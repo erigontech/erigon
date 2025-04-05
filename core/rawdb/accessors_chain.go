@@ -1265,6 +1265,7 @@ func ReadReceiptsCache(db kv.Tx, blockHash common.Hash, blockNum uint64) (res ty
 		}
 		res = append(res, (*types.Receipt)(receipt))
 	}
+
 	return res, nil
 }
 

@@ -97,6 +97,7 @@ type receiptRLP struct {
 
 // storedReceiptRLP is the storage encoding of a receipt.
 type storedReceiptRLP struct {
+	Type              uint8
 	PostStateOrStatus []byte
 	CumulativeGasUsed uint64
 	FirstLogIndex     uint32 // Logs have their own incremental Index within block. To allow calc it without re-executing whole block - can store it in Receipt
@@ -377,6 +378,7 @@ func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
 		logsForStorage[i] = (*LogForStorage)(l)
 	}
 	return rlp.Encode(w, &storedReceiptRLP{
+		Type:              r.Type,
 		PostStateOrStatus: (*Receipt)(r).statusEncoding(),
 		CumulativeGasUsed: r.CumulativeGasUsed,
 		FirstLogIndex:     firstLogIndex,
@@ -401,6 +403,7 @@ func (r *ReceiptForStorage) DecodeRLP(s *rlp.Stream) error {
 	if err := (*Receipt)(r).setStatus(stored.PostStateOrStatus); err != nil {
 		return err
 	}
+	r.Type = stored.Type
 	r.CumulativeGasUsed = stored.CumulativeGasUsed
 	r.FirstLogIndexWithinBlock = stored.FirstLogIndex
 
@@ -561,6 +564,32 @@ func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon
 		r.Logs[j].BlockHash = blockHash
 		r.Logs[j].TxHash = r.TxHash
 		r.Logs[j].TxIndex = uint(txnIdx)
+		r.Logs[j].Index = uint(logIndex)
+		logIndex++
+	}
+	return nil
+}
+
+// DeriveFields fills the receipts with their computed fields based on consensus
+// data and contextual infos like containing block and transactions.
+func (r *Receipt) DeriveFieldsV4ForCachedReceipt(prevCumulativeGasUsed uint64) error {
+	logIndex := r.FirstLogIndexWithinBlock // logIdx is unique within the block and starts from 0
+
+	blockNum := r.BlockNumber.Uint64()
+
+	// The used gas can be calculated based on previous r
+	if r.TransactionIndex == 0 {
+		r.GasUsed = r.CumulativeGasUsed
+	} else {
+		r.GasUsed = r.CumulativeGasUsed - prevCumulativeGasUsed
+	}
+
+	// The derived log fields can simply be set from the block and transaction
+	for j := 0; j < len(r.Logs); j++ {
+		r.Logs[j].BlockNumber = blockNum
+		r.Logs[j].BlockHash = r.BlockHash
+		r.Logs[j].TxHash = r.TxHash
+		r.Logs[j].TxIndex = r.TransactionIndex
 		r.Logs[j].Index = uint(logIndex)
 		logIndex++
 	}
