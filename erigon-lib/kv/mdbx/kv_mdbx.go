@@ -1083,7 +1083,7 @@ func (tx *MdbxTx) GetOne(bucket string, k []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("label: %s, table: %s, %w", tx.db.opts.label, bucket, err)
 	}
-	return v, err
+	return v, nil
 }
 
 func (tx *MdbxTx) Has(bucket string, key []byte) (bool, error) {

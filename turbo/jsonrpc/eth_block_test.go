@@ -21,17 +21,14 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/stretchr/testify/assert"
-
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
-
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/core/rawdb"
@@ -59,9 +56,9 @@ func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	ctx := context.Background()
 	tx, err := m.DB.BeginRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-
+	if err != nil {
+		t.Errorf("could not begin read write transaction: %s", err)
+	}
 	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
 	latestBlock, err := m.BlockReader.BlockByHash(ctx, tx, latestBlockHash)
 	if err != nil {

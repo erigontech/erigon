@@ -416,6 +416,7 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		); err != nil {
 			return err
 		}
+
 	}
 
 	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx) * 100)
@@ -434,6 +435,18 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	}
 	if _, err = tx.(*temporal.Tx).AggTx().(*libstate.AggregatorRoTx).PruneSmallBatches(ctx, pruneTimeout, tx); err != nil { // prune part of retired data, before commit
 		return err
+	}
+
+	// prune receipts
+	const PersistReceipts = 1_000
+	if s.ForwardProgress > PersistReceipts {
+		pruneLimit := 10
+		if s.CurrentSyncCycle.IsInitialCycle {
+			pruneLimit = -1
+		}
+		if err := rawdb.PruneReceiptsCache(tx, s.ForwardProgress-PersistReceipts, pruneLimit); err != nil {
+			return err
+		}
 	}
 
 	if err = s.Done(tx); err != nil {

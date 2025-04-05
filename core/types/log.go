@@ -225,19 +225,15 @@ type rlpLog struct {
 	Data    []byte
 }
 
-// rlpStorageLog is the storage encoding of a log.
-type rlpStorageLog rlpLog
-
-// legacyRlpStorageLog is the previous storage encoding of a log including some redundant fields.
-type legacyRlpStorageLog struct {
+type rlpLogForStorage struct {
 	Address common.Address
 	Topics  []common.Hash
 	Data    []byte
 	//BlockNumber uint64
-	//TxHash      common.Hash
-	//TxIndex     uint
+	//TxHash common.Hash
+	//TxIndex uint
 	//BlockHash   common.Hash
-	//Index       uint
+	//Index uint
 }
 
 // EncodeRLP implements rlp.Encoder.
@@ -279,15 +275,10 @@ type LogForStorage Log
 
 // EncodeRLP implements rlp.Encoder.
 func (l *LogForStorage) EncodeRLP(w io.Writer) error {
-	return rlp.Encode(w, rlpStorageLog{
+	return rlp.Encode(w, rlpLogForStorage{
 		Address: l.Address,
 		Topics:  l.Topics,
 		Data:    l.Data,
-		//BlockNumber: l.BlockNumber,
-		//TxHash:      l.TxHash,
-		//TxIndex:     l.TxIndex,
-		//BlockHash:   l.BlockHash,
-		//Index:       l.Index,
 	})
 }
 
@@ -299,25 +290,16 @@ func (l *LogForStorage) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	var dec rlpStorageLog
+	var dec rlpLogForStorage
 	err = rlp.DecodeBytes(blob, &dec)
-	if err == nil {
-		*l = LogForStorage{
-			Address: dec.Address,
-			Topics:  dec.Topics,
-			Data:    dec.Data,
-		}
-	} else {
-		// Try to decode log with previous definition.
-		var dec legacyRlpStorageLog
-		err = rlp.DecodeBytes(blob, &dec)
-		if err == nil {
-			*l = LogForStorage{
-				Address: dec.Address,
-				Topics:  dec.Topics,
-				Data:    dec.Data,
-			}
-		}
+	if err != nil {
+		return err
 	}
-	return err
+
+	*l = LogForStorage{
+		Address: dec.Address,
+		Topics:  dec.Topics,
+		Data:    dec.Data,
+	}
+	return nil
 }

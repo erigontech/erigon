@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/erigontech/erigon/core/rawdb"
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -116,6 +117,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			var receipt *types.Receipt
 			if txTask.TxIndex >= 0 {
 				receipt = txTask.BlockReceipts[txTask.TxIndex]
+
 			}
 			if err := rawtemporaldb.AppendReceipt(se.doms, receipt, se.blobGasUsed); err != nil {
 				return false, err
@@ -126,6 +128,9 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 				lastReceipt := txTask.BlockReceipts[txTask.TxIndex-1]
 				if lastReceipt == nil {
 					return false, fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
+				}
+				if err := rawdb.WriteReceiptCache(se.applyTx, txTask.BlockNum, txTask.BlockHash, uint32(txTask.TxIndex), lastReceipt); err != nil {
+					return false, err
 				}
 				if len(lastReceipt.Logs) > 0 {
 					firstIndex := lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
