@@ -23,7 +23,6 @@ type testAggConfig struct {
 
 func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Aggregator) {
 	tb.Helper()
-
 	db, agg := testDbAndAggregatorv3(tb, cfg.stepSize)
 	agg.commitmentValuesTransform = !cfg.disableCommitmentBranchTransform
 	agg.d[kv.CommitmentDomain].replaceKeysInValues = agg.commitmentValuesTransform

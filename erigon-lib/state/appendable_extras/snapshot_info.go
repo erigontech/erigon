@@ -98,7 +98,7 @@ func (f *FileInfo) Dir() string { return filepath.Dir(f.Path) }
 
 func fileName(baseName string, version snaptype.Version, from, to uint64) string {
 	// from, to are in units of steps and not in number of entities
-	return fmt.Sprintf("v%d-%06d-%06d-%s", version, from, to, baseName)
+	return fmt.Sprintf("%s-%06d-%06d-%s", version.String(), from, to, baseName)
 }
 
 func SnapFilePath(id AppendableId, version snaptype.Version, from, to RootNum) string {
@@ -114,8 +114,8 @@ func ParseFileName(id AppendableId, fileName string) (res *FileInfo, ok bool) {
 }
 
 func ParseFileNameInDir(id AppendableId, dir, fileName string) (res *FileInfo, ok bool) {
-	//	'v1-000000-000500-transactions.seg'
-	// 'v1-017000-017500-transactions-to-block.idx'
+	//	'v1.0-000000-000500-transactions.seg'
+	// 'v1.0-017000-017500-transactions-to-block.idx'
 	ext := filepath.Ext(fileName)
 	if ext != ".seg" && ext != ".idx" {
 		return nil, false

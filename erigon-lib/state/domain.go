@@ -115,6 +115,8 @@ type domainCfg struct {
 
 	// restricts subset file deletions on domain open/close. Needed to hold files until commitment is merged
 	restrictSubsetFileDeletions bool
+
+	version DomainVersionTypes
 }
 
 type domainVisible struct {
@@ -155,15 +157,26 @@ func NewDomain(cfg domainCfg, aggStep uint64, logger log.Logger) (*Domain, error
 	return d, nil
 }
 func (d *Domain) kvFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.kv", d.filenameBase, fromStep, toStep))
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kv", d.version.DataKV.String(), d.filenameBase, fromStep, toStep))
 }
 func (d *Domain) kvAccessorFilePath(fromStep, toStep uint64) string {
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kvi", d.version.AccessorKVI.String(), d.filenameBase, fromStep, toStep))
+}
+func (d *Domain) kvAccessorFilePathOld(fromStep, toStep uint64) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.kvi", d.filenameBase, fromStep, toStep))
 }
+
 func (d *Domain) kvExistenceIdxFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.kvei", d.filenameBase, fromStep, toStep))
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kvei", d.version.AccessorKVEI.String(), d.filenameBase, fromStep, toStep))
 }
 func (d *Domain) kvBtFilePath(fromStep, toStep uint64) string {
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.bt", d.version.AccessorBT.String(), d.filenameBase, fromStep, toStep))
+}
+
+func (d *Domain) kvExistenceIdxFilePathOld(fromStep, toStep uint64) string {
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.kvei", d.filenameBase, fromStep, toStep))
+}
+func (d *Domain) kvBtFilePathOld(fromStep, toStep uint64) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.bt", d.filenameBase, fromStep, toStep))
 }
 
@@ -220,7 +233,7 @@ func (d *Domain) OpenList(idxFiles, histFiles, domainFiles []string) error {
 
 	d.closeWhatNotInList(domainFiles)
 	d.scanDirtyFiles(domainFiles)
-	if err := d.openDirtyFiles(); err != nil {
+	if err := d.openDirtyFiles(domainFiles); err != nil {
 		return fmt.Errorf("Domain(%s).openList: %w", d.filenameBase, err)
 	}
 	d.protectFromHistoryFilesAheadOfDomainFiles()
@@ -302,7 +315,6 @@ func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*filesItem) 
 	if d.filenameBase == "" {
 		panic("assert: empty `filenameBase`")
 	}
-
 	l := scanDirtyFiles(fileNames, d.aggregationStep, d.filenameBase, "kv", d.logger)
 	for _, dirtyFile := range l {
 		startStep, endStep := dirtyFile.startTxNum/d.aggregationStep, dirtyFile.endTxNum/d.aggregationStep
@@ -320,17 +332,45 @@ func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*filesItem) 
 	return garbageFiles
 }
 
-func (d *Domain) openDirtyFiles() (err error) {
+func (d *Domain) openDirtyFiles(fNames []string) (err error) {
 	invalidFileItems := make([]*filesItem, 0)
 	invalidFileItemsLock := sync.Mutex{}
+	stepNameMap := make(map[steps]string, len(fNames))
+	exts := make(map[string]struct{}, len(fNames))
+	for _, filename := range fNames {
+		from, to, err := ParseStepsFromFileName(filename)
+		if err != nil {
+			continue
+		}
+		if filepath.Ext(filename) == ".kv" {
+			stepNameMap[steps{from: from, to: to}] = filename
+		}
+		exts[filepath.Ext(filename)] = struct{}{}
+	}
+	res := "in domain: " + d.filenameBase
+	for i := range exts {
+		res += "  " + i
+	}
+	println(res)
 	d.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
+			var fPathFull string
+			fPath, ok := stepNameMap[steps{from: fromStep, to: toStep}]
 			if item.decompressor == nil {
-				fPath := d.kvFilePath(fromStep, toStep)
-				exists, err := dir.FileExist(fPath)
+				if !ok {
+					d.logger.Debug("[agg] Domain.openDirtyFiles: file not in map",
+						"from", fromStep, "to", toStep, "ext", ".kv", "base", d.filenameBase)
+					invalidFileItemsLock.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFileItemsLock.Unlock()
+					continue
+				} else {
+					fPathFull = filepath.Join(d.dirs.SnapDomain, fPath)
+				}
+				exists, err := dir.FileExist(fPathFull)
 				if err != nil {
-					_, fName := filepath.Split(fPath)
+					_, fName := filepath.Split(fPathFull)
 					d.logger.Debug("[agg] Domain.openDirtyFiles: FileExist err", "f", fName, "err", err)
 					invalidFileItemsLock.Lock()
 					invalidFileItems = append(invalidFileItems, item)
@@ -338,7 +378,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 					continue
 				}
 				if !exists {
-					_, fName := filepath.Split(fPath)
+					_, fName := filepath.Split(fPathFull)
 					d.logger.Debug("[agg] Domain.openDirtyFiles: file does not exists", "f", fName)
 					invalidFileItemsLock.Lock()
 					invalidFileItems = append(invalidFileItems, item)
@@ -346,8 +386,9 @@ func (d *Domain) openDirtyFiles() (err error) {
 					continue
 				}
 
-				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
-					_, fName := filepath.Split(fPath)
+				//println("path", fPathFull, fPath, fmt.Sprintf("%+v", fNames))
+				if item.decompressor, err = seg.NewDecompressor(fPathFull); err != nil {
+					_, fName := filepath.Split(fPathFull)
 					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
 						d.logger.Debug("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 					} else {
@@ -362,25 +403,28 @@ func (d *Domain) openDirtyFiles() (err error) {
 			}
 
 			if item.index == nil && d.AccessorList&AccessorHashMap != 0 {
-				fPath := d.kvAccessorFilePath(fromStep, toStep)
-				exists, err := dir.FileExist(fPath)
+				fPath = common.ReplaceExt(fPath, ".kvi")
+				fPathFull = filepath.Join(d.dirs.SnapDomain, fPath)
+				exists, err := dir.FileExist(fPathFull)
 				if err != nil {
-					_, fName := filepath.Split(fPath)
+					_, fName := filepath.Split(fPathFull)
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 				}
 				if exists {
-					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
-						_, fName := filepath.Split(fPath)
+					if item.index, err = recsplit.OpenIndex(fPathFull); err != nil {
+						_, fName := filepath.Split(fPathFull)
 						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
 					}
 				}
 			}
 			if item.bindex == nil && d.AccessorList&AccessorBTree != 0 {
-				fPath := d.kvBtFilePath(fromStep, toStep)
-				exists, err := dir.FileExist(fPath)
+				fPath = common.ReplaceExt(fPath, ".bt")
+				fPathFull = filepath.Join(d.dirs.SnapDomain, fPath)
+
+				exists, err := dir.FileExist(fPathFull)
 				if err != nil {
-					_, fName := filepath.Split(fPath)
+					_, fName := filepath.Split(fPathFull)
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 				}
 				if exists {
@@ -388,23 +432,25 @@ func (d *Domain) openDirtyFiles() (err error) {
 					if toStep == 0 && d.filenameBase == "commitment" {
 						btM = 128
 					}
-					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, btM, item.decompressor, d.Compression); err != nil {
-						_, fName := filepath.Split(fPath)
+					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPathFull, btM, item.decompressor, d.Compression); err != nil {
+						_, fName := filepath.Split(fPathFull)
 						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
 					}
 				}
 			}
 			if item.existence == nil && d.AccessorList&AccessorExistence != 0 {
-				fPath := d.kvExistenceIdxFilePath(fromStep, toStep)
-				exists, err := dir.FileExist(fPath)
+				fPath = common.ReplaceExt(fPath, ".kvei")
+				fPathFull = filepath.Join(d.dirs.SnapDomain, fPath)
+
+				exists, err := dir.FileExist(fPathFull)
 				if err != nil {
-					_, fName := filepath.Split(fPath)
+					_, fName := filepath.Split(fPathFull)
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 				}
 				if exists {
-					if item.existence, err = OpenExistenceFilter(fPath); err != nil {
-						_, fName := filepath.Split(fPath)
+					if item.existence, err = OpenExistenceFilter(fPathFull); err != nil {
+						_, fName := filepath.Split(fPathFull)
 						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
 					}
@@ -1222,7 +1268,10 @@ func (d *Domain) missedBtreeAccessors() (l []*filesItem) {
 	if !d.AccessorList.Has(AccessorBTree) {
 		return nil
 	}
-	return fileItemsWithMissingAccessors(d.dirtyFiles, d.aggregationStep, func(fromStep uint64, toStep uint64) []string {
+	return fileItemsWithMissingAccessors(d.dirtyFiles, d.aggregationStep, func(fromStep uint64, toStep uint64, isOld bool) []string {
+		if isOld {
+			return []string{d.kvBtFilePathOld(fromStep, toStep), d.kvExistenceIdxFilePathOld(fromStep, toStep)}
+		}
 		return []string{d.kvBtFilePath(fromStep, toStep), d.kvExistenceIdxFilePath(fromStep, toStep)}
 	})
 }
@@ -1231,7 +1280,10 @@ func (d *Domain) missedMapAccessors() (l []*filesItem) {
 	if !d.AccessorList.Has(AccessorHashMap) {
 		return nil
 	}
-	return fileItemsWithMissingAccessors(d.dirtyFiles, d.aggregationStep, func(fromStep uint64, toStep uint64) []string {
+	return fileItemsWithMissingAccessors(d.dirtyFiles, d.aggregationStep, func(fromStep uint64, toStep uint64, isOld bool) []string {
+		if isOld {
+			return []string{d.kvAccessorFilePathOld(fromStep, toStep)}
+		}
 		return []string{d.kvAccessorFilePath(fromStep, toStep)}
 	})
 }

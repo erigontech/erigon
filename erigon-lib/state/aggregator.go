@@ -98,8 +98,8 @@ type Aggregator struct {
 const AggregatorSqueezeCommitmentValues = true
 const MaxNonFuriousDirtySpacePerTx = 64 * datasize.MB
 
-func commitmentFileMustExist(dirs datadir.Dirs, fromStep, toStep uint64) bool {
-	fPath := filepath.Join(dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.kv", kv.CommitmentDomain, fromStep, toStep))
+func commitmentFileMustExist(dirs datadir.Dirs, fromStep, toStep uint64, version string) bool {
+	fPath := filepath.Join(dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kv", version, kv.CommitmentDomain, fromStep, toStep))
 	exists, err := dir.FileExist(fPath)
 	if err != nil {
 		panic(err)
@@ -120,7 +120,8 @@ func domainIntegrityCheck(name kv.Domain, dirs datadir.Dirs, fromStep, toStep ui
 		if toStep-fromStep > 1 { // only recently built files
 			return true
 		}
-		return commitmentFileMustExist(dirs, fromStep, toStep)
+		return commitmentFileMustExist(dirs, fromStep, toStep, Schema.CommitmentDomain.version.DataKV.String()) ||
+			commitmentFileMustExist(dirs, fromStep, toStep, "v1") //TODO: remove after removing v1 ver supp
 	default:
 		return true
 	}
@@ -193,7 +194,7 @@ func getStateIndicesSalt(baseDir string) (salt *uint32, err error) {
 }
 
 func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.Dirs, logger log.Logger) (err error) {
-	cfg := Schema[name]
+	cfg := Schema.GetDomainCfg(name)
 	//TODO: move dynamic part of config to InvertedIndex
 	cfg.restrictSubsetFileDeletions = a.commitmentValuesTransform
 	cfg.hist.iiCfg.salt = salt
@@ -206,7 +207,7 @@ func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.D
 }
 
 func (a *Aggregator) registerII(idx kv.InvertedIdx, salt *uint32, dirs datadir.Dirs, logger log.Logger) error {
-	idxCfg := StandaloneIISchema[idx]
+	idxCfg := Schema.GetIICfg(idx)
 	idxCfg.salt = salt
 	idxCfg.dirs = dirs
 

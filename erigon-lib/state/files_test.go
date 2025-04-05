@@ -33,7 +33,7 @@ func TestFileItemWithMissingAccessor(t *testing.T) {
 	btree.Set(f2)
 	btree.Set(f3)
 
-	accessorFor := func(fromStep, toStep uint64) []string {
+	accessorFor := func(fromStep, toStep uint64, isOld bool) []string {
 		return []string{
 			filepath.Join(tmp, fmt.Sprintf("testacc_%d_%d.bin", fromStep, toStep)),
 			filepath.Join(tmp, fmt.Sprintf("testacc2_%d_%d.bin", fromStep, toStep)),
@@ -41,12 +41,12 @@ func TestFileItemWithMissingAccessor(t *testing.T) {
 	}
 
 	// create accesssor files for f1, f2
-	for _, fname := range accessorFor(f1.startTxNum/aggStep, f1.endTxNum/aggStep) {
+	for _, fname := range accessorFor(f1.startTxNum/aggStep, f1.endTxNum/aggStep, true) {
 		os.WriteFile(fname, []byte("test"), 0644)
 		defer os.Remove(fname)
 	}
 
-	for _, fname := range accessorFor(f2.startTxNum/aggStep, f2.endTxNum/aggStep) {
+	for _, fname := range accessorFor(f2.startTxNum/aggStep, f2.endTxNum/aggStep, true) {
 		os.WriteFile(fname, []byte("test"), 0644)
 		defer os.Remove(fname)
 	}

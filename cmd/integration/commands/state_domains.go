@@ -308,8 +308,8 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 		return err
 	}
 
-	compressionType := statelib.Schema[domain].Compression
-	compressCfg := statelib.Schema[domain].CompressCfg
+	compressionType := statelib.Schema.GetDomainCfg(domain).Compression
+	compressCfg := statelib.Schema.GetDomainCfg(domain).CompressCfg
 	compressCfg.Workers = runtime.NumCPU()
 	var tbl string
 	switch domain {
