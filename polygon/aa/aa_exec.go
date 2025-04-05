@@ -31,14 +31,20 @@ func ValidateAATransaction(
 		return nil, 0, err
 	}
 
-	paymasterCodeSize, err := ibs.GetCodeSize(*tx.Paymaster)
-	if err != nil {
-		return nil, 0, err
+	var paymasterCodeSize, deployerCodeSize int
+
+	if tx.Paymaster != nil {
+		paymasterCodeSize, err = ibs.GetCodeSize(*tx.Paymaster)
+		if err != nil {
+			return nil, 0, err
+		}
 	}
 
-	deployerCodeSize, err := ibs.GetCodeSize(*tx.Deployer)
-	if err != nil {
-		return nil, 0, err
+	if tx.Deployer != nil {
+		deployerCodeSize, err = ibs.GetCodeSize(*tx.Deployer)
+		if err != nil {
+			return nil, 0, err
+		}
 	}
 
 	if err := PerformTxnStaticValidation(tx, senderCodeSize, paymasterCodeSize, deployerCodeSize); err != nil {
