@@ -103,7 +103,7 @@ const (
 	EthTx    = "BlockTransaction" // tx_id_u64 -> rlp(tx)
 	MaxTxNum = "MaxTxNum"         // block_number_u64 -> max_tx_num_in_block_u64
 
-	Receipts = "Receipt" // block_num_u64 -> canonical block receipts (non-canonical are not stored)
+	Receipts = "Receipt" // block_num_u64 + block_hash + tx_index_u32 -> txn receipt
 
 	// CallTraceSet is the name of the table that contain the mapping of block number to the set (sorted) of all accounts
 	// touched by call traces. It is DupSort-ed table
