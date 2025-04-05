@@ -572,17 +572,10 @@ func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon
 
 // DeriveFields fills the receipts with their computed fields based on consensus
 // data and contextual infos like containing block and transactions.
-func (r *Receipt) DeriveFieldsV4ForCachedReceipt(prevCumulativeGasUsed uint64) error {
+func (r *Receipt) DeriveFieldsV4ForCachedReceipt() error {
 	logIndex := r.FirstLogIndexWithinBlock // logIdx is unique within the block and starts from 0
 
 	blockNum := r.BlockNumber.Uint64()
-
-	// The used gas can be calculated based on previous r
-	if r.TransactionIndex == 0 {
-		r.GasUsed = r.CumulativeGasUsed
-	} else {
-		r.GasUsed = r.CumulativeGasUsed - prevCumulativeGasUsed
-	}
 
 	// The derived log fields can simply be set from the block and transaction
 	for j := 0; j < len(r.Logs); j++ {
