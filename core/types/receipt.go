@@ -524,7 +524,7 @@ func (r Receipts) DeriveFields(hash libcommon.Hash, number uint64, txs Transacti
 	return nil
 }
 
-// DeriveFields fills the receipts with their computed fields based on consensus
+// DeriveFieldsV3ForSingleReceipt fills the receipts with their computed fields based on consensus
 // data and contextual infos like containing block and transactions.
 func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon.Hash, blockNum uint64, txn Transaction, prevCumulativeGasUsed uint64) error {
 	logIndex := r.FirstLogIndexWithinBlock // logIdx is unique within the block and starts from 0
@@ -570,9 +570,9 @@ func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon
 	return nil
 }
 
-// DeriveFields fills the receipts with their computed fields based on consensus
+// DeriveFieldsV4ForCachedReceipt fills the receipts with their computed fields based on consensus
 // data and contextual infos like containing block and transactions.
-func (r *Receipt) DeriveFieldsV4ForCachedReceipt() error {
+func (r *Receipt) DeriveFieldsV4ForCachedReceipt() {
 	logIndex := r.FirstLogIndexWithinBlock // logIdx is unique within the block and starts from 0
 
 	blockNum := r.BlockNumber.Uint64()
@@ -586,7 +586,6 @@ func (r *Receipt) DeriveFieldsV4ForCachedReceipt() error {
 		r.Logs[j].Index = uint(logIndex)
 		logIndex++
 	}
-	return nil
 }
 
 // TODO: maybe make it more prettier (only for debug purposes)

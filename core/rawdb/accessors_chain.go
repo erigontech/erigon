@@ -1263,7 +1263,10 @@ func ReadReceiptsCache(db kv.Tx, blockHash common.Hash, blockNum uint64) (res ty
 		if err := rlp.DecodeBytes(v, receipt); err != nil {
 			return nil, fmt.Errorf("ReadReceipts: deserialize %d, len(v)=%d, %w", blockNum, len(v), err)
 		}
-		res = append(res, (*types.Receipt)(receipt))
+		x := (*types.Receipt)(receipt)
+		x.DeriveFieldsV4ForCachedReceipt()
+		res = append(res, x)
+
 	}
 
 	return res, nil
