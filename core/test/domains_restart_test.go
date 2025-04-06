@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io/fs"
-	"math/big"
 	"math/rand"
 	"os"
 	"path"
@@ -44,10 +43,8 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/erigontech/erigon/core"
 	reset2 "github.com/erigontech/erigon/core/rawdb/rawdbreset"
 	state2 "github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/params"
 )
 
@@ -518,10 +515,6 @@ func TestCommit(t *testing.T) {
 	err = domains.Flush(ctx, tx)
 	require.NoError(t, err)
 
-	core.GenerateTrace = true
-	oldHash, err := core.CalcHashRootForTests(tx, &types.Header{Number: big.NewInt(1)}, true)
-	require.NoError(t, err)
+	require.EqualValues(t, libcommon.BytesToHash(libcommon.FromHex("0xfe81cd91357cd915cae7c02b5a4771e903c16b29dec582818076954be3741030")), domainsHash)
 
-	t.Logf("old hash %x\n", oldHash)
-	require.EqualValues(t, oldHash, libcommon.BytesToHash(domainsHash))
 }

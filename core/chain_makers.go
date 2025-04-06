@@ -26,16 +26,13 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	libstate "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/erigontech/erigon/consensus/misc"
@@ -452,125 +449,6 @@ func hashKeyAndAddIncarnation(k []byte, h *libcommon.Hasher) (newK []byte, err e
 		h.Sha.Read(newK[length.Hash+length.Incarnation:])
 	}
 	return newK, nil
-}
-
-func CalcHashRootForTests(tx kv.RwTx, header *types.Header, trace bool) (hashRoot libcommon.Hash, err error) {
-	domains, err := libstate.NewSharedDomains(tx, log.New())
-	if err != nil {
-		return hashRoot, fmt.Errorf("NewSharedDomains: %w", err)
-	}
-	defer domains.Close()
-
-	if err := tx.ClearBucket(kv.HashedAccountsDeprecated); err != nil {
-		return hashRoot, fmt.Errorf("clear HashedAccounts bucket: %w", err)
-	}
-	if err := tx.ClearBucket(kv.HashedStorageDeprecated); err != nil {
-		return hashRoot, fmt.Errorf("clear HashedStorage bucket: %w", err)
-	}
-	if err := tx.ClearBucket(kv.TrieOfAccounts); err != nil {
-		return hashRoot, fmt.Errorf("clear TrieOfAccounts bucket: %w", err)
-	}
-	if err := tx.ClearBucket(kv.TrieOfStorage); err != nil {
-		return hashRoot, fmt.Errorf("clear TrieOfStorage bucket: %w", err)
-	}
-
-	h := libcommon.NewHasher()
-	defer libcommon.ReturnHasherToPool(h)
-
-	it, err := tx.(kv.TemporalTx).Debug().RangeLatest(kv.AccountsDomain, nil, nil, -1)
-	if err != nil {
-		return libcommon.Hash{}, err
-	}
-
-	for it.HasNext() {
-		k, v, err := it.Next()
-		if err != nil {
-			return hashRoot, fmt.Errorf("interate over plain state: %w", err)
-		}
-		if len(v) > 0 {
-			v, err = accounts.ConvertV3toV2(v)
-			if err != nil {
-				return hashRoot, fmt.Errorf("interate over plain state: %w", err)
-			}
-		}
-		newK, err := hashKeyAndAddIncarnation(k, h)
-		if err != nil {
-			return hashRoot, fmt.Errorf("clear HashedAccounts bucket: %w", err)
-		}
-		if err := tx.Put(kv.HashedAccountsDeprecated, newK, v); err != nil {
-			return hashRoot, fmt.Errorf("clear HashedAccounts bucket: %w", err)
-		}
-	}
-
-	it, err = tx.(kv.TemporalTx).Debug().RangeLatest(kv.StorageDomain, nil, nil, -1)
-	if err != nil {
-		return libcommon.Hash{}, err
-	}
-	for it.HasNext() {
-		k, v, err := it.Next()
-		if err != nil {
-			return hashRoot, fmt.Errorf("interate over plain state: %w", err)
-		}
-		newK, err := hashKeyAndAddIncarnation(k, h)
-		if err != nil {
-			return hashRoot, fmt.Errorf("clear HashedStorage bucket: %w", err)
-		}
-		fmt.Printf("storage %x -> %x\n", k, newK)
-		if err := tx.Put(kv.HashedStorageDeprecated, newK, v); err != nil {
-			return hashRoot, fmt.Errorf("clear HashedStorage bucket: %w", err)
-		}
-
-	}
-
-	if trace {
-		if GenerateTrace {
-			fmt.Printf("State after %d================\n", header.Number)
-			it, err := tx.Range(kv.HashedAccountsDeprecated, nil, nil, order.Asc, kv.Unlim)
-			if err != nil {
-				return hashRoot, err
-			}
-			for it.HasNext() {
-				k, v, err := it.Next()
-				if err != nil {
-					return hashRoot, err
-				}
-				fmt.Printf("%x: %x\n", k, v)
-			}
-			fmt.Printf("..................\n")
-			it, err = tx.Range(kv.HashedStorageDeprecated, nil, nil, order.Asc, kv.Unlim)
-			if err != nil {
-				return hashRoot, err
-			}
-			for it.HasNext() {
-				k, v, err := it.Next()
-				if err != nil {
-					return hashRoot, err
-				}
-				fmt.Printf("%x: %x\n", k, v)
-			}
-			fmt.Printf("===============================\n")
-		}
-		root, err := domains.ComputeCommitment(context.Background(), true, domains.BlockNum(), "")
-		if err != nil {
-			return hashRoot, err
-		}
-		hashRoot.SetBytes(root)
-		return hashRoot, nil
-	}
-	root, err := domains.ComputeCommitment(context.Background(), true, domains.BlockNum(), "")
-	if err != nil {
-		return hashRoot, err
-	}
-	hashRoot.SetBytes(root)
-	return hashRoot, nil
-
-	//var root libcommon.Hash
-	//rootB, err := tx.(*temporal.Tx).Agg().ComputeCommitment(false, false)
-	//if err != nil {
-	//	return root, err
-	//}
-	//root = libcommon.BytesToHash(rootB)
-	//return root, err
 }
 
 func MakeEmptyHeader(parent *types.Header, chainConfig *chain.Config, timestamp uint64, targetGasLimit *uint64) *types.Header {
