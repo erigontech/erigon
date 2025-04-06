@@ -392,11 +392,6 @@ func FinalizeBlockExecution(
 		return nil, nil, nil, nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
 	}
 
-	if casted, ok := stateWriter.(state.WriterWithChangeSets); ok {
-		if err := casted.WriteChangeSets(); err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("writing changesets for block %d failed: %w", header.Number.Uint64(), err)
-		}
-	}
 	return newBlock, newTxs, newReceipt, retRequests, nil
 }
 
