@@ -58,6 +58,5 @@ type DummyView struct {
 	tx    kv.Tx
 }
 
-func (c *DummyView) StateV3() bool                    { return c.cache.stateV3 }
 func (c *DummyView) Get(k []byte) ([]byte, error)     { return c.cache.Get(k, c.tx, 0) }
 func (c *DummyView) GetCode(k []byte) ([]byte, error) { return c.cache.GetCode(k, c.tx, 0) }
