@@ -475,11 +475,7 @@ func TestCommit(t *testing.T) {
 	db, agg, _ := testDbAndAggregatorv3(t, "", aggStep)
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
-	defer func() {
-		if tx != nil {
-			tx.Rollback()
-		}
-	}()
+	defer tx.Rollback()
 
 	domCtx := agg.BeginFilesRo()
 	defer domCtx.Close()
@@ -515,6 +511,6 @@ func TestCommit(t *testing.T) {
 	err = domains.Flush(ctx, tx)
 	require.NoError(t, err)
 
-	require.EqualValues(t, libcommon.BytesToHash(libcommon.FromHex("0xfe81cd91357cd915cae7c02b5a4771e903c16b29dec582818076954be3741030")), domainsHash)
+	require.Equal(t, libcommon.BytesToHash(libcommon.FromHex("0xfe81cd91357cd915cae7c02b5a4771e903c16b29dec582818076954be3741030")), libcommon.BytesToHash(domainsHash))
 
 }
