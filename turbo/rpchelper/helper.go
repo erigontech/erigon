@@ -198,6 +198,6 @@ func NewLatestStateWriter(txc wrap.TxContainer, blockReader services.FullBlockRe
 	return state.NewWriterV4(domains)
 }
 
-func CreateLatestCachedStateReader(cache kvcache.CacheView, tx kv.Tx) state.StateReader {
-	return state.NewCachedReader3(cache, tx.(kv.TemporalTx))
+func CreateLatestCachedStateReader(cache kvcache.CacheView, tx kv.TemporalTx) state.StateReader {
+	return state.NewCachedReader3(cache, tx)
 }
