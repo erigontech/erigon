@@ -21,14 +21,12 @@ package core
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
@@ -420,35 +418,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	tx.Rollback()
 
 	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil
-}
-
-func hashKeyAndAddIncarnation(k []byte, h *libcommon.Hasher) (newK []byte, err error) {
-	if len(k) == length.Addr {
-		newK = make([]byte, length.Hash)
-	} else {
-		newK = make([]byte, length.Hash*2+length.Incarnation)
-	}
-	h.Sha.Reset()
-	//nolint:errcheck
-	h.Sha.Write(k[:length.Addr])
-	//nolint:errcheck
-	h.Sha.Read(newK[:length.Hash])
-	if len(k) == length.Addr+length.Incarnation+length.Hash { // PlainState storage
-		copy(newK[length.Hash:], k[length.Addr:length.Addr+length.Incarnation])
-		h.Sha.Reset()
-		//nolint:errcheck
-		h.Sha.Write(k[length.Addr+length.Incarnation:])
-		//nolint:errcheck
-		h.Sha.Read(newK[length.Hash+length.Incarnation:])
-	} else if len(k) == length.Addr+length.Hash { // e4 Domain storage
-		binary.BigEndian.PutUint64(newK[length.Hash:], 1)
-		h.Sha.Reset()
-		//nolint:errcheck
-		h.Sha.Write(k[len(k)-length.Hash:])
-		//nolint:errcheck
-		h.Sha.Read(newK[length.Hash+length.Incarnation:])
-	}
-	return newK, nil
 }
 
 func MakeEmptyHeader(parent *types.Header, chainConfig *chain.Config, timestamp uint64, targetGasLimit *uint64) *types.Header {
