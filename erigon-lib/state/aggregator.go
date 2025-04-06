@@ -618,7 +618,6 @@ Loop:
 		case <-a.ctx.Done():
 			return a.ctx.Err()
 		case <-finished:
-			fmt.Println("BuildFiles finished")
 			break Loop
 		case <-logEvery.C:
 			if !(a.buildingFiles.Load() || a.mergingFiles.Load()) {
