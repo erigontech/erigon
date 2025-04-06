@@ -454,7 +454,7 @@ func hashKeyAndAddIncarnation(k []byte, h *libcommon.Hasher) (newK []byte, err e
 	return newK, nil
 }
 
-func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) (hashRoot libcommon.Hash, err error) {
+func CalcHashRootForTests(tx kv.RwTx, header *types.Header, trace bool) (hashRoot libcommon.Hash, err error) {
 	domains, err := libstate.NewSharedDomains(tx, log.New())
 	if err != nil {
 		return hashRoot, fmt.Errorf("NewSharedDomains: %w", err)

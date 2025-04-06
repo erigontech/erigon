@@ -519,7 +519,7 @@ func TestCommit(t *testing.T) {
 	require.NoError(t, err)
 
 	core.GenerateTrace = true
-	oldHash, err := core.CalcHashRootForTests(tx, &types.Header{Number: big.NewInt(1)}, true, true)
+	oldHash, err := core.CalcHashRootForTests(tx, &types.Header{Number: big.NewInt(1)}, true)
 	require.NoError(t, err)
 
 	t.Logf("old hash %x\n", oldHash)
