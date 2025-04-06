@@ -87,7 +87,7 @@ func ExecuteBlockEphemerally(
 	chainConfig *chain.Config, vmConfig *vm.Config,
 	blockHashFunc func(n uint64) libcommon.Hash,
 	engine consensus.Engine, block *types.Block,
-	stateReader state.StateReader, stateWriter state.WriterWithChangeSets,
+	stateReader state.StateReader, stateWriter state.StateWriter,
 	chainReader consensus.ChainReader, getTracer func(txIndex int, txHash libcommon.Hash) (*tracing.Hooks, error),
 	logger log.Logger,
 ) (res *EphemeralExecResult, executeBlockErr error) {
