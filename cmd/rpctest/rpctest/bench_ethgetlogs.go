@@ -177,12 +177,13 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 					return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", resp.Error.Code, resp.Error.Message)
 				}
 
-				saw := map[common.Address]struct{}{}
+				sawAddr := map[common.Address]struct{}{}
+				sawTopic := map[common.Hash]struct{}{}
 				for _, l := range resp.Result {
-					if _, ok := saw[l.Address]; ok {
+					if _, ok := sawAddr[l.Address]; ok {
 						continue
 					}
-					saw[l.Address] = struct{}{}
+					sawAddr[l.Address] = struct{}{}
 
 					res = reqGen.Erigon("eth_getLogs", reqGen.getLogs(prevBn, bn, l.Address), &resp)
 					if res.Err != nil {
@@ -199,6 +200,11 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 					if len(l.Topics) == 0 {
 						continue
 					}
+
+					if _, ok := sawTopic[l.Topics[0]]; ok {
+						continue
+					}
+					sawTopic[l.Topics[0]] = struct{}{}
 
 					//invariant2: if `log` visible without filter - then must be visible with filter. (in another words: `topic` must be indexed well)
 					//res = reqGen.Erigon("eth_getLogs", reqGen.getLogs1(prevBn, bn, l.Address, l.Topics[0]), &resp)
