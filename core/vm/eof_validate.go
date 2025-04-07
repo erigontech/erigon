@@ -249,7 +249,7 @@ func validateMaxStackHeight(eofCode []byte, codeIdx uint16, header *eofHeader, o
 			sectionMaxStack = int(eofCode[typesOffset+2])<<8 | int(eofCode[typesOffset+3])
 
 			if stackHeight.max+sectionMaxStack-inputs > stackSizeLimit {
-				return 0, fmt.Errorf("EOFException.MAX_STACK_HEIGHT_ABOVE_LIMIT")
+				return 0, fmt.Errorf("EOFException.STACK_OVERFLOW")
 			}
 
 			if outputs == nonReturningFunction {
@@ -260,7 +260,7 @@ func validateMaxStackHeight(eofCode []byte, codeIdx uint16, header *eofHeader, o
 				}
 				stackHeightRequired = thisOutputs + inputs - outputs
 				if stackHeight.max > stackHeightRequired {
-					return 0, fmt.Errorf("EOFException.MAX_STACK_HEIGHT_ABOVE_LIMIT")
+					return 0, fmt.Errorf("EOFException.STACK_UNDERFLOW|EOFException.STACK_HIGHER_THAN_OUTPUTS")
 				}
 			}
 		} else if op == RETF {

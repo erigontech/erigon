@@ -396,7 +396,7 @@ func validateContainer(eofCode []byte, header *eofHeader, offset uint16, contain
 	container := eofCode[offset : offset+header.containerSizes[containerIdx]]
 
 	if eofcreate && returnCode {
-		return nil, fmt.Errorf("EOF container referenced by both eofcreate and returncode")
+		return nil, fmt.Errorf("EOFException.AMBIGUOUS_CONTAINER_KIND")
 	}
 	if !eofcreate && !returnCode {
 		return nil, fmt.Errorf("EOFException.ORPHAN_SUBCONTAINER")
