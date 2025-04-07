@@ -176,6 +176,7 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 				if resp.Error != nil {
 					return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", resp.Error.Code, resp.Error.Message)
 				}
+
 				saw := map[common.Address]struct{}{}
 				for _, l := range resp.Result {
 					if _, ok := saw[l.Address]; ok {
