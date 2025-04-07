@@ -180,6 +180,9 @@ const (
 	BorCheckpointEnds       = "BorCheckpointEnds"         // start block_num -> checkpoint_id (first block of checkpoint)
 	BorProducerSelections   = "BorProducerSelections"     // span_id -> span selection with accumulated proposer priorities (in JSON encoding)
 
+	// Taiko
+	TaikoL1Origin = "TaikoL1Origin"
+
 	// Downloader
 	BittorrentCompletion = "BittorrentCompletion"
 	BittorrentInfo       = "BittorrentInfo"
@@ -384,6 +387,7 @@ var ChaindataTables = []string{
 	BorCheckpoints,
 	BorCheckpointEnds,
 	BorProducerSelections,
+	TaikoL1Origin,
 	TblAccountVals,
 	TblAccountHistoryKeys,
 	TblAccountHistoryVals,
