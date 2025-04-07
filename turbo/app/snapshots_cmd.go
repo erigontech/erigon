@@ -675,8 +675,11 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	if err := doBlockSnapshotsRangeCheck(snapDir, ".idx", "bodies"); err != nil {
 		return err
 	}
-	if err := doBlockSnapshotsRangeCheck(snapDir, ".idx", "transactions"); err != nil {
-		return err
+	if err := doBlockSnapshotsRangeCheck(snapDir, ".idx", "transactions."); err != nil {
+		return fmt.Errorf("failed to check transactions idx: %w", err)
+	}
+	if err := doBlockSnapshotsRangeCheck(snapDir, ".idx", "transactions-to-block"); err != nil {
+		return fmt.Errorf("failed to check transactions-to-block idx: %w", err)
 	}
 	// Iterate over all fies in snapDir
 	return nil
