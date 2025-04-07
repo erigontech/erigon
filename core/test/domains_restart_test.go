@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io/fs"
-	"math/big"
 	"math/rand"
 	"os"
 	"path"
@@ -44,10 +43,8 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/erigontech/erigon/core"
 	reset2 "github.com/erigontech/erigon/core/rawdb/rawdbreset"
 	state2 "github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/params"
 )
 
@@ -65,7 +62,7 @@ func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.RwDB,
 	db := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 
-	agg, err := state.NewAggregator2(context.Background(), dirs, aggStep, db, logger)
+	agg, err := state.NewAggregator(context.Background(), dirs, aggStep, db, logger)
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 	err = agg.OpenFolder()
@@ -478,11 +475,7 @@ func TestCommit(t *testing.T) {
 	db, agg, _ := testDbAndAggregatorv3(t, "", aggStep)
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
-	defer func() {
-		if tx != nil {
-			tx.Rollback()
-		}
-	}()
+	defer tx.Rollback()
 
 	domCtx := agg.BeginFilesRo()
 	defer domCtx.Close()
@@ -512,16 +505,12 @@ func TestCommit(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	domains.SetTrace(true)
+	domains.SetTrace(false)
 	domainsHash, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
 	require.NoError(t, err)
 	err = domains.Flush(ctx, tx)
 	require.NoError(t, err)
 
-	core.GenerateTrace = true
-	oldHash, err := core.CalcHashRootForTests(tx, &types.Header{Number: big.NewInt(1)}, true, true)
-	require.NoError(t, err)
+	require.Equal(t, libcommon.BytesToHash(libcommon.FromHex("0xfe81cd91357cd915cae7c02b5a4771e903c16b29dec582818076954be3741030")), libcommon.BytesToHash(domainsHash))
 
-	t.Logf("old hash %x\n", oldHash)
-	require.EqualValues(t, oldHash, libcommon.BytesToHash(domainsHash))
 }

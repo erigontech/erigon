@@ -39,7 +39,7 @@ type AccessorIndexBuilder interface {
 // D: db interface
 // we don't need a separate interface for files...
 // since tx is provided separately anyway.
-type StartRoTx[T AppendableFilesTxI] interface {
+type StartRoTx[T AppendableBaseTxI] interface {
 	BeginFilesTx() T
 	BeginNoFilesTx() T
 }
@@ -59,7 +59,7 @@ type AppendableTemporalCommonTxI interface {
 // no need to take mdbx tx
 // common methods for files api
 type AppendableFilesTxI interface {
-	GetFromFiles(entityNum Num) (v Bytes, found bool, err error) // snapshot only
+	GetFromFiles(entityNum Num) (v Bytes, found bool, fileIdx int, err error) // snapshot only
 	Close()
 	VisibleFilesMaxRootNum() RootNum
 	VisibleFilesMaxNum() Num
@@ -74,6 +74,18 @@ type AppendableDbCommonTxI interface {
 	Close()
 }
 
+// common methods across all appendables
+type AppendableBaseTxI interface {
+	AppendableDbCommonTxI
+	AppendableTemporalCommonTxI
+	Get(num Num, tx kv.Tx) (Bytes, error)
+}
+
+type AppendableDebugAPI[T AppendableDbCommonTxI] interface {
+	DebugFiles() AppendableFilesTxI
+	DebugDb() T
+}
+
 // marked
 type MarkedDbTxI interface {
 	AppendableDbCommonTxI
@@ -82,9 +94,9 @@ type MarkedDbTxI interface {
 }
 
 type MarkedTxI interface {
-	MarkedDbTxI
-	AppendableFilesTxI
-	AppendableTemporalCommonTxI
+	AppendableBaseTxI
+	AppendableDebugAPI[MarkedDbTxI]
+	Put(num Num, hash []byte, value Bytes, tx kv.RwTx) error
 }
 
 // unmarked
@@ -95,9 +107,9 @@ type UnmarkedDbTxI interface {
 }
 
 type UnmarkedTxI interface {
-	UnmarkedDbTxI
-	AppendableFilesTxI
-	AppendableTemporalCommonTxI
+	AppendableBaseTxI
+	AppendableDebugAPI[UnmarkedDbTxI]
+	Append(entityNum Num, value Bytes, tx kv.RwTx) error
 }
 
 // buffer values before writing to db supposed to store only canonical values
@@ -110,9 +122,11 @@ type BufferedDbTxI interface {
 }
 
 type BufferedTxI interface {
-	BufferedDbTxI
-	AppendableFilesTxI
-	AppendableTemporalCommonTxI
+	AppendableBaseTxI
+	AppendableDebugAPI[BufferedDbTxI]
+	Get(Num, kv.Tx) (Bytes, error)
+	Put(Num, Bytes) error
+	Flush(context.Context, kv.RwTx) error
 }
 
 type CanonicityStrategy uint8
@@ -140,16 +154,3 @@ type AppendableConfig interface {
 	SetPruneFrom(pruneFrom Num)
 	// Any other option setters you need
 }
-
-// // appending
-// type AppendingDbTxI interface {
-// 	AppendableDbCommonTxI
-// 	GetDb(entityId Id, tx kv.Tx) (Bytes, error)
-// 	Append(entityId Id, value Bytes, tx kv.RwTx) error
-// }
-
-// type AppendingTxI interface {
-// 	AppendingDbTxI
-// 	AppendableFilesTxI
-// 	AppendableTemporalCommonTxI
-// }

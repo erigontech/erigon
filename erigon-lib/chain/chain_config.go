@@ -91,6 +91,9 @@ type Config struct {
 
 	Bor     BorConfig       `json:"-"`
 	BorJSON json.RawMessage `json:"bor,omitempty"`
+
+	// Account Abstraction
+	AllowAA bool
 }
 
 type BlobConfig struct {

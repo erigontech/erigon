@@ -83,11 +83,11 @@ func TestUnmarked_PutToDb(t *testing.T) {
 
 	err = uma_tx.Append(num, value, rwtx)
 	require.NoError(t, err)
-	returnv, err := uma_tx.GetDb(num, rwtx)
+	returnv, err := uma_tx.Get(num, rwtx)
 	require.NoError(t, err)
 	require.Equal(t, value, returnv)
 
-	returnv, err = uma_tx.GetDb(Num(1), rwtx)
+	returnv, err = uma_tx.Get(Num(1), rwtx)
 	require.NoError(t, err)
 	//require.True(t, returnv == nil)a
 	require.True(t, returnv == nil)
@@ -188,7 +188,7 @@ func TestBuildFiles_Unmarked(t *testing.T) {
 	defer rwtx.Rollback()
 	require.NoError(t, err)
 
-	firstRootNumNotInSnap := uma_tx.VisibleFilesMaxRootNum()
+	firstRootNumNotInSnap := uma_tx.DebugFiles().VisibleFilesMaxRootNum()
 	firstSpanIdNotInSnap := Num(heimdall.SpanIdAt(uint64(firstRootNumNotInSnap)))
 	del, err := uma_tx.Prune(ctx, firstRootNumNotInSnap, 1000, rwtx)
 	require.NoError(t, err)
@@ -203,7 +203,7 @@ func TestBuildFiles_Unmarked(t *testing.T) {
 
 	for i := range int(entries_count) {
 		num, value := getData(i)
-		returnv, err := uma_tx.GetDb(num, rwtx)
+		returnv, err := uma_tx.DebugDb().GetDb(num, rwtx)
 		require.NoError(t, err)
 		if num < firstSpanIdNotInSnap {
 			require.True(t, returnv == nil)
@@ -211,7 +211,7 @@ func TestBuildFiles_Unmarked(t *testing.T) {
 			require.Equal(t, returnv, value)
 		}
 
-		returnv, found, err := uma_tx.GetFromFiles(num)
+		returnv, found, _, err := uma_tx.DebugFiles().GetFromFiles(num)
 		require.NoError(t, err)
 		if num < firstSpanIdNotInSnap {
 			require.True(t, found)

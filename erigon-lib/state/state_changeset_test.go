@@ -78,7 +78,7 @@ func TestMergeDiffSet(t *testing.T) {
 	d2 = append(d2, DomainEntryDiff{Key: "key488888888", Value: []byte("value4"), PrevStepBytes: step4[:]})
 
 	merged := MergeDiffSets(d1, d2)
-	require.Equal(t, 4, len(merged))
+	require.Len(t, merged, 4)
 
 	require.Equal(t, d2[0], merged[0])
 	require.Equal(t, d1[1], merged[1])

@@ -54,7 +54,7 @@ func TestLogReadTailSkimFile(t *testing.T) {
 	logFile, err := tail.TailFile(
 		"erigon.log",
 		tail.Config{Follow: false, MustExist: true})
-	require.Nil(t, err)
+	require.NoError(t, err)
 	defer func() {
 		_ = logFile.Stop()
 	}()
@@ -62,7 +62,7 @@ func TestLogReadTailSkimFile(t *testing.T) {
 	eventLog := NewLog(NewTailLineReader(context.Background(), logFile))
 	for {
 		event, err := eventLog.Read()
-		require.Nil(t, err)
+		require.NoError(t, err)
 		if event == nil {
 			break
 		}

@@ -26,9 +26,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/cmd/devnet/services/polygon/heimdallsim"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
@@ -103,23 +103,23 @@ func TestSimulatorEvents(t *testing.T) {
 	sim := setup(t, ctx, []uint64{1_000_000})
 
 	res, err := sim.FetchStateSyncEvents(ctx, 0, time.Now(), 100)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, eventsCount, len(res))
 
 	resLimit, err := sim.FetchStateSyncEvents(ctx, 0, time.Now(), 2)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, 2, len(resLimit))
 	assert.Equal(t, res[:2], resLimit)
 
 	resStart, err := sim.FetchStateSyncEvents(ctx, 10, time.Now(), 5)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, 5, len(resStart))
 	assert.Equal(t, uint64(10), resStart[0].ID)
 	assert.Equal(t, res[9:14], resStart)
 
 	lastTime := res[len(res)-1].Time
 	resTime, err := sim.FetchStateSyncEvents(ctx, 0, lastTime.Add(-1*time.Second), 100)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, eventsCount-1, len(resTime))
 	assert.Equal(t, res[:len(res)-1], resTime)
 }
@@ -136,20 +136,20 @@ func TestSimulatorSpans(t *testing.T) {
 
 	// should have the final span from first iteration
 	span, err := sim.FetchLatestSpan(ctx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, heimdall.SpanIdAt(100_000), span.Id)
 	assert.Equal(t, uint64(96_256), span.StartBlock)
 	assert.Equal(t, uint64(102_655), span.EndBlock)
 
 	// get the last span
 	span2, err := sim.FetchSpan(ctx, uint64(heimdall.SpanIdAt(100_000)))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, span, span2)
 
 	// check if we are in the next iteration
 	sim.Next()
 	span3, err := sim.FetchLatestSpan(ctx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, heimdall.SpanIdAt(205_055), span3.Id)
 	assert.Equal(t, uint64(198_656), span3.StartBlock)
 	assert.Equal(t, uint64(205_055), span3.EndBlock)
@@ -161,7 +161,7 @@ func TestSimulatorSpans(t *testing.T) {
 	// move to next iteration (should be +1 block since we have no more iterations defined)
 	sim.Next()
 	span5, err := sim.FetchLatestSpan(ctx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, heimdall.SpanIdAt(205_056), span5.Id)
 	assert.Equal(t, uint64(205_056), span5.StartBlock)
 	assert.Equal(t, uint64(211_455), span5.EndBlock)

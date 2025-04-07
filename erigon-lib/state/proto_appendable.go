@@ -265,7 +265,9 @@ func (a *ProtoAppendableTx) VisibleFilesMaxNum() Num {
 	return Num(idx.BaseDataID() + idx.KeyCount())
 }
 
-func (a *ProtoAppendableTx) GetFromFiles(entityNum Num) (b Bytes, found bool, err error) {
+// if either found=false or err != nil, then fileIdx = -1
+// can get FileItem on which entityNum was found by a.Files()[fileIdx] etc.
+func (a *ProtoAppendableTx) GetFromFiles(entityNum Num) (b Bytes, found bool, fileIdx int, err error) {
 	a.NoFilesCheck()
 	ap := a.a
 	lastNum := a.VisibleFilesMaxNum()
@@ -275,13 +277,14 @@ func (a *ProtoAppendableTx) GetFromFiles(entityNum Num) (b Bytes, found bool, er
 			return idx.BaseDataID()+idx.KeyCount() > uint64(entityNum)
 		})
 		if index == -1 {
-			return nil, false, fmt.Errorf("entity get error: snapshot expected but now found: (%s, %d)", ap.a.Name(), entityNum)
+			return nil, false, -1, fmt.Errorf("entity get error: snapshot expected but not found: (%s, %d)", ap.a.Name(), entityNum)
 		}
 
-		return a.GetFromFile(entityNum, index)
+		v, f, err := a.GetFromFile(entityNum, index)
+		return v, f, index, err
 	}
 
-	return nil, false, nil
+	return nil, false, -1, nil
 }
 
 func (a *ProtoAppendableTx) Files() []FilesItem {

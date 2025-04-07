@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/core/gdbme"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/params"
@@ -144,6 +145,7 @@ func New(
 	nodeConfig *nodecfg.Config,
 	ethConfig *ethconfig.Config,
 	logger log.Logger,
+	tracer *tracers.Tracer,
 ) (*ErigonNode, error) {
 	//prepareBuckets(optionalParams.CustomBuckets)
 	node, err := node.New(ctx, nodeConfig, logger)
@@ -151,7 +153,7 @@ func New(
 		utils.Fatalf("Failed to create Erigon node: %v", err)
 	}
 
-	ethereum, err := eth.New(ctx, node, ethConfig, logger)
+	ethereum, err := eth.New(ctx, node, ethConfig, logger, tracer)
 	if err != nil {
 		return nil, err
 	}
