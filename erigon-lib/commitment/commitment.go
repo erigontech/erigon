@@ -29,11 +29,10 @@ import (
 
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/cryptozerocopy"
 	"github.com/erigontech/erigon-lib/common/length"
+	ecrypto "github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
@@ -120,15 +119,15 @@ const (
 	// VariantHexPatriciaTrie used as default commitment approach
 	VariantHexPatriciaTrie TrieVariant = "hex-patricia-hashed"
 	// VariantBinPatriciaTrie - Experimental mode with binary key representation
-	VariantBinPatriciaTrie     TrieVariant = "bin-patricia-hashed"
-	VariantParallelHexPatricia TrieVariant = "parallel-hex-patricia-hashed"
+	VariantBinPatriciaTrie       TrieVariant = "bin-patricia-hashed"
+	VariantConcurrentHexPatricia TrieVariant = "hex-concurrent-patricia-hashed"
 )
 
 func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *Updates) {
 	switch tv {
-	case VariantParallelHexPatricia:
+	case VariantConcurrentHexPatricia:
 		root := NewHexPatriciaHashed(length.Addr, nil, tmpdir)
-		trie := NewParallelPatriciaHashed(root, nil)
+		trie := NewConcurrentPatriciaHashed(root, nil)
 		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
 		// tree.SetConcurrentCommitment(true) // first run always sequential
 		return trie, tree
@@ -734,7 +733,7 @@ func ParseTrieVariant(s string) TrieVariant {
 	case "bin":
 		trieVariant = VariantBinPatriciaTrie
 	case "hex-parallel":
-		trieVariant = VariantParallelHexPatricia
+		trieVariant = VariantConcurrentHexPatricia
 	case "hex":
 		fallthrough
 	default:
@@ -866,7 +865,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 				switch tv {
 				case VariantBinPatriciaTrie:
 					stat.ExtSize += uint64(c.extLen)
-				case VariantHexPatriciaTrie, VariantParallelHexPatricia:
+				case VariantHexPatriciaTrie, VariantConcurrentHexPatricia:
 					stat.ExtSize += uint64(c.extLen)
 				}
 				stat.ExtCount++
@@ -928,11 +927,10 @@ func ParseCommitmentMode(s string) Mode {
 }
 
 type Updates struct {
-	keccak cryptozerocopy.KeccakState
 	hasher keyHasher
-	keys   map[string]struct{} // plain keys to keep only unique keys in etl
-	etl    *etl.Collector      // all-in-one collector
-	tree   *btree.BTreeG[*KeyUpdate]
+	keys   map[string]struct{}       // plain keys to keep only unique keys in etl
+	etl    *etl.Collector            // all-in-one collector
+	tree   *btree.BTreeG[*KeyUpdate] // TODO since it's thread safe to read, maybe instead of all collectors we can use one tree
 	mode   Mode
 	tmpdir string
 
@@ -946,6 +944,7 @@ func (t *Updates) SetConcurrentCommitment(b bool) {
 	t.initCollector()
 }
 
+// SetConcurrentCommitment returns true if updates are sorted per nibble
 func (t *Updates) IsConcurrentCommitment() bool {
 	return t.sortPerNibble
 }
@@ -956,7 +955,6 @@ func keyHasherNoop(key []byte) []byte { return key }
 
 func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 	t := &Updates{
-		keccak: sha3.NewLegacyKeccak256().(cryptozerocopy.KeccakState),
 		hasher: hasher,
 		tmpdir: tmpdir,
 		mode:   m,
@@ -1112,9 +1110,7 @@ func (t *Updates) TouchCode(c *KeyUpdate, val []byte) {
 		copy(c.update.CodeHash[:], EmptyCodeHash)
 		return
 	}
-	t.keccak.Reset()
-	t.keccak.Write(val)
-	t.keccak.Read(c.update.CodeHash[:])
+	copy(c.update.CodeHash[:], ecrypto.Keccak256(val))
 }
 
 func (t *Updates) Close() {

@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
-	"github.com/erigontech/erigon-lib/common/cryptozerocopy"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/length"
 	ecrypto "github.com/erigontech/erigon-lib/crypto"
@@ -134,13 +133,13 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 	}
 
 	sd.SetTxNum(0)
-	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, commitment.VariantParallelHexPatricia)
+	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, commitment.VariantConcurrentHexPatricia)
 
 	if _, err := sd.SeekCommitment(context.Background(), tx); err != nil {
 		return nil, err
 	}
 
-	if pt, ok := sd.sdCtx.patriciaTrie.(*commitment.ParallelPatriciaHashed); ok {
+	if pt, ok := sd.sdCtx.patriciaTrie.(*commitment.ConcurrentPatriciaHashed); ok {
 		nextConcurrent, err := pt.CanDoConcurrentNext()
 		if err != nil {
 			return nil, err
@@ -904,8 +903,6 @@ func (sd *SharedDomains) Tx() kv.Tx { return sd.roTx }
 
 type SharedDomainsCommitmentContext struct {
 	sharedDomains *SharedDomains
-	branches      map[string]cachedBranch
-	keccak        cryptozerocopy.KeccakState
 	updates       *commitment.Updates
 	patriciaTrie  commitment.Trie
 	justRestored  atomic.Bool
@@ -921,8 +918,6 @@ func (sdc *SharedDomainsCommitmentContext) SetLimitReadAsOfTxNum(txNum uint64) {
 func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode commitment.Mode, trieVariant commitment.TrieVariant) *SharedDomainsCommitmentContext {
 	ctx := &SharedDomainsCommitmentContext{
 		sharedDomains: sd,
-		//branches:      make(map[string]cachedBranch),
-		//keccak:        sha3.NewLegacyKeccak256().(cryptozerocopy.KeccakState),
 	}
 
 	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, sd.aggTx.a.tmpdir)
@@ -934,28 +929,10 @@ func (sdc *SharedDomainsCommitmentContext) Close() {
 	sdc.updates.Close()
 }
 
-type cachedBranch struct {
-	data []byte
-	step uint64
-}
-
-// ResetBranchCache should be called after each commitment computation
-func (sdc *SharedDomainsCommitmentContext) ResetBranchCache() {
-	//clear(sdc.branches)
-}
-
 func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, error) {
-	//prefS := toStringZeroCopy(pref)
-	//
-	//cached, ok := sdc.branches[prefS]
-	//if ok {
-	//	sdc.mu.Unlock()
-	//	// cached value is already transformed/clean to read.
-	//	// Cache should ResetBranchCache after each commitment computation
-	//	return cached.data, cached.step, nil
-	//}
-	//
 	sdc.mu.Lock()
+	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update.
+	// Keep dereferenced version inside sd commitmentDomain map ready to read again
 	v, step, err := sdc.sharedDomains.LatestCommitment(pref)
 	sdc.mu.Unlock()
 	if err != nil {
@@ -964,11 +941,6 @@ func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, 
 	if sdc.sharedDomains.trace {
 		fmt.Printf("[SDC] Branch: %x: %x\n", pref, v)
 	}
-	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update, if any, so
-	// cache branch until ResetBranchCache called
-	//sdc.branches[prefS] = cachedBranch{data: v, step: step}
-	//sdc.mu.Unlock()
-
 	if len(v) == 0 {
 		return nil, 0, nil
 	}
@@ -981,7 +953,6 @@ func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte,
 		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
 	}
 	sdc.mu.Lock()
-	//sdc.branches[prefixS] = cachedBranch{data: data, step: prevStep}
 	defer sdc.mu.Unlock()
 
 	return sdc.sharedDomains.updateCommitmentData(prefixS, data, prevData, prevStep)
@@ -1074,12 +1045,6 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 	}
 
 	if len(code) > 0 {
-		//sdc.mu.Lock()
-		//sdc.keccak.Reset()
-		//sdc.keccak.Write(code)
-		//sdc.keccak.Read(u.CodeHash[:])
-		//sdc.mu.Unlock()
-
 		copy(u.CodeHash[:], ecrypto.Keccak256(code))
 		u.Flags |= commitment.CodeUpdate
 	} else {
@@ -1153,9 +1118,6 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, expected
 
 // Evaluates commitment for processed state.
 func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, saveState bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
-	sdc.ResetBranchCache()
-	defer sdc.ResetBranchCache()
-
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
 	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
@@ -1227,7 +1189,7 @@ func (sdc *SharedDomainsCommitmentContext) encodeCommitmentState(blockNum, txNum
 		if err != nil {
 			return nil, err
 		}
-	case *commitment.ParallelPatriciaHashed:
+	case *commitment.ConcurrentPatriciaHashed:
 		state, err = trie.RootTrie().EncodeCurrentState(nil)
 		if err != nil {
 			return nil, err
@@ -1260,7 +1222,7 @@ func _decodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
 // LatestCommitmentState searches for last encoded state for CommitmentContext.
 // Found value does not become current state.
 func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState() (blockNum, txNum uint64, state []byte, err error) {
-	if sdc.patriciaTrie.Variant() != commitment.VariantHexPatriciaTrie && sdc.patriciaTrie.Variant() != commitment.VariantParallelHexPatricia {
+	if sdc.patriciaTrie.Variant() != commitment.VariantHexPatriciaTrie && sdc.patriciaTrie.Variant() != commitment.VariantConcurrentHexPatricia {
 		return 0, 0, nil, fmt.Errorf("state storing is only supported hex patricia trie")
 	}
 	state, _, err = sdc.Branch(keyCommitmentState)
@@ -1307,8 +1269,8 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 			return 0, 0, errors.New("cannot typecast hex patricia trie")
 		}
 	}
-	if tv == commitment.VariantParallelHexPatricia {
-		phext, ok := sdc.patriciaTrie.(*commitment.ParallelPatriciaHashed)
+	if tv == commitment.VariantConcurrentHexPatricia {
+		phext, ok := sdc.patriciaTrie.(*commitment.ConcurrentPatriciaHashed)
 		if !ok {
 			return 0, 0, errors.New("cannot typecast parallel hex patricia trie")
 		}
