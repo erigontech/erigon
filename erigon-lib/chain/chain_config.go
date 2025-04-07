@@ -313,6 +313,16 @@ func (c *Config) IsOsaka(time uint64) bool {
 	return isForked(c.OsakaTime, time)
 }
 
+// CHANGE(taiko): IsOntake returns whether num is either equal to the Ontake fork block or greater.
+func (c *Config) IsOntake(num uint64) bool {
+	return isForked(c.OntakeBlock, num)
+}
+
+// CHANGE(taiko): IsPacaya returns whether num is either equal to the pacaya fork block or greater.
+func (c *Config) IsPacaya(num uint64) bool {
+	return isForked(c.PacayaBlock, num)
+}
+
 func (c *Config) GetBurntContract(num uint64) *common.Address {
 	if len(c.BurntContract) == 0 {
 		return nil
