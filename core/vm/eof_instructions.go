@@ -207,16 +207,15 @@ func opEOFCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 	_size := scope.EofHeader.containerSizes[initContainerIdx]
 	initContainer := scope.Contract.Code[_offset : _offset+_size]
 
-	// TODO(racytech): this should be done in `dynamicGas` func, leave it here for now
+	// TODO(racytech): this should be done in `dynamicGas` function
+	// some fuzzing tests are failing due to gas missmatch
+	// it will require refactoring of `dynamicGas`
 	hashingCharge := uint64(6 * ((len(initContainer) + 31) / 32))
 	if ok := scope.Contract.UseGas(hashingCharge, tracing.GasChangeCallContractEOFCreation); !ok {
 		return nil, ErrOutOfGas
 	}
-	igas := int64(gas) - int64(hashingCharge)
-	if igas <= 0 {
-		return nil, ErrOutOfGas
-	}
-	gas = uint64(igas)
+
+	gas = scope.Contract.Gas
 
 	gas -= gas / 64
 	if ok := scope.Contract.UseGas(gas, tracing.GasChangeCallContractEOFCreation); !ok {
@@ -325,6 +324,7 @@ func opExtCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 	if dst256.ByteLen() > 20 {
 		return nil, fmt.Errorf("argument out of range")
 	}
+
 	args := scope.Memory.GetPtr(offset, size)
 	var (
 		ret       []byte
@@ -364,6 +364,11 @@ func opExtDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCont
 
 		gas = interpreter.evm.CallGasTemp()
 	)
+
+	if addr256.ByteLen() > 20 {
+		return nil, fmt.Errorf("argument out of range")
+	}
+
 	if gas == 0 {
 		addr256.SetOne()
 		scope.Stack.Push(&addr256)
@@ -371,9 +376,7 @@ func opExtDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCont
 		interpreter.returnData = nil
 		return nil, nil
 	}
-	if addr256.ByteLen() > 20 {
-		return nil, fmt.Errorf("argument out of range")
-	}
+
 	// Get the arguments from the memory.
 	args := scope.Memory.GetPtr(offset, size)
 
@@ -419,6 +422,10 @@ func opExtStaticCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContex
 		gas = interpreter.evm.CallGasTemp()
 	)
 
+	if addr256.ByteLen() > 20 {
+		return nil, fmt.Errorf("argument out of range")
+	}
+
 	if gas == 0 {
 		addr256.SetOne()
 		scope.Stack.Push(&addr256)
@@ -427,9 +434,6 @@ func opExtStaticCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContex
 		return nil, nil
 	}
 
-	if addr256.ByteLen() > 20 {
-		return nil, fmt.Errorf("argument out of range")
-	}
 	// Get the arguments from the memory.
 	args := scope.Memory.GetPtr(offset, size)
 	ret, returnGas, err := interpreter.evm.ExtStaticCall(scope.Contract, toAddr, args, gas)
