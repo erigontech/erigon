@@ -23,6 +23,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/big"
 	"path"
 
@@ -243,6 +244,33 @@ var (
 		BerlinBlock:           big.NewInt(0),
 		LondonBlock:           big.NewInt(0),
 		Aura:                  &chain.AuRaConfig{},
+	}
+
+	// NonActivatedConfig defines the chain configuration without activating
+	// any protocol change (EIPs).
+	NonActivatedConfig = &chain.Config{
+		ChainID:                 big.NewInt(1),
+		HomesteadBlock:          nil,
+		DAOForkBlock:            nil,
+		TangerineWhistleBlock:   nil,
+		SpuriousDragonBlock:     nil,
+		ByzantiumBlock:          nil,
+		ConstantinopleBlock:     nil,
+		PetersburgBlock:         nil,
+		IstanbulBlock:           nil,
+		MuirGlacierBlock:        nil,
+		BerlinBlock:             nil,
+		LondonBlock:             nil,
+		ArrowGlacierBlock:       nil,
+		GrayGlacierBlock:        nil,
+		MergeNetsplitBlock:      nil,
+		ShanghaiTime:            nil,
+		CancunTime:              nil,
+		PragueTime:              nil,
+		OsakaTime:               nil,
+		TerminalTotalDifficulty: big.NewInt(math.MaxInt64),
+		Ethash:                  new(chain.EthashConfig),
+		Clique:                  nil,
 	}
 
 	TestRules = TestChainConfig.Rules(0, 0)

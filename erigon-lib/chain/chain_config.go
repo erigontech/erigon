@@ -92,6 +92,11 @@ type Config struct {
 	Bor     BorConfig       `json:"-"`
 	BorJSON json.RawMessage `json:"bor,omitempty"`
 
+	// CHANGE(taiko): Taiko network flag.
+	Taiko       bool     `json:"taiko"`
+	OntakeBlock *big.Int `json:"ontakeBlock,omitempty"` // Ontake switch block (nil = no fork, 0 = already activated)
+	PacayaBlock *big.Int `json:"pacayaBlock,omitempty"` // Ontake switch block (nil = no fork, 0 = already activated)
+
 	// Account Abstraction
 	AllowAA bool
 }
