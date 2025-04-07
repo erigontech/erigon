@@ -163,8 +163,6 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		return nil, fmt.Errorf("ReceiptGen.GetReceipt: bn=%d, txnIdx=%d, %w", header.Number.Uint64(), index, err)
 	}
 
-	receipt.BlockHash = header.Hash()
-
 	receipt.CumulativeGasUsed = cumGasUsed
 	receipt.TransactionIndex = uint(index)
 
@@ -199,7 +197,6 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		if err != nil {
 			return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", block.NumberU64(), i, err)
 		}
-		receipt.BlockHash = blockHash
 		receipts[i] = receipt
 	}
 

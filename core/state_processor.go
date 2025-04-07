@@ -85,23 +85,26 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 	// based on the eip phase, we're passing whether the root touch-delete accounts.
 	if !cfg.NoReceipts {
 		// by the txn
-		receipt = &types.Receipt{Type: txn.Type(), CumulativeGasUsed: *usedGas}
+		receipt = &types.Receipt{
+			Type:              txn.Type(),
+			Status:            types.ReceiptStatusSuccessful,
+			CumulativeGasUsed: *usedGas,
+			TxHash:            txn.Hash(),
+			GasUsed:           result.UsedGas,
+			BlockNumber:       header.Number,
+			BlockHash:         header.Hash(),
+			Logs:              ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), blockNum, header.Hash()),
+			TransactionIndex:  uint(ibs.TxnIndex()),
+		}
 		if result.Failed() {
 			receipt.Status = types.ReceiptStatusFailed
-		} else {
-			receipt.Status = types.ReceiptStatusSuccessful
 		}
-		receipt.TxHash = txn.Hash()
-		receipt.GasUsed = result.UsedGas
 		// if the transaction created a contract, store the creation address in the receipt.
 		if msg.To() == nil {
 			receipt.ContractAddress = crypto.CreateAddress(evm.Origin, txn.GetNonce())
 		}
 		// Set the receipt logs and create a bloom for filtering
-		receipt.Logs = ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), blockNum, header.Hash())
 		receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
-		receipt.BlockNumber = header.Number
-		receipt.TransactionIndex = uint(ibs.TxnIndex())
 	}
 
 	return receipt, result.ReturnData, err
