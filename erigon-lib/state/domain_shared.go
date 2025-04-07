@@ -390,7 +390,6 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error)
 	}
 
 	if !aggTx.a.commitmentValuesTransform || bytes.Equal(prefix, keyCommitmentState) {
-		sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), common.Copy(v))
 		return v, endTx / sd.StepSize(), nil
 	}
 
@@ -399,8 +398,6 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error)
 	if err != nil {
 		return nil, 0, err
 	}
-
-	sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), rv)
 	return rv, endTx / sd.StepSize(), nil
 }
 
@@ -948,10 +945,10 @@ func (sdc *SharedDomainsCommitmentContext) ResetBranchCache() {
 func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, error) {
 	prefS := toStringZeroCopy(pref)
 
-	//sdc.mu.Lock()
+	sdc.mu.Lock()
 	cached, ok := sdc.branches[prefS]
 	if ok {
-		//sdc.mu.Unlock()
+		sdc.mu.Unlock()
 		// cached value is already transformed/clean to read.
 		// Cache should ResetBranchCache after each commitment computation
 		return cached.data, cached.step, nil
@@ -959,7 +956,7 @@ func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, 
 
 	v, step, err := sdc.sharedDomains.LatestCommitment(pref)
 	if err != nil {
-		//sdc.mu.Unlock()
+		sdc.mu.Unlock()
 		return nil, 0, fmt.Errorf("branch failed: %w", err)
 	}
 	if sdc.sharedDomains.trace {
@@ -967,8 +964,8 @@ func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, 
 	}
 	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update, if any, so
 	// cache branch until ResetBranchCache called
-	//sdc.branches[prefS] = cachedBranch{data: v, step: step}
-	//sdc.mu.Unlock()
+	sdc.branches[prefS] = cachedBranch{data: v, step: step}
+	sdc.mu.Unlock()
 
 	if len(v) == 0 {
 		return nil, 0, nil
@@ -981,16 +978,16 @@ func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte,
 	if sdc.sharedDomains.trace {
 		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
 	}
-	//sdc.mu.Lock()
-	//sdc.branches[prefixS] = cachedBranch{data: data, step: prevStep}
-	//defer sdc.mu.Unlock()
+	sdc.mu.Lock()
+	sdc.branches[prefixS] = cachedBranch{data: data, step: prevStep}
+	defer sdc.mu.Unlock()
 
 	return sdc.sharedDomains.updateCommitmentData(prefixS, data, prevData, prevStep)
 }
 
 func (sdc *SharedDomainsCommitmentContext) readAccount(plainKey []byte) (encAccount []byte, err error) {
-	//sdc.mu.Lock()
-	//defer sdc.mu.Unlock()
+	sdc.mu.Lock()
+	defer sdc.mu.Unlock()
 
 	if sdc.limitReadAsOfTxNum > 0 {
 		encAccount, _, err = sdc.sharedDomains.getLatestFromFiles(kv.AccountsDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
@@ -1007,8 +1004,8 @@ func (sdc *SharedDomainsCommitmentContext) readAccount(plainKey []byte) (encAcco
 }
 
 func (sdc *SharedDomainsCommitmentContext) readCode(plainKey []byte) (code []byte, err error) {
-	//sdc.mu.Lock()
-	//defer sdc.mu.Unlock()
+	sdc.mu.Lock()
+	defer sdc.mu.Unlock()
 	if sdc.limitReadAsOfTxNum > 0 {
 		code, _, err = sdc.sharedDomains.getLatestFromFiles(kv.CodeDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
 		if err != nil {
@@ -1023,8 +1020,8 @@ func (sdc *SharedDomainsCommitmentContext) readCode(plainKey []byte) (code []byt
 	return code, nil
 }
 func (sdc *SharedDomainsCommitmentContext) readStorage(plainKey []byte) (enc []byte, err error) {
-	//sdc.mu.Lock()
-	//defer sdc.mu.Unlock()
+	sdc.mu.Lock()
+	defer sdc.mu.Unlock()
 	if sdc.limitReadAsOfTxNum > 0 {
 		enc, _, err = sdc.sharedDomains.getLatestFromFiles(kv.StorageDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
 		if err != nil {
