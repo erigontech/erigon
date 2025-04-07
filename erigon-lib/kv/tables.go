@@ -499,6 +499,9 @@ var ConsensusTables = append([]string{
 },
 	ChaindataTables..., //TODO: move bor tables from chaintables to `ConsensusTables`
 )
+
+// CHANGE(taiko): taiko tables
+var TaikoTables = []string{TaikoL1Origin}
 var HeimdallTables = []string{}
 var PolygonBridgeTables = []string{}
 var DownloaderTables = []string{
@@ -631,6 +634,9 @@ var ReconTablesCfg = TableCfg{
 	CodeD:          {Flags: DupSort},
 	PlainContractD: {Flags: DupSort},
 }
+var TaikoTablesCfg = TableCfg{
+	TaikoL1Origin: {},
+}
 
 func TablesCfgByLabel(label Label) TableCfg {
 	switch label {
@@ -736,6 +742,13 @@ func reinit() {
 		_, ok := PolygonBridgeTablesCfg[name]
 		if !ok {
 			PolygonBridgeTablesCfg[name] = TableCfgItem{}
+		}
+	}
+
+	for _, name := range TaikoTables {
+		_, ok := TaikoTablesCfg[name]
+		if !ok {
+			TaikoTablesCfg[name] = TableCfgItem{}
 		}
 	}
 }

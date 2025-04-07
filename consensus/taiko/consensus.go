@@ -92,7 +92,8 @@ func (t *Taiko) VerifyHeader(chain consensus.ChainHeaderReader, header *types.He
 	if chain.GetHeader(header.Hash(), number) != nil {
 		return nil
 	}
-	parent := chain.GetHeader(header.ParentHash, number-1)
+	parent := chain.GetHeaderByHash(header.ParentHash)
+
 	if parent == nil {
 		return consensus.ErrUnknownAncestor
 	}
@@ -186,6 +187,7 @@ func (t *Taiko) verifyHeader(header, parent *types.Header, unixNow int64) error 
 	if err != nil {
 		return err
 	}
+	defer roTx.Rollback()
 	l1Origin, err := rawdb.ReadL1Origin(roTx, header.Number)
 	if err != nil {
 		return err
