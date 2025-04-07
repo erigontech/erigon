@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
@@ -132,7 +131,7 @@ func (sd *DirectAccessDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVa
 	if domain != kv.AccountsDomain && domain != kv.CodeDomain && domain != kv.StorageDomain {
 		return sd.BufferedSharedDomains.DomainDel(domain, k1, k2, prevVal, prevStep)
 	}
-	fmt.Println("JG", sd.ObjectInfo(), "DomainDel", domain.String(), hexutil.Encode(k1), hexutil.Encode(k2), hexutil.Encode(prevVal), prevStep)
+	// fmt.Println("JG", sd.ObjectInfo(), "DomainDel", domain.String(), hexutil.Encode(k1), hexutil.Encode(k2), hexutil.Encode(prevVal), prevStep)
 	k := append(k1, k2...)
 	v := prevVal
 	if v == nil {
@@ -144,7 +143,7 @@ func (sd *DirectAccessDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVa
 	}
 
 	if v == nil || len(v) == 0 {
-		fmt.Println("JG", sd.ObjectInfo(), "DomainDel", "value not found", hexutil.Encode(k))
+		// fmt.Println("JG", sd.ObjectInfo(), "DomainDel", "value not found", hexutil.Encode(k))
 		return nil
 	}
 	if sd.aggTx.d[domain].d.largeValues {

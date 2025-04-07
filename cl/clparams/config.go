@@ -111,12 +111,11 @@ const (
 )
 
 const (
-	MaxDialTimeout     = 15 * time.Second
-	VersionLength  int = 4
-	// 15 MiB
-	MaxChunkSize uint64        = 15728640
-	ReqTimeout   time.Duration = 5 * time.Second
-	RespTimeout  time.Duration = 15 * time.Second
+	MaxDialTimeout               = 15 * time.Second
+	VersionLength  int           = 4
+	MaxChunkSize   uint64        = 15 * 1024 * 1024
+	ReqTimeout     time.Duration = 5 * time.Second
+	RespTimeout    time.Duration = 10 * time.Second
 )
 
 const (
@@ -326,7 +325,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttestationPropagationSlotRange: 32,
 		AttestationSubnetPrefixBits:     6,
 		TtfbTimeout:                     ConfigDurationSec(ReqTimeout),
-		RespTimeout:                     ConfigDurationSec(10 * time.Second),
+		RespTimeout:                     ConfigDurationSec(RespTimeout),
 		MaximumGossipClockDisparity:     ConfigDurationMSec(500 * time.Millisecond),
 		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
 		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
@@ -451,6 +450,7 @@ type BeaconChainConfig struct {
 	MaxBytesPerTransaction           uint64     `yaml:"MAX_BYTES_PER_TRANSACTION" spec:"true" json:"MAX_BYTES_PER_TRANSACTION,string"`                         // MaxBytesPerTransaction defines the maximum number of bytes per transaction.
 	MaxExtraDataBytes                uint64     `yaml:"MAX_EXTRA_DATA_BYTES" spec:"true" json:"MAX_EXTRA_DATA_BYTES,string"`                                   // MaxExtraDataBytes defines the maximum number of bytes in the extra data field.
 	MaxRequestBlobSidecars           uint64     `yaml:"MAX_REQUEST_BLOB_SIDECARS" spec:"true" json:"MAX_REQUEST_BLOB_SIDECARS,string"`                         // MaxRequestBlobSidecars defines the maximum number of blob sidecars to request.
+	MaxRequestBlobSidecarsElectra    uint64     `yaml:"MAX_REQUEST_BLOB_SIDECARS_ELECTRA" spec:"true" json:"MAX_REQUEST_BLOB_SIDECARS_ELECTRA,string"`         // MaxRequestBlobSidecarsElectra defines the maximum number of blob sidecars to request in Electra.
 	MaxRequestBlocks                 uint64     `yaml:"MAX_REQUEST_BLOCKS" spec:"true" json:"MAX_REQUEST_BLOCKS,string"`                                       // Maximum number of blocks in a single request
 	MaxRequestBlocksDeneb            uint64     `yaml:"MAX_REQUEST_BLOCKS_DENEB" spec:"true" json:"MAX_REQUEST_BLOCKS_DENEB,string"`                           // Maximum number of blocks in a single request
 	MaxTransactionsPerPayload        uint64     `yaml:"MAX_TRANSACTIONS_PER_PAYLOAD" spec:"true" json:"MAX_TRANSACTIONS_PER_PAYLOAD,string"`                   // MaxTransactionsPerPayload defines the maximum number of transactions in a single payload.
@@ -740,6 +740,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	MaxBytesPerTransaction:           1073741824, // 1GB
 	MaxExtraDataBytes:                32,
 	MaxRequestBlobSidecars:           768,
+	MaxRequestBlobSidecarsElectra:    1152, // MAX_REQUEST_BLOCKS_DENEB * MAX_BLOBS_PER_BLOCK_ELECTRA
 	MaxRequestBlocks:                 1024,
 	MaxRequestBlocksDeneb:            128,
 	MaxTransactionsPerPayload:        1048576,
@@ -1120,6 +1121,7 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.MinEpochsForBlobSidecarsRequests = 16384
 	cfg.MaxPerEpochActivationChurnLimit = 2
 	cfg.MaxPerEpochActivationExitChurnLimit = 64_000_000_000
+	cfg.MaxRequestBlobSidecarsElectra = 256
 	cfg.InitializeForkSchedule()
 	return cfg
 }
@@ -1161,6 +1163,7 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.MinEpochsForBlobSidecarsRequests = 16384
 	cfg.MaxPerEpochActivationChurnLimit = 2
 	cfg.MaxPerEpochActivationExitChurnLimit = 64_000_000_000
+	cfg.MaxRequestBlobSidecarsElectra = 256
 	cfg.InitializeForkSchedule()
 	return cfg
 }
@@ -1270,6 +1273,16 @@ func (b *BeaconChainConfig) MaxBlobsPerBlockByVersion(v StateVersion) uint64 {
 		return b.MaxBlobsPerBlock
 	case ElectraVersion:
 		return b.MaxBlobsPerBlockElectra
+	}
+	panic("invalid version")
+}
+
+func (b *BeaconChainConfig) MaxRequestBlobSidecarsByVersion(v StateVersion) int {
+	switch v {
+	case DenebVersion:
+		return int(b.MaxRequestBlobSidecars)
+	case ElectraVersion:
+		return int(b.MaxRequestBlobSidecarsElectra)
 	}
 	panic("invalid version")
 }

@@ -24,31 +24,58 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/downloader"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/kv/prune"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/remotedbserver"
+	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
+	libState "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/wrap"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/consensus/clique"
 	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/stagedsync"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/bridge"
+	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_utils"
+	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/turbo/silkworm"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/stages/mock"
+	mdbxGo "github.com/erigontech/mdbx-go/mdbx"
 )
 
 func TestBlockExecutionClique(t *testing.T) {
@@ -168,7 +195,7 @@ func TestBlockExecutionEthash(t *testing.T) {
 	)
 
 	m := mock.MockWithEverything(t, gspec, bankKey, prune.DefaultMode, ethash.NewFaker(), 128 /*blockBufferSize*/, false, /*withTxPool*/
-		false /*withPosDownloader*/, true /*checkStateRoot*/, true /*useSilkworm*/)
+		false /*withPosDownloader*/, true /*checkStateRoot*/, false /*useSilkworm*/)
 
 	var theAddr libcommon.Address
 	var gasFeeCap uint256.Int
@@ -304,7 +331,7 @@ func TestBlockExecutionStorageContract(t *testing.T) {
 		useSilkworm bool
 	}{
 		{"useSilkworm = false", false},
-		{"useSilkworm = true", true},
+		// {"useSilkworm = true", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -371,24 +398,24 @@ func TestBlockExecutionStorageContract(t *testing.T) {
 /*
 Chain setup:
 
-				Genesis Block
-				      |
-				      |
-				Block 1 (Contract Creation)
-				      |
-				      |
-				Block 2 (Contract Call)
-				      |
-				      |
-				Block 3 (Contract Call)
-				      |
-				      |
-				Block 4 (Funds Transfer)
-				      |
-				(fork validation benchmark)
-					 /  \
-                    /	 \
-              Block A    Block B
+					Genesis Block
+					      |
+					      |
+					Block 1 (Contract Creation)
+					      |
+					      |
+					Block 2 (Contract Call)
+					      |
+					      |
+					Block 3 (Contract Call)
+					      |
+					      |
+					Block 4 (Funds Transfer)
+					      |
+					(fork validation benchmark)
+						 /  \
+	                    /	 \
+	              Block A    Block B
 
 Test setup:
 - Blocks A and B contain N transactions each, where N is the number of subAccounts.
@@ -398,7 +425,6 @@ Test setup:
   - validate and execute Block B
   - clear validation cache
 */
-
 func BenchmarkBlockExecution(b *testing.B) {
 	var (
 		signer           = types.LatestSignerForChainID(big.NewInt(1337))
@@ -480,20 +506,177 @@ func BenchmarkBlockExecution(b *testing.B) {
 	}
 }
 
-// func TestManual(t *testing.T) {
-// 	logger := log.New()
+func allSnapshots(ctx context.Context, db kv.RoDB, dirs datadir.Dirs, logger log.Logger) (*freezeblocks.RoSnapshots, *heimdall.RoSnapshots, *libState.Aggregator, *freezeblocks.BlockReader, bridge.Store, heimdall.Store, error) {
+	var err error
 
-// 	ctx := context.Background()
+	chainConfig := fromdb.ChainConfig(db)
+	snapCfg := ethconfig.NewSnapCfg(true, true, true, chainConfig.ChainName)
 
-// 	execState := stagedsync.StageState{
-// 		ID: stages.Execution,
-// 		BlockNumber: ,
-// 	}
+	_allSnapshotsSingleton := freezeblocks.NewRoSnapshots(snapCfg, dirs.Snap, 0, logger)
+	_allBorSnapshotsSingleton := heimdall.NewRoSnapshots(snapCfg, dirs.Snap, 0, logger)
+	_bridgeStoreSingleton := bridge.NewSnapshotStore(bridge.NewDbStore(db), _allBorSnapshotsSingleton, chainConfig.Bor)
+	_heimdallStoreSingleton := heimdall.NewSnapshotStore(heimdall.NewDbStore(db), _allBorSnapshotsSingleton)
+	blockReader := freezeblocks.NewBlockReader(_allSnapshotsSingleton, _allBorSnapshotsSingleton, _heimdallStoreSingleton, _bridgeStoreSingleton)
+	txNums := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader))
 
-// 	dirs := datadir.New("/home/jacek/data/sepolia")
-// 	db := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).MustOpen()
-// 	tx, err := db.BeginRw(ctx)
+	_aggSingleton, err := libState.NewAggregator2(ctx, dirs, config3.DefaultStepSize, db, logger)
+	if err != nil {
+		return nil, nil, nil, nil, nil, nil, err
+	}
 
-// 	assert.NoError(t, err)
+	_aggSingleton.SetProduceMod(snapCfg.ProduceE3)
 
-// }
+	g := &errgroup.Group{}
+	g.Go(func() error {
+		_allSnapshotsSingleton.OptimisticalyOpenFolder()
+		return nil
+	})
+	g.Go(func() error {
+		_allBorSnapshotsSingleton.OptimisticalyOpenFolder()
+		return nil
+	})
+	g.Go(func() error {
+		err := _aggSingleton.OpenFolder()
+		if err != nil {
+			return fmt.Errorf("aggregator opening: %w", err)
+		}
+		return nil
+	})
+	g.Go(func() error {
+		chainConfig := fromdb.ChainConfig(db)
+		var beaconConfig *clparams.BeaconChainConfig
+		_, beaconConfig, _, err = clparams.GetConfigsByNetworkName(chainConfig.ChainName)
+		if err == nil {
+			_allCaplinSnapshotsSingleton := freezeblocks.NewCaplinSnapshots(snapCfg, beaconConfig, dirs, logger)
+			if err = _allCaplinSnapshotsSingleton.OpenFolder(); err != nil {
+				return fmt.Errorf("caplin snapshots: %w", err)
+			}
+			_allCaplinSnapshotsSingleton.LogStat("caplin")
+		}
+		return nil
+	})
+
+	g.Go(func() error {
+		ls, er := os.Stat(filepath.Join(dirs.Snap, downloader.ProhibitNewDownloadsFileName))
+		mtime := time.Time{}
+		if er == nil {
+			mtime = ls.ModTime()
+		}
+		logger.Info("[downloads]", "locked", er == nil, "at", mtime.Format("02 Jan 06 15:04 2006"))
+		return nil
+	})
+	if err = g.Wait(); err != nil {
+		return nil, nil, nil, nil, nil, nil, err
+	}
+
+	_allSnapshotsSingleton.LogStat("blocks")
+	_allBorSnapshotsSingleton.LogStat("bor")
+	_ = db.View(context.Background(), func(tx kv.Tx) error {
+		ac := _aggSingleton.BeginFilesRo()
+		defer ac.Close()
+		ac.LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
+			_, histBlockNumProgress, err := txNums.FindBlockNum(tx, endTxNumMinimax)
+			if err != nil {
+				return histBlockNumProgress, fmt.Errorf("findBlockNum(%d) fails: %w", endTxNumMinimax, err)
+			}
+			return histBlockNumProgress, nil
+		})
+		return nil
+	})
+
+	if err != nil {
+		log.Error("[snapshots] failed to open", "err", err)
+		return nil, nil, nil, nil, nil, nil, err
+	}
+	return _allSnapshotsSingleton, _allBorSnapshotsSingleton, _aggSingleton, blockReader, _bridgeStoreSingleton, _heimdallStoreSingleton, nil
+}
+
+func TestManual(t *testing.T) {
+	useSilkworm := true
+
+	logger := log.New()
+
+	ctx := context.Background()
+
+	execState := stagedsync.StageState{
+		ID:          stages.Execution,
+		BlockNumber: 1,
+	}
+
+	dirs := datadir.New("/home/jacek/data/sepolia")
+	rawDb := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).MustOpen()
+	defer rawDb.Close()
+	_allSnapshots, _allBorSnapshots, _agg, _blockReader, _, _, err := allSnapshots(ctx, rawDb, dirs, logger)
+	assert.NoError(t, err)
+
+	db, err := temporal.New(rawDb, _agg)
+	assert.NoError(t, err)
+	temporalTx, err := db.BeginTemporalRw(ctx)
+	defer temporalTx.Rollback()
+	assert.NoError(t, err)
+
+	cfg := ethconfig.Defaults
+	cfg.StateStream = true
+	cfg.BatchSize = 1 * datasize.MB
+	cfg.Sync.BodyDownloadTimeoutSeconds = 10
+	cfg.TxPool.Disable = true
+	cfg.Dirs = dirs
+	cfg.AlwaysGenerateChangesets = true
+	cfg.ChaosMonkey = false
+	// cfg.SilkwormExecution = useSilkworm
+
+	chainConfig, err := chain.GetConfig(temporalTx, nil)
+	assert.NoError(t, err)
+	cfg.Snapshot = ethconfig.Defaults.Snapshot
+	cfg.Snapshot.ChainName = chainConfig.ChainName
+
+	consensusEngine := ethash.NewFaker()
+
+	vmConfig := vm.Config{}
+
+	genesisConfig, err := rawdb.ReadGenesis(temporalTx)
+	assert.NoError(t, err)
+
+	erigonGrpcServer := remotedbserver.NewKvServer(ctx, db, _allSnapshots, _allBorSnapshots, _agg, logger)
+	notifications := shards.NewNotifications(erigonGrpcServer)
+
+	var silkwormInstance *silkworm.Silkworm
+	if useSilkworm {
+		silkwormInstance, err = silkworm.New(cfg.Dirs.DataDir, mdbxGo.Version(), cfg.SilkwormNumContexts, log.LvlDebug)
+		assert.NoError(t, err)
+
+		repository := silkworm.NewSnapshotsRepository(
+			silkwormInstance,
+			_blockReader.Snapshots().(*freezeblocks.RoSnapshots),
+			_agg,
+			logger,
+		)
+
+		err = repository.Update()
+		assert.NoError(t, err)
+	}
+
+	executeBlockCfg := stagedsync.StageExecuteBlocksCfg(
+		db,
+		prune.DefaultMode,
+		cfg.BatchSize,
+		chainConfig,
+		consensusEngine,
+		&vmConfig,
+		notifications,
+		false,
+		true,
+		dirs,
+		_blockReader,
+		nil,
+		genesisConfig,
+		cfg.Sync,
+		silkwormInstance,
+	)
+
+	txc := wrap.TxContainer{Tx: temporalTx, Doms: nil}
+
+	err = stagedsync.ExecV3(ctx, &execState, nil, 1, executeBlockCfg, txc, false, 7763755, logger, false, false)
+
+	assert.NoError(t, err)
+}

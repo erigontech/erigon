@@ -217,6 +217,9 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 	header := txTask.Header
 	//fmt.Printf("txNum=%d blockNum=%d history=%t\n", txTask.TxNum, txTask.BlockNum, txTask.HistoryExecution)
 
+	fmt.Print("JG RunTxTaskNoLock ", "BlockNum ", txTask.BlockNum, " BlockHash ", hexutil.Encode(txTask.BlockHash.Bytes()),
+		" TxIndex ", txTask.TxIndex, " TxNum ", txTask.TxNum)
+
 	switch {
 	case txTask.TxIndex == -1:
 		if txTask.BlockNum == 0 {
@@ -245,6 +248,9 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		}
 		rw.engine.Initialize(rw.chainConfig, rw.chain, header, ibs, syscall, rw.logger, nil)
 		txTask.Error = ibs.FinalizeTx(rules, noop)
+
+		fmt.Println(" Initialized")
+
 	case txTask.Final:
 		if txTask.BlockNum == 0 {
 			break
@@ -302,15 +308,17 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 				txTask.TraceTos[uncle.Coinbase] = struct{}{}
 			}
 		}
+		fmt.Println(" Finalized")
+
 	default:
+
+		sender, _ := txTask.Txs[txTask.TxIndex].GetSender()
+		fmt.Print(" TxnHash ", txTask.Txs[txTask.TxIndex].Hash(), " Sender ", sender)
 
 		if silkwormInstance != nil {
 			silkworm.ExecuteTx(silkwormInstance, applyTx, txTask)
 			break
 		}
-
-		// // fmt.Println("JG RunTxTaskNoLock", "BlockNum", txTask.BlockNum, "BlockHash", hexutil.Encode(txTask.BlockHash.Bytes()),
-		// 	"TxIndex", txTask.TxIndex, "TxNum", txTask.TxNum, "Transactions in block", len(txTask.Txs))
 
 		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), rw.chainConfig.GetMaxBlobGasPerBlock(header.Time))
 		rw.callTracer.Reset()
@@ -319,11 +327,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		msg := txTask.TxAsMessage
 
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.vmCfg, rules)
-
-		sender, _ := txTask.Txs[txTask.TxIndex].GetSender()
-
-		fmt.Println("JG RunTxTaskNoLock", "BlockNum", txTask.BlockNum, "BlockHash", hexutil.Encode(txTask.BlockHash.Bytes()),
-			"TxIndex", txTask.TxIndex, "TxNum", txTask.TxNum, "TxnHash", txTask.Txs[txTask.TxIndex].Hash(), "Sender", sender)
 
 		// MA applytx
 		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */, rw.engine)
@@ -340,7 +343,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			txTask.TraceFroms = rw.callTracer.Froms()
 			txTask.TraceTos = rw.callTracer.Tos()
 
-			// // fmt.Println("JG RunTxTaskNoLock", "UsedGas", txTask.UsedGas, "UsedBlobGas", txTask.UsedBlobGas, "Error", err)
+			fmt.Println(" UsedGas", txTask.UsedGas, "UsedBlobGas", txTask.UsedBlobGas)
 		}
 	}
 

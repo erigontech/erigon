@@ -17,7 +17,7 @@ jobs:
             backend: RpcSpecific
           #- chain: bor-mainnet
           #  backend: Polygon
-    runs-on: [ self-hosted, "${{ matrix.backend }}" ]
+    runs-on: [ self-hosted, qa, "${{ matrix.backend }}" ]
     env:
       ERIGON_DIR: /opt/erigon-versions/reference-version
       ERIGON_DATA_DIR: /opt/erigon-versions/reference-version/datadir
@@ -224,6 +224,7 @@ jobs:
           cp change_point_analysis.pdf $past_test_dir
           if [ $open_change_points -ne 0 ]; then
             echo "Change point analysis found points that need to be investigated"
+            echo "::warning title=Change Point Analysis::Found change points that need to be investigated"
             #echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"  -- enable in the future
           fi
 
@@ -233,6 +234,14 @@ jobs:
         with:
           name: test-results
           path: ${{ env.past_test_dir }}
+
+      - name: Action to check failure condition
+        if: failure()
+        run: |
+          if [ "${{ steps.test_step.outputs.test_executed }}" != "true" ]; then
+            echo "::warning::Test not executed, workflow failed for infrastructure reasons"
+          fi
+          #exit 1
 
       - name: Action for Success
         if: steps.test_step.outputs.TEST_RESULT == 'success'

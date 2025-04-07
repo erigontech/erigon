@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -26,6 +25,7 @@ import (
 type Num = state.Num
 type RootNum = state.RootNum
 type EntityId = ae.AppendableId
+type MarkedTxI = state.MarkedTxI
 
 // test marked appendable
 func TestMarkedAppendableRegistration(t *testing.T) {
@@ -41,20 +41,6 @@ func TestMarkedAppendableRegistration(t *testing.T) {
 }
 
 func registerEntity(dirs datadir.Dirs, name string) ae.AppendableId {
-	preverified := snapcfg.Mainnet
-	return ae.RegisterAppendable(name, dirs, preverified, ae.WithSnapshotCreationConfig(
-		&ae.SnapshotConfig{
-			SnapshotCreationConfig: &ae.SnapshotCreationConfig{
-				EntitiesPerStep: 1000,
-				MergeStages:     []uint64{1000, 20000, 600000},
-				MinimumSize:     1000000,
-				SafetyMargin:    1000,
-			},
-		},
-	))
-}
-
-func registerEntityRelaxed(dirs datadir.Dirs, name string) ae.AppendableId {
 	return ae.RegisterAppendable(name, dirs, nil, ae.WithSnapshotCreationConfig(
 		&ae.SnapshotConfig{
 			SnapshotCreationConfig: &ae.SnapshotCreationConfig{
@@ -76,7 +62,7 @@ func setup(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
 }
 
 func setupHeader(t *testing.T, log log.Logger, dir datadir.Dirs, db kv.RoDB) (EntityId, *state.Appendable[state.MarkedTxI]) {
-	headerId := registerEntityRelaxed(dir, "headers")
+	headerId := registerEntity(dir, "headers")
 	require.Equal(t, ae.AppendableId(0), headerId)
 
 	// create marked appendable
@@ -86,16 +72,15 @@ func setupHeader(t *testing.T, log log.Logger, dir datadir.Dirs, db kv.RoDB) (En
 		state.WithIndexKeyFactory(&snaptype.HeaderAccessorIndexKeyFactory{}))
 
 	ma, err := state.NewMarkedAppendable(headerId, kv.Headers, kv.HeaderCanonical, ae.IdentityRootRelationInstance, log,
-		state.App_WithFreezer[state.MarkedTxI](freezer),
-		state.App_WithPruneFrom[state.MarkedTxI](Num(1)),
-		state.App_WithIndexBuilders[state.MarkedTxI](builder),
+		state.App_WithFreezer[MarkedTxI](freezer),
+		state.App_WithPruneFrom[MarkedTxI](Num(1)),
+		state.App_WithIndexBuilders[MarkedTxI](builder),
 	)
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
 		ma.Close()
 		ma.RecalcVisibleFiles(0)
-		//ma = nil
 
 		ae.Cleanup()
 		db.Close()

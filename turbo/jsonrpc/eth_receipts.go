@@ -499,7 +499,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, nil
 	}
 
-	if txNumMin+2 > txNum && !isBorStateSyncTx { //TODO: what a magic is this "2" and how to avoid it
+	if txNumMin+1 > txNum && !isBorStateSyncTx {
 		return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
 	}
 
@@ -534,7 +534,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), txnHash, false), nil
 	}
 
-	var txnIndex = int(txNum - txNumMin - 2)
+	var txnIndex = int(txNum - txNumMin - 1)
 
 	txn, err := api._blockReader.TxnByIdxInBlock(ctx, tx, header.Number.Uint64(), txnIndex)
 	if err != nil {
