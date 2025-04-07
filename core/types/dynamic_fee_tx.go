@@ -38,6 +38,8 @@ type DynamicFeeTransaction struct {
 	TipCap     *uint256.Int
 	FeeCap     *uint256.Int
 	AccessList AccessList
+	// CHANGE(taiko): if this transaction is the first TaikoL2.anchor transaction in a block
+	isAnhcor bool
 }
 
 func (tx *DynamicFeeTransaction) GetFeeCap() *uint256.Int { return tx.FeeCap }

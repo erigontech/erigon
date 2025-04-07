@@ -291,6 +291,16 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 	return s.ListEnd()
 }
 
+// CHANGE(taiko) isAnchor() method
+func (tx *SetCodeTransaction) isAnchor() bool {
+	return false
+}
+
+// CHANGE(taiko): mark as anchor
+func (tx *SetCodeTransaction) markAsAnchor() error {
+	return ErrInvalidTxType
+}
+
 func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, _, _, accessListLen, authorizationsLen int) error {
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
