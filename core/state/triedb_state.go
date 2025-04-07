@@ -787,10 +787,6 @@ func (tds *TrieDbState) TrieStateWriter() *TrieStateWriter {
 	return &TrieStateWriter{tds: tds}
 }
 
-func (tds *TrieStateWriter) WriteChangeSets() error { return nil }
-
-func (tds *TrieStateWriter) WriteHistory() error { return nil }
-
 func (tsw *TrieStateWriter) UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error {
 	addrHash := libcommon.Hash(crypto.Keccak256(address.Bytes()))
 	tsw.tds.currentBuffer.accountUpdates[addrHash] = witnesstypes.AccountWithAddress{Address: address, Account: account}
