@@ -239,7 +239,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 
 	rh, err := txc.Doms.ComputeCommitment(ctx, true, blockHeight, s.LogPrefix())
 	if err != nil {
-		return fmt.Errorf("StateV3.Apply: %w", err)
+		return fmt.Errorf("ParallelExecutionState.Apply: %w", err)
 	}
 	current.Header.Root = libcommon.BytesToHash(rh)
 

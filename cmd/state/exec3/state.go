@@ -57,7 +57,7 @@ type Worker struct {
 	background  bool // if true - worker does manage RoTx (begin/rollback) in .ResetTx()
 	blockReader services.FullBlockReader
 	in          *state.QueueWithRetry
-	rs          *state.StateV3
+	rs          *state.ParallelExecutionState
 	stateWriter *state.StateWriterV3
 	stateReader state.ResettableStateReader
 	historyMode bool // if true - stateReader is HistoryReaderV3, otherwise it's state reader
@@ -114,7 +114,7 @@ func NewWorker(lock sync.Locker, logger log.Logger, hooks *tracing.Hooks, ctx co
 
 func (rw *Worker) LogLRUStats() { rw.evm.JumpDestCache.LogStats() }
 
-func (rw *Worker) ResetState(rs *state.StateV3, accumulator *shards.Accumulator) {
+func (rw *Worker) ResetState(rs *state.ParallelExecutionState, accumulator *shards.Accumulator) {
 	rw.rs = rs
 	if rw.background {
 		rw.SetReader(state.NewReaderParallelV3(rs.Domains()))
@@ -402,7 +402,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 	}
 }
 
-func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger log.Logger, hooks *tracing.Hooks, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int, dirs datadir.Dirs, isMining bool) (reconWorkers []*Worker, applyWorker *Worker, rws *state.ResultsQueue, clear func(), wait func()) {
+func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger log.Logger, hooks *tracing.Hooks, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.ParallelExecutionState, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int, dirs datadir.Dirs, isMining bool) (reconWorkers []*Worker, applyWorker *Worker, rws *state.ResultsQueue, clear func(), wait func()) {
 	reconWorkers = make([]*Worker, workerCount)
 
 	resultChSize := workerCount * 8

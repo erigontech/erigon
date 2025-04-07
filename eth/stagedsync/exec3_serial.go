@@ -141,7 +141,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 		}
 
 		// MA applystate
-		if err := se.rs.ApplyState4(ctx, txTask); err != nil {
+		if err := se.rs.ApplyState(ctx, txTask); err != nil {
 			return false, err
 		}
 
@@ -178,7 +178,7 @@ func (se *serialExecutor) commit(ctx context.Context, txNum uint64, blockNum uin
 		return t2, err
 	}
 	se.doms.SetTxNum(txNum)
-	se.rs = state.NewStateV3(se.doms, se.logger)
+	se.rs = state.NewParallelExecutionState(se.doms, se.logger)
 
 	se.applyWorker.ResetTx(se.applyTx)
 	se.applyWorker.ResetState(se.rs, se.accumulator)
