@@ -854,7 +854,8 @@ func (api *TraceAPIImpl) callTransaction(
 	rules := cfg.Rules(blockNumber, header.Time)
 	var txn types.Transaction
 	var borStateSyncTxnHash common.Hash
-	if cfg.Bor != nil {
+	isBorStateSyncTxn := txIndex == -1 && cfg.Bor != nil
+	if isBorStateSyncTxn {
 		// check if this header has state sync txn
 		blockHash := header.Hash()
 		borStateSyncTxnHash = bortypes.ComputeBorTxHash(blockNumber, blockHash)
@@ -871,9 +872,10 @@ func (api *TraceAPIImpl) callTransaction(
 		if err != nil {
 			return nil, nil, err
 		}
-		if ok {
-			txn = bortypes.NewBorTransaction()
+		if !ok {
+			return nil, nil, errors.New("bridge transaction expected but not found")
 		}
+		txn = bortypes.NewBorTransaction()
 	} else {
 		var err error
 		txn, err = api._txnReader.TxnByIdxInBlock(ctx, dbtx, blockNumber, txIndex)
@@ -913,7 +915,7 @@ func (api *TraceAPIImpl) callTransaction(
 
 	var txnHash common.Hash
 	var msg *types.Message
-	if cfg.Bor != nil {
+	if isBorStateSyncTxn {
 		txnHash = borStateSyncTxnHash
 		// we use an empty message for bor state sync txn since it gets handled differently
 	} else {
@@ -927,7 +929,7 @@ func (api *TraceAPIImpl) callTransaction(
 	callParam := TraceCallParam{
 		txHash:            &txnHash,
 		traceTypes:        traceTypes,
-		isBorStateSyncTxn: cfg.Bor != nil,
+		isBorStateSyncTxn: isBorStateSyncTxn,
 	}
 
 	trace, tracingHooks, cmErr := api.doCall(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, msg, callParam,
