@@ -1529,18 +1529,18 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 		var num = rpc.LatestBlockNumber
 		parentNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
 	}
-	blockNumber, hash, _, err := rpchelper.GetBlockNumber(ctx, *parentNrOrHash, dbtx, api._blockReader, api.filters)
+	parentBlockNumber, hash, _, err := rpchelper.GetBlockNumber(ctx, *parentNrOrHash, dbtx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
 	}
 	noop := state.NewNoopWriter()
 
-	parentHeader, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNumber), dbtx)
+	parentHeader, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(parentBlockNumber), dbtx)
 	if err != nil {
 		return nil, err
 	}
 	if parentHeader == nil {
-		return nil, fmt.Errorf("parent header %d(%x) not found", blockNumber, hash)
+		return nil, fmt.Errorf("parent header %d(%x) not found", parentBlockNumber, hash)
 	}
 
 	// Setup context so it may be cancelled the call has completed
@@ -1647,7 +1647,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	if args.isBorStateSyncTxn {
 		txFinalized = true
 		var stateSyncEvents []*types.Message
-		stateSyncEvents, err = api.stateSyncEvents(ctx, dbtx, header.Hash(), blockNumber, chainConfig)
+		stateSyncEvents, err = api.stateSyncEvents(ctx, dbtx, header.Hash(), parentBlockNumber+1, chainConfig)
 		if err != nil {
 			return nil, err
 		}
