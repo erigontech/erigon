@@ -1826,6 +1826,7 @@ func (hph *HexPatriciaHashed) deleteCell(hashedKey []byte) {
 func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) (cell *cell) {
 	if u.Deleted() {
 		hph.deleteCell(hashedKey)
+		fmt.Printf("%x => %s\n", plainKey, u.String())
 		return nil
 	}
 
