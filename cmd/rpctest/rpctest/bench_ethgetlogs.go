@@ -24,6 +24,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"golang.org/x/sync/errgroup"
 )
@@ -175,7 +176,13 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 				if resp.Error != nil {
 					return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", resp.Error.Code, resp.Error.Message)
 				}
+				saw := map[common.Address]struct{}{}
 				for _, l := range resp.Result {
+					if _, ok := saw[l.Address]; ok {
+						continue
+					}
+					saw[l.Address] = struct{}{}
+
 					res = reqGen.Erigon("eth_getLogs", reqGen.getLogs(prevBn, bn, l.Address), &resp)
 					if res.Err != nil {
 						return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)
