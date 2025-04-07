@@ -187,7 +187,6 @@ func (t *StateTest) Run(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config, di
 // RunNoVerify runs a specific subtest and returns the statedb and post-state root
 func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, libcommon.Hash, error) {
 	config, eips, err := GetChainConfig(subtest.Fork)
-
 	if err != nil {
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
@@ -231,11 +230,17 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	if err != nil {
 		return nil, libcommon.Hash{}, err
 	}
-	if len(post.Tx) != 0 {
+
+	// for EOF fuzzing we need to read the tx from the `transaction` field only
+	// and not from `post`, as pointed out by shemnon
+	// future fuzzing tests will involve not just a `gas` as it is now,
+	// but other fileds as well
+	if subtest.Fork != "Osaka" && len(post.Tx) != 0 {
 		txn, err := types.UnmarshalTransactionFromBinary(post.Tx, false /* blobTxnsAreWrappedWithBlobs */)
 		if err != nil {
 			return nil, libcommon.Hash{}, err
 		}
+		// setting msg to blank here results in failing non EOF state tests
 		msg, err = txn.AsMessage(*types.MakeSigner(config, 0, 0), baseFee, config.Rules(0, 0))
 		if err != nil {
 			return nil, libcommon.Hash{}, err

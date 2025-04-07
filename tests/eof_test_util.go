@@ -10,8 +10,7 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 )
 
-// A BlockTest checks handling of entire blocks.
-type EOFTest struct {
+type EOFTest struct { // for EOF validation only
 	json eofJSON
 }
 
