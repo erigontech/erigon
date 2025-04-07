@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/erigontech/erigon-lib/rlp"
+	"math/big"
 	"sync"
 
 	"golang.org/x/sync/errgroup"
@@ -179,7 +180,7 @@ func (rw *Worker) SetReader(reader state.ResettableStateReader) {
 	}
 }
 
-func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvaluaion bool, silkwormInstance *silkworm.Silkworm, applyTx kv.RwTx, silkwormMemDB kv.RwTx) {
+func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvaluaion bool, silkwormInstance *silkworm.Silkworm, applyTx kv.RwTx, silkwormMemDBTx kv.RwTx) {
 	if txTask.HistoryExecution && !rw.historyMode {
 		// in case if we cancelled execution and commitment happened in the middle of the block, we have to process block
 		// from the beginning until committed txNum and only then disable history mode.
@@ -250,39 +251,33 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		}
 
 		if silkwormInstance != nil {
-			silkwormErr := silkworm.BlockExecEnd(silkwormInstance, applyTx, silkwormMemDB)
+			silkwormErr := silkworm.BlockExecEnd(silkwormInstance, applyTx, silkwormMemDBTx)
 			if silkwormErr != nil {
 				return
 			}
 
-			cursor, err := silkwormMemDB.Cursor(kv.Receipts)
+			cursor, err := silkwormMemDBTx.Cursor(kv.Receipts)
 
 			if err != nil {
 				panic(err)
 			}
 
 			idx := 0
-			for k, v, err := cursor.First(); k != nil; k, v, err = cursor.Next() {
+			for key, value, err := cursor.First(); key != nil; key, value, err = cursor.Next() {
 				if err != nil {
 					panic(err)
 				}
 				var receipt types.Receipt
-				rlp.NewStream(bytes.NewReader(v), 0)
+				rlp.NewStream(bytes.NewReader(value), 0)
 
-				if err = receipt.DecodeRLP(rlp.NewStream(bytes.NewReader(v), 0)); err != nil {
-
+				if err = receipt.DecodeRLP(rlp.NewStream(bytes.NewReader(value), 0)); err != nil {
+					panic("Unable to decode silkworm-produced receipt queried from database!")
 				}
-
+				receipt.BlockNumber = new(big.Int).SetUint64(txTask.BlockNum)
 				txTask.BlockReceipts[idx] = &receipt
 				idx++
 			}
-			cursor.Close()
-			silkwormMemDB.Rollback()
 		}
-
-		//for _, v := range txTask.BlockReceipts {
-		//	fmt.Printf("Receipt with gas: %d, cummulative: %d\n", v.GasUsed, v.CumulativeGasUsed)
-		//}
 
 		// End of block transaction in a block
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {

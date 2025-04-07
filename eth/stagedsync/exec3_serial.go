@@ -39,17 +39,17 @@ func (se *serialExecutor) status(ctx context.Context, commitThreshold uint64) er
 }
 
 func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (cont bool, err error) {
-	var silkwormMemTx kv.RwTx
+	var silkwormMemDbTx kv.RwTx
 
 	if se.cfg.silkworm != nil {
 		tmpDB := mdbx.New(kv.TemporaryDB, se.logger).InMem(os.TempDir()).GrowthStep(4 * datasize.MB).MapSize(8 * datasize.MB).MustOpen()
 		var err error
-		silkwormMemTx, err = tmpDB.BeginRw(ctx) // nolint:gocritic
+		silkwormMemDbTx, err = tmpDB.BeginRw(ctx) // nolint:gocritic
 		if err != nil {
 			panic(err)
 		}
 		defer tmpDB.Close()
-		defer silkwormMemTx.Rollback()
+		defer silkwormMemDbTx.Rollback()
 	}
 
 	for _, txTask := range tasks {
@@ -57,7 +57,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			return false, nil
 		}
 
-		se.applyWorker.RunTxTaskNoLock(txTask, se.isMining, se.skipPostEvaluation, se.cfg.silkworm, se.applyTx, silkwormMemTx)
+		se.applyWorker.RunTxTaskNoLock(txTask, se.isMining, se.skipPostEvaluation, se.cfg.silkworm, se.applyTx, silkwormMemDbTx)
 		if err := func() error {
 			if errors.Is(txTask.Error, context.Canceled) {
 				return txTask.Error
@@ -72,11 +72,8 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			mxExecTransactions.Add(1)
 			se.blobGasUsed += txTask.UsedBlobGas
 
-			//TODO: JG add receipts from silkworm
 			if se.cfg.silkworm == nil {
 				txTask.CreateReceipt(se.applyTx)
-			} else {
-				// TODO: pull silkworm receipts from memDb
 			}
 
 			if txTask.Final {
@@ -88,9 +85,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 					se.cfg.notifications.RecentLogs.Add(txTask.BlockReceipts)
 				}
 
-				// TODO: JG add receipts from silkworm
-				// checkReceipts := !se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNum) && !se.cfg.vmConfig.NoReceipts && !se.isMining
-				checkReceipts := false
+				checkReceipts := !se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNum) && !se.cfg.vmConfig.NoReceipts && !se.isMining
 
 				if txTask.BlockNum > 0 && !se.skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 					if err := core.BlockPostValidation(se.usedGas, se.blobGasUsed, checkReceipts, txTask.BlockReceipts, txTask.Header, se.isMining, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
