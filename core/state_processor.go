@@ -20,6 +20,8 @@
 package core
 
 import (
+	"math/big"
+
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -34,21 +36,9 @@ import (
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *GasPool, ibs *state.IntraBlockState,
-	stateWriter state.StateWriter, header *types.Header, txn types.Transaction, usedGas, usedBlobGas *uint64,
-	evm *vm.EVM, cfg vm.Config) (*types.Receipt, []byte, error) {
-	var (
-		receipt *types.Receipt
-		err     error
-	)
-
-	rules := evm.ChainRules()
-	blockNum := header.Number.Uint64()
-	msg, err := txn.AsMessage(*types.MakeSigner(config, blockNum, header.Time), header.BaseFee, rules)
-	if err != nil {
-		return nil, nil, err
-	}
-	msg.SetCheckNonce(!cfg.StatelessExec)
+func applyTransaction(msg Message, engine consensus.EngineReader, gp *GasPool, ibs *state.IntraBlockState,
+	stateWriter state.StateWriter, blockNum *big.Int, blockHash libcommon.Hash, txn types.Transaction, usedGas, usedBlobGas *uint64,
+	evm *vm.EVM, cfg vm.Config) (receipt *types.Receipt, returnData []byte, err error) {
 
 	if cfg.Tracer != nil {
 		if cfg.Tracer.OnTxStart != nil {
@@ -73,7 +63,7 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 		return nil, nil, err
 	}
 	// Update the state with pending changes
-	if err = ibs.FinalizeTx(rules, stateWriter); err != nil {
+	if err = ibs.FinalizeTx(evm.ChainRules(), stateWriter); err != nil {
 		return nil, nil, err
 	}
 	*usedGas += result.UsedGas
@@ -91,9 +81,9 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 			CumulativeGasUsed: *usedGas,
 			TxHash:            txn.Hash(),
 			GasUsed:           result.UsedGas,
-			BlockNumber:       header.Number,
-			BlockHash:         header.Hash(),
-			Logs:              ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), blockNum, header.Hash()),
+			BlockNumber:       blockNum,
+			BlockHash:         blockHash,
+			Logs:              ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), blockNum.Uint64(), blockHash),
 			TransactionIndex:  uint(ibs.TxnIndex()),
 		}
 		if result.Failed() {
@@ -127,5 +117,12 @@ func ApplyTransaction(config *chain.Config, blockHashFunc func(n uint64) libcomm
 	blockContext := NewEVMBlockContext(header, blockHashFunc, engine, author, config)
 	vmenv := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, config, cfg)
 
-	return applyTransaction(config, engine, gp, ibs, stateWriter, header, txn, usedGas, usedBlobGas, vmenv, cfg)
+	rules := vmenv.ChainRules()
+	msg, err := txn.AsMessage(*types.MakeSigner(config, header.Number.Uint64(), header.Time), header.BaseFee, rules)
+	if err != nil {
+		return nil, nil, err
+	}
+	msg.SetCheckNonce(!cfg.StatelessExec)
+
+	return applyTransaction(msg, engine, gp, ibs, stateWriter, header.Number, header.Hash(), txn, usedGas, usedBlobGas, vmenv, cfg)
 }

@@ -271,10 +271,10 @@ func SysCallContract(contract libcommon.Address, data []byte, chainConfig *chain
 		author = &state.SystemAddress
 	}
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, author, chainConfig)
-	return SysCallContractWithBlockContext(contract, data, chainConfig, ibs, blockContext, engine, constCall, tracing)
+	return SysCallContractWithBlockContext(contract, data, chainConfig, ibs, blockContext, constCall, tracing)
 }
 
-func SysCallContractWithBlockContext(contract libcommon.Address, data []byte, chainConfig *chain.Config, ibs evmtypes.IntraBlockState, blockContext evmtypes.BlockContext, engine consensus.EngineReader, constCall bool, tracer *tracing.Hooks) (result []byte, logs []*types.Log, err error) {
+func SysCallContractWithBlockContext(contract libcommon.Address, data []byte, chainConfig *chain.Config, ibs evmtypes.IntraBlockState, blockContext evmtypes.BlockContext, constCall bool, tracer *tracing.Hooks) (result []byte, logs []*types.Log, err error) {
 	innerTracer := &tracing.Hooks{}
 	if tracer != nil {
 		innerTracer = tracer
