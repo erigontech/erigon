@@ -11,6 +11,7 @@ import (
 )
 
 func setup(tb testing.TB) datadir.Dirs {
+	tb.Helper()
 	return datadir.New(tb.TempDir())
 }
 
@@ -108,12 +109,14 @@ func TestE3SnapSchemaForDomain1(t *testing.T) {
 		BtIndex(seg.CompressNone).
 		Existence().Build()
 
+	stepFrom := RootNum(stepSize * 288)
+	stepTo := RootNum(stepSize * 296)
 	info, ok := p.Parse("v1-accounts.288-296.bt")
 	require.True(t, ok)
 	require.Equal(t, "v1-accounts.288-296.bt", info.Name)
 	require.Equal(t, Version(1), info.Version)
-	require.Equal(t, uint64(stepSize*288), info.From)
-	require.Equal(t, uint64(stepSize*296), info.To)
+	require.Equal(t, uint64(stepFrom), info.From)
+	require.Equal(t, uint64(stepTo), info.To)
 	require.Equal(t, "accounts", info.FileType)
 	require.Equal(t, ".bt", info.Ext)
 
@@ -121,8 +124,8 @@ func TestE3SnapSchemaForDomain1(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "v1-accounts.288-296.kv", info.Name)
 	require.Equal(t, Version(1), info.Version)
-	require.Equal(t, uint64(stepSize*288), info.From)
-	require.Equal(t, uint64(stepSize*296), info.To)
+	require.Equal(t, uint64(stepFrom), info.From)
+	require.Equal(t, uint64(stepTo), info.To)
 	require.Equal(t, "accounts", info.FileType)
 	require.Equal(t, string(DataExtensionKv), info.Ext)
 
@@ -130,20 +133,18 @@ func TestE3SnapSchemaForDomain1(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "v1-accounts.288-296.kvei", info.Name)
 	require.Equal(t, Version(1), info.Version)
-	require.Equal(t, uint64(stepSize*288), info.From)
-	require.Equal(t, uint64(stepSize*296), info.To)
+	require.Equal(t, uint64(stepFrom), info.From)
+	require.Equal(t, uint64(stepTo), info.To)
 	require.Equal(t, "accounts", info.FileType)
 	require.Equal(t, ".kvei", info.Ext)
 
-	stepFrom := RootNum(stepSize * 288)
-	stepTo := RootNum(stepSize * 296)
 	dataFileFull := p.DataFile(Version(1), stepFrom, stepTo)
 	_, fName := filepath.Split(dataFileFull)
-	require.Equal(t, fName, "v1-accounts.288-296.kv")
+	require.Equal(t, "v1-accounts.288-296.kv", fName)
 	accFull, params := p.BtIdxFile(Version(1), stepFrom, stepTo)
-	require.Equal(t, params.Compression, seg.CompressNone)
+	require.Equal(t, seg.CompressNone, params.Compression)
 	_, fName = filepath.Split(accFull)
-	require.Equal(t, fName, "v1-accounts.288-296.bt")
+	require.Equal(t, "v1-accounts.288-296.bt", fName)
 
 	require.Panics(t, func() {
 		p.AccessorIdxFile(Version(1), stepFrom, stepTo, 0)
@@ -151,7 +152,7 @@ func TestE3SnapSchemaForDomain1(t *testing.T) {
 
 	exFull := p.ExistenceFile(Version(1), stepFrom, stepTo)
 	_, fName = filepath.Split(exFull)
-	require.Equal(t, fName, "v1-accounts.288-296.kvei")
+	require.Equal(t, "v1-accounts.288-296.kvei", fName)
 
 	require.True(t, p.btIdxFileMetadata.supported)
 	require.True(t, p.existenceFileMetadata.supported)
@@ -165,12 +166,14 @@ func TestE3SnapSchemaForCommitmentDomain(t *testing.T) {
 		Data(dirs.SnapDomain, "commitments", DataExtensionKv).
 		Accessor(dirs.SnapDomain, AccessorExtensionKvi).Build()
 
+	stepFrom := RootNum(stepSize * 288)
+	stepTo := RootNum(stepSize * 296)
 	info, ok := p.Parse("v1-commitments.288-296.kv")
 	require.True(t, ok)
 	require.Equal(t, "v1-commitments.288-296.kv", info.Name)
 	require.Equal(t, Version(1), info.Version)
-	require.Equal(t, uint64(stepSize*288), info.From)
-	require.Equal(t, uint64(stepSize*296), info.To)
+	require.Equal(t, uint64(stepFrom), info.From)
+	require.Equal(t, uint64(stepTo), info.To)
 	require.Equal(t, "commitments", info.FileType)
 	require.Equal(t, string(DataExtensionKv), info.Ext)
 
@@ -178,19 +181,17 @@ func TestE3SnapSchemaForCommitmentDomain(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "v1-commitments.288-296.kvi", info.Name)
 	require.Equal(t, Version(1), info.Version)
-	require.Equal(t, uint64(stepSize*288), info.From)
-	require.Equal(t, uint64(stepSize*296), info.To)
+	require.Equal(t, uint64(stepFrom), info.From)
+	require.Equal(t, uint64(stepTo), info.To)
 	require.Equal(t, "commitments", info.FileType)
 	require.Equal(t, string(AccessorExtensionKvi), info.Ext)
 
-	stepFrom := RootNum(stepSize * 288)
-	stepTo := RootNum(stepSize * 296)
 	dataFileFull := p.DataFile(Version(1), stepFrom, stepTo)
 	_, fName := filepath.Split(dataFileFull)
-	require.Equal(t, fName, "v1-commitments.288-296.kv")
+	require.Equal(t, "v1-commitments.288-296.kv", fName)
 	accFull := p.AccessorIdxFile(Version(1), stepFrom, stepTo, 0)
 	_, fName = filepath.Split(accFull)
-	require.Equal(t, fName, "v1-commitments.288-296.kvi")
+	require.Equal(t, "v1-commitments.288-296.kvi", fName)
 
 	require.Panics(t, func() {
 		p.BtIdxFile(Version(1), stepFrom, stepTo)
@@ -233,12 +234,12 @@ func TestE3SnapSchemaForHistory(t *testing.T) {
 	dataFileFull := p.DataFile(Version(1), stepFrom, stepTo)
 	path, fName := filepath.Split(dataFileFull)
 	require.Equal(t, filepath.Clean(path), filepath.Clean(dirs.SnapHistory))
-	require.Equal(t, fName, "v1-accounts.192-256.v")
+	require.Equal(t, "v1-accounts.192-256.v", fName)
 
 	accFull := p.AccessorIdxFile(Version(1), stepFrom, stepTo, 0)
 	path, fName = filepath.Split(accFull)
 	require.Equal(t, filepath.Clean(path), filepath.Clean(dirs.SnapAccessors))
-	require.Equal(t, fName, "v1-accounts.192-256.vi")
+	require.Equal(t, "v1-accounts.192-256.vi", fName)
 
 	require.Panics(t, func() {
 		p.BtIdxFile(Version(1), stepFrom, stepTo)
@@ -285,12 +286,12 @@ func TestE3SnapSchemaForII(t *testing.T) {
 	fileName := p.DataFile(Version(1), stepFrom, stepTo)
 	path, fName := filepath.Split(fileName)
 	require.Equal(t, filepath.Clean(path), filepath.Clean(dirs.SnapIdx))
-	require.Equal(t, fName, "v1-logaddrs.128-192.ef")
+	require.Equal(t, "v1-logaddrs.128-192.ef", fName)
 
 	accFull := p.AccessorIdxFile(Version(1), stepFrom, stepTo, 0)
 	path, fName = filepath.Split(accFull)
 	require.Equal(t, filepath.Clean(path), filepath.Clean(dirs.SnapAccessors))
-	require.Equal(t, fName, "v1-logaddrs.128-192.efi")
+	require.Equal(t, "v1-logaddrs.128-192.efi", fName)
 
 	require.Panics(t, func() {
 		p.BtIdxFile(Version(1), stepFrom, stepTo)

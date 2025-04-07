@@ -243,7 +243,7 @@ func (a *ProtoAppendableTx) GetFromFiles(entityNum Num) (b Bytes, found bool, fi
 			idx := a.files[i].src.index
 			return idx.BaseDataID()+idx.KeyCount() > uint64(entityNum)
 		})
-		if index == -1 {
+		if index == len(a.files) {
 			return nil, false, -1, fmt.Errorf("entity get error: snapshot expected but not found: (%s, %d)", ap.a.Name(), entityNum)
 		}
 
