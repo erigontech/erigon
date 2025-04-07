@@ -29,7 +29,6 @@ import (
 	"unsafe"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/cryptozerocopy"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -184,10 +183,10 @@ func NewBranchEncoder(sz uint64) *BranchEncoder {
 }
 
 func (be *BranchEncoder) CollectUpdate(
-		ctx PatriciaContext,
-		prefix []byte,
-		bitmap, touchMap, afterMap uint16,
-		readCell func(nibble int, skip bool) (*cell, error),
+	ctx PatriciaContext,
+	prefix []byte,
+	bitmap, touchMap, afterMap uint16,
+	readCell func(nibble int, skip bool) (*cell, error),
 ) (lastNibble int, err error) {
 
 	prev, prevStep, err := ctx.Branch(prefix)
