@@ -178,35 +178,30 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 	for n := 0; n < len(t.nibbles); n++ {
 		nib := t.nibbles[n]
 		phnib := pph.mounts[n]
+		ni := n
 
 		g.Go(func() error {
-			n = n
 			cnt := 0
 			err := nib.Load(nil, "", func(hashedKey, plainKey []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 				cnt++
 				if phnib.trace {
-					fmt.Printf("\n%x) %d plainKey [%x] hashedKey [%x] currentKey [%x]\n", n, cnt, plainKey, hashedKey, phnib.currentKey[:phnib.currentKeyLen])
+					fmt.Printf("\n%x) %d plainKey [%x] hashedKey [%x] currentKey [%x]\n", ni, cnt, plainKey, hashedKey, phnib.currentKey[:phnib.currentKeyLen])
 				}
 				if err := phnib.followAndUpdate(hashedKey, plainKey, nil); err != nil {
-					panic(fmt.Errorf("followAndUpdate[%x]: %w", n, err))
+					return fmt.Errorf("followAndUpdate[%x]: %w", ni, err)
 				}
 				return nil
 			}, etl.TransformArgs{Quit: ctx.Done()})
-
 			if err != nil {
-				panic(err)
-				// return err
+				return err
 			}
-
-			if cnt > 0 {
-				if pph.mounts[n].trace {
-					fmt.Printf("NOW FOLDING nib [%x] #%d d=%d\n", n, cnt, phnib.depths[0])
-				}
-				if err = pph.foldNibble(n); err != nil {
-					return err
-				}
+			if cnt == 0 {
+				return nil
 			}
-			return nil
+			if pph.mounts[ni].trace {
+				fmt.Printf("NOW FOLDING nib [%x] #%d d=%d\n", ni, cnt, phnib.depths[0])
+			}
+			return pph.foldNibble(ni)
 		})
 	}
 	if err := g.Wait(); err != nil {
