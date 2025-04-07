@@ -31,7 +31,6 @@ import (
 
 	"github.com/pkg/errors"
 	btree2 "github.com/tidwall/btree"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common"
@@ -39,6 +38,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/cryptozerocopy"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/length"
+	ecrypto "github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
@@ -921,8 +921,8 @@ func (sdc *SharedDomainsCommitmentContext) SetLimitReadAsOfTxNum(txNum uint64) {
 func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode commitment.Mode, trieVariant commitment.TrieVariant) *SharedDomainsCommitmentContext {
 	ctx := &SharedDomainsCommitmentContext{
 		sharedDomains: sd,
-		branches:      make(map[string]cachedBranch),
-		keccak:        sha3.NewLegacyKeccak256().(cryptozerocopy.KeccakState),
+		//branches:      make(map[string]cachedBranch),
+		//keccak:        sha3.NewLegacyKeccak256().(cryptozerocopy.KeccakState),
 	}
 
 	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, sd.aggTx.a.tmpdir)
@@ -941,7 +941,7 @@ type cachedBranch struct {
 
 // ResetBranchCache should be called after each commitment computation
 func (sdc *SharedDomainsCommitmentContext) ResetBranchCache() {
-	clear(sdc.branches)
+	//clear(sdc.branches)
 }
 
 func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, error) {
@@ -1074,11 +1074,13 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 	}
 
 	if len(code) > 0 {
-		sdc.mu.Lock()
-		sdc.keccak.Reset()
-		sdc.keccak.Write(code)
-		sdc.keccak.Read(u.CodeHash[:])
-		sdc.mu.Unlock()
+		//sdc.mu.Lock()
+		//sdc.keccak.Reset()
+		//sdc.keccak.Write(code)
+		//sdc.keccak.Read(u.CodeHash[:])
+		//sdc.mu.Unlock()
+
+		copy(u.CodeHash[:], ecrypto.Keccak256(code))
 		u.Flags |= commitment.CodeUpdate
 	} else {
 		u.CodeHash = commitment.EmptyCodeHashArray
