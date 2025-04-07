@@ -1,243 +1,263 @@
+<div align="center">
+
 # Erigon
 
-Documentation: **[docs.erigon.tech](https://docs.erigon.tech)**
-Blog: **[erigon.tech/blog](https://erigon.tech/blog/)**
-X/Twitter: **[x.com/ErigonEth](https://x.com/ErigonEth)**
+[![Documentation](https://img.shields.io/badge/docs-docs.erigon.tech-blue)](https://docs.erigon.tech)
+[![Blog](https://img.shields.io/badge/blog-erigon.tech%2Fblog-blue)](https://erigon.tech/blog/)
+[![Twitter Follow](https://img.shields.io/twitter/follow/ErigonEth?style=social)](https://twitter.com/ErigonEth)
 
 Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency
 frontier.
 
-<br>
-
 [![Build status](https://github.com/erigontech/erigon/actions/workflows/ci.yml/badge.svg)](https://github.com/erigontech/erigon/actions/workflows/ci.yml) 
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=erigontech_erigon&metric=coverage)](https://sonarcloud.io/summary/new_code?id=erigontech_erigon)
 
-<!--ts-->
+</div>
 
-- [Erigon](#erigon)
-- [System Requirements](#system-requirements)
-- [Sync Times](#sync-times)
-- [Usage](#usage)
-    - [Getting Started](#getting-started)
-    - [Datadir structure](#datadir-structure)
-    - [History on cheap disk](#history-on-cheap-disk)
-    - [Erigon3 datadir size](#erigon3-datadir-size)
-    - [Erigon3 changes from Erigon2](#erigon3-changes-from-erigon2)
-    - [Logging](#logging)
-    - [Modularity](#modularity)
-    - [Embedded Consensus Layer](#embedded-consensus-layer)
-    - [Testnets](#testnets)
-    - [Block Production (PoS Validator)](#block-production-pos-validator)
-    - [Config Files TOML](#config-files-toml)
-    - [Beacon Chain (Consensus Layer)](#beacon-chain-consensus-layer)
-    - [Caplin](#caplin)
-        - [Caplin's Usage](#caplins-usage)
-    - [Multiple Instances / One Machine](#multiple-instances--one-machine)
-    - [Dev Chain](#dev-chain)
-- [Key features](#key-features)
-    - [Faster Initial Sync](#faster-initial-sync)
-    - [More Efficient State Storage](#more-efficient-state-storage)
-    - [JSON-RPC daemon](#json-rpc-daemon)
-    - [Grafana dashboard](#grafana-dashboard)
-- [FAQ](#faq)
-    - [Use as library](#use-as-library)
-    - [Default Ports and Firewalls](#default-ports-and-firewalls)
-        - [`erigon` ports](#erigon-ports)
-        - [`caplin` ports](#caplin-ports)
-        - [`beaconAPI` ports](#beaconapi-ports)
-        - [`shared` ports](#shared-ports)
-        - [`other` ports](#other-ports)
-        - [Hetzner expecting strict firewall rules](#hetzner-expecting-strict-firewall-rules)
-    - [Run as a separate user - `systemd` example](#run-as-a-separate-user---systemd-example)
-    - [Grab diagnostic for bug report](#grab-diagnostic-for-bug-report)
-    - [Run local devnet](#run-local-devnet)
-    - [Docker permissions error](#docker-permissions-error)
-    - [Public RPC](#public-rpc)
-    - [RaspberryPI](#raspberrypi)
-    - [Run all components by docker-compose](#run-all-components-by-docker-compose)
-        - [Optional: Setup dedicated user](#optional-setup-dedicated-user)
-        - [Environment Variables](#environment-variables)
-        - [Run](#run)
-    - [How to change db pagesize](#how-to-change-db-pagesize)
-    - [Erigon3 perf tricks](#erigon3-perf-tricks)
-    - [Windows](#windows)
-- [Getting in touch](#getting-in-touch)
-    - [Erigon Discord Server](#erigon-discord-server)
-    - [Reporting security issues/concerns](#reporting-security-issuesconcerns)
-- [Known issues](#known-issues)
-    - [`htop` shows incorrect memory usage](#htop-shows-incorrect-memory-usage)
-    - [Cloud network drives](#cloud-network-drives)
-    - [Filesystem's background features are expensive](#filesystems-background-features-are-expensive)
-    - [Gnome Tracker can kill Erigon](#gnome-tracker-can-kill-erigon)
-    - [the --mount option requires BuildKit error](#the---mount-option-requires-buildkit-error)
+## Overview
 
-<!--te-->
+Erigon is an implementation of Ethereum focused on efficiency and optimization. It provides both execution and consensus layer capabilities, designed to be highly performant while maintaining full compatibility with the Ethereum protocol.
 
 **Important defaults**: Erigon 3 is a Full Node by default. (Erigon 2 was an [Archive Node](https://ethereum.org/en/developers/docs/nodes-and-clients/archive-nodes/#what-is-an-archive-node) by default.)
 Set `--prune.mode` to "archive" if you need an archive node or to "minimal" if you run a validator on a small disk (not allowed to change after first start).
 
 <code>In-depth links are marked by the microscope sign (🔬) </code>
 
-System Requirements
-===================
+## 🖥️ System Requirements
 
-RAM: >=32GB, [Golang >= 1.23](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4. 64-bit
-architecture.
+### Hardware
+- **RAM**: 16GB minimum
+- **Storage**:
+  - **Type**: SSD or NVMe required (HDD not recommended)
+- **Space Requirements** (as of April 2024)
 
-- ArchiveNode Ethereum Mainnet: 2TB (April 2024). FullNode: 1.1TB (June 2024)
-- ArchiveNode Gnosis: 1.7TB (March 2024). FullNode: 300GB (June 2024)
-- ArchiveNode Polygon Mainnet: 4.1TB (April 2024). FullNode: 2Tb (April 2024)
+  | Network | Archive Node | Full Node |
+  |---------|-------------|------------|
+  | Ethereum | 2.0 TB | 1.1 TB |
+  | Gnosis | 1.7 TB | 300 GB |
+  | Polygon | 4.1 TB | 2.0 TB |
 
-SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind.
-Bear in mind that SSD performance deteriorates when close to capacity. CloudDrives (like
-gp3): Blocks Execution is slow
-on [cloud-network-drives](https://github.com/erigontech/erigon?tab=readme-ov-file#cloud-network-drives)
+### Software
+- **OS**: 64-bit architecture
+  - Linux: Kernel v4+
+- **Compiler**: GCC 10+ or Clang
+- **Go**: [Version 1.23 or higher](https://golang.org/doc/install)
 
-🔬 More details on [Erigon3 datadir size](#erigon3-datadir-size)
+> ⚠️ **Note**: SSD performance may degrade when near capacity. [Cloud network drives](https://github.com/erigontech/erigon?tab=readme-ov-file#cloud-network-drives) like GP3 may experience slower block execution.
 
-🔬 More details on what type of data stored [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space)
+🔬 Learn more about:
+- [Erigon3 datadir size](#erigon3-datadir-size)
+- [Data storage architecture](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space)
 
-Sync Times
-==========
+## ⚡ Sync Performance
 
-These are the  approximate sync times syncing from scratch to the tip of the chain (results may vary depending on hardware and bandwidth).
+Below are approximate sync times from genesis to chain tip. Results may vary based on hardware and network conditions:
 
+| Network  | Archive Mode | Full Mode | Minimal Mode |
+|----------|-------------|-----------|--------------|
+| Ethereum | 7h 55m | 4h 23m | 1h 41m |
+| Gnosis   | 2h 10m | 1h 5m  | 33m |
+| Polygon  | 45h | 21h 41m | 11h 54m |
 
-| Chain      | Archive         | Full           | Minimal        |
-|------------|-----------------|----------------|----------------|
-| Ethereum   | 7 Hours, 55 Minutes | 4 Hours, 23 Minutes | 1 Hour, 41 Minutes |
-| Gnosis     | 2 Hours, 10 Minutes | 1 Hour, 5 Minutes  | 33 Minutes      |
-| Polygon    | 1 Day, 21 Hours    | 21 Hours, 41 Minutes | 11 Hours, 54 Minutes |
+## 🚀 Getting Started
 
-Usage
-=====
+### Installation
 
-### Getting Started
+Choose one of the following installation methods:
 
-[Release Notes and Binaries](https://github.com/erigontech/erigon/releases)
+#### Pre-built Binaries
+- Download from our [Releases Page](https://github.com/erigontech/erigon/releases)
 
-Build latest release (this will be suitable for most users just wanting to run a node):
-
-```sh
+#### Build from Source
+```bash
+# Clone the repository
 git clone --branch release/<x.xx> --single-branch https://github.com/erigontech/erigon.git
 cd erigon
+
+# Build Erigon
 make erigon
+
+# Start the node
 ./build/bin/erigon
 ```
 
-Increase download speed by `--torrent.download.rate=20mb`. <code>🔬
-See [Downloader docs](./cmd/downloader/readme.md)</code>
+### Basic Usage
 
-Use `--datadir` to choose where to store data.
+```bash
+# Start Erigon with custom data directory
+erigon --datadir /path/to/data
 
-Use `--chain=gnosis` for [Gnosis Chain](https://www.gnosis.io/), `--chain=bor-mainnet` for Polygon Mainnet,
-and `--chain=amoy` for Polygon Amoy.
-For Gnosis Chain you need a [Consensus Layer](#beacon-chain-consensus-layer) client alongside
-Erigon (https://docs.gnosischain.com/category/step--3---run-consensus-client).
+# Increase download speed
+erigon --torrent.download.rate=10G
 
-Running `make help` will list and describe the convenience commands available in the [Makefile](./Makefile).
+# Run on different networks
+erigon --chain=gnosis      # Gnosis Chain
+erigon --chain=bor-mainnet # Polygon Mainnet
+erigon --chain=amoy        # Polygon Amoy
+```
+> 💡 **Tip**: Run `make help` to see all available build commands
 
-### Datadir structure
+### Testnets
+
+If you would like to give Erigon a try: a good option is to start syncing one of the public testnets, such as Sepolia.
+
+It syncs much quicker, and does not take much disk space:
 
 ```sh
-datadir        
-    chaindata     # "Recently-updated Latest State", "Recent History", "Recent Blocks"
-    snapshots     # contains `.seg` files - it's old blocks
-        domain    # Latest State
-        history   # Historical values 
-        idx       # InvertedIndices: can search/filtering/union/intersect them - to find historical data. like eth_getLogs or trace_transaction
-        accessor # Additional (generated) indices of history - have "random-touch" read-pattern. They can serve only `Get` requests (no search/filters).
-    txpool        # pending transactions. safe to remove.
-    nodes         # p2p peers. safe to remove.
-    temp          # used to sort data bigger than RAM. can grow to ~100gb. cleaned at startup.
-   
-# There is 4 domains: account, storage, code, commitment 
+git clone https://github.com/erigontech/erigon.git
+cd erigon
+make erigon
+./build/bin/erigon --datadir=<your_datadir> --chain=sepolia
 ```
 
-### History on cheap disk
+🔬 For detailed configuration options, see:
+- [Downloader Configuration](./cmd/downloader/readme.md)
+- [Chain-specific Setup](https://docs.gnosischain.com/category/step--3---run-consensus-client)
 
-If you can afford store datadir on 1 nvme-raid - great. If can't - it's possible to store history on cheap drive.
 
-```sh
-# place (or ln -s) `datadir` on slow disk. link some sub-folders to fast (low-latency) disk.
-# Example: what need link to fast disk to speedup execution
-datadir        
-    chaindata   # link to fast disk
-    snapshots   
-        domain    # link to fast disk
-        history   
-        idx       
-        accessor 
-    temp # buffers to sort data >> RAM. sequential-buffered IO - is slow-disk-friendly   
+## ✨ Key Features
 
-# Example: how to speedup history access: 
-#   - go step-by-step - first try store `accessor` on fast disk
-#   - if speed is not good enough: `idx`
-#   - if still not enough: `history` 
+### 🏃 High-Performance Sync
+- **OtterSync Technology**: Full node sync in ~3 hours on good network and hardware
+- **Optimized Initial Sync**: [Learn more about OtterSync](https://erigon.substack.com/p/erigon-3-alpha-2-introducing-blazingly)
+- **Built-in Consensus Client**: No need for extra setup, and comes with more performance. 
+
+### 📂 Advanced Storage Architecture
+
+#### Efficient State Management
+- **Flat KV Storage**: Simplified account and storage data structure
+- **Single Merkle Trie**: Unified trie for both accounts and storage
+- **Smart Preprocessing**: Reduces write amplification using temporary files
+
+🔬 **Technical Deep Dives**:
+- [Database Architecture](./docs/programmers_guide/db_walkthrough.MD)
+- [ETL Process](https://github.com/erigontech/erigon/blob/main/erigon-lib/etl/README.md)
+- [Staged Sync Design](/eth/stagedsync/README.md)
+
+### 🔌 Modular RPC System
+
+Components can run either embedded or as separate processes:
+
+```bash
+# Build components
+make erigon rpcdaemon
+
+# Run Erigon core
+./build/bin/erigon --datadir=/path/to/data --http=false
+
+# Run RPC daemon separately
+./build/bin/rpcdaemon --datadir=/path/to/data \
+    --http.api=eth,erigon,web3,net,debug,trace,txpool --ws
 ```
 
-### Erigon3 datadir size
+**Performance Tuning**:
+```bash
+# Increase throughput
+--rpc.batch.concurrency=100
+--rpc.batch.limit=100
+--db.read.concurrency=100
 
-```sh
-# eth-mainnet - archive - Nov 2024
-
-du -hsc /erigon/chaindata
-15G 	/erigon/chaindata
-
-du -hsc /erigon/snapshots/* 
-120G 	/erigon/snapshots/accessor
-300G	/erigon/snapshots/domain
-280G	/erigon/snapshots/history
-430G	/erigon/snapshots/idx
-2.3T	/erigon/snapshots
+# Optimize network
+--http.compression=false
+--ws.compression=false
 ```
 
-```sh
-# bor-mainnet - archive - Nov 2024
+## Data Directory Structure
 
-du -hsc /erigon/chaindata
-20G 	/erigon/chaindata
+### Core Components
 
-du -hsc /erigon/snapshots/* 
-360G	/erigon-data/snapshots/accessor
-1.1T	/erigon-data/snapshots/domain
-750G	/erigon-data/snapshots/history
-1.5T	/erigon-data/snapshots/idx
-4.9T	/erigon/snapshots
+```
+datadir/
+├── chaindata/     # Recent state and blocks
+├── snapshots/     # Historical data (.seg files)
+│   ├── domain/    # Latest state
+│   ├── history/   # Historical values
+│   ├── idx/       # Search indices (eth_getLogs, trace_transaction)
+│   └── accessor/  # Generated indices for Get requests
+├── txpool/        # Pending transactions (temporary)
+├── nodes/         # P2P peer data (temporary)
+└── temp/          # Sort buffer (~100GB, cleaned at startup)
 ```
 
-### Erigon3 changes from Erigon2
+> 💡 **Note**: Erigon operates across four domains: account, storage, code, and commitment
 
-- **Initial sync doesn't re-exec from 0:** downloading 99% LatestState and History
-- **Per-Transaction granularity of history** (Erigon2 had per-block). Means:
-    - Can execute 1 historical transaction - without executing it's block
+### Storage Optimization Guide
+
+#### Tiered Storage Setup
+
+For systems with mixed storage types (fast NVMe + slower drives):
+
+1. **Base Configuration**
+   ```
+   # Place datadir on slower storage, symlink critical paths to fast storage
+   datadir/
+   ├── chaindata -> /fast-disk/chaindata     # Required on fast storage
+   └── snapshots/
+       └── domain -> /fast-disk/domain       # Required on fast storage
+   ```
+
+2. **Progressive Performance Enhancement**
+   ```
+   # Add these to fast storage in order of impact:
+   1. datadir/snapshots/accessor/  # Immediate performance gain
+   2. datadir/snapshots/idx/       # Additional search performance
+   3. datadir/snapshots/history/   # Maximum historical query speed
+   ```
+
+#### Storage Requirements
+
+Reference directory sizes for Ethereum Mainnet (Archive Node, April 2024)
+
+| Component | Size | Description |
+|-----------|------|-------------|
+| chaindata | 15GB | Recent state |
+| snapshots/accessor | 120GB | Access indices |
+| snapshots/domain | 300GB | State data |
+| snapshots/history | 280GB | Historical data |
+| snapshots/idx | 430GB | Search indices |
+| **Total** | **~2.3TB** | |
+
+Reference directory sizes for Polygon PoS Mainnet (Archive Node, November 2024)
+
+| Component | Size       | Description |
+|-----------|------------|-------------|
+| chaindata | 20GB       | Recent state |
+| snapshots/accessor | 360GB      | Access indices |
+| snapshots/domain | 1.1TB      | State data |
+| snapshots/history | 750GB      | Historical data |
+| snapshots/idx | 1.5TB      | Search indices |
+| **Total** | **~4.9TB** | |
+
+## Erigon 3 changes
+
+- **No re-execution:** we download state and history
+- **Per-transaction history granularity** (Erigon2 was per-block).
+    - We can execute transactions in the middle of a block without executing preceding transactions.
     - If account X change V1->V2->V1 within 1 block (different transactions): `debug_getModifiedAccountsByNumber` return
       it
     - Erigon3 doesn't store Logs (aka Receipts) - it always re-executing historical txn (but it's cheaper)
-- **Validator mode**: added. `--internalcl` is enabled by default. to disable use `--externalcl`.
-- **Store most of data in immutable files (segments/snapshots):**
-    - can symlink/mount latest state to fast drive and history to cheap drive
-    - `chaindata` is less than `15gb`. It's ok to `rm -rf chaindata`. (to prevent grow: recommend `--batchSize <= 1G`)
+- **Validator mode**: `--internalcl` is enabled by default. To disable use `--externalcl`.
+- **Store most of the data in immutable files (segments/snapshots):**
+    - You can symlink/mount latest state to fast drive and history to cheap drive.
+    - `chaindata` is less than `15gb`. It's ok to `rm -rf chaindata`.
+    - To prevent growth it is recommended to keep `--batchSize <= 1G`
 - **`--prune` flags changed**: see `--prune.mode` (default: `full`, archive: `archive`, EIP-4444: `minimal`)
 - **Other changes:**
-    - ExecutionStage included many E2 stages: stage_hash_state, stage_trie, log_index, history_index, trace_index
-    - Restart doesn't loose much partial progress: `--sync.loop.block.limit=5_000` enabled by default
+    - Merge multiple E2 stages (stage_hash_state, stage_trie, log_index, history_index, trace_index) into ExecutionStage.
+    - Restart during sync doesn't lose much progress: `--sync.loop.block.limit=5_000` enabled by default
 
-### Logging
+## Logging
 
-_Flags:_
+Erigon provides flexible logging options for both console and disk output.
 
-- `verbosity`
-- `log.console.verbosity` (overriding alias for `verbosity`)
-- `log.json`
-- `log.console.json` (alias for `log.json`)
-- `log.dir.path`
-- `log.dir.prefix`
-- `log.dir.verbosity`
-- `log.dir.json`
+### Console Logging Flags
 
-In order to log only to the stdout/stderr the `--verbosity` (or `log.console.verbosity`) flag can be used to supply an
-int value specifying the highest output log level:
+- `--verbosity`
+- `--log.console.verbosity` (alias for `--verbosity`)
+- `--log.json`
+- `--log.console.json` (alias for `--log.json`)
+
+Use `--verbosity` (or `--log.console.verbosity`) to set the maximum log level for console output:
 
 ```
   LvlCrit = 0
@@ -248,50 +268,39 @@ int value specifying the highest output log level:
   LvlTrace = 5
 ```
 
-To set an output dir for logs to be collected on disk, please set `--log.dir.path` If you want to change the filename
-produced from `erigon` you should also set the `--log.dir.prefix` flag to an alternate name. The
-flag `--log.dir.verbosity` is
-also available to control the verbosity of this logging, with the same int value as above, or the string value e.g. '
-debug' or 'info'. Default verbosity is 'debug' (4), for disk logging.
+### Disk Logging Flags
 
-Log format can be set to json by the use of the boolean flags `log.json` or `log.console.json`, or for the disk
-output `--log.dir.json`.
+- `--log.dir.path`
+- `--log.dir.prefix`
+- `--log.dir.verbosity`
+- `--log.dir.json`
 
-### Modularity
+To enable logging to disk:
 
-Erigon by default is "all in one binary" solution, but it's possible start TxPool as separated processes.
-Same true about: JSON RPC layer (RPCDaemon), p2p layer (Sentry), history download layer (Downloader), consensus.
-Don't start services as separated processes unless you have clear reason for it: resource limiting, scale, replace by
-your own implementation, security.
-How to start Erigon's services as separated processes, see in [docker-compose.yml](./docker-compose.yml).
-Each service has own `./cmd/*/README.md` file.
-[Erigon Blog](https://erigon.substack.com/).
+1. Set `--log.dir.path` to the desired directory.
+2. (Optional) Use `--log.dir.prefix` to customize the output filename prefix (default: `erigon`).
+3. Set `--log.dir.verbosity` to control log level for disk output (accepts integer `0–5` or strings like `debug`, `info`). Default is `debug` (4).
+4. To use JSON format for file logs, enable `--log.dir.json`.
 
-### Embedded Consensus Layer
 
-Built-in consensus for Ethereum Mainnet, Sepolia, Holesky, Hoodi, Gnosis, Chiado.
-To use external Consensus Layer: `--externalcl`.
+## Modularity
 
-### Testnets
+By default, Erigon runs as a single binary with all components included. However, for advanced use cases (e.g., scaling, resource isolation, or custom implementations), you can run individual services separately:
+- TxPool
+- RPCDaemon (JSON-RPC server)
+- Sentry (P2P)
+- Downloader (Ottersync)
+- Consensus (Beacon client)
 
-If you would like to give Erigon a try: a good option is to start syncing one of the public testnets, Holesky (or Amoy).
-It syncs much quicker, and does not take so much disk space:
+> **Note:** Avoid splitting services unless it is required. Separation is intended for advanced users with specific requirements (e.g., resource control, modular architecture).
 
-```sh
-git clone https://github.com/erigontech/erigon.git
-cd erigon
-make erigon
-./build/bin/erigon --datadir=<your_datadir> --chain=holesky --prune.mode=full
-```
+To run services as individual processes, refer to each service's README under `./cmd/*/README.md`.
 
-Please note the `--datadir` option that allows you to store Erigon files in a non-default location. Name of the
-directory `--datadir` does not have to match the name of the chain in `--chain`.
-
-### Block Production (PoS Validator)
+## Block Production (PoS Validator)
 
 Block production is fully supported for Ethereum & Gnosis Chain. It is still experimental for Polygon.
 
-### Config Files TOML
+## Config Files TOML
 
 You can set Erigon flags through a TOML configuration file with the flag `--config`. The flags set in the
 configuration file can be overwritten by writing the flags directly on Erigon command line
@@ -382,91 +391,48 @@ Quote your path if it has spaces.
 
 <code> 🔬 Detailed explanation is [DEV_CHAIN](/docs/DEV_CHAIN.md).</code>
 
-Key features
-============
 
-### Faster Initial Sync
+🔬 [Complete RPC Documentation](./cmd/rpcdaemon/README.md)
 
-On good network bandwidth EthereumMainnet FullNode syncs in 3
-hours: [OtterSync](https://erigon.substack.com/p/erigon-3-alpha-2-introducing-blazingly) can sync
-
-### More Efficient State Storage
-
-**Flat KV storage.** Erigon uses a key-value database and storing accounts and storage in a simple way.
-
-<code> 🔬 See our detailed DB walkthrough [here](./docs/programmers_guide/db_walkthrough.MD).</code>
-
-**Preprocessing**. For some operations, Erigon uses temporary files to preprocess data before inserting it into the main
-DB. That reduces write amplification and DB inserts are orders of magnitude quicker.
-
-<code> 🔬 See our detailed ETL explanation [here](https://github.com/erigontech/erigon/blob/main/erigon-lib/etl/README.md).</code>
-
-**Plain state**
-
-**Single accounts/state trie**. Erigon uses a single Merkle trie for both accounts and the storage.
-
-<code> 🔬 [Staged Sync Readme](/eth/stagedsync/README.md)</code>
-
-### JSON-RPC daemon
-
-Most of Erigon's components (txpool, rpcdaemon, snapshots downloader, sentry, ...) can work inside Erigon and as
-independent process on same Server (or another Server). Example:
-
-```sh
-make erigon rpcdaemon
-./build/bin/erigon --datadir=/my --http=false
-# To run RPCDaemon as separated process: use same `--datadir` as Erigon
-./build/bin/rpcdaemon --datadir=/my --http.api=eth,erigon,web3,net,debug,trace,txpool --ws
+### 🕵 Monitoring
+```bash
+# Launch monitoring stack
+docker compose up prometheus grafana
 ```
+[🔬 Monitoring Setup Guide](./cmd/prometheus/Readme.md)
 
-- Supported JSON-RPC
-  calls: [eth](./cmd/rpcdaemon/commands/eth_api.go), [debug](./cmd/rpcdaemon/commands/debug_api.go), [net](./cmd/rpcdaemon/commands/net_api.go), [web3](./cmd/rpcdaemon/commands/web3_api.go)
-- increase throughput by: `--rpc.batch.concurrency`, `--rpc.batch.limit`, `--db.read.concurrency`
-- increase throughput by disabling: `--http.compression`, `--ws.compression`
+## ❓ FAQ
 
-<code>🔬 See [RPC-Daemon docs](./cmd/rpcdaemon/README.md)</code>
-
-### Grafana dashboard
-
-`docker compose up prometheus grafana`, [detailed docs](./cmd/prometheus/Readme.md).
-
-FAQ
-================
-
-### Use as library
-
-```
-# please use git branch name (or commit hash). don't use git tags
+### 📚 Using Erigon as a Library
+```go
+// Use git branch/commit, not tags
 go mod edit -replace github.com/erigontech/erigon-lib=github.com/erigontech/erigon/erigon-lib@5498f854e44df5c8f0804ff4f0747c0dec3caad5
 go get github.com/erigontech/erigon@main
 go mod tidy
 ```
 
-### Default Ports and Firewalls
+### 🔐 Network Configuration
 
-#### `erigon` ports
+#### Erigon Core Ports
 
-| Component | Port  | Protocol  | Purpose                     | Should Expose |
-|-----------|-------|-----------|-----------------------------|---------------|
-| engine    | 9090  | TCP       | gRPC Server                 | Private       |
-| engine    | 42069 | TCP & UDP | Snap sync (Bittorrent)      | Public        |
-| engine    | 8551  | TCP       | Engine API (JWT auth)       | Private       |
-| sentry    | 30303 | TCP & UDP | eth/68 peering              | Public        |
-| sentry    | 30304 | TCP & UDP | eth/67 peering              | Public        |
-| sentry    | 9091  | TCP       | incoming gRPC Connections   | Private       |
-| rpcdaemon | 8545  | TCP       | HTTP & WebSockets & GraphQL | Private       |
+| Component | Port | Protocol | Purpose | Exposure |
+|-----------|------|----------|----------|----------|
+| Engine | 9090 | TCP | gRPC Server | 🔒 Private |
+| Engine | 42069 | TCP/UDP | Snap Sync | 🔓 Public |
+| Engine | 8551 | TCP | Engine API (JWT) | 🔒 Private |
+| Sentry | 30303 | TCP/UDP | eth/68 Peering | 🔓 Public |
+| Sentry | 30304 | TCP/UDP | eth/67 Peering | 🔓 Public |
+| Sentry | 9091 | TCP | gRPC Inbound | 🔒 Private |
+| RPC | 8545 | TCP | HTTP/WS/GraphQL | 🔒 Private |
 
-Typically, 30303 and 30304 are exposed to the internet to allow incoming peering connections. 9090 is exposed only
-internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon).
-Port 8551 (JWT authenticated) is exposed only internally for [Engine API] JSON-RPC queries from the Consensus Layer
-node.
+> 💡 **Tip**: Only ports 30303, 30304, and 42069 need to be publicly accessible
 
-#### `caplin` ports
+#### Caplin Ports
 
-| Component | Port | Protocol | Purpose | Should Expose |
-|-----------|------|----------|---------|---------------|
-| sentinel  | 4000 | UDP      | Peering | Public        |
-| sentinel  | 4001 | TCP      | Peering | Public        |
+| Component | Port | Protocol | Purpose | Exposure |
+|-----------|------|----------|----------|----------|
+| Sentinel | 4000 | UDP | Peering | 🔓 Public |
+| Sentinel | 4001 | TCP | Peering | 🔓 Public |
 
 In order to configure the ports, use:
 
