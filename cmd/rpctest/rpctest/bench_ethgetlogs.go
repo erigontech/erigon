@@ -197,6 +197,7 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 						return fmt.Errorf("eth_getLogs: at blockNum=%d account %x not indexed", bn, l.Address)
 					}
 
+					//invariant2: if `log` visible without filter - then must be visible with filter. (in another words: `topic` must be indexed well)
 					if len(l.Topics) == 0 {
 						continue
 					}
@@ -206,7 +207,6 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 					}
 					sawTopic[l.Topics[0]] = struct{}{}
 
-					//invariant2: if `log` visible without filter - then must be visible with filter. (in another words: `topic` must be indexed well)
 					res = reqGen.Erigon("eth_getLogs", reqGen.getLogs1(prevBn, bn, l.Address, l.Topics[0]), &resp)
 					if res.Err != nil {
 						return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)
