@@ -818,8 +818,9 @@ type seedHash struct {
 func (d *Downloader) mainLoop(silent bool) error {
 	if d.webseedsDiscover {
 
-		// CornerCase: no peers -> no anoncments to trackers -> no magnetlink resolution (but magnetlink has filename)
-		// means we can start adding weebseeds without waiting for `<-t.GotInfo()`
+		// CornerCase: no peers -> no announcements to trackers -> no magnet
+		// link resolution (but magnet link has filename) means we can start
+		// adding WebSeeds without waiting for `<-t.GotInfo()`
 		d.wg.Add(1)
 		go func() {
 			defer d.wg.Done()
