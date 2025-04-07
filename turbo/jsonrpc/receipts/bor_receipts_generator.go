@@ -2,6 +2,7 @@ package receipts
 
 import (
 	"context"
+
 	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -72,6 +73,7 @@ func (g *BorGenerator) GenerateBorReceipt(ctx context.Context, tx kv.TemporalTx,
 	if err != nil {
 		return nil, err
 	}
+	receipt.BlockHash = block.Hash()
 
 	g.receiptCache.Add(block.Hash(), receipt.Copy())
 	return receipt, nil
