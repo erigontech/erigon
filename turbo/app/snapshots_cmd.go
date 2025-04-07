@@ -675,7 +675,7 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	if err := doBlockSnapshotsRangeCheck(snapDir, ".idx", "bodies"); err != nil {
 		return err
 	}
-	if err := doBlockSnapshotsRangeCheck(snapDir, ".idx", "transactions."); err != nil {
+	if err := doBlockSnapshotsRangeCheck(snapDir, ".idx", "transactions"); err != nil {
 		return fmt.Errorf("failed to check transactions idx: %w", err)
 	}
 	if err := doBlockSnapshotsRangeCheck(snapDir, ".idx", "transactions-to-block"); err != nil {
@@ -827,12 +827,13 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 		from uint64
 		to   uint64
 	}
+
 	intervals := []interval{}
 	if err := filepath.Walk(snapDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if !strings.HasSuffix(info.Name(), suffix) || !strings.Contains(info.Name(), snapType) {
+		if !strings.HasSuffix(info.Name(), suffix) || !strings.Contains(info.Name(), fmt.Sprint(".%s.", snapType)) {
 			return nil
 		}
 		res, _, ok := snaptype.ParseFileName(snapDir, info.Name())
