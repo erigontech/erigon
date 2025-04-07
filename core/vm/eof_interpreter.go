@@ -117,7 +117,7 @@ func (in *EVMInterpreter) RunEOF(contract *Contract, input []byte, readOnly bool
 				}
 			}
 
-			dynamicCost, err = operation.dynamicGas(in.evm, contract, locStack, mem, memorySize)
+			dynamicCost, err = operation.dynamicGas(in.evm, callContext, memorySize, _pc)
 			if err != nil {
 				return nil, fmt.Errorf("%w: %v", ErrOutOfGas, err)
 			}
@@ -228,7 +228,7 @@ func (in *EVMInterpreter) runNoDebug(contract *Contract, input []byte, readOnly 
 				}
 			}
 
-			dynamicCost, err = operation.dynamicGas(in.evm, contract, locStack, mem, memorySize)
+			dynamicCost, err = operation.dynamicGas(in.evm, callContext, memorySize, _pc)
 			if err != nil {
 				return nil, fmt.Errorf("%w: %v", ErrOutOfGas, err)
 			}

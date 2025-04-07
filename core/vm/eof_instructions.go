@@ -207,16 +207,6 @@ func opEOFCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 	_size := scope.EofHeader.containerSizes[initContainerIdx]
 	initContainer := scope.Contract.Code[_offset : _offset+_size]
 
-	// TODO(racytech): this should be done in `dynamicGas` function
-	// some fuzzing tests are failing due to gas missmatch
-	// it will require refactoring of `dynamicGas`
-	hashingCharge := uint64(6 * ((len(initContainer) + 31) / 32))
-	if ok := scope.Contract.UseGas(hashingCharge, tracing.GasChangeCallContractEOFCreation); !ok {
-		return nil, ErrOutOfGas
-	}
-
-	gas = scope.Contract.Gas
-
 	gas -= gas / 64
 	if ok := scope.Contract.UseGas(gas, tracing.GasChangeCallContractEOFCreation); !ok {
 		return nil, ErrOutOfGas

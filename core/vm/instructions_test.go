@@ -830,9 +830,10 @@ func TestOpMCopy(t *testing.T) {
 				t.Error(ErrGasUintOverflow)
 			}
 		}
+		scope := &ScopeContext{mem, stack, nil, nil, nil, 0}
 		// and the dynamic cost
 		var haveGas uint64
-		if dynamicCost, err := gasMcopy(env, nil, stack, mem, memorySize); err != nil {
+		if dynamicCost, err := gasMcopy(env, scope, memorySize, 0); err != nil {
 			t.Error(err)
 		} else {
 			haveGas = GasFastestStep + dynamicCost
