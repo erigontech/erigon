@@ -23,16 +23,16 @@ func (r *BorSpanRootRelation) RootNum2Num(from state.RootNum, tx kv.Tx) (state.N
 }
 
 func setupBorSpans(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) (AppendableId, *state.Appendable[UnmarkedTxI]) {
-	minAggStep := uint64(10)
+	stepSize := uint64(10)
 	name := "borspans"
 	borspanId := registerEntityWithSnapshotConfig(dirs, name, &ae.SnapshotConfig{
 		SnapshotCreationConfig: &ae.SnapshotCreationConfig{
-			RootNumPerStep: minAggStep,
+			RootNumPerStep: stepSize,
 			MergeStages:    []uint64{200, 400},
 			MinimumSize:    10,
 			SafetyMargin:   5,
 		},
-		Schema: ae.NewE2SnapSchemaWithStep(dirs, name, []string{name}, minAggStep),
+		Schema: ae.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize),
 	})
 	require.Equal(t, ae.AppendableId(0), borspanId)
 

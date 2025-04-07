@@ -53,7 +53,11 @@ const (
 )
 
 func (a AccessorExtension) IsSet() bool {
-	return a != ""
+	switch a {
+	case AccessorExtensionIdx, AccessorExtensionKvi, AccessorExtensionVi, AccessorExtensionEfi:
+		return true
+	}
+	return false
 }
 
 func (a AccessorExtension) String() string {
