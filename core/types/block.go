@@ -1011,6 +1011,7 @@ func (bb *Body) DecodeRLP(s *rlp.Stream) error {
 // the given txs, uncles, receipts, and withdrawals.
 func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt, withdrawals []*Withdrawal) *Block {
 	b := &Block{header: CopyHeader(header)}
+	b.header.mutable = true // temporarily make header mutable for modifications below
 
 	// TODO: panic if len(txs) != len(receipts)
 	if len(txs) == 0 {
@@ -1055,6 +1056,8 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 	}
 
 	b.header.ParentBeaconBlockRoot = header.ParentBeaconBlockRoot
+	hash := b.header.Hash() // recalculate since the modifications above may invalidate the copied cached hash
+	b.header.hash.Store(&hash)
 	b.header.mutable = false //Force immutability of block and header. Use `NewBlockForAsembling` if you need mutable block
 	return b
 }
@@ -1470,6 +1473,7 @@ func (b *Block) Copy() *Block {
 func (b *Block) WithSeal(header *Header) *Block {
 	headerCopy := CopyHeader(header)
 	headerCopy.mutable = false
+	headerCopy.hash.Store(nil) // invalidate cached hash
 	return &Block{
 		header:       headerCopy,
 		transactions: b.transactions,
