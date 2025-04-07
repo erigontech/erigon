@@ -19,6 +19,7 @@ package bridge
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -68,6 +69,34 @@ func NewReader(store Store, logger log.Logger, stateReceiverContractAddress libc
 
 func (r *Reader) Prepare(ctx context.Context) error {
 	return r.store.Prepare(ctx)
+}
+
+func (r *Reader) EventsWithinTime(ctx context.Context, timeFrom, timeTo time.Time) ([]*types.Message, error) {
+	events, err := r.store.EventsByTimeframe(ctx, uint64(timeFrom.Unix()), uint64(timeTo.Unix()))
+	if err != nil {
+		return nil, err
+	}
+
+	eventsRaw := make([]*types.Message, 0, len(events))
+
+	// convert to message
+	for _, event := range events {
+		msg := types.NewMessage(
+			state.SystemAddress,
+			&r.stateClientAddress,
+			0, u256.Num0,
+			core.SysCallGasLimit,
+			u256.Num0,
+			nil, nil,
+			event, nil, false,
+			true,
+			nil,
+		)
+
+		eventsRaw = append(eventsRaw, msg)
+	}
+
+	return eventsRaw, nil
 }
 
 // Events returns all sync events at blockNum
