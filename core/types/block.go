@@ -583,7 +583,10 @@ type headerMarshaling struct {
 // RLP encoding.
 func (h *Header) Hash() (hash libcommon.Hash) {
 	if h.mutable {
-		return libcommon.Hash{}
+		return rlpHash(h)
+	}
+	if hash := h.hash.Load(); hash != nil {
+		return *hash
 	}
 	hash = rlpHash(h)
 	h.hash.Store(&hash)
