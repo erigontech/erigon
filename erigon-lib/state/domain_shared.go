@@ -390,6 +390,7 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error)
 	}
 
 	if !aggTx.a.commitmentValuesTransform || bytes.Equal(prefix, keyCommitmentState) {
+		sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), v)
 		return v, endTx / sd.StepSize(), nil
 	}
 
@@ -398,6 +399,7 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error)
 	if err != nil {
 		return nil, 0, err
 	}
+	sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), rv)
 	return rv, endTx / sd.StepSize(), nil
 }
 
@@ -943,20 +945,20 @@ func (sdc *SharedDomainsCommitmentContext) ResetBranchCache() {
 }
 
 func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, error) {
-	prefS := toStringZeroCopy(pref)
-
+	//prefS := toStringZeroCopy(pref)
+	//
+	//cached, ok := sdc.branches[prefS]
+	//if ok {
+	//	sdc.mu.Unlock()
+	//	// cached value is already transformed/clean to read.
+	//	// Cache should ResetBranchCache after each commitment computation
+	//	return cached.data, cached.step, nil
+	//}
+	//
 	sdc.mu.Lock()
-	cached, ok := sdc.branches[prefS]
-	if ok {
-		sdc.mu.Unlock()
-		// cached value is already transformed/clean to read.
-		// Cache should ResetBranchCache after each commitment computation
-		return cached.data, cached.step, nil
-	}
-
 	v, step, err := sdc.sharedDomains.LatestCommitment(pref)
+	sdc.mu.Unlock()
 	if err != nil {
-		sdc.mu.Unlock()
 		return nil, 0, fmt.Errorf("branch failed: %w", err)
 	}
 	if sdc.sharedDomains.trace {
@@ -964,8 +966,8 @@ func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, 
 	}
 	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update, if any, so
 	// cache branch until ResetBranchCache called
-	sdc.branches[prefS] = cachedBranch{data: v, step: step}
-	sdc.mu.Unlock()
+	//sdc.branches[prefS] = cachedBranch{data: v, step: step}
+	//sdc.mu.Unlock()
 
 	if len(v) == 0 {
 		return nil, 0, nil
@@ -979,7 +981,7 @@ func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte,
 		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
 	}
 	sdc.mu.Lock()
-	sdc.branches[prefixS] = cachedBranch{data: data, step: prevStep}
+	//sdc.branches[prefixS] = cachedBranch{data: data, step: prevStep}
 	defer sdc.mu.Unlock()
 
 	return sdc.sharedDomains.updateCommitmentData(prefixS, data, prevData, prevStep)
