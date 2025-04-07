@@ -93,7 +93,7 @@ func opJumpf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 	if scope.Stack.Len()+sectionMaxStack-inputs > 1024 {
 		return nil, fmt.Errorf("JUMPF stack overflow: StackLen: %v, sectionMaxStack: %v, inputs: %v", scope.Stack.Len(), sectionMaxStack, inputs)
 	}
-
+	scope.SectionIdx = uint64(idx)
 	return nil, nil
 }
 
