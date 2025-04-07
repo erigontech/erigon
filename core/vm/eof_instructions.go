@@ -285,13 +285,17 @@ func opReturnCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) 
 func opReturnDataLoad(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 
 	var index256 = scope.Stack.Peek()
-	start := int(index256.Uint64())
+	// _, overflow := index256.Uint64WithOverflow()
+	// if overflow {
+	// 	// TODO: can this be the case?
+	// }
+	start := index256.Uint64()
 	b := [32]byte{}
-	if len(interpreter.returnData) < start {
+	if uint64(len(interpreter.returnData)) < start {
 		index256.SetBytes32(b[:]) // set zero
 	} else {
-		end := min(start+32, len(interpreter.returnData))
-		for i := 0; i < end-start; i++ {
+		end := min(start+32, uint64(len(interpreter.returnData)))
+		for i := uint64(0); i < end-start; i++ {
 			b[i] = interpreter.returnData[start+i]
 		}
 		index256.SetBytes32(b[:])
