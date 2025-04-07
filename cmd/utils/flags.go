@@ -621,6 +621,12 @@ var (
 		Value: ethconfig.Defaults.GPO.MaxPrice.Int64(),
 	}
 
+	// CHANGE(taiko): add `--gpo.defaultprice` flag.
+	GpoDefaultGasPriceFlag = &cli.Int64Flag{
+		Name:  "gpo.defaultprice",
+		Usage: "Default gas price",
+	}
+
 	// Metrics flags
 	MetricsEnabledFlag = cli.BoolFlag{
 		Name:  "metrics",
@@ -812,6 +818,12 @@ var (
 	PolygonSyncStageFlag = cli.BoolFlag{
 		Name:  "polygon.sync.stage",
 		Usage: "Enabling syncing with a stage that uses the polygon sync component",
+	}
+
+	// CHANGE(taiko): Enable taiko
+	TaikoFlag = cli.BoolFlag{
+		Name:  "taiko",
+		Usage: "Taiko network",
 	}
 
 	AAFlag = cli.BoolFlag{
@@ -1743,6 +1755,13 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.C
 	cfg.PolygonPosSingleSlotFinalityBlockAt = ctx.Uint64(PolygonPosSingleSlotFinalityBlockAtFlag.Name)
 }
 
+// CHANGE(taiko): enable taiko
+func setTaikoConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.Config, logger log.Logger) {
+	if ctx.IsSet(TaikoFlag.Name) {
+		cfg.Genesis = core.TaikoGenesisBlock(cfg.NetworkID)
+	}
+}
+
 func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
 	cfg.Enabled = ctx.IsSet(MiningEnabledFlag.Name)
 	cfg.EnabledPOS = !ctx.IsSet(ProposingDisableFlag.Name)
@@ -1952,6 +1971,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
 	setBorConfig(ctx, cfg, nodeConfig, logger)
+	setTaikoConfig(ctx, cfg, nodeConfig, logger)
 	setSilkworm(ctx, cfg)
 	if err := setBeaconAPI(ctx, cfg); err != nil {
 		log.Error("Failed to set beacon API", "err", err)
