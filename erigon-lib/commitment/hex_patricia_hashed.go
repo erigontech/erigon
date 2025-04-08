@@ -2026,7 +2026,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	hph.currentCommitmentMetrics.Updates.Store(updates.Size())
 	defer func() {
 		logEvery.Stop()
-		hph.currentCommitmentMetrics.TotalProcessingTime = time.Since(start)
+		hph.currentCommitmentMetrics.TotalProcessingTimeInc(start)
 		writeMetricsToCSV(&hph.currentCommitmentMetrics)
 	}()
 	//hph.trace = true
@@ -2047,29 +2047,19 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		}
 		// Keep folding until the currentKey is the prefix of the key we modify
 		for hph.needFolding(hashedKey) {
-			var startFold time.Time
-			if collectMetrics {
-				startFold = time.Now()
-			}
+			startFold := hph.currentCommitmentMetrics.Now()
 			if err := hph.fold(); err != nil {
 				return fmt.Errorf("fold: %w", err)
 			}
-			if collectMetrics {
-				hph.currentCommitmentMetrics.TotalFoldingTime += time.Since(startFold)
-			}
+			hph.currentCommitmentMetrics.TotalFoldingTimeInc(startFold)
 		}
 		// Now unfold until we step on an empty cell
 		for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
-			var startUnfold time.Time
-			if collectMetrics {
-				startUnfold = time.Now()
-			}
+			startUnfold := hph.currentCommitmentMetrics.Now()
 			if err := hph.unfold(hashedKey, unfolding); err != nil {
 				return fmt.Errorf("unfold: %w", err)
 			}
-			if collectMetrics {
-				hph.currentCommitmentMetrics.TotalFoldingTime += time.Since(startUnfold)
-			}
+			hph.currentCommitmentMetrics.TotalUnfoldingTimeInc(startUnfold)
 		}
 
 		if len(plainKey) == hph.accountKeyLen {

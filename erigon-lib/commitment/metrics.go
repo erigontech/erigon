@@ -39,6 +39,31 @@ type ProcessCommitment struct {
 	TotalProcessingTime time.Duration
 }
 
+func (processCommitment *ProcessCommitment) Now() time.Time {
+	if collectMetrics {
+		return time.Now()
+	}
+	return time.Time{}
+}
+
+func (ProcessCommitment *ProcessCommitment) TotalUnfoldingTimeInc(t time.Time) {
+	if collectMetrics {
+		ProcessCommitment.TotalUnfoldingTime += time.Since(t)
+	}
+}
+
+func (ProcessCommitment *ProcessCommitment) TotalProcessingTimeInc(t time.Time) {
+	if collectMetrics {
+		ProcessCommitment.TotalProcessingTime += time.Since(t)
+	}
+}
+
+func (ProcessCommitment *ProcessCommitment) TotalFoldingTimeInc(t time.Time) {
+	if collectMetrics {
+		ProcessCommitment.TotalFoldingTime += time.Since(t)
+	}
+}
+
 func (processCommitment *ProcessCommitment) Reset() {
 	processCommitment = &ProcessCommitment{}
 }
