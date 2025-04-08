@@ -223,7 +223,7 @@ func TestAPI(t *testing.T) {
 					select {
 					case out <- common.Copy(v):
 					case <-ctx.Done():
-						t.Log("Context done while sending result")
+						panic("Context done while sending result")
 					}
 					return nil
 				})
@@ -273,7 +273,7 @@ func TestAPI(t *testing.T) {
 					panic(fmt.Sprintf("expected nil, got: %x", v))
 				}
 			case <-ctx.Done():
-				t.Log("Context done while checking res1")
+				panic("Context done while checking res1")
 			}
 		}
 		for i := range res2 {
@@ -283,7 +283,7 @@ func TestAPI(t *testing.T) {
 					panic(fmt.Sprintf("expected: %x, got: %x", account1Enc, v))
 				}
 			case <-ctx.Done():
-				t.Log("Context done while checking res2")
+				panic("Context done while checking res2")
 			}
 		}
 
@@ -322,7 +322,7 @@ func TestAPI(t *testing.T) {
 					panic(fmt.Sprintf("expected: %x, got: %x", account2Enc, v))
 				}
 			case <-ctx.Done():
-				t.Log("Context done while checking res3")
+				panic("Context done while checking res3")
 			}
 		}
 		for i := range res4 {
@@ -332,7 +332,7 @@ func TestAPI(t *testing.T) {
 					panic(fmt.Sprintf("expected: %x, got: %x", account1Enc, v))
 				}
 			case <-ctx.Done():
-				t.Log("Context done while checking res4")
+				panic("Context done while checking res4")
 			}
 		}
 		fmt.Printf("done2: \n")
@@ -367,7 +367,7 @@ func TestAPI(t *testing.T) {
 					panic(fmt.Sprintf("expected: %x, got: %x", account2Enc, v))
 				}
 			case <-ctx.Done():
-				t.Log("Context done while checking res5")
+				panic("Context done while checking res5")
 			}
 		}
 		fmt.Printf("-----21\n")
@@ -379,7 +379,7 @@ func TestAPI(t *testing.T) {
 					panic(fmt.Sprintf("expected: %x, got: %x", account1Enc, v))
 				}
 			case <-ctx.Done():
-				t.Log("Context done while checking res6")
+				panic("Context done while checking res6")
 			}
 		}
 		fmt.Printf("done3: \n")
@@ -435,7 +435,7 @@ func TestAPI(t *testing.T) {
 					panic(fmt.Sprintf("expected: %x, got: %x", account4Enc, v))
 				}
 			case <-ctx.Done():
-				t.Log("Context done while checking res7")
+				panic("Context done while checking res7")
 			}
 		}
 		for i := range res8 {
@@ -445,7 +445,7 @@ func TestAPI(t *testing.T) {
 					panic(fmt.Sprintf("expected: %x, got: %x", account1Enc, v))
 				}
 			case <-ctx.Done():
-				t.Log("Context done while checking res8")
+				panic("Context done while checking res8")
 			}
 		}
 		fmt.Printf("done4: \n")
