@@ -49,6 +49,27 @@ type SnapshotConfig struct {
 	Schema SnapNameSchema
 }
 
+func NewSnapshotConfig(cfg *SnapshotCreationConfig, schema SnapNameSchema) *SnapshotConfig {
+	c := &SnapshotConfig{
+		SnapshotCreationConfig: cfg,
+		Schema:                 schema,
+	}
+	c.validate()
+	return c
+}
+
+func (s *SnapshotConfig) validate() {
+	// some validation
+	for i := range s.MergeStages {
+		if s.MergeStages[i]%s.RootNumPerStep != 0 {
+			panic(fmt.Sprintf("MergeStages[%d] must be divisible by EntitiesPerStep", i))
+		}
+	}
+	if s.MinimumSize%s.RootNumPerStep != 0 {
+		panic(fmt.Sprintf("MinimumSize(%d) must be divisible by EntitiesPerStep(%d)", s.MinimumSize, s.RootNumPerStep))
+	}
+}
+
 func (s *SnapshotConfig) StepsInFrozenFile() uint64 {
 	return s.MergeStages[len(s.MergeStages)-1] / s.RootNumPerStep
 }
@@ -64,16 +85,6 @@ func (s *SnapshotConfig) LoadPreverified(pre snapcfg.Preverified) {
 			continue
 		}
 		s.PreverifiedParsed = append(s.PreverifiedParsed, res)
-	}
-
-	// some validation
-	for i := range s.MergeStages {
-		if s.MergeStages[i]%s.RootNumPerStep != 0 {
-			panic(fmt.Sprintf("MergeStages[%d] must be divisible by EntitiesPerStep", i))
-		}
-	}
-	if s.MinimumSize%s.RootNumPerStep != 0 {
-		panic(fmt.Sprintf("MinimumSize(%d) must be divisible by EntitiesPerStep(%d)", s.MinimumSize, s.RootNumPerStep))
 	}
 }
 

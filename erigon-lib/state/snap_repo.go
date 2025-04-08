@@ -29,7 +29,6 @@ type SnapshotRepo struct {
 	dirtyFiles *btree2.BTreeG[*filesItem]
 	_visible   visibleFiles
 	name       string
-	dir        string
 
 	cfg       *ae.SnapshotConfig
 	parser    ae.SnapNameSchema
@@ -40,14 +39,17 @@ type SnapshotRepo struct {
 }
 
 func NewSnapshotRepoForAppendable(id AppendableId, logger log.Logger) *SnapshotRepo {
+	return NewSnapshotRepo(id.Name(), id.SnapshotConfig(), logger)
+}
+
+func NewSnapshotRepo(name string, cfg *ae.SnapshotConfig, logger log.Logger) *SnapshotRepo {
 	f := &SnapshotRepo{
 		dirtyFiles: btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		name:       id.Name(),
-		dir:        id.SnapshotDir(),
-		cfg:        id.SnapshotConfig(),
-		parser:     id.SnapshotConfig().Schema,
-		stepSize:   id.SnapshotConfig().RootNumPerStep,
-		accessors:  id.SnapshotConfig().Schema.AccessorList(),
+		name:       name,
+		cfg:        cfg,
+		parser:     cfg.Schema,
+		stepSize:   cfg.RootNumPerStep,
+		accessors:  cfg.Schema.AccessorList(),
 		logger:     logger,
 	}
 	return f
@@ -56,7 +58,7 @@ func NewSnapshotRepoForAppendable(id AppendableId, logger log.Logger) *SnapshotR
 func (f *SnapshotRepo) OpenFolder() error {
 	// this only sets up dirtyfiles, not visible files.
 	// there is no integrity checks done here.
-	files, err := filesFromDir(f.dir)
+	files, err := filesFromDir(f.parser.DataDirectory())
 	if err != nil {
 		return err
 	}
@@ -301,7 +303,7 @@ func (f *SnapshotRepo) closeWhatNotInList(fNames []string) {
 	}
 }
 
-func (f *SnapshotRepo) scanDirtyFiles(aps []string) (res []*filesItem) {
+func (f *SnapshotRepo) scanDirtyFiles(aps []string) {
 	if f.stepSize == 0 {
 		panic(fmt.Sprintf("step size if 0 for %s", f.parser.DataTag()))
 	}
@@ -312,9 +314,12 @@ func (f *SnapshotRepo) scanDirtyFiles(aps []string) (res []*filesItem) {
 			f.logger.Trace("can't parse file name", "file", ap)
 			continue
 		}
-		res = append(res, newFilesItemWithSnapConfig(fileInfo.From, fileInfo.To, f.cfg))
+		dirtyFile := newFilesItemWithSnapConfig(fileInfo.From, fileInfo.To, f.cfg)
+
+		if _, has := f.dirtyFiles.Get(dirtyFile); !has {
+			f.dirtyFiles.Set(dirtyFile)
+		}
 	}
-	return res
 }
 
 // determine freezing ranges, given snapshot creation config

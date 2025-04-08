@@ -30,15 +30,13 @@ type UnmarkedTxI = state.UnmarkedTxI
 
 func registerEntity(dirs datadir.Dirs, name string) ae.AppendableId {
 	stepSize := uint64(10)
-	return registerEntityWithSnapshotConfig(dirs, name, &ae.SnapshotConfig{
-		SnapshotCreationConfig: &ae.SnapshotCreationConfig{
-			RootNumPerStep: 10,
-			MergeStages:    []uint64{20, 40},
-			MinimumSize:    10,
-			SafetyMargin:   5,
-		},
-		Schema: ae.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize),
-	})
+	return registerEntityWithSnapshotConfig(dirs, name, ae.NewSnapshotConfig(&ae.SnapshotCreationConfig{
+		RootNumPerStep: 10,
+		MergeStages:    []uint64{20, 40},
+		MinimumSize:    10,
+		SafetyMargin:   5,
+	}, ae.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize)))
+
 }
 
 func registerEntityWithSnapshotConfig(dirs datadir.Dirs, name string, cfg *ae.SnapshotConfig) ae.AppendableId {
