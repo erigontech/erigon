@@ -678,6 +678,7 @@ Loop:
 
 		mxExecBlocks.Add(1)
 
+		fmt.Println(cfg.syncCfg.KeepExecutionProofs)
 		if shouldGenerateChangesets || cfg.syncCfg.KeepExecutionProofs {
 			aggTx := executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 			aggTx.RestrictSubsetFileDeletions(true)
