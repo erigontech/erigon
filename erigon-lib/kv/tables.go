@@ -537,7 +537,6 @@ var ChaindataTablesCfg = TableCfg{
 		DupFromLen:                60,
 		DupToLen:                  28,
 	},
-	CallTraceSet: {Flags: DupSort},
 
 	TblAccountVals:           {Flags: DupSort},
 	TblAccountHistoryKeys:    {Flags: DupSort},
