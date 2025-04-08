@@ -740,6 +740,7 @@ func (hph *HexPatriciaHashed) computeCellHashWithStorage(cell *cell, depth int, 
 			}
 		} else {
 			if !cell.loaded.storage() {
+				CurrentCommitmentMetrics.LoadStorage++
 				update, err := hph.ctx.Storage(cell.storageAddr[:cell.storageAddrLen])
 				if err != nil {
 					return nil, storageRootHashIsSet, nil, err
@@ -822,6 +823,7 @@ func (hph *HexPatriciaHashed) computeCellHashWithStorage(cell *cell, depth int, 
 				return res, storageRootHashIsSet, storageRootHash[:], nil
 			}
 			// storage root update or extension update could invalidate older stateHash, so we need to reload state
+			CurrentCommitmentMetrics.LoadAccount++
 			update, err := hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
 			if err != nil {
 				return nil, storageRootHashIsSet, storageRootHash[:], err
@@ -972,6 +974,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 				return append(append(buf[:0], byte(160)), cell.stateHash[:cell.stateHashLen]...), nil
 			}
 			// storage root update or extension update could invalidate older stateHash, so we need to reload state
+			CurrentCommitmentMetrics.LoadAccount++
 			update, err := hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
 			if err != nil {
 				return nil, err
@@ -1130,6 +1133,7 @@ func (hph *HexPatriciaHashed) createAccountNode(c *cell, row int, hashedKey []by
 	if err != nil {
 		return nil, err
 	}
+	CurrentCommitmentMetrics.LoadAccount++
 	accountUpdate, err := hph.ctx.Account(c.accountAddr[:c.accountAddrLen])
 	if err != nil {
 		return nil, err
@@ -1207,6 +1211,7 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[common.Hash
 			nextNode = &trie.ShortNode{Key: extensionKey} // Value will be in the next iteration
 			if keyPos+1 == len(hashedKey) {
 				if cellToExpand.storageAddrLen > 0 {
+					CurrentCommitmentMetrics.LoadStorage++
 					storageUpdate, err := hph.ctx.Storage(cellToExpand.storageAddr[:cellToExpand.storageAddrLen])
 					if err != nil {
 						return nil, err
@@ -1230,6 +1235,7 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[common.Hash
 				}
 			}
 		} else if cellToExpand.storageAddrLen > 0 { // storage cell
+			CurrentCommitmentMetrics.LoadStorage++
 			storageUpdate, err := hph.ctx.Storage(cellToExpand.storageAddr[:cellToExpand.storageAddrLen])
 			if err != nil {
 				return nil, err
@@ -1301,6 +1307,7 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[common.Hash
 // unfoldBranchNode returns true if unfolding has been done
 func (hph *HexPatriciaHashed) unfoldBranchNode(row, depth int, deleted bool) (bool, error) {
 	key := hexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
+	CurrentCommitmentMetrics.LoadBranch++
 	branchData, fileEndTxNum, err := hph.ctx.Branch(key)
 	if err != nil {
 		return false, err
@@ -1711,6 +1718,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 
 			if cell.stateHashLen == 0 { // load state if needed
 				if !cell.loaded.account() && cell.accountAddrLen > 0 {
+					CurrentCommitmentMetrics.LoadAccount++
 					upd, err := hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
 					if err != nil {
 						return fmt.Errorf("failed to get account: %w", err)
@@ -1721,6 +1729,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 					counters.accLoaded++
 				}
 				if !cell.loaded.storage() && cell.storageAddrLen > 0 {
+					CurrentCommitmentMetrics.LoadStorage++
 					upd, err := hph.ctx.Storage(cell.storageAddr[:cell.storageAddrLen])
 					if err != nil {
 						return fmt.Errorf("failed to get storage: %w", err)
@@ -1917,6 +1926,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		// fmt.Printf("\n%d/%d) plainKey [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
 
 		if len(plainKey) == 20 { // account
+			CurrentCommitmentMetrics.LoadAccount++
 			account, err := hph.ctx.Account(plainKey)
 			if err != nil {
 				return fmt.Errorf("account with plainkey=%x not found: %w", plainKey, err)
@@ -1925,6 +1935,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 				fmt.Printf("account with plainKey=%x, addrHash=%x FOUND = %v\n", plainKey, addrHash, account)
 			}
 		} else {
+			CurrentCommitmentMetrics.LoadStorage++
 			storage, err := hph.ctx.Storage(plainKey)
 			if err != nil {
 				return fmt.Errorf("storage with plainkey=%x not found: %w", plainKey, err)
@@ -2069,11 +2080,13 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		if stateUpdate == nil {
 			// Update the cell
 			if len(plainKey) == hph.accountKeyLen {
+				CurrentCommitmentMetrics.LoadAccount++
 				update, err = hph.ctx.Account(plainKey)
 				if err != nil {
 					return fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
 				}
 			} else {
+				CurrentCommitmentMetrics.LoadStorage++
 				update, err = hph.ctx.Storage(plainKey)
 				if err != nil {
 					return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
@@ -2467,6 +2480,7 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 			panic("nil ctx")
 		}
 
+		CurrentCommitmentMetrics.LoadAccount++
 		update, err := hph.ctx.Account(hph.root.accountAddr[:hph.root.accountAddrLen])
 		if err != nil {
 			return err
@@ -2477,6 +2491,7 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 		if hph.ctx == nil {
 			panic("nil ctx")
 		}
+		CurrentCommitmentMetrics.LoadStorage++
 		update, err := hph.ctx.Storage(hph.root.storageAddr[:hph.root.storageAddrLen])
 		if err != nil {
 			return err

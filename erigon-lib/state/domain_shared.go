@@ -932,7 +932,6 @@ func (sdc *SharedDomainsCommitmentContext) ResetBranchCache() {
 }
 
 func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, error) {
-	commitment.CurrentCommitmentMetrics.LoadBranch++
 	prefS := toStringZeroCopy(pref)
 	cached, ok := sdc.branches[prefS]
 	if ok {
@@ -1013,7 +1012,6 @@ func (sdc *SharedDomainsCommitmentContext) readStorage(plainKey []byte) (enc []b
 }
 
 func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitment.Update, err error) {
-	commitment.CurrentCommitmentMetrics.LoadAccount++
 	encAccount, err := sdc.readAccount(plainKey)
 	if err != nil {
 		return nil, err
@@ -1064,7 +1062,6 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 }
 
 func (sdc *SharedDomainsCommitmentContext) Storage(plainKey []byte) (u *commitment.Update, err error) {
-	commitment.CurrentCommitmentMetrics.LoadStorage++
 	// Look in the summary table first
 	enc, err := sdc.readStorage(plainKey)
 	if err != nil {
