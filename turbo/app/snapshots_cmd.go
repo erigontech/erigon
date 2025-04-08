@@ -833,7 +833,7 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 		if err != nil {
 			return err
 		}
-		if !strings.HasSuffix(info.Name(), suffix) || !strings.Contains(info.Name(), fmt.Sprintf("%s.", snapType)) {
+		if !strings.HasSuffix(info.Name(), suffix) || !strings.Contains(info.Name(), snapType+".") {
 			return nil
 		}
 		res, _, ok := snaptype.ParseFileName(snapDir, info.Name())
