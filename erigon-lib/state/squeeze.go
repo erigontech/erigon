@@ -509,7 +509,9 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 			ac.Close()
 			domains.Close()
 
+			a.dirtyFilesLock.Lock()
 			a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
+			a.dirtyFilesLock.Unlock()
 			if rwTx != nil {
 				rwTx.Rollback()
 				rwTx = nil
