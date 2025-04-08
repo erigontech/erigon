@@ -1464,12 +1464,24 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		return txpoolcfg.FeeTooLow
 	}
 
+	// Do not allow transaction from if sender has authority
+	addr, ok := p.senders.getAddr(mt.TxnSlot.SenderID)
+	if !ok {
+		p.logger.Info("senderID not registered, discarding transaction for safety")
+		return txpoolcfg.InvalidSender
+	}
+	if _, ok := p.auths[addr]; ok {
+		return txpoolcfg.ErrAuthorityReserved
+	}
+
 	// Check if we have txn with same authorization in the pool
 	if mt.TxnSlot.Type == SetCodeTxnType {
 		foundDuplicate := false
 		for _, a := range mt.TxnSlot.Authorities {
+			p.logger.Debug("setCodeTxn ", "authority", a.String())
 			if _, ok := p.auths[*a]; ok {
 				foundDuplicate = true
+				p.logger.Debug("setCodeTxn ", "DUPLICATE authority", a.String(), "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
 				break
 			}
 		}
@@ -1481,16 +1493,6 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 				p.auths[*a] = mt
 			}
 		}
-	}
-
-	// Do not allow transaction from if sender has authority
-	addr, ok := p.senders.getAddr(mt.TxnSlot.SenderID)
-	if !ok {
-		p.logger.Info("senderID not registered, discarding transaction for safety")
-		return txpoolcfg.InvalidSender
-	}
-	if _, ok := p.auths[addr]; ok {
-		return txpoolcfg.ErrAuthorityReserved
 	}
 
 	hashStr := string(mt.TxnSlot.IDHash[:])
