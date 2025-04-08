@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"path/filepath"
@@ -28,16 +29,12 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/pkg/errors"
-	btree2 "github.com/tidwall/btree"
-	"golang.org/x/crypto/sha3"
-
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
-	"github.com/erigontech/erigon-lib/common/cryptozerocopy"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
@@ -45,6 +42,7 @@ import (
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon-lib/types/accounts"
+	btree2 "github.com/tidwall/btree"
 )
 
 var ErrBehindCommitment = errors.New("behind commitment")
@@ -253,7 +251,7 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 				return 0, err
 			}
 			if lastBn < bn {
-				return 0, errors.WithMessage(ErrBehindCommitment, fmt.Sprintf("TxNums index is at block %d and behind commitment %d", lastBn, bn))
+				return 0, fmt.Errorf("%w: TxNums index is at block %d and behind commitment %d", ErrBehindCommitment, lastBn, bn)
 			}
 		}
 		sd.SetBlockNum(bn)
@@ -762,8 +760,8 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, k []byte) (v []byte, step u
 	return v, step, nil
 }
 
-// GetAsOfFile returns value from domain with respect to limit ofMaxTxnum
-func (sd *SharedDomains) getAsOfFile(domain kv.Domain, k, k2 []byte, ofMaxTxnum uint64) (v []byte, step uint64, err error) {
+// getLatestFromFiles returns value from domain with respect to limit ofMaxTxnum
+func (sd *SharedDomains) getLatestFromFiles(domain kv.Domain, k, k2 []byte, ofMaxTxnum uint64) (v []byte, step uint64, err error) {
 	if domain == kv.CommitmentDomain {
 		return sd.LatestCommitment(k)
 	}
@@ -771,7 +769,7 @@ func (sd *SharedDomains) getAsOfFile(domain kv.Domain, k, k2 []byte, ofMaxTxnum 
 		k = append(k, k2...)
 	}
 
-	v, ok, err := sd.aggTx.getAsOfFile(domain, k, ofMaxTxnum)
+	v, ok, _, _, err := sd.roDebugTtx.GetLatestFromFiles(domain, k, ofMaxTxnum)
 	if err != nil {
 		return nil, 0, fmt.Errorf("domain '%s' %x txn=%d read error: %w", domain, k, ofMaxTxnum, err)
 	}
@@ -893,7 +891,6 @@ func (sd *SharedDomains) Tx() kv.Tx { return sd.roTx }
 type SharedDomainsCommitmentContext struct {
 	sharedDomains *SharedDomains
 	branches      map[string]cachedBranch
-	keccak        cryptozerocopy.KeccakState
 	updates       *commitment.Updates
 	patriciaTrie  commitment.Trie
 	justRestored  atomic.Bool
@@ -909,7 +906,6 @@ func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode commitment.Mode, 
 	ctx := &SharedDomainsCommitmentContext{
 		sharedDomains: sd,
 		branches:      make(map[string]cachedBranch),
-		keccak:        sha3.NewLegacyKeccak256().(cryptozerocopy.KeccakState),
 	}
 
 	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, sd.aggTx.a.tmpdir)
@@ -969,7 +965,7 @@ func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte,
 
 func (sdc *SharedDomainsCommitmentContext) readAccount(plainKey []byte) (encAccount []byte, err error) {
 	if sdc.limitReadAsOfTxNum > 0 {
-		encAccount, _, err = sdc.sharedDomains.getAsOfFile(kv.AccountsDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
+		encAccount, _, err = sdc.sharedDomains.getLatestFromFiles(kv.AccountsDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
 		if err != nil {
 			return nil, fmt.Errorf("GetAccount failed: %w", err)
 		}
@@ -984,7 +980,7 @@ func (sdc *SharedDomainsCommitmentContext) readAccount(plainKey []byte) (encAcco
 
 func (sdc *SharedDomainsCommitmentContext) readCode(plainKey []byte) (code []byte, err error) {
 	if sdc.limitReadAsOfTxNum > 0 {
-		code, _, err = sdc.sharedDomains.getAsOfFile(kv.CodeDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
+		code, _, err = sdc.sharedDomains.getLatestFromFiles(kv.CodeDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
 		if err != nil {
 			return nil, fmt.Errorf("GetAccount/Code: failed to read latest code: %w", err)
 		}
@@ -998,7 +994,7 @@ func (sdc *SharedDomainsCommitmentContext) readCode(plainKey []byte) (code []byt
 }
 func (sdc *SharedDomainsCommitmentContext) readStorage(plainKey []byte) (enc []byte, err error) {
 	if sdc.limitReadAsOfTxNum > 0 {
-		enc, _, err = sdc.sharedDomains.getAsOfFile(kv.StorageDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
+		enc, _, err = sdc.sharedDomains.getLatestFromFiles(kv.StorageDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
 		if err != nil {
 			return nil, fmt.Errorf("GetAccount/Code: failed to read latest code: %w", err)
 		}
@@ -1047,9 +1043,7 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 	}
 
 	if len(code) > 0 {
-		sdc.keccak.Reset()
-		sdc.keccak.Write(code)
-		sdc.keccak.Read(u.CodeHash[:])
+		copy(u.CodeHash[:], crypto.Keccak256(code))
 		u.Flags |= commitment.CodeUpdate
 	} else {
 		u.CodeHash = commitment.EmptyCodeHashArray
@@ -1271,7 +1265,7 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 			if err != nil {
 				return 0, 0, fmt.Errorf("failed to get root hash after state restore: %w", err)
 			}
-			fmt.Printf("[commitment] restored state: block=%d txn=%d rootHash=%x\n", cs.blockNum, cs.txNum, rootHash)
+			log.Info(fmt.Sprintf("[commitment] restored state: block=%d txn=%d rootHash=%x", cs.blockNum, cs.txNum, rootHash))
 		}
 	} else {
 		return 0, 0, errors.New("state storing is only supported hex patricia trie")

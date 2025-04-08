@@ -143,7 +143,8 @@ func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailou
 		blockContext := evm.Context
 		blockContext.Coinbase = state.SystemAddress
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			return SysCallContractWithBlockContext(contract, data, evm.ChainConfig(), evm.IntraBlockState(), blockContext, engine, true /* constCall */, nil)
+			ret, _, err := SysCallContractWithBlockContext(contract, data, evm.ChainConfig(), evm.IntraBlockState(), blockContext, engine, true /* constCall */, nil)
+			return ret, err
 		}
 		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 	}
@@ -553,6 +554,16 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 
 	// set code tx
 	auths := msg.Authorizations()
+
+	// Check clauses 4-5, subtract intrinsic gas if everything is correct
+	gas, floorGas7623, overflow := fixedgas.IntrinsicGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, false, uint64(len(auths)))
+	if overflow {
+		return nil, ErrGasUintOverflow
+	}
+	if st.gasRemaining < gas || st.gasRemaining < floorGas7623 {
+		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, max(gas, floorGas7623))
+	}
+
 	verifiedAuthorities := make([]libcommon.Address, 0)
 	if len(auths) > 0 {
 		if contractCreation {
@@ -634,15 +645,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 			}
 		}
-	}
-
-	// Check clauses 4-5, subtract intrinsic gas if everything is correct
-	gas, floorGas7623, overflow := fixedgas.IntrinsicGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, false, uint64(len(auths)))
-	if overflow {
-		return nil, ErrGasUintOverflow
-	}
-	if st.gasRemaining < gas || st.gasRemaining < floorGas7623 {
-		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, max(gas, floorGas7623))
 	}
 
 	if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {

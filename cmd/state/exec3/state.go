@@ -57,7 +57,7 @@ type Worker struct {
 	background  bool // if true - worker does manage RoTx (begin/rollback) in .ResetTx()
 	blockReader services.FullBlockReader
 	in          *state.QueueWithRetry
-	rs          *state.StateV3
+	rs          *state.ParallelExecutionState
 	stateWriter *state.StateWriterV3
 	stateReader state.ResettableStateReader
 	historyMode bool // if true - stateReader is HistoryReaderV3, otherwise it's state reader
@@ -114,7 +114,7 @@ func NewWorker(lock sync.Locker, logger log.Logger, hooks *tracing.Hooks, ctx co
 
 func (rw *Worker) LogLRUStats() { rw.evm.JumpDestCache.LogStats() }
 
-func (rw *Worker) ResetState(rs *state.StateV3, accumulator *shards.Accumulator) {
+func (rw *Worker) ResetState(rs *state.ParallelExecutionState, accumulator *shards.Accumulator) {
 	rw.rs = rs
 	if rw.background {
 		rw.SetReader(state.NewReaderParallelV3(rs.Domains()))
@@ -180,11 +180,6 @@ func (rw *Worker) SetReader(reader state.ResettableStateReader) {
 	}
 }
 
-type validationResult struct {
-	PaymasterContext []byte
-	GasUsed          uint64
-}
-
 func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvaluaion bool) {
 	if txTask.HistoryExecution && !rw.historyMode {
 		// in case if we cancelled execution and commitment happened in the middle of the block, we have to process block
@@ -240,7 +235,8 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract libcommon.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, constCall /* constCall */, rw.hooks)
+			ret, _, err := core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, constCall /* constCall */, rw.hooks)
+			return ret, err
 		}
 		rw.engine.Initialize(rw.chainConfig, rw.chain, header, ibs, syscall, rw.logger, rw.hooks)
 		txTask.Error = ibs.FinalizeTx(rules, noop)
@@ -251,7 +247,14 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 
 		// End of block transaction in a block
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */, rw.hooks)
+			ret, logs, err := core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */, rw.hooks)
+			if err != nil {
+				return nil, err
+			}
+
+			txTask.Logs = append(txTask.Logs, logs...)
+
+			return ret, err
 		}
 
 		if isMining {
@@ -285,64 +288,72 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 				break
 			}
 
-			batchHeaderTxn, ok := txTask.Tx.(*types.AccountAbstractionBatchHeaderTransaction)
-			if !ok {
-				break // this is an AA transaction that should have already been executed at batch header
-			}
+			if !txTask.InBatch {
+				// this is the first transaction in an AA transaction batch, run all validation frames, then execute execution frames in its own txtask
+				startIdx := uint64(txTask.TxIndex)
+				endIdx := startIdx + txTask.AAValidationBatchSize
 
-			startIdx := uint64(txTask.TxIndex + 1)
-			endIdx := startIdx + batchHeaderTxn.TransactionCount
+				validationResults := make([]state.AAValidationResult, txTask.AAValidationBatchSize)
+				log.Debug("🕵️‍♂️[aa] found AA bundle", "startIdx", startIdx, "endIdx", endIdx-1)
 
-			validationResults := make([]validationResult, batchHeaderTxn.TransactionCount)
+				var outerErr error
+				for i := startIdx; i < endIdx; i++ {
+					// check if next n transactions are AA transactions and run validation
+					if txTask.Txs[i].Type() == types.AccountAbstractionTxType {
+						aaTxn, ok := txTask.Tx.(*types.AccountAbstractionTransaction)
+						if !ok {
+							outerErr = fmt.Errorf("invalid transaction type, expected AccountAbstractionTx, got %T", txTask.Tx)
+							break
+						}
 
-			var outerErr error
-			for i := startIdx; i <= endIdx; i++ {
-				// check if next n transactions are AA transactions and run validation
-				if txTask.Txs[i].Type() == types.AccountAbstractionTxType {
-					aaTxn, ok := txTask.Tx.(*types.AccountAbstractionTransaction)
-					if !ok {
-						outerErr = fmt.Errorf("invalid transaction type, expected AccountAbstractionTx, got %T", txTask.Tx)
+						paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, ibs, rw.taskGasPool, header, rw.evm, rw.chainConfig)
+						if err != nil {
+							outerErr = err
+							break
+						}
+
+						validationResults[i-startIdx] = state.AAValidationResult{
+							PaymasterContext: paymasterContext,
+							GasUsed:          validationGasUsed,
+						}
+					} else {
+						outerErr = fmt.Errorf("invalid txcount, expected txn %d to be type %d", i, types.AccountAbstractionTxType)
 						break
 					}
+				}
 
-					paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, ibs, rw.taskGasPool, header, rw.evm, rw.chainConfig)
-					if err != nil {
-						outerErr = err
-						break
-					}
-
-					validationResults[i-startIdx] = validationResult{
-						PaymasterContext: paymasterContext,
-						GasUsed:          validationGasUsed,
-					}
-				} else {
-					outerErr = fmt.Errorf("invalid txcount, expected txn %d to be type %d", i, types.AccountAbstractionTxType)
+				if outerErr != nil {
+					txTask.Error = outerErr
 					break
 				}
+				log.Debug("✅[aa] validated AA bundle", "len", startIdx-endIdx)
+
+				txTask.ValidationResults = validationResults
 			}
 
-			if outerErr != nil {
-				txTask.Error = outerErr
+			if len(txTask.ValidationResults) == 0 {
+				txTask.Error = fmt.Errorf("found RIP-7560 but no remaining validation results, txIndex %d", txTask.TxIndex)
+			}
+
+			aaTxn := txTask.Tx.(*types.AccountAbstractionTransaction) // type cast checked earlier
+			validationRes := txTask.ValidationResults[0]
+			txTask.ValidationResults = txTask.ValidationResults[1:]
+
+			status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, validationRes.PaymasterContext, validationRes.GasUsed, rw.taskGasPool, rw.evm, header, rw.ibs)
+			if err != nil {
+				txTask.Error = err
 				break
 			}
 
-			// execute batch txns
-			for i := startIdx; i <= endIdx; i++ {
-				aaTxn := txTask.Tx.(*types.AccountAbstractionTransaction) // type cast checked earlier
-				validationRes := validationResults[i-startIdx]
+			txTask.Failed = status != 0
+			txTask.UsedGas = gasUsed
+			// Update the state with pending changes
+			ibs.SoftFinalise()
+			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)
+			txTask.TraceFroms = rw.callTracer.Froms()
+			txTask.TraceTos = rw.callTracer.Tos()
 
-				_, _, _, err := aa.ExecuteAATransaction(aaTxn, validationRes.PaymasterContext, validationRes.GasUsed, rw.taskGasPool, rw.evm, header, rw.ibs)
-				if err != nil {
-					outerErr = err
-					break
-				}
-			}
-
-			if outerErr != nil {
-				txTask.Error = outerErr
-				break
-			}
-
+			log.Debug("✅[aa] executed AA bundle transaction", "txIndex", txTask.TxIndex)
 		}
 
 		msg := txTask.TxAsMessage
@@ -391,7 +402,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 	}
 }
 
-func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger log.Logger, hooks *tracing.Hooks, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int, dirs datadir.Dirs, isMining bool) (reconWorkers []*Worker, applyWorker *Worker, rws *state.ResultsQueue, clear func(), wait func()) {
+func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger log.Logger, hooks *tracing.Hooks, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.ParallelExecutionState, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int, dirs datadir.Dirs, isMining bool) (reconWorkers []*Worker, applyWorker *Worker, rws *state.ResultsQueue, clear func(), wait func()) {
 	reconWorkers = make([]*Worker, workerCount)
 
 	resultChSize := workerCount * 8

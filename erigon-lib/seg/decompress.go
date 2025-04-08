@@ -454,7 +454,7 @@ func (d *Decompressor) IsOpen() bool {
 	return d != nil && d.f != nil
 }
 
-func (d *Decompressor) checkFileLenChage() {
+func (d *Decompressor) checkFileLenChange() {
 	if d.f == nil {
 		return
 	}
@@ -474,7 +474,7 @@ func (d *Decompressor) Close() {
 	if d == nil || d.f == nil {
 		return
 	}
-	d.checkFileLenChage()
+	d.checkFileLenChange()
 	if err := mmap.Munmap(d.mmapHandle1, d.mmapHandle2); err != nil {
 		log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", d.FileName(), "stack", dbg.Stack())
 	}

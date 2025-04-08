@@ -22,34 +22,29 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/holiman/uint256"
 )
 
 type PoolChangeEvent struct {
 	Pool    string `json:"pool"`
 	Event   string `json:"event"`
 	TxnHash string `json:"txnHash"`
+	Order   uint8  `json:"order"`
 }
 
 type DiagTxn struct {
 	IDHash              string        `json:"hash"`
 	SenderID            uint64        `json:"senderID"`
-	Nonce               uint64        `json:"nonce"`
-	Value               uint256.Int   `json:"value"`
-	Gas                 uint64        `json:"gas"`
-	FeeCap              uint256.Int   `json:"feeCap"`
-	Tip                 uint256.Int   `json:"tip"`
 	Size                uint32        `json:"size"`
-	Type                byte          `json:"type"`
 	Creation            bool          `json:"creation"`
 	DataLen             int           `json:"dataLen"`
 	AccessListAddrCount int           `json:"accessListAddrCount"`
 	AccessListStorCount int           `json:"accessListStorCount"`
 	BlobHashes          []common.Hash `json:"blobHashes"`
-	Blobs               [][]byte      `json:"blobs"`
 	IsLocal             bool          `json:"isLocal"`
 	DiscardReason       string        `json:"discardReason"`
 	Pool                string        `json:"pool"`
+	OrderMarker         uint8         `json:"orderMarker"`
+	RLP                 []byte        `json:"rlp"`
 }
 
 type IncomingTxnUpdate struct {
@@ -61,10 +56,16 @@ func (ti IncomingTxnUpdate) Type() Type {
 	return TypeOf(ti)
 }
 
+type TxnHashOrder struct {
+	OrderMarker uint8
+	Hash        [32]byte
+}
+
 type PoolChangeBatch struct {
-	Pool    string     `json:"pool"`
-	Event   string     `json:"event"`
-	TxnHash [][32]byte `json:"txnHash"`
+	Pool         string         `json:"pool"`
+	OrderMarker  uint8          `json:"orderMarker"`
+	Event        string         `json:"event"`
+	TxnHashOrder []TxnHashOrder `json:"txnHash"`
 }
 
 type PoolChangeBatchEvent struct {
@@ -113,13 +114,14 @@ func (d *DiagnosticClient) runOnPoolChangeBatchEvent(rootCtx context.Context) {
 				return
 			case info := <-ch:
 				for _, change := range info.Changes {
-					for _, txnHash := range change.TxnHash {
+					for _, txnHash := range change.TxnHashOrder {
 						d.Notify(DiagMessages{
 							MessageType: "txpool",
 							Message: PoolChangeEvent{
 								Pool:    change.Pool,
 								Event:   change.Event,
-								TxnHash: hex.EncodeToString(txnHash[:]),
+								TxnHash: hex.EncodeToString(txnHash.Hash[:]),
+								Order:   txnHash.OrderMarker,
 							},
 						})
 					}

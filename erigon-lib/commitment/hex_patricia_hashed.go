@@ -26,28 +26,24 @@ import (
 	"hash"
 	"io"
 	"math/bits"
-	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/etl"
+	"golang.org/x/crypto/sha3"
+
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	witnesstypes "github.com/erigontech/erigon-lib/types/witness"
-
-	"github.com/erigontech/erigon-lib/common/dbg"
-
-	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/length"
-	ecrypto "github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/rlp"
-	"golang.org/x/crypto/sha3"
 )
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
@@ -95,7 +91,7 @@ type HexPatriciaHashed struct {
 	accValBuf rlp.RlpEncodedBytes
 }
 
-func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext, tmpdir string) *HexPatriciaHashed {
+func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext) *HexPatriciaHashed {
 	hph := &HexPatriciaHashed{
 		ctx:           ctx,
 		keccak:        sha3.NewLegacyKeccak256().(keccakState),
@@ -105,7 +101,7 @@ func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext, tmpdir string)
 		hadToLoadL:    make(map[uint64]skipStat),
 		accValBuf:     make(rlp.RlpEncodedBytes, 128),
 	}
-	hph.branchEncoder = NewBranchEncoder(1024, filepath.Join(tmpdir, "branch-encoder"))
+	hph.branchEncoder = NewBranchEncoder(1024)
 	return hph
 }
 
@@ -1129,7 +1125,7 @@ func (hph *HexPatriciaHashed) PrintGrid() {
 }
 
 // this function is only related to the witness
-func (hph *HexPatriciaHashed) createAccountNode(c *cell, row int, hashedKey []byte, codeReads map[libcommon.Hash]witnesstypes.CodeWithHash) (*trie.AccountNode, error) {
+func (hph *HexPatriciaHashed) createAccountNode(c *cell, row int, hashedKey []byte, codeReads map[common.Hash]witnesstypes.CodeWithHash) (*trie.AccountNode, error) {
 	_, storageIsSet, storageRootHash, err := hph.computeCellHashWithStorage(c, hph.depths[row], nil)
 	if err != nil {
 		return nil, err
@@ -1185,7 +1181,7 @@ func (hph *HexPatriciaHashed) nCellsInRow(row int) int { //nolint:unused
 }
 
 // Traverse the grid following `hashedKey` and produce the witness `trie.Trie` for that key
-func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[libcommon.Hash]witnesstypes.CodeWithHash) (*trie.Trie, error) {
+func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[common.Hash]witnesstypes.CodeWithHash) (*trie.Trie, error) {
 	rootNode := &trie.FullNode{}
 	var currentNode trie.Node = rootNode
 	keyPos := 0 // current position in hashedKey (usually same as row, but could be different due to extension nodes)
@@ -1888,7 +1884,7 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 // but currently need to be defined like that for the fold/unfold algorithm) into the grid and traversing the grid to convert it into `trie.Trie`.
 // All the individual tries are combined to create the final witness trie.
 // Because the grid is lacking information about the code in smart contract accounts which is also part of the witness, we need to provide that as an input parameter to this function (`codeReads`)
-func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Updates, codeReads map[libcommon.Hash]witnesstypes.CodeWithHash, expectedRootHash []byte, logPrefix string) (witnessTrie *trie.Trie, rootHash []byte, err error) {
+func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Updates, codeReads map[common.Hash]witnesstypes.CodeWithHash, expectedRootHash []byte, logPrefix string) (witnessTrie *trie.Trie, rootHash []byte, err error) {
 	var (
 		m  runtime.MemStats
 		ki uint64
@@ -1919,7 +1915,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 			if err != nil {
 				return fmt.Errorf("account with plainkey=%x not found: %w", plainKey, err)
 			} else {
-				addrHash := ecrypto.Keccak256(plainKey)
+				addrHash := crypto.Keccak256(plainKey)
 				fmt.Printf("account with plainKey=%x, addrHash=%x FOUND = %v\n", plainKey, addrHash, account)
 			}
 		} else {
@@ -2082,10 +2078,6 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	}
 	if hph.trace {
 		fmt.Printf("root hash %x updates %d\n", rootHash, updatesCount)
-	}
-	err = hph.branchEncoder.Load(hph.ctx, etl.TransformArgs{Quit: ctx.Done()})
-	if err != nil {
-		return nil, fmt.Errorf("branch update failed: %w", err)
 	}
 	if dbg.KVReadLevelledMetrics {
 		log.Debug("commitment finished, counters updated (no reset)",

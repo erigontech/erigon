@@ -142,7 +142,7 @@ func (d *WebSeeds) checkHasTorrents(manifestResponse snaptype.WebSeedsFromProvid
 	hasTorrents := len(torrentNames) > 0
 	report.missingTorrents = make([]string, 0)
 	for name := range manifestResponse {
-		if !snaptype.IsSeedableExtension(name) {
+		if !snaptype.IsSeedableExtension(name) || name == "manifest.txt" {
 			continue
 		}
 		tname := name + ".torrent"

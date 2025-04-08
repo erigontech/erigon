@@ -22,23 +22,21 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/types/accounts"
 	"math/bits"
 	"sort"
 	"strings"
 	"unsafe"
 
-	"github.com/holiman/uint256"
-
-	"github.com/google/btree"
-	"golang.org/x/crypto/sha3"
+	ecrypto "github.com/erigontech/erigon-lib/crypto"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/cryptozerocopy"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/google/btree"
+	"github.com/holiman/uint256"
 )
 
 var (
@@ -136,7 +134,7 @@ func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *
 		fallthrough
 	default:
 
-		trie := NewHexPatriciaHashed(length.Addr, nil, tmpdir)
+		trie := NewHexPatriciaHashed(length.Addr, nil)
 		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
 		return trie, tree
 	}
@@ -176,52 +174,13 @@ type BranchEncoder struct {
 	buf       *bytes.Buffer
 	bitmapBuf [binary.MaxVarintLen64]byte
 	merger    *BranchMerger
-	updates   *etl.Collector
-	tmpdir    string
 }
 
-func NewBranchEncoder(sz uint64, tmpdir string) *BranchEncoder {
-	be := &BranchEncoder{
+func NewBranchEncoder(sz uint64) *BranchEncoder {
+	return &BranchEncoder{
 		buf:    bytes.NewBuffer(make([]byte, sz)),
-		tmpdir: tmpdir,
 		merger: NewHexBranchMerger(sz / 2),
 	}
-	//be.initCollector()
-	return be
-}
-
-func (be *BranchEncoder) initCollector() {
-	if be.updates != nil {
-		be.updates.Close()
-	}
-	be.updates = etl.NewCollector("commitment.BranchEncoder", be.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize/4), log.Root().New("branch-encoder"))
-	be.updates.LogLvl(log.LvlDebug)
-	be.updates.SortAndFlushInBackground(true)
-}
-
-func (be *BranchEncoder) Load(pc PatriciaContext, args etl.TransformArgs) error {
-	// do not collect them at least now. Write them at CollectUpdate into pc
-	if be.updates == nil {
-		return nil
-	}
-
-	if err := be.updates.Load(nil, "", func(prefix, update []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		stateValue, stateStep, err := pc.Branch(prefix)
-		if err != nil {
-			return err
-		}
-
-		cp, cu := common.Copy(prefix), common.Copy(update) // has to copy :(
-		if err = pc.PutBranch(cp, cu, stateValue, stateStep); err != nil {
-			return err
-		}
-		mxTrieBranchesUpdated.Inc()
-		return nil
-	}, args); err != nil {
-		return err
-	}
-	be.initCollector()
-	return nil
 }
 
 func (be *BranchEncoder) CollectUpdate(
@@ -255,6 +214,7 @@ func (be *BranchEncoder) CollectUpdate(
 	if err = ctx.PutBranch(common.Copy(prefix), common.Copy(update), prev, prevStep); err != nil {
 		return 0, err
 	}
+	mxTrieBranchesUpdated.Inc()
 	return lastNibble, nil
 }
 
@@ -958,7 +918,6 @@ func ParseCommitmentMode(s string) Mode {
 }
 
 type Updates struct {
-	keccak cryptozerocopy.KeccakState
 	hasher keyHasher
 	keys   map[string]struct{}
 	etl    *etl.Collector
@@ -973,7 +932,6 @@ func keyHasherNoop(key []byte) []byte { return key }
 
 func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 	t := &Updates{
-		keccak: sha3.NewLegacyKeccak256().(cryptozerocopy.KeccakState),
 		hasher: hasher,
 		tmpdir: tmpdir,
 		mode:   m,
@@ -1093,18 +1051,16 @@ func (t *Updates) TouchStorage(c *KeyUpdate, val []byte) {
 	}
 }
 
-func (t *Updates) TouchCode(c *KeyUpdate, val []byte) {
+func (t *Updates) TouchCode(c *KeyUpdate, code []byte) {
 	c.update.Flags |= CodeUpdate
-	if len(val) == 0 {
+	if len(code) == 0 {
 		if c.update.Flags == 0 {
 			c.update.Flags = DeleteUpdate
 		}
 		copy(c.update.CodeHash[:], EmptyCodeHash)
 		return
 	}
-	t.keccak.Reset()
-	t.keccak.Write(val)
-	t.keccak.Read(c.update.CodeHash[:])
+	copy(c.update.CodeHash[:], ecrypto.Keccak256(code))
 }
 
 func (t *Updates) Close() {
