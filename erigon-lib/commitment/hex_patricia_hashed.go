@@ -2022,7 +2022,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		start        = time.Now()
 		logEvery     = time.NewTicker(20 * time.Second)
 	)
-	hph.currentCommitmentMetrics = CommitmentMetrics{}
+	hph.currentCommitmentMetrics.Reset()
 	hph.currentCommitmentMetrics.Updates.Store(updates.Size())
 	defer func() {
 		logEvery.Stop()

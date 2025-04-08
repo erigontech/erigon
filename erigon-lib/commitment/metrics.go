@@ -28,6 +28,44 @@ type CommitmentMetrics struct {
 	TotalProcessingTime time.Duration
 }
 
+func (commitmentMetrics *CommitmentMetrics) Reset() {
+	commitmentMetrics = &CommitmentMetrics{}
+}
+
+func (commitmentMetrics *CommitmentMetrics) Headers() []string {
+	return []string{
+		"updates",
+		"address keys",
+		"storage keys",
+		"loading branch",
+		"loading account",
+		"loading storage",
+		"updating branch",
+		"total unfolds",
+		"total unfolding time (ms)",
+		"total folds",
+		"total folding time (ms)",
+		"total processing time (ms)",
+	}
+}
+
+func (commitmentMetrics *CommitmentMetrics) Values() []string {
+	return []string{
+		strconv.FormatUint(commitmentMetrics.Updates.Load(), 10),
+		strconv.FormatUint(commitmentMetrics.AddressKeys.Load(), 10),
+		strconv.FormatUint(commitmentMetrics.StorageKeys.Load(), 10),
+		strconv.FormatUint(commitmentMetrics.LoadBranch.Load(), 10),
+		strconv.FormatUint(commitmentMetrics.LoadAccount.Load(), 10),
+		strconv.FormatUint(commitmentMetrics.LoadStorage.Load(), 10),
+		strconv.FormatUint(commitmentMetrics.UpdateBranch.Load(), 10),
+		strconv.FormatUint(commitmentMetrics.Unfolds.Load(), 10),
+		strconv.Itoa(int(commitmentMetrics.TotalUnfoldingTime.Milliseconds())),
+		strconv.FormatUint(commitmentMetrics.Folds.Load(), 10),
+		strconv.Itoa(int(commitmentMetrics.TotalFoldingTime.Milliseconds())),
+		strconv.Itoa(int(commitmentMetrics.TotalProcessingTime.Milliseconds())),
+	}
+}
+
 func init() {
 	metricsFile = os.Getenv("ERIGON_COMMITMENT_TRACE")
 	collectMetrics = os.Getenv("ERIGON_COMMITMENT_TRACE") != ""
@@ -54,39 +92,11 @@ func writeMetricsToCSV(commitmentMetrics *CommitmentMetrics) error {
 		return err
 	}
 	if info.Size() == 0 {
-		header := []string{
-			"updates",
-			"address keys",
-			"storage keys",
-			"loading branch",
-			"loading account",
-			"loading storage",
-			"updating branch",
-			"total unfolds",
-			"total unfolding time (ms)",
-			"total folds",
-			"total folding time (ms)",
-			"total processing time (ms)",
-		}
-		if err := writer.Write(header); err != nil {
+		if err := writer.Write(commitmentMetrics.Headers()); err != nil {
 			return err
 		}
 	}
 
 	// Write the actual data
-	record := []string{
-		strconv.FormatUint(commitmentMetrics.Updates.Load(), 10),
-		strconv.FormatUint(commitmentMetrics.AddressKeys.Load(), 10),
-		strconv.FormatUint(commitmentMetrics.StorageKeys.Load(), 10),
-		strconv.FormatUint(commitmentMetrics.LoadBranch.Load(), 10),
-		strconv.FormatUint(commitmentMetrics.LoadAccount.Load(), 10),
-		strconv.FormatUint(commitmentMetrics.LoadStorage.Load(), 10),
-		strconv.FormatUint(commitmentMetrics.UpdateBranch.Load(), 10),
-		strconv.FormatUint(commitmentMetrics.Unfolds.Load(), 10),
-		strconv.Itoa(int(commitmentMetrics.TotalUnfoldingTime.Milliseconds())),
-		strconv.FormatUint(commitmentMetrics.Folds.Load(), 10),
-		strconv.Itoa(int(commitmentMetrics.TotalFoldingTime.Milliseconds())),
-		strconv.Itoa(int(commitmentMetrics.TotalProcessingTime.Milliseconds())),
-	}
-	return writer.Write(record)
+	return writer.Write(commitmentMetrics.Values())
 }
