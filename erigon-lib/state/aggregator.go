@@ -1314,6 +1314,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
 			}
 		}
 	}
+
 	for id, ii := range at.iis {
 		r.invertedIndex[id] = ii.findMergeRange(maxEndTxNum, maxSpan)
 	}
