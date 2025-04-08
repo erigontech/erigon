@@ -141,8 +141,8 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 	}
 
 	emptyRemoval := txTask.Rules.IsSpuriousDragon
-	for addr, increase := range txTask.BalanceIncreaseSet {
-		increase := increase
+	for addr, incr := range txTask.BalanceIncreaseSet {
+		increase := incr.Amount
 		addrBytes := addr.Bytes()
 		enc0, step0, err := domains.GetLatest(kv.AccountsDomain, addrBytes)
 		if err != nil {
@@ -155,7 +155,8 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 			}
 		}
 		acc.Balance.Add(&acc.Balance, &increase)
-		if emptyRemoval && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() {
+
+		if emptyRemoval && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() && !incr.IsEscrow {
 			if err := domains.DomainDel(kv.AccountsDomain, addrBytes, nil, enc0, step0); err != nil {
 				return err
 			}

@@ -21,6 +21,7 @@
 package state
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"sort"
@@ -59,6 +60,7 @@ type BalanceIncrease struct {
 	increase    uint256.Int
 	transferred bool // Set to true when the corresponding stateObject is created and balance increase is transferred to the stateObject
 	count       int  // Number of increases - this needs tracking for proper reversion
+	isEscrow    bool // Arbiturm: true if increase related to escrow account
 }
 
 // IntraBlockState is responsible for caching and managing state changes
@@ -456,7 +458,9 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 
 		bi, ok := sdb.balanceInc[addr]
 		if !ok {
-			bi = &BalanceIncrease{}
+			bi = &BalanceIncrease{
+				isEscrow: reason == tracing.BalanceIncreaseEscrow, // arbitrum only
+			}
 			sdb.balanceInc[addr] = bi
 		}
 
@@ -968,11 +972,19 @@ func (sdb *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter Sta
 	return sdb.MakeWriteSet(chainRules, stateWriter)
 }
 
-func (sdb *IntraBlockState) BalanceIncreaseSet() map[libcommon.Address]uint256.Int {
-	s := make(map[libcommon.Address]uint256.Int, len(sdb.balanceInc))
+type BalanceIncreaseEntry struct {
+	Amount   uint256.Int
+	IsEscrow bool
+}
+
+func (sdb *IntraBlockState) BalanceIncreaseSet() map[libcommon.Address]BalanceIncreaseEntry {
+	s := make(map[libcommon.Address]BalanceIncreaseEntry, len(sdb.balanceInc))
 	for addr, bi := range sdb.balanceInc {
 		if !bi.transferred {
-			s[addr] = bi.increase
+			s[addr] = BalanceIncreaseEntry{
+				Amount:   bi.increase,
+				IsEscrow: bi.isEscrow,
+			}
 		}
 	}
 	return s
