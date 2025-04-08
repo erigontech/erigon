@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"os"
 	"strconv"
+	"sync/atomic"
 	"time"
 )
 
@@ -13,28 +14,26 @@ var (
 )
 
 type CommitmentMetrics struct {
-	Updates             int
-	AddressKeys         int
-	StorageKeys         int
-	LoadBranch          int
-	LoadAccount         int
-	LoadStorage         int
-	UpdateBranch        int
-	Unfolds             int
+	Updates             atomic.Uint64
+	AddressKeys         atomic.Uint64
+	StorageKeys         atomic.Uint64
+	LoadBranch          atomic.Uint64
+	LoadAccount         atomic.Uint64
+	LoadStorage         atomic.Uint64
+	UpdateBranch        atomic.Uint64
+	Unfolds             atomic.Uint64
 	TotalUnfoldingTime  time.Duration
-	Folds               int
+	Folds               atomic.Uint64
 	TotalFoldingTime    time.Duration
 	TotalProcessingTime time.Duration
 }
-
-var CurrentCommitmentMetrics CommitmentMetrics
 
 func init() {
 	metricsFile = os.Getenv("ERIGON_COMMITMENT_TRACE")
 	collectMetrics = os.Getenv("ERIGON_COMMITMENT_TRACE") != ""
 }
 
-func writeMetricsToCSV(commitmentMetrics CommitmentMetrics) error {
+func writeMetricsToCSV(commitmentMetrics *CommitmentMetrics) error {
 	if !collectMetrics {
 		return nil
 	}
@@ -76,16 +75,16 @@ func writeMetricsToCSV(commitmentMetrics CommitmentMetrics) error {
 
 	// Write the actual data
 	record := []string{
-		strconv.Itoa(commitmentMetrics.Updates),
-		strconv.Itoa(commitmentMetrics.AddressKeys),
-		strconv.Itoa(commitmentMetrics.StorageKeys),
-		strconv.Itoa(commitmentMetrics.LoadBranch),
-		strconv.Itoa(commitmentMetrics.LoadAccount),
-		strconv.Itoa(commitmentMetrics.LoadStorage),
-		strconv.Itoa(commitmentMetrics.UpdateBranch),
-		strconv.Itoa(commitmentMetrics.Unfolds),
+		strconv.FormatUint(commitmentMetrics.Updates.Load(), 10),
+		strconv.FormatUint(commitmentMetrics.AddressKeys.Load(), 10),
+		strconv.FormatUint(commitmentMetrics.StorageKeys.Load(), 10),
+		strconv.FormatUint(commitmentMetrics.LoadBranch.Load(), 10),
+		strconv.FormatUint(commitmentMetrics.LoadAccount.Load(), 10),
+		strconv.FormatUint(commitmentMetrics.LoadStorage.Load(), 10),
+		strconv.FormatUint(commitmentMetrics.UpdateBranch.Load(), 10),
+		strconv.FormatUint(commitmentMetrics.Unfolds.Load(), 10),
 		strconv.Itoa(int(commitmentMetrics.TotalUnfoldingTime.Milliseconds())),
-		strconv.Itoa(commitmentMetrics.Folds),
+		strconv.FormatUint(commitmentMetrics.Folds.Load(), 10),
 		strconv.Itoa(int(commitmentMetrics.TotalFoldingTime.Milliseconds())),
 		strconv.Itoa(int(commitmentMetrics.TotalProcessingTime.Milliseconds())),
 	}
