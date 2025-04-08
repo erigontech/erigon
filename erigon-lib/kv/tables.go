@@ -105,15 +105,6 @@ const (
 
 	Receipts = "Receipt" // block_num_u64 + block_hash + tx_index_u32 -> txn receipt
 
-	// CallTraceSet is the name of the table that contain the mapping of block number to the set (sorted) of all accounts
-	// touched by call traces. It is DupSort-ed table
-	// 8-byte BE block number -> account address -> two bits (one for "from", another for "to")
-	CallTraceSet = "CallTraceSet"
-	// Indices for call traces - have the same format as LogTopicIndex and LogAddressIndex
-	// Store bitmap indices - in which block number we saw calls from (CallFromIndex) or to (CallToIndex) some addresses
-	CallFromIndex = "CallFromIndex"
-	CallToIndex   = "CallToIndex"
-
 	TxLookup = "BlockTransactionLookup" // hash -> transaction/receipt lookup metadata
 
 	ConfigTable = "Config" // config prefix for the db
@@ -343,9 +334,6 @@ var ChaindataTables = []string{
 	HeadHeaderKey,
 	LastForkchoice,
 	Migrations,
-	CallTraceSet,
-	CallFromIndex,
-	CallToIndex,
 	Sequence,
 	EthTx,
 	TrieOfAccounts,
@@ -549,7 +537,6 @@ var ChaindataTablesCfg = TableCfg{
 		DupFromLen:                60,
 		DupToLen:                  28,
 	},
-	CallTraceSet: {Flags: DupSort},
 
 	TblAccountVals:           {Flags: DupSort},
 	TblAccountHistoryKeys:    {Flags: DupSort},
