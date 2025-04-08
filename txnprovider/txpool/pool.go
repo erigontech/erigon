@@ -1702,10 +1702,10 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 	if mt.TxnSlot.Type == SetCodeTxnType {
 		foundDuplicate := false
 		for _, a := range mt.TxnSlot.Authorities {
-			p.logger.Info("setCodeTxn ", "authority", a.String())
+			p.logger.Debug("setCodeTxn ", "authority", a.String())
 			if _, ok := p.auths[*a]; ok {
 				foundDuplicate = true
-				p.logger.Info("setCodeTxn ", "DUPLICATE authority", a.String(), "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
+				p.logger.Debug("setCodeTxn ", "DUPLICATE authority", a.String(), "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
 				break
 			}
 		}
