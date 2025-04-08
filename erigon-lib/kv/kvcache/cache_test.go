@@ -387,7 +387,7 @@ func TestAPI(t *testing.T) {
 		}
 		fmt.Printf("done3: \n")
 	}()
-	fmt.Printf("-----3 \n")
+	fmt.Printf("-----3\n")
 	txID4 := put(k1[:], account2Enc)
 
 	c.OnNewBlock(&remote.StateChangeBatch{
