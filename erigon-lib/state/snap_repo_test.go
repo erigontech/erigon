@@ -218,17 +218,6 @@ func stepToRootNum(t *testing.T, step uint64, repo *SnapshotRepo) RootNum {
 	return RootNum(repo.cfg.RootNumPerStep * step)
 }
 
-func cleanup(t *testing.T, dirs datadir.Dirs) {
-	t.Cleanup(func() {
-		os.RemoveAll(dirs.Snap)
-		os.RemoveAll(dirs.Chaindata)
-		os.RemoveAll(dirs.SnapIdx)
-		os.RemoveAll(dirs.SnapAccessors)
-		os.RemoveAll(dirs.Tmp)
-		os.RemoveAll(dirs.SnapDomain)
-	})
-}
-
 func setupEntity(t *testing.T, genRepo func(stepSize uint64, dirs datadir.Dirs) (name string, schema ae.SnapNameSchema)) (name string, dirs datadir.Dirs, repo *SnapshotRepo) {
 	dirs = datadir.New(t.TempDir())
 	stepSize := uint64(10)
@@ -245,7 +234,10 @@ func setupEntity(t *testing.T, genRepo func(stepSize uint64, dirs datadir.Dirs) 
 		Schema:                 schema,
 	}, log.New())
 
-	cleanup(t, dirs)
+	t.Cleanup(func() {
+		repo.Close()
+	})
+
 	return name, dirs, repo
 }
 
