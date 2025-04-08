@@ -64,7 +64,7 @@ func (f *SnapshotRepo) OpenFolder() error {
 	}
 
 	f.closeWhatNotInList(files)
-	f.scanDirtyFiles(files)
+	f.loadDirtyFiles(files)
 	if err := f.openDirtyFiles(); err != nil {
 		return fmt.Errorf("SnapshotRepo(%s).openFolder: %w", f.parser.DataTag(), err)
 	}
@@ -303,7 +303,7 @@ func (f *SnapshotRepo) closeWhatNotInList(fNames []string) {
 	}
 }
 
-func (f *SnapshotRepo) scanDirtyFiles(aps []string) {
+func (f *SnapshotRepo) loadDirtyFiles(aps []string) {
 	if f.stepSize == 0 {
 		panic(fmt.Sprintf("step size if 0 for %s", f.parser.DataTag()))
 	}

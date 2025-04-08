@@ -62,11 +62,11 @@ func (s *SnapshotConfig) validate() {
 	// some validation
 	for i := range s.MergeStages {
 		if s.MergeStages[i]%s.RootNumPerStep != 0 {
-			panic(fmt.Sprintf("MergeStages[%d] must be divisible by EntitiesPerStep", i))
+			panic(fmt.Sprintf("MergeStages[%d] must be divisible by RootNumPerStep", i))
 		}
 	}
 	if s.MinimumSize%s.RootNumPerStep != 0 {
-		panic(fmt.Sprintf("MinimumSize(%d) must be divisible by EntitiesPerStep(%d)", s.MinimumSize, s.RootNumPerStep))
+		panic(fmt.Sprintf("MinimumSize(%d) must be divisible by RootNumPerStep(%d)", s.MinimumSize, s.RootNumPerStep))
 	}
 }
 
