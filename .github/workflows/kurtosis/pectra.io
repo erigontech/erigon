@@ -16,6 +16,7 @@ network_params:
   seconds_per_slot: 2
 additional_services:
   - assertoor
+  # - dora
 snooper_enabled: false
 assertoor_params:
   run_stability_check: true
