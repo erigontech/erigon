@@ -1641,7 +1641,6 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 
 	return ac
 }
-func (at *AggregatorRoTx) ViewID() uint64 { return at.id }
 
 // --- Domain part START ---
 
