@@ -22,22 +22,20 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	ecrypto "github.com/erigontech/erigon-lib/crypto"
 	"math/bits"
 	"sort"
 	"strings"
 	"unsafe"
 
-	"github.com/google/btree"
-	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
-
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/cryptozerocopy"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/google/btree"
+	"github.com/holiman/uint256"
 )
 
 var (
@@ -919,7 +917,6 @@ func ParseCommitmentMode(s string) Mode {
 }
 
 type Updates struct {
-	keccak cryptozerocopy.KeccakState
 	hasher keyHasher
 	keys   map[string]struct{}
 	etl    *etl.Collector
@@ -934,7 +931,6 @@ func keyHasherNoop(key []byte) []byte { return key }
 
 func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 	t := &Updates{
-		keccak: sha3.NewLegacyKeccak256().(cryptozerocopy.KeccakState),
 		hasher: hasher,
 		tmpdir: tmpdir,
 		mode:   m,
@@ -1054,18 +1050,16 @@ func (t *Updates) TouchStorage(c *KeyUpdate, val []byte) {
 	}
 }
 
-func (t *Updates) TouchCode(c *KeyUpdate, val []byte) {
+func (t *Updates) TouchCode(c *KeyUpdate, code []byte) {
 	c.update.Flags |= CodeUpdate
-	if len(val) == 0 {
+	if len(code) == 0 {
 		if c.update.Flags == 0 {
 			c.update.Flags = DeleteUpdate
 		}
 		copy(c.update.CodeHash[:], EmptyCodeHash)
 		return
 	}
-	t.keccak.Reset()
-	t.keccak.Write(val)
-	t.keccak.Read(c.update.CodeHash[:])
+	copy(c.update.CodeHash[:], ecrypto.Keccak256(code))
 }
 
 func (t *Updates) Close() {
