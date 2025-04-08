@@ -1358,6 +1358,7 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row, depth int, deleted bool) (bo
 }
 
 func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int) error {
+	CurrentCommitmentMetrics.Unfolds++
 	if hph.trace {
 		fmt.Printf("unfold %d: activeRows: %d\n", unfolding, hph.activeRows)
 	}
@@ -1570,6 +1571,7 @@ func afterMapUpdateKind(afterMap uint16) (kind updateKind, nibblesAfterUpdate in
 // until that current key becomes a prefix of hashedKey that we will process next
 // (in other words until the needFolding function returns 0)
 func (hph *HexPatriciaHashed) fold() (err error) {
+	CurrentCommitmentMetrics.Folds++
 	updateKeyLen := hph.currentKeyLen
 	if hph.activeRows == 0 {
 		return errors.New("cannot fold - no active rows")
@@ -1666,6 +1668,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			fmt.Printf("formed leaf (%d %x, depth=%d) [%x] %s\n", row, nibble, depth, updateKey, cell.FullString())
 		}
 	case updateKindBranch:
+		CurrentCommitmentMetrics.UpdateBranch++
 		if hph.touchMap[row] != 0 { // any modifications
 			if row == 0 {
 				hph.rootTouched = true
@@ -2004,7 +2007,14 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		start        = time.Now()
 		logEvery     = time.NewTicker(20 * time.Second)
 	)
-	defer logEvery.Stop()
+	CurrentCommitmentMetrics.Updates = int(updates.Size())
+	defer func() {
+		logEvery.Stop()
+		CurrentCommitmentMetrics.TotalFoldingTime /= 100   // to milliseconds
+		CurrentCommitmentMetrics.TotalUnfoldingTime /= 100 // to milliseconds
+		CurrentCommitmentMetrics.TotalProcessingTime = int(time.Since(start).Milliseconds())
+		writeMetricsToCSV()
+	}()
 	//hph.trace = true
 
 	err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
@@ -2023,15 +2033,25 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		}
 		// Keep folding until the currentKey is the prefix of the key we modify
 		for hph.needFolding(hashedKey) {
+			startFold := time.Now()
 			if err := hph.fold(); err != nil {
 				return fmt.Errorf("fold: %w", err)
 			}
+			CurrentCommitmentMetrics.TotalFoldingTime += int(time.Since(startFold).Microseconds())
 		}
 		// Now unfold until we step on an empty cell
 		for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
+			startUnfold := time.Now()
 			if err := hph.unfold(hashedKey, unfolding); err != nil {
 				return fmt.Errorf("unfold: %w", err)
 			}
+			CurrentCommitmentMetrics.TotalFoldingTime += int(time.Since(startUnfold).Microseconds())
+		}
+
+		if len(plainKey) == hph.accountKeyLen {
+			CurrentCommitmentMetrics.AddressKeys++
+		} else {
+			CurrentCommitmentMetrics.StorageKeys++
 		}
 
 		if stateUpdate == nil {
