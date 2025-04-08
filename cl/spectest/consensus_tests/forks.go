@@ -58,10 +58,10 @@ var ForksFork = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectest.T
 	}
 
 	haveRoot, err := preState.HashSSZ()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	expectedRoot, err := postState.HashSSZ()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.EqualValues(t, haveRoot, expectedRoot, "state root")
 
 	return nil

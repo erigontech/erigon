@@ -10,7 +10,7 @@ on:
 
 jobs:
   tip-tracking-test:
-    runs-on: [self-hosted, Gnosis]
+    runs-on: [self-hosted, qa, Gnosis]
     timeout-minutes: 600
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir

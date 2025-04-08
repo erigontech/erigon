@@ -37,10 +37,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/urfave/cli/v2"
-
-	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon/polygon/bridge"
-
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -59,6 +55,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -71,7 +68,9 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/integrity"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
 	"github.com/erigontech/erigon/turbo/debug"
@@ -95,7 +94,7 @@ var snapshotCommand = cli.Command{
 	Before: func(cliCtx *cli.Context) error {
 		go mem.LogMemStats(cliCtx.Context, log.New())
 		go disk.UpdateDiskStats(cliCtx.Context, log.New())
-		_, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+		_, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 		if err != nil {
 			return err
 		}
@@ -424,7 +423,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 }
 
 func doBtSearch(cliCtx *cli.Context) error {
-	logger, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
 	if err != nil {
 		return err
 	}
@@ -469,7 +468,7 @@ func doBtSearch(cliCtx *cli.Context) error {
 }
 
 func doDebugKey(cliCtx *cli.Context) error {
-	logger, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
 	if err != nil {
 		return err
 	}
@@ -520,7 +519,7 @@ func doDebugKey(cliCtx *cli.Context) error {
 }
 
 func doIntegrity(cliCtx *cli.Context) error {
-	logger, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
 	if err != nil {
 		return err
 	}
@@ -572,11 +571,11 @@ func doIntegrity(cliCtx *cli.Context) error {
 				return err
 			}
 		case integrity.InvertedIndex:
-			if err := integrity.E3EfFiles(ctx, db, agg, failFast, fromStep); err != nil {
+			if err := integrity.E3EfFiles(ctx, db, failFast, fromStep); err != nil {
 				return err
 			}
 		case integrity.HistoryNoSystemTxs:
-			if err := integrity.E3HistoryNoSystemTxs(ctx, db, blockReader, agg); err != nil {
+			if err := integrity.HistoryCheckNoSystemTxs(ctx, db, blockReader); err != nil {
 				return err
 			}
 		case integrity.BorEvents:
@@ -665,13 +664,22 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	if sum != maxTo {
 		return fmt.Errorf("sum %d != maxTo %d", sum, maxTo)
 	}
-	if err := doBlockSnapshotsRangeCheck(snapDir, "headers"); err != nil {
+	if err := doBlockSnapshotsRangeCheck(snapDir, ".seg", "headers"); err != nil {
 		return err
 	}
-	if err := doBlockSnapshotsRangeCheck(snapDir, "bodies"); err != nil {
+	if err := doBlockSnapshotsRangeCheck(snapDir, ".seg", "bodies"); err != nil {
 		return err
 	}
-	if err := doBlockSnapshotsRangeCheck(snapDir, "transactions"); err != nil {
+	if err := doBlockSnapshotsRangeCheck(snapDir, ".seg", "transactions"); err != nil {
+		return err
+	}
+	if err := doBlockSnapshotsRangeCheck(snapDir, ".idx", "headers"); err != nil {
+		return err
+	}
+	if err := doBlockSnapshotsRangeCheck(snapDir, ".idx", "bodies"); err != nil {
+		return err
+	}
+	if err := doBlockSnapshotsRangeCheck(snapDir, ".idx", "transactions"); err != nil {
 		return err
 	}
 	// Iterate over all fies in snapDir
@@ -815,7 +823,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 	return nil
 }
 
-func doBlockSnapshotsRangeCheck(snapDir string, snapType string) error {
+func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) error {
 	type interval struct {
 		from uint64
 		to   uint64
@@ -825,7 +833,7 @@ func doBlockSnapshotsRangeCheck(snapDir string, snapType string) error {
 		if err != nil {
 			return err
 		}
-		if !strings.HasSuffix(info.Name(), ".seg") || !strings.Contains(info.Name(), snapType) {
+		if !strings.HasSuffix(info.Name(), suffix) || !strings.Contains(info.Name(), snapType) {
 			return nil
 		}
 		res, _, ok := snaptype.ParseFileName(snapDir, info.Name())
@@ -1026,7 +1034,7 @@ func doMeta(cliCtx *cli.Context) error {
 }
 
 func doDecompressSpeed(cliCtx *cli.Context) error {
-	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -1066,7 +1074,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 }
 
 func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
-	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -1109,7 +1117,7 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	return nil
 }
 func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
-	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -1219,7 +1227,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 func doUncompress(cliCtx *cli.Context) error {
 	var logger log.Logger
 	var err error
-	if logger, _, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+	if logger, _, _, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
 	ctx := cliCtx.Context
@@ -1269,9 +1277,10 @@ func doUncompress(cliCtx *cli.Context) error {
 	}
 	return nil
 }
+
 func doCompress(cliCtx *cli.Context) error {
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -1340,7 +1349,7 @@ func doCompress(cliCtx *cli.Context) error {
 	return nil
 }
 func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
-	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -1503,11 +1512,12 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 func doUploaderCommand(cliCtx *cli.Context) error {
 	var logger log.Logger
+	var tracer *tracers.Tracer
 	var err error
 	var metricsMux *http.ServeMux
 	var pprofMux *http.ServeMux
 
-	if logger, metricsMux, pprofMux, err = debug.Setup(cliCtx, true /* root logger */); err != nil {
+	if logger, tracer, metricsMux, pprofMux, err = debug.Setup(cliCtx, true /* root logger */); err != nil {
 		return err
 	}
 
@@ -1527,7 +1537,7 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 
 	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
 
-	ethNode, err := node.New(cliCtx.Context, nodeCfg, ethCfg, logger)
+	ethNode, err := node.New(cliCtx.Context, nodeCfg, ethCfg, logger, tracer)
 	if err != nil {
 		log.Error("Erigon startup", "err", err)
 		return err
@@ -1551,7 +1561,7 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 		Accede(true) // integration tool: open db without creation and without blocking erigon
 }
 func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *libstate.Aggregator {
-	agg, err := libstate.NewAggregator2(ctx, dirs, config3.DefaultStepSize, chainDB, logger)
+	agg, err := libstate.NewAggregator(ctx, dirs, config3.DefaultStepSize, chainDB, logger)
 	if err != nil {
 		panic(err)
 	}

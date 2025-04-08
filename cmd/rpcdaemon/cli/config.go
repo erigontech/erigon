@@ -411,13 +411,13 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 
 		// Configure sapshots
 
-		snapCfg := cfg.Snap
+		cfg.Snap.ChainName = cc.ChainName
 		// this assumed the rpc deamon never runs with a downloader - if this is
 		// not the case we'll need to adjust the defaults of the --no-downlaoder
 		// flag to the faulse by default
-		snapCfg.NoDownloader = true
-		allSnapshots = freezeblocks.NewRoSnapshots(snapCfg, cfg.Dirs.Snap, 0, logger)
-		allBorSnapshots = heimdall.NewRoSnapshots(snapCfg, cfg.Dirs.Snap, 0, logger)
+		cfg.Snap.NoDownloader = true
+		allSnapshots = freezeblocks.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
+		allBorSnapshots = heimdall.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
 
 		if polygonSync {
 			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, cfg.Dirs.DataDir, true, roTxLimit), allBorSnapshots)
@@ -430,7 +430,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, heimdallStore, bridgeStore)
 		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader))
 
-		agg, err := libstate.NewAggregator2(ctx, cfg.Dirs, config3.DefaultStepSize, rawDB, logger)
+		agg, err := libstate.NewAggregator(ctx, cfg.Dirs, config3.DefaultStepSize, rawDB, logger)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("create aggregator: %w", err)
 		}
@@ -841,9 +841,9 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		}()
 	}
 
-	logger.Info("JsonRpc endpoint opened", info...)
+	logger.Info("[rpc] endpoint opened", info...)
 	<-ctx.Done()
-	logger.Info("Exiting...")
+	logger.Info("[rpc] Exiting...")
 	return nil
 }
 
@@ -1140,7 +1140,7 @@ func (e *remoteConsensusEngine) Prepare(_ consensus.ChainHeaderReader, _ *types.
 	panic("remoteConsensusEngine.Prepare not supported")
 }
 
-func (e *remoteConsensusEngine) Finalize(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ types.Transactions, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ consensus.ChainReader, _ consensus.SystemCall, _ log.Logger) (types.Transactions, types.Receipts, types.FlatRequests, error) {
+func (e *remoteConsensusEngine) Finalize(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ types.Transactions, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ consensus.ChainReader, _ consensus.SystemCall, skipReceiptsEval bool, _ log.Logger) (types.Transactions, types.Receipts, types.FlatRequests, error) {
 	panic("remoteConsensusEngine.Finalize not supported")
 }
 

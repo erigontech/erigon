@@ -103,6 +103,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		stagedsync.SendersCfg{},
 		stagedsync.MiningExecCfg{},
 		stagedsync.MiningFinishCfg{},
+		false,
 	)
 	miningSync := stagedsync.New(
 		ethconfig.Defaults.Sync,

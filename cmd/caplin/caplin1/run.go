@@ -72,7 +72,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/stages"
 	"github.com/erigontech/erigon/cl/pool"
 
-	"github.com/Giulio2002/bls"
+	"github.com/erigontech/erigon/cl/utils/bls"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
@@ -392,8 +392,18 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	antiq := antiquary.NewAntiquary(ctx, blobStorage, genesisState, vTables, beaconConfig, dirs, snDownloader, indexDB, stateSnapshots, csn, rcsn, syncedDataManager, logger, config.ArchiveStates, config.ArchiveBlocks, config.ArchiveBlobs, config.SnapshotGenerationEnabled, snBuildSema)
 	// Create the antiquary
 	go func() {
-		if err := antiq.Loop(); err != nil {
-			logger.Error("Antiquary failed", "err", err)
+		keepGoing := true
+		for keepGoing {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(10 * time.Second):
+				if err := antiq.Loop(); err != nil {
+					logger.Debug("Antiquary failed", "err", err)
+				} else {
+					keepGoing = false
+				}
+			}
 		}
 	}()
 

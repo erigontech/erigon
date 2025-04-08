@@ -25,11 +25,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/jwt"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/execution_client/rpc_helper"
@@ -47,7 +47,7 @@ type ExecutionClientRpc struct {
 }
 
 func NewExecutionClientRPC(jwtSecret []byte, addr string, port int) (*ExecutionClientRpc, error) {
-	roundTripper := rpc_helper.NewJWTRoundTripper(jwtSecret)
+	roundTripper := jwt.NewHttpRoundTripper(http.DefaultTransport, jwtSecret)
 	client := &http.Client{Timeout: DefaultRPCHTTPTimeout, Transport: roundTripper}
 
 	isHTTPpecified := strings.HasPrefix(addr, "http")
@@ -273,7 +273,7 @@ func (cc *ExecutionClientRpc) HasBlock(ctx context.Context, hash libcommon.Hash)
 
 // Block production
 
-func (cc *ExecutionClientRpc) GetAssembledBlock(ctx context.Context, id []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *big.Int, error) {
+func (cc *ExecutionClientRpc) GetAssembledBlock(ctx context.Context, id []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *typesproto.RequestsBundle, *big.Int, error) {
 	panic("unimplemented")
 }
 

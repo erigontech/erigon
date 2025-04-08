@@ -24,7 +24,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Giulio2002/bls"
+	"github.com/erigontech/erigon/cl/utils/bls"
 
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"

@@ -155,10 +155,10 @@ func TestAllocConstructor(t *testing.T) {
 	require.NoError(err)
 	state := state.New(reader)
 	balance, err := state.GetBalance(address)
-	assert.NoError(err)
+	require.NoError(err)
 	assert.Equal(funds, balance.ToBig())
 	code, err := state.GetCode(address)
-	assert.NoError(err)
+	require.NoError(err)
 	assert.Equal(libcommon.FromHex("5f355f55"), code)
 
 	key0 := libcommon.HexToHash("0000000000000000000000000000000000000000000000000000000000000000")

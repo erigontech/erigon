@@ -176,9 +176,9 @@ func (r *SnapshotsRepository) updateState(stateTx *state.AggregatorRoTx) error {
 	for i := 0; i < len(iiRanges); i++ {
 		iiRanges[i] = mergeRange
 	}
-	ranges := state.NewRangesV3(allDomainRanges, iiRanges)
+	ranges := state.NewRanges(allDomainRanges, iiRanges)
 
-	allFiles, err := stateTx.StaticFilesInRange(&ranges)
+	allFiles, err := stateTx.FilesInRange(&ranges)
 	if err != nil {
 		return err
 	}

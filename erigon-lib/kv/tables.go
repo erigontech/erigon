@@ -103,19 +103,7 @@ const (
 	EthTx    = "BlockTransaction" // tx_id_u64 -> rlp(tx)
 	MaxTxNum = "MaxTxNum"         // block_number_u64 -> max_tx_num_in_block_u64
 
-	Receipts = "Receipt"        // block_num_u64 -> canonical block receipts (non-canonical are not stored)
-	Log      = "TransactionLog" // block_num_u64 + txId -> logs of transaction
-
-	// Stores bitmap indices - in which block numbers saw logs of given 'address' or 'topic'
-	// [addr or topic] + [2 bytes inverted shard number] -> bitmap(blockN)
-	// indices are sharded - because some bitmaps are >1Mb and when new incoming blocks process it
-	//	 updates ~300 of bitmaps - by append small amount new values. It cause much big writes (MDBX does copy-on-write).
-	//
-	// if last existing shard size merge it with delta
-	// if serialized size of delta > ShardLimit - break down to multiple shards
-	// shard number - it's biggest value in bitmap
-	LogTopicIndex   = "LogTopicIndex"
-	LogAddressIndex = "LogAddressIndex"
+	Receipts = "Receipt" // block_num_u64 + block_hash + tx_index_u32 -> txn receipt
 
 	// CallTraceSet is the name of the table that contain the mapping of block number to the set (sorted) of all accounts
 	// touched by call traces. It is DupSort-ed table
@@ -129,8 +117,6 @@ const (
 	TxLookup = "BlockTransactionLookup" // hash -> transaction/receipt lookup metadata
 
 	ConfigTable = "Config" // config prefix for the db
-
-	PreimagePrefix = "SecureKey" // preimagePrefix + hash -> preima
 
 	// Progress of sync stages: stageName -> stageData
 	SyncStageProgress = "SyncStage"
@@ -297,6 +283,15 @@ const (
 	RandaoMixes      = "RandaoMixes"      // [validator_index+slot] => [randao_mix]
 	Proposers        = "BlockProposers"   // epoch => proposers indicies
 
+	// Electra
+	PendingDepositsDump           = "PendingDepositsDump"           // block_num => dump
+	PendingPartialWithdrawalsDump = "PendingPartialWithdrawalsDump" // block_num => dump
+	PendingConsolidationsDump     = "PendingConsolidationsDump"     // block_num => dump
+	PendingDeposits               = "PendingDeposits"               // slot => queue_diffs
+	PendingPartialWithdrawals     = "PendingPartialWithdrawals"     // slot => queue_diffs
+	PendingConsolidations         = "PendingConsolidations"         // slot => queue_diffs
+	// End Electra
+
 	StatesProcessingProgress = "StatesProcessingProgress"
 
 	//Diagnostics tables
@@ -348,12 +343,9 @@ var ChaindataTables = []string{
 	HeadHeaderKey,
 	LastForkchoice,
 	Migrations,
-	LogTopicIndex,
-	LogAddressIndex,
 	CallTraceSet,
 	CallFromIndex,
 	CallToIndex,
-	Log,
 	Sequence,
 	EthTx,
 	TrieOfAccounts,
@@ -450,6 +442,12 @@ var ChaindataTables = []string{
 	CurrentSyncCommittee,
 	Eth1DataVotes,
 	IntraRandaoMixes,
+	PendingConsolidations,
+	PendingDeposits,
+	PendingDepositsDump,
+	PendingPartialWithdrawalsDump,
+	PendingConsolidationsDump,
+	PendingPartialWithdrawals,
 	ActiveValidatorIndicies,
 	EffectiveBalancesDump,
 	BalancesDump,
@@ -509,7 +507,7 @@ type CmpFunc func(k1, k2, v1, v2 []byte) int
 type TableCfg map[string]TableCfgItem
 type Bucket string
 
-type DBI uint
+type DBI uint32
 type TableFlags uint
 
 const (

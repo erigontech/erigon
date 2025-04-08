@@ -80,8 +80,10 @@ func TestCreation(t *testing.T) {
 				{17034869, 1681338443, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 1681338455}}, // Last pre-Shanghai block
 				{17034870, 1681338479, ID{Hash: checksumToBytes(0xdce96c2d), Next: 1710338135}}, // First Shanghai block
 				{19426586, 1710338123, ID{Hash: checksumToBytes(0xdce96c2d), Next: 1710338135}}, // Last Shanghai block
-				{19426587, 1710338135, ID{Hash: checksumToBytes(0x9f3d2254), Next: 0}},          // First Cancun block
-				{20000000, 1800000000, ID{Hash: checksumToBytes(0x9f3d2254), Next: 0}},          // Future Cancun block (mock)
+				{19426587, 1710338135, ID{Hash: checksumToBytes(0x9f3d2254), Next: 1746612311}}, // First Cancun block
+				{22432453, 1746612299, ID{Hash: checksumToBytes(0x9f3d2254), Next: 1746612311}}, // Last Cancun block (approx.)
+				{22432454, 1746612311, ID{Hash: checksumToBytes(0xc376cf8b), Next: 0}},          // First Prague block (approx.)
+				{30000000, 1900000000, ID{Hash: checksumToBytes(0xc376cf8b), Next: 0}},          // Future Prague block (mock)
 			},
 		},
 		// Sepolia test cases
@@ -116,6 +118,17 @@ func TestCreation(t *testing.T) {
 			},
 		},
 
+		// Hoodi test cases
+		{
+			params.HoodiChainConfig,
+			params.HoodiGenesisHash,
+			[]testcase{
+				{0, 174221200, ID{Hash: checksumToBytes(0xbef71d30), Next: 1742999832}},      // First Cancun block
+				{50000, 1742999820, ID{Hash: checksumToBytes(0xbef71d30), Next: 1742999832}}, // Last Cancun block (approx)
+				{50001, 1742999832, ID{Hash: checksumToBytes(0x0929e24e), Next: 0}},          // First Prague block (approx)
+				{8000000, 1800000000, ID{Hash: checksumToBytes(0x0929e24e), Next: 0}},        // Future Prague block (mock)
+			},
+		},
 		// Gnosis test cases
 		{
 			params.GnosisChainConfig,
@@ -148,11 +161,13 @@ func TestCreation(t *testing.T) {
 			params.ChiadoGenesisHash,
 			[]testcase{
 				{0, 0, ID{Hash: checksumToBytes(0x50d39d7b), Next: 1684934220}},
-				{4100418, 1684934215, ID{Hash: checksumToBytes(0x50d39d7b), Next: 1684934220}}, // Last pre-Shanghai block
-				{4100419, 1684934220, ID{Hash: checksumToBytes(0xa15a4252), Next: 1706724940}}, // First Shanghai block
-				{8021277, 1706724930, ID{Hash: checksumToBytes(0xa15a4252), Next: 1706724940}}, // Last Shanghai block
-				{8021278, 1706724940, ID{Hash: checksumToBytes(0x5fbc16bc), Next: 0}},          // First Cancun block
-				{10000000, 1800000000, ID{Hash: checksumToBytes(0x5fbc16bc), Next: 0}},         // Future Cancun block (mock)
+				{4100418, 1684934215, ID{Hash: checksumToBytes(0x50d39d7b), Next: 1684934220}},  // Last pre-Shanghai block
+				{4100419, 1684934220, ID{Hash: checksumToBytes(0xa15a4252), Next: 1706724940}},  // First Shanghai block
+				{8021277, 1706724930, ID{Hash: checksumToBytes(0xa15a4252), Next: 1706724940}},  // Last Shanghai block
+				{8021278, 1706724940, ID{Hash: checksumToBytes(0x5fbc16bc), Next: 1741254220}},  // First Cancun block
+				{14655798, 1741254215, ID{Hash: checksumToBytes(0x5fbc16bc), Next: 1741254220}}, // Last Cancun block (approx)
+				{14655799, 1741254220, ID{Hash: checksumToBytes(0x8ba51786), Next: 0}},          // First Prague block (approx)
+				{20000000, 1800000000, ID{Hash: checksumToBytes(0x8ba51786), Next: 0}},          // Future Prague block (mock)
 			},
 		},
 		// Amoy test cases

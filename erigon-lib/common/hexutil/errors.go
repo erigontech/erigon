@@ -20,15 +20,17 @@ import "fmt"
 
 // These errors are from go-ethereum in order to keep compatibility with geth error codes.
 var (
-	ErrEmptyString   = &decError{"empty hex string"}
-	ErrSyntax        = &decError{"invalid hex string"}
-	ErrMissingPrefix = &decError{"hex string without 0x prefix"}
-	ErrOddLength     = &decError{"hex string of odd length"}
-	ErrEmptyNumber   = &decError{"hex string \"0x\""}
-	ErrLeadingZero   = &decError{"hex number with leading zero digits"}
-	ErrUint64Range   = &decError{"hex number > 64 bits"}
-	ErrUintRange     = &decError{fmt.Sprintf("hex number > %d bits", uintBits)}
-	ErrBig256Range   = &decError{"hex number > 256 bits"}
+	ErrEmptyString      = &decError{"empty hex string"}
+	ErrSyntax           = &decError{"invalid hex string"}
+	ErrMissingPrefix    = &decError{"hex string without 0x prefix"}
+	ErrOddLength        = &decError{"hex string of odd length"}
+	ErrEmptyNumber      = &decError{"hex string \"0x\""}
+	ErrLeadingZero      = &decError{"hex number with leading zero digits"}
+	ErrUint64Range      = &decError{"hex number > 64 bits"}
+	ErrUintRange        = &decError{fmt.Sprintf("hex number > %d bits", uintBits)}
+	ErrBig256Range      = &decError{"hex number > 256 bits"}
+	ErrTooBigHexString  = &decError{"hex string too long, want at most 32 bytes"}
+	ErrHexStringInvalid = &decError{"hex string invalid"}
 )
 
 type decError struct{ msg string }

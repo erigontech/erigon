@@ -17,6 +17,7 @@
 package kvcache
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -25,8 +26,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/erigontech/erigon-lib/types/accounts"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -39,6 +38,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
 func TestEvictionInUnexpectedOrder(t *testing.T) {
@@ -49,15 +49,15 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 	cfg.NewBlockWait = 0
 	c := New(cfg)
 	c.selectOrCreateRoot(2)
-	require.Equal(1, len(c.roots))
-	require.Equal(0, int(c.latestStateVersionID))
+	require.Len(c.roots, 1)
+	require.Zero(int(c.latestStateVersionID))
 	require.False(c.roots[2].isCanonical)
 
 	c.add([]byte{1}, nil, c.roots[2], 2)
-	require.Equal(0, c.stateEvict.Len())
+	require.Zero(c.stateEvict.Len())
 
 	c.advanceRoot(2)
-	require.Equal(1, len(c.roots))
+	require.Len(c.roots, 1)
 	require.Equal(2, int(c.latestStateVersionID))
 	require.True(c.roots[2].isCanonical)
 
@@ -65,7 +65,7 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 	require.Equal(1, c.stateEvict.Len())
 
 	c.selectOrCreateRoot(5)
-	require.Equal(2, len(c.roots))
+	require.Len(c.roots, 2)
 	require.Equal(2, int(c.latestStateVersionID))
 	require.False(c.roots[5].isCanonical)
 
@@ -75,32 +75,32 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 	require.Equal(2, c.stateEvict.Len())
 
 	c.selectOrCreateRoot(6)
-	require.Equal(3, len(c.roots))
+	require.Len(c.roots, 3)
 	require.Equal(2, int(c.latestStateVersionID))
 	require.False(c.roots[6].isCanonical) // parrent exists, but parent has isCanonical=false
 
 	c.advanceRoot(3)
-	require.Equal(4, len(c.roots))
+	require.Len(c.roots, 4)
 	require.Equal(3, int(c.latestStateVersionID))
 	require.True(c.roots[3].isCanonical)
 
 	c.advanceRoot(4)
-	require.Equal(5, len(c.roots))
+	require.Len(c.roots, 5)
 	require.Equal(4, int(c.latestStateVersionID))
 	require.True(c.roots[4].isCanonical)
 
 	c.selectOrCreateRoot(5)
-	require.Equal(5, len(c.roots))
+	require.Len(c.roots, 5)
 	require.Equal(4, int(c.latestStateVersionID))
 	require.False(c.roots[5].isCanonical)
 
 	c.advanceRoot(5)
-	require.Equal(5, len(c.roots))
+	require.Len(c.roots, 5)
 	require.Equal(5, int(c.latestStateVersionID))
 	require.True(c.roots[5].isCanonical)
 
 	c.advanceRoot(100)
-	require.Equal(6, len(c.roots))
+	require.Len(c.roots, 6)
 	require.Equal(100, int(c.latestStateVersionID))
 	require.True(c.roots[100].isCanonical)
 
@@ -199,7 +199,7 @@ func TestAPI(t *testing.T) {
 			wg.Add(1)
 			res[i] = make(chan []byte)
 			go func(out chan []byte) {
-				require.NoError(db.View(context.Background(), func(tx kv.Tx) error {
+				err := db.View(context.Background(), func(tx kv.Tx) error {
 					if expectTxnID != tx.ViewID() {
 						panic(fmt.Sprintf("epxected: %d, got: %d", expectTxnID, tx.ViewID()))
 					}
@@ -216,7 +216,10 @@ func TestAPI(t *testing.T) {
 					fmt.Println("get", key, v)
 					out <- common.Copy(v)
 					return nil
-				}))
+				})
+				if err != nil {
+					panic(err)
+				}
 			}(res[i])
 		}
 		wg.Wait() // ensure that all goroutines started their transactions
@@ -252,10 +255,15 @@ func TestAPI(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := range res1 {
-			require.Nil(<-res1[i])
+			if <-res1[i] != nil {
+				panic(fmt.Sprintf("epxected nil"))
+			}
 		}
 		for i := range res2 {
-			require.Equal(account1Enc, <-res2[i])
+			v := <-res2[i]
+			if !bytes.Equal(account1Enc, v) {
+				panic(fmt.Sprintf("epxected: %x, got: %x", account1Enc, v))
+			}
 		}
 		fmt.Printf("done1: \n")
 	}()
@@ -286,10 +294,16 @@ func TestAPI(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := range res3 {
-			require.Equal(account2Enc, <-res3[i])
+			v := <-res3[i]
+			if !bytes.Equal(account2Enc, v) {
+				panic(fmt.Sprintf("epxected: %x, got: %x", account2Enc, v))
+			}
 		}
 		for i := range res4 {
-			require.Equal(account1Enc, <-res4[i])
+			v := <-res4[i]
+			if !bytes.Equal(account1Enc, v) {
+				panic(fmt.Sprintf("epxected: %x, got: %x", account1Enc, v))
+			}
 		}
 		fmt.Printf("done2: \n")
 	}()
@@ -317,11 +331,17 @@ func TestAPI(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := range res5 {
-			require.Equal(account2Enc, <-res5[i])
+			v := <-res5[i]
+			if !bytes.Equal(account2Enc, v) {
+				panic(fmt.Sprintf("epxected: %x, got: %x", account2Enc, v))
+			}
 		}
 		fmt.Printf("-----21\n")
 		for i := range res6 {
-			require.Equal(account1Enc, <-res6[i])
+			v := <-res6[i]
+			if !bytes.Equal(account1Enc, v) {
+				panic(fmt.Sprintf("epxected: %x, got: %x", account1Enc, v))
+			}
 		}
 		fmt.Printf("done3: \n")
 	}()
@@ -371,10 +391,16 @@ func TestAPI(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := range res7 {
-			require.Equal(account4Enc, <-res7[i])
+			v := <-res7[i]
+			if !bytes.Equal(account4Enc, v) {
+				panic(fmt.Sprintf("epxected: %x, got: %x", account4Enc, v))
+			}
 		}
 		for i := range res8 {
-			require.Equal(account1Enc, <-res8[i])
+			v := <-res8[i]
+			if !bytes.Equal(account1Enc, v) {
+				panic(fmt.Sprintf("epxected: %x, got: %x", account1Enc, v))
+			}
 		}
 		fmt.Printf("done4: \n")
 	}()

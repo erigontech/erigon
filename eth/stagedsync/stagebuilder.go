@@ -43,6 +43,7 @@ func MiningStages(
 	sendersCfg SendersCfg,
 	execCfg MiningExecCfg,
 	finish MiningFinishCfg,
+	astridEnabled bool,
 ) []*Stage {
 	return []*Stage{
 		{
@@ -71,6 +72,7 @@ func MiningStages(
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return nil
 			},
+			Disabled: astridEnabled,
 		},
 		{
 			ID:          stages.MiningExecution,

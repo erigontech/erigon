@@ -30,6 +30,8 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
+	privateapi2 "github.com/erigontech/erigon/turbo/privateapi"
+
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
@@ -45,7 +47,6 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/ethdb/privateapi"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/builder"
 	"github.com/erigontech/erigon/turbo/jsonrpc/contracts"
@@ -311,10 +312,10 @@ func CreateTestGrpcConn(t *testing.T, m *mock.MockSentry) (context.Context, *grp
 	ethashApi := apis[1].Service.(*ethash.API)
 	server := grpc.NewServer()
 
-	remote.RegisterETHBACKENDServer(server, privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications,
-		m.BlockReader, log.New(), builder.NewLatestBlockBuiltStore()))
+	remote.RegisterETHBACKENDServer(server, privateapi2.NewEthBackendServer(ctx, nil, m.DB, m.Notifications,
+		m.BlockReader, log.New(), builder.NewLatestBlockBuiltStore(), nil))
 	txpool.RegisterTxpoolServer(server, m.TxPoolGrpcServer)
-	txpool.RegisterMiningServer(server, privateapi.NewMiningServer(ctx, &IsMiningMock{}, ethashApi, m.Log))
+	txpool.RegisterMiningServer(server, privateapi2.NewMiningServer(ctx, &IsMiningMock{}, ethashApi, m.Log))
 	listener := bufconn.Listen(1024 * 1024)
 
 	dialer := func() func(context.Context, string) (net.Conn, error) {

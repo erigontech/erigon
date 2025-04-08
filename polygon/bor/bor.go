@@ -931,10 +931,23 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	// where it fetches producers internally. As we fetch data from span
 	// in Erigon, use directly the `GetCurrentProducers` function.
 	if c.config.IsSprintEnd(number) {
-		spanID := uint64(heimdall.SpanIdAt(number + 1))
-		newValidators, err := c.spanner.GetCurrentProducers(spanID, chain.(ChainHeaderReader))
-		if err != nil {
-			return errUnknownValidators
+		var newValidators []*valset.Validator
+
+		if c.useSpanReader {
+			validators, err := c.spanReader.Producers(context.Background(), number+1)
+			if err != nil {
+				return err
+			}
+
+			newValidators = validators.Validators
+		} else {
+			var err error
+			spanID := uint64(heimdall.SpanIdAt(number + 1))
+
+			newValidators, err = c.spanner.GetCurrentProducers(spanID, chain.(ChainHeaderReader))
+			if err != nil {
+				return errUnknownValidators
+			}
 		}
 
 		// sort validator by address
@@ -1019,7 +1032,7 @@ func (c *Bor) CalculateRewards(config *chain.Config, header *types.Header, uncle
 // rewards given.
 func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
-	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
+	chain consensus.ChainReader, syscall consensus.SystemCall, skipReceiptsEval bool, logger log.Logger,
 ) (types.Transactions, types.Receipts, types.FlatRequests, error) {
 	headerNumber := header.Number.Uint64()
 

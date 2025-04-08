@@ -12,41 +12,41 @@ import (
 
 // this is supposed to register domains/iis
 
-func NewAggregator2(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
+func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
 	salt, err := getStateIndicesSalt(dirs.Snap)
 	if err != nil {
 		return nil, err
 	}
 
-	a, err := NewAggregator(ctx, dirs, aggregationStep, db, logger)
+	a, err := newAggregatorOld(ctx, dirs, aggregationStep, db, logger)
 	if err != nil {
 		return nil, err
 	}
-	if err := a.registerDomain(kv.AccountsDomain, salt, dirs, aggregationStep, logger); err != nil {
+	if err := a.registerDomain(kv.AccountsDomain, salt, dirs, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerDomain(kv.StorageDomain, salt, dirs, aggregationStep, logger); err != nil {
+	if err := a.registerDomain(kv.StorageDomain, salt, dirs, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerDomain(kv.CodeDomain, salt, dirs, aggregationStep, logger); err != nil {
+	if err := a.registerDomain(kv.CodeDomain, salt, dirs, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerDomain(kv.CommitmentDomain, salt, dirs, aggregationStep, logger); err != nil {
+	if err := a.registerDomain(kv.CommitmentDomain, salt, dirs, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerDomain(kv.ReceiptDomain, salt, dirs, aggregationStep, logger); err != nil {
+	if err := a.registerDomain(kv.ReceiptDomain, salt, dirs, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerII(kv.LogAddrIdx, salt, dirs, aggregationStep, kv.FileLogAddressIdx, kv.TblLogAddressKeys, kv.TblLogAddressIdx, logger); err != nil {
+	if err := a.registerII(kv.LogAddrIdx, salt, dirs, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerII(kv.LogTopicIdx, salt, dirs, aggregationStep, kv.FileLogTopicsIdx, kv.TblLogTopicsKeys, kv.TblLogTopicsIdx, logger); err != nil {
+	if err := a.registerII(kv.LogTopicIdx, salt, dirs, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerII(kv.TracesFromIdx, salt, dirs, aggregationStep, kv.FileTracesFromIdx, kv.TblTracesFromKeys, kv.TblTracesFromIdx, logger); err != nil {
+	if err := a.registerII(kv.TracesFromIdx, salt, dirs, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerII(kv.TracesToIdx, salt, dirs, aggregationStep, kv.FileTracesToIdx, kv.TblTracesToKeys, kv.TblTracesToIdx, logger); err != nil {
+	if err := a.registerII(kv.TracesToIdx, salt, dirs, logger); err != nil {
 		return nil, err
 	}
 	a.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(100_000) // ~1k blocks of history
@@ -150,6 +150,7 @@ var Schema = map[kv.Domain]domainCfg{
 			historyLargeValues: false,
 			filenameBase:       kv.CommitmentDomain.String(),
 			historyIdx:         kv.CommitmentHistoryIdx,
+			historyDisabled:    true,
 
 			iiCfg: iiCfg{
 				keysTable: kv.TblCommitmentHistoryKeys, valuesTable: kv.TblCommitmentIdx,
@@ -179,5 +180,32 @@ var Schema = map[kv.Domain]domainCfg{
 				filenameBase: kv.ReceiptDomain.String(),
 			},
 		},
+	},
+}
+
+var StandaloneIISchema = map[kv.InvertedIdx]iiCfg{
+	kv.LogAddrIdx: {
+		filenameBase: kv.FileLogAddressIdx, keysTable: kv.TblLogAddressKeys, valuesTable: kv.TblLogAddressIdx,
+
+		compression: seg.CompressNone,
+		name:        kv.LogAddrIdx,
+	},
+	kv.LogTopicIdx: {
+		filenameBase: kv.FileLogTopicsIdx, keysTable: kv.TblLogTopicsKeys, valuesTable: kv.TblLogTopicsIdx,
+
+		compression: seg.CompressNone,
+		name:        kv.LogTopicIdx,
+	},
+	kv.TracesFromIdx: {
+		filenameBase: kv.FileTracesFromIdx, keysTable: kv.TblTracesFromKeys, valuesTable: kv.TblTracesFromIdx,
+
+		compression: seg.CompressNone,
+		name:        kv.TracesFromIdx,
+	},
+	kv.TracesToIdx: {
+		filenameBase: kv.FileTracesToIdx, keysTable: kv.TblTracesToKeys, valuesTable: kv.TblTracesToIdx,
+
+		compression: seg.CompressNone,
+		name:        kv.TracesToIdx,
 	},
 }

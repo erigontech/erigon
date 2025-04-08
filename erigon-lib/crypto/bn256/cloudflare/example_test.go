@@ -47,5 +47,5 @@ func TestExamplePair(t *testing.T) {
 	require.Equal(t, k1, k2)
 	require.Equal(t, k1, k3)
 
-	require.Equal(t, len(np), 4) //Avoid gometalinter varcheck err on np
+	require.Len(t, np, 4) //Avoid gometalinter varcheck err on np
 }

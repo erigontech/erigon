@@ -26,7 +26,6 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/bitmapdb"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/stream"
@@ -54,6 +53,11 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.TemporalTx, block *ty
 
 func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64) (*types.Receipt, error) {
 	return api.receiptsGenerator.GetReceipt(ctx, cc, tx, header, txn, index, txNum)
+}
+
+func (api *BaseAPI) getReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+	return api.receiptsGenerator.GetReceiptsGasUsed(tx, block, txNumsReader)
 }
 
 func (api *BaseAPI) getCachedReceipt(ctx context.Context, hash common.Hash) (*types.Receipt, bool) {
@@ -161,65 +165,6 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	return logs, nil
 }
 
-// The Topic list restricts matches to particular event topics. Each event has a list
-// of topics. Topics matches a prefix of that list. An empty element slice matches any
-// topic. Non-empty elements represent an alternative that matches any of the
-// contained topics.
-//
-// Examples:
-// {} or nil          matches any topic list
-// {{A}}              matches topic A in first position
-// {{}, {B}}          matches any topic in first position AND B in second position
-// {{A}, {B}}         matches topic A in first position AND B in second position
-// {{A, B}, {C, D}}   matches topic (A OR B) in first position AND (C OR D) in second position
-func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint64) (*roaring.Bitmap, error) {
-	var result *roaring.Bitmap
-	for _, sub := range topics {
-		var bitmapForORing *roaring.Bitmap
-		for _, topic := range sub {
-			m, err := bitmapdb.Get(c, kv.LogTopicIndex, topic[:], uint32(from), uint32(to))
-			if err != nil {
-				return nil, err
-			}
-			if bitmapForORing == nil {
-				bitmapForORing = m
-				continue
-			}
-			bitmapForORing.Or(m)
-		}
-
-		if bitmapForORing == nil {
-			continue
-		}
-		if result == nil {
-			result = bitmapForORing
-			continue
-		}
-
-		result = roaring.And(bitmapForORing, result)
-	}
-	return result, nil
-}
-func getAddrsBitmap(tx kv.Tx, addrs []common.Address, from, to uint64) (*roaring.Bitmap, error) {
-	if len(addrs) == 0 {
-		return nil, nil
-	}
-	rx := make([]*roaring.Bitmap, len(addrs))
-	defer func() {
-		for _, bm := range rx {
-			bitmapdb.ReturnToPool(bm)
-		}
-	}()
-	for idx, addr := range addrs {
-		m, err := bitmapdb.Get(tx, kv.LogAddressIndex, addr[:], uint32(from), uint32(to))
-		if err != nil {
-			return nil, err
-		}
-		rx[idx] = m
-	}
-	return roaring.FastOr(rx...), nil
-}
-
 func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) (out stream.U64, err error) {
 	//[from,to)
 	var fromTxNum, toTxNum uint64
@@ -297,10 +242,20 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 		if isFinalTxn {
 			if chainConfig.Bor != nil {
+				if header == nil {
+					header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum)
+					if err != nil {
+						return nil, err
+					}
+				}
 				// check for state sync event logs
 				events, err := api.stateSyncEvents(ctx, tx, header.Hash(), blockNum, chainConfig)
 				if err != nil {
 					return logs, err
+				}
+
+				if len(events) == 0 {
+					continue
 				}
 
 				borLogs, err := api.borReceiptGenerator.GenerateBorLogs(ctx, events, txNumsReader, tx, header, chainConfig, txIndex, len(logs))
@@ -470,18 +425,13 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	}
 
 	// Private API returns 0 if transaction is not found.
-	if blockNum == 0 && chainConfig.Bor != nil {
+	isBorStateSyncTx := blockNum == 0 && chainConfig.Bor != nil
+
+	if isBorStateSyncTx {
 		if api.useBridgeReader {
 			blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
 			if err != nil {
 				return nil, err
-			}
-			if ok {
-				txNumNextBlock, err := txNumsReader.Min(tx, blockNum+1)
-				if err != nil {
-					return nil, err
-				}
-				txNum = txNumNextBlock - 1
 			}
 		} else {
 			blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, txnHash)
@@ -495,7 +445,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, nil
 	}
 
-	if txNumMin+2 > txNum { //TODO: what a magic is this "2" and how to avoid it
+	if txNumMin+1 > txNum && !isBorStateSyncTx {
 		return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
 	}
 
@@ -504,14 +454,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, err
 	}
 
-	var txnIndex = int(txNum - txNumMin - 2)
-
-	txn, err := api._blockReader.TxnByIdxInBlock(ctx, tx, header.Number.Uint64(), txnIndex)
-	if err != nil {
-		return nil, err
-	}
-
-	if txn == nil && chainConfig.Bor != nil {
+	if isBorStateSyncTx {
 		block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
 		if err != nil {
 			return nil, err
@@ -535,6 +478,13 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		}
 
 		return ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), txnHash, false), nil
+	}
+
+	var txnIndex = int(txNum - txNumMin - 1)
+
+	txn, err := api._blockReader.TxnByIdxInBlock(ctx, tx, header.Number.Uint64(), txnIndex)
+	if err != nil {
+		return nil, err
 	}
 
 	receipt, err := api.getReceipt(ctx, chainConfig, tx, header, txn, txnIndex, txNum)
@@ -598,71 +548,4 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	}
 
 	return result, nil
-}
-
-// MapTxNum2BlockNumIter - enrich iterator by TxNumbers, adding more info:
-//   - blockNum
-//   - txIndex in block: -1 means first system tx
-//   - isFinalTxn: last system-txn. BlockRewards and similar things - are attribute to this virtual txn.
-//   - blockNumChanged: means this and previous txNum belongs to different blockNumbers
-//
-// Expect: `it` to return sorted txNums, then blockNum will not change until `it.Next() < maxTxNumInBlock`
-//
-//	it allow certain optimizations.
-type MapTxNum2BlockNumIter struct {
-	it          stream.U64
-	tx          kv.Tx
-	orderAscend bool
-
-	blockNum                         uint64
-	minTxNumInBlock, maxTxNumInBlock uint64
-
-	txNumsReader rawdbv3.TxNumsReader
-}
-
-func MapTxNum2BlockNum(tx kv.Tx, txNumsReader rawdbv3.TxNumsReader, it stream.U64) *MapTxNum2BlockNumIter {
-	return &MapTxNum2BlockNumIter{tx: tx, it: it, orderAscend: true, txNumsReader: txNumsReader}
-}
-func MapDescendTxNum2BlockNum(tx kv.Tx, txNumsReader rawdbv3.TxNumsReader, it stream.U64) *MapTxNum2BlockNumIter {
-	return &MapTxNum2BlockNumIter{tx: tx, it: it, orderAscend: false, txNumsReader: txNumsReader}
-}
-func (i *MapTxNum2BlockNumIter) HasNext() bool { return i.it.HasNext() }
-func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isFinalTxn, blockNumChanged bool, err error) {
-	txNum, err = i.it.Next()
-	if err != nil {
-		return txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err
-	}
-
-	// txNums are sorted, it means blockNum will not change until `txNum < maxTxNumInBlock`
-	if i.maxTxNumInBlock == 0 || (i.orderAscend && txNum > i.maxTxNumInBlock) || (!i.orderAscend && txNum < i.minTxNumInBlock) {
-		blockNumChanged = true
-
-		var ok bool
-		ok, i.blockNum, err = i.txNumsReader.FindBlockNum(i.tx, txNum)
-		if err != nil {
-			return
-		}
-		if !ok {
-			_lb, _lt, _ := i.txNumsReader.Last(i.tx)
-			_fb, _ft, _ := i.txNumsReader.First(i.tx)
-			return txNum, i.blockNum, txIndex, isFinalTxn, blockNumChanged, fmt.Errorf("can't find blockNumber by txNum=%d; last in db: (%d-%d, %d-%d)", txNum, _fb, _lb, _ft, _lt)
-		}
-	}
-	blockNum = i.blockNum
-
-	// if block number changed, calculate all related field
-	if blockNumChanged {
-		i.minTxNumInBlock, err = i.txNumsReader.Min(i.tx, blockNum)
-		if err != nil {
-			return
-		}
-		i.maxTxNumInBlock, err = i.txNumsReader.Max(i.tx, blockNum)
-		if err != nil {
-			return
-		}
-	}
-
-	txIndex = int(txNum) - int(i.minTxNumInBlock) - 1
-	isFinalTxn = txNum == i.maxTxNumInBlock
-	return
 }

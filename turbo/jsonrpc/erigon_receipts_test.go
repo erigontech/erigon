@@ -43,13 +43,13 @@ import (
 )
 
 func TestGetLogs(t *testing.T) {
-	assert := assert.New(t)
+	assert, require := assert.New(t), require.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	{
 		ethApi := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
 
 		logs, err := ethApi.GetLogs(context.Background(), filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(10)})
-		assert.NoError(err)
+		require.NoError(err)
 		assert.Equal(uint64(10), logs[0].BlockNumber)
 
 		// filter by wrong address
@@ -58,7 +58,7 @@ func TestGetLogs(t *testing.T) {
 			ToBlock:   big.NewInt(10),
 			Addresses: libcommon.Addresses{libcommon.Address{}},
 		})
-		assert.NoError(err)
+		require.NoError(err)
 		assert.Equal(0, len(logs))
 
 		// filter by wrong address
@@ -67,7 +67,7 @@ func TestGetLogs(t *testing.T) {
 			ToBlock:   big.NewInt(10),
 			Topics:    [][]libcommon.Hash{{libcommon.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")}},
 		})
-		assert.NoError(err)
+		require.NoError(err)
 		assert.Equal(1, len(logs))
 	}
 }

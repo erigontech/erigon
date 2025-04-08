@@ -201,7 +201,7 @@ func TestGetProof(t *testing.T) {
 			require.NotNil(t, proof)
 
 			tx, err := m.DB.BeginTemporalRo(context.Background())
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			defer tx.Rollback()
 			header, err := api.headerByRPCNumber(context.Background(), rpc.BlockNumber(tt.blockNum), tx)
 			require.NoError(t, err)
@@ -523,16 +523,16 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, libcommon.Addres
 		switch i {
 		case 0:
 			tx, err := types.SignTx(types.NewContractCreation(nonce, new(uint256.Int), 1e6, new(uint256.Int), contract), *signer, bankKey)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			block.AddTx(tx)
 			contractAddr = crypto.CreateAddress(bankAddress, nonce)
 		case 1:
 			txn, err := types.SignTx(types.NewTransaction(nonce, contractAddr, new(uint256.Int), 900000, new(uint256.Int), contractInvocationData(1)), *signer, bankKey)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			block.AddTx(txn)
 		case 2:
 			txn, err := types.SignTx(types.NewTransaction(nonce, contractAddr, new(uint256.Int), 900000, new(uint256.Int), contractInvocationData(2)), *signer, bankKey)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			block.AddTx(txn)
 		}
 	})
@@ -541,7 +541,7 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, libcommon.Addres
 	}
 
 	err = m.InsertChain(chain)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	tx, err := db.BeginTemporalRo(context.Background())
 	if err != nil {
@@ -550,19 +550,19 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, libcommon.Addres
 	defer tx.Rollback()
 
 	stateReader, err := rpchelper.CreateHistoryStateReader(tx, rawdbv3.TxNums, 1, 0, "")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	st := state.New(stateReader)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	exist, err := st.Exist(contractAddr)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.False(t, exist, "Contract should not exist at block #1")
 
 	stateReader, err = rpchelper.CreateHistoryStateReader(tx, rawdbv3.TxNums, 2, 0, "")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	st = state.New(stateReader)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	exist, err = st.Exist(contractAddr)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.True(t, exist, "Contract should exist at block #2")
 
 	return m, bankAddress, contractAddr
@@ -572,25 +572,22 @@ func doPrune(t *testing.T, db kv.RwDB, pruneTo uint64) {
 	ctx := context.Background()
 	logger := testlog.Logger(t, log.LvlCrit)
 	tx, err := db.BeginRw(ctx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	logEvery := time.NewTicker(20 * time.Second)
 
 	err = rawdb.PruneTableDupSort(tx, kv.TblAccountVals, "", pruneTo, logEvery, ctx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	err = rawdb.PruneTableDupSort(tx, kv.StorageChangeSetDeprecated, "", pruneTo, logEvery, ctx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	err = rawdb.PruneTable(tx, kv.Receipts, pruneTo, ctx, math.MaxInt32, time.Hour, logger, "")
-	assert.NoError(t, err)
-
-	err = rawdb.PruneTable(tx, kv.Log, pruneTo, ctx, math.MaxInt32, time.Hour, logger, "")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	err = rawdb.PruneTableDupSort(tx, kv.CallTraceSet, "", pruneTo, logEvery, ctx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	err = tx.Commit()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 }

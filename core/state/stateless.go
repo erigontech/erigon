@@ -264,10 +264,6 @@ func (s *Stateless) CreateContract(address common.Address) error {
 	return nil
 }
 
-func (s *Stateless) WriteChangeSets() error { return nil }
-
-func (s *Stateless) WriteHistory() error { return nil }
-
 // CheckRoot finalises the execution of a block and computes the resulting state root
 func (s *Stateless) CheckRoot(expected common.Hash) error {
 	h := s.Finalize()

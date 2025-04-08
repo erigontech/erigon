@@ -32,7 +32,7 @@ func (l *LocalCheckpointSyncer) GetLatestBeaconState(ctx context.Context) (*stat
 		log.Warn("Could not read local state, starting sync from genesis.")
 		return l.genesisState.Copy()
 	}
-	decompressedSnappy, err := utils.DecompressSnappy(snappyEncoded)
+	decompressedSnappy, err := utils.DecompressSnappy(snappyEncoded, false)
 	if err != nil {
 		return nil, fmt.Errorf("local state is corrupt: %s", err)
 	}

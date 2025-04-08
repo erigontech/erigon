@@ -69,7 +69,7 @@ func getSSZStaticConsensusTest[T unmarshalerMarshalerHashable](ref T) spectest.H
 
 		snappyEncoded, err := fs.ReadFile(fsroot, serializedFile)
 		require.NoError(t, err)
-		encoded, err := utils.DecompressSnappy(snappyEncoded)
+		encoded, err := utils.DecompressSnappy(snappyEncoded, false)
 		require.NoError(t, err)
 
 		if err := object.DecodeSSZ(encoded, int(c.Version())); err != nil && !isBeaconState {
@@ -167,7 +167,7 @@ func sszStaticTestNewObjectByFunc[T unmarshalerMarshalerHashable](
 		// read ssz bytes and decode
 		snappyEncoded, err := fs.ReadFile(fsroot, serializedFile)
 		require.NoError(t, err)
-		encoded, err := utils.DecompressSnappy(snappyEncoded)
+		encoded, err := utils.DecompressSnappy(snappyEncoded, false)
 		require.NoError(t, err)
 		if err := object.DecodeSSZ(encoded, int(c.Version())); err != nil {
 			return err

@@ -211,13 +211,13 @@ func FuzzSilkwormCompress(f *testing.F) {
 
 		path := filepath.Join(workDir, "words.idt")
 		words, err := generateRawWordsFile(path, seed)
-		require.Nil(t, err)
+		require.NoError(t, err)
 
 		// compress using erigon
 		outPath := makeSegFilePath(path, "_erigon")
 		err = SegZipEx(ctx, words, outPath, t.TempDir(), logger)
 		words.Close()
-		require.Nil(t, err)
+		require.NoError(t, err)
 
 		// compress using silkworm
 		outPathSilkworm := makeSegFilePath(path, "")
@@ -225,7 +225,7 @@ func FuzzSilkwormCompress(f *testing.F) {
 		if err != nil {
 			copyFiles([]string{path, outPath}, investigationDir)
 		}
-		require.Nil(t, err)
+		require.NoError(t, err)
 
 		outPathCRC := checksum(outPath)
 		outPathSilkwormCRC := checksum(outPathSilkworm)

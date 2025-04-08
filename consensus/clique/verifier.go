@@ -23,11 +23,11 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/config3"
 
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/params"
 )
 
 // verifyHeader checks whether a header conforms to the consensus rules.The
@@ -194,7 +194,7 @@ func (c *Clique) Snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		// at a checkpoint block without a parent (light client CHT), or we have piled
 		// up more headers than allowed to be reorged (chain reinit from a freezer),
 		// consider the checkpoint trusted and snapshot it.
-		if number == 0 || (number%c.config.Epoch == 0 && (len(headers) > params.FullImmutabilityThreshold || chain.GetHeaderByNumber(number-1) == nil)) {
+		if number == 0 || (number%c.config.Epoch == 0 && (len(headers) > config3.FullImmutabilityThreshold || chain.GetHeaderByNumber(number-1) == nil)) {
 			checkpoint := chain.GetHeaderByNumber(number)
 			if checkpoint != nil {
 				hash := checkpoint.Hash()

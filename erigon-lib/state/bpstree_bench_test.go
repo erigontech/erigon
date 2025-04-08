@@ -1,7 +1,6 @@
 package state
 
 import (
-	"path"
 	"path/filepath"
 	"testing"
 
@@ -20,7 +19,7 @@ func BenchmarkBpsTreeSeek(t *testing.B) {
 
 	dataPath := generateKV(t, tmp, 52, 180, keyCount, logger, 0)
 
-	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 
 	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)

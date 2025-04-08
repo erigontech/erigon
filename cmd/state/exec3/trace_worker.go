@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
@@ -33,7 +34,7 @@ import (
 )
 
 type GenericTracer interface {
-	vm.EVMLogger
+	TracingHooks() *tracing.Hooks
 	SetTransaction(tx types.Transaction)
 	Found() bool
 }
@@ -78,8 +79,7 @@ func NewTraceWorker(tx kv.TemporalTx, cc *chain.Config, engine consensus.EngineR
 		ibs:          state.New(stateReader),
 	}
 	if tracer != nil {
-		ie.vmConfig.Debug = true
-		ie.vmConfig.Tracer = tracer
+		ie.vmConfig.Tracer = tracer.TracingHooks()
 	}
 	return ie
 }
@@ -121,7 +121,7 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, 
 	}
 	e.evm.ResetBetweenBlocks(*e.blockCtx, txContext, e.ibs, *e.vmConfig, e.rules)
 
-	gp := new(core.GasPool).AddGas(txn.GetGas()).AddBlobGas(txn.GetBlobGas())
+	gp := new(core.GasPool).AddGas(txn.GetGasLimit()).AddBlobGas(txn.GetBlobGas())
 	res, err := core.ApplyMessage(e.evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */, e.engine)
 	if err != nil {
 		return nil, fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, e.blockNum, txNum, e.ibs.Error())

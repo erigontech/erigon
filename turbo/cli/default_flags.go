@@ -172,6 +172,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.WithHeimdallWaypoints,
 	&utils.PolygonSyncFlag,
 	&utils.PolygonSyncStageFlag,
+	&utils.AAFlag,
 	&utils.EthStatsURLFlag,
 	&utils.OverridePragueFlag,
 
@@ -244,4 +245,5 @@ var DefaultFlags = []cli.Flag{
 
 	&utils.PolygonPosSingleSlotFinalityFlag,
 	&utils.PolygonPosSingleSlotFinalityBlockAtFlag,
+	&utils.GDBMeFlag,
 }

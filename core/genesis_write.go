@@ -324,6 +324,19 @@ func SepoliaGenesisBlock() *types.Genesis {
 	}
 }
 
+// HoodiGenesisBlock returns the Hoodi network genesis block.
+func HoodiGenesisBlock() *types.Genesis {
+	return &types.Genesis{
+		Config:     params.HoodiChainConfig,
+		Nonce:      0x1234,
+		ExtraData:  []byte(""),
+		GasLimit:   0x2255100, // 36M
+		Difficulty: big.NewInt(1),
+		Timestamp:  1742212800,
+		Alloc:      readPrealloc("allocs/hoodi.json"),
+	}
+}
+
 // AmoyGenesisBlock returns the Amoy network genesis block.
 func AmoyGenesisBlock() *types.Genesis {
 	return &types.Genesis{
@@ -504,7 +517,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		genesisTmpDB := mdbx.New(kv.TemporaryDB, logger).InMem(dirs.DataDir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
 		defer genesisTmpDB.Close()
 
-		agg, err := state2.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, genesisTmpDB, logger)
+		agg, err := state2.NewAggregator(context.Background(), dirs, config3.DefaultStepSize, genesisTmpDB, logger)
 		if err != nil {
 			return err
 		}
@@ -628,6 +641,8 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 		return HoleskyGenesisBlock()
 	case networkname.Sepolia:
 		return SepoliaGenesisBlock()
+	case networkname.Hoodi:
+		return HoodiGenesisBlock()
 	case networkname.Amoy:
 		return AmoyGenesisBlock()
 	case networkname.BorMainnet:

@@ -56,8 +56,8 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	}).MustOpen()
 	tb.Cleanup(db.Close)
 	salt := uint32(1)
-	cfg := iiCfg{salt: &salt, dirs: dirs, aggregationStep: aggStep, filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable}
-	ii, err := NewInvertedIndex(cfg, logger)
+	cfg := iiCfg{salt: &salt, dirs: dirs, filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable}
+	ii, err := NewInvertedIndex(cfg, aggStep, logger)
 	require.NoError(tb, err)
 	ii.DisableFsync()
 	tb.Cleanup(ii.Close)
@@ -286,7 +286,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 
 	ic.Close()
 	err = db.Update(ctx, func(tx kv.RwTx) error {
-		from, to := ii.stepsRangeInDB(tx)
+		from, to := ic.stepsRangeInDB(tx)
 		require.Equal(t, "0.1", fmt.Sprintf("%.1f", from))
 		require.Equal(t, "0.4", fmt.Sprintf("%.1f", to))
 
@@ -315,9 +315,9 @@ func TestInvIndexAfterPrune(t *testing.T) {
 		require.Nil(t, k, table)
 	}
 
-	from, to := ii.stepsRangeInDB(tx)
-	require.Equal(t, float64(0), from)
-	require.Equal(t, float64(0), to)
+	from, to := ic.stepsRangeInDB(tx)
+	require.Equal(t, float64(0), from) //nolint:testifylint
+	require.Equal(t, float64(0), to)   //nolint:testifylint
 }
 
 func filledInvIndex(tb testing.TB, logger log.Logger) (kv.RwDB, *InvertedIndex, uint64) {
@@ -557,7 +557,7 @@ func TestInvIndexScanFiles(t *testing.T) {
 	cfg.salt = &salt
 
 	var err error
-	ii, err = NewInvertedIndex(cfg, logger)
+	ii, err = NewInvertedIndex(cfg, 16, logger)
 	require.NoError(err)
 	defer ii.Close()
 	err = ii.openFolder()
@@ -687,7 +687,7 @@ func TestCtxFiles(t *testing.T) {
 			require.Failf(t, "overlaping files", "%d-%d, %d-%d", item.startTxNum, item.endTxNum, visibleFiles[i-1].startTxNum, visibleFiles[i-1].endTxNum)
 		}
 	}
-	require.Equal(t, 3, len(visibleFiles))
+	require.Len(t, visibleFiles, 3)
 
 	require.Equal(t, 0, int(visibleFiles[0].startTxNum))
 	require.Equal(t, 4, int(visibleFiles[0].endTxNum))

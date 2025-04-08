@@ -51,6 +51,7 @@ func NewService(
 	heimdallService *heimdall.Service,
 	notifications *shards.Notifications,
 	engineAPISwitcher EngineAPISwitcher,
+	minedBlockReg MinedBlockObserverRegistrar,
 
 ) *Service {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
@@ -77,7 +78,7 @@ func NewService(
 		blockLimit,
 	)
 	ccBuilderFactory := NewCanonicalChainBuilderFactory(chainConfig, borConfig, heimdallService, signaturesCache)
-	events := NewTipEvents(logger, p2pService, heimdallService)
+	events := NewTipEvents(logger, p2pService, heimdallService, minedBlockReg)
 	sync := NewSync(
 		config,
 		logger,

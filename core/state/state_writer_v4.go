@@ -40,9 +40,6 @@ func NewWriterV4(tx kv.TemporalPutDel) *WriterV4 {
 	}
 }
 
-func (cw *WriterV4) WriteChangeSets() error { return nil }
-func (cw *WriterV4) WriteHistory() error    { return nil }
-
 func (w *WriterV4) UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error {
 	if w.trace {
 		fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash)

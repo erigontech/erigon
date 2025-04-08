@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/consensuschain"
@@ -103,7 +104,7 @@ func Main(ctx *cli.Context) error {
 		err     error
 		baseDir = ""
 	)
-	var getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error)
+	var getTracer func(txIndex int, txHash libcommon.Hash) (*tracing.Hooks, error)
 
 	// If user specified a basedir, make sure it exists
 	if ctx.IsSet(OutputBasedir.Name) {
@@ -130,7 +131,7 @@ func Main(ctx *cli.Context) error {
 				prevFile.Close()
 			}
 		}()
-		getTracer = func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error) {
+		getTracer = func(txIndex int, txHash libcommon.Hash) (*tracing.Hooks, error) {
 			if prevFile != nil {
 				prevFile.Close()
 			}
@@ -139,10 +140,10 @@ func Main(ctx *cli.Context) error {
 				return nil, NewError(ErrorIO, fmt.Errorf("failed creating trace-file: %v", err2))
 			}
 			prevFile = traceFile
-			return trace_logger.NewJSONLogger(logConfig, traceFile), nil
+			return trace_logger.NewJSONLogger(logConfig, traceFile).Tracer().Hooks, nil
 		}
 	} else {
-		getTracer = func(txIndex int, txHash libcommon.Hash) (tracer vm.EVMLogger, err error) {
+		getTracer = func(txIndex int, txHash libcommon.Hash) (tracer *tracing.Hooks, err error) {
 			return nil, nil
 		}
 	}
@@ -195,7 +196,6 @@ func Main(ctx *cli.Context) error {
 
 	vmConfig := vm.Config{
 		Tracer:        nil,
-		Debug:         ctx.Bool(TraceFlag.Name),
 		StatelessExec: true,
 	}
 	// Construct the chainconfig
@@ -413,11 +413,11 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 	}
 
 	commonTx := types.CommonTx{
-		Nonce: uint64(txJson.Nonce),
-		To:    txJson.To,
-		Value: value,
-		Gas:   uint64(txJson.Gas),
-		Data:  txJson.Input,
+		Nonce:    uint64(txJson.Nonce),
+		To:       txJson.To,
+		Value:    value,
+		GasLimit: uint64(txJson.Gas),
+		Data:     txJson.Input,
 	}
 
 	commonTx.V.SetFromBig(txJson.V.ToInt())
@@ -441,17 +441,17 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 			AccessList: *txJson.Accesses,
 		}, nil
 	} else if txJson.Type == types.DynamicFeeTxType || txJson.Type == types.SetCodeTxType {
-		var tip *uint256.Int
+		var tipCap *uint256.Int
 		var feeCap *uint256.Int
-		if txJson.Tip != nil {
-			tip, overflow = uint256.FromBig(txJson.Tip.ToInt())
+		if txJson.MaxPriorityFeePerGas != nil {
+			tipCap, overflow = uint256.FromBig(txJson.MaxPriorityFeePerGas.ToInt())
 			if overflow {
 				return nil, errors.New("maxPriorityFeePerGas field caused an overflow (uint256)")
 			}
 		}
 
-		if txJson.FeeCap != nil {
-			feeCap, overflow = uint256.FromBig(txJson.FeeCap.ToInt())
+		if txJson.MaxFeePerGas != nil {
+			feeCap, overflow = uint256.FromBig(txJson.MaxFeePerGas.ToInt())
 			if overflow {
 				return nil, errors.New("maxFeePerGas field caused an overflow (uint256)")
 			}
@@ -461,7 +461,7 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 			//it's ok to copy here - because it's constructor of object - no parallel access yet
 			CommonTx:   commonTx, //nolint
 			ChainID:    chainId,
-			Tip:        tip,
+			TipCap:     tipCap,
 			FeeCap:     feeCap,
 			AccessList: *txJson.Accesses,
 		}

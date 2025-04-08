@@ -10,7 +10,7 @@ on:
 
 jobs:
   tip-tracking-test:
-    runs-on: [self-hosted, Polygon]
+    runs-on: [self-hosted, qa, Polygon]
     timeout-minutes: 800
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir

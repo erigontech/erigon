@@ -27,6 +27,7 @@ var ourCapabilities = []string{
 	"engine_getPayloadBodiesByHashV1",
 	"engine_getPayloadBodiesByRangeV1",
 	"engine_getClientVersionV1",
+	"engine_getBlobsV1",
 }
 
 // Returns the most recent version of the payload(for the payloadID) at the time of receiving the call
@@ -165,4 +166,9 @@ func (e *EngineServer) ExchangeCapabilities(fromCl []string) []string {
 	}
 
 	return ourCapabilities
+}
+
+func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []libcommon.Hash) ([]*engine_types.BlobAndProofV1, error) {
+	e.logger.Debug("[GetBlobsV1] Received Request", "hashes", len(blobHashes))
+	return e.getBlobs(ctx, blobHashes)
 }

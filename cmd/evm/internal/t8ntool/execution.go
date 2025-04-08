@@ -81,7 +81,7 @@ type stEnvMarshaling struct {
 	BaseFee          *math.HexOrDecimal256
 }
 
-func MakePreState(chainRules *chain.Rules, tx kv.RwTx, sd *state3.SharedDomains, accounts types.GenesisAlloc) (state.StateReader, state.WriterWithChangeSets) {
+func MakePreState(chainRules *chain.Rules, tx kv.RwTx, sd *state3.SharedDomains, accounts types.GenesisAlloc) (state.StateReader, state.StateWriter) {
 	var blockNr uint64 = 0
 
 	stateReader, stateWriter := rpchelper.NewLatestStateReader(tx), state.NewWriterV4(sd)

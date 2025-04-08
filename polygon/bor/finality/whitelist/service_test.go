@@ -183,7 +183,7 @@ func TestMilestone(t *testing.T) {
 	//Reading from the Db
 	locked, lockedMilestoneNumber, lockedMilestoneHash, lockedMilestoneIDs, err := rawdb.ReadLockField(db)
 
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.True(t, locked, "expected true as locked sprint is of number 15")
 	require.Equal(t, lockedMilestoneNumber, uint64(15), "Expected 15")
 	require.Equal(t, lockedMilestoneHash, common.Hash{}, "Expected", common.Hash{})
@@ -205,7 +205,7 @@ func TestMilestone(t *testing.T) {
 	//Reading from the Db
 	locked, _, _, lockedMilestoneIDs, err = rawdb.ReadLockField(db)
 
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.False(t, locked, "expected true as locked sprint is of number 15")
 	require.Equal(t, len(lockedMilestoneIDs), 0, "expected 0 as milestoneID exist in the map")
 

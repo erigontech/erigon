@@ -311,7 +311,7 @@ func makeListDecoder(typ reflect.Type, tag tags) (decoder, error) {
 		}
 		return decodeByteSlice, nil
 	}
-	etypeinfo := cachedTypeInfo1(etype, tags{})
+	etypeinfo := theTC.infoWhileGenerating(etype, tags{})
 	if etypeinfo.decoderErr != nil {
 		return nil, etypeinfo.decoderErr
 	}
@@ -490,7 +490,7 @@ func zeroFields(structval reflect.Value, fields []field) {
 // makePtrDecoder creates a decoder that decodes into the pointer's element type.
 func makePtrDecoder(typ reflect.Type, tag tags) (decoder, error) {
 	etype := typ.Elem()
-	etypeinfo := cachedTypeInfo1(etype, tags{})
+	etypeinfo := theTC.infoWhileGenerating(etype, tags{})
 	switch {
 	case etypeinfo.decoderErr != nil:
 		return nil, etypeinfo.decoderErr
