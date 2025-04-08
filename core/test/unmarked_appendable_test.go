@@ -3,7 +3,6 @@ package test
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common/background"
@@ -23,23 +22,17 @@ func (r *BorSpanRootRelation) RootNum2Num(from state.RootNum, tx kv.Tx) (state.N
 	return Num(heimdall.SpanIdAt(uint64(from))), nil
 }
 
-func TestUnmarkedAppendableRegistration(t *testing.T) {
-	t.Cleanup(func() {
-		ae.Cleanup()
-	})
-	dirs := datadir.New(t.TempDir())
-	blockId := registerEntity(dirs, "borspans")
-	require.Equal(t, ae.AppendableId(0), blockId)
-}
-
-func setupBorSpans(t *testing.T, log log.Logger, dir datadir.Dirs, db kv.RoDB) (AppendableId, *state.Appendable[UnmarkedTxI]) {
-	borspanId := registerEntityWithSnapshotConfig(dir, "borspans", &ae.SnapshotConfig{
+func setupBorSpans(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) (AppendableId, *state.Appendable[UnmarkedTxI]) {
+	stepSize := uint64(10)
+	name := "borspans"
+	borspanId := registerEntityWithSnapshotConfig(dirs, name, &ae.SnapshotConfig{
 		SnapshotCreationConfig: &ae.SnapshotCreationConfig{
-			RootNumPerStep: 10,
+			RootNumPerStep: stepSize,
 			MergeStages:    []uint64{200, 400},
 			MinimumSize:    10,
 			SafetyMargin:   5,
 		},
+		Schema: ae.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize),
 	})
 	require.Equal(t, ae.AppendableId(0), borspanId)
 
@@ -55,17 +48,19 @@ func setupBorSpans(t *testing.T, log log.Logger, dir datadir.Dirs, db kv.RoDB) (
 		state.App_WithIndexBuilders(indexb))
 	require.NoError(t, err)
 
-	t.Cleanup(func() {
-		uma.Close()
-		uma.RecalcVisibleFiles(0)
-
-		ae.Cleanup()
-		db.Close()
-		os.RemoveAll(dir.Snap)
-		os.RemoveAll(dir.Chaindata)
-	})
-
+	cleanup(t, uma.ProtoAppendable, db, dirs)
 	return borspanId, uma
+}
+
+// TESTS BEGIN HERE
+
+func TestUnmarkedAppendableRegistration(t *testing.T) {
+	t.Cleanup(func() {
+		ae.Cleanup()
+	})
+	dirs := datadir.New(t.TempDir())
+	blockId := registerEntity(dirs, "borspans")
+	require.Equal(t, ae.AppendableId(0), blockId)
 }
 
 func TestUnmarked_PutToDb(t *testing.T) {
