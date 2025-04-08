@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"os"
 	"strconv"
+	"time"
 )
 
 var (
@@ -20,10 +21,10 @@ type CommitmentMetrics struct {
 	LoadStorage         int
 	UpdateBranch        int
 	Unfolds             int
-	TotalUnfoldingTime  int
+	TotalUnfoldingTime  time.Duration
 	Folds               int
-	TotalFoldingTime    int
-	TotalProcessingTime int
+	TotalFoldingTime    time.Duration
+	TotalProcessingTime time.Duration
 }
 
 var CurrentCommitmentMetrics CommitmentMetrics
@@ -33,7 +34,7 @@ func init() {
 	collectMetrics = os.Getenv("ERIGON_COMMITMENT_TRACE") != ""
 }
 
-func writeMetricsToCSV() error {
+func writeMetricsToCSV(commitmentMetrics CommitmentMetrics) error {
 	if !collectMetrics {
 		return nil
 	}
@@ -75,19 +76,18 @@ func writeMetricsToCSV() error {
 
 	// Write the actual data
 	record := []string{
-		strconv.Itoa(CurrentCommitmentMetrics.Updates),
-		strconv.Itoa(CurrentCommitmentMetrics.AddressKeys),
-		strconv.Itoa(CurrentCommitmentMetrics.StorageKeys),
-		strconv.Itoa(CurrentCommitmentMetrics.LoadBranch),
-		strconv.Itoa(CurrentCommitmentMetrics.LoadAccount),
-		strconv.Itoa(CurrentCommitmentMetrics.LoadStorage),
-		strconv.Itoa(CurrentCommitmentMetrics.UpdateBranch),
-		strconv.Itoa(CurrentCommitmentMetrics.Unfolds),
-		strconv.Itoa(CurrentCommitmentMetrics.TotalUnfoldingTime),
-		strconv.Itoa(CurrentCommitmentMetrics.Folds),
-		strconv.Itoa(CurrentCommitmentMetrics.TotalFoldingTime),
-		strconv.Itoa(CurrentCommitmentMetrics.TotalProcessingTime),
+		strconv.Itoa(commitmentMetrics.Updates),
+		strconv.Itoa(commitmentMetrics.AddressKeys),
+		strconv.Itoa(commitmentMetrics.StorageKeys),
+		strconv.Itoa(commitmentMetrics.LoadBranch),
+		strconv.Itoa(commitmentMetrics.LoadAccount),
+		strconv.Itoa(commitmentMetrics.LoadStorage),
+		strconv.Itoa(commitmentMetrics.UpdateBranch),
+		strconv.Itoa(commitmentMetrics.Unfolds),
+		strconv.Itoa(int(commitmentMetrics.TotalUnfoldingTime.Milliseconds())),
+		strconv.Itoa(commitmentMetrics.Folds),
+		strconv.Itoa(int(commitmentMetrics.TotalFoldingTime.Milliseconds())),
+		strconv.Itoa(int(commitmentMetrics.TotalProcessingTime.Milliseconds())),
 	}
-	CurrentCommitmentMetrics = CommitmentMetrics{}
 	return writer.Write(record)
 }
