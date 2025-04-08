@@ -65,20 +65,18 @@ func (ProcessCommitment *ProcessCommitment) TotalFoldingTimeInc(t time.Time) {
 }
 
 func (processCommitment *ProcessCommitment) Reset() {
-	processCommitment = &ProcessCommitment{
-		Updates:             atomic.Uint64{},
-		AddressKeys:         atomic.Uint64{},
-		StorageKeys:         atomic.Uint64{},
-		LoadBranch:          atomic.Uint64{},
-		LoadAccount:         atomic.Uint64{},
-		LoadStorage:         atomic.Uint64{},
-		UpdateBranch:        atomic.Uint64{},
-		Unfolds:             atomic.Uint64{},
-		TotalUnfoldingTime:  0,
-		Folds:               atomic.Uint64{},
-		TotalFoldingTime:    0,
-		TotalProcessingTime: 0,
-	}
+	processCommitment.Updates.Store(0)
+	processCommitment.AddressKeys.Store(0)
+	processCommitment.StorageKeys.Store(0)
+	processCommitment.LoadBranch.Store(0)
+	processCommitment.LoadAccount.Store(0)
+	processCommitment.LoadStorage.Store(0)
+	processCommitment.UpdateBranch.Store(0)
+	processCommitment.Unfolds.Store(0)
+	processCommitment.TotalUnfoldingTime = 0
+	processCommitment.Folds.Store(0)
+	processCommitment.TotalFoldingTime = 0
+	processCommitment.TotalProcessingTime = 0
 }
 
 func (processCommitment *ProcessCommitment) Headers() []string {
