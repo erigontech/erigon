@@ -189,9 +189,10 @@ type Config struct {
 
 	BadBlockHash common.Hash // hash of the block marked as bad
 
-	Snapshot     BlocksFreezing
-	Downloader   *downloadercfg.Cfg
-	CaplinConfig clparams.CaplinConfig
+	KeepExecutionProofs bool
+	Snapshot            BlocksFreezing
+	Downloader          *downloadercfg.Cfg
+	CaplinConfig        clparams.CaplinConfig
 
 	Dirs datadir.Dirs
 
