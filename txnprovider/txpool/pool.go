@@ -1495,12 +1495,14 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 				foundDuplicate = true
 				break
 			}
-
-			p.auths[*signer] = mt
 		}
 
 		if foundDuplicate {
 			return txpoolcfg.ErrAuthorityReserved
+		} else {
+			for _, a := range mt.TxnSlot.Authorities {
+				p.auths[*a] = mt
+			}
 		}
 	}
 
