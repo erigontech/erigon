@@ -8,12 +8,23 @@ import (
 	"time"
 )
 
+func init() {
+	metricsFile = os.Getenv("ERIGON_COMMITMENT_TRACE")
+	collectMetrics = os.Getenv("ERIGON_COMMITMENT_TRACE") != ""
+}
+
 var (
 	metricsFile    string
 	collectMetrics bool
 )
 
-type CommitmentMetrics struct {
+type Metrics interface {
+	Reset()
+	Headers() []string
+	Values() []string
+}
+
+type ProcessCommitment struct {
 	Updates             atomic.Uint64
 	AddressKeys         atomic.Uint64
 	StorageKeys         atomic.Uint64
@@ -28,11 +39,11 @@ type CommitmentMetrics struct {
 	TotalProcessingTime time.Duration
 }
 
-func (commitmentMetrics *CommitmentMetrics) Reset() {
-	commitmentMetrics = &CommitmentMetrics{}
+func (processCommitment *ProcessCommitment) Reset() {
+	processCommitment = &ProcessCommitment{}
 }
 
-func (commitmentMetrics *CommitmentMetrics) Headers() []string {
+func (processCommitment *ProcessCommitment) Headers() []string {
 	return []string{
 		"updates",
 		"address keys",
@@ -49,29 +60,24 @@ func (commitmentMetrics *CommitmentMetrics) Headers() []string {
 	}
 }
 
-func (commitmentMetrics *CommitmentMetrics) Values() []string {
+func (processCommitment *ProcessCommitment) Values() []string {
 	return []string{
-		strconv.FormatUint(commitmentMetrics.Updates.Load(), 10),
-		strconv.FormatUint(commitmentMetrics.AddressKeys.Load(), 10),
-		strconv.FormatUint(commitmentMetrics.StorageKeys.Load(), 10),
-		strconv.FormatUint(commitmentMetrics.LoadBranch.Load(), 10),
-		strconv.FormatUint(commitmentMetrics.LoadAccount.Load(), 10),
-		strconv.FormatUint(commitmentMetrics.LoadStorage.Load(), 10),
-		strconv.FormatUint(commitmentMetrics.UpdateBranch.Load(), 10),
-		strconv.FormatUint(commitmentMetrics.Unfolds.Load(), 10),
-		strconv.Itoa(int(commitmentMetrics.TotalUnfoldingTime.Milliseconds())),
-		strconv.FormatUint(commitmentMetrics.Folds.Load(), 10),
-		strconv.Itoa(int(commitmentMetrics.TotalFoldingTime.Milliseconds())),
-		strconv.Itoa(int(commitmentMetrics.TotalProcessingTime.Milliseconds())),
+		strconv.FormatUint(processCommitment.Updates.Load(), 10),
+		strconv.FormatUint(processCommitment.AddressKeys.Load(), 10),
+		strconv.FormatUint(processCommitment.StorageKeys.Load(), 10),
+		strconv.FormatUint(processCommitment.LoadBranch.Load(), 10),
+		strconv.FormatUint(processCommitment.LoadAccount.Load(), 10),
+		strconv.FormatUint(processCommitment.LoadStorage.Load(), 10),
+		strconv.FormatUint(processCommitment.UpdateBranch.Load(), 10),
+		strconv.FormatUint(processCommitment.Unfolds.Load(), 10),
+		strconv.Itoa(int(processCommitment.TotalUnfoldingTime.Milliseconds())),
+		strconv.FormatUint(processCommitment.Folds.Load(), 10),
+		strconv.Itoa(int(processCommitment.TotalFoldingTime.Milliseconds())),
+		strconv.Itoa(int(processCommitment.TotalProcessingTime.Milliseconds())),
 	}
 }
 
-func init() {
-	metricsFile = os.Getenv("ERIGON_COMMITMENT_TRACE")
-	collectMetrics = os.Getenv("ERIGON_COMMITMENT_TRACE") != ""
-}
-
-func writeMetricsToCSV(commitmentMetrics *CommitmentMetrics) error {
+func writeMetricsToCSV(metrics Metrics) error {
 	if !collectMetrics {
 		return nil
 	}
@@ -92,11 +98,11 @@ func writeMetricsToCSV(commitmentMetrics *CommitmentMetrics) error {
 		return err
 	}
 	if info.Size() == 0 {
-		if err := writer.Write(commitmentMetrics.Headers()); err != nil {
+		if err := writer.Write(metrics.Headers()); err != nil {
 			return err
 		}
 	}
 
 	// Write the actual data
-	return writer.Write(commitmentMetrics.Values())
+	return writer.Write(metrics.Values())
 }

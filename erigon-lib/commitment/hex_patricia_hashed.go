@@ -91,7 +91,7 @@ type HexPatriciaHashed struct {
 	accValBuf rlp.RlpEncodedBytes
 
 	//processing metrics
-	currentCommitmentMetrics CommitmentMetrics
+	currentCommitmentMetrics ProcessCommitment
 }
 
 func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext, tmpdir string) *HexPatriciaHashed {
