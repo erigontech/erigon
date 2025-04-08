@@ -206,19 +206,16 @@ func TestAPI(t *testing.T) {
 				defer wg.Done()
 				err := db.View(ctx, func(tx kv.Tx) error {
 					if expectTxnID != tx.ViewID() {
-						t.Errorf("expected: %d, got: %d", expectTxnID, tx.ViewID())
-						return nil
+						panic(fmt.Sprintf("epxected: %d, got: %d", expectTxnID, tx.ViewID()))
 					}
 					cacheView, err := c.View(ctx, tx)
 					if err != nil {
-						t.Errorf("View error: %v", err)
-						return nil
+						panic(fmt.Sprintf("View error: %v", err))
 					}
 					view := cacheView.(*CoherentView)
 					v, err := c.Get(key[:], tx, view.stateVersionID)
 					if err != nil {
-						t.Errorf("Get error: %v", err)
-						return nil
+						panic(fmt.Sprintf("Get error: %v", err))
 					}
 
 					fmt.Println("get", key, v)
@@ -231,7 +228,7 @@ func TestAPI(t *testing.T) {
 					return nil
 				})
 				if err != nil {
-					t.Errorf("Database error: %v", err)
+					panic(fmt.Sprintf("Database error: %v", err))
 				}
 			}(res[i])
 		}
@@ -273,7 +270,7 @@ func TestAPI(t *testing.T) {
 			select {
 			case v := <-res1[i]:
 				if v != nil {
-					t.Errorf("expected nil, got: %x", v)
+					panic(fmt.Sprintf("expected nil, got: %x", v))
 				}
 			case <-ctx.Done():
 				t.Log("Context done while checking res1")
@@ -283,7 +280,7 @@ func TestAPI(t *testing.T) {
 			select {
 			case v := <-res2[i]:
 				if !bytes.Equal(account1Enc, v) {
-					t.Errorf("expected: %x, got: %x", account1Enc, v)
+					panic(fmt.Sprintf("expected: %x, got: %x", account1Enc, v))
 				}
 			case <-ctx.Done():
 				t.Log("Context done while checking res2")
@@ -322,7 +319,7 @@ func TestAPI(t *testing.T) {
 			select {
 			case v := <-res3[i]:
 				if !bytes.Equal(account2Enc, v) {
-					t.Errorf("expected: %x, got: %x", account2Enc, v)
+					panic(fmt.Sprintf("expected: %x, got: %x", account2Enc, v))
 				}
 			case <-ctx.Done():
 				t.Log("Context done while checking res3")
@@ -332,7 +329,7 @@ func TestAPI(t *testing.T) {
 			select {
 			case v := <-res4[i]:
 				if !bytes.Equal(account1Enc, v) {
-					t.Errorf("expected: %x, got: %x", account1Enc, v)
+					panic(fmt.Sprintf("expected: %x, got: %x", account1Enc, v))
 				}
 			case <-ctx.Done():
 				t.Log("Context done while checking res4")
@@ -367,7 +364,7 @@ func TestAPI(t *testing.T) {
 			select {
 			case v := <-res5[i]:
 				if !bytes.Equal(account2Enc, v) {
-					t.Errorf("expected: %x, got: %x", account2Enc, v)
+					panic(fmt.Sprintf("expected: %x, got: %x", account2Enc, v))
 				}
 			case <-ctx.Done():
 				t.Log("Context done while checking res5")
@@ -379,7 +376,7 @@ func TestAPI(t *testing.T) {
 			select {
 			case v := <-res6[i]:
 				if !bytes.Equal(account1Enc, v) {
-					t.Errorf("expected: %x, got: %x", account1Enc, v)
+					panic(fmt.Sprintf("expected: %x, got: %x", account1Enc, v))
 				}
 			case <-ctx.Done():
 				t.Log("Context done while checking res6")
@@ -435,7 +432,7 @@ func TestAPI(t *testing.T) {
 			select {
 			case v := <-res7[i]:
 				if !bytes.Equal(account4Enc, v) {
-					t.Errorf("expected: %x, got: %x", account4Enc, v)
+					panic(fmt.Sprintf("expected: %x, got: %x", account4Enc, v))
 				}
 			case <-ctx.Done():
 				t.Log("Context done while checking res7")
@@ -445,7 +442,7 @@ func TestAPI(t *testing.T) {
 			select {
 			case v := <-res8[i]:
 				if !bytes.Equal(account1Enc, v) {
-					t.Errorf("expected: %x, got: %x", account1Enc, v)
+					panic(fmt.Sprintf("expected: %x, got: %x", account1Enc, v))
 				}
 			case <-ctx.Done():
 				t.Log("Context done while checking res8")
