@@ -21,7 +21,6 @@
 package state
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"sort"
