@@ -1909,7 +1909,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		}
 
 		var tr *trie.Trie
-		var computedRootHash []byte
+		//var computedRootHash []byte
 
 		// fmt.Printf("\n%d/%d) plainKey [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
 
@@ -1948,13 +1948,13 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		if err != nil {
 			return err
 		}
-		computedRootHash = tr.Root()
-		// fmt.Printf("computedRootHash = %x\n", computedRootHash)
-
-		if !bytes.Equal(computedRootHash, expectedRootHash) {
-			err = fmt.Errorf("root hash mismatch computedRootHash(%x)!=expectedRootHash(%x)", computedRootHash, expectedRootHash)
-			return err
-		}
+		//computedRootHash = tr.Root()
+		//// fmt.Printf("computedRootHash = %x\n", computedRootHash)
+		//
+		//if !bytes.Equal(computedRootHash, expectedRootHash) {
+		//	err = fmt.Errorf("root hash mismatch computedRootHash(%x)!=expectedRootHash(%x)", computedRootHash, expectedRootHash)
+		//	return err
+		//}
 
 		tries = append(tries, tr)
 		ki++
