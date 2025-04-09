@@ -243,6 +243,7 @@ func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadi
 	if err != nil {
 		return err
 	}
+	fmt.Println("commitment history enabled:", isCommitmentHistoryEnabled)
 	if !ok {
 		// we need to make sure we do not run from an old version so check amount of keys in kv.AccountDomain
 		c, err := tx.Count(kv.TblAccountVals)
