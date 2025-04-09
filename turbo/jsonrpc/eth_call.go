@@ -325,6 +325,11 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 }
 
 func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address libcommon.Address, storageKeys []libcommon.Hash, blockNrOrHash rpc.BlockNumberOrHash, db kv.RoDB, logger log.Logger) (*accounts.AccProofResult, error) {
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
 	// get the root hash from header to validate proofs along the way
 	header, err := api._blockReader.HeaderByNumber(ctx, roTx, blockNrOrHash.BlockNumber.Uint64())
 	if err != nil {
@@ -348,6 +353,10 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address libcommon.
 		lastTxnInBlock, err := rawdbv3.TxNums.Min(roTx, header.Number.Uint64()+1)
 		if err != nil {
 			return nil, err
+		}
+		commitmentStartingTxNum := tx.HistoryStartFrom(kv.CommitmentDomain)
+		if lastTxnInBlock < commitmentStartingTxNum {
+			return nil, state.PrunedError
 		}
 		sdCtx.SetLimitReadAsOfTxNum(lastTxnInBlock, false)
 		domains.SetTrace(true)
@@ -415,11 +424,6 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address libcommon.
 		}
 	}
 
-	tx, err := api.db.BeginTemporalRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
 	reader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, "")
 	if err != nil {
 		return nil, err
