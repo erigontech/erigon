@@ -1226,6 +1226,7 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[common.Hash
 					//	return nil, fmt.Errorf("subTrieRoot(%x) != cellHash(%x)", subTrieRoot, cellHash[1:])
 					//}
 					// // DEBUG patch with cell hash which we know to be correct
+					fmt.Printf("witness cell %s\n", cellToExpand.String())
 					nextNode = trie.NewHashNode(cellToExpand.hash[:])
 				}
 			}
