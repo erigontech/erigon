@@ -32,19 +32,19 @@ func InitSchemas() {
 	Schema.CommitmentDomain.version.DataKV = snaptype.V1_0
 	Schema.CommitmentDomain.version.AccessorKVI = snaptype.V1_0
 
-	Schema.ReceiptDomain.version.DataKV = snaptype.V1_1
-	Schema.ReceiptDomain.version.AccessorBT = snaptype.V1_1
-	Schema.ReceiptDomain.version.AccessorKVEI = snaptype.V1_1
-	Schema.ReceiptDomain.hist.version.DataV = snaptype.V1_1
-	Schema.ReceiptDomain.hist.version.AccessorVI = snaptype.V1_1
-	Schema.ReceiptDomain.hist.iiCfg.version.DataEF = snaptype.V1_1
-	Schema.ReceiptDomain.hist.iiCfg.version.AccessorEFI = snaptype.V1_1
+	Schema.ReceiptDomain.version.DataKV = snaptype.V1_0
+	Schema.ReceiptDomain.version.AccessorBT = snaptype.V1_0
+	Schema.ReceiptDomain.version.AccessorKVEI = snaptype.V1_0
+	Schema.ReceiptDomain.hist.version.DataV = snaptype.V1_0
+	Schema.ReceiptDomain.hist.version.AccessorVI = snaptype.V1_0
+	Schema.ReceiptDomain.hist.iiCfg.version.DataEF = snaptype.V1_0
+	Schema.ReceiptDomain.hist.iiCfg.version.AccessorEFI = snaptype.V1_0
 
-	Schema.LogAddrIdx.version.DataEF = snaptype.V1_1
-	Schema.LogAddrIdx.version.AccessorEFI = snaptype.V1_1
+	Schema.LogAddrIdx.version.DataEF = snaptype.V1_0
+	Schema.LogAddrIdx.version.AccessorEFI = snaptype.V1_0
 
-	Schema.LogTopicIdx.version.DataEF = snaptype.V1_1
-	Schema.LogTopicIdx.version.AccessorEFI = snaptype.V1_1
+	Schema.LogTopicIdx.version.DataEF = snaptype.V1_0
+	Schema.LogTopicIdx.version.AccessorEFI = snaptype.V1_0
 
 	Schema.TracesFromIdx.version.DataEF = snaptype.V1_0
 	Schema.TracesFromIdx.version.AccessorEFI = snaptype.V1_0
