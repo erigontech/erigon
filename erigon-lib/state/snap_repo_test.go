@@ -2,7 +2,6 @@ package state
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -271,11 +270,11 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 		if strings.HasSuffix(filename, ".ef") || strings.HasSuffix(filename, ".v") || strings.HasSuffix(filename, ".kv") {
 			seg, err := seg.NewCompressor(context.Background(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 			require.NoError(t, err)
-			defer seg.Close()
 			if err = seg.AddWord([]byte("word")); err != nil {
 				t.Fatal(err)
 			}
 			require.NoError(t, seg.Compress())
+			seg.Close()
 
 			if strings.Contains(filename, name) && containsSubstring(t, filename, extensions) && strings.Contains(filename, dataFolder) {
 				dataFileCount++
@@ -287,7 +286,6 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 		if strings.HasSuffix(filename, ".bt") {
 			seg2, err := seg.NewCompressor(context.Background(), t.Name(), filename+".sample", dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 			require.NoError(t, err)
-			defer seg2.Close()
 			if err = seg2.AddWord([]byte("key")); err != nil {
 				t.Fatal(err)
 			}
@@ -295,14 +293,16 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 				t.Fatal(err)
 			}
 			require.NoError(t, seg2.Compress())
+			seg2.Close()
 			seg3, err := seg.NewDecompressor(filename + ".sample")
 			require.NoError(t, err)
-			defer seg3.Close()
 
-			_, err = CreateBtreeIndexWithDecompressor(filename, 128, seg3, seg.CompressNone, uint32(1), background.NewProgressSet(), dirs.Tmp, log.New(), false)
+			btindex, err := CreateBtreeIndexWithDecompressor(filename, 128, seg3, seg.CompressNone, uint32(1), background.NewProgressSet(), dirs.Tmp, log.New(), false)
 			if err != nil {
 				t.Fatal(err)
 			}
+			seg3.Close()
+			btindex.Close()
 
 			if strings.Contains(filename, name) && containsSubstring(t, filename, extensions) {
 				btCount++
@@ -314,8 +314,8 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 		if strings.HasSuffix(filename, ".kvei") {
 			filter, err := NewExistenceFilter(0, filename)
 			require.NoError(t, err)
-			defer filter.Close()
 			require.NoError(t, filter.Build())
+			filter.Close()
 
 			if strings.Contains(filename, name) && containsSubstring(t, filename, extensions) {
 				existenceCount++
@@ -337,7 +337,6 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer rs.Close()
 
 			if err = rs.AddKey([]byte("first_key"), 0); err != nil {
 				t.Error(err)
@@ -345,6 +344,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 			if err = rs.Build(context.Background()); err != nil {
 				t.Errorf("test is expected to fail, too few keys added")
 			}
+			rs.Close()
 			if strings.Contains(filename, name) && containsSubstring(t, filename, extensions) {
 				accessorCount++
 			}
@@ -366,19 +366,19 @@ func touch(t *testing.T, folder string, files []string, fileGen func(filename st
 	t.Helper()
 	for _, f := range files {
 		filename := filepath.Join(folder, f)
-		touchFile(t, filename)
+		// touchFile(t, filename)
 		fileGen(filename)
 	}
 }
 
-func touchFile(t *testing.T, filename string) {
-	t.Helper()
-	file, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0666)
-	if err != nil {
-		t.Fatalf("failed to open file %s: %v", filename, err)
-	}
-	defer file.Close()
-}
+// func touchFile(t *testing.T, filename string) {
+// 	t.Helper()
+// 	file, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0666)
+// 	if err != nil {
+// 		t.Fatalf("failed to open file %s: %v", filename, err)
+// 	}
+// 	defer file.Close()
+// }
 
 func containsSubstring(t *testing.T, str string, list []string) bool {
 	t.Helper()
