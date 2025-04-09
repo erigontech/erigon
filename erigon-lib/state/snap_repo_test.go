@@ -236,6 +236,7 @@ func setupEntity(t *testing.T, genRepo func(stepSize uint64, dirs datadir.Dirs) 
 
 	t.Cleanup(func() {
 		repo.Close()
+		os.RemoveAll(dirs.DataDir)
 	})
 
 	return name, dirs, repo
