@@ -211,7 +211,7 @@ func (d Dirs) RenameOldVersions() error {
 		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
 		d.Nodes, d.CaplinBlobs, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis,
 	}
-
+	renamed := 0
 	for _, dirPath := range directories {
 		err := filepath.WalkDir(dirPath, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
@@ -222,11 +222,6 @@ func (d Dirs) RenameOldVersions() error {
 				name := entry.Name()
 				newPath := path
 				if strings.HasPrefix(name, "v1-") {
-					println("renaming:", name)
-					newName := strings.Replace(name, "v1-", "v1.0-", 1)
-					oldPath := path
-					newPath = filepath.Join(filepath.Dir(path), newName)
-
 					if strings.HasSuffix(name, ".torrent") {
 						println("removing torrent:", path)
 						if err := os.Remove(path); err != nil {
@@ -234,20 +229,17 @@ func (d Dirs) RenameOldVersions() error {
 						}
 						return nil
 					}
+					println("renaming:", name)
+					newName := strings.Replace(name, "v1-", "v1.0-", 1)
+					oldPath := path
+					newPath = filepath.Join(filepath.Dir(path), newName)
+
 					if err := os.Rename(oldPath, newPath); err != nil {
 						return err
 					}
-					return nil
-				}
-
-				if strings.HasSuffix(name, ".torrent") {
-					println("removing torrent:", newPath)
-					if err := os.Remove(newPath); err != nil {
-						return err
-					}
+					renamed++
 				}
 			}
-
 			return nil
 		})
 
@@ -257,7 +249,7 @@ func (d Dirs) RenameOldVersions() error {
 	}
 
 	// Удаление директории Downloader
-	if d.Downloader != "" {
+	if d.Downloader != "" && renamed > 0 {
 		println("removing downloader dir:", d.Downloader)
 		if err := os.RemoveAll(d.Downloader); err != nil {
 			return err
