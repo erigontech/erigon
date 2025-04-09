@@ -917,6 +917,7 @@ func (sdc *SharedDomainsCommitmentContext) Close() {
 func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, error) {
 	if !sdc.domainsOnly && sdc.limitReadAsOfTxNum > 0 {
 		branch, _, err := sdc.sharedDomains.roTtx.GetAsOf(kv.CommitmentDomain, pref, sdc.limitReadAsOfTxNum)
+		fmt.Printf("[SDC] Branch @%d: %x: %x\n%s\n", sdc.limitReadAsOfTxNum, pref, branch, commitment.BranchData(branch).String())
 		//enc, err := sdc.history.ReadCommitmentBranch(pref)
 		if err != nil {
 			return nil, 0, fmt.Errorf("branch history read failed: %w", err)
