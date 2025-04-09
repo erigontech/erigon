@@ -614,13 +614,15 @@ type BeaconChainConfig struct {
 	WhiskProposerSelectionGap    uint64 `yaml:"WHISK_PROPOSER_SELECTION_GAP" spec:"true" json:"WHISK_PROPOSER_SELECTION_GAP,string"`         // WhiskProposerSelectionGap defines the proposer selection gap.
 
 	// EIP7594
-	NumberOfColumns              uint64 `yaml:"NUMBER_OF_COLUMNS" spec:"true" json:"NUMBER_OF_COLUMNS,string"`                               // NumberOfColumns defines the number of columns in the extended matrix.
-	MaxCellsInExtendedMatrix     uint64 `yaml:"MAX_CELLS_IN_EXTENDED_MATRIX" spec:"true" json:"MAX_CELLS_IN_EXTENDED_MATRIX,string"`         // MaxCellsInExtendedMatrix defines the maximum number of cells in the extended matrix.
-	DataColumnSidecarSubnetCount uint64 `yaml:"DATA_COLUMN_SIDECAR_SUBNET_COUNT" spec:"true" json:"DATA_COLUMN_SIDECAR_SUBNET_COUNT,string"` // DataColumnSidecarSubnetCount defines the number of sidecars in the data column subnet.
-	MaxRequestDataColumnSidecars uint64 `yaml:"MAX_REQUEST_DATA_COLUMN_SIDECARS" spec:"true" json:"MAX_REQUEST_DATA_COLUMN_SIDECARS,string"` // MaxRequestDataColumnSidecars defines the maximum number of data column sidecars that can be requested.
-	SamplesPerSlot               uint64 `yaml:"SAMPLES_PER_SLOT" spec:"true" json:"SAMPLES_PER_SLOT,string"`                                 // SamplesPerSlot defines the number of samples per slot.
-	CustodyRequirement           uint64 `yaml:"CUSTODY_REQUIREMENT" spec:"true" json:"CUSTODY_REQUIREMENT,string"`                           // CustodyRequirement defines the custody requirement.
-	TargetNumberOfPeers          uint64 `yaml:"TARGET_NUMBER_OF_PEERS" spec:"true" json:"TARGET_NUMBER_OF_PEERS,string"`                     // TargetNumberOfPeers defines the target number of peers.
+	NumberOfColumns                        uint64 `yaml:"NUMBER_OF_COLUMNS" spec:"true" json:"NUMBER_OF_COLUMNS,string"`                                                       // NumberOfColumns defines the number of columns in the extended matrix.
+	MaxCellsInExtendedMatrix               uint64 `yaml:"MAX_CELLS_IN_EXTENDED_MATRIX" spec:"true" json:"MAX_CELLS_IN_EXTENDED_MATRIX,string"`                                 // MaxCellsInExtendedMatrix defines the maximum number of cells in the extended matrix.
+	DataColumnSidecarSubnetCount           uint64 `yaml:"DATA_COLUMN_SIDECAR_SUBNET_COUNT" spec:"true" json:"DATA_COLUMN_SIDECAR_SUBNET_COUNT,string"`                         // DataColumnSidecarSubnetCount defines the number of sidecars in the data column subnet.
+	MaxRequestDataColumnSidecars           uint64 `yaml:"MAX_REQUEST_DATA_COLUMN_SIDECARS" spec:"true" json:"MAX_REQUEST_DATA_COLUMN_SIDECARS,string"`                         // MaxRequestDataColumnSidecars defines the maximum number of data column sidecars that can be requested.
+	SamplesPerSlot                         uint64 `yaml:"SAMPLES_PER_SLOT" spec:"true" json:"SAMPLES_PER_SLOT,string"`                                                         // SamplesPerSlot defines the number of samples per slot.
+	CustodyRequirement                     uint64 `yaml:"CUSTODY_REQUIREMENT" spec:"true" json:"CUSTODY_REQUIREMENT,string"`                                                   // CustodyRequirement defines the custody requirement.
+	TargetNumberOfPeers                    uint64 `yaml:"TARGET_NUMBER_OF_PEERS" spec:"true" json:"TARGET_NUMBER_OF_PEERS,string"`                                             // TargetNumberOfPeers defines the target number of peers.
+	NumberOfCustodyGroups                  uint64 `yaml:"NUMBER_OF_CUSTODY_GROUPS" spec:"true" json:"NUMBER_OF_CUSTODY_GROUPS,string"`                                         // NumberOfCustodyGroups defines the number of custody groups.
+	MinEpochsForDataColumnSidecarsRequests uint64 `yaml:"MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS" spec:"true" json:"MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS,string"` // MinEpochsForDataColumnSidecarsRequests defines the minimum number of epochs for data column sidecars requests.
 
 	// Electra
 	MinPerEpochChurnLimitElectra          uint64 `yaml:"MIN_PER_EPOCH_CHURN_LIMIT_ELECTRA" spec:"true" json:"MIN_PER_EPOCH_CHURN_LIMIT_ELECTRA,string"`                   // MinPerEpochChurnLimitElectra defines the minimum per epoch churn limit for Electra.
@@ -906,13 +908,16 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	WhiskEpochsPerShufflingPhase: 256,
 	WhiskProposerSelectionGap:    2,
 
-	NumberOfColumns:              128,
-	MaxCellsInExtendedMatrix:     768,
-	DataColumnSidecarSubnetCount: 32,
-	MaxRequestDataColumnSidecars: 16384,
-	SamplesPerSlot:               8,
-	CustodyRequirement:           1,
-	TargetNumberOfPeers:          70,
+	// EIP-7594
+	NumberOfColumns:                        128,
+	MaxCellsInExtendedMatrix:               768,
+	DataColumnSidecarSubnetCount:           128,
+	MaxRequestDataColumnSidecars:           16384, // MAX_REQUEST_BLOCKS_DENEB * NUMBER_OF_COLUMNS
+	SamplesPerSlot:                         8,
+	CustodyRequirement:                     4,
+	TargetNumberOfPeers:                    70,
+	NumberOfCustodyGroups:                  128,
+	MinEpochsForDataColumnSidecarsRequests: 1 << 12, // 4096 epochs
 
 	// Electra
 	MinPerEpochChurnLimitElectra:          128_000_000_000,
