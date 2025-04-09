@@ -1688,22 +1688,6 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		return txpoolcfg.FeeTooLow
 	}
 
-	// Check if we have txn with same authorization in the pool
-	if mt.TxnSlot.Type == SetCodeTxnType {
-		foundDuplicate := false
-		for _, a := range mt.TxnSlot.Authorities {
-			if _, ok := p.auths[*a]; ok {
-				foundDuplicate = true
-				break
-			}
-			p.auths[*a] = mt
-		}
-
-		if foundDuplicate {
-			return txpoolcfg.ErrAuthorityReserved
-		}
-	}
-
 	// Do not allow transaction from if sender has authority
 	addr, ok := p.senders.getAddr(mt.TxnSlot.SenderID)
 	if !ok {
@@ -1712,6 +1696,27 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 	}
 	if _, ok := p.auths[addr]; ok {
 		return txpoolcfg.ErrAuthorityReserved
+	}
+
+	// Check if we have txn with same authorization in the pool
+	if mt.TxnSlot.Type == SetCodeTxnType {
+		foundDuplicate := false
+		for _, a := range mt.TxnSlot.Authorities {
+			p.logger.Debug("setCodeTxn ", "authority", a.String())
+			if _, ok := p.auths[*a]; ok {
+				foundDuplicate = true
+				p.logger.Debug("setCodeTxn ", "DUPLICATE authority", a.String(), "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
+				break
+			}
+		}
+
+		if foundDuplicate {
+			return txpoolcfg.ErrAuthorityReserved
+		} else {
+			for _, a := range mt.TxnSlot.Authorities {
+				p.auths[*a] = mt
+			}
+		}
 	}
 
 	hashStr := string(mt.TxnSlot.IDHash[:])

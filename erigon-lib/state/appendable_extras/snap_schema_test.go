@@ -104,7 +104,7 @@ func TestE3SnapSchemaForDomain1(t *testing.T) {
 
 	dirs := setup(t)
 	stepSize := uint64(config3.DefaultStepSize)
-	p := NewE3ParserBuilder(AccessorBTree|AccessorExistence, stepSize).
+	p := NewE3SnapSchemaBuilder(AccessorBTree|AccessorExistence, stepSize).
 		Data(dirs.SnapDomain, "accounts", DataExtensionKv).
 		BtIndex(seg.CompressNone).
 		Existence().Build()
@@ -162,7 +162,7 @@ func TestE3SnapSchemaForDomain1(t *testing.T) {
 func TestE3SnapSchemaForCommitmentDomain(t *testing.T) {
 	dirs := setup(t)
 	stepSize := uint64(config3.DefaultStepSize)
-	p := NewE3ParserBuilder(AccessorHashMap, stepSize).
+	p := NewE3SnapSchemaBuilder(AccessorHashMap, stepSize).
 		Data(dirs.SnapDomain, "commitments", DataExtensionKv).
 		Accessor(dirs.SnapDomain, AccessorExtensionKvi).Build()
 
@@ -208,7 +208,7 @@ func TestE3SnapSchemaForCommitmentDomain(t *testing.T) {
 func TestE3SnapSchemaForHistory(t *testing.T) {
 	dirs := setup(t)
 	stepSize := uint64(config3.DefaultStepSize)
-	p := NewE3ParserBuilder(AccessorHashMap, stepSize).
+	p := NewE3SnapSchemaBuilder(AccessorHashMap, stepSize).
 		Data(dirs.SnapHistory, "accounts", DataExtensionV).
 		Accessor(dirs.SnapAccessors, AccessorExtensionVi).Build()
 
@@ -257,7 +257,7 @@ func TestE3SnapSchemaForHistory(t *testing.T) {
 func TestE3SnapSchemaForII(t *testing.T) {
 	dirs := setup(t)
 	stepSize := uint64(config3.DefaultStepSize)
-	p := NewE3ParserBuilder(AccessorHashMap, stepSize).
+	p := NewE3SnapSchemaBuilder(AccessorHashMap, stepSize).
 		Data(dirs.SnapIdx, "logaddrs", DataExtensionEf).
 		Accessor(dirs.SnapAccessors, AccessorExtensionEfi).Build()
 
