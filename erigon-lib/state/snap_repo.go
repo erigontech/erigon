@@ -103,7 +103,7 @@ func (f *SnapshotRepo) DirtyFilesWithNoBtreeAccessors() (l []*filesItem) {
 	}
 	p := f.parser
 	ss := f.stepSize
-	v := ae.Version(1)
+	v := snaptype.V1_0
 
 	return fileItemsWithMissingAccessors(f.dirtyFiles, f.stepSize, func(fromStep uint64, toStep uint64) []string {
 		from, to := RootNum(fromStep*ss), RootNum(toStep*ss)
@@ -118,7 +118,7 @@ func (f *SnapshotRepo) DirtyFilesWithNoHashAccessors() (l []*filesItem) {
 	}
 	p := f.parser
 	ss := f.stepSize
-	v := ae.Version(1)
+	v := snaptype.V1_0
 	accCount := f.parser.AccessorIdxCount()
 	files := make([]string, accCount)
 
@@ -191,7 +191,7 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 	invalidFilesMu := sync.Mutex{}
 	invalidFileItems := make([]*filesItem, 0)
 	p := f.parser
-	version := snaptype.Version(1)
+	version := snaptype.V1_0
 	f.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.decompressor == nil {
