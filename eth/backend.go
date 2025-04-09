@@ -245,6 +245,12 @@ func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadi
 	}
 	fmt.Println("commitment history enabled:", isCommitmentHistoryEnabled)
 	if !ok {
+		if !cfg.KeepExecutionProofs {
+			if err := rawdb.WriteDBCommitmentHistoryEnabled(tx, cfg.KeepExecutionProofs); err != nil {
+				return err
+			}
+			return nil
+		}
 		// we need to make sure we do not run from an old version so check amount of keys in kv.AccountDomain
 		c, err := tx.Count(kv.TblAccountVals)
 		if err != nil {
