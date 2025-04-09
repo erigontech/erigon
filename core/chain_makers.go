@@ -409,8 +409,13 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			}
 			b.header.Root = libcommon.BytesToHash(stateRoot)
 
+			var withdrawals []*types.Withdrawal   // by default nil
+			if config.IsShanghai(b.header.Time) { // if shanghai is activated then empty list
+				withdrawals = []*types.Withdrawal{}
+			}
+
 			// Recreating block to make sure Root makes it into the header
-			block := types.NewBlockForAsembling(b.header, b.txs, b.uncles, b.receipts, []*types.Withdrawal{} /* withdrawals */)
+			block := types.NewBlockForAsembling(b.header, b.txs, b.uncles, b.receipts, withdrawals /* withdrawals */)
 			return block, b.receipts, nil
 		}
 		return nil, nil, errors.New("no engine to generate blocks")
@@ -776,6 +781,10 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 			parentGasLimit := parent.GasLimit() * params.ElasticityMultiplier
 			header.GasLimit = CalcGasLimit(parentGasLimit, parentGasLimit)
 		}
+	}
+
+	if config.IsShanghai(time) {
+		header.WithdrawalsHash = &types.EmptyRootHash
 	}
 
 	if config.IsCancun(header.Time) {

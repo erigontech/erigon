@@ -1014,7 +1014,6 @@ func (bb *Body) DecodeRLP(s *rlp.Stream) error {
 // the given txs, uncles, receipts, and withdrawals.
 func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt, withdrawals []*Withdrawal) *Block {
 	b := &Block{header: CopyHeader(header)}
-
 	// TODO: panic if len(txs) != len(receipts)
 	if len(txs) == 0 {
 		b.header.TxHash = EmptyRootHash
@@ -1058,7 +1057,6 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 	}
 
 	b.header.ParentBeaconBlockRoot = header.ParentBeaconBlockRoot
-	b.header.mutable = false //Force immutability of block and header. Use `NewBlockForAsembling` if you need mutable block
 	return b
 }
 
@@ -1066,6 +1064,7 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 func NewBlockForAsembling(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt, withdrawals []*Withdrawal) *Block {
 	b := NewBlock(header, txs, uncles, receipts, withdrawals)
 	b.header.mutable = true
+	// b.header.hash.Store(nil)
 	return b
 }
 
@@ -1197,7 +1196,11 @@ func (h *Header) String() string {
 
 	// AuRa extensions
 	b.WriteString(fmt.Sprintf("  AuRaStep: %d\n", h.AuRaStep))
-	b.WriteString(fmt.Sprintf("  AuRaSeal: %x\n", h.AuRaSeal))
+	if h.AuRaSeal != nil {
+		b.WriteString(fmt.Sprintf("  AuRaSeal: %x\n", h.AuRaSeal))
+	} else {
+		b.WriteString(fmt.Sprintf("  AuRaSeal: <nil>\n"))
+	}
 
 	// EIP-1559 and EIP-4895 fields
 	if h.BaseFee != nil {
@@ -1233,7 +1236,11 @@ func (h *Header) String() string {
 
 	// Verkle fields
 	b.WriteString(fmt.Sprintf("  Verkle: %t\n", h.Verkle))
-	b.WriteString(fmt.Sprintf("  VerkleProof: %x\n", h.VerkleProof))
+	if h.VerkleProof != nil {
+		b.WriteString(fmt.Sprintf("  VerkleProof: %x\n", h.VerkleProof))
+	} else {
+		b.WriteString(fmt.Sprintf("  VerkleProof: <nil>\n"))
+	}
 	if len(h.VerkleKeyVals) > 0 {
 		b.WriteString("  VerkleKeyVals:\n")
 		for i, kv := range h.VerkleKeyVals {
@@ -1560,6 +1567,7 @@ func (b *Block) Copy() *Block {
 func (b *Block) WithSeal(header *Header) *Block {
 	headerCopy := CopyHeader(header)
 	headerCopy.mutable = false
+	headerCopy.hash.Store(nil) // invalidate cached hash
 	return &Block{
 		header:       headerCopy,
 		transactions: b.transactions,
