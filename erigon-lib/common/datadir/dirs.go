@@ -213,25 +213,53 @@ func (d Dirs) RenameOldVersions() error {
 	}
 
 	for _, dirPath := range directories {
-		err := filepath.WalkDir(dirPath, func(path string, d fs.DirEntry, err error) error {
+		err := filepath.WalkDir(dirPath, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
 
-			if !d.IsDir() && strings.HasPrefix(d.Name(), "v1-") {
-				println("d name:", d.Name())
-				newName := strings.Replace(d.Name(), "v1-", "v1.0-", 1)
-				oldPath := path
-				newPath := filepath.Join(filepath.Dir(path), newName)
+			if !entry.IsDir() {
+				name := entry.Name()
+				newPath := path
+				if strings.HasPrefix(name, "v1-") {
+					println("renaming:", name)
+					newName := strings.Replace(name, "v1-", "v1.0-", 1)
+					oldPath := path
+					newPath = filepath.Join(filepath.Dir(path), newName)
 
-				if err := os.Rename(oldPath, newPath); err != nil {
-					return err
+					if strings.HasSuffix(name, ".torrent") {
+						println("removing torrent:", path)
+						if err := os.Remove(path); err != nil {
+							return err
+						}
+						return nil
+					}
+					if err := os.Rename(oldPath, newPath); err != nil {
+						return err
+					}
+					return nil
+				}
+
+				if strings.HasSuffix(name, ".torrent") {
+					println("removing torrent:", newPath)
+					if err := os.Remove(newPath); err != nil {
+						return err
+					}
 				}
 			}
+
 			return nil
 		})
 
 		if err != nil {
+			return err
+		}
+	}
+
+	// Удаление директории Downloader
+	if d.Downloader != "" {
+		println("removing downloader dir:", d.Downloader)
+		if err := os.RemoveAll(d.Downloader); err != nil {
 			return err
 		}
 	}
