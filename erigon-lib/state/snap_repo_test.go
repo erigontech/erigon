@@ -37,7 +37,7 @@ func TestOpenFolder_AccountsDomain(t *testing.T) {
 	})
 	extensions := repo.cfg.Schema.(*ae.E3SnapSchema).FileExtensions()
 	dataCount, btCount, existenceCount, accessorCount := populateFiles(t, dirs, name, extensions, dirs.SnapDomain)
-	require.True(t, dataCount > 0)
+	require.Positive(t, dataCount)
 
 	err := repo.OpenFolder()
 	require.NoError(t, err)
@@ -85,7 +85,7 @@ func TestOpenFolder_CodeII(t *testing.T) {
 	extensions := repo.cfg.Schema.(*ae.E3SnapSchema).FileExtensions()
 	dataCount, btCount, existenceCount, accessorCount := populateFiles(t, dirs, name, extensions, dirs.SnapIdx)
 
-	require.True(t, dataCount > 0)
+	require.Positive(t, dataCount)
 
 	err := repo.OpenFolder()
 	require.NoError(t, err)
@@ -139,7 +139,7 @@ func TestIntegrateDirtyFile(t *testing.T) {
 
 	extensions := repo.cfg.Schema.(*ae.E3SnapSchema).FileExtensions()
 	dataCount, _, _, _ := populateFiles(t, dirs, name, extensions, dirs.SnapDomain)
-	require.True(t, dataCount > 0)
+	require.Positive(t, dataCount)
 
 	err := repo.OpenFolder()
 	require.NoError(t, err)
@@ -179,46 +179,48 @@ func TestCloseFilesAfterRootNum(t *testing.T) {
 
 	extensions := repo.cfg.Schema.(*ae.E3SnapSchema).FileExtensions()
 	dataCount, _, _, _ := populateFiles(t, dirs, name, extensions, dirs.SnapDomain)
-	require.True(t, dataCount > 0)
+	require.Positive(t, dataCount)
 
 	// 0-256, 256-288, 288-296, 296-298
 
 	// all but 1
 	require.NoError(t, repo.OpenFolder())
 	repo.CloseFilesAfterRootNum(stepToRootNum(t, 10, repo))
-	require.Equal(t, len(repo.dirtyFiles.Items()), 1)
+	require.Len(t, repo.dirtyFiles.Items(), 1)
 
 	// all but 1
 	require.NoError(t, repo.OpenFolder())
 	repo.CloseFilesAfterRootNum(stepToRootNum(t, 256, repo))
-	require.Equal(t, len(repo.dirtyFiles.Items()), 1)
+	require.Len(t, repo.dirtyFiles.Items(), 1)
 
 	// all but 2
 	require.NoError(t, repo.OpenFolder())
 	repo.CloseFilesAfterRootNum(stepToRootNum(t, 270, repo))
-	require.Equal(t, len(repo.dirtyFiles.Items()), 2)
+	require.Len(t, repo.dirtyFiles.Items(), 2)
 
 	// all but 2
 	require.NoError(t, repo.OpenFolder())
 	repo.CloseFilesAfterRootNum(stepToRootNum(t, 288, repo))
-	require.Equal(t, len(repo.dirtyFiles.Items()), 2)
+	require.Len(t, repo.dirtyFiles.Items(), 2)
 
 	// all but 3
 	require.NoError(t, repo.OpenFolder())
 	repo.CloseFilesAfterRootNum(stepToRootNum(t, 290, repo))
-	require.Equal(t, len(repo.dirtyFiles.Items()), 3)
+	require.Len(t, repo.dirtyFiles.Items(), 3)
 
 	// all still open
 	require.NoError(t, repo.OpenFolder())
 	repo.CloseFilesAfterRootNum(stepToRootNum(t, 297, repo))
-	require.Equal(t, len(repo.dirtyFiles.Items()), 4)
+	require.Len(t, repo.dirtyFiles.Items(), 4)
 }
 
 func stepToRootNum(t *testing.T, step uint64, repo *SnapshotRepo) RootNum {
+	t.Helper()
 	return RootNum(repo.cfg.RootNumPerStep * step)
 }
 
 func setupEntity(t *testing.T, genRepo func(stepSize uint64, dirs datadir.Dirs) (name string, schema ae.SnapNameSchema)) (name string, dirs datadir.Dirs, repo *SnapshotRepo) {
+	t.Helper()
 	dirs = datadir.New(t.TempDir())
 	stepSize := uint64(10)
 	name, schema := genRepo(stepSize, dirs)
@@ -365,6 +367,7 @@ func touch(t *testing.T, folder string, files []string, fileGen func(filename st
 }
 
 func touchFile(t *testing.T, filename string) {
+	t.Helper()
 	file, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0666)
 	if err != nil {
 		t.Fatalf("failed to open file %s: %v", filename, err)
