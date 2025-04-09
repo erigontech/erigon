@@ -42,7 +42,6 @@ import (
 var stateBuckets = []string{
 	kv.HashedAccountsDeprecated,
 	kv.HashedStorageDeprecated,
-	kv.ContractCode,
 	kv.PlainState,
 	kv.PlainContractCode,
 	kv.IncarnationMap,
