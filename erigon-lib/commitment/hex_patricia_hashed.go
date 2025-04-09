@@ -1954,7 +1954,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 				return fmt.Errorf("unfold: %w", err)
 			}
 		}
-		hph.PrintGrid()
+		//hph.PrintGrid()
 
 		//hph.updateCell(plainKey, hashedKey, update)
 
