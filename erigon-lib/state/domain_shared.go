@@ -27,6 +27,8 @@ import (
 	"time"
 	"unsafe"
 
+	btree2 "github.com/tidwall/btree"
+
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
@@ -40,7 +42,6 @@ import (
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon-lib/types/accounts"
-	btree2 "github.com/tidwall/btree"
 )
 
 var ErrBehindCommitment = errors.New("behind commitment")
@@ -384,6 +385,7 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error)
 	if err != nil {
 		return nil, 0, err
 	}
+	sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), rv) // keep dereferenced value in cache (to avoid waste on another dereference)
 	return rv, endTx / sd.StepSize(), nil
 }
 
@@ -885,7 +887,6 @@ func (sd *SharedDomains) Tx() kv.Tx { return sd.roTx }
 
 type SharedDomainsCommitmentContext struct {
 	sharedDomains *SharedDomains
-	branches      map[string]cachedBranch
 	updates       *commitment.Updates
 	patriciaTrie  commitment.Trie
 	justRestored  atomic.Bool
@@ -900,7 +901,6 @@ func (sdc *SharedDomainsCommitmentContext) SetLimitReadAsOfTxNum(txNum uint64) {
 func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode commitment.Mode, trieVariant commitment.TrieVariant) *SharedDomainsCommitmentContext {
 	ctx := &SharedDomainsCommitmentContext{
 		sharedDomains: sd,
-		branches:      make(map[string]cachedBranch),
 	}
 
 	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, sd.aggTx.a.tmpdir)
@@ -912,25 +912,9 @@ func (sdc *SharedDomainsCommitmentContext) Close() {
 	sdc.updates.Close()
 }
 
-type cachedBranch struct {
-	data []byte
-	step uint64
-}
-
-// ResetBranchCache should be called after each commitment computation
-func (sdc *SharedDomainsCommitmentContext) ResetBranchCache() {
-	clear(sdc.branches)
-}
-
 func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, error) {
-	prefS := toStringZeroCopy(pref)
-	cached, ok := sdc.branches[prefS]
-	if ok {
-		// cached value is already transformed/clean to read.
-		// Cache should ResetBranchCache after each commitment computation
-		return cached.data, cached.step, nil
-	}
-
+	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update.
+	// Dereferenced branch is kept inside sharedDomains commitment domain map (but not written into buffer so not flushed into db, unless updated)
 	v, step, err := sdc.sharedDomains.LatestCommitment(pref)
 	if err != nil {
 		return nil, 0, fmt.Errorf("branch failed: %w", err)
@@ -938,10 +922,6 @@ func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, 
 	if sdc.sharedDomains.trace {
 		fmt.Printf("[SDC] Branch: %x: %x\n", pref, v)
 	}
-	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update, if any, so
-	// cache branch until ResetBranchCache called
-	sdc.branches[prefS] = cachedBranch{data: v, step: step}
-
 	if len(v) == 0 {
 		return nil, 0, nil
 	}
@@ -953,8 +933,6 @@ func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte,
 	if sdc.sharedDomains.trace {
 		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
 	}
-	sdc.branches[prefixS] = cachedBranch{data: data, step: prevStep}
-
 	return sdc.sharedDomains.updateCommitmentData(prefixS, data, prevData, prevStep)
 }
 
@@ -1111,9 +1089,6 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, expected
 
 // Evaluates commitment for processed state.
 func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, saveState bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
-	sdc.ResetBranchCache()
-	defer sdc.ResetBranchCache()
-
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
 	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
