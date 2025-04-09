@@ -78,6 +78,12 @@ func (e *EventRecordWithTime) MarshallIdBytes() []byte {
 	return id[:]
 }
 
+func (e *EventRecordWithTime) MarshallTimeBytes() []byte {
+	var t [8]byte
+	binary.BigEndian.PutUint64(t[:], uint64(e.Time.Unix()))
+	return t[:]
+}
+
 func (e *EventRecordWithTime) MarshallBytes() ([]byte, error) {
 	eventRecordWithoutTime := e.BuildEventRecord()
 	rlpBytes, err := rlp.EncodeToBytes(eventRecordWithoutTime)
