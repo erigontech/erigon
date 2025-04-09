@@ -35,6 +35,7 @@ func TestOpenFolder_AccountsDomain(t *testing.T) {
 
 		return name, schema
 	})
+	defer repo.Close()
 	extensions := repo.cfg.Schema.(*ae.E3SnapSchema).FileExtensions()
 	dataCount, btCount, existenceCount, accessorCount := populateFiles(t, dirs, name, extensions, dirs.SnapDomain)
 	require.Positive(t, dataCount)
@@ -81,6 +82,7 @@ func TestOpenFolder_CodeII(t *testing.T) {
 			Accessor(dirs.SnapAccessors, ae.AccessorExtensionEfi).Build()
 		return name, schema
 	})
+	defer repo.Close()
 
 	extensions := repo.cfg.Schema.(*ae.E3SnapSchema).FileExtensions()
 	dataCount, btCount, existenceCount, accessorCount := populateFiles(t, dirs, name, extensions, dirs.SnapIdx)
@@ -136,6 +138,7 @@ func TestIntegrateDirtyFile(t *testing.T) {
 
 		return name, schema
 	})
+	defer repo.Close()
 
 	extensions := repo.cfg.Schema.(*ae.E3SnapSchema).FileExtensions()
 	dataCount, _, _, _ := populateFiles(t, dirs, name, extensions, dirs.SnapDomain)
@@ -148,11 +151,11 @@ func TestIntegrateDirtyFile(t *testing.T) {
 	filename := repo.parser.DataFile(snaptype.Version(1), 0, 1024)
 	comp, err := seg.NewCompressor(context.Background(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 	require.NoError(t, err)
+	defer comp.Close()
 	if err = comp.AddWord([]byte("word")); err != nil {
 		t.Fatal(err)
 	}
 	require.NoError(t, comp.Compress())
-	comp.Close()
 
 	filesItem.decompressor, err = seg.NewDecompressor(filename)
 	require.NoError(t, err)
@@ -176,6 +179,7 @@ func TestCloseFilesAfterRootNum(t *testing.T) {
 			Build()
 		return name, schema
 	})
+	defer repo.Close()
 
 	extensions := repo.cfg.Schema.(*ae.E3SnapSchema).FileExtensions()
 	dataCount, _, _, _ := populateFiles(t, dirs, name, extensions, dirs.SnapDomain)
@@ -236,10 +240,10 @@ func setupEntity(t *testing.T, genRepo func(stepSize uint64, dirs datadir.Dirs) 
 		Schema:                 schema,
 	}, log.New())
 
-	t.Cleanup(func() {
-		repo.Close()
-		os.RemoveAll(dirs.DataDir)
-	})
+	// t.Cleanup(func() {
+	// 	repo.Close()
+	// 	//os.RemoveAll(dirs.DataDir)
+	// })
 
 	return name, dirs, repo
 }
@@ -267,11 +271,11 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 		if strings.HasSuffix(filename, ".ef") || strings.HasSuffix(filename, ".v") || strings.HasSuffix(filename, ".kv") {
 			seg, err := seg.NewCompressor(context.Background(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 			require.NoError(t, err)
+			defer seg.Close()
 			if err = seg.AddWord([]byte("word")); err != nil {
 				t.Fatal(err)
 			}
 			require.NoError(t, seg.Compress())
-			seg.Close()
 
 			if strings.Contains(filename, name) && containsSubstring(t, filename, extensions) && strings.Contains(filename, dataFolder) {
 				dataFileCount++
@@ -283,6 +287,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 		if strings.HasSuffix(filename, ".bt") {
 			seg2, err := seg.NewCompressor(context.Background(), t.Name(), filename+".sample", dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 			require.NoError(t, err)
+			defer seg2.Close()
 			if err = seg2.AddWord([]byte("key")); err != nil {
 				t.Fatal(err)
 			}
@@ -290,7 +295,6 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 				t.Fatal(err)
 			}
 			require.NoError(t, seg2.Compress())
-			defer seg2.Close()
 			seg3, err := seg.NewDecompressor(filename + ".sample")
 			require.NoError(t, err)
 			defer seg3.Close()
@@ -310,6 +314,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 		if strings.HasSuffix(filename, ".kvei") {
 			filter, err := NewExistenceFilter(0, filename)
 			require.NoError(t, err)
+			defer filter.Close()
 			require.NoError(t, filter.Build())
 
 			if strings.Contains(filename, name) && containsSubstring(t, filename, extensions) {
@@ -332,14 +337,14 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 			if err != nil {
 				t.Fatal(err)
 			}
+			defer rs.Close()
+
 			if err = rs.AddKey([]byte("first_key"), 0); err != nil {
 				t.Error(err)
 			}
 			if err = rs.Build(context.Background()); err != nil {
 				t.Errorf("test is expected to fail, too few keys added")
 			}
-
-			rs.Close()
 			if strings.Contains(filename, name) && containsSubstring(t, filename, extensions) {
 				accessorCount++
 			}
