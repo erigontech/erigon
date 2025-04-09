@@ -321,23 +321,23 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 	for i, s := range storageKeys {
 		storageKeysConverted[i].SetBytes(s)
 	}
-	return api.getProof(ctx, &roTx, address, storageKeysConverted, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(requestedBlockNr)), api.db, api.logger)
+	return api.getProof(ctx, roTx, address, storageKeysConverted, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(requestedBlockNr)), api.db, api.logger)
 }
 
-func (api *APIImpl) getProof(ctx context.Context, roTx *kv.Tx, address libcommon.Address, storageKeys []libcommon.Hash, blockNrOrHash rpc.BlockNumberOrHash, db kv.RoDB, logger log.Logger) (*accounts.AccProofResult, error) {
+func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address libcommon.Address, storageKeys []libcommon.Hash, blockNrOrHash rpc.BlockNumberOrHash, db kv.RoDB, logger log.Logger) (*accounts.AccProofResult, error) {
 	// get the root hash from header to validate proofs along the way
-	header, err := api._blockReader.HeaderByNumber(ctx, *roTx, blockNrOrHash.BlockNumber.Uint64())
+	header, err := api._blockReader.HeaderByNumber(ctx, roTx, blockNrOrHash.BlockNumber.Uint64())
 	if err != nil {
 		return nil, err
 	}
 
-	domains, err := libstate.NewSharedDomains(*roTx, log.New())
+	domains, err := libstate.NewSharedDomains(roTx, log.New())
 	if err != nil {
 		return nil, err
 	}
 	sdCtx := domains.GetCommitmentContext()
 
-	latestBlock, err := rpchelper.GetLatestBlockNumber(*roTx)
+	latestBlock, err := rpchelper.GetLatestBlockNumber(roTx)
 	if err != nil {
 		return nil, err
 	}
@@ -345,11 +345,16 @@ func (api *APIImpl) getProof(ctx context.Context, roTx *kv.Tx, address libcommon
 		return nil, fmt.Errorf("block number is in the future latest=%d requested=%d", latestBlock, blockNrOrHash.BlockNumber.Uint64())
 	}
 	if blockNrOrHash.BlockNumber.Uint64() < latestBlock {
-		lastTxnInBlock, err := rawdbv3.TxNums.Max(*roTx, header.Number.Uint64())
+		lastTxnInBlock, err := rawdbv3.TxNums.Max(roTx, header.Number.Uint64())
 		if err != nil {
 			return nil, err
 		}
 		sdCtx.SetLimitReadAsOfTxNum(lastTxnInBlock, false)
+		domains.SetTrace(true)
+		if _, err := domains.SeekCommitment(context.Background(), roTx); err != nil {
+			return nil, err
+		}
+		domains.SetTrace(false)
 	}
 
 	// touch account
