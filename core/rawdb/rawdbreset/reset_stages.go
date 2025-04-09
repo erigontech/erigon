@@ -199,7 +199,7 @@ var Tables = map[stages.SyncStage][]string{
 }
 var stateBuckets = []string{
 	kv.Epoch, kv.PendingEpoch, kv.Code,
-	kv.PlainContractCode, kv.ContractCode, kv.IncarnationMap,
+	kv.PlainContractCode, kv.IncarnationMap,
 }
 var stateHistoryBuckets = []string{
 	kv.TblPruningProgress,
@@ -230,19 +230,4 @@ func Reset(ctx context.Context, db kv.RwDB, stagesList ...stages.SyncStage) erro
 		}
 		return nil
 	})
-}
-
-func ResetPruneAt(ctx context.Context, db kv.RwDB, stage stages.SyncStage) error {
-	return db.Update(ctx, func(tx kv.RwTx) error {
-		return stages.SaveStagePruneProgress(tx, stage, 0)
-	})
-}
-
-func Warmup(ctx context.Context, db kv.RwDB, lvl log.Lvl, stList ...stages.SyncStage) error {
-	for _, st := range stList {
-		for _, tbl := range Tables[st] {
-			backup.WarmupTable(ctx, db, tbl, lvl, backup.ReadAheadThreads)
-		}
-	}
-	return nil
 }
