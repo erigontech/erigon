@@ -1220,21 +1220,21 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[common.Hash
 					storageValueNode := trie.ValueNode(storageUpdate.Storage[:storageUpdate.StorageLen])
 					nextNode = &trie.ShortNode{Key: extensionKey, Val: storageValueNode}
 				} else if cellToExpand.accountAddrLen > 0 {
-					//accNode, err := hph.createAccountNode(cellToExpand, row, hashedKey, codeReads)
-					//if err != nil {
-					//	return nil, err
-					//}
-					//_ = accNode
-					//nextNode = &trie.ShortNode{Key: extensionKey, Val: accNode}
-					//extNodeSubTrie := trie.NewInMemoryTrie(nextNode)
-					//subTrieRoot := extNodeSubTrie.Root()
-					//cellHash, _, _, _ := hph.computeCellHashWithStorage(cellToExpand, hph.depths[row], nil)
-					//if !bytes.Equal(subTrieRoot, cellHash[1:]) {
-					//	return nil, fmt.Errorf("subTrieRoot(%x) != cellHash(%x)", subTrieRoot, cellHash[1:])
-					//}
+					accNode, err := hph.createAccountNode(cellToExpand, row, hashedKey, codeReads)
+					if err != nil {
+						return nil, err
+					}
+					_ = accNode
+					nextNode = &trie.ShortNode{Key: extensionKey, Val: accNode}
+					extNodeSubTrie := trie.NewInMemoryTrie(nextNode)
+					subTrieRoot := extNodeSubTrie.Root()
+					cellHash, _, _, _ := hph.computeCellHashWithStorage(cellToExpand, hph.depths[row], nil)
+					if !bytes.Equal(subTrieRoot, cellHash[1:]) {
+						return nil, fmt.Errorf("subTrieRoot(%x) != cellHash(%x)", subTrieRoot, cellHash[1:])
+					}
 					// // DEBUG patch with cell hash which we know to be correct
 					fmt.Printf("witness cell (%d, %0x, depth=%d) %s\n", row, currentNibble, hph.depths[row], cellToExpand.FullString())
-					nextNode = trie.NewHashNode(cellToExpand.stateHash[:])
+					//nextNode = trie.NewHashNode(cellToExpand.stateHash[:])
 				}
 			}
 		} else if cellToExpand.storageAddrLen > 0 { // storage cell
