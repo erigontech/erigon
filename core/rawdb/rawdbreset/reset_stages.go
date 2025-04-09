@@ -132,6 +132,7 @@ func ResetPolygonSync(tx kv.RwTx, br services.FullBlockReader, bw *blockio.Block
 		kv.BorEventNums,
 		kv.BorEvents,
 		kv.BorSpans,
+		kv.BorEventTimes,
 		kv.BorEventProcessedBlocks,
 		kv.BorMilestones,
 		kv.BorCheckpoints,

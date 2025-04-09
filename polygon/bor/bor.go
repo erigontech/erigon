@@ -259,6 +259,7 @@ type spanReader interface {
 
 type bridgeReader interface {
 	Events(ctx context.Context, blockHash libcommon.Hash, blockNum uint64) ([]*types.Message, error)
+	EventsWithinTime(ctx context.Context, timeFrom, timeTo time.Time) ([]*types.Message, error)
 	EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error)
 }
 
@@ -1099,7 +1100,7 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 			}
 
 			// commit states
-			if err := c.CommitStates(state, header, cx, syscall, logger); err != nil {
+			if err := c.CommitStates(state, header, cx, syscall, logger, false); err != nil {
 				err := fmt.Errorf("Finalize.CommitStates: %w", err)
 				c.logger.Error("[bor] Error while committing states", "err", err)
 				return nil, types.Receipts{}, nil, err
@@ -1165,7 +1166,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 				return nil, nil, types.Receipts{}, nil, err
 			}
 			// commit states
-			if err := c.CommitStates(state, header, cx, syscall, logger); err != nil {
+			if err := c.CommitStates(state, header, cx, syscall, logger, true); err != nil {
 				err := fmt.Errorf("FinalizeAndAssemble.CommitStates: %w", err)
 				c.logger.Error("[bor] committing states", "err", err)
 				return nil, nil, types.Receipts{}, nil, err
@@ -1611,13 +1612,51 @@ func (c *Bor) CommitStates(
 	chain statefull.ChainContext,
 	syscall consensus.SystemCall,
 	logger log.Logger,
+	fetchEventsWithingTime bool,
 ) error {
 	blockNum := header.Number.Uint64()
 
 	if c.useBridgeReader {
-		events, err := c.bridgeReader.Events(c.execCtx, header.Hash(), blockNum)
-		if err != nil {
-			return err
+		var events []*types.Message
+		var err error
+
+		if fetchEventsWithingTime {
+			sprintLength := c.config.CalculateSprintLength(blockNum)
+
+			if blockNum < sprintLength {
+				return nil
+			}
+
+			prevSprintStart := chain.Chain.GetHeaderByNumber(blockNum - sprintLength)
+			stateSyncDelay := c.config.CalculateStateSyncDelay(blockNum)
+
+			timeFrom := time.Unix(int64(prevSprintStart.Time-stateSyncDelay), 0)
+			timeTo := time.Unix(int64(header.Time-stateSyncDelay), 0)
+
+			// Previous sprint was not indore.
+			if !c.config.IsIndore(prevSprintStart.Number.Uint64()) {
+				if prevSprintStart.Number.Uint64() >= sprintLength {
+					prevPrevSprintStart := chain.Chain.GetHeaderByNumber(prevSprintStart.Number.Uint64() - sprintLength)
+					timeFrom = time.Unix(int64(prevPrevSprintStart.Time), 0)
+				} else {
+					timeFrom = time.Unix(0, 0)
+				}
+			}
+
+			// Current sprint was not indore.
+			if !c.config.IsIndore(blockNum) {
+				timeTo = time.Unix(int64(prevSprintStart.Time), 0)
+			}
+
+			events, err = c.bridgeReader.EventsWithinTime(c.execCtx, timeFrom, timeTo)
+			if err != nil {
+				return err
+			}
+		} else {
+			events, err = c.bridgeReader.Events(c.execCtx, header.Hash(), blockNum)
+			if err != nil {
+				return err
+			}
 		}
 
 		for _, event := range events {
