@@ -107,10 +107,6 @@ func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext) *HexPatriciaHa
 	return hph
 }
 
-//func (hph *HexPatriciaHashed) SetMemoizationOff(off bool) {
-//	hph.memoizationOff = off
-//}
-
 type cell struct {
 	hashedExtension [128]byte
 	extension       [64]byte
@@ -1224,7 +1220,6 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[common.Hash
 					if err != nil {
 						return nil, err
 					}
-					_ = accNode
 					nextNode = &trie.ShortNode{Key: extensionKey, Val: accNode}
 					extNodeSubTrie := trie.NewInMemoryTrie(nextNode)
 					subTrieRoot := extNodeSubTrie.Root()
@@ -1233,7 +1228,7 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[common.Hash
 						return nil, fmt.Errorf("subTrieRoot(%x) != cellHash(%x)", subTrieRoot, cellHash[1:])
 					}
 					// // DEBUG patch with cell hash which we know to be correct
-					fmt.Printf("witness cell (%d, %0x, depth=%d) %s\n", row, currentNibble, hph.depths[row], cellToExpand.FullString())
+					//fmt.Printf("witness cell (%d, %0x, depth=%d) %s\n", row, currentNibble, hph.depths[row], cellToExpand.FullString())
 					//nextNode = trie.NewHashNode(cellToExpand.stateHash[:])
 				}
 			}
@@ -1903,10 +1898,10 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		updatesCount = updates.Size()
 		logEvery     = time.NewTicker(20 * time.Second)
 	)
-	hph.memoizationOff, hph.trace = false, true
-	defer func() {
-		hph.memoizationOff, hph.trace = false, false
-	}()
+	//hph.memoizationOff, hph.trace = false, true
+	//defer func() {
+	//	hph.memoizationOff, hph.trace = false, false
+	//}()
 
 	defer logEvery.Stop()
 	var tries []*trie.Trie = make([]*trie.Trie, 0, len(updates.keys)) // slice of tries, i.e the witness for each key, these will be all merged into single trie
@@ -1955,7 +1950,6 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 			}
 		}
 		//hph.PrintGrid()
-
 		//hph.updateCell(plainKey, hashedKey, update)
 
 		// convert grid to trie.Trie
