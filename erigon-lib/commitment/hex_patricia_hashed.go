@@ -87,6 +87,8 @@ type HexPatriciaHashed struct {
 	depthsToTxNum [129]uint64 // endTxNum of file with branch data for that depth
 	hadToLoadL    map[uint64]skipStat
 
+	memoizationOff bool // if true, do not rely on memoized hashes
+
 	//temp buffers
 	accValBuf rlp.RlpEncodedBytes
 }
@@ -104,6 +106,10 @@ func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext) *HexPatriciaHa
 	hph.branchEncoder = NewBranchEncoder(1024)
 	return hph
 }
+
+//func (hph *HexPatriciaHashed) SetMemoizationOff(off bool) {
+//	hph.memoizationOff = off
+//}
 
 type cell struct {
 	hashedExtension [128]byte
@@ -1226,7 +1232,7 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[common.Hash
 					//	return nil, fmt.Errorf("subTrieRoot(%x) != cellHash(%x)", subTrieRoot, cellHash[1:])
 					//}
 					// // DEBUG patch with cell hash which we know to be correct
-					fmt.Printf("witness cell %s\n", cellToExpand.String())
+					fmt.Printf("witness cell %s\n", cellToExpand.FullString())
 					nextNode = trie.NewHashNode(cellToExpand.hash[:])
 				}
 			}
@@ -1690,6 +1696,9 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			nibble := bits.TrailingZeros16(bit)
 			cell := &hph.grid[row][nibble]
 
+			if hph.memoizationOff {
+				cell.stateHashLen = 0
+			}
 			/* memoization of state hashes*/
 			counters := hph.hadToLoadL[hph.depthsToTxNum[depth]]
 			if cell.stateHashLen > 0 && (hph.touchMap[row]&hph.afterMap[row]&uint16(1<<nibble) > 0 || cell.stateHashLen != length.Hash) {
@@ -1893,8 +1902,10 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		updatesCount = updates.Size()
 		logEvery     = time.NewTicker(20 * time.Second)
 	)
-	hph.trace = true
-	defer func() { hph.trace = false }()
+	hph.memoizationOff, hph.trace = true, true
+	defer func() {
+		hph.memoizationOff, hph.trace = false, false
+	}()
 
 	defer logEvery.Stop()
 	var tries []*trie.Trie = make([]*trie.Trie, 0, len(updates.keys)) // slice of tries, i.e the witness for each key, these will be all merged into single trie
