@@ -987,44 +987,49 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 	}
 
 	u = &commitment.Update{CodeHash: commitment.EmptyCodeHashArray}
-
-	if len(encAccount) > 0 {
-		acc := accounts.Account{}
-		err = accounts.DeserialiseV3(&acc, encAccount)
-		if err != nil {
-			return nil, err
-		}
-		u.Flags |= commitment.NonceUpdate
-		u.Nonce = acc.Nonce
-		u.Flags |= commitment.BalanceUpdate
-		u.Balance.Set(&acc.Balance)
-		if len(acc.CodeHash.Bytes()) > 0 {
-			u.Flags |= commitment.CodeUpdate
-			copy(u.CodeHash[:], acc.CodeHash.Bytes())
-		}
-	}
-	if u.CodeHash == commitment.EmptyCodeHashArray {
-		if len(encAccount) == 0 {
-			u.Flags = commitment.DeleteUpdate
-		}
+	if len(encAccount) == 0 {
+		u.Flags = commitment.DeleteUpdate
 		return u, nil
 	}
 
-	code, err := sdc.readCode(plainKey)
-	if err != nil {
+	acc := accounts.Account{}
+	if err = accounts.DeserialiseV3(&acc, encAccount); err != nil {
 		return nil, err
 	}
 
-	if len(code) > 0 {
-		copy(u.CodeHash[:], crypto.Keccak256(code))
-		u.Flags |= commitment.CodeUpdate
-	} else {
-		u.CodeHash = commitment.EmptyCodeHashArray
-	}
+	u.Flags |= commitment.NonceUpdate
+	u.Nonce = acc.Nonce
 
-	if len(encAccount) == 0 && len(code) == 0 {
-		u.Flags = commitment.DeleteUpdate
+	u.Flags |= commitment.BalanceUpdate
+	u.Balance.Set(&acc.Balance)
+	if ch := acc.CodeHash.Bytes(); len(ch) > 0 {
+		u.Flags |= commitment.CodeUpdate
+		copy(u.CodeHash[:], acc.CodeHash.Bytes())
 	}
+	// if u.CodeHash == commitment.EmptyCodeHashArray {
+	// 	if len(encAccount) == 0 {
+	// 		u.Flags = commitment.DeleteUpdate
+	// 	}
+	// 	return u, nil
+	// }
+
+	// if assert.Enable {
+	// 	code, err := sdc.readCode(plainKey)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+
+	// 	if len(code) > 0 {
+	// 		copy(u.CodeHash[:], crypto.Keccak256(code))
+	// 		u.Flags |= commitment.CodeUpdate
+	// 	} else {
+	// 		u.CodeHash = commitment.EmptyCodeHashArray
+	// 	}
+
+	// 	if len(encAccount) == 0 && len(code) == 0 {
+	// 		u.Flags = commitment.DeleteUpdate
+	// 	}
+	// }
 	return u, nil
 }
 
