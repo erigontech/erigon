@@ -25,8 +25,8 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
-
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/metrics"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon/eth/consensuschain"
@@ -77,9 +77,11 @@ type Worker struct {
 	vmCfg vm.Config
 
 	dirs datadir.Dirs
+
+	activeCounter *metrics.Ewma
 }
 
-func NewWorker(logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, in *exec.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *exec.ResultsQueue, engine consensus.Engine, dirs datadir.Dirs) *Worker {
+func NewWorker(ctx context.Context, background bool, activeCounter *metrics.Ewma, chainDb kv.RoDB, in *exec.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *exec.ResultsQueue, engine consensus.Engine, dirs datadir.Dirs, logger log.Logger) *Worker {
 	lock := &sync.RWMutex{}
 
 	w := &Worker{
@@ -101,7 +103,8 @@ func NewWorker(logger log.Logger, ctx context.Context, background bool, chainDb 
 		callTracer:  NewCallTracer(),
 		taskGasPool: new(core.GasPool),
 
-		dirs: dirs,
+		dirs:          dirs,
+		activeCounter: activeCounter,
 	}
 	w.runnable.Store(true)
 	w.taskGasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(0))
@@ -221,6 +224,11 @@ func (rw *Worker) RunTxTask(txTask exec.Task) *exec.Result {
 		rw.notifier.Wait()
 	}
 
+	if rw.activeCounter != nil {
+		rw.activeCounter.Update(1)
+		defer rw.activeCounter.Update(-1)
+	}
+
 	return rw.RunTxTaskNoLock(txTask)
 }
 
@@ -291,9 +299,9 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.Result {
 	return result
 }
 
-func NewWorkersPool(accumulator *shards.Accumulator, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB,
+func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, background bool, chainDb kv.RoDB,
 	rs *state.StateV3Buffered, stateReader state.ResettableStateReader, stateWriter state.StateWriter, in *exec.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
-	engine consensus.Engine, workerCount int, dirs datadir.Dirs, isMining bool) (reconWorkers []*Worker, applyWorker *Worker, rws *exec.ResultsQueue, clear func(), wait func()) {
+	engine consensus.Engine, workerCount int, activeCounter *metrics.Ewma, dirs datadir.Dirs, isMining bool, logger log.Logger) (reconWorkers []*Worker, applyWorker *Worker, rws *exec.ResultsQueue, clear func(), wait func()) {
 	reconWorkers = make([]*Worker, workerCount)
 
 	resultsSize := workerCount * 8
@@ -304,7 +312,7 @@ func NewWorkersPool(accumulator *shards.Accumulator, logger log.Logger, ctx cont
 		ctx, cancel := context.WithCancel(ctx)
 		g, ctx := errgroup.WithContext(ctx)
 		for i := 0; i < workerCount; i++ {
-			reconWorkers[i] = NewWorker(logger, ctx, background, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs)
+			reconWorkers[i] = NewWorker(ctx, background, activeCounter, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
 
 			if rs != nil {
 				reader := stateReader
@@ -340,7 +348,7 @@ func NewWorkersPool(accumulator *shards.Accumulator, logger log.Logger, ctx cont
 			//applyWorker.ResetTx(nil)
 		}
 	}
-	applyWorker = NewWorker(logger, ctx, false, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs)
+	applyWorker = NewWorker(ctx, false, nil, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
 
 	return reconWorkers, applyWorker, rws, clear, wait
 }

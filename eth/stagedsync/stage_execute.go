@@ -113,7 +113,7 @@ func StageExecuteBlocksCfg(
 	if dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}
-	
+
 	return ExecuteBlockCfg{
 		db:            db,
 		prune:         pm,
@@ -131,7 +131,7 @@ func StageExecuteBlocksCfg(
 		historyV3:     true,
 		syncCfg:       syncCfg,
 		silkworm:      silkworm,
-		applyWorker:   exec3.NewWorker(log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs),
+		applyWorker:   exec3.NewWorker(context.Background(), false, nil, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, log.Root()),
 	}
 }
 

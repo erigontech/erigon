@@ -14,6 +14,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 
@@ -1035,6 +1036,7 @@ type parallelExecutor struct {
 	execWorkers    []*exec3.Worker
 	stopWorkers    func()
 	waitWorkers    func()
+	activeWorkers  *metrics.Ewma
 	in             *exec.QueueWithRetry
 	rws            *exec.ResultsQueue
 	workerCount    int
@@ -1042,14 +1044,17 @@ type parallelExecutor struct {
 }
 
 func (pe *parallelExecutor) LogExecuted(tx kv.Tx) {
+	pe.activeWorkers.Tick()
 	pe.progress.LogExecuted(tx, pe.rs.StateV3, pe)
 }
 
 func (pe *parallelExecutor) LogCommitted(tx kv.Tx, commitStart time.Time) {
+	pe.activeWorkers.Tick()
 	pe.progress.LogCommitted(tx, commitStart, pe.rs.StateV3, pe)
 }
 
 func (pe *parallelExecutor) LogComplete(tx kv.Tx) {
+	pe.activeWorkers.Tick()
 	pe.progress.LogComplete(tx, pe.rs.StateV3, pe)
 }
 
@@ -1378,9 +1383,12 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	pe.execRequests = make(chan *execRequest, 100_000)
 	pe.in = exec.NewQueueWithRetry(100_000)
 
+	pe.activeWorkers = metrics.NewEwma()
+
 	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers = exec3.NewWorkersPool(
-		pe.accumulator, pe.logger, ctx, true, pe.cfg.db, nil, nil, nil, pe.in,
-		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine, pe.workerCount+1, pe.cfg.dirs, pe.isMining)
+		ctx, pe.accumulator, true, pe.cfg.db, nil, nil, nil, pe.in,
+		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
+		pe.workerCount+1, pe.activeWorkers, pe.cfg.dirs, pe.isMining, pe.logger)
 
 	execLoopCtx, execLoopCtxCancel := context.WithCancel(ctx)
 	pe.execLoopGroup, execLoopCtx = errgroup.WithContext(execLoopCtx)
