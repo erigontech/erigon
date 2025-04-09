@@ -700,6 +700,33 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 	return true, nil
 }
 
+func (a *Aggregator) RemoveOverlaps(ctx context.Context) (err error) {
+	a.logger.Debug("[agg] remove overlaps")
+
+	aggTx := a.BeginFilesRo()
+	defer aggTx.Close()
+
+	for _, tx := range aggTx.d {
+		if len(tx.files) > 0 {
+			overlaps := tx.garbage(tx.files[len(tx.files)-1].src)
+			deleteMergeFile(tx.d.dirtyFiles, overlaps, tx.d.filenameBase, tx.d.logger)
+		}
+		if len(tx.ht.files) > 0 {
+			overlaps := tx.ht.garbage(tx.ht.files[len(tx.ht.files)-1].src)
+			deleteMergeFile(tx.d.History.dirtyFiles, overlaps, tx.d.History.filenameBase, tx.d.logger)
+		}
+	}
+
+	for _, itx := range aggTx.iis {
+		if len(itx.files) > 0 {
+			overlaps := itx.garbage(itx.files[len(itx.files)-1].src)
+			deleteMergeFile(itx.ii.dirtyFiles, overlaps, itx.ii.filenameBase, itx.ii.logger)
+		}
+	}
+
+	return nil
+}
+
 func (a *Aggregator) MergeLoop(ctx context.Context) (err error) {
 	if dbg.NoMerge() || !a.mergingFiles.CompareAndSwap(false, true) {
 		return nil // currently merging or merge is prohibited

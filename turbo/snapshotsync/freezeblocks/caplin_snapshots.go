@@ -285,6 +285,26 @@ Loop:
 	return nil
 }
 
+func (s *CaplinSnapshots) RemoveOverlaps() error {
+	list, _, err := snapshotsync.SegmentsCaplin(s.dir, 0)
+
+	if err != nil {
+		return err
+	}
+
+	if _, toRemove := snapshotsync.FindOverlaps(list); len(toRemove) > 0 {
+		filesToRemove := make([]string, 0, len(toRemove))
+
+		for _, info := range toRemove {
+			filesToRemove = append(filesToRemove, info.Path)
+		}
+
+		snapshotsync.RemoveOldFiles(filesToRemove, s.dir)
+	}
+
+	return nil
+}
+
 func (s *CaplinSnapshots) recalcVisibleFiles() {
 	defer func() {
 		s.idxMax.Store(s.idxAvailability())
