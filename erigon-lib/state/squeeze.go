@@ -448,7 +448,9 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 			domains.Close()
 
+			a.dirtyFilesLock.Lock()
 			a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
+			a.dirtyFilesLock.Unlock()
 			rwTx.Rollback()
 
 			if shardTo+shardSize > lastShard && shardSize > 1 {
