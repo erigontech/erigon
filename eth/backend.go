@@ -253,6 +253,10 @@ func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadi
 		if c > 0 {
 			return fmt.Errorf("commitment history is not enabled in the database. restart erigon after deleting the chaindata folder: %s", dirs.Chaindata)
 		}
+
+		if err := rawdb.WriteDBCommitmentHistoryEnabled(tx, cfg.KeepExecutionProofs); err != nil {
+			return err
+		}
 		return nil
 	}
 	if cfg.KeepExecutionProofs != isCommitmentHistoryEnabled {
