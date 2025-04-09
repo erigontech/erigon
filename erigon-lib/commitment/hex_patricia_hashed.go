@@ -1233,7 +1233,7 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[common.Hash
 					//}
 					// // DEBUG patch with cell hash which we know to be correct
 					fmt.Printf("witness cell %s\n", cellToExpand.FullString())
-					nextNode = trie.NewHashNode(cellToExpand.hash[:])
+					nextNode = trie.NewHashNode(cellToExpand.stateHash[:])
 				}
 			}
 		} else if cellToExpand.storageAddrLen > 0 { // storage cell
@@ -1902,7 +1902,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		updatesCount = updates.Size()
 		logEvery     = time.NewTicker(20 * time.Second)
 	)
-	hph.memoizationOff, hph.trace = true, true
+	hph.memoizationOff, hph.trace = false, true
 	defer func() {
 		hph.memoizationOff, hph.trace = false, false
 	}()
