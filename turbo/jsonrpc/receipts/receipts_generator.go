@@ -3,6 +3,7 @@ package receipts
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -23,8 +24,15 @@ import (
 )
 
 type Generator struct {
-	receiptsCache      *lru.Cache[common.Hash, types.Receipts]
-	receiptCache       *lru.Cache[common.Hash, *types.Receipt]
+	receiptsCache *lru.Cache[common.Hash, types.Receipts]
+	receiptCache  *lru.Cache[common.Hash, *types.Receipt]
+
+	// blockExecMutex ensuring that only 1 block with given hash
+	// executed at a time - all parallel requests for same hash will wait for results
+	// "Requesting near-chain-tip block receipts" - is very common RPC request, means we facing many similar parallel requrest
+	blockExecMutex *loaderMutex[common.Hash] // only
+	txnExecMutex   *loaderMutex[common.Hash] // only 1 txn with current hash executed at a time - same parallel requests are waiting for results
+
 	receiptsCacheTrace bool
 	receiptCacheTrace  bool
 
@@ -65,6 +73,9 @@ func NewGenerator(blockReader services.FullBlockReader, engine consensus.EngineR
 		receiptsCacheTrace: receiptsCacheTrace,
 		receiptCacheTrace:  receiptsCacheTrace,
 		receiptCache:       receiptCache,
+
+		blockExecMutex: &loaderMutex[common.Hash]{},
+		txnExecMutex:   &loaderMutex[common.Hash]{},
 	}
 }
 
@@ -127,7 +138,11 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	if receipts, ok := g.receiptsCache.Get(header.Hash()); ok && len(receipts) > index {
 		return receipts[index], nil
 	}
-	if receipt, ok := g.receiptCache.Get(txn.Hash()); ok {
+
+	txnHash := txn.Hash()
+	mu := g.txnExecMutex.lock(txnHash)
+	defer g.txnExecMutex.unlock(mu, txnHash)
+	if receipt, ok := g.receiptCache.Get(txnHash); ok {
 		return receipt, nil
 	}
 
@@ -163,7 +178,11 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 }
 
 func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
-	if receipts, ok := g.receiptsCache.Get(block.Hash()); ok {
+	blockHash := block.Hash()
+	mu := g.blockExecMutex.lock(blockHash)
+	defer g.blockExecMutex.unlock(mu, blockHash)
+
+	if receipts, ok := g.receiptsCache.Get(blockHash); ok {
 		return receipts, nil
 	}
 
@@ -180,7 +199,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		if err != nil {
 			return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", block.NumberU64(), i, err)
 		}
-		receipt.BlockHash = block.Hash()
+		receipt.BlockHash = blockHash
 		receipts[i] = receipt
 	}
 
@@ -218,4 +237,20 @@ func (g *Generator) GetReceiptsGasUsed(tx kv.TemporalTx, block *types.Block, txN
 	}
 
 	return receipts, nil
+}
+
+type loaderMutex[K comparable] struct {
+	sync.Map
+}
+
+func (m *loaderMutex[K]) lock(key K) *sync.Mutex {
+	value, _ := m.LoadOrStore(key, &sync.Mutex{})
+	mu := value.(*sync.Mutex)
+	mu.Lock()
+	return mu
+}
+
+func (m *loaderMutex[K]) unlock(mu *sync.Mutex, key K) {
+	mu.Unlock()
+	m.Delete(key)
 }

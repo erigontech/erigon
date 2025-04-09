@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
+	ae "github.com/erigontech/erigon-lib/state/appendable_extras"
 )
 
 // filesItem is "dirty" file - means file which can be:
@@ -73,6 +74,10 @@ var _ FilesItem = (*filesItem)(nil)
 
 func newFilesItem(startTxNum, endTxNum, stepSize uint64) *filesItem {
 	return newFilesItemWithFrozenSteps(startTxNum, endTxNum, stepSize, config3.StepsInFrozenFile)
+}
+
+func newFilesItemWithSnapConfig(startTxNum, endTxNum uint64, snapConfig *ae.SnapshotConfig) *filesItem {
+	return newFilesItemWithFrozenSteps(startTxNum, endTxNum, snapConfig.RootNumPerStep, snapConfig.StepsInFrozenFile())
 }
 
 func newFilesItemWithFrozenSteps(startTxNum, endTxNum, stepSize uint64, stepsInFrozenFile uint64) *filesItem {
@@ -364,17 +369,6 @@ func (files visibleFiles) LatestMergedRange() MergeRange {
 		}
 	}
 	return MergeRange{}
-}
-
-func (files visibleFiles) MergedRanges() []MergeRange {
-	if len(files) == 0 {
-		return nil
-	}
-	res := make([]MergeRange, len(files))
-	for i := len(files) - 1; i >= 0; i-- {
-		res[i] = MergeRange{from: files[i].startTxNum, to: files[i].endTxNum}
-	}
-	return res
 }
 
 // fileItemsWithMissingAccessors returns list of files with missing accessors

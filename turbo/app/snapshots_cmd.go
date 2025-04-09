@@ -660,14 +660,26 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	if sum != maxTo {
 		return fmt.Errorf("sum %d != maxTo %d", sum, maxTo)
 	}
-	if err := doBlockSnapshotsRangeCheck(snapDir, "headers"); err != nil {
+	if err := doBlockSnapshotsRangeCheck(snapDir, ".seg", "headers"); err != nil {
 		return err
 	}
-	if err := doBlockSnapshotsRangeCheck(snapDir, "bodies"); err != nil {
+	if err := doBlockSnapshotsRangeCheck(snapDir, ".seg", "bodies"); err != nil {
 		return err
 	}
-	if err := doBlockSnapshotsRangeCheck(snapDir, "transactions"); err != nil {
+	if err := doBlockSnapshotsRangeCheck(snapDir, ".seg", "transactions"); err != nil {
 		return err
+	}
+	if err := doBlockSnapshotsRangeCheck(snapDir, ".idx", "headers"); err != nil {
+		return err
+	}
+	if err := doBlockSnapshotsRangeCheck(snapDir, ".idx", "bodies"); err != nil {
+		return err
+	}
+	if err := doBlockSnapshotsRangeCheck(snapDir, ".idx", "transactions"); err != nil {
+		return fmt.Errorf("failed to check transactions idx: %w", err)
+	}
+	if err := doBlockSnapshotsRangeCheck(snapDir, ".idx", "transactions-to-block"); err != nil {
+		return fmt.Errorf("failed to check transactions-to-block idx: %w", err)
 	}
 	// Iterate over all fies in snapDir
 	return nil
@@ -810,17 +822,18 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 	return nil
 }
 
-func doBlockSnapshotsRangeCheck(snapDir string, snapType string) error {
+func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) error {
 	type interval struct {
 		from uint64
 		to   uint64
 	}
+
 	intervals := []interval{}
 	if err := filepath.Walk(snapDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if !strings.HasSuffix(info.Name(), ".seg") || !strings.Contains(info.Name(), snapType) {
+		if !strings.HasSuffix(info.Name(), suffix) || !strings.Contains(info.Name(), snapType+".") {
 			return nil
 		}
 		res, _, ok := snaptype.ParseFileName(snapDir, info.Name())
@@ -1548,7 +1561,7 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 		Accede(true) // integration tool: open db without creation and without blocking erigon
 }
 func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *libstate.Aggregator {
-	agg, err := libstate.NewAggregator2(ctx, dirs, config3.DefaultStepSize, chainDB, logger)
+	agg, err := libstate.NewAggregator(ctx, dirs, config3.DefaultStepSize, chainDB, logger)
 	if err != nil {
 		panic(err)
 	}

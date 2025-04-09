@@ -56,7 +56,6 @@ type Cache interface {
 	ValidateCurrentRoot(ctx context.Context, tx kv.Tx) (*CacheValidationResult, error)
 }
 type CacheView interface {
-	StateV3() bool
 	Get(k []byte) ([]byte, error)
 	GetCode(k []byte) ([]byte, error)
 }
