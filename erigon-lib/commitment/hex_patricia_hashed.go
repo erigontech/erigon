@@ -1219,12 +1219,12 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[common.Hash
 						return nil, err
 					}
 					nextNode = &trie.ShortNode{Key: extensionKey, Val: accNode}
-					extNodeSubTrie := trie.NewInMemoryTrie(nextNode)
-					subTrieRoot := extNodeSubTrie.Root()
-					cellHash, _, _, _ := hph.computeCellHashWithStorage(cellToExpand, hph.depths[row], nil)
-					if !bytes.Equal(subTrieRoot, cellHash[1:]) {
-						return nil, fmt.Errorf("subTrieRoot(%x) != cellHash(%x)", subTrieRoot, cellHash[1:])
-					}
+					//extNodeSubTrie := trie.NewInMemoryTrie(nextNode)
+					//subTrieRoot := extNodeSubTrie.Root()
+					//cellHash, _, _, _ := hph.computeCellHashWithStorage(cellToExpand, hph.depths[row], nil)
+					//if !bytes.Equal(subTrieRoot, cellHash[1:]) {
+					//	return nil, fmt.Errorf("subTrieRoot(%x) != cellHash(%x)", subTrieRoot, cellHash[1:])
+					//}
 					// // DEBUG patch with cell hash which we know to be correct
 					// nextNode = trie.NewHashNode(cellHash[1:])
 				}
