@@ -2038,6 +2038,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		logEvery.Stop()
 		hph.currentCommitmentMetrics.TotalProcessingTimeInc(start)
 		writeMetricsToCSV(&hph.currentCommitmentMetrics, commitmentMetricsFile)
+		writeMetricsToCSV(&hph.currentAccountMetrics, accountMetricsFile)
 	}()
 	//hph.trace = true
 
