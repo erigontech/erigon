@@ -216,7 +216,7 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Tx, bloc
 		if err != nil {
 			return nil, err
 		}
-		sd.sdCtx.TouchKey(kv.AccountsDomain, string(k), nil)
+		sd.sdCtx.TouchKey(kv.AccountsDomain, string(k), nil, commitment.UpdateTouch)
 	}
 
 	it, err = sd.aggTx.HistoryRange(kv.StorageDomain, int(sd.TxNum()), math.MaxInt64, order.Asc, -1, roTx)
@@ -230,7 +230,7 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Tx, bloc
 		if err != nil {
 			return nil, err
 		}
-		sd.sdCtx.TouchKey(kv.StorageDomain, string(k), nil)
+		sd.sdCtx.TouchKey(kv.StorageDomain, string(k), nil, commitment.UpdateTouch)
 	}
 
 	sd.sdCtx.Reset()
@@ -300,6 +300,7 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 		sd.domains[i] = map[string]dataWithPrevStep{}
 	}
 	if resetCommitment {
+		sd.sdCtx.reads.Reset()
 		sd.sdCtx.updates.Reset()
 		sd.sdCtx.Reset()
 	}
@@ -524,14 +525,14 @@ func (sd *SharedDomains) ReadsValid(readLists map[string]*KvList) bool {
 
 func (sd *SharedDomains) updateAccountData(addr []byte, account, prevAccount []byte, prevStep uint64) error {
 	addrS := string(addr)
-	sd.sdCtx.TouchKey(kv.AccountsDomain, addrS, account)
+	sd.sdCtx.TouchKey(kv.AccountsDomain, addrS, account, commitment.UpdateTouch)
 	sd.put(kv.AccountsDomain, addrS, account)
 	return sd.domainWriters[kv.AccountsDomain].PutWithPrev(addr, nil, account, prevAccount, prevStep)
 }
 
 func (sd *SharedDomains) updateAccountCode(addr, code, prevCode []byte, prevStep uint64) error {
 	addrS := string(addr)
-	sd.sdCtx.TouchKey(kv.CodeDomain, addrS, code)
+	sd.sdCtx.TouchKey(kv.CodeDomain, addrS, code, commitment.UpdateTouch)
 	sd.put(kv.CodeDomain, addrS, code)
 	if len(code) == 0 {
 		return sd.domainWriters[kv.CodeDomain].DeleteWithPrev(addr, nil, prevCode, prevStep)
@@ -555,7 +556,7 @@ func (sd *SharedDomains) deleteAccount(addr, prev []byte, prevStep uint64) error
 		return err
 	}
 
-	sd.sdCtx.TouchKey(kv.AccountsDomain, addrS, nil)
+	sd.sdCtx.TouchKey(kv.AccountsDomain, addrS, nil, commitment.UpdateTouch)
 	sd.put(kv.AccountsDomain, addrS, nil)
 	if err := sd.domainWriters[kv.AccountsDomain].DeleteWithPrev(addr, nil, prev, prevStep); err != nil {
 		return err
@@ -571,7 +572,7 @@ func (sd *SharedDomains) writeAccountStorage(addr, loc []byte, value, preVal []b
 		composite = append(append(composite, addr...), loc...)
 	}
 	compositeS := string(composite)
-	sd.sdCtx.TouchKey(kv.StorageDomain, compositeS, value)
+	sd.sdCtx.TouchKey(kv.StorageDomain, compositeS, value, commitment.UpdateTouch)
 	sd.put(kv.StorageDomain, compositeS, value)
 	return sd.domainWriters[kv.StorageDomain].PutWithPrev(composite, nil, value, preVal, prevStep)
 }
@@ -583,7 +584,7 @@ func (sd *SharedDomains) delAccountStorage(addr, loc []byte, preVal []byte, prev
 		composite = append(append(composite, addr...), loc...)
 	}
 	compositeS := string(composite)
-	sd.sdCtx.TouchKey(kv.StorageDomain, compositeS, nil)
+	sd.sdCtx.TouchKey(kv.StorageDomain, compositeS, nil, commitment.UpdateTouch)
 	sd.put(kv.StorageDomain, compositeS, nil)
 	return sd.domainWriters[kv.StorageDomain].DeleteWithPrev(composite, nil, preVal, prevStep)
 }
@@ -888,8 +889,12 @@ func (sd *SharedDomains) Tx() kv.Tx { return sd.roTx }
 type SharedDomainsCommitmentContext struct {
 	sharedDomains *SharedDomains
 	updates       *commitment.Updates
-	patriciaTrie  commitment.Trie
-	justRestored  atomic.Bool
+	reads         *commitment.Updates
+	// for building and updating commitment
+	RWTrie commitment.Trie
+	// read only patricia trie for building proofs (eth_getProof)
+	ROTrie       commitment.Trie
+	justRestored atomic.Bool
 
 	limitReadAsOfTxNum uint64
 }
@@ -903,13 +908,21 @@ func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode commitment.Mode, 
 		sharedDomains: sd,
 	}
 
-	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, sd.aggTx.a.tmpdir)
-	ctx.patriciaTrie.ResetContext(ctx)
+	// initialize RW trie based on variant
+	ctx.RWTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, sd.aggTx.a.tmpdir)
+	ctx.RWTrie.ResetContext(ctx)
+
+	// we always initialize RO trie
+	ctx.ROTrie = commitment.NewHexPatriciaHashedReader(length.Addr, nil, sd.aggTx.a.tmpdir)
+	ctx.reads = commitment.NewUpdates(mode, sd.aggTx.a.tmpdir, commitment.KeyToHexNibbleHash)
+	ctx.ROTrie.ResetContext(ctx)
+
 	return ctx
 }
 
 func (sdc *SharedDomainsCommitmentContext) Close() {
 	sdc.updates.Close()
+	sdc.reads.Close()
 }
 
 func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, error) {
@@ -1047,7 +1060,8 @@ func (sdc *SharedDomainsCommitmentContext) Storage(plainKey []byte) (u *commitme
 
 func (sdc *SharedDomainsCommitmentContext) Reset() {
 	if !sdc.justRestored.Load() {
-		sdc.patriciaTrie.Reset()
+		sdc.RWTrie.Reset()
+		sdc.ROTrie.Reset()
 	}
 }
 
@@ -1055,36 +1069,43 @@ func (sdc *SharedDomainsCommitmentContext) KeysCount() uint64 {
 	return sdc.updates.Size()
 }
 
-func (sdc *SharedDomainsCommitmentContext) Trie() commitment.Trie {
-	return sdc.patriciaTrie
+func (sdc *SharedDomainsCommitmentContext) GetRWTrie() commitment.Trie {
+	return sdc.RWTrie
+}
+
+func (sdc *SharedDomainsCommitmentContext) GetROTrie() commitment.Trie {
+	return sdc.ROTrie
 }
 
 // TouchPlainKey marks plainKey as updated and applies different fn for different key types
 // (different behaviour for Code, Account and Storage key modifications).
-func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val []byte) {
-	if sdc.updates.Mode() == commitment.ModeDisabled {
+func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val []byte, rou commitment.ReadOrUpdate) {
+	target := sdc.reads
+	if rou == commitment.UpdateTouch {
+		target = sdc.updates
+	}
+	if target.Mode() == commitment.ModeDisabled {
 		return
 	}
-
 	switch d {
 	case kv.AccountsDomain:
-		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchAccount)
+		target.TouchPlainKey(key, val, target.TouchAccount)
 	case kv.CodeDomain:
-		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchCode)
+		target.TouchPlainKey(key, val, target.TouchCode)
 	case kv.StorageDomain:
-		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchStorage)
+		target.TouchPlainKey(key, val, target.TouchStorage)
 	default:
 		panic(fmt.Errorf("TouchKey: unknown domain %s", d))
 	}
 }
 
 func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, expectedRoot []byte, logPrefix string) (proofTrie *trie.Trie, rootHash []byte, err error) {
-	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
+	hexPatriciaHashedReader, ok := sdc.ROTrie.(*commitment.HexPatriciaHashedReader)
 	if ok {
-		return hexPatriciaHashed.GenerateWitness(ctx, sdc.updates, nil, expectedRoot, logPrefix)
+		return hexPatriciaHashedReader.GenerateWitness(ctx, sdc.reads, nil, expectedRoot, logPrefix)
 	}
 
-	return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
+	return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashedReader")
 }
 
 // Evaluates commitment for processed state.
@@ -1098,15 +1119,15 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		defer sdc.sharedDomains.logger.Trace("ComputeCommitment", "block", blockNum, "keys", updateCount, "mode", sdc.updates.Mode())
 	}
 	if updateCount == 0 {
-		rootHash, err = sdc.patriciaTrie.RootHash()
+		rootHash, err = sdc.RWTrie.RootHash()
 		return rootHash, err
 	}
 
 	// data accessing functions should be set when domain is opened/shared context updated
-	sdc.patriciaTrie.SetTrace(sdc.sharedDomains.trace)
+	sdc.RWTrie.SetTrace(sdc.sharedDomains.trace)
 	sdc.Reset()
 
-	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix)
+	rootHash, err = sdc.RWTrie.Process(ctx, sdc.updates, logPrefix)
 	if err != nil {
 		return nil, err
 	}
@@ -1154,14 +1175,14 @@ func (sdc *SharedDomainsCommitmentContext) encodeCommitmentState(blockNum, txNum
 	var state []byte
 	var err error
 
-	switch trie := (sdc.patriciaTrie).(type) {
+	switch trie := (sdc.RWTrie).(type) {
 	case *commitment.HexPatriciaHashed:
 		state, err = trie.EncodeCurrentState(nil)
 		if err != nil {
 			return nil, err
 		}
 	default:
-		return nil, fmt.Errorf("unsupported state storing for patricia trie type: %T", sdc.patriciaTrie)
+		return nil, fmt.Errorf("unsupported state storing for patricia trie type: %T", sdc.RWTrie)
 	}
 
 	cs := &commitmentState{trieState: state, blockNum: blockNum, txNum: txNum}
@@ -1188,7 +1209,7 @@ func _decodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
 // LatestCommitmentState searches for last encoded state for CommitmentContext.
 // Found value does not become current state.
 func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState() (blockNum, txNum uint64, state []byte, err error) {
-	if sdc.patriciaTrie.Variant() != commitment.VariantHexPatriciaTrie {
+	if sdc.RWTrie.Variant() != commitment.VariantHexPatriciaTrie {
 		return 0, 0, nil, fmt.Errorf("state storing is only supported hex patricia trie")
 	}
 	state, _, err = sdc.Branch(keyCommitmentState)
@@ -1218,6 +1239,11 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(tx kv.Tx, cd *DomainRo
 // Otherwise state should be restorePatriciaState()d again.
 
 func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (uint64, uint64, error) {
+	_, supported := sdc.RWTrie.(*commitment.HexPatriciaHashed)
+	if !supported {
+		return 0, 0, errors.New("state storing is only supported hex patricia trie")
+	}
+
 	cs := new(commitmentState)
 	if err := cs.Decode(value); err != nil {
 		if len(value) > 0 {
@@ -1225,20 +1251,34 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 		}
 		// nil value is acceptable for SetState and will reset trie
 	}
-	if hext, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed); ok {
-		if err := hext.SetState(cs.trieState); err != nil {
-			return 0, 0, fmt.Errorf("failed restore state : %w", err)
+
+	// restore state for HexPatriciaHashed
+	writeTrie, _ := sdc.RWTrie.(*commitment.HexPatriciaHashed)
+	if err := writeTrie.SetState(cs.trieState); err != nil {
+		return 0, 0, fmt.Errorf("failed restore state : %w", err)
+	}
+	sdc.justRestored.Store(true) // to prevent double reset
+	if sdc.sharedDomains.trace {
+		rootHash, err := writeTrie.RootHash()
+		if err != nil {
+			return 0, 0, fmt.Errorf("failed to get root hash after state restore: %w", err)
 		}
-		sdc.justRestored.Store(true) // to prevent double reset
-		if sdc.sharedDomains.trace {
-			rootHash, err := hext.RootHash()
-			if err != nil {
-				return 0, 0, fmt.Errorf("failed to get root hash after state restore: %w", err)
-			}
-			log.Info(fmt.Sprintf("[commitment] restored state: block=%d txn=%d rootHash=%x", cs.blockNum, cs.txNum, rootHash))
+		log.Info(fmt.Sprintf("[commitment] restored state commitment: block=%d txn=%d rootHash=%x\n", cs.blockNum, cs.txNum, rootHash))
+	}
+
+	// restore state for HexPatriciaHashedReader
+	readTrie, _ := sdc.ROTrie.(*commitment.HexPatriciaHashedReader)
+	if err := readTrie.SetState(cs.trieState); err != nil {
+		return 0, 0, fmt.Errorf("failed restore state : %w", err)
+	}
+	// TODO may need separate atomic per trie
+	sdc.justRestored.Store(true) // to prevent double reset
+	if sdc.sharedDomains.trace {
+		rootHash, err := readTrie.RootHash()
+		if err != nil {
+			return 0, 0, fmt.Errorf("failed to get root hash after state restore: %w", err)
 		}
-	} else {
-		return 0, 0, errors.New("state storing is only supported hex patricia trie")
+		fmt.Printf("[commitment] restored commitment reader: block=%d txn=%d rootHash=%x\n", cs.blockNum, cs.txNum, rootHash)
 	}
 	return cs.blockNum, cs.txNum, nil
 }
