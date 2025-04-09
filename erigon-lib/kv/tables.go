@@ -336,8 +336,6 @@ var ChaindataTables = []string{
 	Migrations,
 	Sequence,
 	EthTx,
-	TrieOfAccounts,
-	TrieOfStorage,
 	HeaderCanonical,
 	Headers,
 	HeaderTD,
@@ -907,56 +905,6 @@ const (
 	*/
 	E2AccountsHistory = "AccountHistory"
 	E2StorageHistory  = "StorageHistory"
-
-	/*
-	   TrieOfAccounts and TrieOfStorage
-	   hasState,groups - mark prefixes existing in hashed_account table
-	   hasTree - mark prefixes existing in trie_account table (not related with branchNodes)
-	   hasHash - mark prefixes which hashes are saved in current trie_account record (actually only hashes of branchNodes can be saved)
-	   @see UnmarshalTrieNode
-	   @see integrity.Trie
-
-	   +-----------------------------------------------------------------------------------------------------+
-	   | DB record: 0x0B, hasState: 0b1011, hasTree: 0b1001, hasHash: 0b1001, hashes: [x,x]                  |
-	   +-----------------------------------------------------------------------------------------------------+
-
-	   	|                                           |                               |
-	   	v                                           |                               v
-
-	   +---------------------------------------------+             |            +--------------------------------------+
-	   | DB record: 0x0B00, hasState: 0b10001        |             |            | DB record: 0x0B03, hasState: 0b10010 |
-	   | hasTree: 0, hasHash: 0b10000, hashes: [x]   |             |            | hasTree: 0, hasHash: 0, hashes: []   |
-	   +---------------------------------------------+             |            +--------------------------------------+
-
-	   	|                    |                              |                         |                  |
-	   	v                    v                              v                         v                  v
-
-	   +------------------+    +----------------------+     +---------------+        +---------------+  +---------------+
-	   | Account:         |    | BranchNode: 0x0B0004 |     | Account:      |        | Account:      |  | Account:      |
-	   | 0x0B0000...      |    | has no record in     |     | 0x0B01...     |        | 0x0B0301...   |  | 0x0B0304...   |
-	   | in HashedAccount |    |     TrieAccount      |     |               |        |               |  |               |
-	   +------------------+    +----------------------+     +---------------+        +---------------+  +---------------+
-
-	   	                           |                |
-	   	                           v                v
-	   			           +---------------+  +---------------+
-	   			           | Account:      |  | Account:      |
-	   			           | 0x0B000400... |  | 0x0B000401... |
-	   			           +---------------+  +---------------+
-
-	   Invariants:
-	   - hasTree is subset of hasState
-	   - hasHash is subset of hasState
-	   - first level in account_trie always exists if hasState>0
-	   - TrieStorage record of account.root (length=40) must have +1 hash - it's account.root
-	   - each record in TrieAccount table must have parent (may be not direct) and this parent must have correct bit in hasTree bitmap
-	   - if hasState has bit - then HashedAccount table must have record according to this bit
-	   - each TrieAccount record must cover some state (means hasState is always > 0)
-	   - TrieAccount records with length=1 can satisfy (hasBranch==0&&hasHash==0) condition
-	   - Other records in TrieAccount and TrieStorage must (hasTree!=0 || hasHash!=0)
-	*/
-	TrieOfAccounts = "TrieAccount"
-	TrieOfStorage  = "TrieStorage"
 
 	// IncarnationMap for deleted accounts
 	//key - address
