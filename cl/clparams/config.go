@@ -1106,7 +1106,10 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.CapellaForkVersion = 0x03000064
 	cfg.DenebForkEpoch = 889856
 	cfg.DenebForkVersion = 0x04000064
-	cfg.ElectraForkEpoch = math.MaxUint64
+	cfg.ElectraForkEpoch = 1337856
+	cfg.ElectraForkVersion = 0x05000064
+	cfg.FuluForkVersion = 0x06000064
+	cfg.FuluForkEpoch = math.MaxUint64
 	cfg.TerminalTotalDifficulty = "8626000000000000000000058750000000000000000000"
 	cfg.DepositContractAddress = "0x0B98057eA310F4d31F2a452B414647007d1645d9"
 	cfg.BaseRewardFactor = 25
