@@ -128,7 +128,7 @@ func ExecuteBlockEphemerally(
 	for i, txn := range block.Transactions() {
 		ibs.SetTxContext(i)
 		writeTrace := false
-		if vmConfig.Tracer == nil {
+		if vmConfig.Tracer == nil && getTracer != nil {
 			tracer, err := getTracer(i, txn.Hash())
 			if err != nil {
 				return nil, fmt.Errorf("could not obtain tracer: %w", err)
