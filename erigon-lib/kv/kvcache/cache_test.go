@@ -21,7 +21,9 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"os"
 	"runtime"
+	"runtime/pprof"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -176,6 +178,19 @@ func TestAPI(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("fix me on win please")
 	}
+
+	go func() {
+		// do a goroutine dump if we haven't finished in a long time
+		err := common.Sleep(context.Background(), 2*time.Minute)
+		if err != nil {
+			// means we've finished before sleep time - no need for a pprof dump
+			return
+		}
+
+		err = pprof.Lookup("goroutine").WriteTo(os.Stdout, 1)
+		require.NoError(t, err)
+	}()
+
 	require := require.New(t)
 	c := New(DefaultCoherentConfig)
 	k1, k2 := [20]byte{1}, [20]byte{2}
@@ -193,7 +208,6 @@ func TestAPI(t *testing.T) {
 	account4Enc := accounts.SerialiseV3(&acc)
 
 	get := func(key [20]byte, expectTxnID uint64) (res [1]chan []byte) {
-
 		wg := sync.WaitGroup{}
 		for i := 0; i < len(res); i++ {
 			wg.Add(1)
@@ -204,6 +218,7 @@ func TestAPI(t *testing.T) {
 						panic(fmt.Sprintf("epxected: %d, got: %d", expectTxnID, tx.ViewID()))
 					}
 					wg.Done()
+
 					cacheView, err := c.View(context.Background(), tx)
 					view := cacheView.(*CoherentView)
 					if err != nil {
@@ -225,6 +240,7 @@ func TestAPI(t *testing.T) {
 		wg.Wait() // ensure that all goroutines started their transactions
 		return res
 	}
+
 	counter := atomic.Int64{}
 	prevVals := map[string][]byte{}
 	put := func(k, v []byte) uint64 {
@@ -347,7 +363,7 @@ func TestAPI(t *testing.T) {
 	}()
 	fmt.Printf("-----3\n")
 	txID4 := put(k1[:], account2Enc)
-	time.Sleep(10 * time.Second)
+	time.Sleep(1 * time.Second)
 
 	c.OnNewBlock(&remote.StateChangeBatch{
 		StateVersionId:      txID4,
