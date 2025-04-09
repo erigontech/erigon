@@ -360,7 +360,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address libcommon.
 			return nil, state.PrunedError
 		}
 		sdCtx.SetLimitReadAsOfTxNum(lastTxnInBlock, false)
-		domains.SetTrace(true)
+		//domains.SetTrace(true)
 		if _, err := domains.SeekCommitment(context.Background(), roTx); err != nil {
 			return nil, err
 		}
