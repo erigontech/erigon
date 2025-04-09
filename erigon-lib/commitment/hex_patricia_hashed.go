@@ -1925,20 +1925,20 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 
 		// fmt.Printf("\n%d/%d) plainKey [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
 
+		var update *Update
 		if len(plainKey) == 20 { // account
-			account, err := hph.ctx.Account(plainKey)
+			update, err = hph.ctx.Account(plainKey)
 			if err != nil {
 				return fmt.Errorf("account with plainkey=%x not found: %w", plainKey, err)
-			} else {
-				addrHash := crypto.Keccak256(plainKey)
-				fmt.Printf("account with plainKey=%x, addrHash=%x FOUND = %v\n", plainKey, addrHash, account)
 			}
+			addrHash := crypto.Keccak256(plainKey)
+			fmt.Printf("account with plainKey=%x, addrHash=%x FOUND = %v\n", plainKey, addrHash, update)
 		} else {
-			storage, err := hph.ctx.Storage(plainKey)
+			update, err = hph.ctx.Storage(plainKey)
 			if err != nil {
 				return fmt.Errorf("storage with plainkey=%x not found: %w", plainKey, err)
 			}
-			fmt.Printf("storage found = %v\n", storage.Storage)
+			fmt.Printf("storage found = %v\n", update.Storage[:update.StorageLen])
 		}
 
 		// Keep folding until the currentKey is the prefix of the key we modify
@@ -1953,6 +1953,8 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 				return fmt.Errorf("unfold: %w", err)
 			}
 		}
+
+		hph.updateCell(plainKey, hashedKey, update)
 		// hph.PrintGrid()
 
 		// convert grid to trie.Trie
