@@ -1220,11 +1220,11 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[common.Hash
 					storageValueNode := trie.ValueNode(storageUpdate.Storage[:storageUpdate.StorageLen])
 					nextNode = &trie.ShortNode{Key: extensionKey, Val: storageValueNode}
 				} else if cellToExpand.accountAddrLen > 0 {
-					accNode, err := hph.createAccountNode(cellToExpand, row, hashedKey, codeReads)
-					if err != nil {
-						return nil, err
-					}
-					_ = accNode
+					//accNode, err := hph.createAccountNode(cellToExpand, row, hashedKey, codeReads)
+					//if err != nil {
+					//	return nil, err
+					//}
+					//_ = accNode
 					//nextNode = &trie.ShortNode{Key: extensionKey, Val: accNode}
 					//extNodeSubTrie := trie.NewInMemoryTrie(nextNode)
 					//subTrieRoot := extNodeSubTrie.Root()
@@ -1233,7 +1233,7 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[common.Hash
 					//	return nil, fmt.Errorf("subTrieRoot(%x) != cellHash(%x)", subTrieRoot, cellHash[1:])
 					//}
 					// // DEBUG patch with cell hash which we know to be correct
-					fmt.Printf("witness cell %s\n", cellToExpand.FullString())
+					fmt.Printf("witness cell (%d, %0x, depth=%d) %s\n", row, currentNibble, hph.depths[row], cellToExpand.FullString())
 					nextNode = trie.NewHashNode(cellToExpand.stateHash[:])
 				}
 			}
@@ -1956,7 +1956,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		}
 		hph.PrintGrid()
 
-		hph.updateCell(plainKey, hashedKey, update)
+		//hph.updateCell(plainKey, hashedKey, update)
 
 		// convert grid to trie.Trie
 		tr, err = hph.ToTrie(hashedKey, codeReads) // build witness trie for this key, based on the current state of the grid
