@@ -37,6 +37,11 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 )
 
+type AAValidationResult struct {
+	PaymasterContext []byte
+	GasUsed          uint64
+}
+
 // ReadWriteSet contains ReadSet, WriteSet and BalanceIncrease of a transaction,
 // which is processed by a single thread that writes into the ReconState1 and
 // flushes to the database
@@ -87,6 +92,7 @@ type TxTask struct {
 
 	AAValidationBatchSize uint64 // number of consecutive RIP-7560 transactions, should be 0 for single transactions and transactions that are not first in the transaction order
 	InBatch               bool   // set to true for consecutive RIP-7560 transactions after the first one (first one is false)
+	ValidationResults     []AAValidationResult
 }
 
 func (t *TxTask) Sender() *libcommon.Address {

@@ -20,18 +20,17 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
 
-	"github.com/pelletier/go-toml/v2"
-	"github.com/pkg/errors"
-	"github.com/tidwall/btree"
-
 	snapshothashes "github.com/erigontech/erigon-snapshot"
 	"github.com/erigontech/erigon-snapshot/webseed"
+	"github.com/pelletier/go-toml/v2"
+	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common/dbg"

@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -27,8 +28,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-
-	"github.com/pkg/errors"
 
 	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -321,7 +320,7 @@ func (a *ApiHandler) writeValidatorsResponse(
 	}
 
 	if slot == nil {
-		http.Error(w, errors.New("state not found").Error(), http.StatusNotFound)
+		http.Error(w, "state not found", http.StatusNotFound)
 		return
 	}
 	stateEpoch := *slot / a.beaconChainCfg.SlotsPerEpoch
@@ -354,7 +353,7 @@ func (a *ApiHandler) writeValidatorsResponse(
 		return
 	}
 	if balances == nil {
-		http.Error(w, errors.New("balances not found").Error(), http.StatusNotFound)
+		http.Error(w, "balances not found", http.StatusNotFound)
 		return
 	}
 	validators, err := a.forkchoiceStore.GetValidatorSet(blockRoot)
@@ -363,7 +362,7 @@ func (a *ApiHandler) writeValidatorsResponse(
 		return
 	}
 	if validators == nil {
-		http.Error(w, errors.New("validators not found").Error(), http.StatusNotFound)
+		http.Error(w, "validators not found", http.StatusNotFound)
 		return
 	}
 	responseValidators(w, filterIndicies, statusFilters, stateEpoch, balances, validators, *slot <= a.forkchoiceStore.FinalizedSlot(), isOptimistic)
@@ -570,7 +569,7 @@ func (a *ApiHandler) getValidatorBalances(ctx context.Context, w http.ResponseWr
 			responseValidatorsBalances(w, filterIndicies, s.Balances(), false, isOptimistic)
 			return nil
 		}); err != nil {
-			http.Error(w, errors.New("node is not synced").Error(), http.StatusServiceUnavailable)
+			http.Error(w, "node is not synced", http.StatusServiceUnavailable)
 		}
 		return
 	}
@@ -581,7 +580,7 @@ func (a *ApiHandler) getValidatorBalances(ctx context.Context, w http.ResponseWr
 	}
 
 	if slot == nil {
-		http.Error(w, errors.New("state not found").Error(), http.StatusNotFound)
+		http.Error(w, "state not found", http.StatusNotFound)
 		return
 	}
 
@@ -598,7 +597,7 @@ func (a *ApiHandler) getValidatorBalances(ctx context.Context, w http.ResponseWr
 		}
 		if balances == nil {
 
-			http.Error(w, errors.New("validators not found, node may node be running in archivial node").Error(), http.StatusNotFound)
+			http.Error(w, "validators not found, node may node be running in archivial node", http.StatusNotFound)
 		}
 		responseValidatorsBalances(w, filterIndicies, balances, true, isOptimistic)
 		return
@@ -609,7 +608,7 @@ func (a *ApiHandler) getValidatorBalances(ctx context.Context, w http.ResponseWr
 		return
 	}
 	if balances == nil {
-		http.Error(w, errors.New("balances not found").Error(), http.StatusNotFound)
+		http.Error(w, "balances not found", http.StatusNotFound)
 		return
 	}
 	responseValidatorsBalances(w, filterIndicies, balances, *slot <= a.forkchoiceStore.FinalizedSlot(), isOptimistic)
@@ -779,7 +778,7 @@ func (a *ApiHandler) GetEthV1ValidatorAggregateAttestation(w http.ResponseWriter
 	}
 	slotNum, err := strconv.ParseUint(slot, 10, 64)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.WithMessage(err, "invalid slot"))
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid slot: %w", err))
 	}
 
 	attDataRootHash := libcommon.HexToHash(attDataRoot)
@@ -806,7 +805,7 @@ func (a *ApiHandler) GetEthV2ValidatorAggregateAttestation(w http.ResponseWriter
 	}
 	slotNum, err := strconv.ParseUint(slot, 10, 64)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.WithMessage(err, "invalid slot"))
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid slot: %w", err))
 	}
 	committeeIndex := r.URL.Query().Get("committee_index")
 	if committeeIndex == "" {
@@ -814,7 +813,7 @@ func (a *ApiHandler) GetEthV2ValidatorAggregateAttestation(w http.ResponseWriter
 	}
 	committeeIndexNum, err := strconv.ParseUint(committeeIndex, 10, 64)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.WithMessage(err, "invalid committee_index"))
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid committee_index: %w", err))
 	}
 
 	attDataRootHash := libcommon.HexToHash(attDataRoot)
