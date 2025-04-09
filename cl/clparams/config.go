@@ -991,6 +991,8 @@ func sepoliaConfig() BeaconChainConfig {
 	cfg.DenebForkVersion = 0x90000073
 	cfg.ElectraForkEpoch = 222464
 	cfg.ElectraForkVersion = 0x90000074
+	cfg.FuluForkEpoch = math.MaxUint64
+	cfg.FuluForkVersion = 0x90000075
 	cfg.TerminalTotalDifficulty = "17000000000000000"
 	cfg.DepositContractAddress = "0x7f02C3E3c98b133055B8B348B2Ac625669Ed295D"
 	cfg.InitializeForkSchedule()
@@ -1019,6 +1021,8 @@ func holeskyConfig() BeaconChainConfig {
 	cfg.DenebForkVersion = 0x05017000
 	cfg.ElectraForkEpoch = 115968
 	cfg.ElectraForkVersion = 0x06017000
+	cfg.FuluForkEpoch = math.MaxUint64
+	cfg.FuluForkVersion = 0x07017000
 	cfg.TerminalTotalDifficulty = "0"
 	cfg.TerminalBlockHash = [32]byte{}
 	cfg.TerminalBlockHashActivationEpoch = math.MaxUint64
@@ -1061,8 +1065,8 @@ func hoodiConfig() BeaconChainConfig {
 	cfg.DenebForkVersion = 0x50000910
 	cfg.ElectraForkEpoch = 2048
 	cfg.ElectraForkVersion = 0x60000910
-	cfg.FuluForkVersion = 0x70000910
 	cfg.FuluForkEpoch = math.MaxUint64
+	cfg.FuluForkVersion = 0x70000910
 	cfg.TerminalTotalDifficulty = "0"
 	cfg.TerminalBlockHash = [32]byte{}
 	cfg.TerminalBlockHashActivationEpoch = math.MaxUint64
@@ -1108,8 +1112,8 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.DenebForkVersion = 0x04000064
 	cfg.ElectraForkEpoch = 1337856
 	cfg.ElectraForkVersion = 0x05000064
-	cfg.FuluForkVersion = 0x06000064
 	cfg.FuluForkEpoch = math.MaxUint64
+	cfg.FuluForkVersion = 0x06000064
 	cfg.TerminalTotalDifficulty = "8626000000000000000000058750000000000000000000"
 	cfg.DepositContractAddress = "0x0B98057eA310F4d31F2a452B414647007d1645d9"
 	cfg.BaseRewardFactor = 25
@@ -1154,6 +1158,8 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.DenebForkVersion = 0x0400006f
 	cfg.ElectraForkEpoch = 948224
 	cfg.ElectraForkVersion = 0x0500006f
+	cfg.FuluForkEpoch = math.MaxUint64
+	cfg.FuluForkVersion = 0x0600006f
 	cfg.TerminalTotalDifficulty = "231707791542740786049188744689299064356246512"
 	cfg.DepositContractAddress = "0xb97036A26259B7147018913bD58a774cf91acf25"
 	cfg.BaseRewardFactor = 25
