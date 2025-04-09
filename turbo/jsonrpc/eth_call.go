@@ -345,7 +345,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address libcommon.
 		return nil, fmt.Errorf("block number is in the future latest=%d requested=%d", latestBlock, blockNrOrHash.BlockNumber.Uint64())
 	}
 	if blockNrOrHash.BlockNumber.Uint64() < latestBlock {
-		lastTxnInBlock, err := rawdbv3.TxNums.Max(roTx, header.Number.Uint64())
+		lastTxnInBlock, err := rawdbv3.TxNums.Min(roTx, header.Number.Uint64()+1)
 		if err != nil {
 			return nil, err
 		}
