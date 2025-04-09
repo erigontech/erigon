@@ -355,7 +355,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address libcommon.
 			return nil, err
 		}
 		commitmentStartingTxNum := tx.HistoryStartFrom(kv.CommitmentDomain)
-		fmt.Println("commitmentStartingTxNum", commitmentStartingTxNum)
+		fmt.Println("commitmentStartingTxNum", commitmentStartingTxNum, lastTxnInBlock)
 		if lastTxnInBlock < commitmentStartingTxNum {
 			return nil, state.PrunedError
 		}
