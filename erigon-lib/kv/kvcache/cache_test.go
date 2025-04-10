@@ -21,9 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"os"
 	"runtime"
-	"runtime/pprof"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -34,6 +32,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -179,21 +178,6 @@ func TestAPI(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 
-	go func() {
-		// do a goroutine dump if we haven't finished in a long time
-		err := common.Sleep(context.Background(), 2*time.Minute)
-		if err != nil {
-			// means we've finished before sleep time - no need for a pprof dump
-			return
-		}
-
-		err = pprof.Lookup("goroutine").WriteTo(os.Stdout, 1)
-		if err != nil {
-			fmt.Println("error writing pprof", err)
-			return
-		}
-	}()
-
 	require := require.New(t)
 	c := New(DefaultCoherentConfig)
 	k1, k2 := [20]byte{1}, [20]byte{2}
@@ -216,13 +200,14 @@ func TestAPI(t *testing.T) {
 			wg.Add(1)
 			res[i] = make(chan []byte)
 			go func(out chan []byte) {
-				err := db.View(context.Background(), func(tx kv.Tx) error {
+				ctx := dbg.ContextWithDebug(context.Background(), true)
+				err := db.View(ctx, func(tx kv.Tx) error {
 					if expectTxnID != tx.ViewID() {
 						panic(fmt.Sprintf("epxected: %d, got: %d", expectTxnID, tx.ViewID()))
 					}
 					wg.Done()
 
-					cacheView, err := c.View(context.Background(), tx)
+					cacheView, err := c.View(ctx, tx)
 					view := cacheView.(*CoherentView)
 					if err != nil {
 						panic(err)
