@@ -698,18 +698,12 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 		if path == dirs.SnapDomain {
 			return nil
 		}
-		rangeString := strings.Split(info.Name(), ".")[1]
-		rangeNums := strings.Split(rangeString, "-")
-		// convert the range to uint64
-		from, err := strconv.ParseUint(rangeNums[0], 10, 64)
-		if err != nil {
-			return fmt.Errorf("failed to parse to %s: %w", rangeNums[1], err)
-		}
 
-		to, err := strconv.ParseUint(rangeNums[1], 10, 64)
-		if err != nil {
-			return fmt.Errorf("failed to parse to %s: %w", rangeNums[1], err)
+		res, _, ok := snaptype.ParseFileName("", info.Name())
+		if !ok {
+			return fmt.Errorf("failed to parse filename %s: %w", info.Name(), err)
 		}
+		from, to := res.From, res.To
 		maxStep = max(maxStep, to)
 
 		if !strings.HasSuffix(info.Name(), ".kv") || !strings.Contains(info.Name(), "accounts") {
@@ -772,14 +766,12 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 		if path == dirs.SnapIdx {
 			return nil
 		}
-		rangeString := strings.Split(info.Name(), ".")[1]
-		rangeNums := strings.Split(rangeString, "-")
-
-		to, err := strconv.ParseUint(rangeNums[1], 10, 64)
-		if err != nil {
-			return fmt.Errorf("failed to parse to %s: %w", rangeNums[1], err)
+		res, _, ok := snaptype.ParseFileName("", info.Name())
+		if !ok {
+			return fmt.Errorf("failed to parse filename %s: %w", info.Name(), err)
 		}
-		maxStep = max(maxStep, to)
+
+		maxStep = max(maxStep, res.To)
 
 		if !strings.HasSuffix(info.Name(), ".ef") || !strings.Contains(info.Name(), "accounts") {
 			return nil
