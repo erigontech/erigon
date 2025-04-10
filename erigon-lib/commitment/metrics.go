@@ -158,116 +158,6 @@ func (processAccount *ProcessAcount) Headers() []string {
 	}
 }
 
-func (processAccount *ProcessAcount) UpdatesInc(plainKey []byte) {
-	if collectAccountMetrics && plainKey != nil {
-		processAccount.m.Lock()
-		defer processAccount.m.Unlock()
-		account := hex.EncodeToString(plainKey[0:40])
-		if _, ok := processAccount.AccountStats[account]; !ok {
-			processAccount.AccountStats[account] = &AccountStats{}
-		}
-		processAccount.AccountStats[account].Updates++
-	}
-}
-
-func (processAccount *ProcessAcount) UpdatesStorageInc(plainKey []byte) {
-	if collectAccountMetrics && plainKey != nil {
-		processAccount.m.Lock()
-		defer processAccount.m.Unlock()
-		account := hex.EncodeToString(plainKey[0:40])
-		if _, ok := processAccount.AccountStats[account]; !ok {
-			processAccount.AccountStats[account] = &AccountStats{}
-		}
-		if len(plainKey) > 40 {
-			processAccount.AccountStats[account].StorageKeys++
-		}
-	}
-}
-
-func (processAccount *ProcessAcount) LoadBranchInc(plainKey []byte) {
-	if collectAccountMetrics && plainKey != nil {
-		processAccount.m.Lock()
-		defer processAccount.m.Unlock()
-		account := hex.EncodeToString(plainKey[0:40])
-		if _, ok := processAccount.AccountStats[account]; !ok {
-			processAccount.AccountStats[account] = &AccountStats{}
-		}
-		processAccount.AccountStats[account].LoadBranch++
-	}
-}
-
-func (processAccount *ProcessAcount) LoadAccountInc(plainKey []byte) {
-	if collectAccountMetrics && plainKey != nil {
-		processAccount.m.Lock()
-		defer processAccount.m.Unlock()
-		account := hex.EncodeToString(plainKey[0:40])
-		if _, ok := processAccount.AccountStats[account]; !ok {
-			processAccount.AccountStats[account] = &AccountStats{}
-		}
-		processAccount.AccountStats[account].LoadAccount++
-	}
-}
-
-func (processAccount *ProcessAcount) LoadStorageInc(plainKey []byte) {
-	if collectAccountMetrics && plainKey != nil {
-		processAccount.m.Lock()
-		defer processAccount.m.Unlock()
-		account := hex.EncodeToString(plainKey[0:40])
-		if _, ok := processAccount.AccountStats[account]; !ok {
-			processAccount.AccountStats[account] = &AccountStats{}
-		}
-		processAccount.AccountStats[account].LoadStorage++
-	}
-}
-
-func (processAccount *ProcessAcount) UnfoldsInc(plainKey []byte) {
-	if collectAccountMetrics && plainKey != nil {
-		processAccount.m.Lock()
-		defer processAccount.m.Unlock()
-		account := hex.EncodeToString(plainKey[0:40])
-		if _, ok := processAccount.AccountStats[account]; !ok {
-			processAccount.AccountStats[account] = &AccountStats{}
-		}
-		processAccount.AccountStats[account].Unfolds++
-	}
-}
-
-func (processAccount *ProcessAcount) FoldsInc(plainKey []byte) {
-	if collectAccountMetrics && plainKey != nil {
-		processAccount.m.Lock()
-		defer processAccount.m.Unlock()
-		account := hex.EncodeToString(plainKey[0:40])
-		if _, ok := processAccount.AccountStats[account]; !ok {
-			processAccount.AccountStats[account] = &AccountStats{}
-		}
-		processAccount.AccountStats[account].Folds++
-	}
-}
-
-func (processAccount *ProcessAcount) TotalUnfoldingTimeInc(plainKey []byte, t time.Time) {
-	if collectAccountMetrics && plainKey != nil {
-		processAccount.m.Lock()
-		defer processAccount.m.Unlock()
-		account := hex.EncodeToString(plainKey[0:40])
-		if _, ok := processAccount.AccountStats[account]; !ok {
-			processAccount.AccountStats[account] = &AccountStats{}
-		}
-		processAccount.AccountStats[account].TotalUnfoldingTime += time.Since(t)
-	}
-}
-
-func (processAccount *ProcessAcount) TotalFoldingTimeInc(plainKey []byte, t time.Time) {
-	if collectAccountMetrics && plainKey != nil {
-		processAccount.m.Lock()
-		defer processAccount.m.Unlock()
-		account := hex.EncodeToString(plainKey[0:40])
-		if _, ok := processAccount.AccountStats[account]; !ok {
-			processAccount.AccountStats[account] = &AccountStats{}
-		}
-		processAccount.AccountStats[account].TotalFoldingTime += time.Since(t)
-	}
-}
-
 func (processAccount *ProcessAcount) Values() [][]string {
 	processAccount.m.Lock()
 	defer processAccount.m.Unlock()
@@ -275,7 +165,7 @@ func (processAccount *ProcessAcount) Values() [][]string {
 	var ind int
 	for i, account := range processAccount.AccountStats {
 		values[ind] = []string{
-			i,
+			"0x" + i,
 			strconv.FormatUint(account.Updates, 10),
 			strconv.FormatUint(account.StorageKeys, 10),
 			strconv.FormatUint(account.LoadBranch, 10),
@@ -289,6 +179,116 @@ func (processAccount *ProcessAcount) Values() [][]string {
 		ind++
 	}
 	return values
+}
+
+func (processAccount *ProcessAcount) UpdatesInc(plainKey []byte) {
+	if collectAccountMetrics && plainKey != nil {
+		processAccount.m.Lock()
+		defer processAccount.m.Unlock()
+		account := hex.EncodeToString(plainKey[0:20])
+		if _, ok := processAccount.AccountStats[account]; !ok {
+			processAccount.AccountStats[account] = &AccountStats{}
+		}
+		processAccount.AccountStats[account].Updates++
+	}
+}
+
+func (processAccount *ProcessAcount) UpdatesStorageInc(plainKey []byte) {
+	if collectAccountMetrics && plainKey != nil {
+		processAccount.m.Lock()
+		defer processAccount.m.Unlock()
+		account := hex.EncodeToString(plainKey[0:20])
+		if _, ok := processAccount.AccountStats[account]; !ok {
+			processAccount.AccountStats[account] = &AccountStats{}
+		}
+		if len(plainKey) > 20 {
+			processAccount.AccountStats[account].StorageKeys++
+		}
+	}
+}
+
+func (processAccount *ProcessAcount) LoadBranchInc(plainKey []byte) {
+	if collectAccountMetrics && plainKey != nil {
+		processAccount.m.Lock()
+		defer processAccount.m.Unlock()
+		account := hex.EncodeToString(plainKey[0:20])
+		if _, ok := processAccount.AccountStats[account]; !ok {
+			processAccount.AccountStats[account] = &AccountStats{}
+		}
+		processAccount.AccountStats[account].LoadBranch++
+	}
+}
+
+func (processAccount *ProcessAcount) LoadAccountInc(plainKey []byte) {
+	if collectAccountMetrics && plainKey != nil {
+		processAccount.m.Lock()
+		defer processAccount.m.Unlock()
+		account := hex.EncodeToString(plainKey[0:20])
+		if _, ok := processAccount.AccountStats[account]; !ok {
+			processAccount.AccountStats[account] = &AccountStats{}
+		}
+		processAccount.AccountStats[account].LoadAccount++
+	}
+}
+
+func (processAccount *ProcessAcount) LoadStorageInc(plainKey []byte) {
+	if collectAccountMetrics && plainKey != nil {
+		processAccount.m.Lock()
+		defer processAccount.m.Unlock()
+		account := hex.EncodeToString(plainKey[0:20])
+		if _, ok := processAccount.AccountStats[account]; !ok {
+			processAccount.AccountStats[account] = &AccountStats{}
+		}
+		processAccount.AccountStats[account].LoadStorage++
+	}
+}
+
+func (processAccount *ProcessAcount) UnfoldsInc(plainKey []byte) {
+	if collectAccountMetrics && plainKey != nil {
+		processAccount.m.Lock()
+		defer processAccount.m.Unlock()
+		account := hex.EncodeToString(plainKey[0:20])
+		if _, ok := processAccount.AccountStats[account]; !ok {
+			processAccount.AccountStats[account] = &AccountStats{}
+		}
+		processAccount.AccountStats[account].Unfolds++
+	}
+}
+
+func (processAccount *ProcessAcount) FoldsInc(plainKey []byte) {
+	if collectAccountMetrics && plainKey != nil {
+		processAccount.m.Lock()
+		defer processAccount.m.Unlock()
+		account := hex.EncodeToString(plainKey[0:20])
+		if _, ok := processAccount.AccountStats[account]; !ok {
+			processAccount.AccountStats[account] = &AccountStats{}
+		}
+		processAccount.AccountStats[account].Folds++
+	}
+}
+
+func (processAccount *ProcessAcount) TotalUnfoldingTimeInc(plainKey []byte, t time.Time) {
+	if collectAccountMetrics && plainKey != nil {
+		processAccount.m.Lock()
+		defer processAccount.m.Unlock()
+		account := hex.EncodeToString(plainKey[0:20])
+		if _, ok := processAccount.AccountStats[account]; !ok {
+			processAccount.AccountStats[account] = &AccountStats{}
+		}
+		processAccount.AccountStats[account].TotalUnfoldingTime += time.Since(t)
+	}
+}
+
+func (processAccount *ProcessAcount) TotalFoldingTimeInc(plainKey []byte, t time.Time) {
+	if collectAccountMetrics && plainKey != nil {
+		processAccount.m.Lock()
+		defer processAccount.m.Unlock()
+		account := hex.EncodeToString(plainKey[0:20])
+		if _, ok := processAccount.AccountStats[account]; !ok {
+			processAccount.AccountStats[account] = &AccountStats{}
+		}
+		processAccount.AccountStats[account].TotalFoldingTime += time.Since(t)
+	}
 }
 
 func writeMetricsToCSV(metrics Metrics, filePath string) error {
