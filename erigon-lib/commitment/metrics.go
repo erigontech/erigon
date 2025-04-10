@@ -12,9 +12,9 @@ import (
 
 func init() {
 	commitmentMetricsFile = os.Getenv("ERIGON_COMMITMENT_TRACE")
-	accountMetricsFile = os.Getenv("ERIGON_UNFOLDING_TRACE")
+	accountMetricsFile = os.Getenv("ERIGON_ACCOUNT_COMMITMENT_TRACE")
 	collectCommitmentMetrics = os.Getenv("ERIGON_COMMITMENT_TRACE") != ""
-	collectAccountMetrics = os.Getenv("ERIGON_COMMITMENT_ACCOUNT_TRACE") != ""
+	collectAccountMetrics = os.Getenv("ERIGON_ACCOUNT_COMMITMENT_TRACE") != ""
 }
 
 var (
