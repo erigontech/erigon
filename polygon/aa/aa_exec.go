@@ -15,7 +15,6 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 func ValidateAATransaction(
@@ -304,15 +303,68 @@ func PerformTxnStaticValidation(
 	txn *types.AccountAbstractionTransaction,
 	senderCodeSize, paymasterCodeSize, deployerCodeSize int,
 ) error {
-	paymasterAddress, deployerAddress, senderAddress := txn.Paymaster, txn.Deployer, txn.SenderAddress
-	paymasterData, deployerData, paymasterValidationGasLimit := txn.PaymasterData, txn.DeployerData, txn.PaymasterValidationGasLimit
+	hasPaymaster := txn.Paymaster != nil
+	hasPaymasterData := txn.PaymasterData != nil && len(txn.PaymasterData) != 0
+	hasPaymasterGasLimit := txn.PaymasterValidationGasLimit != 0
+	hasDeployer := txn.Deployer != nil
+	hasDeployerData := txn.DeployerData != nil && len(txn.DeployerData) != 0
+	hasCodeSender := senderCodeSize != 0
+	hasCodeDeployer := deployerCodeSize != 0
 
-	return txpool.AAStaticValidation(
-		paymasterAddress, deployerAddress, senderAddress,
-		paymasterData, deployerData,
-		paymasterValidationGasLimit,
-		senderCodeSize, paymasterCodeSize, deployerCodeSize,
-	)
+	if !hasDeployer && hasDeployerData {
+		return fmt.Errorf(
+			"deployer data of size %d is provided but deployer address is not set",
+			len(txn.DeployerData),
+		)
+
+	}
+	if !hasPaymaster && (hasPaymasterData || hasPaymasterGasLimit) {
+		return fmt.Errorf(
+			"paymaster data of size %d (or a gas limit: %d) is provided but paymaster address is not set",
+			len(txn.DeployerData), txn.PaymasterValidationGasLimit,
+		)
+
+	}
+
+	if hasPaymaster {
+		if !hasPaymasterGasLimit {
+			return fmt.Errorf(
+				"paymaster address  %s is provided but 'paymasterVerificationGasLimit' is zero",
+				txn.Paymaster.String(),
+			)
+
+		}
+		hasCodePaymaster := paymasterCodeSize != 0
+		if !hasCodePaymaster {
+			return fmt.Errorf(
+				"paymaster address %s is provided but contract has no code deployed",
+				txn.Paymaster.String(),
+			)
+
+		}
+	}
+
+	if hasDeployer {
+		if !hasCodeDeployer {
+			return fmt.Errorf(
+				"deployer address %s is provided but contract has no code deployed",
+				txn.Deployer.String(),
+			)
+
+		}
+		if hasCodeSender {
+			return fmt.Errorf(
+				"sender address %s and deployer address %s are provided but sender is already deployed",
+				txn.SenderAddress.String(), txn.Deployer.String(),
+			)
+		}
+	}
+
+	if !hasDeployer && !hasCodeSender {
+		return errors.New("account is not deployed and no deployer is specified")
+	}
+
+	return nil
 }
 
 // ValidationPhaseError is an API error that encompasses an EVM revert with JSON error
