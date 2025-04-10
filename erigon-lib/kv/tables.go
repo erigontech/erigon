@@ -99,7 +99,7 @@ const (
 	EthTx    = "BlockTransaction" // tx_id_u64 -> rlp(tx)
 	MaxTxNum = "MaxTxNum"         // block_number_u64 -> max_tx_num_in_block_u64
 
-	ReceiptsCache = "ReceiptCache" // block_num_u64 + block_hash + txnIndex -> txn receipt
+	ReceiptsCache = "ReceiptCache" // block_num_u64 + block_hash + txn_index_u32 -> rlp(receipt)
 
 	TxLookup = "BlockTransactionLookup" // hash -> transaction/receipt lookup metadata
 
