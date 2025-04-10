@@ -99,7 +99,7 @@ var (
 	PersistReceiptsFlag = cli.Uint64Flag{
 		Name:  "experiment.persist.receipts",
 		Usage: "Set > 0 to store receipts in chaindata db (only on chain-tip) - RPC for recent receit/logs will be faster. Values: 1_000 good starting point. 10_000 receitps it's ~1Gb (not much IO increase). Please test before go over 100_000",
-		Value: ethconfig.Defaults.NetworkID,
+		Value: ethconfig.Defaults.PersistReceipts,
 	}
 	DeveloperPeriodFlag = cli.IntFlag{
 		Name:  "dev.period",
