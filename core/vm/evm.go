@@ -492,16 +492,9 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 		err = ErrMaxCodeSizeExceeded
 	}
 
-	// TODO(racytech): see EIP-7620 "test cases" for more info
-	if typ == CREATE || typ == CREATE2 {
-		if len(ret) == 1 && ret[0] == eofMagic[0] {
-			err = ErrInvalidCode
-		}
-	}
-
 	// Reject legacy contract deployment from EOF.
-	if err == nil && isInitcodeEOF && len(ret) > 0 && !hasEOFMagic(ret) {
-		err = ErrLegacyCode
+	if isInitcodeEOF && !hasEOFMagic(ret) {
+		err = fmt.Errorf("%w: %w", ErrInvalidEOFInitcode, ErrLegacyCode)
 	}
 
 	// Reject EOF deployment from legacy.
@@ -510,9 +503,9 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	}
 
 	// Reject code starting with 0xEF if EIP-3541 is enabled.
-	if err == nil && len(ret) >= 1 && HasEOFByte(ret) {
-		if evm.chainRules.IsShanghai {
-			// Don't reject EOF contracts after Shanghai
+	if err == nil && HasEOFByte(ret) {
+		if evm.chainRules.IsOsaka && isInitcodeEOF {
+			// Don't reject EOF contracts after Osaka
 		} else if evm.chainRules.IsLondon {
 			err = ErrInvalidCode
 		}
