@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/cmd/state/commands"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
@@ -458,15 +457,15 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remote.AAValid
 
 	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &libcommon.Address{}, s.chainConfig)
 
-	ot := commands.NewOpcodeTracer(header.Number.Uint64(), true, false)
-	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, s.chainConfig, vm.Config{Tracer: ot.Tracer().Hooks, ReadOnly: true})
-	ibs.SetHooks(ot.Tracer().Hooks)
-	totalGasLimit := fixedgas.TxAAGas + aaTxn.ValidationGasLimit + aaTxn.PaymasterValidationGasLimit + aaTxn.GasLimit + aaTxn.PostOpGasLimit
+	//ot := commands.NewOpcodeTracer(header.Number.Uint64(), true, false)
+	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, s.chainConfig, vm.Config{Tracer: nil, ReadOnly: true})
+	//ibs.SetHooks(ot.Tracer().Hooks)
+	//ot.OnTxStart(evm.GetVMContext(), nil, libcommon.Address{})
 
-	ot.OnTxStart(evm.GetVMContext(), nil, libcommon.Address{})
+	totalGasLimit := fixedgas.TxAAGas + aaTxn.ValidationGasLimit + aaTxn.PaymasterValidationGasLimit + aaTxn.GasLimit + aaTxn.PostOpGasLimit
 	_, _, err = aa.ValidateAATransaction(aaTxn, ibs, new(core.GasPool).AddGas(totalGasLimit), header, evm, s.chainConfig)
-	log.Info("err", "err", err.Error())
 	if err != nil {
+		log.Info("err", "err", err.Error())
 		return &remote.AAValidationReply{Valid: false}, nil
 	}
 
