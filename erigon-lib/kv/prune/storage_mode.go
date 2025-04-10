@@ -85,6 +85,11 @@ type Mode struct {
 	Experiments Experiments
 }
 
+const (
+	DefaultBlocksPruneMode = Distance(math.MaxUint64)     // Use chain-specific history pruning (aka. history-expiry)
+	KeepAllBlocksPruneMode = Distance(math.MaxUint64 - 1) // Keep all history
+)
+
 type BlockAmount interface {
 	PruneTo(stageHead uint64) uint64
 	Enabled() bool
