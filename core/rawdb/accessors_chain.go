@@ -1291,6 +1291,7 @@ func PruneReceiptsCache(tx kv.RwTx, toBlockNum uint64, pruneLimit int) error {
 	}
 	defer rng.Close()
 
+	i := 0
 	var prevBlockNum uint64
 	for k, _, err := rng.First(); k != nil; k, _, err = rng.Next() {
 		if err != nil {
@@ -1308,8 +1309,9 @@ func PruneReceiptsCache(tx kv.RwTx, toBlockNum uint64, pruneLimit int) error {
 		if err := rng.DeleteCurrent(); err != nil {
 			return err
 		}
+		i++
 	}
-
+	log.Warn("[dbg] pruned ", "i", i)
 	return nil
 }
 
