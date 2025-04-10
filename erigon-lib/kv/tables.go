@@ -126,7 +126,7 @@ const (
 	CallFromIndex = "CallFromIndex"
 	CallToIndex   = "CallToIndex"
 
-	ReceiptsCache = "ReceiptCache" // block_num_u64 + block_hash + txnIndex -> txn receipt
+	ReceiptsCache = "ReceiptCache" // block_num_u64 + block_hash + txn_index_u32 -> txn receipt
 
 	TxLookup = "BlockTransactionLookup" // hash -> transaction/receipt lookup metadata
 
