@@ -895,6 +895,8 @@ type SharedDomainsCommitmentContext struct {
 	domainsOnly        bool // if true, do not use history reader and limit to domain files only
 }
 
+// Limits max txNum for read operations. If set to 0, all read operations will be from latest value.
+// If domainOnly=true and txNum > 0, then read operations will be limited to domain files only.
 func (sdc *SharedDomainsCommitmentContext) SetLimitReadAsOfTxNum(txNum uint64, domainOnly bool) {
 	sdc.limitReadAsOfTxNum = txNum
 	sdc.domainsOnly = domainOnly
@@ -920,7 +922,6 @@ func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, 
 		if sdc.sharedDomains.trace {
 			fmt.Printf("[SDC] Branch @%d: %x: %x\n%s\n", sdc.limitReadAsOfTxNum, pref, branch, commitment.BranchData(branch).String())
 		}
-		//enc, err := sdc.history.ReadCommitmentBranch(pref)
 		if err != nil {
 			return nil, 0, fmt.Errorf("branch history read failed: %w", err)
 		}
