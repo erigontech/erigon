@@ -129,10 +129,10 @@ func TestEviction(t *testing.T) {
 		_ = tx.Put(kv.Sequence, kv.PlainStateVersion, versionID[:])
 		cacheView, _ := c.View(ctx, tx)
 		view := cacheView.(*CoherentView)
-		_, _ = c.Get(k1[:], tx, view.stateVersionID)
-		_, _ = c.Get([]byte{1}, tx, view.stateVersionID)
-		_, _ = c.Get([]byte{2}, tx, view.stateVersionID)
-		_, _ = c.Get([]byte{3}, tx, view.stateVersionID)
+		_, _ = c.Get(ctx, k1[:], tx, view.stateVersionID)
+		_, _ = c.Get(ctx, []byte{1}, tx, view.stateVersionID)
+		_, _ = c.Get(ctx, []byte{2}, tx, view.stateVersionID)
+		_, _ = c.Get(ctx, []byte{3}, tx, view.stateVersionID)
 		//require.Equal(c.roots[c.latestViewID].cache.Len(), c.stateEvict.Len())
 		return nil
 	})
@@ -162,10 +162,10 @@ func TestEviction(t *testing.T) {
 		binary.BigEndian.PutUint64(versionID[:], id)
 		_ = tx.Put(kv.Sequence, kv.PlainStateVersion, versionID[:])
 		view := cacheView.(*CoherentView)
-		_, _ = c.Get(k1[:], tx, view.stateVersionID)
-		_, _ = c.Get(k2[:], tx, view.stateVersionID)
-		_, _ = c.Get([]byte{5}, tx, view.stateVersionID)
-		_, _ = c.Get([]byte{6}, tx, view.stateVersionID)
+		_, _ = c.Get(ctx, k1[:], tx, view.stateVersionID)
+		_, _ = c.Get(ctx, k2[:], tx, view.stateVersionID)
+		_, _ = c.Get(ctx, []byte{5}, tx, view.stateVersionID)
+		_, _ = c.Get(ctx, []byte{6}, tx, view.stateVersionID)
 		return nil
 	})
 	require.Equal(c.roots[c.latestStateVersionID].cache.Len(), c.stateEvict.Len())
@@ -207,7 +207,7 @@ func TestAPI(t *testing.T) {
 					if err != nil {
 						panic(err)
 					}
-					v, err := c.Get(key[:], tx, view.stateVersionID)
+					v, err := c.Get(ctx, key[:], tx, view.stateVersionID)
 					if err != nil {
 						panic(err)
 					}
