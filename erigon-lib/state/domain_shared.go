@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/crypto"
 	"math"
 	"sync/atomic"
 	"time"
@@ -1005,30 +1006,19 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 		u.Flags |= commitment.CodeUpdate
 		copy(u.CodeHash[:], acc.CodeHash.Bytes())
 	}
-	// if u.CodeHash == commitment.EmptyCodeHashArray {
-	// 	if len(encAccount) == 0 {
-	// 		u.Flags = commitment.DeleteUpdate
-	// 	}
-	// 	return u, nil
-	// }
-
-	// if assert.Enable {
-	// 	code, err := sdc.readCode(plainKey)
-	// 	if err != nil {
-	// 		return nil, err
-	// 	}
-
-	// 	if len(code) > 0 {
-	// 		copy(u.CodeHash[:], crypto.Keccak256(code))
-	// 		u.Flags |= commitment.CodeUpdate
-	// 	} else {
-	// 		u.CodeHash = commitment.EmptyCodeHashArray
-	// 	}
-
-	// 	if len(encAccount) == 0 && len(code) == 0 {
-	// 		u.Flags = commitment.DeleteUpdate
-	// 	}
-	// }
+	if assert.Enable {
+		code, err := sdc.readCode(plainKey)
+		if err != nil {
+			return nil, err
+		}
+		if len(code) > 0 {
+			copy(u.CodeHash[:], crypto.Keccak256(code))
+			u.Flags |= commitment.CodeUpdate
+		}
+		if !bytes.Equal(acc.CodeHash.Bytes()[:], u.CodeHash[:]) {
+			return nil, fmt.Errorf("code hash mismatch: account '%x' != codeHash '%x'", acc.CodeHash.Bytes(), u.CodeHash[:])
+		}
+	}
 	return u, nil
 }
 
