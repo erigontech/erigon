@@ -188,7 +188,10 @@ func TestAPI(t *testing.T) {
 		}
 
 		err = pprof.Lookup("goroutine").WriteTo(os.Stdout, 1)
-		require.NoError(t, err)
+		if err != nil {
+			fmt.Println("error writing pprof", err)
+			return
+		}
 	}()
 
 	require := require.New(t)
