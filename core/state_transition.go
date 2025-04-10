@@ -353,10 +353,11 @@ func (st *StateTransition) ApplyFrame(validateFrame func(ibs evmtypes.IntraBlock
 	}
 	coinbaseInitBalance = coinbaseInitBalance.Clone()
 
-	epc := &EntryPointCall{}
+	epc := &EntryPointCall{OnEnterSuper: st.evm.Config().Tracer.OnEnter}
 	st.state.SetHooks(&tracing.Hooks{
 		OnEnter: epc.OnEnter,
 	})
+	st.evm.Config().Tracer.OnEnter = epc.OnEnter
 
 	msg := st.msg
 	sender := vm.AccountRef(msg.From())
