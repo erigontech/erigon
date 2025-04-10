@@ -930,7 +930,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon
 
 	signer := types.MakeSigner(chainConfig, blockNum, header.Time)
 	// Returns an array of trace arrays, one trace array for each transaction
-	trace, _, err := api.callTransaction(ctx, tx, header, traceTypes, txnIndex, *gasBailOut, signer, chainConfig, traceConfig)
+	trace, err := api.callTransaction(ctx, tx, header, traceTypes, txnIndex, *gasBailOut, signer, chainConfig, traceConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -1312,18 +1312,18 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		var num = rpc.LatestBlockNumber
 		parentNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
 	}
-	blockNumber, hash, _, err := rpchelper.GetBlockNumber(ctx, *parentNrOrHash, dbtx, api._blockReader, api.filters)
+	parentBlockNumber, hash, _, err := rpchelper.GetBlockNumber(ctx, *parentNrOrHash, dbtx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, nil, err
 	}
 	noop := state.NewNoopWriter()
 
-	parentHeader, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNumber), dbtx)
+	parentHeader, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(parentBlockNumber), dbtx)
 	if err != nil {
 		return nil, nil, err
 	}
 	if parentHeader == nil {
-		return nil, nil, fmt.Errorf("parent header %d(%x) not found", blockNumber, hash)
+		return nil, nil, fmt.Errorf("parent header %d(%x) not found", parentBlockNumber, hash)
 	}
 
 	// Setup context so it may be cancelled the call has completed
@@ -1434,7 +1434,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		if args.isBorStateSyncTxn {
 			txFinalized = true
 			var stateSyncEvents []*types.Message
-			stateSyncEvents, err = api.stateSyncEvents(ctx, dbtx, header.Hash(), blockNumber, chainConfig)
+			stateSyncEvents, err = api.stateSyncEvents(ctx, dbtx, header.Hash(), parentBlockNumber+1, chainConfig)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -1518,10 +1518,10 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	msg *types.Message, callParam TraceCallParam,
 	parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header, gasBailout bool, txIndex int,
 	traceConfig *config.TraceConfig,
-) (*TraceCallResult, *tracing.Hooks, error) {
+) (*TraceCallResult, error) {
 	chainConfig, err := api.chainConfig(ctx, dbtx)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	engine := api.engine()
 
@@ -1529,18 +1529,18 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 		var num = rpc.LatestBlockNumber
 		parentNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
 	}
-	blockNumber, hash, _, err := rpchelper.GetBlockNumber(ctx, *parentNrOrHash, dbtx, api._blockReader, api.filters)
+	parentBlockNumber, hash, _, err := rpchelper.GetBlockNumber(ctx, *parentNrOrHash, dbtx, api._blockReader, api.filters)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	noop := state.NewNoopWriter()
 
-	parentHeader, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNumber), dbtx)
+	parentHeader, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(parentBlockNumber), dbtx)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if parentHeader == nil {
-		return nil, nil, fmt.Errorf("parent header %d(%x) not found", blockNumber, hash)
+		return nil, fmt.Errorf("parent header %d(%x) not found", parentBlockNumber, hash)
 	}
 
 	// Setup context so it may be cancelled the call has completed
@@ -1574,7 +1574,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 		historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
 	}
 	if err := libcommon.Stopped(ctx.Done()); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
@@ -1588,19 +1588,18 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 		case TraceTypeVmTrace:
 			traceTypeVmTrace = true
 		default:
-			return nil, nil, fmt.Errorf("unrecognized trace type: %s", traceType)
+			return nil, fmt.Errorf("unrecognized trace type: %s", traceType)
 		}
 	}
 
 	traceResult := &TraceCallResult{Trace: []*ParityTrace{}, TransactionHash: args.txHash}
 	vmConfig := vm.Config{}
 	var tracer *tracers.Tracer
-	var tracingHooks *tracing.Hooks
 	if traceTypeTrace || traceTypeVmTrace {
 		var ot OeTracer
 		ot.config, err = parseOeTracerConfig(traceConfig)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		ot.compat = api.compatibility
 		ot.r = traceResult
@@ -1612,7 +1611,6 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 			traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
 		}
 		vmConfig.Tracer = ot.Tracer().Hooks
-		tracingHooks = ot.Tracer().Hooks
 		tracer = ot.Tracer()
 	}
 
@@ -1649,9 +1647,9 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	if args.isBorStateSyncTxn {
 		txFinalized = true
 		var stateSyncEvents []*types.Message
-		stateSyncEvents, err = api.stateSyncEvents(ctx, dbtx, header.Hash(), blockNumber, chainConfig)
+		stateSyncEvents, err = api.stateSyncEvents(ctx, dbtx, header.Hash(), parentBlockNumber+1, chainConfig)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 
 		execResult, err = ptracer.TraceBorStateSyncTxnTraceAPI(
@@ -1676,7 +1674,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /*gasBailout*/, engine)
 	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
+		return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
 	}
 
 	chainRules := chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time)
@@ -1685,34 +1683,34 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 		initialIbs := state.New(cloneReader)
 		if !txFinalized {
 			if err = ibs.FinalizeTx(chainRules, sd); err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 		}
 
 		if sd != nil {
 			if err = sd.CompareStates(initialIbs, ibs); err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 		}
 
 		if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 	} else {
 		if !txFinalized {
 			if err = ibs.FinalizeTx(chainRules, noop); err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 		}
 		if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 	}
 	if !traceTypeTrace {
 		traceResult.Trace = []*ParityTrace{}
 	}
 
-	return traceResult, tracingHooks, nil
+	return traceResult, nil
 }
 
 // RawTransaction implements trace_rawTransaction.

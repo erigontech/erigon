@@ -24,6 +24,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"golang.org/x/sync/errgroup"
 )
@@ -175,7 +176,15 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 				if resp.Error != nil {
 					return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", resp.Error.Code, resp.Error.Message)
 				}
+
+				sawAddr := map[common.Address]struct{}{} // don't check same addr in this block
+				sawTopic := map[common.Hash]struct{}{}
 				for _, l := range resp.Result {
+					if _, ok := sawAddr[l.Address]; ok {
+						continue
+					}
+					sawAddr[l.Address] = struct{}{}
+
 					res = reqGen.Erigon("eth_getLogs", reqGen.getLogs(prevBn, bn, l.Address), &resp)
 					if res.Err != nil {
 						return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)
@@ -188,11 +197,16 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 						return fmt.Errorf("eth_getLogs: at blockNum=%d account %x not indexed", bn, l.Address)
 					}
 
+					//invariant2: if `log` visible without filter - then must be visible with filter. (in another words: `topic` must be indexed well)
 					if len(l.Topics) == 0 {
 						continue
 					}
 
-					//invariant2: if `log` visible without filter - then must be visible with filter. (in another words: `topic` must be indexed well)
+					if _, ok := sawTopic[l.Topics[0]]; ok {
+						continue
+					}
+					sawTopic[l.Topics[0]] = struct{}{}
+
 					res = reqGen.Erigon("eth_getLogs", reqGen.getLogs1(prevBn, bn, l.Address, l.Topics[0]), &resp)
 					if res.Err != nil {
 						return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)

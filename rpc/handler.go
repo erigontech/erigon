@@ -431,7 +431,7 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 			}
 		}
 
-		if resp != nil && resp.Error != nil {
+		if resp != nil && resp.Error != nil && resp.Error.Message != "context canceled" {
 			if resp.Error.Data != nil {
 				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
 					"err", resp.Error.Message, "errdata", resp.Error.Data)

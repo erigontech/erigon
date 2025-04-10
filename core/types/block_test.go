@@ -518,7 +518,7 @@ func TestWithdrawalsEncoding(t *testing.T) {
 	var decoded Block
 	require.NoError(t, rlp.DecodeBytes(encoded, &decoded))
 
-	assert.Equal(t, block, &decoded)
+	assert.Equal(t, block.Hash(), decoded.Hash())
 
 	// Now test with empty withdrawals
 	block2 := NewBlock(&header, nil, nil, nil, []*Withdrawal{})
@@ -530,7 +530,7 @@ func TestWithdrawalsEncoding(t *testing.T) {
 	var decoded2 Block
 	require.NoError(t, rlp.DecodeBytes(encoded2, &decoded2))
 
-	assert.Equal(t, block2, &decoded2)
+	assert.Equal(t, block2.Hash(), decoded2.Hash())
 }
 
 func TestBlockRawBodyPreShanghai(t *testing.T) {

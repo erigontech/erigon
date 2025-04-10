@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/bitmapdb"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/core"
@@ -343,23 +342,24 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 
 	hasOverrides := false
 	allBlocks := roaring64.New()
-	for overlayAddress := range *stateOverride {
-		hasOverrides = true
-		fromB, err := bitmapdb.Get64(tx, kv.CallFromIndex, overlayAddress.Bytes(), begin, end+1)
-		if err != nil {
-			log.Error(err.Error())
-			return nil, err
-		}
-
-		toB, err := bitmapdb.Get64(tx, kv.CallToIndex, overlayAddress.Bytes(), begin, end+1)
-		if err != nil {
-			log.Error(err.Error())
-			return nil, err
-		}
-
-		allBlocks.Or(fromB)
-		allBlocks.Or(toB)
-	}
+	//TODO: use E3 iterators
+	//for overlayAddress := range *stateOverride {
+	//	hasOverrides = true
+	//	fromB, err := bitmapdb.Get64(tx, kv.CallFromIndex, overlayAddress.Bytes(), begin, end+1)
+	//	if err != nil {
+	//		log.Error(err.Error())
+	//		return nil, err
+	//	}
+	//
+	//	toB, err := bitmapdb.Get64(tx, kv.CallToIndex, overlayAddress.Bytes(), begin, end+1)
+	//	if err != nil {
+	//		log.Error(err.Error())
+	//		return nil, err
+	//	}
+	//
+	//	allBlocks.Or(fromB)
+	//	allBlocks.Or(toB)
+	//}
 
 	var failed error
 	idx := 0

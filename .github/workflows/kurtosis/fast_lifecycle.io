@@ -20,4 +20,4 @@ assertoor_params:
   run_stability_check: false
   run_block_proposal_check: false
   tests:
-    - file: https://raw.githubusercontent.com/erigontech/erigon/refs/heads/som/kurtosis_lifecycle/.github/workflows/kurtosis/validator-lifecycle-test-v3.io
+    - file: https://raw.githubusercontent.com/erigontech/erigon/refs/heads/main/.github/workflows/kurtosis/validator-lifecycle-test-v3.io

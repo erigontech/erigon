@@ -25,9 +25,8 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon/polygon/aa"
-
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/polygon/aa"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon/eth/consensuschain"
@@ -288,72 +287,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 				break
 			}
 
-			if !txTask.InBatch {
-				// this is the first transaction in an AA transaction batch, run all validation frames, then execute execution frames in its own txtask
-				startIdx := uint64(txTask.TxIndex)
-				endIdx := startIdx + txTask.AAValidationBatchSize
-
-				validationResults := make([]state.AAValidationResult, txTask.AAValidationBatchSize)
-				log.Debug("🕵️‍♂️[aa] found AA bundle", "startIdx", startIdx, "endIdx", endIdx-1)
-
-				var outerErr error
-				for i := startIdx; i < endIdx; i++ {
-					// check if next n transactions are AA transactions and run validation
-					if txTask.Txs[i].Type() == types.AccountAbstractionTxType {
-						aaTxn, ok := txTask.Tx.(*types.AccountAbstractionTransaction)
-						if !ok {
-							outerErr = fmt.Errorf("invalid transaction type, expected AccountAbstractionTx, got %T", txTask.Tx)
-							break
-						}
-
-						paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, ibs, rw.taskGasPool, header, rw.evm, rw.chainConfig)
-						if err != nil {
-							outerErr = err
-							break
-						}
-
-						validationResults[i-startIdx] = state.AAValidationResult{
-							PaymasterContext: paymasterContext,
-							GasUsed:          validationGasUsed,
-						}
-					} else {
-						outerErr = fmt.Errorf("invalid txcount, expected txn %d to be type %d", i, types.AccountAbstractionTxType)
-						break
-					}
-				}
-
-				if outerErr != nil {
-					txTask.Error = outerErr
-					break
-				}
-				log.Debug("✅[aa] validated AA bundle", "len", startIdx-endIdx)
-
-				txTask.ValidationResults = validationResults
-			}
-
-			if len(txTask.ValidationResults) == 0 {
-				txTask.Error = fmt.Errorf("found RIP-7560 but no remaining validation results, txIndex %d", txTask.TxIndex)
-			}
-
-			aaTxn := txTask.Tx.(*types.AccountAbstractionTransaction) // type cast checked earlier
-			validationRes := txTask.ValidationResults[0]
-			txTask.ValidationResults = txTask.ValidationResults[1:]
-
-			status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, validationRes.PaymasterContext, validationRes.GasUsed, rw.taskGasPool, rw.evm, header, rw.ibs)
-			if err != nil {
-				txTask.Error = err
-				break
-			}
-
-			txTask.Failed = status != 0
-			txTask.UsedGas = gasUsed
-			// Update the state with pending changes
-			ibs.SoftFinalise()
-			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)
-			txTask.TraceFroms = rw.callTracer.Froms()
-			txTask.TraceTos = rw.callTracer.Tos()
-
-			log.Debug("✅[aa] executed AA bundle transaction", "txIndex", txTask.TxIndex)
+			rw.execAATxn(txTask)
 		}
 
 		msg := txTask.TxAsMessage
@@ -400,6 +334,75 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		txTask.WriteLists = rw.stateWriter.WriteSet()
 		txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = rw.stateWriter.PrevAndDels()
 	}
+}
+
+func (rw *Worker) execAATxn(txTask *state.TxTask) {
+	if !txTask.InBatch {
+		// this is the first transaction in an AA transaction batch, run all validation frames, then execute execution frames in its own txtask
+		startIdx := uint64(txTask.TxIndex)
+		endIdx := startIdx + txTask.AAValidationBatchSize
+
+		validationResults := make([]state.AAValidationResult, txTask.AAValidationBatchSize)
+		log.Debug("🕵️‍♂️[aa] found AA bundle", "startIdx", startIdx, "endIdx", endIdx-1)
+
+		var outerErr error
+		for i := startIdx; i < endIdx; i++ {
+			// check if next n transactions are AA transactions and run validation
+			if txTask.Txs[i].Type() == types.AccountAbstractionTxType {
+				aaTxn, ok := txTask.Tx.(*types.AccountAbstractionTransaction)
+				if !ok {
+					outerErr = fmt.Errorf("invalid transaction type, expected AccountAbstractionTx, got %T", txTask.Tx)
+					break
+				}
+
+				paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, rw.ibs, rw.taskGasPool, txTask.Header, rw.evm, rw.chainConfig)
+				if err != nil {
+					outerErr = err
+					break
+				}
+
+				validationResults[i-startIdx] = state.AAValidationResult{
+					PaymasterContext: paymasterContext,
+					GasUsed:          validationGasUsed,
+				}
+			} else {
+				outerErr = fmt.Errorf("invalid txcount, expected txn %d to be type %d", i, types.AccountAbstractionTxType)
+				break
+			}
+		}
+
+		if outerErr != nil {
+			txTask.Error = outerErr
+			return
+		}
+		log.Debug("✅[aa] validated AA bundle", "len", startIdx-endIdx)
+
+		txTask.ValidationResults = validationResults
+	}
+
+	if len(txTask.ValidationResults) == 0 {
+		txTask.Error = fmt.Errorf("found RIP-7560 but no remaining validation results, txIndex %d", txTask.TxIndex)
+	}
+
+	aaTxn := txTask.Tx.(*types.AccountAbstractionTransaction) // type cast checked earlier
+	validationRes := txTask.ValidationResults[0]
+	txTask.ValidationResults = txTask.ValidationResults[1:]
+
+	status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, validationRes.PaymasterContext, validationRes.GasUsed, rw.taskGasPool, rw.evm, txTask.Header, rw.ibs)
+	if err != nil {
+		txTask.Error = err
+		return
+	}
+
+	txTask.Failed = status != 0
+	txTask.UsedGas = gasUsed
+	// Update the state with pending changes
+	rw.ibs.SoftFinalise()
+	txTask.Logs = rw.ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)
+	txTask.TraceFroms = rw.callTracer.Froms()
+	txTask.TraceTos = rw.callTracer.Tos()
+
+	log.Debug("✅[aa] executed AA bundle transaction", "txIndex", txTask.TxIndex)
 }
 
 func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger log.Logger, hooks *tracing.Hooks, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.ParallelExecutionState, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int, dirs datadir.Dirs, isMining bool) (reconWorkers []*Worker, applyWorker *Worker, rws *state.ResultsQueue, clear func(), wait func()) {

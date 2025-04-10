@@ -18,13 +18,13 @@ import (
 type AppendableId uint16
 
 type holder struct {
-	name                   string
-	snapshotNameBase       string   // name to be used in snapshot file
-	indexNameBases         []string // one indexNameBase for each index
-	dirs                   datadir.Dirs
-	snapshotDir            string
-	saltFile               string
-	snapshotCreationConfig *SnapshotConfig
+	// tag - "type" of snapshot file. e.g. tag is "bodies" for "v1-007300-007400-bodies.seg" file
+	name                string
+	snapshotDataFileTag string   // name to be used in snapshot file
+	indexFileTag        []string // one indexFileTag for each index
+	dirs                datadir.Dirs
+	saltFile            string
+	snapshotConfig      *SnapshotConfig
 }
 
 // keeping this fixed size, so that append() does not potentially re-allocate array
@@ -49,24 +49,20 @@ func RegisterAppendable(name string, dirs datadir.Dirs, pre snapcfg.Preverified,
 		opt(h)
 	}
 
-	if h.snapshotNameBase == "" {
-		h.snapshotNameBase = name
+	if h.snapshotDataFileTag == "" {
+		h.snapshotDataFileTag = name
 	}
 
-	if h.indexNameBases == nil {
+	if h.indexFileTag == nil {
 		// default
-		h.indexNameBases = []string{name}
-	}
-
-	if h.snapshotDir == "" {
-		h.snapshotDir = dirs.Snap
+		h.indexFileTag = []string{name}
 	}
 
 	if h.saltFile == "" {
 		h.saltFile = path.Join(dirs.Snap, "salt-blocks.txt")
 	}
 
-	if h.snapshotCreationConfig == nil {
+	if h.snapshotConfig == nil {
 		panic("snapshotCreationConfig is required")
 	}
 
@@ -74,7 +70,7 @@ func RegisterAppendable(name string, dirs datadir.Dirs, pre snapcfg.Preverified,
 
 	entityRegistry[curr] = *h
 	id := AppendableId(curr)
-	h.snapshotCreationConfig.SetupConfig(id, h.snapshotDir, pre)
+	h.snapshotConfig.LoadPreverified(pre)
 	curr++
 
 	mu.Unlock()
@@ -91,36 +87,30 @@ func Cleanup() {
 
 type EntityIdOption func(*holder)
 
-func WithSnapshotPrefix(prefix string) EntityIdOption {
+func WithSnapshotTag(tag string) EntityIdOption {
 	return func(a *holder) {
-		a.snapshotNameBase = prefix
+		a.snapshotDataFileTag = tag
 	}
 }
 
-func WithIndexFileType(indexFileType []string) EntityIdOption {
+func WithIndexFileType(indexFileTag []string) EntityIdOption {
 	return func(a *holder) {
-		a.indexNameBases = indexFileType
+		a.indexFileTag = indexFileTag
 	}
 }
 
 // TODO: at appendable boundary, we want this to be value type
 // so changes don't effect config appendables own. Once we get it in
 // as value, we can use reference in other places within appendables.
-func WithSnapshotCreationConfig(cfg *SnapshotConfig) EntityIdOption {
+func WithSnapshotConfig(cfg *SnapshotConfig) EntityIdOption {
 	return func(a *holder) {
-		a.snapshotCreationConfig = cfg
+		a.snapshotConfig = cfg
 	}
 }
 
 func WithSaltFile(saltFile string) EntityIdOption {
 	return func(a *holder) {
 		a.saltFile = saltFile
-	}
-}
-
-func WithSnapshotDir(dir string) EntityIdOption {
-	return func(a *holder) {
-		a.snapshotDir = dir
 	}
 }
 
@@ -132,12 +122,12 @@ func (a AppendableId) Name() string {
 	return entityRegistry[a].name
 }
 
-func (a AppendableId) SnapshotPrefix() string {
-	return entityRegistry[a].snapshotNameBase
+func (a AppendableId) SnapshotTag() string {
+	return entityRegistry[a].snapshotDataFileTag
 }
 
-func (a AppendableId) IndexPrefix() []string {
-	return entityRegistry[a].indexNameBases
+func (a AppendableId) IndexFileTag() []string {
+	return entityRegistry[a].indexFileTag
 }
 
 func (a AppendableId) String() string {
@@ -148,12 +138,8 @@ func (a AppendableId) Dirs() datadir.Dirs {
 	return entityRegistry[a].dirs
 }
 
-func (a AppendableId) SnapshotDir() string {
-	return entityRegistry[a].snapshotDir
-}
-
 func (a AppendableId) SnapshotConfig() *SnapshotConfig {
-	return entityRegistry[a].snapshotCreationConfig
+	return entityRegistry[a].snapshotConfig
 }
 
 func (a AppendableId) Salt() (uint32, error) {

@@ -17,6 +17,7 @@
 package txpool
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -25,6 +26,7 @@ import (
 	"math/bits"
 
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
+	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/secp256k1"
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
@@ -471,6 +473,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 		p = dataPos + dataLen
 	}
 	if slot.Type == SetCodeTxnType {
+		slot.Authorities = make([]*common.Address, 0)
 		dataPos, dataLen, err = rlp.ParseList(payload, p)
 		if err != nil {
 			return 0, fmt.Errorf("%w: authorizations len: %s", ErrParseTxn, err) //nolint
@@ -482,33 +485,39 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 			if err != nil {
 				return 0, fmt.Errorf("%w: authorization: %s", ErrParseTxn, err) //nolint
 			}
-			var sig Signature
+			auth := types.Authorization{}
 			p2 := authPos
-			rawStart := p2
-			p2, err = rlp.ParseU256(payload, p2, &sig.ChainID)
+			p2, err = rlp.ParseU256(payload, p2, &auth.ChainID)
 			if err != nil {
 				return 0, fmt.Errorf("%w: authorization chainId: %s", ErrParseTxn, err) //nolint
 			}
-			if !sig.ChainID.IsUint64() {
+			if !auth.ChainID.IsUint64() {
 				// https://github.com/ethereum/EIPs/pull/8929
-				return 0, fmt.Errorf("%w: authorization chainId is too big: %s", ErrParseTxn, &sig.ChainID)
+				return 0, fmt.Errorf("%w: authorization chainId is too big: %s", ErrParseTxn, &auth.ChainID)
 			}
 			p2, err = rlp.StringOfLen(payload, p2, length.Addr) // address
 			if err != nil {
 				return 0, fmt.Errorf("%w: authorization address: %s", ErrParseTxn, err) //nolint
 			}
+			auth.Address = common.Address(payload[p2 : p2+length.Addr])
 			p2 += length.Addr
-			p2, _, err = rlp.ParseU64(payload, p2) // nonce
+			p2, auth.Nonce, err = rlp.ParseU64(payload, p2) // nonce
 			if err != nil {
 				return 0, fmt.Errorf("%w: authorization nonce: %s", ErrParseTxn, err) //nolint
 			}
-			rawEnd := p2
-			p2, _, err = parseSignature(payload, p2, false /* legacy */, nil /* cfgChainId */, &sig)
+
+			sig := Signature{}
+			p2, auth.YParity, err = parseSignature(payload, p2, false /* legacy */, nil /* cfgChainId */, &sig)
 			if err != nil {
 				return 0, fmt.Errorf("%w: authorization signature: %s", ErrParseTxn, err) //nolint
 			}
-			slot.Authorizations = append(slot.Authorizations, sig)
-			slot.AuthRaw = append(slot.AuthRaw, common.CopyBytes(payload[rawStart:rawEnd]))
+			auth.R, auth.S = sig.R, sig.S
+
+			authority, err := auth.RecoverSigner(bytes.NewBuffer(nil), make([]byte, 32))
+			if err != nil {
+				return 0, fmt.Errorf("%w: recover authorization signer: %s", ErrParseTxn, err) //nolint
+			}
+			slot.Authorities = append(slot.Authorities, authority)
 			authPos += authLen
 			if authPos != p2 {
 				return 0, fmt.Errorf("%w: authorization: unexpected list items", ErrParseTxn)
@@ -831,9 +840,7 @@ type TxnSlot struct {
 	Commitments []gokzg4844.KZGCommitment
 	Proofs      []gokzg4844.KZGProof
 
-	// EIP-7702: set code tx
-	Authorizations []Signature
-	AuthRaw        [][]byte // rlp encoded chainID+address+nonce, used to recover authorization address in txpool
+	Authorities []*common.Address // Indexed authorization signers for EIP-7702 txns (type-4)
 
 	// RIP-7560: account abstraction
 	SenderAddress, Paymaster, Deployer                               *common.Address
