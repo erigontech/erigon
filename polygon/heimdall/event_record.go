@@ -25,6 +25,7 @@ import (
 	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/polygon/bor/borabi"
@@ -106,7 +107,7 @@ func (e *EventRecordWithTime) UnmarshallBytes(v []byte) error {
 	methodId := stateContract.Methods["commitState"].ID
 
 	if !bytes.Equal(methodId, v[0:4]) {
-		return errors.New("no valid record - method mismatch")
+		return errors.New(fmt.Sprintf("no valid record - method mismatch. stack: %s", dbg.Stack()))
 	}
 
 	t := time.Unix((&big.Int{}).SetBytes(v[4:36]).Int64(), 0)
@@ -116,12 +117,12 @@ func (e *EventRecordWithTime) UnmarshallBytes(v []byte) error {
 	}
 
 	if len(args) != 2 {
-		return errors.New("no valid record - args count mismatch")
+		return errors.New(fmt.Sprintf("no valid record - method mismatch. stack: %s", dbg.Stack()))
 	}
 
 	var eventRecord EventRecord
 	if err := rlp.DecodeBytes(args[1].([]byte), &eventRecord); err != nil {
-		return err
+		return errors.New(fmt.Sprintf("no valid record - method mismatch. stack: %s", dbg.Stack()))
 	}
 
 	*e = EventRecordWithTime{EventRecord: eventRecord, Time: t}
