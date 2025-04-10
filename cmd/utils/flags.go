@@ -94,7 +94,6 @@ var (
 	NetworkIdFlag = cli.Uint64Flag{
 		Name:  "networkid",
 		Usage: "Explicitly set network id (integer)(For testnets: use --chain <testnet_name> instead)",
-		Value: ethconfig.Defaults.NetworkID,
 	}
 	DeveloperPeriodFlag = cli.IntFlag{
 		Name:  "dev.period",
