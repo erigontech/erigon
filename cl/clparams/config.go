@@ -27,6 +27,7 @@ import (
 	"os"
 	"path"
 	"strconv"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v2"
@@ -1371,6 +1372,22 @@ func GetConfigsByNetworkName(net string) (*NetworkConfig, *BeaconChainConfig, Ne
 	default:
 		return nil, nil, networkid.MainnetChainID, errors.New("chain not found")
 	}
+}
+
+var (
+	globalBeaconConfig         *BeaconChainConfig
+	onceInitGlobalBeaconConfig sync.Once
+)
+
+func InitGlobalBeaconConfig(cfg *BeaconChainConfig) {
+	// init once
+	onceInitGlobalBeaconConfig.Do(func() {
+		globalBeaconConfig = cfg
+	})
+}
+
+func BeaconConfig() *BeaconChainConfig {
+	return globalBeaconConfig
 }
 
 func GetAllCheckpointSyncEndpoints(net NetworkType) []string {
