@@ -1157,10 +1157,6 @@ func CopyHeader(h *Header) *Header {
 		copy(cpy.VerkleKeyVals, h.VerkleKeyVals)
 	}
 	cpy.mutable = h.mutable
-	if hash := h.hash.Load(); hash != nil {
-		hashCopy := *hash
-		cpy.hash.Store(&hashCopy)
-	}
 	return &cpy
 }
 
