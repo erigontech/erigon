@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -174,10 +173,6 @@ func TestEviction(t *testing.T) {
 }
 
 func TestAPI(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		//t.Skip("fix me on win please")
-	}
-
 	require := require.New(t)
 	c := New(DefaultCoherentConfig)
 	k1, k2 := [20]byte{1}, [20]byte{2}
@@ -351,7 +346,7 @@ func TestAPI(t *testing.T) {
 	}()
 	fmt.Printf("-----3\n")
 	txID4 := put(k1[:], account2Enc)
-	time.Sleep(10 * time.Second)
+	time.Sleep(1 * time.Second)
 
 	c.OnNewBlock(&remote.StateChangeBatch{
 		StateVersionId:      txID4,
