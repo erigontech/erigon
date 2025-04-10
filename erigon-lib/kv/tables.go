@@ -716,17 +716,67 @@ const (
 var StateDomains = []Domain{AccountsDomain, StorageDomain, CodeDomain, CommitmentDomain}
 
 const (
-	AccountsHistoryIdx   InvertedIdx = "AccountsHistoryIdx"
-	StorageHistoryIdx    InvertedIdx = "StorageHistoryIdx"
-	CodeHistoryIdx       InvertedIdx = "CodeHistoryIdx"
-	CommitmentHistoryIdx InvertedIdx = "CommitmentHistoryIdx"
-	ReceiptHistoryIdx    InvertedIdx = "ReceiptHistoryIdx"
+	AccountsHistoryIdx   InvertedIdx = 0
+	StorageHistoryIdx    InvertedIdx = 1
+	CodeHistoryIdx       InvertedIdx = 2
+	CommitmentHistoryIdx InvertedIdx = 3
+	ReceiptHistoryIdx    InvertedIdx = 4
 
-	LogTopicIdx   InvertedIdx = "LogTopicIdx"
-	LogAddrIdx    InvertedIdx = "LogAddrIdx"
-	TracesFromIdx InvertedIdx = "TracesFromIdx"
-	TracesToIdx   InvertedIdx = "TracesToIdx"
+	LogTopicIdx   InvertedIdx = 5
+	LogAddrIdx    InvertedIdx = 6
+	TracesFromIdx InvertedIdx = 7
+	TracesToIdx   InvertedIdx = 8
 )
+
+func (idx InvertedIdx) String() string {
+	switch idx {
+	case AccountsHistoryIdx:
+		return "AccountsHistoryIdx"
+	case StorageHistoryIdx:
+		return "StorageHistoryIdx"
+	case CodeHistoryIdx:
+		return "CodeHistoryIdx"
+	case CommitmentHistoryIdx:
+		return "CommitmentHistoryIdx"
+	case ReceiptHistoryIdx:
+		return "ReceiptHistoryIdx"
+	case LogAddrIdx:
+		return "LogAddrIdx"
+	case LogTopicIdx:
+		return "LogTopicIdx"
+	case TracesFromIdx:
+		return "TracesFromIdx"
+	case TracesToIdx:
+		return "TracesToIdx"
+	default:
+		return "unknown index"
+	}
+}
+
+func String2InvertedIdx(in string) (InvertedIdx, error) {
+	switch in {
+	case "AccountsHistoryIdx":
+		return AccountsHistoryIdx, nil
+	case "StorageHistoryIdx":
+		return StorageHistoryIdx, nil
+	case "CodeHistoryIdx":
+		return CodeHistoryIdx, nil
+	case "CommitmentHistoryIdx":
+		return CommitmentHistoryIdx, nil
+	case "ReceiptHistoryIdx":
+		return ReceiptHistoryIdx, nil
+	case "LogAddrIdx":
+		return LogAddrIdx, nil
+	case "LogTopicIdx":
+		return LogTopicIdx, nil
+	case "TracesFromIdx":
+		return TracesFromIdx, nil
+	case "TracesToIdx":
+		return TracesToIdx, nil
+	default:
+		return InvertedIdx(MaxUint16), fmt.Errorf("unknown inverted index name: %s", in)
+	}
+}
 
 const (
 	ReceiptsAppendable Appendable = 0

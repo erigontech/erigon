@@ -38,7 +38,7 @@ var (
 )
 
 func FileName(version Version, from, to uint64, fileType string) string {
-	return fmt.Sprintf("v%d-%06d-%06d-%s", version, from/1_000, to/1_000, fileType)
+	return fmt.Sprintf("%s-%06d-%06d-%s", version.String(), from/1_000, to/1_000, fileType)
 }
 
 func SegmentFileName(version Version, from, to uint64, t Enum) string {
@@ -78,7 +78,7 @@ func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {
 			return -1
 		}
 
-		return int(a.Version) - int(b.Version)
+		return a.Version.Cmp(b.Version)
 	})
 
 	return out
@@ -181,20 +181,20 @@ func parseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	return res, ok
 }
 
-var stateFileRegex = regexp.MustCompile("^v([0-9]+)-([[:lower:]]+).([0-9]+)-([0-9]+).(.*)$")
+var stateFileRegex = regexp.MustCompile("^v([0-9]+).([0-9]+)-([[:lower:]]+).([0-9]+)-([0-9]+).(.*)$")
 
 func E3Seedable(name string) bool {
 	_, name = filepath.Split(name) // remove absolute path, or `history/` prefixes
 	subs := stateFileRegex.FindStringSubmatch(name)
-	if len(subs) != 6 {
+	if len(subs) != 7 {
 		return false
 	}
 	// Check that it's seedable
-	from, err := strconv.ParseUint(subs[3], 10, 64)
+	from, err := strconv.ParseUint(subs[4], 10, 64)
 	if err != nil {
 		return false
 	}
-	to, err := strconv.ParseUint(subs[4], 10, 64)
+	to, err := strconv.ParseUint(subs[5], 10, 64)
 	if err != nil {
 		return false
 	}
@@ -206,15 +206,15 @@ func E3Seedable(name string) bool {
 func IsStateFile(name string) (ok bool) {
 	_, name = filepath.Split(name) // remove absolute path, or `history/` prefixes
 	subs := stateFileRegex.FindStringSubmatch(name)
-	if len(subs) != 6 {
+	if len(subs) != 7 {
 		return false
 	}
 	// Check that it's seedable
-	_, err := strconv.ParseUint(subs[3], 10, 64)
+	_, err := strconv.ParseUint(subs[4], 10, 64)
 	if err != nil {
 		return false
 	}
-	_, err = strconv.ParseUint(subs[4], 10, 64)
+	_, err = strconv.ParseUint(subs[5], 10, 64)
 
 	return err == nil
 }
@@ -290,7 +290,7 @@ func (f FileInfo) CompareTo(o FileInfo) int {
 }
 
 func (f FileInfo) As(t Type) FileInfo {
-	name := fmt.Sprintf("v%d-%06d-%06d-%s%s", f.Version, f.From/1_000, f.To/1_000, t, f.Ext)
+	name := fmt.Sprintf("%s-%06d-%06d-%s%s", f.Version.String(), f.From/1_000, f.To/1_000, t, f.Ext)
 	return FileInfo{
 		Version: f.Version,
 		From:    f.From,
@@ -360,7 +360,7 @@ func ParseDir(name string) (res []FileInfo, err error) {
 	slices.SortFunc(res, func(i, j FileInfo) int {
 		switch {
 		case i.Version != j.Version:
-			return cmp.Compare(i.Version, j.Version)
+			return i.Version.Cmp(j.Version)
 
 		case i.From != j.From:
 			return cmp.Compare(i.From, j.From)
