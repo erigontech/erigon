@@ -1,9 +1,9 @@
 package list
 
 import (
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/zk/txpool"
-	"github.com/erigontech/erigon/zkevm/log"
 	"github.com/urfave/cli/v2"
 )
 
@@ -34,7 +34,7 @@ func run(cliCtx *cli.Context) error {
 	}
 
 	content, _ := txpool.ListContentAtACL(cliCtx.Context, aclDB)
-	log.Info(content)
+	log.Info("ACL Content", content)
 	pts, _ := txpool.LastPolicyTransactions(cliCtx.Context, aclDB, logCountOutput)
 	if len(pts) == 0 {
 		log.Info("No policy transactions found")

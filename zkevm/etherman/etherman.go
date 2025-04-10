@@ -14,6 +14,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/core/types"
@@ -23,7 +24,6 @@ import (
 	"github.com/erigontech/erigon/zkevm/etherman/smartcontracts/polygonzkevm"
 	"github.com/erigontech/erigon/zkevm/etherman/smartcontracts/polygonzkevmglobalexitroot"
 	ethmanTypes "github.com/erigontech/erigon/zkevm/etherman/types"
-	"github.com/erigontech/erigon/zkevm/log"
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 )
@@ -133,7 +133,7 @@ func NewClient(cfg Config) (*Client, error) {
 	// Connect to ethereum node
 	ethClient, err := ethclient.Dial(cfg.URL)
 	if err != nil {
-		log.Errorf("error connecting to %s: %+v", cfg.URL, err)
+		log.Error("Error connecting", "to URL", cfg.URL, "error", err)
 		return nil, err
 	}
 	// Create smc clients
@@ -199,7 +199,7 @@ func (etherMan *Client) VerifyGenBlockNumber(ctx context.Context, genBlockNumber
 	genBlock := big.NewInt(0).SetUint64(genBlockNumber)
 	response, err := etherMan.EthClient.CodeAt(ctx, etherMan.cfg.PoEAddr, genBlock)
 	if err != nil {
-		log.Error("error getting smc code for gen block number. Error: ", err)
+		log.Error("Error getting smc code for gen block number", "Error", err)
 		return false, err
 	}
 	responseString := hex.EncodeToString(response)
@@ -213,7 +213,7 @@ func (etherMan *Client) VerifyGenBlockNumber(ctx context.Context, genBlockNumber
 				return true, nil
 			}
 		}
-		log.Error("error getting smc code for gen block number. Error: ", err)
+		log.Error("Error getting smc code for gen block number", "Error", err)
 		return false, err
 	}
 	responsePrevString := hex.EncodeToString(responsePrev)
@@ -257,7 +257,7 @@ func (etherMan *Client) readEvents(ctx context.Context, query ethereum.FilterQue
 	for _, vLog := range logs {
 		err := etherMan.processEvent(ctx, vLog, &blocks, &blocksOrder)
 		if err != nil {
-			log.Warnf("error processing event. Retrying... Error: %s. vLog: %+v", err.Error(), vLog)
+			log.Warn("Error processing event. Retrying...", "Error", err, "vLog", vLog)
 			return nil, nil, err
 		}
 	}
@@ -345,7 +345,7 @@ func (etherMan *Client) processEvent(ctx context.Context, vLog types.Log, blocks
 		log.Debug("OverridePendingState event detected")
 		return nil
 	}
-	log.Warn("Event not registered: ", vLog)
+	log.Warn("Event not registered", "vLog", vLog)
 	return nil
 }
 
@@ -353,7 +353,7 @@ func (etherMan *Client) updateZkevmVersion(ctx context.Context, vLog types.Log, 
 	log.Debug("UpdateZkEVMVersion event detected")
 	zkevmVersion, err := etherMan.PoE.ParseUpdateZkEVMVersion(vLog)
 	if err != nil {
-		log.Error("error parsing UpdateZkEVMVersion event. Error: ", err)
+		log.Error("Error parsing UpdateZkEVMVersion event", "Error", err)
 		return err
 	}
 	fork := ForkID{
@@ -373,7 +373,7 @@ func (etherMan *Client) updateZkevmVersion(ctx context.Context, vLog types.Log, 
 	} else if (*blocks)[len(*blocks)-1].BlockHash == vLog.BlockHash && (*blocks)[len(*blocks)-1].BlockNumber == vLog.BlockNumber {
 		(*blocks)[len(*blocks)-1].ForkIDs = append((*blocks)[len(*blocks)-1].ForkIDs, fork)
 	} else {
-		log.Error("Error processing updateZkevmVersion event. BlockHash:", vLog.BlockHash, ". BlockNumber: ", vLog.BlockNumber)
+		log.Error("Error processing updateZkevmVersion event", "BlockHash", vLog.BlockHash, "BlockNumber", vLog.BlockNumber)
 		return fmt.Errorf("error processing updateZkevmVersion event")
 	}
 	or := Order{
@@ -408,7 +408,7 @@ func (etherMan *Client) updateGlobalExitRootEvent(ctx context.Context, vLog type
 	} else if (*blocks)[len(*blocks)-1].BlockHash == vLog.BlockHash && (*blocks)[len(*blocks)-1].BlockNumber == vLog.BlockNumber {
 		(*blocks)[len(*blocks)-1].GlobalExitRoots = append((*blocks)[len(*blocks)-1].GlobalExitRoots, gExitRoot)
 	} else {
-		log.Error("Error processing UpdateGlobalExitRoot event. BlockHash:", vLog.BlockHash, ". BlockNumber: ", vLog.BlockNumber)
+		log.Error("Error processing UpdateGlobalExitRoot event", "BlockHash", vLog.BlockHash, "BlockNumber", vLog.BlockNumber)
 		return fmt.Errorf("error processing UpdateGlobalExitRoot event")
 	}
 	or := Order{
@@ -602,7 +602,7 @@ func (etherMan *Client) forcedBatchEvent(ctx context.Context, vLog types.Log, bl
 	} else if (*blocks)[len(*blocks)-1].BlockHash == vLog.BlockHash && (*blocks)[len(*blocks)-1].BlockNumber == vLog.BlockNumber {
 		(*blocks)[len(*blocks)-1].ForcedBatches = append((*blocks)[len(*blocks)-1].ForcedBatches, forcedBatch)
 	} else {
-		log.Error("Error processing ForceBatch event. BlockHash:", vLog.BlockHash, ". BlockNumber: ", vLog.BlockNumber)
+		log.Error("Error processing ForceBatch event", "BlockHash", vLog.BlockHash, "BlockNumber", vLog.BlockNumber)
 		return fmt.Errorf("error processing ForceBatch event")
 	}
 	or := Order{
@@ -648,7 +648,7 @@ func (etherMan *Client) sequencedBatchesEvent(ctx context.Context, vLog types.Lo
 	} else if (*blocks)[len(*blocks)-1].BlockHash == vLog.BlockHash && (*blocks)[len(*blocks)-1].BlockNumber == vLog.BlockNumber {
 		(*blocks)[len(*blocks)-1].SequencedBatches = append((*blocks)[len(*blocks)-1].SequencedBatches, sequences)
 	} else {
-		log.Error("Error processing SequencedBatches event. BlockHash:", vLog.BlockHash, ". BlockNumber: ", vLog.BlockNumber)
+		log.Error("Error processing SequencedBatches event", "BlockHash", vLog.BlockHash, "BlockNumber", vLog.BlockNumber)
 		return fmt.Errorf("error processing SequencedBatches event")
 	}
 	or := Order{
@@ -728,7 +728,7 @@ func (etherMan *Client) verifyBatchesTrustedAggregatorEvent(ctx context.Context,
 	} else if (*blocks)[len(*blocks)-1].BlockHash == vLog.BlockHash && (*blocks)[len(*blocks)-1].BlockNumber == vLog.BlockNumber {
 		(*blocks)[len(*blocks)-1].VerifiedBatches = append((*blocks)[len(*blocks)-1].VerifiedBatches, trustedVerifyBatch)
 	} else {
-		log.Error("Error processing trustedVerifyBatch event. BlockHash:", vLog.BlockHash, ". BlockNumber: ", vLog.BlockNumber)
+		log.Error("Error processing trustedVerifyBatch event", "BlockHash", vLog.BlockHash, "BlockNumber", vLog.BlockNumber)
 		return fmt.Errorf("error processing trustedVerifyBatch event")
 	}
 	or := Order{
@@ -774,7 +774,7 @@ func (etherMan *Client) forceSequencedBatchesEvent(ctx context.Context, vLog typ
 	} else if (*blocks)[len(*blocks)-1].BlockHash == vLog.BlockHash && (*blocks)[len(*blocks)-1].BlockNumber == vLog.BlockNumber {
 		(*blocks)[len(*blocks)-1].SequencedForceBatches = append((*blocks)[len(*blocks)-1].SequencedForceBatches, sequencedForceBatch)
 	} else {
-		log.Error("Error processing ForceSequencedBatches event. BlockHash:", vLog.BlockHash, ". BlockNumber: ", vLog.BlockNumber)
+		log.Error("Error processing ForceSequencedBatches event", "BlockHash", vLog.BlockHash, "BlockNumber", vLog.BlockNumber)
 		return fmt.Errorf("error processing ForceSequencedBatches event")
 	}
 	or := Order{
@@ -954,12 +954,12 @@ func (etherMan *Client) GetL1GasPrice(ctx context.Context) *big.Int {
 	for i, prov := range etherMan.GasProviders.Providers {
 		gp, err := prov.SuggestGasPrice(ctx)
 		if err != nil {
-			log.Warnf("error getting gas price from provider %d. Error: %s", i+1, err.Error())
+			log.Warn("Error getting gas price", "From provider", i+1, "Error", err.Error())
 		} else if gasPrice.Cmp(gp) == -1 { // gasPrice < gp
 			gasPrice = gp
 		}
 	}
-	log.Debug("gasPrice chose: ", gasPrice)
+	log.Debug("GasPrice chose", "gas price", gasPrice)
 	return gasPrice
 }
 
@@ -1025,7 +1025,7 @@ func (etherMan *Client) SignTx(ctx context.Context, sender common.Address, tx ty
 
 // AddOrReplaceAuth adds an authorization or replace an existent one to the same account
 func (etherMan *Client) AddOrReplaceAuth(auth bind.TransactOpts) error {
-	log.Infof("added or replaced authorization for address: %v", auth.From.String())
+	log.Info("Added or replaced authorization", "for address", auth.From.String())
 	etherMan.auth[auth.From] = auth
 	return nil
 }
@@ -1038,7 +1038,7 @@ func (etherMan *Client) LoadAuthFromKeyStore(path, password string) (*bind.Trans
 			return nil, err
 		}
 
-		log.Infof("loaded authorization for address: %v", auth.From.String())
+		log.Infof("Loaded authorization", "for address", auth.From.String())
 		etherMan.auth[auth.From] = auth
 		return &auth, nil
 	*/

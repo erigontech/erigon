@@ -21,10 +21,10 @@ import (
 	"os"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/zkevm/log"
 )
 
 type JSONFileLogger struct {
@@ -93,7 +93,7 @@ func (l *JSONFileLogger) CaptureEnd(output []byte, usedGas uint64, err error) {
 
 	writeErr := os.WriteFile("traces/"+l.txHash+".json", json, 0600)
 	if err != nil {
-		log.Error(writeErr)
+		log.Error("Error: ", writeErr.Error())
 	}
 }
 

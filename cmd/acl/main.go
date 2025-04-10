@@ -13,7 +13,6 @@ import (
 	"github.com/erigontech/erigon/cmd/acl/update"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/logging"
-	"github.com/erigontech/erigon/zkevm/log"
 	"github.com/urfave/cli/v2"
 )
 
@@ -75,10 +74,10 @@ func handleTerminationSignals(stopFunc func()) {
 
 	switch s := <-signalCh; s {
 	case syscall.SIGTERM:
-		log.Info("Stopping")
+		loglvl.Info("Stopping")
 		stopFunc()
 	case syscall.SIGINT:
-		log.Info("Terminating")
+		loglvl.Info("Terminating")
 		os.Exit(-int(syscall.SIGINT))
 	}
 }
