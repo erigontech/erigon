@@ -8,6 +8,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
@@ -57,6 +58,8 @@ func ValidateAATransaction(
 		return nil, 0, err
 	}
 
+	log.Info("validation starting with", "sender", tx.SenderAddress)
+
 	var originalEvmHook tracing.EnterHook
 	entryPointTracer := EntryPointTracer{}
 	vmConfig := evm.Config()
@@ -86,6 +89,7 @@ func ValidateAATransaction(
 	if err := deployValidation(tx, ibs); err != nil {
 		return nil, 0, err
 	}
+	entryPointTracer.Reset()
 
 	deploymentGasUsed := applyRes.UsedGas
 
@@ -183,8 +187,8 @@ func validationValidation(tx *types.AccountAbstractionTransaction, header *types
 	if ept.Input == nil {
 		return errors.New("account validation did not call the EntryPoint 'acceptAccount' callback")
 	}
-	if bytes.Compare(ept.From[:], tx.SenderAddress[:]) == 0 {
-		return errors.New("invalid call to EntryPoint contract from a wrong account address")
+	if bytes.Compare(ept.From[:], tx.SenderAddress[:]) != 0 {
+		return fmt.Errorf("invalid call to EntryPoint contract from a wrong account address, wanted %s got %s", tx.SenderAddress.String(), ept.From)
 	}
 
 	validityTimeRange, err := types.DecodeAcceptAccount(ept.Input)
@@ -194,18 +198,18 @@ func validationValidation(tx *types.AccountAbstractionTransaction, header *types
 	return validateValidityTimeRange(header.Time, validityTimeRange.ValidAfter, validityTimeRange.ValidUntil)
 }
 
-func paymasterValidation(tx *types.AccountAbstractionTransaction, header *types.Header, epc EntryPointTracer) ([]byte, error) {
-	if epc.Error != nil {
-		return nil, epc.Error
+func paymasterValidation(tx *types.AccountAbstractionTransaction, header *types.Header, ept EntryPointTracer) ([]byte, error) {
+	if ept.Error != nil {
+		return nil, ept.Error
 	}
-	if epc.Input == nil {
+	if ept.Input == nil {
 		return nil, errors.New("paymaster validation did not call the EntryPoint 'acceptPaymaster' callback")
 	}
 
-	if bytes.Compare(epc.From[:], tx.Paymaster[:]) != 0 {
+	if bytes.Compare(ept.From[:], tx.Paymaster[:]) != 0 {
 		return nil, errors.New("invalid call to EntryPoint contract from a wrong paymaster address")
 	}
-	paymasterValidity, err := types.DecodeAcceptPaymaster(epc.Input) // TODO: find better name
+	paymasterValidity, err := types.DecodeAcceptPaymaster(ept.Input) // TODO: find better name
 	if err != nil {
 		return nil, err
 	}
