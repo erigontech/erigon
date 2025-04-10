@@ -175,7 +175,7 @@ func TestEviction(t *testing.T) {
 
 func TestAPI(t *testing.T) {
 	if runtime.GOOS != "linux" {
-		t.Skip("fix me on win please")
+		//t.Skip("fix me on win please")
 	}
 
 	require := require.New(t)
