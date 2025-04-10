@@ -398,7 +398,7 @@ func opExtCodeSize(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
-	if HasEOFByte(code) {
+	if hasEOFMagic(code) {
 		slot.SetUint64(2)
 	} else {
 		slot.SetUint64(uint64(len(code)))
@@ -448,7 +448,7 @@ func opExtCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
-	if HasEOFByte(code) {
+	if hasEOFMagic(code) {
 		codeCopy = getData(eofMagic, uint64CodeOffset, len64)
 	} else {
 		codeCopy = getData(code, uint64CodeOffset, len64)
@@ -510,7 +510,7 @@ func opExtCodeHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
-		if HasEOFByte(code) {
+		if hasEOFMagic(code) {
 			slot.SetFromHex("0x9dbf3648db8210552e9c4f75c6a1c3057c0ca432043bd648be15fe7be05646f5")
 		} else {
 			var codeHash libcommon.Hash
