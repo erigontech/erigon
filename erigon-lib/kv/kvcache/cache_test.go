@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -32,6 +31,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -129,10 +129,10 @@ func TestEviction(t *testing.T) {
 		_ = tx.Put(kv.Sequence, kv.PlainStateVersion, versionID[:])
 		cacheView, _ := c.View(ctx, tx)
 		view := cacheView.(*CoherentView)
-		_, _ = c.Get(k1[:], tx, view.stateVersionID)
-		_, _ = c.Get([]byte{1}, tx, view.stateVersionID)
-		_, _ = c.Get([]byte{2}, tx, view.stateVersionID)
-		_, _ = c.Get([]byte{3}, tx, view.stateVersionID)
+		_, _ = c.Get(ctx, k1[:], tx, view.stateVersionID)
+		_, _ = c.Get(ctx, []byte{1}, tx, view.stateVersionID)
+		_, _ = c.Get(ctx, []byte{2}, tx, view.stateVersionID)
+		_, _ = c.Get(ctx, []byte{3}, tx, view.stateVersionID)
 		//require.Equal(c.roots[c.latestViewID].cache.Len(), c.stateEvict.Len())
 		return nil
 	})
@@ -162,10 +162,10 @@ func TestEviction(t *testing.T) {
 		binary.BigEndian.PutUint64(versionID[:], id)
 		_ = tx.Put(kv.Sequence, kv.PlainStateVersion, versionID[:])
 		view := cacheView.(*CoherentView)
-		_, _ = c.Get(k1[:], tx, view.stateVersionID)
-		_, _ = c.Get(k2[:], tx, view.stateVersionID)
-		_, _ = c.Get([]byte{5}, tx, view.stateVersionID)
-		_, _ = c.Get([]byte{6}, tx, view.stateVersionID)
+		_, _ = c.Get(ctx, k1[:], tx, view.stateVersionID)
+		_, _ = c.Get(ctx, k2[:], tx, view.stateVersionID)
+		_, _ = c.Get(ctx, []byte{5}, tx, view.stateVersionID)
+		_, _ = c.Get(ctx, []byte{6}, tx, view.stateVersionID)
 		return nil
 	})
 	require.Equal(c.roots[c.latestStateVersionID].cache.Len(), c.stateEvict.Len())
@@ -173,9 +173,6 @@ func TestEviction(t *testing.T) {
 }
 
 func TestAPI(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("fix me on win please")
-	}
 	require := require.New(t)
 	c := New(DefaultCoherentConfig)
 	k1, k2 := [20]byte{1}, [20]byte{2}
@@ -193,27 +190,28 @@ func TestAPI(t *testing.T) {
 	account4Enc := accounts.SerialiseV3(&acc)
 
 	get := func(key [20]byte, expectTxnID uint64) (res [1]chan []byte) {
-
 		wg := sync.WaitGroup{}
 		for i := 0; i < len(res); i++ {
 			wg.Add(1)
 			res[i] = make(chan []byte)
 			go func(out chan []byte) {
-				err := db.View(context.Background(), func(tx kv.Tx) error {
+				ctx := dbg.ContextWithDebug(context.Background(), true)
+				err := db.View(ctx, func(tx kv.Tx) error {
 					if expectTxnID != tx.ViewID() {
 						panic(fmt.Sprintf("epxected: %d, got: %d", expectTxnID, tx.ViewID()))
 					}
 					wg.Done()
-					cacheView, err := c.View(context.Background(), tx)
+
+					cacheView, err := c.View(ctx, tx)
 					view := cacheView.(*CoherentView)
 					if err != nil {
 						panic(err)
 					}
-					v, err := c.Get(key[:], tx, view.stateVersionID)
+					v, err := c.Get(ctx, key[:], tx, view.stateVersionID)
 					if err != nil {
 						panic(err)
 					}
-					fmt.Println("get", key, v)
+					fmt.Println("tx", tx.ViewID(), "get", key, v)
 					out <- common.Copy(v)
 					return nil
 				})
@@ -225,6 +223,7 @@ func TestAPI(t *testing.T) {
 		wg.Wait() // ensure that all goroutines started their transactions
 		return res
 	}
+
 	counter := atomic.Int64{}
 	prevVals := map[string][]byte{}
 	put := func(k, v []byte) uint64 {
@@ -347,7 +346,7 @@ func TestAPI(t *testing.T) {
 	}()
 	fmt.Printf("-----3\n")
 	txID4 := put(k1[:], account2Enc)
-	time.Sleep(10 * time.Second)
+	time.Sleep(1 * time.Second)
 
 	c.OnNewBlock(&remote.StateChangeBatch{
 		StateVersionId:      txID4,
