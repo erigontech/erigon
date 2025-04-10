@@ -271,38 +271,38 @@ func TestMultipleAuthorizations(t *testing.T) {
 
 	logger := log.New()
 
-	// txn with existing authorization should not be accepted
+	// a new txn with authority same as one in an existing authorization should not be accepted
 	{
 		var txnSlots TxnSlots
 		txnSlot1 := &TxnSlot{
-			Tip:            *uint256.NewInt(300000),
-			FeeCap:         *uint256.NewInt(300000),
-			Gas:            100000,
-			Nonce:          0,
-			Authorizations: []Signature{auth},
-			AuthRaw:        [][]byte{data.Bytes()},
-			Type:           SetCodeTxnType,
+			Tip:         *uint256.NewInt(300000),
+			FeeCap:      *uint256.NewInt(300000),
+			Gas:         100000,
+			Nonce:       0,
+			Authorities: []*common.Address{&authAddress},
+			Type:        SetCodeTxnType,
 		}
 		txnSlot1.IDHash[0] = 1
 		txnSlots.Append(txnSlot1, addr1[:], true)
+		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
+		require.NoError(t, err)
+		assert.Equal(t, reasons, []txpoolcfg.DiscardReason{txpoolcfg.Success})
 
+		txnSlots = TxnSlots{}
 		txnSlot2 := &TxnSlot{
-			Tip:            *uint256.NewInt(300000),
-			FeeCap:         *uint256.NewInt(300000),
-			Gas:            100000,
-			Nonce:          0,
-			Authorizations: []Signature{auth},
-			AuthRaw:        [][]byte{data.Bytes()},
-			Type:           SetCodeTxnType,
+			Tip:         *uint256.NewInt(300000),
+			FeeCap:      *uint256.NewInt(300000),
+			Gas:         100000,
+			Nonce:       0,
+			Authorities: []*common.Address{&authAddress},
+			Type:        SetCodeTxnType,
 		}
 		txnSlot2.IDHash[0] = 2
 		txnSlots.Append(txnSlot2, addr2[:], true)
-
 		require.NoError(t, pool.senders.registerNewSenders(&txnSlots, logger))
-
-		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
+		reasons, err = pool.AddLocalTxns(ctx, txnSlots)
 		require.NoError(t, err)
-		assert.Equal(t, reasons, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.ErrAuthorityReserved})
+		assert.Equal(t, reasons, []txpoolcfg.DiscardReason{txpoolcfg.ErrAuthorityReserved})
 
 		assert.Len(t, pool.auths, 1) // auth address should be in pool auth
 		_, ok := pool.auths[authAddress]
@@ -318,13 +318,12 @@ func TestMultipleAuthorizations(t *testing.T) {
 	{
 		var txnSlots TxnSlots
 		txnSlot1 := &TxnSlot{
-			Tip:            *uint256.NewInt(300000),
-			FeeCap:         *uint256.NewInt(300000),
-			Gas:            100000,
-			Nonce:          1,
-			Authorizations: []Signature{auth},
-			AuthRaw:        [][]byte{data.Bytes()},
-			Type:           SetCodeTxnType,
+			Tip:         *uint256.NewInt(300000),
+			FeeCap:      *uint256.NewInt(300000),
+			Gas:         100000,
+			Nonce:       1,
+			Authorities: []*common.Address{&authAddress},
+			Type:        SetCodeTxnType,
 		}
 		txnSlot1.IDHash[0] = 3
 		txnSlots.Append(txnSlot1, addr1[:], true)
@@ -336,13 +335,12 @@ func TestMultipleAuthorizations(t *testing.T) {
 
 		txnSlots = TxnSlots{}
 		txnSlot2 := &TxnSlot{
-			Tip:            *uint256.NewInt(900000),
-			FeeCap:         *uint256.NewInt(900000),
-			Gas:            100000,
-			Nonce:          1,
-			Authorizations: []Signature{auth},
-			AuthRaw:        [][]byte{data.Bytes()},
-			Type:           SetCodeTxnType,
+			Tip:         *uint256.NewInt(900000),
+			FeeCap:      *uint256.NewInt(900000),
+			Gas:         100000,
+			Nonce:       1,
+			Authorities: []*common.Address{&authAddress},
+			Type:        SetCodeTxnType,
 		}
 		txnSlot2.IDHash[0] = 4
 		txnSlots.Append(txnSlot2, addr1[:], true)
@@ -357,17 +355,16 @@ func TestMultipleAuthorizations(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// do not allow transactions from delegated addresses
+	// do not allow transactions from a sender if there is a pending delegated txn its authority
 	{
 		var txnSlots TxnSlots
 		txnSlot1 := &TxnSlot{
-			Tip:            *uint256.NewInt(300000),
-			FeeCap:         *uint256.NewInt(300000),
-			Gas:            100000,
-			Nonce:          1,
-			Authorizations: []Signature{auth},
-			AuthRaw:        [][]byte{data.Bytes()},
-			Type:           SetCodeTxnType,
+			Tip:         *uint256.NewInt(300000),
+			FeeCap:      *uint256.NewInt(300000),
+			Gas:         100000,
+			Nonce:       1,
+			Authorities: []*common.Address{&authAddress},
+			Type:        SetCodeTxnType,
 		}
 		txnSlot1.IDHash[0] = 5
 		txnSlots.Append(txnSlot1, addr1[:], true)
@@ -1066,16 +1063,13 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	require.NoError(t, err)
 
 	txn := &TxnSlot{
-		FeeCap:         *uint256.NewInt(21000),
-		Gas:            500000,
-		SenderID:       0,
-		Type:           SetCodeTxnType,
-		Authorizations: make([]Signature, 1),
+		FeeCap:      *uint256.NewInt(21000),
+		Gas:         500000,
+		SenderID:    0,
+		Type:        SetCodeTxnType,
+		Authorities: make([]*common.Address, 1),
 	}
-	txn.Authorizations[0].ChainID = chainID
-	txn.Authorizations[0].V.Set(maxUint256)
-	txn.Authorizations[0].R.Set(maxUint256)
-	txn.Authorizations[0].S.Set(maxUint256)
+	txn.Authorities[0] = &common.Address{}
 
 	txns := TxnSlots{
 		Txns:    append([]*TxnSlot{}, txn),

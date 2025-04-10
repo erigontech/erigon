@@ -411,13 +411,13 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 
 		// Configure sapshots
 
-		snapCfg := cfg.Snap
+		cfg.Snap.ChainName = cc.ChainName
 		// this assumed the rpc deamon never runs with a downloader - if this is
 		// not the case we'll need to adjust the defaults of the --no-downlaoder
 		// flag to the faulse by default
-		snapCfg.NoDownloader = true
-		allSnapshots = freezeblocks.NewRoSnapshots(snapCfg, cfg.Dirs.Snap, 0, logger)
-		allBorSnapshots = heimdall.NewRoSnapshots(snapCfg, cfg.Dirs.Snap, 0, logger)
+		cfg.Snap.NoDownloader = true
+		allSnapshots = freezeblocks.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
+		allBorSnapshots = heimdall.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
 
 		if polygonSync {
 			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, cfg.Dirs.DataDir, true, roTxLimit), allBorSnapshots)

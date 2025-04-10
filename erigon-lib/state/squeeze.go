@@ -328,7 +328,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	}
 	ranges := make([]MergeRange, 0)
 	for fi, f := range sf.d[kv.AccountsDomain] {
-		fmt.Printf("shard %d - %d-%d %s\n", fi, f.startTxNum, f.endTxNum, f.decompressor.FileName())
+		logger.Info("shard %d - %d-%d %s", fi, f.startTxNum, f.endTxNum, f.decompressor.FileName())
 		ranges = append(ranges, MergeRange{
 			from: f.startTxNum,
 			to:   f.endTxNum,
@@ -403,8 +403,8 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 				if !keyIter.HasNext() {
 					return false, nil
 				}
-				if processed%1000 == 0 {
-					fmt.Printf("processed %12d/%d (%2.f%%) %x\r", processed, totalKeys, float64(processed)/float64(totalKeys)*100, k)
+				if processed%10_000 == 0 {
+					logger.Info(fmt.Sprintf("processed %12d/%d (%2.f%%) %x", processed, totalKeys, float64(processed)/float64(totalKeys)*100, k))
 				}
 				k, _, err := keyIter.Next()
 				if err != nil {
@@ -413,7 +413,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 				}
 				processed++
 				if processed%(batchSize*shardSize) == 0 && shardTo != lastShard {
-					fmt.Println()
 					return false, k
 				}
 				return true, k
@@ -449,7 +448,9 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 			domains.Close()
 
+			a.dirtyFilesLock.Lock()
 			a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
+			a.dirtyFilesLock.Unlock()
 			rwTx.Rollback()
 
 			if shardTo+shardSize > lastShard && shardSize > 1 {
@@ -493,13 +494,13 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
 
-	fmt.Printf("latest root %x\n", latestRoot)
+	logger.Info(fmt.Sprintf("latest root %x", latestRoot))
 
 	actx := a.BeginFilesRo()
 	defer actx.Close()
 	if err = SqueezeCommitmentFiles(actx, logger); err != nil {
 		logger.Warn("squeezeCommitmentFiles failed", "err", err)
-		fmt.Printf("rebuilt commitment files still available. Instead of re-run, you have to run 'erigon snapshots sqeeze' to finish squeezing")
+		logger.Info("rebuilt commitment files still available. Instead of re-run, you have to run 'erigon snapshots sqeeze' to finish squeezing")
 		return nil, err
 	}
 
