@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -116,7 +117,7 @@ func (r *Reader) Events(ctx context.Context, blockNum uint64) ([]*types.Message,
 		return nil, err
 	}
 
-	if len(events) > 0 {
+	if len(events) > 0 && dbg.Enabled(ctx) {
 		r.logger.Debug(bridgeLogPrefix("events for block"), "block", blockNum, "start", start, "end", end)
 	}
 
