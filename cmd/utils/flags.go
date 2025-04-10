@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon-lib/direct"
 	downloadercfg2 "github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/utils/flags"
@@ -495,15 +496,6 @@ var (
 	AllowUnprotectedTxs = cli.BoolFlag{
 		Name:  "rpc.allow-unprotected-txs",
 		Usage: "Allow for unprotected (non-EIP155 signed) transactions to be submitted via RPC",
-	}
-	// Careful! Because we must rewind the hash state
-	// and re-compute the state trie, the further back in time the request, the more
-	// computationally intensive the operation becomes.
-	// The current default has been chosen arbitrarily as 'useful' without likely being overly computationally intense.
-	RpcMaxGetProofRewindBlockCount = cli.IntFlag{
-		Name:  "rpc.maxgetproofrewindblockcount.limit",
-		Usage: "Max GetProof rewind block count",
-		Value: 100_000,
 	}
 	StateCacheFlag = cli.StringFlag{
 		Name:  "state.cache",
@@ -1137,6 +1129,10 @@ var (
 		Name:  "gdbme",
 		Usage: "restart erigon under gdb for debug purposes",
 		Value: false,
+	}
+	KeepExecutionProofsFlag = cli.BoolFlag{
+		Name:  "experimental.commitment-history",
+		Usage: "Enables blazing fast eth_getProof for executed block",
 	}
 )
 
@@ -1905,6 +1901,10 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.CaplinConfig.CaplinDiscoveryAddr = ctx.String(CaplinDiscoveryAddrFlag.Name)
 	cfg.CaplinConfig.CaplinDiscoveryPort = ctx.Uint64(CaplinDiscoveryPortFlag.Name)
 	cfg.CaplinConfig.CaplinDiscoveryTCPPort = ctx.Uint64(CaplinDiscoveryTCPPortFlag.Name)
+	if ctx.Bool(KeepExecutionProofsFlag.Name) {
+		cfg.KeepExecutionProofs = true
+		state.EnableHistoricalCommitment()
+	}
 	cfg.CaplinConfig.EnableUPnP = ctx.Bool(CaplinEnableUPNPlag.Name)
 	var err error
 	cfg.CaplinConfig.MaxInboundTrafficPerPeer, err = datasize.ParseString(ctx.String(CaplinMaxInboundTrafficPerPeerFlag.Name))
