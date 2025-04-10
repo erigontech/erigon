@@ -181,20 +181,20 @@ func parseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	return res, ok
 }
 
-var stateFileRegex = regexp.MustCompile("^v([0-9]+)-([[:lower:]]+).([0-9]+)-([0-9]+).(.*)$")
+var stateFileRegex = regexp.MustCompile("^v([0-9]+).([0-9]+)-([[:lower:]]+).([0-9]+)-([0-9]+).(.*)$")
 
 func E3Seedable(name string) bool {
 	_, name = filepath.Split(name) // remove absolute path, or `history/` prefixes
 	subs := stateFileRegex.FindStringSubmatch(name)
-	if len(subs) != 6 {
+	if len(subs) != 7 {
 		return false
 	}
 	// Check that it's seedable
-	from, err := strconv.ParseUint(subs[3], 10, 64)
+	from, err := strconv.ParseUint(subs[4], 10, 64)
 	if err != nil {
 		return false
 	}
-	to, err := strconv.ParseUint(subs[4], 10, 64)
+	to, err := strconv.ParseUint(subs[5], 10, 64)
 	if err != nil {
 		return false
 	}
@@ -206,15 +206,15 @@ func E3Seedable(name string) bool {
 func IsStateFile(name string) (ok bool) {
 	_, name = filepath.Split(name) // remove absolute path, or `history/` prefixes
 	subs := stateFileRegex.FindStringSubmatch(name)
-	if len(subs) != 6 {
+	if len(subs) != 7 {
 		return false
 	}
 	// Check that it's seedable
-	_, err := strconv.ParseUint(subs[3], 10, 64)
+	_, err := strconv.ParseUint(subs[4], 10, 64)
 	if err != nil {
 		return false
 	}
-	_, err = strconv.ParseUint(subs[4], 10, 64)
+	_, err = strconv.ParseUint(subs[5], 10, 64)
 
 	return err == nil
 }
