@@ -390,8 +390,8 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 
 	// For Gnosis only
 	if head.AuRaSeal != nil {
-		result["auraSeal"] = head.AuRaSeal
-		result["auraStep"] = head.AuRaStep
+		result["auraSeal"] = hexutil.Bytes(head.AuRaSeal)
+		result["auraStep"] = (hexutil.Uint64)(head.AuRaStep)
 	}
 
 	return result
