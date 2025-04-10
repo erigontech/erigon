@@ -436,6 +436,7 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		return err
 	}
 
+	log.Warn("[dbg] stage_exec prune", "cfg.syncCfg.PersistReceipts", cfg.syncCfg.PersistReceipts)
 	// prune receipts cache
 	if cfg.syncCfg.PersistReceipts > 0 && s.ForwardProgress > cfg.syncCfg.PersistReceipts {
 		pruneTo := s.ForwardProgress - cfg.syncCfg.PersistReceipts
