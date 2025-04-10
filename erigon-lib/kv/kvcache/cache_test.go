@@ -211,7 +211,7 @@ func TestAPI(t *testing.T) {
 					if err != nil {
 						panic(err)
 					}
-					fmt.Println("get", key, v)
+					fmt.Println("tx", tx.ViewID(), "get", key, v)
 					out <- common.Copy(v)
 					return nil
 				})
