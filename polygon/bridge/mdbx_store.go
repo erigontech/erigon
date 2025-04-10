@@ -249,10 +249,10 @@ func (s *MdbxStore) PutEvents(ctx context.Context, events []*heimdall.EventRecor
 	return tx.Commit()
 }
 
-func (s *MdbxStore) EventsByTimeframe(ctx context.Context, timeFrom, timeTo uint64) ([][]byte, error) {
+func (s *MdbxStore) EventsByTimeframe(ctx context.Context, timeFrom, timeTo uint64) ([][]byte, []uint64, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer tx.Rollback()
 
@@ -522,9 +522,10 @@ func (s txStore) PutEvents(ctx context.Context, events []*heimdall.EventRecordWi
 	return nil
 }
 
-// returns events withing [timeFrom, timeTo) interval.
-func (s txStore) EventsByTimeframe(ctx context.Context, timeFrom, timeTo uint64) ([][]byte, error) {
+// EventsByTimeframe returns events withing [timeFrom, timeTo) interval.
+func (s txStore) EventsByTimeframe(ctx context.Context, timeFrom, timeTo uint64) ([][]byte, []uint64, error) {
 	var events [][]byte
+	var ids []uint64
 
 	kStart := make([]byte, 8)
 	binary.BigEndian.PutUint64(kStart, timeFrom)
@@ -534,24 +535,25 @@ func (s txStore) EventsByTimeframe(ctx context.Context, timeFrom, timeTo uint64)
 
 	it, err := s.tx.Range(kv.BorEventTimes, kStart, kEnd, order.Asc, kv.Unlim)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	for it.HasNext() {
 		_, evID, err := it.Next()
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		v, err := s.tx.GetOne(kv.BorEvents, evID)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		events = append(events, bytes.Clone(v))
+		ids = append(ids, binary.BigEndian.Uint64(evID))
 	}
 
-	return events, nil
+	return events, ids, nil
 }
 
 // Events gets raw events, start inclusive, end exclusive
