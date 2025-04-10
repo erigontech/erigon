@@ -719,15 +719,15 @@ func (tx *AccountAbstractionTransaction) AbiEncode() ([]byte, error) {
 
 	record := &ABIAccountAbstractTxn{
 		Sender:                      *tx.SenderAddress,
-		NonceKey:                    tx.NonceKey,
-		Nonce:                       uint256.NewInt(tx.Nonce),
-		ValidationGasLimit:          uint256.NewInt(tx.ValidationGasLimit),
-		PaymasterValidationGasLimit: uint256.NewInt(tx.PaymasterValidationGasLimit),
-		PostOpGasLimit:              uint256.NewInt(tx.PostOpGasLimit),
-		CallGasLimit:                uint256.NewInt(tx.GasLimit),
-		MaxFeePerGas:                tx.FeeCap,
-		MaxPriorityFeePerGas:        tx.Tip,
-		BuilderFee:                  tx.BuilderFee,
+		NonceKey:                    tx.NonceKey.ToBig(),
+		Nonce:                       big.NewInt(int64(tx.Nonce)),
+		ValidationGasLimit:          big.NewInt(int64(tx.ValidationGasLimit)),
+		PaymasterValidationGasLimit: big.NewInt(int64(tx.PaymasterValidationGasLimit)),
+		PostOpGasLimit:              big.NewInt(int64(tx.PostOpGasLimit)),
+		CallGasLimit:                big.NewInt(int64(tx.GasLimit)),
+		MaxFeePerGas:                tx.FeeCap.ToBig(),
+		MaxPriorityFeePerGas:        tx.Tip.ToBig(),
+		BuilderFee:                  tx.BuilderFee.ToBig(),
 		SenderValidationData:        tx.SenderValidationData,
 		Paymaster:                   *paymaster,
 		PaymasterData:               tx.PaymasterData,
@@ -742,15 +742,15 @@ func (tx *AccountAbstractionTransaction) AbiEncode() ([]byte, error) {
 // ABIAccountAbstractTxn an equivalent of a solidity struct only used to encode the 'transaction' parameter
 type ABIAccountAbstractTxn struct {
 	Sender                      common.Address
-	NonceKey                    *uint256.Int
-	Nonce                       *uint256.Int
-	ValidationGasLimit          *uint256.Int
-	PaymasterValidationGasLimit *uint256.Int
-	PostOpGasLimit              *uint256.Int
-	CallGasLimit                *uint256.Int
-	MaxFeePerGas                *uint256.Int
-	MaxPriorityFeePerGas        *uint256.Int
-	BuilderFee                  *uint256.Int
+	NonceKey                    *big.Int
+	Nonce                       *big.Int
+	ValidationGasLimit          *big.Int
+	PaymasterValidationGasLimit *big.Int
+	PostOpGasLimit              *big.Int
+	CallGasLimit                *big.Int
+	MaxFeePerGas                *big.Int
+	MaxPriorityFeePerGas        *big.Int
+	BuilderFee                  *big.Int
 	Paymaster                   common.Address
 	PaymasterData               []byte
 	Deployer                    common.Address
