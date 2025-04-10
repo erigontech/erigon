@@ -452,6 +452,10 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remote.AAValid
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, s.blockReader))
 	maxTxNum, err := txNumsReader.Max(tx, header.Number.Uint64())
+	if err != nil {
+		return nil, err
+	}
+
 	stateReader.SetTxNum(maxTxNum)
 	ibs := state.New(stateReader)
 
