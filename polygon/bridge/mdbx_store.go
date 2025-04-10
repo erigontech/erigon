@@ -724,16 +724,16 @@ func (s txStore) PruneEvents(ctx context.Context, blocksTo uint64, blocksDeleteL
 		if eventId >= eventIdTo {
 			break
 		}
-		if err = c1.DeleteCurrent(); err != nil {
-			return deleted, err
-		}
-
 		var event heimdall.EventRecordWithTime
 		if err := event.UnmarshallBytes(v); err != nil {
 			return deleted, err
 		}
 
 		if err := tx.Delete(kv.BorEventTimes, event.MarshallTimeBytes()); err != nil {
+			return deleted, err
+		}
+
+		if err = c1.DeleteCurrent(); err != nil {
 			return deleted, err
 		}
 
@@ -829,16 +829,15 @@ func UnwindEvents(tx kv.RwTx, unwindPoint uint64) error {
 	var v []byte
 
 	for k, v, err = eventCursor.Seek(from); err == nil && k != nil; k, v, err = eventCursor.Next() {
-		if err = eventCursor.DeleteCurrent(); err != nil {
-			return err
-		}
-
 		var event heimdall.EventRecordWithTime
 		if err := event.UnmarshallBytes(v); err != nil {
 			return err
 		}
 
 		if err := tx.Delete(kv.BorEventTimes, event.MarshallTimeBytes()); err != nil {
+			return err
+		}
+		if err = eventCursor.DeleteCurrent(); err != nil {
 			return err
 		}
 	}
