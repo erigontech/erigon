@@ -1234,6 +1234,37 @@ func ReadDBSchemaVersion(tx kv.Tx) (major, minor, patch uint32, ok bool, err err
 	patch = binary.BigEndian.Uint32(existingVersion[8:])
 	return major, minor, patch, true, nil
 }
+func ReadDBCommitmentHistoryEnabled(tx kv.Tx) (bool, bool, error) {
+	commitmentHistoryEnabled, err := tx.GetOne(kv.DatabaseInfo, kv.CommitmentLayoutFlagKey)
+	if err != nil {
+		return false, false, fmt.Errorf("reading DB commitment history enabled flag: %w", err)
+	}
+	if len(commitmentHistoryEnabled) == 0 {
+		return false, false, nil
+	}
+	if len(commitmentHistoryEnabled) != 1 {
+		return false, false, fmt.Errorf("incorrect length of DB commitment history enabled flag: %d", len(commitmentHistoryEnabled))
+	}
+	if bytes.Equal(commitmentHistoryEnabled, kv.CommitmentLayoutFlagEnabledVal) {
+		return true, true, nil
+	}
+	if bytes.Equal(commitmentHistoryEnabled, kv.CommitmentLayoutFlagDisabledVal) {
+		return false, true, nil
+	}
+	return false, false, fmt.Errorf("incorrect value of DB commitment history enabled flag: %x", commitmentHistoryEnabled)
+}
+func WriteDBCommitmentHistoryEnabled(tx kv.RwTx, enabled bool) error {
+	var value []byte
+	if enabled {
+		value = kv.CommitmentLayoutFlagEnabledVal
+	} else {
+		value = kv.CommitmentLayoutFlagDisabledVal
+	}
+	if err := tx.Put(kv.DatabaseInfo, kv.CommitmentLayoutFlagKey, value); err != nil {
+		return fmt.Errorf("writing DB commitment history enabled flag: %w", err)
+	}
+	return nil
+}
 
 func ReadReceiptCache(tx kv.Tx, blockNum uint64, blockHash common.Hash, txnIndex uint32, txnHash common.Hash) (*types.Receipt, bool, error) {
 	data, err := tx.GetOne(kv.ReceiptsCache, dbutils.ReceiptCacheKey(blockNum, blockHash, txnIndex))

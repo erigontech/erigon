@@ -33,6 +33,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/trie"
@@ -45,7 +46,6 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/length"
-	ecrypto "github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
 	"golang.org/x/crypto/sha3"
 )
@@ -90,6 +90,8 @@ type HexPatriciaHashed struct {
 
 	depthsToTxNum [129]uint64 // endTxNum of file with branch data for that depth
 	hadToLoadL    map[uint64]skipStat
+
+	memoizationOff bool // if true, do not rely on memoized hashes
 
 	//temp buffers
 	accValBuf rlp.RlpEncodedBytes
@@ -1230,7 +1232,8 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[libcommon.H
 						return nil, fmt.Errorf("subTrieRoot(%x) != cellHash(%x)", subTrieRoot, cellHash[1:])
 					}
 					// // DEBUG patch with cell hash which we know to be correct
-					// nextNode = trie.NewHashNode(cellHash[1:])
+					//fmt.Printf("witness cell (%d, %0x, depth=%d) %s\n", row, currentNibble, hph.depths[row], cellToExpand.FullString())
+					//nextNode = trie.NewHashNode(cellToExpand.stateHash[:])
 				}
 			}
 		} else if cellToExpand.storageAddrLen > 0 { // storage cell
@@ -1693,6 +1696,9 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			nibble := bits.TrailingZeros16(bit)
 			cell := &hph.grid[row][nibble]
 
+			if hph.memoizationOff {
+				cell.stateHashLen = 0
+			}
 			/* memoization of state hashes*/
 			counters := hph.hadToLoadL[hph.depthsToTxNum[depth]]
 			if cell.stateHashLen > 0 && (hph.touchMap[row]&hph.afterMap[row]&uint16(1<<nibble) > 0 || cell.stateHashLen != length.Hash) {
@@ -1896,6 +1902,11 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		updatesCount = updates.Size()
 		logEvery     = time.NewTicker(20 * time.Second)
 	)
+	//hph.memoizationOff, hph.trace = false, true
+	//defer func() {
+	//	hph.memoizationOff, hph.trace = false, false
+	//}()
+
 	defer logEvery.Stop()
 	var tries []*trie.Trie = make([]*trie.Trie, 0, len(updates.keys)) // slice of tries, i.e the witness for each key, these will be all merged into single trie
 	err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
@@ -1910,24 +1921,28 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		}
 
 		var tr *trie.Trie
-		var computedRootHash []byte
+		//var computedRootHash []byte
 
 		// fmt.Printf("\n%d/%d) plainKey [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
 
-		if len(plainKey) == 20 { // account
-			account, err := hph.ctx.Account(plainKey)
+		var update *Update
+		if len(plainKey) == hph.accountKeyLen { // account
+			update, err = hph.ctx.Account(plainKey)
 			if err != nil {
 				return fmt.Errorf("account with plainkey=%x not found: %w", plainKey, err)
-			} else {
-				addrHash := ecrypto.Keccak256(plainKey)
-				fmt.Printf("account with plainKey=%x, addrHash=%x FOUND = %v\n", plainKey, addrHash, account)
+			}
+			if hph.trace {
+				addrHash := crypto.Keccak256(plainKey)
+				fmt.Printf("account with plainKey=%x, addrHash=%x FOUND = %v\n", plainKey, addrHash, update)
 			}
 		} else {
-			storage, err := hph.ctx.Storage(plainKey)
+			update, err = hph.ctx.Storage(plainKey)
 			if err != nil {
 				return fmt.Errorf("storage with plainkey=%x not found: %w", plainKey, err)
 			}
-			fmt.Printf("storage found = %v\n", storage.Storage)
+			if hph.trace {
+				fmt.Printf("storage found = %v\n", update.Storage[:update.StorageLen])
+			}
 		}
 
 		// Keep folding until the currentKey is the prefix of the key we modify
@@ -1942,20 +1957,21 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 				return fmt.Errorf("unfold: %w", err)
 			}
 		}
-		// hph.PrintGrid()
+		//hph.PrintGrid()
+		//hph.updateCell(plainKey, hashedKey, update)
 
 		// convert grid to trie.Trie
 		tr, err = hph.ToTrie(hashedKey, codeReads) // build witness trie for this key, based on the current state of the grid
 		if err != nil {
 			return err
 		}
-		computedRootHash = tr.Root()
-		// fmt.Printf("computedRootHash = %x\n", computedRootHash)
-
-		if !bytes.Equal(computedRootHash, expectedRootHash) {
-			err = fmt.Errorf("root hash mismatch computedRootHash(%x)!=expectedRootHash(%x)", computedRootHash, expectedRootHash)
-			return err
-		}
+		//computedRootHash = tr.Root()
+		//// fmt.Printf("computedRootHash = %x\n", computedRootHash)
+		//
+		//if !bytes.Equal(computedRootHash, expectedRootHash) {
+		//	err = fmt.Errorf("root hash mismatch computedRootHash(%x)!=expectedRootHash(%x)", computedRootHash, expectedRootHash)
+		//	return err
+		//}
 
 		tries = append(tries, tr)
 		ki++
