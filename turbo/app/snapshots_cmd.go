@@ -699,7 +699,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 			return nil
 		}
 
-		res, _, ok := snaptype.ParseFileName("", info.Name())
+		res, _, ok := snaptype.ParseFileName(dirs.SnapDomain, info.Name())
 		if !ok {
 			return fmt.Errorf("failed to parse filename %s: %w", info.Name(), err)
 		}
@@ -766,7 +766,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 		if path == dirs.SnapIdx {
 			return nil
 		}
-		res, _, ok := snaptype.ParseFileName("", info.Name())
+		res, _, ok := snaptype.ParseFileName(dirs.SnapIdx, info.Name())
 		if !ok {
 			return fmt.Errorf("failed to parse filename %s: %w", info.Name(), err)
 		}
