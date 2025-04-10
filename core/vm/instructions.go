@@ -358,15 +358,15 @@ func opReturnDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 		dataSize := uint64(len(interpreter.returnData))
 		length64 := length.Uint64()
 
-		var src uint64
+		var offset uint64
 		if dataOffset.CmpUint64(dataSize) >= 0 {
-			src = dataSize
+			offset = dataSize
 		} else {
-			src = dataOffset.Uint64()
+			offset = dataOffset.Uint64()
 		}
-		copySize := min(length64, dataSize-src)
+		copySize := min(length64, dataSize-offset)
 		if copySize > 0 {
-			scope.Memory.Set(memOffset.Uint64(), copySize, interpreter.returnData[src:src+copySize])
+			scope.Memory.Set(memOffset.Uint64(), copySize, interpreter.returnData[offset:offset+copySize])
 		}
 		if length64-copySize > 0 {
 			scope.Memory.SetZero(memOffset.Uint64()+copySize, length64-copySize)
