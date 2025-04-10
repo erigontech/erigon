@@ -1374,7 +1374,6 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row, depth int, deleted bool) (bo
 }
 
 func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int) error {
-	hph.currentCommitmentMetrics.Unfolds.Add(1)
 	if hph.trace {
 		fmt.Printf("unfold %d: activeRows: %d\n", unfolding, hph.activeRows)
 	}
@@ -2073,6 +2072,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
 			startUnfold := hph.currentCommitmentMetrics.Now()
 			hph.currentAccountMetrics.UnfoldsInc(hph.currentPlainKey)
+			hph.currentCommitmentMetrics.Unfolds.Add(1)
 			if err := hph.unfold(hashedKey, unfolding); err != nil {
 				return fmt.Errorf("unfold: %w", err)
 			}
