@@ -11,6 +11,7 @@ import (
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/params"
@@ -56,19 +57,21 @@ func ValidateAATransaction(
 		return nil, 0, err
 	}
 
-	originalEvmHooks := evm.Config().Tracer.OnEnter
-	entryPointTracer := EntryPointTracer{OnEnterSuper: originalEvmHooks}
-	evm.Config().Tracer.OnEnter = entryPointTracer.OnEnter
-	defer func() {
-		evm.Config().Tracer.OnEnter = originalEvmHooks
-	}()
+	var originalEvmHook tracing.EnterHook
+	entryPointTracer := EntryPointTracer{}
+	vmConfig := evm.Config()
+	if vmConfig.Tracer != nil && vmConfig.Tracer.OnEnter != nil {
+		entryPointTracer = EntryPointTracer{OnEnterSuper: originalEvmHook}
+	}
+	vmConfig.Tracer = entryPointTracer.Hooks()
+	innerEvm := vm.NewEVM(evm.Context, evm.TxContext, ibs, evm.ChainConfig(), vmConfig)
 
 	// TODO: Nonce manager frame
 	// applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
 
 	// Deployer frame
 	msg := tx.DeployerFrame()
-	applyRes, err := core.ApplyFrame(evm, msg, gasPool)
+	applyRes, err := core.ApplyFrame(innerEvm, msg, gasPool)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -91,7 +94,7 @@ func ValidateAATransaction(
 	if err != nil {
 		return nil, 0, err
 	}
-	applyRes, err = core.ApplyFrame(evm, msg, gasPool)
+	applyRes, err = core.ApplyFrame(innerEvm, msg, gasPool)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -117,7 +120,7 @@ func ValidateAATransaction(
 	}
 
 	if msg != nil {
-		applyRes, err = core.ApplyFrame(evm, msg, gasPool)
+		applyRes, err = core.ApplyFrame(innerEvm, msg, gasPool)
 		if err != nil {
 			return nil, 0, err
 		}

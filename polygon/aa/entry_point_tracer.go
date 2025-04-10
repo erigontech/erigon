@@ -38,6 +38,12 @@ func (epc *EntryPointTracer) OnEnter(depth int, typ byte, from libcommon.Address
 	epc.From = from
 }
 
+func (epc *EntryPointTracer) Hooks() *tracing.Hooks {
+	return &tracing.Hooks{
+		OnEnter: epc.OnEnter,
+	}
+}
+
 func (epc *EntryPointTracer) Reset() {
 	epc.Input = nil
 	epc.From = libcommon.Address{}
