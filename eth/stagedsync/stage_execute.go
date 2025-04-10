@@ -111,6 +111,7 @@ func StageExecuteBlocksCfg(
 	if dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}
+	log.Warn("[dbg] stage_exec config", "cfg.syncCfg.PersistReceipts", syncCfg.PersistReceipts)
 
 	return ExecuteBlockCfg{
 		db:                db,
