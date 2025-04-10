@@ -1015,7 +1015,7 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 			copy(u.CodeHash[:], crypto.Keccak256(code))
 			u.Flags |= commitment.CodeUpdate
 		}
-		if !bytes.Equal(acc.CodeHash.Bytes()[:], u.CodeHash[:]) {
+		if !bytes.Equal(acc.CodeHash.Bytes(), u.CodeHash[:]) {
 			return nil, fmt.Errorf("code hash mismatch: account '%x' != codeHash '%x'", acc.CodeHash.Bytes(), u.CodeHash[:])
 		}
 	}
