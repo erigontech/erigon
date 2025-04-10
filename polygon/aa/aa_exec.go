@@ -346,7 +346,7 @@ func newValidationPhaseError(
 	var errorMessage string
 	contractSubst := ""
 	if revertEntityName != "" {
-		contractSubst = "in contract " + revertEntityName
+		contractSubst = " in contract " + revertEntityName
 	}
 	if innerErr != nil {
 		errorMessage = fmt.Sprintf(

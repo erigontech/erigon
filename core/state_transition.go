@@ -327,6 +327,7 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	coinbaseInitBalance = coinbaseInitBalance.Clone()
 
 	msg := st.msg
+	st.gasRemaining += st.msg.Gas()
 	sender := vm.AccountRef(msg.From())
 	contractCreation := msg.To() == nil
 	rules := st.evm.ChainRules()
