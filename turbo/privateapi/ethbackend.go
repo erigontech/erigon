@@ -464,8 +464,8 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remote.AAValid
 
 	totalGasLimit := fixedgas.TxAAGas + aaTxn.ValidationGasLimit + aaTxn.PaymasterValidationGasLimit + aaTxn.GasLimit + aaTxn.PostOpGasLimit
 	_, _, err = aa.ValidateAATransaction(aaTxn, ibs, new(core.GasPool).AddGas(totalGasLimit), header, evm, s.chainConfig)
-	log.Info("err", "err", err.Error())
 	if err != nil {
+		log.Info("err", "err", err.Error())
 		return &remote.AAValidationReply{Valid: false}, nil
 	}
 

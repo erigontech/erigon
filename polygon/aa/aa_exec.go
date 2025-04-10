@@ -8,7 +8,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
@@ -57,8 +56,6 @@ func ValidateAATransaction(
 	if err = chargeGas(header, tx, gasPool, ibs); err != nil {
 		return nil, 0, err
 	}
-
-	log.Info("validation starting with", "sender", tx.SenderAddress)
 
 	var originalEvmHook tracing.EnterHook
 	entryPointTracer := EntryPointTracer{}
@@ -195,7 +192,7 @@ func validationValidation(tx *types.AccountAbstractionTransaction, header *types
 	if err != nil {
 		return err
 	}
-	return validateValidityTimeRange(header.Time, validityTimeRange.ValidAfter, validityTimeRange.ValidUntil)
+	return validateValidityTimeRange(header.Time, validityTimeRange.ValidAfter.Uint64(), validityTimeRange.ValidUntil.Uint64())
 }
 
 func paymasterValidation(tx *types.AccountAbstractionTransaction, header *types.Header, ept EntryPointTracer) ([]byte, error) {
@@ -214,7 +211,7 @@ func paymasterValidation(tx *types.AccountAbstractionTransaction, header *types.
 		return nil, err
 	}
 
-	if err = validateValidityTimeRange(header.Time, paymasterValidity.ValidAfter, paymasterValidity.ValidUntil); err != nil {
+	if err = validateValidityTimeRange(header.Time, paymasterValidity.ValidAfter.Uint64(), paymasterValidity.ValidUntil.Uint64()); err != nil {
 		return nil, err
 	}
 

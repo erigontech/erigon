@@ -50,7 +50,7 @@ func decodeMethodParamsToInterface(output interface{}, methodName string, input 
 }
 
 type AcceptAccountData struct {
-	ValidAfter, ValidUntil uint64
+	ValidAfter, ValidUntil *big.Int
 }
 
 func DecodeAcceptAccount(input []byte) (*AcceptAccountData, error) {
@@ -63,7 +63,7 @@ func DecodeAcceptAccount(input []byte) (*AcceptAccountData, error) {
 }
 
 type AcceptPaymasterData struct {
-	ValidAfter, ValidUntil uint64
+	ValidAfter, ValidUntil *big.Int
 	Context                []byte
 }
 
