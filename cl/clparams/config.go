@@ -1383,7 +1383,7 @@ func InitGlobalBeaconConfig(cfg *BeaconChainConfig) {
 	})
 }
 
-func BeaconConfig() *BeaconChainConfig {
+func GetBeaconConfig() *BeaconChainConfig {
 	return globalBeaconConfig
 }
 
