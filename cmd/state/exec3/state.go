@@ -314,8 +314,8 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			txTask.TraceFroms = rw.callTracer.Froms()
 			txTask.TraceTos = rw.callTracer.Tos()
 
+			txTask.CreateReceipt(rw.Tx())
 			if rw.hooks != nil && rw.hooks.OnTxEnd != nil {
-				txTask.CreateReceipt(rw.Tx())
 				rw.hooks.OnTxEnd(txTask.BlockReceipts[txTask.TxIndex], nil)
 			}
 		}

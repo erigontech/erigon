@@ -1157,10 +1157,6 @@ func CopyHeader(h *Header) *Header {
 		copy(cpy.VerkleKeyVals, h.VerkleKeyVals)
 	}
 	cpy.mutable = h.mutable
-	if hash := h.hash.Load(); hash != nil {
-		hashCopy := *hash
-		cpy.hash.Store(&hashCopy)
-	}
 	return &cpy
 }
 
@@ -1470,6 +1466,7 @@ func (b *Block) Copy() *Block {
 func (b *Block) WithSeal(header *Header) *Block {
 	headerCopy := CopyHeader(header)
 	headerCopy.mutable = false
+	headerCopy.hash.Store(nil) // invalidate cached hash
 	return &Block{
 		header:       headerCopy,
 		transactions: b.transactions,

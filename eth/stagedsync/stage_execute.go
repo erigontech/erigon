@@ -436,6 +436,18 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		return err
 	}
 
+	// prune receipts cache
+	if cfg.syncCfg.PersistReceipts > 0 && s.ForwardProgress > cfg.syncCfg.PersistReceipts {
+		pruneTo := s.ForwardProgress - cfg.syncCfg.PersistReceipts
+		pruneLimit := 10
+		if s.CurrentSyncCycle.IsInitialCycle {
+			pruneLimit = -1
+		}
+		if err := rawdb.PruneReceiptsCache(tx, pruneTo, pruneLimit); err != nil {
+			return err
+		}
+	}
+
 	if err = s.Done(tx); err != nil {
 		return err
 	}

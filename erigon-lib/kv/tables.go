@@ -54,10 +54,6 @@ const (
 	//key - contract code hash
 	//value - contract code
 	Code = "Code"
-
-	//key - addressHash+incarnation
-	//value - code hash
-	ContractCode = "HashedCodeHash"
 )
 
 const Witnesses = "witnesses" // block_num_u64 + "_chunk_" + chunk_num_u64 -> witness ( see: docs/programmers_guide/witness_format.md )
@@ -103,7 +99,7 @@ const (
 	EthTx    = "BlockTransaction" // tx_id_u64 -> rlp(tx)
 	MaxTxNum = "MaxTxNum"         // block_number_u64 -> max_tx_num_in_block_u64
 
-	Receipts = "Receipt" // block_num_u64 + block_hash + tx_index_u32 -> txn receipt
+	ReceiptsCache = "ReceiptCache" // block_num_u64 + block_hash + txn_index_u32 -> rlp(receipt)
 
 	TxLookup = "BlockTransactionLookup" // hash -> transaction/receipt lookup metadata
 
@@ -150,6 +146,7 @@ const (
 	BorEvents               = "BorEvents"                 // event_id -> event_payload
 	BorEventNums            = "BorEventNums"              // block_num -> event_id (last event_id in that block)
 	BorEventProcessedBlocks = "BorEventProcessedBlocks"   // block_num -> block_time, tracks processed blocks in the bridge, used for unwinds and restarts, gets pruned
+	BorEventTimes           = "BorEventTimes"             // timestamp -> event_id
 	BorSpans                = "BorSpans"                  // span_id -> span (in JSON encoding)
 	BorMilestones           = "BorMilestones"             // milestone_id -> milestone (in JSON encoding)
 	BorMilestoneEnds        = "BorMilestoneEnds"          // start block_num -> milestone_id (first block of milestone)
@@ -325,11 +322,10 @@ var ChaindataTables = []string{
 	E2AccountsHistory,
 	E2StorageHistory,
 	Code,
-	ContractCode,
 	HeaderNumber,
 	BadHeaderNumber,
 	BlockBody,
-	Receipts,
+	ReceiptsCache,
 	TxLookup,
 	ConfigTable,
 	DatabaseInfo,
@@ -345,8 +341,6 @@ var ChaindataTables = []string{
 	Migrations,
 	Sequence,
 	EthTx,
-	TrieOfAccounts,
-	TrieOfStorage,
 	HeaderCanonical,
 	Headers,
 	HeaderTD,
@@ -358,6 +352,7 @@ var ChaindataTables = []string{
 	BorEvents,
 	BorEventNums,
 	BorEventProcessedBlocks,
+	BorEventTimes,
 	BorSpans,
 	BorMilestones,
 	BorMilestoneEnds,
@@ -586,6 +581,7 @@ var BorTablesCfg = TableCfg{
 	BorEvents:               {Flags: DupSort},
 	BorEventNums:            {Flags: DupSort},
 	BorEventProcessedBlocks: {Flags: DupSort},
+	BorEventTimes:           {Flags: DupSort},
 	BorSpans:                {Flags: DupSort},
 	BorCheckpoints:          {Flags: DupSort},
 	BorCheckpointEnds:       {Flags: DupSort},
@@ -916,56 +912,6 @@ const (
 	*/
 	E2AccountsHistory = "AccountHistory"
 	E2StorageHistory  = "StorageHistory"
-
-	/*
-	   TrieOfAccounts and TrieOfStorage
-	   hasState,groups - mark prefixes existing in hashed_account table
-	   hasTree - mark prefixes existing in trie_account table (not related with branchNodes)
-	   hasHash - mark prefixes which hashes are saved in current trie_account record (actually only hashes of branchNodes can be saved)
-	   @see UnmarshalTrieNode
-	   @see integrity.Trie
-
-	   +-----------------------------------------------------------------------------------------------------+
-	   | DB record: 0x0B, hasState: 0b1011, hasTree: 0b1001, hasHash: 0b1001, hashes: [x,x]                  |
-	   +-----------------------------------------------------------------------------------------------------+
-
-	   	|                                           |                               |
-	   	v                                           |                               v
-
-	   +---------------------------------------------+             |            +--------------------------------------+
-	   | DB record: 0x0B00, hasState: 0b10001        |             |            | DB record: 0x0B03, hasState: 0b10010 |
-	   | hasTree: 0, hasHash: 0b10000, hashes: [x]   |             |            | hasTree: 0, hasHash: 0, hashes: []   |
-	   +---------------------------------------------+             |            +--------------------------------------+
-
-	   	|                    |                              |                         |                  |
-	   	v                    v                              v                         v                  v
-
-	   +------------------+    +----------------------+     +---------------+        +---------------+  +---------------+
-	   | Account:         |    | BranchNode: 0x0B0004 |     | Account:      |        | Account:      |  | Account:      |
-	   | 0x0B0000...      |    | has no record in     |     | 0x0B01...     |        | 0x0B0301...   |  | 0x0B0304...   |
-	   | in HashedAccount |    |     TrieAccount      |     |               |        |               |  |               |
-	   +------------------+    +----------------------+     +---------------+        +---------------+  +---------------+
-
-	   	                           |                |
-	   	                           v                v
-	   			           +---------------+  +---------------+
-	   			           | Account:      |  | Account:      |
-	   			           | 0x0B000400... |  | 0x0B000401... |
-	   			           +---------------+  +---------------+
-
-	   Invariants:
-	   - hasTree is subset of hasState
-	   - hasHash is subset of hasState
-	   - first level in account_trie always exists if hasState>0
-	   - TrieStorage record of account.root (length=40) must have +1 hash - it's account.root
-	   - each record in TrieAccount table must have parent (may be not direct) and this parent must have correct bit in hasTree bitmap
-	   - if hasState has bit - then HashedAccount table must have record according to this bit
-	   - each TrieAccount record must cover some state (means hasState is always > 0)
-	   - TrieAccount records with length=1 can satisfy (hasBranch==0&&hasHash==0) condition
-	   - Other records in TrieAccount and TrieStorage must (hasTree!=0 || hasHash!=0)
-	*/
-	TrieOfAccounts = "TrieAccount"
-	TrieOfStorage  = "TrieStorage"
 
 	// IncarnationMap for deleted accounts
 	//key - address
