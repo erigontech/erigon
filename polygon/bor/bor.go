@@ -322,8 +322,6 @@ type Bor struct {
 
 	authorizedSigner atomic.Pointer[signer] // Ethereum address and sign function of the signing key
 
-	execCtx context.Context // context of caller execution stage
-
 	spanner         Spanner
 	stateReceiver   StateReceiver
 	HeimdallClient  heimdall.Client
@@ -383,7 +381,6 @@ func New(
 		spanner:         spanner,
 		stateReceiver:   genesisContracts,
 		HeimdallClient:  heimdallClient,
-		execCtx:         context.Background(),
 		logger:          logger,
 		closeCh:         make(chan struct{}),
 		useBridgeReader: bridgeReader != nil && !reflect.ValueOf(bridgeReader).IsNil(), // needed for interface nil caveat
@@ -431,7 +428,6 @@ func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlock
 		logger:      logger,
 		Recents:     recents,
 		Signatures:  signatures,
-		execCtx:     context.Background(),
 		closeCh:     make(chan struct{}),
 	}
 }
@@ -1057,7 +1053,7 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 			}
 
 			// commit states
-			if err := c.CommitStates(state, header, cx, syscall, logger, false); err != nil {
+			if err := c.CommitStates(ctx, header, cx, syscall, logger, false); err != nil {
 				err := fmt.Errorf("Finalize.CommitStates: %w", err)
 				c.logger.Error("[bor] Error while committing states", "err", err)
 				return nil, types.Receipts{}, nil, err
@@ -1123,7 +1119,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 				return nil, nil, types.Receipts{}, nil, err
 			}
 			// commit states
-			if err := c.CommitStates(state, header, cx, syscall, logger, true); err != nil {
+			if err := c.CommitStates(ctx, header, cx, syscall, logger, true); err != nil {
 				err := fmt.Errorf("FinalizeAndAssemble.CommitStates: %w", err)
 				c.logger.Error("[bor] committing states", "err", err)
 				return nil, nil, types.Receipts{}, nil, err
@@ -1554,7 +1550,7 @@ func (c *Bor) getHeaderByNumber(ctx context.Context, tx kv.Tx, number uint64) (*
 
 // CommitStates commit states
 func (c *Bor) CommitStates(
-	state *state.IntraBlockState,
+	ctx context.Context,
 	header *types.Header,
 	chain statefull.ChainContext,
 	syscall consensus.SystemCall,
@@ -1595,12 +1591,12 @@ func (c *Bor) CommitStates(
 				timeTo = time.Unix(int64(prevSprintStart.Time), 0)
 			}
 
-			events, err = c.bridgeReader.EventsWithinTime(c.execCtx, timeFrom, timeTo)
+			events, err = c.bridgeReader.EventsWithinTime(ctx, timeFrom, timeTo)
 			if err != nil {
 				return err
 			}
 		} else {
-			events, err = c.bridgeReader.Events(c.execCtx, blockNum)
+			events, err = c.bridgeReader.Events(ctx, blockNum)
 			if err != nil {
 				return err
 			}
