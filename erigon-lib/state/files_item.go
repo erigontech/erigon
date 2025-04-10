@@ -24,6 +24,8 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/common/dir"
@@ -177,7 +179,7 @@ func (i *filesItem) closeFilesAndRemove() {
 }
 
 func scanDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext string, logger log.Logger) (res []*filesItem) {
-	re := regexp.MustCompile("^v([0-9]+)-" + filenameBase + ".([0-9]+)-([0-9]+)." + ext + "$")
+	re := regexp.MustCompile(`^v(\d+(?:\.\d+)?)-` + filenameBase + `\.(\d+)-(\d+)\.` + ext + `$`)
 	var err error
 
 	for _, name := range fileNames {
@@ -217,17 +219,34 @@ func scanDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext strin
 }
 
 func ParseStepsFromFileName(fileName string) (from, to uint64, err error) {
-	rangeString := strings.Split(fileName, ".")[1]
-	rangeNums := strings.Split(rangeString, "-")
-	// convert the range to uint64
+	parts := strings.Split(fileName, ".")
+	if len(parts) < 2 {
+		return 0, 0, fmt.Errorf("invalid file name format: %s", fileName)
+	}
+
+	var rangePart string
+	// Support both formats: "v1-accounts.32-40.kv" and "v1.0-accounts.32-40.kv"
+	if len(parts) == 3 {
+		rangePart = parts[1]
+	} else {
+		rangePart = parts[len(parts)-2]
+	}
+
+	rangeNums := strings.Split(rangePart, "-")
+	if len(rangeNums) != 2 {
+		return 0, 0, fmt.Errorf("invalid range format in file name: %s", fileName)
+	}
+
 	from, err = strconv.ParseUint(rangeNums[0], 10, 64)
 	if err != nil {
-		return 0, 0, fmt.Errorf("failed to parse to %s: %w", rangeNums[1], err)
+		return 0, 0, fmt.Errorf("failed to parse from %s: %w", rangeNums[0], err)
 	}
+
 	to, err = strconv.ParseUint(rangeNums[1], 10, 64)
 	if err != nil {
 		return 0, 0, fmt.Errorf("failed to parse to %s: %w", rangeNums[1], err)
 	}
+
 	return from, to, nil
 }
 
@@ -373,11 +392,17 @@ func (files visibleFiles) LatestMergedRange() MergeRange {
 
 // fileItemsWithMissingAccessors returns list of files with missing accessors
 // here "accessors" are generated dynamically by `accessorsFor`
-func fileItemsWithMissingAccessors(dirtyFiles *btree2.BTreeG[*filesItem], aggregationStep uint64, accessorsFor func(fromStep, toStep uint64) []string) (l []*filesItem) {
+func fileItemsWithMissingAccessors(dirtyFiles *btree2.BTreeG[*filesItem], aggregationStep uint64, accessorsFor func(fromStep, toStep uint64, isOld bool) []string) (l []*filesItem) {
 	dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/aggregationStep, item.endTxNum/aggregationStep
-			for _, fName := range accessorsFor(fromStep, toStep) {
+			isOld := false
+			if item.decompressor != nil {
+				isOld = snaptype.IsOldFilename(item.decompressor.FileName())
+			} else if item.index != nil {
+				isOld = snaptype.IsOldFilename(item.index.FileName())
+			}
+			for _, fName := range accessorsFor(fromStep, toStep, isOld) {
 				exists, err := dir.FileExist(fName)
 				if err != nil {
 					panic(err)

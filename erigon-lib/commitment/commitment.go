@@ -22,11 +22,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	ecrypto "github.com/erigontech/erigon-lib/crypto"
 	"math/bits"
 	"sort"
 	"strings"
 	"unsafe"
+
+	ecrypto "github.com/erigontech/erigon-lib/crypto"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"

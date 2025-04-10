@@ -35,10 +35,10 @@ This is an embedded file which gets its contents from the [erigon seg repository
 the `well know` hash for a particular segment file in the following format. 
 
 ```toml
-'v1-000000-000100-beaconblocks.seg' = 'eaee23c3db187c8be69e332b4ff50aa73380d0ef'
-'v1-000000-000500-bodies.seg' = 'e9b5c5d1885ee3c6ab6005919e511e1e04c7e34e'
-'v1-000000-000500-headers.seg' = 'df09957d8a28af3bc5137478885a8003677ca878'
-'v1-000000-000500-transactions.seg' = '92bb09068baa8eab9d5ad5e69c1eecd404a82258'
+'v1.0-000000-000100-beaconblocks.seg' = 'eaee23c3db187c8be69e332b4ff50aa73380d0ef'
+'v1.0-000000-000500-bodies.seg' = 'e9b5c5d1885ee3c6ab6005919e511e1e04c7e34e'
+'v1.0-000000-000500-headers.seg' = 'df09957d8a28af3bc5137478885a8003677ca878'
+'v1.0-000000-000500-transactions.seg' = '92bb09068baa8eab9d5ad5e69c1eecd404a82258'
 ```
 
 Where multiple version of files exists there may be several likes per segment and the code in the released Erigon version will select the version that it is interesting.
@@ -70,11 +70,11 @@ This is an internal db table used for managing the state of the download from ei
 
 It contains the following entries
 
-|||
-|----|------|
-| Name | The unqualified name of the file being downloaded.  e.g. `v1-000000-000500-transactions.seg`.  This field is treated as the primary key for the table, there can only be one download per file. |
+||                                                                                                                                                                                                                                                                      |
+|----|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Name | The unqualified name of the file being downloaded.  e.g. `v1.0-000000-000500-transactions.seg`.  This field is treated as the primary key for the table, there can only be one download per file.                                                                    |
 | Hash | The hash of the file being downloaded.  This value can change if the external hash received either from `chain.toml` or `snapshot-lock.json` changes.  If the hash changes the entry is treated as a new download and the `Length` and `Completed` fields are reset. 
-| Length | The length of the file downloaded.  This may be available from the torrent info - but in general is only completed once the file has been downloaded. |
-| Created | The date and time that this record was created, or that the `Hash` field changed, effectively making this a new download. |
-| Completed | This is the date and time that the download was completed.  The presence of a completion date is also used as an indication of completion.  If the field is nil then the download is treated as incomplete |
+| Length | The length of the file downloaded.  This may be available from the torrent info - but in general is only completed once the file has been downloaded.                                                                                                                |
+| Created | The date and time that this record was created, or that the `Hash` field changed, effectively making this a new download.                                                                                                                                            |
+| Completed | This is the date and time that the download was completed.  The presence of a completion date is also used as an indication of completion.  If the field is nil then the download is treated as incomplete                                                           |
 

@@ -56,12 +56,16 @@ func BaseCaseDBForBenchmark(b *testing.B) kv.RwDB {
 	path := b.TempDir()
 	logger := log.New()
 	table := "Table"
-	db := New(kv.ChainDB, logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db := New(kv.ChainDB, logger).Path(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			table:       kv.TableCfgItem{Flags: kv.DupSort},
 			kv.Sequence: kv.TableCfgItem{},
 		}
-	}).MapSize(128 * datasize.MB).MustOpen()
+	}).MapSize(128 * datasize.MB).
+		Flags(func(f uint) uint { return f&^mdbxgo.Durable | mdbxgo.SafeNoSync }).
+		SyncBytes(1 * 1024 * 1024).
+		SyncPeriod(2 * time.Second).
+		MustOpen()
 	b.Cleanup(db.Close)
 	return db
 }
@@ -982,6 +986,28 @@ func BenchmarkDB_Put(b *testing.B) {
 		b.Fatal(err)
 	}
 }
+
+func BenchmarkDB_PutNoSync(b *testing.B) {
+	_db := BaseCaseDBForBenchmark(b)
+	table := "Table"
+	db := _db.(*MdbxKV)
+	keys := make([][]byte, b.N)
+	for i := 1; i <= b.N; i++ {
+		keys[i-1] = u64tob(uint64(i))
+	}
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		// Ensure data is correct.
+		if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+			return tx.Put(table, keys[i], keys[i])
+		}); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// 357732 ns/op
 
 func BenchmarkDB_PutRandom(b *testing.B) {
 	_db := BaseCaseDBForBenchmark(b)

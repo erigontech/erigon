@@ -23,17 +23,18 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"math"
 	"path/filepath"
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
@@ -103,6 +104,8 @@ type histCfg struct {
 
 	//TODO: re-visit this check - maybe we don't need it. It's about kill in the middle of merge
 	integrity rangeIntegrityChecker
+
+	version HistVersionTypes
 }
 
 func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error) {
@@ -126,7 +129,11 @@ func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error
 		if err != nil {
 			panic(err)
 		}
-		return exists
+		existsOld, err := dir.FileExist(h.vFilePathOld(fromStep, toStep))
+		if err != nil {
+			panic(err)
+		}
+		return exists || existsOld
 	}
 
 	var err error
@@ -139,12 +146,23 @@ func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error
 }
 
 func (h *History) vFileName(fromStep, toStep uint64) string {
+	return fmt.Sprintf("%s-%s.%d-%d.v", h.version.DataV.String(), h.filenameBase, fromStep, toStep)
+}
+func (h *History) vFileNameOld(fromStep, toStep uint64) string {
 	return fmt.Sprintf("v1-%s.%d-%d.v", h.filenameBase, fromStep, toStep)
 }
 func (h *History) vFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(h.dirs.SnapHistory, h.vFileName(fromStep, toStep))
 }
+func (h *History) vFilePathOld(fromStep, toStep uint64) string {
+	return filepath.Join(h.dirs.SnapHistory, h.vFileNameOld(fromStep, toStep))
+}
+
 func (h *History) vAccessorFilePath(fromStep, toStep uint64) string {
+	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.vi", h.version.AccessorVI.String(), h.filenameBase, fromStep, toStep))
+}
+
+func (h *History) vAccessorFilePathOld(fromStep, toStep uint64) string {
 	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("v1-%s.%d-%d.vi", h.filenameBase, fromStep, toStep))
 }
 
@@ -159,7 +177,7 @@ func (h *History) openList(idxFiles, histNames []string) error {
 
 	h.closeWhatNotInList(histNames)
 	h.scanDirtyFiles(histNames)
-	if err := h.openDirtyFiles(); err != nil {
+	if err := h.openDirtyFiles(histNames); err != nil {
 		return fmt.Errorf("History(%s).openList: %w", h.filenameBase, err)
 	}
 	return nil
@@ -192,32 +210,59 @@ func (h *History) scanDirtyFiles(fileNames []string) {
 	}
 }
 
-func (h *History) openDirtyFiles() error {
+func (h *History) openDirtyFiles(fNames []string) error {
 	invalidFilesMu := sync.Mutex{}
 	invalidFileItems := make([]*filesItem, 0)
+	stepNameMap := make(map[steps]string, len(fNames))
+	exts := make(map[string]struct{}, len(fNames))
+	for _, filename := range fNames {
+		from, to, err := ParseStepsFromFileName(filename)
+		if err != nil {
+			continue
+		}
+		stepNameMap[steps{from: from, to: to}] = filename
+		exts[filepath.Ext(filename)] = struct{}{}
+	}
+	res := "in hist: " + h.filenameBase
+	for i := range exts {
+		res += "  " + i
+	}
+	println(res)
 	h.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
+			var fPathFull string
+			fPath, ok := stepNameMap[steps{from: fromStep, to: toStep}]
 			if item.decompressor == nil {
-				fPath := h.vFilePath(fromStep, toStep)
-				exists, err := dir.FileExist(fPath)
+				if !ok {
+					h.logger.Debug("[agg] History.openDirtyFiles: file not in map",
+						"from", fromStep, "to", toStep, "ext", ".v", "base", h.filenameBase)
+					invalidFilesMu.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFilesMu.Unlock()
+					continue
+				} else {
+					fPathFull = filepath.Join(h.dirs.SnapHistory, fPath)
+				}
+				exists, err := dir.FileExist(fPathFull)
 				if err != nil {
-					_, fName := filepath.Split(fPath)
-					h.logger.Debug("[agg] History.openDirtyFiles: FileExist", "f", fName, "err", err)
+					_, fName := filepath.Split(fPathFull)
+					h.logger.Debug("[agg] History.openDirtyFiles: FileExist err", "f", fName, "err", err)
 					invalidFilesMu.Lock()
 					invalidFileItems = append(invalidFileItems, item)
 					invalidFilesMu.Unlock()
 					continue
 				}
 				if !exists {
-					_, fName := filepath.Split(fPath)
+					_, fName := filepath.Split(fPathFull)
 					h.logger.Debug("[agg] History.openDirtyFiles: file does not exists", "f", fName)
 					invalidFilesMu.Lock()
 					invalidFileItems = append(invalidFileItems, item)
 					invalidFilesMu.Unlock()
 					continue
 				}
-				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
+
+				if item.decompressor, err = seg.NewDecompressor(fPathFull); err != nil {
 					_, fName := filepath.Split(fPath)
 					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
 						h.logger.Debug("[agg] History.openDirtyFiles", "err", err, "f", fName)
@@ -246,15 +291,17 @@ func (h *History) openDirtyFiles() error {
 			}
 
 			if item.index == nil {
-				fPath := h.vAccessorFilePath(fromStep, toStep)
-				exists, err := dir.FileExist(fPath)
+				fPath = common.ReplaceExt(fPath, ".vi")
+				fPathFull = filepath.Join(h.dirs.SnapHistory, fPath)
+
+				exists, err := dir.FileExist(fPathFull)
 				if err != nil {
-					_, fName := filepath.Split(fPath)
+					_, fName := filepath.Split(fPathFull)
 					h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
 				}
 				if exists {
-					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
-						_, fName := filepath.Split(fPath)
+					if item.index, err = recsplit.OpenIndex(fPathFull); err != nil {
+						_, fName := filepath.Split(fPathFull)
 						h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
 					}
@@ -319,7 +366,12 @@ func (h *History) missedMapAccessors() (l []*filesItem) {
 	if !h.indexList.Has(AccessorHashMap) {
 		return nil
 	}
-	return fileItemsWithMissingAccessors(h.dirtyFiles, h.aggregationStep, func(fromStep, toStep uint64) []string {
+	return fileItemsWithMissingAccessors(h.dirtyFiles, h.aggregationStep, func(fromStep, toStep uint64, isOld bool) []string {
+		if isOld {
+			return []string{
+				h.vAccessorFilePathOld(fromStep, toStep),
+			}
+		}
 		return []string{
 			h.vAccessorFilePath(fromStep, toStep),
 		}
@@ -336,12 +388,15 @@ func (h *History) buildVi(ctx context.Context, item *filesItem, ps *background.P
 	if !ok {
 		return nil
 	}
-
 	if iiItem.decompressor == nil {
 		return fmt.Errorf("buildVI: got iiItem with nil decompressor %s %d-%d", h.filenameBase, item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep)
 	}
 	fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
 	idxPath := h.vAccessorFilePath(fromStep, toStep)
+
+	if snaptype.IsOldFilename(iiItem.decompressor.FileName()) {
+		idxPath = h.vAccessorFilePathOld(fromStep, toStep)
+	}
 
 	_, err = h.buildVI(ctx, idxPath, item.decompressor, iiItem.decompressor, ps)
 	if err != nil {

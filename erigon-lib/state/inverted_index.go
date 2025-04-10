@@ -81,6 +81,8 @@ type iiCfg struct {
 	salt *uint32
 	dirs datadir.Dirs
 
+	version IIVersionTypes
+
 	filenameBase string // filename base for all files of this inverted index
 	keysTable    string // bucket name for index keys;    txnNum_u64 -> key (k+auto_increment)
 	valuesTable  string // bucket name for index values;  k -> txnNum_u64 , Needs to be table with DupSort
@@ -130,10 +132,15 @@ func NewInvertedIndex(cfg iiCfg, aggStep uint64, logger log.Logger) (*InvertedIn
 }
 
 func (ii *InvertedIndex) efAccessorFilePath(fromStep, toStep uint64) string {
+	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.efi", ii.version.AccessorEFI.String(), ii.filenameBase, fromStep, toStep))
+}
+
+func (ii *InvertedIndex) efAccessorFilePathOld(fromStep, toStep uint64) string {
 	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("v1-%s.%d-%d.efi", ii.filenameBase, fromStep, toStep))
 }
+
 func (ii *InvertedIndex) efFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(ii.dirs.SnapIdx, fmt.Sprintf("v1-%s.%d-%d.ef", ii.filenameBase, fromStep, toStep))
+	return filepath.Join(ii.dirs.SnapIdx, fmt.Sprintf("%s-%s.%d-%d.ef", ii.version.DataEF.String(), ii.filenameBase, fromStep, toStep))
 }
 
 func filesFromDir(dir string) ([]string, error) {
@@ -172,7 +179,7 @@ func (ii *InvertedIndex) fileNamesOnDisk() (idx, hist, domain []string, err erro
 func (ii *InvertedIndex) openList(fNames []string) error {
 	ii.closeWhatNotInList(fNames)
 	ii.scanDirtyFiles(fNames)
-	if err := ii.openDirtyFiles(); err != nil {
+	if err := ii.openDirtyFiles(fNames); err != nil {
 		return fmt.Errorf("InvertedIndex(%s).openDirtyFiles: %w", ii.filenameBase, err)
 	}
 	return nil
@@ -221,7 +228,12 @@ func (ii *InvertedIndex) missedMapAccessors() (l []*filesItem) {
 	if !ii.indexList.Has(AccessorHashMap) {
 		return nil
 	}
-	return fileItemsWithMissingAccessors(ii.dirtyFiles, ii.aggregationStep, func(fromStep, toStep uint64) []string {
+	return fileItemsWithMissingAccessors(ii.dirtyFiles, ii.aggregationStep, func(fromStep, toStep uint64, isOld bool) []string {
+		if isOld {
+			return []string{
+				ii.efAccessorFilePathOld(fromStep, toStep),
+			}
+		}
 		return []string{
 			ii.efAccessorFilePath(fromStep, toStep),
 		}
@@ -247,18 +259,49 @@ func (ii *InvertedIndex) BuildMissedAccessors(ctx context.Context, g *errgroup.G
 
 }
 
-func (ii *InvertedIndex) openDirtyFiles() error {
+type steps struct {
+	from uint64
+	to   uint64
+}
+
+func (ii *InvertedIndex) openDirtyFiles(fNames []string) error {
 	var invalidFileItems []*filesItem
 	invalidFileItemsLock := sync.Mutex{}
+	stepNameMap := make(map[steps]string, len(fNames))
+	exts := make(map[string]struct{}, len(fNames))
+	for _, filename := range fNames {
+		from, to, err := ParseStepsFromFileName(filename)
+		if err != nil {
+			continue
+		}
+		exts[filepath.Ext(filename)] = struct{}{}
+		stepNameMap[steps{from: from, to: to}] = filename
+	}
+	res := "in ii: " + ii.filenameBase
+	for i := range exts {
+		res += "  " + i
+	}
+	println(res)
 	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			item := item
 			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
+			var fPathFull string
+			fPath, ok := stepNameMap[steps{from: fromStep, to: toStep}]
+			if !ok {
+				_, fName := filepath.Split(fPath)
+				ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: file not in map", "f", fName)
+				invalidFileItemsLock.Lock()
+				invalidFileItems = append(invalidFileItems, item)
+				invalidFileItemsLock.Unlock()
+				continue
+			} else {
+				fPathFull = filepath.Join(ii.dirs.SnapIdx, fPath)
+			}
 			if item.decompressor == nil {
-				fPath := ii.efFilePath(fromStep, toStep)
-				exists, err := dir.FileExist(fPath)
+				exists, err := dir.FileExist(fPathFull)
 				if err != nil {
-					_, fName := filepath.Split(fPath)
+					_, fName := filepath.Split(fPathFull)
 					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: FileExists error", "f", fName, "err", err)
 					invalidFileItemsLock.Lock()
 					invalidFileItems = append(invalidFileItems, item)
@@ -266,7 +309,7 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 					continue
 				}
 				if !exists {
-					_, fName := filepath.Split(fPath)
+					_, fName := filepath.Split(fPathFull)
 					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: file does not exists", "f", fName)
 					invalidFileItemsLock.Lock()
 					invalidFileItems = append(invalidFileItems, item)
@@ -274,8 +317,8 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 					continue
 				}
 
-				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
-					_, fName := filepath.Split(fPath)
+				if item.decompressor, err = seg.NewDecompressor(fPathFull); err != nil {
+					_, fName := filepath.Split(fPathFull)
 					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
 						ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 					} else {
@@ -290,16 +333,17 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 			}
 
 			if item.index == nil {
-				fPath := ii.efAccessorFilePath(fromStep, toStep)
-				exists, err := dir.FileExist(fPath)
+				fPath = common.ReplaceExt(fPath, ".efi")
+				fPathFull = filepath.Join(ii.dirs.SnapAccessors, fPath)
+				exists, err := dir.FileExist(fPathFull)
 				if err != nil {
-					_, fName := filepath.Split(fPath)
+					_, fName := filepath.Split(fPathFull)
 					ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 					// don't interrupt on error. other files may be good
 				}
 				if exists {
-					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
-						_, fName := filepath.Split(fPath)
+					if item.index, err = recsplit.OpenIndex(fPathFull); err != nil {
+						_, fName := filepath.Split(fPathFull)
 						ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
 					}
@@ -1191,12 +1235,12 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 	//  - but most important i see `.ef` files became "randomly warm":
 	// From:
 	//```sh
-	//vmtouch -v /mnt/erigon/snapshots/idx/v1-storage.1680-1682.ef
+	//vmtouch -v /mnt/erigon/snapshots/idx/v1.0-storage.1680-1682.ef
 	//[ ooooooooo ooooooo oooooooooooooooooo oooooooo  oo o o  ooo ] 93/81397
 	//```
 	// To:
 	//```sh
-	//vmtouch -v /mnt/erigon/snapshots/idx/v1-storage.1680-1682.ef
+	//vmtouch -v /mnt/erigon/snapshots/idx/v1.0-storage.1680-1682.ef
 	//[oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo] 16279/81397
 	//```
 	// It happens because: EVM does read much non-existing keys, like "create storage key if it doesn't exists". And
