@@ -151,35 +151,8 @@ func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailou
 	return NewStateTransition(evm, msg, gp).TransitionDb(refunds, gasBailout)
 }
 
-type EntryPointCall struct {
-	OnEnterSuper tracing.EnterHook
-	Input        []byte
-	From         libcommon.Address
-	Error        error
-}
-
-func (epc *EntryPointCall) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	if epc.OnEnterSuper != nil {
-		epc.OnEnterSuper(depth, typ, from, to, precompile, input, gas, value, code)
-	}
-
-	isRip7560EntryPoint := to.Cmp(types.AA_ENTRY_POINT) == 0
-	if !isRip7560EntryPoint {
-		return
-	}
-
-	if epc.Input != nil {
-		epc.Error = errors.New("illegal repeated call to the EntryPoint callback")
-		return
-	}
-
-	epc.Input = make([]byte, len(input))
-	copy(epc.Input, input)
-	epc.From = from
-}
-
-func ApplyFrame(evm *vm.EVM, msg Message, gp *GasPool, validateFrame func(ibs evmtypes.IntraBlockState, epc *EntryPointCall) error) (*evmtypes.ExecutionResult, error) {
-	return NewStateTransition(evm, msg, gp).ApplyFrame(validateFrame)
+func ApplyFrame(evm *vm.EVM, msg Message, gp *GasPool) (*evmtypes.ExecutionResult, error) {
+	return NewStateTransition(evm, msg, gp).ApplyFrame()
 }
 
 // to returns the recipient of the message.
@@ -340,7 +313,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 	return st.buyGas(gasBailout)
 }
 
-func (st *StateTransition) ApplyFrame(validateFrame func(ibs evmtypes.IntraBlockState, epc *EntryPointCall) error) (*evmtypes.ExecutionResult, error) {
+func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	coinbase := st.evm.Context.Coinbase
 	senderInitBalance, err := st.state.GetBalance(st.msg.From())
 	if err != nil {
@@ -352,12 +325,6 @@ func (st *StateTransition) ApplyFrame(validateFrame func(ibs evmtypes.IntraBlock
 		return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 	}
 	coinbaseInitBalance = coinbaseInitBalance.Clone()
-
-	epc := &EntryPointCall{OnEnterSuper: st.evm.Config().Tracer.OnEnter}
-	st.state.SetHooks(&tracing.Hooks{
-		OnEnter: epc.OnEnter,
-	})
-	st.evm.Config().Tracer.OnEnter = epc.OnEnter
 
 	msg := st.msg
 	sender := vm.AccountRef(msg.From())
@@ -480,12 +447,6 @@ func (st *StateTransition) ApplyFrame(validateFrame func(ibs evmtypes.IntraBlock
 
 	if st.evm.Context.PostApplyMessage != nil {
 		st.evm.Context.PostApplyMessage(st.state, msg.From(), coinbase, result)
-	}
-
-	if validateFrame != nil {
-		if err := validateFrame(st.state, epc); err != nil {
-			return nil, err
-		}
 	}
 
 	return result, nil
