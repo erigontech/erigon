@@ -85,7 +85,7 @@ import (
 }*/
 
 var bucketLabels = map[string]string{
-	kv.Receipts:                 "Receipts",
+	kv.ReceiptsCache:            "Receipts",
 	kv.Headers:                  "Headers",
 	kv.HeaderCanonical:          "Canonical headers",
 	kv.HeaderTD:                 "Headers TD",

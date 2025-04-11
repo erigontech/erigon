@@ -81,6 +81,7 @@ func TestLegacyReceiptDecoding(t *testing.T) {
 		TxHash:          tx.Hash(),
 		ContractAddress: libcommon.BytesToAddress([]byte{0x01, 0x11, 0x11}),
 		GasUsed:         111111,
+		BlockNumber:     big.NewInt(1),
 	}
 	receipt.Bloom = CreateBloom(Receipts{receipt})
 

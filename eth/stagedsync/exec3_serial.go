@@ -58,8 +58,6 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 				se.blobGasUsed += txTask.Tx.GetBlobGas()
 			}
 
-			txTask.CreateReceipt(se.applyTx)
-
 			if txTask.Final {
 				if !se.isMining && !se.skipPostEvaluation && !se.execStage.CurrentSyncCycle.IsInitialCycle {
 					// note this assumes the bloach reciepts is a fixed array shared by
