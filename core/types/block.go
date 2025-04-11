@@ -38,13 +38,15 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 )
 
+const (
+	ExtraVanityLength = 32 // Fixed number of extra-data prefix bytes reserved for signer vanity
+	ExtraSealLength   = 65 // Fixed number of extra-data suffix bytes reserved for signer seal
+)
+
 var (
 	EmptyRootHash     = libcommon.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 	EmptyRequestsHash = libcommon.HexToHash("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855") // sha256.Sum256([]byte(""))
 	EmptyUncleHash    = rlpHash([]*Header(nil))
-
-	ExtraVanityLength = 32 // Fixed number of extra-data prefix bytes reserved for signer vanity
-	ExtraSealLength   = 65 // Fixed number of extra-data suffix bytes reserved for signer seal
 )
 
 // A BlockNonce is a 64-bit hash which proves (combined with the
