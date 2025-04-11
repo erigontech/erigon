@@ -447,13 +447,13 @@ func (s *torrentSession) Download(ctx context.Context, files ...string) error {
 			case <-t.GotInfo():
 			}
 
-			if !t.Complete.Bool() {
+			if !t.Complete().Bool() {
 				t.AllowDataDownload()
 				t.DownloadAll()
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
-				case <-t.Complete.On():
+				case <-t.Complete().On():
 				}
 			}
 
