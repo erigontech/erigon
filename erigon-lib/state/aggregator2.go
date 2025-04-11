@@ -184,3 +184,10 @@ var Schema = map[kv.Domain]domainCfg{
 		},
 	},
 }
+
+func EnableHistoricalCommitment() {
+	cfg := Schema[kv.CommitmentDomain]
+	cfg.hist.historyDisabled = false
+	cfg.hist.snapshotsDisabled = false
+	Schema[kv.CommitmentDomain] = cfg
+}

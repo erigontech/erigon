@@ -84,10 +84,11 @@ var DefaultFlags = []cli.Flag{
 	&utils.RpcBatchLimit,
 	&utils.RpcReturnDataLimit,
 	&utils.AllowUnprotectedTxs,
-	&utils.RpcMaxGetProofRewindBlockCount,
 	&utils.RPCGlobalTxFeeCapFlag,
 	&utils.TxpoolApiAddrFlag,
 	&utils.TraceMaxtracesFlag,
+	&utils.KeepExecutionProofsFlag,
+
 	&HTTPReadTimeoutFlag,
 	&HTTPWriteTimeoutFlag,
 	&HTTPIdleTimeoutFlag,
