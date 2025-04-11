@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -57,6 +58,9 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 	w.Header().Set("Connection", "keep-alive")
 
 	topics := r.URL.Query()["topics"]
+	if len(topics) > 0 {
+		topics = strings.Split(topics[0], ",")
+	}
 	subscribeTopics := mapset.NewSet[event.EventTopic]()
 	for _, v := range topics {
 		topic := event.EventTopic(v)
