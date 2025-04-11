@@ -1879,7 +1879,6 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 			fmt.Printf("keep downHasheKey=[%x]\n", cell.hashedExtension[:cell.hashedExtLen])
 		}
 	}
-
 	if len(plainKey) == hph.accountKeyLen {
 		hph.currentCommitmentMetrics.AddressKeys.Add(1)
 		cell.accountAddrLen = len(plainKey)

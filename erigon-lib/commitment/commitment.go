@@ -22,11 +22,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	ecrypto "github.com/erigontech/erigon-lib/crypto"
 	"math/bits"
 	"sort"
 	"strings"
 	"unsafe"
+
+	ecrypto "github.com/erigontech/erigon-lib/crypto"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -189,6 +190,7 @@ func (be *BranchEncoder) CollectUpdate(
 	bitmap, touchMap, afterMap uint16,
 	readCell func(nibble int, skip bool) (*cell, error),
 ) (lastNibble int, err error) {
+
 	prev, prevStep, err := ctx.Branch(prefix)
 	if err != nil {
 		return 0, err

@@ -11,11 +11,15 @@ import (
 	"time"
 )
 
+/*
+ERIGON_COMMITMENT_TRACE - file path to write commitment metrics
+ERIGON_COMMITMENT_ACCOUNT_TRACE - file path to write account metrics
+*/
 func init() {
 	commitmentMetricsFile = os.Getenv("ERIGON_COMMITMENT_TRACE")
-	accountMetricsFile = os.Getenv("ERIGON_ACCOUNT_COMMITMENT_TRACE")
+	accountMetricsFile = os.Getenv("ERIGON_COMMITMENT_ACCOUNT_TRACE")
 	collectCommitmentMetrics = os.Getenv("ERIGON_COMMITMENT_TRACE") != ""
-	collectAccountMetrics = os.Getenv("ERIGON_ACCOUNT_COMMITMENT_TRACE") != ""
+	collectAccountMetrics = os.Getenv("ERIGON_COMMITMENT_ACCOUNT_TRACE") != ""
 }
 
 var (
@@ -43,45 +47,6 @@ type ProcessCommitment struct {
 	TotalUnfoldingTime  time.Duration
 	TotalFoldingTime    time.Duration
 	TotalProcessingTime time.Duration
-}
-
-func (processCommitment *ProcessCommitment) Now() time.Time {
-	if collectCommitmentMetrics {
-		return time.Now()
-	}
-	return time.Time{}
-}
-
-func (ProcessCommitment *ProcessCommitment) TotalUnfoldingTimeInc(t time.Time) {
-	if collectCommitmentMetrics {
-		ProcessCommitment.TotalUnfoldingTime += time.Since(t)
-	}
-}
-
-func (ProcessCommitment *ProcessCommitment) TotalProcessingTimeInc(t time.Time) {
-	if collectCommitmentMetrics {
-		ProcessCommitment.TotalProcessingTime += time.Since(t)
-	}
-}
-
-func (ProcessCommitment *ProcessCommitment) TotalFoldingTimeInc(t time.Time) {
-	if collectCommitmentMetrics {
-		ProcessCommitment.TotalFoldingTime += time.Since(t)
-	}
-}
-
-func (processCommitment *ProcessCommitment) Reset() {
-	processCommitment.Updates.Store(0)
-	processCommitment.AddressKeys.Store(0)
-	processCommitment.StorageKeys.Store(0)
-	processCommitment.LoadBranch.Store(0)
-	processCommitment.LoadAccount.Store(0)
-	processCommitment.LoadStorage.Store(0)
-	processCommitment.UpdateBranch.Store(0)
-	processCommitment.Unfolds.Store(0)
-	processCommitment.TotalUnfoldingTime = 0
-	processCommitment.TotalFoldingTime = 0
-	processCommitment.TotalProcessingTime = 0
 }
 
 func (processCommitment *ProcessCommitment) Headers() []string {
@@ -118,6 +83,45 @@ func (processCommitment *ProcessCommitment) Values() [][]string {
 	}
 }
 
+func (processCommitment *ProcessCommitment) Reset() {
+	processCommitment.Updates.Store(0)
+	processCommitment.AddressKeys.Store(0)
+	processCommitment.StorageKeys.Store(0)
+	processCommitment.LoadBranch.Store(0)
+	processCommitment.LoadAccount.Store(0)
+	processCommitment.LoadStorage.Store(0)
+	processCommitment.UpdateBranch.Store(0)
+	processCommitment.Unfolds.Store(0)
+	processCommitment.TotalUnfoldingTime = 0
+	processCommitment.TotalFoldingTime = 0
+	processCommitment.TotalProcessingTime = 0
+}
+
+func (processCommitment *ProcessCommitment) Now() time.Time {
+	if collectCommitmentMetrics {
+		return time.Now()
+	}
+	return time.Time{}
+}
+
+func (ProcessCommitment *ProcessCommitment) TotalUnfoldingTimeInc(t time.Time) {
+	if collectCommitmentMetrics {
+		ProcessCommitment.TotalUnfoldingTime += time.Since(t)
+	}
+}
+
+func (ProcessCommitment *ProcessCommitment) TotalProcessingTimeInc(t time.Time) {
+	if collectCommitmentMetrics {
+		ProcessCommitment.TotalProcessingTime += time.Since(t)
+	}
+}
+
+func (ProcessCommitment *ProcessCommitment) TotalFoldingTimeInc(t time.Time) {
+	if collectCommitmentMetrics {
+		ProcessCommitment.TotalFoldingTime += time.Since(t)
+	}
+}
+
 type AccountStats struct {
 	AccountUpdates     uint64
 	StorageUpates      uint64
@@ -129,15 +133,10 @@ type AccountStats struct {
 	Folds              uint64
 	TotalFoldingTime   time.Duration
 }
+
 type ProcessAcount struct {
 	m            sync.Mutex
 	AccountStats map[string]*AccountStats
-}
-
-func (processAccount *ProcessAcount) Reset() {
-	processAccount.m.Lock()
-	defer processAccount.m.Unlock()
-	processAccount.AccountStats = make(map[string]*AccountStats)
 }
 
 func (processAccount *ProcessAcount) Headers() []string {
@@ -176,6 +175,12 @@ func (processAccount *ProcessAcount) Values() [][]string {
 		ind++
 	}
 	return values
+}
+
+func (processAccount *ProcessAcount) Reset() {
+	processAccount.m.Lock()
+	defer processAccount.m.Unlock()
+	processAccount.AccountStats = make(map[string]*AccountStats)
 }
 
 func (processAccount *ProcessAcount) UpdatesInc(plainKey []byte) {
