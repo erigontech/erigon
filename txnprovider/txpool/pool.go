@@ -84,7 +84,7 @@ type Pool interface {
 	FilterKnownIdHashes(tx kv.Tx, hashes Hashes) (unknownHashes Hashes, err error)
 	Started() bool
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
-
+	GetBlobs(blobhashes []common.Hash) ([][]byte, [][]byte)
 	AddNewGoodPeer(peerID PeerID)
 }
 
@@ -151,6 +151,10 @@ type TxPool struct {
 	builderNotifyNewTxns    func()
 	logger                  log.Logger
 	auths                   map[common.Address]*metaTxn // All accounts with a pooled authorization
+	blobHashToTxn           map[common.Hash]struct {
+		index   int
+		txnHash common.Hash
+	}
 }
 
 type FeeCalculator interface {
@@ -228,6 +232,10 @@ func New(
 		newSlotsStreams:         newSlotsStreams,
 		logger:                  logger,
 		auths:                   map[common.Address]*metaTxn{},
+		blobHashToTxn: map[common.Hash]struct {
+			index   int
+			txnHash common.Hash
+		}{},
 	}
 
 	if shanghaiTime != nil {
@@ -423,22 +431,6 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 
 	if err = p.removeMined(p.all, minedTxns.Txns); err != nil {
 		return err
-	}
-
-	// remove auths from pool map
-	for _, mt := range minedTxns.Txns {
-		if mt.Type == SetCodeTxnType {
-			numAuths := len(mt.AuthRaw)
-			for i := range numAuths {
-				signature := mt.Authorizations[i]
-				signer, err := types.RecoverSignerFromRLP(mt.AuthRaw[i], uint8(signature.V.Uint64()), signature.R, signature.S)
-				if err != nil {
-					continue
-				}
-
-				delete(p.auths, *signer)
-			}
-		}
 	}
 
 	var announcements Announcements
@@ -756,7 +748,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 		// make sure we have enough gas in the caller to add this transaction.
 		// not an exact science using intrinsic gas but as close as we could hope for at
 		// this stage
-		authorizationLen := uint64(len(mt.TxnSlot.Authorizations))
+		authorizationLen := uint64(len(mt.TxnSlot.Authorities))
 		intrinsicGas, floorGas, _ := fixedgas.CalcIntrinsicGas(uint64(mt.TxnSlot.DataLen), uint64(mt.TxnSlot.DataNonZeroLen), authorizationLen, uint64(mt.TxnSlot.AccessListAddrCount), uint64(mt.TxnSlot.AccessListStorCount), mt.TxnSlot.Creation, true, true, isShanghai, isPrague)
 		if isPrague && floorGas > intrinsicGas {
 			intrinsicGas = floorGas
@@ -915,7 +907,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 	}
 
-	authorizationLen := len(txn.Authorizations)
+	authorizationLen := len(txn.Authorities)
 	if txn.Type == SetCodeTxnType {
 		if !p.isPrague() {
 			return txpoolcfg.TypeNotActivated
@@ -1417,8 +1409,8 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		}
 		priceBump := p.cfg.PriceBump
 
-		//Blob txn threshold checks for replace txn
 		if mt.TxnSlot.Type == BlobTxnType {
+			//Blob txn threshold checks for replace txn
 			priceBump = p.cfg.BlobPriceBump
 			blobFeeThreshold, overflow := (&uint256.Int{}).MulDivOverflow(
 				&found.TxnSlot.BlobFeeCap,
@@ -1431,6 +1423,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 				}
 				return txpoolcfg.ReplaceUnderpriced // TODO: This is the same as NotReplaced
 			}
+
 		}
 
 		//Regular txn threshold checks
@@ -1471,31 +1464,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		return txpoolcfg.FeeTooLow
 	}
 
-	// Check if we have txn with same authorization in the pool
-	if mt.TxnSlot.Type == SetCodeTxnType {
-		numAuths := len(mt.TxnSlot.AuthRaw)
-		foundDuplicate := false
-		for i := range numAuths {
-			signature := mt.TxnSlot.Authorizations[i]
-			signer, err := types.RecoverSignerFromRLP(mt.TxnSlot.AuthRaw[i], uint8(signature.V.Uint64()), signature.R, signature.S)
-			if err != nil {
-				continue
-			}
-
-			if _, ok := p.auths[*signer]; ok {
-				foundDuplicate = true
-				break
-			}
-
-			p.auths[*signer] = mt
-		}
-
-		if foundDuplicate {
-			return txpoolcfg.ErrAuthorityReserved
-		}
-	}
-
-	// Do not allow transaction from reserved authority
+	// Do not allow transaction from if sender has authority
 	addr, ok := p.senders.getAddr(mt.TxnSlot.SenderID)
 	if !ok {
 		p.logger.Info("senderID not registered, discarding transaction for safety")
@@ -1503,6 +1472,27 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 	}
 	if _, ok := p.auths[addr]; ok {
 		return txpoolcfg.ErrAuthorityReserved
+	}
+
+	// Check if we have txn with same authorization in the pool
+	if mt.TxnSlot.Type == SetCodeTxnType {
+		foundDuplicate := false
+		for _, a := range mt.TxnSlot.Authorities {
+			p.logger.Debug("setCodeTxn ", "authority", a.String())
+			if _, ok := p.auths[*a]; ok {
+				foundDuplicate = true
+				p.logger.Debug("setCodeTxn ", "DUPLICATE authority", a.String(), "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
+				break
+			}
+		}
+
+		if foundDuplicate {
+			return txpoolcfg.ErrAuthorityReserved
+		} else {
+			for _, a := range mt.TxnSlot.Authorities {
+				p.auths[*a] = mt
+			}
+		}
 	}
 
 	hashStr := string(mt.TxnSlot.IDHash[:])
@@ -1522,6 +1512,12 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 	if mt.TxnSlot.Type == BlobTxnType {
 		t := p.totalBlobsInPool.Load()
 		p.totalBlobsInPool.Store(t + (uint64(len(mt.TxnSlot.BlobHashes))))
+		for i, b := range mt.TxnSlot.BlobHashes {
+			p.blobHashToTxn[b] = struct {
+				index   int
+				txnHash common.Hash
+			}{i, mt.TxnSlot.IDHash}
+		}
 	}
 
 	// Remove from mined cache as we are now "resurrecting" it to a sub-pool
@@ -1542,17 +1538,34 @@ func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
 		p.totalBlobsInPool.Store(t - uint64(len(mt.TxnSlot.BlobHashes)))
 	}
 	if mt.TxnSlot.Type == SetCodeTxnType {
-		numAuths := len(mt.TxnSlot.AuthRaw)
-		for i := range numAuths {
-			signature := mt.TxnSlot.Authorizations[i]
-			signer, err := types.RecoverSignerFromRLP(mt.TxnSlot.AuthRaw[i], uint8(signature.V.Uint64()), signature.R, signature.S)
-			if err != nil {
-				continue
-			}
-
-			delete(p.auths, *signer)
+		for _, a := range mt.TxnSlot.Authorities {
+			delete(p.auths, *a)
 		}
 	}
+}
+
+func (p *TxPool) getBlobsAndProofByBlobHashLocked(blobHashes []common.Hash) ([][]byte, [][]byte) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	blobs := make([][]byte, len(blobHashes))
+	proofs := make([][]byte, len(blobHashes))
+	for i, h := range blobHashes {
+		th, ok := p.blobHashToTxn[h]
+		if !ok {
+			continue
+		}
+		mt, ok := p.byHash[string(th.txnHash[:])]
+		if !ok || mt == nil {
+			continue
+		}
+		blobs[i] = mt.TxnSlot.Blobs[th.index]
+		proofs[i] = mt.TxnSlot.Proofs[th.index][:]
+	}
+	return blobs, proofs
+}
+
+func (p *TxPool) GetBlobs(blobHashes []common.Hash) ([][]byte, [][]byte) {
+	return p.getBlobsAndProofByBlobHashLocked(blobHashes)
 }
 
 // Cache recently mined blobs in anticipation of reorg, delete finalized ones

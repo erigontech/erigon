@@ -20,11 +20,12 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/erigontech/erigon-lib/state"
-	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 	"math"
 	"math/big"
 	"testing"
+
+	"github.com/erigontech/erigon-lib/state"
+	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
@@ -46,7 +47,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/types/typestest"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
@@ -270,38 +270,38 @@ func TestMultipleAuthorizations(t *testing.T) {
 
 	logger := log.New()
 
-	// txn with existing authorization should not be accepted
+	// a new txn with authority same as one in an existing authorization should not be accepted
 	{
 		var txnSlots TxnSlots
 		txnSlot1 := &TxnSlot{
-			Tip:            *uint256.NewInt(300000),
-			FeeCap:         *uint256.NewInt(300000),
-			Gas:            100000,
-			Nonce:          0,
-			Authorizations: []Signature{auth},
-			AuthRaw:        [][]byte{data.Bytes()},
-			Type:           SetCodeTxnType,
+			Tip:         *uint256.NewInt(300000),
+			FeeCap:      *uint256.NewInt(300000),
+			Gas:         100000,
+			Nonce:       0,
+			Authorities: []*common.Address{&authAddress},
+			Type:        SetCodeTxnType,
 		}
 		txnSlot1.IDHash[0] = 1
 		txnSlots.Append(txnSlot1, addr1[:], true)
+		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
+		require.NoError(t, err)
+		assert.Equal(t, reasons, []txpoolcfg.DiscardReason{txpoolcfg.Success})
 
+		txnSlots = TxnSlots{}
 		txnSlot2 := &TxnSlot{
-			Tip:            *uint256.NewInt(300000),
-			FeeCap:         *uint256.NewInt(300000),
-			Gas:            100000,
-			Nonce:          0,
-			Authorizations: []Signature{auth},
-			AuthRaw:        [][]byte{data.Bytes()},
-			Type:           SetCodeTxnType,
+			Tip:         *uint256.NewInt(300000),
+			FeeCap:      *uint256.NewInt(300000),
+			Gas:         100000,
+			Nonce:       0,
+			Authorities: []*common.Address{&authAddress},
+			Type:        SetCodeTxnType,
 		}
 		txnSlot2.IDHash[0] = 2
 		txnSlots.Append(txnSlot2, addr2[:], true)
-
-		assert.NoError(t, pool.senders.registerNewSenders(&txnSlots, logger))
-
-		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
-		assert.NoError(t, err)
-		assert.Equal(t, reasons, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.ErrAuthorityReserved})
+		require.NoError(t, pool.senders.registerNewSenders(&txnSlots, logger))
+		reasons, err = pool.AddLocalTxns(ctx, txnSlots)
+		require.NoError(t, err)
+		assert.Equal(t, reasons, []txpoolcfg.DiscardReason{txpoolcfg.ErrAuthorityReserved})
 
 		assert.Len(t, pool.auths, 1) // auth address should be in pool auth
 		_, ok := pool.auths[authAddress]
@@ -317,13 +317,12 @@ func TestMultipleAuthorizations(t *testing.T) {
 	{
 		var txnSlots TxnSlots
 		txnSlot1 := &TxnSlot{
-			Tip:            *uint256.NewInt(300000),
-			FeeCap:         *uint256.NewInt(300000),
-			Gas:            100000,
-			Nonce:          1,
-			Authorizations: []Signature{auth},
-			AuthRaw:        [][]byte{data.Bytes()},
-			Type:           SetCodeTxnType,
+			Tip:         *uint256.NewInt(300000),
+			FeeCap:      *uint256.NewInt(300000),
+			Gas:         100000,
+			Nonce:       1,
+			Authorities: []*common.Address{&authAddress},
+			Type:        SetCodeTxnType,
 		}
 		txnSlot1.IDHash[0] = 3
 		txnSlots.Append(txnSlot1, addr1[:], true)
@@ -335,13 +334,12 @@ func TestMultipleAuthorizations(t *testing.T) {
 
 		txnSlots = TxnSlots{}
 		txnSlot2 := &TxnSlot{
-			Tip:            *uint256.NewInt(900000),
-			FeeCap:         *uint256.NewInt(900000),
-			Gas:            100000,
-			Nonce:          1,
-			Authorizations: []Signature{auth},
-			AuthRaw:        [][]byte{data.Bytes()},
-			Type:           SetCodeTxnType,
+			Tip:         *uint256.NewInt(900000),
+			FeeCap:      *uint256.NewInt(900000),
+			Gas:         100000,
+			Nonce:       1,
+			Authorities: []*common.Address{&authAddress},
+			Type:        SetCodeTxnType,
 		}
 		txnSlot2.IDHash[0] = 4
 		txnSlots.Append(txnSlot2, addr1[:], true)
@@ -356,17 +354,16 @@ func TestMultipleAuthorizations(t *testing.T) {
 		assert.NoError(t, err)
 	}
 
-	// do not allow transactions from delegated addresses
+	// do not allow transactions from a sender if there is a pending delegated txn its authority
 	{
 		var txnSlots TxnSlots
 		txnSlot1 := &TxnSlot{
-			Tip:            *uint256.NewInt(300000),
-			FeeCap:         *uint256.NewInt(300000),
-			Gas:            100000,
-			Nonce:          1,
-			Authorizations: []Signature{auth},
-			AuthRaw:        [][]byte{data.Bytes()},
-			Type:           SetCodeTxnType,
+			Tip:         *uint256.NewInt(300000),
+			FeeCap:      *uint256.NewInt(300000),
+			Gas:         100000,
+			Nonce:       1,
+			Authorities: []*common.Address{&authAddress},
+			Type:        SetCodeTxnType,
 		}
 		txnSlot1.IDHash[0] = 5
 		txnSlots.Append(txnSlot1, addr1[:], true)
@@ -1065,16 +1062,13 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	assert.NoError(t, err)
 
 	txn := &TxnSlot{
-		FeeCap:         *uint256.NewInt(21000),
-		Gas:            500000,
-		SenderID:       0,
-		Type:           SetCodeTxnType,
-		Authorizations: make([]Signature, 1),
+		FeeCap:      *uint256.NewInt(21000),
+		Gas:         500000,
+		SenderID:    0,
+		Type:        SetCodeTxnType,
+		Authorities: make([]*common.Address, 1),
 	}
-	txn.Authorizations[0].ChainID = chainID
-	txn.Authorizations[0].V.Set(maxUint256)
-	txn.Authorizations[0].R.Set(maxUint256)
-	txn.Authorizations[0].S.Set(maxUint256)
+	txn.Authorities[0] = &common.Address{}
 
 	txns := TxnSlots{
 		Txns:    append([]*TxnSlot{}, txn),
@@ -1252,7 +1246,7 @@ func TestBlobTxnReplacement(t *testing.T) {
 
 // Todo, make the txn more realistic with good values
 func makeBlobTxn() TxnSlot {
-	wrapperRlp, commitments := typestest.MakeBlobTxnRlp()
+	wrapperRlp, commitments := types.MakeBlobTxnRlp()
 	commitment0 := commitments[0]
 	commitment1 := commitments[1]
 	tip, feeCap, blobFeeCap := uint256.NewInt(100_000), uint256.NewInt(200_000), uint256.NewInt(200_000)
@@ -1463,6 +1457,84 @@ func TestBlobSlots(t *testing.T) {
 	for _, reason := range reasons {
 		assert.Equal(txpoolcfg.BlobPoolOverflow, reason, reason.String())
 	}
+}
+
+func TestGetBlobsV1(t *testing.T) {
+	assert, require := assert.New(t), require.New(t)
+	ch := make(chan Announcements, 5)
+	coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db := memdb.NewTestPoolDB(t)
+	cfg := txpoolcfg.DefaultConfig
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	//Setting limits for blobs in the pool
+	cfg.TotalBlobPoolLimit = 20
+
+	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0, nil, common.Big0, nil, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
+	assert.NoError(err)
+	require.True(pool != nil)
+	pool.blockGasLimit.Store(30000000)
+	var stateVersionID uint64 = 0
+
+	h1 := gointerfaces.ConvertHashToH256([32]byte{})
+	change := &remote.StateChangeBatch{
+		StateVersionId:       stateVersionID,
+		PendingBlockBaseFee:  200_000,
+		BlockGasLimit:        math.MaxUint64,
+		PendingBlobFeePerGas: 100_000,
+		ChangeBatch: []*remote.StateChange{
+			{BlockHeight: 0, BlockHash: h1},
+		},
+	}
+	var addr [20]byte
+
+	// Add 1 eth to the user account, as a part of change
+	acc := accounts3.Account{
+		Nonce:       0,
+		Balance:     *uint256.NewInt(1 * common.Ether),
+		CodeHash:    common.Hash{},
+		Incarnation: 1,
+	}
+	v := accounts3.SerialiseV3(&acc)
+
+	for i := 0; i < 11; i++ {
+		addr[0] = uint8(i + 1)
+		change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
+			Action:  remote.Action_UPSERT,
+			Address: gointerfaces.ConvertAddressToH160(addr),
+			Data:    v,
+		})
+	}
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	assert.NoError(err)
+	blobHashes := make([]common.Hash, 0, 20)
+
+	//Adding 2 blobs with 1 txn
+	txnSlots := TxnSlots{}
+	addr[0] = uint8(1)
+	blobTxn := makeBlobTxn() // makes a txn with 2 blobs
+	blobTxn.IDHash[0] = uint8(3)
+	blobTxn.Nonce = 0
+	blobTxn.Gas = 50000
+	txnSlots.Append(&blobTxn, addr[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txnSlots)
+	assert.NoError(err)
+	for _, reason := range reasons {
+		assert.Equal(txpoolcfg.Success, reason, reason.String())
+	}
+	blobHashes = append(blobHashes, blobTxn.BlobHashes...)
+
+	blobs, proofs := pool.GetBlobs(blobHashes)
+	require.True(len(blobs) == len(blobHashes))
+	require.True(len(proofs) == len(blobHashes))
+	assert.Equal(blobTxn.Blobs, blobs)
+	assert.Equal(blobTxn.Proofs[0][:], proofs[0])
+	assert.Equal(blobTxn.Proofs[1][:], proofs[1])
 }
 
 func TestGasLimitChanged(t *testing.T) {
