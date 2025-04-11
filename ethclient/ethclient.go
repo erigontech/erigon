@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
 )
 
 // TaikoClient defines typed wrappers for the Ethereum RPC API.
@@ -199,11 +200,12 @@ func (ec *Client) getBlock(ctx context.Context, method string, args ...interface
 	}
 	// Fill the sender cache of transactions in the block.
 	txs := make([]types.Transaction, len(body.Transactions))
-	for i, tx := range body.Transactions {
-		if tx.From != nil {
-			setSenderFromServer(tx.tx, *tx.From, body.Hash)
+	for i, rpcTx := range body.Transactions {
+		from, ok := rpcTx.tx.GetSender()
+		if ok {
+			setSenderFromServer(rpcTx.tx, from, body.Hash)
 		}
-		txs[i] = tx.tx
+		txs[i] = rpcTx.tx
 	}
 
 	return types.NewBlockWithHeader(head).WithBody(
@@ -260,8 +262,21 @@ type txExtraInfo struct {
 }
 
 func (tx *rpcTransaction) UnmarshalJSON(msg []byte) error {
-	if err := json.Unmarshal(msg, &tx.tx); err != nil {
+	var rpcTxn ethapi.RPCTransaction
+	if err := json.Unmarshal(msg, &rpcTxn); err != nil {
 		return err
+	}
+	switch rpcTxn.Type {
+	case types.LegacyTxType:
+		var legacyTx types.LegacyTx
+		err := json.Unmarshal(msg, &legacyTx)
+		if err != nil {
+			return err
+		}
+		tx.tx = &legacyTx
+	default:
+		return errors.New("unexpected transaction type")
+
 	}
 	return json.Unmarshal(msg, &tx.txExtraInfo)
 }

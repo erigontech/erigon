@@ -239,16 +239,6 @@ func newBackend(nodeCfg *nodecfg.Config, ethCfg *ethconfig.Config, logger log.Lo
 	if err != nil {
 		return nil, nil, err
 	}
-	// if _, err := ethservice.BlockChain().InsertChain(blocks[1:]); err != nil {
-	// 	return nil, nil, fmt.Errorf("can't import test blocks: %v", err)
-	// }
-	// Ensure the tx indexing is fully generated
-	// for ; ; time.Sleep(time.Millisecond * 100) {
-	// 	progress, err := ethservice.BlockChain().TxIndexProgress()
-	// 	if err == nil && progress.Done() {
-	// 		break
-	// 	}
-	// }
 	return ethservice, chain, nil
 }
 
@@ -271,9 +261,9 @@ func TestEthClient(t *testing.T) {
 		"BalanceAt": {
 			func(t *testing.T) { testBalanceAt(t, client) },
 		},
-		// "TxInBlockInterrupted": {
-		// 	func(t *testing.T) { testTransactionInBlock(t, client) },
-		// },
+		"TxInBlockInterrupted": {
+			func(t *testing.T) { testTransactionInBlock(t, client) },
+		},
 		// "ChainID": {
 		// 	func(t *testing.T) { testChainID(t, client) },
 		// },
