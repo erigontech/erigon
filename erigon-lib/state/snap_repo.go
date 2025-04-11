@@ -30,8 +30,9 @@ type SnapshotRepo struct {
 	dirtyFiles *btree2.BTreeG[*filesItem]
 
 	// latest version of visible files (derived from dirtyFiles)
-	// when repo is used in the context of rotx, one might want to think if
-	// if it's the repo.current that needs to be used or rotx.visibleFiles etc.
+	// when repo is used in the context of rotx, one might want to think
+	// about which visibleFiles needs to be used - repo.current or
+	// rotx.visibleFiles
 	current visibleFiles
 	name    string
 
@@ -191,14 +192,9 @@ func (f *SnapshotRepo) Garbage(visibleFiles []visibleFile, merged *filesItem) (o
 	return outs
 }
 
-// TODO: merge related methods....
-// FindMergeRange(maxEndRootNum) -> MergeRange
-// FilesInRange(MergeRange) -> []*filesItem
-// IntegrateMergeDirtyFiles + recalcVisibleFiles
-// cleanAfterMerge
-// integrityChecks (on recalcVisibleFiles?)
+// TODO: crossRepoIntegrityCheck
 
-// retusn the most recent merge range to process
+// FindMergeRange returns the most recent merge range to process
 // can be successively called with updated (merge processed) visibleFiles
 // to get the next range to process.
 func (f *SnapshotRepo) FindMergeRange(maxEndRootNum RootNum, files visibleFiles) (mrange MergeRange) {
