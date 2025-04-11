@@ -19,8 +19,8 @@ jobs:
           #  backend: Polygon
     runs-on: [ self-hosted, "${{ matrix.backend }}" ]
     env:
-      ERIGON_DIR: /opt/erigon-versions/reference-version
-      ERIGON_DATA_DIR: /opt/erigon-versions/reference-version/datadir
+      ERIGON_DIR: /opt/erigon-versions/reference-version-3
+      ERIGON_DATA_DIR: /opt/erigon-versions/reference-version-3/datadir
       RPC_PAST_TEST_DIR: /opt/rpc-past-tests
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       CHAIN: ${{ matrix.chain }}
