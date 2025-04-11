@@ -3,6 +3,7 @@ package commitment
 import (
 	"encoding/csv"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"strconv"
 	"sync"
@@ -40,7 +41,6 @@ type ProcessCommitment struct {
 	UpdateBranch        atomic.Uint64
 	Unfolds             atomic.Uint64
 	TotalUnfoldingTime  time.Duration
-	Folds               atomic.Uint64
 	TotalFoldingTime    time.Duration
 	TotalProcessingTime time.Duration
 }
@@ -80,7 +80,6 @@ func (processCommitment *ProcessCommitment) Reset() {
 	processCommitment.UpdateBranch.Store(0)
 	processCommitment.Unfolds.Store(0)
 	processCommitment.TotalUnfoldingTime = 0
-	processCommitment.Folds.Store(0)
 	processCommitment.TotalFoldingTime = 0
 	processCommitment.TotalProcessingTime = 0
 }
@@ -88,15 +87,14 @@ func (processCommitment *ProcessCommitment) Reset() {
 func (processCommitment *ProcessCommitment) Headers() []string {
 	return []string{
 		"updates",
-		"address keys",
-		"storage keys",
-		"loading branch",
-		"loading account",
-		"loading storage",
-		"updating branch",
-		"total unfolds",
+		"address plainKey",
+		"account plainKeys",
+		"PatriciaContext.Branch()",
+		"PatriciaContext.Account()",
+		"PatriciaContext.Storage()",
+		"PatriciaContext.PutBranch()",
+		"unfold/fold calls",
 		"total unfolding time (ms)",
-		"total folds",
 		"total folding time (ms)",
 		"total processing time (ms)",
 	}
@@ -114,7 +112,6 @@ func (processCommitment *ProcessCommitment) Values() [][]string {
 			strconv.FormatUint(processCommitment.UpdateBranch.Load(), 10),
 			strconv.FormatUint(processCommitment.Unfolds.Load(), 10),
 			strconv.Itoa(int(processCommitment.TotalUnfoldingTime.Milliseconds())),
-			strconv.FormatUint(processCommitment.Folds.Load(), 10),
 			strconv.Itoa(int(processCommitment.TotalFoldingTime.Milliseconds())),
 			strconv.Itoa(int(processCommitment.TotalProcessingTime.Milliseconds())),
 		},
@@ -122,8 +119,8 @@ func (processCommitment *ProcessCommitment) Values() [][]string {
 }
 
 type AccountStats struct {
-	Updates            uint64
-	StorageKeys        uint64
+	AccountUpdates     uint64
+	StorageUpates      uint64
 	LoadBranch         uint64
 	LoadAccount        uint64
 	LoadStorage        uint64
@@ -146,8 +143,8 @@ func (processAccount *ProcessAcount) Reset() {
 func (processAccount *ProcessAcount) Headers() []string {
 	return []string{
 		"account",
-		"updates",
-		"storage keys",
+		"account updates",
+		"storage updates",
 		"loading branch",
 		"loading account",
 		"loading storage",
@@ -166,8 +163,8 @@ func (processAccount *ProcessAcount) Values() [][]string {
 	for i, account := range processAccount.AccountStats {
 		values[ind] = []string{
 			"0x" + i,
-			strconv.FormatUint(account.Updates, 10),
-			strconv.FormatUint(account.StorageKeys, 10),
+			strconv.FormatUint(account.AccountUpdates, 10),
+			strconv.FormatUint(account.StorageUpates, 10),
 			strconv.FormatUint(account.LoadBranch, 10),
 			strconv.FormatUint(account.LoadAccount, 10),
 			strconv.FormatUint(account.LoadStorage, 10),
@@ -189,7 +186,9 @@ func (processAccount *ProcessAcount) UpdatesInc(plainKey []byte) {
 		if _, ok := processAccount.AccountStats[account]; !ok {
 			processAccount.AccountStats[account] = &AccountStats{}
 		}
-		processAccount.AccountStats[account].Updates++
+		if len(plainKey) == 20 {
+			processAccount.AccountStats[account].AccountUpdates++
+		}
 	}
 }
 
@@ -202,7 +201,7 @@ func (processAccount *ProcessAcount) UpdatesStorageInc(plainKey []byte) {
 			processAccount.AccountStats[account] = &AccountStats{}
 		}
 		if len(plainKey) > 20 {
-			processAccount.AccountStats[account].StorageKeys++
+			processAccount.AccountStats[account].StorageUpates++
 		}
 	}
 }
@@ -295,6 +294,7 @@ func writeMetricsToCSV(metrics Metrics, filePath string) error {
 	if filePath == "" {
 		return nil
 	}
+	fmt.Println("shota", metrics.Headers()[0], filePath)
 	// Open the file in append mode or create if it doesn't exist
 	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {

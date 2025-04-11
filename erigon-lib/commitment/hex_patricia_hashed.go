@@ -1586,7 +1586,6 @@ func afterMapUpdateKind(afterMap uint16) (kind updateKind, nibblesAfterUpdate in
 // until that current key becomes a prefix of hashedKey that we will process next
 // (in other words until the needFolding function returns 0)
 func (hph *HexPatriciaHashed) fold() (err error) {
-	hph.currentCommitmentMetrics.Folds.Add(1)
 	updateKeyLen := hph.currentKeyLen
 	if hph.activeRows == 0 {
 		return errors.New("cannot fold - no active rows")
@@ -2050,7 +2049,6 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 		default:
 		}
-
 		hph.currentAccountMetrics.UpdatesInc(plainKey)
 		hph.currentPlainKey = plainKey
 		hph.currentAccountMetrics.UpdatesStorageInc(plainKey)
@@ -2077,12 +2075,6 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 			}
 			hph.currentCommitmentMetrics.TotalUnfoldingTimeInc(startUnfold)
 			hph.currentAccountMetrics.TotalUnfoldingTimeInc(hph.currentPlainKey, startUnfold)
-		}
-
-		if len(plainKey) == hph.accountKeyLen {
-			hph.currentCommitmentMetrics.AddressKeys.Add(1)
-		} else {
-			hph.currentCommitmentMetrics.StorageKeys.Add(1)
 		}
 
 		if stateUpdate == nil {
@@ -2490,7 +2482,6 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 			panic("nil ctx")
 		}
 
-		hph.currentCommitmentMetrics.LoadAccount.Add(1)
 		update, err := hph.ctx.Account(hph.root.accountAddr[:hph.root.accountAddrLen])
 		if err != nil {
 			return err
