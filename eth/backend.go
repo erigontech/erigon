@@ -698,6 +698,23 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return nil, err
 	}
 
+	var ethashApi *ethash.API
+	if casted, ok := backend.engine.(*ethash.Ethash); ok {
+		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
+	}
+
+	backend.miningRPC = privateapi2.NewMiningServer(ctx, backend, ethashApi, logger)
+	backend.ethBackendRPC = privateapi2.NewEthBackendServer(
+		ctx,
+		backend,
+		backend.chainDB,
+		backend.notifications,
+		blockReader,
+		logger,
+		latestBlockBuiltStore,
+		chainConfig,
+	)
+
 	backend.stateDiffClient = direct.NewStateDiffClientDirect(kvRPC)
 	var txnProvider txnprovider.TxnProvider
 	if config.TxPool.Disable {
@@ -719,6 +736,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			backend.stateDiffClient,
 			blockBuilderNotifyNewTxns,
 			logger,
+			direct.NewEthBackendClientDirect(backend.ethBackendRPC),
 		)
 		if err != nil {
 			return nil, err
@@ -727,22 +745,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		txnProvider = backend.txPool
 	}
 
-	var ethashApi *ethash.API
-	if casted, ok := backend.engine.(*ethash.Ethash); ok {
-		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
-	}
-
-	backend.miningRPC = privateapi2.NewMiningServer(ctx, backend, ethashApi, logger)
-	backend.ethBackendRPC = privateapi2.NewEthBackendServer(
-		ctx,
-		backend,
-		backend.chainDB,
-		backend.notifications,
-		blockReader,
-		logger,
-		latestBlockBuiltStore,
-		chainConfig,
-	)
 	httpRpcCfg := stack.Config().Http
 	ethRpcClient, txPoolRpcClient, miningRpcClient, rpcDaemonStateCache, rpcFilters := rpcdaemoncli.EmbeddedServices(
 		ctx,

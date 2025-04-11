@@ -508,7 +508,7 @@ func (evm *EVM) SysCreate(caller ContractRef, code []byte, gas uint64, endowment
 	return
 }
 
-// ChainConfig returns the environment's chain configuration
+// Config returns the environment's chain configuration
 func (evm *EVM) Config() Config {
 	return evm.config
 }
