@@ -253,6 +253,7 @@ func newBackend(nodeCfg *nodecfg.Config, ethCfg *ethconfig.Config, logger log.Lo
 }
 
 func TestEthClient(t *testing.T) {
+	// t.Skip()
 	backend, chain, err := newTestBackend(t)
 	require.NoError(t, err)
 	defer backend.Stop()
@@ -267,9 +268,9 @@ func TestEthClient(t *testing.T) {
 		"Header": {
 			func(t *testing.T) { testHeader(t, genesisBlock, chain.Blocks, client) },
 		},
-		// "BalanceAt": {
-		// 	func(t *testing.T) { testBalanceAt(t, client) },
-		// },
+		"BalanceAt": {
+			func(t *testing.T) { testBalanceAt(t, client) },
+		},
 		// "TxInBlockInterrupted": {
 		// 	func(t *testing.T) { testTransactionInBlock(t, client) },
 		// },
@@ -308,19 +309,18 @@ func testHeader(t *testing.T, genesisBlock *types.Block, chain []*types.Block, c
 		want    *types.Header
 		wantErr error
 	}{
-		// "genesis": {
-		// 	block: big.NewInt(0),
-		// 	want:  genesisBlock.Header(),
-		// },
+		"genesis": {
+			block: big.NewInt(0),
+			want:  genesisBlock.Header(),
+		},
 		"first_block": {
 			block: big.NewInt(1),
 			want:  chain[0].Header(),
 		},
-		// "future_block": {
-		// 	block:   big.NewInt(1000000000),
-		// 	want:    nil,
-		// 	wantErr: ethereum.NotFound,
-		// },
+		"future_block": {
+			block:   big.NewInt(1000000000),
+			wantErr: ethereum.NotFound,
+		},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -334,9 +334,7 @@ func testHeader(t *testing.T, genesisBlock *types.Block, chain []*types.Block, c
 			if got != nil && got.Number != nil && got.Number.Sign() == 0 {
 				got.Number = big.NewInt(0) // hack to make DeepEqual work
 			}
-			if got.Hash() != tt.want.Hash() {
-				fmt.Printf("got = %s\n", got.String())
-				fmt.Printf("want = %s\n", tt.want.String())
+			if got != nil && got.Hash() != tt.want.Hash() {
 				t.Fatalf("HeaderByNumber(%v) got = %#v, want %#v", tt.block, got, tt.want)
 			}
 		})
@@ -365,7 +363,7 @@ func testBalanceAt(t *testing.T, client *rpc.Client) {
 			block:   big.NewInt(1),
 			want:    big.NewInt(0),
 		},
-		// "future_block": {
+		// "future_block": { // disabled due to incompatibility with geth
 		// 	account: testAddr,
 		// 	block:   big.NewInt(1000000000),
 		// 	wantErr: errors.New("header not found"),
@@ -380,7 +378,7 @@ func testBalanceAt(t *testing.T, client *rpc.Client) {
 			if tt.wantErr != nil && (err == nil || err.Error() != tt.wantErr.Error()) {
 				t.Fatalf("BalanceAt(%x, %v) error = %q, want %q", tt.account, tt.block, err, tt.wantErr)
 			}
-			if got.Cmp(tt.want) != 0 {
+			if got != nil && got.Cmp(tt.want) != 0 {
 				t.Fatalf("BalanceAt(%x, %v) = %v, want %v", tt.account, tt.block, got, tt.want)
 			}
 		})
