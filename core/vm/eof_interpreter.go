@@ -8,7 +8,7 @@ import (
 	"github.com/erigontech/erigon/core/vm/stack"
 )
 
-func (in *EVMInterpreter) RunEOF(contract *Contract, input []byte, readOnly bool, header *eofHeader) (ret []byte, err error) {
+func (in *EVMInterpreter) RunEOF(contract *Contract, input []byte, readOnly bool, header *EofHeader) (ret []byte, err error) {
 
 	// Don't bother with the execution if there's no code.
 	if len(contract.Code) == 0 {
@@ -151,7 +151,7 @@ func (in *EVMInterpreter) RunEOF(contract *Contract, input []byte, readOnly bool
 	return
 }
 
-func (in *EVMInterpreter) runNoDebug(contract *Contract, input []byte, readOnly bool, header *eofHeader) (ret []byte, err error) {
+func (in *EVMInterpreter) runNoDebug(contract *Contract, input []byte, readOnly bool, header *EofHeader) (ret []byte, err error) {
 	// Reset the previous call's return data. It's unimportant to preserve the old buffer
 	// as every returning call will return new data anyway.
 	in.returnData = nil

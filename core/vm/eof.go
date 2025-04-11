@@ -3,6 +3,7 @@ package vm
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 var (
@@ -64,7 +65,7 @@ func isSupportedVersion(version byte) bool {
 	return version == 1 // || version == 2 etc.
 }
 
-type eofHeader struct {
+type EofHeader struct {
 	version          byte
 	typesOffset      uint16
 	codeSizes        []uint16
@@ -76,9 +77,18 @@ type eofHeader struct {
 	dataOffset       uint16
 }
 
-func ParseEOFHeader(eofCode []byte, jt *JumpTable, containerKind byte, validate bool, depth int) (*eofHeader, error) {
+// has to be non-nil header, required by cmd/eofparse for validation fuzzing
+func (h *EofHeader) GetHexCodeSections(code []byte) string {
+	sections := make([]string, len(h.codeSizes))
+	for i, size := range h.codeSizes {
+		sections[i] = fmt.Sprintf("%x", code[h.codeOffsets[i]:h.codeOffsets[i]+size])
+	}
+	return strings.Join(sections, ", ")
+}
 
-	header := &eofHeader{}
+func ParseEOFHeader(eofCode []byte, jt *JumpTable, containerKind byte, validate bool, depth int) (*EofHeader, error) {
+
+	header := &EofHeader{}
 	if len(eofCode) < 14 {
 		return nil, fmt.Errorf("EOFException.CODE_TOO_SHORT")
 	}
@@ -249,7 +259,7 @@ func ParseEOFHeader(eofCode []byte, jt *JumpTable, containerKind byte, validate 
 	return header, nil
 }
 
-func validateBody(code []byte, header *eofHeader, containerKind byte, depth int) error {
+func validateBody(code []byte, header *EofHeader, containerKind byte, depth int) error {
 
 	offset := int(header.typesOffset) + 4*len(header.codeSizes)
 	for i := range header.codeSizes {
@@ -282,7 +292,7 @@ func validateBody(code []byte, header *eofHeader, containerKind byte, depth int)
 	return nil
 }
 
-func validateTypes(code []byte, header *eofHeader) (uint16, error) {
+func validateTypes(code []byte, header *EofHeader) (uint16, error) {
 
 	offset := header.typesOffset
 
@@ -327,7 +337,7 @@ func validateTypes(code []byte, header *eofHeader) (uint16, error) {
 	return offset, nil
 }
 
-func validateCode(eofCode []byte, header *eofHeader, offset uint16, containerKind byte, jt *JumpTable, referencedByEofCreate, referencedByReturnCode *[]bool) error {
+func validateCode(eofCode []byte, header *EofHeader, offset uint16, containerKind byte, jt *JumpTable, referencedByEofCreate, referencedByReturnCode *[]bool) error {
 
 	// at least one code section is guaranteed by spec
 
@@ -391,7 +401,7 @@ func validateCode(eofCode []byte, header *eofHeader, offset uint16, containerKin
 	return nil
 }
 
-func validateContainer(eofCode []byte, header *eofHeader, offset uint16, containerIdx int, eofcreate, returnCode bool, jt *JumpTable, depth int) (*eofHeader, error) {
+func validateContainer(eofCode []byte, header *EofHeader, offset uint16, containerIdx int, eofcreate, returnCode bool, jt *JumpTable, depth int) (*EofHeader, error) {
 
 	container := eofCode[offset : offset+header.containerSizes[containerIdx]]
 
@@ -402,7 +412,7 @@ func validateContainer(eofCode []byte, header *eofHeader, offset uint16, contain
 		return nil, fmt.Errorf("EOFException.ORPHAN_SUBCONTAINER")
 	}
 	var err error
-	var h *eofHeader
+	var h *EofHeader
 	if eofcreate {
 		_, err = ParseEOFHeader(container, jt, initcode, true, depth+1)
 	} else {

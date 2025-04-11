@@ -74,7 +74,7 @@ type Interpreter interface {
 	// Run loops and evaluates the contract's code with the given input data and returns
 	// the return byte-slice and an error if one occurred.
 	Run(contract *Contract, input []byte, static bool) ([]byte, error)
-	RunEOF(contract *Contract, input []byte, static bool, header *eofHeader) ([]byte, error)
+	RunEOF(contract *Contract, input []byte, static bool, header *EofHeader) ([]byte, error)
 
 	// `Depth` returns the current call stack's depth.
 	Depth() int
@@ -89,7 +89,7 @@ type ScopeContext struct {
 	Stack    *stack.Stack
 	Contract *Contract
 
-	EofHeader   *eofHeader
+	EofHeader   *EofHeader
 	ReturnStack [][2]uint64
 	SectionIdx  uint64 // Current EOF section being executed
 }

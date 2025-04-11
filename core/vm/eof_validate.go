@@ -19,7 +19,7 @@ func parseInt16(b []byte) int {
 	return int(int16(b[1]) | int16(b[0])<<8)
 }
 
-func getTypeSectionOffset(idx uint16, header *eofHeader) uint16 {
+func getTypeSectionOffset(idx uint16, header *EofHeader) uint16 {
 	return header.typesOffset + idx*4
 }
 
@@ -28,7 +28,7 @@ func isTerminal(op OpCode) bool {
 		op == REVERT || op == STOP || op == RETURN || op == INVALID
 }
 
-func validateInstructions(eofCode []byte, codeIdx uint16, header *eofHeader, offset uint16, containerKind byte, jt *JumpTable) ([][2]uint16, map[uint16]bool, error) {
+func validateInstructions(eofCode []byte, codeIdx uint16, header *EofHeader, offset uint16, containerKind byte, jt *JumpTable) ([][2]uint16, map[uint16]bool, error) {
 
 	var (
 		code               = eofCode[offset : offset+header.codeSizes[codeIdx]]
@@ -131,7 +131,7 @@ func checkRjumpDest(codeSize, postPos, relOffset int, rjumpDests *[]int) bool {
 	return true
 }
 
-func validateRjumpDestinations(eofCode []byte, header *eofHeader, jt *JumpTable, codeIdx, offset uint16) error {
+func validateRjumpDestinations(eofCode []byte, header *EofHeader, jt *JumpTable, codeIdx, offset uint16) error {
 	var (
 		code         = eofCode[offset : offset+header.codeSizes[codeIdx]]
 		codeSize     = len(code)
@@ -198,7 +198,7 @@ func visitSuccessor(currentOffset, nextOffset int, stackRequired stackHeightRang
 	return true
 }
 
-func validateMaxStackHeight(eofCode []byte, codeIdx uint16, header *eofHeader, offset uint16, jt *JumpTable) (int, error) {
+func validateMaxStackHeight(eofCode []byte, codeIdx uint16, header *EofHeader, offset uint16, jt *JumpTable) (int, error) {
 	var (
 		code = eofCode[offset : offset+header.codeSizes[codeIdx]]
 		// typeSectionOffset = getTypeSectionOffset(codeIdx, header)

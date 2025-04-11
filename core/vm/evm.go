@@ -65,7 +65,7 @@ func run(evm *EVM, contract *Contract, input []byte, readOnly bool) ([]byte, err
 }
 
 // Not tested on actual testnet, so unsafe
-func runEOF(evm *EVM, contract *Contract, input []byte, readOnly bool, headerEOF *eofHeader) ([]byte, error) {
+func runEOF(evm *EVM, contract *Contract, input []byte, readOnly bool, headerEOF *EofHeader) ([]byte, error) {
 	return evm.interpreter.RunEOF(contract, input, readOnly, headerEOF)
 }
 
@@ -308,7 +308,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		if typ == STATICCALL {
 			readOnly = true
 		}
-		var headerEOF *eofHeader
+		var headerEOF *EofHeader
 		if evm.chainRules.IsOsaka && isEOFcode(code) {
 			if headerEOF, err = ParseEOFHeader(code, evm.interpreter.EOFTable(), runtime, true, 0); err != nil {
 				return nil, 0, err
@@ -440,7 +440,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 		}
 	}
 
-	var headerEOF *eofHeader // still can be nil
+	var headerEOF *EofHeader // still can be nil
 	if headerEOF, err = evm.GetEOFHeader(codeAndHash.code, typ); err != nil {
 		return nil, libcommon.Address{}, gasRemaining, fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, err)
 	}
@@ -626,8 +626,8 @@ func (evm *EVM) IntraBlockState() evmtypes.IntraBlockState {
 }
 
 // GetEOFHeader returns EOF header if IsOsaka and code is EOF code, otherwise nil
-func (evm *EVM) GetEOFHeader(code []byte, typ OpCode) (*eofHeader, error) {
-	// var headerEOF *eofHeader
+func (evm *EVM) GetEOFHeader(code []byte, typ OpCode) (*EofHeader, error) {
+	// var headerEOF *EofHeader
 	// var err error
 	if evm.chainRules.IsOsaka { // check if Osaka and if is EOF code
 		if len(code) > 1 && code[0] == 0xEF && code[1] == 0x00 {
