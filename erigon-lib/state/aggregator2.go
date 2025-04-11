@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
@@ -56,16 +55,6 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
 
 	return a, nil
-}
-
-var dbgCommBtIndex = dbg.EnvBool("AGG_COMMITMENT_BT", false)
-
-func init() {
-	if dbgCommBtIndex {
-		cfg := Schema[kv.CommitmentDomain]
-		cfg.AccessorList = AccessorBTree | AccessorExistence
-		Schema[kv.CommitmentDomain] = cfg
-	}
 }
 
 var Schema = map[kv.Domain]domainCfg{
