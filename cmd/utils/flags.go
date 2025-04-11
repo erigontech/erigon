@@ -1904,6 +1904,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	if ctx.Bool(KeepExecutionProofsFlag.Name) {
 		cfg.KeepExecutionProofs = true
 		state.EnableHistoricalCommitment()
+		log.Warn("[dbg] Schema", "s", fmt.Sprintf("%+v", state.Schema))
 	}
 	cfg.CaplinConfig.EnableUPnP = ctx.Bool(CaplinEnableUPNPlag.Name)
 	var err error
