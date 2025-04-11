@@ -27,9 +27,8 @@ import (
 	"math/big"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-
-	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/execution/consensus/ethash"
 )
 
 type fuzzer struct {
