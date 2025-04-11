@@ -5,9 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"time"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/etl"
 	"golang.org/x/sync/errgroup"
 )
@@ -235,13 +233,6 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 
 // Computing commitment root hash. If possible, use parallel commitment and after evaluation decides, if it can be used next time
 func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error) {
-	start := time.Now()
-	wasConcurrent := updates.IsConcurrentCommitment()
-	updCount := updates.Size()
-	defer func(s time.Time, wasConcurrent bool) {
-		fmt.Printf("commitment time %s; keys %s; was concurrent: %t\n", time.Since(s), common.PrettyCounter(updCount), wasConcurrent)
-	}(start, wasConcurrent)
-
 	switch updates.IsConcurrentCommitment() {
 	case true:
 		rootHash, err = updates.ParallelHashSort(ctx, p)
