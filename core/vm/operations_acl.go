@@ -255,15 +255,75 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 }
 
 var (
-	gasCallEIP7702         = makeCallVariantGasCallEIP7702(gasCall)
-	gasDelegateCallEIP7702 = makeCallVariantGasCallEIP7702(gasDelegateCall)
-	gasStaticCallEIP7702   = makeCallVariantGasCallEIP7702(gasStaticCall)
-	gasCallCodeEIP7702     = makeCallVariantGasCallEIP7702(gasCallCode)
+	gasCallEIP7702            = makeCallVariantGasCallEIP7702(gasCall)
+	gasDelegateCallEIP7702    = makeCallVariantGasCallEIP7702(gasDelegateCall)
+	gasStaticCallEIP7702      = makeCallVariantGasCallEIP7702(gasStaticCall)
+	gasCallCodeEIP7702        = makeCallVariantGasCallEIP7702(gasCallCode)
+	gasExtCallEIP7702         = makeCallVariantGasExtCallEIP7702(gasExtCall)
+	gasExtDelegateCallEIP7702 = makeCallVariantGasExtCallEIP7702(gasExtDelegateCall)
+	gasExtStaticCallEIP7702   = makeCallVariantGasExtCallEIP7702(gasExtStaticCall)
 )
 
 func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 	return func(evm *EVM, scope *ScopeContext, memorySize, pc uint64) (uint64, error) {
 		addr := libcommon.Address(scope.Stack.Back(1).Bytes20())
+		// Check slot presence in the access list
+		var dynCost uint64
+		if evm.intraBlockState.AddAddressToAccessList(addr) {
+			// The WarmStorageReadCostEIP2929 (100) is already deducted in the form of a constant cost, so
+			// the cost to charge for cold access, if any, is Cold - Warm
+			dynCost = params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
+			// Charge the remaining difference here already, to correctly calculate available
+			// gas for call
+			if !scope.Contract.UseGas(dynCost, tracing.GasChangeCallStorageColdAccess) {
+				return 0, ErrOutOfGas
+			}
+		}
+
+		// Check if code is a delegation and if so, charge for resolution.
+		dd, ok, err := evm.intraBlockState.GetDelegatedDesignation(addr)
+		if err != nil {
+			return 0, err
+		}
+		if ok {
+			var ddCost uint64
+			if evm.intraBlockState.AddAddressToAccessList(dd) {
+				ddCost = params.ColdAccountAccessCostEIP2929
+			} else {
+				ddCost = params.WarmStorageReadCostEIP2929
+			}
+
+			if !scope.Contract.UseGas(ddCost, tracing.GasChangeDelegatedDesignation) {
+				return 0, ErrOutOfGas
+			}
+			dynCost += ddCost
+		}
+		// Now call the old calculator, which takes into account
+		// - create new account
+		// - transfer value
+		// - memory expansion
+		// - 63/64ths rule
+		gas, err := oldCalculator(evm, scope, memorySize, pc)
+		if dynCost == 0 || err != nil {
+			return gas, err
+		}
+		// In case of a cold access, we temporarily add the cold charge back, and also
+		// add it to the returned gas. By adding it to the return, it will be charged
+		// outside of this function, as part of the dynamic gas, and that will make it
+		// also become correctly reported to tracers.
+		scope.Contract.Gas += dynCost
+
+		var overflow bool
+		if gas, overflow = math.SafeAdd(gas, dynCost); overflow {
+			return 0, ErrGasUintOverflow
+		}
+		return gas, nil
+	}
+}
+
+func makeCallVariantGasExtCallEIP7702(oldCalculator gasFunc) gasFunc {
+	return func(evm *EVM, scope *ScopeContext, memorySize, pc uint64) (uint64, error) {
+		addr := libcommon.Address(scope.Stack.Back(0).Bytes20())
 		// Check slot presence in the access list
 		var dynCost uint64
 		if evm.intraBlockState.AddAddressToAccessList(addr) {
