@@ -46,8 +46,8 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rpc/jsonrpc/contracts"
 	"github.com/erigontech/erigon/turbo/builder"
-	"github.com/erigontech/erigon/turbo/jsonrpc/contracts"
 	privateapi2 "github.com/erigontech/erigon/turbo/privateapi"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )

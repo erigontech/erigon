@@ -48,7 +48,7 @@ import (
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/p2p/sentry"
-	"github.com/erigontech/erigon/turbo/jsonrpc/receipts"
+	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/stages/bodydownload"
 	"github.com/erigontech/erigon/turbo/stages/headerdownload"

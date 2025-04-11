@@ -35,7 +35,7 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/rpc"
-	ethapi2 "github.com/erigontech/erigon/turbo/adapter/ethapi"
+	ethapi2 "github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
