@@ -72,6 +72,8 @@ import (
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/eth/tracers"
+	debugtracer "github.com/erigontech/erigon/eth/tracers/debug"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
@@ -284,8 +286,16 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	cfg.ChaosMonkey = false
 	cfg.Snapshot.ChainName = gspec.Config.ChainName
 
+	logLvl := log.LvlError
+	if lvl, ok := os.LookupEnv("MOCK_SENTRY_LOG_LEVEL"); ok {
+		logLvl, err = log.LvlFromString(lvl)
+		if err != nil {
+			panic(err)
+		}
+	}
+
 	logger := log.Root()
-	logger.SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
+	logger.SetHandler(log.LvlFilterHandler(logLvl, log.StderrHandler))
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	db, agg := temporaltest.NewTestDB(tb, dirs)
@@ -543,9 +553,17 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		logger, stages.ModeApplyingBlocks,
 	)
 
+	var tracer *tracers.Tracer
+	if dir, ok := os.LookupEnv("MOCK_SENTRY_DEBUG_TRACER_OUTPUT_DIR"); ok {
+		recordOptions := debugtracer.RecordOptions{
+			DisableOpContextRecording: true,
+		}
+		tracer = debugtracer.New(dir, debugtracer.FlushModeBlock, recordOptions)
+	}
+
 	cfg.Genesis = gspec
 	pipelineStages := stages2.NewPipelineStages(mock.Ctx, db, &cfg, p2p.Config{}, mock.sentriesClient, mock.Notifications,
-		snapDownloader, mock.BlockReader, blockRetire, nil, forkValidator, logger, nil, checkStateRoot)
+		snapDownloader, mock.BlockReader, blockRetire, nil, forkValidator, logger, tracer, checkStateRoot)
 	mock.posStagedSync = stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
 	mock.Eth1ExecutionService = eth1.NewEthereumExecutionModule(mock.BlockReader, mock.DB, mock.posStagedSync, forkValidator, mock.ChainConfig, assembleBlockPOS, nil, mock.Notifications.Accumulator, mock.Notifications.RecentLogs, mock.Notifications.StateChangesConsumer, logger, engine, cfg.Sync, ctx)
