@@ -147,7 +147,7 @@ var Schema = map[kv.Domain]domainCfg{
 
 		hist: histCfg{
 			valuesTable: kv.TblCommitmentHistoryVals,
-			compression: seg.CompressNone,
+			compression: seg.CompressKeys | seg.CompressVals,
 
 			snapshotsDisabled:  true,
 			historyLargeValues: false,
