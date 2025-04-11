@@ -113,6 +113,8 @@ type HasAgg interface {
 	Agg() any
 }
 
+var ExperimentalConcurrentCommitment = false // set true to use concurrent commitment by default
+
 func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 
 	sd := &SharedDomains{
@@ -133,7 +135,12 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 	}
 
 	sd.SetTxNum(0)
-	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, commitment.VariantConcurrentHexPatricia)
+	tv := commitment.VariantHexPatriciaTrie
+	if ExperimentalConcurrentCommitment {
+		tv = commitment.VariantConcurrentHexPatricia
+	}
+
+	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv)
 
 	if _, err := sd.SeekCommitment(context.Background(), tx); err != nil {
 		return nil, err
