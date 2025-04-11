@@ -1415,18 +1415,13 @@ func GetCheckpointSyncEndpoint(net NetworkType) string {
 }
 
 // Check if chain with a specific ID is supported or not
-// 1 is Ethereum Mainnet
-// 11155111 is Sepolia Testnet
-// 100 is Gnosis Mainnet
-// 10200 is Chiado Testnet
-// 560048 is Hoodi Testnet
 func EmbeddedSupported(id uint64) bool {
-	return id == 1 ||
-		id == 17000 ||
-		id == 11155111 ||
-		id == 100 ||
-		id == 10200 ||
-		id == 560048
+	return id == networkid.MainnetChainID ||
+		id == networkid.HoleskyChainID ||
+		id == networkid.SepoliaChainID ||
+		id == networkid.GnosisChainID ||
+		id == networkid.ChiadoChainID ||
+		id == networkid.HoodiChainID
 }
 
 func SupportBackfilling(networkId uint64) bool {
