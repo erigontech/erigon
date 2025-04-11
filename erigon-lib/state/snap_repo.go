@@ -77,12 +77,17 @@ func (f *SnapshotRepo) OpenFolder() error {
 }
 
 func (f *SnapshotRepo) IntegrateDirtyFile(file *filesItem) {
+	if file == nil {
+		return
+	}
 	f.dirtyFiles.Set(file)
 }
 
 func (f *SnapshotRepo) IntegrateDirtyFiles(files []*filesItem) {
 	for _, file := range files {
-		f.dirtyFiles.Set(file)
+		if file != nil {
+			f.dirtyFiles.Set(file)
+		}
 	}
 }
 
@@ -98,10 +103,6 @@ func (f *SnapshotRepo) GetFreezingRange(from RootNum, to RootNum) (freezeFrom Ro
 	return getFreezingRange(from, to, f.cfg)
 }
 
-// TODO: if integrity checks are done while calculating visibleFiles, and not here
-// maybe we want to apply integrity checks here as well, because these files will
-// be "opened", and maybe we don't want to do that for those non-integrity check
-// passing files.
 func (f *SnapshotRepo) DirtyFilesWithNoBtreeAccessors() (l []*filesItem) {
 	if !f.accessors.Has(AccessorBTree) {
 		return nil
@@ -257,9 +258,10 @@ func (f *SnapshotRepo) FilesInRange(mrange MergeRange, files visibleFiles) (item
 	return
 }
 
-// func (f *SnapshotRepo) NextFilesToMerge(toRootNum RootNum, files visibleFiles) []visibleFile {
-
-// }
+func (f *SnapshotRepo) CleanAfterMerge(merged *filesItem, vf visibleFiles) {
+	outs := f.Garbage(vf, merged)
+	deleteMergeFile(f.dirtyFiles, outs, f.parser.DataTag(), f.logger)
+}
 
 // private methods
 
