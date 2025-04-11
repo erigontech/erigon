@@ -23,7 +23,6 @@ import (
 	"math/big"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
@@ -32,7 +31,7 @@ import (
 	"github.com/erigontech/erigon/cmd/devnet/services"
 	"github.com/erigontech/erigon/cmd/devnet/transactions"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon/rpc/ethapi"
 )
 
 func init() {
