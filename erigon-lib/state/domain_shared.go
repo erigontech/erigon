@@ -892,10 +892,14 @@ type SharedDomainsCommitmentContext struct {
 	justRestored  atomic.Bool
 
 	limitReadAsOfTxNum uint64
+	domainsOnly        bool // if true, do not use history reader and limit to domain files only
 }
 
-func (sdc *SharedDomainsCommitmentContext) SetLimitReadAsOfTxNum(txNum uint64) {
+// Limits max txNum for read operations. If set to 0, all read operations will be from latest value.
+// If domainOnly=true and txNum > 0, then read operations will be limited to domain files only.
+func (sdc *SharedDomainsCommitmentContext) SetLimitReadAsOfTxNum(txNum uint64, domainOnly bool) {
 	sdc.limitReadAsOfTxNum = txNum
+	sdc.domainsOnly = domainOnly
 }
 
 func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode commitment.Mode, trieVariant commitment.TrieVariant) *SharedDomainsCommitmentContext {
@@ -913,6 +917,17 @@ func (sdc *SharedDomainsCommitmentContext) Close() {
 }
 
 func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, error) {
+	if !sdc.domainsOnly && sdc.limitReadAsOfTxNum > 0 {
+		branch, _, err := sdc.sharedDomains.roTtx.GetAsOf(kv.CommitmentDomain, pref, sdc.limitReadAsOfTxNum)
+		if sdc.sharedDomains.trace {
+			fmt.Printf("[SDC] Branch @%d: %x: %x\n%s\n", sdc.limitReadAsOfTxNum, pref, branch, commitment.BranchData(branch).String())
+		}
+		if err != nil {
+			return nil, 0, fmt.Errorf("branch history read failed: %w", err)
+		}
+		return branch, sdc.limitReadAsOfTxNum / sdc.sharedDomains.StepSize(), nil
+	}
+
 	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update.
 	// Dereferenced branch is kept inside sharedDomains commitment domain map (but not written into buffer so not flushed into db, unless updated)
 	v, step, err := sdc.sharedDomains.LatestCommitment(pref)
@@ -929,6 +944,9 @@ func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, 
 }
 
 func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error {
+	if sdc.limitReadAsOfTxNum > 0 && !sdc.domainsOnly { // do not store branches if explicitly operate on history
+		return nil
+	}
 	prefixS := toStringZeroCopy(prefix)
 	if sdc.sharedDomains.trace {
 		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
@@ -937,45 +955,51 @@ func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte,
 }
 
 func (sdc *SharedDomainsCommitmentContext) readAccount(plainKey []byte) (encAccount []byte, err error) {
-	if sdc.limitReadAsOfTxNum > 0 {
-		encAccount, _, err = sdc.sharedDomains.getLatestFromFiles(kv.AccountsDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
-		if err != nil {
-			return nil, fmt.Errorf("GetAccount failed: %w", err)
+	if sdc.limitReadAsOfTxNum > 0 { // read not from latest
+		if sdc.domainsOnly { // read from previous files
+			encAccount, _, err = sdc.sharedDomains.getLatestFromFiles(kv.AccountsDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
+		} else { // read from history
+			encAccount, _, err = sdc.sharedDomains.roTtx.GetAsOf(kv.AccountsDomain, plainKey, sdc.limitReadAsOfTxNum)
 		}
-		return encAccount, nil
+	} else { // read latest value from domain
+		encAccount, _, err = sdc.sharedDomains.GetLatest(kv.AccountsDomain, plainKey)
 	}
-	encAccount, _, err = sdc.sharedDomains.GetLatest(kv.AccountsDomain, plainKey)
 	if err != nil {
-		return nil, fmt.Errorf("GetAccount failed: %w", err)
+		return nil, fmt.Errorf("GetAccount failed (latest=%t): %w", sdc.limitReadAsOfTxNum == 0, err)
 	}
 	return encAccount, nil
 }
 
 func (sdc *SharedDomainsCommitmentContext) readCode(plainKey []byte) (code []byte, err error) {
 	if sdc.limitReadAsOfTxNum > 0 {
-		code, _, err = sdc.sharedDomains.getLatestFromFiles(kv.CodeDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
-		if err != nil {
-			return nil, fmt.Errorf("GetAccount/Code: failed to read latest code: %w", err)
+		if sdc.domainsOnly {
+			code, _, err = sdc.sharedDomains.getLatestFromFiles(kv.CodeDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
+		} else {
+			code, _, err = sdc.sharedDomains.roTtx.GetAsOf(kv.CodeDomain, plainKey, sdc.limitReadAsOfTxNum)
 		}
-		return code, nil
+	} else {
+		code, _, err = sdc.sharedDomains.GetLatest(kv.CodeDomain, plainKey)
 	}
-	code, _, err = sdc.sharedDomains.GetLatest(kv.CodeDomain, plainKey)
+
 	if err != nil {
-		return nil, fmt.Errorf("GetAccount/Code: failed to read latest code: %w", err)
+		return nil, fmt.Errorf("GetAccount/Code: failed to read code (latest=%t): %w", sdc.limitReadAsOfTxNum == 0, err)
 	}
 	return code, nil
 }
+
 func (sdc *SharedDomainsCommitmentContext) readStorage(plainKey []byte) (enc []byte, err error) {
 	if sdc.limitReadAsOfTxNum > 0 {
-		enc, _, err = sdc.sharedDomains.getLatestFromFiles(kv.StorageDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
-		if err != nil {
-			return nil, fmt.Errorf("GetAccount/Code: failed to read latest code: %w", err)
+		if sdc.domainsOnly {
+			enc, _, err = sdc.sharedDomains.getLatestFromFiles(kv.StorageDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
+		} else {
+			enc, _, err = sdc.sharedDomains.roTtx.GetAsOf(kv.StorageDomain, plainKey, sdc.limitReadAsOfTxNum)
 		}
-		return enc, nil
+	} else {
+		enc, _, err = sdc.sharedDomains.GetLatest(kv.StorageDomain, plainKey)
 	}
-	enc, _, err = sdc.sharedDomains.GetLatest(kv.StorageDomain, plainKey)
+
 	if err != nil {
-		return nil, fmt.Errorf("GetAccount/Code: failed to read latest code: %w", err)
+		return nil, fmt.Errorf("GetStorage: failed to read latest storage (latest=%t): %w", sdc.limitReadAsOfTxNum == 0, err)
 	}
 	return enc, nil
 }
@@ -992,8 +1016,8 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 		return u, nil
 	}
 
-	acc := accounts.Account{}
-	if err = accounts.DeserialiseV3(&acc, encAccount); err != nil {
+	acc := new(accounts.Account)
+	if err = accounts.DeserialiseV3(acc, encAccount); err != nil {
 		return nil, err
 	}
 
@@ -1002,10 +1026,12 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 
 	u.Flags |= commitment.BalanceUpdate
 	u.Balance.Set(&acc.Balance)
+
 	if ch := acc.CodeHash.Bytes(); len(ch) > 0 {
 		u.Flags |= commitment.CodeUpdate
 		copy(u.CodeHash[:], acc.CodeHash.Bytes())
 	}
+  
 	if assert.Enable {
 		code, err := sdc.readCode(plainKey)
 		if err != nil {
@@ -1023,17 +1049,17 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 }
 
 func (sdc *SharedDomainsCommitmentContext) Storage(plainKey []byte) (u *commitment.Update, err error) {
-	// Look in the summary table first
 	enc, err := sdc.readStorage(plainKey)
 	if err != nil {
 		return nil, err
 	}
-	u = new(commitment.Update)
-	u.StorageLen = len(enc)
-	if len(enc) == 0 {
-		u.Flags = commitment.DeleteUpdate
-	} else {
-		u.Flags |= commitment.StorageUpdate
+	u = &commitment.Update{
+		Flags:      commitment.DeleteUpdate,
+		StorageLen: len(enc),
+	}
+
+	if u.StorageLen > 0 {
+		u.Flags = commitment.StorageUpdate
 		copy(u.Storage[:u.StorageLen], enc)
 	}
 	return u, nil

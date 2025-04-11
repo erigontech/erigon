@@ -96,8 +96,8 @@ type Header struct {
 	MixDigest   libcommon.Hash    `json:"mixHash"` // prevRandao after EIP-4399
 	Nonce       BlockNonce        `json:"nonce"`
 	// AuRa extensions (alternative to MixDigest & Nonce)
-	AuRaStep uint64
-	AuRaSeal []byte
+	AuRaStep uint64 `json:"auraStep,omitempty"`
+	AuRaSeal []byte `json:"auraSeal,omitempty"`
 
 	BaseFee         *big.Int        `json:"baseFeePerGas"`   // EIP-1559
 	WithdrawalsHash *libcommon.Hash `json:"withdrawalsRoot"` // EIP-4895
@@ -1157,10 +1157,6 @@ func CopyHeader(h *Header) *Header {
 		copy(cpy.VerkleKeyVals, h.VerkleKeyVals)
 	}
 	cpy.mutable = h.mutable
-	if hash := h.hash.Load(); hash != nil {
-		hashCopy := *hash
-		cpy.hash.Store(&hashCopy)
-	}
 	return &cpy
 }
 

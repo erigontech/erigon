@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -173,13 +172,16 @@ func TestEviction(t *testing.T) {
 }
 
 func TestAPI(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("fix me on win please")
-	}
 	require := require.New(t)
+
+	// Create a context with timeout for the entire test
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	c := New(DefaultCoherentConfig)
 	k1, k2 := [20]byte{1}, [20]byte{2}
 	db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+
 	acc := accounts.Account{
 		Nonce:       1,
 		Balance:     *uint256.NewInt(11),
@@ -193,43 +195,49 @@ func TestAPI(t *testing.T) {
 	account4Enc := accounts.SerialiseV3(&acc)
 
 	get := func(key [20]byte, expectTxnID uint64) (res [1]chan []byte) {
-
 		wg := sync.WaitGroup{}
 		for i := 0; i < len(res); i++ {
 			wg.Add(1)
-			res[i] = make(chan []byte)
+			res[i] = make(chan []byte, 1) // Buffered channel to prevent deadlock
 			go func(out chan []byte) {
-				err := db.View(context.Background(), func(tx kv.Tx) error {
+				defer wg.Done()
+				err := db.View(ctx, func(tx kv.Tx) error {
 					if expectTxnID != tx.ViewID() {
 						panic(fmt.Sprintf("epxected: %d, got: %d", expectTxnID, tx.ViewID()))
 					}
-					wg.Done()
-					cacheView, err := c.View(context.Background(), tx)
-					view := cacheView.(*CoherentView)
+					cacheView, err := c.View(ctx, tx)
 					if err != nil {
-						panic(err)
+						panic(fmt.Sprintf("View error: %v", err))
 					}
+					view := cacheView.(*CoherentView)
 					v, err := c.Get(key[:], tx, view.stateVersionID)
 					if err != nil {
-						panic(err)
+						panic(fmt.Sprintf("Get error: %v", err))
 					}
+
 					fmt.Println("get", key, v)
-					out <- common.Copy(v)
+
+					select {
+					case out <- common.Copy(v):
+					case <-ctx.Done():
+						panic("Context done while sending result")
+					}
 					return nil
 				})
 				if err != nil {
-					panic(err)
+					panic(fmt.Sprintf("Database error: %v", err))
 				}
 			}(res[i])
 		}
 		wg.Wait() // ensure that all goroutines started their transactions
 		return res
 	}
+
 	counter := atomic.Int64{}
 	prevVals := map[string][]byte{}
 	put := func(k, v []byte) uint64 {
 		var txID uint64
-		require.NoError(db.Update(context.Background(), func(tx kv.RwTx) error {
+		err := db.Update(ctx, func(tx kv.RwTx) error {
 			txID = tx.ViewID()
 			d, err := state.NewSharedDomains(tx, log.New())
 			if err != nil {
@@ -241,8 +249,9 @@ func TestAPI(t *testing.T) {
 			}
 			prevVals[string(k)] = v
 			counter.Add(1)
-			return d.Flush(context.Background(), tx)
-		}))
+			return d.Flush(ctx, tx)
+		})
+		require.NoError(err)
 		return txID
 	}
 	// block 1 - represents existing state (no notifications about this data will come to client)
@@ -255,16 +264,26 @@ func TestAPI(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := range res1 {
-			if <-res1[i] != nil {
-				panic(fmt.Sprintf("epxected nil"))
+			select {
+			case v := <-res1[i]:
+				if v != nil {
+					panic(fmt.Sprintf("expected nil, got: %x", v))
+				}
+			case <-ctx.Done():
+				panic("Context done while checking res1")
 			}
 		}
 		for i := range res2 {
-			v := <-res2[i]
-			if !bytes.Equal(account1Enc, v) {
-				panic(fmt.Sprintf("epxected: %x, got: %x", account1Enc, v))
+			select {
+			case v := <-res2[i]:
+				if !bytes.Equal(account1Enc, v) {
+					panic(fmt.Sprintf("expected: %x, got: %x", account1Enc, v))
+				}
+			case <-ctx.Done():
+				panic("Context done while checking res2")
 			}
 		}
+
 		fmt.Printf("done1: \n")
 	}()
 
@@ -294,15 +313,23 @@ func TestAPI(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := range res3 {
-			v := <-res3[i]
-			if !bytes.Equal(account2Enc, v) {
-				panic(fmt.Sprintf("epxected: %x, got: %x", account2Enc, v))
+			select {
+			case v := <-res3[i]:
+				if !bytes.Equal(account2Enc, v) {
+					panic(fmt.Sprintf("expected: %x, got: %x", account2Enc, v))
+				}
+			case <-ctx.Done():
+				panic("Context done while checking res3")
 			}
 		}
 		for i := range res4 {
-			v := <-res4[i]
-			if !bytes.Equal(account1Enc, v) {
-				panic(fmt.Sprintf("epxected: %x, got: %x", account1Enc, v))
+			select {
+			case v := <-res4[i]:
+				if !bytes.Equal(account1Enc, v) {
+					panic(fmt.Sprintf("expected: %x, got: %x", account1Enc, v))
+				}
+			case <-ctx.Done():
+				panic("Context done while checking res4")
 			}
 		}
 		fmt.Printf("done2: \n")
@@ -331,23 +358,31 @@ func TestAPI(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := range res5 {
-			v := <-res5[i]
-			if !bytes.Equal(account2Enc, v) {
-				panic(fmt.Sprintf("epxected: %x, got: %x", account2Enc, v))
+			select {
+			case v := <-res5[i]:
+				if !bytes.Equal(account2Enc, v) {
+					panic(fmt.Sprintf("expected: %x, got: %x", account2Enc, v))
+				}
+			case <-ctx.Done():
+				panic("Context done while checking res5")
 			}
 		}
 		fmt.Printf("-----21\n")
+
 		for i := range res6 {
-			v := <-res6[i]
-			if !bytes.Equal(account1Enc, v) {
-				panic(fmt.Sprintf("epxected: %x, got: %x", account1Enc, v))
+			select {
+			case v := <-res6[i]:
+				if !bytes.Equal(account1Enc, v) {
+					panic(fmt.Sprintf("expected: %x, got: %x", account1Enc, v))
+				}
+			case <-ctx.Done():
+				panic("Context done while checking res6")
 			}
 		}
 		fmt.Printf("done3: \n")
 	}()
 	fmt.Printf("-----3\n")
 	txID4 := put(k1[:], account2Enc)
-	time.Sleep(10 * time.Second)
 
 	c.OnNewBlock(&remote.StateChangeBatch{
 		StateVersionId:      txID4,
@@ -391,15 +426,23 @@ func TestAPI(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := range res7 {
-			v := <-res7[i]
-			if !bytes.Equal(account4Enc, v) {
-				panic(fmt.Sprintf("epxected: %x, got: %x", account4Enc, v))
+			select {
+			case v := <-res7[i]:
+				if !bytes.Equal(account4Enc, v) {
+					panic(fmt.Sprintf("expected: %x, got: %x", account4Enc, v))
+				}
+			case <-ctx.Done():
+				panic("Context done while checking res7")
 			}
 		}
 		for i := range res8 {
-			v := <-res8[i]
-			if !bytes.Equal(account1Enc, v) {
-				panic(fmt.Sprintf("epxected: %x, got: %x", account1Enc, v))
+			select {
+			case v := <-res8[i]:
+				if !bytes.Equal(account1Enc, v) {
+					panic(fmt.Sprintf("expected: %x, got: %x", account1Enc, v))
+				}
+			case <-ctx.Done():
+				panic("Context done while checking res8")
 			}
 		}
 		fmt.Printf("done4: \n")
@@ -412,7 +455,19 @@ func TestAPI(t *testing.T) {
 	// })
 	// require.NoError(err)
 
-	wg.Wait()
+	// Wait for all goroutines to complete or timeout
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// All goroutines completed successfully
+	case <-ctx.Done():
+		t.Error("Test timed out waiting for goroutines to complete")
+	}
 }
 
 func TestCode(t *testing.T) {
