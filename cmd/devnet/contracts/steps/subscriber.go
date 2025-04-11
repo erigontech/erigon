@@ -31,11 +31,11 @@ import (
 	"github.com/erigontech/erigon/cmd/devnet/contracts"
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
 	"github.com/erigontech/erigon/cmd/devnet/devnetutils"
-	"github.com/erigontech/erigon/cmd/devnet/requests"
 	"github.com/erigontech/erigon/cmd/devnet/scenarios"
 	"github.com/erigontech/erigon/cmd/devnet/transactions"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/requests"
 )
 
 func init() {

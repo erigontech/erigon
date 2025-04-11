@@ -37,11 +37,11 @@ import (
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
-	"github.com/erigontech/erigon/cmd/devnet/requests"
 	"github.com/erigontech/erigon/core/types"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/requests"
 )
 
 var ErrTokenIndexOutOfRange = errors.New("index is grater than the number of tokens in transaction")
