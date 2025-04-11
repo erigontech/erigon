@@ -36,7 +36,7 @@ require (
 	github.com/deckarep/golang-set v1.8.0
 	github.com/deckarep/golang-set/v2 v2.3.1
 	github.com/dgravesa/go-parallel v0.6.0
-	github.com/docker/docker v26.1.0+incompatible
+	github.com/docker/docker v26.1.5+incompatible
 	github.com/dop251/goja v0.0.0-20230122112309-96b1610dd4f7
 	github.com/dustin/go-humanize v1.0.1
 	github.com/edsrzf/mmap-go v1.1.0
