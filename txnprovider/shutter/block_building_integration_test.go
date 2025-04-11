@@ -450,7 +450,14 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	require.NoError(t, err)
 	//goland:noinspection HttpUrlsUsage
 	engineApiUrl := fmt.Sprintf("http://%s:%d", httpConfig.AuthRpcHTTPListenAddress, httpConfig.AuthRpcPort)
-	engineApiClient, err := engineapi.DialJsonRpcClient(engineApiUrl, jwtSecret, logger)
+	engineApiClient, err := engineapi.DialJsonRpcClient(
+		engineApiUrl,
+		jwtSecret,
+		logger,
+		// requests should not take more than 5 secs in a test env, yet we can spam frequently
+		engineapi.WithJsonRpcClientRetryBackOff(50*time.Millisecond),
+		engineapi.WithJsonRpcClientMaxRetries(100),
+	)
 	require.NoError(t, err)
 	slotCalculator := shutter.NewBeaconChainSlotCalculator(shutterConfig.BeaconChainGenesisTimestamp, shutterConfig.SecondsPerSlot)
 	cl := testhelpers.NewMockCl(slotCalculator, engineApiClient, bank.Address(), chain.TopBlock)

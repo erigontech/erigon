@@ -44,13 +44,13 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
-	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/execution/consensus/misc"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 // StateTest checks transaction processing without block context.
@@ -264,13 +264,20 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 		}
 	}
 	evm := vm.NewEVM(context, txContext, statedb, config, vmconfig)
+	if vmconfig.Tracer != nil && vmconfig.Tracer.OnTxStart != nil {
+		vmconfig.Tracer.OnTxStart(evm.GetVMContext(), nil, libcommon.Address{})
+	}
 
 	// Execute the message.
 	snapshot := statedb.Snapshot()
 	gaspool := new(core.GasPool)
 	gaspool.AddGas(block.GasLimit()).AddBlobGas(config.GetMaxBlobGasPerBlock(header.Time))
-	if _, err = core.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */, nil /* engine */); err != nil {
+	res, err := core.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */, nil /* engine */)
+	if err != nil {
 		statedb.RevertToSnapshot(snapshot)
+	}
+	if vmconfig.Tracer != nil && vmconfig.Tracer.OnTxEnd != nil {
+		vmconfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: res.UsedGas}, nil)
 	}
 
 	if err = statedb.FinalizeTx(evm.ChainRules(), w); err != nil {

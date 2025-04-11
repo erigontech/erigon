@@ -380,7 +380,7 @@ func writeInterface(val reflect.Value, w *encBuffer) error {
 }
 
 func makeSliceWriter(typ reflect.Type, ts tags) (writer, error) {
-	etypeinfo := cachedTypeInfo1(typ.Elem(), tags{})
+	etypeinfo := theTC.infoWhileGenerating(typ.Elem(), tags{})
 	if etypeinfo.writerErr != nil {
 		return nil, etypeinfo.writerErr
 	}
@@ -448,7 +448,7 @@ func makeStructWriter(typ reflect.Type) (writer, error) {
 }
 
 func makePtrWriter(typ reflect.Type, ts tags) (writer, error) {
-	etypeinfo := cachedTypeInfo1(typ.Elem(), tags{})
+	etypeinfo := theTC.infoWhileGenerating(typ.Elem(), tags{})
 	if etypeinfo.writerErr != nil {
 		return nil, etypeinfo.writerErr
 	}

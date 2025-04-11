@@ -85,8 +85,7 @@ import (
 }*/
 
 var bucketLabels = map[string]string{
-	kv.Receipts:                 "Receipts",
-	kv.Log:                      "Event Logs",
+	kv.ReceiptsCache:            "Receipts",
 	kv.Headers:                  "Headers",
 	kv.HeaderCanonical:          "Canonical headers",
 	kv.HeaderTD:                 "Headers TD",
@@ -98,8 +97,6 @@ var bucketLabels = map[string]string{
 	kv.PlainState:               "Plain State",
 	kv.HashedAccountsDeprecated: "Hashed Accounts",
 	kv.HashedStorageDeprecated:  "Hashed Storage",
-	kv.TrieOfAccounts:           "Intermediate Hashes Of Accounts",
-	kv.TrieOfStorage:            "Intermediate Hashes Of Storage",
 	kv.IncarnationMap:           "Incarnations",
 	kv.Senders:                  "Transaction Senders",
 }

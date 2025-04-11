@@ -141,11 +141,8 @@ func (s *SnapshotStore) LastEventId(ctx context.Context) (uint64, error) {
 	}
 
 	snapshotLastEventId := s.LastFrozenEventId()
-	if snapshotLastEventId > lastEventId {
-		return snapshotLastEventId, nil
-	}
 
-	return lastEventId, nil
+	return max(snapshotLastEventId, lastEventId), nil
 }
 
 func (s *SnapshotStore) LastFrozenEventId() uint64 {
@@ -192,11 +189,8 @@ func (s *SnapshotStore) LastProcessedEventId(ctx context.Context) (uint64, error
 	}
 
 	snapshotLastEventId := s.LastFrozenEventId()
-	if snapshotLastEventId > lastEventId {
-		return snapshotLastEventId, nil
-	}
 
-	return lastEventId, nil
+	return max(snapshotLastEventId, lastEventId), nil
 }
 
 func (s *SnapshotStore) EventTxnToBlockNum(ctx context.Context, txnHash libcommon.Hash) (uint64, bool, error) {
