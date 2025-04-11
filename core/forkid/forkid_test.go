@@ -80,8 +80,10 @@ func TestCreation(t *testing.T) {
 				{17034869, 1681338443, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 1681338455}}, // Last pre-Shanghai block
 				{17034870, 1681338479, ID{Hash: checksumToBytes(0xdce96c2d), Next: 1710338135}}, // First Shanghai block
 				{19426586, 1710338123, ID{Hash: checksumToBytes(0xdce96c2d), Next: 1710338135}}, // Last Shanghai block
-				{19426587, 1710338135, ID{Hash: checksumToBytes(0x9f3d2254), Next: 0}},          // First Cancun block
-				{20000000, 1800000000, ID{Hash: checksumToBytes(0x9f3d2254), Next: 0}},          // Future Cancun block (mock)
+				{19426587, 1710338135, ID{Hash: checksumToBytes(0x9f3d2254), Next: 1746612311}}, // First Cancun block
+				{22432453, 1746612299, ID{Hash: checksumToBytes(0x9f3d2254), Next: 1746612311}}, // Last Cancun block (approx.)
+				{22432454, 1746612311, ID{Hash: checksumToBytes(0xc376cf8b), Next: 0}},          // First Prague block (approx.)
+				{30000000, 1900000000, ID{Hash: checksumToBytes(0xc376cf8b), Next: 0}},          // Future Prague block (mock)
 			},
 		},
 		// Sepolia test cases

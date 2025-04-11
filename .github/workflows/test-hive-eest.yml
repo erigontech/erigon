@@ -17,10 +17,17 @@ jobs:
           repository: ethereum/hive
           # ref: prague-devnet-4
           path: hive
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
+          password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
+    
       - name: Setup go env and cache
         uses: actions/setup-go@v5
         with:
-          go-version: '>=1.22'
+          go-version: '>=1.23'
           go-version-file: 'hive/go.mod'
 
       # Targetting the clients/erigon/Dockerfile.git in the Hive director - 
@@ -71,7 +78,7 @@ jobs:
               echo "failed" > failed.log
               exit 1
             fi
-            if (( failed*2 > tests )); then
+            if (( failed > 3 )); then
               echo "Too many failures for suite ${1} - ${failed} failed out of ${tests}"
               echo "failed" > failed.log
               exit 1

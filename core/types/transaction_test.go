@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/core/types/typestest"
 )
 
 // The values in those tests are from the Transaction Tests
@@ -702,12 +701,6 @@ func populateBlobTxs() {
 	}
 }
 
-func populateBlobWrapperTxs() {
-	for i := 0; i < N; i++ {
-		dummyBlobWrapperTxs[i] = newRandBlobWrapper()
-	}
-}
-
 func TestBlobTxEncodeDecode(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	populateBlobTxs()
@@ -737,7 +730,7 @@ func TestBlobTxEncodeDecode(t *testing.T) {
 }
 
 func TestShortUnwrap(t *testing.T) {
-	blobTxRlp, _ := typestest.MakeBlobTxnRlp()
+	blobTxRlp, _ := MakeBlobTxnRlp()
 	shortRlp, err := UnwrapTxPlayloadRlp(blobTxRlp)
 	if err != nil {
 		t.Errorf("short rlp stripping failed: %v", err)
@@ -749,7 +742,7 @@ func TestShortUnwrap(t *testing.T) {
 		t.Errorf("short rlp decoding failed : %v", err)
 	}
 	wrappedBlobTx := BlobTxWrapper{}
-	blockTxRlp2, _ := typestest.MakeBlobTxnRlp()
+	blockTxRlp2, _ := MakeBlobTxnRlp()
 	err = wrappedBlobTx.DecodeRLP(rlp.NewStream(bytes.NewReader(blockTxRlp2[1:]), 0))
 	if err != nil {
 		t.Errorf("long rlp decoding failed: %v", err)
