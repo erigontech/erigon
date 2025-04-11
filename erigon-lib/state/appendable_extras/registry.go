@@ -18,13 +18,13 @@ import (
 type AppendableId uint16
 
 type holder struct {
-	name             string
-	snapshotNameBase string   // name to be used in snapshot file
-	indexNameBases   []string // one indexNameBase for each index
-	dirs             datadir.Dirs
-	snapshotDir      string
-	saltFile         string
-	snapshotConfig   *SnapshotConfig
+	// tag - "type" of snapshot file. e.g. tag is "bodies" for "v1-007300-007400-bodies.seg" file
+	name                string
+	snapshotDataFileTag string   // name to be used in snapshot file
+	indexFileTag        []string // one indexFileTag for each index
+	dirs                datadir.Dirs
+	saltFile            string
+	snapshotConfig      *SnapshotConfig
 }
 
 // keeping this fixed size, so that append() does not potentially re-allocate array
@@ -49,17 +49,13 @@ func RegisterAppendable(name string, dirs datadir.Dirs, pre snapcfg.Preverified,
 		opt(h)
 	}
 
-	if h.snapshotNameBase == "" {
-		h.snapshotNameBase = name
+	if h.snapshotDataFileTag == "" {
+		h.snapshotDataFileTag = name
 	}
 
-	if h.indexNameBases == nil {
+	if h.indexFileTag == nil {
 		// default
-		h.indexNameBases = []string{name}
-	}
-
-	if h.snapshotDir == "" {
-		h.snapshotDir = dirs.Snap
+		h.indexFileTag = []string{name}
 	}
 
 	if h.saltFile == "" {
@@ -93,13 +89,13 @@ type EntityIdOption func(*holder)
 
 func WithSnapshotTag(tag string) EntityIdOption {
 	return func(a *holder) {
-		a.snapshotNameBase = tag
+		a.snapshotDataFileTag = tag
 	}
 }
 
-func WithIndexFileType(indexFileType []string) EntityIdOption {
+func WithIndexFileType(indexFileTag []string) EntityIdOption {
 	return func(a *holder) {
-		a.indexNameBases = indexFileType
+		a.indexFileTag = indexFileTag
 	}
 }
 
@@ -118,12 +114,6 @@ func WithSaltFile(saltFile string) EntityIdOption {
 	}
 }
 
-func WithSnapshotDir(dir string) EntityIdOption {
-	return func(a *holder) {
-		a.snapshotDir = dir
-	}
-}
-
 func (a AppendableId) Id() uint64 {
 	return uint64(a)
 }
@@ -133,11 +123,11 @@ func (a AppendableId) Name() string {
 }
 
 func (a AppendableId) SnapshotTag() string {
-	return entityRegistry[a].snapshotNameBase
+	return entityRegistry[a].snapshotDataFileTag
 }
 
-func (a AppendableId) IndexPrefix() []string {
-	return entityRegistry[a].indexNameBases
+func (a AppendableId) IndexFileTag() []string {
+	return entityRegistry[a].indexFileTag
 }
 
 func (a AppendableId) String() string {
@@ -146,10 +136,6 @@ func (a AppendableId) String() string {
 
 func (a AppendableId) Dirs() datadir.Dirs {
 	return entityRegistry[a].dirs
-}
-
-func (a AppendableId) SnapshotDir() string {
-	return entityRegistry[a].snapshotDir
 }
 
 func (a AppendableId) SnapshotConfig() *SnapshotConfig {

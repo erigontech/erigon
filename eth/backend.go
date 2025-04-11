@@ -119,15 +119,15 @@ import (
 	"github.com/erigontech/erigon/polygon/heimdall"
 	polygonsync "github.com/erigontech/erigon/polygon/sync"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/jsonrpc"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/turbo/builder"
 	"github.com/erigontech/erigon/turbo/engineapi"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/turbo/execution/eth1"
 	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
 	privateapi2 "github.com/erigontech/erigon/turbo/privateapi"
-	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/silkworm"
@@ -238,6 +238,44 @@ func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {
 	return
 }
 
+func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadir.Dirs, cfg *ethconfig.Config) error {
+	isCommitmentHistoryEnabled, ok, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		if !cfg.KeepExecutionProofs {
+			if err := rawdb.WriteDBCommitmentHistoryEnabled(tx, cfg.KeepExecutionProofs); err != nil {
+				return err
+			}
+			return nil
+		}
+		// we need to make sure we do not run from an old version so check amount of keys in kv.AccountDomain
+		c, err := tx.Count(kv.TblAccountVals)
+		if err != nil {
+			return fmt.Errorf("failed to count keys in kv.AccountDomain: %w", err)
+		}
+		if c > 0 {
+			return fmt.Errorf("commitment history is not enabled in the database. restart erigon after deleting the chaindata folder: %s", dirs.Chaindata)
+		}
+
+		if err := rawdb.WriteDBCommitmentHistoryEnabled(tx, cfg.KeepExecutionProofs); err != nil {
+			return err
+		}
+		return nil
+	}
+	if cfg.KeepExecutionProofs != isCommitmentHistoryEnabled {
+		return fmt.Errorf(
+			"commitment history flag mismatch from db and config. db: %v, config: %v. please restart erigon with the same flag or delete the chaindata folder: %s",
+			isCommitmentHistoryEnabled, cfg.KeepExecutionProofs, dirs.Chaindata)
+	}
+	if err := rawdb.WriteDBCommitmentHistoryEnabled(tx, cfg.KeepExecutionProofs); err != nil {
+		return err
+	}
+	logger.Warn("enabling commitment history. this is an experimental flag so run at your own risk!", "enabled", cfg.KeepExecutionProofs)
+	return nil
+}
+
 const blockBufferSize = 128
 
 // New creates a new Ethereum object (including the
@@ -262,6 +300,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	latestBlockBuiltStore := builder.NewLatestBlockBuiltStore()
 
 	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
+		if err := checkAndSetCommitmentHistoryFlag(tx, logger, dirs, config); err != nil {
+			return err
+		}
 		if err = stages.UpdateMetrics(tx); err != nil {
 			return err
 		}
@@ -552,6 +593,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	if chainConfig.Bor != nil {
 		if !config.WithoutHeimdall {
 			heimdallClient = heimdall.NewHttpClient(config.HeimdallURL, logger)
+		} else {
+			heimdallClient = heimdall.NewIdleClient(config.Miner)
 		}
 
 		if config.PolygonSync {
@@ -949,7 +992,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}()
 
 	if err := backend.StartMining(
-		context.Background(),
+		ctx,
 		backend.chainDB,
 		backend.stateDiffClient,
 		mining,
@@ -1312,6 +1355,12 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 
 	go func() {
 		for req, err := stream.Recv(); ; req, err = stream.Recv() {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
 			if err == nil {
 				for _, change := range req.ChangeBatch {
 					stateChangeCh <- change
@@ -1379,6 +1428,8 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 						s.logger.Warn("mining", "err", err)
 					}
 				case <-quitCh:
+					return
+				case <-ctx.Done():
 					return
 				}
 			}

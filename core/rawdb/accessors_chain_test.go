@@ -460,6 +460,123 @@ func TestHeadStorage(t *testing.T) {
 	}
 }
 
+// Tests that receipts associated with a single block can be stored and retrieved.
+func TestBlockReceiptStorage(t *testing.T) {
+	t.Parallel()
+	m := mock.Mock(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	br := m.BlockReader
+	require := require.New(t)
+	ctx := m.Ctx
+
+	// Create a live block since we need metadata to reconstruct the receipt
+	tx1 := types.NewTransaction(1, libcommon.HexToAddress("0x1"), u256.Num1, 1, u256.Num1, nil)
+	tx2 := types.NewTransaction(2, libcommon.HexToAddress("0x2"), u256.Num2, 2, u256.Num2, nil)
+
+	header := &types.Header{Number: big.NewInt(1)}
+	body := &types.Body{Transactions: types.Transactions{tx1, tx2}}
+
+	// Create the two receipts to manage afterwards
+	receipt1 := &types.Receipt{
+		Status:            types.ReceiptStatusFailed,
+		CumulativeGasUsed: 1,
+		Logs: []*types.Log{
+			{Address: libcommon.BytesToAddress([]byte{0x11})},
+			{Address: libcommon.BytesToAddress([]byte{0x01, 0x11})},
+		},
+		TxHash:          tx1.Hash(),
+		ContractAddress: libcommon.BytesToAddress([]byte{0x01, 0x11, 0x11}),
+		GasUsed:         111111,
+		BlockNumber:     header.Number,
+		BlockHash:       header.Hash(),
+
+		TransactionIndex: 0,
+	}
+	//receipt1.Bloom = types.CreateBloom(types.Receipts{receipt1})
+
+	receipt2 := &types.Receipt{
+		PostState:         libcommon.Hash{2}.Bytes(),
+		CumulativeGasUsed: 2,
+		Logs: []*types.Log{
+			{Address: libcommon.BytesToAddress([]byte{0x22})},
+			{Address: libcommon.BytesToAddress([]byte{0x02, 0x22})},
+		},
+		TxHash:           tx2.Hash(),
+		ContractAddress:  libcommon.BytesToAddress([]byte{0x02, 0x22, 0x22}),
+		GasUsed:          222222,
+		BlockNumber:      header.Number,
+		BlockHash:        header.Hash(),
+		TransactionIndex: 1,
+	}
+	//receipt2.Bloom = types.CreateBloom(types.Receipts{receipt2})
+	receipts := types.Receipts{receipt1, receipt2}
+
+	// Check that no receipt entries are in a pristine database
+	hash := header.Hash() //libcommon.BytesToHash([]byte{0x03, 0x14})
+
+	require.NoError(rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()))
+	require.NoError(rawdb.WriteHeader(tx, header))
+	// Insert the body that corresponds to the receipts
+	require.NoError(rawdb.WriteBody(tx, hash, 1, body))
+	require.NoError(rawdb.WriteSenders(tx, hash, 1, body.SendersFromTxs()))
+
+	// Insert the receipt slice into the database and check presence
+	require.NoError(rawdb.WriteReceiptsCache(tx, 1, hash, receipts))
+
+	b, _, err := br.BlockWithSenders(ctx, tx, hash, 1)
+	require.NoError(err)
+	require.NotNil(b)
+	rs, err := rawdb.ReadReceiptsCache(tx, b)
+	require.NoError(err)
+	require.NotEmpty(rs)
+	require.NoError(checkReceiptsRLP(rs, receipts))
+
+	// Delete the body and ensure that the receipts are no longer returned (metadata can't be recomputed)
+	rawdb.DeleteHeader(tx, hash, 1)
+	rawdb.DeleteBody(tx, hash, 1)
+	{
+		b, _, err := br.BlockWithSenders(ctx, tx, hash, 1)
+		require.NoError(err)
+		require.Nil(b)
+	}
+
+	rs, err = rawdb.ReadReceiptsCache(tx, b)
+	require.NoError(err)
+	require.NotNil(rs)
+
+	// Ensure that receipts without metadata can be returned without the block body too
+	rFromDB, err := rawdb.ReadReceiptsCache(tx, b)
+	require.NoError(err)
+	require.NoError(checkReceiptsRLP(rFromDB, receipts))
+
+	require.NoError(rawdb.WriteHeader(tx, header))
+	// Sanity check that body alone without the receipt is a full purge
+	require.NoError(rawdb.WriteBody(tx, hash, 1, body))
+	b, _, err = br.BlockWithSenders(ctx, tx, hash, 1)
+	require.NoError(err)
+	require.NotNil(b)
+
+	{ //prune: [0, to)
+		require.NoError(rawdb.PruneReceiptsCache(tx, 1, 1)) // exclude upper bound
+		rs, err = rawdb.ReadReceiptsCache(tx, b)
+		require.NoError(err)
+		require.NotEmpty(rs)
+
+		require.NoError(rawdb.PruneReceiptsCache(tx, 2, 0)) // limit preserved
+		rs, err = rawdb.ReadReceiptsCache(tx, b)
+		require.NoError(err)
+		require.NotEmpty(rs)
+
+		require.NoError(rawdb.PruneReceiptsCache(tx, 2, 1)) // prune block 1
+		rs, err = rawdb.ReadReceiptsCache(tx, b)
+		require.NoError(err)
+		require.Empty(rs)
+	}
+
+}
+
 // Tests block storage and retrieval operations with withdrawals.
 func TestBlockWithdrawalsStorage(t *testing.T) {
 	t.Parallel()

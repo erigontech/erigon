@@ -389,6 +389,7 @@ func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) (v []byte, err error) {
 		c.hits.Inc()
 		return it.V, nil
 	}
+
 	c.miss.Inc()
 
 	if c.cfg.StateV3 {
@@ -407,9 +408,10 @@ func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) (v []byte, err error) {
 		return v, nil
 	}
 	//fmt.Printf("from db: %#x,%x\n", k, v)
-
 	c.lock.Lock()
+
 	defer c.lock.Unlock()
+
 	v = c.add(common.Copy(k), common.Copy(v), r, id).V
 	return v, nil
 }

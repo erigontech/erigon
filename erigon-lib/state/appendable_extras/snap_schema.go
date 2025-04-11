@@ -33,6 +33,7 @@ type SnapNameSchema interface {
 	ExistenceFile(version Version, from, to RootNum) string
 
 	AccessorIdxCount() uint64
+	DataDirectory() string
 }
 
 type _fileMetadata struct {
@@ -55,9 +56,7 @@ type E2SnapSchema struct {
 	dataFileTag   string
 	indexFileTags []string
 
-	dataFolder  string
-	indexFolder string
-	accessors   Accessors
+	accessors Accessors
 
 	// caches
 	dataFileMetadata      *_fileMetadata
@@ -81,8 +80,6 @@ func NewE2SnapSchemaWithStep(dirs datadir.Dirs, dataFileTag string, indexFileTag
 		stepSize:      stepSize,
 		dataFileTag:   dataFileTag,
 		indexFileTags: indexFileTags,
-		dataFolder:    dirs.Snap,
-		indexFolder:   dirs.Snap,
 		accessors:     AccessorHashMap,
 
 		dataFileMetadata: &_fileMetadata{
@@ -151,11 +148,11 @@ func (s *E2SnapSchema) Parse(fileName string) (f *SnapInfo, ok bool) {
 }
 
 func (s *E2SnapSchema) DataFile(version Version, from, to RootNum) string {
-	return filepath.Join(s.dataFolder, fmt.Sprintf("%s-%06d-%06d-%s%s", version, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.dataFileTag, string(DataExtensionSeg)))
+	return filepath.Join(s.dataFileMetadata.folder, fmt.Sprintf("%s-%06d-%06d-%s%s", version, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.dataFileTag, string(DataExtensionSeg)))
 }
 
 func (s *E2SnapSchema) AccessorIdxFile(version Version, from, to RootNum, idxPos uint64) string {
-	return filepath.Join(s.indexFolder, fmt.Sprintf("%s-%06d-%06d-%s%s", version, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.indexFileTags[idxPos], string(AccessorExtensionIdx)))
+	return filepath.Join(s.indexFileMetadata.folder, fmt.Sprintf("%s-%06d-%06d-%s%s", version, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.indexFileTags[idxPos], string(AccessorExtensionIdx)))
 }
 
 func (s *E2SnapSchema) BtIdxFile(version Version, from, to RootNum) (string, BtIdxParams) {
@@ -186,6 +183,10 @@ func (s *E2SnapSchema) AccessorIdxCount() uint64 {
 	return uint64(len(s.indexFileTags))
 }
 
+func (s *E2SnapSchema) DataDirectory() string {
+	return s.dataFileMetadata.folder
+}
+
 // E3 Schema
 
 type E3SnapSchema struct {
@@ -210,7 +211,7 @@ type E3SnapSchemaBuilder struct {
 	e *E3SnapSchema
 }
 
-func NewE3ParserBuilder(accessors Accessors, stepSize uint64) *E3SnapSchemaBuilder {
+func NewE3SnapSchemaBuilder(accessors Accessors, stepSize uint64) *E3SnapSchemaBuilder {
 	eschema := E3SnapSchemaBuilder{
 		e: &E3SnapSchema{},
 	}
@@ -288,10 +289,6 @@ func (b *E3SnapSchemaBuilder) checkPresence(check Accessors, met *_fileMetadata)
 }
 
 var _ SnapNameSchema = (*E3SnapSchema)(nil)
-
-// func NewE3Parser(dirs datadir.Dirs) *E3SnapSchema {
-// 	return nil
-// }
 
 var stateFileRegex = regexp.MustCompile("^v([0-9]+)-([[:lower:]]+).([0-9]+)-([0-9]+).(.*)$")
 
@@ -383,4 +380,26 @@ func (s *E3SnapSchema) AccessorIdxCount() uint64 {
 		return 0
 	}
 	return 1
+}
+
+func (s *E3SnapSchema) DataDirectory() string {
+	return s.dataFileMetadata.folder
+}
+
+// debug method for getting all file extensions for this schema
+func (s *E3SnapSchema) FileExtensions() (extensions []string) {
+	extensions = append(extensions, s.dataExtension.String())
+	if s.indexFileMetadata.supported {
+		extensions = append(extensions, s.accessorIdxExtension.String())
+	}
+
+	if s.btIdxFileMetadata.supported {
+		extensions = append(extensions, ".bt")
+	}
+
+	if s.existenceFileMetadata.supported {
+		extensions = append(extensions, ".kvei")
+	}
+
+	return
 }
