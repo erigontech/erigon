@@ -22,11 +22,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	ecrypto "github.com/erigontech/erigon-lib/crypto"
 	"math/bits"
 	"sort"
 	"strings"
 	"unsafe"
+
+	ecrypto "github.com/erigontech/erigon-lib/crypto"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -184,6 +185,7 @@ func NewBranchEncoder(sz uint64) *BranchEncoder {
 
 func (be *BranchEncoder) CollectUpdate(
 	ctx PatriciaContext,
+	currentCommitmentMetrics *ProcessCommitment,
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
 	readCell func(nibble int, skip bool) (*cell, error),
@@ -210,6 +212,7 @@ func (be *BranchEncoder) CollectUpdate(
 	}
 	//fmt.Printf("\ncollectBranchUpdate [%x] -> %s\n", prefix, BranchData(update).String())
 	// has to copy :(
+	currentCommitmentMetrics.UpdateBranch.Add(1)
 	if err = ctx.PutBranch(common.Copy(prefix), common.Copy(update), prev, prevStep); err != nil {
 		return 0, err
 	}
