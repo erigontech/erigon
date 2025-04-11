@@ -282,4 +282,5 @@ type Sync struct {
 
 	ChaosMonkey              bool
 	AlwaysGenerateChangesets bool
+	PersistReceipts          uint64
 }

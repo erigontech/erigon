@@ -90,6 +90,11 @@ func (g *RequestGenerator) getTransactionReceipt(hash string) string {
 	return fmt.Sprintf(template, hash, g.reqID)
 }
 
+func (g *RequestGenerator) getBlockReceipts(bn uint64) string {
+	const template = `{"jsonrpc":"2.0","method":"eth_getBlockReceipts","params":["0x%x"],"id":%d}`
+	return fmt.Sprintf(template, bn, g.reqID)
+}
+
 func (g *RequestGenerator) getBalance(miner libcommon.Address, bn uint64) string {
 	const template = `{"jsonrpc":"2.0","method":"eth_getBalance","params":["0x%x", "0x%x"],"id":%d}`
 	return fmt.Sprintf(template, miner, bn, g.reqID)

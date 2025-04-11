@@ -25,25 +25,22 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math"
 	"math/big"
 	"time"
 
 	"github.com/gballet/go-verkle"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core/rawdb/utils"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/ethdb/cbor"
 )
 
 // ReadCanonicalHash retrieves the hash assigned to a canonical block number.
@@ -784,122 +781,6 @@ func TruncateTd(tx kv.RwTx, blockFrom uint64) error {
 	return nil
 }
 
-// ReadRawReceipts retrieves all the transaction receipts belonging to a block.
-// The receipt metadata fields are not guaranteed to be populated, so they
-// should not be used. Use ReadReceipts instead if the metadata is needed.
-func ReadRawReceipts(db kv.Tx, blockNum uint64) types.Receipts {
-	// Retrieve the flattened receipt slice
-	data, err := db.GetOne(kv.Receipts, hexutility.EncodeTs(blockNum))
-	if err != nil {
-		log.Error("ReadRawReceipts failed", "err", err)
-	}
-	if len(data) == 0 {
-		return nil
-	}
-	var receipts types.Receipts
-	if err := cbor.Unmarshal(&receipts, bytes.NewReader(data)); err != nil {
-		log.Error("receipt unmarshal failed", "err", err)
-		return nil
-	}
-
-	prefix := make([]byte, 8)
-	binary.BigEndian.PutUint64(prefix, blockNum)
-
-	it, err := db.Prefix(kv.Log, prefix)
-	if err != nil {
-		log.Error("logs fetching failed", "err", err)
-		return nil
-	}
-	defer it.Close()
-	for it.HasNext() {
-		k, v, err := it.Next()
-		if err != nil {
-			log.Error("logs fetching failed", "err", err)
-			return nil
-		}
-		var logs types.Logs
-		if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
-			err = fmt.Errorf("receipt unmarshal failed:  %w", err)
-			log.Error("logs fetching failed", "err", err)
-			return nil
-		}
-
-		txIndex := int(binary.BigEndian.Uint32(k[8:]))
-
-		// only return logs from real txs (not from block's stateSyncReceipt)
-		if txIndex < len(receipts) {
-			receipts[txIndex].Logs = logs
-		}
-	}
-
-	return receipts
-}
-
-// WriteReceipts stores all the transaction receipts belonging to a block.
-func WriteReceipts(tx kv.Putter, number uint64, receipts types.Receipts) error {
-	buf := bytes.NewBuffer(make([]byte, 0, 1024))
-	for txId, r := range receipts {
-		if len(r.Logs) == 0 {
-			continue
-		}
-
-		buf.Reset()
-		err := cbor.Marshal(buf, r.Logs)
-		if err != nil {
-			return fmt.Errorf("encode block logs for block %d: %w", number, err)
-		}
-
-		if err = tx.Put(kv.Log, dbutils.LogKey(number, uint32(txId)), buf.Bytes()); err != nil {
-			return fmt.Errorf("writing logs for block %d: %w", number, err)
-		}
-	}
-
-	buf.Reset()
-	err := cbor.Marshal(buf, receipts)
-	if err != nil {
-		return fmt.Errorf("encode block receipts for block %d: %w", number, err)
-	}
-
-	if err = tx.Put(kv.Receipts, hexutility.EncodeTs(number), buf.Bytes()); err != nil {
-		return fmt.Errorf("writing receipts for block %d: %w", number, err)
-	}
-	return nil
-}
-
-// TruncateReceipts removes all receipt for given block number or newer - used for Unwind
-func TruncateReceipts(db kv.RwTx, number uint64) error {
-	if err := db.ForEach(kv.Receipts, hexutility.EncodeTs(number), func(k, _ []byte) error {
-		return db.Delete(kv.Receipts, k)
-	}); err != nil {
-		return err
-	}
-
-	from := make([]byte, 8)
-	binary.BigEndian.PutUint64(from, number)
-	if err := db.ForEach(kv.Log, from, func(k, _ []byte) error {
-		return db.Delete(kv.Log, k)
-	}); err != nil {
-		return err
-	}
-	return nil
-}
-
-func ReceiptsAvailableFrom(tx kv.Tx) (uint64, error) {
-	c, err := tx.Cursor(kv.Receipts)
-	if err != nil {
-		return math.MaxUint64, err
-	}
-	defer c.Close()
-	k, _, err := c.First()
-	if err != nil {
-		return math.MaxUint64, err
-	}
-	if len(k) == 0 {
-		return math.MaxUint64, nil
-	}
-	return binary.BigEndian.Uint64(k), nil
-}
-
 // ReadBlock retrieves an entire block corresponding to the hash, assembling it
 // back from the stored header and body. If either the header or body could not
 // be retrieved nil is returned.
@@ -1352,4 +1233,137 @@ func ReadDBSchemaVersion(tx kv.Tx) (major, minor, patch uint32, ok bool, err err
 	minor = binary.BigEndian.Uint32(existingVersion[4:])
 	patch = binary.BigEndian.Uint32(existingVersion[8:])
 	return major, minor, patch, true, nil
+}
+
+func ReadReceiptCache(tx kv.Tx, blockNum uint64, blockHash common.Hash, txnIndex uint32, txnHash common.Hash) (*types.Receipt, bool, error) {
+	data, err := tx.GetOne(kv.ReceiptsCache, dbutils.ReceiptCacheKey(blockNum, blockHash, txnIndex))
+	if err != nil {
+		return nil, false, err
+	}
+	if data == nil {
+		return nil, false, nil
+	}
+
+	if len(data) == 0 {
+		panic(1)
+	}
+
+	// Convert the receipts from their storage form to their internal representation
+	receipt := &types.ReceiptForStorage{}
+	if err := rlp.DecodeBytes(data, receipt); err != nil {
+		return nil, false, fmt.Errorf("%w, of block %d, len(data)=%d", err, blockNum, len(data))
+	}
+	res := (*types.Receipt)(receipt)
+	res.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, txnHash)
+	return res, true, nil
+}
+
+func ReadReceiptsCache(tx kv.Tx, block *types.Block) (res types.Receipts, err error) {
+	blockHash := block.Hash()
+	blockNum := block.NumberU64()
+
+	rng, err := tx.Prefix(kv.ReceiptsCache, dbutils.HeaderKey(blockNum, blockHash))
+	if err != nil {
+		return nil, fmt.Errorf("ReadReceipts: %d, %w", blockNum, err)
+	}
+	defer rng.Close()
+
+	for rng.HasNext() {
+		_, v, err := rng.Next()
+		if err != nil {
+			return nil, fmt.Errorf("ReadReceipts: %d, %w", blockNum, err)
+		}
+		if len(v) == 0 {
+			return nil, nil
+		}
+
+		// Convert the receipts from their storage form to their internal representation
+		receipt := &types.ReceiptForStorage{}
+		if err := rlp.DecodeBytes(v, receipt); err != nil {
+			return nil, fmt.Errorf("ReadReceipts: deserialize %d, len(v)=%d, %w", blockNum, len(v), err)
+		}
+		x := (*types.Receipt)(receipt)
+		if int(receipt.TransactionIndex) < len(block.Transactions()) {
+			txn := block.Transactions()[receipt.TransactionIndex]
+			x.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, txn.Hash())
+		}
+		res = append(res, x)
+	}
+
+	return res, nil
+}
+
+// PruneReceiptsCache [0,blockNum) removes all receipt until given block number.
+func PruneReceiptsCache(tx kv.RwTx, toBlockNum uint64, pruneLimit int) error {
+	rng, err := tx.RwCursor(kv.ReceiptsCache)
+	if err != nil {
+		return err
+	}
+	defer rng.Close()
+
+	var prevBlockNum uint64
+	for k, _, err := rng.First(); k != nil; k, _, err = rng.Next() {
+		if err != nil {
+			return fmt.Errorf("prune receipts for block %d: %w", toBlockNum, err)
+		}
+		blockNum := binary.BigEndian.Uint64(k)
+		if blockNum > toBlockNum || pruneLimit == 0 {
+			break
+		}
+		if prevBlockNum != blockNum {
+			prevBlockNum = blockNum
+			pruneLimit--
+		}
+
+		if err := rng.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// WriteReceiptsCache stores all the transaction receipts belonging to a block.
+func WriteReceiptsCache(tx kv.RwTx, blockNum uint64, blockHash common.Hash, receipts types.Receipts) error {
+	if ok, err := HasReceiptCache(tx, blockNum, blockHash, 0); err != nil { // if exists don't write
+		return err
+	} else if ok {
+		return nil
+	}
+
+	buf := bytes.NewBuffer(nil)
+	for txnIndex, receipt := range receipts {
+		buf.Reset()
+
+		if txnIndex != int(receipts[txnIndex].TransactionIndex) {
+			panic(fmt.Sprintf("assert: txnIndex is wrong %d %d, blockNum=%d, txnIdx=%d", txnIndex, receipts[txnIndex].TransactionIndex, blockNum, txnIndex))
+		}
+		if len(receipt.Logs) > 0 && int(receipt.FirstLogIndexWithinBlock) != int(receipt.Logs[0].Index) {
+			panic(fmt.Sprintf("assert: FirstLogIndexWithinBlock is wrong: %d %d, blockNum=%d, txnIdx=%d", receipt.FirstLogIndexWithinBlock, receipt.Logs[0].Index, blockNum, txnIndex))
+		}
+		if receipt != nil {
+			storageReceipt := (*types.ReceiptForStorage)(receipt)
+			err := rlp.Encode(buf, storageReceipt)
+			if err != nil {
+				return fmt.Errorf("writing logs for block %d: %w", blockNum, err)
+			}
+			if dbg.AssertEnabled {
+				storageReceipt2 := &types.ReceiptForStorage{}
+				rlp.DecodeBytes(buf.Bytes(), storageReceipt2)
+				if storageReceipt.ContractAddress != storageReceipt2.ContractAddress {
+					panic(fmt.Sprintf("assert: %x, %x\n", storageReceipt.ContractAddress, storageReceipt2.ContractAddress))
+				}
+			}
+		}
+
+		if err := tx.Put(kv.ReceiptsCache, dbutils.ReceiptCacheKey(blockNum, blockHash, uint32(txnIndex)), buf.Bytes()); err != nil {
+			return fmt.Errorf("writing logs for block %d: %w", blockNum, err)
+		}
+	}
+	return nil
+}
+
+// HasReceiptCache stores all the transaction receipts belonging to a block.
+func HasReceiptCache(tx kv.Tx, blockNum uint64, blockHash common.Hash, txnIndex uint32) (bool, error) {
+	return tx.Has(kv.ReceiptsCache, dbutils.ReceiptCacheKey(blockNum, blockHash, txnIndex))
 }

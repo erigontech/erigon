@@ -126,6 +126,8 @@ const (
 	CallFromIndex = "CallFromIndex"
 	CallToIndex   = "CallToIndex"
 
+	ReceiptsCache = "ReceiptCache" // block_num_u64 + block_hash + txn_index_u32 -> rlp(receipt)
+
 	TxLookup = "BlockTransactionLookup" // hash -> transaction/receipt lookup metadata
 
 	ConfigTable = "Config" // config prefix for the db
@@ -343,7 +345,7 @@ var ChaindataTables = []string{
 	HeaderNumber,
 	BadHeaderNumber,
 	BlockBody,
-	Receipts,
+	ReceiptsCache,
 	TxLookup,
 	ConfigTable,
 	DatabaseInfo,
