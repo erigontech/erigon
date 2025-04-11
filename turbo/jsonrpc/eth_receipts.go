@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/eth/ethutils"
 	"github.com/erigontech/erigon/eth/filters"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
-	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
@@ -389,7 +388,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			if err != nil {
 				return nil, err
 			}
-			txIndex := lastTxNum - firstTxNum
+			txIndex := lastTxNum - firstTxNum - 1 // -1 to account for "final tx"
 
 			_, _, logIndex, err := rawtemporaldb.ReceiptAsOf(tx, lastTxNum+1)
 			if err != nil {
