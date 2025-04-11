@@ -679,6 +679,9 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 
 	in, err := aggTx.mergeFiles(ctx, outs, r)
 	if err != nil {
+		if in != nil {
+			in.Close()
+		}
 		return true, err
 	}
 	a.IntegrateMergedDirtyFiles(outs, in)
