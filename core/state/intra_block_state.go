@@ -125,6 +125,34 @@ func (sdb *IntraBlockState) SetTrace(trace bool) {
 	sdb.trace = trace
 }
 
+func (sdb *IntraBlockState) HasAtLeastOneStorage(addr libcommon.Address) (bool, error) {
+	so, err := sdb.getStateObject(addr)
+	if err != nil {
+		return false, err
+	}
+	if so == nil || so.deleted {
+		return false, nil
+	}
+
+	// If the fake storage is set, only lookup the state here(in the debugging mode)
+	if so.fakeStorage != nil && len(so.fakeStorage) > 0 {
+		// value cached, safe to exit now
+		return true, nil
+	}
+	// If we have the original value cached, return that
+	{
+		if so.originStorage != nil && len(so.originStorage) > 0 {
+			// TODO check if its correct, but seems ok
+			return true, nil
+		}
+	}
+	if so.createdContract {
+		return false, nil
+	}
+	// Load from DB in case it is missing.
+	return sdb.stateReader.(StateReaderEOF).AddressHaveStorageKeys(addr)
+}
+
 // setErrorUnsafe sets error but should be called in medhods that already have locks
 // Deprecated: The IBS api now returns errors directly
 func (sdb *IntraBlockState) setErrorUnsafe(err error) {
