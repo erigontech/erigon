@@ -24,8 +24,8 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/contracts"
+	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	shuttercontracts "github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"

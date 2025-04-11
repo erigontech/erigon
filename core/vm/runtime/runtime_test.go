@@ -40,13 +40,13 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	stateLib "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/asm"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/consensus"
 )
 
