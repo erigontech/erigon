@@ -238,6 +238,44 @@ func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {
 	return
 }
 
+func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadir.Dirs, cfg *ethconfig.Config) error {
+	isCommitmentHistoryEnabled, ok, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		if !cfg.KeepExecutionProofs {
+			if err := rawdb.WriteDBCommitmentHistoryEnabled(tx, cfg.KeepExecutionProofs); err != nil {
+				return err
+			}
+			return nil
+		}
+		// we need to make sure we do not run from an old version so check amount of keys in kv.AccountDomain
+		c, err := tx.Count(kv.TblAccountVals)
+		if err != nil {
+			return fmt.Errorf("failed to count keys in kv.AccountDomain: %w", err)
+		}
+		if c > 0 {
+			return fmt.Errorf("commitment history is not enabled in the database. restart erigon after deleting the chaindata folder: %s", dirs.Chaindata)
+		}
+
+		if err := rawdb.WriteDBCommitmentHistoryEnabled(tx, cfg.KeepExecutionProofs); err != nil {
+			return err
+		}
+		return nil
+	}
+	if cfg.KeepExecutionProofs != isCommitmentHistoryEnabled {
+		return fmt.Errorf(
+			"commitment history flag mismatch from db and config. db: %v, config: %v. please restart erigon with the same flag or delete the chaindata folder: %s",
+			isCommitmentHistoryEnabled, cfg.KeepExecutionProofs, dirs.Chaindata)
+	}
+	if err := rawdb.WriteDBCommitmentHistoryEnabled(tx, cfg.KeepExecutionProofs); err != nil {
+		return err
+	}
+	logger.Warn("enabling commitment history. this is an experimental flag so run at your own risk!", "enabled", cfg.KeepExecutionProofs)
+	return nil
+}
+
 const blockBufferSize = 128
 
 // New creates a new Ethereum object (including the
@@ -262,6 +300,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	latestBlockBuiltStore := builder.NewLatestBlockBuiltStore()
 
 	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
+		if err := checkAndSetCommitmentHistoryFlag(tx, logger, dirs, config); err != nil {
+			return err
+		}
 		if err = stages.UpdateMetrics(tx); err != nil {
 			return err
 		}

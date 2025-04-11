@@ -582,10 +582,7 @@ func doPrune(t *testing.T, db kv.RwDB, pruneTo uint64) {
 	err = rawdb.PruneTableDupSort(tx, kv.StorageChangeSetDeprecated, "", pruneTo, logEvery, ctx)
 	require.NoError(t, err)
 
-	err = rawdb.PruneTable(tx, kv.Receipts, pruneTo, ctx, math.MaxInt32, time.Hour, logger, "")
-	require.NoError(t, err)
-
-	err = rawdb.PruneTableDupSort(tx, kv.CallTraceSet, "", pruneTo, logEvery, ctx)
+	err = rawdb.PruneTable(tx, kv.ReceiptsCache, pruneTo, ctx, math.MaxInt32, time.Hour, logger, "")
 	require.NoError(t, err)
 
 	err = tx.Commit()

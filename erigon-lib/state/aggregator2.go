@@ -50,7 +50,10 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		return nil, err
 	}
 	a.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(100_000) // ~1k blocks of history
-	a.recalcVisibleFiles(a.DirtyFilesEndTxNumMinimax())
+
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
 
 	return a, nil
 }
@@ -181,6 +184,13 @@ var Schema = map[kv.Domain]domainCfg{
 			},
 		},
 	},
+}
+
+func EnableHistoricalCommitment() {
+	cfg := Schema[kv.CommitmentDomain]
+	cfg.hist.historyDisabled = false
+	cfg.hist.snapshotsDisabled = false
+	Schema[kv.CommitmentDomain] = cfg
 }
 
 var StandaloneIISchema = map[kv.InvertedIdx]iiCfg{
