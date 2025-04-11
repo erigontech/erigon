@@ -31,10 +31,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	rand2 "math/rand/v2"
+
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/c2h5oh/datasize"
 	"github.com/tidwall/btree"
-	rand2 "golang.org/x/exp/rand"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
@@ -1322,9 +1323,9 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
 }
 
 func (at *AggregatorRoTx) RestrictSubsetFileDeletions(b bool) {
-	at.a.d[kv.AccountsDomain].restrictSubsetFileDeletions = b
-	at.a.d[kv.StorageDomain].restrictSubsetFileDeletions = b
-	at.a.d[kv.CommitmentDomain].restrictSubsetFileDeletions = b
+	// at.a.d[kv.AccountsDomain].restrictSubsetFileDeletions = b
+	// at.a.d[kv.StorageDomain].restrictSubsetFileDeletions = b
+	// at.a.d[kv.CommitmentDomain].restrictSubsetFileDeletions = b
 }
 
 func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticFiles, r *Ranges) (mf *MergedFilesV3, err error) {

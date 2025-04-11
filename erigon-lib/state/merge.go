@@ -185,7 +185,7 @@ func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges
 	return r
 }
 
-// 0-1,1-2,2-3,3-4: allow merge 0-1
+// 0-1,1-2,2-3,3-4: allow merge 0-4
 // 0-2,2-3,3-4: allow merge 0-4
 // 0-2,2-4: allow merge 0-4
 //
@@ -1034,13 +1034,13 @@ func (dt *DomainRoTx) garbage(merged *filesItem) (outs []*filesItem) {
 		return
 	}
 	// `kill -9` may leave some garbage
-	// AggContext doesn't have such files, only Agg.files does
+	// AggRoTx doesn't have such files, only Agg.files does
 	dt.d.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.frozen {
 				continue
 			}
-			if item.isSubsetOf(merged) {
+			if item.isProperSubsetOf(merged) {
 				if dt.d.restrictSubsetFileDeletions {
 					continue
 				}
@@ -1070,15 +1070,17 @@ func garbage(dirtyFiles *btree.BTreeG[*filesItem], visibleFiles []visibleFile, m
 		return
 	}
 	// `kill -9` may leave some garbage
-	// AggContext doesn't have such files, only Agg.files does
+	// AggRotx doesn't have such files, only Agg.files does
 	dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.frozen {
 				continue
 			}
-			if item.isSubsetOf(merged) {
+			if item.isProperSubsetOf(merged) {
 				outs = append(outs, item)
 			}
+			// this case happens when in previous process run, the merged file was created,
+			// but the processed ended before subsumed files could be deleted.
 			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainRoTx`)
 			if item.isBefore(merged) && hasCoverVisibleFile(visibleFiles, item) {
 				outs = append(outs, item)
@@ -1090,7 +1092,7 @@ func garbage(dirtyFiles *btree.BTreeG[*filesItem], visibleFiles []visibleFile, m
 }
 func hasCoverVisibleFile(visibleFiles []visibleFile, item *filesItem) bool {
 	for _, f := range visibleFiles {
-		if item.isSubsetOf(f.src) {
+		if item.isProperSubsetOf(f.src) {
 			return true
 		}
 	}

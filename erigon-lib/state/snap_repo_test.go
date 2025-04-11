@@ -217,6 +217,18 @@ func TestCloseFilesAfterRootNum(t *testing.T) {
 	require.Len(t, repo.dirtyFiles.Items(), 4)
 }
 
+
+func TestMergeRangeSnapRepo(t *testing.T) {
+	
+}
+
+
+
+
+
+
+
+// /////////////////////////////////////// helpers and utils
 func stepToRootNum(t *testing.T, step uint64, repo *SnapshotRepo) RootNum {
 	t.Helper()
 	return RootNum(repo.cfg.RootNumPerStep * step)

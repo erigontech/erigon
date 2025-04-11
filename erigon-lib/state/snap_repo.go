@@ -24,11 +24,16 @@ import (
 // here as interfaces, this would allow more functions currently in DHII+A to be included here.
 // caching version at caching_snap_repo.go
 
-// not thread safe; synchronization done on the caller side
+// NOTE: not thread safe; synchronization done on the caller side
+// specially when accessing dirtyFiles or current.
 type SnapshotRepo struct {
 	dirtyFiles *btree2.BTreeG[*filesItem]
-	_visible   visibleFiles
-	name       string
+
+	// latest version of visible files (derived from dirtyFiles)
+	// when repo is used in the context of rotx, one might want to think if
+	// if it's the repo.current that needs to be used or rotx.visibleFiles etc.
+	current visibleFiles
+	name    string
 
 	cfg       *ae.SnapshotConfig
 	parser    ae.SnapNameSchema
@@ -82,11 +87,11 @@ func (f *SnapshotRepo) IntegrateDirtyFiles(files []*filesItem) {
 }
 
 func (f *SnapshotRepo) RecalcVisibleFiles(to RootNum) {
-	f._visible = calcVisibleFiles(f.dirtyFiles, f.accessors, false, uint64(to))
+	f.current = calcVisibleFiles(f.dirtyFiles, f.accessors, false, uint64(to))
 }
 
 func (f *SnapshotRepo) VisibleFiles() visibleFiles {
-	return f._visible
+	return f.current
 }
 
 func (f *SnapshotRepo) GetFreezingRange(from RootNum, to RootNum) (freezeFrom RootNum, freezeTo RootNum, canFreeze bool) {
@@ -131,7 +136,7 @@ func (f *SnapshotRepo) DirtyFilesWithNoHashAccessors() (l []*filesItem) {
 }
 
 func (f *SnapshotRepo) EndRootNum() RootNum {
-	return RootNum(f._visible.EndTxNum())
+	return RootNum(f.current.EndTxNum())
 }
 
 func (f *SnapshotRepo) Close() {
@@ -171,7 +176,7 @@ func (f *SnapshotRepo) Garbage(visibleFiles []visibleFile, merged *filesItem) (o
 			if item.frozen {
 				continue
 			}
-			if item.isSubsetOf(merged) {
+			if item.isProperSubsetOf(merged) {
 				outs = append(outs, item)
 			}
 			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using rotx)
@@ -184,6 +189,77 @@ func (f *SnapshotRepo) Garbage(visibleFiles []visibleFile, merged *filesItem) (o
 
 	return outs
 }
+
+// TODO: merge related methods....
+// FindMergeRange(maxEndRootNum) -> MergeRange
+// FilesInRange(MergeRange) -> []*filesItem
+// IntegrateMergeDirtyFiles + recalcVisibleFiles
+// cleanAfterMerge
+// integrityChecks (on recalcVisibleFiles?)
+
+// retusn the most recent merge range to process
+// can be successively called with updated (merge processed) visibleFiles
+// to get the next range to process.
+func (f *SnapshotRepo) FindMergeRange(maxEndRootNum RootNum, files visibleFiles) (mrange MergeRange) {
+	toRootNum := min(uint64(maxEndRootNum), files.EndTxNum())
+	for i := 0; i < len(files); i++ {
+		item := files[i]
+		if item.endTxNum > toRootNum {
+			break
+		}
+
+		calcFrom, calcTo, canFreeze := f.GetFreezingRange(RootNum(item.startTxNum), RootNum(toRootNum))
+		if !canFreeze {
+			break
+		}
+
+		if calcFrom.Uint64() != item.startTxNum {
+			panic(fmt.Sprintf("f.GetFreezingRange() returned wrong fromRootNum: %d, expected %d", calcFrom.Uint64(), item.startTxNum))
+		}
+
+		// skip through files which come under the above freezing range
+		j := i + 1
+		for ; j < len(files); j++ {
+			item := files[j]
+			if item.endTxNum > calcTo.Uint64() {
+				break
+			}
+
+			// found a non-trivial range to merge
+			// this function sends the most frequent merge range
+			mrange.from = calcFrom.Uint64()
+			mrange.needMerge = true
+			mrange.to = item.endTxNum
+		}
+
+		i = j - 1
+	}
+
+	return
+}
+
+func (f *SnapshotRepo) FilesInRange(mrange MergeRange, files visibleFiles) (items []*filesItem) {
+	if !mrange.needMerge {
+		return
+	}
+
+	for _, item := range files {
+		if item.startTxNum < mrange.from {
+			continue
+		}
+		if item.endTxNum > mrange.to {
+			break
+		}
+
+		items = append(items, item.src)
+	}
+
+	return
+}
+
+// func (f *SnapshotRepo) NextFilesToMerge(toRootNum RootNum, files visibleFiles) []visibleFile {
+
+// }
 
 // private methods
 
