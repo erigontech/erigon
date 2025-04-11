@@ -41,6 +41,10 @@ func (x RootNum) EncTo8Bytes() (out []byte) {
 	return EncToBytes(x, true)
 }
 
+func (x RootNum) Uint64() uint64 {
+	return uint64(x)
+}
+
 // file extensions
 
 type AccessorExtension string

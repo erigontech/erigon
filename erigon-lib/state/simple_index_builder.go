@@ -106,7 +106,7 @@ type AccessorBuilderOptions func(*SimpleAccessorBuilder)
 func WithIndexPos(indexPos uint64) AccessorBuilderOptions {
 	return func(s *SimpleAccessorBuilder) {
 		if int(s.indexPos) >= len(s.id.IndexFileTag()) {
-			panic("indexPos greater than indexPrefix length")
+			panic("indexPos greater than indexFileTag length")
 		}
 		s.indexPos = indexPos
 	}
