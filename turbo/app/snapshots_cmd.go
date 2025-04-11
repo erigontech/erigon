@@ -151,6 +151,22 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
+			Name: "remove-overlaps",
+			Action: func(c *cli.Context) error {
+				dirs, l, err := datadir.New(c.String(utils.DataDirFlag.Name)).MustFlock()
+				if err != nil {
+					return err
+				}
+				defer l.Unlock()
+
+				return doRemoveOverlaps(c, dirs)
+			},
+			Usage: "erigon seg remove-overlaps",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+			}),
+		},
+		{
 			Name:   "uploader",
 			Action: doUploaderCommand,
 			Usage:  "run erigon in snapshot upload mode (no execution)",
@@ -1507,6 +1523,39 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
+	return nil
+}
+
+func doRemoveOverlaps(cliCtx *cli.Context, dirs datadir.Dirs) error {
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	if err != nil {
+		return err
+	}
+	defer logger.Info("Done")
+	ctx := cliCtx.Context
+
+	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	defer db.Close()
+	chainConfig := fromdb.ChainConfig(db)
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+
+	blockSnaps, borSnaps, caplinSnaps, _, agg, clean, err := openSnaps(ctx, cfg, dirs, 0, db, logger)
+	if err != nil {
+		return err
+	}
+	defer clean()
+	if blockSnaps != nil {
+		blockSnaps.RemoveOverlaps()
+	}
+	if borSnaps != nil {
+		borSnaps.RemoveOverlaps()
+	}
+	if caplinSnaps != nil {
+		caplinSnaps.RemoveOverlaps()
+	}
+	if agg != nil {
+		agg.RemoveOverlaps(ctx)
+	}
 	return nil
 }
 

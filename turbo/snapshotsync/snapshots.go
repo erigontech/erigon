@@ -404,7 +404,7 @@ func (s *DirtySegment) closeAndRemoveFiles() {
 		s.closeSeg()
 
 		snapDir := filepath.Dir(f)
-		removeOldFiles([]string{f}, snapDir)
+		RemoveOldFiles([]string{f}, snapDir)
 	}
 }
 
@@ -1245,14 +1245,14 @@ func (s *RoSnapshots) RemoveOverlaps() error {
 			filesToRemove = append(filesToRemove, info.Path)
 		}
 
-		removeOldFiles(filesToRemove, s.dir)
+		RemoveOldFiles(filesToRemove, s.dir)
 	}
 
 	return nil
 }
 
 func (s *RoSnapshots) RemoveOldFiles(filesToRemove []string) {
-	removeOldFiles(filesToRemove, s.dir)
+	RemoveOldFiles(filesToRemove, s.dir)
 }
 
 type snapshotNotifier interface {
@@ -1568,7 +1568,7 @@ func sendDiagnostics(startIndexingTime time.Time, indexPercent map[string]int, a
 	})
 }
 
-func removeOldFiles(toDel []string, snapDir string) {
+func RemoveOldFiles(toDel []string, snapDir string) {
 	for _, f := range toDel {
 		_ = os.Remove(f)
 		_ = os.Remove(f + ".torrent")
