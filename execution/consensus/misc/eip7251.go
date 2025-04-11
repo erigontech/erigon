@@ -18,24 +18,20 @@ package misc
 
 import (
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/params"
 )
 
-func ApplyBeaconRootEip4788(parentBeaconBlockRoot *libcommon.Hash, syscall consensus.SystemCall, tracer *tracing.Hooks) {
-	if tracer != nil && tracer.OnSystemCallStart != nil {
-		tracer.OnSystemCallStart()
-	}
-
-	if tracer != nil && tracer.OnSystemCallEnd != nil {
-		defer tracer.OnSystemCallEnd()
-	}
-
-	_, err := syscall(params.BeaconRootsAddress, parentBeaconBlockRoot.Bytes())
+func DequeueConsolidationRequests7251(syscall consensus.SystemCall) *types.FlatRequest {
+	res, err := syscall(params.ConsolidationRequestAddress, nil)
 	if err != nil {
-		log.Warn("Failed to call beacon roots contract", "err", err)
+		log.Warn("Err with syscall to ConsolidationRequestAddress", "err", err)
+		return nil
 	}
+	if res != nil {
+		// Just append the contract output as the request data
+		return &types.FlatRequest{Type: types.ConsolidationRequestType, RequestData: res}
+	}
+	return nil
 }

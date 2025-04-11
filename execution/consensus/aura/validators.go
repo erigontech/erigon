@@ -34,10 +34,10 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/accounts/abi/bind"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/consensus/aura/auraabi"
-	"github.com/erigontech/erigon/consensus/aura/aurainterfaces"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/consensus/aura/auraabi"
+	"github.com/erigontech/erigon/execution/consensus/aura/aurainterfaces"
 )
 
 // nolint

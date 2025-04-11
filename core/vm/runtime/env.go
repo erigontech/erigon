@@ -20,10 +20,10 @@
 package runtime
 
 import (
-	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/execution/consensus"
 )
 
 func NewEnv(cfg *Config) *vm.EVM {

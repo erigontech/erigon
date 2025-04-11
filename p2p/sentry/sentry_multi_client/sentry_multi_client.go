@@ -42,12 +42,11 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libsentry "github.com/erigontech/erigon-lib/p2p/sentry"
-
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/turbo/jsonrpc/receipts"
 	"github.com/erigontech/erigon/turbo/services"

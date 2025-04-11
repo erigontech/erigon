@@ -23,8 +23,6 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 
-	"github.com/erigontech/erigon/turbo/shards"
-
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -33,8 +31,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
@@ -43,9 +39,12 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/tracers/config"
+	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/consensus/ethash"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/transactions"
 )

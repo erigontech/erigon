@@ -18,20 +18,24 @@ package misc
 
 import (
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/core/types"
+
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/params"
 )
 
-func DequeueWithdrawalRequests7002(syscall consensus.SystemCall) *types.FlatRequest {
-	res, err := syscall(params.WithdrawalRequestAddress, nil)
+func ApplyBeaconRootEip4788(parentBeaconBlockRoot *libcommon.Hash, syscall consensus.SystemCall, tracer *tracing.Hooks) {
+	if tracer != nil && tracer.OnSystemCallStart != nil {
+		tracer.OnSystemCallStart()
+	}
+
+	if tracer != nil && tracer.OnSystemCallEnd != nil {
+		defer tracer.OnSystemCallEnd()
+	}
+
+	_, err := syscall(params.BeaconRootsAddress, parentBeaconBlockRoot.Bytes())
 	if err != nil {
-		log.Warn("Err with syscall to WithdrawalRequestAddress", "err", err)
-		return nil
+		log.Warn("Failed to call beacon roots contract", "err", err)
 	}
-	if res != nil {
-		// Just append the contract output
-		return &types.FlatRequest{Type: types.WithdrawalRequestType, RequestData: res}
-	}
-	return nil
 }

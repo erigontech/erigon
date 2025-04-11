@@ -24,11 +24,11 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/gasprice"
+	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/rpchelper"
 )

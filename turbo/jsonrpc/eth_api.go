@@ -28,8 +28,6 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 
-	"github.com/erigontech/erigon-lib/kv/prune"
-
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -38,14 +36,15 @@ import (
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
+	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/filters"
+	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/rpc"

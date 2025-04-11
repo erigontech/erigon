@@ -41,9 +41,9 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/common/debug"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/rpc"
 )
 

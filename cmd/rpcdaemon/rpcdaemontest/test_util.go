@@ -30,8 +30,6 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
-	privateapi2 "github.com/erigontech/erigon/turbo/privateapi"
-
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
@@ -42,14 +40,15 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/accounts/abi/bind/backends"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/builder"
 	"github.com/erigontech/erigon/turbo/jsonrpc/contracts"
+	privateapi2 "github.com/erigontech/erigon/turbo/privateapi"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 

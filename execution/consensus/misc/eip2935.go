@@ -23,9 +23,9 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/params"
 )
 
