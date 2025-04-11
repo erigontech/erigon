@@ -82,6 +82,9 @@ type Worker struct {
 }
 
 func NewWorker(lock sync.Locker, logger log.Logger, hooks *tracing.Hooks, ctx context.Context, background bool, chainDb kv.RoDB, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *state.ResultsQueue, engine consensus.Engine, dirs datadir.Dirs, isMining bool) *Worker {
+	callTracer := NewCallTracer(hooks)
+	vmCfg := vm.Config{Tracer: callTracer.Tracer().Hooks}
+
 	w := &Worker{
 		lock:        lock,
 		logger:      logger,
@@ -96,8 +99,9 @@ func NewWorker(lock sync.Locker, logger log.Logger, hooks *tracing.Hooks, ctx co
 		resultCh: results,
 		engine:   engine,
 
-		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
-		callTracer:  NewCallTracer(hooks),
+		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vmCfg),
+		vmCfg:       vmCfg,
+		callTracer:  callTracer,
 		taskGasPool: new(core.GasPool),
 		hooks:       hooks,
 
@@ -106,7 +110,6 @@ func NewWorker(lock sync.Locker, logger log.Logger, hooks *tracing.Hooks, ctx co
 		isMining: isMining,
 	}
 	w.taskGasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(0))
-	w.vmCfg = vm.Config{Tracer: w.callTracer.Tracer().Hooks}
 	w.ibs = state.New(w.stateReader)
 	return w
 }

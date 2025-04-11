@@ -186,24 +186,6 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		}
 	}
 
-	// Invoke tracer hooks that signal entering/exiting a call frame
-	if evm.Config().Tracer != nil {
-		v := value
-		if typ == STATICCALL {
-			v = nil
-		} else if typ == DELEGATECALL {
-			// NOTE: caller must, at all times be a contract. It should never happen
-			// that caller is something other than a Contract.
-			parent := caller.(*Contract)
-			// DELEGATECALL inherits value from parent call
-			v = parent.value
-		}
-		evm.captureBegin(depth, typ, caller.Address(), addr, isPrecompile, input, gas, v, code)
-		defer func(startGas uint64) {
-			evm.captureEnd(depth, typ, startGas, leftOverGas, ret, err)
-		}(gas)
-	}
-
 	if evm.config.NoRecursion && depth > 0 {
 		return nil, gas, nil
 	}
@@ -225,6 +207,24 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 	}
 
 	snapshot := evm.intraBlockState.Snapshot()
+
+	// Invoke tracer hooks that signal entering/exiting a call frame
+	if evm.Config().Tracer != nil {
+		v := value
+		if typ == STATICCALL {
+			v = nil
+		} else if typ == DELEGATECALL {
+			// NOTE: caller must, at all times be a contract. It should never happen
+			// that caller is something other than a Contract.
+			parent := caller.(*Contract)
+			// DELEGATECALL inherits value from parent call
+			v = parent.value
+		}
+		evm.captureBegin(depth, typ, caller.Address(), addr, isPrecompile, input, gas, v, code)
+		defer func(startGas uint64) {
+			evm.captureEnd(depth, typ, startGas, leftOverGas, ret, err)
+		}(gas)
+	}
 
 	if typ == CALL {
 		exist, err := evm.intraBlockState.Exist(addr)
