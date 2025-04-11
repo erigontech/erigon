@@ -254,10 +254,10 @@ func TestMergeRangeSnapRepo(t *testing.T) {
 		require.Len(t, vf, vfCount)
 
 		mr := repo.FindMergeRange(RootNum(vf.EndTxNum()), vf)
-		require.True(t, mr.needMerge == needMerge)
+		require.Equal(t, mr.needMerge, needMerge)
 		if !mr.needMerge {
-			require.True(t, mr.from == mergeFromStep*stepSize)
-			require.True(t, mr.to == mergeToStep*stepSize)
+			require.Equal(t, mr.from, mergeFromStep*stepSize)
+			require.Equal(t, mr.to, mergeToStep*stepSize)
 		}
 		cleanup(t, repo, dirs)
 	}
@@ -328,7 +328,7 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 		vf := repo.VisibleFiles()
 
 		mr := repo.FindMergeRange(RootNum(vf.EndTxNum()), vf)
-		require.True(t, mr.needMerge == needMerge)
+		require.Equal(t, mr.needMerge, needMerge)
 		if !mr.needMerge {
 			cleanup(t, repo, dirs)
 			return
@@ -349,7 +349,7 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 		require.Len(t, vf, nVfAfterMerge)
 
 		repo.CleanAfterMerge(merged, vf)
-		require.True(t, repo.dirtyFiles.Len() == dirtyFilesAfterMerge)
+		require.Equal(t, repo.dirtyFiles.Len(), dirtyFilesAfterMerge)
 
 		cleanup(t, repo, dirs)
 	}
@@ -454,6 +454,7 @@ func populateFilesFull(t *testing.T, dirs datadir.Dirs, name string, extensions 
 }
 
 func populateFiles2(t *testing.T, dirs datadir.Dirs, name string, repo *SnapshotRepo, dataFolder string, ranges []testFileRange) (dataFileCount, btCount, existenceCount, accessorCount int) {
+	t.Helper()
 	allFiles := dhiiFiles{fullPath: true}
 	extensions := repo.cfg.Schema.(*ae.E3SnapSchema).FileExtensions()
 	v := snaptype.Version(1)
