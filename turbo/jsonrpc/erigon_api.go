@@ -26,7 +26,7 @@ import (
 	"github.com/erigontech/erigon/eth/filters"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 // ErigonAPI Erigon specific routines

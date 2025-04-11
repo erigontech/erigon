@@ -23,8 +23,7 @@ import (
 
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/p2p"
-
-	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 // AdminAPI the interface for the admin_* RPC commands.
