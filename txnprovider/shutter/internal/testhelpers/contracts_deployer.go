@@ -23,7 +23,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/execution/abi/bind"
 	shuttercontracts "github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
 )
 

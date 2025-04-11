@@ -19,7 +19,7 @@
 
 package bind
 
-import "github.com/erigontech/erigon/accounts/abi"
+import "github.com/erigontech/erigon/execution/abi"
 
 // tmplData is the data structure required to fill the binding template.
 type tmplData struct {
@@ -97,8 +97,8 @@ import (
 	"reflect"
 
 	ethereum "github.com/erigontech/erigon"
-	"github.com/erigontech/erigon/accounts/abi"
-	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/execution/abi"
+	"github.com/erigontech/erigon/execution/abi/bind"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/event"
