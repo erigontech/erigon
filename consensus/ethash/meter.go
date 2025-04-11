@@ -17,12 +17,12 @@
 package ethash
 
 import (
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/debug"
-	"github.com/erigontech/erigon-lib/metrics"
 )
 
 func newHashRateMeter() *hashRateMeter {
@@ -67,7 +67,7 @@ func (m *meterSnapshot) Stop() {}
 type hashRateMeter struct {
 	lock      sync.RWMutex
 	snapshot  *meterSnapshot
-	a1        *metrics.Ewma
+	a1        *ewma
 	startTime time.Time
 	stopped   uint32
 }
@@ -75,7 +75,7 @@ type hashRateMeter struct {
 func newMeter() *hashRateMeter {
 	return &hashRateMeter{
 		snapshot:  &meterSnapshot{},
-		a1:        metrics.NewEwma(),
+		a1:        &ewma{alpha: 1 - math.Exp(-5.0/60.0/1)},
 		startTime: time.Now(),
 	}
 }
@@ -167,4 +167,43 @@ func (ma *meterArbiter) tickMeters() {
 	for meter := range ma.meters {
 		meter.tick()
 	}
+}
+
+// ewma is the standard implementation of an EWMA and tracks the number
+// of uncounted events and processes them on each tick.  It uses the
+// sync/atomic package to manage uncounted events.
+type ewma struct {
+	uncounted int64 // /!\ this should be the first member to ensure 64-bit alignment
+	alpha     float64
+	rate      float64
+	init      bool
+	mutex     sync.Mutex
+}
+
+// Rate returns the moving average rate of events per second.
+func (a *ewma) Rate() float64 {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	return a.rate * float64(time.Second)
+}
+
+// Tick ticks the clock to update the moving average.  It assumes it is called
+// every five seconds.
+func (a *ewma) Tick() {
+	count := atomic.LoadInt64(&a.uncounted)
+	atomic.AddInt64(&a.uncounted, -count)
+	instantRate := float64(count) / float64(5*time.Second)
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	if a.init {
+		a.rate += a.alpha * (instantRate - a.rate)
+	} else {
+		a.init = true
+		a.rate = instantRate
+	}
+}
+
+// Update adds n uncounted events.
+func (a *ewma) Update(n int64) {
+	atomic.AddInt64(&a.uncounted, n)
 }

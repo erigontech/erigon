@@ -47,6 +47,20 @@ import (
 
 var noop = state.NewNoopWriter()
 
+type ActiveWorkerCount struct {
+	atomic.Int32
+	Ema *metrics.EMA[int32]
+}
+
+func NewActiveWorkerCount() *ActiveWorkerCount {
+	return &ActiveWorkerCount{Ema: metrics.NewEma[int32](0, 0.5)}
+}
+
+func (c *ActiveWorkerCount) Add(i int32) {
+	c.Int32.Add(i)
+	c.Ema.Update(c.Load())
+}
+
 type Worker struct {
 	lock        *sync.RWMutex
 	notifier    *sync.Cond
@@ -78,10 +92,10 @@ type Worker struct {
 
 	dirs datadir.Dirs
 
-	activeCounter *metrics.Ewma
+	activeCounter *ActiveWorkerCount
 }
 
-func NewWorker(ctx context.Context, background bool, activeCounter *metrics.Ewma, chainDb kv.RoDB, in *exec.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *exec.ResultsQueue, engine consensus.Engine, dirs datadir.Dirs, logger log.Logger) *Worker {
+func NewWorker(ctx context.Context, background bool, activeCounter *ActiveWorkerCount, chainDb kv.RoDB, in *exec.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *exec.ResultsQueue, engine consensus.Engine, dirs datadir.Dirs, logger log.Logger) *Worker {
 	lock := &sync.RWMutex{}
 
 	w := &Worker{
@@ -225,8 +239,8 @@ func (rw *Worker) RunTxTask(txTask exec.Task) *exec.Result {
 	}
 
 	if rw.activeCounter != nil {
-		rw.activeCounter.Update(1)
-		defer rw.activeCounter.Update(-1)
+		rw.activeCounter.Add(1)
+		defer rw.activeCounter.Add(-1)
 	}
 
 	return rw.RunTxTaskNoLock(txTask)
@@ -301,7 +315,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.Result {
 
 func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, background bool, chainDb kv.RoDB,
 	rs *state.StateV3Buffered, stateReader state.ResettableStateReader, stateWriter state.StateWriter, in *exec.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
-	engine consensus.Engine, workerCount int, activeCounter *metrics.Ewma, dirs datadir.Dirs, isMining bool, logger log.Logger) (reconWorkers []*Worker, applyWorker *Worker, rws *exec.ResultsQueue, clear func(), wait func()) {
+	engine consensus.Engine, workerCount int, activeCounter *ActiveWorkerCount, dirs datadir.Dirs, isMining bool, logger log.Logger) (reconWorkers []*Worker, applyWorker *Worker, rws *exec.ResultsQueue, clear func(), wait func()) {
 	reconWorkers = make([]*Worker, workerCount)
 
 	resultsSize := workerCount * 8
