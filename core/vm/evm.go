@@ -422,7 +422,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 			}
 		} else {
 			// Don't allow EOF contract to execute legacy initcode.
-			return nil, libcommon.Address{}, gasRemaining, fmt.Errorf("attmept to create EOF from legacy call (CREATE, CREATE2)")
+			return nil, libcommon.Address{}, gasRemaining, ErrLegacyCode
 		}
 	}
 
