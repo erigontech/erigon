@@ -296,39 +296,6 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			return nil, err
 		}
 		if isFinalTxn {
-			if chainConfig.Bor != nil {
-				// check for state sync event logs
-				events, err := api.stateSyncEvents(ctx, tx, header.Hash(), blockNum, chainConfig)
-				if err != nil {
-					return logs, err
-				}
-
-				if len(events) == 0 {
-					continue
-				}
-
-				borLogs, err := api.borReceiptGenerator.GenerateBorLogs(ctx, events, txNumsReader, tx, header, chainConfig, txIndex, len(logs))
-				if err != nil {
-					return logs, err
-				}
-
-				borLogs = borLogs.Filter(addrMap, crit.Topics, 0)
-				for _, filteredLog := range borLogs {
-					logs = append(logs, &types.ErigonLog{
-						Address:     filteredLog.Address,
-						Topics:      filteredLog.Topics,
-						Data:        filteredLog.Data,
-						BlockNumber: filteredLog.BlockNumber,
-						TxHash:      filteredLog.TxHash,
-						TxIndex:     filteredLog.TxIndex,
-						BlockHash:   filteredLog.BlockHash,
-						Index:       filteredLog.Index,
-						Removed:     filteredLog.Removed,
-						Timestamp:   header.Time,
-					})
-				}
-			}
-
 			continue
 		}
 
@@ -391,6 +358,63 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				Removed:     filteredLog.Removed,
 				Timestamp:   header.Time,
 			})
+		}
+	}
+
+	// Get logs from state sync events for block range
+	if chainConfig.Bor != nil {
+		for blockNum := begin; blockNum <= end; blockNum++ {
+			header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)
+			if err != nil {
+				return nil, err
+			}
+
+			// check for state sync event logs
+			events, err := api.stateSyncEvents(ctx, tx, header.Hash(), blockNum, chainConfig)
+			if err != nil {
+				return nil, err
+			}
+
+			if len(events) == 0 {
+				continue
+			}
+
+			lastTxNum, err := txNumsReader.Max(tx, blockNum)
+			if err != nil {
+				return nil, err
+			}
+
+			firstTxNum, err := txNumsReader.Min(tx, blockNum)
+			if err != nil {
+				return nil, err
+			}
+			txIndex := lastTxNum - firstTxNum - 1 // -1 to account for "final tx"
+
+			_, _, logIndex, err := rawtemporaldb.ReceiptAsOf(tx, lastTxNum+1)
+			if err != nil {
+				return nil, err
+			}
+
+			borLogs, err := api.borReceiptGenerator.GenerateBorLogs(ctx, events, txNumsReader, tx, header, chainConfig, int(txIndex), int(logIndex))
+			if err != nil {
+				return logs, err
+			}
+
+			borLogs = borLogs.Filter(addrMap, crit.Topics, 0)
+			for _, filteredLog := range borLogs {
+				logs = append(logs, &types.ErigonLog{
+					Address:     filteredLog.Address,
+					Topics:      filteredLog.Topics,
+					Data:        filteredLog.Data,
+					BlockNumber: filteredLog.BlockNumber,
+					TxHash:      filteredLog.TxHash,
+					TxIndex:     filteredLog.TxIndex,
+					BlockHash:   filteredLog.BlockHash,
+					Index:       filteredLog.Index,
+					Removed:     filteredLog.Removed,
+					Timestamp:   header.Time,
+				})
+			}
 		}
 	}
 
