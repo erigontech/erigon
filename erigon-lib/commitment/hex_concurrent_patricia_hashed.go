@@ -267,12 +267,12 @@ func (p *ConcurrentPatriciaHashed) CanDoConcurrentNext() (bool, error) {
 		}
 		if len(zeroPrefixBranch) > 4 { // tm+am+cells
 			// if root has no extension and there is a branch of zero prefix, can use parallel commitment next time
-			fmt.Printf("use concurrent next\n")
+			// fmt.Printf("use concurrent next\n")
 			return true, nil
 		}
-		fmt.Printf(" 00 [branch %x len %d]\n", zeroPrefixBranch, len(zeroPrefixBranch))
+		// fmt.Printf(" 00 [branch %x len %d]\n", zeroPrefixBranch, len(zeroPrefixBranch))
 	}
-	fmt.Printf("use seq trie next [root extLen=%d][ext '%x']\n", p.root.root.extLen, p.root.root.extension[:p.root.root.extLen])
+	// fmt.Printf("use seq trie next [root extLen=%d][ext '%x']\n", p.root.root.extLen, p.root.root.extension[:p.root.root.extLen])
 	return false, nil
 }
 
