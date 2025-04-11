@@ -182,9 +182,6 @@ func TestAPI(t *testing.T) {
 	k1, k2 := [20]byte{1}, [20]byte{2}
 	db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 
-	// Ensure proper cleanup
-	defer db.Close()
-
 	acc := accounts.Account{
 		Nonce:       1,
 		Balance:     *uint256.NewInt(11),
