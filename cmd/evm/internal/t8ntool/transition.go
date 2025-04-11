@@ -55,8 +55,8 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	trace_logger "github.com/erigontech/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/tests"
-	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 )
 
 const (

@@ -32,6 +32,7 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -139,7 +140,7 @@ type CoherentView struct {
 
 func (c *CoherentView) StateV3() bool { return c.cache.cfg.StateV3 }
 func (c *CoherentView) Get(k []byte) ([]byte, error) {
-	return c.cache.Get(k, c.tx, c.stateVersionID)
+	return c.cache.Get(context.Background(), k, c.tx, c.stateVersionID)
 }
 func (c *CoherentView) GetCode(k []byte) ([]byte, error) {
 	return c.cache.GetCode(k, c.tx, c.stateVersionID)
@@ -328,27 +329,55 @@ func (c *Coherent) OnNewBlock(stateChanges *remote.StateChangeBatch) {
 }
 
 func (c *Coherent) View(ctx context.Context, tx kv.Tx) (CacheView, error) {
+	if dbg.Enabled(ctx) {
+		fmt.Printf("[View] View called for txID %d\n", tx.ViewID())
+	}
 	id, err := tx.ReadSequence(string(kv.PlainStateVersion))
 	if err != nil {
 		return nil, err
 	}
+	if dbg.Enabled(ctx) {
+		fmt.Printf("[View] Got state version for txID %d\n", tx.ViewID())
+	}
 
 	r := c.selectOrCreateRoot(id)
+	if dbg.Enabled(ctx) {
+		fmt.Printf("[View] Selected/created root for txID %d, readyChanClosed: %v\n", tx.ViewID(), r.readyChanClosed.Load())
+	}
 
 	if !c.cfg.WaitForNewBlock || c.waitExceededCount.Load() >= MAX_WAITS {
+		if dbg.Enabled(ctx) {
+			fmt.Printf("[View] Skipping wait for txID %d - WaitForNewBlock: %v, waitExceededCount: %d\n",
+				tx.ViewID(), c.cfg.WaitForNewBlock, c.waitExceededCount.Load())
+		}
 		return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
 	}
 
 	if r.readyChanClosed.Load() {
+		if dbg.Enabled(ctx) {
+			fmt.Printf("[View] Ready channel already closed for txID %d\n", tx.ViewID())
+		}
 		return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
 	}
 
+	if dbg.Enabled(ctx) {
+		fmt.Printf("[View] Waiting for ready channel for txID %d (timeout: %v)\n", tx.ViewID(), c.cfg.NewBlockWait)
+	}
 	select {
 	case <-r.ready:
+		if dbg.Enabled(ctx) {
+			fmt.Printf("[View] Ready channel received for txID %d\n", tx.ViewID())
+		}
 		return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
 	case <-ctx.Done():
+		if dbg.Enabled(ctx) {
+			fmt.Printf("[View] Context cancelled for txID %d: %v\n", tx.ViewID(), ctx.Err())
+		}
 		return nil, fmt.Errorf("kvcache rootNum=%x, %w", tx.ViewID(), ctx.Err())
 	case <-time.After(c.cfg.NewBlockWait):
+		if dbg.Enabled(ctx) {
+			fmt.Printf("[View] Timeout waiting for ready channel for txID %d\n", tx.ViewID())
+		}
 		c.timeout.Inc()
 		c.waitExceededCount.Add(1)
 		return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
@@ -378,19 +407,34 @@ func (c *Coherent) getFromCache(k []byte, id uint64, code bool) (*Element, *Cohe
 	}
 	return it, r, nil
 }
-func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) (v []byte, err error) {
+func (c *Coherent) Get(ctx context.Context, k []byte, tx kv.Tx, id uint64) (v []byte, err error) {
+	if dbg.Enabled(ctx) {
+		fmt.Printf("[Get] Get started for key %x, txID %d\n", k, tx.ViewID())
+	}
 	it, r, err := c.getFromCache(k, id, false)
 	if err != nil {
+		if dbg.Enabled(ctx) {
+			fmt.Printf("[Get] Get cache error for key %x, txID %d: %v\n", k, tx.ViewID(), err)
+		}
 		return nil, err
 	}
 
 	if it != nil {
 		//fmt.Printf("from cache:  %#x,%x\n", k, it.(*Element).V)
+		if dbg.Enabled(ctx) {
+			fmt.Printf("[Get] Cache hit for key %x, txID %d\n", k, tx.ViewID())
+		}
 		c.hits.Inc()
 		return it.V, nil
 	}
+	if dbg.Enabled(ctx) {
+		fmt.Printf("[Get] Cache miss for key %x, txID %d\n", k, tx.ViewID())
+	}
 	c.miss.Inc()
 
+	if dbg.Enabled(ctx) {
+		fmt.Printf("[Get] Attempting to get from DB for key %x, txID %d\n", k, tx.ViewID())
+	}
 	if c.cfg.StateV3 {
 		if len(k) == 20 {
 			v, _, err = tx.(kv.TemporalTx).GetLatest(kv.AccountsDomain, k)
@@ -401,16 +445,37 @@ func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) (v []byte, err error) {
 		v, err = tx.GetOne(kv.PlainState, k)
 	}
 	if err != nil {
+		if dbg.Enabled(ctx) {
+			fmt.Printf("[Get] DB error for key %x, txID %d: %v\n", k, tx.ViewID(), err)
+		}
 		return nil, err
 	}
 	if len(v) == 0 {
+		if dbg.Enabled(ctx) {
+			fmt.Printf("[Get] Empty value from DB for key %x, txID %d\n", k, tx.ViewID())
+		}
 		return v, nil
 	}
 	//fmt.Printf("from db: %#x,%x\n", k, v)
 
+	if dbg.Enabled(ctx) {
+		fmt.Printf("[Get] Attempting to acquire lock for key %x, txID %d\n", k, tx.ViewID())
+	}
 	c.lock.Lock()
-	defer c.lock.Unlock()
+	if dbg.Enabled(ctx) {
+		fmt.Printf("[Get] Lock acquired for key %x, txID %d\n", k, tx.ViewID())
+	}
+	defer func() {
+		c.lock.Unlock()
+		if dbg.Enabled(ctx) {
+			fmt.Printf("[Get] Lock released for key %x, txID %d\n", k, tx.ViewID())
+		}
+	}()
+
 	v = c.add(common.Copy(k), common.Copy(v), r, id).V
+	if dbg.Enabled(ctx) {
+		fmt.Printf("[Get] Get completed for key %x, txID %d\n", k, tx.ViewID())
+	}
 	return v, nil
 }
 

@@ -25,6 +25,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
@@ -72,12 +73,23 @@ func (r *Reader) Prepare(ctx context.Context) error {
 }
 
 func (r *Reader) EventsWithinTime(ctx context.Context, timeFrom, timeTo time.Time) ([]*types.Message, error) {
-	events, err := r.store.EventsByTimeframe(ctx, uint64(timeFrom.Unix()), uint64(timeTo.Unix()))
+	events, ids, err := r.store.EventsByTimeframe(ctx, uint64(timeFrom.Unix()), uint64(timeTo.Unix()))
 	if err != nil {
 		return nil, err
 	}
 
 	eventsRaw := make([]*types.Message, 0, len(events))
+
+	if len(events) > 0 && dbg.Enabled(ctx) {
+		r.logger.Debug(
+			bridgeLogPrefix("events for time range"),
+			"timeFrom", timeFrom.Unix(),
+			"timeTo", timeTo.Unix(),
+			"start", ids[0],
+			"end", ids[len(ids)-1],
+			"len", len(events),
+		)
+	}
 
 	// convert to message
 	for _, event := range events {
@@ -114,6 +126,10 @@ func (r *Reader) Events(ctx context.Context, blockNum uint64) ([]*types.Message,
 	events, err := r.store.Events(ctx, start, end+1)
 	if err != nil {
 		return nil, err
+	}
+
+	if len(events) > 0 && dbg.Enabled(ctx) {
+		r.logger.Debug(bridgeLogPrefix("events for block"), "block", blockNum, "start", start, "end", end, "len", len(events))
 	}
 
 	// convert to message

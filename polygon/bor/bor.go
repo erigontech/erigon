@@ -1567,6 +1567,7 @@ func (c *Bor) CommitStates(
 		var events []*types.Message
 		var err error
 
+		ctx := dbg.ContextWithDebug(c.execCtx, true)
 		if fetchEventsWithingTime {
 			sprintLength := c.config.CalculateSprintLength(blockNum)
 
@@ -1595,12 +1596,12 @@ func (c *Bor) CommitStates(
 				timeTo = time.Unix(int64(prevSprintStart.Time), 0)
 			}
 
-			events, err = c.bridgeReader.EventsWithinTime(c.execCtx, timeFrom, timeTo)
+			events, err = c.bridgeReader.EventsWithinTime(ctx, timeFrom, timeTo)
 			if err != nil {
 				return err
 			}
 		} else {
-			events, err = c.bridgeReader.Events(c.execCtx, blockNum)
+			events, err = c.bridgeReader.Events(ctx, blockNum)
 			if err != nil {
 				return err
 			}

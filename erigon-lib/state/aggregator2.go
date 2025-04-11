@@ -186,6 +186,13 @@ var Schema = map[kv.Domain]domainCfg{
 	},
 }
 
+func EnableHistoricalCommitment() {
+	cfg := Schema[kv.CommitmentDomain]
+	cfg.hist.historyDisabled = false
+	cfg.hist.snapshotsDisabled = false
+	Schema[kv.CommitmentDomain] = cfg
+}
+
 var StandaloneIISchema = map[kv.InvertedIdx]iiCfg{
 	kv.LogAddrIdx: {
 		filenameBase: kv.FileLogAddressIdx, keysTable: kv.TblLogAddressKeys, valuesTable: kv.TblLogAddressIdx,
