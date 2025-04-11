@@ -96,8 +96,8 @@ type Header struct {
 	MixDigest   libcommon.Hash    `json:"mixHash"` // prevRandao after EIP-4399
 	Nonce       BlockNonce        `json:"nonce"`
 	// AuRa extensions (alternative to MixDigest & Nonce)
-	AuRaStep uint64
-	AuRaSeal []byte
+	AuRaStep uint64 `json:"auraStep,omitempty"`
+	AuRaSeal []byte `json:"auraSeal,omitempty"`
 
 	BaseFee         *big.Int        `json:"baseFeePerGas"`   // EIP-1559
 	WithdrawalsHash *libcommon.Hash `json:"withdrawalsRoot"` // EIP-4895
@@ -582,15 +582,14 @@ type headerMarshaling struct {
 // Hash returns the block hash of the header, which is simply the keccak256 hash of its
 // RLP encoding.
 func (h *Header) Hash() (hash libcommon.Hash) {
-	if !h.mutable {
-		if hash := h.hash.Load(); hash != nil {
-			return *hash
-		}
+	if h.mutable {
+		return rlpHash(h)
+	}
+	if hash := h.hash.Load(); hash != nil {
+		return *hash
 	}
 	hash = rlpHash(h)
-	if !h.mutable {
-		h.hash.Store(&hash)
-	}
+	h.hash.Store(&hash)
 	return hash
 }
 
@@ -1158,10 +1157,6 @@ func CopyHeader(h *Header) *Header {
 		copy(cpy.VerkleKeyVals, h.VerkleKeyVals)
 	}
 	cpy.mutable = h.mutable
-	if hash := h.hash.Load(); hash != nil {
-		hashCopy := *hash
-		cpy.hash.Store(&hashCopy)
-	}
 	return &cpy
 }
 
@@ -1471,6 +1466,7 @@ func (b *Block) Copy() *Block {
 func (b *Block) WithSeal(header *Header) *Block {
 	headerCopy := CopyHeader(header)
 	headerCopy.mutable = false
+	headerCopy.hash.Store(nil) // invalidate cached hash
 	return &Block{
 		header:       headerCopy,
 		transactions: b.transactions,

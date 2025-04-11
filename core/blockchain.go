@@ -33,18 +33,17 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
-
-	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/ethutils"
+	"github.com/erigontech/erigon/execution/consensus"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 )
 
@@ -87,7 +86,7 @@ func ExecuteBlockEphemerally(
 	chainConfig *chain.Config, vmConfig *vm.Config,
 	blockHashFunc func(n uint64) libcommon.Hash,
 	engine consensus.Engine, block *types.Block,
-	stateReader state.StateReader, stateWriter state.WriterWithChangeSets,
+	stateReader state.StateReader, stateWriter state.StateWriter,
 	chainReader consensus.ChainReader, getTracer func(txIndex int, txHash libcommon.Hash) (*tracing.Hooks, error),
 	logger log.Logger,
 ) (res *EphemeralExecResult, executeBlockErr error) {
@@ -128,7 +127,7 @@ func ExecuteBlockEphemerally(
 	for i, txn := range block.Transactions() {
 		ibs.SetTxContext(i)
 		writeTrace := false
-		if vmConfig.Tracer == nil {
+		if vmConfig.Tracer == nil && getTracer != nil {
 			tracer, err := getTracer(i, txn.Hash())
 			if err != nil {
 				return nil, fmt.Errorf("could not obtain tracer: %w", err)
@@ -392,11 +391,6 @@ func FinalizeBlockExecution(
 		return nil, nil, nil, nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
 	}
 
-	if casted, ok := stateWriter.(state.WriterWithChangeSets); ok {
-		if err := casted.WriteChangeSets(); err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("writing changesets for block %d failed: %w", header.Number.Uint64(), err)
-		}
-	}
 	return newBlock, newTxs, newReceipt, retRequests, nil
 }
 

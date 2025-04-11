@@ -26,16 +26,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/cmd/utils"
-
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	devnet_args "github.com/erigontech/erigon/cmd/devnet/args"
-	"github.com/erigontech/erigon/cmd/devnet/requests"
+	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rpc/requests"
 	erigonapp "github.com/erigontech/erigon/turbo/app"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
 )

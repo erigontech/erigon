@@ -27,12 +27,12 @@ import (
 
 // CachedWriter is a wrapper for an instance of type StateWriter
 type CachedWriter struct {
-	w     WriterWithChangeSets
+	w     StateWriter
 	cache *shards.StateCache
 }
 
 // NewCachedWriter wraps a given state writer into a cached writer
-func NewCachedWriter(w WriterWithChangeSets, cache *shards.StateCache) *CachedWriter {
+func NewCachedWriter(w StateWriter, cache *shards.StateCache) *CachedWriter {
 	return &CachedWriter{w: w, cache: cache}
 }
 
@@ -77,12 +77,4 @@ func (cw *CachedWriter) WriteAccountStorage(address common.Address, incarnation 
 
 func (cw *CachedWriter) CreateContract(address common.Address) error {
 	return cw.w.CreateContract(address)
-}
-
-func (cw *CachedWriter) WriteChangeSets() error {
-	return cw.w.WriteChangeSets()
-}
-
-func (cw *CachedWriter) WriteHistory() error {
-	return cw.w.WriteHistory()
 }
