@@ -27,7 +27,6 @@ import (
 	"os"
 	"path"
 	"strconv"
-	"sync"
 	"time"
 
 	"gopkg.in/yaml.v2"
@@ -1375,15 +1374,17 @@ func GetConfigsByNetworkName(net string) (*NetworkConfig, *BeaconChainConfig, Ne
 }
 
 var (
-	globalBeaconConfig         *BeaconChainConfig
-	onceInitGlobalBeaconConfig sync.Once
+	globalBeaconConfig *BeaconChainConfig
 )
 
 func InitGlobalBeaconConfig(cfg *BeaconChainConfig) {
-	// init once
-	onceInitGlobalBeaconConfig.Do(func() {
-		globalBeaconConfig = cfg
-	})
+	if cfg == nil {
+		panic("cannot initialize globalBeaconConfig with nil")
+	}
+	if globalBeaconConfig != nil {
+		panic("globalBeaconConfig already initialized")
+	}
+	globalBeaconConfig = cfg
 }
 
 func GetBeaconConfig() *BeaconChainConfig {
