@@ -1620,7 +1620,6 @@ func stage(st *stagedsync.Sync, tx kv.Tx, db kv.RoDB, stage stages.SyncStage) *s
 }
 
 func overrideStorageMode(db kv.RwDB, logger log.Logger) error {
-	chainConfig := fromdb.ChainConfig(db)
 	pm, err := prune.FromCli(pruneB, pruneH)
 	if err != nil {
 		return err
