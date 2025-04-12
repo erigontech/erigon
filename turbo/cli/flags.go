@@ -280,12 +280,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	if !ctx.IsSet(PruneDistanceFlag.Name) {
 		distance = math.MaxUint64
 	}
-	mode, err := prune.FromCli(
-		chainId,
-		distance,
-		blockDistance,
-		libcommon.CliString2Array(ctx.String(ExperimentTevmFlag.Name)),
-	)
+	mode, err := prune.FromCli(distance, blockDistance)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
@@ -408,12 +403,7 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	if experiments != nil {
 		experimentsVal = *experiments
 	}
-	mode, err := prune.FromCli(
-		chainId,
-		distance,
-		blockDistance,
-		libcommon.CliString2Array(experimentsVal),
-	)
+	mode, err := prune.FromCli(distance, blockDistance)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}

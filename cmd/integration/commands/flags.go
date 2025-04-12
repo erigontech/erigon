@@ -45,7 +45,6 @@ var (
 	pruneB, pruneH, pruneR, pruneT, pruneC   uint64
 	pruneBBefore, pruneHBefore, pruneRBefore uint64
 	pruneTBefore, pruneCBefore               uint64
-	experiments                              []string
 	unwindTypes                              []string
 	chain                                    string // Which chain to use (mainnet, sepolia, etc.)
 	outputCsvFile                            string
