@@ -38,7 +38,6 @@ import (
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 // getReceipts - checking in-mem cache, or else fallback to db, or else fallback to re-exec of block to re-gen receipts
@@ -56,8 +55,7 @@ func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.Temp
 }
 
 func (api *BaseAPI) getReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-	return api.receiptsGenerator.GetReceiptsGasUsed(tx, block, txNumsReader)
+	return api.receiptsGenerator.GetReceiptsGasUsed(tx, block, api._txNumReader)
 }
 
 func (api *BaseAPI) getCachedReceipt(ctx context.Context, hash common.Hash) (*types.Receipt, bool) {
@@ -222,14 +220,13 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	var blockHash common.Hash
 	var header *types.Header
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-	txNumbers, err := applyFiltersV3(txNumsReader, tx, begin, end, crit)
+	txNumbers, err := applyFiltersV3(api._txNumReader, tx, begin, end, crit)
 	if err != nil {
 		return logs, err
 	}
 
 	it := rawdbv3.TxNums2BlockNums(tx,
-		txNumsReader,
+		api._txNumReader,
 		txNumbers, order.Asc)
 	defer it.Close()
 	for it.HasNext() {
@@ -258,7 +255,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 					continue
 				}
 
-				borLogs, err := api.borReceiptGenerator.GenerateBorLogs(ctx, events, txNumsReader, tx, header, chainConfig, txIndex, len(logs))
+				borLogs, err := api.borReceiptGenerator.GenerateBorLogs(ctx, events, api._txNumReader, tx, header, chainConfig, txIndex, len(logs))
 				if err != nil {
 					return logs, err
 				}
@@ -417,9 +414,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, nil
 	}
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-
-	txNumMin, err := txNumsReader.Min(tx, blockNum)
+	txNumMin, err := api._txNumReader.Min(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
