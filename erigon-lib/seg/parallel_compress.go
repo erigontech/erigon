@@ -941,7 +941,7 @@ func DictionaryBuilderFromCollectors(ctx context.Context, cfg Cfg, logPrefix, tm
 	if err := dictCollector.Load(nil, "", db.loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return nil, err
 	}
-	db.finish(cfg.DictReducerSoftLimit)
+	db.finish(cfg.MaxDictPatterns)
 
 	db.Sort()
 	if lvl < log.LvlTrace {
