@@ -1031,7 +1031,7 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 		u.Flags |= commitment.CodeUpdate
 		copy(u.CodeHash[:], acc.CodeHash.Bytes())
 	}
-  
+
 	if assert.Enable {
 		code, err := sdc.readCode(plainKey)
 		if err != nil {
@@ -1062,6 +1062,7 @@ func (sdc *SharedDomainsCommitmentContext) Storage(plainKey []byte) (u *commitme
 		u.Flags = commitment.StorageUpdate
 		copy(u.Storage[:u.StorageLen], enc)
 	}
+
 	return u, nil
 }
 
