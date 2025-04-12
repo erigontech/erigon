@@ -134,9 +134,6 @@ func ParseEOFHeader(eofCode []byte, jt *JumpTable, containerKind byte, validate 
 	if numCodeSections != typesSizes/4 {
 		return nil, fmt.Errorf("EOFException.INVALID_TYPE_SECTION_SIZE|EOFException.INVALID_SECTION_BODIES_SIZE")
 	}
-	// if numCodeSections > 1024 { // no need to check this
-	// 	return nil, fmt.Errorf("EOF code sections == 0")
-	// }
 
 	for i := uint16(0); i < numCodeSections; i++ {
 		if offset+1 >= uint16(len(eofCode)) {
@@ -159,6 +156,9 @@ func ParseEOFHeader(eofCode []byte, jt *JumpTable, containerKind byte, validate 
 
 	if eofCode[offset] == kindContainer {
 		offset++
+		if offset+1 >= uint16(len(eofCode)) {
+			return nil, fmt.Errorf("EOFException.INCOMPLETE_SECTION_SIZE")
+		}
 		numContainerSections := uint16(eofCode[offset])<<8 | uint16(eofCode[offset+1])
 		offset += 2
 		if numContainerSections > 256 {

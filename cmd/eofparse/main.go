@@ -61,12 +61,14 @@ func main() {
 		input, err := hex.DecodeString(hexInput)
 		if err != nil {
 			fmt.Println("error decoding hex input:", err)
+			continue
 		}
 
 		// Process the decoded bytes, requires correct containerKind as well
 		header, err := vm.ParseEOFHeader(input, &eofJt, 1, true, 0) //
 		if err != nil {
 			fmt.Println("err:", err)
+			continue
 		}
 
 		fmt.Printf("OK %s\n", header.GetHexCodeSections(input))
