@@ -1377,7 +1377,7 @@ func WriteReceiptsCache(tx kv.TemporalPutDel, blockNum uint64, blockHash common.
 			}
 		}
 
-		//if err := tx.DomainPut(kv.ReceiptsCacheDomain, dbutils.ReceiptCacheKey(blockNum, blockHash, uint32(txnIndex)), nil, buf.Bytes()); err != nil {
+		//if err := tx.DomainPut(kv.ReceiptsCache, dbutils.ReceiptCacheKey(blockNum, blockHash, uint32(txnIndex)), nil, buf.Bytes()); err != nil {
 		//	return fmt.Errorf("writing logs for block %d: %w", blockNum, err)
 		//}
 		if err := tx.DomainPut(kv.ReceiptCacheDomain, dbutils.HeaderKey(blockNum, blockHash), nil, buf.Bytes(), nil, 0); err != nil {
