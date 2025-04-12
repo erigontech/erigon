@@ -462,7 +462,7 @@ func enableEOFv1(jt *JumpTable) {
 	jt[EXTCALL] = &operation{
 		execute:     opExtCall,
 		constantGas: 100,
-		dynamicGas:  gasExtCall,
+		dynamicGas:  gasExtCallEIP7702,
 		numPop:      4,
 		numPush:     1,
 		memorySize:  memoryExtCall,
@@ -470,7 +470,7 @@ func enableEOFv1(jt *JumpTable) {
 	jt[EXTDELEGATECALL] = &operation{
 		execute:     opExtDelegateCall,
 		constantGas: 100,
-		dynamicGas:  gasExtDelegateCall,
+		dynamicGas:  gasExtDelegateCallEIP7702,
 		numPop:      3,
 		numPush:     1,
 		memorySize:  memoryExtCall,
@@ -478,7 +478,7 @@ func enableEOFv1(jt *JumpTable) {
 	jt[EXTSTATICCALL] = &operation{
 		execute:     opExtStaticCall,
 		constantGas: 100,
-		dynamicGas:  gasExtStaticCall,
+		dynamicGas:  gasExtStaticCallEIP7702,
 		numPop:      3,
 		numPush:     1,
 		memorySize:  memoryExtCall,

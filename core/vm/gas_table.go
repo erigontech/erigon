@@ -548,11 +548,6 @@ func gasExtCall(evm *EVM, scope *ScopeContext, memorySize, pc uint64) (uint64, e
 		address        = libcommon.Address(scope.Stack.Back(0).Bytes20())
 	)
 
-	addrMod := evm.IntraBlockState().AddAddressToAccessList(address)
-	if addrMod {
-		gas += params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
-	}
-
 	if transfersValue {
 		if empty, err := evm.IntraBlockState().Empty(address); err != nil {
 			return 0, ErrIntraBlockStateFailed
@@ -561,6 +556,7 @@ func gasExtCall(evm *EVM, scope *ScopeContext, memorySize, pc uint64) (uint64, e
 		}
 		gas += params.CallValueTransferGas
 	}
+
 	memoryGas, err := memoryGasCost(scope.Memory, memorySize)
 	if err != nil {
 		return 0, err
@@ -569,7 +565,6 @@ func gasExtCall(evm *EVM, scope *ScopeContext, memorySize, pc uint64) (uint64, e
 	if gas, overflow = math.SafeAdd(gas, memoryGas); overflow {
 		return 0, ErrGasUintOverflow
 	}
-
 	evm.callGasTemp, err = extCallGas(scope.Contract.Gas, gas)
 	if err != nil {
 		return 0, err
@@ -577,20 +572,13 @@ func gasExtCall(evm *EVM, scope *ScopeContext, memorySize, pc uint64) (uint64, e
 	if gas, overflow = math.SafeAdd(gas, evm.callGasTemp); overflow {
 		return 0, ErrGasUintOverflow
 	}
-
 	return gas, nil
 }
 
 func gasExtDelegateCall(evm *EVM, scope *ScopeContext, memorySize, pc uint64) (uint64, error) {
 	var (
-		gas     uint64
-		address = libcommon.Address(scope.Stack.Back(0).Bytes20())
+		gas uint64
 	)
-
-	addrMod := evm.IntraBlockState().AddAddressToAccessList(address)
-	if addrMod {
-		gas += params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
-	}
 
 	memoryGas, err := memoryGasCost(scope.Memory, memorySize)
 	if err != nil {
@@ -600,7 +588,6 @@ func gasExtDelegateCall(evm *EVM, scope *ScopeContext, memorySize, pc uint64) (u
 	if gas, overflow = math.SafeAdd(gas, memoryGas); overflow {
 		return 0, ErrGasUintOverflow
 	}
-
 	evm.callGasTemp, err = extCallGas(scope.Contract.Gas, gas)
 	if err != nil {
 		return 0, err
@@ -608,19 +595,13 @@ func gasExtDelegateCall(evm *EVM, scope *ScopeContext, memorySize, pc uint64) (u
 	if gas, overflow = math.SafeAdd(gas, evm.callGasTemp); overflow {
 		return 0, ErrGasUintOverflow
 	}
-
 	return gas, nil
 }
 
 func gasExtStaticCall(evm *EVM, scope *ScopeContext, memorySize, pc uint64) (uint64, error) {
 	var (
-		gas     uint64
-		address = libcommon.Address(scope.Stack.Back(0).Bytes20())
+		gas uint64
 	)
-	addrMod := evm.IntraBlockState().AddAddressToAccessList(address)
-	if addrMod {
-		gas += params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
-	}
 
 	memoryGas, err := memoryGasCost(scope.Memory, memorySize)
 	if err != nil {
@@ -630,7 +611,6 @@ func gasExtStaticCall(evm *EVM, scope *ScopeContext, memorySize, pc uint64) (uin
 	if gas, overflow = math.SafeAdd(gas, memoryGas); overflow {
 		return 0, ErrGasUintOverflow
 	}
-
 	evm.callGasTemp, err = extCallGas(scope.Contract.Gas, gas)
 	if err != nil {
 		return 0, err
@@ -638,7 +618,6 @@ func gasExtStaticCall(evm *EVM, scope *ScopeContext, memorySize, pc uint64) (uin
 	if gas, overflow = math.SafeAdd(gas, evm.callGasTemp); overflow {
 		return 0, ErrGasUintOverflow
 	}
-
 	return gas, nil
 }
 

@@ -363,10 +363,7 @@ func opExtDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCont
 	// Get the arguments from the memory.
 	args := scope.Memory.GetPtr(offset, size)
 
-	// The code targeted by EXTDELEGATECALL must also be an EOF.
-	// This restriction has been added to EIP-3540 in
-	// https://github.com/ethereum/EIPs/pull/7131
-	code, err := interpreter.evm.intraBlockState.GetCode(toAddr)
+	code, err := interpreter.evm.intraBlockState.ResolveCode(toAddr)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
