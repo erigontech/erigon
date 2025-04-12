@@ -1227,7 +1227,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
-	chainConfig, pm := fromdb.ChainConfig(db), fromdb.PruneMode(db)
+	chainConfig := fromdb.ChainConfig(db)
 
 	genesis := core.GenesisBlockByChainName(chain)
 	br, _ := blocksIO(db, logger)
