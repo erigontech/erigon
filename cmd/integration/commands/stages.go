@@ -462,7 +462,6 @@ var cmdRunMigrations = &cobra.Command{
 }
 
 var cmdSetPrune = &cobra.Command{
-	Use:   "force_set_prune",
 	Short: "Override existing --prune flag value (if you know what you are doing)",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
@@ -635,7 +634,6 @@ func init() {
 	cmdSetPrune.Flags().Uint64Var(&pruneRBefore, "prune.r.before", 0, "")
 	cmdSetPrune.Flags().Uint64Var(&pruneTBefore, "prune.t.before", 0, "")
 	cmdSetPrune.Flags().Uint64Var(&pruneCBefore, "prune.c.before", 0, "")
-	cmdSetPrune.Flags().StringSliceVar(&experiments, "experiments", nil, "Storage mode to override database")
 	rootCmd.AddCommand(cmdSetPrune)
 }
 
