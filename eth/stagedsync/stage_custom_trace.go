@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
@@ -44,16 +43,13 @@ import (
 type CustomTraceCfg struct {
 	tmpdir   string
 	db       kv.TemporalRwDB
-	prune    prune.Mode
 	execArgs *exec3.ExecArgs
 }
 
-func StageCustomTraceCfg(db kv.TemporalRwDB, prune prune.Mode, dirs datadir.Dirs, br services.FullBlockReader, cc *chain.Config,
-	engine consensus.Engine, genesis *types.Genesis, syncCfg *ethconfig.Sync) CustomTraceCfg {
+func StageCustomTraceCfg(db kv.TemporalRwDB, dirs datadir.Dirs, br services.FullBlockReader, cc *chain.Config, engine consensus.Engine, genesis *types.Genesis, syncCfg *ethconfig.Sync) CustomTraceCfg {
 	execArgs := &exec3.ExecArgs{
 		ChainDB:     db,
 		BlockReader: br,
-		Prune:       prune,
 		ChainConfig: cc,
 		Dirs:        dirs,
 		Engine:      engine,
@@ -62,7 +58,6 @@ func StageCustomTraceCfg(db kv.TemporalRwDB, prune prune.Mode, dirs datadir.Dirs
 	}
 	return CustomTraceCfg{
 		db:       db,
-		prune:    prune,
 		execArgs: execArgs,
 	}
 }
