@@ -138,8 +138,8 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 
 		var readRatio float64
 
-		if taskDur := ex.execMetrics.Duration.Ema.Get(); taskDur > 0 {
-			repeatRatio = 100.0 * float64(ex.execMetrics.ReadDuration.Ema.Get().Microseconds()) / float64(taskDur)
+		if taskDur := ex.execMetrics.Duration.Load(); taskDur > 0 {
+			readRatio = 100.0 * float64(ex.execMetrics.ReadDuration.Load()) / float64(taskDur)
 		}
 
 		parallelExecVals = []interface{}{
