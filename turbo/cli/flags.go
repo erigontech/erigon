@@ -94,7 +94,7 @@ var (
 		Usage: `Keep block history for the latest N blocks (default: everything)`,
 	}
 	ExperimentsFlag = cli.StringFlag{
-		Name: "experiments",
+		Name: "experiment.tevm",
 		Usage: `Enable some experimental stages:
 * tevm - write TEVM translated code to the DB`,
 		Value: "default",
