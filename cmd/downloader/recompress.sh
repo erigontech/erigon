@@ -24,6 +24,7 @@ do
 ./build/bin/erigon snapshots uncompress /erigon-data/sepolia_remove_me/snapshots/history/v1-commitment.3-4.v | DictReducerSoftLimit=10_000_000 MaxDictPatterns=1_000_000 MinPatternLen=20 MaxPatternLen=128 SamplingFactor=1 MinPatternScore=512 ./build/bin/erigon seg compress /erigon-data/sepolia_remove_me/snapshots/history/v99-soft10m-hard1m-min20-max128-s1-sc512-commitment.3-4.v  --datadir=/erigon-data/sepolia_remove_me --log.console.verbosity=5
 
 ./build/bin/erigon snapshots uncompress /erigon-data/sepolia_remove_me/snapshots/history/v1-commitment.3-4.v | DictReducerSoftLimit=10_000_000 MaxDictPatterns=1_000_000 MinPatternLen=20 MaxPatternLen=128 SamplingFactor=1 MinPatternScore=2048 ./build/bin/erigon seg compress /erigon-data/sepolia_remove_me/snapshots/history/v99-soft10m-hard1m-min20-max128-s1-sc2k-commitment.3-4.v  --datadir=/erigon-data/sepolia_remove_me --log.console.verbosity=5
+./build/bin/erigon snapshots uncompress /erigon-data/sepolia_remove_me/snapshots/history/v1-commitment.3-4.v | DictReducerSoftLimit=10_000_000 MaxDictPatterns=1_000_000 MinPatternLen=64 MaxPatternLen=256 SamplingFactor=1 MinPatternScore=1024 ./build/bin/erigon seg compress /erigon-data/sepolia_remove_me/snapshots/history/v99-soft10m-hard1m-min64-max256-s1-commitment.3-4.v  --datadir=/erigon-data/sepolia_remove_me --log.console.verbosity=5
 
 
 
