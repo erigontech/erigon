@@ -547,32 +547,41 @@ var ChaindataTablesCfg = TableCfg{
 		DupToLen:                  28,
 	},
 
-	TblAccountVals:           {Flags: DupSort},
-	TblAccountHistoryKeys:    {Flags: DupSort},
-	TblAccountHistoryVals:    {Flags: DupSort},
-	TblAccountIdx:            {Flags: DupSort},
-	TblStorageVals:           {Flags: DupSort},
-	TblStorageHistoryKeys:    {Flags: DupSort},
-	TblStorageHistoryVals:    {Flags: DupSort},
-	TblStorageIdx:            {Flags: DupSort},
-	TblCodeHistoryKeys:       {Flags: DupSort},
-	TblCodeIdx:               {Flags: DupSort},
+	TblAccountVals:        {Flags: DupSort},
+	TblAccountHistoryKeys: {Flags: DupSort},
+	TblAccountHistoryVals: {Flags: DupSort},
+	TblAccountIdx:         {Flags: DupSort},
+
+	TblStorageVals:        {Flags: DupSort},
+	TblStorageHistoryKeys: {Flags: DupSort},
+	TblStorageHistoryVals: {Flags: DupSort},
+	TblStorageIdx:         {Flags: DupSort},
+
+	TblCodeHistoryKeys: {Flags: DupSort},
+	TblCodeIdx:         {Flags: DupSort},
+
 	TblCommitmentVals:        {Flags: DupSort},
 	TblCommitmentHistoryKeys: {Flags: DupSort},
 	TblCommitmentHistoryVals: {Flags: DupSort},
 	TblCommitmentIdx:         {Flags: DupSort},
-	TblReceiptVals:           {Flags: DupSort},
-	TblReceiptHistoryKeys:    {Flags: DupSort},
-	TblReceiptHistoryVals:    {Flags: DupSort},
-	TblReceiptIdx:            {Flags: DupSort},
-	TblLogAddressKeys:        {Flags: DupSort},
-	TblLogAddressIdx:         {Flags: DupSort},
-	TblLogTopicsKeys:         {Flags: DupSort},
-	TblLogTopicsIdx:          {Flags: DupSort},
-	TblTracesFromKeys:        {Flags: DupSort},
-	TblTracesFromIdx:         {Flags: DupSort},
-	TblTracesToKeys:          {Flags: DupSort},
-	TblTracesToIdx:           {Flags: DupSort},
+
+	TblReceiptVals:        {Flags: DupSort},
+	TblReceiptHistoryKeys: {Flags: DupSort},
+	TblReceiptHistoryVals: {Flags: DupSort},
+	TblReceiptIdx:         {Flags: DupSort},
+
+	TblReceiptCacheHistoryKeys: {Flags: DupSort},
+	TblReceiptCacheIdx:         {Flags: DupSort},
+
+	TblLogAddressKeys: {Flags: DupSort},
+	TblLogAddressIdx:  {Flags: DupSort},
+	TblLogTopicsKeys:  {Flags: DupSort},
+	TblLogTopicsIdx:   {Flags: DupSort},
+
+	TblTracesFromKeys: {Flags: DupSort},
+	TblTracesFromIdx:  {Flags: DupSort},
+	TblTracesToKeys:   {Flags: DupSort},
+	TblTracesToIdx:    {Flags: DupSort},
 }
 
 var AuRaTablesCfg = TableCfg{
