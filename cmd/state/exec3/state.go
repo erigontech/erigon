@@ -50,18 +50,28 @@ var noop = state.NewNoopWriter()
 
 type WorkerMetrics struct {
 	Active        activeWorkerCount
-	Duration      *metrics.EMA[time.Duration]
-	ReadDuration  *metrics.EMA[time.Duration]
-	WriteDuration *metrics.EMA[time.Duration]
+	Duration      activeDuration
+	ReadDuration  activeDuration
+	WriteDuration activeDuration
 }
 
 func NewWorkerMetrics() *WorkerMetrics {
 	return &WorkerMetrics{
 		Active:        activeWorkerCount{Ema: metrics.NewEmaWithBeta[int32](0, 1, 0.2)},
-		Duration:      metrics.NewEma[time.Duration](0, 0.5),
-		ReadDuration:  metrics.NewEma[time.Duration](0, 0.5),
-		WriteDuration: metrics.NewEma[time.Duration](0, 0.5),
+		Duration:      activeDuration{Ema: metrics.NewEma[time.Duration](0, 0.3)},
+		ReadDuration:  activeDuration{Ema: metrics.NewEma[time.Duration](0, 0.3)},
+		WriteDuration: activeDuration{Ema: metrics.NewEma[time.Duration](0, 0.3)},
 	}
+}
+
+type activeDuration struct {
+	atomic.Int64
+	Ema *metrics.EMA[time.Duration]
+}
+
+func (d *activeDuration) Add(i time.Duration) {
+	d.Int64.Add(int64(i))
+	d.Ema.Update(i)
 }
 
 type activeWorkerCount struct {
@@ -255,9 +265,9 @@ func (rw *Worker) RunTxTask(txTask exec.Task) *exec.Result {
 		rw.metrics.Active.Add(1)
 		start := time.Now()
 		defer func() {
-			rw.metrics.Duration.Update(time.Since(start))
+			rw.metrics.Duration.Add(time.Since(start))
 			if readDuration := rw.ibs.StorageReadDuration(); readDuration > 0 {
-				rw.metrics.ReadDuration.Update(rw.ibs.StorageReadDuration())
+				rw.metrics.ReadDuration.Add(rw.ibs.StorageReadDuration())
 			}
 			rw.metrics.Active.Add(-1)
 		}()

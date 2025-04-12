@@ -136,14 +136,20 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 			repeatRatio = 100.0 * float64(repeats) / float64(execDiff)
 		}
 
+		var readRatio float64
+
+		if taskDur := ex.execMetrics.Duration.Load(); taskDur > 0 {
+			repeatRatio = 100.0 * float64(ex.execMetrics.ReadDuration.Load()) / float64(taskDur)
+		}
+
 		parallelExecVals = []interface{}{
 			"exec", common.PrettyCounter(execDiff),
 			"repeat%", fmt.Sprintf("%.2f", repeatRatio),
 			"abort", common.PrettyCounter(abortCount - p.prevAbortCount),
 			"invalid", common.PrettyCounter(invalidCount - p.prevInvalidCount),
 			"workers", ex.execMetrics.Active.Ema.Get(),
-			"task-dur", ex.execMetrics.Duration.Get().Microseconds(),
-			"task-rdur", ex.execMetrics.ReadDuration.Get().Microseconds(),
+			"task-dur", fmt.Sprintf("%d\xc2\xb5s", ex.execMetrics.Duration.Ema.Get().Microseconds()),
+			"task-rdur", fmt.Sprintf("%d\xc2\xb5s (%.2f%%)", ex.execMetrics.ReadDuration.Ema.Get().Microseconds(), readRatio),
 			"rd", common.PrettyCounter(readCount - p.prevReadCount),
 			"wrt", common.PrettyCounter(writeCount - p.prevWriteCount),
 			"rd/s", common.PrettyCounter(uint64(float64(readCount-p.prevReadCount) / interval.Seconds())),
