@@ -138,8 +138,8 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 
 		var readRatio float64
 
-		if taskDur := ex.execMetrics.Duration.Load(); taskDur > 0 {
-			repeatRatio = 100.0 * float64(ex.execMetrics.ReadDuration.Load()) / float64(taskDur)
+		if taskDur := ex.execMetrics.Duration.Ema.Get(); taskDur > 0 {
+			repeatRatio = 100.0 * float64(ex.execMetrics.ReadDuration.Ema.Get().Microseconds()) / float64(taskDur)
 		}
 
 		parallelExecVals = []interface{}{
@@ -148,8 +148,8 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 			"abort", common.PrettyCounter(abortCount - p.prevAbortCount),
 			"invalid", common.PrettyCounter(invalidCount - p.prevInvalidCount),
 			"workers", ex.execMetrics.Active.Ema.Get(),
-			"task-dur", fmt.Sprintf("%d\xc2\xb5s", ex.execMetrics.Duration.Ema.Get().Microseconds()),
-			"task-rdur", fmt.Sprintf("%d\xc2\xb5s (%.2f%%)", ex.execMetrics.ReadDuration.Ema.Get().Microseconds(), readRatio),
+			"task-dur", fmt.Sprintf("%dµs", ex.execMetrics.Duration.Ema.Get().Microseconds()),
+			"task-rdur", fmt.Sprintf("%dµs (%.2f%%)", ex.execMetrics.ReadDuration.Ema.Get().Microseconds(), readRatio),
 			"rd", common.PrettyCounter(readCount - p.prevReadCount),
 			"wrt", common.PrettyCounter(writeCount - p.prevWriteCount),
 			"rd/s", common.PrettyCounter(uint64(float64(readCount-p.prevReadCount) / interval.Seconds())),
