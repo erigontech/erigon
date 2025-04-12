@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
@@ -236,14 +235,14 @@ func (rw *HistoricalTraceWorker) ResetTx(chainTx kv.TemporalTx) {
 
 // immutable (aka. global) params required for block execution. can instantiate once at app-start
 type ExecArgs struct {
-	ChainDB     kv.TemporalRoDB
-	Genesis     *types.Genesis
-	BlockReader services.FullBlockReader
-	Prune       prune.Mode
-	Engine      consensus.Engine
-	Dirs        datadir.Dirs
-	ChainConfig *chain.Config
-	Workers     int
+	ChainDB         kv.TemporalRoDB
+	Genesis         *types.Genesis
+	BlockReader     services.FullBlockReader
+	Engine          consensus.Engine
+	Dirs            datadir.Dirs
+	ChainConfig     *chain.Config
+	Workers         int
+	PersistReceipts bool
 }
 
 func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, in *state.QueueWithRetry, workerCount int, outputTxNum *atomic.Uint64, logger log.Logger) *errgroup.Group {

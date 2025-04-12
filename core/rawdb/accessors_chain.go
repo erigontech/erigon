@@ -1345,12 +1345,12 @@ func PruneReceiptsCache(tx kv.RwTx, toBlockNum uint64, pruneLimit int) error {
 }
 
 // WriteReceiptsCache stores all the transaction receipts belonging to a block.
-func WriteReceiptsCache(tx kv.RwTx, blockNum uint64, blockHash common.Hash, receipts types.Receipts) error {
-	if ok, err := HasReceiptCache(tx, blockNum, blockHash, 0); err != nil { // if exists don't write
-		return err
-	} else if ok {
-		return nil
-	}
+func WriteReceiptsCache(tx kv.TemporalPutDel, blockNum uint64, blockHash common.Hash, receipts types.Receipts) error {
+	//if ok, err := HasReceiptCache(tx, blockNum, blockHash, 0); err != nil { // if exists don't write
+	//	return err
+	//} else if ok {
+	//	return nil
+	//}
 
 	buf := bytes.NewBuffer(nil)
 	for txnIndex, receipt := range receipts {
