@@ -291,7 +291,6 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			}
 
 			if txTask.Final { // block changed
-
 				if cfg.ChainConfig.Bor != nil && txTask.TxIndex >= 1 {
 					// get last receipt and store the last log index + 1
 					lastReceipt := txTask.BlockReceipts[txTask.TxIndex-1]
