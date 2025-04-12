@@ -355,22 +355,14 @@ func opReturnDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 	)
 
 	if scope.EofHeader != nil { // EOF code
-		dataSize := uint64(len(interpreter.returnData))
+		dataOffset64, overflow := dataOffset.Uint64WithOverflow()
+		if overflow {
+			dataOffset64 = math.MaxUint64
+		}
+		// These values are checked for overflow during gas cost calculation
+		memOffset64 := memOffset.Uint64()
 		length64 := length.Uint64()
-
-		var offset uint64
-		if dataOffset.CmpUint64(dataSize) >= 0 {
-			offset = dataSize
-		} else {
-			offset = dataOffset.Uint64()
-		}
-		copySize := min(length64, dataSize-offset)
-		if copySize > 0 {
-			scope.Memory.Set(memOffset.Uint64(), copySize, interpreter.returnData[offset:offset+copySize])
-		}
-		if length64-copySize > 0 {
-			scope.Memory.SetZero(memOffset.Uint64()+copySize, length64-copySize)
-		}
+		scope.Memory.Set(memOffset64, length64, getData(interpreter.returnData, dataOffset64, length64))
 		return nil, nil
 	}
 

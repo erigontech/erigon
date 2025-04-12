@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/holiman/uint256"
 )
@@ -272,23 +273,15 @@ func opReturnCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) 
 }
 
 func opReturnDataLoad(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-
-	var index256 = scope.Stack.Peek()
-	// _, overflow := index256.Uint64WithOverflow()
-	// if overflow {
-	// 	// TODO: can this be the case?
-	// }
-	start := index256.Uint64()
-	b := [32]byte{}
-	if uint64(len(interpreter.returnData)) < start {
-		index256.SetBytes32(b[:]) // set zero
-	} else {
-		end := min(start+32, uint64(len(interpreter.returnData)))
-		for i := uint64(0); i < end-start; i++ {
-			b[i] = interpreter.returnData[start+i]
-		}
-		index256.SetBytes32(b[:])
+	var (
+		offset = scope.Stack.Pop()
+	)
+	offset64, overflow := offset.Uint64WithOverflow()
+	if overflow {
+		offset64 = math.MaxUint64
 	}
+	fmt.Println("opReturnDataLoad offset64", offset64)
+	scope.Stack.Push(offset.SetBytes(getData(interpreter.returnData, offset64, 32)))
 	return nil, nil
 }
 
