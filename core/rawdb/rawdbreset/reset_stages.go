@@ -163,7 +163,7 @@ func ResetExec(ctx context.Context, db kv.RwDB, agg *state.Aggregator, chain str
 	cleanupList := make([]string, 0)
 	cleanupList = append(cleanupList, stateBuckets...)
 	cleanupList = append(cleanupList, stateHistoryBuckets...)
-	cleanupList = append(cleanupList, agg.DomainTables(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain)...)
+	cleanupList = append(cleanupList, agg.DomainTables(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain, kv.ReceiptCacheDomain)...)
 	cleanupList = append(cleanupList, agg.InvertedIndexTables(kv.LogAddrIdx, kv.LogTopicIdx, kv.TracesFromIdx, kv.TracesToIdx)...)
 
 	return db.Update(ctx, func(tx kv.RwTx) error {

@@ -37,6 +37,9 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	if err := a.registerDomain(kv.ReceiptDomain, salt, dirs, logger); err != nil {
 		return nil, err
 	}
+	if err := a.registerDomain(kv.ReceiptCacheDomain, salt, dirs, logger); err != nil {
+		return nil, err
+	}
 	if err := a.registerII(kv.LogAddrIdx, salt, dirs, logger); err != nil {
 		return nil, err
 	}
@@ -181,6 +184,28 @@ var Schema = map[kv.Domain]domainCfg{
 				keysTable: kv.TblReceiptHistoryKeys, valuesTable: kv.TblReceiptIdx,
 				withExistence: false, compressorCfg: seg.DefaultCfg,
 				filenameBase: kv.ReceiptDomain.String(),
+			},
+		},
+	},
+	kv.ReceiptCacheDomain: {
+		name: kv.ReceiptCacheDomain, valuesTable: kv.TblReceiptCacheVals,
+
+		AccessorList: AccessorBTree,
+		Compression:  seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+		CompressCfg:  DomainCompressCfg,
+
+		hist: histCfg{
+			valuesTable: kv.TblReceiptCacheHistoryVals,
+			compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+
+			historyLargeValues: true,
+			filenameBase:       kv.ReceiptCacheDomain.String(),
+			historyIdx:         kv.ReceiptCacheHistoryIdx,
+
+			iiCfg: iiCfg{
+				keysTable: kv.TblReceiptCacheHistoryKeys, valuesTable: kv.TblReceiptCacheIdx,
+				withExistence: false, compressorCfg: seg.DefaultCfg,
+				filenameBase: kv.ReceiptCacheDomain.String(),
 			},
 		},
 	},
