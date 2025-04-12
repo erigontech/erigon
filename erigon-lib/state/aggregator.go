@@ -667,7 +667,6 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 	mxRunningMerges.Inc()
 	defer mxRunningMerges.Dec()
 
-	closeAll := true
 	maxSpan := config3.StepsInFrozenFile * a.StepSize()
 	r := aggTx.findMergeRange(toTxNum, maxSpan)
 	if !r.any() {
@@ -675,29 +674,19 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 	}
 
 	outs, err := aggTx.FilesInRange(r)
-	defer func() {
-		if closeAll {
-			outs.Close()
-		}
-	}()
 	if err != nil {
 		return false, err
 	}
 
 	in, err := aggTx.mergeFiles(ctx, outs, r)
 	if err != nil {
+		in.Close()
 		return true, err
 	}
-	defer func() {
-		if closeAll {
-			in.Close()
-		}
-	}()
 	a.IntegrateMergedDirtyFiles(outs, in)
 	a.cleanAfterMerge(in)
 
 	a.onFreeze(in.FrozenList())
-	closeAll = false
 	return true, nil
 }
 

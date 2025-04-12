@@ -27,7 +27,7 @@ func NewEngineLogsSpammer(logger log.Logger, chainConfig *chain.Config) *EngineL
 
 func (e *EngineLogsSpammer) Start(ctx context.Context) {
 	e.lastRequestTime.Store(time.Now())
-	logSpamInterval := 20 * time.Second
+	logSpamInterval := 60 * time.Second
 	if !e.chainConfig.TerminalTotalDifficultyPassed {
 		return
 	}
@@ -39,8 +39,9 @@ func (e *EngineLogsSpammer) Start(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-intervalSpam.C:
-				if time.Since(e.lastRequestTime.Load().(time.Time)) > logSpamInterval {
-					e.logger.Warn("flag --externalcl was provided, but no CL seems to be connected.")
+				ts := time.Since(e.lastRequestTime.Load().(time.Time)).Round(1 * time.Second)
+				if ts > logSpamInterval {
+					e.logger.Warn("flag --externalcl was provided, but no CL requests to engine-api in " + ts.String())
 				}
 			}
 		}
