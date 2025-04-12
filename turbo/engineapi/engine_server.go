@@ -771,8 +771,9 @@ func (e *EngineServer) HandleNewPayload(
 					if e.test {
 						return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 					}
-					e.logger.Warn(fmt.Sprintf("[%s] New payload: need to recovert missing segment", logPrefix), "height", headerNumber, "hash", headerHash, "missingBlkHash", missingBlkHash)
-					e.blockDownloader.StartDownloading(ctx, 0, missingBlkHash, block)
+					if e.blockDownloader.StartDownloading(ctx, 0, missingBlkHash, block) {
+						e.logger.Warn(fmt.Sprintf("[%s] New payload: need to recover missing segment", logPrefix), "height", headerNumber, "hash", headerHash, "missingBlkHash", missingBlkHash)
+					}
 					return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 				}
 				return nil, err
@@ -807,8 +808,9 @@ func (e *EngineServer) HandleNewPayload(
 			if e.test {
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			}
-			e.logger.Warn(fmt.Sprintf("[%s] New payload: need to recovert missing segment", logPrefix), "height", headerNumber, "hash", headerHash, "missingBlkHash", missingBlkHash)
-			e.blockDownloader.StartDownloading(ctx, 0, missingBlkHash, block)
+			if e.blockDownloader.StartDownloading(ctx, 0, missingBlkHash, block) {
+				e.logger.Warn(fmt.Sprintf("[%s] New payload: need to recover missing segment", logPrefix), "height", headerNumber, "hash", headerHash, "missingBlkHash", missingBlkHash)
+			}
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 		return nil, err
