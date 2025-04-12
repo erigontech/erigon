@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -47,16 +48,28 @@ import (
 
 var noop = state.NewNoopWriter()
 
-type ActiveWorkerCount struct {
+type WorkerMetrics struct {
+	Active        activeWorkerCount
+	Duration      *metrics.EMA[time.Duration]
+	ReadDuration  *metrics.EMA[time.Duration]
+	WriteDuration *metrics.EMA[time.Duration]
+}
+
+func NewWorkerMetrics() *WorkerMetrics {
+	return &WorkerMetrics{
+		Active:        activeWorkerCount{Ema: metrics.NewEmaWithBeta[int32](0, 0.7, 0.5)},
+		Duration:      metrics.NewEma[time.Duration](0, 0.5),
+		ReadDuration:  metrics.NewEma[time.Duration](0, 0.5),
+		WriteDuration: metrics.NewEma[time.Duration](0, 0.5),
+	}
+}
+
+type activeWorkerCount struct {
 	atomic.Int32
 	Ema *metrics.EMA[int32]
 }
 
-func NewActiveWorkerCount() *ActiveWorkerCount {
-	return &ActiveWorkerCount{Ema: metrics.NewEma[int32](0, 0.5)}
-}
-
-func (c *ActiveWorkerCount) Add(i int32) {
+func (c *activeWorkerCount) Add(i int32) {
 	c.Int32.Add(i)
 	c.Ema.Update(c.Load())
 }
@@ -92,10 +105,10 @@ type Worker struct {
 
 	dirs datadir.Dirs
 
-	activeCounter *ActiveWorkerCount
+	metrics *WorkerMetrics
 }
 
-func NewWorker(ctx context.Context, background bool, activeCounter *ActiveWorkerCount, chainDb kv.RoDB, in *exec.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *exec.ResultsQueue, engine consensus.Engine, dirs datadir.Dirs, logger log.Logger) *Worker {
+func NewWorker(ctx context.Context, background bool, metrics *WorkerMetrics, chainDb kv.RoDB, in *exec.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *exec.ResultsQueue, engine consensus.Engine, dirs datadir.Dirs, logger log.Logger) *Worker {
 	lock := &sync.RWMutex{}
 
 	w := &Worker{
@@ -117,8 +130,8 @@ func NewWorker(ctx context.Context, background bool, activeCounter *ActiveWorker
 		callTracer:  NewCallTracer(),
 		taskGasPool: new(core.GasPool),
 
-		dirs:          dirs,
-		activeCounter: activeCounter,
+		dirs:    dirs,
+		metrics: metrics,
 	}
 	w.runnable.Store(true)
 	w.taskGasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(0))
@@ -238,9 +251,16 @@ func (rw *Worker) RunTxTask(txTask exec.Task) *exec.Result {
 		rw.notifier.Wait()
 	}
 
-	if rw.activeCounter != nil {
-		rw.activeCounter.Add(1)
-		defer rw.activeCounter.Add(-1)
+	if rw.metrics != nil {
+		rw.metrics.Active.Add(1)
+		start := time.Now()
+		defer func() {
+			rw.metrics.Duration.Update(time.Since(start))
+			if readDuration := rw.ibs.StorageReadDuration(); readDuration > 0 {
+				rw.metrics.ReadDuration.Update(rw.ibs.StorageReadDuration())
+			}
+			rw.metrics.Active.Add(-1)
+		}()
 	}
 
 	return rw.RunTxTaskNoLock(txTask)
@@ -315,7 +335,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.Result {
 
 func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, background bool, chainDb kv.RoDB,
 	rs *state.StateV3Buffered, stateReader state.ResettableStateReader, stateWriter state.StateWriter, in *exec.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
-	engine consensus.Engine, workerCount int, activeCounter *ActiveWorkerCount, dirs datadir.Dirs, isMining bool, logger log.Logger) (reconWorkers []*Worker, applyWorker *Worker, rws *exec.ResultsQueue, clear func(), wait func()) {
+	engine consensus.Engine, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, isMining bool, logger log.Logger) (reconWorkers []*Worker, applyWorker *Worker, rws *exec.ResultsQueue, clear func(), wait func()) {
 	reconWorkers = make([]*Worker, workerCount)
 
 	resultsSize := workerCount * 8
@@ -326,7 +346,7 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 		ctx, cancel := context.WithCancel(ctx)
 		g, ctx := errgroup.WithContext(ctx)
 		for i := 0; i < workerCount; i++ {
-			reconWorkers[i] = NewWorker(ctx, background, activeCounter, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
+			reconWorkers[i] = NewWorker(ctx, background, metrics, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
 
 			if rs != nil {
 				reader := stateReader

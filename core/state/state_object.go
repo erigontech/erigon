@@ -24,6 +24,7 @@ import (
 	"io"
 	"maps"
 	"math/big"
+	"time"
 
 	"github.com/holiman/uint256"
 
@@ -194,7 +195,10 @@ func (so *stateObject) GetCommittedState(key libcommon.Hash, out *uint256.Int) e
 		return nil
 	}
 	// Load from DB in case it is missing.
+	readStart := time.Now()
 	res, ok, err := so.db.stateReader.ReadAccountStorage(so.address, so.data.GetIncarnation(), key)
+	so.db.storageReadDuration += time.Since(readStart)
+
 	if err != nil {
 		out.Clear()
 		return err
@@ -336,7 +340,11 @@ func (so *stateObject) Code() ([]byte, error) {
 	if so.data.CodeHash == emptyCodeHashH {
 		return nil, nil
 	}
+	
+	readStart := time.Now()
 	code, err := so.db.stateReader.ReadAccountCode(so.Address(), so.data.Incarnation)
+	so.db.storageReadDuration += time.Since(readStart)
+
 	if err != nil {
 		return nil, fmt.Errorf("can't code for %x: %w", so.Address(), err)
 	}

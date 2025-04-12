@@ -1035,7 +1035,7 @@ type parallelExecutor struct {
 	execWorkers    []*exec3.Worker
 	stopWorkers    func()
 	waitWorkers    func()
-	activeWorkers  *exec3.ActiveWorkerCount
+	execMetrics    *exec3.WorkerMetrics
 	in             *exec.QueueWithRetry
 	rws            *exec.ResultsQueue
 	workerCount    int
@@ -1379,12 +1379,12 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	pe.execRequests = make(chan *execRequest, 100_000)
 	pe.in = exec.NewQueueWithRetry(100_000)
 
-	pe.activeWorkers = exec3.NewActiveWorkerCount()
+	pe.execMetrics = exec3.NewWorkerMetrics()
 
 	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers = exec3.NewWorkersPool(
 		ctx, pe.accumulator, true, pe.cfg.db, nil, nil, nil, pe.in,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
-		pe.workerCount+1, pe.activeWorkers, pe.cfg.dirs, pe.isMining, pe.logger)
+		pe.workerCount+1, pe.execMetrics, pe.cfg.dirs, pe.isMining, pe.logger)
 
 	execLoopCtx, execLoopCtxCancel := context.WithCancel(ctx)
 	pe.execLoopGroup, execLoopCtx = errgroup.WithContext(execLoopCtx)
