@@ -26,6 +26,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -134,6 +136,7 @@ type BaseAPI struct {
 	_pruneMode   atomic.Pointer[prune.Mode]
 
 	_blockReader services.FullBlockReader
+	_txNumReader rawdbv3.TxNumsReader
 	_txnReader   services.TxnReader
 	_engine      consensus.EngineReader
 
@@ -165,6 +168,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		blocksLRU:           blocksLRU,
 		_blockReader:        blockReader,
 		_txnReader:          blockReader,
+		_txNumReader:        rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(context.Background(), blockReader)),
 		evmCallTimeout:      evmCallTimeout,
 		_engine:             engine,
 		receiptsGenerator:   receipts.NewGenerator(blockReader, engine),

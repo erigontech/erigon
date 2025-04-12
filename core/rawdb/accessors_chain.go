@@ -28,6 +28,7 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/gballet/go-verkle"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -1279,7 +1280,17 @@ func ReadReceiptCache(tx kv.Tx, blockNum uint64, blockHash common.Hash, txnIndex
 	return res, true, nil
 }
 
-func ReadReceiptsCache(tx kv.Tx, block *types.Block) (res types.Receipts, err error) {
+func ReadReceiptsCache(tx kv.TemporalTx, block *types.Block) (res types.Receipts, err error) {
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, br))
+
+	v, ok, err = tx.HistoryRange(kv.ReceiptDomain, receiptCacheKey)
+	if err != nil {
+		return
+	}
+	if ok && v != nil {
+		cumGasUsed = uvarint(v)
+	}
+
 	blockHash := block.Hash()
 	blockNum := block.NumberU64()
 
@@ -1316,6 +1327,7 @@ func ReadReceiptsCache(tx kv.Tx, block *types.Block) (res types.Receipts, err er
 
 // PruneReceiptsCache [0,blockNum) removes all receipt until given block number.
 func PruneReceiptsCache(tx kv.RwTx, toBlockNum uint64, pruneLimit int) error {
+	return nil
 	rng, err := tx.RwCursor(kv.ReceiptsCache)
 	if err != nil {
 		return err
@@ -1380,12 +1392,16 @@ func WriteReceiptsCache(tx kv.TemporalPutDel, blockNum uint64, blockHash common.
 		//if err := tx.DomainPut(kv.ReceiptsCache, dbutils.ReceiptCacheKey(blockNum, blockHash, uint32(txnIndex)), nil, buf.Bytes()); err != nil {
 		//	return fmt.Errorf("writing logs for block %d: %w", blockNum, err)
 		//}
-		if err := tx.DomainPut(kv.ReceiptCacheDomain, dbutils.HeaderKey(blockNum, blockHash), nil, buf.Bytes(), nil, 0); err != nil {
+		if err := tx.DomainPut(kv.ReceiptCacheDomain, receiptCacheKey, nil, buf.Bytes(), nil, 0); err != nil {
 			return fmt.Errorf("writing logs for block %d: %w", blockNum, err)
 		}
 	}
 	return nil
 }
+
+var (
+	receiptCacheKey = []byte{0x0}
+)
 
 // HasReceiptCache stores all the transaction receipts belonging to a block.
 func HasReceiptCache(tx kv.Tx, blockNum uint64, blockHash common.Hash, txnIndex uint32) (bool, error) {

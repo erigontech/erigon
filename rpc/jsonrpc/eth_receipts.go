@@ -56,8 +56,7 @@ func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.Temp
 }
 
 func (api *BaseAPI) getReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-	return api.receiptsGenerator.GetReceiptsGasUsed(tx, block, txNumsReader)
+	return api.receiptsGenerator.GetReceiptsGasUsed(tx, block, api._txNumReader)
 }
 
 func (api *BaseAPI) getCachedReceipt(ctx context.Context, hash common.Hash) (*types.Receipt, bool) {
