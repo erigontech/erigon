@@ -149,7 +149,7 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 			"invalid", common.PrettyCounter(invalidCount - p.prevInvalidCount),
 			"workers", ex.execMetrics.Active.Ema.Get(),
 			"task-dur", fmt.Sprintf("%dµs", ex.execMetrics.Duration.Ema.Get().Microseconds()),
-			"task-rdur", fmt.Sprintf("%dµs (%.2f%%)", ex.execMetrics.ReadDuration.Ema.Get().Microseconds(), readRatio),
+			"task-rdur", fmt.Sprintf("%dµs(%.2f%%)", ex.execMetrics.ReadDuration.Ema.Get().Microseconds(), readRatio),
 			"rd", common.PrettyCounter(readCount - p.prevReadCount),
 			"wrt", common.PrettyCounter(writeCount - p.prevWriteCount),
 			"rd/s", common.PrettyCounter(uint64(float64(readCount-p.prevReadCount) / interval.Seconds())),
