@@ -93,7 +93,7 @@ var (
 		Name:  "prune.distance.blocks",
 		Usage: `Keep block history for the latest N blocks (default: everything)`,
 	}
-	ExperimentsFlag = cli.StringFlag{
+	ExperimentTevmFlag = cli.StringFlag{
 		Name: "experiment.tevm",
 		Usage: `Enable some experimental stages:
 * tevm - write TEVM translated code to the DB`,
@@ -284,7 +284,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		chainId,
 		distance,
 		blockDistance,
-		libcommon.CliString2Array(ctx.String(ExperimentsFlag.Name)),
+		libcommon.CliString2Array(ctx.String(ExperimentTevmFlag.Name)),
 	)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
@@ -403,7 +403,7 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 		distance = *pruneDistance
 	}
 
-	experiments := f.String(ExperimentsFlag.Name, ExperimentsFlag.Value, ExperimentsFlag.Usage)
+	experiments := f.String(ExperimentTevmFlag.Name, ExperimentTevmFlag.Value, ExperimentTevmFlag.Usage)
 	experimentsVal := ""
 	if experiments != nil {
 		experimentsVal = *experiments
