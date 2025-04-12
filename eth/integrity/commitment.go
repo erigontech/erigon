@@ -57,7 +57,7 @@ func CommitmentFilesSanity(ctx context.Context, db kv.TemporalRwDB, blockReader 
 				info.Do(func() {
 					log.Info("Checking commitment files", "domain", kv.CommitmentDomain, "txn", aggTx.TxNumsInFiles(kv.CommitmentDomain))
 				})
-				keys, err := aggTx.RangeLatest(tx, kv.CommitmentDomain, []byte{byte(j), byte(jj)}, []byte{byte(j), byte(jj + 1)}, -1)
+				keys, err := tx.Debug().RangeLatest(kv.CommitmentDomain, []byte{byte(j), byte(jj)}, []byte{byte(j), byte(jj + 1)}, -1)
 				if err != nil {
 					return err
 				}
