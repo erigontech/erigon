@@ -39,7 +39,7 @@ import (
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/turbo/jsonrpc/receipts"
+	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 

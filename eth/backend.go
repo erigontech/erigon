@@ -85,11 +85,6 @@ import (
 	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	rpcdaemoncli "github.com/erigontech/erigon/cmd/rpcdaemon/cli"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/consensus/clique"
-	"github.com/erigontech/erigon/consensus/ethash"
-	"github.com/erigontech/erigon/consensus/merge"
-	"github.com/erigontech/erigon/contracts"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/blockio"
@@ -104,6 +99,10 @@ import (
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/ethstats"
+	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/consensus/clique"
+	"github.com/erigontech/erigon/execution/consensus/ethash"
+	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
@@ -119,15 +118,16 @@ import (
 	"github.com/erigontech/erigon/polygon/heimdall"
 	polygonsync "github.com/erigontech/erigon/polygon/sync"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/contracts"
+	"github.com/erigontech/erigon/rpc/jsonrpc"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/turbo/builder"
 	"github.com/erigontech/erigon/turbo/engineapi"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/turbo/execution/eth1"
 	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
 	privateapi2 "github.com/erigontech/erigon/turbo/privateapi"
-	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/silkworm"
@@ -593,6 +593,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	if chainConfig.Bor != nil {
 		if !config.WithoutHeimdall {
 			heimdallClient = heimdall.NewHttpClient(config.HeimdallURL, logger)
+		} else {
+			heimdallClient = heimdall.NewIdleClient(config.Miner)
 		}
 
 		if config.PolygonSync {
@@ -990,7 +992,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}()
 
 	if err := backend.StartMining(
-		context.Background(),
+		ctx,
 		backend.chainDB,
 		backend.stateDiffClient,
 		mining,
@@ -1353,6 +1355,12 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 
 	go func() {
 		for req, err := stream.Recv(); ; req, err = stream.Recv() {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
 			if err == nil {
 				for _, change := range req.ChangeBatch {
 					stateChangeCh <- change
@@ -1420,6 +1428,8 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 						s.logger.Warn("mining", "err", err)
 					}
 				case <-quitCh:
+					return
+				case <-ctx.Done():
 					return
 				}
 			}
