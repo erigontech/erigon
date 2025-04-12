@@ -36,6 +36,11 @@ func main() {
 		inputSource = "stdin"
 	}
 
+	// Increase the buffer size to handle large inputs
+	const maxBufferSize = 1024 * 1024
+	buf := make([]byte, maxBufferSize)
+	scanner.Buffer(buf, maxBufferSize)
+
 	eofJt := vm.NewEOFInstructionSet()
 
 	fmt.Printf("Reading hex input from %s:\n", inputSource)
