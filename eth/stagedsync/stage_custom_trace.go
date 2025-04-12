@@ -68,11 +68,11 @@ func StageCustomTraceCfg(db kv.TemporalRwDB, prune prune.Mode, dirs datadir.Dirs
 }
 
 func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger) error {
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.execArgs.BlockReader))
+
 	var startBlock, endBlock uint64
 	stepSize := cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator).StepSize()
 	if err := cfg.db.View(ctx, func(tx kv.Tx) (err error) {
-		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.execArgs.BlockReader))
-
 		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 		txNum := ac.DbgDomain(kv.AccountsDomain).FirstStepNotInFiles() * stepSize
 		var ok bool
