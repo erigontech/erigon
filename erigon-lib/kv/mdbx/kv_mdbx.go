@@ -702,10 +702,8 @@ func (db *MdbxKV) beginRw(ctx context.Context, flags uint) (txn kv.RwTx, err err
 		return nil, errors.New("db closed")
 	}
 
-	runtime.LockOSThread()
 	tx, err := db.env.BeginTxn(nil, flags)
 	if err != nil {
-		runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
 		db.trackTxEnd()
 		return nil, fmt.Errorf("%w, lable: %s, trace: %s", err, db.opts.label, stack2.Trace().String())
 	}
@@ -968,8 +966,6 @@ func (tx *MdbxTx) Commit() error {
 		tx.db.trackTxEnd()
 		if tx.readOnly {
 			tx.db.roTxsLimiter.Release(1)
-		} else {
-			runtime.UnlockOSThread()
 		}
 		tx.db.leakDetector.Del(tx.traceID)
 	}()
@@ -1018,8 +1014,6 @@ func (tx *MdbxTx) Rollback() {
 		tx.db.trackTxEnd()
 		if tx.readOnly {
 			tx.db.roTxsLimiter.Release(1)
-		} else {
-			runtime.UnlockOSThread()
 		}
 		tx.db.leakDetector.Del(tx.traceID)
 	}()
