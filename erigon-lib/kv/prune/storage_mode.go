@@ -40,7 +40,6 @@ type Experiments struct {
 
 func FromCli(distanceHistory, distanceBlocks uint64) (Mode, error) {
 	mode := DefaultMode
-
 	mode.History = Distance(distanceHistory)
 	mode.Blocks = Distance(distanceBlocks)
 	return mode, nil
