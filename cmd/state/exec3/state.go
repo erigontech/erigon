@@ -57,7 +57,7 @@ type WorkerMetrics struct {
 
 func NewWorkerMetrics() *WorkerMetrics {
 	return &WorkerMetrics{
-		Active:        activeWorkerCount{Ema: metrics.NewEmaWithBeta[int32](0, 0.7, 0.5)},
+		Active:        activeWorkerCount{Ema: metrics.NewEmaWithBeta[int32](0, 1, 0.2)},
 		Duration:      metrics.NewEma[time.Duration](0, 0.5),
 		ReadDuration:  metrics.NewEma[time.Duration](0, 0.5),
 		WriteDuration: metrics.NewEma[time.Duration](0, 0.5),
