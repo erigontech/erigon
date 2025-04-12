@@ -76,11 +76,15 @@ func (d *activeDuration) Add(i time.Duration) {
 
 type activeWorkerCount struct {
 	atomic.Int32
-	Ema *metrics.EMA[int32]
+	Total atomic.Int32
+	Ema   *metrics.EMA[int32]
 }
 
 func (c *activeWorkerCount) Add(i int32) {
 	c.Int32.Add(i)
+	if i > 0 {
+		c.Total.Add(i)
+	}
 	c.Ema.Update(c.Load())
 }
 
