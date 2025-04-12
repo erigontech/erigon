@@ -461,25 +461,6 @@ var cmdRunMigrations = &cobra.Command{
 	},
 }
 
-var cmdSetPrune = &cobra.Command{
-	Short: "Override existing --prune flag value (if you know what you are doing)",
-	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
-		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
-		}
-		defer db.Close()
-		if err := overrideStorageMode(db, logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
-	},
-}
-
 func init() {
 	withConfig(cmdPrintStages)
 	withDataDir(cmdPrintStages)
@@ -619,22 +600,6 @@ func init() {
 	withChain(cmdRunMigrations)
 	withHeimdall(cmdRunMigrations)
 	rootCmd.AddCommand(cmdRunMigrations)
-
-	withConfig(cmdSetPrune)
-	withDataDir(cmdSetPrune)
-	withChain(cmdSetPrune)
-	cmdSetPrune.Flags().StringVar(&pruneFlag, "prune", "hrtc", "")
-	cmdSetPrune.Flags().Uint64Var(&pruneB, "prune.b.older", 0, "")
-	cmdSetPrune.Flags().Uint64Var(&pruneH, "prune.h.older", 0, "")
-	cmdSetPrune.Flags().Uint64Var(&pruneR, "prune.r.older", 0, "")
-	cmdSetPrune.Flags().Uint64Var(&pruneT, "prune.t.older", 0, "")
-	cmdSetPrune.Flags().Uint64Var(&pruneC, "prune.c.older", 0, "")
-	cmdSetPrune.Flags().Uint64Var(&pruneBBefore, "prune.b.before", 0, "")
-	cmdSetPrune.Flags().Uint64Var(&pruneHBefore, "prune.h.before", 0, "")
-	cmdSetPrune.Flags().Uint64Var(&pruneRBefore, "prune.r.before", 0, "")
-	cmdSetPrune.Flags().Uint64Var(&pruneTBefore, "prune.t.before", 0, "")
-	cmdSetPrune.Flags().Uint64Var(&pruneCBefore, "prune.c.before", 0, "")
-	rootCmd.AddCommand(cmdSetPrune)
 }
 
 func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
@@ -1616,25 +1581,6 @@ func stage(st *stagedsync.Sync, tx kv.Tx, db kv.RoDB, stage stages.SyncStage) *s
 		panic(err)
 	}
 	return res
-}
-
-func overrideStorageMode(db kv.RwDB, logger log.Logger) error {
-	chainConfig := fromdb.ChainConfig(db)
-	pm, err := prune.FromCli(pruneB, pruneH)
-	if err != nil {
-		return err
-	}
-	return db.Update(context.Background(), func(tx kv.RwTx) error {
-		if err = prune.Override(tx, pm); err != nil {
-			return err
-		}
-		pm, err = prune.Get(tx)
-		if err != nil {
-			return err
-		}
-		logger.Info("Storage mode in DB", "mode", pm.String())
-		return nil
-	})
 }
 
 func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.RwDB, blockReader services.FullBlockReader, logger log.Logger) (engine consensus.Engine, heimdallClient heimdall.Client) {
