@@ -582,6 +582,7 @@ type TemporalDebugTx interface {
 
 	GreedyPruneHistory(ctx context.Context, domain Domain) error
 	PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error)
+	TxNumsInFiles(domains ...Domain) (minTxNum uint64)
 }
 
 type TemporalDebugDB interface {
@@ -609,6 +610,7 @@ type TemporalPutDel interface {
 	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 	//   - user can append k2 into k1, then underlying methods will not preform append
 	DomainPut(domain Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error
+	//DomainPut2(domain Domain, k1 []byte, val []byte, ts uint64) error
 
 	// DomainDel
 	// Optimizations:

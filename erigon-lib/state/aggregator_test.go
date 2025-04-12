@@ -522,7 +522,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	require.NoError(t, err)
 	defer dom2.Close()
 
-	_, err = dom2.SeekCommitment(ctx, wrapTxWithCtx(rwTx, ac2))
+	_, err = dom2.SeekCommitment(ctx, wrapTxWithCtx(rwTx, ac2), false)
 	sstartTx := dom2.TxNum()
 
 	require.NoError(t, err)
@@ -996,7 +996,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer newDoms.Close()
 
-	_, err = newDoms.SeekCommitment(ctx, tx2)
+	_, err = newDoms.SeekCommitment(ctx, tx2, false)
 	require.NoError(t, err)
 	latestTx := newDoms.TxNum()
 	t.Logf("seek to latest_tx=%d", latestTx)
@@ -1246,7 +1246,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	ps := background.NewProgressSet()
 
 	IndexFile := filepath.Join(tmp, fmt.Sprintf("%dk.bt", keyCount/1000))
-	err = BuildBtreeIndexWithDecompressor(IndexFile, decomp, compressFlags, ps, tb.TempDir(), 777, logger, true)
+	err = BuildBtreeIndexWithDecompressor(IndexFile, decomp, compressFlags, ps, tb.TempDir(), 777, logger, true, AccessorBTree|AccessorExistence)
 	require.NoError(tb, err)
 
 	return compPath
