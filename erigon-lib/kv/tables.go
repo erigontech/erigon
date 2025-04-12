@@ -318,7 +318,7 @@ const (
 // Keys
 var (
 	// ExperimentalGetProofsLayout is used to keep track whether we store indecies to facilitate eth_getProof
-	CommitmentLayoutFlagKey = []byte("CommitmentLayouFlag")
+	CommitmentLayoutFlagKey = []byte("CommitmentLayoutFlag")
 
 	PruneTypeOlder = []byte("older")
 	PruneHistory   = []byte("pruneHistory")

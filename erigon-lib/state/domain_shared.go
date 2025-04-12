@@ -1110,8 +1110,9 @@ type SharedDomainsCommitmentContext struct {
 	domainsOnly        bool // if true, do not use history reader and limit to domain files only
 }
 
-// Limits max txNum for read operations. If set to 0, all read operations will be from latest value.
+// Limits max txNum for read operations. If set to 0, all read operations return latest value.
 // If domainOnly=true and txNum > 0, then read operations will be limited to domain files only.
+// If domainOnly=false and txNum > 0, then read operations will be limited to history files only.
 func (sdc *SharedDomainsCommitmentContext) SetLimitReadAsOfTxNum(txNum uint64, domainOnly bool) {
 	sdc.limitReadAsOfTxNum = txNum
 	sdc.domainsOnly = domainOnly
@@ -1120,7 +1121,6 @@ func (sdc *SharedDomainsCommitmentContext) SetLimitReadAsOfTxNum(txNum uint64, d
 func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode commitment.Mode, trieVariant commitment.TrieVariant) *SharedDomainsCommitmentContext {
 	ctx := &SharedDomainsCommitmentContext{
 		sharedDomains: sd,
-		branches:      make(map[string]cachedBranch),
 		keccak:        sha3.NewLegacyKeccak256().(cryptozerocopy.KeccakState),
 	}
 
@@ -1138,14 +1138,9 @@ type cachedBranch struct {
 	step uint64
 }
 
-// ResetBranchCache should be called after each commitment computation
-func (sdc *SharedDomainsCommitmentContext) ResetBranchCache() {
-	clear(sdc.branches)
-}
-
 func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, error) {
 	if !sdc.domainsOnly && sdc.limitReadAsOfTxNum > 0 {
-		branch, _, err := sdc.sharedDomains.getAsOfFile(kv.CommitmentDomain, pref, nil, sdc.limitReadAsOfTxNum)
+		branch, _, err := sdc.sharedDomains.aggTx.GetAsOf(sdc.sharedDomains.roTx, kv.CommitmentDomain, pref, sdc.limitReadAsOfTxNum)
 		if sdc.sharedDomains.trace {
 			fmt.Printf("[SDC] Branch @%d: %x: %x\n%s\n", sdc.limitReadAsOfTxNum, pref, branch, commitment.BranchData(branch).String())
 		}
@@ -1164,10 +1159,6 @@ func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, 
 	if sdc.sharedDomains.trace {
 		fmt.Printf("[SDC] Branch: %x: %x\n", pref, v)
 	}
-	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update, if any, so
-	// cache branch until ResetBranchCache called
-	sdc.branches[string(pref)] = cachedBranch{data: v, step: step}
-
 	if len(v) == 0 {
 		return nil, 0, nil
 	}
@@ -1182,17 +1173,15 @@ func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte,
 	if sdc.sharedDomains.trace {
 		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
 	}
-	sdc.branches[prefixS] = cachedBranch{data: data, step: prevStep}
-
 	return sdc.sharedDomains.updateCommitmentData(prefixS, data, prevData, prevStep)
 }
 
 func (sdc *SharedDomainsCommitmentContext) readAccount(plainKey []byte) (encAccount []byte, err error) {
 	if sdc.limitReadAsOfTxNum > 0 { // read not from latest
 		if sdc.domainsOnly { // read from previous files
-			encAccount, _, err = sdc.sharedDomains.GetLatest(kv.AccountsDomain, plainKey)
-		} else { // read from history
 			encAccount, _, err = sdc.sharedDomains.getAsOfFile(kv.AccountsDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
+		} else { // read from history
+			encAccount, _, err = sdc.sharedDomains.aggTx.GetAsOf(sdc.sharedDomains.roTx, kv.AccountsDomain, plainKey, sdc.limitReadAsOfTxNum)
 		}
 	} else { // read latest value from domain
 		encAccount, _, err = sdc.sharedDomains.GetLatest(kv.AccountsDomain, plainKey)
@@ -1205,12 +1194,12 @@ func (sdc *SharedDomainsCommitmentContext) readAccount(plainKey []byte) (encAcco
 
 func (sdc *SharedDomainsCommitmentContext) readCode(plainKey []byte) (code []byte, err error) {
 	if sdc.limitReadAsOfTxNum > 0 {
-		if sdc.domainsOnly {
-			code, _, err = sdc.sharedDomains.GetLatest(kv.CodeDomain, plainKey)
-		} else {
+		if sdc.domainsOnly { // read from domain file
 			code, _, err = sdc.sharedDomains.getAsOfFile(kv.CodeDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
+		} else { // read from history
+			code, _, err = sdc.sharedDomains.aggTx.GetAsOf(sdc.sharedDomains.roTx, kv.CodeDomain, plainKey, sdc.limitReadAsOfTxNum)
 		}
-	} else {
+	} else { // read latest value
 		code, _, err = sdc.sharedDomains.GetLatest(kv.CodeDomain, plainKey)
 	}
 
@@ -1222,12 +1211,12 @@ func (sdc *SharedDomainsCommitmentContext) readCode(plainKey []byte) (code []byt
 
 func (sdc *SharedDomainsCommitmentContext) readStorage(plainKey []byte) (enc []byte, err error) {
 	if sdc.limitReadAsOfTxNum > 0 {
-		if sdc.domainsOnly {
-			enc, _, err = sdc.sharedDomains.GetLatest(kv.StorageDomain, plainKey)
-		} else {
+		if sdc.domainsOnly { // read from domain file
 			enc, _, err = sdc.sharedDomains.getAsOfFile(kv.StorageDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
+		} else { // read from history
+			enc, _, err = sdc.sharedDomains.aggTx.GetAsOf(sdc.sharedDomains.roTx, kv.StorageDomain, plainKey, sdc.limitReadAsOfTxNum)
 		}
-	} else {
+	} else { // get latest value
 		enc, _, err = sdc.sharedDomains.GetLatest(kv.StorageDomain, plainKey)
 	}
 
@@ -1347,9 +1336,6 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, expected
 
 // Evaluates commitment for processed state.
 func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, saveState bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
-	sdc.ResetBranchCache()
-	defer sdc.ResetBranchCache()
-
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
 	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
