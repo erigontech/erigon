@@ -389,6 +389,11 @@ var ChaindataTables = []string{
 	TblReceiptHistoryVals,
 	TblReceiptIdx,
 
+	TblReceiptCacheVals,
+	TblReceiptCacheHistoryKeys,
+	TblReceiptCacheHistoryVals,
+	TblReceiptCacheIdx,
+
 	TblLogAddressKeys,
 	TblLogAddressIdx,
 	TblLogTopicsKeys,
