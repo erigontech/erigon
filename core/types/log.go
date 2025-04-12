@@ -141,19 +141,16 @@ func (logs Logs) Filter(addrMap map[common.Address]struct{}, topics [][]common.H
 	return o
 }
 
-func (logs Logs) CointainTopics(addrMap map[common.Address]struct{}, topicsMap map[common.Hash]struct{}, maxLogs uint64) Logs {
+func (logs Logs) ContainingTopics(addrMap map[common.Address]struct{}, topicsMap map[common.Hash]struct{}, maxLogs uint64) Logs {
 	o := make(Logs, 0, len(logs))
 	var logCount uint64
-	logCount = 0
+
 	for _, v := range logs {
 		found := false
 
 		// check address if addrMap is not empty
-		if len(addrMap) != 0 {
-			if _, ok := addrMap[v.Address]; !ok {
-				// not there? skip this log
-				continue
-			}
+		if _, requested := addrMap[v.Address]; !requested && len(addrMap) > 0 {
+			continue // not there? skip this log
 		}
 		//topicsMap len zero match any topics
 		if len(topicsMap) == 0 {
@@ -225,19 +222,15 @@ type rlpLog struct {
 	Data    []byte
 }
 
-// rlpStorageLog is the storage encoding of a log.
-type rlpStorageLog rlpLog
-
-// legacyRlpStorageLog is the previous storage encoding of a log including some redundant fields.
-type legacyRlpStorageLog struct {
+type rlpStorageLog struct {
 	Address common.Address
 	Topics  []common.Hash
 	Data    []byte
 	//BlockNumber uint64
-	//TxHash      common.Hash
-	//TxIndex     uint
+	//TxHash common.Hash
+	//TxIndex uint
 	//BlockHash   common.Hash
-	//Index       uint
+	//Index uint
 }
 
 // EncodeRLP implements rlp.Encoder.
@@ -283,11 +276,6 @@ func (l *LogForStorage) EncodeRLP(w io.Writer) error {
 		Address: l.Address,
 		Topics:  l.Topics,
 		Data:    l.Data,
-		//BlockNumber: l.BlockNumber,
-		//TxHash:      l.TxHash,
-		//TxIndex:     l.TxIndex,
-		//BlockHash:   l.BlockHash,
-		//Index:       l.Index,
 	})
 }
 
@@ -301,23 +289,14 @@ func (l *LogForStorage) DecodeRLP(s *rlp.Stream) error {
 	}
 	var dec rlpStorageLog
 	err = rlp.DecodeBytes(blob, &dec)
-	if err == nil {
-		*l = LogForStorage{
-			Address: dec.Address,
-			Topics:  dec.Topics,
-			Data:    dec.Data,
-		}
-	} else {
-		// Try to decode log with previous definition.
-		var dec legacyRlpStorageLog
-		err = rlp.DecodeBytes(blob, &dec)
-		if err == nil {
-			*l = LogForStorage{
-				Address: dec.Address,
-				Topics:  dec.Topics,
-				Data:    dec.Data,
-			}
-		}
+	if err != nil {
+		return err
 	}
-	return err
+
+	*l = LogForStorage{
+		Address: dec.Address,
+		Topics:  dec.Topics,
+		Data:    dec.Data,
+	}
+	return nil
 }

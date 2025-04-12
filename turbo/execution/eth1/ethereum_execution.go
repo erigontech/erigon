@@ -35,13 +35,12 @@ import (
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/wrap"
-
-	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync"
+	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/turbo/builder"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
@@ -74,6 +73,7 @@ type EthereumExecutionModule struct {
 	// Changes accumulator
 	hook                *stages.Hook
 	accumulator         *shards.Accumulator
+	recentLogs          *shards.RecentLogs
 	stateChangeConsumer shards.StateChangeConsumer
 
 	// configuration
@@ -85,8 +85,7 @@ type EthereumExecutionModule struct {
 	doingPostForkchoice atomic.Bool
 
 	// metrics for average mgas/sec
-	avgMgasSec      float64
-	recordedMgasSec uint64
+	avgMgasSec float64
 
 	execution.UnimplementedExecutionServer
 }
@@ -95,6 +94,7 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB
 	executionPipeline *stagedsync.Sync, forkValidator *engine_helpers.ForkValidator,
 	config *chain.Config, builderFunc builder.BlockBuilderFunc,
 	hook *stages.Hook, accumulator *shards.Accumulator,
+	recentLogs *shards.RecentLogs,
 	stateChangeConsumer shards.StateChangeConsumer,
 	logger log.Logger, engine consensus.Engine,
 	syncCfg ethconfig.Sync,
@@ -112,11 +112,11 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB
 		semaphore:           semaphore.NewWeighted(1),
 		hook:                hook,
 		accumulator:         accumulator,
+		recentLogs:          recentLogs,
 		stateChangeConsumer: stateChangeConsumer,
 		engine:              engine,
-
-		syncCfg:      syncCfg,
-		bacgroundCtx: ctx,
+		syncCfg:             syncCfg,
+		bacgroundCtx:        ctx,
 	}
 }
 

@@ -1,6 +1,6 @@
 GOBINREL = build/bin
 GOBIN = $(CURDIR)/$(GOBINREL)
-OPENZEPPELINDIR = $(CURDIR)/../../contracts/openzeppelin
+OPENZEPPELINDIR = $(CURDIR)/../../rpc/contracts/openzeppelin
 
 OS = $(shell uname -s)
 ARCH = $(shell uname -m)

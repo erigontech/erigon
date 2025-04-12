@@ -257,6 +257,19 @@ func main() {
 	}
 	with(benchEthGetLogsCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
 
+	var ethGetLogsInvariantsCmd = &cobra.Command{
+		Use:   "invariantsEthGetLogs",
+		Short: "",
+		Long:  ``,
+		Run: func(cmd *cobra.Command, args []string) {
+			err := rpctest.EthGetLogsInvariants(erigonURL, gethURL, needCompare, blockFrom, blockTo)
+			if err != nil {
+				logger.Error(err.Error())
+			}
+		},
+	}
+	with(ethGetLogsInvariantsCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
+
 	var benchOverlayGetLogsCmd = &cobra.Command{
 		Use:   "benchOverlayGetLogs",
 		Short: "",
@@ -403,6 +416,19 @@ func main() {
 	}
 	with(benchTxReceiptCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
 
+	var benchBlockReceiptsCmd = &cobra.Command{
+		Use:   "benchBlockReceipts",
+		Short: "",
+		Long:  ``,
+		Run: func(cmd *cobra.Command, args []string) {
+			err := rpctest.BenchBlockReceipts(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
+			if err != nil {
+				logger.Error(err.Error())
+			}
+		},
+	}
+	with(benchBlockReceiptsCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
+
 	var benchTraceReplayTransactionCmd = &cobra.Command{
 		Use:   "benchTraceReplayTransaction",
 		Short: "",
@@ -487,6 +513,7 @@ func main() {
 		bench6Cmd,
 		bench7Cmd,
 		benchEthGetLogsCmd,
+		ethGetLogsInvariantsCmd,
 		benchOverlayGetLogsCmd,
 		bench9Cmd,
 		benchTraceCallCmd,
@@ -498,6 +525,7 @@ func main() {
 		benchDebugTraceTransactionCmd,
 		benchDebugTraceCallCmd,
 		benchTxReceiptCmd,
+		benchBlockReceiptsCmd,
 		compareAccountRange,
 		benchTraceReplayTransactionCmd,
 		benchEthBlockByNumberCmd,

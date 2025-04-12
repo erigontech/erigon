@@ -23,11 +23,11 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/execution/consensus"
 )
 
 // applyTransaction attempts to apply a transaction to the given state database
@@ -37,6 +37,11 @@ import (
 func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *GasPool, ibs *state.IntraBlockState,
 	stateWriter state.StateWriter, header *types.Header, txn types.Transaction, usedGas, usedBlobGas *uint64,
 	evm *vm.EVM, cfg vm.Config) (*types.Receipt, []byte, error) {
+	var (
+		receipt *types.Receipt
+		err     error
+	)
+
 	rules := evm.ChainRules()
 	blockNum := header.Number.Uint64()
 	msg, err := txn.AsMessage(*types.MakeSigner(config, blockNum, header.Time), header.BaseFee, rules)
@@ -44,6 +49,17 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 		return nil, nil, err
 	}
 	msg.SetCheckNonce(!cfg.StatelessExec)
+
+	if cfg.Tracer != nil {
+		if cfg.Tracer.OnTxStart != nil {
+			cfg.Tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())
+		}
+		if cfg.Tracer.OnTxEnd != nil {
+			defer func() {
+				cfg.Tracer.OnTxEnd(receipt, err)
+			}()
+		}
+	}
 
 	txContext := NewEVMTxContext(msg)
 	if cfg.TraceJumpDest {
@@ -67,7 +83,6 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 
 	// Set the receipt logs and create the bloom filter.
 	// based on the eip phase, we're passing whether the root touch-delete accounts.
-	var receipt *types.Receipt
 	if !cfg.NoReceipts {
 		// by the txn
 		receipt = &types.Receipt{Type: txn.Type(), CumulativeGasUsed: *usedGas}

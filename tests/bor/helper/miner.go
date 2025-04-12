@@ -151,6 +151,7 @@ func InitMiner(ctx context.Context, dirName string, genesis *types.Genesis, priv
 		RPCTxFeeCap:     1, // 1 ether
 		Snapshot:        ethconfig.BlocksFreezing{NoDownloader: true, ChainName: genesis.Config.ChainName},
 		StateStream:     true,
+		PolygonSync:     true,
 	}
 	ethCfg.TxPool.DBDir = nodeCfg.Dirs.TxPool
 	ethCfg.TxPool.CommitEvery = 15 * time.Second
@@ -158,7 +159,7 @@ func InitMiner(ctx context.Context, dirName string, genesis *types.Genesis, priv
 	ethCfg.TxPool.AccountSlots = 1000000
 	ethCfg.TxPool.PendingSubPoolLimit = 1000000
 
-	ethBackend, err := eth.New(ctx, stack, ethCfg, logger)
+	ethBackend, err := eth.New(ctx, stack, ethCfg, logger, nil)
 	if err != nil {
 		return nil, nil, err
 	}

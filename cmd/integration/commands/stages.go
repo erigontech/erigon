@@ -29,7 +29,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon-lib/kv/prune"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
@@ -45,6 +44,7 @@ import (
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/downloader"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
@@ -52,11 +52,11 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
-	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/blockio"
 	reset2 "github.com/erigontech/erigon/core/rawdb/rawdbreset"
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -64,6 +64,7 @@ import (
 	"github.com/erigontech/erigon/eth/integrity"
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/migrations"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
@@ -1061,8 +1062,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 
 	if txtrace {
 		// Activate tracing and writing into json files for each transaction
-		vmConfig.Tracer = nil
-		vmConfig.Debug = true
+		vmConfig.Tracer = &tracing.Hooks{}
 	}
 
 	var batchSize datasize.ByteSize
@@ -1221,8 +1221,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 
 	if txtrace {
 		// Activate tracing and writing into json files for each transaction
-		vmConfig.Tracer = nil
-		vmConfig.Debug = true
+		vmConfig.Tracer = &tracing.Hooks{}
 	}
 
 	var batchSize datasize.ByteSize
@@ -1258,7 +1257,7 @@ func stagePatriciaTrie(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 
 	br, _ := blocksIO(db, logger)
 	historyV3 := true
-	cfg := stagedsync.StageTrieCfg(db, true /* checkRoot */, true /* saveHashesToDb */, false /* badBlockHalt */, dirs.Tmp, br, nil /* hd */, historyV3, agg)
+	cfg := stagedsync.StageTrieCfg(db, true, true, false, dirs.Tmp, br, nil, historyV3)
 
 	if _, err := stagedsync.RebuildPatriciaTrieBasedOnFiles(ctx, cfg); err != nil {
 		return err
@@ -1376,7 +1375,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		blockReader := freezeblocks.NewBlockReader(_allSnapshotsSingleton, _allBorSnapshotsSingleton, _heimdallStoreSingleton, _bridgeStoreSingleton)
 		txNums := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader))
 
-		_aggSingleton, err = libstate.NewAggregator2(ctx, dirs, config3.DefaultStepSize, db, logger)
+		_aggSingleton, err = libstate.NewAggregator(ctx, dirs, config3.DefaultStepSize, db, logger)
 		if err != nil {
 			err = fmt.Errorf("aggregator init: %w", err)
 			return
@@ -1559,7 +1558,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewDbStore(db), borSn)
 	}
 	stageList := stages2.NewDefaultStages(context.Background(), db, snapDb, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil,
-		heimdallClient, heimdallStore, bridgeStore, recents, signatures, logger)
+		heimdallClient, heimdallStore, bridgeStore, recents, signatures, logger, nil)
 	sync := stagedsync.New(cfg.Sync, stageList, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger, stages.ModeApplyingBlocks)
 
 	miner := stagedsync.NewMiningState(&cfg.Miner)

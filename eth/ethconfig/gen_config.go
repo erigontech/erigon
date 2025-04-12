@@ -12,7 +12,7 @@ import (
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
+	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/params"

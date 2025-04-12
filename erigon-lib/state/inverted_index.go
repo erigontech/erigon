@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
 	"github.com/erigontech/erigon-lib/seg"
+	ae "github.com/erigontech/erigon-lib/state/appendable_extras"
 )
 
 type InvertedIndex struct {
@@ -204,14 +205,12 @@ func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {
 	}
 }
 
-type Accessors int
-
-func (l Accessors) Has(target Accessors) bool { return l&target != 0 }
+type Accessors = ae.Accessors
 
 const (
-	AccessorBTree     Accessors = 0b1
-	AccessorHashMap   Accessors = 0b10
-	AccessorExistence Accessors = 0b100
+	AccessorBTree     Accessors = ae.AccessorBTree
+	AccessorHashMap   Accessors = ae.AccessorHashMap
+	AccessorExistence Accessors = ae.AccessorExistence
 )
 
 func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
@@ -363,11 +362,11 @@ func (iit *InvertedIndexRoTx) Files() (res []string) {
 	return res
 }
 
-func (iit *InvertedIndexRoTx) NewWriter() *invertedIndexBufferedWriter {
+func (iit *InvertedIndexRoTx) NewWriter() *InvertedIndexBufferedWriter {
 	return iit.newWriter(iit.ii.dirs.Tmp, false)
 }
 
-type invertedIndexBufferedWriter struct {
+type InvertedIndexBufferedWriter struct {
 	index, indexKeys *etl.Collector
 	tmpdir           string
 	discard          bool
@@ -387,17 +386,17 @@ func loadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) 
 	return next(k, k, v)
 }
 
-func (w *invertedIndexBufferedWriter) SetTxNum(txNum uint64) {
+func (w *InvertedIndexBufferedWriter) SetTxNum(txNum uint64) {
 	w.txNum = txNum
 	binary.BigEndian.PutUint64(w.txNumBytes[:], w.txNum)
 }
 
 // Add - !NotThreadSafe. Must use WalRLock/BatchHistoryWriteEnd
-func (w *invertedIndexBufferedWriter) Add(key []byte) error {
+func (w *InvertedIndexBufferedWriter) Add(key []byte) error {
 	return w.add(key, key)
 }
 
-func (w *invertedIndexBufferedWriter) add(key, indexKey []byte) error {
+func (w *InvertedIndexBufferedWriter) add(key, indexKey []byte) error {
 	if w.discard {
 		return nil
 	}
@@ -410,7 +409,7 @@ func (w *invertedIndexBufferedWriter) add(key, indexKey []byte) error {
 	return nil
 }
 
-func (w *invertedIndexBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
+func (w *InvertedIndexBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if w.discard {
 		return nil
 	}
@@ -425,7 +424,7 @@ func (w *invertedIndexBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) err
 	return nil
 }
 
-func (w *invertedIndexBufferedWriter) close() {
+func (w *InvertedIndexBufferedWriter) close() {
 	if w == nil {
 		return
 	}
@@ -441,8 +440,8 @@ func (w *invertedIndexBufferedWriter) close() {
 var WALCollectorRAM = dbg.EnvDataSize("AGG_WAL_RAM", etl.BufferOptimalSize/8)
 var CollateETLRAM = dbg.EnvDataSize("AGG_COLLATE_RAM", etl.BufferOptimalSize/4)
 
-func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *invertedIndexBufferedWriter {
-	w := &invertedIndexBufferedWriter{
+func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *InvertedIndexBufferedWriter {
+	w := &InvertedIndexBufferedWriter{
 		discard:         discard,
 		tmpdir:          tmpdir,
 		filenameBase:    iit.ii.filenameBase,
@@ -814,7 +813,7 @@ func (is *InvertedIndexPruneStat) Accumulate(other *InvertedIndexPruneStat) {
 	is.PruneCountValues += other.PruneCountValues
 }
 
-func (iit *InvertedIndexRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, fn func(key []byte, txnum []byte) error) error {
+func (iit *InvertedIndexRoTx) unwind(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, fn func(key []byte, txnum []byte) error) error {
 	_, err := iit.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, fn)
 	if err != nil {
 		return err

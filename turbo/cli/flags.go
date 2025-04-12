@@ -21,32 +21,26 @@ import (
 	"math"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/kv/prune"
-
-	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
-
-	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/rpc/rpccfg"
-
 	"github.com/c2h5oh/datasize"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
-
+	"github.com/erigontech/erigon-lib/kv/prune"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/rpc/rpchelper"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 var (
@@ -533,14 +527,13 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 			RpcSubscriptionFiltersMaxAddresses: ctx.Int(RpcSubscriptionFiltersMaxAddressesFlag.Name),
 			RpcSubscriptionFiltersMaxTopics:    ctx.Int(RpcSubscriptionFiltersMaxTopicsFlag.Name),
 		},
-		Gascap:                      ctx.Uint64(utils.RpcGasCapFlag.Name),
-		Feecap:                      ctx.Float64(utils.RPCGlobalTxFeeCapFlag.Name),
-		MaxTraces:                   ctx.Uint64(utils.TraceMaxtracesFlag.Name),
-		TraceCompatibility:          ctx.Bool(utils.RpcTraceCompatFlag.Name),
-		BatchLimit:                  ctx.Int(utils.RpcBatchLimit.Name),
-		ReturnDataLimit:             ctx.Int(utils.RpcReturnDataLimit.Name),
-		AllowUnprotectedTxs:         ctx.Bool(utils.AllowUnprotectedTxs.Name),
-		MaxGetProofRewindBlockCount: ctx.Int(utils.RpcMaxGetProofRewindBlockCount.Name),
+		Gascap:              ctx.Uint64(utils.RpcGasCapFlag.Name),
+		Feecap:              ctx.Float64(utils.RPCGlobalTxFeeCapFlag.Name),
+		MaxTraces:           ctx.Uint64(utils.TraceMaxtracesFlag.Name),
+		TraceCompatibility:  ctx.Bool(utils.RpcTraceCompatFlag.Name),
+		BatchLimit:          ctx.Int(utils.RpcBatchLimit.Name),
+		ReturnDataLimit:     ctx.Int(utils.RpcReturnDataLimit.Name),
+		AllowUnprotectedTxs: ctx.Bool(utils.AllowUnprotectedTxs.Name),
 
 		OtsMaxPageSize: ctx.Uint64(utils.OtsSearchMaxCapFlag.Name),
 

@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -40,18 +39,18 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethutils"
+	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/jsonrpc"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_logs_spammer"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
-	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 )
@@ -157,7 +156,10 @@ func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, exec
 		if executionRequests != nil {
 			return &rpc.InvalidParamsError{Message: "requests in EngineAPI not supported before Prague"}
 		}
+	} else if executionRequests == nil {
+		return &rpc.InvalidParamsError{Message: "missing requests list"}
 	}
+
 	return nil
 }
 
@@ -262,7 +264,8 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	blockHash := req.BlockHash
 	if header.Hash() != blockHash {
-		s.logger.Error("[NewPayload] invalid block hash", "stated", blockHash, "actual", header.Hash())
+		s.logger.Error("[NewPayload] invalid block hash", "stated", blockHash, "actual", header.Hash(),
+			"payload", req, "parentBeaconBlockRoot", parentBeaconBlockRoot, "requests", executionRequests)
 		return &engine_types.PayloadStatus{
 			Status:          engine_types.InvalidStatus,
 			ValidationError: engine_types.NewStringifiedErrorFromString("invalid block hash"),
@@ -886,7 +889,7 @@ func (e *EngineServer) SetConsuming(consuming bool) {
 	e.consuming.Store(consuming)
 }
 
-func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []libcommon.Hash) ([]*txpoolproto.BlobAndProofV1, error) {
+func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []libcommon.Hash) ([]*engine_types.BlobAndProofV1, error) {
 	if len(blobHashes) > 128 {
 		return nil, &engine_helpers.TooLargeRequestErr
 	}
@@ -898,8 +901,22 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []libcommon.Hash
 	if err != nil {
 		return nil, err
 	}
-
-	return res.BlobsAndProofs, nil
+	ret := make([]*engine_types.BlobAndProofV1, len(blobHashes))
+	if len(blobHashes) != len(res.Blobs) || len(blobHashes) != len(res.Proofs) { // Some fault in the underlying txpool, but still return sane resp
+		log.Warn("[GetBlobsV1] txpool returned unexpected number of blobs and proofs in response, returning nil blobs list")
+		return ret, nil
+	}
+	logLine := []string{}
+	for i := range res.Blobs {
+		if res.Blobs[i] != nil {
+			ret[i] = &engine_types.BlobAndProofV1{Blob: res.Blobs[i], Proof: res.Proofs[i]}
+			logLine = append(logLine, fmt.Sprintf(" %d:", i), fmt.Sprintf(" hash=%x len(blob)=%d len(proof)=%d ", blobHashes[i], len(res.Blobs[i]), len(res.Proofs[i])))
+		} else {
+			logLine = append(logLine, fmt.Sprintf(" %d:", i), " nil")
+		}
+	}
+	e.logger.Debug("[GetBlobsV1]", "Responses", logLine)
+	return ret, nil
 }
 
 func waitForStuff(maxWait time.Duration, waitCondnF func() (bool, error)) (bool, error) {

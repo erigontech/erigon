@@ -25,13 +25,11 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/valyala/fastjson"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/state"
 )
 
@@ -653,8 +651,8 @@ func compareProofs(proof, gethProof *EthGetProof) bool {
 
 func post(client *http.Client, url, request string, response interface{}) error {
 	//fmt.Printf("Request=%s\n", request)
-	log.Info("Getting", "url", url, "request", request)
-	start := time.Now()
+	//log.Info("Getting", "url", url, "request", request)
+	//start := time.Now()
 	r, err := client.Post(url, "application/json", strings.NewReader(request))
 	if err != nil {
 		return err
@@ -672,14 +670,14 @@ func post(client *http.Client, url, request string, response interface{}) error 
 		fmt.Printf("json: %s\n", string(b))
 		panic(err)
 	}
-	log.Info("Got in", "time", time.Since(start).Seconds())
+	//log.Info("Got in", "time", time.Since(start).Seconds())
 	return err
 }
 
 func post2(client *http.Client, url, request string) ([]byte, *fastjson.Value, error) {
-	fmt.Printf("Request=%s\n", request)
-	log.Info("Getting", "url", url, "request", request)
-	start := time.Now()
+	//fmt.Printf("Request=%s\n", request)
+	//log.Info("Getting", "url", url, "request", request)
+	//start := time.Now()
 	r, err := client.Post(url, "application/json", strings.NewReader(request))
 	if err != nil {
 		return nil, nil, err
@@ -698,7 +696,7 @@ func post2(client *http.Client, url, request string) ([]byte, *fastjson.Value, e
 	if err != nil {
 		return nil, nil, fmt.Errorf("parsing http response: %w", err)
 	}
-	log.Info("Got in", "time", time.Since(start).Seconds())
+	//log.Info("Got in", "time", time.Since(start).Seconds())
 	return response, v, nil
 }
 

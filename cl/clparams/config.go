@@ -102,6 +102,7 @@ type NetworkType int
 const (
 	MainnetNetwork NetworkType = 1
 	HoleskyNetwork NetworkType = 17000
+	HoodiNetwork   NetworkType = 560048
 	SepoliaNetwork NetworkType = 11155111
 	GnosisNetwork  NetworkType = 100
 	ChiadoNetwork  NetworkType = 10200
@@ -110,12 +111,11 @@ const (
 )
 
 const (
-	MaxDialTimeout     = 15 * time.Second
-	VersionLength  int = 4
-	// 15 MiB
-	MaxChunkSize uint64        = 15728640
-	ReqTimeout   time.Duration = 5 * time.Second
-	RespTimeout  time.Duration = 15 * time.Second
+	MaxDialTimeout               = 15 * time.Second
+	VersionLength  int           = 4
+	MaxChunkSize   uint64        = 15 * 1024 * 1024
+	ReqTimeout     time.Duration = 5 * time.Second
+	RespTimeout    time.Duration = 10 * time.Second
 )
 
 const (
@@ -188,6 +188,14 @@ var (
 		"enr:-LS4QG0uV4qvcpJ-HFDJRGBmnlD3TJo7yc4jwK8iP7iKaTlfQ5kZvIDspLMJhk7j9KapuL9yyHaZmwTEZqr10k9XumyCEcmHYXR0bmV0c4gAAAAABgAAAIRldGgykGm32XQEAXAAAAEAAAAAAACCaWSCdjSCaXCErK4j-YlzZWNwMjU2azGhAgfWRBEJlb7gAhXIB5ePmjj2b8io0UpEenq1Kl9cxStJg3RjcIIjKIN1ZHCCIyg",
 		"enr:-Le4QLoE1wFHSlGcm48a9ZESb_MRLqPPu6G0vHqu4MaUcQNDHS69tsy-zkN0K6pglyzX8m24mkb-LtBcbjAYdP1uxm4BhGV0aDKQabfZdAQBcAAAAQAAAAAAAIJpZIJ2NIJpcIQ5gR6Wg2lwNpAgAUHQBwEQAAAAAAAAADR-iXNlY3AyNTZrMaEDPMSNdcL92uNIyCsS177Z6KTXlbZakQqxv3aQcWawNXeDdWRwgiMohHVkcDaCI4I",
 	}...)
+	HoodiBootstrapNodes = []string{
+		"enr:-Mq4QLkmuSwbGBUph1r7iHopzRpdqE-gcm5LNZfcE-6T37OCZbRHi22bXZkaqnZ6XdIyEDTelnkmMEQB8w6NbnJUt9GGAZWaowaYh2F0dG5ldHOIABgAAAAAAACEZXRoMpDS8Zl_YAAJEAAIAAAAAAAAgmlkgnY0gmlwhNEmfKCEcXVpY4IyyIlzZWNwMjU2azGhA0hGa4jZJZYQAS-z6ZFK-m4GCFnWS8wfjO0bpSQn6hyEiHN5bmNuZXRzAIN0Y3CCIyiDdWRwgiMo",
+		"enr:-Ku4QLVumWTwyOUVS4ajqq8ZuZz2ik6t3Gtq0Ozxqecj0qNZWpMnudcvTs-4jrlwYRQMQwBS8Pvtmu4ZPP2Lx3i2t7YBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpBd9cEGEAAJEP__________gmlkgnY0gmlwhNEmfKCJc2VjcDI1NmsxoQLdRlI8aCa_ELwTJhVN8k7km7IDc3pYu-FMYBs5_FiigIN1ZHCCIyk",
+		"enr:-LK4QAYuLujoiaqCAs0-qNWj9oFws1B4iy-Hff1bRB7wpQCYSS-IIMxLWCn7sWloTJzC1SiH8Y7lMQ5I36ynGV1ASj4Eh2F0dG5ldHOIYAAAAAAAAACEZXRoMpDS8Zl_YAAJEAAIAAAAAAAAgmlkgnY0gmlwhIbRilSJc2VjcDI1NmsxoQOmI5MlAu3f5WEThAYOqoygpS2wYn0XS5NV2aYq7T0a04N0Y3CCIyiDdWRwgiMo",
+		"enr:-Ku4QIC89sMC0o-irosD4_23lJJ4qCGOvdUz7SmoShWx0k6AaxCFTKviEHa-sa7-EzsiXpDp0qP0xzX6nKdXJX3X-IQBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpBd9cEGEAAJEP__________gmlkgnY0gmlwhIbRilSJc2VjcDI1NmsxoQK_m0f1DzDc9Cjrspm36zuRa7072HSiMGYWLsKiVSbP34N1ZHCCIyk",
+		"enr:-Ku4QNkWjw5tNzo8DtWqKm7CnDdIq_y7xppD6c1EZSwjB8rMOkSFA1wJPLoKrq5UvA7wcxIotH6Usx3PAugEN2JMncIBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpBd9cEGEAAJEP__________gmlkgnY0gmlwhIbHuBeJc2VjcDI1NmsxoQP3FwrhFYB60djwRjAoOjttq6du94DtkQuaN99wvgqaIYN1ZHCCIyk",
+		"enr:-OS4QMJGE13xEROqvKN1xnnt7U-noc51VXyM6wFMuL9LMhQDfo1p1dF_zFdS4OsnXz_vIYk-nQWnqJMWRDKvkSK6_CwDh2F0dG5ldHOIAAAAADAAAACGY2xpZW502IpMaWdodGhvdXNljDcuMC4wLWJldGEuM4RldGgykNLxmX9gAAkQAAgAAAAAAACCaWSCdjSCaXCEhse4F4RxdWljgiMqiXNlY3AyNTZrMaECef77P8k5l3PC_raLw42OAzdXfxeQ-58BJriNaqiRGJSIc3luY25ldHMAg3RjcIIjKIN1ZHCCIyg",
+	}
 )
 
 type NetworkConfig struct {
@@ -308,6 +316,25 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		MinimumPeersInSubnetSearch:      20,
 		BootNodes:                       HoleskyBootstrapNodes,
 	},
+
+	HoodiNetwork: {
+		GossipMaxSize:                   10485760,
+		GossipMaxSizeBellatrix:          15728640,
+		MaxChunkSize:                    15728640, // 15 MiB
+		AttestationSubnetCount:          64,
+		AttestationPropagationSlotRange: 32,
+		AttestationSubnetPrefixBits:     6,
+		TtfbTimeout:                     ConfigDurationSec(ReqTimeout),
+		RespTimeout:                     ConfigDurationSec(RespTimeout),
+		MaximumGossipClockDisparity:     ConfigDurationMSec(500 * time.Millisecond),
+		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
+		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
+		Eth2key:                         "eth2",
+		AttSubnetKey:                    "attnets",
+		SyncCommsSubnetKey:              "syncnets",
+		MinimumPeersInSubnetSearch:      20,
+		BootNodes:                       HoodiBootstrapNodes,
+	},
 }
 
 // Trusted checkpoint sync endpoints: https://eth-clients.github.io/checkpoint-sync-endpoints/
@@ -336,6 +363,10 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 		"https://beaconstate-holesky.chainsafe.io/eth/v2/debug/beacon/states/finalized",
 		"https://holesky.beaconstate.info/eth/v2/debug/beacon/states/finalized",
 		"https://checkpoint-sync.holesky.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
+	},
+	HoodiNetwork: {
+		"https://checkpoint-sync.hoodi.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
+		"https://hoodi-checkpoint-sync.attestant.io/eth/v2/debug/beacon/states/finalized",
 	},
 }
 
@@ -419,6 +450,7 @@ type BeaconChainConfig struct {
 	MaxBytesPerTransaction           uint64     `yaml:"MAX_BYTES_PER_TRANSACTION" spec:"true" json:"MAX_BYTES_PER_TRANSACTION,string"`                         // MaxBytesPerTransaction defines the maximum number of bytes per transaction.
 	MaxExtraDataBytes                uint64     `yaml:"MAX_EXTRA_DATA_BYTES" spec:"true" json:"MAX_EXTRA_DATA_BYTES,string"`                                   // MaxExtraDataBytes defines the maximum number of bytes in the extra data field.
 	MaxRequestBlobSidecars           uint64     `yaml:"MAX_REQUEST_BLOB_SIDECARS" spec:"true" json:"MAX_REQUEST_BLOB_SIDECARS,string"`                         // MaxRequestBlobSidecars defines the maximum number of blob sidecars to request.
+	MaxRequestBlobSidecarsElectra    uint64     `yaml:"MAX_REQUEST_BLOB_SIDECARS_ELECTRA" spec:"true" json:"MAX_REQUEST_BLOB_SIDECARS_ELECTRA,string"`         // MaxRequestBlobSidecarsElectra defines the maximum number of blob sidecars to request in Electra.
 	MaxRequestBlocks                 uint64     `yaml:"MAX_REQUEST_BLOCKS" spec:"true" json:"MAX_REQUEST_BLOCKS,string"`                                       // Maximum number of blocks in a single request
 	MaxRequestBlocksDeneb            uint64     `yaml:"MAX_REQUEST_BLOCKS_DENEB" spec:"true" json:"MAX_REQUEST_BLOCKS_DENEB,string"`                           // Maximum number of blocks in a single request
 	MaxTransactionsPerPayload        uint64     `yaml:"MAX_TRANSACTIONS_PER_PAYLOAD" spec:"true" json:"MAX_TRANSACTIONS_PER_PAYLOAD,string"`                   // MaxTransactionsPerPayload defines the maximum number of transactions in a single payload.
@@ -708,6 +740,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	MaxBytesPerTransaction:           1073741824, // 1GB
 	MaxExtraDataBytes:                32,
 	MaxRequestBlobSidecars:           768,
+	MaxRequestBlobSidecarsElectra:    1152, // MAX_REQUEST_BLOCKS_DENEB * MAX_BLOBS_PER_BLOCK_ELECTRA
 	MaxRequestBlocks:                 1024,
 	MaxRequestBlocksDeneb:            128,
 	MaxTransactionsPerPayload:        1048576,
@@ -822,7 +855,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	DenebForkVersion:     0x04000000,
 	DenebForkEpoch:       269568,
 	ElectraForkVersion:   0x05000000,
-	ElectraForkEpoch:     math.MaxUint64,
+	ElectraForkEpoch:     364032,
 	FuluForkVersion:      0x06000000,
 	FuluForkEpoch:        math.MaxUint64,
 
@@ -958,6 +991,8 @@ func sepoliaConfig() BeaconChainConfig {
 	cfg.DenebForkVersion = 0x90000073
 	cfg.ElectraForkEpoch = 222464
 	cfg.ElectraForkVersion = 0x90000074
+	cfg.FuluForkEpoch = math.MaxUint64
+	cfg.FuluForkVersion = 0x90000075
 	cfg.TerminalTotalDifficulty = "17000000000000000"
 	cfg.DepositContractAddress = "0x7f02C3E3c98b133055B8B348B2Ac625669Ed295D"
 	cfg.InitializeForkSchedule()
@@ -986,6 +1021,8 @@ func holeskyConfig() BeaconChainConfig {
 	cfg.DenebForkVersion = 0x05017000
 	cfg.ElectraForkEpoch = 115968
 	cfg.ElectraForkVersion = 0x06017000
+	cfg.FuluForkEpoch = math.MaxUint64
+	cfg.FuluForkVersion = 0x07017000
 	cfg.TerminalTotalDifficulty = "0"
 	cfg.TerminalBlockHash = [32]byte{}
 	cfg.TerminalBlockHashActivationEpoch = math.MaxUint64
@@ -999,6 +1036,52 @@ func holeskyConfig() BeaconChainConfig {
 	cfg.MinPerEpochChurnLimit = 4
 	cfg.ChurnLimitQuotient = 1 << 16
 	cfg.ProposerScoreBoost = 40
+
+	cfg.InitializeForkSchedule()
+	return cfg
+
+}
+
+func hoodiConfig() BeaconChainConfig {
+	cfg := MainnetBeaconConfig
+	cfg.ConfigName = "hoodi"
+	cfg.MinGenesisActiveValidatorCount = 16384
+	cfg.MinGenesisTime = 1742212800
+	cfg.GenesisForkVersion = 0x10000910
+	cfg.GenesisDelay = 600
+
+	// Time parameters
+	cfg.SecondsPerSlot = 12
+	cfg.Eth1FollowDistance = 2048
+
+	// Forking
+	cfg.AltairForkEpoch = 0
+	cfg.AltairForkVersion = 0x20000910
+	cfg.BellatrixForkEpoch = 0
+	cfg.BellatrixForkVersion = 0x30000910
+	cfg.CapellaForkEpoch = 0
+	cfg.CapellaForkVersion = 0x40000910
+	cfg.DenebForkEpoch = 0
+	cfg.DenebForkVersion = 0x50000910
+	cfg.ElectraForkEpoch = 2048
+	cfg.ElectraForkVersion = 0x60000910
+	cfg.FuluForkEpoch = math.MaxUint64
+	cfg.FuluForkVersion = 0x70000910
+	cfg.TerminalTotalDifficulty = "0"
+	cfg.TerminalBlockHash = [32]byte{}
+	cfg.TerminalBlockHashActivationEpoch = math.MaxUint64
+
+	// Deposit contract
+	cfg.DepositContractAddress = "0x00000000219ab540356cBB839Cbe05303d7705Fa"
+	cfg.DepositChainID = uint64(HoodiNetwork)
+	cfg.DepositNetworkID = uint64(HoodiNetwork)
+
+	cfg.MaxBlobsPerBlockElectra = 9
+	cfg.BlobSidecarSubnetCountElectra = 9
+
+	cfg.SlotsPerEpoch = 32
+	cfg.EpochsPerSyncCommitteePeriod = 256
+	cfg.MinPerEpochChurnLimit = 4
 
 	cfg.InitializeForkSchedule()
 	return cfg
@@ -1027,6 +1110,10 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.CapellaForkVersion = 0x03000064
 	cfg.DenebForkEpoch = 889856
 	cfg.DenebForkVersion = 0x04000064
+	cfg.ElectraForkEpoch = 1337856
+	cfg.ElectraForkVersion = 0x05000064
+	cfg.FuluForkEpoch = math.MaxUint64
+	cfg.FuluForkVersion = 0x06000064
 	cfg.TerminalTotalDifficulty = "8626000000000000000000058750000000000000000000"
 	cfg.DepositContractAddress = "0x0B98057eA310F4d31F2a452B414647007d1645d9"
 	cfg.BaseRewardFactor = 25
@@ -1042,6 +1129,7 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.MinEpochsForBlobSidecarsRequests = 16384
 	cfg.MaxPerEpochActivationChurnLimit = 2
 	cfg.MaxPerEpochActivationExitChurnLimit = 64_000_000_000
+	cfg.MaxRequestBlobSidecarsElectra = 256
 	cfg.InitializeForkSchedule()
 	return cfg
 }
@@ -1070,6 +1158,8 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.DenebForkVersion = 0x0400006f
 	cfg.ElectraForkEpoch = 948224
 	cfg.ElectraForkVersion = 0x0500006f
+	cfg.FuluForkEpoch = math.MaxUint64
+	cfg.FuluForkVersion = 0x0600006f
 	cfg.TerminalTotalDifficulty = "231707791542740786049188744689299064356246512"
 	cfg.DepositContractAddress = "0xb97036A26259B7147018913bD58a774cf91acf25"
 	cfg.BaseRewardFactor = 25
@@ -1083,6 +1173,7 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.MinEpochsForBlobSidecarsRequests = 16384
 	cfg.MaxPerEpochActivationChurnLimit = 2
 	cfg.MaxPerEpochActivationExitChurnLimit = 64_000_000_000
+	cfg.MaxRequestBlobSidecarsElectra = 256
 	cfg.InitializeForkSchedule()
 	return cfg
 }
@@ -1150,6 +1241,7 @@ var BeaconConfigs map[NetworkType]BeaconChainConfig = map[NetworkType]BeaconChai
 	MainnetNetwork: mainnetConfig(),
 	SepoliaNetwork: sepoliaConfig(),
 	HoleskyNetwork: holeskyConfig(),
+	HoodiNetwork:   hoodiConfig(),
 	GnosisNetwork:  gnosisConfig(),
 	ChiadoNetwork:  chiadoConfig(),
 }
@@ -1191,6 +1283,16 @@ func (b *BeaconChainConfig) MaxBlobsPerBlockByVersion(v StateVersion) uint64 {
 		return b.MaxBlobsPerBlock
 	case ElectraVersion:
 		return b.MaxBlobsPerBlockElectra
+	}
+	panic("invalid version")
+}
+
+func (b *BeaconChainConfig) MaxRequestBlobSidecarsByVersion(v StateVersion) int {
+	switch v {
+	case DenebVersion:
+		return int(b.MaxRequestBlobSidecars)
+	case ElectraVersion:
+		return int(b.MaxRequestBlobSidecarsElectra)
 	}
 	panic("invalid version")
 }
@@ -1264,6 +1366,9 @@ func GetConfigsByNetworkName(net string) (*NetworkConfig, *BeaconChainConfig, Ne
 	case networkname.Holesky:
 		networkCfg, beaconCfg := GetConfigsByNetwork(HoleskyNetwork)
 		return networkCfg, beaconCfg, HoleskyNetwork, nil
+	case networkname.Hoodi:
+		networkCfg, beaconCfg := GetConfigsByNetwork(HoodiNetwork)
+		return networkCfg, beaconCfg, HoodiNetwork, nil
 	default:
 		return nil, nil, MainnetNetwork, errors.New("chain not found")
 	}
@@ -1323,18 +1428,14 @@ func GetCheckpointSyncEndpoint(net NetworkType) string {
 // 11155111 is Sepolia Testnet
 // 100 is Gnosis Mainnet
 // 10200 is Chiado Testnet
+// 560048 is Hoodi Testnet
 func EmbeddedSupported(id uint64) bool {
 	return id == 1 ||
 		id == 17000 ||
 		id == 11155111 ||
 		id == 100 ||
-		id == 10200
-}
-
-// Subset of supported networks where embedded CL is stable enough
-// (sufficient number of light-client peers) as to be enabled by default
-func EmbeddedEnabledByDefault(id uint64) bool {
-	return id == 1 || id == 5 || id == 11155111
+		id == 10200 ||
+		id == 560048
 }
 
 func SupportBackfilling(networkId uint64) bool {
@@ -1342,7 +1443,8 @@ func SupportBackfilling(networkId uint64) bool {
 		networkId == uint64(SepoliaNetwork) ||
 		networkId == uint64(GnosisNetwork) ||
 		networkId == uint64(ChiadoNetwork) ||
-		networkId == uint64(HoleskyNetwork)
+		networkId == uint64(HoleskyNetwork) ||
+		networkId == uint64(HoodiNetwork)
 }
 
 func EpochToPaths(slot uint64, config *BeaconChainConfig, suffix string) (string, string) {

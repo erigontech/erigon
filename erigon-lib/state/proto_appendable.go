@@ -12,8 +12,6 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
 	ae "github.com/erigontech/erigon-lib/state/appendable_extras"
-
-	btree2 "github.com/tidwall/btree"
 )
 
 /*
@@ -23,10 +21,11 @@ Can be embedded in other marker/relational/appendable entities.
 type ProtoAppendable struct {
 	freezer Freezer
 
-	a          ae.AppendableId
-	builders   []AccessorIndexBuilder
-	dirtyFiles *btree2.BTreeG[*filesItem]
-	_visible   visibleFiles
+	a        ae.AppendableId
+	cfg      *ae.SnapshotConfig
+	parser   ae.SnapNameSchema
+	builders []AccessorIndexBuilder
+	snaps    *SnapshotRepo
 
 	strategy CanonicityStrategy
 
@@ -35,30 +34,22 @@ type ProtoAppendable struct {
 
 func NewProto(a ae.AppendableId, builders []AccessorIndexBuilder, freezer Freezer, logger log.Logger) *ProtoAppendable {
 	return &ProtoAppendable{
-		a:          a,
-		builders:   builders,
-		freezer:    freezer,
-		dirtyFiles: btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		logger:     logger,
+		a:        a,
+		cfg:      a.SnapshotConfig(),
+		parser:   a.SnapshotConfig().Schema,
+		builders: builders,
+		freezer:  freezer,
+		snaps:    NewSnapshotRepoForAppendable(a, logger),
+		logger:   logger,
 	}
 }
 
-// func (a *ProtoEntity) DirtyFilesMaxRootNum() ae.RootNum {
-// 	latest, found := a.dirtyFiles.Max()
-// 	if latest == nil || !found {
-// 		return 0
-// 	}
-// 	return ae.RootNum(latest.endTxNum)
-// }
-
 func (a *ProtoAppendable) RecalcVisibleFiles(toRootNum RootNum) {
-	a._visible = calcVisibleFiles(a.dirtyFiles, AccessorHashMap, false, uint64(toRootNum))
+	a.snaps.RecalcVisibleFiles(toRootNum)
 }
 
 func (a *ProtoAppendable) IntegrateDirtyFiles(files []*filesItem) {
-	for _, item := range files {
-		a.dirtyFiles.Set(item)
-	}
+	a.snaps.IntegrateDirtyFiles(files)
 }
 
 func (a *ProtoAppendable) BuildFiles(ctx context.Context, from, to RootNum, db kv.RoDB, ps *background.ProgressSet) (dirtyFiles []*filesItem, err error) {
@@ -67,13 +58,13 @@ func (a *ProtoAppendable) BuildFiles(ctx context.Context, from, to RootNum, db k
 	var canFreeze bool
 	cfg := a.a.SnapshotConfig()
 	for {
-		calcFrom, calcTo, canFreeze = ae.GetFreezingRange(calcFrom, calcTo, a.a)
+		calcFrom, calcTo, canFreeze = a.snaps.GetFreezingRange(calcFrom, calcTo)
 		if !canFreeze {
 			break
 		}
 
 		log.Debug("freezing %s from %d to %d", a.a.Name(), calcFrom, calcTo)
-		path := ae.SnapFilePath(a.a, snaptype.Version(1), calcFrom, calcTo)
+		path := a.parser.DataFile(snaptype.Version(1), calcFrom, calcTo)
 		sn, err := seg.NewCompressor(ctx, "Snapshot "+a.a.Name(), path, a.a.Dirs().Tmp, seg.DefaultCfg, log.LvlTrace, a.logger)
 		if err != nil {
 			return dirtyFiles, err
@@ -81,14 +72,14 @@ func (a *ProtoAppendable) BuildFiles(ctx context.Context, from, to RootNum, db k
 		defer sn.Close()
 
 		{
-			a.freezer.SetCollector(func(values []byte) error {
+			if err = a.freezer.Freeze(ctx, calcFrom, calcTo, func(values []byte) error {
 				// TODO: look at block_Snapshots.go#dumpRange
 				// when snapshot is non-frozen range, it AddsUncompressedword (fast creation)
 				// else AddWord.
-				// But BuildFiles perhaps only used for fast builds...and merge is for slow builds.
+				// BuildFiles perhaps only used for fast builds...and merge is for slow builds.
+				// so using uncompressed here
 				return sn.AddUncompressedWord(values)
-			})
-			if err = a.freezer.Freeze(ctx, calcFrom, calcTo, db); err != nil {
+			}, db); err != nil {
 				return dirtyFiles, err
 			}
 		}
@@ -111,7 +102,7 @@ func (a *ProtoAppendable) BuildFiles(ctx context.Context, from, to RootNum, db k
 			return dirtyFiles, err
 		}
 
-		df := newFilesItemWithFrozenSteps(uint64(calcFrom), uint64(calcTo), cfg.MinimumSize, cfg.StepsInFrozenFile())
+		df := newFilesItemWithSnapConfig(uint64(calcFrom), uint64(calcTo), cfg)
 		df.decompressor = valuesDecomp
 
 		indexes := make([]*recsplit.Index, len(a.builders))
@@ -136,39 +127,47 @@ func (a *ProtoAppendable) BuildFiles(ctx context.Context, from, to RootNum, db k
 	return dirtyFiles, nil
 }
 
+func (a *ProtoAppendable) OpenFolder() error {
+	return a.snaps.OpenFolder()
+}
+
 func (a *ProtoAppendable) Close() {
-	var toClose []*filesItem
-	a.dirtyFiles.Walk(func(items []*filesItem) bool {
-		toClose = append(toClose, items...)
-		return true
-	})
-	for _, item := range toClose {
-		item.closeFiles()
-		a.dirtyFiles.Delete(item)
-	}
+	a.snaps.Close()
 }
 
 // proto_appendable_rotx
 
 type ProtoAppendableTx struct {
-	id    AppendableId
-	files visibleFiles
-	a     *ProtoAppendable
+	id      AppendableId
+	files   visibleFiles
+	a       *ProtoAppendable
+	noFiles bool
 
 	readers []*recsplit.IndexReader
 }
 
 func (a *ProtoAppendable) BeginFilesRo() *ProtoAppendableTx {
-	for i := range a._visible {
-		if a._visible[i].src.frozen {
-			a._visible[i].src.refcount.Add(1)
+	visibleFiles := a.snaps.VisibleFiles()
+	for i := range visibleFiles {
+		src := visibleFiles[i].src
+		if src.frozen {
+			src.refcount.Add(1)
 		}
 	}
 
 	return &ProtoAppendableTx{
 		id:    a.a,
-		files: a._visible,
+		files: visibleFiles,
 		a:     a,
+	}
+}
+
+func (a *ProtoAppendable) BeginNoFilesRo() *ProtoAppendableTx {
+	return &ProtoAppendableTx{
+		id:      a.a,
+		files:   nil,
+		a:       a,
+		noFiles: true,
 	}
 }
 
@@ -196,6 +195,7 @@ func (a *ProtoAppendableTx) Close() {
 }
 
 func (a *ProtoAppendableTx) StatelessIdxReader(i int) *recsplit.IndexReader {
+	a.NoFilesCheck()
 	if a.readers == nil {
 		a.readers = make([]*recsplit.IndexReader, len(a.files))
 	}
@@ -214,37 +214,16 @@ func (a *ProtoAppendableTx) Type() CanonicityStrategy {
 }
 
 func (a *ProtoAppendableTx) Garbage(merged *filesItem) (outs []*filesItem) {
-	if merged == nil {
-		return
-	}
-
-	a.a.dirtyFiles.Walk(func(item []*filesItem) bool {
-		for _, item := range item {
-			if item.frozen {
-				continue
-			}
-			if item.isSubsetOf(merged) {
-				outs = append(outs, item)
-			}
-			if item.isBefore(merged) && hasCoverVisibleFile(a.files, item) {
-				outs = append(outs, item)
-			}
-		}
-		return true
-	})
-	return outs
+	return a.a.snaps.Garbage(a.files, merged)
 }
 
 func (a *ProtoAppendableTx) VisibleFilesMaxRootNum() RootNum {
-	lasti := len(a.files) - 1
-	if lasti < 0 {
-		return 0
-	}
-
-	return RootNum(a.files[lasti].src.endTxNum)
+	a.NoFilesCheck()
+	return RootNum(a.files.EndTxNum())
 }
 
 func (a *ProtoAppendableTx) VisibleFilesMaxNum() Num {
+	a.NoFilesCheck()
 	lasti := len(a.files) - 1
 	if lasti < 0 {
 		return 0
@@ -253,33 +232,64 @@ func (a *ProtoAppendableTx) VisibleFilesMaxNum() Num {
 	return Num(idx.BaseDataID() + idx.KeyCount())
 }
 
-func (a *ProtoAppendableTx) LookupFile(entityNum Num, tx kv.Tx) (b Bytes, found bool, err error) {
+// if either found=false or err != nil, then fileIdx = -1
+// can get FileItem on which entityNum was found by a.Files()[fileIdx] etc.
+func (a *ProtoAppendableTx) GetFromFiles(entityNum Num) (b Bytes, found bool, fileIdx int, err error) {
+	a.NoFilesCheck()
 	ap := a.a
 	lastNum := a.VisibleFilesMaxNum()
 	if entityNum < lastNum && ap.builders[0].AllowsOrdinalLookupByNum() {
-		var word []byte
-		index := sort.Search(len(ap._visible), func(i int) bool {
-			idx := ap._visible[i].src.index
+		index := sort.Search(len(a.files), func(i int) bool {
+			idx := a.files[i].src.index
 			return idx.BaseDataID()+idx.KeyCount() > uint64(entityNum)
 		})
-		if index == -1 {
-			return nil, false, fmt.Errorf("entity get error: snapshot expected but now found: (%s, %d)", ap.a.Name(), entityNum)
+		if index == len(a.files) {
+			return nil, false, -1, fmt.Errorf("entity get error: snapshot expected but not found: (%s, %d)", ap.a.Name(), entityNum)
 		}
-		indexR := a.StatelessIdxReader(index)
-		id := int64(entityNum) - int64(indexR.BaseDataID())
-		if id < 0 {
-			a.a.logger.Error("ordinal lookup by negative num", "entityNum", entityNum, "index", index, "indexR.BaseDataID()", indexR.BaseDataID())
-			panic("ordinal lookup by negative num")
-		}
-		offset := indexR.OrdinalLookup(uint64(id))
-		g := a.files[index].src.decompressor.MakeGetter()
-		g.Reset(offset)
-		if g.HasNext() {
-			word, _ = g.Next(word[:0])
-			return word, true, nil
-		}
-		return nil, false, fmt.Errorf("entity get error: %s expected %d in snapshot %s but not found", ap.a.Name(), entityNum, ap._visible[index].src.decompressor.FileName1)
+
+		v, f, err := a.GetFromFile(entityNum, index)
+		return v, f, index, err
 	}
 
-	return nil, false, nil
+	return nil, false, -1, nil
+}
+
+func (a *ProtoAppendableTx) Files() []FilesItem {
+	a.NoFilesCheck()
+	v := a.files
+	fi := make([]FilesItem, len(v))
+	for i, f := range v {
+		fi[i] = f.src
+	}
+	return fi
+}
+
+func (a *ProtoAppendableTx) GetFromFile(entityNum Num, idx int) (v Bytes, found bool, err error) {
+	a.NoFilesCheck()
+	if idx >= len(a.files) {
+		return nil, false, fmt.Errorf("index out of range: %d >= %d", idx, len(a.files))
+	}
+
+	indexR := a.StatelessIdxReader(idx)
+	id := int64(entityNum) - int64(indexR.BaseDataID())
+	if id < 0 {
+		a.a.logger.Error("ordinal lookup by negative num", "entityNum", entityNum, "index", idx, "indexR.BaseDataID()", indexR.BaseDataID())
+		panic("ordinal lookup by negative num")
+	}
+	offset := indexR.OrdinalLookup(uint64(id))
+	g := a.files[idx].src.decompressor.MakeGetter()
+	g.Reset(offset)
+	var word []byte
+	if g.HasNext() {
+		word, _ = g.Next(word[:0])
+		return word, true, nil
+	}
+	ap := a.a
+	return nil, false, fmt.Errorf("entity get error: %s expected %d in snapshot %s but not found", ap.a.Name(), entityNum, a.files[idx].src.decompressor.FileName1)
+}
+
+func (a *ProtoAppendableTx) NoFilesCheck() {
+	if a.noFiles {
+		panic("snapshot read attempt on noFiles mode")
+	}
 }

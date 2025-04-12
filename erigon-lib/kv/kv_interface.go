@@ -567,6 +567,15 @@ type TemporalTx interface {
 	// HistoryRange - producing "state patch" - sorted list of keys updated at [fromTs,toTs) with their most-recent value.
 	//   no duplicates
 	HistoryRange(name Domain, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error)
+
+	Debug() TemporalDebugTx
+}
+
+// TemporalDebugTx - set of slow low-level funcs for debug purposes
+type TemporalDebugTx interface {
+	RangeLatest(domain Domain, from, to []byte, limit int) (stream.KV, error)
+	GetLatestFromDB(domain Domain, k []byte) (v []byte, step uint64, found bool, err error)
+	GetLatestFromFiles(domain Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error)
 }
 
 type WithFreezeInfo interface {

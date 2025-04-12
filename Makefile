@@ -13,9 +13,7 @@ ERIGON_USER ?= erigon
 # if using volume-mounting data dir, then must exist on host OS
 DOCKER_UID ?= $(shell id -u)
 DOCKER_GID ?= $(shell id -g)
-DOCKER_BINARIES ?= 'erigon downloader'
-DOCKER_BUILD_DBTOOLS ?= 'false'
-DOCKER_TAG ?= 'local-erigon/erigon:latest'
+DOCKER_TAG ?= erigontech/erigon:latest
 
 # Variables below for building on host OS, and are ignored for docker
 #
@@ -28,13 +26,8 @@ CGO_CFLAGS += -DMDBX_DISABLE_VALIDATION=0 # Can disable it on CI by separated PR
 #CGO_CFLAGS += -DMDBX_ENABLE_PGOP_STAT=0 # Disabled by default, but may be useful for performance debugging
 CGO_CFLAGS += -DMDBX_ENV_CHECKPID=0 # Erigon doesn't do fork() syscall
 
-# If it is arm64 or aarch64, then we need to use portable version of blst. use or with stringw "arm64" and "aarch64" to support both
-ifeq ($(shell uname -m), arm64)
-	CGO_CFLAGS += -D__BLST_PORTABLE__
-endif
-ifeq ($(shell uname -m), aarch64)
-	CGO_CFLAGS += -D__BLST_PORTABLE__
-endif
+
+CGO_CFLAGS += -D__BLST_PORTABLE__
 
 # Configure GOAMD64 env.variable for AMD64 architecture:
 ifeq ($(shell uname -m),x86_64)
@@ -88,20 +81,20 @@ validate_docker_build_args:
 	@if [ "$(UNAME)" = "Darwin" ]; then \
 		dscl . list /Users UniqueID | grep "$(DOCKER_UID)"; \
 	elif [ "$(UNAME)" = "Linux" ]; then \
-		grep "$(DOCKER_UID):$(DOCKER_GID)" /etc/passwd ; \
+		cat /etc/passwd | grep "$(DOCKER_UID):$(DOCKER_GID)"; \
 	fi
 	@echo "✔️ host OS user exists: $(shell id -nu $(DOCKER_UID))"
 
 ## docker:                            validate, update submodules and build with docker
 docker: validate_docker_build_args git-submodules
-	DOCKER_BUILDKIT=1 $(DOCKER) build \
-		--target erigon \
+	DOCKER_BUILDKIT=1 $(DOCKER) build -t ${DOCKER_TAG} \
 		--build-arg "BUILD_DATE=$(shell date +"%Y-%m-%dT%H:%M:%S:%z")" \
 		--build-arg VCS_REF=${GIT_COMMIT} \
-		--build-arg "BINARIES=${shell echo '$(DOCKER_BINARIES)'}" \
-		--build-arg "BUILD_DBTOOLS=${shell echo '$(DOCKER_BUILD_DBTOOLS)'}" \
-		--progress plain \
-		-t ${DOCKER_TAG} .
+		--build-arg VERSION=${GIT_TAG} \
+		--build-arg UID=${DOCKER_UID} \
+		--build-arg GID=${DOCKER_GID} \
+		${DOCKER_FLAGS} \
+		.
 
 xdg_data_home :=  ~/.local/share
 ifdef XDG_DATA_HOME
@@ -169,7 +162,7 @@ db-tools:
 	go mod vendor
 	cd vendor/github.com/erigontech/mdbx-go && MDBX_BUILD_TIMESTAMP=unknown make tools
 	mkdir -p $(GOBIN)
-	cd vendor/github.com/erigontech/mdbx-go/mdbxdist && cp mdbx_chk $(GOBIN) && cp mdbx_copy $(GOBIN) && cp mdbx_dump $(GOBIN) && cp mdbx_drop $(GOBIN) && cp mdbx_load $(GOBIN) && cp mdbx_stat $(GOBIN)
+	cd vendor/github.com/erigontech/mdbx-go/libmdbx && cp mdbx_chk $(GOBIN) && cp mdbx_copy $(GOBIN) && cp mdbx_dump $(GOBIN) && cp mdbx_drop $(GOBIN) && cp mdbx_load $(GOBIN) && cp mdbx_stat $(GOBIN)
 	rm -rf vendor
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
@@ -351,10 +344,19 @@ GOLANG_CROSS_VERSION  ?= v1.21.5
 
 
 .PHONY: release-dry-run
-release-dry-run: 
-	@echo "Release process moved to github action"
-	@exit 1
-
+release-dry-run: git-submodules
+	@docker run \
+		--rm \
+		--privileged \
+		-e CGO_ENABLED=1 \
+		-e GITHUB_TOKEN \
+		-e DOCKER_USERNAME \
+		-e DOCKER_PASSWORD \
+		-v /var/run/docker.sock:/var/run/docker.sock \
+		-v `pwd`:/go/src/$(PACKAGE_NAME) \
+		-w /go/src/$(PACKAGE_NAME) \
+		ghcr.io/goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
+		--clean --skip=validate --skip=publish
 # since DOCKER_UID, DOCKER_GID are default initialized to the current user uid/gid,
 # we need separate envvars to facilitate creation of the erigon user on the host OS.
 ERIGON_USER_UID ?= 3473

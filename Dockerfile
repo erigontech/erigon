@@ -1,41 +1,87 @@
-######
-##  End-User usage note:
-##
-##  to build own docker image my-erigon-image:tag with just two binaries "erigon" and "downloader"
-##  and with db_tools inside -- run following docker command in erigon/ directory:
-##   
-##    docker build --target erigon --build-arg BINARIES="erigon downloader" --build-arg BUILD_DBTOOLS="true"  --progress plain -t my-erigon-image:tag .
-##
-##  or simple build with default arguments (erigon only binary and without db-tools):
-##
-##    docker build --target erigon -t my-erigon-image:tag .
-##
-##  Note: build ARG "RELEASE_DOCKER_BASE_IMAGE" purposely defined incorrectly in order to fail "docker build"
-######
+# syntax = docker/dockerfile:1.2
+FROM docker.io/library/golang:1.24.1-alpine3.20 AS builder
 
-## Note TARGETARCH is a crucial variable:
-##   see https://docs.docker.com/reference/dockerfile/#automatic-platform-args-in-the-global-scope
+RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++
+
+WORKDIR /app
+ADD go.mod go.mod
+ADD go.sum go.sum
+ADD erigon-lib/go.mod erigon-lib/go.mod
+ADD erigon-lib/go.sum erigon-lib/go.sum
+
+RUN go mod download
+ADD . .
+
+RUN --mount=type=cache,target=/root/.cache \
+    --mount=type=cache,target=/tmp/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    make BUILD_TAGS=nosqlite,noboltdb,nosilkworm all
 
 
-ARG RELEASE_DOCKER_BASE_IMAGE="debian:12-slim" \
-    CI_CD_MAIN_BUILDER_IMAGE="golang:1.24-bookworm" \
-    CI_CD_MAIN_TARGET_BASE_IMAGE="debian:12-slim" \
-    BUILDER_IMAGE="golang" \
-    BUILDER_TAG="1.24-bookworm" \
-    TARGET_IMAGE="debian" \
-    TARGET_TAG="12-slim" \
-    TARGETARCH \
-    TARGETVARIANT \
-    BINARIES="erigon" \
-    BUILD_DBTOOLS="false" \
-    BUILD_DATE="Not defined" \
-    VCS_REF \
-    UID_ERIGON=1000 \
-    GID_ERIGON=1000 \
-    BUILD_SILKWORM="false" \
-    VERSION=${VERSION} \
-    APPLICATION="erigon" \
-    EXPOSED_PORTS="8545 \
+FROM docker.io/library/golang:1.24.1-alpine3.20 AS tools-builder
+RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++
+WORKDIR /app
+
+ADD Makefile Makefile
+ADD tools.go tools.go
+ADD go.mod go.mod
+ADD go.sum go.sum
+ADD erigon-lib/go.mod erigon-lib/go.mod
+ADD erigon-lib/go.sum erigon-lib/go.sum
+
+RUN mkdir -p /app/build/bin
+
+RUN --mount=type=cache,target=/root/.cache \
+    --mount=type=cache,target=/tmp/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    make db-tools
+
+FROM docker.io/library/alpine:3.20
+
+# install required runtime libs, along with some helpers for debugging
+RUN apk add --no-cache ca-certificates libstdc++ tzdata
+RUN apk add --no-cache curl jq bind-tools
+
+# Setup user and group
+#
+# from the perspective of the container, uid=1000, gid=1000 is a sensible choice
+# (mimicking Ubuntu Server), but if caller creates a .env (example in repo root),
+# these defaults will get overridden when make calls docker-compose
+ARG UID=1000
+ARG GID=1000
+RUN adduser -D -u $UID -g $GID erigon
+USER erigon
+RUN mkdir -p ~/.local/share/erigon
+
+# copy compiled artifacts from builder
+## first do the mdbx ones - since these wont change as often
+COPY --from=tools-builder /app/build/bin/mdbx_chk /usr/local/bin/mdbx_chk
+COPY --from=tools-builder /app/build/bin/mdbx_copy /usr/local/bin/mdbx_copy
+COPY --from=tools-builder /app/build/bin/mdbx_drop /usr/local/bin/mdbx_drop
+COPY --from=tools-builder /app/build/bin/mdbx_dump /usr/local/bin/mdbx_dump
+COPY --from=tools-builder /app/build/bin/mdbx_load /usr/local/bin/mdbx_load
+COPY --from=tools-builder /app/build/bin/mdbx_stat /usr/local/bin/mdbx_stat
+
+## then give each binary its own layer
+COPY --from=builder /app/build/bin/devnet /usr/local/bin/devnet
+COPY --from=builder /app/build/bin/downloader /usr/local/bin/downloader
+COPY --from=builder /app/build/bin/erigon /usr/local/bin/erigon
+COPY --from=builder /app/build/bin/evm /usr/local/bin/evm
+COPY --from=builder /app/build/bin/hack /usr/local/bin/hack
+COPY --from=builder /app/build/bin/integration /usr/local/bin/integration
+COPY --from=builder /app/build/bin/observer /usr/local/bin/observer
+COPY --from=builder /app/build/bin/pics /usr/local/bin/pics
+COPY --from=builder /app/build/bin/rpcdaemon /usr/local/bin/rpcdaemon
+COPY --from=builder /app/build/bin/rpctest /usr/local/bin/rpctest
+COPY --from=builder /app/build/bin/sentinel /usr/local/bin/sentinel
+COPY --from=builder /app/build/bin/sentry /usr/local/bin/sentry
+COPY --from=builder /app/build/bin/state /usr/local/bin/state
+COPY --from=builder /app/build/bin/txpool /usr/local/bin/txpool
+COPY --from=builder /app/build/bin/verkle /usr/local/bin/verkle
+COPY --from=builder /app/build/bin/caplin /usr/local/bin/caplin
+
+
+EXPOSE 8545 \
        8551 \
        8546 \
        30303 \
@@ -44,202 +90,20 @@ ARG RELEASE_DOCKER_BASE_IMAGE="debian:12-slim" \
        42069/udp \
        8080 \
        9090 \
-       6060"
+       6060
 
+# https://github.com/opencontainers/image-spec/blob/main/annotations.md
+ARG BUILD_DATE
+ARG VCS_REF
+ARG VERSION
+LABEL org.label-schema.build-date=$BUILD_DATE \
+      org.label-schema.description="Erigon Ethereum Client" \
+      org.label-schema.name="Erigon" \
+      org.label-schema.schema-version="1.0" \
+      org.label-schema.url="https://torquem.ch" \
+      org.label-schema.vcs-ref=$VCS_REF \
+      org.label-schema.vcs-url="https://github.com/erigontech/erigon.git" \
+      org.label-schema.vendor="Torquem" \
+      org.label-schema.version=$VERSION
 
-### Erigon Builder section:
-FROM docker.io/library/${BUILDER_IMAGE}:${BUILDER_TAG} AS builder 
-ARG TARGETARCH \
-    TARGETVARIANT \
-    BUILD_DBTOOLS \
-    BUILD_SILKWORM \
-    BINARIES
-WORKDIR /erigon
-
-COPY . /erigon
-SHELL ["/bin/bash", "-c"]
-RUN --mount=type=cache,target=/go/pkg/mod \
-    if [ "x${TARGETARCH}" == "xamd64" ] && [ "x${TARGETVARIANT}" == "x" ]; then \
-        echo "DEBUG: detected architecture AMD64v1"; \
-        export AMD_FLAGS="GOAMD64_VERSION=v1 GOARCH=amd64"; \
-    elif [ "x${TARGETARCH}" == "xamd64" ] && [ "x${TARGETVARIANT}" == "xv2" ]; then \
-        echo "DEBUG: detected architecture AMD64v2"; \
-        export AMD_FLAGS="GOAMD64_VERSION=v2 GOARCH=amd64"; \
-    elif [ "x${BUILD_SILKWORM}" != "xtrue" ] || [ "x${TARGETARCH}" == "xarm64" ] ; then \
-        echo "DEBUG: add nosilkworm build tag - BUILD_SILKWORM is not true OR ARM64 architecture "; \
-        export FLAG_SILKWORM=",nosilkworm"; \
-    fi && \
-    echo "DEBUG: cmd - make ${AMD_FLAGS} ${BINARIES} GOBIN=/build FLAG_SILKWORM=${FLAG_SILKWORM} ." && \
-    make ${AMD_FLAGS} ${BINARIES} GOBIN=/build BUILD_TAGS=nosqlite,noboltdb${FLAG_SILKWORM} && \
-    if [ "x${BUILD_SILKWORM}" == "xtrue" ] && [ "x${TARGETARCH}" == "xamd64" ]; then \
-        echo "DEBUG: BUILD_SILKWORM=${BUILD_SILKWORM} - installing libsilkworm_capi.so lib on architecture ARM64"; \
-        find $(go env GOMODCACHE)/github.com/erigontech -name libsilkworm_capi.so -exec install {} /build \; ;\
-    fi && \
-    if [ "x${BUILD_DBTOOLS}" == "xtrue" ]; then \
-        echo "Building db-tools:"; \
-        make GOBIN=/build db-tools; \
-    fi && \
-    find /build -ls
-
-### End of builder section
-
-
-### Erigon Target section:
-FROM docker.io/library/${TARGET_IMAGE}:${TARGET_TAG} AS erigon
-ARG USER=erigon \
-    GROUP=erigon \
-    UID_ERIGON \
-    GID_ERIGON \
-    APPLICATION \
-    BUILD_SILKWORM \
-    TARGETARCH \
-    TARGET_IMAGE \
-    TARGET_TAG \
-    EXPOSED_PORTS \
-    BUILD_DATE \
-    VCS_REF \
-    BINARIES
-
-LABEL \
-    "org.opencontainers.image.authors"="https://github.com/erigontech/erigon/graphs/contributors" \
-    "org.opencontainers.image.base.name"="${TARGET_IMAGE}:${TARGET_TAG}" \
-    "org.opencontainers.image.created"="${BUILD_DATE}" \
-    "org.opencontainers.image.revision"="${VCS_REF}" \
-    "org.opencontainers.image.description"="Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency frontier." \
-    "org.opencontainers.image.documentation"="https://erigon.gitbook.io/erigon" \
-    "org.opencontainers.image.source"="https://github.com/erigontech/erigon/blob/main/Dockerfile" \
-    "org.opencontainers.image.url"="https://github.com/erigontech/erigon/blob/main/Dockerfile"
-
-STOPSIGNAL 2
-
-SHELL ["/bin/bash", "-c"]
-
-RUN --mount=type=bind,from=builder,source=/build,target=/tmp/build \
-    echo Installing on ${TARGETARCH} with variant ${TARGETVARIANT} && \
-    addgroup --gid ${GID_ERIGON} ${GROUP} && \
-    adduser --system --uid ${UID_ERIGON} --ingroup ${GROUP} --home /home/${USER} --shell /bin/bash ${USER} && \
-    apt update -y && \
-    apt install -y --no-install-recommends ca-certificates && \
-    apt clean && \
-    rm -rf /var/lib/apt/lists/* && \
-    if [ "x${TARGETARCH}" == "xamd64" ] && [ "x${BUILD_SILKWORM}" != "xtrue" ]; then \
-        echo "Installing libsilkworm_capi.so library to /lib/x86_64-linux-gnu/ in case amd64 architecture:"; \
-        find /tmp/build -name libsilkworm_capi.so -type f | xargs -I % install -m a=r -v % /lib/x86_64-linux-gnu/; \
-        echo "Done." ; \
-    fi && \    
-    install -d -o ${USER} -g ${GROUP} /home/${USER}/.local /home/${USER}/.local/share /home/${USER}/.local/share/erigon && \
-    echo "Installing all binaries:" && \
-    install -v -o root -g root /tmp/build/* /usr/local/bin/ && \
-    rm -fv /usr/local/bin/libsilkworm_capi.so
-
-VOLUME [ "/home/${USER}" ]
-WORKDIR /home/${USER}
-
-USER ${USER}
-
-EXPOSE ${EXPOSED_PORTS}
-
-ENTRYPOINT [ "/usr/local/bin/erigon" ]
-### End of Erigon Target section
-
-
-### CI-CD : main branch docker image publishing for each new commit id
-FROM ${CI_CD_MAIN_BUILDER_IMAGE} AS ci-cd-main-branch-builder
-
-COPY /build-amd64 /build-amd64/
-COPY /build-arm64 /build-arm64/
-
-RUN echo "DEBUG: content of build-amd64" && ls -l /build-amd64 && \
-    echo && \
-    echo "DEBUG: content of build-arm64" && ls -l /build-arm64
-
-
-FROM ${CI_CD_MAIN_TARGET_BASE_IMAGE} AS ci-cd-main-branch
-ARG USER=erigon \
-    GROUP=erigon \
-    UID_ERIGON \
-    GID_ERIGON \
-    TARGETARCH \
-    EXPOSED_PORTS
-
-RUN --mount=type=bind,from=ci-cd-main-branch-builder,source=/build-${TARGETARCH},target=/tmp/erigon \
-    addgroup --gid ${GID_ERIGON} ${GROUP} && \
-    adduser --system --uid ${UID_ERIGON} --ingroup ${GROUP} --home /home/${USER} --shell /bin/bash ${USER} && \
-    apt update -y && \
-    apt install -y --no-install-recommends ca-certificates && \
-    apt clean && \
-    rm -rf /var/lib/apt/lists/* && \
-    install -d -o ${USER} -g ${GROUP} /home/${USER}/.local /home/${USER}/.local/share /home/${USER}/.local/share/erigon && \
-    echo "Installing all binaries:" && \
-    install -v -o root -g root /tmp/erigon/* /usr/local/bin/
-
-VOLUME [ "/home/${USER}" ]
-WORKDIR /home/${USER}
-
-USER ${USER}
-EXPOSE ${EXPOSED_PORTS}
-
-ENTRYPOINT [ "/usr/local/bin/erigon" ]
-
-### End of CI-CD : main branch docker image publishing for each new commit id
-
-
-
-### Release Dockerfile
-FROM ${RELEASE_DOCKER_BASE_IMAGE} AS release-builder
-ARG TARGETARCH \
-    TARGETVARIANT \
-    VERSION=${VERSION} \
-    APPLICATION
-
-COPY ${APPLICATION}_${VERSION}_linux_${TARGETARCH}${TARGETVARIANT}.tar.gz /tmp/${APPLICATION}.tar.gz
-
-RUN tar xzvf /tmp/${APPLICATION}.tar.gz -C /tmp && \
-    mv /tmp/${APPLICATION}_${VERSION}_linux_${TARGETARCH}${TARGETVARIANT} /tmp/${APPLICATION}
-
-FROM ${RELEASE_DOCKER_BASE_IMAGE} AS release
-
-ARG USER=erigon \
-    GROUP=erigon \
-    UID_ERIGON \
-    GID_ERIGON \
-    TARGETARCH \
-    APPLICATION \
-    EXPOSED_PORTS
-
-STOPSIGNAL 2
-
-SHELL ["/bin/bash", "-c"]
-
-RUN --mount=type=bind,from=release-builder,source=/tmp/${APPLICATION},target=/tmp/${APPLICATION} \
-    echo Installing on ${TARGETOS} with variant ${TARGETVARIANT} && \
-    addgroup --gid ${GID_ERIGON} ${GROUP} && \
-    adduser --system --uid ${UID_ERIGON} --ingroup ${GROUP} --home /home/${USER} --shell /bin/bash ${USER} && \
-    apt update -y && \
-    apt install -y --no-install-recommends ca-certificates && \
-    apt clean && \
-    rm -rf /var/lib/apt/lists/* && \
-    if [ "x${TARGETARCH}" == "xamd64" ]; then \
-        echo "Installing libsilkworm_capi.so library to /lib/x86_64-linux-gnu/ in case amd64 architecture:"; \
-        find /tmp/${APPLICATION} -name libsilkworm_capi.so -type f | xargs -I % install -m a=r -v % /lib/x86_64-linux-gnu/; \
-        echo "Done." ; \
-    fi && \
-    install -d -o ${USER} -g ${GROUP} /home/${USER}/.local /home/${USER}/.local/share /home/${USER}/.local/share/erigon && \
-    install -o root -g root /tmp/${APPLICATION}/erigon /usr/local/bin/ && \
-    install -o root -g root /tmp/${APPLICATION}/integration /usr/local/bin/ && \
-    install -o root -g root /tmp/${APPLICATION}/diag /usr/local/bin/ && \
-    install -o root -g root /tmp/${APPLICATION}/sentry /usr/local/bin/ && \
-    install -o root -g root /tmp/${APPLICATION}/txpool /usr/local/bin/ && \
-    install -o root -g root /tmp/${APPLICATION}/downloader /usr/local/bin/ && \
-    install -o root -g root /tmp/${APPLICATION}/rpcdaemon /usr/local/bin/
-
-VOLUME [ "/home/${USER}" ]
-WORKDIR /home/${USER}
-
-USER ${USER}
-
-EXPOSE ${EXPOSED_PORTS}
-
-ENTRYPOINT [ "/usr/local/bin/erigon" ]
-
-### End of Release Dockerfile
+ENTRYPOINT ["erigon"]
