@@ -86,7 +86,6 @@ type iiCfg struct {
 	valuesTable  string // bucket name for index values;  k -> txnNum_u64 , Needs to be table with DupSort
 	name         kv.InvertedIdx
 
-	withExistence bool                // defines if existence index should be built
 	compression   seg.FileCompression // compression type for inverted index keys and values
 	compressorCfg seg.Cfg             // advanced configuration for compressor encodings
 
