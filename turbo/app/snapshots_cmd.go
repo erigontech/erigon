@@ -151,7 +151,7 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
-			Name: "remove-overlaps",
+			Name: "merge",
 			Action: func(c *cli.Context) error {
 				dirs, l, err := datadir.New(c.String(utils.DataDirFlag.Name)).MustFlock()
 				if err != nil {
@@ -159,7 +159,7 @@ var snapshotCommand = cli.Command{
 				}
 				defer l.Unlock()
 
-				return doRemoveOverlaps(c, dirs)
+				return doMerge(c, dirs)
 			},
 			Usage: "erigon seg remove-overlaps",
 			Flags: joinFlags([]cli.Flag{
@@ -1526,7 +1526,10 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	return nil
 }
 
-func doRemoveOverlaps(cliCtx *cli.Context, dirs datadir.Dirs) error {
+// doMerge only runs the merge actions if the retire process - it is intended to clean any
+// unmerged files if the merge process was stopped due to early termination of erigon.  It is
+// different from 'retire' as it does not attempt to create any new snapshots
+func doMerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
@@ -1539,23 +1542,65 @@ func doRemoveOverlaps(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	chainConfig := fromdb.ChainConfig(db)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
-	blockSnaps, borSnaps, caplinSnaps, _, agg, clean, err := openSnaps(ctx, cfg, dirs, 0, db, logger)
+	_, _, caplinSnaps, br, agg, clean, err := openSnaps(ctx, cfg, dirs, 0, db, logger)
 	if err != nil {
 		return err
 	}
 	defer clean()
-	if blockSnaps != nil {
-		blockSnaps.RemoveOverlaps()
+	if err := br.BuildMissedIndicesIfNeed(ctx, "retire", nil, chainConfig); err != nil {
+		return err
 	}
-	if borSnaps != nil {
-		borSnaps.RemoveOverlaps()
+
+	//agg.LimitRecentHistoryWithoutFiles(0)
+
+	var forwardProgress uint64
+	db.View(ctx, func(tx kv.Tx) error {
+		forwardProgress, err = stages.GetStageProgress(tx, stages.Senders)
+		return err
+	})
+
+	if err := br.RetireBlocks(ctx, 0, forwardProgress, log.LvlInfo, nil, nil, nil); err != nil {
+		return err
 	}
+
 	if caplinSnaps != nil {
+		if err := caplinSnaps.BuildMissingIndices(ctx, logger); err != nil {
+			return err
+		}
 		caplinSnaps.RemoveOverlaps()
 	}
-	if agg != nil {
-		agg.RemoveOverlaps(ctx)
+
+	// `erigon retire` command is designed to maximize resouces utilization. But `Erigon itself` does minimize background impact (because not in rush).
+	agg.SetCollateAndBuildWorkers(estimate.StateV3Collate.Workers())
+	agg.SetMergeWorkers(estimate.AlmostAllCPUs())
+	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+
+	logger.Info("Prune state history")
+	for hasMoreToPrune := true; hasMoreToPrune; {
+		if err := db.Update(ctx, func(tx kv.RwTx) error {
+			ac := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx)
+			hasMoreToPrune, err = ac.PruneSmallBatches(ctx, 2*time.Minute, tx)
+			if err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
 	}
+
+	indexWorkers := estimate.IndexSnapshot.Workers()
+	if err = agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
+		return err
+	}
+
+	if err = agg.MergeLoop(ctx); err != nil {
+		return err
+	}
+	if err = agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
+		return err
+	}
+
 	return nil
 }
 
