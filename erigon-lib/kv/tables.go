@@ -186,6 +186,11 @@ const (
 	TblReceiptHistoryVals = "ReceiptHistoryVals"
 	TblReceiptIdx         = "ReceiptIdx"
 
+	TblReceiptCacheVals        = "ReceiptCacheVals"
+	TblReceiptCacheHistoryKeys = "ReceiptCacheHistoryKeys"
+	TblReceiptCacheHistoryVals = "ReceiptCacheHistoryVals"
+	TblReceiptCacheIdx         = "ReceiptCacheIdx"
+
 	TblLogAddressKeys = "LogAddressKeys"
 	TblLogAddressIdx  = "LogAddressIdx"
 	TblLogTopicsKeys  = "LogTopicsKeys"
@@ -384,6 +389,11 @@ var ChaindataTables = []string{
 	TblReceiptHistoryVals,
 	TblReceiptIdx,
 
+	TblReceiptCacheVals,
+	TblReceiptCacheHistoryKeys,
+	TblReceiptCacheHistoryVals,
+	TblReceiptCacheIdx,
+
 	TblLogAddressKeys,
 	TblLogAddressIdx,
 	TblLogTopicsKeys,
@@ -542,32 +552,41 @@ var ChaindataTablesCfg = TableCfg{
 		DupToLen:                  28,
 	},
 
-	TblAccountVals:           {Flags: DupSort},
-	TblAccountHistoryKeys:    {Flags: DupSort},
-	TblAccountHistoryVals:    {Flags: DupSort},
-	TblAccountIdx:            {Flags: DupSort},
-	TblStorageVals:           {Flags: DupSort},
-	TblStorageHistoryKeys:    {Flags: DupSort},
-	TblStorageHistoryVals:    {Flags: DupSort},
-	TblStorageIdx:            {Flags: DupSort},
-	TblCodeHistoryKeys:       {Flags: DupSort},
-	TblCodeIdx:               {Flags: DupSort},
+	TblAccountVals:        {Flags: DupSort},
+	TblAccountHistoryKeys: {Flags: DupSort},
+	TblAccountHistoryVals: {Flags: DupSort},
+	TblAccountIdx:         {Flags: DupSort},
+
+	TblStorageVals:        {Flags: DupSort},
+	TblStorageHistoryKeys: {Flags: DupSort},
+	TblStorageHistoryVals: {Flags: DupSort},
+	TblStorageIdx:         {Flags: DupSort},
+
+	TblCodeHistoryKeys: {Flags: DupSort},
+	TblCodeIdx:         {Flags: DupSort},
+
 	TblCommitmentVals:        {Flags: DupSort},
 	TblCommitmentHistoryKeys: {Flags: DupSort},
 	TblCommitmentHistoryVals: {Flags: DupSort},
 	TblCommitmentIdx:         {Flags: DupSort},
-	TblReceiptVals:           {Flags: DupSort},
-	TblReceiptHistoryKeys:    {Flags: DupSort},
-	TblReceiptHistoryVals:    {Flags: DupSort},
-	TblReceiptIdx:            {Flags: DupSort},
-	TblLogAddressKeys:        {Flags: DupSort},
-	TblLogAddressIdx:         {Flags: DupSort},
-	TblLogTopicsKeys:         {Flags: DupSort},
-	TblLogTopicsIdx:          {Flags: DupSort},
-	TblTracesFromKeys:        {Flags: DupSort},
-	TblTracesFromIdx:         {Flags: DupSort},
-	TblTracesToKeys:          {Flags: DupSort},
-	TblTracesToIdx:           {Flags: DupSort},
+
+	TblReceiptVals:        {Flags: DupSort},
+	TblReceiptHistoryKeys: {Flags: DupSort},
+	TblReceiptHistoryVals: {Flags: DupSort},
+	TblReceiptIdx:         {Flags: DupSort},
+
+	TblReceiptCacheHistoryKeys: {Flags: DupSort},
+	TblReceiptCacheIdx:         {Flags: DupSort},
+
+	TblLogAddressKeys: {Flags: DupSort},
+	TblLogAddressIdx:  {Flags: DupSort},
+	TblLogTopicsKeys:  {Flags: DupSort},
+	TblLogTopicsIdx:   {Flags: DupSort},
+
+	TblTracesFromKeys: {Flags: DupSort},
+	TblTracesFromIdx:  {Flags: DupSort},
+	TblTracesToKeys:   {Flags: DupSort},
+	TblTracesToIdx:    {Flags: DupSort},
 }
 
 var AuRaTablesCfg = TableCfg{
@@ -714,22 +733,24 @@ func reinit() {
 // Temporal
 
 const (
-	AccountsDomain   Domain = 0
-	StorageDomain    Domain = 1
-	CodeDomain       Domain = 2
-	CommitmentDomain Domain = 3
-	ReceiptDomain    Domain = 4
-	DomainLen        Domain = 5
+	AccountsDomain     Domain = 0
+	StorageDomain      Domain = 1
+	CodeDomain         Domain = 2
+	CommitmentDomain   Domain = 3
+	ReceiptDomain      Domain = 4
+	ReceiptCacheDomain Domain = 5
+	DomainLen          Domain = 6
 )
 
 var StateDomains = []Domain{AccountsDomain, StorageDomain, CodeDomain, CommitmentDomain}
 
 const (
-	AccountsHistoryIdx   InvertedIdx = "AccountsHistoryIdx"
-	StorageHistoryIdx    InvertedIdx = "StorageHistoryIdx"
-	CodeHistoryIdx       InvertedIdx = "CodeHistoryIdx"
-	CommitmentHistoryIdx InvertedIdx = "CommitmentHistoryIdx"
-	ReceiptHistoryIdx    InvertedIdx = "ReceiptHistoryIdx"
+	AccountsHistoryIdx     InvertedIdx = "AccountsHistoryIdx"
+	StorageHistoryIdx      InvertedIdx = "StorageHistoryIdx"
+	CodeHistoryIdx         InvertedIdx = "CodeHistoryIdx"
+	CommitmentHistoryIdx   InvertedIdx = "CommitmentHistoryIdx"
+	ReceiptHistoryIdx      InvertedIdx = "ReceiptHistoryIdx"
+	ReceiptCacheHistoryIdx InvertedIdx = "ReceiptCacheHistoryIdx"
 
 	LogTopicIdx   InvertedIdx = "LogTopicIdx"
 	LogAddrIdx    InvertedIdx = "LogAddrIdx"
@@ -754,6 +775,8 @@ func (d Domain) String() string {
 		return "commitment"
 	case ReceiptDomain:
 		return "receipt"
+	case ReceiptCacheDomain:
+		return "receiptcache"
 	default:
 		return "unknown domain"
 	}
@@ -771,6 +794,8 @@ func String2Domain(in string) (Domain, error) {
 		return CommitmentDomain, nil
 	case "receipt":
 		return ReceiptDomain, nil
+	case "receiptcache":
+		return ReceiptCacheDomain, nil
 	default:
 		return Domain(MaxUint16), fmt.Errorf("unknown history name: %s", in)
 	}

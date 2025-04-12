@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
@@ -57,6 +58,7 @@ func StageCustomTraceCfg(db kv.TemporalRwDB, dirs datadir.Dirs, br services.Full
 		Workers:     syncCfg.ExecWorkerCount,
 
 		ProduceReceiptDomain: dbg.EnvBool("PRODUCE_RECEIPT_DOMAIN", true),
+		PersistReceipts: syncCfg.PersistReceipts > 0,
 	}
 	return CustomTraceCfg{
 		db:       db,
@@ -337,6 +339,14 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 						}
 						//log.Info("adding extra", "firstLog", firstIndex)
 						if err := rawtemporaldb.AppendReceipt(doms, &receipt, cumulativeBlobGasUsedInBlock); err != nil {
+							return err
+						}
+					}
+				}
+
+				if cfg.PersistReceipts {
+					if txTask.BlockReceipts != nil {
+						if err := rawdb.WriteReceiptsCache(doms, txTask.BlockNum, txTask.BlockHash, txTask.BlockReceipts); err != nil {
 							return err
 						}
 					}

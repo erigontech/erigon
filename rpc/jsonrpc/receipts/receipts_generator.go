@@ -41,6 +41,7 @@ type Generator struct {
 	receiptCacheTrace  bool
 
 	blockReader services.FullBlockReader
+	txNumReader rawdbv3.TxNumsReader
 	engine      consensus.EngineReader
 }
 
@@ -59,7 +60,7 @@ var (
 	receiptsCacheTrace = dbg.EnvBool("R_LRU_TRACE", false)
 )
 
-func NewGenerator(blockReader services.FullBlockReader, engine consensus.EngineReader) *Generator {
+func NewGenerator(blockReader services.FullBlockReader, txNumReader rawdbv3.TxNumsReader, engine consensus.EngineReader) *Generator {
 	receiptsCache, err := lru.New[common.Hash, types.Receipts](receiptsCacheLimit) //TODO: is handling both of them a good idea though...?
 	if err != nil {
 		panic(err)
@@ -73,6 +74,7 @@ func NewGenerator(blockReader services.FullBlockReader, engine consensus.EngineR
 	return &Generator{
 		receiptsCache:      receiptsCache,
 		blockReader:        blockReader,
+		txNumReader:        txNumReader,
 		engine:             engine,
 		receiptsCacheTrace: receiptsCacheTrace,
 		receiptCacheTrace:  receiptsCacheTrace,
@@ -199,8 +201,9 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
 	blockHash := block.Hash()
+
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
-	receiptsFromDB, err := rawdb.ReadReceiptsCache(tx, block)
+	receiptsFromDB, err := rawdb.ReadReceiptsCache(tx, block, g.txNumReader)
 	if err != nil {
 		return nil, err
 	}

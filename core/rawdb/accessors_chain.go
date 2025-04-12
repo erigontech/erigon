@@ -28,6 +28,7 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/gballet/go-verkle"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -1279,15 +1280,33 @@ func ReadReceiptCache(tx kv.Tx, blockNum uint64, blockHash common.Hash, txnIndex
 	return res, true, nil
 }
 
-func ReadReceiptsCache(tx kv.Tx, block *types.Block) (res types.Receipts, err error) {
+func ReadReceiptsCache(tx kv.TemporalTx, block *types.Block, txNumReader rawdbv3.TxNumsReader) (res types.Receipts, err error) {
 	blockHash := block.Hash()
 	blockNum := block.NumberU64()
 
-	rng, err := tx.Prefix(kv.ReceiptsCache, dbutils.HeaderKey(blockNum, blockHash))
+	_min, err := txNumReader.Min(tx, blockNum)
 	if err != nil {
-		return nil, fmt.Errorf("ReadReceipts: %d, %w", blockNum, err)
+		return
+	}
+	_max, err := txNumReader.Max(tx, blockNum)
+	if err != nil {
+		return
+	}
+
+	rng, err := tx.HistoryRange(kv.ReceiptCacheDomain, int(_min), int(_max+1), order.Asc, -1)
+	if err != nil {
+		return
 	}
 	defer rng.Close()
+	//if ok && v != nil {
+	//	cumGasUsed = uvarint(v)
+	//}
+
+	//rng, err := tx.Prefix(kv.ReceiptsCache, dbutils.HeaderKey(blockNum, blockHash))
+	//if err != nil {
+	//	return nil, fmt.Errorf("ReadReceipts: %d, %w", blockNum, err)
+	//}
+	//defer rng.Close()
 
 	for rng.HasNext() {
 		_, v, err := rng.Next()
@@ -1316,6 +1335,7 @@ func ReadReceiptsCache(tx kv.Tx, block *types.Block) (res types.Receipts, err er
 
 // PruneReceiptsCache [0,blockNum) removes all receipt until given block number.
 func PruneReceiptsCache(tx kv.RwTx, toBlockNum uint64, pruneLimit int) error {
+	return nil
 	rng, err := tx.RwCursor(kv.ReceiptsCache)
 	if err != nil {
 		return err
@@ -1345,12 +1365,12 @@ func PruneReceiptsCache(tx kv.RwTx, toBlockNum uint64, pruneLimit int) error {
 }
 
 // WriteReceiptsCache stores all the transaction receipts belonging to a block.
-func WriteReceiptsCache(tx kv.RwTx, blockNum uint64, blockHash common.Hash, receipts types.Receipts) error {
-	if ok, err := HasReceiptCache(tx, blockNum, blockHash, 0); err != nil { // if exists don't write
-		return err
-	} else if ok {
-		return nil
-	}
+func WriteReceiptsCache(tx kv.TemporalPutDel, blockNum uint64, blockHash common.Hash, receipts types.Receipts) error {
+	//if ok, err := HasReceiptCache(tx, blockNum, blockHash, 0); err != nil { // if exists don't write
+	//	return err
+	//} else if ok {
+	//	return nil
+	//}
 
 	buf := bytes.NewBuffer(nil)
 	for txnIndex, receipt := range receipts {
@@ -1377,12 +1397,19 @@ func WriteReceiptsCache(tx kv.RwTx, blockNum uint64, blockHash common.Hash, rece
 			}
 		}
 
-		if err := tx.Put(kv.ReceiptsCache, dbutils.ReceiptCacheKey(blockNum, blockHash, uint32(txnIndex)), buf.Bytes()); err != nil {
+		//if err := tx.DomainPut(kv.ReceiptsCache, dbutils.ReceiptCacheKey(blockNum, blockHash, uint32(txnIndex)), nil, buf.Bytes()); err != nil {
+		//	return fmt.Errorf("writing logs for block %d: %w", blockNum, err)
+		//}
+		if err := tx.DomainPut(kv.ReceiptCacheDomain, receiptCacheKey, nil, buf.Bytes(), nil, 0); err != nil {
 			return fmt.Errorf("writing logs for block %d: %w", blockNum, err)
 		}
 	}
 	return nil
 }
+
+var (
+	receiptCacheKey = []byte{0x0}
+)
 
 // HasReceiptCache stores all the transaction receipts belonging to a block.
 func HasReceiptCache(tx kv.Tx, blockNum uint64, blockHash common.Hash, txnIndex uint32) (bool, error) {

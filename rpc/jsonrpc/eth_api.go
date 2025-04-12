@@ -26,6 +26,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon-lib/chain"

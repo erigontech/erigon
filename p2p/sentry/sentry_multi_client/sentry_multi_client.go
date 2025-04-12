@@ -27,6 +27,8 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"golang.org/x/sync/semaphore"
 
 	"google.golang.org/grpc"
@@ -208,6 +210,7 @@ func NewMultiClient(
 	} else {
 		bd = &bodydownload.BodyDownload{}
 	}
+	txNumReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(context.Background(), blockReader))
 
 	cs := &MultiClient{
 		Hd:                                hd,
@@ -224,7 +227,7 @@ func NewMultiClient(
 		disableBlockDownload:              disableBlockDownload,
 		logger:                            logger,
 		getReceiptsActiveGoroutineNumber:  semaphore.NewWeighted(1),
-		ethApiWrapper:                     receipts.NewGenerator(blockReader, engine),
+		ethApiWrapper:                     receipts.NewGenerator(blockReader, txNumReader, engine),
 	}
 
 	return cs, nil
