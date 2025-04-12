@@ -32,10 +32,6 @@ var DefaultMode = Mode{
 	Initialised: true,
 	History:     Distance(math.MaxUint64),
 	Blocks:      Distance(math.MaxUint64),
-	Experiments: Experiments{}, // all off
-}
-
-type Experiments struct {
 }
 
 func FromCli(distanceHistory, distanceBlocks uint64) (Mode, error) {
@@ -72,7 +68,6 @@ type Mode struct {
 	Initialised bool // Set when the values are initialised (not default)
 	History     BlockAmount
 	Blocks      BlockAmount
-	Experiments Experiments
 }
 
 type BlockAmount interface {
