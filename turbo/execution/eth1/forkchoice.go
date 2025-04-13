@@ -40,6 +40,11 @@ import (
 	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
 )
 
+// This is the range in which we sanity check and potentially fix the canonical chain if it is broken.
+// a broken canonical chain is very dangerous, as it can lead to a situation where the RPC and snapshots break down.
+// better to have an hack than to regenerate all chains.
+const fixCanonicalFailsafeRange = 16
+
 const startPruneFrom = 1024
 
 type forkchoiceOutcome struct {
@@ -77,6 +82,33 @@ func isDomainAheadOfBlocks(tx kv.RwTx, logger log.Logger) bool {
 	}
 	defer doms.Close()
 	return false
+}
+
+// fixCanonicalChainIfNecessary checks if the canonical chain is broken and fixes it if necessary.
+func (e *EthereumExecutionModule) fixCanonicalChainIfNecessary(ctx context.Context, tx kv.RwTx, blockHash common.Hash) error {
+	currHeader := rawdb.ReadCurrentHeader(tx)
+	if currHeader == nil {
+		return fmt.Errorf("cannot read current header")
+	}
+	if currHeader.Number.Uint64() <= fixCanonicalFailsafeRange {
+		return nil
+	}
+	// check if the canonical chain is broken and fix it if necessary
+	for i := currHeader.Number.Uint64() - 1; i > currHeader.Number.Uint64()-fixCanonicalFailsafeRange; i-- {
+		parentHeader := rawdb.ReadHeaderByNumber(tx, i)
+		if parentHeader == nil {
+			return nil // no need to fix the chain if the header is not found
+		}
+		if currHeader.ParentHash != parentHeader.Hash() {
+			// canonical chain is broken, fix it
+			if err := rawdb.WriteCanonicalHash(tx, currHeader.ParentHash, i); err != nil {
+				return fmt.Errorf("failed to write canonical hash: %w", err)
+			}
+			parentHeader = rawdb.ReadHeaderByNumber(tx, i)
+		}
+		currHeader = parentHeader
+	}
+	return nil
 }
 
 // verifyForkchoiceHashes verifies the finalized and safe hash of the forkchoice state
@@ -208,6 +240,12 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		return
 	}
 	defer tx.Rollback()
+
+	// failsafe which is kind of necessary to avoid a situation where the canonical chain is broken.
+	if err := e.fixCanonicalChainIfNecessary(ctx, tx, originalBlockHash); err != nil {
+		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+		return
+	}
 
 	{ // used by eth_syncing
 		num, err := e.blockReader.HeaderNumber(ctx, tx, originalBlockHash)
@@ -358,10 +396,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			return
 		}
-		if err := rawdb.TruncateCanonicalChain(ctx, tx, currentParentNumber+1); err != nil {
-			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-			return
-		}
 		// Mark all new canonicals as canonicals
 		for _, canonicalSegment := range newCanonicals {
 			chainReader := consensuschain.NewReader(e.config, tx, e.blockReader, e.logger)
@@ -391,10 +425,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		}
 		if len(newCanonicals) > 0 {
 			if err := rawdbv3.TxNums.Truncate(tx, newCanonicals[0].number); err != nil {
-				sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-				return
-			}
-			if err := rawdb.TruncateCanonicalChain(ctx, tx, newCanonicals[0].number); err != nil {
 				sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 				return
 			}
