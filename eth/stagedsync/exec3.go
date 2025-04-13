@@ -120,6 +120,15 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 	var execVals []interface{}
 	var te *txExecutor
 
+	switch ex := ex.(type) {
+	case *parallelExecutor:
+		te = &ex.txExecutor
+		suffix = " parallel"
+	case *serialExecutor:
+		te = &ex.txExecutor
+		suffix = " serial"
+	}
+
 	taskGas := te.execMetrics.UsedGas.Total.Load()
 	taskDur := time.Duration(te.execMetrics.Duration.Load())
 	readDur := time.Duration(te.execMetrics.ReadDuration.Load())
@@ -153,9 +162,6 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 
 	switch ex := ex.(type) {
 	case *parallelExecutor:
-		te = &ex.txExecutor
-		suffix = " parallel"
-
 		execCount := uint64(te.execCount.Load())
 		abortCount := uint64(te.abortCount.Load())
 		invalidCount := uint64(te.invalidCount.Load())
@@ -195,8 +201,6 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 		p.prevReadCount = readCount
 		p.prevWriteCount = writeCount
 	case *serialExecutor:
-		te = &ex.txExecutor
-		suffix = " serial"
 		execVals = []interface{}{
 			"workers", fmt.Sprintf("%.1f", float64(curTaskDur)/float64(interval)),
 			"tdur", fmt.Sprintf("%dµs", avgTaskDur.Microseconds()),
