@@ -28,7 +28,7 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/gballet/go-verkle"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -1280,25 +1280,33 @@ func ReadReceiptCache(tx kv.Tx, blockNum uint64, blockHash common.Hash, txnIndex
 	return res, true, nil
 }
 
-func ReadReceiptsCache(tx kv.TemporalTx, block *types.Block) (res types.Receipts, err error) {
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, br))
-
-	v, ok, err = tx.HistoryRange(kv.ReceiptDomain, receiptCacheKey)
-	if err != nil {
-		return
-	}
-	if ok && v != nil {
-		cumGasUsed = uvarint(v)
-	}
-
+func ReadReceiptsCache(tx kv.TemporalTx, block *types.Block, txNumReader rawdbv3.TxNumsReader) (res types.Receipts, err error) {
 	blockHash := block.Hash()
 	blockNum := block.NumberU64()
 
-	rng, err := tx.Prefix(kv.ReceiptsCache, dbutils.HeaderKey(blockNum, blockHash))
+	_min, err := txNumReader.Min(tx, blockNum)
 	if err != nil {
-		return nil, fmt.Errorf("ReadReceipts: %d, %w", blockNum, err)
+		return
+	}
+	_max, err := txNumReader.Max(tx, blockNum)
+	if err != nil {
+		return
+	}
+
+	rng, err := tx.HistoryRange(kv.ReceiptCacheDomain, int(_min), int(_max+1), order.Asc, -1)
+	if err != nil {
+		return
 	}
 	defer rng.Close()
+	//if ok && v != nil {
+	//	cumGasUsed = uvarint(v)
+	//}
+
+	//rng, err := tx.Prefix(kv.ReceiptsCache, dbutils.HeaderKey(blockNum, blockHash))
+	//if err != nil {
+	//	return nil, fmt.Errorf("ReadReceipts: %d, %w", blockNum, err)
+	//}
+	//defer rng.Close()
 
 	for rng.HasNext() {
 		_, v, err := rng.Next()
