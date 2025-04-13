@@ -60,7 +60,7 @@ var (
 	receiptsCacheTrace = dbg.EnvBool("R_LRU_TRACE", false)
 )
 
-func NewGenerator(blockReader services.FullBlockReader, txNumReader rawdbv3.TxNumsReader, engine consensus.EngineReader) *Generator {
+func NewGenerator(blockReader services.FullBlockReader, engine consensus.EngineReader) *Generator {
 	receiptsCache, err := lru.New[common.Hash, types.Receipts](receiptsCacheLimit) //TODO: is handling both of them a good idea though...?
 	if err != nil {
 		panic(err)
@@ -70,6 +70,8 @@ func NewGenerator(blockReader services.FullBlockReader, txNumReader rawdbv3.TxNu
 	if err != nil {
 		panic(err)
 	}
+
+	txNumReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(context.Background(), blockReader))
 
 	return &Generator{
 		receiptsCache:      receiptsCache,
