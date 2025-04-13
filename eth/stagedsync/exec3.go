@@ -145,12 +145,11 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 	p.prevActivations = activations
 
 	var readRatio float64
-	var avgTaskGas int64
+	var avgTaskGasPerSec int64
 	var avgTaskDur time.Duration
 	var avgReadDur time.Duration
 
 	if curActivations > 0 {
-		avgTaskGas = curTaskGas / curActivations
 		avgTaskDur = curTaskDur / time.Duration(curActivations)
 		avgReadDur = curReadDur / time.Duration(curActivations)
 
@@ -158,7 +157,11 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 			readRatio = 100.0 * float64(avgReadDur) / float64(avgTaskDur)
 		}
 
+		avgTaskGas := curTaskGas / curActivations
+		avgTaskGasPerSec = int64(float64(avgTaskGas) / interval.Seconds())
 	}
+
+	curTaskGasPerSec := int64(float64(curTaskGas) / interval.Seconds())
 
 	switch ex := ex.(type) {
 	case *parallelExecutor:
@@ -185,7 +188,7 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 			"workers", fmt.Sprintf("%d(%.1f)", ex.execMetrics.Active.Ema.Get(), float64(curTaskDur)/float64(interval)),
 			"tdur", fmt.Sprintf("%dµs", avgTaskDur.Microseconds()),
 			"trdur", fmt.Sprintf("%dµs(%.2f%%)", avgReadDur.Microseconds(), readRatio),
-			"tgas", fmt.Sprintf("%s(%s)", common.PrettyCounter(curTaskGas), common.PrettyCounter(avgTaskGas)),
+			"tgas/s", fmt.Sprintf("%s(%s)", common.PrettyCounter(curTaskGasPerSec), common.PrettyCounter(avgTaskGasPerSec)),
 			"rd", common.PrettyCounter(readCount - p.prevReadCount),
 			"wrt", common.PrettyCounter(writeCount - p.prevWriteCount),
 			"rd/s", common.PrettyCounter(uint64(float64(readCount-p.prevReadCount) / interval.Seconds())),
@@ -205,7 +208,7 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 			"workers", fmt.Sprintf("%.1f", float64(curTaskDur)/float64(interval)),
 			"tdur", fmt.Sprintf("%dµs", avgTaskDur.Microseconds()),
 			"trdur", fmt.Sprintf("%dµs(%.2f%%)", avgReadDur.Microseconds(), readRatio),
-			"tgas", fmt.Sprintf("%s(%s)", common.PrettyCounter(curTaskGas), common.PrettyCounter(avgTaskGas)),
+			"tgas/s", fmt.Sprintf("%s(%s)", common.PrettyCounter(curTaskGasPerSec), common.PrettyCounter(avgTaskGasPerSec)),
 		}
 	}
 
