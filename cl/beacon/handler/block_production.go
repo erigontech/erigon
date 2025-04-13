@@ -1212,6 +1212,136 @@ type attestationCandidate struct {
 	reward      uint64
 }
 
+func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState, candicdates []*solid.Attestation) (map[libcommon.Hash][]*solid.Attestation, error) {
+	stateVersion := s.Version()
+	pool := map[libcommon.Hash]map[uint64][]*solid.Attestation{} // map root -> committee -> att candidates
+
+	// Step 1: merge attestations in single committee
+	for _, candidate := range a.operationsPool.AttestationsPool.Raw() {
+		if err := eth2.IsAttestationApplicable(s, candidate); err != nil {
+			continue // attestation not applicable skip
+		}
+
+		attVersion := a.beaconChainCfg.GetCurrentStateVersion(candidate.Data.Slot / a.beaconChainCfg.SlotsPerEpoch)
+		if attVersion.Before(clparams.ElectraVersion) {
+			// Because the on chain Attestation container changes, attestations from the prior fork can’t be included
+			// into post-electra blocks. Therefore the first block after the fork may have zero attestations.
+			// see: https://eips.ethereum.org/EIPS/eip-7549#first-block-after-fork
+			continue
+		}
+
+		dataRoot, err := candidate.Data.HashSSZ()
+		if err != nil {
+			log.Warn("cannot hash attestation data", "err", err)
+			continue
+		}
+		if _, ok := pool[dataRoot]; !ok {
+			pool[dataRoot] = make(map[uint64][]*solid.Attestation)
+		}
+		committeeBits := candidate.CommitteeBits.GetOnIndices()
+		if len(committeeBits) != 1 {
+			log.Warn("invalid candidate commitee bit length %v in attestation pool.", len(committeeBits))
+			continue
+		}
+		candCommitteeBit := uint64(committeeBits[0])
+		if _, ok := pool[dataRoot][candCommitteeBit]; !ok {
+			pool[dataRoot][candCommitteeBit] = []*solid.Attestation{}
+		}
+		mergeAny := false
+		candAggrBits := candidate.AggregationBits.Bytes()
+		for _, curAtt := range pool[dataRoot][candCommitteeBit] {
+			currAggregationBitsBytes := curAtt.AggregationBits.Bytes()
+			if !utils.IsOverlappingSSZBitlist(currAggregationBitsBytes, candAggrBits) {
+				// merge signatures
+				candidateSig := candidate.Signature
+				curSig := curAtt.Signature
+				mergeSig, err := bls.AggregateSignatures([][]byte{candidateSig[:], curSig[:]})
+				if err != nil {
+					log.Warn("[Block Production] Cannot merge signatures", "err", err)
+					continue
+				}
+				// merge aggregation bits
+				mergedAggBits, err := curAtt.AggregationBits.Merge(candidate.AggregationBits)
+				if err != nil {
+					log.Warn("[Block Production] Cannot merge aggregation bits", "err", err)
+					continue
+				}
+				var buf [96]byte
+				copy(buf[:], mergeSig)
+				curAtt.Signature = buf
+				curAtt.AggregationBits = mergedAggBits
+				mergeAny = true
+			}
+		}
+		if !mergeAny {
+			// no merge case, just append. It might be merged with other attestation later.
+			pool[dataRoot][candCommitteeBit] = append(pool[dataRoot][candCommitteeBit], candidate)
+		}
+	}
+
+	// step 2: sort each candidates list within (root, committee_bit) by # of on bit in aggregation_bits
+	type candSort struct {
+		att   *solid.Attestation
+		count int
+	}
+	for root := range pool {
+		for committee := range pool[root] {
+			cands := []candSort{}
+			for i := range pool[root][committee] {
+				att := pool[root][committee][i]
+				// sort cands by # of on bits
+				cands = append(cands, candSort{
+					att:   att,
+					count: att.AggregationBits.Bits(),
+				})
+			}
+			sort.SliceStable(cands, func(i, j int) bool {
+				return cands[i].count > cands[j].count
+			})
+			// take back
+			resultCands := []*solid.Attestation{}
+			for i := range cands {
+				resultCands = append(resultCands, cands[i].att)
+			}
+			pool[root][committee] = resultCands
+		}
+	}
+
+	// step 3: merge attestations from different committees within the same data root
+	mergeCommittee := func(root libcommon.Hash, index int) (*solid.Attestation, error) {
+		signatures := [][]byte{}
+		commiteeBits := solid.NewBitVector(int(a.beaconChainCfg.MaxCommitteesPerSlot))
+		bitSlice := solid.NewBitSlice()
+		for c := range a.beaconChainCfg.MaxCommitteesPerSlot {
+			candidates, ok := pool[root][c]
+			if !ok {
+				continue
+			}
+			if index >= len(candidates) {
+				continue
+			}
+			att := candidates[index]
+			signatures = append(signatures, att.Signature[:])
+			commiteeBits.SetBitAt(int(c), true)
+			for i := range att.AggregationBits.Bits() {
+				bitSlice.AppendBit(att.AggregationBits.GetBitAt(i))
+			}
+		}
+		return &solid.Attestation{
+			AggregationBits: solid.BitlistFromBytes(bitSlice.Bytes(), int(a.beaconChainCfg.MaxCommitteesPerSlot)*int(a.beaconChainCfg.MaxValidatorsPerCommittee)),
+		}, nil
+	}
+	mergedCandidates := make(map[libcommon.Hash][]*solid.Attestation)
+	for root := range pool {
+		for i := range a.beaconChainCfg.MaxAttestationsElectra * 2 { // try double candidates
+			mergeCommittee(pool[root], i)
+		}
+		//for committee := range maxCommitteeNumber[root] + 1 {
+		// merge
+		//}
+	}
+}
+
 func (a *ApiHandler) findBestAttestationsForBlockProduction(
 	s abstract.BeaconState,
 ) *solid.ListSSZ[*solid.Attestation] {
@@ -1268,7 +1398,7 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 				curAtt.AggregationBits = mergedAggBits
 				mergeAny = true
 			}
-			if stateVersion >= clparams.ElectraVersion {
+			/*if stateVersion >= clparams.ElectraVersion {
 				// merge in electra way
 				mergedAggrBits, ok := a.tryMergeAggregationBits(s, curAtt, candidate)
 				if !ok {
@@ -1290,7 +1420,7 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 				curAtt.CommitteeBits = mergedCommitteeBits
 				copy(curAtt.Signature[:], mergeSig)
 				mergeAny = true
-			}
+			}*/
 		}
 		if !mergeAny {
 			// no merge case, just append. It might be merged with other attestation later.
