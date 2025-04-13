@@ -100,7 +100,7 @@ func (e *EthereumExecutionModule) fixCanonicalChainIfNecessary(ctx context.Conte
 			return nil // no need to fix the chain if the header is not found
 		}
 		if currHeader.ParentHash != parentHeader.Hash() {
-			e.logger.Warn("fixCanonicalChainIfNecessary: canonical chain is broken.", "currHeader.ParentHash", currHeader.ParentHash, "parentHeader.Hash", parentHeader.Hash(), "number", i)
+			e.logger.Info("fixCanonicalChainIfNecessary: fixing broken canonical chain.", "currHeader.ParentHash", currHeader.ParentHash, "parentHeader.Hash", parentHeader.Hash(), "number", i)
 			// canonical chain is broken, fix it
 			if err := rawdb.WriteCanonicalHash(tx, currHeader.ParentHash, i); err != nil {
 				return fmt.Errorf("failed to write canonical hash: %w", err)
