@@ -142,7 +142,8 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 		var readRatio float64
 		var avgTaskDur time.Duration
 		var avgReadDur time.Duration
-		var workersPerSec int64
+		var actualWorkersPerSec int64
+		var intervalWorkersPerSec int64
 
 		taskDur := time.Duration(ex.execMetrics.Duration.Load())
 		readDur := time.Duration(ex.execMetrics.ReadDuration.Load())
@@ -159,7 +160,8 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 		if curActivations > 0 {
 			avgTaskDur = curTaskDur / time.Duration(curActivations)
 			avgReadDur = curReadDur / time.Duration(curActivations)
-			workersPerSec = int64(float64(curActivations) / curTaskDur.Seconds())
+			actualWorkersPerSec = int64(float64(curActivations) / curTaskDur.Seconds())
+			intervalWorkersPerSec = int64(float64(curActivations) / interval.Seconds())
 
 			if avgTaskDur > 0 {
 				readRatio = 100.0 * float64(avgReadDur) / float64(avgTaskDur)
@@ -171,9 +173,9 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 			"repeat%", fmt.Sprintf("%.2f", repeatRatio),
 			"abort", common.PrettyCounter(abortCount - p.prevAbortCount),
 			"invalid", common.PrettyCounter(invalidCount - p.prevInvalidCount),
-			"workers", fmt.Sprintf("%d(%d/s)", ex.execMetrics.Active.Ema.Get(), workersPerSec),
-			"tsd", fmt.Sprintf("%dµs", avgTaskDur.Microseconds()),
-			"tsrd", fmt.Sprintf("%dµs(%.2f%%)", avgReadDur.Microseconds(), readRatio),
+			"workers", fmt.Sprintf("avg=%d,act=%d/s,ivl=%d/s)", ex.execMetrics.Active.Ema.Get(), actualWorkersPerSec, intervalWorkersPerSec),
+			"tsk-d", fmt.Sprintf("%dµs", avgTaskDur.Microseconds()),
+			"tsk-rd", fmt.Sprintf("%dµs(%.2f%%)", avgReadDur.Microseconds(), readRatio),
 			"rd", common.PrettyCounter(readCount - p.prevReadCount),
 			"wrt", common.PrettyCounter(writeCount - p.prevWriteCount),
 			"rd/s", common.PrettyCounter(uint64(float64(readCount-p.prevReadCount) / interval.Seconds())),
