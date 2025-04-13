@@ -258,7 +258,7 @@ func (rw *Worker) Run() (err error) {
 	return nil
 }
 
-func (rw *Worker) RunTxTask(txTask exec.Task) *exec.Result {
+func (rw *Worker) RunTxTask(txTask exec.Task) (result *exec.Result) {
 	//fmt.Println("RTX", txTask.Version().BlockNum, txTask.Version().TxIndex, txTask.Version().TxNum, txTask.IsBlockEnd())
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
@@ -275,15 +275,14 @@ func (rw *Worker) RunTxTask(txTask exec.Task) *exec.Result {
 			if readDuration := rw.ibs.StorageReadDuration(); readDuration > 0 {
 				rw.metrics.ReadDuration.Add(rw.ibs.StorageReadDuration())
 			}
-
+			if result != nil && result.ExecutionResult != nil {
+				rw.metrics.UsedGas.Add(int64(result.ExecutionResult.UsedGas))
+			}
 			rw.metrics.Active.Add(-1)
 		}()
 	}
 
-	result := rw.RunTxTaskNoLock(txTask)
-	if rw.metrics != nil && result.ExecutionResult != nil {
-		rw.metrics.UsedGas.Add(int64(result.ExecutionResult.UsedGas))
-	}
+	result = rw.RunTxTaskNoLock(txTask)
 	return result
 }
 

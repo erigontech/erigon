@@ -97,6 +97,7 @@ type Progress struct {
 	prevActivations       int64
 	prevTaskDuration      time.Duration
 	prevTaskReadDuration  time.Duration
+	prevTaskGas           int64
 	prevAbortCount        uint64
 	prevInvalidCount      uint64
 	prevReadCount         uint64
@@ -119,29 +120,35 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 	var execVals []interface{}
 	var te *txExecutor
 
+	taskGas := te.execMetrics.UsedGas.Total.Load()
 	taskDur := time.Duration(te.execMetrics.Duration.Load())
 	readDur := time.Duration(te.execMetrics.ReadDuration.Load())
 	activations := te.execMetrics.Active.Total.Load()
 
+	curTaskGas := taskGas - p.prevTaskGas
 	curTaskDur := taskDur - p.prevTaskDuration
 	curReadDur := readDur - p.prevTaskReadDuration
 	curActivations := activations - int64(p.prevActivations)
 
+	p.prevTaskGas = taskGas
 	p.prevTaskDuration = taskDur
 	p.prevTaskReadDuration = readDur
 	p.prevActivations = activations
 
 	var readRatio float64
+	var avgTaskGas int64
 	var avgTaskDur time.Duration
 	var avgReadDur time.Duration
 
 	if curActivations > 0 {
+		avgTaskGas = curTaskGas / curActivations
 		avgTaskDur = curTaskDur / time.Duration(curActivations)
 		avgReadDur = curReadDur / time.Duration(curActivations)
 
 		if avgTaskDur > 0 {
 			readRatio = 100.0 * float64(avgReadDur) / float64(avgTaskDur)
 		}
+
 	}
 
 	switch ex := ex.(type) {
@@ -170,8 +177,9 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 			"abort", common.PrettyCounter(abortCount - p.prevAbortCount),
 			"invalid", common.PrettyCounter(invalidCount - p.prevInvalidCount),
 			"workers", fmt.Sprintf("%d(%.1f)", ex.execMetrics.Active.Ema.Get(), float64(curTaskDur)/float64(interval)),
-			"tskd", fmt.Sprintf("%dµs", avgTaskDur.Microseconds()),
-			"tskrd", fmt.Sprintf("%dµs(%.2f%%)", avgReadDur.Microseconds(), readRatio),
+			"tdur", fmt.Sprintf("%dµs", avgTaskDur.Microseconds()),
+			"trdur", fmt.Sprintf("%dµs(%.2f%%)", avgReadDur.Microseconds(), readRatio),
+			"tgas", fmt.Sprintf("%s(%s)", common.PrettyCounter(curTaskGas), common.PrettyCounter(avgTaskGas)),
 			"rd", common.PrettyCounter(readCount - p.prevReadCount),
 			"wrt", common.PrettyCounter(writeCount - p.prevWriteCount),
 			"rd/s", common.PrettyCounter(uint64(float64(readCount-p.prevReadCount) / interval.Seconds())),
@@ -191,8 +199,9 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 		suffix = " serial"
 		execVals = []interface{}{
 			"workers", fmt.Sprintf("%.1f", float64(curTaskDur)/float64(interval)),
-			"tskd", fmt.Sprintf("%dµs", avgTaskDur.Microseconds()),
-			"tskrd", fmt.Sprintf("%dµs(%.2f%%)", avgReadDur.Microseconds(), readRatio),
+			"tdur", fmt.Sprintf("%dµs", avgTaskDur.Microseconds()),
+			"trdur", fmt.Sprintf("%dµs(%.2f%%)", avgReadDur.Microseconds(), readRatio),
+			"tgas", fmt.Sprintf("%s(%s)", common.PrettyCounter(curTaskGas), common.PrettyCounter(avgTaskGas)),
 		}
 	}
 
