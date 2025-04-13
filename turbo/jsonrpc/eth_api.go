@@ -37,6 +37,7 @@ import (
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/consensus"
@@ -135,6 +136,7 @@ type BaseAPI struct {
 	_pruneMode   atomic.Pointer[prune.Mode]
 
 	_blockReader services.FullBlockReader
+	_txNumReader rawdbv3.TxNumsReader
 	_txnReader   services.TxnReader
 	_engine      consensus.EngineReader
 
@@ -166,6 +168,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		blocksLRU:           blocksLRU,
 		_blockReader:        blockReader,
 		_txnReader:          blockReader,
+		_txNumReader:        blockReader.TxnumReader(context.Background()),
 		evmCallTimeout:      evmCallTimeout,
 		_engine:             engine,
 		receiptsGenerator:   receipts.NewGenerator(blockReader, engine),
