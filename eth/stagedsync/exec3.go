@@ -142,8 +142,6 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 		var readRatio float64
 		var avgTaskDur time.Duration
 		var avgReadDur time.Duration
-		var actualWorkersPerSec int64
-		var intervalWorkersPerSec int64
 
 		taskDur := time.Duration(ex.execMetrics.Duration.Load())
 		readDur := time.Duration(ex.execMetrics.ReadDuration.Load())
@@ -160,8 +158,6 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 		if curActivations > 0 {
 			avgTaskDur = curTaskDur / time.Duration(curActivations)
 			avgReadDur = curReadDur / time.Duration(curActivations)
-			actualWorkersPerSec = int64(float64(curActivations) / curTaskDur.Seconds())
-			intervalWorkersPerSec = int64(float64(curActivations) / interval.Seconds())
 
 			if avgTaskDur > 0 {
 				readRatio = 100.0 * float64(avgReadDur) / float64(avgTaskDur)
