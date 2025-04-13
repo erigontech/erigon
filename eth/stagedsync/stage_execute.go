@@ -26,8 +26,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon/cmd/state/exec3"
-
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -88,8 +86,6 @@ type ExecuteBlockCfg struct {
 
 	silkworm        *silkworm.Silkworm
 	blockProduction bool
-
-	applyWorker *exec3.Worker
 }
 
 func StageExecuteBlocksCfg(
@@ -131,7 +127,6 @@ func StageExecuteBlocksCfg(
 		historyV3:     true,
 		syncCfg:       syncCfg,
 		silkworm:      silkworm,
-		applyWorker:   exec3.NewWorker(context.Background(), false, nil, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, log.Root()),
 	}
 }
 

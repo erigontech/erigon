@@ -344,18 +344,20 @@ func (ev *taskVersion) Version() state.Version {
 
 type txExecutor struct {
 	sync.RWMutex
-	cfg                      ExecuteBlockCfg
-	agg                      *libstate.Aggregator
-	rs                       *state.StateV3Buffered
-	doms                     *libstate.SharedDomains
-	accumulator              *shards.Accumulator
-	u                        Unwinder
-	isMining                 bool
-	inMemExec                bool
-	applyTx                  kv.Tx
-	logger                   log.Logger
-	logPrefix                string
-	progress                 *Progress
+	cfg         ExecuteBlockCfg
+	agg         *libstate.Aggregator
+	rs          *state.StateV3Buffered
+	doms        *libstate.SharedDomains
+	accumulator *shards.Accumulator
+	u           Unwinder
+	isMining    bool
+	inMemExec   bool
+	applyTx     kv.Tx
+	logger      log.Logger
+	logPrefix   string
+	progress    *Progress
+	execMetrics *exec3.WorkerMetrics
+
 	shouldGenerateChangesets bool
 
 	lastExecutedBlockNum  uint64
@@ -1035,7 +1037,6 @@ type parallelExecutor struct {
 	execWorkers    []*exec3.Worker
 	stopWorkers    func()
 	waitWorkers    func()
-	execMetrics    *exec3.WorkerMetrics
 	in             *exec.QueueWithRetry
 	rws            *exec.ResultsQueue
 	workerCount    int

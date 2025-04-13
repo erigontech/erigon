@@ -116,8 +116,33 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 	interval := currentTime.Sub(p.prevExecTime)
 
 	var suffix string
-	var parallelExecVals []interface{}
+	var execVals []interface{}
 	var te *txExecutor
+
+	taskDur := time.Duration(te.execMetrics.Duration.Load())
+	readDur := time.Duration(te.execMetrics.ReadDuration.Load())
+	activations := te.execMetrics.Active.Total.Load()
+
+	curTaskDur := taskDur - p.prevTaskDuration
+	curReadDur := readDur - p.prevTaskReadDuration
+	curActivations := activations - int64(p.prevActivations)
+
+	p.prevTaskDuration = taskDur
+	p.prevTaskReadDuration = readDur
+	p.prevActivations = activations
+
+	var readRatio float64
+	var avgTaskDur time.Duration
+	var avgReadDur time.Duration
+
+	if curActivations > 0 {
+		avgTaskDur = curTaskDur / time.Duration(curActivations)
+		avgReadDur = curReadDur / time.Duration(curActivations)
+
+		if avgTaskDur > 0 {
+			readRatio = 100.0 * float64(avgReadDur) / float64(avgTaskDur)
+		}
+	}
 
 	switch ex := ex.(type) {
 	case *parallelExecutor:
@@ -139,32 +164,7 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 			repeatRatio = 100.0 * float64(repeats) / float64(execDiff)
 		}
 
-		var readRatio float64
-		var avgTaskDur time.Duration
-		var avgReadDur time.Duration
-
-		taskDur := time.Duration(ex.execMetrics.Duration.Load())
-		readDur := time.Duration(ex.execMetrics.ReadDuration.Load())
-		activations := ex.execMetrics.Active.Total.Load()
-
-		curTaskDur := taskDur - p.prevTaskDuration
-		curReadDur := readDur - p.prevTaskReadDuration
-		curActivations := activations - int64(p.prevActivations)
-
-		p.prevTaskDuration = taskDur
-		p.prevTaskReadDuration = readDur
-		p.prevActivations = activations
-
-		if curActivations > 0 {
-			avgTaskDur = curTaskDur / time.Duration(curActivations)
-			avgReadDur = curReadDur / time.Duration(curActivations)
-
-			if avgTaskDur > 0 {
-				readRatio = 100.0 * float64(avgReadDur) / float64(avgTaskDur)
-			}
-		}
-
-		parallelExecVals = []interface{}{
+		execVals = []interface{}{
 			"exec", common.PrettyCounter(execDiff),
 			"repeat%", fmt.Sprintf("%.2f", repeatRatio),
 			"abort", common.PrettyCounter(abortCount - p.prevAbortCount),
@@ -189,6 +189,11 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 	case *serialExecutor:
 		te = &ex.txExecutor
 		suffix = " serial"
+		execVals = []interface{}{
+			"workers", fmt.Sprintf("%.1f", float64(curTaskDur)/float64(interval)),
+			"tskd", fmt.Sprintf("%dµs", avgTaskDur.Microseconds()),
+			"tskrd", fmt.Sprintf("%dµs(%.2f%%)", avgReadDur.Microseconds(), readRatio),
+		}
 	}
 
 	executedGasSec := uint64(float64(te.executedGas-p.prevExecutedGas) / interval.Seconds())
@@ -201,7 +206,7 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 	executedDiffTxs := uint64(max(int(te.lastExecutedTxNum)-int(p.prevExecutedTxNum), 0))
 
 	p.log("executed", suffix, tx, te, rs, interval, te.lastExecutedBlockNum, executedDiffBlocks,
-		executedDiffTxs, executedTxSec, executedGasSec, false, parallelExecVals)
+		executedDiffTxs, executedTxSec, executedGasSec, false, execVals)
 
 	p.prevExecTime = currentTime
 
@@ -555,8 +560,6 @@ func ExecV3(ctx context.Context,
 		}
 	}
 	rs := state.NewStateV3Buffered(state.NewStateV3(doms, logger))
-
-	defer cfg.applyWorker.LogLRUStats()
 
 	commitThreshold := cfg.batchSize.Bytes()
 

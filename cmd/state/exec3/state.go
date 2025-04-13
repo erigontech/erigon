@@ -49,7 +49,8 @@ import (
 var noop = state.NewNoopWriter()
 
 type WorkerMetrics struct {
-	Active        activeWorkerCount
+	Active        activeCount
+	UsedGas       activeCount
 	Duration      activeDuration
 	ReadDuration  activeDuration
 	WriteDuration activeDuration
@@ -57,7 +58,8 @@ type WorkerMetrics struct {
 
 func NewWorkerMetrics() *WorkerMetrics {
 	return &WorkerMetrics{
-		Active:        activeWorkerCount{Ema: metrics.NewEmaWithBeta[int64](0, 1, 0.2)},
+		Active:        activeCount{Ema: metrics.NewEmaWithBeta[int64](0, 1, 0.2)},
+		UsedGas:       activeCount{Ema: metrics.NewEma[int64](0, 0.3)},
 		Duration:      activeDuration{Ema: metrics.NewEma[time.Duration](0, 0.3)},
 		ReadDuration:  activeDuration{Ema: metrics.NewEma[time.Duration](0, 0.3)},
 		WriteDuration: activeDuration{Ema: metrics.NewEma[time.Duration](0, 0.3)},
@@ -74,13 +76,13 @@ func (d *activeDuration) Add(i time.Duration) {
 	d.Ema.Update(i)
 }
 
-type activeWorkerCount struct {
+type activeCount struct {
 	atomic.Int64
 	Total atomic.Int64
 	Ema   *metrics.EMA[int64]
 }
 
-func (c *activeWorkerCount) Add(i int64) {
+func (c *activeCount) Add(i int64) {
 	c.Int64.Add(i)
 	if i > 0 {
 		c.Total.Add(i)
@@ -273,11 +275,16 @@ func (rw *Worker) RunTxTask(txTask exec.Task) *exec.Result {
 			if readDuration := rw.ibs.StorageReadDuration(); readDuration > 0 {
 				rw.metrics.ReadDuration.Add(rw.ibs.StorageReadDuration())
 			}
+
 			rw.metrics.Active.Add(-1)
 		}()
 	}
 
-	return rw.RunTxTaskNoLock(txTask)
+	result := rw.RunTxTaskNoLock(txTask)
+	if rw.metrics != nil && result.ExecutionResult != nil {
+		rw.metrics.UsedGas.Add(int64(result.ExecutionResult.UsedGas))
+	}
+	return result
 }
 
 // Needed to set history reader when need to offset few txs from block beginning and does not break processing,
