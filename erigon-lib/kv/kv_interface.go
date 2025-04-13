@@ -590,6 +590,7 @@ type FreezeInfo interface {
 type TemporalRwTx interface {
 	RwTx
 	TemporalTx
+	TemporalPutDel
 }
 
 type TemporalPutDel interface {

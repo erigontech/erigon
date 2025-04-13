@@ -258,6 +258,18 @@ func (tx *Tx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit
 	return it, nil
 }
 
+// Write methods
+
+func (tx *Tx) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error {
+	panic("implement me pls")
+}
+func (tx *Tx) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error {
+	panic("implement me pls")
+}
+func (tx *Tx) DomainDelPrefix(domain kv.Domain, prefix []byte) error {
+	panic("implement me pls")
+}
+
 // Debug methods
 
 func (tx *Tx) RangeLatest(domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
