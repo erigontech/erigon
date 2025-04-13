@@ -99,6 +99,7 @@ func (e *EthereumExecutionModule) fixCanonicalChainIfNecessary(ctx context.Conte
 		if parentHeader == nil {
 			return nil // no need to fix the chain if the header is not found
 		}
+		fmt.Println("comparing", currHeader.ParentHash, parentHeader.Hash())
 		if currHeader.ParentHash != parentHeader.Hash() {
 			e.logger.Warn("fixCanonicalChainIfNecessary: canonical chain is broken.", "currHeader.ParentHash", currHeader.ParentHash, "parentHeader.Hash", parentHeader.Hash(), "number", i)
 			// canonical chain is broken, fix it
