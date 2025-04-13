@@ -88,7 +88,7 @@ func isDomainAheadOfBlocks(tx kv.RwTx, logger log.Logger) bool {
 func (e *EthereumExecutionModule) fixCanonicalChainIfNecessary(ctx context.Context, tx kv.RwTx, blockHash common.Hash) error {
 	currHeader := rawdb.ReadCurrentHeader(tx)
 	if currHeader == nil {
-		return fmt.Errorf("cannot read current header")
+		return nil
 	}
 	if currHeader.Number.Uint64() <= fixCanonicalFailsafeRange {
 		return nil
