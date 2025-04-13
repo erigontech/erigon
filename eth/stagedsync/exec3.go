@@ -169,7 +169,7 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 			"repeat%", fmt.Sprintf("%.2f", repeatRatio),
 			"abort", common.PrettyCounter(abortCount - p.prevAbortCount),
 			"invalid", common.PrettyCounter(invalidCount - p.prevInvalidCount),
-			"workers", fmt.Sprintf("%d(%d)", ex.execMetrics.Active.Ema.Get(), float64(curTaskDur)/float64(interval)),
+			"workers", fmt.Sprintf("%d(%.1f)", ex.execMetrics.Active.Ema.Get(), float64(curTaskDur)/float64(interval)),
 			"tskd", fmt.Sprintf("%dµs", avgTaskDur.Microseconds()),
 			"tskrd", fmt.Sprintf("%dµs(%.2f%%)", avgReadDur.Microseconds(), readRatio),
 			"rd", common.PrettyCounter(readCount - p.prevReadCount),
