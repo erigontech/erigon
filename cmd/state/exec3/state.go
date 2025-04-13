@@ -57,7 +57,7 @@ type WorkerMetrics struct {
 
 func NewWorkerMetrics() *WorkerMetrics {
 	return &WorkerMetrics{
-		Active:        activeWorkerCount{Ema: metrics.NewEmaWithBeta[int32](0, 1, 0.2)},
+		Active:        activeWorkerCount{Ema: metrics.NewEmaWithBeta[int64](0, 1, 0.2)},
 		Duration:      activeDuration{Ema: metrics.NewEma[time.Duration](0, 0.3)},
 		ReadDuration:  activeDuration{Ema: metrics.NewEma[time.Duration](0, 0.3)},
 		WriteDuration: activeDuration{Ema: metrics.NewEma[time.Duration](0, 0.3)},
@@ -75,13 +75,13 @@ func (d *activeDuration) Add(i time.Duration) {
 }
 
 type activeWorkerCount struct {
-	atomic.Int32
-	Total atomic.Int32
-	Ema   *metrics.EMA[int32]
+	atomic.Int64
+	Total atomic.Int64
+	Ema   *metrics.EMA[int64]
 }
 
-func (c *activeWorkerCount) Add(i int32) {
-	c.Int32.Add(i)
+func (c *activeWorkerCount) Add(i int64) {
+	c.Int64.Add(i)
 	if i > 0 {
 		c.Total.Add(i)
 	}

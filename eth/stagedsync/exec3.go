@@ -94,6 +94,9 @@ type Progress struct {
 	prevExecutedTxNum     uint64
 	prevExecutedGas       uint64
 	prevExecCount         uint64
+	prevActivations       int64
+	prevTaskDuration      time.Duration
+	prevTaskReadDuration  time.Duration
 	prevAbortCount        uint64
 	prevInvalidCount      uint64
 	prevReadCount         uint64
@@ -137,9 +140,30 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 		}
 
 		var readRatio float64
+		var avgTaskDur time.Duration
+		var avgReadDur time.Duration
+		var workersPerSec int64
 
-		if taskDur := ex.execMetrics.Duration.Load(); taskDur > 0 {
-			readRatio = 100.0 * float64(ex.execMetrics.ReadDuration.Load()) / float64(taskDur)
+		taskDur := time.Duration(ex.execMetrics.Duration.Load())
+		readDur := time.Duration(ex.execMetrics.ReadDuration.Load())
+		activations := ex.execMetrics.Active.Total.Load()
+
+		curTaskDur := taskDur - p.prevTaskDuration
+		curReadDur := readDur - p.prevTaskReadDuration
+		curActivations := activations - int64(p.prevActivations)
+
+		p.prevTaskDuration = taskDur
+		p.prevTaskReadDuration = readDur
+		p.prevActivations = activations
+
+		if curActivations > 0 {
+			avgTaskDur = curTaskDur / time.Duration(curActivations)
+			avgReadDur = curReadDur / time.Duration(curActivations)
+			workersPerSec = int64(float64(curActivations) / curTaskDur.Seconds())
+
+			if avgTaskDur > 0 {
+				readRatio = 100.0 * float64(avgReadDur) / float64(avgTaskDur)
+			}
 		}
 
 		parallelExecVals = []interface{}{
@@ -147,9 +171,9 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 			"repeat%", fmt.Sprintf("%.2f", repeatRatio),
 			"abort", common.PrettyCounter(abortCount - p.prevAbortCount),
 			"invalid", common.PrettyCounter(invalidCount - p.prevInvalidCount),
-			"workers", ex.execMetrics.Active.Ema.Get(),
-			"task-dur", fmt.Sprintf("%dµs", ex.execMetrics.Duration.Ema.Get().Microseconds()),
-			"task-rdur", fmt.Sprintf("%dµs(%.2f%%)", ex.execMetrics.ReadDuration.Ema.Get().Microseconds(), readRatio),
+			"workers", fmt.Sprintf("%d(%d/s)", ex.execMetrics.Active.Ema.Get(), workersPerSec),
+			"tsd", fmt.Sprintf("%dµs", avgTaskDur.Microseconds()),
+			"tsrd", fmt.Sprintf("%dµs(%.2f%%)", avgReadDur.Microseconds(), readRatio),
 			"rd", common.PrettyCounter(readCount - p.prevReadCount),
 			"wrt", common.PrettyCounter(writeCount - p.prevWriteCount),
 			"rd/s", common.PrettyCounter(uint64(float64(readCount-p.prevReadCount) / interval.Seconds())),
