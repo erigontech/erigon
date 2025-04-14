@@ -398,23 +398,6 @@ func TestReferencingIntegrityChecker(t *testing.T) {
 	fileExistsCheck(t, accountsR, 0, 2, true)
 }
 
-func fileExistsCheck(t *testing.T, repo *SnapshotRepo, startStep, endStep uint64, isFound bool) {
-	t.Helper()
-	stepSize := repo.stepSize
-	startTxNum, endTxNum := startStep*stepSize, endStep*stepSize
-	_, found := repo.dirtyFiles.Get(&filesItem{startTxNum: startTxNum, endTxNum: endTxNum})
-	require.True(t, found == isFound)
-
-	_, err := os.Stat(repo.cfg.Schema.DataFile(snaptype.Version(1), ae.RootNum(startTxNum), ae.RootNum(endTxNum)))
-	if isFound {
-		require.NoError(t, err)
-	} else {
-		require.Error(t, err)
-		require.True(t, os.IsNotExist(err))
-	}
-
-}
-
 func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	name, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema ae.SnapNameSchema) {
@@ -720,15 +703,6 @@ func touch(t *testing.T, folder string, files []string, fileGen func(filename st
 	}
 }
 
-// func touchFile(t *testing.T, filename string) {
-// 	t.Helper()
-// 	file, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0666)
-// 	if err != nil {
-// 		t.Fatalf("failed to open file %s: %v", filename, err)
-// 	}
-// 	defer file.Close()
-// }
-
 func containsSubstring(t *testing.T, str string, list []string) bool {
 	t.Helper()
 	for _, s := range list {
@@ -737,4 +711,21 @@ func containsSubstring(t *testing.T, str string, list []string) bool {
 		}
 	}
 	return false
+}
+
+func fileExistsCheck(t *testing.T, repo *SnapshotRepo, startStep, endStep uint64, isFound bool) {
+	t.Helper()
+	stepSize := repo.stepSize
+	startTxNum, endTxNum := startStep*stepSize, endStep*stepSize
+	_, found := repo.dirtyFiles.Get(&filesItem{startTxNum: startTxNum, endTxNum: endTxNum})
+	require.True(t, found == isFound)
+
+	_, err := os.Stat(repo.cfg.Schema.DataFile(snaptype.Version(1), ae.RootNum(startTxNum), ae.RootNum(endTxNum)))
+	if isFound {
+		require.NoError(t, err)
+	} else {
+		require.Error(t, err)
+		require.True(t, os.IsNotExist(err))
+	}
+
 }
