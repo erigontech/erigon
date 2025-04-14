@@ -1423,12 +1423,21 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 			copy(buf[:], aggSig)
 		}
 		bitSlice.AppendBit(true) // set msb to 1
-		return &solid.Attestation{
+		att := &solid.Attestation{
 			AggregationBits: solid.BitlistFromBytes(bitSlice.Bytes(), int(a.beaconChainCfg.MaxCommitteesPerSlot)*int(a.beaconChainCfg.MaxValidatorsPerCommittee)),
 			Signature:       buf,
 			Data:            attData,
 			CommitteeBits:   commiteeBits,
 		}
+		attHash, _ := att.HashSSZ()
+		attHash2, _ := pool[root][0][index].HashSSZ()
+		if attHash != attHash2 {
+			attbytes, _ := json.Marshal(att)
+			attbytes2, _ := json.Marshal(pool[root][0][index])
+			log.Warn("Merged attestation hash mismatch", "root", root, "index", index, "attHash", attHash, "attHash2", attHash2, "att", string(attbytes), "att2", string(attbytes2))
+		}
+
+		return att
 	}
 	mergedCandidates := make(map[libcommon.Hash][]*solid.Attestation)
 	for root := range pool {
