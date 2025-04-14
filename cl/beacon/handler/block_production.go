@@ -1546,12 +1546,12 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 		maxAttLen = int(a.beaconChainCfg.MaxAttestationsElectra)
 	}
 	ret := solid.NewDynamicListSSZ[*solid.Attestation](maxAttLen)
-	for _, candidate := range attestationCandidates {
+	/*for _, candidate := range attestationCandidates {
 		ret.Append(candidate.attestation)
 		if ret.Len() >= maxAttLen {
 			break
 		}
-	}
+	}*/
 	return ret
 }
 
