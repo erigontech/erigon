@@ -1373,7 +1373,7 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 	//   aggregation_bits: 0011|0101
 	//   signature: aggregate(sig2, sig4)
 	// }
-	mergeAttByCommittees := func(root libcommon.Hash, index int) *solid.Attestation {
+	/*mergeAttByCommittees := func(root libcommon.Hash, index int) *solid.Attestation {
 		signatures := [][]byte{}
 		commiteeBits := solid.NewBitVector(int(a.beaconChainCfg.MaxCommitteesPerSlot))
 		bitSlice := solid.NewBitSlice()
@@ -1428,8 +1428,16 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 			}
 			mergedCandidates[root] = append(mergedCandidates[root], att)
 		}
-	}
+	}*/
 
+	mergedCandidates := make(map[libcommon.Hash][]*solid.Attestation)
+	for root := range pool {
+		for c := range pool[root] {
+			for i := range pool[root][c] {
+				mergedCandidates[root] = append(mergedCandidates[root], pool[root][c][i])
+			}
+		}
+	}
 	// print out the merged candidates data
 	for root := range mergedCandidates {
 		for _, att := range mergedCandidates[root] {
@@ -1546,12 +1554,12 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 		maxAttLen = int(a.beaconChainCfg.MaxAttestationsElectra)
 	}
 	ret := solid.NewDynamicListSSZ[*solid.Attestation](maxAttLen)
-	/*for _, candidate := range attestationCandidates {
+	for _, candidate := range attestationCandidates {
 		ret.Append(candidate.attestation)
 		if ret.Len() >= maxAttLen {
 			break
 		}
-	}*/
+	}
 	return ret
 }
 
