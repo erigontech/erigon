@@ -147,7 +147,7 @@ func newTestBackend(t *testing.T) (*eth.Ethereum, *core.ChainPack, error) {
 		HttpServerEnabled:        true,
 		HttpListenAddress:        localhost,
 		HttpPort:                 jsonRpcPort,
-		API:                      []string{"eth"},
+		API:                      []string{"eth", "net"},
 		AuthRpcHTTPListenAddress: localhost,
 		JWTSecretPath:            path.Join(dataDir, "jwt.hex"),
 		ReturnDataLimit:          100_000,
@@ -176,7 +176,7 @@ func newTestBackend(t *testing.T) (*eth.Ethereum, *core.ChainPack, error) {
 	ethConfig.ImportMode = true // this is to avoid getting stuck on a never-ending loop waiting for headers
 	ethConfig.Snapshot.NoDownloader = true
 	ethConfig.Snapshot.DisableDownloadE3 = true
-	ethConfig.NetworkID = 55
+	ethConfig.NetworkID = chainId.Uint64()
 	ethConfig.Genesis = genesis
 	ethConfig.Dirs = dirs
 	// ethConfig.TxPool.Disable = true
@@ -475,14 +475,14 @@ func testStatusFunctions(t *testing.T, client *rpc.Client) {
 		t.Fatalf("unexpected progress: %v", progress)
 	}
 
-	// // NetworkID
-	// networkID, err := ec.NetworkID(context.Background())
-	// if err != nil {
-	// 	t.Fatalf("unexpected error: %v", err)
-	// }
-	// if networkID.Cmp(big.NewInt(1337)) != 0 {
-	// 	t.Fatalf("unexpected networkID: %v", networkID)
-	// }
+	// NetworkID
+	networkID, err := ec.NetworkID(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if networkID.Cmp(chainId) != 0 {
+		t.Fatalf("unexpected networkID: %v", networkID)
+	}
 
 	// SuggestGasPrice
 	gasPrice, err := ec.SuggestGasPrice(context.Background())
