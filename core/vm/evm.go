@@ -193,7 +193,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 	if evm.Config().Tracer != nil {
 		v := value
 		if typ == STATICCALL {
-			v = new(uint256.Int)
+			v = nil
 		} else if typ == DELEGATECALL {
 			// NOTE: caller must, at all times be a contract. It should never happen
 			// that caller is something other than a Contract.
