@@ -1389,6 +1389,15 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 			att := candidates[index]
 			if attData == nil {
 				attData = att.Data
+			} else {
+				// Verify attestation data matches
+				if !att.Data.Equal(attData) {
+					log.Warn("Attestation data mismatch when merging committees",
+						"root", root,
+						"committee", cIndex,
+						"index", index)
+					return nil
+				}
 			}
 			signatures = append(signatures, att.Signature[:])
 			// set commitee bit
