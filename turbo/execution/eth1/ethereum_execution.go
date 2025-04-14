@@ -212,7 +212,7 @@ func (e *EthereumExecutionModule) unwindToCommonCanonical(tx kv.RwTx, header *ty
 			return err
 		}
 		if currentHeader == nil {
-			return makeErrMissingChainSegment(currentHeader.Hash())
+			return makeErrMissingChainSegment(parentBlockHash)
 		}
 	}
 	if err := e.hook.BeforeRun(tx, true); err != nil {
