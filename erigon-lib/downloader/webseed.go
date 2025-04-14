@@ -517,7 +517,7 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 		e.Go(func() error {
 			for _, url := range tUrls {
 				if whitelistLen != len(d.torrentsWhitelist) {
-					panic(fmt.Sprintf("[dbg] whaat???"))
+					panic("assert: race in whitelist filling?")
 				}
 				//validation happens inside
 				_, err := d.callTorrentHttpProvider(ctx, url, name)
