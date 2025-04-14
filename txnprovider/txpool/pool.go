@@ -306,6 +306,8 @@ func (p *TxPool) start(ctx context.Context) error {
 func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error {
 	defer newBlockTimer.ObserveDuration(time.Now())
 
+	sendNewBlockEventToDiagnostics(unwindTxns, unwindBlobTxns, minedTxns, stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight, stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockTime)
+
 	coreDB, cache := p.chainDB()
 	cache.OnNewBlock(stateChanges)
 	coreTx, err := coreDB.BeginRo(ctx)
@@ -339,6 +341,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 
 	pendingPre := p.pending.Len()
 	defer func() {
+
 		p.logger.Debug("[txpool] New block", "block", block,
 			"unwound", len(unwindTxns.Txns), "mined", len(minedTxns.Txns), "blockBaseFee", baseFee,
 			"pending-pre", pendingPre, "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len(),
@@ -2707,4 +2710,73 @@ func sendChangeBatchEventToDiagnostics(pool string, event string, orderHashes []
 	diagnostics.Send(diagnostics.PoolChangeBatchEvent{
 		Changes: toRemoveBatch,
 	})
+}
+
+func sendNewBlockEventToDiagnostics(unwindTxns, unwindBlobTxns, minedTxns TxnSlots, blockNum uint64, blkTime uint64) {
+	if !diagnostics.Client().Connected() {
+		return
+	}
+
+	blockUpdate := diagnostics.BlockUpdate{
+		MinedTxns:       []diagnostics.DiagTxn{},
+		UnwoundTxns:     []diagnostics.DiagTxn{},
+		UnwoundBlobTxns: []diagnostics.DiagTxn{},
+		BlockNum:        blockNum,
+		BlkTime:         blkTime,
+	}
+
+	diagTxns := make([]diagnostics.DiagTxn, 0)
+
+	for _, txn := range minedTxns.Txns {
+		diagTxns = append(diagTxns, diagnostics.DiagTxn{
+			IDHash:              hex.EncodeToString(txn.IDHash[:]),
+			SenderID:            txn.SenderID,
+			Size:                txn.Size,
+			Creation:            txn.Creation,
+			DataLen:             txn.DataLen,
+			AccessListAddrCount: txn.AccessListAddrCount,
+			AccessListStorCount: txn.AccessListStorCount,
+			BlobHashes:          txn.BlobHashes,
+			IsLocal:             false,
+			RLP:                 txn.Rlp,
+		})
+	}
+
+	for _, txn := range unwindTxns.Txns {
+		diagTxns = append(diagTxns, diagnostics.DiagTxn{
+			IDHash:              hex.EncodeToString(txn.IDHash[:]),
+			SenderID:            txn.SenderID,
+			Size:                txn.Size,
+			Creation:            txn.Creation,
+			DataLen:             txn.DataLen,
+			AccessListAddrCount: txn.AccessListAddrCount,
+			AccessListStorCount: txn.AccessListStorCount,
+			BlobHashes:          txn.BlobHashes,
+			IsLocal:             false,
+			RLP:                 txn.Rlp,
+		})
+	}
+
+	for _, txn := range unwindBlobTxns.Txns {
+		diagTxns = append(diagTxns, diagnostics.DiagTxn{
+			IDHash:              hex.EncodeToString(txn.IDHash[:]),
+			SenderID:            txn.SenderID,
+			Size:                txn.Size,
+			Creation:            txn.Creation,
+			DataLen:             txn.DataLen,
+			AccessListAddrCount: txn.AccessListAddrCount,
+			AccessListStorCount: txn.AccessListStorCount,
+			BlobHashes:          txn.BlobHashes,
+			IsLocal:             false,
+			RLP:                 txn.Rlp,
+		})
+	}
+
+	blockUpdate.MinedTxns = diagTxns
+	blockUpdate.UnwoundTxns = diagTxns
+	blockUpdate.UnwoundBlobTxns = diagTxns
+	blockUpdate.BlockNum = blockNum
+	blockUpdate.BlkTime = blkTime
+
+	diagnostics.Send(blockUpdate)
 }

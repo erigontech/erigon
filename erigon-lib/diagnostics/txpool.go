@@ -76,9 +76,22 @@ func (ti PoolChangeBatchEvent) Type() Type {
 	return TypeOf(ti)
 }
 
+type BlockUpdate struct {
+	MinedTxns       []DiagTxn `json:"minedTxns"`
+	UnwoundTxns     []DiagTxn `json:"unwoundTxns"`
+	UnwoundBlobTxns []DiagTxn `json:"unwoundBlobTxns"`
+	BlockNum        uint64    `json:"blkNum"`
+	BlkTime         uint64    `json:"blkTime"`
+}
+
+func (ti BlockUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
 func (d *DiagnosticClient) setupTxPoolDiagnostics(rootCtx context.Context) {
 	d.runOnIncommingTxnListener(rootCtx)
 	d.runOnPoolChangeBatchEvent(rootCtx)
+	d.runOnNewBlockListener(rootCtx)
 	d.SetupNotifier()
 }
 
@@ -126,6 +139,26 @@ func (d *DiagnosticClient) runOnPoolChangeBatchEvent(rootCtx context.Context) {
 						})
 					}
 				}
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) runOnNewBlockListener(rootCtx context.Context) {
+	go func() {
+		ctx, ch, closeChannel := Context[BlockUpdate](rootCtx, 1)
+		defer closeChannel()
+
+		StartProviders(ctx, TypeOf(BlockUpdate{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				return
+			case info := <-ch:
+				d.Notify(DiagMessages{
+					MessageType: "txpool",
+					Message:     info,
+				})
 			}
 		}
 	}()
