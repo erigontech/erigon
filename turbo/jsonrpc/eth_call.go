@@ -361,11 +361,11 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address libcommon.
 		}
 
 		sdCtx.SetLimitReadAsOfTxNum(lastTxnInBlock, false)
-		domains.SetTrace(true)
+		// domains.SetTrace(true)
 		if _, err := domains.SeekCommitment(context.Background(), roTx); err != nil {
 			return nil, err
 		}
-		defer domains.SetTrace(false)
+		domains.SetTrace(false)
 	}
 
 	// touch account
