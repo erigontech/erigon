@@ -856,7 +856,7 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, bl
 		blockNum := blockTo
 		h := rawdb.ReadHeaderByNumber(tx, blockNum)
 		if h == nil {
-			return fmt.Errorf("header not found: %d", blockNum)
+			return fmt.Errorf("last header not found: %d", blockNum)
 		}
 		if prevHash != h.ParentHash {
 			return fmt.Errorf("header hash mismatch: %d, %x != %x", blockNum, prevHash, h.ParentHash)
