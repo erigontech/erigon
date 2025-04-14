@@ -19,6 +19,7 @@ package state
 import (
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -33,6 +34,7 @@ import (
 
 	"github.com/Giulio2002/bls"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/utils"
@@ -226,6 +228,8 @@ func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(
 	}
 	// Matching roots
 	if !data.Source.Equal(justifiedCheckpoint) && !skipAssert {
+		bytes, _ := json.Marshal(data)
+		log.Warn("GetAttestationParticipationFlagIndicies: source does not match", "data", string(bytes))
 		return nil, errors.New("GetAttestationParticipationFlagIndicies: source does not match")
 	}
 	targetRoot, err := GetBlockRoot(b, data.Target.Epoch)
