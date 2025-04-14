@@ -1,5 +1,5 @@
 ARG RELEASE_DOCKER_BASE_IMAGE="alpine:3.20.1" \
-    CI_CD_MAIN_BUILDER_IMAGE="golang:1.22-bookworm" \
+    CI_CD_MAIN_BUILDER_IMAGE="golang:1.23-bookworm" \
     CI_CD_MAIN_TARGET_BASE_IMAGE="alpine:3.20.1" \
     UID_ERIGON=1000 \
     GID_ERIGON=1000 \
