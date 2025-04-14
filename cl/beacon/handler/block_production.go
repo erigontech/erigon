@@ -1330,6 +1330,22 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 		}
 	}
 
+	// print out the pool data
+	for root := range pool {
+		for committee := range pool[root] {
+			log.Info("Pool data", "root", root, "committee", committee, "attestations", len(pool[root][committee]))
+			for _, att := range pool[root][committee] {
+				// Convert aggregation bits to binary string representation
+				bits := att.AggregationBits.Bytes()
+				bitStr := ""
+				for _, b := range bits {
+					bitStr += fmt.Sprintf("%08b", b)
+				}
+				log.Info("Attestation", "aggregation_bits_len", att.AggregationBits.Bits(), "committee", att.CommitteeBits.GetOnIndices(), "aggregation_bits", bitStr[:att.AggregationBits.Bits()])
+			}
+		}
+	}
+
 	// step 3: merge attestations from different committees within the same data root
 	// Example:
 	// For data root 0x123...
