@@ -707,8 +707,6 @@ Loop:
 
 		if cfg.syncCfg.PersistReceipts == 0 {
 			panic(1)
-		} else {
-			log.Warn("[dbg] hi")
 		}
 		if cfg.syncCfg.PersistReceipts > 0 {
 			if len(txTasks) > 0 && txTasks[0].BlockReceipts != nil {
