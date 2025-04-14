@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"io/fs"
 	"net"
-	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -269,10 +268,6 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	}
 	defer d.Close()
 	logger.Info("[snapshots] Start bittorrent server", "my_peer_id", fmt.Sprintf("%x", d.TorrentClient().PeerID()))
-
-	http.HandleFunc("/torrentClientStatus", func(w http.ResponseWriter, r *http.Request) {
-		d.TorrentClient().WriteStatus(w)
-	})
 
 	if len(_verifyFiles) > 0 {
 		verifyFiles = strings.Split(_verifyFiles, ",")
