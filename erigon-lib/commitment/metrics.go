@@ -12,30 +12,26 @@ import (
 )
 
 /*
-ERIGON_COMMITMENT_TRACE - file path to write commitment metrics
-ERIGON_COMMITMENT_ACCOUNT_TRACE - file path to write account metrics
+ERIGON_COMMITMENT_TRACE - file path prefix to write commitment metrics
 */
 func init() {
-	commitmentMetricsFile = os.Getenv("ERIGON_COMMITMENT_TRACE")
-	accountMetricsFile = os.Getenv("ERIGON_COMMITMENT_ACCOUNT_TRACE")
-	collectCommitmentMetrics = os.Getenv("ERIGON_COMMITMENT_TRACE") != ""
-	collectAccountMetrics = os.Getenv("ERIGON_COMMITMENT_ACCOUNT_TRACE") != ""
+	metricsFile = os.Getenv("ERIGON_COMMITMENT_TRACE")
+	collectCommitmentMetrics = metricsFile != ""
 }
 
 var (
-	commitmentMetricsFile    string
-	accountMetricsFile       string
+	metricsFile              string
 	collectCommitmentMetrics bool
-	collectAccountMetrics    bool
 )
 
-type Metrics interface {
+type CsvMetrics interface {
 	Reset()
 	Headers() []string
 	Values() [][]string
 }
 
-type ProcessCommitment struct {
+type Metrics struct {
+	Accounts            *AccountMetrics
 	Updates             atomic.Uint64
 	AddressKeys         atomic.Uint64
 	StorageKeys         atomic.Uint64
@@ -49,7 +45,13 @@ type ProcessCommitment struct {
 	TotalProcessingTime time.Duration
 }
 
-func (processCommitment *ProcessCommitment) Headers() []string {
+func NewMetrics() *Metrics {
+	return &Metrics{
+		Accounts: NewAccounts(),
+	}
+}
+
+func (metrics *Metrics) Headers() []string {
 	return []string{
 		"updates",
 		"address plainKey",
@@ -65,60 +67,67 @@ func (processCommitment *ProcessCommitment) Headers() []string {
 	}
 }
 
-func (processCommitment *ProcessCommitment) Values() [][]string {
+func (metrics *Metrics) Values() [][]string {
 	return [][]string{
 		[]string{
-			strconv.FormatUint(processCommitment.Updates.Load(), 10),
-			strconv.FormatUint(processCommitment.AddressKeys.Load(), 10),
-			strconv.FormatUint(processCommitment.StorageKeys.Load(), 10),
-			strconv.FormatUint(processCommitment.LoadBranch.Load(), 10),
-			strconv.FormatUint(processCommitment.LoadAccount.Load(), 10),
-			strconv.FormatUint(processCommitment.LoadStorage.Load(), 10),
-			strconv.FormatUint(processCommitment.UpdateBranch.Load(), 10),
-			strconv.FormatUint(processCommitment.Unfolds.Load(), 10),
-			strconv.Itoa(int(processCommitment.TotalUnfoldingTime.Milliseconds())),
-			strconv.Itoa(int(processCommitment.TotalFoldingTime.Milliseconds())),
-			strconv.Itoa(int(processCommitment.TotalProcessingTime.Milliseconds())),
+			strconv.FormatUint(metrics.Updates.Load(), 10),
+			strconv.FormatUint(metrics.AddressKeys.Load(), 10),
+			strconv.FormatUint(metrics.StorageKeys.Load(), 10),
+			strconv.FormatUint(metrics.LoadBranch.Load(), 10),
+			strconv.FormatUint(metrics.LoadAccount.Load(), 10),
+			strconv.FormatUint(metrics.LoadStorage.Load(), 10),
+			strconv.FormatUint(metrics.UpdateBranch.Load(), 10),
+			strconv.FormatUint(metrics.Unfolds.Load(), 10),
+			strconv.Itoa(int(metrics.TotalUnfoldingTime.Milliseconds())),
+			strconv.Itoa(int(metrics.TotalFoldingTime.Milliseconds())),
+			strconv.Itoa(int(metrics.TotalProcessingTime.Milliseconds())),
 		},
 	}
 }
 
-func (processCommitment *ProcessCommitment) Reset() {
-	processCommitment.Updates.Store(0)
-	processCommitment.AddressKeys.Store(0)
-	processCommitment.StorageKeys.Store(0)
-	processCommitment.LoadBranch.Store(0)
-	processCommitment.LoadAccount.Store(0)
-	processCommitment.LoadStorage.Store(0)
-	processCommitment.UpdateBranch.Store(0)
-	processCommitment.Unfolds.Store(0)
-	processCommitment.TotalUnfoldingTime = 0
-	processCommitment.TotalFoldingTime = 0
-	processCommitment.TotalProcessingTime = 0
+func (metrics *Metrics) Reset() {
+	metrics.Accounts.Reset()
+	metrics.Updates.Store(0)
+	metrics.AddressKeys.Store(0)
+	metrics.StorageKeys.Store(0)
+	metrics.LoadBranch.Store(0)
+	metrics.LoadAccount.Store(0)
+	metrics.LoadStorage.Store(0)
+	metrics.UpdateBranch.Store(0)
+	metrics.Unfolds.Store(0)
+	metrics.TotalUnfoldingTime = 0
+	metrics.TotalFoldingTime = 0
+	metrics.TotalProcessingTime = 0
 }
 
-func (processCommitment *ProcessCommitment) Now() time.Time {
+func (metrics *Metrics) Now() time.Time {
 	if collectCommitmentMetrics {
 		return time.Now()
 	}
 	return time.Time{}
 }
 
-func (ProcessCommitment *ProcessCommitment) TotalUnfoldingTimeInc(t time.Time) {
+func (metrics *Metrics) TotalUnfoldingTimeInc(t time.Time) {
 	if collectCommitmentMetrics {
-		ProcessCommitment.TotalUnfoldingTime += time.Since(t)
+		metrics.TotalUnfoldingTime += time.Since(t)
 	}
 }
 
-func (ProcessCommitment *ProcessCommitment) TotalProcessingTimeInc(t time.Time) {
+func (metrics *Metrics) TotalProcessingTimeInc(t time.Time) {
 	if collectCommitmentMetrics {
-		ProcessCommitment.TotalProcessingTime += time.Since(t)
+		metrics.TotalProcessingTime += time.Since(t)
 	}
 }
 
-func (ProcessCommitment *ProcessCommitment) TotalFoldingTimeInc(t time.Time) {
+func (metrics *Metrics) TotalFoldingTimeInc(t time.Time) {
 	if collectCommitmentMetrics {
-		ProcessCommitment.TotalFoldingTime += time.Since(t)
+		metrics.TotalFoldingTime += time.Since(t)
+	}
+}
+
+func NewAccounts() *AccountMetrics {
+	return &AccountMetrics{
+		AccountStats: make(map[string]*AccountStats),
 	}
 }
 
@@ -134,15 +143,16 @@ type AccountStats struct {
 	TotalFoldingTime   time.Duration
 }
 
-type ProcessAcount struct {
-	m            sync.Mutex
-	AccountStats map[string]*AccountStats
+type AccountMetrics struct {
+	m sync.Mutex
+	// will be separate value for each key in parallel processing
+	currentPlainKey []byte
+	AccountStats    map[string]*AccountStats
 }
 
-func (processAccount *ProcessAcount) Headers() []string {
+func (processAccount *AccountMetrics) Headers() []string {
 	return []string{
 		"account",
-		"account updates",
 		"storage updates",
 		"loading branch",
 		"loading account",
@@ -154,15 +164,14 @@ func (processAccount *ProcessAcount) Headers() []string {
 	}
 }
 
-func (processAccount *ProcessAcount) Values() [][]string {
+func (processAccount *AccountMetrics) Values() [][]string {
 	processAccount.m.Lock()
 	defer processAccount.m.Unlock()
 	values := make([][]string, len(processAccount.AccountStats), len(processAccount.AccountStats))
 	var ind int
 	for i, account := range processAccount.AccountStats {
 		values[ind] = []string{
-			"0x" + i,
-			strconv.FormatUint(account.AccountUpdates, 10),
+			i,
 			strconv.FormatUint(account.StorageUpates, 10),
 			strconv.FormatUint(account.LoadBranch, 10),
 			strconv.FormatUint(account.LoadAccount, 10),
@@ -177,14 +186,14 @@ func (processAccount *ProcessAcount) Values() [][]string {
 	return values
 }
 
-func (processAccount *ProcessAcount) Reset() {
+func (processAccount *AccountMetrics) Reset() {
 	processAccount.m.Lock()
 	defer processAccount.m.Unlock()
 	processAccount.AccountStats = make(map[string]*AccountStats)
 }
 
-func (processAccount *ProcessAcount) UpdatesInc(plainKey []byte) {
-	if collectAccountMetrics && plainKey != nil {
+func (processAccount *AccountMetrics) UpdatesInc(plainKey []byte) {
+	if collectCommitmentMetrics && plainKey != nil {
 		processAccount.m.Lock()
 		defer processAccount.m.Unlock()
 		account := hex.EncodeToString(plainKey[0:20])
@@ -197,8 +206,8 @@ func (processAccount *ProcessAcount) UpdatesInc(plainKey []byte) {
 	}
 }
 
-func (processAccount *ProcessAcount) UpdatesStorageInc(plainKey []byte) {
-	if collectAccountMetrics && plainKey != nil {
+func (processAccount *AccountMetrics) UpdatesStorageInc(plainKey []byte) {
+	if collectCommitmentMetrics && plainKey != nil {
 		processAccount.m.Lock()
 		defer processAccount.m.Unlock()
 		account := hex.EncodeToString(plainKey[0:20])
@@ -211,8 +220,8 @@ func (processAccount *ProcessAcount) UpdatesStorageInc(plainKey []byte) {
 	}
 }
 
-func (processAccount *ProcessAcount) LoadBranchInc(plainKey []byte) {
-	if collectAccountMetrics && plainKey != nil {
+func (processAccount *AccountMetrics) LoadBranchInc(plainKey []byte) {
+	if collectCommitmentMetrics && plainKey != nil {
 		processAccount.m.Lock()
 		defer processAccount.m.Unlock()
 		account := hex.EncodeToString(plainKey[0:20])
@@ -223,8 +232,8 @@ func (processAccount *ProcessAcount) LoadBranchInc(plainKey []byte) {
 	}
 }
 
-func (processAccount *ProcessAcount) LoadAccountInc(plainKey []byte) {
-	if collectAccountMetrics && plainKey != nil {
+func (processAccount *AccountMetrics) LoadAccountInc(plainKey []byte) {
+	if collectCommitmentMetrics && plainKey != nil {
 		processAccount.m.Lock()
 		defer processAccount.m.Unlock()
 		account := hex.EncodeToString(plainKey[0:20])
@@ -235,8 +244,8 @@ func (processAccount *ProcessAcount) LoadAccountInc(plainKey []byte) {
 	}
 }
 
-func (processAccount *ProcessAcount) LoadStorageInc(plainKey []byte) {
-	if collectAccountMetrics && plainKey != nil {
+func (processAccount *AccountMetrics) LoadStorageInc(plainKey []byte) {
+	if collectCommitmentMetrics && plainKey != nil {
 		processAccount.m.Lock()
 		defer processAccount.m.Unlock()
 		account := hex.EncodeToString(plainKey[0:20])
@@ -247,8 +256,8 @@ func (processAccount *ProcessAcount) LoadStorageInc(plainKey []byte) {
 	}
 }
 
-func (processAccount *ProcessAcount) UnfoldsInc(plainKey []byte) {
-	if collectAccountMetrics && plainKey != nil {
+func (processAccount *AccountMetrics) UnfoldsInc(plainKey []byte) {
+	if collectCommitmentMetrics && plainKey != nil {
 		processAccount.m.Lock()
 		defer processAccount.m.Unlock()
 		account := hex.EncodeToString(plainKey[0:20])
@@ -259,8 +268,8 @@ func (processAccount *ProcessAcount) UnfoldsInc(plainKey []byte) {
 	}
 }
 
-func (processAccount *ProcessAcount) FoldsInc(plainKey []byte) {
-	if collectAccountMetrics && plainKey != nil {
+func (processAccount *AccountMetrics) FoldsInc(plainKey []byte) {
+	if collectCommitmentMetrics && plainKey != nil {
 		processAccount.m.Lock()
 		defer processAccount.m.Unlock()
 		account := hex.EncodeToString(plainKey[0:20])
@@ -271,8 +280,8 @@ func (processAccount *ProcessAcount) FoldsInc(plainKey []byte) {
 	}
 }
 
-func (processAccount *ProcessAcount) TotalUnfoldingTimeInc(plainKey []byte, t time.Time) {
-	if collectAccountMetrics && plainKey != nil {
+func (processAccount *AccountMetrics) TotalUnfoldingTimeInc(plainKey []byte, t time.Time) {
+	if collectCommitmentMetrics && plainKey != nil {
 		processAccount.m.Lock()
 		defer processAccount.m.Unlock()
 		account := hex.EncodeToString(plainKey[0:20])
@@ -283,8 +292,8 @@ func (processAccount *ProcessAcount) TotalUnfoldingTimeInc(plainKey []byte, t ti
 	}
 }
 
-func (processAccount *ProcessAcount) TotalFoldingTimeInc(plainKey []byte, t time.Time) {
-	if collectAccountMetrics && plainKey != nil {
+func (processAccount *AccountMetrics) TotalFoldingTimeInc(plainKey []byte, t time.Time) {
+	if collectCommitmentMetrics && plainKey != nil {
 		processAccount.m.Lock()
 		defer processAccount.m.Unlock()
 		account := hex.EncodeToString(plainKey[0:20])
@@ -295,11 +304,11 @@ func (processAccount *ProcessAcount) TotalFoldingTimeInc(plainKey []byte, t time
 	}
 }
 
-func writeMetricsToCSV(metrics Metrics, filePath string) error {
-	if filePath == "" {
+func writeMetricsToCSV(metrics CsvMetrics, filePath string) error {
+	fmt.Println("shota ", collectCommitmentMetrics, metricsFile)
+	if !collectCommitmentMetrics {
 		return nil
 	}
-	fmt.Println("shota", metrics.Headers()[0], filePath)
 	// Open the file in append mode or create if it doesn't exist
 	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {

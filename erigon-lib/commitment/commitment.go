@@ -174,6 +174,7 @@ type BranchEncoder struct {
 	buf       *bytes.Buffer
 	bitmapBuf [binary.MaxVarintLen64]byte
 	merger    *BranchMerger
+	metrics   *Metrics
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -183,9 +184,12 @@ func NewBranchEncoder(sz uint64) *BranchEncoder {
 	}
 }
 
+func (be *BranchEncoder) SetMetricsCollector(metrics *Metrics) {
+	be.metrics = metrics
+}
+
 func (be *BranchEncoder) CollectUpdate(
 	ctx PatriciaContext,
-	currentCommitmentMetrics *ProcessCommitment,
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
 	readCell func(nibble int, skip bool) (*cell, error),
@@ -212,7 +216,9 @@ func (be *BranchEncoder) CollectUpdate(
 	}
 	//fmt.Printf("\ncollectBranchUpdate [%x] -> %s\n", prefix, BranchData(update).String())
 	// has to copy :(
-	currentCommitmentMetrics.UpdateBranch.Add(1)
+	if be.metrics != nil {
+		be.metrics.UpdateBranch.Add(1)
+	}
 	if err = ctx.PutBranch(common.Copy(prefix), common.Copy(update), prev, prevStep); err != nil {
 		return 0, err
 	}
