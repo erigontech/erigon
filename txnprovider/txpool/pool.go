@@ -2075,7 +2075,6 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 	for worst := p.pending.Worst(); p.pending.Len() > 0 && (worst.subPool < BaseFeePoolBits || worst.minFeeCap.LtUint64(pendingBaseFee) || (worst.TxnSlot.Type == BlobTxnType && worst.TxnSlot.BlobFeeCap.LtUint64(pendingBlobFee))); worst = p.pending.Worst() {
 		tx := p.pending.PopWorst()
 		if worst.subPool >= BaseFeePoolBits {
-			tx := p.pending.PopWorst()
 			p.baseFee.Add(tx, "demote-pending", logger)
 			sendChangeBatchEventToDiagnostics("BaseFee", "add", []diagnostics.TxnHashOrder{
 				{
