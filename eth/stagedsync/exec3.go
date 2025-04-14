@@ -632,6 +632,14 @@ Loop:
 				}
 			}
 			executor.domains().SetChangesetAccumulator(nil)
+
+			if cfg.syncCfg.PersistReceipts > 0 {
+				if len(txTasks) > 0 && txTasks[0].BlockReceipts != nil {
+					if err := rawdb.WriteReceiptsCache(executor.tx(), txTasks[0].BlockNum, txTasks[0].BlockHash, txTasks[0].BlockReceipts); err != nil {
+						return err
+					}
+				}
+			}
 		}
 
 		mxExecBlocks.Add(1)

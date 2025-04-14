@@ -18,7 +18,7 @@ jobs:
     runs-on: [ self-hosted, RpcSpecific ]
     timeout-minutes: 15
     env:
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
+      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-3/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       RPC_PAST_TEST_DIR: /opt/rpc-past-tests

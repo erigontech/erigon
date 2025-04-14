@@ -19,8 +19,8 @@ package eth1
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math/big"
+	"strings"
 	"sync/atomic"
 
 	"golang.org/x/sync/semaphore"
@@ -52,6 +52,45 @@ import (
 
 const maxBlocksLookBehind = 32
 
+var ErrMissingChainSegment = errors.New("missing chain segment")
+
+func makeErrMissingChainSegment(blockHash libcommon.Hash) error {
+	return errors.Join(ErrMissingChainSegment, errors.New("block hash: "+blockHash.String()))
+}
+
+func GetBlockHashFromMissingSegmentError(err error) (libcommon.Hash, bool) {
+	if !errors.Is(err, ErrMissingChainSegment) {
+		return libcommon.Hash{}, false
+	}
+	// Otherwise, we assume the error is a joined error from makeErrMissingChainSegment.
+	// We define an interface to get access to the underlying errors.
+	type unwrapper interface {
+		Unwrap() []error
+	}
+	uw, ok := err.(unwrapper)
+	if !ok {
+		return libcommon.Hash{}, false
+	}
+
+	// iterate through suberrors to find one that contains the block hash info.
+	var hashStr string
+	const prefix = "block hash: "
+	for _, subErr := range uw.Unwrap() {
+		msg := subErr.Error()
+		if strings.HasPrefix(msg, prefix) {
+			hashStr = strings.TrimPrefix(msg, prefix)
+			break
+		}
+	}
+	if hashStr == "" {
+		return libcommon.Hash{}, false
+	}
+
+	// Convert the extracted string into a libcommon.Hash.
+	// This assumes the existence of libcommon.ParseHash.
+	return libcommon.HexToHash(hashStr), true
+}
+
 // EthereumExecutionModule describes ethereum execution logic and indexing.
 type EthereumExecutionModule struct {
 	bacgroundCtx context.Context
@@ -74,6 +113,7 @@ type EthereumExecutionModule struct {
 	// Changes accumulator
 	hook                *stages.Hook
 	accumulator         *shards.Accumulator
+	recentLogs          *shards.RecentLogs
 	stateChangeConsumer shards.StateChangeConsumer
 
 	// configuration
@@ -95,6 +135,7 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB
 	executionPipeline *stagedsync.Sync, forkValidator *engine_helpers.ForkValidator,
 	config *chain.Config, builderFunc builder.BlockBuilderFunc,
 	hook *stages.Hook, accumulator *shards.Accumulator,
+	recentLogs *shards.RecentLogs,
 	stateChangeConsumer shards.StateChangeConsumer,
 	logger log.Logger, engine consensus.Engine,
 	syncCfg ethconfig.Sync,
@@ -112,11 +153,11 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB
 		semaphore:           semaphore.NewWeighted(1),
 		hook:                hook,
 		accumulator:         accumulator,
+		recentLogs:          recentLogs,
 		stateChangeConsumer: stateChangeConsumer,
 		engine:              engine,
-
-		syncCfg:      syncCfg,
-		bacgroundCtx: ctx,
+		syncCfg:             syncCfg,
+		bacgroundCtx:        ctx,
 	}
 }
 
@@ -173,7 +214,7 @@ func (e *EthereumExecutionModule) unwindToCommonCanonical(tx kv.RwTx, header *ty
 			return err
 		}
 		if currentHeader == nil {
-			return fmt.Errorf("header %d, %x not found", parentBlockNum, parentBlockHash)
+			return makeErrMissingChainSegment(parentBlockHash)
 		}
 	}
 	if err := e.hook.BeforeRun(tx, true); err != nil {

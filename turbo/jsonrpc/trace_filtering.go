@@ -66,14 +66,13 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, err
 	}
 
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+
 	var isBorStateSyncTxn bool
 	blockNumber, txNum, ok, err := api.txnLookup(ctx, tx, txHash)
 	if err != nil {
 		return nil, err
 	}
-
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-
 	if !ok {
 		if chainConfig.Bor == nil {
 			return nil, nil
@@ -129,7 +128,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 	hash := header.Hash()
 	signer := types.MakeSigner(chainConfig, blockNumber, header.Time)
 	// Returns an array of trace arrays, one trace array for each transaction
-	trace, _, err := api.callTransaction(ctx, tx, header, []string{TraceTypeTrace}, txIndex, *gasBailOut, signer, chainConfig, traceConfig)
+	trace, err := api.callTransaction(ctx, tx, header, []string{TraceTypeTrace}, txIndex, *gasBailOut, signer, chainConfig, traceConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -847,7 +846,7 @@ func (api *TraceAPIImpl) callTransaction(
 	signer *types.Signer,
 	cfg *chain.Config,
 	traceConfig *config.TraceConfig,
-) (*TraceCallResult, consensus.SystemCall, error) {
+) (*TraceCallResult, error) {
 	blockNumber := header.Number.Uint64()
 	pNo := blockNumber
 	if pNo > 0 {
@@ -858,7 +857,8 @@ func (api *TraceAPIImpl) callTransaction(
 	rules := cfg.Rules(blockNumber, header.Time)
 	var txn types.Transaction
 	var borStateSyncTxnHash common.Hash
-	if cfg.Bor != nil {
+	isBorStateSyncTxn := txIndex == -1 && cfg.Bor != nil
+	if isBorStateSyncTxn {
 		// check if this header has state sync txn
 		blockHash := header.Hash()
 		borStateSyncTxnHash = bortypes.ComputeBorTxHash(blockNumber, blockHash)
@@ -873,16 +873,17 @@ func (api *TraceAPIImpl) callTransaction(
 			_, ok, err = api._blockReader.EventLookup(ctx, dbtx, borStateSyncTxnHash)
 		}
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		if ok {
-			txn = bortypes.NewBorTransaction()
+		if !ok {
+			return nil, errors.New("bridge transaction expected but not found")
 		}
+		txn = bortypes.NewBorTransaction()
 	} else {
 		var err error
 		txn, err = api._txnReader.TxnByIdxInBlock(ctx, dbtx, blockNumber, txIndex)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 	}
 
@@ -895,7 +896,7 @@ func (api *TraceAPIImpl) callTransaction(
 
 	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, cfg.ChainName)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	stateCache := shards.NewStateCache(
 		32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
@@ -909,22 +910,22 @@ func (api *TraceAPIImpl) callTransaction(
 	logger := log.New("trace_filtering")
 	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, header, cfg, ibs, nil, logger, nil)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if err = ibs.CommitBlock(rules, cachedWriter); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	var txnHash common.Hash
 	var msg types.Message
-	if cfg.Bor != nil {
+	if isBorStateSyncTxn {
 		txnHash = borStateSyncTxnHash
 		// we use an empty message for bor state sync txn since it gets handled differently
 	} else {
 		txnHash = txn.Hash()
 		msg, err = txn.AsMessage(*signer, header.BaseFee, rules)
 		if err != nil {
-			return nil, nil, fmt.Errorf("convert txn into msg: %w", err)
+			return nil, fmt.Errorf("convert txn into msg: %w", err)
 		}
 
 		// gnosis might have a fee free account here
@@ -939,21 +940,16 @@ func (api *TraceAPIImpl) callTransaction(
 	callParam := TraceCallParam{
 		txHash:            &txnHash,
 		traceTypes:        traceTypes,
-		isBorStateSyncTxn: cfg.Bor != nil,
+		isBorStateSyncTxn: isBorStateSyncTxn,
 	}
 
 	trace, cmErr := api.doCall(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, msg, callParam,
 		&parentNrOrHash, header, gasBailOut /* gasBailout */, txIndex, traceConfig)
 
 	if cmErr != nil {
-		return nil, nil, cmErr
+		return nil, cmErr
 	}
-
-	syscall := func(contract common.Address, data []byte) ([]byte, error) {
-		return core.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */)
-	}
-
-	return trace, syscall, nil
+	return trace, nil
 }
 
 // TraceFilterRequest represents the arguments for trace_filter

@@ -200,6 +200,7 @@ var Tables = map[stages.SyncStage][]string{
 var stateBuckets = []string{
 	kv.Epoch, kv.PendingEpoch, kv.Code,
 	kv.PlainContractCode, kv.ContractCode, kv.IncarnationMap,
+	kv.ReceiptsCache,
 }
 var stateHistoryBuckets = []string{
 	kv.TblPruningProgress,
