@@ -1183,6 +1183,23 @@ func (sdc *SharedDomainsCommitmentContext) readAccount(plainKey []byte) (encAcco
 	return encAccount, nil
 }
 
+// func (sdc *SharedDomainsCommitmentContext) readCode(plainKey []byte) (code []byte, err error) {
+// 	if sdc.limitReadAsOfTxNum > 0 {
+// 		if sdc.domainsOnly { // read from domain file
+// 			code, _, err = sdc.sharedDomains.getAsOfFile(kv.CodeDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
+// 		} else { // read from history
+// 			code, _, err = sdc.sharedDomains.aggTx.GetAsOf(sdc.sharedDomains.roTx, kv.CodeDomain, plainKey, sdc.limitReadAsOfTxNum)
+// 		}
+// 	} else { // read latest value
+// 		code, _, err = sdc.sharedDomains.GetLatest(kv.CodeDomain, plainKey)
+// 	}
+
+// 	if err != nil {
+// 		return nil, fmt.Errorf("GetAccount/Code: failed to read code (latest=%t): %w", sdc.limitReadAsOfTxNum == 0, err)
+// 	}
+// 	return code, nil
+// }
+
 func (sdc *SharedDomainsCommitmentContext) readStorage(plainKey []byte) (enc []byte, err error) {
 	if sdc.limitReadAsOfTxNum > 0 {
 		if sdc.domainsOnly { // read from domain file
