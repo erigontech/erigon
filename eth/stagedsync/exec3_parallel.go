@@ -344,6 +344,7 @@ func (ev *taskVersion) Version() state.Version {
 }
 
 type blockExecMetrics struct {
+	BlockCount       atomic.Int64
 	UsedGas          blockCount
 	Duration         blockDuration
 	FinalizeDuration blockDuration
@@ -1000,7 +1001,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 }
 
 func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWithRetry) {
-	be.execStarted = time.Now()
 	toExecute := make(sort.IntSlice, 0, 2)
 
 	for be.execTasks.minPending() >= 0 {
@@ -1301,6 +1301,8 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			}
 
 			if blockExecutor, ok := pe.blockExecutors[blockResult.BlockNum+1]; ok {
+				pe.blockExecMetrics.BlockCount.Add(1)
+				blockExecutor.execStarted = time.Now()
 				blockExecutor.scheduleExecution(ctx, pe.in)
 			}
 		}
@@ -1377,6 +1379,8 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 	}
 
 	if scheduleable != nil {
+		pe.blockExecMetrics.BlockCount.Add(1)
+		scheduleable.execStarted = time.Now()
 		scheduleable.scheduleExecution(ctx, pe.in)
 	}
 

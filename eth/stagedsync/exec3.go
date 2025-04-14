@@ -85,27 +85,31 @@ func NewProgress(initialBlockNum, initialTxNum, commitThreshold uint64, updateMe
 }
 
 type Progress struct {
-	initialTime           time.Time
-	initialTxNum          uint64
-	initialBlockNum       uint64
-	prevExecTime          time.Time
-	prevExecutedBlockNum  uint64
-	prevExecutedTxNum     uint64
-	prevExecutedGas       uint64
-	prevExecCount         uint64
-	prevActivations       int64
-	prevTaskDuration      time.Duration
-	prevTaskReadDuration  time.Duration
-	prevTaskGas           int64
-	prevAbortCount        uint64
-	prevInvalidCount      uint64
-	prevReadCount         uint64
-	prevWriteCount        uint64
-	prevCommitTime        time.Time
-	prevCommittedBlockNum uint64
-	prevCommittedTxNum    uint64
-	prevCommittedGas      uint64
-	commitThreshold       uint64
+	initialTime               time.Time
+	initialTxNum              uint64
+	initialBlockNum           uint64
+	prevExecTime              time.Time
+	prevExecutedBlockNum      uint64
+	prevExecutedTxNum         uint64
+	prevExecutedGas           uint64
+	prevExecCount             uint64
+	prevActivations           int64
+	prevTaskDuration          time.Duration
+	prevTaskReadDuration      time.Duration
+	prevTaskGas               int64
+	prevBlockCount            int64
+	prevBlockDuration         time.Duration
+	prevBlockFinalizeDuration time.Duration
+	prevBlockGas              int64
+	prevAbortCount            uint64
+	prevInvalidCount          uint64
+	prevReadCount             uint64
+	prevWriteCount            uint64
+	prevCommitTime            time.Time
+	prevCommittedBlockNum     uint64
+	prevCommittedTxNum        uint64
+	prevCommittedGas          uint64
+	commitThreshold           uint64
 
 	logPrefix string
 	logger    log.Logger
@@ -179,15 +183,52 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 			repeatRatio = 100.0 * float64(repeats) / float64(execDiff)
 		}
 
+		blockCount := te.blockExecMetrics.BlockCount.Load()
+		blockExecGas := te.blockExecMetrics.UsedGas.Load()
+		blockExecDur := time.Duration(te.blockExecMetrics.Duration.Load())
+		blockFinalizeDur := time.Duration(te.blockExecMetrics.FinalizeDuration.Load())
+
+		curBlockCount := blockCount - p.prevBlockCount
+		curBlockExecGas := blockExecGas - p.prevBlockGas
+		curBlockExecDur := blockExecDur - p.prevBlockDuration
+		curBlockFinalizeDur := blockFinalizeDur - p.prevBlockFinalizeDuration
+
+		p.prevBlockCount = blockCount
+		p.prevBlockGas = blockExecGas
+		p.prevBlockDuration = blockExecDur
+		p.prevBlockFinalizeDuration = blockFinalizeDur
+
+		var finalizeRatio float64
+		var avgBlockGasPerSec int64
+		var avgBlockDur time.Duration
+		var avgFinalizeDur time.Duration
+
+		if curBlockCount > 0 {
+			avgBlockDur = curBlockExecDur / time.Duration(curBlockCount)
+			avgFinalizeDur = curBlockFinalizeDur / time.Duration(curBlockCount)
+
+			if avgBlockDur > 0 {
+				finalizeRatio = 100.0 * float64(avgFinalizeDur) / float64(avgBlockDur)
+			}
+
+			avgBlockGas := curBlockExecGas / curBlockCount
+			avgBlockGasPerSec = int64(float64(avgBlockGas) / interval.Seconds())
+		}
+
+		curBlockGasPerSec := int64(float64(curBlockExecGas) / interval.Seconds())
+
 		execVals = []interface{}{
 			"exec", common.PrettyCounter(execDiff),
 			"repeat%", fmt.Sprintf("%.2f", repeatRatio),
 			"abort", common.PrettyCounter(abortCount - p.prevAbortCount),
 			"invalid", common.PrettyCounter(invalidCount - p.prevInvalidCount),
 			"tgas/s", fmt.Sprintf("%s(%s)", common.PrettyCounter(curTaskGasPerSec), common.PrettyCounter(avgTaskGasPerSec)),
+			"bgas/s", fmt.Sprintf("%s(%s)", common.PrettyCounter(curBlockGasPerSec), common.PrettyCounter(avgBlockGasPerSec)),
 			"workers", fmt.Sprintf("%d(%.1f)", ex.taskExecMetrics.Active.Ema.Get(), float64(curTaskDur)/float64(interval)),
 			"tdur", fmt.Sprintf("%dµs", avgTaskDur.Microseconds()),
 			"trdur", fmt.Sprintf("%dµs(%.2f%%)", avgReadDur.Microseconds(), readRatio),
+			"bdur", fmt.Sprintf("%dµs", avgBlockDur.Microseconds()),
+			"bfdur", fmt.Sprintf("%dµs(%.2f%%)", avgFinalizeDur.Microseconds(), finalizeRatio),
 			"rd", common.PrettyCounter(readCount - p.prevReadCount),
 			"wrt", common.PrettyCounter(writeCount - p.prevWriteCount),
 			"rd/s", common.PrettyCounter(uint64(float64(readCount-p.prevReadCount) / interval.Seconds())),
