@@ -482,7 +482,7 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 	e, ctx := errgroup.WithContext(ctx)
 	e.SetLimit(1024)
 	urlsByName := d.TorrentUrls()
-	log.Warn("[dbg] calling: ", "url", urlsByName)
+	whitelistLen := len(d.torrentsWhitelist)
 
 	for fileName, tUrls := range urlsByName {
 		name := fileName
@@ -516,6 +516,9 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 		tUrls := tUrls
 		e.Go(func() error {
 			for _, url := range tUrls {
+				if whitelistLen != len(d.torrentsWhitelist) {
+					panic(999)
+				}
 				//validation happens inside
 				_, err := d.callTorrentHttpProvider(ctx, url, name)
 				if err != nil {
@@ -622,7 +625,7 @@ func nameAndHashWhitelisted(fileName, fileHash string, whitelist snapcfg.Preveri
 		}
 	}
 	if strings.Contains(fileName, "salt-") {
-		log.Warn("[dbg] nameAndHashWhitelisted", "a", fmt.Sprintf("%+v", whitelist), "fileName", fileName)
+		log.Warn("[dbg] nameAndHashWhitelisted", "fileName", fileName, "len(whitelist)", len(whitelist))
 		panic(5)
 	}
 	return false
