@@ -47,13 +47,15 @@ import (
 	"github.com/erigontech/erigon-lib/direct"
 	downloadercfg2 "github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/utils/flags"
-	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
+	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/enode"
@@ -94,6 +96,11 @@ var (
 		Name:  "networkid",
 		Usage: "Explicitly set network id (integer)(For testnets: use --chain <testnet_name> instead)",
 		Value: ethconfig.Defaults.NetworkID,
+	}
+	PersistReceiptsFlag = cli.Uint64Flag{
+		Name:  "experiment.persist.receipts",
+		Usage: "Set > 0 to store receipts in chaindata db (only on chain-tip) - RPC for recent receit/logs will be faster. Values: 1_000 good starting point. 10_000 receitps it's ~1Gb (not much IO increase). Please test before go over 100_000",
+		Value: ethconfig.Defaults.PersistReceipts,
 	}
 	DeveloperPeriodFlag = cli.IntFlag{
 		Name:  "dev.period",
@@ -146,7 +153,7 @@ var (
 	// Transaction pool settings
 	TxPoolDisableFlag = cli.BoolFlag{
 		Name:  "txpool.disable",
-		Usage: "Experimental external pool and block producer, see ./cmd/txpool/readme.md for more info. Disabling internal txpool and block producer.",
+		Usage: "External pool and block producer, see ./cmd/txpool/readme.md for more info. Disabling internal txpool and block producer.",
 		Value: false,
 	}
 	TxPoolGossipDisableFlag = cli.BoolFlag{
@@ -490,15 +497,6 @@ var (
 		Name:  "rpc.allow-unprotected-txs",
 		Usage: "Allow for unprotected (non-EIP155 signed) transactions to be submitted via RPC",
 	}
-	// Careful! Because we must rewind the hash state
-	// and re-compute the state trie, the further back in time the request, the more
-	// computationally intensive the operation becomes.
-	// The current default has been chosen arbitrarily as 'useful' without likely being overly computationally intense.
-	RpcMaxGetProofRewindBlockCount = cli.IntFlag{
-		Name:  "rpc.maxgetproofrewindblockcount.limit",
-		Usage: "Max GetProof rewind block count",
-		Value: 100_000,
-	}
 	StateCacheFlag = cli.StringFlag{
 		Name:  "state.cache",
 		Value: "0MB",
@@ -814,6 +812,12 @@ var (
 		Usage: "Enabling syncing with a stage that uses the polygon sync component",
 	}
 
+	AAFlag = cli.BoolFlag{
+		Name:  "aa",
+		Usage: "Enable AA transactions",
+		Value: false,
+	}
+
 	ConfigFlag = cli.StringFlag{
 		Name:  "config",
 		Usage: "Sets erigon flags from YAML/TOML file",
@@ -1125,6 +1129,10 @@ var (
 		Name:  "gdbme",
 		Usage: "restart erigon under gdb for debug purposes",
 		Value: false,
+	}
+	KeepExecutionProofsFlag = cli.BoolFlag{
+		Name:  "experimental.commitment-history",
+		Usage: "Enables blazing fast eth_getProof for executed block",
 	}
 )
 
@@ -1602,6 +1610,7 @@ func setTxPool(ctx *cli.Context, dbDir string, fullCfg *ethconfig.Config) {
 	if ctx.IsSet(TxPoolGossipDisableFlag.Name) {
 		cfg.NoGossip = ctx.Bool(TxPoolGossipDisableFlag.Name)
 	}
+	cfg.AllowAA = ctx.Bool(AAFlag.Name)
 	cfg.LogEvery = 3 * time.Minute
 	cfg.CommitEvery = libcommon.RandomizeDuration(ctx.Duration(TxPoolCommitEveryFlag.Name))
 	cfg.DBDir = dbDir
@@ -1737,7 +1746,7 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.C
 }
 
 func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
-	cfg.Enabled = ctx.IsSet(MiningEnabledFlag.Name)
+	cfg.Enabled = ctx.Bool(MiningEnabledFlag.Name)
 	cfg.EnabledPOS = !ctx.IsSet(ProposingDisableFlag.Name)
 
 	if cfg.Enabled && len(cfg.Etherbase.Bytes()) == 0 {
@@ -1748,7 +1757,16 @@ func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
 	}
 	if ctx.IsSet(MinerExtraDataFlag.Name) {
 		cfg.ExtraData = []byte(ctx.String(MinerExtraDataFlag.Name))
+	} else if len(params.GitCommit) > 0 {
+		cfg.ExtraData = []byte(ctx.App.Name + "-" + params.VersionWithCommit(params.GitCommit))
+	} else {
+		cfg.ExtraData = []byte(ctx.App.Name + "-" + ctx.App.Version)
 	}
+	maxExtra := min(int(params.MaximumExtraDataSize), types.ExtraVanityLength)
+	if len(cfg.ExtraData) > maxExtra {
+		cfg.ExtraData = cfg.ExtraData[:maxExtra]
+	}
+
 	if ctx.IsSet(MinerGasLimitFlag.Name) {
 		cfg.GasLimit = ctx.Uint64(MinerGasLimitFlag.Name)
 	}
@@ -1883,6 +1901,10 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.CaplinConfig.CaplinDiscoveryAddr = ctx.String(CaplinDiscoveryAddrFlag.Name)
 	cfg.CaplinConfig.CaplinDiscoveryPort = ctx.Uint64(CaplinDiscoveryPortFlag.Name)
 	cfg.CaplinConfig.CaplinDiscoveryTCPPort = ctx.Uint64(CaplinDiscoveryTCPPortFlag.Name)
+	if ctx.Bool(KeepExecutionProofsFlag.Name) {
+		cfg.KeepExecutionProofs = true
+		state.EnableHistoricalCommitment()
+	}
 	cfg.CaplinConfig.EnableUPnP = ctx.Bool(CaplinEnableUPNPlag.Name)
 	var err error
 	cfg.CaplinConfig.MaxInboundTrafficPerPeer, err = datasize.ParseString(ctx.String(CaplinMaxInboundTrafficPerPeerFlag.Name))
@@ -1919,6 +1941,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		cfg.NetworkID = params.NetworkIDByChainName(chain)
 	}
 
+	cfg.PersistReceipts = ctx.Uint64(PersistReceiptsFlag.Name)
+
 	cfg.Dirs = nodeConfig.Dirs
 	cfg.Snapshot.KeepBlocks = ctx.Bool(SnapKeepBlocksFlag.Name)
 	cfg.Snapshot.ProduceE2 = !ctx.Bool(SnapStopFlag.Name)
@@ -1951,6 +1975,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	}
 	setCaplin(ctx, cfg)
 
+	cfg.AllowAA = ctx.Bool(AAFlag.Name)
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 
 	if ctx.IsSet(RPCGlobalGasCapFlag.Name) {

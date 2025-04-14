@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/pkg/errors"
 	blst "github.com/supranational/blst/bindings/go"
 )
 
@@ -121,7 +120,7 @@ func VerifyMultipleSignatures(sigs [][]byte, msgs [][]byte, pubKeys [][]byte) (b
 
 	length := len(sigs)
 	if length != len(pubKeys) || length != len(msgs) {
-		return false, errors.Errorf("provided signatures, pubkeys and messages have differing lengths. S: %d, P: %d,M %d",
+		return false, fmt.Errorf("provided signatures, pubkeys and messages have differing lengths. S: %d, P: %d,M %d",
 			length, len(pubKeys), len(msgs))
 	}
 	mulP1Aff := make([]*blst.P1Affine, length)

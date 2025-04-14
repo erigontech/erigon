@@ -25,14 +25,13 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/cl/utils"
-	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/execution/consensus/merge"
 )
 
 // ETH1Block represents a block structure CL-side.

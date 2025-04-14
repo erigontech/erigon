@@ -80,8 +80,10 @@ func TestCreation(t *testing.T) {
 				{17034869, 1681338443, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 1681338455}}, // Last pre-Shanghai block
 				{17034870, 1681338479, ID{Hash: checksumToBytes(0xdce96c2d), Next: 1710338135}}, // First Shanghai block
 				{19426586, 1710338123, ID{Hash: checksumToBytes(0xdce96c2d), Next: 1710338135}}, // Last Shanghai block
-				{19426587, 1710338135, ID{Hash: checksumToBytes(0x9f3d2254), Next: 0}},          // First Cancun block
-				{20000000, 1800000000, ID{Hash: checksumToBytes(0x9f3d2254), Next: 0}},          // Future Cancun block (mock)
+				{19426587, 1710338135, ID{Hash: checksumToBytes(0x9f3d2254), Next: 1746612311}}, // First Cancun block
+				{22432453, 1746612299, ID{Hash: checksumToBytes(0x9f3d2254), Next: 1746612311}}, // Last Cancun block (approx.)
+				{22432454, 1746612311, ID{Hash: checksumToBytes(0xc376cf8b), Next: 0}},          // First Prague block (approx.)
+				{30000000, 1900000000, ID{Hash: checksumToBytes(0xc376cf8b), Next: 0}},          // Future Prague block (mock)
 			},
 		},
 		// Sepolia test cases
@@ -149,8 +151,10 @@ func TestCreation(t *testing.T) {
 				{29242931, 1690889650, ID{Hash: checksumToBytes(0x018479d3), Next: 1690889660}}, // Last pre-Shanghai block
 				{29242932, 1690889660, ID{Hash: checksumToBytes(0x2efe91ba), Next: 1710181820}}, // First Shanghai block
 				{32880679, 1710181810, ID{Hash: checksumToBytes(0x2efe91ba), Next: 1710181820}}, // Last Shanghai block
-				{32880680, 1710181820, ID{Hash: checksumToBytes(0x1384dfc1), Next: 0}},          // First Cancun block
-				{40000000, 1800000000, ID{Hash: checksumToBytes(0x1384dfc1), Next: 0}},          // Future Cancun block (mock)
+				{32880680, 1710181820, ID{Hash: checksumToBytes(0x1384dfc1), Next: 1746021820}}, // First Cancun block
+				{39834364, 1746021815, ID{Hash: checksumToBytes(0x1384dfc1), Next: 1746021820}}, // Last Cancun block (approx)
+				{39834365, 1746021820, ID{Hash: checksumToBytes(0x2f095d4a), Next: 0}},          // First Prague block (approx)
+				{50000000, 1800000000, ID{Hash: checksumToBytes(0x2f095d4a), Next: 0}},          // Future Prague block (mock)
 			},
 		},
 		// Chiado test cases

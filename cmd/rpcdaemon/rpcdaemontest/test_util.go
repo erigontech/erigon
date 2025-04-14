@@ -25,7 +25,6 @@ import (
 	"net"
 	"testing"
 
-	privateapi2 "github.com/erigontech/erigon/turbo/privateapi"
 	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -39,16 +38,17 @@ import (
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/accounts/abi/bind"
-	"github.com/erigontech/erigon/accounts/abi/bind/backends"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/execution/abi/bind"
+	"github.com/erigontech/erigon/execution/abi/bind/backends"
+	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rpc/jsonrpc/contracts"
 	"github.com/erigontech/erigon/turbo/builder"
-	"github.com/erigontech/erigon/turbo/jsonrpc/contracts"
+	privateapi2 "github.com/erigontech/erigon/turbo/privateapi"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
@@ -312,7 +312,7 @@ func CreateTestGrpcConn(t *testing.T, m *mock.MockSentry) (context.Context, *grp
 	server := grpc.NewServer()
 
 	remote.RegisterETHBACKENDServer(server, privateapi2.NewEthBackendServer(ctx, nil, m.DB, m.Notifications,
-		m.BlockReader, log.New(), builder.NewLatestBlockBuiltStore()))
+		m.BlockReader, log.New(), builder.NewLatestBlockBuiltStore(), nil))
 	txpool.RegisterTxpoolServer(server, m.TxPoolGrpcServer)
 	txpool.RegisterMiningServer(server, privateapi2.NewMiningServer(ctx, &IsMiningMock{}, ethashApi, m.Log))
 	listener := bufconn.Listen(1024 * 1024)

@@ -29,7 +29,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
 )
 
@@ -355,9 +355,19 @@ func (etp *EncryptedTxnsPool) loadSubmissions(start, end uint64, cont submission
 
 func (etp *EncryptedTxnsPool) addSubmission(submission EncryptedTxnSubmission) {
 	etp.submissions.ReplaceOrInsert(submission)
-	if etp.submissions.Len() > etp.config.MaxPooledEncryptedTxns {
-		etp.submissions.DeleteMin()
+	submissionsLen := etp.submissions.Len()
+	if submissionsLen > etp.config.MaxPooledEncryptedTxns {
+		del, _ := etp.submissions.DeleteMin()
+		encryptedTxnsPoolDeleted.Inc()
+		encryptedTxnsPoolTotalCount.Dec()
+		encryptedTxnsPoolTotalBytes.Sub(float64(len(del.EncryptedTransaction)))
 	}
+
+	encryptedTxnSize := float64(len(submission.EncryptedTransaction))
+	encryptedTxnsPoolAdded.Inc()
+	encryptedTxnsPoolTotalCount.Inc()
+	encryptedTxnsPoolTotalBytes.Add(encryptedTxnSize)
+	encryptedTxnSizeBytes.Observe(encryptedTxnSize)
 }
 
 type submissionsContinuer func(*contracts.SequencerTransactionSubmitted) bool

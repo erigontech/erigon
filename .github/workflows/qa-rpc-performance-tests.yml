@@ -6,7 +6,7 @@ on:
       - 'release/3.*'
   workflow_dispatch:
   schedule:
-    - cron: '0 0 * * 0'  # Run on Sunday at 00:00 AM UTC
+    - cron: '0 20 * * *'  # Run every night at 20:00 (08:00 PM) UTC
 
 jobs:
   performance-test-suite:
@@ -224,6 +224,7 @@ jobs:
           cp change_point_analysis.pdf $past_test_dir
           if [ $open_change_points -ne 0 ]; then
             echo "Change point analysis found points that need to be investigated"
+            echo "::warning title=Change Point Analysis::Found change points that need to be investigated"
             #echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"  -- enable in the future
           fi
 
@@ -233,6 +234,14 @@ jobs:
         with:
           name: test-results
           path: ${{ env.past_test_dir }}
+
+      - name: Action to check failure condition
+        if: failure()
+        run: |
+          if [ "${{ steps.test_step.outputs.test_executed }}" != "true" ]; then
+            echo "::warning::Test not executed, workflow failed for infrastructure reasons"
+          fi
+          #exit 1
 
       - name: Action for Success
         if: steps.test_step.outputs.TEST_RESULT == 'success'

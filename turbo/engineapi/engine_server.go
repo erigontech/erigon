@@ -39,18 +39,18 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethutils"
+	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/jsonrpc"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_logs_spammer"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
-	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 )
@@ -156,7 +156,10 @@ func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, exec
 		if executionRequests != nil {
 			return &rpc.InvalidParamsError{Message: "requests in EngineAPI not supported before Prague"}
 		}
+	} else if executionRequests == nil {
+		return &rpc.InvalidParamsError{Message: "missing requests list"}
 	}
+
 	return nil
 }
 
@@ -261,7 +264,8 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	blockHash := req.BlockHash
 	if header.Hash() != blockHash {
-		s.logger.Error("[NewPayload] invalid block hash", "stated", blockHash, "actual", header.Hash())
+		s.logger.Error("[NewPayload] invalid block hash", "stated", blockHash, "actual", header.Hash(),
+			"payload", req, "parentBeaconBlockRoot", parentBeaconBlockRoot, "requests", executionRequests)
 		return &engine_types.PayloadStatus{
 			Status:          engine_types.InvalidStatus,
 			ValidationError: engine_types.NewStringifiedErrorFromString("invalid block hash"),

@@ -28,7 +28,6 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -42,15 +41,16 @@ import (
 	protosentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/bitmapdb"
+	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/stages/mock"
@@ -871,7 +871,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 				return nil
 			})
 			require.Greater(afterPrune, uint64(0))
-			assert.NoError(t, err)
+			require.NoError(err)
 		} else {
 			found, err := bitmapdb.Get64(tx, kv.E2AccountsHistory, address[:], 0, 1024)
 			require.NoError(err)
@@ -1083,21 +1083,21 @@ func TestDoubleAccountRemoval(t *testing.T) {
 		switch i {
 		case 0:
 			tx, err := types.SignTx(types.NewContractCreation(nonce, new(uint256.Int), 1e6, new(uint256.Int), contract), *signer, bankKey)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			block.AddTx(tx)
 			theAddr = crypto.CreateAddress(bankAddress, nonce)
 		case 1:
 			txn, err := types.SignTx(types.NewTransaction(nonce, theAddr, new(uint256.Int), 90000, new(uint256.Int), input), *signer, bankKey)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			block.AddTx(txn)
 		case 2:
 			txn, err := types.SignTx(types.NewTransaction(nonce, theAddr, new(uint256.Int), 90000, new(uint256.Int), kill), *signer, bankKey)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			block.AddTx(txn)
 
 			// sending kill messsage to an already suicided account
 			txn, err = types.SignTx(types.NewTransaction(nonce+1, theAddr, new(uint256.Int), 90000, new(uint256.Int), kill), *signer, bankKey)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			block.AddTx(txn)
 		}
 	})
@@ -1106,7 +1106,7 @@ func TestDoubleAccountRemoval(t *testing.T) {
 	}
 
 	err = m.InsertChain(chain)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	tx, err := m.DB.BeginTemporalRw(m.Ctx)
 	if err != nil {
 		fmt.Printf("beginro error: %v\n", err)
@@ -1115,27 +1115,27 @@ func TestDoubleAccountRemoval(t *testing.T) {
 	defer tx.Rollback()
 
 	st := state.New(m.NewStateReader(tx))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	exist, err := st.Exist(theAddr)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.False(t, exist, "Contract should've been removed")
 
 	st = state.New(m.NewHistoryStateReader(1, tx))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	exist, err = st.Exist(theAddr)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.False(t, exist, "Contract should not exist at block #0")
 
 	st = state.New(m.NewHistoryStateReader(2, tx))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	exist, err = st.Exist(theAddr)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.True(t, exist, "Contract should exist at block #1")
 
 	st = state.New(m.NewHistoryStateReader(3, tx))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	exist, err = st.Exist(theAddr)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.True(t, exist, "Contract should exist at block #2")
 }
 
