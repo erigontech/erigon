@@ -1334,7 +1334,8 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 	for root := range pool {
 		for committee := range pool[root] {
 			att := pool[root][committee][0]
-			log.Info("Pool data", "root", root, "slot", att.Data.Slot, "committee", committee, "attestations", len(pool[root][committee]))
+			attBytes, _ := json.Marshal(att)
+			log.Info("Pool data", "root", root, "slot", att.Data.Slot, "committee", committee, "attestations", len(pool[root][committee]), "attestation", string(attBytes))
 			for _, att := range pool[root][committee] {
 				// Convert aggregation bits to binary string representation
 				bits := att.AggregationBits.Bytes()
