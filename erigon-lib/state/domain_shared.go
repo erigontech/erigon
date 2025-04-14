@@ -30,7 +30,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/types/accounts"
 
 	"github.com/erigontech/erigon-lib/seg"
