@@ -46,7 +46,7 @@ const (
 
 // Version holds the textual version string.
 var Version = func() string {
-	return fmt.Sprintf("%d.%02d.%d", VersionMajor, VersionMinor, VersionMicro)
+	return fmt.Sprintf("%d.%d.%d", VersionMajor, VersionMinor, VersionMicro)
 }()
 
 // VersionWithMeta holds the textual version string including the metadata.
