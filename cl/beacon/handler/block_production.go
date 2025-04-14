@@ -1224,7 +1224,7 @@ type attestationCandidate struct {
 	reward      uint64
 }
 
-func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState, candicdates []*solid.Attestation) (map[libcommon.Hash][]*solid.Attestation, error) {
+func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) (map[libcommon.Hash][]*solid.Attestation, error) {
 	pool := map[libcommon.Hash]map[uint64][]*solid.Attestation{} // map root -> committee -> att candidates
 	// step 1: Group attestations by data root and committee index for merging
 	// so after this step, pool[dataRoot][committeeIndex] will contain all the attestation candidates for that data root and committee index
@@ -1349,8 +1349,8 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState, 
 		commiteeBits := solid.NewBitVector(int(a.beaconChainCfg.MaxCommitteesPerSlot))
 		bitSlice := solid.NewBitSlice()
 		var attData *solid.AttestationData
-		for c := range a.beaconChainCfg.MaxCommitteesPerSlot {
-			candidates, ok := pool[root][c]
+		for cIndex := range a.beaconChainCfg.MaxCommitteesPerSlot {
+			candidates, ok := pool[root][cIndex]
 			if !ok {
 				continue
 			}
@@ -1363,13 +1363,17 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState, 
 			}
 			signatures = append(signatures, att.Signature[:])
 			// set commitee bit
-			commiteeBits.SetBitAt(int(c), true)
+			commiteeBits.SetBitAt(int(cIndex), true)
 			// append aggregation bits
 			for i := range att.AggregationBits.Bits() {
 				bitSlice.AppendBit(att.AggregationBits.GetBitAt(i))
 			}
 		}
 		// aggregate signatures
+		if len(signatures) == 0 {
+			// no candidates to merge
+			return nil
+		}
 		aggSig, err := bls.AggregateSignatures(signatures)
 		if err != nil {
 			log.Warn("Cannot aggregate signatures", "err", err)
@@ -1387,13 +1391,18 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState, 
 	mergedCandidates := make(map[libcommon.Hash][]*solid.Attestation)
 	for root := range pool {
 		for i := range int(a.beaconChainCfg.MaxAttestationsElectra * 3 / 2) { // try 1.5x max attestations
-			mergedCandidates[root] = append(mergedCandidates[root], mergeAttByCommittees(root, i))
+			att := mergeAttByCommittees(root, i)
+			if att == nil {
+				// No more attestations to merge for this root at higher indices, so we can stop checking
+				break
+			}
+			mergedCandidates[root] = append(mergedCandidates[root], att)
 		}
 	}
 	return mergedCandidates, nil
 }
 
-func (a *ApiHandler) denebMergedAttestationCandidates(s abstract.BeaconState, candicdates []*solid.Attestation) (map[libcommon.Hash][]*solid.Attestation, error) {
+func (a *ApiHandler) denebMergedAttestationCandidates(s abstract.BeaconState) (map[libcommon.Hash][]*solid.Attestation, error) {
 	// Group attestations by their data root
 	hashToAtts := make(map[libcommon.Hash][]*solid.Attestation)
 	for _, candidate := range a.operationsPool.AttestationsPool.Raw() {
@@ -1456,14 +1465,14 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 	var hashToAtts map[libcommon.Hash][]*solid.Attestation
 	if s.Version() < clparams.ElectraVersion {
 		var err error
-		hashToAtts, err = a.denebMergedAttestationCandidates(s, a.operationsPool.AttestationsPool.Raw())
+		hashToAtts, err = a.denebMergedAttestationCandidates(s)
 		if err != nil {
-			log.Warn("[Block Production] Cannot merge electra attestations", "err", err)
+			log.Warn("[Block Production] Cannot merge deneb attestations", "err", err)
 			return nil
 		}
 	} else {
 		var err error
-		hashToAtts, err = a.electraMergedAttestationCandidates(s, a.operationsPool.AttestationsPool.Raw())
+		hashToAtts, err = a.electraMergedAttestationCandidates(s)
 		if err != nil {
 			log.Warn("[Block Production] Cannot merge electra attestations", "err", err)
 			return nil
