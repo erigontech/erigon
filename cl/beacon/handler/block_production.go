@@ -1429,6 +1429,14 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 			mergedCandidates[root] = append(mergedCandidates[root], att)
 		}
 	}
+
+	// print out the merged candidates data
+	for root := range mergedCandidates {
+		for _, att := range mergedCandidates[root] {
+			log.Info("Merged candidate", "root", root, "slot", att.Data.Slot, "committee", att.CommitteeBits.GetOnIndices(), "aggregation_bits", att.AggregationBits.Bits())
+		}
+	}
+
 	return mergedCandidates, nil
 }
 
