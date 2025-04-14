@@ -1408,17 +1408,20 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 			}
 		}
 		// aggregate signatures
+		var buf [96]byte
 		if len(signatures) == 0 {
 			// no candidates to merge
 			return nil
+		} else if len(signatures) == 1 {
+			copy(buf[:], signatures[0])
+		} else {
+			aggSig, err := bls.AggregateSignatures(signatures)
+			if err != nil {
+				log.Warn("Cannot aggregate signatures", "err", err)
+				return nil
+			}
+			copy(buf[:], aggSig)
 		}
-		aggSig, err := bls.AggregateSignatures(signatures)
-		if err != nil {
-			log.Warn("Cannot aggregate signatures", "err", err)
-			return nil
-		}
-		var buf [96]byte
-		copy(buf[:], aggSig)
 		bitSlice.AppendBit(true) // set msb to 1
 		return &solid.Attestation{
 			AggregationBits: solid.BitlistFromBytes(bitSlice.Bytes(), int(a.beaconChainCfg.MaxCommitteesPerSlot)*int(a.beaconChainCfg.MaxValidatorsPerCommittee)),
@@ -1429,7 +1432,8 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 	}
 	mergedCandidates := make(map[libcommon.Hash][]*solid.Attestation)
 	for root := range pool {
-		for i := range int(a.beaconChainCfg.MaxAttestationsElectra * 3 / 2) { // try 1.5x max attestations
+		maxAtts := int(a.beaconChainCfg.MaxAttestationsElectra * 3 / 2) // try 1.5x max attestations
+		for i := 0; i < maxAtts; i++ {
 			att := mergeAttByCommittees(root, i)
 			if att == nil {
 				// No more attestations to merge for this root at higher indices, so we can stop checking
