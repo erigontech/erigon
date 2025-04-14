@@ -1381,6 +1381,7 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 		}
 		var buf [96]byte
 		copy(buf[:], aggSig)
+		bitSlice.AppendBit(true) // set msb to 1
 		return &solid.Attestation{
 			AggregationBits: solid.BitlistFromBytes(bitSlice.Bytes(), int(a.beaconChainCfg.MaxCommitteesPerSlot)*int(a.beaconChainCfg.MaxValidatorsPerCommittee)),
 			Signature:       buf,
