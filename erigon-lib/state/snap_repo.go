@@ -14,6 +14,8 @@ import (
 	btree2 "github.com/tidwall/btree"
 )
 
+
+
 // i) manages dirtyfiles and visible files,
 // ii) dirtyfile integration
 // iii) opening folder with dirty files
@@ -49,7 +51,7 @@ func NewSnapshotRepoForAppendable(id AppendableId, logger log.Logger) *SnapshotR
 }
 
 func NewSnapshotRepo(name string, cfg *ae.SnapshotConfig, logger log.Logger) *SnapshotRepo {
-	f := &SnapshotRepo{
+	return &SnapshotRepo{
 		dirtyFiles: btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		name:       name,
 		cfg:        cfg,
@@ -58,7 +60,6 @@ func NewSnapshotRepo(name string, cfg *ae.SnapshotConfig, logger log.Logger) *Sn
 		accessors:  cfg.Schema.AccessorList(),
 		logger:     logger,
 	}
-	return f
 }
 
 func (f *SnapshotRepo) OpenFolder() error {
