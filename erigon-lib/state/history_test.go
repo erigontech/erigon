@@ -59,7 +59,6 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	cfg.hist.historyLargeValues = largeValues
 
 	//perf of tests
-	cfg.hist.iiCfg.withExistence = false
 	cfg.hist.iiCfg.compression = seg.CompressNone
 	cfg.hist.compression = seg.CompressNone
 	aggregationStep := uint64(16)

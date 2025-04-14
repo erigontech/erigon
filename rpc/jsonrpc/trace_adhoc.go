@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	math2 "github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core"
@@ -46,7 +45,6 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/turbo/shards"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/transactions"
 )
 
@@ -884,8 +882,6 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon
 		return nil, err
 	}
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-
 	if !ok {
 		if chainConfig.Bor == nil {
 			return nil, nil
@@ -913,7 +909,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon
 		return nil, err
 	}
 
-	txNumMin, err := txNumsReader.Min(tx, blockNum)
+	txNumMin, err := api._txNumReader.Min(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}

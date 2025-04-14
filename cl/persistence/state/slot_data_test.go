@@ -20,14 +20,16 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-lib/chain/networkid"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/stretchr/testify/require"
 )
 
 func TestSlotData(t *testing.T) {
-	s, err := initial_state.GetGenesisState(clparams.MainnetNetwork)
+	s, err := initial_state.GetGenesisState(networkid.MainnetChainID)
 	require.NoError(t, err)
 	m := &SlotData{
 		Version:                       clparams.ElectraVersion,
