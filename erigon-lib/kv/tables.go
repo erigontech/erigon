@@ -317,6 +317,9 @@ const (
 
 // Keys
 var (
+	// ExperimentalGetProofsLayout is used to keep track whether we store indecies to facilitate eth_getProof
+	CommitmentLayoutFlagKey = []byte("CommitmentLayoutFlag")
+
 	PruneTypeOlder = []byte("older")
 	PruneHistory   = []byte("pruneHistory")
 	PruneBlocks    = []byte("pruneBlocks")
@@ -332,6 +335,12 @@ var (
 
 	StatesProcessingKey          = []byte("StatesProcessing")
 	MinimumPrunableStepDomainKey = []byte("MinimumPrunableStepDomainKey")
+)
+
+// Vals
+var (
+	CommitmentLayoutFlagEnabledVal  = []byte{1}
+	CommitmentLayoutFlagDisabledVal = []byte{2}
 )
 
 // ChaindataTables - list of all buckets. App will panic if some bucket is not in this list.
