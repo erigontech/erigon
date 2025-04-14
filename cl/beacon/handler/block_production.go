@@ -1331,7 +1331,7 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 	}
 
 	// print out the pool data
-	for root := range pool {
+	/*for root := range pool {
 		for committee := range pool[root] {
 			att := pool[root][committee][0]
 			log.Info("Pool data", "root", root, "slot", att.Data.Slot, "committee", committee, "attestations", len(pool[root][committee]))
@@ -1345,7 +1345,7 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 				log.Info("Attestation", "aggregation_bits_len", att.AggregationBits.Bits(), "committee", att.CommitteeBits.GetOnIndices(), "aggregation_bits", bitStr[:att.AggregationBits.Bits()])
 			}
 		}
-	}
+	}*/
 
 	// step 3: merge attestations from different committees within the same data root
 	// Example:
@@ -1373,12 +1373,12 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 	//   aggregation_bits: 0011|0101
 	//   signature: aggregate(sig2, sig4)
 	// }
-	/*mergeAttByCommittees := func(root libcommon.Hash, index int) *solid.Attestation {
+	mergeAttByCommittees := func(root libcommon.Hash, index int) *solid.Attestation {
 		signatures := [][]byte{}
 		commiteeBits := solid.NewBitVector(int(a.beaconChainCfg.MaxCommitteesPerSlot))
 		bitSlice := solid.NewBitSlice()
 		var attData *solid.AttestationData
-		for cIndex := range a.beaconChainCfg.MaxCommitteesPerSlot {
+		for cIndex := uint64(0); cIndex < a.beaconChainCfg.MaxCommitteesPerSlot; cIndex++ {
 			candidates, ok := pool[root][cIndex]
 			if !ok {
 				continue
@@ -1394,7 +1394,7 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 			// set commitee bit
 			commiteeBits.SetBitAt(int(cIndex), true)
 			// append aggregation bits
-			for i := range att.AggregationBits.Bits() {
+			for i := 0; i < att.AggregationBits.Bits(); i++ {
 				bitSlice.AppendBit(att.AggregationBits.GetBitAt(i))
 			}
 		}
@@ -1428,22 +1428,14 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 			}
 			mergedCandidates[root] = append(mergedCandidates[root], att)
 		}
-	}*/
-
-	mergedCandidates := make(map[libcommon.Hash][]*solid.Attestation)
-	for root := range pool {
-		for c := range pool[root] {
-			for i := range pool[root][c] {
-				mergedCandidates[root] = append(mergedCandidates[root], pool[root][c][i])
-			}
-		}
 	}
+
 	// print out the merged candidates data
-	for root := range mergedCandidates {
+	/*for root := range mergedCandidates {
 		for _, att := range mergedCandidates[root] {
 			log.Info("Merged candidate", "root", root, "slot", att.Data.Slot, "committee", att.CommitteeBits.GetOnIndices(), "aggregation_bits", att.AggregationBits.Bits())
 		}
-	}
+	}*/
 
 	return mergedCandidates, nil
 }
