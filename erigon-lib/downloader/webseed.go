@@ -627,6 +627,9 @@ func nameAndHashWhitelisted(fileName, fileHash string, whitelist snapcfg.Preveri
 	if strings.Contains(fileName, "salt-") {
 		log.Warn("[dbg] nameAndHashWhitelisted", "fileName", fileName, "len(whitelist)", len(whitelist))
 		panic(5)
+	} else {
+		log.Warn("[dbg] nameAndHashWhitelisted", "fileName", fileName, "len(whitelist)", len(whitelist))
+		panic(6)
 	}
 	return false
 }
