@@ -1190,11 +1190,11 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
-	chainConfig, pm := fromdb.ChainConfig(db), fromdb.PruneMode(db)
+	chainConfig := fromdb.ChainConfig(db)
 
 	genesis := core.GenesisBlockByChainName(chain)
 	br, _ := blocksIO(db, logger)
-	cfg := stagedsync.StageCustomTraceCfg(db, pm, dirs, br, chainConfig, engine, genesis, &syncCfg)
+	cfg := stagedsync.StageCustomTraceCfg(db, dirs, br, chainConfig, engine, genesis, &syncCfg)
 	err = stagedsync.SpawnCustomTrace(cfg, ctx, logger)
 	if err != nil {
 		return err
