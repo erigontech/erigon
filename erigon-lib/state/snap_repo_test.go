@@ -321,6 +321,7 @@ func TestReferencingIntegrityChecker(t *testing.T) {
 			Build()
 		return name, schema
 	})
+	defer commitmentR.Close()
 
 	accountsR.cfg.Integrity = ae.NewReferencingIntegrityChecker(commitmentR.cfg.Schema)
 	stepSize := accountsR.stepSize
