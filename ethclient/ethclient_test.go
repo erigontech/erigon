@@ -264,23 +264,23 @@ func TestEthClient(t *testing.T) {
 		"TxInBlockInterrupted": {
 			func(t *testing.T) { testTransactionInBlock(t, client) },
 		},
-		// "ChainID": {
-		// 	func(t *testing.T) { testChainID(t, client) },
-		// },
-		// "GetBlock": {
-		// 	func(t *testing.T) { testGetBlock(t, client) },
-		// },
+		"ChainID": {
+			func(t *testing.T) { testChainID(t, client) },
+		},
+		"GetBlock": {
+			func(t *testing.T) { testGetBlock(t, client) },
+		},
 		// "StatusFunctions": {
 		// 	func(t *testing.T) { testStatusFunctions(t, client) },
 		// },
-		// "CallContract": {
-		// 	func(t *testing.T) { testCallContract(t, client) },
-		// },
-		// "CallContractAtHash": {
-		// 	func(t *testing.T) { testCallContractAtHash(t, client) },
-		// },
+		"CallContract": {
+			func(t *testing.T) { testCallContract(t, client) },
+		},
+		"CallContractAtHash": {
+			func(t *testing.T) { testCallContractAtHash(t, client) },
+		},
 		// "AtFunctions": {
-		// 	func(t *testing.T) { testAtFunctions(t, client) },
+		// 	func(t *testing.T) { testAtFunctions(t, client) }, // Disabled because getting pending block RPC call is not supported in Erigon
 		// },
 		// "TransactionSender": {
 		// 	func(t *testing.T) { testTransactionSender(t, client) },
