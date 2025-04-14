@@ -530,6 +530,9 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 	if snapCfg == nil {
 		snapCfg = snapcfg.KnownCfg(cfg.ChainName)
 	}
+	if len(snapCfg.Preverified) == 0 {
+		panic("assert: preverified files list is empty. please restart")
+	}
 	//if len(files) == 0 {
 	lock.Downloads = snapCfg.Preverified
 	//}
