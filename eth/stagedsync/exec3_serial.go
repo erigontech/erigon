@@ -55,8 +55,8 @@ func (se *serialExecutor) commit(ctx context.Context, execStage *StageState, tx 
 func (se *serialExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buffered, applyTx kv.Tx) (err error) {
 
 	if se.worker == nil {
-		se.execMetrics = exec3.NewWorkerMetrics()
-		se.worker = exec3.NewWorker(context.Background(), false, se.execMetrics,
+		se.taskExecMetrics = exec3.NewWorkerMetrics()
+		se.worker = exec3.NewWorker(context.Background(), false, se.taskExecMetrics,
 			se.cfg.db, nil, se.cfg.blockReader, se.cfg.chainConfig, se.cfg.genesis, nil, se.cfg.engine, se.cfg.dirs, se.logger)
 	}
 

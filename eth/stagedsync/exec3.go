@@ -59,9 +59,8 @@ var (
 	mxExecTriggers     = metrics.NewCounter(`exec_triggers`)  //nolint
 	mxExecTransactions = metrics.NewCounter(`exec_txns`)
 	mxExecGas          = metrics.NewCounter(`exec_gas`)
+	mxExecMgas         = metrics.NewGauge(`exec_mgas`)
 	mxExecBlocks       = metrics.NewGauge("exec_blocks")
-
-	mxMgas = metrics.NewGauge(`exec_mgas`)
 )
 
 const (
@@ -129,10 +128,10 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 		suffix = " serial"
 	}
 
-	taskGas := te.execMetrics.UsedGas.Total.Load()
-	taskDur := time.Duration(te.execMetrics.Duration.Load())
-	readDur := time.Duration(te.execMetrics.ReadDuration.Load())
-	activations := te.execMetrics.Active.Total.Load()
+	taskGas := te.taskExecMetrics.UsedGas.Total.Load()
+	taskDur := time.Duration(te.taskExecMetrics.Duration.Load())
+	readDur := time.Duration(te.taskExecMetrics.ReadDuration.Load())
+	activations := te.taskExecMetrics.Active.Total.Load()
 
 	curTaskGas := taskGas - p.prevTaskGas
 	curTaskDur := taskDur - p.prevTaskDuration
@@ -186,7 +185,7 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 			"abort", common.PrettyCounter(abortCount - p.prevAbortCount),
 			"invalid", common.PrettyCounter(invalidCount - p.prevInvalidCount),
 			"tgas/s", fmt.Sprintf("%s(%s)", common.PrettyCounter(curTaskGasPerSec), common.PrettyCounter(avgTaskGasPerSec)),
-			"workers", fmt.Sprintf("%d(%.1f)", ex.execMetrics.Active.Ema.Get(), float64(curTaskDur)/float64(interval)),
+			"workers", fmt.Sprintf("%d(%.1f)", ex.taskExecMetrics.Active.Ema.Get(), float64(curTaskDur)/float64(interval)),
 			"tdur", fmt.Sprintf("%dµs", avgTaskDur.Microseconds()),
 			"trdur", fmt.Sprintf("%dµs(%.2f%%)", avgReadDur.Microseconds(), readRatio),
 			"rd", common.PrettyCounter(readCount - p.prevReadCount),
@@ -480,7 +479,7 @@ func ExecV3(ctx context.Context,
 	start := time.Now()
 	defer func() {
 		if totalGasUsed > 0 {
-			mxMgas.Set((float64(totalGasUsed) / 1e6) / time.Since(start).Seconds())
+			mxExecMgas.Set((float64(totalGasUsed) / 1e6) / time.Since(start).Seconds())
 		}
 	}()
 
@@ -945,7 +944,7 @@ func ExecV3(ctx context.Context,
 				case applyResult := <-applyResults:
 					switch applyResult := applyResult.(type) {
 					case *txResult:
-						pe.executedGas += applyResult.gasUsed
+						pe.executedGas += applyResult.usedGas
 						pe.lastExecutedTxNum = applyResult.txNum
 
 						pe.rs.SetTxNum(applyResult.txNum, applyResult.blockNum)

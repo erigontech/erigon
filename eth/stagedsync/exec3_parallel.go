@@ -14,6 +14,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 
@@ -119,7 +120,7 @@ type txResult struct {
 	blockNum   uint64
 	blockTime  uint64
 	txNum      uint64
-	gasUsed    uint64
+	usedGas    uint64
 	logs       []*types.Log
 	traceFroms map[libcommon.Address]struct{}
 	traceTos   map[libcommon.Address]struct{}
@@ -342,21 +343,48 @@ func (ev *taskVersion) Version() state.Version {
 	return ev.version
 }
 
+type blockExecMetrics struct {
+	UsedGas          blockCount
+	Duration         blockDuration
+	FinalizeDuration blockDuration
+}
+
+type blockDuration struct {
+	atomic.Int64
+	Ema *metrics.EMA[time.Duration]
+}
+
+func (d *blockDuration) Add(i time.Duration) {
+	d.Int64.Add(int64(i))
+	d.Ema.Update(i)
+}
+
+type blockCount struct {
+	atomic.Int64
+	Ema *metrics.EMA[uint64]
+}
+
+func (c *blockCount) Add(i uint64) {
+	c.Int64.Add(int64(i))
+	c.Ema.Update(i)
+}
+
 type txExecutor struct {
 	sync.RWMutex
-	cfg         ExecuteBlockCfg
-	agg         *libstate.Aggregator
-	rs          *state.StateV3Buffered
-	doms        *libstate.SharedDomains
-	accumulator *shards.Accumulator
-	u           Unwinder
-	isMining    bool
-	inMemExec   bool
-	applyTx     kv.Tx
-	logger      log.Logger
-	logPrefix   string
-	progress    *Progress
-	execMetrics *exec3.WorkerMetrics
+	cfg              ExecuteBlockCfg
+	agg              *libstate.Aggregator
+	rs               *state.StateV3Buffered
+	doms             *libstate.SharedDomains
+	accumulator      *shards.Accumulator
+	u                Unwinder
+	isMining         bool
+	inMemExec        bool
+	applyTx          kv.Tx
+	logger           log.Logger
+	logPrefix        string
+	progress         *Progress
+	taskExecMetrics  *exec3.WorkerMetrics
+	blockExecMetrics *blockExecMetrics
 
 	shouldGenerateChangesets bool
 
@@ -646,7 +674,7 @@ type blockExecutor struct {
 	cntExec, cntSpecExec, cntSuccess, cntAbort, cntTotalValidations, cntValidationFail, cntFinalized int
 
 	// cummulative gas for this block
-	gasUsed uint64
+	usedGas uint64
 
 	execFailed, execAborted []int
 
@@ -655,7 +683,8 @@ type blockExecutor struct {
 
 	applyResults chan applyResult
 
-	result *blockResult
+	execStarted time.Time
+	result      *blockResult
 }
 
 func newBlockExec(blockNum uint64, applyResults chan applyResult, profile bool) *blockExecutor {
@@ -896,7 +925,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 
 			applyResult.txNum = txTask.Version().TxNum
 			if txResult.Receipt != nil {
-				applyResult.gasUsed = txResult.Receipt.GasUsed
+				applyResult.usedGas = txResult.Receipt.GasUsed
 			}
 			applyResult.blockTime = txTask.BlockTime()
 			applyResult.logs = append(applyResult.logs, txResult.Logs...)
@@ -904,7 +933,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 			maps.Copy(applyResult.traceTos, txResult.TraceTos)
 			be.cntFinalized++
 			be.finalizeTasks.markComplete(tx)
-			be.gasUsed += applyResult.gasUsed
+			be.usedGas += applyResult.usedGas
 		}
 
 		if applyResult.txNum > 0 {
@@ -935,7 +964,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 			txTask.BlockHash(),
 			txTask.BlockRoot(),
 			nil,
-			be.gasUsed,
+			be.usedGas,
 			txTask.Version().TxNum,
 			true,
 			len(be.tasks) > 0 && be.tasks[0].Version().TxIndex != -1,
@@ -960,7 +989,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 		txTask.BlockHash(),
 		txTask.BlockRoot(),
 		nil,
-		be.gasUsed,
+		be.usedGas,
 		lastTxNum,
 		false,
 		len(be.tasks) > 0 && be.tasks[0].Version().TxIndex != -1,
@@ -971,6 +1000,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 }
 
 func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWithRetry) {
+	be.execStarted = time.Now()
 	toExecute := make(sort.IntSlice, 0, 2)
 
 	for be.execTasks.minPending() >= 0 {
@@ -1189,6 +1219,8 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 		}
 
 		if blockResult.complete {
+			finalizeStarted := time.Now()
+
 			if blockExecutor, ok := pe.blockExecutors[blockResult.BlockNum]; ok {
 				pe.execCount.Add(int64(blockExecutor.cntExec))
 				pe.abortCount.Add(int64(blockExecutor.cntAbort))
@@ -1259,6 +1291,11 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					traceTos:   result.TraceTos,
 				}
 
+				pe.blockExecMetrics.UsedGas.Add(blockResult.GasUsed)
+				pe.blockExecMetrics.FinalizeDuration.Add(time.Since(finalizeStarted))
+				if !blockExecutor.execStarted.IsZero() {
+					pe.blockExecMetrics.Duration.Add(time.Since(blockExecutor.execStarted))
+				}
 				blockExecutor.applyResults <- blockResult
 				delete(pe.blockExecutors, blockResult.BlockNum)
 			}
@@ -1380,12 +1417,12 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	pe.execRequests = make(chan *execRequest, 100_000)
 	pe.in = exec.NewQueueWithRetry(100_000)
 
-	pe.execMetrics = exec3.NewWorkerMetrics()
+	pe.taskExecMetrics = exec3.NewWorkerMetrics()
 
 	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers = exec3.NewWorkersPool(
 		ctx, pe.accumulator, true, pe.cfg.db, nil, nil, nil, pe.in,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
-		pe.workerCount+1, pe.execMetrics, pe.cfg.dirs, pe.isMining, pe.logger)
+		pe.workerCount+1, pe.taskExecMetrics, pe.cfg.dirs, pe.isMining, pe.logger)
 
 	execLoopCtx, execLoopCtxCancel := context.WithCancel(ctx)
 	pe.execLoopGroup, execLoopCtx = errgroup.WithContext(execLoopCtx)
