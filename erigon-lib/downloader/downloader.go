@@ -719,6 +719,9 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 		}
 	}
 
+	if len(lock.Downloads) == 0 {
+		panic("assert: expected files list is empty. please restart")
+	}
 	lock.Downloads = snapcfg.Merge(downloads, missingItems)
 	return lock, nil
 }
