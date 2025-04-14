@@ -85,7 +85,7 @@ func isDomainAheadOfBlocks(tx kv.RwTx, logger log.Logger) bool {
 }
 
 // fixCanonicalChainIfNecessary checks if the canonical chain is broken and fixes it if necessary.
-func (e *EthereumExecutionModule) fixCanonicalChainIfNecessary(ctx context.Context, tx kv.RwTx, blockHash common.Hash) error {
+func (e *EthereumExecutionModule) fixCanonicalChainIfNecessary(ctx context.Context, tx kv.RwTx) error {
 	currHeader := rawdb.ReadCurrentHeader(tx)
 	if currHeader == nil {
 		return nil
@@ -241,12 +241,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		return
 	}
 	defer tx.Rollback()
-
-	// failsafe which is kind of necessary to avoid a situation where the canonical chain is broken.
-	if err := e.fixCanonicalChainIfNecessary(ctx, tx, originalBlockHash); err != nil {
-		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-		return
-	}
 
 	{ // used by eth_syncing
 		num, err := e.blockReader.HeaderNumber(ctx, tx, originalBlockHash)
@@ -618,11 +612,16 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle boo
 			if pruneTimings := e.executionPipeline.PrintTimings(); len(pruneTimings) > 0 {
 				timings = append(timings, pruneTimings...)
 			}
+			// failsafe which is kind of necessary to avoid a situation where the canonical chain is broken.
+			if err := e.fixCanonicalChainIfNecessary(e.bacgroundCtx, tx); err != nil {
+				return err
+			}
 			return nil
 		}); err != nil {
 			e.logger.Error("runPostForkchoiceInBackground", "error", err)
 			return
 		}
+
 		if len(timings) > 0 {
 			e.logger.Info("Timings: Post-Forkchoice (slower than 50ms)", timings...)
 		}
