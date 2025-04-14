@@ -1133,7 +1133,9 @@ func ExecV3(ctx context.Context,
 		}
 	}
 
-	//dumpPlainStateDebug(executor.tx(), executor.domains())
+	if false {
+		dumpPlainStateDebug(applyTx, executor.domains())
+	}
 
 	if !useExternalTx && applyTx != nil {
 		if err = applyTx.Commit(); err != nil {
