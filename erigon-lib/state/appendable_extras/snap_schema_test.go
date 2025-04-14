@@ -105,8 +105,8 @@ func TestE3SnapSchemaForDomain1(t *testing.T) {
 	dirs := setup(t)
 	stepSize := uint64(config3.DefaultStepSize)
 	p := NewE3SnapSchemaBuilder(AccessorBTree|AccessorExistence, stepSize).
-		Data(dirs.SnapDomain, "accounts", DataExtensionKv).
-		BtIndex(seg.CompressNone).
+		Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressKeys).
+		BtIndex().
 		Existence().Build()
 
 	stepFrom := RootNum(stepSize * 288)
@@ -141,8 +141,7 @@ func TestE3SnapSchemaForDomain1(t *testing.T) {
 	dataFileFull := p.DataFile(Version(1), stepFrom, stepTo)
 	_, fName := filepath.Split(dataFileFull)
 	require.Equal(t, "v1-accounts.288-296.kv", fName)
-	accFull, params := p.BtIdxFile(Version(1), stepFrom, stepTo)
-	require.Equal(t, seg.CompressNone, params.Compression)
+	accFull := p.BtIdxFile(Version(1), stepFrom, stepTo)
 	_, fName = filepath.Split(accFull)
 	require.Equal(t, "v1-accounts.288-296.bt", fName)
 
@@ -163,8 +162,8 @@ func TestE3SnapSchemaForCommitmentDomain(t *testing.T) {
 	dirs := setup(t)
 	stepSize := uint64(config3.DefaultStepSize)
 	p := NewE3SnapSchemaBuilder(AccessorHashMap, stepSize).
-		Data(dirs.SnapDomain, "commitments", DataExtensionKv).
-		Accessor(dirs.SnapDomain, AccessorExtensionKvi).Build()
+		Data(dirs.SnapDomain, "commitments", DataExtensionKv, seg.CompressKeys).
+		Accessor(dirs.SnapDomain).Build()
 
 	stepFrom := RootNum(stepSize * 288)
 	stepTo := RootNum(stepSize * 296)
@@ -209,8 +208,8 @@ func TestE3SnapSchemaForHistory(t *testing.T) {
 	dirs := setup(t)
 	stepSize := uint64(config3.DefaultStepSize)
 	p := NewE3SnapSchemaBuilder(AccessorHashMap, stepSize).
-		Data(dirs.SnapHistory, "accounts", DataExtensionV).
-		Accessor(dirs.SnapAccessors, AccessorExtensionVi).Build()
+		Data(dirs.SnapHistory, "accounts", DataExtensionV, seg.CompressKeys).
+		Accessor(dirs.SnapAccessors).Build()
 
 	stepFrom, stepTo := RootNum(stepSize*192), RootNum(stepSize*256)
 	info, ok := p.Parse("v1-accounts.192-256.v")
@@ -258,8 +257,8 @@ func TestE3SnapSchemaForII(t *testing.T) {
 	dirs := setup(t)
 	stepSize := uint64(config3.DefaultStepSize)
 	p := NewE3SnapSchemaBuilder(AccessorHashMap, stepSize).
-		Data(dirs.SnapIdx, "logaddrs", DataExtensionEf).
-		Accessor(dirs.SnapAccessors, AccessorExtensionEfi).Build()
+		Data(dirs.SnapIdx, "logaddrs", DataExtensionEf, seg.CompressNone).
+		Accessor(dirs.SnapAccessors).Build()
 
 	stepFrom, stepTo := RootNum(stepSize*128), RootNum(stepSize*192)
 	info, ok := p.Parse("v1-logaddrs.128-192.ef")
