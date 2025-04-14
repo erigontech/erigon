@@ -104,6 +104,7 @@ func ReadAndCreateSaltIfNeeded(baseDir string) (uint32, error) {
 
 		saltBytes := make([]byte, 4)
 		binary.BigEndian.PutUint32(saltBytes, rand.Uint32())
+		panic(1)
 		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
 			return 0, err
 		}
@@ -117,6 +118,7 @@ func ReadAndCreateSaltIfNeeded(baseDir string) (uint32, error) {
 
 		saltBytes := make([]byte, 4)
 		binary.BigEndian.PutUint32(saltBytes, rand.Uint32())
+		panic(2)
 		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
 			return 0, err
 		}
