@@ -684,6 +684,10 @@ func (a *ApiHandler) produceBeaconBody(
 
 				// Add the requests bundle
 				if requestsBundle != nil && requestsBundle.GetRequests() != nil {
+					if len(requestsBundle.GetRequests()) > 0 {
+						log.Info("BlockProduction: Received requests bundle", "len", len(requestsBundle.GetRequests()))
+					}
+
 					for _, request := range requestsBundle.GetRequests() {
 						rType := request[0]
 						requestData := request[1:]
@@ -691,21 +695,32 @@ func (a *ApiHandler) produceBeaconBody(
 						case types.DepositRequestType:
 							if beaconBody.ExecutionRequests.Deposits.Len() > 0 {
 								log.Error("BlockProduction: Deposit request already exists")
+								continue
 							} else if err := beaconBody.ExecutionRequests.Deposits.DecodeSSZ(requestData, int(stateVersion)); err != nil {
 								log.Error("BlockProduction: Failed to decode deposit request", "err", err)
+								continue
 							}
+							log.Info("BlockProduction: Decoded deposit request", "len", beaconBody.ExecutionRequests.Deposits.Len())
 						case types.WithdrawalRequestType:
 							if beaconBody.ExecutionRequests.Withdrawals.Len() > 0 {
 								log.Error("BlockProduction: Withdrawal request already exists")
+								continue
 							} else if err := beaconBody.ExecutionRequests.Withdrawals.DecodeSSZ(requestData, int(stateVersion)); err != nil {
 								log.Error("BlockProduction: Failed to decode withdrawal request", "err", err)
+								continue
 							}
+							log.Info("BlockProduction: Decoded withdrawal request", "len", beaconBody.ExecutionRequests.Withdrawals.Len())
+
 						case types.ConsolidationRequestType:
 							if beaconBody.ExecutionRequests.Consolidations.Len() > 0 {
 								log.Error("BlockProduction: Consolidation request already exists")
+								continue
 							} else if err := beaconBody.ExecutionRequests.Consolidations.DecodeSSZ(requestData, int(stateVersion)); err != nil {
 								log.Error("BlockProduction: Failed to decode consolidation request", "err", err)
+								continue
 							}
+							log.Info("BlockProduction: Decoded consolidation request", "len", beaconBody.ExecutionRequests.Consolidations.Len())
+
 						}
 					}
 				}
