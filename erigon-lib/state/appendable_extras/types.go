@@ -40,3 +40,59 @@ func (x Num) EncTo8Bytes() (out []byte) {
 func (x RootNum) EncTo8Bytes() (out []byte) {
 	return EncToBytes(x, true)
 }
+
+func (x RootNum) Uint64() uint64 {
+	return uint64(x)
+}
+
+// file extensions
+
+type AccessorExtension string
+
+const (
+	AccessorExtensionIdx AccessorExtension = ".idx"
+	AccessorExtensionKvi AccessorExtension = ".kvi"
+	AccessorExtensionVi  AccessorExtension = ".vi"
+	AccessorExtensionEfi AccessorExtension = ".efi"
+)
+
+func (a AccessorExtension) IsSet() bool {
+	switch a {
+	case AccessorExtensionIdx, AccessorExtensionKvi, AccessorExtensionVi, AccessorExtensionEfi:
+		return true
+	}
+	return false
+}
+
+func (a AccessorExtension) String() string {
+	return string(a)
+}
+
+func (a AccessorExtension) Equals(target string) bool {
+	return string(a) == target
+}
+
+type DataExtension string
+
+const (
+	DataExtensionSeg DataExtension = ".seg"
+	DataExtensionKv  DataExtension = ".kv"
+	DataExtensionV   DataExtension = ".v"
+	DataExtensionEf  DataExtension = ".ef"
+)
+
+func (d DataExtension) IsSet() bool {
+	switch d {
+	case DataExtensionSeg, DataExtensionKv, DataExtensionV, DataExtensionEf:
+		return true
+	}
+	return false
+}
+
+func (d DataExtension) String() string {
+	return string(d)
+}
+
+func (d DataExtension) Equals(target string) bool {
+	return string(d) == target
+}

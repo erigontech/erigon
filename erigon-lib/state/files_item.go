@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
+	ae "github.com/erigontech/erigon-lib/state/appendable_extras"
 )
 
 // filesItem is "dirty" file - means file which can be:
@@ -75,6 +76,10 @@ func newFilesItem(startTxNum, endTxNum, stepSize uint64) *filesItem {
 	return newFilesItemWithFrozenSteps(startTxNum, endTxNum, stepSize, config3.StepsInFrozenFile)
 }
 
+func newFilesItemWithSnapConfig(startTxNum, endTxNum uint64, snapConfig *ae.SnapshotConfig) *filesItem {
+	return newFilesItemWithFrozenSteps(startTxNum, endTxNum, snapConfig.RootNumPerStep, snapConfig.StepsInFrozenFile())
+}
+
 func newFilesItemWithFrozenSteps(startTxNum, endTxNum, stepSize uint64, stepsInFrozenFile uint64) *filesItem {
 	startStep := startTxNum / stepSize
 	endStep := endTxNum / stepSize
@@ -90,8 +95,8 @@ func (i *filesItem) BtIndex() *BtIndex { return i.bindex }
 
 func (i *filesItem) ExistenceFilter() *ExistenceFilter { return i.existence }
 
-// isSubsetOf - when `j` covers `i` but not equal `i`
-func (i *filesItem) isSubsetOf(j *filesItem) bool {
+// isProperSubsetOf - when `j` covers `i` but not equal `i`
+func (i *filesItem) isProperSubsetOf(j *filesItem) bool {
 	return (j.startTxNum <= i.startTxNum && i.endTxNum <= j.endTxNum) && (j.startTxNum != i.startTxNum || i.endTxNum != j.endTxNum)
 }
 func (i *filesItem) isBefore(j *filesItem) bool { return i.endTxNum <= j.startTxNum }
@@ -262,8 +267,8 @@ type visibleFile struct {
 	src *filesItem
 }
 
-func (i *visibleFile) isSubSetOf(j *visibleFile) bool { return i.src.isSubsetOf(j.src) } //nolint
-func (i *visibleFile) isSubsetOf(j *visibleFile) bool { return i.src.isSubsetOf(j.src) } //nolint
+func (i *visibleFile) isSubSetOf(j *visibleFile) bool { return i.src.isProperSubsetOf(j.src) } //nolint
+func (i *visibleFile) isSubsetOf(j *visibleFile) bool { return i.src.isProperSubsetOf(j.src) } //nolint
 
 func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l Accessors, trace bool, toTxNum uint64) (roItems []visibleFile) {
 	newVisibleFiles := make([]visibleFile, 0, files.Len())
@@ -317,7 +322,7 @@ func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l Accessors, trace bool,
 
 			// `kill -9` may leave small garbage files, but if big one already exists we assume it's good(fsynced) and no reason to merge again
 			// see super-set file, just drop sub-set files from list
-			for len(newVisibleFiles) > 0 && newVisibleFiles[len(newVisibleFiles)-1].src.isSubsetOf(item) {
+			for len(newVisibleFiles) > 0 && newVisibleFiles[len(newVisibleFiles)-1].src.isProperSubsetOf(item) {
 				if trace {
 					log.Warn("[dbg] calcVisibleFiles: marked as garbage (is subset)", "item", item.decompressor.FileName(),
 						"of", newVisibleFiles[len(newVisibleFiles)-1].src.decompressor.FileName())

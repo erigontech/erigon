@@ -59,11 +59,11 @@ func BlockBodyKey(number uint64, hash libcommon.Hash) []byte {
 	return k
 }
 
-// LogKey = blockN (uint64 big endian) + txId (uint32 big endian)
-func LogKey(blockNumber uint64, txId uint32) []byte {
-	newK := make([]byte, 8+4)
+func ReceiptCacheKey(blockNumber uint64, blockHash libcommon.Hash, txnIndex uint32) []byte {
+	newK := make([]byte, 8+32+4)
 	binary.BigEndian.PutUint64(newK, blockNumber)
-	binary.BigEndian.PutUint32(newK[8:], txId)
+	copy(newK[8:], blockHash[:])
+	binary.BigEndian.PutUint32(newK[8+32:], txnIndex)
 	return newK
 }
 

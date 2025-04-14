@@ -32,7 +32,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
-	ecrypto "github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
@@ -126,7 +126,7 @@ const (
 func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *Updates) {
 	switch tv {
 	case VariantConcurrentHexPatricia:
-		root := NewHexPatriciaHashed(length.Addr, nil, tmpdir)
+		root := NewHexPatriciaHashed(length.Addr, nil)
 		trie := NewConcurrentPatriciaHashed(root, nil)
 		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
 		// tree.SetConcurrentCommitment(true) // first run always sequential
@@ -141,7 +141,7 @@ func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *
 		fallthrough
 	default:
 
-		trie := NewHexPatriciaHashed(length.Addr, nil, tmpdir)
+		trie := NewHexPatriciaHashed(length.Addr, nil)
 		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
 		return trie, tree
 	}
@@ -1101,16 +1101,16 @@ func (t *Updates) TouchStorage(c *KeyUpdate, val []byte) {
 	}
 }
 
-func (t *Updates) TouchCode(c *KeyUpdate, val []byte) {
+func (t *Updates) TouchCode(c *KeyUpdate, code []byte) {
 	c.update.Flags |= CodeUpdate
-	if len(val) == 0 {
+	if len(code) == 0 {
 		if c.update.Flags == 0 {
 			c.update.Flags = DeleteUpdate
 		}
 		copy(c.update.CodeHash[:], EmptyCodeHash)
 		return
 	}
-	copy(c.update.CodeHash[:], ecrypto.Keccak256(val))
+	copy(c.update.CodeHash[:], crypto.Keccak256(code))
 }
 
 func (t *Updates) Close() {

@@ -65,6 +65,7 @@ type SimpleAccessorBuilder struct {
 	args     *AccessorArgs
 	indexPos uint64
 	id       AppendableId
+	parser   ae.SnapNameSchema
 	kf       IndexKeyFactory
 	fetcher  FirstEntityNumFetcher
 	logger   log.Logger
@@ -78,6 +79,7 @@ func NewSimpleAccessorBuilder(args *AccessorArgs, id AppendableId, logger log.Lo
 	b := &SimpleAccessorBuilder{
 		args:   args,
 		id:     id,
+		parser: id.SnapshotConfig().Schema,
 		logger: logger,
 	}
 
@@ -103,8 +105,8 @@ type AccessorBuilderOptions func(*SimpleAccessorBuilder)
 
 func WithIndexPos(indexPos uint64) AccessorBuilderOptions {
 	return func(s *SimpleAccessorBuilder) {
-		if int(s.indexPos) >= len(s.id.IndexPrefix()) {
-			panic("indexPos greater than indexPrefix length")
+		if int(s.indexPos) >= len(s.id.IndexFileTag()) {
+			panic("indexPos greater than indexFileTag length")
 		}
 		s.indexPos = indexPos
 	}
@@ -126,7 +128,7 @@ func (s *SimpleAccessorBuilder) SetFirstEntityNumFetcher(fetcher FirstEntityNumF
 }
 
 func (s *SimpleAccessorBuilder) GetInputDataQuery(from, to RootNum) *DecompressorIndexInputDataQuery {
-	sgname := ae.SnapFilePath(s.id, snaptype.Version(1), from, to)
+	sgname := s.parser.DataFile(snaptype.Version(1), from, to)
 	decomp, _ := seg.NewDecompressor(sgname)
 	return &DecompressorIndexInputDataQuery{decomp: decomp, baseDataId: uint64(s.fetcher(from, to, decomp))}
 }
@@ -142,12 +144,12 @@ func (s *SimpleAccessorBuilder) AllowsOrdinalLookupByNum() bool {
 func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *background.Progress) (i *recsplit.Index, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("%s: at=%d-%d, %v, %s", s.id.IndexPrefix()[s.indexPos], from, to, rec, dbg.Stack())
+			err = fmt.Errorf("%s: at=%d-%d, %v, %s", s.id.IndexFileTag()[s.indexPos], from, to, rec, dbg.Stack())
 		}
 	}()
 	iidq := s.GetInputDataQuery(from, to)
 	defer iidq.Close()
-	idxFile := ae.IdxFilePath(s.id, snaptype.Version(1), from, to, s.indexPos)
+	idxFile := s.parser.AccessorIdxFile(snaptype.Version(1), from, to, s.indexPos)
 
 	keyCount := iidq.GetCount()
 	if p != nil {

@@ -23,8 +23,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/cmd/devnet/contracts"
+	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
