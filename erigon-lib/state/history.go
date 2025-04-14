@@ -442,9 +442,6 @@ func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, p
 
 func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte, originalStep uint64) (err error) {
 	if w.discard {
-		if w.ii.filenameBase == "commitment" {
-			panic("assert: don't use history for commitment")
-		}
 		return nil
 	}
 
@@ -541,7 +538,6 @@ func (ht *HistoryRoTx) newWriter(tmpdir string, discard bool) *historyBufferedWr
 
 		ii: ht.iit.newWriter(tmpdir, discard),
 	}
-	fmt.Printf("histWriter %s discard: %t", ht.h.filenameBase, w.discard)
 	w.historyVals.SortAndFlushInBackground(true)
 	return w
 }
