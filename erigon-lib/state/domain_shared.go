@@ -123,7 +123,7 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 	sd.SetTx(tx)
 	sd.iiWriters = make([]*invertedIndexBufferedWriter, len(sd.aggTx.iis))
 
-	sd.aggTx.a.DiscardHistory(kv.CommitmentDomain)
+	//sd.aggTx.a.DiscardHistory(kv.CommitmentDomain)
 
 	for id, ii := range sd.aggTx.iis {
 		sd.iiWriters[id] = ii.NewWriter()
@@ -133,7 +133,7 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 		sd.domains[id] = map[string]dataWithPrevStep{}
 		sd.domainWriters[id] = d.NewWriter()
 	}
-	fmt.Printf("Commit conf %v\n", sd.aggTx.d[kv.CommitmentDomain].d.hist)
+	fmt.Printf("Commit conf disabled hist %v\n", sd.aggTx.d[kv.CommitmentDomain].d.hist.historyDisabled)
 
 	sd.SetTxNum(0)
 	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, commitment.VariantHexPatriciaTrie)
