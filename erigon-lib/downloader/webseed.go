@@ -34,6 +34,7 @@ import (
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/hashicorp/go-retryablehttp"
 	"github.com/pelletier/go-toml/v2"
 	"golang.org/x/sync/errgroup"
@@ -481,6 +482,7 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 	e, ctx := errgroup.WithContext(ctx)
 	e.SetLimit(1024)
 	urlsByName := d.TorrentUrls()
+	log.Warn("[dbg] calling: ", "url", urlsByName)
 
 	for fileName, tUrls := range urlsByName {
 		name := fileName
@@ -598,6 +600,7 @@ func validateTorrentBytes(fileName string, b []byte, whitelist snapcfg.Preverifi
 	torrentHash := mi.HashInfoBytes()
 	// files with different names can have same hash. means need check AND name AND hash.
 	if !nameAndHashWhitelisted(fileName, torrentHash.String(), whitelist) {
+		panic(fmt.Errorf(".torrent file is not whitelisted %s", torrentHash.String()))
 		return fmt.Errorf(".torrent file is not whitelisted %s", torrentHash.String())
 	}
 	return nil
@@ -611,9 +614,16 @@ func nameAndHashWhitelisted(fileName, fileHash string, whitelist snapcfg.Preveri
 	fileName = strings.TrimSuffix(fileName, ".torrent")
 
 	for i := 0; i < len(whitelist); i++ {
+		if whitelist[i].Name == fileName && strings.Contains(fileName, "salt-bloc") {
+			log.Warn("[dbg] see1", "fileName", fileName, "Hash", whitelist[i].Hash == fileHash, "stk", dbg.Stack())
+		}
 		if whitelist[i].Name == fileName && whitelist[i].Hash == fileHash {
 			return true
 		}
+	}
+	if strings.Contains(fileName, "salt-") {
+		log.Warn("[dbg] nameAndHashWhitelisted", "a", fmt.Sprintf("%+v", whitelist), "fileName", fileName)
+		panic(5)
 	}
 	return false
 }
