@@ -347,14 +347,12 @@ type blockExecMetrics struct {
 	BlockCount       atomic.Int64
 	UsedGas          blockCount
 	Duration         blockDuration
-	FinalizeDuration blockDuration
 }
 
 func newBlockExecMetrics() *blockExecMetrics {
 	return &blockExecMetrics{
 		UsedGas:          blockCount{Ema: metrics.NewEma[uint64](0, 0.3)},
 		Duration:         blockDuration{Ema: metrics.NewEma[time.Duration](0, 0.3)},
-		FinalizeDuration: blockDuration{Ema: metrics.NewEma[time.Duration](0, 0.3)},
 	}
 }
 
@@ -1227,8 +1225,6 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 		}
 
 		if blockResult.complete {
-			finalizeStarted := time.Now()
-
 			if blockExecutor, ok := pe.blockExecutors[blockResult.BlockNum]; ok {
 				pe.execCount.Add(int64(blockExecutor.cntExec))
 				pe.abortCount.Add(int64(blockExecutor.cntAbort))
@@ -1300,7 +1296,6 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				}
 
 				pe.blockExecMetrics.UsedGas.Add(blockResult.GasUsed)
-				pe.blockExecMetrics.FinalizeDuration.Add(time.Since(finalizeStarted))
 				if !blockExecutor.execStarted.IsZero() {
 					pe.blockExecMetrics.Duration.Add(time.Since(blockExecutor.execStarted))
 				}
