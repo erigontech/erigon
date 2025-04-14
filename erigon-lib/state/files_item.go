@@ -271,7 +271,7 @@ func (i *visibleFile) isSubSetOf(j *visibleFile) bool { return i.src.isProperSub
 func (i *visibleFile) isSubsetOf(j *visibleFile) bool { return i.src.isProperSubsetOf(j.src) } //nolint
 
 func (i visibleFile) Filename() string {
-	return i.src.decompressor.FileName1
+	return i.src.decompressor.FilePath()
 }
 
 func (i visibleFile) StartTxNum() uint64 {
