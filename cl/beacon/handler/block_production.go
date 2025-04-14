@@ -1298,7 +1298,7 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 		}
 		if !mergeAny {
 			// no merge case, just append. It might be merged with other attestation later.
-			pool[dataRoot][candCommitteeBit] = append(pool[dataRoot][candCommitteeBit], candidate)
+			pool[dataRoot][candCommitteeBit] = append(pool[dataRoot][candCommitteeBit], candidate.Copy())
 		}
 	}
 
