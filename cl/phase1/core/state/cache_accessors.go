@@ -229,7 +229,8 @@ func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(
 	// Matching roots
 	if !data.Source.Equal(justifiedCheckpoint) && !skipAssert {
 		bytes, _ := json.Marshal(data)
-		log.Warn("GetAttestationParticipationFlagIndicies: source does not match", "data", string(bytes))
+		log.Warn("GetAttestationParticipationFlagIndicies: source does not match", "data", string(bytes), "justifiedCheckpoint", justifiedCheckpoint,
+			"previousJustifiedCheckpoint", b.PreviousJustifiedCheckpoint(), "currentJustifiedCheckpoint", b.CurrentJustifiedCheckpoint())
 		return nil, errors.New("GetAttestationParticipationFlagIndicies: source does not match")
 	}
 	targetRoot, err := GetBlockRoot(b, data.Target.Epoch)
