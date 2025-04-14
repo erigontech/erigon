@@ -144,7 +144,8 @@ func (c *checkpointState) getAttestingIndicies(attestation *solid.Attestation, a
 		bitIndex := i % 8
 		sliceIndex := i / 8
 		if sliceIndex >= len(aggregationBits) {
-			return nil, errors.New("GetAttestingIndicies: committee is too big")
+			return nil, fmt.Errorf("getAttestingIndicies: committee is too big, committeeOffset: %d, aggrBitsLen: %d, committeeSize: %d",
+				committeeOffset, aggrBitsLen, len(committee))
 		}
 		if (aggregationBits[sliceIndex] & (1 << bitIndex)) > 0 {
 			attestingIndices = append(attestingIndices, member)

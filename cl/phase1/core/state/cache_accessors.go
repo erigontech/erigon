@@ -416,7 +416,8 @@ func (b *CachingBeaconState) GetAttestingIndicies(
 		}
 		for i, member := range committee {
 			if i >= aggrBitsLen {
-				return nil, errors.New("GetAttestingIndicies: committee is too big")
+				return nil, fmt.Errorf("GetAttestingIndicies: committee is too big, committeeOffset: %d, aggrBitsLen: %d, committeeSize: %d",
+					committeeOffset, aggrBitsLen, len(committee))
 			}
 			if aggregationBits.GetBitAt(committeeOffset + i) {
 				attesters = append(attesters, member)
