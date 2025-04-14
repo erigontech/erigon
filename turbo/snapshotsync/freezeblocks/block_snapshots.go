@@ -789,11 +789,14 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, bl
 	if blockFrom > 0 {
 		if err := db.View(ctx, func(tx kv.Tx) error {
 			blockNum := blockFrom - 1
-			h := rawdb.ReadHeaderByNumber(tx, blockNum)
-			if h == nil {
+			h, err := rawdb.ReadCanonicalHash(tx, blockNum)
+			if err != nil {
+				return err
+			}
+			if h == emptyHash {
 				return fmt.Errorf("header not found: %d", blockNum)
 			}
-			prevHash = h.Hash()
+			prevHash = h
 			return nil
 		}); err != nil {
 			return 0, err
