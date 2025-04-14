@@ -105,6 +105,7 @@ func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext) *HexPatriciaHa
 		auxBuffer:     bytes.NewBuffer(make([]byte, 8192)),
 		hadToLoadL:    make(map[uint64]skipStat),
 		accValBuf:     make(rlp.RlpEncodedBytes, 128),
+		metrics:       NewMetrics(),
 	}
 	hph.branchEncoder = NewBranchEncoder(1024)
 	return hph

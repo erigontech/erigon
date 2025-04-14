@@ -3,7 +3,6 @@ package commitment
 import (
 	"encoding/csv"
 	"encoding/hex"
-	"fmt"
 	"os"
 	"strconv"
 	"sync"
@@ -305,7 +304,6 @@ func (processAccount *AccountMetrics) TotalFoldingTimeInc(plainKey []byte, t tim
 }
 
 func writeMetricsToCSV(metrics CsvMetrics, filePath string) error {
-	fmt.Println("shota ", collectCommitmentMetrics, metricsFile)
 	if !collectCommitmentMetrics {
 		return nil
 	}
