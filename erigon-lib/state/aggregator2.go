@@ -189,6 +189,7 @@ var Schema = map[kv.Domain]domainCfg{
 	},
 	kv.ReceiptCacheDomain: {
 		name: kv.ReceiptCacheDomain, valuesTable: kv.TblReceiptCacheVals,
+		largeValues: true,
 
 		AccessorList: AccessorBTree,
 		Compression:  seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
