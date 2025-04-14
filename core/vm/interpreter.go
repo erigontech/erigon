@@ -48,6 +48,9 @@ type Config struct {
 	StatelessExec bool // true is certain conditions (like state trie root hash matching) need to be relaxed for stateless EVM execution
 	RestoreState  bool // Revert all changes made to the state (useful for constant system calls)
 
+	JumpTable    *JumpTable // Legacy EVM instruction table
+	JumpTableEOF *JumpTable // EOF EVM instruction table
+
 	ExtraEips []int // Additional EIPS that are to be enabled
 
 }
@@ -73,6 +76,8 @@ type Interpreter interface {
 
 	// `Depth` returns the current call stack's depth.
 	Depth() int
+
+	Config() *Config
 }
 
 // ScopeContext contains the things that are per-call, such as stack and memory,
@@ -81,6 +86,15 @@ type ScopeContext struct {
 	Memory   *Memory
 	Stack    *stack.Stack
 	Contract *Contract
+
+	CodeSection uint64
+	ReturnStack []*ReturnContext
+}
+
+type ReturnContext struct {
+	Section     uint64
+	Pc          uint64
+	StackHeight int
 }
 
 // MemoryData returns the underlying memory slice. Callers must not modify the contents
@@ -145,6 +159,10 @@ type EVMInterpreter struct {
 	depth int
 }
 
+func (evmi *EVMInterpreter) Config() *Config {
+	return &evmi.cfg
+}
+
 // structcheck doesn't see embedding
 //
 //nolint:structcheck
@@ -172,8 +190,11 @@ func copyJumpTable(jt *JumpTable) *JumpTable {
 
 // NewEVMInterpreter returns a new instance of the Interpreter.
 func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
-	var jt *JumpTable
+	var jt, eofJt *JumpTable
 	switch {
+	case evm.ChainRules().IsOsaka:
+		jt = &pragueInstructionSet
+		eofJt = &eofInstructionSet
 	case evm.ChainRules().IsPrague:
 		jt = &pragueInstructionSet
 	case evm.ChainRules().IsCancun:
@@ -212,12 +233,13 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 		}
 	}
 
+	cfg.JumpTable = jt
+	cfg.JumpTableEOF = eofJt
 	return &EVMInterpreter{
 		VM: &VM{
 			evm: evm,
 			cfg: cfg,
 		},
-		jt: jt,
 	}
 }
 
@@ -238,13 +260,16 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	in.returnData = nil
 
 	var (
-		op          OpCode // current opcode
+		jt          *JumpTable // current jump table
+		op          OpCode     // current opcode
 		mem         = pool.Get().(*Memory)
 		locStack    = stack.New()
 		callContext = &ScopeContext{
-			Memory:   mem,
-			Stack:    locStack,
-			Contract: contract,
+			Memory:      mem,
+			Stack:       locStack,
+			Contract:    contract,
+			CodeSection: 0,
+			ReturnStack: []*ReturnContext{{Section: 0, Pc: 0, StackHeight: 0}},
 		}
 		// For optimisation reason we're using uint64 as the program counter.
 		// It's theoretically possible to go above 2^64. The YP defines the PC
@@ -260,9 +285,15 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	)
 
 	mem.Reset()
-
 	contract.Input = input
-
+	var initcode []byte // TODO(racytech): temp solution, condsider a better way, this will not work with JUMPF, CALLF
+	if contract.IsEOF() {
+		jt = in.cfg.JumpTableEOF
+		initcode = contract.Container._code[callContext.CodeSection]
+	} else {
+		jt = in.cfg.JumpTable
+		initcode = contract.Code
+	}
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
 	// This makes also sure that the readOnly flag isn't removed for child calls.
 	restoreReadonly := readOnly && !in.readOnly
@@ -296,6 +327,11 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	// parent context.
 	steps := 0
 	for {
+		// required by CALLF to set the initcode to appropirate code section
+		if contract.IsEOF() { // TODO(racytech): re-do this, find a better way
+			initcode = contract.Container._code[callContext.CodeSection]
+		}
+
 		steps++
 		if steps%1000 == 0 && in.evm.Cancelled() {
 			break
@@ -306,9 +342,15 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
-		op = contract.GetOp(_pc)
-		operation := in.jt[op]
+		if len(initcode) > int(_pc) {
+			op = OpCode(initcode[_pc])
+		} else {
+			op = STOP
+		}
+
+		operation := jt[op]
 		cost = operation.constantGas // For tracing
+
 		// Validate stack
 		if sLen := locStack.Len(); sLen < operation.numPop {
 			return nil, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
