@@ -227,6 +227,7 @@ func NewE3SnapSchemaBuilder(accessors Accessors, stepSize uint64) *E3SnapSchemaB
 func (b *E3SnapSchemaBuilder) Data(dataFolder string, dataFileTag string, dataExtension DataExtension, compression seg.FileCompression) *E3SnapSchemaBuilder {
 	b.e.dataFileTag = dataFileTag
 	b.e.dataExtension = dataExtension
+	b.e.dataFileCompression = compression
 	b.e.dataFileMetadata = &_fileMetadata{
 		folder:    dataFolder,
 		supported: true,
