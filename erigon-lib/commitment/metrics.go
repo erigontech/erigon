@@ -191,6 +191,15 @@ func (processAccount *AccountMetrics) Reset() {
 	processAccount.AccountStats = make(map[string]*AccountStats)
 }
 
+func (processAccount *AccountMetrics) KeyRegister(plainKey []byte) {
+	if !collectCommitmentMetrics {
+		return
+	}
+	processAccount.UpdatesInc(plainKey)
+	processAccount.currentPlainKey = plainKey
+	processAccount.UpdatesStorageInc(plainKey)
+}
+
 func (processAccount *AccountMetrics) UpdatesInc(plainKey []byte) {
 	if collectCommitmentMetrics && plainKey != nil {
 		processAccount.m.Lock()

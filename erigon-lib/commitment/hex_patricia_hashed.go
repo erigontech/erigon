@@ -2064,9 +2064,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 		default:
 		}
-		hph.metrics.Accounts.UpdatesInc(plainKey)
-		hph.metrics.Accounts.currentPlainKey = plainKey
-		hph.metrics.Accounts.UpdatesStorageInc(plainKey)
+		hph.metrics.Accounts.KeyRegister(plainKey)
 		if hph.trace {
 			fmt.Printf("\n%d/%d) plainKey [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
 		}
