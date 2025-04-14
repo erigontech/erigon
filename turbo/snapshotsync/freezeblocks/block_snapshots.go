@@ -774,8 +774,12 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 	return 0, nil
 }
 
-// DumpHeaders - [from, to)
 func DumpHeaders(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blockTo uint64, _ firstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+	return DumpHeadersRaw(ctx, db, nil, blockFrom, blockTo, nil, collect, workers, lvl, logger, false)
+}
+
+// DumpHeaders - [from, to)
+func DumpHeadersRaw(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blockTo uint64, _ firstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, test bool) (uint64, error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -786,7 +790,7 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, bl
 	)
 
 	// Make sure the canonical chain is not broken.
-	if blockFrom > 0 {
+	if blockFrom > 0 && !test {
 		if err := db.View(ctx, func(tx kv.Tx) error {
 			blockNum := blockFrom - 1
 			h, err := rawdb.ReadCanonicalHash(tx, blockNum)
@@ -824,7 +828,7 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, bl
 			return false, err
 		}
 		// Make sure the canonical chain is not broken.
-		if prevHash != emptyHash && prevHash != h.ParentHash {
+		if prevHash != emptyHash && prevHash != h.ParentHash && !test {
 			return false, fmt.Errorf("header hash mismatch: %d, %x != %x", blockNum, prevHash, h.ParentHash)
 		}
 		prevHash = h.Hash()
@@ -856,6 +860,9 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, bl
 
 	// Make sure the canonical chain is not broken.
 	if err := db.View(ctx, func(tx kv.Tx) error {
+		if test {
+			return nil
+		}
 		blockNum := blockTo
 		h := rawdb.ReadHeaderByNumber(tx, blockNum)
 		if h == nil {

@@ -173,28 +173,28 @@ func TestDump(t *testing.T) {
 		t.Run("headers", func(t *testing.T) {
 			require := require.New(t)
 			var nonceList []uint64
-			_, err := freezeblocks.DumpHeaders(m.Ctx, m.DB, m.ChainConfig, 0, uint64(2*test.chainSize), nil, func(v []byte) error {
+			_, err := freezeblocks.DumpHeadersRaw(m.Ctx, m.DB, m.ChainConfig, 0, uint64(2*test.chainSize), nil, func(v []byte) error {
 				h := types.Header{}
 				if err := rlp.DecodeBytes(v[1:], &h); err != nil {
 					return err
 				}
 				nonceList = append(nonceList, h.Number.Uint64())
 				return nil
-			}, 1, log.LvlInfo, log.New())
+			}, 1, log.LvlInfo, log.New(), true)
 			require.NoError(err)
 			require.Equal(nonceRange(0, test.chainSize), nonceList)
 		})
 		t.Run("headers_not_from_zero", func(t *testing.T) {
 			require := require.New(t)
 			var nonceList []uint64
-			_, err := freezeblocks.DumpHeaders(m.Ctx, m.DB, m.ChainConfig, 2, uint64(test.chainSize), nil, func(v []byte) error {
+			_, err := freezeblocks.DumpHeadersRaw(m.Ctx, m.DB, m.ChainConfig, 2, uint64(test.chainSize), nil, func(v []byte) error {
 				h := types.Header{}
 				if err := rlp.DecodeBytes(v[1:], &h); err != nil {
 					return err
 				}
 				nonceList = append(nonceList, h.Number.Uint64())
 				return nil
-			}, 1, log.LvlInfo, log.New())
+			}, 1, log.LvlInfo, log.New(), true)
 			require.NoError(err)
 			require.Equal(nonceRange(2, test.chainSize-1), nonceList)
 		})
