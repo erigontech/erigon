@@ -69,8 +69,8 @@ type Transaction interface {
 	GetBlobGas() uint64
 	GetValue() *uint256.Int
 	GetTo() *libcommon.Address
-	AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error)
-	WithSignature(signer Signer, sig []byte) (Transaction, error)
+	AsMessage(s ISigner, baseFee *big.Int, rules *chain.Rules) (*Message, error)
+	WithSignature(signer ISigner, sig []byte) (Transaction, error)
 	Hash() libcommon.Hash
 	SigningHash(chainID *big.Int) libcommon.Hash
 	GetData() []byte
@@ -88,7 +88,7 @@ type Transaction interface {
 	// Sender may cache the address, allowing it to be used regardless of
 	// signing method. The cache is invalidated if the cached signer does
 	// not match the signer used in the current call.
-	Sender(Signer) (libcommon.Address, error)
+	Sender(ISigner) (libcommon.Address, error)
 	cachedSender() (libcommon.Address, bool)
 	GetSender() (libcommon.Address, bool)
 	SetSender(libcommon.Address)

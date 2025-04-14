@@ -155,7 +155,7 @@ func (tx *DynamicFeeTransaction) payloadSize() (payloadSize int, nonceLen, gasLe
 	return payloadSize, nonceLen, gasLen, accessListLen
 }
 
-func (tx *DynamicFeeTransaction) WithSignature(signer Signer, sig []byte) (Transaction, error) {
+func (tx *DynamicFeeTransaction) WithSignature(signer ISigner, sig []byte) (Transaction, error) {
 	cpy := tx.copy()
 	r, s, v, err := signer.SignatureValues(tx, sig)
 	if err != nil {
@@ -330,7 +330,7 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 }
 
 // AsMessage returns the transaction as a core.Message.
-func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
+func (tx *DynamicFeeTransaction) AsMessage(s ISigner, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
 	msg := Message{
 		nonce:      tx.Nonce,
 		gasLimit:   tx.GasLimit,
@@ -417,7 +417,7 @@ func (tx *DynamicFeeTransaction) cachedSender() (sender libcommon.Address, ok bo
 	}
 	return *s, true
 }
-func (tx *DynamicFeeTransaction) Sender(signer Signer) (libcommon.Address, error) {
+func (tx *DynamicFeeTransaction) Sender(signer ISigner) (libcommon.Address, error) {
 	if from := tx.from.Load(); from != nil {
 		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
 			return *from, nil

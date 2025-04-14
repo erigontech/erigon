@@ -62,7 +62,7 @@ func (stx *BlobTx) GetBlobGas() uint64 {
 	return fixedgas.BlobGasPerBlob * uint64(len(stx.BlobVersionedHashes))
 }
 
-func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
+func (stx *BlobTx) AsMessage(s ISigner, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
 	msg := Message{
 		nonce:      stx.Nonce,
 		gasLimit:   stx.GasLimit,
@@ -103,7 +103,7 @@ func (stx *BlobTx) cachedSender() (sender libcommon.Address, ok bool) {
 	return *s, true
 }
 
-func (stx *BlobTx) Sender(signer Signer) (libcommon.Address, error) {
+func (stx *BlobTx) Sender(signer ISigner) (libcommon.Address, error) {
 	if from := stx.from.Load(); from != nil {
 		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
 			return *from, nil

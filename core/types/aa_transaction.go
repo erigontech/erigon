@@ -67,7 +67,7 @@ func (tx *AccountAbstractionTransaction) Protected() bool {
 	return true
 }
 
-func (tx *AccountAbstractionTransaction) Sender(signer Signer) (common.Address, error) {
+func (tx *AccountAbstractionTransaction) Sender(signer ISigner) (common.Address, error) {
 	return *tx.SenderAddress, nil
 }
 
@@ -205,11 +205,11 @@ func (tx *AccountAbstractionTransaction) Type() byte {
 	return AccountAbstractionTxType
 }
 
-func (tx *AccountAbstractionTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
+func (tx *AccountAbstractionTransaction) AsMessage(s ISigner, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
 	return nil, errors.New("do not use")
 }
 
-func (tx *AccountAbstractionTransaction) WithSignature(signer Signer, sig []byte) (Transaction, error) {
+func (tx *AccountAbstractionTransaction) WithSignature(signer ISigner, sig []byte) (Transaction, error) {
 	return tx, nil
 }
 

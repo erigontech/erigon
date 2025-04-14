@@ -282,9 +282,9 @@ func TestEthClient(t *testing.T) {
 		// "AtFunctions": {
 		// 	func(t *testing.T) { testAtFunctions(t, client) }, // Disabled because getting pending block RPC call is not supported in Erigon
 		// },
-		// "TransactionSender": {
-		// 	func(t *testing.T) { testTransactionSender(t, client) },
-		// },
+		"TransactionSender": {
+			func(t *testing.T) { testTransactionSender(t, client) },
+		},
 	}
 
 	// t.Parallel()

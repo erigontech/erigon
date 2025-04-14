@@ -82,7 +82,7 @@ func (tx *SetCodeTransaction) payloadSize() (payloadSize, nonceLen, gasLen, acce
 	return
 }
 
-func (tx *SetCodeTransaction) WithSignature(signer Signer, sig []byte) (Transaction, error) {
+func (tx *SetCodeTransaction) WithSignature(signer ISigner, sig []byte) (Transaction, error) {
 	cpy := tx.copy()
 	r, s, v, err := signer.SignatureValues(tx, sig)
 	if err != nil {
@@ -114,7 +114,7 @@ func (tx *SetCodeTransaction) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
+func (tx *SetCodeTransaction) AsMessage(s ISigner, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
 	msg := Message{
 		nonce:      tx.Nonce,
 		gasLimit:   tx.GasLimit,
@@ -151,7 +151,7 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain
 	return &msg, err
 }
 
-func (tx *SetCodeTransaction) Sender(signer Signer) (libcommon.Address, error) {
+func (tx *SetCodeTransaction) Sender(signer ISigner) (libcommon.Address, error) {
 	if from := tx.from.Load(); from != nil {
 		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
 			return *from, nil

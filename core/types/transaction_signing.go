@@ -160,8 +160,8 @@ func LatestSignerForChainID(chainID *big.Int) *Signer {
 }
 
 // SignTx signs the transaction using the given signer and private key.
-func SignTx(txn Transaction, s Signer, prv *ecdsa.PrivateKey) (Transaction, error) {
-	h := txn.SigningHash(s.chainID.ToBig())
+func SignTx(txn Transaction, s ISigner, prv *ecdsa.PrivateKey) (Transaction, error) {
+	h := txn.SigningHash(s.ChainID().ToBig())
 	sig, err := crypto.Sign(h[:], prv)
 	if err != nil {
 		return nil, err
@@ -170,8 +170,8 @@ func SignTx(txn Transaction, s Signer, prv *ecdsa.PrivateKey) (Transaction, erro
 }
 
 // SignNewTx creates a transaction and signs it.
-func SignNewTx(prv *ecdsa.PrivateKey, s Signer, txn Transaction) (Transaction, error) {
-	h := txn.SigningHash(s.chainID.ToBig())
+func SignNewTx(prv *ecdsa.PrivateKey, s ISigner, txn Transaction) (Transaction, error) {
+	h := txn.SigningHash(s.ChainID().ToBig())
 	sig, err := crypto.Sign(h[:], prv)
 	if err != nil {
 		return nil, err
@@ -181,7 +181,7 @@ func SignNewTx(prv *ecdsa.PrivateKey, s Signer, txn Transaction) (Transaction, e
 
 // MustSignNewTx creates a transaction and signs it.
 // This panics if the transaction cannot be signed.
-func MustSignNewTx(prv *ecdsa.PrivateKey, s Signer, txn Transaction) Transaction {
+func MustSignNewTx(prv *ecdsa.PrivateKey, s ISigner, txn Transaction) Transaction {
 	tx1, err := SignNewTx(prv, s, txn)
 	if err != nil {
 		panic(err)
@@ -208,6 +208,7 @@ func Sender(signer ISigner, tx Transaction) (common.Address, error) {
 	if err != nil {
 		return common.Address{}, err
 	}
+	tx.Sender(signer)
 	return addr, nil
 }
 
@@ -217,12 +218,12 @@ type ISigner interface {
 
 	// SignatureValues returns the raw R, S, V values corresponding to the
 	// given signature.
-	SignatureValues(tx *Transaction, sig []byte) (r, s, v *big.Int, err error)
-	ChainID() *big.Int
+	SignatureValues(tx Transaction, sig []byte) (r, s, v *uint256.Int, err error)
+	ChainID() *uint256.Int
 
 	// Hash returns 'signature hash', i.e. the transaction hash that is signed by the
 	// private key. This hash does not uniquely identify the transaction.
-	Hash(tx *Transaction) common.Hash
+	Hash(tx Transaction) common.Hash
 
 	// Equal returns true if the given signer is the same as the receiver.
 	Equal(ISigner) bool
@@ -376,16 +377,23 @@ func (sg Signer) ChainID() *uint256.Int {
 	return &sg.chainID
 }
 
+func (sg Signer) Hash(txn Transaction) common.Hash {
+	h := txn.SigningHash(sg.ChainID().ToBig())
+	return h
+}
+
 // Equal returns true if the given signer is the same as the receiver.
-func (sg Signer) Equal(other Signer) bool {
-	return sg.chainID.Eq(&other.chainID) &&
-		sg.malleable == other.malleable &&
-		sg.unprotected == other.unprotected &&
-		sg.protected == other.protected &&
-		sg.accessList == other.accessList &&
-		sg.dynamicFee == other.dynamicFee &&
-		sg.blob == other.blob &&
-		sg.setCode == other.setCode
+func (sg Signer) Equal(other ISigner) bool {
+	// we can only compare it to a signer of the same type, so have to use type casting
+	otherSigner, ok := other.(Signer)
+	return ok && sg.chainID.Eq(&otherSigner.chainID) &&
+		sg.malleable == otherSigner.malleable &&
+		sg.unprotected == otherSigner.unprotected &&
+		sg.protected == otherSigner.protected &&
+		sg.accessList == otherSigner.accessList &&
+		sg.dynamicFee == otherSigner.dynamicFee &&
+		sg.blob == otherSigner.blob &&
+		sg.setCode == otherSigner.setCode
 }
 
 func decodeSignature(sig []byte) (r, s, v *uint256.Int) {

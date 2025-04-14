@@ -18,10 +18,10 @@ package ethclient
 
 import (
 	"errors"
-	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/holiman/uint256"
 )
 
 // senderFromServer is a types.Signer that remembers the sender address returned by the RPC
@@ -51,12 +51,12 @@ func (s *senderFromServer) Equal(other types.ISigner) bool {
 	return ok && os.blockhash == s.blockhash
 }
 
-func (s *senderFromServer) ChainID() *big.Int {
+func (s *senderFromServer) ChainID() *uint256.Int {
 	panic("can't sign with senderFromServer")
 }
-func (s *senderFromServer) Hash(tx *types.Transaction) common.Hash {
+func (s *senderFromServer) Hash(tx types.Transaction) common.Hash {
 	panic("can't sign with senderFromServer")
 }
-func (s *senderFromServer) SignatureValues(tx *types.Transaction, sig []byte) (R, S, V *big.Int, err error) {
+func (s *senderFromServer) SignatureValues(tx types.Transaction, sig []byte) (R, S, V *uint256.Int, err error) {
 	panic("can't sign with senderFromServer")
 }

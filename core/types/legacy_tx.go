@@ -342,7 +342,7 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
 }
 
 // AsMessage returns the transaction as a core.Message.
-func (tx *LegacyTx) AsMessage(s Signer, _ *big.Int, _ *chain.Rules) (*Message, error) {
+func (tx *LegacyTx) AsMessage(s ISigner, _ *big.Int, _ *chain.Rules) (*Message, error) {
 	msg := Message{
 		nonce:      tx.Nonce,
 		gasLimit:   tx.GasLimit,
@@ -361,7 +361,7 @@ func (tx *LegacyTx) AsMessage(s Signer, _ *big.Int, _ *chain.Rules) (*Message, e
 	return &msg, err
 }
 
-func (tx *LegacyTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
+func (tx *LegacyTx) WithSignature(signer ISigner, sig []byte) (Transaction, error) {
 	cpy := tx.copy()
 	r, s, v, err := signer.SignatureValues(tx, sig)
 	if err != nil {
@@ -430,7 +430,7 @@ func (tx *LegacyTx) cachedSender() (sender libcommon.Address, ok bool) {
 	}
 	return *s, true
 }
-func (tx *LegacyTx) Sender(signer Signer) (libcommon.Address, error) {
+func (tx *LegacyTx) Sender(signer ISigner) (libcommon.Address, error) {
 	if from := tx.from.Load(); from != nil {
 		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
 			return *from, nil
