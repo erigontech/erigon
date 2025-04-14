@@ -274,6 +274,24 @@ func (tx *rpcTransaction) UnmarshalJSON(msg []byte) error {
 			return err
 		}
 		tx.tx = &legacyTx
+	case types.AccessListTxType:
+		var accessListTx types.AccessListTx
+		err := json.Unmarshal(msg, &accessListTx)
+		if err != nil {
+			return err
+		}
+	case types.DynamicFeeTxType:
+		var dynamicFeeTx types.DynamicFeeTransaction
+		err := json.Unmarshal(msg, &dynamicFeeTx)
+		if err != nil {
+			return err
+		}
+	case types.SetCodeTxType:
+		var setCodeTx types.SetCodeTransaction
+		err := json.Unmarshal(msg, &setCodeTx)
+		if err != nil {
+			return err
+		}
 	default:
 		return errors.New("unexpected transaction type")
 
