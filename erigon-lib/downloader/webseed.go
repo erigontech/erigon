@@ -34,7 +34,6 @@ import (
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/hashicorp/go-retryablehttp"
 	"github.com/pelletier/go-toml/v2"
 	"golang.org/x/sync/errgroup"
@@ -617,9 +616,6 @@ func nameAndHashWhitelisted(fileName, fileHash string, whitelist snapcfg.Preveri
 	fileName = strings.TrimSuffix(fileName, ".torrent")
 
 	for i := 0; i < len(whitelist); i++ {
-		if whitelist[i].Name == fileName && strings.Contains(fileName, "salt-bloc") {
-			log.Warn("[dbg] see1", "fileName", fileName, "Hash", whitelist[i].Hash == fileHash, "stk", dbg.Stack())
-		}
 		if whitelist[i].Name == fileName && whitelist[i].Hash == fileHash {
 			return true
 		}
