@@ -220,7 +220,7 @@ func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx
 			_min, _ := txNumsReader.Min(tx, blockNum)
 			_max, _ := txNumsReader.Max(tx, blockNum)
 
-			if txNum != _max && cfg.ChainConfig.Bor != nil {
+			if cfg.ChainConfig.Bor == nil || (cfg.ChainConfig.Bor != nil && txNum != _max) {
 				err := fmt.Errorf("bad receipt at txnum: %d, block: %d(%d-%d), cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, _min, _max, cumGasUsed, prevCumGasUsed)
 				log.Warn(err.Error())
 				return err
