@@ -350,6 +350,14 @@ type blockExecMetrics struct {
 	FinalizeDuration blockDuration
 }
 
+func newBlockExecMetrics() *blockExecMetrics {
+	return &blockExecMetrics{
+		UsedGas:          blockCount{Ema: metrics.NewEma[uint64](0, 0.3)},
+		Duration:         blockDuration{Ema: metrics.NewEma[time.Duration](0, 0.3)},
+		FinalizeDuration: blockDuration{Ema: metrics.NewEma[time.Duration](0, 0.3)},
+	}
+}
+
 type blockDuration struct {
 	atomic.Int64
 	Ema *metrics.EMA[time.Duration]
@@ -1422,6 +1430,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	pe.in = exec.NewQueueWithRetry(100_000)
 
 	pe.taskExecMetrics = exec3.NewWorkerMetrics()
+	pe.blockExecMetrics = newBlockExecMetrics()
 
 	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers = exec3.NewWorkersPool(
 		ctx, pe.accumulator, true, pe.cfg.db, nil, nil, nil, pe.in,
