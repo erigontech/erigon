@@ -593,6 +593,10 @@ func (a *ApiHandler) produceBeaconBody(
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		start := time.Now()
+		defer func() {
+			log.Info("BlockProduction: ForkChoiceUpdate&GetPayload took", "duration", time.Since(start))
+		}()
 		timeoutForBlockBuilding := 2 * time.Second // keep asking for 2 seconds for block
 		retryTime := 10 * time.Millisecond
 		secsDiff := (targetSlot - baseBlock.Slot) * a.beaconChainCfg.SecondsPerSlot
@@ -760,6 +764,10 @@ func (a *ApiHandler) produceBeaconBody(
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		start := time.Now()
+		defer func() {
+			log.Info("BlockProduction: GetSyncAggregate took", "duration", time.Since(start))
+		}()
 		beaconBody.SyncAggregate, err = a.syncMessagePool.GetSyncAggregate(targetSlot-1, blockRoot)
 		if err != nil {
 			log.Error("BlockProduction: Failed to get sync aggregate", "err", err)
@@ -769,6 +777,10 @@ func (a *ApiHandler) produceBeaconBody(
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		start := time.Now()
+		defer func() {
+			log.Info("BlockProduction: GetBlockOperations&findBestAttestations took", "duration", time.Since(start))
+		}()
 		beaconBody.AttesterSlashings, beaconBody.ProposerSlashings, beaconBody.VoluntaryExits, beaconBody.ExecutionChanges = a.getBlockOperations(
 			baseState,
 			targetSlot,
