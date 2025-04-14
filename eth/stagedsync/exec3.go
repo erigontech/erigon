@@ -710,7 +710,7 @@ Loop:
 		}
 		if cfg.syncCfg.PersistReceipts > 0 {
 			if len(txTasks) > 0 && txTasks[0].BlockReceipts != nil {
-				if err := rawdb.WriteReceiptsCache(doms, txTasks[0].BlockNum, txTasks[0].BlockHash, txTasks[0].BlockReceipts); err != nil {
+				if err := rawdb.WriteReceiptsCache(executor.domains(), txTasks[0].BlockNum, txTasks[0].BlockHash, txTasks[0].BlockReceipts); err != nil {
 					return err
 				}
 			}
