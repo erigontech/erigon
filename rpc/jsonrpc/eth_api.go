@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/kv/prune"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core"
@@ -52,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 // EthAPI is a collection of functions that are exposed in the
@@ -134,6 +136,7 @@ type BaseAPI struct {
 	_pruneMode   atomic.Pointer[prune.Mode]
 
 	_blockReader services.FullBlockReader
+	_txNumReader rawdbv3.TxNumsReader
 	_txnReader   services.TxnReader
 	_engine      consensus.EngineReader
 
@@ -165,6 +168,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		blocksLRU:           blocksLRU,
 		_blockReader:        blockReader,
 		_txnReader:          blockReader,
+		_txNumReader:        rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(context.Background(), blockReader)),
 		evmCallTimeout:      evmCallTimeout,
 		_engine:             engine,
 		receiptsGenerator:   receipts.NewGenerator(blockReader, engine),

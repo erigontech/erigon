@@ -92,7 +92,6 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 	}
 	defer tx.Rollback()
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
 	number, err := api._blockReader.HeaderNumber(ctx, tx, blockHash)
 	if err != nil {
 		return StorageRangeResult{}, err
@@ -100,7 +99,7 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 	if number == nil {
 		return StorageRangeResult{}, nil
 	}
-	minTxNum, err := txNumsReader.Min(tx, *number)
+	minTxNum, err := api._txNumReader.Min(tx, *number)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
@@ -188,8 +187,6 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 		return nil, err
 	}
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-
 	// forces negative numbers to fail (too large) but allows zero
 	startNum := uint64(startNumber.Int64())
 	if startNum > latestBlock {
@@ -211,11 +208,11 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 		return nil, fmt.Errorf("start block (%d) must be less than or equal to end block (%d)", startNum, endNum)
 	}
 	//[from, to)
-	startTxNum, err := txNumsReader.Min(tx, startNum)
+	startTxNum, err := api._txNumReader.Min(tx, startNum)
 	if err != nil {
 		return nil, err
 	}
-	endTxNum, err := txNumsReader.Min(tx, endNum)
+	endTxNum, err := api._txNumReader.Min(tx, endNum)
 	if err != nil {
 		return nil, err
 	}
@@ -255,8 +252,6 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 	}
 	defer tx.Rollback()
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-
 	startBlock, err := api.blockByHashWithSenders(ctx, tx, startHash)
 	if err != nil {
 		return nil, err
@@ -283,11 +278,11 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 	}
 
 	//[from, to)
-	startTxNum, err := txNumsReader.Min(tx, startNum)
+	startTxNum, err := api._txNumReader.Min(tx, startNum)
 	if err != nil {
 		return nil, err
 	}
-	endTxNum, err := txNumsReader.Min(tx, endNum)
+	endTxNum, err := api._txNumReader.Min(tx, endNum)
 	if err != nil {
 		return nil, err
 	}
@@ -300,8 +295,6 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 		return nil, err
 	}
 	defer tx.Rollback()
-
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
 
 	number, err := api._blockReader.HeaderNumber(ctx, tx, blockHash)
 	if err != nil {
@@ -322,7 +315,7 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 		return nil, errors.New("block hash is not canonical")
 	}
 
-	minTxNum, err := txNumsReader.Min(tx, *number)
+	minTxNum, err := api._txNumReader.Min(tx, *number)
 	if err != nil {
 		return nil, err
 	}
@@ -506,8 +499,6 @@ func (api *PrivateDebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash c
 		return nil, err
 	}
 
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-
 	// Private API returns 0 if transaction is not found.
 	isBorStateSyncTx := blockNum == 0 && chainConfig.Bor != nil
 	if isBorStateSyncTx {
@@ -526,7 +517,7 @@ func (api *PrivateDebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash c
 		return nil, nil
 	}
 
-	txNumMin, err := txNumsReader.Min(tx, blockNum)
+	txNumMin, err := api._txNumReader.Min(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}

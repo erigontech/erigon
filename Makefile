@@ -303,8 +303,13 @@ gencodec:
 graphql:
 	PATH=$(GOBIN):$(PATH) cd ./cmd/rpcdaemon/graphql && go run github.com/99designs/gqlgen .
 
+## grpc:                              generate grpc and protobuf code
+grpc:
+	@cd erigon-lib && $(MAKE) grpc
+	@cd txnprovider/shutter && $(MAKE) proto
+
 ## gen:                               generate all auto-generated code in the codebase
-gen: mocks solc abigen gencodec graphql
+gen: mocks solc abigen gencodec graphql grpc
 	@cd erigon-lib && $(MAKE) gen
 
 ## bindings:                          generate test contracts and core contracts
