@@ -335,7 +335,7 @@ func TestReferencingIntegrityChecker(t *testing.T) {
 	dataCount, _, _, _ := populateFiles2(t, dirs, "accounts", accountsR, dirs.SnapDomain, []testFileRange{{0, 1}, {1, 2}, {0, 2}})
 	require.Positive(t, dataCount)
 	require.NoError(t, accountsR.OpenFolder())
-	require.Len(t, accountsR.dirtyFiles, 3)
+	require.Equal(t, 3, accountsR.dirtyFiles.Len())
 
 	dataCount, _, _, _ = populateFiles2(t, dirs, "commitment", commitmentR, dirs.SnapDomain, []testFileRange{{0, 1}, {1, 2}})
 	require.Positive(t, dataCount)
@@ -344,7 +344,7 @@ func TestReferencingIntegrityChecker(t *testing.T) {
 	accountsR.RecalcVisibleFiles(RootNum(MaxUint64))
 	acf := accountsR.VisibleFiles()
 
-	require.Equal(t, 0, acf[0].startTxNum)
+	require.Equal(t, uint64(0), acf[0].startTxNum)
 	require.Equal(t, 1*stepSize, acf[0].endTxNum)
 	require.Equal(t, 1*stepSize, acf[1].startTxNum)
 	require.Equal(t, 2*stepSize, acf[1].endTxNum)
@@ -352,7 +352,7 @@ func TestReferencingIntegrityChecker(t *testing.T) {
 	commitmentR.RecalcVisibleFiles(RootNum(MaxUint64))
 	ccf := commitmentR.VisibleFiles()
 
-	require.Equal(t, 0, ccf[0].startTxNum)
+	require.Equal(t, uint64(0), ccf[0].startTxNum)
 	require.Equal(t, 1*stepSize, ccf[0].endTxNum)
 	require.Equal(t, 1*stepSize, ccf[1].startTxNum)
 
@@ -360,7 +360,7 @@ func TestReferencingIntegrityChecker(t *testing.T) {
 
 	mergeFile, found := accountsR.dirtyFiles.Get(&filesItem{startTxNum: 0, endTxNum: 2 * stepSize})
 	require.True(t, found)
-	require.Equal(t, 0, mergeFile.startTxNum)
+	require.Equal(t, uint64(0), mergeFile.startTxNum)
 	require.Equal(t, 2*stepSize, mergeFile.endTxNum)
 
 	accountsR.CleanAfterMerge(mergeFile, acf)
@@ -376,12 +376,12 @@ func TestReferencingIntegrityChecker(t *testing.T) {
 	ccf = commitmentR.VisibleFiles()
 
 	require.Len(t, ccf, 1)
-	require.Equal(t, 0, ccf[0].startTxNum)
+	require.Equal(t, uint64(0), ccf[0].startTxNum)
 	require.Equal(t, 2*stepSize, ccf[0].endTxNum)
 
 	cMergeFile, found := commitmentR.dirtyFiles.Get(&filesItem{startTxNum: 0, endTxNum: 2 * stepSize})
 	require.True(t, found)
-	require.Equal(t, 0, cMergeFile.startTxNum)
+	require.Equal(t, uint64(0), cMergeFile.startTxNum)
 	require.Equal(t, 2*stepSize, cMergeFile.endTxNum)
 
 	// should remove commitment.0-1,1-2; thus freeing
@@ -391,7 +391,7 @@ func TestReferencingIntegrityChecker(t *testing.T) {
 	accountsR.RecalcVisibleFiles(RootNum(MaxUint64))
 	acf = accountsR.VisibleFiles()
 
-	require.Equal(t, 0, acf[0].startTxNum)
+	require.Equal(t, uint64(0), acf[0].startTxNum)
 	require.Equal(t, 2*stepSize, acf[0].endTxNum)
 	accountsR.CleanAfterMerge(mergeFile, acf)
 	fileExistsCheck(t, accountsR, 0, 1, false)
@@ -576,7 +576,11 @@ func populateFiles2(t *testing.T, dirs datadir.Dirs, name string, repo *Snapshot
 			allFiles.domainFiles = append(allFiles.domainFiles, repo.parser.ExistenceFile(v, from, to))
 		}
 		if acc.Has(AccessorHashMap) {
-			allFiles.domainFiles = append(allFiles.domainFiles, repo.parser.AccessorIdxFile(v, from, to, 0))
+			if containsSubstring(t, ae.AccessorExtensionKvi.String(), extensions) {
+				allFiles.domainFiles = append(allFiles.domainFiles, repo.parser.AccessorIdxFile(v, from, to, 0))
+			} else {
+				allFiles.accessorFiles = append(allFiles.accessorFiles, repo.parser.AccessorIdxFile(v, from, to, 0))
+			}
 		}
 	}
 
