@@ -1132,11 +1132,6 @@ func (sdc *SharedDomainsCommitmentContext) Close() {
 	sdc.updates.Close()
 }
 
-type cachedBranch struct {
-	data []byte
-	step uint64
-}
-
 func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, error) {
 	if !sdc.domainsOnly && sdc.limitReadAsOfTxNum > 0 {
 		branch, _, err := sdc.sharedDomains.aggTx.GetAsOf(sdc.sharedDomains.roTx, kv.CommitmentDomain, pref, sdc.limitReadAsOfTxNum)
@@ -1252,21 +1247,21 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 		u.Flags |= commitment.CodeUpdate
 		copy(u.CodeHash[:], ch)
 	}
-	if u.CodeHash != commitment.EmptyCodeHashArray {
-		// todo do we really need to read code and then hash it again once we have hash in account?)))
+	// if u.CodeHash != commitment.EmptyCodeHashArray {
+	// 	// todo do we really need to read code and then hash it again once we have hash in account?)))
 
-		code, err := sdc.readCode(plainKey)
-		if err != nil {
-			return nil, err
-		}
+	// 	code, err := sdc.readCode(plainKey)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
 
-		if len(code) > 0 {
-			copy(u.CodeHash[:], crypto.Keccak256(code))
-			u.Flags |= commitment.CodeUpdate
-		} else {
-			u.CodeHash = commitment.EmptyCodeHashArray
-		}
-	}
+	// 	if len(code) > 0 {
+	// 		copy(u.CodeHash[:], crypto.Keccak256(code))
+	// 		u.Flags |= commitment.CodeUpdate
+	// 	} else {
+	// 		u.CodeHash = commitment.EmptyCodeHashArray
+	// 	}
+	// }
 	return u, nil
 }
 
