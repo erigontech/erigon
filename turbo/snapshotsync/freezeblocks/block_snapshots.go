@@ -37,6 +37,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
+	"github.com/erigontech/erigon-lib/common"
 	common2 "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -778,6 +779,27 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, bl
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
+	// do hash sanity check
+	var (
+		prevHash  common.Hash
+		emptyHash common.Hash
+	)
+
+	// Make sure the canonical chain is not broken.
+	if blockFrom > 0 {
+		if err := db.View(ctx, func(tx kv.Tx) error {
+			blockNum := blockFrom - 1
+			h := rawdb.ReadHeaderByNumber(tx, blockNum)
+			if h == nil {
+				return fmt.Errorf("header not found: %d", blockNum)
+			}
+			prevHash = h.Hash()
+			return nil
+		}); err != nil {
+			return 0, err
+		}
+	}
+
 	key := make([]byte, 8+32)
 	from := hexutil.EncodeTs(blockFrom)
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
@@ -798,6 +820,11 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, bl
 		if err := rlp.DecodeBytes(dataRLP, &h); err != nil {
 			return false, err
 		}
+		// Make sure the canonical chain is not broken.
+		if prevHash != emptyHash && prevHash != h.ParentHash {
+			return false, fmt.Errorf("header hash mismatch: %d, %x != %x", blockNum, prevHash, h.ParentHash)
+		}
+		prevHash = h.Hash()
 
 		value := make([]byte, len(dataRLP)+1) // first_byte_of_header_hash + header_rlp
 		value[0] = h.Hash()[0]
@@ -820,6 +847,21 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, bl
 		default:
 		}
 		return true, nil
+	}); err != nil {
+		return 0, err
+	}
+
+	// Make sure the canonical chain is not broken.
+	if err := db.View(ctx, func(tx kv.Tx) error {
+		blockNum := blockTo
+		h := rawdb.ReadHeaderByNumber(tx, blockNum)
+		if h == nil {
+			return fmt.Errorf("header not found: %d", blockNum)
+		}
+		if prevHash != h.ParentHash {
+			return fmt.Errorf("header hash mismatch: %d, %x != %x", blockNum, prevHash, h.ParentHash)
+		}
+		return nil
 	}); err != nil {
 		return 0, err
 	}
