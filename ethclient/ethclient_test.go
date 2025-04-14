@@ -270,9 +270,9 @@ func TestEthClient(t *testing.T) {
 		"GetBlock": {
 			func(t *testing.T) { testGetBlock(t, client) },
 		},
-		// "StatusFunctions": {
-		// 	func(t *testing.T) { testStatusFunctions(t, client) },
-		// },
+		"StatusFunctions": {
+			func(t *testing.T) { testStatusFunctions(t, client) },
+		},
 		"CallContract": {
 			func(t *testing.T) { testCallContract(t, client) },
 		},
@@ -507,7 +507,7 @@ func testStatusFunctions(t *testing.T, client *rpc.Client) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if blobBaseFee.Cmp(big.NewInt(1)) != 0 {
+	if blobBaseFee.Cmp(big.NewInt(int64(*getChainConfig().MinBlobGasPrice))) != 0 {
 		t.Fatalf("unexpected blob base fee: %v", blobBaseFee)
 	}
 
@@ -526,9 +526,9 @@ func testStatusFunctions(t *testing.T, client *rpc.Client) {
 		},
 		BaseFee: []*big.Int{
 			big.NewInt(765625000),
-			big.NewInt(671627818),
+			big.NewInt(670725782),
 		},
-		GasUsedRatio: []float64{0.008912678667376286},
+		GasUsedRatio: []float64{0.0042},
 	}
 	if !reflect.DeepEqual(history, want) {
 		t.Fatalf("FeeHistory result doesn't match expected: (got: %v, want: %v)", history, want)

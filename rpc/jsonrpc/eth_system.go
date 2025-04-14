@@ -196,7 +196,7 @@ func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex,
 	return results, nil
 }
 
-// BlobBaseFee returns the base fee for blob gas at the current head.
+// BlobBaseFee (eth_blobBaseFee) returns the base fee for blob gas at the current head.
 func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
 	// read current header
 	tx, err := api.db.BeginTemporalRo(ctx)
