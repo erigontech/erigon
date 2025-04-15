@@ -206,8 +206,8 @@ var Schema = map[kv.Domain]domainCfg{
 
 			iiCfg: iiCfg{
 				keysTable: kv.TblReceiptCacheHistoryKeys, valuesTable: kv.TblReceiptCacheIdx,
-				withExistence: false, compressorCfg: seg.DefaultCfg,
-				filenameBase: kv.ReceiptCacheDomain.String(),
+				compressorCfg: seg.DefaultCfg,
+				filenameBase:  kv.ReceiptCacheDomain.String(),
 			},
 		},
 	},
