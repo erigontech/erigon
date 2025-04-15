@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/chain/networkid"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -113,7 +114,7 @@ func TestBeaconBody(t *testing.T) {
 }
 
 func TestBeaconBlockJson(t *testing.T) {
-	_, bc := clparams.GetConfigsByNetwork(clparams.GnosisNetwork)
+	_, bc := clparams.GetConfigsByNetwork(networkid.GnosisChainID)
 	block := NewSignedBeaconBlock(bc, clparams.DenebVersion)
 	block.Block.Body.Version = clparams.DenebVersion
 	err := json.Unmarshal(beaconBodyJSON, block)

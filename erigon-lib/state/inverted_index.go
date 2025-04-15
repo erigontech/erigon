@@ -51,7 +51,7 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
 	"github.com/erigontech/erigon-lib/seg"
-	ae "github.com/erigontech/erigon-lib/state/appendable_extras"
+	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 )
 
 type InvertedIndex struct {
@@ -88,7 +88,6 @@ type iiCfg struct {
 	valuesTable  string // bucket name for index values;  k -> txnNum_u64 , Needs to be table with DupSort
 	name         kv.InvertedIdx
 
-	withExistence bool                // defines if existence index should be built
 	compression   seg.FileCompression // compression type for inverted index keys and values
 	compressorCfg seg.Cfg             // advanced configuration for compressor encodings
 
@@ -207,12 +206,12 @@ func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {
 	}
 }
 
-type Accessors = ae.Accessors
+type Accessors = ee.Accessors
 
 const (
-	AccessorBTree     Accessors = ae.AccessorBTree
-	AccessorHashMap   Accessors = ae.AccessorHashMap
-	AccessorExistence Accessors = ae.AccessorExistence
+	AccessorBTree     Accessors = ee.AccessorBTree
+	AccessorHashMap   Accessors = ee.AccessorHashMap
+	AccessorExistence Accessors = ee.AccessorExistence
 )
 
 func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {

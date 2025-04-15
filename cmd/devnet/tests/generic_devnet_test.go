@@ -28,9 +28,9 @@ import (
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
 	"github.com/erigontech/erigon/cmd/devnet/admin"
 	contracts_steps "github.com/erigontech/erigon/cmd/devnet/contracts/steps"
-	"github.com/erigontech/erigon/cmd/devnet/requests"
 	"github.com/erigontech/erigon/cmd/devnet/services"
 	"github.com/erigontech/erigon/cmd/devnet/transactions"
+	"github.com/erigontech/erigon/rpc/requests"
 )
 
 func testDynamicTx(t *testing.T, ctx context.Context) {

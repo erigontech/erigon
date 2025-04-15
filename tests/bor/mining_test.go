@@ -139,7 +139,7 @@ func TestMiningBenchmark(t *testing.T) {
 			break
 		}
 
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	timeToExecute := time.Since(start)

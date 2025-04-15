@@ -5,7 +5,7 @@ import (
 
 	rand2 "golang.org/x/exp/rand"
 
-	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/execution/consensus"
 )
 
 const (

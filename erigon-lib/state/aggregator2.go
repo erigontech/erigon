@@ -130,8 +130,8 @@ var Schema = SchemaGen{
 
 			iiCfg: iiCfg{
 				keysTable: kv.TblAccountHistoryKeys, valuesTable: kv.TblAccountIdx,
-				withExistence: false, compressorCfg: seg.DefaultCfg,
-				filenameBase: kv.AccountsDomain.String(), //TODO: looks redundant
+				compressorCfg: seg.DefaultCfg,
+				filenameBase:  kv.AccountsDomain.String(), //TODO: looks redundant
 			},
 		},
 	},
@@ -152,8 +152,8 @@ var Schema = SchemaGen{
 
 			iiCfg: iiCfg{
 				keysTable: kv.TblStorageHistoryKeys, valuesTable: kv.TblStorageIdx,
-				withExistence: false, compressorCfg: seg.DefaultCfg,
-				filenameBase: kv.StorageDomain.String(),
+				compressorCfg: seg.DefaultCfg,
+				filenameBase:  kv.StorageDomain.String(),
 			},
 		},
 	},
@@ -174,9 +174,9 @@ var Schema = SchemaGen{
 			historyIdx:         kv.CodeHistoryIdx,
 
 			iiCfg: iiCfg{
-				withExistence: false, compressorCfg: seg.DefaultCfg,
 				keysTable: kv.TblCodeHistoryKeys, valuesTable: kv.TblCodeIdx,
-				filenameBase: kv.CodeDomain.String(),
+				compressorCfg: seg.DefaultCfg,
+				filenameBase:  kv.CodeDomain.String(),
 			},
 		},
 	},
@@ -200,8 +200,8 @@ var Schema = SchemaGen{
 
 			iiCfg: iiCfg{
 				keysTable: kv.TblCommitmentHistoryKeys, valuesTable: kv.TblCommitmentIdx,
-				withExistence: false, compressorCfg: seg.DefaultCfg,
-				filenameBase: kv.CommitmentDomain.String(),
+				compressorCfg: seg.DefaultCfg,
+				filenameBase:  kv.CommitmentDomain.String(),
 			},
 		},
 	},
@@ -222,12 +222,22 @@ var Schema = SchemaGen{
 
 			iiCfg: iiCfg{
 				keysTable: kv.TblReceiptHistoryKeys, valuesTable: kv.TblReceiptIdx,
-				withExistence: false, compressorCfg: seg.DefaultCfg,
-				filenameBase: kv.ReceiptDomain.String(),
+				compressorCfg: seg.DefaultCfg,
+				filenameBase:  kv.ReceiptDomain.String(),
 			},
 		},
 	},
-	LogAddrIdx: iiCfg{
+}
+
+func EnableHistoricalCommitment() {
+	cfg := Schema[kv.CommitmentDomain]
+	cfg.hist.historyDisabled = false
+	cfg.hist.snapshotsDisabled = false
+	Schema[kv.CommitmentDomain] = cfg
+}
+
+var StandaloneIISchema = map[kv.InvertedIdx]iiCfg{
+	kv.LogAddrIdx: {
 		filenameBase: kv.FileLogAddressIdx, keysTable: kv.TblLogAddressKeys, valuesTable: kv.TblLogAddressIdx,
 
 		compression: seg.CompressNone,
