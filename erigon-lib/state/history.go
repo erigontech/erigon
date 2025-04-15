@@ -451,6 +451,9 @@ func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte, origin
 		original = []byte{}
 	}
 
+	if w.ii.name == kv.CommitmentHistoryIdx {
+		fmt.Printf("[dbg] alex: %t\n", w.compressSingleVal)
+	}
 	if w.compressSingleVal {
 		w.snappyWriteBuffer = growslice(w.snappyWriteBuffer, snappy.MaxEncodedLen(len(original)))
 		original = snappy.Encode(w.snappyWriteBuffer, original)
