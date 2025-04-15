@@ -1313,8 +1313,7 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[common.Hash
 // unfoldBranchNode returns true if unfolding has been done
 func (hph *HexPatriciaHashed) unfoldBranchNode(row, depth int, deleted bool) (bool, error) {
 	key := hexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
-	hph.metrics.LoadBranch.Add(1)
-	hph.metrics.Accounts.LoadBranchInc(hph.metrics.Accounts.currentPlainKey)
+	hph.metrics.Branch(hph.metrics.Accounts.currentPlainKey)
 	branchData, fileEndTxNum, err := hph.ctx.Branch(key)
 	if err != nil {
 		return false, err
@@ -2128,6 +2127,9 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	if hph.trace {
 		fmt.Printf("root hash %x updates %d\n", rootHash, updatesCount)
 	}
+
+	hph.metrics.CollectFileDepthStats(hph.hadToLoadL)
+
 	if dbg.KVReadLevelledMetrics {
 		log.Debug("commitment finished, counters updated (no reset)",
 			//"hadToLoad", common.PrettyCounter(hadToLoad.Load()), "skippedLoad", common.PrettyCounter(skippedLoad.Load()),

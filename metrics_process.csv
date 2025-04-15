@@ -1,8 +1,0 @@
-updates,address plainKey,account plainKeys,PatriciaContext.Branch(),PatriciaContext.Account(),PatriciaContext.Storage(),PatriciaContext.PutBranch(),unfold/fold calls,total unfolding time (ms),total folding time (ms),total processing time (ms)
-43668,13644,26969,136843,14650,34876,141843,170228,10128,2245,12635
-303,158,131,1478,161,159,1490,1763,34,9,46
-303,158,131,1478,161,159,1490,1763,3,4,9
-1386,548,794,5428,552,938,5515,6741,136,42,186
-590,239,335,2453,244,365,2470,3007,50,13,68
-1226,499,678,4974,510,773,5009,6159,107,26,140
-950,375,536,3866,382,614,3898,4780,81,25,112

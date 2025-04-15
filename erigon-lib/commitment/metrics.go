@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"encoding/hex"
 	"os"
+	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -38,6 +39,7 @@ type Metrics struct {
 	LoadAccount         atomic.Uint64
 	LoadStorage         atomic.Uint64
 	UpdateBranch        atomic.Uint64
+	LoadDepths          [6]uint64 // L0 AccountLoads, L0 StorageLoads, L1 AccountLoads, L1 StorageLoads, L2 AccountLoads, L2 StorageLoads
 	Unfolds             atomic.Uint64
 	TotalUnfoldingTime  time.Duration
 	TotalFoldingTime    time.Duration
@@ -59,6 +61,9 @@ func (metrics *Metrics) Headers() []string {
 		"PatriciaContext.Account()",
 		"PatriciaContext.Storage()",
 		"PatriciaContext.PutBranch()",
+		"L0 - Load Account/Storage",
+		"L1 - Load Account/Storage",
+		"L2 - Load Account/Storage",
 		"unfold/fold calls",
 		"total unfolding time (ms)",
 		"total folding time (ms)",
@@ -76,6 +81,9 @@ func (metrics *Metrics) Values() [][]string {
 			strconv.FormatUint(metrics.LoadAccount.Load(), 10),
 			strconv.FormatUint(metrics.LoadStorage.Load(), 10),
 			strconv.FormatUint(metrics.UpdateBranch.Load(), 10),
+			strconv.FormatUint(metrics.LoadDepths[0], 10) + "/" + strconv.FormatUint(metrics.LoadDepths[1], 10),
+			strconv.FormatUint(metrics.LoadDepths[2], 10) + "/" + strconv.FormatUint(metrics.LoadDepths[3], 10),
+			strconv.FormatUint(metrics.LoadDepths[4], 10) + "/" + strconv.FormatUint(metrics.LoadDepths[5], 10),
 			strconv.FormatUint(metrics.Unfolds.Load(), 10),
 			strconv.Itoa(int(metrics.TotalUnfoldingTime.Milliseconds())),
 			strconv.Itoa(int(metrics.TotalFoldingTime.Milliseconds())),
@@ -106,6 +114,22 @@ func (metrics *Metrics) Now() time.Time {
 	return time.Time{}
 }
 
+func (metrics *Metrics) CollectFileDepthStats(m map[uint64]skipStat) {
+	if collectCommitmentMetrics {
+		ends := make([]uint64, 0, len(m))
+		for k := range m {
+			ends = append(ends, k)
+		}
+		sort.Slice(ends, func(i, j int) bool { return ends[i] > ends[j] })
+		for i := 0; i < 3 && i < len(ends); i++ {
+			// get stats for specific file depth
+			v := m[ends[i]]
+			// write level i file stats - account and storage loads
+			metrics.LoadDepths[i*2], metrics.LoadDepths[i*2+1] = v.accLoaded, v.storLoaded
+		}
+	}
+}
+
 func (metrics *Metrics) Account(plainKey []byte) {
 	if collectCommitmentMetrics {
 		metrics.LoadAccount.Add(1)
@@ -117,6 +141,13 @@ func (metrics *Metrics) Storage(plainKey []byte) {
 	if collectCommitmentMetrics {
 		metrics.LoadStorage.Add(1)
 		metrics.Accounts.LoadStorageInc(plainKey)
+	}
+}
+
+func (metrics *Metrics) Branch(plainKey []byte) {
+	if collectCommitmentMetrics {
+		metrics.LoadBranch.Add(1)
+		metrics.Accounts.LoadBranchInc(plainKey)
 	}
 }
 
