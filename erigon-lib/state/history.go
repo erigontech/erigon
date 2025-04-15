@@ -520,7 +520,6 @@ type historyBufferedWriter struct {
 	largeValues bool
 
 	compressSingleVal bool
-	snappyReadBuffer  []byte
 	snappyWriteBuffer []byte
 
 	ii *InvertedIndexBufferedWriter
