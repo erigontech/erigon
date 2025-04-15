@@ -723,10 +723,10 @@ func (sd *SharedDomains) SetTrace(b bool) {
 }
 
 func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
-	if blockNum == 616861 {
-		fmt.Printf("blockNum %d\n", blockNum)
-		sd.SetTrace(true)
-	}
+	// if blockNum == 616861 {
+	// 	fmt.Printf("blockNum %d\n", blockNum)
+	// 	sd.SetTrace(true)
+	// }
 	rootHash, err = sd.sdCtx.ComputeCommitment(ctx, saveStateAfter, blockNum, logPrefix)
 	return
 }

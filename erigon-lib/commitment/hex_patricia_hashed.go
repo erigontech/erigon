@@ -1999,6 +1999,8 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 	return witnessTrie, rootHash, nil
 }
 
+var POIACC = common.FromHex("8ef5cf2cc3b5010e8f5815d8dca2a3643ad295f4")
+
 func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error) {
 	var (
 		m      runtime.MemStats
@@ -2021,6 +2023,10 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 
 		default:
+		}
+		if bytes.Equal(plainKey, POIACC) {
+			ki++
+			return nil
 		}
 
 		if hph.trace {

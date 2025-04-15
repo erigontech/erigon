@@ -640,7 +640,7 @@ func (st *StateTransition) refundGas(refundQuotient uint64) {
 	remaining := uint256.NewInt(st.gasRemaining)
 	remaining = remaining.Mul(remaining, st.gasPrice)
 
-	fmt.Printf("refund remaining gas %d to %x\n", remaining, st.msg.From())
+	fmt.Printf("[ST] refund remaining gas %d to %x\n", remaining, st.msg.From())
 	st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)
 
 	// Arbitrum: record the gas refund
