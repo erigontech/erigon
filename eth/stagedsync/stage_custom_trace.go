@@ -285,9 +285,9 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 				if txTask.TxIndex >= 0 {
 					receipt = txTask.BlockReceipts[txTask.TxIndex]
 				}
-				if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock); err != nil {
-					return err
-				}
+				//if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock); err != nil {
+				//	return err
+				//}
 			}
 
 			if txTask.Final { // block changed
@@ -298,15 +298,14 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 						return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
 					}
 					if len(lastReceipt.Logs) > 0 {
-						firstIndex := lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
-						receipt := types.Receipt{
-							CumulativeGasUsed:        lastReceipt.CumulativeGasUsed,
-							FirstLogIndexWithinBlock: uint32(firstIndex),
-						}
-						//log.Info("adding extra", "firstLog", firstIndex)
-						if err := rawtemporaldb.AppendReceipt(doms, &receipt, cumulativeBlobGasUsedInBlock); err != nil {
-							return err
-						}
+						//firstIndex := lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
+						//receipt := types.Receipt{
+						//	CumulativeGasUsed:        lastReceipt.CumulativeGasUsed,
+						//	FirstLogIndexWithinBlock: uint32(firstIndex),
+						//}
+						//if err := rawtemporaldb.AppendReceipt(doms, &receipt, cumulativeBlobGasUsedInBlock); err != nil {
+						//	return err
+						//}
 					}
 				}
 
