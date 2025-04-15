@@ -1316,6 +1316,8 @@ func decompressIfNeed(buf, v []byte, enabled bool) ([]byte, []byte, error) {
 	return buf, buf, nil
 }
 
+var RECEIPT_CACHE_SNAPPY = dbg.EnvBool("RECEIPT_CACHE_SNAPPY", true)
+
 func ReadReceiptsCache(tx kv.TemporalTx, block *types.Block, txNumReader rawdbv3.TxNumsReader) (res types.Receipts, err error) {
 	blockHash := block.Hash()
 	blockNum := block.NumberU64()
@@ -1354,11 +1356,10 @@ func ReadReceiptsCache(tx kv.TemporalTx, block *types.Block, txNumReader rawdbv3
 			return nil, nil
 		}
 
-		snappyReadBuffer, v, err = decompressIfNeed(snappyReadBuffer, v, true)
+		snappyReadBuffer, v, err = decompressIfNeed(snappyReadBuffer, v, RECEIPT_CACHE_SNAPPY)
 		if err != nil {
 			return nil, err
 		}
-		v = snappyReadBuffer
 
 		// Convert the receipts from their storage form to their internal representation
 		receipt := &types.ReceiptForStorage{}
@@ -1444,8 +1445,7 @@ func WriteReceiptsCache(tx kv.TemporalPutDel, blockNum uint64, blockHash common.
 
 			toWrite = buf.Bytes()
 
-			snappyWriteBuffer, toWrite = compressIfNeed(snappyWriteBuffer, toWrite, true)
-			toWrite = snappyWriteBuffer
+			snappyWriteBuffer, toWrite = compressIfNeed(snappyWriteBuffer, toWrite, RECEIPT_CACHE_SNAPPY)
 		}
 
 		//if err := tx.DomainPut(kv.ReceiptsCache, dbutils.ReceiptCacheKey(blockNum, blockHash, uint32(txnIndex)), nil, toWrite); err != nil {
