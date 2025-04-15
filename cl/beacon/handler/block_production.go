@@ -787,12 +787,15 @@ func (a *ApiHandler) produceBeaconBody(
 		)
 		beaconBody.Attestations = a.findBestAttestationsForBlockProduction(baseState)
 	}()
-
 	wg.Wait()
 	if executionPayload == nil {
 		return nil, 0, errors.New("failed to produce execution payload")
 	}
 	beaconBody.ExecutionPayload = executionPayload
+
+	attBytes, _ := json.Marshal(beaconBody.Attestations)
+	log.Info("BlockProduction: Attestations", "att", string(attBytes))
+
 	return beaconBody, executionValue, nil
 }
 
