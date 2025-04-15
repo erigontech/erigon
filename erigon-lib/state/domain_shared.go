@@ -904,11 +904,11 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 func (sd *SharedDomains) Tx() kv.Tx { return sd.roTx }
 
 type SharedDomainsCommitmentContext struct {
-	mu            sync.Mutex
+	mu            sync.Mutex // protects reads from sharedDomains when trie is concurrent
 	sharedDomains *SharedDomains
 	updates       *commitment.Updates
 	patriciaTrie  commitment.Trie
-	justRestored  atomic.Bool
+	justRestored  atomic.Bool // set to true when commitment trie was just restored from snapshot
 
 	limitReadAsOfTxNum uint64
 	domainsOnly        bool // if true, do not use history reader and limit to domain files only
@@ -936,9 +936,10 @@ func (sdc *SharedDomainsCommitmentContext) Close() {
 }
 
 func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, error) {
-	sdc.mu.Lock()
-	defer sdc.mu.Unlock()
-
+	if sdc.patriciaTrie.Variant() == commitment.VariantConcurrentHexPatricia {
+		sdc.mu.Lock()
+		defer sdc.mu.Unlock()
+	}
 	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update.
 	// Keep dereferenced version inside sd commitmentDomain map ready to read again
 	if !sdc.domainsOnly && sdc.limitReadAsOfTxNum > 0 {
@@ -975,15 +976,18 @@ func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte,
 	if sdc.sharedDomains.trace {
 		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
 	}
-	sdc.mu.Lock()
-	defer sdc.mu.Unlock()
-
+	if sdc.patriciaTrie.Variant() == commitment.VariantConcurrentHexPatricia {
+		sdc.mu.Lock()
+		defer sdc.mu.Unlock()
+	}
 	return sdc.sharedDomains.updateCommitmentData(prefixS, data, prevData, prevStep)
 }
 
 func (sdc *SharedDomainsCommitmentContext) readAccount(plainKey []byte) (encAccount []byte, err error) {
-	sdc.mu.Lock()
-	defer sdc.mu.Unlock()
+	if sdc.patriciaTrie.Variant() == commitment.VariantConcurrentHexPatricia {
+		sdc.mu.Lock()
+		defer sdc.mu.Unlock()
+	}
 
 	if sdc.limitReadAsOfTxNum > 0 { // read not from latest
 		if sdc.domainsOnly { // read from previous files
@@ -1001,8 +1005,10 @@ func (sdc *SharedDomainsCommitmentContext) readAccount(plainKey []byte) (encAcco
 }
 
 func (sdc *SharedDomainsCommitmentContext) readCode(plainKey []byte) (code []byte, err error) {
-	sdc.mu.Lock()
-	defer sdc.mu.Unlock()
+	if sdc.patriciaTrie.Variant() == commitment.VariantConcurrentHexPatricia {
+		sdc.mu.Lock()
+		defer sdc.mu.Unlock()
+	}
 
 	if sdc.limitReadAsOfTxNum > 0 {
 		if sdc.domainsOnly {
@@ -1021,8 +1027,10 @@ func (sdc *SharedDomainsCommitmentContext) readCode(plainKey []byte) (code []byt
 }
 
 func (sdc *SharedDomainsCommitmentContext) readStorage(plainKey []byte) (enc []byte, err error) {
-	sdc.mu.Lock()
-	defer sdc.mu.Unlock()
+	if sdc.patriciaTrie.Variant() == commitment.VariantConcurrentHexPatricia {
+		sdc.mu.Lock()
+		defer sdc.mu.Unlock()
+	}
 
 	if sdc.limitReadAsOfTxNum > 0 {
 		if sdc.domainsOnly {

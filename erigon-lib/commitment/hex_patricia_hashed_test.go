@@ -300,9 +300,9 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 			Build()
 
 		keyLen := 20
-		trieSequential := NewHexPatriciaHashed(keyLen, stateSeq, stateSeq.TempDir())
+		trieSequential := NewHexPatriciaHashed(keyLen, stateSeq)
 
-		trieBatchR := NewHexPatriciaHashed(keyLen, stateBatch, stateSeq.TempDir())
+		trieBatchR := NewHexPatriciaHashed(keyLen, stateBatch)
 		trieBatch := NewConcurrentPatriciaHashed(trieBatchR, stateBatch)
 
 		if sortHashedKeys {
@@ -543,9 +543,9 @@ func Test_ParallelHexPatriciaHashed_EdgeCases(t *testing.T) {
 	// 	Storage("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed", "0401").
 	// 	Build()
 
-	trieSequential := NewHexPatriciaHashed(length.Addr, stateSeq, stateSeq.TempDir())
+	trieSequential := NewHexPatriciaHashed(length.Addr, stateSeq)
 
-	trieBatchR := NewHexPatriciaHashed(length.Addr, stateBatch, stateSeq.TempDir())
+	trieBatchR := NewHexPatriciaHashed(length.Addr, stateBatch)
 	trieBatch := NewConcurrentPatriciaHashed(trieBatchR, stateBatch)
 
 	plainKeys, updates = sortUpdatesByHashIncrease(t, trieSequential, plainKeys, updates)
@@ -1264,8 +1264,8 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMiddle(t *te
 		Balance("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", 5*1e17).
 		Build()
 
-	sequential := NewHexPatriciaHashed(20, stateSeq)
-	batch := NewHexPatriciaHashed(20, stateBatch)
+	sequential := NewHexPatriciaHashed(length.Addr, stateSeq)
+	batch := NewHexPatriciaHashed(length.Addr, stateBatch)
 
 	plainKeys, updates = sortUpdatesByHashIncrease(t, sequential, plainKeys, updates)
 
@@ -1415,8 +1415,8 @@ func Test_ParallelHexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMidd
 		Storage("00000000000000000000000000000000000000f5", "1f00000000000000000000000000000000000000f5", "00000000000000000000000000000000000000f5").
 		Build()
 
-	sequential := NewHexPatriciaHashed(20, stateSeq, stateSeq.TempDir())
-	batch := NewHexPatriciaHashed(20, stateBatch, stateSeq.TempDir())
+	sequential := NewHexPatriciaHashed(length.Addr, stateSeq)
+	batch := NewHexPatriciaHashed(length.Addr, stateBatch)
 
 	plainKeys, updates = sortUpdatesByHashIncrease(t, sequential, plainKeys, updates)
 
