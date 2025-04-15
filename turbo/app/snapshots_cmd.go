@@ -1314,7 +1314,7 @@ func doCompress(cliCtx *cli.Context) error {
 
 	doSnappyEachWord := dbg.EnvBool("SnappyEachWord", false)
 
-	logger.Info("[compress] file", "datadir", dirs.DataDir, "f", f, "cfg", compressCfg)
+	logger.Info("[compress] file", "datadir", dirs.DataDir, "f", f, "cfg", compressCfg, "SnappyEachWord", doSnappyEachWord)
 	c, err := seg.NewCompressor(ctx, "compress", f, dirs.Tmp, compressCfg, log.LvlInfo, logger)
 	if err != nil {
 		return err
