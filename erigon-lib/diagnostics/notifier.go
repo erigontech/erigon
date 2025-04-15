@@ -124,7 +124,6 @@ func (d *DiagnosticClient) clearConnection() {
 }
 
 func (d *DiagnosticClient) Connected() bool {
-	return true
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.conn != nil
