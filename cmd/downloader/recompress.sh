@@ -80,6 +80,8 @@ ERIGON_JD_LRU=20200 ERIGON_D_LRU=100200 ./build/bin/integration stage_exec --dat
 
 
 ./build/bin/erigon snapshots uncompress /erigon-data/exp_comp/v1-commitment.1-2.v | DictReducerSoftLimit=1_000_000 MaxDictPatterns=64_000 MinPatternLen=5 MaxPatternLen=128 SamplingFactor=1 MinPatternScore=8000 ./build/bin/erigon seg compress /erigon-data/exp_comp/v99-soft1m-hard64k-min5-max128-s1-sc8k-commitment.1-2.v --datadir=/erigon-data/sepolia_remove_me --log.console.verbosity=5
+./build/bin/erigon snapshots uncompress /erigon-data/exp_comp/v1-commitment.1-2.v | DictReducerSoftLimit=1_000_000 MaxDictPatterns=64_000 MinPatternLen=20 MaxPatternLen=128 SamplingFactor=1 MinPatternScore=8000 ./build/bin/erigon seg compress /erigon-data/exp_comp/v99-soft1m-hard64k-min20-max128-s1-sc8k-commitment.1-2.v --datadir=/erigon-data/sepolia_remove_me --log.console.verbosity=5
+./build/bin/erigon snapshots uncompress /erigon-data/exp_comp/v1-commitment.1-2.v | DictReducerSoftLimit=1_000_000 MaxDictPatterns=128_000 MinPatternLen=20 MaxPatternLen=128 SamplingFactor=1 MinPatternScore=8000 ./build/bin/erigon seg compress /erigon-data/exp_comp/v99-soft1m-hard128k-min20-max128-s1-sc8k-commitment.1-2.v --datadir=/erigon-data/sepolia_remove_me --log.console.verbosity=5
 
 
 du -h /erigon-data/exp_comp/*
