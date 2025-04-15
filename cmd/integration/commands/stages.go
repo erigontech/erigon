@@ -1442,7 +1442,6 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 	}); err != nil {
 		panic(err)
 	}
-	log.Info("[flags]", "KeepExecutionProofs", syncCfg.KeepExecutionProofs)
 	if syncCfg.KeepExecutionProofs {
 		libstate.EnableHistoricalCommitment()
 	}
