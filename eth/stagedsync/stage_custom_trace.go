@@ -281,13 +281,13 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			doms.SetTxNum(txTask.TxNum)
 
 			if !txTask.Final {
-				var receipt *types.Receipt
-				if txTask.TxIndex >= 0 {
-					receipt = txTask.BlockReceipts[txTask.TxIndex]
-				}
-				if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock); err != nil {
-					return err
-				}
+				//var receipt *types.Receipt
+				//if txTask.TxIndex >= 0 {
+				//	receipt = txTask.BlockReceipts[txTask.TxIndex]
+				//}
+				//if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock); err != nil {
+				//	return err
+				//}
 			}
 
 			if txTask.Final { // block changed
