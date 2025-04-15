@@ -88,6 +88,11 @@ func (ti BlockUpdate) Type() Type {
 	return TypeOf(ti)
 }
 
+type TxpoolDiagMessage struct {
+	Type    string      `json:"type"`
+	Message interface{} `json:"message"`
+}
+
 func (d *DiagnosticClient) setupTxPoolDiagnostics(rootCtx context.Context) {
 	d.runOnIncommingTxnListener(rootCtx)
 	d.runOnPoolChangeBatchEvent(rootCtx)
@@ -124,7 +129,10 @@ func (d *DiagnosticClient) runOnIncommingTxnListener(rootCtx context.Context) {
 			case info := <-ch:
 				d.Notify(DiagMessages{
 					MessageType: "txpool_IncomingTxnUpdate",
-					Message:     info,
+					Message: TxpoolDiagMessage{
+						Type:    "incomingTxnUpdate",
+						Message: info,
+					},
 				})
 			}
 		}
@@ -145,12 +153,15 @@ func (d *DiagnosticClient) runOnPoolChangeBatchEvent(rootCtx context.Context) {
 				for _, change := range info.Changes {
 					for _, txnHash := range change.TxnHashOrder {
 						d.Notify(DiagMessages{
-							MessageType: "txpool_PoolChangeEvent",
-							Message: PoolChangeEvent{
-								Pool:    change.Pool,
-								Event:   change.Event,
-								TxnHash: hex.EncodeToString(txnHash.Hash[:]),
-								Order:   txnHash.OrderMarker,
+							MessageType: "txpool",
+							Message: TxpoolDiagMessage{
+								Type: "poolChangeEvent",
+								Message: PoolChangeEvent{
+									Pool:    change.Pool,
+									Event:   change.Event,
+									TxnHash: hex.EncodeToString(txnHash.Hash[:]),
+									Order:   txnHash.OrderMarker,
+								},
 							},
 						})
 					}
@@ -172,8 +183,11 @@ func (d *DiagnosticClient) runOnNewBlockListener(rootCtx context.Context) {
 				return
 			case info := <-ch:
 				d.Notify(DiagMessages{
-					MessageType: "txpool_BlockUpdate",
-					Message:     info,
+					MessageType: "txpool",
+					Message: TxpoolDiagMessage{
+						Type:    "blockUpdate",
+						Message: info,
+					},
 				})
 			}
 		}
