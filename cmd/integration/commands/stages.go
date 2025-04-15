@@ -1564,6 +1564,11 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 		stages.ModeBlockProduction,
 	)
 
+	if syncCfg.KeepExecutionProofs {
+		cfg.KeepExecutionProofs = true
+		libstate.EnableHistoricalCommitment()
+	}
+
 	return engine, vmConfig, sync, miningSync, miner
 }
 
