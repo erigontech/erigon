@@ -830,8 +830,7 @@ func (hph *HexPatriciaHashed) computeCellHashWithStorage(cell *cell, depth int, 
 				return res, storageRootHashIsSet, storageRootHash[:], nil
 			}
 			// storage root update or extension update could invalidate older stateHash, so we need to reload state
-			hph.metrics.LoadAccount.Add(1)
-			hph.metrics.Accounts.LoadAccountInc(hph.metrics.Accounts.currentPlainKey)
+			hph.metrics.Account(hph.metrics.Accounts.currentPlainKey)
 			update, err := hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
 			if err != nil {
 				return nil, storageRootHashIsSet, storageRootHash[:], err
@@ -982,8 +981,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 				return append(append(buf[:0], byte(160)), cell.stateHash[:cell.stateHashLen]...), nil
 			}
 			// storage root update or extension update could invalidate older stateHash, so we need to reload state
-			hph.metrics.LoadAccount.Add(1)
-			hph.metrics.Accounts.LoadAccountInc(hph.metrics.Accounts.currentPlainKey)
+			hph.metrics.Account(hph.metrics.Accounts.currentPlainKey)
 			update, err := hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
 			if err != nil {
 				return nil, err
@@ -1142,8 +1140,7 @@ func (hph *HexPatriciaHashed) createAccountNode(c *cell, row int, hashedKey []by
 	if err != nil {
 		return nil, err
 	}
-	hph.metrics.LoadAccount.Add(1)
-	hph.metrics.Accounts.LoadAccountInc(hph.metrics.Accounts.currentPlainKey)
+	hph.metrics.Account(hph.metrics.Accounts.currentPlainKey)
 	accountUpdate, err := hph.ctx.Account(c.accountAddr[:c.accountAddrLen])
 	if err != nil {
 		return nil, err
@@ -1728,8 +1725,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 
 			if cell.stateHashLen == 0 { // load state if needed
 				if !cell.loaded.account() && cell.accountAddrLen > 0 {
-					hph.metrics.LoadAccount.Add(1)
-					hph.metrics.Accounts.LoadAccountInc(hph.metrics.Accounts.currentPlainKey)
+					hph.metrics.Account(hph.metrics.Accounts.currentPlainKey)
 					upd, err := hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
 					if err != nil {
 						return fmt.Errorf("failed to get account: %w", err)
@@ -1943,7 +1939,6 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 
 		var update *Update
 		if len(plainKey) == hph.accountKeyLen { // account
-			hph.metrics.LoadAccount.Add(1)
 			update, err = hph.ctx.Account(plainKey)
 			if err != nil {
 				return fmt.Errorf("account with plainkey=%x not found: %w", plainKey, err)
@@ -2076,32 +2071,26 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 				return fmt.Errorf("fold: %w", err)
 			}
 			hph.metrics.TotalFoldingTimeInc(startFold)
-			hph.metrics.Accounts.TotalFoldingTimeInc(hph.metrics.Accounts.currentPlainKey, startFold)
 		}
 		// Now unfold until we step on an empty cell
 		for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
-			startUnfold := hph.metrics.Now()
-			hph.metrics.Accounts.UnfoldsInc(hph.metrics.Accounts.currentPlainKey)
-			hph.metrics.Unfolds.Add(1)
+			unfoldDone := hph.metrics.StartUnfolding(hph.metrics.Accounts.currentPlainKey)
 			if err := hph.unfold(hashedKey, unfolding); err != nil {
 				return fmt.Errorf("unfold: %w", err)
 			}
-			hph.metrics.TotalUnfoldingTimeInc(startUnfold)
-			hph.metrics.Accounts.TotalUnfoldingTimeInc(hph.metrics.Accounts.currentPlainKey, startUnfold)
+			unfoldDone()
 		}
 
 		if stateUpdate == nil {
 			// Update the cell
 			if len(plainKey) == hph.accountKeyLen {
-				hph.metrics.LoadAccount.Add(1)
-				hph.metrics.Accounts.LoadAccountInc(hph.metrics.Accounts.currentPlainKey)
+				hph.metrics.Account(hph.metrics.Accounts.currentPlainKey)
 				update, err = hph.ctx.Account(plainKey)
 				if err != nil {
 					return fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
 				}
 			} else {
-				hph.metrics.LoadStorage.Add(1)
-				hph.metrics.Accounts.LoadStorageInc(hph.metrics.Accounts.currentPlainKey)
+				hph.metrics.Storage(hph.metrics.Accounts.currentPlainKey)
 				update, err = hph.ctx.Storage(plainKey)
 				if err != nil {
 					return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
