@@ -443,7 +443,6 @@ func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, p
 }
 
 func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte, originalStep uint64) (err error) {
-	log.Warn("[dbg] AddPrevValue", "h", w.ii.name, "ii", w.ii.name, "compressSingleVal", w.compressSingleVal, "discard", w.discard)
 	if w.discard {
 		return nil
 	}
