@@ -227,17 +227,7 @@ var Schema = SchemaGen{
 			},
 		},
 	},
-}
-
-func EnableHistoricalCommitment() {
-	cfg := Schema[kv.CommitmentDomain]
-	cfg.hist.historyDisabled = false
-	cfg.hist.snapshotsDisabled = false
-	Schema[kv.CommitmentDomain] = cfg
-}
-
-var StandaloneIISchema = map[kv.InvertedIdx]iiCfg{
-	kv.LogAddrIdx: {
+	LogAddrIdx: iiCfg{
 		filenameBase: kv.FileLogAddressIdx, keysTable: kv.TblLogAddressKeys, valuesTable: kv.TblLogAddressIdx,
 
 		compression: seg.CompressNone,
@@ -261,4 +251,11 @@ var StandaloneIISchema = map[kv.InvertedIdx]iiCfg{
 		compression: seg.CompressNone,
 		name:        kv.TracesToIdx,
 	},
+}
+
+func EnableHistoricalCommitment() {
+	cfg := Schema.CommitmentDomain
+	cfg.hist.historyDisabled = false
+	cfg.hist.snapshotsDisabled = false
+	Schema.CommitmentDomain = cfg
 }
