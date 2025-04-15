@@ -1316,7 +1316,7 @@ func decompressIfNeed(buf, v []byte, enabled bool) ([]byte, []byte, error) {
 	return buf, buf, nil
 }
 
-var RECEIPT_CACHE_SNAPPY = dbg.EnvBool("RECEIPT_CACHE_SNAPPY", true)
+var RECEIPT_CACHE_SNAPPY = dbg.EnvBool("RECEIPT_CACHE_SNAPPY", false)
 
 func ReadReceiptsCache(tx kv.TemporalTx, block *types.Block, txNumReader rawdbv3.TxNumsReader) (res types.Receipts, err error) {
 	blockHash := block.Hash()
