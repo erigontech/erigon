@@ -28,12 +28,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/golang/snappy"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
@@ -93,6 +94,7 @@ type histCfg struct {
 	//   keys: txNum -> key1+key2
 	//   vals: key1+key2+txNum -> value (not DupSort)
 	historyLargeValues bool
+	compressSingleVal  bool
 	snapshotsDisabled  bool // don't produce .v and .ef files, keep in db table. old data will be pruned anyway.
 	historyDisabled    bool // skip all write operations to this History (even in DB)
 
@@ -449,6 +451,11 @@ func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte, origin
 		original = []byte{}
 	}
 
+	if w.compressSingleVal {
+
+		original = snappy.Encode(original, nil)
+	}
+
 	//defer func() {
 	//	fmt.Printf("addPrevValue [%p;tx=%d] '%x' -> '%x'\n", w, w.ii.txNum, key1, original)
 	//}()
@@ -512,6 +519,8 @@ type historyBufferedWriter struct {
 	//   vals: key1+key2+txNum -> value (not DupSort)
 	largeValues bool
 
+	compressSingleVal bool
+
 	ii *InvertedIndexBufferedWriter
 }
 
@@ -531,10 +540,11 @@ func (ht *HistoryRoTx) newWriter(tmpdir string, discard bool) *historyBufferedWr
 	w := &historyBufferedWriter{
 		discard: discard,
 
-		historyKey:       make([]byte, 128),
-		largeValues:      ht.h.historyLargeValues,
-		historyValsTable: ht.h.valuesTable,
-		historyVals:      etl.NewCollector(ht.h.filenameBase+".flush.hist", tmpdir, etl.NewSortableBuffer(WALCollectorRAM), ht.h.logger).LogLvl(log.LvlTrace),
+		historyKey:        make([]byte, 128),
+		largeValues:       ht.h.historyLargeValues,
+		compressSingleVal: ht.h.compressSingleVal,
+		historyValsTable:  ht.h.valuesTable,
+		historyVals:       etl.NewCollector(ht.h.filenameBase+".flush.hist", tmpdir, etl.NewSortableBuffer(WALCollectorRAM), ht.h.logger).LogLvl(log.LvlTrace),
 
 		ii: ht.iit.newWriter(tmpdir, discard),
 	}
