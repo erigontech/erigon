@@ -973,14 +973,14 @@ func ExecV3(ctx context.Context,
 						pe.lastExecutedTxNum = applyResult.txNum
 
 						pe.rs.SetTxNum(applyResult.txNum, applyResult.blockNum)
-
-						if err := pe.rs.ApplyState4(ctx, applyTx,
-							applyResult.blockNum, applyResult.txNum, applyResult.writeSet,
-							nil, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
-							pe.cfg.chainConfig, pe.cfg.chainConfig.Rules(applyResult.blockNum, applyResult.blockTime), false); err != nil {
-							return err
+						if false {
+							if err := pe.rs.ApplyState4(ctx, applyTx,
+								applyResult.blockNum, applyResult.txNum, applyResult.writeSet,
+								nil, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
+								pe.cfg.chainConfig, pe.cfg.chainConfig.Rules(applyResult.blockNum, applyResult.blockTime), false); err != nil {
+								return err
+							}
 						}
-
 					case *blockResult:
 						if applyResult.BlockNum > lastBlockResult.BlockNum {
 							pe.doms.SetTxNum(applyResult.lastTxNum)
