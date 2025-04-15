@@ -72,6 +72,7 @@ func ReceiptAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed uint64, cumBlobGasu
 }
 
 func AppendReceipt(tx kv.TemporalPutDel, receipt *types.Receipt, cumBlobGasUsed uint64) error {
+	return nil //TODO: remove me
 	var cumGasUsedInBlock uint64
 	var firstLogIndexWithinBlock uint32
 	if receipt != nil {
