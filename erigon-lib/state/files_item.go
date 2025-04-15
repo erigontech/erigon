@@ -282,6 +282,10 @@ func (i visibleFile) EndTxNum() uint64 {
 	return i.endTxNum
 }
 
+func (i visibleFile) FilesItem() FilesItem {
+	return i.src
+}
+
 func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l Accessors, trace bool, toTxNum uint64) (roItems []visibleFile) {
 	newVisibleFiles := make([]visibleFile, 0, files.Len())
 	// trace = true

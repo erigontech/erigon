@@ -58,6 +58,7 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
 	libstate "github.com/erigontech/erigon-lib/state"
+	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
@@ -275,6 +276,14 @@ var snapshotCommand = cli.Command{
 			Name:        "clearIndexing",
 			Action:      doClearIndexing,
 			Description: "Clear all indexing data",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+			}),
+		},
+		{
+			Name:        "publishableLs",
+			Action:      doPublishableLs,
+			Description: "List publishable snapshots",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 			}),
@@ -921,6 +930,200 @@ func doClearIndexing(cliCtx *cli.Context) error {
 	os.Remove(filepath.Join(snapDir, "salt-blocks.txt"))
 
 	return nil
+}
+
+func doPublishableLs(cliCtx *cli.Context) error {
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+
+	printPublishableFilesFn := func(minimax ee.RootNum, repos []*libstate.SnapshotRepo) error {
+		for _, repo := range repos {
+			// align visible files
+			minimax = min(minimax, repo.RecalcVisibleFiles(minimax))
+		}
+
+		for _, repo := range repos {
+			repo.RecalcVisibleFiles(minimax)
+			vfs := repo.VisibleFiles()
+			acc := repo.Schema().AccessorList()
+			for _, vf := range vfs {
+				fi := vf.FilesItem()
+				fmt.Println(vf.Filename())
+				if acc.Has(ee.AccessorBTree) {
+					fmt.Println(fi.BtIndex().FilePath())
+				}
+				if acc.Has(ee.AccessorExistence) {
+					fmt.Println(fi.ExistenceFilter().FilePath)
+				}
+				if acc.Has(ee.AccessorHashMap) {
+					for i := range repo.Schema().AccessorIdxCount() {
+						idxFilePath := repo.Schema().AccessorIdxFile(snaptype.Version(1), ee.RootNum(vf.StartTxNum()), ee.RootNum(vf.EndTxNum()), i)
+						fmt.Println(idxFilePath)
+					}
+					// using this alternatively (rather than fi.AccessorIndex()) because filesItem don't support
+					// multiple accessors yet.
+					// 	fmt.Printf("%s\n", fi.AccessorIndex().FilePath())
+				}
+			}
+		}
+
+		return nil
+
+	}
+
+	repos, miniMaxTxNum, err := e3FilesRepo(dirs, logger)
+	if err != nil {
+		return err
+	}
+
+	repos2, miniMaxRootNum, err := blocksFilesRepo(dirs, logger)
+	if err != nil {
+		return err
+	}
+
+	printPublishableFilesFn(miniMaxTxNum, repos)
+	printPublishableFilesFn(miniMaxRootNum, repos2)
+
+	return nil
+
+}
+
+func blocksFilesRepo(dirs datadir.Dirs, logger log.Logger) (repos []*libstate.SnapshotRepo, miniMaxRootNum ee.RootNum, err error) {
+	stepSize := uint64(1000)
+	createConfig := &ee.SnapshotCreationConfig{
+		RootNumPerStep: stepSize,
+		MergeStages:    []uint64{}, // doesn't matter here
+		MinimumSize:    stepSize,
+	}
+
+	repoGenFn := func(snapt snaptype.Type) *libstate.SnapshotRepo {
+		name := snapt.Name()
+		indexTags := make([]string, len(snapt.Indexes()))
+		for i, index := range snapt.Indexes() {
+			indexTags[i] = index.Name
+		}
+		schema := ee.NewE2SnapSchemaWithIndexTag(dirs, name, indexTags)
+		return libstate.NewSnapshotRepo(name, &ee.SnapshotConfig{
+			SnapshotCreationConfig: createConfig,
+			Schema:                 schema,
+		}, logger)
+	}
+
+	bodiesRepo := repoGenFn(coresnaptype.Bodies)
+	headersRepo := repoGenFn(coresnaptype.Headers)
+	txRepo := repoGenFn(coresnaptype.Transactions)
+	repos = append(repos, bodiesRepo, headersRepo, txRepo)
+
+	// link transactions <> bodies
+	ic := ee.NewReferencingIntegrityChecker(bodiesRepo.Schema())
+	txRepo.SetIntegrityChecker(ic)
+
+	miniMaxRootNum = ee.RootNum(libstate.MaxUint64)
+	for _, repo := range repos {
+		if err = repo.OpenFolder(); err != nil {
+			return nil, 0, err
+		}
+		miniMaxRootNum = min(miniMaxRootNum, repo.MaxDirtyRootNum())
+	}
+	return
+}
+
+func e3FilesRepo(dirs datadir.Dirs, logger log.Logger) (repos []*libstate.SnapshotRepo, minRootNum ee.RootNum, err error) {
+	stepSize := uint64(config3.DefaultStepSize)
+	createConfig := &ee.SnapshotCreationConfig{
+		RootNumPerStep: stepSize,
+		MergeStages:    []uint64{}, // doesn't matter
+		MinimumSize:    stepSize,
+	}
+
+	repoGenWithoutCommitment := func(name string, domainCompression seg.FileCompression, historyCompression seg.FileCompression) (repos2 []*libstate.SnapshotRepo) {
+
+		// domain
+		schema := ee.NewE3SnapSchemaBuilder(ee.AccessorBTree|ee.AccessorExistence, stepSize).
+			Data(dirs.SnapDomain, name, ee.DataExtensionKv, domainCompression).
+			BtIndex().Existence().Build()
+		domain := libstate.NewSnapshotRepo(name, &ee.SnapshotConfig{
+			SnapshotCreationConfig: createConfig,
+			Schema:                 schema,
+		}, logger)
+
+		// history
+		schema = ee.NewE3SnapSchemaBuilder(ee.AccessorHashMap, stepSize).
+			Data(dirs.SnapHistory, name, ee.DataExtensionV, historyCompression).
+			Accessor(dirs.SnapAccessors).Build()
+		history := libstate.NewSnapshotRepo(name, &ee.SnapshotConfig{
+			SnapshotCreationConfig: createConfig,
+			Schema:                 schema,
+		}, logger)
+
+		//ii
+		schema = ee.NewE3SnapSchemaBuilder(ee.AccessorHashMap, stepSize).
+			Data(dirs.SnapIdx, name, ee.DataExtensionEf, seg.CompressNone).
+			Accessor(dirs.SnapAccessors).Build()
+		ii := libstate.NewSnapshotRepo(name, &ee.SnapshotConfig{
+			SnapshotCreationConfig: createConfig,
+			Schema:                 schema,
+		}, logger)
+
+		repos2 = append(repos2, domain, history, ii)
+
+		return
+	}
+
+	repoGenCommitment := func(name string, domainCompression seg.FileCompression) *libstate.SnapshotRepo {
+		// domain
+		schema := ee.NewE3SnapSchemaBuilder(ee.AccessorHashMap, stepSize).
+			Data(dirs.SnapDomain, name, ee.DataExtensionKv, domainCompression).
+			Accessor(dirs.SnapDomain).
+			Build()
+		return libstate.NewSnapshotRepo(name, &ee.SnapshotConfig{
+			SnapshotCreationConfig: createConfig,
+			Schema:                 schema,
+		}, logger)
+	}
+
+	repoGenStandalone := func(name string) *libstate.SnapshotRepo {
+		schema := ee.NewE3SnapSchemaBuilder(ee.AccessorHashMap, stepSize).
+			Data(dirs.SnapIdx, name, ee.DataExtensionEf, seg.CompressNone).
+			Accessor(dirs.SnapAccessors).
+			Build()
+		return libstate.NewSnapshotRepo(name, &ee.SnapshotConfig{
+			SnapshotCreationConfig: createConfig,
+			Schema:                 schema,
+		}, logger)
+
+	}
+
+	accountRepos := repoGenWithoutCommitment(kv.AccountsDomain.String(), seg.CompressNone, seg.CompressNone)
+	accountDomainRepo := accountRepos[0]
+	repos = append(repos, accountRepos...)
+	repos = append(repos, repoGenWithoutCommitment(kv.StorageDomain.String(), seg.CompressKeys, seg.CompressNone)...)
+	repos = append(repos, repoGenWithoutCommitment(kv.CodeDomain.String(), seg.CompressVals, seg.CompressKeys|seg.CompressVals)...)
+	repos = append(repos, repoGenWithoutCommitment(kv.ReceiptDomain.String(), seg.CompressNone, seg.CompressNone)...)
+
+	commitmentRepo := repoGenCommitment(kv.CommitmentDomain.String(), seg.CompressKeys)
+	repos = append(repos, commitmentRepo)
+
+	// standalone iis
+	repos = append(repos, repoGenStandalone(kv.FileLogAddressIdx))
+	repos = append(repos, repoGenStandalone(kv.FileLogTopicsIdx))
+	repos = append(repos, repoGenStandalone(kv.FileTracesFromIdx))
+	repos = append(repos, repoGenStandalone(kv.FileTracesToIdx))
+
+	// link account <> commitment
+	ic := ee.NewReferencingIntegrityChecker(commitmentRepo.Schema())
+	accountDomainRepo.SetIntegrityChecker(ic) // domain
+
+	minRootNum = ee.RootNum(libstate.MaxUint64)
+	for _, repo := range repos {
+		if err = repo.OpenFolder(); err != nil {
+			return nil, 0, err
+		}
+		minRootNum = min(minRootNum, repo.MaxDirtyRootNum())
+	}
+
+	return repos, minRootNum, nil
+
 }
 
 func deleteFilesWithExtensions(dir string, extensions []string) error {
