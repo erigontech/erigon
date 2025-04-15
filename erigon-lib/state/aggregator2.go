@@ -149,14 +149,17 @@ var Schema = map[kv.Domain]domainCfg{
 		replaceKeysInValues: AggregatorSqueezeCommitmentValues,
 
 		hist: histCfg{
-			valuesTable: kv.TblCommitmentHistoryVals,
-			compression: seg.CompressNone,
+			valuesTable:   kv.TblCommitmentHistoryVals,
+			compression:   seg.CompressNone, // seg.CompressKeys | seg.CompressVals,
+			compressorCfg: seg.DefaultCfg,
 
 			snapshotsDisabled:  true,
 			historyLargeValues: false,
-			filenameBase:       kv.CommitmentDomain.String(),
-			historyIdx:         kv.CommitmentHistoryIdx,
-			historyDisabled:    true,
+			compressSingleVal:  false,
+
+			filenameBase:    kv.CommitmentDomain.String(),
+			historyIdx:      kv.CommitmentHistoryIdx,
+			historyDisabled: true,
 
 			iiCfg: iiCfg{
 				keysTable: kv.TblCommitmentHistoryKeys, valuesTable: kv.TblCommitmentIdx,
@@ -171,7 +174,7 @@ var Schema = map[kv.Domain]domainCfg{
 
 		AccessorList: AccessorBTree | AccessorExistence,
 		Compression:  seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
-		CompressCfg:  DomainCompressCfg,
+		CompressCfg:  seg.DefaultCfg,
 
 		hist: histCfg{
 			valuesTable: kv.TblReceiptHistoryVals,
@@ -201,13 +204,15 @@ var Schema = map[kv.Domain]domainCfg{
 			compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
 
 			historyLargeValues: true,
-			filenameBase:       kv.ReceiptCacheDomain.String(),
-			historyIdx:         kv.ReceiptCacheHistoryIdx,
+			compressSingleVal:  true,
+
+			filenameBase: kv.ReceiptCacheDomain.String(),
+			historyIdx:   kv.ReceiptCacheHistoryIdx,
 
 			iiCfg: iiCfg{
 				keysTable: kv.TblReceiptCacheHistoryKeys, valuesTable: kv.TblReceiptCacheIdx,
-				withExistence: false, compressorCfg: seg.DefaultCfg,
-				filenameBase: kv.ReceiptCacheDomain.String(),
+				compressorCfg: seg.DefaultCfg,
+				filenameBase:  kv.ReceiptCacheDomain.String(),
 			},
 		},
 	},

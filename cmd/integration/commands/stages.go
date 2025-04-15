@@ -1433,6 +1433,20 @@ const blockBufferSize = 128
 func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.MiningConfig, logger log.Logger) (consensus.Engine, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
 
+	if err := db.View(context.Background(), func(tx kv.Tx) (err error) {
+		syncCfg.KeepExecutionProofs, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		panic(err)
+	}
+	log.Info("[flags]", "KeepExecutionProofs", syncCfg.KeepExecutionProofs)
+	if syncCfg.KeepExecutionProofs {
+		libstate.EnableHistoricalCommitment()
+	}
+
 	vmConfig := &vm.Config{}
 
 	events := shards.NewEvents()
@@ -1453,6 +1467,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 		syncCfg.AlwaysGenerateChangesets = true
 		noCommit = false
 	}
+
 	cfg.Sync = syncCfg
 
 	cfg.Prune = pm
@@ -1462,7 +1477,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 	if miningConfig != nil {
 		cfg.Miner = *miningConfig
 	}
-	cfg.Dirs = datadir.New(datadirCli)
+	cfg.Dirs = dirs
 	allSn, borSn, agg, _, _, _, err := allSnapshots(ctx, db, logger)
 	if err != nil {
 		panic(err) // we do already panic above on genesis error

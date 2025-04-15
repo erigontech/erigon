@@ -133,6 +133,16 @@ var DomainCompressCfg = seg.Cfg{
 	Workers:              1,
 }
 
+var HistCompressCfg = seg.Cfg{
+	MinPatternScore:      2000,
+	DictReducerSoftLimit: 1000000,
+	MinPatternLen:        20,
+	MaxPatternLen:        128,
+	SamplingFactor:       1,
+	MaxDictPatterns:      64 * 1024,
+	Workers:              1,
+}
+
 func NewDomain(cfg domainCfg, aggStep uint64, logger log.Logger) (*Domain, error) {
 	if cfg.hist.iiCfg.dirs.SnapDomain == "" {
 		panic("assert: empty `dirs`")
