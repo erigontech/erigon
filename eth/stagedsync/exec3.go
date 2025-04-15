@@ -245,7 +245,7 @@ func ExecV3(ctx context.Context,
 	if !inMemExec && !isMining {
 		if initialCycle {
 			agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
-			agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+			agg.SetCompressWorkers(min(2, estimate.CompressSnapshot.Workers()-1))
 		} else {
 			agg.SetCompressWorkers(1)
 			agg.SetCollateAndBuildWorkers(1)
