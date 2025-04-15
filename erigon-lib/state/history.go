@@ -452,8 +452,8 @@ func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte, origin
 	}
 
 	if w.compressSingleVal {
-
-		original = snappy.Encode(original, nil)
+		w.snappyWriteBuffer = growslice(w.snappyWriteBuffer, snappy.MaxEncodedLen(len(original)))
+		original = snappy.Encode(w.snappyWriteBuffer, original)
 	}
 
 	//defer func() {
@@ -520,8 +520,22 @@ type historyBufferedWriter struct {
 	largeValues bool
 
 	compressSingleVal bool
+	snappyReadBuffer  []byte
+	snappyWriteBuffer []byte
 
 	ii *InvertedIndexBufferedWriter
+}
+
+// growslice ensures b has the wanted length by either expanding it to its capacity
+// or allocating a new slice if b has insufficient capacity.
+func growslice(b []byte, wantLength int) []byte {
+	if len(b) >= wantLength {
+		return b
+	}
+	if cap(b) >= wantLength {
+		return b[:cap(b)]
+	}
+	return make([]byte, wantLength)
 }
 
 func (w *historyBufferedWriter) SetTxNum(v uint64) { w.ii.SetTxNum(v) }
