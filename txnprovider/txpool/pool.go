@@ -564,6 +564,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 	}
 
 	if isDiagEnabled {
+		fmt.Println("sending diagTxns", len(diagTxns))
 		diagnostics.Send(diagnostics.IncomingTxnUpdate{
 			Txns:    diagTxns,
 			Updates: map[string][][32]byte{},

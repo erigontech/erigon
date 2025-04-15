@@ -127,6 +127,7 @@ func (d *DiagnosticClient) runOnIncommingTxnListener(rootCtx context.Context) {
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
+				fmt.Println("se2323ndi"))
 				d.Notify(DiagMessages{
 					MessageType: "txpool_IncomingTxnUpdate",
 					Message: TxpoolDiagMessage{
