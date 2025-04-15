@@ -1338,8 +1338,9 @@ func doCompress(cliCtx *cli.Context) error {
 		l1 := len(word)
 		snappyBuf, word = compress.EncodeSnappyIfNeed(snappyBuf, word, doSnappyEachWord)
 		l2 := len(word)
-
-		fmt.Printf("a: %d, %d\n", l1, l2)
+		if l1 > 1 && l2 > l1 {
+			fmt.Printf("alex: %x, %x\n", l1, l2)
+		}
 
 		if err := w.AddWord(word); err != nil {
 			return err

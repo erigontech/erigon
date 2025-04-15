@@ -20,7 +20,8 @@ func EncodeSnappyIfNeed(buf, v []byte, enabled bool) ([]byte, []byte) {
 	if !enabled {
 		return buf, v
 	}
-	buf = snappy.Encode(growslice(buf, snappy.MaxEncodedLen(len(v))), v)
+	buf = growslice(buf, snappy.MaxEncodedLen(len(v)))
+	buf = snappy.Encode(buf, v)
 	return buf, buf
 }
 
@@ -32,7 +33,8 @@ func DecodeSnappyIfNeed(buf, v []byte, enabled bool) ([]byte, []byte, error) {
 	if err != nil {
 		return buf, nil, err
 	}
-	buf, err = snappy.Decode(growslice(buf, actualSize), v)
+	buf = growslice(buf, actualSize)
+	buf, err = snappy.Decode(buf, v)
 	if err != nil {
 		return buf, nil, err
 	}
