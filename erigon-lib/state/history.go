@@ -443,6 +443,7 @@ func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, p
 }
 
 func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte, originalStep uint64) (err error) {
+	fmt.Printf("[dbg] alex: %s\n", w.ii.name)
 	if w.ii.name == kv.CommitmentHistoryIdx {
 		fmt.Printf("[dbg] alex: %t, %t\n", w.compressSingleVal, w.discard)
 	}
@@ -456,7 +457,9 @@ func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte, origin
 
 	if w.compressSingleVal {
 		w.snappyWriteBuffer = growslice(w.snappyWriteBuffer, snappy.MaxEncodedLen(len(original)))
+		lB := len(original)
 		original = snappy.Encode(w.snappyWriteBuffer, original)
+		panic(fmt.Sprintf("from %d to %d\n", lB, len(original)))
 	}
 
 	//defer func() {
