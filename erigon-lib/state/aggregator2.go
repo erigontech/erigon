@@ -152,7 +152,7 @@ var Schema = map[kv.Domain]domainCfg{
 
 			snapshotsDisabled:  true,
 			historyLargeValues: false,
-			compressSingleVal:  false,
+			compressSingleVal:  true,
 
 			filenameBase:    kv.CommitmentDomain.String(),
 			historyIdx:      kv.CommitmentHistoryIdx,
