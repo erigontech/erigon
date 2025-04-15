@@ -133,12 +133,12 @@ var DomainCompressCfg = seg.Cfg{
 	Workers:              1,
 }
 
-var HistCompressCfg = seg.Cfg{
-	MinPatternScore:      2000,
+var HistoryCompressCfg = seg.Cfg{
+	MinPatternScore:      8000,
 	DictReducerSoftLimit: 1000000,
-	MinPatternLen:        20,
+	MinPatternLen:        5,
 	MaxPatternLen:        128,
-	SamplingFactor:       1,
+	SamplingFactor:       4,
 	MaxDictPatterns:      64 * 1024,
 	Workers:              1,
 }
