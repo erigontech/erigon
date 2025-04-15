@@ -138,7 +138,7 @@ var HistCompressCfg = seg.Cfg{
 	DictReducerSoftLimit: 1000000,
 	MinPatternLen:        20,
 	MaxPatternLen:        128,
-	SamplingFactor:       1,
+	SamplingFactor:       4,
 	MaxDictPatterns:      64 * 1024,
 	Workers:              1,
 }
