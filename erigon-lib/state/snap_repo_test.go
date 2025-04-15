@@ -561,7 +561,7 @@ func populateFiles2(t *testing.T, dirs datadir.Dirs, name string, repo *Snapshot
 	t.Helper()
 	allFiles := dhiiFiles{fullPath: true}
 	extensions := repo.cfg.Schema.(*ee.E3SnapSchema).FileExtensions()
-	v := snaptype.Version(1)
+	v := snaptype.V1_0
 	acc := repo.schema.AccessorList()
 	for _, r := range ranges {
 		from, to := RootNum(r.fromStep*repo.stepSize), RootNum(r.toStep*repo.stepSize)
@@ -723,7 +723,7 @@ func fileExistsCheck(t *testing.T, repo *SnapshotRepo, startStep, endStep uint64
 	_, found := repo.dirtyFiles.Get(&filesItem{startTxNum: startTxNum, endTxNum: endTxNum})
 	require.Equal(t, found, isFound)
 
-	_, err := os.Stat(repo.cfg.Schema.DataFile(snaptype.Version(1), ee.RootNum(startTxNum), ee.RootNum(endTxNum)))
+	_, err := os.Stat(repo.cfg.Schema.DataFile(snaptype.V1_0, ee.RootNum(startTxNum), ee.RootNum(endTxNum)))
 	if isFound {
 		require.NoError(t, err)
 	} else {
