@@ -792,10 +792,6 @@ func (a *ApiHandler) produceBeaconBody(
 		return nil, 0, errors.New("failed to produce execution payload")
 	}
 	beaconBody.ExecutionPayload = executionPayload
-
-	attBytes, _ := json.Marshal(beaconBody.Attestations)
-	log.Info("BlockProduction: Attestations", "att", string(attBytes))
-
 	return beaconBody, executionValue, nil
 }
 
