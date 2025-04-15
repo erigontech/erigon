@@ -146,8 +146,9 @@ var Schema = map[kv.Domain]domainCfg{
 		replaceKeysInValues: AggregatorSqueezeCommitmentValues,
 
 		hist: histCfg{
-			valuesTable: kv.TblCommitmentHistoryVals,
-			compression: seg.CompressNone, // seg.CompressKeys | seg.CompressVals,
+			valuesTable:   kv.TblCommitmentHistoryVals,
+			compression:   seg.CompressNone, // seg.CompressKeys | seg.CompressVals,
+			compressorCfg: DomainCompressCfg,
 
 			snapshotsDisabled:  true,
 			historyLargeValues: false,

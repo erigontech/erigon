@@ -459,9 +459,6 @@ func (d *Domain) Close() {
 }
 
 func (w *DomainBufferedWriter) PutWithPrev(key1, key2, val, preval []byte, prevStep uint64) error {
-	fmt.Printf("[dbg] PutWithPrev: %s\n", key1)
-	fmt.Printf("[dbg] PutWithPrev: %s\n", key1)
-
 	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `preval`` slice is invalidated
 	if tracePutWithPrev != "" && tracePutWithPrev == w.h.ii.filenameBase {
 		fmt.Printf("PutWithPrev(%s, txn %d, key[%x][%x] value[%x] preval[%x])\n", w.h.ii.filenameBase, w.h.ii.txNum, key1, key2, val, preval)
