@@ -11,7 +11,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/state"
-	ae "github.com/erigontech/erigon-lib/state/appendable_extras"
+	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/stretchr/testify/require"
 )
@@ -22,45 +22,45 @@ func (r *BorSpanRootRelation) RootNum2Num(from state.RootNum, tx kv.Tx) (state.N
 	return Num(heimdall.SpanIdAt(uint64(from))), nil
 }
 
-func setupBorSpans(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) (AppendableId, *state.Appendable[UnmarkedTxI]) {
+func setupBorSpans(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) (ForkableId, *state.Forkable[UnmarkedTxI]) {
 	stepSize := uint64(10)
 	name := "borspans"
-	borspanId := registerEntityWithSnapshotConfig(dirs, name, ae.NewSnapshotConfig(
-		&ae.SnapshotCreationConfig{
+	borspanId := registerEntityWithSnapshotConfig(dirs, name, ee.NewSnapshotConfig(
+		&ee.SnapshotCreationConfig{
 			RootNumPerStep: stepSize,
 			MergeStages:    []uint64{200, 400},
 			MinimumSize:    10,
 			SafetyMargin:   5,
 		},
-		ae.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize),
+		ee.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize),
 	))
-	require.Equal(t, ae.AppendableId(0), borspanId)
+	require.Equal(t, ee.ForkableId(0), borspanId)
 
 	indexb := state.NewSimpleAccessorBuilder(state.NewAccessorArgs(true, false), borspanId, log)
 	indexb.SetFirstEntityNumFetcher(func(from, to RootNum, seg *seg.Decompressor) Num {
 		return Num(heimdall.SpanIdAt(uint64(from)))
 	})
 
-	uma, err := state.NewUnmarkedAppendable(borspanId,
+	uma, err := state.NewUnmarkedForkable(borspanId,
 		kv.BorSpans,
 		&BorSpanRootRelation{},
 		log,
 		state.App_WithIndexBuilders(indexb))
 	require.NoError(t, err)
 
-	cleanup(t, uma.ProtoAppendable, db, dirs)
+	cleanup(t, uma.ProtoForkable, db, dirs)
 	return borspanId, uma
 }
 
 // TESTS BEGIN HERE
 
-func TestUnmarkedAppendableRegistration(t *testing.T) {
+func TestUnmarkedForkableRegistration(t *testing.T) {
 	t.Cleanup(func() {
-		ae.Cleanup()
+		ee.Cleanup()
 	})
 	dirs := datadir.New(t.TempDir())
 	blockId := registerEntity(dirs, "borspans")
-	require.Equal(t, ae.AppendableId(0), blockId)
+	require.Equal(t, ee.ForkableId(0), blockId)
 }
 
 func TestUnmarked_PutToDb(t *testing.T) {
