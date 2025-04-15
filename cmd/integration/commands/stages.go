@@ -1438,7 +1438,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 		if err != nil {
 			return err
 		}
-		return nilk
+		return nil
 	}); err != nil {
 		panic(err)
 	}
