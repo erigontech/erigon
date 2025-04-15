@@ -201,13 +201,14 @@ var Schema = map[kv.Domain]domainCfg{
 			compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
 
 			historyLargeValues: true,
-			filenameBase:       kv.ReceiptCacheDomain.String(),
-			historyIdx:         kv.ReceiptCacheHistoryIdx,
+
+			filenameBase: kv.ReceiptCacheDomain.String(),
+			historyIdx:   kv.ReceiptCacheHistoryIdx,
 
 			iiCfg: iiCfg{
 				keysTable: kv.TblReceiptCacheHistoryKeys, valuesTable: kv.TblReceiptCacheIdx,
-				withExistence: false, compressorCfg: seg.DefaultCfg,
-				filenameBase: kv.ReceiptCacheDomain.String(),
+				compressorCfg: seg.DefaultCfg,
+				filenameBase:  kv.ReceiptCacheDomain.String(),
 			},
 		},
 	},
