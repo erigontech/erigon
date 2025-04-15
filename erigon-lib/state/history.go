@@ -976,7 +976,8 @@ type HistoryRoTx struct {
 	valsC    kv.Cursor
 	valsCDup kv.CursorDupSort
 
-	_bufTs []byte
+	_bufTs           []byte
+	snappyReadBuffer []byte
 }
 
 func (h *History) BeginFilesRo() *HistoryRoTx {
@@ -1207,6 +1208,18 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	v, _ := g.Next(nil)
 	if traceGetAsOf == ht.h.filenameBase {
 		fmt.Printf("DomainGetAsOf(%s, %x, %d) -> %s, histTxNum=%d, isNil(v)=%t\n", ht.h.filenameBase, key, txNum, g.FileName(), histTxNum, v == nil)
+	}
+	if ht.h.compressSingleVal {
+		var actualSize int
+		actualSize, err = snappy.DecodedLen(v)
+		if err != nil {
+			return nil, false, err
+		}
+		ht.snappyReadBuffer = growslice(ht.snappyReadBuffer, actualSize)
+		v, err = snappy.Decode(ht.snappyReadBuffer, v)
+		if err != nil {
+			return nil, false, err
+		}
 	}
 	return v, true, nil
 }
