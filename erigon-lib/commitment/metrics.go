@@ -121,7 +121,7 @@ func (metrics *Metrics) Storage(plainKey []byte) {
 }
 
 func (metrics *Metrics) StartUnfolding(plainKey []byte) func() {
-	if !collectCommitmentMetrics {
+	if collectCommitmentMetrics {
 		startUnfold := metrics.Now()
 		metrics.Accounts.UnfoldsInc(metrics.Accounts.currentPlainKey)
 		metrics.Unfolds.Add(1)
@@ -134,7 +134,7 @@ func (metrics *Metrics) StartUnfolding(plainKey []byte) func() {
 }
 
 func (metrics *Metrics) StartFolding(plainKey []byte) func() {
-	if !collectCommitmentMetrics {
+	if collectCommitmentMetrics {
 		startUnfold := metrics.Now()
 		metrics.Accounts.UnfoldsInc(metrics.Accounts.currentPlainKey)
 		metrics.Unfolds.Add(1)
@@ -198,9 +198,9 @@ func (processAccount *AccountMetrics) Headers() []string {
 		"loading account",
 		"loading storage",
 		"total unfolds",
-		"total unfolding time (ms)",
+		"total unfolding time (μs)",
 		"total folds",
-		"total folding time (ms)",
+		"total folding time (μs)",
 	}
 }
 
@@ -218,9 +218,9 @@ func (processAccount *AccountMetrics) Values() [][]string {
 			strconv.FormatUint(account.LoadAccount, 10),
 			strconv.FormatUint(account.LoadStorage, 10),
 			strconv.FormatUint(account.Unfolds, 10),
-			strconv.Itoa(int(account.TotalUnfoldingTime.Milliseconds())),
+			strconv.Itoa(int(account.TotalUnfoldingTime.Microseconds())),
 			strconv.FormatUint(account.Folds, 10),
-			strconv.Itoa(int(account.TotalFoldingTime.Milliseconds())),
+			strconv.Itoa(int(account.TotalFoldingTime.Microseconds())),
 		}
 		ind++
 	}
