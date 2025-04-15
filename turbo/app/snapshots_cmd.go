@@ -1346,6 +1346,7 @@ func doCompress(cliCtx *cli.Context) error {
 			return ctx.Err()
 		default:
 		}
+
 	}
 	if !errors.Is(err, io.EOF) {
 		return err
