@@ -43,12 +43,12 @@ func (d *DiagnosticClient) setupSnapshotDiagnostics(rootCtx context.Context) {
 	d.runFileDownloadedListener(rootCtx)
 	d.runFillDBListener(rootCtx)
 
-	go func() {
+	/*go func() {
 		for {
 			time.Sleep(1 * time.Second)
 			d.SaveSnaphotsSyncToJsonFile()
 		}
-	}()
+	}()*/
 }
 
 func (d *DiagnosticClient) runFillDBListener(rootCtx context.Context) {
@@ -200,9 +200,9 @@ func (d *DiagnosticClient) SaveSnaphotsSyncToJsonFile() {
 	var data []byte
 
 	// Check if file exists
-	if _, err := os.Stat("/erigon/sync_messages.json"); err == nil {
+	if _, err := os.Stat("/app/sync_messages.json"); err == nil {
 		// File exists, read existing content
-		existingData, err := os.ReadFile("/erigon/sync_messages.json")
+		existingData, err := os.ReadFile("/app/sync_messages.json")
 		if err != nil {
 			log.Error("[Diagnostics] Error reading existing sync messages file", "err", err)
 			return
@@ -235,7 +235,7 @@ func (d *DiagnosticClient) SaveSnaphotsSyncToJsonFile() {
 	}
 
 	// Write to file
-	if err := os.WriteFile("/erigon/sync_messages.json", data, 0644); err != nil {
+	if err := os.WriteFile("/app/sync_messages.json", data, 0644); err != nil {
 		log.Error("[Diagnostics] Error writing sync messages to file", "err", err)
 		return
 	}
