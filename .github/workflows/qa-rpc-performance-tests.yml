@@ -19,8 +19,8 @@ jobs:
           #  backend: Polygon
     runs-on: [ self-hosted, "${{ matrix.backend }}" ]
     env:
-      ERIGON_DIR: /opt/erigon-versions/reference-version
-      ERIGON_DATA_DIR: /opt/erigon-versions/reference-version/datadir
+      ERIGON_DIR: /opt/erigon-versions/reference-version-3
+      ERIGON_DATA_DIR: /opt/erigon-versions/reference-version-3/datadir
       RPC_PAST_TEST_DIR: /opt/rpc-past-tests
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       CHAIN: ${{ matrix.chain }}
@@ -62,6 +62,9 @@ jobs:
           RPC_DAEMON_PID=$!          
           echo "RPC_DAEMON_PID=$RPC_DAEMON_PID" >> $GITHUB_ENV
           echo "rpc_daemon_started=true" >> $GITHUB_OUTPUT
+          
+          sleep 5
+          tail erigon.log
           
           echo "RpcDaemon started"
 
@@ -196,11 +199,11 @@ jobs:
           fi
 
       - name: Stop Erigon RpcDaemon
-        if: steps.rpcdaemon_running_step.outputs.rpc_daemon_started == 'true'
+        if: always()
         working-directory: ${{ github.workspace }}/build/bin
         run: |
           # Clean up rpcdaemon process if it's still running
-          if kill -0 $RPC_DAEMON_PID 2> /dev/null; then
+          if [ -n "$RPC_DAEMON_PID" ] && kill -0 $RPC_DAEMON_PID 2> /dev/null; then
             echo "RpcDaemon stopping..."
             kill $RPC_DAEMON_PID
             echo "RpcDaemon stopped"
