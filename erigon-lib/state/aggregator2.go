@@ -146,8 +146,9 @@ var Schema = map[kv.Domain]domainCfg{
 		replaceKeysInValues: AggregatorSqueezeCommitmentValues,
 
 		hist: histCfg{
-			valuesTable: kv.TblCommitmentHistoryVals,
-			compression: seg.CompressNone,
+			valuesTable:   kv.TblCommitmentHistoryVals,
+			compression:   seg.CompressNone,
+			compressorCfg: HistoryCompressCfg,
 
 			snapshotsDisabled:  true,
 			historyLargeValues: false,
@@ -218,4 +219,24 @@ var StandaloneIISchema = map[kv.InvertedIdx]iiCfg{
 		compression: seg.CompressNone,
 		name:        kv.TracesToIdx,
 	},
+}
+
+var DomainCompressCfg = seg.Cfg{
+	MinPatternScore:      1000,
+	DictReducerSoftLimit: 2000000,
+	MinPatternLen:        20,
+	MaxPatternLen:        128,
+	SamplingFactor:       4,
+	MaxDictPatterns:      64 * 1024 * 2,
+	Workers:              1,
+}
+
+var HistoryCompressCfg = seg.Cfg{
+	MinPatternScore:      8000,
+	DictReducerSoftLimit: 2000000,
+	MinPatternLen:        20,
+	MaxPatternLen:        128,
+	SamplingFactor:       1,
+	MaxDictPatterns:      64 * 1024 * 2,
+	Workers:              1,
 }
