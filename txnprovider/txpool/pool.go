@@ -2725,10 +2725,12 @@ func sendNewBlockEventToDiagnostics(unwindTxns, unwindBlobTxns, minedTxns TxnSlo
 		BlkTime:         blkTime,
 	}
 
-	diagTxns := make([]diagnostics.DiagTxn, 0)
+	minedDiagTxns := make([]diagnostics.DiagTxn, 0)
+	unwindDiagTxns := make([]diagnostics.DiagTxn, 0)
+	unwindBlobDiagTxns := make([]diagnostics.DiagTxn, 0)
 
 	for _, txn := range minedTxns.Txns {
-		diagTxns = append(diagTxns, diagnostics.DiagTxn{
+		minedDiagTxns = append(minedDiagTxns, diagnostics.DiagTxn{
 			IDHash:              hex.EncodeToString(txn.IDHash[:]),
 			SenderID:            txn.SenderID,
 			Size:                txn.Size,
@@ -2743,7 +2745,7 @@ func sendNewBlockEventToDiagnostics(unwindTxns, unwindBlobTxns, minedTxns TxnSlo
 	}
 
 	for _, txn := range unwindTxns.Txns {
-		diagTxns = append(diagTxns, diagnostics.DiagTxn{
+		unwindDiagTxns = append(unwindDiagTxns, diagnostics.DiagTxn{
 			IDHash:              hex.EncodeToString(txn.IDHash[:]),
 			SenderID:            txn.SenderID,
 			Size:                txn.Size,
@@ -2758,7 +2760,7 @@ func sendNewBlockEventToDiagnostics(unwindTxns, unwindBlobTxns, minedTxns TxnSlo
 	}
 
 	for _, txn := range unwindBlobTxns.Txns {
-		diagTxns = append(diagTxns, diagnostics.DiagTxn{
+		unwindBlobDiagTxns = append(unwindBlobDiagTxns, diagnostics.DiagTxn{
 			IDHash:              hex.EncodeToString(txn.IDHash[:]),
 			SenderID:            txn.SenderID,
 			Size:                txn.Size,
@@ -2772,9 +2774,9 @@ func sendNewBlockEventToDiagnostics(unwindTxns, unwindBlobTxns, minedTxns TxnSlo
 		})
 	}
 
-	blockUpdate.MinedTxns = diagTxns
-	blockUpdate.UnwoundTxns = diagTxns
-	blockUpdate.UnwoundBlobTxns = diagTxns
+	blockUpdate.MinedTxns = minedDiagTxns
+	blockUpdate.UnwoundTxns = unwindDiagTxns
+	blockUpdate.UnwoundBlobTxns = unwindBlobDiagTxns
 	blockUpdate.BlockNum = blockNum
 	blockUpdate.BlkTime = blkTime
 
