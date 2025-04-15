@@ -1027,23 +1027,22 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 	u.Flags |= commitment.BalanceUpdate
 	u.Balance.Set(&acc.Balance)
 
-	if ch := acc.CodeHash.Bytes(); len(ch) > 0 { // if code hash is not empty
+	if ch := acc.CodeHash.Bytes(); len(ch) > 0 {
 		u.Flags |= commitment.CodeUpdate
-		copy(u.CodeHash[:], ch)
+		copy(u.CodeHash[:], acc.CodeHash.Bytes())
 	}
-	if u.CodeHash != commitment.EmptyCodeHashArray {
-		// todo do we really need to read code and then hash it again once we have hash in account?)))
 
+	if assert.Enable {
 		code, err := sdc.readCode(plainKey)
 		if err != nil {
 			return nil, err
 		}
-
 		if len(code) > 0 {
 			copy(u.CodeHash[:], crypto.Keccak256(code))
 			u.Flags |= commitment.CodeUpdate
-		} else {
-			u.CodeHash = commitment.EmptyCodeHashArray
+		}
+		if !bytes.Equal(acc.CodeHash.Bytes(), u.CodeHash[:]) {
+			return nil, fmt.Errorf("code hash mismatch: account '%x' != codeHash '%x'", acc.CodeHash.Bytes(), u.CodeHash[:])
 		}
 	}
 	return u, nil
@@ -1063,6 +1062,7 @@ func (sdc *SharedDomainsCommitmentContext) Storage(plainKey []byte) (u *commitme
 		u.Flags = commitment.StorageUpdate
 		copy(u.Storage[:u.StorageLen], enc)
 	}
+
 	return u, nil
 }
 

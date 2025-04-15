@@ -24,11 +24,17 @@ import (
 // here as interfaces, this would allow more functions currently in DHII+A to be included here.
 // caching version at caching_snap_repo.go
 
-// not thread safe; synchronization done on the caller side
+// NOTE: not thread safe; synchronization done on the caller side
+// specially when accessing dirtyFiles or current.
 type SnapshotRepo struct {
 	dirtyFiles *btree2.BTreeG[*filesItem]
-	_visible   visibleFiles
-	name       string
+
+	// latest version of visible files (derived from dirtyFiles)
+	// when repo is used in the context of rotx, one might want to think
+	// about which visibleFiles needs to be used - repo.current or
+	// rotx.visibleFiles
+	current visibleFiles
+	name    string
 
 	cfg       *ae.SnapshotConfig
 	parser    ae.SnapNameSchema
@@ -43,7 +49,7 @@ func NewSnapshotRepoForAppendable(id AppendableId, logger log.Logger) *SnapshotR
 }
 
 func NewSnapshotRepo(name string, cfg *ae.SnapshotConfig, logger log.Logger) *SnapshotRepo {
-	f := &SnapshotRepo{
+	return &SnapshotRepo{
 		dirtyFiles: btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		name:       name,
 		cfg:        cfg,
@@ -52,7 +58,6 @@ func NewSnapshotRepo(name string, cfg *ae.SnapshotConfig, logger log.Logger) *Sn
 		accessors:  cfg.Schema.AccessorList(),
 		logger:     logger,
 	}
-	return f
 }
 
 func (f *SnapshotRepo) OpenFolder() error {
@@ -72,31 +77,32 @@ func (f *SnapshotRepo) OpenFolder() error {
 }
 
 func (f *SnapshotRepo) IntegrateDirtyFile(file *filesItem) {
+	if file == nil {
+		return
+	}
 	f.dirtyFiles.Set(file)
 }
 
 func (f *SnapshotRepo) IntegrateDirtyFiles(files []*filesItem) {
 	for _, file := range files {
-		f.dirtyFiles.Set(file)
+		if file != nil {
+			f.dirtyFiles.Set(file)
+		}
 	}
 }
 
 func (f *SnapshotRepo) RecalcVisibleFiles(to RootNum) {
-	f._visible = calcVisibleFiles(f.dirtyFiles, f.accessors, false, uint64(to))
+	f.current = f.calcVisibleFiles(to)
 }
 
 func (f *SnapshotRepo) VisibleFiles() visibleFiles {
-	return f._visible
+	return f.current
 }
 
 func (f *SnapshotRepo) GetFreezingRange(from RootNum, to RootNum) (freezeFrom RootNum, freezeTo RootNum, canFreeze bool) {
 	return getFreezingRange(from, to, f.cfg)
 }
 
-// TODO: if integrity checks are done while calculating visibleFiles, and not here
-// maybe we want to apply integrity checks here as well, because these files will
-// be "opened", and maybe we don't want to do that for those non-integrity check
-// passing files.
 func (f *SnapshotRepo) DirtyFilesWithNoBtreeAccessors() (l []*filesItem) {
 	if !f.accessors.Has(AccessorBTree) {
 		return nil
@@ -131,7 +137,7 @@ func (f *SnapshotRepo) DirtyFilesWithNoHashAccessors() (l []*filesItem) {
 }
 
 func (f *SnapshotRepo) EndRootNum() RootNum {
-	return RootNum(f._visible.EndTxNum())
+	return RootNum(f.current.EndTxNum())
 }
 
 func (f *SnapshotRepo) Close() {
@@ -166,16 +172,24 @@ func (f *SnapshotRepo) Garbage(visibleFiles []visibleFile, merged *filesItem) (o
 		return
 	}
 
+	integrity := f.cfg.Integrity
 	f.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.frozen {
 				continue
 			}
-			if item.isSubsetOf(merged) {
+			if item.isProperSubsetOf(merged) {
+				if integrity != nil && integrity.Check(ae.RootNum(item.startTxNum), ae.RootNum(item.endTxNum)) {
+					continue
+				}
 				outs = append(outs, item)
+				continue
 			}
 			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using rotx)
 			if item.isBefore(merged) && hasCoverVisibleFile(visibleFiles, item) {
+				if integrity != nil && integrity.Check(ae.RootNum(item.startTxNum), ae.RootNum(item.endTxNum)) {
+					continue
+				}
 				outs = append(outs, item)
 			}
 		}
@@ -183,6 +197,73 @@ func (f *SnapshotRepo) Garbage(visibleFiles []visibleFile, merged *filesItem) (o
 	})
 
 	return outs
+}
+
+// TODO: crossRepoIntegrityCheck
+
+// FindMergeRange returns the most recent merge range to process
+// can be successively called with updated (merge processed) visibleFiles
+// to get the next range to process.
+func (f *SnapshotRepo) FindMergeRange(maxEndRootNum RootNum, files visibleFiles) (mrange MergeRange) {
+	toRootNum := min(uint64(maxEndRootNum), files.EndTxNum())
+	for i := 0; i < len(files); i++ {
+		item := files[i]
+		if item.endTxNum > toRootNum {
+			break
+		}
+
+		calcFrom, calcTo, canFreeze := f.GetFreezingRange(RootNum(item.startTxNum), RootNum(toRootNum))
+		if !canFreeze {
+			break
+		}
+
+		if calcFrom.Uint64() != item.startTxNum {
+			panic(fmt.Sprintf("f.GetFreezingRange() returned wrong fromRootNum: %d, expected %d", calcFrom.Uint64(), item.startTxNum))
+		}
+
+		// skip through files which come under the above freezing range
+		j := i + 1
+		for ; j < len(files); j++ {
+			item := files[j]
+			if item.endTxNum > calcTo.Uint64() {
+				break
+			}
+
+			// found a non-trivial range to merge
+			// this function sends the most frequent merge range
+			mrange.from = calcFrom.Uint64()
+			mrange.needMerge = true
+			mrange.to = item.endTxNum
+		}
+
+		i = j - 1
+	}
+
+	return
+}
+
+func (f *SnapshotRepo) FilesInRange(mrange MergeRange, files visibleFiles) (items []*filesItem) {
+	if !mrange.needMerge {
+		return
+	}
+
+	for _, item := range files {
+		if item.startTxNum < mrange.from {
+			continue
+		}
+		if item.endTxNum > mrange.to {
+			break
+		}
+
+		items = append(items, item.src)
+	}
+
+	return
+}
+
+func (f *SnapshotRepo) CleanAfterMerge(merged *filesItem, vf visibleFiles) {
+	outs := f.Garbage(vf, merged)
+	deleteMergeFile(f.dirtyFiles, outs, f.parser.DataTag(), f.logger)
 }
 
 // private methods
@@ -320,6 +401,93 @@ func (f *SnapshotRepo) loadDirtyFiles(aps []string) {
 			f.dirtyFiles.Set(dirtyFile)
 		}
 	}
+}
+
+func (f *SnapshotRepo) calcVisibleFiles(to RootNum) (roItems []visibleFile) {
+	files := f.dirtyFiles
+	trace := false
+
+	newVisibleFiles := make([]visibleFile, 0, files.Len())
+	integrity := f.cfg.Integrity
+	if trace {
+		log.Warn("[dbg] calcVisibleFiles", "amount", files.Len(), "toTxNum", to)
+	}
+	files.Walk(func(items []*filesItem) bool {
+		for _, item := range items {
+			if item.endTxNum > to.Uint64() {
+				if trace {
+					log.Warn("[dbg] calcVisibleFiles: ends after limit", "f", item.decompressor.FileName(), "limitRootNum", to)
+				}
+				continue
+			}
+			if item.canDelete.Load() {
+				if trace {
+					log.Warn("[dbg] calcVisibleFiles: canDelete=true", "f", item.decompressor.FileName())
+				}
+				continue
+			}
+
+			// TODO: need somehow handle this case, but indices do not open in tests TestFindMergeRangeCornerCases
+			if item.decompressor == nil {
+				if trace {
+					log.Warn("[dbg] calcVisibleFiles: decompressor not opened", "from", item.startTxNum, "to", item.endTxNum)
+				}
+				continue
+			}
+			if f.accessors.Has(AccessorBTree) && item.bindex == nil {
+				if trace {
+					log.Warn("[dbg] calcVisibleFiles: BTindex not opened", "f", item.decompressor.FileName())
+				}
+				//panic(fmt.Errorf("btindex nil: %s", item.decompressor.FileName()))
+				continue
+			}
+			if f.accessors.Has(AccessorHashMap) && item.index == nil {
+				if trace {
+					log.Warn("[dbg] calcVisibleFiles: RecSplit not opened", "f", item.decompressor.FileName())
+				}
+				//panic(fmt.Errorf("index nil: %s", item.decompressor.FileName()))
+				continue
+			}
+			if f.accessors.Has(AccessorExistence) && item.existence == nil {
+				if trace {
+					log.Warn("[dbg] calcVisibleFiles: Existence not opened", "f", item.decompressor.FileName())
+				}
+				//panic(fmt.Errorf("existence nil: %s", item.decompressor.FileName()))
+				continue
+			}
+
+			if integrity != nil && !integrity.Check(ae.RootNum(item.startTxNum), ae.RootNum(item.endTxNum)) {
+				if trace {
+					log.Warn("[dbg] calcVisibleFiles: integrity check failed, skipping:", "from", item.startTxNum, "to", item.endTxNum)
+				}
+				continue
+			}
+
+			// `kill -9` may leave small garbage files, but if big one already exists we assume it's good(fsynced) and no reason to merge again
+			// see super-set file, just drop sub-set files from list
+			for len(newVisibleFiles) > 0 && newVisibleFiles[len(newVisibleFiles)-1].src.isProperSubsetOf(item) {
+				if trace {
+					log.Warn("[dbg] calcVisibleFiles: marked as garbage (is subset)", "item", item.decompressor.FileName(),
+						"of", newVisibleFiles[len(newVisibleFiles)-1].src.decompressor.FileName())
+				}
+				newVisibleFiles[len(newVisibleFiles)-1].src = nil
+				newVisibleFiles = newVisibleFiles[:len(newVisibleFiles)-1]
+			}
+
+			// log.Warn("willBeVisible", "newVisibleFile", item.decompressor.FileName())
+			newVisibleFiles = append(newVisibleFiles, visibleFile{
+				startTxNum: item.startTxNum,
+				endTxNum:   item.endTxNum,
+				i:          len(newVisibleFiles),
+				src:        item,
+			})
+		}
+		return true
+	})
+	if newVisibleFiles == nil {
+		newVisibleFiles = []visibleFile{}
+	}
+	return newVisibleFiles
 }
 
 // determine freezing ranges, given snapshot creation config

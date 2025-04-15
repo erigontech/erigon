@@ -27,10 +27,9 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/direct"
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/core/forkid"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/p2p/forkid"
 )
 
 var ProtocolToString = map[uint]string{
