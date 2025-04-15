@@ -1266,9 +1266,9 @@ func ReadReceiptCache(tx kv.Tx, blockNum uint64, blockHash common.Hash, txnIndex
 	if data == nil {
 		return nil, false, nil
 	}
-
-	if len(data) == 0 {
-		panic(1)
+	_, data, err = decompressIfNeed(nil, data, RECEIPT_CACHE_SNAPPY)
+	if err != nil {
+		return nil, false, err
 	}
 
 	// Convert the receipts from their storage form to their internal representation
