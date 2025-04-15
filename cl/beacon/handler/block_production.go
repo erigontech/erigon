@@ -1439,8 +1439,8 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 	}
 	mergedCandidates := make(map[libcommon.Hash][]*solid.Attestation)
 	for root := range pool {
-		maxAtts := maxAttsPerDataRoot[root]
 		mergedCandidates[root] = []*solid.Attestation{}
+		maxAtts := min(maxAttsPerDataRoot[root], int(a.beaconChainCfg.MaxAttestations*3/2)) // limit the max attestations to 1.5 times the max attestations
 		for i := 0; i < maxAtts; i++ {
 			att := mergeAttByCommittees(root, i)
 			if att == nil {
