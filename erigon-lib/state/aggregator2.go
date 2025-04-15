@@ -204,7 +204,7 @@ var Schema = map[kv.Domain]domainCfg{
 			compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
 
 			historyLargeValues: true,
-			compressSingleVal:  true,
+			compressSingleVal:  false,
 
 			filenameBase: kv.ReceiptCacheDomain.String(),
 			historyIdx:   kv.ReceiptCacheHistoryIdx,
