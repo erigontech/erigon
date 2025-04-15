@@ -28,12 +28,13 @@ type SnapNameSchema interface {
 
 	// these give out full filepath, not just filename
 	DataFile(version Version, from, to RootNum) string
-	AccessorIdxFile(version Version, from, to RootNum, idxPos uint64) string           // index or accessor file (recsplit typically)
-	BtIdxFile(version Version, from, to RootNum) (filename string, params BtIdxParams) // hack to pass params required for opening btree index
+	AccessorIdxFile(version Version, from, to RootNum, idxPos uint64) string // index or accessor file (recsplit typically)
+	BtIdxFile(version Version, from, to RootNum) string                      // hack to pass params required for opening btree index
 	ExistenceFile(version Version, from, to RootNum) string
 
 	AccessorIdxCount() uint64
 	DataDirectory() string
+	DataFileCompression() seg.FileCompression
 }
 
 type _fileMetadata struct {
@@ -155,7 +156,7 @@ func (s *E2SnapSchema) AccessorIdxFile(version Version, from, to RootNum, idxPos
 	return filepath.Join(s.indexFileMetadata.folder, fmt.Sprintf("%s-%06d-%06d-%s%s", version, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.indexFileTags[idxPos], string(AccessorExtensionIdx)))
 }
 
-func (s *E2SnapSchema) BtIdxFile(version Version, from, to RootNum) (string, BtIdxParams) {
+func (s *E2SnapSchema) BtIdxFile(version Version, from, to RootNum) string {
 	panic("unsupported")
 }
 
@@ -187,14 +188,19 @@ func (s *E2SnapSchema) DataDirectory() string {
 	return s.dataFileMetadata.folder
 }
 
+func (s *E2SnapSchema) DataFileCompression() seg.FileCompression {
+	return seg.CompressNone
+}
+
 // E3 Schema
 
 type E3SnapSchema struct {
 	stepSize uint64
 
-	dataExtension DataExtension
-	dataFileTag   string
-	accessors     Accessors
+	dataExtension       DataExtension
+	dataFileTag         string
+	dataFileCompression seg.FileCompression
+	accessors           Accessors
 
 	accessorIdxExtension AccessorExtension
 	// caches
@@ -202,9 +208,6 @@ type E3SnapSchema struct {
 	indexFileMetadata     *_fileMetadata
 	btIdxFileMetadata     *_fileMetadata
 	existenceFileMetadata *_fileMetadata
-
-	// misc
-	btParams *BtIdxParams
 }
 
 type E3SnapSchemaBuilder struct {
@@ -221,9 +224,10 @@ func NewE3SnapSchemaBuilder(accessors Accessors, stepSize uint64) *E3SnapSchemaB
 	return &eschema
 }
 
-func (b *E3SnapSchemaBuilder) Data(dataFolder string, dataFileTag string, dataExtension DataExtension) *E3SnapSchemaBuilder {
+func (b *E3SnapSchemaBuilder) Data(dataFolder string, dataFileTag string, dataExtension DataExtension, compression seg.FileCompression) *E3SnapSchemaBuilder {
 	b.e.dataFileTag = dataFileTag
 	b.e.dataExtension = dataExtension
+	b.e.dataFileCompression = compression
 	b.e.dataFileMetadata = &_fileMetadata{
 		folder:    dataFolder,
 		supported: true,
@@ -233,10 +237,7 @@ func (b *E3SnapSchemaBuilder) Data(dataFolder string, dataFileTag string, dataEx
 
 // currently assumes dataFolder as the folder
 // So, Data() should be called first
-func (b *E3SnapSchemaBuilder) BtIndex(fileCompression seg.FileCompression) *E3SnapSchemaBuilder {
-	b.e.btParams = &BtIdxParams{
-		Compression: fileCompression,
-	}
+func (b *E3SnapSchemaBuilder) BtIndex() *E3SnapSchemaBuilder {
 	b.e.btIdxFileMetadata = &_fileMetadata{
 		folder:    b.e.dataFileMetadata.folder, // assuming "data" and btindex in same folder, which is currently the case
 		supported: true,
@@ -244,12 +245,25 @@ func (b *E3SnapSchemaBuilder) BtIndex(fileCompression seg.FileCompression) *E3Sn
 	return b
 }
 
-func (b *E3SnapSchemaBuilder) Accessor(accessorFolder string, accessorExtension AccessorExtension) *E3SnapSchemaBuilder {
+func (b *E3SnapSchemaBuilder) Accessor(accessorFolder string) *E3SnapSchemaBuilder {
 	b.e.indexFileMetadata = &_fileMetadata{
 		folder:    accessorFolder,
 		supported: true,
 	}
-	b.e.accessorIdxExtension = accessorExtension
+
+	var ex AccessorExtension
+	switch b.e.dataExtension {
+	case DataExtensionKv:
+		ex = AccessorExtensionKvi
+	case DataExtensionV:
+		ex = AccessorExtensionVi
+	case DataExtensionEf:
+		ex = AccessorExtensionEfi
+	default:
+		panic(fmt.Sprintf("unsupported data extension: %s", b.e.dataExtension))
+	}
+
+	b.e.accessorIdxExtension = ex
 	return b
 }
 
@@ -353,11 +367,11 @@ func (s *E3SnapSchema) AccessorIdxFile(version Version, from, to RootNum, idxPos
 	return filepath.Join(s.indexFileMetadata.folder, fmt.Sprintf("%s-%s.%d-%d%s", version, s.dataFileTag, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.accessorIdxExtension))
 }
 
-func (s *E3SnapSchema) BtIdxFile(version Version, from, to RootNum) (string, BtIdxParams) {
+func (s *E3SnapSchema) BtIdxFile(version Version, from, to RootNum) string {
 	if !s.btIdxFileMetadata.supported {
 		panic(fmt.Sprintf("%s not supported for %s", AccessorBTree, s.dataFileTag))
 	}
-	return filepath.Join(s.btIdxFileMetadata.folder, fmt.Sprintf("%s-%s.%d-%d.bt", version, s.dataFileTag, from/RootNum(s.stepSize), to/RootNum(s.stepSize))), *s.btParams
+	return filepath.Join(s.btIdxFileMetadata.folder, fmt.Sprintf("%s-%s.%d-%d.bt", version, s.dataFileTag, from/RootNum(s.stepSize), to/RootNum(s.stepSize)))
 }
 
 func (s *E3SnapSchema) ExistenceFile(version Version, from, to RootNum) string {
@@ -384,6 +398,10 @@ func (s *E3SnapSchema) AccessorIdxCount() uint64 {
 
 func (s *E3SnapSchema) DataDirectory() string {
 	return s.dataFileMetadata.folder
+}
+
+func (s *E3SnapSchema) DataFileCompression() seg.FileCompression {
+	return s.dataFileCompression
 }
 
 // debug method for getting all file extensions for this schema
