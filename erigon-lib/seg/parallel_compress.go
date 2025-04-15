@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"runtime"
 	"slices"
 	"strconv"
 	"sync"
@@ -34,7 +33,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg/patricia"
@@ -259,9 +257,6 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	if lvl < log.LvlTrace {
 		logger.Log(lvl, fmt.Sprintf("[%s] dictionary file parsed", logPrefix), "entries", len(code2pattern))
 	}
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
-	log.Warn("[dbg] mem after dictBuilder.ForEach", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	ch := make(chan *CompressionWord, 10_000)
 	inputSize, outputSize := &atomic.Uint64{}, &atomic.Uint64{}
 
