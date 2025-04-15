@@ -1389,7 +1389,7 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 	//   signature: aggregate(sig2, sig4)
 	// }
 
-	mergeAttByCommittees := func(root libcommon.Hash, index int) *solid.Attestation {
+	/*mergeAttByCommittees := func(root libcommon.Hash, index int) *solid.Attestation {
 		signatures := [][]byte{}
 		commiteeBits := solid.NewBitVector(int(a.beaconChainCfg.MaxCommitteesPerSlot))
 		bitSlice := solid.NewBitSlice()
@@ -1454,17 +1454,22 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 		}
 
 		return att
-	}
+	}*/
 	mergedCandidates := make(map[libcommon.Hash][]*solid.Attestation)
 	for root := range pool {
 		maxAtts := maxAttsPerDataRoot[root]
 		for i := 0; i < maxAtts; i++ {
-			att := mergeAttByCommittees(root, i)
+			/*att := mergeAttByCommittees(root, i)
 			if att == nil {
 				// No more attestations to merge for this root at higher indices, so we can stop checking
 				break
+			}*/
+			for c := 0; c < int(a.beaconChainCfg.MaxCommitteesPerSlot); c++ {
+				if i >= len(pool[root][uint64(c)]) {
+					break
+				}
+				mergedCandidates[root] = append(mergedCandidates[root], pool[root][uint64(c)][i])
 			}
-			mergedCandidates[root] = append(mergedCandidates[root], att)
 		}
 	}
 
