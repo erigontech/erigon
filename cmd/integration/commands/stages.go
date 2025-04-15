@@ -1434,12 +1434,12 @@ const blockBufferSize = 128
 func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.MiningConfig, logger log.Logger) (consensus.Engine, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
 	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
-		if err := ethutils.CheckAndSetCommitmentHistoryFlag(tx, logger, dirs, config); err != nil {
+		if err := ethutils.CheckAndSetCommitmentHistoryFlag(tx, logger, dirs, syncCfg.KeepExecutionProofs); err != nil {
 			return err
 		}
 		return nil
 	}); err != nil {
-		return nil, err
+		panic(err)
 	}
 
 	vmConfig := &vm.Config{}
