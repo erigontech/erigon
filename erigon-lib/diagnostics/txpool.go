@@ -93,7 +93,23 @@ func (d *DiagnosticClient) setupTxPoolDiagnostics(rootCtx context.Context) {
 	d.runOnPoolChangeBatchEvent(rootCtx)
 	d.runOnNewBlockListener(rootCtx)
 	d.SetupNotifier()
+	//GetPoolTransactions(rootCtx, "localhost:9090")
 }
+
+/*func GetPoolTransactions(ctx context.Context, grpcAddr string) ([]*types.Transaction, error) {
+	// Create a gRPC connection
+	conn, err := grpc.Dial(grpcAddr, grpc.WithInsecure())
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect: %v", err)
+	}
+	defer conn.Close()
+
+	// Create a txpool client
+	txPoolClient := txpoolproto.NewTxpoolClient(conn)
+
+	// Get all transactions
+	return GetAllTransactions(ctx, txPoolClient)
+}*/
 
 func (d *DiagnosticClient) runOnIncommingTxnListener(rootCtx context.Context) {
 	go func() {
@@ -163,3 +179,29 @@ func (d *DiagnosticClient) runOnNewBlockListener(rootCtx context.Context) {
 		}
 	}()
 }
+
+/*func GetAllTransactions(ctx context.Context, txPoolClient *txpool.TxPoolClient) ([]*types.Transaction, error) {
+	// Create an empty request to get all transactions
+	reply, err := txPoolClient.All(ctx, &txpoolproto.AllRequest{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get all transactions: %v", err)
+	}
+
+	// Decode all transactions
+	transactions := make([]*types.Transaction, 0, len(reply.Txs))
+	for _, tx := range reply.Txs {
+		txn, err := types.DecodeWrappedTransaction(tx.RlpTx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode transaction: %v", err)
+		}
+
+		// Set the sender address
+		var sender common.Address
+		copy(sender[:], tx.Sender)
+		txn.SetSender(sender)
+
+		transactions = append(transactions, txn)
+	}
+
+	return transactions, nil
+}*/
