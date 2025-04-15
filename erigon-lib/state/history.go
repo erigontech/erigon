@@ -451,10 +451,7 @@ func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte, origin
 		original = []byte{}
 	}
 
-	if w.compressSingleVal {
-		w.snappyWriteBuffer = growslice(w.snappyWriteBuffer, snappy.MaxEncodedLen(len(original)))
-		original = snappy.Encode(w.snappyWriteBuffer, original)
-	}
+	w.snappyWriteBuffer, original = compressIfNeed(w.snappyWriteBuffer, original, w.compressSingleVal)
 
 	//defer func() {
 	//	fmt.Printf("addPrevValue [%p;tx=%d] '%x' -> '%x'\n", w, w.ii.txNum, key1, original)
@@ -1178,22 +1175,27 @@ func (ht *HistoryRoTx) getFile(txNum uint64) (it visibleFile, ok bool) {
 	return it, false
 }
 
-func (ht *HistoryRoTx) decompressIfNeed(v []byte) ([]byte, error) {
-	if !ht.h.compressSingleVal {
-		return v, nil
+func compressIfNeed(buf, v []byte, enabled bool) ([]byte, []byte) {
+	if !enabled {
+		return buf, v
 	}
-	var err error
-	var actualSize int
-	actualSize, err = snappy.DecodedLen(v)
+	buf = snappy.Encode(growslice(buf, snappy.MaxEncodedLen(len(v))), v)
+	return buf, buf
+}
+
+func decompressIfNeed(buf, v []byte, enabled bool) ([]byte, []byte, error) {
+	if !enabled {
+		return buf, v, nil
+	}
+	actualSize, err := snappy.DecodedLen(v)
 	if err != nil {
-		return nil, err
+		return buf, nil, err
 	}
-	ht.snappyReadBuffer = growslice(ht.snappyReadBuffer, actualSize)
-	v, err = snappy.Decode(ht.snappyReadBuffer, v)
+	buf, err = snappy.Decode(growslice(buf, actualSize), v)
 	if err != nil {
-		return nil, err
+		return buf, nil, err
 	}
-	return v, nil
+	return buf, buf, nil
 }
 
 func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, bool, error) {
@@ -1226,7 +1228,7 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	if traceGetAsOf == ht.h.filenameBase {
 		fmt.Printf("DomainGetAsOf(%s, %x, %d) -> %s, histTxNum=%d, isNil(v)=%t\n", ht.h.filenameBase, key, txNum, g.FileName(), histTxNum, v == nil)
 	}
-	v, err = ht.decompressIfNeed(v)
+	ht.snappyReadBuffer, v, err = decompressIfNeed(ht.snappyReadBuffer, v, ht.h.compressSingleVal)
 	if err != nil {
 		return nil, false, err
 	}
@@ -1295,7 +1297,7 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 			return nil, false, nil
 		}
 
-		val, err = ht.decompressIfNeed(val)
+		ht.snappyReadBuffer, val, err = decompressIfNeed(ht.snappyReadBuffer, val, ht.h.compressSingleVal)
 		if err != nil {
 			return nil, false, err
 		}
@@ -1315,7 +1317,7 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 	}
 	// `val == []byte{}` means key was created in this txNum and doesn't exist before.
 	v := val[8:]
-	v, err = ht.decompressIfNeed(v)
+	ht.snappyReadBuffer, v, err = decompressIfNeed(ht.snappyReadBuffer, v, ht.h.compressSingleVal)
 	if err != nil {
 		return nil, false, err
 	}
