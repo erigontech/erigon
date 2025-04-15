@@ -147,7 +147,7 @@ type ProtoAppendableTx struct {
 }
 
 func (a *ProtoAppendable) BeginFilesRo() *ProtoAppendableTx {
-	visibleFiles := a.snaps.VisibleFiles()
+	visibleFiles := a.snaps.visibleFiles()
 	for i := range visibleFiles {
 		src := visibleFiles[i].src
 		if src.frozen {

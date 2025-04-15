@@ -37,7 +37,7 @@ type SnapshotRepo struct {
 	name    string
 
 	cfg       *ae.SnapshotConfig
-	parser    ae.SnapNameSchema
+	schema    ae.SnapNameSchema
 	accessors Accessors
 	stepSize  uint64
 
@@ -53,7 +53,7 @@ func NewSnapshotRepo(name string, cfg *ae.SnapshotConfig, logger log.Logger) *Sn
 		dirtyFiles: btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		name:       name,
 		cfg:        cfg,
-		parser:     cfg.Schema,
+		schema:     cfg.Schema,
 		stepSize:   cfg.RootNumPerStep,
 		accessors:  cfg.Schema.AccessorList(),
 		logger:     logger,
@@ -63,7 +63,7 @@ func NewSnapshotRepo(name string, cfg *ae.SnapshotConfig, logger log.Logger) *Sn
 func (f *SnapshotRepo) OpenFolder() error {
 	// this only sets up dirtyfiles, not visible files.
 	// there is no integrity checks done here.
-	files, err := filesFromDir(f.parser.DataDirectory())
+	files, err := filesFromDir(f.schema.DataDirectory())
 	if err != nil {
 		return err
 	}
@@ -71,9 +71,17 @@ func (f *SnapshotRepo) OpenFolder() error {
 	f.closeWhatNotInList(files)
 	f.loadDirtyFiles(files)
 	if err := f.openDirtyFiles(); err != nil {
-		return fmt.Errorf("SnapshotRepo(%s).openFolder: %w", f.parser.DataTag(), err)
+		return fmt.Errorf("SnapshotRepo(%s).openFolder: %w", f.schema.DataTag(), err)
 	}
 	return nil
+}
+
+func (f *SnapshotRepo) SetIntegrityChecker(integrity ae.IntegrityChecker) {
+	f.cfg.Integrity = integrity
+}
+
+func (f *SnapshotRepo) Schema() ae.SnapNameSchema {
+	return f.schema
 }
 
 func (f *SnapshotRepo) IntegrateDirtyFile(file *filesItem) {
@@ -95,8 +103,23 @@ func (f *SnapshotRepo) RecalcVisibleFiles(to RootNum) {
 	f.current = f.calcVisibleFiles(to)
 }
 
-func (f *SnapshotRepo) VisibleFiles() visibleFiles {
+type VisibleFile interface {
+	Filename() string
+	StartTxNum() uint64
+	EndTxNum() uint64
+}
+
+type VisibleFiles []VisibleFile
+
+func (f *SnapshotRepo) visibleFiles() visibleFiles {
 	return f.current
+}
+
+func (f *SnapshotRepo) VisibleFiles() (files []VisibleFile) {
+	for _, file := range f.current {
+		files = append(files, file)
+	}
+	return
 }
 
 func (f *SnapshotRepo) GetFreezingRange(from RootNum, to RootNum) (freezeFrom RootNum, freezeTo RootNum, canFreeze bool) {
@@ -107,13 +130,13 @@ func (f *SnapshotRepo) DirtyFilesWithNoBtreeAccessors() (l []*filesItem) {
 	if !f.accessors.Has(AccessorBTree) {
 		return nil
 	}
-	p := f.parser
+	p := f.schema
 	ss := f.stepSize
 	v := ae.Version(1)
 
 	return fileItemsWithMissingAccessors(f.dirtyFiles, f.stepSize, func(fromStep uint64, toStep uint64) []string {
 		from, to := RootNum(fromStep*ss), RootNum(toStep*ss)
-		fname, _ := p.BtIdxFile(v, from, to)
+		fname := p.BtIdxFile(v, from, to)
 		return []string{fname, p.ExistenceFile(v, from, to)}
 	})
 }
@@ -122,10 +145,10 @@ func (f *SnapshotRepo) DirtyFilesWithNoHashAccessors() (l []*filesItem) {
 	if !f.accessors.Has(AccessorHashMap) {
 		return nil
 	}
-	p := f.parser
+	p := f.schema
 	ss := f.stepSize
 	v := ae.Version(1)
-	accCount := f.parser.AccessorIdxCount()
+	accCount := f.schema.AccessorIdxCount()
 	files := make([]string, accCount)
 
 	return fileItemsWithMissingAccessors(f.dirtyFiles, f.stepSize, func(fromStep uint64, toStep uint64) []string {
@@ -263,7 +286,7 @@ func (f *SnapshotRepo) FilesInRange(mrange MergeRange, files visibleFiles) (item
 
 func (f *SnapshotRepo) CleanAfterMerge(merged *filesItem, vf visibleFiles) {
 	outs := f.Garbage(vf, merged)
-	deleteMergeFile(f.dirtyFiles, outs, f.parser.DataTag(), f.logger)
+	deleteMergeFile(f.dirtyFiles, outs, f.schema.DataTag(), f.logger)
 }
 
 // private methods
@@ -271,7 +294,7 @@ func (f *SnapshotRepo) CleanAfterMerge(merged *filesItem, vf visibleFiles) {
 func (f *SnapshotRepo) openDirtyFiles() error {
 	invalidFilesMu := sync.Mutex{}
 	invalidFileItems := make([]*filesItem, 0)
-	p := f.parser
+	p := f.schema
 	version := snaptype.Version(1)
 	f.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
@@ -320,14 +343,14 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 			}
 
 			if item.bindex == nil && accessors.Has(AccessorBTree) {
-				fPath, params := p.BtIdxFile(version, ae.RootNum(item.startTxNum), ae.RootNum(item.endTxNum))
+				fPath := p.BtIdxFile(version, ae.RootNum(item.startTxNum), ae.RootNum(item.endTxNum))
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
 					f.logger.Warn("[agg] SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
 				}
 				if exists {
-					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, DefaultBtreeM, item.decompressor, params.Compression); err != nil {
+					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, DefaultBtreeM, item.decompressor, p.DataFileCompression()); err != nil {
 						_, fName := filepath.Split(fPath)
 						f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files maybe good
@@ -386,11 +409,11 @@ func (f *SnapshotRepo) closeWhatNotInList(fNames []string) {
 
 func (f *SnapshotRepo) loadDirtyFiles(aps []string) {
 	if f.stepSize == 0 {
-		panic(fmt.Sprintf("step size if 0 for %s", f.parser.DataTag()))
+		panic(fmt.Sprintf("step size if 0 for %s", f.schema.DataTag()))
 	}
 
 	for _, ap := range aps {
-		fileInfo, ok := f.parser.Parse(ap)
+		fileInfo, ok := f.schema.Parse(ap)
 		if !ok {
 			f.logger.Trace("can't parse file name", "file", ap)
 			continue
