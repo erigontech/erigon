@@ -167,7 +167,7 @@ var Schema = map[kv.Domain]domainCfg{
 		name: kv.ReceiptDomain, valuesTable: kv.TblReceiptVals,
 
 		AccessorList: AccessorBTree | AccessorExistence,
-		Compression:  seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+		Compression:  seg.CompressNone,
 		CompressCfg:  seg.DefaultCfg,
 
 		hist: histCfg{
