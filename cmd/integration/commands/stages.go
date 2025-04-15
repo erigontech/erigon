@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon/eth/ethutils"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
@@ -1432,6 +1433,14 @@ const blockBufferSize = 128
 
 func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.MiningConfig, logger log.Logger) (consensus.Engine, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
+	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		if err := ethutils.CheckAndSetCommitmentHistoryFlag(tx, logger, dirs, config); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
 
 	vmConfig := &vm.Config{}
 
@@ -1454,9 +1463,9 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 		noCommit = false
 	}
 	if syncCfg.KeepExecutionProofs {
-		cfg.KeepExecutionProofs = true
 		libstate.EnableHistoricalCommitment()
 	}
+
 	cfg.Sync = syncCfg
 
 	cfg.Prune = pm
@@ -1466,7 +1475,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 	if miningConfig != nil {
 		cfg.Miner = *miningConfig
 	}
-	cfg.Dirs = datadir.New(datadirCli)
+	cfg.Dirs = dirs
 	allSn, borSn, agg, _, _, _, err := allSnapshots(ctx, db, logger)
 	if err != nil {
 		panic(err) // we do already panic above on genesis error
