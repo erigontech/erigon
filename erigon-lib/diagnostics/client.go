@@ -40,23 +40,24 @@ type DiagnosticClient struct {
 	dataDirPath string
 	speedTest   bool
 
-	syncStages          []SyncStage
-	syncStats           SyncStatistics
-	BlockExecution      BlockEexcStatsData
-	snapshotFileList    SnapshoFilesList
-	mu                  sync.Mutex
-	headerMutex         sync.Mutex
-	hardwareInfo        HardwareInfo
-	peersStats          *PeerStats
-	headers             Headers
-	bodies              BodiesInfo
-	bodiesMutex         sync.Mutex
-	resourcesUsage      ResourcesUsage
-	resourcesUsageMutex sync.Mutex
-	networkSpeed        NetworkSpeedTestResult
-	networkSpeedMutex   sync.Mutex
-	webseedsList        []string
-	conn                *websocket.Conn
+	syncStages           []SyncStage
+	syncStats            SyncStatistics
+	BlockExecution       BlockEexcStatsData
+	snapshotFileList     SnapshoFilesList
+	mu                   sync.Mutex
+	headerMutex          sync.Mutex
+	hardwareInfo         HardwareInfo
+	peersStats           *PeerStats
+	headers              Headers
+	bodies               BodiesInfo
+	bodiesMutex          sync.Mutex
+	resourcesUsage       ResourcesUsage
+	resourcesUsageMutex  sync.Mutex
+	networkSpeed         NetworkSpeedTestResult
+	networkSpeedMutex    sync.Mutex
+	webseedsList         []string
+	conn                 *websocket.Conn
+	notificationMessages []DiagMessages
 }
 
 var (
@@ -100,8 +101,9 @@ func NewDiagnosticClient(ctx context.Context, metricsMux *http.ServeMux, dataDir
 			resourcesUsage: ResourcesUsage{
 				MemoryUsage: []MemoryStats{},
 			},
-			peersStats:   NewPeerStats(1000), // 1000 is the limit of peers; TODO: make it configurable through a flag
-			webseedsList: webseedsList,
+			peersStats:           NewPeerStats(1000), // 1000 is the limit of peers; TODO: make it configurable through a flag
+			webseedsList:         webseedsList,
+			notificationMessages: []DiagMessages{},
 		}
 	})
 
