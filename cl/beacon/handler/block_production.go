@@ -1408,15 +1408,6 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 			att := candidates[index]
 			if attData == nil {
 				attData = att.Data
-			} else {
-				// Verify attestation data matches
-				if !att.Data.Equal(attData) {
-					log.Warn("Attestation data mismatch when merging committees",
-						"root", root,
-						"committee", cIndex,
-						"index", index)
-					return nil
-				}
 			}
 			signatures = append(signatures, att.Signature[:])
 			// set commitee bit
@@ -1448,14 +1439,6 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 			Data:            attData,
 			CommitteeBits:   commiteeBits,
 		}
-		attHash, _ := att.HashSSZ()
-		attHash2, _ := pool[root][0][index].HashSSZ()
-		if attHash != attHash2 {
-			attbytes, _ := json.Marshal(att)
-			attbytes2, _ := json.Marshal(pool[root][0][index])
-			log.Warn("Merged attestation hash mismatch", "root", root, "index", index, "attHash", attHash, "attHash2", attHash2, "att", string(attbytes), "att2", string(attbytes2))
-		}
-
 		return att
 	}
 	mergedCandidates := make(map[libcommon.Hash][]*solid.Attestation)
@@ -1469,29 +1452,9 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 				break
 			}
 			mergedCandidates[root] = append(mergedCandidates[root], att)
-			/*for c := 0; c < int(a.beaconChainCfg.MaxCommitteesPerSlot); c++ {
-				if i >= len(pool[root][uint64(c)]) {
-					break
-				}
-				mergedCandidates[root] = append(mergedCandidates[root], pool[root][uint64(c)][i])
-			}*/
 		}
 	}
 
-	// print out the merged candidates data
-	/*for root := range mergedCandidates {
-		for _, att := range mergedCandidates[root] {
-			log.Info("Merged candidate", "root", root, "slot", att.Data.Slot, "committee", att.CommitteeBits.GetOnIndices(), "aggregation_bits", att.AggregationBits.Bits())
-		}
-	}*/
-	/*mergedCandidates := make(map[libcommon.Hash][]*solid.Attestation)
-	for root := range pool {
-		for committee := range pool[root] {
-			for _, att := range pool[root][committee] {
-				mergedCandidates[root] = append(mergedCandidates[root], att)
-			}
-		}
-	}*/
 	return mergedCandidates, nil
 }
 
