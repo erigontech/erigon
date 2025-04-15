@@ -107,7 +107,7 @@ func (d *DiagnosticClient) runOnIncommingTxnListener(rootCtx context.Context) {
 				return
 			case info := <-ch:
 				d.Notify(DiagMessages{
-					MessageType: "txpool",
+					MessageType: "txpool_IncomingTxnUpdate",
 					Message:     info,
 				})
 			}
@@ -129,7 +129,7 @@ func (d *DiagnosticClient) runOnPoolChangeBatchEvent(rootCtx context.Context) {
 				for _, change := range info.Changes {
 					for _, txnHash := range change.TxnHashOrder {
 						d.Notify(DiagMessages{
-							MessageType: "txpool",
+							MessageType: "txpool_PoolChangeEvent",
 							Message: PoolChangeEvent{
 								Pool:    change.Pool,
 								Event:   change.Event,
@@ -156,7 +156,7 @@ func (d *DiagnosticClient) runOnNewBlockListener(rootCtx context.Context) {
 				return
 			case info := <-ch:
 				d.Notify(DiagMessages{
-					MessageType: "txpool",
+					MessageType: "txpool_BlockUpdate",
 					Message:     info,
 				})
 			}
