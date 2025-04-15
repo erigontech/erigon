@@ -39,7 +39,7 @@ type Metrics struct {
 	LoadAccount         atomic.Uint64
 	LoadStorage         atomic.Uint64
 	UpdateBranch        atomic.Uint64
-	LoadDepths          [6]uint64 // L0 AccountLoads, L0 StorageLoads, L1 AccountLoads, L1 StorageLoads, L2 AccountLoads, L2 StorageLoads
+	LoadDepths          [10]uint64
 	Unfolds             atomic.Uint64
 	TotalUnfoldingTime  time.Duration
 	TotalFoldingTime    time.Duration
@@ -64,6 +64,8 @@ func (metrics *Metrics) Headers() []string {
 		"L0 - Load Account/Storage",
 		"L1 - Load Account/Storage",
 		"L2 - Load Account/Storage",
+		"L3 - Load Account/Storage",
+		"L4 - Load Account/Storage",
 		"unfold/fold calls",
 		"total unfolding time (ms)",
 		"total folding time (ms)",
@@ -84,6 +86,8 @@ func (metrics *Metrics) Values() [][]string {
 			strconv.FormatUint(metrics.LoadDepths[0], 10) + "/" + strconv.FormatUint(metrics.LoadDepths[1], 10),
 			strconv.FormatUint(metrics.LoadDepths[2], 10) + "/" + strconv.FormatUint(metrics.LoadDepths[3], 10),
 			strconv.FormatUint(metrics.LoadDepths[4], 10) + "/" + strconv.FormatUint(metrics.LoadDepths[5], 10),
+			strconv.FormatUint(metrics.LoadDepths[6], 10) + "/" + strconv.FormatUint(metrics.LoadDepths[7], 10),
+			strconv.FormatUint(metrics.LoadDepths[8], 10) + "/" + strconv.FormatUint(metrics.LoadDepths[9], 10),
 			strconv.FormatUint(metrics.Unfolds.Load(), 10),
 			strconv.Itoa(int(metrics.TotalUnfoldingTime.Milliseconds())),
 			strconv.Itoa(int(metrics.TotalFoldingTime.Milliseconds())),
@@ -121,7 +125,7 @@ func (metrics *Metrics) CollectFileDepthStats(m map[uint64]skipStat) {
 			ends = append(ends, k)
 		}
 		sort.Slice(ends, func(i, j int) bool { return ends[i] > ends[j] })
-		for i := 0; i < 3 && i < len(ends); i++ {
+		for i := 0; i < 5 && i < len(ends); i++ {
 			// get stats for specific file depth
 			v := m[ends[i]]
 			// write level i file stats - account and storage loads
