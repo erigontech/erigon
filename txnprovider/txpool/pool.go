@@ -525,6 +525,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 		txn := newTxns.Txns[i]
 
 		if isDiagEnabled {
+			fmt.Println("connected")
 			subpool := "Unknown"
 			orderMarker := SubPoolMarker(0)
 			found := p.all.get(txn.SenderID, txn.Nonce)
@@ -550,6 +551,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 			}
 
 			diagTxns = append(diagTxns, diagTxn)
+			fmt.Println("diagTxns", len(diagTxns))
 		}
 
 		if reason == txpoolcfg.Success {
