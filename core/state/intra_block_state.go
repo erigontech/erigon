@@ -437,6 +437,14 @@ func (sdb *IntraBlockState) HasSelfdestructed(addr libcommon.Address) (bool, err
  * SETTERS
  */
 
+func (sdb *IntraBlockState) RemoveEscrowProtection(addr libcommon.Address) {
+	bi, ok := sdb.balanceInc[addr]
+	if ok {
+		bi.isEscrow = false
+		sdb.balanceInc[addr] = bi
+	}
+}
+
 // AddBalance adds amount to the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) error {
@@ -485,6 +493,11 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 
 			sdb.tracingHooks.OnBalanceChange(addr, prev, new(uint256.Int).Add(prev, amount), reason)
 		}
+
+		sdb.arbExtraData.unexpectedBalanceDelta.Add(
+			sdb.arbExtraData.unexpectedBalanceDelta,
+			amount,
+		)
 
 		bi.increase.Add(&bi.increase, amount)
 		bi.count++
@@ -656,6 +669,10 @@ func (sdb *IntraBlockState) Selfdestruct(addr libcommon.Address) (bool, error) {
 	stateObject.markSelfdestructed()
 	sdb.arbExtraData.unexpectedBalanceDelta.Sub(
 		sdb.arbExtraData.unexpectedBalanceDelta, &stateObject.data.Balance)
+	if bi, exist := sdb.balanceInc[addr]; exist && bi.isEscrow {
+		fmt.Printf("ESCROW unprotected by selfdestruct %x\n", addr)
+		bi.isEscrow = false
+	}
 
 	stateObject.createdContract = false
 	stateObject.data.Balance.Clear()

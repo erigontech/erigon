@@ -186,4 +186,7 @@ type IntraBlockState interface {
 	AddLog(*types.Log)
 
 	SetHooks(hooks *tracing.Hooks)
+	//CreateZombieIfDeleted(from common.Address)
+
+	RemoveEscrowProtection(addr common.Address)
 }
