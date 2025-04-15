@@ -64,6 +64,8 @@ do
 ./build/bin/erigon snapshots uncompress /erigon-data/sepolia_remove_me/snapshots/history/v1-commitment.3-4.v | DictReducerSoftLimit=1_000_000 MaxDictPatterns=64_000 MinPatternLen=5 MaxPatternLen=20 SamplingFactor=1 MinPatternScore=4000 ./build/bin/erigon seg compress /erigon-data/sepolia_remove_me/snapshots/history/v99-soft1m-hard64k-min5-max20-s1-sc4k-commitment.3-4.v  --datadir=/erigon-data/sepolia_remove_me --log.console.verbosity=5
 
 
+ERIGON_JD_LRU=20200 ERIGON_D_LRU=100200 ERIGON_II_LRU=100200 nohup ./build/bin/erigon --datadir /erigon-data/ --nat=stun --chain mainnet --torrent.download.rate 100G --torrent.download.slots=5000 --prune.mode archive --http.api=eth,erigon,web3,net,debug,trace,txpool --beacon.api.addr=localhost --beacon.api.port=9093 --beacon.api=beacon,config,validator --http.addr=0.0.0.0 --http.port=9092 --log.console.verbosity=4 --no-downloader --batchSize=256m --experimental.commitment-history > /erigon-logs/erigon-process.log 2>&1 &
+
 
 ./build/bin/erigon snapshots uncompress /erigon-data/exp_comp/v1-commitment.1-2.v | DictReducerSoftLimit=1_000_000 MaxDictPatterns=64_000 MinPatternLen=20 MaxPatternLen=128 SamplingFactor=1 MinPatternScore=1000 ./build/bin/erigon seg compress /erigon-data/exp_comp/v99-soft1m-hard64k-min20-max128-s1-sc1k-commitment.1-2.v --datadir=/erigon-data/sepolia_remove_me --log.console.verbosity=5
 ./build/bin/erigon snapshots uncompress /erigon-data/exp_comp/v1-commitment.1-2.v | DictReducerSoftLimit=1_000_000 MaxDictPatterns=64_000 MinPatternLen=20 MaxPatternLen=128 SamplingFactor=1 MinPatternScore=2000 ./build/bin/erigon seg compress /erigon-data/exp_comp/v99-soft1m-hard64k-min20-max128-s1-sc2k-commitment.1-2.v --datadir=/erigon-data/sepolia_remove_me --log.console.verbosity=5
