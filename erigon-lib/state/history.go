@@ -1179,6 +1179,24 @@ func (ht *HistoryRoTx) getFile(txNum uint64) (it visibleFile, ok bool) {
 	return it, false
 }
 
+func (ht *HistoryRoTx) decompressIfNeed(v []byte) ([]byte, error) {
+	if !ht.h.compressSingleVal {
+		return v, nil
+	}
+	var err error
+	var actualSize int
+	actualSize, err = snappy.DecodedLen(v)
+	if err != nil {
+		return nil, err
+	}
+	ht.snappyReadBuffer = growslice(ht.snappyReadBuffer, actualSize)
+	v, err = snappy.Decode(ht.snappyReadBuffer, v)
+	if err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
 func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, bool, error) {
 	// Files list of II and History is different
 	// it means II can't return index of file, but can return TxNum which History will use to find own file
@@ -1209,17 +1227,9 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	if traceGetAsOf == ht.h.filenameBase {
 		fmt.Printf("DomainGetAsOf(%s, %x, %d) -> %s, histTxNum=%d, isNil(v)=%t\n", ht.h.filenameBase, key, txNum, g.FileName(), histTxNum, v == nil)
 	}
-	if ht.h.compressSingleVal {
-		var actualSize int
-		actualSize, err = snappy.DecodedLen(v)
-		if err != nil {
-			return nil, false, err
-		}
-		ht.snappyReadBuffer = growslice(ht.snappyReadBuffer, actualSize)
-		v, err = snappy.Decode(ht.snappyReadBuffer, v)
-		if err != nil {
-			return nil, false, err
-		}
+	v, err = ht.decompressIfNeed(v)
+	if err != nil {
+		return nil, false, err
 	}
 	return v, true, nil
 }
@@ -1285,6 +1295,11 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 		if kAndTxNum == nil || !bytes.Equal(kAndTxNum[:len(kAndTxNum)-8], key) {
 			return nil, false, nil
 		}
+
+		val, err = ht.decompressIfNeed(val)
+		if err != nil {
+			return nil, false, err
+		}
 		// val == []byte{}, means key was created in this txNum and doesn't exist before.
 		return val, true, nil
 	}
@@ -1300,7 +1315,12 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 		return nil, false, nil
 	}
 	// `val == []byte{}` means key was created in this txNum and doesn't exist before.
-	return val[8:], true, nil
+	v := val[8:]
+	v, err = ht.decompressIfNeed(v)
+	if err != nil {
+		return nil, false, err
+	}
+	return v, true, nil
 }
 
 func (ht *HistoryRoTx) RangeAsOf(ctx context.Context, startTxNum uint64, from, to []byte, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
