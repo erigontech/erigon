@@ -148,7 +148,7 @@ var Schema = map[kv.Domain]domainCfg{
 		hist: histCfg{
 			valuesTable:   kv.TblCommitmentHistoryVals,
 			compression:   seg.CompressNone, // seg.CompressKeys | seg.CompressVals,
-			compressorCfg: DomainCompressCfg,
+			compressorCfg: seg.DefaultCfg,
 
 			snapshotsDisabled:  true,
 			historyLargeValues: false,
@@ -170,7 +170,7 @@ var Schema = map[kv.Domain]domainCfg{
 
 		AccessorList: AccessorBTree | AccessorExistence,
 		Compression:  seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
-		CompressCfg:  HistCompressCfg,
+		CompressCfg:  seg.DefaultCfg,
 
 		hist: histCfg{
 			valuesTable: kv.TblReceiptHistoryVals,
