@@ -453,9 +453,7 @@ func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte, origin
 
 	if w.compressSingleVal {
 		w.snappyWriteBuffer = growslice(w.snappyWriteBuffer, snappy.MaxEncodedLen(len(original)))
-		lB := len(original)
 		original = snappy.Encode(w.snappyWriteBuffer, original)
-		log.Warn("[dbg] snappy", "from", lB, "to", len(original))
 	}
 
 	//defer func() {
