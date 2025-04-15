@@ -30,6 +30,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/gballet/go-verkle"
+	"github.com/golang/snappy"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -1265,9 +1266,9 @@ func ReadReceiptCache(tx kv.Tx, blockNum uint64, blockHash common.Hash, txnIndex
 	if data == nil {
 		return nil, false, nil
 	}
-
-	if len(data) == 0 {
-		panic(1)
+	_, data, err = decompressIfNeed(nil, data, RECEIPT_CACHE_SNAPPY)
+	if err != nil {
+		return nil, false, err
 	}
 
 	// Convert the receipts from their storage form to their internal representation
@@ -1279,6 +1280,43 @@ func ReadReceiptCache(tx kv.Tx, blockNum uint64, blockHash common.Hash, txnIndex
 	res.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, txnHash)
 	return res, true, nil
 }
+
+// growslice ensures b has the wanted length by either expanding it to its capacity
+// or allocating a new slice if b has insufficient capacity.
+func growslice(b []byte, wantLength int) []byte {
+	if len(b) >= wantLength {
+		return b
+	}
+	if cap(b) >= wantLength {
+		return b[:cap(b)]
+	}
+	return make([]byte, wantLength)
+}
+
+func compressIfNeed(buf, v []byte, enabled bool) ([]byte, []byte) {
+	if !enabled {
+		return buf, v
+	}
+	buf = snappy.Encode(growslice(buf, snappy.MaxEncodedLen(len(v))), v)
+	return buf, buf
+}
+
+func decompressIfNeed(buf, v []byte, enabled bool) ([]byte, []byte, error) {
+	if !enabled {
+		return buf, v, nil
+	}
+	actualSize, err := snappy.DecodedLen(v)
+	if err != nil {
+		return buf, nil, err
+	}
+	buf, err = snappy.Decode(growslice(buf, actualSize), v)
+	if err != nil {
+		return buf, nil, err
+	}
+	return buf, buf, nil
+}
+
+var RECEIPT_CACHE_SNAPPY = dbg.EnvBool("RECEIPT_CACHE_SNAPPY", false)
 
 func ReadReceiptsCache(tx kv.TemporalTx, block *types.Block, txNumReader rawdbv3.TxNumsReader) (res types.Receipts, err error) {
 	blockHash := block.Hash()
@@ -1308,6 +1346,7 @@ func ReadReceiptsCache(tx kv.TemporalTx, block *types.Block, txNumReader rawdbv3
 	//}
 	//defer rng.Close()
 
+	var snappyReadBuffer []byte
 	for rng.HasNext() {
 		_, v, err := rng.Next()
 		if err != nil {
@@ -1315,6 +1354,11 @@ func ReadReceiptsCache(tx kv.TemporalTx, block *types.Block, txNumReader rawdbv3
 		}
 		if len(v) == 0 {
 			return nil, nil
+		}
+
+		snappyReadBuffer, v, err = decompressIfNeed(snappyReadBuffer, v, RECEIPT_CACHE_SNAPPY)
+		if err != nil {
+			return nil, err
 		}
 
 		// Convert the receipts from their storage form to their internal representation
@@ -1372,6 +1416,9 @@ func WriteReceiptsCache(tx kv.TemporalPutDel, blockNum uint64, blockHash common.
 	//	return nil
 	//}
 
+	var snappyWriteBuffer []byte
+	var toWrite []byte
+
 	buf := bytes.NewBuffer(nil)
 	for txnIndex, receipt := range receipts {
 		buf.Reset()
@@ -1395,12 +1442,16 @@ func WriteReceiptsCache(tx kv.TemporalPutDel, blockNum uint64, blockHash common.
 					panic(fmt.Sprintf("assert: %x, %x\n", storageReceipt.ContractAddress, storageReceipt2.ContractAddress))
 				}
 			}
+
+			toWrite = buf.Bytes()
+
+			snappyWriteBuffer, toWrite = compressIfNeed(snappyWriteBuffer, toWrite, RECEIPT_CACHE_SNAPPY)
 		}
 
-		//if err := tx.DomainPut(kv.ReceiptsCache, dbutils.ReceiptCacheKey(blockNum, blockHash, uint32(txnIndex)), nil, buf.Bytes()); err != nil {
+		//if err := tx.DomainPut(kv.ReceiptsCache, dbutils.ReceiptCacheKey(blockNum, blockHash, uint32(txnIndex)), nil, toWrite); err != nil {
 		//	return fmt.Errorf("writing logs for block %d: %w", blockNum, err)
 		//}
-		if err := tx.DomainPut(kv.ReceiptCacheDomain, receiptCacheKey, nil, buf.Bytes(), nil, 0); err != nil {
+		if err := tx.DomainPut(kv.ReceiptCacheDomain, receiptCacheKey, nil, toWrite, nil, 0); err != nil {
 			return fmt.Errorf("writing logs for block %d: %w", blockNum, err)
 		}
 	}
