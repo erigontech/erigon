@@ -46,6 +46,8 @@ type SnapshotConfig struct {
 	// is aligned to those of the root entity.
 	RootAligned bool
 
+	Integrity IntegrityChecker
+
 	Schema SnapNameSchema
 }
 

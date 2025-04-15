@@ -19,8 +19,8 @@ package eth1
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math/big"
+	"strings"
 	"sync/atomic"
 
 	"golang.org/x/sync/semaphore"
@@ -40,8 +40,8 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync"
+	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/turbo/builder"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 	"github.com/erigontech/erigon/turbo/services"
@@ -50,6 +50,45 @@ import (
 )
 
 const maxBlocksLookBehind = 32
+
+var ErrMissingChainSegment = errors.New("missing chain segment")
+
+func makeErrMissingChainSegment(blockHash libcommon.Hash) error {
+	return errors.Join(ErrMissingChainSegment, errors.New("block hash: "+blockHash.String()))
+}
+
+func GetBlockHashFromMissingSegmentError(err error) (libcommon.Hash, bool) {
+	if !errors.Is(err, ErrMissingChainSegment) {
+		return libcommon.Hash{}, false
+	}
+	// Otherwise, we assume the error is a joined error from makeErrMissingChainSegment.
+	// We define an interface to get access to the underlying errors.
+	type unwrapper interface {
+		Unwrap() []error
+	}
+	uw, ok := err.(unwrapper)
+	if !ok {
+		return libcommon.Hash{}, false
+	}
+
+	// iterate through suberrors to find one that contains the block hash info.
+	var hashStr string
+	const prefix = "block hash: "
+	for _, subErr := range uw.Unwrap() {
+		msg := subErr.Error()
+		if strings.HasPrefix(msg, prefix) {
+			hashStr = strings.TrimPrefix(msg, prefix)
+			break
+		}
+	}
+	if hashStr == "" {
+		return libcommon.Hash{}, false
+	}
+
+	// Convert the extracted string into a libcommon.Hash.
+	// This assumes the existence of libcommon.ParseHash.
+	return libcommon.HexToHash(hashStr), true
+}
 
 // EthereumExecutionModule describes ethereum execution logic and indexing.
 type EthereumExecutionModule struct {
@@ -173,7 +212,7 @@ func (e *EthereumExecutionModule) unwindToCommonCanonical(tx kv.RwTx, header *ty
 			return err
 		}
 		if currentHeader == nil {
-			return fmt.Errorf("header %d, %x not found", parentBlockNum, parentBlockHash)
+			return makeErrMissingChainSegment(parentBlockHash)
 		}
 	}
 	if err := e.hook.BeforeRun(tx, true); err != nil {

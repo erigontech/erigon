@@ -90,8 +90,8 @@ var Schema = map[kv.Domain]domainCfg{
 
 			iiCfg: iiCfg{
 				keysTable: kv.TblAccountHistoryKeys, valuesTable: kv.TblAccountIdx,
-				withExistence: false, compressorCfg: seg.DefaultCfg,
-				filenameBase: kv.AccountsDomain.String(), //TODO: looks redundant
+				compressorCfg: seg.DefaultCfg,
+				filenameBase:  kv.AccountsDomain.String(), //TODO: looks redundant
 			},
 		},
 	},
@@ -112,8 +112,8 @@ var Schema = map[kv.Domain]domainCfg{
 
 			iiCfg: iiCfg{
 				keysTable: kv.TblStorageHistoryKeys, valuesTable: kv.TblStorageIdx,
-				withExistence: false, compressorCfg: seg.DefaultCfg,
-				filenameBase: kv.StorageDomain.String(),
+				compressorCfg: seg.DefaultCfg,
+				filenameBase:  kv.StorageDomain.String(),
 			},
 		},
 	},
@@ -134,9 +134,9 @@ var Schema = map[kv.Domain]domainCfg{
 			historyIdx:         kv.CodeHistoryIdx,
 
 			iiCfg: iiCfg{
-				withExistence: false, compressorCfg: seg.DefaultCfg,
 				keysTable: kv.TblCodeHistoryKeys, valuesTable: kv.TblCodeIdx,
-				filenameBase: kv.CodeDomain.String(),
+				compressorCfg: seg.DefaultCfg,
+				filenameBase:  kv.CodeDomain.String(),
 			},
 		},
 	},
@@ -160,8 +160,8 @@ var Schema = map[kv.Domain]domainCfg{
 
 			iiCfg: iiCfg{
 				keysTable: kv.TblCommitmentHistoryKeys, valuesTable: kv.TblCommitmentIdx,
-				withExistence: false, compressorCfg: seg.DefaultCfg,
-				filenameBase: kv.CommitmentDomain.String(),
+				compressorCfg: seg.DefaultCfg,
+				filenameBase:  kv.CommitmentDomain.String(),
 			},
 		},
 	},
@@ -183,8 +183,8 @@ var Schema = map[kv.Domain]domainCfg{
 
 			iiCfg: iiCfg{
 				keysTable: kv.TblReceiptHistoryKeys, valuesTable: kv.TblReceiptIdx,
-				withExistence: false, compressorCfg: seg.DefaultCfg,
-				filenameBase: kv.ReceiptDomain.String(),
+				compressorCfg: seg.DefaultCfg,
+				filenameBase:  kv.ReceiptDomain.String(),
 			},
 		},
 	},
