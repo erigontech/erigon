@@ -6,15 +6,15 @@ import (
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/recsplit"
-	ae "github.com/erigontech/erigon-lib/state/appendable_extras"
+	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 )
 
-type RootNum = ae.RootNum
-type Num = ae.Num
-type Id = ae.Id
-type EncToBytesI = ae.EncToBytesI
-type AppendableId = ae.AppendableId
-type Bytes = ae.Bytes
+type RootNum = ee.RootNum
+type Num = ee.Num
+type Id = ee.Id
+type EncToBytesI = ee.EncToBytesI
+type ForkableId = ee.ForkableId
+type Bytes = ee.Bytes
 
 // Freezer takes hot data (e.g. from db) and transforms it
 // to snapshot cold data.
@@ -39,7 +39,7 @@ type AccessorIndexBuilder interface {
 // D: db interface
 // we don't need a separate interface for files...
 // since tx is provided separately anyway.
-type StartRoTx[T AppendableBaseTxI] interface {
+type StartRoTx[T ForkableBaseTxI] interface {
 	BeginFilesTx() T
 	BeginNoFilesTx() T
 }
@@ -51,14 +51,14 @@ type StartRoTx[T AppendableBaseTxI] interface {
 // and use separate tx..it can lead to inconsistency (due to db data being pruned)
 // so temporaltx is needed here...
 
-type AppendableTemporalCommonTxI interface {
+type ForkableTemporalCommonTxI interface {
 	Close()
 	Type() CanonicityStrategy
 }
 
 // no need to take mdbx tx
 // common methods for files api
-type AppendableFilesTxI interface {
+type ForkableFilesTxI interface {
 	GetFromFiles(entityNum Num) (v Bytes, found bool, fileIdx int, err error) // snapshot only
 	Close()
 	VisibleFilesMaxRootNum() RootNum
@@ -68,62 +68,62 @@ type AppendableFilesTxI interface {
 	GetFromFile(entityNum Num, idx int) (v Bytes, found bool, err error)
 }
 
-type AppendableDbCommonTxI interface {
+type ForkableDbCommonTxI interface {
 	Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (uint64, error)
 	Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error
 	Close()
 }
 
-// common methods across all appendables
-type AppendableBaseTxI interface {
-	AppendableDbCommonTxI
-	AppendableTemporalCommonTxI
+// common methods across all forkables
+type ForkableBaseTxI interface {
+	ForkableDbCommonTxI
+	ForkableTemporalCommonTxI
 	Get(num Num, tx kv.Tx) (Bytes, error)
 }
 
-type AppendableDebugAPI[T AppendableDbCommonTxI] interface {
-	DebugFiles() AppendableFilesTxI
+type ForkableDebugAPI[T ForkableDbCommonTxI] interface {
+	DebugFiles() ForkableFilesTxI
 	DebugDb() T
 }
 
 // marked
 type MarkedDbTxI interface {
-	AppendableDbCommonTxI
+	ForkableDbCommonTxI
 	GetDb(num Num, hash []byte, tx kv.Tx) (Bytes, error) // db only (hash==nil => canonical value)
 	Put(num Num, hash []byte, value Bytes, tx kv.RwTx) error
 }
 
 type MarkedTxI interface {
-	AppendableBaseTxI
-	AppendableDebugAPI[MarkedDbTxI]
+	ForkableBaseTxI
+	ForkableDebugAPI[MarkedDbTxI]
 	Put(num Num, hash []byte, value Bytes, tx kv.RwTx) error
 }
 
 // unmarked
 type UnmarkedDbTxI interface {
-	AppendableDbCommonTxI
+	ForkableDbCommonTxI
 	GetDb(num Num, tx kv.Tx) (Bytes, error)
 	Append(entityNum Num, value Bytes, tx kv.RwTx) error
 }
 
 type UnmarkedTxI interface {
-	AppendableBaseTxI
-	AppendableDebugAPI[UnmarkedDbTxI]
+	ForkableBaseTxI
+	ForkableDebugAPI[UnmarkedDbTxI]
 	Append(entityNum Num, value Bytes, tx kv.RwTx) error
 }
 
 // buffer values before writing to db supposed to store only canonical values
 // Note that values in buffer are not reflected in Get call.
 type BufferedDbTxI interface {
-	AppendableDbCommonTxI
+	ForkableDbCommonTxI
 	GetDb(Num, kv.Tx) (Bytes, error)
 	Put(Num, Bytes) error
 	Flush(context.Context, kv.RwTx) error
 }
 
 type BufferedTxI interface {
-	AppendableBaseTxI
-	AppendableDebugAPI[BufferedDbTxI]
+	ForkableBaseTxI
+	ForkableDebugAPI[BufferedDbTxI]
 	Get(Num, kv.Tx) (Bytes, error)
 	Put(Num, Bytes) error
 	Flush(context.Context, kv.RwTx) error
@@ -146,8 +146,8 @@ const (
 
 /////////////////// config
 
-// A non-generic interface that any Appendable can implement
-type AppendableConfig interface {
+// A non-generic interface that any Forkable can implement
+type ForkableConfig interface {
 	SetFreezer(freezer Freezer)
 	SetIndexBuilders(builders ...AccessorIndexBuilder)
 	SetTs4Bytes(ts4Bytes bool)

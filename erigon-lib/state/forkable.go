@@ -8,7 +8,7 @@ import (
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	ae "github.com/erigontech/erigon-lib/state/appendable_extras"
+	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 )
 
 const MaxUint64 = ^uint64(0)
@@ -21,11 +21,11 @@ type BufferFactory interface {
 	New() etl.Buffer
 }
 
-var _ StartRoTx[AppendableBaseTxI] = (*Appendable[AppendableBaseTxI])(nil)
+var _ StartRoTx[ForkableBaseTxI] = (*Forkable[ForkableBaseTxI])(nil)
 var ErrNotFoundInSnapshot = errors.New("entity not found in snapshot")
 
-type Appendable[T AppendableBaseTxI] struct {
-	*ProtoAppendable
+type Forkable[T ForkableBaseTxI] struct {
+	*ProtoForkable
 
 	canonicalTbl string // for marked structures
 	valsTbl      string
@@ -37,34 +37,34 @@ type Appendable[T AppendableBaseTxI] struct {
 	rel RootRelationI
 }
 
-type AppOpts func(AppendableConfig)
+type AppOpts func(ForkableConfig)
 
 func App_WithFreezer(freezer Freezer) AppOpts {
-	return func(a AppendableConfig) {
+	return func(a ForkableConfig) {
 		a.SetFreezer(freezer)
 	}
 }
 
 func App_WithIndexBuilders(builders ...AccessorIndexBuilder) AppOpts {
-	return func(a AppendableConfig) {
+	return func(a ForkableConfig) {
 		a.SetIndexBuilders(builders...)
 	}
 }
 
 func App_WithTs4Bytes(ts4Bytes bool) AppOpts {
-	return func(a AppendableConfig) {
+	return func(a ForkableConfig) {
 		a.SetTs4Bytes(ts4Bytes)
 	}
 }
 
 func App_WithPruneFrom(pruneFrom Num) AppOpts {
-	return func(a AppendableConfig) {
+	return func(a ForkableConfig) {
 		a.SetPruneFrom(pruneFrom)
 	}
 }
 
 // func App
-func NewMarkedAppendable(id AppendableId, valsTbl string, canonicalTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts) (*Appendable[MarkedTxI], error) {
+func NewMarkedForkable(id ForkableId, valsTbl string, canonicalTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts) (*Forkable[MarkedTxI], error) {
 	a, err := create[MarkedTxI](id, Marked, valsTbl, canonicalTbl, relation, logger, options...)
 	if err != nil {
 		return nil, err
@@ -73,9 +73,9 @@ func NewMarkedAppendable(id AppendableId, valsTbl string, canonicalTbl string, r
 	a.beginTxGen = func(files bool) MarkedTxI {
 		m := &MarkedTx{ap: a}
 		if files {
-			m.ProtoAppendableTx = a.ProtoAppendable.BeginFilesRo()
+			m.ProtoForkableTx = a.ProtoForkable.BeginFilesRo()
 		} else {
-			m.ProtoAppendableTx = a.ProtoAppendable.BeginNoFilesRo()
+			m.ProtoForkableTx = a.ProtoForkable.BeginNoFilesRo()
 		}
 		return m
 	}
@@ -83,7 +83,7 @@ func NewMarkedAppendable(id AppendableId, valsTbl string, canonicalTbl string, r
 	return a, nil
 }
 
-func NewUnmarkedAppendable(id AppendableId, valsTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts) (*Appendable[UnmarkedTxI], error) {
+func NewUnmarkedForkable(id ForkableId, valsTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts) (*Forkable[UnmarkedTxI], error) {
 	a, err := create[UnmarkedTxI](id, Unmarked, valsTbl, "", relation, logger, options...)
 	if err != nil {
 		return nil, err
@@ -104,9 +104,9 @@ func NewUnmarkedAppendable(id AppendableId, valsTbl string, relation RootRelatio
 	a.beginTxGen = func(files bool) UnmarkedTxI {
 		m := &UnmarkedTx{ap: a}
 		if files {
-			m.ProtoAppendableTx = a.ProtoAppendable.BeginFilesRo()
+			m.ProtoForkableTx = a.ProtoForkable.BeginFilesRo()
 		} else {
-			m.ProtoAppendableTx = a.ProtoAppendable.BeginNoFilesRo()
+			m.ProtoForkableTx = a.ProtoForkable.BeginNoFilesRo()
 		}
 		return m
 	}
@@ -114,7 +114,7 @@ func NewUnmarkedAppendable(id AppendableId, valsTbl string, relation RootRelatio
 	return a, nil
 }
 
-func NewBufferedAppendable(id AppendableId, valsTbl string, relation RootRelationI, factory BufferFactory, logger log.Logger, options ...AppOpts) (*Appendable[BufferedTxI], error) {
+func NewBufferedForkable(id ForkableId, valsTbl string, relation RootRelationI, factory BufferFactory, logger log.Logger, options ...AppOpts) (*Forkable[BufferedTxI], error) {
 	a, err := create[BufferedTxI](id, Buffered, valsTbl, "", relation, logger, options...)
 	if err != nil {
 		return nil, err
@@ -127,9 +127,9 @@ func NewBufferedAppendable(id AppendableId, valsTbl string, relation RootRelatio
 	a.beginTxGen = func(files bool) BufferedTxI {
 		m := &BufferedTx{ap: a}
 		if files {
-			m.ProtoAppendableTx = a.ProtoAppendable.BeginFilesRo()
+			m.ProtoForkableTx = a.ProtoForkable.BeginFilesRo()
 		} else {
-			m.ProtoAppendableTx = a.ProtoAppendable.BeginNoFilesRo()
+			m.ProtoForkableTx = a.ProtoForkable.BeginNoFilesRo()
 		}
 		return m
 	}
@@ -138,9 +138,9 @@ func NewBufferedAppendable(id AppendableId, valsTbl string, relation RootRelatio
 	return a, nil
 }
 
-func create[T AppendableBaseTxI](id AppendableId, strategy CanonicityStrategy, valsTbl string, canonicalTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts) (*Appendable[T], error) {
-	a := &Appendable[T]{
-		ProtoAppendable: NewProto(id, nil, nil, logger),
+func create[T ForkableBaseTxI](id ForkableId, strategy CanonicityStrategy, valsTbl string, canonicalTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts) (*Forkable[T], error) {
+	a := &Forkable[T]{
+		ProtoForkable: NewProto(id, nil, nil, logger),
 	}
 	a.rel = relation
 	a.valsTbl = valsTbl
@@ -152,42 +152,42 @@ func create[T AppendableBaseTxI](id AppendableId, strategy CanonicityStrategy, v
 	return a, nil
 }
 
-func (a *Appendable[T]) PruneFrom() Num {
+func (a *Forkable[T]) PruneFrom() Num {
 	return a.pruneFrom
 }
 
-func (a *Appendable[T]) encTs(ts ae.EncToBytesI) []byte {
+func (a *Forkable[T]) encTs(ts ee.EncToBytesI) []byte {
 	return ts.EncToBytes(!a.ts4Bytes)
 }
 
-func (a *Appendable[T]) BeginFilesTx() T {
+func (a *Forkable[T]) BeginFilesTx() T {
 	return a.beginTxGen(true)
 }
 
-func (a *Appendable[T]) BeginNoFilesTx() T {
+func (a *Forkable[T]) BeginNoFilesTx() T {
 	return a.beginTxGen(false)
 }
 
-func (a *Appendable[T]) SetFreezer(freezer Freezer) {
+func (a *Forkable[T]) SetFreezer(freezer Freezer) {
 	a.freezer = freezer
 }
 
-func (a *Appendable[T]) SetIndexBuilders(builders ...AccessorIndexBuilder) {
+func (a *Forkable[T]) SetIndexBuilders(builders ...AccessorIndexBuilder) {
 	a.builders = builders
 }
 
-func (a *Appendable[T]) SetPruneFrom(pruneFrom Num) {
+func (a *Forkable[T]) SetPruneFrom(pruneFrom Num) {
 	a.pruneFrom = pruneFrom
 }
 
-func (a *Appendable[T]) SetTs4Bytes(ts4Bytes bool) {
+func (a *Forkable[T]) SetTs4Bytes(ts4Bytes bool) {
 	a.ts4Bytes = ts4Bytes
 }
 
 // marked tx
 type MarkedTx struct {
-	*ProtoAppendableTx
-	ap *Appendable[MarkedTxI]
+	*ProtoForkableTx
+	ap *Forkable[MarkedTxI]
 }
 
 func (m *MarkedTx) Get(num Num, tx kv.Tx) (Bytes, error) {
@@ -234,7 +234,7 @@ func (m *MarkedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error {
 		return err
 	}
 	fromKey := a.encTs(efrom)
-	_, err = ae.DeleteRangeFromTbl(a.canonicalTbl, fromKey, nil, MaxUint64, tx)
+	_, err = ee.DeleteRangeFromTbl(a.canonicalTbl, fromKey, nil, MaxUint64, tx)
 	return err
 }
 
@@ -246,15 +246,15 @@ func (m *MarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.Rw
 		return 0, err
 	}
 	toKeyPrefix := a.encTs(eto)
-	if del, err := ae.DeleteRangeFromTbl(a.canonicalTbl, fromKeyPrefix, toKeyPrefix, limit, tx); err != nil {
+	if del, err := ee.DeleteRangeFromTbl(a.canonicalTbl, fromKeyPrefix, toKeyPrefix, limit, tx); err != nil {
 		return del, err
 	}
 
-	return ae.DeleteRangeFromTbl(a.valsTbl, fromKeyPrefix, toKeyPrefix, limit, tx)
+	return ee.DeleteRangeFromTbl(a.valsTbl, fromKeyPrefix, toKeyPrefix, limit, tx)
 }
 
 func (m *MarkedTx) combK(ts Num, hash []byte) []byte {
-	// relevant only for marked appendable
+	// relevant only for marked forkable
 	// assuming hash is common.Hash which is 32 bytes
 	const HashBytes = 32
 	k := make([]byte, 8+HashBytes)
@@ -263,7 +263,7 @@ func (m *MarkedTx) combK(ts Num, hash []byte) []byte {
 	return k
 }
 
-func (m *MarkedTx) DebugFiles() AppendableFilesTxI {
+func (m *MarkedTx) DebugFiles() ForkableFilesTxI {
 	return m
 }
 
@@ -273,8 +273,8 @@ func (m *MarkedTx) DebugDb() MarkedDbTxI {
 
 // unmarked tx
 type UnmarkedTx struct {
-	*ProtoAppendableTx
-	ap *Appendable[UnmarkedTxI]
+	*ProtoForkableTx
+	ap *Forkable[UnmarkedTxI]
 }
 
 func (m *UnmarkedTx) Get(num Num, tx kv.Tx) (Bytes, error) {
@@ -304,7 +304,7 @@ func (m *UnmarkedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error
 	if err != nil {
 		return err
 	}
-	_, err = ae.DeleteRangeFromTbl(ap.valsTbl, ap.encTs(fromN), nil, 0, tx)
+	_, err = ee.DeleteRangeFromTbl(ap.valsTbl, ap.encTs(fromN), nil, 0, tx)
 	return err
 }
 
@@ -314,14 +314,14 @@ func (m *UnmarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.
 	if err != nil {
 		return 0, err
 	}
-	log.Info("pruning", "appendable", ap.a.Name(), "from", ap.pruneFrom, "to", toNum)
+	log.Info("pruning", "forkable", ap.a.Name(), "from", ap.pruneFrom, "to", toNum)
 
 	eFrom := ap.encTs(ap.pruneFrom)
 	eTo := ap.encTs(toNum)
-	return ae.DeleteRangeFromTbl(ap.valsTbl, eFrom, eTo, limit, tx)
+	return ee.DeleteRangeFromTbl(ap.valsTbl, eFrom, eTo, limit, tx)
 }
 
-func (m *UnmarkedTx) DebugFiles() AppendableFilesTxI {
+func (m *UnmarkedTx) DebugFiles() ForkableFilesTxI {
 	return m
 }
 
@@ -330,8 +330,8 @@ func (m *UnmarkedTx) DebugDb() UnmarkedDbTxI {
 }
 
 type BufferedTx struct {
-	*ProtoAppendableTx
-	ap      *Appendable[BufferedTxI]
+	*ProtoForkableTx
+	ap      *Forkable[BufferedTxI]
 	values  *etl.Collector
 	factory BufferFactory
 }
@@ -357,7 +357,7 @@ func (m *BufferedTx) GetDb(entityNum Num, tx kv.Tx) (data Bytes, err error) {
 
 func (m *BufferedTx) Put(entityNum Num, value Bytes) error {
 	if m.values == nil {
-		m.values = etl.NewCollector(m.id.Name()+".appendable.flush",
+		m.values = etl.NewCollector(m.id.Name()+".forkable.flush",
 			m.id.Dirs().Tmp, m.factory.New(), m.a.logger).LogLvl(log.LvlTrace)
 	}
 
@@ -380,11 +380,11 @@ func (m *BufferedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.
 	if err != nil {
 		return 0, err
 	}
-	log.Info("pruning", "appendable", ap.a.Name(), "from", ap.pruneFrom, "to", toNum)
+	log.Info("pruning", "forkable", ap.a.Name(), "from", ap.pruneFrom, "to", toNum)
 
 	eFrom := ap.encTs(ap.pruneFrom)
 	eTo := ap.encTs(toNum)
-	return ae.DeleteRangeFromTbl(ap.valsTbl, eFrom, eTo, limit, tx)
+	return ee.DeleteRangeFromTbl(ap.valsTbl, eFrom, eTo, limit, tx)
 }
 
 func (m *BufferedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error {
@@ -397,10 +397,10 @@ func (m *BufferedTx) Close() {
 		m.values.Close()
 	}
 
-	m.ProtoAppendableTx.Close()
+	m.ProtoForkableTx.Close()
 }
 
-func (m *BufferedTx) DebugFiles() AppendableFilesTxI {
+func (m *BufferedTx) DebugFiles() ForkableFilesTxI {
 	return m
 }
 
@@ -416,18 +416,18 @@ var (
 )
 
 // type AppendingTx struct {
-// 	*ProtoAppendableTx
-// 	ap *Appendable[AppendingTxI]
+// 	*ProtoForkableTx
+// 	ap *Forkable[AppendingTxI]
 // }
 
-// func NewAppendingAppendable(id AppendableId, valsTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts[AppendingTxI]) (*Appendable[AppendingTxI], error) {
+// func NewAppendingForkable(id ForkableId, valsTbl string, relation RootRelationI, logger log.Logger, options ...AppOpts[AppendingTxI]) (*Forkable[AppendingTxI], error) {
 // 	a, err := create(id, Appending, valsTbl, "", relation, logger, options...)
 // 	if err != nil {
 // 		return nil, err
 // 	}
 // 	a.beginFilesRoGen = func() AppendingTxI {
 // 		return &AppendingTx{
-// 			ProtoAppendableTx: a.ProtoAppendable.BeginFilesRo(),
+// 			ProtoForkableTx: a.ProtoForkable.BeginFilesRo(),
 // 			ap:                a,
 // 		}
 // 	}
@@ -484,7 +484,7 @@ var (
 // 	if err != nil {
 // 		return 0, err
 // 	}
-// 	log.Info("pruning", "appendable", ap.a.Name(), "from", ap.pruneFrom, "to", toId)
+// 	log.Info("pruning", "forkable", ap.a.Name(), "from", ap.pruneFrom, "to", toId)
 
 // 	eFrom := ap.encTs(ap.pruneFrom)
 // 	eTo := ap.encTs(toId)

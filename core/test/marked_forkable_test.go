@@ -16,7 +16,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
-	ae "github.com/erigontech/erigon-lib/state/appendable_extras"
+	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 	"github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/stretchr/testify/require"
@@ -24,23 +24,23 @@ import (
 
 type Num = state.Num
 type RootNum = state.RootNum
-type AppendableId = ae.AppendableId
+type ForkableId = ee.ForkableId
 type MarkedTxI = state.MarkedTxI
 type UnmarkedTxI = state.UnmarkedTxI
 
-func registerEntity(dirs datadir.Dirs, name string) ae.AppendableId {
+func registerEntity(dirs datadir.Dirs, name string) ee.ForkableId {
 	stepSize := uint64(10)
-	return registerEntityWithSnapshotConfig(dirs, name, ae.NewSnapshotConfig(&ae.SnapshotCreationConfig{
+	return registerEntityWithSnapshotConfig(dirs, name, ee.NewSnapshotConfig(&ee.SnapshotCreationConfig{
 		RootNumPerStep: 10,
 		MergeStages:    []uint64{20, 40},
 		MinimumSize:    10,
 		SafetyMargin:   5,
-	}, ae.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize)))
+	}, ee.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize)))
 
 }
 
-func registerEntityWithSnapshotConfig(dirs datadir.Dirs, name string, cfg *ae.SnapshotConfig) ae.AppendableId {
-	return ae.RegisterAppendable(name, dirs, nil, ae.WithSnapshotConfig(cfg))
+func registerEntityWithSnapshotConfig(dirs datadir.Dirs, name string, cfg *ee.SnapshotConfig) ee.ForkableId {
+	return ee.RegisterForkable(name, dirs, nil, ee.WithSnapshotConfig(cfg))
 }
 
 func setup(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
@@ -51,33 +51,33 @@ func setup(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
 	return dirs, db, logger
 }
 
-func setupHeader(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) (AppendableId, *state.Appendable[state.MarkedTxI]) {
+func setupHeader(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) (ForkableId, *state.Forkable[state.MarkedTxI]) {
 	headerId := registerEntity(dirs, "headers")
-	require.Equal(t, ae.AppendableId(0), headerId)
+	require.Equal(t, ee.ForkableId(0), headerId)
 
-	// create marked appendable
+	// create marked forkable
 	freezer := snaptype.NewHeaderFreezer(kv.HeaderCanonical, kv.Headers, log)
 
 	builder := state.NewSimpleAccessorBuilder(state.NewAccessorArgs(true, true), headerId, log,
 		state.WithIndexKeyFactory(&snaptype.HeaderAccessorIndexKeyFactory{}))
 
-	ma, err := state.NewMarkedAppendable(headerId, kv.Headers, kv.HeaderCanonical, ae.IdentityRootRelationInstance, log,
+	ma, err := state.NewMarkedForkable(headerId, kv.Headers, kv.HeaderCanonical, ee.IdentityRootRelationInstance, log,
 		state.App_WithFreezer(freezer),
 		state.App_WithPruneFrom(Num(1)),
 		state.App_WithIndexBuilders(builder),
 	)
 	require.NoError(t, err)
 
-	cleanup(t, ma.ProtoAppendable, db, dirs)
+	cleanup(t, ma.ProtoForkable, db, dirs)
 	return headerId, ma
 }
 
-func cleanup(t *testing.T, p *state.ProtoAppendable, db kv.RoDB, dirs datadir.Dirs) {
+func cleanup(t *testing.T, p *state.ProtoForkable, db kv.RoDB, dirs datadir.Dirs) {
 	t.Cleanup(func() {
 		p.Close()
 		p.RecalcVisibleFiles(0)
 
-		ae.Cleanup()
+		ee.Cleanup()
 		db.Close()
 		os.RemoveAll(dirs.Snap)
 		os.RemoveAll(dirs.Chaindata)
@@ -87,17 +87,17 @@ func cleanup(t *testing.T, p *state.ProtoAppendable, db kv.RoDB, dirs datadir.Di
 
 // TESTS BEGIN HERE
 
-// test marked appendable
-func TestMarkedAppendableRegistration(t *testing.T) {
+// test marked forkable
+func TestMarkedForkableRegistration(t *testing.T) {
 	// just registration goes fine
 	t.Cleanup(func() {
-		ae.Cleanup()
+		ee.Cleanup()
 	})
 	dirs := datadir.New(t.TempDir())
 	blockId := registerEntity(dirs, "blocks")
-	require.Equal(t, ae.AppendableId(0), blockId)
+	require.Equal(t, ee.ForkableId(0), blockId)
 	headerId := registerEntity(dirs, "headers")
-	require.Equal(t, ae.AppendableId(1), headerId)
+	require.Equal(t, ee.ForkableId(1), headerId)
 }
 
 func TestMarked_PutToDb(t *testing.T) {
