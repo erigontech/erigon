@@ -207,8 +207,9 @@ func (processAccount *AccountMetrics) Headers() []string {
 func (processAccount *AccountMetrics) Values() [][]string {
 	processAccount.m.Lock()
 	defer processAccount.m.Unlock()
-	values := make([][]string, len(processAccount.AccountStats), len(processAccount.AccountStats))
-	var ind int
+	// + 1 to add one empty line between "process" calls
+	values := make([][]string, len(processAccount.AccountStats)+1, len(processAccount.AccountStats)+1)
+	ind := 1
 	for i, account := range processAccount.AccountStats {
 		values[ind] = []string{
 			i,
