@@ -115,11 +115,13 @@ func GetLatestBadBlocks(tx kv.Tx) ([]*types.Block, error) {
 // mainly for testing purposes
 func ResetBadBlockCache(tx kv.Tx, limit int) error {
 	bheapCacheMutex.Lock()
-	defer bheapCacheMutex.Unlock()
 	bheapCache = utils.NewBlockMaxHeap(limit)
+	bheapCacheMutex.Unlock()
 	// load the heap
 	return tx.ForEach(kv.BadHeaderNumber, nil, func(blockHash, blockNumBytes []byte) error {
+		bheapCacheMutex.Lock()
 		heap.Push(bheapCache, &utils.BlockId{Number: binary.BigEndian.Uint64(blockNumBytes), Hash: common.BytesToHash(blockHash)})
+		bheapCacheMutex.Unlock()
 		return nil
 	})
 }
