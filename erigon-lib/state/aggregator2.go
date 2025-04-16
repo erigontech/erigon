@@ -71,15 +71,14 @@ func init() {
 var Schema = map[kv.Domain]domainCfg{
 	kv.AccountsDomain: {
 		name: kv.AccountsDomain, valuesTable: kv.TblAccountVals,
+		CompressCfg: DomainCompressCfg, Compression: seg.CompressNone,
 
 		AccessorList:         AccessorBTree | AccessorExistence,
 		crossDomainIntegrity: domainIntegrityCheck,
-		Compression:          seg.CompressNone,
-		CompressCfg:          DomainCompressCfg,
 
 		hist: histCfg{
-			valuesTable: kv.TblAccountHistoryVals,
-			compression: seg.CompressNone,
+			valuesTable:   kv.TblAccountHistoryVals,
+			compressorCfg: seg.DefaultCfg, compression: seg.CompressNone,
 
 			historyLargeValues: false,
 			filenameBase:       kv.AccountsDomain.String(), //TODO: looks redundant
@@ -94,14 +93,13 @@ var Schema = map[kv.Domain]domainCfg{
 	},
 	kv.StorageDomain: {
 		name: kv.StorageDomain, valuesTable: kv.TblStorageVals,
+		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
 
 		AccessorList: AccessorBTree | AccessorExistence,
-		Compression:  seg.CompressKeys,
-		CompressCfg:  DomainCompressCfg,
 
 		hist: histCfg{
-			valuesTable: kv.TblStorageHistoryVals,
-			compression: seg.CompressNone,
+			valuesTable:   kv.TblStorageHistoryVals,
+			compressorCfg: seg.DefaultCfg, compression: seg.CompressNone,
 
 			historyLargeValues: false,
 			filenameBase:       kv.StorageDomain.String(),
@@ -116,15 +114,14 @@ var Schema = map[kv.Domain]domainCfg{
 	},
 	kv.CodeDomain: {
 		name: kv.CodeDomain, valuesTable: kv.TblCodeVals,
+		CompressCfg: DomainCompressCfg, Compression: seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
 
 		AccessorList: AccessorBTree | AccessorExistence,
-		Compression:  seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
-		CompressCfg:  DomainCompressCfg,
 		largeValues:  true,
 
 		hist: histCfg{
-			valuesTable: kv.TblCodeHistoryVals,
-			compression: seg.CompressKeys | seg.CompressVals,
+			valuesTable:   kv.TblCodeHistoryVals,
+			compressorCfg: seg.DefaultCfg, compression: seg.CompressKeys | seg.CompressVals,
 
 			historyLargeValues: true,
 			filenameBase:       kv.CodeDomain.String(),
@@ -139,15 +136,14 @@ var Schema = map[kv.Domain]domainCfg{
 	},
 	kv.CommitmentDomain: {
 		name: kv.CommitmentDomain, valuesTable: kv.TblCommitmentVals,
+		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
 
 		AccessorList:        AccessorHashMap,
-		Compression:         seg.CompressKeys,
-		CompressCfg:         DomainCompressCfg,
 		replaceKeysInValues: AggregatorSqueezeCommitmentValues,
 
 		hist: histCfg{
-			valuesTable: kv.TblCommitmentHistoryVals,
-			compression: seg.CompressNone,
+			valuesTable:   kv.TblCommitmentHistoryVals,
+			compressorCfg: HistoryCompressCfg, compression: seg.CompressNone,
 
 			snapshotsDisabled:  true,
 			historyLargeValues: false,
@@ -164,14 +160,13 @@ var Schema = map[kv.Domain]domainCfg{
 	},
 	kv.ReceiptDomain: {
 		name: kv.ReceiptDomain, valuesTable: kv.TblReceiptVals,
+		CompressCfg: seg.DefaultCfg, Compression: seg.CompressNone,
 
 		AccessorList: AccessorBTree | AccessorExistence,
-		Compression:  seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
-		CompressCfg:  DomainCompressCfg,
 
 		hist: histCfg{
-			valuesTable: kv.TblReceiptHistoryVals,
-			compression: seg.CompressNone,
+			valuesTable:   kv.TblReceiptHistoryVals,
+			compressorCfg: seg.DefaultCfg, compression: seg.CompressNone,
 
 			historyLargeValues: false,
 			filenameBase:       kv.ReceiptDomain.String(),
@@ -218,4 +213,24 @@ var StandaloneIISchema = map[kv.InvertedIdx]iiCfg{
 		compression: seg.CompressNone,
 		name:        kv.TracesToIdx,
 	},
+}
+
+var DomainCompressCfg = seg.Cfg{
+	MinPatternScore:      1000,
+	DictReducerSoftLimit: 2000000,
+	MinPatternLen:        20,
+	MaxPatternLen:        128,
+	SamplingFactor:       4,
+	MaxDictPatterns:      64 * 1024 * 2,
+	Workers:              1,
+}
+
+var HistoryCompressCfg = seg.Cfg{
+	MinPatternScore:      8000,
+	DictReducerSoftLimit: 2000000,
+	MinPatternLen:        20,
+	MaxPatternLen:        128,
+	SamplingFactor:       1,
+	MaxDictPatterns:      64 * 1024 * 2,
+	Workers:              1,
 }

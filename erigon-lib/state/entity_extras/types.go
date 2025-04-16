@@ -17,11 +17,11 @@ type EncToBytesI interface {
 	EncToBytes(enc8Bytes bool) []byte
 }
 
-func (n Num) Step(a AppendableId) uint64 {
+func (n Num) Step(a ForkableId) uint64 {
 	return step(n, a)
 }
 
-func (n RootNum) Step(a AppendableId) uint64 {
+func (n RootNum) Step(a ForkableId) uint64 {
 	return step(n, a)
 }
 

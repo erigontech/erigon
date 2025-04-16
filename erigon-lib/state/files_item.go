@@ -31,7 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-	ae "github.com/erigontech/erigon-lib/state/appendable_extras"
+	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 )
 
 // filesItem is "dirty" file - means file which can be:
@@ -76,7 +76,7 @@ func newFilesItem(startTxNum, endTxNum, stepSize uint64) *filesItem {
 	return newFilesItemWithFrozenSteps(startTxNum, endTxNum, stepSize, config3.StepsInFrozenFile)
 }
 
-func newFilesItemWithSnapConfig(startTxNum, endTxNum uint64, snapConfig *ae.SnapshotConfig) *filesItem {
+func newFilesItemWithSnapConfig(startTxNum, endTxNum uint64, snapConfig *ee.SnapshotConfig) *filesItem {
 	return newFilesItemWithFrozenSteps(startTxNum, endTxNum, snapConfig.RootNumPerStep, snapConfig.StepsInFrozenFile())
 }
 
@@ -269,6 +269,18 @@ type visibleFile struct {
 
 func (i *visibleFile) isSubSetOf(j *visibleFile) bool { return i.src.isProperSubsetOf(j.src) } //nolint
 func (i *visibleFile) isSubsetOf(j *visibleFile) bool { return i.src.isProperSubsetOf(j.src) } //nolint
+
+func (i visibleFile) Filename() string {
+	return i.src.decompressor.FilePath()
+}
+
+func (i visibleFile) StartTxNum() uint64 {
+	return i.startTxNum
+}
+
+func (i visibleFile) EndTxNum() uint64 {
+	return i.endTxNum
+}
 
 func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l Accessors, trace bool, toTxNum uint64) (roItems []visibleFile) {
 	newVisibleFiles := make([]visibleFile, 0, files.Len())

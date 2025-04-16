@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	rand2 "math/rand/v2"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -30,8 +31,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	rand2 "math/rand/v2"
 
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/c2h5oh/datasize"
@@ -1002,7 +1001,7 @@ func (as *AggregatorPruneStat) Accumulate(other *AggregatorPruneStat) {
 
 // temporal function to prune history straight after commitment is done - reduce history size in db until we build
 // pruning in background. This helps on chain-tip performance (while full pruning is not available we can prune at least commit)
-func (at *AggregatorRoTx) PruneCommitHistory(ctx context.Context, tx kv.RwTx, logEvery *time.Ticker) error {
+func (at *AggregatorRoTx) GreedyPruneCommitHistory(ctx context.Context, tx kv.RwTx, logEvery *time.Ticker) error {
 	cd := at.d[kv.CommitmentDomain]
 	if cd.ht.h.historyDisabled {
 		return nil

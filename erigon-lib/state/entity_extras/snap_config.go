@@ -73,6 +73,10 @@ func (s *SnapshotConfig) validate() {
 }
 
 func (s *SnapshotConfig) StepsInFrozenFile() uint64 {
+	if len(s.MergeStages) == 0 {
+		return s.MinimumSize / s.RootNumPerStep
+	}
+
 	return s.MergeStages[len(s.MergeStages)-1] / s.RootNumPerStep
 }
 

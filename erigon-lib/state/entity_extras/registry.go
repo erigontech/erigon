@@ -12,10 +12,10 @@ import (
 	"github.com/erigontech/erigon-lib/common/dir"
 )
 
-// AppendableId id as a uint64, returned by `RegisterAppendable`. It is dependent on
+// ForkableId id as a uint64, returned by `RegisterForkable`. It is dependent on
 // the order of registration, and so counting on it being constant across reboots
 // might be tricky.
-type AppendableId uint16
+type ForkableId uint16
 
 type holder struct {
 	// tag - "type" of snapshot file. e.g. tag is "bodies" for "v1-007300-007400-bodies.seg" file
@@ -28,19 +28,19 @@ type holder struct {
 }
 
 // keeping this fixed size, so that append() does not potentially re-allocate array
-// to a different address. This means that the "reads" (methods on AppendableId) can
+// to a different address. This means that the "reads" (methods on ForkableId) can
 // be done without any locks.
 var entityRegistry [20]holder
 var curr uint16
 
 var mu sync.RWMutex
 
-// RegisterAppendable
+// RegisterForkable
 // name: just user-defined name for identification
 // dirs: directory where snapshots have to reside
 // salt: for creation of indexes.
 // pre: preverified files are snapshot file lists that gets downloaded initially.
-func RegisterAppendable(name string, dirs datadir.Dirs, pre snapcfg.Preverified, options ...EntityIdOption) AppendableId {
+func RegisterForkable(name string, dirs datadir.Dirs, pre snapcfg.Preverified, options ...EntityIdOption) ForkableId {
 	h := &holder{
 		name: name,
 		dirs: dirs,
@@ -69,7 +69,7 @@ func RegisterAppendable(name string, dirs datadir.Dirs, pre snapcfg.Preverified,
 	mu.Lock()
 
 	entityRegistry[curr] = *h
-	id := AppendableId(curr)
+	id := ForkableId(curr)
 	h.snapshotConfig.LoadPreverified(pre)
 	curr++
 
@@ -99,9 +99,9 @@ func WithIndexFileType(indexFileTag []string) EntityIdOption {
 	}
 }
 
-// TODO: at appendable boundary, we want this to be value type
-// so changes don't effect config appendables own. Once we get it in
-// as value, we can use reference in other places within appendables.
+// TODO: at forkable boundary, we want this to be value type
+// so changes don't effect config forkables own. Once we get it in
+// as value, we can use reference in other places within forkables.
 func WithSnapshotConfig(cfg *SnapshotConfig) EntityIdOption {
 	return func(a *holder) {
 		a.snapshotConfig = cfg
@@ -114,35 +114,35 @@ func WithSaltFile(saltFile string) EntityIdOption {
 	}
 }
 
-func (a AppendableId) Id() uint64 {
+func (a ForkableId) Id() uint64 {
 	return uint64(a)
 }
 
-func (a AppendableId) Name() string {
+func (a ForkableId) Name() string {
 	return entityRegistry[a].name
 }
 
-func (a AppendableId) SnapshotTag() string {
+func (a ForkableId) SnapshotTag() string {
 	return entityRegistry[a].snapshotDataFileTag
 }
 
-func (a AppendableId) IndexFileTag() []string {
+func (a ForkableId) IndexFileTag() []string {
 	return entityRegistry[a].indexFileTag
 }
 
-func (a AppendableId) String() string {
+func (a ForkableId) String() string {
 	return entityRegistry[a].name
 }
 
-func (a AppendableId) Dirs() datadir.Dirs {
+func (a ForkableId) Dirs() datadir.Dirs {
 	return entityRegistry[a].dirs
 }
 
-func (a AppendableId) SnapshotConfig() *SnapshotConfig {
+func (a ForkableId) SnapshotConfig() *SnapshotConfig {
 	return entityRegistry[a].snapshotConfig
 }
 
-func (a AppendableId) Salt() (uint32, error) {
+func (a ForkableId) Salt() (uint32, error) {
 	// not computing salt an EntityId inception
 	// since salt file might not be downloaded yet.
 	saltFile := entityRegistry[a].saltFile

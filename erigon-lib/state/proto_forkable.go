@@ -11,19 +11,19 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-	ae "github.com/erigontech/erigon-lib/state/appendable_extras"
+	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 )
 
 /*
-ProtoAppendable with basic functionality it's not intended to be used directly.
-Can be embedded in other marker/relational/appendable entities.
+ProtoForkable with basic functionality it's not intended to be used directly.
+Can be embedded in other marker/relational/appending entities.
 */
-type ProtoAppendable struct {
+type ProtoForkable struct {
 	freezer Freezer
 
-	a        ae.AppendableId
-	cfg      *ae.SnapshotConfig
-	parser   ae.SnapNameSchema
+	a        ee.ForkableId
+	cfg      *ee.SnapshotConfig
+	parser   ee.SnapNameSchema
 	builders []AccessorIndexBuilder
 	snaps    *SnapshotRepo
 
@@ -32,27 +32,27 @@ type ProtoAppendable struct {
 	logger log.Logger
 }
 
-func NewProto(a ae.AppendableId, builders []AccessorIndexBuilder, freezer Freezer, logger log.Logger) *ProtoAppendable {
-	return &ProtoAppendable{
+func NewProto(a ee.ForkableId, builders []AccessorIndexBuilder, freezer Freezer, logger log.Logger) *ProtoForkable {
+	return &ProtoForkable{
 		a:        a,
 		cfg:      a.SnapshotConfig(),
 		parser:   a.SnapshotConfig().Schema,
 		builders: builders,
 		freezer:  freezer,
-		snaps:    NewSnapshotRepoForAppendable(a, logger),
+		snaps:    NewSnapshotRepoForForkable(a, logger),
 		logger:   logger,
 	}
 }
 
-func (a *ProtoAppendable) RecalcVisibleFiles(toRootNum RootNum) {
+func (a *ProtoForkable) RecalcVisibleFiles(toRootNum RootNum) {
 	a.snaps.RecalcVisibleFiles(toRootNum)
 }
 
-func (a *ProtoAppendable) IntegrateDirtyFiles(files []*filesItem) {
+func (a *ProtoForkable) IntegrateDirtyFiles(files []*filesItem) {
 	a.snaps.IntegrateDirtyFiles(files)
 }
 
-func (a *ProtoAppendable) BuildFiles(ctx context.Context, from, to RootNum, db kv.RoDB, ps *background.ProgressSet) (dirtyFiles []*filesItem, err error) {
+func (a *ProtoForkable) BuildFiles(ctx context.Context, from, to RootNum, db kv.RoDB, ps *background.ProgressSet) (dirtyFiles []*filesItem, err error) {
 	log.Debug("freezing %s from %d to %d", a.a.Name(), from, to)
 	calcFrom, calcTo := from, to
 	var canFreeze bool
@@ -127,27 +127,27 @@ func (a *ProtoAppendable) BuildFiles(ctx context.Context, from, to RootNum, db k
 	return dirtyFiles, nil
 }
 
-func (a *ProtoAppendable) OpenFolder() error {
+func (a *ProtoForkable) OpenFolder() error {
 	return a.snaps.OpenFolder()
 }
 
-func (a *ProtoAppendable) Close() {
+func (a *ProtoForkable) Close() {
 	a.snaps.Close()
 }
 
-// proto_appendable_rotx
+// proto_forkable_rotx
 
-type ProtoAppendableTx struct {
-	id      AppendableId
+type ProtoForkableTx struct {
+	id      ForkableId
 	files   visibleFiles
-	a       *ProtoAppendable
+	a       *ProtoForkable
 	noFiles bool
 
 	readers []*recsplit.IndexReader
 }
 
-func (a *ProtoAppendable) BeginFilesRo() *ProtoAppendableTx {
-	visibleFiles := a.snaps.VisibleFiles()
+func (a *ProtoForkable) BeginFilesRo() *ProtoForkableTx {
+	visibleFiles := a.snaps.visibleFiles()
 	for i := range visibleFiles {
 		src := visibleFiles[i].src
 		if src.frozen {
@@ -155,15 +155,15 @@ func (a *ProtoAppendable) BeginFilesRo() *ProtoAppendableTx {
 		}
 	}
 
-	return &ProtoAppendableTx{
+	return &ProtoForkableTx{
 		id:    a.a,
 		files: visibleFiles,
 		a:     a,
 	}
 }
 
-func (a *ProtoAppendable) BeginNoFilesRo() *ProtoAppendableTx {
-	return &ProtoAppendableTx{
+func (a *ProtoForkable) BeginNoFilesRo() *ProtoForkableTx {
+	return &ProtoForkableTx{
 		id:      a.a,
 		files:   nil,
 		a:       a,
@@ -171,7 +171,7 @@ func (a *ProtoAppendable) BeginNoFilesRo() *ProtoAppendableTx {
 	}
 }
 
-func (a *ProtoAppendableTx) Close() {
+func (a *ProtoForkableTx) Close() {
 	if a.files == nil {
 		return
 	}
@@ -194,7 +194,7 @@ func (a *ProtoAppendableTx) Close() {
 	a.readers = nil
 }
 
-func (a *ProtoAppendableTx) StatelessIdxReader(i int) *recsplit.IndexReader {
+func (a *ProtoForkableTx) StatelessIdxReader(i int) *recsplit.IndexReader {
 	a.NoFilesCheck()
 	if a.readers == nil {
 		a.readers = make([]*recsplit.IndexReader, len(a.files))
@@ -209,20 +209,20 @@ func (a *ProtoAppendableTx) StatelessIdxReader(i int) *recsplit.IndexReader {
 	return r
 }
 
-func (a *ProtoAppendableTx) Type() CanonicityStrategy {
+func (a *ProtoForkableTx) Type() CanonicityStrategy {
 	return a.a.strategy
 }
 
-func (a *ProtoAppendableTx) Garbage(merged *filesItem) (outs []*filesItem) {
+func (a *ProtoForkableTx) Garbage(merged *filesItem) (outs []*filesItem) {
 	return a.a.snaps.Garbage(a.files, merged)
 }
 
-func (a *ProtoAppendableTx) VisibleFilesMaxRootNum() RootNum {
+func (a *ProtoForkableTx) VisibleFilesMaxRootNum() RootNum {
 	a.NoFilesCheck()
 	return RootNum(a.files.EndTxNum())
 }
 
-func (a *ProtoAppendableTx) VisibleFilesMaxNum() Num {
+func (a *ProtoForkableTx) VisibleFilesMaxNum() Num {
 	a.NoFilesCheck()
 	lasti := len(a.files) - 1
 	if lasti < 0 {
@@ -234,7 +234,7 @@ func (a *ProtoAppendableTx) VisibleFilesMaxNum() Num {
 
 // if either found=false or err != nil, then fileIdx = -1
 // can get FileItem on which entityNum was found by a.Files()[fileIdx] etc.
-func (a *ProtoAppendableTx) GetFromFiles(entityNum Num) (b Bytes, found bool, fileIdx int, err error) {
+func (a *ProtoForkableTx) GetFromFiles(entityNum Num) (b Bytes, found bool, fileIdx int, err error) {
 	a.NoFilesCheck()
 	ap := a.a
 	lastNum := a.VisibleFilesMaxNum()
@@ -254,7 +254,7 @@ func (a *ProtoAppendableTx) GetFromFiles(entityNum Num) (b Bytes, found bool, fi
 	return nil, false, -1, nil
 }
 
-func (a *ProtoAppendableTx) Files() []FilesItem {
+func (a *ProtoForkableTx) Files() []FilesItem {
 	a.NoFilesCheck()
 	v := a.files
 	fi := make([]FilesItem, len(v))
@@ -264,7 +264,7 @@ func (a *ProtoAppendableTx) Files() []FilesItem {
 	return fi
 }
 
-func (a *ProtoAppendableTx) GetFromFile(entityNum Num, idx int) (v Bytes, found bool, err error) {
+func (a *ProtoForkableTx) GetFromFile(entityNum Num, idx int) (v Bytes, found bool, err error) {
 	a.NoFilesCheck()
 	if idx >= len(a.files) {
 		return nil, false, fmt.Errorf("index out of range: %d >= %d", idx, len(a.files))
@@ -288,7 +288,7 @@ func (a *ProtoAppendableTx) GetFromFile(entityNum Num, idx int) (v Bytes, found 
 	return nil, false, fmt.Errorf("entity get error: %s expected %d in snapshot %s but not found", ap.a.Name(), entityNum, a.files[idx].src.decompressor.FileName1)
 }
 
-func (a *ProtoAppendableTx) NoFilesCheck() {
+func (a *ProtoForkableTx) NoFilesCheck() {
 	if a.noFiles {
 		panic("snapshot read attempt on noFiles mode")
 	}

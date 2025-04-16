@@ -14,11 +14,11 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-	ae "github.com/erigontech/erigon-lib/state/appendable_extras"
+	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 )
 
 // interfaces defined here are not required to be implemented in
-// appendables. These are just helpers when SimpleAccessorBuilder is used. Also can be used to provide some structure
+// forkables. These are just helpers when SimpleAccessorBuilder is used. Also can be used to provide some structure
 // to build more custom indexes.
 type IndexInputDataQuery interface {
 	GetStream(ctx context.Context) stream.Trio[[]byte, uint64, uint64] // (word/value, index, offset)
@@ -64,8 +64,8 @@ func NewAccessorArgs(enums, lessFalsePositives bool) *AccessorArgs {
 type SimpleAccessorBuilder struct {
 	args     *AccessorArgs
 	indexPos uint64
-	id       AppendableId
-	parser   ae.SnapNameSchema
+	id       ForkableId
+	parser   ee.SnapNameSchema
 	kf       IndexKeyFactory
 	fetcher  FirstEntityNumFetcher
 	logger   log.Logger
@@ -75,7 +75,7 @@ type FirstEntityNumFetcher = func(from, to RootNum, seg *seg.Decompressor) Num
 
 var _ AccessorIndexBuilder = (*SimpleAccessorBuilder)(nil)
 
-func NewSimpleAccessorBuilder(args *AccessorArgs, id AppendableId, logger log.Logger, options ...AccessorBuilderOptions) *SimpleAccessorBuilder {
+func NewSimpleAccessorBuilder(args *AccessorArgs, id ForkableId, logger log.Logger, options ...AccessorBuilderOptions) *SimpleAccessorBuilder {
 	b := &SimpleAccessorBuilder{
 		args:   args,
 		id:     id,

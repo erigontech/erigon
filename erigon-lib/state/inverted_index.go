@@ -51,7 +51,7 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
 	"github.com/erigontech/erigon-lib/seg"
-	ae "github.com/erigontech/erigon-lib/state/appendable_extras"
+	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 )
 
 type InvertedIndex struct {
@@ -204,12 +204,12 @@ func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {
 	}
 }
 
-type Accessors = ae.Accessors
+type Accessors = ee.Accessors
 
 const (
-	AccessorBTree     Accessors = ae.AccessorBTree
-	AccessorHashMap   Accessors = ae.AccessorHashMap
-	AccessorExistence Accessors = ae.AccessorExistence
+	AccessorBTree     Accessors = ee.AccessorBTree
+	AccessorHashMap   Accessors = ee.AccessorHashMap
+	AccessorExistence Accessors = ee.AccessorExistence
 )
 
 func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
