@@ -219,11 +219,15 @@ func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx
 		if int(cumGasUsed) == prevCumGasUsed && cumGasUsed != 0 && blockNum == prevBN {
 			_min, _ := txNumsReader.Min(tx, blockNum)
 			_max, _ := txNumsReader.Max(tx, blockNum)
-			err := fmt.Errorf("bad receipt at txnum: %d, block: %d(%d-%d), cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, _min, _max, cumGasUsed, prevCumGasUsed)
-			log.Warn(err.Error())
-			return err
-			//panic(err)
+
+			if cfg.ChainConfig.Bor == nil || (cfg.ChainConfig.Bor != nil && txNum != _max) {
+				err := fmt.Errorf("bad receipt at txnum: %d, block: %d(%d-%d), cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, _min, _max, cumGasUsed, prevCumGasUsed)
+				log.Warn(err.Error())
+				return err
+				//panic(err)
+			}
 		}
+
 		prevCumGasUsed = int(cumGasUsed)
 		prevBN = blockNum
 
@@ -292,6 +296,25 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			}
 
 			if txTask.Final { // block changed
+				if cfg.ChainConfig.Bor != nil && txTask.TxIndex >= 1 {
+					// get last receipt and store the last log index + 1
+					lastReceipt := txTask.BlockReceipts[txTask.TxIndex-1]
+					if lastReceipt == nil {
+						return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
+					}
+					if len(lastReceipt.Logs) > 0 {
+						firstIndex := lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
+						receipt := types.Receipt{
+							CumulativeGasUsed:        lastReceipt.CumulativeGasUsed,
+							FirstLogIndexWithinBlock: uint32(firstIndex),
+						}
+
+						if err := rawtemporaldb.AppendReceipt(doms, &receipt, cumulativeBlobGasUsedInBlock); err != nil {
+							return err
+						}
+					}
+				}
+
 				cumulativeBlobGasUsedInBlock = 0
 			}
 
