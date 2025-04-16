@@ -149,9 +149,6 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 			return nil, err
 		}
 		sd.sdCtx.updates.SetConcurrentCommitment(nextConcurrent)
-		fmt.Printf("use concurrent commitment %v\n", nextConcurrent)
-	} else {
-		fmt.Println("commitment mode is not concurrent patricia trie")
 	}
 	return sd, nil
 }
