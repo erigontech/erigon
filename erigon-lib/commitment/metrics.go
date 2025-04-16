@@ -193,8 +193,8 @@ func (metrics *Metrics) TotalProcessingTimeInc(t time.Time) {
 
 func (metrics *Metrics) TotalFoldingTimeInc(t time.Time, plainKey []byte) {
 	if collectCommitmentMetrics {
-		metrics.Accounts.TotalFoldingTimeInc(plainKey, t)
 		metrics.totalFoldingTime += time.Since(t)
+		metrics.Accounts.TotalFoldingTimeInc(plainKey, t)
 	}
 }
 
