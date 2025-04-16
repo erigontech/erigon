@@ -1397,10 +1397,12 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	var forwardProgress uint64
 	if to == 0 {
-		db.View(ctx, func(tx kv.Tx) error {
+		if err := db.View(ctx, func(tx kv.Tx) error {
 			forwardProgress, err = stages.GetStageProgress(tx, stages.Senders)
 			return err
-		})
+		}); err != nil {
+			return err
+		}
 		blockReader, _ := br.IO()
 		from2, to2, ok := freezeblocks.CanRetire(forwardProgress, blockReader.FrozenBlocks(), coresnaptype.Enums.Headers, nil)
 		if ok {
