@@ -333,7 +333,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 		defer rwTx.Rollback()
 
-		_, err := ac.Prune(ctx, rwTx, 0, nil)
+		_, err := ac.prune(ctx, rwTx, 0, nil)
 		require.NoError(err)
 
 		wrwTx = wrapTxWithCtx(rwTx, ac)

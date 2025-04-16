@@ -132,7 +132,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
-		stat, err := ac.Prune(context.Background(), rwTx, 0, logEvery)
+		stat, err := ac.prune(context.Background(), rwTx, 0, logEvery)
 		require.NoError(t, err)
 		t.Logf("Prune: %s", stat)
 
@@ -251,7 +251,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
-		stat, err := ac.Prune(context.Background(), rwTx, 0, logEvery)
+		stat, err := ac.prune(context.Background(), rwTx, 0, logEvery)
 		require.NoError(t, err)
 		t.Logf("Prune: %s", stat)
 
