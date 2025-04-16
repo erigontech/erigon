@@ -535,6 +535,8 @@ type InvertedIndexRoTx struct {
 	readers []*recsplit.IndexReader
 
 	seekInFilesCache *IISeekInFilesCache
+
+	ef *eliasfano32.EliasFano // re-usable
 }
 
 // hashKey - change of salt will require re-gen of indices
@@ -616,7 +618,11 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 			continue
 		}
 		eliasVal, _ := g.Next(nil)
-		equalOrHigherTxNum, found = eliasfano32.Seek(eliasVal, txNum)
+
+		if iit.ef == nil {
+			iit.ef = eliasfano32.NewEliasFano(1, 1)
+		}
+		equalOrHigherTxNum, found = iit.ef.Reset(eliasVal).Seek(txNum)
 		if !found {
 			continue
 		}
