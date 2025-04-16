@@ -161,8 +161,8 @@ func (metrics *Metrics) StartUnfolding(plainKey []byte) func() {
 		metrics.Accounts.UnfoldsInc(plainKey)
 		metrics.unfolds.Add(1)
 		return func() {
-			metrics.TotalUnfoldingTimeInc(startUnfold)
-			metrics.Accounts.TotalUnfoldingTimeInc(plainKey, startUnfold)
+			metrics.TotalUnfoldingTimeInc(startUnfold, plainKey)
+
 		}
 	}
 	return func() {}
@@ -179,15 +179,10 @@ func (metrics *Metrics) StartFolding(plainKey []byte) func() {
 	return func() {}
 }
 
-func (metrics *Metrics) TotalUnfoldingTimeInc(t time.Time) {
+func (metrics *Metrics) TotalUnfoldingTimeInc(t time.Time, plainKey []byte) {
 	if collectCommitmentMetrics {
 		metrics.totalUnfoldingTime += time.Since(t)
-	}
-}
-
-func (metrics *Metrics) TotalProcessingTimeInc(t time.Time) {
-	if collectCommitmentMetrics {
-		metrics.totalProcessingTime += time.Since(t)
+		metrics.Accounts.TotalUnfoldingTimeInc(plainKey, t)
 	}
 }
 
@@ -195,6 +190,12 @@ func (metrics *Metrics) TotalFoldingTimeInc(t time.Time, plainKey []byte) {
 	if collectCommitmentMetrics {
 		metrics.totalFoldingTime += time.Since(t)
 		metrics.Accounts.TotalFoldingTimeInc(plainKey, t)
+	}
+}
+
+func (metrics *Metrics) TotalProcessingTimeInc(t time.Time) {
+	if collectCommitmentMetrics {
+		metrics.totalProcessingTime += time.Since(t)
 	}
 }
 
