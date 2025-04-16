@@ -147,7 +147,6 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&SnapshotFromFlag,
-				&SnapshotToFlag,
 			}),
 		},
 		{
@@ -286,11 +285,6 @@ var (
 	SnapshotFromFlag = cli.Uint64Flag{
 		Name:  "from",
 		Usage: "From block number",
-		Value: 0,
-	}
-	SnapshotToFlag = cli.Uint64Flag{
-		Name:  "to",
-		Usage: "To block number. Zero - means unlimited.",
 		Value: 0,
 	}
 	SnapshotRebuildFlag = cli.BoolFlag{
@@ -1361,7 +1355,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	ctx := cliCtx.Context
 
 	from := cliCtx.Uint64(SnapshotFromFlag.Name)
-	to := cliCtx.Uint64(SnapshotToFlag.Name)
 
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
@@ -1388,28 +1381,23 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	//agg.LimitRecentHistoryWithoutFiles(0)
 
-	var forwardProgress uint64
-	if to == 0 {
-		if err := db.View(ctx, func(tx kv.Tx) error {
-			forwardProgress, err = stages.GetStageProgress(tx, stages.Senders)
-			return err
-		}); err != nil {
-			return err
-		}
-		blockReader, _ := br.IO()
-		from2, to2, ok := freezeblocks.CanRetire(forwardProgress, blockReader.FrozenBlocks(), coresnaptype.Enums.Headers, nil)
-		if ok {
-			from, to = from2, to2
-		}
-	} else {
-		forwardProgress = to
+	var to uint64
+	if err := db.View(ctx, func(tx kv.Tx) error {
+		to, err = stages.GetStageProgress(tx, stages.Senders)
+		return err
+	}); err != nil {
+		return err
+	}
+	blockReader, _ := br.IO()
+	from2, to2, ok := freezeblocks.CanRetire(to, blockReader.FrozenBlocks(), coresnaptype.Enums.Headers, nil)
+	if ok {
+		from, to = from2, to2
 	}
 
-	if err := br.RetireBlocks(ctx, from, forwardProgress, log.LvlInfo, nil, nil, nil); err != nil {
+	if err := br.RetireBlocks(ctx, from, to, log.LvlInfo, nil, nil, nil); err != nil {
 		return err
 	}
 
-	blockReader, _ := br.IO()
 	deletedBlocks := math.MaxInt // To pass the first iteration
 	allDeletedBlocks := 0
 	for deletedBlocks > 0 { // prune happens by small steps, so need many runs
