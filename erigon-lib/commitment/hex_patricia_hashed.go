@@ -2112,9 +2112,11 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	// Folding everything up to the root
 	for hph.activeRows > 0 {
+		foldDone := hph.metrics.StartFolding(nil)
 		if err := hph.fold(); err != nil {
 			return nil, fmt.Errorf("final fold: %w", err)
 		}
+		foldDone()
 	}
 
 	rootHash, err = hph.RootHash()
