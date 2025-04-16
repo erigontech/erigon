@@ -157,7 +157,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 
 	// compute blob fee for eip-4844 data blobs if any
 	blobGasVal := new(uint256.Int)
-	if st.evm.ChainRules().IsCancun {
+	if st.evm.ChainRules().IsCancun && !st.evm.ChainRules().IsArbitrum {
 		blobGasPrice := st.evm.Context.BlobBaseFee
 		if blobGasPrice == nil {
 			return fmt.Errorf("%w: Cancun is active but ExcessBlobGas is nil", ErrInternalFailure)
@@ -284,7 +284,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 	if isArb {
 		isCancun = st.evm.Context.ArbOSVersion >= 20
 	}
-	if st.msg.BlobGas() > 0 && isCancun {
+	if st.msg.BlobGas() > 0 && isCancun && !isArb {
 		blobGasPrice := st.evm.Context.BlobBaseFee
 		if blobGasPrice == nil {
 			return fmt.Errorf("%w: Cancun is active but ExcessBlobGas is nil", ErrInternalFailure)
