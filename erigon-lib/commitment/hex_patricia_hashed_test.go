@@ -243,27 +243,53 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 	require.EqualValues(t, rBatch, rSeq, "sequential and batch root should match")
 }
 
-// Ordering is crucial for trie. since trie do hashing by itself and reorder updates inside Process{Keys,Updates}, have to reorder them for some tests
-func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [][]byte, updates []Update) ([][]byte, []Update) {
-	t.Helper()
+func Test_Trie_CorrectSwitchForConcurrentAndSequential(t *testing.T) {
+	t.Parallel()
 
-	ku := make([]*KeyUpdate, len(plainKeys))
-	for i, pk := range plainKeys {
-		ku[i] = &KeyUpdate{plainKey: string(pk), hashedKey: KeyToHexNibbleHash(pk), update: &updates[i]}
+	ctx := context.Background()
+	ms := NewMockState(t)
+	hph := NewHexPatriciaHashed(length.Addr, ms)
+	hph.SetTrace(false)
+
+	// generate list of updates diverging from first nibble (good case for parallelization))
+	plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, length.Addr, 0, 32)
+	builder := NewUpdateBuilder()
+	for i := 0; i < len(plainKeysList); i++ {
+		builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
 	}
 
-	sort.Slice(updates, func(i, j int) bool {
-		return bytes.Compare(ku[i].hashedKey, ku[j].hashedKey) < 0
-	})
+	plainKeys, updates := builder.Build()
+	err := ms.applyPlainUpdates(plainKeys, updates)
+	require.NoError(t, err)
 
-	pks := make([][]byte, len(updates))
-	upds := make([]Update, len(updates))
-	for i, u := range ku {
-		pks[i] = []byte(u.plainKey)
-		upds[i] = *u.update
-		fmt.Printf("%x -> %x\n", u.plainKey, u.hashedKey)
+	toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+	defer toProcess.Close()
+
+	_, err = hph.Process(ctx, toProcess, "")
+	require.NoError(t, err)
+
+	paratrie := NewConcurrentPatriciaHashed(hph, ms)
+	canParallel, err := paratrie.CanDoConcurrentNext()
+	require.NoError(t, err)
+	require.True(t, canParallel, "should be able to parallelize next run")
+
+	builder = NewUpdateBuilder()
+	for i := 2; i < len(plainKeys); i++ {
+		builder.Delete(common.Bytes2Hex(plainKeys[i]))
 	}
-	return pks, upds
+	plainKeys, updates = builder.Build()
+	err = ms.applyPlainUpdates(plainKeys, updates)
+	require.NoError(t, err)
+
+	toProcess2 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+	defer toProcess2.Close()
+
+	_, err = paratrie.Process(ctx, toProcess2, "")
+	require.NoError(t, err)
+
+	canParallel, err = paratrie.CanDoConcurrentNext()
+	require.NoError(t, err)
+	require.False(t, canParallel, "should be NOT able to parallelize next run")
 }
 
 func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
@@ -466,32 +492,6 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 		// ordering of keys differs
 		uniqTest(t, false, false)
 	})
-}
-
-// longer prefixLen - harder to find required keys
-func generatePlainKeysWithSameHashPrefix(tb testing.TB, keyLen int, prefixLen int, keyCount int) (plainKeys [][]byte, hashedKeys [][]byte) {
-	tb.Helper()
-	plainKeys = make([][]byte, 0, keyCount)
-	hashedKeys = make([][]byte, 0, keyCount)
-	for {
-		key := make([]byte, keyLen)
-		rand.Read(key)
-
-		hashed := KeyToHexNibbleHash(key)
-		if len(plainKeys) == 0 {
-			plainKeys = append(plainKeys, key)
-			hashedKeys = append(hashedKeys, hashed)
-			continue
-		}
-		if bytes.Equal(hashed[:prefixLen], hashedKeys[0][:prefixLen]) {
-			plainKeys = append(plainKeys, key)
-			hashedKeys = append(hashedKeys, hashed)
-		}
-		if len(plainKeys) == keyCount {
-			break
-		}
-	}
-	return plainKeys, hashedKeys
 }
 
 func Test_ParallelHexPatriciaHashed_EdgeCases(t *testing.T) {
@@ -1837,4 +1837,53 @@ func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
 		rBatch = common.Copy(rh)
 	}
 	require.EqualValues(t, rBatch, rSeq, "sequential and batch root should match")
+}
+
+// longer prefixLen - harder to find required keys
+func generatePlainKeysWithSameHashPrefix(tb testing.TB, keyLen int, prefixLen int, keyCount int) (plainKeys [][]byte, hashedKeys [][]byte) {
+	tb.Helper()
+	plainKeys = make([][]byte, 0, keyCount)
+	hashedKeys = make([][]byte, 0, keyCount)
+	for {
+		key := make([]byte, keyLen)
+		rand.Read(key)
+
+		hashed := KeyToHexNibbleHash(key)
+		if len(plainKeys) == 0 {
+			plainKeys = append(plainKeys, key)
+			hashedKeys = append(hashedKeys, hashed)
+			continue
+		}
+		if bytes.Equal(hashed[:prefixLen], hashedKeys[0][:prefixLen]) {
+			plainKeys = append(plainKeys, key)
+			hashedKeys = append(hashedKeys, hashed)
+		}
+		if len(plainKeys) == keyCount {
+			break
+		}
+	}
+	return plainKeys, hashedKeys
+}
+
+// Ordering is crucial for trie. since trie do hashing by itself and reorder updates inside Process{Keys,Updates}, have to reorder them for some tests
+func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [][]byte, updates []Update) ([][]byte, []Update) {
+	t.Helper()
+
+	ku := make([]*KeyUpdate, len(plainKeys))
+	for i, pk := range plainKeys {
+		ku[i] = &KeyUpdate{plainKey: string(pk), hashedKey: KeyToHexNibbleHash(pk), update: &updates[i]}
+	}
+
+	sort.Slice(updates, func(i, j int) bool {
+		return bytes.Compare(ku[i].hashedKey, ku[j].hashedKey) < 0
+	})
+
+	pks := make([][]byte, len(updates))
+	upds := make([]Update, len(updates))
+	for i, u := range ku {
+		pks[i] = []byte(u.plainKey)
+		upds[i] = *u.update
+		fmt.Printf("%x -> %x\n", u.plainKey, u.hashedKey)
+	}
+	return pks, upds
 }

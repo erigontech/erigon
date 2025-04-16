@@ -111,8 +111,6 @@ type HasAgg interface {
 	Agg() any
 }
 
-var ExperimentalConcurrentCommitment = false // set true to use concurrent commitment by default
-
 func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 
 	sd := &SharedDomains{
@@ -144,13 +142,16 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 		return nil, err
 	}
 
+	// enable concurrent commitment if we are using concurrent patricia trie
 	if pt, ok := sd.sdCtx.patriciaTrie.(*commitment.ConcurrentPatriciaHashed); ok {
 		nextConcurrent, err := pt.CanDoConcurrentNext()
 		if err != nil {
 			return nil, err
 		}
-
 		sd.sdCtx.updates.SetConcurrentCommitment(nextConcurrent)
+		fmt.Printf("use concurrent commitment %v\n", nextConcurrent)
+	} else {
+		fmt.Println("commitment mode is not concurrent patricia trie")
 	}
 	return sd, nil
 }
