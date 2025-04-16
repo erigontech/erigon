@@ -26,6 +26,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
+	"sync"
 	"time"
 
 	"github.com/gballet/go-verkle"
@@ -78,9 +79,11 @@ func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, markChainAsBad bool) er
 				return err
 			}
 
+			bheapCacheMutex.Lock()
 			if bheapCache != nil {
 				heap.Push(bheapCache, &utils.BlockId{Number: binary.BigEndian.Uint64(blockNumBytes), Hash: common.BytesToHash(blockHash)})
 			}
+			bheapCacheMutex.Unlock()
 		}
 		return tx.Delete(kv.HeaderCanonical, blockNumBytes)
 	}); err != nil {
@@ -91,8 +94,11 @@ func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, markChainAsBad bool) er
 
 /* latest bad blocks start */
 var bheapCache utils.ExtendedHeap
+var bheapCacheMutex sync.Mutex
 
 func GetLatestBadBlocks(tx kv.Tx) ([]*types.Block, error) {
+	bheapCacheMutex.Lock()
+	defer bheapCacheMutex.Unlock()
 	if bheapCache == nil {
 		ResetBadBlockCache(tx, 100)
 	}
@@ -108,6 +114,8 @@ func GetLatestBadBlocks(tx kv.Tx) ([]*types.Block, error) {
 
 // mainly for testing purposes
 func ResetBadBlockCache(tx kv.Tx, limit int) error {
+	bheapCacheMutex.Lock()
+	defer bheapCacheMutex.Unlock()
 	bheapCache = utils.NewBlockMaxHeap(limit)
 	// load the heap
 	return tx.ForEach(kv.BadHeaderNumber, nil, func(blockHash, blockNumBytes []byte) error {
