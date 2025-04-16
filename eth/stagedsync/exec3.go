@@ -615,7 +615,7 @@ Loop:
 
 		mxExecBlocks.Add(1)
 
-		if shouldGenerateChangesets || cfg.chainConfig.IsArbitrum() {
+		if shouldGenerateChangesets {
 			aggTx := executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 			aggTx.RestrictSubsetFileDeletions(true)
 			start := time.Now()
