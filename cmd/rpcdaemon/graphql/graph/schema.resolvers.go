@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -31,11 +32,17 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 		bNum, err := strconv.ParseUint(*number, 10, 64)
 		if err == nil {
 			// Positive integer, go ahead
+			if bNum > math.MaxInt64 {
+				return nil, fmt.Errorf("block number is too large")
+			}
 			blockNumber = rpc.BlockNumber(bNum)
 		} else {
 			bNum, err := hexutil.DecodeUint64(*number)
 			if err == nil {
 				// Hexadecimal, 0x prefixed
+				if bNum > math.MaxInt64 {
+					return nil, fmt.Errorf("block number is too large")
+				}
 				blockNumber = rpc.BlockNumber(bNum)
 			} else {
 				var err error

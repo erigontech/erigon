@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -495,6 +496,9 @@ func NewMsgFilters(filterParam string) (MsgFilters, error) {
 			n, err := strconv.ParseUint(code, 10, 64)
 			if err != nil {
 				return nil, fmt.Errorf("invalid message code: %s", code)
+			}
+			if n > math.MaxInt64 {
+				return nil, fmt.Errorf("message code out of range: %s", code)
 			}
 			filters[MsgFilter{Proto: proto, Code: int64(n)}] = struct{}{}
 		}

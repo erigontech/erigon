@@ -58,8 +58,17 @@ func DecodeUint256orHex(val *string) (*big.Int, error) {
 
 // DecodeInt64orHex decodes a string int64 or hex string into a int64
 func DecodeInt64orHex(val *string) (int64, error) {
-	i, err := DecodeUint64orHex(val)
-	return int64(i), err
+	if val == nil {
+		return 0, nil
+	}
+
+	str := *val
+	base := 10
+	if strings.HasPrefix(str, "0x") {
+		str = str[2:]
+		base = 16
+	}
+	return strconv.ParseInt(str, base, hex.BitSize64)
 }
 
 // DecodeBytes decodes a hex string into a []byte

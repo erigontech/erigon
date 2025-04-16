@@ -50,6 +50,35 @@ func MustDecode(input string) []byte {
 	return dec
 }
 
+func DecodeInt32(input string) (int32, error) {
+	raw, err := checkNumber(input)
+	if err != nil {
+		return 0, err
+	}
+
+	dec, err := strconv.ParseInt(raw, 16, 32)
+	if err != nil {
+		return 0, mapError(err)
+	}
+	if dec < -1<<31 || dec > 1<<31-1 {
+		return 0, ErrUintRange
+	}
+	return int32(dec), nil
+}
+
+// DecodeInt64 decodes a hex string with 0x prefix as a quantity.
+func DecodeInt64(input string) (int64, error) {
+	raw, err := checkNumber(input)
+	if err != nil {
+		return 0, err
+	}
+	dec, err := strconv.ParseInt(raw, 16, 64)
+	if err != nil {
+		return 0, mapError(err)
+	}
+	return dec, nil
+}
+
 // DecodeUint64 decodes a hex string with 0x prefix as a quantity.
 func DecodeUint64(input string) (uint64, error) {
 	raw, err := checkNumber(input)

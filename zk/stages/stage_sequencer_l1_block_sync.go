@@ -189,7 +189,15 @@ LOOP:
 				// this is important because the batches are written in reverse order
 				for idx, batch := range batches {
 					b := initBatch + uint64(idx)
-					data := make([]byte, 20+32+8+len(batch))
+
+					size := 20 + 32 + 8 + len(batch)
+					if size > LIMIT_120_KB {
+						log.Error(fmt.Sprintf("[%s] L1 batch data is too large", logPrefix), "size", size)
+						funcErr = fmt.Errorf("L1 batch data is too large: %d", size)
+						return funcErr
+					}
+
+					data := make([]byte, size)
 					copy(data, coinbase.Bytes())
 					copy(data[20:], l1InfoRoot)
 					copy(data[52:], limitTimestampBytes)

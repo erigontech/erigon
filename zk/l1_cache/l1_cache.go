@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	"errors"
@@ -36,11 +38,16 @@ var paramsToExpire = map[string]struct{}{
 }
 
 type L1Cache struct {
-	server *http.Server
-	db     kv.RwDB
+	server         *http.Server
+	db             kv.RwDB
+	hostsWhitelist []string
 }
 
-func NewL1Cache(ctx context.Context, dbPath string, port uint) (*L1Cache, error) {
+func NewL1Cache(ctx context.Context, dbPath string, port uint, hostsWhitelist []string) (*L1Cache, error) {
+	if hostsWhitelist == nil {
+		return nil, fmt.Errorf("L1Cache hosts whitelist cannot be nil")
+	}
+
 	db := mdbx.NewMDBX(log.New()).Path(dbPath).MustOpen()
 
 	tx, err := db.BeginRw(ctx)
@@ -59,7 +66,7 @@ func NewL1Cache(ctx context.Context, dbPath string, port uint) (*L1Cache, error)
 		return nil, err
 	}
 
-	http.HandleFunc("/", handleRequest(db))
+	http.HandleFunc("/", handleRequest(db, hostsWhitelist))
 	addr := fmt.Sprintf(":%d", port)
 	server := &http.Server{
 		Addr:           addr,
@@ -86,8 +93,9 @@ func NewL1Cache(ctx context.Context, dbPath string, port uint) (*L1Cache, error)
 	}()
 
 	return &L1Cache{
-		server: server,
-		db:     db,
+		server:         server,
+		db:             db,
+		hostsWhitelist: hostsWhitelist,
 	}, nil
 }
 
@@ -157,12 +165,18 @@ func generateCacheKey(chainID string, body []byte) (string, error) {
 	return fmt.Sprintf("%s_%s", chainID, modifiedBody), nil
 }
 
-func handleRequest(db kv.RwDB) http.HandlerFunc {
+func handleRequest(db kv.RwDB, hostsWhitelist []string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		endpoint := r.URL.Query().Get("endpoint")
 		chainID := r.URL.Query().Get("chainid")
 		if endpoint == "" || chainID == "" {
 			http.Error(w, "Missing endpoint or chainid parameter", http.StatusBadRequest)
+			return
+		}
+
+		l1Endpoint, err := verifyEndpoint(endpoint, hostsWhitelist)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
@@ -207,7 +221,7 @@ func handleRequest(db kv.RwDB) http.HandlerFunc {
 			tx.Rollback()
 		}
 
-		resp, err := http.Post(endpoint, "application/json", bytes.NewBuffer(body))
+		resp, err := http.Post(l1Endpoint, "application/json", bytes.NewBuffer(body))
 		if err != nil {
 			http.Error(w, "Failed to fetch from upstream", http.StatusInternalServerError)
 			return
@@ -266,4 +280,37 @@ func handleRequest(db kv.RwDB) http.HandlerFunc {
 		w.Header().Set("X-Cache-Status", "MISS")
 		w.Write(responseBody)
 	}
+}
+
+func verifyEndpoint(endpoint string, hostsWhiteList []string) (string, error) {
+	var l1Endpoint string
+	// Check against the whitelist
+	parsedURL, err := url.Parse(endpoint)
+	if err != nil {
+		return "", fmt.Errorf("invalid L1 cache endpoint URL")
+	}
+
+	// Extract host and port from the URL
+	host, port, err := net.SplitHostPort(parsedURL.Host)
+	if err != nil {
+		host = parsedURL.Host
+		port = ""
+	}
+
+	// Try to split host and port.
+	for _, wHost := range hostsWhiteList {
+		if host == wHost {
+			l1Endpoint = wHost
+			if port != "" {
+				l1Endpoint = net.JoinHostPort(l1Endpoint, port)
+			}
+			break
+		}
+	}
+
+	if l1Endpoint == "" {
+		return "", fmt.Errorf("L1 cache endpoint is not whitelisted")
+	}
+
+	return l1Endpoint, nil
 }

@@ -209,7 +209,7 @@ func StringToBlockNumber(str string) (BlockNumber, error) {
 		return LatestBlockNumber, nil
 	}
 
-	n, err := encoding.DecodeUint64orHex(&str)
+	n, err := encoding.DecodeInt64orHex(&str)
 	if err != nil {
 		return 0, err
 	}
@@ -319,7 +319,7 @@ type Index int64
 // UnmarshalJSON automatically decodes the user input for the block number, when a JSON RPC method is called
 func (i *Index) UnmarshalJSON(buffer []byte) error {
 	str := strings.Trim(string(buffer), "\"")
-	n, err := encoding.DecodeUint64orHex(&str)
+	n, err := encoding.DecodeInt64orHex(&str)
 	if err != nil {
 		return err
 	}
@@ -376,7 +376,7 @@ func stringToBatchNumber(str string) (BatchNumber, error) {
 		return LatestBatchNumber, nil
 	}
 
-	n, err := encoding.DecodeUint64orHex(&str)
+	n, err := encoding.DecodeInt64orHex(&str)
 	if err != nil {
 		return 0, err
 	}

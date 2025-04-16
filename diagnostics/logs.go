@@ -28,6 +28,7 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/urfave/cli/v2"
 
@@ -97,7 +98,7 @@ func writeLogsList(w http.ResponseWriter, dirPath string) {
 func writeLogsRead(w http.ResponseWriter, r *http.Request, dirPath string) {
 	file := path.Base(r.URL.Path)
 
-	if file == "/" || file == "." {
+	if file == "." || strings.Contains(file, "/") || strings.Contains(file, "\\") || strings.Contains(file, "..") {
 		http.Error(w, "file is required - specify the name of log file to read", http.StatusBadRequest)
 		return
 	}

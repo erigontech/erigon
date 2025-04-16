@@ -1026,7 +1026,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		l1Urls := strings.Split(cfg.L1RpcUrl, ",")
 
 		if cfg.Zk.L1CacheEnabled {
-			l1Cache, err := l1_cache.NewL1Cache(ctx, path.Join(stack.DataDir(), "l1cache"), cfg.Zk.L1CachePort)
+			// extract hosts from l1Urls
+			l1Hosts, err := urlsToHosts(l1Urls)
+			if err != nil {
+				return nil, err
+			}
+
+			l1Cache, err := l1_cache.NewL1Cache(ctx, path.Join(stack.DataDir(), "l1cache"), cfg.Zk.L1CachePort, l1Hosts)
 			if err != nil {
 				return nil, err
 			}
@@ -2255,4 +2261,16 @@ func createClientVersionMetric() {
 	metrics.GetOrCreateGauge(fmt.Sprintf(`web3_client_version{os="%s"}`, runtime.GOOS))
 	metrics.GetOrCreateGauge(fmt.Sprintf(`web3_client_version{arch="%s"}`, runtime.GOARCH))
 	metrics.GetOrCreateGauge(fmt.Sprintf(`web3_client_version{go_version="%s"}`, runtime.Version()))
+}
+
+func urlsToHosts(urls []string) ([]string, error) {
+	hosts := make([]string, len(urls))
+	for i, urlStr := range urls {
+		host, err := url.Parse(urlStr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse URL: %w", err)
+		}
+		hosts[i] = host.Hostname()
+	}
+	return hosts, nil
 }

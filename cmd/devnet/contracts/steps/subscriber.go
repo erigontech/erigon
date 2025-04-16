@@ -70,7 +70,7 @@ func DeployAndCallLogSubscriber(ctx context.Context, deployer string) (*libcommo
 
 	logs, err := node.FilterLogs(ctx, ethereum.FilterQuery{
 		FromBlock: big.NewInt(0),
-		ToBlock:   big.NewInt(int64(blockNum)),
+		ToBlock:   new(big.Int).SetUint64(blockNum),
 		Addresses: []libcommon.Address{address}})
 
 	if err != nil || len(logs) == 0 {
