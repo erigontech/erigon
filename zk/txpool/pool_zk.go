@@ -291,60 +291,6 @@ func (p *TxPool) MarkForDiscardFromPendingBest(txHash common.Hash) {
 	}
 }
 
-func (p *TxPool) RemoveMinedTransactions(ctx context.Context, tx kv.Tx, blockGasLimit uint64, ids []common.Hash) error {
-	if len(ids) == 0 {
-		return nil
-	}
-	cache := p.cache()
-
-	p.lock.Lock()
-	defer p.lock.Unlock()
-
-	toDelete := make([]*metaTx, 0)
-
-	p.all.ascendAll(func(mt *metaTx) bool {
-		for _, id := range ids {
-			if bytes.Equal(mt.Tx.IDHash[:], id[:]) {
-				toDelete = append(toDelete, mt)
-				switch mt.currentSubPool {
-				case PendingSubPool:
-					p.pending.Remove(mt)
-				case BaseFeeSubPool:
-					p.baseFee.Remove(mt)
-				case QueuedSubPool:
-					p.queued.Remove(mt)
-				default:
-					//already removed
-				}
-			}
-		}
-		return true
-	})
-
-	sendersWithChangedState := make(map[uint64]struct{})
-	for _, mt := range toDelete {
-		p.discardLocked(mt, Mined)
-		sendersWithChangedState[mt.Tx.SenderID] = struct{}{}
-	}
-
-	baseFee := p.pendingBaseFee.Load()
-
-	cacheView, err := cache.View(ctx, tx)
-	if err != nil {
-		return err
-	}
-	for senderID := range sendersWithChangedState {
-		nonce, balance, err := p.senders.info(cacheView, senderID)
-		if err != nil {
-			return err
-		}
-		p.onSenderStateChange(senderID, nonce, balance, p.all,
-			baseFee, blockGasLimit, p.pending, p.baseFee, p.queued, p.discardLocked)
-
-	}
-	return nil
-}
-
 func (p *TxPool) TriggerSenderStateChanges(ctx context.Context, tx kv.Tx, blockGasLimit uint64, senders map[common.Address]struct{}) error {
 	if len(senders) == 0 {
 		return nil

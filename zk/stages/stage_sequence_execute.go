@@ -702,12 +702,6 @@ func sequencingBatchStep(
 			defer sdb.tx.Rollback()
 		}
 
-		// remove mined transactions from the pool
-		toRemove := append(batchState.blockState.builtBlockElements.txSlots, batchState.blockState.transactionsToDiscard...)
-		if err := cfg.txPool.RemoveMinedTransactions(ctx, sdb.tx, header.GasLimit, toRemove); err != nil {
-			return err
-		}
-
 		// remove the decoded transactions from the cache
 		for _, txHash := range batchState.blockState.builtBlockElements.txSlots {
 			cfg.decodedTxCache.Remove(txHash)
