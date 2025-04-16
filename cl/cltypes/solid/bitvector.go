@@ -29,7 +29,7 @@ func NewBitVector(c int) *BitVector {
 	return &BitVector{
 		bitLen:    0,
 		bitCap:    c,
-		container: make([]byte, 0),
+		container: make([]byte, (c+7)/8),
 	}
 }
 
