@@ -344,15 +344,17 @@ func (ev *taskVersion) Version() state.Version {
 }
 
 type blockExecMetrics struct {
-	BlockCount       atomic.Int64
-	UsedGas          blockCount
-	Duration         blockDuration
+	BlockCount   atomic.Int64
+	LastBlockNum atomic.Int64
+	LastTxNum    atomic.Int64
+	UsedGas      blockCount
+	Duration     blockDuration
 }
 
 func newBlockExecMetrics() *blockExecMetrics {
 	return &blockExecMetrics{
-		UsedGas:          blockCount{Ema: metrics.NewEma[uint64](0, 0.3)},
-		Duration:         blockDuration{Ema: metrics.NewEma[time.Duration](0, 0.3)},
+		UsedGas:  blockCount{Ema: metrics.NewEma[uint64](0, 0.3)},
+		Duration: blockDuration{Ema: metrics.NewEma[time.Duration](0, 0.3)},
 	}
 }
 
@@ -1298,13 +1300,15 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				pe.blockExecMetrics.UsedGas.Add(blockResult.GasUsed)
 				if !blockExecutor.execStarted.IsZero() {
 					pe.blockExecMetrics.Duration.Add(time.Since(blockExecutor.execStarted))
+					pe.blockExecMetrics.BlockCount.Add(1)
+					pe.blockExecMetrics.LastBlockNum.Store(int64(blockResult.BlockNum))
+					pe.blockExecMetrics.LastTxNum.Store(int64(blockResult.lastTxNum))
 				}
 				blockExecutor.applyResults <- blockResult
 				delete(pe.blockExecutors, blockResult.BlockNum)
 			}
 
 			if blockExecutor, ok := pe.blockExecutors[blockResult.BlockNum+1]; ok {
-				pe.blockExecMetrics.BlockCount.Add(1)
 				blockExecutor.execStarted = time.Now()
 				blockExecutor.scheduleExecution(ctx, pe.in)
 			}
