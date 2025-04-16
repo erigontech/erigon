@@ -32,18 +32,18 @@ type CsvMetrics interface {
 
 type Metrics struct {
 	Accounts            *AccountMetrics
-	Updates             atomic.Uint64
-	AddressKeys         atomic.Uint64
-	StorageKeys         atomic.Uint64
-	LoadBranch          atomic.Uint64
-	LoadAccount         atomic.Uint64
-	LoadStorage         atomic.Uint64
-	UpdateBranch        atomic.Uint64
-	LoadDepths          [10]uint64
-	Unfolds             atomic.Uint64
-	TotalUnfoldingTime  time.Duration
-	TotalFoldingTime    time.Duration
-	TotalProcessingTime time.Duration
+	updates             atomic.Uint64
+	addressKeys         atomic.Uint64
+	storageKeys         atomic.Uint64
+	loadBranch          atomic.Uint64
+	loadAccount         atomic.Uint64
+	loadStorage         atomic.Uint64
+	updateBranch        atomic.Uint64
+	loadDepths          [10]uint64
+	unfolds             atomic.Uint64
+	totalUnfoldingTime  time.Duration
+	totalFoldingTime    time.Duration
+	totalProcessingTime time.Duration
 }
 
 func NewMetrics() *Metrics {
@@ -76,39 +76,39 @@ func (metrics *Metrics) Headers() []string {
 func (metrics *Metrics) Values() [][]string {
 	return [][]string{
 		[]string{
-			strconv.FormatUint(metrics.Updates.Load(), 10),
-			strconv.FormatUint(metrics.AddressKeys.Load(), 10),
-			strconv.FormatUint(metrics.StorageKeys.Load(), 10),
-			strconv.FormatUint(metrics.LoadBranch.Load(), 10),
-			strconv.FormatUint(metrics.LoadAccount.Load(), 10),
-			strconv.FormatUint(metrics.LoadStorage.Load(), 10),
-			strconv.FormatUint(metrics.UpdateBranch.Load(), 10),
-			strconv.FormatUint(metrics.LoadDepths[0], 10) + "/" + strconv.FormatUint(metrics.LoadDepths[1], 10),
-			strconv.FormatUint(metrics.LoadDepths[2], 10) + "/" + strconv.FormatUint(metrics.LoadDepths[3], 10),
-			strconv.FormatUint(metrics.LoadDepths[4], 10) + "/" + strconv.FormatUint(metrics.LoadDepths[5], 10),
-			strconv.FormatUint(metrics.LoadDepths[6], 10) + "/" + strconv.FormatUint(metrics.LoadDepths[7], 10),
-			strconv.FormatUint(metrics.LoadDepths[8], 10) + "/" + strconv.FormatUint(metrics.LoadDepths[9], 10),
-			strconv.FormatUint(metrics.Unfolds.Load(), 10),
-			strconv.Itoa(int(metrics.TotalUnfoldingTime.Milliseconds())),
-			strconv.Itoa(int(metrics.TotalFoldingTime.Milliseconds())),
-			strconv.Itoa(int(metrics.TotalProcessingTime.Milliseconds())),
+			strconv.FormatUint(metrics.updates.Load(), 10),
+			strconv.FormatUint(metrics.addressKeys.Load(), 10),
+			strconv.FormatUint(metrics.storageKeys.Load(), 10),
+			strconv.FormatUint(metrics.loadBranch.Load(), 10),
+			strconv.FormatUint(metrics.loadAccount.Load(), 10),
+			strconv.FormatUint(metrics.loadStorage.Load(), 10),
+			strconv.FormatUint(metrics.updateBranch.Load(), 10),
+			strconv.FormatUint(metrics.loadDepths[0], 10) + "/" + strconv.FormatUint(metrics.loadDepths[1], 10),
+			strconv.FormatUint(metrics.loadDepths[2], 10) + "/" + strconv.FormatUint(metrics.loadDepths[3], 10),
+			strconv.FormatUint(metrics.loadDepths[4], 10) + "/" + strconv.FormatUint(metrics.loadDepths[5], 10),
+			strconv.FormatUint(metrics.loadDepths[6], 10) + "/" + strconv.FormatUint(metrics.loadDepths[7], 10),
+			strconv.FormatUint(metrics.loadDepths[8], 10) + "/" + strconv.FormatUint(metrics.loadDepths[9], 10),
+			strconv.FormatUint(metrics.unfolds.Load(), 10),
+			strconv.Itoa(int(metrics.totalUnfoldingTime.Milliseconds())),
+			strconv.Itoa(int(metrics.totalFoldingTime.Milliseconds())),
+			strconv.Itoa(int(metrics.totalProcessingTime.Milliseconds())),
 		},
 	}
 }
 
 func (metrics *Metrics) Reset() {
 	metrics.Accounts.Reset()
-	metrics.Updates.Store(0)
-	metrics.AddressKeys.Store(0)
-	metrics.StorageKeys.Store(0)
-	metrics.LoadBranch.Store(0)
-	metrics.LoadAccount.Store(0)
-	metrics.LoadStorage.Store(0)
-	metrics.UpdateBranch.Store(0)
-	metrics.Unfolds.Store(0)
-	metrics.TotalUnfoldingTime = 0
-	metrics.TotalFoldingTime = 0
-	metrics.TotalProcessingTime = 0
+	metrics.updates.Store(0)
+	metrics.addressKeys.Store(0)
+	metrics.storageKeys.Store(0)
+	metrics.loadBranch.Store(0)
+	metrics.loadAccount.Store(0)
+	metrics.loadStorage.Store(0)
+	metrics.updateBranch.Store(0)
+	metrics.unfolds.Store(0)
+	metrics.totalUnfoldingTime = 0
+	metrics.totalFoldingTime = 0
+	metrics.totalProcessingTime = 0
 }
 
 func (metrics *Metrics) Now() time.Time {
@@ -129,28 +129,28 @@ func (metrics *Metrics) CollectFileDepthStats(m map[uint64]skipStat) {
 			// get stats for specific file depth
 			v := m[ends[i]]
 			// write level i file stats - account and storage loads
-			metrics.LoadDepths[i*2], metrics.LoadDepths[i*2+1] = v.accLoaded, v.storLoaded
+			metrics.loadDepths[i*2], metrics.loadDepths[i*2+1] = v.accLoaded, v.storLoaded
 		}
 	}
 }
 
 func (metrics *Metrics) Account(plainKey []byte) {
 	if collectCommitmentMetrics {
-		metrics.LoadAccount.Add(1)
+		metrics.loadAccount.Add(1)
 		metrics.Accounts.LoadAccountInc(plainKey)
 	}
 }
 
 func (metrics *Metrics) Storage(plainKey []byte) {
 	if collectCommitmentMetrics {
-		metrics.LoadStorage.Add(1)
+		metrics.loadStorage.Add(1)
 		metrics.Accounts.LoadStorageInc(plainKey)
 	}
 }
 
 func (metrics *Metrics) Branch(plainKey []byte) {
 	if collectCommitmentMetrics {
-		metrics.LoadBranch.Add(1)
+		metrics.loadBranch.Add(1)
 		metrics.Accounts.LoadBranchInc(plainKey)
 	}
 }
@@ -159,7 +159,7 @@ func (metrics *Metrics) StartUnfolding(plainKey []byte) func() {
 	if collectCommitmentMetrics {
 		startUnfold := metrics.Now()
 		metrics.Accounts.UnfoldsInc(metrics.Accounts.currentPlainKey)
-		metrics.Unfolds.Add(1)
+		metrics.unfolds.Add(1)
 		return func() {
 			metrics.TotalUnfoldingTimeInc(startUnfold)
 			metrics.Accounts.TotalUnfoldingTimeInc(metrics.Accounts.currentPlainKey, startUnfold)
@@ -181,20 +181,20 @@ func (metrics *Metrics) StartFolding(plainKey []byte) func() {
 
 func (metrics *Metrics) TotalUnfoldingTimeInc(t time.Time) {
 	if collectCommitmentMetrics {
-		metrics.TotalUnfoldingTime += time.Since(t)
+		metrics.totalUnfoldingTime += time.Since(t)
 	}
 }
 
 func (metrics *Metrics) TotalProcessingTimeInc(t time.Time) {
 	if collectCommitmentMetrics {
-		metrics.TotalProcessingTime += time.Since(t)
+		metrics.totalProcessingTime += time.Since(t)
 	}
 }
 
 func (metrics *Metrics) TotalFoldingTimeInc(t time.Time) {
 	if collectCommitmentMetrics {
 		metrics.Accounts.TotalFoldingTimeInc(metrics.Accounts.currentPlainKey, t)
-		metrics.TotalFoldingTime += time.Since(t)
+		metrics.totalFoldingTime += time.Since(t)
 	}
 }
 

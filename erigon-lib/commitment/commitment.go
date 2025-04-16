@@ -217,7 +217,7 @@ func (be *BranchEncoder) CollectUpdate(
 	//fmt.Printf("\ncollectBranchUpdate [%x] -> %s\n", prefix, BranchData(update).String())
 	// has to copy :(
 	if be.metrics != nil {
-		be.metrics.UpdateBranch.Add(1)
+		be.metrics.updateBranch.Add(1)
 	}
 	if err = ctx.PutBranch(common.Copy(prefix), common.Copy(update), prev, prevStep); err != nil {
 		return 0, err
