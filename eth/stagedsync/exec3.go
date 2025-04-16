@@ -967,102 +967,92 @@ func ExecV3(ctx context.Context,
 				case request := <-asyncTxChan:
 					request.Apply()
 				case applyResult := <-applyResults:
-					for applyResult != nil {
-						switch ar := applyResult.(type) {
-						case *txResult:
-							pe.executedGas += ar.usedGas
-							pe.lastExecutedTxNum = ar.txNum
+					switch applyResult := applyResult.(type) {
+					case *txResult:
+						pe.executedGas += applyResult.usedGas
+						pe.lastExecutedTxNum = applyResult.txNum
 
-							pe.rs.SetTxNum(ar.txNum, ar.blockNum)
-							if false {
-								if err := pe.rs.ApplyState4(ctx, applyTx,
-									ar.blockNum, ar.txNum, ar.writeSet,
-									nil, ar.logs, ar.traceFroms, ar.traceTos,
-									pe.cfg.chainConfig, pe.cfg.chainConfig.Rules(ar.blockNum, ar.blockTime), false); err != nil {
+						pe.rs.SetTxNum(applyResult.txNum, applyResult.blockNum)
+						if false {
+							if err := pe.rs.ApplyState4(ctx, applyTx,
+								applyResult.blockNum, applyResult.txNum, applyResult.writeSet,
+								nil, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
+								pe.cfg.chainConfig, pe.cfg.chainConfig.Rules(applyResult.blockNum, applyResult.blockTime), false); err != nil {
+								return err
+							}
+						}
+					case *blockResult:
+						if applyResult.BlockNum > lastBlockResult.BlockNum {
+							pe.doms.SetTxNum(applyResult.lastTxNum)
+							pe.doms.SetBlockNum(applyResult.BlockNum)
+							lastBlockResult = *applyResult
+							pe.lastExecutedBlockNum = applyResult.BlockNum
+							uncommittedGas += applyResult.GasUsed
+						}
+
+						flushPending = pe.rs.SizeEstimate() > pe.cfg.batchSize.Bytes()
+
+						if !dbg.DiscardCommitment() {
+							if shouldGenerateChangesets || lastBlockResult.BlockNum == maxBlockNum ||
+								(flushPending && lastBlockResult.BlockNum > pe.lastCommittedBlockNum) {
+								var trace bool
+								if traceBlock(applyResult.BlockNum) {
+									trace = true
+								}
+								pe.doms.SetTrace(trace)
+								if !dbg.BatchCommitments {
+									commitment.Captured = []string{}
+								}
+								rh, err := pe.doms.ComputeCommitment(ctx, applyTx, true, applyResult.BlockNum, pe.logPrefix)
+								pe.doms.SetTrace(false)
+								captured := commitment.Captured
+								commitment.Captured = nil
+								if err != nil {
 									return err
 								}
-							}
-
-							select {
-							case applyResult = <-applyResults:
-							default:
-								applyResult = nil
-							}
-
-						case *blockResult:
-							if ar.BlockNum > lastBlockResult.BlockNum {
-								pe.doms.SetTxNum(ar.lastTxNum)
-								pe.doms.SetBlockNum(ar.BlockNum)
-								lastBlockResult = *ar
-								pe.lastExecutedBlockNum = ar.BlockNum
-								uncommittedGas += ar.GasUsed
-							}
-
-							flushPending = pe.rs.SizeEstimate() > pe.cfg.batchSize.Bytes()
-
-							if !dbg.DiscardCommitment() {
-								if shouldGenerateChangesets || lastBlockResult.BlockNum == maxBlockNum ||
-									(flushPending && lastBlockResult.BlockNum > pe.lastCommittedBlockNum) {
-									var trace bool
-									if traceBlock(ar.BlockNum) {
-										trace = true
-									}
-									pe.doms.SetTrace(trace)
+								if !bytes.Equal(rh, applyResult.StateRoot.Bytes()) {
+									logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", pe.logPrefix, applyResult.BlockNum, rh, applyResult.StateRoot.Bytes(), applyResult.BlockHash))
 									if !dbg.BatchCommitments {
-										commitment.Captured = []string{}
-									}
-									rh, err := pe.doms.ComputeCommitment(ctx, applyTx, true, ar.BlockNum, pe.logPrefix)
-									pe.doms.SetTrace(false)
-									captured := commitment.Captured
-									commitment.Captured = nil
-									if err != nil {
-										return err
-									}
-									if !bytes.Equal(rh, ar.StateRoot.Bytes()) {
-										logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", pe.logPrefix, ar.BlockNum, rh, ar.StateRoot.Bytes(), ar.BlockHash))
-										if !dbg.BatchCommitments {
-											for _, line := range captured {
-												fmt.Println(line)
-											}
+										for _, line := range captured {
+											fmt.Println(line)
+										}
 
-											maxTxIndex := len(ar.TxIO.Inputs()) - 1
+										maxTxIndex := len(applyResult.TxIO.Inputs()) - 1
 
-											for txIndex := -1; txIndex < maxTxIndex; txIndex++ {
-												fmt.Println(
-													fmt.Sprintf("%d (%d) RD", ar.BlockNum, txIndex), ar.TxIO.ReadSet(txIndex).Len(),
-													"WRT", len(ar.TxIO.WriteSet(txIndex)))
+										for txIndex := -1; txIndex < maxTxIndex; txIndex++ {
+											fmt.Println(
+												fmt.Sprintf("%d (%d) RD", applyResult.BlockNum, txIndex), applyResult.TxIO.ReadSet(txIndex).Len(),
+												"WRT", len(applyResult.TxIO.WriteSet(txIndex)))
 
-													ar.TxIO.ReadSet(txIndex).Scan(func(vr *state.VersionedRead) bool {
-													fmt.Println(fmt.Sprintf("%d (%d)", ar.BlockNum, txIndex), "RD", vr.String())
-													return true
-												})
+											applyResult.TxIO.ReadSet(txIndex).Scan(func(vr *state.VersionedRead) bool {
+												fmt.Println(fmt.Sprintf("%d (%d)", applyResult.BlockNum, txIndex), "RD", vr.String())
+												return true
+											})
 
-												for _, vw := range ar.TxIO.WriteSet(txIndex) {
-													fmt.Println(fmt.Sprintf("%d (%d)", ar.BlockNum, txIndex), "WRT", vw.String())
-												}
+											for _, vw := range applyResult.TxIO.WriteSet(txIndex) {
+												fmt.Println(fmt.Sprintf("%d (%d)", applyResult.BlockNum, txIndex), "WRT", vw.String())
 											}
 										}
-										return errors.New("wrong trie root")
 									}
-
-									pe.lastCommittedBlockNum = lastBlockResult.BlockNum
-									pe.lastCommittedTxNum = lastBlockResult.lastTxNum
-									pe.committedGas += uncommittedGas
-									uncommittedGas = 0
+									return errors.New("wrong trie root")
 								}
-							}
 
-							//fmt.Println("Block Complete", blockResult.BlockNum)
-							if dbg.StopAfterBlock > 0 && ar.BlockNum == dbg.StopAfterBlock {
-								return fmt.Errorf("stopping: block %d complete", ar.BlockNum)
+								pe.lastCommittedBlockNum = lastBlockResult.BlockNum
+								pe.lastCommittedTxNum = lastBlockResult.lastTxNum
+								pe.committedGas += uncommittedGas
+								uncommittedGas = 0
 							}
-
-							if maxBlockNum == ar.BlockNum {
-								return nil
-							}
-
-							applyResult = nil
 						}
+
+						//fmt.Println("Block Complete", blockResult.BlockNum)
+						if dbg.StopAfterBlock > 0 && applyResult.BlockNum == dbg.StopAfterBlock {
+							return fmt.Errorf("stopping: block %d complete", applyResult.BlockNum)
+						}
+
+						if maxBlockNum == applyResult.BlockNum {
+							return nil
+						}
+
 					}
 				case <-executorContext.Done():
 					err = executor.wait(ctx)
