@@ -148,7 +148,6 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 				&SnapshotFromFlag,
 				&SnapshotToFlag,
-				&SnapshotEveryFlag,
 			}),
 		},
 		{
@@ -293,11 +292,6 @@ var (
 		Name:  "to",
 		Usage: "To block number. Zero - means unlimited.",
 		Value: 0,
-	}
-	SnapshotEveryFlag = cli.Uint64Flag{
-		Name:  "every",
-		Usage: "Do operation every N blocks",
-		Value: 1_000,
 	}
 	SnapshotRebuildFlag = cli.BoolFlag{
 		Name:  "rebuild",
@@ -1368,7 +1362,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	from := cliCtx.Uint64(SnapshotFromFlag.Name)
 	to := cliCtx.Uint64(SnapshotToFlag.Name)
-	every := cliCtx.Uint64(SnapshotEveryFlag.Name)
 
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
@@ -1404,13 +1397,12 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		blockReader, _ := br.IO()
 		from2, to2, ok := freezeblocks.CanRetire(forwardProgress, blockReader.FrozenBlocks(), coresnaptype.Enums.Headers, nil)
 		if ok {
-			from, to, every = from2, to2, to2-from2
+			from, to = from2, to2
 		}
 	} else {
 		forwardProgress = to
 	}
 
-	logger.Info("Params", "from", from, "to", to, "every", every)
 	if err := br.RetireBlocks(ctx, from, forwardProgress, log.LvlInfo, nil, nil, nil); err != nil {
 		return err
 	}
@@ -1442,12 +1434,8 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	logger.Info("Prune state history")
 	for hasMoreToPrune := true; hasMoreToPrune; {
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
-			ac := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx)
-			hasMoreToPrune, err = ac.PruneSmallBatches(ctx, 2*time.Minute, tx)
-			if err != nil {
-				return err
-			}
-			return nil
+			hasMoreToPrune, err = tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 2*time.Minute)
+			return err
 		}); err != nil {
 			return err
 		}
@@ -1467,9 +1455,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		if err != nil {
 			return err
 		}
-
-		ac := agg.BeginFilesRo()
-		defer ac.Close()
 		return nil
 	}); err != nil {
 		return err
@@ -1480,31 +1465,10 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
-	if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-		ac := agg.BeginFilesRo()
-		defer ac.Close()
-
-		logEvery := time.NewTicker(30 * time.Second)
-		defer logEvery.Stop()
-
-		stat, err := ac.Prune(ctx, tx, math.MaxUint64, logEvery)
-		if err != nil {
-			return err
-		}
-		logger.Info("aftermath prune finished", "stat", stat.String())
-		return err
-	}); err != nil {
-		return err
-	}
-
 	for hasMoreToPrune := true; hasMoreToPrune; {
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
-			ac := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx)
-			hasMoreToPrune, err = ac.PruneSmallBatches(ctx, 2*time.Minute, tx)
-			if err != nil {
-				return err
-			}
-			return nil
+			hasMoreToPrune, err = tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 2*time.Minute)
+			return err
 		}); err != nil {
 			return err
 		}

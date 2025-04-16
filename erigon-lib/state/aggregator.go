@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	rand2 "math/rand/v2"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -30,8 +31,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	rand2 "math/rand/v2"
 
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/c2h5oh/datasize"
@@ -368,6 +367,24 @@ func (a *Aggregator) LS() {
 	for _, d := range a.iis {
 		doLS(d.dirtyFiles)
 	}
+}
+
+func (a *Aggregator) WaitForBuildAndMerge(ctx context.Context) chan struct{} {
+	res := make(chan struct{})
+	go func() {
+		defer close(res)
+
+		chkEvery := time.NewTicker(3 * time.Second)
+		defer chkEvery.Stop()
+		for a.buildingFiles.Load() || a.mergingFiles.Load() {
+			select {
+			case <-ctx.Done():
+				return
+			case <-chkEvery.C: //TODO: more reliable notification
+			}
+		}
+	}()
+	return res
 }
 
 func (a *Aggregator) BuildMissedIndices(ctx context.Context, workers int) error {
@@ -737,6 +754,12 @@ func (a *Aggregator) DomainTables(domains ...kv.Domain) (tables []string) {
 		tables = append(tables, a.d[domain].Tables()...)
 	}
 	return tables
+}
+func (a *AggregatorRoTx) DomainFiles(domains ...kv.Domain) (files []string) {
+	for _, domain := range domains {
+		files = append(files, a.d[domain].Files()...)
+	}
+	return files
 }
 func (a *Aggregator) InvertedIndexTables(indices ...kv.InvertedIdx) (tables []string) {
 	for _, idx := range indices {
