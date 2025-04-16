@@ -7,9 +7,9 @@ import (
 	"os/signal"
 	"time"
 
-	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
-	log2 "github.com/0xPolygonHermez/zkevm-data-streamer/log"
 	"github.com/erigontech/erigon/zk/datastream/server"
+	"github.com/gateway-fm/zkevm-data-streamer/datastreamer"
+	log2 "github.com/gateway-fm/zkevm-data-streamer/log"
 )
 
 var (

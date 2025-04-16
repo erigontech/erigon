@@ -49,8 +49,6 @@ filippo.io/edwards25519 v1.0.0-rc.1/go.mod h1:N1IkdkCkiLB6tki+MYJoSx2JTY9NUlxZE7
 gfx.cafe/util/go/generic v0.0.0-20230721185457-c559e86c829c h1:alCfDKmPC0EC0KGlZWrNF0hilVWBkzMz+aAYTJ/2hY4=
 gfx.cafe/util/go/generic v0.0.0-20230721185457-c559e86c829c/go.mod h1:WvSX4JsCRBuIXj0FRBFX9YLg+2SoL3w8Ww19uZO9yNE=
 git.apache.org/thrift.git v0.0.0-20180902110319-2566ecd5d999/go.mod h1:fPE2ZNJGynbRyZ4dJvy6G277gSllfV2HJqblrnkyeyg=
-github.com/0xPolygonHermez/zkevm-data-streamer v0.2.8 h1:0Sc91seArqR3BQs49SGwGXWjf0MQYW98sEUYrao7duU=
-github.com/0xPolygonHermez/zkevm-data-streamer v0.2.8/go.mod h1:7nM7Ihk+fTG1TQPwdZoGOYd3wprqqyIyjtS514uHzWE=
 github.com/99designs/gqlgen v0.17.40 h1:/l8JcEVQ93wqIfmH9VS1jsAkwm6eAF1NwQn3N+SDqBY=
 github.com/99designs/gqlgen v0.17.40/go.mod h1:b62q1USk82GYIVjC60h02YguAZLqYZtvWml8KkhJps4=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
@@ -317,6 +315,8 @@ github.com/garslo/gogen v0.0.0-20170307003452-d6ebae628c7c h1:uYNKzPntb8c6DKvP9E
 github.com/garslo/gogen v0.0.0-20170307003452-d6ebae628c7c/go.mod h1:Q0X6pkwTILDlzrGEckF6HKjXe48EgsY/l7K7vhY4MW8=
 github.com/gateway-fm/vectorized-poseidon-gold v1.0.0 h1:Du0ZW+fkZhgRNGx/gAkHnMj3/Rl8uJkAEe+ZDPX3PDw=
 github.com/gateway-fm/vectorized-poseidon-gold v1.0.0/go.mod h1:VLGQpyjrOg8+FugH/+d8tfYd/c3z4Xqa+zbUBITygaw=
+github.com/gateway-fm/zkevm-data-streamer v0.2.9 h1:ezR6IJakWvtNXFEhWXtwuot0JikKCJIB9rk2wnUsH3A=
+github.com/gateway-fm/zkevm-data-streamer v0.2.9/go.mod h1:kKQSu8Ob9yNR+3ocx9dHlWmQ4Gnct3jRtQqKR69CmyM=
 github.com/gballet/go-verkle v0.0.0-20221121182333-31427a1f2d35 h1:I8QswD9gf3VEpr7bpepKKOm7ChxFITIG+oc1I5/S0no=
 github.com/gballet/go-verkle v0.0.0-20221121182333-31427a1f2d35/go.mod h1:DMDd04jjQgdynaAwbEgiRERIGpC8fDjx0+y06an7Psg=
 github.com/gfx-labs/sse v0.0.0-20231226060816-f747e26a9baa h1:b6fBm4SLM8jywQHNmc3ZCl6zQEhEyZl6bp7is4en72M=

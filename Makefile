@@ -148,6 +148,7 @@ COMMANDS += verkle
 COMMANDS += evm
 COMMANDS += sentinel
 COMMANDS += acl
+COMMANDS += relay
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd

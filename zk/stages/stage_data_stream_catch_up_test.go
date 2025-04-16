@@ -6,7 +6,6 @@ import (
 	"os"
 	"testing"
 
-	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon/core/rawdb"
@@ -16,6 +15,7 @@ import (
 	"github.com/erigontech/erigon/smt/pkg/db"
 	"github.com/erigontech/erigon/zk/datastream/mocks"
 	"github.com/erigontech/erigon/zk/hermez_db"
+	"github.com/gateway-fm/zkevm-data-streamer/datastreamer"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"gotest.tools/v3/assert"

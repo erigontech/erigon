@@ -12,7 +12,7 @@ package mocks
 import (
 	reflect "reflect"
 
-	datastreamer "github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
+	datastreamer "github.com/gateway-fm/zkevm-data-streamer/datastreamer"
 	gomock "go.uber.org/mock/gomock"
 )
 

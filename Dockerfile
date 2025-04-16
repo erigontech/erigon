@@ -85,6 +85,7 @@ COPY --from=builder /app/build/bin/state /usr/local/bin/state
 COPY --from=builder /app/build/bin/txpool /usr/local/bin/txpool
 COPY --from=builder /app/build/bin/verkle /usr/local/bin/verkle
 COPY --from=builder /app/build/bin/acl /usr/local/bin/acl
+COPY --from=builder /app/build/bin/relay /usr/local/bin/relay
 
 EXPOSE 8545 \
        8551 \
@@ -95,7 +96,8 @@ EXPOSE 8545 \
        42069/udp \
        8080 \
        9090 \
-       6060
+       6060 \
+       7900
 
 # https://github.com/opencontainers/image-spec/blob/main/annotations.md
 ARG BUILD_DATE

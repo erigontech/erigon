@@ -7,7 +7,7 @@
 # Default UID: 1000
 # Default GID: 1000
 # Ports: `9090` execution engine (private api), `9091` sentry, `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
-# Ports: `8545` json rpc, `8551` consensus json rpc, `30303` eth p2p protocol, `42069` bittorrent protocol,
+# Ports: `8545` json rpc, `8551` consensus json rpc, `30303` eth p2p protocol, `42069` bittorrent protocol, `7900` data stream relay
 
 # Connections: erigon -> (sentries, downloader), rpcdaemon -> (erigon, txpool), txpool -> erigon
 
@@ -68,9 +68,18 @@ services:
       --private.api.addr=erigon:9090 --txpool.api.addr=txpool:9094 --datadir=/home/erigon/.local/share/erigon
     ports: [ "8545:8545" ]
 
-
-
-
+  relay:
+    image: thorax/erigon:${TAG:-latest}
+    user: ${DOCKER_UID:-1000}:${DOCKER_GID:-1000}
+    entrypoint: relay
+    command: |
+      ${RELAY_FLAGS-} --server=${RELAY_DSHOST:-127.0.0.1:6900} --port=${RELAY_PORT:-7900}
+      --datafile=${RELAY_FILE:-/home/erigon/.local/share/erigon/datarelay.bin} --log=${RELAY_LOG:-info}
+      --writetimeout=${RELAY_WRITETIMEOUT:-3000} --inactivitytimeout=${RELAY_INACTIVITYTIMEOUT:-120}
+    ports: [ "${RELAY_PORT:-7900}:${RELAY_PORT:-7900}" ]
+    volumes:
+      - ${XDG_DATA_HOME:-~/.local/share}/erigon:/home/erigon/.local/share/erigon
+      
   prometheus:
     image: prom/prometheus:v2.51.2
     user: ${DOCKER_UID:-1000}:${DOCKER_GID:-1000} # Uses erigon user from Dockerfile
