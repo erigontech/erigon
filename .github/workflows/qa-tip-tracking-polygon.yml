@@ -18,7 +18,7 @@ jobs:
     timeout-minutes: 800
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
-      ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
+      ERIGON_TESTBED_AREA: /opt/erigon-testbed
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 21600 # 6 hours
       TOTAL_TIME_SECONDS: 43200 # 12 hours
