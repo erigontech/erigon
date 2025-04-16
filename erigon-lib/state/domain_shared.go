@@ -721,8 +721,7 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 		}
 	}
 	if dbg.PruneOnFlushTimeout != 0 {
-		_, err = sd.aggTx.PruneSmallBatches(ctx, dbg.PruneOnFlushTimeout, tx)
-		if err != nil {
+		if _, err := tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, dbg.PruneOnFlushTimeout); err != nil {
 			return err
 		}
 	}
