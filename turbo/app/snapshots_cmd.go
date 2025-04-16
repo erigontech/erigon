@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/common/compress"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
@@ -1294,6 +1295,7 @@ func doCompress(cliCtx *cli.Context) error {
 
 	compressCfg := seg.DefaultCfg
 	compressCfg.Workers = estimate.CompressSnapshot.Workers()
+	compressCfg.MinPatternScore = uint64(dbg.EnvInt("MinPatternScore", int(compressCfg.MinPatternScore)))
 	compressCfg.MinPatternLen = dbg.EnvInt("MinPatternLen", compressCfg.MinPatternLen)
 	compressCfg.MaxPatternLen = dbg.EnvInt("MaxPatternLen", compressCfg.MaxPatternLen)
 	compressCfg.SamplingFactor = uint64(dbg.EnvInt("SamplingFactor", int(compressCfg.SamplingFactor)))
@@ -1310,7 +1312,9 @@ func doCompress(cliCtx *cli.Context) error {
 		compression = seg.CompressNone
 	}
 
-	logger.Info("[compress] file", "datadir", dirs.DataDir, "f", f, "cfg", compressCfg)
+	doSnappyEachWord := dbg.EnvBool("SnappyEachWord", false)
+
+	logger.Info("[compress] file", "datadir", dirs.DataDir, "f", f, "cfg", compressCfg, "SnappyEachWord", doSnappyEachWord)
 	c, err := seg.NewCompressor(ctx, "compress", f, dirs.Tmp, compressCfg, log.LvlInfo, logger)
 	if err != nil {
 		return err
@@ -1319,25 +1323,30 @@ func doCompress(cliCtx *cli.Context) error {
 	w := seg.NewWriter(c, compression)
 
 	r := bufio.NewReaderSize(os.Stdin, int(128*datasize.MB))
-	buf := make([]byte, 0, int(1*datasize.MB))
+	word := make([]byte, 0, int(1*datasize.MB))
+	var snappyBuf []byte
 	var l uint64
 	for l, err = binary.ReadUvarint(r); err == nil; l, err = binary.ReadUvarint(r) {
-		if cap(buf) < int(l) {
-			buf = make([]byte, l)
+		if cap(word) < int(l) {
+			word = make([]byte, l)
 		} else {
-			buf = buf[:l]
+			word = word[:l]
 		}
-		if _, err = io.ReadFull(r, buf); err != nil {
+		if _, err = io.ReadFull(r, word); err != nil {
 			return err
 		}
-		if err := w.AddWord(buf); err != nil {
+		snappyBuf, word = compress.EncodeSnappyIfNeed(snappyBuf, word, doSnappyEachWord)
+
+		if err := w.AddWord(word); err != nil {
 			return err
 		}
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
+
 	}
 	if !errors.Is(err, io.EOF) {
 		return err
@@ -1348,6 +1357,7 @@ func doCompress(cliCtx *cli.Context) error {
 
 	return nil
 }
+
 func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
