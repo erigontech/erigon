@@ -185,6 +185,8 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 // considered a revert-and-consume-all-gas operation except for
 // ErrExecutionReverted which means revert-and-keep-gas-left.
 func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (ret []byte, err error) {
+	in.evm.ProcessingHook.PushContract(contract)
+	defer func() { in.evm.ProcessingHook.PopContract() }()
 	// Don't bother with the execution if there's no code.
 	if len(contract.Code) == 0 {
 		return nil, nil
