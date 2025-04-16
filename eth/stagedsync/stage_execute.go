@@ -431,6 +431,10 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	pruneTimeout := 250 * time.Millisecond
 	if s.CurrentSyncCycle.IsInitialCycle {
 		pruneTimeout = 12 * time.Hour
+
+		if err = tx.(*temporal.Tx).AggTx().(*libstate.AggregatorRoTx).GreedyPruneCommitHistory(ctx, tx, nil); err != nil {
+			return err
+		}
 	}
 	if _, err = tx.(*temporal.Tx).AggTx().(*libstate.AggregatorRoTx).PruneSmallBatches(ctx, pruneTimeout, tx); err != nil { // prune part of retired data, before commit
 		return err
