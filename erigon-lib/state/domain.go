@@ -123,16 +123,6 @@ type domainVisible struct {
 	caches *sync.Pool
 }
 
-var DomainCompressCfg = seg.Cfg{
-	MinPatternScore:      1000,
-	DictReducerSoftLimit: 2000000,
-	MinPatternLen:        20,
-	MaxPatternLen:        128,
-	SamplingFactor:       4,
-	MaxDictPatterns:      64 * 1024 * 2,
-	Workers:              1,
-}
-
 func NewDomain(cfg domainCfg, aggStep uint64, logger log.Logger) (*Domain, error) {
 	if cfg.hist.iiCfg.dirs.SnapDomain == "" {
 		panic("assert: empty `dirs`")
