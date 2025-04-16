@@ -1269,10 +1269,18 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 		if _, ok := pool[dataRoot][candCommitteeBit]; !ok {
 			pool[dataRoot][candCommitteeBit] = []*solid.Attestation{}
 		}
-		mergeAny := false
+
+		// try to merge the attestation with the existing ones
+		var appendCandidate bool = true
 		candAggrBits := candidate.AggregationBits.Bytes()
 		for _, curAtt := range pool[dataRoot][candCommitteeBit] {
 			currAggregationBitsBytes := curAtt.AggregationBits.Bytes()
+			if utils.IsNonStrictSupersetBitlist(currAggregationBitsBytes, candAggrBits) {
+				// skip the duplicate attestation
+				appendCandidate = false
+				continue
+			}
+
 			if !utils.IsOverlappingSSZBitlist(currAggregationBitsBytes, candAggrBits) {
 				// merge signatures
 				candidateSig := candidate.Signature
@@ -1292,10 +1300,10 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 				copy(buf[:], mergeSig)
 				curAtt.Signature = buf
 				curAtt.AggregationBits = mergedAggBits
-				mergeAny = true
+				appendCandidate = false
 			}
 		}
-		if !mergeAny {
+		if appendCandidate {
 			// no merge case, just append. It might be merged with other attestation later.
 			pool[dataRoot][candCommitteeBit] = append(pool[dataRoot][candCommitteeBit], candidate.Copy())
 		}
@@ -1343,23 +1351,6 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 			}
 		}
 	}
-
-	// print out the pool data
-	/*for root := range pool {
-		for committee := range pool[root] {
-			att := pool[root][committee][0]
-			log.Info("Pool data", "root", root, "slot", att.Data.Slot, "committee", committee, "attestations", len(pool[root][committee]))
-			for _, att := range pool[root][committee] {
-				// Convert aggregation bits to binary string representation
-				bits := att.AggregationBits.Bytes()
-				bitStr := ""
-				for _, b := range bits {
-					bitStr += fmt.Sprintf("%08b", b)
-				}
-				log.Info("Attestation", "aggregation_bits_len", att.AggregationBits.Bits(), "committee", att.CommitteeBits.GetOnIndices(), "aggregation_bits", bitStr[:att.AggregationBits.Bits()])
-			}
-		}
-	}*/
 
 	// step 3: merge attestations from different committees within the same data root
 	// Example:
