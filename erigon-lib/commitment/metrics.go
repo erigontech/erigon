@@ -158,11 +158,11 @@ func (metrics *Metrics) Branch(plainKey []byte) {
 func (metrics *Metrics) StartUnfolding(plainKey []byte) func() {
 	if collectCommitmentMetrics {
 		startUnfold := metrics.Now()
-		metrics.Accounts.UnfoldsInc(metrics.Accounts.currentPlainKey)
+		metrics.Accounts.UnfoldsInc(plainKey)
 		metrics.unfolds.Add(1)
 		return func() {
 			metrics.TotalUnfoldingTimeInc(startUnfold)
-			metrics.Accounts.TotalUnfoldingTimeInc(metrics.Accounts.currentPlainKey, startUnfold)
+			metrics.Accounts.TotalUnfoldingTimeInc(plainKey, startUnfold)
 		}
 	}
 	return func() {}
@@ -173,7 +173,7 @@ func (metrics *Metrics) StartFolding(plainKey []byte) func() {
 		startUnfold := metrics.Now()
 		metrics.Accounts.FoldsInc(plainKey)
 		return func() {
-			metrics.TotalFoldingTimeInc(startUnfold)
+			metrics.TotalFoldingTimeInc(startUnfold, plainKey)
 		}
 	}
 	return func() {}
@@ -191,9 +191,9 @@ func (metrics *Metrics) TotalProcessingTimeInc(t time.Time) {
 	}
 }
 
-func (metrics *Metrics) TotalFoldingTimeInc(t time.Time) {
+func (metrics *Metrics) TotalFoldingTimeInc(t time.Time, plainKey []byte) {
 	if collectCommitmentMetrics {
-		metrics.Accounts.TotalFoldingTimeInc(metrics.Accounts.currentPlainKey, t)
+		metrics.Accounts.TotalFoldingTimeInc(plainKey, t)
 		metrics.totalFoldingTime += time.Since(t)
 	}
 }
@@ -219,8 +219,7 @@ type AccountStats struct {
 type AccountMetrics struct {
 	m sync.Mutex
 	// will be separate value for each key in parallel processing
-	currentPlainKey []byte
-	AccountStats    map[string]*AccountStats
+	AccountStats map[string]*AccountStats
 }
 
 func (processAccount *AccountMetrics) Headers() []string {
@@ -266,12 +265,11 @@ func (processAccount *AccountMetrics) Reset() {
 	processAccount.AccountStats = make(map[string]*AccountStats)
 }
 
-func (processAccount *AccountMetrics) KeyRegister(plainKey []byte) {
+func (processAccount *AccountMetrics) Updates(plainKey []byte) {
 	if !collectCommitmentMetrics {
 		return
 	}
 	processAccount.UpdatesInc(plainKey)
-	processAccount.currentPlainKey = plainKey
 	processAccount.UpdatesStorageInc(plainKey)
 }
 
