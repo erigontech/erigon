@@ -755,9 +755,9 @@ func (a *Aggregator) DomainTables(domains ...kv.Domain) (tables []string) {
 	}
 	return tables
 }
-func (a *AggregatorRoTx) DomainFiles(domains ...kv.Domain) (files []string) {
+func (at *AggregatorRoTx) DomainFiles(domains ...kv.Domain) (files []string) {
 	for _, domain := range domains {
-		files = append(files, a.d[domain].Files()...)
+		files = append(files, at.d[domain].Files()...)
 	}
 	return files
 }
