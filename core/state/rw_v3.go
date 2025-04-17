@@ -585,7 +585,7 @@ func (r *ReaderV3) AddressHaveStorageKeys(address common.Address) (bool, error) 
 	var haveOneStorageKey bool
 	err := sd.IterateStoragePrefix(address.Bytes(), func(ask []byte, val []byte, step uint64) error {
 		haveOneStorageKey = true
-		return state.IterateStorageEarlyExit
+		return state.ErrIterateStorageEarlyExit
 	})
 	if err != nil {
 		return false, err
@@ -696,7 +696,7 @@ func (r *ReaderParallelV3) AddressHaveStorageKeys(address common.Address) (bool,
 			// lifecycle of `r.readList` is less than lifecycle of `r.rs` and `r.tx`, also `r.rs` and `r.tx` do store data immutable way
 			r.readLists[kv.StorageDomain.String()].Push(string(ask), common.Copy(val))
 		}
-		return state.IterateStorageEarlyExit
+		return state.ErrIterateStorageEarlyExit
 	})
 	if err != nil {
 		return false, err

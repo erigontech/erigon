@@ -654,8 +654,8 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter b
 	return
 }
 
-// This error must be returned by the iterator function to stop the iteration inside IterateStoragePrefix and exit without error
-var IterateStorageEarlyExit = errors.New("early exit")
+// ErrIterateStorageEarlyExit is used function to stop the iteration inside IterateStoragePrefix and exit without error
+var ErrIterateStorageEarlyExit = errors.New("iterate storage early exit")
 
 // IterateStoragePrefix iterates over key-value pairs of the storage domain that start with given prefix
 // Such iteration is not intended to be used in public API, therefore it uses read-write transaction

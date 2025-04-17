@@ -20,7 +20,10 @@ import (
 	"bytes"
 	"container/heap"
 	"encoding/binary"
+	"errors"
 	"fmt"
+
+	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -28,7 +31,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
-	btree2 "github.com/tidwall/btree"
 )
 
 type CursorType uint8
@@ -440,6 +442,9 @@ func (dt *DomainRoTx) debugIteratePrefix(prefix []byte, haveRamUpdates bool,
 		}
 		if len(lastVal) > 0 {
 			if err := it(lastKey, lastVal, lastStep); err != nil {
+				if errors.Is(err, ErrIterateStorageEarlyExit) {
+					return nil
+				}
 				return err
 			}
 		}
