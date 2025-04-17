@@ -30,6 +30,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/common/u256"
@@ -623,6 +624,12 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	return result, nil
 }
 
+var arbTrace bool
+
+func init() {
+	arbTrace = dbg.EnvBool("ARB_TRACE", false)
+}
+
 func (st *StateTransition) refundGas(refundQuotient uint64) {
 	// Arbitrum:
 	st.gasRemaining += st.evm.ProcessingHook.ForceRefundGas()
@@ -640,7 +647,9 @@ func (st *StateTransition) refundGas(refundQuotient uint64) {
 	remaining := uint256.NewInt(st.gasRemaining)
 	remaining = remaining.Mul(remaining, st.gasPrice)
 
-	fmt.Printf("[ST] refund remaining gas %d to %x\n", remaining, st.msg.From())
+	if arbTrace {
+		fmt.Printf("[ST] refund remaining gas %d to %x\n", remaining, st.msg.From())
+	}
 	st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)
 
 	// Arbitrum: record the gas refund

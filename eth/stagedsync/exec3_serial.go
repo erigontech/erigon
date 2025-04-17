@@ -6,8 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
-
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/consensus"
@@ -15,7 +14,14 @@ import (
 	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
+	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 )
+
+var arbTrace bool
+
+func init() {
+	arbTrace = dbg.EnvBool("ARB_TRACE", false)
+}
 
 type serialExecutor struct {
 	txExecutor
@@ -81,8 +87,9 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 				if err != nil {
 					return err
 				}
-				fmt.Printf("commitment hash %x header %x\n", rh, txTask.Header.Root)
-				fmt.Printf("txTask.Header.Root %x\n", txTask.Header.Root)
+				if arbTrace {
+					fmt.Printf("commitment hash %x txTask.Header.Root %x\n", rh, txTask.Header.Root)
+				}
 			}
 			if se.cfg.syncCfg.ChaosMonkey {
 				chaosErr := chaos_monkey.ThrowRandomConsensusError(se.execStage.CurrentSyncCycle.IsInitialCycle, txTask.TxIndex, se.cfg.badBlockHalt, txTask.Error)
@@ -135,7 +142,6 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			return false, err
 		}
 
-		fmt.Printf("%d: root hdr %x\n", txTask.BlockNum, txTask.Header.Root)
 		se.outputTxNum.Add(1)
 	}
 	return true, nil

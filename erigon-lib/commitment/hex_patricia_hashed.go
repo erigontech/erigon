@@ -50,6 +50,12 @@ import (
 	"golang.org/x/crypto/sha3"
 )
 
+var arbTrace bool
+
+func init() {
+	arbTrace = dbg.EnvBool("ARB_TRACE", false)
+}
+
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
 // Read to get a variable amount of data from the hash state. Read is faster than Sum
 // because it doesn't copy the internal state, but also modifies the internal state.
@@ -1826,7 +1832,9 @@ func (hph *HexPatriciaHashed) deleteCell(hashedKey []byte) {
 func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) (cell *cell) {
 	if u.Deleted() {
 		hph.deleteCell(hashedKey)
-		fmt.Printf("%x => %s\n", plainKey, u.String())
+		if hph.trace || arbTrace {
+			fmt.Printf("%x => %s\n", plainKey, u.String())
+		}
 		return nil
 	}
 
@@ -1870,9 +1878,9 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 	cell.stateHashLen = 0
 
 	cell.setFromUpdate(u)
-	// if hph.trace {
-	fmt.Printf("%x => %s\n", plainKey, u.String())
-	// }
+	if hph.trace || arbTrace {
+		fmt.Printf("%x => %s\n", plainKey, u.String())
+	}
 	return cell
 }
 
@@ -1999,7 +2007,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 	return witnessTrie, rootHash, nil
 }
 
-var POIACC = common.FromHex("8ef5cf2cc3b5010e8f5815d8dca2a3643ad295f4")
+//var POIACC = common.FromHex("8ef5cf2cc3b5010e8f5815d8dca2a3643ad295f4")
 
 func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error) {
 	var (

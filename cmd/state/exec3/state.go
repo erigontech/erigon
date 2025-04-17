@@ -49,8 +49,11 @@ import (
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
+var arbTrace bool
+
 func init() {
 	gethhook.RequireHookedGeth()
+	arbTrace = dbg.EnvBool("ARB_TRACE", false)
 }
 
 var noop = state.NewNoopWriter()
@@ -221,14 +224,14 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 
 	rw.ibs.Reset()
 	ibs := rw.ibs
-	rw.ibs.SetTrace(true)
-
-	fmt.Printf("---- txnIdx %d block %d\n", txTask.TxIndex, txTask.BlockNum)
+	rw.ibs.SetTrace(arbTrace)
 
 	rules := txTask.Rules
 	var err error
 	header := txTask.Header
-	//fmt.Printf("txNum=%d blockNum=%d history=%t\n", txTask.TxNum, txTask.BlockNum, txTask.HistoryExecution)
+	if arbTrace {
+		fmt.Printf("txNum=%d blockNum=%d history=%t\n", txTask.TxNum, txTask.BlockNum, txTask.HistoryExecution)
+	}
 
 	switch {
 	case txTask.TxIndex == -1:
@@ -278,7 +281,9 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 			break
 		}
 
-		//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
+		if arbTrace {
+			fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
+		}
 		// End of block transaction in a block
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 			return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */)
@@ -329,17 +334,20 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 			ibs.SoftFinalise()
 			//txTask.Error = ibs.FinalizeTx(rules, noop)
 			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)
-			fmt.Printf("logs len %d\n", len(txTask.Logs))
 			txTask.TraceFroms = rw.callTracer.Froms()
 			txTask.TraceTos = rw.callTracer.Tos()
 		}
 	}
-	fmt.Printf("---- txnIdx %d block %d DONE------\n", txTask.TxIndex, txTask.BlockNum)
+	if arbTrace {
+		fmt.Printf("---- txnIdx %d block %d DONE------\n", txTask.TxIndex, txTask.BlockNum)
+	}
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
 	if txTask.Error == nil {
 		txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
-		for addr, bal := range txTask.BalanceIncreaseSet {
-			fmt.Printf("BalanceIncreaseSet [%x]=>[%d]\n", addr, &(bal.Amount))
+		if arbTrace {
+			for addr, bal := range txTask.BalanceIncreaseSet {
+				fmt.Printf("BalanceIncreaseSet [%x]=>[%d]\n", addr, &(bal.Amount))
+			}
 		}
 		if err = ibs.MakeWriteSet(rules, rw.stateWriter); err != nil {
 			panic(err)
