@@ -376,7 +376,8 @@ func TestRemoveOverlaps(t *testing.T) {
 	require.NoError(err)
 	require.Equal(60, len(list))
 
-	fmt.Printf("%+v\n", list[0])
+	os.Remove(filepath.Join(s.Dir(), list[15].Name()))
+	fmt.Printf("[dbg] alex: %s\n", a)
 	s.RemoveOverlaps()
 
 	list, err = snaptype.Segments(s.Dir())
