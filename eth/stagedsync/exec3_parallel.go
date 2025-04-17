@@ -358,7 +358,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 			defer tx.Rollback()
 			temporalTx, ok := tx.(kv.TemporalTx)
 			if ok {
-				err = fmt.Errorf("cast error: temporal tx %v", temporalTx)
+				return fmt.Errorf("cast error: temporal tx %v", temporalTx)
 			}
 			pe.doms.SetTx(temporalTx)
 

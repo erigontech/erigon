@@ -150,7 +150,7 @@ func (fv *ForkValidator) FlushExtendingFork(tx kv.RwTx, accumulator *shards.Accu
 	if fv.sharedDom != nil {
 		temporalTx, ok := tx.(kv.TemporalTx)
 		if !ok {
-			return fmt.Errorf("FlushExtendingFork: tx is not a temporal tx")
+			return errors.New("FlushExtendingFork: tx is not a temporal tx")
 		}
 		fv.sharedDom.SetTx(temporalTx)
 		if err := fv.sharedDom.Flush(fv.ctx, tx); err != nil {

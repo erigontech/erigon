@@ -632,7 +632,7 @@ func CalculateStateRoot(tx kv.RwTx) (*libcommon.Hash, error) {
 	defer libcommon.ReturnHasherToPool(h)
 	temporalTx, ok := tx.(kv.TemporalTx)
 	if !ok {
-		return nil, fmt.Errorf("tx is not a temporal transaction")
+		return nil, errors.New("tx is not a temporal transaction")
 	}
 	domains, err := libstate.NewSharedDomains(temporalTx, log.New())
 	if err != nil {
