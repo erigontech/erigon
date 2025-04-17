@@ -284,7 +284,19 @@ func computeBlocksToPrune(blockReader blockReader, p prune.Mode) (blocksToPrune 
 
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs, headerchain, blobs, caplinState bool, prune prune.Mode, caplin CaplinMode, agg *state.Aggregator, tx kv.RwTx, blockReader blockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient, stagesIdsList []string) error {
+func WaitForDownloader(
+	ctx context.Context,
+	logPrefix string,
+	dirs datadir.Dirs,
+	headerchain, blobs, caplinState bool,
+	prune prune.Mode,
+	caplin CaplinMode,
+	agg *state.Aggregator,
+	tx kv.RwTx,
+	blockReader blockReader,
+	cc *chain.Config,
+	snapshotDownloader proto_downloader.DownloaderClient,
+) error {
 	snapshots := blockReader.Snapshots()
 	borSnapshots := blockReader.BorSnapshots()
 

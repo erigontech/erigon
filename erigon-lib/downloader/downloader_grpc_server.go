@@ -88,13 +88,16 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 
 		if it.TorrentHash == nil {
 			// if we don't have the torrent hash then we seed a new snapshot
+			// TODO: Make the torrent in place then call addTorrent.
 			if err := s.d.AddNewSeedableFile(ctx, it.Path); err != nil {
 				return nil, err
 			}
 			continue
+		} else {
+			// TODO: Try to fetch the torrent file from provider if we don't have it here.
 		}
 
-		if err := s.d.AddMagnetLink(ctx, Proto2InfoHash(it.TorrentHash), it.Path); err != nil {
+		if err := s.d.addTorrent(ctx, Proto2InfoHash(it.TorrentHash), it.Path); err != nil {
 			return nil, err
 		}
 	}

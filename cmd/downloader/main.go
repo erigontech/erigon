@@ -25,6 +25,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -245,12 +246,27 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 			return err
 		}
 	}
-	cfg, err := downloadercfg.New(ctx, dirs, version, torrentLogLevel, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots, staticPeers, webseedsList, chain, true, dbWritemap)
+	cfg, err := downloadercfg.New(
+		ctx,
+		dirs,
+		version,
+		torrentLogLevel,
+		downloadRate,
+		uploadRate,
+		torrentPort,
+		torrentConnsPerFile,
+		torrentDownloadSlots,
+		staticPeers,
+		webseedsList,
+		chain,
+		true,
+		dbWritemap,
+	)
 	if err != nil {
 		return err
 	}
 
-	cfg.ClientConfig.PieceHashersPerTorrent = dbg.EnvInt("DL_HASHERS", 32)
+	cfg.ClientConfig.PieceHashersPerTorrent = dbg.EnvInt("DL_HASHERS", runtime.NumCPU())
 	cfg.ClientConfig.DisableIPv6 = disableIPV6
 	cfg.ClientConfig.DisableIPv4 = disableIPV4
 
@@ -262,7 +278,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 
 	cfg.AddTorrentsFromDisk = true // always true unless using uploader - which wants control of torrent files
 
-	d, err := downloader.New(ctx, cfg, logger, log.LvlInfo, seedbox)
+	d, err := downloader.New(ctx, cfg, logger, log.LvlInfo)
 	if err != nil {
 		return err
 	}
