@@ -14,8 +14,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build integration
-
 package shutter_test
 
 import (
@@ -60,6 +58,10 @@ import (
 )
 
 func TestShutterBlockBuilding(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 

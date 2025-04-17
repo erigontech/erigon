@@ -1,4 +1,18 @@
-//go:build integration
+// Copyright 2023 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package bor
 
@@ -20,9 +34,8 @@ import (
 	"github.com/erigontech/erigon-lib/common/fdlimit"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth"
@@ -55,6 +68,10 @@ var (
 // Example : CGO_CFLAGS="-D__BLST_PORTABLE__" go test -run ^TestMiningBenchmark$ github.com/erigontech/erigon/tests/bor -v -count=1
 // In TestMiningBenchmark, we will test the mining performance. We will initialize a single node devnet and fire 5000 txs. We will measure the time it takes to include all the txs. This can be made more advcanced by increasing blockLimit and txsInTxpool.
 func TestMiningBenchmark(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	//usually 15sec is enough
 	ctx, clean := context.WithTimeout(context.Background(), time.Minute)
 	defer clean()
@@ -84,7 +101,7 @@ func TestMiningBenchmark(t *testing.T) {
 			panic(err)
 		}
 
-		var nodeInfo *remote.NodesInfoReply
+		var nodeInfo *remoteproto.NodesInfoReply
 
 		for nodeInfo == nil || len(nodeInfo.NodesInfo) == 0 {
 			nodeInfo, err = ethBackend.NodesInfo(1)
@@ -124,14 +141,14 @@ func TestMiningBenchmark(t *testing.T) {
 		if err != nil {
 			panic(err)
 		}
-		_, err = ethbackends[0].TxpoolServer().Add(ctx, &txpool.AddRequest{RlpTxs: [][]byte{buf.Bytes()}})
+		_, err = ethbackends[0].TxpoolServer().Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{buf.Bytes()}})
 		if err != nil {
 			panic(err)
 		}
 	}
 
 	for {
-		pendingReply, err := ethbackends[0].TxpoolServer().Status(ctx, &txpool_proto.StatusRequest{})
+		pendingReply, err := ethbackends[0].TxpoolServer().Status(ctx, &txpoolproto.StatusRequest{})
 		if err != nil {
 			panic(err)
 		}
@@ -149,14 +166,14 @@ func TestMiningBenchmark(t *testing.T) {
 }
 
 // newRandomTxWithNonce creates a new transaction with the given nonce.
-func newRandomTxWithNonce(creation bool, nonce uint64, txPool txpool_proto.TxpoolServer) (tx *types.Transaction, err error) {
+func newRandomTxWithNonce(creation bool, nonce uint64, txPool txpoolproto.TxpoolServer) (tx *types.Transaction, err error) {
 	var txn types.Transaction
 
 	gasPrice := uint256.NewInt(100 * params.InitialBaseFee)
 
 	if creation {
-		var nonceReply *txpool_proto.NonceReply
-		nonceReply, err = txPool.Nonce(context.Background(), &txpool_proto.NonceRequest{Address: gointerfaces.ConvertAddressToH160(addr1)})
+		var nonceReply *txpoolproto.NonceReply
+		nonceReply, err = txPool.Nonce(context.Background(), &txpoolproto.NonceRequest{Address: gointerfaces.ConvertAddressToH160(addr1)})
 		if err != nil {
 			return nil, err
 		}
