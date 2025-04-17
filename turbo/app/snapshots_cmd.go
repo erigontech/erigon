@@ -343,6 +343,29 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 			}),
 		},
+		{
+			Name:  "history",
+			Usage: "Manages history snapshots",
+			Subcommands: []*cli.Command{
+				{
+					Name:   "dedup",
+					Action: historyDedup,
+					Usage:  "Dedup a .v frozen history file",
+					Flags: joinFlags([]cli.Flag{
+						&utils.DataDirFlag,
+						&utils.VFileFlag,
+					}),
+				},
+				{
+					Name:   "dedup_all",
+					Action: historyDedupAll,
+					Usage:  "Dedup all .v frozen history files (accounts and storage domains only)",
+					Flags: joinFlags([]cli.Flag{
+						&utils.DataDirFlag,
+					}),
+				},
+			},
+		},
 	},
 }
 

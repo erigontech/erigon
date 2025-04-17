@@ -1142,6 +1142,11 @@ var (
 		Name:  "experimental.commitment-history",
 		Usage: "Enables blazing fast eth_getProof for executed block",
 	}
+
+	VFileFlag = cli.StringFlag{
+		Name:  "vfile",
+		Usage: "Which .v file inside snapshots/history to dedup",
+	}
 )
 
 var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag, &DiagDisabledFlag, &DiagEndpointAddrFlag, &DiagEndpointPortFlag, &DiagSpeedTestFlag}

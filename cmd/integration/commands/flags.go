@@ -35,6 +35,7 @@ var (
 	reset, noCommit              bool
 	bucket                       string
 	datadirCli, toChaindata      string
+	vfile                        string
 	migration                    string
 	integrityFast, integritySlow bool
 	file                         string
