@@ -375,7 +375,6 @@ func TestRemoveOverlaps(t *testing.T) {
 
 	//corner case: small header.seg was removed, but .idx left as garbage
 	os.Remove(filepath.Join(s.Dir(), list[15].Name()))
-	//fmt.Printf("[dbg] alex: %s\n", a)
 
 	require.NoError(s.OpenSegments(coresnaptype.BlockSnapshotTypes, false))
 	require.NoError(s.RemoveOverlaps())
@@ -384,17 +383,17 @@ func TestRemoveOverlaps(t *testing.T) {
 	require.NoError(err)
 	require.Equal(15, len(list))
 
+	for i, info := range list {
+		if i%5 < 2 {
+			require.Equal(100_000, int(info.Len()), info.Name())
+		} else {
+			require.Equal(10_000, int(info.Len()), info.Name())
+		}
+	}
+
 	list, err = snaptype.IdxFiles(s.Dir())
 	require.NoError(err)
 	require.Equal(20, len(list))
-
-	for i, info := range list {
-		if i%5 < 2 {
-			require.Equal(100_000, int(info.Len()))
-		} else {
-			require.Equal(10_000, int(info.Len()))
-		}
-	}
 }
 
 func TestCanRetire(t *testing.T) {
