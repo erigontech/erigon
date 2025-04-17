@@ -1245,7 +1245,7 @@ func (s *RoSnapshots) RemoveOverlaps() error {
 			filesToRemove = append(filesToRemove, info.Path)
 		}
 
-		fmt.Printf("[dbg] alex: %s\n", filesToRemove)
+		fmt.Printf("[dbg] rm: %s\n", filesToRemove)
 		removeOldFiles(filesToRemove, s.dir)
 	}
 
