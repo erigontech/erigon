@@ -27,8 +27,8 @@ import (
 )
 
 var (
-	recordingDbSize       = metrics.GetOrCreateGauge("arb/validator/recordingdb/size") // note: only updating when adding state, not when removing - but should be good enough
-	recordingDbReferences = metrics.GetOrCreateGauge("arb/validator/recordingdb/references")
+	recordingDbSize       = metrics.GetOrCreateGauge("arb_validator_recordingdb_size") _/ note: only updating when adding state, not when removing - but should be good enough
+	recordingDbReferences = metrics.GetOrCreateGauge("arb_validator_recordingdb_references")
 )
 
 type RecordingKV struct {

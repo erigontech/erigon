@@ -32,10 +32,10 @@ import (
 )
 
 var (
-	liveStatesReferencedCounter        = metrics.GetOrCreateCounter("arb/apibackend/states/live/referenced")
-	liveStatesDereferencedCounter      = metrics.GetOrCreateCounter("arb/apibackend/states/live/dereferenced")
-	recreatedStatesReferencedCounter   = metrics.GetOrCreateCounter("arb/apibackend/states/recreated/referenced")
-	recreatedStatesDereferencedCounter = metrics.GetOrCreateCounter("arb/apibackend/states/recreated/dereferenced")
+	liveStatesReferencedCounter        = metrics.GetOrCreateCounter("arb_apibackend_states_live_referenced")
+	liveStatesDereferencedCounter      = metrics.GetOrCreateCounter("arb_apibackend_states_live_dereferenced")
+	recreatedStatesReferencedCounter   = metrics.GetOrCreateCounter("arb_apibackend_states_recreated_referenced")
+	recreatedStatesDereferencedCounter = metrics.GetOrCreateCounter("arb_apibackend_states_recreated_dereferenced")
 )
 
 type APIBackend struct {
