@@ -30,7 +30,7 @@ type TxProcessingHook interface {
 	PopContract()
 	ForceRefundGas() uint64
 
-	SetMessage(msg *types.Message)
+	SetMessage(msg *types.Message, ibs evmtypes.IntraBlockState)
 	NonrefundableGas() uint64
 	DropTip() bool
 	EndTxHook(totalGasUsed uint64, evmSuccess bool)
@@ -49,7 +49,7 @@ type DefaultTxProcessor struct {
 
 func (p DefaultTxProcessor) IsArbitrum() bool { return false }
 
-func (p DefaultTxProcessor) SetMessage(*types.Message) {}
+func (p DefaultTxProcessor) SetMessage(*types.Message, evmtypes.IntraBlockState) {}
 
 func (p DefaultTxProcessor) StartTxHook() (bool, uint64, error, []byte) {
 	return false, 0, nil, nil

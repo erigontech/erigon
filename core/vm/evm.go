@@ -106,7 +106,8 @@ type EVM struct {
 	JumpDestCache *JumpDestCache
 
 	//Arbitrum processing hook
-	ProcessingHook TxProcessingHook
+	ProcessingHookSet atomic.Bool
+	ProcessingHook    TxProcessingHook
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
