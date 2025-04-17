@@ -80,7 +80,7 @@ func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {
 
 		return int(a.Version) - int(b.Version)
 	})
-
+	fmt.Printf("filter? %d, %d\n", len(in), len(out))
 	return out
 }
 func FilesWithExt(dir string, expectExt string) ([]FileInfo, error) {
