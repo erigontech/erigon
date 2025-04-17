@@ -27,7 +27,7 @@ import (
 )
 
 var (
-	recordingDbSize       = metrics.GetOrCreateGauge("arb_validator_recordingdb_size") _/ note: only updating when adding state, not when removing - but should be good enough
+	recordingDbSize       = metrics.GetOrCreateGauge("arb_validator_recordingdb_size") // note: only updating when adding state, not when removing - but should be good enough
 	recordingDbReferences = metrics.GetOrCreateGauge("arb_validator_recordingdb_references")
 )
 
