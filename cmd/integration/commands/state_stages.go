@@ -284,7 +284,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig params.MiningConfig, ctx 
 
 		stateStages.MockExecFunc(stages.Execution, execUntilFunc(execToBlock))
 		_ = stateStages.SetCurrentStage(stages.Execution)
-		if _, err := stateStages.Run(db, wrap.TxContainer{Tx: tx, Doms: sd}, false /* firstCycle */, false); err != nil {
+		if _, err := stateStages.Run(db, wrap.NewTxContainer(tx, sd), false /* firstCycle */, false); err != nil {
 			return err
 		}
 
@@ -336,7 +336,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig params.MiningConfig, ctx 
 			//})
 
 			_ = miningStages.SetCurrentStage(stages.MiningCreateBlock)
-			if _, err := miningStages.Run(db, wrap.TxContainer{Tx: tx, Doms: sd}, false /* firstCycle */, false); err != nil {
+			if _, err := miningStages.Run(db, wrap.NewTxContainer(tx, sd), false /* firstCycle */, false); err != nil {
 				return err
 			}
 			tx.Rollback()
@@ -444,7 +444,7 @@ func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log
 
 		_ = sync.SetCurrentStage(stages.Execution)
 		t := time.Now()
-		if _, err = sync.Run(db, wrap.TxContainer{Tx: tx}, initialCycle, false); err != nil {
+		if _, err = sync.Run(db, wrap.NewTxContainer(tx, nil), initialCycle, false); err != nil {
 			return err
 		}
 		logger.Info("[Integration] ", "loop time", time.Since(t))

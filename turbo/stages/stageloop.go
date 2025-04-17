@@ -103,7 +103,7 @@ func StageLoop(
 		hook.LastNewBlockSeen(hd.Progress())
 		t := time.Now()
 		// Estimate the current top height seen from the peer
-		err := StageLoopIteration(ctx, db, wrap.TxContainer{}, sync, initialCycle, false, logger, blockReader, hook)
+		err := StageLoopIteration(ctx, db, wrap.NewTxContainer(nil, nil), sync, initialCycle, false, logger, blockReader, hook)
 
 		if err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
@@ -152,7 +152,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.F
 			}
 		}
 
-		more, err := sync.Run(db, wrap.TxContainer{}, initialCycle, firstCycle)
+		more, err := sync.Run(db, wrap.NewTxContainer(nil, nil), initialCycle, firstCycle)
 		if err != nil {
 			return err
 		}
@@ -521,7 +521,7 @@ func MiningStep(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, tmpDir
 	mb := membatchwithdb.NewMemoryBatch(tx, tmpDir, logger)
 	defer mb.Close()
 
-	txc := wrap.TxContainer{Tx: mb}
+	txc := wrap.NewTxContainer(mb, nil)
 	sd, err := state.NewSharedDomains(mb, logger)
 	if err != nil {
 		return err

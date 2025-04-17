@@ -383,7 +383,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			return
 		}
 		// Run the unwind
-		if err := e.executionPipeline.RunUnwind(e.db, wrap.TxContainer{Tx: tx}); err != nil {
+		if err := e.executionPipeline.RunUnwind(e.db, wrap.NewTxContainer(tx, nil)); err != nil {
 			err = fmt.Errorf("updateForkChoice: %w", err)
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			return
@@ -484,7 +484,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	// Run the forkchoice
 	initialCycle := limitedBigJump
 	firstCycle := false
-	if _, err := e.executionPipeline.Run(e.db, wrap.TxContainer{Tx: tx}, initialCycle, firstCycle); err != nil {
+	if _, err := e.executionPipeline.Run(e.db, wrap.NewTxContainer(tx, nil), initialCycle, firstCycle); err != nil {
 		err = fmt.Errorf("updateForkChoice: %w", err)
 		e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
 		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)

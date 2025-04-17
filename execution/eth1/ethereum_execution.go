@@ -221,7 +221,7 @@ func (e *EthereumExecutionModule) unwindToCommonCanonical(tx kv.RwTx, header *ty
 	if err := e.executionPipeline.UnwindTo(currentHeader.Number.Uint64(), stagedsync.ExecUnwind, tx); err != nil {
 		return err
 	}
-	if err := e.executionPipeline.RunUnwind(nil, wrap.TxContainer{Tx: tx}); err != nil {
+	if err := e.executionPipeline.RunUnwind(nil, wrap.NewTxContainer(tx, nil)); err != nil {
 		return err
 	}
 	return nil

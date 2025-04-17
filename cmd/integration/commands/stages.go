@@ -1079,7 +1079,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		}
 		defer tx.Rollback()
 	}
-	txc := wrap.TxContainer{Tx: tx}
+	txc := wrap.NewTxContainer(tx, nil)
 
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber, true, false)
