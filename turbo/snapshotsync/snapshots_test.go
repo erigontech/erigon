@@ -18,6 +18,7 @@ package snapshotsync
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -371,6 +372,11 @@ func TestRemoveOverlaps(t *testing.T) {
 	require.NoError(err)
 	require.Equal(45, len(list))
 
+	list, err = snaptype.IdxFiles(s.Dir())
+	require.NoError(err)
+	require.Equal(60, len(list))
+
+	fmt.Printf("%+v\n", list[0])
 	s.RemoveOverlaps()
 
 	list, err = snaptype.Segments(s.Dir())
