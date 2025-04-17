@@ -1,7 +1,35 @@
 ChangeLog
 ---------
 
-## v3.0.1 (in development)
+## v3.0.3 (in development)
+
+### Milestone
+
+https://github.com/erigontech/erigon/milestone/42
+
+## v3.0.2
+
+### Milestone
+
+https://github.com/erigontech/erigon/milestone/41
+
+## v3.0.1 
+
+**Improvements:**
+
+- receipts gen: dedup parallel re-exec of same block by @AskAlexSharov in https://github.com/erigontech/erigon/pull/14377
+- Increase maximum open files limit on MacOSX by @AlexeyAkhunov in https://github.com/erigontech/erigon/pull/14427
+- engineeapi, txpool: Implement GetBlobsV1 (#13975) by @somnathb1 in https://github.com/erigontech/erigon/pull/14380
+- cmd: Set default EL extradata to erigon-version (#14419) by @somnathb1 in https://github.com/erigontech/erigon/pull/14435
+- Schedule Pectra hard fork for Ethereum Mainnet (#14424) by @somnathb1 in https://github.com/erigontech/erigon/pull/14436
+- engineapi: Add requests nil check (#14421) by @somnathb1 in https://github.com/erigontech/erigon/pull/14499
+
+**Bugfixes:**
+
+- Include execution requests in produced block (#14326) by @domiwei in https://github.com/erigontech/erigon/pull/14395
+- txpool: Fix 7702 signature parsing and simplify auth handling (#14486) by @somnathb1 in https://github.com/erigontech/erigon/pull/14495
+
+### Milestone
 
 https://github.com/erigontech/erigon/milestone/40
 
