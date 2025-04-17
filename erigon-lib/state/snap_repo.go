@@ -18,7 +18,7 @@ import (
 // ii) dirtyfile integration
 // iii) opening folder with dirty files
 // iv) snap creation/merge configuration
-// v) fileItemsWithMissingAccessors - missedBtreeAccessor/missedMapAccessor
+// v) fileItemsWithMissedAccessors - missedBtreeAccessor/missedMapAccessor
 
 // maybe accessor/btree build functions and data_file (.kv, .v, .seg) can also be supplied
 // here as interfaces, this would allow more functions currently in DHII+A to be included here.
@@ -134,7 +134,7 @@ func (f *SnapshotRepo) DirtyFilesWithNoBtreeAccessors() (l []*filesItem) {
 	ss := f.stepSize
 	v := ee.Version(1)
 
-	return fileItemsWithMissingAccessors(f.dirtyFiles, f.stepSize, func(fromStep uint64, toStep uint64) []string {
+	return fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep uint64, toStep uint64) []string {
 		from, to := RootNum(fromStep*ss), RootNum(toStep*ss)
 		fname := p.BtIdxFile(v, from, to)
 		return []string{fname, p.ExistenceFile(v, from, to)}
@@ -151,7 +151,7 @@ func (f *SnapshotRepo) DirtyFilesWithNoHashAccessors() (l []*filesItem) {
 	accCount := f.schema.AccessorIdxCount()
 	files := make([]string, accCount)
 
-	return fileItemsWithMissingAccessors(f.dirtyFiles, f.stepSize, func(fromStep uint64, toStep uint64) []string {
+	return fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep uint64, toStep uint64) []string {
 		for i := uint64(0); i < accCount; i++ {
 			files[i] = p.AccessorIdxFile(v, RootNum(fromStep*ss), RootNum(toStep*ss), i)
 		}
