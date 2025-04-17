@@ -106,6 +106,17 @@ func NoGaps[T SortedRange](in []T) (out []T, missingRanges []Range) {
 	return out, missingRanges
 }
 
+func filterType[T SortedRange](in []T, p snaptype.Type) (res []T) {
+	for i := 0; i < len(in); i++ {
+		f := in[i]
+		if f.GetType() != p {
+			continue
+		}
+		res = append(res, f)
+	}
+	return res
+}
+
 func findOverlaps[T SortedRange](in []T) (res []T, overlapped []T) {
 	for i := 0; i < len(in); i++ {
 		f := in[i]
@@ -1257,9 +1268,25 @@ func (s *RoSnapshots) RemoveOverlaps() error {
 		if err != nil {
 			return err
 		}
-		if _, toRemove := findOverlaps(list); len(toRemove) > 0 {
-			fmt.Printf("[dbg] RemoveOverlaps4: %d\n", len(toRemove))
+		var part1, part2 []snaptype.FileInfo
+		for _, l := range list {
+			if strings.Contains(l.Name(), "transactions-to-block") {
+				part2 = append(part2, l)
+				continue
+			}
+			part1 = append(part1, l)
+		}
 
+		if _, toRemove := findOverlaps(part1); len(toRemove) > 0 {
+			filesToRemove := make([]string, 0, len(toRemove))
+
+			for _, info := range toRemove {
+				filesToRemove = append(filesToRemove, info.Path)
+			}
+
+			removeOldFiles(filesToRemove, s.dir)
+		}
+		if _, toRemove := findOverlaps(part2); len(toRemove) > 0 {
 			filesToRemove := make([]string, 0, len(toRemove))
 
 			for _, info := range toRemove {
