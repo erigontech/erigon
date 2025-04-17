@@ -43,7 +43,7 @@ import (
 type CustomTraceCfg struct {
 	tmpdir   string
 	db       kv.TemporalRwDB
-	execArgs *exec3.ExecArgs
+	ExecArgs *exec3.ExecArgs
 }
 
 func StageCustomTraceCfg(db kv.TemporalRwDB, dirs datadir.Dirs, br services.FullBlockReader, cc *chain.Config, engine consensus.Engine, genesis *types.Genesis, syncCfg *ethconfig.Sync) CustomTraceCfg {
@@ -55,15 +55,17 @@ func StageCustomTraceCfg(db kv.TemporalRwDB, dirs datadir.Dirs, br services.Full
 		Engine:      engine,
 		Genesis:     genesis,
 		Workers:     syncCfg.ExecWorkerCount,
+
+		ProduceReceiptDomain: dbg.EnvBool("PRODUCE_RECEIPT_DOMAIN", true),
 	}
 	return CustomTraceCfg{
 		db:       db,
-		execArgs: execArgs,
+		ExecArgs: execArgs,
 	}
 }
 
 func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger) error {
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.execArgs.BlockReader))
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.ExecArgs.BlockReader))
 
 	var startBlock, endBlock uint64
 	stepSize := cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator).StepSize()
@@ -92,15 +94,44 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 	}); err != nil {
 		return err
 	}
-	defer cfg.execArgs.BlockReader.Snapshots().(*freezeblocks.RoSnapshots).EnableReadAhead().DisableReadAhead()
+	defer cfg.ExecArgs.BlockReader.Snapshots().(*freezeblocks.RoSnapshots).EnableReadAhead().DisableReadAhead()
 
 	log.Info("SpawnCustomTrace", "startBlock", startBlock, "endBlock", endBlock)
 
 	batchSize := uint64(100_000)
 	for ; startBlock < endBlock; startBlock += batchSize {
-		if err := customTraceBatchProduce(ctx, cfg.execArgs, cfg.db, startBlock, startBlock+batchSize, "custom_trace", logger); err != nil {
+		if err := customTraceBatchProduce(ctx, cfg.ExecArgs, cfg.db, startBlock, startBlock+batchSize, "custom_trace", logger); err != nil {
 			return err
 		}
+	}
+
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+	chkEvery := time.NewTicker(3 * time.Second)
+	defer chkEvery.Stop()
+
+Loop:
+	for {
+		select {
+		case <-cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator).WaitForBuildAndMerge(ctx):
+			break Loop
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-logEvery.C:
+			var m runtime.MemStats
+			dbg.ReadMemStats(&m)
+			//TODO: log progress and list of domains/files
+			logger.Info("[snapshots] Building files", "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+		}
+	}
+
+	if err := cfg.db.Update(ctx, func(tx kv.RwTx) error {
+		if _, err := tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 10*time.Hour); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	log.Info("SpawnCustomTrace finish")
@@ -173,7 +204,7 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.Tem
 	}
 
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		if _, err := tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 10*time.Hour); err != nil { // prune part of retired data, before commit
+		if _, err := tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 10*time.Hour); err != nil {
 			return err
 		}
 		return nil
@@ -184,6 +215,10 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.Tem
 }
 
 func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, fromBlock, toBlock uint64) (err error) {
+	if !dbg.AssertEnabled {
+		return nil
+	}
+
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
