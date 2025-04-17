@@ -109,7 +109,7 @@ type HasAgg interface {
 	Agg() any
 }
 
-func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
+func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
 
 	sd := &SharedDomains{
 		logger:  logger,
@@ -596,17 +596,13 @@ func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) 
 	panic(fmt.Errorf("unknown index %s", table))
 }
 
-func (sd *SharedDomains) SetTx(tx kv.Tx) {
+func (sd *SharedDomains) SetTx(tx kv.TemporalTx) {
 	if tx == nil {
 		panic("tx is nil")
 	}
 
-	if casted, ok := tx.(kv.TemporalTx); ok {
-		sd.roTtx = casted
-		sd.roDebugTtx = casted.Debug()
-	} else {
-		panic(fmt.Sprintf("%T is not TemporalTx", tx))
-	}
+	sd.roTtx = tx
+	sd.roDebugTtx = tx.Debug()
 
 	casted, ok := tx.(HasAggTx)
 	if !ok {
@@ -881,7 +877,7 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 	}
 	return nil
 }
-func (sd *SharedDomains) Tx() kv.Tx { return sd.roTtx }
+func (sd *SharedDomains) Tx() kv.TemporalTx { return sd.roTtx }
 
 type SharedDomainsCommitmentContext struct {
 	sharedDomains *SharedDomains

@@ -418,7 +418,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 				return true, k
 			}
 
-			rwTx, err := rwDb.BeginRw(ctx)
+			rwTx, err := rwDb.BeginTemporalRw(ctx)
 			if err != nil {
 				return nil, err
 			}

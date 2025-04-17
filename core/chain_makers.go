@@ -327,7 +327,11 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	defer tx.Rollback()
 	logger := log.New("generate-chain", config.ChainName)
 
-	domains, err := libstate.NewSharedDomains(tx, logger)
+	temporalTx, ok := tx.(kv.TemporalTx)
+	if !ok {
+		return nil, fmt.Errorf("db does not support temporal transactions")
+	}
+	domains, err := libstate.NewSharedDomains(temporalTx, logger)
 	if err != nil {
 		return nil, err
 	}
