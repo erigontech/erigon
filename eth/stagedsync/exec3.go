@@ -86,7 +86,7 @@ type Progress struct {
 	logger       log.Logger
 }
 
-func (p *Progress) Log(suffix string, rs *state.ParallelExecutionState, in *state.QueueWithRetry, rws *state.ResultsQueue, txCount uint64, gas uint64, inputBlockNum uint64, outputBlockNum uint64, outTxNum uint64, repeatCount uint64, idxStepsAmountInDB float64, shouldGenerateChangesets bool, inMemExec bool) {
+func (p *Progress) Log(suffix string, rs *state.ParallelExecutionState, in *state.QueueWithRetry, rws *state.ResultsQueue, txCount uint64, gas uint64, inputBlockNum uint64, outputBlockNum uint64, outTxNum uint64, repeatCount uint64, idxStepsAmountInDB float64, commitEveryBlock bool, inMemExec bool) {
 	mxExecStepsInDB.Set(idxStepsAmountInDB * 100)
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
@@ -102,7 +102,7 @@ func (p *Progress) Log(suffix string, rs *state.ParallelExecutionState, in *stat
 		suffix = " " + suffix
 	}
 
-	if shouldGenerateChangesets {
+	if commitEveryBlock {
 		suffix += " Commit every block"
 	}
 
@@ -411,7 +411,7 @@ func ExecV3(ctx context.Context,
 		}
 
 		defer func() {
-			progress.Log("Done", executor.readState(), nil, nil, se.txCount, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
+			progress.Log("Done", executor.readState(), nil, nil, se.txCount, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets || cfg.syncCfg.KeepExecutionProofs, inMemExec)
 		}()
 
 		executor = se
@@ -678,7 +678,7 @@ Loop:
 
 		mxExecBlocks.Add(1)
 
-		if shouldGenerateChangesets {
+		if shouldGenerateChangesets || cfg.syncCfg.KeepExecutionProofs {
 			aggTx := executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 			aggTx.RestrictSubsetFileDeletions(true)
 			start := time.Now()
@@ -694,13 +694,23 @@ Loop:
 
 			ts += time.Since(start)
 			aggTx.RestrictSubsetFileDeletions(false)
-			executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
-			if !inMemExec {
-				if err := state2.WriteDiffSet(executor.tx(), blockNum, b.Hash(), changeset); err != nil {
-					return err
+			if shouldGenerateChangesets {
+				executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
+				if !inMemExec {
+					if err := state2.WriteDiffSet(executor.tx(), blockNum, b.Hash(), changeset); err != nil {
+						return err
+					}
 				}
 			}
 			executor.domains().SetChangesetAccumulator(nil)
+
+			if cfg.syncCfg.PersistReceipts > 0 {
+				if len(txTasks) > 0 && txTasks[0].BlockReceipts != nil {
+					if err := rawdb.WriteReceiptsCache(executor.tx(), txTasks[0].BlockNum, txTasks[0].BlockHash, txTasks[0].BlockReceipts); err != nil {
+						return err
+					}
+				}
+			}
 		}
 
 		mxExecBlocks.Add(1)
@@ -754,6 +764,12 @@ Loop:
 				t1 = time.Since(tt) + ts
 
 				tt = time.Now()
+
+				// allow greedy prune on non-chain-tip
+				if err = applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).GreedyPruneCommitHistory(ctx, applyTx, nil); err != nil {
+					return err
+				}
+
 				if _, err := aggregatorRo.PruneSmallBatches(ctx, 10*time.Hour, executor.tx()); err != nil {
 					return err
 				}
@@ -942,9 +958,6 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	}
 	if !inMemExec {
 		if err := doms.Flush(ctx, applyTx); err != nil {
-			return false, err
-		}
-		if err = applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneCommitHistory(ctx, applyTx, nil); err != nil {
 			return false, err
 		}
 	}

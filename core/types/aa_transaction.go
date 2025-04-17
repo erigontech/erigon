@@ -14,7 +14,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/accounts/abi"
+	"github.com/erigontech/erigon/execution/abi"
 )
 
 const (

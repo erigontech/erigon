@@ -35,12 +35,12 @@ import (
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/trie"
-	"github.com/erigontech/erigon/accounts/abi/bind"
-	"github.com/erigontech/erigon/accounts/abi/bind/backends"
 	"github.com/erigontech/erigon/cmd/pics/contracts"
 	"github.com/erigontech/erigon/cmd/pics/visual"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/execution/abi/bind"
+	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -85,7 +85,7 @@ import (
 }*/
 
 var bucketLabels = map[string]string{
-	kv.Receipts:                 "Receipts",
+	kv.ReceiptsCache:            "Receipts",
 	kv.Headers:                  "Headers",
 	kv.HeaderCanonical:          "Canonical headers",
 	kv.HeaderTD:                 "Headers TD",

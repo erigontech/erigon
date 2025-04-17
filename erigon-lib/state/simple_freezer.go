@@ -8,7 +8,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 )
 
-// default freezer implementation for relational appendables (which have RootRelationI)
+// default freezer implementation for relational forkables (which have RootRelationI)
 // implements Freezer interface
 type SimpleRelationalFreezer struct {
 	rel     RootRelationI
