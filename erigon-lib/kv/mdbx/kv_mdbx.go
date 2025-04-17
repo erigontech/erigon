@@ -310,6 +310,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 	opts.pageSize = datasize.ByteSize(in.PageSize)
 	opts.mapSize = datasize.ByteSize(in.MapSize)
+	opts.log.Warn("[db] open", "label", opts.label, "sizeLimit", opts.mapSize, "pageSize", opts.pageSize, "stack", dbg.Stack())
 	if opts.label == kv.ChainDB {
 		opts.log.Info("[db] open", "label", opts.label, "sizeLimit", opts.mapSize, "pageSize", opts.pageSize)
 	} else {
