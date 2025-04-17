@@ -1396,6 +1396,14 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	if err := br.RetireBlocks(ctx, from, to, log.LvlInfo, nil, nil, nil); err != nil {
 		return err
 	}
+	if err := blockReader.Snapshots().RemoveOverlaps(); err != nil {
+		return err
+	}
+	if sn := blockReader.BorSnapshots(); sn != nil {
+		if err := sn.RemoveOverlaps(); err != nil {
+			return err
+		}
+	}
 
 	deletedBlocks := math.MaxInt // To pass the first iteration
 	allDeletedBlocks := 0

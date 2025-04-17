@@ -505,6 +505,7 @@ type BlockSnapshots interface {
 	SetSegmentsMin(uint64)
 
 	DownloadComplete()
+	RemoveOverlaps() error
 	DownloadReady() bool
 	Ready(context.Context) <-chan error
 }
