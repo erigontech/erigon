@@ -66,8 +66,8 @@ func (ac *aggDirtyFilesRoTx) Close() {
 	if ac.agg == nil {
 		return
 	}
-	// not doing closeAndRemove() because that needs dirtyFilesLock
-	// it canDelete is true, it'll get removed in the AggRoTx.Close() path.
+	// not doing closeAndRemove() because that needs dirtyFilesLock.
+	// if canDelete is true, it'll get removed in the AggRoTx.Close() path.
 	for _, d := range ac.domain {
 		d.Close()
 	}
