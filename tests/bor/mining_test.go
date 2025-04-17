@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/fdlimit"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -26,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/node"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/tests/bor/helper"
 )
 
