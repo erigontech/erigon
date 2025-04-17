@@ -465,21 +465,14 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 
 		bi, ok := sdb.balanceInc[addr]
 		if !ok {
-			bi = &BalanceIncrease{}
+			bi = &BalanceIncrease{
+				isEscrow: reason == tracing.BalanceIncreaseEscrow,
+			}
+			if sdb.trace {
+				fmt.Printf("ESCROW protected %x\n", addr)
+			}
 			sdb.balanceInc[addr] = bi
 		}
-		if reason == tracing.BalanceIncreaseEscrow {
-			bi.isEscrow = true // arbitrum only
-			sdb.balanceInc[addr] = bi
-			fmt.Printf("ESCROW protected %x\n", addr)
-		} else if bi.isEscrow == true {
-			bi.isEscrow = false // arbitrum only
-			fmt.Printf("ESCROW UNprotected %x\n", addr)
-			sdb.balanceInc[addr] = bi
-		}
-		// if bytes.Equal(addr.Bytes(), libcommon.FromHex("8ef5cf2cc3b5010e8f5815d8dca2a3643ad295f4")) {
-		// 	fmt.Printf("!!!!ESCROW protected %x\n", addr)
-		// }
 
 		if sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil {
 			// TODO: discuss if we should ignore error
