@@ -1393,7 +1393,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	if ok {
 		from, to = from2, to2
 	}
-
 	if err := br.RetireBlocks(ctx, from, to, log.LvlInfo, nil, nil, nil); err != nil {
 		return err
 	}
