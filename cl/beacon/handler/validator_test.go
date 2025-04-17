@@ -23,7 +23,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	mockaggregation "github.com/erigontech/erigon/cl/aggregation/mock_services"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
@@ -172,8 +171,8 @@ func (t *validatorTestSuite) TestGetEthV1ValidatorAggregateAttestation() {
 			expCode: http.StatusOK,
 			expBody: map[string]any{
 				"data": map[string]any{
-					"aggregation_bits": "0x" + common.Bytes2Hex([]byte{0b00111111, 0b00000011, 0, 0}),
-					"signature":        "0x" + common.Bytes2Hex([][96]byte{{0, 1, 2, 3, 4, 5}}[0][:]),
+					"aggregation_bits": "0x" + libcommon.Bytes2Hex([]byte{0b00111111, 0b00000011, 0, 0}),
+					"signature":        "0x" + libcommon.Bytes2Hex([][96]byte{{0, 1, 2, 3, 4, 5}}[0][:]),
 					"data": map[string]any{
 						"slot":              "1",
 						"index":             "1",

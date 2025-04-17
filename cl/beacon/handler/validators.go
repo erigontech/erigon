@@ -29,7 +29,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -287,7 +286,7 @@ func (a *ApiHandler) writeValidatorsResponse(
 	r *http.Request,
 	tx kv.Tx,
 	blockId *beaconhttp.SegmentID,
-	blockRoot common.Hash,
+	blockRoot libcommon.Hash,
 	validatorIds,
 	queryFilters []string,
 ) {
@@ -911,9 +910,9 @@ type validatorIdentityResponse struct {
 		"activation_epoch": "1"
 	}
 	*/
-	Index           uint64         `json:"index"`
-	Pubkey          common.Bytes48 `json:"pubkey"`
-	ActivationEpoch uint64         `json:"activation_epoch"`
+	Index           uint64            `json:"index"`
+	Pubkey          libcommon.Bytes48 `json:"pubkey"`
+	ActivationEpoch uint64            `json:"activation_epoch"`
 }
 
 func (v *validatorIdentityResponse) EncodeSSZ(buf []byte) ([]byte, error) {
