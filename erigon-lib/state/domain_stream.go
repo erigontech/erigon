@@ -390,7 +390,7 @@ func (dt *DomainRoTx) debugIteratePrefix(prefix []byte, haveRamUpdates bool,
 				}
 			case FILE_CURSOR:
 				indexList := dt.d.AccessorList
-				if indexList&AccessorBTree != 0 {
+				if indexList.Has(AccessorBTree) {
 					if ci1.btCursor.Next() {
 						ci1.key = ci1.btCursor.Key()
 						if ci1.key != nil && bytes.HasPrefix(ci1.key, prefix) {
@@ -401,7 +401,7 @@ func (dt *DomainRoTx) debugIteratePrefix(prefix []byte, haveRamUpdates bool,
 						ci1.btCursor.Close()
 					}
 				}
-				if indexList&AccessorHashMap != 0 {
+				if indexList.Has(AccessorHashMap) {
 					ci1.dg.Reset(ci1.latestOffset)
 					if !ci1.dg.HasNext() {
 						break
