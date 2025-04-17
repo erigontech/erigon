@@ -106,17 +106,6 @@ func NoGaps[T SortedRange](in []T) (out []T, missingRanges []Range) {
 	return out, missingRanges
 }
 
-func filterType[T SortedRange](in []T, p snaptype.Type) (res []T) {
-	for i := 0; i < len(in); i++ {
-		f := in[i]
-		if f.GetType() != p {
-			continue
-		}
-		res = append(res, f)
-	}
-	return res
-}
-
 func findOverlaps[T SortedRange](in []T) (res []T, overlapped []T) {
 	for i := 0; i < len(in); i++ {
 		f := in[i]
