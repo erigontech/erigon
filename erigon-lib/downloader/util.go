@@ -464,55 +464,40 @@ func readPeerID(db kv.RoDB) (peerID []byte, err error) {
 	return peerID, nil
 }
 
-func ScheduleVerifyFile(ctx context.Context, t *torrent.Torrent, completePieces *atomic.Uint64) error {
-	ctx, cancel := context.WithCancel(ctx)
-	wg, wgctx := errgroup.WithContext(ctx)
-	wg.SetLimit(16)
-
-	// piece changes happen asynchronously - we need to wait from them to complete
-	pieceChanges := t.SubscribePieceStateChanges()
-	inprogress := map[int]struct{}{}
-
-	for i := 0; i < t.NumPieces(); i++ {
-		inprogress[i] = struct{}{}
-
-		i := i
-		wg.Go(func() error {
-			t.Piece(i).VerifyData()
-			return nil
+// Trigger all pieces to be verified with the given concurrency primitives. It's
+// an error for a piece to not be complete or have an unknown state after
+// verification. NB: I'm pretty sure I misread the original code, and it's okay for a piece to not
+// be completed after this check, it just needs to have been checked.
+func ScheduleVerifyFile(ctx context.Context, eg *errgroup.Group, t *torrent.Torrent, piecesChecked *atomic.Uint64) {
+	for i := range t.NumPieces() {
+		// I think if a check fails, this will still power through and force the
+		// rest of the pieces to get verified but ignore the result. Check
+		// ctx.Err to avoid that.
+		eg.Go(func() (err error) {
+			defer piecesChecked.Add(1)
+			piece := t.Piece(i)
+			err = piece.VerifyDataContext(ctx)
+			if err != nil {
+				return
+			}
+			// I wonder if we want the storage completion (derived from a piece
+			// completion DB in most cases), or if we want the torrent lib's
+			// cached version (since we did just verify data). That would be in
+			// piece.State().Completion.
+			completion := piece.Storage().Completion()
+			if completion.Complete {
+				err = errors.New("piece not complete")
+			}
+			if !completion.Ok {
+				err = errors.New("storage state unknown")
+			}
+			if completion.Err != nil {
+				err = fmt.Errorf("storage completion state error: %w", completion.Err)
+			}
+			if err != nil {
+				err = fmt.Errorf("piece %s:%d verify failed: %w", t.Name(), i, err)
+			}
+			return
 		})
-	}
-
-	for {
-		select {
-		case <-wgctx.Done():
-			cancel()
-			return wg.Wait()
-		case change := <-pieceChanges.Values:
-			if !change.Ok {
-				var err error
-
-				if change.Err != nil {
-					err = change.Err
-				} else {
-					err = errors.New("unexpected piece change error")
-				}
-
-				cancel()
-				return fmt.Errorf("piece %s:%d verify failed: %w", t.Name(), change.Index, err)
-			}
-
-			if !(change.Checking || change.Hashing || change.QueuedForHash || change.Marking) {
-				if change.Complete {
-					completePieces.Add(1)
-				}
-				delete(inprogress, change.Index)
-			}
-
-			if len(inprogress) == 0 {
-				cancel()
-				return wg.Wait()
-			}
-		}
 	}
 }

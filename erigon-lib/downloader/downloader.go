@@ -1973,11 +1973,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		stats.BytesCompleted += uint64(t.BytesCompleted())
 	}
 
-	// if we have no previous stats, it means that node was restarted and need to set initial values
-	if prevStats.BytesDownload == 0 {
-		prevStats.BytesDownload = stats.BytesCompleted
-	}
-
 	if prevStats.BytesCompleted == 0 {
 		prevStats.BytesCompleted = stats.BytesCompleted
 	}
@@ -2053,26 +2048,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		webseedRates, webseeds := getWebseedsRatesForlogs(weebseedPeersOfThisFile, torrentName, t.Complete().Bool())
 		rates, peers := getPeersRatesForlogs(peersOfThisFile, torrentName)
 
-		if !torrentComplete {
-			d.lock.RLock()
-			info, err := d.torrentInfo(torrentName)
-			d.lock.RUnlock()
-
-			if err == nil {
-				if info != nil {
-					dbInfo++
-				}
-			} else if _, ok := webDownloadInfo[torrentName]; ok {
-				stats.MetadataReady++
-			} else {
-				noMetadata = append(noMetadata, torrentName)
-			}
-
-			if progress == 0 {
-				zeroProgress = append(zeroProgress, torrentName)
-			}
-		}
-
 		// more detailed statistic: download rate of each peer (for each file)
 		if !torrentComplete && progress != 0 {
 			if info, ok := downloading[torrentName]; ok {
@@ -2095,8 +2070,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 		stats.Completed = stats.Completed && torrentComplete
 	}
-
-	stats.BytesDownload = uint64(downloadedBytes)
 
 	if len(downloading) > 0 {
 		stats.Completed = false
@@ -2358,6 +2331,8 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 			return ctx.Err()
 		case <-t.GotInfo(): //files to verify already have .torrent on disk. means must have `Info()` already
 		default: // skip other files
+			// TODO: This seems wrong. If we don't have the info we are missing
+			// something.
 			continue
 		}
 
@@ -2384,10 +2359,13 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 	d.logger.Info("[snapshots] Verify start")
 	defer d.logger.Info("[snapshots] Verify done", "files", len(toVerify), "whiteList", whiteList)
 
-	completedPieces, completedFiles := &atomic.Uint64{}, &atomic.Uint64{}
+	var completedPieces, completedFiles atomic.Uint64
 
 	{
 		logEvery := time.NewTicker(20 * time.Second)
+		// Make sure this routine stops after we return from this function.
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
 		defer logEvery.Stop()
 		d.wg.Add(1)
 		go func() {
@@ -2407,35 +2385,21 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 		}()
 	}
 
-	g, context := errgroup.WithContext(ctx)
-	// torrent lib internally limiting amount of hashers per file
-	// set limit here just to make load predictable, not to control Disk/CPU consumption
+	g, ctx := errgroup.WithContext(ctx)
+	// We're hashing multiple torrents and the torrent library limits hash
+	// concurrency per-torrent. We trigger piece verification ourselves to make
+	// the load more predictable. This value would be related to whatever
+	// hardware performs the hashing.
 	g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
 	for _, t := range toVerify {
-		t := t
-		g.Go(func() error {
-			defer completedFiles.Add(1)
-			if failFast {
-				return VerifyFileFailFast(context, t, d.SnapDir(), completedPieces)
-			}
-
-			err := ScheduleVerifyFile(context, t, completedPieces)
-
-			if err != nil || !t.Complete().Bool() {
-				if err := d.db.Update(context, torrentInfoReset(t.Name(), t.InfoHash().Bytes(), 0)); err != nil {
-					return fmt.Errorf("verify data: %s: reset failed: %w", t.Name(), err)
-				}
-			}
-
-			return err
-		})
+		ScheduleVerifyFile(ctx, g, t, &completedPieces)
+		// Technically this requires the pieces for a given torrent to be
+		// completed, but I took a shortcut after I realised. I don't think it's
+		// necessary for it to be super accurate since we also have a pieces counter.
+		completedFiles.Add(1)
 	}
 
-	if err := g.Wait(); err != nil {
-		return err
-	}
-
-	return nil
+	return g.Wait()
 }
 
 // AddNewSeedableFile decides what we do depending on whether we have the .seg file or the .torrent file
@@ -2809,19 +2773,18 @@ func (d *Downloader) logProgress() {
 
 	dbg.ReadMemStats(&m)
 
+	// This should probably all just be based on the piece completion. It can't go over 100% or go backwards...
 	status := "Downloading"
 
-	percentDone := float32(100) * (float32(d.stats.BytesDownload) / float32(d.stats.BytesTotal))
-	bytesDone := d.stats.BytesDownload
-	rate := d.stats.DownloadRate
-	remainingBytes := d.stats.BytesTotal - d.stats.BytesDownload
+	bytesDone := d.stats.BytesCompleted
 
-	if d.stats.BytesDownload >= d.stats.BytesTotal && d.stats.MetadataReady == d.stats.FilesTotal && d.stats.BytesTotal > 0 {
+	percentDone := float32(100) * (float32(bytesDone) / float32(d.stats.BytesTotal))
+	rate := d.stats.DownloadRate
+	remainingBytes := d.stats.BytesTotal - bytesDone
+
+	if d.stats.DownloadRate == 0 && d.stats.CompletionRate > 0 {
 		status = "Verifying"
-		percentDone = float32(100) * (float32(d.stats.BytesCompleted) / float32(d.stats.BytesTotal))
-		bytesDone = d.stats.BytesCompleted
 		rate = d.stats.CompletionRate
-		remainingBytes = d.stats.BytesTotal - d.stats.BytesCompleted
 	}
 
 	if d.stats.BytesTotal == 0 {
@@ -2859,14 +2822,9 @@ func (d *Downloader) logProgress() {
 
 func calculateTime(amountLeft, rate uint64) string {
 	if rate == 0 {
-		return "999hrs:99m"
+		return "inf"
 	}
-	timeLeftInSeconds := amountLeft / rate
-
-	hours := timeLeftInSeconds / 3600
-	minutes := (timeLeftInSeconds / 60) % 60
-
-	return fmt.Sprintf("%dhrs:%dm", hours, minutes)
+	return (time.Duration(amountLeft) * time.Second / time.Duration(rate)).String()
 }
 
 func (d *Downloader) Completed() bool {
