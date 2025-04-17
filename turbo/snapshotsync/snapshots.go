@@ -1236,11 +1236,10 @@ func (s *RoSnapshots) closeWhatNotInList(l []string) {
 }
 
 func (s *RoSnapshots) RemoveOverlaps() error {
-	list, err := snaptype.Segments(s.dir)
+	list, err := snaptype.FilesWithExt(s.dir, ".seg")
 	if err != nil {
 		return err
 	}
-
 	if _, toRemove := findOverlaps(list); len(toRemove) > 0 {
 		fmt.Printf("[dbg] RemoveOverlaps3: %d", len(toRemove))
 
@@ -1253,6 +1252,24 @@ func (s *RoSnapshots) RemoveOverlaps() error {
 		removeOldFiles(filesToRemove, s.dir)
 	}
 
+	{
+		list, err := snaptype.FilesWithExt(s.dir, ".idx")
+		if err != nil {
+			return err
+		}
+
+		if _, toRemove := findOverlaps(list); len(toRemove) > 0 {
+			fmt.Printf("[dbg] RemoveOverlaps4: %d", len(toRemove))
+
+			filesToRemove := make([]string, 0, len(toRemove))
+
+			for _, info := range toRemove {
+				filesToRemove = append(filesToRemove, info.Path)
+			}
+
+			removeOldFiles(filesToRemove, s.dir)
+		}
+	}
 	fmt.Printf("[dbg] RemoveOverlaps4")
 	return nil
 }
