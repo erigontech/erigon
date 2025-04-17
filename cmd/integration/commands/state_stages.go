@@ -172,7 +172,11 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig params.MiningConfig, ctx 
 	}
 	defer tx.Rollback()
 
-	sd, err := stateLib.NewSharedDomains(tx, logger1)
+	temporalTx, ok := tx.(kv.TemporalTx)
+	if !ok {
+		return errors.New("db doesn't support temporal tx")
+	}
+	sd, err := stateLib.NewSharedDomains(temporalTx, logger1)
 	if err != nil {
 		return err
 	}

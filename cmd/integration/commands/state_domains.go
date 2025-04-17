@@ -492,7 +492,11 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	stateTx, err := stateDb.BeginRw(ctx)
 	must(err)
 	defer stateTx.Rollback()
-	domains, err := state3.NewSharedDomains(stateTx, logger)
+	temporalTx, ok := stateTx.(kv.TemporalTx)
+	if !ok {
+		return fmt.Errorf("stateDb transaction is not a temporal transaction")
+	}
+	domains, err := state3.NewSharedDomains(temporalTx, logger)
 	if err != nil {
 		return err
 	}
