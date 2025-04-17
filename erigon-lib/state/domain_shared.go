@@ -79,9 +79,8 @@ type SharedDomains struct {
 	sdCtx *SharedDomainsCommitmentContext
 
 	// next fields are filed by `.SetTx` - they are all point to same `tx` - just reducing amount of interface castings at runtime
-	aggTx      *AggregatorRoTx
-	roTtx      kv.TemporalTx
-	roDebugTtx kv.TemporalDebugTx
+	aggTx *AggregatorRoTx
+	roTtx kv.TemporalTx
 
 	logger log.Logger
 
@@ -359,7 +358,7 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error)
 		// sd cache values as is (without transformation) so safe to return
 		return v, prevStep, nil
 	}
-	v, step, found, err := sd.roDebugTtx.GetLatestFromDB(kv.CommitmentDomain, prefix)
+	v, step, found, err := sd.roTtx.Debug().GetLatestFromDB(kv.CommitmentDomain, prefix)
 	if err != nil {
 		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
 	}
@@ -370,7 +369,7 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error)
 
 	// getLatestFromFiles doesn't provide same semantics as getLatestFromDB - it returns start/end tx
 	// of file where the value is stored (not exact step when kv has been set)
-	v, _, startTx, endTx, err := sd.roDebugTtx.GetLatestFromFiles(kv.CommitmentDomain, prefix, 0)
+	v, _, startTx, endTx, err := sd.roTtx.Debug().GetLatestFromFiles(kv.CommitmentDomain, prefix, 0)
 	if err != nil {
 		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
 	}
@@ -602,7 +601,6 @@ func (sd *SharedDomains) SetTx(tx kv.TemporalTx) {
 	}
 
 	sd.roTtx = tx
-	sd.roDebugTtx = tx.Debug()
 
 	casted, ok := tx.(HasAggTx)
 	if !ok {
@@ -760,7 +758,7 @@ func (sd *SharedDomains) getLatestFromFiles(domain kv.Domain, k, k2 []byte, ofMa
 		k = append(k, k2...)
 	}
 
-	v, ok, _, _, err := sd.roDebugTtx.GetLatestFromFiles(domain, k, ofMaxTxnum)
+	v, ok, _, _, err := sd.roTtx.Debug().GetLatestFromFiles(domain, k, ofMaxTxnum)
 	if err != nil {
 		return nil, 0, fmt.Errorf("domain '%s' %x txn=%d read error: %w", domain, k, ofMaxTxnum, err)
 	}
