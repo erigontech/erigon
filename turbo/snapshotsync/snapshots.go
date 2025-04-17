@@ -1237,10 +1237,8 @@ func (s *RoSnapshots) RemoveOverlaps() error {
 		return err
 	}
 
-	fmt.Printf("[dbg] RemoveOverlaps2: %+v", list)
-
 	if _, toRemove := findOverlaps(list); len(toRemove) > 0 {
-		fmt.Printf("[dbg] RemoveOverlaps3: %+v", toRemove)
+		fmt.Printf("[dbg] RemoveOverlaps3: %+v", len(toRemove))
 
 		filesToRemove := make([]string, 0, len(toRemove))
 
