@@ -91,6 +91,9 @@ type HexPatriciaHashed struct {
 
 	//temp buffers
 	accValBuf rlp.RlpEncodedBytes
+
+	//processing metrics
+	metrics *Metrics
 }
 
 func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext) *HexPatriciaHashed {
@@ -102,6 +105,7 @@ func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext) *HexPatriciaHa
 		auxBuffer:     bytes.NewBuffer(make([]byte, 8192)),
 		hadToLoadL:    make(map[uint64]skipStat),
 		accValBuf:     make(rlp.RlpEncodedBytes, 128),
+		metrics:       NewMetrics(),
 	}
 	hph.branchEncoder = NewBranchEncoder(1024)
 	return hph
@@ -742,6 +746,7 @@ func (hph *HexPatriciaHashed) computeCellHashWithStorage(cell *cell, depth int, 
 			}
 		} else {
 			if !cell.loaded.storage() {
+				hph.metrics.Storage(cell.storageAddr[:cell.storageAddrLen])
 				update, err := hph.ctx.Storage(cell.storageAddr[:cell.storageAddrLen])
 				if err != nil {
 					return nil, storageRootHashIsSet, nil, err
@@ -824,6 +829,7 @@ func (hph *HexPatriciaHashed) computeCellHashWithStorage(cell *cell, depth int, 
 				return res, storageRootHashIsSet, storageRootHash[:], nil
 			}
 			// storage root update or extension update could invalidate older stateHash, so we need to reload state
+			hph.metrics.Account(cell.accountAddr[:cell.accountAddrLen])
 			update, err := hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
 			if err != nil {
 				return nil, storageRootHashIsSet, storageRootHash[:], err
@@ -974,6 +980,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 				return append(append(buf[:0], byte(160)), cell.stateHash[:cell.stateHashLen]...), nil
 			}
 			// storage root update or extension update could invalidate older stateHash, so we need to reload state
+			hph.metrics.Account(cell.accountAddr[:cell.accountAddrLen])
 			update, err := hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
 			if err != nil {
 				return nil, err
@@ -1132,6 +1139,7 @@ func (hph *HexPatriciaHashed) createAccountNode(c *cell, row int, hashedKey []by
 	if err != nil {
 		return nil, err
 	}
+	hph.metrics.Account(c.accountAddr[:c.accountAddrLen])
 	accountUpdate, err := hph.ctx.Account(c.accountAddr[:c.accountAddrLen])
 	if err != nil {
 		return nil, err
@@ -1304,6 +1312,7 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[common.Hash
 // unfoldBranchNode returns true if unfolding has been done
 func (hph *HexPatriciaHashed) unfoldBranchNode(row, depth int, deleted bool) (bool, error) {
 	key := hexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
+	hph.metrics.Branch(hph.currentKey[:hph.currentKeyLen])
 	branchData, fileEndTxNum, err := hph.ctx.Branch(key)
 	if err != nil {
 		return false, err
@@ -1714,6 +1723,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 
 			if cell.stateHashLen == 0 { // load state if needed
 				if !cell.loaded.account() && cell.accountAddrLen > 0 {
+					hph.metrics.Account(cell.accountAddr[:cell.accountAddrLen])
 					upd, err := hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
 					if err != nil {
 						return fmt.Errorf("failed to get account: %w", err)
@@ -1724,6 +1734,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 					counters.accLoaded++
 				}
 				if !cell.loaded.storage() && cell.storageAddrLen > 0 {
+					hph.metrics.Storage(cell.storageAddr[:cell.storageAddrLen])
 					upd, err := hph.ctx.Storage(cell.storageAddr[:cell.storageAddrLen])
 					if err != nil {
 						return fmt.Errorf("failed to get storage: %w", err)
@@ -2020,7 +2031,17 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		start        = time.Now()
 		logEvery     = time.NewTicker(20 * time.Second)
 	)
-	defer logEvery.Stop()
+
+	hph.metrics = NewMetrics()
+	hph.branchEncoder.SetMetricsCollector(hph.metrics)
+	hph.metrics.updates.Store(updates.Size())
+
+	defer func() {
+		logEvery.Stop()
+		hph.metrics.TotalProcessingTimeInc(start)
+		writeMetricsToCSV(hph.metrics, metricsFile+"_process.csv")
+		writeMetricsToCSV(hph.metrics.Accounts, metricsFile+"_accounts.csv")
+	}()
 	//hph.trace = true
 
 	err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
@@ -2034,30 +2055,37 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		default:
 		}
 
+		hph.metrics.Updates(plainKey)
 		if hph.trace {
 			fmt.Printf("\n%d/%d) plainKey [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
 		}
 		// Keep folding until the currentKey is the prefix of the key we modify
 		for hph.needFolding(hashedKey) {
+			foldDone := hph.metrics.StartFolding(plainKey)
 			if err := hph.fold(); err != nil {
 				return fmt.Errorf("fold: %w", err)
 			}
+			foldDone()
 		}
 		// Now unfold until we step on an empty cell
 		for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
+			unfoldDone := hph.metrics.StartUnfolding(plainKey)
 			if err := hph.unfold(hashedKey, unfolding); err != nil {
 				return fmt.Errorf("unfold: %w", err)
 			}
+			unfoldDone()
 		}
 
 		if stateUpdate == nil {
 			// Update the cell
 			if len(plainKey) == hph.accountKeyLen {
+				hph.metrics.Account(plainKey)
 				update, err = hph.ctx.Account(plainKey)
 				if err != nil {
 					return fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
 				}
 			} else {
+				hph.metrics.Storage(plainKey)
 				update, err = hph.ctx.Storage(plainKey)
 				if err != nil {
 					return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
@@ -2083,9 +2111,11 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	// Folding everything up to the root
 	for hph.activeRows > 0 {
+		foldDone := hph.metrics.StartFolding(nil)
 		if err := hph.fold(); err != nil {
 			return nil, fmt.Errorf("final fold: %w", err)
 		}
+		foldDone()
 	}
 
 	rootHash, err = hph.RootHash()
@@ -2095,6 +2125,9 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	if hph.trace {
 		fmt.Printf("root hash %x updates %d\n", rootHash, updatesCount)
 	}
+
+	hph.metrics.CollectFileDepthStats(hph.hadToLoadL)
+
 	if dbg.KVReadLevelledMetrics {
 		log.Debug("commitment finished, counters updated (no reset)",
 			//"hadToLoad", common.PrettyCounter(hadToLoad.Load()), "skippedLoad", common.PrettyCounter(skippedLoad.Load()),

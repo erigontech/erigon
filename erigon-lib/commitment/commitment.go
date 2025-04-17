@@ -22,11 +22,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	ecrypto "github.com/erigontech/erigon-lib/crypto"
 	"math/bits"
 	"sort"
 	"strings"
 	"unsafe"
+
+	ecrypto "github.com/erigontech/erigon-lib/crypto"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -173,6 +174,7 @@ type BranchEncoder struct {
 	buf       *bytes.Buffer
 	bitmapBuf [binary.MaxVarintLen64]byte
 	merger    *BranchMerger
+	metrics   *Metrics
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -180,6 +182,10 @@ func NewBranchEncoder(sz uint64) *BranchEncoder {
 		buf:    bytes.NewBuffer(make([]byte, sz)),
 		merger: NewHexBranchMerger(sz / 2),
 	}
+}
+
+func (be *BranchEncoder) SetMetricsCollector(metrics *Metrics) {
+	be.metrics = metrics
 }
 
 func (be *BranchEncoder) CollectUpdate(
@@ -210,6 +216,9 @@ func (be *BranchEncoder) CollectUpdate(
 	}
 	//fmt.Printf("\ncollectBranchUpdate [%x] -> %s\n", prefix, BranchData(update).String())
 	// has to copy :(
+	if be.metrics != nil {
+		be.metrics.updateBranch.Add(1)
+	}
 	if err = ctx.PutBranch(common.Copy(prefix), common.Copy(update), prev, prevStep); err != nil {
 		return 0, err
 	}
