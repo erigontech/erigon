@@ -134,6 +134,17 @@ func (metrics *Metrics) CollectFileDepthStats(m map[uint64]skipStat) {
 	}
 }
 
+func (metrics *Metrics) Updates(plainKey []byte) {
+	if collectCommitmentMetrics {
+		if len(plainKey) == 20 {
+			metrics.addressKeys.Add(1)
+		} else {
+			metrics.storageKeys.Add(1)
+			metrics.Accounts.UpdatesStorageInc(plainKey)
+		}
+	}
+}
+
 func (metrics *Metrics) Account(plainKey []byte) {
 	if collectCommitmentMetrics {
 		metrics.loadAccount.Add(1)
@@ -206,7 +217,6 @@ func NewAccounts() *AccountMetrics {
 }
 
 type AccountStats struct {
-	AccountUpdates     uint64
 	StorageUpates      uint64
 	LoadBranch         uint64
 	LoadAccount        uint64
@@ -266,30 +276,8 @@ func (processAccount *AccountMetrics) Reset() {
 	processAccount.AccountStats = make(map[string]*AccountStats)
 }
 
-func (processAccount *AccountMetrics) Updates(plainKey []byte) {
-	if !collectCommitmentMetrics {
-		return
-	}
-	processAccount.UpdatesInc(plainKey)
-	processAccount.UpdatesStorageInc(plainKey)
-}
-
-func (processAccount *AccountMetrics) UpdatesInc(plainKey []byte) {
-	if collectCommitmentMetrics && plainKey != nil {
-		processAccount.m.Lock()
-		defer processAccount.m.Unlock()
-		account := hex.EncodeToString(plainKey[0:20])
-		if _, ok := processAccount.AccountStats[account]; !ok {
-			processAccount.AccountStats[account] = &AccountStats{}
-		}
-		if len(plainKey) == 20 {
-			processAccount.AccountStats[account].AccountUpdates++
-		}
-	}
-}
-
 func (processAccount *AccountMetrics) UpdatesStorageInc(plainKey []byte) {
-	if collectCommitmentMetrics && plainKey != nil {
+	if collectCommitmentMetrics && len(plainKey) > 20 {
 		processAccount.m.Lock()
 		defer processAccount.m.Unlock()
 		account := hex.EncodeToString(plainKey[0:20])
@@ -303,7 +291,7 @@ func (processAccount *AccountMetrics) UpdatesStorageInc(plainKey []byte) {
 }
 
 func (processAccount *AccountMetrics) LoadBranchInc(plainKey []byte) {
-	if collectCommitmentMetrics && plainKey != nil {
+	if collectCommitmentMetrics && len(plainKey) > 20 {
 		processAccount.m.Lock()
 		defer processAccount.m.Unlock()
 		account := hex.EncodeToString(plainKey[0:20])
@@ -315,7 +303,7 @@ func (processAccount *AccountMetrics) LoadBranchInc(plainKey []byte) {
 }
 
 func (processAccount *AccountMetrics) LoadAccountInc(plainKey []byte) {
-	if collectCommitmentMetrics && plainKey != nil {
+	if collectCommitmentMetrics && len(plainKey) > 20 {
 		processAccount.m.Lock()
 		defer processAccount.m.Unlock()
 		account := hex.EncodeToString(plainKey[0:20])
@@ -327,7 +315,7 @@ func (processAccount *AccountMetrics) LoadAccountInc(plainKey []byte) {
 }
 
 func (processAccount *AccountMetrics) LoadStorageInc(plainKey []byte) {
-	if collectCommitmentMetrics && plainKey != nil {
+	if collectCommitmentMetrics && len(plainKey) > 20 {
 		processAccount.m.Lock()
 		defer processAccount.m.Unlock()
 		account := hex.EncodeToString(plainKey[0:20])
@@ -339,7 +327,7 @@ func (processAccount *AccountMetrics) LoadStorageInc(plainKey []byte) {
 }
 
 func (processAccount *AccountMetrics) UnfoldsInc(plainKey []byte) {
-	if collectCommitmentMetrics && plainKey != nil {
+	if collectCommitmentMetrics && len(plainKey) > 20 {
 		processAccount.m.Lock()
 		defer processAccount.m.Unlock()
 		account := hex.EncodeToString(plainKey[0:20])
@@ -351,7 +339,7 @@ func (processAccount *AccountMetrics) UnfoldsInc(plainKey []byte) {
 }
 
 func (processAccount *AccountMetrics) FoldsInc(plainKey []byte) {
-	if collectCommitmentMetrics && plainKey != nil {
+	if collectCommitmentMetrics && len(plainKey) > 20 {
 		processAccount.m.Lock()
 		defer processAccount.m.Unlock()
 		account := hex.EncodeToString(plainKey[0:20])
@@ -363,7 +351,7 @@ func (processAccount *AccountMetrics) FoldsInc(plainKey []byte) {
 }
 
 func (processAccount *AccountMetrics) TotalUnfoldingTimeInc(plainKey []byte, t time.Time) {
-	if collectCommitmentMetrics && plainKey != nil {
+	if collectCommitmentMetrics && len(plainKey) > 20 {
 		processAccount.m.Lock()
 		defer processAccount.m.Unlock()
 		account := hex.EncodeToString(plainKey[0:20])
@@ -375,7 +363,7 @@ func (processAccount *AccountMetrics) TotalUnfoldingTimeInc(plainKey []byte, t t
 }
 
 func (processAccount *AccountMetrics) TotalFoldingTimeInc(plainKey []byte, t time.Time) {
-	if collectCommitmentMetrics && plainKey != nil {
+	if collectCommitmentMetrics && len(plainKey) > 20 {
 		processAccount.m.Lock()
 		defer processAccount.m.Unlock()
 		account := hex.EncodeToString(plainKey[0:20])

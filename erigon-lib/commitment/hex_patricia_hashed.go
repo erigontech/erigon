@@ -1871,13 +1871,11 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 		}
 	}
 	if len(plainKey) == hph.accountKeyLen {
-		hph.metrics.addressKeys.Add(1)
 		cell.accountAddrLen = len(plainKey)
 		copy(cell.accountAddr[:], plainKey)
 
 		copy(cell.CodeHash[:], EmptyCodeHash) // todo check
 	} else { // set storage key
-		hph.metrics.storageKeys.Add(1)
 		cell.storageAddrLen = len(plainKey)
 		copy(cell.storageAddr[:], plainKey)
 	}
@@ -2057,7 +2055,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		default:
 		}
 
-		hph.metrics.Accounts.Updates(plainKey)
+		hph.metrics.Updates(plainKey)
 		if hph.trace {
 			fmt.Printf("\n%d/%d) plainKey [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
 		}
