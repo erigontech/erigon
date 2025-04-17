@@ -110,7 +110,9 @@ func findOverlaps[T SortedRange](in []T) (res []T, overlapped []T) {
 	for i := 0; i < len(in); i++ {
 		f := in[i]
 		iFrom, iTo := f.GetRange()
-		fmt.Printf("[dbg] findOverlaps: %s, %d-%d", f.GetType().Name(), iFrom, iTo)
+		if f.GetType().Name() == "headers" {
+			fmt.Printf("[dbg] findOverlaps: %s, %d-%d", f.GetType().Name(), iFrom, iTo)
+		}
 
 		if iFrom == iTo {
 			overlapped = append(overlapped, f)
@@ -1240,7 +1242,7 @@ func (s *RoSnapshots) RemoveOverlaps() error {
 	}
 
 	if _, toRemove := findOverlaps(list); len(toRemove) > 0 {
-		fmt.Printf("[dbg] RemoveOverlaps3: %+v", len(toRemove))
+		fmt.Printf("[dbg] RemoveOverlaps3: %d", len(toRemove))
 
 		filesToRemove := make([]string, 0, len(toRemove))
 
@@ -1248,7 +1250,6 @@ func (s *RoSnapshots) RemoveOverlaps() error {
 			filesToRemove = append(filesToRemove, info.Path)
 		}
 
-		fmt.Printf("[dbg] rm: %s\n", filesToRemove)
 		removeOldFiles(filesToRemove, s.dir)
 	}
 
@@ -1575,6 +1576,7 @@ func sendDiagnostics(startIndexingTime time.Time, indexPercent map[string]int, a
 
 func removeOldFiles(toDel []string, snapDir string) {
 	for _, f := range toDel {
+		fmt.Printf("[dbg] rm: %s\n", f)
 		_ = os.Remove(f)
 		_ = os.Remove(f + ".torrent")
 		ext := filepath.Ext(f)
