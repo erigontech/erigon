@@ -154,7 +154,7 @@ const DefaultGrowthStep = 1 * datasize.GB
 func New(label kv.Label, log log.Logger) MdbxOpts {
 	opts := MdbxOpts{
 		bucketsCfg: WithChaindataTables,
-		flags:      mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable,
+		flags:      mdbx.NoReadahead | mdbx.Durable,
 		log:        log,
 		pageSize:   kv.DefaultPageSize(),
 
