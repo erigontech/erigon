@@ -936,7 +936,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 
 			applyResult.txNum = txTask.Version().TxNum
 			if txResult.Receipt != nil {
-				applyResult.gasUsed = txResult.Receipt.GasUsed
+				applyResult.gasUsed += txResult.Receipt.GasUsed
+				be.gasUsed += txResult.Receipt.GasUsed
 			}
 			applyResult.blockTime = txTask.BlockTime()
 			applyResult.logs = append(applyResult.logs, txResult.Logs...)
@@ -944,7 +945,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 			maps.Copy(applyResult.traceTos, txResult.TraceTos)
 			be.cntFinalized++
 			be.finalizeTasks.markComplete(tx)
-			be.gasUsed += applyResult.gasUsed
 		}
 
 		if applyResult.txNum > 0 {
