@@ -44,13 +44,13 @@ import (
 )
 
 // DefaultPieceSize - Erigon serves many big files, bigger pieces will reduce
-// amount of network announcements, but can't go over 2Mb
+// amount of network announcements, but can't go over 2Mb. TODO: This is definitely not true.
 // see https://wiki.theory.org/BitTorrentSpecification#Metainfo_File_Structure
 const DefaultPieceSize = 2 * 1024 * 1024
 
 // DefaultNetworkChunkSize - how much data request per 1 network call to peer.
 // default: 16Kb
-const DefaultNetworkChunkSize = 8 * 1024 * 1024
+const DefaultNetworkChunkSize = 256 << 10 // 256 KiB
 
 type Cfg struct {
 	ClientConfig  *torrent.ClientConfig
@@ -61,7 +61,6 @@ type Cfg struct {
 	SnapshotConfig                  *snapcfg.Cfg
 	DownloadTorrentFilesFromWebseed bool
 	AddTorrentsFromDisk             bool
-	SnapshotLock                    bool
 	ChainName                       string
 
 	Dirs datadir.Dirs
@@ -110,7 +109,17 @@ func Default() *torrent.ClientConfig {
 	return torrentConfig
 }
 
-func New(ctx context.Context, dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile, downloadSlots int, staticPeers, webseeds []string, chainName string, lockSnapshots, mdbxWriteMap bool) (*Cfg, error) {
+func New(
+	ctx context.Context,
+	dirs datadir.Dirs,
+	version string,
+	verbosity lg.Level,
+	downloadRate, uploadRate datasize.ByteSize,
+	port, connsPerFile, downloadSlots int,
+	staticPeers, webseeds []string,
+	chainName string,
+	lockSnapshots, mdbxWriteMap bool,
+) (*Cfg, error) {
 	torrentConfig := Default()
 	//torrentConfig.PieceHashersPerTorrent = runtime.NumCPU()
 	torrentConfig.DataDir = dirs.Snap // `DataDir` of torrent-client-lib is different from Erigon's `DataDir`. Just same naming.
@@ -229,12 +238,17 @@ func New(ctx context.Context, dirs datadir.Dirs, version string, verbosity lg.Le
 		return nil, err
 	}
 
-	return &Cfg{Dirs: dirs, ChainName: chainName,
-		ClientConfig: torrentConfig, DownloadSlots: downloadSlots,
-		WebSeedUrls: webseedHttpProviders, WebSeedFileProviders: webseedFileProviders,
-		DownloadTorrentFilesFromWebseed: true, AddTorrentsFromDisk: true, SnapshotLock: lockSnapshots,
-		SnapshotConfig: preverifiedCfg,
-		MdbxWriteMap:   mdbxWriteMap,
+	return &Cfg{
+		Dirs:                            dirs,
+		ChainName:                       chainName,
+		ClientConfig:                    torrentConfig,
+		DownloadSlots:                   downloadSlots,
+		WebSeedUrls:                     webseedHttpProviders,
+		WebSeedFileProviders:            webseedFileProviders,
+		DownloadTorrentFilesFromWebseed: true,
+		AddTorrentsFromDisk:             true,
+		SnapshotConfig:                  preverifiedCfg,
+		MdbxWriteMap:                    mdbxWriteMap,
 	}, nil
 }
 
