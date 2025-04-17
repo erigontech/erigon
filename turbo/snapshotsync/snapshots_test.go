@@ -373,7 +373,7 @@ func TestRemoveOverlaps(t *testing.T) {
 	require.NoError(err)
 	require.Equal(60, len(list))
 
-	//corner case: small header.seg was removed, but .idx left as garbage
+	//corner case: small header.seg was removed, but header.idx left as garbage. such garbage must be cleaned.
 	os.Remove(filepath.Join(s.Dir(), list[15].Name()))
 
 	require.NoError(s.OpenSegments(coresnaptype.BlockSnapshotTypes, false))
