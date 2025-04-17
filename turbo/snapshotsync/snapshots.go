@@ -1251,25 +1251,8 @@ func (s *RoSnapshots) RemoveOverlaps() error {
 		if err != nil {
 			return err
 		}
-		var part1, part2 []snaptype.FileInfo
-		for _, l := range list {
-			if strings.Contains(l.Name(), "transactions-to-block") {
-				part2 = append(part2, l)
-				continue
-			}
-			part1 = append(part1, l)
-		}
 
-		if _, toRemove := findOverlaps(part1); len(toRemove) > 0 {
-			filesToRemove := make([]string, 0, len(toRemove))
-
-			for _, info := range toRemove {
-				filesToRemove = append(filesToRemove, info.Path)
-			}
-
-			removeOldFiles(filesToRemove, s.dir)
-		}
-		if _, toRemove := findOverlaps(part2); len(toRemove) > 0 {
+		if _, toRemove := findOverlaps(list); len(toRemove) > 0 {
 			filesToRemove := make([]string, 0, len(toRemove))
 
 			for _, info := range toRemove {
@@ -1601,7 +1584,6 @@ func sendDiagnostics(startIndexingTime time.Time, indexPercent map[string]int, a
 
 func removeOldFiles(toDel []string, snapDir string) {
 	for _, f := range toDel {
-		fmt.Printf("[dbg] rm: %s\n", f)
 		_ = os.Remove(f)
 		_ = os.Remove(f + ".torrent")
 		ext := filepath.Ext(f)
