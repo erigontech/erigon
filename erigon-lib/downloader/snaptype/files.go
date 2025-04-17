@@ -56,6 +56,7 @@ func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {
 		if f.Ext != expectExt { // filter out only compressed files
 			continue
 		}
+		fmt.Printf("filter: %s\n", f.name)
 		out = append(out, f)
 	}
 
@@ -80,7 +81,6 @@ func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {
 
 		return int(a.Version) - int(b.Version)
 	})
-	fmt.Printf("filter? %d, %d\n", len(in), len(out))
 	return out
 }
 func FilesWithExt(dir string, expectExt string) ([]FileInfo, error) {
