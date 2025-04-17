@@ -1246,21 +1246,20 @@ func (s *RoSnapshots) RemoveOverlaps() error {
 		removeOldFiles(filesToRemove, s.dir)
 	}
 
-	{
-		list, err := snaptype.FilesWithExt(s.dir, ".idx")
-		if err != nil {
-			return err
+	//it's possible that .seg was remove but .idx not (kill between deletes, etc...)
+	list, err = snaptype.FilesWithExt(s.dir, ".idx")
+	if err != nil {
+		return err
+	}
+
+	if _, toRemove := findOverlaps(list); len(toRemove) > 0 {
+		filesToRemove := make([]string, 0, len(toRemove))
+
+		for _, info := range toRemove {
+			filesToRemove = append(filesToRemove, info.Path)
 		}
 
-		if _, toRemove := findOverlaps(list); len(toRemove) > 0 {
-			filesToRemove := make([]string, 0, len(toRemove))
-
-			for _, info := range toRemove {
-				filesToRemove = append(filesToRemove, info.Path)
-			}
-
-			removeOldFiles(filesToRemove, s.dir)
-		}
+		removeOldFiles(filesToRemove, s.dir)
 	}
 	return nil
 }
