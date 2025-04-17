@@ -1233,7 +1233,7 @@ func (s *RoSnapshots) closeWhatNotInList(l []string) {
 }
 
 func (s *RoSnapshots) RemoveOverlaps() error {
-	list, err := snaptype.FilesWithExt(s.dir, ".seg")
+	list, err := snaptype.Segments(s.dir)
 	if err != nil {
 		return err
 	}
@@ -1248,7 +1248,7 @@ func (s *RoSnapshots) RemoveOverlaps() error {
 	}
 
 	//it's possible that .seg was remove but .idx not (kill between deletes, etc...)
-	list, err = snaptype.FilesWithExt(s.dir, ".idx")
+	list, err = snaptype.IdxFiles(s.dir)
 	if err != nil {
 		return err
 	}
