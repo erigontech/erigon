@@ -136,7 +136,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		}
 	}
 
-	var usedGas uint64
+	var gasUsed uint64
 	for txnIndex, txn := range txns {
 		isBorStateSyncTxn := borStateSyncTxn == txn
 		var txnHash common.Hash
@@ -183,8 +183,8 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 				return err
 			}
 
-			var _usedGas uint64
-			_usedGas, err = polygontracer.TraceBorStateSyncTxnDebugAPI(
+			var _gasUsed uint64
+			_gasUsed, err = polygontracer.TraceBorStateSyncTxnDebugAPI(
 				ctx,
 				chainConfig,
 				config,
@@ -198,11 +198,11 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 				stateSyncEvents,
 				txnIndex,
 			)
-			usedGas += _usedGas
+			gasUsed += _gasUsed
 		} else {
-			var _usedGas uint64
-			_usedGas, err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout)
-			usedGas += _usedGas
+			var _gasUsed uint64
+			_gasUsed, err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout)
+			gasUsed += _gasUsed
 		}
 		if err == nil {
 			err = ibs.FinalizeTx(rules, state.NewNoopWriter())
@@ -230,8 +230,8 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 			refunds = false
 		}
 
-		if refunds && block.GasUsed() != usedGas {
-			panic(fmt.Errorf("assert: block.GasUsed() %d != usedGas %d. blockNum=%d", block.GasUsed(), usedGas, blockNumber))
+		if refunds && block.GasUsed() != gasUsed {
+			panic(fmt.Errorf("assert: block.GasUsed() %d != gasUsed %d. blockNum=%d", block.GasUsed(), gasUsed, blockNumber))
 		}
 	}
 

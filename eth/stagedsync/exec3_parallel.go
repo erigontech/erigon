@@ -120,7 +120,7 @@ type txResult struct {
 	blockNum   uint64
 	blockTime  uint64
 	txNum      uint64
-	usedGas    uint64
+	gasUsed    uint64
 	logs       []*types.Log
 	traceFroms map[libcommon.Address]struct{}
 	traceTos   map[libcommon.Address]struct{}
@@ -222,7 +222,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 	result.Receipt = &types.Receipt{
 		Type:      txTask.TxType(),
 		PostState: nil,
-		GasUsed:   result.ExecutionResult.UsedGas,
+		GasUsed:   result.ExecutionResult.GasUsed,
 		TxHash:    txHash,
 		// Set the receipt logs and create the bloom filter.
 		Logs:             ibs.GetLogs(txTask.TxIndex, txHash, blockNum, blockHash),
@@ -232,9 +232,9 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 	}
 
 	if prevReceipt != nil {
-		result.Receipt.CumulativeGasUsed = prevReceipt.CumulativeGasUsed + result.ExecutionResult.UsedGas
+		result.Receipt.CumulativeGasUsed = prevReceipt.CumulativeGasUsed + result.ExecutionResult.GasUsed
 	} else {
-		result.Receipt.CumulativeGasUsed = result.ExecutionResult.UsedGas
+		result.Receipt.CumulativeGasUsed = result.ExecutionResult.GasUsed
 	}
 
 	if result.ExecutionResult.Failed() {
@@ -347,13 +347,13 @@ type blockExecMetrics struct {
 	BlockCount   atomic.Int64
 	LastBlockNum atomic.Int64
 	LastTxNum    atomic.Int64
-	UsedGas      blockCount
+	GasUsed      blockCount
 	Duration     blockDuration
 }
 
 func newBlockExecMetrics() *blockExecMetrics {
 	return &blockExecMetrics{
-		UsedGas:  blockCount{Ema: metrics.NewEma[uint64](0, 0.3)},
+		GasUsed:  blockCount{Ema: metrics.NewEma[uint64](0, 0.3)},
 		Duration: blockDuration{Ema: metrics.NewEma[time.Duration](0, 0.3)},
 	}
 }
@@ -683,7 +683,7 @@ type blockExecutor struct {
 	cntExec, cntSpecExec, cntSuccess, cntAbort, cntTotalValidations, cntValidationFail, cntFinalized int
 
 	// cummulative gas for this block
-	usedGas uint64
+	gasUsed uint64
 
 	execFailed, execAborted []int
 
@@ -934,7 +934,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 
 			applyResult.txNum = txTask.Version().TxNum
 			if txResult.Receipt != nil {
-				applyResult.usedGas = txResult.Receipt.GasUsed
+				applyResult.gasUsed = txResult.Receipt.GasUsed
 			}
 			applyResult.blockTime = txTask.BlockTime()
 			applyResult.logs = append(applyResult.logs, txResult.Logs...)
@@ -942,7 +942,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 			maps.Copy(applyResult.traceTos, txResult.TraceTos)
 			be.cntFinalized++
 			be.finalizeTasks.markComplete(tx)
-			be.usedGas += applyResult.usedGas
+			be.gasUsed += applyResult.gasUsed
 		}
 
 		if applyResult.txNum > 0 {
@@ -973,7 +973,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 			txTask.BlockHash(),
 			txTask.BlockRoot(),
 			nil,
-			be.usedGas,
+			be.gasUsed,
 			txTask.Version().TxNum,
 			true,
 			len(be.tasks) > 0 && be.tasks[0].Version().TxIndex != -1,
@@ -998,7 +998,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 		txTask.BlockHash(),
 		txTask.BlockRoot(),
 		nil,
-		be.usedGas,
+		be.gasUsed,
 		lastTxNum,
 		false,
 		len(be.tasks) > 0 && be.tasks[0].Version().TxIndex != -1,
@@ -1297,7 +1297,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					traceTos:   result.TraceTos,
 				}
 
-				pe.blockExecMetrics.UsedGas.Add(blockResult.GasUsed)
+				pe.blockExecMetrics.GasUsed.Add(blockResult.GasUsed)
 				if !blockExecutor.execStarted.IsZero() {
 					pe.blockExecMetrics.Duration.Add(time.Since(blockExecutor.execStarted))
 					pe.blockExecMetrics.BlockCount.Add(1)

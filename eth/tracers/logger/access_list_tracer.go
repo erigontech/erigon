@@ -244,9 +244,9 @@ func (a *AccessListTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint6
 
 func (*AccessListTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
 }
-func (*AccessListTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
+func (*AccessListTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
 }
-func (*AccessListTracer) CaptureExit(output []byte, usedGas uint64, err error) {
+func (*AccessListTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
 }
 
 // AccessList returns the current accesslist maintained by the tracer.

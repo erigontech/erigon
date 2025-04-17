@@ -94,7 +94,7 @@ func (l *JSONLogger) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, sco
 }
 
 // CaptureEnd is triggered at end of execution.
-func (l *JSONLogger) CaptureEnd(output []byte, usedGas uint64, err error) {
+func (l *JSONLogger) CaptureEnd(output []byte, gasUsed uint64, err error) {
 	type endLog struct {
 		Output  string              `json:"output"`
 		GasUsed math.HexOrDecimal64 `json:"gasUsed"`
@@ -104,8 +104,8 @@ func (l *JSONLogger) CaptureEnd(output []byte, usedGas uint64, err error) {
 	if err != nil {
 		errMsg = err.Error()
 	}
-	_ = l.encoder.Encode(endLog{libcommon.Bytes2Hex(output), math.HexOrDecimal64(usedGas), errMsg})
+	_ = l.encoder.Encode(endLog{libcommon.Bytes2Hex(output), math.HexOrDecimal64(gasUsed), errMsg})
 }
 
-func (l *JSONLogger) CaptureExit(output []byte, usedGas uint64, err error) {
+func (l *JSONLogger) CaptureExit(output []byte, gasUsed uint64, err error) {
 }

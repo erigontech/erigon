@@ -50,7 +50,7 @@ var noop = state.NewNoopWriter()
 
 type WorkerMetrics struct {
 	Active        activeCount
-	UsedGas       activeCount
+	GasUsed       activeCount
 	Duration      activeDuration
 	ReadDuration  activeDuration
 	WriteDuration activeDuration
@@ -59,7 +59,7 @@ type WorkerMetrics struct {
 func NewWorkerMetrics() *WorkerMetrics {
 	return &WorkerMetrics{
 		Active:        activeCount{Ema: metrics.NewEmaWithBeta[int64](0, 1, 0.2)},
-		UsedGas:       activeCount{Ema: metrics.NewEma[int64](0, 0.3)},
+		GasUsed:       activeCount{Ema: metrics.NewEma[int64](0, 0.3)},
 		Duration:      activeDuration{Ema: metrics.NewEma[time.Duration](0, 0.3)},
 		ReadDuration:  activeDuration{Ema: metrics.NewEma[time.Duration](0, 0.3)},
 		WriteDuration: activeDuration{Ema: metrics.NewEma[time.Duration](0, 0.3)},
@@ -276,7 +276,7 @@ func (rw *Worker) RunTxTask(txTask exec.Task) (result *exec.Result) {
 				rw.metrics.ReadDuration.Add(rw.ibs.StorageReadDuration())
 			}
 			if result != nil && result.ExecutionResult != nil {
-				rw.metrics.UsedGas.Add(int64(result.ExecutionResult.UsedGas))
+				rw.metrics.GasUsed.Add(int64(result.ExecutionResult.GasUsed))
 			}
 			rw.metrics.Active.Add(-1)
 		}()

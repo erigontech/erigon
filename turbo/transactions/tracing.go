@@ -108,7 +108,7 @@ func TraceTx(
 	chainConfig *chain.Config,
 	stream *jsoniter.Stream,
 	callTimeout time.Duration,
-) (usedGas uint64, err error) {
+) (gasUsed uint64, err error) {
 	tracer, streaming, cancel, err := AssembleTracer(ctx, config, txCtx.TxHash, blockHash, txnIndex, stream, callTimeout)
 	if err != nil {
 		stream.WriteNil()
@@ -123,12 +123,12 @@ func TraceTx(
 		if err != nil {
 			return res, err
 		}
-		usedGas = res.UsedGas
+		gasUsed = res.GasUsed
 		return res, nil
 	}
 
 	err = ExecuteTraceTx(blockCtx, txCtx, ibs, config, chainConfig, stream, tracer, streaming, execCb)
-	return usedGas, err
+	return gasUsed, err
 }
 
 func AssembleTracer(
@@ -219,7 +219,7 @@ func ExecuteTraceTx(
 		stream.WriteArrayEnd()
 		stream.WriteMore()
 		stream.WriteObjectField("gas")
-		stream.WriteUint64(result.UsedGas)
+		stream.WriteUint64(result.GasUsed)
 		stream.WriteMore()
 		stream.WriteObjectField("failed")
 		stream.WriteBool(result.Failed())

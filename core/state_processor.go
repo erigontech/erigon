@@ -35,7 +35,7 @@ import (
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
 func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *GasPool, ibs *state.IntraBlockState,
-	stateWriter state.StateWriter, header *types.Header, txn types.Transaction, usedGas, usedBlobGas *uint64,
+	stateWriter state.StateWriter, header *types.Header, txn types.Transaction, gasUsed, usedBlobGas *uint64,
 	evm *vm.EVM, cfg vm.Config) (*types.Receipt, []byte, error) {
 	rules := evm.ChainRules()
 	blockNum := header.Number.Uint64()
@@ -68,7 +68,7 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 	if err = ibs.FinalizeTx(rules, stateWriter); err != nil {
 		return nil, nil, err
 	}
-	*usedGas += result.UsedGas
+	*gasUsed += result.GasUsed
 	if usedBlobGas != nil {
 		*usedBlobGas += txn.GetBlobGas()
 	}
@@ -78,14 +78,14 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 	var receipt *types.Receipt
 	if !cfg.NoReceipts {
 		// by the txn
-		receipt = &types.Receipt{Type: txn.Type(), CumulativeGasUsed: *usedGas}
+		receipt = &types.Receipt{Type: txn.Type(), CumulativeGasUsed: *gasUsed}
 		if result.Failed() {
 			receipt.Status = types.ReceiptStatusFailed
 		} else {
 			receipt.Status = types.ReceiptStatusSuccessful
 		}
 		receipt.TxHash = txn.Hash()
-		receipt.GasUsed = result.UsedGas
+		receipt.GasUsed = result.GasUsed
 		// if the transaction created a contract, store the creation address in the receipt.
 		if msg.To() == nil {
 			receipt.ContractAddress = crypto.CreateAddress(evm.Origin, txn.GetNonce())
@@ -106,7 +106,7 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 // indicating the block was invalid.
 func ApplyTransaction(config *chain.Config, blockHashFunc func(n uint64) (libcommon.Hash, error), engine consensus.EngineReader,
 	author *libcommon.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter,
-	header *types.Header, txn types.Transaction, usedGas, usedBlobGas *uint64, cfg vm.Config,
+	header *types.Header, txn types.Transaction, gasUsed, usedBlobGas *uint64, cfg vm.Config,
 ) (*types.Receipt, []byte, error) {
 	// Create a new context to be used in the EVM environment
 
@@ -117,5 +117,5 @@ func ApplyTransaction(config *chain.Config, blockHashFunc func(n uint64) (libcom
 	blockContext := NewEVMBlockContext(header, blockHashFunc, engine, author, config)
 	vmenv := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, config, cfg)
 
-	return applyTransaction(config, engine, gp, ibs, stateWriter, header, txn, usedGas, usedBlobGas, vmenv, cfg)
+	return applyTransaction(config, engine, gp, ibs, stateWriter, header, txn, gasUsed, usedBlobGas, vmenv, cfg)
 }

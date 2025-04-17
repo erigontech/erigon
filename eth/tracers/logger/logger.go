@@ -226,7 +226,7 @@ func (l *StructLogger) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, s
 }
 
 // CaptureEnd is called after the call finishes to finalize the tracing.
-func (l *StructLogger) CaptureEnd(output []byte, usedGas uint64, err error) {
+func (l *StructLogger) CaptureEnd(output []byte, gasUsed uint64, err error) {
 	l.output = output
 	l.err = err
 	if l.cfg.Debug {
@@ -238,7 +238,7 @@ func (l *StructLogger) CaptureEnd(output []byte, usedGas uint64, err error) {
 }
 
 // CaptureExit is called after the internal call finishes to finalize the tracing.
-func (l *StructLogger) CaptureExit(output []byte, usedGas uint64, err error) {
+func (l *StructLogger) CaptureExit(output []byte, gasUsed uint64, err error) {
 }
 
 // StructLogs returns the captured log entries.
@@ -420,15 +420,15 @@ func (t *mdLogger) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope
 	fmt.Fprintf(t.out, "\nError: at pc=%d, op=%v: %v\n", pc, op, err)
 }
 
-func (t *mdLogger) captureEndOrExit(output []byte, usedGas uint64, err error) {
+func (t *mdLogger) captureEndOrExit(output []byte, gasUsed uint64, err error) {
 	fmt.Fprintf(t.out, "\nOutput: `0x%x`\nConsumed gas: `%d`\nError: `%v`\n",
-		output, usedGas, err)
+		output, gasUsed, err)
 }
 
-func (t *mdLogger) CaptureEnd(output []byte, usedGas uint64, err error) {
-	t.captureEndOrExit(output, usedGas, err)
+func (t *mdLogger) CaptureEnd(output []byte, gasUsed uint64, err error) {
+	t.captureEndOrExit(output, gasUsed, err)
 }
 
-func (t *mdLogger) CaptureExit(output []byte, usedGas uint64, err error) {
-	t.captureEndOrExit(output, usedGas, err)
+func (t *mdLogger) CaptureExit(output []byte, gasUsed uint64, err error) {
+	t.captureEndOrExit(output, gasUsed, err)
 }

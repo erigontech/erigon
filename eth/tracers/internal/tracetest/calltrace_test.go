@@ -201,8 +201,8 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			if err := json.Unmarshal(res, &topCall); err != nil {
 				t.Fatalf("failed to unmarshal top calls gasUsed: %v", err)
 			}
-			if uint64(topCall.GasUsed) != vmRet.UsedGas {
-				t.Fatalf("top call has invalid gasUsed. have: %d want: %d", topCall.GasUsed, vmRet.UsedGas)
+			if uint64(topCall.GasUsed) != vmRet.GasUsed {
+				t.Fatalf("top call has invalid gasUsed. have: %d want: %d", topCall.GasUsed, vmRet.GasUsed)
 			}
 		})
 	}

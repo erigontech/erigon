@@ -206,8 +206,8 @@ func (l *JsonStreamLogger) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint6
 }
 
 // CaptureEnd is called after the call finishes to finalize the tracing.
-func (l *JsonStreamLogger) CaptureEnd(output []byte, usedGas uint64, err error) {
+func (l *JsonStreamLogger) CaptureEnd(output []byte, gasUsed uint64, err error) {
 }
 
-func (l *JsonStreamLogger) CaptureExit(output []byte, usedGas uint64, err error) {
+func (l *JsonStreamLogger) CaptureExit(output []byte, gasUsed uint64, err error) {
 }

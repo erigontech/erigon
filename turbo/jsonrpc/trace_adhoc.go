@@ -401,7 +401,7 @@ func (ot *OeTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libco
 	ot.captureStartOrEnter(true /* deep */, typ, from, to, precompile, create, input, gas, value, code)
 }
 
-func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, usedGas uint64, err error) {
+func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed uint64, err error) {
 	if ot.r.VmTrace != nil {
 		if len(ot.vmOpStack) > 0 {
 			ot.lastOffStack = ot.vmOpStack[len(ot.vmOpStack)-1]
@@ -437,11 +437,11 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, usedGas uint64, e
 			switch topTrace.Type {
 			case CALL:
 				topTrace.Result.(*TraceResult).GasUsed = new(hexutil.Big)
-				topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(usedGas)
+				topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(gasUsed)
 				topTrace.Result.(*TraceResult).Output = libcommon.CopyBytes(output)
 			case CREATE:
 				topTrace.Result.(*CreateTraceResult).GasUsed = new(hexutil.Big)
-				topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(usedGas)
+				topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(gasUsed)
 				topTrace.Result.(*CreateTraceResult).Code = libcommon.CopyBytes(output)
 			}
 		} else {
@@ -460,10 +460,10 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, usedGas uint64, e
 		switch topTrace.Type {
 		case CALL:
 			topTrace.Result.(*TraceResult).GasUsed = new(hexutil.Big)
-			topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(usedGas)
+			topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(gasUsed)
 		case CREATE:
 			topTrace.Result.(*CreateTraceResult).GasUsed = new(hexutil.Big)
-			topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(usedGas)
+			topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(gasUsed)
 		}
 	}
 	ot.traceStack = ot.traceStack[:len(ot.traceStack)-1]
@@ -472,12 +472,12 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, usedGas uint64, e
 	}
 }
 
-func (ot *OeTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
-	ot.captureEndOrExit(false /* deep */, output, usedGas, err)
+func (ot *OeTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
+	ot.captureEndOrExit(false /* deep */, output, gasUsed, err)
 }
 
-func (ot *OeTracer) CaptureExit(output []byte, usedGas uint64, err error) {
-	ot.captureEndOrExit(true /* deep */, output, usedGas, err)
+func (ot *OeTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
+	ot.captureEndOrExit(true /* deep */, output, gasUsed, err)
 }
 
 func (ot *OeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, opDepth int, err error) {

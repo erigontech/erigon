@@ -87,7 +87,7 @@ func (bsstt *borStateSyncTxnTracer) CaptureStart(
 	bsstt.EVMLogger.CaptureEnter(vm.CALL, from, to, precompile, create, input, gas, value, code)
 }
 
-func (bsstt *borStateSyncTxnTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
+func (bsstt *borStateSyncTxnTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
 	if bsstt.stateSyncEventsCount == 0 {
 		// guard against unexpected use
 		panic("unexpected extra call to borStateSyncTxnTracer.CaptureEnd")
@@ -97,7 +97,7 @@ func (bsstt *borStateSyncTxnTracer) CaptureEnd(output []byte, usedGas uint64, er
 	bsstt.stateSyncEventsCount--
 
 	// trick tracer to think it is a CaptureExit
-	bsstt.EVMLogger.CaptureExit(output, usedGas, err)
+	bsstt.EVMLogger.CaptureExit(output, gasUsed, err)
 
 	if bsstt.stateSyncEventsCount == 0 {
 		// reached last event

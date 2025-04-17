@@ -120,7 +120,7 @@ func (r *Result) CreateReceipt(prev *types.Receipt) (*types.Receipt, error) {
 		}
 	}
 
-	cumulativeGasUsed += r.ExecutionResult.UsedGas
+	cumulativeGasUsed += r.ExecutionResult.GasUsed
 
 	r.Receipt = r.createReceipt(txIndex, cumulativeGasUsed)
 	r.Receipt.FirstLogIndexWithinBlock = firstLogIndex
@@ -134,7 +134,7 @@ func (r *Result) createReceipt(txIndex int, cumulativeGasUsed uint64) *types.Rec
 		BlockHash:         r.BlockHash(),
 		TransactionIndex:  uint(txIndex),
 		Type:              r.TxType(),
-		GasUsed:           r.ExecutionResult.UsedGas,
+		GasUsed:           r.ExecutionResult.GasUsed,
 		CumulativeGasUsed: cumulativeGasUsed,
 		TxHash:            r.TxHash(),
 		Logs:              r.Logs,
@@ -852,7 +852,7 @@ func (q *ResultsQueue) AddWaiter(lock bool) chan any {
 		q.Lock()
 		defer q.Unlock()
 	}
-	
+
 	if q.addWaiters == nil {
 		q.addWaiters = make(chan any)
 	}

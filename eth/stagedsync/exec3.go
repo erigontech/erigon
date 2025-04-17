@@ -131,7 +131,7 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 		suffix = " serial"
 	}
 
-	taskGas := te.taskExecMetrics.UsedGas.Total.Load()
+	taskGas := te.taskExecMetrics.GasUsed.Total.Load()
 	taskDur := time.Duration(te.taskExecMetrics.Duration.Load())
 	readDur := time.Duration(te.taskExecMetrics.ReadDuration.Load())
 	activations := te.taskExecMetrics.Active.Total.Load()
@@ -183,7 +183,7 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 		}
 
 		blockCount := te.blockExecMetrics.BlockCount.Load()
-		blockExecGas := te.blockExecMetrics.UsedGas.Load()
+		blockExecGas := te.blockExecMetrics.GasUsed.Load()
 		blockExecDur := time.Duration(te.blockExecMetrics.Duration.Load())
 
 		curBlockCount := blockCount - p.prevBlockCount
@@ -212,7 +212,7 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 			"workers", fmt.Sprintf("%d(%.1f)", ex.taskExecMetrics.Active.Ema.Get(), float64(curTaskDur)/float64(interval)),
 			"tdur", fmt.Sprintf("%dµs", avgTaskDur.Microseconds()),
 			"trdur", fmt.Sprintf("%dµs(%.2f%%)", avgReadDur.Microseconds(), readRatio),
-			"bdur", fmt.Sprintf("%dms(%d)", avgBlockDur.Milliseconds(), curBlockCount),
+			"bdur", fmt.Sprintf("%dms", avgBlockDur.Milliseconds()),
 			"rd", common.PrettyCounter(readCount - p.prevReadCount),
 			"wrt", common.PrettyCounter(writeCount - p.prevWriteCount),
 			"rd/s", common.PrettyCounter(uint64(float64(readCount-p.prevReadCount) / interval.Seconds())),
@@ -969,7 +969,7 @@ func ExecV3(ctx context.Context,
 				case applyResult := <-applyResults:
 					switch applyResult := applyResult.(type) {
 					case *txResult:
-						pe.executedGas += applyResult.usedGas
+						pe.executedGas += applyResult.gasUsed
 						pe.lastExecutedTxNum = applyResult.txNum
 
 						pe.rs.SetTxNum(applyResult.txNum, applyResult.blockNum)

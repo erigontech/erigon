@@ -120,7 +120,7 @@ func (t *TransactionTracer) CaptureEnter(typ vm.OpCode, from common.Address, to 
 	t.captureStartOrEnter(typ, from, to, precompile, input, value)
 }
 
-func (t *TransactionTracer) captureEndOrExit(output []byte, usedGas uint64, err error) {
+func (t *TransactionTracer) captureEndOrExit(output []byte, gasUsed uint64, err error) {
 	t.depth--
 
 	lastIdx := len(t.stack) - 1
@@ -132,10 +132,10 @@ func (t *TransactionTracer) captureEndOrExit(output []byte, usedGas uint64, err 
 	pop.Output = outputCopy
 }
 
-func (t *TransactionTracer) CaptureExit(output []byte, usedGas uint64, err error) {
-	t.captureEndOrExit(output, usedGas, err)
+func (t *TransactionTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
+	t.captureEndOrExit(output, gasUsed, err)
 }
 
-func (t *TransactionTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
-	t.captureEndOrExit(output, usedGas, err)
+func (t *TransactionTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
+	t.captureEndOrExit(output, gasUsed, err)
 }

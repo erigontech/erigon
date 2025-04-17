@@ -26,7 +26,7 @@ type serialExecutor struct {
 	txExecutor
 	// outputs
 	txCount         uint64
-	usedGas         uint64
+	gasUsed         uint64
 	blobGasUsed     uint64
 	lastBlockResult *blockResult
 	worker          *exec3.Worker
@@ -110,8 +110,8 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 			}
 
 			se.txCount++
-			se.usedGas += result.ExecutionResult.UsedGas
-			mxExecGas.Add(float64(result.ExecutionResult.UsedGas))
+			se.gasUsed += result.ExecutionResult.GasUsed
+			mxExecGas.Add(float64(result.ExecutionResult.GasUsed))
 			mxExecTransactions.Add(1)
 
 			if txTask.Tx() != nil {
@@ -147,7 +147,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 				}
 				checkReceipts := !se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber()) && !se.cfg.vmConfig.NoReceipts && !se.isMining
 				if txTask.BlockNumber() > 0 && startTxIndex == 0 { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-					if err := core.BlockPostValidation(se.usedGas, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, se.isMining); err != nil {
+					if err := core.BlockPostValidation(se.gasUsed, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, se.isMining); err != nil {
 						return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 					}
 				}
@@ -235,8 +235,8 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 		se.lastExecutedBlockNum = txTask.BlockNumber()
 
 		if task.IsBlockEnd() {
-			se.executedGas += se.usedGas
-			se.usedGas = 0
+			se.executedGas += se.gasUsed
+			se.gasUsed = 0
 			se.blobGasUsed = 0
 		}
 	}

@@ -38,10 +38,10 @@ type EVMLogger interface {
 	CaptureTxEnd(restGas uint64)
 	// Top call frame
 	CaptureStart(env *EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte)
-	CaptureEnd(output []byte, usedGas uint64, err error)
+	CaptureEnd(output []byte, gasUsed uint64, err error)
 	// Rest of the frames
 	CaptureEnter(typ OpCode, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte)
-	CaptureExit(output []byte, usedGas uint64, err error)
+	CaptureExit(output []byte, gasUsed uint64, err error)
 	// Opcode level
 	CaptureState(pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, rData []byte, depth int, err error)
 	CaptureFault(pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, depth int, err error)
