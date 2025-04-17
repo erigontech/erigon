@@ -818,8 +818,9 @@ type seedHash struct {
 func (d *Downloader) mainLoop(silent bool) error {
 	if d.webseedsDiscover {
 
-		// CornerCase: no peers -> no anoncments to trackers -> no magnetlink resolution (but magnetlink has filename)
-		// means we can start adding weebseeds without waiting for `<-t.GotInfo()`
+		// CornerCase: no peers -> no announcements to trackers -> no magnet
+		// link resolution (but magnet link has filename) means we can start
+		// adding WebSeeds without waiting for `<-t.GotInfo()`
 		d.wg.Add(1)
 		go func() {
 			defer d.wg.Done()
@@ -970,7 +971,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 				_, downloading := d.downloading[t.Name()]
 				d.lock.RUnlock()
 
-				if downloading && t.Complete.Bool() {
+				if downloading && t.Complete().Bool() {
 					select {
 					case <-d.ctx.Done():
 						return
@@ -1567,19 +1568,19 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloa
 			select {
 			case <-d.ctx.Done():
 				return
-			case <-t.Complete.On():
+			case <-t.Complete().On():
 				downloadTime := time.Since(downloadStarted)
-				downloaded := t.Stats().BytesCompleted
+				downloaded := t.BytesCompleted()
 
 				diagnostics.Send(diagnostics.FileDownloadedStatisticsUpdate{
 					FileName:    t.Name(),
 					TimeTook:    downloadTime.Seconds(),
-					AverageRate: uint64(float64(downloaded.Int64()) / downloadTime.Seconds()),
+					AverageRate: uint64(float64(downloaded) / downloadTime.Seconds()),
 				})
 
 				d.logger.Debug("[snapshots] Downloaded from BitTorrent", "file", t.Name(),
-					"download-time", downloadTime.Round(time.Second).String(), "downloaded", common.ByteCount(uint64(downloaded.Int64())),
-					"rate", fmt.Sprintf("%s/s", common.ByteCount(uint64(float64(downloaded.Int64())/downloadTime.Seconds()))))
+					"download-time", downloadTime.Round(time.Second).String(), "downloaded", common.ByteCount(uint64(downloaded)),
+					"rate", fmt.Sprintf("%s/s", common.ByteCount(uint64(float64(downloaded)/downloadTime.Seconds()))))
 				return
 			case <-time.After(10 * time.Second):
 				bytesRead := t.Stats().BytesReadData
@@ -1958,20 +1959,18 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 	d.lock.RUnlock()
 
-	//Call this methods outside of `lock` critical section, because they have own locks with contention
+	// Call these methods outside `lock` critical section, because they have own locks with contention.
 	torrents := torrentClient.Torrents()
-	connStats := torrentClient.ConnStats()
+	connStats := torrentClient.Stats()
 
 	stats.Completed = true
 	stats.BytesUpload = uint64(connStats.BytesWrittenData.Int64())
 	stats.BytesHashed = uint64(connStats.BytesHashed.Int64())
-	stats.BytesFlushed = uint64(connStats.BytesFlushed.Int64())
 	stats.BytesDownload = uint64(connStats.BytesReadData.Int64())
-	stats.BytesCompleted = uint64(connStats.BytesCompleted.Int64())
-
-	// if we have no previous stats, it means that node was restarted and need to set initial values
-	if prevStats.BytesDownload == 0 {
-		prevStats.BytesDownload = stats.BytesCompleted
+	stats.BytesCompleted = 0
+	// If this is an issue, might be better to do it as a torrent.Client method.
+	for _, t := range torrents {
+		stats.BytesCompleted += uint64(t.BytesCompleted())
 	}
 
 	if prevStats.BytesCompleted == 0 {
@@ -2010,7 +2009,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		}
 
 		torrentName := t.Name()
-		torrentComplete := t.Complete.Bool()
+		torrentComplete := t.Complete().Bool()
 		torrentInfo++
 		stats.MetadataReady++
 
@@ -2046,28 +2045,8 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			peers[peer.PeerID] = struct{}{}
 		}
 
-		webseedRates, webseeds := getWebseedsRatesForlogs(weebseedPeersOfThisFile, torrentName, t.Complete.Bool())
+		webseedRates, webseeds := getWebseedsRatesForlogs(weebseedPeersOfThisFile, torrentName, t.Complete().Bool())
 		rates, peers := getPeersRatesForlogs(peersOfThisFile, torrentName)
-
-		if !torrentComplete {
-			d.lock.RLock()
-			info, err := d.torrentInfo(torrentName)
-			d.lock.RUnlock()
-
-			if err == nil {
-				if info != nil {
-					dbInfo++
-				}
-			} else if _, ok := webDownloadInfo[torrentName]; ok {
-				stats.MetadataReady++
-			} else {
-				noMetadata = append(noMetadata, torrentName)
-			}
-
-			if progress == 0 {
-				zeroProgress = append(zeroProgress, torrentName)
-			}
-		}
 
 		// more detailed statistic: download rate of each peer (for each file)
 		if !torrentComplete && progress != 0 {
@@ -2091,8 +2070,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 		stats.Completed = stats.Completed && torrentComplete
 	}
-
-	stats.BytesDownload = uint64(downloadedBytes)
 
 	if len(downloading) > 0 {
 		stats.Completed = false
@@ -2282,6 +2259,14 @@ func getProgressStatus(torrentClient *torrent.Client, noDownloadProgress []strin
 	return writer.files
 }
 
+// Adds segment peer fields common to Peer instances.
+func setCommonPeerSegmentFields(peer *torrent.Peer, stats *torrent.PeerStats, segment *diagnostics.SegmentPeer) {
+	segment.DownloadRate = uint64(stats.DownloadRate)
+	segment.UploadRate = uint64(stats.LastWriteUploadRate)
+	segment.PiecesCount = uint64(stats.RemotePieceCount)
+	segment.RemoteAddr = peer.RemoteAddr.String()
+}
+
 func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer, fName string, finished bool) ([]interface{}, []diagnostics.SegmentPeer) {
 	seeds := make([]diagnostics.SegmentPeer, 0, len(weebseedPeersOfThisFile))
 	webseedRates := make([]interface{}, 0, len(weebseedPeersOfThisFile)*2)
@@ -2289,21 +2274,20 @@ func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer, fName stri
 	for _, peer := range weebseedPeersOfThisFile {
 		if peerUrl, err := webPeerUrl(peer); err == nil {
 			if shortUrl, err := url.JoinPath(peerUrl.Host, peerUrl.Path); err == nil {
-				rate := uint64(peer.DownloadRate())
-				upRate := uint64(peer.UploadRate())
+				stats := peer.Stats()
 				if !finished {
 					seed := diagnostics.SegmentPeer{
-						Url:          peerUrl.Host,
-						DownloadRate: rate,
-						UploadRate:   upRate,
-						RemoteAddr:   peer.RemoteAddr.String(),
-						PeerId:       [20]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-						PiecesCount:  0,
-						TorrentName:  fName,
+						Url:         peerUrl.Host,
+						TorrentName: fName,
 					}
+					setCommonPeerSegmentFields(peer, &stats, &seed)
 					seeds = append(seeds, seed)
 				}
-				webseedRates = append(webseedRates, strings.TrimSuffix(shortUrl, "/"), fmt.Sprintf("%s/s", common.ByteCount(rate)))
+				webseedRates = append(
+					webseedRates,
+					strings.TrimSuffix(shortUrl, "/"),
+					fmt.Sprintf("%s/s", common.ByteCount(uint64(stats.DownloadRate))),
+				)
 			}
 		}
 	}
@@ -2322,21 +2306,16 @@ func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]
 	rates = append(rates, "file", fName)
 
 	for _, peer := range peersOfThisFile {
-		dr := uint64(peer.DownloadRate())
-		ur := uint64(peer.UploadRate())
 		url := fmt.Sprintf("%v", peer.PeerClientName.Load())
-
+		stats := peer.Stats()
 		segPeer := diagnostics.SegmentPeer{
-			Url:          url,
-			DownloadRate: dr,
-			UploadRate:   ur,
-			PiecesCount:  peer.PeerPieces().GetCardinality(),
-			RemoteAddr:   peer.RemoteAddr.String(),
-			PeerId:       peer.PeerID,
-			TorrentName:  fName,
+			Url:         url,
+			PeerId:      peer.PeerID,
+			TorrentName: fName,
 		}
+		setCommonPeerSegmentFields(&peer.Peer, &stats, &segPeer)
 		peers = append(peers, segPeer)
-		rates = append(rates, url, fmt.Sprintf("%s/s", common.ByteCount(dr)))
+		rates = append(rates, url, fmt.Sprintf("%s/s", common.ByteCount(uint64(stats.DownloadRate))))
 	}
 
 	return rates, peers
@@ -2352,6 +2331,8 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 			return ctx.Err()
 		case <-t.GotInfo(): //files to verify already have .torrent on disk. means must have `Info()` already
 		default: // skip other files
+			// TODO: This seems wrong. If we don't have the info we are missing
+			// something.
 			continue
 		}
 
@@ -2378,10 +2359,13 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 	d.logger.Info("[snapshots] Verify start")
 	defer d.logger.Info("[snapshots] Verify done", "files", len(toVerify), "whiteList", whiteList)
 
-	completedPieces, completedFiles := &atomic.Uint64{}, &atomic.Uint64{}
+	var completedPieces, completedFiles atomic.Uint64
 
 	{
 		logEvery := time.NewTicker(20 * time.Second)
+		// Make sure this routine stops after we return from this function.
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
 		defer logEvery.Stop()
 		d.wg.Add(1)
 		go func() {
@@ -2401,35 +2385,21 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 		}()
 	}
 
-	g, context := errgroup.WithContext(ctx)
-	// torrent lib internally limiting amount of hashers per file
-	// set limit here just to make load predictable, not to control Disk/CPU consumption
+	g, ctx := errgroup.WithContext(ctx)
+	// We're hashing multiple torrents and the torrent library limits hash
+	// concurrency per-torrent. We trigger piece verification ourselves to make
+	// the load more predictable. This value would be related to whatever
+	// hardware performs the hashing.
 	g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
 	for _, t := range toVerify {
-		t := t
-		g.Go(func() error {
-			defer completedFiles.Add(1)
-			if failFast {
-				return VerifyFileFailFast(context, t, d.SnapDir(), completedPieces)
-			}
-
-			err := ScheduleVerifyFile(context, t, completedPieces)
-
-			if err != nil || !t.Complete.Bool() {
-				if err := d.db.Update(context, torrentInfoReset(t.Name(), t.InfoHash().Bytes(), 0)); err != nil {
-					return fmt.Errorf("verify data: %s: reset failed: %w", t.Name(), err)
-				}
-			}
-
-			return err
-		})
+		ScheduleVerifyFile(ctx, g, t, &completedPieces)
+		// Technically this requires the pieces for a given torrent to be
+		// completed, but I took a shortcut after I realised. I don't think it's
+		// necessary for it to be super accurate since we also have a pieces counter.
+		completedFiles.Add(1)
 	}
 
-	if err := g.Wait(); err != nil {
-		return err
-	}
-
-	return nil
+	return g.Wait()
 }
 
 // AddNewSeedableFile decides what we do depending on whether we have the .seg file or the .torrent file
@@ -2803,19 +2773,18 @@ func (d *Downloader) logProgress() {
 
 	dbg.ReadMemStats(&m)
 
+	// This should probably all just be based on the piece completion. It can't go over 100% or go backwards...
 	status := "Downloading"
 
-	percentDone := float32(100) * (float32(d.stats.BytesDownload) / float32(d.stats.BytesTotal))
-	bytesDone := d.stats.BytesDownload
-	rate := d.stats.DownloadRate
-	remainingBytes := d.stats.BytesTotal - d.stats.BytesDownload
+	bytesDone := d.stats.BytesCompleted
 
-	if d.stats.BytesDownload >= d.stats.BytesTotal && d.stats.MetadataReady == d.stats.FilesTotal && d.stats.BytesTotal > 0 {
+	percentDone := float32(100) * (float32(bytesDone) / float32(d.stats.BytesTotal))
+	rate := d.stats.DownloadRate
+	remainingBytes := d.stats.BytesTotal - bytesDone
+
+	if d.stats.DownloadRate == 0 && d.stats.CompletionRate > 0 {
 		status = "Verifying"
-		percentDone = float32(100) * (float32(d.stats.BytesCompleted) / float32(d.stats.BytesTotal))
-		bytesDone = d.stats.BytesCompleted
 		rate = d.stats.CompletionRate
-		remainingBytes = d.stats.BytesTotal - d.stats.BytesCompleted
 	}
 
 	if d.stats.BytesTotal == 0 {
@@ -2853,14 +2822,9 @@ func (d *Downloader) logProgress() {
 
 func calculateTime(amountLeft, rate uint64) string {
 	if rate == 0 {
-		return "999hrs:99m"
+		return "inf"
 	}
-	timeLeftInSeconds := amountLeft / rate
-
-	hours := timeLeftInSeconds / 3600
-	minutes := (timeLeftInSeconds / 60) % 60
-
-	return fmt.Sprintf("%dhrs:%dm", hours, minutes)
+	return (time.Duration(amountLeft) * time.Second / time.Duration(rate)).String()
 }
 
 func (d *Downloader) Completed() bool {
@@ -2896,4 +2860,12 @@ func (d *Downloader) CompletedTorrents() map[string]completedTorrentInfo {
 	defer d.lock.RUnlock()
 
 	return d.completedTorrents
+}
+
+// Expose torrent client status to HTTP on the public/default serve mux used by GOPPROF=http. Only
+// do this if you have a single instance.
+func (d *Downloader) HandleTorrentClientStatus() {
+	http.HandleFunc("/downloaderTorrentClientStatus", func(w http.ResponseWriter, r *http.Request) {
+		d.torrentClient.WriteStatus(w)
+	})
 }
