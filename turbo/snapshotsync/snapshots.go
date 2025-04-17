@@ -110,6 +110,8 @@ func findOverlaps[T SortedRange](in []T) (res []T, overlapped []T) {
 	for i := 0; i < len(in); i++ {
 		f := in[i]
 		iFrom, iTo := f.GetRange()
+		fmt.Printf("[dbg] findOverlaps: %s, %d-%d", f.GetType().Name(), iFrom, iTo)
+
 		if iFrom == iTo {
 			overlapped = append(overlapped, f)
 			continue
