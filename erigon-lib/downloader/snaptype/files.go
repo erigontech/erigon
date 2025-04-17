@@ -63,6 +63,9 @@ func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {
 		if cmp := strings.Compare(a.Type.Name(), b.Type.Name()); cmp != 0 {
 			return cmp
 		}
+		if cmp := strings.Compare(a.Type.Name(), b.Type.Name()); cmp != 0 {
+			return cmp
+		}
 
 		switch {
 		case a.From > b.From:
@@ -80,6 +83,10 @@ func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {
 
 		return int(a.Version) - int(b.Version)
 	})
+	for _, f := range out {
+		fmt.Printf("sort: %s\n", f.name)
+	}
+
 	return out
 }
 func FilesWithExt(dir string, expectExt string) ([]FileInfo, error) {
@@ -264,7 +271,7 @@ type FileInfo struct {
 	From, To        uint64
 	name, Path, Ext string
 	Type            Type
-	TypeString      string // This is for giulio's generic snapshots
+	TypeString      string // part of file-name - without version, range, ext
 }
 
 func (f FileInfo) TorrentFileExists() (bool, error) { return dir.FileExist(f.Path + ".torrent") }
@@ -366,6 +373,9 @@ func ParseDir(name string) (res []FileInfo, err error) {
 
 		case i.To != j.To:
 			return cmp.Compare(i.To, j.To)
+
+		case cmp.Compare(i.TypeString, j.TypeString) != 0:
+			return cmp.Compare(i.TypeString, j.TypeString)
 
 		case i.Type.Enum() != j.Type.Enum():
 			return cmp.Compare(i.Type.Enum(), j.Type.Enum())
