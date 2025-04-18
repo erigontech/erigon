@@ -125,7 +125,7 @@ func (sdb *IntraBlockState) SetTrace(trace bool) {
 	sdb.trace = trace
 }
 
-func (sdb *IntraBlockState) HasAtLeastOneStorage(addr libcommon.Address) (bool, error) {
+func (sdb *IntraBlockState) HasStorage(addr libcommon.Address) (bool, error) {
 	so, err := sdb.getStateObject(addr)
 	if err != nil {
 		return false, err
@@ -150,7 +150,7 @@ func (sdb *IntraBlockState) HasAtLeastOneStorage(addr libcommon.Address) (bool, 
 		return false, nil
 	}
 	// Load from DB in case it is missing.
-	return sdb.stateReader.(StateReaderEOF).AddressHaveStorageKeys(addr)
+	return sdb.stateReader.(StateReaderEOF).HasStorage(addr)
 }
 
 // setErrorUnsafe sets error but should be called in medhods that already have locks

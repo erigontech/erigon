@@ -576,21 +576,21 @@ func (r *ReaderV3) ReadSet() map[string]*libstate.KvList { return nil }
 func (r *ReaderV3) SetTrace(trace bool)                  { r.trace = trace }
 func (r *ReaderV3) ResetReadSet()                        {}
 
-func (r *ReaderV3) AddressHaveStorageKeys(address common.Address) (bool, error) {
+func (r *ReaderV3) HasStorage(address common.Address) (bool, error) {
 	sd, ok := r.tx.(*state.SharedDomains)
 	if !ok {
 		panic("AddressHasNoStorage: ReaderV3.tx is not SharedDomains")
 	}
 
-	var haveOneStorageKey bool
+	var hasStorage bool
 	err := sd.IterateStoragePrefix(address.Bytes(), func(ask []byte, val []byte, step uint64) (bool, error) {
-		haveOneStorageKey = true
+		hasStorage = true
 		return false, nil
 	})
 	if err != nil {
 		return false, err
 	}
-	return haveOneStorageKey, nil
+	return hasStorage, nil
 }
 
 func (r *ReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
@@ -688,10 +688,10 @@ func (r *ReaderParallelV3) ReadSet() map[string]*libstate.KvList { return r.read
 func (r *ReaderParallelV3) SetTrace(trace bool)                  { r.trace = trace }
 func (r *ReaderParallelV3) ResetReadSet()                        { r.readLists = newReadList() }
 
-func (r *ReaderParallelV3) AddressHaveStorageKeys(address common.Address) (bool, error) {
-	var haveOneStorageKey bool
+func (r *ReaderParallelV3) HasStorage(address common.Address) (bool, error) {
+	var hasStorage bool
 	err := r.sd.IterateStoragePrefix(address.Bytes(), func(ask []byte, val []byte, step uint64) (bool, error) {
-		haveOneStorageKey = true
+		hasStorage = true
 		if !r.discardReadList {
 			// lifecycle of `r.readList` is less than lifecycle of `r.rs` and `r.tx`, also `r.rs` and `r.tx` do store data immutable way
 			r.readLists[kv.StorageDomain.String()].Push(string(ask), common.Copy(val))
@@ -701,7 +701,7 @@ func (r *ReaderParallelV3) AddressHaveStorageKeys(address common.Address) (bool,
 	if err != nil {
 		return false, err
 	}
-	return haveOneStorageKey, nil
+	return hasStorage, nil
 }
 
 func (r *ReaderParallelV3) ReadAccountData(address common.Address) (*accounts.Account, error) {

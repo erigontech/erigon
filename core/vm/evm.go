@@ -414,9 +414,9 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 		}
 		return nil, libcommon.Address{}, 0, err
 	}
-	nonEmptyStorage, err := evm.intraBlockState.HasAtLeastOneStorage(address)
-	if err != nil || nonEmptyStorage {
-		fmt.Printf("check nonEmptyStorage: %v, err: %v\n", nonEmptyStorage, err)
+	hasStorage, err := evm.intraBlockState.HasStorage(address)
+	if err != nil || hasStorage {
+		fmt.Printf("check nonEmptyStorage: %v, err: %v\n", hasStorage, err)
 		err = ErrContractAddressCollision
 		return nil, libcommon.Address{}, 0, err
 	}

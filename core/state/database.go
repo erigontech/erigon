@@ -46,8 +46,7 @@ type StateReader interface {
 
 type StateReaderEOF interface {
 	StateReader
-	// AddressHaveStorageKeys returns true if address have at least one storage key inside.
-	AddressHaveStorageKeys(address common.Address) (bool, error)
+	HasStorage(address common.Address) (bool, error)
 }
 
 type HistoricalStateReader interface {
