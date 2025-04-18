@@ -99,14 +99,21 @@ func (f *SnapshotRepo) IntegrateDirtyFiles(files []*filesItem) {
 	}
 }
 
-func (f *SnapshotRepo) RecalcVisibleFiles(to RootNum) {
+func (f *SnapshotRepo) RecalcVisibleFiles(to RootNum) (lastRootNum RootNum) {
 	f.current = f.calcVisibleFiles(to)
+	curr := f.current
+	if len(curr) == 0 {
+		return 0
+	}
+
+	return RootNum(curr[len(curr)-1].endTxNum)
 }
 
 type VisibleFile interface {
 	Filename() string
 	StartTxNum() uint64
 	EndTxNum() uint64
+	FilesItem() FilesItem
 }
 
 type VisibleFiles []VisibleFile
@@ -287,6 +294,14 @@ func (f *SnapshotRepo) FilesInRange(mrange MergeRange, files visibleFiles) (item
 func (f *SnapshotRepo) CleanAfterMerge(merged *filesItem, vf visibleFiles) {
 	outs := f.Garbage(vf, merged)
 	deleteMergeFile(f.dirtyFiles, outs, f.schema.DataTag(), f.logger)
+}
+
+func (f *SnapshotRepo) MaxDirtyRootNum() RootNum {
+	item, ok := f.dirtyFiles.Max()
+	if !ok {
+		return 0
+	}
+	return RootNum(item.endTxNum)
 }
 
 // private methods
