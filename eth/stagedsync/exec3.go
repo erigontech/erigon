@@ -99,7 +99,6 @@ type Progress struct {
 	prevTaskGas           int64
 	prevBlockCount        int64
 	prevBlockDuration     time.Duration
-	prevBlockGas          int64
 	prevAbortCount        uint64
 	prevInvalidCount      uint64
 	prevReadCount         uint64
@@ -183,15 +182,12 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 		}
 
 		blockCount := te.blockExecMetrics.BlockCount.Load()
-		blockExecGas := te.blockExecMetrics.GasUsed.Load()
 		blockExecDur := time.Duration(te.blockExecMetrics.Duration.Load())
 
 		curBlockCount := blockCount - p.prevBlockCount
-		curBlockExecGas := blockExecGas - p.prevBlockGas
 		curBlockExecDur := blockExecDur - p.prevBlockDuration
 
 		p.prevBlockCount = blockCount
-		p.prevBlockGas = blockExecGas
 		p.prevBlockDuration = blockExecDur
 
 		var avgBlockDur time.Duration
@@ -200,15 +196,12 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 			avgBlockDur = curBlockExecDur / time.Duration(curBlockCount)
 		}
 
-		curBlockGasPerSec := int64(float64(curBlockExecGas) / interval.Seconds())
-
 		execVals = []interface{}{
 			"exec", common.PrettyCounter(execDiff),
 			"repeat%", fmt.Sprintf("%.2f", repeatRatio),
 			"abort", common.PrettyCounter(abortCount - p.prevAbortCount),
 			"invalid", common.PrettyCounter(invalidCount - p.prevInvalidCount),
 			"tgas/s", fmt.Sprintf("%s(%s)", common.PrettyCounter(curTaskGasPerSec), common.PrettyCounter(avgTaskGasPerSec)),
-			"bgas/s", common.PrettyCounter(curBlockGasPerSec),
 			"actwrk", float64(curTaskDur) / float64(interval),
 			"tdur", fmt.Sprintf("%dµs", avgTaskDur.Microseconds()),
 			"trdur", fmt.Sprintf("%dµs(%.2f%%)", avgReadDur.Microseconds(), readRatio),
