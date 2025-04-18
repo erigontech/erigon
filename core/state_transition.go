@@ -27,6 +27,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-lib/chain/params"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/math"
@@ -39,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/params"
 )
 
 var emptyCodeHash = crypto.Keccak256Hash(nil)
@@ -616,7 +616,7 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 			}
 			if exists {
-				st.state.AddRefund(fixedgas.PerEmptyAccountCost - fixedgas.PerAuthBaseCost)
+				st.state.AddRefund(params.PerEmptyAccountCost - params.PerAuthBaseCost)
 			}
 
 			// 7. set authority code

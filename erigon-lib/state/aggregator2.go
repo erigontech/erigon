@@ -188,6 +188,8 @@ func EnableHistoricalCommitment() {
 	Schema[kv.CommitmentDomain] = cfg
 }
 
+var ExperimentalConcurrentCommitment = false // set true to use concurrent commitment by default
+
 var StandaloneIISchema = map[kv.InvertedIdx]iiCfg{
 	kv.LogAddrIdx: {
 		filenameBase: kv.FileLogAddressIdx, keysTable: kv.TblLogAddressKeys, valuesTable: kv.TblLogAddressIdx,

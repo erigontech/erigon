@@ -37,6 +37,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
@@ -784,7 +785,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 	defer tx.Rollback()
 	for ; count < n && i < len(best.ms); i++ {
 		// if we wouldn't have enough gas for a standard transaction then quit out early
-		if availableGas < fixedgas.TxGas {
+		if availableGas < params.TxGas {
 			break
 		}
 
@@ -810,10 +811,10 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 
 		// Skip transactions that require more blob gas than is available
 		blobCount := uint64(len(mt.TxnSlot.BlobHashes))
-		if blobCount*fixedgas.BlobGasPerBlob > availableBlobGas {
+		if blobCount*params.BlobGasPerBlob > availableBlobGas {
 			continue
 		}
-		availableBlobGas -= blobCount * fixedgas.BlobGasPerBlob
+		availableBlobGas -= blobCount * params.BlobGasPerBlob
 
 		// make sure we have enough gas in the caller to add this transaction.
 		// not an exact science using intrinsic gas but as close as we could hope for at
@@ -933,7 +934,7 @@ func toBlobs(_blobs [][]byte) []gokzg4844.BlobRef {
 
 func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView) txpoolcfg.DiscardReason {
 	isShanghai := p.isShanghai() || p.isAgra()
-	if isShanghai && txn.Creation && txn.DataLen > fixedgas.MaxInitCodeSize {
+	if isShanghai && txn.Creation && txn.DataLen > params.MaxInitCodeSize {
 		return txpoolcfg.InitCodeTooLarge // EIP-3860
 	}
 	if txn.Type == BlobTxnType {
@@ -1088,7 +1089,7 @@ func requiredBalance(txn *TxnSlot) *uint256.Int {
 	// and https://eips.ethereum.org/EIPS/eip-4844#gas-accounting
 	blobCount := uint64(len(txn.BlobHashes))
 	if blobCount != 0 {
-		maxBlobGasCost := uint256.NewInt(fixedgas.BlobGasPerBlob)
+		maxBlobGasCost := uint256.NewInt(params.BlobGasPerBlob)
 		maxBlobGasCost.Mul(maxBlobGasCost, uint256.NewInt(blobCount))
 		_, overflow = maxBlobGasCost.MulOverflow(maxBlobGasCost, &txn.BlobFeeCap)
 		if overflow {
