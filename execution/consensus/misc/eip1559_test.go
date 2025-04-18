@@ -24,10 +24,10 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
-
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/params"
+	params2 "github.com/erigontech/erigon/params"
 )
 
 // copyConfig does a _shallow_ copy of a given config. Safe to set new values, but
@@ -38,7 +38,7 @@ func copyConfig(original *chain.Config) *chain.Config {
 }
 
 func config() *chain.Config {
-	config := copyConfig(params.TestChainConfig)
+	config := copyConfig(params2.TestChainConfig)
 	config.LondonBlock = big.NewInt(5)
 	return config
 }

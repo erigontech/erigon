@@ -7,14 +7,13 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/abi"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
@@ -257,7 +256,7 @@ func ExecuteAATransaction(
 		return 0, 0, err
 	}
 
-	gasPool.AddGas(fixedgas.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit - gasUsed)
+	gasPool.AddGas(params.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit - gasUsed)
 
 	return executionStatus, gasUsed, nil
 }

@@ -63,6 +63,9 @@ func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {
 		if cmp := strings.Compare(a.Type.Name(), b.Type.Name()); cmp != 0 {
 			return cmp
 		}
+		if cmp := strings.Compare(a.TypeString, b.TypeString); cmp != 0 {
+			return cmp
+		}
 
 		switch {
 		case a.From > b.From:
@@ -80,7 +83,6 @@ func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {
 
 		return int(a.Version) - int(b.Version)
 	})
-
 	return out
 }
 func FilesWithExt(dir string, expectExt string) ([]FileInfo, error) {
@@ -146,15 +148,17 @@ func parseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	if isSaltFile(fileName) {
 		// format for salt files is different: salt-<type>.txt
 		res.Type, ok = ParseFileType(parts[0])
+		res.CaplinTypeString = parts[0]
 		res.TypeString = parts[0]
 	} else {
 		res.Type, ok = ParseFileType(parts[len(parts)-1])
 		// This is a caplin hack - it is because with caplin state snapshots ok is always false
+		res.CaplinTypeString = parts[len(parts)-1]
 		res.TypeString = parts[len(parts)-1]
 	}
 
 	if ok {
-		res.TypeString = res.Type.Name()
+		res.CaplinTypeString = res.Type.Name()
 	}
 
 	if len(parts) < 3 {
@@ -265,7 +269,9 @@ type FileInfo struct {
 	From, To        uint64
 	name, Path, Ext string
 	Type            Type
-	TypeString      string // This is for giulio's generic snapshots
+
+	CaplinTypeString string // part of file-name - without version, range, ext
+	TypeString       string
 }
 
 func (f FileInfo) TorrentFileExists() (bool, error) { return dir.FileExist(f.Path + ".torrent") }
@@ -370,11 +376,12 @@ func ParseDir(name string) (res []FileInfo, err error) {
 
 		case i.Type.Enum() != j.Type.Enum():
 			return cmp.Compare(i.Type.Enum(), j.Type.Enum())
+		case i.TypeString != j.TypeString:
+			return cmp.Compare(i.TypeString, j.TypeString)
 		}
 
 		return cmp.Compare(i.Ext, j.Ext)
 	})
-
 	return res, nil
 }
 

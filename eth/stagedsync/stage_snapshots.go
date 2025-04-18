@@ -302,7 +302,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 	indexWorkers := estimate.IndexSnapshot.Workers()
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "E3 Indexing"})
-	if err := agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
+	if err := agg.BuildMissedAccessors(ctx, indexWorkers); err != nil {
 		return err
 	}
 

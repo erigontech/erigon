@@ -31,7 +31,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/seg"
-	state3 "github.com/erigontech/erigon-lib/state"
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon-lib/log/v3"
