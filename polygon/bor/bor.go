@@ -1726,7 +1726,7 @@ type BlockExtraData struct {
 	// length of TxDependencies          ->   n (n = number of transactions in the block)
 	// length of TxDependencies[i]       ->   k (k = a whole number)
 	// k elements in TxDependencies[i]   ->   transaction indexes on which transaction i is dependent on
-	TxDependencies [][]int
+	TxDependencies [][]uint64
 }
 
 // Returns the Block-STM Transaction Dependency from the block header
@@ -1745,7 +1745,15 @@ func GetTxDependencies(h *types.Header) [][]int {
 		return nil
 	}
 
-	return blockExtraData.TxDependencies
+	dependencies := make([][]int, len(blockExtraData.TxDependencies))
+	for i, txDependencies := range blockExtraData.TxDependencies {
+		deps := make([]int, len(txDependencies))
+		for j := range txDependencies {
+			deps[j] = int(txDependencies[j])
+		}
+		dependencies[i] = deps
+	}
+	return dependencies
 }
 
 func GetValidatorBytes(h *types.Header, config *borcfg.BorConfig) []byte {
