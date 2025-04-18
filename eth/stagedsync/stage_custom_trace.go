@@ -350,11 +350,15 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			}
 
 			if cfg.ProduceReceiptsCacheDomain {
-				if txTask.TxIndex >= 0 && txTask.BlockReceipts != nil {
-					receipt := txTask.BlockReceipts[txTask.TxIndex]
-					if err := rawdb.WriteReceiptCache(doms, receipt); err != nil {
-						return err
+				if !txTask.Final {
+					if txTask.TxIndex >= 0 && txTask.BlockReceipts != nil {
+						receipt := txTask.BlockReceipts[txTask.TxIndex]
+						if err := rawdb.WriteReceiptCache(doms, receipt); err != nil {
+							return err
+						}
 					}
+				} else {
+					//TODO: bor
 				}
 			}
 
