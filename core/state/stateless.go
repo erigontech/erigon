@@ -132,6 +132,11 @@ func (s *Stateless) ReadAccountStorage(address common.Address, incarnation uint6
 	return nil, nil
 }
 
+func (s *Stateless) HasStorage(address common.Address) (bool, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
 // ReadAccountCode is a part of the StateReader interface
 func (s *Stateless) ReadAccountCode(address common.Address, incarnation uint64) (code []byte, err error) {
 	if s.trace {

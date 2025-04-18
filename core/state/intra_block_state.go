@@ -150,7 +150,7 @@ func (sdb *IntraBlockState) HasStorage(addr libcommon.Address) (bool, error) {
 		return false, nil
 	}
 	// Load from DB in case it is missing.
-	return sdb.stateReader.(StateReaderEOF).HasStorage(addr)
+	return sdb.stateReader.HasStorage(addr)
 }
 
 // setErrorUnsafe sets error but should be called in medhods that already have locks
