@@ -27,7 +27,8 @@ type ProtoForkable struct {
 	builders []AccessorIndexBuilder
 	snaps    *SnapshotRepo
 
-	strategy CanonicityStrategy
+	strategy  CanonicityStrategy
+	unaligned bool
 
 	logger log.Logger
 }
@@ -127,8 +128,8 @@ func (a *ProtoForkable) BuildFiles(ctx context.Context, from, to RootNum, db kv.
 	return dirtyFiles, nil
 }
 
-func (a *ProtoForkable) OpenFolder() error {
-	return a.snaps.OpenFolder()
+func (a *ProtoForkable) Repo() *SnapshotRepo {
+	return a.snaps
 }
 
 func (a *ProtoForkable) Close() {

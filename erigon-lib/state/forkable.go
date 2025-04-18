@@ -184,6 +184,12 @@ func (a *Forkable[T]) SetTs4Bytes(ts4Bytes bool) {
 	a.ts4Bytes = ts4Bytes
 }
 
+// align the snapshots of this forkable entity
+// with others members of entity set
+func (a *Forkable[T]) Aligned(aligned bool) {
+	a.unaligned = !aligned
+}
+
 // marked tx
 type MarkedTx struct {
 	*ProtoForkableTx
