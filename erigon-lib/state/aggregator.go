@@ -237,7 +237,6 @@ func (a *Aggregator) OpenFolder() error {
 	if err := a.openFolder(); err != nil {
 		return err
 	}
-	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
 	return nil
 }
 
@@ -261,6 +260,7 @@ func (a *Aggregator) openFolder() error {
 	if err := eg.Wait(); err != nil {
 		return fmt.Errorf("openFolder: %w", err)
 	}
+	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
 	return nil
 }
 
@@ -387,7 +387,7 @@ func (a *Aggregator) WaitForBuildAndMerge(ctx context.Context) chan struct{} {
 	return res
 }
 
-func (a *Aggregator) BuildMissedIndices(ctx context.Context, workers int) error {
+func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) error {
 	startIndexingTime := time.Now()
 	ps := background.NewProgressSet()
 
@@ -408,16 +408,26 @@ func (a *Aggregator) BuildMissedIndices(ctx context.Context, workers int) error 
 			}
 		}
 	}()
+
+	rotx := a.DebugBeginDirtyFilesRo()
+	defer rotx.Close()
+
+	missedFilesItems := rotx.FilesWithMissedAccessors()
+
 	for _, d := range a.d {
-		d.BuildMissedAccessors(ctx, g, ps)
+		d.BuildMissedAccessors(ctx, g, ps, missedFilesItems.domain[d.name])
 	}
+
 	for _, ii := range a.iis {
-		ii.BuildMissedAccessors(ctx, g, ps)
+		ii.BuildMissedAccessors(ctx, g, ps, missedFilesItems.ii[ii.name])
 	}
 
 	if err := g.Wait(); err != nil {
 		return err
 	}
+
+	rotx.Close()
+
 	if err := a.OpenFolder(); err != nil {
 		return err
 	}
@@ -438,25 +448,6 @@ func sendDiagnostics(startIndexingTime time.Time, indexPercent map[string]int, a
 		Segments:    segmentsStats,
 		TimeElapsed: time.Since(startIndexingTime).Round(time.Second).Seconds(),
 	})
-}
-
-func (a *Aggregator) BuildMissedIndicesInBackground(ctx context.Context, workers int) {
-	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
-		return
-	}
-	a.wg.Add(1)
-	go func() {
-		defer a.wg.Done()
-		defer a.buildingFiles.Store(false)
-		aggTx := a.BeginFilesRo()
-		defer aggTx.Close()
-		if err := a.BuildMissedIndices(ctx, workers); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
-				return
-			}
-			a.logger.Warn("[snapshots] BuildOptionalMissedIndicesInBackground", "err", err)
-		}
-	}()
 }
 
 type AggV3Collation struct {

@@ -1098,7 +1098,7 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	if err := caplinSnaps.BuildMissingIndices(ctx, logger); err != nil {
 		return err
 	}
-	err = agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers())
+	err = agg.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers())
 	if err != nil {
 		return err
 	}
@@ -1440,7 +1440,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	logger.Info("Work on state history snapshots")
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	if err = agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
+	if err = agg.BuildMissedAccessors(ctx, indexWorkers); err != nil {
 		return err
 	}
 
@@ -1474,7 +1474,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	if err = agg.MergeLoop(ctx); err != nil {
 		return err
 	}
-	if err = agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
+	if err = agg.BuildMissedAccessors(ctx, indexWorkers); err != nil {
 		return err
 	}
 
