@@ -19,6 +19,7 @@ package snapshotsync
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -182,17 +183,14 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 			continue
 		}
 		var _, to uint64
-		var err error
 		if isStateSnapshot(name) {
 			// parse "from" (0) and "to" (64) from the name
 			// parse the snapshot "kind". e.g kind of 'idx/v1.0-accounts.0-64.ef' is "idx/v1.0-accounts"
-			rangeString := strings.Split(name, ".")[1]
-			rangeNums := strings.Split(rangeString, "-")
-			// convert the range to uint64
-			to, err = strconv.ParseUint(rangeNums[1], 10, 64)
-			if err != nil {
-				return nil, err
+			res, _, ok := snaptype.ParseFileName("", name)
+			if !ok {
+				return blackList, errors.New("invalid state snapshot name")
 			}
+			to = res.To
 			if stepPrune < to {
 				continue
 			}

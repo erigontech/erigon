@@ -101,9 +101,11 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 	res.Path = filepath.Join(dir, fileName)
 
 	if res.From == 0 && res.To == 0 {
+		println(fileName, isStateFile)
 		parts := strings.Split(fileName, ".")
-		if len(parts) == 3 || len(parts) == 4 {
-			fsteps := strings.Split(parts[1], "-")
+		partsLen := len(parts)
+		if partsLen == 3 || partsLen == 4 {
+			fsteps := strings.Split(parts[partsLen-2], "-")
 			if len(fsteps) == 2 {
 				if from, err := strconv.ParseUint(fsteps[0], 10, 64); err == nil {
 					res.From = from
@@ -173,42 +175,41 @@ func parseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	return res, ok
 }
 
-var stateFileRegex = regexp.MustCompile("^v([0-9]+).([0-9]+)-([[:lower:]]+).([0-9]+)-([0-9]+).(.*)$")
+var stateFileRegex = regexp.MustCompile("^v([0-9]+)(?:.([0-9]+))?-([[:lower:]]+).([0-9]+)-([0-9]+).(.*)$")
+
+func parseStateFile(name string) (from, to uint64, ok bool) {
+	_, name = filepath.Split(name) // убираем путь
+	subs := stateFileRegex.FindStringSubmatch(name)
+	if len(subs) != 7 && len(subs) != 6 {
+		return 0, 0, false
+	}
+
+	fromIdx := len(subs) - 3
+	toIdx := len(subs) - 2
+
+	from, err := strconv.ParseUint(subs[fromIdx], 10, 64)
+	if err != nil {
+		return 0, 0, false
+	}
+	to, err = strconv.ParseUint(subs[toIdx], 10, 64)
+	if err != nil {
+		return 0, 0, false
+	}
+
+	return from, to, true
+}
 
 func E3Seedable(name string) bool {
-	_, name = filepath.Split(name) // remove absolute path, or `history/` prefixes
-	subs := stateFileRegex.FindStringSubmatch(name)
-	if len(subs) != 7 {
+	from, to, ok := parseStateFile(name)
+	if !ok {
 		return false
 	}
-	// Check that it's seedable
-	from, err := strconv.ParseUint(subs[4], 10, 64)
-	if err != nil {
-		return false
-	}
-	to, err := strconv.ParseUint(subs[5], 10, 64)
-	if err != nil {
-		return false
-	}
-	if (to-from)%Erigon3SeedableSteps != 0 {
-		return false
-	}
-	return true
+	return (to-from)%Erigon3SeedableSteps == 0
 }
-func IsStateFile(name string) (ok bool) {
-	_, name = filepath.Split(name) // remove absolute path, or `history/` prefixes
-	subs := stateFileRegex.FindStringSubmatch(name)
-	if len(subs) != 7 {
-		return false
-	}
-	// Check that it's seedable
-	_, err := strconv.ParseUint(subs[4], 10, 64)
-	if err != nil {
-		return false
-	}
-	_, err = strconv.ParseUint(subs[5], 10, 64)
 
-	return err == nil
+func IsStateFile(name string) bool {
+	_, _, ok := parseStateFile(name)
+	return ok
 }
 
 func SeedableV2Extensions() []string {

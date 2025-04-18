@@ -504,15 +504,17 @@ func TestOpenAllSnapshot(t *testing.T) {
 func TestParseCompressedFileName(t *testing.T) {
 	require := require.New(t)
 	fs := fstest.MapFS{
-		"a":                   &fstest.MapFile{},
-		"1-a":                 &fstest.MapFile{},
-		"1-2-a":               &fstest.MapFile{},
-		"1-2-bodies.info":     &fstest.MapFile{},
-		"1-2-bodies.seg":      &fstest.MapFile{},
-		"v2-1-2-bodies.seg":   &fstest.MapFile{},
-		"v0-1-2-bodies.seg":   &fstest.MapFile{},
-		"v1-1-2-bodies.seg":   &fstest.MapFile{},
-		"v1.0-1-2-bodies.seg": &fstest.MapFile{},
+		"a":                      &fstest.MapFile{},
+		"1-a":                    &fstest.MapFile{},
+		"1-2-a":                  &fstest.MapFile{},
+		"1-2-bodies.info":        &fstest.MapFile{},
+		"1-2-bodies.seg":         &fstest.MapFile{},
+		"v2-1-2-bodies.seg":      &fstest.MapFile{},
+		"v0-1-2-bodies.seg":      &fstest.MapFile{},
+		"v1-1-2-bodies.seg":      &fstest.MapFile{},
+		"v1.0-1-2-bodies.seg":    &fstest.MapFile{},
+		"v1-accounts.24-28.ef":   &fstest.MapFile{},
+		"v1.0-accounts.24-28.ef": &fstest.MapFile{},
 	}
 	stat := func(name string) string {
 		s, err := fs.Stat(name)
@@ -539,11 +541,25 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.Equal(1_000, int(f.From))
 	require.Equal(2_000, int(f.To))
 
-	f, _, ok = snaptype.ParseFileName("", stat("v1.0-1-2-bodies.seg"))
+	var e3 bool
+	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-1-2-bodies.seg"))
 	require.True(ok)
+	require.False(e3)
 	require.Equal(f.Type.Enum(), coresnaptype.Bodies.Enum())
 	require.Equal(1_000, int(f.From))
 	require.Equal(2_000, int(f.To))
+
+	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-accounts.24-28.ef"))
+	require.True(ok)
+	require.True(e3)
+	require.Equal(24, int(f.From))
+	require.Equal(28, int(f.To))
+
+	f, e3, ok = snaptype.ParseFileName("", stat("v1-accounts.24-28.ef"))
+	require.True(ok)
+	require.True(e3)
+	require.Equal(24, int(f.From))
+	require.Equal(28, int(f.To))
 }
 
 func TestCalculateVisibleSegments(t *testing.T) {
