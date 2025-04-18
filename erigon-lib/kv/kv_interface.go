@@ -581,6 +581,7 @@ type TemporalDebugTx interface {
 	DomainFiles(domain ...Domain) []string
 
 	PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error)
+	TxNumsInFiles(domains ...Domain) (minTxNum uint64)
 }
 
 type TemporalDebugDB interface {
