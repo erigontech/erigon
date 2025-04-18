@@ -621,7 +621,7 @@ func NewHeader(env stEnv) *types.Header {
 	return &header
 }
 
-func CalculateStateRoot(tx kv.RwTx) (*libcommon.Hash, error) {
+func CalculateStateRoot(tx kv.TemporalRwTx) (*libcommon.Hash, error) {
 	// Generate hashed state
 	c, err := tx.RwCursor(kv.PlainState)
 	if err != nil {
@@ -630,11 +630,7 @@ func CalculateStateRoot(tx kv.RwTx) (*libcommon.Hash, error) {
 	defer c.Close()
 	h := libcommon.NewHasher()
 	defer libcommon.ReturnHasherToPool(h)
-	temporalTx, ok := tx.(kv.TemporalTx)
-	if !ok {
-		return nil, errors.New("tx is not a temporal transaction")
-	}
-	domains, err := libstate.NewSharedDomains(temporalTx, log.New())
+	domains, err := libstate.NewSharedDomains(tx, log.New())
 	if err != nil {
 		return nil, fmt.Errorf("NewSharedDomains: %w", err)
 	}
