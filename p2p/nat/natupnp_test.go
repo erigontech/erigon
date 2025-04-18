@@ -17,8 +17,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build integration
-
 package nat
 
 import (
@@ -34,6 +32,10 @@ import (
 )
 
 func TestUPNP_DDWRT(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	if runtime.GOOS == "windows" {
 		t.Skipf("disabled to avoid firewall prompt")
 	}

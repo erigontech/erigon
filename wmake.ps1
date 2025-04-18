@@ -36,7 +36,7 @@ Param(
         "sentry",
         "state",
         "test",
-        "test-integration",
+        "test-all",
         "txpool",
         "all"
     )]
@@ -520,9 +520,9 @@ if ($BuildTarget -eq "db-tools") {
     go.exe clean -cache
 
 } elseif ($BuildTarget -eq "test") {
-    Write-Host " Running tests ..."
+    Write-Host " Running short tests ..."
     $env:GODEBUG = "cgocheck=0"
-    $TestCommand = "go test $($Erigon.BuildFlags) -p 2 -tags=e4 ./..."
+    $TestCommand = "go test $($Erigon.BuildFlags) -short -p 2 -tags=e4 ./..."
     Invoke-Expression -Command $TestCommand | Out-Host
     if (!($?)) {
         Write-Host " ERROR : Tests failed"
@@ -533,8 +533,8 @@ if ($BuildTarget -eq "db-tools") {
         Remove-Item Env:\GODEBUG
     }
 
-} elseif ($BuildTarget -eq "test-integration") {
-    Write-Host " Running integration tests ..."
+} elseif ($BuildTarget -eq "test-all") {
+    Write-Host " Running all tests ..."
     $env:GODEBUG = "cgocheck=0"
     $TestCommand = "go test $($Erigon.BuildFlags) -p 2 --timeout 130m -tags=e4 ./..."
     Invoke-Expression -Command $TestCommand | Out-Host

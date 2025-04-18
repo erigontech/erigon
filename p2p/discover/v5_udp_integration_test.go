@@ -14,8 +14,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build integration_skip
-
 package discover
 
 import (
@@ -31,6 +29,10 @@ import (
 
 // This test checks that pending calls are re-sent when a handshake happens.
 func TestUDPv5_callResend(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	if runtime.GOOS != "linux" {
 		t.Skip("fix me on win please")
 	}

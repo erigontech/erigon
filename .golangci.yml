@@ -3,7 +3,6 @@ run:
   build-tags:
     - nosqlite
     - noboltdb
-    - integration
 
 linters:
   presets:
