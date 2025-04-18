@@ -79,7 +79,6 @@ type SharedDomains struct {
 	sdCtx *SharedDomainsCommitmentContext
 
 	// next fields are filed by `.SetTx` - they are all point to same `tx` - just reducing amount of interface castings at runtime
-	roTx       kv.Tx
 	aggTx      *AggregatorRoTx
 	roTtx      kv.TemporalTx
 	roDebugTtx kv.TemporalDebugTx
@@ -205,7 +204,7 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 	return sd.Flush(ctx, rwTx)
 }
 
-func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Tx, blockNum uint64) ([]byte, error) {
+func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.TemporalTx, blockNum uint64) ([]byte, error) {
 	it, err := sd.aggTx.HistoryRange(kv.StorageDomain, int(sd.TxNum()), math.MaxInt64, order.Asc, -1, roTx)
 	if err != nil {
 		return nil, err
@@ -276,7 +275,7 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 	}
 	sd.SetBlockNum(bn)
 	sd.SetTxNum(txn)
-	newRh, err := sd.rebuildCommitment(ctx, tx, bn)
+	newRh, err := sd.rebuildCommitment(ctx, sd.roTtx, bn)
 	if err != nil {
 		return 0, err
 	}
@@ -601,7 +600,6 @@ func (sd *SharedDomains) SetTx(tx kv.Tx) {
 	if tx == nil {
 		panic("tx is nil")
 	}
-	sd.roTx = tx
 
 	if casted, ok := tx.(kv.TemporalTx); ok {
 		sd.roTtx = casted
@@ -664,7 +662,7 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter b
 // k and v lifetime is bounded by the lifetime of the iterator
 func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v []byte, step uint64) error) error {
 	haveRamUpdates := sd.storage.Len() > 0
-	return sd.aggTx.d[kv.StorageDomain].debugIteratePrefix(prefix, haveRamUpdates, sd.storage.Iter(), it, sd.txNum, sd.StepSize(), sd.roTx)
+	return sd.aggTx.d[kv.StorageDomain].debugIteratePrefix(prefix, haveRamUpdates, sd.storage.Iter(), it, sd.txNum, sd.StepSize(), sd.roTtx)
 }
 
 func (sd *SharedDomains) Close() {
@@ -721,8 +719,7 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 		}
 	}
 	if dbg.PruneOnFlushTimeout != 0 {
-		_, err = sd.aggTx.PruneSmallBatches(ctx, dbg.PruneOnFlushTimeout, tx)
-		if err != nil {
+		if _, err := tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, dbg.PruneOnFlushTimeout); err != nil {
 			return err
 		}
 	}
@@ -750,7 +747,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, k []byte) (v []byte, step u
 	if v, prevStep, ok := sd.get(domain, k); ok {
 		return v, prevStep, nil
 	}
-	v, step, _, err = sd.aggTx.GetLatest(domain, k, sd.roTx)
+	v, step, _, err = sd.aggTx.GetLatest(domain, k, sd.roTtx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
@@ -883,7 +880,7 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 	}
 	return nil
 }
-func (sd *SharedDomains) Tx() kv.Tx { return sd.roTx }
+func (sd *SharedDomains) Tx() kv.Tx { return sd.roTtx }
 
 type SharedDomainsCommitmentContext struct {
 	sharedDomains *SharedDomains

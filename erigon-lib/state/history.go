@@ -109,7 +109,6 @@ type histCfg struct {
 
 func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error) {
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
-	cfg.compressorCfg = seg.DefaultCfg
 	if cfg.indexList == 0 {
 		cfg.indexList = AccessorHashMap
 	}
@@ -296,9 +295,7 @@ func (h *History) closeWhatNotInList(fNames []string) {
 	}
 }
 
-func (h *History) Tables() []string {
-	return append([]string{h.keysTable, h.valuesTable}, h.InvertedIndex.Tables()...)
-}
+func (h *History) Tables() []string { return append(h.InvertedIndex.Tables(), h.valuesTable) }
 
 func (h *History) Close() {
 	if h == nil {

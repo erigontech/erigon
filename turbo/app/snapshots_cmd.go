@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/common/compress"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
@@ -146,8 +147,6 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&SnapshotFromFlag,
-				&SnapshotToFlag,
-				&SnapshotEveryFlag,
 			}),
 		},
 		{
@@ -287,16 +286,6 @@ var (
 		Name:  "from",
 		Usage: "From block number",
 		Value: 0,
-	}
-	SnapshotToFlag = cli.Uint64Flag{
-		Name:  "to",
-		Usage: "To block number. Zero - means unlimited.",
-		Value: 0,
-	}
-	SnapshotEveryFlag = cli.Uint64Flag{
-		Name:  "every",
-		Usage: "Do operation every N blocks",
-		Value: 1_000,
 	}
 	SnapshotRebuildFlag = cli.BoolFlag{
 		Name:  "rebuild",
@@ -843,13 +832,13 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 	// Check that there are no gaps
 	for i := 1; i < len(intervals); i++ {
 		if intervals[i].from != intervals[i-1].to {
-			return fmt.Errorf("gap between %d and %d. snaptype: %s", intervals[i-1].to, intervals[i].from, snapType)
+			return fmt.Errorf("gap between (%d-%d) and (%d-%d). snaptype: %s", intervals[i-1].from, intervals[i-1].to, intervals[i].from, intervals[i].to, snapType)
 		}
 	}
 	// Check that there are no overlaps
 	for i := 1; i < len(intervals); i++ {
 		if intervals[i].from < intervals[i-1].to {
-			return fmt.Errorf("overlap between %d and %d. snaptype: %s", intervals[i-1].to, intervals[i].from, snapType)
+			return fmt.Errorf("overlap between (%d-%d) and (%d-%d). snaptype: %s", intervals[i-1].from, intervals[i-1].to, intervals[i].from, intervals[i].to, snapType)
 		}
 	}
 
@@ -1286,6 +1275,7 @@ func doCompress(cliCtx *cli.Context) error {
 
 	compressCfg := seg.DefaultCfg
 	compressCfg.Workers = estimate.CompressSnapshot.Workers()
+	compressCfg.MinPatternScore = uint64(dbg.EnvInt("MinPatternScore", int(compressCfg.MinPatternScore)))
 	compressCfg.MinPatternLen = dbg.EnvInt("MinPatternLen", compressCfg.MinPatternLen)
 	compressCfg.MaxPatternLen = dbg.EnvInt("MaxPatternLen", compressCfg.MaxPatternLen)
 	compressCfg.SamplingFactor = uint64(dbg.EnvInt("SamplingFactor", int(compressCfg.SamplingFactor)))
@@ -1302,7 +1292,9 @@ func doCompress(cliCtx *cli.Context) error {
 		compression = seg.CompressNone
 	}
 
-	logger.Info("[compress] file", "datadir", dirs.DataDir, "f", f, "cfg", compressCfg)
+	doSnappyEachWord := dbg.EnvBool("SnappyEachWord", false)
+
+	logger.Info("[compress] file", "datadir", dirs.DataDir, "f", f, "cfg", compressCfg, "SnappyEachWord", doSnappyEachWord)
 	c, err := seg.NewCompressor(ctx, "compress", f, dirs.Tmp, compressCfg, log.LvlInfo, logger)
 	if err != nil {
 		return err
@@ -1311,25 +1303,30 @@ func doCompress(cliCtx *cli.Context) error {
 	w := seg.NewWriter(c, compression)
 
 	r := bufio.NewReaderSize(os.Stdin, int(128*datasize.MB))
-	buf := make([]byte, 0, int(1*datasize.MB))
+	word := make([]byte, 0, int(1*datasize.MB))
+	var snappyBuf []byte
 	var l uint64
 	for l, err = binary.ReadUvarint(r); err == nil; l, err = binary.ReadUvarint(r) {
-		if cap(buf) < int(l) {
-			buf = make([]byte, l)
+		if cap(word) < int(l) {
+			word = make([]byte, l)
 		} else {
-			buf = buf[:l]
+			word = word[:l]
 		}
-		if _, err = io.ReadFull(r, buf); err != nil {
+		if _, err = io.ReadFull(r, word); err != nil {
 			return err
 		}
-		if err := w.AddWord(buf); err != nil {
+		snappyBuf, word = compress.EncodeSnappyIfNeed(snappyBuf, word, doSnappyEachWord)
+
+		if err := w.AddWord(word); err != nil {
 			return err
 		}
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
+
 	}
 	if !errors.Is(err, io.EOF) {
 		return err
@@ -1340,6 +1337,7 @@ func doCompress(cliCtx *cli.Context) error {
 
 	return nil
 }
+
 func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
@@ -1349,8 +1347,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	ctx := cliCtx.Context
 
 	from := cliCtx.Uint64(SnapshotFromFlag.Name)
-	to := cliCtx.Uint64(SnapshotToFlag.Name)
-	every := cliCtx.Uint64(SnapshotEveryFlag.Name)
 
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
@@ -1377,27 +1373,30 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	//agg.LimitRecentHistoryWithoutFiles(0)
 
-	var forwardProgress uint64
-	if to == 0 {
-		db.View(ctx, func(tx kv.Tx) error {
-			forwardProgress, err = stages.GetStageProgress(tx, stages.Senders)
-			return err
-		})
-		blockReader, _ := br.IO()
-		from2, to2, ok := freezeblocks.CanRetire(forwardProgress, blockReader.FrozenBlocks(), coresnaptype.Enums.Headers, nil)
-		if ok {
-			from, to, every = from2, to2, to2-from2
-		}
-	} else {
-		forwardProgress = to
-	}
-
-	logger.Info("Params", "from", from, "to", to, "every", every)
-	if err := br.RetireBlocks(ctx, from, forwardProgress, log.LvlInfo, nil, nil, nil); err != nil {
+	var to uint64
+	if err := db.View(ctx, func(tx kv.Tx) error {
+		to, err = stages.GetStageProgress(tx, stages.Senders)
+		return err
+	}); err != nil {
 		return err
 	}
-
 	blockReader, _ := br.IO()
+	from2, to2, ok := freezeblocks.CanRetire(to, blockReader.FrozenBlocks(), coresnaptype.Enums.Headers, nil)
+	if ok {
+		from, to = from2, to2
+	}
+	if err := br.RetireBlocks(ctx, from, to, log.LvlInfo, nil, nil, nil); err != nil {
+		return err
+	}
+	if err := blockReader.Snapshots().RemoveOverlaps(); err != nil {
+		return err
+	}
+	if sn := blockReader.BorSnapshots(); sn != nil {
+		if err := sn.RemoveOverlaps(); err != nil {
+			return err
+		}
+	}
+
 	deletedBlocks := math.MaxInt // To pass the first iteration
 	allDeletedBlocks := 0
 	for deletedBlocks > 0 { // prune happens by small steps, so need many runs
@@ -1424,12 +1423,8 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	logger.Info("Prune state history")
 	for hasMoreToPrune := true; hasMoreToPrune; {
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
-			ac := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx)
-			hasMoreToPrune, err = ac.PruneSmallBatches(ctx, 2*time.Minute, tx)
-			if err != nil {
-				return err
-			}
-			return nil
+			hasMoreToPrune, err = tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 2*time.Minute)
+			return err
 		}); err != nil {
 			return err
 		}
@@ -1449,9 +1444,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		if err != nil {
 			return err
 		}
-
-		ac := agg.BeginFilesRo()
-		defer ac.Close()
 		return nil
 	}); err != nil {
 		return err
@@ -1462,31 +1454,10 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
-	if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-		ac := agg.BeginFilesRo()
-		defer ac.Close()
-
-		logEvery := time.NewTicker(30 * time.Second)
-		defer logEvery.Stop()
-
-		stat, err := ac.Prune(ctx, tx, math.MaxUint64, logEvery)
-		if err != nil {
-			return err
-		}
-		logger.Info("aftermath prune finished", "stat", stat.String())
-		return err
-	}); err != nil {
-		return err
-	}
-
 	for hasMoreToPrune := true; hasMoreToPrune; {
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
-			ac := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx)
-			hasMoreToPrune, err = ac.PruneSmallBatches(ctx, 2*time.Minute, tx)
-			if err != nil {
-				return err
-			}
-			return nil
+			hasMoreToPrune, err = tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 2*time.Minute)
+			return err
 		}); err != nil {
 			return err
 		}

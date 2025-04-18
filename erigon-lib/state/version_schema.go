@@ -4,6 +4,8 @@ import (
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 )
 
+var commitmentDomainVersion snaptype.Version
+
 func InitSchemas() {
 	Schema.AccountsDomain.version.DataKV = snaptype.V1_0
 	Schema.AccountsDomain.version.AccessorBT = snaptype.V1_0
@@ -31,6 +33,7 @@ func InitSchemas() {
 
 	Schema.CommitmentDomain.version.DataKV = snaptype.V1_0
 	Schema.CommitmentDomain.version.AccessorKVI = snaptype.V1_0
+	commitmentDomainVersion = Schema.CommitmentDomain.version.DataKV
 
 	Schema.ReceiptDomain.version.DataKV = snaptype.V1_0
 	Schema.ReceiptDomain.version.AccessorBT = snaptype.V1_0

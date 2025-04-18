@@ -27,6 +27,7 @@ import (
 	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
 
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/commitment"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -48,7 +49,6 @@ import (
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
 	ethapi2 "github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -163,12 +163,21 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		return 0, err
 	}
 
-	// try and get the block from the lru cache first then try DB before failing
 	block := api.tryBlockFromLru(blockHash)
+
+	// try and get the block from the lru cache first then try DB before failing
 	if block == nil {
 		block, err = api.blockWithSenders(ctx, dbtx, blockHash, blockNum)
 		if err != nil {
 			return 0, err
+		}
+	}
+
+	// try to check if it is a pending block
+	if block == nil {
+		b := api.filters.LastPendingBlock()
+		if b != nil && blockNum == b.NumberU64() {
+			block = b
 		}
 	}
 

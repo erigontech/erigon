@@ -143,7 +143,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	stat, err := ac.Prune(context.Background(), rwTx, 0, logEvery)
+	stat, err := ac.prune(context.Background(), rwTx, 0, logEvery)
 	require.NoError(t, err)
 	t.Logf("Prune: %s", stat)
 
@@ -258,7 +258,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	stat, err := ac.Prune(context.Background(), rwTx, 0, logEvery)
+	stat, err := ac.prune(context.Background(), rwTx, 0, logEvery)
 	require.NoError(t, err)
 	t.Logf("Prune: %s", stat)
 
@@ -1352,7 +1352,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	fnames := []string{}
 	for _, f := range ac.d[kv.CommitmentDomain].files {
 		var k, stateVal []byte
-		if ac.d[kv.CommitmentDomain].d.AccessorList&AccessorHashMap != 0 {
+		if ac.d[kv.CommitmentDomain].d.AccessorList.Has(AccessorHashMap) {
 			idx := f.src.index.GetReaderFromPool()
 			r := seg.NewReader(f.src.decompressor.MakeGetter(), compression)
 

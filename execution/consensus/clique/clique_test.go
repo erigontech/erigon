@@ -25,6 +25,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-lib/chain/params"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -35,7 +36,7 @@ import (
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/execution/consensus/clique"
-	"github.com/erigontech/erigon/params"
+	params2 "github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
@@ -51,7 +52,7 @@ func TestReimportMirroredState(t *testing.T) {
 		cliqueDB = memdb.NewTestDB(t, kv.ConsensusDB)
 		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr     = crypto.PubkeyToAddress(key.PublicKey)
-		engine   = clique.New(params.AllCliqueProtocolChanges, params.CliqueSnapshot, cliqueDB, log.New())
+		engine   = clique.New(params2.AllCliqueProtocolChanges, params2.CliqueSnapshot, cliqueDB, log.New())
 		signer   = types.LatestSignerForChainID(nil)
 	)
 	genspec := &types.Genesis{
@@ -59,7 +60,7 @@ func TestReimportMirroredState(t *testing.T) {
 		Alloc: map[libcommon.Address]types.GenesisAccount{
 			addr: {Balance: big.NewInt(10000000000000000)},
 		},
-		Config: params.AllCliqueProtocolChanges,
+		Config: params2.AllCliqueProtocolChanges,
 	}
 	copy(genspec.ExtraData[clique.ExtraVanity:], addr[:])
 	checkStateRoot := true
