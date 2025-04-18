@@ -313,7 +313,7 @@ func (t *TxTask) Dependencies() []int {
 	if t.dependencies == nil {
 		t.dependencies = []int{}
 
-		// TODO move this dependenvy to somewhere more general
+		// TODO move this dependency to somewhere more general
 		blockDependencies := bor.GetTxDependencies(t.Header)
 
 		if t.TxIndex > 0 && len(blockDependencies) > t.TxIndex {
