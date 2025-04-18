@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package entity_extras
+package state
 
 import (
 	"bytes"
@@ -58,7 +58,7 @@ func Test_BtreeIndex_Init(t *testing.T) {
 	tmp := t.TempDir()
 
 	keyCount, M := 100, uint64(4)
-	compPath := GenerateKV(t, tmp, 52, 300, keyCount, logger, 0)
+	compPath := generateKV(t, tmp, 52, 300, keyCount, logger, 0)
 	decomp, err := seg.NewDecompressor(compPath)
 	require.NoError(t, err)
 	defer decomp.Close()
@@ -81,9 +81,9 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	compressFlags := seg.CompressKeys | seg.CompressVals
 
 	t.Run("empty index", func(t *testing.T) {
-		dataPath := GenerateKV(t, tmp, 52, 180, 0, logger, 0)
+		dataPath := generateKV(t, tmp, 52, 180, 0, logger, 0)
 		indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
-		BuildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
+		buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 
 		kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)
 		require.NoError(t, err)
@@ -91,10 +91,10 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 		bt.Close()
 		kv.Close()
 	})
-	dataPath := GenerateKV(t, tmp, 52, 180, keyCount, logger, 0)
+	dataPath := generateKV(t, tmp, 52, 180, keyCount, logger, 0)
 
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
-	BuildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
+	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 
 	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)
 	require.NoError(t, err)
@@ -102,7 +102,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	defer bt.Close()
 	defer kv.Close()
 
-	keys, err := PivotKeysFromKV(dataPath)
+	keys, err := pivotKeysFromKV(dataPath)
 	require.NoError(t, err)
 
 	getter := seg.NewReader(kv.MakeGetter(), compressFlags)
@@ -164,12 +164,12 @@ func Test_BtreeIndex_Build(t *testing.T) {
 	keyCount, M := 20000, 510
 
 	compressFlags := seg.CompressKeys | seg.CompressVals
-	dataPath := GenerateKV(t, tmp, 52, 48, keyCount, logger, compressFlags)
-	keys, err := PivotKeysFromKV(dataPath)
+	dataPath := generateKV(t, tmp, 52, 48, keyCount, logger, compressFlags)
+	keys, err := pivotKeysFromKV(dataPath)
 	require.NoError(t, err)
 
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
-	BuildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
+	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 	require.NoError(t, err)
 
 	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)
@@ -200,6 +200,17 @@ func Test_BtreeIndex_Build(t *testing.T) {
 	}
 }
 
+// Opens .kv at dataPath and generates index over it to file 'indexPath'
+func buildBtreeIndex(tb testing.TB, dataPath, indexPath string, compressed seg.FileCompression, seed uint32, logger log.Logger, noFsync bool) {
+	tb.Helper()
+	decomp, err := seg.NewDecompressor(dataPath)
+	require.NoError(tb, err)
+	defer decomp.Close()
+
+	err = BuildBtreeIndexWithDecompressor(indexPath, decomp, compressed, background.NewProgressSet(), filepath.Dir(indexPath), seed, logger, noFsync)
+	require.NoError(tb, err)
+}
+
 func Test_BtreeIndex_Seek2(t *testing.T) {
 	t.Parallel()
 
@@ -208,10 +219,10 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 	keyCount, M := 1_200_000, 1024
 
 	compressFlags := seg.CompressKeys | seg.CompressVals
-	dataPath := GenerateKV(t, tmp, 52, 48, keyCount, logger, compressFlags)
+	dataPath := generateKV(t, tmp, 52, 48, keyCount, logger, compressFlags)
 
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
-	BuildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
+	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 
 	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)
 	require.NoError(t, err)
@@ -219,7 +230,7 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 	defer bt.Close()
 	defer kv.Close()
 
-	keys, err := PivotKeysFromKV(dataPath)
+	keys, err := pivotKeysFromKV(dataPath)
 	require.NoError(t, err)
 
 	getter := seg.NewReader(kv.MakeGetter(), compressFlags)
@@ -302,7 +313,7 @@ func TestBpsTree_Seek(t *testing.T) {
 	logger := log.New()
 
 	compressFlag := seg.CompressNone
-	dataPath := GenerateKV(t, tmp, 10, 48, keyCount, logger, compressFlag)
+	dataPath := generateKV(t, tmp, 10, 48, keyCount, logger, compressFlag)
 
 	kv, err := seg.NewDecompressor(dataPath)
 	require.NoError(t, err)

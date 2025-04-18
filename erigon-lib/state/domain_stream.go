@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
-	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 	btree2 "github.com/tidwall/btree"
 )
 
@@ -49,7 +48,7 @@ type CursorItem struct {
 	iter         btree2.MapIter[string, dataWithPrevStep]
 	dg           *seg.Reader
 	dg2          *seg.Reader
-	btCursor     *ee.Cursor
+	btCursor     *Cursor
 	key          []byte
 	val          []byte
 	step         uint64

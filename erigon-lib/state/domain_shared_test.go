@@ -52,7 +52,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	rnd := NewRnd(2342)
+	rnd := newRnd(2342)
 	maxTx := stepSize * 8
 
 	// 1. generate data
@@ -133,7 +133,7 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	maxTx := stepSize
 	hashes := make([][]byte, maxTx)
 	count := 10
-	rnd := NewRnd(0)
+	rnd := newRnd(0)
 	ac.Close()
 	err = rwTx.Commit()
 	require.NoError(t, err)

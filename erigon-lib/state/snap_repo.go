@@ -346,7 +346,7 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 					f.logger.Warn("[agg] SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
 				}
 				if exists {
-					if item.bindex, err = ee.OpenBtreeIndexWithDecompressor(fPath, ee.DefaultBtreeM, item.decompressor, p.DataFileCompression()); err != nil {
+					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, DefaultBtreeM, item.decompressor, p.DataFileCompression()); err != nil {
 						_, fName := filepath.Split(fPath)
 						f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files maybe good
@@ -361,7 +361,7 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 					f.logger.Debug("SnapshotRepo.openDirtyFiles: FileExist", "f", fName, "err", err)
 				}
 				if exists {
-					if item.existence, err = ee.OpenExistenceFilter(fPath); err != nil {
+					if item.existence, err = OpenExistenceFilter(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files maybe good

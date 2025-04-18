@@ -45,7 +45,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	defer domains.Close()
 	maxTx := stepSize * 258
 
-	rnd := NewRnd(4500)
+	rnd := newRnd(4500)
 
 	keys := make([][]byte, 8)
 	for i := 0; i < len(keys); i++ {

@@ -1,4 +1,4 @@
-package entity_extras
+package state
 
 import (
 	"strings"
@@ -12,7 +12,7 @@ import (
 func TestNewBtIndex(t *testing.T) {
 	t.Parallel()
 	keyCount := 10000
-	kvPath := GenerateKV(t, t.TempDir(), 20, 10, keyCount, log.New(), seg.CompressNone)
+	kvPath := generateKV(t, t.TempDir(), 20, 10, keyCount, log.New(), seg.CompressNone)
 
 	indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
 

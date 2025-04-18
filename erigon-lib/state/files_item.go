@@ -63,9 +63,12 @@ type filesItem struct {
 	canDelete atomic.Bool
 }
 
-type FilesItem = ee.FilesItem
-type ExistenceFilter = ee.ExistenceFilter
-type BtIndex = ee.BtIndex
+type FilesItem interface {
+	Segment() *seg.Decompressor
+	AccessorIndex() *recsplit.Index
+	BtIndex() *BtIndex
+	ExistenceFilter() *ExistenceFilter
+}
 
 var _ FilesItem = (*filesItem)(nil)
 
