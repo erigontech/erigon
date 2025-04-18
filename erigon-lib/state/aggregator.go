@@ -336,10 +336,8 @@ func (at *AggregatorRoTx) AllFiles() VisibleFiles {
 	}
 	return res
 }
-func (at *AggregatorRoTx) Files(domain kv.Domain) VisibleFiles {
-	return at.d[domain].Files()
-}
-func (at *AggregatorRoTx) StepSize() uint64 { return at.a.StepSize() }
+func (at *AggregatorRoTx) Files(domain kv.Domain) VisibleFiles { return at.d[domain].Files() }
+func (at *AggregatorRoTx) StepSize() uint64                    { return at.a.StepSize() }
 
 func (a *Aggregator) Files() []string {
 	ac := a.BeginFilesRo()
@@ -1100,9 +1098,7 @@ func (at *AggregatorRoTx) EndTxNumNoCommitment() uint64 {
 	)
 }
 
-func (at *AggregatorRoTx) Agg() *Aggregator {
-	return at.a
-}
+func (at *AggregatorRoTx) Agg() *Aggregator { return at.a }
 
 func (at *AggregatorRoTx) MinStepInDb(tx kv.Tx, domain kv.Domain) (lstInDb uint64) {
 	return at.d[domain].d.minStepInDB(tx)

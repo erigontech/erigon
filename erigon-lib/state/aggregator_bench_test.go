@@ -181,7 +181,7 @@ func Benchmark_BTree_Seek(b *testing.B) {
 			cur, err := bt.Seek(getter, keys[p])
 			require.NoError(b, err)
 
-			require.EqualValues(b, keys[p], cur.Key())
+			require.EqualValues(b, keys[p], cur.key)
 			cur.Close()
 		}
 	})
@@ -193,7 +193,7 @@ func Benchmark_BTree_Seek(b *testing.B) {
 			cur, err := bt.Seek(getter, keys[p])
 			require.NoError(b, err)
 
-			require.EqualValues(b, keys[p], cur.Key())
+			require.EqualValues(b, keys[p], cur.key)
 
 			prevKey := common.Copy(keys[p])
 			ntimer := time.Duration(0)
