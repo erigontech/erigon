@@ -91,7 +91,7 @@ type Progress struct {
 	prevExecTime          time.Time
 	prevExecutedBlockNum  uint64
 	prevExecutedTxNum     uint64
-	prevExecutedGas       uint64
+	prevExecutedGas       int64
 	prevExecCount         uint64
 	prevActivations       int64
 	prevTaskDuration      time.Duration
@@ -107,7 +107,7 @@ type Progress struct {
 	prevCommitTime        time.Time
 	prevCommittedBlockNum uint64
 	prevCommittedTxNum    uint64
-	prevCommittedGas      uint64
+	prevCommittedGas      int64
 	commitThreshold       uint64
 
 	logPrefix string
@@ -165,7 +165,7 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 
 	curTaskGasPerSec := int64(float64(curTaskGas) / interval.Seconds())
 
-	switch ex := ex.(type) {
+	switch ex.(type) {
 	case *parallelExecutor:
 		execCount := uint64(te.execCount.Load())
 		abortCount := uint64(te.abortCount.Load())
@@ -175,7 +175,7 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 
 		execDiff := execCount - p.prevExecCount
 
-		var repeats = max(int(execDiff)-int(max(int(te.lastExecutedTxNum)-int(p.prevExecutedTxNum), 0)), 0)
+		var repeats = max(int(execDiff)-int(max(int(te.lastExecutedTxNum.Load())-int(p.prevExecutedTxNum), 0)), 0)
 		var repeatRatio float64
 
 		if repeats > 0 {
@@ -209,7 +209,7 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 			"invalid", common.PrettyCounter(invalidCount - p.prevInvalidCount),
 			"tgas/s", fmt.Sprintf("%s(%s)", common.PrettyCounter(curTaskGasPerSec), common.PrettyCounter(avgTaskGasPerSec)),
 			"bgas/s", common.PrettyCounter(curBlockGasPerSec),
-			"workers", fmt.Sprintf("%d(%.1f)", ex.taskExecMetrics.Active.Ema.Get(), float64(curTaskDur)/float64(interval)),
+			"actwrk", float64(curTaskDur) / float64(interval),
 			"tdur", fmt.Sprintf("%dµs", avgTaskDur.Microseconds()),
 			"trdur", fmt.Sprintf("%dµs(%.2f%%)", avgReadDur.Microseconds(), readRatio),
 			"bdur", fmt.Sprintf("%dms", avgBlockDur.Milliseconds()),
@@ -236,24 +236,24 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 		}
 	}
 
-	executedGasSec := uint64(float64(te.executedGas-p.prevExecutedGas) / interval.Seconds())
+	executedGasSec := uint64(float64(te.executedGas.Load()-p.prevExecutedGas) / interval.Seconds())
 	var executedTxSec uint64
 
-	if te.lastExecutedTxNum > p.prevExecutedTxNum {
-		executedTxSec = uint64(float64(te.lastExecutedTxNum-p.prevExecutedTxNum) / interval.Seconds())
+	if uint64(te.lastExecutedTxNum.Load()) > p.prevExecutedTxNum {
+		executedTxSec = uint64(float64(uint64(te.lastExecutedTxNum.Load())-p.prevExecutedTxNum) / interval.Seconds())
 	}
-	executedDiffBlocks := max(int(te.lastExecutedBlockNum)-int(p.prevExecutedBlockNum), 0)
-	executedDiffTxs := uint64(max(int(te.lastExecutedTxNum)-int(p.prevExecutedTxNum), 0))
+	executedDiffBlocks := max(te.lastExecutedBlockNum.Load()-int64(p.prevExecutedBlockNum), 0)
+	executedDiffTxs := uint64(max(te.lastExecutedTxNum.Load()-int64(p.prevExecutedTxNum), 0))
 
-	p.log("executed", suffix, tx, te, rs, interval, te.lastExecutedBlockNum, executedDiffBlocks,
+	p.log("executed", suffix, tx, te, rs, interval, uint64(te.lastExecutedBlockNum.Load()), executedDiffBlocks,
 		executedDiffTxs, executedTxSec, executedGasSec, false, execVals)
 
 	p.prevExecTime = currentTime
 
-	if te.lastExecutedBlockNum > 0 {
-		p.prevExecutedTxNum = te.lastExecutedTxNum
-		p.prevExecutedGas = te.executedGas
-		p.prevExecutedBlockNum = te.lastExecutedBlockNum
+	if te.lastExecutedBlockNum.Load() > 0 {
+		p.prevExecutedTxNum = uint64(te.lastExecutedTxNum.Load())
+		p.prevExecutedGas = te.executedGas.Load()
+		p.prevExecutedBlockNum = uint64(te.lastExecutedBlockNum.Load())
 	}
 }
 
@@ -287,7 +287,7 @@ func (p *Progress) LogCommitted(tx kv.Tx, commitStart time.Time, rs *state.State
 	if te.lastCommittedTxNum > p.prevCommittedTxNum {
 		committedTxSec = uint64(float64(te.lastCommittedTxNum-p.prevCommittedTxNum) / interval.Seconds())
 	}
-	committedDiffBlocks := max(int(te.lastCommittedBlockNum)-int(p.prevCommittedBlockNum), 0)
+	committedDiffBlocks := max(int64(te.lastCommittedBlockNum)-int64(p.prevCommittedBlockNum), 0)
 
 	p.log("committed", suffix, tx, te, rs, interval, te.lastCommittedBlockNum, committedDiffBlocks,
 		te.lastCommittedTxNum-p.prevCommittedTxNum, committedTxSec, committedGasSec, true, nil)
@@ -319,19 +319,19 @@ func (p *Progress) LogComplete(tx kv.Tx, rs *state.StateV3, ex executor) {
 	gas := te.committedGas
 
 	if gas == 0 {
-		gas = te.executedGas
+		gas = te.executedGas.Load()
 	}
 
 	lastTxNum := te.lastCommittedTxNum
 
 	if lastTxNum == 0 {
-		lastTxNum = te.lastExecutedTxNum
+		lastTxNum = uint64(te.lastExecutedTxNum.Load())
 	}
 
 	lastBlockNum := te.lastCommittedBlockNum
 
 	if lastBlockNum == 0 {
-		lastBlockNum = te.lastExecutedBlockNum
+		lastBlockNum = uint64(te.lastExecutedBlockNum.Load())
 	}
 
 	gasSec := uint64(float64(gas) / interval.Seconds())
@@ -339,13 +339,13 @@ func (p *Progress) LogComplete(tx kv.Tx, rs *state.StateV3, ex executor) {
 	if lastTxNum > p.initialTxNum {
 		txSec = uint64((float64(lastTxNum) - float64(p.initialTxNum)) / interval.Seconds())
 	}
-	diffBlocks := max(int(lastBlockNum)-int(p.initialBlockNum), 0)
+	diffBlocks := max(int64(lastBlockNum)-int64(p.initialBlockNum), 0)
 
 	p.log("done", suffix, tx, te, rs, interval, lastBlockNum, diffBlocks, lastTxNum-p.initialTxNum, txSec, gasSec, true, nil)
 }
 
 func (p *Progress) log(mode string, suffix string, tx kv.Tx, te *txExecutor, rs *state.StateV3, interval time.Duration,
-	blk uint64, blks int, txs uint64, txsSec uint64, gasSec uint64, logSteps bool, extraVals []interface{}) {
+	blk uint64, blks int64, txs uint64, txsSec uint64, gasSec uint64, logSteps bool, extraVals []interface{}) {
 
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
@@ -678,7 +678,7 @@ func ExecV3(ctx context.Context,
 
 	agg.BuildFilesInBackground(outputTxNum.Load())
 
-	var uncommittedGas uint64
+	var uncommittedGas int64
 	var b *types.Block
 
 	var readAhead chan uint64
@@ -797,7 +797,7 @@ func ExecV3(ctx context.Context,
 					return err
 				}
 
-				uncommittedGas = se.executedGas - se.committedGas
+				uncommittedGas = se.executedGas.Load() - int64(se.committedGas)
 				mxExecBlocks.Add(1)
 
 				if !continueLoop {
@@ -948,7 +948,7 @@ func ExecV3(ctx context.Context,
 		}
 
 		var lastBlockResult blockResult
-		var uncommittedGas uint64
+		var uncommittedGas int64
 		var flushPending bool
 
 		err = func() error {
@@ -969,9 +969,7 @@ func ExecV3(ctx context.Context,
 				case applyResult := <-applyResults:
 					switch applyResult := applyResult.(type) {
 					case *txResult:
-						pe.executedGas += applyResult.gasUsed
-						pe.lastExecutedTxNum = applyResult.txNum
-
+						uncommittedGas += applyResult.gasUsed
 						pe.rs.SetTxNum(applyResult.txNum, applyResult.blockNum)
 						if err := pe.rs.ApplyState4(ctx, applyTx,
 							applyResult.blockNum, applyResult.txNum, applyResult.writeSet,
@@ -984,8 +982,6 @@ func ExecV3(ctx context.Context,
 							pe.doms.SetTxNum(applyResult.lastTxNum)
 							pe.doms.SetBlockNum(applyResult.BlockNum)
 							lastBlockResult = *applyResult
-							pe.lastExecutedBlockNum = applyResult.BlockNum
-							uncommittedGas += applyResult.GasUsed
 						}
 
 						flushPending = pe.rs.SizeEstimate() > pe.cfg.batchSize.Bytes()

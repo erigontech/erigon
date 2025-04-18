@@ -231,11 +231,11 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 			BlockNum:  txTask.BlockNumber(),
 			lastTxNum: txTask.TxNum,
 		}
-		se.lastExecutedTxNum = txTask.TxNum
-		se.lastExecutedBlockNum = txTask.BlockNumber()
+		se.lastExecutedTxNum.Store(int64(txTask.TxNum))
+		se.lastExecutedBlockNum.Store(int64(txTask.BlockNumber()))
 
 		if task.IsBlockEnd() {
-			se.executedGas += se.gasUsed
+			se.executedGas.Add(int64(se.gasUsed))
 			se.gasUsed = 0
 			se.blobGasUsed = 0
 		}

@@ -120,7 +120,7 @@ type txResult struct {
 	blockNum   uint64
 	blockTime  uint64
 	txNum      uint64
-	gasUsed    uint64
+	gasUsed    int64
 	logs       []*types.Log
 	traceFroms map[libcommon.Address]struct{}
 	traceTos   map[libcommon.Address]struct{}
@@ -397,12 +397,12 @@ type txExecutor struct {
 
 	shouldGenerateChangesets bool
 
-	lastExecutedBlockNum  uint64
-	lastExecutedTxNum     uint64
-	executedGas           uint64
+	lastExecutedBlockNum  atomic.Int64
+	lastExecutedTxNum     atomic.Int64
+	executedGas           atomic.Int64
 	lastCommittedBlockNum uint64
 	lastCommittedTxNum    uint64
-	committedGas          uint64
+	committedGas          int64
 
 	execLoopGroup *errgroup.Group
 
@@ -711,8 +711,7 @@ func newBlockExec(blockNum uint64, applyResults chan applyResult, profile bool) 
 	}
 }
 
-func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg ExecuteBlockCfg, rs *state.StateV3Buffered,
-	accumulator *shards.Accumulator, in *exec.QueueWithRetry, applyTx kv.Tx, logger log.Logger) (result *blockResult, err error) {
+func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, res *exec.Result, applyTx kv.Tx) (result *blockResult, err error) {
 
 	task, ok := res.Task.(*taskVersion)
 
@@ -897,11 +896,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 	}
 
 	maxValidated := be.validateTasks.maxComplete()
-	be.scheduleExecution(ctx, in)
+	be.scheduleExecution(ctx, pe.in)
 
 	if be.finalizeTasks.minPending() != -1 {
-		stateWriter := state.NewStateWriterBufferedV3(rs, accumulator)
-		stateReader := state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains(), applyTx))
+		stateWriter := state.NewStateWriterBufferedV3(pe.rs, pe.accumulator)
+		stateReader := state.NewBufferedReader(pe.rs, state.NewReaderV3(pe.rs.Domains(), applyTx))
 
 		applyResult := txResult{
 			blockNum:   be.blockNum,
@@ -926,7 +925,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 			}
 
 			txResult := be.results[tx]
-			_, err = txResult.finalize(prevReceipt, cfg.engine, be.versionMap, stateReader, stateWriter)
+			_, err = txResult.finalize(prevReceipt, pe.cfg.engine, be.versionMap, stateReader, stateWriter)
 
 			if err != nil {
 				return nil, err
@@ -934,7 +933,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 
 			applyResult.txNum = txTask.Version().TxNum
 			if txResult.Receipt != nil {
-				applyResult.gasUsed += txResult.Receipt.GasUsed
+				applyResult.gasUsed += int64(txResult.Receipt.GasUsed)
 				be.gasUsed += txResult.Receipt.GasUsed
 			}
 			applyResult.blockTime = txTask.BlockTime()
@@ -946,13 +945,15 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 		}
 
 		if applyResult.txNum > 0 {
+			pe.executedGas.Add(int64(applyResult.gasUsed))
+			pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
 			applyResult.writeSet = stateWriter.WriteSet()
 			be.applyResults <- &applyResult
 		}
 	}
 
 	if be.finalizeTasks.countComplete() == len(be.tasks) && be.execTasks.countComplete() == len(be.tasks) {
-		logger.Debug("exec summary", "block", be.blockNum, "tasks", len(be.tasks), "execs", be.cntExec,
+		pe.logger.Debug("exec summary", "block", be.blockNum, "tasks", len(be.tasks), "execs", be.cntExec,
 			"speculative", be.cntSpecExec, "success", be.cntSuccess, "aborts", be.cntAbort, "validations", be.cntTotalValidations, "failures", be.cntValidationFail,
 			"retries", fmt.Sprintf("%.2f%%", float64(be.cntAbort+be.cntValidationFail)/float64(be.cntExec)*100),
 			"execs", fmt.Sprintf("%.2f%%", float64(be.cntExec)/float64(len(be.tasks))*100))
@@ -963,7 +964,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 
 		if be.profile {
 			allDeps = state.GetDep(be.blockIO)
-			deps = state.BuildDAG(be.blockIO, logger)
+			deps = state.BuildDAG(be.blockIO, pe.logger)
 		}
 
 		txTask := be.tasks[len(be.tasks)-1].Task
@@ -1228,6 +1229,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 
 		if blockResult.complete {
 			if blockExecutor, ok := pe.blockExecutors[blockResult.BlockNum]; ok {
+				pe.lastExecutedBlockNum.Store(int64(blockResult.BlockNum))
 				pe.execCount.Add(int64(blockExecutor.cntExec))
 				pe.abortCount.Add(int64(blockExecutor.cntAbort))
 				pe.invalidCount.Add(int64(blockExecutor.cntValidationFail))
@@ -1414,7 +1416,7 @@ func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.Tx) (
 			return nil, fmt.Errorf("unknown block: %d", txResult.Version().BlockNum)
 		}
 
-		blockResult, err = blockExecutor.nextResult(ctx, txResult, pe.cfg, pe.rs, pe.accumulator, pe.in, applyTx, pe.logger)
+		blockResult, err = blockExecutor.nextResult(ctx, pe, txResult, applyTx)
 
 		if err != nil {
 			return blockResult, err
