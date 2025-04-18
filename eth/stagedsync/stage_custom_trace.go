@@ -58,7 +58,7 @@ func StageCustomTraceCfg(db kv.TemporalRwDB, dirs datadir.Dirs, br services.Full
 		Workers:     syncCfg.ExecWorkerCount,
 
 		ProduceReceiptDomain: dbg.EnvBool("PRODUCE_RECEIPT_DOMAIN", false),
-		ProduceRCacheDomain:  dbg.EnvBool("PRODUCE_RECEIPT_CACHE_DOMAIN", true),
+		ProduceRCacheDomain:  syncCfg.PersistReceiptsCache,
 	}
 	return CustomTraceCfg{
 		db:       db,

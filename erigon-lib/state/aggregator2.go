@@ -252,6 +252,7 @@ func EnableHistoricalCommitment() {
 	Schema[kv.CommitmentDomain] = cfg
 }
 func EnableHistoricalRCache() {
+	panic(1)
 	cfg := Schema[kv.RCacheDomain]
 	cfg.hist.historyDisabled = false
 	cfg.hist.snapshotsDisabled = false
