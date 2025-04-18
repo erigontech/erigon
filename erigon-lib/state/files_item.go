@@ -267,21 +267,6 @@ type visibleFile struct {
 	src *filesItem
 }
 
-func (i *visibleFile) isSubSetOf(j *visibleFile) bool { return i.src.isProperSubsetOf(j.src) } //nolint
-func (i *visibleFile) isSubsetOf(j *visibleFile) bool { return i.src.isProperSubsetOf(j.src) } //nolint
-
-func (i visibleFile) Filename() string {
-	return i.src.decompressor.FilePath()
-}
-
-func (i visibleFile) StartTxNum() uint64 {
-	return i.startTxNum
-}
-
-func (i visibleFile) EndTxNum() uint64 {
-	return i.endTxNum
-}
-
 func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l Accessors, trace bool, toTxNum uint64) (roItems []visibleFile) {
 	newVisibleFiles := make([]visibleFile, 0, files.Len())
 	// trace = true
