@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"container/heap"
 	"encoding/binary"
-	"errors"
 	"fmt"
 
 	btree2 "github.com/tidwall/btree"
@@ -302,14 +301,11 @@ func (hi *DomainLatestIterFile) Next() ([]byte, []byte, error) {
 }
 
 // debugIteratePrefix iterates over key-value pairs of the storage domain that start with given prefix
-// Such iteration is not intended to be used in public API, therefore it uses read-write transaction
-// inside the domain. Another version of this for public API use needs to be created, that uses
-// roTx instead and supports ending the iterations before it reaches the end.
 //
 // k and v lifetime is bounded by the lifetime of the iterator
 func (dt *DomainRoTx) debugIteratePrefix(prefix []byte, haveRamUpdates bool,
 	ramIter btree2.MapIter[string, dataWithPrevStep],
-	it func(k []byte, v []byte, step uint64) error,
+	it func(k []byte, v []byte, step uint64) (cont bool, err error),
 	txNum, stepSize uint64,
 	roTx kv.Tx,
 ) error {
@@ -441,11 +437,12 @@ func (dt *DomainRoTx) debugIteratePrefix(prefix []byte, haveRamUpdates bool,
 			}
 		}
 		if len(lastVal) > 0 {
-			if err := it(lastKey, lastVal, lastStep); err != nil {
-				if errors.Is(err, ErrIterateStorageEarlyExit) {
-					return nil
-				}
+			cont, err := it(lastKey, lastVal, lastStep)
+			if err != nil {
 				return err
+			}
+			if !cont {
+				return nil
 			}
 		}
 	}

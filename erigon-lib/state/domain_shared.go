@@ -654,16 +654,10 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter b
 	return
 }
 
-// ErrIterateStorageEarlyExit is used function to stop the iteration inside IterateStoragePrefix and exit without error
-var ErrIterateStorageEarlyExit = errors.New("iterate storage early exit")
-
 // IterateStoragePrefix iterates over key-value pairs of the storage domain that start with given prefix
-// Such iteration is not intended to be used in public API, therefore it uses read-write transaction
-// inside the domain. Another version of this for public API use needs to be created, that uses
-// roTx instead and supports ending the iterations before it reaches the end.
 //
 // k and v lifetime is bounded by the lifetime of the iterator
-func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v []byte, step uint64) error) error {
+func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v []byte, step uint64) (cont bool, err error)) error {
 	haveRamUpdates := sd.storage.Len() > 0
 	return sd.aggTx.d[kv.StorageDomain].debugIteratePrefix(prefix, haveRamUpdates, sd.storage.Iter(), it, sd.txNum, sd.StepSize(), sd.roTtx)
 }
@@ -857,9 +851,9 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 		step uint64
 	}
 	tombs := make([]tuple, 0, 8)
-	if err := sd.IterateStoragePrefix(prefix, func(k, v []byte, step uint64) error {
+	if err := sd.IterateStoragePrefix(prefix, func(k, v []byte, step uint64) (bool, error) {
 		tombs = append(tombs, tuple{k, v, step})
-		return nil
+		return true, nil
 	}); err != nil {
 		return err
 	}
@@ -871,9 +865,9 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 
 	if assert.Enable {
 		forgotten := 0
-		if err := sd.IterateStoragePrefix(prefix, func(k, v []byte, step uint64) error {
+		if err := sd.IterateStoragePrefix(prefix, func(k, v []byte, step uint64) (bool, error) {
 			forgotten++
-			return nil
+			return true, nil
 		}); err != nil {
 			return err
 		}

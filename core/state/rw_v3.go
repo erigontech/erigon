@@ -378,9 +378,9 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 		if err := w.rs.domains.DomainDel(kv.CodeDomain, address[:], nil, nil, 0); err != nil {
 			return err
 		}
-		if err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte, step uint64) error {
+		if err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte, step uint64) (bool, error) {
 			w.writeLists[kv.StorageDomain.String()].Push(string(k), nil)
-			return nil
+			return true, nil
 		}); err != nil {
 			return err
 		}
@@ -583,9 +583,9 @@ func (r *ReaderV3) AddressHaveStorageKeys(address common.Address) (bool, error) 
 	}
 
 	var haveOneStorageKey bool
-	err := sd.IterateStoragePrefix(address.Bytes(), func(ask []byte, val []byte, step uint64) error {
+	err := sd.IterateStoragePrefix(address.Bytes(), func(ask []byte, val []byte, step uint64) (bool, error) {
 		haveOneStorageKey = true
-		return state.ErrIterateStorageEarlyExit
+		return false, nil
 	})
 	if err != nil {
 		return false, err
@@ -690,13 +690,13 @@ func (r *ReaderParallelV3) ResetReadSet()                        { r.readLists =
 
 func (r *ReaderParallelV3) AddressHaveStorageKeys(address common.Address) (bool, error) {
 	var haveOneStorageKey bool
-	err := r.sd.IterateStoragePrefix(address.Bytes(), func(ask []byte, val []byte, step uint64) error {
+	err := r.sd.IterateStoragePrefix(address.Bytes(), func(ask []byte, val []byte, step uint64) (bool, error) {
 		haveOneStorageKey = true
 		if !r.discardReadList {
 			// lifecycle of `r.readList` is less than lifecycle of `r.rs` and `r.tx`, also `r.rs` and `r.tx` do store data immutable way
 			r.readLists[kv.StorageDomain.String()].Push(string(ask), common.Copy(val))
 		}
-		return state.ErrIterateStorageEarlyExit
+		return false, nil
 	})
 	if err != nil {
 		return false, err
