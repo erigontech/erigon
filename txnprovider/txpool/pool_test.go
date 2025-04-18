@@ -27,6 +27,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/state"
 
 	"github.com/stretchr/testify/require"
