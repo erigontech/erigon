@@ -398,8 +398,10 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 		var removed int
 		for _, res := range files {
 			if !strings.Contains(res.Name(), domainToRemove.String()) {
+				fmt.Printf("skip: %s\n", res.Name())
 				continue
 			}
+			fmt.Printf("rm: %s\n", res.Name())
 			if err := os.Remove(res.Path); err != nil {
 				return fmt.Errorf("failed to remove %s: %w", res.Path, err)
 			}

@@ -526,7 +526,9 @@ func TestBlockReceiptStorage(t *testing.T) {
 	require.NoError(rawdb.WriteSenders(tx, hash, 1, body.SendersFromTxs()))
 
 	// Insert the receipt slice into the database and check presence
-	require.NoError(rawdb.WriteReceiptsCache(tx, 1, hash, receipts))
+	for _, r := range receipts {
+		require.NoError(rawdb.WriteReceiptCache(tx, r))
+	}
 
 	b, _, err := br.BlockWithSenders(ctx, tx, hash, 1)
 	require.NoError(err)
