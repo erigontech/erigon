@@ -19,6 +19,7 @@ package stagedsync
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/big"
 	"runtime"
@@ -315,7 +316,7 @@ Loop:
 		unwindTo := headerInserter.UnwindPoint()
 		temporalTx, ok := tx.(kv.TemporalTx)
 		if !ok {
-			return fmt.Errorf("tx is not a temporal tx")
+			return errors.New("tx is not a temporal tx")
 		}
 		doms, err := state.NewSharedDomains(temporalTx, logger) //TODO: if remove this line TestBlockchainHeaderchainReorgConsistency failing
 		if err != nil {

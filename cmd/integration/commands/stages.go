@@ -631,7 +631,7 @@ func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 
 		temporalTx, ok := tx.(kv.TemporalTx)
 		if !ok {
-			return fmt.Errorf("tx is not a temporal tx")
+			return errors.New("tx is not a temporal tx")
 		}
 		domains, err := libstate.NewSharedDomains(temporalTx, logger)
 		if err != nil {
@@ -1113,7 +1113,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			if execProgress == 0 {
 				temporalTx, ok := tx.(kv.TemporalTx)
 				if !ok {
-					return fmt.Errorf("tx is not a temporal tx")
+					return errors.New("tx is not a temporal tx")
 				}
 				doms, err := libstate.NewSharedDomains(temporalTx, log.New())
 				if err != nil {

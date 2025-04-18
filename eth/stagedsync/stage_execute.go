@@ -169,7 +169,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	if txc.Doms == nil {
 		temporalTx, ok := txc.Tx.(kv.TemporalTx)
 		if !ok {
-			return fmt.Errorf("tx is not a temporal tx")
+			return errors.New("tx is not a temporal tx")
 		}
 		domains, err = libstate.NewSharedDomains(temporalTx, logger)
 		if err != nil {
