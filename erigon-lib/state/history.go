@@ -109,9 +109,6 @@ func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error
 	if cfg.indexList == 0 {
 		cfg.indexList = AccessorHashMap
 	}
-	if cfg.iiCfg.filenameBase == "" {
-		cfg.iiCfg.filenameBase = cfg.filenameBase
-	}
 
 	h := History{
 		histCfg:       cfg,

@@ -127,7 +127,7 @@ func NewDomain(cfg domainCfg, aggStep uint64, logger log.Logger) (*Domain, error
 	if cfg.hist.iiCfg.dirs.SnapDomain == "" {
 		panic("assert: empty `dirs`")
 	}
-	if cfg.hist.filenameBase == "" {
+	if cfg.hist.iiCfg.filenameBase == "" {
 		panic("assert: emtpy `filenameBase`" + cfg.name.String())
 	}
 
