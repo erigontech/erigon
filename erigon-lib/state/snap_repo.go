@@ -7,6 +7,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
@@ -103,19 +104,14 @@ func (f *SnapshotRepo) RecalcVisibleFiles(to RootNum) {
 	f.current = f.calcVisibleFiles(to)
 }
 
-type VisibleFile interface {
-	Filename() string
-	StartTxNum() uint64
-	EndTxNum() uint64
-}
-
-type VisibleFiles []VisibleFile
+type VisibleFile = kv.VisibleFile
+type VisibleFiles = kv.VisibleFiles
 
 func (f *SnapshotRepo) visibleFiles() visibleFiles {
 	return f.current
 }
 
-func (f *SnapshotRepo) VisibleFiles() (files []VisibleFile) {
+func (f *SnapshotRepo) VisibleFiles() (files VisibleFiles) {
 	for _, file := range f.current {
 		files = append(files, file)
 	}
@@ -350,7 +346,7 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 					f.logger.Warn("[agg] SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
 				}
 				if exists {
-					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, DefaultBtreeM, item.decompressor, p.DataFileCompression()); err != nil {
+					if item.bindex, err = ee.OpenBtreeIndexWithDecompressor(fPath, ee.DefaultBtreeM, item.decompressor, p.DataFileCompression()); err != nil {
 						_, fName := filepath.Split(fPath)
 						f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files maybe good
@@ -365,7 +361,7 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 					f.logger.Debug("SnapshotRepo.openDirtyFiles: FileExist", "f", fName, "err", err)
 				}
 				if exists {
-					if item.existence, err = OpenExistenceFilter(fPath); err != nil {
+					if item.existence, err = ee.OpenExistenceFilter(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files maybe good

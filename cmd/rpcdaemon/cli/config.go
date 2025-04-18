@@ -57,6 +57,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/state/stats"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/health"
@@ -453,7 +454,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			rawDB.View(context.Background(), func(tx kv.Tx) error {
 				aggTx := agg.BeginFilesRo()
 				defer aggTx.Close()
-				aggTx.LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
+				stats.LogStats(aggTx, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
 					_, histBlockNumProgress, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
 					return histBlockNumProgress, err
 				})
@@ -489,7 +490,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 					rawDB.View(context.Background(), func(tx kv.Tx) error {
 						ac := agg.BeginFilesRo()
 						defer ac.Close()
-						ac.LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
+						stats.LogStats(ac, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
 							_, histBlockNumProgress, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
 							return histBlockNumProgress, err
 						})

@@ -63,12 +63,9 @@ type filesItem struct {
 	canDelete atomic.Bool
 }
 
-type FilesItem interface {
-	Segment() *seg.Decompressor
-	AccessorIndex() *recsplit.Index
-	BtIndex() *BtIndex
-	ExistenceFilter() *ExistenceFilter
-}
+type FilesItem = ee.FilesItem
+type ExistenceFilter = ee.ExistenceFilter
+type BtIndex = ee.BtIndex
 
 var _ FilesItem = (*filesItem)(nil)
 
@@ -274,11 +271,11 @@ func (i visibleFile) Filename() string {
 	return i.src.decompressor.FilePath()
 }
 
-func (i visibleFile) StartTxNum() uint64 {
+func (i visibleFile) StartRootNum() uint64 {
 	return i.startTxNum
 }
 
-func (i visibleFile) EndTxNum() uint64 {
+func (i visibleFile) EndRootNum() uint64 {
 	return i.endTxNum
 }
 

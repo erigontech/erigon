@@ -59,6 +59,8 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
 	libstate "github.com/erigontech/erigon-lib/state"
+	ee "github.com/erigontech/erigon-lib/state/entity_extras"
+	"github.com/erigontech/erigon-lib/state/stats"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
@@ -425,7 +427,7 @@ func doBtSearch(cliCtx *cli.Context) error {
 	dbg.ReadMemStats(&m)
 	logger.Info("before open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	compress := seg.CompressKeys | seg.CompressVals
-	kv, idx, err := libstate.OpenBtreeIndexAndDataFile(srcF, dataFilePath, libstate.DefaultBtreeM, compress, false)
+	kv, idx, err := ee.OpenBtreeIndexAndDataFile(srcF, dataFilePath, ee.DefaultBtreeM, compress, false)
 	if err != nil {
 		return err
 	}
@@ -990,7 +992,7 @@ func doMeta(cliCtx *cli.Context) error {
 			panic(err)
 		}
 		defer src.Close()
-		bt, err := libstate.OpenBtreeIndexWithDecompressor(fname, libstate.DefaultBtreeM, src, seg.CompressNone)
+		bt, err := ee.OpenBtreeIndexWithDecompressor(fname, ee.DefaultBtreeM, src, seg.CompressNone)
 		if err != nil {
 			return err
 		}
@@ -1194,7 +1196,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	err = chainDB.View(ctx, func(tx kv.Tx) error {
 		ac := agg.BeginFilesRo()
 		defer ac.Close()
-		ac.LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
+		stats.LogStats(ac, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
 			_, histBlockNumProgress, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader)).FindBlockNum(tx, endTxNumMinimax)
 			return histBlockNumProgress, err
 		})

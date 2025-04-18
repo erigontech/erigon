@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
+	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 )
 
 func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.RwDB, *Aggregator) {
@@ -97,7 +98,7 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 }
 
 func queueKeys(ctx context.Context, seed, ofSize uint64) <-chan []byte {
-	rnd := newRnd(seed)
+	rnd := NewRnd(seed)
 	keys := make(chan []byte, 1)
 	go func() {
 		for {
@@ -116,22 +117,22 @@ func queueKeys(ctx context.Context, seed, ofSize uint64) <-chan []byte {
 
 func Benchmark_BtreeIndex_Search(b *testing.B) {
 	logger := log.New()
-	rnd := newRnd(uint64(time.Now().UnixNano()))
+	rnd := NewRnd(uint64(time.Now().UnixNano()))
 	tmp := b.TempDir()
 	defer os.RemoveAll(tmp)
 	dataPath := "../../data/storage.256-288.kv"
 
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 	comp := seg.CompressKeys | seg.CompressVals
-	buildBtreeIndex(b, dataPath, indexPath, comp, 1, logger, true)
+	ee.BuildBtreeIndex(b, dataPath, indexPath, comp, 1, logger, true)
 
 	M := 1024
-	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), comp, false)
+	kv, bt, err := ee.OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), comp, false)
 	require.NoError(b, err)
 	defer bt.Close()
 	defer kv.Close()
 
-	keys, err := pivotKeysFromKV(dataPath)
+	keys, err := ee.PivotKeysFromKV(dataPath)
 	require.NoError(b, err)
 	getter := seg.NewReader(kv.MakeGetter(), comp)
 
@@ -152,17 +153,17 @@ func benchInitBtreeIndex(b *testing.B, M uint64, compression seg.FileCompression
 	tmp := b.TempDir()
 	b.Cleanup(func() { os.RemoveAll(tmp) })
 
-	dataPath := generateKV(b, tmp, 52, 10, 1000000, logger, 0)
+	dataPath := ee.GenerateKV(b, tmp, 52, 10, 1000000, logger, 0)
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bt")
 
-	buildBtreeIndex(b, dataPath, indexPath, compression, 1, logger, true)
+	ee.BuildBtreeIndex(b, dataPath, indexPath, compression, 1, logger, true)
 
-	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, M, compression, false)
+	kv, bt, err := ee.OpenBtreeIndexAndDataFile(indexPath, dataPath, M, compression, false)
 	require.NoError(b, err)
 	b.Cleanup(func() { bt.Close() })
 	b.Cleanup(func() { kv.Close() })
 
-	keys, err := pivotKeysFromKV(dataPath)
+	keys, err := ee.PivotKeysFromKV(dataPath)
 	require.NoError(b, err)
 	return kv, bt, keys, dataPath
 }
@@ -171,7 +172,7 @@ func Benchmark_BTree_Seek(b *testing.B) {
 	M := uint64(1024)
 	compress := seg.CompressNone
 	kv, bt, keys, _ := benchInitBtreeIndex(b, M, compress)
-	rnd := newRnd(uint64(time.Now().UnixNano()))
+	rnd := NewRnd(uint64(time.Now().UnixNano()))
 	getter := seg.NewReader(kv.MakeGetter(), compress)
 
 	b.Run("seek_only", func(b *testing.B) {
@@ -181,7 +182,7 @@ func Benchmark_BTree_Seek(b *testing.B) {
 			cur, err := bt.Seek(getter, keys[p])
 			require.NoError(b, err)
 
-			require.EqualValues(b, keys[p], cur.key)
+			require.EqualValues(b, keys[p], cur.Key())
 			cur.Close()
 		}
 	})
@@ -193,7 +194,7 @@ func Benchmark_BTree_Seek(b *testing.B) {
 			cur, err := bt.Seek(getter, keys[p])
 			require.NoError(b, err)
 
-			require.EqualValues(b, keys[p], cur.key)
+			require.EqualValues(b, keys[p], cur.Key())
 
 			prevKey := common.Copy(keys[p])
 			ntimer := time.Duration(0)
@@ -228,7 +229,7 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 		b.Skip("requires existing KV index file at ../../data/storage.kv")
 	}
 
-	rnd := newRnd(uint64(time.Now().UnixNano()))
+	rnd := NewRnd(uint64(time.Now().UnixNano()))
 	tmp := b.TempDir()
 
 	defer os.RemoveAll(tmp)
@@ -244,7 +245,7 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 
 	getter := decomp.MakeGetter()
 
-	keys, err := pivotKeysFromKV(dataPath)
+	keys, err := ee.PivotKeysFromKV(dataPath)
 	require.NoError(b, err)
 
 	for i := 0; i < b.N; i++ {
@@ -397,4 +398,10 @@ func BenchmarkDb_BeginFiles_Throughput_IO(b *testing.B) {
 			tx.Rollback()
 		}
 	})
+}
+
+type RndGen = ee.RndGen
+
+func NewRnd(seed uint64) *ee.RndGen {
+	return ee.NewRnd(seed)
 }

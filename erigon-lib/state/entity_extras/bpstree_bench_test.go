@@ -1,4 +1,4 @@
-package state
+package entity_extras
 
 import (
 	"path/filepath"
@@ -17,10 +17,10 @@ func BenchmarkBpsTreeSeek(t *testing.B) {
 	t.Logf("N: %d, M: %d skip since shard <= %d", keyCount, M, DefaultBtreeStartSkip)
 	compressFlags := seg.CompressKeys | seg.CompressVals
 
-	dataPath := generateKV(t, tmp, 52, 180, keyCount, logger, 0)
+	dataPath := GenerateKV(t, tmp, 52, 180, keyCount, logger, 0)
 
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
-	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
+	BuildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 
 	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)
 	require.NoError(t, err)

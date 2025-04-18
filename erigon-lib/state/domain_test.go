@@ -24,8 +24,6 @@ import (
 	"fmt"
 	"io/fs"
 	"math"
-	randOld "math/rand"
-	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"sort"
@@ -34,6 +32,7 @@ import (
 	"testing"
 	"time"
 
+	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -51,20 +50,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 )
-
-type rndGen struct {
-	*rand.Rand
-	oldGen *randOld.Rand
-}
-
-func newRnd(seed uint64) *rndGen {
-	return &rndGen{
-		Rand:   rand.New(rand.NewChaCha8([32]byte{byte(seed)})),
-		oldGen: randOld.New(randOld.NewSource(int64(seed))),
-	}
-}
-func (r *rndGen) IntN(n int) int                   { return int(r.Uint64N(uint64(n))) }
-func (r *rndGen) Read(p []byte) (n int, err error) { return r.oldGen.Read(p) } // seems `go1.22` doesn't have `Read` method on `math/v2` generator
 
 func testDbAndDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain) {
 	t.Helper()
@@ -711,7 +696,7 @@ func TestNewSegStreamReader(t *testing.T) {
 	keyCount := 1000
 	valSize := 4
 
-	fpath := generateKV(t, t.TempDir(), length.Addr, valSize, keyCount, logger, seg.CompressNone)
+	fpath := ee.GenerateKV(t, t.TempDir(), length.Addr, valSize, keyCount, logger, seg.CompressNone)
 	dec, err := seg.NewDecompressor(fpath)
 	require.NoError(t, err)
 
@@ -1339,7 +1324,7 @@ func generateTestDataForDomainCommitment(tb testing.TB, keySize1, keySize2, tota
 	tb.Helper()
 
 	doms := make(map[string]map[string][]upd)
-	r := newRnd(31)
+	r := NewRnd(31)
 
 	accs := make(map[string][]upd)
 	stor := make(map[string][]upd)
@@ -1367,7 +1352,7 @@ func generateTestData(tb testing.TB, keySize1, keySize2, totalTx, keyTxsLimit, k
 	tb.Helper()
 
 	data := make(map[string][]upd)
-	r := newRnd(31)
+	r := NewRnd(31)
 	if keyLimit == 1 {
 		key1 := generateRandomKey(r, keySize1)
 		data[key1] = generateUpdates(r, totalTx, keyTxsLimit)
@@ -1383,17 +1368,17 @@ func generateTestData(tb testing.TB, keySize1, keySize2, totalTx, keyTxsLimit, k
 	return data
 }
 
-func generateRandomKey(r *rndGen, size uint64) string {
+func generateRandomKey(r *RndGen, size uint64) string {
 	return string(generateRandomKeyBytes(r, size))
 }
 
-func generateRandomKeyBytes(r *rndGen, size uint64) []byte {
+func generateRandomKeyBytes(r *RndGen, size uint64) []byte {
 	key := make([]byte, size)
 	r.Read(key)
 	return key
 }
 
-func generateAccountUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
+func generateAccountUpdates(r *RndGen, totalTx, keyTxsLimit uint64) []upd {
 	updates := make([]upd, 0)
 	usedTxNums := make(map[uint64]bool)
 
@@ -1416,7 +1401,7 @@ func generateAccountUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 	return updates
 }
 
-func generateArbitraryValueUpdates(r *rndGen, totalTx, keyTxsLimit, maxSize uint64) []upd {
+func generateArbitraryValueUpdates(r *RndGen, totalTx, keyTxsLimit, maxSize uint64) []upd {
 	updates := make([]upd, 0)
 	usedTxNums := make(map[uint64]bool)
 	//maxStorageSize := 24 * (1 << 10) // limit on contract code
@@ -1435,7 +1420,7 @@ func generateArbitraryValueUpdates(r *rndGen, totalTx, keyTxsLimit, maxSize uint
 	return updates
 }
 
-func generateUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
+func generateUpdates(r *RndGen, totalTx, keyTxsLimit uint64) []upd {
 	updates := make([]upd, 0)
 	usedTxNums := make(map[uint64]bool)
 
@@ -1456,7 +1441,7 @@ func generateUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 	return updates
 }
 
-func generateRandomTxNum(r *rndGen, maxTxNum uint64, usedTxNums map[uint64]bool) uint64 {
+func generateRandomTxNum(r *RndGen, maxTxNum uint64, usedTxNums map[uint64]bool) uint64 {
 	txNum := uint64(r.IntN(int(maxTxNum)))
 	for usedTxNums[txNum] {
 		txNum = uint64(r.IntN(int(maxTxNum)))

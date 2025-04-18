@@ -35,11 +35,9 @@ import (
 
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/order"
@@ -446,7 +444,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	defer domains.Close()
 
 	var latestCommitTxNum uint64
-	rnd := newRnd(0)
+	rnd := NewRnd(0)
 
 	someKey := []byte("somekey")
 	txs := (aggStep / 2) * 19
@@ -546,28 +544,6 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	require.EqualValues(t, maxWrite, binary.BigEndian.Uint64(v[:]))
 }
 
-func TestNewBtIndex(t *testing.T) {
-	t.Parallel()
-	keyCount := 10000
-	kvPath := generateKV(t, t.TempDir(), 20, 10, keyCount, log.New(), seg.CompressNone)
-
-	indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
-
-	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, DefaultBtreeM, seg.CompressNone, false)
-	require.NoError(t, err)
-	defer bt.Close()
-	defer kv.Close()
-	require.NotNil(t, kv)
-	require.NotNil(t, bt)
-	require.GreaterOrEqual(t, len(bt.bplus.mx), keyCount/int(DefaultBtreeM))
-
-	for i := 1; i < len(bt.bplus.mx); i++ {
-		require.NotZero(t, bt.bplus.mx[i].di)
-		require.NotZero(t, bt.bplus.mx[i].off)
-		require.NotEmpty(t, bt.bplus.mx[i].key)
-	}
-}
-
 func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	t.Parallel()
 	aggStep := uint64(2)
@@ -591,7 +567,7 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	maxTx := aggStep * 3
 	t.Logf("step=%d tx_count=%d\n", aggStep, maxTx)
 
-	rnd := newRnd(0)
+	rnd := NewRnd(0)
 
 	generateSharedDomainsUpdates(t, domains, maxTx, rnd, length.Addr, 10, aggStep/2)
 
@@ -771,7 +747,7 @@ func fillRawdbTxNumsIndexForSharedDomains(t *testing.T, rwTx kv.RwTx, maxTx, com
 	}
 }
 
-func generateSharedDomainsUpdates(t *testing.T, domains *SharedDomains, maxTxNum uint64, rnd *rndGen, keyMaxLen, keysCount, commitEvery uint64) map[string]struct{} {
+func generateSharedDomainsUpdates(t *testing.T, domains *SharedDomains, maxTxNum uint64, rnd *RndGen, keyMaxLen, keysCount, commitEvery uint64) map[string]struct{} {
 	t.Helper()
 	usedKeys := make(map[string]struct{}, keysCount*maxTxNum)
 	for txNum := uint64(1); txNum <= maxTxNum; txNum++ {
@@ -789,7 +765,7 @@ func generateSharedDomainsUpdates(t *testing.T, domains *SharedDomains, maxTxNum
 	return usedKeys
 }
 
-func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txNum uint64, rnd *rndGen, prevKeys map[string]struct{}, keyMaxLen, keysCount uint64) map[string]struct{} {
+func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txNum uint64, rnd *RndGen, prevKeys map[string]struct{}, keyMaxLen, keysCount uint64) map[string]struct{} {
 	t.Helper()
 	domains.SetTxNum(txNum)
 
@@ -925,7 +901,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	txs := aggStep * 5
 	t.Logf("step=%d tx_count=%d\n", aggStep, txs)
 
-	rnd := newRnd(0)
+	rnd := NewRnd(0)
 	keys := make([][]byte, txs)
 
 	for txNum := uint64(1); txNum <= txs; txNum++ {
@@ -1072,7 +1048,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	txs := (aggStep) * config3.StepsInFrozenFile
 	t.Logf("step=%d tx_count=%d", aggStep, txs)
 
-	rnd := newRnd(0)
+	rnd := NewRnd(0)
 	keys := make([][]byte, txs/2)
 
 	var prev1, prev2 []byte
@@ -1162,95 +1138,6 @@ func Test_EncodeCommitmentState(t *testing.T) {
 	require.EqualValues(t, cs.trieState, dec.trieState)
 }
 
-// takes first 100k keys from file
-func pivotKeysFromKV(dataPath string) ([][]byte, error) {
-	decomp, err := seg.NewDecompressor(dataPath)
-	if err != nil {
-		return nil, err
-	}
-
-	getter := decomp.MakeGetter()
-	getter.Reset(0)
-
-	key := make([]byte, 0, 64)
-
-	listing := make([][]byte, 0, 1000)
-
-	for getter.HasNext() {
-		if len(listing) > 100000 {
-			break
-		}
-		key, _ := getter.Next(key[:0])
-		listing = append(listing, common.Copy(key))
-		getter.Skip()
-	}
-	decomp.Close()
-
-	return listing, nil
-}
-
-func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, logger log.Logger, compressFlags seg.FileCompression) string {
-	tb.Helper()
-
-	rnd := newRnd(0)
-	values := make([]byte, valueSize)
-
-	dataPath := filepath.Join(tmp, fmt.Sprintf("%dk.kv", keyCount/1000))
-	comp, err := seg.NewCompressor(context.Background(), "cmp", dataPath, tmp, seg.DefaultCfg, log.LvlDebug, logger)
-	require.NoError(tb, err)
-
-	bufSize := 8 * datasize.KB
-	if keyCount > 1000 { // windows CI can't handle much small parallel disk flush
-		bufSize = 1 * datasize.MB
-	}
-	collector := etl.NewCollector(BtreeLogPrefix+" genCompress", tb.TempDir(), etl.NewSortableBuffer(bufSize), logger)
-
-	for i := 0; i < keyCount; i++ {
-		key := make([]byte, keySize)
-		n, err := rnd.Read(key[:])
-		require.EqualValues(tb, keySize, n)
-		binary.BigEndian.PutUint64(key[keySize-8:], uint64(i))
-		require.NoError(tb, err)
-
-		n, err = rnd.Read(values[:rnd.IntN(valueSize)+1])
-		require.NoError(tb, err)
-
-		err = collector.Collect(key, values[:n])
-		require.NoError(tb, err)
-	}
-
-	writer := seg.NewWriter(comp, compressFlags)
-
-	loader := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		err = writer.AddWord(k)
-		require.NoError(tb, err)
-		err = writer.AddWord(v)
-		require.NoError(tb, err)
-		return nil
-	}
-
-	err = collector.Load(nil, "", loader, etl.TransformArgs{})
-	require.NoError(tb, err)
-
-	collector.Close()
-
-	err = comp.Compress()
-	require.NoError(tb, err)
-	comp.Close()
-
-	decomp, err := seg.NewDecompressor(dataPath)
-	require.NoError(tb, err)
-	defer decomp.Close()
-	compPath := decomp.FilePath()
-	ps := background.NewProgressSet()
-
-	IndexFile := filepath.Join(tmp, fmt.Sprintf("%dk.bt", keyCount/1000))
-	err = BuildBtreeIndexWithDecompressor(IndexFile, decomp, compressFlags, ps, tb.TempDir(), 777, logger, true)
-	require.NoError(tb, err)
-
-	return compPath
-}
-
 func testDbAndAggregatorv3(tb testing.TB, aggStep uint64) (kv.RwDB, *Aggregator) {
 	tb.Helper()
 	require, logger := require.New(tb), log.New()
@@ -1271,7 +1158,7 @@ func testDbAndAggregatorv3(tb testing.TB, aggStep uint64) (kv.RwDB, *Aggregator)
 func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byte, [][]byte) {
 	tb.Helper()
 
-	rnd := newRnd(0)
+	rnd := NewRnd(0)
 	values := make([][]byte, keyCount)
 	keys := make([][]byte, keyCount)
 

@@ -628,7 +628,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 			seg3, err := seg.NewDecompressor(filename + ".sample")
 			require.NoError(t, err)
 
-			btindex, err := CreateBtreeIndexWithDecompressor(filename, 128, seg3, seg.CompressNone, uint32(1), background.NewProgressSet(), dirs.Tmp, log.New(), false)
+			btindex, err := ee.CreateBtreeIndexWithDecompressor(filename, 128, seg3, seg.CompressNone, uint32(1), background.NewProgressSet(), dirs.Tmp, log.New(), false)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -643,7 +643,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 		}
 
 		if strings.HasSuffix(filename, ".kvei") {
-			filter, err := NewExistenceFilter(0, filename)
+			filter, err := ee.NewExistenceFilter(0, filename)
 			require.NoError(t, err)
 			require.NoError(t, filter.Build())
 			filter.Close()

@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
 	"github.com/erigontech/erigon-lib/seg"
+	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 )
 
 func (d *Domain) dirtyFilesEndTxNumMinimax() uint64 {
@@ -533,11 +534,11 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 
 	if dt.d.AccessorList.Has(AccessorBTree) {
 		btPath := dt.d.kvBtAccessorFilePath(fromStep, toStep)
-		btM := DefaultBtreeM
+		btM := ee.DefaultBtreeM
 		if toStep == 0 && dt.d.filenameBase == "commitment" {
 			btM = 128
 		}
-		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, btM, valuesIn.decompressor, dt.d.Compression, *dt.d.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync)
+		valuesIn.bindex, err = ee.CreateBtreeIndexWithDecompressor(btPath, btM, valuesIn.decompressor, dt.d.Compression, *dt.d.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
@@ -558,7 +559,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 			return nil, nil, nil, fmt.Errorf("merge %s FileExist err [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
 		if exists {
-			valuesIn.existence, err = OpenExistenceFilter(bloomIndexPath)
+			valuesIn.existence, err = ee.OpenExistenceFilter(bloomIndexPath)
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("merge %s existence [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 			}

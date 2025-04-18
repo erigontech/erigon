@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package state
+package entity_extras
 
 import (
 	"bufio"
@@ -644,3 +644,4 @@ func (b *BtIndex) OrdinalLookup(getter *seg.Reader, i uint64) *Cursor {
 
 func (b *BtIndex) Offsets() *eliasfano32.EliasFano { return b.bplus.Offsets() }
 func (b *BtIndex) Distances() (map[int]int, error) { return b.bplus.Distances() }
+func (b *BtIndex) BpsTree() *BpsTree               { return b.bplus }

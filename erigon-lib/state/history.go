@@ -303,10 +303,10 @@ func (h *History) Close() {
 	h.closeWhatNotInList([]string{})
 }
 
-func (ht *HistoryRoTx) Files() (res []string) {
+func (ht *HistoryRoTx) Files() (res VisibleFiles) {
 	for _, item := range ht.files {
 		if item.src.decompressor != nil {
-			res = append(res, item.src.decompressor.FileName())
+			res = append(res, item)
 		}
 	}
 	return append(res, ht.iit.Files()...)
