@@ -969,7 +969,6 @@ func (s *RoSnapshots) OpenList(fileNames []string, optimistic bool) error {
 	defer s.dirtyLock.Unlock()
 
 	s.closeWhatNotInList(fileNames)
-	println("fileNames:", fmt.Sprintf("%+v", fileNames))
 	if err := s.openSegments(fileNames, true, optimistic); err != nil {
 		return err
 	}

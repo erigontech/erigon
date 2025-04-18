@@ -274,7 +274,6 @@ func (d Dirs) RenameNewVersions() error {
 			}
 
 			if !d.IsDir() && strings.HasPrefix(d.Name(), "v1.0-") {
-				println("d name:", d.Name())
 				newName := strings.Replace(d.Name(), "v1.0-", "v1-", 1)
 				oldPath := path
 				newPath := filepath.Join(filepath.Dir(path), newName)

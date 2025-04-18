@@ -101,7 +101,6 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 	res.Path = filepath.Join(dir, fileName)
 
 	if res.From == 0 && res.To == 0 {
-		println(fileName, isStateFile)
 		parts := strings.Split(fileName, ".")
 		partsLen := len(parts)
 		if partsLen == 3 || partsLen == 4 {
