@@ -33,19 +33,12 @@ import (
 	"github.com/erigontech/erigon-lib/common/dir"
 )
 
-var (
-	ErrInvalidFileName = errors.New("invalid compressed file name")
-)
-
 func FileName(version Version, from, to uint64, fileType string) string {
 	return fmt.Sprintf("%s-%06d-%06d-%s", version.String(), from/1_000, to/1_000, fileType)
 }
 
 func SegmentFileName(version Version, from, to uint64, t Enum) string {
 	return FileName(version, from, to, t.String()) + ".seg"
-}
-func DatFileName(version Version, from, to uint64, fType string) string {
-	return FileName(version, from, to, fType) + ".dat"
 }
 func IdxFileName(version Version, from, to uint64, fType string) string {
 	return FileName(version, from, to, fType) + ".idx"
