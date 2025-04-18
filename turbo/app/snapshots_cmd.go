@@ -1384,6 +1384,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 
 	//agg.LimitRecentHistoryWithoutFiles(0)
+	blockReader, _ := br.IO()
 
 	var forwardProgress uint64
 	if to == 0 {
@@ -1391,7 +1392,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 			forwardProgress, err = stages.GetStageProgress(tx, stages.Senders)
 			return err
 		})
-		blockReader, _ := br.IO()
 		from2, to2, ok := freezeblocks.CanRetire(forwardProgress, blockReader.FrozenBlocks(), coresnaptype.Enums.Headers, nil)
 		if ok {
 			from, to, every = from2, to2, to2-from2
@@ -1413,7 +1413,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		}
 	}
 
-	blockReader, _ := br.IO()
 	deletedBlocks := math.MaxInt // To pass the first iteration
 	allDeletedBlocks := 0
 	for deletedBlocks > 0 { // prune happens by small steps, so need many runs
