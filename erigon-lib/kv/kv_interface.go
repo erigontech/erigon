@@ -597,6 +597,7 @@ type TemporalDebugTx interface {
 
 	CanUnwindToBlockNum() (uint64, error)
 	CanUnwindBeforeBlockNum(blockNum uint64) (unwindableBlockNum uint64, ok bool, err error)
+	TxNumsInFiles(domains ...Domain) (minTxNum uint64)
 }
 
 type TemporalDebugDB interface {
