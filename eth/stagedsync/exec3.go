@@ -202,7 +202,7 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 			"abort", common.PrettyCounter(abortCount - p.prevAbortCount),
 			"invalid", common.PrettyCounter(invalidCount - p.prevInvalidCount),
 			"tgas/s", fmt.Sprintf("%s(%s)", common.PrettyCounter(curTaskGasPerSec), common.PrettyCounter(avgTaskGasPerSec)),
-			"actwrk", float64(curTaskDur) / float64(interval),
+			"arat", float64(curTaskDur) / float64(interval),
 			"tdur", fmt.Sprintf("%dµs", avgTaskDur.Microseconds()),
 			"trdur", fmt.Sprintf("%dµs(%.2f%%)", avgReadDur.Microseconds(), readRatio),
 			"bdur", fmt.Sprintf("%dms", avgBlockDur.Milliseconds()),
