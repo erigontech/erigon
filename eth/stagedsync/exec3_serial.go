@@ -173,7 +173,7 @@ func (se *serialExecutor) commit(ctx context.Context, txNum uint64, blockNum uin
 	}
 	temporalTx, ok := se.applyTx.(kv.TemporalTx)
 	if !ok {
-		return t2, fmt.Errorf("tx is not a temporal tx")
+		return t2, errors.New("tx is not a temporal tx")
 	}
 	se.doms, err = state2.NewSharedDomains(temporalTx, se.logger)
 	if err != nil {
