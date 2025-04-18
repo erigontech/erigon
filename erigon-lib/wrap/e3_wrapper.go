@@ -25,6 +25,7 @@ func NewTxContainer(Tx kv.RwTx, doms *state.SharedDomains) TxContainer {
 	txContainer := TxContainer{
 		Tx:   Tx,
 		Doms: doms,
+		Ttx:  nil,
 	}
 	if ttx, ok := Tx.(kv.TemporalTx); ok {
 		txContainer.Ttx = ttx
