@@ -57,8 +57,8 @@ func StageCustomTraceCfg(db kv.TemporalRwDB, dirs datadir.Dirs, br services.Full
 		Genesis:     genesis,
 		Workers:     syncCfg.ExecWorkerCount,
 
-		ProduceReceiptDomain:       dbg.EnvBool("PRODUCE_RECEIPT_DOMAIN", false),
-		ProduceReceiptsCacheDomain: dbg.EnvBool("PRODUCE_RECEIPT_CACHE_DOMAIN", true),
+		ProduceReceiptDomain: dbg.EnvBool("PRODUCE_RECEIPT_DOMAIN", false),
+		ProduceRCacheDomain:  dbg.EnvBool("PRODUCE_RECEIPT_CACHE_DOMAIN", true),
 	}
 	return CustomTraceCfg{
 		db:       db,
@@ -348,8 +348,10 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 					cumulativeBlobGasUsedInBlock = 0
 				}
 			}
-
-			if cfg.ProduceReceiptsCacheDomain {
+			if !cfg.ProduceRCacheDomain {
+				panic(1)
+			}
+			if cfg.ProduceRCacheDomain {
 				if !txTask.Final {
 					if txTask.TxIndex >= 0 && txTask.BlockReceipts != nil {
 						receipt := txTask.BlockReceipts[txTask.TxIndex]

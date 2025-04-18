@@ -1184,7 +1184,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	var producingDomain kv.Domain
 	if cfg.ExecArgs.ProduceReceiptDomain {
 		producingDomain = kv.RCacheDomain
-	} else if cfg.ExecArgs.ProduceReceiptsCacheDomain {
+	} else if cfg.ExecArgs.ProduceRCacheDomain {
 		producingDomain = kv.RCacheDomain
 	} else {
 		panic("assert: which domain need to produce?")

@@ -243,9 +243,8 @@ type ExecArgs struct {
 	ChainConfig *chain.Config
 	Workers     int
 
-	PersistReceipts bool
-	ProduceReceiptDomain       bool
-	ProduceReceiptsCacheDomain bool
+	ProduceReceiptDomain bool
+	ProduceRCacheDomain  bool
 }
 
 func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, in *state.QueueWithRetry, workerCount int, outputTxNum *atomic.Uint64, logger log.Logger) *errgroup.Group {
