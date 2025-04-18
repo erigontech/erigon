@@ -177,7 +177,7 @@ var Schema = map[kv.Domain]domainCfg{
 		name: kv.RCacheDomain, valuesTable: kv.TblRCacheVals,
 		largeValues: true,
 
-		AccessorList: AccessorBTree,
+		AccessorList: AccessorHashMap,
 		Compression:  seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
 		CompressCfg:  DomainCompressCfg,
 
