@@ -260,7 +260,7 @@ func ExecV3(ctx context.Context,
 		var err error
 		temporalTx, ok := applyTx.(kv.TemporalTx)
 		if !ok {
-			return fmt.Errorf("applyTx is not a temporal transaction")
+			return errors.New("applyTx is not a temporal transaction")
 		}
 		doms, err = state2.NewSharedDomains(temporalTx, log.New())
 		// if we are behind the commitment, we can't execute anything
@@ -396,7 +396,7 @@ func ExecV3(ctx context.Context,
 		applyWorker.ResetTx(applyTx)
 		temporalTx, ok := applyTx.(kv.TemporalTx)
 		if !ok {
-			return fmt.Errorf("applyTx is not a temporal transaction")
+			return errors.New("applyTx is not a temporal transaction")
 		}
 		doms.SetTx(temporalTx)
 
