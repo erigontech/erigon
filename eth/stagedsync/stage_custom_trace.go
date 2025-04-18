@@ -136,35 +136,6 @@ Loop:
 		return err
 	}
 
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
-	chkEvery := time.NewTicker(3 * time.Second)
-	defer chkEvery.Stop()
-
-Loop:
-	for {
-		select {
-		case <-cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator).WaitForBuildAndMerge(ctx):
-			break Loop
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-logEvery.C:
-			var m runtime.MemStats
-			dbg.ReadMemStats(&m)
-			//TODO: log progress and list of domains/files
-			logger.Info("[snapshots] Building files", "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
-		}
-	}
-
-	if err := cfg.db.Update(ctx, func(tx kv.RwTx) error {
-		if _, err := tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 10*time.Hour); err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-
 	log.Info("SpawnCustomTrace finish")
 	if err := cfg.db.View(ctx, func(tx kv.Tx) error {
 		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
