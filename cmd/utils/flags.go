@@ -1126,6 +1126,11 @@ var (
 		Name:  "polygon.pos.ssf.block",
 		Usage: "Enabling Polygon PoS Single Slot Finality since block",
 	}
+	ExperimentalConcurrentCommitmentFlag = cli.BoolFlag{
+		Name:  "experimental.concurrent-commitment",
+		Usage: "EXPERIMENTAL: enables concurrent trie for commitment",
+		Value: false,
+	}
 	GDBMeFlag = cli.BoolFlag{
 		Name:  "gdbme",
 		Usage: "restart erigon under gdb for debug purposes",
@@ -1978,6 +1983,11 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	cfg.AllowAA = ctx.Bool(AAFlag.Name)
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
+
+	if ctx.Bool(ExperimentalConcurrentCommitmentFlag.Name) {
+		// cfg.ExperimentalConcurrentCommitment = true
+		state.ExperimentalConcurrentCommitment = true
+	}
 
 	if ctx.IsSet(RPCGlobalGasCapFlag.Name) {
 		cfg.RPCGasCap = ctx.Uint64(RPCGlobalGasCapFlag.Name)

@@ -249,4 +249,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.PolygonPosSingleSlotFinalityFlag,
 	&utils.PolygonPosSingleSlotFinalityBlockAtFlag,
 	&utils.GDBMeFlag,
+
+	&utils.ExperimentalConcurrentCommitmentFlag,
 }
