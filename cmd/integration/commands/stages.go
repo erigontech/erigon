@@ -1176,13 +1176,27 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	defer sn.Close()
 	defer borSn.Close()
 	defer agg.Close()
+
+	chainConfig := fromdb.ChainConfig(db)
+	genesis := core.GenesisBlockByChainName(chain)
+	br, _ := blocksIO(db, logger)
+	cfg := stagedsync.StageCustomTraceCfg(db, dirs, br, chainConfig, engine, genesis, &syncCfg)
+	var producingDomain kv.Domain
+	if cfg.ExecArgs.ProduceReceiptDomain {
+		producingDomain = kv.RCacheDomain
+	} else if cfg.ExecArgs.ProduceReceiptsCacheDomain {
+		producingDomain = kv.RCacheDomain
+	} else {
+		panic("assert: which domain need to produce?")
+	}
+
 	if reset {
 		tx, err := db.BeginTemporalRw(ctx)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
-		tables := db.Debug().DomainTables(kv.ReceiptDomain)
+		tables := db.Debug().DomainTables(producingDomain)
 		if err := backup.ClearTables(ctx, tx, tables...); err != nil {
 			return err
 		}
@@ -1204,12 +1218,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
-	chainConfig := fromdb.ChainConfig(db)
-
-	genesis := core.GenesisBlockByChainName(chain)
-	br, _ := blocksIO(db, logger)
-	cfg := stagedsync.StageCustomTraceCfg(db, dirs, br, chainConfig, engine, genesis, &syncCfg)
-	err = stagedsync.SpawnCustomTrace(cfg, ctx, logger)
+	err = stagedsync.SpawnCustomTrace(cfg, producingDomain, ctx, logger)
 	if err != nil {
 		return err
 	}
@@ -1458,6 +1467,9 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 	}
 	if syncCfg.KeepExecutionProofs {
 		libstate.EnableHistoricalCommitment()
+	}
+	if syncCfg.PersistReceiptsCache {
+		libstate.EnableHistoricalRCache()
 	}
 
 	vmConfig := &vm.Config{}

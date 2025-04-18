@@ -163,7 +163,7 @@ func ResetExec(ctx context.Context, db kv.RwDB, agg *state.Aggregator, chain str
 	cleanupList := make([]string, 0)
 	cleanupList = append(cleanupList, stateBuckets...)
 	cleanupList = append(cleanupList, stateHistoryBuckets...)
-	cleanupList = append(cleanupList, agg.DomainTables(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain, kv.ReceiptCacheDomain)...)
+	cleanupList = append(cleanupList, agg.DomainTables(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain)...)
 	cleanupList = append(cleanupList, agg.InvertedIndexTables(kv.LogAddrIdx, kv.LogTopicIdx, kv.TracesFromIdx, kv.TracesToIdx)...)
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
@@ -193,16 +193,12 @@ func ResetTxLookup(tx kv.RwTx) error {
 }
 
 var Tables = map[stages.SyncStage][]string{
-	stages.CustomTrace: {
-		kv.TblReceiptVals, kv.TblReceiptHistoryKeys, kv.TblReceiptHistoryVals, kv.TblReceiptIdx,
-		kv.TblReceiptCacheVals, kv.TblReceiptCacheHistoryKeys, kv.TblReceiptCacheHistoryVals, kv.TblReceiptCacheIdx,
-	},
-	stages.Finish: {},
+	stages.CustomTrace: {},
+	stages.Finish:      {},
 }
 var stateBuckets = []string{
 	kv.Epoch, kv.PendingEpoch, kv.Code,
 	kv.PlainContractCode, kv.IncarnationMap,
-	kv.ReceiptsCache,
 }
 var stateHistoryBuckets = []string{
 	kv.TblPruningProgress,

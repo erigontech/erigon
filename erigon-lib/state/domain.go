@@ -127,7 +127,7 @@ func NewDomain(cfg domainCfg, aggStep uint64, logger log.Logger) (*Domain, error
 	if cfg.hist.iiCfg.dirs.SnapDomain == "" {
 		panic("assert: empty `dirs`")
 	}
-	if cfg.hist.filenameBase == "" {
+	if cfg.hist.iiCfg.filenameBase == "" {
 		panic("assert: emtpy `filenameBase`" + cfg.name.String())
 	}
 
@@ -1452,6 +1452,7 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 			}
 			continue
 		}
+
 		if traceGetLatest == dt.name {
 			fmt.Printf("GetLatest(%s, %x) -> found in file %s\n", dt.name.String(), k, dt.files[i].src.decompressor.FileName())
 		}
@@ -1970,6 +1971,10 @@ func (sr *SegStreamReader) Next() (k, v []byte, err error) {
 
 func (dt *DomainRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 	return dt.ht.iit.stepsRangeInDB(tx)
+}
+
+func (dt *DomainRoTx) Tables() (res []string) {
+	return []string{dt.d.valuesTable, dt.ht.h.valuesTable, dt.ht.iit.ii.keysTable, dt.ht.iit.ii.valuesTable}
 }
 
 func (dt *DomainRoTx) Files() (res []string) {

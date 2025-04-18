@@ -76,8 +76,7 @@ type rangeIntegrityChecker func(fromStep, toStep uint64) bool
 type histCfg struct {
 	iiCfg iiCfg
 
-	valuesTable  string // bucket for history values; key1+key2+txnNum -> oldValue , stores values BEFORE change
-	filenameBase string // filename base for all history files
+	valuesTable string // bucket for history values; key1+key2+txnNum -> oldValue , stores values BEFORE change
 
 	keepRecentTxnInDB uint64 // When snapshotsDisabled=true, keepRecentTxnInDB is used to keep this amount of txn in db before pruning
 
@@ -109,9 +108,6 @@ func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
 	if cfg.indexList == 0 {
 		cfg.indexList = AccessorHashMap
-	}
-	if cfg.iiCfg.filenameBase == "" {
-		cfg.iiCfg.filenameBase = cfg.filenameBase
 	}
 
 	h := History{

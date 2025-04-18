@@ -57,8 +57,8 @@ func StageCustomTraceCfg(db kv.TemporalRwDB, dirs datadir.Dirs, br services.Full
 		Genesis:     genesis,
 		Workers:     syncCfg.ExecWorkerCount,
 
-		ProduceReceiptDomain:       dbg.EnvBool("PRODUCE_RECEIPT_DOMAIN", true),
-		ProduceReceiptsCacheDomain: syncCfg.PersistReceiptsCache > 0,
+		ProduceReceiptDomain:       dbg.EnvBool("PRODUCE_RECEIPT_DOMAIN", false),
+		ProduceReceiptsCacheDomain: dbg.EnvBool("PRODUCE_RECEIPT_CACHE_DOMAIN", true),
 	}
 	return CustomTraceCfg{
 		db:       db,
@@ -66,16 +66,7 @@ func StageCustomTraceCfg(db kv.TemporalRwDB, dirs datadir.Dirs, br services.Full
 	}
 }
 
-func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger) error {
-	var producingDomain kv.Domain
-	if cfg.execArgs.ProduceReceiptDomain {
-		producingDomain = kv.ReceiptCacheDomain
-	} else if cfg.execArgs.ProduceReceiptsCacheDomain {
-		producingDomain = kv.ReceiptCacheDomain
-	} else {
-		panic("assert: which domain need to produce?")
-	}
-
+func SpawnCustomTrace(cfg CustomTraceCfg, producingDomain kv.Domain, ctx context.Context, logger log.Logger) error {
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.ExecArgs.BlockReader))
 
 	var startBlock, endBlock uint64
@@ -114,6 +105,35 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 		if err := customTraceBatchProduce(ctx, cfg.ExecArgs, cfg.db, startBlock, startBlock+batchSize, "custom_trace", producingDomain, logger); err != nil {
 			return err
 		}
+	}
+
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+	chkEvery := time.NewTicker(3 * time.Second)
+	defer chkEvery.Stop()
+
+Loop:
+	for {
+		select {
+		case <-cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator).WaitForBuildAndMerge(ctx):
+			break Loop
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-logEvery.C:
+			var m runtime.MemStats
+			dbg.ReadMemStats(&m)
+			//TODO: log progress and list of domains/files
+			logger.Info("[snapshots] Building files", "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+		}
+	}
+
+	if err := cfg.db.Update(ctx, func(tx kv.RwTx) error {
+		if _, err := tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 10*time.Hour); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	logEvery := time.NewTicker(20 * time.Second)
@@ -359,15 +379,11 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			}
 
 			if cfg.ProduceReceiptsCacheDomain {
-				if txTask.Final { // block changed
-					if cfg.ProduceReceiptsCacheDomain {
-						if txTask.BlockReceipts != nil {
-							if err := rawdb.WriteReceiptsCache(doms, txTask.BlockNum, txTask.BlockHash, txTask.BlockReceipts); err != nil {
-								return err
-							}
-						}
+				if txTask.TxIndex >= 0 && txTask.BlockReceipts != nil {
+					receipt := txTask.BlockReceipts[txTask.TxIndex]
+					if err := rawdb.WriteReceiptCache(doms, receipt); err != nil {
+						return err
 					}
-					cumulativeBlobGasUsedInBlock = 0
 				}
 			}
 

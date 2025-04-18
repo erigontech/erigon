@@ -36,6 +36,8 @@ import (
 	"github.com/erigontech/erigon-lib/state"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
@@ -55,15 +57,17 @@ type ParallelExecutionState struct {
 
 	logger log.Logger
 
-	trace bool
+	syncCfg ethconfig.Sync
+	trace   bool
 }
 
-func NewParallelExecutionState(domains *libstate.SharedDomains, logger log.Logger) *ParallelExecutionState {
+func NewParallelExecutionState(domains *libstate.SharedDomains, syncCfg ethconfig.Sync, logger log.Logger) *ParallelExecutionState {
 	return &ParallelExecutionState{
 		domains:      domains,
 		triggers:     map[uint64]*TxTask{},
 		senderTxNums: map[common.Address]uint64{},
 		logger:       logger,
+		syncCfg:      syncCfg,
 		//trace: true,
 	}
 }
@@ -235,6 +239,48 @@ func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *li
 			}
 		}
 	}
+
+	if rs.syncCfg.PersistReceiptsCache {
+		if !txTask.Final {
+			if txTask.TxIndex >= 0 && txTask.BlockReceipts != nil {
+				if err := rawdb.WriteReceiptCache(domains, txTask.BlockReceipts[txTask.TxIndex]); err != nil {
+					return err
+				}
+			}
+		} else {
+			//bor: skip for now
+		}
+
+	}
+
+	//if !txTask.Final {
+	//	var receipt *types.Receipt
+	//	if txTask.TxIndex >= 0 {
+	//		receipt = txTask.BlockReceipts[txTask.TxIndex]
+	//	}
+	//	if err := rawtemporaldb.AppendReceipt(se.doms, receipt, se.blobGasUsed); err != nil {
+	//		return false, err
+	//	}
+	//} else {
+	//	if se.cfg.chainConfig.Bor != nil && txTask.TxIndex >= 1 {
+	//		// get last receipt and store the last log index + 1
+	//		lastReceipt := txTask.BlockReceipts[txTask.TxIndex-1]
+	//		if lastReceipt == nil {
+	//			return false, fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
+	//		}
+	//		if len(lastReceipt.Logs) > 0 {
+	//			firstIndex := lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
+	//			receipt := types.Receipt{
+	//				CumulativeGasUsed:        lastReceipt.CumulativeGasUsed,
+	//				FirstLogIndexWithinBlock: uint32(firstIndex),
+	//			}
+	//			if err := rawtemporaldb.AppendReceipt(se.doms, &receipt, se.blobGasUsed); err != nil {
+	//				return false, err
+	//			}
+	//		}
+	//	}
+	//}
+
 	return nil
 }
 

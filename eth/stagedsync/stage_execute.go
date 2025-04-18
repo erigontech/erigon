@@ -164,7 +164,8 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 
 var ErrTooDeepUnwind = errors.New("too deep unwind")
 
-func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, br services.FullBlockReader, accumulator *shards.Accumulator, logger log.Logger) (err error) {
+func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator, logger log.Logger) (err error) {
+	br := cfg.blockReader
 	var domains *libstate.SharedDomains
 	if txc.Doms == nil {
 		domains, err = libstate.NewSharedDomains(txc.Tx, logger)
@@ -175,7 +176,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	} else {
 		domains = txc.Doms
 	}
-	rs := state.NewParallelExecutionState(domains, logger)
+	rs := state.NewParallelExecutionState(domains, cfg.syncCfg, logger)
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, br))
 
@@ -383,7 +384,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 		accumulator.StartChange(header, txs, true)
 	}
 
-	return unwindExec3(u, s, txc, ctx, cfg.blockReader, accumulator, logger)
+	return unwindExec3(u, s, txc, ctx, cfg, accumulator, logger)
 }
 
 func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx context.Context, logger log.Logger) (err error) {
@@ -440,18 +441,6 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 
 	if _, err := tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, pruneTimeout); err != nil {
 		return err
-	}
-
-	// prune receipts cache
-	if cfg.syncCfg.PersistReceiptsCache > 0 && s.ForwardProgress > cfg.syncCfg.PersistReceiptsCache {
-		pruneTo := s.ForwardProgress - cfg.syncCfg.PersistReceiptsCache
-		pruneLimit := 10
-		if s.CurrentSyncCycle.IsInitialCycle {
-			pruneLimit = -1
-		}
-		if err := rawdb.PruneReceiptsCache(tx, pruneTo, pruneLimit); err != nil {
-			return err
-		}
 	}
 
 	if err = s.Done(tx); err != nil {

@@ -476,8 +476,8 @@ func doDebugKey(cliCtx *cli.Context) error {
 		domain, idx = kv.CommitmentDomain, kv.CommitmentHistoryIdx
 	case "receipt":
 		domain, idx = kv.ReceiptDomain, kv.ReceiptHistoryIdx
-	case "receiptcache":
-		domain, idx = kv.ReceiptCacheDomain, kv.ReceiptCacheHistoryIdx
+	case "rcache":
+		domain, idx = kv.RCacheDomain, kv.RCacheHistoryIdx
 	default:
 		panic(ds)
 	}
@@ -1398,6 +1398,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	if err := br.RetireBlocks(ctx, from, to, log.LvlInfo, nil, nil, nil); err != nil {
 		return err
 	}
+
 	if err := blockReader.Snapshots().RemoveOverlaps(); err != nil {
 		return err
 	}

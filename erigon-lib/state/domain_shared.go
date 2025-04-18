@@ -137,7 +137,7 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 
 	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv)
 
-	if _, err := sd.SeekCommitment(context.Background(), tx); err != nil {
+	if _, err := sd.SeekCommitment(context.Background(), tx, false); err != nil {
 		return nil, err
 	}
 
@@ -252,7 +252,7 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Temporal
 }
 
 // SeekCommitment lookups latest available commitment and sets it as current
-func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromBlockBeginning uint64, err error) {
+func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx, trace bool) (txsFromBlockBeginning uint64, err error) {
 	bn, txn, ok, err := sd.sdCtx.SeekCommitment(tx, sd.aggTx.d[kv.CommitmentDomain], 0, math.MaxUint64)
 	if err != nil {
 		return 0, err
@@ -389,7 +389,6 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error)
 	if err != nil {
 		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
 	}
-
 	if !aggTx.a.commitmentValuesTransform || bytes.Equal(prefix, keyCommitmentState) {
 		sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), v)
 		return v, endTx / sd.StepSize(), nil
@@ -1261,6 +1260,9 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState() (blockNum, tx
 		return 0, 0, nil, err
 	}
 	if len(state) < 16 {
+		if sdc.sharedDomains.roTtx.Debug().TxNumsInFiles(kv.CommitmentDomain) > 0 {
+			return 0, 0, nil, fmt.Errorf("assert: special key `state` not found in commitment files (but we have them), probably files are `purified`, probably you manually deleted too much recent files")
+		}
 		return 0, 0, nil, nil
 	}
 
@@ -1311,14 +1313,16 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 		return 0, 0, errors.New("state storing is only supported hex patricia trie")
 	}
 
-	if err := hext.SetState(cs.trieState); err != nil {
-		return 0, 0, fmt.Errorf("failed restore state : %w", err)
-	}
-	sdc.justRestored.Store(true) // to prevent double reset
-	if sdc.sharedDomains.trace {
-		rootHash, err := hext.RootHash()
-		if err != nil {
-			return 0, 0, fmt.Errorf("failed to get root hash after state restore: %w", err)
+	log.Info("[commitment.seek] set21")
+		if err := hext.SetState(cs.trieState); err != nil {
+			return 0, 0, fmt.Errorf("failed restore state : %w", err)
+		}
+		sdc.justRestored.Store(true) // to prevent double reset
+		if sdc.sharedDomains.trace {
+			rootHash, err := hext.RootHash()
+			if err != nil {
+				return 0, 0, fmt.Errorf("failed to get root hash after state restore: %w", err)
+
 		}
 		log.Info(fmt.Sprintf("[commitment] restored state: block=%d txn=%d rootHash=%x\n", cs.blockNum, cs.txNum, rootHash))
 	}

@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -43,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -212,7 +212,7 @@ type Config struct {
 
 	// Transaction pool options
 	TxPool  txpoolcfg.Config
-	Shutter shutter.Config
+	Shutter shuttercfg.Config
 
 	// Gas Price Oracle options
 	GPO gaspricecfg.Config
@@ -286,5 +286,5 @@ type Sync struct {
 	ChaosMonkey              bool
 	AlwaysGenerateChangesets bool
 	KeepExecutionProofs      bool
-	PersistReceiptsCache     uint64
+	PersistReceiptsCache     bool
 }

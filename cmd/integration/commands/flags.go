@@ -150,7 +150,7 @@ func withDataDir(cmd *cobra.Command) {
 
 func withBatchSize(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&batchSizeStr, "batchSize", cli.BatchSizeFlag.Value, cli.BatchSizeFlag.Usage)
-	cmd.Flags().Uint64Var(&syncCfg.PersistReceiptsCache, utils.PersistReceiptsFlag.Name, utils.PersistReceiptsFlag.Value, utils.PersistReceiptsFlag.Usage)
+	cmd.Flags().BoolVar(&syncCfg.PersistReceiptsCache, utils.PersistReceiptsFlag.Name, utils.PersistReceiptsFlag.Value, utils.PersistReceiptsFlag.Usage)
 }
 
 func withIntegrityChecks(cmd *cobra.Command) {

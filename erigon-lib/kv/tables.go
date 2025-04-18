@@ -99,8 +99,6 @@ const (
 	EthTx    = "BlockTransaction" // tx_id_u64 -> rlp(tx)
 	MaxTxNum = "MaxTxNum"         // block_number_u64 -> max_tx_num_in_block_u64
 
-	ReceiptsCache = "ReceiptCache" // block_num_u64 + block_hash + txn_index_u32 -> rlp(receipt)
-
 	TxLookup = "BlockTransactionLookup" // hash -> transaction/receipt lookup metadata
 
 	ConfigTable = "Config" // config prefix for the db
@@ -186,10 +184,10 @@ const (
 	TblReceiptHistoryVals = "ReceiptHistoryVals"
 	TblReceiptIdx         = "ReceiptIdx"
 
-	TblReceiptCacheVals        = "ReceiptCacheVals"
-	TblReceiptCacheHistoryKeys = "ReceiptCacheHistoryKeys"
-	TblReceiptCacheHistoryVals = "ReceiptCacheHistoryVals"
-	TblReceiptCacheIdx         = "ReceiptCacheIdx"
+	TblRCacheVals        = "ReceiptCacheVals"
+	TblRCacheHistoryKeys = "ReceiptCacheHistoryKeys"
+	TblRCacheHistoryVals = "ReceiptCacheHistoryVals"
+	TblRCacheIdx         = "ReceiptCacheIdx"
 
 	TblLogAddressKeys = "LogAddressKeys"
 	TblLogAddressIdx  = "LogAddressIdx"
@@ -330,7 +328,6 @@ var ChaindataTables = []string{
 	HeaderNumber,
 	BadHeaderNumber,
 	BlockBody,
-	ReceiptsCache,
 	TxLookup,
 	ConfigTable,
 	DatabaseInfo,
@@ -389,10 +386,10 @@ var ChaindataTables = []string{
 	TblReceiptHistoryVals,
 	TblReceiptIdx,
 
-	TblReceiptCacheVals,
-	TblReceiptCacheHistoryKeys,
-	TblReceiptCacheHistoryVals,
-	TblReceiptCacheIdx,
+	TblRCacheVals,
+	TblRCacheHistoryKeys,
+	TblRCacheHistoryVals,
+	TblRCacheIdx,
 
 	TblLogAddressKeys,
 	TblLogAddressIdx,
@@ -575,8 +572,8 @@ var ChaindataTablesCfg = TableCfg{
 	TblReceiptHistoryVals: {Flags: DupSort},
 	TblReceiptIdx:         {Flags: DupSort},
 
-	TblReceiptCacheHistoryKeys: {Flags: DupSort},
-	TblReceiptCacheIdx:         {Flags: DupSort},
+	TblRCacheHistoryKeys: {Flags: DupSort},
+	TblRCacheIdx:         {Flags: DupSort},
 
 	TblLogAddressKeys: {Flags: DupSort},
 	TblLogAddressIdx:  {Flags: DupSort},
@@ -733,24 +730,24 @@ func reinit() {
 // Temporal
 
 const (
-	AccountsDomain     Domain = 0
-	StorageDomain      Domain = 1
-	CodeDomain         Domain = 2
-	CommitmentDomain   Domain = 3
-	ReceiptDomain      Domain = 4
-	ReceiptCacheDomain Domain = 5
-	DomainLen          Domain = 6
+	AccountsDomain   Domain = 0
+	StorageDomain    Domain = 1
+	CodeDomain       Domain = 2
+	CommitmentDomain Domain = 3
+	ReceiptDomain    Domain = 4
+	RCacheDomain     Domain = 5
+	DomainLen        Domain = 6
 )
 
 var StateDomains = []Domain{AccountsDomain, StorageDomain, CodeDomain, CommitmentDomain}
 
 const (
-	AccountsHistoryIdx     InvertedIdx = "AccountsHistoryIdx"
-	StorageHistoryIdx      InvertedIdx = "StorageHistoryIdx"
-	CodeHistoryIdx         InvertedIdx = "CodeHistoryIdx"
-	CommitmentHistoryIdx   InvertedIdx = "CommitmentHistoryIdx"
-	ReceiptHistoryIdx      InvertedIdx = "ReceiptHistoryIdx"
-	ReceiptCacheHistoryIdx InvertedIdx = "ReceiptCacheHistoryIdx"
+	AccountsHistoryIdx   InvertedIdx = "AccountsHistoryIdx"
+	StorageHistoryIdx    InvertedIdx = "StorageHistoryIdx"
+	CodeHistoryIdx       InvertedIdx = "CodeHistoryIdx"
+	CommitmentHistoryIdx InvertedIdx = "CommitmentHistoryIdx"
+	ReceiptHistoryIdx    InvertedIdx = "ReceiptHistoryIdx"
+	RCacheHistoryIdx     InvertedIdx = "ReceiptCacheHistoryIdx"
 
 	LogTopicIdx   InvertedIdx = "LogTopicIdx"
 	LogAddrIdx    InvertedIdx = "LogAddrIdx"
@@ -775,8 +772,8 @@ func (d Domain) String() string {
 		return "commitment"
 	case ReceiptDomain:
 		return "receipt"
-	case ReceiptCacheDomain:
-		return "receiptcache"
+	case RCacheDomain:
+		return "rcache"
 	default:
 		return "unknown domain"
 	}
@@ -794,8 +791,8 @@ func String2Domain(in string) (Domain, error) {
 		return CommitmentDomain, nil
 	case "receipt":
 		return ReceiptDomain, nil
-	case "receiptcache":
-		return ReceiptCacheDomain, nil
+	case "rcache":
+		return RCacheDomain, nil
 	default:
 		return Domain(MaxUint16), fmt.Errorf("unknown history name: %s", in)
 	}
