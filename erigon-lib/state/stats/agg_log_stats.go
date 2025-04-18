@@ -64,8 +64,8 @@ func LogStats(at *state.AggregatorRoTx, tx kv.Tx, logger log.Logger, tx2block fu
 		"txs", common2.PrettyCounter(at.Agg().EndTxNumMinimax()),
 		"txNum2blockNum", strings.Join(str, ","),
 		"first_history_idx_in_db", firstHistoryIndexBlockInDB,
-		"last_comitment_block", lastCommitmentBlockNum,
-		"last_comitment_tx_num", lastCommitmentTxNum,
+		"last_commitment_block", lastCommitmentBlockNum,
+		"last_commitment_tx_num", lastCommitmentTxNum,
 		//"cnt_in_files", strings.Join(str2, ","),
 		//"used_files", strings.Join(at.Files(), ","),
 		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
