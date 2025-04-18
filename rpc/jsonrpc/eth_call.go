@@ -341,11 +341,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address libcommon.
 		return nil, err
 	}
 
-	temporalTx, ok := tx.(kv.TemporalTx)
-	if !ok {
-		return nil, errors.New("tx is not a temporal tx")
-	}
-	domains, err := libstate.NewSharedDomains(temporalTx, log.New())
+	domains, err := libstate.NewSharedDomains(tx.(kv.TemporalTx), log.New())
 	if err != nil {
 		return nil, err
 	}
