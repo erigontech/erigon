@@ -297,6 +297,10 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 	merger := snapshotsync.NewMerger(tmpDir, workers, lvl, db, br.chainConfig, logger)
 	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(), snapshots.BlocksAvailable())
 	if len(rangesToMerge) == 0 {
+		//TODO: enable, but optimize to reduce chain-tip impact
+		//if err := snapshots.RemoveOverlaps(); err != nil {
+		//	return false, err
+		//}
 		return ok, nil
 	}
 	ok = true // have something to merge

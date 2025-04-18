@@ -505,6 +505,7 @@ type BlockSnapshots interface {
 	SetSegmentsMin(uint64)
 
 	DownloadComplete()
+	RemoveOverlaps() error
 	DownloadReady() bool
 	Ready(context.Context) <-chan error
 }
@@ -1233,7 +1234,21 @@ func (s *RoSnapshots) closeWhatNotInList(l []string) {
 
 func (s *RoSnapshots) RemoveOverlaps() error {
 	list, err := snaptype.Segments(s.dir)
+	if err != nil {
+		return err
+	}
+	if _, toRemove := findOverlaps(list); len(toRemove) > 0 {
+		filesToRemove := make([]string, 0, len(toRemove))
 
+		for _, info := range toRemove {
+			filesToRemove = append(filesToRemove, info.Path)
+		}
+
+		removeOldFiles(filesToRemove, s.dir)
+	}
+
+	//it's possible that .seg was remove but .idx not (kill between deletes, etc...)
+	list, err = snaptype.IdxFiles(s.dir)
 	if err != nil {
 		return err
 	}
@@ -1247,7 +1262,6 @@ func (s *RoSnapshots) RemoveOverlaps() error {
 
 		removeOldFiles(filesToRemove, s.dir)
 	}
-
 	return nil
 }
 

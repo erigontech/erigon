@@ -852,13 +852,13 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 	// Check that there are no gaps
 	for i := 1; i < len(intervals); i++ {
 		if intervals[i].from != intervals[i-1].to {
-			return fmt.Errorf("gap between %d and %d. snaptype: %s", intervals[i-1].to, intervals[i].from, snapType)
+			return fmt.Errorf("gap between (%d-%d) and (%d-%d). snaptype: %s", intervals[i-1].from, intervals[i-1].to, intervals[i].from, intervals[i].to, snapType)
 		}
 	}
 	// Check that there are no overlaps
 	for i := 1; i < len(intervals); i++ {
 		if intervals[i].from < intervals[i-1].to {
-			return fmt.Errorf("overlap between %d and %d. snaptype: %s", intervals[i-1].to, intervals[i].from, snapType)
+			return fmt.Errorf("overlap between (%d-%d) and (%d-%d). snaptype: %s", intervals[i-1].from, intervals[i-1].to, intervals[i].from, intervals[i].to, snapType)
 		}
 	}
 
@@ -1384,6 +1384,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 
 	//agg.LimitRecentHistoryWithoutFiles(0)
+	blockReader, _ := br.IO()
 
 	var forwardProgress uint64
 	if to == 0 {
@@ -1391,7 +1392,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 			forwardProgress, err = stages.GetStageProgress(tx, stages.Senders)
 			return err
 		})
-		blockReader, _ := br.IO()
 		from2, to2, ok := freezeblocks.CanRetire(forwardProgress, blockReader.FrozenBlocks(), coresnaptype.Enums.Headers, nil)
 		if ok {
 			from, to, every = from2, to2, to2-from2
@@ -1404,8 +1404,15 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	if err := br.RetireBlocks(ctx, from, forwardProgress, log.LvlInfo, nil, nil, nil); err != nil {
 		return err
 	}
+	if err := blockReader.Snapshots().RemoveOverlaps(); err != nil {
+		return err
+	}
+	if sn := blockReader.BorSnapshots(); sn != nil {
+		if err := sn.RemoveOverlaps(); err != nil {
+			return err
+		}
+	}
 
-	blockReader, _ := br.IO()
 	deletedBlocks := math.MaxInt // To pass the first iteration
 	allDeletedBlocks := 0
 	for deletedBlocks > 0 { // prune happens by small steps, so need many runs
