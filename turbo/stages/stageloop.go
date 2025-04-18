@@ -264,7 +264,7 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 		//tableSizes = stagedsync.CollectDBMetrics(db, txc.Tx) // Need to do this before commit to access tx
 		commitStart := time.Now()
 		errTx := txc.Tx.Commit()
-		txc.Tx = nil
+		txc = wrap.NewTxContainer(nil, txc.Doms)
 		if errTx != nil {
 			return errTx
 		}

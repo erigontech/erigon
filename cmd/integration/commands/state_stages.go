@@ -166,17 +166,14 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig params.MiningConfig, ctx 
 	engine, vmConfig, stateStages, miningStages, miner := newSync(ctx, db, &miningConfig, logger1)
 	chainConfig, pm := fromdb.ChainConfig(db), fromdb.PruneMode(db)
 
-	tx, err := db.BeginRw(ctx)
+	ttx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer ttx.Rollback()
+	var tx kv.RwTx = ttx
 
-	temporalTx, ok := tx.(kv.TemporalTx)
-	if !ok {
-		return errors.New("db doesn't support temporal tx")
-	}
-	sd, err := stateLib.NewSharedDomains(temporalTx, logger1)
+	sd, err := stateLib.NewSharedDomains(ttx, logger1)
 	if err != nil {
 		return err
 	}

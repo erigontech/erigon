@@ -275,9 +275,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		criticalError = fmt.Errorf("failed to create shared domains: %w", criticalError)
 		return
 	}
-	var txc wrap.TxContainer
-	txc.Tx = tx
-	txc.Doms = fv.sharedDom
+	txc := wrap.NewTxContainer(tx, fv.sharedDom)
 
 	fv.extendingForkNotifications = shards.NewNotifications(nil)
 	return fv.validateAndStorePayload(txc, header, body, unwindPoint, headersChain, bodiesChain, fv.extendingForkNotifications)

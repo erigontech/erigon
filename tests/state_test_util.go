@@ -203,13 +203,8 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 
-	var txc wrap.TxContainer
-	txc.Tx = tx
-	temporalTx, ok := txc.Tx.(kv.TemporalTx)
-	if !ok {
-		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
-	}
-	domains, err := state2.NewSharedDomains(temporalTx, log.New())
+	txc := wrap.NewTxContainer(tx, nil)
+	domains, err := state2.NewSharedDomains(txc.Ttx, log.New())
 	if err != nil {
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
@@ -328,14 +323,8 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, b
 		}
 	}
 
-	var txc wrap.TxContainer
-	txc.Tx = tx
-
-	temporalTx, ok := txc.Tx.(kv.TemporalTx)
-	if !ok {
-		return nil, errors.New("tx is not a temporal tx")
-	}
-	domains, err := state2.NewSharedDomains(temporalTx, log.New())
+	txc := wrap.NewTxContainer(tx, nil)
+	domains, err := state2.NewSharedDomains(txc.Ttx, log.New())
 	if err != nil {
 		return nil, err
 	}
