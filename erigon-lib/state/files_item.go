@@ -267,6 +267,18 @@ type visibleFile struct {
 	src *filesItem
 }
 
+func (v visibleFile) Filename() string {
+	return v.getter.FileName()
+}
+
+func (v visibleFile) StartTxNum() uint64 {
+	return v.startTxNum
+}
+
+func (v visibleFile) EndTxNum() uint64 {
+	return v.endTxNum
+}
+
 func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l Accessors, trace bool, toTxNum uint64) (roItems []visibleFile) {
 	newVisibleFiles := make([]visibleFile, 0, files.Len())
 	// trace = true
