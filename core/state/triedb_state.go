@@ -8,6 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -16,7 +18,6 @@ import (
 	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	witnesstypes "github.com/erigontech/erigon-lib/types/witness"
-	"github.com/holiman/uint256"
 )
 
 // Buffer is a structure holding updates, deletes, and reads registered within one change period
@@ -695,6 +696,11 @@ func (tds *TrieDbState) ReadAccountStorage(address libcommon.Address, incarnatio
 	}
 
 	return enc, nil
+}
+
+func (tds *TrieDbState) HasStorage(address libcommon.Address) (bool, error) {
+	//TODO implement me
+	panic("implement me")
 }
 
 func (tds *TrieDbState) readAccountCodeFromTrie(addrHash []byte) ([]byte, bool) {

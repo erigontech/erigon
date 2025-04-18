@@ -76,6 +76,11 @@ func (cr *CachedReader) ReadAccountStorage(address common.Address, incarnation u
 	return v, nil
 }
 
+func (cr *CachedReader) HasStorage(address common.Address) (bool, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
 // ReadAccountCode is called when code of an account needs to be fetched from the state
 // Usually, one of (address;incarnation) or codeHash is enough to uniquely identify the code
 func (cr *CachedReader) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {

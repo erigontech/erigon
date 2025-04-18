@@ -81,6 +81,11 @@ func (r *CachedReader3) ReadAccountStorage(address common.Address, incarnation u
 	return enc, nil
 }
 
+func (r *CachedReader3) HasStorage(address common.Address) (bool, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
 func (r *CachedReader3) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {
 	code, err := r.cache.GetCode(address[:])
 	if len(code) == 0 {

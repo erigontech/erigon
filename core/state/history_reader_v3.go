@@ -104,6 +104,11 @@ func (hr *HistoryReaderV3) ReadAccountStorage(address common.Address, incarnatio
 	return enc, err
 }
 
+func (hr *HistoryReaderV3) HasStorage(address common.Address) (bool, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
 func (hr *HistoryReaderV3) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {
 	//  must pass key2=Nil here: because Erigon4 does concatinate key1+key2 under the hood
 	//code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)

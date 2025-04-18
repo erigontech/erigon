@@ -378,9 +378,9 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 		if err := w.rs.domains.DomainDel(kv.CodeDomain, address[:], nil, nil, 0); err != nil {
 			return err
 		}
-		if err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte, step uint64) error {
+		if err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte, step uint64) (bool, error) {
 			w.writeLists[kv.StorageDomain.String()].Push(string(k), nil)
-			return nil
+			return true, nil
 		}); err != nil {
 			return err
 		}
@@ -564,7 +564,7 @@ type ReaderV3 struct {
 func NewReaderV3(tx kv.TemporalGetter) *ReaderV3 {
 	return &ReaderV3{
 		//trace:     true,
-		tx:        tx,
+		tx:        tx, // tx may be SharedDomains which is useful to check if address has no storage keys at all
 		composite: make([]byte, 20+32),
 	}
 }
@@ -575,6 +575,23 @@ func (r *ReaderV3) SetTx(tx kv.TemporalTx)               {}
 func (r *ReaderV3) ReadSet() map[string]*libstate.KvList { return nil }
 func (r *ReaderV3) SetTrace(trace bool)                  { r.trace = trace }
 func (r *ReaderV3) ResetReadSet()                        {}
+
+func (r *ReaderV3) HasStorage(address common.Address) (bool, error) {
+	sd, ok := r.tx.(*state.SharedDomains)
+	if !ok {
+		panic("AddressHasNoStorage: ReaderV3.tx is not SharedDomains")
+	}
+
+	var hasStorage bool
+	err := sd.IterateStoragePrefix(address.Bytes(), func(ask []byte, val []byte, step uint64) (bool, error) {
+		hasStorage = true
+		return false, nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return hasStorage, nil
+}
 
 func (r *ReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	enc, _, err := r.tx.GetLatest(kv.AccountsDomain, address[:])
@@ -670,6 +687,22 @@ func (r *ReaderParallelV3) SetTx(tx kv.TemporalTx)               {}
 func (r *ReaderParallelV3) ReadSet() map[string]*libstate.KvList { return r.readLists }
 func (r *ReaderParallelV3) SetTrace(trace bool)                  { r.trace = trace }
 func (r *ReaderParallelV3) ResetReadSet()                        { r.readLists = newReadList() }
+
+func (r *ReaderParallelV3) HasStorage(address common.Address) (bool, error) {
+	var hasStorage bool
+	err := r.sd.IterateStoragePrefix(address.Bytes(), func(ask []byte, val []byte, step uint64) (bool, error) {
+		hasStorage = true
+		if !r.discardReadList {
+			// lifecycle of `r.readList` is less than lifecycle of `r.rs` and `r.tx`, also `r.rs` and `r.tx` do store data immutable way
+			r.readLists[kv.StorageDomain.String()].Push(string(ask), common.Copy(val))
+		}
+		return false, nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return hasStorage, nil
+}
 
 func (r *ReaderParallelV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	enc, _, err := r.sd.GetLatest(kv.AccountsDomain, address[:])

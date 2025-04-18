@@ -39,6 +39,7 @@ type StateReader interface {
 	ReadAccountData(address common.Address) (*accounts.Account, error)
 	ReadAccountDataForDebug(address common.Address) (*accounts.Account, error)
 	ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error)
+	HasStorage(address common.Address) (bool, error)
 	ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error)
 	ReadAccountCodeSize(address common.Address, incarnation uint64) (int, error)
 	ReadAccountIncarnation(address common.Address) (uint64, error)
