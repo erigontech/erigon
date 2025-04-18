@@ -358,8 +358,6 @@ func newBlockExecMetrics() *blockExecMetrics {
 	}
 }
 
-var txGasUsed = blockCount{Ema: metrics.NewEma[uint64](0, 0.3)}
-
 type blockDuration struct {
 	atomic.Int64
 	Ema *metrics.EMA[time.Duration]
@@ -949,7 +947,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, res *exec.Result, cfg E
 
 		if applyResult.txNum > 0 {
 			applyResult.writeSet = stateWriter.WriteSet()
-			txGasUsed.Add(applyResult.gasUsed)
 			be.applyResults <- &applyResult
 		}
 	}

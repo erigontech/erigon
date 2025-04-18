@@ -97,7 +97,6 @@ type Progress struct {
 	prevTaskDuration      time.Duration
 	prevTaskReadDuration  time.Duration
 	prevTaskGas           int64
-	prevTxGas             int64
 	prevBlockCount        int64
 	prevBlockDuration     time.Duration
 	prevBlockGas          int64
@@ -186,17 +185,14 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 		blockCount := te.blockExecMetrics.BlockCount.Load()
 		blockExecGas := te.blockExecMetrics.GasUsed.Load()
 		blockExecDur := time.Duration(te.blockExecMetrics.Duration.Load())
-		txExecGas := txGasUsed.Load()
 
 		curBlockCount := blockCount - p.prevBlockCount
 		curBlockExecGas := blockExecGas - p.prevBlockGas
 		curBlockExecDur := blockExecDur - p.prevBlockDuration
-		curTxExecGas := txExecGas - p.prevTxGas
 
 		p.prevBlockCount = blockCount
 		p.prevBlockGas = blockExecGas
 		p.prevBlockDuration = blockExecDur
-		p.prevTxGas = txExecGas
 
 		var avgBlockDur time.Duration
 
@@ -205,7 +201,6 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 		}
 
 		curBlockGasPerSec := int64(float64(curBlockExecGas) / interval.Seconds())
-		curTxGasPerSec := int64(float64(curTxExecGas) / interval.Seconds())
 
 		execVals = []interface{}{
 			"exec", common.PrettyCounter(execDiff),
@@ -213,7 +208,7 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 			"abort", common.PrettyCounter(abortCount - p.prevAbortCount),
 			"invalid", common.PrettyCounter(invalidCount - p.prevInvalidCount),
 			"tgas/s", fmt.Sprintf("%s(%s)", common.PrettyCounter(curTaskGasPerSec), common.PrettyCounter(avgTaskGasPerSec)),
-			"bgas/s", fmt.Sprintf("%s(%s)", common.PrettyCounter(curBlockGasPerSec), common.PrettyCounter(curTxGasPerSec)),
+			"bgas/s", common.PrettyCounter(curBlockGasPerSec),
 			"workers", fmt.Sprintf("%d(%.1f)", ex.taskExecMetrics.Active.Ema.Get(), float64(curTaskDur)/float64(interval)),
 			"tdur", fmt.Sprintf("%dµs", avgTaskDur.Microseconds()),
 			"trdur", fmt.Sprintf("%dµs(%.2f%%)", avgReadDur.Microseconds(), readRatio),
@@ -978,13 +973,11 @@ func ExecV3(ctx context.Context,
 						pe.lastExecutedTxNum = applyResult.txNum
 
 						pe.rs.SetTxNum(applyResult.txNum, applyResult.blockNum)
-						if false {
-							if err := pe.rs.ApplyState4(ctx, applyTx,
-								applyResult.blockNum, applyResult.txNum, applyResult.writeSet,
-								nil, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
-								pe.cfg.chainConfig, pe.cfg.chainConfig.Rules(applyResult.blockNum, applyResult.blockTime), false); err != nil {
-								return err
-							}
+						if err := pe.rs.ApplyState4(ctx, applyTx,
+							applyResult.blockNum, applyResult.txNum, applyResult.writeSet,
+							nil, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
+							pe.cfg.chainConfig, pe.cfg.chainConfig.Rules(applyResult.blockNum, applyResult.blockTime), false); err != nil {
+							return err
 						}
 					case *blockResult:
 						if applyResult.BlockNum > lastBlockResult.BlockNum {
