@@ -198,6 +198,7 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 			}
 			blackList[name] = struct{}{}
 		} else {
+			println(name)
 			// e.g 'v1.0-000000-000100-beaconblocks.seg'
 			// parse "from" (000000) and "to" (000100) from the name. 100 is 100'000 blocks
 			s, _, ok := snaptype.ParseFileName("", name)
