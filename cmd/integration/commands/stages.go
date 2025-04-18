@@ -1470,9 +1470,6 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 	}
 	if syncCfg.PersistReceiptsCache {
 		libstate.EnableHistoricalRCache()
-	} else {
-		fmt.Printf("a: %+v\n", syncCfg)
-		panic(2)
 	}
 
 	vmConfig := &vm.Config{}
