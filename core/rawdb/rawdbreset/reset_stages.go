@@ -195,6 +195,7 @@ func ResetTxLookup(tx kv.RwTx) error {
 var Tables = map[stages.SyncStage][]string{
 	stages.CustomTrace: {
 		kv.TblReceiptVals, kv.TblReceiptHistoryKeys, kv.TblReceiptHistoryVals, kv.TblReceiptIdx,
+		kv.TblReceiptCacheVals, kv.TblReceiptCacheHistoryKeys, kv.TblReceiptCacheHistoryVals, kv.TblReceiptCacheIdx,
 	},
 	stages.Finish: {},
 }

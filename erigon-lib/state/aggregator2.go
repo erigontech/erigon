@@ -164,6 +164,7 @@ var Schema = map[kv.Domain]domainCfg{
 	kv.ReceiptDomain: {
 		name: kv.ReceiptDomain, valuesTable: kv.TblReceiptVals,
 		CompressCfg: seg.DefaultCfg, Compression: seg.CompressNone,
+		largeValues: false,
 
 		AccessorList: AccessorBTree | AccessorExistence,
 
@@ -184,6 +185,7 @@ var Schema = map[kv.Domain]domainCfg{
 	},
 	kv.ReceiptCacheDomain: {
 		name: kv.ReceiptCacheDomain, valuesTable: kv.TblReceiptCacheVals,
+		largeValues: true,
 
 		AccessorList: AccessorBTree,
 		Compression:  seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
@@ -199,8 +201,8 @@ var Schema = map[kv.Domain]domainCfg{
 
 			iiCfg: iiCfg{
 				keysTable: kv.TblReceiptCacheHistoryKeys, valuesTable: kv.TblReceiptCacheIdx,
-				withExistence: false, compressorCfg: seg.DefaultCfg,
-				filenameBase: kv.ReceiptCacheDomain.String(),
+				compressorCfg: seg.DefaultCfg,
+				filenameBase:  kv.ReceiptCacheDomain.String(),
 			},
 		},
 	},

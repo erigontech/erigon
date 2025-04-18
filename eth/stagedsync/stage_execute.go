@@ -443,8 +443,8 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	}
 
 	// prune receipts cache
-	if cfg.syncCfg.PersistReceipts > 0 && s.ForwardProgress > cfg.syncCfg.PersistReceipts {
-		pruneTo := s.ForwardProgress - cfg.syncCfg.PersistReceipts
+	if cfg.syncCfg.PersistReceiptsCache > 0 && s.ForwardProgress > cfg.syncCfg.PersistReceiptsCache {
+		pruneTo := s.ForwardProgress - cfg.syncCfg.PersistReceiptsCache
 		pruneLimit := 10
 		if s.CurrentSyncCycle.IsInitialCycle {
 			pruneLimit = -1

@@ -57,8 +57,8 @@ func StageCustomTraceCfg(db kv.TemporalRwDB, dirs datadir.Dirs, br services.Full
 		Genesis:     genesis,
 		Workers:     syncCfg.ExecWorkerCount,
 
-		ProduceReceiptDomain: dbg.EnvBool("PRODUCE_RECEIPT_DOMAIN", true),
-		PersistReceipts: syncCfg.PersistReceipts > 0,
+		ProduceReceiptDomain:       dbg.EnvBool("PRODUCE_RECEIPT_DOMAIN", true),
+		ProduceReceiptsCacheDomain: syncCfg.PersistReceiptsCache > 0,
 	}
 	return CustomTraceCfg{
 		db:       db,
@@ -67,6 +67,15 @@ func StageCustomTraceCfg(db kv.TemporalRwDB, dirs datadir.Dirs, br services.Full
 }
 
 func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger) error {
+	var producingDomain kv.Domain
+	if cfg.execArgs.ProduceReceiptDomain {
+		producingDomain = kv.ReceiptCacheDomain
+	} else if cfg.execArgs.ProduceReceiptsCacheDomain {
+		producingDomain = kv.ReceiptCacheDomain
+	} else {
+		panic("assert: which domain need to produce?")
+	}
+
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.ExecArgs.BlockReader))
 
 	var startBlock, endBlock uint64
@@ -83,8 +92,8 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 			panic(ok)
 		}
 
-		txNum = ac.DbgDomain(kv.ReceiptDomain).FirstStepNotInFiles() * stepSize
-		log.Info("[dbg] SpawnCustomTrace", "accountsDomainProgress", ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx), "receiptDomainProgress", ac.DbgDomain(kv.ReceiptDomain).DbgMaxTxNumInDB(tx), "receiptDomainFiles", ac.DbgDomain(kv.ReceiptDomain).Files())
+		txNum = ac.DbgDomain(producingDomain).FirstStepNotInFiles() * stepSize
+		log.Info("[dbg] SpawnCustomTrace", "accountsDomain", ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx), "producingDomain", ac.DbgDomain(producingDomain).DbgMaxTxNumInDB(tx), "producingDomainFiles", ac.DbgDomain(producingDomain).Files())
 		ok, startBlock, err = txNumsReader.FindBlockNum(tx, txNum)
 		if err != nil {
 			return fmt.Errorf("getting last executed block: %w", err)
@@ -102,7 +111,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 
 	batchSize := uint64(100_000)
 	for ; startBlock < endBlock; startBlock += batchSize {
-		if err := customTraceBatchProduce(ctx, cfg.ExecArgs, cfg.db, startBlock, startBlock+batchSize, "custom_trace", logger); err != nil {
+		if err := customTraceBatchProduce(ctx, cfg.ExecArgs, cfg.db, startBlock, startBlock+batchSize, "custom_trace", producingDomain, logger); err != nil {
 			return err
 		}
 	}
@@ -139,7 +148,7 @@ Loop:
 	log.Info("SpawnCustomTrace finish")
 	if err := cfg.db.View(ctx, func(tx kv.Tx) error {
 		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
-		receiptProgress := ac.DbgDomain(kv.ReceiptDomain).DbgMaxTxNumInDB(tx)
+		receiptProgress := ac.DbgDomain(producingDomain).DbgMaxTxNumInDB(tx)
 		accProgress := ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx)
 		if accProgress != receiptProgress {
 			err := fmt.Errorf("[integrity] ReceiptDomain=%d is behind AccountDomain=%d", receiptProgress, accProgress)
@@ -153,7 +162,7 @@ Loop:
 	return nil
 }
 
-func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.TemporalRwDB, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
+func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.TemporalRwDB, fromBlock, toBlock uint64, logPrefix string, producingDomain kv.Domain, logger log.Logger) error {
 	var lastTxNum uint64
 	{
 		tx, err := db.BeginTemporalRw(ctx)
@@ -196,7 +205,7 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.Tem
 	}
 	if err := db.View(ctx, func(tx kv.Tx) error {
 		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
-		fromStep = ac.DbgDomain(kv.ReceiptDomain).FirstStepNotInFiles()
+		fromStep = ac.DbgDomain(producingDomain).FirstStepNotInFiles()
 		return nil
 	}); err != nil {
 		return err
@@ -314,45 +323,52 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			doms.SetTx(tx)
 			doms.SetTxNum(txTask.TxNum)
 
-			if !txTask.Final {
-				var receipt *types.Receipt
-				if txTask.TxIndex >= 0 {
-					receipt = txTask.BlockReceipts[txTask.TxIndex]
+			if cfg.ProduceReceiptDomain {
+				if !txTask.Final {
+					var receipt *types.Receipt
+					if txTask.TxIndex >= 0 {
+						receipt = txTask.BlockReceipts[txTask.TxIndex]
+					}
+					if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock); err != nil {
+						return err
+					}
 				}
-				if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock); err != nil {
-					return err
+
+				if txTask.Final { // block changed
+					if cfg.ChainConfig.Bor != nil && txTask.TxIndex >= 1 {
+						// get last receipt and store the last log index + 1
+						lastReceipt := txTask.BlockReceipts[txTask.TxIndex-1]
+						if lastReceipt == nil {
+							return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
+						}
+						if len(lastReceipt.Logs) > 0 {
+							firstIndex := lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
+							receipt := types.Receipt{
+								CumulativeGasUsed:        lastReceipt.CumulativeGasUsed,
+								FirstLogIndexWithinBlock: uint32(firstIndex),
+							}
+							//log.Info("adding extra", "firstLog", firstIndex)
+							if err := rawtemporaldb.AppendReceipt(doms, &receipt, cumulativeBlobGasUsedInBlock); err != nil {
+								return err
+							}
+						}
+					}
+
+					cumulativeBlobGasUsedInBlock = 0
 				}
 			}
 
-			if txTask.Final { // block changed
-				if cfg.ChainConfig.Bor != nil && txTask.TxIndex >= 1 {
-					// get last receipt and store the last log index + 1
-					lastReceipt := txTask.BlockReceipts[txTask.TxIndex-1]
-					if lastReceipt == nil {
-						return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
-					}
-					if len(lastReceipt.Logs) > 0 {
-						firstIndex := lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
-						receipt := types.Receipt{
-							CumulativeGasUsed:        lastReceipt.CumulativeGasUsed,
-							FirstLogIndexWithinBlock: uint32(firstIndex),
-						}
-						//log.Info("adding extra", "firstLog", firstIndex)
-						if err := rawtemporaldb.AppendReceipt(doms, &receipt, cumulativeBlobGasUsedInBlock); err != nil {
-							return err
+			if cfg.ProduceReceiptsCacheDomain {
+				if txTask.Final { // block changed
+					if cfg.ProduceReceiptsCacheDomain {
+						if txTask.BlockReceipts != nil {
+							if err := rawdb.WriteReceiptsCache(doms, txTask.BlockNum, txTask.BlockHash, txTask.BlockReceipts); err != nil {
+								return err
+							}
 						}
 					}
+					cumulativeBlobGasUsedInBlock = 0
 				}
-
-				if cfg.PersistReceipts {
-					if txTask.BlockReceipts != nil {
-						if err := rawdb.WriteReceiptsCache(doms, txTask.BlockNum, txTask.BlockHash, txTask.BlockReceipts); err != nil {
-							return err
-						}
-					}
-				}
-
-				cumulativeBlobGasUsedInBlock = 0
 			}
 
 			select {
