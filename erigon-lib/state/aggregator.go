@@ -323,8 +323,8 @@ func (a *Aggregator) HasBackgroundFilesBuild2() bool {
 func (a *Aggregator) HasBackgroundFilesBuild() bool { return a.ps.Has() }
 func (a *Aggregator) BackgroundProgress() string    { return a.ps.String() }
 
-func (at *AggregatorRoTx) AllFiles() []string {
-	var res []string
+func (at *AggregatorRoTx) AllFiles() VisibleFiles {
+	var res VisibleFiles
 	if at == nil {
 		return res
 	}
@@ -336,13 +336,13 @@ func (at *AggregatorRoTx) AllFiles() []string {
 	}
 	return res
 }
-func (at *AggregatorRoTx) Files(domain kv.Domain) []string { return at.d[domain].Files() }
-func (at *AggregatorRoTx) StepSize() uint64                { return at.a.StepSize() }
+func (at *AggregatorRoTx) Files(domain kv.Domain) VisibleFiles { return at.d[domain].Files() }
+func (at *AggregatorRoTx) StepSize() uint64                    { return at.a.StepSize() }
 
 func (a *Aggregator) Files() []string {
 	ac := a.BeginFilesRo()
 	defer ac.Close()
-	return ac.AllFiles()
+	return ac.AllFiles().Names()
 }
 func (a *Aggregator) LS() {
 	doLS := func(dirtyFiles *btree.BTreeG[*filesItem]) {
@@ -744,7 +744,7 @@ func (a *Aggregator) DomainTables(domains ...kv.Domain) (tables []string) {
 	}
 	return tables
 }
-func (at *AggregatorRoTx) DomainFiles(domains ...kv.Domain) (files []string) {
+func (at *AggregatorRoTx) DomainFiles(domains ...kv.Domain) (files VisibleFiles) {
 	for _, domain := range domains {
 		files = append(files, at.d[domain].Files()...)
 	}
@@ -1090,70 +1090,18 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, l
 	return aggStat, nil
 }
 
-func (at *AggregatorRoTx) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint64) (uint64, error)) {
-	maxTxNum := at.TxNumsInFiles(kv.StateDomains...)
-	if maxTxNum == 0 {
-		return
-	}
-
-	domainBlockNumProgress, err := tx2block(maxTxNum)
-	if err != nil {
-		at.a.logger.Warn("[snapshots:history] Stat", "err", err)
-		return
-	}
-	str := make([]string, 0, len(at.d[kv.AccountsDomain].files))
-	for _, item := range at.d[kv.AccountsDomain].files {
-		bn, err := tx2block(item.endTxNum)
-		if err != nil {
-			at.a.logger.Warn("[snapshots:history] Stat", "err", err)
-			return
-		}
-		str = append(str, fmt.Sprintf("%d=%dK", item.endTxNum/at.StepSize(), bn/1_000))
-	}
-	//str2 := make([]string, 0, len(at.storage.files))
-	//for _, item := range at.storage.files {
-	//	str2 = append(str2, fmt.Sprintf("%s:%dm", item.src.decompressor.FileName(), item.src.decompressor.Count()/1_000_000))
-	//}
-	//for _, item := range at.commitment.files {
-	//	bn := tx2block(item.endTxNum) / 1_000
-	//	str2 = append(str2, fmt.Sprintf("%s:%dK", item.src.decompressor.FileName(), bn))
-	//}
-	var lastCommitmentBlockNum, lastCommitmentTxNum uint64
-	if len(at.d[kv.CommitmentDomain].files) > 0 {
-		lastCommitmentTxNum = at.d[kv.CommitmentDomain].files[len(at.d[kv.CommitmentDomain].files)-1].endTxNum
-		lastCommitmentBlockNum, err = tx2block(lastCommitmentTxNum)
-		if err != nil {
-			at.a.logger.Warn("[snapshots:history] Stat", "err", err)
-			return
-		}
-	}
-	firstHistoryIndexBlockInDB, err := tx2block(at.d[kv.AccountsDomain].d.minStepInDB(tx) * at.StepSize())
-	if err != nil {
-		at.a.logger.Warn("[snapshots:history] Stat", "err", err)
-		return
-	}
-
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
-	at.a.logger.Info("[snapshots:history] Stat",
-		"blocks", common2.PrettyCounter(domainBlockNumProgress+1),
-		"txs", common2.PrettyCounter(at.a.visibleFilesMinimaxTxNum.Load()),
-		"txNum2blockNum", strings.Join(str, ","),
-		"first_history_idx_in_db", firstHistoryIndexBlockInDB,
-		"last_comitment_block", lastCommitmentBlockNum,
-		"last_comitment_tx_num", lastCommitmentTxNum,
-		//"cnt_in_files", strings.Join(str2, ","),
-		//"used_files", strings.Join(at.Files(), ","),
-		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
-
-}
-
 func (at *AggregatorRoTx) EndTxNumNoCommitment() uint64 {
 	return min(
 		at.d[kv.AccountsDomain].files.EndTxNum(),
 		at.d[kv.CodeDomain].files.EndTxNum(),
 		at.d[kv.StorageDomain].files.EndTxNum(),
 	)
+}
+
+func (at *AggregatorRoTx) Agg() *Aggregator { return at.a }
+
+func (at *AggregatorRoTx) MinStepInDb(tx kv.Tx, domain kv.Domain) (lstInDb uint64) {
+	return at.d[domain].d.minStepInDB(tx)
 }
 
 func (a *Aggregator) EndTxNumMinimax() uint64 { return a.visibleFilesMinimaxTxNum.Load() }

@@ -559,7 +559,8 @@ func TestNewBtIndex(t *testing.T) {
 	defer kv.Close()
 	require.NotNil(t, kv)
 	require.NotNil(t, bt)
-	require.GreaterOrEqual(t, len(bt.bplus.mx), keyCount/int(DefaultBtreeM))
+	bplus := bt.bplus
+	require.GreaterOrEqual(t, len(bplus.mx), keyCount/int(DefaultBtreeM))
 
 	for i := 1; i < len(bt.bplus.mx); i++ {
 		require.NotZero(t, bt.bplus.mx[i].di)

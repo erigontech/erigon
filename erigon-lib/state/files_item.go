@@ -274,11 +274,11 @@ func (i visibleFile) Filename() string {
 	return i.src.decompressor.FilePath()
 }
 
-func (i visibleFile) StartTxNum() uint64 {
+func (i visibleFile) StartRootNum() uint64 {
 	return i.startTxNum
 }
 
-func (i visibleFile) EndTxNum() uint64 {
+func (i visibleFile) EndRootNum() uint64 {
 	return i.endTxNum
 }
 

@@ -355,10 +355,10 @@ func (ii *InvertedIndex) Close() {
 // DisableFsync - just for tests
 func (ii *InvertedIndex) DisableFsync() { ii.noFsync = true }
 
-func (iit *InvertedIndexRoTx) Files() (res []string) {
+func (iit *InvertedIndexRoTx) Files() (res VisibleFiles) {
 	for _, item := range iit.files {
 		if item.src.decompressor != nil {
-			res = append(res, item.src.decompressor.FileName())
+			res = append(res, item)
 		}
 	}
 	return res
