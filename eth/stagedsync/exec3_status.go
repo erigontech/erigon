@@ -188,7 +188,7 @@ func (m *execStatusList) countComplete() int {
 	return len(m.complete)
 }
 
-func (m *execStatusList) addDependencies(blocker int, dependent int) bool {
+func (m *execStatusList) addDependency(blocker int, dependent int) bool {
 	if blocker < 0 || blocker >= dependent {
 		return false
 	}

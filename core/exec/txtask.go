@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -196,9 +197,10 @@ type TxTask struct {
 	Logger log.Logger
 	Trace  bool
 
-	sender  *libcommon.Address
-	message *types.Message
-	signer  *types.Signer
+	sender       *libcommon.Address
+	message      *types.Message
+	signer       *types.Signer
+	dependencies []int
 }
 
 func (t *TxTask) compare(other Task) int {
@@ -308,7 +310,17 @@ func (t *TxTask) Version() state.Version {
 }
 
 func (t *TxTask) Dependencies() []int {
-	return nil
+	if t.dependencies == nil {
+		t.dependencies = []int{}
+
+		// TODO move this dependenvy to somewhere more general
+		blockDependencies := bor.GetTxDependencies(t.Header)
+
+		if t.TxIndex > 0 && len(blockDependencies) > t.TxIndex {
+			t.dependencies = append(t.dependencies, blockDependencies[t.TxIndex]...)
+		}
+	}
+	return t.dependencies
 }
 
 func (t *TxTask) VersionMap() *state.VersionMap {

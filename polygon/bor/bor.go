@@ -950,7 +950,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 
 			blockExtraData := &BlockExtraData{
 				ValidatorBytes: tempValidatorBytes,
-				TxDependency:   nil,
+				TxDependencies: nil,
 			}
 
 			blockExtraDataBytes, err := rlp.EncodeToBytes(blockExtraData)
@@ -968,7 +968,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	} else if c.config.IsNapoli(header.Number.Uint64()) { // PIP-16: Transaction Dependency Data
 		blockExtraData := &BlockExtraData{
 			ValidatorBytes: nil,
-			TxDependency:   nil,
+			TxDependencies: nil,
 		}
 
 		blockExtraDataBytes, err := rlp.EncodeToBytes(blockExtraData)
@@ -1723,15 +1723,15 @@ type BlockExtraData struct {
 	// Validator bytes of bor
 	ValidatorBytes []byte
 
-	// length of TxDependency          ->   n (n = number of transactions in the block)
-	// length of TxDependency[i]       ->   k (k = a whole number)
-	// k elements in TxDependency[i]   ->   transaction indexes on which transaction i is dependent on
-	TxDependency [][]uint64
+	// length of TxDependencies          ->   n (n = number of transactions in the block)
+	// length of TxDependencies[i]       ->   k (k = a whole number)
+	// k elements in TxDependencies[i]   ->   transaction indexes on which transaction i is dependent on
+	TxDependencies [][]int
 }
 
 // Returns the Block-STM Transaction Dependency from the block header
-func GetTxDependency(b *types.Block) [][]uint64 {
-	tempExtra := b.Extra()
+func GetTxDependencies(h *types.Header) [][]int {
+	tempExtra := h.Extra
 
 	if len(tempExtra) < types.ExtraVanityLength+types.ExtraSealLength {
 		log.Error("length of extra less is than vanity and seal")
@@ -1745,7 +1745,7 @@ func GetTxDependency(b *types.Block) [][]uint64 {
 		return nil
 	}
 
-	return blockExtraData.TxDependency
+	return blockExtraData.TxDependencies
 }
 
 func GetValidatorBytes(h *types.Header, config *borcfg.BorConfig) []byte {

@@ -344,8 +344,8 @@ func (ev *taskVersion) Version() state.Version {
 }
 
 type blockExecMetrics struct {
-	BlockCount   atomic.Int64
-	Duration     blockDuration
+	BlockCount atomic.Int64
+	Duration   blockDuration
 }
 
 func newBlockExecMetrics() *blockExecMetrics {
@@ -746,7 +746,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					l--
 				}
 
-				addedDependencies = be.execTasks.addDependencies(execErr.Dependency, tx)
+				addedDependencies = be.execTasks.addDependency(execErr.Dependency, tx)
 				be.execFailed[tx]++
 				if be.execFailed[tx] > 4 {
 					fmt.Println("FAIL", tx, be.txIncarnations[tx], be.execFailed[tx], "dep", execErr.Dependency)
@@ -757,7 +757,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				if len(be.estimateDeps[tx]) > 0 {
 					estimate = be.estimateDeps[tx][len(be.estimateDeps[tx])-1]
 				}
-				addedDependencies = be.execTasks.addDependencies(estimate, tx)
+				addedDependencies = be.execTasks.addDependency(estimate, tx)
 				newEstimate := estimate + (estimate+tx)/2
 				if newEstimate >= tx {
 					newEstimate = tx - 1
@@ -1348,7 +1348,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 
 		if len(t.Dependencies()) > 0 {
 			for _, val := range t.Dependencies() {
-				executor.execTasks.addDependencies(val, i)
+				executor.execTasks.addDependency(val, i)
 			}
 			executor.execTasks.clearPending(i)
 		} else {
@@ -1358,7 +1358,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			}
 			if sender != nil {
 				if tx, ok := prevSenderTx[*sender]; ok {
-					executor.execTasks.addDependencies(tx, i)
+					executor.execTasks.addDependency(tx, i)
 					executor.execTasks.clearPending(i)
 				}
 
