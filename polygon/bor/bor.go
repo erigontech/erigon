@@ -1757,9 +1757,6 @@ func (c *Bor) TxDependencies(h *types.Header) [][]int {
 
 	c.Dependencies.Add(h.Hash(), dependencies)
 
-	if len(dependencies) > 0 {
-		fmt.Println(h.Number.Int64(), dependencies)
-	}
 	return dependencies
 }
 
