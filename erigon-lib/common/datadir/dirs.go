@@ -220,7 +220,6 @@ func (d Dirs) RenameOldVersions() error {
 
 			if !entry.IsDir() {
 				name := entry.Name()
-				newPath := path
 				if strings.HasPrefix(name, "v1-") {
 					if strings.HasSuffix(name, ".torrent") {
 						println("removing torrent:", path)
@@ -232,9 +231,9 @@ func (d Dirs) RenameOldVersions() error {
 					println("renaming:", name)
 					newName := strings.Replace(name, "v1-", "v1.0-", 1)
 					oldPath := path
-					newPath = filepath.Join(filepath.Dir(path), newName)
+					path = filepath.Join(filepath.Dir(path), newName)
 
-					if err := os.Rename(oldPath, newPath); err != nil {
+					if err := os.Rename(oldPath, path); err != nil {
 						return err
 					}
 					renamed++
