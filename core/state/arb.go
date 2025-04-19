@@ -599,5 +599,5 @@ func OpenArbitrumWasmDB(ctx context.Context, path string) WasmIface {
 		mdbxDB.Close()
 	}()
 	openedArbitrumWasmDB = WrapDatabaseWithWasm(mdbxDB, []WasmTarget{TargetWavm, LocalTarget()})
-	return WrapDatabaseWithWasm(mdbxDB, []WasmTarget{TargetWavm, LocalTarget()})
+	return openedArbitrumWasmDB
 }
