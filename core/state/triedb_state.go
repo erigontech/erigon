@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
+	"maps"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -108,9 +109,7 @@ func (b *Buffer) merge(other *Buffer) {
 			m = make(map[libcommon.Hash][]byte)
 			b.storageUpdates[addrHash] = m
 		}
-		for keyHash, v := range om {
-			m[keyHash] = v
-		}
+		maps.Copy(m, om)
 	}
 	for addrHash, incarnation := range other.storageIncarnation {
 		b.storageIncarnation[addrHash] = incarnation
