@@ -1,6 +1,8 @@
 package ethdb
 
 import (
+	"fmt"
+
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/nitro-erigon/arbos/programs"
 )
@@ -17,5 +19,6 @@ func InitialiazeWasmTarget() {
 		desc = programs.DefaultTargetDescriptionArm
 	}
 
+	fmt.Println("Initializing Wasm target:", lt, desc)
 	programs.SetTarget(lt, desc, true)
 }
