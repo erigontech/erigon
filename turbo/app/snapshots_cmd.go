@@ -1315,7 +1315,7 @@ func doCompress(cliCtx *cli.Context) error {
 
 	r := bufio.NewReaderSize(os.Stdin, int(128*datasize.MB))
 	word := make([]byte, 0, int(1*datasize.MB))
-	var snappyBuf []byte
+	var snappyBuf, unSnappyBuf []byte
 	var l uint64
 	for l, err = binary.ReadUvarint(r); err == nil; l, err = binary.ReadUvarint(r) {
 		if cap(word) < int(l) {
@@ -1327,10 +1327,11 @@ func doCompress(cliCtx *cli.Context) error {
 			return err
 		}
 		snappyBuf, word = compress.EncodeSnappyIfNeed(snappyBuf, word, doSnappyEachWord)
-		snappyBuf, word, err = compress.DecodeSnappyIfNeed(snappyBuf, word, doUnSnappyEachWord)
+		unSnappyBuf, word, err = compress.DecodeSnappyIfNeed(unSnappyBuf, word, doUnSnappyEachWord)
 		if err != nil {
 			return err
 		}
+		_, _ = snappyBuf, unSnappyBuf
 
 		if err := w.AddWord(word); err != nil {
 			return err
