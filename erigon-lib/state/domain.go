@@ -1972,10 +1972,10 @@ func (dt *DomainRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 	return dt.ht.iit.stepsRangeInDB(tx)
 }
 
-func (dt *DomainRoTx) Files() (res []string) {
+func (dt *DomainRoTx) Files() (res VisibleFiles) {
 	for _, item := range dt.files {
 		if item.src.decompressor != nil {
-			res = append(res, item.src.decompressor.FileName())
+			res = append(res, item)
 		}
 	}
 	return append(res, dt.ht.Files()...)
