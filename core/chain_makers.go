@@ -314,25 +314,21 @@ func (cp *ChainPack) NumberOfPoWBlocks() int {
 // Blocks created by GenerateChain do not contain valid proof of work
 // values. Inserting them into BlockChain requires use of FakePow or
 // a similar non-validating proof of work implementation.
-func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.Engine, db kv.RwDB, n int, gen func(int, *BlockGen)) (*ChainPack, error) {
+func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.Engine, db kv.TemporalRwDB, n int, gen func(int, *BlockGen)) (*ChainPack, error) {
 	if config == nil {
 		config = params2.TestChainConfig
 	}
 	headers, blocks, receipts := make([]*types.Header, n), make(types.Blocks, n), make([]types.Receipts, n)
 	chainreader := &FakeChainReader{Cfg: config, current: parent}
 	ctx := context.Background()
-	tx, errBegin := db.BeginRw(context.Background())
+	tx, errBegin := db.BeginTemporalRw(context.Background())
 	if errBegin != nil {
 		return nil, errBegin
 	}
 	defer tx.Rollback()
 	logger := log.New("generate-chain", config.ChainName)
 
-	temporalTx, ok := tx.(kv.TemporalTx)
-	if !ok {
-		return nil, errors.New("db does not support temporal transactions")
-	}
-	domains, err := libstate.NewSharedDomains(temporalTx, logger)
+	domains, err := libstate.NewSharedDomains(tx, logger)
 	if err != nil {
 		return nil, err
 	}
