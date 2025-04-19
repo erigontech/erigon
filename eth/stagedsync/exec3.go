@@ -315,7 +315,7 @@ func ExecV3(ctx context.Context,
 			accumulator = shards.NewAccumulator()
 		}
 	}
-	rs := state.NewParallelExecutionState(doms, logger)
+	rs := state.NewParallelExecutionState(doms, cfg.syncCfg, cfg.chainConfig.Bor != nil, logger)
 
 	////TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
 	// Now rwLoop closing both (because applyLoop we completely restart)
@@ -711,14 +711,6 @@ Loop:
 				}
 			}
 			executor.domains().SetChangesetAccumulator(nil)
-
-			if cfg.syncCfg.PersistReceipts > 0 {
-				if len(txTasks) > 0 && txTasks[0].BlockReceipts != nil {
-					if err := rawdb.WriteReceiptsCache(executor.tx(), txTasks[0].BlockNum, txTasks[0].BlockHash, txTasks[0].BlockReceipts); err != nil {
-						return err
-					}
-				}
-			}
 		}
 
 		mxExecBlocks.Add(1)

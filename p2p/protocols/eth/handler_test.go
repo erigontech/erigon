@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
-	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	params2 "github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 	"github.com/erigontech/erigon/turbo/stages/mock"
@@ -262,9 +261,6 @@ func TestGetBlockHeaders(t *testing.T) {
 }
 
 func TestGetBlockReceipts(t *testing.T) {
-	if !sentry_multi_client.EnableP2PReceipts {
-		t.Skip("")
-	}
 	// Define three accounts to simulate transactions with
 	acc1Key, _ := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
 	acc2Key, _ := crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")

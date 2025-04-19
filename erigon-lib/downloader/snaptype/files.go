@@ -98,11 +98,6 @@ func IsCorrectFileName(name string) bool {
 	return len(parts) == 4
 }
 
-func IsCorrectHistoryFileName(name string) bool {
-	parts := strings.Split(name, ".")
-	return len(parts) == 3
-}
-
 func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bool) {
 	res, ok = parseFileName(dir, fileName)
 	if ok {
