@@ -577,11 +577,17 @@ func (w *WasmDB) WasmTargets() []WasmTarget {
 	return w.targets
 }
 
-func WrapDatabaseWithWasm(wasm kv.RwDB, cacheTag uint32, targets []WasmTarget) WasmIface {
-	return &WasmDB{RwDB: wasm, cacheTag: cacheTag, targets: targets, activatedAsmCache: lru.NewSizeConstrainedCache[activatedAsmCacheKey, []byte](1000)}
+const constantCacheTag = 1
+
+func WrapDatabaseWithWasm(wasm kv.RwDB, targets []WasmTarget) WasmIface {
+	return &WasmDB{RwDB: wasm, cacheTag: constantCacheTag, targets: targets, activatedAsmCache: lru.NewSizeConstrainedCache[activatedAsmCacheKey, []byte](1000)}
 }
 
-func OpenArbitrumWasmDB(ctx context.Context, path string, cacheTag uint32, targets []WasmTarget, logger log.Logger) WasmIface {
+func OpenArbitrumWasmDB(ctx context.Context, path string) WasmIface {
 	mdbxDB := mdbx.MustOpen(path)
-	return WrapDatabaseWithWasm(mdbxDB, cacheTag, targets)
+	go func() {
+		<-ctx.Done()
+		mdbxDB.Close()
+	}()
+	return WrapDatabaseWithWasm(mdbxDB, []WasmTarget{TargetWavm, LocalTarget()})
 }
