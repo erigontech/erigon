@@ -1335,6 +1335,12 @@ func doCompress(cliCtx *cli.Context) error {
 
 	var l uint64
 	for l, err = binary.ReadUvarint(r); err == nil; l, err = binary.ReadUvarint(r) {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		if cap(word) < int(l) {
 			word = make([]byte, l)
 		} else {
@@ -1343,6 +1349,23 @@ func doCompress(cliCtx *cli.Context) error {
 		if _, err = io.ReadFull(r, word); err != nil {
 			return err
 		}
+
+		if justPrint {
+			fmt.Printf("%x\n\n", word)
+			continue
+		}
+
+		concatI++
+		if concat > 0 {
+			if concatI%concat != 0 {
+				concatBuf = append(concatBuf, word...)
+				continue
+			}
+
+			word = concatBuf
+			concatBuf = concatBuf[:0]
+		}
+
 		snappyBuf, word = compress.EncodeSnappyIfNeed(snappyBuf, word, doSnappyEachWord)
 		unSnappyBuf, word, err = compress.DecodeSnappyIfNeed(unSnappyBuf, word, doUnSnappyEachWord)
 		if err != nil {
@@ -1357,29 +1380,6 @@ func doCompress(cliCtx *cli.Context) error {
 		}
 		_, _ = zstdBuf, unZstdBuf
 
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		if justPrint {
-			fmt.Printf("%x\n\n", word)
-			continue
-		}
-
-		concatI++
-		if concat > 0 {
-			if concatI%concat == 0 {
-				if err := w.AddWord(concatBuf); err != nil {
-					return err
-				}
-				concatBuf = concatBuf[:0]
-				continue
-			}
-			concatBuf = append(concatBuf, word...)
-			continue
-		}
 		if err := w.AddWord(word); err != nil {
 			return err
 		}
