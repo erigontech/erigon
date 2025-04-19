@@ -245,8 +245,7 @@ func (s *IntraBlockState) TryGetActivatedAsm(target WasmTarget, moduleHash commo
 			return asm, nil
 		}
 	}
-	// return s.ActivatedAsm(target, moduleHash)
-	return nil, errors.New("not found")
+	return s.ActivatedAsm(target, moduleHash)
 }
 
 func (s *IntraBlockState) TryGetActivatedAsmMap(targets []WasmTarget, moduleHash common.Hash) (map[WasmTarget][]byte, error) {
@@ -262,9 +261,7 @@ func (s *IntraBlockState) TryGetActivatedAsmMap(targets []WasmTarget, moduleHash
 	var err error
 	asmMap = make(map[WasmTarget][]byte, len(targets))
 	for _, target := range targets {
-		// asm, dbErr := s.db.ActivatedAsm(target, moduleHash)
-		asm := []byte{}
-		var dbErr error
+		asm, dbErr := s.ActivatedAsm(target, moduleHash)
 		if dbErr == nil {
 			asmMap[target] = asm
 		} else {
@@ -336,27 +333,32 @@ func (s *IntraBlockState) GetSelfDestructs() []common.Address {
 }
 
 func (sdb *IntraBlockState) ActivatedAsm(target WasmTarget, moduleHash common.Hash) (asm []byte, err error) {
-	return nil, nil
-	//TODO implement me
-	panic("implement me")
+	if sdb.wasmDB == nil {
+		panic("IBS: wasmDB not set")
+	}
+	return sdb.wasmDB.ActivatedAsm(target, moduleHash)
 }
 
 func (sdb *IntraBlockState) WasmStore() kv.RwDB {
+	if sdb.wasmDB == nil {
+		panic("IBS: wasmDB not set")
+	}
 	//TODO implement me
-	return nil
-	panic("implement me")
+	return sdb.wasmDB.WasmStore()
 }
 
 func (sdb *IntraBlockState) WasmCacheTag() uint32 {
-	return 0
-	//TODO implement me
-	panic("implement me")
+	if sdb.wasmDB == nil {
+		panic("IBS: wasmDB not set")
+	}
+	return sdb.wasmDB.WasmCacheTag()
 }
 
 func (sdb *IntraBlockState) WasmTargets() []WasmTarget {
-	return []WasmTarget{}
-	//TODO implement me
-	panic("implement me")
+	if sdb.wasmDB == nil {
+		panic("IBS: wasmDB not set")
+	}
+	return sdb.wasmDB.WasmTargets()
 }
 
 func (sdb *IntraBlockState) GetReceiptsByHash(hash common.Hash) types.Receipts {
@@ -517,11 +519,8 @@ func (s *IntraBlockState) GetStorageRoot(addr common.Address) common.Hash {
 
 type WasmIface interface {
 	ActivatedAsm(target WasmTarget, moduleHash common.Hash) ([]byte, error)
-
 	WasmStore() kv.RwDB
-
 	WasmCacheTag() uint32
-
 	WasmTargets() []WasmTarget
 }
 
@@ -556,6 +555,13 @@ func (w *WasmDB) ActivatedAsm(target WasmTarget, moduleHash common.Hash) ([]byte
 		return asm, nil
 	}
 	return nil, errors.New("not found")
+}
+
+func (w *WasmDB) WriteActivatedAsm(moduleHash common.Hash, asmMap map[WasmTarget][]byte) error {
+	return w.Update(context.Background(), func(tx kv.RwTx) error {
+		WriteActivation(tx, moduleHash, asmMap)
+		return nil
+	})
 }
 
 func (w *WasmDB) WasmStore() kv.RwDB {
