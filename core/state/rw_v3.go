@@ -245,19 +245,15 @@ func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *li
 
 	if rs.syncCfg.PersistReceiptsCache {
 		var receipt *types.Receipt
-		if txTask.TxIndex == -1 {
-			receipt = txTask.BlockReceipts[txTask.TxIndex]
+		if !txTask.Final {
+			if txTask.TxIndex >= 0 && txTask.BlockReceipts != nil {
+				receipt = txTask.BlockReceipts[txTask.TxIndex]
+			}
 		} else {
-			if !txTask.Final {
-				if txTask.TxIndex >= 0 && txTask.BlockReceipts != nil {
-					receipt = txTask.BlockReceipts[txTask.TxIndex]
-				}
-			} else {
-				if rs.isBor && txTask.TxIndex >= 1 {
-					lastReceipt := txTask.BlockReceipts[txTask.TxIndex-1]
-					if lastReceipt == nil {
-						return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
-					}
+			if rs.isBor && txTask.TxIndex >= 1 {
+				receipt = txTask.BlockReceipts[txTask.TxIndex-1]
+				if receipt == nil {
+					return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
 				}
 			}
 		}
