@@ -1315,6 +1315,8 @@ func doCompress(cliCtx *cli.Context) error {
 	doZstdEachWord := dbg.EnvBool("ZstdEachWord", false)
 	doUnZstdEachWord := dbg.EnvBool("UnZstdEachWord", false)
 
+	justPrint := dbg.EnvBool("JustPrint", false)
+
 	logger.Info("[compress] file", "datadir", dirs.DataDir, "f", f, "cfg", compressCfg, "SnappyEachWord", doSnappyEachWord)
 	c, err := seg.NewCompressor(ctx, "compress", f, dirs.Tmp, compressCfg, log.LvlInfo, logger)
 	if err != nil {
@@ -1351,8 +1353,12 @@ func doCompress(cliCtx *cli.Context) error {
 		}
 		_, _ = zstdBuf, unZstdBuf
 
-		if err := w.AddWord(word); err != nil {
-			return err
+		if justPrint {
+			fmt.Printf("%x\n\n", word)
+		} else {
+			if err := w.AddWord(word); err != nil {
+				return err
+			}
 		}
 
 		select {
