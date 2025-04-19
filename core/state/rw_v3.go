@@ -55,13 +55,15 @@ type ParallelExecutionState struct {
 	triggers     map[uint64]*TxTask
 	senderTxNums map[common.Address]uint64
 
+	isBor bool
+
 	logger log.Logger
 
 	syncCfg ethconfig.Sync
 	trace   bool
 }
 
-func NewParallelExecutionState(domains *libstate.SharedDomains, syncCfg ethconfig.Sync, logger log.Logger) *ParallelExecutionState {
+func NewParallelExecutionState(domains *libstate.SharedDomains, syncCfg ethconfig.Sync, isBor bool, logger log.Logger) *ParallelExecutionState {
 	return &ParallelExecutionState{
 		domains:      domains,
 		triggers:     map[uint64]*TxTask{},
@@ -248,6 +250,18 @@ func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *li
 				}
 			}
 		} else {
+			if rs.isBor && txTask.TxIndex >= 1 {
+				lastReceipt := txTask.BlockReceipts[txTask.TxIndex-1]
+				if lastReceipt == nil {
+					return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
+				}
+				//if len(lastReceipt.Logs) > 0 {
+				//	lastReceipt.FirstLogIndexWithinBlock = lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
+				//}
+				if err := rawdb.WriteReceiptCache(domains, lastReceipt); err != nil {
+					return err
+				}
+			}
 			//bor: skip for now
 		}
 

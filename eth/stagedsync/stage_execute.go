@@ -176,7 +176,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	} else {
 		domains = txc.Doms
 	}
-	rs := state.NewParallelExecutionState(domains, cfg.syncCfg, logger)
+	rs := state.NewParallelExecutionState(domains, cfg.syncCfg, cfg.chainConfig.Bor != nil, logger)
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, br))
 
