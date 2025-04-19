@@ -311,7 +311,7 @@ func (t *TxTask) Version() state.Version {
 }
 
 func (t *TxTask) Dependencies() []int {
-	if !dbg.IgnoreDependencies {
+	if dbg.UseTxDependencies {
 		if t.dependencies == nil && t.Engine != nil {
 			t.dependencies = []int{}
 
