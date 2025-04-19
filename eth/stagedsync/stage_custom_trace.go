@@ -348,19 +348,23 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 					cumulativeBlobGasUsedInBlock = 0
 				}
 			}
-			if !cfg.ProduceRCacheDomain {
-				panic(1)
-			}
+
 			if cfg.ProduceRCacheDomain {
+				var receipt *types.Receipt
 				if !txTask.Final {
 					if txTask.TxIndex >= 0 && txTask.BlockReceipts != nil {
-						receipt := txTask.BlockReceipts[txTask.TxIndex]
-						if err := rawdb.WriteReceiptCache(doms, receipt); err != nil {
-							return err
-						}
+						receipt = txTask.BlockReceipts[txTask.TxIndex]
 					}
 				} else {
-					//TODO: bor
+					if cfg.ChainConfig.Bor != nil && txTask.TxIndex >= 1 {
+						receipt = txTask.BlockReceipts[txTask.TxIndex-1]
+						if receipt == nil {
+							return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
+						}
+					}
+				}
+				if err := rawdb.WriteReceiptCache(doms, receipt); err != nil {
+					return err
 				}
 			}
 
