@@ -1302,6 +1302,7 @@ func doCompress(cliCtx *cli.Context) error {
 	}
 
 	doSnappyEachWord := dbg.EnvBool("SnappyEachWord", false)
+	doUnSnappyEachWord := dbg.EnvBool("UnSnappyEachWord", false)
 
 	logger.Info("[compress] file", "datadir", dirs.DataDir, "f", f, "cfg", compressCfg, "SnappyEachWord", doSnappyEachWord)
 	c, err := seg.NewCompressor(ctx, "compress", f, dirs.Tmp, compressCfg, log.LvlInfo, logger)
@@ -1313,7 +1314,7 @@ func doCompress(cliCtx *cli.Context) error {
 
 	r := bufio.NewReaderSize(os.Stdin, int(128*datasize.MB))
 	word := make([]byte, 0, int(1*datasize.MB))
-	var snappyBuf []byte
+	var snappyBuf, unSnappyBuf []byte
 	var l uint64
 	for l, err = binary.ReadUvarint(r); err == nil; l, err = binary.ReadUvarint(r) {
 		if cap(word) < int(l) {
@@ -1325,6 +1326,11 @@ func doCompress(cliCtx *cli.Context) error {
 			return err
 		}
 		snappyBuf, word = compress.EncodeSnappyIfNeed(snappyBuf, word, doSnappyEachWord)
+		unSnappyBuf, word, err = compress.DecodeSnappyIfNeed(unSnappyBuf, word, doUnSnappyEachWord)
+		if err != nil {
+			return err
+		}
+		_, _ = snappyBuf, unSnappyBuf
 
 		if err := w.AddWord(word); err != nil {
 			return err
@@ -1397,6 +1403,15 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	if err := br.RetireBlocks(ctx, from, to, log.LvlInfo, nil, nil, nil); err != nil {
 		return err
 	}
+	if err := blockReader.Snapshots().RemoveOverlaps(); err != nil {
+		return err
+	}
+	if sn := blockReader.BorSnapshots(); sn != nil {
+		if err := sn.RemoveOverlaps(); err != nil {
+			return err
+		}
+	}
+
 	if err := blockReader.Snapshots().RemoveOverlaps(); err != nil {
 		return err
 	}

@@ -291,3 +291,6 @@ func (tx *Tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
 func (tx *Tx) PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error) {
 	return tx.aggtx.PruneSmallBatches(ctx, timeout, tx.MdbxTx)
 }
+func (tx *Tx) GreedyPruneHistory(ctx context.Context, domain kv.Domain) error {
+	return tx.aggtx.GreedyPruneHistory(ctx, domain, tx.MdbxTx)
+}

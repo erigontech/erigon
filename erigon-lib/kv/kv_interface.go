@@ -580,6 +580,7 @@ type TemporalDebugTx interface {
 
 	DomainFiles(domain ...Domain) VisibleFiles
 
+	GreedyPruneHistory(ctx context.Context, domain Domain) error
 	PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error)
 }
 
