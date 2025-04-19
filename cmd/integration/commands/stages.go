@@ -630,7 +630,11 @@ func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 		ac := agg.BeginFilesRo()
 		defer ac.Close()
 
-		domains, err := libstate.NewSharedDomains(tx, logger)
+		temporalTx, ok := tx.(kv.TemporalTx)
+		if !ok {
+			return errors.New("tx is not a temporal tx")
+		}
+		domains, err := libstate.NewSharedDomains(temporalTx, logger)
 		if err != nil {
 			return err
 		}
@@ -1077,7 +1081,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		}
 		defer tx.Rollback()
 	}
-	txc := wrap.TxContainer{Tx: tx}
+	txc := wrap.NewTxContainer(tx, nil)
 
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber, true, false)
@@ -1108,7 +1112,11 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 				return err
 			}
 			if execProgress == 0 {
-				doms, err := libstate.NewSharedDomains(tx, log.New())
+				temporalTx, ok := tx.(kv.TemporalTx)
+				if !ok {
+					return errors.New("tx is not a temporal tx")
+				}
+				doms, err := libstate.NewSharedDomains(temporalTx, log.New())
 				if err != nil {
 					panic(err)
 				}
@@ -1134,7 +1142,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			}
 			defer tx.Rollback()
 			for bn := execProgress; bn < block; bn++ {
-				txc.Tx = tx
+				txc = wrap.NewTxContainer(tx, txc.Doms)
 				if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, bn, ctx, cfg, logger); err != nil {
 					return err
 				}
@@ -1142,7 +1150,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		} else {
 			if err := db.Update(ctx, func(tx kv.RwTx) error {
 				for bn := execProgress; bn < block; bn++ {
-					txc.Tx = tx
+					txc = wrap.NewTxContainer(tx, txc.Doms)
 					if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, bn, ctx, cfg, logger); err != nil {
 						return err
 					}

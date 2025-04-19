@@ -167,7 +167,11 @@ var ErrTooDeepUnwind = errors.New("too deep unwind")
 func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, br services.FullBlockReader, accumulator *shards.Accumulator, logger log.Logger) (err error) {
 	var domains *libstate.SharedDomains
 	if txc.Doms == nil {
-		domains, err = libstate.NewSharedDomains(txc.Tx, logger)
+		temporalTx, ok := txc.Tx.(kv.TemporalTx)
+		if !ok {
+			return errors.New("tx is not a temporal tx")
+		}
+		domains, err = libstate.NewSharedDomains(temporalTx, logger)
 		if err != nil {
 			return err
 		}

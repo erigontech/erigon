@@ -146,7 +146,7 @@ func TestExecute(t *testing.T) {
 func TestCall(t *testing.T) {
 	t.Parallel()
 	_, tx, _ := NewTestTemporalDb(t)
-	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	domains, err := stateLib.NewSharedDomains(tx.(kv.TemporalTx), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	state := state.New(state.NewReaderV3(domains))

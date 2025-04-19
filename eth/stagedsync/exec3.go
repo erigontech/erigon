@@ -258,7 +258,11 @@ func ExecV3(ctx context.Context,
 		doms = txc.Doms
 	} else {
 		var err error
-		doms, err = state2.NewSharedDomains(applyTx, log.New())
+		temporalTx, ok := applyTx.(kv.TemporalTx)
+		if !ok {
+			return errors.New("applyTx is not a temporal transaction")
+		}
+		doms, err = state2.NewSharedDomains(temporalTx, log.New())
 		// if we are behind the commitment, we can't execute anything
 		// this can heppen if progress in domain is higher than progress in blocks
 		if errors.Is(err, state2.ErrBehindCommitment) {
@@ -390,7 +394,11 @@ func ExecV3(ctx context.Context,
 		executor = pe
 	} else {
 		applyWorker.ResetTx(applyTx)
-		doms.SetTx(applyTx)
+		temporalTx, ok := applyTx.(kv.TemporalTx)
+		if !ok {
+			return errors.New("applyTx is not a temporal transaction")
+		}
+		doms.SetTx(temporalTx)
 
 		se := &serialExecutor{
 			txExecutor: txExecutor{

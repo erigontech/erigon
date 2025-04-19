@@ -1047,7 +1047,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	tx, err := coreDB.BeginRw(ctx)
 	defer tx.Rollback()
 	require.NoError(t, err)
-	sd, err := state.NewSharedDomains(tx, logger)
+	sd, err := state.NewSharedDomains(tx.(kv.TemporalTx), logger)
 	require.NoError(t, err)
 	defer sd.Close()
 
