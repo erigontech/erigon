@@ -21,6 +21,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/stretchr/testify/require"
 
@@ -36,7 +37,7 @@ func TestDecryptionKeysValidators(t *testing.T) {
 
 	instanceId := uint64(123)
 	maxNumKeysPerMessage := uint64(10)
-	config := shutter.Config{
+	config := shuttercfg.Config{
 		InstanceId:           instanceId,
 		MaxNumKeysPerMessage: maxNumKeysPerMessage,
 	}
@@ -599,7 +600,7 @@ func TestDecryptionKeysValidators(t *testing.T) {
 
 type decryptionKeysValidationTestCase struct {
 	name                  string
-	config                shutter.Config
+	config                shuttercfg.Config
 	msg                   *pubsub.Message
 	slotCalculator        func(t *testing.T) *testhelpers.MockSlotCalculator
 	eonTracker            func(t *testing.T) *testhelpers.MockEonTracker

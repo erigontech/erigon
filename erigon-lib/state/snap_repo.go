@@ -7,6 +7,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
@@ -18,7 +19,7 @@ import (
 // ii) dirtyfile integration
 // iii) opening folder with dirty files
 // iv) snap creation/merge configuration
-// v) fileItemsWithMissingAccessors - missedBtreeAccessor/missedMapAccessor
+// v) fileItemsWithMissedAccessors - missedBtreeAccessor/missedMapAccessor
 
 // maybe accessor/btree build functions and data_file (.kv, .v, .seg) can also be supplied
 // here as interfaces, this would allow more functions currently in DHII+A to be included here.
@@ -103,19 +104,14 @@ func (f *SnapshotRepo) RecalcVisibleFiles(to RootNum) {
 	f.current = f.calcVisibleFiles(to)
 }
 
-type VisibleFile interface {
-	Filename() string
-	StartTxNum() uint64
-	EndTxNum() uint64
-}
-
-type VisibleFiles []VisibleFile
+type VisibleFile = kv.VisibleFile
+type VisibleFiles = kv.VisibleFiles
 
 func (f *SnapshotRepo) visibleFiles() visibleFiles {
 	return f.current
 }
 
-func (f *SnapshotRepo) VisibleFiles() (files []VisibleFile) {
+func (f *SnapshotRepo) VisibleFiles() (files VisibleFiles) {
 	for _, file := range f.current {
 		files = append(files, file)
 	}
@@ -134,7 +130,7 @@ func (f *SnapshotRepo) DirtyFilesWithNoBtreeAccessors() (l []*filesItem) {
 	ss := f.stepSize
 	v := snaptype.V1_0
 
-	return fileItemsWithMissingAccessors(f.dirtyFiles, f.stepSize, func(fromStep uint64, toStep uint64) []string {
+	return fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep uint64, toStep uint64) []string {
 		from, to := RootNum(fromStep*ss), RootNum(toStep*ss)
 		fname := p.BtIdxFile(v, from, to)
 		return []string{fname, p.ExistenceFile(v, from, to)}
@@ -151,7 +147,7 @@ func (f *SnapshotRepo) DirtyFilesWithNoHashAccessors() (l []*filesItem) {
 	accCount := f.schema.AccessorIdxCount()
 	files := make([]string, accCount)
 
-	return fileItemsWithMissingAccessors(f.dirtyFiles, f.stepSize, func(fromStep uint64, toStep uint64) []string {
+	return fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep uint64, toStep uint64) []string {
 		for i := uint64(0); i < accCount; i++ {
 			files[i] = p.AccessorIdxFile(v, RootNum(fromStep*ss), RootNum(toStep*ss), i)
 		}

@@ -172,7 +172,7 @@ func (hc *HarnessCfg) GetOrCreateDefaultHeimdallProducersOverride() map[uint64][
 
 type Harness struct {
 	logger                     log.Logger
-	chainDataDB                kv.RwDB
+	chainDataDB                kv.TemporalRwDB
 	borConsensusDB             kv.RwDB
 	chainConfig                *chain.Config
 	borConfig                  *borcfg.BorConfig
@@ -237,11 +237,11 @@ func (h *Harness) RunStateSyncStageForward(t *testing.T, id stages.SyncStage) {
 }
 
 func (h *Harness) RunStateSyncStageForwardWithErrorIs(t *testing.T, id stages.SyncStage, wantErr error) {
-	h.runSyncStageForwardWithErrorIs(t, id, h.stateSync, h.stateSyncStages, wantErr, wrap.TxContainer{})
+	h.runSyncStageForwardWithErrorIs(t, id, h.stateSync, h.stateSyncStages, wantErr, wrap.NewTxContainer(nil, nil))
 }
 
 func (h *Harness) RunStateStageForwardWithReturnError(t *testing.T, id stages.SyncStage) error {
-	return h.runSyncStageForwardWithReturnError(t, id, h.stateSync, h.stateSyncStages, wrap.TxContainer{})
+	return h.runSyncStageForwardWithReturnError(t, id, h.stateSync, h.stateSyncStages, wrap.NewTxContainer(nil, nil))
 }
 
 func (h *Harness) RunMiningStageForward(ctx context.Context, t *testing.T, id stages.SyncStage) {
@@ -253,7 +253,7 @@ func (h *Harness) RunMiningStageForwardWithErrorIs(ctx context.Context, t *testi
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	txc := wrap.TxContainer{Tx: tx}
+	txc := wrap.NewTxContainer(tx, nil)
 	h.runSyncStageForwardWithErrorIs(t, id, h.miningSync, h.miningSyncStages, wantErr, txc)
 
 	err = tx.Commit()
@@ -265,7 +265,7 @@ func (h *Harness) RunMiningStageForwardWithReturnError(ctx context.Context, t *t
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	txc := wrap.TxContainer{Tx: tx}
+	txc := wrap.NewTxContainer(tx, nil)
 	err = h.runSyncStageForwardWithReturnError(t, id, h.miningSync, h.miningSyncStages, txc)
 	if err != nil {
 		return err

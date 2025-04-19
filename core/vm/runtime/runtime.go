@@ -146,7 +146,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 			return nil, nil, err
 		}
 		defer tx.Rollback()
-		sd, err := state3.NewSharedDomains(tx, log.New())
+		sd, err := state3.NewSharedDomains(tx.(kv.TemporalRwTx), log.New())
 		if err != nil {
 			return nil, nil, err
 		}
@@ -214,7 +214,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, libcommon.Addres
 			return nil, [20]byte{}, 0, err
 		}
 		defer tx.Rollback()
-		sd, err := state3.NewSharedDomains(tx, log.New())
+		sd, err := state3.NewSharedDomains(tx.(kv.TemporalRwTx), log.New())
 		if err != nil {
 			return nil, [20]byte{}, 0, err
 		}

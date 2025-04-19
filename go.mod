@@ -47,7 +47,7 @@ require (
 	github.com/goccy/go-json v0.9.11
 	github.com/gofrs/flock v0.12.1
 	github.com/golang-jwt/jwt/v4 v4.5.2
-	github.com/golang/snappy v0.0.5-0.20220116011046-fa5810519dcb
+	github.com/golang/snappy v1.0.0
 	github.com/google/btree v1.1.3
 	github.com/google/cel-go v0.18.2
 	github.com/google/go-cmp v0.6.0

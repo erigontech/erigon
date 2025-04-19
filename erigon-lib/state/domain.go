@@ -129,7 +129,7 @@ func NewDomain(cfg domainCfg, aggStep uint64, logger log.Logger) (*Domain, error
 	if cfg.hist.iiCfg.dirs.SnapDomain == "" {
 		panic("assert: empty `dirs`")
 	}
-	if cfg.hist.filenameBase == "" {
+	if cfg.hist.iiCfg.filenameBase == "" {
 		panic("assert: emtpy `filenameBase`" + cfg.name.String())
 	}
 
@@ -1194,28 +1194,36 @@ func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep uint
 	return buildHashMapAccessor(ctx, data, d.Compression, idxPath, false, cfg, ps, d.logger)
 }
 
-func (d *Domain) missedBtreeAccessors() (l []*filesItem) {
+func (d *Domain) MissedBtreeAccessors() (l []*filesItem) {
+	return d.missedBtreeAccessors(d.dirtyFiles.Items())
+}
+
+func (d *Domain) missedBtreeAccessors(source []*filesItem) (l []*filesItem) {
 	if !d.AccessorList.Has(AccessorBTree) {
 		return nil
 	}
-	return fileItemsWithMissingAccessors(d.dirtyFiles, d.aggregationStep, func(fromStep uint64, toStep uint64) []string {
+	return fileItemsWithMissedAccessors(source, d.aggregationStep, func(fromStep uint64, toStep uint64) []string {
 		return []string{d.kvBtAccessorFilePath(fromStep, toStep), d.kvExistenceIdxFilePath(fromStep, toStep)}
 	})
 }
 
-func (d *Domain) missedMapAccessors() (l []*filesItem) {
+func (d *Domain) MissedMapAccessors() (l []*filesItem) {
+	return d.missedMapAccessors(d.dirtyFiles.Items())
+}
+
+func (d *Domain) missedMapAccessors(source []*filesItem) (l []*filesItem) {
 	if !d.AccessorList.Has(AccessorHashMap) {
 		return nil
 	}
-	return fileItemsWithMissingAccessors(d.dirtyFiles, d.aggregationStep, func(fromStep uint64, toStep uint64) []string {
+	return fileItemsWithMissedAccessors(source, d.aggregationStep, func(fromStep uint64, toStep uint64) []string {
 		return []string{d.kviAccessorFilePath(fromStep, toStep)}
 	})
 }
 
 // BuildMissedAccessors - produce .efi/.vi/.kvi from .ef/.v/.kv
-func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
-	d.History.BuildMissedAccessors(ctx, g, ps)
-	for _, item := range d.missedBtreeAccessors() {
+func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet, domainFiles *MissedAccessorDomainFiles) {
+	d.History.BuildMissedAccessors(ctx, g, ps, domainFiles.history)
+	for _, item := range domainFiles.missedBtreeAccessors() {
 		if item.decompressor == nil {
 			log.Warn(fmt.Sprintf("[dbg] BuildMissedAccessors: item with nil decompressor %s %d-%d", d.filenameBase, item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep))
 		}
@@ -1230,7 +1238,7 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 			return nil
 		})
 	}
-	for _, item := range d.missedMapAccessors() {
+	for _, item := range domainFiles.missedMapAccessors() {
 		if item.decompressor == nil {
 			log.Warn(fmt.Sprintf("[dbg] BuildMissedAccessors: item with nil decompressor %s %d-%d", d.filenameBase, item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep))
 		}
@@ -1965,10 +1973,10 @@ func (dt *DomainRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 	return dt.ht.iit.stepsRangeInDB(tx)
 }
 
-func (dt *DomainRoTx) Files() (res []string) {
+func (dt *DomainRoTx) Files() (res VisibleFiles) {
 	for _, item := range dt.files {
 		if item.src.decompressor != nil {
-			res = append(res, item.src.decompressor.FileName())
+			res = append(res, item)
 		}
 	}
 	return append(res, dt.ht.Files()...)
