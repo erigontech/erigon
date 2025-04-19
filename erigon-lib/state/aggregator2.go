@@ -112,6 +112,8 @@ func (s *SchemaGen) GetIICfg(name kv.InvertedIdx) iiCfg {
 	}
 }
 
+var ExperimentalConcurrentCommitment = false // set true to use concurrent commitment by default
+
 var Schema = SchemaGen{
 	AccountsDomain: domainCfg{
 		name: kv.AccountsDomain, valuesTable: kv.TblAccountVals,
