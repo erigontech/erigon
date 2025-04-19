@@ -182,8 +182,8 @@ var Schema = map[kv.Domain]domainCfg{
 		CompressCfg:  DomainCompressCfg,
 
 		hist: histCfg{
-			valuesTable: kv.TblRCacheHistoryVals,
-			compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+			valuesTable:   kv.TblRCacheHistoryVals,
+			compressorCfg: HistoryCompressCfg, compression: seg.CompressKeys | seg.CompressVals,
 
 			historyLargeValues: true,
 			historyIdx:         kv.RCacheHistoryIdx,
@@ -236,7 +236,7 @@ var DomainCompressCfg = seg.Cfg{
 }
 
 var HistoryCompressCfg = seg.Cfg{
-	MinPatternScore:      8000,
+	MinPatternScore:      4000,
 	DictReducerSoftLimit: 2000000,
 	MinPatternLen:        20,
 	MaxPatternLen:        128,
