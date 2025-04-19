@@ -1348,8 +1348,8 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 		executor.validateTasks.pushPending(i)
 
 		if len(t.Dependencies()) > 0 {
-			for _, val := range t.Dependencies() {
-				executor.execTasks.addDependency(val, i)
+			for _, depTxIndex := range t.Dependencies() {
+				executor.execTasks.addDependency(depTxIndex+1, i)
 			}
 			executor.execTasks.clearPending(i)
 		} else {
