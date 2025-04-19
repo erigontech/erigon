@@ -555,10 +555,10 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 
 	var tracer *tracers.Tracer
 	if dir, ok := os.LookupEnv("MOCK_SENTRY_DEBUG_TRACER_OUTPUT_DIR"); ok {
-		recordOptions := debugtracer.RecordOptions{
-			DisableOpContextRecording: true,
-		}
-		tracer = debugtracer.New(dir, debugtracer.FlushModeBlock, recordOptions)
+		tracer = debugtracer.New(dir, debugtracer.WithRecordOptions(debugtracer.RecordOptions{
+			DisableOnOpcodeStackRecording:  true,
+			DisableOnOpcodeMemoryRecording: true,
+		}))
 	}
 
 	cfg.Genesis = gspec

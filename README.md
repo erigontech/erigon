@@ -65,6 +65,7 @@ frontier.
     - [Filesystem's background features are expensive](#filesystems-background-features-are-expensive)
     - [Gnome Tracker can kill Erigon](#gnome-tracker-can-kill-erigon)
     - [the --mount option requires BuildKit error](#the---mount-option-requires-buildkit-error)
+    - [`cannot allocate memory` Erigon crashes due to kernel allocation limits](#erigon-crashes-due-to-kernel-allocation-limits)
 
 <!--te-->
 
@@ -787,4 +788,14 @@ For anyone else that was getting the BuildKit error when trying to start Erigon 
 XDG_DATA_HOME=/preferred/data/folder DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
 ```
 
+### Erigon crashes due to kernel allocation limits
+
+Erigon will crash with `cannot allocate memory`.
+
+to fix this add the following to `/etc/sysctl.conf` or a .conf file in `/etc/sysctl.d/`
+
+```
+vm.overcommit_memory = 1 (it is 0 by default)
+vm.max_map_count = 8388608 (it is 1048576 by default)
+```
 ---------

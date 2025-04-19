@@ -30,11 +30,10 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/params"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
-
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/params"
 )
 
 type diffTest struct {

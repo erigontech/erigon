@@ -531,8 +531,8 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 	}
 
-	if dt.d.AccessorList&AccessorBTree != 0 {
-		btPath := dt.d.kvBtFilePath(fromStep, toStep)
+	if dt.d.AccessorList.Has(AccessorBTree) {
+		btPath := dt.d.kvBtAccessorFilePath(fromStep, toStep)
 		btM := DefaultBtreeM
 		if toStep == 0 && dt.d.filenameBase == "commitment" {
 			btM = 128
@@ -542,16 +542,16 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
 	}
-	if dt.d.AccessorList&AccessorHashMap != 0 {
-		if err = dt.d.buildAccessor(ctx, fromStep, toStep, valuesIn.decompressor, ps); err != nil {
-			return nil, nil, nil, fmt.Errorf("merge %s buildAccessor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
+	if dt.d.AccessorList.Has(AccessorHashMap) {
+		if err = dt.d.buildHashMapAccessor(ctx, fromStep, toStep, valuesIn.decompressor, ps); err != nil {
+			return nil, nil, nil, fmt.Errorf("merge %s buildHashMapAccessor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
-		if valuesIn.index, err = recsplit.OpenIndex(dt.d.kvAccessorFilePath(fromStep, toStep)); err != nil {
-			return nil, nil, nil, fmt.Errorf("merge %s buildAccessor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
+		if valuesIn.index, err = recsplit.OpenIndex(dt.d.kviAccessorFilePath(fromStep, toStep)); err != nil {
+			return nil, nil, nil, fmt.Errorf("merge %s buildHashMapAccessor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
 	}
 
-	if dt.d.AccessorList&AccessorExistence != 0 {
+	if dt.d.AccessorList.Has(AccessorExistence) {
 		bloomIndexPath := dt.d.kvExistenceIdxFilePath(fromStep, toStep)
 		exists, err := dir.FileExist(bloomIndexPath)
 		if err != nil {
@@ -695,7 +695,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 	ps.Delete(p)
 
 	if err := iit.ii.buildMapAccessor(ctx, fromStep, toStep, outItem.decompressor, ps); err != nil {
-		return nil, fmt.Errorf("merge %s buildAccessor [%d-%d]: %w", iit.ii.filenameBase, startTxNum, endTxNum, err)
+		return nil, fmt.Errorf("merge %s buildHashMapAccessor [%d-%d]: %w", iit.ii.filenameBase, startTxNum, endTxNum, err)
 	}
 	if outItem.index, err = recsplit.OpenIndex(iit.ii.efAccessorFilePath(fromStep, toStep)); err != nil {
 		return nil, err

@@ -36,10 +36,12 @@ const (
 	CallNewAccountGas     uint64 = 25000 // Paid for CALL when the destination address didn't exist prior.
 	TxGas                 uint64 = 21000 // Per transaction not creating a contract. NOTE: Not payable on data of calls between transactions.
 	TxGasContractCreation uint64 = 53000 // Per transaction that creates a contract. NOTE: Not payable on data of calls between transactions.
+	TxAAGas               uint64 = 15000 // Per account abstraction transaction
 	TxDataZeroGas         uint64 = 4     // Per byte of data attached to a transaction that equals zero. NOTE: Not payable on data of calls between transactions.
-	QuadCoeffDiv          uint64 = 512   // Divisor for the quadratic particle of the memory cost equation.
-	LogDataGas            uint64 = 8     // Per byte in a LOG* operation's data.
-	CallStipend           uint64 = 2300  // Free gas given at beginning of call.
+
+	QuadCoeffDiv uint64 = 512  // Divisor for the quadratic particle of the memory cost equation.
+	LogDataGas   uint64 = 8    // Per byte in a LOG* operation's data.
+	CallStipend  uint64 = 2300 // Free gas given at beginning of call.
 
 	Keccak256Gas     uint64 = 30 // Once per KECCAK256 operation.
 	Keccak256WordGas uint64 = 6  // Once per word of the KECCAK256 operation's data.
@@ -94,6 +96,7 @@ const (
 	TxDataNonZeroGasEIP2028   uint64 = 16   // Per byte of non zero data attached to a transaction after EIP 2028 (part in Istanbul)
 	TxAccessListAddressGas    uint64 = 2400 // Per address specified in EIP 2930 access list
 	TxAccessListStorageKeyGas uint64 = 1900 // Per storage key specified in EIP 2930 access list
+	TxTotalCostFloorPerToken  uint64 = 10   // Per token of calldata in a transaction, as a minimum the txn must pay (EIP-7623)
 
 	// These have been changed during the course of the chain
 	CallGasFrontier              uint64 = 40  // Once per CALL operation & message call transaction.
@@ -171,7 +174,10 @@ const (
 	RefundQuotientEIP3529 uint64 = 5 // After EIP-3529: refunds are capped to gasUsed / 5
 
 	// EIP-4844: Shard Blob Transactions
-	PointEvaluationGas uint64 = 50000
+	PointEvaluationGas   uint64 = 50000
+	FieldElementsPerBlob        = 4096 // each field element is 32 bytes
+	BlobSize                    = FieldElementsPerBlob * 32
+	BlobGasPerBlob       uint64 = 0x20000
 
 	// PIP-27: secp256r1 elliptic curve signature verifier gas price
 	P256VerifyGas uint64 = 3450
@@ -180,8 +186,10 @@ const (
 	BlockHashHistoryServeWindow uint64 = 8191
 	BlockHashOldWindow          uint64 = 256
 
-	// EIP-7702
-	SetCodeMagicPrefix = byte(0x05)
+	// EIP-7702: Set EOA account code
+	SetCodeMagicPrefix  = byte(0x05)
+	PerEmptyAccountCost = 25000
+	PerAuthBaseCost     = 12500
 )
 
 // EIP-7702: Set EOA account code

@@ -24,13 +24,13 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/state"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -43,11 +43,10 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/state"
 	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
-	"github.com/stretchr/testify/require"
 )
 
 func TestNonceFromAddress(t *testing.T) {
@@ -883,25 +882,25 @@ func TestShanghaiValidateTxn(t *testing.T) {
 		},
 		"shanghai exactly on bound - create tx": {
 			expected:   txpoolcfg.Success,
-			dataLen:    fixedgas.MaxInitCodeSize,
+			dataLen:    params.MaxInitCodeSize,
 			isShanghai: true,
 			creation:   true,
 		},
 		"shanghai one over bound - create tx": {
 			expected:   txpoolcfg.InitCodeTooLarge,
-			dataLen:    fixedgas.MaxInitCodeSize + 1,
+			dataLen:    params.MaxInitCodeSize + 1,
 			isShanghai: true,
 			creation:   true,
 		},
 		"shanghai exactly on bound - calldata tx": {
 			expected:   txpoolcfg.Success,
-			dataLen:    fixedgas.MaxInitCodeSize,
+			dataLen:    params.MaxInitCodeSize,
 			isShanghai: true,
 			creation:   false,
 		},
 		"shanghai one over bound - calldata tx": {
 			expected:   txpoolcfg.Success,
-			dataLen:    fixedgas.MaxInitCodeSize + 1,
+			dataLen:    params.MaxInitCodeSize + 1,
 			isShanghai: true,
 			creation:   false,
 		},

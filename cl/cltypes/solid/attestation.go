@@ -63,7 +63,7 @@ func (a *Attestation) Copy() *Attestation {
 	new.AggregationBits = a.AggregationBits.Copy()
 	new.Data = &AttestationData{}
 	*new.Data = *a.Data
-	new.Signature = a.Signature
+	copy(new.Signature[:], a.Signature[:])
 	new.CommitteeBits = a.CommitteeBits.Copy()
 	return new
 }

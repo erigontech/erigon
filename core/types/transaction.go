@@ -31,8 +31,8 @@ import (
 	"github.com/protolambda/ztyp/codec"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/params"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/math"
 	libcrypto "github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -444,7 +444,7 @@ func (m *Message) ChangeGas(globalGasCap, desiredGas uint64) {
 	m.gasLimit = gas
 }
 
-func (m *Message) BlobGas() uint64 { return fixedgas.BlobGasPerBlob * uint64(len(m.blobHashes)) }
+func (m *Message) BlobGas() uint64 { return params.BlobGasPerBlob * uint64(len(m.blobHashes)) }
 
 func (m *Message) MaxFeePerBlobGas() *uint256.Int {
 	return &m.maxFeePerBlobGas

@@ -77,8 +77,7 @@ type rangeIntegrityChecker func(fromStep, toStep uint64) bool
 type histCfg struct {
 	iiCfg iiCfg
 
-	valuesTable  string // bucket for history values; key1+key2+txnNum -> oldValue , stores values BEFORE change
-	filenameBase string // filename base for all history files
+	valuesTable string // bucket for history values; key1+key2+txnNum -> oldValue , stores values BEFORE change
 
 	keepRecentTxnInDB uint64 // When snapshotsDisabled=true, keepRecentTxnInDB is used to keep this amount of txn in db before pruning
 
@@ -109,12 +108,8 @@ type histCfg struct {
 
 func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error) {
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
-	cfg.compressorCfg = seg.DefaultCfg
 	if cfg.indexList == 0 {
 		cfg.indexList = AccessorHashMap
-	}
-	if cfg.iiCfg.filenameBase == "" {
-		cfg.iiCfg.filenameBase = cfg.filenameBase
 	}
 
 	h := History{
@@ -296,9 +291,7 @@ func (h *History) closeWhatNotInList(fNames []string) {
 	}
 }
 
-func (h *History) Tables() []string {
-	return append([]string{h.keysTable, h.valuesTable}, h.InvertedIndex.Tables()...)
-}
+func (h *History) Tables() []string { return append(h.InvertedIndex.Tables(), h.valuesTable) }
 
 func (h *History) Close() {
 	if h == nil {
@@ -317,11 +310,15 @@ func (ht *HistoryRoTx) Files() (res []string) {
 	return append(res, ht.iit.Files()...)
 }
 
-func (h *History) missedMapAccessors() (l []*filesItem) {
+func (h *History) MissedMapAccessors() (l []*filesItem) {
+	return h.missedMapAccessors(h.dirtyFiles.Items())
+}
+
+func (h *History) missedMapAccessors(source []*filesItem) (l []*filesItem) {
 	if !h.indexList.Has(AccessorHashMap) {
 		return nil
 	}
-	return fileItemsWithMissingAccessors(h.dirtyFiles, h.aggregationStep, func(fromStep, toStep uint64) []string {
+	return fileItemsWithMissedAccessors(source, h.aggregationStep, func(fromStep, toStep uint64) []string {
 		return []string{
 			h.vAccessorFilePath(fromStep, toStep),
 		}
@@ -432,9 +429,9 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	return historyIdxPath, nil
 }
 
-func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
-	h.InvertedIndex.BuildMissedAccessors(ctx, g, ps)
-	for _, item := range h.missedMapAccessors() {
+func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet, historyFiles *MissedAccessorHistoryFiles) {
+	h.InvertedIndex.BuildMissedAccessors(ctx, g, ps, historyFiles.ii)
+	for _, item := range historyFiles.missedMapAccessors() {
 		item := item
 		g.Go(func() error {
 			return h.buildVi(ctx, item, ps)

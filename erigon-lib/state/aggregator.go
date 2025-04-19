@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	rand2 "math/rand/v2"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -30,8 +31,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	rand2 "math/rand/v2"
 
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/c2h5oh/datasize"
@@ -238,7 +237,6 @@ func (a *Aggregator) OpenFolder() error {
 	if err := a.openFolder(); err != nil {
 		return err
 	}
-	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
 	return nil
 }
 
@@ -262,6 +260,7 @@ func (a *Aggregator) openFolder() error {
 	if err := eg.Wait(); err != nil {
 		return fmt.Errorf("openFolder: %w", err)
 	}
+	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
 	return nil
 }
 
@@ -370,41 +369,67 @@ func (a *Aggregator) LS() {
 	}
 }
 
-func (a *Aggregator) BuildMissedIndices(ctx context.Context, workers int) error {
-	startIndexingTime := time.Now()
-	{
-		ps := background.NewProgressSet()
+func (a *Aggregator) WaitForBuildAndMerge(ctx context.Context) chan struct{} {
+	res := make(chan struct{})
+	go func() {
+		defer close(res)
 
-		g, ctx := errgroup.WithContext(ctx)
-		g.SetLimit(workers)
-		go func() {
-			logEvery := time.NewTicker(20 * time.Second)
-			defer logEvery.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-logEvery.C:
-					var m runtime.MemStats
-					dbg.ReadMemStats(&m)
-					sendDiagnostics(startIndexingTime, ps.DiagnosticsData(), m.Alloc, m.Sys)
-					a.logger.Info("[snapshots] Indexing", "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
-				}
+		chkEvery := time.NewTicker(3 * time.Second)
+		defer chkEvery.Stop()
+		for a.buildingFiles.Load() || a.mergingFiles.Load() {
+			select {
+			case <-ctx.Done():
+				return
+			case <-chkEvery.C: //TODO: more reliable notification
 			}
-		}()
-		for _, d := range a.d {
-			d.BuildMissedAccessors(ctx, g, ps)
 		}
-		for _, ii := range a.iis {
-			ii.BuildMissedAccessors(ctx, g, ps)
-		}
+	}()
+	return res
+}
 
-		if err := g.Wait(); err != nil {
-			return err
+func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) error {
+	startIndexingTime := time.Now()
+	ps := background.NewProgressSet()
+
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(workers)
+	go func() {
+		logEvery := time.NewTicker(20 * time.Second)
+		defer logEvery.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-logEvery.C:
+				var m runtime.MemStats
+				dbg.ReadMemStats(&m)
+				sendDiagnostics(startIndexingTime, ps.DiagnosticsData(), m.Alloc, m.Sys)
+				a.logger.Info("[snapshots] Indexing", "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+			}
 		}
-		if err := a.OpenFolder(); err != nil {
-			return err
-		}
+	}()
+
+	rotx := a.DebugBeginDirtyFilesRo()
+	defer rotx.Close()
+
+	missedFilesItems := rotx.FilesWithMissedAccessors()
+
+	for _, d := range a.d {
+		d.BuildMissedAccessors(ctx, g, ps, missedFilesItems.domain[d.name])
+	}
+
+	for _, ii := range a.iis {
+		ii.BuildMissedAccessors(ctx, g, ps, missedFilesItems.ii[ii.name])
+	}
+
+	if err := g.Wait(); err != nil {
+		return err
+	}
+
+	rotx.Close()
+
+	if err := a.OpenFolder(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -423,25 +448,6 @@ func sendDiagnostics(startIndexingTime time.Time, indexPercent map[string]int, a
 		Segments:    segmentsStats,
 		TimeElapsed: time.Since(startIndexingTime).Round(time.Second).Seconds(),
 	})
-}
-
-func (a *Aggregator) BuildMissedIndicesInBackground(ctx context.Context, workers int) {
-	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
-		return
-	}
-	a.wg.Add(1)
-	go func() {
-		defer a.wg.Done()
-		defer a.buildingFiles.Store(false)
-		aggTx := a.BeginFilesRo()
-		defer aggTx.Close()
-		if err := a.BuildMissedIndices(ctx, workers); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
-				return
-			}
-			a.logger.Warn("[snapshots] BuildOptionalMissedIndicesInBackground", "err", err)
-		}
-	}()
 }
 
 type AggV3Collation struct {
@@ -738,6 +744,12 @@ func (a *Aggregator) DomainTables(domains ...kv.Domain) (tables []string) {
 	}
 	return tables
 }
+func (at *AggregatorRoTx) DomainFiles(domains ...kv.Domain) (files []string) {
+	for _, domain := range domains {
+		files = append(files, at.d[domain].Files()...)
+	}
+	return files
+}
 func (a *Aggregator) InvertedIndexTables(indices ...kv.InvertedIdx) (tables []string) {
 	for _, idx := range indices {
 		if ii := a.searchII(idx); ii != nil {
@@ -869,7 +881,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 		// `context.Background()` is important here!
 		//     it allows keep DB consistent - prune all keys-related data or noting
 		//     can't interrupt by ctrl+c and leave dirt in DB
-		stat, err := at.Prune(context.Background(), tx, pruneLimit, aggLogEvery)
+		stat, err := at.prune(context.Background(), tx, pruneLimit, aggLogEvery)
 		if err != nil {
 			at.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err)
 			return false, err
@@ -1002,7 +1014,7 @@ func (as *AggregatorPruneStat) Accumulate(other *AggregatorPruneStat) {
 
 // temporal function to prune history straight after commitment is done - reduce history size in db until we build
 // pruning in background. This helps on chain-tip performance (while full pruning is not available we can prune at least commit)
-func (at *AggregatorRoTx) PruneCommitHistory(ctx context.Context, tx kv.RwTx, logEvery *time.Ticker) error {
+func (at *AggregatorRoTx) GreedyPruneCommitHistory(ctx context.Context, tx kv.RwTx, logEvery *time.Ticker) error {
 	cd := at.d[kv.CommitmentDomain]
 	if cd.ht.h.historyDisabled {
 		return nil
@@ -1029,7 +1041,7 @@ func (at *AggregatorRoTx) PruneCommitHistory(ctx context.Context, tx kv.RwTx, lo
 	return nil
 }
 
-func (at *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, logEvery *time.Ticker) (*AggregatorPruneStat, error) {
+func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, logEvery *time.Ticker) (*AggregatorPruneStat, error) {
 	defer mxPruneTookAgg.ObserveDuration(time.Now())
 
 	if limit == 0 {

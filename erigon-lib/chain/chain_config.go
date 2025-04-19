@@ -23,8 +23,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
 )
 
 // Config is the core config which determines the blockchain settings.
@@ -323,7 +323,7 @@ func (c *Config) GetMinBlobGasPrice() uint64 {
 }
 
 func (c *Config) GetMaxBlobGasPerBlock(t uint64) uint64 {
-	return c.GetMaxBlobsPerBlock(t) * fixedgas.BlobGasPerBlob
+	return c.GetMaxBlobsPerBlock(t) * params.BlobGasPerBlob
 }
 
 func (c *Config) GetMaxBlobsPerBlock(time uint64) uint64 {
@@ -339,7 +339,7 @@ func (c *Config) GetTargetBlobGasPerBlock(t uint64) uint64 {
 	if c != nil {
 		b = c.BlobSchedule
 	}
-	return b.TargetBlobsPerBlock(c.IsPrague(t)) * fixedgas.BlobGasPerBlob
+	return b.TargetBlobsPerBlock(c.IsPrague(t)) * params.BlobGasPerBlob
 }
 
 func (c *Config) GetBlobGasPriceUpdateFraction(t uint64) uint64 {
