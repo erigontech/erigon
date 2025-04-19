@@ -1271,6 +1271,12 @@ func doUncompress(cliCtx *cli.Context) error {
 }
 
 func doCompress(cliCtx *cli.Context) error {
+	defer func() {
+		var m runtime.MemStats
+		dbg.ReadMemStats(&m)
+		log.Info("done", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	}()
+
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
