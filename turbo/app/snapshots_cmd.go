@@ -1316,6 +1316,7 @@ func doCompress(cliCtx *cli.Context) error {
 	doUnZstdEachWord := dbg.EnvBool("UnZstdEachWord", false)
 
 	justPrint := dbg.EnvBool("JustPrint", false)
+	concat := dbg.EnvInt("Concat", 0)
 
 	logger.Info("[compress] file", "datadir", dirs.DataDir, "f", f, "cfg", compressCfg, "SnappyEachWord", doSnappyEachWord)
 	c, err := seg.NewCompressor(ctx, "compress", f, dirs.Tmp, compressCfg, log.LvlInfo, logger)
@@ -1329,6 +1330,9 @@ func doCompress(cliCtx *cli.Context) error {
 	word := make([]byte, 0, int(1*datasize.MB))
 	var snappyBuf, unSnappyBuf []byte
 	var zstdBuf, unZstdBuf []byte
+	var concatBuf []byte
+	concatI := 0
+
 	var l uint64
 	for l, err = binary.ReadUvarint(r); err == nil; l, err = binary.ReadUvarint(r) {
 		if cap(word) < int(l) {
@@ -1353,20 +1357,32 @@ func doCompress(cliCtx *cli.Context) error {
 		}
 		_, _ = zstdBuf, unZstdBuf
 
-		if justPrint {
-			fmt.Printf("%x\n\n", word)
-		} else {
-			if err := w.AddWord(word); err != nil {
-				return err
-			}
-		}
-
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
 
+		if justPrint {
+			fmt.Printf("%x\n\n", word)
+			continue
+		}
+
+		concatI++
+		if concat > 0 {
+			if concatI%concat == 0 {
+				if err := w.AddWord(concatBuf); err != nil {
+					return err
+				}
+				concatBuf = concatBuf[:0]
+				continue
+			}
+			concatBuf = append(concatBuf, word...)
+			continue
+		}
+		if err := w.AddWord(word); err != nil {
+			return err
+		}
 	}
 	if !errors.Is(err, io.EOF) {
 		return err
