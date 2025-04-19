@@ -127,6 +127,11 @@ type EngineReader interface {
 	// engine is based on signatures.
 	Author(header *types.Header) (libcommon.Address, error)
 
+	// Dependencies retrives the dependencies between transactions
+	// included in the block accosiated with this header a nil return
+	// implies no dependencies are known
+	TxDependencies(header *types.Header) [][]int
+
 	// Service transactions are free and don't pay baseFee after EIP-1559
 	IsServiceTransaction(sender libcommon.Address, syscall SystemCall) bool
 

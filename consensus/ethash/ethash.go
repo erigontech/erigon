@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
+	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
 )
@@ -584,5 +585,9 @@ func (ethash *Ethash) GetTransferFunc() evmtypes.TransferFunc {
 }
 
 func (ethash *Ethash) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
+	return nil
+}
+
+func (c *Ethash) TxDependencies(h *types.Header) [][]int {
 	return nil
 }

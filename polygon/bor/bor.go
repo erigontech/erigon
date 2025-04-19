@@ -312,13 +312,15 @@ func BorRLP(header *types.Header, c *borcfg.BorConfig) []byte {
 
 // Bor is the matic-bor consensus engine
 type Bor struct {
+	mutex       sync.Mutex
 	chainConfig *chain.Config     // Chain config
 	config      *borcfg.BorConfig // Consensus engine configuration parameters for bor consensus
 	DB          kv.RwDB           // Database to store and retrieve snapshot checkpoints
 	blockReader services.FullBlockReader
 
-	Recents    *lru.ARCCache[libcommon.Hash, *Snapshot]         // Snapshots for recent block to speed up reorgs
-	Signatures *lru.ARCCache[libcommon.Hash, libcommon.Address] // Signatures of recent blocks to speed up mining
+	Recents      *lru.ARCCache[libcommon.Hash, *Snapshot]         // Snapshots for recent block to speed up reorgs
+	Signatures   *lru.ARCCache[libcommon.Hash, libcommon.Address] // Signatures of recent blocks to speed up mining
+	Dependencies *lru.ARCCache[libcommon.Hash, [][]int]
 
 	authorizedSigner atomic.Pointer[signer] // Ethereum address and sign function of the signing key
 
@@ -372,6 +374,7 @@ func New(
 	// Allocate the snapshot caches and create the engine
 	recents, _ := lru.NewARC[libcommon.Hash, *Snapshot](inmemorySnapshots)
 	signatures, _ := lru.NewARC[libcommon.Hash, libcommon.Address](inmemorySignatures)
+	dependencies, _ := lru.NewARC[libcommon.Hash, [][]int](128)
 
 	c := &Bor{
 		chainConfig:     chainConfig,
@@ -380,6 +383,7 @@ func New(
 		blockReader:     blockReader,
 		Recents:         recents,
 		Signatures:      signatures,
+		Dependencies:    dependencies,
 		spanner:         spanner,
 		stateReceiver:   genesisContracts,
 		HeimdallClient:  heimdallClient,
@@ -422,17 +426,19 @@ func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlock
 
 	recents, _ := lru.NewARC[libcommon.Hash, *Snapshot](inmemorySnapshots)
 	signatures, _ := lru.NewARC[libcommon.Hash, libcommon.Address](inmemorySignatures)
+	dependencies, _ := lru.NewARC[libcommon.Hash, [][]int](128)
 
 	return &Bor{
-		chainConfig: chainConfig,
-		config:      borConfig,
-		DB:          kv.RwWrapper{RoDB: db},
-		blockReader: blockReader,
-		logger:      logger,
-		Recents:     recents,
-		Signatures:  signatures,
-		execCtx:     context.Background(),
-		closeCh:     make(chan struct{}),
+		chainConfig:  chainConfig,
+		config:       borConfig,
+		DB:           kv.RwWrapper{RoDB: db},
+		blockReader:  blockReader,
+		logger:       logger,
+		Recents:      recents,
+		Dependencies: dependencies,
+		Signatures:   signatures,
+		execCtx:      context.Background(),
+		closeCh:      make(chan struct{}),
 	}
 }
 
@@ -1718,19 +1724,14 @@ func (c *Bor) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
 	return AddFeeTransferLog
 }
 
-// In bor, RLP encoding of BlockExtraData will be stored in the Extra field in the header
-type BlockExtraData struct {
-	// Validator bytes of bor
-	ValidatorBytes []byte
+func (c *Bor) TxDependencies(h *types.Header) [][]int {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 
-	// length of TxDependencies          ->   n (n = number of transactions in the block)
-	// length of TxDependencies[i]       ->   k (k = a whole number)
-	// k elements in TxDependencies[i]   ->   transaction indexes on which transaction i is dependent on
-	TxDependencies [][]uint64
-}
+	if dependencies, ok := c.Dependencies.Get(h.Hash()); ok {
+		return dependencies
+	}
 
-// Returns the Block-STM Transaction Dependency from the block header
-func GetTxDependencies(h *types.Header) [][]int {
 	tempExtra := h.Extra
 
 	if len(tempExtra) < types.ExtraVanityLength+types.ExtraSealLength {
@@ -1753,7 +1754,21 @@ func GetTxDependencies(h *types.Header) [][]int {
 		}
 		dependencies[i] = deps
 	}
+
+	c.Dependencies.Add(h.Hash(), dependencies)
+
 	return dependencies
+}
+
+// In bor, RLP encoding of BlockExtraData will be stored in the Extra field in the header
+type BlockExtraData struct {
+	// Validator bytes of bor
+	ValidatorBytes []byte
+
+	// length of TxDependencies          ->   n (n = number of transactions in the block)
+	// length of TxDependencies[i]       ->   k (k = a whole number)
+	// k elements in TxDependencies[i]   ->   transaction indexes on which transaction i is dependent on
+	TxDependencies [][]uint64
 }
 
 func GetValidatorBytes(h *types.Header, config *borcfg.BorConfig) []byte {

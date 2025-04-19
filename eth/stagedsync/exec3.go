@@ -202,7 +202,7 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 			"abort", common.PrettyCounter(abortCount - p.prevAbortCount),
 			"invalid", common.PrettyCounter(invalidCount - p.prevInvalidCount),
 			"tgas/s", fmt.Sprintf("%s(%s)", common.PrettyCounter(curTaskGasPerSec), common.PrettyCounter(avgTaskGasPerSec)),
-			"arat", fmt.Sprintf("%.1f", float64(curTaskDur)/float64(interval)),
+			"aratio", fmt.Sprintf("%.1f", float64(curTaskDur)/float64(interval)),
 			"tdur", fmt.Sprintf("%dµs", avgTaskDur.Microseconds()),
 			"trdur", fmt.Sprintf("%dµs(%.2f%%)", avgReadDur.Microseconds(), readRatio),
 			"bdur", fmt.Sprintf("%dms", avgBlockDur.Milliseconds()),
@@ -223,7 +223,7 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 	case *serialExecutor:
 		execVals = []interface{}{
 			"tgas/s", fmt.Sprintf("%s(%s)", common.PrettyCounter(curTaskGasPerSec), common.PrettyCounter(avgTaskGasPerSec)),
-			"arat", fmt.Sprintf("%.1f", float64(curTaskDur)/float64(interval)),
+			"aratio", fmt.Sprintf("%.1f", float64(curTaskDur)/float64(interval)),
 			"tdur", fmt.Sprintf("%dµs", avgTaskDur.Microseconds()),
 			"trdur", fmt.Sprintf("%dµs(%.2f%%)", avgReadDur.Microseconds(), readRatio),
 		}
@@ -764,6 +764,7 @@ func ExecV3(ctx context.Context,
 						// use history reader instead of state reader to catch up to the tx where we left off
 						HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
 						Config:           chainConfig,
+						Engine:           cfg.engine,
 						Trace:            traceTx(blockNum, txIndex),
 					}
 

@@ -25,11 +25,11 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -194,6 +194,7 @@ type TxTask struct {
 	Incarnation int
 
 	Config *chain.Config
+	Engine consensus.Engine
 	Logger log.Logger
 	Trace  bool
 
@@ -310,16 +311,18 @@ func (t *TxTask) Version() state.Version {
 }
 
 func (t *TxTask) Dependencies() []int {
-	if t.dependencies == nil {
-		t.dependencies = []int{}
+	if !dbg.IgnoreDependencies {
+		if t.dependencies == nil && t.Engine != nil {
+			t.dependencies = []int{}
 
-		// TODO move this dependency to somewhere more general
-		blockDependencies := bor.GetTxDependencies(t.Header)
+			blockDependencies := t.Engine.TxDependencies(t.Header)
 
-		if t.TxIndex > 0 && len(blockDependencies) > t.TxIndex {
-			t.dependencies = append(t.dependencies, blockDependencies[t.TxIndex]...)
+			if t.TxIndex > 0 && len(blockDependencies) > t.TxIndex {
+				t.dependencies = append(t.dependencies, blockDependencies[t.TxIndex]...)
+			}
 		}
 	}
+
 	return t.dependencies
 }
 

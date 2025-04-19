@@ -81,6 +81,7 @@ var (
 	StopAfterBlock       = EnvUint("STOP_AFTER_BLOCK", 0)
 	BatchCommitments     = EnvBool("BATCH_COMMITMENTS", true)
 	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
+	IgnoreDependencies   = EnvBool("IGNORE_DEPENDENCIES", false)
 )
 
 func ReadMemStats(m *runtime.MemStats) {
