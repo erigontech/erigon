@@ -766,7 +766,7 @@ Loop:
 				tt = time.Now()
 
 				// allow greedy prune on non-chain-tip
-				if err = applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).GreedyPruneCommitHistory(ctx, applyTx, nil); err != nil {
+				if err = executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).GreedyPruneCommitHistory(ctx, applyTx, nil); err != nil {
 					return err
 				}
 
