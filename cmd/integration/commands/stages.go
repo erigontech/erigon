@@ -1471,8 +1471,7 @@ const blockBufferSize = 128
 
 func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.MiningConfig, logger log.Logger) (consensus.Engine, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
-
-	gethexe
+	ethdb.InitialiazeWasmTarget()
 	vmConfig := &vm.Config{}
 
 	events := shards.NewEvents()
