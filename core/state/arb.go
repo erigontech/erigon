@@ -583,14 +583,21 @@ func WrapDatabaseWithWasm(wasm kv.RwDB, targets []WasmTarget) WasmIface {
 	return &WasmDB{RwDB: wasm, cacheTag: constantCacheTag, targets: targets, activatedAsmCache: lru.NewSizeConstrainedCache[activatedAsmCacheKey, []byte](1000)}
 }
 
+var openedArbitrumWasmDB WasmIface
+
 func OpenArbitrumWasmDB(ctx context.Context, path string) WasmIface {
+	if openedArbitrumWasmDB != nil {
+		return openedArbitrumWasmDB
+	}
 	mdbxDB := mdbx.New(kv.ArbWasmDB, log.New()).Path(path).
-		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { //TODO: move Caplin tables to own tables cofig
+		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 			return kv.ChaindataTablesCfg
 		}).MustOpen()
 	go func() {
 		<-ctx.Done()
+		openedArbitrumWasmDB = nil
 		mdbxDB.Close()
 	}()
+	openedArbitrumWasmDB = WrapDatabaseWithWasm(mdbxDB, []WasmTarget{TargetWavm, LocalTarget()})
 	return WrapDatabaseWithWasm(mdbxDB, []WasmTarget{TargetWavm, LocalTarget()})
 }
