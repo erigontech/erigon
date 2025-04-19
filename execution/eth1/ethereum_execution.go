@@ -97,7 +97,7 @@ type EthereumExecutionModule struct {
 	blockReader services.FullBlockReader
 
 	// MDBX database
-	db                kv.RwDB // main database
+	db                kv.TemporalRwDB // main database
 	semaphore         *semaphore.Weighted
 	executionPipeline *stagedsync.Sync
 	forkValidator     *engine_helpers.ForkValidator
@@ -129,7 +129,7 @@ type EthereumExecutionModule struct {
 	execution.UnimplementedExecutionServer
 }
 
-func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB,
+func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.TemporalRwDB,
 	executionPipeline *stagedsync.Sync, forkValidator *engine_helpers.ForkValidator,
 	config *chain.Config, builderFunc builder.BlockBuilderFunc,
 	hook *stages.Hook, accumulator *shards.Accumulator,
