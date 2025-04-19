@@ -24,6 +24,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/erigontech/erigon/core/types"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -243,30 +244,26 @@ func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *li
 	}
 
 	if rs.syncCfg.PersistReceiptsCache {
+		var receipt *types.Receipt
 		if txTask.TxIndex == -1 {
-			if err := rawdb.WriteReceiptCache(domains, txTask.BlockReceipts[txTask.TxIndex]); err != nil {
-				return err
-			}
-		}
-		if !txTask.Final {
-			if txTask.TxIndex >= 0 && txTask.BlockReceipts != nil {
-				if err := rawdb.WriteReceiptCache(domains, txTask.BlockReceipts[txTask.TxIndex]); err != nil {
-					return err
-				}
-			}
+			receipt = txTask.BlockReceipts[txTask.TxIndex]
 		} else {
-			if rs.isBor && txTask.TxIndex >= 1 {
-				lastReceipt := txTask.BlockReceipts[txTask.TxIndex-1]
-				if lastReceipt == nil {
-					return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
+			if !txTask.Final {
+				if txTask.TxIndex >= 0 && txTask.BlockReceipts != nil {
+					receipt = txTask.BlockReceipts[txTask.TxIndex]
 				}
-				if err := rawdb.WriteReceiptCache(domains, lastReceipt); err != nil {
-					return err
+			} else {
+				if rs.isBor && txTask.TxIndex >= 1 {
+					lastReceipt := txTask.BlockReceipts[txTask.TxIndex-1]
+					if lastReceipt == nil {
+						return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
+					}
 				}
 			}
-			//bor: skip for now
 		}
-
+		if err := rawdb.WriteReceiptCache(domains, receipt); err != nil {
+			return err
+		}
 	}
 
 	//if !txTask.Final {
