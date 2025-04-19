@@ -30,6 +30,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/gballet/go-verkle"
+	"github.com/golang/snappy"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -1292,6 +1293,30 @@ func growslice(b []byte, wantLength int) []byte {
 	}
 	return make([]byte, wantLength)
 }
+func compressIfNeed(buf, v []byte, enabled bool) ([]byte, []byte) {
+	if !enabled {
+		return buf, v
+	}
+	buf = snappy.Encode(growslice(buf, snappy.MaxEncodedLen(len(v))), v)
+	return buf, buf
+}
+
+func decompressIfNeed(buf, v []byte, enabled bool) ([]byte, []byte, error) {
+	if !enabled {
+		return buf, v, nil
+	}
+	actualSize, err := snappy.DecodedLen(v)
+	if err != nil {
+		return buf, nil, err
+	}
+	buf, err = snappy.Decode(growslice(buf, actualSize), v)
+	if err != nil {
+		return buf, nil, err
+	}
+	return buf, buf, nil
+}
+
+var receiptCacheSnappy = dbg.EnvBool("receiptCacheSnappy", true)
 
 func ReadReceiptsCache(tx kv.TemporalTx, block *types.Block, txNumReader rawdbv3.TxNumsReader) (res types.Receipts, err error) {
 	blockHash := block.Hash()
@@ -1329,10 +1354,10 @@ func ReadReceiptsCache(tx kv.TemporalTx, block *types.Block, txNumReader rawdbv3
 			return nil, nil
 		}
 
-		//snappyReadBuffer, v, err = decompressIfNeed(snappyReadBuffer, v, receiptCacheSnappy)
-		//if err != nil {
-		//	return nil, fmt.Errorf("snappy: %w", err)
-		//}
+		snappyReadBuffer, v, err = decompressIfNeed(snappyReadBuffer, v, receiptCacheSnappy)
+		if err != nil {
+			return nil, fmt.Errorf("snappy: %w", err)
+		}
 		_ = snappyReadBuffer
 
 		// Convert the receipts from their storage form to their internal representation
@@ -1376,6 +1401,7 @@ func WriteReceiptCache(tx kv.TemporalPutDel, receipt *types.Receipt) error {
 		}
 
 		toWrite = buf.Bytes()
+		_, toWrite = compressIfNeed(nil, toWrite, receiptCacheSnappy)
 	}
 
 	if err := tx.DomainPut(kv.RCacheDomain, receiptCacheKey, nil, toWrite, nil, 0); err != nil {
