@@ -584,7 +584,7 @@ func WrapDatabaseWithWasm(wasm kv.RwDB, targets []WasmTarget) WasmIface {
 }
 
 func OpenArbitrumWasmDB(ctx context.Context, path string) WasmIface {
-	mdbxDB := mdbx.New(kv.ArbitrumDB, log.New()).Path(path).
+	mdbxDB := mdbx.New(kv.ArbWasmDB, log.New()).Path(path).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { //TODO: move Caplin tables to own tables cofig
 			return kv.ChaindataTablesCfg
 		}).MustOpen()
