@@ -46,6 +46,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			return false, nil
 		}
 
+		se.applyWorker.SetArbitrumWasmDB(se.cfg.arbitrumWasmDB)
 		se.applyWorker.RunTxTaskNoLock(txTask, se.isMining)
 		if err := func() error {
 			if errors.Is(txTask.Error, context.Canceled) {

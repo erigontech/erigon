@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/common/lru"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
@@ -578,4 +579,9 @@ func (w *WasmDB) WasmTargets() []WasmTarget {
 
 func WrapDatabaseWithWasm(wasm kv.RwDB, cacheTag uint32, targets []WasmTarget) WasmIface {
 	return &WasmDB{RwDB: wasm, cacheTag: cacheTag, targets: targets, activatedAsmCache: lru.NewSizeConstrainedCache[activatedAsmCacheKey, []byte](1000)}
+}
+
+func OpenArbitrumWasmDB(ctx context.Context, path string, cacheTag uint32, targets []WasmTarget, logger log.Logger) WasmIface {
+	mdbxDB := mdbx.MustOpen(path)
+	return WrapDatabaseWithWasm(mdbxDB, cacheTag, targets)
 }

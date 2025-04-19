@@ -91,6 +91,8 @@ type ExecuteBlockCfg struct {
 	blockProduction bool
 
 	applyWorker, applyWorkerMining *exec3.Worker
+
+	arbitrumWasmDB state.WasmIface
 }
 
 func StageExecuteBlocksCfg(
@@ -110,6 +112,8 @@ func StageExecuteBlocksCfg(
 	genesis *types.Genesis,
 	syncCfg ethconfig.Sync,
 	silkworm *silkworm.Silkworm,
+
+	arbitrumWasmDB state.WasmIface,
 ) ExecuteBlockCfg {
 	if dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
@@ -134,6 +138,8 @@ func StageExecuteBlocksCfg(
 		silkworm:          silkworm,
 		applyWorker:       exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, false),
 		applyWorkerMining: exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, true),
+
+		arbitrumWasmDB: arbitrumWasmDB,
 	}
 }
 
