@@ -17,7 +17,6 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/nitro-erigon/arbos/programs"
 	"github.com/holiman/uint256"
 )
 
@@ -600,16 +599,6 @@ func OpenArbitrumWasmDB(ctx context.Context, path string) WasmIface {
 		mdbxDB.Close()
 	}()
 
-	lt := LocalTarget()
-	desc := "description unavailable"
-	switch lt {
-	case TargetAmd64:
-		desc = programs.DefaultTargetDescriptionX86
-	case TargetArm64:
-		desc = programs.DefaultTargetDescriptionArm
-	}
-
-	programs.SetTarget(lt, desc, true)
-	openedArbitrumWasmDB = WrapDatabaseWithWasm(mdbxDB, []WasmTarget{lt})
+	openedArbitrumWasmDB = WrapDatabaseWithWasm(mdbxDB, []WasmTarget{LocalTarget()})
 	return openedArbitrumWasmDB
 }
