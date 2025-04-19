@@ -1306,6 +1306,9 @@ func doCompress(cliCtx *cli.Context) error {
 	doSnappyEachWord := dbg.EnvBool("SnappyEachWord", false)
 	doUnSnappyEachWord := dbg.EnvBool("UnSnappyEachWord", false)
 
+	doZstdEachWord := dbg.EnvBool("ZstdEachWord", false)
+	doUnZstdEachWord := dbg.EnvBool("UnZstdEachWord", false)
+
 	logger.Info("[compress] file", "datadir", dirs.DataDir, "f", f, "cfg", compressCfg, "SnappyEachWord", doSnappyEachWord)
 	c, err := seg.NewCompressor(ctx, "compress", f, dirs.Tmp, compressCfg, log.LvlInfo, logger)
 	if err != nil {
@@ -1317,6 +1320,7 @@ func doCompress(cliCtx *cli.Context) error {
 	r := bufio.NewReaderSize(os.Stdin, int(128*datasize.MB))
 	word := make([]byte, 0, int(1*datasize.MB))
 	var snappyBuf, unSnappyBuf []byte
+	var zstdBuf, unZstdBuf []byte
 	var l uint64
 	for l, err = binary.ReadUvarint(r); err == nil; l, err = binary.ReadUvarint(r) {
 		if cap(word) < int(l) {
@@ -1333,6 +1337,13 @@ func doCompress(cliCtx *cli.Context) error {
 			return err
 		}
 		_, _ = snappyBuf, unSnappyBuf
+
+		zstdBuf, word = compress.EncodeZstdIfNeed(zstdBuf, word, doZstdEachWord)
+		unZstdBuf, word, err = compress.DecodeZstdIfNeed(unZstdBuf, word, doUnZstdEachWord)
+		if err != nil {
+			return err
+		}
+		_, _ = zstdBuf, unZstdBuf
 
 		if err := w.AddWord(word); err != nil {
 			return err
