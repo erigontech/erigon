@@ -243,6 +243,11 @@ func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *li
 	}
 
 	if rs.syncCfg.PersistReceiptsCache {
+		if txTask.TxIndex == -1 {
+			if err := rawdb.WriteReceiptCache(domains, txTask.BlockReceipts[txTask.TxIndex]); err != nil {
+				return err
+			}
+		}
 		if !txTask.Final {
 			if txTask.TxIndex >= 0 && txTask.BlockReceipts != nil {
 				if err := rawdb.WriteReceiptCache(domains, txTask.BlockReceipts[txTask.TxIndex]); err != nil {
@@ -255,9 +260,6 @@ func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *li
 				if lastReceipt == nil {
 					return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
 				}
-				//if len(lastReceipt.Logs) > 0 {
-				//	lastReceipt.FirstLogIndexWithinBlock = lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
-				//}
 				if err := rawdb.WriteReceiptCache(domains, lastReceipt); err != nil {
 					return err
 				}
