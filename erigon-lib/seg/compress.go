@@ -307,7 +307,7 @@ func (c *Compressor) fsync(f *os.File) error {
 // superstringLimit limits how large can one "superstring" get before it is processed
 // CompressorSequential allocates 7 bytes for each uint of superstringLimit. For example,
 // superstingLimit 16m will result in 112Mb being allocated for various arrays
-const superstringLimit = 16 * 1024 * 1024
+const superstringLimit = 32 * 1024 * 1024
 
 type DictionaryBuilder struct {
 	lastWord      []byte
