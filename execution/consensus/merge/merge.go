@@ -25,9 +25,9 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/params"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
@@ -35,7 +35,7 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/aura"
 	"github.com/erigontech/erigon/execution/consensus/misc"
-	"github.com/erigontech/erigon/params"
+	params2 "github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -179,7 +179,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 			}
 		} else {
 			for _, w := range withdrawals {
-				amountInWei := new(uint256.Int).Mul(uint256.NewInt(w.Amount), uint256.NewInt(params.GWei))
+				amountInWei := new(uint256.Int).Mul(uint256.NewInt(w.Amount), uint256.NewInt(params2.GWei))
 				state.AddBalance(w.Address, amountInWei, tracing.BalanceIncreaseWithdrawal)
 			}
 		}

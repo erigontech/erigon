@@ -26,18 +26,18 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/chain/params"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/filters"
-	"github.com/erigontech/erigon/params"
+	params2 "github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -240,7 +240,7 @@ func TestGetBlockReceiptsByBlockHash(t *testing.T) {
 // wraps it into a mock backend.
 func mockWithGenerator(t *testing.T, blocks int, generator func(int, *core.BlockGen)) *mock.MockSentry {
 	m := mock.MockWithGenesis(t, &types.Genesis{
-		Config: params.TestChainConfig,
+		Config: params2.TestChainConfig,
 		Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
 	}, testKey, false)
 	if blocks > 0 {

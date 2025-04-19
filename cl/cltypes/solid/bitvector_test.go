@@ -113,18 +113,18 @@ func TestBitvectorJson(t *testing.T) {
 	require := require.New(t)
 
 	// marshal
-	v := NewBitVector(1000)
+	v := NewBitVector(20)
 	v.SetBitAt(2, true)
 	v.SetBitAt(4, true)
 	v.SetBitAt(9, true)
 
 	j, err := v.MarshalJSON()
 	require.NoError(err, "BitVector MarshalJSON failed")
-	require.Equal(`"0x1402"`, string(j), "BitVector MarshalJSON did not return the expected JSON")
+	require.Equal(`"0x140200"`, string(j), "BitVector MarshalJSON did not return the expected JSON")
 
 	// unmarshal
-	text := []byte(`"0x1402"`)
-	v = NewBitVector(1000)
+	text := []byte(`"0x140200"`)
+	v = NewBitVector(20) // Use same size as original vector
 	err = v.UnmarshalJSON(text)
 	require.NoError(err, "BitVector UnmarshalJSON failed")
 	indices := v.GetOnIndices()

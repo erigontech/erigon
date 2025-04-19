@@ -27,13 +27,11 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
+	"github.com/erigontech/erigon-lib/chain/params"
 	libcommon "github.com/erigontech/erigon-lib/common"
-
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/params"
 )
 
 func opAdd(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {

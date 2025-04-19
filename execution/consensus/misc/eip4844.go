@@ -26,8 +26,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
-
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon/core/types"
 )
 
@@ -109,5 +108,5 @@ func GetBlobGasPrice(config *chain.Config, excessBlobGas uint64, headerTime uint
 }
 
 func GetBlobGasUsed(numBlobs int) uint64 {
-	return uint64(numBlobs) * fixedgas.BlobGasPerBlob
+	return uint64(numBlobs) * params.BlobGasPerBlob
 }

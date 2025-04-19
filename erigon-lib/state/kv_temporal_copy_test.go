@@ -18,6 +18,7 @@ package state
 
 import (
 	"context"
+	"time"
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
@@ -72,8 +73,9 @@ type DB struct {
 func New(db kv.RwDB, agg *Aggregator) (*DB, error) {
 	return &DB{RwDB: db, agg: agg}, nil
 }
-func (db *DB) Agg() any            { return db.agg }
-func (db *DB) InternalDB() kv.RwDB { return db.RwDB }
+func (db *DB) Agg() any                  { return db.agg }
+func (db *DB) InternalDB() kv.RwDB       { return db.RwDB }
+func (db *DB) Debug() kv.TemporalDebugDB { return kv.TemporalDebugDB(db) }
 
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	kvTx, err := db.RwDB.BeginRo(ctx) //nolint:gocritic
@@ -257,6 +259,18 @@ func (tx *Tx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit
 	return it, nil
 }
 
+// Write methods
+
+func (tx *Tx) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error {
+	panic("implement me pls. or use SharedDomains")
+}
+func (tx *Tx) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error {
+	panic("implement me pls. or use SharedDomains")
+}
+func (tx *Tx) DomainDelPrefix(domain kv.Domain, prefix []byte) error {
+	panic("implement me pls. or use SharedDomains")
+}
+
 // Debug methods
 
 func (tx *Tx) RangeLatest(domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
@@ -267,4 +281,14 @@ func (tx *Tx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step uint64
 }
 func (tx *Tx) GetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	return tx.aggtx.DebugGetLatestFromFiles(domain, k, maxTxNum)
+}
+func (tx *Tx) DomainTables(domain ...kv.Domain) []string { return tx.db.agg.DomainTables(domain...) }
+func (db *DB) DomainTables(domain ...kv.Domain) []string { return db.agg.DomainTables(domain...) }
+func (tx *Tx) DomainFiles(domain ...kv.Domain) []string  { return tx.aggtx.DomainFiles(domain...) }
+func (tx *Tx) PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error) {
+	return tx.aggtx.PruneSmallBatches(ctx, timeout, tx.MdbxTx)
+}
+
+func (tx *Tx) GreedyPruneHistory(ctx context.Context, domain kv.Domain) error {
+	return tx.aggtx.GreedyPruneHistory(ctx, domain, tx.MdbxTx)
 }

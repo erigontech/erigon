@@ -25,14 +25,13 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
-
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
 // VerifyEip1559Header verifies some header attributes which were changed in EIP-1559,

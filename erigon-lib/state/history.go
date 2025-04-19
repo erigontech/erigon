@@ -28,12 +28,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/snappy"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/compress"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/etl"
@@ -77,8 +77,7 @@ type rangeIntegrityChecker func(fromStep, toStep uint64) bool
 type histCfg struct {
 	iiCfg iiCfg
 
-	valuesTable  string // bucket for history values; key1+key2+txnNum -> oldValue , stores values BEFORE change
-	filenameBase string // filename base for all history files
+	valuesTable string // bucket for history values; key1+key2+txnNum -> oldValue , stores values BEFORE change
 
 	keepRecentTxnInDB uint64 // When snapshotsDisabled=true, keepRecentTxnInDB is used to keep this amount of txn in db before pruning
 
@@ -109,12 +108,8 @@ type histCfg struct {
 
 func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error) {
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
-	cfg.compressorCfg = seg.DefaultCfg
 	if cfg.indexList == 0 {
 		cfg.indexList = AccessorHashMap
-	}
-	if cfg.iiCfg.filenameBase == "" {
-		cfg.iiCfg.filenameBase = cfg.filenameBase
 	}
 
 	h := History{
@@ -296,9 +291,7 @@ func (h *History) closeWhatNotInList(fNames []string) {
 	}
 }
 
-func (h *History) Tables() []string {
-	return append([]string{h.keysTable, h.valuesTable}, h.InvertedIndex.Tables()...)
-}
+func (h *History) Tables() []string { return append(h.InvertedIndex.Tables(), h.valuesTable) }
 
 func (h *History) Close() {
 	if h == nil {
@@ -317,11 +310,15 @@ func (ht *HistoryRoTx) Files() (res []string) {
 	return append(res, ht.iit.Files()...)
 }
 
-func (h *History) missedMapAccessors() (l []*filesItem) {
+func (h *History) MissedMapAccessors() (l []*filesItem) {
+	return h.missedMapAccessors(h.dirtyFiles.Items())
+}
+
+func (h *History) missedMapAccessors(source []*filesItem) (l []*filesItem) {
 	if !h.indexList.Has(AccessorHashMap) {
 		return nil
 	}
-	return fileItemsWithMissingAccessors(h.dirtyFiles, h.aggregationStep, func(fromStep, toStep uint64) []string {
+	return fileItemsWithMissedAccessors(source, h.aggregationStep, func(fromStep, toStep uint64) []string {
 		return []string{
 			h.vAccessorFilePath(fromStep, toStep),
 		}
@@ -432,9 +429,9 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	return historyIdxPath, nil
 }
 
-func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
-	h.InvertedIndex.BuildMissedAccessors(ctx, g, ps)
-	for _, item := range h.missedMapAccessors() {
+func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet, historyFiles *MissedAccessorHistoryFiles) {
+	h.InvertedIndex.BuildMissedAccessors(ctx, g, ps, historyFiles.ii)
+	for _, item := range historyFiles.missedMapAccessors() {
 		item := item
 		g.Go(func() error {
 			return h.buildVi(ctx, item, ps)
@@ -451,7 +448,7 @@ func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte, origin
 		original = []byte{}
 	}
 
-	w.snappyWriteBuffer, original = compressIfNeed(w.snappyWriteBuffer, original, w.compressSingleVal)
+	w.snappyWriteBuffer, original = compress.EncodeSnappyIfNeed(w.snappyWriteBuffer, original, w.compressSingleVal)
 
 	//defer func() {
 	//	fmt.Printf("addPrevValue [%p;tx=%d] '%x' -> '%x'\n", w, w.ii.txNum, key1, original)
@@ -520,18 +517,6 @@ type historyBufferedWriter struct {
 	snappyWriteBuffer []byte
 
 	ii *InvertedIndexBufferedWriter
-}
-
-// growslice ensures b has the wanted length by either expanding it to its capacity
-// or allocating a new slice if b has insufficient capacity.
-func growslice(b []byte, wantLength int) []byte {
-	if len(b) >= wantLength {
-		return b
-	}
-	if cap(b) >= wantLength {
-		return b[:cap(b)]
-	}
-	return make([]byte, wantLength)
 }
 
 func (w *historyBufferedWriter) SetTxNum(v uint64) { w.ii.SetTxNum(v) }
@@ -1175,29 +1160,6 @@ func (ht *HistoryRoTx) getFile(txNum uint64) (it visibleFile, ok bool) {
 	return it, false
 }
 
-func compressIfNeed(buf, v []byte, enabled bool) ([]byte, []byte) {
-	if !enabled {
-		return buf, v
-	}
-	buf = snappy.Encode(growslice(buf, snappy.MaxEncodedLen(len(v))), v)
-	return buf, buf
-}
-
-func decompressIfNeed(buf, v []byte, enabled bool) ([]byte, []byte, error) {
-	if !enabled {
-		return buf, v, nil
-	}
-	actualSize, err := snappy.DecodedLen(v)
-	if err != nil {
-		return buf, nil, err
-	}
-	buf, err = snappy.Decode(growslice(buf, actualSize), v)
-	if err != nil {
-		return buf, nil, err
-	}
-	return buf, buf, nil
-}
-
 func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, bool, error) {
 	// Files list of II and History is different
 	// it means II can't return index of file, but can return TxNum which History will use to find own file
@@ -1228,7 +1190,7 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	if traceGetAsOf == ht.h.filenameBase {
 		fmt.Printf("DomainGetAsOf(%s, %x, %d) -> %s, histTxNum=%d, isNil(v)=%t\n", ht.h.filenameBase, key, txNum, g.FileName(), histTxNum, v == nil)
 	}
-	ht.snappyReadBuffer, v, err = decompressIfNeed(ht.snappyReadBuffer, v, ht.h.compressSingleVal)
+	ht.snappyReadBuffer, v, err = compress.DecodeSnappyIfNeed(ht.snappyReadBuffer, v, ht.h.compressSingleVal)
 	if err != nil {
 		return nil, false, err
 	}
@@ -1297,7 +1259,7 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 			return nil, false, nil
 		}
 
-		ht.snappyReadBuffer, val, err = decompressIfNeed(ht.snappyReadBuffer, val, ht.h.compressSingleVal)
+		ht.snappyReadBuffer, val, err = compress.DecodeSnappyIfNeed(ht.snappyReadBuffer, val, ht.h.compressSingleVal)
 		if err != nil {
 			return nil, false, err
 		}
@@ -1317,7 +1279,7 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 	}
 	// `val == []byte{}` means key was created in this txNum and doesn't exist before.
 	v := val[8:]
-	ht.snappyReadBuffer, v, err = decompressIfNeed(ht.snappyReadBuffer, v, ht.h.compressSingleVal)
+	ht.snappyReadBuffer, v, err = compress.DecodeSnappyIfNeed(ht.snappyReadBuffer, v, ht.h.compressSingleVal)
 	if err != nil {
 		return nil, false, err
 	}

@@ -27,8 +27,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core/types"
@@ -229,9 +229,9 @@ func TestBlobTxnParsing(t *testing.T) {
 
 	blobsRlpPrefix := hexutil.MustDecodeHex("fa040008")
 	blobRlpPrefix := hexutil.MustDecodeHex("ba020000")
-	blob0 := make([]byte, fixedgas.BlobSize)
+	blob0 := make([]byte, params.BlobSize)
 	rand.Read(blob0)
-	blob1 := make([]byte, fixedgas.BlobSize)
+	blob1 := make([]byte, params.BlobSize)
 	rand.Read(blob1)
 
 	proofsRlpPrefix := hexutil.MustDecodeHex("f862")
