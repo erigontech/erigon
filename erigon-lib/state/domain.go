@@ -1977,10 +1977,10 @@ func (dt *DomainRoTx) Tables() (res []string) {
 	return []string{dt.d.valuesTable, dt.ht.h.valuesTable, dt.ht.iit.ii.keysTable, dt.ht.iit.ii.valuesTable}
 }
 
-func (dt *DomainRoTx) Files() (res []string) {
+func (dt *DomainRoTx) Files() (res VisibleFiles) {
 	for _, item := range dt.files {
 		if item.src.decompressor != nil {
-			res = append(res, item.src.decompressor.FileName())
+			res = append(res, item)
 		}
 	}
 	return append(res, dt.ht.Files()...)

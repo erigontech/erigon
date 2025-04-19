@@ -341,7 +341,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address libcommon.
 		return nil, err
 	}
 
-	domains, err := libstate.NewSharedDomains(roTx, log.New())
+	domains, err := libstate.NewSharedDomains(tx, log.New())
 	if err != nil {
 		return nil, err
 	}

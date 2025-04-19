@@ -7,6 +7,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
@@ -103,19 +104,14 @@ func (f *SnapshotRepo) RecalcVisibleFiles(to RootNum) {
 	f.current = f.calcVisibleFiles(to)
 }
 
-type VisibleFile interface {
-	Filename() string
-	StartTxNum() uint64
-	EndTxNum() uint64
-}
-
-type VisibleFiles []VisibleFile
+type VisibleFile = kv.VisibleFile
+type VisibleFiles = kv.VisibleFiles
 
 func (f *SnapshotRepo) visibleFiles() visibleFiles {
 	return f.current
 }
 
-func (f *SnapshotRepo) VisibleFiles() (files []VisibleFile) {
+func (f *SnapshotRepo) VisibleFiles() (files VisibleFiles) {
 	for _, file := range f.current {
 		files = append(files, file)
 	}
