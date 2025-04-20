@@ -30,6 +30,8 @@ func EncodeSnappyIfNeed(buf, v []byte, enabled bool) ([]byte, []byte) {
 	return buf, buf
 }
 
+const maxUint24 = int(^uint32(0) >> 8)
+
 func DecodeSnappyIfNeed(buf, v []byte, enabled bool) ([]byte, []byte, error) {
 	if !enabled {
 		return buf, v, nil
@@ -38,10 +40,13 @@ func DecodeSnappyIfNeed(buf, v []byte, enabled bool) ([]byte, []byte, error) {
 	if err != nil {
 		return buf, nil, fmt.Errorf("snappy.decode1: %w", err)
 	}
+	if actualSize > maxUint24 {
+		return buf, nil, fmt.Errorf("snappy.decode2: too large msg: %d", actualSize)
+	}
 	buf = growslice(buf, actualSize)
 	buf, err = snappy.Decode(nil, v)
 	if err != nil {
-		return buf, nil, fmt.Errorf("snappy.decode2: %w", err)
+		return buf, nil, fmt.Errorf("snappy.decode3: %w", err)
 	}
 	return buf, buf, nil
 }
