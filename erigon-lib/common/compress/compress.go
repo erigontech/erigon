@@ -2,6 +2,7 @@ package compress
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 
 	"github.com/golang/snappy"
@@ -35,12 +36,12 @@ func DecodeSnappyIfNeed(buf, v []byte, enabled bool) ([]byte, []byte, error) {
 	}
 	actualSize, err := snappy.DecodedLen(v)
 	if err != nil {
-		return buf, nil, err
+		return buf, nil, fmt.Errorf("snappy.decode1: %w", err)
 	}
 	buf = growslice(buf, actualSize)
 	buf, err = snappy.Decode(buf, v)
 	if err != nil {
-		return buf, nil, err
+		return buf, nil, fmt.Errorf("snappy.decode2: %w", err)
 	}
 	return buf, buf, nil
 }
