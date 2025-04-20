@@ -591,7 +591,6 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
 	numBuf := make([]byte, 8)
-	println("dump tx started")
 	parse := func(ctx *txpool.TxnParseContext, v, valueBuf []byte, senders []common2.Address, j int) ([]byte, error) {
 		var sender [20]byte
 		slot := txpool.TxnSlot{}
@@ -698,6 +697,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			valueBufs[i] = valueBuf[:]
 			parseCtxs[i] = txpool.NewTxnParseContext(*chainID)
 		}
+		println("dump tx workers", workers)
 
 		if err := addSystemTx(parseCtxs[0], tx, body.BaseTxnID); err != nil {
 			return false, err
