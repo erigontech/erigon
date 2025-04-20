@@ -550,7 +550,8 @@ func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstK
 		if noCompress {
 			return sn.AddUncompressedWord(v)
 		}
-		return sn.AddWord(v)
+		err := sn.AddWord(v)
+		return err
 	}, workers, lvl, logger)
 
 	if err != nil {

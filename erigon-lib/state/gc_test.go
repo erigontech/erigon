@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon-lib/seg"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/kv"
@@ -58,7 +59,8 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 			h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 			lastInView := hc.files[len(hc.files)-1]
-			g := lastInView.src.decompressor.MakeGetter()
+
+			g := seg.NewPagedReader(hc.statelessGetter(len(hc.files)-1), hc.h.historySampling, true)
 			require.Equal(lastInView.startTxNum, lastOnFs.startTxNum)
 			require.Equal(lastInView.endTxNum, lastOnFs.endTxNum)
 			if g.HasNext() {

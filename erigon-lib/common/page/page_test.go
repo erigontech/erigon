@@ -1,0 +1,74 @@
+package page
+
+import (
+	"bytes"
+	"fmt"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-lib/common"
+)
+
+// multyBytesWriter is a writer for [][]byte, similar to bytes.Writer.
+type multyBytesWriter struct {
+	buffer [][]byte
+}
+
+func (w *multyBytesWriter) Write(p []byte) (n int, err error) {
+	w.buffer = append(w.buffer, common.Copy(p))
+	return len(p), nil
+}
+func (w *multyBytesWriter) Bytes() [][]byte { return w.buffer }
+func (w *multyBytesWriter) Reset()          { w.buffer = nil }
+
+func TestPage(t *testing.T) {
+	buf, require := &multyBytesWriter{}, require.New(t)
+	sampling := 2
+	w := NewWriter(buf, sampling, false)
+	for i := 0; i < sampling+1; i++ {
+		k, v := fmt.Sprintf("k %d", i), fmt.Sprintf("v %d", i)
+		require.NoError(w.Add([]byte(k), []byte(v)))
+	}
+	require.NoError(w.Flush())
+	pages := buf.Bytes()
+	pageNum := 0
+	p1 := &Reader{}
+	p1.Reset(pages[0], false)
+
+	iter := 0
+	for i := 0; i < sampling+1; i++ {
+		iter++
+		expectK, expectV := fmt.Sprintf("k %d", i), fmt.Sprintf("v %d", i)
+		v := Get([]byte(expectK), pages[pageNum], false)
+		require.Equal(expectV, string(v), i)
+		require.True(p1.HasNext())
+		k, v := p1.Next()
+		require.Equal(expectK, string(k), i)
+		require.Equal(expectV, string(v), i)
+
+		if iter%sampling == 0 {
+			pageNum++
+
+			require.False(p1.HasNext())
+			p1.Reset(pages[pageNum], false)
+		}
+	}
+}
+
+func BenchmarkName(b *testing.B) {
+	buf := bytes.NewBuffer(nil)
+	w := NewWriter(buf, 2, false)
+	w.Add([]byte{1}, []byte{11})
+	w.Add([]byte{2}, []byte{12})
+	bts := common.Copy(buf.Bytes())
+
+	k := []byte{2}
+
+	b.Run("1", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			Get(k, bts, false)
+		}
+	})
+
+}
