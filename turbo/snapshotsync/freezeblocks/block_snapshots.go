@@ -583,7 +583,7 @@ var bufPool = sync.Pool{
 // DumpTxs - [from, to)
 // Format: hash[0]_1byte + sender_address_2bytes + txnRlp
 func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, _ firstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (lastTx uint64, err error) {
-	logEvery := time.NewTicker(20 * time.Second)
+	logEvery := time.NewTicker(1 * time.Second)
 	defer logEvery.Stop()
 	warmupCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -697,7 +697,6 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			valueBufs[i] = valueBuf[:]
 			parseCtxs[i] = txpool.NewTxnParseContext(*chainID)
 		}
-		println("dump tx workers", workers)
 
 		if err := addSystemTx(parseCtxs[0], tx, body.BaseTxnID); err != nil {
 			return false, err
