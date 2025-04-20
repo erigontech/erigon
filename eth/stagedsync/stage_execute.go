@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/ethdb/prune"
+	"github.com/erigontech/erigon/ethdb/wasmdb"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/silkworm"
@@ -91,6 +92,8 @@ type ExecuteBlockCfg struct {
 	blockProduction bool
 
 	applyWorker, applyWorkerMining *exec3.Worker
+
+	arbitrumWasmDB wasmdb.WasmIface
 }
 
 func StageExecuteBlocksCfg(
@@ -110,6 +113,8 @@ func StageExecuteBlocksCfg(
 	genesis *types.Genesis,
 	syncCfg ethconfig.Sync,
 	silkworm *silkworm.Silkworm,
+
+	arbitrumWasmDB wasmdb.WasmIface,
 ) ExecuteBlockCfg {
 	if dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
@@ -134,6 +139,8 @@ func StageExecuteBlocksCfg(
 		silkworm:          silkworm,
 		applyWorker:       exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, false),
 		applyWorkerMining: exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, true),
+
+		arbitrumWasmDB: arbitrumWasmDB,
 	}
 }
 

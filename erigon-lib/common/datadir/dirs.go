@@ -36,6 +36,7 @@ type Dirs struct {
 	DataDir         string
 	RelativeDataDir string // like dataDir, but without filepath.Abs() resolution
 	Chaindata       string
+	ArbitrumWasm    string
 	Tmp             string
 	Snap            string
 	SnapIdx         string
@@ -81,11 +82,12 @@ func New(datadir string) Dirs {
 		CaplinIndexing:  filepath.Join(datadir, "caplin", "indexing"),
 		CaplinLatest:    filepath.Join(datadir, "caplin", "latest"),
 		CaplinGenesis:   filepath.Join(datadir, "caplin", "genesis"),
+		ArbitrumWasm:    filepath.Join(datadir, "arbitrumwasm"),
 	}
 
 	dir.MustExist(dirs.Chaindata, dirs.Tmp,
 		dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapCaplin,
-		dirs.Downloader, dirs.TxPool, dirs.Nodes, dirs.CaplinBlobs, dirs.CaplinIndexing, dirs.CaplinLatest, dirs.CaplinGenesis)
+		dirs.Downloader, dirs.TxPool, dirs.Nodes, dirs.CaplinBlobs, dirs.CaplinIndexing, dirs.CaplinLatest, dirs.CaplinGenesis, dirs.ArbitrumWasm)
 	return dirs
 }
 

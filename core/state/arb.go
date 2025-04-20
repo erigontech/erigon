@@ -2,20 +2,19 @@ package state
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"fmt"
 	"runtime"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/common/lru"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/ethdb/wasmdb"
 	"github.com/holiman/uint256"
 )
 
@@ -35,7 +34,7 @@ var (
 	StylusDiscriminant = []byte{stylusEOFMagic, stylusEOFMagicSuffix, stylusEOFVersion}
 )
 
-type ActivatedWasm map[WasmTarget][]byte
+type ActivatedWasm map[wasmdb.WasmTarget][]byte
 
 // checks if a valid Stylus prefix is present
 func IsStylusProgram(b []byte) bool {
@@ -59,144 +58,21 @@ func NewStylusPrefix(dictionary byte) []byte {
 	return append(prefix, dictionary)
 }
 
-type WasmTarget string
-
-const (
-	TargetWavm  WasmTarget = "wavm"
-	TargetArm64 WasmTarget = "arm64"
-	TargetAmd64 WasmTarget = "amd64"
-	TargetHost  WasmTarget = "host"
-)
-
-func LocalTarget() WasmTarget {
-	if runtime.GOOS == "linux" {
-		switch runtime.GOARCH {
-		case "arm64":
-			return TargetArm64
-		case "amd64":
-			return TargetAmd64
-		}
-	}
-	return TargetHost
-}
-
-func activatedAsmKeyPrefix(target WasmTarget) (WasmPrefix, error) {
-	var prefix WasmPrefix
-	switch target {
-	case TargetWavm:
-		prefix = activatedAsmWavmPrefix
-	case TargetArm64:
-		prefix = activatedAsmArmPrefix
-	case TargetAmd64:
-		prefix = activatedAsmX86Prefix
-	case TargetHost:
-		prefix = activatedAsmHostPrefix
-	default:
-		return WasmPrefix{}, fmt.Errorf("invalid target: %v", target)
-	}
-	return prefix, nil
-}
-
-func IsSupportedWasmTarget(target WasmTarget) bool {
-	_, err := activatedAsmKeyPrefix(target)
-	return err == nil
-}
-
-func WriteActivation(db kv.Putter, moduleHash common.Hash, asmMap map[WasmTarget][]byte) {
-	for target, asm := range asmMap {
-		writeActivatedAsm(db, target, moduleHash, asm)
-	}
-}
-
-// Stores the activated asm for a given moduleHash and target
-func writeActivatedAsm(db kv.Putter, target WasmTarget, moduleHash common.Hash, asm []byte) {
-	prefix, err := activatedAsmKeyPrefix(target)
-	if err != nil {
-		log.Crit("Failed to store activated wasm asm", "err", err)
-	}
-	key := activatedKey(prefix, moduleHash)
-	if err := db.Put(kv.ArbWasmActivationBucket, key[:], asm); err != nil {
-		log.Crit("Failed to store activated wasm asm", "err", err)
-	}
-}
-
-// Retrieves the activated asm for a given moduleHash and target
-func ReadActivatedAsm(db kv.Getter, target WasmTarget, moduleHash common.Hash) []byte {
-	prefix, err := activatedAsmKeyPrefix(target)
-	if err != nil {
-		log.Crit("Failed to read activated wasm asm", "err", err)
-	}
-	key := activatedKey(prefix, moduleHash)
-	asm, err := db.GetOne(kv.ArbWasmActivationBucket, key[:])
-	if err != nil {
-		return nil
-	}
-	return asm
-}
-
-// Stores wasm schema version
-func WriteWasmSchemaVersion(db kv.Putter) {
-	if err := db.Put(kv.ArbWasmActivationBucket, wasmSchemaVersionKey, []byte{WasmSchemaVersion}); err != nil {
-		log.Crit("Failed to store wasm schema version", "err", err)
-	}
-}
-
-// Retrieves wasm schema version
-func ReadWasmSchemaVersion(db kv.Getter) ([]byte, error) {
-	return db.GetOne(kv.ArbWasmActivationBucket, wasmSchemaVersionKey)
-}
-
-const WasmSchemaVersion byte = 0x01
-
-const WasmPrefixLen = 3
-
-// WasmKeyLen = CompiledWasmCodePrefix + moduleHash
-const WasmKeyLen = WasmPrefixLen + length.Hash
-
-type WasmPrefix = [WasmPrefixLen]byte
-type WasmKey = [WasmKeyLen]byte
-
-var (
-	wasmSchemaVersionKey = []byte("WasmSchemaVersion")
-
-	// 0x00 prefix to avoid conflicts when wasmdb is not separate database
-	activatedAsmWavmPrefix = WasmPrefix{0x00, 'w', 'w'} // (prefix, moduleHash) -> stylus module (wavm)
-	activatedAsmArmPrefix  = WasmPrefix{0x00, 'w', 'r'} // (prefix, moduleHash) -> stylus asm for ARM system
-	activatedAsmX86Prefix  = WasmPrefix{0x00, 'w', 'x'} // (prefix, moduleHash) -> stylus asm for x86 system
-	activatedAsmHostPrefix = WasmPrefix{0x00, 'w', 'h'} // (prefix, moduleHash) -> stylus asm for system other then ARM and x86
-)
-
-func DeprecatedPrefixesV0() (keyPrefixes [][]byte, keyLength int) {
-	return [][]byte{
-		// deprecated prefixes, used in version 0x00, purged in version 0x01
-		{0x00, 'w', 'a'}, // ActivatedAsmPrefix
-		{0x00, 'w', 'm'}, // ActivatedModulePrefix
-	}, 3 + 32
-}
-
-// key = prefix + moduleHash
-func activatedKey(prefix WasmPrefix, moduleHash common.Hash) WasmKey {
-	var key WasmKey
-	copy(key[:WasmPrefixLen], prefix[:])
-	copy(key[WasmPrefixLen:], moduleHash[:])
-	return key
-}
-
 type IntraBlockStateArbitrum interface {
 	evmtypes.IntraBlockState
 
 	// Arbitrum: manage Stylus wasms
-	ActivateWasm(moduleHash common.Hash, asmMap map[WasmTarget][]byte)
-	TryGetActivatedAsm(target WasmTarget, moduleHash common.Hash) (asm []byte, err error)
-	TryGetActivatedAsmMap(targets []WasmTarget, moduleHash common.Hash) (asmMap map[WasmTarget][]byte, err error)
+	ActivateWasm(moduleHash common.Hash, asmMap map[wasmdb.WasmTarget][]byte)
+	TryGetActivatedAsm(target wasmdb.WasmTarget, moduleHash common.Hash) (asm []byte, err error)
+	TryGetActivatedAsmMap(targets []wasmdb.WasmTarget, moduleHash common.Hash) (asmMap map[wasmdb.WasmTarget][]byte, err error)
 	RecordCacheWasm(wasm CacheWasm)
 	RecordEvictWasm(wasm EvictWasm)
 	GetRecentWasms() RecentWasms
 	UserWasms() UserWasms
-	ActivatedAsm(target WasmTarget, moduleHash common.Hash) (asm []byte, err error)
+	ActivatedAsm(target wasmdb.WasmTarget, moduleHash common.Hash) (asm []byte, err error)
 	WasmStore() kv.RwDB
 	WasmCacheTag() uint32
-	WasmTargets() []WasmTarget
+	WasmTargets() []wasmdb.WasmTarget
 
 	// Arbitrum: track stylus's memory footprint
 	GetStylusPages() (uint16, uint16)
@@ -208,7 +84,7 @@ type IntraBlockStateArbitrum interface {
 	HasSelfDestructed(addr common.Address) bool
 
 	StartRecording()
-	RecordProgram(targets []WasmTarget, moduleHash common.Hash)
+	RecordProgram(targets []wasmdb.WasmTarget, moduleHash common.Hash)
 
 	GetStorageRoot(address common.Address) common.Hash
 	GetUnexpectedBalanceDelta() *uint256.Int
@@ -227,7 +103,7 @@ type IntraBlockStateArbitrum interface {
 	TxnIndex() int
 }
 
-func (s *IntraBlockState) ActivateWasm(moduleHash common.Hash, asmMap map[WasmTarget][]byte) {
+func (s *IntraBlockState) ActivateWasm(moduleHash common.Hash, asmMap map[wasmdb.WasmTarget][]byte) {
 	_, exists := s.arbExtraData.activatedWasms[moduleHash]
 	if exists {
 		return
@@ -238,18 +114,17 @@ func (s *IntraBlockState) ActivateWasm(moduleHash common.Hash, asmMap map[WasmTa
 	})
 }
 
-func (s *IntraBlockState) TryGetActivatedAsm(target WasmTarget, moduleHash common.Hash) ([]byte, error) {
+func (s *IntraBlockState) TryGetActivatedAsm(target wasmdb.WasmTarget, moduleHash common.Hash) ([]byte, error) {
 	asmMap, exists := s.arbExtraData.activatedWasms[moduleHash]
 	if exists {
 		if asm, exists := asmMap[target]; exists {
 			return asm, nil
 		}
 	}
-	// return s.ActivatedAsm(target, moduleHash)
-	return nil, errors.New("not found")
+	return s.ActivatedAsm(target, moduleHash)
 }
 
-func (s *IntraBlockState) TryGetActivatedAsmMap(targets []WasmTarget, moduleHash common.Hash) (map[WasmTarget][]byte, error) {
+func (s *IntraBlockState) TryGetActivatedAsmMap(targets []wasmdb.WasmTarget, moduleHash common.Hash) (map[wasmdb.WasmTarget][]byte, error) {
 	asmMap := s.arbExtraData.activatedWasms[moduleHash]
 	if asmMap != nil {
 		for _, target := range targets {
@@ -260,11 +135,9 @@ func (s *IntraBlockState) TryGetActivatedAsmMap(targets []WasmTarget, moduleHash
 		return asmMap, nil
 	}
 	var err error
-	asmMap = make(map[WasmTarget][]byte, len(targets))
+	asmMap = make(map[wasmdb.WasmTarget][]byte, len(targets))
 	for _, target := range targets {
-		// asm, dbErr := s.db.ActivatedAsm(target, moduleHash)
-		asm := []byte{}
-		var dbErr error
+		asm, dbErr := s.ActivatedAsm(target, moduleHash)
 		if dbErr == nil {
 			asmMap[target] = asm
 		} else {
@@ -335,28 +208,33 @@ func (s *IntraBlockState) GetSelfDestructs() []common.Address {
 	return selfDestructs
 }
 
-func (sdb *IntraBlockState) ActivatedAsm(target WasmTarget, moduleHash common.Hash) (asm []byte, err error) {
-	return nil, nil
-	//TODO implement me
-	panic("implement me")
+func (sdb *IntraBlockState) ActivatedAsm(target wasmdb.WasmTarget, moduleHash common.Hash) (asm []byte, err error) {
+	if sdb.wasmDB == nil {
+		panic("IBS: wasmDB not set")
+	}
+	return sdb.wasmDB.ActivatedAsm(target, moduleHash)
 }
 
 func (sdb *IntraBlockState) WasmStore() kv.RwDB {
+	if sdb.wasmDB == nil {
+		panic("IBS: wasmDB not set")
+	}
 	//TODO implement me
-	return nil
-	panic("implement me")
+	return sdb.wasmDB.WasmStore()
 }
 
 func (sdb *IntraBlockState) WasmCacheTag() uint32 {
-	return 0
-	//TODO implement me
-	panic("implement me")
+	if sdb.wasmDB == nil {
+		panic("IBS: wasmDB not set")
+	}
+	return sdb.wasmDB.WasmCacheTag()
 }
 
-func (sdb *IntraBlockState) WasmTargets() []WasmTarget {
-	return []WasmTarget{}
-	//TODO implement me
-	panic("implement me")
+func (sdb *IntraBlockState) WasmTargets() []wasmdb.WasmTarget {
+	if sdb.wasmDB == nil {
+		panic("IBS: wasmDB not set")
+	}
+	return sdb.wasmDB.WasmTargets()
 }
 
 func (sdb *IntraBlockState) GetReceiptsByHash(hash common.Hash) types.Receipts {
@@ -422,7 +300,7 @@ func (s *IntraBlockState) StartRecording() {
 	s.arbExtraData.userWasms = make(UserWasms)
 }
 
-func (s *IntraBlockState) RecordProgram(targets []WasmTarget, moduleHash common.Hash) {
+func (s *IntraBlockState) RecordProgram(targets []wasmdb.WasmTarget, moduleHash common.Hash) {
 	if len(targets) == 0 {
 		// nothing to record
 		return
@@ -513,63 +391,4 @@ func (s *IntraBlockState) GetStorageRoot(addr common.Address) common.Hash {
 		return stateObject.data.Root
 	}
 	return common.Hash{}
-}
-
-type WasmIface interface {
-	ActivatedAsm(target WasmTarget, moduleHash common.Hash) ([]byte, error)
-
-	WasmStore() kv.RwDB
-
-	WasmCacheTag() uint32
-
-	WasmTargets() []WasmTarget
-}
-
-type activatedAsmCacheKey struct {
-	moduleHash common.Hash
-	target     WasmTarget
-}
-
-type WasmDB struct {
-	kv.RwDB
-
-	activatedAsmCache *lru.SizeConstrainedCache[activatedAsmCacheKey, []byte]
-	cacheTag          uint32
-	targets           []WasmTarget
-}
-
-func (w *WasmDB) ActivatedAsm(target WasmTarget, moduleHash common.Hash) ([]byte, error) {
-	cacheKey := activatedAsmCacheKey{moduleHash, target}
-	if asm, _ := w.activatedAsmCache.Get(cacheKey); len(asm) > 0 {
-		return asm, nil
-	}
-	var asm []byte
-	err := w.View(context.Background(), func(tx kv.Tx) error {
-		asm = ReadActivatedAsm(tx, target, moduleHash)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	if len(asm) > 0 {
-		w.activatedAsmCache.Add(cacheKey, asm)
-		return asm, nil
-	}
-	return nil, errors.New("not found")
-}
-
-func (w *WasmDB) WasmStore() kv.RwDB {
-	return w
-}
-
-func (w *WasmDB) WasmCacheTag() uint32 {
-	return w.cacheTag
-}
-
-func (w *WasmDB) WasmTargets() []WasmTarget {
-	return w.targets
-}
-
-func WrapDatabaseWithWasm(wasm kv.RwDB, cacheTag uint32, targets []WasmTarget) WasmIface {
-	return &WasmDB{RwDB: wasm, cacheTag: cacheTag, targets: targets, activatedAsmCache: lru.NewSizeConstrainedCache[activatedAsmCacheKey, []byte](1000)}
 }

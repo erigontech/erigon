@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/ethdb/wasmdb"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
@@ -113,7 +114,7 @@ type BlockChain interface {
 
 	GetReceiptsByHash(hash common.Hash) types.Receipts
 	// StateCache returns the caching database underpinning the blockchain instance.
-	StateCache() state.WasmIface //kv.RwDB // TODO could return wasm storage only
+	StateCache() wasmdb.WasmIface //kv.RwDB // TODO could return wasm storage only
 
 	SharedDomains() *state2.SharedDomains
 
@@ -739,7 +740,7 @@ func (b BlockChainArbitrum) GetReceiptsByHash(hash common.Hash) types.Receipts {
 	panic("implement me")
 }
 
-func (b BlockChainArbitrum) StateCache() state.WasmIface {
+func (b BlockChainArbitrum) StateCache() wasmdb.WasmIface {
 	//TODO implement me
 	panic("implement me")
 }

@@ -187,6 +187,12 @@ func (rw *Worker) SetReader(reader state.ResettableStateReader) {
 	}
 }
 
+func (rw *Worker) SetArbitrumWasmDB(wasmDB state.WasmIface) {
+	if rw.chainConfig.IsArbitrum() {
+		rw.ibs.SetWasmDB(wasmDB)
+	}
+}
+
 func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 	if txTask.HistoryExecution && !rw.historyMode {
 		// in case if we cancelled execution and commitment happened in the middle of the block, we have to process block

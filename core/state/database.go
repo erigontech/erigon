@@ -24,7 +24,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
@@ -98,12 +97,4 @@ func (nw *NoopWriter) WriteChangeSets() error {
 
 func (nw *NoopWriter) WriteHistory() error {
 	return nil
-}
-
-type WasmStateWriter interface {
-	// Arbitrum: Read activated Stylus contracts
-	ActivatedAsm(target WasmTarget, moduleHash common.Hash) (asm []byte, err error)
-	WasmStore() kv.RwDB
-	WasmCacheTag() uint32
-	WasmTargets() []WasmTarget
 }
