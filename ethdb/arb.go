@@ -1,24 +1,20 @@
 package ethdb
 
 import (
-	"fmt"
-
-	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/ethdb/wasmdb"
 	"github.com/erigontech/nitro-erigon/arbos/programs"
 )
 
-//type WasmTarget string
-
-func InitialiazeWasmTarget() {
-	lt := state.LocalTarget()
+// InitializeLocalWasmTarget initializes the local WASM target based on the current arch.
+func InitialiazeLocalWasmTarget() {
+	lt := wasmdb.LocalTarget()
 	desc := "description unavailable"
 	switch lt {
-	case state.TargetAmd64:
+	case wasmdb.TargetAmd64:
 		desc = programs.DefaultTargetDescriptionX86
-	case state.TargetArm64:
+	case wasmdb.TargetArm64:
 		desc = programs.DefaultTargetDescriptionArm
 	}
 
-	fmt.Println("Initializing Wasm target:", lt, desc)
 	programs.SetTarget(lt, desc, true)
 }

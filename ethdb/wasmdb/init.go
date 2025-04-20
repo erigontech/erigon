@@ -1,0 +1,9 @@
+package wasmdb
+
+
+
+func init() {
+
+}
+
+

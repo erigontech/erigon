@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/ethdb/wasmdb"
 )
 
 var _ evmtypes.IntraBlockState = new(IntraBlockState) // compile-time interface-check
@@ -109,7 +110,7 @@ type IntraBlockState struct {
 	balanceInc     map[libcommon.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
 
 	// Arbitrum stylus
-	wasmDB WasmIface
+	wasmDB wasmdb.WasmIface
 }
 
 // Create a new state from a given trie
@@ -137,7 +138,7 @@ func New(stateReader StateReader) *IntraBlockState {
 	}
 }
 
-func (sdb *IntraBlockState) SetWasmDB(wasmDB WasmIface) {
+func (sdb *IntraBlockState) SetWasmDB(wasmDB wasmdb.WasmIface) {
 	sdb.wasmDB = wasmDB
 }
 
@@ -1004,7 +1005,7 @@ func (sdb *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter Sta
 			if err := db.Update(context.TODO(), func(tx kv.RwTx) error {
 				// Arbitrum: write Stylus programs to disk
 				for moduleHash, asmMap := range sdb.arbExtraData.activatedWasms {
-					WriteActivation(tx, moduleHash, asmMap)
+					wasmdb.WriteActivation(tx, moduleHash, asmMap)
 				}
 				return nil
 			}); err != nil {
