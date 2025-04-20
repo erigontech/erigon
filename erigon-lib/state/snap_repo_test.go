@@ -153,7 +153,7 @@ func TestIntegrateDirtyFile(t *testing.T) {
 	comp, err := seg.NewCompressor(context.Background(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 	require.NoError(t, err)
 	defer comp.Close()
-	if err = comp.AddWord([]byte("word")); err != nil {
+	if _, err = comp.AddWord([]byte("word")); err != nil {
 		t.Fatal(err)
 	}
 	require.NoError(t, comp.Compress())
@@ -601,7 +601,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 		if strings.HasSuffix(filename, ".ef") || strings.HasSuffix(filename, ".v") || strings.HasSuffix(filename, ".kv") {
 			seg, err := seg.NewCompressor(context.Background(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 			require.NoError(t, err)
-			if err = seg.AddWord([]byte("word")); err != nil {
+			if _, err = seg.AddWord([]byte("word")); err != nil {
 				t.Fatal(err)
 			}
 			require.NoError(t, seg.Compress())
@@ -617,10 +617,10 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 		if strings.HasSuffix(filename, ".bt") {
 			seg2, err := seg.NewCompressor(context.Background(), t.Name(), filename+".sample", dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 			require.NoError(t, err)
-			if err = seg2.AddWord([]byte("key")); err != nil {
+			if _, err = seg2.AddWord([]byte("key")); err != nil {
 				t.Fatal(err)
 			}
-			if err = seg2.AddWord([]byte("value")); err != nil {
+			if _, err = seg2.AddWord([]byte("value")); err != nil {
 				t.Fatal(err)
 			}
 			require.NoError(t, seg2.Compress())

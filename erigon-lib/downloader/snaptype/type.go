@@ -562,7 +562,8 @@ func ExtractRange(ctx context.Context, f FileInfo, extractor RangeExtractor, ind
 	defer sn.Close()
 
 	lastKeyValue, err = extractor.Extract(ctx, f.From, f.To, firstKey, chainDB, chainConfig, func(v []byte) error {
-		return sn.AddWord(v)
+		_, err := sn.AddWord(v)
+		return err
 	}, workers, lvl, logger)
 
 	if err != nil {

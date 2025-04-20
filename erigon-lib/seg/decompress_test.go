@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/page"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -48,7 +49,7 @@ func prepareLoremDict(t *testing.T) *Decompressor {
 	}
 	defer c.Close()
 	for k, w := range loremStrings {
-		if err = c.AddWord([]byte(fmt.Sprintf("%s %d", w, k))); err != nil {
+		if _, err = c.AddWord([]byte(fmt.Sprintf("%s %d", w, k))); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -59,6 +60,35 @@ func prepareLoremDict(t *testing.T) *Decompressor {
 	if d, err = NewDecompressor(file); err != nil {
 		t.Fatal(err)
 	}
+	return d
+}
+
+func prepareLoremDict2(t *testing.T, sampling int, pageCompression bool) *Decompressor {
+	t.Helper()
+	logger, require := log.New(), require.New(t)
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "compressed")
+	t.Name()
+	cfg := DefaultCfg
+	cfg.MinPatternScore = 1
+	cfg.Workers = 2
+	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	require.NoError(err)
+	defer c.Close()
+	wr := NewWriter(c, CompressNone)
+	defer wr.Close()
+
+	p := page.NewWriter(wr, sampling, pageCompression)
+	for k, w := range loremStrings {
+		key := fmt.Sprintf("key %d", k)
+		val := fmt.Sprintf("%s %d", w, k)
+		require.NoError(p.Add([]byte(key), []byte(val)))
+	}
+	require.NoError(p.Flush())
+	require.NoError(wr.Compress())
+
+	d, err := NewDecompressor(file)
+	require.NoError(err)
 	return d
 }
 
@@ -82,6 +112,25 @@ func TestDecompressSkip(t *testing.T) {
 	}
 }
 
+func TestDecompressSkip2(t *testing.T) {
+	d := prepareLoremDict2(t, 16, false)
+	defer d.Close()
+	require := require.New(t)
+	g := NewPagedReader(d.MakeGetter(), 16, false)
+	i := 0
+	for g.HasNext() {
+		w := loremStrings[i]
+		if i%2 == 0 {
+			g.Skip()
+		} else {
+			word, _ := g.Next(nil)
+			expected := fmt.Sprintf("%s %d", w, i)
+			ws := string(word)
+			require.Equal(expected, ws)
+		}
+		i++
+	}
+}
 func TestDecompressMatchOK(t *testing.T) {
 	d := prepareLoremDict(t)
 	defer d.Close()
@@ -145,7 +194,7 @@ func prepareStupidDict(t *testing.T, size int) *Decompressor {
 	}
 	defer c.Close()
 	for i := 0; i < size; i++ {
-		if err = c.AddWord([]byte(fmt.Sprintf("word-%d", i))); err != nil {
+		if _, err = c.AddWord([]byte(fmt.Sprintf("word-%d", i))); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -392,7 +441,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		require.NoError(t, err)
 		defer c.Close()
 		for k, w := range loremStrings {
-			if err = c.AddWord([]byte(fmt.Sprintf("%s %d", w, k))); err != nil {
+			if _, err = c.AddWord([]byte(fmt.Sprintf("%s %d", w, k))); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -598,7 +647,7 @@ func prepareRandomDict(t *testing.T) *Decompressor {
 			word := WORDS[idx]
 			m := rand.Intn(2)
 			if m == 1 {
-				if err = c.AddWord(word); err != nil {
+				if _, err = c.AddWord(word); err != nil {
 					t.Fatal(err)
 				}
 				WORD_FLAGS[idx] = true
@@ -610,7 +659,7 @@ func prepareRandomDict(t *testing.T) *Decompressor {
 			idx++
 			INPUT_FLAGS = append(INPUT_FLAGS, n)
 		case 1: // nil word
-			if err = c.AddWord(nil); err != nil {
+			if _, err = c.AddWord(nil); err != nil {
 				t.Fatal(err)
 			}
 			INPUT_FLAGS = append(INPUT_FLAGS, n)

@@ -61,7 +61,7 @@ func FuzzCompress(f *testing.F) {
 		}
 		defer c.Close()
 		for _, b := range a {
-			if err = c.AddWord(b); err != nil {
+			if _, err = c.AddWord(b); err != nil {
 				t.Fatal(err)
 			}
 		}

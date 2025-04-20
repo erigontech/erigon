@@ -142,6 +142,7 @@ var Schema = map[kv.Domain]domainCfg{
 
 			historyLargeValues: false,
 			compressSingleVal:  false,
+			historySampling:    16,
 
 			snapshotsDisabled: true,
 			historyDisabled:   true,

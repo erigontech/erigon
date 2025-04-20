@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/compress"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/common/page"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/bitmapdb"
@@ -93,9 +94,11 @@ type histCfg struct {
 	//   keys: txNum -> key1+key2
 	//   vals: key1+key2+txNum -> value (not DupSort)
 	historyLargeValues bool
-	compressSingleVal  bool
 	snapshotsDisabled  bool // don't produce .v and .ef files, keep in db table. old data will be pruned anyway.
 	historyDisabled    bool // skip all write operations to this History (even in DB)
+
+	compressSingleVal bool // each value get compressed by snappy
+	historySampling   int  // when collating .v files: concat 16 values and snappy them
 
 	indexList     Accessors
 	compressorCfg seg.Cfg             // compression settings for history files
@@ -350,8 +353,35 @@ func (h *History) buildVi(ctx context.Context, item *filesItem, ps *background.P
 }
 
 func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHist *seg.Decompressor, ps *background.ProgressSet) (string, error) {
+	var historyKey []byte
+	var txKey [8]byte
+	var valOffset uint64
+
+	defer hist.EnableReadAhead().DisableReadAhead()
+	defer efHist.EnableReadAhead().DisableReadAhead()
+
+	histReader := seg.NewReader(hist.MakeGetter(), h.compression)
+	efHistReader := seg.NewReader(efHist.MakeGetter(), h.InvertedIndex.compression)
+
+	var keyBuf, valBuf []byte
+	cnt := uint64(0)
+	for efHistReader.HasNext() {
+		keyBuf, _ = efHistReader.Next(nil)
+		valBuf, _ = efHistReader.Next(nil)
+		cnt += eliasfano32.Count(valBuf)
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		default:
+		}
+	}
+
+	_, fName := filepath.Split(historyIdxPath)
+	p := ps.AddNew(fName, uint64(hist.Count()))
+	defer ps.Delete(p)
+
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   hist.Count(),
+		KeyCount:   int(cnt),
 		Enums:      false,
 		BucketSize: recsplit.DefaultBucketSize,
 		LeafSize:   recsplit.DefaultLeafSize,
@@ -366,21 +396,8 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	defer rs.Close()
 	rs.LogLvl(log.LvlTrace)
 
-	var historyKey []byte
-	var txKey [8]byte
-	var valOffset uint64
-
-	_, fName := filepath.Split(historyIdxPath)
-	p := ps.AddNew(fName, uint64(hist.Count()))
-	defer ps.Delete(p)
-
-	defer hist.EnableReadAhead().DisableReadAhead()
-	defer efHist.EnableReadAhead().DisableReadAhead()
-
-	var keyBuf, valBuf []byte
-	histReader := seg.NewReader(hist.MakeGetter(), h.compression)
-	efHistReader := seg.NewReader(efHist.MakeGetter(), h.InvertedIndex.compression)
-
+	valOffset = 0
+	i := 0
 	for {
 		histReader.Reset(0)
 		efHistReader.Reset(0)
@@ -401,10 +418,18 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 				}
 				binary.BigEndian.PutUint64(txKey[:], txNum)
 				historyKey = append(append(historyKey[:0], txKey[:]...), keyBuf...)
+				//fmt.Printf("[dbg] vi: %d, %x\n", txNum, keyBuf)
 				if err = rs.AddKey(historyKey, valOffset); err != nil {
 					return "", err
 				}
-				valOffset, _ = histReader.Skip()
+				if h.historySampling == 0 {
+					valOffset, _ = histReader.Skip()
+				} else {
+					i++
+					if i%h.historySampling == 0 {
+						valOffset, _ = histReader.Skip()
+					}
+				}
 				p.Processed.Add(1)
 			}
 
@@ -567,7 +592,6 @@ type HistoryCollation struct {
 	efHistoryComp *seg.Writer
 	historyPath   string
 	efHistoryPath string
-	historyCount  int // same as historyComp.Count()
 }
 
 func (c HistoryCollation) Close() {
@@ -668,17 +692,19 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	}
 
 	var (
-		keyBuf      = make([]byte, 0, 256)
-		numBuf      = make([]byte, 8)
-		bitmap      = bitmapdb.NewBitmap64()
-		prevEf      []byte
-		prevKey     []byte
+		keyBuf  = make([]byte, 0, 256)
+		numBuf  = make([]byte, 8)
+		bitmap  = bitmapdb.NewBitmap64()
+		prevEf  []byte
+		prevKey []byte
+
 		initialized bool
 	)
 	efHistoryComp = seg.NewWriter(efComp, seg.CompressNone) // coll+build must be fast - no compression
 	collector.SortAndFlushInBackground(true)
 	defer bitmapdb.ReturnToPool64(bitmap)
 
+	p := page.NewWriter(historyComp, 16, true)
 	loadBitmapsFunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		txNum := binary.BigEndian.Uint64(v)
 		if !initialized {
@@ -697,20 +723,10 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 
 		for it.HasNext() {
 			vTxNum := it.Next()
+			ef.AddOffset(vTxNum)
+
 			binary.BigEndian.PutUint64(numBuf, vTxNum)
-			if h.historyLargeValues {
-				keyBuf = append(append(keyBuf[:0], prevKey...), numBuf...)
-				key, val, err := c.SeekExact(keyBuf)
-				if err != nil {
-					return fmt.Errorf("seekExact %s history val [%x]: %w", h.filenameBase, key, err)
-				}
-				if len(val) == 0 {
-					val = nil
-				}
-				if err = historyComp.AddWord(val); err != nil {
-					return fmt.Errorf("add %s history val [%x]=>[%x]: %w", h.filenameBase, key, val, err)
-				}
-			} else {
+			if !h.historyLargeValues {
 				val, err := cd.SeekBothRange(prevKey, numBuf)
 				if err != nil {
 					return fmt.Errorf("seekBothRange %s history val [%x]: %w", h.filenameBase, prevKey, err)
@@ -720,22 +736,40 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 				} else {
 					val = nil
 				}
-				if err = historyComp.AddWord(val); err != nil {
-					return fmt.Errorf("add %s history val [%x]=>[%x]: %w", h.filenameBase, prevKey, val, err)
+				if _, err = historyComp.Write(val); err != nil {
+					return fmt.Errorf("add %s history val [%x]: %w", h.filenameBase, prevKey, err)
 				}
+				continue
+			}
+			keyBuf = append(append(keyBuf[:0], prevKey...), numBuf...)
+			key, val, err := c.SeekExact(keyBuf)
+			if err != nil {
+				return fmt.Errorf("seekExact %s history val [%x]: %w", h.filenameBase, key, err)
+			}
+			if len(val) == 0 {
+				val = nil
 			}
 
-			ef.AddOffset(vTxNum)
+			if h.historySampling == 0 {
+				if _, err = historyComp.Write(val); err != nil {
+					return fmt.Errorf("add %s history val [%x]: %w", h.filenameBase, key, err)
+				}
+				continue
+			}
+
+			if err := p.Add(keyBuf, val); err != nil {
+				return fmt.Errorf("add %s history val [%x]: %w", h.filenameBase, key, err)
+			}
 		}
 		bitmap.Clear()
 		ef.Build()
 
 		prevEf = ef.AppendBytes(prevEf[:0])
 
-		if err = efHistoryComp.AddWord(prevKey); err != nil {
+		if _, err = efHistoryComp.Write(prevKey); err != nil {
 			return fmt.Errorf("add %s ef history key [%x]: %w", h.filenameBase, prevKey, err)
 		}
-		if err = efHistoryComp.AddWord(prevEf); err != nil {
+		if _, err = efHistoryComp.Write(prevEf); err != nil {
 			return fmt.Errorf("add %s ef history val: %w", h.filenameBase, err)
 		}
 
@@ -755,6 +789,9 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 			return HistoryCollation{}, err
 		}
 	}
+	if err = p.Flush(); err != nil {
+		return HistoryCollation{}, fmt.Errorf("add %s history val: %w", h.filenameBase, err)
+	}
 
 	closeComp = false
 	mxCollationSizeHist.SetUint64(uint64(historyComp.Count()))
@@ -764,7 +801,6 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 		efHistoryPath: efHistoryPath,
 		historyPath:   historyPath,
 		historyComp:   historyComp,
-		historyCount:  historyComp.Count(),
 	}, nil
 }
 

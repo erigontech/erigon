@@ -47,7 +47,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 	require.NoError(t, err)
 	defer c.Close()
 	c.DisableFsync()
-	err = c.AddWord([]byte{1})
+	_, err = c.AddWord([]byte{1})
 	require.NoError(t, err)
 	err = c.Compress()
 	require.NoError(t, err)

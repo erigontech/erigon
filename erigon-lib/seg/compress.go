@@ -182,17 +182,17 @@ func (c *Compressor) ReadFrom(g *Getter) error {
 	var v []byte
 	for g.HasNext() {
 		v, _ = g.Next(v[:0])
-		if err := c.AddWord(v); err != nil {
+		if _, err := c.AddWord(v); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (c *Compressor) AddWord(word []byte) error {
+func (c *Compressor) AddWord(word []byte) (n int, err error) {
 	select {
 	case <-c.ctx.Done():
-		return c.ctx.Err()
+		return n, c.ctx.Err()
 	default:
 	}
 
@@ -215,7 +215,7 @@ func (c *Compressor) AddWord(word []byte) error {
 		c.superstring = append(c.superstring, 0, 0)
 	}
 
-	return c.uncompressedFile.Append(word)
+	return len(word), c.uncompressedFile.Append(word)
 }
 
 func (c *Compressor) AddUncompressedWord(word []byte) error {

@@ -18,6 +18,8 @@ package seg
 
 import (
 	"fmt"
+
+	"github.com/erigontech/erigon-lib/common/page"
 )
 
 //Reader and Writer - decorators on Getter and Compressor - which
@@ -123,6 +125,46 @@ func (g *Reader) Skip() (uint64, int) {
 
 }
 
+type R interface {
+	Next(buf []byte) ([]byte, uint64)
+	Reset(offset uint64)
+	HasNext() bool
+	Skip() (uint64, int)
+}
+
+type PagedReader struct {
+	file       R
+	snappy     bool
+	sampling   int
+	page       *page.Reader
+	pageOffset uint64
+}
+
+func NewPagedReader(r R, sampling int, snappy bool) *PagedReader {
+	if sampling == 0 {
+		sampling = 1
+	}
+	return &PagedReader{file: r, sampling: sampling, snappy: snappy, page: &page.Reader{}}
+}
+
+func (g *PagedReader) Reset(offset uint64) { g.file.Reset(offset) }
+func (g *PagedReader) HasNext() bool       { return g.page.HasNext() || g.file.HasNext() }
+func (g *PagedReader) Next(buf []byte) ([]byte, uint64) {
+	if g.page.HasNext() {
+		_, v := g.page.Next()
+		return v, g.pageOffset
+	}
+	var pageV []byte
+	pageV, g.pageOffset = g.file.Next(buf)
+	g.page.Reset(pageV, g.snappy)
+	_, v := g.page.Next()
+	return v, g.pageOffset
+}
+func (g *PagedReader) Skip() (uint64, int) {
+	v, offset := g.Next(nil)
+	return offset, len(v)
+}
+
 type Writer struct {
 	*Compressor
 	keyWritten bool
@@ -133,7 +175,7 @@ func NewWriter(kv *Compressor, compress FileCompression) *Writer {
 	return &Writer{kv, false, compress}
 }
 
-func (c *Writer) AddWord(word []byte) error {
+func (c *Writer) Write(word []byte) (n int, err error) {
 	fl := CompressKeys
 	if c.keyWritten {
 		fl = CompressVals
@@ -145,14 +187,14 @@ func (c *Writer) AddWord(word []byte) error {
 	if c.c&fl != 0 {
 		return c.Compressor.AddWord(word)
 	}
-	return c.Compressor.AddUncompressedWord(word)
+	return n, c.Compressor.AddUncompressedWord(word)
 }
 
 func (c *Writer) ReadFrom(r *Reader) error {
 	var v []byte
 	for r.HasNext() {
 		v, _ = r.Next(v[:0])
-		if err := c.AddWord(v); err != nil {
+		if _, err := c.Write(v); err != nil {
 			return err
 		}
 	}
