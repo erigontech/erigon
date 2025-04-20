@@ -39,7 +39,7 @@ func DecodeSnappyIfNeed(buf, v []byte, enabled bool) ([]byte, []byte, error) {
 		return buf, nil, fmt.Errorf("snappy.decode1: %w", err)
 	}
 	buf = growslice(buf, actualSize)
-	buf, err = snappy.Decode(buf, v)
+	buf, err = snappy.Decode(nil, v)
 	if err != nil {
 		return buf, nil, fmt.Errorf("snappy.decode2: %w", err)
 	}
