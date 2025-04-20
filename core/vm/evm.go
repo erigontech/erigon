@@ -301,8 +301,10 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		var contract *Contract
 		if typ == CALLCODE {
 			contract = NewContract(caller, caller.Address(), value, gas, evm.config.SkipAnalysis, evm.JumpDestCache)
+			contract.delegateOrCallcode = true
 		} else if typ == DELEGATECALL {
 			contract = NewContract(caller, caller.Address(), value, gas, evm.config.SkipAnalysis, evm.JumpDestCache).AsDelegate()
+			contract.delegateOrCallcode = true
 		} else {
 			contract = NewContract(caller, addrCopy, value, gas, evm.config.SkipAnalysis, evm.JumpDestCache)
 		}
