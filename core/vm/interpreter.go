@@ -253,6 +253,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	// Arbitrum: handle Stylus programs
 	if in.evm.chainRules.IsStylus && state.IsStylusProgram(contract.Code) {
 		ret, err = in.evm.ProcessingHook.ExecuteWASM(callContext, input, in)
+		fmt.Println(err)
 		return
 	}
 
