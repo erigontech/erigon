@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/page"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -62,6 +63,35 @@ func prepareLoremDict(t *testing.T) *Decompressor {
 	return d
 }
 
+func prepareLoremDict2(t *testing.T, sampling int, pageCompression bool) *Decompressor {
+	t.Helper()
+	logger, require := log.New(), require.New(t)
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "compressed")
+	t.Name()
+	cfg := DefaultCfg
+	cfg.MinPatternScore = 1
+	cfg.Workers = 2
+	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	require.NoError(err)
+	defer c.Close()
+	wr := NewWriter(c, CompressNone)
+	defer wr.Close()
+
+	p := page.NewWriter(wr, sampling, pageCompression)
+	for k, w := range loremStrings {
+		key := fmt.Sprintf("key %d", k)
+		val := fmt.Sprintf("%s %d", w, k)
+		require.NoError(p.Add([]byte(key), []byte(val)))
+	}
+	require.NoError(p.Flush())
+	require.NoError(wr.Compress())
+
+	d, err := NewDecompressor(file)
+	require.NoError(err)
+	return d
+}
+
 func TestDecompressSkip(t *testing.T) {
 	d := prepareLoremDict(t)
 	defer d.Close()
@@ -82,6 +112,25 @@ func TestDecompressSkip(t *testing.T) {
 	}
 }
 
+func TestDecompressSkip2(t *testing.T) {
+	d := prepareLoremDict2(t, 2, false)
+	defer d.Close()
+	require := require.New(t)
+	g := NewPagedReader(d.MakeGetter(), 2, false)
+	i := 0
+	for g.HasNext() {
+		w := loremStrings[i]
+		if i%2 == 0 {
+			g.Skip()
+		} else {
+			word, _ := g.Next(nil)
+			expected := fmt.Sprintf("%s %d", w, i)
+			ws := string(word)
+			require.Equal(expected, ws)
+		}
+		i++
+	}
+}
 func TestDecompressMatchOK(t *testing.T) {
 	d := prepareLoremDict(t)
 	defer d.Close()

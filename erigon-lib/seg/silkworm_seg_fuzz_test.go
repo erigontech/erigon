@@ -145,7 +145,7 @@ func generateRawWordsFile(path string, seed int64) (*RawWordsFile, error) {
 	}
 
 	r := rand.New(rand.NewSource(seed))
-	totalSizeLimit := maxTotalSize // r.Intn(maxTotalSize + 1)
+	totalSizeLimit := maxTotalSize // file.Intn(maxTotalSize + 1)
 	var wordLen int
 
 	patterns := generatePatterns(r)

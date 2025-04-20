@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/erigontech/erigon-lib/common/page"
 	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -448,7 +449,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 			val, _ := g.Next(nil)
 			heap.Push(&cp, &CursorItem{
 				t:          FILE_CURSOR,
-				dg:         g,
+				idx:        g,
 				key:        key,
 				val:        val,
 				startTxNum: item.startTxNum,
@@ -471,9 +472,9 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		// Advance all the items that have this key (including the top)
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 			ci1 := heap.Pop(&cp).(*CursorItem)
-			if ci1.dg.HasNext() {
-				ci1.key, _ = ci1.dg.Next(nil)
-				ci1.val, _ = ci1.dg.Next(nil)
+			if ci1.idx.HasNext() {
+				ci1.key, _ = ci1.idx.Next(nil)
+				ci1.val, _ = ci1.idx.Next(nil)
 				heap.Push(&cp, ci1)
 			}
 		}
@@ -620,7 +621,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 			//fmt.Printf("heap push %s [%d] %x\n", item.decompressor.FilePath(), item.endTxNum, key)
 			heap.Push(&cp, &CursorItem{
 				t:        FILE_CURSOR,
-				dg:       g,
+				idx:      g,
 				key:      key,
 				val:      val,
 				endTxNum: item.endTxNum,
@@ -651,9 +652,9 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 				mergedOnce = true
 			}
 			// fmt.Printf("multi-way %s [%d] %x\n", ii.keysTable, ci1.endTxNum, ci1.key)
-			if ci1.dg.HasNext() {
-				ci1.key, _ = ci1.dg.Next(nil)
-				ci1.val, _ = ci1.dg.Next(nil)
+			if ci1.idx.HasNext() {
+				ci1.key, _ = ci1.idx.Next(nil)
+				ci1.val, _ = ci1.idx.Next(nil)
 				// fmt.Printf("heap next push %s [%d] %x\n", ii.keysTable, ci1.endTxNum, ci1.key)
 				heap.Push(&cp, ci1)
 			}
@@ -763,6 +764,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		if ht.h.noFsync {
 			compr.DisableFsync()
 		}
+		pagedWr := page.NewWriter(compr, ht.h.historySampling, true)
 		p := ps.AddNew(path.Base(datPath), 1)
 		defer ps.Delete(p)
 
@@ -772,22 +774,22 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 			g := seg.NewReader(item.decompressor.MakeGetter(), ht.h.compression)
 			g.Reset(0)
 			if g.HasNext() {
-				var g2 *seg.Reader
+				var g2 seg.R
 				for _, hi := range historyFiles { // full-scan, because it's ok to have different amount files. by unclean-shutdown.
 					if hi.startTxNum == item.startTxNum && hi.endTxNum == item.endTxNum {
-						g2 = seg.NewReader(hi.decompressor.MakeGetter(), ht.h.compression)
+						g2 = seg.NewPagedReader(seg.NewReader(hi.decompressor.MakeGetter(), ht.h.compression), ht.h.historySampling, true)
 						break
 					}
 				}
-				if g2 == nil {
-					panic(fmt.Sprintf("for file: %s, not found corresponding file to merge", g.FileName()))
-				}
+				//if g2 == nil {
+				//	panic(fmt.Sprintf("for file: %s, not found corresponding file to merge", g.FileName()))
+				//}
 				key, _ := g.Next(nil)
 				val, _ := g.Next(nil)
 				heap.Push(&cp, &CursorItem{
 					t:        FILE_CURSOR,
-					dg:       g,
-					dg2:      g2,
+					idx:      g,
+					hist:     g2,
 					key:      key,
 					val:      val,
 					endTxNum: item.endTxNum,
@@ -809,23 +811,26 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				ci1 := heap.Pop(&cp).(*CursorItem)
 				count := eliasfano32.Count(ci1.val)
 				for i := uint64(0); i < count; i++ {
-					if !ci1.dg2.HasNext() {
-						panic(fmt.Errorf("assert: no value??? %s, i=%d, count=%d, lastKey=%x, ci1.key=%x", ci1.dg2.FileName(), i, count, lastKey, ci1.key))
+					if !ci1.hist.HasNext() {
+						panic(fmt.Errorf("assert: no value??? %s, i=%d, count=%d, lastKey=%x, ci1.key=%x", ci1.hist.FileName(), i, count, lastKey, ci1.key))
 					}
 
-					valBuf, _ = ci1.dg2.Next(valBuf[:0])
-					if _, err = compr.Write(valBuf); err != nil {
+					valBuf, _ = ci1.hist.Next(nil)
+					if err = pagedWr.Add(lastKey, valBuf); err != nil {
 						return nil, nil, err
 					}
 				}
 				// fmt.Printf("fput '%x'->%x\n", lastKey, ci1.val)
 				keyCount += int(count)
-				if ci1.dg.HasNext() {
-					ci1.key, _ = ci1.dg.Next(nil)
-					ci1.val, _ = ci1.dg.Next(nil)
+				if ci1.idx.HasNext() {
+					ci1.key, _ = ci1.idx.Next(nil)
+					ci1.val, _ = ci1.idx.Next(nil)
 					heap.Push(&cp, ci1)
 				}
 			}
+		}
+		if err := pagedWr.Flush(); err != nil {
+			return nil, nil, err
 		}
 		if err = compr.Compress(); err != nil {
 			return nil, nil, err
@@ -861,7 +866,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		)
 
 		g := seg.NewReader(indexIn.decompressor.MakeGetter(), ht.h.InvertedIndex.compression)
-		g2 := seg.NewReader(decomp.MakeGetter(), ht.h.compression)
+		g2 := seg.NewPagedReader(seg.NewReader(decomp.MakeGetter(), ht.h.compression), ht.h.historySampling, true)
 
 		for {
 			g.Reset(0)
