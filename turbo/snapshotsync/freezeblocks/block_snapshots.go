@@ -545,7 +545,7 @@ func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstK
 	//  - build must be fast
 	//  - merge can be slow and expensive
 	noCompress := (f.To - f.From) < (snaptype.Erigon2MergeLimit - 1)
-	println("made comp", f)
+	println("made comp", fmt.Sprintf("%+v", f))
 
 	lastKeyValue, err = dumper(ctx, chainDB, chainConfig, f.From, f.To, firstKey, func(v []byte) error {
 		if noCompress {
