@@ -1,15 +1,22 @@
 package compress
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
 func TestName(t *testing.T) {
-	_, vv := EncodeSnappyIfNeed(nil, []byte("hi"), true)
-	_, word, err := DecodeSnappyIfNeed(nil, vv, true)
+	expectWord := []byte("hi")
+	_, vv := EncodeSnappyIfNeed(nil, expectWord, true)
+	var buf []byte
+	buf, word, err := DecodeSnappyIfNeed(buf, vv, true)
 	require.NoError(t, err)
-	fmt.Printf("%s\n", word)
+	require.Equal(t, expectWord, word)
+	buf, word, err = DecodeSnappyIfNeed(buf, vv, true)
+	require.NoError(t, err)
+	require.Equal(t, expectWord, word)
+	buf, word, err = DecodeSnappyIfNeed(buf, vv, true)
+	require.NoError(t, err)
+	require.Equal(t, expectWord, word)
 }
