@@ -155,10 +155,6 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 }
 
 func TestInvIndexCollationBuild(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	t.Parallel()
 
 	logger := log.New()

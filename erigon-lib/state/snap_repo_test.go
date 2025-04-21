@@ -316,10 +316,6 @@ func TestMergeRangeSnapRepo(t *testing.T) {
 
 // foreign key; commitment <> accounts
 func TestReferencingIntegrityChecker(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	dirs := datadir.New(t.TempDir())
 	_, accountsR := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema ee.SnapNameSchema) {
 		accessors := AccessorBTree | AccessorExistence

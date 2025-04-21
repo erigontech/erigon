@@ -38,10 +38,6 @@ import (
 )
 
 func TestV2HashBuilding(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	var keys []string
 	for b := uint32(0); b < 100000; b++ {
 		var preimage [4]byte
@@ -109,10 +105,6 @@ func TestV2HashBuilding(t *testing.T) {
 }
 
 func TestV2Resolution(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	var keys []string
 	for b := uint32(0); b < 100000; b++ {
 		var preimage [4]byte

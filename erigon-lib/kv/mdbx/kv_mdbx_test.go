@@ -695,10 +695,6 @@ func testCloseWaitsAfterTxBegin(
 }
 
 func TestCloseWaitsAfterTxBegin(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	ctx := context.Background()
 	t.Run("BeginRoAndCommit", func(t *testing.T) {
 		testCloseWaitsAfterTxBegin(

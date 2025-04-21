@@ -1591,10 +1591,6 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 }
 
 func TestDomainRange(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	db, d := testDbAndDomainOfStep(t, 25, log.New())
 	require, ctx := require.New(t), context.Background()
 
