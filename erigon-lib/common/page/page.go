@@ -36,7 +36,9 @@ func (c *Writer) Add(k, v []byte) (err error) {
 	c.keys = append(c.keys, k...)
 	c.vals = append(c.vals, v...)
 	isFull := c.i%c.limit == 0
+	//fmt.Printf("[dbg] write: %x, %x\n", k, v)
 	if isFull {
+		//fmt.Printf("[dbg] write--\n")
 		bts := c.bytesAndReset()
 		_, err = c.parent.Write(bts)
 		return err
@@ -130,6 +132,7 @@ func Get(key, compressedPage []byte, snappyEnabled bool) []byte {
 	keys := data[:vOffset]
 	vals := data[vOffset:]
 	vOffset = 0
+	//fmt.Printf("[dbg] see(%x): %x, %x\n", key, keys, vals)
 
 	for i := 0; i < cnt*4; i += 4 {
 		kLen, vLen := be.Uint32(kLens[i:]), be.Uint32(vLens[i:])

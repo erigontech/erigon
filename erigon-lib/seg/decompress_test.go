@@ -112,10 +112,18 @@ func TestDecompressSkip(t *testing.T) {
 	}
 }
 
-func TestDecompressSkip2(t *testing.T) {
+func TestPagedReader(t *testing.T) {
 	d := prepareLoremDict2(t, 2, false)
 	defer d.Close()
 	require := require.New(t)
+	g1 := NewPagedReader(d.MakeGetter(), 2, false)
+	_, _, o1 := g1.Next2(nil)
+	require.Zero(o1)
+	_, _, o1 = g1.Next2(nil)
+	require.Zero(o1)
+	_, _, o1 = g1.Next2(nil)
+	require.NotZero(o1)
+
 	g := NewPagedReader(d.MakeGetter(), 2, false)
 	i := 0
 	for g.HasNext() {
@@ -123,7 +131,7 @@ func TestDecompressSkip2(t *testing.T) {
 		if i%2 == 0 {
 			g.Skip()
 		} else {
-			word, _ := g.Next(nil)
+			_, word, _ := g.Next2(nil)
 			expected := fmt.Sprintf("%s %d", w, i)
 			ws := string(word)
 			require.Equal(expected, ws)
@@ -131,6 +139,7 @@ func TestDecompressSkip2(t *testing.T) {
 		i++
 	}
 }
+
 func TestDecompressMatchOK(t *testing.T) {
 	d := prepareLoremDict(t)
 	defer d.Close()

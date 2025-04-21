@@ -345,14 +345,14 @@ func (h *History) buildVi(ctx context.Context, item *filesItem, ps *background.P
 	fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
 	idxPath := h.vAccessorFilePath(fromStep, toStep)
 
-	_, err = h.buildVI(ctx, idxPath, item.decompressor, iiItem.decompressor, ps)
+	err = h.buildVI(ctx, idxPath, item.decompressor, iiItem.decompressor, ps)
 	if err != nil {
 		return fmt.Errorf("buildVI: %w", err)
 	}
 	return nil
 }
 
-func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHist *seg.Decompressor, ps *background.ProgressSet) (string, error) {
+func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHist *seg.Decompressor, ps *background.ProgressSet) error {
 	var historyKey []byte
 	var txKey [8]byte
 	var valOffset uint64
@@ -371,7 +371,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		cnt += eliasfano32.Count(valBuf)
 		select {
 		case <-ctx.Done():
-			return "", ctx.Err()
+			return ctx.Err()
 		default:
 		}
 	}
@@ -379,7 +379,6 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	_, fName := filepath.Split(historyIdxPath)
 	p := ps.AddNew(fName, uint64(hist.Count()))
 	defer ps.Delete(p)
-
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   int(cnt),
 		Enums:      false,
@@ -391,7 +390,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		NoFsync:    h.noFsync,
 	}, h.logger)
 	if err != nil {
-		return "", fmt.Errorf("create recsplit: %w", err)
+		return fmt.Errorf("create recsplit: %w", err)
 	}
 	defer rs.Close()
 	rs.LogLvl(log.LvlTrace)
@@ -413,13 +412,13 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 			for efIt.HasNext() {
 				txNum, err := efIt.Next()
 				if err != nil {
-					return "", err
+					return err
 				}
 				binary.BigEndian.PutUint64(txKey[:], txNum)
 				historyKey = append(append(historyKey[:0], txKey[:]...), keyBuf...)
 				//fmt.Printf("[dbg] vi: %d, %x\n", txNum, keyBuf)
 				if err = rs.AddKey(historyKey, valOffset); err != nil {
-					return "", err
+					return err
 				}
 				if h.historySampling == 0 {
 					valOffset, _ = histReader.Skip()
@@ -434,7 +433,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 
 			select {
 			case <-ctx.Done():
-				return "", ctx.Err()
+				return ctx.Err()
 			default:
 			}
 		}
@@ -444,13 +443,13 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 				log.Info("Building recsplit. Collision happened. It's ok. Restarting...")
 				rs.ResetNextSalt()
 			} else {
-				return "", fmt.Errorf("build idx: %w", err)
+				return fmt.Errorf("build idx: %w", err)
 			}
 		} else {
 			break
 		}
 	}
-	return historyIdxPath, nil
+	return nil
 }
 
 func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet, historyFiles *MissedAccessorHistoryFiles) {
@@ -915,7 +914,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	}
 
 	historyIdxPath := h.vAccessorFilePath(step, step+1)
-	historyIdxPath, err = h.buildVI(ctx, historyIdxPath, historyDecomp, efHistoryDecomp, ps)
+	err = h.buildVI(ctx, historyIdxPath, historyDecomp, efHistoryDecomp, ps)
 	if err != nil {
 		return HistoryFiles{}, fmt.Errorf("build %s .vi: %w", h.filenameBase, err)
 	}
@@ -1220,7 +1219,6 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	}
 	g := ht.statelessGetter(historyItem.i)
 	g.Reset(offset)
-
 	v, _ := g.Next(nil)
 	if traceGetAsOf == ht.h.filenameBase {
 		fmt.Printf("DomainGetAsOf(%s, %x, %d) -> %s, histTxNum=%d, isNil(v)=%t\n", ht.h.filenameBase, key, txNum, g.FileName(), histTxNum, v == nil)
