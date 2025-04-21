@@ -708,12 +708,10 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		collected := -1
 		collectorLock := sync.Mutex{}
 		collections := sync.NewCond(&collectorLock)
-		println("block num:", blockNum, "to", blockTo, body.TxCount, workers)
 		var j int
 
 		if err := tx.ForAmount(kv.EthTx, numBuf, body.TxCount-2, func(_, tv []byte) error {
 			tx := j
-			println("tx:", j)
 			j++
 
 			parsers.Go(func() error {
@@ -727,30 +725,22 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 				parseCtx.WithAllowPreEip2s(blockNum <= chainConfig.HomesteadBlock.Uint64())
 
 				valueBuf, err := parse(parseCtx, tv, valueBufs[tx%workers], senders, tx)
-
+				collectorLock.Lock()
+				defer collectorLock.Unlock()
 				if err != nil {
-					println("parse error:", err.Error())
-					collectorLock.Lock()
-					defer collectorLock.Unlock()
 					collected = tx
 					collections.Broadcast() // to fail fast on it.
 					return fmt.Errorf("%w, block: %d", err, blockNum)
 				}
-				println("parsed", tx)
-				collectorLock.Lock()
-				defer collectorLock.Unlock()
 
 				for collected < tx-1 {
-					println("waiting for", tx, "now:", collected)
 					collections.Wait()
 				}
 
 				// first tx byte => sender address => tx rlp
 				if err := collect(valueBuf); err != nil {
-					println("collect error:", err.Error())
 					return err
 				}
-				println("collected", tx)
 				collected = tx
 				collections.Broadcast()
 
