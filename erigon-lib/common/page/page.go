@@ -149,12 +149,6 @@ func Get(key, compressedPage []byte, snappyEnabled bool) []byte {
 	//	return vals[from:]
 	//}
 
-	from := be.Uint32(kLens[(cnt-1)*4:])
-	if bytes.Equal(key, data[from:]) {
-		from = be.Uint32(vLens[(cnt-1)*4:])
-		return data[from:]
-	}
-
 	return nil
 }
 
