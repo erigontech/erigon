@@ -1208,7 +1208,8 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	if reader.Empty() {
 		return nil, false, nil
 	}
-	offset, ok := reader.Lookup(ht.encodeTs(histTxNum, key))
+	historyKey := ht.encodeTs(histTxNum, key)
+	offset, ok := reader.Lookup(historyKey)
 	if !ok {
 		return nil, false, nil
 	}
@@ -1223,6 +1224,8 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	if err != nil {
 		return nil, false, err
 	}
+
+	v = page.Get(key, v, true)
 	return v, true, nil
 }
 
