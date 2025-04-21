@@ -1312,9 +1312,6 @@ func doCompress(cliCtx *cli.Context) error {
 	doSnappyEachWord := dbg.EnvBool("SnappyEachWord", false)
 	doUnSnappyEachWord := dbg.EnvBool("UnSnappyEachWord", false)
 
-	doZstdEachWord := dbg.EnvBool("ZstdEachWord", false)
-	doUnZstdEachWord := dbg.EnvBool("UnZstdEachWord", false)
-
 	justPrint := dbg.EnvBool("JustPrint", false)
 	concat := dbg.EnvInt("Concat", 0)
 
