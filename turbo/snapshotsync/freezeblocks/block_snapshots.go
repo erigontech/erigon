@@ -717,6 +717,10 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			j++
 
 			parsers.Go(func() error {
+				if rec := recover(); rec != nil {
+					fmt.Printf("rec: %v\n", rec)
+				}
+
 				parseCtx := parseCtxs[tx%workers]
 
 				parseCtx.WithSender(len(senders) == 0)
