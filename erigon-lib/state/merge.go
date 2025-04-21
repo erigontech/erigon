@@ -775,13 +775,13 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				var g2 seg.R
 				for _, hi := range historyFiles { // full-scan, because it's ok to have different amount files. by unclean-shutdown.
 					if hi.startTxNum == item.startTxNum && hi.endTxNum == item.endTxNum {
-						g2 = seg.NewReader(hi.decompressor.MakeGetter(), ht.h.compression)
+						g2 = seg.NewPagedReader(seg.NewReader(hi.decompressor.MakeGetter(), ht.h.compression), ht.h.historySampling, true)
 						break
 					}
 				}
-				if g2 == nil {
-					panic(fmt.Sprintf("for file: %s, not found corresponding file to merge", g.FileName()))
-				}
+				//if g2 == nil {
+				//	panic(fmt.Sprintf("for file: %s, not found corresponding file to merge", g.FileName()))
+				//}
 				key, _ := g.Next(nil)
 				val, _ := g.Next(nil)
 				heap.Push(&cp, &CursorItem{
