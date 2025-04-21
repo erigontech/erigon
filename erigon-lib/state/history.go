@@ -370,7 +370,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		cnt += eliasfano32.Count(valBuf)
 		select {
 		case <-ctx.Done():
-			return "", ctx.Err()
+			return ctx.Err()
 		default:
 		}
 	}
