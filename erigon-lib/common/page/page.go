@@ -97,6 +97,16 @@ func (c *Writer) bytes() []byte {
 	return lengthsAndKeysAndVals
 }
 
+type disableFsycn interface {
+	DisableFsync()
+}
+
+func (c *Writer) DisableFsync() {
+	if casted, ok := c.parent.(disableFsycn); ok {
+		casted.DisableFsync()
+	}
+}
+
 var be = binary.BigEndian
 
 func Get(key, buf []byte, snappyEnabled bool) []byte {

@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/erigontech/erigon-lib/common/page"
 	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -763,6 +764,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		if ht.h.noFsync {
 			compr.DisableFsync()
 		}
+		pagedWr := page.NewWriter(compr, ht.h.historySampling, true)
 		p := ps.AddNew(path.Base(datPath), 1)
 		defer ps.Delete(p)
 
@@ -814,7 +816,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 					}
 
 					valBuf, _ = ci1.hist.Next(valBuf[:0])
-					if _, err = compr.Write(valBuf); err != nil {
+					if err = pagedWr.Add(lastKey, valBuf); err != nil {
 						return nil, nil, err
 					}
 				}
@@ -826,6 +828,9 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 					heap.Push(&cp, ci1)
 				}
 			}
+		}
+		if err := pagedWr.Flush(); err != nil {
+			return nil, nil, err
 		}
 		if err = compr.Compress(); err != nil {
 			return nil, nil, err
@@ -861,7 +866,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		)
 
 		g := seg.NewReader(indexIn.decompressor.MakeGetter(), ht.h.InvertedIndex.compression)
-		g2 := seg.NewReader(decomp.MakeGetter(), ht.h.compression)
+		g2 := seg.NewPagedReader(seg.NewReader(decomp.MakeGetter(), ht.h.compression), ht.h.historySampling, true)
 
 		for {
 			g.Reset(0)
