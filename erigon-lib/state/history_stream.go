@@ -132,7 +132,7 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 		if !ok {
 			continue
 		}
-		g := hi.hc.statelessGetter(historyItem.i)
+		g := seg.NewPagedReader(hi.hc.statelessGetter(historyItem.i), hi.hc.h.historySampling, true)
 		g.Reset(offset)
 		hi.nextVal, _ = g.Next(nil)
 		return nil

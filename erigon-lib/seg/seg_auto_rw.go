@@ -133,6 +133,7 @@ type R interface {
 	HasNext() bool
 	Skip() (uint64, int)
 	FileName() string
+	BinarySearch(seek []byte, count int, getOffset func(i uint64) (offset uint64)) (foundOffset uint64, ok bool)
 }
 
 type PagedReader struct {
@@ -141,7 +142,7 @@ type PagedReader struct {
 	sampling int
 	page     *page.Reader
 
-	pageOffset, nextPageOffset uint64
+	currentPageOffset, nextPageOffset uint64
 }
 
 func NewPagedReader(r R, sampling int, snappy bool) *PagedReader {
@@ -151,9 +152,15 @@ func NewPagedReader(r R, sampling int, snappy bool) *PagedReader {
 	return &PagedReader{file: r, sampling: sampling, snappy: snappy, page: &page.Reader{}}
 }
 
-func (g *PagedReader) Reset(offset uint64) { g.file.Reset(offset) }
-func (g *PagedReader) FileName() string    { return g.file.FileName() }
-func (g *PagedReader) HasNext() bool       { return (g.sampling > 1 && g.page.HasNext()) || g.file.HasNext() }
+func (g *PagedReader) Reset(offset uint64) {
+	g.file.Reset(offset)
+	v, nextPageOffset := g.file.Next(nil)
+	g.page.Reset(v, g.snappy)
+	g.currentPageOffset = offset
+	g.nextPageOffset = nextPageOffset
+}
+func (g *PagedReader) FileName() string { return g.file.FileName() }
+func (g *PagedReader) HasNext() bool    { return (g.sampling > 1 && g.page.HasNext()) || g.file.HasNext() }
 func (g *PagedReader) Next(buf []byte) ([]byte, uint64) {
 	if g.sampling <= 1 {
 		return g.file.Next(buf)
@@ -161,14 +168,18 @@ func (g *PagedReader) Next(buf []byte) ([]byte, uint64) {
 
 	if g.page.HasNext() {
 		_, v := g.page.Next()
-		return v, g.pageOffset
+		if g.page.HasNext() {
+			return v, g.currentPageOffset
+		}
+		return v, g.nextPageOffset
 	}
+	g.currentPageOffset = g.nextPageOffset
 	var pageV []byte
-	pageV, g.pageOffset = g.file.Next(buf)
+	pageV, g.nextPageOffset = g.file.Next(buf)
 	g.page = &page.Reader{}
 	g.page.Reset(common.Copy(pageV), g.snappy)
 	_, v := g.page.Next()
-	return v, g.pageOffset
+	return v, g.currentPageOffset
 }
 func (g *PagedReader) Next2(buf []byte) (k, v []byte, pageOffset uint64) {
 	if g.sampling <= 1 {
@@ -178,17 +189,17 @@ func (g *PagedReader) Next2(buf []byte) (k, v []byte, pageOffset uint64) {
 
 	if g.page.HasNext() {
 		k, v = g.page.Next()
-		return k, v, g.pageOffset
+		return k, v, g.currentPageOffset
 	}
 	// rs.Add(w, offset)
 	// w, offset = g.Next()
 	var pageV []byte
-	g.pageOffset = g.nextPageOffset
+	g.currentPageOffset = g.nextPageOffset
 	pageV, g.nextPageOffset = g.file.Next(buf)
 	g.page = &page.Reader{}
 	g.page.Reset(common.Copy(pageV), g.snappy)
 	k, v = g.page.Next()
-	return k, v, g.pageOffset
+	return k, v, g.currentPageOffset
 }
 func (g *PagedReader) Skip() (uint64, int) {
 	v, offset := g.Next(nil)

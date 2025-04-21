@@ -360,14 +360,13 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	defer hist.EnableReadAhead().DisableReadAhead()
 	defer efHist.EnableReadAhead().DisableReadAhead()
 
-	histReader := seg.NewReader(hist.MakeGetter(), h.compression)
-	efHistReader := seg.NewReader(efHist.MakeGetter(), h.InvertedIndex.compression)
+	iiReader := seg.NewReader(efHist.MakeGetter(), h.InvertedIndex.compression)
 
 	var keyBuf, valBuf []byte
 	cnt := uint64(0)
-	for efHistReader.HasNext() {
-		keyBuf, _ = efHistReader.Next(keyBuf[:0]) // skip key
-		valBuf, _ = efHistReader.Next(valBuf[:0])
+	for iiReader.HasNext() {
+		keyBuf, _ = iiReader.Next(keyBuf[:0]) // skip key
+		valBuf, _ = iiReader.Next(valBuf[:0])
 		cnt += eliasfano32.Count(valBuf)
 		select {
 		case <-ctx.Done():
@@ -375,6 +374,8 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		default:
 		}
 	}
+
+	histReader := seg.NewReader(hist.MakeGetter(), h.compression)
 
 	_, fName := filepath.Split(historyIdxPath)
 	p := ps.AddNew(fName, uint64(hist.Count()))
@@ -398,12 +399,12 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	i := 0
 	for {
 		histReader.Reset(0)
-		efHistReader.Reset(0)
+		iiReader.Reset(0)
 
 		valOffset = 0
-		for efHistReader.HasNext() {
-			keyBuf, _ = efHistReader.Next(nil)
-			valBuf, _ = efHistReader.Next(nil)
+		for iiReader.HasNext() {
+			keyBuf, _ = iiReader.Next(keyBuf[:0])
+			valBuf, _ = iiReader.Next(valBuf[:0])
 
 			// fmt.Printf("ef key %x\n", keyBuf)
 
