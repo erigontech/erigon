@@ -732,6 +732,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 					println("parse error:", err.Error())
 					collectorLock.Lock()
 					defer collectorLock.Unlock()
+					collected = tx
 					collections.Broadcast() // to fail fast on it.
 					return fmt.Errorf("%w, block: %d", err, blockNum)
 				}
