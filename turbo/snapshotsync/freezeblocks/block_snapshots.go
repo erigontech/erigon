@@ -730,6 +730,9 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 
 				if err != nil {
 					println("parse error:", err.Error())
+					collectorLock.Lock()
+					defer collectorLock.Unlock()
+					collections.Broadcast() // to fail fast on it.
 					return fmt.Errorf("%w, block: %d", err, blockNum)
 				}
 				println("parsed", tx)
