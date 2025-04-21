@@ -315,7 +315,7 @@ var (
 							tx, errDecode := types.UnmarshalTransactionFromBinary(word[firstTxByteAndlengthOfAddress:], false)
 							if errDecode != nil {
 								println("UnmarshalTransactionFromBinary err", errDecode.Error())
-								return fmt.Errorf("ParseTransaction: %w, blockNum: %d, i: %d", err, blockNum, ti)
+								return fmt.Errorf("ParseTransaction: %w, blockNum: %d, i: %d", errDecode, blockNum, ti)
 							}
 							slot.IDHash = tx.Hash()
 						}
