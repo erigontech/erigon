@@ -143,9 +143,9 @@ func (c *Writer) Write(word []byte) (n int, err error) {
 	}
 
 	if c.c&fl != 0 {
-		return n, c.Compressor.AddWord(word)
+		return len(word), c.Compressor.AddWord(word)
 	}
-	return n, c.Compressor.AddUncompressedWord(word)
+	return len(word), c.Compressor.AddUncompressedWord(word)
 }
 
 func (c *Writer) ReadFrom(r *Reader) error {
