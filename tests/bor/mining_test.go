@@ -7,7 +7,6 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
@@ -15,20 +14,20 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon-lib/chain/params"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/fdlimit"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fdlimit"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/node"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/tests/bor/helper"
+	"github.com/erigontech/erigon/turbo/testlog"
 )
 
 const (
@@ -60,7 +59,7 @@ func TestMiningBenchmark(t *testing.T) {
 	ctx, clean := context.WithTimeout(context.Background(), time.Minute)
 	defer clean()
 
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StreamHandler(os.Stderr, log.TerminalFormat())))
+	logger := testlog.Logger(t, log.LvlInfo)
 	fdlimit.Raise(2048)
 
 	genesis := helper.InitGenesis("./testdata/genesis_2val.json", 64, networkname.BorE2ETestChain2Val)
@@ -71,7 +70,7 @@ func TestMiningBenchmark(t *testing.T) {
 	var txs []*types.Transaction
 
 	for i := 0; i < 1; i++ {
-		stack, ethBackend, err := helper.InitMiner(ctx, t.TempDir(), &genesis, pkeys[i], true, i)
+		stack, ethBackend, err := helper.InitMiner(ctx, logger, t.TempDir(), &genesis, pkeys[i], true, i)
 		if err != nil {
 			panic(err)
 		}
@@ -136,11 +135,19 @@ func TestMiningBenchmark(t *testing.T) {
 		if err != nil {
 			panic(err)
 		}
+
+		logger.Info(
+			"Number of txs in the pool:",
+			"pending", pendingReply.PendingCount,
+			"base_fee", pendingReply.BaseFeeCount,
+			"queued", pendingReply.QueuedCount,
+		)
+
 		if pendingReply.PendingCount == 0 {
 			break
 		}
 
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	timeToExecute := time.Since(start)

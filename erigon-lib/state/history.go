@@ -28,12 +28,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/compress"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
@@ -76,8 +77,7 @@ type rangeIntegrityChecker func(fromStep, toStep uint64) bool
 type histCfg struct {
 	iiCfg iiCfg
 
-	valuesTable  string // bucket for history values; key1+key2+txnNum -> oldValue , stores values BEFORE change
-	filenameBase string // filename base for all history files
+	valuesTable string // bucket for history values; key1+key2+txnNum -> oldValue , stores values BEFORE change
 
 	keepRecentTxnInDB uint64 // When snapshotsDisabled=true, keepRecentTxnInDB is used to keep this amount of txn in db before pruning
 
@@ -93,6 +93,7 @@ type histCfg struct {
 	//   keys: txNum -> key1+key2
 	//   vals: key1+key2+txNum -> value (not DupSort)
 	historyLargeValues bool
+	compressSingleVal  bool
 	snapshotsDisabled  bool // don't produce .v and .ef files, keep in db table. old data will be pruned anyway.
 	historyDisabled    bool // skip all write operations to this History (even in DB)
 
@@ -107,12 +108,8 @@ type histCfg struct {
 
 func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error) {
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
-	cfg.compressorCfg = seg.DefaultCfg
 	if cfg.indexList == 0 {
 		cfg.indexList = AccessorHashMap
-	}
-	if cfg.iiCfg.filenameBase == "" {
-		cfg.iiCfg.filenameBase = cfg.filenameBase
 	}
 
 	h := History{
@@ -294,9 +291,7 @@ func (h *History) closeWhatNotInList(fNames []string) {
 	}
 }
 
-func (h *History) Tables() []string {
-	return append([]string{h.keysTable, h.valuesTable}, h.InvertedIndex.Tables()...)
-}
+func (h *History) Tables() []string { return append(h.InvertedIndex.Tables(), h.valuesTable) }
 
 func (h *History) Close() {
 	if h == nil {
@@ -306,20 +301,24 @@ func (h *History) Close() {
 	h.closeWhatNotInList([]string{})
 }
 
-func (ht *HistoryRoTx) Files() (res []string) {
+func (ht *HistoryRoTx) Files() (res VisibleFiles) {
 	for _, item := range ht.files {
 		if item.src.decompressor != nil {
-			res = append(res, item.src.decompressor.FileName())
+			res = append(res, item)
 		}
 	}
 	return append(res, ht.iit.Files()...)
 }
 
-func (h *History) missedMapAccessors() (l []*filesItem) {
+func (h *History) MissedMapAccessors() (l []*filesItem) {
+	return h.missedMapAccessors(h.dirtyFiles.Items())
+}
+
+func (h *History) missedMapAccessors(source []*filesItem) (l []*filesItem) {
 	if !h.indexList.Has(AccessorHashMap) {
 		return nil
 	}
-	return fileItemsWithMissingAccessors(h.dirtyFiles, h.aggregationStep, func(fromStep, toStep uint64) []string {
+	return fileItemsWithMissedAccessors(source, h.aggregationStep, func(fromStep, toStep uint64) []string {
 		return []string{
 			h.vAccessorFilePath(fromStep, toStep),
 		}
@@ -430,9 +429,9 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	return historyIdxPath, nil
 }
 
-func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
-	h.InvertedIndex.BuildMissedAccessors(ctx, g, ps)
-	for _, item := range h.missedMapAccessors() {
+func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet, historyFiles *MissedAccessorHistoryFiles) {
+	h.InvertedIndex.BuildMissedAccessors(ctx, g, ps, historyFiles.ii)
+	for _, item := range historyFiles.missedMapAccessors() {
 		item := item
 		g.Go(func() error {
 			return h.buildVi(ctx, item, ps)
@@ -448,6 +447,8 @@ func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte, origin
 	if original == nil {
 		original = []byte{}
 	}
+
+	w.snappyWriteBuffer, original = compress.EncodeSnappyIfNeed(w.snappyWriteBuffer, original, w.compressSingleVal)
 
 	//defer func() {
 	//	fmt.Printf("addPrevValue [%p;tx=%d] '%x' -> '%x'\n", w, w.ii.txNum, key1, original)
@@ -512,6 +513,9 @@ type historyBufferedWriter struct {
 	//   vals: key1+key2+txNum -> value (not DupSort)
 	largeValues bool
 
+	compressSingleVal bool
+	snappyWriteBuffer []byte
+
 	ii *InvertedIndexBufferedWriter
 }
 
@@ -531,10 +535,11 @@ func (ht *HistoryRoTx) newWriter(tmpdir string, discard bool) *historyBufferedWr
 	w := &historyBufferedWriter{
 		discard: discard,
 
-		historyKey:       make([]byte, 128),
-		largeValues:      ht.h.historyLargeValues,
-		historyValsTable: ht.h.valuesTable,
-		historyVals:      etl.NewCollector(ht.h.filenameBase+".flush.hist", tmpdir, etl.NewSortableBuffer(WALCollectorRAM), ht.h.logger).LogLvl(log.LvlTrace),
+		historyKey:        make([]byte, 128),
+		largeValues:       ht.h.historyLargeValues,
+		compressSingleVal: ht.h.compressSingleVal,
+		historyValsTable:  ht.h.valuesTable,
+		historyVals:       etl.NewCollector(ht.h.filenameBase+".flush.hist", tmpdir, etl.NewSortableBuffer(WALCollectorRAM), ht.h.logger).LogLvl(log.LvlTrace),
 
 		ii: ht.iit.newWriter(tmpdir, discard),
 	}
@@ -702,7 +707,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 				if len(val) == 0 {
 					val = nil
 				}
-				if err = historyComp.AddWord(val); err != nil {
+				if _, err = historyComp.Write(val); err != nil {
 					return fmt.Errorf("add %s history val [%x]=>[%x]: %w", h.filenameBase, key, val, err)
 				}
 			} else {
@@ -715,7 +720,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 				} else {
 					val = nil
 				}
-				if err = historyComp.AddWord(val); err != nil {
+				if _, err = historyComp.Write(val); err != nil {
 					return fmt.Errorf("add %s history val [%x]=>[%x]: %w", h.filenameBase, prevKey, val, err)
 				}
 			}
@@ -727,10 +732,10 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 
 		prevEf = ef.AppendBytes(prevEf[:0])
 
-		if err = efHistoryComp.AddWord(prevKey); err != nil {
+		if _, err = efHistoryComp.Write(prevKey); err != nil {
 			return fmt.Errorf("add %s ef history key [%x]: %w", h.filenameBase, prevKey, err)
 		}
-		if err = efHistoryComp.AddWord(prevEf); err != nil {
+		if _, err = efHistoryComp.Write(prevEf); err != nil {
 			return fmt.Errorf("add %s ef history val: %w", h.filenameBase, err)
 		}
 
@@ -952,7 +957,8 @@ type HistoryRoTx struct {
 	valsC    kv.Cursor
 	valsCDup kv.CursorDupSort
 
-	_bufTs []byte
+	_bufTs           []byte
+	snappyReadBuffer []byte
 }
 
 func (h *History) BeginFilesRo() *HistoryRoTx {
@@ -1184,6 +1190,10 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	if traceGetAsOf == ht.h.filenameBase {
 		fmt.Printf("DomainGetAsOf(%s, %x, %d) -> %s, histTxNum=%d, isNil(v)=%t\n", ht.h.filenameBase, key, txNum, g.FileName(), histTxNum, v == nil)
 	}
+	ht.snappyReadBuffer, v, err = compress.DecodeSnappyIfNeed(ht.snappyReadBuffer, v, ht.h.compressSingleVal)
+	if err != nil {
+		return nil, false, err
+	}
 	return v, true, nil
 }
 
@@ -1248,6 +1258,11 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 		if kAndTxNum == nil || !bytes.Equal(kAndTxNum[:len(kAndTxNum)-8], key) {
 			return nil, false, nil
 		}
+
+		ht.snappyReadBuffer, val, err = compress.DecodeSnappyIfNeed(ht.snappyReadBuffer, val, ht.h.compressSingleVal)
+		if err != nil {
+			return nil, false, err
+		}
 		// val == []byte{}, means key was created in this txNum and doesn't exist before.
 		return val, true, nil
 	}
@@ -1263,7 +1278,12 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 		return nil, false, nil
 	}
 	// `val == []byte{}` means key was created in this txNum and doesn't exist before.
-	return val[8:], true, nil
+	v := val[8:]
+	ht.snappyReadBuffer, v, err = compress.DecodeSnappyIfNeed(ht.snappyReadBuffer, v, ht.h.compressSingleVal)
+	if err != nil {
+		return nil, false, err
+	}
+	return v, true, nil
 }
 
 func (ht *HistoryRoTx) RangeAsOf(ctx context.Context, startTxNum uint64, from, to []byte, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
@@ -1302,7 +1322,7 @@ func (ht *HistoryRoTx) RangeAsOf(ctx context.Context, startTxNum uint64, from, t
 }
 
 func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By, limit int) (stream.KV, error) {
-	if asc == false {
+	if asc == order.Desc {
 		panic("not supported yet")
 	}
 	if len(ht.iit.files) == 0 {

@@ -185,7 +185,7 @@ func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges
 	return r
 }
 
-// 0-1,1-2,2-3,3-4: allow merge 0-1
+// 0-1,1-2,2-3,3-4: allow merge 0-4
 // 0-2,2-3,3-4: allow merge 0-4
 // 0-2,2-4: allow merge 0-4
 //
@@ -490,10 +490,10 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 						}
 					}
 				}
-				if err = kvWriter.AddWord(keyBuf); err != nil {
+				if _, err = kvWriter.Write(keyBuf); err != nil {
 					return nil, nil, nil, err
 				}
-				if err = kvWriter.AddWord(valBuf); err != nil {
+				if _, err = kvWriter.Write(valBuf); err != nil {
 					return nil, nil, nil, err
 				}
 			}
@@ -511,10 +511,10 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 				}
 			}
 		}
-		if err = kvWriter.AddWord(keyBuf); err != nil {
+		if _, err = kvWriter.Write(keyBuf); err != nil {
 			return nil, nil, nil, err
 		}
-		if err = kvWriter.AddWord(valBuf); err != nil {
+		if _, err = kvWriter.Write(valBuf); err != nil {
 			return nil, nil, nil, err
 		}
 	}
@@ -531,8 +531,8 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 	}
 
-	if dt.d.AccessorList&AccessorBTree != 0 {
-		btPath := dt.d.kvBtFilePath(fromStep, toStep)
+	if dt.d.AccessorList.Has(AccessorBTree) {
+		btPath := dt.d.kvBtAccessorFilePath(fromStep, toStep)
 		btM := DefaultBtreeM
 		if toStep == 0 && dt.d.filenameBase == "commitment" {
 			btM = 128
@@ -542,16 +542,16 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
 	}
-	if dt.d.AccessorList&AccessorHashMap != 0 {
-		if err = dt.d.buildAccessor(ctx, fromStep, toStep, valuesIn.decompressor, ps); err != nil {
-			return nil, nil, nil, fmt.Errorf("merge %s buildAccessor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
+	if dt.d.AccessorList.Has(AccessorHashMap) {
+		if err = dt.d.buildHashMapAccessor(ctx, fromStep, toStep, valuesIn.decompressor, ps); err != nil {
+			return nil, nil, nil, fmt.Errorf("merge %s buildHashMapAccessor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
-		if valuesIn.index, err = recsplit.OpenIndex(dt.d.kvAccessorFilePath(fromStep, toStep)); err != nil {
-			return nil, nil, nil, fmt.Errorf("merge %s buildAccessor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
+		if valuesIn.index, err = recsplit.OpenIndex(dt.d.kviAccessorFilePath(fromStep, toStep)); err != nil {
+			return nil, nil, nil, fmt.Errorf("merge %s buildHashMapAccessor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
 	}
 
-	if dt.d.AccessorList&AccessorExistence != 0 {
+	if dt.d.AccessorList.Has(AccessorExistence) {
 		bloomIndexPath := dt.d.kvExistenceIdxFilePath(fromStep, toStep)
 		exists, err := dir.FileExist(bloomIndexPath)
 		if err != nil {
@@ -660,10 +660,10 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 		}
 		if keyBuf != nil {
 			// fmt.Printf("pput %x->%x\n", keyBuf, valBuf)
-			if err = write.AddWord(keyBuf); err != nil {
+			if _, err = write.Write(keyBuf); err != nil {
 				return nil, err
 			}
-			if err = write.AddWord(valBuf); err != nil {
+			if _, err = write.Write(valBuf); err != nil {
 				return nil, err
 			}
 		}
@@ -675,10 +675,10 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 	}
 	if keyBuf != nil {
 		// fmt.Printf("put %x->%x\n", keyBuf, valBuf)
-		if err = write.AddWord(keyBuf); err != nil {
+		if _, err = write.Write(keyBuf); err != nil {
 			return nil, err
 		}
-		if err = write.AddWord(valBuf); err != nil {
+		if _, err = write.Write(valBuf); err != nil {
 			return nil, err
 		}
 	}
@@ -695,7 +695,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 	ps.Delete(p)
 
 	if err := iit.ii.buildMapAccessor(ctx, fromStep, toStep, outItem.decompressor, ps); err != nil {
-		return nil, fmt.Errorf("merge %s buildAccessor [%d-%d]: %w", iit.ii.filenameBase, startTxNum, endTxNum, err)
+		return nil, fmt.Errorf("merge %s buildHashMapAccessor [%d-%d]: %w", iit.ii.filenameBase, startTxNum, endTxNum, err)
 	}
 	if outItem.index, err = recsplit.OpenIndex(iit.ii.efAccessorFilePath(fromStep, toStep)); err != nil {
 		return nil, err
@@ -814,7 +814,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 					}
 
 					valBuf, _ = ci1.dg2.Next(valBuf[:0])
-					if err = compr.AddWord(valBuf); err != nil {
+					if _, err = compr.Write(valBuf); err != nil {
 						return nil, nil, err
 					}
 				}
@@ -1034,17 +1034,16 @@ func (dt *DomainRoTx) garbage(merged *filesItem) (outs []*filesItem) {
 		return
 	}
 	// `kill -9` may leave some garbage
-	// AggContext doesn't have such files, only Agg.files does
+	// AggRoTx doesn't have such files, only Agg.files does
 	dt.d.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.frozen {
 				continue
 			}
-			if item.isSubsetOf(merged) {
+			if item.isProperSubsetOf(merged) {
 				if dt.d.restrictSubsetFileDeletions {
 					continue
 				}
-				fmt.Printf("garbage: %s is subset of %s", item.decompressor.FileName(), merged.decompressor.FileName())
 				outs = append(outs, item)
 			}
 			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainRoTx`)
@@ -1071,15 +1070,17 @@ func garbage(dirtyFiles *btree.BTreeG[*filesItem], visibleFiles []visibleFile, m
 		return
 	}
 	// `kill -9` may leave some garbage
-	// AggContext doesn't have such files, only Agg.files does
+	// AggRotx doesn't have such files, only Agg.files does
 	dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.frozen {
 				continue
 			}
-			if item.isSubsetOf(merged) {
+			if item.isProperSubsetOf(merged) {
 				outs = append(outs, item)
 			}
+			// this case happens when in previous process run, the merged file was created,
+			// but the processed ended before subsumed files could be deleted.
 			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainRoTx`)
 			if item.isBefore(merged) && hasCoverVisibleFile(visibleFiles, item) {
 				outs = append(outs, item)
@@ -1091,7 +1092,7 @@ func garbage(dirtyFiles *btree.BTreeG[*filesItem], visibleFiles []visibleFile, m
 }
 func hasCoverVisibleFile(visibleFiles []visibleFile, item *filesItem) bool {
 	for _, f := range visibleFiles {
-		if item.isSubsetOf(f.src) {
+		if item.isProperSubsetOf(f.src) {
 			return true
 		}
 	}

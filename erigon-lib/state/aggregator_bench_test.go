@@ -114,17 +114,6 @@ func queueKeys(ctx context.Context, seed, ofSize uint64) <-chan []byte {
 	return keys
 }
 
-func Benchmark_BtreeIndex_Allocation(b *testing.B) {
-	rnd := newRnd(uint64(time.Now().UnixNano()))
-	for i := 0; i < b.N; i++ {
-		now := time.Now()
-		count := rnd.IntN(1000000000)
-		bt := newBtAlloc(uint64(count), uint64(1<<12), true, nil, nil)
-		bt.traverseDfs()
-		fmt.Printf("alloc %v\n", time.Since(now))
-	}
-}
-
 func Benchmark_BtreeIndex_Search(b *testing.B) {
 	logger := log.New()
 	rnd := newRnd(uint64(time.Now().UnixNano()))

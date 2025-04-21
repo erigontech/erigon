@@ -37,6 +37,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
@@ -438,22 +439,6 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 		return err
 	}
 
-	// remove auths from pool map
-	for _, mt := range minedTxns.Txns {
-		if mt.Type == SetCodeTxnType {
-			numAuths := len(mt.AuthRaw)
-			for i := range numAuths {
-				signature := mt.Authorizations[i]
-				signer, err := types.RecoverSignerFromRLP(mt.AuthRaw[i], uint8(signature.V.Uint64()), signature.R, signature.S)
-				if err != nil {
-					continue
-				}
-
-				delete(p.auths, *signer)
-			}
-		}
-	}
-
 	var announcements Announcements
 	announcements, err = p.addTxnsOnNewBlock(block, cacheView, stateChanges, p.senders, unwindTxns, /* newTxns */
 		pendingBaseFee, stateChanges.BlockGasLimit, p.logger)
@@ -798,7 +783,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 	defer tx.Rollback()
 	for ; count < n && i < len(best.ms); i++ {
 		// if we wouldn't have enough gas for a standard transaction then quit out early
-		if availableGas < fixedgas.TxGas {
+		if availableGas < params.TxGas {
 			break
 		}
 
@@ -824,16 +809,16 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 
 		// Skip transactions that require more blob gas than is available
 		blobCount := uint64(len(mt.TxnSlot.BlobHashes))
-		if blobCount*fixedgas.BlobGasPerBlob > availableBlobGas {
+		if blobCount*params.BlobGasPerBlob > availableBlobGas {
 			continue
 		}
-		availableBlobGas -= blobCount * fixedgas.BlobGasPerBlob
+		availableBlobGas -= blobCount * params.BlobGasPerBlob
 
 		// make sure we have enough gas in the caller to add this transaction.
 		// not an exact science using intrinsic gas but as close as we could hope for at
 		// this stage
 		isAATxn := mt.TxnSlot.Type == types.AccountAbstractionTxType
-		authorizationLen := uint64(len(mt.TxnSlot.Authorizations))
+		authorizationLen := uint64(len(mt.TxnSlot.Authorities))
 		intrinsicGas, floorGas, _ := fixedgas.CalcIntrinsicGas(uint64(mt.TxnSlot.DataLen), uint64(mt.TxnSlot.DataNonZeroLen), authorizationLen, uint64(mt.TxnSlot.AccessListAddrCount), uint64(mt.TxnSlot.AccessListStorCount), mt.TxnSlot.Creation, true, true, isShanghai, isPrague, isAATxn)
 		if isPrague && floorGas > intrinsicGas {
 			intrinsicGas = floorGas
@@ -947,7 +932,7 @@ func toBlobs(_blobs [][]byte) []gokzg4844.BlobRef {
 
 func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView) txpoolcfg.DiscardReason {
 	isShanghai := p.isShanghai() || p.isAgra()
-	if isShanghai && txn.Creation && txn.DataLen > fixedgas.MaxInitCodeSize {
+	if isShanghai && txn.Creation && txn.DataLen > params.MaxInitCodeSize {
 		return txpoolcfg.InitCodeTooLarge // EIP-3860
 	}
 	if txn.Type == BlobTxnType {
@@ -1038,7 +1023,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 	}
 
-	authorizationLen := len(txn.Authorizations)
+	authorizationLen := len(txn.Authorities)
 	if txn.Type == SetCodeTxnType {
 		if !p.isPrague() {
 			return txpoolcfg.TypeNotActivated
@@ -1197,7 +1182,7 @@ func requiredBalance(txn *TxnSlot) *uint256.Int {
 	// and https://eips.ethereum.org/EIPS/eip-4844#gas-accounting
 	blobCount := uint64(len(txn.BlobHashes))
 	if blobCount != 0 {
-		maxBlobGasCost := uint256.NewInt(fixedgas.BlobGasPerBlob)
+		maxBlobGasCost := uint256.NewInt(params.BlobGasPerBlob)
 		maxBlobGasCost.Mul(maxBlobGasCost, uint256.NewInt(blobCount))
 		_, overflow = maxBlobGasCost.MulOverflow(maxBlobGasCost, &txn.BlobFeeCap)
 		if overflow {
@@ -1704,31 +1689,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		return txpoolcfg.FeeTooLow
 	}
 
-	// Check if we have txn with same authorization in the pool
-	if mt.TxnSlot.Type == SetCodeTxnType {
-		numAuths := len(mt.TxnSlot.AuthRaw)
-		foundDuplicate := false
-		for i := range numAuths {
-			signature := mt.TxnSlot.Authorizations[i]
-			signer, err := types.RecoverSignerFromRLP(mt.TxnSlot.AuthRaw[i], uint8(signature.V.Uint64()), signature.R, signature.S)
-			if err != nil {
-				continue
-			}
-
-			if _, ok := p.auths[*signer]; ok {
-				foundDuplicate = true
-				break
-			}
-
-			p.auths[*signer] = mt
-		}
-
-		if foundDuplicate {
-			return txpoolcfg.ErrAuthorityReserved
-		}
-	}
-
-	// Do not allow transaction from reserved authority
+	// Do not allow transaction from if sender has authority
 	addr, ok := p.senders.getAddr(mt.TxnSlot.SenderID)
 	if !ok {
 		p.logger.Info("senderID not registered, discarding transaction for safety")
@@ -1736,6 +1697,27 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 	}
 	if _, ok := p.auths[addr]; ok {
 		return txpoolcfg.ErrAuthorityReserved
+	}
+
+	// Check if we have txn with same authorization in the pool
+	if mt.TxnSlot.Type == SetCodeTxnType {
+		foundDuplicate := false
+		for _, a := range mt.TxnSlot.Authorities {
+			p.logger.Debug("setCodeTxn ", "authority", a.String())
+			if _, ok := p.auths[*a]; ok {
+				foundDuplicate = true
+				p.logger.Debug("setCodeTxn ", "DUPLICATE authority", a.String(), "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
+				break
+			}
+		}
+
+		if foundDuplicate {
+			return txpoolcfg.ErrAuthorityReserved
+		} else {
+			for _, a := range mt.TxnSlot.Authorities {
+				p.auths[*a] = mt
+			}
+		}
 	}
 
 	hashStr := string(mt.TxnSlot.IDHash[:])
@@ -1787,15 +1769,8 @@ func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
 		p.totalBlobsInPool.Store(t - uint64(len(mt.TxnSlot.BlobHashes)))
 	}
 	if mt.TxnSlot.Type == SetCodeTxnType {
-		numAuths := len(mt.TxnSlot.AuthRaw)
-		for i := range numAuths {
-			signature := mt.TxnSlot.Authorizations[i]
-			signer, err := types.RecoverSignerFromRLP(mt.TxnSlot.AuthRaw[i], uint8(signature.V.Uint64()), signature.R, signature.S)
-			if err != nil {
-				continue
-			}
-
-			delete(p.auths, *signer)
+		for _, a := range mt.TxnSlot.Authorities {
+			delete(p.auths, *a)
 		}
 	}
 }

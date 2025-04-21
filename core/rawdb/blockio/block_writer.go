@@ -102,10 +102,7 @@ func (w *BlockWriter) TruncateBodies(db kv.RoDB, tx kv.RwTx, from uint64) error 
 		return err
 	}
 
-	if err := backup.ClearTables(context.Background(), db, tx,
-		kv.EthTx,
-		kv.MaxTxNum,
-	); err != nil {
+	if err := backup.ClearTables(context.Background(), tx, kv.EthTx, kv.MaxTxNum); err != nil {
 		return err
 	}
 	if err := tx.ResetSequence(kv.EthTx, 0); err != nil {

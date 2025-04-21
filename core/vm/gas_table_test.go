@@ -41,12 +41,11 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	state3 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
-	"github.com/erigontech/erigon/core/vm"
-
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 func TestMemoryGasCost(t *testing.T) {
@@ -194,13 +193,12 @@ func TestCreateGas(t *testing.T) {
 
 		var stateReader state.StateReader
 		var stateWriter state.StateWriter
-		var txc wrap.TxContainer
-		txc.Tx = tx
+		txc := wrap.NewTxContainer(tx, nil)
 
 		eface := *(*[2]uintptr)(unsafe.Pointer(&tx))
 		fmt.Printf("init tx %x\n", eface[1])
 
-		domains, err := state3.NewSharedDomains(txc.Tx, log.New())
+		domains, err := state3.NewSharedDomains(txc.Tx.(kv.TemporalTx), log.New())
 		require.NoError(t, err)
 		defer domains.Close()
 		txc.Doms = domains

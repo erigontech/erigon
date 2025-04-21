@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io/fs"
-	"math/big"
 	"math/rand"
 	"os"
 	"path"
@@ -44,10 +43,8 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/erigontech/erigon/core"
 	reset2 "github.com/erigontech/erigon/core/rawdb/rawdbreset"
 	state2 "github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/params"
 )
 
@@ -103,7 +100,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	domCtx := agg.BeginFilesRo()
 	defer domCtx.Close()
 
-	domains, err := state.NewSharedDomains(tx, log.New())
+	domains, err := state.NewSharedDomains(tx.(kv.TemporalTx), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	domains.SetTxNum(0)
@@ -215,7 +212,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	require.NoError(t, err)
 	domCtx = agg.BeginFilesRo()
 	defer domCtx.Close()
-	domains, err = state.NewSharedDomains(tx, log.New())
+	domains, err = state.NewSharedDomains(tx.(kv.TemporalTx), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -249,7 +246,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	defer tx.Rollback()
 	domCtx = agg.BeginFilesRo()
 	defer domCtx.Close()
-	domains, err = state.NewSharedDomains(tx, log.New())
+	domains, err = state.NewSharedDomains(tx.(kv.TemporalTx), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	writer = state2.NewWriterV4(domains)
@@ -309,7 +306,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	domCtx := agg.BeginFilesRo()
 	defer domCtx.Close()
 
-	domains, err := state.NewSharedDomains(tx, log.New())
+	domains, err := state.NewSharedDomains(tx.(kv.TemporalTx), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	domains.SetTxNum(0)
@@ -399,7 +396,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 
 	domCtx = agg.BeginFilesRo()
 	defer domCtx.Close()
-	domains, err = state.NewSharedDomains(tx, log.New())
+	domains, err = state.NewSharedDomains(tx.(kv.TemporalTx), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -419,7 +416,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	defer tx.Rollback()
 	domCtx = agg.BeginFilesRo()
 	defer domCtx.Close()
-	domains, err = state.NewSharedDomains(tx, log.New())
+	domains, err = state.NewSharedDomains(tx.(kv.TemporalTx), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -478,15 +475,11 @@ func TestCommit(t *testing.T) {
 	db, agg, _ := testDbAndAggregatorv3(t, "", aggStep)
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
-	defer func() {
-		if tx != nil {
-			tx.Rollback()
-		}
-	}()
+	defer tx.Rollback()
 
 	domCtx := agg.BeginFilesRo()
 	defer domCtx.Close()
-	domains, err := state.NewSharedDomains(tx, log.New())
+	domains, err := state.NewSharedDomains(tx.(kv.TemporalTx), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -512,16 +505,12 @@ func TestCommit(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	domains.SetTrace(true)
+	domains.SetTrace(false)
 	domainsHash, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
 	require.NoError(t, err)
 	err = domains.Flush(ctx, tx)
 	require.NoError(t, err)
 
-	core.GenerateTrace = true
-	oldHash, err := core.CalcHashRootForTests(tx, &types.Header{Number: big.NewInt(1)}, true, true)
-	require.NoError(t, err)
+	require.Equal(t, libcommon.BytesToHash(libcommon.FromHex("0xfe81cd91357cd915cae7c02b5a4771e903c16b29dec582818076954be3741030")), libcommon.BytesToHash(domainsHash))
 
-	t.Logf("old hash %x\n", oldHash)
-	require.EqualValues(t, oldHash, libcommon.BytesToHash(domainsHash))
 }
