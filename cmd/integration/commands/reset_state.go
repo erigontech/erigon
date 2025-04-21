@@ -25,6 +25,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/erigontech/erigon-lib/kv/backup"
+	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/spf13/cobra"
@@ -39,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/core/rawdb/rawdbhelpers"
 	reset2 "github.com/erigontech/erigon/core/rawdb/rawdbreset"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/turbo/debug"
 )
 
@@ -104,7 +104,7 @@ var cmdClearBadBlocks = &cobra.Command{
 		defer db.Close()
 
 		return db.Update(ctx, func(tx kv.RwTx) error {
-			return backup.ClearTable(ctx, db, tx, "BadHeaderNumber")
+			return backup.ClearTables(ctx, tx, kv.BadHeaderNumber)
 		})
 	},
 }

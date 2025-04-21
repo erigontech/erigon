@@ -31,6 +31,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -79,6 +80,10 @@ type DomainRanges struct {
 	values  MergeRange
 	history HistoryRanges
 	aggStep uint64
+}
+
+func NewDomainRanges(name kv.Domain, values MergeRange, history HistoryRanges, aggStep uint64) DomainRanges {
+	return DomainRanges{name: name, values: values, history: history, aggStep: aggStep}
 }
 
 func (r DomainRanges) String() string {
@@ -180,7 +185,7 @@ func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges
 	return r
 }
 
-// 0-1,1-2,2-3,3-4: allow merge 0-1
+// 0-1,1-2,2-3,3-4: allow merge 0-4
 // 0-2,2-3,3-4: allow merge 0-4
 // 0-2,2-4: allow merge 0-4
 //
@@ -217,6 +222,10 @@ func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Merge
 type HistoryRanges struct {
 	history MergeRange
 	index   MergeRange
+}
+
+func NewHistoryRanges(history MergeRange, index MergeRange) HistoryRanges {
+	return HistoryRanges{history: history, index: index}
 }
 
 func (r HistoryRanges) String(aggStep uint64) string {
@@ -370,6 +379,13 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	if !r.any() {
 		return
 	}
+	defer func() {
+		// Merge is background operation. It must not crush application.
+		// Convert panic to error.
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("[snapshots] background mergeFiles: domain=%s, %s, %s, %s", dt.name, r.String(), rec, dbg.Stack())
+		}
+	}()
 
 	closeFiles := true
 	var kvWriter *seg.Writer
@@ -515,8 +531,8 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 	}
 
-	if dt.d.AccessorList&AccessorBTree != 0 {
-		btPath := dt.d.kvBtFilePath(fromStep, toStep)
+	if dt.d.AccessorList.Has(AccessorBTree) {
+		btPath := dt.d.kvBtAccessorFilePath(fromStep, toStep)
 		btM := DefaultBtreeM
 		if toStep == 0 && dt.d.filenameBase == "commitment" {
 			btM = 128
@@ -526,16 +542,16 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
 	}
-	if dt.d.AccessorList&AccessorHashMap != 0 {
-		if err = dt.d.buildAccessor(ctx, fromStep, toStep, valuesIn.decompressor, ps); err != nil {
-			return nil, nil, nil, fmt.Errorf("merge %s buildAccessor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
+	if dt.d.AccessorList.Has(AccessorHashMap) {
+		if err = dt.d.buildHashMapAccessor(ctx, fromStep, toStep, valuesIn.decompressor, ps); err != nil {
+			return nil, nil, nil, fmt.Errorf("merge %s buildHashMapAccessor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
-		if valuesIn.index, err = recsplit.OpenIndex(dt.d.kvAccessorFilePath(fromStep, toStep)); err != nil {
-			return nil, nil, nil, fmt.Errorf("merge %s buildAccessor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
+		if valuesIn.index, err = recsplit.OpenIndex(dt.d.kviAccessorFilePath(fromStep, toStep)); err != nil {
+			return nil, nil, nil, fmt.Errorf("merge %s buildHashMapAccessor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
 	}
 
-	if dt.d.AccessorList&AccessorExistence != 0 {
+	if dt.d.AccessorList.Has(AccessorExistence) {
 		bloomIndexPath := dt.d.kvExistenceIdxFilePath(fromStep, toStep)
 		exists, err := dir.FileExist(bloomIndexPath)
 		if err != nil {
@@ -679,7 +695,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 	ps.Delete(p)
 
 	if err := iit.ii.buildMapAccessor(ctx, fromStep, toStep, outItem.decompressor, ps); err != nil {
-		return nil, fmt.Errorf("merge %s buildAccessor [%d-%d]: %w", iit.ii.filenameBase, startTxNum, endTxNum, err)
+		return nil, fmt.Errorf("merge %s buildHashMapAccessor [%d-%d]: %w", iit.ii.filenameBase, startTxNum, endTxNum, err)
 	}
 	if outItem.index, err = recsplit.OpenIndex(iit.ii.efAccessorFilePath(fromStep, toStep)); err != nil {
 		return nil, err
@@ -701,6 +717,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 			}
 		}
 	}()
+
 	if indexIn, err = ht.iit.mergeFiles(ctx, indexFiles, r.index.from, r.index.to, ps); err != nil {
 		return nil, nil, err
 	}
@@ -1017,17 +1034,16 @@ func (dt *DomainRoTx) garbage(merged *filesItem) (outs []*filesItem) {
 		return
 	}
 	// `kill -9` may leave some garbage
-	// AggContext doesn't have such files, only Agg.files does
+	// AggRoTx doesn't have such files, only Agg.files does
 	dt.d.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.frozen {
 				continue
 			}
-			if item.isSubsetOf(merged) {
+			if item.isProperSubsetOf(merged) {
 				if dt.d.restrictSubsetFileDeletions {
 					continue
 				}
-				fmt.Printf("garbage: %s is subset of %s", item.decompressor.FileName(), merged.decompressor.FileName())
 				outs = append(outs, item)
 			}
 			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainRoTx`)
@@ -1054,15 +1070,17 @@ func garbage(dirtyFiles *btree.BTreeG[*filesItem], visibleFiles []visibleFile, m
 		return
 	}
 	// `kill -9` may leave some garbage
-	// AggContext doesn't have such files, only Agg.files does
+	// AggRotx doesn't have such files, only Agg.files does
 	dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.frozen {
 				continue
 			}
-			if item.isSubsetOf(merged) {
+			if item.isProperSubsetOf(merged) {
 				outs = append(outs, item)
 			}
+			// this case happens when in previous process run, the merged file was created,
+			// but the processed ended before subsumed files could be deleted.
 			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainRoTx`)
 			if item.isBefore(merged) && hasCoverVisibleFile(visibleFiles, item) {
 				outs = append(outs, item)
@@ -1074,17 +1092,17 @@ func garbage(dirtyFiles *btree.BTreeG[*filesItem], visibleFiles []visibleFile, m
 }
 func hasCoverVisibleFile(visibleFiles []visibleFile, item *filesItem) bool {
 	for _, f := range visibleFiles {
-		if item.isSubsetOf(f.src) {
+		if item.isProperSubsetOf(f.src) {
 			return true
 		}
 	}
 	return false
 }
 
-func (ac *AggregatorRoTx) DbgDomain(idx kv.Domain) *DomainRoTx         { return ac.d[idx] }
-func (ac *AggregatorRoTx) DbgII(idx kv.InvertedIdx) *InvertedIndexRoTx { return ac.searchII(idx) }
-func (ac *AggregatorRoTx) searchII(idx kv.InvertedIdx) *InvertedIndexRoTx {
-	for _, iit := range ac.iis {
+func (at *AggregatorRoTx) DbgDomain(idx kv.Domain) *DomainRoTx         { return at.d[idx] }
+func (at *AggregatorRoTx) DbgII(idx kv.InvertedIdx) *InvertedIndexRoTx { return at.searchII(idx) }
+func (at *AggregatorRoTx) searchII(idx kv.InvertedIdx) *InvertedIndexRoTx {
+	for _, iit := range at.iis {
 		if iit.name == idx {
 			return iit
 		}

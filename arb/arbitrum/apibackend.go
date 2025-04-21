@@ -17,7 +17,6 @@ import (
 	"github.com/erigontech/erigon-lib/metrics"
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/arb/arbitrum_types"
-	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/bloombits"
 	"github.com/erigontech/erigon/core/state"
@@ -27,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/eth/filters"
 	"github.com/erigontech/erigon/event"
+	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/services"
 )

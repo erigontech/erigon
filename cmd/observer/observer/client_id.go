@@ -117,7 +117,7 @@ func clientNameBlacklist() []string {
 		"qk_node",
 
 		// Quai/v1.10.10-unstable-b1b52e79-20220226/linux-amd64/go1.17.7
-		// https://quai.network
+		// https://www.qu.ai
 		"Quai",
 
 		// REOSC/v2.2.4-unstable-6bcba06-20190321/x86_64-linux-gnu/rustc1.37.0

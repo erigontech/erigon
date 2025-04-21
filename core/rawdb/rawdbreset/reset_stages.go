@@ -132,6 +132,7 @@ func ResetPolygonSync(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services
 		kv.BorEventNums,
 		kv.BorEvents,
 		kv.BorSpans,
+		kv.BorEventTimes,
 		kv.BorEventProcessedBlocks,
 		kv.BorMilestones,
 		kv.BorCheckpoints,
@@ -152,7 +153,7 @@ func ResetPolygonSync(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services
 }
 
 func ResetSenders(ctx context.Context, db kv.RwDB, tx kv.RwTx) error {
-	if err := backup.ClearTables(ctx, db, tx, kv.Senders); err != nil {
+	if err := backup.ClearTables(ctx, tx, kv.Senders); err != nil {
 		return nil
 	}
 	return clearStageProgress(tx, stages.Senders)
@@ -170,7 +171,7 @@ func ResetExec(ctx context.Context, db kv.RwDB, agg *state.Aggregator, chain str
 			return err
 		}
 
-		if err := backup.ClearTables(ctx, db, tx, cleanupList...); err != nil {
+		if err := backup.ClearTables(ctx, tx, cleanupList...); err != nil {
 			return nil
 		}
 		// corner case: state files may be ahead of block files - so, can't use SharedDomains here. juts leave progress as 0.
@@ -199,7 +200,8 @@ var Tables = map[stages.SyncStage][]string{
 }
 var stateBuckets = []string{
 	kv.Epoch, kv.PendingEpoch, kv.Code,
-	kv.PlainContractCode, kv.ContractCode, kv.IncarnationMap,
+	kv.PlainContractCode, kv.IncarnationMap,
+	kv.ReceiptsCache,
 }
 var stateHistoryBuckets = []string{
 	kv.TblPruningProgress,
@@ -221,7 +223,7 @@ func clearStageProgress(tx kv.RwTx, stagesList ...stages.SyncStage) error {
 func Reset(ctx context.Context, db kv.RwDB, stagesList ...stages.SyncStage) error {
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		for _, st := range stagesList {
-			if err := backup.ClearTables(ctx, db, tx, Tables[st]...); err != nil {
+			if err := backup.ClearTables(ctx, tx, Tables[st]...); err != nil {
 				return err
 			}
 			if err := clearStageProgress(tx, stagesList...); err != nil {
@@ -230,19 +232,4 @@ func Reset(ctx context.Context, db kv.RwDB, stagesList ...stages.SyncStage) erro
 		}
 		return nil
 	})
-}
-
-func ResetPruneAt(ctx context.Context, db kv.RwDB, stage stages.SyncStage) error {
-	return db.Update(ctx, func(tx kv.RwTx) error {
-		return stages.SaveStagePruneProgress(tx, stage, 0)
-	})
-}
-
-func Warmup(ctx context.Context, db kv.RwDB, lvl log.Lvl, stList ...stages.SyncStage) error {
-	for _, st := range stList {
-		for _, tbl := range Tables[st] {
-			backup.WarmupTable(ctx, db, tbl, lvl, backup.ReadAheadThreads)
-		}
-	}
-	return nil
 }

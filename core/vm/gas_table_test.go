@@ -41,12 +41,11 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	state3 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
-	"github.com/erigontech/erigon/core/vm"
-
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 func TestMemoryGasCost(t *testing.T) {
@@ -104,7 +103,7 @@ func testTemporalDB(t *testing.T) *temporal.DB {
 
 	t.Cleanup(db.Close)
 
-	agg, err := state3.NewAggregator2(context.Background(), datadir.New(t.TempDir()), 16, db, log.New())
+	agg, err := state3.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, log.New())
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 

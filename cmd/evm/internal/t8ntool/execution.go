@@ -30,12 +30,11 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
 	state3 "github.com/erigontech/erigon-lib/state"
-
-	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/execution/consensus/ethash"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 type Prestate struct {
@@ -81,7 +80,7 @@ type stEnvMarshaling struct {
 	BaseFee          *math.HexOrDecimal256
 }
 
-func MakePreState(chainRules *chain.Rules, tx kv.RwTx, sd *state3.SharedDomains, accounts types.GenesisAlloc) (state.StateReader, state.WriterWithChangeSets) {
+func MakePreState(chainRules *chain.Rules, tx kv.RwTx, sd *state3.SharedDomains, accounts types.GenesisAlloc) (state.StateReader, state.StateWriter) {
 	var blockNr uint64 = 0
 
 	stateReader, stateWriter := rpchelper.NewLatestStateReader(tx), state.NewWriterV4(sd)

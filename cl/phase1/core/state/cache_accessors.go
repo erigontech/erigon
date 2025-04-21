@@ -31,11 +31,11 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/erigontech/erigon/cl/utils/threading"
 
-	"github.com/Giulio2002/bls"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/bls"
 )
 
 // these are view functions for the beacon state cache
@@ -416,7 +416,8 @@ func (b *CachingBeaconState) GetAttestingIndicies(
 		}
 		for i, member := range committee {
 			if i >= aggrBitsLen {
-				return nil, errors.New("GetAttestingIndicies: committee is too big")
+				return nil, fmt.Errorf("GetAttestingIndicies: committee is too big, slot: %d, committeeIndex: %d, aggrBitsLen: %d, committeeSize: %d",
+					slot, committeeIndex, aggrBitsLen, len(committee))
 			}
 			if aggregationBits.GetBitAt(committeeOffset + i) {
 				attesters = append(attesters, member)

@@ -37,12 +37,9 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/urfave/cli/v2"
-
-	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon/polygon/bridge"
-
 	"golang.org/x/sync/semaphore"
 
+	"github.com/erigontech/erigon-lib/common/compress"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -59,6 +56,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -71,7 +69,9 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/integrity"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
 	"github.com/erigontech/erigon/turbo/debug"
@@ -95,7 +95,7 @@ var snapshotCommand = cli.Command{
 	Before: func(cliCtx *cli.Context) error {
 		go mem.LogMemStats(cliCtx.Context, log.New())
 		go disk.UpdateDiskStats(cliCtx.Context, log.New())
-		_, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+		_, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 		if err != nil {
 			return err
 		}
@@ -147,8 +147,6 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&SnapshotFromFlag,
-				&SnapshotToFlag,
-				&SnapshotEveryFlag,
 			}),
 		},
 		{
@@ -289,16 +287,6 @@ var (
 		Usage: "From block number",
 		Value: 0,
 	}
-	SnapshotToFlag = cli.Uint64Flag{
-		Name:  "to",
-		Usage: "To block number. Zero - means unlimited.",
-		Value: 0,
-	}
-	SnapshotEveryFlag = cli.Uint64Flag{
-		Name:  "every",
-		Usage: "Do operation every N blocks",
-		Value: 1_000,
-	}
 	SnapshotRebuildFlag = cli.BoolFlag{
 		Name:  "rebuild",
 		Usage: "Force rebuild",
@@ -424,7 +412,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 }
 
 func doBtSearch(cliCtx *cli.Context) error {
-	logger, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
 	if err != nil {
 		return err
 	}
@@ -469,7 +457,7 @@ func doBtSearch(cliCtx *cli.Context) error {
 }
 
 func doDebugKey(cliCtx *cli.Context) error {
-	logger, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
 	if err != nil {
 		return err
 	}
@@ -520,7 +508,7 @@ func doDebugKey(cliCtx *cli.Context) error {
 }
 
 func doIntegrity(cliCtx *cli.Context) error {
-	logger, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
 	if err != nil {
 		return err
 	}
@@ -572,11 +560,11 @@ func doIntegrity(cliCtx *cli.Context) error {
 				return err
 			}
 		case integrity.InvertedIndex:
-			if err := integrity.E3EfFiles(ctx, db, agg, failFast, fromStep); err != nil {
+			if err := integrity.E3EfFiles(ctx, db, failFast, fromStep); err != nil {
 				return err
 			}
 		case integrity.HistoryNoSystemTxs:
-			if err := integrity.E3HistoryNoSystemTxs(ctx, db, blockReader, agg); err != nil {
+			if err := integrity.HistoryCheckNoSystemTxs(ctx, db, blockReader); err != nil {
 				return err
 			}
 		case integrity.BorEvents:
@@ -661,14 +649,26 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	if sum != maxTo {
 		return fmt.Errorf("sum %d != maxTo %d", sum, maxTo)
 	}
-	if err := doBlockSnapshotsRangeCheck(snapDir, "headers"); err != nil {
+	if err := doBlockSnapshotsRangeCheck(snapDir, ".seg", "headers"); err != nil {
 		return err
 	}
-	if err := doBlockSnapshotsRangeCheck(snapDir, "bodies"); err != nil {
+	if err := doBlockSnapshotsRangeCheck(snapDir, ".seg", "bodies"); err != nil {
 		return err
 	}
-	if err := doBlockSnapshotsRangeCheck(snapDir, "transactions"); err != nil {
+	if err := doBlockSnapshotsRangeCheck(snapDir, ".seg", "transactions"); err != nil {
 		return err
+	}
+	if err := doBlockSnapshotsRangeCheck(snapDir, ".idx", "headers"); err != nil {
+		return err
+	}
+	if err := doBlockSnapshotsRangeCheck(snapDir, ".idx", "bodies"); err != nil {
+		return err
+	}
+	if err := doBlockSnapshotsRangeCheck(snapDir, ".idx", "transactions"); err != nil {
+		return fmt.Errorf("failed to check transactions idx: %w", err)
+	}
+	if err := doBlockSnapshotsRangeCheck(snapDir, ".idx", "transactions-to-block"); err != nil {
+		return fmt.Errorf("failed to check transactions-to-block idx: %w", err)
 	}
 	// Iterate over all fies in snapDir
 	return nil
@@ -811,17 +811,18 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 	return nil
 }
 
-func doBlockSnapshotsRangeCheck(snapDir string, snapType string) error {
+func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) error {
 	type interval struct {
 		from uint64
 		to   uint64
 	}
+
 	intervals := []interval{}
 	if err := filepath.Walk(snapDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if !strings.HasSuffix(info.Name(), ".seg") || !strings.Contains(info.Name(), snapType) {
+		if !strings.HasSuffix(info.Name(), suffix) || !strings.Contains(info.Name(), snapType+".") {
 			return nil
 		}
 		res, _, ok := snaptype.ParseFileName(snapDir, info.Name())
@@ -839,13 +840,13 @@ func doBlockSnapshotsRangeCheck(snapDir string, snapType string) error {
 	// Check that there are no gaps
 	for i := 1; i < len(intervals); i++ {
 		if intervals[i].from != intervals[i-1].to {
-			return fmt.Errorf("gap between %d and %d. snaptype: %s", intervals[i-1].to, intervals[i].from, snapType)
+			return fmt.Errorf("gap between (%d-%d) and (%d-%d). snaptype: %s", intervals[i-1].from, intervals[i-1].to, intervals[i].from, intervals[i].to, snapType)
 		}
 	}
 	// Check that there are no overlaps
 	for i := 1; i < len(intervals); i++ {
 		if intervals[i].from < intervals[i-1].to {
-			return fmt.Errorf("overlap between %d and %d. snaptype: %s", intervals[i-1].to, intervals[i].from, snapType)
+			return fmt.Errorf("overlap between (%d-%d) and (%d-%d). snaptype: %s", intervals[i-1].from, intervals[i-1].to, intervals[i].from, intervals[i].to, snapType)
 		}
 	}
 
@@ -1022,7 +1023,7 @@ func doMeta(cliCtx *cli.Context) error {
 }
 
 func doDecompressSpeed(cliCtx *cli.Context) error {
-	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -1062,7 +1063,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 }
 
 func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
-	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -1105,7 +1106,7 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	return nil
 }
 func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
-	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -1215,7 +1216,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 func doUncompress(cliCtx *cli.Context) error {
 	var logger log.Logger
 	var err error
-	if logger, _, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+	if logger, _, _, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
 	ctx := cliCtx.Context
@@ -1265,9 +1266,10 @@ func doUncompress(cliCtx *cli.Context) error {
 	}
 	return nil
 }
+
 func doCompress(cliCtx *cli.Context) error {
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -1281,6 +1283,7 @@ func doCompress(cliCtx *cli.Context) error {
 
 	compressCfg := seg.DefaultCfg
 	compressCfg.Workers = estimate.CompressSnapshot.Workers()
+	compressCfg.MinPatternScore = uint64(dbg.EnvInt("MinPatternScore", int(compressCfg.MinPatternScore)))
 	compressCfg.MinPatternLen = dbg.EnvInt("MinPatternLen", compressCfg.MinPatternLen)
 	compressCfg.MaxPatternLen = dbg.EnvInt("MaxPatternLen", compressCfg.MaxPatternLen)
 	compressCfg.SamplingFactor = uint64(dbg.EnvInt("SamplingFactor", int(compressCfg.SamplingFactor)))
@@ -1297,7 +1300,9 @@ func doCompress(cliCtx *cli.Context) error {
 		compression = seg.CompressNone
 	}
 
-	logger.Info("[compress] file", "datadir", dirs.DataDir, "f", f, "cfg", compressCfg)
+	doSnappyEachWord := dbg.EnvBool("SnappyEachWord", false)
+
+	logger.Info("[compress] file", "datadir", dirs.DataDir, "f", f, "cfg", compressCfg, "SnappyEachWord", doSnappyEachWord)
 	c, err := seg.NewCompressor(ctx, "compress", f, dirs.Tmp, compressCfg, log.LvlInfo, logger)
 	if err != nil {
 		return err
@@ -1306,25 +1311,30 @@ func doCompress(cliCtx *cli.Context) error {
 	w := seg.NewWriter(c, compression)
 
 	r := bufio.NewReaderSize(os.Stdin, int(128*datasize.MB))
-	buf := make([]byte, 0, int(1*datasize.MB))
+	word := make([]byte, 0, int(1*datasize.MB))
+	var snappyBuf []byte
 	var l uint64
 	for l, err = binary.ReadUvarint(r); err == nil; l, err = binary.ReadUvarint(r) {
-		if cap(buf) < int(l) {
-			buf = make([]byte, l)
+		if cap(word) < int(l) {
+			word = make([]byte, l)
 		} else {
-			buf = buf[:l]
+			word = word[:l]
 		}
-		if _, err = io.ReadFull(r, buf); err != nil {
+		if _, err = io.ReadFull(r, word); err != nil {
 			return err
 		}
-		if err := w.AddWord(buf); err != nil {
+		snappyBuf, word = compress.EncodeSnappyIfNeed(snappyBuf, word, doSnappyEachWord)
+
+		if err := w.AddWord(word); err != nil {
 			return err
 		}
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
+
 	}
 	if !errors.Is(err, io.EOF) {
 		return err
@@ -1335,8 +1345,9 @@ func doCompress(cliCtx *cli.Context) error {
 
 	return nil
 }
+
 func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
-	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -1344,8 +1355,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	ctx := cliCtx.Context
 
 	from := cliCtx.Uint64(SnapshotFromFlag.Name)
-	to := cliCtx.Uint64(SnapshotToFlag.Name)
-	every := cliCtx.Uint64(SnapshotEveryFlag.Name)
 
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
@@ -1372,27 +1381,46 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	//agg.LimitRecentHistoryWithoutFiles(0)
 
-	var forwardProgress uint64
-	if to != 0 {
-		forwardProgress = to
-	} else {
-		db.View(ctx, func(tx kv.Tx) error {
-			forwardProgress, err = stages.GetStageProgress(tx, stages.Senders)
+	// Arbitrum: it was like that:
+	//var forwardProgress uint64
+	//if to != 0 {
+	//	forwardProgress = to
+	//} else {
+	//	db.View(ctx, func(tx kv.Tx) error {
+	//		forwardProgress, err = stages.GetStageProgress(tx, stages.Senders)
+	//		return err
+	//	})
+	//	blockReader, _ := br.IO()
+	//	from2, to2, ok := freezeblocks.CanRetire(forwardProgress, blockReader.FrozenBlocks(), coresnaptype.Enums.Headers, nil)
+	//	if ok {
+	//		from, to, every = from2, to2, to2-from2
+	//	}
+	//}
+
+	var to uint64
+	if err := db.View(ctx, func(tx kv.Tx) error {
+		to, err = stages.GetStageProgress(tx, stages.Senders)
+		return err
+	}); err != nil {
+		return err
+	}
+	blockReader, _ := br.IO()
+	from2, to2, ok := freezeblocks.CanRetire(to, blockReader.FrozenBlocks(), coresnaptype.Enums.Headers, nil)
+	if ok {
+		from, to = from2, to2
+	}
+	if err := br.RetireBlocks(ctx, from, to, log.LvlInfo, nil, nil, nil); err != nil {
+		return err
+	}
+	if err := blockReader.Snapshots().RemoveOverlaps(); err != nil {
+		return err
+	}
+	if sn := blockReader.BorSnapshots(); sn != nil {
+		if err := sn.RemoveOverlaps(); err != nil {
 			return err
-		})
-		blockReader, _ := br.IO()
-		from2, to2, ok := freezeblocks.CanRetire(forwardProgress, blockReader.FrozenBlocks(), coresnaptype.Enums.Headers, nil)
-		if ok {
-			from, to, every = from2, to2, to2-from2
 		}
 	}
 
-	logger.Info("Params", "from", from, "to", to, "every", every)
-	if err := br.RetireBlocks(ctx, 0, forwardProgress, log.LvlInfo, nil, nil, nil); err != nil {
-		return err
-	}
-
-	blockReader, _ := br.IO()
 	deletedBlocks := math.MaxInt // To pass the first iteration
 	allDeletedBlocks := 0
 	for deletedBlocks > 0 { // prune happens by small steps, so need many runs
@@ -1419,12 +1447,8 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	logger.Info("Prune state history")
 	for hasMoreToPrune := true; hasMoreToPrune; {
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
-			ac := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx)
-			hasMoreToPrune, err = ac.PruneSmallBatches(ctx, 2*time.Minute, tx)
-			if err != nil {
-				return err
-			}
-			return nil
+			hasMoreToPrune, err = tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 2*time.Minute)
+			return err
 		}); err != nil {
 			return err
 		}
@@ -1444,9 +1468,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		if err != nil {
 			return err
 		}
-
-		ac := agg.BeginFilesRo()
-		defer ac.Close()
 		return nil
 	}); err != nil {
 		return err
@@ -1457,31 +1478,10 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
-	if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-		ac := agg.BeginFilesRo()
-		defer ac.Close()
-
-		logEvery := time.NewTicker(30 * time.Second)
-		defer logEvery.Stop()
-
-		stat, err := ac.Prune(ctx, tx, math.MaxUint64, logEvery)
-		if err != nil {
-			return err
-		}
-		logger.Info("aftermath prune finished", "stat", stat.String())
-		return err
-	}); err != nil {
-		return err
-	}
-
 	for hasMoreToPrune := true; hasMoreToPrune; {
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
-			ac := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx)
-			hasMoreToPrune, err = ac.PruneSmallBatches(ctx, 2*time.Minute, tx)
-			if err != nil {
-				return err
-			}
-			return nil
+			hasMoreToPrune, err = tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 2*time.Minute)
+			return err
 		}); err != nil {
 			return err
 		}
@@ -1499,11 +1499,12 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 func doUploaderCommand(cliCtx *cli.Context) error {
 	var logger log.Logger
+	var tracer *tracers.Tracer
 	var err error
 	var metricsMux *http.ServeMux
 	var pprofMux *http.ServeMux
 
-	if logger, metricsMux, pprofMux, err = debug.Setup(cliCtx, true /* root logger */); err != nil {
+	if logger, tracer, metricsMux, pprofMux, err = debug.Setup(cliCtx, true /* root logger */); err != nil {
 		return err
 	}
 
@@ -1523,7 +1524,7 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 
 	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
 
-	ethNode, err := node.New(cliCtx.Context, nodeCfg, ethCfg, logger)
+	ethNode, err := node.New(cliCtx.Context, nodeCfg, ethCfg, logger, tracer)
 	if err != nil {
 		log.Error("Erigon startup", "err", err)
 		return err
@@ -1547,7 +1548,7 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 		Accede(true) // integration tool: open db without creation and without blocking erigon
 }
 func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *libstate.Aggregator {
-	agg, err := libstate.NewAggregator2(ctx, dirs, config3.DefaultStepSize, chainDB, logger)
+	agg, err := libstate.NewAggregator(ctx, dirs, config3.DefaultStepSize, chainDB, logger)
 	if err != nil {
 		panic(err)
 	}

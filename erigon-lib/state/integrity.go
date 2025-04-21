@@ -17,50 +17,50 @@ import (
 )
 
 // search key in all files of all domains and print file names
-func (ac *AggregatorRoTx) IntegrityKey(domain kv.Domain, k []byte) error {
-	l, err := ac.d[domain].IntegrityDomainFilesWithKey(k)
+func (at *AggregatorRoTx) IntegrityKey(domain kv.Domain, k []byte) error {
+	l, err := at.d[domain].IntegrityDomainFilesWithKey(k)
 	if err != nil {
 		return err
 	}
 	if len(l) > 0 {
-		ac.a.logger.Info("[dbg] found in", "files", l)
+		at.a.logger.Info("[dbg] found in", "files", l)
 	}
 	return nil
 }
-func (ac *AggregatorRoTx) IntegirtyInvertedIndexKey(domain kv.Domain, k []byte) error {
-	return ac.d[domain].IntegrityKey(k)
+func (at *AggregatorRoTx) IntegirtyInvertedIndexKey(domain kv.Domain, k []byte) error {
+	return at.d[domain].IntegrityKey(k)
 }
 
-func (ac *AggregatorRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx context.Context, name kv.InvertedIdx, failFast bool, fromStep uint64) error {
+func (at *AggregatorRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx context.Context, name kv.InvertedIdx, failFast bool, fromStep uint64) error {
 	switch name {
 	case kv.AccountsHistoryIdx:
-		err := ac.d[kv.AccountsDomain].ht.iit.IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
+		err := at.d[kv.AccountsDomain].ht.iit.IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
 		if err != nil {
 			return err
 		}
 	case kv.StorageHistoryIdx:
-		err := ac.d[kv.CodeDomain].ht.iit.IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
+		err := at.d[kv.CodeDomain].ht.iit.IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
 		if err != nil {
 			return err
 		}
 	case kv.CodeHistoryIdx:
-		err := ac.d[kv.StorageDomain].ht.iit.IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
+		err := at.d[kv.StorageDomain].ht.iit.IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
 		if err != nil {
 			return err
 		}
 	case kv.CommitmentHistoryIdx:
-		err := ac.d[kv.CommitmentDomain].ht.iit.IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
+		err := at.d[kv.CommitmentDomain].ht.iit.IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
 		if err != nil {
 			return err
 		}
 	case kv.ReceiptHistoryIdx:
-		err := ac.d[kv.ReceiptDomain].ht.iit.IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
+		err := at.d[kv.ReceiptDomain].ht.iit.IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
 		if err != nil {
 			return err
 		}
 	default:
 		// check the ii
-		if v := ac.searchII(name); v != nil {
+		if v := at.searchII(name); v != nil {
 			return v.IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
 		}
 		panic(fmt.Sprintf("unexpected: %s", name))
@@ -126,7 +126,7 @@ func (dt *DomainRoTx) IntegrityKey(k []byte) error {
 			if ef.Count() > 2 {
 				last2 = ef.Get(ef.Count() - 2)
 			}
-			log.Warn(fmt.Sprintf("[dbg] see1: %s, min=%d,max=%d, before_max=%d, all: %d\n", item.decompressor.FileName(), ef.Min(), ef.Max(), last2, stream.ToArrU64Must(ef.Iterator())))
+			log.Warn(fmt.Sprintf("[dbg] see1: %s, min=%d,max=%d, before_max=%d, all: %d", item.decompressor.FileName(), ef.Min(), ef.Max(), last2, stream.ToArrU64Must(ef.Iterator())))
 		}
 		return true
 	})
@@ -188,7 +188,7 @@ func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx cont
 		if err := iterStep(item); err != nil {
 			return err
 		}
-		//log.Warn(fmt.Sprintf("[dbg] see1: %s, min=%d,max=%d, before_max=%d, all: %d\n", item.src.decompressor.FileName(), ef.Min(), ef.Max(), last2, stream.ToArrU64Must(ef.Iterator())))
+		//log.Warn(fmt.Sprintf("[dbg] see1: %s, min=%d,max=%d, before_max=%d, all: %d", item.src.decompressor.FileName(), ef.Min(), ef.Max(), last2, stream.ToArrU64Must(ef.Iterator())))
 	}
 	return nil
 }

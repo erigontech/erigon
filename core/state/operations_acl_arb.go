@@ -6,8 +6,8 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/nitro-erigon/util/arbmath"
 	"github.com/holiman/uint256"
 )

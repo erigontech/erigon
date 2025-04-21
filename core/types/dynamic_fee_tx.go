@@ -35,17 +35,16 @@ import (
 type DynamicFeeTransaction struct {
 	CommonTx
 	ChainID    *uint256.Int
-	Tip        *uint256.Int
+	TipCap     *uint256.Int
 	FeeCap     *uint256.Int
 	AccessList AccessList
 }
 
-func (tx *DynamicFeeTransaction) GetPrice() *uint256.Int  { return tx.Tip }
 func (tx *DynamicFeeTransaction) GetFeeCap() *uint256.Int { return tx.FeeCap }
-func (tx *DynamicFeeTransaction) GetTip() *uint256.Int    { return tx.Tip }
+func (tx *DynamicFeeTransaction) GetTipCap() *uint256.Int { return tx.TipCap }
 func (tx *DynamicFeeTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	if baseFee == nil {
-		return tx.GetTip()
+		return tx.GetTipCap()
 	}
 	gasFeeCap := tx.GetFeeCap()
 	// return 0 because effectiveFee cant be < 0
@@ -54,8 +53,8 @@ func (tx *DynamicFeeTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint2
 		return uint256.NewInt(0)
 	}
 	effectiveFee := new(uint256.Int).Sub(gasFeeCap, baseFee)
-	if tx.GetTip().Lt(effectiveFee) {
-		return tx.GetTip()
+	if tx.GetTipCap().Lt(effectiveFee) {
+		return tx.GetTipCap()
 	} else {
 		return effectiveFee
 	}
@@ -73,13 +72,13 @@ func (tx *DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 			Nonce:           tx.Nonce,
 			To:              tx.To, // TODO: copy pointed-to address
 			Data:            libcommon.CopyBytes(tx.Data),
-			Gas:             tx.Gas,
+			GasLimit:        tx.GasLimit,
 			// These are copied below.
 			Value: new(uint256.Int),
 		},
 		ChainID:    new(uint256.Int),
 		AccessList: make(AccessList, len(tx.AccessList)),
-		Tip:        new(uint256.Int),
+		TipCap:     new(uint256.Int),
 		FeeCap:     new(uint256.Int),
 	}
 	copy(cpy.AccessList, tx.AccessList)
@@ -89,8 +88,8 @@ func (tx *DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 	if tx.ChainID != nil {
 		cpy.ChainID.Set(tx.ChainID)
 	}
-	if tx.Tip != nil {
-		cpy.Tip.Set(tx.Tip)
+	if tx.TipCap != nil {
+		cpy.TipCap.Set(tx.TipCap)
 	}
 	if tx.FeeCap != nil {
 		cpy.FeeCap.Set(tx.FeeCap)
@@ -121,13 +120,13 @@ func (tx *DynamicFeeTransaction) payloadSize() (payloadSize int, nonceLen, gasLe
 	payloadSize += nonceLen
 	// size of MaxPriorityFeePerGas
 	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(tx.Tip)
+	payloadSize += rlp.Uint256LenExcludingHead(tx.TipCap)
 	// size of MaxFeePerGas
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(tx.FeeCap)
-	// size of Gas
+	// size of GasLimit
 	payloadSize++
-	gasLen = rlp.IntLenExcludingHead(tx.Gas)
+	gasLen = rlp.IntLenExcludingHead(tx.GasLimit)
 	payloadSize += gasLen
 	// size of To
 	payloadSize++
@@ -199,15 +198,15 @@ func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSiz
 		return err
 	}
 	// encode MaxPriorityFeePerGas
-	if err := rlp.EncodeUint256(tx.Tip, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.TipCap, w, b); err != nil {
 		return err
 	}
 	// encode MaxFeePerGas
 	if err := rlp.EncodeUint256(tx.FeeCap, w, b); err != nil {
 		return err
 	}
-	// encode Gas
-	if err := rlp.EncodeInt(tx.Gas, w, b); err != nil {
+	// encode GasLimit
+	if err := rlp.EncodeInt(tx.GasLimit, w, b); err != nil {
 		return err
 	}
 	// encode To
@@ -282,12 +281,12 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 	if b, err = s.Uint256Bytes(); err != nil {
 		return err
 	}
-	tx.Tip = new(uint256.Int).SetBytes(b)
+	tx.TipCap = new(uint256.Int).SetBytes(b)
 	if b, err = s.Uint256Bytes(); err != nil {
 		return err
 	}
 	tx.FeeCap = new(uint256.Int).SetBytes(b)
-	if tx.Gas, err = s.Uint(); err != nil {
+	if tx.GasLimit, err = s.Uint(); err != nil {
 		return err
 	}
 	if b, err = s.Bytes(); err != nil {
@@ -329,12 +328,12 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 }
 
 // AsMessage returns the transaction as a core.Message.
-func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
+func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
 	msg := Message{
 		nonce:      tx.Nonce,
-		gasLimit:   tx.Gas,
+		gasLimit:   tx.GasLimit,
 		gasPrice:   *tx.FeeCap,
-		tip:        *tx.Tip,
+		tipCap:     *tx.TipCap,
 		feeCap:     *tx.FeeCap,
 		to:         tx.To,
 		amount:     *tx.Value,
@@ -344,22 +343,22 @@ func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *ch
 		Tx:         tx,
 	}
 	if !rules.IsLondon {
-		return msg, errors.New("eip-1559 transactions require London")
+		return nil, errors.New("eip-1559 transactions require London")
 	}
 	if baseFee != nil {
 		overflow := msg.gasPrice.SetFromBig(baseFee)
 		if overflow {
-			return msg, errors.New("gasPrice higher than 2^256-1")
+			return nil, errors.New("gasPrice higher than 2^256-1")
 		}
 	}
-	msg.gasPrice.Add(&msg.gasPrice, tx.Tip)
+	msg.gasPrice.Add(&msg.gasPrice, tx.TipCap)
 	if msg.gasPrice.Gt(tx.FeeCap) {
 		msg.gasPrice.Set(tx.FeeCap)
 	}
 
 	var err error
 	msg.from, err = tx.Sender(s)
-	return msg, err
+	return &msg, err
 }
 
 // Hash computes the hash (but not for signatures!)
@@ -370,9 +369,9 @@ func (tx *DynamicFeeTransaction) Hash() libcommon.Hash {
 	hash := prefixedRlpHash(DynamicFeeTxType, []interface{}{
 		tx.ChainID,
 		tx.Nonce,
-		tx.Tip,
+		tx.TipCap,
 		tx.FeeCap,
-		tx.Gas,
+		tx.GasLimit,
 		tx.To,
 		tx.Value,
 		tx.Data,
@@ -389,9 +388,9 @@ func (tx *DynamicFeeTransaction) SigningHash(chainID *big.Int) libcommon.Hash {
 		[]interface{}{
 			chainID,
 			tx.Nonce,
-			tx.Tip,
+			tx.TipCap,
 			tx.FeeCap,
-			tx.Gas,
+			tx.GasLimit,
 			tx.To,
 			tx.Value,
 			tx.Data,
@@ -435,14 +434,14 @@ func (tx *DynamicFeeTransaction) Sender(signer Signer) (libcommon.Address, error
 func NewEIP1559Transaction(chainID uint256.Int, nonce uint64, to libcommon.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, gasTip *uint256.Int, gasFeeCap *uint256.Int, data []byte) *DynamicFeeTransaction {
 	return &DynamicFeeTransaction{
 		CommonTx: CommonTx{
-			Nonce: nonce,
-			To:    &to,
-			Value: amount,
-			Gas:   gasLimit,
-			Data:  data,
+			Nonce:    nonce,
+			To:       &to,
+			Value:    amount,
+			GasLimit: gasLimit,
+			Data:     data,
 		},
 		ChainID: &chainID,
-		Tip:     gasTip,
+		TipCap:  gasTip,
 		FeeCap:  gasFeeCap,
 	}
 }

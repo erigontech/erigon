@@ -14,6 +14,8 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
+//go:build integration
+
 package heimdall
 
 import (
@@ -45,13 +47,14 @@ import (
 
 func TestServiceWithAmoyData(t *testing.T) {
 	suite.Run(t, &ServiceTestSuite{
-		testDataDir:             "testdata/amoy",
-		chainConfig:             params.AmoyChainConfig,
-		expectedLastSpan:        1280,
-		expectedFirstCheckpoint: 1,
-		expectedLastCheckpoint:  150,
-		expectedFirstMilestone:  285542,
-		expectedLastMilestone:   285641,
+		testDataDir:                    "testdata/amoy",
+		chainConfig:                    params.AmoyChainConfig,
+		expectedLastSpan:               1280,
+		expectedFirstCheckpoint:        1,
+		expectedLastCheckpoint:         150,
+		expectedFirstMilestone:         285542,
+		expectedLastMilestone:          285641,
+		entityNumberToCheckBeforeFirst: 2,
 		producersApiBlocksToTest: []uint64{
 			// span 0
 			1,   // start
@@ -82,13 +85,14 @@ func TestServiceWithAmoyData(t *testing.T) {
 
 func TestServiceWithMainnetData(t *testing.T) {
 	suite.Run(t, &ServiceTestSuite{
-		testDataDir:             "testdata/mainnet",
-		chainConfig:             params.BorMainnetChainConfig,
-		expectedLastSpan:        2344,
-		expectedFirstCheckpoint: 1,
-		expectedLastCheckpoint:  1,
-		expectedFirstMilestone:  453496,
-		expectedLastMilestone:   453496,
+		testDataDir:                    "testdata/mainnet",
+		chainConfig:                    params.BorMainnetChainConfig,
+		expectedLastSpan:               2344,
+		expectedFirstCheckpoint:        1,
+		expectedLastCheckpoint:         1,
+		expectedFirstMilestone:         453496,
+		expectedLastMilestone:          453496,
+		entityNumberToCheckBeforeFirst: 2,
 		producersApiBlocksToTest: []uint64{
 			1,
 			16,
@@ -121,19 +125,21 @@ func TestServiceWithMainnetData(t *testing.T) {
 
 type ServiceTestSuite struct {
 	// test suite inputs
-	testDataDir              string
-	chainConfig              *chain.Config
-	expectedFirstSpan        uint64
-	expectedLastSpan         uint64
-	expectedFirstCheckpoint  uint64
-	expectedLastCheckpoint   uint64
-	expectedFirstMilestone   uint64
-	expectedLastMilestone    uint64
-	producersApiBlocksToTest []uint64
+	testDataDir                    string
+	chainConfig                    *chain.Config
+	expectedFirstSpan              uint64
+	expectedLastSpan               uint64
+	expectedFirstCheckpoint        uint64
+	expectedLastCheckpoint         uint64
+	expectedFirstMilestone         uint64
+	expectedLastMilestone          uint64
+	entityNumberToCheckBeforeFirst uint64
+	producersApiBlocksToTest       []uint64
 
 	// test suite internals
 	suite.Suite
 	ctx                          context.Context
+	logger                       log.Logger
 	cancel                       context.CancelFunc
 	eg                           errgroup.Group
 	client                       *MockClient
@@ -151,8 +157,8 @@ func (suite *ServiceTestSuite) SetupSuite() {
 	ctrl := gomock.NewController(suite.T())
 	tempDir := suite.T().TempDir()
 	dataDir := fmt.Sprintf("%s/datadir", tempDir)
-	logger := testlog.Logger(suite.T(), log.LvlCrit)
-	store := NewMdbxStore(logger, dataDir, false, 1)
+	suite.logger = testlog.Logger(suite.T(), log.LvlCrit)
+	store := NewMdbxStore(suite.logger, dataDir, false, 1)
 	borConfig := suite.chainConfig.Bor.(*borcfg.BorConfig)
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.spansTestDataDir = filepath.Join(suite.testDataDir, "spans")
@@ -167,7 +173,7 @@ func (suite *ServiceTestSuite) SetupSuite() {
 		Store:     store,
 		BorConfig: borConfig,
 		Client:    suite.client,
-		Logger:    logger,
+		Logger:    suite.logger,
 	})
 
 	err := suite.service.store.Prepare(suite.ctx)
@@ -185,19 +191,25 @@ func (suite *ServiceTestSuite) SetupSuite() {
 		return suite.service.Run(suite.ctx)
 	})
 
-	lastMilestone, err := suite.service.SynchronizeMilestones(suite.ctx)
+	lastMilestone, ok, err := suite.service.SynchronizeMilestones(suite.ctx)
 	require.NoError(suite.T(), err)
+	require.True(suite.T(), ok)
 	require.Equal(suite.T(), suite.expectedLastMilestone, uint64(lastMilestone.Id))
-	lastCheckpoint, err := suite.service.SynchronizeCheckpoints(suite.ctx)
+
+	lastCheckpoint, ok, err := suite.service.SynchronizeCheckpoints(suite.ctx)
 	require.NoError(suite.T(), err)
+	require.True(suite.T(), ok)
 	require.Equal(suite.T(), suite.expectedLastCheckpoint, uint64(lastCheckpoint.Id))
+
 	err = suite.service.SynchronizeSpans(suite.ctx, math.MaxInt)
 	require.NoError(suite.T(), err)
 }
 
 func (suite *ServiceTestSuite) TearDownSuite() {
+	suite.logger.Info("tear down test case")
 	suite.cancel()
 	err := suite.eg.Wait()
+	suite.logger.Info("test has been torn down")
 	require.ErrorIs(suite.T(), err, context.Canceled)
 }
 
@@ -211,7 +223,13 @@ func (suite *ServiceTestSuite) TestMilestones() {
 	require.True(t, ok)
 	require.Equal(t, suite.expectedLastMilestone, id)
 
-	for id := uint64(0); id < suite.expectedFirstMilestone; id++ {
+	checkFrom := uint64(0)
+
+	if suite.expectedFirstMilestone > suite.entityNumberToCheckBeforeFirst {
+		checkFrom = suite.expectedFirstMilestone - suite.entityNumberToCheckBeforeFirst
+	}
+
+	for id := checkFrom; id < suite.expectedFirstMilestone; id++ {
 		entity, ok, err := svc.store.Milestones().Entity(ctx, id)
 		require.NoError(t, err)
 		require.False(t, ok)
@@ -240,7 +258,13 @@ func (suite *ServiceTestSuite) TestCheckpoints() {
 	require.True(t, ok)
 	require.Equal(t, suite.expectedLastCheckpoint, id)
 
-	for id := uint64(0); id < suite.expectedFirstCheckpoint; id++ {
+	checkFrom := uint64(0)
+
+	if suite.expectedFirstCheckpoint > suite.entityNumberToCheckBeforeFirst {
+		checkFrom = suite.expectedFirstCheckpoint - suite.entityNumberToCheckBeforeFirst
+	}
+
+	for id := checkFrom; id < suite.expectedFirstCheckpoint; id++ {
 		entity, ok, err := svc.store.Checkpoints().Entity(ctx, id)
 		require.NoError(t, err)
 		require.False(t, ok)
@@ -265,7 +289,13 @@ func (suite *ServiceTestSuite) TestSpans() {
 	require.True(t, ok)
 	require.Equal(t, suite.expectedLastSpan, id)
 
-	for id := uint64(0); id < suite.expectedFirstSpan; id++ {
+	checkFrom := uint64(0)
+
+	if suite.expectedFirstSpan > suite.entityNumberToCheckBeforeFirst {
+		checkFrom = suite.expectedFirstSpan - suite.entityNumberToCheckBeforeFirst
+	}
+
+	for id := checkFrom; id < suite.expectedFirstSpan; id++ {
 		entity, ok, err := svc.store.Spans().Entity(ctx, id)
 		require.NoError(t, err)
 		require.False(t, ok)
@@ -488,4 +518,48 @@ type proposerSequenceResult struct {
 type difficultiesKV struct {
 	Signer     common.Address
 	Difficulty uint64
+}
+
+func TestIsCatchingUp(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockClient := NewMockClient(ctrl)
+
+	s := Service{
+		client: mockClient,
+	}
+
+	mockClient.EXPECT().
+		FetchStatus(gomock.Any()).
+		DoAndReturn(func(ctx context.Context) (*Status, error) {
+			return &Status{
+				LatestBlockTime: "",
+				CatchingUp:      true,
+			}, nil
+		})
+
+	isCatchingUp, err := s.IsCatchingUp(context.TODO())
+	require.NoError(t, err)
+	require.True(t, isCatchingUp)
+}
+
+func TestIsCatchingUpLateBlock(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockClient := NewMockClient(ctrl)
+
+	s := Service{
+		client: mockClient,
+	}
+
+	mockClient.EXPECT().
+		FetchStatus(gomock.Any()).
+		DoAndReturn(func(ctx context.Context) (*Status, error) {
+			return &Status{
+				LatestBlockTime: "2025-02-14T11:45:00.764588Z",
+				CatchingUp:      false,
+			}, nil
+		})
+
+	isCatchingUp, err := s.IsCatchingUp(context.TODO())
+	require.NoError(t, err)
+	require.True(t, isCatchingUp)
 }

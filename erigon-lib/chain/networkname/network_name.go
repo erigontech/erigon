@@ -20,6 +20,7 @@ const (
 	Mainnet             = "mainnet"
 	Holesky             = "holesky"
 	Sepolia             = "sepolia"
+	Hoodi               = "hoodi"
 	Dev                 = "dev"
 	Amoy                = "amoy"
 	BorMainnet          = "bor-mainnet"
@@ -36,6 +37,7 @@ var All = []string{
 	Mainnet,
 	Holesky,
 	Sepolia,
+	Hoodi,
 	Amoy,
 	BorMainnet,
 	BorDevnet,

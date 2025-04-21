@@ -27,10 +27,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/types/testdata"
 )
 
 func TestParseTransactionRLP(t *testing.T) {
@@ -43,24 +45,24 @@ func TestParseTransactionRLP(t *testing.T) {
 			for i, tt := range testSet.tests {
 				tt := tt
 				t.Run(strconv.Itoa(i), func(t *testing.T) {
-					payload := hexutility.MustDecodeHex(tt.PayloadStr)
+					payload := hexutil.MustDecodeHex(tt.PayloadStr)
 					parseEnd, err := ctx.ParseTransaction(payload, 0, txn, txnSender[:], false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
 					require.NoError(err)
 					require.Equal(len(payload), parseEnd)
 					if tt.SignHashStr != "" {
-						signHash := hexutility.MustDecodeHex(tt.SignHashStr)
+						signHash := hexutil.MustDecodeHex(tt.SignHashStr)
 						if !bytes.Equal(signHash, ctx.Sighash[:]) {
 							t.Errorf("signHash expected %x, got %x", signHash, ctx.Sighash)
 						}
 					}
 					if tt.IdHashStr != "" {
-						idHash := hexutility.MustDecodeHex(tt.IdHashStr)
+						idHash := hexutil.MustDecodeHex(tt.IdHashStr)
 						if !bytes.Equal(idHash, txn.IDHash[:]) {
 							t.Errorf("IdHash expected %x, got %x", idHash, txn.IDHash)
 						}
 					}
 					if tt.SenderStr != "" {
-						expectSender := hexutility.MustDecodeHex(tt.SenderStr)
+						expectSender := hexutil.MustDecodeHex(tt.SenderStr)
 						if !bytes.Equal(expectSender, txnSender[:]) {
 							t.Errorf("expectSender expected %x, got %x", expectSender, txnSender)
 						}
@@ -78,18 +80,18 @@ func TestTransactionSignatureValidity1(t *testing.T) {
 	ctx.WithAllowPreEip2s(true)
 
 	txn, txnSender := &TxnSlot{}, [20]byte{}
-	validTxn := hexutility.MustDecodeHex("f83f800182520894095e7baea6a6c7c4c2dfeb977efac326af552d870b801ba048b55bfa915ac795c431978d8a6a992b628d557da5ff759b307d495a3664935301")
+	validTxn := hexutil.MustDecodeHex("f83f800182520894095e7baea6a6c7c4c2dfeb977efac326af552d870b801ba048b55bfa915ac795c431978d8a6a992b628d557da5ff759b307d495a3664935301")
 	_, err := ctx.ParseTransaction(validTxn, 0, txn, txnSender[:], false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	preEip2Txn := hexutility.MustDecodeHex("f85f800182520894095e7baea6a6c7c4c2dfeb977efac326af552d870b801ba048b55bfa915ac795c431978d8a6a992b628d557da5ff759b307d495a36649353a07fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a1")
+	preEip2Txn := hexutil.MustDecodeHex("f85f800182520894095e7baea6a6c7c4c2dfeb977efac326af552d870b801ba048b55bfa915ac795c431978d8a6a992b628d557da5ff759b307d495a36649353a07fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a1")
 	_, err = ctx.ParseTransaction(preEip2Txn, 0, txn, txnSender[:], false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Now enforce EIP-2
 	ctx.WithAllowPreEip2s(false)
 	_, err = ctx.ParseTransaction(validTxn, 0, txn, txnSender[:], false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	_, err = ctx.ParseTransaction(preEip2Txn, 0, txn, txnSender[:], false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
 	assert.Error(t, err)
@@ -100,7 +102,7 @@ func TestTransactionSignatureValidity2(t *testing.T) {
 	chainId := new(uint256.Int).SetUint64(5)
 	ctx := NewTxnParseContext(*chainId)
 	slot, sender := &TxnSlot{}, [20]byte{}
-	rlp := hexutility.MustDecodeHex("02f8720513844190ab00848321560082520894cab441d2f45a3fee83d15c6b6b6c36a139f55b6288054607fc96a6000080c001a0dffe4cb5651e663d0eac8c4d002de734dd24db0f1109b062d17da290a133cc02a0913fb9f53f7a792bcd9e4d7cced1b8545d1ab82c77432b0bc2e9384ba6c250c5")
+	rlp := hexutil.MustDecodeHex("02f8720513844190ab00848321560082520894cab441d2f45a3fee83d15c6b6b6c36a139f55b6288054607fc96a6000080c001a0dffe4cb5651e663d0eac8c4d002de734dd24db0f1109b062d17da290a133cc02a0913fb9f53f7a792bcd9e4d7cced1b8545d1ab82c77432b0bc2e9384ba6c250c5")
 	_, err := ctx.ParseTransaction(rlp, 0, slot, sender[:], false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
 	assert.Error(t, err)
 
@@ -193,10 +195,10 @@ func TestBlobTxnParsing(t *testing.T) {
 		"d09e26212d3377f3f8426d8ec210a08aaeccaf3873d07cef005aca28c39f8a9f8bdb1ec8d79f" +
 		"fc25afc0a4fa2ab73601a036b241b061a36a32ab7fe86c7aa9eb592dd59018cd0443adc09035" +
 		"90c16b02b0a05edcc541b4741c5cc6dd347c5ed9577ef293a62787b4510465fadbfe39ee4094"
-	bodyRlp := hexutility.MustDecodeHex(bodyRlpHex)
+	bodyRlp := hexutil.MustDecodeHex(bodyRlpHex)
 
 	hasEnvelope := true
-	bodyEnvelopePrefix := hexutility.MustDecodeHex("b9012b")
+	bodyEnvelopePrefix := hexutil.MustDecodeHex("b9012b")
 	var bodyEnvelope []byte
 	bodyEnvelope = append(bodyEnvelope, bodyEnvelopePrefix...)
 	bodyEnvelope = append(bodyEnvelope, BlobTxnType)
@@ -225,14 +227,14 @@ func TestBlobTxnParsing(t *testing.T) {
 	wrappedWithBlobs = true
 	hasEnvelope = false
 
-	blobsRlpPrefix := hexutility.MustDecodeHex("fa040008")
-	blobRlpPrefix := hexutility.MustDecodeHex("ba020000")
-	blob0 := make([]byte, fixedgas.BlobSize)
+	blobsRlpPrefix := hexutil.MustDecodeHex("fa040008")
+	blobRlpPrefix := hexutil.MustDecodeHex("ba020000")
+	blob0 := make([]byte, params.BlobSize)
 	rand.Read(blob0)
-	blob1 := make([]byte, fixedgas.BlobSize)
+	blob1 := make([]byte, params.BlobSize)
 	rand.Read(blob1)
 
-	proofsRlpPrefix := hexutility.MustDecodeHex("f862")
+	proofsRlpPrefix := hexutil.MustDecodeHex("f862")
 	var commitment0, commitment1 gokzg4844.KZGCommitment
 	rand.Read(commitment0[:])
 	rand.Read(commitment1[:])
@@ -240,7 +242,7 @@ func TestBlobTxnParsing(t *testing.T) {
 	rand.Read(proof0[:])
 	rand.Read(proof1[:])
 
-	wrapperRlp := hexutility.MustDecodeHex("03fa0401fe")
+	wrapperRlp := hexutil.MustDecodeHex("03fa0401fe")
 	wrapperRlp = append(wrapperRlp, bodyRlp...)
 	wrapperRlp = append(wrapperRlp, blobsRlpPrefix...)
 	wrapperRlp = append(wrapperRlp, blobRlpPrefix...)
@@ -295,79 +297,44 @@ func TestBlobTxnParsing(t *testing.T) {
 	assert.Equal(t, proof1, fatTxn.Proofs[1])
 }
 
-func TestSetCodeAuthRawParsing(t *testing.T) {
-	// generated using this in core/types/encdec_test.go
-	/*
-		func TestGenerateSetCodeTxnRlp(t *testing.T) {
-			tr := NewTRand()
-			var txn Transaction
-			requiredAuthLen := 1
-			for txn = tr.RandTransaction(SetCodeTxType); txn.Type() != SetCodeTxType || len(txn.(*SetCodeTransaction).GetAuthorizations()) != requiredAuthLen; txn = tr.RandTransaction(SetCodeTxType) {
-			}
-			v, _, _ := txn.RawSignatureValues()
-			v.SetUint64(uint64(randIntInRange(0, 2)))
+func TestSetCodeAuthSignatureRecover(t *testing.T) {
+	txnRlpHex := testdata.ValidSetCodeTxn1
+	// For authorizationList[0] in the above :-
+	// expectedAddress := common.HexToAddress("0x0e2dadd8081919cd0534c4144a74204f2db229ec")
+	// expectedNonce := 0x17
+	// expectedYParity := 0x1
+	// expectedR := "0x837da79f8b17c1db2371cdc4b2b134cd5aef1b588f811a5e3b4f2329c2107116"
+	// expectedS := "0x66aab6e4baa71dd601f4211e1bbf27c297e47dc845e73b9147ab1823064df2b9"
 
-			txn.GetChainID().SetUint64(1)
+	// Should match with (but commented for efficiency) -
+	// expectedSigner, err := setCodeTx.Authorizations[0].RecoverSigner(bytes.NewBuffer(nil), make([]byte, 32))
 
-			auths := txn.(*SetCodeTransaction).GetAuthorizations()
-			auths[0].ChainID = 1
-			auths[0].Nonce = 10
-			auths[0].Address = libcommon.HexToAddress("0xde0B295669a9FD93d5F28D9Ec85E40f4cb697BAe")
-			w := bytes.NewBuffer(nil)
-			if err := txn.MarshalBinary(w); err != nil {
-				t.Error(err)
-			}
+	expectedChainId := 11155111 // Sepolia
+	expectedSigner := common.HexToAddress("0x7934d5340b1fa4e3d8f5cd62705feee3ece50ea3")
 
-			hex := hexutility.Bytes(w.Bytes()).String()
-			authj, err := json.Marshal(txn.(*SetCodeTransaction).GetAuthorizations())
-			if err != nil {
-				t.Error(err)
-			}
-			fmt.Println("txn", hex, len(txn.(*SetCodeTransaction).GetAuthorizations()), string(authj))
-		}
-	*/
-	bodyRlxHex := "0x04f9049e018889ee3d6b9ebf6ba1888b1a5f65f3cdca7d88f68834f2b4d0715588dd8a498e12c308cb945fd038e869663db8dd239fe1a9147c2a99ddcb0188c901aea8e00d085cb902cd7be4e3a63e15d2dec92a4de7787cd3bf97c422b9824ce02e032d987beb6518e8020b1ab8d4cb290b509b9dc7833f006da4979cf7cfb697edd7222778ced565d1a999a44e31f080638f918e0eec79b4b2dd46f0e964f3e405bfe235f1fd27bffeb90cf393711147799321dee0d3ae22eacb60c4024bae203b82968111ef579d0a3e68a14c31c12abdddfae54a9c488bfde0b1f3f5635b275d67a49530501fafedf9e29a4a04b8720c3d77ccc00d8772816d4b16292a995b4a44840f2e149c35bc62bdbbd64a47ffcf506d41e3b72da2387e8daf2e96131fa74a91172bf14350773a85628b3a2213d37cf8624d55bfab63133f4da0da5559431dbf2178c8a69f0549c100871abfbcec9099092f0027f2a146ad8e73d705dcee036385b2ba8fcc6bb43a98298e4149689d62d20e2b7aa229ea4ddabc8cc17243faacbc1b405c4e0d66babb42761ac0109b852d6f3486de201a39d639a685cf35bb122b500f6533970beaa003a124b12dff03dadd7de82f5f8487e3deb6c0debd3675b1d9bfbb568a4ad3eeea8d76f11ab76c1403e3b094ab6af4bcf89971ca8ee2821960a0a8892c0160bbfd92f69891aeec50c6a1f01b411cc7d1902e101acb5672821192e8ba80be74937a59b497d4bb6f766612b8f487e299f76e505bd0a10af95494bee0fbd1ba95aa52fd739f896d13b09bb605f9ba8cfb2b413a5d590c5e351ecd99ae4737443493a2d3fbfd165b5669118f82c4a6e6fc184a1880203fc6e1fd917abfd77110ba01b1867a38bd1286c6557efc630feb385c533cd84194a9c95def3a0a132116c6d75107db7ad114329425817e152c30069b6556f34559ed678699fddcd35a05fee0144f7964995f09faa4cde325cb5c2da4224f8252b55b987fc54296d0316a9e40b7aae0cb2f58d33d3418bf29fb21e6cabea12563c83cdfe4e2d848823d450f43eee919d5591f719006d9545b6773f14a1ff076fb5774e4de4eed61efd44d105b43a1768aaded355355c0f9010ff794a1d26391185070ad08c5b4bf1df855ffc0e897c5e1a026452ffaac6a96832bf62b550b30b4825a5dbd3c2f46419b6a857eaec43e2764f859946867fce4bcb4339a4fda05f556336499ebf0182df842a021824f29b1b799cf739d944ec397754facbd8d0b16b2afe56d26616466b1a760a01e979136ab5dcc20835eed318eb62413dfd5f3f69787c0f07e1a079371b71a2bf87a946416515c2d28ac7c7e9afa09fc30b550e4996677f863a0aa40e5bfbb7f445acc791c24c6db15ef7e9167cd8fb5dd2940d96135ff4d6a4fa01869b7699d771b48e973b84e916b4bc2a06b0dec665214f5ec43a2a4fb5b4ec1a05c371dc0735b30ef12037f33c1239e0e1211173f1e59cf6c04561a94a7867f3ff84df84b0194de0b295669a9fd93d5f28d9ec85e40f4cb697bae0a579309053d89140f8cee2816d5b671d40401b111d19e37a34b21c05c0f22be62b95a6a019d8395bbeeb2ebaa12e60b652e8f95000194297aef1a6b3c8065bdb0c233ef83e529307a19ad93ef44f0dd4adddc83ad8b0dad25d1072d034400"
-	bodyRlx := hexutility.MustDecodeHex(bodyRlxHex)
+	var (
+		txn TxnSlot
+	)
 
-	ctx := NewTxnParseContext(*uint256.NewInt(1))
+	txnRlpBytes := hexutil.FromHex(txnRlpHex)
+	ctx := NewTxnParseContext(*uint256.NewInt(uint64(expectedChainId)))
 	ctx.withSender = false
-	var txn TxnSlot
-
-	_, err := ctx.ParseTransaction(bodyRlx, 0, &txn, nil, false, false, nil)
+	_, err := ctx.ParseTransaction(txnRlpBytes, 0, &txn, nil, false, false, nil)
 	require.NoError(t, err)
-	require.Len(t, txn.AuthRaw, 1)
 
-	payload := txn.AuthRaw[0]
-	p := 0
-
-	var chainID uint256.Int
-	var nonce uint64
-	var address common.Address
-	actualAddress := common.HexToAddress("0xde0B295669a9FD93d5F28D9Ec85E40f4cb697BAe")
-
-	p, err = rlp.ParseU256(payload, p, &chainID)
-	require.NoError(t, err)
-	require.Equal(t, chainID.Uint64(), uint64(1))
-
-	p, datalen, err := rlp.ParseString(payload, p)
-	require.NoError(t, err)
-	require.Equal(t, datalen, 20)
-
-	address = common.BytesToAddress(payload[p : p+datalen])
-	require.Equal(t, address, actualAddress)
-
-	p += 20
-	_, nonce, err = rlp.ParseU64(payload, p)
-	require.NoError(t, err)
-	require.Equal(t, nonce, uint64(10))
+	setCodeTx := types.SetCodeTransaction{}
+	rlpStream := rlp.NewStream(bytes.NewBuffer(txnRlpBytes[1:]), uint64(len(txnRlpBytes)))
+	setCodeTx.DecodeRLP(rlpStream)
+	require.Len(t, txn.Authorities, 1)
+	require.Equal(t, expectedSigner, *txn.Authorities[0])
 }
 
 func TestSetCodeTxnParsing(t *testing.T) {
-	bodyRlxHex := "0x04f9041701880124ec419e9796da8868b499f209983df888bb35ca86e3d9ea47882486c24309101b0e94e4ec12c49d6bcf7cc1325aa50afff92a561229fe880c716dca0e3e3d28b902b6779e563691f1ca8a86a02efdd93db261215047dad430a475d0e191f66b580d6e759a7c7a739532455e65160acf92dc1e1cc11970e7851277278e9d5d2549e451de8c8dd98ebdd3c55e73cd0b465875b72ea6d54917474f7ddfbd1f66d1a929694becc69bc3064c79c32b2db2a094844b400133724e046d9a96f2b6c7888fe008e6a667a970068487ce9a8e6c1260973956b26c1b78235f3452e21c5ed6d47507023ec4072b9ebea8ea9bde77ea64352ef7a6a8efb2ca61fbd0cf7c31491a4c38e3081dfc7b5e8066fca60d8f57b641032f23119a67a37ad0514529df22ba73b4028dc4a6aef0b26161371d731a81d8ac20ea90515b924f2534e32c240d0b75b5d1683e1bc7ecf8b82b73fb4c40d7cfc38e8c32f2c4d3424a86ba8c6e867f13328be201dd8d5e8ee47e03c1d9096968b71228b068cc21514f6bab7867a0d0a2651f40e927079b008c3ef11d571eb5f71d729ee9cfb3d2a99d258c10371fa1df271f4588e031498b155244295490fd842b3055e240ea89843a188b7f15be53252367761b9a8d21818d2c756822c0383246e167dd645722aefe4ecc5e78608bcc851dc5a51255a3f91e908bb5fa53063596458f45c6e25a712de4b2a5b36eea57f5b772c84f1d0f2f2ae103445fb7f2d38493041ca452f1e846c34331bea7b5b350d02306fa3a15b50e978b4efebccce8a3479479d51c95a08e0cab0732fc4f8095337d7502c6a962199342ed127701a6f5b0e54cbdd88f23556aab406a3a7ef49f848c3efbf4cf62052999bde1940abf4944158aefc5472f4ec9e23308cfb63deedc79e9a4f39d8b353c7e6f15d36f4c63987ae6f32701c6579e68f05f9ae86b6fbbc8d57bc17e5c2f3e5389ea75d102017767205c10d6bf5cf6e33a94ad9e6cfac5accf56d61dcee39f2e954ea89b7241e480e6021fa099a81bc9d28d6ca58a11d36f406b212be70c721bd8a4d1d643fa2bf30ebd59a4f838f794fbba2afaae8cabd778b6e151b0431e3fef0a033ce1a07081820b2a08cc2ed4355811644547f23597f7ebe516538baac51d97cbccee97f8ccf201941d994a07f0b3e925d332d4eae10c9ba474da3d8a8806320d2ae09c60e880887dbf8422d2f6549088321947f20ebcbfeff20194327d773bdc6c27cd28a533e81074372dc33a8afd884ef63dce09c5e56c8088cb702ac89cff765f88d26fe11c3d471949f20194f61ffc773a97207c8124c29526a59e6fa0b34a52880e563a787da952ab808884f2a19b171abfb2882d473907f3ada086f20194c1d608bb39e078a99086e7564e89a7625ed86dca88e8a0ab45821912e88088df6c3d43080350518895a828c35680a0278088e2487fd89ca40b3488689accdbeb8d4d2e"
-	bodyRlx := hexutility.MustDecodeHex(bodyRlxHex)
+	bodyRlxHex := testdata.ValidSetCodeTxn2
+	bodyRlx := hexutil.MustDecodeHex(bodyRlxHex)
 
 	hasEnvelope := false
-	ctx := NewTxnParseContext(*uint256.NewInt(1))
+	ctx := NewTxnParseContext(*uint256.NewInt(11155111))
 	ctx.withSender = false
 
 	var txn TxnSlot
@@ -377,12 +344,12 @@ func TestSetCodeTxnParsing(t *testing.T) {
 
 	_, err = ctx.ParseTransaction(bodyRlx, 0, &txn, nil, hasEnvelope, false, nil)
 	require.NoError(t, err)
-	assert.Equal(t, 4, len(txn.Authorizations))
+	assert.Equal(t, 2, len(txn.Authorities))
 	assert.Equal(t, SetCodeTxnType, txn.Type)
 
 	// test empty authorizations
 	bodyRlxHex = "0x04f903420188db1b29114eba96ab887145908699cc1f3488987b96c0c55fced7886b85e4937b481442949a60a150fda306891ad7aff6d47584c8a0e1571788c5f7682286d452e0b9021164b57ad1f652639f5d44536f1b868437787082df48b3e2a684742d0eafcfda5336e7a958afb22ae57aad8e9a271528f9aa1f4a34e29491a8929732e22c04a438578b2b8510862572dd36b5304a9c3b6668b7c8f818be8411c07866ccb1fbe34586f80a1ace62753b918139acefc71f92d0c4679c0a56bb6c8ae38bc37a7ee8f348255c8ada95e842b52d4bd2b2447789a8543beda9f3bc8e27f28d51373ef9b1494c3d21adc6b0416444088ed08834eb5736d48566da000356bbcd7d78b118c39d15a56874fd254dcfcc172cd7a82e36621b964ebc54fdaa64de9e381b1545cfc7c4ea1cfccff829f0dfa395ef5f750b79689e5c8e3f6c7de9afe34d05f599dac8e3ae999f7acb32f788991425a7d8b36bf92a7dc14d913c3cc5854e580f48d507bf06018f3d012155791e1930791afccefe46f268b59e023ddacaf1e8278026a4c962f9b968f065e7c33d98d2aea49e8885ac77bfcc952e322c5e414cb5b4e7477829c0a4b8b0964fc28d202bca1b3bedca34f3fe12d62629b30a4764121440d0ea0f50f26579c486070d00309a44c14f6c3347c5d14b520eca8a399a1cd3c421f28ae5485e96b4c500a411754a78f558701d1a9788d22e6d2f02fefd1c45c2d427b518adda66a34432c3f94b4b3811e2d063dca2917f403033b0400e4e9dc3fd327b10a43a15229332596671d0392e501c39f43b23f814e95b093e981418091f9e2a32013ab8fa7a409d5636b52fded6f8d5f794de688ae4be9a54b20eb5366903223863de2bc895e1a0f5ecb3956919b8e9e9956c20c89b523e71c5803592c99871b7d5ee025e402941f89b94ae16863cc3bf6e6946f186d0f63d77343f81363ef884a0b09afe54c0376e3e3091473edb4e2bf43f08530356a2c9236bf373869b79c8d0a0ec2c57ca577173865f340a7cd13cf0051e52229722e3a529f851d4b74e315c8ca00bbe5f1a1ef2e5830d0c5cb8e93a05d4d29b4d7bf244ceea432888c4fbd5d5d5a0823b7ceaeba3a4cd70572c2ccc560d588ffeed638aec7c0cc364afa7dbf1c51cc0018818848492f65ca7bd88ea2017dc526fff7f"
-	bodyRlx = hexutility.MustDecodeHex(bodyRlxHex)
+	bodyRlx = hexutil.MustDecodeHex(bodyRlxHex)
 	ctx = NewTxnParseContext(*uint256.NewInt(1))
 	ctx.withSender = false
 	var tx2 TxnSlot
@@ -393,7 +360,7 @@ func TestSetCodeTxnParsing(t *testing.T) {
 
 	_, err = ctx.ParseTransaction(bodyRlx, 0, &tx2, nil, hasEnvelope, false, nil)
 	require.NoError(t, err)
-	assert.Equal(t, 0, len(tx2.Authorizations))
+	assert.Equal(t, 0, len(tx2.Authorities))
 	assert.Equal(t, SetCodeTxnType, tx2.Type)
 
 	// generated using this in core/types/encdec_test.go
@@ -419,7 +386,7 @@ func TestSetCodeTxnParsing(t *testing.T) {
 				t.Error(err)
 			}
 
-			hex := hexutility.Bytes(w.Bytes()).String()
+			hex := hexutil.Bytes(w.Bytes()).String()
 			//hex := libcommon.BytesToHash().Hex()
 			authj, err := json.Marshal(txn.(*SetCodeTransaction).GetAuthorizations())
 			if err != nil {
@@ -458,12 +425,12 @@ func TestSetCodeTxnParsingWithLargeAuthorizationValues(t *testing.T) {
 				t.Error(err)
 			}
 
-			hex := hexutility.Bytes(w.Bytes()).String()
+			hex := hexutil.Bytes(w.Bytes()).String()
 			fmt.Println("txn.", hex)
 		}
 	*/
 	bodyRlxHex := "0x04f90546018820d75f30c9812472883efdaaf328683c8f88791ecd238942f142882f6a9ebaec6c1af49484d85e90da36f0392202193df1101863eb895d498883bf224e11f95355b902540e61088a043ef305b21d1bab6e4c14edeae66b3c0d6c183e423324c562b33b98ca2900d6a0adc2c13fdce4835debb623bf9f02860959bf589e88392a98a57db341a182e7d063945aaa4153010dd1d58d508d27ddd07e82b2f95af341b76b3acfbe00fde8d890867b6794ac95a4096dccbfaf9f92f446d6e4f3a718185f875ce49308ad24cf8b7316f1a73da7fb626e92e7d45d3b6ffeb2e3d153e92bc2499ccd8a43a6295db0be96dffcb857ed409b3e4f29a126e38982bf927efa9e637f670f631b36795dc158cb32069e846f28e4721b9d3004c6951075bf14f27e9f81dfa409e344e713143da8b8b35bd5ebfbc2b5c1e6909fadc7a5681ca63ecd387b745bbd3fff1169308a02e313671f2e5e5e914e8085236112fe12ae52403f54a95230c5807e5697b34bea0bf932a8cd45b6bf7ac1b318c594de85c523b1b82358ee8fce4f94d04bc30369c5a5482668a354bb36bb0f6e8943662be124cc3650f8e563a9c62808fb65444f425ff274974cd6cce771e67c2d45a95431a731ae0db60ef83793d9c257d48a24dae64e43870ecaf56a7f3e95415cdaacee3da94ad569e430ba4cdf5f0ac7cd8bd2e5507a1d0f16849e1d1823fcce1670c861b591051170c60883a32c23bc0a552415203baad7d1a6d44e3229956387ae014e944dbd7b918fa1c52fc7a4ee1ea813f1ba4a1bdedd7a23b4a93faca01eb1127d51953603eae70499d485dc3c8633b778dbae199158e03977b003a9da717ae8f31780949c53f82c5d09dd7428747426f77e39349dcd4fb8e3793d6a46cd4e9be6d6614b285d79e772bae41fb8a1625d23b38cef14911092e78c86f901f0f85994e805c10b96ec670ff8d6b684ed413eb71babf735f842a0e1b6f8621d3f4513ac7d491849fdcf3a8264e6cf4a1503357414a38682662555a027d3e5a0f5e7478629ef06e831162a8e99c4d9cd973919e21c162d29ac1410e6f87a94a5bfb70f5ffb19b2b2173e2d80a1bbfb6ff10dc4f863a0e129afdd8d7ac6e5c52708e658ded4859b06f1b483497e0474f6599b72dd2f75a0a7169872faa1fdfc3c2d80c207bc64ae817301b4087979563ef690b02b0d7964a0fe009fc656d1f0fcfc1c7c93b7ab67bdc9dd06f06a37fdaecbd43ed5d1423a11f87a94feae80b40ef29bdd926061a9000c1b0875cb0be3f863a0a5a381867886a9780e6f955d62cf73849e338918751dba1442d632fccb8d52a8a0ee8501f7bbc25d0dde1f60771167abc421be099cf0ec07636f4e5092f8f6b66ba0660a025a421dd73f4747e3a262a726ab8ff76b893c23e4d595ac50c86b9ae8c0f89b94d94f45974bbdb5d2e27419b5202fd2eec115fe26f884a04ee78854a71d2c0965a62080f2cff53b788a3dc0f8c6a55bf0535e0197a8ba77a08eb0010ea0fbe6e9251421dcbc26d83abe55bc24c6466b1833365dd87b253623a0040fa96b15c24f6a6e6dfd1e7be34b7fb58e8cfc26e4ed16b45d8eb567b60089a0cbfa955cc7c5435e0b6694e1a3d64d773a8baa3c4a85d6eddad407dbff5e645df8a4f8a2a0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff942d9986714cb0a7f215d435013a08af34c42406be88ffffffffffffffffa0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffa0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffa0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff01886417de6405dde7ee88813b5026c7af887a"
-	bodyRlx := hexutility.MustDecodeHex(bodyRlxHex)
+	bodyRlx := hexutil.MustDecodeHex(bodyRlxHex)
 
 	ctx := NewTxnParseContext(*uint256.NewInt(1))
 	ctx.withSender = false

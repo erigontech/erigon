@@ -620,3 +620,42 @@ func (c *MockClientFetchStateSyncEventsCall) DoAndReturn(f func(context.Context,
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
+
+// FetchStatus mocks base method.
+func (m *MockClient) FetchStatus(ctx context.Context) (*Status, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FetchStatus", ctx)
+	ret0, _ := ret[0].(*Status)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FetchStatus indicates an expected call of FetchStatus.
+func (mr *MockClientMockRecorder) FetchStatus(ctx any) *MockClientFetchStatusCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchStatus", reflect.TypeOf((*MockClient)(nil).FetchStatus), ctx)
+	return &MockClientFetchStatusCall{Call: call}
+}
+
+// MockClientFetchStatusCall wrap *gomock.Call
+type MockClientFetchStatusCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockClientFetchStatusCall) Return(arg0 *Status, arg1 error) *MockClientFetchStatusCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockClientFetchStatusCall) Do(f func(context.Context) (*Status, error)) *MockClientFetchStatusCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockClientFetchStatusCall) DoAndReturn(f func(context.Context) (*Status, error)) *MockClientFetchStatusCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}

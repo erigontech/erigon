@@ -70,6 +70,7 @@ func (r *HistoricalStatesReader) attestingIndicies(attestation *solid.Attestatio
 	var (
 		committeeBits   = attestation.CommitteeBits
 		aggregationBits = attestation.AggregationBits
+		aggrBitsLen     = aggregationBits.Bits()
 		attesters       = []uint64{}
 	)
 	committeeOffset := 0
@@ -82,14 +83,15 @@ func (r *HistoricalStatesReader) attestingIndicies(attestation *solid.Attestatio
 			return nil, err
 		}
 		for i, member := range committee {
-			if i >= aggregationBits.Bits() {
-				return nil, errors.New("GetAttestingIndicies: committee is too big")
+			if i >= aggrBitsLen {
+				return nil, fmt.Errorf("attestingIndicies: committee is too big, committeeOffset: %d, aggrBitsLen: %d, committeeSize: %d",
+					committeeOffset, aggrBitsLen, len(committee))
 			}
 			if aggregationBits.GetBitAt(committeeOffset + i) {
 				attesters = append(attesters, member)
 			}
-			committeeOffset += len(committee)
 		}
+		committeeOffset += len(committee)
 	}
 	return attesters, nil
 }

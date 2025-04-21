@@ -23,11 +23,11 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/execution/consensus"
 )
 
 // applyTransaction attempts to apply a transaction to the given state database
@@ -37,6 +37,11 @@ import (
 func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *GasPool, ibs *state.IntraBlockState,
 	stateWriter state.StateWriter, header *types.Header, txn types.Transaction, usedGas, usedBlobGas *uint64,
 	evm *vm.EVM, cfg vm.Config) (*types.Receipt, []byte, error) {
+	var (
+		receipt *types.Receipt
+		err     error
+	)
+
 	rules := evm.ChainRules()
 	blockNum := header.Number.Uint64()
 	msg, err := txn.AsMessage(*types.MakeSigner(config, blockNum, header.Time), header.BaseFee, rules)
@@ -45,12 +50,15 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 	}
 	msg.SetCheckNonce(!cfg.StatelessExec)
 
-	if msg.FeeCap().IsZero() && engine != nil {
-		// Only zero-gas transactions may be service ones
-		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			return SysCallContract(contract, data, config, ibs, header, engine, true /* constCall */)
+	if cfg.Tracer != nil {
+		if cfg.Tracer.OnTxStart != nil {
+			cfg.Tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())
 		}
-		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
+		if cfg.Tracer.OnTxEnd != nil {
+			defer func() {
+				cfg.Tracer.OnTxEnd(receipt, err)
+			}()
+		}
 	}
 
 	txContext := NewEVMTxContext(msg)
@@ -60,7 +68,7 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 
 	// Update the evm with the new transaction context.
 	evm.Reset(txContext, ibs)
-	result, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
+	result, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -76,7 +84,6 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 
 	// Set the receipt logs and create the bloom filter.
 	// based on the eip phase, we're passing whether the root touch-delete accounts.
-	var receipt *types.Receipt
 	if !cfg.NoReceipts {
 		// by the txn
 		receipt = &types.Receipt{Type: txn.Type(), CumulativeGasUsed: *usedGas}
@@ -147,7 +154,9 @@ func applyArbTransaction(config *chain.Config, engine consensus.EngineReader, gp
 	if msg.FeeCap().IsZero() && engine != nil {
 		// Only zero-gas transactions may be service ones
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			return SysCallContract(contract, data, config, ibs, header, engine, true /* constCall */)
+			b, logs, err := SysCallContract(contract, data, config, ibs, header, engine, true /* constCall */, evm.Config().Tracer)
+			_ = logs
+			return b, err
 		}
 		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 	}
@@ -159,7 +168,7 @@ func applyArbTransaction(config *chain.Config, engine consensus.EngineReader, gp
 
 	// Update the evm with the new transaction context.
 	evm.Reset(txContext, ibs)
-	result, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
+	result, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, nil)
 	if err != nil {
 		return nil, nil, err
 	}

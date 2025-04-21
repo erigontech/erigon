@@ -37,13 +37,13 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state3 "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/accounts/abi/bind"
-	"github.com/erigontech/erigon/accounts/abi/bind/backends"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/state/contracts"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/execution/abi/bind"
+	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -1368,7 +1368,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	sd.SetBlockNum(1)
 
 	trieCode, tcErr := r.ReadAccountCode(contract, 1)
-	assert.NoError(t, tcErr, "you can receive the new code")
+	require.NoError(t, tcErr, "you can receive the new code")
 	assert.Equal(t, oldCode, trieCode, "new code should be received")
 
 	newCode := []byte{0x04, 0x04, 0x04, 0x04}
@@ -1379,7 +1379,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	}
 
 	trieCode, tcErr = r.ReadAccountCode(contract, 1)
-	assert.NoError(t, tcErr, "you can receive the new code")
+	require.NoError(t, tcErr, "you can receive the new code")
 	assert.Equal(t, newCode, trieCode, "new code should be received")
 
 	rh2, err := sd.ComputeCommitment(context.Background(), true, 1, "")
@@ -1416,11 +1416,11 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	}
 
 	codeSize, err := r.ReadAccountCodeSize(contract, 1)
-	assert.NoError(t, err, "you can receive the new code")
+	require.NoError(t, err, "you can receive the new code")
 	assert.Equal(t, len(code), codeSize, "new code should be received")
 
 	code2, err := r.ReadAccountCode(contract, 1)
-	assert.NoError(t, err, "you can receive the new code")
+	require.NoError(t, err, "you can receive the new code")
 	assert.Equal(t, code, code2, "new code should be received")
 }
 
@@ -1459,13 +1459,13 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 
 	codeHash := libcommon.BytesToHash(crypto.Keccak256(code))
 	codeSize, err := r.ReadAccountCodeSize(contract, 1)
-	assert.NoError(t, err, "you can receive the code size ")
+	require.NoError(t, err, "you can receive the code size ")
 	assert.Equal(t, len(code), codeSize, "you can receive the code size")
 
-	assert.NoError(t, tx.Delete(kv.Code, codeHash[:]), nil)
+	require.NoError(t, tx.Delete(kv.Code, codeHash[:]), nil)
 
 	codeSize2, err := r.ReadAccountCodeSize(contract, 1)
-	assert.NoError(t, err, "you can still receive code size even with empty DB")
+	require.NoError(t, err, "you can still receive code size even with empty DB")
 	assert.Equal(t, len(code), codeSize2, "code size should be received even with empty DB")
 
 	r2, err = sd.ComputeCommitment(context.Background(), true, 1, "")

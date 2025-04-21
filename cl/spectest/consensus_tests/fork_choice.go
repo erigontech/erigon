@@ -23,19 +23,22 @@ import (
 	"math"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/spectest"
-
 	"github.com/spf13/afero"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/chain/networkid"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
@@ -43,13 +46,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/spectest"
 )
 
 func (f *ForkChoiceStep) StepType() string {
@@ -198,19 +195,18 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	anchorState, err := spectest.ReadBeaconState(root, c.Version(), "anchor_state.ssz_snappy")
 	require.NoError(t, err)
 
-	genesisState, err := initial_state.GetGenesisState(clparams.MainnetNetwork)
+	genesisState, err := initial_state.GetGenesisState(networkid.MainnetChainID)
 	require.NoError(t, err)
 
 	emitters := beaconevents.NewEventEmitter()
-	_, beaconConfig := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
+	_, beaconConfig := clparams.GetConfigsByNetwork(networkid.MainnetChainID)
 	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), beaconConfig)
 	blobStorage := blob_storage.NewBlobStore(memdb.New("/tmp", kv.ChainDB), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
 
-	validatorMonitor := monitor.NewValidatorMonitor(false, nil, nil, nil)
 	forkStore, err := forkchoice.NewForkChoiceStore(
 		ethClock, anchorState, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig),
 		fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}, emitters),
-		emitters, synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true), blobStorage, validatorMonitor, public_keys_registry.NewInMemoryPublicKeysRegistry(), false)
+		emitters, synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true), blobStorage, public_keys_registry.NewInMemoryPublicKeysRegistry(), false)
 	require.NoError(t, err)
 	forkStore.SetSynced(true)
 

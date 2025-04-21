@@ -35,12 +35,12 @@ import (
 type CommonTx struct {
 	TransactionMisc
 
-	Nonce   uint64             // nonce of sender account
-	Gas     uint64             // gas limit
-	To      *libcommon.Address `rlp:"nil"` // nil means contract creation
-	Value   *uint256.Int       // wei amount
-	Data    []byte             // contract invocation input data
-	V, R, S uint256.Int        // signature values
+	Nonce    uint64             // nonce of sender account
+	GasLimit uint64             // gas limit
+	To       *libcommon.Address `rlp:"nil"` // nil means contract creation
+	Value    *uint256.Int       // wei amount
+	Data     []byte             // contract invocation input data
+	V, R, S  uint256.Int        // signature values
 }
 
 func (ct *CommonTx) GetNonce() uint64 {
@@ -55,8 +55,8 @@ func (ct *CommonTx) GetBlobGas() uint64 {
 	return 0
 }
 
-func (ct *CommonTx) GetGas() uint64 {
-	return ct.Gas
+func (ct *CommonTx) GetGasLimit() uint64 {
+	return ct.GasLimit
 }
 
 func (ct *CommonTx) GetValue() *uint256.Int {
@@ -97,12 +97,11 @@ type LegacyTx struct {
 	GasPrice *uint256.Int // wei per gas
 }
 
-func (tx *LegacyTx) GetPrice() *uint256.Int  { return tx.GasPrice }
-func (tx *LegacyTx) GetTip() *uint256.Int    { return tx.GasPrice }
+func (tx *LegacyTx) GetTipCap() *uint256.Int { return tx.GasPrice }
 func (tx *LegacyTx) GetFeeCap() *uint256.Int { return tx.GasPrice }
 func (tx *LegacyTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	if baseFee == nil {
-		return tx.GetTip()
+		return tx.GetTipCap()
 	}
 	gasFeeCap := tx.GetFeeCap()
 	// return 0 because effectiveFee cant be < 0
@@ -110,8 +109,8 @@ func (tx *LegacyTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 		return uint256.NewInt(0)
 	}
 	effectiveFee := new(uint256.Int).Sub(gasFeeCap, baseFee)
-	if tx.GetTip().Lt(effectiveFee) {
-		return tx.GetTip()
+	if tx.GetTipCap().Lt(effectiveFee) {
+		return tx.GetTipCap()
 	} else {
 		return effectiveFee
 	}
@@ -134,11 +133,11 @@ func (tx *LegacyTx) Unwrap() Transaction {
 func NewTransaction(nonce uint64, to libcommon.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, data []byte) *LegacyTx {
 	return &LegacyTx{
 		CommonTx: CommonTx{
-			Nonce: nonce,
-			To:    &to,
-			Value: amount,
-			Gas:   gasLimit,
-			Data:  data,
+			Nonce:    nonce,
+			To:       &to,
+			Value:    amount,
+			GasLimit: gasLimit,
+			Data:     data,
 		},
 		GasPrice: gasPrice,
 	}
@@ -149,10 +148,10 @@ func NewTransaction(nonce uint64, to libcommon.Address, amount *uint256.Int, gas
 func NewContractCreation(nonce uint64, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, data []byte) *LegacyTx {
 	return &LegacyTx{
 		CommonTx: CommonTx{
-			Nonce: nonce,
-			Value: amount,
-			Gas:   gasLimit,
-			Data:  data,
+			Nonce:    nonce,
+			Value:    amount,
+			GasLimit: gasLimit,
+			Data:     data,
 		},
 		GasPrice: gasPrice,
 	}
@@ -166,7 +165,7 @@ func (tx *LegacyTx) copy() *LegacyTx {
 			Nonce:           tx.Nonce,
 			To:              tx.To, // TODO: copy pointed-to address
 			Data:            libcommon.CopyBytes(tx.Data),
-			Gas:             tx.Gas,
+			GasLimit:        tx.GasLimit,
 			// These are initialized below.
 			Value: new(uint256.Int),
 		},
@@ -196,7 +195,7 @@ func (tx *LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(tx.GasPrice)
 	payloadSize++
-	gasLen = rlp.IntLenExcludingHead(tx.Gas)
+	gasLen = rlp.IntLenExcludingHead(tx.GasLimit)
 	payloadSize += gasLen
 	payloadSize++
 	if tx.To != nil {
@@ -246,7 +245,7 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, 
 	if err := rlp.EncodeUint256(tx.GasPrice, w, b); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(tx.Gas, w, b); err != nil {
+	if err := rlp.EncodeInt(tx.GasLimit, w, b); err != nil {
 		return err
 	}
 	if tx.To == nil {
@@ -304,8 +303,8 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read GasPrice: %w", err)
 	}
 	tx.GasPrice = new(uint256.Int).SetBytes(b)
-	if tx.Gas, err = s.Uint(); err != nil {
-		return fmt.Errorf("read Gas: %w", err)
+	if tx.GasLimit, err = s.Uint(); err != nil {
+		return fmt.Errorf("read GasLimit: %w", err)
 	}
 	if b, err = s.Bytes(); err != nil {
 		return fmt.Errorf("read To: %w", err)
@@ -343,12 +342,12 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
 }
 
 // AsMessage returns the transaction as a core.Message.
-func (tx *LegacyTx) AsMessage(s Signer, _ *big.Int, _ *chain.Rules) (Message, error) {
+func (tx *LegacyTx) AsMessage(s Signer, _ *big.Int, _ *chain.Rules) (*Message, error) {
 	msg := Message{
 		nonce:      tx.Nonce,
-		gasLimit:   tx.Gas,
+		gasLimit:   tx.GasLimit,
 		gasPrice:   *tx.GasPrice,
-		tip:        *tx.GasPrice,
+		tipCap:     *tx.GasPrice,
 		feeCap:     *tx.GasPrice,
 		to:         tx.To,
 		amount:     *tx.Value,
@@ -360,7 +359,7 @@ func (tx *LegacyTx) AsMessage(s Signer, _ *big.Int, _ *chain.Rules) (Message, er
 
 	var err error
 	msg.from, err = tx.Sender(s)
-	return msg, err
+	return &msg, err
 }
 
 func (tx *LegacyTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
@@ -383,7 +382,7 @@ func (tx *LegacyTx) Hash() libcommon.Hash {
 	hash := rlpHash([]interface{}{
 		tx.Nonce,
 		tx.GasPrice,
-		tx.Gas,
+		tx.GasLimit,
 		tx.To,
 		tx.Value,
 		tx.Data,
@@ -398,7 +397,7 @@ func (tx *LegacyTx) SigningHash(chainID *big.Int) libcommon.Hash {
 		return rlpHash([]interface{}{
 			tx.Nonce,
 			tx.GasPrice,
-			tx.Gas,
+			tx.GasLimit,
 			tx.To,
 			tx.Value,
 			tx.Data,
@@ -408,7 +407,7 @@ func (tx *LegacyTx) SigningHash(chainID *big.Int) libcommon.Hash {
 	return rlpHash([]interface{}{
 		tx.Nonce,
 		tx.GasPrice,
-		tx.Gas,
+		tx.GasLimit,
 		tx.To,
 		tx.Value,
 		tx.Data,

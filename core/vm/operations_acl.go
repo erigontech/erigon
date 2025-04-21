@@ -24,12 +24,11 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-lib/chain/params"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
-
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/stack"
-	"github.com/erigontech/erigon/params"
 )
 
 func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
@@ -168,7 +167,7 @@ func makeCallVariantGasCallEIP2929(oldCalculator gasFunc) gasFunc {
 		if addrMod {
 			// Charge the remaining difference here already, to correctly calculate available
 			// gas for call
-			if !contract.UseGas(coldCost, tracing.GasChangeCallStorageColdAccess) {
+			if !contract.UseGas(coldCost, evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess) {
 				return 0, ErrOutOfGas
 			}
 		}
@@ -272,7 +271,7 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 			dynCost = params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
 			// Charge the remaining difference here already, to correctly calculate available
 			// gas for call
-			if !contract.UseGas(dynCost, tracing.GasChangeCallStorageColdAccess) {
+			if !contract.UseGas(dynCost, evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess) {
 				return 0, ErrOutOfGas
 			}
 		}
@@ -290,7 +289,7 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 				ddCost = params.WarmStorageReadCostEIP2929
 			}
 
-			if !contract.UseGas(ddCost, tracing.GasChangeDelegatedDesignation) {
+			if !contract.UseGas(ddCost, evm.Config().Tracer, tracing.GasChangeDelegatedDesignation) {
 				return 0, ErrOutOfGas
 			}
 			dynCost += ddCost

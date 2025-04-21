@@ -31,7 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
@@ -53,17 +53,16 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	salt := uint32(1)
 	cfg := Schema[kv.AccountsDomain]
 
-	cfg.hist.iiCfg.aggregationStep = 16
 	cfg.hist.iiCfg.dirs = dirs
 	cfg.hist.iiCfg.salt = &salt
 
 	cfg.hist.historyLargeValues = largeValues
 
 	//perf of tests
-	cfg.hist.iiCfg.withExistence = false
 	cfg.hist.iiCfg.compression = seg.CompressNone
 	cfg.hist.compression = seg.CompressNone
-	h, err := NewHistory(cfg.hist, logger)
+	aggregationStep := uint64(16)
+	h, err := NewHistory(cfg.hist, aggregationStep, logger)
 	require.NoError(tb, err)
 	h.DisableFsync()
 	tb.Cleanup(db.Close)
@@ -1287,18 +1286,18 @@ func TestIterateChanged2(t *testing.T) {
 			require.NoError(err)
 			defer tx.Rollback()
 
-			v, ok, err := hc.HistorySeek(hexutility.MustDecodeHex("0100000000000001"), 900, tx)
+			v, ok, err := hc.HistorySeek(hexutil.MustDecodeHex("0100000000000001"), 900, tx)
 			require.NoError(err)
 			require.True(ok)
-			require.Equal(hexutility.MustDecodeHex("ff00000000000383"), v)
-			v, ok, err = hc.HistorySeek(hexutility.MustDecodeHex("0100000000000001"), 0, tx)
+			require.Equal(hexutil.MustDecodeHex("ff00000000000383"), v)
+			v, ok, err = hc.HistorySeek(hexutil.MustDecodeHex("0100000000000001"), 0, tx)
 			require.NoError(err)
 			require.True(ok)
 			require.Equal([]byte{}, v)
-			v, ok, err = hc.HistorySeek(hexutility.MustDecodeHex("0100000000000001"), 1000, tx)
+			v, ok, err = hc.HistorySeek(hexutil.MustDecodeHex("0100000000000001"), 1000, tx)
 			require.NoError(err)
 			require.True(ok)
-			require.Equal(hexutility.MustDecodeHex("ff000000000003e7"), v)
+			require.Equal(hexutil.MustDecodeHex("ff000000000003e7"), v)
 			_ = testCases
 		})
 		t.Run("after merge", func(t *testing.T) {
@@ -1341,18 +1340,18 @@ func TestIterateChanged2(t *testing.T) {
 			require.NoError(err)
 			defer tx.Rollback()
 
-			v, ok, err := hc.HistorySeek(hexutility.MustDecodeHex("0100000000000001"), 900, tx)
+			v, ok, err := hc.HistorySeek(hexutil.MustDecodeHex("0100000000000001"), 900, tx)
 			require.NoError(err)
 			require.True(ok)
-			require.Equal(hexutility.MustDecodeHex("ff00000000000383"), v)
-			v, ok, err = hc.HistorySeek(hexutility.MustDecodeHex("0100000000000001"), 0, tx)
+			require.Equal(hexutil.MustDecodeHex("ff00000000000383"), v)
+			v, ok, err = hc.HistorySeek(hexutil.MustDecodeHex("0100000000000001"), 0, tx)
 			require.NoError(err)
 			require.True(ok)
 			require.Equal([]byte{}, v)
-			v, ok, err = hc.HistorySeek(hexutility.MustDecodeHex("0100000000000001"), 1000, tx)
+			v, ok, err = hc.HistorySeek(hexutil.MustDecodeHex("0100000000000001"), 1000, tx)
 			require.NoError(err)
 			require.True(ok)
-			require.Equal(hexutility.MustDecodeHex("ff000000000003e7"), v)
+			require.Equal(hexutil.MustDecodeHex("ff000000000003e7"), v)
 		})
 	}
 	t.Run("large_values", func(t *testing.T) {

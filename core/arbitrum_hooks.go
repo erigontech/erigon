@@ -35,12 +35,12 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/arb/arbitrum_types"
-	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/event"
+	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/rpc"
 )
 

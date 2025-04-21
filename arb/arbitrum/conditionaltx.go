@@ -5,8 +5,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
+	"github.com/erigontech/erigon/rpc/jsonrpc"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -67,5 +66,5 @@ func SendConditionalTransactionRPC(ctx context.Context, rpc *rpc.Client, tx type
 	if err := tx.MarshalBinary(buf); err != nil {
 		return err
 	}
-	return rpc.CallContext(ctx, nil, "eth_sendRawTransactionConditional", hexutility.Encode(buf.Bytes()), options)
+	return rpc.CallContext(ctx, nil, "eth_sendRawTransactionConditional", hexutil.Encode(buf.Bytes()), options)
 }

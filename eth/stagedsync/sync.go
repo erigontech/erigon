@@ -520,6 +520,7 @@ func CollectTableSizes(db kv.RoDB, tx kv.Tx, buckets []string) []interface{} {
 
 func (s *Sync) runStage(stage *Stage, db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bool, badBlockUnwind bool) (err error) {
 	start := time.Now()
+	s.logger.Debug(fmt.Sprintf("[%s] Starting Stage run", s.LogPrefix()))
 	stageState, err := s.StageState(stage.ID, txc.Tx, db, initialCycle, firstCycle)
 	if err != nil {
 		return err

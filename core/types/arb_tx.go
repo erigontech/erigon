@@ -83,7 +83,7 @@ func (tx *ArbTx) encodeTyped(w *bytes.Buffer) error {
 	return tx.inner.EncodeRLP(w)
 }
 
-func (tx *ArbTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
+func (tx *ArbTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
 	msg, err := tx.Tx.AsMessage(s, baseFee, rules)
 	if err == nil {
 		msg.Tx = tx
@@ -250,13 +250,14 @@ func (tx *ArbTx) Data() []byte { return tx.inner.GetData() }
 func (tx *ArbTx) AccessList() AccessList { return tx.inner.GetAccessList() }
 
 // Gas returns the gas limit of the transaction.
-func (tx *ArbTx) Gas() uint64 { return tx.inner.GetGas() }
+func (tx *ArbTx) Gas() uint64 { return tx.inner.GetGasLimit() }
 
 // GasPrice returns the gas price of the transaction.
-func (tx *ArbTx) GasPrice() *big.Int { return new(big.Int).Set(tx.inner.GetPrice().ToBig()) }
+// TODO same as .GasFeeCap()?
+func (tx *ArbTx) GasPrice() *big.Int { return new(big.Int).Set(tx.inner.GetFeeCap().ToBig()) }
 
 // GasTipCap returns the gasTipCap per gas of the transaction.
-func (tx *ArbTx) GasTipCap() *big.Int { return new(big.Int).Set(tx.inner.GetTip().ToBig()) }
+func (tx *ArbTx) GasTipCap() *big.Int { return new(big.Int).Set(tx.inner.GetTipCap().ToBig()) }
 
 // GasFeeCap returns the fee cap per gas of the transaction.
 func (tx *ArbTx) GasFeeCap() *big.Int { return new(big.Int).Set(tx.inner.GetFeeCap().ToBig()) }
@@ -295,12 +296,12 @@ func (tx *ArbTx) GasFeeCapIntCmp(other *big.Int) int {
 
 // GasTipCapCmp compares the gasTipCap of two transactions.
 func (tx *ArbTx) GasTipCapCmp(other *ArbTx) int {
-	return tx.inner.GetTip().Cmp(other.inner.GetTip())
+	return tx.inner.GetTipCap().Cmp(other.inner.GetTipCap())
 }
 
 // GasTipCapIntCmp compares the gasTipCap of the transaction against the given gasTipCap.
 func (tx *ArbTx) GasTipCapIntCmp(other *big.Int) int {
-	return tx.inner.GetTip().ToBig().Cmp(other)
+	return tx.inner.GetTipCap().ToBig().Cmp(other)
 }
 
 // EffectiveGasTip returns the effective miner gasTipCap for the given base fee.
@@ -629,10 +630,10 @@ func TransactionToMessage(tx Transaction, s ArbitrumSigner, baseFee *big.Int, ru
 		Tx:        tx,
 
 		nonce:    tx.GetNonce(),
-		gasLimit: tx.GetGas(),
-		gasPrice: *tx.GetPrice(),
+		gasLimit: tx.GetGasLimit(),
+		gasPrice: *tx.GetFeeCap(),
 		feeCap:   *tx.GetFeeCap(),
-		tip:      *tx.GetTip(),
+		tipCap:   *tx.GetTipCap(),
 		to:       tx.GetTo(),
 		// value:             tx.GetValue(),
 		amount:            *tx.GetValue(), // TODO amount is value?
@@ -645,7 +646,7 @@ func TransactionToMessage(tx Transaction, s ArbitrumSigner, baseFee *big.Int, ru
 	}
 	// If baseFee provided, set gasPrice to effectiveGasPrice.
 	if baseFee != nil {
-		msg.gasPrice.SetFromBig(cmath.BigMin(msg.gasPrice.ToBig().Add(msg.tip.ToBig(), baseFee), msg.feeCap.ToBig()))
+		msg.gasPrice.SetFromBig(cmath.BigMin(msg.gasPrice.ToBig().Add(msg.tipCap.ToBig(), baseFee), msg.feeCap.ToBig()))
 	}
 	msg.from, err = s.Sender(tx)
 	return msg, err

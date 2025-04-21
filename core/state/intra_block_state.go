@@ -251,7 +251,7 @@ func (sdb *IntraBlockState) Exist(addr libcommon.Address) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return s != nil && !s.deleted, err
+	return s != nil && !s.deleted, nil
 }
 
 // Empty returns whether the state object is either non-existent
@@ -474,7 +474,7 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 			sdb.balanceInc[addr] = bi
 		}
 
-		if sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil {
+		if !amount.IsZero() && sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil {
 			// TODO: discuss if we should ignore error
 			prev := new(uint256.Int)
 			account, _ := sdb.stateReader.ReadAccountDataForDebug(addr)

@@ -11,7 +11,6 @@ import (
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/holiman/uint256"
@@ -640,7 +639,7 @@ func (ec *Client) SendTransaction(ctx context.Context, tx types.Transaction) err
 	if err := tx.MarshalBinary(buf); err != nil {
 		return err
 	}
-	return ec.c.CallContext(ctx, nil, "eth_sendRawTransaction", hexutility.Encode(buf.Bytes()))
+	return ec.c.CallContext(ctx, nil, "eth_sendRawTransaction", hexutil.Encode(buf.Bytes()))
 }
 
 func toBlockNumArg(number *big.Int) string {
@@ -681,8 +680,8 @@ func toCallArg(msg ethereum.CallMsg) interface{} {
 	if msg.FeeCap != nil {
 		arg["maxFeePerGas"] = (*hexutil.Big)(msg.FeeCap.ToBig())
 	}
-	if msg.Tip != nil {
-		arg["maxPriorityFeePerGas"] = (*hexutil.Big)(msg.Tip.ToBig())
+	if msg.TipCap != nil {
+		arg["maxPriorityFeePerGas"] = (*hexutil.Big)(msg.TipCap.ToBig())
 	}
 	if msg.AccessList != nil {
 		arg["accessList"] = msg.AccessList

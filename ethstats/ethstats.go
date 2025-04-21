@@ -34,21 +34,19 @@ import (
 	"sync"
 	"time"
 
-	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-
 	"github.com/gorilla/websocket"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/turbo/services"
-
-	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/p2p/sentry"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 const (
@@ -595,9 +593,9 @@ func (s *Service) reportHistory(conn *connWrapper, list []uint64) error {
 	} else {
 		// No indexes requested, send back the top ones
 		headHash := rawdb.ReadHeadBlockHash(roTx)
-		headNumber, _ := s.blockReader.HeaderNumber(context.Background(), roTx, headHash)
-		if headNumber == nil {
-			return nil
+		headNumber, err := s.blockReader.HeaderNumber(context.Background(), roTx, headHash)
+		if headNumber == nil || err != nil {
+			return err
 		}
 		start := int(*headNumber - historyUpdateRange + 1)
 		if start < 0 {
@@ -615,12 +613,12 @@ func (s *Service) reportHistory(conn *connWrapper, list []uint64) error {
 		if err != nil {
 			return err
 		}
-		td, err := rawdb.ReadTd(roTx, block.Hash(), number)
-		if err != nil {
-			return err
-		}
 		// If we do have the block, add to the history and continue
 		if block != nil {
+			td, err := rawdb.ReadTd(roTx, block.Hash(), number)
+			if err != nil {
+				return err
+			}
 			history[len(history)-1-i] = s.assembleBlockStats(block, td)
 			continue
 		}

@@ -45,11 +45,11 @@ type OpContext interface {
 
 // IntraBlockState gives tracers access to the whole state.
 type IntraBlockState interface {
-	GetBalance(libcommon.Address) *uint256.Int
-	GetNonce(libcommon.Address) uint64
-	GetCode(libcommon.Address) []byte
-	GetState(addr libcommon.Address, key *libcommon.Hash, value *uint256.Int)
-	Exist(libcommon.Address) bool
+	GetBalance(libcommon.Address) (*uint256.Int, error)
+	GetNonce(libcommon.Address) (uint64, error)
+	GetCode(libcommon.Address) ([]byte, error)
+	GetState(addr libcommon.Address, key *libcommon.Hash, value *uint256.Int) error
+	Exist(libcommon.Address) (bool, error)
 	GetRefund() uint64
 }
 
@@ -65,6 +65,8 @@ type VMContext struct {
 	IntraBlockState IntraBlockState
 
 	TxHash libcommon.Hash
+
+	ArbOSVersion uint64 // arbitrum
 }
 
 // BlockEvent is emitted upon tracing an incoming block.
@@ -84,7 +86,7 @@ type (
 	// TxStartHook is called before the execution of a transaction starts.
 	// Call simulations don't come with a valid signature. `from` field
 	// to be used for address of the caller.
-	TxStartHook = func(vm *VMContext, txn types.Transaction, from libcommon.Address)
+	TxStartHook = func(vm *VMContext, txn types.Transaction, from libcommon.Address) // i think txn should be message, we can get rid of `ToTransaction` in callargs (api.go)
 
 	// TxEndHook is called after the execution of a transaction ends.
 	TxEndHook = func(receipt *types.Receipt, err error)
@@ -184,6 +186,7 @@ type Hooks struct {
 	OnCodeChange    CodeChangeHook
 	OnStorageChange StorageChangeHook
 	OnLog           LogHook
+	Flush           func(tx types.Transaction)
 }
 
 // BalanceChangeReason is used to indicate the reason for a balance change, useful

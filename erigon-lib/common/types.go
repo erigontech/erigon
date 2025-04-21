@@ -28,7 +28,6 @@ import (
 	"strings"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/length"
 )
 
@@ -93,7 +92,7 @@ func NewMixedcaseAddressFromString(hexaddr string) (*MixedcaseAddress, error) {
 
 // UnmarshalJSON parses MixedcaseAddress
 func (ma *MixedcaseAddress) UnmarshalJSON(input []byte) error {
-	if err := hexutility.UnmarshalFixedJSON(addressT, input, ma.addr[:]); err != nil {
+	if err := hexutil.UnmarshalFixedJSON(addressT, input, ma.addr[:]); err != nil {
 		return err
 	}
 	return json.Unmarshal(input, &ma.original)

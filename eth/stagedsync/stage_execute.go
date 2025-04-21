@@ -24,23 +24,19 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/kv/temporal"
 	"golang.org/x/sync/errgroup"
-
-	"github.com/erigontech/erigon/cmd/state/exec3"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
-
-	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/core/state"
@@ -48,7 +44,8 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/ethdb/prune"
+	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/silkworm"
@@ -132,8 +129,8 @@ func StageExecuteBlocksCfg(
 		historyV3:         true,
 		syncCfg:           syncCfg,
 		silkworm:          silkworm,
-		applyWorker:       exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, false),
-		applyWorkerMining: exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, true),
+		applyWorker:       exec3.NewWorker(nil, log.Root(), vmConfig.Tracer, context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, false),
+		applyWorkerMining: exec3.NewWorker(nil, log.Root(), vmConfig.Tracer, context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, true),
 	}
 }
 
@@ -159,7 +156,7 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 	}
 
 	parallel := txc.Tx == nil
-	if err := ExecV3(ctx, s, u, workersCount, cfg, txc, parallel, to, logger, initialCycle, isMining); err != nil {
+	if err := ExecV3(ctx, s, u, workersCount, cfg, txc, parallel, to, logger, cfg.vmConfig.Tracer, initialCycle, isMining); err != nil {
 		return err
 	}
 	return nil
@@ -178,7 +175,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	} else {
 		domains = txc.Doms
 	}
-	rs := state.NewStateV3(domains, logger)
+	rs := state.NewParallelExecutionState(domains, logger)
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, br))
 
@@ -215,7 +212,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 		}
 	}
 	if err := rs.Unwind(ctx, txc.Tx, u.UnwindPoint, txNum, accumulator, changeset); err != nil {
-		return fmt.Errorf("StateV3.Unwind(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
+		return fmt.Errorf("ParallelExecutionState.Unwind(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
 	}
 	if err := rawdb.DeleteNewerEpochs(txc.Tx, u.UnwindPoint+1); err != nil {
 		return fmt.Errorf("delete newer epochs: %w", err)
@@ -372,11 +369,18 @@ func unwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 		if !ok {
 			return fmt.Errorf("canonical hash not found %d", u.UnwindPoint)
 		}
+		header, err := cfg.blockReader.HeaderByHash(ctx, txc.Tx, hash)
+		if err != nil {
+			return fmt.Errorf("read canonical header of unwind point: %w", err)
+		}
+		if header == nil {
+			return fmt.Errorf("canonical header for unwind point not found: %s", hash)
+		}
 		txs, err := cfg.blockReader.RawTransactions(ctx, txc.Tx, u.UnwindPoint, s.BlockNumber)
 		if err != nil {
 			return err
 		}
-		accumulator.StartChange(u.UnwindPoint, hash, txs, true)
+		accumulator.StartChange(header, txs, true)
 	}
 
 	return unwindExec3(u, s, txc, ctx, cfg.blockReader, accumulator, logger)
@@ -391,7 +395,7 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		}
 		defer tx.Rollback()
 	}
-	if s.ForwardProgress > config3.MaxReorgDepthV3 && !cfg.syncCfg.AlwaysGenerateChangesets {
+	if s.ForwardProgress > uint64(dbg.MaxReorgDepth) && !cfg.syncCfg.AlwaysGenerateChangesets {
 		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
 		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
 		var pruneDiffsLimitOnChainTip = 1_000
@@ -403,7 +407,7 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		if err := rawdb.PruneTable(
 			tx,
 			kv.ChangeSets3,
-			s.ForwardProgress-config3.MaxReorgDepthV3,
+			s.ForwardProgress-uint64(dbg.MaxReorgDepth),
 			ctx,
 			pruneDiffsLimitOnChainTip,
 			pruneTimeout,
@@ -427,9 +431,27 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	pruneTimeout := 250 * time.Millisecond
 	if s.CurrentSyncCycle.IsInitialCycle {
 		pruneTimeout = 12 * time.Hour
+
+		// allow greedy prune on non-chain-tip
+		if err = tx.(*temporal.Tx).AggTx().(*libstate.AggregatorRoTx).GreedyPruneCommitHistory(ctx, tx, nil); err != nil {
+			return err
+		}
 	}
-	if _, err = tx.(*temporal.Tx).AggTx().(*libstate.AggregatorRoTx).PruneSmallBatches(ctx, pruneTimeout, tx); err != nil { // prune part of retired data, before commit
+
+	if _, err := tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, pruneTimeout); err != nil {
 		return err
+	}
+
+	// prune receipts cache
+	if cfg.syncCfg.PersistReceipts > 0 && s.ForwardProgress > cfg.syncCfg.PersistReceipts {
+		pruneTo := s.ForwardProgress - cfg.syncCfg.PersistReceipts
+		pruneLimit := 10
+		if s.CurrentSyncCycle.IsInitialCycle {
+			pruneLimit = -1
+		}
+		if err := rawdb.PruneReceiptsCache(tx, pruneTo, pruneLimit); err != nil {
+			return err
+		}
 	}
 
 	if err = s.Done(tx); err != nil {

@@ -35,7 +35,6 @@ var (
 	bigT    = reflect.TypeOf((*Big)(nil))
 	uintT   = reflect.TypeOf(Uint(0))
 	uint64T = reflect.TypeOf(Uint64(0))
-	bytesT  = reflect.TypeOf(Bytes(nil))
 )
 
 // UnmarshalFixedUnprefixedText decodes the input as a string with optional 0x prefix. The
@@ -220,25 +219,6 @@ func isString(input []byte) bool {
 	return len(input) >= 2 && input[0] == '"' && input[len(input)-1] == '"'
 }
 
-func bytesHave0xPrefix(input []byte) bool {
-	return len(input) >= 2 && input[0] == '0' && (input[1] == 'x' || input[1] == 'X')
-}
-
-func checkText(input []byte, wantPrefix bool) ([]byte, error) {
-	if len(input) == 0 {
-		return nil, nil // empty strings are allowed
-	}
-	if bytesHave0xPrefix(input) {
-		input = input[2:]
-	} else if wantPrefix {
-		return nil, ErrMissingPrefix
-	}
-	if len(input)%2 != 0 {
-		return nil, ErrOddLength
-	}
-	return input, nil
-}
-
 func checkNumberText(input []byte) (raw []byte, err error) {
 	if len(input) == 0 {
 		return nil, nil // empty strings are allowed
@@ -259,7 +239,11 @@ func checkNumberText(input []byte) (raw []byte, err error) {
 func wrapTypeError(err error, typ reflect.Type) error {
 	// keeping compatiblity with go ethereum tests
 	// nolint:errorlint
-	if _, ok := err.(*decError); ok {
+	//if _, ok := err.(*decError); ok {
+	//	return &json.UnmarshalTypeError{Value: err.Error(), Type: typ}
+	//}
+	var dec *decError
+	if errors.As(err, &dec) {
 		return &json.UnmarshalTypeError{Value: err.Error(), Type: typ}
 	}
 	return err
@@ -269,44 +253,14 @@ func errNonString(typ reflect.Type) error {
 	return &json.UnmarshalTypeError{Value: "non-string", Type: typ}
 }
 
-// Bytes marshals/unmarshals as a JSON string with 0x prefix.
-// The empty slice marshals as "0x".
-type Bytes []byte
-
-// MarshalText implements encoding.TextMarshaler
-func (b Bytes) MarshalText() ([]byte, error) {
-	result := make([]byte, len(b)*2+2)
-	copy(result, `0x`)
-	hex.Encode(result[2:], b)
-	return result, nil
-}
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (b *Bytes) UnmarshalJSON(input []byte) error {
+// UnmarshalFixedJSON decodes the input as a string with 0x prefix. The length of out
+// determines the required input length. This function is commonly used to implement the
+// UnmarshalJSON method for fixed-size types.
+func UnmarshalFixedJSON(typ reflect.Type, input, out []byte) error {
 	if !isString(input) {
-		return errNonString(bytesT)
+		return &json.UnmarshalTypeError{Value: "non-string", Type: typ}
 	}
-	return wrapTypeError(b.UnmarshalText(input[1:len(input)-1]), bytesT)
-}
-
-// UnmarshalText implements encoding.TextUnmarshaler.
-func (b *Bytes) UnmarshalText(input []byte) error {
-	raw, err := checkText(input, true)
-	if err != nil {
-		return err
-	}
-	dec := make([]byte, len(raw)/2)
-	if _, err = hex.Decode(dec, raw); err != nil {
-		err = mapError(err)
-	} else {
-		*b = dec
-	}
-	return err
-}
-
-// String returns the hex encoding of b.
-func (b Bytes) String() string {
-	return "0x" + hex.EncodeToString(b)
+	return wrapTypeError(UnmarshalFixedText(typ.String(), input[1:len(input)-1], out), typ)
 }
 
 // ImplementsGraphQLType returns true if Bytes implements the specified GraphQL type.
