@@ -132,7 +132,7 @@ func Get(key, compressedPage []byte, snappyEnabled bool) []byte {
 	keys := data[:vOffset]
 	vals := data[vOffset:]
 	vOffset = 0
-	fmt.Printf("[dbg] see(%x): %x, %x\n", key, keys, vals)
+	//fmt.Printf("[dbg] see(%x): %x, %x\n", key, keys, vals)
 
 	for i := 0; i < cnt*4; i += 4 {
 		kLen, vLen := be.Uint32(kLens[i:]), be.Uint32(vLens[i:])
