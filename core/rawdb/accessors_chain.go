@@ -1364,6 +1364,8 @@ func WriteReceiptCache(tx kv.TemporalPutDel, receipt *types.Receipt) error {
 		}
 
 		_, toWrite = compress.EncodeSnappyIfNeed(nil, toWrite, receiptCacheSnappy)
+	} else {
+		toWrite = []byte{}
 	}
 
 	if err := tx.DomainPut(kv.RCacheDomain, receiptCacheKey, nil, toWrite, nil, 0); err != nil {
