@@ -703,7 +703,8 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	collector.SortAndFlushInBackground(true)
 	defer bitmapdb.ReturnToPool64(bitmap)
 
-	log.Warn("[dbg] collate", "name", h.filenameBase, "sampling", h.historySampling)
+	var histKeyBuf []byte
+	//log.Warn("[dbg] collate", "name", h.filenameBase, "sampling", h.historySampling)
 	historyWriter := page.NewWriter(historyComp, h.historySampling, true)
 	loadBitmapsFunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		txNum := binary.BigEndian.Uint64(v)
@@ -736,7 +737,10 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 				} else {
 					val = nil
 				}
-				if err := historyWriter.Add(prevKey, val); err != nil {
+
+				histKeyBuf = historyKey(vTxNum, prevKey, histKeyBuf)
+				fmt.Printf("write: %x\n", histKeyBuf)
+				if err := historyWriter.Add(histKeyBuf, val); err != nil {
 					return fmt.Errorf("add %s history val [%x]: %w", h.filenameBase, prevKey, err)
 				}
 				continue
@@ -750,7 +754,9 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 				val = nil
 			}
 
-			if err := historyWriter.Add(keyBuf, val); err != nil {
+			histKeyBuf = historyKey(vTxNum, prevKey, histKeyBuf)
+			fmt.Printf("[dbg] write: %x, %x\n", keyBuf, val)
+			if err := historyWriter.Add(histKeyBuf, val); err != nil {
 				return fmt.Errorf("add %s history val [%x]: %w", h.filenameBase, key, err)
 			}
 		}
@@ -1229,6 +1235,16 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 		v = page.Get(historyKey, v, true)
 	}
 	return v, true, nil
+}
+
+func historyKey(txNum uint64, key []byte, buf []byte) []byte {
+	if buf == nil || cap(buf) < 8+len(key) {
+		buf = make([]byte, 8+len(key))
+	}
+	buf = buf[:8+len(key)]
+	binary.BigEndian.PutUint64(buf, txNum)
+	copy(buf[8:], key)
+	return buf
 }
 
 func (ht *HistoryRoTx) encodeTs(txNum uint64, key []byte) []byte {

@@ -129,12 +129,13 @@ func Get(key, compressedPage []byte, snappyEnabled bool) []byte {
 	}
 	keys := data[:vOffset]
 	vals := data[vOffset:]
+	fmt.Printf("[dbg] %d keys: %x, vals: %x\n", cnt, keys, vals)
 	vOffset = 0
 
 	for i := 0; i < cnt*4; i += 4 {
 		kLen, vLen := be.Uint32(kLens[i:]), be.Uint32(vLens[i:])
 		foundKey := keys[kOffset : kOffset+kLen]
-		fmt.Printf("see: %s, %s\n", key, foundKey)
+		fmt.Printf("[dbg] see: kLen=%d, %x, %x\n", kLen, key, foundKey)
 		if bytes.Equal(key, foundKey) {
 			return vals[vOffset : vOffset+vLen]
 		} else {

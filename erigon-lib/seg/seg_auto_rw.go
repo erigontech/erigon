@@ -169,6 +169,23 @@ func (g *PagedReader) Next(buf []byte) ([]byte, uint64) {
 	_, v := g.page.Next()
 	return v, g.pageOffset
 }
+func (g *PagedReader) Next2(buf []byte) (k, v []byte, pageOffset uint64) {
+	if g.sampling <= 1 {
+		v, pageOffset = g.file.Next(buf)
+		return nil, v, pageOffset
+	}
+
+	if g.page.HasNext() {
+		k, v = g.page.Next()
+		return k, v, g.pageOffset
+	}
+	var pageV []byte
+	pageV, g.pageOffset = g.file.Next(buf)
+	g.page = &page.Reader{}
+	g.page.Reset(common.Copy(pageV), g.snappy)
+	k, v = g.page.Next()
+	return k, v, g.pageOffset
+}
 func (g *PagedReader) Skip() (uint64, int) {
 	v, offset := g.Next(nil)
 	return offset, len(v)
