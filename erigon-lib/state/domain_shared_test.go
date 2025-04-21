@@ -35,6 +35,10 @@ import (
 )
 
 func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	stepSize := uint64(100)
@@ -110,6 +114,10 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 }
 
 func TestSharedDomain_Unwind(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	stepSize := uint64(100)
@@ -387,6 +395,10 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 }
 
 func TestSharedDomain_StorageIter(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))

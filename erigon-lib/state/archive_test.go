@@ -32,6 +32,9 @@ import (
 )
 
 func TestArchiveWriter(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
 
 	tmp := t.TempDir()
 	logger := log.New()
