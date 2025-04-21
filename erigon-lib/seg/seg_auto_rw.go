@@ -19,6 +19,7 @@ package seg
 import (
 	"fmt"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/page"
 )
 
@@ -156,7 +157,8 @@ func (g *PagedReader) Next(buf []byte) ([]byte, uint64) {
 	}
 	var pageV []byte
 	pageV, g.pageOffset = g.file.Next(buf)
-	g.page.Reset(pageV, g.snappy)
+	g.page = &page.Reader{}
+	g.page.Reset(common.Copy(pageV), g.snappy)
 	_, v := g.page.Next()
 	return v, g.pageOffset
 }

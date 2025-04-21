@@ -46,7 +46,8 @@ func (c *Writer) Reset() {
 func (c *Writer) Flush() error {
 	defer c.Reset()
 	if !c.Empty() {
-		_, err := c.parent.Write(c.bytesAndReset())
+		bts := c.bytesAndReset()
+		_, err := c.parent.Write(bts)
 		return err
 	}
 	return nil
@@ -65,6 +66,9 @@ func (c *Writer) bytes() []byte {
 	keysAndVals := c.keys
 
 	c.vals = growslice(c.vals[:0], 1+len(c.kLengths)*2*4)
+	for i := range c.vals {
+		c.vals[i] = 0
+	}
 	c.vals[0] = uint8(len(c.kLengths)) // first byte is amount of vals
 	lensBuf := c.vals[1:]
 	for i, l := range c.kLengths {
@@ -136,7 +140,7 @@ func FromBytes(buf []byte, snappyEnabled bool) *Reader {
 	return r
 }
 
-func (r *Reader) Reset(v []byte, snappyEnabled bool) {
+func (r *Reader) Reset(v []byte, snappyEnabled bool) (n int) {
 	var err error
 	r.snappyBuf, v, err = compress.DecodeSnappyIfNeed(r.snappyBuf, v, snappyEnabled)
 	if err != nil {
@@ -151,6 +155,7 @@ func (r *Reader) Reset(v []byte, snappyEnabled bool) {
 	for i := 0; i < r.limit*4; i += 4 {
 		r.vOffset += be.Uint32(r.kLens[i:])
 	}
+	return
 }
 func (r *Reader) HasNext() bool { return r.limit > r.i }
 func (r *Reader) Next() (k, v []byte) {
@@ -167,11 +172,8 @@ func (r *Reader) Next() (k, v []byte) {
 // growslice ensures b has the wanted length by either expanding it to its capacity
 // or allocating a new slice if b has insufficient capacity.
 func growslice(b []byte, wantLength int) []byte {
-	if len(b) >= wantLength {
-		return b
-	}
 	if cap(b) >= wantLength {
-		return b[:cap(b)]
+		return b[:wantLength]
 	}
 	return make([]byte, wantLength)
 }

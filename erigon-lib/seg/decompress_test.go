@@ -113,10 +113,10 @@ func TestDecompressSkip(t *testing.T) {
 }
 
 func TestDecompressSkip2(t *testing.T) {
-	d := prepareLoremDict2(t, 16, false)
+	d := prepareLoremDict2(t, 2, false)
 	defer d.Close()
 	require := require.New(t)
-	g := NewPagedReader(d.MakeGetter(), 16, false)
+	g := NewPagedReader(d.MakeGetter(), 2, false)
 	i := 0
 	for g.HasNext() {
 		w := loremStrings[i]

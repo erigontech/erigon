@@ -2,6 +2,7 @@ package page
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -9,44 +10,50 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 )
 
+// pagesWriter is a writer for [][]byte, similar to bytes.Writer.
+type pagesWriter struct {
+	buffer [][]byte
+}
+
+func (w *pagesWriter) Write(p []byte) (n int, err error) {
+	w.buffer = append(w.buffer, common.Copy(p))
+	return len(p), nil
+}
+func (w *pagesWriter) Bytes() [][]byte { return w.buffer }
+func (w *pagesWriter) Reset()          { w.buffer = nil }
+
 func TestPage(t *testing.T) {
-	buf, require := bytes.NewBuffer(nil), require.New(t)
-	w := NewWriter(buf, 2, false)
-	require.NoError(w.Add([]byte{1}, []byte{11}))
-	require.NoError(w.Add([]byte{2}, []byte{12}))
+	buf, require := &pagesWriter{}, require.New(t)
+	sampling := 2
+	w := NewWriter(buf, sampling, false)
+	for i := 0; i < sampling+1; i++ {
+		k, v := fmt.Sprintf("k %d", i), fmt.Sprintf("v %d", i)
+		require.NoError(w.Add([]byte(k), []byte(v)))
+	}
 	require.NoError(w.Flush())
-	bts := common.Copy(buf.Bytes())
-	v := Get([]byte{1}, bts, false)
-	require.Equal([]byte{11}, v)
-	v = Get([]byte{2}, bts, false)
-	require.Equal([]byte{12}, v)
-
+	pages := buf.Bytes()
+	pageNum := 0
 	p1 := &Reader{}
-	p1.Reset(bts, false)
-	require.True(p1.HasNext())
-	k, v := p1.Next()
-	require.Equal([]byte{1}, k)
-	require.Equal([]byte{11}, v)
+	p1.Reset(pages[0], false)
 
-	require.True(p1.HasNext())
-	k, v = p1.Next()
-	require.Equal([]byte{2}, k)
-	require.Equal([]byte{12}, v)
+	iter := 0
+	for i := 0; i < sampling+1; i++ {
+		iter++
+		expectK, expectV := fmt.Sprintf("k %d", i), fmt.Sprintf("v %d", i)
+		v := Get([]byte(expectK), pages[pageNum], false)
+		require.Equal(expectV, string(v), i)
+		require.True(p1.HasNext())
+		k, v := p1.Next()
+		require.Equal(expectK, string(k), i)
+		require.Equal(expectV, string(v), i)
 
-	require.False(p1.HasNext())
+		if iter%sampling == 0 {
+			pageNum++
 
-	p1.Reset(bts, false)
-	require.True(p1.HasNext())
-	k, v = p1.Next()
-	require.Equal([]byte{1}, k)
-	require.Equal([]byte{11}, v)
-
-	require.True(p1.HasNext())
-	k, v = p1.Next()
-	require.Equal([]byte{2}, k)
-	require.Equal([]byte{12}, v)
-
-	require.False(p1.HasNext())
+			require.False(p1.HasNext())
+			p1.Reset(pages[pageNum], false)
+		}
+	}
 }
 
 func BenchmarkName(b *testing.B) {
