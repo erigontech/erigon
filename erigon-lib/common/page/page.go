@@ -36,9 +36,9 @@ func (c *Writer) Add(k, v []byte) (err error) {
 	c.keys = append(c.keys, k...)
 	c.vals = append(c.vals, v...)
 	isFull := c.i%c.limit == 0
-	fmt.Printf("[dbg] write: %x, %x\n", k, v)
+	//fmt.Printf("[dbg] write: %x, %x\n", k, v)
 	if isFull {
-		fmt.Printf("[dbg] write--\n")
+		//fmt.Printf("[dbg] write--\n")
 		bts := c.bytesAndReset()
 		_, err = c.parent.Write(bts)
 		return err
