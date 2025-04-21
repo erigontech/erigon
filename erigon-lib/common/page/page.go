@@ -129,7 +129,6 @@ func Get(key, compressedPage []byte, snappyEnabled bool) []byte {
 	}
 	keys := data[:vOffset]
 	vals := data[vOffset:]
-	fmt.Printf("[dbg] %d keys: %x, vals: %x\n", cnt, keys, vals)
 	vOffset = 0
 
 	for i := 0; i < cnt*4; i += 4 {
