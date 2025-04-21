@@ -217,14 +217,18 @@ func TestHistoryCollationBuild(t *testing.T) {
 		require.NoError(err)
 
 		require.True(strings.HasSuffix(c.historyPath, h.vFileName(0, 1)))
-		require.Equal(6, c.historyComp.Count())
 		require.Equal(3, c.efHistoryComp.Count()/2)
+		expectCount := 6
+		if h.historySampling > 0 {
+			expectCount = (6 / h.historySampling) + 1 //amount of pages
+		}
+		require.Equal(expectCount, c.historyComp.Count())
 
 		sf, err := h.buildFiles(ctx, 0, c, background.NewProgressSet())
 		require.NoError(err)
 		defer sf.CleanupOnError()
 		var valWords []string
-		gh := seg.NewReader(sf.historyDecomp.MakeGetter(), h.compression)
+		gh := seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.compression), h.historySampling, true)
 		gh.Reset(0)
 		for gh.HasNext() {
 			w, _ := gh.Next(nil)
@@ -258,7 +262,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 			require.Equal(keyWords[i], string(w))
 		}
 		r = recsplit.NewIndexReader(sf.historyIdx)
-		gh = seg.NewReader(sf.historyDecomp.MakeGetter(), h.compression)
+		gh = seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.compression), h.historySampling, true)
 		var vi int
 		for i := 0; i < len(keyWords); i++ {
 			ints := intArrs[i]
