@@ -886,10 +886,15 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 					}
 					binary.BigEndian.PutUint64(txKey[:], txNum)
 					historyKey = append(append(historyKey[:0], txKey[:]...), keyBuf...)
+					//fmt.Printf("[dbg] index merge1: %x, %d\n", historyKey, valOffset)
 					if err = rs.AddKey(historyKey, valOffset); err != nil {
 						return nil, nil, err
 					}
-					valOffset, _ = g2.Skip()
+					var fk, fv []byte
+					fk, fv, valOffset = g2.Next2(nil)
+					fmt.Printf("[dbg] index merge2: %x, %d, %x,%x\n", historyKey, valOffset, fk, fv)
+					_, _ = fk, fv
+					//valOffset, _ = g2.Skip()
 				}
 				p.Processed.Add(1)
 			}

@@ -1219,7 +1219,7 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	}
 	g := ht.statelessGetter(historyItem.i)
 	g.Reset(offset)
-
+	fmt.Printf("[dbg] hist.seek: offset=%d\n", offset)
 	v, _ := g.Next(nil)
 	if traceGetAsOf == ht.h.filenameBase {
 		fmt.Printf("DomainGetAsOf(%s, %x, %d) -> %s, histTxNum=%d, isNil(v)=%t\n", ht.h.filenameBase, key, txNum, g.FileName(), histTxNum, v == nil)

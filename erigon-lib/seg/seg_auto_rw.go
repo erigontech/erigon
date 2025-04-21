@@ -136,11 +136,12 @@ type R interface {
 }
 
 type PagedReader struct {
-	file       R
-	snappy     bool
-	sampling   int
-	page       *page.Reader
-	pageOffset uint64
+	file     R
+	snappy   bool
+	sampling int
+	page     *page.Reader
+
+	pageOffset, nextPageOffset uint64
 }
 
 func NewPagedReader(r R, sampling int, snappy bool) *PagedReader {
@@ -179,8 +180,11 @@ func (g *PagedReader) Next2(buf []byte) (k, v []byte, pageOffset uint64) {
 		k, v = g.page.Next()
 		return k, v, g.pageOffset
 	}
+	// rs.Add(w, offset)
+	// w, offset = g.Next()
 	var pageV []byte
-	pageV, g.pageOffset = g.file.Next(buf)
+	g.pageOffset = g.nextPageOffset
+	pageV, g.nextPageOffset = g.file.Next(buf)
 	g.page = &page.Reader{}
 	g.page.Reset(common.Copy(pageV), g.snappy)
 	k, v = g.page.Next()
