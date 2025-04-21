@@ -110,6 +110,12 @@ func TestDecompressSkip(t *testing.T) {
 		}
 		i++
 	}
+
+	g.Reset(0)
+	_, offset := g.Next(nil)
+	require.Equal(t, 8, int(offset))
+	_, offset = g.Next(nil)
+	require.Equal(t, 16, int(offset))
 }
 
 func TestPagedReader(t *testing.T) {
@@ -138,6 +144,16 @@ func TestPagedReader(t *testing.T) {
 		}
 		i++
 	}
+
+	g.Reset(0)
+	_, offset := g.Next(nil)
+	require.Equal(0, int(offset))
+	_, offset = g.Next(nil)
+	require.Equal(0x2a, int(offset))
+	_, offset = g.Next(nil)
+	require.Equal(0x2a, int(offset))
+	_, offset = g.Next(nil)
+	require.Equal(0x52, int(offset))
 }
 
 func TestDecompressMatchOK(t *testing.T) {
