@@ -208,6 +208,10 @@ func TestFindMergeRange(t *testing.T) {
 }
 
 func TestMergeSnapshots(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	logger := log.New()
 	dir, require := t.TempDir(), require.New(t)
 	createFile := func(from, to uint64) {
@@ -304,6 +308,10 @@ func TestMergeSnapshots(t *testing.T) {
 }
 
 func TestDeleteSnapshots(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	logger := log.New()
 	dir, require := t.TempDir(), require.New(t)
 	createFile := func(from, to uint64) {

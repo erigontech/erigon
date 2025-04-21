@@ -239,6 +239,9 @@ func TestMerkle(t *testing.T) {
 }
 
 func TestBlockGeneration(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
 
 	_, chain, err := generateBlocks(t, 1600)
 
@@ -270,6 +273,10 @@ func TestBlockGeneration(t *testing.T) {
 }
 
 func TestBlockProof(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	sentry, chain, err := generateBlocks(t, 1600)
 
 	if err != nil {

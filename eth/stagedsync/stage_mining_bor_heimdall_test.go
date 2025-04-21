@@ -30,6 +30,10 @@ import (
 )
 
 func TestMiningBorHeimdallForwardPersistsSpans(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	ctx := context.Background()
