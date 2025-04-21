@@ -578,8 +578,9 @@ type TemporalDebugTx interface {
 	GetLatestFromDB(domain Domain, k []byte) (v []byte, step uint64, found bool, err error)
 	GetLatestFromFiles(domain Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error)
 
-	DomainFiles(domain ...Domain) []string
+	DomainFiles(domain ...Domain) VisibleFiles
 
+	GreedyPruneHistory(ctx context.Context, domain Domain) error
 	PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error)
 }
 
@@ -592,8 +593,8 @@ type WithFreezeInfo interface {
 }
 
 type FreezeInfo interface {
-	AllFiles() []string
-	Files(domainName Domain) []string
+	AllFiles() VisibleFiles
+	Files(domainName Domain) VisibleFiles
 }
 
 type TemporalRwTx interface {

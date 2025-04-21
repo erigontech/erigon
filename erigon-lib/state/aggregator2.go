@@ -137,12 +137,14 @@ var Schema = map[kv.Domain]domainCfg{
 
 		hist: histCfg{
 			valuesTable:   kv.TblCommitmentHistoryVals,
-			compressorCfg: HistoryCompressCfg, compression: seg.CompressNone,
+			compressorCfg: HistoryCompressCfg, compression: seg.CompressNone, // seg.CompressKeys | seg.CompressVals,
+			historyIdx: kv.CommitmentHistoryIdx,
 
-			snapshotsDisabled:  true,
 			historyLargeValues: false,
-			historyIdx:         kv.CommitmentHistoryIdx,
-			historyDisabled:    true,
+			compressSingleVal:  false,
+
+			snapshotsDisabled: true,
+			historyDisabled:   true,
 
 			iiCfg: iiCfg{
 				filenameBase: kv.CommitmentDomain.String(), keysTable: kv.TblCommitmentHistoryKeys, valuesTable: kv.TblCommitmentIdx,
@@ -218,11 +220,11 @@ var DomainCompressCfg = seg.Cfg{
 }
 
 var HistoryCompressCfg = seg.Cfg{
-	MinPatternScore:      8000,
+	MinPatternScore:      4000,
 	DictReducerSoftLimit: 2000000,
 	MinPatternLen:        20,
 	MaxPatternLen:        128,
 	SamplingFactor:       1,
-	MaxDictPatterns:      64 * 1024 * 2,
+	MaxDictPatterns:      64 * 1024,
 	Workers:              1,
 }

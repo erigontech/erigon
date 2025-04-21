@@ -802,10 +802,10 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo uint64, wal *e
 			} else {
 				v = v[8:]
 			}
-			if err = comp.AddWord(k); err != nil {
+			if _, err = comp.Write(k); err != nil {
 				return fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, k, err)
 			}
-			if err = comp.AddWord(v); err != nil {
+			if _, err = comp.Write(v); err != nil {
 				return fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, k, v, err)
 			}
 		}
@@ -828,10 +828,10 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo uint64, wal *e
 		if err != nil {
 			return coll, fmt.Errorf("vt: %w", err)
 		}
-		if err = comp.AddWord(kv.k); err != nil {
+		if _, err = comp.Write(kv.k); err != nil {
 			return coll, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, kv.k, err)
 		}
-		if err = comp.AddWord(kv.v); err != nil {
+		if _, err = comp.Write(kv.v); err != nil {
 			return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, kv.k, kv.v, err)
 		}
 	}
@@ -926,10 +926,10 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 			}{k[:len(k)-8], v})
 			k, v, err = valsCursor.Next()
 		} else {
-			if err = comp.AddWord(k); err != nil {
+			if _, err = comp.Write(k); err != nil {
 				return coll, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, k, err)
 			}
-			if err = comp.AddWord(v[8:]); err != nil {
+			if _, err = comp.Write(v[8:]); err != nil {
 				return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, k, v[8:], err)
 			}
 			k, v, err = valsCursor.(kv.CursorDupSort).NextNoDup()
@@ -946,10 +946,10 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 		}
 	}
 	for _, kv := range kvs {
-		if err = comp.AddWord(kv.k); err != nil {
+		if _, err = comp.Write(kv.k); err != nil {
 			return coll, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, kv.k, err)
 		}
-		if err = comp.AddWord(kv.v); err != nil {
+		if _, err = comp.Write(kv.v); err != nil {
 			return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, kv.k, kv.v, err)
 		}
 	}
@@ -1972,10 +1972,10 @@ func (dt *DomainRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 	return dt.ht.iit.stepsRangeInDB(tx)
 }
 
-func (dt *DomainRoTx) Files() (res []string) {
+func (dt *DomainRoTx) Files() (res VisibleFiles) {
 	for _, item := range dt.files {
 		if item.src.decompressor != nil {
-			res = append(res, item.src.decompressor.FileName())
+			res = append(res, item)
 		}
 	}
 	return append(res, dt.ht.Files()...)

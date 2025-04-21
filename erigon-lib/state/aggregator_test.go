@@ -559,7 +559,8 @@ func TestNewBtIndex(t *testing.T) {
 	defer kv.Close()
 	require.NotNil(t, kv)
 	require.NotNil(t, bt)
-	require.GreaterOrEqual(t, len(bt.bplus.mx), keyCount/int(DefaultBtreeM))
+	bplus := bt.bplus
+	require.GreaterOrEqual(t, len(bplus.mx), keyCount/int(DefaultBtreeM))
 
 	for i := 1; i < len(bt.bplus.mx); i++ {
 		require.NotZero(t, bt.bplus.mx[i].di)
@@ -1222,9 +1223,9 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	writer := seg.NewWriter(comp, compressFlags)
 
 	loader := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		err = writer.AddWord(k)
+		_, err = writer.Write(k)
 		require.NoError(tb, err)
-		err = writer.AddWord(v)
+		_, err = writer.Write(v)
 		require.NoError(tb, err)
 		return nil
 	}

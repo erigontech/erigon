@@ -31,6 +31,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/seg"
+
+	state3 "github.com/erigontech/erigon-lib/state"
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -279,10 +281,11 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 		fmt.Printf("Indexing file %s\n", fileName)
 		var buf []byte
 		for getter.HasNext() {
-			buf = buf[:0]
-			buf, _ = getter.Next(buf)
+			buf, _ = getter.Next(buf[:0])
 
-			collector.Collect(buf, layerBytes)
+			if err := collector.Collect(buf, layerBytes); err != nil {
+				return err
+			}
 			count++
 			//fmt.Println("count: ", count, "keyLength: ", len(buf))
 			if count%100000 == 0 {
@@ -429,10 +432,10 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 				skipped++
 				continue
 			}
-			if err := comp.AddWord(bufKey); err != nil {
+			if _, err := comp.Write(bufKey); err != nil {
 				return fmt.Errorf("failed to add key %x: %w", bufKey, err)
 			}
-			if err := comp.AddWord(bufVal); err != nil {
+			if _, err := comp.Write(bufVal); err != nil {
 				return fmt.Errorf("failed to add val %x: %w", bufVal, err)
 			}
 			count++
@@ -491,7 +494,11 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	stateTx, err := stateDb.BeginRw(ctx)
 	must(err)
 	defer stateTx.Rollback()
-	domains, err := statelib.NewSharedDomains(stateTx, logger)
+	temporalTx, ok := stateTx.(kv.TemporalTx)
+	if !ok {
+		return errors.New("stateDb transaction is not a temporal transaction")
+	}
+	domains, err := state3.NewSharedDomains(temporalTx, logger)
 	if err != nil {
 		return err
 	}
