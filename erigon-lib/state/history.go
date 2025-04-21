@@ -366,8 +366,8 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	var keyBuf, valBuf []byte
 	cnt := uint64(0)
 	for efHistReader.HasNext() {
-		keyBuf, _ = efHistReader.Next(nil)
-		valBuf, _ = efHistReader.Next(nil)
+		keyBuf, _ = efHistReader.Next(keyBuf[:0]) // skip key
+		valBuf, _ = efHistReader.Next(valBuf[:0])
 		cnt += eliasfano32.Count(valBuf)
 		select {
 		case <-ctx.Done():
@@ -396,7 +396,6 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	defer rs.Close()
 	rs.LogLvl(log.LvlTrace)
 
-	valOffset = 0
 	i := 0
 	for {
 		histReader.Reset(0)
