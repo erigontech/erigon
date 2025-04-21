@@ -36,10 +36,6 @@ import (
 )
 
 func TestTable_pingReplace(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	run := func(newNodeResponding, lastInBucketResponding bool) {
 		name := fmt.Sprintf("newNodeResponding=%t/lastInBucketResponding=%t", newNodeResponding, lastInBucketResponding)
 		t.Run(name, func(t *testing.T) {
@@ -150,10 +146,6 @@ func testTableBumpNoDuplicatesRun(t *testing.T, bucketCountGen byte, bumpCountGe
 }
 
 func TestTable_bumpNoDuplicates_examples(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	t.Parallel()
 
 	randGen := rand.New(rand.NewSource(time.Now().Unix()))
@@ -180,10 +172,6 @@ func TestTable_bumpNoDuplicates_examples(t *testing.T) {
 
 // This checks that the table-wide IP limit is applied correctly.
 func TestTable_IPLimit(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	transport := newPingRecorder()
 	tmpDir := t.TempDir()
 	tab, db := newTestTable(transport, tmpDir, log.Root())
@@ -202,10 +190,6 @@ func TestTable_IPLimit(t *testing.T) {
 
 // This checks that the per-bucket IP limit is applied correctly.
 func TestTable_BucketIPLimit(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	transport := newPingRecorder()
 	tmpDir := t.TempDir()
 	tab, db := newTestTable(transport, tmpDir, log.Root())
@@ -300,10 +284,6 @@ func testTableFindNodeByIDRun(t *testing.T, nodesCountGen uint16, resultsCountGe
 }
 
 func TestTable_findNodeByID_examples(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	t.Parallel()
 
 	randGen := rand.New(rand.NewSource(time.Now().Unix()))
@@ -376,10 +356,6 @@ func testTableReadRandomNodesGetAllRun(t *testing.T, nodesCountGen uint16, rand 
 }
 
 func TestTable_ReadRandomNodesGetAll_examples(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	t.Parallel()
 
 	randGen := rand.New(rand.NewSource(time.Now().Unix()))
@@ -419,10 +395,6 @@ func generateNode(rand *rand.Rand) *node {
 }
 
 func TestTable_addVerifiedNode(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	tmpDir := t.TempDir()
 	tab, db := newTestTable(newPingRecorder(), tmpDir, log.Root())
 	<-tab.initDone
@@ -456,10 +428,6 @@ func TestTable_addVerifiedNode(t *testing.T) {
 }
 
 func TestTable_addSeenNode(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	tmpDir := t.TempDir()
 	tab, db := newTestTable(newPingRecorder(), tmpDir, log.Root())
 	<-tab.initDone
@@ -494,10 +462,6 @@ func TestTable_addSeenNode(t *testing.T) {
 // This test checks that ENR updates happen during revalidation. If a node in the table
 // announces a new sequence number, the new record should be pulled.
 func TestTable_revalidateSyncRecord(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	transport := newPingRecorder()
 	tmpDir := t.TempDir()
 	tab, db := newTestTable(transport, tmpDir, log.Root())

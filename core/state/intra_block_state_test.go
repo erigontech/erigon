@@ -431,10 +431,6 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 }
 
 func TestTransientStorage(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	t.Parallel()
 	state := New(nil)
 

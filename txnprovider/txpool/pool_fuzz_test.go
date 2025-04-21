@@ -295,6 +295,10 @@ func splitDataset(in TxnSlots) (TxnSlots, TxnSlots, TxnSlots, TxnSlots) {
 }
 
 func FuzzOnNewBlocks(f *testing.F) {
+	if testing.Short() {
+		f.Skip()
+	}
+
 	var u64 = [1 * 4]byte{1}
 	var senderAddr = [1 + 1 + 1]byte{1}
 	f.Add(u64[:], u64[:], u64[:], u64[:], senderAddr[:], uint8(12))

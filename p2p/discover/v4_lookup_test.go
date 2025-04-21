@@ -34,10 +34,6 @@ import (
 )
 
 func TestUDPv4_Lookup(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	if runtime.GOOS != "linux" {
 		t.Skip("fix me on win please")
 	}
@@ -77,10 +73,6 @@ func TestUDPv4_Lookup(t *testing.T) {
 }
 
 func TestUDPv4_LookupIterator(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	if runtime.GOOS != "linux" {
 		t.Skip("fix me on win please")
 	}
@@ -132,10 +124,6 @@ func TestUDPv4_LookupIterator(t *testing.T) {
 // TestUDPv4_LookupIteratorClose checks that lookupIterator ends when its Close
 // method is called.
 func TestUDPv4_LookupIteratorClose(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	t.Parallel()
 	logger := log.New()
 	test := newUDPTest(t, logger)

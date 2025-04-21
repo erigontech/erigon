@@ -47,17 +47,11 @@ func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postSt
 }
 
 func TestStateAntiquaryElectra(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
 	blocks, preState, postState := tests.GetElectraRandom()
 	runTest(t, blocks, preState, postState)
 }
 
 func TestStateAntiquaryCapella(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
 	blocks, preState, postState := tests.GetCapellaRandom()
 	runTest(t, blocks, preState, postState)
 }

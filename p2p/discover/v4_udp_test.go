@@ -169,10 +169,6 @@ func (test *udpTest) waitPacketOut(validate interface{}) (closed bool) {
 }
 
 func TestUDPv4_packetErrors(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	logger := log.New()
 	test := newUDPTest(t, logger)
 	defer test.close()
@@ -184,10 +180,6 @@ func TestUDPv4_packetErrors(t *testing.T) {
 }
 
 func TestUDPv4_pingTimeout(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	t.Parallel()
 	logger := log.New()
 	test := newUDPTest(t, logger)
@@ -207,10 +199,6 @@ func (req testPacket) Kind() byte   { return byte(req) }
 func (req testPacket) Name() string { return "" }
 
 func TestUDPv4_responseTimeouts(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	if runtime.GOOS == `darwin` {
 		t.Skip("unstable test on darwin")
 	}
@@ -291,10 +279,6 @@ func TestUDPv4_responseTimeouts(t *testing.T) {
 }
 
 func TestUDPv4_findnodeTimeout(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	t.Parallel()
 	logger := log.New()
 	test := newUDPTest(t, logger)
@@ -313,10 +297,6 @@ func TestUDPv4_findnodeTimeout(t *testing.T) {
 }
 
 func TestUDPv4_findnode(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	logger := log.New()
 	test := newUDPTest(t, logger)
 	defer test.close()
@@ -375,10 +355,6 @@ func TestUDPv4_findnode(t *testing.T) {
 }
 
 func TestUDPv4_findnodeMultiReply(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	logger := log.New()
 	test := newUDPTest(t, logger)
 	defer test.close()
@@ -436,10 +412,6 @@ func TestUDPv4_findnodeMultiReply(t *testing.T) {
 
 // This test checks that reply matching of pong verifies the ping hash.
 func TestUDPv4_pingMatch(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	logger := log.New()
 	test := newUDPTest(t, logger)
 	defer test.close()
@@ -455,10 +427,6 @@ func TestUDPv4_pingMatch(t *testing.T) {
 
 // This test checks that reply matching of pong verifies the sender IP address.
 func TestUDPv4_pingMatchIP(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	logger := log.New()
 	test := newUDPTest(t, logger)
 	defer test.close()
@@ -477,10 +445,6 @@ func TestUDPv4_pingMatchIP(t *testing.T) {
 }
 
 func TestUDPv4_successfulPing(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	logger := log.New()
 	test := newUDPTest(t, logger)
 	added := make(chan *node, 1)
@@ -548,10 +512,6 @@ func TestUDPv4_successfulPing(t *testing.T) {
 
 // This test checks that EIP-868 requests work.
 func TestUDPv4_EIP868(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	logger := log.New()
 	test := newUDPTest(t, logger)
 	defer test.close()

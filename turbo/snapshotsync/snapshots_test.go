@@ -340,6 +340,10 @@ func TestDeleteSnapshots(t *testing.T) {
 }
 
 func TestRemoveOverlaps(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	logger := log.New()
 	dir, require := t.TempDir(), require.New(t)
 	createFile := func(from, to uint64) {
