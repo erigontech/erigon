@@ -736,6 +736,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 				defer collectorLock.Unlock()
 
 				for collected < tx-1 {
+					println("waiting for", tx, "now:", collected)
 					collections.Wait()
 				}
 
