@@ -61,7 +61,7 @@ func FuzzDecompressMatch(f *testing.F) {
 		c.DisableFsync()
 		defer c.Close()
 		for _, b := range a {
-			if _, err = c.AddWord(b); err != nil {
+			if err = c.AddWord(b); err != nil {
 				t.Fatal(err)
 			}
 		}

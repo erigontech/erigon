@@ -42,7 +42,7 @@ func TestCompressEmptyDict(t *testing.T) {
 	}
 	defer c.Close()
 
-	if _, err = c.AddWord([]byte("word")); err != nil {
+	if err = c.AddWord([]byte("word")); err != nil {
 		t.Fatal(err)
 	}
 	if err = c.Compress(); err != nil {
@@ -95,16 +95,16 @@ func prepareDict(t *testing.T) *Decompressor {
 	}
 	defer c.Close()
 	for i := 0; i < 100; i++ {
-		if _, err = c.AddWord(nil); err != nil {
+		if err = c.AddWord(nil); err != nil {
 			panic(err)
 		}
-		if _, err = c.AddWord([]byte("long")); err != nil {
+		if err = c.AddWord([]byte("long")); err != nil {
 			t.Fatal(err)
 		}
-		if _, err = c.AddWord([]byte("word")); err != nil {
+		if err = c.AddWord([]byte("word")); err != nil {
 			t.Fatal(err)
 		}
-		if _, err = c.AddWord([]byte(fmt.Sprintf("%d longlongword %d", i, i))); err != nil {
+		if err = c.AddWord([]byte(fmt.Sprintf("%d longlongword %d", i, i))); err != nil {
 			t.Fatal(err)
 		}
 	}

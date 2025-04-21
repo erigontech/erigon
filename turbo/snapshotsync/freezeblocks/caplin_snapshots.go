@@ -473,7 +473,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 		if skippedInARow > 1000 {
 			return fmt.Errorf("skipped too many blocks in a row during snapshot generation, range %d-%d at slot %d", fromSlot, toSlot, i)
 		}
-		if _, err := sn.AddWord(dump); err != nil {
+		if err := sn.AddWord(dump); err != nil {
 			return err
 		}
 	}
@@ -565,7 +565,7 @@ func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 		if i%20_000 == 0 {
 			logger.Log(lvl, "Dumping beacon blobs", "progress", i)
 		}
-		if _, err := sn.AddWord(reusableBuf); err != nil {
+		if err := sn.AddWord(reusableBuf); err != nil {
 			return err
 		}
 

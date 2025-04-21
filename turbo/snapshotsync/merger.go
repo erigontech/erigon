@@ -272,7 +272,7 @@ func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, ta
 			g := d.MakeGetter()
 			for g.HasNext() {
 				word, _ = g.Next(word[:0])
-				if _, err := f.AddWord(word); err != nil {
+				if err := f.AddWord(word); err != nil {
 					return err
 				}
 			}

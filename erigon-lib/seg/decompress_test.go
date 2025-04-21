@@ -49,7 +49,7 @@ func prepareLoremDict(t *testing.T) *Decompressor {
 	}
 	defer c.Close()
 	for k, w := range loremStrings {
-		if _, err = c.AddWord([]byte(fmt.Sprintf("%s %d", w, k))); err != nil {
+		if err = c.AddWord([]byte(fmt.Sprintf("%s %d", w, k))); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -194,7 +194,7 @@ func prepareStupidDict(t *testing.T, size int) *Decompressor {
 	}
 	defer c.Close()
 	for i := 0; i < size; i++ {
-		if _, err = c.AddWord([]byte(fmt.Sprintf("word-%d", i))); err != nil {
+		if err = c.AddWord([]byte(fmt.Sprintf("word-%d", i))); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -441,7 +441,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		require.NoError(t, err)
 		defer c.Close()
 		for k, w := range loremStrings {
-			if _, err = c.AddWord([]byte(fmt.Sprintf("%s %d", w, k))); err != nil {
+			if err = c.AddWord([]byte(fmt.Sprintf("%s %d", w, k))); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -647,7 +647,7 @@ func prepareRandomDict(t *testing.T) *Decompressor {
 			word := WORDS[idx]
 			m := rand.Intn(2)
 			if m == 1 {
-				if _, err = c.AddWord(word); err != nil {
+				if err = c.AddWord(word); err != nil {
 					t.Fatal(err)
 				}
 				WORD_FLAGS[idx] = true
@@ -659,7 +659,7 @@ func prepareRandomDict(t *testing.T) *Decompressor {
 			idx++
 			INPUT_FLAGS = append(INPUT_FLAGS, n)
 		case 1: // nil word
-			if _, err = c.AddWord(nil); err != nil {
+			if err = c.AddWord(nil); err != nil {
 				t.Fatal(err)
 			}
 			INPUT_FLAGS = append(INPUT_FLAGS, n)
