@@ -605,6 +605,7 @@ func (c HistoryCollation) Close() {
 // [txFrom; txTo)
 func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollation, error) {
 	if h.snapshotsDisabled {
+		log.Warn("[dbg] h.snapshotsDisabled is set to true", "name", h.filenameBase)
 		return HistoryCollation{}, nil
 	}
 
