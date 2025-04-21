@@ -92,6 +92,10 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 }
 
 func TestDomain_CollationBuild(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	t.Run("compressDomainVals=true", func(t *testing.T) {
@@ -103,6 +107,10 @@ func TestDomain_CollationBuild(t *testing.T) {
 }
 
 func TestDomain_OpenFolder(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	db, d, txs := filledDomain(t, log.New())
@@ -455,6 +463,10 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 }
 
 func TestHistory(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	logger := log.New()
@@ -569,6 +581,10 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64, prune
 }
 
 func TestDomain_MergeFiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	logger := log.New()
@@ -583,6 +599,10 @@ func TestDomain_MergeFiles(t *testing.T) {
 }
 
 func TestDomain_ScanFiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	logger := log.New()
@@ -654,6 +674,10 @@ func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 }
 
 func TestDomain_Delete(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	logger := log.New()
@@ -744,6 +768,10 @@ func TestNewSegStreamReader(t *testing.T) {
 // then check.
 // in real life we periodically do collate-merge-prune without stopping adding data
 func TestDomain_Prune_AfterAllWrites(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	logger := log.New()
@@ -815,6 +843,10 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 }
 
 func TestDomain_PruneOnWrite(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	logger := log.New()
@@ -925,6 +957,10 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 }
 
 func TestDomain_OpenFilesWithDeletions(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	logger := log.New()
 	keyCount, txCount := uint64(4), uint64(125)
@@ -1064,6 +1100,10 @@ func TestScanStaticFilesD(t *testing.T) {
 }
 
 func TestDomain_CollationBuildInMem(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	logEvery := time.NewTicker(30 * time.Second)
@@ -1155,6 +1195,10 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 }
 
 func TestDomainContext_getFromFiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	db, d := testDbAndDomain(t, log.New())
@@ -1466,6 +1510,10 @@ func generateRandomTxNum(r *rndGen, maxTxNum uint64, usedTxNums map[uint64]bool)
 }
 
 func TestDomain_GetAfterAggregation(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	db, d := testDbAndDomainOfStep(t, 25, log.New())
 	require := require.New(t)
 
@@ -1543,6 +1591,10 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 }
 
 func TestDomainRange(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	db, d := testDbAndDomainOfStep(t, 25, log.New())
 	require, ctx := require.New(t), context.Background()
 
@@ -1653,6 +1705,10 @@ func TestDomainRange(t *testing.T) {
 }
 
 func TestDomain_CanPruneAfterAggregation(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	aggStep, ctx := uint64(25), context.Background()
@@ -1748,6 +1804,10 @@ func TestDomain_CanPruneAfterAggregation(t *testing.T) {
 }
 
 func TestDomain_PruneAfterAggregation(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	db, d := testDbAndDomainOfStep(t, 25, log.New())
@@ -2017,6 +2077,10 @@ func TestDomain_PruneProgress(t *testing.T) {
 }
 
 func TestDomain_Unwind(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	db, d := testDbAndDomain(t, log.New())
@@ -2273,6 +2337,10 @@ func compareIteratorsS(t *testing.T, et, ut stream.KVS) {
 }
 
 func TestDomain_PruneSimple(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	pruningKey := common.FromHex("701b39aee8d1ee500442d2874a6e6d0cc9dad8d9")
@@ -2451,6 +2519,10 @@ func TestDomain_PruneSimple(t *testing.T) {
 }
 
 func TestDomainContext_findShortenedKey(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	db, d := testDbAndDomain(t, log.New())
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)

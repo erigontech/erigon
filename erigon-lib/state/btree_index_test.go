@@ -73,6 +73,10 @@ func Test_BtreeIndex_Init(t *testing.T) {
 }
 
 func Test_BtreeIndex_Seek(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	tmp := t.TempDir()
@@ -157,6 +161,10 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 }
 
 func Test_BtreeIndex_Build(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	tmp := t.TempDir()

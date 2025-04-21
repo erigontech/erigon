@@ -270,6 +270,10 @@ func TestG2Identity(t *testing.T) {
 }
 
 func TestTripartiteDiffieHellman(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	a, _ := rand.Int(rand.Reader, Order)
 	b, _ := rand.Int(rand.Reader, Order)
 	c, _ := rand.Int(rand.Reader, Order)

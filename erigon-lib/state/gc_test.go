@@ -28,6 +28,10 @@ import (
 )
 
 func TestGCReadAfterRemoveFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -113,6 +117,10 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 }
 
 func TestDomainGCReadAfterRemoveFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	ctx := context.Background()

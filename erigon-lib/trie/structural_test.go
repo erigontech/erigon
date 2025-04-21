@@ -31,14 +31,17 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
-
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlphacks"
 )
 
 func TestV2HashBuilding(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	var keys []string
 	for b := uint32(0); b < 100000; b++ {
 		var preimage [4]byte
@@ -106,6 +109,10 @@ func TestV2HashBuilding(t *testing.T) {
 }
 
 func TestV2Resolution(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	var keys []string
 	for b := uint32(0); b < 100000; b++ {
 		var preimage [4]byte

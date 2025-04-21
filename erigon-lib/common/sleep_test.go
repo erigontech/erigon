@@ -26,6 +26,10 @@ import (
 )
 
 func TestSleep(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	start := time.Now()
 	err := Sleep(ctx, 100*time.Millisecond)

@@ -495,6 +495,10 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 }
 
 func Test_ParallelHexPatriciaHashed_EdgeCases(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	// generate subtrie with 4 keys with the same prefix
