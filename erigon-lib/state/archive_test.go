@@ -59,9 +59,9 @@ func TestArchiveWriter(t *testing.T) {
 		for _, k := range keys {
 			upd := td[string(k)]
 
-			err := w.AddWord(k)
+			_, err := w.Write(k)
 			require.NoError(tb, err)
-			err = w.AddWord(upd[0].value)
+			_, err = w.Write(upd[0].value)
 			require.NoError(tb, err)
 		}
 		err := w.Compress()

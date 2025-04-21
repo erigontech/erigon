@@ -1380,7 +1380,7 @@ func doCompress(cliCtx *cli.Context) error {
 		}
 		_, _ = zstdBuf, unZstdBuf
 
-		if err := w.AddWord(word); err != nil {
+		if _, err := w.Write(word); err != nil {
 			return err
 		}
 	}

@@ -1223,9 +1223,9 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	writer := seg.NewWriter(comp, compressFlags)
 
 	loader := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		err = writer.AddWord(k)
+		_, err = writer.Write(k)
 		require.NoError(tb, err)
-		err = writer.AddWord(v)
+		_, err = writer.Write(v)
 		require.NoError(tb, err)
 		return nil
 	}
