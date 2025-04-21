@@ -692,7 +692,7 @@ func (a *APIBackend) GetEVM(ctx context.Context, msg *types.Message, state *stat
 	if vmConfig == nil {
 		vmConfig = a.BlockChain().GetVMConfig()
 	}
-	txContext := core.NewEVMTxContext(*msg)
+	txContext := core.NewEVMTxContext(msg)
 	var context evmtypes.BlockContext
 	if blockCtx != nil {
 		context = *blockCtx
