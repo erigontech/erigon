@@ -297,8 +297,7 @@ func (v *VisibleSegment) Get(globalId uint64) ([]byte, error) {
 	if !gg.HasNext() {
 		return nil, nil
 	}
-	var buf []byte
-	buf, _ = gg.Next(buf)
+	buf, _ := gg.Next(nil)
 	if len(buf) == 0 {
 		return nil, nil
 	}
