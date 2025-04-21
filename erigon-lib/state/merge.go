@@ -812,6 +812,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				count := eliasfano32.Count(ci1.val)
 				for i := uint64(0); i < count; i++ {
 					if !ci1.hist.HasNext() {
+						ci1.hist.HasNext()
 						panic(fmt.Errorf("assert: no value??? %s, i=%d, count=%d, lastKey=%x, ci1.key=%x", ci1.hist.FileName(), i, count, lastKey, ci1.key))
 					}
 
