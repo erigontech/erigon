@@ -640,6 +640,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 	doWarmup, warmupTxs, warmupSenders := blockTo-blockFrom >= 100_000 && workers > 4, &atomic.Bool{}, &atomic.Bool{}
 	from := hexutil.EncodeTs(blockFrom)
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
+		println("in chunks walker")
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum >= blockTo { // [from, to)
 			return false, nil
@@ -774,6 +775,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 	}); err != nil {
 		return 0, fmt.Errorf("BigChunks: %w", err)
 	}
+	println("exiting big chunks")
 	return 0, nil
 }
 
