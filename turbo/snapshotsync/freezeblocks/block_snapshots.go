@@ -694,7 +694,6 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			valueBuf := bufPool.Get().(*[16 * 4096]byte)
 			defer bufPool.Put(valueBuf)
 			valueBufs[i] = valueBuf[:]
-			println("chainID", chainID.String(), chainConfig.ChainName)
 			parseCtxs[i] = txpool.NewTxnParseContext(*chainID)
 		}
 
