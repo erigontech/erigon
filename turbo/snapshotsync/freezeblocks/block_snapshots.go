@@ -742,6 +742,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 
 				// first tx byte => sender address => tx rlp
 				if err := collect(valueBuf); err != nil {
+					println("collect error:", err.Error())
 					return err
 				}
 				println("collected", tx)
