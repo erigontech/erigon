@@ -154,10 +154,16 @@ func NewPagedReader(r R, sampling int, snappy bool) *PagedReader {
 
 func (g *PagedReader) Reset(offset uint64) {
 	g.file.Reset(offset)
-	v, nextPageOffset := g.file.Next(nil)
-	g.page.Reset(v, g.snappy)
 	g.currentPageOffset = offset
-	g.nextPageOffset = nextPageOffset
+	if g.file.HasNext() {
+		v, nextPageOffset := g.file.Next(nil)
+		g.page.Reset(v, g.snappy)
+		g.nextPageOffset = nextPageOffset
+	} else {
+		g.page = &page.Reader{}
+		g.nextPageOffset = offset
+	}
+
 }
 func (g *PagedReader) FileName() string { return g.file.FileName() }
 func (g *PagedReader) HasNext() bool    { return (g.sampling > 1 && g.page.HasNext()) || g.file.HasNext() }
