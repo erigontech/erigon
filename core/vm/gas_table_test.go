@@ -193,13 +193,12 @@ func TestCreateGas(t *testing.T) {
 
 		var stateReader state.StateReader
 		var stateWriter state.StateWriter
-		var txc wrap.TxContainer
-		txc.Tx = tx
+		txc := wrap.NewTxContainer(tx, nil)
 
 		eface := *(*[2]uintptr)(unsafe.Pointer(&tx))
 		fmt.Printf("init tx %x\n", eface[1])
 
-		domains, err := state3.NewSharedDomains(txc.Tx, log.New())
+		domains, err := state3.NewSharedDomains(txc.Tx.(kv.TemporalTx), log.New())
 		require.NoError(t, err)
 		defer domains.Close()
 		txc.Doms = domains

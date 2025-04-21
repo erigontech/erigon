@@ -163,12 +163,21 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		return 0, err
 	}
 
-	// try and get the block from the lru cache first then try DB before failing
 	block := api.tryBlockFromLru(blockHash)
+
+	// try and get the block from the lru cache first then try DB before failing
 	if block == nil {
 		block, err = api.blockWithSenders(ctx, dbtx, blockHash, blockNum)
 		if err != nil {
 			return 0, err
+		}
+	}
+
+	// try to check if it is a pending block
+	if block == nil {
+		b := api.filters.LastPendingBlock()
+		if b != nil && blockNum == b.NumberU64() {
+			block = b
 		}
 	}
 
@@ -332,7 +341,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address libcommon.
 		return nil, err
 	}
 
-	domains, err := libstate.NewSharedDomains(roTx, log.New())
+	domains, err := libstate.NewSharedDomains(tx, log.New())
 	if err != nil {
 		return nil, err
 	}
@@ -611,7 +620,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	if err != nil {
 		return nil, err
 	}
-	sdCtx := libstate.NewSharedDomainsCommitmentContext(domains, commitment.ModeUpdate, commitment.VariantHexPatriciaTrie)
+	sdCtx := domains.GetCommitmentContext()
 	patricieTrie := sdCtx.Trie()
 	hph, ok := patricieTrie.(*commitment.HexPatriciaHashed)
 	if !ok {

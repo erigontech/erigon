@@ -135,7 +135,7 @@ func getChainInstance(
 	config *chain.Config,
 	parent *types.Block,
 	engine consensus.Engine,
-	db kv.RwDB,
+	db kv.TemporalRwDB,
 	contractBackend *backends.SimulatedBackend,
 ) (*core.ChainPack, error) {
 	var err error
@@ -150,7 +150,7 @@ func generateChain(
 	config *chain.Config,
 	parent *types.Block,
 	engine consensus.Engine,
-	db kv.RwDB,
+	db kv.TemporalRwDB,
 	contractBackend *backends.SimulatedBackend,
 ) (*core.ChainPack, error) {
 	var (

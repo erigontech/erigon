@@ -101,7 +101,7 @@ func RewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr, lates
 	unwindState := &UnwindState{ID: stages.Execution, UnwindPoint: blockNr - 1, CurrentBlockNumber: latestBlockNr}
 	stageState := &StageState{ID: stages.Execution, BlockNumber: blockNr}
 
-	txc := wrap.TxContainer{Tx: batch}
+	txc := wrap.NewTxContainer(batch, nil)
 	batchSizeStr := "512M"
 	var batchSize datasize.ByteSize
 	err := batchSize.UnmarshalText([]byte(batchSizeStr))

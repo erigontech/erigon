@@ -621,7 +621,7 @@ func NewHeader(env stEnv) *types.Header {
 	return &header
 }
 
-func CalculateStateRoot(tx kv.RwTx) (*libcommon.Hash, error) {
+func CalculateStateRoot(tx kv.TemporalRwTx) (*libcommon.Hash, error) {
 	// Generate hashed state
 	c, err := tx.RwCursor(kv.PlainState)
 	if err != nil {

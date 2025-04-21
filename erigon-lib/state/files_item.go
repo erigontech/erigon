@@ -274,11 +274,11 @@ func (i visibleFile) Filename() string {
 	return i.src.decompressor.FilePath()
 }
 
-func (i visibleFile) StartTxNum() uint64 {
+func (i visibleFile) StartRootNum() uint64 {
 	return i.startTxNum
 }
 
-func (i visibleFile) EndTxNum() uint64 {
+func (i visibleFile) EndRootNum() uint64 {
 	return i.endTxNum
 }
 
@@ -383,24 +383,21 @@ func (files visibleFiles) LatestMergedRange() MergeRange {
 	return MergeRange{}
 }
 
-// fileItemsWithMissingAccessors returns list of files with missing accessors
+// fileItemsWithMissedAccessors returns list of files with missed accessors
 // here "accessors" are generated dynamically by `accessorsFor`
-func fileItemsWithMissingAccessors(dirtyFiles *btree2.BTreeG[*filesItem], aggregationStep uint64, accessorsFor func(fromStep, toStep uint64) []string) (l []*filesItem) {
-	dirtyFiles.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			fromStep, toStep := item.startTxNum/aggregationStep, item.endTxNum/aggregationStep
-			for _, fName := range accessorsFor(fromStep, toStep) {
-				exists, err := dir.FileExist(fName)
-				if err != nil {
-					panic(err)
-				}
-				if !exists {
-					l = append(l, item)
-					break
-				}
+func fileItemsWithMissedAccessors(dirtyFiles []*filesItem, aggregationStep uint64, accessorsFor func(fromStep, toStep uint64) []string) (l []*filesItem) {
+	for _, item := range dirtyFiles {
+		fromStep, toStep := item.startTxNum/aggregationStep, item.endTxNum/aggregationStep
+		for _, fName := range accessorsFor(fromStep, toStep) {
+			exists, err := dir.FileExist(fName)
+			if err != nil {
+				panic(err)
+			}
+			if !exists {
+				l = append(l, item)
+				break
 			}
 		}
-		return true
-	})
+	}
 	return
 }

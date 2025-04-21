@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sync"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -409,6 +410,22 @@ func (ub *UpdateBuilder) Build() (plainKeys [][]byte, updates []Update) {
 	return
 }
 
+func WrapKeyUpdatesParallel(tb testing.TB, mode Mode, hasher keyHasher, keys [][]byte, updates []Update) *Updates {
+	tb.Helper()
+
+	upd := NewUpdates(mode, tb.TempDir(), hasher)
+	upd.SetConcurrentCommitment(true)
+	for i, key := range keys {
+		ks := toStringZeroCopy(key)
+		upd.TouchPlainKey(ks, nil, func(c *KeyUpdate, _ []byte) {
+			c.plainKey = ks
+			c.hashedKey = hasher(key)
+			c.update = &updates[i]
+		})
+	}
+	return upd
+}
+
 func WrapKeyUpdates(tb testing.TB, mode Mode, hasher keyHasher, keys [][]byte, updates []Update) *Updates {
 	tb.Helper()
 
@@ -431,4 +448,11 @@ func WrapKeyUpdatesInto(tb testing.TB, upd *Updates, keys [][]byte, updates []Up
 			c.update = &updates[i]
 		})
 	}
+}
+
+type ParallelMockState struct {
+	MockState
+	accMu  sync.Mutex
+	stoMu  sync.Mutex
+	commMu sync.RWMutex
 }

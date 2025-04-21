@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon-lib/kv/temporal"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -167,7 +166,11 @@ var ErrTooDeepUnwind = errors.New("too deep unwind")
 func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, br services.FullBlockReader, accumulator *shards.Accumulator, logger log.Logger) (err error) {
 	var domains *libstate.SharedDomains
 	if txc.Doms == nil {
-		domains, err = libstate.NewSharedDomains(txc.Tx, logger)
+		temporalTx, ok := txc.Tx.(kv.TemporalTx)
+		if !ok {
+			return errors.New("tx is not a temporal tx")
+		}
+		domains, err = libstate.NewSharedDomains(temporalTx, logger)
 		if err != nil {
 			return err
 		}
@@ -433,7 +436,7 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		pruneTimeout = 12 * time.Hour
 
 		// allow greedy prune on non-chain-tip
-		if err = tx.(*temporal.Tx).AggTx().(*libstate.AggregatorRoTx).GreedyPruneCommitHistory(ctx, tx, nil); err != nil {
+		if err = tx.(kv.TemporalRwTx).Debug().GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
 			return err
 		}
 	}
