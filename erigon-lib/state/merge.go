@@ -815,7 +815,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 						panic(fmt.Errorf("assert: no value??? %s, i=%d, count=%d, lastKey=%x, ci1.key=%x", ci1.hist.FileName(), i, count, lastKey, ci1.key))
 					}
 
-					valBuf, _ = ci1.hist.Next(valBuf[:0])
+					valBuf, _ = ci1.hist.Next(nil)
 					if err = pagedWr.Add(lastKey, valBuf); err != nil {
 						return nil, nil, err
 					}
