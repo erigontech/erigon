@@ -817,7 +817,6 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 
 					var k []byte
 					k, valBuf, _ = ci1.hist.Next2(nil)
-					fmt.Printf("[dbg] merge: %x, %x\n", k, valBuf)
 					if err = pagedWr.Add(k, valBuf); err != nil {
 						return nil, nil, err
 					}
