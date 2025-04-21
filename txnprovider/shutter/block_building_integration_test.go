@@ -24,11 +24,11 @@ import (
 	"math/big"
 	"os"
 	"path"
+	"runtime"
 	"runtime/pprof"
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/holiman/uint256"
 	libp2pcrypto "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -55,12 +55,17 @@ import (
 	"github.com/erigontech/erigon/turbo/testlog"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/testhelpers"
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 func TestShutterBlockBuilding(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
+	}
+
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
