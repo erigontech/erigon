@@ -707,7 +707,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		collected := -1
 		collectorLock := sync.Mutex{}
 		collections := sync.NewCond(&collectorLock)
-
+		println("block num:", blockNum, "to", blockTo)
 		var j int
 
 		if err := tx.ForAmount(kv.EthTx, numBuf, body.TxCount-2, func(_, tv []byte) error {
