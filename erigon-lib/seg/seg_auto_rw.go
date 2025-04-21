@@ -157,6 +157,12 @@ func (g *PagedReader) Next(buf []byte) ([]byte, uint64) {
 	}
 	var pageV []byte
 	pageV, g.pageOffset = g.file.Next(buf)
+	if pageV == nil {
+		panic(1)
+	}
+	if len(pageV) == 0 {
+		panic(fmt.Sprintf("assert: %t, %d", g.file.HasNext(), len(pageV)))
+	}
 	g.page = &page.Reader{}
 	g.page.Reset(common.Copy(pageV), g.snappy)
 	_, v := g.page.Next()

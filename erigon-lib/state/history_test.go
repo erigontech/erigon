@@ -105,7 +105,7 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 			defer sf.CleanupOnError()
 
 			efReader := seg.NewReader(sf.efHistoryDecomp.MakeGetter(), h.compression)
-			hReader := seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.compression), h.historySampling)
+			hReader := seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.compression), h.historySampling, true)
 
 			// ef contains all sorted keys
 			// for each key it has a list of txNums
@@ -113,7 +113,7 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 
 			var keyBuf, valBuf, hValBuf []byte
 			seenKeys := make([]string, 0)
-
+			iter := 0
 			for efReader.HasNext() {
 				keyBuf, _ = efReader.Next(nil)
 				valBuf, _ = efReader.Next(nil)
@@ -130,13 +130,14 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 				//require.Len(t, updates, int(ef.Count()), "updates count mismatch")
 
 				for efIt.HasNext() {
+					iter++
 					txNum, err := efIt.Next()
 					require.NoError(t, err)
 					require.EqualValuesf(t, updates[vi].txNum, txNum, "txNum mismatch")
 
 					require.Truef(t, hReader.HasNext(), "hReader has no more values")
 					hValBuf, _ = hReader.Next(nil)
-					fmt.Printf("[dbg] do it: %d, %d, %d\n", vi, len(hValBuf), len(updates[vi].value))
+					//fmt.Printf("[dbg] do it: %d, %d, %d\n", vi, len(hValBuf), len(updates[vi].value))
 					if updates[vi].value == nil {
 						require.Emptyf(t, hValBuf, "value at %d is not empty (not nil)", vi)
 					} else {
