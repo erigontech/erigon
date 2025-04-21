@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"container/heap"
 	"context"
-	"encoding/binary"
 	"fmt"
 	"math"
 	"path"
@@ -816,7 +815,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 					}
 
 					var k []byte
-					k, valBuf, _ = ci1.hist.Next2(nil)
+					k, valBuf, _ = ci1.hist.Next2(valBuf[:0])
 					if err = pagedWr.Add(k, valBuf); err != nil {
 						return nil, nil, err
 					}
@@ -844,73 +843,10 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		}
 		ps.Delete(p)
 
-		p = ps.AddNew(path.Base(idxPath), uint64(decomp.Count()/2))
-		defer ps.Delete(p)
-		if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
-			KeyCount:   keyCount,
-			Enums:      false,
-			BucketSize: recsplit.DefaultBucketSize,
-			LeafSize:   recsplit.DefaultLeafSize,
-			TmpDir:     ht.h.dirs.Tmp,
-			IndexFile:  idxPath,
-			Salt:       ht.h.salt,
-			NoFsync:    ht.h.noFsync,
-		}, ht.h.logger); err != nil {
-			return nil, nil, fmt.Errorf("create recsplit: %w", err)
+		if err = ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, ps); err != nil {
+			return nil, nil, err
 		}
-		rs.LogLvl(log.LvlTrace)
 
-		var (
-			txKey      [8]byte
-			historyKey []byte
-			keyBuf     []byte
-			valOffset  uint64
-		)
-
-		g := seg.NewReader(indexIn.decompressor.MakeGetter(), ht.h.InvertedIndex.compression)
-		g2 := seg.NewPagedReader(seg.NewReader(decomp.MakeGetter(), ht.h.compression), ht.h.historySampling, true)
-
-		for {
-			g.Reset(0)
-			g2.Reset(0)
-			valOffset = 0
-			for g.HasNext() {
-				keyBuf, _ = g.Next(nil)
-				valBuf, _ = g.Next(nil)
-				ef, _ := eliasfano32.ReadEliasFano(valBuf)
-				efIt := ef.Iterator()
-				for efIt.HasNext() {
-					txNum, err := efIt.Next()
-					if err != nil {
-						return nil, nil, err
-					}
-					binary.BigEndian.PutUint64(txKey[:], txNum)
-					historyKey = append(append(historyKey[:0], txKey[:]...), keyBuf...)
-					//fmt.Printf("[dbg] index merge1: %x, %d\n", historyKey, valOffset)
-					if err = rs.AddKey(historyKey, valOffset); err != nil {
-						return nil, nil, err
-					}
-					var fk, fv []byte
-					fk, fv, valOffset = g2.Next2(nil)
-					fmt.Printf("[dbg] index merge2: %x, %d, %x,%x\n", historyKey, valOffset, fk, fv)
-					_, _ = fk, fv
-					//valOffset, _ = g2.Skip()
-				}
-				p.Processed.Add(1)
-			}
-			if err = rs.Build(ctx); err != nil {
-				if rs.Collision() {
-					log.Info("Building recsplit. Collision happened. It's ok. Restarting...")
-					rs.ResetNextSalt()
-				} else {
-					return nil, nil, fmt.Errorf("build %s idx: %w", ht.h.filenameBase, err)
-				}
-			} else {
-				break
-			}
-		}
-		rs.Close()
-		rs = nil
 		if index, err = recsplit.OpenIndex(idxPath); err != nil {
 			return nil, nil, fmt.Errorf("open %s idx: %w", ht.h.filenameBase, err)
 		}

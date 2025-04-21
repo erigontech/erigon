@@ -345,14 +345,14 @@ func (h *History) buildVi(ctx context.Context, item *filesItem, ps *background.P
 	fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
 	idxPath := h.vAccessorFilePath(fromStep, toStep)
 
-	_, err = h.buildVI(ctx, idxPath, item.decompressor, iiItem.decompressor, ps)
+	err = h.buildVI(ctx, idxPath, item.decompressor, iiItem.decompressor, ps)
 	if err != nil {
 		return fmt.Errorf("buildVI: %w", err)
 	}
 	return nil
 }
 
-func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHist *seg.Decompressor, ps *background.ProgressSet) (string, error) {
+func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHist *seg.Decompressor, ps *background.ProgressSet) error {
 	var historyKey []byte
 	var txKey [8]byte
 	var valOffset uint64
@@ -360,14 +360,13 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	defer hist.EnableReadAhead().DisableReadAhead()
 	defer efHist.EnableReadAhead().DisableReadAhead()
 
-	histReader := seg.NewReader(hist.MakeGetter(), h.compression)
-	efHistReader := seg.NewReader(efHist.MakeGetter(), h.InvertedIndex.compression)
+	iiReader := seg.NewReader(efHist.MakeGetter(), h.InvertedIndex.compression)
 
 	var keyBuf, valBuf []byte
 	cnt := uint64(0)
-	for efHistReader.HasNext() {
-		keyBuf, _ = efHistReader.Next(keyBuf[:0]) // skip key
-		valBuf, _ = efHistReader.Next(valBuf[:0])
+	for iiReader.HasNext() {
+		keyBuf, _ = iiReader.Next(keyBuf[:0]) // skip key
+		valBuf, _ = iiReader.Next(valBuf[:0])
 		cnt += eliasfano32.Count(valBuf)
 		select {
 		case <-ctx.Done():
@@ -376,10 +375,11 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		}
 	}
 
+	histReader := seg.NewReader(hist.MakeGetter(), h.compression)
+
 	_, fName := filepath.Split(historyIdxPath)
 	p := ps.AddNew(fName, uint64(hist.Count()))
 	defer ps.Delete(p)
-
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   int(cnt),
 		Enums:      false,
@@ -391,7 +391,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		NoFsync:    h.noFsync,
 	}, h.logger)
 	if err != nil {
-		return "", fmt.Errorf("create recsplit: %w", err)
+		return fmt.Errorf("create recsplit: %w", err)
 	}
 	defer rs.Close()
 	rs.LogLvl(log.LvlTrace)
@@ -399,12 +399,12 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	i := 0
 	for {
 		histReader.Reset(0)
-		efHistReader.Reset(0)
+		iiReader.Reset(0)
 
 		valOffset = 0
-		for efHistReader.HasNext() {
-			keyBuf, _ = efHistReader.Next(nil)
-			valBuf, _ = efHistReader.Next(nil)
+		for iiReader.HasNext() {
+			keyBuf, _ = iiReader.Next(keyBuf[:0])
+			valBuf, _ = iiReader.Next(valBuf[:0])
 
 			// fmt.Printf("ef key %x\n", keyBuf)
 
@@ -413,13 +413,13 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 			for efIt.HasNext() {
 				txNum, err := efIt.Next()
 				if err != nil {
-					return "", err
+					return err
 				}
 				binary.BigEndian.PutUint64(txKey[:], txNum)
 				historyKey = append(append(historyKey[:0], txKey[:]...), keyBuf...)
 				//fmt.Printf("[dbg] vi: %d, %x\n", txNum, keyBuf)
 				if err = rs.AddKey(historyKey, valOffset); err != nil {
-					return "", err
+					return err
 				}
 				if h.historySampling == 0 {
 					valOffset, _ = histReader.Skip()
@@ -434,7 +434,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 
 			select {
 			case <-ctx.Done():
-				return "", ctx.Err()
+				return ctx.Err()
 			default:
 			}
 		}
@@ -444,13 +444,13 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 				log.Info("Building recsplit. Collision happened. It's ok. Restarting...")
 				rs.ResetNextSalt()
 			} else {
-				return "", fmt.Errorf("build idx: %w", err)
+				return fmt.Errorf("build idx: %w", err)
 			}
 		} else {
 			break
 		}
 	}
-	return historyIdxPath, nil
+	return nil
 }
 
 func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet, historyFiles *MissedAccessorHistoryFiles) {
@@ -914,7 +914,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	}
 
 	historyIdxPath := h.vAccessorFilePath(step, step+1)
-	historyIdxPath, err = h.buildVI(ctx, historyIdxPath, historyDecomp, efHistoryDecomp, ps)
+	err = h.buildVI(ctx, historyIdxPath, historyDecomp, efHistoryDecomp, ps)
 	if err != nil {
 		return HistoryFiles{}, fmt.Errorf("build %s .vi: %w", h.filenameBase, err)
 	}

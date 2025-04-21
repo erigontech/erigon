@@ -56,8 +56,8 @@ type HistoryRangeAsOfFiles struct {
 func (hi *HistoryRangeAsOfFiles) Close() {
 }
 
-func (hi *HistoryRangeAsOfFiles) init(files visibleFiles) error {
-	for i, item := range files {
+func (hi *HistoryRangeAsOfFiles) init(iiFiles visibleFiles) error {
+	for i, item := range iiFiles {
 		if item.endTxNum <= hi.startTxNum {
 			continue
 		}
@@ -132,7 +132,7 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 		if !ok {
 			continue
 		}
-		g := hi.hc.statelessGetter(historyItem.i)
+		g := seg.NewPagedReader(hi.hc.statelessGetter(historyItem.i), hi.hc.h.historySampling, true)
 		g.Reset(offset)
 		hi.nextVal, _ = g.Next(nil)
 		return nil
