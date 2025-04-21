@@ -130,26 +130,36 @@ func (sdb *IntraBlockState) HasStorage(addr libcommon.Address) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if so == nil || so.deleted {
+	if so == nil || so.selfdestructed || so.deleted {
 		return false, nil
 	}
 
 	// If the fake storage is set, only lookup the state here(in the debugging mode)
-	if so.fakeStorage != nil && len(so.fakeStorage) > 0 {
-		// value cached, safe to exit now
-		return true, nil
+	if len(so.fakeStorage) > 0 {
+		for _, v := range so.fakeStorage {
+			if !v.IsZero() {
+				return true, nil
+			}
+		}
+
+		return false, nil
 	}
-	// If we have the original value cached, return that
-	{
-		if so.originStorage != nil && len(so.originStorage) > 0 {
-			// TODO check if its correct, but seems ok
+
+	// If we know of at least one non-empty cached storage slot, then the object has storage
+	for _, v := range so.originStorage {
+		if !v.IsZero() {
 			return true, nil
 		}
 	}
-	if so.createdContract {
-		return false, nil
+
+	// If we know of at least one non-empty dirty storage slot, then the object has storage
+	for _, v := range so.dirtyStorage {
+		if !v.IsZero() {
+			return true, nil
+		}
 	}
-	// Load from DB in case it is missing.
+
+	// Otherwise check in the DB
 	return sdb.stateReader.HasStorage(addr)
 }
 
