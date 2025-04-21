@@ -1281,7 +1281,7 @@ func ReadReceiptCache(tx kv.TemporalTx, blockNum uint64, blockHash common.Hash, 
 	return res, true, nil
 }
 
-var receiptCacheSnappy = dbg.EnvBool("receiptCacheSnappy", true)
+var receiptCacheSnappy = dbg.EnvBool("receiptCacheSnappy", false)
 
 func ReadReceiptsCache(tx kv.TemporalTx, block *types.Block, txNumReader rawdbv3.TxNumsReader) (res types.Receipts, err error) {
 	blockHash := block.Hash()
