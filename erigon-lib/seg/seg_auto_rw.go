@@ -24,7 +24,7 @@ import (
 )
 
 //Reader and Writer - decorators on Getter and Compressor - which
-//can auto-use Next/NextUncompressed and AddWord/AddUncompressedWord - based on `FileCompression` passed to constructor
+//can auto-use Next/NextUncompressed and Write/AddUncompressedWord - based on `FileCompression` passed to constructor
 
 // Maybe in future will add support of io.Reader/Writer interfaces to this decorators
 // Maybe in future will merge decorators into it's parents
@@ -168,6 +168,23 @@ func (g *PagedReader) Next(buf []byte) ([]byte, uint64) {
 	g.page.Reset(common.Copy(pageV), g.snappy)
 	_, v := g.page.Next()
 	return v, g.pageOffset
+}
+func (g *PagedReader) Next2(buf []byte) (k, v []byte, pageOffset uint64) {
+	if g.sampling <= 1 {
+		v, pageOffset = g.file.Next(buf)
+		return nil, v, pageOffset
+	}
+
+	if g.page.HasNext() {
+		k, v = g.page.Next()
+		return k, v, g.pageOffset
+	}
+	var pageV []byte
+	pageV, g.pageOffset = g.file.Next(buf)
+	g.page = &page.Reader{}
+	g.page.Reset(common.Copy(pageV), g.snappy)
+	k, v = g.page.Next()
+	return k, v, g.pageOffset
 }
 func (g *PagedReader) Skip() (uint64, int) {
 	v, offset := g.Next(nil)

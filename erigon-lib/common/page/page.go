@@ -109,33 +109,47 @@ func (c *Writer) DisableFsync() {
 
 var be = binary.BigEndian
 
-func Get(key, buf []byte, snappyEnabled bool) []byte {
+func Get(key, compressedPage []byte, snappyEnabled bool) []byte {
 	var err error
-	_, buf, err = compress.DecodeSnappyIfNeed(nil, buf, snappyEnabled)
+	var page []byte
+	_, page, err = compress.DecodeSnappyIfNeed(nil, compressedPage, snappyEnabled)
 	if err != nil {
 		panic(err)
 	}
 
-	cnt := int(buf[0])
+	cnt := int(page[0])
 	if cnt == 0 {
 		return nil
 	}
-	kLens, vLens, data := buf[1:1+cnt*4], buf[1+cnt*4:1+cnt*4*2], buf[1+cnt*4*2:]
+	meta, data := page[1:1+cnt*4*2], page[1+cnt*4*2:]
+	kLens, vLens := meta[:cnt*4], meta[cnt*4:]
 	var kOffset, vOffset uint32
 	for i := 0; i < cnt*4; i += 4 {
 		vOffset += be.Uint32(kLens[i:])
 	}
+	keys := data[:vOffset]
+	vals := data[vOffset:]
+	fmt.Printf("[dbg] %d keys: %x, vals: %x\n", cnt, keys, vals)
+	vOffset = 0
 
 	for i := 0; i < cnt*4; i += 4 {
 		kLen, vLen := be.Uint32(kLens[i:]), be.Uint32(vLens[i:])
-		if bytes.Equal(key, data[kOffset:kOffset+kLen]) {
-			return data[vOffset : vOffset+vLen]
+		foundKey := keys[kOffset : kOffset+kLen]
+		fmt.Printf("[dbg] see: kLen=%d, %x, %x\n", kLen, key, foundKey)
+		if bytes.Equal(key, foundKey) {
+			return vals[vOffset : vOffset+vLen]
 		} else {
 			_ = data
 		}
 		kOffset += kLen
 		vOffset += vLen
 	}
+	//from := be.Uint32(kLens[(cnt-1)*4:])
+	//foudKey := keys[from:]
+	//if bytes.Equal(key, foudKey) {
+	//	from = be.Uint32(vLens[(cnt-1)*4:])
+	//	return vals[from:]
+	//}
 
 	from := be.Uint32(kLens[(cnt-1)*4:])
 	if bytes.Equal(key, data[from:]) {

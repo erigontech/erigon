@@ -47,7 +47,7 @@ type CursorItem struct {
 
 	iter         btree2.MapIter[string, dataWithPrevStep]
 	idx          *seg.Reader
-	hist         seg.R
+	hist         *seg.PagedReader
 	btCursor     *Cursor
 	key          []byte
 	val          []byte

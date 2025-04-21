@@ -774,7 +774,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 			g := seg.NewReader(item.decompressor.MakeGetter(), ht.h.compression)
 			g.Reset(0)
 			if g.HasNext() {
-				var g2 seg.R
+				var g2 *seg.PagedReader
 				for _, hi := range historyFiles { // full-scan, because it's ok to have different amount files. by unclean-shutdown.
 					if hi.startTxNum == item.startTxNum && hi.endTxNum == item.endTxNum {
 						g2 = seg.NewPagedReader(seg.NewReader(hi.decompressor.MakeGetter(), ht.h.compression), ht.h.historySampling, true)
@@ -815,11 +815,13 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 						panic(fmt.Errorf("assert: no value??? %s, i=%d, count=%d, lastKey=%x, ci1.key=%x", ci1.hist.FileName(), i, count, lastKey, ci1.key))
 					}
 
-					valBuf, _ = ci1.hist.Next(nil)
-					if err = pagedWr.Add(lastKey, valBuf); err != nil {
+					var k []byte
+					k, valBuf, _ = ci1.hist.Next2(nil)
+					if err = pagedWr.Add(k, valBuf); err != nil {
 						return nil, nil, err
 					}
 				}
+
 				// fmt.Printf("fput '%x'->%x\n", lastKey, ci1.val)
 				keyCount += int(count)
 				if ci1.idx.HasNext() {
