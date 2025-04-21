@@ -10,20 +10,20 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 )
 
-// pagesWriter is a writer for [][]byte, similar to bytes.Writer.
-type pagesWriter struct {
+// multyBytesWriter is a writer for [][]byte, similar to bytes.Writer.
+type multyBytesWriter struct {
 	buffer [][]byte
 }
 
-func (w *pagesWriter) Write(p []byte) (n int, err error) {
+func (w *multyBytesWriter) Write(p []byte) (n int, err error) {
 	w.buffer = append(w.buffer, common.Copy(p))
 	return len(p), nil
 }
-func (w *pagesWriter) Bytes() [][]byte { return w.buffer }
-func (w *pagesWriter) Reset()          { w.buffer = nil }
+func (w *multyBytesWriter) Bytes() [][]byte { return w.buffer }
+func (w *multyBytesWriter) Reset()          { w.buffer = nil }
 
 func TestPage(t *testing.T) {
-	buf, require := &pagesWriter{}, require.New(t)
+	buf, require := &multyBytesWriter{}, require.New(t)
 	sampling := 2
 	w := NewWriter(buf, sampling, false)
 	for i := 0; i < sampling+1; i++ {
