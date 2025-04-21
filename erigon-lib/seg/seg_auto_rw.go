@@ -91,6 +91,7 @@ func (g *Reader) MatchCmp(prefix []byte) int {
 	return g.Getter.MatchCmpUncompressed(prefix)
 }
 
+func (g *Reader) FileName() string { return g.Getter.FileName() }
 func (g *Reader) Next(buf []byte) ([]byte, uint64) {
 	fl := CompressKeys
 	if g.nextValue {
@@ -131,6 +132,7 @@ type R interface {
 	Reset(offset uint64)
 	HasNext() bool
 	Skip() (uint64, int)
+	FileName() string
 }
 
 type PagedReader struct {
@@ -157,12 +159,6 @@ func (g *PagedReader) Next(buf []byte) ([]byte, uint64) {
 	}
 	var pageV []byte
 	pageV, g.pageOffset = g.file.Next(buf)
-	if pageV == nil {
-		panic(1)
-	}
-	if len(pageV) == 0 {
-		panic(fmt.Sprintf("assert: %t, %d", g.file.HasNext(), len(pageV)))
-	}
 	g.page = &page.Reader{}
 	g.page.Reset(common.Copy(pageV), g.snappy)
 	_, v := g.page.Next()

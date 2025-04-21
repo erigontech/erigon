@@ -736,7 +736,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 				} else {
 					val = nil
 				}
-				if _, err = historyComp.Write(val); err != nil {
+				if err := p.Add(prevKey, val); err != nil {
 					return fmt.Errorf("add %s history val [%x]: %w", h.filenameBase, prevKey, err)
 				}
 				continue
@@ -748,13 +748,6 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 			}
 			if len(val) == 0 {
 				val = nil
-			}
-
-			if h.historySampling == 0 {
-				if _, err = historyComp.Write(val); err != nil {
-					return fmt.Errorf("add %s history val [%x]: %w", h.filenameBase, key, err)
-				}
-				continue
 			}
 
 			if err := p.Add(keyBuf, val); err != nil {

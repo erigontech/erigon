@@ -3,6 +3,7 @@ package page
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"io"
 
 	"github.com/erigontech/erigon-lib/common/compress"
@@ -24,6 +25,11 @@ type Writer struct {
 
 func (c *Writer) Empty() bool { return c.i == 0 }
 func (c *Writer) Add(k, v []byte) (err error) {
+	if c.limit <= 1 {
+		_, err = c.parent.Write(v)
+		return err
+	}
+
 	c.i++
 	c.kLengths = append(c.kLengths, len(k))
 	c.vLengths = append(c.vLengths, len(v))
@@ -44,6 +50,10 @@ func (c *Writer) Reset() {
 	c.keys, c.vals = c.keys[:0], c.vals[:0]
 }
 func (c *Writer) Flush() error {
+	if c.limit <= 1 {
+		return nil
+	}
+
 	defer c.Reset()
 	if !c.Empty() {
 		bts := c.bytesAndReset()
@@ -146,7 +156,7 @@ func (r *Reader) Reset(v []byte, snappyEnabled bool) (n int) {
 	_ = vcpu
 	r.snappyBuf, v, err = compress.DecodeSnappyIfNeed(r.snappyBuf, v, snappyEnabled)
 	if err != nil {
-		panic(err)
+		panic(fmt.Errorf("len(v): %d, %w", len(v), err))
 	}
 
 	r.i, r.kOffset, r.vOffset = 0, 0, 0
