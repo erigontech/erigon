@@ -729,6 +729,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 				valueBuf, err := parse(parseCtx, tv, valueBufs[tx%workers], senders, tx)
 
 				if err != nil {
+					println("parse error:", err.Error())
 					return fmt.Errorf("%w, block: %d", err, blockNum)
 				}
 				println("parsed", tx)
