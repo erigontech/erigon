@@ -602,6 +602,14 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			println("UnmarshalTransactionFromBinary tx", tx.Hash().Hex())
 			return valueBuf, err
 		}
+
+		tx, errDecode := types.UnmarshalTransactionFromBinary(v, false)
+		if errDecode != nil {
+			println("UnmarshalTransactionFromBinary err", errDecode.Error())
+		}
+		if tx.Hash() != common.BytesToHash(slot.IDHash[:]) {
+			println("new rlp:", tx.Hash().Hex(), "old:", common.BytesToHash(slot.IDHash[:]).Hex())
+		}
 		if len(senders) > 0 {
 			sender = senders[j]
 		}
