@@ -44,7 +44,7 @@ var (
 const WasmSchemaVersion byte = 0x01
 
 func LocalTarget() WasmTarget {
-	if runtime.GOOS == "linux" || runtime.GOOS == "darwin" {
+	if runtime.GOOS == "linux" {
 		switch runtime.GOARCH {
 		case "arm64":
 			return TargetArm64
