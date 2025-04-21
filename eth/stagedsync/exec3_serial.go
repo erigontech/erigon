@@ -39,6 +39,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			return false, nil
 		}
 
+		se.applyWorker.SetArbitrumWasmDB(se.cfg.arbitrumWasmDB)
 		se.applyWorker.RunTxTaskNoLock(txTask, se.isMining, se.skipPostEvaluation)
 		if err := func() error {
 			if errors.Is(txTask.Error, context.Canceled) {
@@ -56,6 +57,8 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			if txTask.Tx != nil {
 				se.blobGasUsed += txTask.Tx.GetBlobGas()
 			}
+
+			txTask.CreateReceipt(se.applyTx)
 
 			if txTask.Final {
 				if !se.isMining && !se.skipPostEvaluation && !se.execStage.CurrentSyncCycle.IsInitialCycle {

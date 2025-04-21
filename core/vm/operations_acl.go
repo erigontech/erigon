@@ -58,9 +58,9 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 			//		return params.SloadGasEIP2200, nil
 			return cost + params.WarmStorageReadCostEIP2929, nil // SLOAD_GAS
 		}
-		var original uint256.Int
+		original := uint256.NewInt(0)
 		slotCommited := libcommon.Hash(x.Bytes32())
-		evm.IntraBlockState().GetCommittedState(contract.Address(), &slotCommited, &original)
+		evm.IntraBlockState().GetCommittedState(contract.Address(), &slotCommited, original)
 		if original.Eq(&current) {
 			if original.IsZero() { // create slot (2.1.1)
 				return cost + params.SstoreSetGasEIP2200, nil

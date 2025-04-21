@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain/params"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 )
@@ -910,6 +911,19 @@ func opStop(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 func opSelfdestruct(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	if interpreter.readOnly {
 		return nil, ErrWriteProtection
+	}
+
+	// Arbitrum: revert if acting account is a Stylus program
+	if interpreter.evm.chainRules.IsStylus {
+		actingAddress := scope.Contract.Address()
+		code, err := interpreter.evm.intraBlockState.GetCode(actingAddress)
+		if err != nil {
+			return nil, err
+		}
+
+		if state.IsStylusProgram(code) {
+			return nil, ErrExecutionReverted
+		}
 	}
 	beneficiary := scope.Stack.Pop()
 	callerAddr := scope.Contract.Address()

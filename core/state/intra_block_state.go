@@ -21,6 +21,7 @@
 package state
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -31,11 +32,13 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/turbo/ethdb/wasmdb"
 )
 
 var _ evmtypes.IntraBlockState = new(IntraBlockState) // compile-time interface-check
@@ -104,6 +107,9 @@ type IntraBlockState struct {
 	trace          bool
 	tracingHooks   *tracing.Hooks
 	balanceInc     map[libcommon.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
+
+	// Arbitrum stylus
+	wasmDB wasmdb.WasmIface
 }
 
 // Create a new state from a given trie
@@ -129,6 +135,10 @@ func New(stateReader StateReader) *IntraBlockState {
 		},
 		//trace:             true,
 	}
+}
+
+func (sdb *IntraBlockState) SetWasmDB(wasmDB wasmdb.WasmIface) {
+	sdb.wasmDB = wasmDB
 }
 
 func (sdb *IntraBlockState) SetHooks(hooks *tracing.Hooks) {
@@ -986,6 +996,21 @@ func (sdb *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter Sta
 	for addr, bi := range sdb.balanceInc {
 		if !bi.transferred {
 			sdb.getStateObject(addr)
+		}
+	}
+
+	if sdb.wasmDB != nil && sdb.arbExtraData != nil {
+		if db := sdb.wasmDB.WasmStore(); db != nil && len(sdb.arbExtraData.activatedWasms) > 0 {
+			if err := db.Update(context.TODO(), func(tx kv.RwTx) error {
+				// Arbitrum: write Stylus programs to disk
+				for moduleHash, asmMap := range sdb.arbExtraData.activatedWasms {
+					wasmdb.WriteActivation(tx, moduleHash, asmMap)
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
+			sdb.arbExtraData.activatedWasms = make(map[libcommon.Hash]ActivatedWasm)
 		}
 	}
 	return sdb.MakeWriteSet(chainRules, stateWriter)
