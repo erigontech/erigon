@@ -640,7 +640,6 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 	doWarmup, warmupTxs, warmupSenders := blockTo-blockFrom >= 100_000 && workers > 4, &atomic.Bool{}, &atomic.Bool{}
 	from := hexutil.EncodeTs(blockFrom)
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
-		println("in chunks walker")
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum >= blockTo { // [from, to)
 			return false, nil
@@ -725,14 +724,15 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 				parseCtx.WithAllowPreEip2s(blockNum <= chainConfig.HomesteadBlock.Uint64())
 
 				valueBuf, err := parse(parseCtx, tv, valueBufs[tx%workers], senders, tx)
-				collectorLock.Lock()
-				defer collectorLock.Unlock()
 				if err != nil {
+					collectorLock.Lock()
+					defer collectorLock.Unlock()
 					collected = tx
 					collections.Broadcast() // to fail fast on it.
 					return fmt.Errorf("%w, block: %d", err, blockNum)
 				}
-
+				collectorLock.Lock()
+				defer collectorLock.Unlock()
 				for collected < tx-1 {
 					collections.Wait()
 				}
