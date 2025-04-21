@@ -56,8 +56,8 @@ type HistoryRangeAsOfFiles struct {
 func (hi *HistoryRangeAsOfFiles) Close() {
 }
 
-func (hi *HistoryRangeAsOfFiles) init(files visibleFiles) error {
-	for i, item := range files {
+func (hi *HistoryRangeAsOfFiles) init(iiFiles visibleFiles) error {
+	for i, item := range iiFiles {
 		if item.endTxNum <= hi.startTxNum {
 			continue
 		}
