@@ -281,10 +281,11 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 		fmt.Printf("Indexing file %s\n", fileName)
 		var buf []byte
 		for getter.HasNext() {
-			buf = buf[:0]
-			buf, _ = getter.Next(buf)
+			buf, _ = getter.Next(buf[:0])
 
-			collector.Collect(buf, layerBytes)
+			if err := collector.Collect(buf, layerBytes); err != nil {
+				return err
+			}
 			count++
 			//fmt.Println("count: ", count, "keyLength: ", len(buf))
 			if count%100000 == 0 {
