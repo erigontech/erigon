@@ -38,6 +38,8 @@ func TestFastDoubleRlpForByteArrays(t *testing.T) {
 }
 
 func doTestWithByte(t *testing.T, b byte, iterations int) {
+	t.Helper()
+
 	var prefixBuf [8]byte
 	buffer := new(bytes.Buffer)
 
