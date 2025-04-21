@@ -284,6 +284,10 @@ func testTableFindNodeByIDRun(t *testing.T, nodesCountGen uint16, resultsCountGe
 }
 
 func TestTable_findNodeByID_examples(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	randGen := rand.New(rand.NewSource(time.Now().Unix()))

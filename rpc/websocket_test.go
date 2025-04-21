@@ -178,6 +178,10 @@ func TestClientWebsocketPing(t *testing.T) {
 
 // This checks that the websocket transport can deal with large messages.
 func TestClientWebsocketLargeMessage(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	logger := log.New()
 	var (
 		srv     = NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, true, logger, 100)
