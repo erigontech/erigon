@@ -704,7 +704,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	collector.SortAndFlushInBackground(true)
 	defer bitmapdb.ReturnToPool64(bitmap)
 
-	p := page.NewWriter(historyComp, h.historySampling, true)
+	historyPagedComp := page.NewWriter(historyComp, h.historySampling, true)
 	loadBitmapsFunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		txNum := binary.BigEndian.Uint64(v)
 		if !initialized {
@@ -736,7 +736,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 				} else {
 					val = nil
 				}
-				if err := p.Add(prevKey, val); err != nil {
+				if err := historyPagedComp.Add(prevKey, val); err != nil {
 					return fmt.Errorf("add %s history val [%x]: %w", h.filenameBase, prevKey, err)
 				}
 				continue
@@ -750,7 +750,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 				val = nil
 			}
 
-			if err := p.Add(keyBuf, val); err != nil {
+			if err := historyPagedComp.Add(keyBuf, val); err != nil {
 				return fmt.Errorf("add %s history val [%x]: %w", h.filenameBase, key, err)
 			}
 		}
@@ -782,7 +782,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 			return HistoryCollation{}, err
 		}
 	}
-	if err = p.Flush(); err != nil {
+	if err = historyPagedComp.Flush(); err != nil {
 		return HistoryCollation{}, fmt.Errorf("add %s history val: %w", h.filenameBase, err)
 	}
 
