@@ -739,7 +739,6 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 				}
 
 				histKeyBuf = historyKey(vTxNum, prevKey, histKeyBuf)
-				fmt.Printf("write: %x\n", histKeyBuf)
 				if err := historyWriter.Add(histKeyBuf, val); err != nil {
 					return fmt.Errorf("add %s history val [%x]: %w", h.filenameBase, prevKey, err)
 				}
@@ -755,7 +754,6 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 			}
 
 			histKeyBuf = historyKey(vTxNum, prevKey, histKeyBuf)
-			fmt.Printf("[dbg] write: %x, %x\n", keyBuf, val)
 			if err := historyWriter.Add(histKeyBuf, val); err != nil {
 				return fmt.Errorf("add %s history val [%x]: %w", h.filenameBase, key, err)
 			}
