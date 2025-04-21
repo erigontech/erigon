@@ -75,8 +75,9 @@ type InvertedIndex struct {
 }
 
 type iiCfg struct {
-	salt *uint32
-	dirs datadir.Dirs
+	salt    *uint32
+	dirs    datadir.Dirs
+	disable bool // totally disable Domain/History/InvertedIndex - ignore all writes, don't produce files
 
 	filenameBase    string // filename base for all files of this inverted index
 	aggregationStep uint64 // amount of transactions inside single aggregation step
@@ -175,6 +176,9 @@ func (ii *InvertedIndex) openList(fNames []string) error {
 }
 
 func (ii *InvertedIndex) openFolder() error {
+	if ii.disable {
+		return nil
+	}
 	idxFiles, _, _, err := ii.fileNamesOnDisk()
 	if err != nil {
 		return err
@@ -1057,10 +1061,10 @@ func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (
 
 		prevEf = ef.AppendBytes(prevEf[:0])
 
-		if err = coll.writer.AddWord(prevKey); err != nil {
+		if _, err = coll.writer.Write(prevKey); err != nil {
 			return fmt.Errorf("add %s efi index key [%x]: %w", ii.filenameBase, prevKey, err)
 		}
-		if err = coll.writer.AddWord(prevEf); err != nil {
+		if _, err = coll.writer.Write(prevEf); err != nil {
 			return fmt.Errorf("add %s efi index val: %w", ii.filenameBase, err)
 		}
 

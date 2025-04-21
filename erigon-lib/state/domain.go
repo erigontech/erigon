@@ -235,6 +235,10 @@ func (d *Domain) protectFromHistoryFilesAheadOfDomainFiles() {
 }
 
 func (d *Domain) openFolder() error {
+	if d.disable {
+		return nil
+	}
+
 	idx, histFiles, domainFiles, err := d.fileNamesOnDisk()
 	if err != nil {
 		return fmt.Errorf("Domain(%s).openFolder: %w", d.filenameBase, err)
@@ -770,6 +774,9 @@ func (d *Domain) DumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo, txnF
 // [stepFrom; stepTo)
 // In contrast to collate function collateETL puts contents of wal into file.
 func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo uint64, wal *etl.Collector, vt valueTransformer) (coll Collation, err error) {
+	if d.disable {
+		return Collation{}, err
+	}
 	started := time.Now()
 	closeCollation := true
 	defer func() {
@@ -820,10 +827,10 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo uint64, wal *e
 			} else {
 				v = v[8:]
 			}
-			if err = comp.AddWord(k); err != nil {
+			if _, err = comp.Write(k); err != nil {
 				return fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, k, err)
 			}
-			if err = comp.AddWord(v); err != nil {
+			if _, err = comp.Write(v); err != nil {
 				return fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, k, v, err)
 			}
 		}
@@ -846,10 +853,10 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo uint64, wal *e
 		if err != nil {
 			return coll, fmt.Errorf("vt: %w", err)
 		}
-		if err = comp.AddWord(kv.k); err != nil {
+		if _, err = comp.Write(kv.k); err != nil {
 			return coll, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, kv.k, err)
 		}
-		if err = comp.AddWord(kv.v); err != nil {
+		if _, err = comp.Write(kv.v); err != nil {
 			return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, kv.k, kv.v, err)
 		}
 	}
@@ -865,6 +872,10 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo uint64, wal *e
 // and returns compressors, elias fano, and bitmaps
 // [txFrom; txTo)
 func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv.Tx) (coll Collation, err error) {
+	if d.disable {
+		return Collation{}, nil
+	}
+
 	{ //assert
 		if txFrom%d.aggregationStep != 0 {
 			panic(fmt.Errorf("assert: unexpected txFrom=%d", txFrom))
@@ -944,10 +955,10 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 			}{k[:len(k)-8], v})
 			k, v, err = valsCursor.Next()
 		} else {
-			if err = comp.AddWord(k); err != nil {
+			if _, err = comp.Write(k); err != nil {
 				return coll, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, k, err)
 			}
-			if err = comp.AddWord(v[8:]); err != nil {
+			if _, err = comp.Write(v[8:]); err != nil {
 				return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, k, v[8:], err)
 			}
 			k, v, err = valsCursor.(kv.CursorDupSort).NextNoDup()
@@ -964,10 +975,10 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 		}
 	}
 	for _, kv := range kvs {
-		if err = comp.AddWord(kv.k); err != nil {
+		if _, err = comp.Write(kv.k); err != nil {
 			return coll, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, kv.k, err)
 		}
-		if err = comp.AddWord(kv.v); err != nil {
+		if _, err = comp.Write(kv.v); err != nil {
 			return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, kv.k, kv.v, err)
 		}
 	}
@@ -1005,6 +1016,9 @@ func (sf StaticFiles) CleanupOnError() {
 
 // skips history files
 func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, collation Collation, ps *background.ProgressSet) (StaticFiles, error) {
+	if d.disable {
+		return StaticFiles{}, nil
+	}
 	mxRunningFilesBuilding.Inc()
 	defer mxRunningFilesBuilding.Dec()
 	if traceFileLife != "" && d.filenameBase == traceFileLife {
@@ -1104,6 +1118,10 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, co
 // buildFiles performs potentially resource intensive operations of creating
 // static files and their indices
 func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collation, ps *background.ProgressSet) (StaticFiles, error) {
+	if d.disable {
+		return StaticFiles{}, nil
+	}
+
 	mxRunningFilesBuilding.Inc()
 	defer mxRunningFilesBuilding.Dec()
 	if traceFileLife != "" && d.filenameBase == traceFileLife {
@@ -1332,6 +1350,9 @@ func buildAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.File
 }
 
 func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
+	if d.disable {
+		return
+	}
 	d.History.integrateDirtyFiles(sf.HistoryFiles, txNumFrom, txNumTo)
 
 	fi := newFilesItem(txNumFrom, txNumTo, d.aggregationStep)
@@ -1719,6 +1740,10 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 // GetLatest returns value, step in which the value last changed, and bool value which is true if the value
 // is present, and false if it is not present (not set or deleted)
 func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, uint64, bool, error) {
+	if dt.d.disable {
+		return nil, 0, false, nil
+	}
+
 	var v []byte
 	var foundStep uint64
 	var found bool

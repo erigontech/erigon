@@ -475,10 +475,10 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 						}
 					}
 				}
-				if err = kvWriter.AddWord(keyBuf); err != nil {
+				if _, err = kvWriter.Write(keyBuf); err != nil {
 					return nil, nil, nil, err
 				}
-				if err = kvWriter.AddWord(valBuf); err != nil {
+				if _, err = kvWriter.Write(valBuf); err != nil {
 					return nil, nil, nil, err
 				}
 			}
@@ -496,10 +496,10 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 				}
 			}
 		}
-		if err = kvWriter.AddWord(keyBuf); err != nil {
+		if _, err = kvWriter.Write(keyBuf); err != nil {
 			return nil, nil, nil, err
 		}
-		if err = kvWriter.AddWord(valBuf); err != nil {
+		if _, err = kvWriter.Write(valBuf); err != nil {
 			return nil, nil, nil, err
 		}
 	}
@@ -645,10 +645,10 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 		}
 		if keyBuf != nil {
 			// fmt.Printf("pput %x->%x\n", keyBuf, valBuf)
-			if err = write.AddWord(keyBuf); err != nil {
+			if _, err = write.Write(keyBuf); err != nil {
 				return nil, err
 			}
-			if err = write.AddWord(valBuf); err != nil {
+			if _, err = write.Write(valBuf); err != nil {
 				return nil, err
 			}
 		}
@@ -660,10 +660,10 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 	}
 	if keyBuf != nil {
 		// fmt.Printf("put %x->%x\n", keyBuf, valBuf)
-		if err = write.AddWord(keyBuf); err != nil {
+		if _, err = write.Write(keyBuf); err != nil {
 			return nil, err
 		}
-		if err = write.AddWord(valBuf); err != nil {
+		if _, err = write.Write(valBuf); err != nil {
 			return nil, err
 		}
 	}
@@ -798,9 +798,8 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 						panic(fmt.Errorf("assert: no value??? %s, i=%d, count=%d, lastKey=%x, ci1.key=%x", ci1.hist.FileName(), i, count, lastKey, ci1.key))
 					}
 
-					var k, v []byte
-					k, v, valBuf, _ = ci1.hist.Next2(valBuf[:0])
-					if err = pagedWr.Add(k, v); err != nil {
+					valBuf, _ = ci1.dg2.Next(valBuf[:0])
+					if _, err = compr.Write(valBuf); err != nil {
 						return nil, nil, err
 					}
 				}

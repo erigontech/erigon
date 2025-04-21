@@ -28,12 +28,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/page"
 	"github.com/erigontech/erigon-lib/etl"
@@ -370,7 +370,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		cnt += eliasfano32.Count(valBuf)
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return "", ctx.Err()
 		default:
 		}
 	}
@@ -378,7 +378,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	histReader := seg.NewReader(hist.MakeGetter(), h.compression)
 
 	_, fName := filepath.Split(historyIdxPath)
-	p := ps.AddNew(fName, uint64(hist.Count()))
+	p := ps.AddNew(fName, uint64(efHist.Count())/2)
 	defer ps.Delete(p)
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   int(cnt),
@@ -405,6 +405,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		for iiReader.HasNext() {
 			keyBuf, _ = iiReader.Next(keyBuf[:0])
 			valBuf, _ = iiReader.Next(valBuf[:0])
+			p.Processed.Add(1)
 
 			// fmt.Printf("ef key %x\n", keyBuf)
 
@@ -427,7 +428,6 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 						valOffset, _ = histReader.Skip()
 					}
 				}
-				p.Processed.Add(1)
 			}
 
 			select {
@@ -756,10 +756,10 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 
 		prevEf = ef.AppendBytes(prevEf[:0])
 
-		if err = efHistoryComp.AddWord(prevKey); err != nil {
+		if _, err = efHistoryComp.Write(prevKey); err != nil {
 			return fmt.Errorf("add %s ef history key [%x]: %w", h.filenameBase, prevKey, err)
 		}
-		if err = efHistoryComp.AddWord(prevEf); err != nil {
+		if _, err = efHistoryComp.Write(prevEf); err != nil {
 			return fmt.Errorf("add %s ef history val: %w", h.filenameBase, err)
 		}
 
@@ -942,17 +942,6 @@ func (h *History) integrateDirtyFiles(sf HistoryFiles, txNumFrom, txNumTo uint64
 }
 
 func (h *History) isEmpty(tx kv.Tx) (bool, error) {
-	if h.historyLargeValues {
-		k, err := kv.FirstKey(tx, h.valuesTable)
-		if err != nil {
-			return false, err
-		}
-		k2, err := kv.FirstKey(tx, h.keysTable)
-		if err != nil {
-			return false, err
-		}
-		return k == nil && k2 == nil, nil
-	}
 	k, err := kv.FirstKey(tx, h.valuesTable)
 	if err != nil {
 		return false, err
@@ -982,7 +971,8 @@ type HistoryRoTx struct {
 	valsC    kv.Cursor
 	valsCDup kv.CursorDupSort
 
-	_bufTs []byte
+	_bufTs           []byte
+	snappyReadBuffer []byte
 }
 
 func (h *History) BeginFilesRo() *HistoryRoTx {
@@ -1233,17 +1223,17 @@ func historyKey(txNum uint64, key []byte, buf []byte) []byte {
 }
 
 func (ht *HistoryRoTx) encodeTs(txNum uint64, key []byte) []byte {
-	if ht._bufTs == nil {
-		ht._bufTs = make([]byte, 8+len(key))
-	}
-	binary.BigEndian.PutUint64(ht._bufTs, txNum)
-	ht._bufTs = append(ht._bufTs[:8], key...)
-	return ht._bufTs[:8+len(key)]
+	ht._bufTs = historyKey(txNum, key, ht._bufTs)
+	return ht._bufTs
 }
 
 // HistorySeek searches history for a value of specified key before txNum
 // second return value is true if the value is found in the history (even if it is nil)
 func (ht *HistoryRoTx) HistorySeek(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
+	if ht.h.disable {
+		return nil, false, nil
+	}
+
 	v, ok, err := ht.historySeekInFiles(key, txNum)
 	if err != nil {
 		return nil, false, err
@@ -1348,7 +1338,7 @@ func (ht *HistoryRoTx) RangeAsOf(ctx context.Context, startTxNum uint64, from, t
 }
 
 func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By, limit int) (stream.KV, error) {
-	if asc == false {
+	if asc == order.Desc {
 		panic("not supported yet")
 	}
 	if len(ht.iit.files) == 0 {

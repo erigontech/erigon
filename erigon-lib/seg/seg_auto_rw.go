@@ -23,7 +23,7 @@ import (
 )
 
 //Reader and Writer - decorators on Getter and Compressor - which
-//can auto-use Next/NextUncompressed and AddWord/AddUncompressedWord - based on `FileCompression` passed to constructor
+//can auto-use Next/NextUncompressed and Write/AddUncompressedWord - based on `FileCompression` passed to constructor
 
 // Maybe in future will add support of io.Reader/Writer interfaces to this decorators
 // Maybe in future will merge decorators into it's parents
@@ -219,7 +219,7 @@ func NewWriter(kv *Compressor, compress FileCompression) *Writer {
 	return &Writer{kv, false, compress}
 }
 
-func (c *Writer) AddWord(word []byte) error {
+func (c *Writer) Write(word []byte) (n int, err error) {
 	fl := CompressKeys
 	if c.keyWritten {
 		fl = CompressVals
@@ -229,16 +229,16 @@ func (c *Writer) AddWord(word []byte) error {
 	}
 
 	if c.c&fl != 0 {
-		return c.Compressor.AddWord(word)
+		return n, c.Compressor.AddWord(word)
 	}
-	return c.Compressor.AddUncompressedWord(word)
+	return n, c.Compressor.AddUncompressedWord(word)
 }
 
 func (c *Writer) ReadFrom(r *Reader) error {
 	var v []byte
 	for r.HasNext() {
 		v, _ = r.Next(v[:0])
-		if err := c.AddWord(v); err != nil {
+		if _, err := c.Write(v); err != nil {
 			return err
 		}
 	}
