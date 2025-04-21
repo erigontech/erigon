@@ -179,7 +179,7 @@ test-erigon-ext:
 test: test-erigon-lib
 	$(GOTEST) -short --timeout 10m -coverprofile=coverage.out
 
-## test-all:                  run all tests with a hour timeout
+## test-all:                  run all tests with a 1h timeout
 test-all: test-erigon-lib-all
 	$(GOTEST) --timeout 60m
 
