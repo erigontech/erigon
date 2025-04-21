@@ -890,7 +890,6 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 						return nil, nil, err
 					}
 					valOffset, _ = g2.Skip()
-					fmt.Printf("[dbg] indexing: %d\n", valOffset)
 				}
 				p.Processed.Add(1)
 			}
