@@ -702,7 +702,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 				if len(val) == 0 {
 					val = nil
 				}
-				if err = historyComp.AddWord(val); err != nil {
+				if _, err = historyComp.Write(val); err != nil {
 					return fmt.Errorf("add %s history val [%x]=>[%x]: %w", h.filenameBase, key, val, err)
 				}
 			} else {
@@ -715,7 +715,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 				} else {
 					val = nil
 				}
-				if err = historyComp.AddWord(val); err != nil {
+				if _, err = historyComp.Write(val); err != nil {
 					return fmt.Errorf("add %s history val [%x]=>[%x]: %w", h.filenameBase, prevKey, val, err)
 				}
 			}
@@ -727,10 +727,10 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 
 		prevEf = ef.AppendBytes(prevEf[:0])
 
-		if err = efHistoryComp.AddWord(prevKey); err != nil {
+		if _, err = efHistoryComp.Write(prevKey); err != nil {
 			return fmt.Errorf("add %s ef history key [%x]: %w", h.filenameBase, prevKey, err)
 		}
-		if err = efHistoryComp.AddWord(prevEf); err != nil {
+		if _, err = efHistoryComp.Write(prevEf); err != nil {
 			return fmt.Errorf("add %s ef history val: %w", h.filenameBase, err)
 		}
 

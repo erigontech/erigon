@@ -1330,7 +1330,7 @@ func doCompress(cliCtx *cli.Context) error {
 		if _, err = io.ReadFull(r, buf); err != nil {
 			return err
 		}
-		if err := w.AddWord(buf); err != nil {
+		if _, err := w.Write(buf); err != nil {
 			return err
 		}
 		select {

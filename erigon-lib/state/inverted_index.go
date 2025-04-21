@@ -1057,10 +1057,10 @@ func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (
 
 		prevEf = ef.AppendBytes(prevEf[:0])
 
-		if err = coll.writer.AddWord(prevKey); err != nil {
+		if _, err = coll.writer.Write(prevKey); err != nil {
 			return fmt.Errorf("add %s efi index key [%x]: %w", ii.filenameBase, prevKey, err)
 		}
-		if err = coll.writer.AddWord(prevEf); err != nil {
+		if _, err = coll.writer.Write(prevEf); err != nil {
 			return fmt.Errorf("add %s efi index val: %w", ii.filenameBase, err)
 		}
 
