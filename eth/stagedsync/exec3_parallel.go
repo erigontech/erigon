@@ -749,7 +749,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				addedDependencies = be.execTasks.addDependency(execErr.Dependency, tx)
 				be.execFailed[tx]++
-				if be.execFailed[tx] > 1 {
+				if be.execFailed[tx] > 0 {
 					fmt.Println(be.blockNum, "FAIL", tx, be.txIncarnations[tx], be.execFailed[tx], "dep", execErr.Dependency)
 				}
 			} else {
@@ -766,7 +766,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				be.estimateDeps[tx] = append(be.estimateDeps[tx], newEstimate)
 				be.execAborted[tx]++
 
-				if be.execFailed[tx] > 1 {
+				if be.execFailed[tx] > 0 {
 					fmt.Println(be.blockNum, "ABORT", tx, be.txIncarnations[tx], be.execAborted[tx], execErr.Dependency)
 				}
 			}
