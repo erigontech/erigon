@@ -37,7 +37,7 @@ func DecodeSnappyIfNeed(buf, v []byte, enabled bool) ([]byte, []byte, error) {
 	if actualSize > maxUint24 {
 		return buf, nil, fmt.Errorf("snappy.decode2: too large msg: %d", actualSize)
 	}
-	buf = growslice(buf, actualSize)
+	//buf = growslice(buf, actualSize)
 	buf, err = snappy.Decode(nil, v) //todo: `erigon seg decompress` doesn't work if use buffer
 	if err != nil {
 		return buf, nil, fmt.Errorf("snappy.decode3: %w", err)
