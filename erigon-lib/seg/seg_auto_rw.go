@@ -19,7 +19,6 @@ package seg
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/page"
 )
 
@@ -185,30 +184,25 @@ func (g *PagedReader) Next(buf []byte) ([]byte, uint64) {
 	g.currentPageOffset = g.nextPageOffset
 	var pageV []byte
 	pageV, g.nextPageOffset = g.file.Next(buf)
-	g.page = &page.Reader{}
-	g.page.Reset(common.Copy(pageV), g.snappy)
+	g.page.Reset(pageV, g.snappy)
 	_, v := g.page.Next()
 	return v, g.currentPageOffset
 }
-func (g *PagedReader) Next2(buf []byte) (k, v []byte, pageOffset uint64) {
+func (g *PagedReader) Next2(buf []byte) (k, v, bufOut []byte, pageOffset uint64) {
 	if g.valuesOnCompressedPage <= 1 {
-		v, pageOffset = g.file.Next(buf)
-		return nil, v, pageOffset
+		buf, pageOffset = g.file.Next(buf)
+		return nil, buf, buf, pageOffset
 	}
 
 	if g.page.HasNext() {
 		k, v = g.page.Next()
-		return k, v, g.currentPageOffset
+		return k, v, buf, g.currentPageOffset
 	}
-	// rs.Add(w, offset)
-	// w, offset = g.Next()
-	var pageV []byte
 	g.currentPageOffset = g.nextPageOffset
-	pageV, g.nextPageOffset = g.file.Next(buf)
-	g.page = &page.Reader{}
-	g.page.Reset(common.Copy(pageV), g.snappy)
+	buf, g.nextPageOffset = g.file.Next(buf[:0])
+	g.page.Reset(buf, g.snappy)
 	k, v = g.page.Next()
-	return k, v, g.currentPageOffset
+	return k, v, buf, g.currentPageOffset
 }
 func (g *PagedReader) Skip() (uint64, int) {
 	v, offset := g.Next(nil)

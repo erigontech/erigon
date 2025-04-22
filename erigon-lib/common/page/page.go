@@ -145,13 +145,6 @@ func Get(key, compressedPage []byte, snappyBuf []byte, snappyEnabled bool) (v []
 		kOffset += kLen
 		vOffset += vLen
 	}
-	//from := be.Uint32(kLens[(cnt-1)*4:])
-	//foudKey := keys[from:]
-	//if bytes.Equal(key, foudKey) {
-	//	from = be.Uint32(vLens[(cnt-1)*4:])
-	//	return vals[from:]
-	//}
-
 	return nil, snappyBuf
 }
 
@@ -171,8 +164,6 @@ func FromBytes(buf []byte, snappyEnabled bool) *Reader {
 
 func (r *Reader) Reset(v []byte, snappyEnabled bool) (n int) {
 	var err error
-	vcpu := v
-	_ = vcpu
 	r.snappyBuf, v, err = compress.DecodeSnappyIfNeed(r.snappyBuf, v, snappyEnabled)
 	if err != nil {
 		panic(fmt.Errorf("len(v): %d, %w", len(v), err))
