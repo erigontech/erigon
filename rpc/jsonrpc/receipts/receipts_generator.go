@@ -210,6 +210,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	if len(receiptsFromDB) > 0 && !dbg.AssertEnabled {
 		return receiptsFromDB, nil
 	}
+	log.Warn("[dbg] not found in db", "bn", block.NumberU64())
 
 	mu := g.blockExecMutex.lock(blockHash) // parallel requests of same blockNum will executed only once
 	defer g.blockExecMutex.unlock(mu, blockHash)
