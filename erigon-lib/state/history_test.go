@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/page"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -218,11 +219,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 
 		require.True(strings.HasSuffix(c.historyPath, h.vFileName(0, 1)))
 		require.Equal(3, c.efHistoryComp.Count()/2)
-		expectCount := 6
-		if h.historySampling > 0 {
-			expectCount = (6 / h.historySampling) + 1 //amount of pages
-		}
-		require.Equal(expectCount, c.historyComp.Count())
+		require.Equal(page.WordsAmount2PagesAmount(6, h.historySampling), c.historyComp.Count())
 
 		sf, err := h.buildFiles(ctx, 0, c, background.NewProgressSet())
 		require.NoError(err)

@@ -702,7 +702,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	efHistoryComp = seg.NewWriter(efComp, seg.CompressNone) // coll+build must be fast - no compression
 	collector.SortAndFlushInBackground(true)
 	defer bitmapdb.ReturnToPool64(bitmap)
-
+	cnt := 0
 	var histKeyBuf []byte
 	//log.Warn("[dbg] collate", "name", h.filenameBase, "sampling", h.historySampling)
 	historyWriter := page.NewWriter(historyComp, h.historySampling, true)
@@ -723,6 +723,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 		it := bitmap.Iterator()
 
 		for it.HasNext() {
+			cnt++
 			vTxNum := it.Next()
 			ef.AddOffset(vTxNum)
 
@@ -789,7 +790,6 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	if err = historyWriter.Flush(); err != nil {
 		return HistoryCollation{}, fmt.Errorf("add %s history val: %w", h.filenameBase, err)
 	}
-
 	closeComp = false
 	mxCollationSizeHist.SetUint64(uint64(historyComp.Count()))
 
