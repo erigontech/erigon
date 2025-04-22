@@ -194,7 +194,7 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 func (sd *SharedDomains) AggTx() any { return sd.aggTx }
 
 // aggregator context should call aggTx.Unwind before this one.
-func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo, txUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
+func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.TemporalRwTx, blockUnwindTo, txUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
 	step := txUnwindTo / sd.StepSize()
 	sd.logger.Info("aggregator unwind", "step", step,
 		"txUnwindTo", txUnwindTo)
@@ -206,7 +206,7 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 		return err
 	}
 
-	if err := sd.aggTx.Unwind(ctx, rwTx, txUnwindTo, changeset); err != nil {
+	if err := rwTx.Unwind(ctx, txUnwindTo, changeset); err != nil {
 		return err
 	}
 
