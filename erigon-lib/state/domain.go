@@ -479,7 +479,7 @@ func (w *DomainBufferedWriter) SetTxNum(v uint64) {
 	w.h.SetTxNum(v)
 	binary.BigEndian.PutUint64(w.stepBytes[:], ^(v / w.h.ii.aggregationStep))
 }
-func (w *DomainBufferedWriter) SetDiff(diff *DomainDiff) { w.diff = diff }
+func (w *DomainBufferedWriter) SetDiff(diff *kv.DomainDiff) { w.diff = diff }
 
 func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWriter {
 	discardHistory := discard || dt.d.historyDisabled
@@ -509,7 +509,7 @@ type DomainBufferedWriter struct {
 	stepBytes [8]byte // current inverted step representation
 	aux       []byte  // auxilary buffer for key1 + key2
 	aux2      []byte  // auxilary buffer for step + val
-	diff      *DomainDiff
+	diff      *kv.DomainDiff
 
 	h *historyBufferedWriter
 }
@@ -1326,7 +1326,7 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 
 // unwind is similar to prune but the difference is that it restores domain values from the history as of txFrom
 // context Flush should be managed by caller.
-func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwindTo uint64, domainDiffs []DomainEntryDiff) error {
+func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwindTo uint64, domainDiffs []kv.DomainEntryDiff) error {
 	// fmt.Printf("[domain][%s] unwinding domain to txNum=%d, step %d\n", d.filenameBase, txNumUnwindTo, step)
 	d := dt.d
 

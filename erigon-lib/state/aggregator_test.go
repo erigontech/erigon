@@ -1358,7 +1358,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	domains, err = NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
-	diffs := [kv.DomainLen][]DomainEntryDiff{}
+	diffs := [kv.DomainLen][]kv.DomainEntryDiff{}
 	for idx := range changesetAt5.Diffs {
 		diffs[idx] = changesetAt5.Diffs[idx].GetDiffSet()
 	}

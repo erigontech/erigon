@@ -601,6 +601,8 @@ type TemporalRwTx interface {
 	RwTx
 	TemporalTx
 	TemporalPutDel
+
+	Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff) error
 }
 
 type TemporalPutDel interface {

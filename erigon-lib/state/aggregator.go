@@ -1608,7 +1608,10 @@ func (at *AggregatorRoTx) DebugGetLatestFromFiles(domain kv.Domain, k []byte, ma
 	return at.d[domain].getLatestFromFiles(k, maxTxNum)
 }
 
-func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo uint64, changeset *[kv.DomainLen][]DomainEntryDiff, logEvery *time.Ticker) error {
+func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
 	step := txNumUnwindTo / at.StepSize()
 	for idx, d := range at.d {
 		if err := d.unwind(ctx, tx, step, txNumUnwindTo, changeset[idx]); err != nil {
