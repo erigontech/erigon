@@ -252,7 +252,6 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			} else {
 				if len(receipts) > 0 && len(receiptsFromDB) == 0 {
 					panic(fmt.Sprintf("assert: not enough receipts: bn=%d, %d != %d", block.NumberU64(), len(receipts), len(receiptsFromDB)))
-
 				}
 			}
 		}
