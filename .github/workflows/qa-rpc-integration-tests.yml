@@ -51,7 +51,7 @@ jobs:
         id: save_chaindata_step
         run: |
           rm -rf $ERIGON_TESTBED_AREA/chaindata-prev || true
-          cp $ERIGON_REFERENCE_DATA_DIR/chaindata $ERIGON_TESTBED_AREA/chaindata-prev
+          cp -r $ERIGON_REFERENCE_DATA_DIR/chaindata $ERIGON_TESTBED_AREA/chaindata-prev
 
       - name: Run RpcDaemon
         working-directory: ${{ github.workspace }}/build/bin
