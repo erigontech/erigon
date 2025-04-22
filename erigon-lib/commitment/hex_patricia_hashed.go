@@ -1914,20 +1914,20 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 	//}
 	// Keep folding until the currentKey is the prefix of the key we modify
 	for hph.needFolding(hashedKey) {
-    foldDone := hph.metrics.StartFolding(plainKey)
+		foldDone := hph.metrics.StartFolding(plainKey)
 		if err := hph.fold(); err != nil {
 			return fmt.Errorf("fold: %w", err)
 		}
-    foldDone()
+		foldDone()
 	}
 	// Now unfold until we step on an empty cell
 	for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
 		printLater := hph.currentKeyLen == 0 && hph.mounted && hph.trace
-    unfoldDone := hph.metrics.StartUnfolding(plainKey)
+		unfoldDone := hph.metrics.StartUnfolding(plainKey)
 		if err := hph.unfold(hashedKey, unfolding); err != nil {
 			return fmt.Errorf("unfold: %w", err)
 		}
-    unfoldDone()
+		unfoldDone()
 		if printLater {
 			fmt.Printf("[%x] subtrie pref '%x' d=%d\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hph.depths[max(0, hph.activeRows-1)])
 		}
@@ -1937,13 +1937,13 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 	if stateUpdate == nil {
 		// Update the cell
 		if len(plainKey) == hph.accountKeyLen {
-      hph.metrics.Account(plainKey)
+			hph.metrics.Account(plainKey)
 			stateUpdate, err = hph.ctx.Account(plainKey)
 			if err != nil {
 				return fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
 			}
 		} else {
-      hph.metrics.Storage(plainKey)
+			hph.metrics.Storage(plainKey)
 			stateUpdate, err = hph.ctx.Storage(plainKey)
 			if err != nil {
 				return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
@@ -2150,7 +2150,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 		default:
 		}
-    hph.metrics.Updates(plainKey)
+		hph.metrics.Updates(plainKey)
 		if hph.trace {
 			fmt.Printf("\n%d/%d) plainKey [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
 		}
