@@ -1115,7 +1115,11 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	require.True(t, strings.HasSuffix(c.valuesPath, "v1-accounts.0-1.kv"))
 	require.Equal(t, 3, c.valuesCount)
 	require.True(t, strings.HasSuffix(c.historyPath, "v1-accounts.0-1.v"))
-	require.EqualValues(t, 3*maxTx, c.historyComp.Count())
+	expectCount := int(3 * maxTx)
+	if d.hist.historySampling > 0 {
+		expectCount = (int(3*maxTx) / d.hist.historySampling) + 1 //amount of pages
+	}
+	require.EqualValues(t, expectCount, c.historyComp.Count())
 	require.Equal(t, 3, c.efHistoryComp.Count()/2)
 
 	sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())

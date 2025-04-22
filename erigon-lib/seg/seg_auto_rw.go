@@ -153,6 +153,10 @@ func NewPagedReader(r R, sampling int, snappy bool) *PagedReader {
 }
 
 func (g *PagedReader) Reset(offset uint64) {
+	if g.sampling <= 1 {
+		g.file.Reset(offset)
+		return
+	}
 	g.file.Reset(offset)
 	g.currentPageOffset = offset
 	if g.file.HasNext() {
