@@ -551,25 +551,19 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	// Skip fee payment when NoBaseFee is set and the fee fields
 	// are 0. This avoids a negative effectiveTip being applied to
 	// the coinbase when simulating calls.
-	if msg.FeeCap().Sign() != 0 || msg.TipCap().Sign() != 0 {
-		fee := new(uint256.Int).SetUint64(st.gasUsed())
-		fee.Mul(fee, effectiveTip)
-		st.state.AddBalance(st.evm.Context.Coinbase, fee, tracing.BalanceIncreaseRewardTransactionFee)
-
-		// CHANGE(taiko): basefee is not burnt, but sent to a treasury and block.coinbase instead.
-		if st.evm.ChainConfig().Taiko && st.evm.Context.BaseFee != nil && !st.msg.IsAnchor() {
-			totalFee := new(uint256.Int).Mul(
-				new(uint256.Int).SetUint64(st.gasUsed()),
-				new(uint256.Int).SetUint64(st.evm.Context.BaseFee.Uint64()),
-			)
-			feeCoinbase := new(uint256.Int).Div(
-				new(uint256.Int).Mul(totalFee, new(uint256.Int).SetUint64(uint64(st.msg.BasefeeSharingPercentage()))),
-				new(uint256.Int).SetUint64(100),
-			)
-			feeTreasury := new(uint256.Int).Sub(totalFee, feeCoinbase)
-			st.state.AddBalance(st.getTreasuryAddress(), feeTreasury, tracing.BalanceIncreaseTreasury)
-			st.state.AddBalance(st.evm.Context.Coinbase, feeCoinbase, tracing.BalanceIncreaseBaseFeeSharing)
-		}
+	// CHANGE(taiko): basefee is not burnt, but sent to a treasury and block.coinbase instead.
+	if st.evm.ChainConfig().Taiko && st.evm.Context.BaseFee != nil && !st.msg.IsAnchor() {
+		totalFee := new(uint256.Int).Mul(
+			new(uint256.Int).SetUint64(st.gasUsed()),
+			new(uint256.Int).SetUint64(st.evm.Context.BaseFee.Uint64()),
+		)
+		feeCoinbase := new(uint256.Int).Div(
+			new(uint256.Int).Mul(totalFee, new(uint256.Int).SetUint64(uint64(st.msg.BasefeeSharingPercentage()))),
+			new(uint256.Int).SetUint64(100),
+		)
+		feeTreasury := new(uint256.Int).Sub(totalFee, feeCoinbase)
+		st.state.AddBalance(st.getTreasuryAddress(), feeTreasury, tracing.BalanceIncreaseTreasury)
+		st.state.AddBalance(st.evm.Context.Coinbase, feeCoinbase, tracing.BalanceIncreaseBaseFeeSharing)
 	}
 
 	result := &evmtypes.ExecutionResult{
