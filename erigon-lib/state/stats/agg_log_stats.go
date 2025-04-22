@@ -33,14 +33,7 @@ func LogStats(at *state.AggregatorRoTx, tx kv.Tx, logger log.Logger, tx2block fu
 		}
 		str = append(str, fmt.Sprintf("%d=%dK", item.EndRootNum()/at.StepSize(), bn/1_000))
 	}
-	//str2 := make([]string, 0, len(at.storage.files))
-	//for _, item := range at.storage.files {
-	//	str2 = append(str2, fmt.Sprintf("%s:%dm", item.src.decompressor.FileName(), item.src.decompressor.Count()/1_000_000))
-	//}
-	//for _, item := range at.commitment.files {
-	//	bn := tx2block(item.endTxNum) / 1_000
-	//	str2 = append(str2, fmt.Sprintf("%s:%dK", item.src.decompressor.FileName(), bn))
-	//}
+
 	var lastCommitmentBlockNum, lastCommitmentTxNum uint64
 	commFiles := at.DomainFiles(kv.CommitmentDomain)
 	if len(commFiles) > 0 {

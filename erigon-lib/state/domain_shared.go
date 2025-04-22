@@ -176,12 +176,12 @@ func (sd *SharedDomains) GetCommitmentContext() *SharedDomainsCommitmentContext 
 	return sd.sdCtx
 }
 
-func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumber uint64) ([kv.DomainLen][]DomainEntryDiff, bool, error) {
+func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumber uint64) ([kv.DomainLen][]kv.DomainEntryDiff, bool, error) {
 	var key [40]byte
 	binary.BigEndian.PutUint64(key[:8], blockNumber)
 	copy(key[8:], blockHash[:])
 	if changeset, ok := sd.pastChangesAccumulator[toStringZeroCopy(key[:])]; ok {
-		return [kv.DomainLen][]DomainEntryDiff{
+		return [kv.DomainLen][]kv.DomainEntryDiff{
 			changeset.Diffs[kv.AccountsDomain].GetDiffSet(),
 			changeset.Diffs[kv.StorageDomain].GetDiffSet(),
 			changeset.Diffs[kv.CodeDomain].GetDiffSet(),
@@ -194,10 +194,8 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 func (sd *SharedDomains) AggTx() any { return sd.aggTx }
 
 // aggregator context should call aggTx.Unwind before this one.
-func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo, txUnwindTo uint64, changeset *[kv.DomainLen][]DomainEntryDiff) error {
+func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.TemporalRwTx, blockUnwindTo, txUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
 	step := txUnwindTo / sd.StepSize()
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
 	sd.logger.Info("aggregator unwind", "step", step,
 		"txUnwindTo", txUnwindTo)
 	//fmt.Printf("aggregator unwind step %d txUnwindTo %d\n", step, txUnwindTo)
@@ -208,7 +206,7 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 		return err
 	}
 
-	if err := sd.aggTx.Unwind(ctx, rwTx, txUnwindTo, changeset, logEvery); err != nil {
+	if err := rwTx.Unwind(ctx, txUnwindTo, changeset); err != nil {
 		return err
 	}
 
@@ -219,7 +217,7 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 }
 
 func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.TemporalTx, blockNum uint64) ([]byte, error) {
-	it, err := sd.aggTx.HistoryRange(kv.StorageDomain, int(sd.TxNum()), math.MaxInt64, order.Asc, -1, roTx)
+	it, err := roTx.HistoryRange(kv.StorageDomain, int(sd.TxNum()), math.MaxInt64, order.Asc, -1)
 	if err != nil {
 		return nil, err
 	}
@@ -232,7 +230,7 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Temporal
 		sd.sdCtx.TouchKey(kv.AccountsDomain, string(k), nil)
 	}
 
-	it, err = sd.aggTx.HistoryRange(kv.StorageDomain, int(sd.TxNum()), math.MaxInt64, order.Asc, -1, roTx)
+	it, err = roTx.HistoryRange(kv.StorageDomain, int(sd.TxNum()), math.MaxInt64, order.Asc, -1)
 	if err != nil {
 		return nil, err
 	}
@@ -252,7 +250,7 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Temporal
 
 // SeekCommitment lookups latest available commitment and sets it as current
 func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromBlockBeginning uint64, err error) {
-	bn, txn, ok, err := sd.sdCtx.SeekCommitment(tx, sd.aggTx.d[kv.CommitmentDomain], 0, math.MaxUint64)
+	bn, txn, ok, err := sd.sdCtx.SeekCommitment(tx)
 	if err != nil {
 		return 0, err
 	}
@@ -1236,7 +1234,7 @@ const keyCommitmentStateS = "state"
 
 var keyCommitmentState = []byte(keyCommitmentStateS)
 
-func (sd *SharedDomains) LatestCommitmentState(tx kv.Tx, sinceTx, untilTx uint64) (blockNum, txNum uint64, state []byte, err error) {
+func (sd *SharedDomains) LatestCommitmentState(tx kv.Tx) (blockNum, txNum uint64, state []byte, err error) {
 	return sd.sdCtx.LatestCommitmentState()
 }
 
@@ -1264,7 +1262,7 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState() (blockNum, tx
 
 // SeekCommitment [sinceTx, untilTx] searches for last encoded state from DomainCommitted
 // and if state found, sets it up to current domain
-func (sdc *SharedDomainsCommitmentContext) SeekCommitment(tx kv.Tx, cd *DomainRoTx, sinceTx, untilTx uint64) (blockNum, txNum uint64, ok bool, err error) {
+func (sdc *SharedDomainsCommitmentContext) SeekCommitment(tx kv.Tx) (blockNum, txNum uint64, ok bool, err error) {
 	_, _, state, err := sdc.LatestCommitmentState()
 	if err != nil {
 		return 0, 0, false, err

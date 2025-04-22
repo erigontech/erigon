@@ -2029,7 +2029,7 @@ func TestDomain_Unwind(t *testing.T) {
 	//maxTx := uint64(float64(d.aggregationStep) * 1.5)
 	maxTx := d.aggregationStep - 2
 	currTx := maxTx - 1
-	diffSetMap := map[uint64][]DomainEntryDiff{}
+	diffSetMap := map[uint64][]kv.DomainEntryDiff{}
 
 	writeKeys := func(t *testing.T, d *Domain, db kv.RwDB, maxTx uint64) {
 		t.Helper()
@@ -2042,7 +2042,7 @@ func TestDomain_Unwind(t *testing.T) {
 		defer writer.Close()
 		var preval1, preval2, preval3, preval4 []byte
 		for i := uint64(0); i < maxTx; i++ {
-			writer.diff = &DomainDiff{}
+			writer.diff = &kv.DomainDiff{}
 			writer.SetTxNum(i)
 			if i%3 == 0 && i > 0 { // once in 3 txn put key3 -> value3.i and skip other keys update
 				if i%12 == 0 { // once in 12 txn delete key3 before update
@@ -2091,7 +2091,7 @@ func TestDomain_Unwind(t *testing.T) {
 		writer := dc.NewWriter()
 		defer writer.Close()
 
-		totalDiff := []DomainEntryDiff{}
+		totalDiff := []kv.DomainEntryDiff{}
 		if currTx > unwindTo {
 			totalDiff = diffSetMap[currTx]
 			fmt.Println(currTx)
