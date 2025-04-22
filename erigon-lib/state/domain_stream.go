@@ -45,8 +45,8 @@ type CursorItem struct {
 	cNonDup kv.Cursor
 
 	iter         btree2.MapIter[string, dataWithPrevStep]
-	dg           *seg.Reader
-	dg2          *seg.Reader
+	idx          *seg.Reader
+	hist         *seg.PagedReader
 	btCursor     *Cursor
 	key          []byte
 	val          []byte
