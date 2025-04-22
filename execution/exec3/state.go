@@ -344,7 +344,7 @@ func (rw *Worker) execAATxn(txTask *state.TxTask) {
 		log.Info("🕵️‍♂️[aa] found AA bundle", "startIdx", startIdx, "endIdx", endIdx)
 
 		var outerErr error
-		for i := startIdx; i < endIdx; i++ {
+		for i := startIdx; i <= endIdx; i++ {
 			// check if next n transactions are AA transactions and run validation
 			if txTask.Txs[i].Type() == types.AccountAbstractionTxType {
 				aaTxn, ok := txTask.Tx.(*types.AccountAbstractionTransaction)
