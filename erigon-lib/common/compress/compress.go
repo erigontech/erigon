@@ -1,7 +1,9 @@
 package compress
 
 import (
-	"github.com/golang/snappy"
+	"sync"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 // growslice ensures b has the wanted length by either expanding it to its capacity
@@ -13,27 +15,53 @@ func growslice(b []byte, wantLength int) []byte {
 	return make([]byte, wantLength)
 }
 
-func EncodeSnappyIfNeed(buf, v []byte, enabled bool) ([]byte, []byte) {
+var (
+	zstdEncPool = sync.Pool{
+		New: func() interface{} {
+			enc, _ := zstd.NewWriter(nil)
+			return enc
+		},
+	}
+	zstdDecPool = sync.Pool{
+		New: func() interface{} {
+			dec, _ := zstd.NewReader(nil)
+			return dec
+		},
+	}
+)
+
+// EncodeZstdIfNeed compresses v into buf if enabled, otherwise returns buf and v unchanged.
+// It pre-allocates buf to ZSTD’s worst-case bound (src + src/255 + 16) and reuses encoders.
+func EncodeZstdIfNeed(buf, v []byte, enabled bool) ([]byte, []byte) {
 	if !enabled {
 		return buf, v
 	}
-	buf = growslice(buf, snappy.MaxEncodedLen(len(v)))
-	buf = snappy.Encode(buf, v)
+	bound := len(v) + len(v)/255 + 16
+	buf = growslice(buf, bound)
+
+	enc := zstdEncPool.Get().(*zstd.Encoder)
+	defer zstdEncPool.Put(enc)
+	enc.Reset(nil) // clear any previous state
+
+	// EncodeAll uses buf[:0] to reuse the backing array
+	buf = enc.EncodeAll(v, buf[:0])
 	return buf, buf
 }
 
-func DecodeSnappyIfNeed(buf, v []byte, enabled bool) ([]byte, []byte, error) {
+// DecodeZstdIfNeed decompresses v into buf if enabled, otherwise returns buf and v unchanged.
+// It reuses decoders from the pool and writes into buf (grown to at least len(v)).
+func DecodeZstdIfNeed(buf, v []byte, enabled bool) ([]byte, []byte, error) {
 	if !enabled {
 		return buf, v, nil
 	}
-	actualSize, err := snappy.DecodedLen(v)
+	buf = growslice(buf, len(v))
+
+	dec := zstdDecPool.Get().(*zstd.Decoder)
+	defer zstdDecPool.Put(dec)
+
+	out, err := dec.DecodeAll(v, buf[:0])
 	if err != nil {
 		return buf, nil, err
 	}
-	buf = growslice(buf, actualSize)
-	buf, err = snappy.Decode(buf, v)
-	if err != nil {
-		return buf, nil, err
-	}
-	return buf, buf, nil
+	return out, out, nil
 }
