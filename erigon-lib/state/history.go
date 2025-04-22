@@ -96,7 +96,7 @@ type histCfg struct {
 	snapshotsDisabled  bool // don't produce .v and .ef files, keep in db table. old data will be pruned anyway.
 	historyDisabled    bool // skip all write operations to this History (even in DB)
 
-	historySampling int // when collating .v files: concat 16 values and snappy them
+	historyValuesOnCompressedPage int // when collating .v files: concat 16 values and snappy them
 
 	indexList     Accessors
 	compressorCfg seg.Cfg             // compression settings for history files
@@ -419,11 +419,11 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 				if err = rs.AddKey(historyKey, valOffset); err != nil {
 					return err
 				}
-				if h.historySampling == 0 {
+				if h.historyValuesOnCompressedPage == 0 {
 					valOffset, _ = histReader.Skip()
 				} else {
 					i++
-					if i%h.historySampling == 0 {
+					if i%h.historyValuesOnCompressedPage == 0 {
 						valOffset, _ = histReader.Skip()
 					}
 				}
@@ -696,8 +696,8 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	defer bitmapdb.ReturnToPool64(bitmap)
 	cnt := 0
 	var histKeyBuf []byte
-	//log.Warn("[dbg] collate", "name", h.filenameBase, "sampling", h.historySampling)
-	historyWriter := page.NewWriter(historyComp, h.historySampling, true)
+	//log.Warn("[dbg] collate", "name", h.filenameBase, "sampling", h.historyValuesOnCompressedPage)
+	historyWriter := page.NewWriter(historyComp, h.historyValuesOnCompressedPage, true)
 	loadBitmapsFunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		txNum := binary.BigEndian.Uint64(v)
 		if !initialized {
@@ -1217,7 +1217,7 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 		fmt.Printf("DomainGetAsOf(%s, %x, %d) -> %s, histTxNum=%d, isNil(v)=%t\n", ht.h.filenameBase, key, txNum, g.FileName(), histTxNum, v == nil)
 	}
 
-	if ht.h.historySampling > 1 {
+	if ht.h.historyValuesOnCompressedPage > 1 {
 		v, ht.snappyReadBuffer = page.Get(historyKey, v, ht.snappyReadBuffer, true)
 	}
 	return v, true, nil

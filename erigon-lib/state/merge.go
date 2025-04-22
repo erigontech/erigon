@@ -763,7 +763,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		if ht.h.noFsync {
 			compr.DisableFsync()
 		}
-		pagedWr := page.NewWriter(compr, ht.h.historySampling, true)
+		pagedWr := page.NewWriter(compr, ht.h.historyValuesOnCompressedPage, true)
 		p := ps.AddNew(path.Base(datPath), 1)
 		defer ps.Delete(p)
 
@@ -776,7 +776,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				var g2 *seg.PagedReader
 				for _, hi := range historyFiles { // full-scan, because it's ok to have different amount files. by unclean-shutdown.
 					if hi.startTxNum == item.startTxNum && hi.endTxNum == item.endTxNum {
-						g2 = seg.NewPagedReader(seg.NewReader(hi.decompressor.MakeGetter(), ht.h.compression), ht.h.historySampling, true)
+						g2 = seg.NewPagedReader(seg.NewReader(hi.decompressor.MakeGetter(), ht.h.compression), ht.h.historyValuesOnCompressedPage, true)
 						break
 					}
 				}
