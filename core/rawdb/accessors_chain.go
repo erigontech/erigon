@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
-	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
@@ -1263,12 +1262,20 @@ func ReadReceiptCache(tx kv.TemporalTx, blockNum uint64, blockHash common.Hash, 
 		return nil, false, err
 	}
 
-	v, ok, err := tx.GetAsOf(kv.RCacheDomain, receiptCacheKey, _min+uint64(txnIndex))
+	v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, _min+uint64(txnIndex)+1)
 	if err != nil {
-		return nil, false, err
+		return nil, false, fmt.Errorf("unexpected error, couldn't find changeset: txNum=%d, %w", _min+uint64(txnIndex)+1, err)
 	}
 	if !ok {
 		return nil, false, nil
+	}
+	if len(v) == 0 {
+		return nil, false, nil
+	}
+
+	_, v, err = compress.DecodeSnappyIfNeed(nil, v, receiptCacheSnappy)
+	if err != nil {
+		return nil, false, fmt.Errorf("snappy: %w", err)
 	}
 
 	// Convert the receipts from their storage form to their internal representation
@@ -1297,18 +1304,8 @@ func ReadReceiptsCache(tx kv.TemporalTx, block *types.Block, txNumReader rawdbv3
 	}
 	var snappyReadBuffer []byte
 
-	it, err := tx.IndexRange(kv.RCacheHistoryIdx, receiptCacheKey, int(_min), int(_max+1), order.Asc, kv.Unlim)
-	if err != nil {
-		return nil, err
-	}
-	defer it.Close()
-	for i := 0; it.HasNext(); i++ {
-		txnID, err := it.Next()
-		if err != nil {
-			return nil, err
-		}
-
-		v, ok, err := tx.HistorySeek(kv.AccountsDomain, receiptCacheKey, txnID)
+	for txnID := _min; txnID < _max+1; txnID++ {
+		v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txnID+1)
 		if err != nil {
 			return nil, fmt.Errorf("unexpected error, couldn't find changeset: txNum=%d, %w", txnID, err)
 		}
@@ -1316,7 +1313,7 @@ func ReadReceiptsCache(tx kv.TemporalTx, block *types.Block, txNumReader rawdbv3
 			return nil, nil
 		}
 		if len(v) == 0 {
-			return nil, nil
+			continue
 		}
 
 		snappyReadBuffer, v, err = compress.DecodeSnappyIfNeed(snappyReadBuffer, v, receiptCacheSnappy)
@@ -1337,7 +1334,6 @@ func ReadReceiptsCache(tx kv.TemporalTx, block *types.Block, txNumReader rawdbv3
 		}
 		res = append(res, x)
 	}
-
 	return res, nil
 }
 

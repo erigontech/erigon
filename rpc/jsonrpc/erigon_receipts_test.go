@@ -228,7 +228,7 @@ func TestGetBlockReceiptsByBlockHash(t *testing.T) {
 			}
 
 			a, _ := json.Marshal(receiptsFromBlock)
-			assert.Equal(t, expect[block.Number.Uint64()], string(a))
+			assert.JSONEq(t, expect[block.Number.Uint64()], string(a))
 		}
 		return nil
 	})
