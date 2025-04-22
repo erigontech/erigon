@@ -11,6 +11,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
@@ -220,7 +221,11 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 		defer tx.Rollback()
 	}
 
-	pe.doms.SetTx(tx)
+	temporalTx, ok := tx.(kv.TemporalTx)
+	if ok {
+		return fmt.Errorf("cast error: temporal tx %v", temporalTx)
+	}
+	pe.doms.SetTx(temporalTx)
 
 	defer pe.applyLoopWg.Wait()
 	applyCtx, cancelApplyCtx := context.WithCancel(ctx)
@@ -252,11 +257,9 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 				if err != nil {
 					return err
 				}
-				ac := pe.agg.BeginFilesRo()
-				if _, err = ac.PruneSmallBatches(ctx, 10*time.Second, tx); err != nil { // prune part of retired data, before commit
+				if _, err := tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, dbg.PruneOnFlushTimeout); err != nil {
 					return err
 				}
-				ac.Close()
 				if !pe.inMemExec {
 					if err = pe.doms.Flush(ctx, tx); err != nil {
 						return err
@@ -352,7 +355,11 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 				return err
 			}
 			defer tx.Rollback()
-			pe.doms.SetTx(tx)
+			temporalTx, ok := tx.(kv.TemporalTx)
+			if ok {
+				return fmt.Errorf("cast error: temporal tx %v", temporalTx)
+			}
+			pe.doms.SetTx(temporalTx)
 
 			applyCtx, cancelApplyCtx = context.WithCancel(ctx) //nolint:fatcontext
 			defer cancelApplyCtx()

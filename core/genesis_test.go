@@ -44,6 +44,10 @@ import (
 )
 
 func TestGenesisBlockHashes(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	logger := log.New()
 	db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))

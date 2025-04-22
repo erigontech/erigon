@@ -28,8 +28,8 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/params"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
 	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/rlp"
 )
@@ -40,7 +40,7 @@ const (
 
 type KZGCommitment [LEN_48]byte // Compressed BLS12-381 G1 element
 type KZGProof [LEN_48]byte
-type Blob [fixedgas.BlobSize]byte
+type Blob [params.BlobSize]byte
 
 type BlobKzgs []KZGCommitment
 type KZGProofs []KZGProof
@@ -56,9 +56,9 @@ type BlobTxWrapper struct {
 /* Blob methods */
 
 func (b *Blob) payloadSize() int {
-	size := 1                                                      // 0xb7..0xbf
-	size += libcommon.BitLenToByteLen(bits.Len(fixedgas.BlobSize)) // length encoding size
-	size += fixedgas.BlobSize                                      // byte_array it self
+	size := 1                                                    // 0xb7..0xbf
+	size += libcommon.BitLenToByteLen(bits.Len(params.BlobSize)) // length encoding size
+	size += params.BlobSize                                      // byte_array it self
 	return size
 }
 
@@ -202,7 +202,7 @@ func (blobs *Blobs) DecodeRLP(s *rlp.Stream) error {
 	blob := Blob{}
 
 	for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
-		if len(b) == fixedgas.BlobSize {
+		if len(b) == params.BlobSize {
 			copy((blob)[:], b)
 			*blobs = append(*blobs, blob)
 		} else {

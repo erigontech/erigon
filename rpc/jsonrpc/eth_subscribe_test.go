@@ -31,9 +31,9 @@ import (
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/builder"
 	"github.com/erigontech/erigon/turbo/privateapi"
 	"github.com/erigontech/erigon/turbo/stages"
 	"github.com/erigontech/erigon/turbo/stages/mock"
@@ -72,7 +72,7 @@ func TestEthSubscribe(t *testing.T) {
 	highestSeenHeader := chain.TopBlock.NumberU64()
 
 	hook := stages.NewHook(m.Ctx, m.DB, m.Notifications, m.Sync, m.BlockReader, m.ChainConfig, m.Log, nil)
-	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.TxContainer{}, m.Sync, initialCycle, firstCycle, logger, m.BlockReader, hook); err != nil {
+	if err := stages.StageLoopIteration(m.Ctx, m.DB, wrap.NewTxContainer(nil, nil), m.Sync, initialCycle, firstCycle, logger, m.BlockReader, hook); err != nil {
 		t.Fatal(err)
 	}
 

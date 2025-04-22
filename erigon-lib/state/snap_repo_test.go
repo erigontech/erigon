@@ -13,7 +13,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-	ae "github.com/erigontech/erigon-lib/state/appendable_extras"
+	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 	"github.com/stretchr/testify/require"
 )
 
@@ -24,19 +24,23 @@ import (
 // 4. merge files
 
 func TestOpenFolder_AccountsDomain(t *testing.T) {
-	name, dirs, repo := setupEntity(t, func(stepSize uint64, dirs datadir.Dirs) (name string, schema ae.SnapNameSchema) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	dirs := datadir.New(t.TempDir())
+	name, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema ee.SnapNameSchema) {
 		accessors := AccessorBTree | AccessorExistence
 		name = "accounts"
-		schema = ae.NewE3SnapSchemaBuilder(accessors, stepSize).
-			Data(dirs.SnapDomain, name, ae.DataExtensionKv).
-			BtIndex(seg.CompressNone).
-			Existence().
+		schema = ee.NewE3SnapSchemaBuilder(accessors, stepSize).
+			Data(dirs.SnapDomain, name, ee.DataExtensionKv, seg.CompressNone).
+			BtIndex().Existence().
 			Build()
 
 		return name, schema
 	})
 	defer repo.Close()
-	extensions := repo.cfg.Schema.(*ae.E3SnapSchema).FileExtensions()
+	extensions := repo.cfg.Schema.(*ee.E3SnapSchema).FileExtensions()
 	dataCount, btCount, existenceCount, accessorCount := populateFilesFull(t, dirs, name, extensions, dirs.SnapDomain)
 	require.Positive(t, dataCount)
 
@@ -74,17 +78,22 @@ func TestOpenFolder_AccountsDomain(t *testing.T) {
 }
 
 func TestOpenFolder_CodeII(t *testing.T) {
-	name, dirs, repo := setupEntity(t, func(stepSize uint64, dirs datadir.Dirs) (name string, schema ae.SnapNameSchema) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	dirs := datadir.New(t.TempDir())
+	name, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema ee.SnapNameSchema) {
 		accessors := AccessorHashMap
 		name = "code"
-		schema = ae.NewE3SnapSchemaBuilder(accessors, stepSize).
-			Data(dirs.SnapIdx, name, ae.DataExtensionEf).
-			Accessor(dirs.SnapAccessors, ae.AccessorExtensionEfi).Build()
+		schema = ee.NewE3SnapSchemaBuilder(accessors, stepSize).
+			Data(dirs.SnapIdx, name, ee.DataExtensionEf, seg.CompressNone).
+			Accessor(dirs.SnapAccessors).Build()
 		return name, schema
 	})
 	defer repo.Close()
 
-	extensions := repo.cfg.Schema.(*ae.E3SnapSchema).FileExtensions()
+	extensions := repo.cfg.Schema.(*ee.E3SnapSchema).FileExtensions()
 	dataCount, btCount, existenceCount, accessorCount := populateFilesFull(t, dirs, name, extensions, dirs.SnapIdx)
 
 	require.Positive(t, dataCount)
@@ -123,16 +132,20 @@ func TestOpenFolder_CodeII(t *testing.T) {
 }
 
 func TestIntegrateDirtyFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	// setup account
 	// add a dirty file
 	// check presence of dirty file
-
-	name, dirs, repo := setupEntity(t, func(stepSize uint64, dirs datadir.Dirs) (name string, schema ae.SnapNameSchema) {
+	dirs := datadir.New(t.TempDir())
+	name, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema ee.SnapNameSchema) {
 		accessors := AccessorBTree | AccessorExistence
 		name = "accounts"
-		schema = ae.NewE3SnapSchemaBuilder(accessors, stepSize).
-			Data(dirs.SnapDomain, name, ae.DataExtensionKv).
-			BtIndex(seg.CompressNone).
+		schema = ee.NewE3SnapSchemaBuilder(accessors, stepSize).
+			Data(dirs.SnapDomain, name, ee.DataExtensionKv, seg.CompressNone).
+			BtIndex().
 			Existence().
 			Build()
 
@@ -140,7 +153,7 @@ func TestIntegrateDirtyFile(t *testing.T) {
 	})
 	defer repo.Close()
 
-	extensions := repo.cfg.Schema.(*ae.E3SnapSchema).FileExtensions()
+	extensions := repo.cfg.Schema.(*ee.E3SnapSchema).FileExtensions()
 	dataCount, _, _, _ := populateFilesFull(t, dirs, name, extensions, dirs.SnapDomain)
 	require.Positive(t, dataCount)
 
@@ -148,7 +161,7 @@ func TestIntegrateDirtyFile(t *testing.T) {
 	require.NoError(t, err)
 
 	filesItem := newFilesItemWithSnapConfig(0, 1024, repo.cfg)
-	filename := repo.parser.DataFile(snaptype.Version(1), 0, 1024)
+	filename := repo.schema.DataFile(snaptype.Version(1), 0, 1024)
 	comp, err := seg.NewCompressor(context.Background(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 	require.NoError(t, err)
 	defer comp.Close()
@@ -166,22 +179,26 @@ func TestIntegrateDirtyFile(t *testing.T) {
 }
 
 func TestCloseFilesAfterRootNum(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	// setup account
 	// set various root numbers and check if the right files are closed
-
-	name, dirs, repo := setupEntity(t, func(stepSize uint64, dirs datadir.Dirs) (name string, schema ae.SnapNameSchema) {
+	dirs := datadir.New(t.TempDir())
+	name, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema ee.SnapNameSchema) {
 		accessors := AccessorBTree | AccessorExistence
 		name = "accounts"
-		schema = ae.NewE3SnapSchemaBuilder(accessors, stepSize).
-			Data(dirs.SnapDomain, name, ae.DataExtensionKv).
-			BtIndex(seg.CompressNone).
+		schema = ee.NewE3SnapSchemaBuilder(accessors, stepSize).
+			Data(dirs.SnapDomain, name, ee.DataExtensionKv, seg.CompressNone).
+			BtIndex().
 			Existence().
 			Build()
 		return name, schema
 	})
 	defer repo.Close()
 
-	extensions := repo.cfg.Schema.(*ae.E3SnapSchema).FileExtensions()
+	extensions := repo.cfg.Schema.(*ee.E3SnapSchema).FileExtensions()
 	dataCount, _, _, _ := populateFilesFull(t, dirs, name, extensions, dirs.SnapDomain)
 	require.Positive(t, dataCount)
 
@@ -219,13 +236,17 @@ func TestCloseFilesAfterRootNum(t *testing.T) {
 }
 
 func TestMergeRangeSnapRepo(t *testing.T) {
-	name, dirs, repo := setupEntity(t, func(stepSize uint64, dirs datadir.Dirs) (name string, schema ae.SnapNameSchema) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	dirs := datadir.New(t.TempDir())
+	name, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema ee.SnapNameSchema) {
 		accessors := AccessorBTree | AccessorExistence
 		name = "accounts"
-		schema = ae.NewE3SnapSchemaBuilder(accessors, stepSize).
-			Data(dirs.SnapDomain, name, ae.DataExtensionKv).
-			BtIndex(seg.CompressNone).
-			Existence().
+		schema = ee.NewE3SnapSchemaBuilder(accessors, stepSize).
+			Data(dirs.SnapDomain, name, ee.DataExtensionKv, seg.CompressNone).
+			BtIndex().Existence().
 			Build()
 		return name, schema
 	})
@@ -238,7 +259,7 @@ func TestMergeRangeSnapRepo(t *testing.T) {
 		mergeStages[i] = (1 << (i + 1)) * stepSize
 	}
 
-	repo.cfg.SnapshotCreationConfig = &ae.SnapshotCreationConfig{
+	repo.cfg.SnapshotCreationConfig = &ee.SnapshotCreationConfig{
 		RootNumPerStep: 10,
 		MergeStages:    mergeStages,
 		MinimumSize:    10,
@@ -250,7 +271,7 @@ func TestMergeRangeSnapRepo(t *testing.T) {
 		require.Positive(t, dataCount)
 		require.NoError(t, repo.OpenFolder())
 		repo.RecalcVisibleFiles(RootNum(MaxUint64))
-		vf := repo.VisibleFiles()
+		vf := repo.visibleFiles()
 		require.Len(t, vf, vfCount)
 
 		mr := repo.FindMergeRange(RootNum(vf.EndTxNum()), vf)
@@ -293,13 +314,121 @@ func TestMergeRangeSnapRepo(t *testing.T) {
 	testFn([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}, {10, 11}, {11, 12}, {12, 13}, {13, 15}, {15, 16}}, 15, true, 0, 16)
 }
 
-func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
-	name, dirs, repo := setupEntity(t, func(stepSize uint64, dirs datadir.Dirs) (name string, schema ae.SnapNameSchema) {
+// foreign key; commitment <> accounts
+func TestReferencingIntegrityChecker(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	_, accountsR := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema ee.SnapNameSchema) {
 		accessors := AccessorBTree | AccessorExistence
 		name = "accounts"
-		schema = ae.NewE3SnapSchemaBuilder(accessors, stepSize).
-			Data(dirs.SnapDomain, name, ae.DataExtensionKv).
-			BtIndex(seg.CompressNone).
+		schema = ee.NewE3SnapSchemaBuilder(accessors, stepSize).
+			Data(dirs.SnapDomain, name, ee.DataExtensionKv, seg.CompressNone).
+			BtIndex().Existence().
+			Build()
+		return name, schema
+	})
+
+	defer accountsR.Close()
+
+	_, commitmentR := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema ee.SnapNameSchema) {
+		accessors := AccessorHashMap
+		name = "commitment"
+		schema = ee.NewE3SnapSchemaBuilder(accessors, stepSize).
+			Data(dirs.SnapDomain, name, ee.DataExtensionKv, seg.CompressNone).
+			Accessor(dirs.SnapDomain).
+			Build()
+		return name, schema
+	})
+	defer commitmentR.Close()
+
+	accountsR.cfg.Integrity = ee.NewReferencingIntegrityChecker(commitmentR.cfg.Schema)
+	stepSize := accountsR.stepSize
+
+	// setup accounts and commitment files
+
+	// accounts: 0-1; 1-2; 0-2
+	// commitment: 0-1; 1-2
+	// visibleFiles for accounts (and commitment) should use 0-1, 1-2
+	// then cleanAfterMerge should leave infact 0-1, 1-2
+
+	dataCount, _, _, _ := populateFiles2(t, dirs, "accounts", accountsR, dirs.SnapDomain, []testFileRange{{0, 1}, {1, 2}, {0, 2}})
+	require.Positive(t, dataCount)
+	require.NoError(t, accountsR.OpenFolder())
+	require.Equal(t, 3, accountsR.dirtyFiles.Len())
+
+	dataCount, _, _, _ = populateFiles2(t, dirs, "commitment", commitmentR, dirs.SnapDomain, []testFileRange{{0, 1}, {1, 2}})
+	require.Positive(t, dataCount)
+	require.NoError(t, commitmentR.OpenFolder())
+
+	accountsR.RecalcVisibleFiles(RootNum(MaxUint64))
+	acf := accountsR.visibleFiles()
+
+	require.Equal(t, uint64(0), acf[0].startTxNum)
+	require.Equal(t, 1*stepSize, acf[0].endTxNum)
+	require.Equal(t, 1*stepSize, acf[1].startTxNum)
+	require.Equal(t, 2*stepSize, acf[1].endTxNum)
+
+	commitmentR.RecalcVisibleFiles(RootNum(MaxUint64))
+	ccf := commitmentR.visibleFiles()
+
+	require.Equal(t, uint64(0), ccf[0].startTxNum)
+	require.Equal(t, 1*stepSize, ccf[0].endTxNum)
+	require.Equal(t, 1*stepSize, ccf[1].startTxNum)
+
+	require.Equal(t, 2*stepSize, ccf[1].endTxNum)
+
+	mergeFile, found := accountsR.dirtyFiles.Get(&filesItem{startTxNum: 0, endTxNum: 2 * stepSize})
+	require.True(t, found)
+	require.Equal(t, uint64(0), mergeFile.startTxNum)
+	require.Equal(t, 2*stepSize, mergeFile.endTxNum)
+
+	accountsR.CleanAfterMerge(mergeFile, acf)
+	fileExistsCheck(t, accountsR, 0, 1, true)
+	fileExistsCheck(t, accountsR, 1, 2, true)
+
+	// now let's add merged commitment and do same checks
+	dataCount, _, _, _ = populateFiles2(t, dirs, "commitment", commitmentR, dirs.SnapDomain, []testFileRange{{0, 2}})
+	require.Positive(t, dataCount)
+	require.NoError(t, commitmentR.OpenFolder())
+
+	commitmentR.RecalcVisibleFiles(RootNum(MaxUint64))
+	ccf = commitmentR.visibleFiles()
+
+	require.Len(t, ccf, 1)
+	require.Equal(t, uint64(0), ccf[0].startTxNum)
+	require.Equal(t, 2*stepSize, ccf[0].endTxNum)
+
+	cMergeFile, found := commitmentR.dirtyFiles.Get(&filesItem{startTxNum: 0, endTxNum: 2 * stepSize})
+	require.True(t, found)
+	require.Equal(t, uint64(0), cMergeFile.startTxNum)
+	require.Equal(t, 2*stepSize, cMergeFile.endTxNum)
+
+	// should remove commitment.0-1,1-2; thus freeing
+	// accounts.0-1,1-2 as well
+	commitmentR.CleanAfterMerge(cMergeFile, ccf)
+
+	accountsR.RecalcVisibleFiles(RootNum(MaxUint64))
+	acf = accountsR.visibleFiles()
+
+	require.Equal(t, uint64(0), acf[0].startTxNum)
+	require.Equal(t, 2*stepSize, acf[0].endTxNum)
+	accountsR.CleanAfterMerge(mergeFile, acf)
+	fileExistsCheck(t, accountsR, 0, 1, false)
+	fileExistsCheck(t, accountsR, 1, 2, false)
+	fileExistsCheck(t, accountsR, 0, 2, true)
+}
+
+func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	dirs := datadir.New(t.TempDir())
+	name, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema ee.SnapNameSchema) {
+		accessors := AccessorBTree | AccessorExistence
+		name = "accounts"
+		schema = ee.NewE3SnapSchemaBuilder(accessors, stepSize).
+			Data(dirs.SnapDomain, name, ee.DataExtensionKv, seg.CompressNone).
+			BtIndex().
 			Existence().
 			Build()
 		return name, schema
@@ -313,7 +442,7 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 		mergeStages[i] = (1 << (i + 1)) * stepSize
 	}
 
-	repo.cfg.SnapshotCreationConfig = &ae.SnapshotCreationConfig{
+	repo.cfg.SnapshotCreationConfig = &ee.SnapshotCreationConfig{
 		RootNumPerStep: 10,
 		MergeStages:    mergeStages,
 		MinimumSize:    10,
@@ -325,7 +454,7 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 		require.Positive(t, dataCount)
 		require.NoError(t, repo.OpenFolder())
 		repo.RecalcVisibleFiles(RootNum(MaxUint64))
-		vf := repo.VisibleFiles()
+		vf := repo.visibleFiles()
 
 		mr := repo.FindMergeRange(RootNum(vf.EndTxNum()), vf)
 		require.Equal(t, mr.needMerge, needMerge)
@@ -345,7 +474,7 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 		require.NoError(t, repo.openDirtyFiles())
 		repo.RecalcVisibleFiles(RootNum(MaxUint64))
 
-		vf = repo.VisibleFiles()
+		vf = repo.visibleFiles()
 		require.Len(t, vf, nVfAfterMerge)
 
 		repo.CleanAfterMerge(merged, vf)
@@ -409,24 +538,23 @@ func stepToRootNum(t *testing.T, step uint64, repo *SnapshotRepo) RootNum {
 	return RootNum(repo.cfg.RootNumPerStep * step)
 }
 
-func setupEntity(t *testing.T, genRepo func(stepSize uint64, dirs datadir.Dirs) (name string, schema ae.SnapNameSchema)) (name string, dirs datadir.Dirs, repo *SnapshotRepo) {
+func setupEntity(t *testing.T, dirs datadir.Dirs, genRepo func(stepSize uint64, dirs datadir.Dirs) (name string, schema ee.SnapNameSchema)) (name string, repo *SnapshotRepo) {
 	t.Helper()
-	dirs = datadir.New(t.TempDir())
 	stepSize := uint64(10)
 	name, schema := genRepo(stepSize, dirs)
 
-	createConfig := ae.SnapshotCreationConfig{
+	createConfig := ee.SnapshotCreationConfig{
 		RootNumPerStep: stepSize,
 		MergeStages:    []uint64{20, 40},
 		MinimumSize:    10,
 		SafetyMargin:   5,
 	}
-	repo = NewSnapshotRepo(name, &ae.SnapshotConfig{
+	repo = NewSnapshotRepo(name, &ee.SnapshotConfig{
 		SnapshotCreationConfig: &createConfig,
 		Schema:                 schema,
 	}, log.New())
 
-	return name, dirs, repo
+	return name, repo
 }
 
 type dhiiFiles struct {
@@ -456,21 +584,25 @@ func populateFilesFull(t *testing.T, dirs datadir.Dirs, name string, extensions 
 func populateFiles2(t *testing.T, dirs datadir.Dirs, name string, repo *SnapshotRepo, dataFolder string, ranges []testFileRange) (dataFileCount, btCount, existenceCount, accessorCount int) {
 	t.Helper()
 	allFiles := dhiiFiles{fullPath: true}
-	extensions := repo.cfg.Schema.(*ae.E3SnapSchema).FileExtensions()
+	extensions := repo.cfg.Schema.(*ee.E3SnapSchema).FileExtensions()
 	v := snaptype.Version(1)
-	acc := repo.parser.AccessorList()
+	acc := repo.schema.AccessorList()
 	for _, r := range ranges {
 		from, to := RootNum(r.fromStep*repo.stepSize), RootNum(r.toStep*repo.stepSize)
-		allFiles.domainFiles = append(allFiles.domainFiles, repo.parser.DataFile(v, from, to))
+		allFiles.domainFiles = append(allFiles.domainFiles, repo.schema.DataFile(v, from, to))
 		if acc.Has(AccessorBTree) {
-			f, _ := repo.parser.BtIdxFile(v, from, to)
+			f := repo.schema.BtIdxFile(v, from, to)
 			allFiles.domainFiles = append(allFiles.domainFiles, f)
 		}
 		if acc.Has(AccessorExistence) {
-			allFiles.domainFiles = append(allFiles.domainFiles, repo.parser.ExistenceFile(v, from, to))
+			allFiles.domainFiles = append(allFiles.domainFiles, repo.schema.ExistenceFile(v, from, to))
 		}
 		if acc.Has(AccessorHashMap) {
-			allFiles.domainFiles = append(allFiles.accessorFiles, repo.parser.AccessorIdxFile(v, from, to, 0))
+			if containsSubstring(t, ee.AccessorExtensionKvi.String(), extensions) {
+				allFiles.domainFiles = append(allFiles.domainFiles, repo.schema.AccessorIdxFile(v, from, to, 0))
+			} else {
+				allFiles.accessorFiles = append(allFiles.accessorFiles, repo.schema.AccessorIdxFile(v, from, to, 0))
+			}
 		}
 	}
 
@@ -598,15 +730,6 @@ func touch(t *testing.T, folder string, files []string, fileGen func(filename st
 	}
 }
 
-// func touchFile(t *testing.T, filename string) {
-// 	t.Helper()
-// 	file, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0666)
-// 	if err != nil {
-// 		t.Fatalf("failed to open file %s: %v", filename, err)
-// 	}
-// 	defer file.Close()
-// }
-
 func containsSubstring(t *testing.T, str string, list []string) bool {
 	t.Helper()
 	for _, s := range list {
@@ -615,4 +738,21 @@ func containsSubstring(t *testing.T, str string, list []string) bool {
 		}
 	}
 	return false
+}
+
+func fileExistsCheck(t *testing.T, repo *SnapshotRepo, startStep, endStep uint64, isFound bool) {
+	t.Helper()
+	stepSize := repo.stepSize
+	startTxNum, endTxNum := startStep*stepSize, endStep*stepSize
+	_, found := repo.dirtyFiles.Get(&filesItem{startTxNum: startTxNum, endTxNum: endTxNum})
+	require.Equal(t, found, isFound)
+
+	_, err := os.Stat(repo.cfg.Schema.DataFile(snaptype.Version(1), ee.RootNum(startTxNum), ee.RootNum(endTxNum)))
+	if isFound {
+		require.NoError(t, err)
+	} else {
+		require.Error(t, err)
+		require.True(t, os.IsNotExist(err))
+	}
+
 }

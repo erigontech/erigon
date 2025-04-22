@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/kv/backup"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
@@ -50,6 +51,7 @@ import (
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
 
+	"github.com/erigontech/erigon-lib/state/stats"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/core"
@@ -64,6 +66,7 @@ import (
 	"github.com/erigontech/erigon/eth/integrity"
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/migrations"
 	"github.com/erigontech/erigon/node/nodecfg"
@@ -74,7 +77,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/turbo/builder"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 	"github.com/erigontech/erigon/turbo/services"
@@ -628,7 +630,11 @@ func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 		ac := agg.BeginFilesRo()
 		defer ac.Close()
 
-		domains, err := libstate.NewSharedDomains(tx, logger)
+		temporalTx, ok := tx.(kv.TemporalTx)
+		if !ok {
+			return errors.New("tx is not a temporal tx")
+		}
+		domains, err := libstate.NewSharedDomains(temporalTx, logger)
 		if err != nil {
 			return err
 		}
@@ -1075,7 +1081,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		}
 		defer tx.Rollback()
 	}
-	txc := wrap.TxContainer{Tx: tx}
+	txc := wrap.NewTxContainer(tx, nil)
 
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber, true, false)
@@ -1106,7 +1112,11 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 				return err
 			}
 			if execProgress == 0 {
-				doms, err := libstate.NewSharedDomains(tx, log.New())
+				temporalTx, ok := tx.(kv.TemporalTx)
+				if !ok {
+					return errors.New("tx is not a temporal tx")
+				}
+				doms, err := libstate.NewSharedDomains(temporalTx, log.New())
 				if err != nil {
 					panic(err)
 				}
@@ -1132,7 +1142,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			}
 			defer tx.Rollback()
 			for bn := execProgress; bn < block; bn++ {
-				txc.Tx = tx
+				txc = wrap.NewTxContainer(tx, txc.Doms)
 				if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, bn, ctx, cfg, logger); err != nil {
 					return err
 				}
@@ -1140,7 +1150,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		} else {
 			if err := db.Update(ctx, func(tx kv.RwTx) error {
 				for bn := execProgress; bn < block; bn++ {
-					txc.Tx = tx
+					txc = wrap.NewTxContainer(tx, txc.Doms)
 					if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, bn, ctx, cfg, logger); err != nil {
 						return err
 					}
@@ -1176,6 +1186,19 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	defer borSn.Close()
 	defer agg.Close()
 	if reset {
+		tx, err := db.BeginTemporalRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		tables := db.Debug().DomainTables(kv.ReceiptDomain)
+		if err := backup.ClearTables(ctx, tx, tables...); err != nil {
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+
 		if err := reset2.Reset(ctx, db, stages.CustomTrace); err != nil {
 			return err
 		}
@@ -1394,7 +1417,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		_ = db.View(context.Background(), func(tx kv.Tx) error {
 			ac := _aggSingleton.BeginFilesRo()
 			defer ac.Close()
-			ac.LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
+			stats.LogStats(ac, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
 				_, histBlockNumProgress, err := txNums.FindBlockNum(tx, endTxNumMinimax)
 				if err != nil {
 					return histBlockNumProgress, fmt.Errorf("findBlockNum(%d) fails: %w", endTxNumMinimax, err)
@@ -1433,6 +1456,19 @@ const blockBufferSize = 128
 func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.MiningConfig, logger log.Logger) (consensus.Engine, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
 
+	if err := db.View(context.Background(), func(tx kv.Tx) (err error) {
+		syncCfg.KeepExecutionProofs, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		panic(err)
+	}
+	if syncCfg.KeepExecutionProofs {
+		libstate.EnableHistoricalCommitment()
+	}
+
 	vmConfig := &vm.Config{}
 
 	events := shards.NewEvents()
@@ -1453,6 +1489,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 		syncCfg.AlwaysGenerateChangesets = true
 		noCommit = false
 	}
+
 	cfg.Sync = syncCfg
 
 	cfg.Prune = pm
@@ -1462,7 +1499,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 	if miningConfig != nil {
 		cfg.Miner = *miningConfig
 	}
-	cfg.Dirs = datadir.New(datadirCli)
+	cfg.Dirs = dirs
 	allSn, borSn, agg, _, _, _, err := allSnapshots(ctx, db, logger)
 	if err != nil {
 		panic(err) // we do already panic above on genesis error

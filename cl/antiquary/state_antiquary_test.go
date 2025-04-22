@@ -14,8 +14,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build integration
-
 package antiquary
 
 import (
@@ -23,10 +21,10 @@ import (
 	_ "embed"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/antiquary/tests"

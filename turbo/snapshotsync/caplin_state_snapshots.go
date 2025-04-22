@@ -289,7 +289,7 @@ Loop:
 		var exists bool
 		var sn *DirtySegment
 
-		dirtySegments, ok := s.dirty[f.TypeString]
+		dirtySegments, ok := s.dirty[f.CaplinTypeString]
 		if !ok {
 			continue
 		}

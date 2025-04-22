@@ -4,6 +4,3 @@
 [submodule "eest-fixtures"]
 	path = tests/execution-spec-tests
 	url = https://github.com/erigontech/eest-fixtures
-[submodule "contracts/openzeppelin"]
-	path = rpc/contracts/openzeppelin
-	url = https://github.com/OpenZeppelin/openzeppelin-contracts

@@ -27,6 +27,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-lib/chain/params"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/math"
@@ -39,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/params"
 )
 
 var emptyCodeHash = crypto.Keccak256Hash(nil)
@@ -151,35 +151,8 @@ func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailou
 	return NewStateTransition(evm, msg, gp).TransitionDb(refunds, gasBailout)
 }
 
-type EntryPointCall struct {
-	OnEnterSuper tracing.EnterHook
-	Input        []byte
-	From         libcommon.Address
-	Error        error
-}
-
-func (epc *EntryPointCall) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	if epc.OnEnterSuper != nil {
-		epc.OnEnterSuper(depth, typ, from, to, precompile, input, gas, value, code)
-	}
-
-	isRip7560EntryPoint := to.Cmp(types.AA_ENTRY_POINT) == 0
-	if !isRip7560EntryPoint {
-		return
-	}
-
-	if epc.Input != nil {
-		epc.Error = errors.New("illegal repeated call to the EntryPoint callback")
-		return
-	}
-
-	epc.Input = make([]byte, len(input))
-	copy(epc.Input, input)
-	epc.From = from
-}
-
-func ApplyFrame(evm *vm.EVM, msg Message, gp *GasPool, validateFrame func(ibs evmtypes.IntraBlockState, epc *EntryPointCall) error) (*evmtypes.ExecutionResult, error) {
-	return NewStateTransition(evm, msg, gp).ApplyFrame(validateFrame)
+func ApplyFrame(evm *vm.EVM, msg Message, gp *GasPool) (*evmtypes.ExecutionResult, error) {
+	return NewStateTransition(evm, msg, gp).ApplyFrame()
 }
 
 // to returns the recipient of the message.
@@ -341,7 +314,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 }
 
 // ApplyFrame is similar to TransitionDb but without gas accounting, for use in RIP-7560 transactions
-func (st *StateTransition) ApplyFrame(validateFrame func(ibs evmtypes.IntraBlockState, epc *EntryPointCall) error) (*evmtypes.ExecutionResult, error) {
+func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	coinbase := st.evm.Context.Coinbase
 	senderInitBalance, err := st.state.GetBalance(st.msg.From())
 	if err != nil {
@@ -354,12 +327,8 @@ func (st *StateTransition) ApplyFrame(validateFrame func(ibs evmtypes.IntraBlock
 	}
 	coinbaseInitBalance = coinbaseInitBalance.Clone()
 
-	epc := &EntryPointCall{}
-	st.state.SetHooks(&tracing.Hooks{
-		OnEnter: epc.OnEnter,
-	})
-
 	msg := st.msg
+	st.gasRemaining += st.msg.Gas()
 	sender := vm.AccountRef(msg.From())
 	contractCreation := msg.To() == nil
 	rules := st.evm.ChainRules()
@@ -402,12 +371,6 @@ func (st *StateTransition) ApplyFrame(validateFrame func(ibs evmtypes.IntraBlock
 
 	if st.evm.Context.PostApplyMessage != nil {
 		st.evm.Context.PostApplyMessage(st.state, msg.From(), coinbase, result)
-	}
-
-	if validateFrame != nil {
-		if err := validateFrame(st.state, epc); err != nil {
-			return nil, err
-		}
 	}
 
 	return result, nil
@@ -653,7 +616,7 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 			}
 			if exists {
-				st.state.AddRefund(fixedgas.PerEmptyAccountCost - fixedgas.PerAuthBaseCost)
+				st.state.AddRefund(params.PerEmptyAccountCost - params.PerAuthBaseCost)
 			}
 
 			// 7. set authority code

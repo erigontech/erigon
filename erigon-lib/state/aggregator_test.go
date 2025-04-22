@@ -53,6 +53,10 @@ import (
 )
 
 func TestAggregatorV3_Merge(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	db, agg := testDbAndAggregatorv3(t, 10)
 	rwTx, err := db.BeginRwNosync(context.Background())
@@ -143,7 +147,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	stat, err := ac.Prune(context.Background(), rwTx, 0, logEvery)
+	stat, err := ac.prune(context.Background(), rwTx, 0, logEvery)
 	require.NoError(t, err)
 	t.Logf("Prune: %s", stat)
 
@@ -174,7 +178,139 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	require.EqualValues(t, otherMaxWrite, binary.BigEndian.Uint64(v[:]))
 }
 
+func TestAggregatorV3_DirtyFilesRo(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 10)
+	rwTx, err := db.BeginRwNosync(context.Background())
+	require.NoError(t, err)
+	defer func() {
+		if rwTx != nil {
+			rwTx.Rollback()
+		}
+	}()
+
+	ac := agg.BeginFilesRo()
+	defer ac.Close()
+	domains, err := NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	txs := uint64(1000)
+	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	var (
+		commKey1 = []byte("someCommKey")
+		commKey2 = []byte("otherCommKey")
+	)
+
+	// keys are encodings of numbers 1..31
+	// each key changes value on every txNum which is multiple of the key
+	//var maxWrite, otherMaxWrite uint64
+	for txNum := uint64(1); txNum <= txs; txNum++ {
+		domains.SetTxNum(txNum)
+
+		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
+
+		n, err := rnd.Read(addr)
+		require.NoError(t, err)
+		require.EqualValues(t, length.Addr, n)
+
+		n, err = rnd.Read(loc)
+		require.NoError(t, err)
+		require.EqualValues(t, length.Hash, n)
+		acc := accounts.Account{
+			Nonce:       1,
+			Balance:     *uint256.NewInt(0),
+			CodeHash:    common.Hash{},
+			Incarnation: 0,
+		}
+		buf := accounts.SerialiseV3(&acc)
+		err = domains.DomainPut(kv.AccountsDomain, addr, nil, buf, nil, 0)
+		require.NoError(t, err)
+
+		err = domains.DomainPut(kv.StorageDomain, addr, loc, []byte{addr[0], loc[0]}, nil, 0)
+		require.NoError(t, err)
+
+		var v [8]byte
+		binary.BigEndian.PutUint64(v[:], txNum)
+		if txNum%135 == 0 {
+			pv, step, err := domains.GetLatest(kv.CommitmentDomain, commKey2)
+			require.NoError(t, err)
+
+			err = domains.DomainPut(kv.CommitmentDomain, commKey2, nil, v[:], pv, step)
+			require.NoError(t, err)
+			// otherMaxWrite = txNum
+		} else {
+			pv, step, err := domains.GetLatest(kv.CommitmentDomain, commKey1)
+			require.NoError(t, err)
+
+			err = domains.DomainPut(kv.CommitmentDomain, commKey1, nil, v[:], pv, step)
+			require.NoError(t, err)
+			// maxWrite = txNum
+		}
+		require.NoError(t, err)
+
+	}
+
+	err = domains.Flush(context.Background(), rwTx)
+	require.NoError(t, err)
+
+	require.NoError(t, err)
+	err = rwTx.Commit()
+	require.NoError(t, err)
+	rwTx = nil
+
+	err = agg.BuildFiles(txs)
+	require.NoError(t, err)
+
+	checkDirtyFiles := func(dirtyFiles []*filesItem, expectedLen, expectedRefCnt int) {
+		require.Len(t, dirtyFiles, expectedLen)
+		for _, f := range dirtyFiles {
+			require.Equal(t, int32(expectedRefCnt), f.refcount.Load())
+		}
+	}
+
+	checkAllEntities := func(expectedLen, expectedRefCnt int) {
+		for _, d := range agg.d {
+			checkDirtyFiles(d.dirtyFiles.Items(), expectedLen, expectedRefCnt)
+			if d.snapshotsDisabled {
+				continue
+			}
+			checkDirtyFiles(d.History.dirtyFiles.Items(), expectedLen, expectedRefCnt)
+			checkDirtyFiles(d.History.InvertedIndex.dirtyFiles.Items(), expectedLen, expectedRefCnt)
+		}
+
+		for _, ii := range agg.iis {
+			checkDirtyFiles(ii.dirtyFiles.Items(), expectedLen, expectedRefCnt)
+		}
+	}
+
+	checkAllEntities(3, 0)
+
+	aggDirtyRoTx := agg.DebugBeginDirtyFilesRo()
+	checkAllEntities(3, 1)
+
+	aggDirtyRoTx2 := agg.DebugBeginDirtyFilesRo()
+	checkAllEntities(3, 2)
+
+	aggDirtyRoTx2.Close()
+	checkAllEntities(3, 1)
+	aggDirtyRoTx2.Close() // close again, should remain same refcnt
+	checkAllEntities(3, 1)
+
+	aggDirtyRoTx.Close()
+	checkAllEntities(3, 0)
+}
+
 func TestAggregatorV3_MergeValTransform(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	db, agg := testDbAndAggregatorv3(t, 10)
 	rwTx, err := db.BeginRwNosync(context.Background())
@@ -258,7 +394,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	stat, err := ac.Prune(context.Background(), rwTx, 0, logEvery)
+	stat, err := ac.prune(context.Background(), rwTx, 0, logEvery)
 	require.NoError(t, err)
 	t.Logf("Prune: %s", stat)
 
@@ -270,8 +406,12 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 }
 
 func TestAggregatorV3_RestartOnDatadir(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
-	//t.Skip()
+
 	t.Run("BPlus", func(t *testing.T) {
 		rc := runCfg{
 			aggStep:  50,
@@ -435,7 +575,8 @@ func TestNewBtIndex(t *testing.T) {
 	defer kv.Close()
 	require.NotNil(t, kv)
 	require.NotNil(t, bt)
-	require.GreaterOrEqual(t, len(bt.bplus.mx), keyCount/int(DefaultBtreeM))
+	bplus := bt.bplus
+	require.GreaterOrEqual(t, len(bplus.mx), keyCount/int(DefaultBtreeM))
 
 	for i := 1; i < len(bt.bplus.mx); i++ {
 		require.NotZero(t, bt.bplus.mx[i].di)
@@ -445,8 +586,12 @@ func TestNewBtIndex(t *testing.T) {
 }
 
 func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
-	aggStep := uint64(10)
+	aggStep := uint64(2)
 	db, agg := testDbAndAggregatorv3(t, aggStep)
 
 	tx, err := db.BeginRw(context.Background())
@@ -464,12 +609,12 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	maxTx := aggStep * 5
+	maxTx := aggStep * 3
 	t.Logf("step=%d tx_count=%d\n", aggStep, maxTx)
 
 	rnd := newRnd(0)
 
-	generateSharedDomainsUpdates(t, domains, maxTx, rnd, 20, 10, aggStep/2)
+	generateSharedDomainsUpdates(t, domains, maxTx, rnd, length.Addr, 10, aggStep/2)
 
 	// flush and build files
 	err = domains.Flush(context.Background(), tx)
@@ -656,8 +801,10 @@ func generateSharedDomainsUpdates(t *testing.T, domains *SharedDomains, maxTxNum
 			usedKeys[k] = struct{}{}
 		}
 		if txNum%commitEvery == 0 {
-			_, err := domains.ComputeCommitment(context.Background(), true, txNum/commitEvery, "")
+			// domains.SetTrace(true)
+			rh, err := domains.ComputeCommitment(context.Background(), true, txNum/commitEvery, "")
 			require.NoErrorf(t, err, "txNum=%d", txNum)
+			t.Logf("commitment %x txn=%d", rh, txNum)
 		}
 	}
 	return usedKeys
@@ -775,6 +922,10 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txN
 }
 
 func TestAggregatorV3_RestartOnFiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	logger := log.New()
@@ -907,6 +1058,10 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 }
 
 func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	ctx := context.Background()
 	aggStep := uint64(500)
@@ -1096,9 +1251,9 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	writer := seg.NewWriter(comp, compressFlags)
 
 	loader := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		err = writer.AddWord(k)
+		_, err = writer.Write(k)
 		require.NoError(tb, err)
-		err = writer.AddWord(v)
+		_, err = writer.Write(v)
 		require.NoError(tb, err)
 		return nil
 	}
@@ -1231,11 +1386,11 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	domains, err = NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
-	diffs := [kv.DomainLen][]DomainEntryDiff{}
+	diffs := [kv.DomainLen][]kv.DomainEntryDiff{}
 	for idx := range changesetAt5.Diffs {
 		diffs[idx] = changesetAt5.Diffs[idx].GetDiffSet()
 	}
-	err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom, &diffs)
+	err = domains.Unwind(context.Background(), wrapTxWithCtx(rwTx, ac), 0, pruneFrom, &diffs)
 	require.NoError(t, err)
 
 	domains.SetChangesetAccumulator(changesetAt3)
@@ -1279,7 +1434,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	for idx := range changesetAt3.Diffs {
 		diffs[idx] = changesetAt3.Diffs[idx].GetDiffSet()
 	}
-	err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom, &diffs)
+	err = domains.Unwind(context.Background(), wrapTxWithCtx(rwTx, ac), 0, pruneFrom, &diffs)
 	require.NoError(t, err)
 
 	for i = int(pruneFrom); i < len(vals); i++ {
@@ -1337,6 +1492,10 @@ func wrapDbWithCtx(db kv.RwDB, ctx *Aggregator) kv.TemporalRwDB {
 }
 
 func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	_db, agg := testDbAggregatorWithFiles(t, &testAggConfig{
 		stepSize:                         20,
 		disableCommitmentBranchTransform: false,
@@ -1351,7 +1510,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	fnames := []string{}
 	for _, f := range ac.d[kv.CommitmentDomain].files {
 		var k, stateVal []byte
-		if ac.d[kv.CommitmentDomain].d.AccessorList&AccessorHashMap != 0 {
+		if ac.d[kv.CommitmentDomain].d.AccessorList.Has(AccessorHashMap) {
 			idx := f.src.index.GetReaderFromPool()
 			r := seg.NewReader(f.src.decompressor.MakeGetter(), compression)
 

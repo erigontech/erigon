@@ -14,8 +14,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build integration
-
 package simulator_test
 
 import (
@@ -23,13 +21,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/direct"
-	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	sentry_if "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry/simulator"
 )
 
@@ -50,7 +46,7 @@ func TestSimulatorStart(t *testing.T) {
 
 	simClient := direct.NewSentryClientDirect(66, sim)
 
-	peerCount, err := simClient.PeerCount(ctx, &sentry.PeerCountRequest{})
+	peerCount, err := simClient.PeerCount(ctx, &sentryproto.PeerCountRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,8 +55,8 @@ func TestSimulatorStart(t *testing.T) {
 		t.Fatal("Invalid response count: expected:", 1, "got:", peerCount.Count)
 	}
 
-	receiver, err := simClient.Messages(ctx, &sentry.MessagesRequest{
-		Ids: []sentry.MessageId{sentry.MessageId_BLOCK_HEADERS_66},
+	receiver, err := simClient.Messages(ctx, &sentryproto.MessagesRequest{
+		Ids: []sentryproto.MessageId{sentryproto.MessageId_BLOCK_HEADERS_66},
 	})
 
 	if err != nil {
@@ -83,8 +79,8 @@ func TestSimulatorStart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	peers, err := simClient.SendMessageToAll(ctx, &sentry.OutboundMessageData{
-		Id:   sentry_if.MessageId_GET_BLOCK_HEADERS_66,
+	peers, err := simClient.SendMessageToAll(ctx, &sentryproto.OutboundMessageData{
+		Id:   sentryproto.MessageId_GET_BLOCK_HEADERS_66,
 		Data: data.Bytes(),
 	})
 
@@ -102,8 +98,8 @@ func TestSimulatorStart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if message.Id != sentry_if.MessageId_BLOCK_HEADERS_66 {
-		t.Fatal("unexpected message id expected:", sentry_if.MessageId_BLOCK_HEADERS_66, "got:", message.Id)
+	if message.Id != sentryproto.MessageId_BLOCK_HEADERS_66 {
+		t.Fatal("unexpected message id expected:", sentryproto.MessageId_BLOCK_HEADERS_66, "got:", message.Id)
 	}
 
 	var expectedPeer bool

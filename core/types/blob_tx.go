@@ -25,8 +25,8 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/params"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/rlp"
 )
 
@@ -59,7 +59,7 @@ func (stx *BlobTx) GetBlobHashes() []libcommon.Hash {
 }
 
 func (stx *BlobTx) GetBlobGas() uint64 {
-	return fixedgas.BlobGasPerBlob * uint64(len(stx.BlobVersionedHashes))
+	return params.BlobGasPerBlob * uint64(len(stx.BlobVersionedHashes))
 }
 
 func (stx *BlobTx) AsMessage(s ISigner, baseFee *big.Int, rules *chain.Rules) (*Message, error) {

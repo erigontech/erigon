@@ -176,6 +176,10 @@ func TestTracer(t *testing.T) {
 }
 
 func TestHalt(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	timeout := errors.New("stahp")
 	tracer, err := newJsTracer("{step: function() { while(1); }, result: function() { return null; }, fault: function(){}}", nil, nil)
 	if err != nil {

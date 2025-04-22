@@ -43,11 +43,11 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
+	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc/jsonrpc/contracts"
-	"github.com/erigontech/erigon/turbo/builder"
 	privateapi2 "github.com/erigontech/erigon/turbo/privateapi"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -135,7 +135,7 @@ func getChainInstance(
 	config *chain.Config,
 	parent *types.Block,
 	engine consensus.Engine,
-	db kv.RwDB,
+	db kv.TemporalRwDB,
 	contractBackend *backends.SimulatedBackend,
 ) (*core.ChainPack, error) {
 	var err error
@@ -150,7 +150,7 @@ func generateChain(
 	config *chain.Config,
 	parent *types.Block,
 	engine consensus.Engine,
-	db kv.RwDB,
+	db kv.TemporalRwDB,
 	contractBackend *backends.SimulatedBackend,
 ) (*core.ChainPack, error) {
 	var (
