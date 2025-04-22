@@ -53,79 +53,76 @@ func (a *ProtoForkable) IntegrateDirtyFiles(files []*filesItem) {
 	a.snaps.IntegrateDirtyFiles(files)
 }
 
-func (a *ProtoForkable) BuildFiles(ctx context.Context, from, to RootNum, db kv.RoDB, ps *background.ProgressSet) (dirtyFiles []*filesItem, err error) {
+// BuildFiles builds a single file for the given range, respecting the snapshot config.
+// It might be possible to build multiple files, but this function returns the first one;
+// and might need to be called multiple times.
+func (a *ProtoForkable) BuildFiles(ctx context.Context, from, to RootNum, db kv.RoDB, ps *background.ProgressSet) (builtFile *filesItem, built bool, err error) {
 	log.Debug("freezing %s from %d to %d", a.a.Name(), from, to)
 	calcFrom, calcTo := from, to
 	var canFreeze bool
 	cfg := a.a.SnapshotConfig()
-	for {
-		calcFrom, calcTo, canFreeze = a.snaps.GetFreezingRange(calcFrom, calcTo)
-		if !canFreeze {
-			break
-		}
-
-		log.Debug("freezing %s from %d to %d", a.a.Name(), calcFrom, calcTo)
-		path := a.parser.DataFile(snaptype.Version(1), calcFrom, calcTo)
-		sn, err := seg.NewCompressor(ctx, "Snapshot "+a.a.Name(), path, a.a.Dirs().Tmp, seg.DefaultCfg, log.LvlTrace, a.logger)
-		if err != nil {
-			return dirtyFiles, err
-		}
-		defer sn.Close()
-
-		{
-			if err = a.freezer.Freeze(ctx, calcFrom, calcTo, func(values []byte) error {
-				// TODO: look at block_Snapshots.go#dumpRange
-				// when snapshot is non-frozen range, it AddsUncompressedword (fast creation)
-				// else AddWord.
-				// BuildFiles perhaps only used for fast builds...and merge is for slow builds.
-				// so using uncompressed here
-				return sn.AddUncompressedWord(values)
-			}, db); err != nil {
-				return dirtyFiles, err
-			}
-		}
-
-		{
-			p := ps.AddNew(path, 1)
-			defer ps.Delete(p)
-
-			if err := sn.Compress(); err != nil {
-				return dirtyFiles, err
-			}
-			sn.Close()
-			sn = nil
-			ps.Delete(p)
-
-		}
-
-		valuesDecomp, err := seg.NewDecompressor(path)
-		if err != nil {
-			return dirtyFiles, err
-		}
-
-		df := newFilesItemWithSnapConfig(uint64(calcFrom), uint64(calcTo), cfg)
-		df.decompressor = valuesDecomp
-
-		indexes := make([]*recsplit.Index, len(a.builders))
-		for i, ib := range a.builders {
-			p := &background.Progress{}
-			ps.Add(p)
-			recsplitIdx, err := ib.Build(ctx, calcFrom, calcTo, p)
-			if err != nil {
-				return dirtyFiles, err
-			}
-
-			indexes[i] = recsplitIdx
-		}
-		// TODO: add support for multiple indexes in filesItem.
-		df.index = indexes[0]
-		dirtyFiles = append(dirtyFiles, df)
-
-		calcFrom = calcTo
-		calcTo = to
+	calcFrom, calcTo, canFreeze = a.snaps.GetFreezingRange(calcFrom, calcTo)
+	if !canFreeze {
+		return nil, false, nil
 	}
 
-	return dirtyFiles, nil
+	log.Debug("freezing %s from %d to %d", a.a.Name(), calcFrom, calcTo)
+	path := a.parser.DataFile(snaptype.Version(1), calcFrom, calcTo)
+	sn, err := seg.NewCompressor(ctx, "Snapshot "+a.a.Name(), path, a.a.Dirs().Tmp, seg.DefaultCfg, log.LvlTrace, a.logger)
+	if err != nil {
+		return nil, false, err
+	}
+	defer sn.Close()
+
+	{
+		if err = a.freezer.Freeze(ctx, calcFrom, calcTo, func(values []byte) error {
+			// TODO: look at block_Snapshots.go#dumpRange
+			// when snapshot is non-frozen range, it AddsUncompressedword (fast creation)
+			// else AddWord.
+			// BuildFiles perhaps only used for fast builds...and merge is for slow builds.
+			// so using uncompressed here
+			return sn.AddUncompressedWord(values)
+		}, db); err != nil {
+			return nil, false, err
+		}
+	}
+
+	{
+		p := ps.AddNew(path, 1)
+		defer ps.Delete(p)
+
+		if err := sn.Compress(); err != nil {
+			return nil, false, err
+		}
+		sn.Close()
+		sn = nil
+		ps.Delete(p)
+
+	}
+
+	valuesDecomp, err := seg.NewDecompressor(path)
+	if err != nil {
+		return nil, false, err
+	}
+
+	df := newFilesItemWithSnapConfig(uint64(calcFrom), uint64(calcTo), cfg)
+	df.decompressor = valuesDecomp
+
+	//indexes := make([]*recsplit.Index, len(a.builders))
+	for _, ib := range a.builders {
+		p := &background.Progress{}
+		ps.Add(p)
+		recsplitIdx, err := ib.Build(ctx, calcFrom, calcTo, p)
+		if err != nil {
+			return nil, false, err
+		}
+
+		//indexes[i] = recsplitIdx
+		// TODO: add support for multiple indexes in filesItem.
+
+		df.index = recsplitIdx
+	}
+	return df, true, nil
 }
 
 func (a *ProtoForkable) Repo() *SnapshotRepo {

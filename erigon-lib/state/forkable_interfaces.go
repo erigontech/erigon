@@ -71,6 +71,7 @@ type ForkableFilesTxI interface {
 type ForkableDbCommonTxI interface {
 	Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (uint64, error)
 	Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error
+	HasRootNumUpto(ctx context.Context, to RootNum, tx kv.Tx) bool
 	Close()
 }
 

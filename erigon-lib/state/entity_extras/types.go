@@ -21,6 +21,10 @@ func (n Num) Step(a ForkableId) uint64 {
 	return step(n, a)
 }
 
+func (n Num) Uint64() uint64 {
+	return uint64(n)
+}
+
 func (n RootNum) Step(a ForkableId) uint64 {
 	return step(n, a)
 }

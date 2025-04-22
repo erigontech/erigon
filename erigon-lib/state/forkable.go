@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
@@ -259,6 +260,21 @@ func (m *MarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.Rw
 	return ee.DeleteRangeFromTbl(a.valsTbl, fromKeyPrefix, toKeyPrefix, limit, tx)
 }
 
+func (m *MarkedTx) HasRootNumUpto(ctx context.Context, to RootNum, tx kv.Tx) bool {
+	a := m.ap
+	lastNum, _ := kv.LastKey(tx, a.canonicalTbl)
+	if len(lastNum) == 0 {
+		return false
+	}
+	iLastNum := binary.BigEndian.Uint64(lastNum)
+	eto, err := a.rel.RootNum2Num(to, tx)
+	if err != nil {
+		panic(fmt.Sprintf("err RootNum2Num %v %v", to, err))
+	}
+
+	return iLastNum >= eto.Uint64()
+}
+
 func (m *MarkedTx) combK(ts Num, hash []byte) []byte {
 	// relevant only for marked forkable
 	// assuming hash is common.Hash which is 32 bytes
@@ -325,6 +341,21 @@ func (m *UnmarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.
 	eFrom := ap.encTs(ap.pruneFrom)
 	eTo := ap.encTs(toNum)
 	return ee.DeleteRangeFromTbl(ap.valsTbl, eFrom, eTo, limit, tx)
+}
+
+func (m *UnmarkedTx) HasRootNumUpto(ctx context.Context, to RootNum, tx kv.Tx) bool {
+	a := m.ap
+	lastNum, _ := kv.LastKey(tx, a.valsTbl)
+	if len(lastNum) == 0 {
+		return false
+	}
+	iLastNum := binary.BigEndian.Uint64(lastNum)
+	eto, err := a.rel.RootNum2Num(to, tx)
+	if err != nil {
+		panic(fmt.Sprintf("err RootNum2Num %v %v", to, err))
+	}
+
+	return iLastNum >= eto.Uint64()
 }
 
 func (m *UnmarkedTx) DebugFiles() ForkableFilesTxI {
@@ -396,6 +427,21 @@ func (m *BufferedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.
 func (m *BufferedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error {
 	// no op
 	return nil
+}
+
+func (m *BufferedTx) HasRootNumUpto(ctx context.Context, to RootNum, tx kv.Tx) bool {
+	a := m.ap
+	lastNum, _ := kv.LastKey(tx, a.valsTbl)
+	if len(lastNum) == 0 {
+		return false
+	}
+	iLastNum := binary.BigEndian.Uint64(lastNum)
+	eto, err := a.rel.RootNum2Num(to, tx)
+	if err != nil {
+		panic(fmt.Sprintf("err RootNum2Num %v %v", to, err))
+	}
+
+	return iLastNum >= eto.Uint64()
 }
 
 func (m *BufferedTx) Close() {
