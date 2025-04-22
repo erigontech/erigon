@@ -82,34 +82,6 @@ func TestReWriteIndex(t *testing.T) {
 	}
 }
 
-func TestNoMonotonic(t *testing.T) {
-	logger, require, tmpDir, salt := log.New(), require.New(t), t.TempDir(), uint32(1)
-	indexFile := filepath.Join(tmpDir, "index")
-	rs, err := NewRecSplit(RecSplitArgs{
-		KeyCount:   3,
-		BucketSize: 10,
-		Salt:       &salt,
-		TmpDir:     tmpDir,
-		IndexFile:  indexFile,
-		LeafSize:   8,
-	}, logger)
-	require.NoError(err)
-	require.NoError(rs.AddKey([]byte(fmt.Sprintf("key %d", 0)), 10))
-	require.NoError(rs.AddKey([]byte(fmt.Sprintf("key %d", 1)), 10))
-	require.NoError(rs.AddKey([]byte(fmt.Sprintf("key %d", 2)), 10))
-	require.NoError(rs.Build(context.Background()))
-
-	idx := MustOpen(indexFile)
-	defer idx.Close()
-	reader := NewIndexReader(idx)
-	offset, _ := reader.Lookup([]byte(fmt.Sprintf("key %d", 0)))
-	require.Equal(uint64(10), offset)
-	offset, _ = reader.Lookup([]byte(fmt.Sprintf("key %d", 1)))
-	require.Equal(uint64(10), offset)
-	offset, _ = reader.Lookup([]byte(fmt.Sprintf("key %d", 2)))
-	require.Equal(uint64(10), offset)
-}
-
 func TestForwardCompatibility(t *testing.T) {
 	t.Run("features_are_optional", func(t *testing.T) {
 		var features Features

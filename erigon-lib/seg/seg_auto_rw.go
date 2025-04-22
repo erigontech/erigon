@@ -127,7 +127,7 @@ func (g *Reader) Skip() (uint64, int) {
 
 }
 
-type R interface {
+type ReaderI interface {
 	Next(buf []byte) ([]byte, uint64)
 	Reset(offset uint64)
 	HasNext() bool
@@ -137,7 +137,7 @@ type R interface {
 }
 
 type PagedReader struct {
-	file     R
+	file     ReaderI
 	snappy   bool
 	sampling int
 	page     *page.Reader
@@ -145,7 +145,7 @@ type PagedReader struct {
 	currentPageOffset, nextPageOffset uint64
 }
 
-func NewPagedReader(r R, sampling int, snappy bool) *PagedReader {
+func NewPagedReader(r ReaderI, sampling int, snappy bool) *PagedReader {
 	if sampling == 0 {
 		sampling = 1
 	}

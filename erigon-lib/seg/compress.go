@@ -189,7 +189,7 @@ func (c *Compressor) ReadFrom(g *Getter) error {
 	return nil
 }
 
-func (c *Compressor) AddWord(word []byte) (err error) {
+func (c *Compressor) AddWord(word []byte) error {
 	select {
 	case <-c.ctx.Done():
 		return c.ctx.Err()
