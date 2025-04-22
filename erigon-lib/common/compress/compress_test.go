@@ -19,4 +19,6 @@ func TestName(t *testing.T) {
 	buf, word, err = DecodeSnappyIfNeed(buf, vv, true)
 	require.NoError(t, err)
 	require.Equal(t, expectWord, word)
+
+	_ = buf
 }

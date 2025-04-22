@@ -71,6 +71,7 @@ func NewParallelExecutionState(domains *libstate.SharedDomains, syncCfg ethconfi
 		senderTxNums: map[common.Address]uint64{},
 		logger:       logger,
 		syncCfg:      syncCfg,
+		isBor:        isBor,
 		//trace: true,
 	}
 }
