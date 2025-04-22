@@ -1254,9 +1254,6 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState() (blockNum, tx
 		return 0, 0, nil, err
 	}
 	if len(state) < 16 {
-		if sdc.sharedDomains.roTtx.Debug().TxNumsInFiles(kv.CommitmentDomain) > 0 {
-			return 0, 0, nil, fmt.Errorf("assert: special key `state` not found in commitment files (but we have them), probably files are `purified`, probably you manually deleted too much recent files")
-		}
 		return 0, 0, nil, nil
 	}
 
@@ -1315,7 +1312,6 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 		rootHash, err := hext.RootHash()
 		if err != nil {
 			return 0, 0, fmt.Errorf("failed to get root hash after state restore: %w", err)
-
 		}
 		log.Info(fmt.Sprintf("[commitment] restored state: block=%d txn=%d rootHash=%x\n", cs.blockNum, cs.txNum, rootHash))
 	}
