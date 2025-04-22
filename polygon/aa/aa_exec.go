@@ -67,6 +67,11 @@ func ValidateAATransaction(
 	// TODO: Nonce manager frame
 	// applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
 
+	senderNonce, _ := ibs.GetNonce(*tx.SenderAddress)
+	if tx.Nonce > senderNonce+1 { // ibs returns last used nonce
+		return nil, 0, errors.New("nonce too low")
+	}
+
 	// Deployer frame
 	msg := tx.DeployerFrame()
 	applyRes, err := core.ApplyFrame(innerEvm, msg, gasPool)
