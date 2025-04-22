@@ -238,8 +238,15 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		}
 		receipts[i] = receipt
 
-		if dbg.AssertEnabled && receiptsFromDB != nil && len(receipts) > 0 {
-			g.assertEqualReceipts(receipt, receiptsFromDB[i])
+		if dbg.AssertEnabled {
+			if receiptsFromDB != nil && len(receipts) > 0 {
+				g.assertEqualReceipts(receipt, receiptsFromDB[i])
+			} else {
+				if len(receipts) > 0 && len(receiptsFromDB) == 0 {
+					panic(fmt.Sprintf("assert: not enough receipts %d != %d", len(receipts), len(receiptsFromDB)))
+
+				}
+			}
 		}
 	}
 
