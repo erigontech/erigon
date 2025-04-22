@@ -24,7 +24,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/erigontech/erigon/core/types"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -38,6 +37,7 @@ import (
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/turbo/shards"
 )
@@ -71,6 +71,7 @@ func NewParallelExecutionState(domains *libstate.SharedDomains, syncCfg ethconfi
 		senderTxNums: map[common.Address]uint64{},
 		logger:       logger,
 		syncCfg:      syncCfg,
+		isBor:        isBor,
 		//trace: true,
 	}
 }
