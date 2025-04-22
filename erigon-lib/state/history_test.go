@@ -63,7 +63,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	//perf of tests
 	cfg.hist.iiCfg.compression = seg.CompressNone
 	cfg.hist.compression = seg.CompressNone
-	//cfg.hist.historySampling = 16
+	//cfg.hist.historyValuesOnCompressedPage = 16
 	aggregationStep := uint64(16)
 	h, err := NewHistory(cfg.hist, aggregationStep, logger)
 	require.NoError(tb, err)
@@ -106,7 +106,7 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 			defer sf.CleanupOnError()
 
 			efReader := seg.NewReader(sf.efHistoryDecomp.MakeGetter(), h.compression)
-			hReader := seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.compression), h.historySampling, true)
+			hReader := seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.compression), h.historyValuesOnCompressedPage, true)
 
 			// ef contains all sorted keys
 			// for each key it has a list of txNums
@@ -219,13 +219,13 @@ func TestHistoryCollationBuild(t *testing.T) {
 
 		require.True(strings.HasSuffix(c.historyPath, h.vFileName(0, 1)))
 		require.Equal(3, c.efHistoryComp.Count()/2)
-		require.Equal(page.WordsAmount2PagesAmount(6, h.historySampling), c.historyComp.Count())
+		require.Equal(page.WordsAmount2PagesAmount(6, h.historyValuesOnCompressedPage), c.historyComp.Count())
 
 		sf, err := h.buildFiles(ctx, 0, c, background.NewProgressSet())
 		require.NoError(err)
 		defer sf.CleanupOnError()
 		var valWords []string
-		gh := seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.compression), h.historySampling, true)
+		gh := seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.compression), h.historyValuesOnCompressedPage, true)
 		gh.Reset(0)
 		for gh.HasNext() {
 			w, _ := gh.Next(nil)
@@ -259,7 +259,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 			require.Equal(keyWords[i], string(w))
 		}
 		r = recsplit.NewIndexReader(sf.historyIdx)
-		gh = seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.compression), h.historySampling, true)
+		gh = seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.compression), h.historyValuesOnCompressedPage, true)
 		var vi int
 		for i := 0; i < len(keyWords); i++ {
 			ints := intArrs[i]

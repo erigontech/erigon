@@ -137,23 +137,23 @@ type ReaderI interface {
 }
 
 type PagedReader struct {
-	file     ReaderI
-	snappy   bool
-	sampling int
-	page     *page.Reader
+	file                   ReaderI
+	snappy                 bool
+	valuesOnCompressedPage int
+	page                   *page.Reader
 
 	currentPageOffset, nextPageOffset uint64
 }
 
-func NewPagedReader(r ReaderI, sampling int, snappy bool) *PagedReader {
-	if sampling == 0 {
-		sampling = 1
+func NewPagedReader(r ReaderI, valuesOnCompressedPage int, snappy bool) *PagedReader {
+	if valuesOnCompressedPage == 0 {
+		valuesOnCompressedPage = 1
 	}
-	return &PagedReader{file: r, sampling: sampling, snappy: snappy, page: &page.Reader{}}
+	return &PagedReader{file: r, valuesOnCompressedPage: valuesOnCompressedPage, snappy: snappy, page: &page.Reader{}}
 }
 
 func (g *PagedReader) Reset(offset uint64) {
-	if g.sampling <= 1 {
+	if g.valuesOnCompressedPage <= 1 {
 		g.file.Reset(offset)
 		return
 	}
@@ -167,9 +167,11 @@ func (g *PagedReader) Reset(offset uint64) {
 	g.page = &page.Reader{} // TODO: optimize
 }
 func (g *PagedReader) FileName() string { return g.file.FileName() }
-func (g *PagedReader) HasNext() bool    { return (g.sampling > 1 && g.page.HasNext()) || g.file.HasNext() }
+func (g *PagedReader) HasNext() bool {
+	return (g.valuesOnCompressedPage > 1 && g.page.HasNext()) || g.file.HasNext()
+}
 func (g *PagedReader) Next(buf []byte) ([]byte, uint64) {
-	if g.sampling <= 1 {
+	if g.valuesOnCompressedPage <= 1 {
 		return g.file.Next(buf)
 	}
 
@@ -189,7 +191,7 @@ func (g *PagedReader) Next(buf []byte) ([]byte, uint64) {
 	return v, g.currentPageOffset
 }
 func (g *PagedReader) Next2(buf []byte) (k, v []byte, pageOffset uint64) {
-	if g.sampling <= 1 {
+	if g.valuesOnCompressedPage <= 1 {
 		v, pageOffset = g.file.Next(buf)
 		return nil, v, pageOffset
 	}
