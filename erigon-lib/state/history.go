@@ -351,8 +351,7 @@ func (h *History) buildVi(ctx context.Context, item *filesItem, ps *background.P
 }
 
 func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHist *seg.Decompressor, ps *background.ProgressSet) error {
-	var historyKey []byte
-	var txKey [8]byte
+	var histKey []byte
 	var valOffset uint64
 
 	defer hist.EnableReadAhead().DisableReadAhead()
@@ -413,10 +412,8 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 				if err != nil {
 					return err
 				}
-				binary.BigEndian.PutUint64(txKey[:], txNum)
-				historyKey = append(append(historyKey[:0], txKey[:]...), keyBuf...)
-				//fmt.Printf("[dbg] vi: %d, %x\n", txNum, keyBuf)
-				if err = rs.AddKey(historyKey, valOffset); err != nil {
+				histKey = historyKey(txNum, keyBuf, histKey[:0])
+				if err = rs.AddKey(histKey, valOffset); err != nil {
 					return err
 				}
 				if h.historyValuesOnCompressedPage == 0 {
