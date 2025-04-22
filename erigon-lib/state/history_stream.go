@@ -139,7 +139,7 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 		} else {
 			g := seg.NewPagedReader(hi.hc.statelessGetter(historyItem.i), hi.hc.h.historySampling, true)
 			g.Reset(offset)
-			for g.HasNext() {
+			for i := 0; i < hi.hc.h.historySampling && g.HasNext(); i++ {
 				k, v, _ := g.Next2(nil)
 				histKey := historyKey(txNum, hi.nextKey, nil)
 				if bytes.Equal(histKey, k) {
