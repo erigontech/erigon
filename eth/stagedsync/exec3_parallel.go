@@ -1028,11 +1028,13 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 					!be.blockIO.HasReads(txIndex) ||
 					!state.ValidateVersion(txIndex, be.blockIO, be.versionMap,
 						func(_ state.ReadSource, _, writtenVersion state.Version) bool {
-							if be.execFailed[nextTx] > 0 || be.txIncarnations[nextTx] > 4 {
-								fmt.Println(be.blockNum, "VALIDATE", nextTx, writtenVersion.TxIndex, writtenVersion.TxIndex < maxValidated, writtenVersion.Incarnation, be.txIncarnations[writtenVersion.TxIndex+1])
-							}
-							return writtenVersion.TxIndex < maxValidated &&
+							res := writtenVersion.TxIndex < maxValidated &&
 								writtenVersion.Incarnation == be.txIncarnations[writtenVersion.TxIndex+1]
+
+							if be.execFailed[nextTx] > 0 || be.txIncarnations[nextTx] > 4 {
+								fmt.Println(be.blockNum, "VALIDATE", nextTx, writtenVersion.TxIndex, res, writtenVersion.TxIndex < maxValidated, writtenVersion.Incarnation, be.txIncarnations[writtenVersion.TxIndex+1])
+							}
+							return res
 						})) {
 				be.execTasks.pushPending(nextTx)
 				continue
