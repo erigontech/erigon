@@ -63,7 +63,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	//perf of tests
 	cfg.hist.iiCfg.compression = seg.CompressNone
 	cfg.hist.compression = seg.CompressNone
-	//cfg.hist.historyValuesOnCompressedPage = 16
+	cfg.hist.historyValuesOnCompressedPage = 16
 	aggregationStep := uint64(16)
 	h, err := NewHistory(cfg.hist, aggregationStep, logger)
 	require.NoError(tb, err)
