@@ -116,13 +116,13 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 		if bytes.Equal(key, hi.nextKey) {
 			continue
 		}
-		n, ok := eliasfano32.Seek(idxVal, hi.startTxNum)
+		txNum, ok := eliasfano32.Seek(idxVal, hi.startTxNum)
 		if !ok {
 			continue
 		}
 
 		hi.nextKey = key
-		binary.BigEndian.PutUint64(hi.txnKey[:], n)
+		binary.BigEndian.PutUint64(hi.txnKey[:], txNum)
 		historyItem, ok := hi.hc.getFileDeprecated(top.startTxNum, top.endTxNum)
 		if !ok {
 			return fmt.Errorf("no %s file found for [%x]", hi.hc.h.filenameBase, hi.nextKey)
@@ -132,9 +132,22 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 		if !ok {
 			continue
 		}
-		g := seg.NewPagedReader(hi.hc.statelessGetter(historyItem.i), hi.hc.h.historySampling, true)
-		g.Reset(offset)
-		hi.nextVal, _ = g.Next(nil)
+		if hi.hc.h.historySampling <= 1 {
+			g := hi.hc.statelessGetter(historyItem.i)
+			hi.hc.statelessGetter(historyItem.i)
+			hi.nextVal, _ = g.Next(nil)
+		} else {
+			g := seg.NewPagedReader(hi.hc.statelessGetter(historyItem.i), hi.hc.h.historySampling, true)
+			g.Reset(offset)
+			for g.HasNext() {
+				k, v, _ := g.Next2(nil)
+				histKey := historyKey(txNum, hi.nextKey, nil)
+				if bytes.Equal(histKey, k) {
+					hi.nextVal = v
+					break
+				}
+			}
+		}
 		return nil
 	}
 	hi.nextKey = nil
