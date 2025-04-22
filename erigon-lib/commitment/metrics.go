@@ -284,9 +284,7 @@ func (processAccount *AccountMetrics) UpdatesStorageInc(plainKey []byte) {
 		if _, ok := processAccount.AccountStats[account]; !ok {
 			processAccount.AccountStats[account] = &AccountStats{}
 		}
-		if len(plainKey) > 20 {
-			processAccount.AccountStats[account].StorageUpates++
-		}
+		processAccount.AccountStats[account].StorageUpates++
 	}
 }
 
