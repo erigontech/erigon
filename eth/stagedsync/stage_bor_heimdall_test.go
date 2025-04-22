@@ -39,6 +39,10 @@ import (
 )
 
 func TestBorHeimdallForwardPersistsSpans(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	ctx := context.Background()
@@ -132,6 +136,10 @@ func TestBorHeimdallForwardFetchesFirstSpanAfterSecondSprintStart(t *testing.T) 
 }
 
 func TestBorHeimdallForwardFetchesNextSpanDuringLastSprintOfCurrentSpan(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	// heimdall prepares the next span a number of sprints before the end of the current one
 	// we should be fetching the next span once we reach the last sprint of the current span
 	// this mimics the behaviour in bor

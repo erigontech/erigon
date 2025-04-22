@@ -197,9 +197,11 @@ func TestLastBlock(t *testing.T) {
 
 // Tests that given a starting canonical chain of a given size, it can be extended
 // with various length chains.
-func TestExtendCanonicalBlocks(t *testing.T) { testExtendCanonical(t) }
+func TestExtendCanonicalBlocks(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
 
-func testExtendCanonical(t *testing.T) {
 	t.Parallel()
 	length := 5
 
@@ -255,6 +257,10 @@ func TestLongerForkHeaders(t *testing.T) { testLongerFork(t, false) }
 func TestLongerForkBlocks(t *testing.T)  { testLongerFork(t, true) }
 
 func testLongerFork(t *testing.T, full bool) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	length := 10
 
 	// Make first chain starting from genesis
@@ -446,6 +452,10 @@ func testBadHashes(t *testing.T) {
 
 // Tests that chain reorganisations handle transaction removals and reinsertions.
 func TestChainTxReorgs(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	var (
 		key1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -761,6 +771,10 @@ func TestEIP155Transition(t *testing.T) {
 }
 
 func TestModes(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	// run test on all combination of flags
 	runWithModesPermuations(
@@ -1146,6 +1160,10 @@ func TestDoubleAccountRemoval(t *testing.T) {
 //
 // https://github.com/ethereum/go-ethereum/pull/15941
 func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	// Generate a canonical chain to act as the main dataset
 	m, m2 := mock.Mock(t), mock.Mock(t)
@@ -1209,6 +1227,10 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 // Tests that doing large reorgs works even if the state associated with the
 // forking point is not available any more.
 func TestLargeReorgTrieGC(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	// Generate the original common chain segment and the two competing forks
 
@@ -1269,6 +1291,10 @@ func TestLargeReorgTrieGC(t *testing.T) {
 //   - https://github.com/ethereum/go-ethereum/issues/18977
 //   - https://github.com/ethereum/go-ethereum/pull/18988
 func TestLowDiffLongChain(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	// Generate a canonical chain to act as the main dataset
 	m := mock.Mock(t)
@@ -1725,6 +1751,10 @@ func TestDeleteRecreateAccount(t *testing.T) {
 // Expected outcome is that _all_ slots are cleared from A, due to the selfdestruct,
 // and then the new slots exist
 func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	var (
 		// Generate a canonical chain to act as the main dataset

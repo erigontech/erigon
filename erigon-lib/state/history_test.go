@@ -74,6 +74,10 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 }
 
 func TestHistoryCollationsAndBuilds(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	runTest := func(t *testing.T, largeValues bool) {
@@ -167,6 +171,10 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 }
 
 func TestHistoryCollationBuild(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	logger := log.New()
@@ -416,41 +424,45 @@ func TestHistoryCanPrune(t *testing.T) {
 		collateAndMergeHistory(t, db, h, stepsTotal*h.aggregationStep, false)
 		return addr
 	}
-	t.Run("withFiles", func(t *testing.T) {
-		db, h := testDbAndHistory(t, true, logger)
-		h.snapshotsDisabled = false
 
-		defer db.Close()
-		writeKey(t, h, db)
+	if !testing.Short() {
+		t.Run("withFiles", func(t *testing.T) {
+			db, h := testDbAndHistory(t, true, logger)
+			h.snapshotsDisabled = false
 
-		rwTx, err := db.BeginRw(context.Background())
-		defer rwTx.Rollback()
-		require.NoError(t, err)
+			defer db.Close()
+			writeKey(t, h, db)
 
-		hc := h.BeginFilesRo()
-		defer hc.Close()
-
-		maxTxInSnaps := hc.files.EndTxNum()
-		require.Equal(t, (stepsTotal-stepKeepInDB)*16, maxTxInSnaps)
-
-		for i := uint64(0); i < stepsTotal; i++ {
-			cp, untilTx := hc.canPruneUntil(rwTx, h.aggregationStep*(i+1))
-			require.GreaterOrEqual(t, h.aggregationStep*(stepsTotal-stepKeepInDB), untilTx)
-			if i >= stepsTotal-stepKeepInDB {
-				require.Falsef(t, cp, "step %d should be NOT prunable", i)
-			} else {
-				require.Truef(t, cp, "step %d should be prunable", i)
-			}
-			stat, err := hc.Prune(context.Background(), rwTx, i*h.aggregationStep, (i+1)*h.aggregationStep, math.MaxUint64, false, logEvery)
+			rwTx, err := db.BeginRw(context.Background())
+			defer rwTx.Rollback()
 			require.NoError(t, err)
-			if i >= stepsTotal-stepKeepInDB {
-				require.Falsef(t, cp, "step %d should be NOT prunable", i)
-			} else {
-				require.NotNilf(t, stat, "step %d should be pruned and prune stat available", i)
-				require.Truef(t, cp, "step %d should be pruned", i)
+
+			hc := h.BeginFilesRo()
+			defer hc.Close()
+
+			maxTxInSnaps := hc.files.EndTxNum()
+			require.Equal(t, (stepsTotal-stepKeepInDB)*16, maxTxInSnaps)
+
+			for i := uint64(0); i < stepsTotal; i++ {
+				cp, untilTx := hc.canPruneUntil(rwTx, h.aggregationStep*(i+1))
+				require.GreaterOrEqual(t, h.aggregationStep*(stepsTotal-stepKeepInDB), untilTx)
+				if i >= stepsTotal-stepKeepInDB {
+					require.Falsef(t, cp, "step %d should be NOT prunable", i)
+				} else {
+					require.Truef(t, cp, "step %d should be prunable", i)
+				}
+				stat, err := hc.Prune(context.Background(), rwTx, i*h.aggregationStep, (i+1)*h.aggregationStep, math.MaxUint64, false, logEvery)
+				require.NoError(t, err)
+				if i >= stepsTotal-stepKeepInDB {
+					require.Falsef(t, cp, "step %d should be NOT prunable", i)
+				} else {
+					require.NotNilf(t, stat, "step %d should be pruned and prune stat available", i)
+					require.Truef(t, cp, "step %d should be pruned", i)
+				}
 			}
-		}
-	})
+		})
+	}
+
 	t.Run("withoutFiles", func(t *testing.T) {
 		db, h := testDbAndHistory(t, false, logger)
 		h.snapshotsDisabled = true
@@ -836,6 +848,10 @@ func checkHistoryHistory(t *testing.T, h *History, txs uint64) {
 }
 
 func TestHistoryHistory(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -932,6 +948,10 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 }
 
 func TestHistoryMergeFiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	logger := log.New()
@@ -952,6 +972,10 @@ func TestHistoryMergeFiles(t *testing.T) {
 }
 
 func TestHistoryScanFiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	logger := log.New()
@@ -983,6 +1007,10 @@ func TestHistoryScanFiles(t *testing.T) {
 }
 
 func TestIterateChanged(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	logger := log.New()
@@ -1145,6 +1173,10 @@ func TestIterateChanged(t *testing.T) {
 }
 
 func TestIterateChanged2(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	logger := log.New()
@@ -1465,6 +1497,10 @@ func writeSomeHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 }
 
 func Test_HistoryIterate_VariousKeysLen(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	logger := log.New()
@@ -1518,6 +1554,10 @@ func Test_HistoryIterate_VariousKeysLen(t *testing.T) {
 }
 
 func TestHistory_OpenFolder(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	logger := log.New()

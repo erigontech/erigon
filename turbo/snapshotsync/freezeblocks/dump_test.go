@@ -22,7 +22,6 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -32,9 +31,8 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/txnprovider/txpool"
-
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
@@ -42,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 func nonceRange(from, to int) []uint64 {
@@ -64,6 +63,10 @@ func baseIdRange(base, indexer, len int) []uint64 {
 }
 
 func TestDump(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win")
 	}

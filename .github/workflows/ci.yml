@@ -118,4 +118,4 @@ jobs:
         run: .\wmake.ps1 test
 
       - name: Test erigon-lib
-        run: cd erigon-lib && make test-no-fuzz
+        run: cd erigon-lib && make test

@@ -53,6 +53,10 @@ import (
 )
 
 func TestAggregatorV3_Merge(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	db, agg := testDbAndAggregatorv3(t, 10)
 	rwTx, err := db.BeginRwNosync(context.Background())
@@ -175,6 +179,10 @@ func TestAggregatorV3_Merge(t *testing.T) {
 }
 
 func TestAggregatorV3_DirtyFilesRo(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	db, agg := testDbAndAggregatorv3(t, 10)
 	rwTx, err := db.BeginRwNosync(context.Background())
@@ -299,6 +307,10 @@ func TestAggregatorV3_DirtyFilesRo(t *testing.T) {
 }
 
 func TestAggregatorV3_MergeValTransform(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	db, agg := testDbAndAggregatorv3(t, 10)
 	rwTx, err := db.BeginRwNosync(context.Background())
@@ -394,8 +406,12 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 }
 
 func TestAggregatorV3_RestartOnDatadir(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
-	//t.Skip()
+
 	t.Run("BPlus", func(t *testing.T) {
 		rc := runCfg{
 			aggStep:  50,
@@ -570,6 +586,10 @@ func TestNewBtIndex(t *testing.T) {
 }
 
 func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	aggStep := uint64(2)
 	db, agg := testDbAndAggregatorv3(t, aggStep)
@@ -902,6 +922,10 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txN
 }
 
 func TestAggregatorV3_RestartOnFiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	logger := log.New()
@@ -1034,6 +1058,10 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 }
 
 func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	ctx := context.Background()
 	aggStep := uint64(500)
@@ -1464,6 +1492,10 @@ func wrapDbWithCtx(db kv.RwDB, ctx *Aggregator) kv.TemporalRwDB {
 }
 
 func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	_db, agg := testDbAggregatorWithFiles(t, &testAggConfig{
 		stepSize:                         20,
 		disableCommitmentBranchTransform: false,
