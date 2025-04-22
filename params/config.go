@@ -214,7 +214,7 @@ func ChainConfigByChainName(chain string) *chain.Config {
 	case networkname.Mainnet:
 		return MainnetChainConfig
 	case networkname.Dev:
-		return AllCliqueProtocolChanges
+		return AllProtocolChanges
 	case networkname.Holesky:
 		return HoleskyChainConfig
 	case networkname.Sepolia:

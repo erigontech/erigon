@@ -598,12 +598,15 @@ Loop:
 
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
-				txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
-				if err != nil {
-					if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
-						hooks.OnBlockEnd(err)
+
+				if txTask.Tx.Type() != types.AccountAbstractionTxType {
+					txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
+					if err != nil {
+						if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
+							hooks.OnBlockEnd(err)
+						}
+						return err
 					}
-					return err
 				}
 			}
 
@@ -616,7 +619,7 @@ Loop:
 		var isAASequence bool
 		for _, txTask := range txTasks {
 			txIndex := txTask.TxIndex
-			if txIndex < 0 || txIndex >= len(txs)-1 {
+			if txIndex < 0 || txIndex > len(txs)-1 {
 				continue
 			}
 
@@ -629,8 +632,8 @@ Loop:
 			}
 
 			aaBatchSize := uint64(1)
-			for _, tt := range txTasks[txIndex+1:] {
-				if tt.Tx.Type() == types.AccountAbstractionTxType {
+			for _, tt := range txTasks {
+				if tt.TxIndex > txIndex && tt.Tx != nil && tt.Tx.Type() == types.AccountAbstractionTxType {
 					aaBatchSize++
 					tt.InBatch = true
 				} else {

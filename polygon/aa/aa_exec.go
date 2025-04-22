@@ -5,9 +5,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/big"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
@@ -292,6 +294,20 @@ func ExecuteAATransaction(
 	gasPool.AddGas(params.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit - gasUsed)
 
 	return executionStatus, gasUsed, nil
+}
+
+func CreateAAReceipt(txnHash common.Hash, status, gasUsed, cumGasUsed, blockNum, txnIndex uint64, logs types.Logs) *types.Receipt {
+	receipt := &types.Receipt{Type: types.AccountAbstractionTxType, CumulativeGasUsed: cumGasUsed}
+	receipt.Status = status
+	receipt.TxHash = txnHash
+	receipt.GasUsed = gasUsed
+	// Set the receipt logs and create a bloom for filtering
+	receipt.Logs = logs
+	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
+	receipt.BlockNumber = big.NewInt(int64(blockNum))
+	receipt.TransactionIndex = uint(txnIndex)
+
+	return receipt
 }
 
 // TODO: get rid of?

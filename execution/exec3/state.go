@@ -285,6 +285,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			}
 
 			rw.execAATxn(txTask)
+			return
 		}
 
 		msg := txTask.TxAsMessage
@@ -340,7 +341,7 @@ func (rw *Worker) execAATxn(txTask *state.TxTask) {
 		endIdx := startIdx + txTask.AAValidationBatchSize
 
 		validationResults := make([]state.AAValidationResult, txTask.AAValidationBatchSize)
-		log.Debug("🕵️‍♂️[aa] found AA bundle", "startIdx", startIdx, "endIdx", endIdx-1)
+		log.Info("🕵️‍♂️[aa] found AA bundle", "startIdx", startIdx, "endIdx", endIdx)
 
 		var outerErr error
 		for i := startIdx; i < endIdx; i++ {
@@ -372,7 +373,7 @@ func (rw *Worker) execAATxn(txTask *state.TxTask) {
 			txTask.Error = outerErr
 			return
 		}
-		log.Debug("✅[aa] validated AA bundle", "len", startIdx-endIdx)
+		log.Info("✅[aa] validated AA bundle", "len", startIdx-endIdx)
 
 		txTask.ValidationResults = validationResults
 	}
@@ -399,7 +400,7 @@ func (rw *Worker) execAATxn(txTask *state.TxTask) {
 	txTask.TraceFroms = rw.callTracer.Froms()
 	txTask.TraceTos = rw.callTracer.Tos()
 
-	log.Debug("✅[aa] executed AA bundle transaction", "txIndex", txTask.TxIndex)
+	log.Info("✅[aa] executed AA bundle transaction", "txIndex", txTask.TxIndex)
 }
 
 func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger log.Logger, hooks *tracing.Hooks, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.ParallelExecutionState, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int, dirs datadir.Dirs, isMining bool) (reconWorkers []*Worker, applyWorker *Worker, rws *state.ResultsQueue, clear func(), wait func()) {
