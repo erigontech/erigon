@@ -1217,7 +1217,7 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	}
 
 	if ht.h.historySampling > 1 {
-		v = page.Get(historyKey, v, true)
+		v, ht.snappyReadBuffer = page.Get(historyKey, v, ht.snappyReadBuffer, true)
 	}
 	return v, true, nil
 }

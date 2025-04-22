@@ -111,17 +111,17 @@ func (c *Writer) DisableFsync() {
 
 var be = binary.BigEndian
 
-func Get(key, compressedPage []byte, snappyEnabled bool) []byte {
+func Get(key, compressedPage []byte, snappyBuf []byte, snappyEnabled bool) (v []byte, snappyBufOut []byte) {
 	var err error
 	var page []byte
-	_, page, err = compress.DecodeSnappyIfNeed(nil, compressedPage, snappyEnabled)
+	snappyBuf, page, err = compress.DecodeSnappyIfNeed(snappyBuf, compressedPage, snappyEnabled)
 	if err != nil {
 		panic(err)
 	}
 
 	cnt := int(page[0])
 	if cnt == 0 {
-		return nil
+		return nil, snappyBuf
 	}
 	meta, data := page[1:1+cnt*4*2], page[1+cnt*4*2:]
 	kLens, vLens := meta[:cnt*4], meta[cnt*4:]
@@ -138,7 +138,7 @@ func Get(key, compressedPage []byte, snappyEnabled bool) []byte {
 		kLen, vLen := be.Uint32(kLens[i:]), be.Uint32(vLens[i:])
 		foundKey := keys[kOffset : kOffset+kLen]
 		if bytes.Equal(key, foundKey) {
-			return vals[vOffset : vOffset+vLen]
+			return vals[vOffset : vOffset+vLen], snappyBuf
 		} else {
 			_ = data
 		}
@@ -152,7 +152,7 @@ func Get(key, compressedPage []byte, snappyEnabled bool) []byte {
 	//	return vals[from:]
 	//}
 
-	return nil
+	return nil, snappyBuf
 }
 
 type Reader struct {

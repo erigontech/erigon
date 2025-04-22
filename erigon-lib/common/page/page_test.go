@@ -40,7 +40,7 @@ func TestPage(t *testing.T) {
 	for i := 0; i < sampling+1; i++ {
 		iter++
 		expectK, expectV := fmt.Sprintf("k %d", i), fmt.Sprintf("v %d", i)
-		v := Get([]byte(expectK), pages[pageNum], false)
+		v, _ := Get([]byte(expectK), pages[pageNum], nil, false)
 		require.Equal(expectV, string(v), i)
 		require.True(p1.HasNext())
 		k, v := p1.Next()
@@ -67,7 +67,7 @@ func BenchmarkName(b *testing.B) {
 
 	b.Run("1", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			Get(k, bts, false)
+			Get(k, bts, nil, false)
 		}
 	})
 
