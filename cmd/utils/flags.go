@@ -100,7 +100,12 @@ var (
 	PersistReceiptsFlag = cli.Uint64Flag{
 		Name:  "experiment.persist.receipts",
 		Usage: "Set > 0 to store receipts in chaindata db (only on chain-tip) - RPC for recent receit/logs will be faster. Values: 1_000 good starting point. 10_000 receitps it's ~1Gb (not much IO increase). Please test before go over 100_000",
-		Value: ethconfig.Defaults.PersistReceipts,
+		Value: 10_000,
+	}
+	PersistReceiptsV2Flag = cli.BoolFlag{
+		Name:  "experiment.persist.receipts.v2",
+		Usage: "To store receipts in chaindata db (only on chain-tip) - RPC for recent receit/logs will be faster. Values: 1_000 good starting point. 10_000 receitps it's ~1Gb (not much IO increase). Please test before go over 100_000",
+		Value: ethconfig.Defaults.PersistReceiptsCacheV2,
 	}
 	DeveloperPeriodFlag = cli.IntFlag{
 		Name:  "dev.period",
@@ -1899,6 +1904,12 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		cfg.KeepExecutionProofs = true
 		state.EnableHistoricalCommitment()
 	}
+	if ctx.Bool(PersistReceiptsV2Flag.Name) {
+		cfg.PersistReceiptsCacheV2 = true
+		state.EnableHistoricalRCache()
+	}
+	cfg.PersistReceiptsV1 = ctx.Uint64(PersistReceiptsFlag.Name)
+
 	cfg.CaplinConfig.EnableUPnP = ctx.Bool(CaplinEnableUPNPlag.Name)
 	var err error
 	cfg.CaplinConfig.MaxInboundTrafficPerPeer, err = datasize.ParseString(ctx.String(CaplinMaxInboundTrafficPerPeerFlag.Name))
@@ -1934,8 +1945,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	} else {
 		cfg.NetworkID = params.NetworkIDByChainName(chain)
 	}
-
-	cfg.PersistReceipts = ctx.Uint64(PersistReceiptsFlag.Name)
 
 	cfg.Dirs = nodeConfig.Dirs
 	cfg.Snapshot.KeepBlocks = ctx.Bool(SnapKeepBlocksFlag.Name)

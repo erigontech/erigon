@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package temporal
+package state
 
 import (
 	"context"
@@ -23,7 +23,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
-	"github.com/erigontech/erigon-lib/state"
 )
 
 var ( // Compile time interface checks
@@ -66,10 +65,10 @@ var ( // Compile time interface checks
 
 type DB struct {
 	kv.RwDB
-	agg *state.Aggregator
+	agg *Aggregator
 }
 
-func New(db kv.RwDB, agg *state.Aggregator) (*DB, error) {
+func New(db kv.RwDB, agg *Aggregator) (*DB, error) {
 	return &DB{RwDB: db, agg: agg}, nil
 }
 func (db *DB) Agg() any                  { return db.agg }
@@ -168,7 +167,7 @@ func (db *DB) OnFreeze(f kv.OnFreezeFunc) { db.agg.OnFreeze(f) }
 type Tx struct {
 	*mdbx.MdbxTx
 	db               *DB
-	aggtx            *state.AggregatorRoTx
+	aggtx            *AggregatorRoTx
 	resourcesToClose []kv.Closer
 	ctx              context.Context
 }
@@ -181,7 +180,7 @@ func (tx *Tx) ForceReopenAggCtx() {
 func (tx *Tx) WarmupDB(force bool) error { return tx.MdbxTx.WarmupDB(force) }
 func (tx *Tx) LockDBInRam() error        { return tx.MdbxTx.LockDBInRam() }
 func (tx *Tx) AggTx() any                { return tx.aggtx }
-func (tx *Tx) Agg() *state.Aggregator    { return tx.db.agg }
+func (tx *Tx) Agg() *Aggregator          { return tx.db.agg }
 func (tx *Tx) Rollback() {
 	tx.autoClose()
 	if tx.MdbxTx == nil { // invariant: it's safe to call Commit/Rollback multiple times

@@ -22,6 +22,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 // benchTxReceipt compares response of Erigon with Geth
@@ -102,6 +104,8 @@ func BenchTxReceipt(erigonURL, gethURL string, needCompare bool, blockFrom uint6
 	return nil
 }
 
+const logInterval = 20 * time.Second
+
 func BenchBlockReceipts(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFileName string, errorFileName string) error {
 	setRoutes(erigonURL, gethURL)
 
@@ -145,13 +149,22 @@ func BenchBlockReceipts(erigonURL, gethURL string, needCompare bool, blockFrom u
 	if blockNumber.Error != nil {
 		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
 	}
-	fmt.Printf("Last block: %d\n", blockNumber.Number)
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+
+	log.Info("starting", "last_block", blockNumber.Number, "from", blockNumber, "to", blockTo)
 	for bn := blockFrom; bn <= blockTo; bn++ {
 		request := reqGen.getBlockReceipts(bn)
 		errCtx := fmt.Sprintf("block %d", bn)
 		if err := requestAndCompare(request, "eth_getBlockReceipts", errCtx, reqGen, needCompare, rec, errs, resultsCh,
 			/* insertOnlyIfSuccess */ false); err != nil {
 			return err
+		}
+
+		select {
+		case <-logEvery.C:
+			log.Info("progess", "b", bn)
+		default:
 		}
 	}
 	return nil

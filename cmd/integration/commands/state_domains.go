@@ -311,6 +311,8 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 		tbl = kv.HeaderTD
 	case "receipt":
 		tbl = kv.BadHeaderNumber
+	case kv.RCacheDomain.String():
+		tbl = kv.BlockBody
 	default:
 		return fmt.Errorf("invalid domainName %s", domainName)
 	}

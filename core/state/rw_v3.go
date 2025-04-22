@@ -24,7 +24,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -32,10 +31,14 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/state"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
@@ -47,20 +50,25 @@ type StateV3 struct {
 	triggers     map[uint64]*TxTask
 	senderTxNums map[common.Address]uint64
 
+	isBor bool
+
+	logger              log.Logger
 	applyPrevAccountBuf []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
 	addrIncBuf          []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
-	logger              log.Logger
 
-	trace bool
+	syncCfg ethconfig.Sync
+	trace   bool
 }
 
-func NewStateV3(domains *libstate.SharedDomains, logger log.Logger) *StateV3 {
+func NewStateV3(domains *libstate.SharedDomains, syncCfg ethconfig.Sync, isBor bool, logger log.Logger) *StateV3 {
 	return &StateV3{
 		domains:             domains,
 		triggers:            map[uint64]*TxTask{},
 		senderTxNums:        map[common.Address]uint64{},
 		applyPrevAccountBuf: make([]byte, 256),
 		logger:              logger,
+		syncCfg:             syncCfg,
+		isBor:               isBor,
 		//trace: true,
 	}
 }
@@ -232,6 +240,26 @@ func (rs *StateV3) ApplyLogsAndTraces4(txTask *TxTask, domains *libstate.SharedD
 			}
 		}
 	}
+
+	if rs.syncCfg.PersistReceiptsCacheV2 {
+		var receipt *types.Receipt
+		if !txTask.Final {
+			if txTask.TxIndex >= 0 && txTask.BlockReceipts != nil {
+				receipt = txTask.BlockReceipts[txTask.TxIndex]
+			}
+		} else {
+			if rs.isBor && txTask.TxIndex >= 1 {
+				receipt = txTask.BlockReceipts[txTask.TxIndex-1]
+				if receipt == nil {
+					return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
+				}
+			}
+		}
+		if err := rawdb.WriteReceiptCacheV2(domains, receipt); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 

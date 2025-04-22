@@ -28,12 +28,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/page"
 	"github.com/erigontech/erigon-lib/etl"
@@ -318,11 +318,15 @@ func (ht *HistoryRoTx) Files() (res []string) {
 	return append(res, ht.iit.Files()...)
 }
 
-func (h *History) missedMapAccessors() (l []*filesItem) {
+func (h *History) MissedMapAccessors() (l []*filesItem) {
+	return h.missedMapAccessors(h.dirtyFiles.Items())
+}
+
+func (h *History) missedMapAccessors(source []*filesItem) (l []*filesItem) {
 	if !h.indexList.Has(AccessorHashMap) {
 		return nil
 	}
-	return fileItemsWithMissingAccessors(h.dirtyFiles, h.aggregationStep, func(fromStep, toStep uint64) []string {
+	return fileItemsWithMissedAccessors(source, h.aggregationStep, func(fromStep, toStep uint64) []string {
 		return []string{
 			h.vAccessorFilePath(fromStep, toStep),
 		}
@@ -429,6 +433,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 				}
 				p.Processed.Add(1)
 			}
+			p.Processed.Add(1)
 
 			select {
 			case <-ctx.Done():
@@ -451,9 +456,9 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	return nil
 }
 
-func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
-	h.InvertedIndex.BuildMissedAccessors(ctx, g, ps)
-	for _, item := range h.missedMapAccessors() {
+func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet, historyFiles *MissedAccessorHistoryFiles) {
+	h.InvertedIndex.BuildMissedAccessors(ctx, g, ps, historyFiles.ii)
+	for _, item := range historyFiles.missedMapAccessors() {
 		item := item
 		g.Go(func() error {
 			return h.buildVi(ctx, item, ps)
@@ -1245,6 +1250,10 @@ func (ht *HistoryRoTx) encodeTs(txNum uint64, key []byte) []byte {
 // HistorySeek searches history for a value of specified key before txNum
 // second return value is true if the value is found in the history (even if it is nil)
 func (ht *HistoryRoTx) HistorySeek(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
+	if ht.h.disable {
+		return nil, false, nil
+	}
+
 	v, ok, err := ht.historySeekInFiles(key, txNum)
 	if err != nil {
 		return nil, false, err

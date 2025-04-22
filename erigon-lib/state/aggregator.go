@@ -313,6 +313,7 @@ func (a *Aggregator) closeDirtyFiles() {
 	wg.Wait()
 }
 
+func (a *Aggregator) EnableDomain(domain kv.Domain)   { a.d[domain].disable = false }
 func (a *Aggregator) SetCollateAndBuildWorkers(i int) { a.collateAndBuildWorkers = i }
 func (a *Aggregator) SetMergeWorkers(i int)           { a.mergeWorkers = i }
 func (a *Aggregator) SetCompressWorkers(i int) {
@@ -388,39 +389,46 @@ func (a *Aggregator) LS() {
 
 func (a *Aggregator) BuildMissedIndices(ctx context.Context, workers int) error {
 	startIndexingTime := time.Now()
-	{
-		ps := background.NewProgressSet()
+	ps := background.NewProgressSet()
 
-		g, ctx := errgroup.WithContext(ctx)
-		g.SetLimit(workers)
-		go func() {
-			logEvery := time.NewTicker(20 * time.Second)
-			defer logEvery.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-logEvery.C:
-					var m runtime.MemStats
-					dbg.ReadMemStats(&m)
-					sendDiagnostics(startIndexingTime, ps.DiagnosticsData(), m.Alloc, m.Sys)
-					a.logger.Info("[snapshots] Indexing", "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
-				}
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(workers)
+	go func() {
+		logEvery := time.NewTicker(20 * time.Second)
+		defer logEvery.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-logEvery.C:
+				var m runtime.MemStats
+				dbg.ReadMemStats(&m)
+				sendDiagnostics(startIndexingTime, ps.DiagnosticsData(), m.Alloc, m.Sys)
+				a.logger.Info("[snapshots] Indexing", "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 			}
-		}()
-		for _, d := range a.d {
-			d.BuildMissedAccessors(ctx, g, ps)
 		}
-		for _, ii := range a.iis {
-			ii.BuildMissedAccessors(ctx, g, ps)
-		}
+	}()
 
-		if err := g.Wait(); err != nil {
-			return err
-		}
-		if err := a.OpenFolder(); err != nil {
-			return err
-		}
+	rotx := a.DebugBeginDirtyFilesRo()
+	defer rotx.Close()
+
+	missedFilesItems := rotx.FilesWithMissedAccessors()
+
+	for _, d := range a.d {
+		d.BuildMissedAccessors(ctx, g, ps, missedFilesItems.domain[d.name])
+	}
+	for _, ii := range a.iis {
+		ii.BuildMissedAccessors(ctx, g, ps, missedFilesItems.ii[ii.name])
+	}
+
+	if err := g.Wait(); err != nil {
+		return err
+	}
+
+	rotx.Close()
+
+	if err := a.OpenFolder(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -534,6 +542,10 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(a.collateAndBuildWorkers)
 	for _, d := range a.d {
+		if d.disable {
+			continue
+		}
+
 		d := d
 		dc := d.BeginFilesRo()
 		firstStepNotInFiles := dc.FirstStepNotInFiles()
@@ -576,6 +588,10 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 
 	// indices are built concurrently
 	for iikey, ii := range a.iis {
+		if ii.disable {
+			continue
+		}
+
 		ii := ii
 		dc := ii.BeginFilesRo()
 		firstStepNotInFiles := dc.FirstStepNotInFiles()
@@ -1286,6 +1302,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *RangesV3 
 			if !slices.Contains(kv.StateDomains, kd) {
 				continue
 			}
+
 			if kd == kv.CommitmentDomain || cr.values.Equal(&dr.values) {
 				continue
 			}
@@ -1299,6 +1316,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *RangesV3 
 						"commitment", cr.values.String("vals", at.a.StepSize()))
 					continue
 				}
+
 				restorePrevRange = true
 			}
 		}

@@ -183,7 +183,7 @@ func (dt *DomainRoTx) lookupDirtyFileByItsRange(txFrom uint64, txTo uint64) *fil
 	}
 
 	if item == nil || item.bindex == nil {
-		fileStepsss := ""
+		fileStepsss := "" + dt.d.name.String() + ": "
 		for _, item := range dt.d.dirtyFiles.Items() {
 			fileStepsss += fmt.Sprintf("%d-%d;", item.startTxNum/dt.d.aggregationStep, item.endTxNum/dt.d.aggregationStep)
 		}

@@ -26,7 +26,6 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/bitmapdb"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/stream"
@@ -159,65 +158,6 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		}
 	}
 	return logs, nil
-}
-
-// The Topic list restricts matches to particular event topics. Each event has a list
-// of topics. Topics matches a prefix of that list. An empty element slice matches any
-// topic. Non-empty elements represent an alternative that matches any of the
-// contained topics.
-//
-// Examples:
-// {} or nil          matches any topic list
-// {{A}}              matches topic A in first position
-// {{}, {B}}          matches any topic in first position AND B in second position
-// {{A}, {B}}         matches topic A in first position AND B in second position
-// {{A, B}, {C, D}}   matches topic (A OR B) in first position AND (C OR D) in second position
-func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint64) (*roaring.Bitmap, error) {
-	var result *roaring.Bitmap
-	for _, sub := range topics {
-		var bitmapForORing *roaring.Bitmap
-		for _, topic := range sub {
-			m, err := bitmapdb.Get(c, kv.LogTopicIndex, topic[:], uint32(from), uint32(to))
-			if err != nil {
-				return nil, err
-			}
-			if bitmapForORing == nil {
-				bitmapForORing = m
-				continue
-			}
-			bitmapForORing.Or(m)
-		}
-
-		if bitmapForORing == nil {
-			continue
-		}
-		if result == nil {
-			result = bitmapForORing
-			continue
-		}
-
-		result = roaring.And(bitmapForORing, result)
-	}
-	return result, nil
-}
-func getAddrsBitmap(tx kv.Tx, addrs []common.Address, from, to uint64) (*roaring.Bitmap, error) {
-	if len(addrs) == 0 {
-		return nil, nil
-	}
-	rx := make([]*roaring.Bitmap, len(addrs))
-	defer func() {
-		for _, bm := range rx {
-			bitmapdb.ReturnToPool(bm)
-		}
-	}()
-	for idx, addr := range addrs {
-		m, err := bitmapdb.Get(tx, kv.LogAddressIndex, addr[:], uint32(from), uint32(to))
-		if err != nil {
-			return nil, err
-		}
-		rx[idx] = m
-	}
-	return roaring.FastOr(rx...), nil
 }
 
 func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) (out stream.U64, err error) {

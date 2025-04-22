@@ -228,6 +228,9 @@ func (db *DB) Update(ctx context.Context, f func(tx kv.RwTx) error) (err error) 
 func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) (err error) {
 	return errors.New("remote db provider doesn't support .UpdateNosync method")
 }
+
+func (tx *tx) AggTx() any                 { panic("not implemented") }
+func (db *DB) Debug() kv.TemporalDebugDB  { panic("not implemented") }
 func (db *DB) OnFreeze(f kv.OnFreezeFunc) { panic("not implemented") }
 
 func (tx *tx) ViewID() uint64  { return tx.viewID }
@@ -678,7 +681,7 @@ func (tx *tx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit
 
 func (tx *tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error) {
 	return stream.PaginateU64(func(pageToken string) (arr []uint64, nextPageToken string, err error) {
-		req := &remote.IndexRangeReq{TxId: tx.id, Table: string(name), K: k, FromTs: int64(fromTs), ToTs: int64(toTs), OrderAscend: bool(asc), Limit: int64(limit), PageToken: pageToken}
+		req := &remote.IndexRangeReq{TxId: tx.id, Table: name.String(), K: k, FromTs: int64(fromTs), ToTs: int64(toTs), OrderAscend: bool(asc), Limit: int64(limit), PageToken: pageToken}
 		reply, err := tx.db.remoteKV.IndexRange(tx.ctx, req)
 		if err != nil {
 			return nil, "", err

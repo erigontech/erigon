@@ -1266,6 +1266,110 @@ func WriteDBCommitmentHistoryEnabled(tx kv.RwTx, enabled bool) error {
 	return nil
 }
 
+func ReadReceiptCacheV2(tx kv.TemporalTx, blockNum uint64, blockHash common.Hash, txnIndex uint32, txnHash common.Hash, txNumReader rawdbv3.TxNumsReader) (*types.Receipt, bool, error) {
+	_min, err := txNumReader.Min(tx, blockNum)
+	if err != nil {
+		return nil, false, err
+	}
+
+	v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, _min+uint64(txnIndex)+1)
+	if err != nil {
+		return nil, false, fmt.Errorf("unexpected error, couldn't find changeset: txNum=%d, %w", _min+uint64(txnIndex)+1, err)
+	}
+	if !ok {
+		return nil, false, nil
+	}
+	if len(v) == 0 {
+		return nil, false, nil
+	}
+
+	// Convert the receipts from their storage form to their internal representation
+	receipt := &types.ReceiptForStorage{}
+	if err := rlp.DecodeBytes(v, receipt); err != nil {
+		return nil, false, fmt.Errorf("%w, of block %d, len(v)=%d", err, blockNum, len(v))
+	}
+	res := (*types.Receipt)(receipt)
+	res.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, txnHash)
+	return res, true, nil
+}
+
+func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdbv3.TxNumsReader) (res types.Receipts, err error) {
+	blockHash := block.Hash()
+	blockNum := block.NumberU64()
+
+	_min, err := txNumReader.Min(tx, blockNum)
+	if err != nil {
+		return
+	}
+	_max, err := txNumReader.Max(tx, blockNum)
+	if err != nil {
+		return
+	}
+
+	for txnID := _min; txnID < _max+1; txnID++ {
+		v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txnID+1)
+		if err != nil {
+			return nil, fmt.Errorf("unexpected error, couldn't find changeset: txNum=%d, %w", txnID, err)
+		}
+		if !ok {
+			return res, nil
+		}
+		if len(v) == 0 {
+			continue
+		}
+
+		// Convert the receipts from their storage form to their internal representation
+		receipt := &types.ReceiptForStorage{}
+		if err := rlp.DecodeBytes(v, receipt); err != nil {
+			return nil, fmt.Errorf("ReadReceipts: deserialize %d, len(v)=%d, %w", blockNum, len(v), err)
+		}
+		x := (*types.Receipt)(receipt)
+		if int(receipt.TransactionIndex) < len(block.Transactions()) {
+			txn := block.Transactions()[receipt.TransactionIndex]
+			x.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, txn.Hash())
+		}
+		res = append(res, x)
+	}
+	return res, nil
+}
+
+func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt) error {
+	var toWrite []byte
+
+	if receipt != nil {
+		if len(receipt.Logs) > 0 && int(receipt.FirstLogIndexWithinBlock) != int(receipt.Logs[0].Index) {
+			panic(fmt.Sprintf("assert: FirstLogIndexWithinBlock is wrong: %d %d, blockNum=%d", receipt.FirstLogIndexWithinBlock, receipt.Logs[0].Index, receipt.BlockNumber.Uint64()))
+		}
+
+		var err error
+		storageReceipt := (*types.ReceiptForStorage)(receipt)
+		toWrite, err = rlp.EncodeToBytes(storageReceipt)
+		if err != nil {
+			return fmt.Errorf("WriteReceiptCache: %w", err)
+		}
+		if dbg.AssertEnabled {
+			storageReceipt2 := &types.ReceiptForStorage{}
+			rlp.DecodeBytes(toWrite, storageReceipt2)
+			if storageReceipt.ContractAddress != storageReceipt2.ContractAddress {
+				panic(fmt.Sprintf("assert: %x, %x\n", storageReceipt.ContractAddress, storageReceipt2.ContractAddress))
+			}
+		}
+	} else {
+		toWrite = []byte{}
+	}
+
+	if err := tx.DomainPut(kv.RCacheDomain, receiptCacheKey, nil, toWrite, nil, 0); err != nil {
+		return fmt.Errorf("WriteReceiptCache: %w", err)
+	}
+	return nil
+}
+
+var (
+	receiptCacheKey = []byte{0x0}
+)
+
+//--- deprecated
+
 func ReadReceiptCache(tx kv.Tx, blockNum uint64, blockHash common.Hash, txnIndex uint32, txnHash common.Hash) (*types.Receipt, bool, error) {
 	data, err := tx.GetOne(kv.ReceiptsCache, dbutils.ReceiptCacheKey(blockNum, blockHash, txnIndex))
 	if err != nil {

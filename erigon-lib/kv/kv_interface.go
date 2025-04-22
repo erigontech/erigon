@@ -502,6 +502,10 @@ type TemporalRwTx interface {
 	TemporalTx
 }
 
+type TemporalDebugDB interface {
+	DomainTables(domain ...Domain) []string
+}
+
 type TemporalPutDel interface {
 	// DomainPut
 	// Optimizations:
@@ -523,6 +527,7 @@ type TemporalRoDB interface {
 	SnapshotNotifier
 	ViewTemporal(ctx context.Context, f func(tx TemporalTx) error) error
 	BeginTemporalRo(ctx context.Context) (TemporalTx, error)
+	Debug() TemporalDebugDB
 }
 type TemporalRwDB interface {
 	RwDB

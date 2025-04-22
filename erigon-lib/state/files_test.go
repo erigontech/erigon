@@ -51,7 +51,7 @@ func TestFileItemWithMissingAccessor(t *testing.T) {
 		defer os.Remove(fname)
 	}
 
-	fileItems := fileItemsWithMissingAccessors(btree, aggStep, accessorFor)
+	fileItems := fileItemsWithMissedAccessors(btree.Items(), aggStep, accessorFor)
 	require.Equal(t, 1, len(fileItems))
 	require.Equal(t, f3, fileItems[0])
 }
