@@ -190,8 +190,8 @@ var Schema = map[kv.Domain]domainCfg{
 			historyLargeValues: true,
 			historyIdx:         kv.RCacheHistoryIdx,
 
-			snapshotsDisabled: true,
-			historySampling:   16,
+			snapshotsDisabled:             true,
+			historyValuesOnCompressedPage: 32,
 
 			iiCfg: iiCfg{
 				filenameBase: kv.RCacheDomain.String(), keysTable: kv.TblRCacheHistoryKeys, valuesTable: kv.TblRCacheIdx,
