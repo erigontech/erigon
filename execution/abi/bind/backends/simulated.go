@@ -83,7 +83,8 @@ type SimulatedBackend struct {
 	gasPool         *core.GasPool
 	pendingBlock    *types.Block // Currently pending block that will be imported on request
 	pendingReader   state.StateReader
-	pendingReaderTx kv.Tx
+	pendingReaderTx kv.TemporalTx
+	pendingReaderSd *state2.SharedDomains
 	pendingState    *state.IntraBlockState // Currently pending state that will be the active on request
 
 	rmLogsFeed event.Feed
@@ -139,6 +140,9 @@ func (b *SimulatedBackend) Close() {
 	if b.pendingReaderTx != nil {
 		b.pendingReaderTx.Rollback()
 	}
+	if b.pendingReaderSd != nil {
+		b.pendingReaderSd.Close()
+	}
 	b.m.Close()
 }
 
@@ -181,12 +185,20 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	if b.pendingReaderTx != nil {
 		b.pendingReaderTx.Rollback()
 	}
-	tx, err := b.m.DB.BeginRo(context.Background()) //nolint:gocritic
+	if b.pendingReaderSd != nil {
+		b.pendingReaderSd.Close()
+	}
+	tx, err := b.m.DB.BeginTemporalRo(context.Background()) //nolint:gocritic
+	if err != nil {
+		panic(err)
+	}
+	sd, err := state2.NewSharedDomains(tx, b.m.Log)
 	if err != nil {
 		panic(err)
 	}
 	b.pendingReaderTx = tx
-	b.pendingReader = b.m.NewStateReader(b.pendingReaderTx)
+	b.pendingReaderSd = sd
+	b.pendingReader = b.m.NewStateReader(sd)
 	b.pendingState = state.New(b.pendingReader)
 }
 
@@ -561,8 +573,13 @@ func (b *SimulatedBackend) CallContract(ctx context.Context, call ethereum.CallM
 		return nil, errBlockNumberUnsupported
 	}
 	var res *evmtypes.ExecutionResult
-	if err := b.m.DB.View(context.Background(), func(tx kv.Tx) (err error) {
-		s := state.New(b.m.NewStateReader(tx))
+	if err := b.m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) (err error) {
+		sd, err := state2.NewSharedDomains(tx, b.m.Log)
+		if err != nil {
+			return err
+		}
+		defer sd.Close()
+		s := state.New(b.m.NewStateReader(sd))
 		res, err = b.callContract(ctx, call, b.pendingBlock, s)
 		if err != nil {
 			return err

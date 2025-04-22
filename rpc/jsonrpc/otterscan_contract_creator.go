@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/log/v3"
+	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -41,7 +42,13 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 	}
 	defer tx.Rollback()
 
-	latestState := rpchelper.NewLatestStateReader(tx)
+	sd, err := libstate.NewSharedDomains(tx, log.New())
+	if err != nil {
+		return nil, err
+	}
+	defer sd.Close()
+
+	latestState := rpchelper.NewLatestDomainStateReader(sd)
 	plainStateAcc, err := latestState.ReadAccountData(addr)
 	if err != nil {
 		return nil, err

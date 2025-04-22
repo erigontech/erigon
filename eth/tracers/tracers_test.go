@@ -32,6 +32,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
+	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
@@ -100,12 +101,16 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		Balance: big.NewInt(500000000000000),
 	}
 
+	rules := params.AllProtocolChanges.Rules(context.BlockNumber, context.Time)
 	m := mock.Mock(t)
-	tx, err := m.DB.BeginRw(m.Ctx)
+	tx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	rules := params.AllProtocolChanges.Rules(context.BlockNumber, context.Time)
-	statedb, _ := tests.MakePreState(rules, tx, alloc, context.BlockNumber)
+	sd, err := libstate.NewSharedDomains(tx, m.Log)
+	require.NoError(t, err)
+	defer sd.Close()
+	statedb, err := tests.MakePreState(rules, tx, sd, alloc, context.BlockNumber)
+	require.NoError(t, err)
 
 	// Create the tracer, the EVM environment and run it
 	tracer, err := tracers.New("prestateTracer", new(tracers.Context), json.RawMessage("{}"))

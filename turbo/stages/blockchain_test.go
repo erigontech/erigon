@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
@@ -1024,13 +1025,16 @@ func TestEIP161AccountRemoval(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
-	tx, err := m.DB.BeginRw(m.Ctx)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
 	if err != nil {
 		fmt.Printf("beginro error: %v\n", err)
 		return
 	}
 	defer tx.Rollback()
-	exist, err := state.New(m.NewStateReader(tx)).Exist(theAddr)
+	sd, err := libstate.NewSharedDomains(tx, m.Log)
+	require.NoError(t, err)
+	defer sd.Close()
+	exist, err := state.New(m.NewStateReader(sd)).Exist(theAddr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1043,8 +1047,11 @@ func TestEIP161AccountRemoval(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
-	if err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
-		exist, err := state.New(m.NewStateReader(tx)).Exist(theAddr)
+	if err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
+		sd, err := libstate.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		exist, err := state.New(m.NewStateReader(sd)).Exist(theAddr)
 		if err != nil {
 			return err
 		}
@@ -1060,8 +1067,11 @@ func TestEIP161AccountRemoval(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(2, 3)); err != nil {
 		t.Fatal(err)
 	}
-	if err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
-		exist, err := state.New(m.NewStateReader(tx)).Exist(theAddr)
+	if err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
+		sd, err := libstate.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		exist, err := state.New(m.NewStateReader(sd)).Exist(theAddr)
 		if err != nil {
 			return err
 		}
@@ -1122,14 +1132,17 @@ func TestDoubleAccountRemoval(t *testing.T) {
 
 	err = m.InsertChain(chain)
 	require.NoError(t, err)
-	tx, err := m.DB.BeginTemporalRw(m.Ctx)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
 	if err != nil {
 		fmt.Printf("beginro error: %v\n", err)
 		return
 	}
 	defer tx.Rollback()
 
-	st := state.New(m.NewStateReader(tx))
+	sd, err := libstate.NewSharedDomains(tx, m.Log)
+	require.NoError(t, err)
+	defer sd.Close()
+	st := state.New(m.NewStateReader(sd))
 	require.NoError(t, err)
 	exist, err := st.Exist(theAddr)
 	require.NoError(t, err)
@@ -1908,9 +1921,11 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		if err := m.InsertChain(chain.Slice(i, i+1)); err != nil {
 			t.Fatalf("block %d: failed to insert into chain: %v", i, err)
 		}
-		err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
-
-			statedb := state.New(m.NewStateReader(tx))
+		err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
+			sd, err := libstate.NewSharedDomains(tx, m.Log)
+			require.NoError(t, err)
+			defer sd.Close()
+			statedb := state.New(m.NewStateReader(sd))
 			// If all is correct, then slot 1 and 2 are zero
 			key1 := libcommon.HexToHash("01")
 			var got uint256.Int

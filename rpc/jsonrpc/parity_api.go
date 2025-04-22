@@ -25,6 +25,8 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/log/v3"
+	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -65,7 +67,14 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account libcommon
 		return nil, fmt.Errorf("listStorageKeys cannot open tx: %w", err)
 	}
 	defer tx.Rollback()
-	a, err := rpchelper.NewLatestStateReader(tx).ReadAccountData(account)
+
+	sd, err := libstate.NewSharedDomains(tx, log.New())
+	if err != nil {
+		return nil, err
+	}
+	defer sd.Close()
+
+	a, err := rpchelper.NewLatestDomainStateReader(sd).ReadAccountData(account)
 	if err != nil {
 		return nil, err
 	} else if a == nil {

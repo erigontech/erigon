@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
+	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
@@ -150,10 +151,13 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			rules := test.Genesis.Config.Rules(context.BlockNumber, context.Time)
 
 			m := mock.Mock(t)
-			dbTx, err := m.DB.BeginRw(m.Ctx)
+			dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 			require.NoError(t, err)
 			defer dbTx.Rollback()
-			statedb, err := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
+			sd, err := libstate.NewSharedDomains(dbTx, m.Log)
+			require.NoError(t, err)
+			defer sd.Close()
+			statedb, err := tests.MakePreState(rules, dbTx, sd, test.Genesis.Alloc, uint64(test.Context.Number))
 			require.NoError(t, err)
 			tracer, err := tracers.New(tracerName, new(tracers.Context), test.TracerConfig)
 			if err != nil {
@@ -262,10 +266,14 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 		GasLimit:    uint64(test.Context.GasLimit),
 	}
 	m := mock.Mock(b)
-	dbTx, err := m.DB.BeginRw(m.Ctx)
+	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(b, err)
 	defer dbTx.Rollback()
-	statedb, _ := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
+	sd, err := libstate.NewSharedDomains(dbTx, m.Log)
+	require.NoError(b, err)
+	defer sd.Close()
+	statedb, err := tests.MakePreState(rules, dbTx, sd, test.Genesis.Alloc, uint64(test.Context.Number))
+	require.NoError(b, err)
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -338,11 +346,14 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 	}
 	rules := params.MainnetChainConfig.Rules(context.BlockNumber, context.Time)
 	m := mock.Mock(t)
-	dbTx, err := m.DB.BeginRw(m.Ctx)
+	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(t, err)
 	defer dbTx.Rollback()
-
-	statedb, _ := tests.MakePreState(rules, dbTx, alloc, context.BlockNumber)
+	sd, err := libstate.NewSharedDomains(dbTx, m.Log)
+	require.NoError(t, err)
+	defer sd.Close()
+	statedb, err := tests.MakePreState(rules, dbTx, sd, alloc, context.BlockNumber)
+	require.NoError(t, err)
 	// Create the tracer, the EVM environment and run it
 	tracer, err := tracers.New("callTracer", nil, nil)
 	if err != nil {

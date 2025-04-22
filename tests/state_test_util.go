@@ -166,7 +166,7 @@ func (t *StateTest) Subtests() []StateSubtest {
 }
 
 // Run executes a specific subtest and verifies the post-state and logs
-func (t *StateTest) Run(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, libcommon.Hash, error) {
+func (t *StateTest) Run(tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, libcommon.Hash, error) {
 	state, root, err := t.RunNoVerify(tx, subtest, vmconfig, dirs)
 	if err != nil {
 		return state, types.EmptyRootHash, err
@@ -184,7 +184,7 @@ func (t *StateTest) Run(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config, di
 }
 
 // RunNoVerify runs a specific subtest and returns the statedb and post-state root
-func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, libcommon.Hash, error) {
+func (t *StateTest) RunNoVerify(tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, libcommon.Hash, error) {
 	config, eips, err := GetChainConfig(subtest.Fork)
 	if err != nil {
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
@@ -198,11 +198,6 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	readBlockNr := block.NumberU64()
 	writeBlockNr := readBlockNr + 1
 
-	_, err = MakePreState(&chain.Rules{}, tx, t.json.Pre, readBlockNr)
-	if err != nil {
-		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
-	}
-
 	txc := wrap.NewTxContainer(tx, nil)
 	domains, err := state2.NewSharedDomains(txc.Ttx, log.New())
 	if err != nil {
@@ -210,7 +205,13 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	}
 	defer domains.Close()
 	txc.Doms = domains
-	r := rpchelper.NewLatestStateReader(tx)
+
+	_, err = MakePreState(&chain.Rules{}, tx, domains, t.json.Pre, readBlockNr)
+	if err != nil {
+		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
+	}
+
+	r := rpchelper.NewLatestDomainStateReader(domains)
 	w := rpchelper.NewLatestStateWriter(txc, nil, writeBlockNr)
 	statedb := state.New(r)
 
@@ -294,8 +295,8 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	return statedb, libcommon.BytesToHash(rootBytes), nil
 }
 
-func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
-	r := rpchelper.NewLatestStateReader(tx)
+func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, sd *state2.SharedDomains, accounts types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
+	r := rpchelper.NewLatestDomainStateReader(sd)
 	statedb := state.New(r)
 	statedb.SetTxContext(0)
 	for addr, a := range accounts {
@@ -323,15 +324,7 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, b
 		}
 	}
 
-	txc := wrap.NewTxContainer(tx, nil)
-	domains, err := state2.NewSharedDomains(txc.Ttx, log.New())
-	if err != nil {
-		return nil, err
-	}
-	defer domains.Close()
-	defer domains.Flush(context2.Background(), tx)
-	txc.Doms = domains
-
+	txc := wrap.NewTxContainer(tx, sd)
 	w := rpchelper.NewLatestStateWriter(txc, nil, blockNr-1)
 
 	// Commit and re-open to start with a clean state.

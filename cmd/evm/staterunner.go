@@ -152,7 +152,7 @@ func aggregateResultsFromStateTests(
 	}
 	defer db.Close()
 
-	tx, txErr := db.BeginRw(context.Background())
+	tx, txErr := db.BeginTemporalRw(context.Background())
 	if txErr != nil {
 		return nil, txErr
 	}

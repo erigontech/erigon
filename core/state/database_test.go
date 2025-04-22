@@ -131,8 +131,11 @@ func TestCreate2Revive(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		sd, err := state3.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		st := state.New(m.NewStateReader(sd))
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -152,8 +155,11 @@ func TestCreate2Revive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		sd, err := state3.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		st := state.New(m.NewStateReader(sd))
 		if exist, err := st.Exist(contractAddress); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -170,8 +176,11 @@ func TestCreate2Revive(t *testing.T) {
 
 	var key2 libcommon.Hash
 	var check2 uint256.Int
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		sd, err := state3.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		st := state.New(m.NewStateReader(sd))
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -191,8 +200,11 @@ func TestCreate2Revive(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(2, 3)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		sd, err := state3.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		st := state.New(m.NewStateReader(sd))
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
 		} else if exist {
@@ -206,8 +218,11 @@ func TestCreate2Revive(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(3, 4)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		sd, err := state3.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		st := state.New(m.NewStateReader(sd))
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -348,9 +363,11 @@ func TestCreate2Polymorth(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-
-		st := state.New(m.NewStateReader(tx))
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		sd, err := state3.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		st := state.New(m.NewStateReader(sd))
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -370,8 +387,11 @@ func TestCreate2Polymorth(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		sd, err := state3.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		st := state.New(m.NewStateReader(sd))
 		if exist, err := st.Exist(contractAddress); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -386,8 +406,11 @@ func TestCreate2Polymorth(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		sd, err := state3.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		st := state.New(m.NewStateReader(sd))
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -417,8 +440,11 @@ func TestCreate2Polymorth(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(2, 3)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		sd, err := state3.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		st := state.New(m.NewStateReader(sd))
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
 		} else if exist {
@@ -432,8 +458,11 @@ func TestCreate2Polymorth(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(3, 4)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		sd, err := state3.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		st := state.New(m.NewStateReader(sd))
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -463,8 +492,11 @@ func TestCreate2Polymorth(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(4, 5)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		sd, err := state3.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		st := state.New(m.NewStateReader(sd))
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -582,9 +614,11 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		t.Fatalf("generate long blocks")
 	}
 
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-
-		st := state.New(m.NewStateReader(tx))
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		sd, err := state3.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		st := state.New(m.NewStateReader(sd))
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -605,8 +639,11 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 
 	var key0 libcommon.Hash
 	var correctValueX uint256.Int
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		sd, err := state3.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		st := state.New(m.NewStateReader(sd))
 		if exist, err := st.Exist(contractAddress); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -625,8 +662,11 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		sd, err := state3.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		st := state.New(m.NewStateReader(sd))
 		if exist, err := st.Exist(contractAddress); err != nil {
 			t.Error(err)
 		} else if exist {
@@ -639,8 +679,11 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	if err = m.InsertChain(longerChain.Slice(1, 4)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		sd, err := state3.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		st := state.New(m.NewStateReader(sd))
 		if exist, err := st.Exist(contractAddress); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -734,8 +777,11 @@ func TestReorgOverStateChange(t *testing.T) {
 		t.Fatalf("generate longer blocks: %v", err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		sd, err := state3.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		st := state.New(m.NewStateReader(sd))
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -758,8 +804,11 @@ func TestReorgOverStateChange(t *testing.T) {
 
 	var key0 libcommon.Hash
 	var correctValueX uint256.Int
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		sd, err := state3.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		st := state.New(m.NewStateReader(sd))
 		if exist, err := st.Exist(contractAddress); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -782,8 +831,11 @@ func TestReorgOverStateChange(t *testing.T) {
 	if err = m.InsertChain(longerChain.Slice(1, 3)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		sd, err := state3.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		st := state.New(m.NewStateReader(sd))
 		if exist, err := st.Exist(contractAddress); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -874,8 +926,11 @@ func TestCreateOnExistingStorage(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		sd, err := state3.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		st := state.New(m.NewStateReader(sd))
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -895,8 +950,11 @@ func TestCreateOnExistingStorage(t *testing.T) {
 
 	var key0 libcommon.Hash
 	var check0 uint256.Int
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		sd, err := state3.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		st := state.New(m.NewStateReader(sd))
 		if exist, err := st.Exist(contractAddress); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1024,8 +1082,11 @@ func TestEip2200Gas(t *testing.T) {
 	}
 
 	var balanceBefore *uint256.Int
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		sd, err := state3.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		st := state.New(m.NewStateReader(sd))
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1046,8 +1107,11 @@ func TestEip2200Gas(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		sd, err := state3.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		st := state.New(m.NewStateReader(sd))
 		if exist, err := st.Exist(contractAddress); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1121,8 +1185,11 @@ func TestWrongIncarnation(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		sd, err := state3.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		st := state.New(m.NewStateReader(sd))
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1142,8 +1209,11 @@ func TestWrongIncarnation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		stateReader := m.NewStateReader(tx)
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		sd, err := state3.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		stateReader := m.NewStateReader(sd)
 		acc, err := stateReader.ReadAccountData(contractAddress)
 		if err != nil {
 			t.Fatal(err)
@@ -1170,8 +1240,11 @@ func TestWrongIncarnation(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		stateReader := m.NewStateReader(tx)
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		sd, err := state3.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		stateReader := m.NewStateReader(sd)
 		acc, err := stateReader.ReadAccountData(contractAddress)
 		if err != nil {
 			t.Fatal(err)
@@ -1281,8 +1354,11 @@ func TestWrongIncarnation2(t *testing.T) {
 		t.Fatalf("generate longer blocks: %v", err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		sd, err := state3.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		st := state.New(m.NewStateReader(sd))
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1302,15 +1378,18 @@ func TestWrongIncarnation2(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		sd, err := state3.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		st := state.New(m.NewStateReader(sd))
 		if exist, err := st.Exist(contractAddress); err != nil {
 			t.Error(err)
 		} else if !exist {
 			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 		}
 
-		stateReader := m.NewStateReader(tx)
+		stateReader := m.NewStateReader(sd)
 		acc, err := stateReader.ReadAccountData(contractAddress)
 		if err != nil {
 			t.Fatal(err)
@@ -1329,8 +1408,11 @@ func TestWrongIncarnation2(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		stateReader := m.NewStateReader(tx)
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		sd, err := state3.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		stateReader := m.NewStateReader(sd)
 		acc, err := stateReader.ReadAccountData(contractAddress)
 		if err != nil {
 			t.Fatal(err)
@@ -1633,8 +1715,11 @@ func TestRecreateAndRewind(t *testing.T) {
 
 	var key0 libcommon.Hash
 	var check0 uint256.Int
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		sd, err := state3.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		st := state.New(m.NewStateReader(sd))
 		if exist, err := st.Exist(phoenixAddress); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1653,9 +1738,11 @@ func TestRecreateAndRewind(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(2, chain.Length())); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-
-		st := state.New(m.NewStateReader(tx))
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		sd, err := state3.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		st := state.New(m.NewStateReader(sd))
 		if exist, err := st.Exist(phoenixAddress); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1674,8 +1761,11 @@ func TestRecreateAndRewind(t *testing.T) {
 	if err = m.InsertChain(longerChain); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		sd, err := state3.NewSharedDomains(tx, m.Log)
+		require.NoError(t, err)
+		defer sd.Close()
+		st := state.New(m.NewStateReader(sd))
 		if exist, err := st.Exist(phoenixAddress); err != nil {
 			t.Error(err)
 		} else if !exist {
