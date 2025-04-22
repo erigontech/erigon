@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package ethclient_test
+package ethclient
 
 import (
 	"bytes"
@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/ethclient"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/params"
@@ -54,17 +53,17 @@ import (
 
 // Verify that Client implements the ethereum interfaces.
 var (
-	_ = ethereum.ChainReader(&ethclient.Client{})
-	_ = ethereum.TransactionReader(&ethclient.Client{})
-	_ = ethereum.ChainStateReader(&ethclient.Client{})
-	_ = ethereum.ChainSyncReader(&ethclient.Client{})
-	_ = ethereum.ContractCaller(&ethclient.Client{})
-	_ = ethereum.GasEstimator(&ethclient.Client{})
-	_ = ethereum.GasPricer(&ethclient.Client{})
-	_ = ethereum.LogFilterer(&ethclient.Client{})
-	_ = ethereum.PendingStateReader(&ethclient.Client{})
-	// _ = ethereum.PendingStateEventer(&ethclient.Client{})
-	_ = ethereum.PendingContractCaller(&ethclient.Client{})
+	_ = ethereum.ChainReader(&Client{})
+	_ = ethereum.TransactionReader(&Client{})
+	_ = ethereum.ChainStateReader(&Client{})
+	_ = ethereum.ChainSyncReader(&Client{})
+	_ = ethereum.ContractCaller(&Client{})
+	_ = ethereum.GasEstimator(&Client{})
+	_ = ethereum.GasPricer(&Client{})
+	_ = ethereum.LogFilterer(&Client{})
+	_ = ethereum.PendingStateReader(&Client{})
+	// _ = ethereum.PendingStateEventer(&Client{})
+	_ = ethereum.PendingContractCaller(&Client{})
 )
 
 var (
@@ -147,7 +146,7 @@ func newTestBackend(t *testing.T) (*eth.Ethereum, *core.ChainPack, error) {
 		HttpServerEnabled:        true,
 		HttpListenAddress:        localhost,
 		HttpPort:                 jsonRpcPort,
-		API:                      []string{"eth", "net"},
+		API:                      []string{"eth", "net", "taiko"}, // putting taiko here
 		AuthRpcHTTPListenAddress: localhost,
 		JWTSecretPath:            path.Join(dataDir, "jwt.hex"),
 		ReturnDataLimit:          100_000,
@@ -314,7 +313,7 @@ func testHeader(t *testing.T, genesisBlock *types.Block, chain []*types.Block, c
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			ec := ethclient.NewClient(client)
+			ec := NewClient(client)
 			ctx := context.Background()
 
 			got, err := ec.HeaderByNumber(ctx, tt.block)
@@ -361,7 +360,7 @@ func testBalanceAt(t *testing.T, client *rpc.Client) {
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			ec := ethclient.NewClient(client)
+			ec := NewClient(client)
 			ctx := context.Background()
 
 			got, err := ec.BalanceAt(ctx, tt.account, tt.block)
@@ -376,7 +375,7 @@ func testBalanceAt(t *testing.T, client *rpc.Client) {
 }
 
 func testTransactionInBlock(t *testing.T, client *rpc.Client) {
-	ec := ethclient.NewClient(client)
+	ec := NewClient(client)
 
 	// Get current block by number.
 	block, err := ec.BlockByNumber(context.Background(), nil)
@@ -408,7 +407,7 @@ func testTransactionInBlock(t *testing.T, client *rpc.Client) {
 }
 
 func testChainID(t *testing.T, client *rpc.Client) {
-	ec := ethclient.NewClient(client)
+	ec := NewClient(client)
 	id, err := ec.ChainID(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -419,7 +418,7 @@ func testChainID(t *testing.T, client *rpc.Client) {
 }
 
 func testGetBlock(t *testing.T, client *rpc.Client) {
-	ec := ethclient.NewClient(client)
+	ec := NewClient(client)
 
 	// Get current block number
 	blockNumber, err := ec.BlockNumber(context.Background())
@@ -464,7 +463,7 @@ func testGetBlock(t *testing.T, client *rpc.Client) {
 }
 
 func testStatusFunctions(t *testing.T, client *rpc.Client) {
-	ec := ethclient.NewClient(client)
+	ec := NewClient(client)
 
 	// Sync progress
 	progress, err := ec.SyncProgress(context.Background())
@@ -536,7 +535,7 @@ func testStatusFunctions(t *testing.T, client *rpc.Client) {
 }
 
 func testCallContractAtHash(t *testing.T, client *rpc.Client) {
-	ec := ethclient.NewClient(client)
+	ec := NewClient(client)
 
 	// EstimateGas
 	msg := ethereum.CallMsg{
@@ -563,7 +562,7 @@ func testCallContractAtHash(t *testing.T, client *rpc.Client) {
 }
 
 func testCallContract(t *testing.T, client *rpc.Client) {
-	ec := ethclient.NewClient(client)
+	ec := NewClient(client)
 
 	// EstimateGas
 	msg := ethereum.CallMsg{
@@ -590,7 +589,7 @@ func testCallContract(t *testing.T, client *rpc.Client) {
 }
 
 func testAtFunctions(t *testing.T, client *rpc.Client) {
-	ec := ethclient.NewClient(client)
+	ec := NewClient(client)
 
 	block, err := ec.HeaderByNumber(context.Background(), big.NewInt(1))
 	if err != nil {
@@ -693,7 +692,7 @@ func testAtFunctions(t *testing.T, client *rpc.Client) {
 }
 
 func testTransactionSender(t *testing.T, client *rpc.Client) {
-	ec := ethclient.NewClient(client)
+	ec := NewClient(client)
 	ctx := context.Background()
 
 	// Retrieve testTx1 via RPC.
@@ -733,7 +732,7 @@ func testTransactionSender(t *testing.T, client *rpc.Client) {
 	}
 }
 
-func sendTransaction(ec *ethclient.Client) error {
+func sendTransaction(ec *Client) error {
 	chainID, err := ec.ChainID(context.Background())
 	if err != nil {
 		return err
@@ -761,9 +760,9 @@ func sendTransaction(ec *ethclient.Client) error {
 
 // // Here we show how to get the error message of reverted contract call.
 // func ExampleRevertErrorData() {
-// 	// First create an ethclient.Client instance.
+// 	// First create an Client instance.
 // 	ctx := context.Background()
-// 	ec, _ := ethclient.DialContext(ctx, exampleNode.HTTPEndpoint())
+// 	ec, _ := DialContext(ctx, exampleNode.HTTPEndpoint())
 
 // 	// Call the contract.
 // 	// Note we expect the call to return an error.
@@ -778,7 +777,7 @@ func sendTransaction(ec *ethclient.Client) error {
 // 	}
 
 // 	// Extract the low-level revert data from the error.
-// 	revertData, ok := ethclient.RevertErrorData(err)
+// 	revertData, ok := RevertErrorData(err)
 // 	if !ok {
 // 		panic("unpacking revert failed")
 // 	}

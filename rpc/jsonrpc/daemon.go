@@ -47,6 +47,7 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolC
 	dbImpl := NewDBAPIImpl() /* deprecated */
 	adminImpl := NewAdminAPI(eth)
 	parityImpl := NewParityAPIImpl(base, db)
+	taikoBackendImpl := NewTaikoAPIImpl(db)
 
 	var borImpl *BorImpl
 
@@ -172,6 +173,12 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolC
 				Namespace: "overlay",
 				Public:    true,
 				Service:   OverlayAPI(overlayImpl),
+				Version:   "1.0",
+			})
+		case "taiko":
+			list = append(list, rpc.API{
+				Namespace: "taiko",
+				Service:   TaikoAPI(taikoBackendImpl),
 				Version:   "1.0",
 			})
 		}
