@@ -196,6 +196,12 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 
 	if !gasBailout {
 		balanceCheck := gasVal
+		// CHANGE(taiko): if the transaction is an anchor transaction, the balance check is skipped.
+		if st.msg.IsAnchor() {
+			balanceCheck = libcommon.Num0
+			gasVal = libcommon.Num0
+		}
+
 		if st.feeCap != nil {
 			balanceCheck = st.sharedBuyGasBalance.SetUint64(st.msg.Gas())
 			balanceCheck, overflow = balanceCheck.MulOverflow(balanceCheck, st.feeCap)
