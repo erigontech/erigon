@@ -236,13 +236,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		}
 		rw.engine.Initialize(rw.chainConfig, rw.chain, header, ibs, syscall, rw.logger, rw.hooks)
 		txTask.Error = ibs.FinalizeTx(rules, noop)
-	case txTask.TxIndex == 0:
-		// CHANGE(taiko): mark the first transaction as anchor transaction.
-		if txTask.Config.Taiko {
-			if err := txTask.Txs[0].MarkAsAnchor(); err != nil {
-				panic(err)
-			}
-		}
 	case txTask.Final:
 		if txTask.BlockNum == 0 {
 			break
@@ -279,6 +272,12 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			}
 		}
 	default:
+		// CHANGE(taiko): mark the first transaction as anchor transaction.
+		if txTask.Config.Taiko && txTask.TxIndex == 0 {
+			if err := txTask.Txs[0].MarkAsAnchor(); err != nil {
+				panic(err)
+			}
+		}
 		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), rw.chainConfig.GetMaxBlobGasPerBlock(header.Time))
 		rw.callTracer.Reset()
 		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
@@ -295,6 +294,10 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		}
 
 		msg := txTask.TxAsMessage
+		// CHANGE(taiko) : handle extra fields
+		if txTask.Config.Taiko && txTask.Config.IsOntake(txTask.BlockNum) {
+			msg.BasefeeSharingPctg = core.DecodeOntakeExtraData(header.Extra)
+		}
 
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.vmCfg, rules)
 

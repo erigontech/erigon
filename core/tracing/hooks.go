@@ -236,6 +236,10 @@ const (
 	// account within the same txn (captured at end of tx).
 	// Note it doesn't account for a self-destruct which appoints itself as recipient.
 	BalanceDecreaseSelfdestructBurn BalanceChangeReason = 14
+
+	// CHANGE(taiko): Add new balance change reasons
+	BalanceIncreaseTreasury       BalanceChangeReason = 99
+	BalanceIncreaseBaseFeeSharing BalanceChangeReason = 100
 )
 
 // GasChangeReason is used to indicate the reason for a gas change, useful

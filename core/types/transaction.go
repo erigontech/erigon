@@ -375,7 +375,7 @@ type Message struct {
 	blobHashes       []libcommon.Hash
 	authorizations   []Authorization
 	// CHANGE(taiko): whether the current transaction is the first TaikoL2.anchor transaction in a block.
-	IsAnchor bool
+	isAnchor bool
 	// CHANGE(taiko): basefeeSharingPctg of the basefee will be sent to the block.coinbase,
 	// the remaining will be sent to the treasury address.
 	BasefeeSharingPctg uint8
@@ -457,6 +457,11 @@ func (m *Message) MaxFeePerBlobGas() *uint256.Int {
 }
 
 func (m *Message) BlobHashes() []libcommon.Hash { return m.blobHashes }
+
+// CHANGE(taiko): IsAnchor()
+func (m *Message) IsAnchor() bool { return m.isAnchor }
+
+func (m *Message) BasefeeSharingPercentage() uint8 { return m.BasefeeSharingPctg }
 
 func DecodeSSZ(data []byte, dest codec.Deserializable) error {
 	err := dest.Deserialize(codec.NewDecodingReader(bytes.NewReader(data), uint64(len(data))))

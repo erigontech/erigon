@@ -23,13 +23,16 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math/big"
 	"slices"
+	"strings"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain/params"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
+	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -106,6 +109,10 @@ type Message interface {
 
 	IsFree() bool // service transactions on Gnosis are exempt from EIP-1559 mandatory fees
 	SetIsFree(bool)
+
+	// CHANGE(taiko)
+	IsAnchor() bool
+	BasefeeSharingPercentage() uint8 // base fee sharing percentage
 }
 
 // NewStateTransition initialises and returns a new state transition object.
@@ -535,6 +542,30 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		}
 	}
 
+	// Skip fee payment when NoBaseFee is set and the fee fields
+	// are 0. This avoids a negative effectiveTip being applied to
+	// the coinbase when simulating calls.
+	if msg.FeeCap().Sign() != 0 || msg.TipCap().Sign() != 0 {
+		fee := new(uint256.Int).SetUint64(st.gasUsed())
+		fee.Mul(fee, effectiveTip)
+		st.state.AddBalance(st.evm.Context.Coinbase, fee, tracing.BalanceIncreaseRewardTransactionFee)
+
+		// CHANGE(taiko): basefee is not burnt, but sent to a treasury and block.coinbase instead.
+		if st.evm.ChainConfig().Taiko && st.evm.Context.BaseFee != nil && !st.msg.IsAnchor() {
+			totalFee := new(uint256.Int).Mul(
+				new(uint256.Int).SetUint64(st.gasUsed()),
+				new(uint256.Int).SetUint64(st.evm.Context.BaseFee.Uint64()),
+			)
+			feeCoinbase := new(uint256.Int).Div(
+				new(uint256.Int).Mul(totalFee, new(uint256.Int).SetUint64(uint64(st.msg.BasefeeSharingPercentage()))),
+				new(uint256.Int).SetUint64(100),
+			)
+			feeTreasury := new(uint256.Int).Sub(totalFee, feeCoinbase)
+			st.state.AddBalance(st.getTreasuryAddress(), feeTreasury, tracing.BalanceIncreaseTreasury)
+			st.state.AddBalance(st.evm.Context.Coinbase, feeCoinbase, tracing.BalanceIncreaseBaseFeeSharing)
+		}
+	}
+
 	result := &evmtypes.ExecutionResult{
 		UsedGas:             st.gasUsed(),
 		Err:                 vmerr,
@@ -653,4 +684,24 @@ func (st *StateTransition) refundGas() {
 // gasUsed returns the amount of gas used up by the state transition.
 func (st *StateTransition) gasUsed() uint64 {
 	return st.initialGas - st.gasRemaining
+}
+
+// CHANGE(taiko): returns the treasury address based on chain ID.
+func (st *StateTransition) getTreasuryAddress() libcommon.Address {
+	var (
+		prefix = st.evm.ChainConfig().ChainID.String()
+		suffix = "10001"
+	)
+	return libcommon.HexToAddress(
+		"0x" +
+			prefix +
+			strings.Repeat("0", length.Addr*2-len(prefix)-len(suffix)) +
+			suffix,
+	)
+}
+
+// CHANGE(taiko): decodes an ontake block's extradata, returns basefeeSharingPctg configurations,
+// the corresponding enocding function in protocol is `LibProposing._encodeGasConfigs`.
+func DecodeOntakeExtraData(extradata []byte) uint8 {
+	return uint8(new(big.Int).SetBytes(extradata).Uint64())
 }
