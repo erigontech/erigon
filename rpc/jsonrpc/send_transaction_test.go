@@ -140,6 +140,10 @@ func TestSendRawTransaction(t *testing.T) {
 }
 
 func TestSendRawTransactionUnprotected(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	mockSentry, require := mock.MockWithTxPool(t), require.New(t)
 	logger := log.New()
 

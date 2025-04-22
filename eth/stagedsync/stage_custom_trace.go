@@ -68,9 +68,9 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.ExecArgs.BlockReader))
 
 	var startBlock, endBlock uint64
-	stepSize := cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator).StepSize()
 	if err := cfg.db.View(ctx, func(tx kv.Tx) (err error) {
 		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+		stepSize := ac.StepSize()
 		txNum := ac.DbgDomain(kv.AccountsDomain).FirstStepNotInFiles() * stepSize
 		var ok bool
 		ok, endBlock, err = txNumsReader.FindBlockNum(tx, txNum)

@@ -294,3 +294,7 @@ func (tx *Tx) PruneSmallBatches(ctx context.Context, timeout time.Duration) (hav
 func (tx *Tx) GreedyPruneHistory(ctx context.Context, domain kv.Domain) error {
 	return tx.aggtx.GreedyPruneHistory(ctx, domain, tx.MdbxTx)
 }
+
+func (tx *Tx) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
+	return tx.aggtx.Unwind(ctx, tx.MdbxTx, txNumUnwindTo, changeset)
+}

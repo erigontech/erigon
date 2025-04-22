@@ -17,8 +17,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build integration
-
 package enode
 
 import "testing"
@@ -26,6 +24,10 @@ import "testing"
 // This test checks fairness of FairMix in the happy case where all sources return nodes
 // within the context's deadline.
 func TestFairMix(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	for i := 0; i < 500; i++ {
 		testMixerFairness(t)
 	}
