@@ -29,6 +29,7 @@ import (
 
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/chain"
+	params2 "github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -108,20 +109,20 @@ var testTx1 = types.MustSignNewTx(testKey, *types.LatestSigner(getChainConfig())
 	CommonTx: types.CommonTx{
 		Nonce:    0,
 		Value:    uint256.NewInt(12),
-		GasLimit: params.TxGas,
+		GasLimit: params2.TxGas,
 		To:       &common.Address{2},
 	},
-	GasPrice: uint256.NewInt(params.InitialBaseFee),
+	GasPrice: uint256.NewInt(params2.InitialBaseFee),
 })
 
 var testTx2 = types.MustSignNewTx(testKey, *types.LatestSigner(getChainConfig()), &types.LegacyTx{
 	CommonTx: types.CommonTx{
 		Nonce:    1,
 		Value:    uint256.NewInt(8),
-		GasLimit: params.TxGas,
+		GasLimit: params2.TxGas,
 		To:       &common.Address{2},
 	},
-	GasPrice: uint256.NewInt(params.InitialBaseFee),
+	GasPrice: uint256.NewInt(params2.InitialBaseFee),
 })
 
 var generateTestChain = func(i int, g *core.BlockGen) {
@@ -750,7 +751,7 @@ func sendTransaction(ec *Client) error {
 			Value:    uint256.NewInt(1),
 			GasLimit: 22000,
 		},
-		GasPrice: uint256.NewInt(params.InitialBaseFee),
+		GasPrice: uint256.NewInt(params2.InitialBaseFee),
 	})
 	if err != nil {
 		return err

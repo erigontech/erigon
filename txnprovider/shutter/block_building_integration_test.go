@@ -29,12 +29,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/holiman/uint256"
-	libp2pcrypto "github.com/libp2p/go-libp2p/core/crypto"
-	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/stretchr/testify/require"
-
 	"github.com/erigontech/erigon-lib/chain"
+	params2 "github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -62,6 +58,10 @@ import (
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/testhelpers"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
+	"github.com/holiman/uint256"
+	libp2pcrypto "github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -84,7 +84,7 @@ var genesis = &types.Genesis{
 	},
 	ExtraData: []byte("test genesis"),
 	Timestamp: 9000,
-	BaseFee:   big.NewInt(params.InitialBaseFee),
+	BaseFee:   big.NewInt(params2.InitialBaseFee),
 }
 
 var chainId = big.NewInt(987656789)
@@ -104,20 +104,20 @@ var testTx1 = types.MustSignNewTx(testKey, *types.LatestSigner(getChainConfig())
 	CommonTx: types.CommonTx{
 		Nonce:    0,
 		Value:    uint256.NewInt(12),
-		GasLimit: params.TxGas,
+		GasLimit: params2.TxGas,
 		To:       &common.Address{2},
 	},
-	GasPrice: uint256.NewInt(params.InitialBaseFee),
+	GasPrice: uint256.NewInt(params2.InitialBaseFee),
 })
 
 var testTx2 = types.MustSignNewTx(testKey, *types.LatestSigner(getChainConfig()), &types.LegacyTx{
 	CommonTx: types.CommonTx{
 		Nonce:    1,
 		Value:    uint256.NewInt(8),
-		GasLimit: params.TxGas,
+		GasLimit: params2.TxGas,
 		To:       &common.Address{2},
 	},
-	GasPrice: uint256.NewInt(params.InitialBaseFee),
+	GasPrice: uint256.NewInt(params2.InitialBaseFee),
 })
 
 var generateTestChain = func(i int, g *core.BlockGen) {

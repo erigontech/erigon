@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
+	params2 "github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -21,7 +22,6 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/holiman/uint256"
 )
@@ -139,8 +139,8 @@ func (t *Taiko) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*type
 
 func (t *Taiko) verifyHeader(header, parent *types.Header, unixNow int64) error {
 	// Ensure that the header's extra-data section is of a reasonable size (<= 32 bytes)
-	if uint64(len(header.Extra)) > params.MaximumExtraDataSize {
-		return fmt.Errorf("extra-data too long: %d > %d", len(header.Extra), params.MaximumExtraDataSize)
+	if uint64(len(header.Extra)) > params2.MaximumExtraDataSize {
+		return fmt.Errorf("extra-data too long: %d > %d", len(header.Extra), params2.MaximumExtraDataSize)
 	}
 
 	// Timestamp should later than or equal to parent (when many L2 blocks included in one L1 block)
@@ -159,8 +159,8 @@ func (t *Taiko) verifyHeader(header, parent *types.Header, unixNow int64) error 
 	}
 
 	// Verify that the gas limit is <= 2^63-1
-	if header.GasLimit > params.MaxGasLimit {
-		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params.MaxGasLimit)
+	if header.GasLimit > params2.MaxGasLimit {
+		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params2.MaxGasLimit)
 	}
 
 	// Verify that the gasUsed is <= gasLimit
