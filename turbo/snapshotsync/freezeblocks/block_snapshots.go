@@ -592,26 +592,18 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 	numBuf := make([]byte, 8)
 	parse := func(ctx *txpool.TxnParseContext, v, valueBuf []byte, senders []common2.Address, j int) ([]byte, error) {
 		var sender [20]byte
-		//slot := txpool.TxnSlot{}
-		//
-		//if _, err := ctx.ParseTransaction(v, 0, &slot, sender[:], false /* hasEnvelope */, false /* wrappedWithBlobs */, nil); err != nil {
-		//	return valueBuf, err
-		//}
 
-		tx, errDecode := types.UnmarshalTransactionFromBinary(v, false)
-		if errDecode != nil {
-			println("UnmarshalTransactionFromBinary err", errDecode.Error())
+		tx, err := types.UnmarshalTransactionFromBinary(v, false)
+		if err != nil {
+			return valueBuf, err
 		}
 
 		signer := types.LatestSigner(chainConfig)
 		sender, err = tx.Sender(*signer)
 		if err != nil {
-			println("sender", err.Error())
 			return valueBuf, err
 		}
-		//if tx.Hash() != common.BytesToHash(slot.IDHash[:]) {
-		//	println("new rlp:", tx.Hash().Hex(), "old:", common.BytesToHash(slot.IDHash[:]).Hex())
-		//}
+
 		if len(senders) > 0 {
 			sender = senders[j]
 		}

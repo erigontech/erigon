@@ -309,12 +309,8 @@ var (
 							slot.IDHash = common.Hash{}
 							binary.BigEndian.PutUint64(slot.IDHash[:], baseTxnID.U64()+ti)
 						} else {
-							//if _, err = parseCtx.ParseTransaction(word[firstTxByteAndlengthOfAddress:], 0, &slot, nil, true /* hasEnvelope */, false /* wrappedWithBlobs */, nil /* validateHash */); err != nil {
-							//	return fmt.Errorf("ParseTransaction: %w, blockNum: %d, i: %d", err, blockNum, ti)
-							//}
 							tx, errDecode := types.UnmarshalTransactionFromBinary(word[firstTxByteAndlengthOfAddress:], false)
 							if errDecode != nil {
-								println("UnmarshalTransactionFromBinary err", errDecode.Error())
 								return fmt.Errorf("ParseTransaction: %w, blockNum: %d, i: %d", errDecode, blockNum, ti)
 							}
 							slot.IDHash = tx.Hash()
