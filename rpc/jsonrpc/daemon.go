@@ -65,6 +65,7 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolC
 	}
 
 	otsImpl := NewOtterscanAPI(base, db, cfg.OtsMaxPageSize)
+	internalImpl := NewInternalAPI(base, db)
 	gqlImpl := NewGraphQLAPI(base, db)
 	overlayImpl := NewOverlayAPI(base, db, cfg.Gascap, cfg.OverlayGetLogsTimeout, cfg.OverlayReplayBlockTimeout, otsImpl)
 
@@ -163,6 +164,13 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolC
 				Namespace: "ots",
 				Public:    true,
 				Service:   OtterscanAPI(otsImpl),
+				Version:   "1.0",
+			})
+		case "internal":
+			list = append(list, rpc.API{
+				Namespace: "internal",
+				Public:    true,
+				Service:   InternalAPI(internalImpl),
 				Version:   "1.0",
 			})
 		case "clique":
