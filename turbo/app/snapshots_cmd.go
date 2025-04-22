@@ -1373,13 +1373,6 @@ func doCompress(cliCtx *cli.Context) error {
 		}
 		_, _ = snappyBuf, unSnappyBuf
 
-		zstdBuf, word = compress.EncodeZstdIfNeed(zstdBuf, word, doZstdEachWord)
-		unZstdBuf, word, err = compress.DecodeZstdIfNeed(unZstdBuf, word, doUnZstdEachWord)
-		if err != nil {
-			return err
-		}
-		_, _ = zstdBuf, unZstdBuf
-
 		if _, err := w.Write(word); err != nil {
 			return err
 		}
