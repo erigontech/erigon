@@ -388,6 +388,7 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error)
 	if err != nil {
 		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
 	}
+
 	if !aggTx.a.commitmentValuesTransform || bytes.Equal(prefix, keyCommitmentState) {
 		sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), v)
 		return v, endTx / sd.StepSize(), nil

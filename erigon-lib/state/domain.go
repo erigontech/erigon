@@ -1452,7 +1452,6 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 			}
 			continue
 		}
-
 		if traceGetLatest == dt.name {
 			fmt.Printf("GetLatest(%s, %x) -> found in file %s\n", dt.name.String(), k, dt.files[i].src.decompressor.FileName())
 		}

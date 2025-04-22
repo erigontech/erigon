@@ -201,7 +201,6 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
 	blockHash := block.Hash()
-
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
 	receiptsFromDB, err := rawdb.ReadReceiptsCache(tx, block, g.txNumReader)
 	if err != nil {
