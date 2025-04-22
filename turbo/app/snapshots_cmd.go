@@ -1312,9 +1312,6 @@ func doCompress(cliCtx *cli.Context) error {
 	doSnappyEachWord := dbg.EnvBool("SnappyEachWord", false)
 	doUnSnappyEachWord := dbg.EnvBool("UnSnappyEachWord", false)
 
-	doZstdEachWord := dbg.EnvBool("ZstdEachWord", false)
-	doUnZstdEachWord := dbg.EnvBool("UnZstdEachWord", false)
-
 	justPrint := dbg.EnvBool("JustPrint", false)
 	concat := dbg.EnvInt("Concat", 0)
 
@@ -1329,7 +1326,6 @@ func doCompress(cliCtx *cli.Context) error {
 	r := bufio.NewReaderSize(os.Stdin, int(128*datasize.MB))
 	word := make([]byte, 0, int(1*datasize.MB))
 	var snappyBuf, unSnappyBuf []byte
-	var zstdBuf, unZstdBuf []byte
 	var concatBuf []byte
 	concatI := 0
 
