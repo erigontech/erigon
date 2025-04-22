@@ -340,7 +340,7 @@ func (rw *Worker) execAATxn(txTask *state.TxTask) {
 		startIdx := uint64(txTask.TxIndex)
 		endIdx := startIdx + txTask.AAValidationBatchSize
 
-		validationResults := make([]state.AAValidationResult, txTask.AAValidationBatchSize)
+		validationResults := make([]state.AAValidationResult, txTask.AAValidationBatchSize+1)
 		log.Info("🕵️‍♂️[aa] found AA bundle", "startIdx", startIdx, "endIdx", endIdx)
 
 		var outerErr error
