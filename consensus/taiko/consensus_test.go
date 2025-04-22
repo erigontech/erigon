@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	params2 "github.com/erigontech/erigon-lib/chain/params"
+
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
@@ -139,7 +141,7 @@ func TestVerifyHeader(t *testing.T) {
 	err = testEngine.VerifyHeader(chainReader, &types.Header{
 		Number:          common.Big1,
 		Time:            uint64(time.Now().Unix()),
-		BaseFee:         big.NewInt(params.InitialBaseFee),
+		BaseFee:         big.NewInt(params2.InitialBaseFee),
 		WithdrawalsHash: &types.EmptyRootHash,
 		UncleHash:       types.EmptyUncleHash,
 	}, false)
@@ -148,7 +150,7 @@ func TestVerifyHeader(t *testing.T) {
 		ParentHash:      m.Genesis.Hash(),
 		Number:          common.Big0,
 		Time:            uint64(time.Now().Unix()),
-		BaseFee:         big.NewInt(params.InitialBaseFee),
+		BaseFee:         big.NewInt(params2.InitialBaseFee),
 		WithdrawalsHash: &types.EmptyRequestsHash,
 		UncleHash:       types.EmptyUncleHash,
 	}, false)
@@ -158,8 +160,8 @@ func TestVerifyHeader(t *testing.T) {
 		ParentHash:      chain.TopBlock.Hash(),
 		Number:          new(big.Int).SetInt64(int64(len(chain.Blocks) + 1)),
 		Time:            uint64(time.Now().Unix()),
-		Extra:           bytes.Repeat([]byte{1}, int(params.MaximumExtraDataSize+1)),
-		BaseFee:         big.NewInt(params.InitialBaseFee),
+		Extra:           bytes.Repeat([]byte{1}, int(params2.MaximumExtraDataSize+1)),
+		BaseFee:         big.NewInt(params2.InitialBaseFee),
 		WithdrawalsHash: &types.EmptyRootHash,
 		UncleHash:       types.EmptyUncleHash,
 	}, false)
@@ -170,7 +172,7 @@ func TestVerifyHeader(t *testing.T) {
 		Number:          new(big.Int).SetInt64(int64(len(chain.Blocks) + 1)),
 		Time:            uint64(time.Now().Unix()),
 		Difficulty:      common.Big1,
-		BaseFee:         big.NewInt(params.InitialBaseFee),
+		BaseFee:         big.NewInt(params2.InitialBaseFee),
 		WithdrawalsHash: &types.EmptyRootHash,
 		UncleHash:       types.EmptyUncleHash,
 	}, false)
@@ -180,8 +182,8 @@ func TestVerifyHeader(t *testing.T) {
 		ParentHash:      chain.TopBlock.Hash(),
 		Number:          new(big.Int).SetInt64(int64(len(chain.Blocks) + 1)),
 		Time:            uint64(time.Now().Unix()),
-		GasLimit:        params.MaxGasLimit + 1,
-		BaseFee:         big.NewInt(params.InitialBaseFee),
+		GasLimit:        params2.MaxGasLimit + 1,
+		BaseFee:         big.NewInt(params2.InitialBaseFee),
 		WithdrawalsHash: &types.EmptyRootHash,
 		UncleHash:       types.EmptyUncleHash,
 	}, false)
@@ -191,8 +193,8 @@ func TestVerifyHeader(t *testing.T) {
 		ParentHash: chain.TopBlock.Hash(),
 		Number:     new(big.Int).SetInt64(int64(len(chain.Blocks) + 1)),
 		Time:       uint64(time.Now().Unix()),
-		GasLimit:   params.MaxGasLimit,
-		BaseFee:    big.NewInt(params.InitialBaseFee),
+		GasLimit:   params2.MaxGasLimit,
+		BaseFee:    big.NewInt(params2.InitialBaseFee),
 		UncleHash:  types.EmptyUncleHash,
 	}, false)
 	assert.ErrorContains(t, err, "withdrawals hash missing", "VerifyHeader should throw ErrWithdrawalsHashMissing when withdrawalshash is nil")
@@ -201,8 +203,8 @@ func TestVerifyHeader(t *testing.T) {
 		ParentHash:      chain.TopBlock.Hash(),
 		Number:          new(big.Int).SetInt64(int64(len(chain.Blocks) + 1)),
 		Time:            uint64(time.Now().Unix()),
-		GasLimit:        params.MaxGasLimit,
-		BaseFee:         big.NewInt(params.InitialBaseFee),
+		GasLimit:        params2.MaxGasLimit,
+		BaseFee:         big.NewInt(params2.InitialBaseFee),
 		WithdrawalsHash: &types.EmptyRootHash,
 	}, false)
 	assert.ErrorContains(t, err, "uncles not empty", "VerifyHeader should throw ErrUnclesNotEmpty if uncles is not the empty hash")
