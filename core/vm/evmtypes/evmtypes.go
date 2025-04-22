@@ -143,7 +143,6 @@ type IntraBlockState interface {
 	SubRefund(uint64)
 	GetRefund() uint64
 
-	HasStorage(addr common.Address) (bool, error)
 	GetCommittedState(common.Address, *common.Hash, *uint256.Int) error
 	GetState(address common.Address, slot *common.Hash, outValue *uint256.Int) error
 	SetState(common.Address, *common.Hash, uint256.Int) error
@@ -161,6 +160,7 @@ type IntraBlockState interface {
 	// Empty returns whether the given account is empty. Empty
 	// is defined according to EIP161 (balance = nonce = code = 0).
 	Empty(common.Address) (bool, error)
+	HasStorage(addr common.Address) (bool, error)
 
 	Prepare(rules *chain.Rules, sender, coinbase common.Address, dest *common.Address,
 		precompiles []common.Address, txAccesses types.AccessList, authorities []common.Address) error
