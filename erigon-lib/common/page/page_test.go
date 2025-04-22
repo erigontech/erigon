@@ -58,12 +58,13 @@ func TestPage(t *testing.T) {
 
 func BenchmarkName(b *testing.B) {
 	buf := bytes.NewBuffer(nil)
-	w := NewWriter(buf, 2, false)
-	w.Add([]byte{1}, []byte{11})
-	w.Add([]byte{2}, []byte{12})
-	bts := common.Copy(buf.Bytes())
+	w := NewWriter(buf, 16, false)
+	for i := 0; i < 16; i++ {
+		w.Add([]byte{byte(i)}, []byte{10 + byte(i)})
+	}
+	bts := buf.Bytes()
 
-	k := []byte{2}
+	k := []byte{15}
 
 	b.Run("1", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {

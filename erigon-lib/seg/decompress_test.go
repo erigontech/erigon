@@ -123,11 +123,12 @@ func TestPagedReader(t *testing.T) {
 	defer d.Close()
 	require := require.New(t)
 	g1 := NewPagedReader(d.MakeGetter(), 2, false)
-	_, _, o1 := g1.Next2(nil)
+	var buf []byte
+	_, _, buf, o1 := g1.Next2(buf[:0])
 	require.Zero(o1)
-	_, _, o1 = g1.Next2(nil)
+	_, _, buf, o1 = g1.Next2(buf[:0])
 	require.Zero(o1)
-	_, _, o1 = g1.Next2(nil)
+	_, _, buf, o1 = g1.Next2(buf[:0])
 	require.NotZero(o1)
 
 	g := NewPagedReader(d.MakeGetter(), 2, false)
@@ -137,22 +138,22 @@ func TestPagedReader(t *testing.T) {
 		if i%2 == 0 {
 			g.Skip()
 		} else {
-			_, word, _ := g.Next2(nil)
+			var word []byte
+			_, word, buf, _ = g.Next2(buf[:0])
 			expected := fmt.Sprintf("%s %d", w, i)
-			ws := string(word)
-			require.Equal(expected, ws)
+			require.Equal(expected, string(word))
 		}
 		i++
 	}
 
 	g.Reset(0)
-	_, offset := g.Next(nil)
+	_, offset := g.Next(buf[:0])
 	require.Equal(0, int(offset))
-	_, offset = g.Next(nil)
+	_, offset = g.Next(buf[:0])
 	require.Equal(0x2a, int(offset))
-	_, offset = g.Next(nil)
+	_, offset = g.Next(buf[:0])
 	require.Equal(0x2a, int(offset))
-	_, offset = g.Next(nil)
+	_, offset = g.Next(buf[:0])
 	require.Equal(0x52, int(offset))
 }
 

@@ -164,8 +164,6 @@ func FromBytes(buf []byte, snappyEnabled bool) *Reader {
 
 func (r *Reader) Reset(v []byte, snappyEnabled bool) (n int) {
 	var err error
-	vcpu := v
-	_ = vcpu
 	r.snappyBuf, v, err = compress.DecodeSnappyIfNeed(r.snappyBuf, v, snappyEnabled)
 	if err != nil {
 		panic(fmt.Errorf("len(v): %d, %w", len(v), err))
