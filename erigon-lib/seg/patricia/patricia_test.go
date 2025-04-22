@@ -1635,9 +1635,9 @@ func TestFindMatches8(t *testing.T) {
 		"600052604060002060009150909054906101000a900473ffffffffffffffffffffffffffffffffffffffff1681565b600260005060205280600052604060002060" +
 		"00915090505481565b60036000505481565b60046000505481565b6005600050548156")
 	matches := mf2.FindLongestMatches(data)
-	for _, m := range matches {
-		fmt.Printf("%+v, match: [%x]\n", m, data[m.Start:m.End])
-	}
+	//for _, m := range matches {
+	//	fmt.Printf("%+v, match: [%x]\n", m, data[m.Start:m.End])
+	//}
 	if len(matches) != 144 {
 		t.Errorf("expected matches: %d, got %d", 144, len(matches))
 	}
