@@ -145,7 +145,6 @@ func Get(key, compressedPage []byte, snappyEnabled bool) []byte {
 		kOffset += kLen
 		vOffset += vLen
 	}
-
 	return nil
 }
 
