@@ -28,11 +28,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/common/page"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
@@ -42,7 +45,6 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
 	"github.com/erigontech/erigon-lib/seg"
-	"github.com/stretchr/testify/require"
 )
 
 func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History) {
@@ -61,6 +63,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	//perf of tests
 	cfg.hist.iiCfg.compression = seg.CompressNone
 	cfg.hist.compression = seg.CompressNone
+	//cfg.hist.historyValuesOnCompressedPage = 16
 	aggregationStep := uint64(16)
 	h, err := NewHistory(cfg.hist, aggregationStep, logger)
 	require.NoError(tb, err)
@@ -103,7 +106,7 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 			defer sf.CleanupOnError()
 
 			efReader := seg.NewReader(sf.efHistoryDecomp.MakeGetter(), h.compression)
-			hReader := seg.NewReader(sf.historyDecomp.MakeGetter(), h.compression)
+			hReader := seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.compression), h.historyValuesOnCompressedPage, true)
 
 			// ef contains all sorted keys
 			// for each key it has a list of txNums
@@ -111,7 +114,6 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 
 			var keyBuf, valBuf, hValBuf []byte
 			seenKeys := make([]string, 0)
-
 			for efReader.HasNext() {
 				keyBuf, _ = efReader.Next(nil)
 				valBuf, _ = efReader.Next(nil)
@@ -216,29 +218,29 @@ func TestHistoryCollationBuild(t *testing.T) {
 		require.NoError(err)
 
 		require.True(strings.HasSuffix(c.historyPath, h.vFileName(0, 1)))
-		require.Equal(6, c.historyCount)
 		require.Equal(3, c.efHistoryComp.Count()/2)
+		require.Equal(page.WordsAmount2PagesAmount(6, h.historyValuesOnCompressedPage), c.historyComp.Count())
 
 		sf, err := h.buildFiles(ctx, 0, c, background.NewProgressSet())
 		require.NoError(err)
 		defer sf.CleanupOnError()
 		var valWords []string
-		g := sf.historyDecomp.MakeGetter()
-		g.Reset(0)
-		for g.HasNext() {
-			w, _ := g.Next(nil)
+		gh := seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.compression), h.historyValuesOnCompressedPage, true)
+		gh.Reset(0)
+		for gh.HasNext() {
+			w, _ := gh.Next(nil)
 			valWords = append(valWords, string(w))
 		}
 		require.Equal([]string{"", "value1.1", "", "value2.1", "value2.2", ""}, valWords)
 		require.Equal(6, int(sf.historyIdx.KeyCount()))
-		g = sf.efHistoryDecomp.MakeGetter()
-		g.Reset(0)
+		ge := sf.efHistoryDecomp.MakeGetter()
+		ge.Reset(0)
 		var keyWords []string
 		var intArrs [][]uint64
-		for g.HasNext() {
-			w, _ := g.Next(nil)
+		for ge.HasNext() {
+			w, _ := ge.Next(nil)
 			keyWords = append(keyWords, string(w))
-			w, _ = g.Next(w[:0])
+			w, _ = ge.Next(w[:0])
 			ef, _ := eliasfano32.ReadEliasFano(w)
 			ints, err := stream.ToArrayU64(ef.Iterator())
 			require.NoError(err)
@@ -252,12 +254,12 @@ func TestHistoryCollationBuild(t *testing.T) {
 			if !ok {
 				continue
 			}
-			g.Reset(offset)
-			w, _ := g.Next(nil)
+			ge.Reset(offset)
+			w, _ := ge.Next(nil)
 			require.Equal(keyWords[i], string(w))
 		}
 		r = recsplit.NewIndexReader(sf.historyIdx)
-		g = sf.historyDecomp.MakeGetter()
+		gh = seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.compression), h.historyValuesOnCompressedPage, true)
 		var vi int
 		for i := 0; i < len(keyWords); i++ {
 			ints := intArrs[i]
@@ -268,8 +270,8 @@ func TestHistoryCollationBuild(t *testing.T) {
 				if !ok {
 					continue
 				}
-				g.Reset(offset)
-				w, _ := g.Next(nil)
+				gh.Reset(offset)
+				w, _ := gh.Next(nil)
 				require.Equal(valWords[vi], string(w))
 				vi++
 			}
