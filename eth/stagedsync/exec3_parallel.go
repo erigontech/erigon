@@ -748,9 +748,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 
 				addedDependencies = be.execTasks.addDependency(execErr.Dependency, tx)
-				be.execFailed[tx]++
-				if be.execFailed[tx] > 0 {
-					fmt.Println(be.blockNum, "FAIL", tx, be.txIncarnations[tx], be.execFailed[tx], be.execAborted[tx], "dep", execErr.Dependency)
+				be.execAborted[tx]++
+				if be.execAborted[tx] > 0 {
+					fmt.Println(be.blockNum, "ABORT", tx, be.txIncarnations[tx], be.execFailed[tx], be.execAborted[tx], "dep", execErr.Dependency)
 				}
 			} else {
 				estimate := 0
@@ -875,7 +875,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			be.execFailed[tx]++
 
 			if be.execFailed[tx] > 0 {
-				fmt.Println(fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txIncarnation), "INVALID", "failed", be.execFailed[tx], "aborted", be.execAborted[tx])
+				fmt.Println(fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txIncarnation), "FAILED", "failed", be.execFailed[tx], "aborted", be.execAborted[tx])
 			}
 
 			// 'create validation tasks for all transactions > tx ...'
@@ -1029,7 +1029,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 					!state.ValidateVersion(txIndex, be.blockIO, be.versionMap,
 						func(_ state.ReadSource, _, writtenVersion state.Version) bool {
 							if be.execFailed[nextTx] > 0 || be.txIncarnations[nextTx] > 4 {
-								fmt.Println(be.blockNum, "VAL", nextTx, writtenVersion.TxIndex, writtenVersion.TxIndex < maxValidated, writtenVersion.Incarnation, be.txIncarnations[writtenVersion.TxIndex+1])
+								fmt.Println(be.blockNum, "VALIDATE", nextTx, writtenVersion.TxIndex, writtenVersion.TxIndex < maxValidated, writtenVersion.Incarnation, be.txIncarnations[writtenVersion.TxIndex+1])
 							}
 							return writtenVersion.TxIndex < maxValidated &&
 								writtenVersion.Incarnation == be.txIncarnations[writtenVersion.TxIndex+1]
@@ -1041,7 +1041,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 		}
 
 		if be.execFailed[nextTx] > 0 || be.txIncarnations[nextTx] > 4 {
-			fmt.Println(be.blockNum, "EXEC", nextTx, be.txIncarnations[nextTx], "max val", maxValidated, be.blockIO.HasReads(nextTx), "aborted", be.execAborted[nextTx], "failed", be.execFailed[nextTx])
+			fmt.Println(be.blockNum, "EXEC", nextTx, be.txIncarnations[nextTx], "max val", maxValidated, be.blockIO.HasReads(nextTx), "failed", be.execFailed[nextTx], "aborted", be.execAborted[nextTx])
 		}
 
 		be.cntExec++
