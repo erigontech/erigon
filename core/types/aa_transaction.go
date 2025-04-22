@@ -10,6 +10,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
+	params2 "github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
@@ -128,7 +129,7 @@ func (tx *AccountAbstractionTransaction) GetFeeCap() *uint256.Int {
 }
 
 func (tx *AccountAbstractionTransaction) GetGasLimit() uint64 {
-	return tx.GasLimit
+	return params2.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit
 }
 
 func (tx *AccountAbstractionTransaction) GetTipCap() *uint256.Int {
