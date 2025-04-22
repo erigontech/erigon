@@ -311,8 +311,13 @@ grpc:
 	@cd erigon-lib && $(MAKE) grpc
 	@cd txnprovider/shutter && $(MAKE) proto
 
+## stringer:                          generate stringer code
+stringer:
+	$(GOBUILD) -o $(GOBIN)/stringer golang.org/x/tools/cmd/stringer
+	PATH="$(GOBIN):$(PATH)" go generate -run "stringer" ./...
+
 ## gen:                               generate all auto-generated code in the codebase
-gen: mocks solc abigen gencodec graphql grpc
+gen: mocks solc abigen gencodec graphql grpc stringer
 	@cd erigon-lib && $(MAKE) gen
 
 ## bindings:                          generate test contracts and core contracts
