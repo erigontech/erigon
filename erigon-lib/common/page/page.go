@@ -202,3 +202,14 @@ func growslice(b []byte, wantLength int) []byte {
 	}
 	return make([]byte, wantLength)
 }
+
+func WordsAmount2PagesAmount(wordsAmount int, pageSize int) (pagesAmount int) {
+	pagesAmount = wordsAmount
+	if wordsAmount == 0 {
+		return 0
+	}
+	if pageSize > 0 {
+		pagesAmount = (wordsAmount-1)/pageSize + 1 //amount of pages
+	}
+	return pagesAmount
+}
