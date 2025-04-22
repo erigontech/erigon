@@ -193,8 +193,16 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 	g.addToCacheReceipt(receipt.TxHash, receipt)
 
-	if dbg.AssertEnabled && receiptFromDB != nil {
-		g.assertEqualReceipts(receipt, receiptFromDB)
+	if dbg.AssertEnabled {
+		if receiptFromDB != nil {
+			g.assertEqualReceipts(receipt, receiptFromDB)
+		} else {
+			if receipt != nil && receiptFromDB == nil {
+				panic(fmt.Sprintf("assert: not enough receipts: bn=%d %t != %t", blockNum, receipt != nil, receiptFromDB != nil))
+
+			}
+			g.assertEqualReceipts(receipt, receiptFromDB)
+		}
 	}
 	return receipt, nil
 }
@@ -243,7 +251,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 				g.assertEqualReceipts(receipt, receiptsFromDB[i])
 			} else {
 				if len(receipts) > 0 && len(receiptsFromDB) == 0 {
-					panic(fmt.Sprintf("assert: not enough receipts %d != %d", len(receipts), len(receiptsFromDB)))
+					panic(fmt.Sprintf("assert: not enough receipts: bn=%d, %d != %d", block.NumberU64(), len(receipts), len(receiptsFromDB)))
 
 				}
 			}
