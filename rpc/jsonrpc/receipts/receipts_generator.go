@@ -211,6 +211,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		return receiptsFromDB, nil
 	}
 	log.Warn("[dbg] not found in db", "bn", block.NumberU64())
+	return nil, nil
 
 	mu := g.blockExecMutex.lock(blockHash) // parallel requests of same blockNum will executed only once
 	defer g.blockExecMutex.unlock(mu, blockHash)
