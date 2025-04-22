@@ -28,9 +28,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/page"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/common/page"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
@@ -63,7 +63,7 @@ func prepareLoremDict(t *testing.T) *Decompressor {
 	return d
 }
 
-func prepareLoremDict2(t *testing.T, sampling int, pageCompression bool) *Decompressor {
+func prepareLoremDictOnPagedWriter(t *testing.T, sampling int, pageCompression bool) *Decompressor {
 	t.Helper()
 	logger, require := log.New(), require.New(t)
 	tmpDir := t.TempDir()
@@ -119,7 +119,7 @@ func TestDecompressSkip(t *testing.T) {
 }
 
 func TestPagedReader(t *testing.T) {
-	d := prepareLoremDict2(t, 2, false)
+	d := prepareLoremDictOnPagedWriter(t, 2, false)
 	defer d.Close()
 	require := require.New(t)
 	g1 := NewPagedReader(d.MakeGetter(), 2, false)
