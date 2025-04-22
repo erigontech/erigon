@@ -14,8 +14,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build integration
-
 package shutter_test
 
 import (
@@ -26,6 +24,7 @@ import (
 	"math/big"
 	"os"
 	"path"
+	"runtime"
 	"runtime/pprof"
 	"testing"
 	"time"
@@ -41,10 +40,8 @@ import (
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cmd/devnet/requests"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
-	"github.com/erigontech/erigon/contracts"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -52,14 +49,25 @@ import (
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rpc/contracts"
+	"github.com/erigontech/erigon/rpc/requests"
 	"github.com/erigontech/erigon/turbo/engineapi"
 	"github.com/erigontech/erigon/turbo/testlog"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/testhelpers"
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 func TestShutterBlockBuilding(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
@@ -229,7 +237,7 @@ type blockBuildingUniverse struct {
 	acc5                 libcommon.Address
 	transactor           testhelpers.EncryptedTransactor
 	txnInclusionVerifier testhelpers.TxnInclusionVerifier
-	shutterConfig        shutter.Config
+	shutterConfig        shuttercfg.Config
 	shutterCoordinator   testhelpers.ShutterBlockBuildingCoordinator
 }
 
@@ -296,7 +304,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	contractDeployerPrivKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	contractDeployer := crypto.PubkeyToAddress(contractDeployerPrivKey.PublicKey)
-	shutterConfig := shutter.ConfigByChainName(params.ChiadoChainConfig.ChainName)
+	shutterConfig := shuttercfg.ConfigByChainName(params.ChiadoChainConfig.ChainName)
 	shutterConfig.Enabled = false // first we need to deploy the shutter smart contracts
 	shutterConfig.BootstrapNodes = []string{decryptionKeySenderPeerAddr}
 	shutterConfig.PrivateKey = nodeKey

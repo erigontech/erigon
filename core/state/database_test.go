@@ -37,13 +37,13 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state3 "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/accounts/abi/bind"
-	"github.com/erigontech/erigon/accounts/abi/bind/backends"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/state/contracts"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/execution/abi/bind"
+	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -494,6 +494,10 @@ func TestCreate2Polymorth(t *testing.T) {
 }
 
 func TestReorgOverSelfDestruct(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	// Configure and generate a sample block chain
 	var (
@@ -1185,6 +1189,10 @@ func TestWrongIncarnation(t *testing.T) {
 
 // create acc, deploy to it contract, reorg to state without contract
 func TestWrongIncarnation2(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	// Configure and generate a sample block chain
 	var (
@@ -1474,6 +1482,10 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 }
 
 func TestRecreateAndRewind(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	// Configure and generate a sample block chain
 	var (

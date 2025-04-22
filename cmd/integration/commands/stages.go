@@ -29,13 +29,11 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/kv/backup"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
-
-	"github.com/erigontech/erigon-lib/kv/prune"
-	"github.com/erigontech/erigon/core/tracing"
 
 	"github.com/erigontech/mdbx-go/mdbx"
 	"github.com/erigontech/secp256k1"
@@ -47,18 +45,20 @@ import (
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/downloader"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
 
+	"github.com/erigontech/erigon-lib/state/stats"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
-	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/blockio"
 	reset2 "github.com/erigontech/erigon/core/rawdb/rawdbreset"
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -66,6 +66,8 @@ import (
 	"github.com/erigontech/erigon/eth/integrity"
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/migrations"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
@@ -75,7 +77,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/turbo/builder"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 	"github.com/erigontech/erigon/turbo/services"
@@ -462,26 +463,6 @@ var cmdRunMigrations = &cobra.Command{
 	},
 }
 
-var cmdSetPrune = &cobra.Command{
-	Use:   "force_set_prune",
-	Short: "Override existing --prune flag value (if you know what you are doing)",
-	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
-		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
-		}
-		defer db.Close()
-		if err := overrideStorageMode(db, logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
-	},
-}
-
 func init() {
 	withConfig(cmdPrintStages)
 	withDataDir(cmdPrintStages)
@@ -621,23 +602,6 @@ func init() {
 	withChain(cmdRunMigrations)
 	withHeimdall(cmdRunMigrations)
 	rootCmd.AddCommand(cmdRunMigrations)
-
-	withConfig(cmdSetPrune)
-	withDataDir(cmdSetPrune)
-	withChain(cmdSetPrune)
-	cmdSetPrune.Flags().StringVar(&pruneFlag, "prune", "hrtc", "")
-	cmdSetPrune.Flags().Uint64Var(&pruneB, "prune.b.older", 0, "")
-	cmdSetPrune.Flags().Uint64Var(&pruneH, "prune.h.older", 0, "")
-	cmdSetPrune.Flags().Uint64Var(&pruneR, "prune.r.older", 0, "")
-	cmdSetPrune.Flags().Uint64Var(&pruneT, "prune.t.older", 0, "")
-	cmdSetPrune.Flags().Uint64Var(&pruneC, "prune.c.older", 0, "")
-	cmdSetPrune.Flags().Uint64Var(&pruneBBefore, "prune.b.before", 0, "")
-	cmdSetPrune.Flags().Uint64Var(&pruneHBefore, "prune.h.before", 0, "")
-	cmdSetPrune.Flags().Uint64Var(&pruneRBefore, "prune.r.before", 0, "")
-	cmdSetPrune.Flags().Uint64Var(&pruneTBefore, "prune.t.before", 0, "")
-	cmdSetPrune.Flags().Uint64Var(&pruneCBefore, "prune.c.before", 0, "")
-	cmdSetPrune.Flags().StringSliceVar(&experiments, "experiments", nil, "Storage mode to override database")
-	rootCmd.AddCommand(cmdSetPrune)
 }
 
 func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
@@ -666,7 +630,11 @@ func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 		ac := agg.BeginFilesRo()
 		defer ac.Close()
 
-		domains, err := libstate.NewSharedDomains(tx, logger)
+		temporalTx, ok := tx.(kv.TemporalTx)
+		if !ok {
+			return errors.New("tx is not a temporal tx")
+		}
+		domains, err := libstate.NewSharedDomains(temporalTx, logger)
 		if err != nil {
 			return err
 		}
@@ -1113,7 +1081,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		}
 		defer tx.Rollback()
 	}
-	txc := wrap.TxContainer{Tx: tx}
+	txc := wrap.NewTxContainer(tx, nil)
 
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber, true, false)
@@ -1144,7 +1112,11 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 				return err
 			}
 			if execProgress == 0 {
-				doms, err := libstate.NewSharedDomains(tx, log.New())
+				temporalTx, ok := tx.(kv.TemporalTx)
+				if !ok {
+					return errors.New("tx is not a temporal tx")
+				}
+				doms, err := libstate.NewSharedDomains(temporalTx, log.New())
 				if err != nil {
 					panic(err)
 				}
@@ -1170,7 +1142,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			}
 			defer tx.Rollback()
 			for bn := execProgress; bn < block; bn++ {
-				txc.Tx = tx
+				txc = wrap.NewTxContainer(tx, txc.Doms)
 				if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, bn, ctx, cfg, logger); err != nil {
 					return err
 				}
@@ -1178,7 +1150,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		} else {
 			if err := db.Update(ctx, func(tx kv.RwTx) error {
 				for bn := execProgress; bn < block; bn++ {
-					txc.Tx = tx
+					txc = wrap.NewTxContainer(tx, txc.Doms)
 					if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, bn, ctx, cfg, logger); err != nil {
 						return err
 					}
@@ -1214,6 +1186,19 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	defer borSn.Close()
 	defer agg.Close()
 	if reset {
+		tx, err := db.BeginTemporalRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		tables := db.Debug().DomainTables(kv.ReceiptDomain)
+		if err := backup.ClearTables(ctx, tx, tables...); err != nil {
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+
 		if err := reset2.Reset(ctx, db, stages.CustomTrace); err != nil {
 			return err
 		}
@@ -1228,11 +1213,11 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
-	chainConfig, pm := fromdb.ChainConfig(db), fromdb.PruneMode(db)
+	chainConfig := fromdb.ChainConfig(db)
 
 	genesis := core.GenesisBlockByChainName(chain)
 	br, _ := blocksIO(db, logger)
-	cfg := stagedsync.StageCustomTraceCfg(db, pm, dirs, br, chainConfig, engine, genesis, &syncCfg)
+	cfg := stagedsync.StageCustomTraceCfg(db, dirs, br, chainConfig, engine, genesis, &syncCfg)
 	err = stagedsync.SpawnCustomTrace(cfg, ctx, logger)
 	if err != nil {
 		return err
@@ -1432,7 +1417,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		_ = db.View(context.Background(), func(tx kv.Tx) error {
 			ac := _aggSingleton.BeginFilesRo()
 			defer ac.Close()
-			ac.LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
+			stats.LogStats(ac, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
 				_, histBlockNumProgress, err := txNums.FindBlockNum(tx, endTxNumMinimax)
 				if err != nil {
 					return histBlockNumProgress, fmt.Errorf("findBlockNum(%d) fails: %w", endTxNumMinimax, err)
@@ -1471,6 +1456,19 @@ const blockBufferSize = 128
 func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.MiningConfig, logger log.Logger) (consensus.Engine, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
 
+	if err := db.View(context.Background(), func(tx kv.Tx) (err error) {
+		syncCfg.KeepExecutionProofs, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		panic(err)
+	}
+	if syncCfg.KeepExecutionProofs {
+		libstate.EnableHistoricalCommitment()
+	}
+
 	vmConfig := &vm.Config{}
 
 	events := shards.NewEvents()
@@ -1491,6 +1489,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 		syncCfg.AlwaysGenerateChangesets = true
 		noCommit = false
 	}
+
 	cfg.Sync = syncCfg
 
 	cfg.Prune = pm
@@ -1500,7 +1499,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 	if miningConfig != nil {
 		cfg.Miner = *miningConfig
 	}
-	cfg.Dirs = datadir.New(datadirCli)
+	cfg.Dirs = dirs
 	allSn, borSn, agg, _, _, _, err := allSnapshots(ctx, db, logger)
 	if err != nil {
 		panic(err) // we do already panic above on genesis error
@@ -1619,25 +1618,6 @@ func stage(st *stagedsync.Sync, tx kv.Tx, db kv.RoDB, stage stages.SyncStage) *s
 		panic(err)
 	}
 	return res
-}
-
-func overrideStorageMode(db kv.RwDB, logger log.Logger) error {
-	chainConfig := fromdb.ChainConfig(db)
-	pm, err := prune.FromCli(chainConfig.ChainID.Uint64(), pruneB, pruneH, experiments)
-	if err != nil {
-		return err
-	}
-	return db.Update(context.Background(), func(tx kv.RwTx) error {
-		if err = prune.Override(tx, pm); err != nil {
-			return err
-		}
-		pm, err = prune.Get(tx)
-		if err != nil {
-			return err
-		}
-		logger.Info("Storage mode in DB", "mode", pm.String())
-		return nil
-	})
 }
 
 func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.RwDB, blockReader services.FullBlockReader, logger log.Logger) (engine consensus.Engine, heimdallClient heimdall.Client) {

@@ -21,32 +21,26 @@ import (
 	"math"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/kv/prune"
-
-	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
-
-	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/rpc/rpccfg"
-
 	"github.com/c2h5oh/datasize"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
-
+	"github.com/erigontech/erigon-lib/kv/prune"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/rpc/rpchelper"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 var (
@@ -98,12 +92,6 @@ var (
 	PruneBlocksDistanceFlag = cli.Uint64Flag{
 		Name:  "prune.distance.blocks",
 		Usage: `Keep block history for the latest N blocks (default: everything)`,
-	}
-	ExperimentsFlag = cli.StringFlag{
-		Name: "experiments",
-		Usage: `Enable some experimental stages:
-* tevm - write TEVM translated code to the DB`,
-		Value: "default",
 	}
 
 	// mTLS flags
@@ -273,6 +261,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	if cfg.Genesis != nil {
 		chainId = cfg.Genesis.Config.ChainID.Uint64()
 	}
+	_ = chainId
 	// Sanitize prune flag
 	if ctx.String(PruneModeFlag.Name) != "archive" && (ctx.IsSet(PruneBlocksDistanceFlag.Name) || ctx.IsSet(PruneDistanceFlag.Name)) {
 		utils.Fatalf("error: --prune.distance and --prune.distance.blocks are only allowed with --prune.mode=archive")
@@ -286,12 +275,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	if !ctx.IsSet(PruneDistanceFlag.Name) {
 		distance = math.MaxUint64
 	}
-	mode, err := prune.FromCli(
-		chainId,
-		distance,
-		blockDistance,
-		libcommon.CliString2Array(ctx.String(ExperimentsFlag.Name)),
-	)
+	mode, err := prune.FromCli(distance, blockDistance)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
@@ -399,8 +383,6 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	pruneBlockDistance := f.Uint64(PruneBlocksDistanceFlag.Name, PruneBlocksDistanceFlag.Value, PruneBlocksDistanceFlag.Usage)
 	pruneDistance := f.Uint64(PruneDistanceFlag.Name, PruneDistanceFlag.Value, PruneDistanceFlag.Usage)
 
-	chainId := cfg.NetworkID
-
 	var distance, blockDistance uint64 = math.MaxUint64, math.MaxUint64
 	if pruneBlockDistance != nil {
 		blockDistance = *pruneBlockDistance
@@ -409,17 +391,7 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 		distance = *pruneDistance
 	}
 
-	experiments := f.String(ExperimentsFlag.Name, ExperimentsFlag.Value, ExperimentsFlag.Usage)
-	experimentsVal := ""
-	if experiments != nil {
-		experimentsVal = *experiments
-	}
-	mode, err := prune.FromCli(
-		chainId,
-		distance,
-		blockDistance,
-		libcommon.CliString2Array(experimentsVal),
-	)
+	mode, err := prune.FromCli(distance, blockDistance)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}

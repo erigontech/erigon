@@ -258,7 +258,11 @@ func ExecV3(ctx context.Context,
 		doms = txc.Doms
 	} else {
 		var err error
-		doms, err = state2.NewSharedDomains(applyTx, log.New())
+		temporalTx, ok := applyTx.(kv.TemporalTx)
+		if !ok {
+			return errors.New("applyTx is not a temporal transaction")
+		}
+		doms, err = state2.NewSharedDomains(temporalTx, log.New())
 		// if we are behind the commitment, we can't execute anything
 		// this can heppen if progress in domain is higher than progress in blocks
 		if errors.Is(err, state2.ErrBehindCommitment) {
@@ -390,7 +394,11 @@ func ExecV3(ctx context.Context,
 		executor = pe
 	} else {
 		applyWorker.ResetTx(applyTx)
-		doms.SetTx(applyTx)
+		temporalTx, ok := applyTx.(kv.TemporalTx)
+		if !ok {
+			return errors.New("applyTx is not a temporal transaction")
+		}
+		doms.SetTx(temporalTx)
 
 		se := &serialExecutor{
 			txExecutor: txExecutor{
@@ -764,7 +772,13 @@ Loop:
 				t1 = time.Since(tt) + ts
 
 				tt = time.Now()
-				if _, err := aggregatorRo.PruneSmallBatches(ctx, 10*time.Hour, executor.tx()); err != nil {
+
+				// allow greedy prune on non-chain-tip
+				if err = executor.tx().(kv.TemporalRwTx).Debug().GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
+					return err
+				}
+
+				if _, err := executor.tx().(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 10*time.Hour); err != nil {
 					return err
 				}
 				t3 = time.Since(tt)
@@ -828,7 +842,7 @@ func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *state2.SharedDomains) {
 		doms.Flush(context.Background(), tx)
 	}
 	{
-		it, err := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).DebugRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
+		it, err := tx.Debug().RangeLatest(kv.AccountsDomain, nil, nil, -1)
 		if err != nil {
 			panic(err)
 		}
@@ -952,9 +966,6 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	}
 	if !inMemExec {
 		if err := doms.Flush(ctx, applyTx); err != nil {
-			return false, err
-		}
-		if err = applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneCommitHistory(ctx, applyTx, nil); err != nil {
 			return false, err
 		}
 	}

@@ -284,21 +284,20 @@ func (s *VisibleSegment) IsIndexed() bool {
 	return s.src.IsIndexed()
 }
 
-func (v *VisibleSegment) Get(globalId uint64) ([]byte, error) {
-	idxSlot := v.src.Index()
+func (s *VisibleSegment) Get(globalId uint64) ([]byte, error) {
+	idxSlot := s.src.Index()
 
 	if idxSlot == nil {
 		return nil, nil
 	}
 	blockOffset := idxSlot.OrdinalLookup(globalId - idxSlot.BaseDataID())
 
-	gg := v.src.MakeGetter()
+	gg := s.src.MakeGetter()
 	gg.Reset(blockOffset)
 	if !gg.HasNext() {
 		return nil, nil
 	}
-	var buf []byte
-	buf, _ = gg.Next(buf)
+	buf, _ := gg.Next(nil)
 	if len(buf) == 0 {
 		return nil, nil
 	}
@@ -505,6 +504,7 @@ type BlockSnapshots interface {
 	SetSegmentsMin(uint64)
 
 	DownloadComplete()
+	RemoveOverlaps() error
 	DownloadReady() bool
 	Ready(context.Context) <-chan error
 }
@@ -1233,7 +1233,21 @@ func (s *RoSnapshots) closeWhatNotInList(l []string) {
 
 func (s *RoSnapshots) RemoveOverlaps() error {
 	list, err := snaptype.Segments(s.dir)
+	if err != nil {
+		return err
+	}
+	if _, toRemove := findOverlaps(list); len(toRemove) > 0 {
+		filesToRemove := make([]string, 0, len(toRemove))
 
+		for _, info := range toRemove {
+			filesToRemove = append(filesToRemove, info.Path)
+		}
+
+		removeOldFiles(filesToRemove, s.dir)
+	}
+
+	//it's possible that .seg was remove but .idx not (kill between deletes, etc...)
+	list, err = snaptype.IdxFiles(s.dir)
 	if err != nil {
 		return err
 	}
@@ -1247,7 +1261,6 @@ func (s *RoSnapshots) RemoveOverlaps() error {
 
 		removeOldFiles(filesToRemove, s.dir)
 	}
-
 	return nil
 }
 
