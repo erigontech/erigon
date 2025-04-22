@@ -157,17 +157,14 @@ func (g *PagedReader) Reset(offset uint64) {
 		g.file.Reset(offset)
 		return
 	}
-	g.file.Reset(offset)
-	g.currentPageOffset = offset
-	if g.file.HasNext() {
-		v, nextPageOffset := g.file.Next(nil)
-		g.page.Reset(v, g.snappy)
-		g.nextPageOffset = nextPageOffset
-	} else {
-		g.page = &page.Reader{}
-		g.nextPageOffset = offset
+	if g.currentPageOffset == offset { // don't reset internal state in this case: likely user just iterating over all values
+		return
 	}
 
+	g.file.Reset(offset)
+	g.currentPageOffset = offset
+	g.nextPageOffset = offset
+	g.page = &page.Reader{} // TODO: optimize
 }
 func (g *PagedReader) FileName() string { return g.file.FileName() }
 func (g *PagedReader) HasNext() bool    { return (g.sampling > 1 && g.page.HasNext()) || g.file.HasNext() }
