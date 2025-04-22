@@ -193,7 +193,7 @@ Loop:
 	for idx, d := range stateChangeset.Diffs {
 		a[idx] = d.GetDiffSet()
 	}
-	err = domains.Unwind(ctx, rwTx, 0, unwindTo, &a)
+	err = domains.Unwind(ctx, wrapTxWithCtx(rwTx, ac), 0, unwindTo, &a)
 	require.NoError(t, err)
 	acu.Close()
 
