@@ -35,10 +35,10 @@ func TestStateLogger(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name               string
-		run                func(state *IntraBlockState)
-		checker            func(t *testing.T, state *IntraBlockState)
-		wantBalanceChanges []balanceChangeTrace
+		name                    string
+		run                     func(state *IntraBlockState)
+		checker                 func(t *testing.T, state *IntraBlockState)
+		wantBalanceChangeTraces []balanceChangeTrace
 	}{
 		{
 			name: "multiple add balance",
@@ -86,7 +86,7 @@ func TestStateLogger(t *testing.T) {
 					t.Errorf("Incorrect Balance for  %s expectedBalance: %s, got:%s", libcommon.Address{}, uint256.NewInt(3), so.Balance())
 				}
 			},
-			wantBalanceChanges: []balanceChangeTrace{
+			wantBalanceChangeTraces: []balanceChangeTrace{
 				{addr: libcommon.Address{}, prev: *uint256.NewInt(0), new: *uint256.NewInt(2), reason: tracing.BalanceChangeUnspecified},
 				{addr: libcommon.Address{}, prev: *uint256.NewInt(2), new: *uint256.NewInt(3), reason: tracing.BalanceChangeUnspecified},
 			},
@@ -104,7 +104,7 @@ func TestStateLogger(t *testing.T) {
 					t.Errorf("Incorrect Balance for  %s expectedBalance: %s, got:%s", libcommon.Address{}, uint256.NewInt(1), so.Balance())
 				}
 			},
-			wantBalanceChanges: []balanceChangeTrace{
+			wantBalanceChangeTraces: []balanceChangeTrace{
 				{addr: libcommon.Address{}, prev: *uint256.NewInt(0), new: *uint256.NewInt(2), reason: tracing.BalanceChangeUnspecified},
 				{addr: libcommon.Address{}, prev: *uint256.NewInt(2), new: *uint256.NewInt(1), reason: tracing.BalanceChangeUnspecified},
 			},
@@ -132,7 +132,7 @@ func TestStateLogger(t *testing.T) {
 
 			tt.run(state)
 			tt.checker(t, state)
-			require.Equal(t, mt.balanceChangeTraces, tt.wantBalanceChanges)
+			require.Equal(t, mt.balanceChangeTraces, tt.wantBalanceChangeTraces)
 		})
 	}
 }
