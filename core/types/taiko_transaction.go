@@ -16,19 +16,19 @@ func (tx *BlobTx) isAnchor() bool {
 	return false
 }
 
-func (tx *DynamicFeeTransaction) markAsAnchor() error {
+func (tx *DynamicFeeTransaction) MarkAsAnchor() error {
 	tx.isAnhcor = true
 	return nil
 }
 
-func (tx *LegacyTx) markAsAnchor() error {
+func (tx *LegacyTx) MarkAsAnchor() error {
 	return ErrInvalidTxType
 }
 
-func (tx *AccessListTx) markAsAnchor() error {
+func (tx *AccessListTx) MarkAsAnchor() error {
 	return ErrInvalidTxType
 }
 
-func (tx *BlobTx) markAsAnchor() error {
+func (tx *BlobTx) MarkAsAnchor() error {
 	return ErrInvalidTxType
 }

@@ -739,6 +739,10 @@ func (tx *AccountAbstractionTransaction) AbiEncode() ([]byte, error) {
 	return packed, err
 }
 
+func (tx *AccountAbstractionTransaction) MarkAsAnchor() error {
+	return ErrInvalidTxType
+}
+
 // ABIAccountAbstractTxn an equivalent of a solidity struct only used to encode the 'transaction' parameter
 type ABIAccountAbstractTxn struct {
 	Sender                      common.Address

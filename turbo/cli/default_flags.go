@@ -142,6 +142,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.FakePoWFlag,
 	&utils.GpoBlocksFlag,
 	&utils.GpoPercentileFlag,
+	&utils.GpoDefaultGasPriceFlag, // CHANGE(taiko)
 	&utils.InsecureUnlockAllowedFlag,
 	&utils.IdentityFlag,
 	&utils.CliqueSnapshotCheckpointIntervalFlag,

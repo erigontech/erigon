@@ -94,6 +94,7 @@ type Transaction interface {
 	SetSender(libcommon.Address)
 	IsContractDeploy() bool
 	Unwrap() Transaction // If this is a network wrapper, returns the unwrapped txn. Otherwise returns itself.
+	MarkAsAnchor() error // CHANGE(taiko): boolean marker to indicate if it's an anchor transaction or not
 }
 
 // TransactionMisc is collection of miscellaneous fields for transaction that is supposed to be embedded into concrete
@@ -373,6 +374,11 @@ type Message struct {
 	isFree           bool
 	blobHashes       []libcommon.Hash
 	authorizations   []Authorization
+	// CHANGE(taiko): whether the current transaction is the first TaikoL2.anchor transaction in a block.
+	IsAnchor bool
+	// CHANGE(taiko): basefeeSharingPctg of the basefee will be sent to the block.coinbase,
+	// the remaining will be sent to the treasury address.
+	BasefeeSharingPctg uint8
 }
 
 func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,

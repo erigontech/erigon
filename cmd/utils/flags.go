@@ -621,7 +621,7 @@ var (
 	}
 
 	// CHANGE(taiko): add `--gpo.defaultprice` flag.
-	GpoDefaultGasPriceFlag = &cli.Int64Flag{
+	GpoDefaultGasPriceFlag = cli.Int64Flag{
 		Name:  "gpo.defaultprice",
 		Usage: "Default gas price",
 	}

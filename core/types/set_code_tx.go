@@ -297,7 +297,7 @@ func (tx *SetCodeTransaction) isAnchor() bool {
 }
 
 // CHANGE(taiko): mark as anchor
-func (tx *SetCodeTransaction) markAsAnchor() error {
+func (tx *SetCodeTransaction) MarkAsAnchor() error {
 	return ErrInvalidTxType
 }
 

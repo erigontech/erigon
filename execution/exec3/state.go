@@ -236,6 +236,13 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		}
 		rw.engine.Initialize(rw.chainConfig, rw.chain, header, ibs, syscall, rw.logger, rw.hooks)
 		txTask.Error = ibs.FinalizeTx(rules, noop)
+	case txTask.TxIndex == 0:
+		// CHANGE(taiko): mark the first transaction as anchor transaction.
+		if txTask.Config.Taiko {
+			if err := txTask.Txs[0].MarkAsAnchor(); err != nil {
+				panic(err)
+			}
+		}
 	case txTask.Final:
 		if txTask.BlockNum == 0 {
 			break

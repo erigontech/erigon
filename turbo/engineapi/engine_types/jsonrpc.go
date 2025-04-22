@@ -21,34 +21,39 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 )
 
 // ExecutionPayload represents an execution payload (aka block)
 type ExecutionPayload struct {
-	ParentHash    common.Hash         `json:"parentHash"    gencodec:"required"`
-	FeeRecipient  common.Address      `json:"feeRecipient"  gencodec:"required"`
-	StateRoot     common.Hash         `json:"stateRoot"     gencodec:"required"`
-	ReceiptsRoot  common.Hash         `json:"receiptsRoot"  gencodec:"required"`
-	LogsBloom     hexutil.Bytes       `json:"logsBloom"     gencodec:"required"`
-	PrevRandao    common.Hash         `json:"prevRandao"    gencodec:"required"`
-	BlockNumber   hexutil.Uint64      `json:"blockNumber"   gencodec:"required"`
-	GasLimit      hexutil.Uint64      `json:"gasLimit"      gencodec:"required"`
-	GasUsed       hexutil.Uint64      `json:"gasUsed"       gencodec:"required"`
-	Timestamp     hexutil.Uint64      `json:"timestamp"     gencodec:"required"`
-	ExtraData     hexutil.Bytes       `json:"extraData"     gencodec:"required"`
-	BaseFeePerGas *hexutil.Big        `json:"baseFeePerGas" gencodec:"required"`
-	BlockHash     common.Hash         `json:"blockHash"     gencodec:"required"`
-	Transactions  []hexutil.Bytes     `json:"transactions"  gencodec:"required"`
-	Withdrawals   []*types.Withdrawal `json:"withdrawals"`
-	BlobGasUsed   *hexutil.Uint64     `json:"blobGasUsed"`
-	ExcessBlobGas *hexutil.Uint64     `json:"excessBlobGas"`
+	ParentHash      common.Hash         `json:"parentHash"    gencodec:"required"`
+	FeeRecipient    common.Address      `json:"feeRecipient"  gencodec:"required"`
+	StateRoot       common.Hash         `json:"stateRoot"     gencodec:"required"`
+	ReceiptsRoot    common.Hash         `json:"receiptsRoot"  gencodec:"required"`
+	LogsBloom       hexutil.Bytes       `json:"logsBloom"     gencodec:"required"`
+	PrevRandao      common.Hash         `json:"prevRandao"    gencodec:"required"`
+	BlockNumber     hexutil.Uint64      `json:"blockNumber"   gencodec:"required"`
+	GasLimit        hexutil.Uint64      `json:"gasLimit"      gencodec:"required"`
+	GasUsed         hexutil.Uint64      `json:"gasUsed"       gencodec:"required"`
+	Timestamp       hexutil.Uint64      `json:"timestamp"     gencodec:"required"`
+	ExtraData       hexutil.Bytes       `json:"extraData"     gencodec:"required"`
+	BaseFeePerGas   *hexutil.Big        `json:"baseFeePerGas" gencodec:"required"`
+	BlockHash       common.Hash         `json:"blockHash"     gencodec:"required"`
+	Transactions    []hexutil.Bytes     `json:"transactions"  gencodec:"required"`
+	Withdrawals     []*types.Withdrawal `json:"withdrawals"`
+	BlobGasUsed     *hexutil.Uint64     `json:"blobGasUsed"`
+	ExcessBlobGas   *hexutil.Uint64     `json:"excessBlobGas"`
+	TxHash          common.Hash         `json:"txHash" gencodec:"required"`            // CHANGE(taiko): allow passing txHash directly instead of transactions list
+	WithdrawalsHash common.Hash         `json:"withdrawalsHash"   gencodec:"required"` // CHANGE(taiko): allow passing WithdrawalsHash directly instead of withdrawals
+	TaikoBlock      bool                // CHANGE(taiko): whether this is a Taiko L2 block, only used by ExecutableDataToBlock
 }
 
 // PayloadAttributes represent the attributes required to start assembling a payload
@@ -65,6 +70,31 @@ type PayloadAttributes struct {
 	SuggestedFeeRecipient common.Address      `json:"suggestedFeeRecipient" gencodec:"required"`
 	Withdrawals           []*types.Withdrawal `json:"withdrawals"`
 	ParentBeaconBlockRoot *common.Hash        `json:"parentBeaconBlockRoot"`
+	// CHANGE(taiko): extra fields.
+	BaseFeePerGas *big.Int        `json:"baseFeePerGas" gencodec:"required"`
+	BlockMetadata *BlockMetadata  `json:"blockMetadata" gencodec:"required"`
+	L1Origin      *rawdb.L1Origin `json:"l1Origin"      gencodec:"required"`
+}
+
+//go:generate go run github.com/fjl/gencodec -type BlockMetadata -field-override blockMetadataMarshaling -out gen_blockmetadata.go
+
+// CHANGE(taiko): BlockMetadata represents a `BlockMetadata` struct defined in
+// protocol.
+type BlockMetadata struct {
+	Beneficiary common.Address `json:"beneficiary"  gencodec:"required"`
+	GasLimit    uint64         `json:"gasLimit"     gencodec:"required"`
+	Timestamp   uint64         `json:"timestamp"    gencodec:"required"`
+	MixHash     common.Hash    `json:"mixHash"      gencodec:"required"`
+
+	// Extra fields required in taiko-geth.
+	TxList    []byte `json:"txList"          gencodec:"required"`
+	ExtraData []byte `json:"extraData"       gencodec:"required"`
+}
+
+// CHANGE(taiko): JSON type overrides for BlockMetadata.
+type blockMetadataMarshaling struct {
+	Timestamp hexutil.Uint64
+	TxList    hexutil.Bytes
 }
 
 // TransitionConfiguration represents the correct configurations of the CL and the EL
