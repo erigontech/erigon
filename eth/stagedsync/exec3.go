@@ -639,7 +639,7 @@ Loop:
 				continue
 			}
 
-			aaBatchSize := uint64(1)
+			aaBatchSize := uint64(0)
 			for _, tt := range txTasks {
 				if tt.TxIndex > txIndex && tt.Tx != nil && tt.Tx.Type() == types.AccountAbstractionTxType {
 					aaBatchSize++
