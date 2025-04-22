@@ -80,7 +80,6 @@ type SharedDomains struct {
 	sdCtx *SharedDomainsCommitmentContext
 
 	// next fields are filed by `.SetTx` - they are all point to same `tx` - just reducing amount of interface castings at runtime
-	aggTx *AggregatorRoTx
 	roTtx kv.TemporalTx
 
 	logger log.Logger
@@ -117,13 +116,13 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 		//trace:   true,
 	}
 	sd.SetTx(tx)
-	sd.iiWriters = make([]*InvertedIndexBufferedWriter, len(sd.aggTx.iis))
+	sd.iiWriters = make([]*InvertedIndexBufferedWriter, len(sd.AggTx().(*AggregatorRoTx).iis))
 
-	for id, ii := range sd.aggTx.iis {
+	for id, ii := range sd.AggTx().(*AggregatorRoTx).iis {
 		sd.iiWriters[id] = ii.NewWriter()
 	}
 
-	for id, d := range sd.aggTx.d {
+	for id, d := range sd.AggTx().(*AggregatorRoTx).d {
 		sd.domains[id] = map[string]dataWithPrevStep{}
 		sd.domainWriters[id] = d.NewWriter()
 	}
@@ -191,7 +190,7 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 	return ReadDiffSet(tx, blockNumber, blockHash)
 }
 
-func (sd *SharedDomains) AggTx() any { return sd.aggTx }
+func (sd *SharedDomains) AggTx() any { return sd.roTtx.AggTx() }
 
 // aggregator context should call aggTx.Unwind before this one.
 func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo, txUnwindTo uint64, changeset *[kv.DomainLen][]DomainEntryDiff) error {
@@ -208,7 +207,7 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 		return err
 	}
 
-	if err := sd.aggTx.Unwind(ctx, rwTx, txUnwindTo, changeset, logEvery); err != nil {
+	if err := sd.roTtx.AggTx().(*AggregatorRoTx).Unwind(ctx, rwTx, txUnwindTo, changeset, logEvery); err != nil {
 		return err
 	}
 
@@ -219,7 +218,7 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 }
 
 func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.TemporalTx, blockNum uint64) ([]byte, error) {
-	it, err := sd.aggTx.HistoryRange(kv.StorageDomain, int(sd.TxNum()), math.MaxInt64, order.Asc, -1, roTx)
+	it, err := sd.roTtx.AggTx().(*AggregatorRoTx).HistoryRange(kv.StorageDomain, int(sd.TxNum()), math.MaxInt64, order.Asc, -1, roTx)
 	if err != nil {
 		return nil, err
 	}
@@ -232,7 +231,7 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Temporal
 		sd.sdCtx.TouchKey(kv.AccountsDomain, string(k), nil)
 	}
 
-	it, err = sd.aggTx.HistoryRange(kv.StorageDomain, int(sd.TxNum()), math.MaxInt64, order.Asc, -1, roTx)
+	it, err = sd.roTtx.AggTx().(*AggregatorRoTx).HistoryRange(kv.StorageDomain, int(sd.TxNum()), math.MaxInt64, order.Asc, -1, roTx)
 	if err != nil {
 		return nil, err
 	}
@@ -252,7 +251,7 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Temporal
 
 // SeekCommitment lookups latest available commitment and sets it as current
 func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromBlockBeginning uint64, err error) {
-	bn, txn, ok, err := sd.sdCtx.SeekCommitment(tx, sd.aggTx.d[kv.CommitmentDomain], 0, math.MaxUint64)
+	bn, txn, ok, err := sd.sdCtx.SeekCommitment(tx, sd.roTtx.AggTx().(*AggregatorRoTx).d[kv.CommitmentDomain], 0, math.MaxUint64)
 	if err != nil {
 		return 0, err
 	}
@@ -368,7 +367,7 @@ func (sd *SharedDomains) SizeEstimate() uint64 {
 }
 
 func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error) {
-	aggTx := sd.aggTx
+	aggTx := sd.roTtx.AggTx().(*AggregatorRoTx)
 	if v, prevStep, ok := sd.get(kv.CommitmentDomain, prefix); ok {
 		// sd cache values as is (without transformation) so safe to return
 		return v, prevStep, nil
@@ -615,21 +614,10 @@ func (sd *SharedDomains) SetTx(tx kv.TemporalTx) {
 	if tx == nil {
 		panic("tx is nil")
 	}
-
 	sd.roTtx = tx
-
-	casted, ok := tx.(HasAggTx)
-	if !ok {
-		panic(fmt.Errorf("type %T need AggTx method", tx))
-	}
-
-	sd.aggTx = casted.AggTx().(*AggregatorRoTx)
-	if sd.aggTx == nil {
-		panic(errors.New("aggtx is nil"))
-	}
 }
 
-func (sd *SharedDomains) StepSize() uint64 { return sd.aggTx.StepSize() }
+func (sd *SharedDomains) StepSize() uint64 { return sd.roTtx.AggTx().(*AggregatorRoTx).StepSize() }
 
 // SetTxNum sets txNum for all domains as well as common txNum for all domains
 // Requires for sd.rwTx because of commitment evaluation in shared domains if aggregationStep is reached
@@ -672,12 +660,12 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter b
 // k and v lifetime is bounded by the lifetime of the iterator
 func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v []byte, step uint64) error) error {
 	haveRamUpdates := sd.storage.Len() > 0
-	return sd.aggTx.d[kv.StorageDomain].debugIteratePrefix(prefix, haveRamUpdates, sd.storage.Iter(), it, sd.txNum, sd.StepSize(), sd.roTtx)
+	return sd.roTtx.AggTx().(*AggregatorRoTx).d[kv.StorageDomain].debugIteratePrefix(prefix, haveRamUpdates, sd.storage.Iter(), it, sd.txNum, sd.StepSize(), sd.roTtx)
 }
 
 func (sd *SharedDomains) Close() {
 	sd.SetBlockNum(0)
-	if sd.aggTx != nil {
+	if sd.roTtx.AggTx().(*AggregatorRoTx) != nil {
 		sd.SetTxNum(0)
 
 		//sd.walLock.Lock()
@@ -718,7 +706,7 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 		if err := w.Flush(ctx, tx); err != nil {
 			return err
 		}
-		sd.aggTx.d[di].closeValsCursor()
+		sd.roTtx.AggTx().(*AggregatorRoTx).d[di].closeValsCursor()
 	}
 	for _, w := range sd.iiWriters {
 		if w == nil {
@@ -757,7 +745,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, k []byte) (v []byte, step u
 	if v, prevStep, ok := sd.get(domain, k); ok {
 		return v, prevStep, nil
 	}
-	v, step, _, err = sd.aggTx.GetLatest(domain, k, sd.roTtx)
+	v, step, _, err = sd.roTtx.AggTx().(*AggregatorRoTx).GetLatest(domain, k, sd.roTtx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
@@ -915,7 +903,7 @@ func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode commitment.Mode, 
 		sharedDomains: sd,
 	}
 
-	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, sd.aggTx.a.tmpdir)
+	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, sd.roTtx.AggTx().(*AggregatorRoTx).a.tmpdir)
 	ctx.patriciaTrie.ResetContext(ctx)
 	return ctx
 }
@@ -1176,7 +1164,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 }
 
 func (sdc *SharedDomainsCommitmentContext) storeCommitmentState(blockNum uint64, rootHash []byte) error {
-	if sdc.sharedDomains.aggTx == nil {
+	if sdc.sharedDomains.roTtx.AggTx().(*AggregatorRoTx) == nil {
 		return fmt.Errorf("store commitment state: AggregatorContext is not initialized")
 	}
 	encodedState, err := sdc.encodeCommitmentState(blockNum, sdc.sharedDomains.txNum)
