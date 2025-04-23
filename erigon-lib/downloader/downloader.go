@@ -302,11 +302,6 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		return nil, fmt.Errorf("openClient: %w", err)
 	}
 
-	// TODO: Put this somewhere global?
-	http.HandleFunc("/downloaderTorrentClientStatus", func(w http.ResponseWriter, r *http.Request) {
-		torrentClient.WriteStatus(w)
-	})
-
 	peerID, err := readPeerID(db)
 	if err != nil {
 		return nil, fmt.Errorf("get peer id: %w", err)
