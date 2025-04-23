@@ -476,7 +476,5 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remote.AAValid
 		return &remote.AAValidationReply{Valid: false}, nil
 	}
 
-	// read tracer
-
-	return &remote.AAValidationReply{Valid: true}, nil
+	return &remote.AAValidationReply{Valid: validationTracer.Err() != nil}, nil
 }

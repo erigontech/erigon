@@ -242,6 +242,6 @@ func (t *ValidationRulesTracer) OnStorageChange(addr libcommon.Address, slot *li
 	}
 }
 
-func (t *ValidationRulesTracer) GetError() error {
+func (t *ValidationRulesTracer) Err() error {
 	return t.err
 }
