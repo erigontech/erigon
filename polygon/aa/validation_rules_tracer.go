@@ -92,7 +92,7 @@ func NewValidationRulesTracer(sender libcommon.Address, senderHasCode bool) *Val
 	return t
 }
 
-func (t *ValidationRulesTracer) GetHooks() *tracing.Hooks {
+func (t *ValidationRulesTracer) Hooks() *tracing.Hooks {
 	return &tracing.Hooks{
 		OnOpcode:        t.OnOpcode,
 		OnEnter:         t.OnEnter,
