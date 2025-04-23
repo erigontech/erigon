@@ -25,7 +25,7 @@ require (
 	github.com/RoaringBitmap/roaring/v2 v2.4.5
 	github.com/alecthomas/kong v0.8.1
 	github.com/anacrolix/sync v0.5.1
-	github.com/anacrolix/torrent v1.52.6-0.20231201115409-7ea994b6bbd8
+	github.com/anacrolix/torrent v1.58.2-0.20250417003442-fae873df2876
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/consensys/gnark-crypto v0.17.0
@@ -112,6 +112,7 @@ require (
 	github.com/RoaringBitmap/roaring v1.9.4 // indirect
 	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b // indirect
+	github.com/cespare/xxhash v1.1.0 // indirect
 	github.com/crate-crypto/go-ipa v0.0.0-20221111143132-9aa5d42120bc // indirect
 	github.com/elastic/go-freelru v0.16.0 // indirect
 	github.com/erigontech/speedtest v0.0.2 // indirect
@@ -123,7 +124,16 @@ require (
 	github.com/hashicorp/go-retryablehttp v0.7.7 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4 // indirect
+	github.com/pion/dtls/v3 v3.0.3 // indirect
+	github.com/pion/ice/v4 v4.0.2 // indirect
+	github.com/pion/mdns/v2 v2.0.7 // indirect
+	github.com/pion/srtp/v3 v3.0.4 // indirect
+	github.com/pion/stun/v3 v3.0.0 // indirect
+	github.com/pion/transport/v3 v3.0.7 // indirect
+	github.com/pion/turn/v4 v4.0.0 // indirect
+	github.com/pion/webrtc/v4 v4.0.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/protolambda/ctxlock v0.1.0 // indirect
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
 	github.com/tklauser/go-sysconf v0.3.14 // indirect
 	github.com/tklauser/numcpus v0.8.0 // indirect
@@ -141,19 +151,19 @@ require (
 	github.com/Masterminds/semver/v3 v3.2.0 // indirect
 	github.com/agnivade/levenshtein v1.2.0 // indirect
 	github.com/ajwerner/btree v0.0.0-20211221152037-f427b3e689c0 // indirect
-	github.com/anacrolix/chansync v0.3.0 // indirect
+	github.com/anacrolix/chansync v0.6.0 // indirect
 	github.com/anacrolix/dht/v2 v2.21.1 // indirect
 	github.com/anacrolix/envpprof v1.3.0 // indirect
-	github.com/anacrolix/generics v0.0.2-0.20240227122613-f95486179cab // indirect
-	github.com/anacrolix/go-libutp v1.3.2-0.20250216011621-bed3eb985aac // indirect
-	github.com/anacrolix/log v0.15.2 // indirect
+	github.com/anacrolix/generics v0.0.3-0.20240902042256-7fb2702ef0ca // indirect
+	github.com/anacrolix/go-libutp v1.3.2 // indirect
+	github.com/anacrolix/log v0.15.3-0.20240627045001-cd912c641d83 // indirect
 	github.com/anacrolix/missinggo v1.3.0 // indirect
 	github.com/anacrolix/missinggo/perf v1.0.0 // indirect
-	github.com/anacrolix/missinggo/v2 v2.7.3 // indirect
-	github.com/anacrolix/mmsg v1.0.0 // indirect
-	github.com/anacrolix/multiless v0.3.1-0.20221221005021-2d12701f83f7 // indirect
+	github.com/anacrolix/missinggo/v2 v2.7.4 // indirect
+	github.com/anacrolix/mmsg v1.0.1 // indirect
+	github.com/anacrolix/multiless v0.4.0 // indirect
 	github.com/anacrolix/stm v0.4.1-0.20221221005312-96d17df0e496 // indirect
-	github.com/anacrolix/upnp v0.1.3-0.20220123035249-922794e51c96 // indirect
+	github.com/anacrolix/upnp v0.1.4 // indirect
 	github.com/anacrolix/utp v0.1.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
@@ -210,7 +220,7 @@ require (
 	github.com/libp2p/go-netroute v0.2.1 // indirect
 	github.com/libp2p/go-reuseport v0.4.0 // indirect
 	github.com/libp2p/go-yamux/v4 v4.0.1 // indirect
-	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
+	github.com/lufia/plan9stats v0.0.0-20220913051719-115f729f3c8c // indirect
 	github.com/marten-seemann/tcp v0.0.0-20210406111302-dfbc87cc63fd // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
@@ -254,7 +264,7 @@ require (
 	github.com/pion/turn/v2 v2.1.6 // indirect
 	github.com/pion/webrtc/v3 v3.3.4 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
+	github.com/power-devops/perfstat v0.0.0-20220216144756-c35f1ee13d7c // indirect
 	github.com/prometheus/client_golang v1.21.1
 	github.com/prometheus/client_model v0.6.1 // indirect
 	github.com/prometheus/common v0.62.0 // indirect
