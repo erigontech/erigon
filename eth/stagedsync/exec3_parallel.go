@@ -877,7 +877,15 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			be.execFailed[tx]++
 
 			if be.execFailed[tx] > 0 {
-				fmt.Println(be.blockNum, "FAILED", tx, be.txIncarnations[tx], "failed", be.execFailed[tx], "aborted", be.execAborted[tx])
+				var reads []int
+
+				if readSet := be.blockIO.ReadSet(txVersion.TxIndex); readSet != nil {
+					readSet.Scan(func(vr *state.VersionedRead) bool {
+						reads = append(reads, vr.Version.TxIndex+1)
+						return true
+					})
+				}
+				fmt.Println(be.blockNum, "FAILED", tx, be.txIncarnations[tx], "failed", be.execFailed[tx], "aborted", be.execAborted[tx], "reads", reads)
 			}
 
 			// 'create validation tasks for all transactions > tx ...'
