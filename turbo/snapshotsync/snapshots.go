@@ -284,21 +284,20 @@ func (s *VisibleSegment) IsIndexed() bool {
 	return s.src.IsIndexed()
 }
 
-func (v *VisibleSegment) Get(globalId uint64) ([]byte, error) {
-	idxSlot := v.src.Index()
+func (s *VisibleSegment) Get(globalId uint64) ([]byte, error) {
+	idxSlot := s.src.Index()
 
 	if idxSlot == nil {
 		return nil, nil
 	}
 	blockOffset := idxSlot.OrdinalLookup(globalId - idxSlot.BaseDataID())
 
-	gg := v.src.MakeGetter()
+	gg := s.src.MakeGetter()
 	gg.Reset(blockOffset)
 	if !gg.HasNext() {
 		return nil, nil
 	}
-	var buf []byte
-	buf, _ = gg.Next(buf)
+	buf, _ := gg.Next(nil)
 	if len(buf) == 0 {
 		return nil, nil
 	}

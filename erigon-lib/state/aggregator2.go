@@ -186,8 +186,8 @@ var Schema = SchemaGen{
 			compressorCfg: HistoryCompressCfg, compression: seg.CompressNone, // seg.CompressKeys | seg.CompressVals,
 			historyIdx: kv.CommitmentHistoryIdx,
 
-			historyLargeValues: false,
-			compressSingleVal:  false,
+			historyLargeValues:            false,
+			historyValuesOnCompressedPage: 16,
 
 			snapshotsDisabled: true,
 			historyDisabled:   true,

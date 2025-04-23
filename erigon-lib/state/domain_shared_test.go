@@ -35,6 +35,10 @@ import (
 )
 
 func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	stepSize := uint64(100)
@@ -110,6 +114,10 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 }
 
 func TestSharedDomain_Unwind(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	stepSize := uint64(100)
@@ -189,11 +197,11 @@ Loop:
 	domains.currentChangesAccumulator = nil
 
 	acu := agg.BeginFilesRo()
-	var a [kv.DomainLen][]DomainEntryDiff
+	var a [kv.DomainLen][]kv.DomainEntryDiff
 	for idx, d := range stateChangeset.Diffs {
 		a[idx] = d.GetDiffSet()
 	}
-	err = domains.Unwind(ctx, rwTx, 0, unwindTo, &a)
+	err = domains.Unwind(ctx, wrapTxWithCtx(rwTx, ac), 0, unwindTo, &a)
 	require.NoError(t, err)
 	acu.Close()
 
@@ -212,6 +220,10 @@ Loop:
 }
 
 func TestSharedDomain_IteratePrefix(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	stepSize := uint64(8)
@@ -387,6 +399,10 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 }
 
 func TestSharedDomain_StorageIter(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))

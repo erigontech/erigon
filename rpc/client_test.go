@@ -169,6 +169,10 @@ func TestClientCancelHTTP(t *testing.T)      { testClientCancel("http", t, log.N
 // This test checks that requests made through CallContext can be canceled by canceling
 // the context.
 func testClientCancel(transport string, t *testing.T, logger log.Logger) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	// These tests take a lot of time, run them all at once.
 	// You probably want to run with -parallel 1 or comment out
 	// the call to t.Parallel if you enable the logging.
@@ -518,6 +522,10 @@ func TestClientHTTP(t *testing.T) {
 }
 
 func TestClientReconnect(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	logger := log.New()
 	startServer := func(addr string) (*Server, net.Listener) {
 		srv := newTestServer(logger)

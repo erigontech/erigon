@@ -96,6 +96,10 @@ func TestNodeStartMultipleTimes(t *testing.T) {
 
 // Tests that if the data dir is already in use, an appropriate error is returned.
 func TestNodeUsedDataDir(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please")
 	}
