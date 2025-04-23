@@ -750,7 +750,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				addedDependencies = be.execTasks.addDependency(execErr.Dependency, tx)
 				be.execAborted[tx]++
 				if be.execAborted[tx] > 0 {
-					fmt.Println(be.blockNum, "ABORT", tx, be.txIncarnations[tx], be.execFailed[tx], be.execAborted[tx], "dep", execErr.Dependency)
+					fmt.Println(be.blockNum, "ABORT", tx, be.txIncarnations[tx], be.execFailed[tx], be.execAborted[tx], "dep", execErr.Dependency, "err", execErr.OriginError)
 				}
 			} else {
 				estimate := 0
@@ -767,7 +767,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				be.execAborted[tx]++
 
 				if be.execAborted[tx] > 0 || be.execFailed[tx] > 0 {
-					fmt.Println(be.blockNum, "ABORT", tx, be.txIncarnations[tx], be.execFailed[tx], be.execAborted[tx])
+					fmt.Println(be.blockNum, "ABORT", tx, be.txIncarnations[tx], be.execFailed[tx], be.execAborted[tx], "err", execErr.OriginError)
 				}
 			}
 
@@ -1027,21 +1027,15 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 			if be.txIncarnations[nextTx] > 0 &&
 				(be.execAborted[nextTx] > 0 ||
 					!be.blockIO.HasReads(txIndex) ||
-					!func() bool {
-						valid := state.ValidateVersion(txIndex, be.blockIO, be.versionMap,
-							func(_ state.ReadSource, _, writtenVersion state.Version) bool {
-								res := writtenVersion.TxIndex < maxValidated &&
-									writtenVersion.Incarnation == be.txIncarnations[writtenVersion.TxIndex+1]
-								if be.execFailed[nextTx] > 0 || be.txIncarnations[nextTx] > 4 {
-									fmt.Println(be.blockNum, "VALIDATE", nextTx, writtenVersion.TxIndex, res, writtenVersion.TxIndex < maxValidated, writtenVersion.Incarnation, be.txIncarnations[writtenVersion.TxIndex+1])
-								}
-								return res
-							})
-						if be.execFailed[nextTx] > 0 {
-							fmt.Println(be.blockNum, "VALID", nextTx, valid)
-						}
-						return valid
-					}()) {
+					!state.ValidateVersion(txIndex, be.blockIO, be.versionMap,
+						func(_ state.ReadSource, _, writtenVersion state.Version) bool {
+							res := writtenVersion.TxIndex < maxValidated &&
+								writtenVersion.Incarnation == be.txIncarnations[writtenVersion.TxIndex+1]
+							if be.execFailed[nextTx] > 0 || be.txIncarnations[nextTx] > 4 {
+								fmt.Println(be.blockNum, "VALIDATE", nextTx, writtenVersion.TxIndex, res, writtenVersion.TxIndex < maxValidated, writtenVersion.Incarnation, be.txIncarnations[writtenVersion.TxIndex+1])
+							}
+							return res
+						})) {
 				if be.execFailed[nextTx] > 0 {
 					fmt.Println(be.blockNum, "PEND", nextTx)
 				}
