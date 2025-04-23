@@ -1032,7 +1032,6 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 							func(_ state.ReadSource, _, writtenVersion state.Version) bool {
 								res := writtenVersion.TxIndex < maxValidated &&
 									writtenVersion.Incarnation == be.txIncarnations[writtenVersion.TxIndex+1]
-
 								if be.execFailed[nextTx] > 0 || be.txIncarnations[nextTx] > 4 {
 									fmt.Println(be.blockNum, "VALIDATE", nextTx, writtenVersion.TxIndex, res, writtenVersion.TxIndex < maxValidated, writtenVersion.Incarnation, be.txIncarnations[writtenVersion.TxIndex+1])
 								}
@@ -1053,7 +1052,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 		}
 
 		if be.execFailed[nextTx] > 0 || be.txIncarnations[nextTx] > 4 {
-			fmt.Println(be.blockNum, "EXEC", nextTx, be.txIncarnations[nextTx], "max val", maxValidated, be.blockIO.HasReads(nextTx), "failed", be.execFailed[nextTx], "aborted", be.execAborted[nextTx])
+			fmt.Println(be.blockNum, "EXEC", nextTx, be.txIncarnations[nextTx], "maxValidated", maxValidated, be.blockIO.HasReads(nextTx), "failed", be.execFailed[nextTx], "aborted", be.execAborted[nextTx])
 		}
 
 		be.cntExec++
