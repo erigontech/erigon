@@ -153,7 +153,7 @@ type parallelExecutor struct {
 	progress                 *Progress
 }
 
-func (pe *parallelExecutor) applyLoop(ctx context.Context, maxTxNum uint64, blockComplete *atomic.Bool, errCh chan error) {
+func (pe *parallelExecutor) applyLoop(ctx context.Context, rotx kv.TemporalTx, maxTxNum uint64, blockComplete *atomic.Bool, errCh chan error) {
 	defer pe.applyLoopWg.Done()
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -179,7 +179,7 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, maxTxNum uint64, bloc
 			}
 
 			processedTxNum, conflicts, triggers, _ /*processedBlockNum*/, stoppedAtBlockEnd, err :=
-				pe.processResultQueue(ctx, pe.outputTxNum.Load(), pe.rwsConsumed, true, false)
+				pe.processResultQueue(ctx, rotx, pe.outputTxNum.Load(), pe.rwsConsumed, true, false)
 			if err != nil {
 				return err
 			}
@@ -214,7 +214,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 
 	tx := pe.applyTx
 	if tx == nil {
-		tx, err := pe.cfg.db.BeginRw(ctx)
+		tx, err := pe.cfg.db.BeginTemporalRw(ctx)
 		if err != nil {
 			return err
 		}
@@ -235,7 +235,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 	blockComplete := atomic.Bool{}
 	blockComplete.Store(true)
 
-	go pe.applyLoop(applyCtx, maxTxNum, &blockComplete, pe.rwLoopErrCh)
+	go pe.applyLoop(applyCtx, temporalTx, maxTxNum, &blockComplete, pe.rwLoopErrCh)
 
 	for pe.outputTxNum.Load() <= maxTxNum {
 		select {
@@ -253,7 +253,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 				if pe.doms.BlockNum() != pe.outputBlockNum.GetValueUint64() {
 					panic(fmt.Errorf("%d != %d", pe.doms.BlockNum(), pe.outputBlockNum.GetValueUint64()))
 				}
-				_, err := pe.doms.ComputeCommitment(ctx, true, pe.outputBlockNum.GetValueUint64(), pe.execStage.LogPrefix())
+				_, err := pe.doms.ComputeCommitment(ctx, temporalTx, true, pe.outputBlockNum.GetValueUint64(), pe.execStage.LogPrefix())
 				if err != nil {
 					return err
 				}
@@ -261,7 +261,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 					return err
 				}
 				if !pe.inMemExec {
-					if err = pe.doms.Flush(ctx, tx); err != nil {
+					if err = pe.doms.Flush(ctx, tx.(kv.TemporalRwTx)); err != nil {
 						return err
 					}
 				}
@@ -284,7 +284,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 					pe.applyWorker.ResetTx(tx)
 
 					processedTxNum, conflicts, triggers, processedBlockNum, stoppedAtBlockEnd, err :=
-						pe.processResultQueue(ctx, pe.outputTxNum.Load(), nil, false, true)
+						pe.processResultQueue(ctx, temporalTx, pe.outputTxNum.Load(), nil, false, true)
 					if err != nil {
 						return err
 					}
@@ -323,7 +323,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 				t2 = time.Since(tt)
 				tt = time.Now()
 
-				if err := pe.doms.Flush(ctx, tx); err != nil {
+				if err := pe.doms.Flush(ctx, tx.(kv.TemporalRwTx)); err != nil {
 					return err
 				}
 				pe.doms.ClearRam(true)
@@ -364,12 +364,12 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 			applyCtx, cancelApplyCtx = context.WithCancel(ctx) //nolint:fatcontext
 			defer cancelApplyCtx()
 			pe.applyLoopWg.Add(1)
-			go pe.applyLoop(applyCtx, maxTxNum, &blockComplete, pe.rwLoopErrCh)
+			go pe.applyLoop(applyCtx, temporalTx, maxTxNum, &blockComplete, pe.rwLoopErrCh)
 
 			logger.Info("Committed", "time", time.Since(commitStart), "drain", t0, "drain_and_lock", t1, "rs.flush", t2, "agg.flush", t3, "tx.commit", t4)
 		}
 	}
-	if err := pe.doms.Flush(ctx, tx); err != nil {
+	if err := pe.doms.Flush(ctx, tx.(kv.TemporalRwTx)); err != nil {
 		return err
 	}
 	if err := pe.execStage.Update(tx, pe.outputBlockNum.GetValueUint64()); err != nil {
@@ -381,7 +381,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 	return nil
 }
 
-func (pe *parallelExecutor) processResultQueue(ctx context.Context, inputTxNum uint64, backPressure chan<- struct{}, canRetry, forceStopAtBlockEnd bool) (outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, stopedAtBlockEnd bool, err error) {
+func (pe *parallelExecutor) processResultQueue(ctx context.Context, rotx kv.TemporalTx, inputTxNum uint64, backPressure chan<- struct{}, canRetry, forceStopAtBlockEnd bool) (outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, stopedAtBlockEnd bool, err error) {
 	rwsIt := pe.rws.Iter()
 	defer rwsIt.Close()
 	//defer fmt.Println("PRQ", "Done")
@@ -423,7 +423,7 @@ func (pe *parallelExecutor) processResultQueue(ctx context.Context, inputTxNum u
 
 		if txTask.Final {
 			pe.rs.SetTxNum(txTask.TxNum, txTask.BlockNum)
-			err := pe.rs.ApplyState(ctx, txTask)
+			err := pe.rs.ApplyState(ctx, rotx, txTask)
 			if err != nil {
 				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("ParallelExecutionState.Apply: %w", err)
 			}

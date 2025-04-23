@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon-lib/kv"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -60,8 +61,8 @@ func (p *ConcurrentPatriciaHashed) RootTrie() *HexPatriciaHashed {
 	return p.root
 }
 
-func (p *ConcurrentPatriciaHashed) foldNibble(nib int) error {
-	c, err := p.mounts[nib].foldMounted(nib)
+func (p *ConcurrentPatriciaHashed) foldNibble(rotx kv.TemporalTx, nib int) error {
+	c, err := p.mounts[nib].foldMounted(rotx, nib)
 	if err != nil {
 		return err
 	}
@@ -157,7 +158,7 @@ func (p *ConcurrentPatriciaHashed) SetParticularTrace(b bool, n int) {
 	}
 }
 
-func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaHashed) ([]byte, error) {
+func (t *Updates) ParallelHashSort(ctx context.Context, rotx kv.TemporalTx, pph *ConcurrentPatriciaHashed) ([]byte, error) {
 	if t.mode != ModeDirect {
 		return nil, errors.New("parallel hashsort for indirect mode is not supported")
 	}
@@ -186,7 +187,7 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 				if phnib.trace {
 					fmt.Printf("\n%x) %d plainKey [%x] hashedKey [%x] currentKey [%x]\n", ni, cnt, plainKey, hashedKey, phnib.currentKey[:phnib.currentKeyLen])
 				}
-				if err := phnib.followAndUpdate(hashedKey, plainKey, nil); err != nil {
+				if err := phnib.followAndUpdate(rotx, hashedKey, plainKey, nil); err != nil {
 					return fmt.Errorf("followAndUpdate[%x]: %w", ni, err)
 				}
 				return nil
@@ -200,7 +201,7 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 			if pph.mounts[ni].trace {
 				fmt.Printf("NOW FOLDING nib [%x] #%d d=%d\n", ni, cnt, phnib.depths[0])
 			}
-			return pph.foldNibble(ni)
+			return pph.foldNibble(rotx, ni)
 		})
 	}
 	if err := g.Wait(); err != nil {
@@ -216,11 +217,11 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 	}
 
 	for pph.root.activeRows > 0 {
-		if err := pph.root.fold(); err != nil {
+		if err := pph.root.fold(rotx); err != nil {
 			return nil, err
 		}
 	}
-	rootHash, err := pph.root.RootHash()
+	rootHash, err := pph.root.RootHash(rotx)
 	if err != nil {
 		return nil, err
 	}
@@ -232,7 +233,7 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 }
 
 // Computing commitment root hash. If possible, use parallel commitment and after evaluation decides, if it can be used next time
-func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error) {
+func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, rotx kv.TemporalTx, updates *Updates, logPrefix string) (rootHash []byte, err error) {
 	// start := time.Now()
 	// wasConcurrent := updates.IsConcurrentCommitment()
 	// updCount := updates.Size()
@@ -242,9 +243,9 @@ func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates
 
 	switch updates.IsConcurrentCommitment() {
 	case true:
-		rootHash, err = updates.ParallelHashSort(ctx, p)
+		rootHash, err = updates.ParallelHashSort(ctx, rotx, p)
 	default:
-		rootHash, err = p.root.Process(ctx, updates, logPrefix)
+		rootHash, err = p.root.Process(ctx, rotx, updates, logPrefix)
 	}
 	if err != nil {
 		return nil, err
@@ -297,6 +298,6 @@ func (p *ConcurrentPatriciaHashed) ResetContext(ctx PatriciaContext) {
 	}
 }
 
-func (p *ConcurrentPatriciaHashed) RootHash() (hash []byte, err error) {
-	return p.root.RootHash()
+func (p *ConcurrentPatriciaHashed) RootHash(rotx kv.TemporalTx) (hash []byte, err error) {
+	return p.root.RootHash(rotx)
 }

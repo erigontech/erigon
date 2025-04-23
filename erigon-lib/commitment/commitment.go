@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/types/accounts"
@@ -82,7 +83,7 @@ var (
 // Trie represents commitment variant.
 type Trie interface {
 	// RootHash produces root hash of the trie
-	RootHash() (hash []byte, err error)
+	RootHash(rotx kv.TemporalTx) (hash []byte, err error)
 
 	// Makes trie more verbose
 	SetTrace(bool)
@@ -97,7 +98,7 @@ type Trie interface {
 	ResetContext(ctx PatriciaContext)
 
 	// Process updates
-	Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error)
+	Process(ctx context.Context, rotx kv.TemporalTx, updates *Updates, logPrefix string) (rootHash []byte, err error)
 }
 
 type PatriciaContext interface {
@@ -108,9 +109,9 @@ type PatriciaContext interface {
 	// store branch data
 	PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error
 	// fetch account with given plain key
-	Account(plainKey []byte) (*Update, error)
+	Account(rotx kv.TemporalTx, plainKey []byte) (*Update, error)
 	// fetch storage with given plain key
-	Storage(plainKey []byte) (*Update, error)
+	Storage(rotx kv.TemporalTx, plainKey []byte) (*Update, error)
 }
 
 type TrieVariant string

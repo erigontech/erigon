@@ -148,12 +148,12 @@ func (fv *ForkValidator) FlushExtendingFork(tx kv.RwTx, accumulator *shards.Accu
 	start := time.Now()
 	// Flush changes to db.
 	if fv.sharedDom != nil {
-		temporalTx, ok := tx.(kv.TemporalTx)
+		temporalTx, ok := tx.(kv.TemporalRwTx)
 		if !ok {
-			return errors.New("FlushExtendingFork: tx is not a temporal tx")
+			return errors.New("FlushExtendingFork: tx is not a temporal rw tx")
 		}
 		fv.sharedDom.SetTx(temporalTx)
-		if err := fv.sharedDom.Flush(fv.ctx, tx); err != nil {
+		if err := fv.sharedDom.Flush(fv.ctx, temporalTx); err != nil {
 			return err
 		}
 		fv.sharedDom.Close()

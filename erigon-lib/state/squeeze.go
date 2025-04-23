@@ -517,7 +517,7 @@ func (sd *SharedDomains) discardWrites(d kv.Domain) {
 	sd.domainWriters[d].h.discard = true
 }
 
-func rebuildCommitmentShard(ctx context.Context, sd *SharedDomains, roTx kv.Tx, aggTx *AggregatorRoTx, next func() (bool, []byte), cfg *rebuiltCommitment, logger log.Logger) (*rebuiltCommitment, error) {
+func rebuildCommitmentShard(ctx context.Context, sd *SharedDomains, roTx kv.TemporalTx, aggTx *AggregatorRoTx, next func() (bool, []byte), cfg *rebuiltCommitment, logger log.Logger) (*rebuiltCommitment, error) {
 	sd.discardWrites(kv.AccountsDomain)
 	sd.discardWrites(kv.StorageDomain)
 	sd.discardWrites(kv.CodeDomain)
@@ -538,7 +538,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *SharedDomains, roTx kv.Tx, 
 		}
 	}
 	collectionSpent := time.Since(sf)
-	rh, err := sd.sdCtx.ComputeCommitment(ctx, true, sd.BlockNum(), fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo))
+	rh, err := sd.sdCtx.ComputeCommitment(ctx, roTx, true, sd.BlockNum(), fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo))
 	if err != nil {
 		return nil, err
 	}
