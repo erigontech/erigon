@@ -35,6 +35,9 @@ import (
 	"github.com/erigontech/erigon-lib/metrics"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
@@ -52,17 +55,22 @@ type ParallelExecutionState struct {
 	triggers     map[uint64]*TxTask
 	senderTxNums map[common.Address]uint64
 
+	isBor bool
+
 	logger log.Logger
 
-	trace bool
+	syncCfg ethconfig.Sync
+	trace   bool
 }
 
-func NewParallelExecutionState(domains *libstate.SharedDomains, logger log.Logger) *ParallelExecutionState {
+func NewParallelExecutionState(domains *libstate.SharedDomains, syncCfg ethconfig.Sync, isBor bool, logger log.Logger) *ParallelExecutionState {
 	return &ParallelExecutionState{
 		domains:      domains,
 		triggers:     map[uint64]*TxTask{},
 		senderTxNums: map[common.Address]uint64{},
 		logger:       logger,
+		syncCfg:      syncCfg,
+		isBor:        isBor,
 		//trace: true,
 	}
 }
@@ -234,6 +242,26 @@ func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *li
 			}
 		}
 	}
+
+	if rs.syncCfg.PersistReceiptsCache {
+		var receipt *types.Receipt
+		if !txTask.Final {
+			if txTask.TxIndex >= 0 && txTask.BlockReceipts != nil {
+				receipt = txTask.BlockReceipts[txTask.TxIndex]
+			}
+		} else {
+			if rs.isBor && txTask.TxIndex >= 1 {
+				receipt = txTask.BlockReceipts[txTask.TxIndex-1]
+				if receipt == nil {
+					return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
+				}
+			}
+		}
+		if err := rawdb.WriteReceiptCache(domains, receipt); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 

@@ -60,7 +60,7 @@ func DecodeZstdIfNeed(buf, v []byte, enabled bool) ([]byte, []byte, error) {
 
 	out, err := dec.DecodeAll(v, buf[:0])
 	if err != nil {
-		return buf, nil, err
+		return buf, nil, fmt.Errorf("snappy.decode3: %w", err)
 	}
 	return out, out, nil
 }
