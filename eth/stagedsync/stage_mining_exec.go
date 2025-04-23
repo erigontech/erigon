@@ -470,11 +470,6 @@ func addTransactionsToMiningBlock(
 			header.GasUsed += gasUsed
 			logs := ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), header.Number.Uint64(), header.Hash())
 			receipt := aa.CreateAAReceipt(txn.Hash(), status, gasUsed, header.GasUsed, header.Number.Uint64(), uint64(ibs.TxnIndex()), logs)
-			if err != nil {
-				ibs.RevertToSnapshot(snap)
-				gasPool = new(core.GasPool).AddGas(gasSnap).AddBlobGas(blobGasSnap) // restore gasPool as well as ibs
-				return nil, err
-			}
 
 			current.Txns = append(current.Txns, txn)
 			current.Receipts = append(current.Receipts, receipt)
