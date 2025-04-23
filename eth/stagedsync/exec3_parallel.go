@@ -1015,10 +1015,11 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 
 	maxValidated := be.validateTasks.maxComplete()
 	for i := 0; i < len(toExecute); i++ {
-
 		nextTx := toExecute[i]
 		execTask := be.tasks[nextTx]
-
+		if be.execFailed[nextTx] > 0 {
+			fmt.Println(be.blockNum, "TRY", nextTx)
+		}
 		if nextTx == maxValidated+1 {
 			be.skipCheck[nextTx] = true
 		} else {
