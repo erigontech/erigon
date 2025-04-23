@@ -75,7 +75,6 @@ go.work*
 
 docker-compose.*.yml
 .env
-coverage-test.out
 coverage-test-all.out
 
 dist
