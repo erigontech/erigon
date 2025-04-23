@@ -22,10 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"os"
 	"path"
-	"runtime"
-	"runtime/pprof"
 	"testing"
 	"time"
 
@@ -64,24 +61,8 @@ func TestShutterBlockBuilding(t *testing.T) {
 		t.Skip()
 	}
 
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please")
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-
-	go func() {
-		// do a goroutine dump if we haven't finished in a long time
-		err := libcommon.Sleep(ctx, 2*time.Minute)
-		if err != nil {
-			// means we've finished before sleep time - no need for a pprof dump
-			return
-		}
-
-		err = pprof.Lookup("goroutine").WriteTo(os.Stdout, 1)
-		require.NoError(t, err)
-	}()
 
 	uni := initBlockBuildingUniverse(ctx, t)
 	sender1 := uni.acc1PrivKey
