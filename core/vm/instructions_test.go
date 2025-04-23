@@ -30,6 +30,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/common/u256"
@@ -37,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/core/vm/stack"
-	"github.com/erigontech/erigon/params"
 )
 
 const opTestArg = "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
@@ -111,7 +111,7 @@ func init() {
 
 func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFunc, name string) {
 	var (
-		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, params.TestChainConfig, Config{})
+		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
 		stack          = stack.New()
 		pc             = uint64(0)
 		evmInterpreter = env.interpreter.(*EVMInterpreter)
@@ -215,7 +215,7 @@ func TestSAR(t *testing.T) {
 func TestAddMod(t *testing.T) {
 	t.Parallel()
 	var (
-		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, params.TestChainConfig, Config{})
+		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
 		stack          = stack.New()
 		evmInterpreter = NewEVMInterpreter(env, env.Config())
 		pc             = uint64(0)
@@ -254,7 +254,7 @@ func TestAddMod(t *testing.T) {
 // getResult is a convenience function to generate the expected values
 // func getResult(args []*twoOperandParams, opFn executionFunc) []TwoOperandTestcase {
 // 	var (
-// 		env         = NewEVM(BlockContext{}, TxContext{}, nil, params.TestChainConfig, Config{})
+// 		env         = NewEVM(BlockContext{}, TxContext{}, nil, chain.TestChainConfig, Config{})
 // 		stack       = stack.New()
 // 		pc          = uint64(0)
 // 		interpreter = env.interpreter.(*EVMInterpreter)
@@ -303,7 +303,7 @@ func TestJsonTestcases(t *testing.T) {
 
 func opBenchmark(b *testing.B, op executionFunc, args ...string) {
 	var (
-		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, params.TestChainConfig, Config{})
+		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
 		stack          = stack.New()
 		evmInterpreter = NewEVMInterpreter(env, env.Config())
 	)
@@ -538,7 +538,7 @@ func BenchmarkOpIsZero(b *testing.B) {
 func TestOpMstore(t *testing.T) {
 	t.Parallel()
 	var (
-		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, params.TestChainConfig, Config{})
+		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
 		stack          = stack.New()
 		mem            = NewMemory()
 		evmInterpreter = NewEVMInterpreter(env, env.Config())
@@ -562,7 +562,7 @@ func TestOpMstore(t *testing.T) {
 
 func BenchmarkOpMstore(bench *testing.B) {
 	var (
-		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, params.TestChainConfig, Config{})
+		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
 		stack          = stack.New()
 		mem            = NewMemory()
 		evmInterpreter = NewEVMInterpreter(env, env.Config())
@@ -585,7 +585,7 @@ func TestOpTstore(t *testing.T) {
 	t.Parallel()
 	var (
 		state          = state.New(nil)
-		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, state, params.TestChainConfig, Config{})
+		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, state, chain.TestChainConfig, Config{})
 		stack          = stack.New()
 		mem            = NewMemory()
 		evmInterpreter = NewEVMInterpreter(env, env.Config())
@@ -623,7 +623,7 @@ func TestOpTstore(t *testing.T) {
 
 func BenchmarkOpKeccak256(bench *testing.B) {
 	var (
-		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, params.TestChainConfig, Config{})
+		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
 		stack          = stack.New()
 		mem            = NewMemory()
 		evmInterpreter = NewEVMInterpreter(env, env.Config())
@@ -798,7 +798,7 @@ func TestOpMCopy(t *testing.T) {
 		},
 	} {
 		var (
-			env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, params.TestChainConfig, Config{})
+			env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
 			stack          = stack.New()
 			pc             = uint64(0)
 			evmInterpreter = NewEVMInterpreter(env, env.Config())

@@ -466,7 +466,7 @@ func TestChainTxReorgs(t *testing.T) {
 		addr2   = crypto.PubkeyToAddress(key2.PublicKey)
 		addr3   = crypto.PubkeyToAddress(key3.PublicKey)
 		gspec   = &types.Genesis{
-			Config:   params2.TestChainConfig,
+			Config:   libchain.TestChainConfig,
 			GasLimit: 3141592,
 			Alloc: types.GenesisAlloc{
 				addr1: {Balance: big.NewInt(1000000)},
@@ -1095,7 +1095,7 @@ func TestDoubleAccountRemoval(t *testing.T) {
 		input       = hexutil.MustDecode("0xadbd8465")
 		kill        = hexutil.MustDecode("0x41c0e1b5")
 		gspec       = &types.Genesis{
-			Config: params2.TestChainConfig,
+			Config: libchain.TestChainConfig,
 			Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds}},
 		}
 	)
@@ -1391,7 +1391,7 @@ func TestDeleteCreateRevert(t *testing.T) {
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
-			Config: params2.TestChainConfig,
+			Config: libchain.TestChainConfig,
 			Alloc: types.GenesisAlloc{
 				address: {Balance: funds},
 				// The address 0xAAAAA selfdestructs if called
@@ -1508,7 +1508,7 @@ func TestDeleteRecreateSlots(t *testing.T) {
 	t.Logf("Destination address: %x\n", aa)
 
 	gspec := &types.Genesis{
-		Config: params2.TestChainConfig,
+		Config: libchain.TestChainConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
@@ -1625,7 +1625,7 @@ func TestCVE2020_26265(t *testing.T) {
 		} // Code for CALLER
 	)
 	gspec := &types.Genesis{
-		Config: params2.TestChainConfig,
+		Config: libchain.TestChainConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
@@ -1703,7 +1703,7 @@ func TestDeleteRecreateAccount(t *testing.T) {
 	aaStorage[libcommon.HexToHash("02")] = libcommon.HexToHash("02")
 
 	gspec := &types.Genesis{
-		Config: params2.TestChainConfig,
+		Config: libchain.TestChainConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
@@ -1829,7 +1829,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 	aa := crypto.CreateAddress2(bb, [32]byte{}, initHash[:])
 	t.Logf("Destination address: %x\n", aa)
 	gspec := &types.Genesis{
-		Config: params2.TestChainConfig,
+		Config: libchain.TestChainConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
@@ -2035,7 +2035,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 	t.Logf("Destination address: %x\n", aa)
 
 	gspec := &types.Genesis{
-		Config: params2.TestChainConfig,
+		Config: libchain.TestChainConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address aa has some funds
@@ -2116,7 +2116,7 @@ func TestEIP2718Transition(t *testing.T) {
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
-			Config: params2.TestChainConfig,
+			Config: libchain.TestChainConfig,
 			Alloc: types.GenesisAlloc{
 				address: {Balance: funds},
 				// The address 0xAAAA sloads 0x00 and 0x01
@@ -2208,7 +2208,7 @@ func TestEIP1559Transition(t *testing.T) {
 		key2, _ = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
 		addr1   = crypto.PubkeyToAddress(key1.PublicKey)
 		addr2   = crypto.PubkeyToAddress(key2.PublicKey)
-		funds   = new(uint256.Int).Mul(u256.Num1, new(uint256.Int).SetUint64(params2.Ether))
+		funds   = new(uint256.Int).Mul(u256.Num1, new(uint256.Int).SetUint64(libcommon.Ether))
 		gspec   = &types.Genesis{
 			Config: params2.SepoliaChainConfig,
 			Alloc: types.GenesisAlloc{
@@ -2254,7 +2254,7 @@ func TestEIP1559Transition(t *testing.T) {
 					Data:     []byte{},
 				},
 				ChainID:    &chainID,
-				FeeCap:     new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(params2.GWei)),
+				FeeCap:     new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(libcommon.GWei)),
 				TipCap:     u256.Num2,
 				AccessList: accesses,
 			}
@@ -2314,7 +2314,7 @@ func TestEIP1559Transition(t *testing.T) {
 	chain, err = core.GenerateChain(m.ChainConfig, block, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{2})
 
-		var txn types.Transaction = types.NewTransaction(0, aa, u256.Num0, 30000, new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(params2.GWei)), nil)
+		var txn types.Transaction = types.NewTransaction(0, aa, u256.Num0, 30000, new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(libcommon.GWei)), nil)
 		txn, _ = types.SignTx(txn, *signer, key2)
 
 		b.AddTx(txn)

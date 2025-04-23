@@ -17,12 +17,12 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package params
+package common
 
 // These are the multipliers for ether denominations.
 // Example: To get the wei value of an amount in 'gwei', use
 //
-//	new(big.Int).Mul(value, big.NewInt(params.GWei))
+//	new(big.Int).Mul(value, big.NewInt(common.GWei))
 const (
 	Wei   = 1
 	GWei  = 1e9

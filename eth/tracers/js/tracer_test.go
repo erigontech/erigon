@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/tracers"
-	"github.com/erigontech/erigon/params"
 )
 
 type account struct{}
@@ -104,7 +103,7 @@ func TestTracer(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ret, err := runTrace(tracer, testCtx(), params.TestChainConfig, contract)
+		ret, err := runTrace(tracer, testCtx(), chain.TestChainConfig, contract)
 		if err != nil {
 			return nil, err.Error() // Stringify to allow comparison without nil checks
 		}
@@ -189,7 +188,7 @@ func TestHalt(t *testing.T) {
 		time.Sleep(1 * time.Second)
 		tracer.Stop(timeout)
 	}()
-	if _, err = runTrace(tracer, testCtx(), params.TestChainConfig, nil); !strings.Contains(err.Error(), "stahp") {
+	if _, err = runTrace(tracer, testCtx(), chain.TestChainConfig, nil); !strings.Contains(err.Error(), "stahp") {
 		t.Errorf("Expected timeout error, got %v", err)
 	}
 }
@@ -200,7 +199,7 @@ func TestHaltBetweenSteps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env := vm.NewEVM(evmtypes.BlockContext{BlockNumber: 1}, evmtypes.TxContext{GasPrice: uint256.NewInt(1)}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Tracer: tracer.Hooks})
+	env := vm.NewEVM(evmtypes.BlockContext{BlockNumber: 1}, evmtypes.TxContext{GasPrice: uint256.NewInt(1)}, &dummyStatedb{}, chain.TestChainConfig, vm.Config{Tracer: tracer.Hooks})
 	scope := &vm.ScopeContext{
 		Contract: vm.NewContract(&account{}, libcommon.Address{}, uint256.NewInt(0), 0, false /* skipAnalysis */, c),
 	}
@@ -225,7 +224,7 @@ func TestNoStepExec(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		env := vm.NewEVM(evmtypes.BlockContext{BlockNumber: 1}, evmtypes.TxContext{GasPrice: uint256.NewInt(100)}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Tracer: tracer.Hooks})
+		env := vm.NewEVM(evmtypes.BlockContext{BlockNumber: 1}, evmtypes.TxContext{GasPrice: uint256.NewInt(100)}, &dummyStatedb{}, chain.TestChainConfig, vm.Config{Tracer: tracer.Hooks})
 		tracer.OnTxStart(env.GetVMContext(), types.NewTransaction(0, libcommon.Address{}, new(uint256.Int), 0, new(uint256.Int), nil), libcommon.Address{})
 		tracer.OnEnter(0, byte(vm.CALL), libcommon.Address{}, libcommon.Address{}, false, []byte{}, 1000, uint256.NewInt(0), []byte{})
 		tracer.OnExit(0, nil, 0, nil, false)

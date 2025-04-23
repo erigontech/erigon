@@ -20,9 +20,9 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/params"
 	"github.com/holiman/uint256"
 	"pgregory.net/rapid"
 )
@@ -31,7 +31,7 @@ func TestInterpreterReadonly(t *testing.T) {
 	t.Parallel()
 	c := NewJumpDestCache()
 	rapid.Check(t, func(t *rapid.T) {
-		env := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, params.TestChainConfig, Config{})
+		env := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, chain.TestChainConfig, Config{})
 
 		isEVMSliceTest := rapid.SliceOfN(rapid.Bool(), 1, -1).Draw(t, "tevm")
 		readOnlySliceTest := rapid.SliceOfN(rapid.Bool(), len(isEVMSliceTest), len(isEVMSliceTest)).Draw(t, "readonly")
@@ -291,7 +291,7 @@ func TestReadonlyBasicCases(t *testing.T) {
 				t.Parallel()
 				readonlySliceTest := testcase.readonlySliceTest
 
-				env := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, params.TestChainConfig, Config{})
+				env := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, chain.TestChainConfig, Config{})
 
 				readonliesGot := make([]*readOnlyState, len(testcase.readonlySliceTest))
 				isEVMGot := make([]bool, len(evmsTestcase.emvs))
