@@ -18,13 +18,13 @@ func growslice(b []byte, wantLength int) []byte {
 var (
 	zstdEncPool = sync.Pool{
 		New: func() interface{} {
-			enc, _ := zstd.NewWriter(nil)
+			enc, _ := zstd.NewWriter(nil, zstd.WithEncoderCRC(false), zstd.WithZeroFrames(true))
 			return enc
 		},
 	}
 	zstdDecPool = sync.Pool{
 		New: func() interface{} {
-			dec, _ := zstd.NewReader(nil)
+			dec, _ := zstd.NewReader(nil, zstd.IgnoreChecksum(true))
 			return dec
 		},
 	}
@@ -41,7 +41,6 @@ func EncodeZstdIfNeed(buf, v []byte, enabled bool) ([]byte, []byte) {
 
 	enc := zstdEncPool.Get().(*zstd.Encoder)
 	defer zstdEncPool.Put(enc)
-	enc.Reset(nil) // clear any previous state
 
 	// EncodeAll uses buf[:0] to reuse the backing array
 	buf = enc.EncodeAll(v, buf[:0])
