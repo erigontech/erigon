@@ -39,8 +39,8 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/core/rawdb/utils"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/erigon-db/rawdb/utils"
 )
 
 // ReadCanonicalHash retrieves the hash assigned to a canonical block number.
