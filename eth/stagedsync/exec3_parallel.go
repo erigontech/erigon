@@ -881,7 +881,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				if readSet := be.blockIO.ReadSet(txVersion.TxIndex); readSet != nil {
 					readSet.Scan(func(vr *state.VersionedRead) bool {
-						reads = append(reads, vr.String())
+						reads = append(reads, vr.Source.VersionedString(vr.Version))
 						return true
 					})
 				}

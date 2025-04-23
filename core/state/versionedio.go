@@ -32,7 +32,7 @@ func (s ReadSource) String() string {
 	}
 }
 
-func (s ReadSource) versionedString(version Version) string {
+func (s ReadSource) VersionedString(version Version) string {
 	switch s {
 	case MapRead:
 		return fmt.Sprintf("version-map:%d.%d", version.TxIndex, version.Incarnation)
@@ -146,7 +146,7 @@ type VersionedRead struct {
 }
 
 func (vr VersionedRead) String() string {
-	return fmt.Sprintf("%x %s (%s): %s", vr.Address, AccountKey{Path: vr.Path, Key: vr.Key}, vr.Source.versionedString(vr.Version), valueString(vr.Path, vr.Val))
+	return fmt.Sprintf("%x %s (%s): %s", vr.Address, AccountKey{Path: vr.Path, Key: vr.Key}, vr.Source.VersionedString(vr.Version), valueString(vr.Path, vr.Val))
 }
 
 type VersionedWrite struct {
