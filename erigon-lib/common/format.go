@@ -1,6 +1,6 @@
 // Copyright 2016 The go-ethereum Authors
 // (original work)
-// Copyright 2024 The Erigon Authors
+// Copyright 2021 The Erigon Authors
 // (modifications)
 // This file is part of Erigon.
 //
