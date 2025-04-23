@@ -5,10 +5,12 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+
+	"github.com/erigontech/erigon-lib/common/compress"
 )
 
-func NewWriter(parent io.Writer, limit int, snappyEnabled bool) *Writer {
-	return &Writer{parent: parent, limit: limit, snappyEnabled: snappyEnabled}
+func NewWriter(parent io.Writer, limit int, compressionEnabled bool) *Writer {
+	return &Writer{parent: parent, limit: limit, compressionEnabled: compressionEnabled}
 }
 
 type Writer struct {
@@ -17,8 +19,8 @@ type Writer struct {
 	keys, vals         []byte
 	kLengths, vLengths []int
 
-	snappyBuf     []byte
-	snappyEnabled bool
+	compressionBuf     []byte
+	compressionEnabled bool
 }
 
 func (c *Writer) Empty() bool { return c.i == 0 }
@@ -92,7 +94,7 @@ func (c *Writer) bytes() []byte {
 	c.vals = append(c.vals, keysAndVals...)
 	lengthsAndKeysAndVals := c.vals
 
-	c.snappyBuf, lengthsAndKeysAndVals = EncodeSnappyIfNeed(c.snappyBuf, lengthsAndKeysAndVals, c.snappyEnabled)
+	c.compressionBuf, lengthsAndKeysAndVals = compress.EncodeZstdIfNeed(c.compressionBuf, lengthsAndKeysAndVals, c.compressionEnabled)
 
 	return lengthsAndKeysAndVals
 }
@@ -109,17 +111,17 @@ func (c *Writer) DisableFsync() {
 
 var be = binary.BigEndian
 
-func Get(key, compressedPage []byte, snappyBuf []byte, snappyEnabled bool) (v []byte, snappyBufOut []byte) {
+func Get(key, compressedPage []byte, compressionBuf []byte, compressionEnabled bool) (v []byte, compressionBufOut []byte) {
 	var err error
 	var page []byte
-	snappyBuf, page, err = DecodeSnappyIfNeed(snappyBuf, compressedPage, snappyEnabled)
+	compressionBuf, page, err = compress.DecodeZstdIfNeed(compressionBuf, compressedPage, compressionEnabled)
 	if err != nil {
 		panic(err)
 	}
 
 	cnt := int(page[0])
 	if cnt == 0 {
-		return nil, snappyBuf
+		return nil, compressionBuf
 	}
 	meta, data := page[1:1+cnt*4*2], page[1+cnt*4*2:]
 	kLens, vLens := meta[:cnt*4], meta[cnt*4:]
@@ -136,14 +138,14 @@ func Get(key, compressedPage []byte, snappyBuf []byte, snappyEnabled bool) (v []
 		kLen, vLen := be.Uint32(kLens[i:]), be.Uint32(vLens[i:])
 		foundKey := keys[kOffset : kOffset+kLen]
 		if bytes.Equal(key, foundKey) {
-			return vals[vOffset : vOffset+vLen], snappyBuf
+			return vals[vOffset : vOffset+vLen], compressionBuf
 		} else {
 			_ = data
 		}
 		kOffset += kLen
 		vOffset += vLen
 	}
-	return nil, snappyBuf
+	return nil, compressionBuf
 }
 
 type Reader struct {
@@ -151,18 +153,18 @@ type Reader struct {
 	kLens, vLens, data []byte
 	kOffset, vOffset   uint32
 
-	snappyBuf []byte
+	compressionBuf []byte
 }
 
-func FromBytes(buf []byte, snappyEnabled bool) *Reader {
+func FromBytes(buf []byte, compressionEnabled bool) *Reader {
 	r := &Reader{}
-	r.Reset(buf, snappyEnabled)
+	r.Reset(buf, compressionEnabled)
 	return r
 }
 
-func (r *Reader) Reset(v []byte, snappyEnabled bool) (n int) {
+func (r *Reader) Reset(v []byte, compressionEnabled bool) (n int) {
 	var err error
-	r.snappyBuf, v, err = DecodeSnappyIfNeed(r.snappyBuf, v, snappyEnabled)
+	r.compressionBuf, v, err = compress.DecodeZstdIfNeed(r.compressionBuf, v, compressionEnabled)
 	if err != nil {
 		panic(fmt.Errorf("len(v): %d, %w", len(v), err))
 	}
