@@ -207,7 +207,11 @@ func (tx *AccountAbstractionTransaction) Type() byte {
 }
 
 func (tx *AccountAbstractionTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
-	return nil, errors.New("do not use")
+	return &Message{
+		to:         nil,
+		gasPrice:   *tx.FeeCap,
+		blobHashes: []common.Hash{},
+	}, errors.New("do not use")
 }
 
 func (tx *AccountAbstractionTransaction) WithSignature(signer Signer, sig []byte) (Transaction, error) {

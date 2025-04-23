@@ -284,6 +284,8 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 				break
 			}
 
+			msg, _ := txTask.Tx.AsMessage(types.Signer{}, nil, nil)
+			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.vmCfg, rules)
 			rw.execAATxn(txTask)
 			return
 		}
@@ -400,7 +402,7 @@ func (rw *Worker) execAATxn(txTask *state.TxTask) {
 	txTask.TraceFroms = rw.callTracer.Froms()
 	txTask.TraceTos = rw.callTracer.Tos()
 
-	log.Info("✅[aa] executed AA bundle transaction", "txIndex", txTask.TxIndex)
+	log.Info("🚀[aa] executed AA bundle transaction", "txIndex", txTask.TxIndex)
 }
 
 func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger log.Logger, hooks *tracing.Hooks, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.ParallelExecutionState, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int, dirs datadir.Dirs, isMining bool) (reconWorkers []*Worker, applyWorker *Worker, rws *state.ResultsQueue, clear func(), wait func()) {
