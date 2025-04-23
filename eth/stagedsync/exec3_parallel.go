@@ -888,7 +888,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 				if writeSet := be.blockIO.WriteSet(txVersion.TxIndex); writeSet != nil {
 					for _, vr := range writeSet {
-						reads = append(reads, fmt.Sprintf("%x %s", vr.Address, state.AccountKey{Path: vr.Path, Key: vr.Key}))
+						writes = append(reads, fmt.Sprintf("%x %s", vr.Address, state.AccountKey{Path: vr.Path, Key: vr.Key}))
 					}
 				}
 				fmt.Println(be.blockNum, "FAILED", tx, be.txIncarnations[tx], "failed", be.execFailed[tx], "aborted", be.execAborted[tx], "reads", reads, "writes", writes)
@@ -1052,9 +1052,6 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 							}
 							return res
 						})) {
-				if be.execFailed[nextTx] > 0 {
-					fmt.Println(be.blockNum, "PEND", nextTx)
-				}
 				be.execTasks.pushPending(nextTx)
 				continue
 			}
