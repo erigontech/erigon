@@ -287,6 +287,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			msg, _ := txTask.Tx.AsMessage(types.Signer{}, nil, nil)
 			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.vmCfg, rules)
 			rw.execAATxn(txTask)
+			txTask.CreateReceipt(rw.Tx())
 			return
 		}
 
