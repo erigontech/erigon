@@ -205,7 +205,6 @@ func CopyFile(from, to string) error {
 }
 
 func (d Dirs) RenameOldVersions() error {
-	println("start rename old versions")
 	directories := []string{
 		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
 		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
@@ -222,13 +221,11 @@ func (d Dirs) RenameOldVersions() error {
 				name := entry.Name()
 				if strings.HasPrefix(name, "v1-") {
 					if strings.HasSuffix(name, ".torrent") {
-						println("removing torrent:", path)
 						if err := os.Remove(path); err != nil {
 							return err
 						}
 						return nil
 					}
-					println("renaming:", name)
 					newName := strings.Replace(name, "v1-", "v1.0-", 1)
 					oldPath := path
 					path = filepath.Join(filepath.Dir(path), newName)
@@ -249,7 +246,6 @@ func (d Dirs) RenameOldVersions() error {
 
 	// Удаление директории Downloader
 	if d.Downloader != "" && renamed > 0 {
-		println("removing downloader dir:", d.Downloader)
 		if err := os.RemoveAll(d.Downloader); err != nil {
 			return err
 		}
@@ -259,7 +255,6 @@ func (d Dirs) RenameOldVersions() error {
 }
 
 func (d Dirs) RenameNewVersions() error {
-	println("start rename new versions")
 	directories := []string{
 		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
 		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
