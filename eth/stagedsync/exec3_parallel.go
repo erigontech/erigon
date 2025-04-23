@@ -891,7 +891,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 						reads = append(reads, fmt.Sprintf("%x %s", vr.Address, state.AccountKey{Path: vr.Path, Key: vr.Key}))
 					}
 				}
-				fmt.Println(be.blockNum, "FAILED", tx, be.txIncarnations[tx], "failed", be.execFailed[tx], "aborted", be.execAborted[tx], "reads", reads)
+				fmt.Println(be.blockNum, "FAILED", tx, be.txIncarnations[tx], "failed", be.execFailed[tx], "aborted", be.execAborted[tx], "reads", reads, "writes", writes)
 			}
 
 			// 'create validation tasks for all transactions > tx ...'
