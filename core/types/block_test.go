@@ -32,6 +32,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -40,7 +41,6 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	params2 "github.com/erigontech/erigon/params"
 )
 
 // the following 2 functions are replica for the test
@@ -328,7 +328,7 @@ func makeBenchBlock() *Block {
 		key, _   = crypto.GenerateKey()
 		txs      = make([]Transaction, 70)
 		receipts = make([]*Receipt, len(txs))
-		signer   = LatestSigner(params2.TestChainConfig)
+		signer   = LatestSigner(chain.TestChainConfig)
 		uncles   = make([]*Header, 3)
 	)
 	header := &Header{

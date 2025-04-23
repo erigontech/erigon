@@ -615,7 +615,7 @@ func (dummyAccount) SetCode(libcommon.Hash, []byte)                         {}
 func (dummyAccount) ForEachStorage(cb func(key, value libcommon.Hash) bool) {}
 
 func testGenCfg() error {
-	env := vm.NewEVM(vm.Context{BlockNumber: big.NewInt(1)}, &dummyStatedb{}, params.TestChainConfig,
+	env := vm.NewEVM(vm.Context{BlockNumber: big.NewInt(1)}, &dummyStatedb{}, chain.TestChainConfig,
 		vm.Config{
 			EVMInterpreter: "SaInterpreter",
 		}, nil)
