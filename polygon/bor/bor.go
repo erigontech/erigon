@@ -39,6 +39,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/params"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -48,15 +49,14 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/finality"
 	"github.com/erigontech/erigon/polygon/bor/finality/flags"
@@ -257,6 +257,7 @@ type spanReader interface {
 	Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error)
 }
 
+//go:generate mockgen -typed=true -destination=./bridge_reader_mock.go -package=bor . bridgeReader
 type bridgeReader interface {
 	Events(ctx context.Context, blockNum uint64) ([]*types.Message, error)
 	EventsWithinTime(ctx context.Context, timeFrom, timeTo time.Time) ([]*types.Message, error)
@@ -1567,6 +1568,7 @@ func (c *Bor) CommitStates(
 		var events []*types.Message
 		var err error
 
+		ctx := dbg.ContextWithDebug(c.execCtx, true)
 		if fetchEventsWithingTime {
 			sprintLength := c.config.CalculateSprintLength(blockNum)
 
@@ -1595,12 +1597,12 @@ func (c *Bor) CommitStates(
 				timeTo = time.Unix(int64(prevSprintStart.Time), 0)
 			}
 
-			events, err = c.bridgeReader.EventsWithinTime(c.execCtx, timeFrom, timeTo)
+			events, err = c.bridgeReader.EventsWithinTime(ctx, timeFrom, timeTo)
 			if err != nil {
 				return err
 			}
 		} else {
-			events, err = c.bridgeReader.Events(c.execCtx, blockNum)
+			events, err = c.bridgeReader.Events(ctx, blockNum)
 			if err != nil {
 				return err
 			}

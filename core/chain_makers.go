@@ -26,18 +26,18 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/params"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	libstate "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/consensus/merge"
-	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/consensus/merge"
+	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
@@ -313,14 +313,14 @@ func (cp *ChainPack) NumberOfPoWBlocks() int {
 // Blocks created by GenerateChain do not contain valid proof of work
 // values. Inserting them into BlockChain requires use of FakePow or
 // a similar non-validating proof of work implementation.
-func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.Engine, db kv.RwDB, n int, gen func(int, *BlockGen)) (*ChainPack, error) {
+func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.Engine, db kv.TemporalRwDB, n int, gen func(int, *BlockGen)) (*ChainPack, error) {
 	if config == nil {
-		config = params.TestChainConfig
+		config = chain.TestChainConfig
 	}
 	headers, blocks, receipts := make([]*types.Header, n), make(types.Blocks, n), make([]types.Receipts, n)
 	chainreader := &FakeChainReader{Cfg: config, current: parent}
 	ctx := context.Background()
-	tx, errBegin := db.BeginRw(context.Background())
+	tx, errBegin := db.BeginTemporalRw(context.Background())
 	if errBegin != nil {
 		return nil, errBegin
 	}
@@ -355,9 +355,9 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		b.header = makeHeader(chainreader, parent, ibs, b.engine)
 		// Mutate the state and block according to any hard-fork specs
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
-			limit := new(big.Int).Add(daoBlock, params.DAOForkExtraRange)
+			limit := new(big.Int).Add(daoBlock, misc.DAOForkExtraRange)
 			if b.header.Number.Cmp(daoBlock) >= 0 && b.header.Number.Cmp(limit) < 0 {
-				b.header.Extra = libcommon.CopyBytes(params.DAOForkBlockExtra)
+				b.header.Extra = libcommon.CopyBytes(misc.DAOForkBlockExtra)
 			}
 		}
 		if b.engine != nil {

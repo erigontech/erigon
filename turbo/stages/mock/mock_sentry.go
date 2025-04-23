@@ -58,8 +58,6 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/blockio"
@@ -69,22 +67,26 @@ import (
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconsensusconfig"
-	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/eth/tracers"
+	debugtracer "github.com/erigontech/erigon/eth/tracers/debug"
+	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/consensus/ethash"
+	"github.com/erigontech/erigon/execution/eth1"
+	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
 	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/turbo/builder"
+	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
-	"github.com/erigontech/erigon/turbo/execution/eth1"
-	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader"
-	"github.com/erigontech/erigon/turbo/jsonrpc/receipts"
-	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
@@ -280,11 +282,20 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	cfg.TxPool.Disable = !withTxPool
 	cfg.Dirs = dirs
 	cfg.AlwaysGenerateChangesets = true
+	cfg.PersistReceipts = 4
 	cfg.ChaosMonkey = false
 	cfg.Snapshot.ChainName = gspec.Config.ChainName
 
+	logLvl := log.LvlError
+	if lvl, ok := os.LookupEnv("MOCK_SENTRY_LOG_LEVEL"); ok {
+		logLvl, err = log.LvlFromString(lvl)
+		if err != nil {
+			panic(err)
+		}
+	}
+
 	logger := log.Root()
-	logger.SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
+	logger.SetHandler(log.LvlFilterHandler(logLvl, log.StderrHandler))
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	db, agg := temporaltest.NewTestDB(tb, dirs)
@@ -354,6 +365,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			stateChangesClient,
 			func() {}, /* builderNotifyNewTxns */
 			logger,
+			nil,
 			txpool.WithP2PFetcherWg(&mock.ReceiveWg),
 			txpool.WithP2PSenderWg(nil),
 			txpool.WithFeeCalculator(nil),
@@ -542,9 +554,17 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		logger, stages.ModeApplyingBlocks,
 	)
 
+	var tracer *tracers.Tracer
+	if dir, ok := os.LookupEnv("MOCK_SENTRY_DEBUG_TRACER_OUTPUT_DIR"); ok {
+		tracer = debugtracer.New(dir, debugtracer.WithRecordOptions(debugtracer.RecordOptions{
+			DisableOnOpcodeStackRecording:  true,
+			DisableOnOpcodeMemoryRecording: true,
+		}))
+	}
+
 	cfg.Genesis = gspec
 	pipelineStages := stages2.NewPipelineStages(mock.Ctx, db, &cfg, p2p.Config{}, mock.sentriesClient, mock.Notifications,
-		snapDownloader, mock.BlockReader, blockRetire, nil, forkValidator, logger, nil, checkStateRoot)
+		snapDownloader, mock.BlockReader, blockRetire, nil, forkValidator, logger, tracer, checkStateRoot)
 	mock.posStagedSync = stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
 	mock.Eth1ExecutionService = eth1.NewEthereumExecutionModule(mock.BlockReader, mock.DB, mock.posStagedSync, forkValidator, mock.ChainConfig, assembleBlockPOS, nil, mock.Notifications.Accumulator, mock.Notifications.RecentLogs, mock.Notifications.StateChangesConsumer, logger, engine, cfg.Sync, ctx)
@@ -610,10 +630,10 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 
 // Mock is convenience function to create a mock with some pre-set values
 func Mock(tb testing.TB) *MockSentry {
-	funds := big.NewInt(1 * params.Ether)
+	funds := big.NewInt(1 * libcommon.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
-	chainConfig := params.TestChainConfig
+	chainConfig := chain.TestChainConfig
 	gspec := &types.Genesis{
 		Config: chainConfig,
 		Alloc: types.GenesisAlloc{
@@ -624,10 +644,10 @@ func Mock(tb testing.TB) *MockSentry {
 }
 
 func MockWithTxPool(t *testing.T) *MockSentry {
-	funds := big.NewInt(1 * params.Ether)
+	funds := big.NewInt(1 * libcommon.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
-	chainConfig := params.TestChainConfig
+	chainConfig := chain.TestChainConfig
 	gspec := &types.Genesis{
 		Config: chainConfig,
 		Alloc: types.GenesisAlloc{
@@ -640,7 +660,7 @@ func MockWithTxPool(t *testing.T) *MockSentry {
 }
 
 func MockWithTxPoolCancun(t *testing.T) *MockSentry {
-	funds := big.NewInt(1 * params.Ether)
+	funds := big.NewInt(1 * libcommon.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
 	chainConfig := params.AllProtocolChanges
@@ -656,7 +676,7 @@ func MockWithTxPoolCancun(t *testing.T) *MockSentry {
 }
 
 func MockWithZeroTTD(t *testing.T, withPosDownloader bool) *MockSentry {
-	funds := big.NewInt(1 * params.Ether)
+	funds := big.NewInt(1 * libcommon.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
 	chainConfig := params.AllProtocolChanges
@@ -671,10 +691,10 @@ func MockWithZeroTTD(t *testing.T, withPosDownloader bool) *MockSentry {
 }
 
 func MockWithZeroTTDGnosis(t *testing.T, withPosDownloader bool) *MockSentry {
-	funds := big.NewInt(1 * params.Ether)
+	funds := big.NewInt(1 * libcommon.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
-	chainConfig := params.TestChainAuraConfig
+	chainConfig := chain.TestChainAuraConfig
 	chainConfig.TerminalTotalDifficulty = libcommon.Big0
 	chainConfig.TerminalTotalDifficultyPassed = true
 	gspec := &types.Genesis{
@@ -767,7 +787,7 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 	initialCycle, firstCycle := MockInsertAsInitialCycle, false
 	hook := stages2.NewHook(ms.Ctx, ms.DB, ms.Notifications, ms.Sync, ms.BlockReader, ms.ChainConfig, ms.Log, nil)
 
-	if err = stages2.StageLoopIteration(ms.Ctx, ms.DB, wrap.TxContainer{}, ms.Sync, initialCycle, firstCycle, ms.Log, ms.BlockReader, hook); err != nil {
+	if err = stages2.StageLoopIteration(ms.Ctx, ms.DB, wrap.NewTxContainer(nil, nil), ms.Sync, initialCycle, firstCycle, ms.Log, ms.BlockReader, hook); err != nil {
 		return err
 	}
 	if ms.TxPool != nil {

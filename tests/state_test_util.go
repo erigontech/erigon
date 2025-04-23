@@ -44,13 +44,13 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
-	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/execution/consensus/misc"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 // StateTest checks transaction processing without block context.
@@ -203,9 +203,8 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 
-	var txc wrap.TxContainer
-	txc.Tx = tx
-	domains, err := state2.NewSharedDomains(tx, log.New())
+	txc := wrap.NewTxContainer(tx, nil)
+	domains, err := state2.NewSharedDomains(txc.Ttx, log.New())
 	if err != nil {
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
@@ -324,10 +323,8 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, b
 		}
 	}
 
-	var txc wrap.TxContainer
-	txc.Tx = tx
-
-	domains, err := state2.NewSharedDomains(tx, log.New())
+	txc := wrap.NewTxContainer(tx, nil)
+	domains, err := state2.NewSharedDomains(txc.Ttx, log.New())
 	if err != nil {
 		return nil, err
 	}

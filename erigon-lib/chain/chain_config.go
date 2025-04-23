@@ -23,8 +23,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
 )
 
 // Config is the core config which determines the blockchain settings.
@@ -95,6 +95,39 @@ type Config struct {
 	// Account Abstraction
 	AllowAA bool
 }
+
+var (
+	TestChainConfig = &Config{
+		ChainID:               big.NewInt(1337),
+		Consensus:             EtHashConsensus,
+		HomesteadBlock:        big.NewInt(0),
+		TangerineWhistleBlock: big.NewInt(0),
+		SpuriousDragonBlock:   big.NewInt(0),
+		ByzantiumBlock:        big.NewInt(0),
+		ConstantinopleBlock:   big.NewInt(0),
+		PetersburgBlock:       big.NewInt(0),
+		IstanbulBlock:         big.NewInt(0),
+		MuirGlacierBlock:      big.NewInt(0),
+		BerlinBlock:           big.NewInt(0),
+		Ethash:                new(EthashConfig),
+	}
+
+	TestChainAuraConfig = &Config{
+		ChainID:               big.NewInt(1),
+		Consensus:             AuRaConsensus,
+		HomesteadBlock:        big.NewInt(0),
+		TangerineWhistleBlock: big.NewInt(0),
+		SpuriousDragonBlock:   big.NewInt(0),
+		ByzantiumBlock:        big.NewInt(0),
+		ConstantinopleBlock:   big.NewInt(0),
+		PetersburgBlock:       big.NewInt(0),
+		IstanbulBlock:         big.NewInt(0),
+		MuirGlacierBlock:      big.NewInt(0),
+		BerlinBlock:           big.NewInt(0),
+		LondonBlock:           big.NewInt(0),
+		Aura:                  &AuRaConfig{},
+	}
+)
 
 type BlobConfig struct {
 	Target                *uint64 `json:"target,omitempty"`
@@ -323,7 +356,7 @@ func (c *Config) GetMinBlobGasPrice() uint64 {
 }
 
 func (c *Config) GetMaxBlobGasPerBlock(t uint64) uint64 {
-	return c.GetMaxBlobsPerBlock(t) * fixedgas.BlobGasPerBlob
+	return c.GetMaxBlobsPerBlock(t) * params.BlobGasPerBlob
 }
 
 func (c *Config) GetMaxBlobsPerBlock(time uint64) uint64 {
@@ -339,7 +372,7 @@ func (c *Config) GetTargetBlobGasPerBlock(t uint64) uint64 {
 	if c != nil {
 		b = c.BlobSchedule
 	}
-	return b.TargetBlobsPerBlock(c.IsPrague(t)) * fixedgas.BlobGasPerBlob
+	return b.TargetBlobsPerBlock(c.IsPrague(t)) * params.BlobGasPerBlob
 }
 
 func (c *Config) GetBlobGasPriceUpdateFraction(t uint64) uint64 {

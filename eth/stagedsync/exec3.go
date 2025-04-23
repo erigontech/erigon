@@ -86,7 +86,7 @@ type Progress struct {
 	logger       log.Logger
 }
 
-func (p *Progress) Log(suffix string, rs *state.ParallelExecutionState, in *state.QueueWithRetry, rws *state.ResultsQueue, txCount uint64, gas uint64, inputBlockNum uint64, outputBlockNum uint64, outTxNum uint64, repeatCount uint64, idxStepsAmountInDB float64, shouldGenerateChangesets bool, inMemExec bool) {
+func (p *Progress) Log(suffix string, rs *state.ParallelExecutionState, in *state.QueueWithRetry, rws *state.ResultsQueue, txCount uint64, gas uint64, inputBlockNum uint64, outputBlockNum uint64, outTxNum uint64, repeatCount uint64, idxStepsAmountInDB float64, commitEveryBlock bool, inMemExec bool) {
 	mxExecStepsInDB.Set(idxStepsAmountInDB * 100)
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
@@ -102,7 +102,7 @@ func (p *Progress) Log(suffix string, rs *state.ParallelExecutionState, in *stat
 		suffix = " " + suffix
 	}
 
-	if shouldGenerateChangesets {
+	if commitEveryBlock {
 		suffix += " Commit every block"
 	}
 
@@ -258,7 +258,11 @@ func ExecV3(ctx context.Context,
 		doms = txc.Doms
 	} else {
 		var err error
-		doms, err = state2.NewSharedDomains(applyTx, log.New())
+		temporalTx, ok := applyTx.(kv.TemporalTx)
+		if !ok {
+			return errors.New("applyTx is not a temporal transaction")
+		}
+		doms, err = state2.NewSharedDomains(temporalTx, log.New())
 		// if we are behind the commitment, we can't execute anything
 		// this can heppen if progress in domain is higher than progress in blocks
 		if errors.Is(err, state2.ErrBehindCommitment) {
@@ -390,7 +394,11 @@ func ExecV3(ctx context.Context,
 		executor = pe
 	} else {
 		applyWorker.ResetTx(applyTx)
-		doms.SetTx(applyTx)
+		temporalTx, ok := applyTx.(kv.TemporalTx)
+		if !ok {
+			return errors.New("applyTx is not a temporal transaction")
+		}
+		doms.SetTx(temporalTx)
 
 		se := &serialExecutor{
 			txExecutor: txExecutor{
@@ -411,7 +419,7 @@ func ExecV3(ctx context.Context,
 		}
 
 		defer func() {
-			progress.Log("Done", executor.readState(), nil, nil, se.txCount, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
+			progress.Log("Done", executor.readState(), nil, nil, se.txCount, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets || cfg.syncCfg.KeepExecutionProofs, inMemExec)
 		}()
 
 		executor = se
@@ -678,7 +686,7 @@ Loop:
 
 		mxExecBlocks.Add(1)
 
-		if shouldGenerateChangesets {
+		if shouldGenerateChangesets || cfg.syncCfg.KeepExecutionProofs {
 			aggTx := executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 			aggTx.RestrictSubsetFileDeletions(true)
 			start := time.Now()
@@ -694,13 +702,23 @@ Loop:
 
 			ts += time.Since(start)
 			aggTx.RestrictSubsetFileDeletions(false)
-			executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
-			if !inMemExec {
-				if err := state2.WriteDiffSet(executor.tx(), blockNum, b.Hash(), changeset); err != nil {
-					return err
+			if shouldGenerateChangesets {
+				executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
+				if !inMemExec {
+					if err := state2.WriteDiffSet(executor.tx(), blockNum, b.Hash(), changeset); err != nil {
+						return err
+					}
 				}
 			}
 			executor.domains().SetChangesetAccumulator(nil)
+
+			if cfg.syncCfg.PersistReceipts > 0 {
+				if len(txTasks) > 0 && txTasks[0].BlockReceipts != nil {
+					if err := rawdb.WriteReceiptsCache(executor.tx(), txTasks[0].BlockNum, txTasks[0].BlockHash, txTasks[0].BlockReceipts); err != nil {
+						return err
+					}
+				}
+			}
 		}
 
 		mxExecBlocks.Add(1)
@@ -754,7 +772,13 @@ Loop:
 				t1 = time.Since(tt) + ts
 
 				tt = time.Now()
-				if _, err := aggregatorRo.PruneSmallBatches(ctx, 10*time.Hour, executor.tx()); err != nil {
+
+				// allow greedy prune on non-chain-tip
+				if err = executor.tx().(kv.TemporalRwTx).Debug().GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
+					return err
+				}
+
+				if _, err := executor.tx().(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 10*time.Hour); err != nil {
 					return err
 				}
 				t3 = time.Since(tt)
@@ -818,7 +842,7 @@ func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *state2.SharedDomains) {
 		doms.Flush(context.Background(), tx)
 	}
 	{
-		it, err := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).DebugRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
+		it, err := tx.Debug().RangeLatest(kv.AccountsDomain, nil, nil, -1)
 		if err != nil {
 			panic(err)
 		}
@@ -942,9 +966,6 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	}
 	if !inMemExec {
 		if err := doms.Flush(ctx, applyTx); err != nil {
-			return false, err
-		}
-		if err = applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneCommitHistory(ctx, applyTx, nil); err != nil {
 			return false, err
 		}
 	}

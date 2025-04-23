@@ -184,6 +184,9 @@ func (db *DB) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	}
 	return &tx{ctx: ctx, db: db, stream: stream, streamCancelFn: streamCancelFn, viewID: msg.ViewId, id: msg.TxId}, nil
 }
+func (db *DB) Debug() kv.TemporalDebugDB                 { return kv.TemporalDebugDB(db) }
+func (db *DB) DomainTables(domain ...kv.Domain) []string { panic("not implemented") }
+
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	t, err := db.BeginRo(ctx) //nolint:gocritic
 	if err != nil {
@@ -227,6 +230,8 @@ func (db *DB) Update(ctx context.Context, f func(tx kv.RwTx) error) (err error) 
 func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) (err error) {
 	return errors.New("remote db provider doesn't support .UpdateNosync method")
 }
+
+func (tx *tx) AggTx() any                 { panic("not implemented") }
 func (tx *tx) Debug() kv.TemporalDebugTx  { panic("not implemented") }
 func (tx *tx) FreezeInfo() kv.FreezeInfo  { panic("not implemented") }
 func (db *DB) OnFreeze(f kv.OnFreezeFunc) { panic("not implemented") }

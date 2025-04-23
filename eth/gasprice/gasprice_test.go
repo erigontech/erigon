@@ -27,6 +27,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
@@ -35,9 +36,8 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/gasprice"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
@@ -47,7 +47,7 @@ func newTestBackend(t *testing.T) *mock.MockSentry {
 		key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr   = crypto.PubkeyToAddress(key.PublicKey)
 		gspec  = &types.Genesis{
-			Config: params.TestChainConfig,
+			Config: chain.TestChainConfig,
 			Alloc:  types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
 		}
 		signer = types.LatestSigner(gspec.Config)
@@ -57,7 +57,7 @@ func newTestBackend(t *testing.T) *mock.MockSentry {
 	// Generate testing blocks
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 32, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{1})
-		tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), libcommon.HexToAddress("deadbeef"), uint256.NewInt(100), 21000, uint256.NewInt(uint64(int64(i+1)*params.GWei)), nil), *signer, key)
+		tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), libcommon.HexToAddress("deadbeef"), uint256.NewInt(100), 21000, uint256.NewInt(uint64(int64(i+1)*libcommon.GWei)), nil), *signer, key)
 		if txErr != nil {
 			t.Fatalf("failed to create tx: %v", txErr)
 		}
@@ -77,7 +77,7 @@ func TestSuggestPrice(t *testing.T) {
 	config := gaspricecfg.Config{
 		Blocks:     2,
 		Percentile: 60,
-		Default:    big.NewInt(params.GWei),
+		Default:    big.NewInt(libcommon.GWei),
 	}
 
 	m := newTestBackend(t) //, big.NewInt(16), c.pending)
@@ -94,7 +94,7 @@ func TestSuggestPrice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to retrieve recommended gas price: %v", err)
 	}
-	expect := big.NewInt(params.GWei * int64(30))
+	expect := big.NewInt(libcommon.GWei * int64(30))
 	if got.Cmp(expect) != 0 {
 		t.Fatalf("Gas price mismatch, want %d, got %d", expect, got)
 	}
