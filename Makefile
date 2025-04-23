@@ -177,11 +177,11 @@ test-erigon-ext:
 
 ## test:                      run short tests with a 10m timeout
 test: test-erigon-lib
-	$(GOTEST) -short --timeout 10m -coverprofile=coverage.out
+	$(GOTEST) -short --timeout 10m -coverprofile=coverage-test.out
 
 ## test-all:                  run all tests with a 1h timeout
 test-all: test-erigon-lib-all
-	$(GOTEST) --timeout 60m
+	$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out
 
 ## test-hive						run the hive tests locally off nektos/act workflows simulator
 test-hive:	
