@@ -117,10 +117,6 @@ func withReset(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&reset, "reset", false, "reset given stage")
 }
 
-func withResetPruneAt(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&resetPruneAt, "resetPruneAt", false, "reset prune_at to 0 for a given stage")
-}
-
 func withBucket(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&bucket, "bucket", "", "reset given stage")
 }
@@ -150,7 +146,6 @@ func withDataDir(cmd *cobra.Command) {
 
 func withBatchSize(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&batchSizeStr, "batchSize", cli.BatchSizeFlag.Value, cli.BatchSizeFlag.Usage)
-	cmd.Flags().Uint64Var(&syncCfg.PersistReceipts, utils.PersistReceiptsFlag.Name, utils.PersistReceiptsFlag.Value, utils.PersistReceiptsFlag.Usage)
 }
 
 func withIntegrityChecks(cmd *cobra.Command) {
