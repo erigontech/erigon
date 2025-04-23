@@ -892,17 +892,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		be.versionMap.SetTrace(trace)
 		be.versionMap.FlushVersionedWrites(be.blockIO.WriteSet(txVersion.TxIndex), cntInvalid == 0, tracePrefix)
 		be.versionMap.SetTrace(false)
-
-		if be.blockNum == 66976934 && tx == 46 {
-			var writes []string
-			if writeSet := be.blockIO.WriteSet(txVersion.TxIndex); writeSet != nil {
-				for _, vr := range writeSet {
-					writes = append(writes, fmt.Sprintf("%x %s", vr.Address, state.AccountKey{Path: vr.Path, Key: vr.Key}))
-				}
-			}
-
-			fmt.Println(be.blockNum, tx, writes)
-		}
 	}
 
 	maxValidated := be.validateTasks.maxComplete()
@@ -1039,6 +1028,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 			txIndex := execTask.Version().TxIndex
 			if be.txIncarnations[nextTx] > 0 &&
 				(be.execAborted[nextTx] > 0 ||
+					be.execFailed[nextTx] > 0 ||
 					!be.blockIO.HasReads(txIndex) ||
 					!state.ValidateVersion(txIndex, be.blockIO, be.versionMap,
 						func(_ state.ReadSource, _, writtenVersion state.Version) bool {
