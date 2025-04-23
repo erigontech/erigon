@@ -297,8 +297,8 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 			result = &exec.Result{
 				TxIn: ev.VersionedReads(ibs),
 				Err: exec.ErrExecAbortError{
-					Dependency:  ibs.DepTxIndex(),
-					OriginError: err}}
+					DependencyTxIndex: ibs.DepTxIndex(),
+					OriginError:       err}}
 		}
 	}()
 
@@ -326,7 +326,7 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 
 	if ibs.HadInvalidRead() || result.Err != nil {
 		if err, ok := result.Err.(exec.ErrExecAbortError); !ok {
-			result.Err = exec.ErrExecAbortError{Dependency: ibs.DepTxIndex(), OriginError: err}
+			result.Err = exec.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: err}
 		}
 	}
 
@@ -739,18 +739,20 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 			addedDependencies := false
 
-			if execErr.Dependency >= 0 {
+			if execErr.DependencyTxIndex >= 0 {
+				dependency := execErr.DependencyTxIndex + 1
+
 				l := len(be.estimateDeps[tx])
-				for l > 0 && be.estimateDeps[tx][l-1] > execErr.Dependency {
+				for l > 0 && be.estimateDeps[tx][l-1] > dependency {
 					be.execTasks.removeDependency(be.estimateDeps[tx][l-1])
 					be.estimateDeps[tx] = be.estimateDeps[tx][:l-1]
 					l--
 				}
 
-				addedDependencies = be.execTasks.addDependency(execErr.Dependency, tx)
+				addedDependencies = be.execTasks.addDependency(dependency, tx)
 				be.execAborted[tx]++
 				if be.execAborted[tx] > 0 {
-					fmt.Println(be.blockNum, "ABORT", tx, be.txIncarnations[tx], be.execFailed[tx], be.execAborted[tx], "dep", execErr.Dependency, "err", execErr.OriginError)
+					fmt.Println(be.blockNum, "ABORT", tx, be.txIncarnations[tx], be.execFailed[tx], be.execAborted[tx], "dep", dependency, "err", execErr.OriginError)
 				}
 			} else {
 				estimate := 0
@@ -767,7 +769,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				be.execAborted[tx]++
 
 				if be.execAborted[tx] > 0 || be.execFailed[tx] > 0 {
-					fmt.Println(be.blockNum, "ABORT", tx, be.txIncarnations[tx], be.execFailed[tx], be.execAborted[tx], "err", execErr.OriginError)
+					fmt.Println(be.blockNum, "ABORT", tx, be.txIncarnations[tx], be.execFailed[tx], be.execAborted[tx], "est dep", estimate, "err", execErr.OriginError)
 				}
 			}
 

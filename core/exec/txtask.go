@@ -159,13 +159,13 @@ func (r *Result) createReceipt(txIndex int, cumulativeGasUsed uint64) *types.Rec
 }
 
 type ErrExecAbortError struct {
-	Dependency  int
-	OriginError error
+	DependencyTxIndex int
+	OriginError       error
 }
 
 func (e ErrExecAbortError) Error() string {
-	if e.Dependency >= 0 {
-		return fmt.Sprintf("Execution aborted due to dependency %d", e.Dependency)
+	if e.DependencyTxIndex >= 0 {
+		return fmt.Sprintf("Execution aborted due to dependency %d", e.DependencyTxIndex)
 	} else {
 		return "Execution aborted"
 	}
@@ -435,7 +435,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			message, err := txTask.TxMessage()
 
 			if err != nil {
-				return nil, ErrExecAbortError{Dependency: ibs.DepTxIndex(), OriginError: err}
+				return nil, ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: err}
 			}
 
 			// Apply the transaction to the current state (included in the env).
@@ -443,7 +443,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 				applyRes, err := core.ApplyMessageNoFeeBurnOrTip(evm, message, gasPool, true, false)
 
 				if applyRes == nil || err != nil {
-					return nil, ErrExecAbortError{Dependency: ibs.DepTxIndex(), OriginError: err}
+					return nil, ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: err}
 				}
 
 				reads := ibs.VersionedReads()

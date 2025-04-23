@@ -128,8 +128,8 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 
 			if i == 0 && val != nil && (val.(int) != t.nonce) {
 				return &exec.Result{Err: exec.ErrExecAbortError{
-					Dependency:  -1,
-					OriginError: fmt.Errorf("invalid nonce: got: %d, expected: %d", val.(int), t.nonce)}}
+					DependencyTxIndex: -1,
+					OriginError:       fmt.Errorf("invalid nonce: got: %d, expected: %d", val.(int), t.nonce)}}
 			}
 
 			if result.Status() == state.MVReadResultDependency {
@@ -159,7 +159,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	}
 
 	if dep != -1 {
-		return &exec.Result{Err: exec.ErrExecAbortError{Dependency: dep, OriginError: fmt.Errorf("Dependency error")}}
+		return &exec.Result{Err: exec.ErrExecAbortError{DependencyTxIndex: dep, OriginError: fmt.Errorf("Dependency error")}}
 	}
 
 	return &exec.Result{}
