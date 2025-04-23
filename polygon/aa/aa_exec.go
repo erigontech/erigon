@@ -243,6 +243,14 @@ func ExecuteAATransaction(
 ) (executionStatus uint64, gasUsed uint64, err error) {
 	executionStatus = types.ExecutionStatusSuccess
 
+	nonce, err := ibs.GetNonce(*tx.SenderAddress)
+	if err != nil {
+		return 0, 0, err
+	}
+	if err = ibs.SetNonce(*tx.SenderAddress, nonce+1); err != nil {
+		return 0, 0, err
+	}
+
 	// Execution frame
 	msg := tx.ExecutionFrame()
 	applyRes, err := core.ApplyFrame(evm, msg, gasPool)
