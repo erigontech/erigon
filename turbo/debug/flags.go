@@ -209,6 +209,10 @@ func SetupTracerCtx(ctx *cli.Context) (*tracers.Tracer, error) {
 	return tracers.New(tracerName, &tracers.Context{}, []byte(cfg))
 }
 
+// Since this errors if more than one is created anyway, it should be a global on this package. Now
+// we can register things against it. Consider just using the default http.ServeMux instead.
+var PprofMux *http.ServeMux
+
 // Setup initializes profiling and logging based on the CLI flags.
 // It should be called as early as possible in the program.
 func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *tracers.Tracer, *http.ServeMux, *http.ServeMux, error) {
@@ -256,8 +260,8 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *tracers.Tracer, *htt
 		if (address == metricsAddress) && metricsEnabled {
 			metricsMux = StartPProf(address, metricsMux)
 		} else {
-			pprofMux := StartPProf(address, nil)
-			return logger, tracer, metricsMux, pprofMux, nil
+			PprofMux = StartPProf(address, nil)
+			return logger, tracer, metricsMux, PprofMux, nil
 		}
 	}
 
@@ -320,9 +324,7 @@ func RaiseFdLimit() {
 	}
 }
 
-var (
-	metricsConfigs = []string{metricsEnabledFlag.Name, metricsAddrFlag.Name, metricsPortFlag.Name}
-)
+var metricsConfigs = []string{metricsEnabledFlag.Name, metricsAddrFlag.Name, metricsPortFlag.Name}
 
 func SetFlagsFromConfigFile(ctx *cli.Context) error {
 	filePath := ctx.String(configFlag.Name)

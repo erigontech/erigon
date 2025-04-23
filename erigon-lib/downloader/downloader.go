@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/turbo/debug"
 	"math"
 	"math/rand/v2"
 	"net/http"
@@ -2904,4 +2905,5 @@ func (d *Downloader) HandleTorrentClientStatus() {
 	http.HandleFunc("/downloaderTorrentClientStatus", func(w http.ResponseWriter, r *http.Request) {
 		d.torrentClient.WriteStatus(w)
 	})
+	debug.PprofMux
 }
