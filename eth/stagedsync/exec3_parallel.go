@@ -1027,16 +1027,25 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 			if be.txIncarnations[nextTx] > 0 &&
 				(be.execAborted[nextTx] > 0 ||
 					!be.blockIO.HasReads(txIndex) ||
-					!state.ValidateVersion(txIndex, be.blockIO, be.versionMap,
-						func(_ state.ReadSource, _, writtenVersion state.Version) bool {
-							res := writtenVersion.TxIndex < maxValidated &&
-								writtenVersion.Incarnation == be.txIncarnations[writtenVersion.TxIndex+1]
+					!func() bool {
+						valid := state.ValidateVersion(txIndex, be.blockIO, be.versionMap,
+							func(_ state.ReadSource, _, writtenVersion state.Version) bool {
+								res := writtenVersion.TxIndex < maxValidated &&
+									writtenVersion.Incarnation == be.txIncarnations[writtenVersion.TxIndex+1]
 
-							if be.execFailed[nextTx] > 0 || be.txIncarnations[nextTx] > 4 {
-								fmt.Println(be.blockNum, "VALIDATE", nextTx, writtenVersion.TxIndex, res, writtenVersion.TxIndex < maxValidated, writtenVersion.Incarnation, be.txIncarnations[writtenVersion.TxIndex+1])
-							}
-							return res
-						})) {
+								if be.execFailed[nextTx] > 0 || be.txIncarnations[nextTx] > 4 {
+									fmt.Println(be.blockNum, "VALIDATE", nextTx, writtenVersion.TxIndex, res, writtenVersion.TxIndex < maxValidated, writtenVersion.Incarnation, be.txIncarnations[writtenVersion.TxIndex+1])
+								}
+								return res
+							})
+						if be.execFailed[nextTx] > 0 {
+							fmt.Println(be.blockNum, "VALID", nextTx, valid)
+						}
+						return valid
+					}()) {
+				if be.execFailed[nextTx] > 0 {
+					fmt.Println(be.blockNum, "PEND", nextTx)
+				}
 				be.execTasks.pushPending(nextTx)
 				continue
 			}
