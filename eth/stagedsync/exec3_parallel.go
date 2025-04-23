@@ -878,12 +878,18 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 			if be.execFailed[tx] > 0 {
 				var reads []string
+				var writes []string
 
 				if readSet := be.blockIO.ReadSet(txVersion.TxIndex); readSet != nil {
 					readSet.Scan(func(vr *state.VersionedRead) bool {
-						reads = append(reads, vr.Source.VersionedString(vr.Version))
+						reads = append(reads, fmt.Sprintf("%x %s: %s", vr.Address, state.AccountKey{Path: vr.Path, Key: vr.Key}, vr.Source.VersionedString(vr.Version)))
 						return true
 					})
+				}
+				if writeSet := be.blockIO.WriteSet(txVersion.TxIndex); writeSet != nil {
+					for _, vr := range writeSet {
+						reads = append(reads, fmt.Sprintf("%x %s", vr.Address, state.AccountKey{Path: vr.Path, Key: vr.Key}))
+					}
 				}
 				fmt.Println(be.blockNum, "FAILED", tx, be.txIncarnations[tx], "failed", be.execFailed[tx], "aborted", be.execAborted[tx], "reads", reads)
 			}
