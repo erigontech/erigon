@@ -284,15 +284,18 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 				break
 			}
 
-			msg, _ := txTask.Tx.AsMessage(types.Signer{}, nil, nil)
+			msg, err := txTask.Tx.AsMessage(types.Signer{}, nil, nil)
+			if err != nil {
+				txTask.Error = err
+				break
+			}
+
 			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.vmCfg, rules)
 			rw.execAATxn(txTask)
-			txTask.CreateReceipt(rw.Tx())
 			break
 		}
 
 		msg := txTask.TxAsMessage
-
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.vmCfg, rules)
 
 		if rw.hooks != nil && rw.hooks.OnTxStart != nil {
@@ -402,6 +405,7 @@ func (rw *Worker) execAATxn(txTask *state.TxTask) {
 	txTask.Logs = rw.ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)
 	txTask.TraceFroms = rw.callTracer.Froms()
 	txTask.TraceTos = rw.callTracer.Tos()
+	txTask.CreateReceipt(rw.Tx())
 
 	log.Info("🚀[aa] executed AA bundle transaction", "txIndex", txTask.TxIndex, "status", status)
 }
