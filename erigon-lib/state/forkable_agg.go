@@ -96,8 +96,8 @@ func (r *ForkableAgg) RegisterBufferedForkable(ap *Forkable[BufferedTxI]) {
 // quick prune
 // prune
 // debug interface (files/db)
-// temporal interface
-// begin tx
+// - temporal interface (needs temporaldb)
+// - begin tx
 
 func (r *ForkableAgg) OpenFolder() error {
 	r.dirtyFilesLock.Lock()
@@ -389,6 +389,8 @@ type ForkableAggRoTx struct {
 	buffered []BufferedTxI
 
 	// TODO _leakId logic
+
+	// TODO map from forkableId -> stragety+index in array; strategy encoded in lowest 2-bits.
 }
 
 func (r *ForkableAgg) BeginFilesRo() *ForkableAggRoTx {
