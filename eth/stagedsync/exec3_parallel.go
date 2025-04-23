@@ -877,11 +877,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			be.execFailed[tx]++
 
 			if be.execFailed[tx] > 0 {
-				var reads []int
+				var reads []string
 
 				if readSet := be.blockIO.ReadSet(txVersion.TxIndex); readSet != nil {
 					readSet.Scan(func(vr *state.VersionedRead) bool {
-						reads = append(reads, vr.Version.TxIndex+1)
+						reads = append(reads, vr.String())
 						return true
 					})
 				}
