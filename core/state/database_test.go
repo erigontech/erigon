@@ -44,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
@@ -1493,7 +1492,7 @@ func TestRecreateAndRewind(t *testing.T) {
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
-			Config: params.TestChainConfig,
+			Config: chain.TestChainConfig,
 			Alloc: types.GenesisAlloc{
 				address: types.GenesisAccount{Balance: funds},
 			},

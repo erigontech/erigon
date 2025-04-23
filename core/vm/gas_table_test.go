@@ -31,6 +31,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -210,7 +211,7 @@ func TestCreateGas(t *testing.T) {
 		s := state.New(stateReader)
 		s.CreateAccount(address, true)
 		s.SetCode(address, hexutil.MustDecode(tt.code))
-		_ = s.CommitBlock(params.TestChainConfig.Rules(0, 0), stateWriter)
+		_ = s.CommitBlock(chain.TestChainConfig.Rules(0, 0), stateWriter)
 
 		vmctx := evmtypes.BlockContext{
 			CanTransfer: func(evmtypes.IntraBlockState, libcommon.Address, *uint256.Int) (bool, error) { return true, nil },
@@ -223,7 +224,7 @@ func TestCreateGas(t *testing.T) {
 			config.ExtraEips = []int{3860}
 		}
 
-		vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, params.TestChainConfig, config)
+		vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainConfig, config)
 
 		var startGas uint64 = math.MaxUint64
 		_, gas, err := vmenv.Call(vm.AccountRef(libcommon.Address{}), address, nil, startGas, new(uint256.Int), false /* bailout */)

@@ -150,39 +150,6 @@ var (
 	ChiadoChainConfig = readChainSpec("chainspecs/chiado.json")
 
 	CliqueSnapshot = NewSnapshotConfig(10, 1024, 16384, true, "")
-
-	TestChainConfig = &chain.Config{
-		ChainID:               big.NewInt(1337),
-		Consensus:             chain.EtHashConsensus,
-		HomesteadBlock:        big.NewInt(0),
-		TangerineWhistleBlock: big.NewInt(0),
-		SpuriousDragonBlock:   big.NewInt(0),
-		ByzantiumBlock:        big.NewInt(0),
-		ConstantinopleBlock:   big.NewInt(0),
-		PetersburgBlock:       big.NewInt(0),
-		IstanbulBlock:         big.NewInt(0),
-		MuirGlacierBlock:      big.NewInt(0),
-		BerlinBlock:           big.NewInt(0),
-		Ethash:                new(chain.EthashConfig),
-	}
-
-	TestChainAuraConfig = &chain.Config{
-		ChainID:               big.NewInt(1),
-		Consensus:             chain.AuRaConsensus,
-		HomesteadBlock:        big.NewInt(0),
-		TangerineWhistleBlock: big.NewInt(0),
-		SpuriousDragonBlock:   big.NewInt(0),
-		ByzantiumBlock:        big.NewInt(0),
-		ConstantinopleBlock:   big.NewInt(0),
-		PetersburgBlock:       big.NewInt(0),
-		IstanbulBlock:         big.NewInt(0),
-		MuirGlacierBlock:      big.NewInt(0),
-		BerlinBlock:           big.NewInt(0),
-		LondonBlock:           big.NewInt(0),
-		Aura:                  &chain.AuRaConfig{},
-	}
-
-	TestRules = TestChainConfig.Rules(0, 0)
 )
 
 type ConsensusSnapshotConfig struct {
@@ -209,8 +176,8 @@ func NewSnapshotConfig(checkpointInterval uint64, inmemorySnapshots int, inmemor
 	}
 }
 
-func ChainConfigByChainName(chain string) *chain.Config {
-	switch chain {
+func ChainConfigByChainName(chainName string) *chain.Config {
+	switch chainName {
 	case networkname.Mainnet:
 		return MainnetChainConfig
 	case networkname.Dev:
@@ -232,7 +199,7 @@ func ChainConfigByChainName(chain string) *chain.Config {
 	case networkname.Chiado:
 		return ChiadoChainConfig
 	case networkname.Test:
-		return TestChainConfig
+		return chain.TestChainConfig
 	default:
 		return nil
 	}

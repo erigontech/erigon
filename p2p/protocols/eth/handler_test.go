@@ -27,6 +27,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -39,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
-	params2 "github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -350,7 +350,7 @@ func TestGetBlockReceipts(t *testing.T) {
 // wraps it into a mock backend.
 func mockWithGenerator(t *testing.T, blocks int, generator func(int, *core.BlockGen)) *mock.MockSentry {
 	m := mock.MockWithGenesis(t, &types.Genesis{
-		Config: params2.TestChainConfig,
+		Config: chain.TestChainConfig,
 		Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
 	}, testKey, false)
 	if blocks > 0 {

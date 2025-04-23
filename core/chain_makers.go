@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/execution/consensus/misc"
-	params2 "github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
@@ -316,7 +315,7 @@ func (cp *ChainPack) NumberOfPoWBlocks() int {
 // a similar non-validating proof of work implementation.
 func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.Engine, db kv.TemporalRwDB, n int, gen func(int, *BlockGen)) (*ChainPack, error) {
 	if config == nil {
-		config = params2.TestChainConfig
+		config = chain.TestChainConfig
 	}
 	headers, blocks, receipts := make([]*types.Header, n), make(types.Blocks, n), make([]types.Receipts, n)
 	chainreader := &FakeChainReader{Cfg: config, current: parent}

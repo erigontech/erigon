@@ -86,11 +86,11 @@ func TestDump(t *testing.T) {
 	tests := []test{
 		{
 			chainSize:   5,
-			chainConfig: params.TestChainConfig,
+			chainConfig: chain.TestChainConfig,
 		},
 		{
 			chainSize:   50,
-			chainConfig: params.TestChainConfig,
+			chainConfig: chain.TestChainConfig,
 		},
 		{
 			chainSize:   1000,

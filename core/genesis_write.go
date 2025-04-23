@@ -267,7 +267,7 @@ func write(tx kv.RwTx, g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (
 
 // GenesisBlockForTesting creates and writes a block in which addr has the given wei balance.
 func GenesisBlockForTesting(db kv.RwDB, addr libcommon.Address, balance *big.Int, dirs datadir.Dirs, logger log.Logger) *types.Block {
-	g := types.Genesis{Alloc: types.GenesisAlloc{addr: {Balance: balance}}, Config: params2.TestChainConfig}
+	g := types.Genesis{Alloc: types.GenesisAlloc{addr: {Balance: balance}}, Config: chain.TestChainConfig}
 	block := MustCommitGenesis(&g, db, dirs, logger)
 	return block
 }
@@ -278,7 +278,7 @@ type GenAccount struct {
 }
 
 func GenesisWithAccounts(db kv.RwDB, accs []GenAccount, dirs datadir.Dirs, logger log.Logger) *types.Block {
-	g := types.Genesis{Config: params2.TestChainConfig}
+	g := types.Genesis{Config: chain.TestChainConfig}
 	allocs := make(map[libcommon.Address]types.GenesisAccount)
 	for _, acc := range accs {
 		allocs[acc.Addr] = types.GenesisAccount{Balance: acc.Balance}
@@ -401,7 +401,7 @@ func ChiadoGenesisBlock() *types.Genesis {
 	}
 }
 func TestGenesisBlock() *types.Genesis {
-	return &types.Genesis{Config: params2.TestChainConfig}
+	return &types.Genesis{Config: chain.TestChainConfig}
 }
 
 // Pre-calculated version of:
