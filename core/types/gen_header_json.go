@@ -18,23 +18,23 @@ var _ = (*headerMarshaling)(nil)
 // MarshalJSON marshals as JSON.
 func (h Header) MarshalJSON() ([]byte, error) {
 	type Header struct {
-		ParentHash            common.Hash    `json:"parentHash"       gencodec:"required"`
-		UncleHash             common.Hash    `json:"sha3Uncles"       gencodec:"required"`
-		Coinbase              common.Address `json:"miner"`
-		Root                  common.Hash    `json:"stateRoot"        gencodec:"required"`
-		TxHash                common.Hash    `json:"transactionsRoot" gencodec:"required"`
-		ReceiptHash           common.Hash    `json:"receiptsRoot"     gencodec:"required"`
-		Bloom                 Bloom          `json:"logsBloom"        gencodec:"required"`
-		Difficulty            *hexutil.Big   `json:"difficulty"       gencodec:"required"`
-		Number                *hexutil.Big   `json:"number"           gencodec:"required"`
-		GasLimit              hexutil.Uint64 `json:"gasLimit"         gencodec:"required"`
-		GasUsed               hexutil.Uint64 `json:"gasUsed"          gencodec:"required"`
-		Time                  hexutil.Uint64 `json:"timestamp"        gencodec:"required"`
-		Extra                 hexutil.Bytes  `json:"extraData"        gencodec:"required"`
-		MixDigest             common.Hash    `json:"mixHash"`
-		Nonce                 BlockNonce     `json:"nonce"`
-		AuRaStep              hexutil.Uint64 `json:"auraStep,omitempty"`
-		AuRaSeal              hexutil.Bytes  `json:"auraSeal,omitempty"`
+		ParentHash            common.Hash     `json:"parentHash"       gencodec:"required"`
+		UncleHash             common.Hash     `json:"sha3Uncles"       gencodec:"required"`
+		Coinbase              common.Address  `json:"miner"`
+		Root                  common.Hash     `json:"stateRoot"        gencodec:"required"`
+		TxHash                common.Hash     `json:"transactionsRoot" gencodec:"required"`
+		ReceiptHash           common.Hash     `json:"receiptsRoot"     gencodec:"required"`
+		Bloom                 Bloom           `json:"logsBloom"        gencodec:"required"`
+		Difficulty            *hexutil.Big    `json:"difficulty"       gencodec:"required"`
+		Number                *hexutil.Big    `json:"number"           gencodec:"required"`
+		GasLimit              hexutil.Uint64  `json:"gasLimit"         gencodec:"required"`
+		GasUsed               hexutil.Uint64  `json:"gasUsed"          gencodec:"required"`
+		Time                  hexutil.Uint64  `json:"timestamp"        gencodec:"required"`
+		Extra                 hexutil.Bytes   `json:"extraData"        gencodec:"required"`
+		MixDigest             common.Hash     `json:"mixHash"`
+		Nonce                 BlockNonce      `json:"nonce"`
+		AuRaStep              hexutil.Uint64  `json:"auraStep,omitempty"`
+		AuRaSeal              hexutil.Bytes   `json:"auraSeal,omitempty"`
 		BaseFee               *hexutil.Big    `json:"baseFeePerGas"`
 		WithdrawalsHash       *common.Hash    `json:"withdrawalsRoot"`
 		BlobGasUsed           *hexutil.Uint64 `json:"blobGasUsed"`
@@ -95,8 +95,8 @@ func (h *Header) UnmarshalJSON(input []byte) error {
 		Extra                 *hexutil.Bytes  `json:"extraData"        gencodec:"required"`
 		MixDigest             *common.Hash    `json:"mixHash"`
 		Nonce                 *BlockNonce     `json:"nonce"`
-		AuRaStep              hexutil.Uint64 `json:"auraStep,omitempty"`
-		AuRaSeal              hexutil.Bytes  `json:"auraSeal,omitempty"`
+		AuRaStep              hexutil.Uint64  `json:"auraStep,omitempty"`
+		AuRaSeal              hexutil.Bytes   `json:"auraSeal,omitempty"`
 		BaseFee               *hexutil.Big    `json:"baseFeePerGas"`
 		WithdrawalsHash       *common.Hash    `json:"withdrawalsRoot"`
 		BlobGasUsed           *hexutil.Uint64 `json:"blobGasUsed"`
@@ -168,9 +168,9 @@ func (h *Header) UnmarshalJSON(input []byte) error {
 	if dec.Nonce != nil {
 		h.Nonce = *dec.Nonce
 	}
-	
+
 	h.AuRaStep = uint64(dec.AuRaStep)
-	
+
 	if dec.AuRaSeal != nil {
 		h.AuRaSeal = dec.AuRaSeal
 	}

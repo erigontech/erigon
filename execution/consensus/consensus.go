@@ -73,6 +73,8 @@ type ChainHeaderReader interface {
 
 // ChainReader defines a small collection of methods needed to access the local
 // blockchain during header and/or uncle verification.
+//
+//go:generate mockgen -typed=true -destination=./chain_reader_mock.go -package=consensus . ChainReader
 type ChainReader interface {
 	ChainHeaderReader
 

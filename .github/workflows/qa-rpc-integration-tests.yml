@@ -51,7 +51,8 @@ jobs:
         id: save_chaindata_step
         run: |
           rm -rf $ERIGON_TESTBED_AREA/chaindata-prev || true
-          mv $ERIGON_REFERENCE_DATA_DIR/chaindata $ERIGON_TESTBED_AREA/chaindata-prev
+          echo "Backup chaindata"
+          cp -r $ERIGON_REFERENCE_DATA_DIR/chaindata $ERIGON_TESTBED_AREA/chaindata-prev
 
       - name: Run RpcDaemon
         working-directory: ${{ github.workspace }}/build/bin
@@ -139,6 +140,7 @@ jobs:
         run: |
           if [ -d "$ERIGON_TESTBED_AREA/chaindata-prev" ] && [ "${{ steps.save_chaindata_step.outcome }}" == "success" ]; then
           rm -rf $ERIGON_REFERENCE_DATA_DIR/chaindata
+          echo "Restore chaindata"
           mv $ERIGON_TESTBED_AREA/chaindata-prev $ERIGON_REFERENCE_DATA_DIR/chaindata
           fi
 

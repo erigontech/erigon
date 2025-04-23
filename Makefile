@@ -177,11 +177,11 @@ test-erigon-ext:
 
 ## test:                      run short tests with a 10m timeout
 test: test-erigon-lib
-	$(GOTEST) -short --timeout 10m -coverprofile=coverage.out
+	$(GOTEST) -short --timeout 10m -coverprofile=coverage-test.out
 
 ## test-all:                  run all tests with a 1h timeout
 test-all: test-erigon-lib-all
-	$(GOTEST) --timeout 60m
+	$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out
 
 ## test-hive						run the hive tests locally off nektos/act workflows simulator
 test-hive:	
@@ -311,8 +311,13 @@ grpc:
 	@cd erigon-lib && $(MAKE) grpc
 	@cd txnprovider/shutter && $(MAKE) proto
 
+## stringer:                          generate stringer code
+stringer:
+	$(GOBUILD) -o $(GOBIN)/stringer golang.org/x/tools/cmd/stringer
+	PATH="$(GOBIN):$(PATH)" go generate -run "stringer" ./...
+
 ## gen:                               generate all auto-generated code in the codebase
-gen: mocks solc abigen gencodec graphql grpc
+gen: mocks solc abigen gencodec graphql grpc stringer
 	@cd erigon-lib && $(MAKE) gen
 
 ## bindings:                          generate test contracts and core contracts
