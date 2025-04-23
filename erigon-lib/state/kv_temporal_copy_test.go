@@ -282,13 +282,18 @@ func (tx *Tx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step uint64
 func (tx *Tx) GetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	return tx.aggtx.DebugGetLatestFromFiles(domain, k, maxTxNum)
 }
-func (tx *Tx) DomainTables(domain ...kv.Domain) []string    { return tx.db.agg.DomainTables(domain...) }
-func (db *DB) DomainTables(domain ...kv.Domain) []string    { return db.agg.DomainTables(domain...) }
-func (tx *Tx) DomainFiles(domain ...kv.Domain) VisibleFiles { return tx.aggtx.DomainFiles(domain...) }
+func (tx *Tx) DomainTables(domain ...kv.Domain) []string { return tx.db.agg.DomainTables(domain...) }
+func (db *DB) DomainTables(domain ...kv.Domain) []string { return db.agg.DomainTables(domain...) }
+func (tx *Tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
+	return tx.aggtx.DomainFiles(domain...)
+}
 func (tx *Tx) PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error) {
 	return tx.aggtx.PruneSmallBatches(ctx, timeout, tx.MdbxTx)
 }
-
 func (tx *Tx) GreedyPruneHistory(ctx context.Context, domain kv.Domain) error {
 	return tx.aggtx.GreedyPruneHistory(ctx, domain, tx.MdbxTx)
+}
+
+func (tx *Tx) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
+	return tx.aggtx.Unwind(ctx, tx.MdbxTx, txNumUnwindTo, changeset)
 }

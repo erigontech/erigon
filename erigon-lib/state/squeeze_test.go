@@ -83,6 +83,9 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 }
 
 func TestAggregator_SqueezeCommitment(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
 
 	cfgd := &testAggConfig{stepSize: 32, disableCommitmentBranchTransform: true}
 	db, agg := testDbAggregatorWithFiles(t, cfgd)

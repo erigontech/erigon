@@ -682,7 +682,7 @@ func (s *CaplinSnapshots) ReadHeader(slot uint64) (*cltypes.SignedBeaconBlockHea
 		return nil, 0, libcommon.Hash{}, nil
 	}
 
-	buf, _ = gg.Next(buf)
+	buf, _ = gg.Next(buf[:0])
 	if len(buf) == 0 {
 		return nil, 0, libcommon.Hash{}, nil
 	}
@@ -724,7 +724,7 @@ func (s *CaplinSnapshots) ReadBlobSidecars(slot uint64) ([]*cltypes.BlobSidecar,
 		return nil, nil
 	}
 
-	buf, _ = gg.Next(buf)
+	buf, _ = gg.Next(buf[:0])
 	if len(buf) == 0 {
 		return nil, nil
 	}

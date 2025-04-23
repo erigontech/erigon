@@ -75,7 +75,7 @@ func (a *ProtoForkable) BuildFiles(ctx context.Context, from, to RootNum, db kv.
 			if err = a.freezer.Freeze(ctx, calcFrom, calcTo, func(values []byte) error {
 				// TODO: look at block_Snapshots.go#dumpRange
 				// when snapshot is non-frozen range, it AddsUncompressedword (fast creation)
-				// else AddWord.
+				// else Write.
 				// BuildFiles perhaps only used for fast builds...and merge is for slow builds.
 				// so using uncompressed here
 				return sn.AddUncompressedWord(values)

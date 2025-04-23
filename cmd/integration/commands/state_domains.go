@@ -281,10 +281,11 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 		fmt.Printf("Indexing file %s\n", fileName)
 		var buf []byte
 		for getter.HasNext() {
-			buf = buf[:0]
-			buf, _ = getter.Next(buf)
+			buf, _ = getter.Next(buf[:0])
 
-			collector.Collect(buf, layerBytes)
+			if err := collector.Collect(buf, layerBytes); err != nil {
+				return err
+			}
 			count++
 			//fmt.Println("count: ", count, "keyLength: ", len(buf))
 			if count%100000 == 0 {
@@ -431,10 +432,10 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 				skipped++
 				continue
 			}
-			if err := comp.AddWord(bufKey); err != nil {
+			if _, err := comp.Write(bufKey); err != nil {
 				return fmt.Errorf("failed to add key %x: %w", bufKey, err)
 			}
-			if err := comp.AddWord(bufVal); err != nil {
+			if _, err := comp.Write(bufVal); err != nil {
 				return fmt.Errorf("failed to add val %x: %w", bufVal, err)
 			}
 			count++

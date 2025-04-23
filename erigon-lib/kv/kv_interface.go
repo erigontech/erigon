@@ -570,6 +570,7 @@ type TemporalTx interface {
 	HistoryRange(name Domain, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error)
 
 	Debug() TemporalDebugTx
+	AggTx() any
 }
 
 // TemporalDebugTx - set of slow low-level funcs for debug purposes
@@ -601,6 +602,8 @@ type TemporalRwTx interface {
 	RwTx
 	TemporalTx
 	TemporalPutDel
+
+	Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff) error
 }
 
 type TemporalPutDel interface {

@@ -480,7 +480,7 @@ func (w *DomainBufferedWriter) SetTxNum(v uint64) {
 	w.h.SetTxNum(v)
 	binary.BigEndian.PutUint64(w.stepBytes[:], ^(v / w.h.ii.aggregationStep))
 }
-func (w *DomainBufferedWriter) SetDiff(diff *DomainDiff) { w.diff = diff }
+func (w *DomainBufferedWriter) SetDiff(diff *kv.DomainDiff) { w.diff = diff }
 
 func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWriter {
 	discardHistory := discard || dt.d.historyDisabled
@@ -510,7 +510,7 @@ type DomainBufferedWriter struct {
 	stepBytes [8]byte // current inverted step representation
 	aux       []byte  // auxilary buffer for key1 + key2
 	aux2      []byte  // auxilary buffer for step + val
-	diff      *DomainDiff
+	diff      *kv.DomainDiff
 
 	h *historyBufferedWriter
 }
@@ -803,10 +803,10 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo uint64, wal *e
 			} else {
 				v = v[8:]
 			}
-			if err = comp.AddWord(k); err != nil {
+			if _, err = comp.Write(k); err != nil {
 				return fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, k, err)
 			}
-			if err = comp.AddWord(v); err != nil {
+			if _, err = comp.Write(v); err != nil {
 				return fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, k, v, err)
 			}
 		}
@@ -829,10 +829,10 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo uint64, wal *e
 		if err != nil {
 			return coll, fmt.Errorf("vt: %w", err)
 		}
-		if err = comp.AddWord(kv.k); err != nil {
+		if _, err = comp.Write(kv.k); err != nil {
 			return coll, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, kv.k, err)
 		}
-		if err = comp.AddWord(kv.v); err != nil {
+		if _, err = comp.Write(kv.v); err != nil {
 			return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, kv.k, kv.v, err)
 		}
 	}
@@ -927,10 +927,10 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 			}{k[:len(k)-8], v})
 			k, v, err = valsCursor.Next()
 		} else {
-			if err = comp.AddWord(k); err != nil {
+			if _, err = comp.Write(k); err != nil {
 				return coll, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, k, err)
 			}
-			if err = comp.AddWord(v[8:]); err != nil {
+			if _, err = comp.Write(v[8:]); err != nil {
 				return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, k, v[8:], err)
 			}
 			k, v, err = valsCursor.(kv.CursorDupSort).NextNoDup()
@@ -947,10 +947,10 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 		}
 	}
 	for _, kv := range kvs {
-		if err = comp.AddWord(kv.k); err != nil {
+		if _, err = comp.Write(kv.k); err != nil {
 			return coll, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, kv.k, err)
 		}
-		if err = comp.AddWord(kv.v); err != nil {
+		if _, err = comp.Write(kv.v); err != nil {
 			return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, kv.k, kv.v, err)
 		}
 	}
@@ -1327,7 +1327,7 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 
 // unwind is similar to prune but the difference is that it restores domain values from the history as of txFrom
 // context Flush should be managed by caller.
-func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwindTo uint64, domainDiffs []DomainEntryDiff) error {
+func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwindTo uint64, domainDiffs []kv.DomainEntryDiff) error {
 	// fmt.Printf("[domain][%s] unwinding domain to txNum=%d, step %d\n", d.filenameBase, txNumUnwindTo, step)
 	d := dt.d
 

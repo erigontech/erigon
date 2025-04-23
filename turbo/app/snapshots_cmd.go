@@ -1317,14 +1317,14 @@ func doCompress(cliCtx *cli.Context) error {
 		if _, err = io.ReadFull(r, word); err != nil {
 			return err
 		}
-		snappyBuf, word = compress.EncodeSnappyIfNeed(snappyBuf, word, doSnappyEachWord)
-		unSnappyBuf, word, err = compress.DecodeSnappyIfNeed(unSnappyBuf, word, doUnSnappyEachWord)
+		snappyBuf, word = compress.EncodeZstdIfNeed(snappyBuf, word, doSnappyEachWord)
+		unSnappyBuf, word, err = compress.DecodeZstdIfNeed(unSnappyBuf, word, doUnSnappyEachWord)
 		if err != nil {
 			return err
 		}
 		_, _ = snappyBuf, unSnappyBuf
 
-		if err := w.AddWord(word); err != nil {
+		if _, err := w.Write(word); err != nil {
 			return err
 		}
 

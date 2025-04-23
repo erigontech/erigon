@@ -14,8 +14,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build integration
-
 package heimdall
 
 import (
@@ -46,6 +44,10 @@ import (
 )
 
 func TestServiceWithAmoyData(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	suite.Run(t, &ServiceTestSuite{
 		testDataDir:                    "testdata/amoy",
 		chainConfig:                    params.AmoyChainConfig,
@@ -84,6 +86,10 @@ func TestServiceWithAmoyData(t *testing.T) {
 }
 
 func TestServiceWithMainnetData(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	suite.Run(t, &ServiceTestSuite{
 		testDataDir:                    "testdata/mainnet",
 		chainConfig:                    params.BorMainnetChainConfig,
@@ -521,6 +527,10 @@ type difficultiesKV struct {
 }
 
 func TestIsCatchingUp(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	ctrl := gomock.NewController(t)
 	mockClient := NewMockClient(ctrl)
 
@@ -543,6 +553,10 @@ func TestIsCatchingUp(t *testing.T) {
 }
 
 func TestIsCatchingUpLateBlock(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	ctrl := gomock.NewController(t)
 	mockClient := NewMockClient(ctrl)
 

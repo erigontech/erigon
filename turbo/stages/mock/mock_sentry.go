@@ -365,6 +365,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			stateChangesClient,
 			func() {}, /* builderNotifyNewTxns */
 			logger,
+			nil,
 			txpool.WithP2PFetcherWg(&mock.ReceiveWg),
 			txpool.WithP2PSenderWg(nil),
 			txpool.WithFeeCalculator(nil),
