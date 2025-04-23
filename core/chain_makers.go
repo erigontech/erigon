@@ -356,9 +356,9 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		b.header = makeHeader(chainreader, parent, ibs, b.engine)
 		// Mutate the state and block according to any hard-fork specs
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
-			limit := new(big.Int).Add(daoBlock, params2.DAOForkExtraRange)
+			limit := new(big.Int).Add(daoBlock, misc.DAOForkExtraRange)
 			if b.header.Number.Cmp(daoBlock) >= 0 && b.header.Number.Cmp(limit) < 0 {
-				b.header.Extra = libcommon.CopyBytes(params2.DAOForkBlockExtra)
+				b.header.Extra = libcommon.CopyBytes(misc.DAOForkBlockExtra)
 			}
 		}
 		if b.engine != nil {
