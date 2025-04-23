@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
@@ -43,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpccfg"
@@ -508,7 +508,7 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, libcommon.Addres
 		bankFunds   = big.NewInt(1e9)
 		contract    = hexutil.MustDecode(contractHexString)
 		gspec       = &types.Genesis{
-			Config: params.TestChainConfig,
+			Config: chain.TestChainConfig,
 			Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds}},
 		}
 	)

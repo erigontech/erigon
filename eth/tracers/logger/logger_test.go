@@ -25,13 +25,12 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
-
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/core/vm/stack"
-	"github.com/erigontech/erigon/params"
 )
 
 type dummyContractRef struct {
@@ -61,7 +60,7 @@ func TestStoreCapture(t *testing.T) {
 	c := vm.NewJumpDestCache()
 	var (
 		logger   = NewStructLogger(nil)
-		env      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Tracer: logger.Hooks()})
+		env      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, chain.TestChainConfig, vm.Config{Tracer: logger.Hooks()})
 		mem      = vm.NewMemory()
 		stack    = stack.New()
 		contract = vm.NewContract(&dummyContractRef{}, libcommon.Address{}, new(uint256.Int), 0, false /* skipAnalysis */, c)

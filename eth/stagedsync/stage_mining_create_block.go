@@ -221,9 +221,9 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 	// If we are care about TheDAO hard-fork check whether to override the extra-data or not
 	if daoBlock := cfg.chainConfig.DAOForkBlock; daoBlock != nil {
 		// Check whether the block is among the fork extra-override range
-		limit := new(big.Int).Add(daoBlock, params.DAOForkExtraRange)
+		limit := new(big.Int).Add(daoBlock, misc.DAOForkExtraRange)
 		if header.Number.Cmp(daoBlock) >= 0 && header.Number.Cmp(limit) < 0 {
-			header.Extra = libcommon.Copy(params.DAOForkBlockExtra)
+			header.Extra = libcommon.Copy(misc.DAOForkBlockExtra)
 		}
 	}
 

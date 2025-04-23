@@ -96,6 +96,39 @@ type Config struct {
 	AllowAA bool
 }
 
+var (
+	TestChainConfig = &Config{
+		ChainID:               big.NewInt(1337),
+		Consensus:             EtHashConsensus,
+		HomesteadBlock:        big.NewInt(0),
+		TangerineWhistleBlock: big.NewInt(0),
+		SpuriousDragonBlock:   big.NewInt(0),
+		ByzantiumBlock:        big.NewInt(0),
+		ConstantinopleBlock:   big.NewInt(0),
+		PetersburgBlock:       big.NewInt(0),
+		IstanbulBlock:         big.NewInt(0),
+		MuirGlacierBlock:      big.NewInt(0),
+		BerlinBlock:           big.NewInt(0),
+		Ethash:                new(EthashConfig),
+	}
+
+	TestChainAuraConfig = &Config{
+		ChainID:               big.NewInt(1),
+		Consensus:             AuRaConsensus,
+		HomesteadBlock:        big.NewInt(0),
+		TangerineWhistleBlock: big.NewInt(0),
+		SpuriousDragonBlock:   big.NewInt(0),
+		ByzantiumBlock:        big.NewInt(0),
+		ConstantinopleBlock:   big.NewInt(0),
+		PetersburgBlock:       big.NewInt(0),
+		IstanbulBlock:         big.NewInt(0),
+		MuirGlacierBlock:      big.NewInt(0),
+		BerlinBlock:           big.NewInt(0),
+		LondonBlock:           big.NewInt(0),
+		Aura:                  &AuRaConfig{},
+	}
+)
+
 type BlobConfig struct {
 	Target                *uint64 `json:"target,omitempty"`
 	Max                   *uint64 `json:"max,omitempty"`

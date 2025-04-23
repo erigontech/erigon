@@ -30,7 +30,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -44,11 +43,12 @@ import (
 	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 // BorDefaultMinerGasPrice defines the minimum gas price for bor validators to mine a transaction.
-var BorDefaultMinerGasPrice = big.NewInt(25 * params.GWei)
+var BorDefaultMinerGasPrice = big.NewInt(25 * common.GWei)
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gaspricecfg.Config{
@@ -92,7 +92,7 @@ var Defaults = Config{
 	Prune:     prune.DefaultMode,
 	Miner: params.MiningConfig{
 		GasLimit: 36_000_000,
-		GasPrice: big.NewInt(params.GWei),
+		GasPrice: big.NewInt(common.GWei),
 		Recommit: 3 * time.Second,
 	},
 	TxPool:      txpoolcfg.DefaultConfig,
