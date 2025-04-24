@@ -232,7 +232,6 @@ func ParseStepsFromFileName(fileName string) (from, to uint64, err error) {
 }
 
 func deleteMergeFile(dirtyFiles *btree2.BTreeG[*filesItem], outs []*filesItem, filenameBase string, logger log.Logger) {
-	return
 	for _, out := range outs {
 		if out == nil {
 			panic("must not happen: " + filenameBase)
