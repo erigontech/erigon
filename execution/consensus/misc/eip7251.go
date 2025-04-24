@@ -20,8 +20,8 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/chain/params"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/execution/consensus"
 )
 

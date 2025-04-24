@@ -144,11 +144,7 @@ func setArray(dst, src reflect.Value) error {
 		return set(dst, indirect(src))
 	}
 	array := reflect.New(dst.Type()).Elem()
-	min := src.Len()
-	if src.Len() > dst.Len() {
-		min = dst.Len()
-	}
-	for i := 0; i < min; i++ {
+	for i := 0; i < min(src.Len(), dst.Len()); i++ {
 		if err := set(array.Index(i), src.Index(i)); err != nil {
 			return err
 		}

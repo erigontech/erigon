@@ -25,7 +25,7 @@ import (
 	ethereum "github.com/erigontech/erigon"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/filters"
 	"github.com/erigontech/erigon/event"
 	"github.com/erigontech/erigon/execution/abi/bind"

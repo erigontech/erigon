@@ -44,11 +44,6 @@ func (f *FlatRequest) RequestType() byte { return f.Type }
 // Encodes flat encoding of request the way it should be serialized
 func (f *FlatRequest) Encode() []byte { return append([]byte{f.Type}, f.RequestData...) }
 
-// Returns pointer to deep copy of a new FlatRequest
-func (f *FlatRequest) copy() *FlatRequest {
-	return &FlatRequest{Type: f.Type, RequestData: append([]byte{}, f.RequestData...)}
-}
-
 type FlatRequests []FlatRequest
 
 func (r FlatRequests) Hash() *libcommon.Hash {

@@ -46,8 +46,8 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/types"
 	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 

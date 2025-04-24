@@ -22,11 +22,9 @@ package ethash
 import (
 	"errors"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-
 	libcommon "github.com/erigontech/erigon-lib/common"
-
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 var errEthashStopped = errors.New("ethash stopped")

@@ -9,8 +9,8 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-lib/abi"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/execution/abi"
 )
 
 //go:embed aa.abi
@@ -44,7 +44,7 @@ func decodeMethodParamsToInterface(output interface{}, methodName string, input 
 	}
 	err = m.Inputs.Copy(output, params)
 	if err != nil {
-		return fmt.Errorf("unable to decode %s: %v", methodName, err)
+		return fmt.Errorf("unable to decode %s: %w", methodName, err)
 	}
 	return nil
 }

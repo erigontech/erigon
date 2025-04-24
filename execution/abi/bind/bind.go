@@ -33,9 +33,8 @@ import (
 	"text/template"
 	"unicode"
 
+	"github.com/erigontech/erigon-lib/abi"
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon/execution/abi"
 )
 
 // Lang is a target programming language selector to generate bindings for.

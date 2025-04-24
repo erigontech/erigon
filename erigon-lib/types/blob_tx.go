@@ -38,20 +38,6 @@ type BlobTx struct {
 	BlobVersionedHashes []libcommon.Hash
 }
 
-// copy creates a deep copy of the transaction data and initializes all fields.
-func (stx *BlobTx) copy() *BlobTx {
-	cpy := &BlobTx{
-		DynamicFeeTransaction: *stx.DynamicFeeTransaction.copy(),
-		MaxFeePerBlobGas:      new(uint256.Int),
-		BlobVersionedHashes:   make([]libcommon.Hash, len(stx.BlobVersionedHashes)),
-	}
-	copy(cpy.BlobVersionedHashes, stx.BlobVersionedHashes)
-	if stx.MaxFeePerBlobGas != nil {
-		cpy.MaxFeePerBlobGas.Set(stx.MaxFeePerBlobGas)
-	}
-	return cpy
-}
-
 func (stx *BlobTx) Type() byte { return BlobTxType }
 
 func (stx *BlobTx) GetBlobHashes() []libcommon.Hash {

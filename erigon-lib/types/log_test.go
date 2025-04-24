@@ -124,6 +124,8 @@ func TestUnmarshalLog(t *testing.T) {
 }
 
 func checkError(t *testing.T, testname string, got, want error) bool {
+	t.Helper()
+
 	if got == nil {
 		if want != nil {
 			t.Errorf("test %q: got no error, want %q", testname, want)

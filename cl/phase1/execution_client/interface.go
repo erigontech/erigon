@@ -23,9 +23,8 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 )
 
