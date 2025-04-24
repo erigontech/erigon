@@ -260,14 +260,14 @@ func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r 
 		return
 	}
 
-	if err := a.voluntaryExitService.ProcessMessage(r.Context(), nil, &services.SignedVoluntaryExitForGossip{
-		SignedVoluntaryExit:   &req,
-		ImmediateVerification: true,
-	}); err != nil && !errors.Is(err, services.ErrIgnore) {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	a.operationsPool.VoluntaryExitsPool.Insert(req.VoluntaryExit.ValidatorIndex, &req)
+	// if err := a.voluntaryExitService.ProcessMessage(r.Context(), nil, &services.SignedVoluntaryExitForGossip{
+	// 	SignedVoluntaryExit:   &req,
+	// 	ImmediateVerification: true,
+	// }); err != nil && !errors.Is(err, services.ErrIgnore) {
+	// 	http.Error(w, err.Error(), http.StatusBadRequest)
+	// 	return
+	// }
+	// a.operationsPool.VoluntaryExitsPool.Insert(req.VoluntaryExit.ValidatorIndex, &req)
 	if a.sentinel != nil {
 		if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
 			Data: encodedSSZ,
