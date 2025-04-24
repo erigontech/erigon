@@ -85,6 +85,10 @@ type Pool interface {
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
 	GetBlobs(blobhashes []common.Hash) ([][]byte, [][]byte)
 	AddNewGoodPeer(peerID PeerID)
+
+	// Get enriched sender information
+	GetSenderInfo(ctx context.Context, addr common.Address) (*SenderInfo, error)
+	GetAllSendersInfo(ctx context.Context) ([]*SenderInfo, error)
 }
 
 var _ Pool = (*TxPool)(nil) // compile-time interface check
@@ -163,6 +167,76 @@ type ValidateAA interface {
 
 type FeeCalculator interface {
 	CurrentFees(chainConfig *chain.Config, db kv.Getter) (baseFee uint64, blobFee uint64, minBlobGasPrice, blockGasLimit uint64, err error)
+}
+
+// SenderInfo contains enriched information about a sender's state in the transaction pool
+type SenderInfo struct {
+	Address          common.Address
+	StateNonce       uint64
+	StateBalance     uint256.Int
+	HighestPoolNonce uint64
+	TotalGasUsed     uint64
+	TotalFees        uint256.Int
+	HasEnoughBalance bool
+	TransactionCount int
+}
+
+// GetSenderInfo returns enriched information about a sender's state in the transaction pool
+func (p *TxPool) GetSenderInfo(ctx context.Context, addr common.Address) (*SenderInfo, error) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	// Get sender ID and state info
+	senderID, found := p.senders.getID(addr)
+	if !found {
+		return nil, fmt.Errorf("sender not found")
+	}
+
+	// Get state nonce and balance
+	view, err := p._stateCache.View(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	stateNonce, stateBalance, err := p.senders.info(view, senderID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get highest nonce in pool
+	highestNonce, _ := p.all.nonce(senderID)
+
+	// Calculate total gas used and fees
+	var totalGasUsed uint64
+	var totalFees uint256.Int
+	var cumulativeBalance uint256.Int
+
+	p.all.ascend(senderID, func(mt *metaTxn) bool {
+		totalGasUsed += mt.TxnSlot.Gas
+
+		// Calculate fee for this transaction
+		fee := uint256.NewInt(0)
+		fee.Mul(uint256.NewInt(mt.TxnSlot.Gas), &mt.TxnSlot.FeeCap)
+		totalFees.Add(&totalFees, fee)
+
+		// Add to cumulative balance requirement
+		needBalance := requiredBalance(mt.TxnSlot)
+		cumulativeBalance.Add(&cumulativeBalance, needBalance)
+		return true
+	})
+
+	// Check if sender has enough balance for all transactions
+	hasEnoughBalance := stateBalance.Cmp(&cumulativeBalance) >= 0
+
+	return &SenderInfo{
+		Address:          addr,
+		StateNonce:       stateNonce,
+		StateBalance:     stateBalance,
+		HighestPoolNonce: highestNonce,
+		TotalGasUsed:     totalGasUsed,
+		TotalFees:        totalFees,
+		HasEnoughBalance: hasEnoughBalance,
+		TransactionCount: p.all.count(senderID),
+	}, nil
 }
 
 func New(
@@ -412,6 +486,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 		}
 	}
 	if err = p.senders.onNewBlock(stateChanges, unwindTxns, minedTxns, p.logger); err != nil {
+		sd
 		return err
 	}
 
@@ -462,6 +537,8 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 		default:
 		}
 	}
+
+	GetSenderInfo(common.Address)
 
 	return nil
 }
@@ -2712,6 +2789,37 @@ func sendChangeBatchEventToDiagnostics(pool string, event string, orderHashes []
 
 	diagnostics.Send(diagnostics.PoolChangeBatchEvent{
 		Changes: toRemoveBatch,
+	})
+}
+
+func (p *TxPool) sendSenderInfoUpdateToDiagnostics(cacheView kvcache.CacheView) {
+	if !diagnostics.Client().Connected() {
+		return
+	}
+
+	senders := make([]diagnostics.SenderInfo, 0)
+
+	for i := 0; i < p.unprocessedRemoteTxns.Senders.Len(); i++ {
+		addr := p.unprocessedRemoteTxns.Senders.AddressAt(i)
+		senderID, _ := p.senders.getID(addr)
+		nonce, balance, err := p.senders.info(cacheView, senderID)
+		if err != nil {
+			return
+		}
+
+		highestNonce, _ := p.all.nonce(senderID)
+
+		senders = append(senders, diagnostics.SenderInfo{
+			Address:          addr,
+			StateNonce:       nonce,
+			StateBalance:     balance,
+			HighestPoolNonce: highestNonce,
+		})
+	}
+
+	// Send sender info update to diagnostics
+	diagnostics.Send(diagnostics.SenderInfoUpdate{
+		Senders: senders,
 	})
 }
 

@@ -18,9 +18,10 @@ package txpool
 
 import (
 	"fmt"
-	"github.com/erigontech/erigon-lib/types/accounts"
 	"math"
 	"math/bits"
+
+	"github.com/erigontech/erigon-lib/types/accounts"
 
 	"github.com/google/btree"
 	"github.com/holiman/uint256"

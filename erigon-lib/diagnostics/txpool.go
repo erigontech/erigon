@@ -23,6 +23,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/holiman/uint256"
 )
 
 type PoolChangeEvent struct {
@@ -86,6 +87,21 @@ type BlockUpdate struct {
 }
 
 func (ti BlockUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
+type SenderInfoUpdate struct {
+	Senders []SenderInfo `json:"senders"`
+}
+
+type SenderInfo struct {
+	Address          common.Address
+	StateNonce       uint64
+	StateBalance     uint256.Int
+	HighestPoolNonce uint64
+}
+
+func (ti SenderInfoUpdate) Type() Type {
 	return TypeOf(ti)
 }
 
