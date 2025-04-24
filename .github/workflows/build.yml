@@ -7,10 +7,6 @@ on:
   release:
     types: [published]
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Custom Docker Tag (leave blank to use the branch name or commit SHA)'
-        required: false
 
 env:
   DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -33,15 +29,11 @@ jobs:
           SHORT_SHA=$(echo ${{ github.sha }} | head -c 7)
           echo "BRANCH_NAME=${BRANCH_NAME}" >> $GITHUB_ENV
           echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_ENV
-          TAG=${{ github.event.inputs.tag }}
-          if [[ -z "$TAG" ]]; then
-            if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-              TAG=$BRANCH_NAME-$SHORT_SHA
-            elif [[ "${{ github.event_name }}" == "push" ]]; then
-              TAG=$SHORT_SHA
-            elif [[ "${{ github.event_name }}" == "release" ]]; then
-              TAG=${{ github.event.release.tag_name }}
-            fi
+          TAG=$BRANCH_NAME-$SHORT_SHA
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            TAG=$SHORT_SHA
+          elif [[ "${{ github.event_name }}" == "release" ]]; then
+            TAG=${{ github.event.release.tag_name }}
           fi
           echo "version=$TAG" >> $GITHUB_OUTPUT
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
@@ -111,7 +103,7 @@ jobs:
             --tag ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }} \
             ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }}-amd64 \
             ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }}-arm64
-          
+
           if [ "${{ needs.prepare.outputs.latest_tag }}" == "true" ]; then
             docker buildx imagetools create \
               --tag ${{ env.IMAGE_NAME }}:latest \
