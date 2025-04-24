@@ -976,7 +976,14 @@ func (dt *DomainRoTx) garbage(merged *filesItem) (outs []*filesItem) {
 			if item.frozen {
 				continue
 			}
-			if merged != nil && item.isProperSubsetOf(merged) {
+			if merged == nil {
+				if hasCoverVisibleFile(dt.files, item) {
+					outs = append(outs, item)
+				}
+				continue
+			}
+
+			if item.isProperSubsetOf(merged) {
 				if dt.d.restrictSubsetFileDeletions {
 					continue
 				}
@@ -984,7 +991,7 @@ func (dt *DomainRoTx) garbage(merged *filesItem) (outs []*filesItem) {
 			}
 
 			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainRoTx`)
-			if (merged != nil && item.isBefore(merged)) && hasCoverVisibleFile(dt.files, item) {
+			if item.isBefore(merged) && hasCoverVisibleFile(dt.files, item) {
 				outs = append(outs, item)
 			}
 		}
@@ -1011,14 +1018,21 @@ func garbage(dirtyFiles *btree.BTreeG[*filesItem], visibleFiles []visibleFile, m
 				continue
 			}
 
-			if merged != nil && item.isProperSubsetOf(merged) {
+			if merged == nil {
+				if hasCoverVisibleFile(visibleFiles, item) {
+					outs = append(outs, item)
+				}
+				continue
+			}
+
+			if item.isProperSubsetOf(merged) {
 				outs = append(outs, item)
 			}
 
 			// this case happens when in previous process run, the merged file was created,
 			// but the processed ended before subsumed files could be deleted.
 			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainRoTx`)
-			if (merged != nil && item.isBefore(merged)) && hasCoverVisibleFile(visibleFiles, item) {
+			if item.isBefore(merged) && hasCoverVisibleFile(visibleFiles, item) {
 				outs = append(outs, item)
 			}
 		}
