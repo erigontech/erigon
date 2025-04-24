@@ -942,9 +942,6 @@ func (h *History) integrateMergedDirtyFiles(indexOuts, historyOuts []*filesItem,
 
 func (dt *DomainRoTx) cleanAfterMerge(mergedDomain, mergedHist, mergedIdx *filesItem) {
 	dt.ht.cleanAfterMerge(mergedHist, mergedIdx)
-	if mergedDomain == nil {
-		return
-	}
 	outs := dt.garbage(mergedDomain)
 	deleteMergeFile(dt.d.dirtyFiles, outs, dt.d.filenameBase, dt.d.logger)
 }
@@ -953,10 +950,7 @@ func (dt *DomainRoTx) cleanAfterMerge(mergedDomain, mergedHist, mergedIdx *files
 // in this case we need keep small files, but when history already merged to `frozen` state - then we can cleanup
 // all earlier small files, by mark tem as `canDelete=true`
 func (ht *HistoryRoTx) cleanAfterMerge(merged, mergedIdx *filesItem) {
-	if merged == nil {
-		return
-	}
-	if merged.endTxNum == 0 {
+	if merged != nil && merged.endTxNum == 0 {
 		return
 	}
 	outs := ht.garbage(merged)
@@ -966,10 +960,7 @@ func (ht *HistoryRoTx) cleanAfterMerge(merged, mergedIdx *filesItem) {
 
 // cleanAfterMerge - mark all small files before `f` as `canDelete=true`
 func (iit *InvertedIndexRoTx) cleanAfterMerge(merged *filesItem) {
-	if merged == nil {
-		return
-	}
-	if merged.endTxNum == 0 {
+	if merged != nil && merged.endTxNum == 0 {
 		return
 	}
 	outs := iit.garbage(merged)

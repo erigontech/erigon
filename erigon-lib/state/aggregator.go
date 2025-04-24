@@ -702,7 +702,6 @@ func (a *Aggregator) RemoveOverlaps(ctx context.Context) (err error) {
 }
 
 func (a *Aggregator) MergeLoop(ctx context.Context) (err error) {
-	fmt.Printf("[dbg] MergeLoop1\n")
 	if dbg.NoMerge() || !a.mergingFiles.CompareAndSwap(false, true) {
 		return nil // currently merging or merge is prohibited
 	}
@@ -1381,7 +1380,6 @@ func (a *Aggregator) IntegrateMergedDirtyFiles(outs *SelectedStaticFiles, in *Me
 func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 	at := a.BeginFilesRo()
 	defer at.Close()
-	fmt.Printf("[dbg] cleanAfterMerge1\n")
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 
