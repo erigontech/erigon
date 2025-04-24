@@ -1393,7 +1393,6 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 		}
 	}
 	for id, ii := range at.iis {
-		ii.garbage(nxil)
 		if in == nil {
 			ii.cleanAfterMerge(nil)
 		} else {
