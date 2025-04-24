@@ -333,8 +333,9 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		return nil, err
 	}
 	defer domains.Close()
-	stateReader := state.NewReaderV3(domains)
-	stateWriter := state.NewWriterV4(domains)
+	sdtx := libstate.NewSharedDomainsTx(domains, tx)
+	stateReader := state.NewReaderV3(sdtx)
+	stateWriter := state.NewWriterV4(sdtx)
 
 	txNum := -1
 	setBlockNum := func(blockNum uint64) {
@@ -388,7 +389,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			//	return nil, nil, err
 			//}
 			//b.header.Root, err = CalcHashRootForTests(tx, b.header, histV3, true)
-			stateRoot, err := domains.ComputeCommitment(ctx, true, b.header.Number.Uint64(), "")
+			stateRoot, err := domains.ComputeCommitment(ctx, tx, true, b.header.Number.Uint64(), "")
 			if err != nil {
 				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
 			}

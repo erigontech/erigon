@@ -287,7 +287,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	}
 
 	var root libcommon.Hash
-	rootBytes, err := domains.ComputeCommitment(context2.Background(), true, header.Number.Uint64(), "")
+	rootBytes, err := domains.ComputeCommitment(context2.Background(), txc.Ttx, true, header.Number.Uint64(), "")
 	if err != nil {
 		return statedb, root, fmt.Errorf("ComputeCommitment: %w", err)
 	}
@@ -329,7 +329,7 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, b
 		return nil, err
 	}
 	defer domains.Close()
-	defer domains.Flush(context2.Background(), tx)
+	defer domains.Flush(context2.Background(), txc.Tx.(kv.TemporalRwTx))
 	txc.Doms = domains
 
 	w := rpchelper.NewLatestStateWriter(txc, nil, blockNr-1)

@@ -181,8 +181,8 @@ func CreateHistoryStateReader(tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReade
 	return r, nil
 }
 
-func NewLatestDomainStateReader(sd *state2.SharedDomains) state.StateReader {
-	return state.NewReaderV3(sd)
+func NewLatestDomainStateReader(sd *state2.SharedDomains, tx kv.TemporalTx) state.StateReader {
+	return state.NewReaderV3(state2.NewSharedDomainsTx(sd, tx))
 }
 
 func NewLatestStateReader(tx kv.Tx) state.StateReader {
@@ -195,7 +195,7 @@ func NewLatestStateWriter(txc wrap.TxContainer, blockReader services.FullBlockRe
 		panic(err)
 	}
 	domains.SetTxNum(uint64(int(minTxNum) + /* 1 system txNum in beginning of block */ 1))
-	return state.NewWriterV4(domains)
+	return state.NewWriterV4(state2.NewSharedDomainsTx(domains, txc.Ttx))
 }
 
 func CreateLatestCachedStateReader(cache kvcache.CacheView, tx kv.TemporalTx) state.StateReader {

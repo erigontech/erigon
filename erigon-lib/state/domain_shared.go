@@ -76,6 +76,34 @@ type dataWithPrevStep struct {
 	prevStep uint64
 }
 
+type SharedDomainsTx struct {
+	sd *SharedDomains
+	tx kv.TemporalTx
+}
+
+func NewSharedDomainsTx(sd *SharedDomains, tx kv.TemporalTx) *SharedDomainsTx {
+	return &SharedDomainsTx{
+		sd: sd,
+		tx: tx,
+	}
+}
+
+func (sdg *SharedDomainsTx) GetLatest(domain kv.Domain, key []byte) ([]byte, uint64, error) {
+	return sdg.sd.GetLatest(sdg.tx, domain, key)
+}
+
+func (sdg *SharedDomainsTx) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error {
+	return sdg.sd.DomainDel(sdg.tx, domain, k1, k2, prevVal, prevStep)
+}
+
+func (sdg *SharedDomainsTx) DomainDelPrefix(domain kv.Domain, prefix []byte) error {
+	return sdg.sd.DomainDelPrefix(sdg.tx, domain, prefix)
+}
+
+func (sdg *SharedDomainsTx) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error {
+	return sdg.sd.DomainPut(sdg.tx, domain, k1, k2, val, prevVal, prevStep)
+}
+
 type SharedDomains struct {
 	sdCtx *SharedDomainsCommitmentContext
 
