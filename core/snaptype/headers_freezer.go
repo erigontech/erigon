@@ -19,7 +19,7 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/state"
 	ee "github.com/erigontech/erigon-lib/state/entity_extras"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 type HeaderFreezer struct {

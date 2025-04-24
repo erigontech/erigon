@@ -25,8 +25,8 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/systemcontracts"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/params"
 )
 

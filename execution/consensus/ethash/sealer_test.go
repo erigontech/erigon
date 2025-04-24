@@ -37,7 +37,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 // Tests whether remote HTTP servers are correctly notified of new work.

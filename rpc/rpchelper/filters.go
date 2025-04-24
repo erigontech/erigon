@@ -42,7 +42,7 @@ import (
 	txpool2 "github.com/erigontech/erigon/txnprovider/txpool"
 
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/filters"
 )
 

@@ -24,7 +24,7 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 
-	types2 "github.com/erigontech/erigon/core/types"
+	types2 "github.com/erigontech/erigon-lib/types"
 )
 
 type LogsFilterAggregator struct {
