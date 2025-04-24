@@ -1,16 +1,15 @@
 package das
 
 import (
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 )
 
-/*
-type DataColumnIdentifier struct {
+type DataColumnsByRootIdentifier struct {
 	BlockRoot common.Hash
-	Index     ColumnIndex
+	Columns   []cltypes.ColumnIndex
 }
-*/
 
 // VerifyDataColumnSidecar verifies if the data column sidecar is valid according to protocol rules.
 // This function is re-entrant and thread-safe.
