@@ -193,15 +193,12 @@ func TestHistoryCollationBuild(t *testing.T) {
 		writer := hc.NewWriter()
 		defer writer.close()
 
-		writer.SetTxNum(2)
 		err = writer.AddPrevValue([]byte("key1"), nil, 2, nil)
 		require.NoError(err)
 
-		writer.SetTxNum(3)
 		err = writer.AddPrevValue([]byte("key2"), nil, 3, nil)
 		require.NoError(err)
 
-		writer.SetTxNum(6)
 		err = writer.AddPrevValue([]byte("key1"), nil, 6, []byte("value1.1"))
 		require.NoError(err)
 		err = writer.AddPrevValue([]byte("key2"), nil, 6, []byte("value2.1"))
@@ -210,7 +207,6 @@ func TestHistoryCollationBuild(t *testing.T) {
 		flusher := writer
 		writer = hc.NewWriter()
 
-		writer.SetTxNum(7)
 		err = writer.AddPrevValue([]byte("key2"), nil, 7, []byte("value2.2"))
 		require.NoError(err)
 		err = writer.AddPrevValue([]byte("key3"), nil, 7, nil)
@@ -311,21 +307,17 @@ func TestHistoryAfterPrune(t *testing.T) {
 		writer := hc.NewWriter()
 		defer writer.close()
 
-		writer.SetTxNum(2)
 		err = writer.AddPrevValue([]byte("key1"), nil, 2, nil)
 		require.NoError(err)
 
-		writer.SetTxNum(3)
 		err = writer.AddPrevValue([]byte("key2"), nil, 3, nil)
 		require.NoError(err)
 
-		writer.SetTxNum(6)
 		err = writer.AddPrevValue([]byte("key1"), nil, 6, []byte("value1.1"))
 		require.NoError(err)
 		err = writer.AddPrevValue([]byte("key2"), nil, 6, []byte("value2.1"))
 		require.NoError(err)
 
-		writer.SetTxNum(7)
 		err = writer.AddPrevValue([]byte("key2"), nil, 7, []byte("value2.2"))
 		require.NoError(err)
 		err = writer.AddPrevValue([]byte("key3"), nil, 7, nil)
@@ -400,7 +392,6 @@ func TestHistoryCanPrune(t *testing.T) {
 		val := make([]byte, 8)
 
 		for i := uint64(0); i < stepsTotal*h.aggregationStep; i++ {
-			writer.SetTxNum(i)
 			if cap(val) == 0 {
 				val = make([]byte, 8)
 			}
@@ -731,7 +722,6 @@ func filledHistoryValues(tb testing.TB, largeValues bool, values map[string][]up
 		var keyFlushCount = 0
 		for key, upds := range values {
 			for i := 0; i < len(upds); i++ {
-				writer.SetTxNum(upds[i].txNum)
 				err := writer.AddPrevValue([]byte(key), nil, upds[i].txNum, upds[i].value)
 				require.NoError(tb, err)
 			}
@@ -775,7 +765,6 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 	var prevVal [32][]byte
 	var flusher flusher
 	for txNum := uint64(1); txNum <= txs; txNum++ {
-		writer.SetTxNum(txNum)
 		for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
 			if txNum%keyNum == 0 {
 				valNum := txNum / keyNum
@@ -1450,8 +1439,6 @@ func writeSomeHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	var prevVal [7][]byte
 	var flusher flusher
 	for txNum := uint64(1); txNum <= txs; txNum++ {
-		writer.SetTxNum(txNum)
-
 		for ik, k := range keys {
 			var v [8]byte
 			binary.BigEndian.PutUint64(v[:], txNum)

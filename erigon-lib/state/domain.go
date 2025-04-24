@@ -446,40 +446,37 @@ func (d *Domain) Close() {
 	d.closeWhatNotInList([]string{})
 }
 
-func (w *DomainBufferedWriter) PutWithPrev(key1, key2, val, preval []byte, prevStep uint64) error {
+func (w *DomainBufferedWriter) PutWithPrev(key1, key2, val []byte, txNum uint64, preval []byte, prevStep uint64) error {
+	step := txNum / w.h.ii.aggregationStep
 	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `preval`` slice is invalidated
 	if tracePutWithPrev != "" && tracePutWithPrev == w.h.ii.filenameBase {
-		fmt.Printf("PutWithPrev(%s, txn %d, key[%x][%x] value[%x] preval[%x])\n", w.h.ii.filenameBase, w.h.ii.txNum, key1, key2, val, preval)
+		fmt.Printf("PutWithPrev(%s, txn %d, key[%x][%x] value[%x] preval[%x])\n", w.h.ii.filenameBase, step, key1, key2, val, preval)
 	}
-	if err := w.h.AddPrevValue(key1, key2, w.h.ii.txNum, preval); err != nil {
+	if err := w.h.AddPrevValue(key1, key2, txNum, preval); err != nil {
 		return err
 	}
 	if w.diff != nil {
-		w.diff.DomainUpdate(key1, key2, w.step, preval, prevStep)
+		w.diff.DomainUpdate(key1, key2, step, preval, prevStep)
 	}
-	return w.addValue(key1, key2, val, w.step)
+	return w.addValue(key1, key2, val, step)
 }
 
-func (w *DomainBufferedWriter) DeleteWithPrev(key1, key2, prev []byte, prevStep uint64) (err error) {
+func (w *DomainBufferedWriter) DeleteWithPrev(key1, key2 []byte, txNum uint64, prev []byte, prevStep uint64) (err error) {
+	step := txNum / w.h.ii.aggregationStep
+
 	// This call to update needs to happen before d.tx.Delete() later, because otherwise the content of `original`` slice is invalidated
 	if tracePutWithPrev != "" && tracePutWithPrev == w.h.ii.filenameBase {
-		fmt.Printf("DeleteWithPrev(%s, txn %d, key[%x][%x] preval[%x])\n", w.h.ii.filenameBase, w.h.ii.txNum, key1, key2, prev)
+		fmt.Printf("DeleteWithPrev(%s, txn %d, key[%x][%x] preval[%x])\n", w.h.ii.filenameBase, txNum, key1, key2, prev)
 	}
-	if err := w.h.AddPrevValue(key1, key2, w.h.ii.txNum, prev); err != nil {
+	if err := w.h.AddPrevValue(key1, key2, txNum, prev); err != nil {
 		return err
 	}
 	if w.diff != nil {
-		w.diff.DomainUpdate(key1, key2, w.step, prev, prevStep)
+		w.diff.DomainUpdate(key1, key2, step, prev, prevStep)
 	}
-	return w.addValue(key1, key2, nil, w.step)
+	return w.addValue(key1, key2, nil, step)
 }
 
-func (w *DomainBufferedWriter) SetTxNum(v uint64) {
-	w.setTxNumOnce = true
-	w.h.SetTxNum(v)
-	w.step = v / w.h.ii.aggregationStep
-	//binary.BigEndian.PutUint64(w.stepBytes[:], ^(v / w.h.ii.aggregationStep))
-}
 func (w *DomainBufferedWriter) SetDiff(diff *kv.DomainDiff) { w.diff = diff }
 
 func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWriter {
@@ -501,8 +498,7 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWrit
 type DomainBufferedWriter struct {
 	values *etl.Collector
 
-	setTxNumOnce bool
-	discard      bool
+	discard bool
 
 	valsTable string
 	largeVals bool
@@ -595,17 +591,14 @@ func (w *DomainBufferedWriter) addValue(key1, key2, value []byte, step uint64) e
 	if w.discard {
 		return nil
 	}
-	if !w.setTxNumOnce {
-		panic("you forgot to call SetTxNum")
-	}
 	binary.BigEndian.PutUint64(w.stepBytes[:], ^step)
 
 	if w.largeVals {
 		kl := len(key1) + len(key2)
 		w.aux = append(append(append(w.aux[:0], key1...), key2...), w.stepBytes[:]...)
 		fullkey := w.aux[:kl+8]
-		if asserts && (w.h.ii.txNum/w.h.ii.aggregationStep) != ^binary.BigEndian.Uint64(w.stepBytes[:]) {
-			panic(fmt.Sprintf("assert: %d != %d", w.h.ii.txNum/w.h.ii.aggregationStep, ^binary.BigEndian.Uint64(w.stepBytes[:])))
+		if asserts && step != ^binary.BigEndian.Uint64(w.stepBytes[:]) {
+			panic(fmt.Sprintf("assert: %d != %d", step, ^binary.BigEndian.Uint64(w.stepBytes[:])))
 		}
 
 		if err := w.values.Collect(fullkey, value); err != nil {
@@ -617,8 +610,8 @@ func (w *DomainBufferedWriter) addValue(key1, key2, value []byte, step uint64) e
 	w.aux = append(append(w.aux[:0], key1...), key2...)
 	w.aux2 = append(append(w.aux2[:0], w.stepBytes[:]...), value...)
 
-	if asserts && (w.h.ii.txNum/w.h.ii.aggregationStep) != ^binary.BigEndian.Uint64(w.stepBytes[:]) {
-		panic(fmt.Sprintf("assert: %d != %d", w.h.ii.txNum/w.h.ii.aggregationStep, ^binary.BigEndian.Uint64(w.stepBytes[:])))
+	if asserts && step != ^binary.BigEndian.Uint64(w.stepBytes[:]) {
+		panic(fmt.Sprintf("assert: %d != %d", step, ^binary.BigEndian.Uint64(w.stepBytes[:])))
 	}
 
 	//defer func() {

@@ -170,21 +170,17 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	writer := ic.NewWriter()
 	defer writer.close()
 
-	writer.SetTxNum(2)
 	err = writer.Add([]byte("key1"), 2)
 	require.NoError(t, err)
 
-	writer.SetTxNum(3)
 	err = writer.Add([]byte("key2"), 3)
 	require.NoError(t, err)
 
-	writer.SetTxNum(6)
 	err = writer.Add([]byte("key1"), 6)
 	require.NoError(t, err)
 	err = writer.Add([]byte("key3"), 6)
 	require.NoError(t, err)
 
-	writer.SetTxNum(17)
 	err = writer.Add([]byte("key10"), 17)
 	require.NoError(t, err)
 
@@ -256,15 +252,12 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	writer := ic.NewWriter()
 	defer writer.close()
 
-	writer.SetTxNum(2)
 	err = writer.Add([]byte("key1"), 2)
 	require.NoError(t, err)
 
-	writer.SetTxNum(3)
 	err = writer.Add([]byte("key2"), 3)
 	require.NoError(t, err)
 
-	writer.SetTxNum(6)
 	err = writer.Add([]byte("key1"), 6)
 	require.NoError(t, err)
 	err = writer.Add([]byte("key3"), 6)
@@ -350,7 +343,6 @@ func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log
 		// keys are encodings of numbers 1..31
 		// each key changes value on every txNum which is multiple of the key
 		for txNum := uint64(1); txNum <= txs; txNum++ {
-			writer.SetTxNum(txNum)
 			for keyNum := uint64(1); keyNum <= module; keyNum++ {
 				if txNum%keyNum == 0 {
 					var k [8]byte

@@ -534,8 +534,6 @@ type historyBufferedWriter struct {
 	ii *InvertedIndexBufferedWriter
 }
 
-func (w *historyBufferedWriter) SetTxNum(v uint64) { w.ii.SetTxNum(v) }
-
 func (w *historyBufferedWriter) close() {
 	if w == nil { // allow dobule-close
 		return

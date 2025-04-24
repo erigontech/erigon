@@ -388,11 +388,6 @@ func loadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) 
 	return next(k, k, v)
 }
 
-func (w *InvertedIndexBufferedWriter) SetTxNum(txNum uint64) {
-	w.txNum = txNum
-	//binary.BigEndian.PutUint64(w.txNumBytes[:], w.txNum)
-}
-
 // Add - !NotThreadSafe. Must use WalRLock/BatchHistoryWriteEnd
 func (w *InvertedIndexBufferedWriter) Add(key []byte, txNum uint64) error {
 	return w.add(key, key, txNum)
