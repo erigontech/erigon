@@ -50,7 +50,7 @@ func TestGenesisBlockHashes(t *testing.T) {
 
 	t.Parallel()
 	logger := log.New()
-	db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	check := func(network string) {
 		genesis := core.GenesisBlockByChainName(network)
 		tx, err := db.BeginRw(context.Background())
@@ -110,7 +110,7 @@ func TestGenesisBlockRoots(t *testing.T) {
 func TestCommitGenesisIdempotency(t *testing.T) {
 	t.Parallel()
 	logger := log.New()
-	db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
