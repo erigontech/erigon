@@ -41,7 +41,6 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/builder"
@@ -91,9 +90,9 @@ func CreateTestSentry(t *testing.T) (*mock.MockSentry, *core.ChainPack, []*core.
 	)
 
 	var (
-		gspec = &genesis.Genesis{
+		gspec = &types.Genesis{
 			Config: chain.TestChainConfig,
-			Alloc: genesis.GenesisAlloc{
+			Alloc: types.GenesisAlloc{
 				address:  {Balance: big.NewInt(9000000000000000000)},
 				address1: {Balance: big.NewInt(200000000000000000)},
 				address2: {Balance: big.NewInt(300000000000000000)},
@@ -351,9 +350,9 @@ func CreateTestSentryForTraces(t *testing.T) *mock.MockSentry {
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
-		gspec   = &genesis.Genesis{
+		gspec   = &types.Genesis{
 			Config: chain.TestChainConfig,
-			Alloc: genesis.GenesisAlloc{
+			Alloc: types.GenesisAlloc{
 				address: {Balance: funds},
 				// The address 0x00ff
 				a0: {
@@ -508,9 +507,9 @@ func CreateTestSentryForTracesCollision(t *testing.T) *mock.MockSentry {
 	aa := crypto.CreateAddress2(bb, [32]byte{}, initHash[:])
 	t.Logf("Destination address: %x\n", aa)
 
-	gspec := &genesis.Genesis{
+	gspec := &types.Genesis{
 		Config: chain.TestChainConfig,
-		Alloc: genesis.GenesisAlloc{
+		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
 			aa: {

@@ -26,9 +26,9 @@ import (
 
 	chain2 "github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core"
-	gen "github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
@@ -36,7 +36,7 @@ import (
 
 var (
 	genesisPath string
-	genesis     *gen.Genesis
+	genesis     *types.Genesis
 	chainConfig *chain2.Config
 )
 
@@ -67,21 +67,21 @@ var rootCmd = &cobra.Command{
 	},
 }
 
-func genesisFromFile(genesisPath string) *gen.Genesis {
+func genesisFromFile(genesisPath string) *types.Genesis {
 	file, err := os.Open(genesisPath)
 	if err != nil {
 		utils.Fatalf("Failed to read genesis file: %v", err)
 	}
 	defer file.Close()
 
-	genesis := new(gen.Genesis)
+	genesis := new(types.Genesis)
 	if err := json.NewDecoder(file).Decode(genesis); err != nil {
 		utils.Fatalf("invalid genesis file: %v", err)
 	}
 	return genesis
 }
 
-func getChainGenesisAndConfig() (genesis *gen.Genesis, chainConfig *chain2.Config) {
+func getChainGenesisAndConfig() (genesis *types.Genesis, chainConfig *chain2.Config) {
 	if chain == "" {
 		genesis, chainConfig = core.MainnetGenesisBlock(), params.MainnetChainConfig
 	} else {

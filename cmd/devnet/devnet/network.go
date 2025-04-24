@@ -31,9 +31,9 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	devnet_args "github.com/erigontech/erigon/cmd/devnet/args"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/rpc/requests"
 	erigonapp "github.com/erigontech/erigon/turbo/app"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
@@ -50,7 +50,7 @@ type Network struct {
 	Snapshots          bool
 	Nodes              []Node
 	Services           []Service
-	Genesis            *genesis.Genesis
+	Genesis            *types.Genesis
 	BorStateSyncDelay  time.Duration
 	BorPeriod          time.Duration
 	BorMinBlockSize    int
@@ -157,15 +157,15 @@ func (nw *Network) createNode(nodeArgs Node) (Node, error) {
 
 	if n.IsBlockProducer() {
 		if nw.Genesis == nil {
-			nw.Genesis = &genesis.Genesis{}
+			nw.Genesis = &types.Genesis{}
 		}
 
 		if nw.Genesis.Alloc == nil {
-			nw.Genesis.Alloc = genesis.GenesisAlloc{
-				n.Account().Address: genesis.GenesisAccount{Balance: blockProducerFunds},
+			nw.Genesis.Alloc = types.GenesisAlloc{
+				n.Account().Address: types.GenesisAccount{Balance: blockProducerFunds},
 			}
 		} else {
-			nw.Genesis.Alloc[n.Account().Address] = genesis.GenesisAccount{Balance: blockProducerFunds}
+			nw.Genesis.Alloc[n.Account().Address] = types.GenesisAccount{Balance: blockProducerFunds}
 		}
 	}
 

@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/filters"
@@ -240,9 +239,9 @@ func TestGetBlockReceiptsByBlockHash(t *testing.T) {
 // newTestBackend creates a chain with a number of explicitly defined blocks and
 // wraps it into a mock backend.
 func mockWithGenerator(t *testing.T, blocks int, generator func(int, *core.BlockGen)) *mock.MockSentry {
-	m := mock.MockWithGenesis(t, &genesis.Genesis{
+	m := mock.MockWithGenesis(t, &types.Genesis{
 		Config: chain.TestChainConfig,
-		Alloc:  genesis.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
+		Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
 	}, testKey, false)
 	if blocks > 0 {
 		chain, _ := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, blocks, generator)

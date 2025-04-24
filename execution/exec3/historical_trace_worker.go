@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/execution/consensus"
@@ -237,7 +236,7 @@ func (rw *HistoricalTraceWorker) ResetTx(chainTx kv.TemporalTx) {
 // immutable (aka. global) params required for block execution. can instantiate once at app-start
 type ExecArgs struct {
 	ChainDB     kv.TemporalRoDB
-	Genesis     *genesis.Genesis
+	Genesis     *types.Genesis
 	BlockReader services.FullBlockReader
 	Engine      consensus.Engine
 	Dirs        datadir.Dirs

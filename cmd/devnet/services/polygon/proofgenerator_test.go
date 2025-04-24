@@ -44,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/params"
@@ -395,7 +394,7 @@ type initialData struct {
 	keys         []*ecdsa.PrivateKey
 	addresses    []libcommon.Address
 	transactOpts []*bind.TransactOpts
-	genesisSpec  *genesis.Genesis
+	genesisSpec  *types.Genesis
 }
 
 func getGenesis(accounts int, funds ...*big.Int) initialData {
@@ -412,7 +411,7 @@ func getGenesis(accounts int, funds ...*big.Int) initialData {
 
 	addresses := make([]libcommon.Address, 0, len(keys))
 	transactOpts := make([]*bind.TransactOpts, 0, len(keys))
-	allocs := genesis.GenesisAlloc{}
+	allocs := types.GenesisAlloc{}
 	for _, key := range keys {
 		addr := crypto.PubkeyToAddress(key.PublicKey)
 		addresses = append(addresses, addr)
@@ -422,14 +421,14 @@ func getGenesis(accounts int, funds ...*big.Int) initialData {
 		}
 		transactOpts = append(transactOpts, to)
 
-		allocs[addr] = genesis.GenesisAccount{Balance: accountFunds}
+		allocs[addr] = types.GenesisAccount{Balance: accountFunds}
 	}
 
 	return initialData{
 		keys:         keys,
 		addresses:    addresses,
 		transactOpts: transactOpts,
-		genesisSpec: &genesis.Genesis{
+		genesisSpec: &types.Genesis{
 			Config: &chain.Config{
 				ChainID:               big.NewInt(1),
 				HomesteadBlock:        new(big.Int),

@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/execution/consensus/clique"
 	"github.com/erigontech/erigon/params"
@@ -417,7 +416,7 @@ func TestClique(t *testing.T) {
 				}
 			}
 			// Create the genesis block with the initial set of signers
-			genesis := &genesis.Genesis{
+			genesis := &types.Genesis{
 				ExtraData: make([]byte, clique.ExtraVanity+length.Addr*len(signers)+clique.ExtraSeal),
 				Config:    params.AllCliqueProtocolChanges,
 			}

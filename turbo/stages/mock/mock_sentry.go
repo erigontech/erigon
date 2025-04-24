@@ -62,7 +62,6 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/erigon-db/rawdb/blockio"
 	"github.com/erigontech/erigon/eth/consensuschain"
@@ -109,7 +108,7 @@ type MockSentry struct {
 	DB                   kv.TemporalRwDB
 	Dirs                 datadir.Dirs
 	Engine               consensus.Engine
-	gspec                *genesis.Genesis
+	gspec                *types.Genesis
 	ChainConfig          *chain.Config
 	Sync                 *stagedsync.Sync
 	MiningSync           *stagedsync.Sync
@@ -242,16 +241,16 @@ func (ms *MockSentry) NodeInfo(context.Context, *emptypb.Empty) (*ptypes.NodeInf
 
 const blockBufferSize = 128
 
-func MockWithGenesis(tb testing.TB, gspec *genesis.Genesis, key *ecdsa.PrivateKey, withPosDownloader bool) *MockSentry {
+func MockWithGenesis(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, withPosDownloader bool) *MockSentry {
 	return MockWithGenesisPruneMode(tb, gspec, key, blockBufferSize, prune.DefaultMode, withPosDownloader)
 }
 
-func MockWithGenesisEngine(tb testing.TB, gspec *genesis.Genesis, engine consensus.Engine, withPosDownloader, checkStateRoot bool) *MockSentry {
+func MockWithGenesisEngine(tb testing.TB, gspec *types.Genesis, engine consensus.Engine, withPosDownloader, checkStateRoot bool) *MockSentry {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	return MockWithEverything(tb, gspec, key, prune.DefaultMode, engine, blockBufferSize, false, withPosDownloader, checkStateRoot)
 }
 
-func MockWithGenesisPruneMode(tb testing.TB, gspec *genesis.Genesis, key *ecdsa.PrivateKey, blockBufferSize int, prune prune.Mode, withPosDownloader bool) *MockSentry {
+func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, blockBufferSize int, prune prune.Mode, withPosDownloader bool) *MockSentry {
 	var engine consensus.Engine
 
 	switch {
@@ -265,7 +264,7 @@ func MockWithGenesisPruneMode(tb testing.TB, gspec *genesis.Genesis, key *ecdsa.
 	return MockWithEverything(tb, gspec, key, prune, engine, blockBufferSize, false, withPosDownloader, checkStateRoot)
 }
 
-func MockWithEverything(tb testing.TB, gspec *genesis.Genesis, key *ecdsa.PrivateKey, prune prune.Mode,
+func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode,
 	engine consensus.Engine, blockBufferSize int, withTxPool, withPosDownloader, checkStateRoot bool,
 ) *MockSentry {
 	tmpdir := os.TempDir()
@@ -635,9 +634,9 @@ func Mock(tb testing.TB) *MockSentry {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
 	chainConfig := chain.TestChainConfig
-	gspec := &genesis.Genesis{
+	gspec := &types.Genesis{
 		Config: chainConfig,
-		Alloc: genesis.GenesisAlloc{
+		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 		},
 	}
@@ -649,9 +648,9 @@ func MockWithTxPool(t *testing.T) *MockSentry {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
 	chainConfig := chain.TestChainConfig
-	gspec := &genesis.Genesis{
+	gspec := &types.Genesis{
 		Config: chainConfig,
-		Alloc: genesis.GenesisAlloc{
+		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 		},
 	}
@@ -665,9 +664,9 @@ func MockWithTxPoolCancun(t *testing.T) *MockSentry {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
 	chainConfig := params.AllProtocolChanges
-	gspec := &genesis.Genesis{
+	gspec := &types.Genesis{
 		Config: chainConfig,
-		Alloc: genesis.GenesisAlloc{
+		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 		},
 	}
@@ -682,9 +681,9 @@ func MockWithZeroTTD(t *testing.T, withPosDownloader bool) *MockSentry {
 	address := crypto.PubkeyToAddress(key.PublicKey)
 	chainConfig := params.AllProtocolChanges
 	chainConfig.TerminalTotalDifficulty = libcommon.Big0
-	gspec := &genesis.Genesis{
+	gspec := &types.Genesis{
 		Config: chainConfig,
-		Alloc: genesis.GenesisAlloc{
+		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 		},
 	}
@@ -698,9 +697,9 @@ func MockWithZeroTTDGnosis(t *testing.T, withPosDownloader bool) *MockSentry {
 	chainConfig := chain.TestChainAuraConfig
 	chainConfig.TerminalTotalDifficulty = libcommon.Big0
 	chainConfig.TerminalTotalDifficultyPassed = true
-	gspec := &genesis.Genesis{
+	gspec := &types.Genesis{
 		Config: chainConfig,
-		Alloc: genesis.GenesisAlloc{
+		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 		},
 	}

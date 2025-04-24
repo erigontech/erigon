@@ -32,24 +32,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/temporal"
-
-	"github.com/erigontech/erigon-lib/common/datadir"
-
 	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	common2 "github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
-
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/evm/internal/compiler"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/cmd/utils/flags"
@@ -57,7 +55,6 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/runtime"
-	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/params"
@@ -73,7 +70,7 @@ var runCommand = cli.Command{
 
 // readGenesis will read the given JSON format genesis file and return
 // the initialized Genesis structure
-func readGenesis(genesisPath string) *genesis.Genesis {
+func readGenesis(genesisPath string) *types.Genesis {
 	// Make sure we have a valid genesis JSON
 	//genesisPath := ctx.Args().First()
 	if len(genesisPath) == 0 {
@@ -90,7 +87,7 @@ func readGenesis(genesisPath string) *genesis.Genesis {
 		}
 	}(file)
 
-	genesis := new(genesis.Genesis)
+	genesis := new(types.Genesis)
 	if err := json.NewDecoder(file).Decode(genesis); err != nil {
 		utils.Fatalf("invalid genesis file: %v", err)
 	}
@@ -152,7 +149,7 @@ func runCmd(ctx *cli.Context) error {
 		chainConfig   *chain.Config
 		sender        = libcommon.BytesToAddress([]byte("sender"))
 		receiver      = libcommon.BytesToAddress([]byte("receiver"))
-		genesisConfig *genesis.Genesis
+		genesisConfig *types.Genesis
 	)
 	if machineFriendlyOutput {
 		tracer = logger.NewJSONLogger(logconfig, os.Stdout).Tracer()
@@ -170,7 +167,7 @@ func runCmd(ctx *cli.Context) error {
 		genesisConfig = gen
 		chainConfig = gen.Config
 	} else {
-		genesisConfig = new(genesis.Genesis)
+		genesisConfig = new(types.Genesis)
 	}
 	agg, err := state2.NewAggregator(context.Background(), datadir.New(os.TempDir()), config3.DefaultStepSize, db, log.New())
 	if err != nil {

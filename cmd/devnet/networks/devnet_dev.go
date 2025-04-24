@@ -21,11 +21,11 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
 	"github.com/erigontech/erigon/cmd/devnet/args"
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
 	account_services "github.com/erigontech/erigon/cmd/devnet/services/accounts"
-	"github.com/erigontech/erigon/erigon-db/genesis"
 )
 
 func NewDevDevnet(
@@ -63,8 +63,8 @@ func NewDevDevnet(
 		BasePrivateApiAddr: "localhost:10090",
 		BaseRPCHost:        baseRpcHost,
 		BaseRPCPort:        baseRpcPort,
-		Genesis: &genesis.Genesis{
-			Alloc: genesis.GenesisAlloc{
+		Genesis: &types.Genesis{
+			Alloc: types.GenesisAlloc{
 				faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
 			},
 			GasLimit: gasLimit,

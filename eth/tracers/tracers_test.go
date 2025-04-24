@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/tests"
@@ -86,16 +85,16 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		BaseFee:     uint256.NewInt(0),
 		BlobBaseFee: uint256.NewInt(50000),
 	}
-	alloc := genesis.GenesisAlloc{}
+	alloc := types.GenesisAlloc{}
 
 	// The code pushes 'deadbeef' into memory, then the other params, and calls CREATE2, then returns
 	// the address
-	alloc[libcommon.HexToAddress("0x00000000000000000000000000000000deadbeef")] = genesis.GenesisAccount{
+	alloc[libcommon.HexToAddress("0x00000000000000000000000000000000deadbeef")] = types.GenesisAccount{
 		Nonce:   1,
 		Code:    hexutil.MustDecode("0x63deadbeef60005263cafebabe6004601c6000F560005260206000F3"),
 		Balance: big.NewInt(1),
 	}
-	alloc[origin] = genesis.GenesisAccount{
+	alloc[origin] = types.GenesisAccount{
 		Nonce:   1,
 		Code:    []byte{},
 		Balance: big.NewInt(500000000000000),

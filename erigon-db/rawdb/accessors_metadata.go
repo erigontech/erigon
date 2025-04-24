@@ -24,13 +24,12 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/erigontech/erigon/erigon-db/genesis"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
-
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
 // ReadChainConfig retrieves the consensus settings based on the given genesis hash.
@@ -83,7 +82,7 @@ func WriteChainConfig(db kv.Putter, hash libcommon.Hash, cfg *chain.Config) erro
 	return nil
 }
 
-func WriteGenesisIfNotExist(db kv.RwTx, g *genesis.Genesis) error {
+func WriteGenesisIfNotExist(db kv.RwTx, g *types.Genesis) error {
 	has, err := db.Has(kv.ConfigTable, kv.GenesisKey)
 	if err != nil {
 		return err
@@ -100,7 +99,7 @@ func WriteGenesisIfNotExist(db kv.RwTx, g *genesis.Genesis) error {
 	return db.Put(kv.ConfigTable, kv.GenesisKey, val)
 }
 
-func ReadGenesis(db kv.Getter) (*genesis.Genesis, error) {
+func ReadGenesis(db kv.Getter) (*types.Genesis, error) {
 	val, err := db.GetOne(kv.ConfigTable, kv.GenesisKey)
 	if err != nil {
 		return nil, err
@@ -108,7 +107,7 @@ func ReadGenesis(db kv.Getter) (*genesis.Genesis, error) {
 	if len(val) == 0 || string(val) == "null" {
 		return nil, nil
 	}
-	var g genesis.Genesis
+	var g types.Genesis
 	if err := json.Unmarshal(val, &g); err != nil {
 		return nil, err
 	}

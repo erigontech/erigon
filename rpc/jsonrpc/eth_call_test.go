@@ -42,7 +42,6 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/rpc"
@@ -508,9 +507,9 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, libcommon.Addres
 		bankAddress = crypto.PubkeyToAddress(bankKey.PublicKey)
 		bankFunds   = big.NewInt(1e9)
 		contract    = hexutil.MustDecode(contractHexString)
-		gspec       = &genesis.Genesis{
+		gspec       = &types.Genesis{
 			Config: chain.TestChainConfig,
-			Alloc:  genesis.GenesisAlloc{bankAddress: {Balance: bankFunds}},
+			Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds}},
 		}
 	)
 	m := mock.MockWithGenesis(t, gspec, bankKey, false)

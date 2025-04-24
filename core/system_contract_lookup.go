@@ -23,8 +23,8 @@ import (
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/systemcontracts"
-	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
@@ -45,7 +45,7 @@ func init() {
 			if err != nil {
 				panic(fmt.Errorf("failed to parse block number in BlockAlloc: %s", err.Error()))
 			}
-			alloc, err := genesis.DecodeGenesisAlloc(genesisAlloc)
+			alloc, err := types.DecodeGenesisAlloc(genesisAlloc)
 			if err != nil {
 				panic(fmt.Errorf("failed to decode block alloc: %v", err))
 			}
@@ -56,7 +56,7 @@ func init() {
 	addGnosisSpecialCase()
 }
 
-func allocToCodeRecords(alloc genesis.GenesisAlloc, byChain map[libcommon.Address][]libcommon.CodeRecord, blockNum uint64) {
+func allocToCodeRecords(alloc types.GenesisAlloc, byChain map[libcommon.Address][]libcommon.CodeRecord, blockNum uint64) {
 	for addr, account := range alloc {
 		if len(account.Code) > 0 {
 			list := byChain[addr]

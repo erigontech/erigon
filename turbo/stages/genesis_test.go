@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -48,9 +47,9 @@ func TestSetupGenesis(t *testing.T) {
 	t.Parallel()
 	var (
 		customghash = libcommon.HexToHash("0x89c99d90b79719238d2645c7642f2c9295246e80775b38cfd162b696817fbd50")
-		customg     = genesis.Genesis{
+		customg     = types.Genesis{
 			Config: &chain.Config{ChainID: big.NewInt(1), HomesteadBlock: big.NewInt(3)},
-			Alloc: genesis.GenesisAlloc{
+			Alloc: types.GenesisAlloc{
 				{1}: {Balance: big.NewInt(1), Storage: map[libcommon.Hash]libcommon.Hash{{1}: {1}}},
 			},
 		}
@@ -69,9 +68,9 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "genesis without ChainConfig",
 			fn: func(t *testing.T, db kv.RwDB) (*chain.Config, *types.Block, error) {
-				return core.CommitGenesisBlock(db, new(genesis.Genesis), datadir.New(tmpdir), logger)
+				return core.CommitGenesisBlock(db, new(types.Genesis), datadir.New(tmpdir), logger)
 			},
-			wantErr:    genesis.ErrGenesisNoConfig,
+			wantErr:    types.ErrGenesisNoConfig,
 			wantConfig: params.AllProtocolChanges,
 		},
 		{

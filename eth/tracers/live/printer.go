@@ -12,7 +12,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/eth/tracers"
 )
 
@@ -98,7 +97,7 @@ func (p *Printer) OnBlockEnd(err error) {
 	fmt.Printf("OnBlockEnd: err=%v\n", err)
 }
 
-func (p *Printer) OnGenesisBlock(b *types.Block, alloc genesis.GenesisAlloc) {
+func (p *Printer) OnGenesisBlock(b *types.Block, alloc types.GenesisAlloc) {
 	fmt.Printf("OnGenesisBlock: b=%v, allocLength=%d\n", b.NumberU64(), len(alloc))
 }
 
