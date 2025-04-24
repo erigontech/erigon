@@ -751,7 +751,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				addedDependencies = be.execTasks.addDependency(dependency, tx)
 				be.execAborted[tx]++
-				if be.txIncarnations[tx] > 1 {
+
+				if dbg.TraceTransactionIO && be.txIncarnations[tx] > 1 {
 					fmt.Println(be.blockNum, "ABORT", tx, be.txIncarnations[tx], be.execFailed[tx], be.execAborted[tx], "dep", dependency, "err", execErr.OriginError)
 				}
 			} else {
@@ -768,7 +769,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				be.estimateDeps[tx] = append(be.estimateDeps[tx], newEstimate)
 				be.execAborted[tx]++
 
-				if be.txIncarnations[tx] > 1 {
+				if dbg.TraceTransactionIO && be.txIncarnations[tx] > 1 {
 					fmt.Println(be.blockNum, "ABORT", tx, be.txIncarnations[tx], be.execFailed[tx], be.execAborted[tx], "est dep", estimate, "err", execErr.OriginError)
 				}
 			}
@@ -876,7 +877,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			be.cntValidationFail++
 			be.execFailed[tx]++
 
-			if be.txIncarnations[tx] > 1 {
+			if dbg.TraceTransactionIO && be.txIncarnations[tx] > 1 {
 				fmt.Println(be.blockNum, "FAILED", tx, be.txIncarnations[tx], "failed", be.execFailed[tx], "aborted", be.execAborted[tx])
 			}
 
@@ -1029,9 +1030,6 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 						func(_ state.ReadSource, _, writtenVersion state.Version) bool {
 							res := writtenVersion.TxIndex < maxValidated &&
 								writtenVersion.Incarnation == be.txIncarnations[writtenVersion.TxIndex+1]
-							if be.txIncarnations[nextTx] > 1 {
-								fmt.Println(be.blockNum, "VALIDATE", nextTx, writtenVersion.TxIndex, res, writtenVersion.TxIndex < maxValidated, writtenVersion.Incarnation, be.txIncarnations[writtenVersion.TxIndex+1])
-							}
 							return res
 						})) {
 				be.execTasks.pushPending(nextTx)
@@ -1040,7 +1038,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 			be.cntSpecExec++
 		}
 
-		if be.txIncarnations[nextTx] > 1 {
+		if dbg.TraceTransactionIO && be.txIncarnations[nextTx] > 1 {
 			fmt.Println(be.blockNum, "EXEC", nextTx, be.txIncarnations[nextTx], "maxValidated", maxValidated, be.blockIO.HasReads(nextTx), "failed", be.execFailed[nextTx], "aborted", be.execAborted[nextTx])
 		}
 

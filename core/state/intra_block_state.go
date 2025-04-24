@@ -103,6 +103,7 @@ type IntraBlockState struct {
 	versionedWrites     WriteSet
 	versionedReads      ReadSet
 	storageReadDuration time.Duration
+	storageReadCount    int64
 	version             int
 	dep                 int
 }
@@ -180,6 +181,10 @@ func (sdb *IntraBlockState) StorageReadDuration() time.Duration {
 	return sdb.storageReadDuration
 }
 
+func (sdb *IntraBlockState) StorageReadCount() int64 {
+	return sdb.storageReadCount
+}
+
 func (sdb *IntraBlockState) SetVersionMap(versionMap *VersionMap) {
 	sdb.versionMap = versionMap
 }
@@ -211,6 +216,7 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.versionedReads = nil
 	sdb.versionedWrites = nil
 	sdb.storageReadDuration = 0
+	sdb.storageReadCount = 0
 	sdb.dep = -1
 }
 
@@ -370,6 +376,7 @@ func (sdb *IntraBlockState) GetCodeSize(addr libcommon.Address) (int, error) {
 			readStart := time.Now()
 			l, err := sdb.stateReader.ReadAccountCodeSize(addr, s.data.Incarnation)
 			sdb.storageReadDuration += time.Since(readStart)
+			sdb.storageReadCount++
 			if err != nil {
 				return l, err
 			}
@@ -543,6 +550,7 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 				readStart := time.Now()
 				account, _ := sdb.stateReader.ReadAccountDataForDebug(addr)
 				sdb.storageReadDuration += time.Since(readStart)
+				sdb.storageReadCount++
 
 				if account != nil {
 					prev.Add(&account.Balance, &bi.increase)
@@ -881,6 +889,7 @@ func (sdb *IntraBlockState) getStateObject(addr libcommon.Address) (*stateObject
 	readStart := time.Now()
 	readAccount, err := sdb.stateReader.ReadAccountData(addr)
 	sdb.storageReadDuration += time.Since(readStart)
+	sdb.storageReadCount++
 
 	if err != nil {
 		return nil, err
@@ -1015,6 +1024,7 @@ func (sdb *IntraBlockState) CreateAccount(addr libcommon.Address, contractCreati
 		readStart := time.Now()
 		inc, err := sdb.stateReader.ReadAccountIncarnation(addr)
 		sdb.storageReadDuration += time.Since(readStart)
+		sdb.storageReadCount++
 
 		if err == nil {
 			prevInc = inc

@@ -96,6 +96,7 @@ type Progress struct {
 	prevActivations       int64
 	prevTaskDuration      time.Duration
 	prevTaskReadDuration  time.Duration
+	prevTaskReadCount     int64
 	prevTaskGas           int64
 	prevBlockCount        int64
 	prevBlockDuration     time.Duration
@@ -132,17 +133,20 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 
 	taskGas := te.taskExecMetrics.GasUsed.Total.Load()
 	taskDur := time.Duration(te.taskExecMetrics.Duration.Load())
-	readDur := time.Duration(te.taskExecMetrics.ReadDuration.Load())
+	readDur := time.Duration(te.taskExecMetrics.StorageReadDuration.Load())
+	readCount := te.taskExecMetrics.StorageReadCount.Load()
 	activations := te.taskExecMetrics.Active.Total.Load()
 
 	curTaskGas := taskGas - p.prevTaskGas
 	curTaskDur := taskDur - p.prevTaskDuration
 	curReadDur := readDur - p.prevTaskReadDuration
+	curReadCount := readCount - p.prevTaskReadCount
 	curActivations := activations - int64(p.prevActivations)
 
 	p.prevTaskGas = taskGas
 	p.prevTaskDuration = taskDur
 	p.prevTaskReadDuration = readDur
+	p.prevTaskReadCount = readCount
 	p.prevActivations = activations
 
 	var readRatio float64
@@ -204,11 +208,13 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 			"tgas/s", fmt.Sprintf("%s(%s)", common.PrettyCounter(curTaskGasPerSec), common.PrettyCounter(avgTaskGasPerSec)),
 			"aratio", fmt.Sprintf("%.1f", float64(curTaskDur)/float64(interval)),
 			"tdur", fmt.Sprintf("%dµs", avgTaskDur.Microseconds()),
-			"trdur", fmt.Sprintf("%dµs(%.2f%%)", avgReadDur.Microseconds(), readRatio),
+			"tsrdur", fmt.Sprintf("%dµs(%.2f%%)", avgReadDur.Microseconds(), readRatio),
 			"bdur", fmt.Sprintf("%dms", avgBlockDur.Milliseconds()),
 			"rd", common.PrettyCounter(readCount - p.prevReadCount),
+			"srd", common.PrettyCounter(curReadCount),
 			"wrt", common.PrettyCounter(writeCount - p.prevWriteCount),
 			"rd/s", common.PrettyCounter(uint64(float64(readCount-p.prevReadCount) / interval.Seconds())),
+			"srd/s", common.PrettyCounter(uint64(float64(curReadCount) / interval.Seconds())),
 			"wrt/s", common.PrettyCounter(uint64(float64(writeCount-p.prevWriteCount) / interval.Seconds())),
 		}
 
@@ -226,6 +232,8 @@ func (p *Progress) LogExecuted(tx kv.Tx, rs *state.StateV3, ex executor) {
 			"aratio", fmt.Sprintf("%.1f", float64(curTaskDur)/float64(interval)),
 			"tdur", fmt.Sprintf("%dµs", avgTaskDur.Microseconds()),
 			"trdur", fmt.Sprintf("%dµs(%.2f%%)", avgReadDur.Microseconds(), readRatio),
+			"srd", common.PrettyCounter(curReadCount),
+			"srd/s", common.PrettyCounter(uint64(float64(curReadCount) / interval.Seconds())),
 		}
 	}
 
