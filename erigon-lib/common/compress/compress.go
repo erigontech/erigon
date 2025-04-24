@@ -1,6 +1,7 @@
 package compress
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
