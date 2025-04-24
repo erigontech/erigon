@@ -22,9 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
-	mdbx1 "github.com/erigontech/mdbx-go/mdbx"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
 
@@ -92,9 +90,6 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (tdb kv.
 	if opts.GetLabel() != kv.ChainDB {
 		panic(opts.GetLabel())
 	}
-	opts = opts.Flags(func(f uint) uint { return f&^mdbx1.Durable | mdbx1.SafeNoSync }).
-		SyncBytes(32 * 1024 * 1024).
-		SyncPeriod(2 * time.Second)
 
 	rawDB := opts.MustOpen()
 	if applyMigrations {
