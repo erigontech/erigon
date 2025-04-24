@@ -1015,9 +1015,9 @@ func (iit *InvertedIndexRoTx) garbage(merged *filesItem) (outs []*filesItem) {
 }
 
 func garbage(dirtyFiles *btree.BTreeG[*filesItem], visibleFiles []visibleFile, merged *filesItem) (outs []*filesItem) {
-	if merged == nil {
-		return
-	}
+	//if merged == nil {
+	//	return
+	//}
 	// `kill -9` may leave some garbage
 	// AggRotx doesn't have such files, only Agg.files does
 	dirtyFiles.Walk(func(items []*filesItem) bool {
@@ -1025,9 +1025,15 @@ func garbage(dirtyFiles *btree.BTreeG[*filesItem], visibleFiles []visibleFile, m
 			if item.frozen {
 				continue
 			}
+
 			if item.isProperSubsetOf(merged) {
 				outs = append(outs, item)
 			}
+
+			if hasCoverVisibleFile(visibleFiles, item) {
+				fmt.Printf("[dbg] see: %s\n", item.decompressor.FileName())
+			}
+
 			// this case happens when in previous process run, the merged file was created,
 			// but the processed ended before subsumed files could be deleted.
 			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainRoTx`)

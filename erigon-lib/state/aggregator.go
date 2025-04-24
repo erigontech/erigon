@@ -1381,13 +1381,13 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 	defer a.dirtyFilesLock.Unlock()
 
 	for id, d := range at.d {
-		d.garbage(nil)
-		//d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])
+		//d.garbage(nil)
+		d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])
 		_ = id
 	}
-	//for id, ii := range at.iis {
-	//ii.cleanAfterMerge(in.iis[id])
-	//}
+	for id, ii := range at.iis {
+		ii.cleanAfterMerge(in.iis[id])
+	}
 }
 
 // KeepRecentTxnsOfHistoriesWithDisabledSnapshots limits amount of recent transactions protected from prune in domains history.
