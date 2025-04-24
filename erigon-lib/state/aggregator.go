@@ -676,8 +676,6 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 	maxSpan := config3.StepsInFrozenFile * a.StepSize()
 	r := aggTx.findMergeRange(toTxNum, maxSpan)
 	if !r.any() {
-		a.cleanAfterMerge(nil)
-		fmt.Printf("[dbg] early exit\n")
 		return false, nil
 	}
 
@@ -698,7 +696,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 	return true, nil
 }
 
-func (a *Aggregator) RemoveOverlaps() (err error) {
+func (a *Aggregator) RemoveOverlaps(ctx context.Context) (err error) {
 	a.cleanAfterMerge(nil)
 	return nil
 }
@@ -1388,14 +1386,19 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 	defer a.dirtyFilesLock.Unlock()
 
 	for id, d := range at.d {
-		d.garbage(nil)
-		//d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])
-		_ = id
+		if in == nil {
+			d.cleanAfterMerge(nil, nil, nil)
+		} else {
+			d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])
+		}
 	}
 	for id, ii := range at.iis {
-		ii.garbage(nil)
-		//ii.cleanAfterMerge(in.iis[id])
-		_ = id
+		ii.garbage(nxil)
+		if in == nil {
+			ii.cleanAfterMerge(nil)
+		} else {
+			ii.cleanAfterMerge(in.iis[id])
+		}
 	}
 }
 
