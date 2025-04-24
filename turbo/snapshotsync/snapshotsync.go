@@ -261,7 +261,11 @@ func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error)
 		if !strings.HasPrefix(p.Name, "domain") {
 			continue
 		}
-		rangeString := strings.Split(p.Name, ".")[1]
+		name := strings.TrimPrefix(p.Name, "domain/")
+		versionString := strings.Split(name, "-")[0]
+		name = strings.TrimPrefix(name, versionString)
+
+		rangeString := strings.Split(name, ".")[1]
 		rangeNums := strings.Split(rangeString, "-")
 		// convert the range to uint64
 		to, err := strconv.ParseUint(rangeNums[1], 10, 64)
