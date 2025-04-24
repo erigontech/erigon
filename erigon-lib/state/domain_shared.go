@@ -650,15 +650,33 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter b
 	return
 }
 
+func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte) ([]byte, bool, error) {
+	var firstKey []byte
+	var hasPrefix bool
+	err := sd.IteratePrefix(domain, prefix, func(k []byte, v []byte, step uint64) (bool, error) {
+		firstKey = common.CopyBytes(k)
+		hasPrefix = true
+		return false, nil // do not continue, end on first occurrence
+	})
+	return firstKey, hasPrefix, err
+}
+
 // IterateStoragePrefix iterates over key-value pairs of the storage domain that start with given prefix
-// Such iteration is not intended to be used in public API, therefore it uses read-write transaction
-// inside the domain. Another version of this for public API use needs to be created, that uses
-// roTx instead and supports ending the iterations before it reaches the end.
 //
 // k and v lifetime is bounded by the lifetime of the iterator
-func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v []byte, step uint64) error) error {
-	haveRamUpdates := sd.storage.Len() > 0
-	return sd.AggTx().d[kv.StorageDomain].debugIteratePrefix(prefix, haveRamUpdates, sd.storage.Iter(), it, sd.txNum, sd.StepSize(), sd.roTtx)
+func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v []byte, step uint64) (cont bool, err error)) error {
+	return sd.IteratePrefix(kv.StorageDomain, prefix, it)
+}
+
+func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, it func(k []byte, v []byte, step uint64) (cont bool, err error)) error {
+	var haveRamUpdates bool
+	var ramIter btree2.MapIter[string, dataWithPrevStep]
+	if domain == kv.StorageDomain {
+		haveRamUpdates = sd.storage.Len() > 0
+		ramIter = sd.storage.Iter()
+	}
+
+	return sd.AggTx().d[domain].debugIteratePrefix(prefix, haveRamUpdates, ramIter, it, sd.txNum, sd.StepSize(), sd.roTtx)
 }
 
 func (sd *SharedDomains) Close() {
@@ -850,9 +868,9 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 		step uint64
 	}
 	tombs := make([]tuple, 0, 8)
-	if err := sd.IterateStoragePrefix(prefix, func(k, v []byte, step uint64) error {
+	if err := sd.IterateStoragePrefix(prefix, func(k, v []byte, step uint64) (bool, error) {
 		tombs = append(tombs, tuple{k, v, step})
-		return nil
+		return true, nil
 	}); err != nil {
 		return err
 	}
@@ -864,9 +882,9 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 
 	if assert.Enable {
 		forgotten := 0
-		if err := sd.IterateStoragePrefix(prefix, func(k, v []byte, step uint64) error {
+		if err := sd.IterateStoragePrefix(prefix, func(k, v []byte, step uint64) (bool, error) {
 			forgotten++
-			return nil
+			return true, nil
 		}); err != nil {
 			return err
 		}
