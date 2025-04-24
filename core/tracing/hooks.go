@@ -22,13 +22,12 @@ package tracing
 import (
 	"math/big"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/erigon-db/genesis"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types"
-
-	"github.com/holiman/uint256"
+	"github.com/erigontech/erigon/erigon-db/genesis"
 )
 
 // OpContext provides the context at which the opcode is being

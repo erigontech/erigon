@@ -31,13 +31,10 @@ import (
 	"github.com/goccy/go-json"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
-
-	"github.com/erigontech/erigon/turbo/testlog"
-
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
+	"github.com/erigontech/erigon/turbo/testlog"
 )
 
 // Tests whether remote HTTP servers are correctly notified of new work.

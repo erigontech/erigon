@@ -20,7 +20,6 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon-lib/common"
-
 	"github.com/erigontech/erigon-lib/types"
 )
 
