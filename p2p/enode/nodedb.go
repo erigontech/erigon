@@ -140,7 +140,7 @@ func newPersistentDB(ctx context.Context, logger log.Logger, path string) (*DB, 
 	currentVer := make([]byte, binary.MaxVarintLen64)
 	currentVer = currentVer[:binary.PutVarint(currentVer, int64(dbVersion))]
 
-	var blob []bytew
+	var blob []byte
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		c, err := tx.RwCursor(kv.Inodes)
 		if err != nil {
