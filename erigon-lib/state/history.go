@@ -375,7 +375,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	histReader := seg.NewReader(hist.MakeGetter(), h.compression)
 
 	_, fName := filepath.Split(historyIdxPath)
-	p := ps.AddNew(fName, cnt)
+	p := ps.AddNew(fName, uint64(efHist.Count())/2)
 	defer ps.Delete(p)
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   int(cnt),
@@ -402,6 +402,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		for iiReader.HasNext() {
 			keyBuf, _ = iiReader.Next(keyBuf[:0])
 			valBuf, _ = iiReader.Next(valBuf[:0])
+			p.Processed.Add(1)
 
 			// fmt.Printf("ef key %x\n", keyBuf)
 
@@ -425,8 +426,6 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 					}
 				}
 			}
-
-			p.Processed.Add(1)
 
 			select {
 			case <-ctx.Done():
