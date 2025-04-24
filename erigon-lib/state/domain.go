@@ -477,6 +477,7 @@ func (w *DomainBufferedWriter) DeleteWithPrev(key1, key2, prev []byte, prevStep 
 func (w *DomainBufferedWriter) SetTxNum(v uint64) {
 	w.setTxNumOnce = true
 	w.h.SetTxNum(v)
+	w.step = v / w.h.ii.aggregationStep
 	//binary.BigEndian.PutUint64(w.stepBytes[:], ^(v / w.h.ii.aggregationStep))
 }
 func (w *DomainBufferedWriter) SetDiff(diff *kv.DomainDiff) { w.diff = diff }
