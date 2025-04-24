@@ -171,21 +171,21 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	defer writer.close()
 
 	writer.SetTxNum(2)
-	err = writer.Add([]byte("key1"))
+	err = writer.Add([]byte("key1"), 2)
 	require.NoError(t, err)
 
 	writer.SetTxNum(3)
-	err = writer.Add([]byte("key2"))
+	err = writer.Add([]byte("key2"), 3)
 	require.NoError(t, err)
 
 	writer.SetTxNum(6)
-	err = writer.Add([]byte("key1"))
+	err = writer.Add([]byte("key1"), 6)
 	require.NoError(t, err)
-	err = writer.Add([]byte("key3"))
+	err = writer.Add([]byte("key3"), 6)
 	require.NoError(t, err)
 
 	writer.SetTxNum(17)
-	err = writer.Add([]byte("key10"))
+	err = writer.Add([]byte("key10"), 17)
 	require.NoError(t, err)
 
 	err = writer.Flush(ctx, tx)
@@ -257,17 +257,17 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	defer writer.close()
 
 	writer.SetTxNum(2)
-	err = writer.Add([]byte("key1"))
+	err = writer.Add([]byte("key1"), 2)
 	require.NoError(t, err)
 
 	writer.SetTxNum(3)
-	err = writer.Add([]byte("key2"))
+	err = writer.Add([]byte("key2"), 3)
 	require.NoError(t, err)
 
 	writer.SetTxNum(6)
-	err = writer.Add([]byte("key1"))
+	err = writer.Add([]byte("key1"), 6)
 	require.NoError(t, err)
-	err = writer.Add([]byte("key3"))
+	err = writer.Add([]byte("key3"), 6)
 	require.NoError(t, err)
 
 	err = writer.Flush(ctx, tx)
@@ -355,7 +355,7 @@ func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log
 				if txNum%keyNum == 0 {
 					var k [8]byte
 					binary.BigEndian.PutUint64(k[:], keyNum)
-					err := writer.Add(k[:])
+					err := writer.Add(k[:], txNum)
 					require.NoError(err)
 				}
 			}

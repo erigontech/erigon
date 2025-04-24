@@ -451,13 +451,13 @@ func (w *DomainBufferedWriter) PutWithPrev(key1, key2, val, preval []byte, prevS
 	if tracePutWithPrev != "" && tracePutWithPrev == w.h.ii.filenameBase {
 		fmt.Printf("PutWithPrev(%s, txn %d, key[%x][%x] value[%x] preval[%x])\n", w.h.ii.filenameBase, w.h.ii.txNum, key1, key2, val, preval)
 	}
-	if err := w.h.AddPrevValue(key1, key2, preval, prevStep); err != nil {
+	if err := w.h.AddPrevValue(key1, key2, w.h.ii.txNum, preval); err != nil {
 		return err
 	}
 	if w.diff != nil {
-		w.diff.DomainUpdate(key1, key2, preval, w.stepBytes[:], prevStep)
+		w.diff.DomainUpdate(key1, key2, w.step, preval, prevStep)
 	}
-	return w.addValue(key1, key2, val)
+	return w.addValue(key1, key2, val, w.step)
 }
 
 func (w *DomainBufferedWriter) DeleteWithPrev(key1, key2, prev []byte, prevStep uint64) (err error) {
@@ -465,19 +465,19 @@ func (w *DomainBufferedWriter) DeleteWithPrev(key1, key2, prev []byte, prevStep 
 	if tracePutWithPrev != "" && tracePutWithPrev == w.h.ii.filenameBase {
 		fmt.Printf("DeleteWithPrev(%s, txn %d, key[%x][%x] preval[%x])\n", w.h.ii.filenameBase, w.h.ii.txNum, key1, key2, prev)
 	}
-	if err := w.h.AddPrevValue(key1, key2, prev, prevStep); err != nil {
+	if err := w.h.AddPrevValue(key1, key2, w.h.ii.txNum, prev); err != nil {
 		return err
 	}
 	if w.diff != nil {
-		w.diff.DomainUpdate(key1, key2, prev, w.stepBytes[:], prevStep)
+		w.diff.DomainUpdate(key1, key2, w.step, prev, prevStep)
 	}
-	return w.addValue(key1, key2, nil)
+	return w.addValue(key1, key2, nil, w.step)
 }
 
 func (w *DomainBufferedWriter) SetTxNum(v uint64) {
 	w.setTxNumOnce = true
 	w.h.SetTxNum(v)
-	binary.BigEndian.PutUint64(w.stepBytes[:], ^(v / w.h.ii.aggregationStep))
+	//binary.BigEndian.PutUint64(w.stepBytes[:], ^(v / w.h.ii.aggregationStep))
 }
 func (w *DomainBufferedWriter) SetDiff(diff *kv.DomainDiff) { w.diff = diff }
 
@@ -507,8 +507,9 @@ type DomainBufferedWriter struct {
 	largeVals bool
 
 	stepBytes [8]byte // current inverted step representation
-	aux       []byte  // auxilary buffer for key1 + key2
-	aux2      []byte  // auxilary buffer for step + val
+	step      uint64
+	aux       []byte // auxilary buffer for key1 + key2
+	aux2      []byte // auxilary buffer for step + val
 	diff      *kv.DomainDiff
 
 	h *historyBufferedWriter
@@ -589,13 +590,15 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	return nil
 }
 
-func (w *DomainBufferedWriter) addValue(key1, key2, value []byte) error {
+func (w *DomainBufferedWriter) addValue(key1, key2, value []byte, step uint64) error {
 	if w.discard {
 		return nil
 	}
 	if !w.setTxNumOnce {
 		panic("you forgot to call SetTxNum")
 	}
+	binary.BigEndian.PutUint64(w.stepBytes[:], ^step)
+
 	if w.largeVals {
 		kl := len(key1) + len(key2)
 		w.aux = append(append(append(w.aux[:0], key1...), key2...), w.stepBytes[:]...)

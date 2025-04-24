@@ -602,7 +602,7 @@ func (sd *SharedDomains) delAccountStorage(addr, loc []byte, preVal []byte, prev
 func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) {
 	for _, writer := range sd.iiWriters {
 		if writer.name == table {
-			return writer.Add(key)
+			return writer.Add(key, sd.txNum)
 		}
 	}
 	panic(fmt.Errorf("unknown index %s", table))
