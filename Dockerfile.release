@@ -1,6 +1,6 @@
-ARG RELEASE_DOCKER_BASE_IMAGE="alpine:3.20.6" \
+ARG RELEASE_DOCKER_BASE_IMAGE="alpine:latest" \
     CI_CD_MAIN_BUILDER_IMAGE="golang:1.23-bookworm" \
-    CI_CD_MAIN_TARGET_BASE_IMAGE="alpine:3.20.6" \
+    CI_CD_MAIN_TARGET_BASE_IMAGE="alpine:latest" \
     UID_ERIGON=1000 \
     GID_ERIGON=1000 \
     EXPOSED_PORTS="8545 \
@@ -55,7 +55,7 @@ RUN --mount=type=bind,from=temporary,source=/tmp/${APPLICATION},target=/tmp/${AP
         echo "Installing libsilkworm_capi.so library to /lib/x86_64-linux-gnu/ in case amd64 architecture:"; \
         find /tmp/${APPLICATION} -name libsilkworm_capi.so -type f | xargs -I % install -m a=r -v % /lib/x86_64-linux-gnu/; \
         echo "Done." ; \
-    fi && \    
+    fi && \
     install -d -o ${USER} -g ${GROUP} /home/${USER}/.local /home/${USER}/.local/share /home/${USER}/.local/share/erigon && \
     install -o root -g root /tmp/${APPLICATION}/cdk-erigon /usr/local/bin/ && \
     install -o root -g root /tmp/${APPLICATION}/integration /usr/local/bin/ && \
