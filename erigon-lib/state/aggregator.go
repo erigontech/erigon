@@ -676,6 +676,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 	maxSpan := config3.StepsInFrozenFile * a.StepSize()
 	r := aggTx.findMergeRange(toTxNum, maxSpan)
 	if !r.any() {
+		a.cleanAfterMerge(nil)
 		fmt.Printf("[dbg] early exit\n")
 		return false, nil
 	}
