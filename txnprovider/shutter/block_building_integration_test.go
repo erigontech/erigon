@@ -22,10 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"os"
 	"path"
-	"runtime"
-	"runtime/pprof"
 	"testing"
 	"time"
 
@@ -34,6 +31,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
 
+	params2 "github.com/erigontech/erigon-lib/chain/params"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -43,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/node"
@@ -64,24 +63,8 @@ func TestShutterBlockBuilding(t *testing.T) {
 		t.Skip()
 	}
 
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please")
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-
-	go func() {
-		// do a goroutine dump if we haven't finished in a long time
-		err := libcommon.Sleep(ctx, 2*time.Minute)
-		if err != nil {
-			// means we've finished before sleep time - no need for a pprof dump
-			return
-		}
-
-		err = pprof.Lookup("goroutine").WriteTo(os.Stdout, 1)
-		require.NoError(t, err)
-	}()
 
 	uni := initBlockBuildingUniverse(ctx, t)
 	sender1 := uni.acc1PrivKey
@@ -352,6 +335,18 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	genesis := core.ChiadoGenesisBlock()
 	genesis.Timestamp = uint64(time.Now().Unix() - 1)
 	genesis.Config = &chainConfig
+	genesis.Alloc[params2.ConsolidationRequestAddress] = types.GenesisAccount{
+		Code:    []byte{0}, // Can't be empty
+		Storage: make(map[libcommon.Hash]libcommon.Hash, 0),
+		Balance: big.NewInt(0),
+		Nonce:   0,
+	}
+	genesis.Alloc[params2.WithdrawalRequestAddress] = types.GenesisAccount{
+		Code:    []byte{0}, // Can't be empty
+		Storage: make(map[libcommon.Hash]libcommon.Hash, 0),
+		Balance: big.NewInt(0),
+		Nonce:   0,
+	}
 	// 1_000 ETH in wei in the bank
 	bank := testhelpers.NewBank(new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil))
 	bank.RegisterGenesisAlloc(genesis)

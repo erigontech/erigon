@@ -40,8 +40,8 @@ import (
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/abi/bind"
 )

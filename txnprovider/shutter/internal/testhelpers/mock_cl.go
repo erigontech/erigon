@@ -18,9 +18,12 @@ package testhelpers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"time"
+
+	"github.com/cenkalti/backoff/v4"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -69,12 +72,15 @@ func (cl *MockCl) BuildBlock(ctx context.Context, opts ...BlockBuildingOption) (
 	}
 
 	// start block building process
-	fcuRes, err := cl.engineApiClient.ForkchoiceUpdatedV3(ctx, &forkChoiceState, &payloadAttributes)
+	fcuRes, err := retryEngineSyncing(ctx, func() (*enginetypes.ForkChoiceUpdatedResponse, enginetypes.EngineStatus, error) {
+		r, err := cl.engineApiClient.ForkchoiceUpdatedV3(ctx, &forkChoiceState, &payloadAttributes)
+		return r, r.PayloadStatus.Status, err
+	})
 	if err != nil {
 		return nil, err
 	}
 	if fcuRes.PayloadStatus.Status != enginetypes.ValidStatus {
-		return nil, fmt.Errorf("payload status is not valid: %s", fcuRes.PayloadStatus.Status)
+		return nil, fmt.Errorf("payload status of block building fcu is not valid: %s", fcuRes.PayloadStatus.Status)
 	}
 
 	// give block builder time to build a block
@@ -90,12 +96,15 @@ func (cl *MockCl) BuildBlock(ctx context.Context, opts ...BlockBuildingOption) (
 	}
 
 	// insert the newly built block
-	payloadStatus, err := cl.engineApiClient.NewPayloadV4(ctx, payloadRes.ExecutionPayload, []libcommon.Hash{}, &parentBeaconBlockRoot, []hexutil.Bytes{})
+	payloadStatus, err := retryEngineSyncing(ctx, func() (*enginetypes.PayloadStatus, enginetypes.EngineStatus, error) {
+		r, err := cl.engineApiClient.NewPayloadV4(ctx, payloadRes.ExecutionPayload, []libcommon.Hash{}, &parentBeaconBlockRoot, []hexutil.Bytes{})
+		return r, r.Status, err
+	})
 	if err != nil {
 		return nil, err
 	}
 	if payloadStatus.Status != enginetypes.ValidStatus {
-		return nil, fmt.Errorf("payload status is not valid: %s", payloadStatus.Status)
+		return nil, fmt.Errorf("payload status of new payload is not valid: %s", payloadStatus.Status)
 	}
 
 	// set the newly built block as canonical
@@ -105,12 +114,15 @@ func (cl *MockCl) BuildBlock(ctx context.Context, opts ...BlockBuildingOption) (
 		SafeBlockHash:      newHash,
 		HeadHash:           newHash,
 	}
-	fcuRes, err = cl.engineApiClient.ForkchoiceUpdatedV3(ctx, &forkChoiceState, nil)
+	fcuRes, err = retryEngineSyncing(ctx, func() (*enginetypes.ForkChoiceUpdatedResponse, enginetypes.EngineStatus, error) {
+		r, err := cl.engineApiClient.ForkchoiceUpdatedV3(ctx, &forkChoiceState, nil)
+		return r, r.PayloadStatus.Status, err
+	})
 	if err != nil {
 		return nil, err
 	}
 	if fcuRes.PayloadStatus.Status != enginetypes.ValidStatus {
-		return nil, fmt.Errorf("payload status is not valid: %s", fcuRes.PayloadStatus.Status)
+		return nil, fmt.Errorf("payload status of fcu is not valid: %s", fcuRes.PayloadStatus.Status)
 	}
 
 	cl.prevBlockHash = newHash
@@ -139,4 +151,26 @@ func WithBlockBuildingSlot(slot uint64) BlockBuildingOption {
 
 type blockBuildingOptions struct {
 	slot uint64
+}
+
+func retryEngineSyncing[T any](ctx context.Context, f func() (*T, enginetypes.EngineStatus, error)) (*T, error) {
+	operation := func() (*T, error) {
+		res, status, err := f()
+		if err != nil {
+			return nil, backoff.Permanent(err) // do not retry
+		}
+		if status == enginetypes.SyncingStatus {
+			return nil, errors.New("engine is syncing") // retry
+		}
+		return res, nil
+	}
+
+	// don't retry for too long
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+
+	var backOff backoff.BackOff
+	backOff = backoff.NewConstantBackOff(50 * time.Millisecond)
+	backOff = backoff.WithContext(backOff, ctx)
+	return backoff.RetryWithData(operation, backOff)
 }

@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
