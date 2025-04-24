@@ -23,12 +23,11 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
-
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/params"
 )
 
 func makeBlock(txCount, uncleCount, withdrawalCount int) *types.Block {
@@ -36,7 +35,7 @@ func makeBlock(txCount, uncleCount, withdrawalCount int) *types.Block {
 		key, _      = crypto.GenerateKey()
 		txs         = make([]types.Transaction, txCount)
 		receipts    = make([]*types.Receipt, len(txs))
-		signer      = types.LatestSigner(params.TestChainConfig)
+		signer      = types.LatestSigner(chain.TestChainConfig)
 		uncles      = make([]*types.Header, uncleCount)
 		withdrawals = make([]*types.Withdrawal, withdrawalCount)
 	)

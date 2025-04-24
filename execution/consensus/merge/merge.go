@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/aura"
 	"github.com/erigontech/erigon/execution/consensus/misc"
-	params2 "github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -179,7 +178,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 			}
 		} else {
 			for _, w := range withdrawals {
-				amountInWei := new(uint256.Int).Mul(uint256.NewInt(w.Amount), uint256.NewInt(params2.GWei))
+				amountInWei := new(uint256.Int).Mul(uint256.NewInt(w.Amount), uint256.NewInt(libcommon.GWei))
 				state.AddBalance(w.Address, amountInWei, tracing.BalanceIncreaseWithdrawal)
 			}
 		}

@@ -34,13 +34,12 @@ import (
 	"testing"
 	"time"
 
-	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/common/page"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
@@ -48,6 +47,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
+	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 )
@@ -83,6 +83,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 
 	cfg.hist.iiCfg.dirs = dirs
 	cfg.hist.iiCfg.salt = &salt
+	//cfg.hist.historyValuesOnCompressedPage = 16
 	d, err := NewDomain(cfg, aggStep, logger)
 	require.NoError(t, err)
 	d.DisableFsync()
@@ -92,6 +93,10 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 }
 
 func TestDomain_CollationBuild(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	t.Run("compressDomainVals=true", func(t *testing.T) {
@@ -103,6 +108,10 @@ func TestDomain_CollationBuild(t *testing.T) {
 }
 
 func TestDomain_OpenFolder(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	db, d, txs := filledDomain(t, log.New())
@@ -198,7 +207,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		require.True(t, strings.HasSuffix(c.valuesPath, "v1-accounts.0-1.kv"))
 		require.Equal(t, 2, c.valuesCount)
 		require.True(t, strings.HasSuffix(c.historyPath, "v1-accounts.0-1.v"))
-		require.Equal(t, 3, c.historyComp.Count())
+		require.Equal(t, page.WordsAmount2PagesAmount(3, d.historyValuesOnCompressedPage), c.historyComp.Count())
 		require.Equal(t, 2*c.valuesCount, c.efHistoryComp.Count())
 
 		sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
@@ -455,6 +464,10 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 }
 
 func TestHistory(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	logger := log.New()
@@ -569,6 +582,10 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64, prune
 }
 
 func TestDomain_MergeFiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	logger := log.New()
@@ -583,6 +600,10 @@ func TestDomain_MergeFiles(t *testing.T) {
 }
 
 func TestDomain_ScanFiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	logger := log.New()
@@ -654,6 +675,10 @@ func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 }
 
 func TestDomain_Delete(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	logger := log.New()
@@ -744,6 +769,10 @@ func TestNewSegStreamReader(t *testing.T) {
 // then check.
 // in real life we periodically do collate-merge-prune without stopping adding data
 func TestDomain_Prune_AfterAllWrites(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	logger := log.New()
@@ -815,6 +844,10 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 }
 
 func TestDomain_PruneOnWrite(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	logger := log.New()
@@ -925,6 +958,10 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 }
 
 func TestDomain_OpenFilesWithDeletions(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	logger := log.New()
 	keyCount, txCount := uint64(4), uint64(125)
@@ -1064,6 +1101,10 @@ func TestScanStaticFilesD(t *testing.T) {
 }
 
 func TestDomain_CollationBuildInMem(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	logEvery := time.NewTicker(30 * time.Second)
@@ -1114,7 +1155,7 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	require.True(t, strings.HasSuffix(c.valuesPath, "v1-accounts.0-1.kv"))
 	require.Equal(t, 3, c.valuesCount)
 	require.True(t, strings.HasSuffix(c.historyPath, "v1-accounts.0-1.v"))
-	require.EqualValues(t, 3*maxTx, c.historyCount)
+	require.EqualValues(t, page.WordsAmount2PagesAmount(int(3*maxTx), d.hist.historyValuesOnCompressedPage), c.historyComp.Count())
 	require.Equal(t, 3, c.efHistoryComp.Count()/2)
 
 	sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
@@ -1155,6 +1196,10 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 }
 
 func TestDomainContext_getFromFiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	db, d := testDbAndDomain(t, log.New())
@@ -1466,6 +1511,10 @@ func generateRandomTxNum(r *rndGen, maxTxNum uint64, usedTxNums map[uint64]bool)
 }
 
 func TestDomain_GetAfterAggregation(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	db, d := testDbAndDomainOfStep(t, 25, log.New())
 	require := require.New(t)
 
@@ -1653,6 +1702,10 @@ func TestDomainRange(t *testing.T) {
 }
 
 func TestDomain_CanPruneAfterAggregation(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	aggStep, ctx := uint64(25), context.Background()
@@ -1748,6 +1801,10 @@ func TestDomain_CanPruneAfterAggregation(t *testing.T) {
 }
 
 func TestDomain_PruneAfterAggregation(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	db, d := testDbAndDomainOfStep(t, 25, log.New())
@@ -2017,6 +2074,10 @@ func TestDomain_PruneProgress(t *testing.T) {
 }
 
 func TestDomain_Unwind(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	db, d := testDbAndDomain(t, log.New())
@@ -2028,7 +2089,7 @@ func TestDomain_Unwind(t *testing.T) {
 	//maxTx := uint64(float64(d.aggregationStep) * 1.5)
 	maxTx := d.aggregationStep - 2
 	currTx := maxTx - 1
-	diffSetMap := map[uint64][]DomainEntryDiff{}
+	diffSetMap := map[uint64][]kv.DomainEntryDiff{}
 
 	writeKeys := func(t *testing.T, d *Domain, db kv.RwDB, maxTx uint64) {
 		t.Helper()
@@ -2041,7 +2102,7 @@ func TestDomain_Unwind(t *testing.T) {
 		defer writer.Close()
 		var preval1, preval2, preval3, preval4 []byte
 		for i := uint64(0); i < maxTx; i++ {
-			writer.diff = &DomainDiff{}
+			writer.diff = &kv.DomainDiff{}
 			writer.SetTxNum(i)
 			if i%3 == 0 && i > 0 { // once in 3 txn put key3 -> value3.i and skip other keys update
 				if i%12 == 0 { // once in 12 txn delete key3 before update
@@ -2090,7 +2151,7 @@ func TestDomain_Unwind(t *testing.T) {
 		writer := dc.NewWriter()
 		defer writer.Close()
 
-		totalDiff := []DomainEntryDiff{}
+		totalDiff := []kv.DomainEntryDiff{}
 		if currTx > unwindTo {
 			totalDiff = diffSetMap[currTx]
 			fmt.Println(currTx)
@@ -2273,6 +2334,10 @@ func compareIteratorsS(t *testing.T, et, ut stream.KVS) {
 }
 
 func TestDomain_PruneSimple(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	pruningKey := common.FromHex("701b39aee8d1ee500442d2874a6e6d0cc9dad8d9")
@@ -2451,6 +2516,10 @@ func TestDomain_PruneSimple(t *testing.T) {
 }
 
 func TestDomainContext_findShortenedKey(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	db, d := testDbAndDomain(t, log.New())
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)

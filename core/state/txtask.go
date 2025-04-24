@@ -24,14 +24,14 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	//"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/erigon-db/rawdb/rawtemporaldb"
 )
 
 type AAValidationResult struct {
@@ -132,11 +132,10 @@ func (t *TxTask) CreateReceipt(tx kv.Tx) {
 	}
 
 	cumulativeGasUsed += t.UsedGas
-
-	// if t.UsedGas == 0 { // TODO comment for arbitrum only
-	// 	msg := fmt.Sprintf("no gas used stack: %s tx %+v", dbg.Stack(), t.Tx)
-	// 	panic(msg)
-	// }
+	//if t.UsedGas == 0 { // TODO comment for arbitrum
+	//	msg := fmt.Sprintf("no gas used stack: %s tx %+v", dbg.Stack(), t.Tx)
+	//	panic(msg)
+	//}
 
 	r := t.createReceipt(cumulativeGasUsed, firstLogIndex)
 	t.BlockReceipts[t.TxIndex] = r
@@ -175,9 +174,9 @@ func (t *TxTask) createReceipt(cumulativeGasUsed uint64, firstLogIndex uint32) *
 
 	receipt.Bloom = types.LogsBloom(receipt.Logs) // why do we need to add this?
 	// if the transaction created a contract, store the creation address in the receipt.
-	//if t.TxAsMessage.To() == nil {
-	//	receipt.ContractAddress = crypto.CreateAddress(*t.Sender(), t.Tx.GetNonce())
-	//}
+	if t.TxAsMessage.To() == nil {
+		receipt.ContractAddress = crypto.CreateAddress(*t.Sender(), t.Tx.GetNonce())
+	}
 
 	return receipt
 }

@@ -24,8 +24,9 @@ import (
 	"errors"
 	"math/big"
 
-	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/common"
+
+	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/core/types"
 )
 

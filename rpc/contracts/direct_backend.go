@@ -54,7 +54,6 @@ func NewDirectBackend(api jsonrpc.EthAPI) DirectBackend {
 //	return block
 //}
 
-
 func (b DirectBackend) CodeAt(ctx context.Context, account libcommon.Address, blockNum *big.Int) ([]byte, error) {
 	return b.api.GetCode(ctx, account, BlockNumArg(blockNum))
 }

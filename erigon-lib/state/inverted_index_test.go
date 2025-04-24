@@ -233,6 +233,10 @@ func TestInvIndexCollationBuild(t *testing.T) {
 }
 
 func TestInvIndexAfterPrune(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	logger := log.New()
@@ -507,6 +511,10 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 }
 
 func TestInvIndexRanges(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	logger := log.New()
@@ -540,6 +548,10 @@ func TestInvIndexRanges(t *testing.T) {
 }
 
 func TestInvIndexMerge(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	logger := log.New()
 	db, ii, txs := filledInvIndex(t, logger)
 
@@ -548,6 +560,10 @@ func TestInvIndexMerge(t *testing.T) {
 }
 
 func TestInvIndexScanFiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	logger, require := log.New(), require.New(t)
 	db, ii, txs := filledInvIndex(t, logger)
 
@@ -568,6 +584,10 @@ func TestInvIndexScanFiles(t *testing.T) {
 }
 
 func TestChangedKeysIterator(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	logger := log.New()
@@ -728,6 +748,10 @@ func TestIsBefore(t *testing.T) {
 }
 
 func TestInvIndex_OpenFolder(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	db, ii, txs := filledInvIndex(t, log.New())

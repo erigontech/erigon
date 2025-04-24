@@ -1,4 +1,4 @@
-// Copyright 2021 The Erigon Authors
+// Copyright 2025 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,10 +14,11 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package common
+package testhelpers
 
-const (
-	Wei   = 1
-	GWei  = 1e9
-	Ether = 1e18
-)
+import "github.com/erigontech/erigon/txnprovider/shutter"
+
+//go:generate mockgen -typed=true -source=./mockgen_eon_tracker.go -destination=./eon_tracker_mock.go -package=testhelpers
+type EonTracker interface {
+	shutter.EonTracker
+}

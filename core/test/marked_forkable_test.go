@@ -135,6 +135,10 @@ func TestMarked_PutToDb(t *testing.T) {
 }
 
 func TestPrune(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	// prune
 	for pruneTo := RootNum(0); ; pruneTo++ {
 		var entries_count uint64

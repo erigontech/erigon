@@ -28,6 +28,7 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"golang.org/x/sync/errgroup"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -41,7 +42,7 @@ import (
 
 type DecryptionKeysProcessor struct {
 	logger            log.Logger
-	config            Config
+	config            shuttercfg.Config
 	encryptedTxnsPool *EncryptedTxnsPool
 	decryptedTxnsPool *DecryptedTxnsPool
 	blockListener     *BlockListener
@@ -54,7 +55,7 @@ type DecryptionKeysProcessor struct {
 
 func NewDecryptionKeysProcessor(
 	logger log.Logger,
-	config Config,
+	config shuttercfg.Config,
 	encryptedTxnsPool *EncryptedTxnsPool,
 	decryptedTxnsPool *DecryptedTxnsPool,
 	blockListener *BlockListener,

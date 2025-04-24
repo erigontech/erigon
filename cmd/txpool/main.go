@@ -27,6 +27,8 @@ import (
 	"github.com/erigontech/erigon/turbo/privateapi"
 	"github.com/spf13/cobra"
 
+	"github.com/erigontech/erigon/turbo/privateapi"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/paths"
@@ -131,6 +133,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 		return fmt.Errorf("could not connect to remoteKv: %w", err)
 	}
 
+	ethBackendClient := remote.NewETHBACKENDClient(coreConn)
 	kvClient := remote.NewKVClient(coreConn)
 	coreDB, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), log.New(), kvClient).Open()
 	if err != nil {
@@ -190,6 +193,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 		kvClient,
 		notifyMiner,
 		logger,
+		ethBackendClient,
 	)
 	if err != nil {
 		return err

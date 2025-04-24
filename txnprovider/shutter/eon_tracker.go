@@ -29,6 +29,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
@@ -54,7 +55,7 @@ type KsmEonTracker struct {
 	lastCleanupBlockNum  uint64
 }
 
-func NewKsmEonTracker(logger log.Logger, config Config, bl *BlockListener, cb bind.ContractBackend) *KsmEonTracker {
+func NewKsmEonTracker(logger log.Logger, config shuttercfg.Config, bl *BlockListener, cb bind.ContractBackend) *KsmEonTracker {
 	ksmContractAddr := libcommon.HexToAddress(config.KeyperSetManagerContractAddress)
 	ksmContract, err := contracts.NewKeyperSetManager(ksmContractAddr, cb)
 	if err != nil {
