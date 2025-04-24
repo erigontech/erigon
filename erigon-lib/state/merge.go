@@ -978,9 +978,6 @@ func (iit *InvertedIndexRoTx) cleanAfterMerge(merged *filesItem) {
 
 // garbage - returns list of garbage files after merge step is done. at startup pass here last frozen file
 func (dt *DomainRoTx) garbage(merged *filesItem) (outs []*filesItem) {
-	if merged == nil {
-		return
-	}
 	// `kill -9` may leave some garbage
 	// AggRoTx doesn't have such files, only Agg.files does
 	dt.d.dirtyFiles.Walk(func(items []*filesItem) bool {
@@ -988,14 +985,18 @@ func (dt *DomainRoTx) garbage(merged *filesItem) (outs []*filesItem) {
 			if item.frozen {
 				continue
 			}
-			if item.isProperSubsetOf(merged) {
+			if merged != nil && item.isProperSubsetOf(merged) {
 				if dt.d.restrictSubsetFileDeletions {
 					continue
 				}
 				outs = append(outs, item)
 			}
+
+			if hasCoverVisibleFile(dt.files, item) {
+				fmt.Printf("[dbg] see: %s\n", item.decompressor.FileName())
+			}
 			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainRoTx`)
-			if item.isBefore(merged) && hasCoverVisibleFile(dt.files, item) {
+			if (merged != nil && item.isBefore(merged)) && hasCoverVisibleFile(dt.files, item) {
 				outs = append(outs, item)
 			}
 		}
