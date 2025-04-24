@@ -487,6 +487,8 @@ func compareTransactions(t *testing.T, a, b Transaction) {
 }
 
 func compareHeaders(t *testing.T, a, b []*Header) error {
+	t.Helper()
+
 	auLen, buLen := len(a), len(b)
 	if auLen != buLen {
 		return fmt.Errorf("uncles len mismatch: expected: %v, got: %v", auLen, buLen)
@@ -499,6 +501,8 @@ func compareHeaders(t *testing.T, a, b []*Header) error {
 }
 
 func compareWithdrawals(t *testing.T, a, b []*Withdrawal) error {
+	t.Helper()
+
 	awLen, bwLen := len(a), len(b)
 	if awLen != bwLen {
 		return fmt.Errorf("withdrawals len mismatch: expected: %v, got: %v", awLen, bwLen)
@@ -511,6 +515,7 @@ func compareWithdrawals(t *testing.T, a, b []*Withdrawal) error {
 }
 
 func compareRawBodies(t *testing.T, a, b *RawBody) error {
+	t.Helper()
 
 	atLen, btLen := len(a.Transactions), len(b.Transactions)
 	if atLen != btLen {
@@ -529,6 +534,7 @@ func compareRawBodies(t *testing.T, a, b *RawBody) error {
 }
 
 func compareBodies(t *testing.T, a, b *Body) error {
+	t.Helper()
 
 	atLen, btLen := len(a.Transactions), len(b.Transactions)
 	if atLen != btLen {

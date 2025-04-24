@@ -285,7 +285,7 @@ func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
 	kzgCtx := libkzg.Ctx()
 	err := kzgCtx.VerifyBlobKZGProofBatch(toBlobs(txw.Blobs), toComms(txw.Commitments), toProofs(txw.Proofs))
 	if err != nil {
-		return fmt.Errorf("error during proof verification: %v", err)
+		return fmt.Errorf("error during proof verification: %w", err)
 	}
 	for i, h := range txw.Tx.BlobVersionedHashes {
 		if computed := txw.Commitments[i].ComputeVersionedHash(); computed != h {
