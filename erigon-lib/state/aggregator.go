@@ -698,6 +698,11 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 	return true, nil
 }
 
+func (a *Aggregator) RemoveOverlaps() (err error) {
+	a.cleanAfterMerge(nil)
+	return nil
+}
+
 func (a *Aggregator) MergeLoop(ctx context.Context) (err error) {
 	fmt.Printf("[dbg] MergeLoop1\n")
 	if dbg.NoMerge() || !a.mergingFiles.CompareAndSwap(false, true) {

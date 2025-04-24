@@ -1529,6 +1529,9 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	if err = agg.MergeLoop(ctx); err != nil {
 		return err
 	}
+	if err = agg.MergeLoop(ctx); err != nil {
+		return err
+	}
 
 	return nil
 }
