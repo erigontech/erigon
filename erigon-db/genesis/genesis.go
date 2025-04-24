@@ -31,8 +31,6 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
-
-	"github.com/erigontech/erigon/params"
 )
 
 //go:generate gencodec -type Genesis -field-override genesisSpecMarshaling -out gen_genesis.go
@@ -167,17 +165,4 @@ func (h *storageJSON) UnmarshalText(text []byte) error {
 
 func (h storageJSON) MarshalText() ([]byte, error) {
 	return hexutil.Bytes(h[:]).MarshalText()
-}
-
-func (g *Genesis) ConfigOrDefault(genesisHash libcommon.Hash) *chain.Config {
-	if g != nil {
-		return g.Config
-	}
-
-	config := params.ChainConfigByGenesisHash(genesisHash)
-	if config != nil {
-		return config
-	} else {
-		return params.AllProtocolChanges
-	}
 }

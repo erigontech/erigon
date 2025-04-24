@@ -106,6 +106,19 @@ func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *gen.Genesis, overridePr
 	return c, b, nil
 }
 
+func configOrDefault(g *gen.Genesis, genesisHash libcommon.Hash) *chain.Config {
+	if g != nil {
+		return g.Config
+	}
+
+	config := params2.ChainConfigByGenesisHash(genesisHash)
+	if config != nil {
+		return config
+	} else {
+		return params2.AllProtocolChanges
+	}
+}
+
 func WriteGenesisBlock(tx kv.RwTx, genesis *gen.Genesis, overridePragueTime *big.Int, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
 	if err := rawdb.WriteGenesisIfNotExist(tx, genesis); err != nil {
 		return nil, nil, err
@@ -165,7 +178,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *gen.Genesis, overridePragueTime *big
 		}
 	}
 	// Get the existing chain configuration.
-	newCfg := genesis.ConfigOrDefault(storedHash)
+	newCfg := configOrDefault(genesis, storedHash)
 	applyOverrides(newCfg)
 	if err := newCfg.CheckConfigForkOrder(); err != nil {
 		return newCfg, nil, err
