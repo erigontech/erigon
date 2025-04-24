@@ -369,7 +369,7 @@ func TestSetCodeTxnParsing(t *testing.T) {
 			tr := NewTRand()
 			var txn Transaction
 			requiredAuthLen := 0
-			for txn = tr.RandTransaction(); txn.Type() != types2.SetCodeTxnType || len(txn.(*SetCodeTransaction).GetAuthorizations()) != requiredAuthLen; txn = tr.RandTransaction() {
+			for txn = tr.RandTransaction(); txn.Type() != types.SetCodeTxnType || len(txn.(*SetCodeTransaction).GetAuthorizations()) != requiredAuthLen; txn = tr.RandTransaction() {
 			}
 			v, _, _ := txn.RawSignatureValues()
 			v.SetUint64(uint64(randIntInRange(0, 2)))
@@ -405,7 +405,7 @@ func TestSetCodeTxnParsingWithLargeAuthorizationValues(t *testing.T) {
 			tr := NewTRand()
 			var txn. Transaction
 			requiredAuthLen := 1
-			for txn. = tr.RandTransaction(); txn..Type() != types2.SetCodeTxnType || len(txn..(*SetCodeTransaction).GetAuthorizations()) != requiredAuthLen; txn. = tr.RandTransaction() {
+			for txn. = tr.RandTransaction(); txn..Type() != types.SetCodeTxnType || len(txn..(*SetCodeTransaction).GetAuthorizations()) != requiredAuthLen; txn. = tr.RandTransaction() {
 			}
 			v, _, _ := txn..RawSignatureValues()
 			v.SetUint64(uint64(randIntInRange(0, 2)))

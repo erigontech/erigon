@@ -23,7 +23,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/concurrent"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	types2 "github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 type LogsFilterAggregator struct {
@@ -43,12 +43,12 @@ type LogsFilter struct {
 	allTopics      int
 	topics         *concurrent.SyncMap[libcommon.Hash, int]
 	topicsOriginal [][]libcommon.Hash // Original topic filters to be applied before distributing to individual subscribers
-	sender         Sub[*types2.Log]   // nil for aggregate subscriber, for appropriate stream server otherwise
+	sender         Sub[*types.Log]    // nil for aggregate subscriber, for appropriate stream server otherwise
 }
 
 // Send sends a log to the subscriber represented by the LogsFilter.
 // It forwards the log to the subscriber's sender.
-func (l *LogsFilter) Send(lg *types2.Log) {
+func (l *LogsFilter) Send(lg *types.Log) {
 	l.sender.Send(lg)
 }
 
@@ -72,7 +72,7 @@ func NewLogsFilterAggregator() *LogsFilterAggregator {
 
 // insertLogsFilter inserts a new log filter into the LogsFilterAggregator with the specified sender.
 // It generates a new filter ID, creates a new LogsFilter, and adds it to the logsFilters map.
-func (a *LogsFilterAggregator) insertLogsFilter(sender Sub[*types2.Log]) (LogsSubID, *LogsFilter) {
+func (a *LogsFilterAggregator) insertLogsFilter(sender Sub[*types.Log]) (LogsSubID, *LogsFilter) {
 	a.logsFilterLock.Lock()
 	defer a.logsFilterLock.Unlock()
 	filterId := LogsSubID(generateSubscriptionID())
@@ -219,7 +219,7 @@ func (a *LogsFilterAggregator) distributeLog(eventLog *remote.SubscribeLogsReply
 	a.logsFilterLock.RLock()
 	defer a.logsFilterLock.RUnlock()
 
-	var lg types2.Log
+	var lg types.Log
 	var topics []libcommon.Hash
 
 	a.logsFilters.Range(func(k LogsSubID, filter *LogsFilter) error {
