@@ -58,6 +58,20 @@ import (
 //go:embed allocs
 var allocs embed.FS
 
+// GenesisMismatchError is raised when trying to overwrite an existing
+// genesis block with an incompatible one.
+type GenesisMismatchError struct {
+	Stored, New libcommon.Hash
+}
+
+func (e *GenesisMismatchError) Error() string {
+	config := params2.ChainConfigByGenesisHash(e.Stored)
+	if config == nil {
+		return fmt.Sprintf("database contains incompatible genesis (have %x, new %x)", e.Stored, e.New)
+	}
+	return fmt.Sprintf("database contains incompatible genesis (try with --chain=%s)", config.ChainName)
+}
+
 // CommitGenesisBlock writes or updates the genesis block in db.
 // The block that will be used is:
 //
@@ -139,7 +153,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *gen.Genesis, overridePragueTime *big
 		}
 		hash := block.Hash()
 		if hash != storedHash {
-			return genesis.Config, block, &gen.GenesisMismatchError{Stored: storedHash, New: hash}
+			return genesis.Config, block, &GenesisMismatchError{Stored: storedHash, New: hash}
 		}
 	}
 	number := rawdb.ReadHeaderNumber(tx, storedHash)
