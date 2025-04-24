@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
@@ -279,9 +280,9 @@ func createDumpTestKV(t *testing.T, chainConfig *chain.Config, chainSize int) *m
 	var (
 		key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr   = crypto.PubkeyToAddress(key.PublicKey)
-		gspec  = &types.Genesis{
+		gspec  = &genesis.Genesis{
 			Config: chainConfig,
-			Alloc:  types.GenesisAlloc{addr: {Balance: (&big.Int{}).Mul(big.NewInt(math.MaxInt64), big.NewInt(int64(chainSize)))}},
+			Alloc:  genesis.GenesisAlloc{addr: {Balance: (&big.Int{}).Mul(big.NewInt(math.MaxInt64), big.NewInt(int64(chainSize)))}},
 		}
 		signer = types.LatestSigner(gspec.Config)
 	)

@@ -25,7 +25,7 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/turbo/debug"
 
 	"github.com/erigontech/erigon-lib/kv"
@@ -74,7 +74,7 @@ func initGenesis(cliCtx *cli.Context) error {
 	}
 	defer file.Close()
 
-	genesis := new(types.Genesis)
+	genesis := new(genesis.Genesis)
 	if err := json.NewDecoder(file).Decode(genesis); err != nil {
 		utils.Fatalf("invalid genesis file: %v", err)
 	}

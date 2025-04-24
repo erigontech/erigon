@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync"
@@ -149,7 +150,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 }
 
 type genesisInitData struct {
-	genesis                 *types.Genesis
+	genesis                 *genesis.Genesis
 	genesisAllocPrivateKey  *ecdsa.PrivateKey
 	genesisAllocPrivateKeys map[libcommon.Address]*ecdsa.PrivateKey
 	fundedAddresses         []libcommon.Address
@@ -402,9 +403,9 @@ func createGenesisInitData(t *testing.T, chainConfig *chain.Config) *genesisInit
 
 	return &genesisInitData{
 		genesisAllocPrivateKey: accountPrivateKey,
-		genesis: &types.Genesis{
+		genesis: &genesis.Genesis{
 			Config: chainConfig,
-			Alloc: types.GenesisAlloc{
+			Alloc: genesis.GenesisAlloc{
 				accountAddress: {
 					Balance: new(big.Int).Exp(big.NewInt(1_000), big.NewInt(18), nil),
 				},

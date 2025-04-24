@@ -20,16 +20,15 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/chain/networkname"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
 	"github.com/erigontech/erigon/cmd/devnet/args"
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
 	account_services "github.com/erigontech/erigon/cmd/devnet/services/accounts"
 	"github.com/erigontech/erigon/cmd/devnet/services/polygon"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
@@ -54,8 +53,8 @@ func NewBorDevnetWithoutHeimdall(
 		BaseRPCHost:        baseRpcHost,
 		BaseRPCPort:        baseRpcPort,
 		//Snapshots:          true,
-		Genesis: &types.Genesis{
-			Alloc: types.GenesisAlloc{
+		Genesis: &genesis.Genesis{
+			Alloc: genesis.GenesisAlloc{
 				faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
 			},
 			GasLimit: gasLimit,
@@ -134,8 +133,8 @@ func NewBorDevnetWithHeimdall(
 		BorStateSyncDelay:  5 * time.Second,
 		BorWithMilestones:  &withMilestones,
 		Services:           append(services, account_services.NewFaucet(networkname.BorDevnet, faucetSource)),
-		Genesis: &types.Genesis{
-			Alloc: types.GenesisAlloc{
+		Genesis: &genesis.Genesis{
+			Alloc: genesis.GenesisAlloc{
 				faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
 			},
 			GasLimit: gasLimit,
@@ -159,8 +158,8 @@ func NewBorDevnetWithHeimdall(
 		BaseRPCHost:        baseRpcHost,
 		BaseRPCPort:        baseRpcPort + 1000,
 		Services:           append(services, account_services.NewFaucet(networkname.Dev, faucetSource)),
-		Genesis: &types.Genesis{
-			Alloc: types.GenesisAlloc{
+		Genesis: &genesis.Genesis{
+			Alloc: genesis.GenesisAlloc{
 				faucetSource.Address:    {Balance: accounts.EtherAmount(200_000)},
 				checkpointOwner.Address: {Balance: accounts.EtherAmount(10_000)},
 			},

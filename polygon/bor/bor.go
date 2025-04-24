@@ -53,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/execution/consensus"
@@ -403,7 +404,7 @@ func New(
 
 	// make sure we can decode all the GenesisAlloc in the BorConfig.
 	for key, genesisAlloc := range c.config.BlockAlloc {
-		if _, err := types.DecodeGenesisAlloc(genesisAlloc); err != nil {
+		if _, err := genesis.DecodeGenesisAlloc(genesisAlloc); err != nil {
 			panic(fmt.Sprintf("BUG: Block alloc '%s' in genesis is not correct: %v", key, err))
 		}
 	}
@@ -1080,7 +1081,7 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 func (c *Bor) changeContractCodeIfNeeded(headerNumber uint64, state *state.IntraBlockState) error {
 	for blockNumber, genesisAlloc := range c.config.BlockAlloc {
 		if blockNumber == strconv.FormatUint(headerNumber, 10) {
-			allocs, err := types.DecodeGenesisAlloc(genesisAlloc)
+			allocs, err := genesis.DecodeGenesisAlloc(genesisAlloc)
 			if err != nil {
 				return fmt.Errorf("failed to decode genesis alloc: %v", err)
 			}

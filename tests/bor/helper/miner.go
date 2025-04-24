@@ -16,8 +16,8 @@ import (
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/node"
@@ -30,14 +30,14 @@ import (
 )
 
 // InitGenesis initializes genesis file from json with sprint size and chain name as configurable inputs
-func InitGenesis(fileLocation string, sprintSize uint64, chainName string) types.Genesis {
+func InitGenesis(fileLocation string, sprintSize uint64, chainName string) genesis.Genesis {
 	// sprint size = 8 in genesis
 	genesisData, err := os.ReadFile(fileLocation)
 	if err != nil {
 		panic(err)
 	}
 
-	genesis := &types.Genesis{}
+	genesis := &genesis.Genesis{}
 	if err := json.Unmarshal(genesisData, genesis); err != nil {
 		panic(err)
 	}
@@ -77,7 +77,7 @@ func NewNodeConfig() *nodecfg.Config {
 }
 
 // InitNode initializes a node with the given genesis file and config
-func InitMiner(ctx context.Context, logger log.Logger, dirName string, genesis *types.Genesis, privKey *ecdsa.PrivateKey, withoutHeimdall bool, minerID int) (*node.Node, *eth.Ethereum, error) {
+func InitMiner(ctx context.Context, logger log.Logger, dirName string, genesis *genesis.Genesis, privKey *ecdsa.PrivateKey, withoutHeimdall bool, minerID int) (*node.Node, *eth.Ethereum, error) {
 	// Define the basic configurations for the Ethereum node
 
 	nodeCfg := &nodecfg.Config{

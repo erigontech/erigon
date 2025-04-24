@@ -24,7 +24,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 
@@ -83,7 +83,7 @@ func WriteChainConfig(db kv.Putter, hash libcommon.Hash, cfg *chain.Config) erro
 	return nil
 }
 
-func WriteGenesisIfNotExist(db kv.RwTx, g *types.Genesis) error {
+func WriteGenesisIfNotExist(db kv.RwTx, g *genesis.Genesis) error {
 	has, err := db.Has(kv.ConfigTable, kv.GenesisKey)
 	if err != nil {
 		return err
@@ -100,7 +100,7 @@ func WriteGenesisIfNotExist(db kv.RwTx, g *types.Genesis) error {
 	return db.Put(kv.ConfigTable, kv.GenesisKey, val)
 }
 
-func ReadGenesis(db kv.Getter) (*types.Genesis, error) {
+func ReadGenesis(db kv.Getter) (*genesis.Genesis, error) {
 	val, err := db.GetOne(kv.ConfigTable, kv.GenesisKey)
 	if err != nil {
 		return nil, err
@@ -108,7 +108,7 @@ func ReadGenesis(db kv.Getter) (*types.Genesis, error) {
 	if len(val) == 0 || string(val) == "null" {
 		return nil, nil
 	}
-	var g types.Genesis
+	var g genesis.Genesis
 	if err := json.Unmarshal(val, &g); err != nil {
 		return nil, err
 	}

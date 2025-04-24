@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/eth/tracers"
 )
 
@@ -355,7 +356,7 @@ func (t *Tracer) OnBlockEnd(err error) {
 	t.mustFlushToFile(path.Join(t.outputDir, blockTraceFile))
 }
 
-func (t *Tracer) OnGenesisBlock(genesis *types.Block, alloc types.GenesisAlloc) {
+func (t *Tracer) OnGenesisBlock(genesis *types.Block, alloc genesis.GenesisAlloc) {
 	if t.recordOptions.DisableOnGenesisBlockRecording {
 		return
 	}
@@ -698,8 +699,8 @@ type OnBlockEndTrace struct {
 }
 
 type OnGenesisBlockTrace struct {
-	Header *types.Header      `json:"header,omitempty"`
-	Alloc  types.GenesisAlloc `json:"alloc,omitempty"`
+	Header *types.Header        `json:"header,omitempty"`
+	Alloc  genesis.GenesisAlloc `json:"alloc,omitempty"`
 }
 
 type OnSystemCallStartTrace struct{}

@@ -50,7 +50,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
 
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/evm/internal/compiler"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/cmd/utils/flags"
@@ -58,6 +57,7 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/runtime"
+	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/params"
@@ -73,7 +73,7 @@ var runCommand = cli.Command{
 
 // readGenesis will read the given JSON format genesis file and return
 // the initialized Genesis structure
-func readGenesis(genesisPath string) *types.Genesis {
+func readGenesis(genesisPath string) *genesis.Genesis {
 	// Make sure we have a valid genesis JSON
 	//genesisPath := ctx.Args().First()
 	if len(genesisPath) == 0 {
@@ -90,7 +90,7 @@ func readGenesis(genesisPath string) *types.Genesis {
 		}
 	}(file)
 
-	genesis := new(types.Genesis)
+	genesis := new(genesis.Genesis)
 	if err := json.NewDecoder(file).Decode(genesis); err != nil {
 		utils.Fatalf("invalid genesis file: %v", err)
 	}
@@ -152,7 +152,7 @@ func runCmd(ctx *cli.Context) error {
 		chainConfig   *chain.Config
 		sender        = libcommon.BytesToAddress([]byte("sender"))
 		receiver      = libcommon.BytesToAddress([]byte("receiver"))
-		genesisConfig *types.Genesis
+		genesisConfig *genesis.Genesis
 	)
 	if machineFriendlyOutput {
 		tracer = logger.NewJSONLogger(logconfig, os.Stdout).Tracer()
@@ -170,7 +170,7 @@ func runCmd(ctx *cli.Context) error {
 		genesisConfig = gen
 		chainConfig = gen.Config
 	} else {
-		genesisConfig = new(types.Genesis)
+		genesisConfig = new(genesis.Genesis)
 	}
 	agg, err := state2.NewAggregator(context.Background(), datadir.New(os.TempDir()), config3.DefaultStepSize, db, log.New())
 	if err != nil {

@@ -26,8 +26,8 @@ import (
 	libchain "github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
@@ -40,7 +40,7 @@ func TestHeaderVerification(t *testing.T) {
 	t.Parallel()
 	// Create a simple chain to verify
 	var (
-		gspec  = &types.Genesis{Config: libchain.TestChainConfig}
+		gspec  = &genesis.Genesis{Config: libchain.TestChainConfig}
 		engine = ethash.NewFaker()
 	)
 	logger := testlog.Logger(t, log.LvlInfo)
@@ -89,7 +89,7 @@ func TestHeaderWithSealVerification(t *testing.T) {
 	t.Parallel()
 	// Create a simple chain to verify
 	var (
-		gspec  = &types.Genesis{Config: libchain.TestChainAuraConfig}
+		gspec  = &genesis.Genesis{Config: libchain.TestChainAuraConfig}
 		engine = ethash.NewFaker()
 	)
 	logger := testlog.Logger(t, log.LvlInfo)

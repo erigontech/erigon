@@ -35,10 +35,10 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/erigon-db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -81,7 +81,7 @@ type ExecuteBlockCfg struct {
 	dirs      datadir.Dirs
 	historyV3 bool
 	syncCfg   ethconfig.Sync
-	genesis   *types.Genesis
+	genesis   *genesis.Genesis
 
 	silkworm        *silkworm.Silkworm
 	blockProduction bool
@@ -103,7 +103,7 @@ func StageExecuteBlocksCfg(
 	dirs datadir.Dirs,
 	blockReader services.FullBlockReader,
 	hd headerDownloader,
-	genesis *types.Genesis,
+	genesis *genesis.Genesis,
 	syncCfg ethconfig.Sync,
 	silkworm *silkworm.Silkworm,
 ) ExecuteBlockCfg {

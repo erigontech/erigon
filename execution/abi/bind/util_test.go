@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 )
@@ -67,7 +68,7 @@ func TestWaitDeployed(t *testing.T) {
 
 		t.Run(name, func(t *testing.T) {
 			backend := backends.NewSimulatedBackend(t,
-				types.GenesisAlloc{
+				genesis.GenesisAlloc{
 					crypto.PubkeyToAddress(testKey.PublicKey): {Balance: big.NewInt(10000000000)},
 				},
 				10000000,
@@ -121,7 +122,7 @@ func TestWaitDeployedCornerCases(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 	backend := backends.NewSimulatedBackend(t,
-		types.GenesisAlloc{
+		genesis.GenesisAlloc{
 			crypto.PubkeyToAddress(testKey.PublicKey): {Balance: big.NewInt(10000000000)},
 		},
 		10000000,

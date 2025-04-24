@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/eth/tracers"
 	debugtracer "github.com/erigontech/erigon/eth/tracers/debug"
 	"github.com/erigontech/erigon/execution/consensus"
@@ -55,11 +56,11 @@ type account struct {
 
 // testcase defines a single test to check the stateDiff tracer against.
 type testcase struct {
-	Genesis      *types.Genesis  `json:"genesis"`
-	Context      *callContext    `json:"context"`
-	Input        string          `json:"input"`
-	TracerConfig json.RawMessage `json:"tracerConfig"`
-	Result       interface{}     `json:"result"`
+	Genesis      *genesis.Genesis `json:"genesis"`
+	Context      *callContext     `json:"context"`
+	Input        string           `json:"input"`
+	TracerConfig json.RawMessage  `json:"tracerConfig"`
+	Result       interface{}      `json:"result"`
 }
 
 func TestPrestateTracerLegacy(t *testing.T) {

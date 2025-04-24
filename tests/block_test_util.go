@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/eth/ethconsensusconfig"
 	"github.com/erigontech/erigon/turbo/services"
@@ -63,8 +64,8 @@ func (bt *BlockTest) UnmarshalJSON(in []byte) error {
 type btJSON struct {
 	Blocks     []btBlock                `json:"blocks"`
 	Genesis    btHeader                 `json:"genesisBlockHeader"`
-	Pre        types.GenesisAlloc       `json:"pre"`
-	Post       types.GenesisAlloc       `json:"postState"`
+	Pre        genesis.GenesisAlloc     `json:"pre"`
+	Post       genesis.GenesisAlloc     `json:"postState"`
 	BestBlock  libcommon.UnprefixedHash `json:"lastblockhash"`
 	Network    string                   `json:"network"`
 	SealEngine string                   `json:"sealEngine"`
@@ -158,8 +159,8 @@ func (bt *BlockTest) Run(t *testing.T, checkStateRoot bool) error {
 	return bt.validateImportedHeaders(tx, validBlocks, m)
 }
 
-func (bt *BlockTest) genesis(config *chain.Config) *types.Genesis {
-	return &types.Genesis{
+func (bt *BlockTest) genesis(config *chain.Config) *genesis.Genesis {
+	return &genesis.Genesis{
 		Config:                config,
 		Nonce:                 bt.json.Genesis.Nonce.Uint64(),
 		Timestamp:             bt.json.Genesis.Timestamp,

@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/execution/abi/bind"
 )
@@ -50,8 +51,8 @@ func TestSimulatedBackend(t *testing.T) {
 	var gasLimit uint64 = 8000029
 	key, _ := crypto.GenerateKey() // nolint: gosec
 	auth, _ := bind.NewKeyedTransactorWithChainID(key, big.NewInt(1337))
-	genAlloc := make(types.GenesisAlloc)
-	genAlloc[auth.From] = types.GenesisAccount{Balance: big.NewInt(9223372036854775807)}
+	genAlloc := make(genesis.GenesisAlloc)
+	genAlloc[auth.From] = genesis.GenesisAccount{Balance: big.NewInt(9223372036854775807)}
 
 	sim := NewSimulatedBackend(t, genAlloc, gasLimit)
 
@@ -120,7 +121,7 @@ var expectedReturn = []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 func simTestBackend(t *testing.T, testAddr common.Address) *SimulatedBackend {
 	expectedBal := uint256.NewInt(10000000000)
 	return NewSimulatedBackend(t,
-		types.GenesisAlloc{
+		genesis.GenesisAlloc{
 			testAddr: {Balance: expectedBal.ToBig()},
 		}, 10000000,
 	)
@@ -164,7 +165,7 @@ func TestNewSimulatedBackend(t *testing.T) {
 
 func TestSimulatedBackend_AdjustTime(t *testing.T) {
 	sim := NewSimulatedBackend(t,
-		types.GenesisAlloc{}, 10000000,
+		genesis.GenesisAlloc{}, 10000000,
 	)
 
 	prevTime := sim.pendingBlock.Time()
@@ -239,7 +240,7 @@ func TestSimulatedBackend_BalanceAt(t *testing.T) {
 
 func TestSimulatedBackend_BlockByHash(t *testing.T) {
 	sim := NewSimulatedBackend(t,
-		types.GenesisAlloc{}, 10000000,
+		genesis.GenesisAlloc{}, 10000000,
 	)
 	bgCtx := context.Background()
 
@@ -259,7 +260,7 @@ func TestSimulatedBackend_BlockByHash(t *testing.T) {
 
 func TestSimulatedBackend_BlockByNumber(t *testing.T) {
 	sim := NewSimulatedBackend(t,
-		types.GenesisAlloc{}, 10000000,
+		genesis.GenesisAlloc{}, 10000000,
 	)
 	bgCtx := context.Background()
 
@@ -376,7 +377,7 @@ func TestSimulatedBackend_TransactionByHash(t *testing.T) {
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
 
 	sim := NewSimulatedBackend(t,
-		types.GenesisAlloc{
+		genesis.GenesisAlloc{
 			testAddr: {Balance: big.NewInt(10000000000)},
 		}, 10000000)
 	bgCtx := context.Background()
@@ -439,7 +440,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 	addr := crypto.PubkeyToAddress(key.PublicKey)
 	opts, _ := bind.NewKeyedTransactorWithChainID(key, big.NewInt(1337))
 
-	sim := NewSimulatedBackend(t, types.GenesisAlloc{addr: {Balance: big.NewInt(common.Ether)}}, 10000000)
+	sim := NewSimulatedBackend(t, genesis.GenesisAlloc{addr: {Balance: big.NewInt(common.Ether)}}, 10000000)
 
 	parsed, _ := abi.JSON(strings.NewReader(contractAbi))
 	contractAddr, _, _, _ := bind.DeployContract(opts, parsed, common.FromHex(contractBin), sim)
@@ -543,7 +544,7 @@ func TestSimulatedBackend_EstimateGasWithPrice(t *testing.T) {
 	key, _ := crypto.GenerateKey()
 	addr := crypto.PubkeyToAddress(key.PublicKey)
 
-	sim := NewSimulatedBackend(t, types.GenesisAlloc{addr: {Balance: big.NewInt(common.Ether*2 + 2e17)}}, 10000000)
+	sim := NewSimulatedBackend(t, genesis.GenesisAlloc{addr: {Balance: big.NewInt(common.Ether*2 + 2e17)}}, 10000000)
 
 	recipient := common.HexToAddress("deadbeef")
 	var cases = []struct {
@@ -878,7 +879,7 @@ func TestSimulatedBackend_TransactionReceipt(t *testing.T) {
 
 func TestSimulatedBackend_SuggestGasPrice(t *testing.T) {
 	sim := NewSimulatedBackend(t,
-		types.GenesisAlloc{},
+		genesis.GenesisAlloc{},
 		10000000,
 	)
 	bgCtx := context.Background()

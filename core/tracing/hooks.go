@@ -23,6 +23,7 @@ import (
 	"math/big"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-db/genesis"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/types"
@@ -124,7 +125,7 @@ type (
 	BlockEndHook = func(err error)
 
 	// GenesisBlockHook is called when the genesis block is being processed.
-	GenesisBlockHook = func(genesis *types.Block, alloc types.GenesisAlloc)
+	GenesisBlockHook = func(genesis *types.Block, alloc genesis.GenesisAlloc)
 
 	// OnSystemCallStartHook is called when a system call is about to be executed. Today,
 	// this hook is invoked when the EIP-4788 system call is about to be executed to set the

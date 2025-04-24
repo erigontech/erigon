@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/state/contracts"
 	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/turbo/stages/mock"
@@ -55,7 +56,7 @@ func TestCreate2Revive(t *testing.T) {
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
-		gspec   = &types.Genesis{
+		gspec   = &genesis.Genesis{
 			Config: &chain.Config{
 				ChainID:               big.NewInt(1),
 				HomesteadBlock:        new(big.Int),
@@ -64,8 +65,8 @@ func TestCreate2Revive(t *testing.T) {
 				ByzantiumBlock:        big.NewInt(1),
 				ConstantinopleBlock:   big.NewInt(1),
 			},
-			Alloc: types.GenesisAlloc{
-				address: types.GenesisAccount{Balance: funds},
+			Alloc: genesis.GenesisAlloc{
+				address: genesis.GenesisAccount{Balance: funds},
 			},
 		}
 		signer = types.LatestSignerForChainID(nil)
@@ -238,7 +239,7 @@ func TestCreate2Polymorth(t *testing.T) {
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
-		gspec   = &types.Genesis{
+		gspec   = &genesis.Genesis{
 			Config: &chain.Config{
 				ChainID:               big.NewInt(1),
 				HomesteadBlock:        new(big.Int),
@@ -247,8 +248,8 @@ func TestCreate2Polymorth(t *testing.T) {
 				ByzantiumBlock:        big.NewInt(1),
 				ConstantinopleBlock:   big.NewInt(1),
 			},
-			Alloc: types.GenesisAlloc{
-				address: types.GenesisAccount{Balance: funds},
+			Alloc: genesis.GenesisAlloc{
+				address: genesis.GenesisAccount{Balance: funds},
 			},
 		}
 		signer = types.LatestSignerForChainID(nil)
@@ -503,7 +504,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
-		gspec   = &types.Genesis{
+		gspec   = &genesis.Genesis{
 			Config: &chain.Config{
 				ChainID:               big.NewInt(1),
 				HomesteadBlock:        new(big.Int),
@@ -512,8 +513,8 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 				ByzantiumBlock:        big.NewInt(1),
 				ConstantinopleBlock:   big.NewInt(1),
 			},
-			Alloc: types.GenesisAlloc{
-				address: types.GenesisAccount{Balance: funds},
+			Alloc: genesis.GenesisAlloc{
+				address: genesis.GenesisAccount{Balance: funds},
 			},
 		}
 	)
@@ -662,7 +663,7 @@ func TestReorgOverStateChange(t *testing.T) {
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
-		gspec   = &types.Genesis{
+		gspec   = &genesis.Genesis{
 			Config: &chain.Config{
 				ChainID:               big.NewInt(1),
 				HomesteadBlock:        new(big.Int),
@@ -671,7 +672,7 @@ func TestReorgOverStateChange(t *testing.T) {
 				ByzantiumBlock:        big.NewInt(1),
 				ConstantinopleBlock:   big.NewInt(1),
 			},
-			Alloc: types.GenesisAlloc{
+			Alloc: genesis.GenesisAlloc{
 				address: {Balance: funds},
 			},
 		}
@@ -825,7 +826,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 		// Address of the contract that will be deployed
 		contractAddr = libcommon.HexToAddress("0x3a220f351252089d385b29beca14e27f204c296a")
 		funds        = big.NewInt(1000000000)
-		gspec        = &types.Genesis{
+		gspec        = &genesis.Genesis{
 			Config: &chain.Config{
 				ChainID:               big.NewInt(1),
 				HomesteadBlock:        new(big.Int),
@@ -834,7 +835,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 				ByzantiumBlock:        big.NewInt(1),
 				ConstantinopleBlock:   big.NewInt(1),
 			},
-			Alloc: types.GenesisAlloc{
+			Alloc: genesis.GenesisAlloc{
 				address: {Balance: funds},
 				// Pre-existing storage item in an account without code
 				contractAddr: {Balance: funds, Storage: map[libcommon.Hash]libcommon.Hash{{}: libcommon.HexToHash("0x42")}},
@@ -969,7 +970,7 @@ func TestEip2200Gas(t *testing.T) {
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
-		gspec   = &types.Genesis{
+		gspec   = &genesis.Genesis{
 			Config: &chain.Config{
 				ChainID:               big.NewInt(1),
 				HomesteadBlock:        new(big.Int),
@@ -980,7 +981,7 @@ func TestEip2200Gas(t *testing.T) {
 				ConstantinopleBlock:   big.NewInt(1),
 				IstanbulBlock:         big.NewInt(1),
 			},
-			Alloc: types.GenesisAlloc{
+			Alloc: genesis.GenesisAlloc{
 				address: {Balance: funds},
 			},
 		}
@@ -1074,15 +1075,15 @@ func TestWrongIncarnation(t *testing.T) {
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
-		gspec   = &types.Genesis{
+		gspec   = &genesis.Genesis{
 			Config: &chain.Config{
 				ChainID:               big.NewInt(1),
 				HomesteadBlock:        new(big.Int),
 				TangerineWhistleBlock: new(big.Int),
 				SpuriousDragonBlock:   big.NewInt(1),
 			},
-			Alloc: types.GenesisAlloc{
-				address: types.GenesisAccount{Balance: funds},
+			Alloc: genesis.GenesisAlloc{
+				address: genesis.GenesisAccount{Balance: funds},
 			},
 		}
 	)
@@ -1198,15 +1199,15 @@ func TestWrongIncarnation2(t *testing.T) {
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
-		gspec   = &types.Genesis{
+		gspec   = &genesis.Genesis{
 			Config: &chain.Config{
 				ChainID:               big.NewInt(1),
 				HomesteadBlock:        new(big.Int),
 				TangerineWhistleBlock: new(big.Int),
 				SpuriousDragonBlock:   big.NewInt(1),
 			},
-			Alloc: types.GenesisAlloc{
-				address: types.GenesisAccount{Balance: funds},
+			Alloc: genesis.GenesisAlloc{
+				address: genesis.GenesisAccount{Balance: funds},
 			},
 		}
 		signer = types.LatestSignerForChainID(nil)
@@ -1491,10 +1492,10 @@ func TestRecreateAndRewind(t *testing.T) {
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
-		gspec   = &types.Genesis{
+		gspec   = &genesis.Genesis{
 			Config: chain.TestChainConfig,
-			Alloc: types.GenesisAlloc{
-				address: types.GenesisAccount{Balance: funds},
+			Alloc: genesis.GenesisAlloc{
+				address: genesis.GenesisAccount{Balance: funds},
 			},
 		}
 	)
@@ -1696,7 +1697,7 @@ func TestTxLookupUnwind(t *testing.T) {
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
-		gspec   = &types.Genesis{
+		gspec   = &genesis.Genesis{
 			Config: &chain.Config{
 				ChainID:               big.NewInt(1),
 				HomesteadBlock:        new(big.Int),
@@ -1705,8 +1706,8 @@ func TestTxLookupUnwind(t *testing.T) {
 				ByzantiumBlock:        big.NewInt(1),
 				ConstantinopleBlock:   big.NewInt(1),
 			},
-			Alloc: types.GenesisAlloc{
-				address: types.GenesisAccount{Balance: funds},
+			Alloc: genesis.GenesisAlloc{
+				address: genesis.GenesisAccount{Balance: funds},
 			},
 		}
 		signer = types.LatestSignerForChainID(nil)

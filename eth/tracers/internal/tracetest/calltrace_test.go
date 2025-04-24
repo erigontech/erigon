@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/eth/tracers"
 	_ "github.com/erigontech/erigon/eth/tracers/js"
 	_ "github.com/erigontech/erigon/eth/tracers/native"
@@ -85,11 +86,11 @@ type callTrace struct {
 
 // callTracerTest defines a single test to check the call tracer against.
 type callTracerTest struct {
-	Genesis      *types.Genesis  `json:"genesis"`
-	Context      *callContext    `json:"context"`
-	Input        string          `json:"input"`
-	TracerConfig json.RawMessage `json:"tracerConfig"`
-	Result       *callTrace      `json:"result"`
+	Genesis      *genesis.Genesis `json:"genesis"`
+	Context      *callContext     `json:"context"`
+	Input        string           `json:"input"`
+	TracerConfig json.RawMessage  `json:"tracerConfig"`
+	Result       *callTrace       `json:"result"`
 }
 
 // Iterates over all the input-output datasets in the tracer test harness and
@@ -326,12 +327,12 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 		byte(vm.DUP1), byte(vm.PUSH1), 0xff, byte(vm.GAS), // value=0,address=0xff, gas=GAS
 		byte(vm.CALL),
 	}
-	var alloc = types.GenesisAlloc{
-		to: types.GenesisAccount{
+	var alloc = genesis.GenesisAlloc{
+		to: genesis.GenesisAccount{
 			Nonce: 1,
 			Code:  code,
 		},
-		origin: types.GenesisAccount{
+		origin: genesis.GenesisAccount{
 			Nonce:   0,
 			Balance: big.NewInt(500000000000000),
 		},

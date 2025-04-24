@@ -12,7 +12,7 @@ import (
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/params"
@@ -23,7 +23,7 @@ import (
 // MarshalTOML marshals as TOML.
 func (c Config) MarshalTOML() (interface{}, error) {
 	type Config struct {
-		Genesis                             *types.Genesis `toml:",omitempty"`
+		Genesis                             *genesis.Genesis `toml:",omitempty"`
 		NetworkID                           uint64
 		EthDiscoveryURLs                    []string
 		Prune                               prune.Mode
@@ -123,7 +123,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 // UnmarshalTOML unmarshals from TOML.
 func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	type Config struct {
-		Genesis                             *types.Genesis `toml:",omitempty"`
+		Genesis                             *genesis.Genesis `toml:",omitempty"`
 		NetworkID                           *uint64
 		EthDiscoveryURLs                    []string
 		Prune                               *prune.Mode

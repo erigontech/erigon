@@ -33,13 +33,14 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 type Prestate struct {
-	Env stEnv              `json:"env"`
-	Pre types.GenesisAlloc `json:"pre"`
+	Env stEnv                `json:"env"`
+	Pre genesis.GenesisAlloc `json:"pre"`
 }
 
 type ommer struct {
@@ -80,7 +81,7 @@ type stEnvMarshaling struct {
 	BaseFee          *math.HexOrDecimal256
 }
 
-func MakePreState(chainRules *chain.Rules, tx kv.RwTx, sd *state3.SharedDomains, accounts types.GenesisAlloc) (state.StateReader, state.StateWriter) {
+func MakePreState(chainRules *chain.Rules, tx kv.RwTx, sd *state3.SharedDomains, accounts genesis.GenesisAlloc) (state.StateReader, state.StateWriter) {
 	var blockNr uint64 = 0
 
 	stateReader, stateWriter := rpchelper.NewLatestStateReader(tx), state.NewWriterV4(sd)

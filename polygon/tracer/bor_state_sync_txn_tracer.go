@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/eth/tracers"
 )
 
@@ -153,7 +154,7 @@ func (bsstt *borStateSyncTxnTracer) OnBlockEnd(err error) {
 	}
 }
 
-func (bsstt *borStateSyncTxnTracer) OnGenesisBlock(b *types.Block, alloc types.GenesisAlloc) {
+func (bsstt *borStateSyncTxnTracer) OnGenesisBlock(b *types.Block, alloc genesis.GenesisAlloc) {
 	if bsstt.Tracer.OnGenesisBlock != nil {
 		bsstt.Tracer.OnGenesisBlock(b, alloc)
 	}

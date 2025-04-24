@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/tests/contracts"
@@ -835,7 +836,7 @@ type initialData struct {
 	keys         []*ecdsa.PrivateKey
 	addresses    []libcommon.Address
 	transactOpts []*bind.TransactOpts
-	genesisSpec  *types.Genesis
+	genesisSpec  *genesis.Genesis
 }
 
 func getGenesis(funds ...*big.Int) initialData {
@@ -851,7 +852,7 @@ func getGenesis(funds ...*big.Int) initialData {
 
 	addresses := make([]libcommon.Address, 0, len(keys))
 	transactOpts := make([]*bind.TransactOpts, 0, len(keys))
-	allocs := types.GenesisAlloc{}
+	allocs := genesis.GenesisAlloc{}
 	for _, key := range keys {
 		addr := crypto.PubkeyToAddress(key.PublicKey)
 		addresses = append(addresses, addr)
@@ -861,14 +862,14 @@ func getGenesis(funds ...*big.Int) initialData {
 		}
 		transactOpts = append(transactOpts, to)
 
-		allocs[addr] = types.GenesisAccount{Balance: accountFunds}
+		allocs[addr] = genesis.GenesisAccount{Balance: accountFunds}
 	}
 
 	return initialData{
 		keys:         keys,
 		addresses:    addresses,
 		transactOpts: transactOpts,
-		genesisSpec: &types.Genesis{
+		genesisSpec: &genesis.Genesis{
 			Config: &chain.Config{
 				ChainID:               big.NewInt(1),
 				HomesteadBlock:        new(big.Int),
@@ -887,7 +888,7 @@ type txn struct {
 	key  *ecdsa.PrivateKey
 }
 
-func GenerateBlocks(t *testing.T, gspec *types.Genesis, txs map[int]txn) (*mock.MockSentry, *core.ChainPack, error) {
+func GenerateBlocks(t *testing.T, gspec *genesis.Genesis, txs map[int]txn) (*mock.MockSentry, *core.ChainPack, error) {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	m := mock.MockWithGenesis(t, gspec, key, false)
 

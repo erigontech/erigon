@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	trace_logger "github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
@@ -93,9 +94,9 @@ var (
 )
 
 type input struct {
-	Alloc types.GenesisAlloc `json:"alloc,omitempty"`
-	Env   *stEnv             `json:"env,omitempty"`
-	Txs   []*txWithKey       `json:"txs,omitempty"`
+	Alloc genesis.GenesisAlloc `json:"alloc,omitempty"`
+	Env   *stEnv               `json:"env,omitempty"`
+	Txs   []*txWithKey         `json:"txs,omitempty"`
 }
 
 func Main(ctx *cli.Context) error {
@@ -522,7 +523,7 @@ func signUnsignedTransactions(txs []*txWithKey, signer types.Signer) (types.Tran
 	return signedTxs, nil
 }
 
-type Alloc map[libcommon.Address]types.GenesisAccount
+type Alloc map[libcommon.Address]genesis.GenesisAccount
 
 func (g Alloc) OnRoot(libcommon.Hash) {}
 
@@ -535,7 +536,7 @@ func (g Alloc) OnAccount(addr libcommon.Address, dumpAccount state.DumpAccount) 
 			storage[libcommon.HexToHash(k)] = libcommon.HexToHash(v)
 		}
 	}
-	genesisAccount := types.GenesisAccount{
+	genesisAccount := genesis.GenesisAccount{
 		Code:    dumpAccount.Code,
 		Storage: storage,
 		Balance: balance,

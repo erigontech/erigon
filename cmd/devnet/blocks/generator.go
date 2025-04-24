@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/turbo/stages/mock"
@@ -37,7 +38,7 @@ type TxGen struct {
 	Key *ecdsa.PrivateKey
 }
 
-func GenerateBlocks(t *testing.T, gspec *types.Genesis, blocks int, txs map[int]TxGen, txPerBlock func(int) int) (*mock.MockSentry, *core.ChainPack, error) {
+func GenerateBlocks(t *testing.T, gspec *genesis.Genesis, blocks int, txs map[int]TxGen, txPerBlock func(int) int) (*mock.MockSentry, *core.ChainPack, error) {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	m := mock.MockWithGenesis(t, gspec, key, false)
 

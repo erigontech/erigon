@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/event"
 	"github.com/erigontech/erigon/execution/abi/bind"
@@ -92,8 +93,8 @@ type SimulatedBackend struct {
 
 // NewSimulatedBackend creates a new binding backend using a simulated blockchain
 // for testing purposes.
-func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
-	genesis := types.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
+func NewSimulatedBackendWithConfig(t *testing.T, alloc genesis.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
+	genesis := genesis.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
 	engine := ethash.NewFaker()
 	checkStateRoot := true
 	m := mock.MockWithGenesisEngine(t, &genesis, engine, false, checkStateRoot)
@@ -117,12 +118,12 @@ func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, confi
 }
 
 // A simulated backend always uses chainID 1337.
-func NewSimulatedBackend(t *testing.T, alloc types.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
+func NewSimulatedBackend(t *testing.T, alloc genesis.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
 	b := NewTestSimulatedBackendWithConfig(t, alloc, chain.TestChainConfig, gasLimit)
 	return b
 }
 
-func NewTestSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
+func NewTestSimulatedBackendWithConfig(t *testing.T, alloc genesis.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
 	b := NewSimulatedBackendWithConfig(t, alloc, config, gasLimit)
 	t.Cleanup(b.Close)
 	return b

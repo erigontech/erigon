@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/params"
@@ -361,7 +362,7 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 
 	checkStateRoot := true
 	return validator{
-		mock.MockWithEverything(t, &types.Genesis{Config: heimdall.chainConfig}, validatorKey, prune.DefaultMode, bor, 1024, false, false, checkStateRoot),
+		mock.MockWithEverything(t, &genesis.Genesis{Config: heimdall.chainConfig}, validatorKey, prune.DefaultMode, bor, 1024, false, false, checkStateRoot),
 		heimdall,
 		blocks,
 	}

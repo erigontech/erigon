@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/turbo/stages/mock"
@@ -59,9 +60,9 @@ func TestGenerateChain(t *testing.T) {
 	log.Root().SetHandler(log.DiscardHandler())
 
 	// Ensure that key1 has some funds in the genesis block.
-	gspec := &types.Genesis{
+	gspec := &genesis.Genesis{
 		Config: &chain.Config{HomesteadBlock: new(big.Int), ChainID: big.NewInt(1)},
-		Alloc:  types.GenesisAlloc{addr1: {Balance: big.NewInt(1000000)}},
+		Alloc:  genesis.GenesisAlloc{addr1: {Balance: big.NewInt(1000000)}},
 	}
 	m := mock.MockWithGenesis(t, gspec, key1, false)
 

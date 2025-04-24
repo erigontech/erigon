@@ -22,7 +22,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/types"
+	gen "github.com/erigontech/erigon/erigon-db/genesis"
 )
 
 type Bank struct {
@@ -50,6 +50,6 @@ func (b Bank) PrivKey() *ecdsa.PrivateKey {
 	return b.privKey
 }
 
-func (b Bank) RegisterGenesisAlloc(genesis *types.Genesis) {
-	genesis.Alloc[b.Address()] = types.GenesisAccount{Balance: b.initialBalance}
+func (b Bank) RegisterGenesisAlloc(genesis *gen.Genesis) {
+	genesis.Alloc[b.Address()] = gen.GenesisAccount{Balance: b.initialBalance}
 }

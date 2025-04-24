@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/eth/tracers/config"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/rpc"
@@ -364,11 +365,11 @@ func TestOeTracer(t *testing.T) {
 	}
 
 	type testcase struct {
-		Genesis      *types.Genesis  `json:"genesis"`
-		Context      *callContext    `json:"context"`
-		Input        string          `json:"input"`
-		TracerConfig json.RawMessage `json:"tracerConfig"`
-		Result       []*ParityTrace  `json:"result"`
+		Genesis      *genesis.Genesis `json:"genesis"`
+		Context      *callContext     `json:"context"`
+		Input        string           `json:"input"`
+		TracerConfig json.RawMessage  `json:"tracerConfig"`
+		Result       []*ParityTrace   `json:"result"`
 	}
 
 	dirPath := "oetracer"

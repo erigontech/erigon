@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -48,9 +49,9 @@ func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir 
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
-		gspec   = &types.Genesis{
+		gspec   = &genesis.Genesis{
 			Config: chain.TestChainConfig,
-			Alloc:  types.GenesisAlloc{address: {Balance: funds}},
+			Alloc:  genesis.GenesisAlloc{address: {Balance: funds}},
 		}
 	)
 	m := mock.MockWithGenesis(tb, gspec, key, false)

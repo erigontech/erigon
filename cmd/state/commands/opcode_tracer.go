@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
+	gen "github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/tracers"
@@ -415,7 +416,7 @@ type segPrefix struct {
 
 // OpcodeTracer re-executes historical transactions in read-only mode
 // and traces them at the opcode level
-func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, numBlocks uint64,
+func OpcodeTracer(genesis *gen.Genesis, blockNum uint64, chaindata string, numBlocks uint64,
 	saveOpcodes bool, saveBblocks bool, logger log.Logger) error {
 	blockNumOrig := blockNum
 

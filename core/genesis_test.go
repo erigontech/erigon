@@ -35,9 +35,9 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/erigon-db/genesis"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/turbo/stages/mock"
@@ -140,9 +140,9 @@ func TestAllocConstructor(t *testing.T) {
 
 	funds := big.NewInt(1000000000)
 	address := libcommon.HexToAddress("0x1000000000000000000000000000000000000001")
-	genSpec := &types.Genesis{
+	genSpec := &genesis.Genesis{
 		Config: params.AllProtocolChanges,
-		Alloc: types.GenesisAlloc{
+		Alloc: genesis.GenesisAlloc{
 			address: {Constructor: deploymentCode, Balance: funds},
 		},
 	}
@@ -180,7 +180,7 @@ func TestDecodeBalance0(t *testing.T) {
 	genesisData, err := os.ReadFile("./genesis_test.json")
 	require.NoError(t, err)
 
-	genesis := &types.Genesis{}
+	genesis := &genesis.Genesis{}
 	err = json.Unmarshal(genesisData, genesis)
 	require.NoError(t, err)
 	_ = genesisData
