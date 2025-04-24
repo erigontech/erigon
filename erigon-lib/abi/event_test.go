@@ -337,7 +337,7 @@ func TestEventTupleUnpack(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			err := unpackTestEventData(tc.dest, tc.data, tc.jsonLog, assert)
 			if tc.error == "" {
-				assert.Nil(err, "Should be able to unpack event data.")
+				assert.NoError(err, "Should be able to unpack event data.")
 				assert.Equal(tc.expected, tc.dest, tc.name)
 			} else {
 				assert.EqualError(err, tc.error, tc.name)

@@ -545,8 +545,8 @@ func TestBlockRawBodyPreShanghai(t *testing.T) {
 	rlp.DecodeBytes(bstring, body)
 
 	require.Nil(body.Withdrawals)
-	require.Equal(1, len(body.Uncles))
-	require.Equal(0, len(body.Transactions))
+	require.Len(body.Uncles, 1)
+	require.Len(body.Transactions, 0)
 }
 
 func TestBlockRawBodyPostShanghaiNoWithdrawals(t *testing.T) {
@@ -560,9 +560,9 @@ func TestBlockRawBodyPostShanghaiNoWithdrawals(t *testing.T) {
 	rlp.DecodeBytes(bstring, body)
 
 	require.NotNil(body.Withdrawals)
-	require.Equal(0, len(body.Withdrawals))
-	require.Equal(1, len(body.Uncles))
-	require.Equal(0, len(body.Transactions))
+	require.Len(body.Withdrawals, 0)
+	require.Len(body.Uncles, 1)
+	require.Len(body.Transactions, 0)
 }
 
 func TestBlockRawBodyPostShanghaiWithdrawals(t *testing.T) {

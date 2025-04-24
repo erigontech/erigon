@@ -227,12 +227,12 @@ func (blobs Blobs) ComputeCommitmentsAndProofs() (commitments []KZGCommitment, v
 	for i := 0; i < len(blobs); i++ {
 		commitment, err := kzgCtx.BlobToKZGCommitment(blobs[i][:], 1 /*numGoRoutines*/)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("could not convert blob to commitment: %v", err)
+			return nil, nil, nil, fmt.Errorf("could not convert blob to commitment: %w", err)
 		}
 
 		proof, err := kzgCtx.ComputeBlobKZGProof(blobs[i][:], commitment, 1 /*numGoRoutnes*/)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("could not compute proof for blob: %v", err)
+			return nil, nil, nil, fmt.Errorf("could not compute proof for blob: %w", err)
 		}
 		commitments[i] = KZGCommitment(commitment)
 		proofs[i] = KZGProof(proof)

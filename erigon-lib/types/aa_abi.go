@@ -44,7 +44,7 @@ func decodeMethodParamsToInterface(output interface{}, methodName string, input 
 	}
 	err = m.Inputs.Copy(output, params)
 	if err != nil {
-		return fmt.Errorf("unable to decode %s: %v", methodName, err)
+		return fmt.Errorf("unable to decode %s: %w", methodName, err)
 	}
 	return nil
 }

@@ -155,52 +155,6 @@ func (tx *AccountAbstractionTransaction) GetTo() *common.Address {
 	return nil
 }
 
-func (tx *AccountAbstractionTransaction) copy() *AccountAbstractionTransaction {
-	cpy := &AccountAbstractionTransaction{
-		Nonce:                       tx.Nonce,
-		ChainID:                     tx.ChainID,
-		Tip:                         tx.Tip,
-		FeeCap:                      tx.FeeCap,
-		GasLimit:                    tx.GasLimit,
-		AccessList:                  tx.AccessList,
-		SenderValidationData:        common.CopyBytes(tx.SenderValidationData),
-		ExecutionData:               common.CopyBytes(tx.ExecutionData),
-		PaymasterData:               common.CopyBytes(tx.PaymasterData),
-		DeployerData:                common.CopyBytes(tx.DeployerData),
-		BuilderFee:                  new(uint256.Int),
-		ValidationGasLimit:          tx.ValidationGasLimit,
-		PaymasterValidationGasLimit: tx.PaymasterValidationGasLimit,
-		PostOpGasLimit:              tx.PostOpGasLimit,
-		NonceKey:                    new(uint256.Int),
-	}
-
-	if tx.SenderAddress != nil {
-		addr := *tx.SenderAddress
-		cpy.SenderAddress = &addr
-	}
-	if tx.Paymaster != nil {
-		addr := *tx.Paymaster
-		cpy.Paymaster = &addr
-	}
-	if tx.Deployer != nil {
-		addr := *tx.Deployer
-		cpy.Deployer = &addr
-	}
-
-	cpy.Authorizations = make([]Authorization, len(tx.Authorizations))
-	for i, ath := range tx.Authorizations {
-		cpy.Authorizations[i] = *ath.copy()
-	}
-
-	if tx.BuilderFee != nil {
-		cpy.BuilderFee.Set(tx.BuilderFee)
-	}
-	if tx.NonceKey != nil {
-		cpy.NonceKey.Set(tx.NonceKey)
-	}
-	return cpy
-}
-
 func (tx *AccountAbstractionTransaction) Type() byte {
 	return AccountAbstractionTxType
 }

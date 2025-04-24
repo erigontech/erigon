@@ -423,12 +423,16 @@ func isEqualBytes(a, b []byte) bool {
 }
 
 func check(t *testing.T, f string, want, got interface{}) {
+	t.Helper()
+
 	if !reflect.DeepEqual(want, got) {
 		t.Errorf("%s mismatch: want %v, got %v", f, want, got)
 	}
 }
 
 func checkHeaders(t *testing.T, a, b *Header) {
+	t.Helper()
+
 	check(t, "Header.ParentHash", a.ParentHash, b.ParentHash)
 	check(t, "Header.UncleHash", a.UncleHash, b.UncleHash)
 	check(t, "Header.Coinbase", a.Coinbase, b.Coinbase)
@@ -452,6 +456,8 @@ func checkHeaders(t *testing.T, a, b *Header) {
 }
 
 func checkWithdrawals(t *testing.T, a, b *Withdrawal) {
+	t.Helper()
+
 	check(t, "Withdrawal.Index", a.Index, b.Index)
 	check(t, "Withdrawal.Validator", a.Validator, b.Validator)
 	check(t, "Withdrawal.Address", a.Address, b.Address)
@@ -459,6 +465,8 @@ func checkWithdrawals(t *testing.T, a, b *Withdrawal) {
 }
 
 func compareTransactions(t *testing.T, a, b Transaction) {
+	t.Helper()
+
 	v1, r1, s1 := a.RawSignatureValues()
 	v2, r2, s2 := b.RawSignatureValues()
 	check(t, "Tx.Type", a.Type(), b.Type())
