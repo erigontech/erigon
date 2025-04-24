@@ -90,14 +90,13 @@ func (r *ForkableAgg) RegisterBufferedForkable(ap *Forkable[BufferedTxI]) {
 
 // - "open folder"
 // - close
-// build files
+// - build files
 // merge files
 // get index
 // quick prune
 // prune
 // debug interface (files/db)
-// - temporal interface (needs temporaldb)
-// - begin tx
+// - temporal agg interface
 
 func (r *ForkableAgg) OpenFolder() error {
 	r.dirtyFilesLock.Lock()
@@ -110,9 +109,6 @@ func (r *ForkableAgg) OpenFolder() error {
 }
 
 // BuildFiles builds all snapshots (asynchronously) upto a given RootNum
-// note that it doesn't check if data is available (in db, for retire)
-// till the given `num`, and it might build partially empty files if
-// data is not available in db.
 func (r *ForkableAgg) BuildFiles(num RootNum, unalignedIncluded bool) chan struct{} {
 	// build in background
 	fin := make(chan struct{})
@@ -130,7 +126,7 @@ func (r *ForkableAgg) BuildFiles(num RootNum, unalignedIncluded bool) chan struc
 		defer r.wg.Done()
 		defer r.buildingFiles.Store(false)
 		for built {
-			built, err = r.buildFiles(r.ctx, num)
+			built, err = r.buildFile(r.ctx, num)
 			if err != nil && (errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped)) {
 				close(fin)
 				return
@@ -152,11 +148,13 @@ func (r *ForkableAgg) BuildFiles(num RootNum, unalignedIncluded bool) chan struc
 }
 
 func (r *ForkableAgg) MergeLoop(ctx context.Context) error {
+	// TODO
 	return nil
 }
 
-func (r *ForkableAgg) buildFiles(ctx context.Context, to RootNum) (built bool, err error) {
-	// 1. first just build aligned
+// buildFile builds a single file
+// multiple invocations will build subsequent files
+func (r *ForkableAgg) buildFile(ctx context.Context, to RootNum) (built bool, err error) {
 	type wrappedFilesItem struct {
 		*filesItem
 		st CanonicityStrategy
@@ -182,7 +180,7 @@ func (r *ForkableAgg) buildFiles(ctx context.Context, to RootNum) (built bool, e
 	defer r.buildingFiles.Store(false)
 
 	// build aligned
-	tx := r.BeginFilesRo()
+	tx := r.BeginTemporalTx()
 	defer tx.Close()
 
 	firstRootNumNotInFiles := tx.AlignedMaxRootNum()
@@ -209,7 +207,7 @@ func (r *ForkableAgg) buildFiles(ctx context.Context, to RootNum) (built bool, e
 				return nil
 			}
 
-			df, built, err := p.BuildFiles(ctx2, fromRootNum, to, r.db, r.ps)
+			df, built, err := p.BuildFile(ctx2, fromRootNum, to, r.db, r.ps)
 			if err != nil {
 				return err
 			}
@@ -231,7 +229,7 @@ func (r *ForkableAgg) buildFiles(ctx context.Context, to RootNum) (built bool, e
 		return false, err
 	}
 
-	tx.Close()
+	tx.Close() // no need for tx in index building
 
 	for _, df := range cfiles {
 		r.loop(func(p *ProtoForkable) error {
@@ -243,12 +241,6 @@ func (r *ForkableAgg) buildFiles(ctx context.Context, to RootNum) (built bool, e
 	}
 
 	return len(cfiles) > 0, nil
-}
-
-func (r *ForkableAgg) cleanupDfs(dfs []*filesItem) {
-	for _, df := range dfs {
-		df.closeFiles()
-	}
 }
 
 func (r *ForkableAgg) Close() {
@@ -355,7 +347,7 @@ func (r *ForkableAgg) recalcVisibleFiles(toRootNum RootNum) {
 }
 
 func (r *ForkableAgg) recalcVisibleFilesMinimaxRootNum() {
-	aggTx := r.BeginFilesRo()
+	aggTx := r.BeginTemporalTx()
 	defer aggTx.Close()
 	r.visibleFilesMinimaxRootNum.Store(aggTx.AlignedMaxRootNum().Uint64())
 }
@@ -382,7 +374,7 @@ func (r *ForkableAgg) loop(fn func(p *ProtoForkable) error) error {
 	return nil
 }
 
-type ForkableAggRoTx struct {
+type ForkableAggTemporalTx struct {
 	f        *ForkableAgg
 	marked   []MarkedTxI
 	unmarked []UnmarkedTxI
@@ -393,24 +385,24 @@ type ForkableAggRoTx struct {
 	// TODO map from forkableId -> stragety+index in array; strategy encoded in lowest 2-bits.
 }
 
-func (r *ForkableAgg) BeginFilesRo() *ForkableAggRoTx {
+func (r *ForkableAgg) BeginTemporalTx() *ForkableAggTemporalTx {
 	marked := make([]MarkedTxI, 0, len(r.marked))
 	unmarked := make([]UnmarkedTxI, 0, len(r.unmarked))
 	buffered := make([]BufferedTxI, 0, len(r.buffered))
 
 	for _, ap := range r.marked {
-		marked = append(marked, ap.BeginFilesTx())
+		marked = append(marked, ap.BeginTemporalTx())
 	}
 
 	for _, ap := range r.unmarked {
-		unmarked = append(unmarked, ap.BeginFilesTx())
+		unmarked = append(unmarked, ap.BeginTemporalTx())
 	}
 
 	for _, ap := range r.buffered {
-		buffered = append(buffered, ap.BeginFilesTx())
+		buffered = append(buffered, ap.BeginTemporalTx())
 	}
 
-	return &ForkableAggRoTx{
+	return &ForkableAggTemporalTx{
 		f:        r,
 		marked:   marked,
 		unmarked: unmarked,
@@ -418,25 +410,28 @@ func (r *ForkableAgg) BeginFilesRo() *ForkableAggRoTx {
 	}
 }
 
-func (r *ForkableAggRoTx) AlignedMaxRootNum() RootNum {
+func (r *ForkableAggTemporalTx) AlignedMaxRootNum() RootNum {
+	// return aligned max root num of "any" aligned forkable,
+	// which is ok since all are expected to be at same height
 	return loopOverDebugFiles(r, ee.AllForkableId, true, func(db ForkableFilesTxI) RootNum {
 		return db.VisibleFilesMaxRootNum()
 	})
 }
 
-func (r *ForkableAggRoTx) MaxRootNum(forId ForkableId) RootNum {
+func (r *ForkableAggTemporalTx) MaxRootNum(forId ForkableId) RootNum {
+	// return max root num of the a given forkableId
 	return loopOverDebugFiles(r, forId, false, func(db ForkableFilesTxI) RootNum {
 		return db.VisibleFilesMaxRootNum()
 	})
 }
 
-func (r *ForkableAggRoTx) HasRootNumUpto(ctx context.Context, forId ForkableId, to RootNum, tx kv.Tx) bool {
+func (r *ForkableAggTemporalTx) HasRootNumUpto(ctx context.Context, forId ForkableId, to RootNum, tx kv.Tx) bool {
 	return loopOverDebugDbs(r, forId, func(db ForkableDbCommonTxI) bool {
 		return db.HasRootNumUpto(ctx, to, tx)
 	})
 }
 
-func loopOverDebugDbs[R any](r *ForkableAggRoTx, forId ForkableId, fn func(ForkableDbCommonTxI) R) R {
+func loopOverDebugDbs[R any](r *ForkableAggTemporalTx, forId ForkableId, fn func(ForkableDbCommonTxI) R) R {
 	for i, mt := range r.marked {
 		if r.f.marked[i].a == forId {
 			dbg := mt.(ForkableDebugAPI[MarkedDbTxI])
@@ -461,7 +456,7 @@ func loopOverDebugDbs[R any](r *ForkableAggRoTx, forId ForkableId, fn func(Forka
 	panic(fmt.Sprintf("no forkable with id %s", forId.String()))
 }
 
-func loopOverDebugFiles[R any](r *ForkableAggRoTx, forId ForkableId, skipUnaligned bool, fn func(ForkableFilesTxI) R) R {
+func loopOverDebugFiles[R any](r *ForkableAggTemporalTx, forId ForkableId, skipUnaligned bool, fn func(ForkableFilesTxI) R) R {
 	for i, mt := range r.marked {
 		if skipUnaligned && r.f.marked[i].unaligned {
 			continue
@@ -495,7 +490,7 @@ func loopOverDebugFiles[R any](r *ForkableAggRoTx, forId ForkableId, skipUnalign
 	panic(fmt.Sprintf("no forkable with id %s", forId.String()))
 }
 
-func (r *ForkableAggRoTx) Close() {
+func (r *ForkableAggTemporalTx) Close() {
 	if r == nil || r.f == nil {
 		return
 	}

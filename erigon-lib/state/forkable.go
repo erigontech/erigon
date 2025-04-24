@@ -161,7 +161,7 @@ func (a *Forkable[T]) encTs(ts ee.EncToBytesI) []byte {
 	return ts.EncToBytes(!a.ts4Bytes)
 }
 
-func (a *Forkable[T]) BeginFilesTx() T {
+func (a *Forkable[T]) BeginTemporalTx() T {
 	return a.beginTxGen(true)
 }
 

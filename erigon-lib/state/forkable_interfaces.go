@@ -40,7 +40,7 @@ type AccessorIndexBuilder interface {
 // we don't need a separate interface for files...
 // since tx is provided separately anyway.
 type StartRoTx[T ForkableBaseTxI] interface {
-	BeginFilesTx() T
+	BeginTemporalTx() T
 	BeginNoFilesTx() T
 }
 

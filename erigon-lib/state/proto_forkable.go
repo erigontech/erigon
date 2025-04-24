@@ -49,14 +49,27 @@ func (a *ProtoForkable) RecalcVisibleFiles(toRootNum RootNum) {
 	a.snaps.RecalcVisibleFiles(toRootNum)
 }
 
+func (a *ProtoForkable) IntegrateDirtyFile(file *filesItem) {
+	a.snaps.IntegrateDirtyFile(file)
+}
+
 func (a *ProtoForkable) IntegrateDirtyFiles(files []*filesItem) {
 	a.snaps.IntegrateDirtyFiles(files)
 }
 
-// BuildFiles builds a single file for the given range, respecting the snapshot config.
-// It might be possible to build multiple files, but this function returns the first one;
-// and might need to be called multiple times.
-func (a *ProtoForkable) BuildFiles(ctx context.Context, from, to RootNum, db kv.RoDB, ps *background.ProgressSet) (builtFile *filesItem, built bool, err error) {
+func (a *ProtoForkable) IntegrateDirtyFiles2(files []FilesItem) {
+	cfiles := make([]*filesItem, len(files))
+	for i := range files {
+		cfiles[i] = files[i].(*filesItem)
+	}
+	a.snaps.IntegrateDirtyFiles(cfiles)
+}
+
+// BuildFile builds a single file for the given range, respecting the snapshot config.
+//  1. typically this would be used to built a single step or "minimum sized snapshot", but can
+//     be used to build bigger files too.
+//  2. The caller is responsible for ensuring that data is available in db to freeze.
+func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.RoDB, ps *background.ProgressSet) (builtFile *filesItem, built bool, err error) {
 	log.Debug("freezing %s from %d to %d", a.a.Name(), from, to)
 	calcFrom, calcTo := from, to
 	var canFreeze bool

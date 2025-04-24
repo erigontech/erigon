@@ -68,6 +68,7 @@ type FilesItem interface {
 	AccessorIndex() *recsplit.Index
 	BtIndex() *BtIndex
 	ExistenceFilter() *ExistenceFilter
+	Range() (startTxNum, endTxNum uint64)
 }
 
 var _ FilesItem = (*filesItem)(nil)
@@ -94,6 +95,10 @@ func (i *filesItem) AccessorIndex() *recsplit.Index { return i.index }
 func (i *filesItem) BtIndex() *BtIndex { return i.bindex }
 
 func (i *filesItem) ExistenceFilter() *ExistenceFilter { return i.existence }
+
+func (i *filesItem) Range() (startTxNum, endTxNum uint64) {
+	return i.startTxNum, i.endTxNum
+}
 
 // isProperSubsetOf - when `j` covers `i` but not equal `i`
 func (i *filesItem) isProperSubsetOf(j *filesItem) bool {
