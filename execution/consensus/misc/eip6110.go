@@ -34,16 +34,22 @@ const (
 
 var depositTopic = libcommon.HexToHash("0x649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")
 
+// Doesn't panic, use carefully
+func bytesTypeNoErr(size int) abi.Type {
+	bytesT, _ := abi.NewType(fmt.Sprintf("bytes%d", size), "", nil)
+	return bytesT
+}
+
 var (
 	// DepositABI is an ABI instance of beacon chain deposit events.
 	DepositABI   = abi.ABI{Events: map[string]abi.Event{"DepositEvent": depositEvent}}
 	bytesT, _    = abi.NewType("bytes", "", nil)
 	depositEvent = abi.NewEvent("DepositEvent", "DepositEvent", false, abi.Arguments{
-		{Name: "pubkey", Type: bytesT, Indexed: false},
-		{Name: "withdrawal_credentials", Type: bytesT, Indexed: false},
-		{Name: "amount", Type: bytesT, Indexed: false},
-		{Name: "signature", Type: bytesT, Indexed: false},
-		{Name: "index", Type: bytesT, Indexed: false}},
+		{Name: "pubkey", Type: bytesTypeNoErr(BLSPubKeyLen), Indexed: false},
+		{Name: "withdrawal_credentials", Type: bytesTypeNoErr(WithdrawalCredentialsLen), Indexed: false},
+		{Name: "amount", Type: bytesTypeNoErr(8), Indexed: false},
+		{Name: "signature", Type: bytesTypeNoErr(BLSSigLen), Indexed: false},
+		{Name: "index", Type: bytesTypeNoErr(8), Indexed: false}},
 	)
 )
 
