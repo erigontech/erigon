@@ -270,6 +270,15 @@ func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r 
 	a.logger.Info("[Beacon REST] sending voluntary exit", "validator_index", req.VoluntaryExit.ValidatorIndex, "signature", req.Signature)
 	// a.operationsPool.VoluntaryExitsPool.Insert(req.VoluntaryExit.ValidatorIndex, &req)
 	if a.sentinel != nil {
+		peers, err := a.sentinel.GetPeers(r.Context(), &sentinel.EmptyMessage{})
+		if err != nil {
+			a.logger.Debug("[Beacon REST] failed to get peers", "err", err)
+		}
+		if peers.Active < 48 {
+			a.logger.Debug("[Beacon REST] not enough peers to publish voluntary exit", "peers", peers.Active)
+			http.Error(w, "not enough peers to publish voluntary exit", http.StatusBadRequest)
+			return
+		}
 		if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
 			Data: encodedSSZ,
 			Name: gossip.TopicNameVoluntaryExit,
