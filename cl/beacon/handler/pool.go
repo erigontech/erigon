@@ -267,6 +267,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r 
 	// 	http.Error(w, err.Error(), http.StatusBadRequest)
 	// 	return
 	// }
+	a.logger.Info("[Beacon REST] sending voluntary exit", "validator_index", req.VoluntaryExit.ValidatorIndex, "signature", req.Signature)
 	// a.operationsPool.VoluntaryExitsPool.Insert(req.VoluntaryExit.ValidatorIndex, &req)
 	if a.sentinel != nil {
 		if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
