@@ -1231,12 +1231,8 @@ func historyKey(txNum uint64, key []byte, buf []byte) []byte {
 }
 
 func (ht *HistoryRoTx) encodeTs(txNum uint64, key []byte) []byte {
-	if ht._bufTs == nil {
-		ht._bufTs = make([]byte, 8+len(key))
-	}
-	binary.BigEndian.PutUint64(ht._bufTs, txNum)
-	ht._bufTs = append(ht._bufTs[:8], key...)
-	return ht._bufTs[:8+len(key)]
+	ht._bufTs = historyKey(txNum, key, ht._bufTs)
+	return ht._bufTs
 }
 
 // HistorySeek searches history for a value of specified key before txNum
