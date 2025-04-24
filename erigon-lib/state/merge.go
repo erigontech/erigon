@@ -1035,7 +1035,7 @@ func garbage(dirtyFiles *btree.BTreeG[*filesItem], visibleFiles []visibleFile, m
 func hasCoverVisibleFile(visibleFiles []visibleFile, item *filesItem) bool {
 	for _, f := range visibleFiles {
 		if item.isProperSubsetOf(f.src) {
-			fmt.Printf("[dbg] see: %s, %s\n", item.decompressor.FileName(), item.decompressor.FileName())
+			fmt.Printf("[dbg] see: %s, %s\n", item.decompressor.FileName(), f.src.decompressor.FileName())
 			return true
 		}
 	}
