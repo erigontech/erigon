@@ -244,10 +244,12 @@ func deleteMergeFile(dirtyFiles *btree2.BTreeG[*filesItem], outs []*filesItem, f
 		if out.refcount.Load() == 0 {
 			out.closeFilesAndRemove()
 
+			logger.Warn("[agg.dbg] deleteMergeFile: remove", "f", out.decompressor.FileName())
 			if filenameBase == traceFileLife && out.decompressor != nil {
 				logger.Warn("[agg.dbg] deleteMergeFile: remove", "f", out.decompressor.FileName())
 			}
 		} else {
+			logger.Warn("[agg.dbg] deleteMergeFile: remove", "f", out.decompressor.FileName())
 			if filenameBase == traceFileLife && out.decompressor != nil {
 				logger.Warn("[agg.dbg] deleteMergeFile: mark as canDelete=true", "f", out.decompressor.FileName())
 			}
