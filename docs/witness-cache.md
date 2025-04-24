@@ -2,6 +2,8 @@
 
 Enable caching of witnesses for batches. This is useful for speeding up the RPC endpoint `zkevm_getBatchWitness` as it will check the cache first before generating a new witness. The cache is stored in the DB and is truncated when a higher verified batch comes in. This cache is generated towards the end of the stage loop.
 
+The latest stable build with witness cache is cdk-erigon [v2.61.20](https://github.com/0xPolygonHermez/cdk-erigon/releases/tag/v2.61.20)
+
 ## Flag List
 
 - `zkevm.witness-cache-enable`
