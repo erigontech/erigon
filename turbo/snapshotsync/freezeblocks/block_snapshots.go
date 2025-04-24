@@ -37,12 +37,13 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
+	"github.com/erigontech/erigon-lib/common"
 	common2 "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	dir2 "github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -151,7 +152,7 @@ type BlockRetire struct {
 	// shared semaphore with AggregatorV3 to allow only one type of snapshot building at a time
 	snBuildAllowed *semaphore.Weighted
 
-	workers int
+	workers atomic.Int32
 	tmpDir  string
 	db      kv.RoDB
 
@@ -181,8 +182,7 @@ func NewBlockRetire(
 	snBuildAllowed *semaphore.Weighted,
 	logger log.Logger,
 ) *BlockRetire {
-	return &BlockRetire{
-		workers:        compressWorkers,
+	r := &BlockRetire{
 		tmpDir:         dirs.Tmp,
 		dirs:           dirs,
 		blockReader:    blockReader,
@@ -196,10 +196,12 @@ func NewBlockRetire(
 		heimdallStore:  heimdallStore,
 		bridgeStore:    bridgeStore,
 	}
+	r.workers.Store(int32(compressWorkers))
+	return r
 }
 
-func (br *BlockRetire) SetWorkers(workers int) { br.workers = workers }
-func (br *BlockRetire) GetWorkers() int        { return br.workers }
+func (br *BlockRetire) SetWorkers(workers int) { br.workers.Store(int32(workers)) }
+func (br *BlockRetire) GetWorkers() int        { return int(br.workers.Load()) }
 
 func (br *BlockRetire) IO() (services.FullBlockReader, *blockio.BlockWriter) {
 	return br.blockReader, br.blockWriter
@@ -266,7 +268,7 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 	default:
 	}
 
-	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers
+	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers.Load()
 	snapshots := br.snapshots()
 
 	blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum, snaptype.Unknown, br.chainConfig)
@@ -280,7 +282,7 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 		logger.Log(lvl, "[snapshots] Retire Blocks", "range",
 			fmt.Sprintf("%s-%s", common2.PrettyCounter(blockFrom), common2.PrettyCounter(blockTo)))
 		// in future we will do it in background
-		if err := DumpBlocks(ctx, blockFrom, blockTo, br.chainConfig, tmpDir, snapshots.Dir(), db, workers, lvl, logger, blockReader); err != nil {
+		if err := DumpBlocks(ctx, blockFrom, blockTo, br.chainConfig, tmpDir, snapshots.Dir(), db, int(workers), lvl, logger, blockReader); err != nil {
 			return ok, fmt.Errorf("DumpBlocks: %w", err)
 		}
 
@@ -293,9 +295,13 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 		}
 	}
 
-	merger := snapshotsync.NewMerger(tmpDir, workers, lvl, db, br.chainConfig, logger)
+	merger := snapshotsync.NewMerger(tmpDir, int(workers), lvl, db, br.chainConfig, logger)
 	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(), snapshots.BlocksAvailable())
 	if len(rangesToMerge) == 0 {
+		//TODO: enable, but optimize to reduce chain-tip impact
+		//if err := snapshots.RemoveOverlaps(); err != nil {
+		//	return false, err
+		//}
 		return ok, nil
 	}
 	ok = true // have something to merge
@@ -634,7 +640,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 	}
 
 	doWarmup, warmupTxs, warmupSenders := blockTo-blockFrom >= 100_000 && workers > 4, &atomic.Bool{}, &atomic.Bool{}
-	from := hexutility.EncodeTs(blockFrom)
+	from := hexutil.EncodeTs(blockFrom)
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum >= blockTo { // [from, to)
@@ -655,7 +661,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		}
 
 		if doWarmup && !warmupSenders.Load() && blockNum%1_000 == 0 {
-			clean := kv.ReadAhead(warmupCtx, db, warmupSenders, kv.Senders, hexutility.EncodeTs(blockNum), 10_000)
+			clean := kv.ReadAhead(warmupCtx, db, warmupSenders, kv.Senders, hexutil.EncodeTs(blockNum), 10_000)
 			defer clean()
 		}
 		if doWarmup && !warmupTxs.Load() && blockNum%1_000 == 0 {
@@ -773,13 +779,41 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 	return 0, nil
 }
 
-// DumpHeaders - [from, to)
 func DumpHeaders(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blockTo uint64, _ firstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+	return DumpHeadersRaw(ctx, db, nil, blockFrom, blockTo, nil, collect, workers, lvl, logger, false)
+}
+
+// DumpHeaders - [from, to)
+func DumpHeadersRaw(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blockTo uint64, _ firstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, test bool) (uint64, error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
+	// do hash sanity check
+	var (
+		prevHash  common.Hash
+		emptyHash common.Hash
+	)
+
+	// Make sure the canonical chain is not broken.
+	if blockFrom > 0 && !test {
+		if err := db.View(ctx, func(tx kv.Tx) error {
+			blockNum := blockFrom - 1
+			h, err := rawdb.ReadCanonicalHash(tx, blockNum)
+			if err != nil {
+				return err
+			}
+			if h == emptyHash {
+				return fmt.Errorf("header not found: %d", blockNum)
+			}
+			prevHash = h
+			return nil
+		}); err != nil {
+			return 0, err
+		}
+	}
+
 	key := make([]byte, 8+32)
-	from := hexutility.EncodeTs(blockFrom)
+	from := hexutil.EncodeTs(blockFrom)
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum >= blockTo {
@@ -798,6 +832,11 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, bl
 		if err := rlp.DecodeBytes(dataRLP, &h); err != nil {
 			return false, err
 		}
+		// Make sure the canonical chain is not broken.
+		if prevHash != emptyHash && prevHash != h.ParentHash && !test {
+			return false, fmt.Errorf("header hash mismatch: %d, %x != %x", blockNum, prevHash, h.ParentHash)
+		}
+		prevHash = h.Hash()
 
 		value := make([]byte, len(dataRLP)+1) // first_byte_of_header_hash + header_rlp
 		value[0] = h.Hash()[0]
@@ -823,6 +862,24 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, bl
 	}); err != nil {
 		return 0, err
 	}
+
+	// Make sure the canonical chain is not broken.
+	if err := db.View(ctx, func(tx kv.Tx) error {
+		if test {
+			return nil
+		}
+		blockNum := blockTo
+		h := rawdb.ReadHeaderByNumber(tx, blockNum)
+		if h == nil {
+			return fmt.Errorf("last header not found: %d", blockNum)
+		}
+		if prevHash != h.ParentHash {
+			return fmt.Errorf("header hash mismatch: %d, %x != %x", blockNum, prevHash, h.ParentHash)
+		}
+		return nil
+	}); err != nil {
+		return 0, err
+	}
 	return 0, nil
 }
 
@@ -834,7 +891,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 	blockNumByteLength := 8
 	blockHashByteLength := 32
 	key := make([]byte, blockNumByteLength+blockHashByteLength)
-	from := hexutility.EncodeTs(blockFrom)
+	from := hexutil.EncodeTs(blockFrom)
 
 	lastTxNum := firstTxNum(ctx)
 

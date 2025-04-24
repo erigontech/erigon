@@ -22,7 +22,7 @@ import (
 	"fmt"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
@@ -162,10 +162,6 @@ func (b *BeaconBlock) Version() clparams.StateVersion {
 	return b.Body.Version
 }
 
-func (b *BeaconBlock) SetVersion(version clparams.StateVersion) {
-	b.Body.SetVersion(version)
-}
-
 func (b *BeaconBlock) EncodeSSZ(buf []byte) (dst []byte, err error) {
 	return ssz2.MarshalSSZ(buf, b.Slot, b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
 }
@@ -247,8 +243,8 @@ func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparams.State
 	)
 	if version.AfterOrEqual(clparams.ElectraVersion) {
 		// upgrade to electra
-		maxAttSlashing = MaxAttesterSlashingsElectra
-		maxAttestation = MaxAttestationsElectra
+		maxAttSlashing = int(beaconCfg.MaxAttesterSlashingsElectra)
+		maxAttestation = int(beaconCfg.MaxAttestationsElectra)
 		executionRequests = NewExecutionRequests(beaconCfg)
 	}
 
@@ -265,15 +261,6 @@ func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparams.State
 		BlobKzgCommitments: solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48),
 		ExecutionRequests:  executionRequests,
 		Version:            version,
-	}
-}
-func (b *BeaconBody) SetVersion(version clparams.StateVersion) {
-	b.Version = version
-	b.ExecutionPayload.SetVersion(version)
-	if version.AfterOrEqual(clparams.ElectraVersion) {
-		b.AttesterSlashings = solid.NewDynamicListSSZ[*AttesterSlashing](MaxAttesterSlashingsElectra)
-		b.Attestations = solid.NewDynamicListSSZ[*solid.Attestation](MaxAttestationsElectra)
-		b.ExecutionRequests = NewExecutionRequests(b.beaconCfg)
 	}
 }
 
@@ -535,12 +522,12 @@ func (b *BeaconBody) GetExecutionRequests() *ExecutionRequests {
 	return b.ExecutionRequests
 }
 
-func (b *BeaconBody) GetExecutionRequestsList() []hexutility.Bytes {
+func (b *BeaconBody) GetExecutionRequestsList() []hexutil.Bytes {
 	r := b.ExecutionRequests
 	if r == nil {
 		return nil
 	}
-	ret := []hexutility.Bytes{}
+	ret := []hexutil.Bytes{}
 	for _, r := range []struct {
 		typ      byte
 		requests ssz.EncodableSSZ
@@ -556,7 +543,7 @@ func (b *BeaconBody) GetExecutionRequestsList() []hexutility.Bytes {
 		}
 		// type + ssz
 		if len(ssz) > 0 {
-			ret = append(ret, append(hexutility.Bytes{r.typ}, ssz...))
+			ret = append(ret, append(hexutil.Bytes{r.typ}, ssz...))
 		}
 	}
 	return ret
@@ -616,7 +603,7 @@ func (b *DenebBeaconBlock) GetParentRoot() libcommon.Hash {
 }
 
 func (b *DenebBeaconBlock) GetBody() GenericBeaconBody {
-	return b.Block.GetBody()
+	return b.Block.Body
 }
 
 type DenebSignedBeaconBlock struct {

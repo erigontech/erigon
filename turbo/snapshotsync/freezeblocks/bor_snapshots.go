@@ -44,9 +44,8 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 	}
 
 	snapshots := br.borSnapshots()
-
 	chainConfig := fromdb.ChainConfig(br.db)
-	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers
+	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, int(br.workers.Load())
 
 	blocksRetired := false
 

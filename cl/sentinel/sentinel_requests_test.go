@@ -30,11 +30,11 @@ import (
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
+	"github.com/erigontech/erigon-lib/chain/networkid"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/antiquary"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -70,13 +70,14 @@ func TestSentinelBlocksByRange(t *testing.T) {
 	ethClock := getEthClock(t)
 	ctx := context.Background()
 	db, blocks, _, _, _, reader := loadChain(t)
-	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
+	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(networkid.MainnetChainID)
 	sentinel, err := New(ctx, &SentinelConfig{
 		NetworkConfig: networkConfig,
 		BeaconConfig:  beaconConfig,
 		IpAddr:        listenAddrHost,
 		Port:          7070,
 		EnableBlocks:  true,
+		MaxPeerCount:  8883,
 	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel.Stop()
@@ -174,13 +175,14 @@ func TestSentinelBlocksByRoots(t *testing.T) {
 	ctx := context.Background()
 	db, blocks, _, _, _, reader := loadChain(t)
 	ethClock := getEthClock(t)
-	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
+	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(networkid.MainnetChainID)
 	sentinel, err := New(ctx, &SentinelConfig{
 		NetworkConfig: networkConfig,
 		BeaconConfig:  beaconConfig,
 		IpAddr:        listenAddrHost,
 		Port:          7070,
 		EnableBlocks:  true,
+		MaxPeerCount:  8883,
 	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel.Stop()
@@ -283,13 +285,14 @@ func TestSentinelStatusRequest(t *testing.T) {
 	ctx := context.Background()
 	db, blocks, _, _, _, reader := loadChain(t)
 	ethClock := getEthClock(t)
-	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
+	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(networkid.MainnetChainID)
 	sentinel, err := New(ctx, &SentinelConfig{
 		NetworkConfig: networkConfig,
 		BeaconConfig:  beaconConfig,
 		IpAddr:        listenAddrHost,
 		Port:          7070,
 		EnableBlocks:  true,
+		MaxPeerCount:  8883,
 	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel.Stop()

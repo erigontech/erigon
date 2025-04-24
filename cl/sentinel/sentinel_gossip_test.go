@@ -25,8 +25,8 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/chain/networkid"
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
@@ -34,7 +34,7 @@ import (
 )
 
 func getEthClock(t *testing.T) eth_clock.EthereumClock {
-	s, err := initial_state.GetGenesisState(clparams.MainnetNetwork)
+	s, err := initial_state.GetGenesisState(networkid.MainnetChainID)
 	require.NoError(t, err)
 	return eth_clock.NewEthereumClock(s.GenesisTime(), s.GenesisValidatorsRoot(), s.BeaconConfig())
 }
@@ -44,10 +44,10 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 
 	ctx := context.Background()
 	db, _, _, _, _, reader := loadChain(t)
-	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
+	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(networkid.MainnetChainID)
 	bcfg := *beaconConfig
 
-	s, err := initial_state.GetGenesisState(clparams.MainnetNetwork)
+	s, err := initial_state.GetGenesisState(networkid.MainnetChainID)
 	require.NoError(t, err)
 	ethClock := eth_clock.NewEthereumClock(s.GenesisTime(), s.GenesisValidatorsRoot(), &bcfg)
 
@@ -63,6 +63,7 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 		IpAddr:        listenAddrHost,
 		Port:          7070,
 		EnableBlocks:  true,
+		MaxPeerCount:  9999999,
 	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel1.Stop()
@@ -77,6 +78,7 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 		Port:          7077,
 		EnableBlocks:  true,
 		TCPPort:       9123,
+		MaxPeerCount:  9999999,
 	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel2.Stop()

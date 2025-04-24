@@ -46,12 +46,16 @@ var (
 	ErrNotInCheckpointList   = errors.New("checkpontId doesn't exist in Heimdall")
 	ErrBadGateway            = errors.New("bad gateway")
 	ErrServiceUnavailable    = errors.New("service unavailable")
-	ErrCloudflareAccess      = errors.New("cloudflare access")
+	ErrCloudflareAccessNoApp = errors.New("cloudflare access - no application")
+	ErrOperationTimeout      = errors.New("operation timed out, check internet connection")
+	ErrNoHost                = errors.New("no such host, check internet connection")
 
 	TransientErrors = []error{
 		ErrBadGateway,
 		ErrServiceUnavailable,
-		ErrCloudflareAccess,
+		ErrCloudflareAccessNoApp,
+		ErrOperationTimeout,
+		ErrNoHost,
 		context.DeadlineExceeded,
 	}
 )
@@ -124,6 +128,8 @@ const (
 	fetchStateSyncEventsFormat = "from-id=%d&to-time=%d&limit=%d"
 	fetchStateSyncEventsPath   = "clerk/event-record/list"
 	fetchStateSyncEvent        = "clerk/event-record/%s"
+
+	fetchStatus = "/status"
 
 	fetchCheckpoint                = "/checkpoints/%s"
 	fetchCheckpointCount           = "/checkpoints/count"
@@ -349,6 +355,22 @@ func (c *HttpClient) FetchMilestone(ctx context.Context, number int64) (*Milesto
 	return &response.Result, nil
 }
 
+func (c *HttpClient) FetchStatus(ctx context.Context) (*Status, error) {
+	url, err := statusURL(c.urlString)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx = withRequestType(ctx, statusRequest)
+
+	response, err := FetchWithRetry[StatusResponse](ctx, c, url, c.logger)
+	if err != nil {
+		return nil, err
+	}
+
+	return &response.Result, nil
+}
+
 // FetchCheckpointCount fetches the checkpoint count from heimdall
 func (c *HttpClient) FetchCheckpointCount(ctx context.Context) (int64, error) {
 	url, err := checkpointCountURL(c.urlString)
@@ -491,6 +513,14 @@ func FetchWithRetryEx[T any](
 			return result, nil
 		}
 
+		if strings.Contains(err.Error(), "operation timed out") {
+			return result, ErrOperationTimeout
+		}
+
+		if strings.Contains(err.Error(), "no such host") {
+			return result, ErrNoHost
+		}
+
 		// 503 (Service Unavailable) is thrown when an endpoint isn't activated
 		// yet in heimdall. E.g. when the hard fork hasn't hit yet but heimdall
 		// is upgraded.
@@ -587,6 +617,10 @@ func checkpointCountURL(urlString string) (*url.URL, error) {
 	return makeURL(urlString, fetchCheckpointCount, "")
 }
 
+func statusURL(urlString string) (*url.URL, error) {
+	return makeURL(urlString, fetchStatus, "")
+}
+
 func checkpointListURL(urlString string, page uint64, limit uint64) (*url.URL, error) {
 	return makeURL(urlString, fetchCheckpointList, fmt.Sprintf(fetchCheckpointListQueryFormat, page, limit))
 }
@@ -664,10 +698,10 @@ func internalFetch(ctx context.Context, handler httpRequestHandler, u *url.URL, 
 
 	// check status code
 	if res.StatusCode != 200 {
-		cloudflareErr := regexp.MustCompile(`Error.*Cloudflare Access`)
+		cloudflareErr := regexp.MustCompile(`Error.*Cloudflare Access.*Unable to find your Access application`)
 		bodyStr := string(body)
 		if res.StatusCode == 404 && cloudflareErr.MatchString(bodyStr) {
-			return nil, fmt.Errorf("%w: url='%s', status=%d, body='%s'", ErrCloudflareAccess, u.String(), res.StatusCode, bodyStr)
+			return nil, fmt.Errorf("%w: url='%s', status=%d, body='%s'", ErrCloudflareAccessNoApp, u.String(), res.StatusCode, bodyStr)
 		}
 
 		return nil, fmt.Errorf("%w: url='%s', status=%d, body='%s'", ErrNotSuccessfulResponse, u.String(), res.StatusCode, bodyStr)

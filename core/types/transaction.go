@@ -31,8 +31,8 @@ import (
 	"github.com/protolambda/ztyp/codec"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/params"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/math"
 	libcrypto "github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -53,6 +53,7 @@ const (
 	DynamicFeeTxType
 	BlobTxType
 	SetCodeTxType
+	AccountAbstractionTxType
 
 	// Arbitrum transaction types
 	ArbitrumDepositTxType         byte = 0x64
@@ -69,16 +70,15 @@ type Transaction interface {
 	Type() byte
 	GetChainID() *uint256.Int
 	GetNonce() uint64
-	GetPrice() *uint256.Int
-	GetTip() *uint256.Int
-	GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int
-	GetFeeCap() *uint256.Int
+	GetTipCap() *uint256.Int                              // max_priority_fee_per_gas in EIP-1559
+	GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int // effective_gas_price in EIP-1559
+	GetFeeCap() *uint256.Int                              // max_fee_per_gas in EIP-1559
 	GetBlobHashes() []libcommon.Hash
-	GetGas() uint64
+	GetGasLimit() uint64
 	GetBlobGas() uint64
 	GetValue() *uint256.Int
 	GetTo() *libcommon.Address
-	AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error)
+	AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error)
 	WithSignature(signer Signer, sig []byte) (Transaction, error)
 	Hash() libcommon.Hash
 	SigningHash(chainID *big.Int) libcommon.Hash
@@ -205,6 +205,8 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 		}
 	case SetCodeTxType:
 		t = &SetCodeTransaction{}
+	case AccountAbstractionTxType:
+		t = &AccountAbstractionTransaction{}
 	case ArbitrumDepositTxType:
 		t = &ArbitrumDepositTx{}
 	case ArbitrumUnsignedTxType:
@@ -384,7 +386,7 @@ type Message struct {
 	gasLimit         uint64
 	gasPrice         uint256.Int
 	feeCap           uint256.Int
-	tip              uint256.Int
+	tipCap           uint256.Int
 	maxFeePerBlobGas uint256.Int
 	data             []byte
 	accessList       AccessList
@@ -402,9 +404,10 @@ type Message struct {
 	Tx                Transaction
 }
 
+// Arbitrum
 func (msg *Message) SetGasPrice(f *uint256.Int) { msg.gasPrice.Set(f) }
 func (msg *Message) SetFeeCap(f *uint256.Int)   { msg.feeCap.Set(f) }
-func (msg *Message) SetTip(f *uint256.Int)      { msg.tip.Set(f) }
+func (msg *Message) SetTip(f *uint256.Int)      { msg.tipCap.Set(f) }
 
 type MessageRunMode uint8
 
@@ -420,12 +423,12 @@ func (m MessageRunMode) ExecutedOnChain() bool { // can use isFree for that??
 	return m == MessageCommitMode || m == MessageReplayMode
 }
 
-// eof arb deprecated stuff
+// eof arbitrum
 
 func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
-	gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList AccessList, checkNonce bool,
+	gasPrice *uint256.Int, feeCap, tipCap *uint256.Int, data []byte, accessList AccessList, checkNonce bool,
 	isFree bool, maxFeePerBlobGas *uint256.Int,
-) Message {
+) *Message {
 	m := Message{
 		from:       from,
 		to:         to,
@@ -440,8 +443,8 @@ func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amo
 	if gasPrice != nil {
 		m.gasPrice.Set(gasPrice)
 	}
-	if tip != nil {
-		m.tip.Set(tip)
+	if tipCap != nil {
+		m.tipCap.Set(tipCap)
 	}
 	if feeCap != nil {
 		m.feeCap.Set(feeCap)
@@ -449,28 +452,28 @@ func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amo
 	if maxFeePerBlobGas != nil {
 		m.maxFeePerBlobGas.Set(maxFeePerBlobGas)
 	}
-	return m
+	return &m
 }
 
-func (m Message) From() libcommon.Address         { return m.from }
-func (m Message) To() *libcommon.Address          { return m.to }
-func (m Message) GasPrice() *uint256.Int          { return &m.gasPrice }
-func (m Message) FeeCap() *uint256.Int            { return &m.feeCap }
-func (m Message) Tip() *uint256.Int               { return &m.tip }
-func (m Message) Value() *uint256.Int             { return &m.amount }
-func (m Message) Gas() uint64                     { return m.gasLimit }
-func (m Message) Nonce() uint64                   { return m.nonce }
-func (m Message) Data() []byte                    { return m.data }
-func (m Message) AccessList() AccessList          { return m.accessList }
-func (m Message) Authorizations() []Authorization { return m.authorizations }
+func (m *Message) From() libcommon.Address         { return m.from }
+func (m *Message) To() *libcommon.Address          { return m.to }
+func (m *Message) GasPrice() *uint256.Int          { return &m.gasPrice }
+func (m *Message) FeeCap() *uint256.Int            { return &m.feeCap }
+func (m *Message) TipCap() *uint256.Int            { return &m.tipCap }
+func (m *Message) Value() *uint256.Int             { return &m.amount }
+func (m *Message) Gas() uint64                     { return m.gasLimit }
+func (m *Message) Nonce() uint64                   { return m.nonce }
+func (m *Message) Data() []byte                    { return m.data }
+func (m *Message) AccessList() AccessList          { return m.accessList }
+func (m *Message) Authorizations() []Authorization { return m.authorizations }
 func (m *Message) SetAuthorizations(authorizations []Authorization) {
 	m.authorizations = authorizations
 }
-func (m Message) CheckNonce() bool { return m.checkNonce }
+func (m *Message) CheckNonce() bool { return m.checkNonce }
 func (m *Message) SetCheckNonce(checkNonce bool) {
 	m.checkNonce = checkNonce
 }
-func (m Message) IsFree() bool { return m.isFree }
+func (m *Message) IsFree() bool { return m.isFree }
 func (m *Message) SetIsFree(isFree bool) {
 	m.isFree = isFree
 }
@@ -491,13 +494,13 @@ func (m *Message) ChangeGas(globalGasCap, desiredGas uint64) {
 	m.gasLimit = gas
 }
 
-func (m Message) BlobGas() uint64 { return fixedgas.BlobGasPerBlob * uint64(len(m.blobHashes)) }
+func (m *Message) BlobGas() uint64 { return params.BlobGasPerBlob * uint64(len(m.blobHashes)) }
 
-func (m Message) MaxFeePerBlobGas() *uint256.Int {
+func (m *Message) MaxFeePerBlobGas() *uint256.Int {
 	return &m.maxFeePerBlobGas
 }
 
-func (m Message) BlobHashes() []libcommon.Hash { return m.blobHashes }
+func (m *Message) BlobHashes() []libcommon.Hash { return m.blobHashes }
 
 func DecodeSSZ(data []byte, dest codec.Deserializable) error {
 	err := dest.Deserialize(codec.NewDecodingReader(bytes.NewReader(data), uint64(len(data))))

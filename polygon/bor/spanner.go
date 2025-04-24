@@ -18,15 +18,15 @@ package bor
 
 import (
 	"encoding/hex"
+	"errors"
 	"math/big"
-
-	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -127,6 +127,10 @@ func (c *ChainSpanner) GetCurrentProducers(spanId uint64, chain ChainHeaderReade
 	}
 
 	span := chain.BorSpan(spanId)
+
+	if span == nil {
+		return nil, errors.New("no span found")
+	}
 
 	producers := make([]*valset.Validator, len(span.SelectedProducers))
 	for i := range span.SelectedProducers {

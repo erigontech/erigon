@@ -21,7 +21,8 @@ import (
 	"math/big"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/core/types"
@@ -35,7 +36,7 @@ var errContextExceeded = "rpc error: code = DeadlineExceeded desc = context dead
 
 //go:generate mockgen -typed=true -source=./interface.go -destination=./execution_engine_mock.go -package=execution_client . ExecutionEngine
 type ExecutionEngine interface {
-	NewPayload(ctx context.Context, payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash, versionedHashes []libcommon.Hash, executionRequestsList []hexutility.Bytes) (PayloadStatus, error)
+	NewPayload(ctx context.Context, payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash, versionedHashes []libcommon.Hash, executionRequestsList []hexutil.Bytes) (PayloadStatus, error)
 	ForkChoiceUpdate(ctx context.Context, finalized libcommon.Hash, head libcommon.Hash, attributes *engine_types.PayloadAttributes) ([]byte, error)
 	SupportInsertion() bool
 	InsertBlocks(ctx context.Context, blocks []*types.Block, wait bool) error
@@ -51,5 +52,5 @@ type ExecutionEngine interface {
 	FrozenBlocks(ctx context.Context) uint64
 	HasGapInSnapshots(ctx context.Context) bool
 	// Block production
-	GetAssembledBlock(ctx context.Context, id []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *big.Int, error)
+	GetAssembledBlock(ctx context.Context, id []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *typesproto.RequestsBundle, *big.Int, error)
 }

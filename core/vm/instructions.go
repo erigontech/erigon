@@ -27,12 +27,12 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
+	"github.com/erigontech/erigon-lib/chain/params"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/params"
 )
 
 func opAdd(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -696,7 +696,7 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 	// reuse size int for stackvalue
 	stackvalue := size
 
-	scope.Contract.UseGas(gas, tracing.GasChangeCallContractCreation)
+	scope.Contract.UseGas(gas, interpreter.evm.Config().Tracer, tracing.GasChangeCallContractCreation)
 
 	res, addr, returnGas, suberr := interpreter.evm.Create(scope.Contract, input, gas, &value, false)
 
@@ -712,7 +712,7 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 		stackvalue.SetBytes(addr.Bytes())
 	}
 
-	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)
+	scope.Contract.RefundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 
 	if suberr == ErrExecutionReverted {
 		interpreter.returnData = res // set REVERT data to return data buffer
@@ -736,7 +736,7 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 
 	// Apply EIP150
 	gas -= gas / 64
-	scope.Contract.UseGas(gas, tracing.GasChangeCallContractCreation2)
+	scope.Contract.UseGas(gas, interpreter.evm.Config().Tracer, tracing.GasChangeCallContractCreation2)
 	// reuse size int for stackvalue
 	stackValue := size
 	res, addr, returnGas, suberr := interpreter.evm.Create2(scope.Contract, input, gas, &endowment, &salt, false)
@@ -749,7 +749,7 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 	}
 
 	scope.Stack.Push(&stackValue)
-	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)
+	scope.Contract.RefundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 
 	if suberr == ErrExecutionReverted {
 		interpreter.returnData = res // set REVERT data to return data buffer
@@ -787,11 +787,10 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 	}
 	stack.Push(&temp)
 	if err == nil || err == ErrExecutionReverted {
-		ret = libcommon.CopyBytes(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
-	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)
+	scope.Contract.RefundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 
 	interpreter.returnData = ret
 	return ret, nil
@@ -821,11 +820,10 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	}
 	stack.Push(&temp)
 	if err == nil || err == ErrExecutionReverted {
-		ret = libcommon.CopyBytes(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
-	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)
+	scope.Contract.RefundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 
 	interpreter.returnData = ret
 	return ret, nil
@@ -851,11 +849,10 @@ func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 	}
 	stack.Push(&temp)
 	if err == nil || err == ErrExecutionReverted {
-		ret = libcommon.CopyBytes(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
-	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)
+	scope.Contract.RefundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 
 	interpreter.returnData = ret
 	return ret, nil
@@ -881,11 +878,10 @@ func opStaticCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) 
 	}
 	stack.Push(&temp)
 	if err == nil || err == ErrExecutionReverted {
-		ret = libcommon.CopyBytes(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
-	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)
+	scope.Contract.RefundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 
 	interpreter.returnData = ret
 	return ret, nil
@@ -936,14 +932,16 @@ func opSelfdestruct(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 	if err != nil {
 		return nil, err
 	}
-	if interpreter.evm.Config().Debug {
-		if interpreter.cfg.Debug {
-			interpreter.cfg.Tracer.CaptureEnter(SELFDESTRUCT, callerAddr, beneficiaryAddr, false /* precompile */, false /* create */, []byte{}, 0, balance, nil /* code */)
-			interpreter.cfg.Tracer.CaptureExit([]byte{}, 0, nil)
-		}
-	}
+
+	balanceVal := *balance
 	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
 	interpreter.evm.IntraBlockState().Selfdestruct(callerAddr)
+	if interpreter.evm.Config().Tracer != nil && interpreter.evm.Config().Tracer.OnEnter != nil {
+		interpreter.evm.Config().Tracer.OnEnter(interpreter.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiary.Bytes20(), false, []byte{}, 0, &balanceVal, nil)
+	}
+	if interpreter.evm.Config().Tracer != nil && interpreter.evm.Config().Tracer.OnExit != nil {
+		interpreter.evm.Config().Tracer.OnExit(interpreter.depth, []byte{}, 0, nil, false)
+	}
 	return nil, errStopToken
 }
 
@@ -962,11 +960,11 @@ func opSelfdestruct6780(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCon
 	interpreter.evm.IntraBlockState().SubBalance(callerAddr, &balance, tracing.BalanceDecreaseSelfdestruct)
 	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, &balance, tracing.BalanceIncreaseSelfdestruct)
 	interpreter.evm.IntraBlockState().Selfdestruct6780(callerAddr)
-	if interpreter.evm.Config().Debug {
-		if interpreter.cfg.Debug {
-			interpreter.cfg.Tracer.CaptureEnter(SELFDESTRUCT, callerAddr, beneficiaryAddr, false /* precompile */, false /* create */, []byte{}, 0, &balance, nil /* code */)
-			interpreter.cfg.Tracer.CaptureExit([]byte{}, 0, nil)
-		}
+	if interpreter.evm.Config().Tracer != nil && interpreter.evm.Config().Tracer.OnEnter != nil {
+		interpreter.cfg.Tracer.OnEnter(interpreter.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiary.Bytes20(), false, []byte{}, 0, &balance, nil)
+	}
+	if interpreter.evm.Config().Tracer != nil && interpreter.evm.Config().Tracer.OnExit != nil {
+		interpreter.cfg.Tracer.OnExit(interpreter.depth, []byte{}, 0, nil, false)
 	}
 	return nil, errStopToken
 }

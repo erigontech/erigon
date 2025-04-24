@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"container/heap"
 	"encoding/binary"
+	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -296,4 +297,152 @@ func (hi *DomainLatestIterFile) Next() ([]byte, []byte, error) {
 	order.Asc.Assert(hi.kBackup, hi.nextKey)
 	// TODO: remove `common.Copy`. it protecting from some existing bug. https://github.com/erigontech/erigon/issues/12672
 	return common.Copy(hi.kBackup), common.Copy(hi.vBackup), nil
+}
+
+// debugIteratePrefix iterates over key-value pairs of the storage domain that start with given prefix
+// Such iteration is not intended to be used in public API, therefore it uses read-write transaction
+// inside the domain. Another version of this for public API use needs to be created, that uses
+// roTx instead and supports ending the iterations before it reaches the end.
+//
+// k and v lifetime is bounded by the lifetime of the iterator
+func (dt *DomainRoTx) debugIteratePrefix(prefix []byte, haveRamUpdates bool,
+	ramIter btree2.MapIter[string, dataWithPrevStep],
+	it func(k []byte, v []byte, step uint64) error,
+	txNum, stepSize uint64,
+	roTx kv.Tx,
+) error {
+	// Implementation:
+	//     File endTxNum  = last txNum of file step
+	//     DB endTxNum    = first txNum of step in db
+	//     RAM endTxNum   = current txnum
+	//  Example: stepSize=8, file=0-2.kv, db has key of step 2, current tx num is 17
+	//     File endTxNum  = 15, because `0-2.kv` has steps 0 and 1, last txNum of step 1 is 15
+	//     DB endTxNum    = 16, because db has step 2, and first txNum of step 2 is 16.
+	//     RAM endTxNum   = 17, because current tcurrent txNum is 17
+
+	var cp CursorHeap
+	cpPtr := &cp
+	heap.Init(cpPtr)
+	var k, v []byte
+	var err error
+
+	if ramIter.Seek(string(prefix)) {
+		k := toBytesZeroCopy(ramIter.Key())
+		v = ramIter.Value().data
+
+		if len(k) > 0 && bytes.HasPrefix(k, prefix) {
+			heap.Push(cpPtr, &CursorItem{t: RAM_CURSOR, key: common.Copy(k), val: common.Copy(v), step: 0, iter: ramIter, endTxNum: txNum, reverse: true})
+		}
+	}
+
+	valsCursor, err := roTx.CursorDupSort(dt.d.valuesTable)
+	if err != nil {
+		return err
+	}
+	defer valsCursor.Close()
+	if k, v, err = valsCursor.Seek(prefix); err != nil {
+		return err
+	}
+	if len(k) > 0 && bytes.HasPrefix(k, prefix) {
+		step := ^binary.BigEndian.Uint64(v[:8])
+		val := v[8:]
+		endTxNum := step * stepSize // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+		if haveRamUpdates && endTxNum >= txNum {
+			return fmt.Errorf("probably you didn't set SharedDomains.SetTxNum(). ram must be ahead of db: %d, %d", txNum, endTxNum)
+		}
+
+		heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(val), step: step, cDup: valsCursor, endTxNum: endTxNum, reverse: true})
+	}
+
+	for i, item := range dt.files {
+		cursor, err := item.src.bindex.Seek(dt.statelessGetter(i), prefix)
+		if err != nil {
+			return err
+		}
+		if cursor == nil {
+			continue
+		}
+
+		key := cursor.Key()
+		if key != nil && bytes.HasPrefix(key, prefix) {
+			val := cursor.Value()
+			txNum := item.endTxNum - 1 // !important: .kv files have semantic [from, t)
+			heap.Push(cpPtr, &CursorItem{t: FILE_CURSOR, key: key, val: val, step: 0, btCursor: cursor, endTxNum: txNum, reverse: true})
+		}
+	}
+
+	for cp.Len() > 0 {
+		lastKey := common.Copy(cp[0].key)
+		lastVal := common.Copy(cp[0].val)
+		lastStep := cp[0].step
+		// Advance all the items that have this key (including the top)
+		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
+			ci1 := heap.Pop(cpPtr).(*CursorItem)
+			switch ci1.t {
+			case RAM_CURSOR:
+				if ci1.iter.Next() {
+					k = toBytesZeroCopy(ci1.iter.Key())
+					if k != nil && bytes.HasPrefix(k, prefix) {
+						ci1.key = common.Copy(k)
+						ci1.val = common.Copy(ci1.iter.Value().data)
+						heap.Push(cpPtr, ci1)
+					}
+				}
+			case FILE_CURSOR:
+				indexList := dt.d.AccessorList
+				if indexList.Has(AccessorBTree) {
+					if ci1.btCursor.Next() {
+						ci1.key = ci1.btCursor.Key()
+						if ci1.key != nil && bytes.HasPrefix(ci1.key, prefix) {
+							ci1.val = ci1.btCursor.Value()
+							heap.Push(cpPtr, ci1)
+						}
+					} else {
+						ci1.btCursor.Close()
+					}
+				}
+				if indexList.Has(AccessorHashMap) {
+					ci1.dg.Reset(ci1.latestOffset)
+					if !ci1.dg.HasNext() {
+						break
+					}
+					key, _ := ci1.dg.Next(nil)
+					if key != nil && bytes.HasPrefix(key, prefix) {
+						ci1.key = key
+						ci1.val, ci1.latestOffset = ci1.dg.Next(nil)
+						heap.Push(cpPtr, ci1)
+					} else {
+						ci1.dg = nil
+					}
+				}
+			case DB_CURSOR:
+				k, v, err := ci1.cDup.NextNoDup()
+				if err != nil {
+					return err
+				}
+
+				if len(k) > 0 && bytes.HasPrefix(k, prefix) {
+					ci1.key = common.Copy(k)
+					step := ^binary.BigEndian.Uint64(v[:8])
+					endTxNum := step * stepSize // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+					if haveRamUpdates && endTxNum >= txNum {
+						ci1.cDup.Close()
+						return fmt.Errorf("probably you didn't set SharedDomains.SetTxNum(). ram must be ahead of db: %d, %d", txNum, endTxNum)
+					}
+					ci1.endTxNum = endTxNum
+					ci1.val = common.Copy(v[8:])
+					ci1.step = step
+					heap.Push(cpPtr, ci1)
+				} else {
+					ci1.cDup.Close()
+				}
+			}
+		}
+		if len(lastVal) > 0 {
+			if err := it(lastKey, lastVal, lastStep); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

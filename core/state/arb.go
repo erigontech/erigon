@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"runtime"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/lru"
@@ -14,8 +16,7 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/ethdb/wasmdb"
-	"github.com/holiman/uint256"
+	"github.com/erigontech/erigon/turbo/ethdb/wasmdb"
 )
 
 var (

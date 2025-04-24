@@ -8,7 +8,7 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 )
 
@@ -17,12 +17,12 @@ var _ = (*genesisAccountMarshaling)(nil)
 // MarshalJSON marshals as JSON.
 func (g GenesisAccount) MarshalJSON() ([]byte, error) {
 	type GenesisAccount struct {
-		Constructor hexutility.Bytes            `json:"constructor,omitempty"`
-		Code        hexutility.Bytes            `json:"code,omitempty"`
+		Constructor hexutil.Bytes               `json:"constructor,omitempty"`
+		Code        hexutil.Bytes               `json:"code,omitempty"`
 		Storage     map[storageJSON]storageJSON `json:"storage,omitempty"`
 		Balance     *math.HexOrDecimal256       `json:"balance" gencodec:"required"`
 		Nonce       math.HexOrDecimal64         `json:"nonce,omitempty"`
-		PrivateKey  hexutility.Bytes            `json:"secretKey,omitempty"`
+		PrivateKey  hexutil.Bytes               `json:"secretKey,omitempty"`
 	}
 	var enc GenesisAccount
 	enc.Constructor = g.Constructor
@@ -42,12 +42,12 @@ func (g GenesisAccount) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON unmarshals from JSON.
 func (g *GenesisAccount) UnmarshalJSON(input []byte) error {
 	type GenesisAccount struct {
-		Constructor *hexutility.Bytes           `json:"constructor,omitempty"`
-		Code        *hexutility.Bytes           `json:"code,omitempty"`
+		Constructor *hexutil.Bytes              `json:"constructor,omitempty"`
+		Code        *hexutil.Bytes              `json:"code,omitempty"`
 		Storage     map[storageJSON]storageJSON `json:"storage,omitempty"`
 		Balance     *math.HexOrDecimal256       `json:"balance" gencodec:"required"`
 		Nonce       *math.HexOrDecimal64        `json:"nonce,omitempty"`
-		PrivateKey  *hexutility.Bytes           `json:"secretKey,omitempty"`
+		PrivateKey  *hexutil.Bytes              `json:"secretKey,omitempty"`
 	}
 	var dec GenesisAccount
 	if err := json.Unmarshal(input, &dec); err != nil {

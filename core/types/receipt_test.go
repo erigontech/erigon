@@ -81,6 +81,7 @@ func TestLegacyReceiptDecoding(t *testing.T) {
 		TxHash:          tx.Hash(),
 		ContractAddress: libcommon.BytesToAddress([]byte{0x01, 0x11, 0x11}),
 		GasUsed:         111111,
+		BlockNumber:     big.NewInt(1),
 	}
 	receipt.Bloom = CreateBloom(Receipts{receipt})
 
@@ -141,28 +142,28 @@ func TestDeriveFields(t *testing.T) {
 	txs := Transactions{
 		&LegacyTx{
 			CommonTx: CommonTx{
-				Nonce: 1,
-				Value: u256.Num1,
-				Gas:   1,
+				Nonce:    1,
+				Value:    u256.Num1,
+				GasLimit: 1,
 			},
 			GasPrice: u256.Num1,
 		},
 		&LegacyTx{
 			CommonTx: CommonTx{
-				To:    &to2,
-				Nonce: 2,
-				Value: u256.Num2,
-				Gas:   2,
+				To:       &to2,
+				Nonce:    2,
+				Value:    u256.Num2,
+				GasLimit: 2,
 			},
 			GasPrice: u256.Num2,
 		},
 		&AccessListTx{
 			LegacyTx: LegacyTx{
 				CommonTx: CommonTx{
-					To:    &to3,
-					Nonce: 3,
-					Value: uint256.NewInt(3),
-					Gas:   3,
+					To:       &to3,
+					Nonce:    3,
+					Value:    uint256.NewInt(3),
+					GasLimit: 3,
 				},
 				GasPrice: uint256.NewInt(3),
 			},
@@ -237,8 +238,8 @@ func TestDeriveFields(t *testing.T) {
 			if r.TransactionIndex != uint(i) {
 				t.Errorf("receipts[%d].TransactionIndex = %d, want %d", i, r.TransactionIndex, i)
 			}
-			if r.GasUsed != txs[i].GetGas() {
-				t.Errorf("receipts[%d].GasUsed = %d, want %d", i, r.GasUsed, txs[i].GetGas())
+			if r.GasUsed != txs[i].GetGasLimit() {
+				t.Errorf("receipts[%d].GasUsed = %d, want %d", i, r.GasUsed, txs[i].GetGasLimit())
 			}
 			if txs[i].GetTo() != nil && r.ContractAddress != (libcommon.Address{}) {
 				t.Errorf("receipts[%d].ContractAddress = %s, want %s", i, r.ContractAddress.String(), (libcommon.Address{}).String())
@@ -300,8 +301,8 @@ func TestDeriveFields(t *testing.T) {
 	//		if r.TransactionIndex != uint(i) {
 	//			t.Errorf("receipts[%d].TransactionIndex = %d, want %d", i, r.TransactionIndex, i)
 	//		}
-	//		if r.GasUsed != txs[i].GetGas() {
-	//			t.Errorf("receipts[%d].GasUsed = %d, want %d", i, r.GasUsed, txs[i].GetGas())
+	//		if r.GasUsed != txs[i].GetGasLimit() {
+	//			t.Errorf("receipts[%d].GasUsed = %d, want %d", i, r.GasUsed, txs[i].GetGasLimit())
 	//		}
 	//		if txs[i].GetTo() != nil && r.ContractAddress != (libcommon.Address{}) {
 	//			t.Errorf("receipts[%d].ContractAddress = %s, want %s", i, r.ContractAddress.String(), (libcommon.Address{}).String())

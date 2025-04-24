@@ -25,7 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv/stream"
 )
 
@@ -67,7 +67,7 @@ func TestEliasFanoSeekBoundaries(t *testing.T) {
 		"0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080dfdfbb4e0460fedffffffffffffffffffffeffffffffffffdfffffffffffffffbfffff7ffffffffffbff7ffffffffdffffdffffffffefffffdbffffff7ffffbffffffffeffffbfffeffffbfdffffffff7fff7f7fff7f7fdfef7fffbffffddfef7fffefbfffdfffef" +
 		"ffdbfffffe7fffefef7fffdff7f7fbefeff7f7f77ffff7fffd7fff7ebfdaf77fbfbdffba6dfbdbdef66adbd17777abffb77f7a25eff65d7bed52aa77f355d6596dfdffffa4cbaed5ea7699edffffffffffffffbf7a1edf7b7ff56ead7dbf6f7ddefd7ee6eeae7afbbedefaffffcbfcfbffffffffffefedcdeef7f5fbdf7deffddede7dbbf77fffdbf5edbbdd5fd7ee9bf77bbf7577dffdfeedffff77ffffffffffcfdedffefefedeffeebbfb7dddf9dd9fb77ceff4d52bbeefdbeffa7efdbedd7eef9ebbef776fdefbb7dbbfffbdf7f7f7fdedfbefffffbf6ffbffff77ed7d6f9eb7fadefbf7eeedbedbed2db5bf6fb7ceeffe7dbfffd7dff7effdffffeffffffbd4efb3bbf7fbefd7b7fdefffffffdbfffffffefbbeffffff7eefefdeefbfdffd767ffffdffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffffffffffffffff6ef7ef7f7fbfdebfbfb7bfbfffffbff7f7ffffdf7d7ff77bdfbbdbdfbbffef7edf75ffffffefefdfbffdbefffbbd775ffffddfdf7fffdedf7ff7bfff7fff7fffffbfffeffffef7fffffffffdffbffff7f7fbfffefbfffffffffdf7dffff7fffedffffd7fffeffffffdfffffbfdf7ffefffdfffbffffffbffbffffdff7effffbffffffffffdbfefff7fdfffffffffeffffffefffbbfddffbffffdfdfff7fbdffffffefffffefdeffffbdfff7dffdfffeffbfff7ffeffbeffffffe7dfffbfffffffffbfffffffffffffeffffffbffff7fbfffffffbdffffd7ffffffefffefdff7effdfffffefff7ffff7fdfff7fffffffffbffffeffffffbfffffffffefbffbfffdfbfffefff7ffffffdffbfffffffffdffffffbfffffeffbffffffffffdffdffffeff7ffffffbffffffffff7ffffffffffffffffdfffffb7fffffeffffff77fffeffffffeffdffffffffdffffffdfffeffffdffdffffffffdff7ffffeffffffbffffffffffbffffdfff7ffffffffefffefffdffeffffffbfffffffffdfffffffefffff7fffb7ffffff7ff7ffffffeffefffffdffff7ffffffffffbfffffffbffffffffffffffffffffffffffffffffffffffdfffeffdffffffffbffffefffeffffffffdffffbfffbffffff7ffbffffff7fffffdfff7ffffffffdffffffffffeffffbffffffffffffffffbf7ffffffffffbfffffbfffffff7ffffffffffffeffffffdffffffffffffffdffffffffff7fffbfffffffffffffffdfffffffbffffffffbffffffeffffffffffffdffff7fffffff7ffffffffffffffeffffffffffeffffffffffffffffffffff7fffffffffffffffbffffffffefffffffffdfffffffffffffffffffffbffffffffffffffffefffffffffffffeffffffffffffff7ffffffffffffffffeffffffffffffffffbfffffffffffffdfffffffffffffffffdffffffffffffffffbfffffffffdffffffbfffffff" +
 		"7ffffffffffffffbffffffffffffbfffffff7fffffffffffffffffffdfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffdffffffffdfffffffeffffbffffffffffffbfffffffefffffeffdfffbfffffffeffffffffbfffffbffbffffffffffffff7ffffffdffffffffffefffffdffffffbffffffffffffffdfffffffffffdfffffbffffffffffbfffffffffbffffffffffffbffffffffffefffffffffff7ffffffffffff7ffffffdffffffffeffffeffffffffff7ffffffffffeffffffffffffbffffbffffffffff7ffffffbffffffffffbfffffffffffff7fffffeffff7ffffffffffffbfffffffffffefffffffffffffffffeffffffffffefffffffffbfffffffffffdffffffffffdffffffeffffffffffefffffdffffffffffffbffffffffffeffffffffffdffffffff7ffffffbffffffffdfffffffffbfffffffbfffffeffffffefffffffff7ffffffffeffffffffff7ffffffffffeffffdfffdfffffffbfffffffffdfffdfffffefffffffffefffffdffffffffffff7ffffffffffff7fffffff7ffffffffffffffffffefffffffffffeffffffffffdfffffffbfffffffdfffffffffffdffffffffffdfffffdffffefffbfffffffbffffffdffffffffffbffffffffffffbffff7fffffffffdffffffbfffffffff7ffffbfffbfffffbfffffffffffeffffffffbfff7fffffffffffff7ff7fff7ffffffffbffffefffdffffffbfffffefffffffdfffffdfffffffeffffffffeffffffffffffffbfffffffbfffffffffffbfffffffefffffffffeffff7ffffffffdffffdffffffbffffefffff7ffffffffff7fffffffffffffffbfffffffffffffff7ffffffff7fffffffff7fffffdfffffffffffffbfffffffff1f00000000000000ff43000000000000000000001a01000025020000390300005a040000c205000000070000380800007f090000ba0a0000e20b0000f40c0000040e00002c0f00004210000053110000641200007b1300008714000096150000a3160000ae170000b9180000c4190000ce1a0000d51b0000df1c0000e61d0000ed1e0000f21f0000f7200000fb210000ff22000005240000062500000f260000182700001e280000242900002b2a0000312b0000382c00003e2d0000462e00004f2f0000543000005d310000643200006e330000763400007f350000843600000000000000000000"
-	buf := hexutility.MustDecodeHex(raw)
+	buf := hexutil.MustDecodeHex(raw)
 	ef := NewEliasFano(1, 1)
 	ef.Reset(buf)
 
@@ -145,7 +145,7 @@ func TestEliasFanoSeek(t *testing.T) {
 	})
 
 	{
-		v2, ok2 := ef.Search(ef.Max())
+		v2, ok2 := ef.Seek(ef.Max())
 		require.True(t, ok2, v2)
 		require.Equal(t, int(ef.Max()), int(v2))
 		it := ef.Iterator()
@@ -170,7 +170,7 @@ func TestEliasFanoSeek(t *testing.T) {
 	}
 
 	{
-		v2, ok2 := ef.Search(ef.Min())
+		v2, ok2 := ef.Seek(ef.Min())
 		require.True(t, ok2, v2)
 		require.Equal(t, int(ef.Min()), int(v2))
 		it := ef.Iterator()
@@ -182,7 +182,7 @@ func TestEliasFanoSeek(t *testing.T) {
 	}
 
 	{
-		v2, ok2 := ef.Search(0)
+		v2, ok2 := ef.Seek(0)
 		require.True(t, ok2, v2)
 		require.Equal(t, int(ef.Min()), int(v2))
 		it := ef.Iterator()
@@ -194,7 +194,7 @@ func TestEliasFanoSeek(t *testing.T) {
 	}
 
 	{
-		v2, ok2 := ef.Search(math.MaxUint32)
+		v2, ok2 := ef.Seek(math.MaxUint32)
 		require.False(t, ok2, v2)
 		it := ef.Iterator()
 		it.Seek(math.MaxUint32)
@@ -202,7 +202,7 @@ func TestEliasFanoSeek(t *testing.T) {
 	}
 
 	{
-		v2, ok2 := ef.Search((count+1)*123 + 1)
+		v2, ok2 := ef.Seek((count+1)*123 + 1)
 		require.False(t, ok2, v2)
 		it := ef.Iterator()
 		it.Seek((count+1)*123 + 1)
@@ -212,7 +212,7 @@ func TestEliasFanoSeek(t *testing.T) {
 	t.Run("search and seek can't return smaller", func(t *testing.T) {
 		for i := uint64(0); i < count; i++ {
 			search := i * 123
-			v, ok2 := ef.Search(search)
+			v, ok2 := ef.Seek(search)
 			require.True(t, ok2, search)
 			require.GreaterOrEqual(t, int(v), int(search))
 			it := ef.Iterator()
@@ -243,21 +243,21 @@ func TestEliasFano(t *testing.T) {
 		offset1 := ef.Get(uint64(i))
 		assert.Equal(t, offset, offset1, "offset")
 	}
-	v, ok := ef.Search(37)
+	v, ok := ef.Seek(37)
 	assert.True(t, ok, "search1")
 	assert.Equal(t, uint64(37), v, "search1")
-	v, ok = ef.Search(0)
+	v, ok = ef.Seek(0)
 	assert.True(t, ok, "search2")
 	assert.Equal(t, uint64(1), v, "search2")
-	_, ok = ef.Search(100)
+	_, ok = ef.Seek(100)
 	assert.False(t, ok, "search3")
-	v, ok = ef.Search(11)
+	v, ok = ef.Seek(11)
 	assert.True(t, ok, "search4")
 	assert.Equal(t, uint64(14), v, "search4")
 
 	buf := bytes.NewBuffer(nil)
 	err := ef.Write(buf)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, ef.AppendBytes(nil), buf.Bytes())
 
 	ef2, _ := ReadEliasFano(buf.Bytes())
@@ -512,7 +512,7 @@ func BenchmarkEF(b *testing.B) {
 			it.Seek(1_230)
 			n, err := it.Next()
 			require.NoError(b, err)
-			require.Equal(b, n, uint64(1_230))
+			require.Equal(b, uint64(1_230), n)
 		}
 	})
 	b.Run("naive reverse iterator", func(b *testing.B) {

@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	libchain "github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/params"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -41,18 +42,18 @@ import (
 	protosentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/bitmapdb"
+	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/eth/protocols/eth"
-	"github.com/erigontech/erigon/ethdb/prune"
+	"github.com/erigontech/erigon/execution/consensus/ethash"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
-	"github.com/erigontech/erigon/params"
+	params2 "github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
@@ -454,7 +455,7 @@ func TestChainTxReorgs(t *testing.T) {
 		addr2   = crypto.PubkeyToAddress(key2.PublicKey)
 		addr3   = crypto.PubkeyToAddress(key3.PublicKey)
 		gspec   = &types.Genesis{
-			Config:   params.TestChainConfig,
+			Config:   params2.TestChainConfig,
 			GasLimit: 3141592,
 			Alloc: types.GenesisAlloc{
 				addr1: {Balance: big.NewInt(1000000)},
@@ -871,7 +872,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 				return nil
 			})
 			require.Greater(afterPrune, uint64(0))
-			assert.NoError(t, err)
+			require.NoError(err)
 		} else {
 			found, err := bitmapdb.Get64(tx, kv.E2AccountsHistory, address[:], 0, 1024)
 			require.NoError(err)
@@ -1070,7 +1071,7 @@ func TestDoubleAccountRemoval(t *testing.T) {
 		input       = hexutil.MustDecode("0xadbd8465")
 		kill        = hexutil.MustDecode("0x41c0e1b5")
 		gspec       = &types.Genesis{
-			Config: params.TestChainConfig,
+			Config: params2.TestChainConfig,
 			Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds}},
 		}
 	)
@@ -1083,21 +1084,21 @@ func TestDoubleAccountRemoval(t *testing.T) {
 		switch i {
 		case 0:
 			tx, err := types.SignTx(types.NewContractCreation(nonce, new(uint256.Int), 1e6, new(uint256.Int), contract), *signer, bankKey)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			block.AddTx(tx)
 			theAddr = crypto.CreateAddress(bankAddress, nonce)
 		case 1:
 			txn, err := types.SignTx(types.NewTransaction(nonce, theAddr, new(uint256.Int), 90000, new(uint256.Int), input), *signer, bankKey)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			block.AddTx(txn)
 		case 2:
 			txn, err := types.SignTx(types.NewTransaction(nonce, theAddr, new(uint256.Int), 90000, new(uint256.Int), kill), *signer, bankKey)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			block.AddTx(txn)
 
 			// sending kill messsage to an already suicided account
 			txn, err = types.SignTx(types.NewTransaction(nonce+1, theAddr, new(uint256.Int), 90000, new(uint256.Int), kill), *signer, bankKey)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			block.AddTx(txn)
 		}
 	})
@@ -1106,7 +1107,7 @@ func TestDoubleAccountRemoval(t *testing.T) {
 	}
 
 	err = m.InsertChain(chain)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	tx, err := m.DB.BeginTemporalRw(m.Ctx)
 	if err != nil {
 		fmt.Printf("beginro error: %v\n", err)
@@ -1115,27 +1116,27 @@ func TestDoubleAccountRemoval(t *testing.T) {
 	defer tx.Rollback()
 
 	st := state.New(m.NewStateReader(tx))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	exist, err := st.Exist(theAddr)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.False(t, exist, "Contract should've been removed")
 
 	st = state.New(m.NewHistoryStateReader(1, tx))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	exist, err = st.Exist(theAddr)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.False(t, exist, "Contract should not exist at block #0")
 
 	st = state.New(m.NewHistoryStateReader(2, tx))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	exist, err = st.Exist(theAddr)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.True(t, exist, "Contract should exist at block #1")
 
 	st = state.New(m.NewHistoryStateReader(3, tx))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	exist, err = st.Exist(theAddr)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.True(t, exist, "Contract should exist at block #2")
 }
 
@@ -1351,7 +1352,7 @@ func TestDeleteCreateRevert(t *testing.T) {
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
-			Config: params.TestChainConfig,
+			Config: params2.TestChainConfig,
 			Alloc: types.GenesisAlloc{
 				address: {Balance: funds},
 				// The address 0xAAAAA selfdestructs if called
@@ -1468,7 +1469,7 @@ func TestDeleteRecreateSlots(t *testing.T) {
 	t.Logf("Destination address: %x\n", aa)
 
 	gspec := &types.Genesis{
-		Config: params.TestChainConfig,
+		Config: params2.TestChainConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
@@ -1585,7 +1586,7 @@ func TestCVE2020_26265(t *testing.T) {
 		} // Code for CALLER
 	)
 	gspec := &types.Genesis{
-		Config: params.TestChainConfig,
+		Config: params2.TestChainConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
@@ -1663,7 +1664,7 @@ func TestDeleteRecreateAccount(t *testing.T) {
 	aaStorage[libcommon.HexToHash("02")] = libcommon.HexToHash("02")
 
 	gspec := &types.Genesis{
-		Config: params.TestChainConfig,
+		Config: params2.TestChainConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
@@ -1785,7 +1786,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 	aa := crypto.CreateAddress2(bb, [32]byte{}, initHash[:])
 	t.Logf("Destination address: %x\n", aa)
 	gspec := &types.Genesis{
-		Config: params.TestChainConfig,
+		Config: params2.TestChainConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
@@ -1989,7 +1990,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 	t.Logf("Destination address: %x\n", aa)
 
 	gspec := &types.Genesis{
-		Config: params.TestChainConfig,
+		Config: params2.TestChainConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address aa has some funds
@@ -2070,7 +2071,7 @@ func TestEIP2718Transition(t *testing.T) {
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
-			Config: params.TestChainConfig,
+			Config: params2.TestChainConfig,
 			Alloc: types.GenesisAlloc{
 				address: {Balance: funds},
 				// The address 0xAAAA sloads 0x00 and 0x01
@@ -2100,9 +2101,9 @@ func TestEIP2718Transition(t *testing.T) {
 			ChainID: chainID,
 			LegacyTx: types.LegacyTx{
 				CommonTx: types.CommonTx{
-					Nonce: 0,
-					To:    &aa,
-					Gas:   30000,
+					Nonce:    0,
+					To:       &aa,
+					GasLimit: 30000,
 				},
 				GasPrice: gasPrice,
 			},
@@ -2162,9 +2163,9 @@ func TestEIP1559Transition(t *testing.T) {
 		key2, _ = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
 		addr1   = crypto.PubkeyToAddress(key1.PublicKey)
 		addr2   = crypto.PubkeyToAddress(key2.PublicKey)
-		funds   = new(uint256.Int).Mul(u256.Num1, new(uint256.Int).SetUint64(params.Ether))
+		funds   = new(uint256.Int).Mul(u256.Num1, new(uint256.Int).SetUint64(params2.Ether))
 		gspec   = &types.Genesis{
-			Config: params.SepoliaChainConfig,
+			Config: params2.SepoliaChainConfig,
 			Alloc: types.GenesisAlloc{
 				addr1: {Balance: funds.ToBig()},
 				addr2: {Balance: funds.ToBig()},
@@ -2202,14 +2203,14 @@ func TestEIP1559Transition(t *testing.T) {
 			chainID.SetFromBig(gspec.Config.ChainID)
 			var txn types.Transaction = &types.DynamicFeeTransaction{
 				CommonTx: types.CommonTx{
-					Nonce: 0,
-					To:    &aa,
-					Gas:   30000,
-					Data:  []byte{},
+					Nonce:    0,
+					To:       &aa,
+					GasLimit: 30000,
+					Data:     []byte{},
 				},
 				ChainID:    &chainID,
-				FeeCap:     new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(params.GWei)),
-				Tip:        u256.Num2,
+				FeeCap:     new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(params2.GWei)),
+				TipCap:     u256.Num2,
 				AccessList: accesses,
 			}
 			txn, _ = types.SignTx(txn, *signer, key1)
@@ -2243,7 +2244,7 @@ func TestEIP1559Transition(t *testing.T) {
 			return err
 		}
 		expected := new(uint256.Int).Add(
-			new(uint256.Int).SetUint64(block.GasUsed()*block.Transactions()[0].GetPrice().Uint64()),
+			new(uint256.Int).SetUint64(block.GasUsed()*block.Transactions()[0].GetTipCap().Uint64()),
 			ethash.ConstantinopleBlockReward,
 		)
 		if actual.Cmp(expected) != 0 {
@@ -2256,7 +2257,7 @@ func TestEIP1559Transition(t *testing.T) {
 			return err
 		}
 		actual = new(uint256.Int).Sub(funds, balance)
-		expected = new(uint256.Int).SetUint64(block.GasUsed() * (block.Transactions()[0].GetPrice().Uint64() + block.BaseFee().Uint64()))
+		expected = new(uint256.Int).SetUint64(block.GasUsed() * (block.Transactions()[0].GetTipCap().Uint64() + block.BaseFee().Uint64()))
 		if actual.Cmp(expected) != 0 {
 			t.Fatalf("sender expenditure incorrect: expected %d, got %d", expected, actual)
 		}
@@ -2268,7 +2269,7 @@ func TestEIP1559Transition(t *testing.T) {
 	chain, err = core.GenerateChain(m.ChainConfig, block, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{2})
 
-		var txn types.Transaction = types.NewTransaction(0, aa, u256.Num0, 30000, new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(params.GWei)), nil)
+		var txn types.Transaction = types.NewTransaction(0, aa, u256.Num0, 30000, new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(params2.GWei)), nil)
 		txn, _ = types.SignTx(txn, *signer, key2)
 
 		b.AddTx(txn)
@@ -2284,7 +2285,8 @@ func TestEIP1559Transition(t *testing.T) {
 	block = chain.Blocks[0]
 	err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
 		statedb := state.New(m.NewHistoryStateReader(1, tx))
-		effectiveTip := block.Transactions()[0].GetPrice().Uint64() - block.BaseFee().Uint64()
+		baseFee := uint256.MustFromBig(block.BaseFee())
+		effectiveTip := block.Transactions()[0].GetEffectiveGasTip(baseFee).Uint64()
 
 		// 6+5: Ensure that miner received only the tx's effective tip.
 		actual, err := statedb.GetBalance(block.Coinbase())
@@ -2305,7 +2307,7 @@ func TestEIP1559Transition(t *testing.T) {
 			return err
 		}
 		actual = new(uint256.Int).Sub(funds, balance)
-		expected = new(uint256.Int).SetUint64(block.GasUsed() * (effectiveTip + block.BaseFee().Uint64()))
+		expected = new(uint256.Int).SetUint64(block.GasUsed() * (effectiveTip + baseFee.Uint64()))
 		if actual.Cmp(expected) != 0 {
 			t.Fatalf("sender balance incorrect: expected %d, got %d", expected, actual)
 		}

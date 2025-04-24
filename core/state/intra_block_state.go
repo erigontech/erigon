@@ -29,7 +29,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -39,7 +38,7 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/ethdb/wasmdb"
+	"github.com/erigontech/erigon/turbo/ethdb/wasmdb"
 )
 
 var _ evmtypes.IntraBlockState = new(IntraBlockState) // compile-time interface-check
@@ -262,7 +261,7 @@ func (sdb *IntraBlockState) Exist(addr libcommon.Address) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return s != nil && !s.deleted, err
+	return s != nil && !s.deleted, nil
 }
 
 // Empty returns whether the state object is either non-existent
@@ -485,7 +484,7 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 			sdb.balanceInc[addr] = bi
 		}
 
-		if sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil {
+		if !amount.IsZero() && sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil {
 			// TODO: discuss if we should ignore error
 			prev := new(uint256.Int)
 			account, _ := sdb.stateReader.ReadAccountDataForDebug(addr)
@@ -1011,7 +1010,7 @@ func (sdb *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter Sta
 			}); err != nil {
 				return err
 			}
-			sdb.arbExtraData.activatedWasms = make(map[common.Hash]ActivatedWasm)
+			sdb.arbExtraData.activatedWasms = make(map[libcommon.Hash]ActivatedWasm)
 		}
 	}
 	return sdb.MakeWriteSet(chainRules, stateWriter)

@@ -26,13 +26,8 @@ CGO_CFLAGS += -DMDBX_DISABLE_VALIDATION=0 # Can disable it on CI by separated PR
 #CGO_CFLAGS += -DMDBX_ENABLE_PGOP_STAT=0 # Disabled by default, but may be useful for performance debugging
 CGO_CFLAGS += -DMDBX_ENV_CHECKPID=0 # Erigon doesn't do fork() syscall
 
-# If it is arm64 or aarch64, then we need to use portable version of blst. use or with stringw "arm64" and "aarch64" to support both
-ifeq ($(shell uname -m), arm64)
-	CGO_CFLAGS += -D__BLST_PORTABLE__
-endif
-ifeq ($(shell uname -m), aarch64)
-	CGO_CFLAGS += -D__BLST_PORTABLE__
-endif
+
+CGO_CFLAGS += -D__BLST_PORTABLE__
 
 # Configure GOAMD64 env.variable for AMD64 architecture:
 ifeq ($(shell uname -m),x86_64)
@@ -167,7 +162,7 @@ db-tools:
 	go mod vendor
 	cd vendor/github.com/erigontech/mdbx-go && MDBX_BUILD_TIMESTAMP=unknown make tools
 	mkdir -p $(GOBIN)
-	cd vendor/github.com/erigontech/mdbx-go/mdbxdist && cp mdbx_chk $(GOBIN) && cp mdbx_copy $(GOBIN) && cp mdbx_dump $(GOBIN) && cp mdbx_drop $(GOBIN) && cp mdbx_load $(GOBIN) && cp mdbx_stat $(GOBIN)
+	cd vendor/github.com/erigontech/mdbx-go/libmdbx && cp mdbx_chk $(GOBIN) && cp mdbx_copy $(GOBIN) && cp mdbx_dump $(GOBIN) && cp mdbx_drop $(GOBIN) && cp mdbx_load $(GOBIN) && cp mdbx_stat $(GOBIN)
 	rm -rf vendor
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
@@ -308,8 +303,13 @@ gencodec:
 graphql:
 	PATH=$(GOBIN):$(PATH) cd ./cmd/rpcdaemon/graphql && go run github.com/99designs/gqlgen .
 
+## grpc:                              generate grpc and protobuf code
+grpc:
+	@cd erigon-lib && $(MAKE) grpc
+	@cd txnprovider/shutter && $(MAKE) proto
+
 ## gen:                               generate all auto-generated code in the codebase
-gen: mocks solc abigen gencodec graphql
+gen: mocks solc abigen gencodec graphql grpc
 	@cd erigon-lib && $(MAKE) gen
 
 ## bindings:                          generate test contracts and core contracts

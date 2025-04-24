@@ -1,13 +1,16 @@
 name: QA - Snapshot Download
 
 on:
+  push:
+    branches:
+      - 'release/3.*'
   schedule:
     - cron: '0 20 * * 1-6'  # Run every night at 20:00 (08:00 PM) UTC except Sunday
   workflow_dispatch:     # Run manually
 
 jobs:
   snap-download-test:
-    runs-on: self-hosted
+    runs-on: [self-hosted, qa]
     timeout-minutes: 500
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data

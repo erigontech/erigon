@@ -62,7 +62,7 @@ type ChainReader interface {
 	HeaderByHash(ctx context.Context, hash libcommon.Hash) (*types.Header, error)
 	HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error)
 	TransactionCount(ctx context.Context, blockHash libcommon.Hash) (uint, error)
-	TransactionInBlock(ctx context.Context, blockHash libcommon.Hash, index uint) (types.Transaction, error)
+	TransactionInBlock(ctx context.Context, blockHash libcommon.Hash, index uint) (*types.Transaction, error)
 
 	// This method subscribes to notifications about changes of the head block of
 	// the canonical chain.
@@ -109,7 +109,7 @@ type SyncProgress struct {
 	PulledStates  uint64 // Number of state trie entries already downloaded
 	KnownStates   uint64 // Total number of state trie entries known about
 
-	// "snap sync" fields.
+	// Arbitrum "snap sync" fields.
 	SyncedAccounts      uint64 // Number of accounts downloaded
 	SyncedAccountBytes  uint64 // Number of account trie bytes persisted to disk
 	SyncedBytecodes     uint64 // Number of bytecodes downloaded
@@ -146,11 +146,11 @@ type CallMsg struct {
 	Value            *uint256.Int       // amount of wei sent along with the call
 	Data             []byte             // input data, usually an ABI-encoded contract method invocation
 
-	FeeCap         *uint256.Int          // EIP-1559 fee cap per gas.
-	Tip            *uint256.Int          // EIP-1559 tip per gas.
-	AccessList     types.AccessList      // EIP-2930 access list.
-	BlobHashes     []libcommon.Hash      // EIP-4844 versioned blob hashes.
-	Authorizations []types.Authorization // EIP-3074 authorizations.
+	FeeCap         *uint256.Int          // EIP-1559 max_fee_per_gas
+	TipCap         *uint256.Int          // EIP-1559 max_priority_fee_per_gas
+	AccessList     types.AccessList      // EIP-2930 access list
+	BlobHashes     []libcommon.Hash      // EIP-4844 versioned blob hashes
+	Authorizations []types.Authorization // EIP-3074 authorizations
 
 	SkipL1Charging bool // L1 charging is disabled when SkipL1Charging is true
 }

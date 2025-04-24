@@ -46,7 +46,7 @@ func init() {
 }
 
 // ctorFn is the constructor signature of a native tracer.
-type ctorFn = func(*tracers.Context, json.RawMessage) (tracers.Tracer, error)
+type ctorFn = func(*tracers.Context, json.RawMessage) (*tracers.Tracer, error)
 
 /*
 ctors is a map of package-local tracer constructors.
@@ -62,7 +62,7 @@ Hence, we cannot make the map in init, but must make it upon first use.
 */
 var ctors map[string]ctorFn
 
-func RegisterExternal(name string, ctor func(*tracers.Context, json.RawMessage) (tracers.Tracer, error)) {
+func RegisterExternal(name string, ctor ctorFn) {
 	register(name, ctor)
 }
 
@@ -75,7 +75,7 @@ func register(name string, ctor ctorFn) {
 }
 
 // lookup returns a tracer, if one can be matched to the given name.
-func lookup(name string, ctx *tracers.Context, cfg json.RawMessage) (tracers.Tracer, error) {
+func lookup(name string, ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, error) {
 	if ctors == nil {
 		ctors = make(map[string]ctorFn)
 	}

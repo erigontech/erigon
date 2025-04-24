@@ -23,11 +23,8 @@ import (
 	"io"
 	"slices"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
-
 	"github.com/erigontech/erigon-lib/rlp"
 )
 
@@ -38,9 +35,9 @@ import (
 type Log struct {
 	// Consensus fields:
 	// address of the contract that generated the event
-	Address libcommon.Address `json:"address" gencodec:"required" codec:"1"`
+	Address common.Address `json:"address" gencodec:"required" codec:"1"`
 	// list of topics provided by the contract.
-	Topics []libcommon.Hash `json:"topics" gencodec:"required" codec:"2"`
+	Topics []common.Hash `json:"topics" gencodec:"required" codec:"2"`
 	// supplied by the contract, usually ABI-encoded
 	Data []byte `json:"data" gencodec:"required" codec:"3"`
 
@@ -50,11 +47,11 @@ type Log struct {
 	BlockNumber uint64 `json:"blockNumber" codec:"-"`
 
 	// hash of the transaction
-	TxHash libcommon.Hash `json:"transactionHash" gencodec:"required" codec:"-"`
+	TxHash common.Hash `json:"transactionHash" gencodec:"required" codec:"-"`
 	// index of the transaction in the block
 	TxIndex uint `json:"transactionIndex" codec:"-"`
 	// hash of the block in which the transaction was included
-	BlockHash libcommon.Hash `json:"blockHash" codec:"-"`
+	BlockHash common.Hash `json:"blockHash" codec:"-"`
 	// index of the log in the block
 	Index uint `json:"logIndex" codec:"-"`
 
@@ -64,16 +61,16 @@ type Log struct {
 }
 
 type ErigonLog struct {
-	Address     libcommon.Address `json:"address" gencodec:"required" codec:"1"`
-	Topics      []libcommon.Hash  `json:"topics" gencodec:"required" codec:"2"`
-	Data        []byte            `json:"data" gencodec:"required" codec:"3"`
-	BlockNumber uint64            `json:"blockNumber" codec:"-"`
-	TxHash      libcommon.Hash    `json:"transactionHash" gencodec:"required" codec:"-"`
-	TxIndex     uint              `json:"transactionIndex" codec:"-"`
-	BlockHash   libcommon.Hash    `json:"blockHash" codec:"-"`
-	Index       uint              `json:"logIndex" codec:"-"`
-	Removed     bool              `json:"removed" codec:"-"`
-	Timestamp   uint64            `json:"timestamp" codec:"-"`
+	Address     common.Address `json:"address" gencodec:"required" codec:"1"`
+	Topics      []common.Hash  `json:"topics" gencodec:"required" codec:"2"`
+	Data        []byte         `json:"data" gencodec:"required" codec:"3"`
+	BlockNumber uint64         `json:"blockNumber" codec:"-"`
+	TxHash      common.Hash    `json:"transactionHash" gencodec:"required" codec:"-"`
+	TxIndex     uint           `json:"transactionIndex" codec:"-"`
+	BlockHash   common.Hash    `json:"blockHash" codec:"-"`
+	Index       uint           `json:"logIndex" codec:"-"`
+	Removed     bool           `json:"removed" codec:"-"`
+	Timestamp   uint64         `json:"timestamp" codec:"-"`
 }
 
 type ErigonLogs []*ErigonLog
@@ -91,14 +88,14 @@ func (logs Logs) Copy() Logs {
 	return logsCopy
 }
 
-func (logs Logs) Filter(addrMap map[libcommon.Address]struct{}, topics [][]libcommon.Hash, maxLogs uint64) Logs {
-	topicMap := make(map[int]map[libcommon.Hash]struct{}, 7)
+func (logs Logs) Filter(addrMap map[common.Address]struct{}, topics [][]common.Hash, maxLogs uint64) Logs {
+	topicMap := make(map[int]map[common.Hash]struct{}, 7)
 
 	//populate topic map
 	for idx, v := range topics {
 		for _, vv := range v {
 			if _, ok := topicMap[idx]; !ok {
-				topicMap[idx] = map[libcommon.Hash]struct{}{}
+				topicMap[idx] = map[common.Hash]struct{}{}
 			}
 			topicMap[idx][vv] = struct{}{}
 		}
@@ -147,19 +144,16 @@ func (logs Logs) Filter(addrMap map[libcommon.Address]struct{}, topics [][]libco
 	return o
 }
 
-func (logs Logs) CointainTopics(addrMap map[libcommon.Address]struct{}, topicsMap map[libcommon.Hash]struct{}, maxLogs uint64) Logs {
+func (logs Logs) ContainingTopics(addrMap map[common.Address]struct{}, topicsMap map[common.Hash]struct{}, maxLogs uint64) Logs {
 	o := make(Logs, 0, len(logs))
 	var logCount uint64
-	logCount = 0
+
 	for _, v := range logs {
 		found := false
 
 		// check address if addrMap is not empty
-		if len(addrMap) != 0 {
-			if _, ok := addrMap[v.Address]; !ok {
-				// not there? skip this log
-				continue
-			}
+		if _, requested := addrMap[v.Address]; !requested && len(addrMap) > 0 {
+			continue // not there? skip this log
 		}
 		//topicsMap len zero match any topics
 		if len(topicsMap) == 0 {
@@ -183,7 +177,7 @@ func (logs Logs) CointainTopics(addrMap map[libcommon.Address]struct{}, topicsMa
 	return o
 }
 
-func (logs Logs) FilterOld(addresses map[libcommon.Address]struct{}, topics [][]libcommon.Hash) Logs {
+func (logs Logs) FilterOld(addresses map[common.Address]struct{}, topics [][]common.Hash) Logs {
 	result := make(Logs, 0, len(logs))
 	// populate a set of addresses
 Logs:
@@ -219,31 +213,27 @@ Logs:
 }
 
 type logMarshaling struct {
-	Data        hexutility.Bytes
+	Data        hexutil.Bytes
 	BlockNumber hexutil.Uint64
 	TxIndex     hexutil.Uint
 	Index       hexutil.Uint
 }
 
 type rlpLog struct {
-	Address libcommon.Address
-	Topics  []libcommon.Hash
+	Address common.Address
+	Topics  []common.Hash
 	Data    []byte
 }
 
-// rlpStorageLog is the storage encoding of a log.
-type rlpStorageLog rlpLog
-
-// legacyRlpStorageLog is the previous storage encoding of a log including some redundant fields.
-type legacyRlpStorageLog struct {
-	Address libcommon.Address
-	Topics  []libcommon.Hash
+type rlpStorageLog struct {
+	Address common.Address
+	Topics  []common.Hash
 	Data    []byte
 	//BlockNumber uint64
-	//TxHash      libcommon.Hash
-	//TxIndex     uint
-	//BlockHash   libcommon.Hash
-	//Index       uint
+	//TxHash common.Hash
+	//TxIndex uint
+	//BlockHash   common.Hash
+	//Index uint
 }
 
 // EncodeRLP implements rlp.Encoder.
@@ -267,13 +257,13 @@ func (l *Log) Copy() *Log {
 		return nil
 	}
 	return &Log{
-		Address:     libcommon.BytesToAddress(l.Address.Bytes()),
+		Address:     common.BytesToAddress(l.Address.Bytes()),
 		Topics:      slices.Clone(l.Topics),
 		Data:        slices.Clone(l.Data),
 		BlockNumber: l.BlockNumber,
-		TxHash:      libcommon.BytesToHash(l.TxHash.Bytes()),
+		TxHash:      common.BytesToHash(l.TxHash.Bytes()),
 		TxIndex:     l.TxIndex,
-		BlockHash:   libcommon.BytesToHash(l.BlockHash.Bytes()),
+		BlockHash:   common.BytesToHash(l.BlockHash.Bytes()),
 		Index:       l.Index,
 		Removed:     l.Removed,
 	}
@@ -289,11 +279,6 @@ func (l *LogForStorage) EncodeRLP(w io.Writer) error {
 		Address: l.Address,
 		Topics:  l.Topics,
 		Data:    l.Data,
-		//BlockNumber: l.BlockNumber,
-		//TxHash:      l.TxHash,
-		//TxIndex:     l.TxIndex,
-		//BlockHash:   l.BlockHash,
-		//Index:       l.Index,
 	})
 }
 
@@ -307,23 +292,14 @@ func (l *LogForStorage) DecodeRLP(s *rlp.Stream) error {
 	}
 	var dec rlpStorageLog
 	err = rlp.DecodeBytes(blob, &dec)
-	if err == nil {
-		*l = LogForStorage{
-			Address: dec.Address,
-			Topics:  dec.Topics,
-			Data:    dec.Data,
-		}
-	} else {
-		// Try to decode log with previous definition.
-		var dec legacyRlpStorageLog
-		err = rlp.DecodeBytes(blob, &dec)
-		if err == nil {
-			*l = LogForStorage{
-				Address: dec.Address,
-				Topics:  dec.Topics,
-				Data:    dec.Data,
-			}
-		}
+	if err != nil {
+		return err
 	}
-	return err
+
+	*l = LogForStorage{
+		Address: dec.Address,
+		Topics:  dec.Topics,
+		Data:    dec.Data,
+	}
+	return nil
 }

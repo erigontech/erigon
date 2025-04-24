@@ -11,7 +11,7 @@ import (
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	"github.com/erigontech/erigon/core/types"
 )
@@ -27,7 +27,7 @@ func convertDataToStringP(abstractMap map[string]interface{}, field string) *str
 			return nil
 		}
 		result = v.String()
-	case hexutility.Bytes:
+	case hexutil.Bytes:
 		result = v.String()
 	case hexutil2.Uint:
 		result = v.String()

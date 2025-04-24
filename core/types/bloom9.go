@@ -25,7 +25,7 @@ import (
 	"math/big"
 	"unsafe"
 
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/crypto/cryptopool"
 )
@@ -107,12 +107,12 @@ func (b Bloom) Test(topic []byte) bool {
 
 // MarshalText encodes b as a hex string with 0x prefix.
 func (b Bloom) MarshalText() ([]byte, error) {
-	return hexutility.Bytes(b[:]).MarshalText()
+	return hexutil.Bytes(b[:]).MarshalText()
 }
 
 // UnmarshalText b as a hex string with 0x prefix.
 func (b *Bloom) UnmarshalText(input []byte) error {
-	return hexutility.UnmarshalFixedText("Bloom", input, b[:])
+	return hexutil.UnmarshalFixedText("Bloom", input, b[:])
 }
 
 func CreateBloom(receipts Receipts) Bloom {
@@ -130,7 +130,7 @@ func CreateBloom(receipts Receipts) Bloom {
 }
 
 // LogsBloom returns the bloom bytes for the given logs
-func LogsBloom(logs []*Log) []byte {
+func LogsBloom(logs []*Log) Bloom {
 	buf := make([]byte, 6)
 	var bin Bloom
 	for _, log := range logs {
@@ -139,7 +139,7 @@ func LogsBloom(logs []*Log) []byte {
 			bin.add(b[:], buf)
 		}
 	}
-	return bin[:]
+	return bin
 }
 
 // Bloom9 returns the bloom filter for the given data

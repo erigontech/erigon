@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/erigontech/erigon-lib/chain/params"
 )
 
 func TestShanghaiIntrinsicGas(t *testing.T) {
@@ -60,7 +62,7 @@ func TestShanghaiIntrinsicGas(t *testing.T) {
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
 			// Todo (@somnathb1) - Factor in EIP-7623
-			gas, _, overflow := CalcIntrinsicGas(c.dataLen, c.dataNonZeroLen, c.authorizationsLen, 0, 0, c.creation, true, true, c.isShanghai, false)
+			gas, _, overflow := CalcIntrinsicGas(c.dataLen, c.dataNonZeroLen, c.authorizationsLen, 0, 0, c.creation, true, true, c.isShanghai, false, false)
 			if overflow != false {
 				t.Errorf("expected success but got uint overflow")
 			}
@@ -73,8 +75,8 @@ func TestShanghaiIntrinsicGas(t *testing.T) {
 
 func TestZeroDataIntrinsicGas(t *testing.T) {
 	assert := assert.New(t)
-	gas, floorGas7623, overflow := CalcIntrinsicGas(0, 0, 0, 0, 0, false, true, true, true, true)
-	assert.Equal(overflow, false)
-	assert.Equal(gas, TxGas)
-	assert.Equal(floorGas7623, TxGas)
+	gas, floorGas7623, overflow := CalcIntrinsicGas(0, 0, 0, 0, 0, false, true, true, true, true, false)
+	assert.False(overflow)
+	assert.Equal(params.TxGas, gas)
+	assert.Equal(params.TxGas, floorGas7623)
 }

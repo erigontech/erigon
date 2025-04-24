@@ -23,7 +23,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -125,7 +125,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		}
 	}
 
-	var executionRequestsList []hexutility.Bytes = nil
+	var executionRequestsList []hexutil.Bytes = nil
 	if block.Version() >= clparams.ElectraVersion {
 		executionRequestsList = block.Block.Body.GetExecutionRequestsList()
 	}
@@ -269,9 +269,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		Block:               blockRoot,
 		ExecutionOptimistic: f.optimisticStore.IsOptimistic(blockRoot),
 	})
-	if f.validatorMonitor != nil {
-		f.validatorMonitor.OnNewBlock(lastProcessedState, block.Block)
-	}
+
 	if !isVerifiedExecutionPayload {
 		log.Debug("OnBlock", "elapsed", time.Since(start), "slot", block.Block.Slot)
 	}

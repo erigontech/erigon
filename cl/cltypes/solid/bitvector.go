@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -29,7 +29,7 @@ func NewBitVector(c int) *BitVector {
 	return &BitVector{
 		bitLen:    0,
 		bitCap:    c,
-		container: make([]byte, 0),
+		container: make([]byte, (c+7)/8),
 	}
 }
 
@@ -140,11 +140,11 @@ func (b *BitVector) HashSSZ() ([32]byte, error) {
 }
 
 func (b *BitVector) MarshalJSON() ([]byte, error) {
-	return json.Marshal(hexutility.Bytes(b.container))
+	return json.Marshal(hexutil.Bytes(b.container))
 }
 
 func (b *BitVector) UnmarshalJSON(data []byte) error {
-	var hex hexutility.Bytes
+	var hex hexutil.Bytes
 	if err := json.Unmarshal(data, &hex); err != nil {
 		return err
 	}
@@ -167,4 +167,14 @@ func (b *BitVector) Union(other *BitVector) (*BitVector, error) {
 		}
 	}
 	return new, nil
+}
+
+func (b *BitVector) IsOverlap(other *BitVector) bool {
+	// check by bytes
+	for i := 0; i < len(b.container) && i < len(other.container); i++ {
+		if b.container[i]&other.container[i] != 0 {
+			return true
+		}
+	}
+	return false
 }

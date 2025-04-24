@@ -17,6 +17,7 @@
 package types
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -27,8 +28,8 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/params"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
 	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/rlp"
 )
@@ -39,7 +40,7 @@ const (
 
 type KZGCommitment [LEN_48]byte // Compressed BLS12-381 G1 element
 type KZGProof [LEN_48]byte
-type Blob [fixedgas.BlobSize]byte
+type Blob [params.BlobSize]byte
 
 type BlobKzgs []KZGCommitment
 type KZGProofs []KZGProof
@@ -55,9 +56,9 @@ type BlobTxWrapper struct {
 /* Blob methods */
 
 func (b *Blob) payloadSize() int {
-	size := 1                                                      // 0xb7..0xbf
-	size += libcommon.BitLenToByteLen(bits.Len(fixedgas.BlobSize)) // length encoding size
-	size += fixedgas.BlobSize                                      // byte_array it self
+	size := 1                                                    // 0xb7..0xbf
+	size += libcommon.BitLenToByteLen(bits.Len(params.BlobSize)) // length encoding size
+	size += params.BlobSize                                      // byte_array it self
 	return size
 }
 
@@ -75,9 +76,9 @@ func (li BlobKzgs) payloadSize() int {
 
 func (li BlobKzgs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
-		return err
-	}
+	buf := newEncodingBuf()
+	l := rlp.EncodeListPrefix(payloadSize, buf[:])
+	w.Write(buf[:l])
 
 	for _, cmtmt := range li {
 		if err := rlp.EncodeString(cmtmt[:], w, b); err != nil {
@@ -125,9 +126,9 @@ func (li KZGProofs) payloadSize() int {
 
 func (li KZGProofs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
-		return err
-	}
+	buf := newEncodingBuf()
+	l := rlp.EncodeListPrefix(payloadSize, buf[:])
+	w.Write(buf[:l])
 
 	for _, proof := range li {
 		if err := rlp.EncodeString(proof[:], w, b); err != nil {
@@ -179,10 +180,10 @@ func (blobs Blobs) payloadSize() int {
 
 func (blobs Blobs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
-		return err
-	}
 
+	buf := newEncodingBuf()
+	l := rlp.EncodeListPrefix(payloadSize, buf[:])
+	w.Write(buf[:l])
 	for _, blob := range blobs {
 		if err := rlp.EncodeString(blob[:], w, b); err != nil {
 			return err
@@ -201,7 +202,7 @@ func (blobs *Blobs) DecodeRLP(s *rlp.Stream) error {
 	blob := Blob{}
 
 	for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
-		if len(b) == fixedgas.BlobSize {
+		if len(b) == params.BlobSize {
 			copy((blob)[:], b)
 			*blobs = append(*blobs, blob)
 		} else {
@@ -302,8 +303,7 @@ func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
 func (txw *BlobTxWrapper) Type() byte               { return txw.Tx.Type() }
 func (txw *BlobTxWrapper) GetChainID() *uint256.Int { return txw.Tx.GetChainID() }
 func (txw *BlobTxWrapper) GetNonce() uint64         { return txw.Tx.GetNonce() }
-func (txw *BlobTxWrapper) GetPrice() *uint256.Int   { return txw.Tx.GetPrice() }
-func (txw *BlobTxWrapper) GetTip() *uint256.Int     { return txw.Tx.GetTip() }
+func (txw *BlobTxWrapper) GetTipCap() *uint256.Int  { return txw.Tx.GetTipCap() }
 func (txw *BlobTxWrapper) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	return txw.Tx.GetEffectiveGasTip(baseFee)
 }
@@ -311,12 +311,12 @@ func (txw *BlobTxWrapper) GetFeeCap() *uint256.Int { return txw.Tx.GetFeeCap() }
 
 func (txw *BlobTxWrapper) GetBlobHashes() []libcommon.Hash { return txw.Tx.GetBlobHashes() }
 
-func (txw *BlobTxWrapper) GetGas() uint64            { return txw.Tx.GetGas() }
+func (txw *BlobTxWrapper) GetGasLimit() uint64       { return txw.Tx.GetGasLimit() }
 func (txw *BlobTxWrapper) GetBlobGas() uint64        { return txw.Tx.GetBlobGas() }
 func (txw *BlobTxWrapper) GetValue() *uint256.Int    { return txw.Tx.GetValue() }
 func (txw *BlobTxWrapper) GetTo() *libcommon.Address { return txw.Tx.GetTo() }
 
-func (txw *BlobTxWrapper) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
+func (txw *BlobTxWrapper) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
 	return txw.Tx.AsMessage(s, baseFee, rules)
 }
 func (txw *BlobTxWrapper) WithSignature(signer Signer, sig []byte) (Transaction, error) {
@@ -380,6 +380,49 @@ func (txw *BlobTxWrapper) DecodeRLP(s *rlp.Stream) error {
 // blobs/commitments/proofs is when we reply to GetPooledTransactions (and that's handled by the txpool).
 func (txw *BlobTxWrapper) EncodingSize() int {
 	return txw.Tx.EncodingSize()
+}
+func (txw *BlobTxWrapper) payloadSize() (payloadSize int) {
+	l, _, _, _, _ := txw.Tx.payloadSize()
+	payloadSize += l + rlp.ListPrefixLen(l)
+	l = txw.Blobs.payloadSize()
+	payloadSize += l + rlp.ListPrefixLen(l)
+	l = txw.Commitments.payloadSize()
+	payloadSize += l + rlp.ListPrefixLen(l)
+	l = txw.Proofs.payloadSize()
+	payloadSize += l + rlp.ListPrefixLen(l)
+	return
+}
+func (txw *BlobTxWrapper) MarshalBinaryWrapped(w io.Writer) error {
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
+	// encode TxType
+	b[0] = BlobTxType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	payloadSize := txw.payloadSize()
+	l := rlp.EncodeListPrefix(payloadSize, b[1:])
+	if _, err := w.Write(b[1 : 1+l]); err != nil {
+		return err
+	}
+	bw := bytes.Buffer{}
+	if err := txw.Tx.MarshalBinary(&bw); err != nil {
+		return err
+	}
+	if _, err := w.Write(bw.Bytes()[1:]); err != nil {
+		return err
+	}
+
+	if err := txw.Blobs.encodePayload(w, b[:], txw.Blobs.payloadSize()); err != nil {
+		return err
+	}
+	if err := txw.Commitments.encodePayload(w, b[:], txw.Commitments.payloadSize()); err != nil {
+		return err
+	}
+	if err := txw.Proofs.encodePayload(w, b[:], txw.Proofs.payloadSize()); err != nil {
+		return err
+	}
+	return nil
 }
 func (txw *BlobTxWrapper) MarshalBinary(w io.Writer) error {
 	return txw.Tx.MarshalBinary(w)

@@ -30,49 +30,46 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/cmd/state/exec3"
-	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/ethdb/prune"
+	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 type CustomTraceCfg struct {
 	tmpdir   string
-	db       kv.RwDB
-	prune    prune.Mode
-	execArgs *exec3.ExecArgs
+	db       kv.TemporalRwDB
+	ExecArgs *exec3.ExecArgs
 }
 
-func StageCustomTraceCfg(db kv.TemporalRwDB, prune prune.Mode, dirs datadir.Dirs, br services.FullBlockReader, cc *chain.Config,
-	engine consensus.Engine, genesis *types.Genesis, syncCfg *ethconfig.Sync) CustomTraceCfg {
+func StageCustomTraceCfg(db kv.TemporalRwDB, dirs datadir.Dirs, br services.FullBlockReader, cc *chain.Config, engine consensus.Engine, genesis *types.Genesis, syncCfg *ethconfig.Sync) CustomTraceCfg {
 	execArgs := &exec3.ExecArgs{
 		ChainDB:     db,
 		BlockReader: br,
-		Prune:       prune,
 		ChainConfig: cc,
 		Dirs:        dirs,
 		Engine:      engine,
 		Genesis:     genesis,
 		Workers:     syncCfg.ExecWorkerCount,
+
+		ProduceReceiptDomain: dbg.EnvBool("PRODUCE_RECEIPT_DOMAIN", true),
 	}
 	return CustomTraceCfg{
 		db:       db,
-		prune:    prune,
-		execArgs: execArgs,
+		ExecArgs: execArgs,
 	}
 }
 
 func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger) error {
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.ExecArgs.BlockReader))
+
 	var startBlock, endBlock uint64
 	stepSize := cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator).StepSize()
 	if err := cfg.db.View(ctx, func(tx kv.Tx) (err error) {
-		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.execArgs.BlockReader))
-
 		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 		txNum := ac.DbgDomain(kv.AccountsDomain).FirstStepNotInFiles() * stepSize
 		var ok bool
@@ -97,15 +94,44 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 	}); err != nil {
 		return err
 	}
-	defer cfg.execArgs.BlockReader.Snapshots().(*freezeblocks.RoSnapshots).EnableReadAhead().DisableReadAhead()
+	defer cfg.ExecArgs.BlockReader.Snapshots().(*freezeblocks.RoSnapshots).EnableReadAhead().DisableReadAhead()
 
 	log.Info("SpawnCustomTrace", "startBlock", startBlock, "endBlock", endBlock)
 
 	batchSize := uint64(100_000)
 	for ; startBlock < endBlock; startBlock += batchSize {
-		if err := customTraceBatchProduce(ctx, cfg.execArgs, cfg.db, startBlock, startBlock+batchSize, "custom_trace", logger); err != nil {
+		if err := customTraceBatchProduce(ctx, cfg.ExecArgs, cfg.db, startBlock, startBlock+batchSize, "custom_trace", logger); err != nil {
 			return err
 		}
+	}
+
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+	chkEvery := time.NewTicker(3 * time.Second)
+	defer chkEvery.Stop()
+
+Loop:
+	for {
+		select {
+		case <-cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator).WaitForBuildAndMerge(ctx):
+			break Loop
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-logEvery.C:
+			var m runtime.MemStats
+			dbg.ReadMemStats(&m)
+			//TODO: log progress and list of domains/files
+			logger.Info("[snapshots] Building files", "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+		}
+	}
+
+	if err := cfg.db.Update(ctx, func(tx kv.RwTx) error {
+		if _, err := tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 10*time.Hour); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	log.Info("SpawnCustomTrace finish")
@@ -125,17 +151,22 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 	return nil
 }
 
-func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwDB, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
+func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.TemporalRwDB, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
 	var lastTxNum uint64
-	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		ttx := tx.(kv.TemporalRwTx)
+	{
+		tx, err := db.BeginTemporalRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+
 		doms, err := state2.NewSharedDomains(tx, logger)
 		if err != nil {
 			return err
 		}
 		defer doms.Close()
 
-		if err := customTraceBatch(ctx, cfg, ttx, doms, fromBlock, toBlock, logPrefix, logger); err != nil {
+		if err := customTraceBatch(ctx, cfg, tx, doms, fromBlock, toBlock, logPrefix, logger); err != nil {
 			return err
 		}
 
@@ -144,8 +175,8 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 			return err
 		}
 
-		{ //assert
-			if err = AssertReceipts(ctx, cfg, ttx, fromBlock, toBlock); err != nil {
+		if cfg.ChainConfig.Bor == nil { //assert
+			if err = AssertReceipts(ctx, cfg, tx, fromBlock, toBlock); err != nil {
 				return err
 			}
 		}
@@ -154,9 +185,6 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 		if err := tx.Commit(); err != nil {
 			return err
 		}
-		return nil
-	}); err != nil {
-		return err
 	}
 
 	agg := db.(state2.HasAgg).Agg().(*state2.Aggregator)
@@ -176,8 +204,7 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 	}
 
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
-		if _, err := ac.PruneSmallBatches(ctx, 10*time.Hour, tx); err != nil { // prune part of retired data, before commit
+		if _, err := tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 10*time.Hour); err != nil {
 			return err
 		}
 		return nil
@@ -188,6 +215,10 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 }
 
 func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, fromBlock, toBlock uint64) (err error) {
+	if !dbg.AssertEnabled {
+		return nil
+	}
+
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
@@ -262,7 +293,7 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 	var m runtime.MemStats
 	if err := exec3.CustomTraceMapReduce(fromBlock, toBlock, exec3.TraceConsumer{
 		NewTracer: func() exec3.GenericTracer { return nil },
-		Reduce: func(txTask *state.TxTask, tx kv.Tx) error {
+		Reduce: func(txTask *state.TxTask, tx kv.TemporalTx) error {
 			if txTask.Error != nil {
 				return txTask.Error
 			}
@@ -292,6 +323,25 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			}
 
 			if txTask.Final { // block changed
+				if cfg.ChainConfig.Bor != nil && txTask.TxIndex >= 1 {
+					// get last receipt and store the last log index + 1
+					lastReceipt := txTask.BlockReceipts[txTask.TxIndex-1]
+					if lastReceipt == nil {
+						return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
+					}
+					if len(lastReceipt.Logs) > 0 {
+						firstIndex := lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
+						receipt := types.Receipt{
+							CumulativeGasUsed:        lastReceipt.CumulativeGasUsed,
+							FirstLogIndexWithinBlock: uint32(firstIndex),
+						}
+						//log.Info("adding extra", "firstLog", firstIndex)
+						if err := rawtemporaldb.AppendReceipt(doms, &receipt, cumulativeBlobGasUsedInBlock); err != nil {
+							return err
+						}
+					}
+				}
+
 				cumulativeBlobGasUsedInBlock = 0
 			}
 

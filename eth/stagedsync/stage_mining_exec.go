@@ -27,6 +27,7 @@ import (
 	"golang.org/x/net/context"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/params"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/metrics"
 	"github.com/erigontech/erigon-lib/kv"
@@ -35,14 +36,13 @@ import (
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon-lib/wrap"
-	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/txnprovider"
 )
@@ -195,7 +195,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 
 	var err error
 	var block *types.Block
-	block, current.Txns, current.Receipts, current.Requests, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txns, current.Uncles, &state.NoopWriter{}, &cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, chainReader, true, logger)
+	block, current.Txns, current.Receipts, current.Requests, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txns, current.Uncles, &state.NoopWriter{}, &cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, chainReader, true, logger, nil)
 	if err != nil {
 		return fmt.Errorf("cannot finalize block execution: %s", err)
 	}
@@ -239,7 +239,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 
 	rh, err := txc.Doms.ComputeCommitment(ctx, true, blockHeight, s.LogPrefix())
 	if err != nil {
-		return fmt.Errorf("StateV3.Apply: %w", err)
+		return fmt.Errorf("ParallelExecutionState.Apply: %w", err)
 	}
 	current.Header.Root = libcommon.BytesToHash(rh)
 
@@ -269,6 +269,7 @@ func getNextTransactions(
 	provideOpts := []txnprovider.ProvideOption{
 		txnprovider.WithAmount(amount),
 		txnprovider.WithParentBlockNum(executionAt),
+		txnprovider.WithBlockTime(header.Time),
 		txnprovider.WithGasTarget(remainingGas),
 		txnprovider.WithBlobGasTarget(remainingBlobGas),
 		txnprovider.WithTxnIdsFilter(alreadyYielded),
@@ -364,42 +365,30 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 				return nil, fmt.Errorf("bad baseFee %s", header.BaseFee)
 			}
 			// Make sure the transaction gasFeeCap is greater than the block's baseFee.
-			if !transaction.GetFeeCap().IsZero() || !transaction.GetTip().IsZero() {
-				if err := core.CheckEip1559TxGasFeeCap(sender, transaction.GetFeeCap(), transaction.GetTip(), baseFee256, false /* isFree */); err != nil {
+			if !transaction.GetFeeCap().IsZero() || !transaction.GetTipCap().IsZero() {
+				if err := core.CheckEip1559TxGasFeeCap(sender, transaction.GetFeeCap(), transaction.GetTipCap(), baseFee256, false /* isFree */); err != nil {
 					transactions = transactions[1:]
 					feeTooLowCnt++
 					continue
 				}
 			}
 		}
-		txnGas := transaction.GetGas()
-		txnPrice := transaction.GetPrice()
+		txnGasLimit := transaction.GetGasLimit()
 		value := transaction.GetValue()
 		accountBalance := account.Balance
 
-		want := uint256.NewInt(0)
-		want.SetUint64(txnGas)
-		want, overflow := want.MulOverflow(want, txnPrice)
+		want := uint256.NewInt(txnGasLimit)
+		want, overflow := want.MulOverflow(want, transaction.GetFeeCap())
 		if overflow {
 			transactions = transactions[1:]
 			overflowCnt++
 			continue
 		}
-
-		if transaction.GetFeeCap() != nil {
-			want.SetUint64(txnGas)
-			want, overflow = want.MulOverflow(want, transaction.GetFeeCap())
-			if overflow {
-				transactions = transactions[1:]
-				overflowCnt++
-				continue
-			}
-			want, overflow = want.AddOverflow(want, value)
-			if overflow {
-				transactions = transactions[1:]
-				overflowCnt++
-				continue
-			}
+		want, overflow = want.AddOverflow(want, value)
+		if overflow {
+			transactions = transactions[1:]
+			overflowCnt++
+			continue
 		}
 
 		if accountBalance.Cmp(want) < 0 {

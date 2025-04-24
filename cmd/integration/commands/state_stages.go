@@ -25,19 +25,16 @@ import (
 	"os"
 	"time"
 
-	stateLib "github.com/erigontech/erigon-lib/state"
-
-	"github.com/erigontech/erigon-lib/wrap"
-
 	"github.com/c2h5oh/datasize"
 	"github.com/spf13/cobra"
-
-	"github.com/erigontech/erigon-lib/log/v3"
 
 	chain2 "github.com/erigontech/erigon-lib/chain"
 	common2 "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	stateLib "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core"
@@ -47,11 +44,11 @@ import (
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/eth/tracers/logger"
-	"github.com/erigontech/erigon/ethdb/wasmdb"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/params"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
 	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/turbo/ethdb/wasmdb"
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
@@ -214,12 +211,13 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig params.MiningConfig, ctx 
 		stopAt = 1
 	}
 
+	var structLogger *logger.StructLogger
 	traceStart := func() {
-		vmConfig.Tracer = logger.NewStructLogger(&logger.LogConfig{})
-		vmConfig.Debug = true
+		structLogger = logger.NewStructLogger(&logger.LogConfig{})
+		vmConfig.Tracer = structLogger.Hooks()
 	}
 	traceStop := func(id int) {
-		if !vmConfig.Debug {
+		if vmConfig.Tracer == nil {
 			return
 		}
 		w, err3 := os.Create(fmt.Sprintf("trace_%d.txt", id))
@@ -228,7 +226,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig params.MiningConfig, ctx 
 		}
 		encoder := json.NewEncoder(w)
 		encoder.SetIndent(" ", " ")
-		for _, l := range logger.FormatLogs(vmConfig.Tracer.(*logger.StructLogger).StructLogs()) {
+		for _, l := range logger.FormatLogs(structLogger.StructLogs()) {
 			if err2 := encoder.Encode(l); err2 != nil {
 				panic(err2)
 			}
@@ -238,7 +236,6 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig params.MiningConfig, ctx 
 		}
 
 		vmConfig.Tracer = nil
-		vmConfig.Debug = false
 	}
 	_, _ = traceStart, traceStop
 

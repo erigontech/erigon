@@ -2,7 +2,7 @@ package state
 
 import (
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/ethdb/wasmdb"
+	"github.com/erigontech/erigon/turbo/ethdb/wasmdb"
 )
 
 type wasmActivation struct {

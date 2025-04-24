@@ -118,6 +118,30 @@ var (
 		},
 	}
 
+	isValidQtyTests = []unmarshalTest{
+		// invalid
+		{input: ``, wantErr: ErrEmptyString},
+		{input: `0`, wantErr: ErrMissingPrefix},
+		{input: `0x`, wantErr: ErrEmptyNumber},
+		{input: `0x01`, wantErr: ErrLeadingZero},
+		{input: `0x00`, wantErr: ErrLeadingZero},
+		{input: `0x0000000000000000000000000000000000000000000000000000000000000001`, wantErr: ErrLeadingZero},
+		{input: `0x0000000000000000000000000000000000000000000000000000000000000000`, wantErr: ErrLeadingZero},
+		{input: `0x10000000000000000000000000000000000000000000000000000000000000000`, wantErr: ErrTooBigHexString},
+		{input: `0x1zz01`, wantErr: ErrHexStringInvalid},
+		{input: `0xasdf`, wantErr: ErrHexStringInvalid},
+
+		// valid
+		{input: `0x0`, wantErr: nil},
+		{input: `0x1`, wantErr: nil},
+		{input: `0x2F2`, wantErr: nil},
+		{input: `0X2F2`, wantErr: nil},
+		{input: `0x1122aaff`, wantErr: nil},
+		{input: `0xbbb`, wantErr: nil},
+		{input: `0xffffffffffffffff`, wantErr: nil},
+		{input: `0x123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0`, wantErr: nil},
+	}
+
 	decodeUint64Tests = []unmarshalTest{
 		// invalid
 		{input: `0`, wantErr: ErrMissingPrefix},
@@ -187,6 +211,24 @@ func TestDecodeUint64(t *testing.T) {
 			if test.want != nil {
 				require.EqualValues(t, test.want, dec)
 			}
+		})
+	}
+}
+
+func TestEncode(t *testing.T) {
+	for _, test := range encodeBytesTests {
+		enc := Encode(test.input.([]byte))
+		if enc != test.want {
+			t.Errorf("input %x: wrong encoding %s", test.input, enc)
+		}
+	}
+}
+
+func TestIsValidQuantity(t *testing.T) {
+	for idx, test := range isValidQtyTests {
+		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
+			err := IsValidQuantity(test.input)
+			checkError(t, test.input, err, test.wantErr)
 		})
 	}
 }

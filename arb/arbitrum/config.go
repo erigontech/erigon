@@ -9,6 +9,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
@@ -18,7 +19,6 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/nitro-erigon/arbos"
 	"github.com/erigontech/nitro-erigon/arbos/arbosState"
 	"github.com/erigontech/nitro-erigon/arbos/arbostypes"
@@ -95,8 +95,8 @@ var DefaultConfig = Config{
 	RPCTxFeeCap:             ethconfig.Defaults.RPCTxFeeCap, // 1 ether
 	TxAllowUnprotected:      true,
 	RPCEVMTimeout:           ethconfig.Defaults.ArbRPCEVMTimeout, // 5 seconds
-	BloomBitsBlocks:         params.BloomBitsBlocks * 4,          // we generally have smaller blocks
-	BloomConfirms:           params.BloomConfirms,
+	BloomBitsBlocks:         config3.BloomBitsBlocks * 4,         // we generally have smaller blocks
+	BloomConfirms:           config3.BloomConfirms,
 	FilterLogCacheSize:      32,
 	FilterTimeout:           5 * time.Minute,
 	FeeHistoryMaxBlockCount: 1024,

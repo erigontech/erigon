@@ -26,12 +26,11 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
-
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/consensus/merge"
-	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/consensus/merge"
+	"github.com/erigontech/erigon/execution/consensus/misc"
 )
 
 // NewEVMBlockContext creates a new context for use in the EVM.

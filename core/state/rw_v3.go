@@ -24,7 +24,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -32,6 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/state"
 	libstate "github.com/erigontech/erigon-lib/state"
@@ -41,40 +41,43 @@ import (
 
 var execTxsDone = metrics.NewCounter(`exec_txs_done`)
 
-type StateV3 struct {
+// ParallelExecutionState - mainly designed for parallel transactions execution. It does separate:
+//   - execution
+//   - re-try execution if conflict-resolution
+//   - collect state changes for conflict-resolution
+//   - apply state-changes independently from execution and even in another goroutine (by ApplyState func)
+//   - track which txNums state-changes was applied
+type ParallelExecutionState struct {
 	domains      *libstate.SharedDomains
 	triggerLock  sync.Mutex
 	triggers     map[uint64]*TxTask
 	senderTxNums map[common.Address]uint64
 
-	applyPrevAccountBuf []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
-	addrIncBuf          []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
-	logger              log.Logger
+	logger log.Logger
 
 	trace bool
 }
 
-func NewStateV3(domains *libstate.SharedDomains, logger log.Logger) *StateV3 {
-	return &StateV3{
-		domains:             domains,
-		triggers:            map[uint64]*TxTask{},
-		senderTxNums:        map[common.Address]uint64{},
-		applyPrevAccountBuf: make([]byte, 256),
-		logger:              logger,
+func NewParallelExecutionState(domains *libstate.SharedDomains, logger log.Logger) *ParallelExecutionState {
+	return &ParallelExecutionState{
+		domains:      domains,
+		triggers:     map[uint64]*TxTask{},
+		senderTxNums: map[common.Address]uint64{},
+		logger:       logger,
 		//trace: true,
 	}
 }
 
-func (rs *StateV3) ReTry(txTask *TxTask, in *QueueWithRetry) {
+func (rs *ParallelExecutionState) ReTry(txTask *TxTask, in *QueueWithRetry) {
 	txTask.Reset()
 	in.ReTry(txTask)
 }
-func (rs *StateV3) AddWork(ctx context.Context, txTask *TxTask, in *QueueWithRetry) {
+func (rs *ParallelExecutionState) AddWork(ctx context.Context, txTask *TxTask, in *QueueWithRetry) {
 	txTask.Reset()
 	in.Add(ctx, txTask)
 }
 
-func (rs *StateV3) RegisterSender(txTask *TxTask) bool {
+func (rs *ParallelExecutionState) RegisterSender(txTask *TxTask) bool {
 	//TODO: it deadlocks on panic, fix it
 	defer func() {
 		rec := recover()
@@ -96,7 +99,7 @@ func (rs *StateV3) RegisterSender(txTask *TxTask) bool {
 	return !deferral
 }
 
-func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64, in *QueueWithRetry) (count int) {
+func (rs *ParallelExecutionState) CommitTxNum(sender *common.Address, txNum uint64, in *QueueWithRetry) (count int) {
 	execTxsDone.Inc()
 
 	rs.triggerLock.Lock()
@@ -115,7 +118,7 @@ func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64, in *QueueWi
 	return count
 }
 
-func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) error {
+func (rs *ParallelExecutionState) applyState(txTask *TxTask, domains *libstate.SharedDomains) error {
 	var acc accounts.Account
 
 	//maps are unordered in Go! don't iterate over it. SharedDomains.deleteAccount will call GetLatest(Code) and expecting it not been delete yet
@@ -170,29 +173,29 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 	return nil
 }
 
-func (rs *StateV3) Domains() *libstate.SharedDomains {
+func (rs *ParallelExecutionState) Domains() *libstate.SharedDomains {
 	return rs.domains
 }
 
-func (rs *StateV3) SetTxNum(txNum, blockNum uint64) {
+func (rs *ParallelExecutionState) SetTxNum(txNum, blockNum uint64) {
 	rs.domains.SetTxNum(txNum)
 	rs.domains.SetBlockNum(blockNum)
 }
 
-func (rs *StateV3) ApplyState4(ctx context.Context, txTask *TxTask) error {
+func (rs *ParallelExecutionState) ApplyState(ctx context.Context, txTask *TxTask) error {
 	if txTask.HistoryExecution {
 		return nil
 	}
 	//defer rs.domains.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
 	if err := rs.applyState(txTask, rs.domains); err != nil {
-		return fmt.Errorf("StateV3.ApplyState: %w", err)
+		return fmt.Errorf("ParallelExecutionState.ApplyState: %w", err)
 	}
 	returnReadList(txTask.ReadLists)
 	returnWriteList(txTask.WriteLists)
 
-	if err := rs.ApplyLogsAndTraces4(txTask, rs.domains); err != nil {
-		return fmt.Errorf("StateV3.ApplyLogsAndTraces: %w", err)
+	if err := rs.ApplyLogsAndTraces(txTask, rs.domains); err != nil {
+		return fmt.Errorf("ParallelExecutionState.ApplyLogsAndTraces: %w", err)
 	}
 
 	if (txTask.TxNum+1)%rs.domains.StepSize() == 0 /*&& txTask.TxNum > 0 */ {
@@ -202,7 +205,7 @@ func (rs *StateV3) ApplyState4(ctx context.Context, txTask *TxTask) error {
 		_, err := rs.domains.ComputeCommitment(ctx, true, txTask.BlockNum,
 			fmt.Sprintf("applying step %d", txTask.TxNum/rs.domains.StepSize()))
 		if err != nil {
-			return fmt.Errorf("StateV3.ComputeCommitment: %w", err)
+			return fmt.Errorf("ParallelExecutionState.ComputeCommitment: %w", err)
 		}
 	}
 
@@ -210,7 +213,7 @@ func (rs *StateV3) ApplyState4(ctx context.Context, txTask *TxTask) error {
 	return nil
 }
 
-func (rs *StateV3) ApplyLogsAndTraces4(txTask *TxTask, domains *libstate.SharedDomains) error {
+func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *libstate.SharedDomains) error {
 	for addr := range txTask.TraceFroms {
 		if err := domains.IndexAdd(kv.TracesFromIdx, addr[:]); err != nil {
 			return err
@@ -241,7 +244,7 @@ var (
 	mxState3Unwind        = metrics.GetOrCreateSummary("state3_unwind")
 )
 
-func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwindTo uint64, accumulator *shards.Accumulator, changeset *[kv.DomainLen][]state.DomainEntryDiff) error {
+func (rs *ParallelExecutionState) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwindTo uint64, accumulator *shards.Accumulator, changeset *[kv.DomainLen][]state.DomainEntryDiff) error {
 	mxState3UnwindRunning.Inc()
 	defer mxState3UnwindRunning.Dec()
 	st := time.Now()
@@ -310,24 +313,24 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwi
 	return nil
 }
 
-func (rs *StateV3) DoneCount() uint64 {
+func (rs *ParallelExecutionState) DoneCount() uint64 {
 	return execTxsDone.GetValueUint64()
 }
 
-func (rs *StateV3) SizeEstimate() (r uint64) {
+func (rs *ParallelExecutionState) SizeEstimate() (r uint64) {
 	if rs.domains != nil {
 		r += rs.domains.SizeEstimate()
 	}
 	return r
 }
 
-func (rs *StateV3) ReadsValid(readLists map[string]*libstate.KvList) bool {
+func (rs *ParallelExecutionState) ReadsValid(readLists map[string]*libstate.KvList) bool {
 	return rs.domains.ReadsValid(readLists)
 }
 
 // StateWriterBufferedV3 - used by parallel workers to accumulate updates and then send them to conflict-resolution.
 type StateWriterBufferedV3 struct {
-	rs           *StateV3
+	rs           *ParallelExecutionState
 	trace        bool
 	writeLists   map[string]*libstate.KvList
 	accountPrevs map[string][]byte
@@ -337,7 +340,7 @@ type StateWriterBufferedV3 struct {
 	accumulator  *shards.Accumulator
 }
 
-func NewStateWriterBufferedV3(rs *StateV3, accumulator *shards.Accumulator) *StateWriterBufferedV3 {
+func NewStateWriterBufferedV3(rs *ParallelExecutionState, accumulator *shards.Accumulator) *StateWriterBufferedV3 {
 	return &StateWriterBufferedV3{
 		rs:          rs,
 		writeLists:  newWriteList(),
@@ -449,12 +452,12 @@ func (w *StateWriterBufferedV3) CreateContract(address common.Address) error {
 
 // StateWriterV3 - used by parallel workers to accumulate updates and then send them to conflict-resolution.
 type StateWriterV3 struct {
-	rs          *StateV3
+	rs          *ParallelExecutionState
 	trace       bool
 	accumulator *shards.Accumulator
 }
 
-func NewStateWriterV3(rs *StateV3, accumulator *shards.Accumulator) *StateWriterV3 {
+func NewStateWriterV3(rs *ParallelExecutionState, accumulator *shards.Accumulator) *StateWriterV3 {
 	return &StateWriterV3{
 		rs:          rs,
 		accumulator: accumulator,

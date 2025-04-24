@@ -110,9 +110,9 @@ func (tx *ArbitrumUnsignedTx) Type() byte                   { return ArbitrumUns
 func (tx *ArbitrumUnsignedTx) GetChainID() *uint256.Int     { return uint256.MustFromBig(tx.ChainId) }
 func (tx *ArbitrumUnsignedTx) GetNonce() uint64             { return tx.Nonce }
 func (tx *ArbitrumUnsignedTx) GetPrice() *uint256.Int       { return uint256.MustFromBig(tx.GasFeeCap) }
-func (tx *ArbitrumUnsignedTx) GetTip() *uint256.Int         { return uintZero }
+func (tx *ArbitrumUnsignedTx) GetTipCap() *uint256.Int      { return uintZero }
 func (tx *ArbitrumUnsignedTx) GetBlobHashes() []common.Hash { return []common.Hash{} }
-func (tx *ArbitrumUnsignedTx) GetGas() uint64               { return tx.Gas }
+func (tx *ArbitrumUnsignedTx) GetGasLimit() uint64          { return tx.Gas }
 func (tx *ArbitrumUnsignedTx) GetBlobGas() uint64           { return 0 }
 func (tx *ArbitrumUnsignedTx) GetValue() *uint256.Int       { return uint256.MustFromBig(tx.Value) }
 func (tx *ArbitrumUnsignedTx) GetTo() *common.Address       { return tx.To }
@@ -128,12 +128,12 @@ func (tx *ArbitrumUnsignedTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.
 	return res.Set(baseFee)
 }
 
-func (tx *ArbitrumUnsignedTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
-	msg := Message{
+func (tx *ArbitrumUnsignedTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
+	msg := &Message{
 		gasPrice:   *tx.GetPrice(),
-		tip:        *tx.GetTip(),
+		tipCap:     *tx.GetTipCap(),
 		feeCap:     *tx.GetFeeCap(),
-		gasLimit:   tx.GetGas(),
+		gasLimit:   tx.GetGasLimit(),
 		nonce:      tx.GetNonce(),
 		accessList: tx.GetAccessList(),
 		from:       tx.From,
@@ -498,10 +498,10 @@ func (tx *ArbitrumContractTx) Type() byte                   { return ArbitrumCon
 func (tx *ArbitrumContractTx) GetChainID() *uint256.Int     { return uint256.MustFromBig(tx.ChainId) }
 func (tx *ArbitrumContractTx) GetNonce() uint64             { return 0 }
 func (tx *ArbitrumContractTx) GetPrice() *uint256.Int       { return uint256.MustFromBig(tx.GasFeeCap) }
-func (tx *ArbitrumContractTx) GetTip() *uint256.Int         { return uintZero }
+func (tx *ArbitrumContractTx) GetTipCap() *uint256.Int      { return uintZero }
 func (tx *ArbitrumContractTx) GetFeeCap() *uint256.Int      { return uint256.MustFromBig(tx.GasFeeCap) }
 func (tx *ArbitrumContractTx) GetBlobHashes() []common.Hash { return []common.Hash{} }
-func (tx *ArbitrumContractTx) GetGas() uint64               { return tx.Gas }
+func (tx *ArbitrumContractTx) GetGasLimit() uint64          { return tx.Gas }
 func (tx *ArbitrumContractTx) GetBlobGas() uint64           { return 0 }
 func (tx *ArbitrumContractTx) GetData() []byte              { return tx.Data }
 func (tx *ArbitrumContractTx) GetValue() *uint256.Int       { return uint256.MustFromBig(tx.Value) }
@@ -519,12 +519,12 @@ func (tx *ArbitrumContractTx) RawSignatureValues() (*uint256.Int, *uint256.Int, 
 	return uintZero, uintZero, uintZero
 }
 
-func (tx *ArbitrumContractTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
-	msg := Message{
+func (tx *ArbitrumContractTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
+	msg := &Message{
 		gasPrice:   *tx.GetPrice(),
-		tip:        *tx.GetTip(),
+		tipCap:     *tx.GetTipCap(),
 		feeCap:     *tx.GetFeeCap(),
-		gasLimit:   tx.GetGas(),
+		gasLimit:   tx.GetGasLimit(),
 		nonce:      tx.GetNonce(),
 		accessList: tx.GetAccessList(),
 		from:       tx.From,
@@ -536,7 +536,7 @@ func (tx *ArbitrumContractTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		Tx: tx,
 	}
 	if baseFee != nil {
-		msg.gasPrice.SetFromBig(cmath.BigMin(msg.gasPrice.ToBig().Add(msg.tip.ToBig(), baseFee), msg.feeCap.ToBig()))
+		msg.gasPrice.SetFromBig(cmath.BigMin(msg.gasPrice.ToBig().Add(msg.tipCap.ToBig(), baseFee), msg.feeCap.ToBig()))
 	}
 	return msg, nil
 }
@@ -920,10 +920,10 @@ func (tx *ArbitrumRetryTx) Type() byte                   { return ArbitrumRetryT
 func (tx *ArbitrumRetryTx) GetChainID() *uint256.Int     { return uint256.MustFromBig(tx.ChainId) }
 func (tx *ArbitrumRetryTx) GetNonce() uint64             { return tx.Nonce }
 func (tx *ArbitrumRetryTx) GetPrice() *uint256.Int       { return uint256.MustFromBig(tx.GasFeeCap) }
-func (tx *ArbitrumRetryTx) GetTip() *uint256.Int         { return uintZero }
+func (tx *ArbitrumRetryTx) GetTipCap() *uint256.Int      { return uintZero }
 func (tx *ArbitrumRetryTx) GetFeeCap() *uint256.Int      { return uint256.MustFromBig(tx.GasFeeCap) }
 func (tx *ArbitrumRetryTx) GetBlobHashes() []common.Hash { return []common.Hash{} }
-func (tx *ArbitrumRetryTx) GetGas() uint64               { return tx.Gas }
+func (tx *ArbitrumRetryTx) GetGasLimit() uint64          { return tx.Gas }
 func (tx *ArbitrumRetryTx) GetBlobGas() uint64           { return 0 }
 func (tx *ArbitrumRetryTx) GetData() []byte              { return tx.Data }
 func (tx *ArbitrumRetryTx) GetValue() *uint256.Int       { return uint256.MustFromBig(tx.Value) }
@@ -941,12 +941,12 @@ func (tx *ArbitrumRetryTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *ui
 	return uintZero, uintZero, uintZero
 }
 
-func (tx *ArbitrumRetryTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
-	msg := Message{
+func (tx *ArbitrumRetryTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
+	msg := &Message{
 		gasPrice:   *tx.GetPrice(),
-		tip:        *tx.GetTip(),
+		tipCap:     *tx.GetTipCap(),
 		feeCap:     *tx.GetFeeCap(),
-		gasLimit:   tx.GetGas(),
+		gasLimit:   tx.GetGasLimit(),
 		nonce:      tx.GetNonce(),
 		accessList: tx.GetAccessList(),
 		from:       tx.From,
@@ -958,7 +958,7 @@ func (tx *ArbitrumRetryTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Ru
 		Tx: tx,
 	}
 	if baseFee != nil {
-		msg.gasPrice.SetFromBig(cmath.BigMin(msg.gasPrice.ToBig().Add(msg.tip.ToBig(), baseFee), msg.feeCap.ToBig()))
+		msg.gasPrice.SetFromBig(cmath.BigMin(msg.gasPrice.ToBig().Add(msg.tipCap.ToBig(), baseFee), msg.feeCap.ToBig()))
 	}
 	return msg, nil
 }
@@ -1408,10 +1408,10 @@ func (tx *ArbitrumSubmitRetryableTx) copy() *ArbitrumSubmitRetryableTx {
 
 func (tx *ArbitrumSubmitRetryableTx) Type() byte                   { return ArbitrumSubmitRetryableTxType }
 func (tx *ArbitrumSubmitRetryableTx) GetBlobHashes() []common.Hash { return []common.Hash{} }
-func (tx *ArbitrumSubmitRetryableTx) GetGas() uint64               { return tx.Gas }
+func (tx *ArbitrumSubmitRetryableTx) GetGasLimit() uint64          { return tx.Gas }
 func (tx *ArbitrumSubmitRetryableTx) GetBlobGas() uint64           { return 0 }
 func (tx *ArbitrumSubmitRetryableTx) GetNonce() uint64             { return 0 }
-func (tx *ArbitrumSubmitRetryableTx) GetTip() *uint256.Int         { return uintZero }
+func (tx *ArbitrumSubmitRetryableTx) GetTipCap() *uint256.Int      { return uintZero }
 func (tx *ArbitrumSubmitRetryableTx) GetValue() *uint256.Int       { return uintZero }
 func (tx *ArbitrumSubmitRetryableTx) GetTo() *common.Address       { return &ArbRetryableTxAddress }
 func (tx *ArbitrumSubmitRetryableTx) GetAccessList() AccessList    { return nil }
@@ -1602,12 +1602,12 @@ func (tx *ArbitrumSubmitRetryableTx) encodePayload(w io.Writer, b []byte, payloa
 	return nil
 }
 
-func (tx *ArbitrumSubmitRetryableTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
-	msg := Message{
+func (tx *ArbitrumSubmitRetryableTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
+	msg := &Message{
 		gasPrice:   *tx.GetPrice(),
-		tip:        *tx.GetTip(),
+		tipCap:     *tx.GetTipCap(),
 		feeCap:     *tx.GetFeeCap(),
-		gasLimit:   tx.GetGas(),
+		gasLimit:   tx.GetGasLimit(),
 		nonce:      tx.GetNonce(),
 		accessList: tx.GetAccessList(),
 		from:       tx.From,
@@ -1619,7 +1619,7 @@ func (tx *ArbitrumSubmitRetryableTx) AsMessage(s Signer, baseFee *big.Int, rules
 		Tx: tx,
 	}
 	if baseFee != nil {
-		msg.gasPrice.SetFromBig(cmath.BigMin(msg.gasPrice.ToBig().Add(msg.tip.ToBig(), baseFee), msg.feeCap.ToBig()))
+		msg.gasPrice.SetFromBig(cmath.BigMin(msg.gasPrice.ToBig().Add(msg.tipCap.ToBig(), baseFee), msg.feeCap.ToBig()))
 	}
 	// if !rules.IsCancun {
 	// 	return msg, errors.New("BlobTx transactions require Cancun")
@@ -1910,10 +1910,10 @@ func (tx *ArbitrumDepositTx) Type() byte                   { return ArbitrumDepo
 func (tx *ArbitrumDepositTx) GetChainID() *uint256.Int     { return uint256.MustFromBig(tx.ChainId) }
 func (tx *ArbitrumDepositTx) GetNonce() uint64             { return 0 }
 func (tx *ArbitrumDepositTx) GetPrice() *uint256.Int       { return uintZero }
-func (tx *ArbitrumDepositTx) GetTip() *uint256.Int         { return uintZero }
+func (tx *ArbitrumDepositTx) GetTipCap() *uint256.Int      { return uintZero }
 func (tx *ArbitrumDepositTx) GetFeeCap() *uint256.Int      { return uintZero }
 func (tx *ArbitrumDepositTx) GetBlobHashes() []common.Hash { return []common.Hash{} }
-func (tx *ArbitrumDepositTx) GetGas() uint64               { return 0 }
+func (tx *ArbitrumDepositTx) GetGasLimit() uint64          { return 0 }
 func (tx *ArbitrumDepositTx) GetBlobGas() uint64           { return 0 }
 func (tx *ArbitrumDepositTx) GetData() []byte              { return nil }
 func (tx *ArbitrumDepositTx) GetValue() *uint256.Int       { return uint256.MustFromBig(tx.Value) }
@@ -1925,12 +1925,12 @@ func (tx *ArbitrumDepositTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *
 	return uintZero, uintZero, uintZero
 }
 
-func (tx *ArbitrumDepositTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
-	msg := Message{
+func (tx *ArbitrumDepositTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
+	msg := &Message{
 		gasPrice:   *tx.GetPrice(),
-		tip:        *tx.GetTip(),
+		tipCap:     *tx.GetTipCap(),
 		feeCap:     *tx.GetFeeCap(),
-		gasLimit:   tx.GetGas(),
+		gasLimit:   tx.GetGasLimit(),
 		nonce:      tx.GetNonce(),
 		accessList: tx.GetAccessList(),
 		from:       tx.From,
@@ -1942,7 +1942,7 @@ func (tx *ArbitrumDepositTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.
 		Tx: tx,
 	}
 	if baseFee != nil {
-		msg.gasPrice.SetFromBig(cmath.BigMin(msg.gasPrice.ToBig().Add(msg.tip.ToBig(), baseFee), msg.feeCap.ToBig()))
+		msg.gasPrice.SetFromBig(cmath.BigMin(msg.gasPrice.ToBig().Add(msg.tipCap.ToBig(), baseFee), msg.feeCap.ToBig()))
 	}
 	// if msg.feeCap.IsZero() {
 	// 	msg.feeCap.Set(uint256.NewInt(0x5f5e100))
@@ -1956,7 +1956,7 @@ func (tx *ArbitrumDepositTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.
 	// 		return msg, errors.New("gasPrice higher than 2^256-1")
 	// 	}
 	// }
-	// msg.gasPrice.Add(&msg.gasPrice, tx.GetTip())
+	// msg.gasPrice.Add(&msg.gasPrice, tx.GetTipCap())
 	// if msg.gasPrice.Gt(tx.GetFeeCap()) {
 	// 	msg.gasPrice.Set(tx.GetFeeCap())
 	// }
@@ -2215,10 +2215,10 @@ func (tx *ArbitrumInternalTx) Type() byte                   { return ArbitrumInt
 func (tx *ArbitrumInternalTx) GetChainID() *uint256.Int     { return tx.ChainId }
 func (tx *ArbitrumInternalTx) GetNonce() uint64             { return 0 }
 func (tx *ArbitrumInternalTx) GetPrice() *uint256.Int       { return uintZero }
-func (tx *ArbitrumInternalTx) GetTip() *uint256.Int         { return uintZero }
+func (tx *ArbitrumInternalTx) GetTipCap() *uint256.Int      { return uintZero }
 func (tx *ArbitrumInternalTx) GetFeeCap() *uint256.Int      { return uintZero }
 func (tx *ArbitrumInternalTx) GetBlobHashes() []common.Hash { return []common.Hash{} }
-func (tx *ArbitrumInternalTx) GetGas() uint64               { return 0 }
+func (tx *ArbitrumInternalTx) GetGasLimit() uint64          { return 0 }
 func (tx *ArbitrumInternalTx) GetBlobGas() uint64           { return 0 } // todo
 func (tx *ArbitrumInternalTx) GetData() []byte              { return tx.Data }
 func (tx *ArbitrumInternalTx) GetValue() *uint256.Int       { return uintZero }
@@ -2230,12 +2230,12 @@ func (tx *ArbitrumInternalTx) RawSignatureValues() (*uint256.Int, *uint256.Int, 
 	return uintZero, uintZero, uintZero
 }
 
-func (tx *ArbitrumInternalTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
-	msg := Message{
+func (tx *ArbitrumInternalTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
+	msg := &Message{
 		gasPrice:   *tx.GetPrice(),
-		tip:        *tx.GetTip(),
+		tipCap:     *tx.GetTipCap(),
 		feeCap:     *tx.GetFeeCap(),
-		gasLimit:   tx.GetGas(),
+		gasLimit:   tx.GetGasLimit(),
 		nonce:      tx.GetNonce(),
 		accessList: tx.GetAccessList(),
 		from:       ArbosAddress,
@@ -2247,7 +2247,7 @@ func (tx *ArbitrumInternalTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 	}
 
 	if baseFee != nil {
-		msg.gasPrice.SetFromBig(cmath.BigMin(msg.gasPrice.ToBig().Add(msg.tip.ToBig(), baseFee), msg.feeCap.ToBig()))
+		msg.gasPrice.SetFromBig(cmath.BigMin(msg.gasPrice.ToBig().Add(msg.tipCap.ToBig(), baseFee), msg.feeCap.ToBig()))
 	}
 	// if msg.feeCap.IsZero() {
 	// 	msg.gasLimit = baseFee.Uint64()
@@ -2262,7 +2262,7 @@ func (tx *ArbitrumInternalTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 	// if msg.feeCap.IsZero() {
 	// 	msg.gasLimit = baseFee.Uint64()
 	// }
-	// msg.gasPrice.Add(&msg.gasPrice, tx.GetTip())
+	// msg.gasPrice.Add(&msg.gasPrice, tx.GetTipCap())
 	// if msg.gasPrice.Gt(tx.GetFeeCap()) {
 	// 	msg.gasPrice.Set(tx.GetFeeCap())
 	// }

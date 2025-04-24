@@ -35,12 +35,11 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/erigontech/erigon-lib/chain/params"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/core/types/typestest"
 )
 
 // The values in those tests are from the Transaction Tests
@@ -71,11 +70,11 @@ var (
 		ChainID: u256.Num1,
 		LegacyTx: LegacyTx{
 			CommonTx: CommonTx{
-				Nonce: 3,
-				To:    &testAddr,
-				Value: uint256.NewInt(10),
-				Gas:   25000,
-				Data:  libcommon.FromHex("5544"),
+				Nonce:    3,
+				To:       &testAddr,
+				Value:    uint256.NewInt(10),
+				GasLimit: 25000,
+				Data:     libcommon.FromHex("5544"),
 			},
 			GasPrice: uint256.NewInt(1),
 		},
@@ -88,14 +87,14 @@ var (
 
 	dynFeeTx = &DynamicFeeTransaction{
 		CommonTx: CommonTx{
-			Nonce: 3,
-			To:    &testAddr,
-			Value: uint256.NewInt(10),
-			Gas:   25000,
-			Data:  libcommon.FromHex("5544"),
+			Nonce:    3,
+			To:       &testAddr,
+			Value:    uint256.NewInt(10),
+			GasLimit: 25000,
+			Data:     libcommon.FromHex("5544"),
 		},
 		ChainID: u256.Num1,
-		Tip:     uint256.NewInt(1),
+		TipCap:  uint256.NewInt(1),
 		FeeCap:  uint256.NewInt(1),
 	}
 
@@ -382,10 +381,10 @@ func TestTransactionCoding(t *testing.T) {
 			// Legacy tx.
 			txdata = &LegacyTx{
 				CommonTx: CommonTx{
-					Nonce: i,
-					To:    &recipient,
-					Gas:   1,
-					Data:  []byte("abcdef"),
+					Nonce:    i,
+					To:       &recipient,
+					GasLimit: 1,
+					Data:     []byte("abcdef"),
 				},
 				GasPrice: u256.Num2,
 			}
@@ -393,9 +392,9 @@ func TestTransactionCoding(t *testing.T) {
 			// Legacy txn contract creation.
 			txdata = &LegacyTx{
 				CommonTx: CommonTx{
-					Nonce: i,
-					Gas:   1,
-					Data:  []byte("abcdef"),
+					Nonce:    i,
+					GasLimit: 1,
+					Data:     []byte("abcdef"),
 				},
 				GasPrice: u256.Num2,
 			}
@@ -405,10 +404,10 @@ func TestTransactionCoding(t *testing.T) {
 				ChainID: uint256.NewInt(1),
 				LegacyTx: LegacyTx{
 					CommonTx: CommonTx{
-						Nonce: i,
-						To:    &recipient,
-						Gas:   123457,
-						Data:  []byte("abcdef"),
+						Nonce:    i,
+						To:       &recipient,
+						GasLimit: 123457,
+						Data:     []byte("abcdef"),
 					},
 					GasPrice: uint256.NewInt(10),
 				},
@@ -420,10 +419,10 @@ func TestTransactionCoding(t *testing.T) {
 				ChainID: uint256.NewInt(1),
 				LegacyTx: LegacyTx{
 					CommonTx: CommonTx{
-						Nonce: i,
-						To:    &recipient,
-						Gas:   123457,
-						Data:  []byte("abcdef"),
+						Nonce:    i,
+						To:       &recipient,
+						GasLimit: 123457,
+						Data:     []byte("abcdef"),
 					},
 					GasPrice: uint256.NewInt(10),
 				},
@@ -434,8 +433,8 @@ func TestTransactionCoding(t *testing.T) {
 				ChainID: uint256.NewInt(1),
 				LegacyTx: LegacyTx{
 					CommonTx: CommonTx{
-						Nonce: i,
-						Gas:   123457,
+						Nonce:    i,
+						GasLimit: 123457,
 					},
 					GasPrice: uint256.NewInt(10),
 				},
@@ -596,17 +595,17 @@ func randData() []byte {
 func newRandBlobTx() *BlobTx {
 	stx := &BlobTx{DynamicFeeTransaction: DynamicFeeTransaction{
 		CommonTx: CommonTx{
-			Nonce: rand.Uint64(),
-			Gas:   rand.Uint64(),
-			To:    randAddr(),
-			Value: uint256.NewInt(rand.Uint64()),
-			Data:  randData(),
-			V:     *uint256.NewInt(0),
-			R:     *uint256.NewInt(rand.Uint64()),
-			S:     *uint256.NewInt(rand.Uint64()),
+			Nonce:    rand.Uint64(),
+			GasLimit: rand.Uint64(),
+			To:       randAddr(),
+			Value:    uint256.NewInt(rand.Uint64()),
+			Data:     randData(),
+			V:        *uint256.NewInt(0),
+			R:        *uint256.NewInt(rand.Uint64()),
+			S:        *uint256.NewInt(rand.Uint64()),
 		},
 		ChainID:    uint256.NewInt(rand.Uint64()),
-		Tip:        uint256.NewInt(rand.Uint64()),
+		TipCap:     uint256.NewInt(rand.Uint64()),
 		FeeCap:     uint256.NewInt(rand.Uint64()),
 		AccessList: randAccessList(),
 	},
@@ -620,9 +619,9 @@ func printSTX(stx *BlobTx) {
 	fmt.Println("--BlobTx")
 	fmt.Printf("ChainID: %v\n", stx.ChainID)
 	fmt.Printf("Nonce: %v\n", stx.Nonce)
-	fmt.Printf("MaxPriorityFeePerGas: %v\n", stx.Tip)
+	fmt.Printf("MaxPriorityFeePerGas: %v\n", stx.TipCap)
 	fmt.Printf("MaxFeePerGas: %v\n", stx.FeeCap)
-	fmt.Printf("Gas: %v\n", stx.Gas)
+	fmt.Printf("Gas: %v\n", stx.GasLimit)
 	fmt.Printf("To: %v\n", stx.To)
 	fmt.Printf("Value: %v\n", stx.Value)
 	fmt.Printf("Data: %v\n", stx.Data)
@@ -676,8 +675,8 @@ func newRandProofs(size int) KZGProofs {
 func newRandBlobs(size int) Blobs {
 	var result Blobs
 	for i := 0; i < size; i++ {
-		var arr [fixedgas.BlobSize]byte
-		for j := 0; j < fixedgas.BlobSize; j++ {
+		var arr [params.BlobSize]byte
+		for j := 0; j < params.BlobSize; j++ {
 			arr[j] = randByte()
 		}
 		result = append(result, arr)
@@ -699,12 +698,6 @@ func newRandBlobWrapper() *BlobTxWrapper {
 func populateBlobTxs() {
 	for i := 0; i < N; i++ {
 		dummyBlobTxs[i] = newRandBlobTx()
-	}
-}
-
-func populateBlobWrapperTxs() {
-	for i := 0; i < N; i++ {
-		dummyBlobWrapperTxs[i] = newRandBlobWrapper()
 	}
 }
 
@@ -737,7 +730,7 @@ func TestBlobTxEncodeDecode(t *testing.T) {
 }
 
 func TestShortUnwrap(t *testing.T) {
-	blobTxRlp, _ := typestest.MakeBlobTxnRlp()
+	blobTxRlp, _ := MakeBlobTxnRlp()
 	shortRlp, err := UnwrapTxPlayloadRlp(blobTxRlp)
 	if err != nil {
 		t.Errorf("short rlp stripping failed: %v", err)
@@ -749,7 +742,7 @@ func TestShortUnwrap(t *testing.T) {
 		t.Errorf("short rlp decoding failed : %v", err)
 	}
 	wrappedBlobTx := BlobTxWrapper{}
-	blockTxRlp2, _ := typestest.MakeBlobTxnRlp()
+	blockTxRlp2, _ := MakeBlobTxnRlp()
 	err = wrappedBlobTx.DecodeRLP(rlp.NewStream(bytes.NewReader(blockTxRlp2[1:]), 0))
 	if err != nil {
 		t.Errorf("long rlp decoding failed: %v", err)

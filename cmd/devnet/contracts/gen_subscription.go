@@ -8,10 +8,9 @@ import (
 	"strings"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-
 	ethereum "github.com/erigontech/erigon"
-	"github.com/erigontech/erigon/accounts/abi"
-	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/execution/abi"
+	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/event"
 )

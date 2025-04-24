@@ -80,6 +80,45 @@ func (c *MockEonTrackerCurrentEonCall) DoAndReturn(f func() (shutter.Eon, bool))
 	return c
 }
 
+// EonByBlockNum mocks base method.
+func (m *MockEonTracker) EonByBlockNum(blockNum uint64) (shutter.Eon, bool) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "EonByBlockNum", blockNum)
+	ret0, _ := ret[0].(shutter.Eon)
+	ret1, _ := ret[1].(bool)
+	return ret0, ret1
+}
+
+// EonByBlockNum indicates an expected call of EonByBlockNum.
+func (mr *MockEonTrackerMockRecorder) EonByBlockNum(blockNum any) *MockEonTrackerEonByBlockNumCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "EonByBlockNum", reflect.TypeOf((*MockEonTracker)(nil).EonByBlockNum), blockNum)
+	return &MockEonTrackerEonByBlockNumCall{Call: call}
+}
+
+// MockEonTrackerEonByBlockNumCall wrap *gomock.Call
+type MockEonTrackerEonByBlockNumCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockEonTrackerEonByBlockNumCall) Return(arg0 shutter.Eon, arg1 bool) *MockEonTrackerEonByBlockNumCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockEonTrackerEonByBlockNumCall) Do(f func(uint64) (shutter.Eon, bool)) *MockEonTrackerEonByBlockNumCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockEonTrackerEonByBlockNumCall) DoAndReturn(f func(uint64) (shutter.Eon, bool)) *MockEonTrackerEonByBlockNumCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // RecentEon mocks base method.
 func (m *MockEonTracker) RecentEon(index shutter.EonIndex) (shutter.Eon, bool) {
 	m.ctrl.T.Helper()

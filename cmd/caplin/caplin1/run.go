@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/sentinel"
 	"github.com/erigontech/erigon/cl/sentinel/service"
@@ -73,7 +72,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/stages"
 	"github.com/erigontech/erigon/cl/pool"
 
-	"github.com/Giulio2002/bls"
+	"github.com/erigontech/erigon/cl/utils/bls"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
@@ -146,14 +145,13 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		if config.HaveInvalidDevnetParams() {
 			return errors.New("devnet config and genesis state paths must be set together")
 		}
-		networkConfig, _ = clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
-		tmp, err := clparams.CustomConfig(config.CustomConfigPath)
+		customBeaconCfg, customNetworkCfg, err := clparams.CustomConfig(config.CustomConfigPath)
 		if err != nil {
 			return err
 		}
-		beaconConfig = &tmp
+		beaconConfig = &customBeaconCfg
+		networkConfig = &customNetworkCfg
 		genesisDb = genesisdb.NewGenesisDB(beaconConfig, dirs.CaplinGenesis)
-
 		stateBytes, err := os.ReadFile(config.CustomGenesisStatePath)
 		if err != nil {
 			return fmt.Errorf("could not read provided genesis state file: %s", err)
@@ -264,7 +262,6 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	syncContributionPool := sync_contribution_pool.NewSyncContributionPool(beaconConfig)
 	emitters := beaconevents.NewEventEmitter()
 	aggregationPool := aggregation.NewAggregationPool(ctx, beaconConfig, networkConfig, ethClock)
-	validatorMonitor := monitor.NewValidatorMonitor(config.EnableValidatorMonitor, ethClock, beaconConfig, syncedDataManager)
 	doLMDSampling := len(state.GetActiveValidatorsIndices(state.Slot()/beaconConfig.SlotsPerEpoch)) >= 20_000
 
 	// create the public keys registry
@@ -272,7 +269,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 
 	forkChoice, err := forkchoice.NewForkChoiceStore(
 		ethClock, state, engine, pool, fork_graph.NewForkGraphDisk(state, syncedDataManager, fcuFs, config.BeaconAPIRouter, emitters),
-		emitters, syncedDataManager, blobStorage, validatorMonitor, pksRegistry, doLMDSampling)
+		emitters, syncedDataManager, blobStorage, pksRegistry, doLMDSampling)
 	if err != nil {
 		logger.Error("Could not create forkchoice", "err", err)
 		return err
@@ -395,8 +392,18 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	antiq := antiquary.NewAntiquary(ctx, blobStorage, genesisState, vTables, beaconConfig, dirs, snDownloader, indexDB, stateSnapshots, csn, rcsn, syncedDataManager, logger, config.ArchiveStates, config.ArchiveBlocks, config.ArchiveBlobs, config.SnapshotGenerationEnabled, snBuildSema)
 	// Create the antiquary
 	go func() {
-		if err := antiq.Loop(); err != nil {
-			logger.Error("Antiquary failed", "err", err)
+		keepGoing := true
+		for keepGoing {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(10 * time.Second):
+				if err := antiq.Loop(); err != nil {
+					logger.Debug("Antiquary failed", "err", err)
+				} else {
+					keepGoing = false
+				}
+			}
 		}
 	}()
 
@@ -438,7 +445,6 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			blsToExecutionChangeService,
 			proposerSlashingService,
 			option.builderClient,
-			validatorMonitor,
 			stateSnapshots,
 			true,
 		)
@@ -467,7 +473,6 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		emitters,
 		blobStorage,
 		attestationProducer,
-		validatorMonitor,
 	)
 	sync := stages.ConsensusClStages(ctx, stageCfg)
 

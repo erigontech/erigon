@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 	"io/fs"
 	"math"
 	randOld "math/rand"
@@ -35,10 +34,12 @@ import (
 	"testing"
 	"time"
 
+	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
@@ -80,10 +81,9 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	t.Cleanup(db.Close)
 	salt := uint32(1)
 
-	cfg.hist.iiCfg.aggregationStep = aggStep
 	cfg.hist.iiCfg.dirs = dirs
 	cfg.hist.iiCfg.salt = &salt
-	d, err := NewDomain(cfg, logger)
+	d, err := NewDomain(cfg, aggStep, logger)
 	require.NoError(t, err)
 	d.DisableFsync()
 	t.Cleanup(d.Close)
@@ -144,7 +144,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	writer.SetTxNum(2)
 
@@ -286,7 +286,7 @@ func TestDomain_AfterPrune(t *testing.T) {
 	dc := d.BeginFilesRo()
 	defer d.Close()
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	var (
 		k1 = []byte("key1")
@@ -380,7 +380,7 @@ func filledDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain, uint64) {
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	var prev [32][]byte
 	// keys are encodings of numbers 1..31
@@ -612,7 +612,7 @@ func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	val := []byte("value1")
 	writer.SetTxNum(1)
@@ -665,7 +665,7 @@ func TestDomain_Delete(t *testing.T) {
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	// Put on even txNum, delete on odd txNum
 	for txNum := uint64(0); txNum < uint64(1000); txNum++ {
@@ -727,7 +727,7 @@ func TestNewSegStreamReader(t *testing.T) {
 	for sr.HasNext() {
 		k, v, err := sr.Next()
 		if prevK != nil {
-			require.True(t, bytes.Compare(prevK, k) < 0)
+			require.Negative(t, bytes.Compare(prevK, k))
 		}
 		prevK = common.Copy(k)
 
@@ -830,7 +830,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
@@ -918,7 +918,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 		require.EqualValues(t, v[:], storedV, label)
 	}
 
-	from, to := d.stepsRangeInDB(tx)
+	from, to := dc.stepsRangeInDB(tx)
 	require.Equal(t, 3, int(from))
 	require.Equal(t, 4, int(to))
 
@@ -1030,10 +1030,9 @@ func emptyTestDomain(aggStep uint64) *Domain {
 	salt := uint32(1)
 	cfg.hist.iiCfg.salt = &salt
 	cfg.hist.iiCfg.dirs = datadir2.New(os.TempDir())
-	cfg.hist.iiCfg.aggregationStep = aggStep
 	cfg.hist.iiCfg.name = kv.InvertedIdx("dummy")
 
-	d, err := NewDomain(cfg, log.New())
+	d, err := NewDomain(cfg, aggStep, log.New())
 	if err != nil {
 		panic(err)
 	}
@@ -1061,7 +1060,7 @@ func TestScanStaticFilesD(t *testing.T) {
 		}
 		return true
 	})
-	require.Equal(t, 6, len(found))
+	require.Len(t, found, 6)
 }
 
 func TestDomain_CollationBuildInMem(t *testing.T) {
@@ -1082,7 +1081,7 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	d.aggregationStep = maxTx
 
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	var preval1, preval2, preval3 []byte
 
@@ -1177,7 +1176,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	var prev []byte
 	for i = 0; i < len(vals); i++ {
@@ -1276,7 +1275,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
@@ -1442,10 +1441,14 @@ func generateUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 
 	for i := uint64(0); i < keyTxsLimit; i++ {
 		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
-		value := make([]byte, 10)
-		r.Read(value)
+		up := upd{txNum: txNum, value: []byte{}}
 
-		updates = append(updates, upd{txNum: txNum, value: value})
+		if r.Rand.IntN(100) < 85 || i == keyTxsLimit-1 { // 15% rate for delete, last tx is never a deletion
+			up.value = make([]byte, 10)
+			r.Read(up.value)
+		}
+
+		updates = append(updates, up)
 		usedTxNums[txNum] = true
 	}
 	sort.Slice(updates, func(i, j int) bool { return updates[i].txNum < updates[j].txNum })
@@ -1478,7 +1481,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	dc := d.BeginFilesRo()
 	defer d.Close()
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	keySize1 := uint64(length.Addr)
 	keySize2 := uint64(length.Addr + length.Hash)
@@ -1489,11 +1492,13 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	// put some kvs
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	for key, updates := range data {
-		p := []byte{}
+		pv, ps := []byte{}, uint64(0)
 		for i := 0; i < len(updates); i++ {
 			writer.SetTxNum(updates[i].txNum)
-			writer.PutWithPrev([]byte(key), nil, updates[i].value, p, 0)
-			p = common.Copy(updates[i].value)
+			if i > 0 {
+				pv, ps = updates[i-1].value, updates[i-1].txNum/d.aggregationStep
+			}
+			writer.PutWithPrev([]byte(key), nil, updates[i].value, pv, ps)
 		}
 	}
 	writer.SetTxNum(totalTx)
@@ -1519,6 +1524,11 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 		for i := 1; i < len(updates); i++ {
 			v, ok, err := dc.GetAsOf([]byte(key), updates[i].txNum, tx)
 			require.NoError(err)
+			if len(updates[i-1].value) == 0 {
+				require.False(ok)
+				require.Empty(v, "value was deleted, expected empty slice, got %x", v)
+				continue
+			}
 			require.True(ok)
 			require.EqualValuesf(updates[i-1].value, v, "(%d/%d) key %x, txn %d", kc, len(data), []byte(key), updates[i-1].txNum)
 		}
@@ -1548,23 +1558,37 @@ func TestDomainRange(t *testing.T) {
 	dc := d.BeginFilesRo()
 	defer d.Close()
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	keySize1 := uint64(2)
 	keySize2 := uint64(2)
 	totalTx := uint64(300)
-	keyTxsLimit := uint64(2)
+	keyTxsLimit := uint64(3)
 	keyLimit := uint64(10)
 
 	// put some kvs
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
+	cutoffTxnum := uint64(190)
+	keysLeftAfterCutoff := make(map[string]struct{})
+	keysLatest := make(map[string]struct{})
+
 	for key, updates := range data {
-		p := []byte{}
+		pv, ps := []byte{}, uint64(0)
 		for i := 0; i < len(updates); i++ {
 			writer.SetTxNum(updates[i].txNum)
-			err = writer.PutWithPrev([]byte(key), nil, updates[i].value, p, 0)
+			if i > 0 {
+				pv, ps = updates[i-1].value, updates[i-1].txNum/d.aggregationStep
+			}
+			err = writer.PutWithPrev([]byte(key), nil, updates[i].value, pv, ps)
 			require.NoError(err)
-			p = common.Copy(updates[i].value)
+
+			if updates[i].txNum >= cutoffTxnum && len(updates[i].value) > 0 {
+				keysLeftAfterCutoff[key] = struct{}{}
+			}
+			keysLatest[key] = struct{}{}
+			if len(updates[i].value) == 0 {
+				delete(keysLatest, key)
+			}
 		}
 	}
 	writer.SetTxNum(totalTx)
@@ -1585,43 +1609,46 @@ func TestDomainRange(t *testing.T) {
 	defer dc.Close()
 
 	{
-		it, err := dc.ht.RangeAsOf(ctx, 190, nil, nil, order.Asc, -1, tx)
+		it, err := dc.ht.RangeAsOf(ctx, cutoffTxnum, nil, nil, order.Asc, -1, tx)
 		require.NoError(err)
 		keys, vals, err := stream.ToArrayKV(it)
 		require.NoError(err)
 		order.Asc.AssertList(keys)
-		require.Equal(3, len(keys))
-		require.Equal(3, len(vals))
+		require.Equal(len(keysLeftAfterCutoff), len(keys))
+		require.Equal(len(keysLeftAfterCutoff), len(vals))
 	}
 
 	{
-		it, err := dc.RangeLatest(tx, nil, nil, -1)
+		it, err := dc.DebugRangeLatest(tx, nil, nil, -1)
 		require.NoError(err)
 		keys, vals, err := stream.ToArrayKV(it)
 		require.NoError(err)
 		order.Asc.AssertList(keys)
-		require.Equal(5, len(keys))
-		require.Equal(5, len(vals))
+		require.Equal(len(keysLatest), len(keys))
+		require.Equal(len(keysLatest), len(vals))
 	}
 
 	{
-		it, err := dc.RangeAsOf(ctx, tx, []byte(""), nil, 190, order.Asc, -1)
+		it, err := dc.RangeAsOf(ctx, tx, []byte(""), nil, cutoffTxnum, order.Asc, -1)
 		require.NoError(err)
 		keys, vals, err := stream.ToArrayKV(it)
 		require.NoError(err)
 		order.Asc.AssertList(keys)
-		require.Equal(5, len(keys))
-		require.Equal(5, len(vals))
+
+		// we expect here more keys than len(keysLeftAfterCutoff) because we are query Domain here, not History
+		require.Equal(len(keysLatest), len(keys))
+		require.Equal(len(keysLatest), len(vals))
 	}
 
 	{
-		it, err := dc.RangeAsOf(ctx, tx, []byte(""), nil, 190, order.Asc, 4)
+		lim := len(keysLatest) - 1
+		it, err := dc.RangeAsOf(ctx, tx, []byte(""), nil, cutoffTxnum, order.Asc, lim)
 		require.NoError(err)
 		keys, vals, err := stream.ToArrayKV(it)
 		require.NoError(err)
 		order.Asc.AssertList(keys)
-		require.Equal(4, len(keys))
-		require.Equal(4, len(vals))
+		require.Len(keys, lim)
+		require.Len(vals, lim)
 	}
 }
 
@@ -1643,7 +1670,7 @@ func TestDomain_CanPruneAfterAggregation(t *testing.T) {
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	keySize1 := uint64(length.Addr)
 	keySize2 := uint64(length.Addr + length.Hash)
@@ -1738,7 +1765,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	keySize1 := uint64(length.Addr)
 	keySize2 := uint64(length.Addr + length.Hash)
@@ -1781,8 +1808,14 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	for key, updates := range data {
 		kc++
 		for i := 1; i < len(updates); i++ {
-			v, _, err := dc.GetAsOf([]byte(key), updates[i].txNum, tx)
+			v, ok, err := dc.GetAsOf([]byte(key), updates[i].txNum, tx)
 			require.NoError(t, err)
+			if len(updates[i-1].value) == 0 { // was deleted
+				require.False(t, ok)
+				require.Empty(t, v, "value was deleted, expected empty slice, got %x", v)
+				continue
+			}
+			require.True(t, ok)
 			require.EqualValuesf(t, updates[i-1].value, v, "(%d/%d) key %x, txn %d", kc, len(data), []byte(key), updates[i-1].txNum)
 		}
 		if len(updates) == 0 {
@@ -1881,7 +1914,7 @@ func TestDomain_PruneProgress(t *testing.T) {
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	keySize1 := uint64(length.Addr)
 	keySize2 := uint64(length.Addr + length.Hash)
@@ -2005,10 +2038,10 @@ func TestDomain_Unwind(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 		writer := dc.NewWriter()
-		defer writer.close()
+		defer writer.Close()
 		var preval1, preval2, preval3, preval4 []byte
 		for i := uint64(0); i < maxTx; i++ {
-			writer.diff = &StateDiffDomain{}
+			writer.diff = &DomainDiff{}
 			writer.SetTxNum(i)
 			if i%3 == 0 && i > 0 { // once in 3 txn put key3 -> value3.i and skip other keys update
 				if i%12 == 0 { // once in 12 txn delete key3 before update
@@ -2055,7 +2088,7 @@ func TestDomain_Unwind(t *testing.T) {
 		dc := d.BeginFilesRo()
 		defer dc.Close()
 		writer := dc.NewWriter()
-		defer writer.close()
+		defer writer.Close()
 
 		totalDiff := []DomainEntryDiff{}
 		if currTx > unwindTo {
@@ -2067,7 +2100,7 @@ func TestDomain_Unwind(t *testing.T) {
 			}
 		}
 
-		err = dc.Unwind(ctx, tx, unwindTo/d.aggregationStep, unwindTo, totalDiff)
+		err = dc.unwind(ctx, tx, unwindTo/d.aggregationStep, unwindTo, totalDiff)
 		currTx = unwindTo
 		require.NoError(t, err)
 		dc.Close()
@@ -2080,7 +2113,7 @@ func TestDomain_Unwind(t *testing.T) {
 		writeKeys(t, expected, tmpDb, unwindTo)
 
 		suf := fmt.Sprintf(";unwindTo=%d", unwindTo)
-		t.Run("RangeLatest"+suf, func(t *testing.T) {
+		t.Run("DebugRangeLatest"+suf, func(t *testing.T) {
 			t.Helper()
 
 			etx, err := tmpDb.BeginRo(ctx)
@@ -2095,10 +2128,10 @@ func TestDomain_Unwind(t *testing.T) {
 			defer ectx.Close()
 			uc := d.BeginFilesRo()
 			defer uc.Close()
-			et, err := ectx.RangeLatest(etx, nil, nil, -1)
+			et, err := ectx.DebugRangeLatest(etx, nil, nil, -1)
 			require.NoError(t, err)
 
-			ut, err := uc.RangeLatest(utx, nil, nil, -1)
+			ut, err := uc.DebugRangeLatest(utx, nil, nil, -1)
 			require.NoError(t, err)
 			compareIterators(t, et, ut)
 		})
@@ -2256,7 +2289,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 		writer := dc.NewWriter()
-		defer writer.close()
+		defer writer.Close()
 
 		for i := 0; uint64(i) < maxTx; i++ {
 			writer.SetTxNum(uint64(i))
@@ -2427,7 +2460,7 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	keySize1 := uint64(length.Addr)
 	keySize2 := uint64(length.Addr + length.Hash)
@@ -2479,7 +2512,7 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 	var ki int
 	for key, updates := range data {
 
-		v, found, st, en, err := dc.getFromFiles([]byte(key), 0)
+		v, found, st, en, err := dc.getLatestFromFiles([]byte(key), 0)
 		require.True(t, found)
 		require.NoError(t, err)
 		for i := len(updates) - 1; i >= 0; i-- {
@@ -2514,7 +2547,7 @@ func TestCanBuild(t *testing.T) {
 	dc.files = append(dc.files, visibleFile{startTxNum: 0, endTxNum: d.aggregationStep})
 
 	writer := dc.NewWriter()
-	defer writer.close()
+	defer writer.Close()
 
 	k, v := []byte{1}, []byte{1}
 	// db has data which already in files
@@ -2541,5 +2574,5 @@ func TestCanBuild(t *testing.T) {
 	canBuild = dc.canBuild(tx)
 	require.NoError(t, err)
 	require.True(t, canBuild)
-	_ = writer.PutWithPrev(k, nil, hexutility.EncodeTs(d.aggregationStep*2+1), nil, 0)
+	_ = writer.PutWithPrev(k, nil, hexutil.EncodeTs(d.aggregationStep*2+1), nil, 0)
 }

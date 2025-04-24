@@ -23,8 +23,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
 )
 
 // Config is the core config which determines the blockchain settings.
@@ -91,6 +91,9 @@ type Config struct {
 
 	Bor     BorConfig       `json:"-"`
 	BorJSON json.RawMessage `json:"bor,omitempty"`
+
+	// Account Abstraction
+	AllowAA bool
 
 	ArbitrumChainParams ArbitrumChainParams `json:"-"`
 	ArbJSON             json.RawMessage     `json:"arbitrum,omitempty"`
@@ -338,7 +341,7 @@ func (c *Config) GetMinBlobGasPrice() uint64 {
 }
 
 func (c *Config) GetMaxBlobGasPerBlock(t uint64) uint64 {
-	return c.GetMaxBlobsPerBlock(t) * fixedgas.BlobGasPerBlob
+	return c.GetMaxBlobsPerBlock(t) * params.BlobGasPerBlob
 }
 
 func (c *Config) GetMaxBlobsPerBlock(time uint64) uint64 {
@@ -354,7 +357,7 @@ func (c *Config) GetTargetBlobGasPerBlock(t uint64) uint64 {
 	if c != nil {
 		b = c.BlobSchedule
 	}
-	return b.TargetBlobsPerBlock(c.IsPrague(t)) * fixedgas.BlobGasPerBlob
+	return b.TargetBlobsPerBlock(c.IsPrague(t)) * params.BlobGasPerBlob
 }
 
 func (c *Config) GetBlobGasPriceUpdateFraction(t uint64) uint64 {
@@ -618,7 +621,7 @@ func (c *Config) Rules(num uint64, time, currentArbosVersion uint64) *Rules {
 		chainID = new(big.Int)
 	}
 
-	rules := &Rules{
+	return &Rules{
 		ChainID:            new(big.Int).Set(chainID),
 		IsHomestead:        c.IsHomestead(num),
 		IsTangerineWhistle: c.IsTangerineWhistle(num),
@@ -639,8 +642,6 @@ func (c *Config) Rules(num uint64, time, currentArbosVersion uint64) *Rules {
 		IsArbitrum:         c.IsArbitrum(),
 		IsStylus:           c.IsArbitrum() && currentArbosVersion >= ArbosVersion_Stylus,
 	}
-
-	return rules
 }
 
 // isForked returns whether a fork scheduled at block s is active at the given head block.

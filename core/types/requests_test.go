@@ -27,4 +27,10 @@ func TestEmptyRequestsHashCalculation(t *testing.T) {
 	if *h != testH {
 		t.Errorf("Requests Hash calculation error for empty hash, expected: %v, got: %v", testH, h)
 	}
+
+	reqs = make(FlatRequests, 3)
+	h = reqs.Hash()
+	if *h != testH {
+		t.Errorf("Requests Hash calculation error for empty hash, expected: %v, got: %v", testH, h)
+	}
 }

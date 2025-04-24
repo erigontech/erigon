@@ -20,15 +20,16 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-lib/chain/networkid"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/stretchr/testify/require"
 )
 
 func TestSlotData(t *testing.T) {
-	s, err := initial_state.GetGenesisState(clparams.MainnetNetwork)
+	s, err := initial_state.GetGenesisState(networkid.MainnetChainID)
 	require.NoError(t, err)
 	m := &SlotData{
 		Version:                       clparams.ElectraVersion,
@@ -42,9 +43,6 @@ func TestSlotData(t *testing.T) {
 		EarliestExitEpoch:             7,
 		ConsolidationBalanceToConsume: 8,
 		EarliestConsolidationEpoch:    9,
-		PendingDeposits:               solid.NewPendingDepositList(s.BeaconConfig()),
-		PendingPartialWithdrawals:     solid.NewPendingWithdrawalList(s.BeaconConfig()),
-		PendingConsolidations:         solid.NewPendingConsolidationList(s.BeaconConfig()),
 		Fork:                          &cltypes.Fork{Epoch: 12},
 	}
 	var b bytes.Buffer

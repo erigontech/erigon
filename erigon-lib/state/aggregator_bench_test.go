@@ -19,22 +19,21 @@ package state
 import (
 	"bytes"
 	"context"
+	"flag"
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
 )
@@ -45,19 +44,11 @@ func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.RwDB, *Aggregato
 	dirs := datadir.New(b.TempDir())
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	b.Cleanup(db.Close)
-	agg, err := NewAggregator2(context.Background(), dirs, aggStep, db, logger)
+	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, logger)
 	require.NoError(b, err)
 	b.Cleanup(agg.Close)
 	return db, agg
 }
-
-type txWithCtx struct {
-	kv.Tx
-	ac *AggregatorRoTx
-}
-
-func WrapTxWithCtx(tx kv.Tx, ctx *AggregatorRoTx) *txWithCtx { return &txWithCtx{Tx: tx, ac: ctx} }
-func (tx *txWithCtx) AggTx() any                             { return tx.ac }
 
 func BenchmarkAggregator_Processing(b *testing.B) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -81,7 +72,7 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
-	domains, err := NewSharedDomains(WrapTxWithCtx(tx, ac), log.New())
+	domains, err := NewSharedDomains(wrapTxWithCtx(tx, ac), log.New())
 	require.NoError(b, err)
 	defer domains.Close()
 
@@ -123,17 +114,6 @@ func queueKeys(ctx context.Context, seed, ofSize uint64) <-chan []byte {
 	return keys
 }
 
-func Benchmark_BtreeIndex_Allocation(b *testing.B) {
-	rnd := newRnd(uint64(time.Now().UnixNano()))
-	for i := 0; i < b.N; i++ {
-		now := time.Now()
-		count := rnd.IntN(1000000000)
-		bt := newBtAlloc(uint64(count), uint64(1<<12), true, nil, nil)
-		bt.traverseDfs()
-		fmt.Printf("alloc %v\n", time.Since(now))
-	}
-}
-
 func Benchmark_BtreeIndex_Search(b *testing.B) {
 	logger := log.New()
 	rnd := newRnd(uint64(time.Now().UnixNano()))
@@ -141,7 +121,7 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 	defer os.RemoveAll(tmp)
 	dataPath := "../../data/storage.256-288.kv"
 
-	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 	comp := seg.CompressKeys | seg.CompressVals
 	buildBtreeIndex(b, dataPath, indexPath, comp, 1, logger, true)
 
@@ -173,7 +153,7 @@ func benchInitBtreeIndex(b *testing.B, M uint64, compression seg.FileCompression
 	b.Cleanup(func() { os.RemoveAll(tmp) })
 
 	dataPath := generateKV(b, tmp, 52, 10, 1000000, logger, 0)
-	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bt")
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bt")
 
 	buildBtreeIndex(b, dataPath, indexPath, compression, 1, logger, true)
 
@@ -286,4 +266,135 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 		require.NoErrorf(b, err, "i=%d", i)
 		require.EqualValues(b, keys[p], key)
 	}
+}
+
+func BenchmarkAggregator_BeginFilesRo_Latency(b *testing.B) {
+	//BenchmarkAggregator_BeginFilesRo/begin_files_ro-16  1737404  737.3 ns/op  3216 B/op  21 allocs/op
+	aggStep := uint64(100_00)
+	_, agg := testDbAndAggregatorBench(b, aggStep)
+
+	b.Run("begin_files_ro", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			agg.BeginFilesRo()
+		}
+	})
+}
+
+var parallel = flag.Int("bench.parallel", 1, "parallelism value") // runs 1 *maxprocs
+var loopv = flag.Int("bench.loopv", 100000, "loop value")
+
+func BenchmarkAggregator_BeginFilesRo_Throughput(b *testing.B) {
+	// RESULT: deteriorates after 2^21 goroutines
+
+	/**
+	for cpu in $(seq 0 20); do
+		cpus=$((1 << $cpu))  # Same as 2^cpu
+		echo -n "($cpus, "
+		echo -n $(go test -benchmem -run=^$ -bench ^BenchmarkAggregator_BeginFilesRo_Throughput$ github.com/erigontech/erigon-lib/state  \
+		-bench.parallel=$cpus -bench.loopv=1000 | grep 'BenchmarkAggregator_BeginFilesRo_Throughput' | cut -f3 | xargs|cut -d' ' -f1)
+		echo -n "), "
+	done
+	**/
+	// trying to find BeginFilesRo throughput
+	if !flag.Parsed() {
+		flag.Parse()
+	}
+	//b.Logf("Running with parallel=%d work=%d, #goroutines:%d", *parallel, *loopv, *parallel*runtime.GOMAXPROCS(0))
+
+	aggStep := uint64(100_00)
+	_, agg := testDbAndAggregatorBench(b, aggStep)
+
+	b.SetParallelism(*parallel) // p * maxprocs
+	b.RunParallel(func(b *testing.PB) {
+		foo := 0
+		for b.Next() {
+			tx := agg.BeginFilesRo()
+			for i := 0; i < *loopv; i++ {
+				foo *= 2
+				foo /= 2
+			}
+			tx.Close()
+		}
+	})
+}
+
+func BenchmarkDb_BeginFiles_Throughput(b *testing.B) {
+	// RESULT: deteriorates after 2^21 goroutines.
+
+	/**
+	for cpu in $(seq 0 20); do
+	    cpus=$((1 << $cpu))  # Same as 2^cpu
+	    echo -n "($cpus, "
+	    echo -n $(go test -benchmem -run=^$ -bench ^BenchmarkDb_BeginFiles_Throughput$ github.com/erigontech/erigon-lib/state  \
+		-bench.parallel=$cpus -bench.loopv=1000 | grep 'BenchmarkDb_BeginFiles_Throughput' | cut -f3 | xargs|cut -d' ' -f1)
+	    echo -n "), "
+	done
+	**/
+
+	// trying to find BeginFilesRo and Rollback throughput
+	if !flag.Parsed() {
+		flag.Parse()
+	}
+	//b.Logf("Running with parallel=%d work=%d, #goroutines:%d", *parallel, *loopv, *parallel*runtime.GOMAXPROCS(0))
+
+	aggStep := uint64(100_00)
+	db, _ := testDbAndAggregatorBench(b, aggStep)
+	ctx := context.Background()
+
+	b.SetParallelism(*parallel) // p * maxprocs
+	b.RunParallel(func(pb *testing.PB) {
+		//foo := 0
+		for pb.Next() {
+			tx, err := db.BeginRo(ctx)
+			if err != nil {
+				b.Fatalf("%v", err)
+			}
+			millis := *loopv * 1000000
+			time.Sleep(time.Duration(int64(millis)))
+
+			// for i := 0; i < *loopv; i++ {
+			// 	foo *= 2
+			// 	foo /= 2
+			// }
+			tx.Rollback()
+		}
+	})
+}
+
+func BenchmarkDb_BeginFiles_Throughput_IO(b *testing.B) {
+	// RESULT: deteriorates after 2^17 goroutines i.e. 130k goroutines.
+	// time.Sleep to emulate page faults
+
+	/**
+	for cpu in $(seq 0 20); do
+	    cpus=$((1 << $cpu))  # Same as 2^cpu
+	    echo -n "($cpus, "
+	    echo -n $(go test -benchmem -run=^$ -bench ^BenchmarkDb_BeginFiles_Throughput_IO$ github.com/erigontech/erigon-lib/state  \
+		-bench.parallel=$cpus | grep 'BenchmarkDb_BeginFiles_Throughput_IO' | cut -f3 | xargs|cut -d' ' -f1)
+	    echo -n "), "
+	done
+	**/
+
+	// trying to find BeginFilesRo and Rollback throughput
+	if !flag.Parsed() {
+		flag.Parse()
+	}
+	//b.Logf("Running with parallel=%d work=%d, #goroutines:%d", *parallel, *loopv, *parallel*runtime.GOMAXPROCS(0))
+
+	aggStep := uint64(100_00)
+	db, _ := testDbAndAggregatorBench(b, aggStep)
+	ctx := context.Background()
+
+	b.SetParallelism(*parallel) // p * maxprocs
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			tx, err := db.BeginRo(ctx)
+			if err != nil {
+				b.Fatalf("%v", err)
+			}
+			millis := 5 * time.Millisecond
+			time.Sleep(time.Duration(int64(millis)))
+			tx.Rollback()
+		}
+	})
 }

@@ -76,6 +76,7 @@ type ExecutionResult struct {
 	SenderInitBalance   *uint256.Int
 	CoinbaseInitBalance *uint256.Int
 	FeeTipped           *uint256.Int
+	EvmRefund           uint64 // Gas refunded by EVM without considering refundQuotient
 
 	// Arbitrum: a tx may yield others that need to run afterward (see retryables)
 	ScheduledTxes types.Transactions
@@ -186,7 +187,7 @@ type IntraBlockState interface {
 	AddLog(*types.Log)
 
 	SetHooks(hooks *tracing.Hooks)
-	//CreateZombieIfDeleted(from common.Address)
 
+	// Arbitrum
 	RemoveEscrowProtection(addr common.Address)
 }

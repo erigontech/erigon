@@ -1,17 +1,13 @@
 # Erigon
 
-Documentation: **[docs.erigon.tech](https://docs.erigon.tech)**
-Blog: **[erigon.tech/news](https://erigon.tech/news/)**
-X/Twitter: **[x.com/ErigonEth](https://x.com/ErigonEth)**
+[![Docs](https://img.shields.io/badge/docs-up-green)](https://docs.erigon.tech/)
+[![Blog](https://img.shields.io/badge/blog-up-green)](https://erigon.tech/blog/)
+[![Twitter](https://img.shields.io/twitter/follow/ErigonEth?style=social)](https://x.com/ErigonEth)
+[![Build status](https://github.com/erigontech/erigon/actions/workflows/ci.yml/badge.svg)](https://github.com/erigontech/erigon/actions/workflows/ci.yml)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=erigontech_erigon&metric=coverage)](https://sonarcloud.io/summary/new_code?id=erigontech_erigon)
 
 Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency
 frontier.
-
-<br>
-
-![Build status](https://github.com/erigontech/erigon/actions/workflows/ci.yml/badge.svg) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=erigontech_erigon&metric=coverage)](https://sonarcloud.io/summary/new_code?id=erigontech_erigon)
-
-<!--ts-->
 
 - [Erigon](#erigon)
 - [System Requirements](#system-requirements)
@@ -62,8 +58,6 @@ frontier.
     - [Windows](#windows)
 - [Getting in touch](#getting-in-touch)
     - [Erigon Discord Server](#erigon-discord-server)
-    - [Blog](#blog)
-    - [Twitter](#twitter)
     - [Reporting security issues/concerns](#reporting-security-issuesconcerns)
 - [Known issues](#known-issues)
     - [`htop` shows incorrect memory usage](#htop-shows-incorrect-memory-usage)
@@ -82,7 +76,7 @@ Set `--prune.mode` to "archive" if you need an archive node or to "minimal" if y
 System Requirements
 ===================
 
-RAM: >=32GB, [Golang >= 1.22](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4. 64-bit
+RAM: >=32GB, [Golang >= 1.23](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4. 64-bit
 architecture.
 
 - ArchiveNode Ethereum Mainnet: 2TB (April 2024). FullNode: 1.1TB (June 2024)
@@ -270,7 +264,7 @@ Each service has own `./cmd/*/README.md` file.
 
 ### Embedded Consensus Layer
 
-Built-in consensus for Ethereum Mainnet, Sepolia, Holesky, Gnosis.
+Built-in consensus for Ethereum Mainnet, Sepolia, Holesky, Hoodi, Gnosis, Chiado.
 To use external Consensus Layer: `--externalcl`.
 
 ### Testnets
@@ -359,9 +353,8 @@ anymore.
 Caplin also has an archival mode for historical states and blocks. it can be enabled through the `--caplin.archive`
 flag.
 In order to enable the caplin's Beacon API, the flag `--beacon.api=<namespaces>` must be added.
-e.g: `--beacon.api=beacon,builder,config,debug,node,validator,lighthouse` will enable all endpoints. **NOTE: Caplin is
-not staking-ready so aggregation endpoints are still to be implemented. Additionally enabling the Beacon API will lead
-to a 6 GB higher RAM usage.
+e.g: `--beacon.api=beacon,builder,config,debug,node,validator,lighthouse` will enable all endpoints. 
+Note: enabling the Beacon API will lead to a 6 GB higher RAM usage
 
 ### Multiple Instances / One Machine
 
@@ -381,7 +374,7 @@ Quote your path if it has spaces.
 
 ### Dev Chain
 
-<code> 🔬 Detailed explanation is [DEV_CHAIN](/DEV_CHAIN.md).</code>
+<code> 🔬 Detailed explanation is [DEV_CHAIN](/docs/DEV_CHAIN.md).</code>
 
 Key features
 ============
@@ -682,7 +675,7 @@ Windows users may run erigon in 3 possible ways:
   build on windows :
     * [Git](https://git-scm.com/downloads) for Windows must be installed. If you're cloning this repository is very
       likely you already have it
-    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.22
+    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.23
     * GNU CC Compiler at least version 13 (is highly suggested that you install `chocolatey` package manager - see
       following point)
     * If you need to build MDBX tools (i.e. `.\wmake.ps1 db-tools`)
@@ -708,7 +701,7 @@ Windows users may run erigon in 3 possible ways:
   those mount points use `DrvFS` which is
   a [network file system](https://github.com/erigontech/erigon?tab=readme-ov-file#cloud-network-drives)
   and, additionally, MDBX locks the db for exclusive access which implies only one process at a time can access data.
-  This has consequences on the running of `rpcdaemon` which has to be configured as [Remote DB](#for-remote-db) even if
+  This has consequences on the running of `rpcdaemon` which has to be configured as [Remote DB](#json-rpc-daemon) even if
   it is executed on the very same computer. If instead your data is hosted on the native Linux filesystem non
   limitations apply.
   **Please also note the default WSL2 environment has its own IP address which does not match the one of the network

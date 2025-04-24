@@ -24,12 +24,11 @@ import (
 	ethereum "github.com/erigontech/erigon"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon/rpc/ethapi"
 )
 
 func NewBackend(node devnet.Node) bind.ContractBackend {
@@ -72,7 +71,7 @@ func (cb contractBackend) CallContract(ctx context.Context, call ethereum.CallMs
 		Gas:      (*hexutil.Uint64)(&call.Gas),
 		GasPrice: gasPrice,
 		Value:    value,
-		Data:     (*hexutility.Bytes)(&call.Data),
+		Data:     (*hexutil.Bytes)(&call.Data),
 	}, blockRef, nil)
 }
 

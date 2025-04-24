@@ -7,11 +7,11 @@ import (
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/arb/arbitrum_types"
-	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/bloombits"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/event"
+	"github.com/erigontech/erigon/execution/consensus"
 
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/rpc"

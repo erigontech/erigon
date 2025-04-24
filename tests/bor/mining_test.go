@@ -12,21 +12,21 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon-lib/chain/params"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/fdlimit"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fdlimit"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/node"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/tests/bor/helper"
 )
 
@@ -74,6 +74,11 @@ func TestMiningBenchmark(t *testing.T) {
 		if err != nil {
 			panic(err)
 		}
+
+		t.Cleanup(func() {
+			err := stack.Close()
+			require.NoError(t, err)
+		})
 
 		if err := stack.Start(); err != nil {
 			panic(err)
@@ -134,7 +139,7 @@ func TestMiningBenchmark(t *testing.T) {
 			break
 		}
 
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	timeToExecute := time.Since(start)

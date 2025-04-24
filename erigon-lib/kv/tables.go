@@ -54,10 +54,6 @@ const (
 	//key - contract code hash
 	//value - contract code
 	Code = "Code"
-
-	//key - addressHash+incarnation
-	//value - code hash
-	ContractCode = "HashedCodeHash"
 )
 
 const Witnesses = "witnesses" // block_num_u64 + "_chunk_" + chunk_num_u64 -> witness ( see: docs/programmers_guide/witness_format.md )
@@ -103,34 +99,11 @@ const (
 	EthTx    = "BlockTransaction" // tx_id_u64 -> rlp(tx)
 	MaxTxNum = "MaxTxNum"         // block_number_u64 -> max_tx_num_in_block_u64
 
-	Receipts = "Receipt"        // block_num_u64 -> canonical block receipts (non-canonical are not stored)
-	Log      = "TransactionLog" // block_num_u64 + txId -> logs of transaction
-
-	// Stores bitmap indices - in which block numbers saw logs of given 'address' or 'topic'
-	// [addr or topic] + [2 bytes inverted shard number] -> bitmap(blockN)
-	// indices are sharded - because some bitmaps are >1Mb and when new incoming blocks process it
-	//	 updates ~300 of bitmaps - by append small amount new values. It cause much big writes (MDBX does copy-on-write).
-	//
-	// if last existing shard size merge it with delta
-	// if serialized size of delta > ShardLimit - break down to multiple shards
-	// shard number - it's biggest value in bitmap
-	LogTopicIndex   = "LogTopicIndex"
-	LogAddressIndex = "LogAddressIndex"
-
-	// CallTraceSet is the name of the table that contain the mapping of block number to the set (sorted) of all accounts
-	// touched by call traces. It is DupSort-ed table
-	// 8-byte BE block number -> account address -> two bits (one for "from", another for "to")
-	CallTraceSet = "CallTraceSet"
-	// Indices for call traces - have the same format as LogTopicIndex and LogAddressIndex
-	// Store bitmap indices - in which block number we saw calls from (CallFromIndex) or to (CallToIndex) some addresses
-	CallFromIndex = "CallFromIndex"
-	CallToIndex   = "CallToIndex"
+	ReceiptsCache = "ReceiptCache" // block_num_u64 + block_hash + txn_index_u32 -> rlp(receipt)
 
 	TxLookup = "BlockTransactionLookup" // hash -> transaction/receipt lookup metadata
 
 	ConfigTable = "Config" // config prefix for the db
-
-	PreimagePrefix = "SecureKey" // preimagePrefix + hash -> preima
 
 	// Progress of sync stages: stageName -> stageData
 	SyncStageProgress = "SyncStage"
@@ -173,6 +146,7 @@ const (
 	BorEvents               = "BorEvents"                 // event_id -> event_payload
 	BorEventNums            = "BorEventNums"              // block_num -> event_id (last event_id in that block)
 	BorEventProcessedBlocks = "BorEventProcessedBlocks"   // block_num -> block_time, tracks processed blocks in the bridge, used for unwinds and restarts, gets pruned
+	BorEventTimes           = "BorEventTimes"             // timestamp -> event_id
 	BorSpans                = "BorSpans"                  // span_id -> span (in JSON encoding)
 	BorMilestones           = "BorMilestones"             // milestone_id -> milestone (in JSON encoding)
 	BorMilestoneEnds        = "BorMilestoneEnds"          // start block_num -> milestone_id (first block of milestone)
@@ -297,6 +271,15 @@ const (
 	RandaoMixes      = "RandaoMixes"      // [validator_index+slot] => [randao_mix]
 	Proposers        = "BlockProposers"   // epoch => proposers indicies
 
+	// Electra
+	PendingDepositsDump           = "PendingDepositsDump"           // block_num => dump
+	PendingPartialWithdrawalsDump = "PendingPartialWithdrawalsDump" // block_num => dump
+	PendingConsolidationsDump     = "PendingConsolidationsDump"     // block_num => dump
+	PendingDeposits               = "PendingDeposits"               // slot => queue_diffs
+	PendingPartialWithdrawals     = "PendingPartialWithdrawals"     // slot => queue_diffs
+	PendingConsolidations         = "PendingConsolidations"         // slot => queue_diffs
+	// End Electra
+
 	StatesProcessingProgress = "StatesProcessingProgress"
 
 	//Diagnostics tables
@@ -313,6 +296,9 @@ const (
 
 // Keys
 var (
+	// ExperimentalGetProofsLayout is used to keep track whether we store indecies to facilitate eth_getProof
+	CommitmentLayoutFlagKey = []byte("CommitmentLayouFlag")
+
 	PruneTypeOlder = []byte("older")
 	PruneHistory   = []byte("pruneHistory")
 	PruneBlocks    = []byte("pruneBlocks")
@@ -330,6 +316,12 @@ var (
 	MinimumPrunableStepDomainKey = []byte("MinimumPrunableStepDomainKey")
 )
 
+// Vals
+var (
+	CommitmentLayoutFlagEnabledVal  = []byte{1}
+	CommitmentLayoutFlagDisabledVal = []byte{2}
+)
+
 // ChaindataTables - list of all buckets. App will panic if some bucket is not in this list.
 // This list will be sorted in `init` method.
 // ChaindataTablesCfg - can be used to find index in sorted version of ChaindataTables list by name
@@ -337,11 +329,10 @@ var ChaindataTables = []string{
 	E2AccountsHistory,
 	E2StorageHistory,
 	Code,
-	ContractCode,
 	HeaderNumber,
 	BadHeaderNumber,
 	BlockBody,
-	Receipts,
+	ReceiptsCache,
 	TxLookup,
 	ConfigTable,
 	DatabaseInfo,
@@ -355,16 +346,8 @@ var ChaindataTables = []string{
 	HeadHeaderKey,
 	LastForkchoice,
 	Migrations,
-	LogTopicIndex,
-	LogAddressIndex,
-	CallTraceSet,
-	CallFromIndex,
-	CallToIndex,
-	Log,
 	Sequence,
 	EthTx,
-	TrieOfAccounts,
-	TrieOfStorage,
 	HeaderCanonical,
 	Headers,
 	HeaderTD,
@@ -376,6 +359,7 @@ var ChaindataTables = []string{
 	BorEvents,
 	BorEventNums,
 	BorEventProcessedBlocks,
+	BorEventTimes,
 	BorSpans,
 	BorMilestones,
 	BorMilestoneEnds,
@@ -457,6 +441,12 @@ var ChaindataTables = []string{
 	CurrentSyncCommittee,
 	Eth1DataVotes,
 	IntraRandaoMixes,
+	PendingConsolidations,
+	PendingDeposits,
+	PendingDepositsDump,
+	PendingPartialWithdrawalsDump,
+	PendingConsolidationsDump,
+	PendingPartialWithdrawals,
 	ActiveValidatorIndicies,
 	EffectiveBalancesDump,
 	BalancesDump,
@@ -523,7 +513,7 @@ type CmpFunc func(k1, k2, v1, v2 []byte) int
 type TableCfg map[string]TableCfgItem
 type Bucket string
 
-type DBI uint
+type DBI uint32
 type TableFlags uint
 
 const (
@@ -565,7 +555,6 @@ var ChaindataTablesCfg = TableCfg{
 		DupFromLen:                60,
 		DupToLen:                  28,
 	},
-	CallTraceSet: {Flags: DupSort},
 
 	TblAccountVals:           {Flags: DupSort},
 	TblAccountHistoryKeys:    {Flags: DupSort},
@@ -612,6 +601,7 @@ var BorTablesCfg = TableCfg{
 	BorEvents:               {Flags: DupSort},
 	BorEventNums:            {Flags: DupSort},
 	BorEventProcessedBlocks: {Flags: DupSort},
+	BorEventTimes:           {Flags: DupSort},
 	BorSpans:                {Flags: DupSort},
 	BorCheckpoints:          {Flags: DupSort},
 	BorCheckpointEnds:       {Flags: DupSort},
@@ -954,56 +944,6 @@ const (
 	*/
 	E2AccountsHistory = "AccountHistory"
 	E2StorageHistory  = "StorageHistory"
-
-	/*
-	   TrieOfAccounts and TrieOfStorage
-	   hasState,groups - mark prefixes existing in hashed_account table
-	   hasTree - mark prefixes existing in trie_account table (not related with branchNodes)
-	   hasHash - mark prefixes which hashes are saved in current trie_account record (actually only hashes of branchNodes can be saved)
-	   @see UnmarshalTrieNode
-	   @see integrity.Trie
-
-	   +-----------------------------------------------------------------------------------------------------+
-	   | DB record: 0x0B, hasState: 0b1011, hasTree: 0b1001, hasHash: 0b1001, hashes: [x,x]                  |
-	   +-----------------------------------------------------------------------------------------------------+
-
-	   	|                                           |                               |
-	   	v                                           |                               v
-
-	   +---------------------------------------------+             |            +--------------------------------------+
-	   | DB record: 0x0B00, hasState: 0b10001        |             |            | DB record: 0x0B03, hasState: 0b10010 |
-	   | hasTree: 0, hasHash: 0b10000, hashes: [x]   |             |            | hasTree: 0, hasHash: 0, hashes: []   |
-	   +---------------------------------------------+             |            +--------------------------------------+
-
-	   	|                    |                              |                         |                  |
-	   	v                    v                              v                         v                  v
-
-	   +------------------+    +----------------------+     +---------------+        +---------------+  +---------------+
-	   | Account:         |    | BranchNode: 0x0B0004 |     | Account:      |        | Account:      |  | Account:      |
-	   | 0x0B0000...      |    | has no record in     |     | 0x0B01...     |        | 0x0B0301...   |  | 0x0B0304...   |
-	   | in HashedAccount |    |     TrieAccount      |     |               |        |               |  |               |
-	   +------------------+    +----------------------+     +---------------+        +---------------+  +---------------+
-
-	   	                           |                |
-	   	                           v                v
-	   			           +---------------+  +---------------+
-	   			           | Account:      |  | Account:      |
-	   			           | 0x0B000400... |  | 0x0B000401... |
-	   			           +---------------+  +---------------+
-
-	   Invariants:
-	   - hasTree is subset of hasState
-	   - hasHash is subset of hasState
-	   - first level in account_trie always exists if hasState>0
-	   - TrieStorage record of account.root (length=40) must have +1 hash - it's account.root
-	   - each record in TrieAccount table must have parent (may be not direct) and this parent must have correct bit in hasTree bitmap
-	   - if hasState has bit - then HashedAccount table must have record according to this bit
-	   - each TrieAccount record must cover some state (means hasState is always > 0)
-	   - TrieAccount records with length=1 can satisfy (hasBranch==0&&hasHash==0) condition
-	   - Other records in TrieAccount and TrieStorage must (hasTree!=0 || hasHash!=0)
-	*/
-	TrieOfAccounts = "TrieAccount"
-	TrieOfStorage  = "TrieStorage"
 
 	// IncarnationMap for deleted accounts
 	//key - address
