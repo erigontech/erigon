@@ -1028,7 +1028,7 @@ func garbage(dirtyFiles *btree.BTreeG[*filesItem], visibleFiles []visibleFile, m
 			if item.isProperSubsetOf(merged) {
 				outs = append(outs, item)
 			}
-			_ = hasCoverVisibleFile(dt.files, item)
+			_ = hasCoverVisibleFile(visibleFiles, item)
 
 			// this case happens when in previous process run, the merged file was created,
 			// but the processed ended before subsumed files could be deleted.
