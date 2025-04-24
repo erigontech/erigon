@@ -31,8 +31,8 @@ jobs:
       matrix:
         # list of os: https://github.com/actions/virtual-environments
         os:
-          - ubuntu-22.04
-          - macos-14
+          - ubuntu-latest
+          - macos-latest
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -69,14 +69,6 @@ jobs:
 
       - name: Test
         run: make test
-
-      - name: SonarCloud
-        if: runner.os == 'Linux'
-        uses: SonarSource/sonarcloud-github-action@v2.3.0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        continue-on-error: true
 
   tests-windows:
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
@@ -118,4 +110,4 @@ jobs:
         run: .\wmake.ps1 test
 
       - name: Test erigon-lib
-        run: cd erigon-lib && make test-no-fuzz
+        run: cd erigon-lib && make test

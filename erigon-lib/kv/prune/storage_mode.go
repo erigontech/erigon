@@ -32,26 +32,12 @@ var DefaultMode = Mode{
 	Initialised: true,
 	History:     Distance(math.MaxUint64),
 	Blocks:      Distance(math.MaxUint64),
-	Experiments: Experiments{}, // all off
 }
 
-type Experiments struct {
-}
-
-func FromCli(chainId uint64, distanceHistory, distanceBlocks uint64, experiments []string) (Mode, error) {
+func FromCli(distanceHistory, distanceBlocks uint64) (Mode, error) {
 	mode := DefaultMode
-
 	mode.History = Distance(distanceHistory)
 	mode.Blocks = Distance(distanceBlocks)
-
-	for _, ex := range experiments {
-		switch ex {
-		case "":
-			// skip
-		default:
-			return DefaultMode, fmt.Errorf("unexpected experiment found: %s", ex)
-		}
-	}
 	return mode, nil
 }
 
@@ -82,7 +68,6 @@ type Mode struct {
 	Initialised bool // Set when the values are initialised (not default)
 	History     BlockAmount
 	Blocks      BlockAmount
-	Experiments Experiments
 }
 
 type BlockAmount interface {

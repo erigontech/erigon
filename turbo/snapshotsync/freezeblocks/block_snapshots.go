@@ -37,6 +37,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
+	"github.com/erigontech/erigon-lib/common"
 	common2 "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -50,10 +51,10 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/rawdb/blockio"
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/erigon-db/rawdb"
+	"github.com/erigontech/erigon/erigon-db/rawdb/blockio"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
@@ -297,6 +298,10 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 	merger := snapshotsync.NewMerger(tmpDir, int(workers), lvl, db, br.chainConfig, logger)
 	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(), snapshots.BlocksAvailable())
 	if len(rangesToMerge) == 0 {
+		//TODO: enable, but optimize to reduce chain-tip impact
+		//if err := snapshots.RemoveOverlaps(); err != nil {
+		//	return false, err
+		//}
 		return ok, nil
 	}
 	ok = true // have something to merge
@@ -773,10 +778,38 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 	return 0, nil
 }
 
-// DumpHeaders - [from, to)
 func DumpHeaders(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blockTo uint64, _ firstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+	return DumpHeadersRaw(ctx, db, nil, blockFrom, blockTo, nil, collect, workers, lvl, logger, false)
+}
+
+// DumpHeaders - [from, to)
+func DumpHeadersRaw(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blockTo uint64, _ firstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, test bool) (uint64, error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
+
+	// do hash sanity check
+	var (
+		prevHash  common.Hash
+		emptyHash common.Hash
+	)
+
+	// Make sure the canonical chain is not broken.
+	if blockFrom > 0 && !test {
+		if err := db.View(ctx, func(tx kv.Tx) error {
+			blockNum := blockFrom - 1
+			h, err := rawdb.ReadCanonicalHash(tx, blockNum)
+			if err != nil {
+				return err
+			}
+			if h == emptyHash {
+				return fmt.Errorf("header not found: %d", blockNum)
+			}
+			prevHash = h
+			return nil
+		}); err != nil {
+			return 0, err
+		}
+	}
 
 	key := make([]byte, 8+32)
 	from := hexutil.EncodeTs(blockFrom)
@@ -798,6 +831,11 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, bl
 		if err := rlp.DecodeBytes(dataRLP, &h); err != nil {
 			return false, err
 		}
+		// Make sure the canonical chain is not broken.
+		if prevHash != emptyHash && prevHash != h.ParentHash && !test {
+			return false, fmt.Errorf("header hash mismatch: %d, %x != %x", blockNum, prevHash, h.ParentHash)
+		}
+		prevHash = h.Hash()
 
 		value := make([]byte, len(dataRLP)+1) // first_byte_of_header_hash + header_rlp
 		value[0] = h.Hash()[0]
@@ -820,6 +858,24 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, bl
 		default:
 		}
 		return true, nil
+	}); err != nil {
+		return 0, err
+	}
+
+	// Make sure the canonical chain is not broken.
+	if err := db.View(ctx, func(tx kv.Tx) error {
+		if test {
+			return nil
+		}
+		blockNum := blockTo
+		h := rawdb.ReadHeaderByNumber(tx, blockNum)
+		if h == nil {
+			return fmt.Errorf("last header not found: %d", blockNum)
+		}
+		if prevHash != h.ParentHash {
+			return fmt.Errorf("header hash mismatch: %d, %x != %x", blockNum, prevHash, h.ParentHash)
+		}
+		return nil
 	}); err != nil {
 		return 0, err
 	}

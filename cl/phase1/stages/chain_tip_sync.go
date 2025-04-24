@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -10,7 +11,6 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	network2 "github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
-	"github.com/pkg/errors"
 )
 
 // waitForExecutionEngineToBeFinished checks if the execution engine is ready within a specified timeout.
@@ -90,12 +90,12 @@ func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count ui
 		// Request blobs frantically from the execution client
 		blobs, err := network2.RequestBlobsFrantically(ctx, cfg.rpc, ids)
 		if err != nil {
-			return nil, errors.Wrap(err, "failed to request blobs frantically")
+			return nil, fmt.Errorf("failed to request blobs frantically: %w", err)
 		}
 
 		// Verify the blobs against identifiers and insert them into the blob store
 		if _, inserted, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, nil); err != nil {
-			return nil, errors.Wrap(err, "failed to verify blobs against identifiers and insert into the blob store")
+			return nil, fmt.Errorf("failed to verify blobs against identifiers and insert into the blob store: %w", err)
 		}
 	}
 

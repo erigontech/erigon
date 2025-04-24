@@ -232,9 +232,6 @@ func (a *Antiquary) Loop() error {
 		}
 	}
 
-	if a.states {
-		go a.loopStates(a.ctx)
-	}
 	if err := beacon_indicies.WriteLastBeaconSnapshot(tx, frozenSlots); err != nil {
 		return err
 	}
@@ -242,6 +239,10 @@ func (a *Antiquary) Loop() error {
 	a.logger.Info("[Antiquary] Restarting Caplin")
 	if err := tx.Commit(); err != nil {
 		return err
+	}
+
+	if a.states {
+		go a.loopStates(a.ctx)
 	}
 	// Check for snapshots retirement every 3 minutes
 	retirementTicker := time.NewTicker(12 * time.Second)

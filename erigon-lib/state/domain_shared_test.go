@@ -38,6 +38,10 @@ import (
 )
 
 func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	stepSize := uint64(100)
@@ -51,7 +55,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
-	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err := NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -96,7 +100,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	defer rwTx.Rollback()
 
 	// 4. restart on same (replaced keys) files
-	domains, err = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err = NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -113,6 +117,10 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 }
 
 func TestSharedDomain_Unwind(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	stepSize := uint64(100)
@@ -126,7 +134,7 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
-	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err := NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -148,7 +156,7 @@ Loop:
 
 	ac = agg.BeginFilesRo()
 	defer ac.Close()
-	domains, err = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err = NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -192,11 +200,11 @@ Loop:
 	domains.currentChangesAccumulator = nil
 
 	acu := agg.BeginFilesRo()
-	var a [kv.DomainLen][]DomainEntryDiff
+	var a [kv.DomainLen][]kv.DomainEntryDiff
 	for idx, d := range stateChangeset.Diffs {
 		a[idx] = d.GetDiffSet()
 	}
-	err = domains.Unwind(ctx, rwTx, 0, unwindTo, &a)
+	err = domains.Unwind(ctx, wrapTxWithCtx(rwTx, ac), 0, unwindTo, &a)
 	require.NoError(t, err)
 	acu.Close()
 
@@ -215,6 +223,10 @@ Loop:
 }
 
 func TestSharedDomain_IteratePrefix(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	stepSize := uint64(8)
@@ -246,7 +258,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 
 	ac = agg.BeginFilesRo()
 	defer ac.Close()
-	wrwTx := WrapTxWithCtx(rwTx, ac)
+	wrwTx := wrapTxWithCtx(rwTx, ac)
 	domains, err := NewSharedDomains(wrwTx, log.New())
 	require.NoError(err)
 	defer domains.Close()
@@ -336,10 +348,10 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 		defer rwTx.Rollback()
 
-		_, err := ac.Prune(ctx, rwTx, 0, nil)
+		_, err := ac.prune(ctx, rwTx, 0, nil)
 		require.NoError(err)
 
-		wrwTx = WrapTxWithCtx(rwTx, ac)
+		wrwTx = wrapTxWithCtx(rwTx, ac)
 		domains, err = NewSharedDomains(wrwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
@@ -390,6 +402,10 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 }
 
 func TestSharedDomain_StorageIter(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))
@@ -405,7 +421,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
-	wtxRw := WrapTxWithCtx(rwTx, ac)
+	wtxRw := wrapTxWithCtx(rwTx, ac)
 	domains, err := NewSharedDomains(wtxRw, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
@@ -491,7 +507,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	rwTx, err = db.BeginRw(ctx)
 	require.NoError(t, err)
 
-	domains, err = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err = NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 

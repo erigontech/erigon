@@ -30,12 +30,11 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
-
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -149,7 +148,11 @@ func (fv *ForkValidator) FlushExtendingFork(tx kv.RwTx, accumulator *shards.Accu
 	start := time.Now()
 	// Flush changes to db.
 	if fv.sharedDom != nil {
-		fv.sharedDom.SetTx(tx)
+		temporalTx, ok := tx.(kv.TemporalTx)
+		if !ok {
+			return errors.New("FlushExtendingFork: tx is not a temporal tx")
+		}
+		fv.sharedDom.SetTx(temporalTx)
 		if err := fv.sharedDom.Flush(fv.ctx, tx); err != nil {
 			return err
 		}
@@ -275,9 +278,13 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		}()
 	}
 
-	var txc wrap.TxContainer
-	txc.Tx = tx
-	// txc.Doms = fv.sharedDom
+	temporalTx := tx.(kv.TemporalTx)
+	fv.sharedDom, criticalError = state.NewSharedDomains(temporalTx, logger)
+	if criticalError != nil {
+		criticalError = fmt.Errorf("failed to create shared domains: %w", criticalError)
+		return
+	}
+	txc := wrap.NewTxContainer(tx, fv.sharedDom)
 
 	fv.extendingForkNotifications = shards.NewNotifications(nil)
 	return fv.validateAndStorePayload(txc, header, body, unwindPoint, headersChain, bodiesChain, fv.extendingForkNotifications)

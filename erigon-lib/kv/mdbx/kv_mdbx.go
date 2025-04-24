@@ -34,6 +34,7 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/mdbx-go/mdbx"
 	stack2 "github.com/go-stack/stack"
 	"golang.org/x/sync/semaphore"
@@ -61,25 +62,29 @@ func WithChaindataTables(defaultBuckets kv.TableCfg) kv.TableCfg {
 
 // handles background process of periodically flushing commits to disk
 type PeriodicFlusher struct {
-	env              *mdbx.Env // mdbx environment to flush to
-	opts             MdbxOpts
-	ticker           *time.Ticker  // set ticker
-	syncPeriod       time.Duration // how often to flush
-	quitFlushingChan chan struct{} // to signal end of flushing
-	closed           atomic.Bool
+	env        *mdbx.Env // mdbx environment to flush to
+	opts       MdbxOpts
+	ticker     *time.Ticker  // set ticker
+	syncPeriod time.Duration // how often to flush
+	closed     atomic.Bool
+	quitChan   chan struct{} // channel to signal closing
+	doneWg     sync.WaitGroup
 }
 
 func newPeriodicFlusher(env *mdbx.Env, opts MdbxOpts, syncPeriod time.Duration) *PeriodicFlusher {
 	return &PeriodicFlusher{
-		env:              env,
-		opts:             opts,
-		ticker:           time.NewTicker(syncPeriod),
-		syncPeriod:       syncPeriod,
-		quitFlushingChan: make(chan struct{}),
+		env:        env,
+		opts:       opts,
+		ticker:     time.NewTicker(syncPeriod),
+		syncPeriod: syncPeriod,
+		quitChan:   make(chan struct{}, 1),
+		doneWg:     sync.WaitGroup{},
 	}
 }
 
-func (flusher *PeriodicFlusher) Close() {
+func (flusher *PeriodicFlusher) shutdown() {
+	// flusher.lock.Lock()
+	// defer flusher.lock.Unlock()
 	swapped := flusher.closed.CompareAndSwap(false, true)
 	if !swapped {
 		return
@@ -87,27 +92,34 @@ func (flusher *PeriodicFlusher) Close() {
 	if flusher.ticker != nil {
 		flusher.ticker.Stop() // Stop the ticker
 	}
-	close(flusher.quitFlushingChan) //  close channel to signal quit
+	flusher.quitChan <- struct{}{} // non-blocking send due to buffered chan
+}
+
+func (flusher *PeriodicFlusher) Close() {
+	flusher.shutdown()
+	flusher.doneWg.Wait()
 }
 
 func (flusher *PeriodicFlusher) FlushInBackground(ctx context.Context) {
-	for {
-		select {
-		case <-flusher.ticker.C:
-			if err := flusher.env.Sync(true, false); err != nil {
-				flusher.opts.log.Error("Error during periodic mdbx sync", "err", err, "dbName", flusher.opts.label)
-			}
-		case _, ok := <-flusher.quitFlushingChan:
-			if !ok {
+	flusher.doneWg.Add(1)
+	go func(ctx context.Context) {
+		defer flusher.doneWg.Done()
+		for {
+			select {
+			case <-flusher.ticker.C:
+				if err := flusher.env.Sync(true, false); err != nil {
+					flusher.opts.log.Error("Error during periodic mdbx sync", "err", err, "dbName", flusher.opts.label)
+				}
+			case <-flusher.quitChan:
+				return
+			case <-ctx.Done():
+				// here the flusher is not closed explicitly from outside,
+				// so we must close it from within
+				flusher.shutdown()
 				return
 			}
-		case <-ctx.Done():
-			// here the flusher is not closed explicitly from outside,
-			// so we must close it from within
-			flusher.ticker.Stop()
-			return
 		}
-	}
+	}(ctx)
 }
 
 type MdbxOpts struct {
@@ -143,7 +155,7 @@ const DefaultGrowthStep = 1 * datasize.GB
 func New(label kv.Label, log log.Logger) MdbxOpts {
 	opts := MdbxOpts{
 		bucketsCfg: WithChaindataTables,
-		flags:      mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable,
+		flags:      mdbx.NoReadahead | mdbx.Durable,
 		log:        log,
 		pageSize:   kv.DefaultPageSize(),
 
@@ -425,9 +437,8 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncPeriod != 0 {
 		db.periodicFlusher = newPeriodicFlusher(env, opts, opts.syncPeriod)
-		go func(ctx context.Context) { // start goroutine periodically flushing to disk
-			db.periodicFlusher.FlushInBackground(ctx) // start flushing in background
-		}(ctx)
+		db.periodicFlusher.FlushInBackground(ctx) // start flushing in background
+
 	}
 
 	customBuckets := opts.bucketsCfg(kv.TablesCfgByLabel(opts.label))
@@ -1564,6 +1575,9 @@ func (tx *MdbxTx) Range(table string, fromPrefix, toPrefix []byte, asc order.By,
 		s.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
+	if !s.tx.readOnly {
+		s.nextK, s.nextV = common.Copy(s.nextK), common.Copy(s.nextV)
+	}
 	return s, nil
 }
 
@@ -1713,6 +1727,9 @@ func (s *cursor2iter) Next() (k, v []byte, err error) {
 	if err = s.advance(); err != nil {
 		return nil, nil, err
 	}
+	if !s.tx.readOnly {
+		s.nextK, s.nextV = common.Copy(s.nextK), common.Copy(s.nextV)
+	}
 	return k, v, nil
 }
 
@@ -1726,6 +1743,9 @@ func (tx *MdbxTx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []
 	if err := s.init(table, tx); err != nil {
 		s.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
+	}
+	if !s.tx.readOnly {
+		s.nextV = common.Copy(s.nextV)
 	}
 	return s, nil
 }
@@ -1873,6 +1893,9 @@ func (s *cursorDup2iter) Next() (k, v []byte, err error) {
 	v = s.nextV
 	if err = s.advance(); err != nil {
 		return nil, nil, err
+	}
+	if !s.tx.readOnly {
+		s.nextV = common.Copy(s.nextV)
 	}
 	return s.key, v, nil
 }

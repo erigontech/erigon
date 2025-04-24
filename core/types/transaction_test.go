@@ -35,8 +35,8 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/erigontech/erigon-lib/chain/params"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
@@ -675,8 +675,8 @@ func newRandProofs(size int) KZGProofs {
 func newRandBlobs(size int) Blobs {
 	var result Blobs
 	for i := 0; i < size; i++ {
-		var arr [fixedgas.BlobSize]byte
-		for j := 0; j < fixedgas.BlobSize; j++ {
+		var arr [params.BlobSize]byte
+		for j := 0; j < params.BlobSize; j++ {
 			arr[j] = randByte()
 		}
 		result = append(result, arr)

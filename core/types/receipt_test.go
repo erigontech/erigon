@@ -30,11 +30,11 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/params"
 )
 
 func TestDecodeEmptyTypedReceipt(t *testing.T) {
@@ -81,6 +81,7 @@ func TestLegacyReceiptDecoding(t *testing.T) {
 		TxHash:          tx.Hash(),
 		ContractAddress: libcommon.BytesToAddress([]byte{0x01, 0x11, 0x11}),
 		GasUsed:         111111,
+		BlockNumber:     big.NewInt(1),
 	}
 	receipt.Bloom = CreateBloom(Receipts{receipt})
 
@@ -218,7 +219,7 @@ func TestDeriveFields(t *testing.T) {
 			t.Fatalf("DeriveFields(...) = %v, want <nil>", err)
 		}
 		// Iterate over all the computed fields and check that they're correct
-		signer := MakeSigner(params.TestChainConfig, number.Uint64(), 0)
+		signer := MakeSigner(chain.TestChainConfig, number.Uint64(), 0)
 
 		logIndex := uint(0)
 		for i, r := range receipts {
@@ -275,7 +276,7 @@ func TestDeriveFields(t *testing.T) {
 	//t.Run("DeriveV3", func(t *testing.T) {
 	//	clearComputedFieldsOnReceipts(t, receipts)
 	//	// Iterate over all the computed fields and check that they're correct
-	//	signer := MakeSigner(params.TestChainConfig, number.Uint64(), 0)
+	//	signer := MakeSigner(chain.TestChainConfig, number.Uint64(), 0)
 	//
 	//	logIndex := uint(0)
 	//	for i := range receipts {

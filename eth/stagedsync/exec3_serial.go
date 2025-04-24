@@ -10,15 +10,15 @@ import (
 	"os"
 	"time"
 
-	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
-
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/erigon-db/rawdb/rawtemporaldb"
+	"github.com/erigontech/erigon/execution/consensus"
+	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 )
 
 type serialExecutor struct {
@@ -166,7 +166,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 		}
 
 		// MA applystate
-		if err := se.rs.ApplyState4(ctx, txTask); err != nil {
+		if err := se.rs.ApplyState(ctx, txTask); err != nil {
 			return false, err
 		}
 
@@ -198,12 +198,16 @@ func (se *serialExecutor) commit(ctx context.Context, txNum uint64, blockNum uin
 			return t2, err
 		}
 	}
-	se.doms, err = state2.NewSharedDomains(se.applyTx, se.logger)
+	temporalTx, ok := se.applyTx.(kv.TemporalTx)
+	if !ok {
+		return t2, errors.New("tx is not a temporal tx")
+	}
+	se.doms, err = state2.NewSharedDomains(temporalTx, se.logger)
 	if err != nil {
 		return t2, err
 	}
 	se.doms.SetTxNum(txNum)
-	se.rs = state.NewStateV3(se.doms, se.logger)
+	se.rs = state.NewParallelExecutionState(se.doms, se.logger)
 
 	se.applyWorker.ResetTx(se.applyTx)
 	se.applyWorker.ResetState(se.rs, se.accumulator)

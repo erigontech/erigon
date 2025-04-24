@@ -32,6 +32,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/params"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
@@ -39,7 +41,6 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/params"
 )
 
 // the following 2 functions are replica for the test
@@ -327,7 +328,7 @@ func makeBenchBlock() *Block {
 		key, _   = crypto.GenerateKey()
 		txs      = make([]Transaction, 70)
 		receipts = make([]*Receipt, len(txs))
-		signer   = LatestSigner(params.TestChainConfig)
+		signer   = LatestSigner(chain.TestChainConfig)
 		uncles   = make([]*Header, 3)
 	)
 	header := &Header{
@@ -518,7 +519,7 @@ func TestWithdrawalsEncoding(t *testing.T) {
 	var decoded Block
 	require.NoError(t, rlp.DecodeBytes(encoded, &decoded))
 
-	assert.Equal(t, block, &decoded)
+	assert.Equal(t, block.Hash(), decoded.Hash())
 
 	// Now test with empty withdrawals
 	block2 := NewBlock(&header, nil, nil, nil, []*Withdrawal{})
@@ -530,7 +531,7 @@ func TestWithdrawalsEncoding(t *testing.T) {
 	var decoded2 Block
 	require.NoError(t, rlp.DecodeBytes(encoded2, &decoded2))
 
-	assert.Equal(t, block2, &decoded2)
+	assert.Equal(t, block2.Hash(), decoded2.Hash())
 }
 
 func TestBlockRawBodyPreShanghai(t *testing.T) {

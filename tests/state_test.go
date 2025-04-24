@@ -17,8 +17,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build integration
-
 package tests
 
 import (
@@ -33,12 +31,15 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/tracers/logger"
 )
 
 func TestState(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 	if runtime.GOOS == "windows" {
@@ -97,7 +98,7 @@ func withTrace(t *testing.T, test func(vm.Config) error) {
 	buf := new(bytes.Buffer)
 	w := bufio.NewWriter(buf)
 	tracer := logger.NewJSONLogger(&logger.LogConfig{DisableMemory: true}, w)
-	config.Debug, config.Tracer = true, tracer
+	config.Tracer = tracer.Tracer().Hooks
 	err2 := test(config)
 	if !reflect.DeepEqual(err, err2) {
 		t.Errorf("different error for second run: %v", err2)
