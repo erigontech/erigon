@@ -43,7 +43,7 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig"
 )
 
-var greatOtterBanner = `
+var GreatOtterBanner = `
    _____ _             _   _                ____  _   _                                       
   / ____| |           | | (_)              / __ \| | | |                                      
  | (___ | |_ __ _ _ __| |_ _ _ __   __ _  | |  | | |_| |_ ___ _ __ ___ _   _ _ __   ___       
@@ -360,8 +360,8 @@ func WaitForDownloader(
 		if !caplinState && strings.Contains(p.Name, "caplin/") {
 			continue
 		}
-		if headerchain &&
-			!(strings.Contains(p.Name, "headers") || strings.Contains(p.Name, "bodies") || p.Name == "salt-blocks.txt") {
+		// Can we just do this? The two calls to this function will be distinct files now.
+		if headerchain != (strings.Contains(p.Name, "headers") || strings.Contains(p.Name, "bodies") || p.Name == "salt-blocks.txt") {
 			continue
 		}
 		if _, ok := blackListForPruning[p.Name]; ok {
@@ -371,12 +371,6 @@ func WaitForDownloader(
 		downloadRequest = append(downloadRequest, NewDownloadRequest(p.Name, p.Hash))
 	}
 
-	if headerchain {
-		log.Info("[OtterSync] Starting Ottersync")
-		log.Info(greatOtterBanner)
-	}
-
-	log.Info(fmt.Sprintf("[%s] Requesting downloads", logPrefix))
 	for {
 		select {
 		case <-ctx.Done():
@@ -389,14 +383,13 @@ func WaitForDownloader(
 			continue
 		}
 		break
-
 	}
 
 	const checkInterval = 20 * time.Second
 	checkEvery := time.NewTicker(checkInterval)
 	defer checkEvery.Stop()
 
-	// Check once without delay, for faster erigon re-start
+	// Check once without delay, for faster erigon re-start. There was a race here, now fixed.
 	completedResp, err := snapshotDownloader.Completed(ctx, &proto_downloader.CompletedRequest{})
 	if err != nil {
 		return err
@@ -416,6 +409,8 @@ func WaitForDownloader(
 	}
 
 	if blockReader.FreezingCfg().Verify {
+		// On the second WaitForDownloader, this will reverify the header chain! TODO: Add the
+		// download request to the VerifyRequest payload so we only block on stuff we want right now.
 		if _, err := snapshotDownloader.Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
 			return err
 		}

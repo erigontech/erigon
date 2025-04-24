@@ -232,9 +232,7 @@ func NewTorrentClient(ctx context.Context, config CreateNewTorrentClientConfig) 
 
 	version := "erigon: " + params.VersionWithCommit(params.GitCommit)
 
-	cfg, err := downloadercfg.New(ctx, dirs, version, logLevel, downloadRate, uploadRate,
-		config.TorrentPort,
-		config.ConnsPerFile, 0, nil, webseedsList, config.Chain, true, true)
+	cfg, err := downloadercfg.New(ctx, dirs, version, logLevel, downloadRate, uploadRate, config.TorrentPort, config.ConnsPerFile, 0, nil, webseedsList, config.Chain, true)
 
 	if err != nil {
 		return nil, err

@@ -60,8 +60,10 @@ type Cfg struct {
 	WebSeedFileProviders            []string
 	SnapshotConfig                  *snapcfg.Cfg
 	DownloadTorrentFilesFromWebseed bool
-	AddTorrentsFromDisk             bool
-	ChainName                       string
+	// TODO: Have I rendered this obsolete?
+	AddTorrentsFromDisk bool
+
+	ChainName string
 
 	Dirs datadir.Dirs
 
@@ -69,6 +71,7 @@ type Cfg struct {
 }
 
 func Default() *torrent.ClientConfig {
+	// TODO: Add config dump in client status writer output...
 	torrentConfig := torrent.NewDefaultClientConfig()
 	// better don't increase because erigon periodically producing "new seedable files" - and adding them to downloader.
 	// it must not impact chain tip sync - so, limit resources to minimum by default.
@@ -78,33 +81,23 @@ func Default() *torrent.ClientConfig {
 	torrentConfig.MinDialTimeout = 6 * time.Second    //default: 3s
 	torrentConfig.HandshakesTimeout = 8 * time.Second //default: 4s
 
-	// default limit is 1MB, but we have 2MB pieces which brings us to:
-	//   *torrent.PeerConn: waiting for alloc limit reservation: reservation for 1802972 exceeds limiter max 1048576
-	torrentConfig.MaxAllocPeerRequestDataPerConn = int64(DefaultPieceSize)
+	// This needs to be at least the chunk size of requests we expect to service for peers. This has
+	// been as high as 8 MiB unintentionally, but the piece size for all previous torrents has been
+	// 2 MiB. Therefore 2 MiB is required to service those nodes.
+	torrentConfig.MaxAllocPeerRequestDataPerConn = max(torrentConfig.MaxAllocPeerRequestDataPerConn, DefaultPieceSize)
 
 	// this limits the amount of unverified bytes - which will throttle the
 	// number of requests the torrent will handle - it acts as a brake on
 	// parallelism if set (default is 67,108,864)
-	torrentConfig.MaxUnverifiedBytes = 0
+	// TODO: Well this would explain why hashing can't keep up.
+	//torrentConfig.MaxUnverifiedBytes = 0
 
-	// enable dht
+	// enable dht. TODO: We want DHT.
 	torrentConfig.NoDHT = true
-	//torrentConfig.DisableTrackers = true
-	//torrentConfig.DisableWebtorrent = true
-
-	// Reduce defaults - to avoid peers with very bad geography
-	//torrentConfig.MinDialTimeout = 1 * time.Second      // default: 3sec
-	//torrentConfig.NominalDialTimeout = 10 * time.Second // default: 20sec
-	//torrentConfig.HandshakesTimeout = 1 * time.Second   // default: 4sec
-
-	// see: https://en.wikipedia.org/wiki/TCP_half-open
-	//torrentConfig.TotalHalfOpenConns = 100     // default: 100
-	//torrentConfig.HalfOpenConnsPerTorrent = 25 // default: 25
-	//torrentConfig.TorrentPeersHighWater = 500 // default: 500
-	//torrentConfig.TorrentPeersLowWater = 50   // default: 50
 
 	torrentConfig.Seed = true
-	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
+	// TODO: Check the result of this in the client status spew.
+	torrentConfig.UpnpID = torrentConfig.UpnpID + " leecher"
 
 	return torrentConfig
 }
@@ -118,7 +111,7 @@ func New(
 	port, connsPerFile, downloadSlots int,
 	staticPeers, webseeds []string,
 	chainName string,
-	lockSnapshots, mdbxWriteMap bool,
+	mdbxWriteMap bool,
 ) (*Cfg, error) {
 	torrentConfig := Default()
 	//torrentConfig.PieceHashersPerTorrent = runtime.NumCPU()
@@ -133,24 +126,19 @@ func New(
 	// check if ipv6 is enabled
 	torrentConfig.DisableIPv6 = !getIpv6Enabled()
 
-	if uploadRate > 512*datasize.MB {
-		torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Inf, DefaultNetworkChunkSize) // default: unlimited
-	} else {
-		torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()), DefaultNetworkChunkSize) // default: unlimited
-	}
-
-	if downloadRate > 512*datasize.MB {
-		torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Inf, DefaultNetworkChunkSize) // default: unlimited
-	} else {
-		torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(downloadRate.Bytes()), DefaultNetworkChunkSize) // default: unlimited
-	}
+	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()), DefaultNetworkChunkSize)       // default: unlimited
+	torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(downloadRate.Bytes()), 2*DefaultNetworkChunkSize) // default: unlimited
 
 	// debug
 	//torrentConfig.Debug = true
 	torrentConfig.Logger = torrentConfig.Logger.WithFilterLevel(verbosity)
 	torrentConfig.Logger.SetHandlers(adapterHandler{})
 
-	if len(staticPeers) > 0 {
+	// TODO: This doesn't look right. Enabling DHT only for static peers will introduce very
+	// different runtime behaviour. Is it assumed those peers are torrent client endpoints and we
+	// want to force connecting to them? PEX might be more suited here. DHT should eventually be
+	// enabled regardless, but then this code would make more sense.
+	if len(staticPeers) > 0 && false {
 		torrentConfig.NoDHT = false
 		//defaultNodes := torrentConfig.DhtStartingNodes
 		torrentConfig.DhtStartingNodes = func(network string) dht.StartingNodesGetter {

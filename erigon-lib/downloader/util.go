@@ -18,6 +18,8 @@ package downloader
 
 import (
 	"context"
+	"slices"
+
 	//nolint:gosec
 	"errors"
 	"fmt"
@@ -318,29 +320,29 @@ func IsSnapNameAllowed(name string) bool {
 // added first time - pieces verification process will start (disk IO heavy) - Progress
 // kept in `piece completion storage` (surviving reboot). Once it's done - no disk IO needed again.
 // Don't need call torrent.VerifyData manually
-func addTorrentFile(
-	ctx context.Context,
+func (d *Downloader) addTorrentFile(
 	ts *torrent.TorrentSpec,
-	torrentClient *torrent.Client,
-	webseeds *WebSeeds,
-) (t *torrent.Torrent, ok bool, err error) {
+) (t *torrent.Torrent, new bool, err error) {
 	ts.ChunkSize = downloadercfg.DefaultNetworkChunkSize
-	// Non-zero chunksize is not allowed for existing torrents. If this breaks I will fix anacrolix/torrent instead of working around it.
-	return _addTorrentFile(ctx, ts, torrentClient, webseeds)
-}
-
-func _addTorrentFile(
-	ctx context.Context,
-	ts *torrent.TorrentSpec,
-	torrentClient *torrent.Client,
-	webseeds *WebSeeds,
-) (t *torrent.Torrent, ok bool, err error) {
-	err = ctx.Err()
+	ts.Trackers = Trackers
+	ts.Webseeds = nil
+	// Non-zero chunksize is not allowed for existing torrents. If this breaks I will fix
+	// anacrolix/torrent instead of working around it.
+	t, new, err = d.torrentClient.AddTorrentSpec(ts)
 	if err != nil {
 		return
 	}
-	ts.Webseeds, _ = webseeds.ByFileName(ts.DisplayName)
-	return torrentClient.AddTorrentSpec(ts)
+	var urlStrs = slices.Collect(d.webSeedUrlStrs())
+	if len(urlStrs) == 0 {
+		panic(fmt.Sprintf("no webseeds for %q", ts.DisplayName))
+	}
+	t.AddWebSeeds(
+		urlStrs,
+		// TODO: We add a truly massive number of torrents, this is a workaround until goroutine
+		// counts are managed more effectively for them.
+		//torrent.WebSeedTorrentMaxRequests(1),
+	)
+	return
 }
 
 func savePeerID(db kv.RwDB, peerID torrent.PeerID) error {
@@ -366,7 +368,7 @@ func readPeerID(db kv.RoDB) (peerID []byte, err error) {
 // Trigger all pieces to be verified with the given concurrency primitives. It's
 // an error for a piece to not be complete or have an unknown state after
 // verification.
-func ScheduleVerifyFile(ctx context.Context, eg *errgroup.Group, t *torrent.Torrent, piecesChecked *atomic.Uint64) {
+func scheduleVerifyFile(ctx context.Context, eg *errgroup.Group, t *torrent.Torrent, piecesChecked *atomic.Uint64) {
 	for i := range t.NumPieces() {
 		// I think if a check fails, this will still power through and force the
 		// rest of the pieces to get verified but ignore the result. Check
@@ -383,9 +385,6 @@ func ScheduleVerifyFile(ctx context.Context, eg *errgroup.Group, t *torrent.Torr
 			// cached version (since we did just verify data). That would be in
 			// piece.State().Completion.
 			completion := piece.Storage().Completion()
-			if completion.Complete {
-				err = errors.New("piece not complete")
-			}
 			if !completion.Ok {
 				err = errors.New("storage state unknown")
 			}

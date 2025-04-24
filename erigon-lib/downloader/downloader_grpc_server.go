@@ -66,7 +66,9 @@ func (s *GrpcServer) ProhibitNewDownloads(ctx context.Context, req *proto_downlo
 // After "download once" - Erigon will produce and seed new files
 // Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
 func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddRequest) (*emptypb.Empty, error) {
-	defer s.d.ReCalcStats(10 * time.Second) // immediately call ReCalc to set stat.Complete flag
+	for _, item := range request.Items {
+		fmt.Printf("%v: %v\n", Proto2InfoHash(item.TorrentHash), item.Path)
+	}
 
 	if len(s.d.torrentClient.Torrents()) == 0 || s.d.startTime.IsZero() {
 		s.d.startTime = time.Now()
@@ -107,7 +109,6 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 
 // Delete - stop seeding, remove file, remove .torrent
 func (s *GrpcServer) Delete(ctx context.Context, request *proto_downloader.DeleteRequest) (*emptypb.Empty, error) {
-	defer s.d.ReCalcStats(10 * time.Second) // immediately call ReCalc to set stat.Complete flag
 	torrents := s.d.torrentClient.Torrents()
 	for _, name := range request.Paths {
 		if name == "" {
@@ -172,6 +173,7 @@ func (s *GrpcServer) TorrentCompleted(req *proto_downloader.TorrentCompletedRequ
 	return nil
 }
 
+// TODO: Is anyone using this?
 func (s *GrpcServer) onTorrentComplete(name string, hash *prototypes.H160) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

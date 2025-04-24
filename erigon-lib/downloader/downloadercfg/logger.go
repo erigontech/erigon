@@ -18,8 +18,6 @@ package downloadercfg
 
 import (
 	"fmt"
-	"strings"
-
 	lg "github.com/anacrolix/log"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -50,6 +48,35 @@ func Int2LogLevel(level int) (lvl lg.Level, dbg bool, err error) {
 	return lvl, dbg, nil
 }
 
+func anacrolixToErigonLogLevel(level lg.Level) log.Lvl {
+	switch level {
+	case lg.Never:
+		// This should never occur. Maybe log that a message leaked?
+		panic(level)
+		return log.LvlTrace + 1
+	case lg.NotSet:
+		// This is usually bad practice. Set an appropriate default so it doesn't happen.
+		return log.LvlWarn
+	case lg.Debug:
+		return log.LvlDebug
+	case lg.Info:
+		return log.LvlInfo
+	case lg.Warning:
+		return log.LvlWarn
+	case lg.Error:
+		return log.LvlError
+	case lg.Critical:
+		return log.LvlCrit
+	case lg.Disabled:
+		panic(level)
+		// This should never occur. Maybe log that a message leaked?
+		return log.LvlError
+	default:
+		// This shouldn't happen...
+		panic(level)
+	}
+}
+
 type noopHandler struct{}
 
 func (b noopHandler) Handle(r lg.Record) {
@@ -58,86 +85,16 @@ func (b noopHandler) Handle(r lg.Record) {
 type adapterHandler struct{}
 
 func (b adapterHandler) Handle(r lg.Record) {
-	lvl := r.Level
-
-	switch lvl {
-	case lg.Debug:
-		str := r.String()
-		skip := strings.Contains(str, "completion change") || strings.Contains(str, "hashed piece") ||
-			strings.Contains(str, "set torrent=") ||
-			strings.Contains(str, "all initial dials failed") ||
-			strings.Contains(str, "local and remote peer ids are the same") ||
-			strings.Contains(str, "connection at") || strings.Contains(str, "don't want conns right now") ||
-			strings.Contains(str, "is mutually complete") ||
-			strings.Contains(str, "sending PEX message") || strings.Contains(str, "received pex message") ||
-			strings.Contains(str, "announce to") || strings.Contains(str, "announcing to") ||
-			strings.Contains(str, "EOF") || strings.Contains(str, "closed") || strings.Contains(str, "connection reset by peer") || strings.Contains(str, "use of closed network connection") || strings.Contains(str, "broken pipe") ||
-			strings.Contains(str, "inited with remoteAddr")
-		if skip {
-			log.Trace(str, "lvl", lvl.LogString())
-			break
-		}
-		log.Debug(str)
-	case lg.Info:
-		str := r.String()
-		skip := strings.Contains(str, "EOF")
-		//strings.Contains(str, "banning ip <nil>") ||
-		//strings.Contains(str, "spurious timer") { // suppress useless errors
-		if skip {
-			log.Trace(str, "lvl", lvl.LogString())
-			break
-		}
-		log.Info(str)
-	case lg.Warning:
-		str := r.String()
-		skip := strings.Contains(str, "EOF") ||
-			strings.Contains(str, "requested chunk too long") ||
-			strings.Contains(str, "banned ip") ||
-			//strings.Contains(str, "banning webseed") ||
-			strings.Contains(str, "TrackerClient closed") ||
-			strings.Contains(str, "being sole dirtier of piece") ||
-			strings.Contains(str, "webrtc conn for unloaded torrent") ||
-			strings.Contains(str, "could not find offer for id") ||
-			strings.Contains(str, "received invalid reject") ||
-			strings.Contains(str, "reservation cancelled")
-
-		if skip {
-			log.Debug(str)
-			break
-		}
-		log.Warn(str)
-	case lg.Error:
-		str := r.String()
-		skip := strings.Contains(str, "EOF") ||
-			strings.Contains(str, "short write") ||
-			strings.Contains(str, "disabling data download")
-		if skip {
-			log.Trace(str, "lvl", lvl.LogString())
-			break
-		}
-		log.Error(str)
-	case lg.Critical:
-		str := r.String()
-		skip := strings.Contains(str, "EOF") ||
-			strings.Contains(str, "torrent closed") ||
-			strings.Contains(str, "don't want conns")
-		if skip {
-			log.Trace(str, "lvl", lvl.LogString())
-			break
-		}
-		log.Error(str)
-	default:
-		str := r.String()
-		skip := strings.Contains(str, "EOF") || strings.Contains(str, "unhandled response status") ||
-			strings.Contains(str, "error doing webseed request")
-		if skip {
-			log.Trace(str, "lvl", lvl.LogString())
-			break
-		}
-		log.Info("[downloader] "+r.String(), "torrent_log_type", "unknown", "or", lvl.LogString())
-	}
+	// Note that anacrolix/log now partly supports stdlib slog, so if Erigon switches to that, it
+	// would be better to use that too. anacrolix/torrent might change eventually too.
+	lvl := anacrolixToErigonLogLevel(r.Level)
+	// TODO: anacrolix/log has context values we can pull out... Also can we use the two line
+	// formatter or a newer implementation for the single line?
+	msg := "[downloader torrent client] " + string(lg.LineFormatter(r))
+	log.Log(lvl, msg)
 }
 
+// TODO: Ditch this.
 type RetryableHttpLogger struct {
 	l log.Logger
 }

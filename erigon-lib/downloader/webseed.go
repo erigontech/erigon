@@ -31,14 +31,12 @@ import (
 	"time"
 
 	"github.com/anacrolix/torrent"
-	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/c2h5oh/datasize"
 	"github.com/hashicorp/go-retryablehttp"
 	"github.com/pelletier/go-toml/v2"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -536,30 +534,6 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(
 	return webSeedMap
 }
 
-func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) (ts *torrent.TorrentSpec, ok bool, err error) {
-	urls, ok := d.ByFileName(name)
-	if !ok {
-		return nil, false, nil
-	}
-	for _, urlStr := range urls {
-		urlStr += ".torrent"
-		parsedUrl, err := url.Parse(urlStr)
-		if err != nil {
-			d.logger.Log(d.verbosity, "[snapshots] callTorrentHttpProvider parse url", "err", err)
-			continue // it's ok if some HTTP provider failed - try next one
-		}
-		res, err := d.callTorrentHttpProvider(ctx, parsedUrl)
-		if err != nil {
-			d.logger.Debug("[snapshots] .torrent from webseed rejected", "name", name, "err", err, "url", urlStr)
-			continue // it's ok if some HTTP provider failed - try next one
-		}
-		ts, _, err = d.torrentFiles.Create(name, res)
-		return ts, ts != nil, err
-	}
-
-	return nil, false, nil
-}
-
 func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL) ([]byte, error) {
 	if !strings.HasSuffix(url.Path, ".torrent") {
 		return nil, fmt.Errorf("seems not-torrent url passed: %s", url.String())
@@ -586,28 +560,4 @@ func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL) ([
 		return nil, fmt.Errorf("webseed.downloadTorrentFile: read body: host=%s, url=%s, %w", url.Hostname(), url.EscapedPath(), err)
 	}
 	return res, nil
-}
-
-func validateTorrentBytes(fileName string, b []byte, whitelist snapcfg.Preverified) error {
-	var mi metainfo.MetaInfo
-	if err := bencode.NewDecoder(bytes.NewBuffer(b)).Decode(&mi); err != nil {
-		return err
-	}
-	torrentHash := mi.HashInfoBytes()
-	// files with different names can have same hash. means need check AND name AND hash.
-	if !nameAndHashWhitelisted(fileName, torrentHash.String(), whitelist) {
-		return fmt.Errorf(".torrent file is not whitelisted %s", torrentHash.String())
-	}
-	return nil
-}
-
-func nameAndHashWhitelisted(fileName, fileHash string, whitelist snapcfg.Preverified) bool {
-	fileName = strings.TrimSuffix(fileName, ".torrent")
-
-	for i := 0; i < len(whitelist); i++ {
-		if whitelist[i].Name == fileName && whitelist[i].Hash == fileHash {
-			return true
-		}
-	}
-	return false
 }
