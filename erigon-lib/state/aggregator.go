@@ -1381,12 +1381,14 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 	defer a.dirtyFilesLock.Unlock()
 
 	for id, d := range at.d {
-		//d.garbage(nil)
-		d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])
+		d.garbage(nil)
+		//d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])
 		_ = id
 	}
 	for id, ii := range at.iis {
-		ii.cleanAfterMerge(in.iis[id])
+		ii.garbage(nil)
+		//ii.cleanAfterMerge(in.iis[id])
+		_ = id
 	}
 }
 
