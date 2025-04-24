@@ -375,7 +375,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	histReader := seg.NewReader(hist.MakeGetter(), h.compression)
 
 	_, fName := filepath.Split(historyIdxPath)
-	p := ps.AddNew(fName, uint64(hist.Count()))
+	p := ps.AddNew(fName, cnt)
 	defer ps.Delete(p)
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   int(cnt),
@@ -424,8 +424,8 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 						valOffset, _ = histReader.Skip()
 					}
 				}
-				p.Processed.Add(1)
 			}
+			p.Processed.Add(1)
 
 			select {
 			case <-ctx.Done():
