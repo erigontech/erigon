@@ -696,6 +696,11 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 	return true, nil
 }
 
+func (a *Aggregator) RemoveOverlapsAfterMerg(ctx context.Context) (err error) {
+	a.cleanAfterMerge(nil)
+	return nil
+}
+
 func (a *Aggregator) MergeLoop(ctx context.Context) (err error) {
 	if dbg.NoMerge() || !a.mergingFiles.CompareAndSwap(false, true) {
 		return nil // currently merging or merge is prohibited
@@ -1380,10 +1385,18 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 	defer a.dirtyFilesLock.Unlock()
 
 	for id, d := range at.d {
-		d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])
+		if in == nil {
+			d.cleanAfterMerge(nil, nil, nil)
+		} else {
+			d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])
+		}
 	}
 	for id, ii := range at.iis {
-		ii.cleanAfterMerge(in.iis[id])
+		if in == nil {
+			ii.cleanAfterMerge(nil)
+		} else {
+			ii.cleanAfterMerge(in.iis[id])
+		}
 	}
 }
 
