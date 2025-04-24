@@ -151,15 +151,15 @@ func CreateStateReader(ctx context.Context, tx kv.TemporalTx, br services.FullBl
 	return CreateStateReaderFromBlockNumber(ctx, tx, rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, br)), blockNumber, latest, txnIndex, stateCache, chainName)
 }
 
-func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, blockNumber uint64, latest bool, txnIndex int, stateCache kvcache.Cache, chainName string) (state.StateReader, error) {
+func CreateStateReaderFromBlockNumber(ctx context.Context, sd *state2.SharedDomains, txNumsReader rawdbv3.TxNumsReader, blockNumber uint64, latest bool, txnIndex int, stateCache kvcache.Cache, chainName string) (state.StateReader, error) {
 	if latest {
-		cacheView, err := stateCache.View(ctx, tx)
+		cacheView, err := stateCache.View(ctx, sd)
 		if err != nil {
 			return nil, err
 		}
-		return CreateLatestCachedStateReader(cacheView, tx), nil
+		return CreateLatestCachedStateReader(cacheView), nil
 	}
-	return CreateHistoryStateReader(tx, txNumsReader, blockNumber+1, txnIndex, chainName)
+	return CreateHistoryStateReader(sd.Tx(), txNumsReader, blockNumber+1, txnIndex, chainName)
 }
 
 func CreateHistoryStateReader(tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, blockNumber uint64, txnIndex int, chainName string) (state.StateReader, error) {
@@ -195,6 +195,6 @@ func NewLatestStateWriter(txc wrap.TxContainer, blockReader services.FullBlockRe
 	return state.NewWriterV4(domains)
 }
 
-func CreateLatestCachedStateReader(cache kvcache.CacheView, tx kv.TemporalTx) state.StateReader {
-	return state.NewCachedReader3(cache, tx)
+func CreateLatestCachedStateReader(cache kvcache.CacheView) state.StateReader {
+	return state.NewCachedReader3(cache)
 }

@@ -186,7 +186,13 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 	header := block.HeaderNoCopy()
 
-	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, api._txNumReader, blockNum, isLatest, 0, api.stateCache, chainConfig.ChainName)
+	sd, err := libstate.NewSharedDomains(dbtx, api.logger)
+	if err != nil {
+		return 0, err
+	}
+	defer sd.Close()
+
+	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, sd, api._txNumReader, blockNum, isLatest, 0, api.stateCache, chainConfig.ChainName)
 	if err != nil {
 		return 0, err
 	}
@@ -759,7 +765,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		if err != nil {
 			return nil, err
 		}
-		stateReader = rpchelper.CreateLatestCachedStateReader(cacheView, tx)
+		stateReader = rpchelper.CreateLatestCachedStateReader(cacheView)
 	} else {
 		stateReader, err = rpchelper.CreateHistoryStateReader(tx, api._txNumReader, blockNumber+1, 0, chainConfig.ChainName)
 		if err != nil {

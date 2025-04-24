@@ -18,7 +18,6 @@ package state
 
 import (
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 
 	"github.com/erigontech/erigon-lib/types/accounts"
@@ -28,12 +27,11 @@ import (
 // This wrapper only makes calls to the underlying reader if the item is not in the cache
 type CachedReader3 struct {
 	cache kvcache.CacheView
-	db    kv.TemporalTx
 }
 
 // NewCachedReader3 wraps a given state reader into the cached reader
-func NewCachedReader3(cache kvcache.CacheView, tx kv.TemporalTx) *CachedReader3 {
-	return &CachedReader3{cache: cache, db: tx}
+func NewCachedReader3(cache kvcache.CacheView) *CachedReader3 {
+	return &CachedReader3{cache: cache}
 }
 
 // ReadAccountData is called when an account needs to be fetched from the state

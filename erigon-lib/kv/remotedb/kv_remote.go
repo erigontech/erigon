@@ -200,7 +200,7 @@ func (db *DB) BeginRw(ctx context.Context) (kv.RwTx, error) {
 func (db *DB) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
 	return nil, errors.New("remote db provider doesn't support .BeginRw method")
 }
-func (db *DB) BeginTemporalRw(ctx context.Context) (kv.RwTx, error) {
+func (db *DB) BeginTemporalRw(ctx context.Context) (kv.TemporalRwTx, error) {
 	return nil, errors.New("remote db provider doesn't support .BeginTemporalRw method")
 }
 func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.RwTx, error) {

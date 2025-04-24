@@ -36,6 +36,7 @@ import (
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/metrics"
+	libstate "github.com/erigontech/erigon-lib/state"
 )
 
 type CacheValidationResult struct {
@@ -50,7 +51,7 @@ type CacheValidationResult struct {
 
 type Cache interface {
 	// View - returns CacheView consistent with given kv.Tx
-	View(ctx context.Context, tx kv.Tx) (CacheView, error)
+	View(ctx context.Context, sd *libstate.SharedDomains) (CacheView, error)
 	OnNewBlock(sc *remote.StateChangeBatch)
 	Len() int
 	ValidateCurrentRoot(ctx context.Context, tx kv.Tx) (*CacheValidationResult, error)
@@ -58,6 +59,7 @@ type Cache interface {
 type CacheView interface {
 	Get(k []byte) ([]byte, error)
 	GetCode(k []byte) ([]byte, error)
+	HasStorage(addr common.Address) (bool, error)
 }
 
 // Coherent works on top of Database Transaction and pair Coherent+ReadTransaction must
@@ -132,17 +134,22 @@ type CoherentRoot struct {
 // CoherentView - dumb object, which proxy all requests to Coherent object.
 // It's thread-safe, because immutable
 type CoherentView struct {
-	tx             kv.Tx
+	sd             *libstate.SharedDomains
 	cache          *Coherent
 	stateVersionID uint64
 }
 
 func (c *CoherentView) StateV3() bool { return c.cache.cfg.StateV3 }
 func (c *CoherentView) Get(k []byte) ([]byte, error) {
-	return c.cache.Get(k, c.tx, c.stateVersionID)
+	return c.cache.Get(k, c.sd, c.stateVersionID)
 }
 func (c *CoherentView) GetCode(k []byte) ([]byte, error) {
-	return c.cache.GetCode(k, c.tx, c.stateVersionID)
+	return c.cache.GetCode(k, c.sd, c.stateVersionID)
+}
+
+func (c *CoherentView) HasStorage(addr common.Address) (bool, error) {
+	//TODO implement me
+	panic("implement me")
 }
 
 var _ Cache = (*Coherent)(nil)         // compile-time interface check
@@ -327,8 +334,8 @@ func (c *Coherent) OnNewBlock(stateChanges *remote.StateChangeBatch) {
 	//log.Info("on new block handled", "viewID", stateChanges.StateVersionID)
 }
 
-func (c *Coherent) View(ctx context.Context, tx kv.Tx) (CacheView, error) {
-	id, err := tx.ReadSequence(string(kv.PlainStateVersion))
+func (c *Coherent) View(ctx context.Context, sd *libstate.SharedDomains) (CacheView, error) {
+	id, err := sd.Tx().ReadSequence(string(kv.PlainStateVersion))
 	if err != nil {
 		return nil, err
 	}
@@ -336,22 +343,22 @@ func (c *Coherent) View(ctx context.Context, tx kv.Tx) (CacheView, error) {
 	r := c.selectOrCreateRoot(id)
 
 	if !c.cfg.WaitForNewBlock || c.waitExceededCount.Load() >= MAX_WAITS {
-		return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
+		return &CoherentView{stateVersionID: id, sd: sd, cache: c}, nil
 	}
 
 	if r.readyChanClosed.Load() {
-		return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
+		return &CoherentView{stateVersionID: id, sd: sd, cache: c}, nil
 	}
 
 	select {
 	case <-r.ready:
-		return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
+		return &CoherentView{stateVersionID: id, sd: sd, cache: c}, nil
 	case <-ctx.Done():
-		return nil, fmt.Errorf("kvcache rootNum=%x, %w", tx.ViewID(), ctx.Err())
+		return nil, fmt.Errorf("kvcache rootNum=%x, %w", sd.Tx().ViewID(), ctx.Err())
 	case <-time.After(c.cfg.NewBlockWait):
 		c.timeout.Inc()
 		c.waitExceededCount.Add(1)
-		return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil
+		return &CoherentView{stateVersionID: id, sd: sd, cache: c}, nil
 	}
 }
 
@@ -378,7 +385,7 @@ func (c *Coherent) getFromCache(k []byte, id uint64, code bool) (*Element, *Cohe
 	}
 	return it, r, nil
 }
-func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) (v []byte, err error) {
+func (c *Coherent) Get(k []byte, sd *libstate.SharedDomains, id uint64) (v []byte, err error) {
 	it, r, err := c.getFromCache(k, id, false)
 	if err != nil {
 		return nil, err
@@ -394,12 +401,12 @@ func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) (v []byte, err error) {
 
 	if c.cfg.StateV3 {
 		if len(k) == 20 {
-			v, _, err = tx.(kv.TemporalTx).GetLatest(kv.AccountsDomain, k)
+			v, _, err = sd.GetLatest(kv.AccountsDomain, k)
 		} else {
-			v, _, err = tx.(kv.TemporalTx).GetLatest(kv.StorageDomain, k)
+			v, _, err = sd.GetLatest(kv.StorageDomain, k)
 		}
 	} else {
-		v, err = tx.GetOne(kv.PlainState, k)
+		v, err = sd.Tx().GetOne(kv.PlainState, k)
 	}
 	if err != nil {
 		return nil, err
@@ -416,7 +423,7 @@ func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) (v []byte, err error) {
 	return v, nil
 }
 
-func (c *Coherent) GetCode(k []byte, tx kv.Tx, id uint64) (v []byte, err error) {
+func (c *Coherent) GetCode(k []byte, sd *libstate.SharedDomains, id uint64) (v []byte, err error) {
 	it, r, err := c.getFromCache(k, id, true)
 	if err != nil {
 		return nil, err
@@ -430,9 +437,9 @@ func (c *Coherent) GetCode(k []byte, tx kv.Tx, id uint64) (v []byte, err error) 
 	c.codeMiss.Inc()
 
 	if c.cfg.StateV3 {
-		v, _, err = tx.(kv.TemporalTx).GetLatest(kv.CodeDomain, k)
+		v, _, err = sd.GetLatest(kv.CodeDomain, k)
 	} else {
-		v, err = tx.GetOne(kv.Code, k)
+		v, err = sd.Tx().GetOne(kv.Code, k)
 	}
 	if err != nil {
 		return nil, err
@@ -641,9 +648,9 @@ func DebugStats(cache Cache) []Stat {
 	sort.Slice(res, func(i, j int) bool { return res[i].BlockNum < res[j].BlockNum })
 	return res
 }
-func AssertCheckValues(ctx context.Context, tx kv.Tx, cache Cache) (int, error) {
+func AssertCheckValues(ctx context.Context, sd *libstate.SharedDomains, cache Cache) (int, error) {
 	defer func(t time.Time) { fmt.Printf("AssertCheckValues:327: %s\n", time.Since(t)) }(time.Now())
-	view, err := cache.View(ctx, tx)
+	view, err := cache.View(ctx, sd)
 	if err != nil {
 		return 0, err
 	}
@@ -667,7 +674,7 @@ func AssertCheckValues(ctx context.Context, tx kv.Tx, cache Cache) (int, error) 
 		for _, i := range items {
 			k, v := i.K, i.V
 			var dbV []byte
-			dbV, err = tx.GetOne(kv.PlainState, k)
+			dbV, err = sd.Tx().GetOne(kv.PlainState, k)
 			if err != nil {
 				return false
 			}

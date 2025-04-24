@@ -55,6 +55,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/log/v3"
+	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
@@ -100,7 +101,7 @@ var _ txnprovider.TxnProvider = (*TxPool)(nil)
 //
 // It preserve TxnSlot objects immutable
 type TxPool struct {
-	_chainDB               kv.RoDB // remote db - use it wisely
+	_chainDB               kv.TemporalRoDB // remote db - use it wisely
 	_stateCache            kvcache.Cache
 	poolDB                 kv.RwDB
 	lock                   *sync.Mutex
@@ -170,7 +171,7 @@ func New(
 	ctx context.Context,
 	newTxns chan Announcements,
 	poolDB kv.RwDB,
-	chainDB kv.RoDB,
+	chainDB kv.TemporalRoDB,
 	cfg txpoolcfg.Config,
 	cache kvcache.Cache,
 	chainID uint256.Int,
@@ -287,7 +288,7 @@ func (p *TxPool) start(ctx context.Context) error {
 
 	return p.poolDB.View(ctx, func(tx kv.Tx) error {
 		coreDb, _ := p.chainDB()
-		coreTx, err := coreDb.BeginRo(ctx)
+		coreTx, err := coreDb.BeginTemporalRo(ctx)
 		if err != nil {
 			return err
 		}
@@ -311,12 +312,17 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 
 	coreDB, cache := p.chainDB()
 	cache.OnNewBlock(stateChanges)
-	coreTx, err := coreDB.BeginRo(ctx)
+	coreTx, err := coreDB.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
 	}
-
 	defer coreTx.Rollback()
+
+	sd, err := libstate.NewSharedDomains(coreTx, p.logger)
+	if err != nil {
+		return err
+	}
+	defer sd.Close()
 
 	block := stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight
 	baseFee := stateChanges.PendingBlockBaseFee
@@ -325,7 +331,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 		return err
 	}
 
-	cacheView, err := cache.View(ctx, coreTx)
+	cacheView, err := cache.View(ctx, sd)
 	if err != nil {
 		return err
 	}
@@ -349,7 +355,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	}()
 
 	if assert.Enable {
-		if _, err := kvcache.AssertCheckValues(ctx, coreTx, cache); err != nil {
+		if _, err := kvcache.AssertCheckValues(ctx, sd, cache); err != nil {
 			p.logger.Error("AssertCheckValues", "err", err, "stack", stack.Trace().String())
 		}
 	}
@@ -479,12 +485,19 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 
 	defer processBatchTxnsTimer.ObserveDuration(time.Now())
 	coreDB, cache := p.chainDB()
-	coreTx, err := coreDB.BeginRo(ctx)
+	coreTx, err := coreDB.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
 	}
 	defer coreTx.Rollback()
-	cacheView, err := cache.View(ctx, coreTx)
+
+	sd, err := libstate.NewSharedDomains(coreTx, p.logger)
+	if err != nil {
+		return err
+	}
+	defer sd.Close()
+
+	cacheView, err := cache.View(ctx, sd)
 	if err != nil {
 		return err
 	}
@@ -1318,13 +1331,19 @@ func fillDiscardReasons(reasons []txpoolcfg.DiscardReason, newTxns TxnSlots, dis
 
 func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
 	coreDb, cache := p.chainDB()
-	coreTx, err := coreDb.BeginRo(ctx)
+	coreTx, err := coreDb.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer coreTx.Rollback()
 
-	cacheView, err := cache.View(ctx, coreTx)
+	sd, err := libstate.NewSharedDomains(coreTx, p.logger)
+	if err != nil {
+		return nil, err
+	}
+	defer sd.Close()
+
+	cacheView, err := cache.View(ctx, sd)
 	if err != nil {
 		return nil, err
 	}
@@ -1374,7 +1393,7 @@ func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcf
 	return reasons, nil
 }
 
-func (p *TxPool) chainDB() (kv.RoDB, kvcache.Cache) {
+func (p *TxPool) chainDB() (kv.TemporalRoDB, kvcache.Cache) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	return p._chainDB, p._stateCache
@@ -2398,7 +2417,7 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 	return nil
 }
 
-func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
+func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.TemporalTx) error {
 	if p.lastSeenBlock.Load() == 0 {
 		lastSeenBlock, err := LastSeenBlock(tx)
 		if err != nil {
@@ -2424,7 +2443,13 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 		p.lastSeenBlock.Store(lastSeenProgress)
 	}
 
-	cacheView, err := p._stateCache.View(ctx, coreTx)
+	sd, err := libstate.NewSharedDomains(coreTx, p.logger)
+	if err != nil {
+		return err
+	}
+	defer sd.Close()
+
+	cacheView, err := p._stateCache.View(ctx, sd)
 	if err != nil {
 		return err
 	}
