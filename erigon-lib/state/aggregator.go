@@ -696,7 +696,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 	return true, nil
 }
 
-func (a *Aggregator) RemoveOverlapsAfterMerg(ctx context.Context) (err error) {
+func (a *Aggregator) RemoveOverlapsAfterMerge(ctx context.Context) (err error) {
 	a.cleanAfterMerge(nil)
 	return nil
 }
