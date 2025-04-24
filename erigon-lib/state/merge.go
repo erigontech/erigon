@@ -1025,7 +1025,7 @@ func garbage(dirtyFiles *btree.BTreeG[*filesItem], visibleFiles []visibleFile, m
 				continue
 			}
 
-			if item.isProperSubsetOf(merged) {
+			if merged != nil && item.isProperSubsetOf(merged) {
 				outs = append(outs, item)
 			}
 			_ = hasCoverVisibleFile(visibleFiles, item)
