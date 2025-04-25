@@ -56,7 +56,7 @@ type validatePayloadFunc func(wrap.TxContainer, *types.Header, *types.RawBody, u
 
 type ForkValidator struct {
 	// current memory batch containing chain head that extend canonical fork.
-	sharedDom *state.SharedDomains
+	sharedDom state.SharedDomains
 	// notifications accumulated for the extending fork
 	extendingForkNotifications *shards.Notifications
 	// hash of chain head that extend canonical fork.
@@ -267,14 +267,18 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	}
 	if fv.sharedDom != nil {
 		fv.sharedDom.Close()
+		fv.sharedDom = nil
+		defer func() {
+			var err error
+			temporalTx := tx.(kv.TemporalTx)
+			fv.sharedDom, criticalError = state.NewSharedDomains(temporalTx, logger)
+			if err != nil {
+				criticalError = fmt.Errorf("failed to create shared domains: %w", err)
+				return
+			}
+		}()
 	}
 
-	temporalTx := tx.(kv.TemporalTx)
-	fv.sharedDom, criticalError = state.NewSharedDomains(temporalTx, logger)
-	if criticalError != nil {
-		criticalError = fmt.Errorf("failed to create shared domains: %w", criticalError)
-		return
-	}
 	txc := wrap.NewTxContainer(tx, fv.sharedDom)
 
 	fv.extendingForkNotifications = shards.NewNotifications(nil)
@@ -363,4 +367,11 @@ func (fv *ForkValidator) GetTimings(hash common.Hash) BlockTimings {
 		return timings
 	}
 	return BlockTimings{}
+}
+
+// GetTimings returns the timings of the last block validation.
+func (fv *ForkValidator) ClearValidation() {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	fv.validHashes.Purge()
 }

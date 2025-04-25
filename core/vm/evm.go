@@ -224,6 +224,8 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 		}
 	}
 
+	// fmt.Println("JG evm.go: call: from: ", caller.Address().String(), " to: ", addr.String(), " value: ", value.String(), " gas: ", gas, " depth: ", depth, " type: ", typ.String(), " isPrecompile: ", isPrecompile, " code: ", hexutil.Encode(code), " input: ", hexutil.Encode(input))
+
 	snapshot := evm.intraBlockState.Snapshot()
 
 	if typ == CALL {
@@ -279,6 +281,9 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 			readOnly = true
 		}
 		ret, err = run(evm, contract, input, readOnly)
+		// if err != nil {
+		// 	fmt.Println("evm.go: call: run: err: ", err)
+		// }
 		gas = contract.Gas
 	}
 	// When an error was returned by the EVM or when setting the creation code

@@ -80,7 +80,8 @@ type TxTask struct {
 	TraceFroms         map[common.Address]struct{}
 	TraceTos           map[common.Address]struct{}
 
-	UsedGas uint64
+	UsedGas     uint64
+	UsedBlobGas uint64
 
 	// BlockReceipts is used only by Gnosis:
 	//  - it does store `proof, err := rlp.EncodeToBytes(ValidatorSetProof{Header: header, Receipts: r})`

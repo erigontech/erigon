@@ -78,7 +78,7 @@ type executor interface {
 	//these are reset by commit - so need to be read from the executor once its processing
 	tx() kv.RwTx
 	readState() *state.ParallelExecutionState
-	domains() *state2.SharedDomains
+	domains() state2.SharedDomains
 }
 
 type txExecutor struct {
@@ -87,7 +87,7 @@ type txExecutor struct {
 	execStage      *StageState
 	agg            *state2.Aggregator
 	rs             *state.ParallelExecutionState
-	doms           *state2.SharedDomains
+	doms           state2.SharedDomains
 	accumulator    *shards.Accumulator
 	u              Unwinder
 	isMining       bool
@@ -107,7 +107,7 @@ func (te *txExecutor) readState() *state.ParallelExecutionState {
 	return te.rs
 }
 
-func (te *txExecutor) domains() *state2.SharedDomains {
+func (te *txExecutor) domains() state2.SharedDomains {
 	return te.doms
 }
 
@@ -405,7 +405,7 @@ func (pe *parallelExecutor) processResultQueue(ctx context.Context, inputTxNum u
 			}
 
 			// resolve first conflict right here: it's faster and conflict-free
-			pe.applyWorker.RunTxTaskNoLock(txTask.Reset(), pe.isMining, false)
+			pe.applyWorker.RunTxTaskNoLock(txTask.Reset(), pe.isMining, false, nil, nil, nil)
 			if txTask.Error != nil {
 				//fmt.Println("RETRY", txTask.TxNum, txTask.Error)
 				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, txTask.Error)

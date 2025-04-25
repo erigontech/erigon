@@ -21,7 +21,7 @@ import (
 	"github.com/erigontech/erigon-lib/state"
 )
 
-func NewTxContainer(Tx kv.RwTx, doms *state.SharedDomains) TxContainer {
+func NewTxContainer(Tx kv.RwTx, doms state.SharedDomains) TxContainer {
 	txContainer := TxContainer{
 		Tx:   Tx,
 		Doms: doms,
@@ -36,5 +36,5 @@ func NewTxContainer(Tx kv.RwTx, doms *state.SharedDomains) TxContainer {
 type TxContainer struct {
 	Tx   kv.RwTx
 	Ttx  kv.TemporalTx
-	Doms *state.SharedDomains
+	Doms state.SharedDomains
 }

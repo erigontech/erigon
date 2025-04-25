@@ -165,7 +165,7 @@ var ErrTooDeepUnwind = errors.New("too deep unwind")
 
 func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator, logger log.Logger) (err error) {
 	br := cfg.blockReader
-	var domains *libstate.SharedDomains
+	var domains libstate.SharedDomains
 	var tx kv.TemporalRwTx
 	if txc.Doms == nil {
 		temporalTx, ok := txc.Tx.(kv.TemporalRwTx)

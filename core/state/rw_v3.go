@@ -50,7 +50,7 @@ var execTxsDone = metrics.NewCounter(`exec_txs_done`)
 //   - apply state-changes independently from execution and even in another goroutine (by ApplyState func)
 //   - track which txNums state-changes was applied
 type ParallelExecutionState struct {
-	domains      *libstate.SharedDomains
+	domains      libstate.SharedDomains
 	triggerLock  sync.Mutex
 	triggers     map[uint64]*TxTask
 	senderTxNums map[common.Address]uint64
@@ -63,7 +63,7 @@ type ParallelExecutionState struct {
 	trace   bool
 }
 
-func NewParallelExecutionState(domains *libstate.SharedDomains, syncCfg ethconfig.Sync, isBor bool, logger log.Logger) *ParallelExecutionState {
+func NewParallelExecutionState(domains libstate.SharedDomains, syncCfg ethconfig.Sync, isBor bool, logger log.Logger) *ParallelExecutionState {
 	return &ParallelExecutionState{
 		domains:      domains,
 		triggers:     map[uint64]*TxTask{},
@@ -125,7 +125,7 @@ func (rs *ParallelExecutionState) CommitTxNum(sender *common.Address, txNum uint
 	return count
 }
 
-func (rs *ParallelExecutionState) applyState(txTask *TxTask, domains *libstate.SharedDomains) error {
+func (rs *ParallelExecutionState) applyState(txTask *TxTask, domains libstate.SharedDomains) error {
 	var acc accounts.Account
 
 	//maps are unordered in Go! don't iterate over it. SharedDomains.deleteAccount will call GetLatest(Code) and expecting it not been delete yet
@@ -179,7 +179,7 @@ func (rs *ParallelExecutionState) applyState(txTask *TxTask, domains *libstate.S
 	return nil
 }
 
-func (rs *ParallelExecutionState) Domains() *libstate.SharedDomains {
+func (rs *ParallelExecutionState) Domains() libstate.SharedDomains {
 	return rs.domains
 }
 
@@ -219,7 +219,7 @@ func (rs *ParallelExecutionState) ApplyState(ctx context.Context, txTask *TxTask
 	return nil
 }
 
-func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *libstate.SharedDomains) error {
+func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains libstate.SharedDomains) error {
 	for addr := range txTask.TraceFroms {
 		if err := domains.IndexAdd(kv.TracesFromIdx, addr[:]); err != nil {
 			return err
@@ -506,7 +506,7 @@ func (w *StateWriterV3) UpdateAccountData(address common.Address, original, acco
 		fmt.Printf("acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
 	}
 	if original.Incarnation > account.Incarnation {
-		//del, before create: to clanup code/storage
+		//del, before create: to cleanup code/storage
 		if err := w.rs.domains.DomainDel(kv.CodeDomain, address[:], nil, nil, 0); err != nil {
 			return err
 		}
@@ -675,14 +675,14 @@ func (r *ReaderV3) ReadAccountIncarnation(address common.Address) (uint64, error
 type ReaderParallelV3 struct {
 	txNum     uint64
 	trace     bool
-	sd        *libstate.SharedDomains
+	sd        libstate.SharedDomains
 	composite []byte
 
 	discardReadList bool
 	readLists       map[string]*libstate.KvList
 }
 
-func NewReaderParallelV3(sd *libstate.SharedDomains) *ReaderParallelV3 {
+func NewReaderParallelV3(sd libstate.SharedDomains) *ReaderParallelV3 {
 	return &ReaderParallelV3{
 		//trace:     true,
 		sd:        sd,

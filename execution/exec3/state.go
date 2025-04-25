@@ -17,12 +17,19 @@
 package exec3
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 	"sync"
 
+	"github.com/erigontech/erigon-lib/rlp"
+
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/eth/consensuschain"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -36,11 +43,11 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/turbo/silkworm"
 )
 
 var noop = state.NewNoopWriter()
@@ -154,7 +161,7 @@ func (rw *Worker) Run() (err error) {
 func (rw *Worker) RunTxTask(txTask *state.TxTask, isMining bool) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
-	rw.RunTxTaskNoLock(txTask, isMining, false)
+	rw.RunTxTaskNoLock(txTask, isMining, false, nil, nil, nil)
 }
 
 // Needed to set history reader when need to offset few txs from block beginning and does not break processing,
@@ -176,7 +183,7 @@ func (rw *Worker) SetReader(reader state.ResettableStateReader) {
 	}
 }
 
-func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvaluaion bool) {
+func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvaluaion bool, silkwormInstance *silkworm.Silkworm, applyTx kv.RwTx, silkwormMemDBTx kv.RwTx) {
 	if txTask.HistoryExecution && !rw.historyMode {
 		// in case if we cancelled execution and commitment happened in the middle of the block, we have to process block
 		// from the beginning until committed txNum and only then disable history mode.
@@ -214,6 +221,9 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 	header := txTask.Header
 	//fmt.Printf("txNum=%d blockNum=%d history=%t\n", txTask.TxNum, txTask.BlockNum, txTask.HistoryExecution)
 
+	fmt.Print("JG RunTxTaskNoLock ", "BlockNum ", txTask.BlockNum, " BlockHash ", hexutil.Encode(txTask.BlockHash.Bytes()),
+		" TxIndex ", txTask.TxIndex, " TxNum ", txTask.TxNum)
+
 	switch {
 	case txTask.TxIndex == -1:
 		if txTask.BlockNum == 0 {
@@ -228,6 +238,13 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			break
 		}
 
+		if silkwormInstance != nil {
+			silkwormErr := silkworm.BlockExecStart(silkwormInstance, applyTx, txTask)
+			if silkwormErr != nil {
+				return
+			}
+		}
+
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
@@ -236,9 +253,41 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		}
 		rw.engine.Initialize(rw.chainConfig, rw.chain, header, ibs, syscall, rw.logger, rw.hooks)
 		txTask.Error = ibs.FinalizeTx(rules, noop)
+
+		fmt.Println(" Initialized")
+
 	case txTask.Final:
 		if txTask.BlockNum == 0 {
 			break
+		}
+
+		if silkwormInstance != nil {
+			silkwormErr := silkworm.BlockExecEnd(silkwormInstance, applyTx, silkwormMemDBTx)
+			if silkwormErr != nil {
+				return
+			}
+
+			cursor, err := silkwormMemDBTx.Cursor(kv.TblReceiptVals)
+
+			if err != nil {
+				panic(err)
+			}
+
+			idx := 0
+			for key, value, err := cursor.First(); key != nil; key, value, err = cursor.Next() {
+				if err != nil {
+					panic(err)
+				}
+				var receipt types.Receipt
+				rlp.NewStream(bytes.NewReader(value), 0)
+
+				if err = receipt.DecodeRLP(rlp.NewStream(bytes.NewReader(value), 0)); err != nil {
+					panic("Unable to decode silkworm-produced receipt queried from database!")
+				}
+				receipt.BlockNumber = new(big.Int).SetUint64(txTask.BlockNum)
+				txTask.BlockReceipts[idx] = &receipt
+				idx++
+			}
 		}
 
 		// End of block transaction in a block
@@ -271,7 +320,18 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 				txTask.TraceTos[uncle.Coinbase] = struct{}{}
 			}
 		}
+		fmt.Println(" Finalized")
+
 	default:
+
+		sender, _ := txTask.Txs[txTask.TxIndex].GetSender()
+		fmt.Print(" TxnHash ", txTask.Txs[txTask.TxIndex].Hash(), " Sender ", sender)
+
+		if silkwormInstance != nil {
+			silkworm.ExecuteTx(silkwormInstance, applyTx, txTask)
+			break
+		}
+
 		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), rw.chainConfig.GetMaxBlobGasPerBlock(header.Time))
 		rw.callTracer.Reset()
 		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
@@ -304,6 +364,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		} else {
 			txTask.Failed = applyRes.Failed()
 			txTask.UsedGas = applyRes.UsedGas
+			txTask.UsedBlobGas = txTask.Tx.GetBlobGas()
 			// Update the state with pending changes
 			ibs.SoftFinalise()
 			//txTask.Error = ibs.FinalizeTx(rules, noop)
@@ -317,7 +378,9 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			}
 		}
 
+		fmt.Println(" UsedGas", txTask.UsedGas, "UsedBlobGas", txTask.UsedBlobGas)
 	}
+
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
 	if txTask.Error == nil {
 		txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()

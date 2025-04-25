@@ -17,6 +17,12 @@
 package silkworm
 
 import (
+	"errors"
+	"math/big"
+	"unsafe"
+
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/execution/consensus"
 	silkworm_go "github.com/erigontech/silkworm-go"
 
 	"github.com/erigontech/erigon-lib/kv"
@@ -101,4 +107,75 @@ func (service SentryService) Start() error {
 
 func (service SentryService) Stop() error {
 	return service.silkworm.SentryStop()
+}
+
+func ExecuteBlocksEphemeral(s *Silkworm, txn kv.Tx, chainID *big.Int, startBlock uint64, maxBlock uint64, batchSize uint64, writeChangeSets, writeReceipts, writeCallTraces bool) (uint64, error) {
+	var txnHandle unsafe.Pointer
+	if txn != nil {
+		txnHandle = txn.CHandle()
+	}
+	lastExecutedBlock, err := s.ExecuteBlocksEphemeral(txnHandle, chainID, startBlock, maxBlock, batchSize, writeChangeSets, writeReceipts, writeCallTraces)
+	if (err != nil) && errors.Is(err, silkworm_go.ErrInvalidBlock) {
+		return lastExecutedBlock, consensus.ErrInvalidBlock
+	}
+	return lastExecutedBlock, err
+}
+
+func ExecuteBlocksPerpetual(s *Silkworm, db kv.RwDB, chainID *big.Int, startBlock uint64, maxBlock uint64, batchSize uint64, writeChangeSets, writeReceipts, writeCallTraces bool) (uint64, error) {
+	lastExecutedBlock, err := s.ExecuteBlocksPerpetual(db.CHandle(), chainID, startBlock, maxBlock, batchSize, writeChangeSets, writeReceipts, writeCallTraces)
+	if (err != nil) && errors.Is(err, silkworm_go.ErrInvalidBlock) {
+		return lastExecutedBlock, consensus.ErrInvalidBlock
+	}
+	return lastExecutedBlock, err
+}
+
+type CanAddSnapshotsToSilkwarm interface {
+	AddSnapshotsToSilkworm(*Silkworm) error
+}
+
+func ExecuteTx(s *Silkworm, txn kv.Tx, txTask *state.TxTask) error {
+	var txnHandle unsafe.Pointer
+	if txn != nil {
+		txnHandle = txn.CHandle()
+	}
+
+	// fmt.Println("JG silkworm.ExecuteTx", "BlockNum", txTask.BlockNum, "BlockHash", hexutil.Encode(txTask.BlockHash.Bytes()),
+	// "TxIndex", txTask.TxIndex, "TxNum", txTask.TxNum, "Transactions in block", len(txTask.Txs))
+
+	gasUsed, blobGasUsed, err := s.ExecuteTxn(txnHandle, txTask.BlockNum, silkworm_go.Hash(txTask.BlockHash), uint64(txTask.TxIndex), txTask.TxNum)
+
+	txTask.UsedGas = gasUsed
+	txTask.UsedBlobGas = blobGasUsed
+	txTask.Error = err
+
+	// fmt.Println("JG silkworm.ExecuteTx", "UsedGas", gasUsed, "UsedBlobGas", blobGasUsed, "Error", err)
+
+	return err
+}
+
+func BlockExecStart(s *Silkworm, txn kv.Tx, txTask *state.TxTask) error {
+	var txnHandle unsafe.Pointer
+	if txn != nil {
+		txnHandle = txn.CHandle()
+	}
+
+	err := s.BlockExecStart(txnHandle, txTask.BlockNum, silkworm_go.Hash(txTask.BlockHash))
+
+	return err
+}
+
+func BlockExecEnd(s *Silkworm, txn kv.Tx, memDbTxn kv.Tx) error {
+	var txnHandle unsafe.Pointer
+	if txn != nil {
+		txnHandle = txn.CHandle()
+	}
+
+	var memDbTxnHandle unsafe.Pointer
+	if memDbTxn != nil {
+		memDbTxnHandle = memDbTxn.CHandle()
+	}
+
+	err := s.BlockExecEnd(txnHandle, memDbTxnHandle)
+
+	return err
 }

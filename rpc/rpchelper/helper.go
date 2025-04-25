@@ -181,8 +181,8 @@ func CreateHistoryStateReader(tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReade
 	return r, nil
 }
 
-func NewLatestDomainStateReader(sd *state2.SharedDomains) state.StateReader {
-	return state.NewReaderV3(sd)
+func NewLatestDomainStateReader(sd state2.SharedDomains) state.StateReader {
+	return state.NewReaderV3(sd.Tx())
 }
 
 func NewLatestStateReader(tx kv.Tx) state.StateReader {

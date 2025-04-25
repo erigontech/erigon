@@ -137,7 +137,7 @@ func (p *Progress) Log(suffix string, rs *state.ParallelExecutionState, in *stat
 // Cases:
 //  1. Snapshots > ExecutionStage: snapshots can have half-block data `10.4`. Get right txNum from SharedDomains (after SeekCommitment)
 //  2. ExecutionStage > Snapshots: no half-block data possible. Rely on DB.
-func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms *state2.SharedDomains, maxBlockNum uint64) (
+func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms state2.SharedDomains, maxBlockNum uint64) (
 	inputTxNum uint64, maxTxNum uint64, offsetFromBlockBeginning uint64, err error) {
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.blockReader))
@@ -208,6 +208,9 @@ func ExecV3(ctx context.Context,
 	initialCycle bool,
 	isMining bool,
 ) (execErr error) {
+	// fmt.Println("JG ExecV3 start", maxBlockNum)
+	execV3start := time.Now()
+
 	inMemExec := txc.Doms != nil
 	// TODO: e35 doesn't support parallel-exec yet
 	parallel = false //nolint
@@ -253,18 +256,24 @@ func ExecV3(ctx context.Context,
 	}
 
 	var err error
-	var doms *state2.SharedDomains
+	var doms state2.SharedDomains
 	if inMemExec {
 		doms = txc.Doms
 	} else {
 		var err error
-		temporalTx, ok := applyTx.(kv.TemporalTx)
+		temporalTx, ok := applyTx.(kv.TemporalRwTx)
 		if !ok {
 			return errors.New("applyTx is not a temporal transaction")
 		}
-		doms, err = state2.NewSharedDomains(temporalTx, log.New())
+
+		if cfg.silkworm != nil {
+			doms, err = state2.NewDirectAccessDomains(temporalTx, log.New())
+		} else {
+			doms, err = state2.NewSharedDomains(temporalTx, log.New())
+		}
+
 		// if we are behind the commitment, we can't execute anything
-		// this can heppen if progress in domain is higher than progress in blocks
+		// this can happen if progress in domain is higher than progress in blocks
 		if errors.Is(err, state2.ErrBehindCommitment) {
 			return nil
 		}
@@ -276,18 +285,22 @@ func ExecV3(ctx context.Context,
 	txNumInDB := doms.TxNum()
 
 	var (
-		inputTxNum               = doms.TxNum()
-		stageProgress            = execStage.BlockNumber
-		outputTxNum              = atomic.Uint64{}
-		blockComplete            = atomic.Bool{}
-		outputBlockNum           = stages.SyncMetrics[stages.Execution]
-		inputBlockNum            = &atomic.Uint64{}
-		offsetFromBlockBeginning uint64
-		blockNum, maxTxNum       uint64
+		inputTxNum                    = doms.TxNum()
+		stageProgress                 = execStage.BlockNumber
+		outputTxNum                   = atomic.Uint64{}
+		blockComplete                 = atomic.Bool{}
+		outputBlockNum                = stages.SyncMetrics[stages.Execution]
+		inputBlockNum                 = &atomic.Uint64{}
+		offsetFromBlockBeginning      uint64
+		fromBlock, blockNum, maxTxNum uint64
 	)
 
 	blockNum = doms.BlockNum()
 	outputTxNum.Store(doms.TxNum())
+
+	defer func() {
+		logger.Info(fmt.Sprintf("[%s] ExecV3 done", execStage.LogPrefix()), "fromBlock", fromBlock, "toBlock", maxBlockNum, "time", time.Since(execV3start), "useSilkworm", cfg.silkworm != nil, "inMem", inMemExec)
+	}()
 
 	if maxBlockNum < blockNum {
 		return nil
@@ -296,11 +309,6 @@ func ExecV3(ctx context.Context,
 	shouldGenerateChangesets := maxBlockNum-blockNum <= changesetSafeRange || cfg.syncCfg.AlwaysGenerateChangesets
 	if blockNum < cfg.blockReader.FrozenBlocks() {
 		shouldGenerateChangesets = false
-	}
-
-	if maxBlockNum > blockNum+16 {
-		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
-			"from", blockNum, "to", maxBlockNum, "fromTxNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx, "inMem", inMemExec)
 	}
 
 	agg.BuildFilesInBackground(outputTxNum.Load())
@@ -429,6 +437,7 @@ func ExecV3(ctx context.Context,
 
 	ts := time.Duration(0)
 	blockNum = executor.domains().BlockNum()
+	fromBlock = blockNum
 	outputTxNum.Store(executor.domains().TxNum())
 
 	if maxBlockNum < blockNum {
@@ -437,7 +446,7 @@ func ExecV3(ctx context.Context,
 
 	if maxBlockNum > blockNum+16 {
 		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
-			"from", blockNum, "to", maxBlockNum, "fromTxNum", executor.domains().TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx)
+			"from", blockNum, "to", maxBlockNum, "fromTxNum", executor.domains().TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx, "useSilkworm", cfg.silkworm != nil, "inMem", inMemExec)
 	}
 
 	agg.BuildFilesInBackground(outputTxNum.Load())
@@ -459,6 +468,8 @@ func ExecV3(ctx context.Context,
 
 	// Only needed by bor chains
 	shouldGenerateChangesetsForLastBlocks := cfg.chainConfig.Bor != nil
+
+	// fmt.Println("JG ExecV3 Loop start", blockNum, "to", maxBlockNum)
 
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
@@ -491,6 +502,7 @@ Loop:
 		executor.domains().SetBlockNum(blockNum)
 
 		b, err = blockWithSenders(ctx, cfg.db, executor.tx(), blockReader, blockNum)
+		fmt.Printf("JG executing block %d expected gas used %d total txns %d\n", blockNum, b.GasUsed(), len(b.Transactions()))
 		if err != nil {
 			return err
 		}
@@ -582,6 +594,7 @@ Loop:
 
 				ValidationResults: validationResults,
 			}
+
 			if txTask.HistoryExecution && usedGas == 0 {
 				usedGas, _, _, err = rawtemporaldb.ReceiptAsOf(executor.tx().(kv.TemporalTx), txTask.TxNum)
 				if err != nil {
@@ -729,7 +742,7 @@ Loop:
 				}
 
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(executor.tx())
-				progress.Log("", executor.readState(), nil, nil, count, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
+				progress.Log("progress", executor.readState(), nil, nil, count, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
 
 				//TODO: https://github.com/erigontech/erigon/issues/10724
 				//if executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).CanPrune(executor.tx(), outputTxNum.Load()) {
@@ -745,6 +758,7 @@ Loop:
 					skipPostEvaluation || // If we skip post evaluation, then we should compute root hash ASAP for fail-fast
 					aggregatorRo.CanPrune(executor.tx(), outputTxNum.Load()) // if have something to prune - better prune ASAP to keep chaindata smaller
 				if !needCalcRoot {
+					logger.Info("No need to calculate root hash", "size", executor.readState().SizeEstimate(), "threshold", commitThreshold)
 					break
 				}
 
@@ -829,7 +843,7 @@ Loop:
 }
 
 // nolint
-func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *state2.SharedDomains) {
+func dumpPlainStateDebug(tx kv.TemporalRwTx, doms state2.SharedDomains) {
 	if doms != nil {
 		doms.Flush(context.Background(), tx)
 	}
@@ -920,7 +934,7 @@ func handleIncorrectRootHashError(header *types.Header, applyTx kv.RwTx, cfg Exe
 }
 
 // flushAndCheckCommitmentV3 - does write state to db and then check commitment
-func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.RwTx, doms *state2.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, inMemExec bool) (bool, error) {
+func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.RwTx, doms state2.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, inMemExec bool) (bool, error) {
 
 	// E2 state root check was in another stage - means we did flush state even if state root will not match
 	// And Unwind expecting it
@@ -952,6 +966,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		header.Root = common.BytesToHash(computedRootHash)
 		return true, nil
 	}
+	// fmt.Println("JG computedRootHash", hexutil.Encode(computedRootHash), "header.Root", header.Root.Hex())
 	if !bytes.Equal(computedRootHash, header.Root.Bytes()) {
 		logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), computedRootHash, header.Root.Bytes(), header.Hash()))
 		return handleIncorrectRootHashError(header, applyTx, cfg, e, maxBlockNum, logger, u)

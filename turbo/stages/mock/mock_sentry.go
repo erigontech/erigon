@@ -86,12 +86,14 @@ import (
 	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/turbo/silkworm"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	stages2 "github.com/erigontech/erigon/turbo/stages"
 	"github.com/erigontech/erigon/turbo/stages/bodydownload"
 	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
+	"github.com/erigontech/mdbx-go/mdbx"
 )
 
 const MockInsertAsInitialCycle = false
@@ -102,6 +104,7 @@ type MockSentry struct {
 	Log                  log.Logger
 	tb                   testing.TB
 	cancel               context.CancelFunc
+	EthConfig            *ethconfig.Config
 	DB                   kv.TemporalRwDB
 	Dirs                 datadir.Dirs
 	Engine               consensus.Engine
@@ -122,6 +125,7 @@ type MockSentry struct {
 	ReceiveWg            sync.WaitGroup
 	Address              common.Address
 	Eth1ExecutionService *eth1.EthereumExecutionModule
+	ForkValidator        *engine_helpers.ForkValidator
 
 	Notifications *shards.Notifications
 
@@ -135,6 +139,8 @@ type MockSentry struct {
 	ReceiptsReader *receipts.Generator
 	posStagedSync  *stagedsync.Sync
 	bgComponentsEg errgroup.Group
+
+	silkwormInstance *silkworm.Silkworm
 }
 
 func (ms *MockSentry) Close() {
@@ -150,6 +156,9 @@ func (ms *MockSentry) Close() {
 	}
 	if err := ms.bgComponentsEg.Wait(); err != nil {
 		require.Equal(ms.tb, context.Canceled, err) // upon waiting for clean exit we should get ctx cancelled
+	}
+	if ms.silkwormInstance != nil {
+		ms.silkwormInstance.Close()
 	}
 }
 
@@ -238,9 +247,9 @@ func MockWithGenesis(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey,
 	return MockWithGenesisPruneMode(tb, gspec, key, blockBufferSize, prune.DefaultMode, withPosDownloader)
 }
 
-func MockWithGenesisEngine(tb testing.TB, gspec *types.Genesis, engine consensus.Engine, withPosDownloader, checkStateRoot bool) *MockSentry {
+func MockWithGenesisEngine(tb testing.TB, gspec *types.Genesis, engine consensus.Engine, withPosDownloader, checkStateRoot bool, useSilkworm bool) *MockSentry {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	return MockWithEverything(tb, gspec, key, prune.DefaultMode, engine, blockBufferSize, false, withPosDownloader, checkStateRoot)
+	return MockWithEverything(tb, gspec, key, prune.DefaultMode, engine, blockBufferSize, false, withPosDownloader, checkStateRoot, useSilkworm)
 }
 
 func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, blockBufferSize int, prune prune.Mode, withPosDownloader bool) *MockSentry {
@@ -254,11 +263,12 @@ func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.Pr
 	}
 
 	checkStateRoot := true
-	return MockWithEverything(tb, gspec, key, prune, engine, blockBufferSize, false, withPosDownloader, checkStateRoot)
+	return MockWithEverything(tb, gspec, key, prune, engine, blockBufferSize, false, withPosDownloader, checkStateRoot, false)
 }
 
 func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode,
 	engine consensus.Engine, blockBufferSize int, withTxPool, withPosDownloader, checkStateRoot bool,
+	useSilkworm bool,
 ) *MockSentry {
 	tmpdir := os.TempDir()
 	if tb != nil {
@@ -278,6 +288,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	cfg.PersistReceiptsCache = true
 	cfg.ChaosMonkey = false
 	cfg.Snapshot.ChainName = gspec.Config.ChainName
+	cfg.SilkwormExecution = useSilkworm
 
 	logLvl := log.LvlError
 	if lvl, ok := os.LookupEnv("MOCK_SENTRY_LOG_LEVEL"); ok {
@@ -293,9 +304,9 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	db := temporaltest.NewTestDB(tb, dirs)
 
-	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db, nil, nil, nil, logger)
 	allSnapshots := freezeblocks.NewRoSnapshots(cfg.Snapshot, dirs.Snap, 0, logger)
 	allBorSnapshots := heimdall.NewRoSnapshots(cfg.Snapshot, dirs.Snap, 0, logger)
+	erigonGrpcServer := remotedbserver.NewKvServer(ctx, db, allSnapshots, allBorSnapshots, nil, logger)
 
 	bridgeStore := bridge.NewSnapshotStore(bridge.NewDbStore(db), allBorSnapshots, gspec.Config.Bor)
 	heimdallStore := heimdall.NewSnapshotStore(heimdall.NewDbStore(db), allBorSnapshots)
@@ -304,6 +315,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 
 	mock := &MockSentry{
 		Ctx: ctx, cancel: ctxCancel, DB: db,
+		EthConfig:      &cfg,
 		tb:             tb,
 		Log:            logger,
 		Dirs:           dirs,
@@ -311,12 +323,19 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		gspec:          gspec,
 		ChainConfig:    gspec.Config,
 		Key:            key,
-		Notifications:  shards.NewNotifications(erigonGrpcServeer),
+		Notifications:  shards.NewNotifications(erigonGrpcServer),
 		PeerId:         gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
 		BlockSnapshots: allSnapshots,
 		BlockReader:    br,
 		ReceiptsReader: receipts.NewGenerator(br, engine),
 		HistoryV3:      true,
+	}
+
+	if useSilkworm {
+		mock.silkwormInstance, err = silkworm.New(cfg.Dirs.DataDir, mdbx.Version(), cfg.SilkwormNumContexts, log.LvlError)
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	if tb != nil {
@@ -348,7 +367,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	blockPropagator := func(Ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int) {}
 	if !cfg.TxPool.Disable {
 		poolCfg := txpoolcfg.DefaultConfig
-		stateChangesClient := direct.NewStateDiffClientDirect(erigonGrpcServeer)
+		stateChangesClient := direct.NewStateDiffClientDirect(erigonGrpcServer)
 		mock.TxPool, mock.TxPoolGrpcServer, err = txpool.Assemble(
 			ctx,
 			poolCfg,
@@ -382,7 +401,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		terseLogger.SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))
 		// Needs its own notifications to not update RPC daemon and txpool about pending blocks
 		stateSync := stages2.NewInMemoryExecution(mock.Ctx, mock.DB, &cfg, mock.sentriesClient,
-			dirs, notifications, mock.BlockReader, blockWriter, nil, terseLogger)
+			dirs, notifications, mock.BlockReader, blockWriter, mock.silkwormInstance, terseLogger)
 		chainReader := consensuschain.NewReader(mock.ChainConfig, txc.Tx, mock.BlockReader, logger)
 		// We start the mining step
 		if err := stages2.StateStep(ctx, chainReader, mock.Engine, txc, stateSync, header, body, unwindPoint, headersChain, bodiesChain, true); err != nil {
@@ -399,7 +418,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		}
 		return nil
 	}
-	forkValidator := engine_helpers.NewForkValidator(ctx, 1, inMemoryExecution, dirs.Tmp, mock.BlockReader)
+	mock.ForkValidator = engine_helpers.NewForkValidator(ctx, 1, inMemoryExecution, dirs.Tmp, mock.BlockReader)
 
 	statusDataProvider := sentry.NewStatusDataProvider(
 		db,
@@ -502,7 +521,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 					mock.sentriesClient.Hd,
 					mock.gspec,
 					cfg.Sync,
-					nil,
+					mock.silkwormInstance,
 				),
 				stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, cfg.Sync, false, dirs.Tmp, prune, mock.BlockReader, mock.sentriesClient.Hd),
 				stagedsync.StageMiningExecCfg(mock.DB, miner, nil, *mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil, 0, mock.TxPool, mock.BlockReader),
@@ -521,7 +540,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	blockRetire := freezeblocks.NewBlockRetire(1, dirs, mock.BlockReader, blockWriter, mock.DB, nil, nil, mock.ChainConfig, &cfg, mock.Notifications.Events, nil, logger)
 	mock.Sync = stagedsync.New(
 		cfg.Sync,
-		stagedsync.DefaultStages(mock.Ctx, stagedsync.StageSnapshotsCfg(mock.DB, *mock.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, mock.BlockReader, mock.Notifications, false, false, false, nil, prune), stagedsync.StageHeadersCfg(mock.DB, mock.sentriesClient.Hd, mock.sentriesClient.Bd, *mock.ChainConfig, cfg.Sync, sendHeaderRequest, propagateNewBlockHashes, penalize, cfg.BatchSize, false, mock.BlockReader, blockWriter, dirs.Tmp, mock.Notifications), stagedsync.StageBorHeimdallCfg(mock.DB, snapDb, stagedsync.MiningState{}, *mock.ChainConfig, nil, nil, nil, mock.BlockReader, nil, nil, recents, signatures, false, nil), stagedsync.StageBlockHashesCfg(mock.DB, mock.Dirs.Tmp, mock.ChainConfig, blockWriter), stagedsync.StageBodiesCfg(mock.DB, mock.sentriesClient.Bd, sendBodyRequest, penalize, blockPropagator, cfg.Sync.BodyDownloadTimeoutSeconds, *mock.ChainConfig, mock.BlockReader, blockWriter), stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, cfg.Sync, false, dirs.Tmp, prune, mock.BlockReader, mock.sentriesClient.Hd), stagedsync.StageExecuteBlocksCfg(
+		stagedsync.DefaultStages(mock.Ctx, stagedsync.StageSnapshotsCfg(mock.DB, *mock.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, mock.BlockReader, mock.Notifications, false, false, false, mock.silkwormInstance, prune), stagedsync.StageHeadersCfg(mock.DB, mock.sentriesClient.Hd, mock.sentriesClient.Bd, *mock.ChainConfig, cfg.Sync, sendHeaderRequest, propagateNewBlockHashes, penalize, cfg.BatchSize, false, mock.BlockReader, blockWriter, dirs.Tmp, mock.Notifications), stagedsync.StageBorHeimdallCfg(mock.DB, snapDb, stagedsync.MiningState{}, *mock.ChainConfig, nil, nil, nil, mock.BlockReader, nil, nil, recents, signatures, false, nil), stagedsync.StageBlockHashesCfg(mock.DB, mock.Dirs.Tmp, mock.ChainConfig, blockWriter), stagedsync.StageBodiesCfg(mock.DB, mock.sentriesClient.Bd, sendBodyRequest, penalize, blockPropagator, cfg.Sync.BodyDownloadTimeoutSeconds, *mock.ChainConfig, mock.BlockReader, blockWriter), stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, cfg.Sync, false, dirs.Tmp, prune, mock.BlockReader, mock.sentriesClient.Hd), stagedsync.StageExecuteBlocksCfg(
 			mock.DB,
 			prune,
 			cfg.BatchSize,
@@ -536,8 +555,8 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			mock.sentriesClient.Hd,
 			mock.gspec,
 			cfg.Sync,
-			nil,
-		), stagedsync.StageTxLookupCfg(mock.DB, prune, dirs.Tmp, mock.ChainConfig.Bor, mock.BlockReader), stagedsync.StageFinishCfg(mock.DB, dirs.Tmp, forkValidator), !withPosDownloader),
+			mock.silkwormInstance,
+		), stagedsync.StageTxLookupCfg(mock.DB, prune, dirs.Tmp, mock.ChainConfig.Bor, mock.BlockReader), stagedsync.StageFinishCfg(mock.DB, dirs.Tmp, mock.ForkValidator), !withPosDownloader),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
 		logger, stages.ModeApplyingBlocks,
@@ -553,10 +572,10 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 
 	cfg.Genesis = gspec
 	pipelineStages := stages2.NewPipelineStages(mock.Ctx, db, &cfg, p2p.Config{}, mock.sentriesClient, mock.Notifications,
-		snapDownloader, mock.BlockReader, blockRetire, nil, forkValidator, logger, tracer, checkStateRoot)
+		snapDownloader, mock.BlockReader, blockRetire, mock.silkwormInstance, mock.ForkValidator, logger, tracer, checkStateRoot)
 	mock.posStagedSync = stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
-	mock.Eth1ExecutionService = eth1.NewEthereumExecutionModule(mock.BlockReader, mock.DB, mock.posStagedSync, forkValidator, mock.ChainConfig, assembleBlockPOS, nil, mock.Notifications.Accumulator, mock.Notifications.RecentLogs, mock.Notifications.StateChangesConsumer, logger, engine, cfg.Sync, ctx)
+	mock.Eth1ExecutionService = eth1.NewEthereumExecutionModule(mock.BlockReader, mock.DB, mock.posStagedSync, mock.ForkValidator, mock.ChainConfig, assembleBlockPOS, nil, mock.Notifications.Accumulator, mock.Notifications.RecentLogs, mock.Notifications.StateChangesConsumer, logger, engine, cfg.Sync, ctx)
 
 	mock.sentriesClient.Hd.StartPoSDownloader(mock.Ctx, sendHeaderRequest, penalize)
 
@@ -580,7 +599,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 				mock.sentriesClient.Hd,
 				mock.gspec,
 				cfg.Sync,
-				nil,
+				mock.silkwormInstance,
 			),
 			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, cfg.Sync, false, dirs.Tmp, prune, mock.BlockReader, mock.sentriesClient.Hd),
 			stagedsync.StageMiningExecCfg(mock.DB, miner, nil, *mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil, 0, mock.TxPool, mock.BlockReader),
@@ -645,7 +664,7 @@ func MockWithTxPool(t *testing.T) *MockSentry {
 	}
 
 	checkStateRoot := true
-	return MockWithEverything(t, gspec, key, prune.DefaultMode, ethash.NewFaker(), blockBufferSize, true, false, checkStateRoot)
+	return MockWithEverything(t, gspec, key, prune.DefaultMode, ethash.NewFaker(), blockBufferSize, true, false, checkStateRoot, false)
 }
 
 func MockWithTxPoolCancun(t *testing.T) *MockSentry {
@@ -661,7 +680,7 @@ func MockWithTxPoolCancun(t *testing.T) *MockSentry {
 	}
 
 	checkStateRoot := true
-	return MockWithEverything(t, gspec, key, prune.DefaultMode, ethash.NewFaker(), blockBufferSize, true, false, checkStateRoot)
+	return MockWithEverything(t, gspec, key, prune.DefaultMode, ethash.NewFaker(), blockBufferSize, true, false, checkStateRoot, false)
 }
 
 func MockWithZeroTTD(t *testing.T, withPosDownloader bool) *MockSentry {
@@ -694,7 +713,7 @@ func MockWithZeroTTDGnosis(t *testing.T, withPosDownloader bool) *MockSentry {
 	}
 	engine := ethconsensusconfig.CreateConsensusEngineBareBones(context.Background(), chainConfig, log.New())
 	checkStateRoot := true
-	return MockWithGenesisEngine(t, gspec, engine, withPosDownloader, checkStateRoot)
+	return MockWithGenesisEngine(t, gspec, engine, withPosDownloader, checkStateRoot, false)
 }
 
 func (ms *MockSentry) EnableLogs() {

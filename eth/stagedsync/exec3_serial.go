@@ -4,9 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
@@ -35,12 +39,25 @@ func (se *serialExecutor) status(ctx context.Context, commitThreshold uint64) er
 }
 
 func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (cont bool, err error) {
+	var silkwormMemDbTx kv.RwTx
+
+	if se.cfg.silkworm != nil {
+		tmpDB := mdbx.New(kv.TemporaryDB, se.logger).InMem(os.TempDir()).GrowthStep(4 * datasize.MB).MapSize(8 * datasize.MB).MustOpen()
+		var err error
+		silkwormMemDbTx, err = tmpDB.BeginRw(ctx) // nolint:gocritic
+		if err != nil {
+			panic(err)
+		}
+		defer tmpDB.Close()
+		defer silkwormMemDbTx.Rollback()
+	}
+
 	for _, txTask := range tasks {
 		if txTask.Error != nil {
 			return false, nil
 		}
 
-		se.applyWorker.RunTxTaskNoLock(txTask, se.isMining, se.skipPostEvaluation)
+		se.applyWorker.RunTxTaskNoLock(txTask, se.isMining, se.skipPostEvaluation, se.cfg.silkworm, se.applyTx, silkwormMemDbTx)
 		if err := func() error {
 			if errors.Is(txTask.Error, context.Canceled) {
 				return txTask.Error
@@ -53,9 +70,10 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			se.usedGas += txTask.UsedGas
 			mxExecGas.Add(float64(txTask.UsedGas))
 			mxExecTransactions.Add(1)
+			se.blobGasUsed += txTask.UsedBlobGas
 
-			if txTask.Tx != nil {
-				se.blobGasUsed += txTask.Tx.GetBlobGas()
+			if se.cfg.silkworm == nil {
+				txTask.CreateReceipt(se.applyTx)
 			}
 
 			if txTask.Final {
@@ -63,9 +81,12 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 					// note this assumes the bloach reciepts is a fixed array shared by
 					// all tasks - if that changes this will need to change - robably need to
 					// add this to the executor
+					// TODO: JG add receipts from silkworm
 					se.cfg.notifications.RecentLogs.Add(txTask.BlockReceipts)
 				}
+
 				checkReceipts := !se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNum) && !se.cfg.vmConfig.NoReceipts && !se.isMining
+
 				if txTask.BlockNum > 0 && !se.skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 					if err := core.BlockPostValidation(se.usedGas, se.blobGasUsed, checkReceipts, txTask.BlockReceipts, txTask.Header, se.isMining, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
 						return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
@@ -110,9 +131,10 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			return false, nil
 		}
 
-		if !txTask.Final {
+		// TODO: JG silkworm receipts already added
+		if !txTask.Final && se.cfg.silkworm == nil {
 			var receipt *types.Receipt
-			if txTask.TxIndex >= 0 {
+			if txTask.TxIndex >= 0 && !txTask.Final {
 				receipt = txTask.BlockReceipts[txTask.TxIndex]
 			}
 			if err := rawtemporaldb.AppendReceipt(se.doms, receipt, se.blobGasUsed); err != nil {
