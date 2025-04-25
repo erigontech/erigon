@@ -212,7 +212,8 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	if version >= clparams.CapellaVersion {
 		withdrawals = req.Withdrawals
 	}
-	if err := s.checkWithdrawalsPresence(header.Time, withdrawals); err != nil {
+	// CHANGE(taiko) : skip withdrawals presence if on Taiko
+	if err := s.checkWithdrawalsPresence(header.Time, withdrawals); !s.config.Taiko && err != nil {
 		return nil, err
 	}
 	if withdrawals != nil {
