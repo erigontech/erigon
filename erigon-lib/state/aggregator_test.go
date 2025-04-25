@@ -267,25 +267,31 @@ func TestAggregatorV3_DirtyFilesRo(t *testing.T) {
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
 
-	checkDirtyFiles := func(dirtyFiles []*filesItem, expectedLen, expectedRefCnt int) {
-		require.Len(t, dirtyFiles, expectedLen)
+	checkDirtyFiles := func(dirtyFiles []*filesItem, expectedLen, expectedRefCnt int, name string) {
+		require.Len(t, dirtyFiles, expectedLen, name)
 		for _, f := range dirtyFiles {
-			require.Equal(t, int32(expectedRefCnt), f.refcount.Load())
+			require.Equal(t, int32(expectedRefCnt), f.refcount.Load(), name)
 		}
 	}
 
 	checkAllEntities := func(expectedLen, expectedRefCnt int) {
 		for _, d := range agg.d {
-			checkDirtyFiles(d.dirtyFiles.Items(), expectedLen, expectedRefCnt)
+			if d.disable {
+				expectedLen = 0
+			}
+			checkDirtyFiles(d.dirtyFiles.Items(), expectedLen, expectedRefCnt, d.name.String())
 			if d.snapshotsDisabled {
 				continue
 			}
-			checkDirtyFiles(d.History.dirtyFiles.Items(), expectedLen, expectedRefCnt)
-			checkDirtyFiles(d.History.InvertedIndex.dirtyFiles.Items(), expectedLen, expectedRefCnt)
+			checkDirtyFiles(d.History.dirtyFiles.Items(), expectedLen, expectedRefCnt, d.name.String())
+			checkDirtyFiles(d.History.InvertedIndex.dirtyFiles.Items(), expectedLen, expectedRefCnt, d.name.String())
 		}
 
 		for _, ii := range agg.iis {
-			checkDirtyFiles(ii.dirtyFiles.Items(), expectedLen, expectedRefCnt)
+			if ii.disable {
+				expectedLen = 0
+			}
+			checkDirtyFiles(ii.dirtyFiles.Items(), expectedLen, expectedRefCnt, ii.filenameBase)
 		}
 	}
 
