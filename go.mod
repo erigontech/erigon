@@ -74,7 +74,6 @@ require (
 	github.com/pelletier/go-toml/v2 v2.2.3
 	github.com/pion/randutil v0.1.0
 	github.com/pion/stun v0.6.1
-	github.com/protolambda/ztyp v0.2.2
 	github.com/prysmaticlabs/go-bitfield v0.0.0-20240618144021-706c95b2dd15
 	github.com/prysmaticlabs/gohashtree v0.0.4-beta
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
@@ -125,6 +124,7 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/protolambda/ztyp v0.2.2 // indirect
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
 	github.com/tklauser/go-sysconf v0.3.14 // indirect
 	github.com/tklauser/numcpus v0.8.0 // indirect

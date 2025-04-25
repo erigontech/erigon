@@ -17,7 +17,7 @@
 package fork_graph
 
 import (
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -36,23 +36,23 @@ import (
  */
 type ForkGraph interface {
 	AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, ChainSegmentInsertionResult, error)
-	GetHeader(blockRoot libcommon.Hash) (*cltypes.BeaconBlockHeader, bool)
-	GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.CachingBeaconState, error)
-	GetCurrentJustifiedCheckpoint(blockRoot libcommon.Hash) (solid.Checkpoint, bool)
-	GetFinalizedCheckpoint(blockRoot libcommon.Hash) (solid.Checkpoint, bool)
+	GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool)
+	GetState(blockRoot common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error)
+	GetCurrentJustifiedCheckpoint(blockRoot common.Hash) (solid.Checkpoint, bool)
+	GetFinalizedCheckpoint(blockRoot common.Hash) (solid.Checkpoint, bool)
 	GetSyncCommittees(period uint64) (*solid.SyncCommittee, *solid.SyncCommittee, bool)
-	MarkHeaderAsInvalid(blockRoot libcommon.Hash)
+	MarkHeaderAsInvalid(blockRoot common.Hash)
 	AnchorSlot() uint64
 	Prune(uint64) error
-	GetBlockRewards(blockRoot libcommon.Hash) (*eth2.BlockRewardsCollector, bool)
+	GetBlockRewards(blockRoot common.Hash) (*eth2.BlockRewardsCollector, bool)
 	LowestAvailableSlot() uint64
-	GetLightClientBootstrap(blockRoot libcommon.Hash) (*cltypes.LightClientBootstrap, bool)
+	GetLightClientBootstrap(blockRoot common.Hash) (*cltypes.LightClientBootstrap, bool)
 	NewestLightClientUpdate() *cltypes.LightClientUpdate
 	GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool)
-	GetBalances(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error)
-	GetInactivitiesScores(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error)
-	GetValidatorSet(blockRoot libcommon.Hash) (*solid.ValidatorSet, error)
+	GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error)
+	GetInactivitiesScores(blockRoot common.Hash) (solid.Uint64ListSSZ, error)
+	GetValidatorSet(blockRoot common.Hash) (*solid.ValidatorSet, error)
 	GetCurrentParticipationIndicies(epoch uint64) (*solid.ParticipationBitList, error)
 	GetPreviousParticipationIndicies(epoch uint64) (*solid.ParticipationBitList, error)
-	DumpBeaconStateOnDisk(blockRoot libcommon.Hash, state *state.CachingBeaconState, forced bool) error
+	DumpBeaconStateOnDisk(blockRoot common.Hash, state *state.CachingBeaconState, forced bool) error
 }

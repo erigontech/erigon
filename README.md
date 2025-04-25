@@ -261,7 +261,7 @@ Don't start services as separated processes unless you have clear reason for it:
 your own implementation, security.
 How to start Erigon's services as separated processes, see in [docker-compose.yml](./docker-compose.yml).
 Each service has own `./cmd/*/README.md` file.
-[Erigon Blog](https://erigon.substack.com/).
+[Erigon Blog](https://erigon.tech/blog/).
 
 ### Embedded Consensus Layer
 

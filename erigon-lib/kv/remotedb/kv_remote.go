@@ -660,6 +660,11 @@ func (tx *tx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err er
 	return reply.V, 0, nil
 }
 
+func (tx *tx) HasPrefix(domain kv.Domain, prefix []byte) (firstKey []byte, ok bool, err error) {
+	//TODO implement me
+	panic("implement me")
+}
+
 func (tx *tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
 	return stream.PaginateKV(func(pageToken string) (keys, vals [][]byte, nextPageToken string, err error) {
 		reply, err := tx.db.remoteKV.RangeAsOf(tx.ctx, &remote.RangeAsOfReq{TxId: tx.id, Table: name.String(), FromKey: fromKey, ToKey: toKey, Ts: ts, OrderAscend: bool(asc), Limit: int64(limit), PageToken: pageToken})

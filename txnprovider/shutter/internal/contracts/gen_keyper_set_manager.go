@@ -10,10 +10,10 @@ import (
 	"strings"
 
 	ethereum "github.com/erigontech/erigon"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/abi"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/event"
-	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/abi/bind"
 )
 
@@ -23,7 +23,7 @@ var (
 	_ = strings.NewReader
 	_ = ethereum.NotFound
 	_ = bind.Bind
-	_ = libcommon.Big1
+	_ = common.Big1
 	_ = types.BloomLookup
 	_ = event.NewSubscription
 	_ = fmt.Errorf
@@ -37,15 +37,15 @@ const KeyperSetManagerABI = "[{\"inputs\":[{\"internalType\":\"address\",\"name\
 var KeyperSetManagerBin = "0x6080604052348015600e575f5ffd5b50604051610e20380380610e20833981016040819052602b916055565b600180546001600160a01b0390921661010002610100600160a81b03199092169190911790556080565b5f602082840312156064575f5ffd5b81516001600160a01b03811681146079575f5ffd5b9392505050565b610d938061008d5f395ff3fe608060405234801561000f575f5ffd5b5060043610610111575f3560e01c80638456cb591161009e578063d3877c431161006e578063d3877c431461024b578063d547741f1461025e578063e63ab1e914610271578063f2e6100a14610298578063f90f3bed146102a0575f5ffd5b80638456cb59146101f957806391d14854146102015780639ce110d714610214578063a217fddf14610244575f5ffd5b806336568abe116100e457806336568abe146101ad5780633f4ba83a146101c0578063485cc955146101c85780635c975abb146101db578063636df979146101e6575f5ffd5b806301ffc9a714610115578063035cef151461013d578063248a9ca3146101685780632f2ff15d14610198575b5f5ffd5b610128610123366004610a47565b6102b3565b60405190151581526020015b60405180910390f35b61015061014b366004610a82565b6102e9565b6040516001600160401b039091168152602001610134565b61018a610176366004610a9d565b5f9081526020819052604090206001015490565b604051908152602001610134565b6101ab6101a6366004610ac8565b610373565b005b6101ab6101bb366004610ac8565b61039d565b6101ab6103d5565b6101ab6101d6366004610af6565b6103ea565b60015460ff16610128565b6101506101f4366004610a82565b610492565b6101ab6104c9565b61012861020f366004610ac8565b6104fb565b60015461022c9061010090046001600160a01b031681565b6040516001600160a01b039091168152602001610134565b61018a5f81565b6101ab610259366004610b22565b610523565b6101ab61026c366004610ac8565b6107bd565b61018a7f65d7a28e3265b37a6474929f336521b332c1681b933f6cb9f3376673440d862a81565b600254610150565b61022c6102ae366004610a82565b6107e1565b5f6001600160e01b03198216637965db0b60e01b14806102e357506301ffc9a760e01b6001600160e01b03198316145b92915050565b6002545f905b8015610359576001600160401b038316600261030c600184610b52565b8154811061031c5761031c610b65565b5f918252602090912001546001600160401b03161161034757610340600182610b52565b9392505050565b8061035181610b79565b9150506102ef565b506040516367c9fd1d60e11b815260040160405180910390fd5b5f8281526020819052604090206001015461038d8161081f565b6103978383610829565b50505050565b6001600160a01b03811633146103c65760405163334bd91960e11b815260040160405180910390fd5b6103d082826108b8565b505050565b5f6103df8161081f565b6103e7610921565b50565b60015461010090046001600160a01b03166104175760405162dc149f60e41b815260040160405180910390fd5b60015461010090046001600160a01b0316331461044757604051630d622feb60e01b815260040160405180910390fd5b6104515f83610829565b5061047c7f65d7a28e3265b37a6474929f336521b332c1681b933f6cb9f3376673440d862a82610829565b505060018054610100600160a81b031916905550565b5f6002826001600160401b0316815481106104af576104af610b65565b5f918252602090912001546001600160401b031692915050565b7f65d7a28e3265b37a6474929f336521b332c1681b933f6cb9f3376673440d862a6104f38161081f565b6103e7610973565b5f918252602082815260408084206001600160a01b0393909316845291905290205460ff1690565b5f61052d8161081f565b6002541580159061058e575060028054610582919061054e90600190610b52565b8154811061055e5761055e610b65565b5f918252602090912001546001600160401b031661057d436001610b8e565b6109ae565b836001600160401b0316105b156105ac576040516361cb74ab60e11b815260040160405180910390fd5b816001600160a01b0316638d4e40836040518163ffffffff1660e01b8152600401602060405180830381865afa1580156105e8573d5f5f3e3d5ffd5b505050506040513d601f19601f8201168201806040525081019061060c9190610ba1565b6106295760405163756318d560e11b815260040160405180910390fd5b6040805180820182526001600160401b0380861682526001600160a01b0380861660208401818152600280546001810182555f91825295517f405787fa12a823e0f2b7631cc41b3ba8828b3321ca811111fa75cd3aa3bb5ace90960180549251909416600160401b026001600160e01b031990921695909416949094179390931790558251639eab525360e01b8152925185937fa940387dac06ebd336730f1d14b21629a9d137069a9137e871f95313e101016593889386939192639eab525392600480830193928290030181865afa158015610708573d5f5f3e3d5ffd5b505050506040513d5f823e601f3d908101601f1916820160405261072f9190810190610be4565b846001600160a01b031663e75235b86040518163ffffffff1660e01b8152600401602060405180830381865afa15801561076b573d5f5f3e3d5ffd5b505050506040513d601f19601f8201168201806040525081019061078f9190610cac565b60025461079e90600190610b52565b6040516107af959493929190610cc7565b60405180910390a150505050565b5f828152602081905260409020600101546107d78161081f565b61039783836108b8565b5f6002826001600160401b0316815481106107fe576107fe610b65565b5f91825260209091200154600160401b90046001600160a01b031692915050565b6103e781336109bd565b5f61083483836104fb565b6108b1575f838152602081815260408083206001600160a01b03861684529091529020805460ff191660011790556108693390565b6001600160a01b0316826001600160a01b0316847f2f8788117e7eff1d82e926ec794901d17c78024a50270940304540a733656f0d60405160405180910390a45060016102e3565b505f6102e3565b5f6108c383836104fb565b156108b1575f838152602081815260408083206001600160a01b0386168085529252808320805460ff1916905551339286917ff6391f5c32d9c69d2a47ea670b442974b53935d1edc7fd64eb21e047a839171b9190a45060016102e3565b6109296109fe565b6001805460ff191690557f5db9ee0a495bf2e6ff9c91a7834c1ba4fdd244a5e8aa4e537bd38aeae4b073aa335b6040516001600160a01b03909116815260200160405180910390a1565b61097b610a23565b6001805460ff1916811790557f62e78cea01bee320cd4e420270b5ea74000d11b0c9f74754ebdbfc544b05a25833610956565b5f828218828411028218610340565b6109c782826104fb565b6109fa5760405163e2517d3f60e01b81526001600160a01b03821660048201526024810183905260440160405180910390fd5b5050565b60015460ff16610a2157604051638dfc202b60e01b815260040160405180910390fd5b565b60015460ff1615610a215760405163d93c066560e01b815260040160405180910390fd5b5f60208284031215610a57575f5ffd5b81356001600160e01b031981168114610340575f5ffd5b6001600160401b03811681146103e7575f5ffd5b5f60208284031215610a92575f5ffd5b813561034081610a6e565b5f60208284031215610aad575f5ffd5b5035919050565b6001600160a01b03811681146103e7575f5ffd5b5f5f60408385031215610ad9575f5ffd5b823591506020830135610aeb81610ab4565b809150509250929050565b5f5f60408385031215610b07575f5ffd5b8235610b1281610ab4565b91506020830135610aeb81610ab4565b5f5f60408385031215610b33575f5ffd5b8235610b1281610a6e565b634e487b7160e01b5f52601160045260245ffd5b818103818111156102e3576102e3610b3e565b634e487b7160e01b5f52603260045260245ffd5b5f81610b8757610b87610b3e565b505f190190565b808201808211156102e3576102e3610b3e565b5f60208284031215610bb1575f5ffd5b81518015158114610340575f5ffd5b634e487b7160e01b5f52604160045260245ffd5b8051610bdf81610ab4565b919050565b5f60208284031215610bf4575f5ffd5b81516001600160401b03811115610c09575f5ffd5b8201601f81018413610c19575f5ffd5b80516001600160401b03811115610c3257610c32610bc0565b8060051b604051601f19603f83011681018181106001600160401b0382111715610c5e57610c5e610bc0565b604052918252602081840181019290810187841115610c7b575f5ffd5b6020850194505b83851015610ca157610c9385610bd4565b815260209485019401610c82565b509695505050505050565b5f60208284031215610cbc575f5ffd5b815161034081610a6e565b6001600160401b03861681526001600160a01b03851660208083019190915260a06040830181905285519083018190525f9186019060c0840190835b81811015610d2a5783516001600160a01b0316835260209384019390920191600101610d03565b50506001600160401b03861660608501529150610d449050565b6001600160401b0383166080830152969550505050505056fea2646970667358221220f01038fce2964a471ef377bebe0af245ac3b6ba9761adad999d8f95908cbbb8f64736f6c634300081c0033"
 
 // DeployKeyperSetManager deploys a new Ethereum contract, binding an instance of KeyperSetManager to it.
-func DeployKeyperSetManager(auth *bind.TransactOpts, backend bind.ContractBackend, initializer libcommon.Address) (libcommon.Address, types.Transaction, *KeyperSetManager, error) {
+func DeployKeyperSetManager(auth *bind.TransactOpts, backend bind.ContractBackend, initializer common.Address) (common.Address, types.Transaction, *KeyperSetManager, error) {
 	parsed, err := abi.JSON(strings.NewReader(KeyperSetManagerABI))
 	if err != nil {
-		return libcommon.Address{}, nil, nil, err
+		return common.Address{}, nil, nil, err
 	}
 
-	address, tx, contract, err := bind.DeployContract(auth, parsed, libcommon.FromHex(KeyperSetManagerBin), backend, initializer)
+	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(KeyperSetManagerBin), backend, initializer)
 	if err != nil {
-		return libcommon.Address{}, nil, nil, err
+		return common.Address{}, nil, nil, err
 	}
 	return address, tx, &KeyperSetManager{KeyperSetManagerCaller: KeyperSetManagerCaller{contract: contract}, KeyperSetManagerTransactor: KeyperSetManagerTransactor{contract: contract}, KeyperSetManagerFilterer: KeyperSetManagerFilterer{contract: contract}}, nil
 }
@@ -110,7 +110,7 @@ type KeyperSetManagerTransactorRaw struct {
 }
 
 // NewKeyperSetManager creates a new instance of KeyperSetManager, bound to a specific deployed contract.
-func NewKeyperSetManager(address libcommon.Address, backend bind.ContractBackend) (*KeyperSetManager, error) {
+func NewKeyperSetManager(address common.Address, backend bind.ContractBackend) (*KeyperSetManager, error) {
 	contract, err := bindKeyperSetManager(address, backend, backend, backend)
 	if err != nil {
 		return nil, err
@@ -119,7 +119,7 @@ func NewKeyperSetManager(address libcommon.Address, backend bind.ContractBackend
 }
 
 // NewKeyperSetManagerCaller creates a new read-only instance of KeyperSetManager, bound to a specific deployed contract.
-func NewKeyperSetManagerCaller(address libcommon.Address, caller bind.ContractCaller) (*KeyperSetManagerCaller, error) {
+func NewKeyperSetManagerCaller(address common.Address, caller bind.ContractCaller) (*KeyperSetManagerCaller, error) {
 	contract, err := bindKeyperSetManager(address, caller, nil, nil)
 	if err != nil {
 		return nil, err
@@ -128,7 +128,7 @@ func NewKeyperSetManagerCaller(address libcommon.Address, caller bind.ContractCa
 }
 
 // NewKeyperSetManagerTransactor creates a new write-only instance of KeyperSetManager, bound to a specific deployed contract.
-func NewKeyperSetManagerTransactor(address libcommon.Address, transactor bind.ContractTransactor) (*KeyperSetManagerTransactor, error) {
+func NewKeyperSetManagerTransactor(address common.Address, transactor bind.ContractTransactor) (*KeyperSetManagerTransactor, error) {
 	contract, err := bindKeyperSetManager(address, nil, transactor, nil)
 	if err != nil {
 		return nil, err
@@ -137,7 +137,7 @@ func NewKeyperSetManagerTransactor(address libcommon.Address, transactor bind.Co
 }
 
 // NewKeyperSetManagerFilterer creates a new log filterer instance of KeyperSetManager, bound to a specific deployed contract.
-func NewKeyperSetManagerFilterer(address libcommon.Address, filterer bind.ContractFilterer) (*KeyperSetManagerFilterer, error) {
+func NewKeyperSetManagerFilterer(address common.Address, filterer bind.ContractFilterer) (*KeyperSetManagerFilterer, error) {
 	contract, err := bindKeyperSetManager(address, nil, nil, filterer)
 	if err != nil {
 		return nil, err
@@ -146,7 +146,7 @@ func NewKeyperSetManagerFilterer(address libcommon.Address, filterer bind.Contra
 }
 
 // bindKeyperSetManager binds a generic wrapper to an already deployed contract.
-func bindKeyperSetManager(address libcommon.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
+func bindKeyperSetManager(address common.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
 	parsed, err := abi.JSON(strings.NewReader(KeyperSetManagerABI))
 	if err != nil {
 		return nil, err
@@ -288,15 +288,15 @@ func (_KeyperSetManager *KeyperSetManagerCallerSession) GetKeyperSetActivationBl
 // GetKeyperSetAddress is a free data retrieval call binding the contract method 0xf90f3bed.
 //
 // Solidity: function getKeyperSetAddress(uint64 index) view returns(address)
-func (_KeyperSetManager *KeyperSetManagerCaller) GetKeyperSetAddress(opts *bind.CallOpts, index uint64) (libcommon.Address, error) {
+func (_KeyperSetManager *KeyperSetManagerCaller) GetKeyperSetAddress(opts *bind.CallOpts, index uint64) (common.Address, error) {
 	var out []interface{}
 	err := _KeyperSetManager.contract.Call(opts, &out, "getKeyperSetAddress", index)
 
 	if err != nil {
-		return *new(libcommon.Address), err
+		return *new(common.Address), err
 	}
 
-	out0 := *abi.ConvertType(out[0], new(libcommon.Address)).(*libcommon.Address)
+	out0 := *abi.ConvertType(out[0], new(common.Address)).(*common.Address)
 
 	return out0, err
 
@@ -305,14 +305,14 @@ func (_KeyperSetManager *KeyperSetManagerCaller) GetKeyperSetAddress(opts *bind.
 // GetKeyperSetAddress is a free data retrieval call binding the contract method 0xf90f3bed.
 //
 // Solidity: function getKeyperSetAddress(uint64 index) view returns(address)
-func (_KeyperSetManager *KeyperSetManagerSession) GetKeyperSetAddress(index uint64) (libcommon.Address, error) {
+func (_KeyperSetManager *KeyperSetManagerSession) GetKeyperSetAddress(index uint64) (common.Address, error) {
 	return _KeyperSetManager.Contract.GetKeyperSetAddress(&_KeyperSetManager.CallOpts, index)
 }
 
 // GetKeyperSetAddress is a free data retrieval call binding the contract method 0xf90f3bed.
 //
 // Solidity: function getKeyperSetAddress(uint64 index) view returns(address)
-func (_KeyperSetManager *KeyperSetManagerCallerSession) GetKeyperSetAddress(index uint64) (libcommon.Address, error) {
+func (_KeyperSetManager *KeyperSetManagerCallerSession) GetKeyperSetAddress(index uint64) (common.Address, error) {
 	return _KeyperSetManager.Contract.GetKeyperSetAddress(&_KeyperSetManager.CallOpts, index)
 }
 
@@ -412,7 +412,7 @@ func (_KeyperSetManager *KeyperSetManagerCallerSession) GetRoleAdmin(role [32]by
 // HasRole is a free data retrieval call binding the contract method 0x91d14854.
 //
 // Solidity: function hasRole(bytes32 role, address account) view returns(bool)
-func (_KeyperSetManager *KeyperSetManagerCaller) HasRole(opts *bind.CallOpts, role [32]byte, account libcommon.Address) (bool, error) {
+func (_KeyperSetManager *KeyperSetManagerCaller) HasRole(opts *bind.CallOpts, role [32]byte, account common.Address) (bool, error) {
 	var out []interface{}
 	err := _KeyperSetManager.contract.Call(opts, &out, "hasRole", role, account)
 
@@ -429,29 +429,29 @@ func (_KeyperSetManager *KeyperSetManagerCaller) HasRole(opts *bind.CallOpts, ro
 // HasRole is a free data retrieval call binding the contract method 0x91d14854.
 //
 // Solidity: function hasRole(bytes32 role, address account) view returns(bool)
-func (_KeyperSetManager *KeyperSetManagerSession) HasRole(role [32]byte, account libcommon.Address) (bool, error) {
+func (_KeyperSetManager *KeyperSetManagerSession) HasRole(role [32]byte, account common.Address) (bool, error) {
 	return _KeyperSetManager.Contract.HasRole(&_KeyperSetManager.CallOpts, role, account)
 }
 
 // HasRole is a free data retrieval call binding the contract method 0x91d14854.
 //
 // Solidity: function hasRole(bytes32 role, address account) view returns(bool)
-func (_KeyperSetManager *KeyperSetManagerCallerSession) HasRole(role [32]byte, account libcommon.Address) (bool, error) {
+func (_KeyperSetManager *KeyperSetManagerCallerSession) HasRole(role [32]byte, account common.Address) (bool, error) {
 	return _KeyperSetManager.Contract.HasRole(&_KeyperSetManager.CallOpts, role, account)
 }
 
 // Initializer is a free data retrieval call binding the contract method 0x9ce110d7.
 //
 // Solidity: function initializer() view returns(address)
-func (_KeyperSetManager *KeyperSetManagerCaller) Initializer(opts *bind.CallOpts) (libcommon.Address, error) {
+func (_KeyperSetManager *KeyperSetManagerCaller) Initializer(opts *bind.CallOpts) (common.Address, error) {
 	var out []interface{}
 	err := _KeyperSetManager.contract.Call(opts, &out, "initializer")
 
 	if err != nil {
-		return *new(libcommon.Address), err
+		return *new(common.Address), err
 	}
 
-	out0 := *abi.ConvertType(out[0], new(libcommon.Address)).(*libcommon.Address)
+	out0 := *abi.ConvertType(out[0], new(common.Address)).(*common.Address)
 
 	return out0, err
 
@@ -460,14 +460,14 @@ func (_KeyperSetManager *KeyperSetManagerCaller) Initializer(opts *bind.CallOpts
 // Initializer is a free data retrieval call binding the contract method 0x9ce110d7.
 //
 // Solidity: function initializer() view returns(address)
-func (_KeyperSetManager *KeyperSetManagerSession) Initializer() (libcommon.Address, error) {
+func (_KeyperSetManager *KeyperSetManagerSession) Initializer() (common.Address, error) {
 	return _KeyperSetManager.Contract.Initializer(&_KeyperSetManager.CallOpts)
 }
 
 // Initializer is a free data retrieval call binding the contract method 0x9ce110d7.
 //
 // Solidity: function initializer() view returns(address)
-func (_KeyperSetManager *KeyperSetManagerCallerSession) Initializer() (libcommon.Address, error) {
+func (_KeyperSetManager *KeyperSetManagerCallerSession) Initializer() (common.Address, error) {
 	return _KeyperSetManager.Contract.Initializer(&_KeyperSetManager.CallOpts)
 }
 
@@ -536,63 +536,63 @@ func (_KeyperSetManager *KeyperSetManagerCallerSession) SupportsInterface(interf
 // AddKeyperSet is a paid mutator transaction binding the contract method 0xd3877c43.
 //
 // Solidity: function addKeyperSet(uint64 activationBlock, address keyperSetContract) returns()
-func (_KeyperSetManager *KeyperSetManagerTransactor) AddKeyperSet(opts *bind.TransactOpts, activationBlock uint64, keyperSetContract libcommon.Address) (types.Transaction, error) {
+func (_KeyperSetManager *KeyperSetManagerTransactor) AddKeyperSet(opts *bind.TransactOpts, activationBlock uint64, keyperSetContract common.Address) (types.Transaction, error) {
 	return _KeyperSetManager.contract.Transact(opts, "addKeyperSet", activationBlock, keyperSetContract)
 }
 
 // AddKeyperSet is a paid mutator transaction binding the contract method 0xd3877c43.
 //
 // Solidity: function addKeyperSet(uint64 activationBlock, address keyperSetContract) returns()
-func (_KeyperSetManager *KeyperSetManagerSession) AddKeyperSet(activationBlock uint64, keyperSetContract libcommon.Address) (types.Transaction, error) {
+func (_KeyperSetManager *KeyperSetManagerSession) AddKeyperSet(activationBlock uint64, keyperSetContract common.Address) (types.Transaction, error) {
 	return _KeyperSetManager.Contract.AddKeyperSet(&_KeyperSetManager.TransactOpts, activationBlock, keyperSetContract)
 }
 
 // AddKeyperSet is a paid mutator transaction binding the contract method 0xd3877c43.
 //
 // Solidity: function addKeyperSet(uint64 activationBlock, address keyperSetContract) returns()
-func (_KeyperSetManager *KeyperSetManagerTransactorSession) AddKeyperSet(activationBlock uint64, keyperSetContract libcommon.Address) (types.Transaction, error) {
+func (_KeyperSetManager *KeyperSetManagerTransactorSession) AddKeyperSet(activationBlock uint64, keyperSetContract common.Address) (types.Transaction, error) {
 	return _KeyperSetManager.Contract.AddKeyperSet(&_KeyperSetManager.TransactOpts, activationBlock, keyperSetContract)
 }
 
 // GrantRole is a paid mutator transaction binding the contract method 0x2f2ff15d.
 //
 // Solidity: function grantRole(bytes32 role, address account) returns()
-func (_KeyperSetManager *KeyperSetManagerTransactor) GrantRole(opts *bind.TransactOpts, role [32]byte, account libcommon.Address) (types.Transaction, error) {
+func (_KeyperSetManager *KeyperSetManagerTransactor) GrantRole(opts *bind.TransactOpts, role [32]byte, account common.Address) (types.Transaction, error) {
 	return _KeyperSetManager.contract.Transact(opts, "grantRole", role, account)
 }
 
 // GrantRole is a paid mutator transaction binding the contract method 0x2f2ff15d.
 //
 // Solidity: function grantRole(bytes32 role, address account) returns()
-func (_KeyperSetManager *KeyperSetManagerSession) GrantRole(role [32]byte, account libcommon.Address) (types.Transaction, error) {
+func (_KeyperSetManager *KeyperSetManagerSession) GrantRole(role [32]byte, account common.Address) (types.Transaction, error) {
 	return _KeyperSetManager.Contract.GrantRole(&_KeyperSetManager.TransactOpts, role, account)
 }
 
 // GrantRole is a paid mutator transaction binding the contract method 0x2f2ff15d.
 //
 // Solidity: function grantRole(bytes32 role, address account) returns()
-func (_KeyperSetManager *KeyperSetManagerTransactorSession) GrantRole(role [32]byte, account libcommon.Address) (types.Transaction, error) {
+func (_KeyperSetManager *KeyperSetManagerTransactorSession) GrantRole(role [32]byte, account common.Address) (types.Transaction, error) {
 	return _KeyperSetManager.Contract.GrantRole(&_KeyperSetManager.TransactOpts, role, account)
 }
 
 // Initialize is a paid mutator transaction binding the contract method 0x485cc955.
 //
 // Solidity: function initialize(address admin, address pauser) returns()
-func (_KeyperSetManager *KeyperSetManagerTransactor) Initialize(opts *bind.TransactOpts, admin libcommon.Address, pauser libcommon.Address) (types.Transaction, error) {
+func (_KeyperSetManager *KeyperSetManagerTransactor) Initialize(opts *bind.TransactOpts, admin common.Address, pauser common.Address) (types.Transaction, error) {
 	return _KeyperSetManager.contract.Transact(opts, "initialize", admin, pauser)
 }
 
 // Initialize is a paid mutator transaction binding the contract method 0x485cc955.
 //
 // Solidity: function initialize(address admin, address pauser) returns()
-func (_KeyperSetManager *KeyperSetManagerSession) Initialize(admin libcommon.Address, pauser libcommon.Address) (types.Transaction, error) {
+func (_KeyperSetManager *KeyperSetManagerSession) Initialize(admin common.Address, pauser common.Address) (types.Transaction, error) {
 	return _KeyperSetManager.Contract.Initialize(&_KeyperSetManager.TransactOpts, admin, pauser)
 }
 
 // Initialize is a paid mutator transaction binding the contract method 0x485cc955.
 //
 // Solidity: function initialize(address admin, address pauser) returns()
-func (_KeyperSetManager *KeyperSetManagerTransactorSession) Initialize(admin libcommon.Address, pauser libcommon.Address) (types.Transaction, error) {
+func (_KeyperSetManager *KeyperSetManagerTransactorSession) Initialize(admin common.Address, pauser common.Address) (types.Transaction, error) {
 	return _KeyperSetManager.Contract.Initialize(&_KeyperSetManager.TransactOpts, admin, pauser)
 }
 
@@ -620,42 +620,42 @@ func (_KeyperSetManager *KeyperSetManagerTransactorSession) Pause() (types.Trans
 // RenounceRole is a paid mutator transaction binding the contract method 0x36568abe.
 //
 // Solidity: function renounceRole(bytes32 role, address callerConfirmation) returns()
-func (_KeyperSetManager *KeyperSetManagerTransactor) RenounceRole(opts *bind.TransactOpts, role [32]byte, callerConfirmation libcommon.Address) (types.Transaction, error) {
+func (_KeyperSetManager *KeyperSetManagerTransactor) RenounceRole(opts *bind.TransactOpts, role [32]byte, callerConfirmation common.Address) (types.Transaction, error) {
 	return _KeyperSetManager.contract.Transact(opts, "renounceRole", role, callerConfirmation)
 }
 
 // RenounceRole is a paid mutator transaction binding the contract method 0x36568abe.
 //
 // Solidity: function renounceRole(bytes32 role, address callerConfirmation) returns()
-func (_KeyperSetManager *KeyperSetManagerSession) RenounceRole(role [32]byte, callerConfirmation libcommon.Address) (types.Transaction, error) {
+func (_KeyperSetManager *KeyperSetManagerSession) RenounceRole(role [32]byte, callerConfirmation common.Address) (types.Transaction, error) {
 	return _KeyperSetManager.Contract.RenounceRole(&_KeyperSetManager.TransactOpts, role, callerConfirmation)
 }
 
 // RenounceRole is a paid mutator transaction binding the contract method 0x36568abe.
 //
 // Solidity: function renounceRole(bytes32 role, address callerConfirmation) returns()
-func (_KeyperSetManager *KeyperSetManagerTransactorSession) RenounceRole(role [32]byte, callerConfirmation libcommon.Address) (types.Transaction, error) {
+func (_KeyperSetManager *KeyperSetManagerTransactorSession) RenounceRole(role [32]byte, callerConfirmation common.Address) (types.Transaction, error) {
 	return _KeyperSetManager.Contract.RenounceRole(&_KeyperSetManager.TransactOpts, role, callerConfirmation)
 }
 
 // RevokeRole is a paid mutator transaction binding the contract method 0xd547741f.
 //
 // Solidity: function revokeRole(bytes32 role, address account) returns()
-func (_KeyperSetManager *KeyperSetManagerTransactor) RevokeRole(opts *bind.TransactOpts, role [32]byte, account libcommon.Address) (types.Transaction, error) {
+func (_KeyperSetManager *KeyperSetManagerTransactor) RevokeRole(opts *bind.TransactOpts, role [32]byte, account common.Address) (types.Transaction, error) {
 	return _KeyperSetManager.contract.Transact(opts, "revokeRole", role, account)
 }
 
 // RevokeRole is a paid mutator transaction binding the contract method 0xd547741f.
 //
 // Solidity: function revokeRole(bytes32 role, address account) returns()
-func (_KeyperSetManager *KeyperSetManagerSession) RevokeRole(role [32]byte, account libcommon.Address) (types.Transaction, error) {
+func (_KeyperSetManager *KeyperSetManagerSession) RevokeRole(role [32]byte, account common.Address) (types.Transaction, error) {
 	return _KeyperSetManager.Contract.RevokeRole(&_KeyperSetManager.TransactOpts, role, account)
 }
 
 // RevokeRole is a paid mutator transaction binding the contract method 0xd547741f.
 //
 // Solidity: function revokeRole(bytes32 role, address account) returns()
-func (_KeyperSetManager *KeyperSetManagerTransactorSession) RevokeRole(role [32]byte, account libcommon.Address) (types.Transaction, error) {
+func (_KeyperSetManager *KeyperSetManagerTransactorSession) RevokeRole(role [32]byte, account common.Address) (types.Transaction, error) {
 	return _KeyperSetManager.Contract.RevokeRole(&_KeyperSetManager.TransactOpts, role, account)
 }
 
@@ -683,7 +683,7 @@ func (_KeyperSetManager *KeyperSetManagerTransactorSession) Unpause() (types.Tra
 // KeyperSetManagerAddKeyperSetParams is an auto generated read-only Go binding of transcaction calldata params
 type KeyperSetManagerAddKeyperSetParams struct {
 	Param_activationBlock   uint64
-	Param_keyperSetContract libcommon.Address
+	Param_keyperSetContract common.Address
 }
 
 // Parse AddKeyperSet method from calldata of a transaction
@@ -712,7 +712,7 @@ func ParseKeyperSetManagerAddKeyperSetParams(calldata []byte) (*KeyperSetManager
 	}
 
 	out0 := *abi.ConvertType(out[0], new(uint64)).(*uint64)
-	out1 := *abi.ConvertType(out[1], new(libcommon.Address)).(*libcommon.Address)
+	out1 := *abi.ConvertType(out[1], new(common.Address)).(*common.Address)
 
 	return &KeyperSetManagerAddKeyperSetParams{
 		Param_activationBlock: out0, Param_keyperSetContract: out1,
@@ -722,7 +722,7 @@ func ParseKeyperSetManagerAddKeyperSetParams(calldata []byte) (*KeyperSetManager
 // KeyperSetManagerGrantRoleParams is an auto generated read-only Go binding of transcaction calldata params
 type KeyperSetManagerGrantRoleParams struct {
 	Param_role    [32]byte
-	Param_account libcommon.Address
+	Param_account common.Address
 }
 
 // Parse GrantRole method from calldata of a transaction
@@ -751,7 +751,7 @@ func ParseKeyperSetManagerGrantRoleParams(calldata []byte) (*KeyperSetManagerGra
 	}
 
 	out0 := *abi.ConvertType(out[0], new([32]byte)).(*[32]byte)
-	out1 := *abi.ConvertType(out[1], new(libcommon.Address)).(*libcommon.Address)
+	out1 := *abi.ConvertType(out[1], new(common.Address)).(*common.Address)
 
 	return &KeyperSetManagerGrantRoleParams{
 		Param_role: out0, Param_account: out1,
@@ -760,8 +760,8 @@ func ParseKeyperSetManagerGrantRoleParams(calldata []byte) (*KeyperSetManagerGra
 
 // KeyperSetManagerInitializeParams is an auto generated read-only Go binding of transcaction calldata params
 type KeyperSetManagerInitializeParams struct {
-	Param_admin  libcommon.Address
-	Param_pauser libcommon.Address
+	Param_admin  common.Address
+	Param_pauser common.Address
 }
 
 // Parse Initialize method from calldata of a transaction
@@ -789,8 +789,8 @@ func ParseKeyperSetManagerInitializeParams(calldata []byte) (*KeyperSetManagerIn
 		return nil, fmt.Errorf("failed to match calldata with param field number")
 	}
 
-	out0 := *abi.ConvertType(out[0], new(libcommon.Address)).(*libcommon.Address)
-	out1 := *abi.ConvertType(out[1], new(libcommon.Address)).(*libcommon.Address)
+	out0 := *abi.ConvertType(out[0], new(common.Address)).(*common.Address)
+	out1 := *abi.ConvertType(out[1], new(common.Address)).(*common.Address)
 
 	return &KeyperSetManagerInitializeParams{
 		Param_admin: out0, Param_pauser: out1,
@@ -800,7 +800,7 @@ func ParseKeyperSetManagerInitializeParams(calldata []byte) (*KeyperSetManagerIn
 // KeyperSetManagerRenounceRoleParams is an auto generated read-only Go binding of transcaction calldata params
 type KeyperSetManagerRenounceRoleParams struct {
 	Param_role               [32]byte
-	Param_callerConfirmation libcommon.Address
+	Param_callerConfirmation common.Address
 }
 
 // Parse RenounceRole method from calldata of a transaction
@@ -829,7 +829,7 @@ func ParseKeyperSetManagerRenounceRoleParams(calldata []byte) (*KeyperSetManager
 	}
 
 	out0 := *abi.ConvertType(out[0], new([32]byte)).(*[32]byte)
-	out1 := *abi.ConvertType(out[1], new(libcommon.Address)).(*libcommon.Address)
+	out1 := *abi.ConvertType(out[1], new(common.Address)).(*common.Address)
 
 	return &KeyperSetManagerRenounceRoleParams{
 		Param_role: out0, Param_callerConfirmation: out1,
@@ -839,7 +839,7 @@ func ParseKeyperSetManagerRenounceRoleParams(calldata []byte) (*KeyperSetManager
 // KeyperSetManagerRevokeRoleParams is an auto generated read-only Go binding of transcaction calldata params
 type KeyperSetManagerRevokeRoleParams struct {
 	Param_role    [32]byte
-	Param_account libcommon.Address
+	Param_account common.Address
 }
 
 // Parse RevokeRole method from calldata of a transaction
@@ -868,7 +868,7 @@ func ParseKeyperSetManagerRevokeRoleParams(calldata []byte) (*KeyperSetManagerRe
 	}
 
 	out0 := *abi.ConvertType(out[0], new([32]byte)).(*[32]byte)
-	out1 := *abi.ConvertType(out[1], new(libcommon.Address)).(*libcommon.Address)
+	out1 := *abi.ConvertType(out[1], new(common.Address)).(*common.Address)
 
 	return &KeyperSetManagerRevokeRoleParams{
 		Param_role: out0, Param_account: out1,
@@ -945,15 +945,15 @@ func (it *KeyperSetManagerKeyperSetAddedIterator) Close() error {
 // KeyperSetManagerKeyperSetAdded represents a KeyperSetAdded event raised by the KeyperSetManager contract.
 type KeyperSetManagerKeyperSetAdded struct {
 	ActivationBlock   uint64
-	KeyperSetContract libcommon.Address
-	Members           []libcommon.Address
+	KeyperSetContract common.Address
+	Members           []common.Address
 	Threshold         uint64
 	Eon               uint64
 	Raw               types.Log // Blockchain specific contextual infos
 }
 
-func (_KeyperSetManager *KeyperSetManagerFilterer) KeyperSetAddedEventID() libcommon.Hash {
-	return libcommon.HexToHash("0xa940387dac06ebd336730f1d14b21629a9d137069a9137e871f95313e1010165")
+func (_KeyperSetManager *KeyperSetManagerFilterer) KeyperSetAddedEventID() common.Hash {
+	return common.HexToHash("0xa940387dac06ebd336730f1d14b21629a9d137069a9137e871f95313e1010165")
 }
 
 // FilterKeyperSetAdded is a free log retrieval operation binding the contract event 0xa940387dac06ebd336730f1d14b21629a9d137069a9137e871f95313e1010165.
@@ -1087,12 +1087,12 @@ func (it *KeyperSetManagerKeyperSetAdded0Iterator) Close() error {
 // KeyperSetManagerKeyperSetAdded0 represents a KeyperSetAdded0 event raised by the KeyperSetManager contract.
 type KeyperSetManagerKeyperSetAdded0 struct {
 	ActivationSlot    uint64
-	KeyperSetContract libcommon.Address
+	KeyperSetContract common.Address
 	Raw               types.Log // Blockchain specific contextual infos
 }
 
-func (_KeyperSetManager *KeyperSetManagerFilterer) KeyperSetAdded0EventID() libcommon.Hash {
-	return libcommon.HexToHash("0x6605cb866297050f9f49ae7e0b38e0e4c8178d4b176e24332bc01672818d707b")
+func (_KeyperSetManager *KeyperSetManagerFilterer) KeyperSetAdded0EventID() common.Hash {
+	return common.HexToHash("0x6605cb866297050f9f49ae7e0b38e0e4c8178d4b176e24332bc01672818d707b")
 }
 
 // FilterKeyperSetAdded0 is a free log retrieval operation binding the contract event 0x6605cb866297050f9f49ae7e0b38e0e4c8178d4b176e24332bc01672818d707b.
@@ -1225,12 +1225,12 @@ func (it *KeyperSetManagerPausedIterator) Close() error {
 
 // KeyperSetManagerPaused represents a Paused event raised by the KeyperSetManager contract.
 type KeyperSetManagerPaused struct {
-	Account libcommon.Address
+	Account common.Address
 	Raw     types.Log // Blockchain specific contextual infos
 }
 
-func (_KeyperSetManager *KeyperSetManagerFilterer) PausedEventID() libcommon.Hash {
-	return libcommon.HexToHash("0x62e78cea01bee320cd4e420270b5ea74000d11b0c9f74754ebdbfc544b05a258")
+func (_KeyperSetManager *KeyperSetManagerFilterer) PausedEventID() common.Hash {
+	return common.HexToHash("0x62e78cea01bee320cd4e420270b5ea74000d11b0c9f74754ebdbfc544b05a258")
 }
 
 // FilterPaused is a free log retrieval operation binding the contract event 0x62e78cea01bee320cd4e420270b5ea74000d11b0c9f74754ebdbfc544b05a258.
@@ -1369,8 +1369,8 @@ type KeyperSetManagerRoleAdminChanged struct {
 	Raw               types.Log // Blockchain specific contextual infos
 }
 
-func (_KeyperSetManager *KeyperSetManagerFilterer) RoleAdminChangedEventID() libcommon.Hash {
-	return libcommon.HexToHash("0xbd79b86ffe0ab8e8776151514217cd7cacd52c909f66475c3af44e129f0b00ff")
+func (_KeyperSetManager *KeyperSetManagerFilterer) RoleAdminChangedEventID() common.Hash {
+	return common.HexToHash("0xbd79b86ffe0ab8e8776151514217cd7cacd52c909f66475c3af44e129f0b00ff")
 }
 
 // FilterRoleAdminChanged is a free log retrieval operation binding the contract event 0xbd79b86ffe0ab8e8776151514217cd7cacd52c909f66475c3af44e129f0b00ff.
@@ -1530,19 +1530,19 @@ func (it *KeyperSetManagerRoleGrantedIterator) Close() error {
 // KeyperSetManagerRoleGranted represents a RoleGranted event raised by the KeyperSetManager contract.
 type KeyperSetManagerRoleGranted struct {
 	Role    [32]byte
-	Account libcommon.Address
-	Sender  libcommon.Address
+	Account common.Address
+	Sender  common.Address
 	Raw     types.Log // Blockchain specific contextual infos
 }
 
-func (_KeyperSetManager *KeyperSetManagerFilterer) RoleGrantedEventID() libcommon.Hash {
-	return libcommon.HexToHash("0x2f8788117e7eff1d82e926ec794901d17c78024a50270940304540a733656f0d")
+func (_KeyperSetManager *KeyperSetManagerFilterer) RoleGrantedEventID() common.Hash {
+	return common.HexToHash("0x2f8788117e7eff1d82e926ec794901d17c78024a50270940304540a733656f0d")
 }
 
 // FilterRoleGranted is a free log retrieval operation binding the contract event 0x2f8788117e7eff1d82e926ec794901d17c78024a50270940304540a733656f0d.
 //
 // Solidity: event RoleGranted(bytes32 indexed role, address indexed account, address indexed sender)
-func (_KeyperSetManager *KeyperSetManagerFilterer) FilterRoleGranted(opts *bind.FilterOpts, role [][32]byte, account []libcommon.Address, sender []libcommon.Address) (*KeyperSetManagerRoleGrantedIterator, error) {
+func (_KeyperSetManager *KeyperSetManagerFilterer) FilterRoleGranted(opts *bind.FilterOpts, role [][32]byte, account []common.Address, sender []common.Address) (*KeyperSetManagerRoleGrantedIterator, error) {
 
 	var roleRule []interface{}
 	for _, roleItem := range role {
@@ -1567,7 +1567,7 @@ func (_KeyperSetManager *KeyperSetManagerFilterer) FilterRoleGranted(opts *bind.
 // WatchRoleGranted is a free log subscription operation binding the contract event 0x2f8788117e7eff1d82e926ec794901d17c78024a50270940304540a733656f0d.
 //
 // Solidity: event RoleGranted(bytes32 indexed role, address indexed account, address indexed sender)
-func (_KeyperSetManager *KeyperSetManagerFilterer) WatchRoleGranted(opts *bind.WatchOpts, sink chan<- *KeyperSetManagerRoleGranted, role [][32]byte, account []libcommon.Address, sender []libcommon.Address) (event.Subscription, error) {
+func (_KeyperSetManager *KeyperSetManagerFilterer) WatchRoleGranted(opts *bind.WatchOpts, sink chan<- *KeyperSetManagerRoleGranted, role [][32]byte, account []common.Address, sender []common.Address) (event.Subscription, error) {
 
 	var roleRule []interface{}
 	for _, roleItem := range role {
@@ -1696,19 +1696,19 @@ func (it *KeyperSetManagerRoleRevokedIterator) Close() error {
 // KeyperSetManagerRoleRevoked represents a RoleRevoked event raised by the KeyperSetManager contract.
 type KeyperSetManagerRoleRevoked struct {
 	Role    [32]byte
-	Account libcommon.Address
-	Sender  libcommon.Address
+	Account common.Address
+	Sender  common.Address
 	Raw     types.Log // Blockchain specific contextual infos
 }
 
-func (_KeyperSetManager *KeyperSetManagerFilterer) RoleRevokedEventID() libcommon.Hash {
-	return libcommon.HexToHash("0xf6391f5c32d9c69d2a47ea670b442974b53935d1edc7fd64eb21e047a839171b")
+func (_KeyperSetManager *KeyperSetManagerFilterer) RoleRevokedEventID() common.Hash {
+	return common.HexToHash("0xf6391f5c32d9c69d2a47ea670b442974b53935d1edc7fd64eb21e047a839171b")
 }
 
 // FilterRoleRevoked is a free log retrieval operation binding the contract event 0xf6391f5c32d9c69d2a47ea670b442974b53935d1edc7fd64eb21e047a839171b.
 //
 // Solidity: event RoleRevoked(bytes32 indexed role, address indexed account, address indexed sender)
-func (_KeyperSetManager *KeyperSetManagerFilterer) FilterRoleRevoked(opts *bind.FilterOpts, role [][32]byte, account []libcommon.Address, sender []libcommon.Address) (*KeyperSetManagerRoleRevokedIterator, error) {
+func (_KeyperSetManager *KeyperSetManagerFilterer) FilterRoleRevoked(opts *bind.FilterOpts, role [][32]byte, account []common.Address, sender []common.Address) (*KeyperSetManagerRoleRevokedIterator, error) {
 
 	var roleRule []interface{}
 	for _, roleItem := range role {
@@ -1733,7 +1733,7 @@ func (_KeyperSetManager *KeyperSetManagerFilterer) FilterRoleRevoked(opts *bind.
 // WatchRoleRevoked is a free log subscription operation binding the contract event 0xf6391f5c32d9c69d2a47ea670b442974b53935d1edc7fd64eb21e047a839171b.
 //
 // Solidity: event RoleRevoked(bytes32 indexed role, address indexed account, address indexed sender)
-func (_KeyperSetManager *KeyperSetManagerFilterer) WatchRoleRevoked(opts *bind.WatchOpts, sink chan<- *KeyperSetManagerRoleRevoked, role [][32]byte, account []libcommon.Address, sender []libcommon.Address) (event.Subscription, error) {
+func (_KeyperSetManager *KeyperSetManagerFilterer) WatchRoleRevoked(opts *bind.WatchOpts, sink chan<- *KeyperSetManagerRoleRevoked, role [][32]byte, account []common.Address, sender []common.Address) (event.Subscription, error) {
 
 	var roleRule []interface{}
 	for _, roleItem := range role {
@@ -1861,12 +1861,12 @@ func (it *KeyperSetManagerUnpausedIterator) Close() error {
 
 // KeyperSetManagerUnpaused represents a Unpaused event raised by the KeyperSetManager contract.
 type KeyperSetManagerUnpaused struct {
-	Account libcommon.Address
+	Account common.Address
 	Raw     types.Log // Blockchain specific contextual infos
 }
 
-func (_KeyperSetManager *KeyperSetManagerFilterer) UnpausedEventID() libcommon.Hash {
-	return libcommon.HexToHash("0x5db9ee0a495bf2e6ff9c91a7834c1ba4fdd244a5e8aa4e537bd38aeae4b073aa")
+func (_KeyperSetManager *KeyperSetManagerFilterer) UnpausedEventID() common.Hash {
+	return common.HexToHash("0x5db9ee0a495bf2e6ff9c91a7834c1ba4fdd244a5e8aa4e537bd38aeae4b073aa")
 }
 
 // FilterUnpaused is a free log retrieval operation binding the contract event 0x5db9ee0a495bf2e6ff9c91a7834c1ba4fdd244a5e8aa4e537bd38aeae4b073aa.

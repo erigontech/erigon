@@ -30,13 +30,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
@@ -82,7 +82,7 @@ func getKvGetterForStateTable(db kv.RoDB, tableName string) KeyValueGetter {
 		if err := db.View(context.TODO(), func(tx kv.Tx) error {
 			key = base_encoding.Encode64ToBytes4(numId)
 			value, err = tx.GetOne(tableName, key)
-			value = libcommon.Copy(value)
+			value = common.Copy(value)
 			return err
 		}); err != nil {
 			return nil, nil, err
@@ -205,7 +205,7 @@ func (s *CaplinStateSnapshots) SegmentsMax() uint64 { return s.segmentsMax.Load(
 
 func (s *CaplinStateSnapshots) LogStat(str string) {
 	s.logger.Info(fmt.Sprintf("[snapshots:%s] Stat", str),
-		"blocks", libcommon.PrettyCounter(s.SegmentsMax()+1), "indices", libcommon.PrettyCounter(s.IndicesMax()+1))
+		"blocks", common.PrettyCounter(s.SegmentsMax()+1), "indices", common.PrettyCounter(s.IndicesMax()+1))
 }
 
 func (s *CaplinStateSnapshots) LS() {

@@ -23,7 +23,7 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/jwt"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -97,8 +97,8 @@ func (c *JsonRpcClient) NewPayloadV2(ctx context.Context, payload *enginetypes.E
 func (c *JsonRpcClient) NewPayloadV3(
 	ctx context.Context,
 	executionPayload *enginetypes.ExecutionPayload,
-	expectedBlobHashes []libcommon.Hash,
-	parentBeaconBlockRoot *libcommon.Hash,
+	expectedBlobHashes []common.Hash,
+	parentBeaconBlockRoot *common.Hash,
 ) (*enginetypes.PayloadStatus, error) {
 	return backoff.RetryWithData(func() (*enginetypes.PayloadStatus, error) {
 		var result enginetypes.PayloadStatus
@@ -120,8 +120,8 @@ func (c *JsonRpcClient) NewPayloadV3(
 func (c *JsonRpcClient) NewPayloadV4(
 	ctx context.Context,
 	executionPayload *enginetypes.ExecutionPayload,
-	expectedBlobHashes []libcommon.Hash,
-	parentBeaconBlockRoot *libcommon.Hash,
+	expectedBlobHashes []common.Hash,
+	parentBeaconBlockRoot *common.Hash,
 	executionRequests []hexutil.Bytes,
 ) (*enginetypes.PayloadStatus, error) {
 	return backoff.RetryWithData(func() (*enginetypes.PayloadStatus, error) {
@@ -231,7 +231,7 @@ func (c *JsonRpcClient) GetPayloadV4(ctx context.Context, payloadID hexutil.Byte
 	}, c.backOff(ctx))
 }
 
-func (c *JsonRpcClient) GetPayloadBodiesByHashV1(ctx context.Context, hashes []libcommon.Hash) ([]*enginetypes.ExecutionPayloadBody, error) {
+func (c *JsonRpcClient) GetPayloadBodiesByHashV1(ctx context.Context, hashes []common.Hash) ([]*enginetypes.ExecutionPayloadBody, error) {
 	return backoff.RetryWithData(func() ([]*enginetypes.ExecutionPayloadBody, error) {
 		var result []*enginetypes.ExecutionPayloadBody
 		err := c.rpcClient.CallContext(ctx, &result, "engine_getPayloadBodiesByHashV1", hashes)

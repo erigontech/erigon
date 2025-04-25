@@ -17,7 +17,7 @@
 package raw
 
 import (
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -46,7 +46,7 @@ func (b *BeaconState) SetLatestBlockHeader(header *cltypes.BeaconBlockHeader) {
 	b.markLeaf(LatestBlockHeaderLeafIndex)
 }
 
-func (b *BeaconState) SetBlockRootAt(index int, root libcommon.Hash) {
+func (b *BeaconState) SetBlockRootAt(index int, root common.Hash) {
 	if b.events.OnNewBlockRoot != nil {
 		b.events.OnNewBlockRoot(index, root)
 	}
@@ -54,7 +54,7 @@ func (b *BeaconState) SetBlockRootAt(index int, root libcommon.Hash) {
 	b.blockRoots.Set(index, root)
 }
 
-func (b *BeaconState) SetStateRootAt(index int, root libcommon.Hash) {
+func (b *BeaconState) SetStateRootAt(index int, root common.Hash) {
 	if b.events.OnNewStateRoot != nil {
 		b.events.OnNewStateRoot(index, root)
 	}
@@ -62,7 +62,7 @@ func (b *BeaconState) SetStateRootAt(index int, root libcommon.Hash) {
 	b.stateRoots.Set(index, root)
 }
 
-func (b *BeaconState) SetWithdrawalCredentialForValidatorAtIndex(index int, creds libcommon.Hash) {
+func (b *BeaconState) SetWithdrawalCredentialForValidatorAtIndex(index int, creds common.Hash) {
 	b.markLeaf(ValidatorsLeafIndex)
 	if b.events.OnNewValidatorWithdrawalCredentials != nil {
 		b.events.OnNewValidatorWithdrawalCredentials(index, creds[:])
@@ -267,7 +267,7 @@ func (b *BeaconState) AddValidator(validator solid.Validator, balance uint64) {
 	b.markLeaf(BalancesLeafIndex)
 }
 
-func (b *BeaconState) SetRandaoMixAt(index int, mix libcommon.Hash) {
+func (b *BeaconState) SetRandaoMixAt(index int, mix common.Hash) {
 	if b.events.OnRandaoMixChange != nil {
 		b.events.OnRandaoMixChange(index, mix)
 	}
@@ -374,7 +374,7 @@ func (b *BeaconState) AddHistoricalSummary(summary *cltypes.HistoricalSummary) {
 	b.markLeaf(HistoricalSummariesLeafIndex)
 }
 
-func (b *BeaconState) AddHistoricalRoot(root libcommon.Hash) {
+func (b *BeaconState) AddHistoricalRoot(root common.Hash) {
 	b.historicalRoots.Append(root)
 	b.markLeaf(HistoricalRootsLeafIndex)
 }
@@ -488,7 +488,7 @@ func (b *BeaconState) SetGenesisTime(time uint64) {
 }
 
 // SetGenesisValidatorsRoot sets the genesis validators root of the BeaconState.
-func (b *BeaconState) SetGenesisValidatorsRoot(root libcommon.Hash) {
+func (b *BeaconState) SetGenesisValidatorsRoot(root common.Hash) {
 	b.markLeaf(GenesisValidatorsRootLeafIndex)
 	b.genesisValidatorsRoot = root
 }

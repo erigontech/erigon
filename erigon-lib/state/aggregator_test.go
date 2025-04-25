@@ -267,25 +267,29 @@ func TestAggregatorV3_DirtyFilesRo(t *testing.T) {
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
 
-	checkDirtyFiles := func(dirtyFiles []*filesItem, expectedLen, expectedRefCnt int) {
-		require.Len(t, dirtyFiles, expectedLen)
+	checkDirtyFiles := func(dirtyFiles []*filesItem, expectedLen, expectedRefCnt int, disabled bool, name string) {
+		if disabled {
+			expectedLen = 0
+		}
+
+		require.Len(t, dirtyFiles, expectedLen, name)
 		for _, f := range dirtyFiles {
-			require.Equal(t, int32(expectedRefCnt), f.refcount.Load())
+			require.Equal(t, int32(expectedRefCnt), f.refcount.Load(), name)
 		}
 	}
 
 	checkAllEntities := func(expectedLen, expectedRefCnt int) {
 		for _, d := range agg.d {
-			checkDirtyFiles(d.dirtyFiles.Items(), expectedLen, expectedRefCnt)
+			checkDirtyFiles(d.dirtyFiles.Items(), expectedLen, expectedRefCnt, d.disable, d.name.String())
 			if d.snapshotsDisabled {
 				continue
 			}
-			checkDirtyFiles(d.History.dirtyFiles.Items(), expectedLen, expectedRefCnt)
-			checkDirtyFiles(d.History.InvertedIndex.dirtyFiles.Items(), expectedLen, expectedRefCnt)
+			checkDirtyFiles(d.History.dirtyFiles.Items(), expectedLen, expectedRefCnt, d.disable, d.name.String())
+			checkDirtyFiles(d.History.InvertedIndex.dirtyFiles.Items(), expectedLen, expectedRefCnt, d.disable, d.name.String())
 		}
 
 		for _, ii := range agg.iis {
-			checkDirtyFiles(ii.dirtyFiles.Items(), expectedLen, expectedRefCnt)
+			checkDirtyFiles(ii.dirtyFiles.Items(), expectedLen, expectedRefCnt, ii.disable, ii.filenameBase)
 		}
 	}
 
@@ -1275,7 +1279,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	ps := background.NewProgressSet()
 
 	IndexFile := filepath.Join(tmp, fmt.Sprintf("%dk.bt", keyCount/1000))
-	err = BuildBtreeIndexWithDecompressor(IndexFile, decomp, compressFlags, ps, tb.TempDir(), 777, logger, true)
+	err = BuildBtreeIndexWithDecompressor(IndexFile, decomp, compressFlags, ps, tb.TempDir(), 777, logger, true, AccessorBTree|AccessorExistence)
 	require.NoError(tb, err)
 
 	return compPath
@@ -1571,7 +1575,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	finalRoot, err := RebuildCommitmentFiles(ctx, db, &rawdbv3.TxNums, agg.logger)
 	require.NoError(t, err)
 	require.NotEmpty(t, finalRoot)
-	require.NotEqualValues(t, commitment.EmptyRootHash, finalRoot)
+	require.NotEqual(t, commitment.EmptyRootHash, finalRoot)
 
 	require.EqualValues(t, roots[len(roots)-1][:], finalRoot[:])
 }

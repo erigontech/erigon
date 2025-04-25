@@ -37,6 +37,9 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	if err := a.registerDomain(kv.ReceiptDomain, salt, dirs, logger); err != nil {
 		return nil, err
 	}
+	if err := a.registerDomain(kv.RCacheDomain, salt, dirs, logger); err != nil {
+		return nil, err
+	}
 	if err := a.registerII(kv.LogAddrIdx, salt, dirs, logger); err != nil {
 		return nil, err
 	}
@@ -74,6 +77,7 @@ type SchemaGen struct {
 	CodeDomain       domainCfg
 	CommitmentDomain domainCfg
 	ReceiptDomain    domainCfg
+	RCacheDomain domainCfg
 	LogAddrIdx       iiCfg
 	LogTopicIdx      iiCfg
 	TracesFromIdx    iiCfg
@@ -201,6 +205,7 @@ var Schema = SchemaGen{
 	ReceiptDomain: domainCfg{
 		name: kv.ReceiptDomain, valuesTable: kv.TblReceiptVals,
 		CompressCfg: seg.DefaultCfg, Compression: seg.CompressNone,
+		largeValues: false,
 
 		AccessorList: AccessorBTree | AccessorExistence,
 
@@ -217,6 +222,31 @@ var Schema = SchemaGen{
 			},
 		},
 	},
+	RCacheDomain: domainCfg{
+		name: kv.RCacheDomain, valuesTable: kv.TblRCacheVals,
+		largeValues: true,
+
+		AccessorList: AccessorHashMap,
+		CompressCfg:  DomainCompressCfg, Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+
+		hist: histCfg{
+			valuesTable: kv.TblRCacheHistoryVals,
+			compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+
+			historyLargeValues: true,
+			historyIdx:         kv.RCacheHistoryIdx,
+
+			snapshotsDisabled:             true,
+			historyValuesOnCompressedPage: 16,
+
+			iiCfg: iiCfg{
+				disable:      true, // disable everything by default
+				filenameBase: kv.RCacheDomain.String(), keysTable: kv.TblRCacheHistoryKeys, valuesTable: kv.TblRCacheIdx,
+				compressorCfg: seg.DefaultCfg,
+			},
+		},
+	},
+
 	LogAddrIdx: iiCfg{
 		filenameBase: kv.FileLogAddressIdx, keysTable: kv.TblLogAddressKeys, valuesTable: kv.TblLogAddressIdx,
 
@@ -269,3 +299,19 @@ var HistoryCompressCfg = seg.Cfg{
 	MaxDictPatterns:      64 * 1024,
 	Workers:              1,
 }
+
+func EnableHistoricalCommitment() {
+	cfg := Schema[kv.CommitmentDomain]
+	cfg.hist.historyDisabled = false
+	cfg.hist.snapshotsDisabled = false
+	Schema[kv.CommitmentDomain] = cfg
+}
+func EnableHistoricalRCache() {
+	cfg := Schema[kv.RCacheDomain]
+	cfg.hist.iiCfg.disable = false
+	cfg.hist.historyDisabled = false
+	cfg.hist.snapshotsDisabled = false
+	Schema[kv.RCacheDomain] = cfg
+}
+
+var ExperimentalConcurrentCommitment = false // set true to use concurrent commitment by default

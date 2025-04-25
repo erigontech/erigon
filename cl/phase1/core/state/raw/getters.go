@@ -20,7 +20,7 @@ import (
 	"errors"
 	"fmt"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -45,7 +45,7 @@ func (b *BeaconState) GenesisTime() uint64 {
 	return b.genesisTime
 }
 
-func (b *BeaconState) GenesisValidatorsRoot() libcommon.Hash {
+func (b *BeaconState) GenesisValidatorsRoot() common.Hash {
 	return b.genesisValidatorsRoot
 }
 
@@ -146,9 +146,9 @@ func (b *BeaconState) ValidatorBalance(index int) (uint64, error) {
 	return b.balances.Get(index), nil
 }
 
-func (b *BeaconState) ValidatorPublicKey(index int) (libcommon.Bytes48, error) {
+func (b *BeaconState) ValidatorPublicKey(index int) (common.Bytes48, error) {
 	if index >= b.validators.Length() {
-		return libcommon.Bytes48{}, ErrInvalidValidatorIndex
+		return common.Bytes48{}, ErrInvalidValidatorIndex
 	}
 	return b.validators.Get(index).PublicKey(), nil
 }
@@ -354,12 +354,12 @@ func (b *BeaconState) PendingConsolidations() *solid.ListSSZ[*solid.PendingConso
 // more compluicated ones
 
 // GetBlockRootAtSlot returns the block root at a given slot
-func (b *BeaconState) GetBlockRootAtSlot(slot uint64) (libcommon.Hash, error) {
+func (b *BeaconState) GetBlockRootAtSlot(slot uint64) (common.Hash, error) {
 	if slot >= b.Slot() {
-		return libcommon.Hash{}, ErrGetBlockRootAtSlotFuture
+		return common.Hash{}, ErrGetBlockRootAtSlotFuture
 	}
 	if b.Slot() > slot+b.BeaconConfig().SlotsPerHistoricalRoot {
-		return libcommon.Hash{}, errors.New("GetBlockRootAtSlot: slot too much far behind")
+		return common.Hash{}, errors.New("GetBlockRootAtSlot: slot too much far behind")
 	}
 	return b.blockRoots.Get(int(slot % b.BeaconConfig().SlotsPerHistoricalRoot)), nil
 }

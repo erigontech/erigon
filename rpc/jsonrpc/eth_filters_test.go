@@ -24,7 +24,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
@@ -75,20 +75,20 @@ func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log)
 
 	// generate some random topics
-	topics := make([][]libcommon.Hash, 0)
+	topics := make([][]common.Hash, 0)
 	for i := 0; i < 10; i++ {
 		bytes := make([]byte, length.Hash)
 		rand.Read(bytes)
-		toAdd := []libcommon.Hash{libcommon.BytesToHash(bytes)}
+		toAdd := []common.Hash{common.BytesToHash(bytes)}
 		topics = append(topics, toAdd)
 	}
 
 	// generate some addresses
-	addresses := make([]libcommon.Address, 0)
+	addresses := make([]common.Address, 0)
 	for i := 0; i < 10; i++ {
 		bytes := make([]byte, length.Addr)
 		rand.Read(bytes)
-		addresses = append(addresses, libcommon.BytesToAddress(bytes))
+		addresses = append(addresses, common.BytesToAddress(bytes))
 	}
 
 	crit := filters.FilterCriteria{

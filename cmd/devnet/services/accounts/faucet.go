@@ -24,7 +24,7 @@ import (
 	"strings"
 	"sync"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
 	"github.com/erigontech/erigon/cmd/devnet/blocks"
 	"github.com/erigontech/erigon/cmd/devnet/contracts"
@@ -38,7 +38,7 @@ type Faucet struct {
 	chainName       string
 	source          *accounts.Account
 	transactOpts    *bind.TransactOpts
-	contractAddress libcommon.Address
+	contractAddress common.Address
 	contract        *contracts.Faucet
 	deployer        *deployer
 }
@@ -134,7 +134,7 @@ func (f *Faucet) Start(_ context.Context) error {
 
 func (f *Faucet) Stop() {}
 
-func (f *Faucet) Address() libcommon.Address {
+func (f *Faucet) Address() common.Address {
 	return f.contractAddress
 }
 
@@ -164,7 +164,7 @@ func (f *Faucet) Balance(ctx context.Context) (*big.Int, error) {
 	return node.GetBalance(f.contractAddress, rpc.LatestBlock)
 }
 
-func (f *Faucet) Send(ctx context.Context, destination *accounts.Account, eth float64) (*big.Int, libcommon.Hash, error) {
+func (f *Faucet) Send(ctx context.Context, destination *accounts.Account, eth float64) (*big.Int, common.Hash, error) {
 	f.Lock()
 	deployer := f.deployer
 	f.Unlock()
@@ -174,7 +174,7 @@ func (f *Faucet) Send(ctx context.Context, destination *accounts.Account, eth fl
 	}
 
 	if f.transactOpts == nil {
-		return nil, libcommon.Hash{}, errors.New("faucet not initialized")
+		return nil, common.Hash{}, errors.New("faucet not initialized")
 	}
 
 	node := devnet.SelectNode(ctx)
@@ -182,7 +182,7 @@ func (f *Faucet) Send(ctx context.Context, destination *accounts.Account, eth fl
 	count, err := node.GetTransactionCount(f.source.Address, rpc.PendingBlock)
 
 	if err != nil {
-		return nil, libcommon.Hash{}, err
+		return nil, common.Hash{}, err
 	}
 
 	f.transactOpts.Nonce = count
@@ -191,25 +191,25 @@ func (f *Faucet) Send(ctx context.Context, destination *accounts.Account, eth fl
 	trn, err := f.contract.Send(f.transactOpts, destination.Address, amount)
 
 	if err != nil {
-		return nil, libcommon.Hash{}, err
+		return nil, common.Hash{}, err
 	}
 
 	return amount, trn.Hash(), err
 }
 
-func (f *Faucet) Receive(ctx context.Context, source *accounts.Account, eth float64) (*big.Int, libcommon.Hash, error) {
+func (f *Faucet) Receive(ctx context.Context, source *accounts.Account, eth float64) (*big.Int, common.Hash, error) {
 	node := devnet.SelectNode(ctx)
 
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(source.SigKey(), node.ChainID())
 
 	if err != nil {
-		return nil, libcommon.Hash{}, err
+		return nil, common.Hash{}, err
 	}
 
 	count, err := node.GetTransactionCount(f.source.Address, rpc.PendingBlock)
 
 	if err != nil {
-		return nil, libcommon.Hash{}, err
+		return nil, common.Hash{}, err
 	}
 
 	transactOpts.Nonce = count
@@ -219,7 +219,7 @@ func (f *Faucet) Receive(ctx context.Context, source *accounts.Account, eth floa
 	trn, err := (&contracts.FaucetRaw{Contract: f.contract}).Transfer(transactOpts)
 
 	if err != nil {
-		return nil, libcommon.Hash{}, err
+		return nil, common.Hash{}, err
 	}
 
 	return transactOpts.Value, trn.Hash(), nil

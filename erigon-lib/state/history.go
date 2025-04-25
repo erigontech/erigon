@@ -377,7 +377,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	histReader := seg.NewReader(hist.MakeGetter(), h.compression)
 
 	_, fName := filepath.Split(historyIdxPath)
-	p := ps.AddNew(fName, uint64(hist.Count()))
+	p := ps.AddNew(fName, uint64(efHist.Count())/2)
 	defer ps.Delete(p)
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   int(cnt),
@@ -404,6 +404,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		for iiReader.HasNext() {
 			keyBuf, _ = iiReader.Next(keyBuf[:0])
 			valBuf, _ = iiReader.Next(valBuf[:0])
+			p.Processed.Add(1)
 
 			// fmt.Printf("ef key %x\n", keyBuf)
 
@@ -426,8 +427,8 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 						valOffset, _ = histReader.Skip()
 					}
 				}
-				p.Processed.Add(1)
 			}
+			p.Processed.Add(1)
 
 			select {
 			case <-ctx.Done():
@@ -460,7 +461,7 @@ func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, p
 	}
 }
 
-func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte, originalStep uint64) (err error) {
+func (w *historyBufferedWriter) AddPrevValue(key1, key2 []byte, txNum uint64, original []byte) (err error) {
 	if w.discard {
 		return nil
 	}
@@ -468,6 +469,7 @@ func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte, origin
 	if original == nil {
 		original = []byte{}
 	}
+	binary.BigEndian.PutUint64(w.ii.txNumBytes[:], txNum)
 
 	//defer func() {
 	//	fmt.Printf("addPrevValue [%p;tx=%d] '%x' -> '%x'\n", w, w.ii.txNum, key1, original)
@@ -534,8 +536,6 @@ type historyBufferedWriter struct {
 
 	ii *InvertedIndexBufferedWriter
 }
-
-func (w *historyBufferedWriter) SetTxNum(v uint64) { w.ii.SetTxNum(v) }
 
 func (w *historyBufferedWriter) close() {
 	if w == nil { // allow dobule-close
@@ -941,17 +941,6 @@ func (h *History) integrateDirtyFiles(sf HistoryFiles, txNumFrom, txNumTo uint64
 }
 
 func (h *History) isEmpty(tx kv.Tx) (bool, error) {
-	if h.historyLargeValues {
-		k, err := kv.FirstKey(tx, h.valuesTable)
-		if err != nil {
-			return false, err
-		}
-		k2, err := kv.FirstKey(tx, h.keysTable)
-		if err != nil {
-			return false, err
-		}
-		return k == nil && k2 == nil, nil
-	}
 	k, err := kv.FirstKey(tx, h.valuesTable)
 	if err != nil {
 		return false, err
@@ -1233,17 +1222,17 @@ func historyKey(txNum uint64, key []byte, buf []byte) []byte {
 }
 
 func (ht *HistoryRoTx) encodeTs(txNum uint64, key []byte) []byte {
-	if ht._bufTs == nil {
-		ht._bufTs = make([]byte, 8+len(key))
-	}
-	binary.BigEndian.PutUint64(ht._bufTs, txNum)
-	ht._bufTs = append(ht._bufTs[:8], key...)
-	return ht._bufTs[:8+len(key)]
+	ht._bufTs = historyKey(txNum, key, ht._bufTs)
+	return ht._bufTs
 }
 
 // HistorySeek searches history for a value of specified key before txNum
 // second return value is true if the value is found in the history (even if it is nil)
 func (ht *HistoryRoTx) HistorySeek(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
+	if ht.h.disable {
+		return nil, false, nil
+	}
+
 	v, ok, err := ht.historySeekInFiles(key, txNum)
 	if err != nil {
 		return nil, false, err
