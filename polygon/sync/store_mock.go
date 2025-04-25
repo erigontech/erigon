@@ -13,7 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
-	types "github.com/erigontech/erigon/core/types"
+	types "github.com/erigontech/erigon-lib/types"
 	gomock "go.uber.org/mock/gomock"
 )
 

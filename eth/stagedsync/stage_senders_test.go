@@ -23,17 +23,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
@@ -57,7 +57,7 @@ func TestSenders(t *testing.T) {
 	}
 
 	// prepare txn so it works with our test
-	signer1 := types.MakeSigner(params.TestChainConfig, params.TestChainConfig.BerlinBlock.Uint64(), 0)
+	signer1 := types.MakeSigner(chain.TestChainConfig, chain.TestChainConfig.BerlinBlock.Uint64(), 0)
 	header := &types.Header{Number: libcommon.Big1}
 	hash := header.Hash()
 	require.NoError(rawdb.WriteHeader(tx, header))
@@ -89,7 +89,7 @@ func TestSenders(t *testing.T) {
 	}))
 	require.NoError(rawdb.WriteCanonicalHash(tx, hash, 1))
 
-	signer2 := types.MakeSigner(params.TestChainConfig, params.TestChainConfig.BerlinBlock.Uint64(), 0)
+	signer2 := types.MakeSigner(chain.TestChainConfig, chain.TestChainConfig.BerlinBlock.Uint64(), 0)
 	header.Number = libcommon.Big2
 	hash = header.Hash()
 	require.NoError(rawdb.WriteHeader(tx, header))
@@ -145,7 +145,7 @@ func TestSenders(t *testing.T) {
 
 	require.NoError(stages.SaveStageProgress(tx, stages.Bodies, 3))
 
-	cfg := stagedsync.StageSendersCfg(db, params.TestChainConfig, ethconfig.Defaults.Sync, false, "", prune.Mode{}, br, nil)
+	cfg := stagedsync.StageSendersCfg(db, chain.TestChainConfig, ethconfig.Defaults.Sync, false, "", prune.Mode{}, br, nil)
 	err = stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 3, m.Ctx, log.New())
 	require.NoError(err)
 
@@ -176,13 +176,13 @@ func TestSenders(t *testing.T) {
 		assert.Equal(t, 5, int(cnt))
 
 		txs, err := rawdb.CanonicalTransactions(tx, 1, 2)
-		assert.NoError(t, err)
+		require.NoError(err)
 		assert.Equal(t, 2, len(txs))
 		txs, err = rawdb.CanonicalTransactions(tx, 5, 3)
-		assert.NoError(t, err)
+		require.NoError(err)
 		assert.Equal(t, 3, len(txs))
 		txs, err = rawdb.CanonicalTransactions(tx, 5, 1024)
-		assert.NoError(t, err)
+		require.NoError(err)
 		assert.Equal(t, 3, len(txs))
 	}
 }

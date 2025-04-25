@@ -35,9 +35,9 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon-lib/types"
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -1129,7 +1129,7 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.Vi
 
 		// final txnHash check  - completely avoid false-positives
 		if txn.Hash() == txnHash {
-			return txn, blockNum, idxTxnHash.BaseDataID() + txNumInFile + 1, true, nil
+			return txn, blockNum, idxTxnHash.BaseDataID() + txNumInFile, true, nil
 		}
 	}
 

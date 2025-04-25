@@ -295,6 +295,10 @@ func splitDataset(in TxnSlots) (TxnSlots, TxnSlots, TxnSlots, TxnSlots) {
 }
 
 func FuzzOnNewBlocks(f *testing.F) {
+	if testing.Short() {
+		f.Skip()
+	}
+
 	var u64 = [1 * 4]byte{1}
 	var senderAddr = [1 + 1 + 1]byte{1}
 	f.Add(u64[:], u64[:], u64[:], u64[:], senderAddr[:], uint8(12))
@@ -314,21 +318,21 @@ func FuzzOnNewBlocks(f *testing.F) {
 		}
 
 		assert, require := assert.New(t), require.New(t)
-		assert.NoError(txns.Valid())
+		require.NoError(txns.Valid())
 
 		var prevHashes Hashes
 		ch := make(chan Announcements, 100)
 
-		coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+		coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 		db := memdb.NewTestPoolDB(t)
 
 		cfg := txpoolcfg.DefaultConfig
 		sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-		pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
-		assert.NoError(err)
+		pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+		require.NoError(err)
 
 		err = pool.start(ctx)
-		assert.NoError(err)
+		require.NoError(err)
 
 		pool.senders.senderIDs = senderIDs
 		for addr, id := range senderIDs {
@@ -496,7 +500,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 		// go to first fork
 		txns1, txns2, p2pReceived, txns3 := splitDataset(txns)
 		err = pool.OnNewBlock(ctx, change, txns1, TxnSlots{}, TxnSlots{})
-		assert.NoError(err)
+		require.NoError(err)
 		check(txns1, TxnSlots{}, "fork1")
 		checkNotify(txns1, TxnSlots{}, "fork1")
 
@@ -509,7 +513,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 			},
 		}
 		err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, txns2)
-		assert.NoError(err)
+		require.NoError(err)
 		check(TxnSlots{}, txns2, "fork1 mined")
 		checkNotify(TxnSlots{}, txns2, "fork1 mined")
 
@@ -522,7 +526,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 			},
 		}
 		err = pool.OnNewBlock(ctx, change, txns2, TxnSlots{}, TxnSlots{})
-		assert.NoError(err)
+		require.NoError(err)
 		check(txns2, TxnSlots{}, "fork2")
 		checkNotify(txns2, TxnSlots{}, "fork2")
 
@@ -534,14 +538,14 @@ func FuzzOnNewBlocks(f *testing.F) {
 			},
 		}
 		err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, txns3)
-		assert.NoError(err)
+		require.NoError(err)
 		check(TxnSlots{}, txns3, "fork2 mined")
 		checkNotify(TxnSlots{}, txns3, "fork2 mined")
 
 		// add some remote txns from p2p
 		pool.AddRemoteTxns(ctx, p2pReceived)
 		err = pool.processRemoteTxns(ctx)
-		assert.NoError(err)
+		require.NoError(err)
 		check(p2pReceived, TxnSlots{}, "p2pmsg1")
 		checkNotify(p2pReceived, TxnSlots{}, "p2pmsg1")
 
@@ -550,8 +554,8 @@ func FuzzOnNewBlocks(f *testing.F) {
 		check(p2pReceived, TxnSlots{}, "after_flush")
 		checkNotify(p2pReceived, TxnSlots{}, "after_flush")
 
-		p2, err := New(ctx, ch, db, coreDB, txpoolcfg.DefaultConfig, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
-		assert.NoError(err)
+		p2, err := New(ctx, ch, db, coreDB, txpoolcfg.DefaultConfig, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+		require.NoError(err)
 
 		p2.senders = pool.senders // senders are not persisted
 		err = coreDB.View(ctx, func(coreTx kv.Tx) error { return p2.fromDB(ctx, tx, coreTx) })

@@ -31,22 +31,21 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	"github.com/erigontech/erigon-lib/kv/order"
-
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
-	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/valset"
@@ -173,7 +172,7 @@ func (hc *HarnessCfg) GetOrCreateDefaultHeimdallProducersOverride() map[uint64][
 
 type Harness struct {
 	logger                     log.Logger
-	chainDataDB                kv.RwDB
+	chainDataDB                kv.TemporalRwDB
 	borConsensusDB             kv.RwDB
 	chainConfig                *chain.Config
 	borConfig                  *borcfg.BorConfig
@@ -238,11 +237,11 @@ func (h *Harness) RunStateSyncStageForward(t *testing.T, id stages.SyncStage) {
 }
 
 func (h *Harness) RunStateSyncStageForwardWithErrorIs(t *testing.T, id stages.SyncStage, wantErr error) {
-	h.runSyncStageForwardWithErrorIs(t, id, h.stateSync, h.stateSyncStages, wantErr, wrap.TxContainer{})
+	h.runSyncStageForwardWithErrorIs(t, id, h.stateSync, h.stateSyncStages, wantErr, wrap.NewTxContainer(nil, nil))
 }
 
 func (h *Harness) RunStateStageForwardWithReturnError(t *testing.T, id stages.SyncStage) error {
-	return h.runSyncStageForwardWithReturnError(t, id, h.stateSync, h.stateSyncStages, wrap.TxContainer{})
+	return h.runSyncStageForwardWithReturnError(t, id, h.stateSync, h.stateSyncStages, wrap.NewTxContainer(nil, nil))
 }
 
 func (h *Harness) RunMiningStageForward(ctx context.Context, t *testing.T, id stages.SyncStage) {
@@ -254,7 +253,7 @@ func (h *Harness) RunMiningStageForwardWithErrorIs(ctx context.Context, t *testi
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	txc := wrap.TxContainer{Tx: tx}
+	txc := wrap.NewTxContainer(tx, nil)
 	h.runSyncStageForwardWithErrorIs(t, id, h.miningSync, h.miningSyncStages, wantErr, txc)
 
 	err = tx.Commit()
@@ -266,7 +265,7 @@ func (h *Harness) RunMiningStageForwardWithReturnError(ctx context.Context, t *t
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	txc := wrap.TxContainer{Tx: tx}
+	txc := wrap.NewTxContainer(tx, nil)
 	err = h.runSyncStageForwardWithReturnError(t, id, h.miningSync, h.miningSyncStages, txc)
 	if err != nil {
 		return err

@@ -727,6 +727,10 @@ func (m *MemoryMutation) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte,
 	return m.db.(kv.TemporalTx).GetAsOf(name, k, ts)
 }
 
+func (m *MemoryMutation) HasPrefix(name kv.Domain, prefix []byte) (firstKey []byte, ok bool, err error) {
+	return m.db.(kv.TemporalTx).HasPrefix(name, prefix)
+}
+
 func (m *MemoryMutation) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
 	// panic("not supported")
 	return m.db.(kv.TemporalTx).RangeAsOf(name, fromKey, toKey, ts, asc, limit)
@@ -753,3 +757,4 @@ func (m *MemoryMutation) HistoryStartFrom(name kv.Domain) uint64 {
 func (m *MemoryMutation) FreezeInfo() kv.FreezeInfo {
 	panic("not supported")
 }
+func (m *MemoryMutation) Debug() kv.TemporalDebugTx { return m.db.(kv.TemporalTx).Debug() }

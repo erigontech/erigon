@@ -18,23 +18,22 @@ import (
 
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/state"
-	ee "github.com/erigontech/erigon-lib/state/appendable_extras"
-	"github.com/erigontech/erigon/core/types"
+	ee "github.com/erigontech/erigon-lib/state/entity_extras"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 type HeaderFreezer struct {
 	canonicalTbl, valsTbl string
-	coll                  state.Collector
 	logger                log.Logger
 }
 
 var _ state.Freezer = (*HeaderFreezer)(nil)
 
 func NewHeaderFreezer(canonicalTbl, valsTbl string, logger log.Logger) *HeaderFreezer {
-	return &HeaderFreezer{canonicalTbl, valsTbl, nil, logger}
+	return &HeaderFreezer{canonicalTbl, valsTbl, logger}
 }
 
-func (f *HeaderFreezer) Freeze(ctx context.Context, blockFrom, blockTo ee.RootNum, db kv.RoDB) error {
+func (f *HeaderFreezer) Freeze(ctx context.Context, blockFrom, blockTo ee.RootNum, coll state.Collector, db kv.RoDB) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -62,7 +61,7 @@ func (f *HeaderFreezer) Freeze(ctx context.Context, blockFrom, blockTo ee.RootNu
 		value := make([]byte, len(dataRLP)+1) // first_byte_of_header_hash + header_rlp
 		value[0] = h.Hash()[0]
 		copy(value[1:], dataRLP)
-		if err := f.coll(value); err != nil {
+		if err := coll(value); err != nil {
 			return false, err
 		}
 
@@ -79,10 +78,6 @@ func (f *HeaderFreezer) Freeze(ctx context.Context, blockFrom, blockTo ee.RootNu
 		}
 		return true, nil
 	})
-}
-
-func (f *HeaderFreezer) SetCollector(coll state.Collector) {
-	f.coll = coll
 }
 
 var _ state.IndexKeyFactory = (*HeaderAccessorIndexKeyFactory)(nil)

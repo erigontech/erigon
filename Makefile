@@ -162,23 +162,26 @@ db-tools:
 	go mod vendor
 	cd vendor/github.com/erigontech/mdbx-go && MDBX_BUILD_TIMESTAMP=unknown make tools
 	mkdir -p $(GOBIN)
-	cd vendor/github.com/erigontech/mdbx-go/mdbxdist && cp mdbx_chk $(GOBIN) && cp mdbx_copy $(GOBIN) && cp mdbx_dump $(GOBIN) && cp mdbx_drop $(GOBIN) && cp mdbx_load $(GOBIN) && cp mdbx_stat $(GOBIN)
+	cd vendor/github.com/erigontech/mdbx-go/libmdbx && cp mdbx_chk $(GOBIN) && cp mdbx_copy $(GOBIN) && cp mdbx_dump $(GOBIN) && cp mdbx_drop $(GOBIN) && cp mdbx_load $(GOBIN) && cp mdbx_stat $(GOBIN)
 	rm -rf vendor
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
 test-erigon-lib:
 	@cd erigon-lib && $(MAKE) test
 
+test-erigon-lib-all:
+	@cd erigon-lib && $(MAKE) test-all
+
 test-erigon-ext:
 	@cd tests/erigon-ext-test && ./test.sh $(GIT_COMMIT)
 
-## test:                              run unit tests with a 100s timeout
+## test:                      run short tests with a 10m timeout
 test: test-erigon-lib
-	$(GOTEST) --timeout 10m -coverprofile=coverage.out
+	$(GOTEST) -short --timeout 10m -coverprofile=coverage-test.out
 
-## test-integration:                  run integration tests with a 30m timeout
-test-integration: test-erigon-lib
-	$(GOTEST) --timeout 240m -tags $(BUILD_TAGS),integration
+## test-all:                  run all tests with a 1h timeout
+test-all: test-erigon-lib-all
+	$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out
 
 ## test-hive						run the hive tests locally off nektos/act workflows simulator
 test-hive:	
@@ -303,8 +306,18 @@ gencodec:
 graphql:
 	PATH=$(GOBIN):$(PATH) cd ./cmd/rpcdaemon/graphql && go run github.com/99designs/gqlgen .
 
+## grpc:                              generate grpc and protobuf code
+grpc:
+	@cd erigon-lib && $(MAKE) grpc
+	@cd txnprovider/shutter && $(MAKE) proto
+
+## stringer:                          generate stringer code
+stringer:
+	$(GOBUILD) -o $(GOBIN)/stringer golang.org/x/tools/cmd/stringer
+	PATH="$(GOBIN):$(PATH)" go generate -run "stringer" ./...
+
 ## gen:                               generate all auto-generated code in the codebase
-gen: mocks solc abigen gencodec graphql
+gen: mocks solc abigen gencodec graphql grpc stringer
 	@cd erigon-lib && $(MAKE) gen
 
 ## bindings:                          generate test contracts and core contracts

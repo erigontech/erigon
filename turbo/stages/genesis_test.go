@@ -34,8 +34,8 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -104,7 +104,7 @@ func TestSetupGenesis(t *testing.T) {
 				core.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
 				return core.CommitGenesisBlock(db, core.SepoliaGenesisBlock(), datadir.New(tmpdir), logger)
 			},
-			wantErr:    &types.GenesisMismatchError{Stored: customghash, New: params.SepoliaGenesisHash},
+			wantErr:    &core.GenesisMismatchError{Stored: customghash, New: params.SepoliaGenesisHash},
 			wantHash:   params.SepoliaGenesisHash,
 			wantConfig: params.SepoliaChainConfig,
 		},
@@ -114,7 +114,7 @@ func TestSetupGenesis(t *testing.T) {
 				core.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
 				return core.CommitGenesisBlock(db, core.BorMainnetGenesisBlock(), datadir.New(tmpdir), logger)
 			},
-			wantErr:    &types.GenesisMismatchError{Stored: customghash, New: params.BorMainnetGenesisHash},
+			wantErr:    &core.GenesisMismatchError{Stored: customghash, New: params.BorMainnetGenesisHash},
 			wantHash:   params.BorMainnetGenesisHash,
 			wantConfig: params.BorMainnetChainConfig,
 		},
@@ -124,7 +124,7 @@ func TestSetupGenesis(t *testing.T) {
 				core.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
 				return core.CommitGenesisBlock(db, core.AmoyGenesisBlock(), datadir.New(tmpdir), logger)
 			},
-			wantErr:    &types.GenesisMismatchError{Stored: customghash, New: params.AmoyGenesisHash},
+			wantErr:    &core.GenesisMismatchError{Stored: customghash, New: params.AmoyGenesisHash},
 			wantHash:   params.AmoyGenesisHash,
 			wantConfig: params.AmoyChainConfig,
 		},
@@ -174,7 +174,7 @@ func TestSetupGenesis(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			dirs := datadir.New(tmpdir)
-			db, _ := temporaltest.NewTestDB(t, dirs)
+			db := temporaltest.NewTestDB(t, dirs)
 			//cc := tool.ChainConfigFromDB(db)
 			freezingCfg := ethconfig.Defaults.Snapshot
 			//freezingCfg.ChainName = cc.ChainName //TODO: nil-pointer?

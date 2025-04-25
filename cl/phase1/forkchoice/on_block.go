@@ -23,12 +23,10 @@ import (
 	"sort"
 	"time"
 
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -40,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/cl/transition/impl/eth2/statechange"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethutils"
 )
 
@@ -49,7 +46,7 @@ const foreseenProposers = 16
 var ErrEIP4844DataNotAvailable = errors.New("EIP-4844 blob data is not available")
 
 func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, block *cltypes.Eth1Block, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) error {
-	expectedBlobHashes := []common.Hash{}
+	expectedBlobHashes := []libcommon.Hash{}
 	transactions, err := types.DecodeTransactions(block.Transactions.UnderlyngReference())
 	if err != nil {
 		return fmt.Errorf("unable to decode transactions: %v", err)

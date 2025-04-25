@@ -22,7 +22,6 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -32,16 +31,16 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/txnprovider/txpool"
-
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 func nonceRange(from, to int) []uint64 {
@@ -64,6 +63,10 @@ func baseIdRange(base, indexer, len int) []uint64 {
 }
 
 func TestDump(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win")
 	}
@@ -83,11 +86,11 @@ func TestDump(t *testing.T) {
 	tests := []test{
 		{
 			chainSize:   5,
-			chainConfig: params.TestChainConfig,
+			chainConfig: chain.TestChainConfig,
 		},
 		{
 			chainSize:   50,
-			chainConfig: params.TestChainConfig,
+			chainConfig: chain.TestChainConfig,
 		},
 		{
 			chainSize:   1000,
@@ -173,28 +176,28 @@ func TestDump(t *testing.T) {
 		t.Run("headers", func(t *testing.T) {
 			require := require.New(t)
 			var nonceList []uint64
-			_, err := freezeblocks.DumpHeaders(m.Ctx, m.DB, m.ChainConfig, 0, uint64(2*test.chainSize), nil, func(v []byte) error {
+			_, err := freezeblocks.DumpHeadersRaw(m.Ctx, m.DB, m.ChainConfig, 0, uint64(2*test.chainSize), nil, func(v []byte) error {
 				h := types.Header{}
 				if err := rlp.DecodeBytes(v[1:], &h); err != nil {
 					return err
 				}
 				nonceList = append(nonceList, h.Number.Uint64())
 				return nil
-			}, 1, log.LvlInfo, log.New())
+			}, 1, log.LvlInfo, log.New(), true)
 			require.NoError(err)
 			require.Equal(nonceRange(0, test.chainSize), nonceList)
 		})
 		t.Run("headers_not_from_zero", func(t *testing.T) {
 			require := require.New(t)
 			var nonceList []uint64
-			_, err := freezeblocks.DumpHeaders(m.Ctx, m.DB, m.ChainConfig, 2, uint64(test.chainSize), nil, func(v []byte) error {
+			_, err := freezeblocks.DumpHeadersRaw(m.Ctx, m.DB, m.ChainConfig, 2, uint64(test.chainSize), nil, func(v []byte) error {
 				h := types.Header{}
 				if err := rlp.DecodeBytes(v[1:], &h); err != nil {
 					return err
 				}
 				nonceList = append(nonceList, h.Number.Uint64())
 				return nil
-			}, 1, log.LvlInfo, log.New())
+			}, 1, log.LvlInfo, log.New(), true)
 			require.NoError(err)
 			require.Equal(nonceRange(2, test.chainSize-1), nonceList)
 		})
@@ -288,7 +291,7 @@ func createDumpTestKV(t *testing.T, chainConfig *chain.Config, chainSize int) *m
 	// Generate testing blocks
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{1})
-		tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), libcommon.HexToAddress("deadbeef"), uint256.NewInt(100), 21000, uint256.NewInt(uint64(int64(i+1)*params.GWei)), nil), *signer, key)
+		tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), libcommon.HexToAddress("deadbeef"), uint256.NewInt(100), 21000, uint256.NewInt(uint64(int64(i+1)*libcommon.GWei)), nil), *signer, key)
 		if txErr != nil {
 			t.Fatalf("failed to create tx: %v", txErr)
 		}

@@ -10,11 +10,11 @@ import (
 	"strings"
 
 	ethereum "github.com/erigontech/erigon"
+	"github.com/erigontech/erigon-lib/abi"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/accounts/abi"
-	"github.com/erigontech/erigon/accounts/abi/bind"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/event"
+	"github.com/erigontech/erigon/execution/abi/bind"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.

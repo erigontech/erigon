@@ -110,7 +110,7 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 	//	}
 	//}
 
-	if dt.d.AccessorList&AccessorHashMap != 0 {
+	if dt.d.AccessorList.Has(0) {
 		reader := recsplit.NewIndexReader(item.index)
 		defer reader.Close()
 
@@ -135,7 +135,7 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 		}
 		return encodeShorterKey(nil, offset), true
 	}
-	if dt.d.AccessorList&AccessorBTree != 0 {
+	if dt.d.AccessorList.Has(AccessorBTree) {
 		if item.bindex == nil {
 			dt.d.logger.Warn("[agg] commitment branch key replacement: file doesn't have index", "name", item.decompressor.FileName())
 		}
@@ -183,7 +183,7 @@ func (dt *DomainRoTx) lookupDirtyFileByItsRange(txFrom uint64, txTo uint64) *fil
 	}
 
 	if item == nil || item.bindex == nil {
-		fileStepsss := ""
+		fileStepsss := "" + dt.d.name.String() + ": "
 		for _, item := range dt.d.dirtyFiles.Items() {
 			fileStepsss += fmt.Sprintf("%d-%d;", item.startTxNum/dt.d.aggregationStep, item.endTxNum/dt.d.aggregationStep)
 		}

@@ -23,10 +23,10 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/erigontech/erigon-lib/abi"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon/accounts/abi"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 // UnpackLog unpacks log

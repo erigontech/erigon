@@ -21,13 +21,15 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/mdbx-go/mdbx"
+
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/mdbx-go/mdbx"
 )
 
 //Variables Naming:
@@ -535,6 +537,7 @@ type (
 
 type TemporalGetter interface {
 	GetLatest(name Domain, k []byte) (v []byte, step uint64, err error)
+	HasPrefix(name Domain, prefix []byte) (firstKey []byte, ok bool, err error)
 }
 type TemporalTx interface {
 	Tx
@@ -567,6 +570,26 @@ type TemporalTx interface {
 	// HistoryRange - producing "state patch" - sorted list of keys updated at [fromTs,toTs) with their most-recent value.
 	//   no duplicates
 	HistoryRange(name Domain, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error)
+
+	Debug() TemporalDebugTx
+	AggTx() any
+}
+
+// TemporalDebugTx - set of slow low-level funcs for debug purposes
+type TemporalDebugTx interface {
+	RangeLatest(domain Domain, from, to []byte, limit int) (stream.KV, error)
+	GetLatestFromDB(domain Domain, k []byte) (v []byte, step uint64, found bool, err error)
+	GetLatestFromFiles(domain Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error)
+
+	DomainFiles(domain ...Domain) VisibleFiles
+
+	GreedyPruneHistory(ctx context.Context, domain Domain) error
+	PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error)
+	TxNumsInFiles(domains ...Domain) (minTxNum uint64)
+}
+
+type TemporalDebugDB interface {
+	DomainTables(domain ...Domain) []string
 }
 
 type WithFreezeInfo interface {
@@ -574,13 +597,16 @@ type WithFreezeInfo interface {
 }
 
 type FreezeInfo interface {
-	AllFiles() []string
-	Files(domainName Domain) []string
+	AllFiles() VisibleFiles
+	Files(domainName Domain) VisibleFiles
 }
 
 type TemporalRwTx interface {
 	RwTx
 	TemporalTx
+	TemporalPutDel
+
+	Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff) error
 }
 
 type TemporalPutDel interface {
@@ -589,6 +615,7 @@ type TemporalPutDel interface {
 	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 	//   - user can append k2 into k1, then underlying methods will not preform append
 	DomainPut(domain Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error
+	//DomainPut2(domain Domain, k1 []byte, val []byte, ts uint64) error
 
 	// DomainDel
 	// Optimizations:
@@ -604,6 +631,7 @@ type TemporalRoDB interface {
 	SnapshotNotifier
 	ViewTemporal(ctx context.Context, f func(tx TemporalTx) error) error
 	BeginTemporalRo(ctx context.Context) (TemporalTx, error)
+	Debug() TemporalDebugDB
 }
 type TemporalRwDB interface {
 	RwDB

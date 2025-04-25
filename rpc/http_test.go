@@ -107,6 +107,10 @@ func TestHTTPResponseWithEmptyGet(t *testing.T) {
 
 // This checks that maxRequestContentLength is not applied to the response of a request.
 func TestHTTPRespBodyUnlimited(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	logger := log.New()
 	const respLength = maxRequestContentLength * 3
 

@@ -22,9 +22,9 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 )
 
@@ -51,5 +51,5 @@ type ExecutionEngine interface {
 	FrozenBlocks(ctx context.Context) uint64
 	HasGapInSnapshots(ctx context.Context) bool
 	// Block production
-	GetAssembledBlock(ctx context.Context, id []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *big.Int, error)
+	GetAssembledBlock(ctx context.Context, id []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *typesproto.RequestsBundle, *big.Int, error)
 }

@@ -1,17 +1,13 @@
 # Erigon
 
-Documentation: **[docs.erigon.tech](https://docs.erigon.tech)**
-Blog: **[erigon.tech/blog](https://erigon.tech/blog/)**
-X/Twitter: **[x.com/ErigonEth](https://x.com/ErigonEth)**
+[![Docs](https://img.shields.io/badge/docs-up-green)](https://docs.erigon.tech/)
+[![Blog](https://img.shields.io/badge/blog-up-green)](https://erigon.tech/blog/)
+[![Twitter](https://img.shields.io/twitter/follow/ErigonEth?style=social)](https://x.com/ErigonEth)
+[![Build status](https://github.com/erigontech/erigon/actions/workflows/ci.yml/badge.svg)](https://github.com/erigontech/erigon/actions/workflows/ci.yml)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=erigontech_erigon&metric=coverage)](https://sonarcloud.io/summary/new_code?id=erigontech_erigon)
 
 Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency
 frontier.
-
-<br>
-
-![Build status](https://github.com/erigontech/erigon/actions/workflows/ci.yml/badge.svg) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=erigontech_erigon&metric=coverage)](https://sonarcloud.io/summary/new_code?id=erigontech_erigon)
-
-<!--ts-->
 
 - [Erigon](#erigon)
 - [System Requirements](#system-requirements)
@@ -69,6 +65,7 @@ frontier.
     - [Filesystem's background features are expensive](#filesystems-background-features-are-expensive)
     - [Gnome Tracker can kill Erigon](#gnome-tracker-can-kill-erigon)
     - [the --mount option requires BuildKit error](#the---mount-option-requires-buildkit-error)
+    - [`cannot allocate memory` Erigon crashes due to kernel allocation limits](#erigon-crashes-due-to-kernel-allocation-limits)
 
 <!--te-->
 
@@ -264,7 +261,7 @@ Don't start services as separated processes unless you have clear reason for it:
 your own implementation, security.
 How to start Erigon's services as separated processes, see in [docker-compose.yml](./docker-compose.yml).
 Each service has own `./cmd/*/README.md` file.
-[Erigon Blog](https://erigon.substack.com/).
+[Erigon Blog](https://erigon.tech/blog/).
 
 ### Embedded Consensus Layer
 
@@ -357,9 +354,8 @@ anymore.
 Caplin also has an archival mode for historical states and blocks. it can be enabled through the `--caplin.archive`
 flag.
 In order to enable the caplin's Beacon API, the flag `--beacon.api=<namespaces>` must be added.
-e.g: `--beacon.api=beacon,builder,config,debug,node,validator,lighthouse` will enable all endpoints. **NOTE: Caplin is
-not staking-ready so aggregation endpoints are still to be implemented. Additionally enabling the Beacon API will lead
-to a 6 GB higher RAM usage.
+e.g: `--beacon.api=beacon,builder,config,debug,node,validator,lighthouse` will enable all endpoints. 
+Note: enabling the Beacon API will lead to a 6 GB higher RAM usage
 
 ### Multiple Instances / One Machine
 
@@ -379,7 +375,7 @@ Quote your path if it has spaces.
 
 ### Dev Chain
 
-<code> 🔬 Detailed explanation is [DEV_CHAIN](/DEV_CHAIN.md).</code>
+<code> 🔬 Detailed explanation is [DEV_CHAIN](/docs/DEV_CHAIN.md).</code>
 
 Key features
 ============
@@ -792,4 +788,14 @@ For anyone else that was getting the BuildKit error when trying to start Erigon 
 XDG_DATA_HOME=/preferred/data/folder DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
 ```
 
+### Erigon crashes due to kernel allocation limits
+
+Erigon will crash with `cannot allocate memory`.
+
+to fix this add the following to `/etc/sysctl.conf` or a .conf file in `/etc/sysctl.d/`
+
+```
+vm.overcommit_memory = 1 (it is 0 by default)
+vm.max_map_count = 8388608 (it is 1048576 by default)
+```
 ---------

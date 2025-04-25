@@ -2,7 +2,7 @@ package state
 
 import (
 	"github.com/erigontech/erigon-lib/kv"
-	ae "github.com/erigontech/erigon-lib/state/appendable_extras"
+	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 )
 
 //// relations
@@ -20,8 +20,7 @@ func (r *PointRelation) RootNum2Num(inp RootNum, tx kv.Tx) (Num, error) {
 
 //////////////////////////////////////////////
 
-// many:1; EntityEnds tbl: start RootNum -> num
-// also id == num here (only canonical data)
+// many:1; EntityEnds tbl: start RootNum -> id
 type ManyToOneRelation struct {
 	entityEndsTbl string
 }
@@ -38,7 +37,7 @@ func (r *ManyToOneRelation) RootNum2Num(inp RootNum, tx kv.Tx) (Num, error) {
 		return 0, err
 	}
 
-	return Num(ae.Decode64FromBytes(v, true)), nil
+	return Num(ee.Decode64FromBytes(v, true)), nil
 }
 
 //////////////////////////////////////////////
@@ -52,12 +51,12 @@ type OneToManyRelation struct {
 
 // returns 1st num present in the given inp RootNum
 func (r *OneToManyRelation) RootNum2Num(inp RootNum, tx kv.Tx) (Num, error) {
-	prevMaxNum, err := tx.GetOne(r.maxNumTbl, ae.EncToBytes(uint64(inp)-1, true))
+	prevMaxNum, err := tx.GetOne(r.maxNumTbl, ee.EncToBytes(uint64(inp)-1, true))
 	if err != nil {
 		return 0, err
 	}
 
-	return Num(ae.Decode64FromBytes(prevMaxNum, true) + 1), nil
+	return Num(ee.Decode64FromBytes(prevMaxNum, true) + 1), nil
 }
 
 // // 1: many; pure function

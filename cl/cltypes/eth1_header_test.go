@@ -19,11 +19,13 @@ package cltypes
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestEth1Header(t *testing.T) {
@@ -77,10 +79,10 @@ func TestEth1Header(t *testing.T) {
 
 	// Test EncodeSSZ and DecodeSSZ
 	encodedData, err := header.EncodeSSZ(nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	decodedHeader := &Eth1Header{}
 	err = decodedHeader.DecodeSSZ(encodedData, int(version))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, header, decodedHeader)
 
 	// Test EncodingSizeSSZ
@@ -90,6 +92,6 @@ func TestEth1Header(t *testing.T) {
 
 	// Test HashSSZ
 	root, err := header.HashSSZ()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, libcommon.HexToHash("0x9170a25a0980f07bcb9af2a52ff915262763e0e6a2df26aa205b967bd462a6d3"), libcommon.Hash(root))
 }

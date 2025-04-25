@@ -19,16 +19,16 @@ package gaspricecfg
 import (
 	"math/big"
 
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon-lib/common"
 )
 
-var DefaultIgnorePrice = big.NewInt(2 * params.Wei)
+var DefaultIgnorePrice = big.NewInt(2 * common.Wei)
 
 // BorDefaultGpoIgnorePrice defines the minimum gas price below which bor gpo will ignore transactions.
-var BorDefaultGpoIgnorePrice = big.NewInt(25 * params.Wei)
+var BorDefaultGpoIgnorePrice = big.NewInt(25 * common.Wei)
 
 var (
-	DefaultMaxPrice = big.NewInt(500 * params.GWei)
+	DefaultMaxPrice = big.NewInt(500 * common.GWei)
 )
 
 type Config struct {

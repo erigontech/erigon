@@ -30,7 +30,7 @@ import (
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
@@ -419,6 +419,10 @@ func (s *Service) Unwind(ctx context.Context, blockNum uint64) error {
 
 	s.lastProcessedBlockInfo.Store(&lastProcessedBlockInfo)
 	return nil
+}
+
+func (s *Service) EventsWithinTime(ctx context.Context, timeFrom, timeTo time.Time) ([]*types.Message, error) {
+	return s.reader.EventsWithinTime(ctx, timeFrom, timeTo)
 }
 
 // Events returns all sync events at blockNum
