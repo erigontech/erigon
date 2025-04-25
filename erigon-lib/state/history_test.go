@@ -53,7 +53,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	//TODO: tests will fail if set histCfg.compression = CompressKeys | CompressValues
 	salt := uint32(1)
-	cfg := Schema[kv.AccountsDomain]
+	cfg := Schema.AccountsDomain
 
 	cfg.hist.iiCfg.dirs = dirs
 	cfg.hist.iiCfg.salt = &salt
@@ -1396,12 +1396,12 @@ func TestScanStaticFilesH(t *testing.T) {
 	_, h := newTestDomain()
 
 	files := []string{
-		"v1-accounts.0-1.v",
-		"v1-accounts.1-2.v",
-		"v1-accounts.0-4.v",
-		"v1-accounts.2-3.v",
-		"v1-accounts.3-4.v",
-		"v1-accounts.4-5.v",
+		"v1.0-accounts.0-1.v",
+		"v1.0-accounts.1-2.v",
+		"v1.0-accounts.0-4.v",
+		"v1.0-accounts.2-3.v",
+		"v1.0-accounts.3-4.v",
+		"v1.0-accounts.4-5.v",
 	}
 	h.scanDirtyFiles(files)
 	require.Equal(t, 6, h.dirtyFiles.Len())

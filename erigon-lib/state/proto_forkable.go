@@ -64,7 +64,7 @@ func (a *ProtoForkable) BuildFiles(ctx context.Context, from, to RootNum, db kv.
 		}
 
 		log.Debug("freezing %s from %d to %d", a.a.Name(), calcFrom, calcTo)
-		path := a.parser.DataFile(snaptype.Version(1), calcFrom, calcTo)
+		path := a.parser.DataFile(snaptype.V1_0, calcFrom, calcTo)
 		sn, err := seg.NewCompressor(ctx, "Snapshot "+a.a.Name(), path, a.a.Dirs().Tmp, seg.DefaultCfg, log.LvlTrace, a.logger)
 		if err != nil {
 			return dirtyFiles, err

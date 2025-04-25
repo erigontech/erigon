@@ -197,3 +197,7 @@ func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx cont
 	}
 	return nil
 }
+
+func InitAccountSchemaIntegrity() {
+	Schema.AccountsDomain.crossDomainIntegrity = domainIntegrityCheck
+}

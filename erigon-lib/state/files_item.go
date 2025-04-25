@@ -177,7 +177,7 @@ func (i *filesItem) closeFilesAndRemove() {
 }
 
 func scanDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext string, logger log.Logger) (res []*filesItem) {
-	re := regexp.MustCompile("^v([0-9]+)-" + filenameBase + ".([0-9]+)-([0-9]+)." + ext + "$")
+	re := regexp.MustCompile(`^v(\d+(?:\.\d+)?)-` + filenameBase + `\.(\d+)-(\d+)\.` + ext + `$`)
 	var err error
 
 	for _, name := range fileNames {
@@ -266,9 +266,6 @@ type visibleFile struct {
 	i   int
 	src *filesItem
 }
-
-func (i *visibleFile) isSubSetOf(j *visibleFile) bool { return i.src.isProperSubsetOf(j.src) } //nolint
-func (i *visibleFile) isSubsetOf(j *visibleFile) bool { return i.src.isProperSubsetOf(j.src) } //nolint
 
 func (i visibleFile) Filename() string {
 	return i.src.decompressor.FilePath()

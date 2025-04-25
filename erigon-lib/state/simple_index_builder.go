@@ -128,7 +128,7 @@ func (s *SimpleAccessorBuilder) SetFirstEntityNumFetcher(fetcher FirstEntityNumF
 }
 
 func (s *SimpleAccessorBuilder) GetInputDataQuery(from, to RootNum) *DecompressorIndexInputDataQuery {
-	sgname := s.parser.DataFile(snaptype.Version(1), from, to)
+	sgname := s.parser.DataFile(snaptype.V1_0, from, to)
 	decomp, _ := seg.NewDecompressor(sgname)
 	return &DecompressorIndexInputDataQuery{decomp: decomp, baseDataId: uint64(s.fetcher(from, to, decomp))}
 }
@@ -149,7 +149,7 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *
 	}()
 	iidq := s.GetInputDataQuery(from, to)
 	defer iidq.Close()
-	idxFile := s.parser.AccessorIdxFile(snaptype.Version(1), from, to, s.indexPos)
+	idxFile := s.parser.AccessorIdxFile(snaptype.V1_0, from, to, s.indexPos)
 
 	keyCount := iidq.GetCount()
 	if p != nil {
