@@ -33,7 +33,6 @@ jobs:
         uses: golangci/golangci-lint-action@v7
         with:
           version: v2.1.5
-          skip-cache: true
 
       - name: Lint
         if: runner.os == 'Linux'
