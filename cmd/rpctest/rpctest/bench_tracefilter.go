@@ -22,7 +22,7 @@ import (
 	"math/rand"
 	"os"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 // Compares response of Erigon with OpenEthereum
@@ -80,7 +80,7 @@ func BenchTraceFilter(erigonURL, oeURL string, needCompare bool, blockFrom uint6
 		}
 		if res.Err == nil && mag.Error == nil {
 			accountSet := extractAccountMap(&mag)
-			accounts := make([]libcommon.Address, 0, len(accountSet))
+			accounts := make([]common.Address, 0, len(accountSet))
 			for account := range accountSet {
 				accounts = append(accounts, account)
 			}

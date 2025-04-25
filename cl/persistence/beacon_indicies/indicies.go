@@ -24,7 +24,7 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -69,11 +69,11 @@ func ReadHighestFinalized(tx kv.Tx) (uint64, error) {
 }
 
 // WriteHeaderSlot writes the slot associated with a block root.
-func WriteHeaderSlot(tx kv.RwTx, blockRoot libcommon.Hash, slot uint64) error {
+func WriteHeaderSlot(tx kv.RwTx, blockRoot common.Hash, slot uint64) error {
 	return tx.Put(kv.BlockRootToSlot, blockRoot[:], base_encoding.Encode64ToBytes4(slot))
 }
 
-func ReadBlockSlotByBlockRoot(tx kv.Tx, blockRoot libcommon.Hash) (*uint64, error) {
+func ReadBlockSlotByBlockRoot(tx kv.Tx, blockRoot common.Hash) (*uint64, error) {
 	slotBytes, err := tx.GetOne(kv.BlockRootToSlot, blockRoot[:])
 	if err != nil {
 		return nil, err
@@ -87,19 +87,19 @@ func ReadBlockSlotByBlockRoot(tx kv.Tx, blockRoot libcommon.Hash) (*uint64, erro
 }
 
 // WriteStateRoot writes the slot associated with a block root.
-func WriteStateRoot(tx kv.RwTx, blockRoot libcommon.Hash, stateRoot libcommon.Hash) error {
+func WriteStateRoot(tx kv.RwTx, blockRoot common.Hash, stateRoot common.Hash) error {
 	if err := tx.Put(kv.BlockRootToStateRoot, blockRoot[:], stateRoot[:]); err != nil {
 		return err
 	}
 	return tx.Put(kv.StateRootToBlockRoot, stateRoot[:], blockRoot[:])
 }
 
-func ReadStateRootByBlockRoot(ctx context.Context, tx kv.Tx, blockRoot libcommon.Hash) (libcommon.Hash, error) {
-	var stateRoot libcommon.Hash
+func ReadStateRootByBlockRoot(ctx context.Context, tx kv.Tx, blockRoot common.Hash) (common.Hash, error) {
+	var stateRoot common.Hash
 
 	sRoot, err := tx.GetOne(kv.BlockRootToStateRoot, blockRoot[:])
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 
 	copy(stateRoot[:], sRoot)
@@ -107,12 +107,12 @@ func ReadStateRootByBlockRoot(ctx context.Context, tx kv.Tx, blockRoot libcommon
 	return stateRoot, nil
 }
 
-func ReadBlockRootByStateRoot(tx kv.Tx, stateRoot libcommon.Hash) (libcommon.Hash, error) {
-	var blockRoot libcommon.Hash
+func ReadBlockRootByStateRoot(tx kv.Tx, stateRoot common.Hash) (common.Hash, error) {
+	var blockRoot common.Hash
 
 	bRoot, err := tx.GetOne(kv.StateRootToBlockRoot, stateRoot[:])
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 
 	copy(blockRoot[:], bRoot)
@@ -120,12 +120,12 @@ func ReadBlockRootByStateRoot(tx kv.Tx, stateRoot libcommon.Hash) (libcommon.Has
 	return blockRoot, nil
 }
 
-func ReadCanonicalBlockRoot(tx kv.Tx, slot uint64) (libcommon.Hash, error) {
-	var blockRoot libcommon.Hash
+func ReadCanonicalBlockRoot(tx kv.Tx, slot uint64) (common.Hash, error) {
+	var blockRoot common.Hash
 
 	bRoot, err := tx.GetOne(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(slot))
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 
 	copy(blockRoot[:], bRoot)
@@ -147,19 +147,19 @@ func ReadLastBeaconSnapshot(tx kv.Tx) (uint64, error) {
 	return base_encoding.Decode64FromBytes4(val), nil
 }
 
-func MarkRootCanonical(ctx context.Context, tx kv.RwTx, slot uint64, blockRoot libcommon.Hash) error {
+func MarkRootCanonical(ctx context.Context, tx kv.RwTx, slot uint64, blockRoot common.Hash) error {
 	return tx.Put(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(slot), blockRoot[:])
 }
 
-func WriteExecutionBlockNumber(tx kv.RwTx, blockRoot libcommon.Hash, blockNumber uint64) error {
+func WriteExecutionBlockNumber(tx kv.RwTx, blockRoot common.Hash, blockNumber uint64) error {
 	return tx.Put(kv.BlockRootToBlockNumber, blockRoot[:], base_encoding.Encode64ToBytes4(blockNumber))
 }
 
-func WriteExecutionBlockHash(tx kv.RwTx, blockRoot, blockHash libcommon.Hash) error {
+func WriteExecutionBlockHash(tx kv.RwTx, blockRoot, blockHash common.Hash) error {
 	return tx.Put(kv.BlockRootToBlockHash, blockRoot[:], blockHash[:])
 }
 
-func ReadExecutionBlockNumber(tx kv.Tx, blockRoot libcommon.Hash) (*uint64, error) {
+func ReadExecutionBlockNumber(tx kv.Tx, blockRoot common.Hash) (*uint64, error) {
 	val, err := tx.GetOne(kv.BlockRootToBlockNumber, blockRoot[:])
 	if err != nil {
 		return nil, err
@@ -172,15 +172,15 @@ func ReadExecutionBlockNumber(tx kv.Tx, blockRoot libcommon.Hash) (*uint64, erro
 	return ret, nil
 }
 
-func ReadExecutionBlockHash(tx kv.Tx, blockRoot libcommon.Hash) (libcommon.Hash, error) {
+func ReadExecutionBlockHash(tx kv.Tx, blockRoot common.Hash) (common.Hash, error) {
 	val, err := tx.GetOne(kv.BlockRootToBlockHash, blockRoot[:])
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 	if len(val) == 0 {
-		return libcommon.Hash{}, nil
+		return common.Hash{}, nil
 	}
-	return libcommon.BytesToHash(val), nil
+	return common.BytesToHash(val), nil
 }
 
 func WriteBeaconBlockHeader(ctx context.Context, tx kv.RwTx, signedHeader *cltypes.SignedBeaconBlockHeader) error {
@@ -224,12 +224,12 @@ func WriteBeaconBlockHeaderAndIndicies(ctx context.Context, tx kv.RwTx, signedHe
 	return nil
 }
 
-func ReadParentBlockRoot(ctx context.Context, tx kv.Tx, blockRoot libcommon.Hash) (libcommon.Hash, error) {
-	var parentRoot libcommon.Hash
+func ReadParentBlockRoot(ctx context.Context, tx kv.Tx, blockRoot common.Hash) (common.Hash, error) {
+	var parentRoot common.Hash
 
 	pRoot, err := tx.GetOne(kv.BlockRootToParentRoot, blockRoot[:])
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 
 	copy(parentRoot[:], pRoot)
@@ -237,7 +237,7 @@ func ReadParentBlockRoot(ctx context.Context, tx kv.Tx, blockRoot libcommon.Hash
 	return parentRoot, nil
 }
 
-func WriteParentBlockRoot(ctx context.Context, tx kv.RwTx, blockRoot, parentRoot libcommon.Hash) error {
+func WriteParentBlockRoot(ctx context.Context, tx kv.RwTx, blockRoot, parentRoot common.Hash) error {
 	return tx.Put(kv.BlockRootToParentRoot, blockRoot[:], parentRoot[:])
 }
 
@@ -264,14 +264,14 @@ func PruneSignedHeaders(tx kv.RwTx, from uint64) error {
 	return nil
 }
 
-func RangeBlockRoots(ctx context.Context, tx kv.Tx, fromSlot, toSlot uint64, fn func(slot uint64, beaconBlockRoot libcommon.Hash) bool) error {
+func RangeBlockRoots(ctx context.Context, tx kv.Tx, fromSlot, toSlot uint64, fn func(slot uint64, beaconBlockRoot common.Hash) bool) error {
 	cursor, err := tx.Cursor(kv.CanonicalBlockRoots)
 	if err != nil {
 		return err
 	}
 	defer cursor.Close()
 	for k, v, err := cursor.Seek(base_encoding.Encode64ToBytes4(fromSlot)); err == nil && k != nil && base_encoding.Decode64FromBytes4(k) <= toSlot; k, v, err = cursor.Next() {
-		if !fn(base_encoding.Decode64FromBytes4(k), libcommon.BytesToHash(v)) {
+		if !fn(base_encoding.Decode64FromBytes4(k), common.BytesToHash(v)) {
 			break
 		}
 	}
@@ -292,8 +292,8 @@ func PruneBlockRoots(ctx context.Context, tx kv.RwTx, fromSlot, toSlot uint64) e
 	return err
 }
 
-func ReadBeaconBlockRootsInSlotRange(ctx context.Context, tx kv.Tx, fromSlot, count uint64) ([]libcommon.Hash, []uint64, error) {
-	blockRoots := make([]libcommon.Hash, 0, count)
+func ReadBeaconBlockRootsInSlotRange(ctx context.Context, tx kv.Tx, fromSlot, count uint64) ([]common.Hash, []uint64, error) {
+	blockRoots := make([]common.Hash, 0, count)
 	slots := make([]uint64, 0, count)
 	cursor, err := tx.Cursor(kv.CanonicalBlockRoots)
 	if err != nil {
@@ -303,7 +303,7 @@ func ReadBeaconBlockRootsInSlotRange(ctx context.Context, tx kv.Tx, fromSlot, co
 	currentCount := uint64(0)
 	for k, v, err := cursor.Seek(base_encoding.Encode64ToBytes4(fromSlot)); err == nil && k != nil && currentCount != count; k, v, err = cursor.Next() {
 		currentCount++
-		blockRoots = append(blockRoots, libcommon.BytesToHash(v))
+		blockRoots = append(blockRoots, common.BytesToHash(v))
 		slots = append(slots, base_encoding.Decode64FromBytes4(k))
 	}
 	return blockRoots, slots, err
@@ -328,7 +328,7 @@ func WriteBeaconBlock(ctx context.Context, tx kv.RwTx, block *cltypes.SignedBeac
 	if err := encoder.Flush(); err != nil {
 		return err
 	}
-	if err := tx.Put(kv.BeaconBlocks, dbutils.BlockBodyKey(block.Block.Slot, blockRoot), libcommon.Copy(buf.Bytes())); err != nil {
+	if err := tx.Put(kv.BeaconBlocks, dbutils.BlockBodyKey(block.Block.Slot, blockRoot), common.Copy(buf.Bytes())); err != nil {
 		return err
 	}
 	return nil
@@ -397,7 +397,7 @@ func PruneBlocks(ctx context.Context, tx kv.RwTx, to uint64) error {
 
 }
 
-func ReadSignedHeaderByBlockRoot(ctx context.Context, tx kv.Tx, blockRoot libcommon.Hash) (*cltypes.SignedBeaconBlockHeader, bool, error) {
+func ReadSignedHeaderByBlockRoot(ctx context.Context, tx kv.Tx, blockRoot common.Hash) (*cltypes.SignedBeaconBlockHeader, bool, error) {
 	h := &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{}}
 	headerBytes, err := tx.GetOne(kv.BeaconBlockHeaders, blockRoot[:])
 	if err != nil {
@@ -416,7 +416,7 @@ func ReadSignedHeaderByBlockRoot(ctx context.Context, tx kv.Tx, blockRoot libcom
 	return h, canonical == blockRoot, nil
 }
 
-func ReadBlockRootsByParentRoot(tx kv.Tx, parentRoot libcommon.Hash) ([]libcommon.Hash, error) {
+func ReadBlockRootsByParentRoot(tx kv.Tx, parentRoot common.Hash) ([]common.Hash, error) {
 	roots, err := tx.GetOne(kv.ParentRootToBlockRoots, parentRoot[:])
 	if err != nil {
 		return nil, err
@@ -424,16 +424,16 @@ func ReadBlockRootsByParentRoot(tx kv.Tx, parentRoot libcommon.Hash) ([]libcommo
 	if len(roots) == 0 {
 		return nil, nil
 	}
-	blockRoots := make([]libcommon.Hash, 0, len(roots)/32)
+	blockRoots := make([]common.Hash, 0, len(roots)/32)
 	for i := 0; i < len(roots); i += 32 {
-		var blockRoot libcommon.Hash
+		var blockRoot common.Hash
 		copy(blockRoot[:], roots[i:i+32])
 		blockRoots = append(blockRoots, blockRoot)
 	}
 	return blockRoots, nil
 }
 
-func AddBlockRootToParentRootsIndex(tx kv.RwTx, parentRoot, blockRoot libcommon.Hash) error {
+func AddBlockRootToParentRootsIndex(tx kv.RwTx, parentRoot, blockRoot common.Hash) error {
 	roots, err := tx.GetOne(kv.ParentRootToBlockRoots, parentRoot[:])
 	if err != nil {
 		return err
@@ -445,6 +445,6 @@ func AddBlockRootToParentRootsIndex(tx kv.RwTx, parentRoot, blockRoot libcommon.
 		}
 	}
 
-	roots = append(libcommon.Copy(roots), blockRoot[:]...)
+	roots = append(common.Copy(roots), blockRoot[:]...)
 	return tx.Put(kv.ParentRootToBlockRoots, parentRoot[:], roots)
 }

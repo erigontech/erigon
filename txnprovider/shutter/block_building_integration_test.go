@@ -22,26 +22,22 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"os"
 	"path"
-	"runtime"
-	"runtime/pprof"
 	"testing"
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
 	params2 "github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/node"
@@ -136,24 +132,8 @@ func TestShutterBlockBuilding(t *testing.T) {
 		t.Skip()
 	}
 
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please")
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-
-	go func() {
-		// do a goroutine dump if we haven't finished in a long time
-		err := libcommon.Sleep(ctx, 2*time.Minute)
-		if err != nil {
-			// means we've finished before sleep time - no need for a pprof dump
-			return
-		}
-
-		err = pprof.Lookup("goroutine").WriteTo(os.Stdout, 1)
-		require.NoError(t, err)
-	}()
 
 	uni := initBlockBuildingUniverse(ctx, t)
 	sender1 := uni.acc1PrivKey
@@ -298,15 +278,15 @@ type blockBuildingUniverse struct {
 	contractsDeployer    testhelpers.ContractsDeployer
 	contractsDeployment  testhelpers.ContractsDeployment
 	acc1PrivKey          *ecdsa.PrivateKey
-	acc1                 libcommon.Address
+	acc1                 common.Address
 	acc2PrivKey          *ecdsa.PrivateKey
-	acc2                 libcommon.Address
+	acc2                 common.Address
 	acc3PrivKey          *ecdsa.PrivateKey
-	acc3                 libcommon.Address
+	acc3                 common.Address
 	acc4PrivKey          *ecdsa.PrivateKey
-	acc4                 libcommon.Address
+	acc4                 common.Address
 	acc5PrivKey          *ecdsa.PrivateKey
-	acc5                 libcommon.Address
+	acc5                 common.Address
 	transactor           testhelpers.EncryptedTransactor
 	txnInclusionVerifier testhelpers.TxnInclusionVerifier
 	shutterConfig        shuttercfg.Config

@@ -24,7 +24,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	shuttercrypto "github.com/erigontech/erigon/txnprovider/shutter/internal/crypto"
@@ -41,7 +41,7 @@ type EonKeyGeneration struct {
 }
 
 func (ekg EonKeyGeneration) Eon() shutter.Eon {
-	members := make([]libcommon.Address, len(ekg.Keypers))
+	members := make([]common.Address, len(ekg.Keypers))
 	for i, keyper := range ekg.Keypers {
 		members[i] = keyper.Address()
 	}
@@ -83,8 +83,8 @@ func (ekg EonKeyGeneration) EpochSecretKey(signers []Keyper, ip *shutter.Identit
 	return shuttercrypto.ComputeEpochSecretKey(keyperIndices, epochSecretKeyShares, ekg.Threshold)
 }
 
-func (ekg EonKeyGeneration) Members() []libcommon.Address {
-	members := make([]libcommon.Address, len(ekg.Keypers))
+func (ekg EonKeyGeneration) Members() []common.Address {
+	members := make([]common.Address, len(ekg.Keypers))
 	for i, keyper := range ekg.Keypers {
 		members[i] = keyper.Address()
 	}
@@ -102,7 +102,7 @@ func (k Keyper) PublicKey() ecdsa.PublicKey {
 	return k.PrivateKey.PublicKey
 }
 
-func (k Keyper) Address() libcommon.Address {
+func (k Keyper) Address() common.Address {
 	return crypto.PubkeyToAddress(k.PublicKey())
 }
 

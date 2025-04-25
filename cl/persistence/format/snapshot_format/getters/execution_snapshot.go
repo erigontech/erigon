@@ -21,13 +21,13 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
@@ -48,7 +48,7 @@ func (r *ExecutionSnapshotReader) SetBeaconChainConfig(beaconCfg *clparams.Beaco
 	r.beaconCfg = beaconCfg
 }
 
-func (r *ExecutionSnapshotReader) Transactions(number uint64, hash libcommon.Hash) (*solid.TransactionsSSZ, error) {
+func (r *ExecutionSnapshotReader) Transactions(number uint64, hash common.Hash) (*solid.TransactionsSSZ, error) {
 	tx, err := r.db.BeginRo(r.ctx)
 	if err != nil {
 		return nil, err
@@ -100,7 +100,7 @@ func convertWithdrawalsToBytesSSZ(ws []*types.Withdrawal) []byte {
 	return ret
 }
 
-func (r *ExecutionSnapshotReader) Withdrawals(number uint64, hash libcommon.Hash) (*solid.ListSSZ[*cltypes.Withdrawal], error) {
+func (r *ExecutionSnapshotReader) Withdrawals(number uint64, hash common.Hash) (*solid.ListSSZ[*cltypes.Withdrawal], error) {
 	tx, err := r.db.BeginRo(r.ctx)
 	if err != nil {
 		return nil, err

@@ -10,7 +10,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/stretchr/testify/require"
 )
 

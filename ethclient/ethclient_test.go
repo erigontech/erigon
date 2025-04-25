@@ -35,10 +35,10 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/node"
@@ -101,7 +101,7 @@ func getChainConfig() *chain.Config {
 	chainConfig.TerminalTotalDifficulty = big.NewInt(0)
 	chainConfig.ShanghaiTime = big.NewInt(0)
 	chainConfig.CancunTime = big.NewInt(0)
-	chainConfig.PragueTime = big.NewInt(0)
+	chainConfig.PragueTime = nil
 	return &chainConfig
 }
 
@@ -164,6 +164,7 @@ func newTestBackend(t *testing.T) (*eth.Ethereum, *core.ChainPack, error) {
 
 	chainConfig := getChainConfig()
 	genesis := core.ChiadoGenesisBlock()
+
 	// genesis.Timestamp = uint64(time.Now().Unix() - 1)
 	genesis.Timestamp = 1743777048
 	genesis.Config = chainConfig

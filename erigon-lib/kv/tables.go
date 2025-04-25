@@ -99,8 +99,6 @@ const (
 	EthTx    = "BlockTransaction" // tx_id_u64 -> rlp(tx)
 	MaxTxNum = "MaxTxNum"         // block_number_u64 -> max_tx_num_in_block_u64
 
-	ReceiptsCache = "ReceiptCache" // block_num_u64 + block_hash + txn_index_u32 -> rlp(receipt)
-
 	TxLookup = "BlockTransactionLookup" // hash -> transaction/receipt lookup metadata
 
 	ConfigTable = "Config" // config prefix for the db
@@ -188,6 +186,11 @@ const (
 	TblReceiptHistoryKeys = "ReceiptHistoryKeys"
 	TblReceiptHistoryVals = "ReceiptHistoryVals"
 	TblReceiptIdx         = "ReceiptIdx"
+
+	TblRCacheVals        = "ReceiptCacheVals"
+	TblRCacheHistoryKeys = "ReceiptCacheHistoryKeys"
+	TblRCacheHistoryVals = "ReceiptCacheHistoryVals"
+	TblRCacheIdx         = "ReceiptCacheIdx"
 
 	TblLogAddressKeys = "LogAddressKeys"
 	TblLogAddressIdx  = "LogAddressIdx"
@@ -328,7 +331,6 @@ var ChaindataTables = []string{
 	HeaderNumber,
 	BadHeaderNumber,
 	BlockBody,
-	ReceiptsCache,
 	TxLookup,
 	ConfigTable,
 	DatabaseInfo,
@@ -387,6 +389,11 @@ var ChaindataTables = []string{
 	TblReceiptHistoryKeys,
 	TblReceiptHistoryVals,
 	TblReceiptIdx,
+
+	TblRCacheVals,
+	TblRCacheHistoryKeys,
+	TblRCacheHistoryVals,
+	TblRCacheIdx,
 
 	TblLogAddressKeys,
 	TblLogAddressIdx,
@@ -549,32 +556,41 @@ var ChaindataTablesCfg = TableCfg{
 		DupToLen:                  28,
 	},
 
-	TblAccountVals:           {Flags: DupSort},
-	TblAccountHistoryKeys:    {Flags: DupSort},
-	TblAccountHistoryVals:    {Flags: DupSort},
-	TblAccountIdx:            {Flags: DupSort},
-	TblStorageVals:           {Flags: DupSort},
-	TblStorageHistoryKeys:    {Flags: DupSort},
-	TblStorageHistoryVals:    {Flags: DupSort},
-	TblStorageIdx:            {Flags: DupSort},
-	TblCodeHistoryKeys:       {Flags: DupSort},
-	TblCodeIdx:               {Flags: DupSort},
+	TblAccountVals:        {Flags: DupSort},
+	TblAccountHistoryKeys: {Flags: DupSort},
+	TblAccountHistoryVals: {Flags: DupSort},
+	TblAccountIdx:         {Flags: DupSort},
+
+	TblStorageVals:        {Flags: DupSort},
+	TblStorageHistoryKeys: {Flags: DupSort},
+	TblStorageHistoryVals: {Flags: DupSort},
+	TblStorageIdx:         {Flags: DupSort},
+
+	TblCodeHistoryKeys: {Flags: DupSort},
+	TblCodeIdx:         {Flags: DupSort},
+
 	TblCommitmentVals:        {Flags: DupSort},
 	TblCommitmentHistoryKeys: {Flags: DupSort},
 	TblCommitmentHistoryVals: {Flags: DupSort},
 	TblCommitmentIdx:         {Flags: DupSort},
-	TblReceiptVals:           {Flags: DupSort},
-	TblReceiptHistoryKeys:    {Flags: DupSort},
-	TblReceiptHistoryVals:    {Flags: DupSort},
-	TblReceiptIdx:            {Flags: DupSort},
-	TblLogAddressKeys:        {Flags: DupSort},
-	TblLogAddressIdx:         {Flags: DupSort},
-	TblLogTopicsKeys:         {Flags: DupSort},
-	TblLogTopicsIdx:          {Flags: DupSort},
-	TblTracesFromKeys:        {Flags: DupSort},
-	TblTracesFromIdx:         {Flags: DupSort},
-	TblTracesToKeys:          {Flags: DupSort},
-	TblTracesToIdx:           {Flags: DupSort},
+
+	TblReceiptVals:        {Flags: DupSort},
+	TblReceiptHistoryKeys: {Flags: DupSort},
+	TblReceiptHistoryVals: {Flags: DupSort},
+	TblReceiptIdx:         {Flags: DupSort},
+
+	TblRCacheHistoryKeys: {Flags: DupSort},
+	TblRCacheIdx:         {Flags: DupSort},
+
+	TblLogAddressKeys: {Flags: DupSort},
+	TblLogAddressIdx:  {Flags: DupSort},
+	TblLogTopicsKeys:  {Flags: DupSort},
+	TblLogTopicsIdx:   {Flags: DupSort},
+
+	TblTracesFromKeys: {Flags: DupSort},
+	TblTracesFromIdx:  {Flags: DupSort},
+	TblTracesToKeys:   {Flags: DupSort},
+	TblTracesToIdx:    {Flags: DupSort},
 }
 
 var AuRaTablesCfg = TableCfg{
@@ -731,12 +747,13 @@ func reinit() {
 // Temporal
 
 const (
-	AccountsDomain   Domain = 0
-	StorageDomain    Domain = 1
-	CodeDomain       Domain = 2
-	CommitmentDomain Domain = 3
-	ReceiptDomain    Domain = 4
-	DomainLen        Domain = 5
+	AccountsDomain   Domain = 0 // Eth Accounts
+	StorageDomain    Domain = 1 // Eth Account's Storage
+	CodeDomain       Domain = 2 // Eth Smart-Contract Code
+	CommitmentDomain Domain = 3 // Merkle Trie
+	ReceiptDomain    Domain = 4 // Tiny Receipts - without logs. Required for node-operations.
+	RCacheDomain     Domain = 5 // Fat Receipts - with logs. Optional.
+	DomainLen        Domain = 6 // Technical marker of Enum. Not real Domain.
 )
 
 var StateDomains = []Domain{AccountsDomain, StorageDomain, CodeDomain, CommitmentDomain}
@@ -747,6 +764,7 @@ const (
 	CodeHistoryIdx       InvertedIdx = "CodeHistoryIdx"
 	CommitmentHistoryIdx InvertedIdx = "CommitmentHistoryIdx"
 	ReceiptHistoryIdx    InvertedIdx = "ReceiptHistoryIdx"
+	RCacheHistoryIdx     InvertedIdx = "ReceiptCacheHistoryIdx"
 
 	LogTopicIdx   InvertedIdx = "LogTopicIdx"
 	LogAddrIdx    InvertedIdx = "LogAddrIdx"
@@ -771,6 +789,8 @@ func (d Domain) String() string {
 		return "commitment"
 	case ReceiptDomain:
 		return "receipt"
+	case RCacheDomain:
+		return "rcache"
 	default:
 		return "unknown domain"
 	}
@@ -788,6 +808,8 @@ func String2Domain(in string) (Domain, error) {
 		return CommitmentDomain, nil
 	case "receipt":
 		return ReceiptDomain, nil
+	case "rcache":
+		return RCacheDomain, nil
 	default:
 		return Domain(MaxUint16), fmt.Errorf("unknown history name: %s", in)
 	}

@@ -6,7 +6,7 @@ import (
 
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/erigon-db/rawdb"
 )
 
 // TaikoAPIBackend handles L2 node related RPC calls.

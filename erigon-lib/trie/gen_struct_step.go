@@ -24,8 +24,7 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlphacks"
 )
 
@@ -82,7 +81,7 @@ type GenStructStepLeafData struct {
 func (GenStructStepLeafData) GenStructStepData() {}
 
 type GenStructStepHashData struct {
-	Hash    libcommon.Hash
+	Hash    common.Hash
 	HasTree bool
 }
 
