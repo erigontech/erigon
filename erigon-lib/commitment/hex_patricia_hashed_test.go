@@ -268,6 +268,7 @@ func Test_Trie_CorrectSwitchForConcurrentAndSequential(t *testing.T) {
 	_, err = hph.Process(ctx, toProcess, "")
 	require.NoError(t, err)
 
+	ms.SetConcurrentCommitment(true)
 	paratrie := NewConcurrentPatriciaHashed(hph, ms)
 	canParallel, err := paratrie.CanDoConcurrentNext()
 	require.NoError(t, err)
@@ -328,6 +329,7 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 		keyLen := 20
 		trieSequential := NewHexPatriciaHashed(keyLen, stateSeq)
 
+		stateBatch.SetConcurrentCommitment(true)
 		trieBatchR := NewHexPatriciaHashed(keyLen, stateBatch)
 		trieBatch := NewConcurrentPatriciaHashed(trieBatchR, stateBatch)
 
@@ -545,6 +547,7 @@ func Test_ParallelHexPatriciaHashed_EdgeCases(t *testing.T) {
 
 	trieSequential := NewHexPatriciaHashed(length.Addr, stateSeq)
 
+	stateBatch.SetConcurrentCommitment(true)
 	trieBatchR := NewHexPatriciaHashed(length.Addr, stateBatch)
 	trieBatch := NewConcurrentPatriciaHashed(trieBatchR, stateBatch)
 
@@ -1468,6 +1471,7 @@ func Test_ParallelHexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMidd
 
 		//updsTwo.Close()
 		fmt.Printf("\n2. Trie parallel update (%d updates)\n", len(updates))
+		stateBatch.SetConcurrentCommitment(true)
 		trieBatch := NewConcurrentPatriciaHashed(batch, stateBatch)
 		updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:somewhere+1], updates[:somewhere+1])
 
