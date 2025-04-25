@@ -55,11 +55,11 @@ var (
 
 // field type overrides for abi upacking
 type depositUnpacking struct {
-	Pubkey                []byte
-	WithdrawalCredentials []byte
-	Amount                []byte
-	Signature             []byte
-	Index                 []byte
+	Pubkey                [BLSPubKeyLen]byte
+	WithdrawalCredentials [WithdrawalCredentialsLen]byte
+	Amount                [8]byte
+	Signature             [BLSSigLen]byte
+	Index                 [8]byte
 }
 
 // unpackDepositLog unpacks a serialized DepositEvent.
@@ -68,12 +68,15 @@ func unpackDepositLog(data []byte) ([]byte, error) {
 	if err := DepositABI.UnpackIntoInterface(&du, "DepositEvent", data); err != nil {
 		return nil, err
 	}
+	if len(data) != 576 {
+		log.Warn("Spiderman len not eq 576 for deposit data")
+	}
 	reqData := make([]byte, 0, types.DepositRequestDataLen)
-	reqData = append(reqData, du.Pubkey...)
-	reqData = append(reqData, du.WithdrawalCredentials...)
-	reqData = append(reqData, du.Amount...)
-	reqData = append(reqData, du.Signature...)
-	reqData = append(reqData, du.Index...)
+	reqData = append(reqData, du.Pubkey[:]...)
+	reqData = append(reqData, du.WithdrawalCredentials[:]...)
+	reqData = append(reqData, du.Amount[:]...)
+	reqData = append(reqData, du.Signature[:]...)
+	reqData = append(reqData, du.Index[:]...)
 
 	return reqData, nil
 }
