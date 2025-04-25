@@ -54,7 +54,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core"
@@ -888,9 +887,6 @@ func (ms *MockSentry) NewHistoryStateReader(blockNum uint64, tx kv.TemporalTx) s
 
 func (ms *MockSentry) NewStateReader(tx kv.Tx) state.StateReader {
 	return state.NewReaderV3(tx.(kv.TemporalGetter))
-}
-func (ms *MockSentry) HistoryV3Components() *libstate.Aggregator {
-	return ms.agg
 }
 
 func (ms *MockSentry) BlocksIO() (services.FullBlockReader, *blockio.BlockWriter) {
