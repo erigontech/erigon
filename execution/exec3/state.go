@@ -274,7 +274,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 	default:
 		// CHANGE(taiko): mark the first transaction as anchor transaction.
 		if txTask.Config.Taiko && txTask.TxIndex == 0 {
-			if err := txTask.Txs[0].MarkAsAnchor(); err != nil {
+			if err := txTask.Tx.MarkAsAnchor(); err != nil {
 				panic(err)
 			}
 		}

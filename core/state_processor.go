@@ -49,6 +49,11 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 		return nil, nil, err
 	}
 	msg.SetCheckNonce(!cfg.StatelessExec)
+	// CHANGE(taiko): decode the basefeeSharingPctg config from the extradata, and
+	// add it to the Message, if its an ontake block.
+	if config.IsOntake(header.Number.Uint64()) {
+		msg.BasefeeSharingPctg = DecodeOntakeExtraData(header.Extra)
+	}
 
 	if cfg.Tracer != nil {
 		if cfg.Tracer.OnTxStart != nil {
