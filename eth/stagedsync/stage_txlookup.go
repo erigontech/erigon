@@ -31,10 +31,10 @@ import (
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
+	borrawdb "github.com/erigontech/erigon/polygon/rawdb"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
@@ -182,7 +182,7 @@ func borTxnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint
 		blockNumBytes := bigNum.SetUint64(blocknum).Bytes()
 
 		// we add state sync transactions every bor Sprint amount of blocks
-		if cfg.borConfig.IsSprintStart(blocknum) && rawdb.HasBorReceipts(tx, blocknum) {
+		if cfg.borConfig.IsSprintStart(blocknum) && borrawdb.HasBorReceipts(tx, blocknum) {
 			txnHash := bortypes.ComputeBorTxHash(blocknum, blockHash)
 			if err := next(k, txnHash.Bytes(), blockNumBytes); err != nil {
 				return err
