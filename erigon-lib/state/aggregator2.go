@@ -96,6 +96,8 @@ func (s *SchemaGen) GetDomainCfg(name kv.Domain) domainCfg {
 		return s.CommitmentDomain
 	case kv.ReceiptDomain:
 		return s.ReceiptDomain
+	case kv.RCacheDomain:
+		return s.RCacheDomain
 	default:
 		return domainCfg{}
 	}
