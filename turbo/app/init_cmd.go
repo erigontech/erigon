@@ -20,19 +20,17 @@ import (
 	"encoding/json"
 	"os"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
-
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/turbo/debug"
-
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/node"
+	"github.com/erigontech/erigon/turbo/debug"
 )
 
 var initCommand = cli.Command{

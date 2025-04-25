@@ -28,9 +28,9 @@ import (
 	"github.com/erigontech/erigon-lib/chain/params"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/aura"
@@ -201,11 +201,17 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		if depositReqs != nil {
 			rs = append(rs, *depositReqs)
 		}
-		withdrawalReq := misc.DequeueWithdrawalRequests7002(syscall)
+		withdrawalReq, err := misc.DequeueWithdrawalRequests7002(syscall, state)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 		if withdrawalReq != nil {
 			rs = append(rs, *withdrawalReq)
 		}
-		consolidations := misc.DequeueConsolidationRequests7251(syscall)
+		consolidations, err := misc.DequeueConsolidationRequests7251(syscall, state)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 		if consolidations != nil {
 			rs = append(rs, *consolidations)
 		}

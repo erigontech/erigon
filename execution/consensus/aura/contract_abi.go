@@ -22,8 +22,8 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-lib/abi"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/aura/contracts"
 )

@@ -78,6 +78,8 @@ func TestDeriveSha(t *testing.T) {
 }
 
 func checkDeriveSha(t *testing.T, list DerivableList) {
+	t.Helper()
+
 	legacySha := legacyDeriveSha(list)
 	deriveSha := DeriveSha(list)
 	if !hashesEqual(legacySha, deriveSha) {

@@ -47,15 +47,29 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/erigon-db/rawdb"
 	params2 "github.com/erigontech/erigon/params"
 )
 
 //go:embed allocs
 var allocs embed.FS
+
+// GenesisMismatchError is raised when trying to overwrite an existing
+// genesis block with an incompatible one.
+type GenesisMismatchError struct {
+	Stored, New libcommon.Hash
+}
+
+func (e *GenesisMismatchError) Error() string {
+	config := params2.ChainConfigByGenesisHash(e.Stored)
+	if config == nil {
+		return fmt.Sprintf("database contains incompatible genesis (have %x, new %x)", e.Stored, e.New)
+	}
+	return fmt.Sprintf("database contains incompatible genesis (try with --chain=%s)", config.ChainName)
+}
 
 // CommitGenesisBlock writes or updates the genesis block in db.
 // The block that will be used is:
@@ -89,6 +103,19 @@ func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, override
 		return c, b, err
 	}
 	return c, b, nil
+}
+
+func configOrDefault(g *types.Genesis, genesisHash libcommon.Hash) *chain.Config {
+	if g != nil {
+		return g.Config
+	}
+
+	config := params2.ChainConfigByGenesisHash(genesisHash)
+	if config != nil {
+		return config
+	} else {
+		return params2.AllProtocolChanges
+	}
 }
 
 func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *big.Int, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
@@ -138,7 +165,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *b
 		}
 		hash := block.Hash()
 		if hash != storedHash {
-			return genesis.Config, block, &types.GenesisMismatchError{Stored: storedHash, New: hash}
+			return genesis.Config, block, &GenesisMismatchError{Stored: storedHash, New: hash}
 		}
 	}
 	number := rawdb.ReadHeaderNumber(tx, storedHash)
@@ -150,7 +177,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *b
 		}
 	}
 	// Get the existing chain configuration.
-	newCfg := genesis.ConfigOrDefault(storedHash)
+	newCfg := configOrDefault(genesis, storedHash)
 	applyOverrides(newCfg)
 	if err := newCfg.CheckConfigForkOrder(); err != nil {
 		return newCfg, nil, err

@@ -20,6 +20,7 @@
 package types
 
 import (
+	"errors"
 	"math/big"
 	"testing"
 
@@ -155,7 +156,7 @@ func TestChainId(t *testing.T) {
 	}
 
 	_, err = txn.Sender(*LatestSignerForChainID(big.NewInt(2)))
-	if err != ErrInvalidChainId {
+	if !errors.Is(err, ErrInvalidChainId) {
 		t.Error("expected error:", ErrInvalidChainId)
 	}
 

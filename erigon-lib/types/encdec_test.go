@@ -423,12 +423,16 @@ func isEqualBytes(a, b []byte) bool {
 }
 
 func check(t *testing.T, f string, want, got interface{}) {
+	t.Helper()
+
 	if !reflect.DeepEqual(want, got) {
 		t.Errorf("%s mismatch: want %v, got %v", f, want, got)
 	}
 }
 
 func checkHeaders(t *testing.T, a, b *Header) {
+	t.Helper()
+
 	check(t, "Header.ParentHash", a.ParentHash, b.ParentHash)
 	check(t, "Header.UncleHash", a.UncleHash, b.UncleHash)
 	check(t, "Header.Coinbase", a.Coinbase, b.Coinbase)
@@ -452,6 +456,8 @@ func checkHeaders(t *testing.T, a, b *Header) {
 }
 
 func checkWithdrawals(t *testing.T, a, b *Withdrawal) {
+	t.Helper()
+
 	check(t, "Withdrawal.Index", a.Index, b.Index)
 	check(t, "Withdrawal.Validator", a.Validator, b.Validator)
 	check(t, "Withdrawal.Address", a.Address, b.Address)
@@ -459,6 +465,8 @@ func checkWithdrawals(t *testing.T, a, b *Withdrawal) {
 }
 
 func compareTransactions(t *testing.T, a, b Transaction) {
+	t.Helper()
+
 	v1, r1, s1 := a.RawSignatureValues()
 	v2, r2, s2 := b.RawSignatureValues()
 	check(t, "Tx.Type", a.Type(), b.Type())
@@ -479,6 +487,8 @@ func compareTransactions(t *testing.T, a, b Transaction) {
 }
 
 func compareHeaders(t *testing.T, a, b []*Header) error {
+	t.Helper()
+
 	auLen, buLen := len(a), len(b)
 	if auLen != buLen {
 		return fmt.Errorf("uncles len mismatch: expected: %v, got: %v", auLen, buLen)
@@ -491,6 +501,8 @@ func compareHeaders(t *testing.T, a, b []*Header) error {
 }
 
 func compareWithdrawals(t *testing.T, a, b []*Withdrawal) error {
+	t.Helper()
+
 	awLen, bwLen := len(a), len(b)
 	if awLen != bwLen {
 		return fmt.Errorf("withdrawals len mismatch: expected: %v, got: %v", awLen, bwLen)
@@ -503,6 +515,7 @@ func compareWithdrawals(t *testing.T, a, b []*Withdrawal) error {
 }
 
 func compareRawBodies(t *testing.T, a, b *RawBody) error {
+	t.Helper()
 
 	atLen, btLen := len(a.Transactions), len(b.Transactions)
 	if atLen != btLen {
@@ -521,6 +534,7 @@ func compareRawBodies(t *testing.T, a, b *RawBody) error {
 }
 
 func compareBodies(t *testing.T, a, b *Body) error {
+	t.Helper()
 
 	atLen, btLen := len(a.Transactions), len(b.Transactions)
 	if atLen != btLen {

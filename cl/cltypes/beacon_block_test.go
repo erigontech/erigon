@@ -28,9 +28,9 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain/networkid"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/core/types"
 )
 
 //go:embed testdata/block_test_gnosis_deneb.json

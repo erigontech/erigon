@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	types2 "github.com/erigontech/erigon/core/types"
+	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/erigon-db/rawdb"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
