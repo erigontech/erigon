@@ -504,9 +504,8 @@ type DomainBufferedWriter struct {
 	largeVals bool
 
 	stepBytes [8]byte // current inverted step representation
-	step      uint64
-	aux       []byte // auxilary buffer for key1 + key2
-	aux2      []byte // auxilary buffer for step + val
+	aux       []byte  // auxilary buffer for key1 + key2
+	aux2      []byte  // auxilary buffer for step + val
 	diff      *kv.DomainDiff
 
 	h *historyBufferedWriter
