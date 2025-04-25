@@ -306,7 +306,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 
 	allSnapshots := freezeblocks.NewRoSnapshots(cfg.Snapshot, dirs.Snap, 0, logger)
 	allBorSnapshots := heimdall.NewRoSnapshots(cfg.Snapshot, dirs.Snap, 0, logger)
-	erigonGrpcServer := remotedbserver.NewKvServer(ctx, db, allSnapshots, allBorSnapshots, agg, logger)
+	erigonGrpcServer := remotedbserver.NewKvServer(ctx, db, allSnapshots, allBorSnapshots, nil, logger)
 
 	bridgeStore := bridge.NewSnapshotStore(bridge.NewDbStore(db), allBorSnapshots, gspec.Config.Bor)
 	heimdallStore := heimdall.NewSnapshotStore(heimdall.NewDbStore(db), allBorSnapshots)
