@@ -28,21 +28,21 @@ linters:
   disable:
     - testifylint #TODO: enable me
     - staticcheck #TODO: enable me
+    - errchkjson #TODO: enable me
+    - makezero #TODO: enable me
+    - noctx #TODO: enable me
+    - errorlint #TODO: enable me
+    - unused #TODO: enable me
     - contextcheck
     - err113
-    - errchkjson
-    - errorlint
     - exhaustive
     - gocheckcompilerdirectives
     - gosec
-    - makezero
     - musttag
     - nilerr
-    - noctx
     - protogetter
     - recvcheck
     - unparam
-    - unused
     - wrapcheck
   settings:
     goconst:
