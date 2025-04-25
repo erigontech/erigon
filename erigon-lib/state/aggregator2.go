@@ -77,7 +77,7 @@ type SchemaGen struct {
 	CodeDomain       domainCfg
 	CommitmentDomain domainCfg
 	ReceiptDomain    domainCfg
-	RCacheDomain domainCfg
+	RCacheDomain     domainCfg
 	LogAddrIdx       iiCfg
 	LogTopicIdx      iiCfg
 	TracesFromIdx    iiCfg
@@ -300,18 +300,10 @@ var HistoryCompressCfg = seg.Cfg{
 	Workers:              1,
 }
 
-func EnableHistoricalCommitment() {
-	cfg := Schema[kv.CommitmentDomain]
-	cfg.hist.historyDisabled = false
-	cfg.hist.snapshotsDisabled = false
-	Schema[kv.CommitmentDomain] = cfg
-}
 func EnableHistoricalRCache() {
-	cfg := Schema[kv.RCacheDomain]
+	cfg := Schema.RCacheDomain
 	cfg.hist.iiCfg.disable = false
 	cfg.hist.historyDisabled = false
 	cfg.hist.snapshotsDisabled = false
-	Schema[kv.RCacheDomain] = cfg
+	Schema.RCacheDomain = cfg
 }
-
-var ExperimentalConcurrentCommitment = false // set true to use concurrent commitment by default
