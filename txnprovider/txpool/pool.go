@@ -1604,7 +1604,7 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 		if err != nil {
 			return announcements, discardReasons, err
 		}
-		p.onSenderStateChange(senderID, nonce, balance, blockGasLimit, logger)
+		p.onSenderStateChange(senderID, nonce, balance, blockGasLimit, logger) collect info
 	}
 
 	p.promote(pendingBaseFee, pendingBlobFee, &announcements, logger)
