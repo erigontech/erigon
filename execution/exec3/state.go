@@ -21,9 +21,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/rlp"
 	"math/big"
 	"sync"
+
+	"github.com/erigontech/erigon-lib/rlp"
 
 	"golang.org/x/sync/errgroup"
 
@@ -37,17 +38,13 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/erigontech/erigon/turbo/services"
@@ -272,7 +269,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 				return
 			}
 
-			cursor, err := silkwormMemDBTx.Cursor(kv.Receipts)
+			cursor, err := silkwormMemDBTx.Cursor(kv.TblReceiptVals)
 
 			if err != nil {
 				panic(err)
@@ -383,8 +380,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			}
 		}
 
-			fmt.Println(" UsedGas", txTask.UsedGas, "UsedBlobGas", txTask.UsedBlobGas)
-		}
+		fmt.Println(" UsedGas", txTask.UsedGas, "UsedBlobGas", txTask.UsedBlobGas)
 	}
 
 	// Prepare read set, write set and balanceIncrease set and send for serialisation

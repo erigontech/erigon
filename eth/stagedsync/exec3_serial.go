@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"os"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core"

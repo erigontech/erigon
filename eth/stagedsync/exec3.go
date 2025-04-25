@@ -261,7 +261,7 @@ func ExecV3(ctx context.Context,
 		doms = txc.Doms
 	} else {
 		var err error
-		temporalTx, ok := applyTx.(kv.TemporalTx)
+		temporalTx, ok := applyTx.(kv.TemporalRwTx)
 		if !ok {
 			return errors.New("applyTx is not a temporal transaction")
 		}

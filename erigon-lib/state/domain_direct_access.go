@@ -16,7 +16,7 @@ type DirectAccessDomains struct {
 	lastTouchedTxNum uint64
 }
 
-func NewDirectAccessDomains(tx kv.RwTx, logger log.Logger) (*DirectAccessDomains, error) {
+func NewDirectAccessDomains(tx kv.TemporalRwTx, logger log.Logger) (*DirectAccessDomains, error) {
 	sd, _ := NewSharedDomains(tx, logger)
 	dad := &DirectAccessDomains{
 		BufferedSharedDomains: *sd,
@@ -41,7 +41,7 @@ func (sd *DirectAccessDomains) GetLatest(domain kv.Domain, k []byte) (v []byte, 
 	if domain != kv.AccountsDomain && domain != kv.CodeDomain && domain != kv.StorageDomain {
 		return sd.BufferedSharedDomains.GetLatest(domain, k)
 	}
-	v, step, _, err = sd.aggTx.GetLatest(domain, k, sd.roTx)
+	v, step, _, err = sd.AggTx().GetLatest(domain, k, sd.roTx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
@@ -73,24 +73,24 @@ func (sd *DirectAccessDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, p
 
 func (sd *DirectAccessDomains) updateHistory(k1 []byte, k2 []byte, val []byte, domain kv.Domain) error {
 	var histStepPrefix [8]byte
-	binary.BigEndian.PutUint64(histStepPrefix[:], ^(sd.txNum / sd.aggTx.a.aggregationStep))
+	binary.BigEndian.PutUint64(histStepPrefix[:], ^(sd.txNum / sd.AggTx().a.aggregationStep))
 	var txNumBytes [8]byte
 	binary.BigEndian.PutUint64(txNumBytes[:], sd.txNum)
 	k := append(k1, k2...)
 	v := append(txNumBytes[:], val...)
-	return sd.rwTx.AppendDup(sd.aggTx.d[domain].ht.h.valuesTable, k, v)
+	return sd.rwTx.AppendDup(sd.AggTx().d[domain].ht.h.valuesTable, k, v)
 	//TODO: JG Test append dup for sorted table
 	//TODO: JG History Keys table
 }
 
 func (sd *DirectAccessDomains) updateValue(k1 []byte, k2 []byte, val []byte, domain kv.Domain) error {
 	var histStepPrefix [8]byte
-	binary.BigEndian.PutUint64(histStepPrefix[:], ^(sd.txNum / sd.aggTx.a.aggregationStep))
+	binary.BigEndian.PutUint64(histStepPrefix[:], ^(sd.txNum / sd.AggTx().a.aggregationStep))
 	var k, v []byte
-	if sd.aggTx.d[domain].d.largeValues {
+	if sd.AggTx().d[domain].d.largeValues {
 		k = append(append(k1, k2...), histStepPrefix[:]...)
 		v = val
-		if err := sd.rwTx.Put(sd.aggTx.d[domain].d.valuesTable, k, v); err != nil {
+		if err := sd.rwTx.Put(sd.AggTx().d[domain].d.valuesTable, k, v); err != nil {
 			// // fmt.Println("JG", sd.ObjectInfo(), "DomainPut", "Put large value", err)
 			return err
 		}
@@ -98,7 +98,7 @@ func (sd *DirectAccessDomains) updateValue(k1 []byte, k2 []byte, val []byte, dom
 	}
 	k = append(k1, k2...)
 	v = append(histStepPrefix[:], val...)
-	valuesCursor, err := sd.rwTx.RwCursorDupSort(sd.aggTx.d[domain].d.valuesTable)
+	valuesCursor, err := sd.rwTx.RwCursorDupSort(sd.AggTx().d[domain].d.valuesTable)
 	if err != nil {
 		// // fmt.Println("JG", sd.ObjectInfo(), "DomainPut", "RwCursorDupSort", err)
 		return err
@@ -146,15 +146,15 @@ func (sd *DirectAccessDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVa
 		// fmt.Println("JG", sd.ObjectInfo(), "DomainDel", "value not found", hexutil.Encode(k))
 		return nil
 	}
-	if sd.aggTx.d[domain].d.largeValues {
-		valuesCursor, err := sd.rwTx.RwCursor(sd.aggTx.d[domain].d.valuesTable)
+	if sd.AggTx().d[domain].d.largeValues {
+		valuesCursor, err := sd.rwTx.RwCursor(sd.AggTx().d[domain].d.valuesTable)
 		if err != nil {
 			return err
 		}
 		defer valuesCursor.Close()
 		return valuesCursor.Delete(k)
 	}
-	valuesCursor, err := sd.rwTx.RwCursorDupSort(sd.aggTx.d[domain].d.valuesTable)
+	valuesCursor, err := sd.rwTx.RwCursorDupSort(sd.AggTx().d[domain].d.valuesTable)
 	if err != nil {
 		return err
 	}

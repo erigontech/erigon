@@ -270,7 +270,8 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		fv.sharedDom = nil
 		defer func() {
 			var err error
-			fv.sharedDom, err = state.NewSharedDomains(tx, logger)
+			temporalTx := tx.(kv.TemporalTx)
+			fv.sharedDom, criticalError = state.NewSharedDomains(temporalTx, logger)
 			if err != nil {
 				criticalError = fmt.Errorf("failed to create shared domains: %w", err)
 				return
@@ -278,12 +279,6 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		}()
 	}
 
-	temporalTx := tx.(kv.TemporalTx)
-	fv.sharedDom, criticalError = state.NewSharedDomains(temporalTx, logger)
-	if criticalError != nil {
-		criticalError = fmt.Errorf("failed to create shared domains: %w", criticalError)
-		return
-	}
 	txc := wrap.NewTxContainer(tx, fv.sharedDom)
 
 	fv.extendingForkNotifications = shards.NewNotifications(nil)

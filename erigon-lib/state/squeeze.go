@@ -432,7 +432,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			domains.SetTxNum(lastTxnumInShard - 1)
 			domains.sdCtx.SetLimitReadAsOfTxNum(domains.TxNum()+1, true) // this helps to read state from correct file during commitment
 
-			rebuiltCommit, err = rebuildCommitmentShard(ctx, domains, domains.roTtx, domains.AggTx(), nextKey, &rebuiltCommitment{
+			rebuiltCommit, err = rebuildCommitmentShard(ctx, domains, domains.roTx, domains.AggTx(), nextKey, &rebuiltCommitment{
 				StepFrom: shardFrom,
 				StepTo:   shardTo,
 				TxnFrom:  fromTxNumRange,
@@ -517,9 +517,9 @@ func (sd *BufferedSharedDomains) discardWrites(d kv.Domain) {
 }
 
 func rebuildCommitmentShard(ctx context.Context, sd SharedDomains, roTx kv.Tx, aggTx *AggregatorRoTx, next func() (bool, []byte), cfg *rebuiltCommitment, logger log.Logger) (*rebuiltCommitment, error) {
-	sd.discardWrites(kv.AccountsDomain)
-	sd.discardWrites(kv.StorageDomain)
-	sd.discardWrites(kv.CodeDomain)
+	sd.DiscardWrites(kv.AccountsDomain)
+	sd.DiscardWrites(kv.StorageDomain)
+	sd.DiscardWrites(kv.CodeDomain)
 
 	visComFiles := roTx.(kv.WithFreezeInfo).FreezeInfo().Files(kv.CommitmentDomain)
 	logger.Info("starting commitment", "shard", fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo),
@@ -530,14 +530,14 @@ func rebuildCommitmentShard(ctx context.Context, sd SharedDomains, roTx kv.Tx, a
 	sf := time.Now()
 	var processed uint64
 	for ok, key := next(); ; ok, key = next() {
-		sd.sdCtx.TouchKey(kv.AccountsDomain, string(key), nil)
+		sd.TouchKey(kv.AccountsDomain, string(key), nil)
 		processed++
 		if !ok {
 			break
 		}
 	}
 	collectionSpent := time.Since(sf)
-	rh, err := sd.sdCtx.ComputeCommitment(ctx, true, sd.BlockNum(), fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo))
+	rh, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo))
 	if err != nil {
 		return nil, err
 	}
@@ -547,7 +547,7 @@ func rebuildCommitmentShard(ctx context.Context, sd SharedDomains, roTx kv.Tx, a
 
 	sb := time.Now()
 
-	err = aggTx.d[kv.CommitmentDomain].d.dumpStepRangeOnDisk(ctx, cfg.StepFrom, cfg.StepTo, cfg.TxnFrom, cfg.TxnTo, sd.domainWriters[kv.CommitmentDomain], nil)
+	err = aggTx.d[kv.CommitmentDomain].d.dumpStepRangeOnDisk(ctx, cfg.StepFrom, cfg.StepTo, cfg.TxnFrom, cfg.TxnTo, sd.GetDomainWriter(kv.CommitmentDomain), nil)
 	if err != nil {
 		return nil, err
 	}
