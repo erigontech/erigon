@@ -989,7 +989,6 @@ func (dt *DomainRoTx) garbage(merged *filesItem) (outs []*filesItem) {
 				}
 				outs = append(outs, item)
 			}
-
 			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainRoTx`)
 			if item.isBefore(merged) && hasCoverVisibleFile(dt.files, item) {
 				outs = append(outs, item)
@@ -1028,7 +1027,6 @@ func garbage(dirtyFiles *btree.BTreeG[*filesItem], visibleFiles []visibleFile, m
 			if item.isProperSubsetOf(merged) {
 				outs = append(outs, item)
 			}
-
 			// this case happens when in previous process run, the merged file was created,
 			// but the processed ended before subsumed files could be deleted.
 			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainRoTx`)
