@@ -101,7 +101,7 @@ func queueKeys(ctx context.Context, seed, ofSize uint64) <-chan []byte {
 	keys := make(chan []byte, 1)
 	go func() {
 		for {
-			if ctx.Err() != nil {
+			if ctx.Err() != nil { //nolint:staticcheck
 				break
 			}
 			bb := make([]byte, ofSize)

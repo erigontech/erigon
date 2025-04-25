@@ -2249,8 +2249,6 @@ func TestDomain_Unwind(t *testing.T) {
 	unwindAndCompare(t, d, db, 6)
 	unwindAndCompare(t, d, db, 5)
 	unwindAndCompare(t, d, db, 2)
-
-	return
 }
 
 func compareIterators(t *testing.T, et, ut stream.KV) {

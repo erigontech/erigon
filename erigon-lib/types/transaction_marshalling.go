@@ -497,7 +497,7 @@ func (tx *SetCodeTransaction) UnmarshalJSON(input []byte) error {
 		return err
 	}
 
-	if err := tx.DynamicFeeTransaction.unmarshalJson(dec); err != nil {
+	if err := tx.unmarshalJson(dec); err != nil {
 		return err
 	}
 	tx.Authorizations = make([]Authorization, len(*dec.Authorizations))

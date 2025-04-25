@@ -585,7 +585,7 @@ func (tx *AccountAbstractionTransaction) PaymasterPostOp(paymasterContext []byte
 
 func (tx *AccountAbstractionTransaction) PaymasterFrame(chainID *big.Int) (*Message, error) {
 	zeroAddress := common.Address{}
-	if tx.Paymaster == nil || bytes.Compare(zeroAddress[:], tx.Paymaster[:]) == 0 {
+	if tx.Paymaster == nil || bytes.Equal(zeroAddress[:], tx.Paymaster[:]) {
 		return nil, nil
 	}
 
