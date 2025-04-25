@@ -208,7 +208,7 @@ func TestSetupGenesis(t *testing.T) {
 					}
 					return nil
 				}); dbErr != nil {
-					t.Fatal(err)
+					t.Fatal(dbErr)
 				}
 			}
 		})
