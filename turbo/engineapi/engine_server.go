@@ -188,24 +188,46 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	for _, transaction := range req.Transactions {
 		txs = append(txs, transaction)
 	}
-
-	header := types.Header{
-		ParentHash:  req.ParentHash,
-		Coinbase:    req.FeeRecipient,
-		Root:        req.StateRoot,
-		Bloom:       bloom,
-		BaseFee:     (*big.Int)(req.BaseFeePerGas),
-		Extra:       req.ExtraData,
-		Number:      big.NewInt(0).SetUint64(req.BlockNumber.Uint64()),
-		GasUsed:     uint64(req.GasUsed),
-		GasLimit:    uint64(req.GasLimit),
-		Time:        uint64(req.Timestamp),
-		MixDigest:   req.PrevRandao,
-		UncleHash:   types.EmptyUncleHash,
-		Difficulty:  merge.ProofOfStakeDifficulty,
-		Nonce:       merge.ProofOfStakeNonce,
-		ReceiptHash: req.ReceiptsRoot,
-		TxHash:      types.DeriveSha(types.BinaryTransactions(txs)),
+	var header types.Header
+	// CHANGE(taiko) : special decoding into Header
+	if s.config.Taiko && req.Transactions == nil && req.Withdrawals == nil {
+		header = types.Header{
+			ParentHash:      req.ParentHash,
+			UncleHash:       types.EmptyUncleHash,
+			Coinbase:        req.FeeRecipient,
+			Root:            req.StateRoot,
+			TxHash:          req.TxHash,
+			ReceiptHash:     req.ReceiptsRoot,
+			Bloom:           types.BytesToBloom(req.LogsBloom),
+			Difficulty:      common.Big0,
+			Number:          new(big.Int).SetUint64(req.BlockNumber.Uint64()),
+			GasLimit:        req.GasLimit.Uint64(),
+			GasUsed:         req.GasUsed.Uint64(),
+			Time:            req.Timestamp.Uint64(),
+			BaseFee:         (*big.Int)(req.BaseFeePerGas),
+			Extra:           req.ExtraData,
+			MixDigest:       req.PrevRandao,
+			WithdrawalsHash: &req.WithdrawalsHash,
+		}
+	} else {
+		header = types.Header{
+			ParentHash:  req.ParentHash,
+			Coinbase:    req.FeeRecipient,
+			Root:        req.StateRoot,
+			Bloom:       bloom,
+			BaseFee:     (*big.Int)(req.BaseFeePerGas),
+			Extra:       req.ExtraData,
+			Number:      big.NewInt(0).SetUint64(req.BlockNumber.Uint64()),
+			GasUsed:     uint64(req.GasUsed),
+			GasLimit:    uint64(req.GasLimit),
+			Time:        uint64(req.Timestamp),
+			MixDigest:   req.PrevRandao,
+			UncleHash:   types.EmptyUncleHash,
+			Difficulty:  merge.ProofOfStakeDifficulty,
+			Nonce:       merge.ProofOfStakeNonce,
+			ReceiptHash: req.ReceiptsRoot,
+			TxHash:      types.DeriveSha(types.BinaryTransactions(txs)),
+		}
 	}
 
 	var withdrawals types.Withdrawals
