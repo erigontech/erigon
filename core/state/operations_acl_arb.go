@@ -54,7 +54,7 @@ func WasmStateStoreCost(db *IntraBlockState, program common.Address, key, value 
 		//		return params.SloadGasEIP2200, nil
 		return cost + params.WarmStorageReadCostEIP2929 // SLOAD_GAS
 	}
-	var original *uint256.Int
+	original := uint256.NewInt(0)
 	err = db.GetCommittedState(program, &key, original)
 	if original == current {
 		if original.IsZero() {

@@ -52,8 +52,6 @@ import (
 	"github.com/erigontech/erigon-lib/state/stats"
 	"github.com/erigontech/erigon-lib/wrap"
 
-	"github.com/erigontech/erigon/turbo/ethdb"
-	"github.com/erigontech/erigon/turbo/ethdb/wasmdb"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/core"
@@ -80,6 +78,8 @@ import (
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/turbo/ethdb"
+	"github.com/erigontech/erigon/turbo/ethdb/wasmdb"
 	"github.com/erigontech/erigon/turbo/logging"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -1459,34 +1459,34 @@ const blockBufferSize = 128
 
 func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.MiningConfig, logger log.Logger) (consensus.Engine, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
+
+	if err := db.View(context.Background(), func(tx kv.Tx) (err error) {
+		syncCfg.KeepExecutionProofs, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		panic(err)
+	}
+	if syncCfg.KeepExecutionProofs {
+		libstate.EnableHistoricalCommitment()
+	}
+
+	if err := db.View(context.Background(), func(tx kv.Tx) (err error) {
+		syncCfg.KeepExecutionProofs, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		panic(err)
+	}
+	if syncCfg.KeepExecutionProofs {
+		libstate.EnableHistoricalCommitment()
+	}
+
 	ethdb.InitialiazeLocalWasmTarget()
-
-	if err := db.View(context.Background(), func(tx kv.Tx) (err error) {
-		syncCfg.KeepExecutionProofs, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
-		if err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		panic(err)
-	}
-	if syncCfg.KeepExecutionProofs {
-		libstate.EnableHistoricalCommitment()
-	}
-
-	if err := db.View(context.Background(), func(tx kv.Tx) (err error) {
-		syncCfg.KeepExecutionProofs, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
-		if err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		panic(err)
-	}
-	if syncCfg.KeepExecutionProofs {
-		libstate.EnableHistoricalCommitment()
-	}
-
 	vmConfig := &vm.Config{}
 
 	events := shards.NewEvents()
