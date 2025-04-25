@@ -724,7 +724,7 @@ func (c Collation) Close() {
 }
 
 func (d *Domain) dumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo, txnFrom, txnTo uint64, wal *DomainBufferedWriter, vt valueTransformer) error {
-	if stepFrom == stepTo {
+	if d.disable || stepFrom == stepTo {
 		return nil
 	}
 	if stepFrom > stepTo {
@@ -752,6 +752,9 @@ func (d *Domain) dumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo, txnF
 // [stepFrom; stepTo)
 // In contrast to collate function collateETL puts contents of wal into file.
 func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo uint64, wal *etl.Collector, vt valueTransformer) (coll Collation, err error) {
+	if d.disable {
+		return Collation{}, err
+	}
 	started := time.Now()
 	closeCollation := true
 	defer func() {
@@ -991,6 +994,9 @@ func (sf StaticFiles) CleanupOnError() {
 
 // skips history files
 func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, collation Collation, ps *background.ProgressSet) (StaticFiles, error) {
+	if d.disable {
+		return StaticFiles{}, nil
+	}
 	mxRunningFilesBuilding.Inc()
 	defer mxRunningFilesBuilding.Dec()
 	if traceFileLife != "" && d.filenameBase == traceFileLife {
@@ -1321,6 +1327,9 @@ func buildHashMapAccessor(ctx context.Context, d *seg.Decompressor, compressed s
 }
 
 func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
+	if d.disable {
+		return
+	}
 	d.History.integrateDirtyFiles(sf.HistoryFiles, txNumFrom, txNumTo)
 
 	fi := newFilesItem(txNumFrom, txNumTo, d.aggregationStep)
