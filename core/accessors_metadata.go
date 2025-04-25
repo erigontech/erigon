@@ -20,12 +20,15 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
@@ -77,4 +80,48 @@ func WriteChainConfig(db kv.Putter, hash common.Hash, cfg *chain.Config) error {
 		return fmt.Errorf("failed to store chain config: %w", err)
 	}
 	return nil
+}
+
+func WriteGenesisIfNotExist(db kv.RwTx, g *types.Genesis) error {
+	has, err := db.Has(kv.ConfigTable, kv.GenesisKey)
+	if err != nil {
+		return err
+	}
+	if has {
+		return nil
+	}
+
+	// Marshal json g
+	val, err := json.Marshal(g)
+	if err != nil {
+		return err
+	}
+	return db.Put(kv.ConfigTable, kv.GenesisKey, val)
+}
+
+func ReadGenesis(db kv.Getter) (*types.Genesis, error) {
+	val, err := db.GetOne(kv.ConfigTable, kv.GenesisKey)
+	if err != nil {
+		return nil, err
+	}
+	if len(val) == 0 || string(val) == "null" {
+		return nil, nil
+	}
+	var g types.Genesis
+	if err := json.Unmarshal(val, &g); err != nil {
+		return nil, err
+	}
+	return &g, nil
+}
+
+func AllSegmentsDownloadComplete(tx kv.Getter) (allSegmentsDownloadComplete bool, err error) {
+	snapshotsStageProgress, err := stages.GetStageProgress(tx, stages.Snapshots)
+	return snapshotsStageProgress > 0, err
+}
+func AllSegmentsDownloadCompleteFromDB(db kv.RoDB) (allSegmentsDownloadComplete bool, err error) {
+	err = db.View(context.Background(), func(tx kv.Tx) error {
+		allSegmentsDownloadComplete, err = AllSegmentsDownloadComplete(tx)
+		return err
+	})
+	return allSegmentsDownloadComplete, err
 }

@@ -119,7 +119,7 @@ func configOrDefault(g *types.Genesis, genesisHash common.Hash) *chain.Config {
 }
 
 func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *big.Int, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
-	if err := rawdb.WriteGenesisIfNotExist(tx, genesis); err != nil {
+	if err := WriteGenesisIfNotExist(tx, genesis); err != nil {
 		return nil, nil, err
 	}
 
