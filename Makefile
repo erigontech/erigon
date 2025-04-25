@@ -245,6 +245,33 @@ eest-hive:
 	cd "eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
 	cd "eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eest/consume-engine,"",--sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.3.0/fixtures_develop.tar.gz)
 
+
+# define kurtosis assertoor runner
+define run-kurtosis-assertoor
+	docker build -t test/erigon:current . ; \
+	kurtosis enclave rm -f makefile-kurtosis-testnet ; \
+	kurtosis run --enclave makefile-kurtosis-testnet github.com/ethpandaops/ethereum-package --args-file $(1) ; \
+	printf "\nTo view logs: \nkurtosis service logs my-testnet el-1-erigon-lighthouse\n"
+endef
+
+check-kurtosis:
+	@if ! command -v kurtosis >/dev/null 2>&1; then \
+		echo "kurtosis command not found in PATH, please source it in PATH. If Kurtosis is not installed, install it by visiting https://docs.kurtosis.com/install/"; \
+		exit 1; \
+	fi; \
+
+kurtosis-pectra-assertoor:	check-kurtosis
+	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/pectra.io")
+
+kurtosis-reguler-assertoor:	check-kurtosis 
+	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/regular-assertoor.io")
+
+kurtosis-cleanup:
+	@echo "Currently Running Enclaves: "
+	@kurtosis enclave ls
+	@echo "-----------------------------------\n"
+	kurtosis enclave rm -f makefile-kurtosis-testnet
+
 ## lint-deps:                         install lint dependencies
 lint-deps:
 	@cd erigon-lib && $(MAKE) lint-deps
