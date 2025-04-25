@@ -547,7 +547,6 @@ func rebuildCommitmentShard(ctx context.Context, sd *SharedDomains, roTx kv.Tx, 
 		"collection", collectionSpent.String())
 
 	sb := time.Now()
-
 	err = aggTx.d[kv.CommitmentDomain].d.dumpStepRangeOnDisk(ctx, cfg.StepFrom, cfg.StepTo, cfg.TxnFrom, cfg.TxnTo, sd.domainWriters[kv.CommitmentDomain], nil)
 	if err != nil {
 		return nil, err
