@@ -78,8 +78,9 @@ type InvertedIndex struct {
 }
 
 type iiCfg struct {
-	salt *uint32
-	dirs datadir.Dirs
+	salt    *uint32
+	dirs    datadir.Dirs
+	disable bool // totally disable Domain/History/InvertedIndex - ignore all writes, don't produce files
 
 	filenameBase string // filename base for all files of this inverted index
 	keysTable    string // bucket name for index keys;    txnNum_u64 -> key (k+auto_increment)
@@ -178,6 +179,9 @@ func (ii *InvertedIndex) openList(fNames []string) error {
 }
 
 func (ii *InvertedIndex) openFolder() error {
+	if ii.disable {
+		return nil
+	}
 	idxFiles, _, _, err := ii.fileNamesOnDisk()
 	if err != nil {
 		return err
@@ -376,7 +380,6 @@ type InvertedIndexBufferedWriter struct {
 
 	indexTable, indexKeysTable string
 
-	txNum           uint64
 	aggregationStep uint64
 	txNumBytes      [8]byte
 	name            kv.InvertedIdx
@@ -388,20 +391,17 @@ func loadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) 
 	return next(k, k, v)
 }
 
-func (w *InvertedIndexBufferedWriter) SetTxNum(txNum uint64) {
-	w.txNum = txNum
-	binary.BigEndian.PutUint64(w.txNumBytes[:], w.txNum)
-}
-
 // Add - !NotThreadSafe. Must use WalRLock/BatchHistoryWriteEnd
-func (w *InvertedIndexBufferedWriter) Add(key []byte) error {
-	return w.add(key, key)
+func (w *InvertedIndexBufferedWriter) Add(key []byte, txNum uint64) error {
+	return w.add(key, key, txNum)
 }
 
-func (w *InvertedIndexBufferedWriter) add(key, indexKey []byte) error {
+func (w *InvertedIndexBufferedWriter) add(key, indexKey []byte, txNum uint64) error {
 	if w.discard {
 		return nil
 	}
+	binary.BigEndian.PutUint64(w.txNumBytes[:], txNum)
+
 	if err := w.indexKeys.Collect(w.txNumBytes[:], key); err != nil {
 		return err
 	}

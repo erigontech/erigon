@@ -26,7 +26,7 @@ import (
 	"path/filepath"
 	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
@@ -75,7 +75,7 @@ func ValidateTxLookups(chaindata string, logger log.Logger) error {
 	blockBytes := big.NewInt(0)
 	ctx := context.Background()
 	for !interrupt {
-		if err := libcommon.Stopped(quitCh); err != nil {
+		if err := common.Stopped(quitCh); err != nil {
 			return err
 		}
 		blockHash, ok, err := br.CanonicalHash(ctx, tx, blockNum)

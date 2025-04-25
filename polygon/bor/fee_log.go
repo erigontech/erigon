@@ -19,23 +19,22 @@ package bor
 import (
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-
-	"github.com/erigontech/erigon/core/types"
+	common "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 )
 
-var transferLogSig = libcommon.HexToHash("0xe6497e3ee548a3372136af2fcb0696db31fc6cf20260707645068bd3fe97f3c4")
-var transferFeeLogSig = libcommon.HexToHash("0x4dfe1bbbcf077ddc3e01291eea2d5c70c2b422b415d95645b9adcfd678cb1d63")
-var feeAddress = libcommon.HexToAddress("0x0000000000000000000000000000000000001010")
+var transferLogSig = common.HexToHash("0xe6497e3ee548a3372136af2fcb0696db31fc6cf20260707645068bd3fe97f3c4")
+var transferFeeLogSig = common.HexToHash("0x4dfe1bbbcf077ddc3e01291eea2d5c70c2b422b415d95645b9adcfd678cb1d63")
+var feeAddress = common.HexToAddress("0x0000000000000000000000000000000000001010")
 
 // addTransferLog adds transfer log into state
 func addTransferLog(
 	state evmtypes.IntraBlockState,
-	eventSig libcommon.Hash,
+	eventSig common.Hash,
 
 	sender,
-	recipient libcommon.Address,
+	recipient common.Address,
 
 	amount,
 	input1,
@@ -58,7 +57,7 @@ func addTransferLog(
 	// add transfer log
 	state.AddLog(&types.Log{
 		Address: feeAddress,
-		Topics: []libcommon.Hash{
+		Topics: []common.Hash{
 			eventSig,
 			feeAddress.Hash(),
 			sender.Hash(),

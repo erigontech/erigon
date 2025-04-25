@@ -32,7 +32,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -109,7 +109,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 
 	var (
 		aux     [8]byte
-		loc     = libcommon.Hash{}
+		loc     = common.Hash{}
 		maxStep = uint64(20)
 		txs     = aggStep*maxStep + aggStep/2 // we do 20.5 steps, 1.5 left in db.
 
@@ -118,9 +118,9 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 		hashes    = make([][]byte, 0)
 
 		// list of inserted accounts and storage locations
-		addrs = make([]libcommon.Address, 0)
+		addrs = make([]common.Address, 0)
 		accs  = make([]*accounts.Account, 0)
-		locs  = make([]libcommon.Hash, 0)
+		locs  = make([]common.Hash, 0)
 
 		writer = state2.NewWriterV4(domains)
 	)
@@ -315,7 +315,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 
 	var (
 		aux     [8]byte
-		loc     = libcommon.Hash{}
+		loc     = common.Hash{}
 		maxStep = uint64(20)
 		txs     = aggStep*maxStep + aggStep/2 // we do 20.5 steps, 1.5 left in db.
 
@@ -324,9 +324,9 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		hashes    = make([][]byte, 0)
 
 		// list of inserted accounts and storage locations
-		addrs = make([]libcommon.Address, 0)
+		addrs = make([]common.Address, 0)
 		accs  = make([]*accounts.Account, 0)
-		locs  = make([]libcommon.Hash, 0)
+		locs  = make([]common.Hash, 0)
 
 		writer = state2.NewWriterV4(domains)
 	)
@@ -366,7 +366,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	latestHash, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
 	require.NoError(t, err)
 	_ = latestHash
-	//require.EqualValues(t, params.MainnetGenesisHash, libcommon.Hash(latestHash))
+	//require.EqualValues(t, params.MainnetGenesisHash, common.Hash(latestHash))
 	//t.Logf("executed tx %d root %x datadir %q\n", txs, latestHash, datadir)
 
 	err = domains.Flush(ctx, tx)
@@ -428,9 +428,9 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 
 	rh, err := domains.ComputeCommitment(ctx, false, domains.BlockNum(), "")
 	require.NoError(t, err)
-	require.EqualValues(t, params.TestGenesisStateRoot, libcommon.BytesToHash(rh))
-	//require.NotEqualValues(t, latestHash, libcommon.BytesToHash(rh))
-	//libcommon.BytesToHash(rh))
+	require.EqualValues(t, params.TestGenesisStateRoot, common.BytesToHash(rh))
+	//require.NotEqualValues(t, latestHash, common.BytesToHash(rh))
+	//common.BytesToHash(rh))
 
 	var i, j int
 	for txNum := txToStart; txNum <= txs; txNum++ {
@@ -455,7 +455,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	}
 }
 
-func randomAccount(t *testing.T) (*accounts.Account, libcommon.Address) {
+func randomAccount(t *testing.T) (*accounts.Account, common.Address) {
 	t.Helper()
 	key, err := crypto.GenerateKey()
 	if err != nil {
@@ -486,13 +486,13 @@ func TestCommit(t *testing.T) {
 	acc := accounts.Account{
 		Nonce:       0,
 		Balance:     *uint256.NewInt(7),
-		CodeHash:    libcommon.Hash{},
+		CodeHash:    common.Hash{},
 		Incarnation: 1,
 	}
 	buf := accounts.SerialiseV3(&acc)
 
-	addr := libcommon.Hex2Bytes("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e")
-	loc := libcommon.Hex2Bytes("24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed")
+	addr := common.Hex2Bytes("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e")
+	loc := common.Hex2Bytes("24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed")
 
 	for i := 1; i < 3; i++ {
 		addr[0] = byte(i)
@@ -511,6 +511,6 @@ func TestCommit(t *testing.T) {
 	err = domains.Flush(ctx, tx)
 	require.NoError(t, err)
 
-	require.Equal(t, libcommon.BytesToHash(libcommon.FromHex("0xfe81cd91357cd915cae7c02b5a4771e903c16b29dec582818076954be3741030")), libcommon.BytesToHash(domainsHash))
+	require.Equal(t, common.BytesToHash(common.FromHex("0xfe81cd91357cd915cae7c02b5a4771e903c16b29dec582818076954be3741030")), common.BytesToHash(domainsHash))
 
 }

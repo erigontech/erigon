@@ -13,9 +13,9 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/execution/consensus"
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
@@ -153,6 +153,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 						CumulativeGasUsed:        lastReceipt.CumulativeGasUsed,
 						FirstLogIndexWithinBlock: uint32(firstIndex),
 					}
+					lastReceipt.FirstLogIndexWithinBlock = uint32(firstIndex)
 					if err := rawtemporaldb.AppendReceipt(se.doms, &receipt, se.blobGasUsed); err != nil {
 						return false, err
 					}
@@ -202,7 +203,7 @@ func (se *serialExecutor) commit(ctx context.Context, txNum uint64, blockNum uin
 		return t2, err
 	}
 	se.doms.SetTxNum(txNum)
-	se.rs = state.NewParallelExecutionState(se.doms, se.logger)
+	se.rs = state.NewParallelExecutionState(se.doms, se.cfg.syncCfg, se.cfg.chainConfig.Bor != nil, se.logger)
 
 	se.applyWorker.ResetTx(se.applyTx)
 	se.applyWorker.ResetState(se.rs, se.accumulator)

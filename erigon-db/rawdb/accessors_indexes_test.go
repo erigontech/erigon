@@ -27,11 +27,11 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/stages/mock"
@@ -63,9 +63,9 @@ func TestLookupStorage(t *testing.T) {
 			require.NoError(t, err)
 			defer tx.Rollback()
 
-			tx1 := types.NewTransaction(1, libcommon.BytesToAddress([]byte{0x11}), uint256.NewInt(111), 1111, uint256.NewInt(11111), []byte{0x11, 0x11, 0x11})
-			tx2 := types.NewTransaction(2, libcommon.BytesToAddress([]byte{0x22}), uint256.NewInt(222), 2222, uint256.NewInt(22222), []byte{0x22, 0x22, 0x22})
-			tx3 := types.NewTransaction(3, libcommon.BytesToAddress([]byte{0x33}), uint256.NewInt(333), 3333, uint256.NewInt(33333), []byte{0x33, 0x33, 0x33})
+			tx1 := types.NewTransaction(1, common.BytesToAddress([]byte{0x11}), uint256.NewInt(111), 1111, uint256.NewInt(11111), []byte{0x11, 0x11, 0x11})
+			tx2 := types.NewTransaction(2, common.BytesToAddress([]byte{0x22}), uint256.NewInt(222), 2222, uint256.NewInt(22222), []byte{0x22, 0x22, 0x22})
+			tx3 := types.NewTransaction(3, common.BytesToAddress([]byte{0x33}), uint256.NewInt(333), 3333, uint256.NewInt(33333), []byte{0x33, 0x33, 0x33})
 			txs := []types.Transaction{tx1, tx2, tx3}
 
 			block := types.NewBlock(&types.Header{Number: big.NewInt(314)}, txs, nil, nil, nil)
@@ -123,34 +123,34 @@ func TestLookupStorage(t *testing.T) {
 
 // ReadTransactionByHash retrieves a specific transaction from the database, along with
 // its added positional metadata.
-func readTransactionByHash(db kv.Tx, hash libcommon.Hash, br services.FullBlockReader) (txn types.Transaction, blockHash libcommon.Hash, blockNumber uint64, txNum uint64, txIndex uint64, err error) {
+func readTransactionByHash(db kv.Tx, hash common.Hash, br services.FullBlockReader) (txn types.Transaction, blockHash common.Hash, blockNumber uint64, txNum uint64, txIndex uint64, err error) {
 	blockNumberPtr, txNumPtr, err := rawdb.ReadTxLookupEntry(db, hash)
 	if err != nil {
-		return nil, libcommon.Hash{}, 0, 0, 0, err
+		return nil, common.Hash{}, 0, 0, 0, err
 	}
 	if blockNumberPtr == nil {
-		return nil, libcommon.Hash{}, 0, 0, 0, nil
+		return nil, common.Hash{}, 0, 0, 0, nil
 	}
 	blockNumber = *blockNumberPtr
 	if txNumPtr == nil {
-		return nil, libcommon.Hash{}, 0, 0, 0, nil
+		return nil, common.Hash{}, 0, 0, 0, nil
 	}
 	txNum = *txNumPtr
 	blockHash, ok, err := br.CanonicalHash(context.Background(), db, blockNumber)
 	if err != nil {
-		return nil, libcommon.Hash{}, 0, 0, 0, err
+		return nil, common.Hash{}, 0, 0, 0, err
 	}
-	if !ok || blockHash == (libcommon.Hash{}) {
-		return nil, libcommon.Hash{}, 0, 0, 0, nil
+	if !ok || blockHash == (common.Hash{}) {
+		return nil, common.Hash{}, 0, 0, 0, nil
 	}
 	body, _ := br.BodyWithTransactions(context.Background(), db, blockHash, blockNumber)
 	if body == nil {
 		log.Error("Transaction referenced missing", "number", blockNumber, "hash", blockHash)
-		return nil, libcommon.Hash{}, 0, 0, 0, nil
+		return nil, common.Hash{}, 0, 0, 0, nil
 	}
 	senders, err1 := rawdb.ReadSenders(db, blockHash, blockNumber)
 	if err1 != nil {
-		return nil, libcommon.Hash{}, 0, 0, 0, err1
+		return nil, common.Hash{}, 0, 0, 0, err1
 	}
 	body.SendersToTxs(senders)
 	for txInd, txnValue := range body.Transactions {
@@ -159,5 +159,5 @@ func readTransactionByHash(db kv.Tx, hash libcommon.Hash, br services.FullBlockR
 		}
 	}
 	log.Error("Transaction not found", "number", blockNumber, "hash", blockHash, "txhash", hash)
-	return nil, libcommon.Hash{}, 0, 0, 0, nil
+	return nil, common.Hash{}, 0, 0, 0, nil
 }

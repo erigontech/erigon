@@ -24,10 +24,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 func makeBlock(txCount, uncleCount, withdrawalCount int) *types.Block {
@@ -51,7 +51,7 @@ func makeBlock(txCount, uncleCount, withdrawalCount int) *types.Block {
 		amount, _ := uint256.FromBig(math.BigPow(2, int64(i)))
 		price := uint256.NewInt(300000)
 		data := make([]byte, 100)
-		tx := types.NewTransaction(uint64(i), libcommon.Address{}, amount, 123457, price, data)
+		tx := types.NewTransaction(uint64(i), common.Address{}, amount, 123457, price, data)
 		signedTx, err := types.SignTx(tx, *signer, key)
 		if err != nil {
 			panic(err)

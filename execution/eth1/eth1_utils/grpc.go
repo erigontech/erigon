@@ -23,11 +23,11 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 func HeaderToHeaderRPC(header *types.Header) *execution.Header {
@@ -145,15 +145,15 @@ func HeaderRpcToHeader(header *execution.Header) (*types.Header, error) {
 		h.BaseFee = gointerfaces.ConvertH256ToUint256Int(header.BaseFeePerGas).ToBig()
 	}
 	if header.WithdrawalHash != nil {
-		h.WithdrawalsHash = new(libcommon.Hash)
+		h.WithdrawalsHash = new(common.Hash)
 		*h.WithdrawalsHash = gointerfaces.ConvertH256ToHash(header.WithdrawalHash)
 	}
 	if header.ParentBeaconBlockRoot != nil {
-		h.ParentBeaconBlockRoot = new(libcommon.Hash)
+		h.ParentBeaconBlockRoot = new(common.Hash)
 		*h.ParentBeaconBlockRoot = gointerfaces.ConvertH256ToHash(header.ParentBeaconBlockRoot)
 	}
 	if header.RequestsHash != nil {
-		h.RequestsHash = new(libcommon.Hash)
+		h.RequestsHash = new(common.Hash)
 		*h.RequestsHash = gointerfaces.ConvertH256ToHash(header.RequestsHash)
 	}
 	blockHash := gointerfaces.ConvertH256ToHash(header.BlockHash)
@@ -211,7 +211,7 @@ func ConvertWithdrawalsToRpc(in []*types.Withdrawal) []*types2.Withdrawal {
 	return out
 }
 
-func ConvertRawBlockBodyToRpc(in *types.RawBody, blockNumber uint64, blockHash libcommon.Hash) *execution.BlockBody {
+func ConvertRawBlockBodyToRpc(in *types.RawBody, blockNumber uint64, blockHash common.Hash) *execution.BlockBody {
 	if in == nil {
 		return nil
 	}
@@ -225,7 +225,7 @@ func ConvertRawBlockBodyToRpc(in *types.RawBody, blockNumber uint64, blockHash l
 	}
 }
 
-func ConvertRawBlockBodiesToRpc(in []*types.RawBody, blockNumbers []uint64, blockHashes []libcommon.Hash) []*execution.BlockBody {
+func ConvertRawBlockBodiesToRpc(in []*types.RawBody, blockNumbers []uint64, blockHashes []common.Hash) []*execution.BlockBody {
 	ret := []*execution.BlockBody{}
 
 	for i, body := range in {

@@ -587,7 +587,7 @@ func (sd *BufferedSharedDomains) updateAccountData(addr []byte, account, prevAcc
 	addrS := string(addr)
 	sd.sdCtx.TouchKey(kv.AccountsDomain, addrS, account)
 	sd.put(kv.AccountsDomain, addrS, account)
-	return sd.domainWriters[kv.AccountsDomain].PutWithPrev(addr, nil, account, prevAccount, prevStep)
+	return sd.domainWriters[kv.AccountsDomain].PutWithPrev(addr, nil, account, sd.txNum, prevAccount, prevStep)
 }
 
 func (sd *BufferedSharedDomains) updateAccountCode(addr, code, prevCode []byte, prevStep uint64) error {
@@ -595,14 +595,14 @@ func (sd *BufferedSharedDomains) updateAccountCode(addr, code, prevCode []byte, 
 	sd.sdCtx.TouchKey(kv.CodeDomain, addrS, code)
 	sd.put(kv.CodeDomain, addrS, code)
 	if len(code) == 0 {
-		return sd.domainWriters[kv.CodeDomain].DeleteWithPrev(addr, nil, prevCode, prevStep)
+		return sd.domainWriters[kv.CodeDomain].DeleteWithPrev(addr, nil, sd.txNum, prevCode, prevStep)
 	}
-	return sd.domainWriters[kv.CodeDomain].PutWithPrev(addr, nil, code, prevCode, prevStep)
+	return sd.domainWriters[kv.CodeDomain].PutWithPrev(addr, nil, code, sd.txNum, prevCode, prevStep)
 }
 
 func (sd *BufferedSharedDomains) UpdateCommitmentData(prefix string, data, prev []byte, prevStep uint64) error {
 	sd.put(kv.CommitmentDomain, prefix, data)
-	return sd.domainWriters[kv.CommitmentDomain].PutWithPrev(toBytesZeroCopy(prefix), nil, data, prev, prevStep)
+	return sd.domainWriters[kv.CommitmentDomain].PutWithPrev(toBytesZeroCopy(prefix), nil, data, sd.txNum, prev, prevStep)
 }
 
 func (sd *BufferedSharedDomains) deleteAccount(addr, prev []byte, prevStep uint64) error {
@@ -618,8 +618,7 @@ func (sd *BufferedSharedDomains) deleteAccount(addr, prev []byte, prevStep uint6
 
 	sd.sdCtx.TouchKey(kv.AccountsDomain, addrS, nil)
 	sd.put(kv.AccountsDomain, addrS, nil)
-
-	if err := sd.domainWriters[kv.AccountsDomain].DeleteWithPrev(addr, nil, prev, prevStep); err != nil {
+	if err := sd.domainWriters[kv.AccountsDomain].DeleteWithPrev(addr, nil, sd.txNum, prev, prevStep); err != nil {
 		return err
 	}
 
@@ -635,7 +634,7 @@ func (sd *BufferedSharedDomains) writeAccountStorage(addr, loc []byte, value, pr
 	compositeS := string(composite)
 	sd.sdCtx.TouchKey(kv.StorageDomain, compositeS, value)
 	sd.put(kv.StorageDomain, compositeS, value)
-	return sd.domainWriters[kv.StorageDomain].PutWithPrev(composite, nil, value, preVal, prevStep)
+	return sd.domainWriters[kv.StorageDomain].PutWithPrev(composite, nil, value, sd.txNum, preVal, prevStep)
 }
 
 func (sd *BufferedSharedDomains) delAccountStorage(addr, loc []byte, preVal []byte, prevStep uint64) error {
@@ -647,13 +646,13 @@ func (sd *BufferedSharedDomains) delAccountStorage(addr, loc []byte, preVal []by
 	compositeS := string(composite)
 	sd.sdCtx.TouchKey(kv.StorageDomain, compositeS, nil)
 	sd.put(kv.StorageDomain, compositeS, nil)
-	return sd.domainWriters[kv.StorageDomain].DeleteWithPrev(composite, nil, preVal, prevStep)
+	return sd.domainWriters[kv.StorageDomain].DeleteWithPrev(composite, nil, sd.txNum, preVal, prevStep)
 }
 
 func (sd *BufferedSharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) {
 	for _, writer := range sd.iiWriters {
 		if writer.name == table {
-			return writer.Add(key)
+			return writer.Add(key, sd.txNum)
 		}
 	}
 	panic(fmt.Errorf("unknown index %s", table))
@@ -675,16 +674,6 @@ func (sd *BufferedSharedDomains) SetTxNum(txNum uint64) {
 	if sd.sdCtx != nil {
 		sd.sdCtx.SetTxNum(txNum)
 	}
-	for _, d := range sd.domainWriters {
-		if d != nil {
-			d.SetTxNum(txNum)
-		}
-	}
-	for _, iiWriter := range sd.iiWriters {
-		if iiWriter != nil {
-			iiWriter.SetTxNum(txNum)
-		}
-	}
 }
 
 func (sd *BufferedSharedDomains) TxNum() uint64 { return sd.txNum }
@@ -698,44 +687,39 @@ func (sd *BufferedSharedDomains) SetTrace(b bool) {
 	sd.sdCtx.SetTrace(b)
 }
 
-func (sd *BufferedSharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
-	// fmt.Println("JG ComputeCommitment", "calculate")
 	// uSize := sd.sdCtx.updates.Size()
 	rootHash, err = sd.sdCtx.ComputeCommitment(ctx, saveStateAfter, blockNum, logPrefix)
 	// fmt.Println("JG ComputeCommitment", "updates", uSize, "rootHash", hexutil.Encode(rootHash))
 	return rootHash, err
 }
 
-// IterateStoragePrefix iterates over key-value pairs of the storage domain that start with given prefix
-// Such iteration is not intended to be used in public API, therefore it uses read-write transaction
-// inside the domain. Another version of this for public API use needs to be created, that uses
-// roTx instead and supports ending the iterations before it reaches the end.
-//
-// k and v lifetime is bounded by the lifetime of the iterator
-func (sd *BufferedSharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v []byte, step uint64) error) error {
-	haveRamUpdates := sd.storage.Len() > 0
-	return sd.AggTx().d[kv.StorageDomain].debugIteratePrefix(prefix, haveRamUpdates, sd.storage.Iter(), it, sd.txNum, sd.StepSize(), sd.roTx)
+func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte) ([]byte, bool, error) {
+	var firstKey []byte
+	var hasPrefix bool
+	err := sd.IteratePrefix(domain, prefix, func(k []byte, v []byte, step uint64) (bool, error) {
+		firstKey = common.CopyBytes(k)
+		hasPrefix = true
+		return false, nil // do not continue, end on first occurrence
+	})
+	return firstKey, hasPrefix, err
 }
 
-func (sd *BufferedSharedDomains) Close() {
-	// fmt.Println("JG", sd.ObjectInfo(), "Close")
-	sd.SetBlockNum(0)
-	if sd.AggTx() != nil {
-		sd.SetTxNum(0)
+// IterateStoragePrefix iterates over key-value pairs of the storage domain that start with given prefix
+//
+// k and v lifetime is bounded by the lifetime of the iterator
+func (sd *BufferedSharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v []byte, step uint64) (cont bool, err error)) error {
+	return sd.IteratePrefix(kv.StorageDomain, prefix, it)
+}
 
-		//sd.walLock.Lock()
-		//defer sd.walLock.Unlock()
-		for _, d := range sd.domainWriters {
-			d.Close()
-		}
-		for _, iiWriter := range sd.iiWriters {
-			iiWriter.close()
-		}
+func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, it func(k []byte, v []byte, step uint64) (cont bool, err error)) error {
+	var haveRamUpdates bool
+	var ramIter btree2.MapIter[string, dataWithPrevStep]
+	if domain == kv.StorageDomain {
+		haveRamUpdates = sd.storage.Len() > 0
+		ramIter = sd.storage.Iter()
 	}
 
-	if sd.sdCtx != nil {
-		sd.sdCtx.Close()
-	}
+	return sd.AggTx().d[domain].debugIteratePrefix(prefix, haveRamUpdates, ramIter, it, sd.txNum, sd.StepSize(), sd.roTtx)
 }
 
 func (sd *BufferedSharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
@@ -863,15 +847,15 @@ func (sd *BufferedSharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val,
 			return nil
 		}
 		return sd.updateAccountCode(k1, val, prevVal, prevStep)
-	case kv.CommitmentDomain:
+	case kv.CommitmentDomain, kv.RCacheDomain:
 		sd.put(domain, toStringZeroCopy(append(k1, k2...)), val)
-		return sd.domainWriters[domain].PutWithPrev(k1, k2, val, prevVal, prevStep)
+		return sd.domainWriters[domain].PutWithPrev(k1, k2, val, sd.txNum, prevVal, prevStep)
 	default:
 		if bytes.Equal(prevVal, val) {
 			return nil
 		}
 		sd.put(domain, toStringZeroCopy(append(k1, k2...)), val)
-		return sd.domainWriters[domain].PutWithPrev(k1, k2, val, prevVal, prevStep)
+		return sd.domainWriters[domain].PutWithPrev(k1, k2, val, sd.txNum, prevVal, prevStep)
 	}
 }
 
@@ -903,7 +887,7 @@ func (sd *BufferedSharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prev
 		return sd.UpdateCommitmentData(toStringZeroCopy(k1), nil, prevVal, prevStep)
 	default:
 		sd.put(domain, toStringZeroCopy(append(k1, k2...)), nil)
-		return sd.domainWriters[domain].DeleteWithPrev(k1, k2, prevVal, prevStep)
+		return sd.domainWriters[domain].DeleteWithPrev(k1, k2, sd.txNum, prevVal, prevStep)
 	}
 }
 
@@ -917,9 +901,9 @@ func (sd *BufferedSharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte
 		step uint64
 	}
 	tombs := make([]tuple, 0, 8)
-	if err := sd.IterateStoragePrefix(prefix, func(k, v []byte, step uint64) error {
+	if err := sd.IterateStoragePrefix(prefix, func(k, v []byte, step uint64) (bool, error) {
 		tombs = append(tombs, tuple{k, v, step})
-		return nil
+		return true, nil
 	}); err != nil {
 		return err
 	}
@@ -931,9 +915,9 @@ func (sd *BufferedSharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte
 
 	if assert.Enable {
 		forgotten := 0
-		if err := sd.IterateStoragePrefix(prefix, func(k, v []byte, step uint64) error {
+		if err := sd.IterateStoragePrefix(prefix, func(k, v []byte, step uint64) (bool, error) {
 			forgotten++
-			return nil
+			return true, nil
 		}); err != nil {
 			return err
 		}

@@ -10,10 +10,10 @@ import (
 	"strings"
 
 	ethereum "github.com/erigontech/erigon"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/abi"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/event"
-	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/abi/bind"
 )
 
@@ -23,7 +23,7 @@ var (
 	_ = strings.NewReader
 	_ = ethereum.NotFound
 	_ = bind.Bind
-	_ = libcommon.Big1
+	_ = common.Big1
 	_ = types.BloomLookup
 	_ = event.NewSubscription
 	_ = fmt.Errorf
@@ -37,15 +37,15 @@ const ReviveABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\
 var ReviveBin = "0x6080604052348015600f57600080fd5b5060f88061001e6000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c8063a5e3875114602d575b600080fd5b604760048036036020811015604157600080fd5b50356049565b005b6040805180820190915260138082527260424355603060005360ff60015360026000f360681b60208301908152600091849183f5604080516001600160a01b038316815290519192507f68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb919081900360200190a150505056fea26469706673582212205d3337629b15c78b9915ebb927a3e974fe4df0d021b8c091ca1923cf2258ed2564736f6c63430007020033"
 
 // DeployRevive deploys a new Ethereum contract, binding an instance of Revive to it.
-func DeployRevive(auth *bind.TransactOpts, backend bind.ContractBackend) (libcommon.Address, types.Transaction, *Revive, error) {
+func DeployRevive(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *Revive, error) {
 	parsed, err := abi.JSON(strings.NewReader(ReviveABI))
 	if err != nil {
-		return libcommon.Address{}, nil, nil, err
+		return common.Address{}, nil, nil, err
 	}
 
-	address, tx, contract, err := bind.DeployContract(auth, parsed, libcommon.FromHex(ReviveBin), backend)
+	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(ReviveBin), backend)
 	if err != nil {
-		return libcommon.Address{}, nil, nil, err
+		return common.Address{}, nil, nil, err
 	}
 	return address, tx, &Revive{ReviveCaller: ReviveCaller{contract: contract}, ReviveTransactor: ReviveTransactor{contract: contract}, ReviveFilterer: ReviveFilterer{contract: contract}}, nil
 }
@@ -110,7 +110,7 @@ type ReviveTransactorRaw struct {
 }
 
 // NewRevive creates a new instance of Revive, bound to a specific deployed contract.
-func NewRevive(address libcommon.Address, backend bind.ContractBackend) (*Revive, error) {
+func NewRevive(address common.Address, backend bind.ContractBackend) (*Revive, error) {
 	contract, err := bindRevive(address, backend, backend, backend)
 	if err != nil {
 		return nil, err
@@ -119,7 +119,7 @@ func NewRevive(address libcommon.Address, backend bind.ContractBackend) (*Revive
 }
 
 // NewReviveCaller creates a new read-only instance of Revive, bound to a specific deployed contract.
-func NewReviveCaller(address libcommon.Address, caller bind.ContractCaller) (*ReviveCaller, error) {
+func NewReviveCaller(address common.Address, caller bind.ContractCaller) (*ReviveCaller, error) {
 	contract, err := bindRevive(address, caller, nil, nil)
 	if err != nil {
 		return nil, err
@@ -128,7 +128,7 @@ func NewReviveCaller(address libcommon.Address, caller bind.ContractCaller) (*Re
 }
 
 // NewReviveTransactor creates a new write-only instance of Revive, bound to a specific deployed contract.
-func NewReviveTransactor(address libcommon.Address, transactor bind.ContractTransactor) (*ReviveTransactor, error) {
+func NewReviveTransactor(address common.Address, transactor bind.ContractTransactor) (*ReviveTransactor, error) {
 	contract, err := bindRevive(address, nil, transactor, nil)
 	if err != nil {
 		return nil, err
@@ -137,7 +137,7 @@ func NewReviveTransactor(address libcommon.Address, transactor bind.ContractTran
 }
 
 // NewReviveFilterer creates a new log filterer instance of Revive, bound to a specific deployed contract.
-func NewReviveFilterer(address libcommon.Address, filterer bind.ContractFilterer) (*ReviveFilterer, error) {
+func NewReviveFilterer(address common.Address, filterer bind.ContractFilterer) (*ReviveFilterer, error) {
 	contract, err := bindRevive(address, nil, nil, filterer)
 	if err != nil {
 		return nil, err
@@ -146,7 +146,7 @@ func NewReviveFilterer(address libcommon.Address, filterer bind.ContractFilterer
 }
 
 // bindRevive binds a generic wrapper to an already deployed contract.
-func bindRevive(address libcommon.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
+func bindRevive(address common.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
 	parsed, err := abi.JSON(strings.NewReader(ReviveABI))
 	if err != nil {
 		return nil, err
@@ -319,12 +319,12 @@ func (it *ReviveDeployEventIterator) Close() error {
 
 // ReviveDeployEvent represents a DeployEvent event raised by the Revive contract.
 type ReviveDeployEvent struct {
-	D   libcommon.Address
+	D   common.Address
 	Raw types.Log // Blockchain specific contextual infos
 }
 
-func (_Revive *ReviveFilterer) DeployEventEventID() libcommon.Hash {
-	return libcommon.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")
+func (_Revive *ReviveFilterer) DeployEventEventID() common.Hash {
+	return common.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")
 }
 
 // FilterDeployEvent is a free log retrieval operation binding the contract event 0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb.

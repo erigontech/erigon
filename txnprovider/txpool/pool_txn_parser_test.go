@@ -31,8 +31,8 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/types/testdata"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/types/testdata"
 )
 
 func TestParseTransactionRLP(t *testing.T) {
@@ -369,7 +369,7 @@ func TestSetCodeTxnParsing(t *testing.T) {
 			tr := NewTRand()
 			var txn Transaction
 			requiredAuthLen := 0
-			for txn = tr.RandTransaction(); txn.Type() != types2.SetCodeTxnType || len(txn.(*SetCodeTransaction).GetAuthorizations()) != requiredAuthLen; txn = tr.RandTransaction() {
+			for txn = tr.RandTransaction(); txn.Type() != types.SetCodeTxnType || len(txn.(*SetCodeTransaction).GetAuthorizations()) != requiredAuthLen; txn = tr.RandTransaction() {
 			}
 			v, _, _ := txn.RawSignatureValues()
 			v.SetUint64(uint64(randIntInRange(0, 2)))
@@ -387,7 +387,7 @@ func TestSetCodeTxnParsing(t *testing.T) {
 			}
 
 			hex := hexutil.Bytes(w.Bytes()).String()
-			//hex := libcommon.BytesToHash().Hex()
+			//hex := common.BytesToHash().Hex()
 			authj, err := json.Marshal(txn.(*SetCodeTransaction).GetAuthorizations())
 			if err != nil {
 				t.Error(err)
@@ -405,7 +405,7 @@ func TestSetCodeTxnParsingWithLargeAuthorizationValues(t *testing.T) {
 			tr := NewTRand()
 			var txn. Transaction
 			requiredAuthLen := 1
-			for txn. = tr.RandTransaction(); txn..Type() != types2.SetCodeTxnType || len(txn..(*SetCodeTransaction).GetAuthorizations()) != requiredAuthLen; txn. = tr.RandTransaction() {
+			for txn. = tr.RandTransaction(); txn..Type() != types.SetCodeTxnType || len(txn..(*SetCodeTransaction).GetAuthorizations()) != requiredAuthLen; txn. = tr.RandTransaction() {
 			}
 			v, _, _ := txn..RawSignatureValues()
 			v.SetUint64(uint64(randIntInRange(0, 2)))

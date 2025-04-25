@@ -32,7 +32,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
@@ -139,21 +139,21 @@ func TestEIP2200(t *testing.T) {
 			r, w := state.NewReaderV3(sd), state.NewWriterV4(sd)
 			s := state.New(r)
 
-			address := libcommon.BytesToAddress([]byte("contract"))
+			address := common.BytesToAddress([]byte("contract"))
 			s.CreateAccount(address, true)
 			s.SetCode(address, hexutil.MustDecode(tt.input))
-			s.SetState(address, &libcommon.Hash{}, *uint256.NewInt(uint64(tt.original)))
+			s.SetState(address, &common.Hash{}, *uint256.NewInt(uint64(tt.original)))
 
 			_ = s.CommitBlock(params.AllProtocolChanges.Rules(0, 0), w)
 			vmctx := evmtypes.BlockContext{
-				CanTransfer: func(evmtypes.IntraBlockState, libcommon.Address, *uint256.Int) (bool, error) { return true, nil },
-				Transfer: func(evmtypes.IntraBlockState, libcommon.Address, libcommon.Address, *uint256.Int, bool) error {
+				CanTransfer: func(evmtypes.IntraBlockState, common.Address, *uint256.Int) (bool, error) { return true, nil },
+				Transfer: func(evmtypes.IntraBlockState, common.Address, common.Address, *uint256.Int, bool) error {
 					return nil
 				},
 			}
 			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, params.AllProtocolChanges, vm.Config{ExtraEips: []int{2200}})
 
-			_, gas, err := vmenv.Call(vm.AccountRef(libcommon.Address{}), address, nil, tt.gaspool, new(uint256.Int), false /* bailout */)
+			_, gas, err := vmenv.Call(vm.AccountRef(common.Address{}), address, nil, tt.gaspool, new(uint256.Int), false /* bailout */)
 			if !errors.Is(err, tt.failure) {
 				t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
 			}
@@ -184,9 +184,9 @@ var createGasTests = []struct {
 
 func TestCreateGas(t *testing.T) {
 	t.Parallel()
-	db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	for i, tt := range createGasTests {
-		address := libcommon.BytesToAddress([]byte("contract"))
+		address := common.BytesToAddress([]byte("contract"))
 
 		tx, err := db.BeginRw(context.Background())
 		require.NoError(t, err)
@@ -214,8 +214,8 @@ func TestCreateGas(t *testing.T) {
 		_ = s.CommitBlock(chain.TestChainConfig.Rules(0, 0), stateWriter)
 
 		vmctx := evmtypes.BlockContext{
-			CanTransfer: func(evmtypes.IntraBlockState, libcommon.Address, *uint256.Int) (bool, error) { return true, nil },
-			Transfer: func(evmtypes.IntraBlockState, libcommon.Address, libcommon.Address, *uint256.Int, bool) error {
+			CanTransfer: func(evmtypes.IntraBlockState, common.Address, *uint256.Int) (bool, error) { return true, nil },
+			Transfer: func(evmtypes.IntraBlockState, common.Address, common.Address, *uint256.Int, bool) error {
 				return nil
 			},
 		}
@@ -227,7 +227,7 @@ func TestCreateGas(t *testing.T) {
 		vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainConfig, config)
 
 		var startGas uint64 = math.MaxUint64
-		_, gas, err := vmenv.Call(vm.AccountRef(libcommon.Address{}), address, nil, startGas, new(uint256.Int), false /* bailout */)
+		_, gas, err := vmenv.Call(vm.AccountRef(common.Address{}), address, nil, startGas, new(uint256.Int), false /* bailout */)
 		if err != nil {
 			t.Errorf("test %d execution failed: %v", i, err)
 		}

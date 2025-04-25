@@ -24,17 +24,16 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-
-	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
 )
 
 // ReadChainConfig retrieves the consensus settings based on the given genesis hash.
-func ReadChainConfig(db kv.Getter, hash libcommon.Hash) (*chain.Config, error) {
+func ReadChainConfig(db kv.Getter, hash common.Hash) (*chain.Config, error) {
 	data, err := db.GetOne(kv.ConfigTable, hash[:])
 	if err != nil {
 		return nil, err
@@ -59,7 +58,7 @@ func ReadChainConfig(db kv.Getter, hash libcommon.Hash) (*chain.Config, error) {
 }
 
 // WriteChainConfig writes the chain config settings to the database.
-func WriteChainConfig(db kv.Putter, hash libcommon.Hash, cfg *chain.Config) error {
+func WriteChainConfig(db kv.Putter, hash common.Hash, cfg *chain.Config) error {
 	if cfg == nil {
 		return nil
 	}

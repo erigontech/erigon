@@ -28,20 +28,20 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir string, logger log.Logger) *types.Block {
 	var (
-		aa = libcommon.HexToAddress("0x000000000000000000000000000000000000aaaa")
+		aa = common.HexToAddress("0x000000000000000000000000000000000000aaaa")
 		// Generate a canonical chain to act as the main dataset
 		engine = ethash.NewFaker()
 		// A sender who makes transactions, has some funds
@@ -118,8 +118,8 @@ func testRlpIterator(t *testing.T, txs, uncles, datasize int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var gotHashes []libcommon.Hash
-	var expHashes []libcommon.Hash
+	var gotHashes []common.Hash
+	var expHashes []common.Hash
 	for txIt.Next() {
 		gotHashes = append(gotHashes, crypto.Keccak256Hash(txIt.Value()))
 	}
@@ -159,12 +159,12 @@ func BenchmarkHashing(b *testing.B) {
 		bodyRlp, _ = rlp.EncodeToBytes(block.Body())
 		blockRlp, _ = rlp.EncodeToBytes(block)
 	}
-	var got libcommon.Hash
+	var got common.Hash
 	var hasher = sha3.NewLegacyKeccak256()
 	b.Run("iteratorhashing", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			var hash libcommon.Hash
+			var hash common.Hash
 			it, err := rlp.NewListIterator(bodyRlp)
 			if err != nil {
 				b.Fatal(err)
@@ -183,7 +183,7 @@ func BenchmarkHashing(b *testing.B) {
 			}
 		}
 	})
-	var exp libcommon.Hash
+	var exp common.Hash
 	b.Run("fullbodyhashing", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
