@@ -27,7 +27,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
 )
 
@@ -46,8 +46,8 @@ func (tx *SetCodeTransaction) Type() byte {
 	return SetCodeTxType
 }
 
-func (tx *SetCodeTransaction) GetBlobHashes() []libcommon.Hash {
-	return []libcommon.Hash{}
+func (tx *SetCodeTransaction) GetBlobHashes() []common.Hash {
+	return []common.Hash{}
 }
 
 func (tx *SetCodeTransaction) GetAuthorizations() []Authorization {
@@ -151,7 +151,7 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain
 	return &msg, err
 }
 
-func (tx *SetCodeTransaction) Sender(signer Signer) (libcommon.Address, error) {
+func (tx *SetCodeTransaction) Sender(signer Signer) (common.Address, error) {
 	if from := tx.from.Load(); from != nil {
 		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
 			return *from, nil
@@ -159,13 +159,13 @@ func (tx *SetCodeTransaction) Sender(signer Signer) (libcommon.Address, error) {
 	}
 	addr, err := signer.Sender(tx)
 	if err != nil {
-		return libcommon.Address{}, err
+		return common.Address{}, err
 	}
 	tx.from.Store(&addr)
 	return addr, nil
 }
 
-func (tx *SetCodeTransaction) Hash() libcommon.Hash {
+func (tx *SetCodeTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
@@ -186,7 +186,7 @@ func (tx *SetCodeTransaction) Hash() libcommon.Hash {
 	return hash
 }
 
-func (tx *SetCodeTransaction) SigningHash(chainID *big.Int) libcommon.Hash {
+func (tx *SetCodeTransaction) SigningHash(chainID *big.Int) common.Hash {
 	return prefixedRlpHash(
 		SetCodeTxType,
 		[]interface{}{
@@ -254,7 +254,7 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 	if len(b) != 20 {
 		return fmt.Errorf("wrong size for To: %d", len(b))
 	}
-	tx.To = &libcommon.Address{}
+	tx.To = &common.Address{}
 	copy((*tx.To)[:], b)
 	if b, err = s.Uint256Bytes(); err != nil {
 		return err
@@ -361,16 +361,16 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 }
 
 // ParseDelegation tries to parse the address from a delegation slice.
-func ParseDelegation(code []byte) (libcommon.Address, bool) {
+func ParseDelegation(code []byte) (common.Address, bool) {
 	if len(code) != DelegateDesignationCodeSize || !bytes.HasPrefix(code, params.DelegatedDesignationPrefix) {
-		return libcommon.Address{}, false
+		return common.Address{}, false
 	}
-	var addr libcommon.Address
+	var addr common.Address
 	copy(addr[:], code[len(params.DelegatedDesignationPrefix):])
 	return addr, true
 }
 
 // AddressToDelegation adds the delegation prefix to the specified address.
-func AddressToDelegation(addr libcommon.Address) []byte {
+func AddressToDelegation(addr common.Address) []byte {
 	return append(params.DelegatedDesignationPrefix, addr.Bytes()...)
 }

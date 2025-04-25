@@ -26,7 +26,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
 )
 
@@ -35,12 +35,12 @@ var ErrNilToFieldTx = errors.New("Tx: field 'To' can not be 'nil'")
 type BlobTx struct {
 	DynamicFeeTransaction
 	MaxFeePerBlobGas    *uint256.Int
-	BlobVersionedHashes []libcommon.Hash
+	BlobVersionedHashes []common.Hash
 }
 
 func (stx *BlobTx) Type() byte { return BlobTxType }
 
-func (stx *BlobTx) GetBlobHashes() []libcommon.Hash {
+func (stx *BlobTx) GetBlobHashes() []common.Hash {
 	return stx.BlobVersionedHashes
 }
 
@@ -81,7 +81,7 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*M
 	return &msg, err
 }
 
-func (stx *BlobTx) cachedSender() (sender libcommon.Address, ok bool) {
+func (stx *BlobTx) cachedSender() (sender common.Address, ok bool) {
 	s := stx.from.Load()
 	if s == nil {
 		return sender, false
@@ -89,7 +89,7 @@ func (stx *BlobTx) cachedSender() (sender libcommon.Address, ok bool) {
 	return *s, true
 }
 
-func (stx *BlobTx) Sender(signer Signer) (libcommon.Address, error) {
+func (stx *BlobTx) Sender(signer Signer) (common.Address, error) {
 	if from := stx.from.Load(); from != nil {
 		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
 			return *from, nil
@@ -97,13 +97,13 @@ func (stx *BlobTx) Sender(signer Signer) (libcommon.Address, error) {
 	}
 	addr, err := signer.Sender(stx)
 	if err != nil {
-		return libcommon.Address{}, err
+		return common.Address{}, err
 	}
 	stx.from.Store(&addr)
 	return addr, nil
 }
 
-func (stx *BlobTx) Hash() libcommon.Hash {
+func (stx *BlobTx) Hash() common.Hash {
 	if hash := stx.hash.Load(); hash != nil {
 		return *hash
 	}
@@ -125,7 +125,7 @@ func (stx *BlobTx) Hash() libcommon.Hash {
 	return hash
 }
 
-func (stx *BlobTx) SigningHash(chainID *big.Int) libcommon.Hash {
+func (stx *BlobTx) SigningHash(chainID *big.Int) common.Hash {
 	return prefixedRlpHash(
 		BlobTxType,
 		[]interface{}{
@@ -160,11 +160,11 @@ func (stx *BlobTx) payloadSize() (payloadSize, nonceLen, gasLen, accessListLen, 
 	return
 }
 
-func blobVersionedHashesSize(hashes []libcommon.Hash) int {
+func blobVersionedHashesSize(hashes []common.Hash) int {
 	return 33 * len(hashes)
 }
 
-func encodeBlobVersionedHashes(hashes []libcommon.Hash, w io.Writer, b []byte) error {
+func encodeBlobVersionedHashes(hashes []common.Hash, w io.Writer, b []byte) error {
 	for i := 0; i < len(hashes); i++ {
 		if err := rlp.EncodeString(hashes[i][:], w, b); err != nil {
 			return err
@@ -326,7 +326,7 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	if len(b) != 20 {
 		return fmt.Errorf("wrong size for To: %d", len(b))
 	}
-	stx.To = &libcommon.Address{}
+	stx.To = &common.Address{}
 	copy((*stx.To)[:], b)
 
 	if b, err = s.Uint256Bytes(); err != nil {
@@ -348,7 +348,7 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	}
 	stx.MaxFeePerBlobGas = new(uint256.Int).SetBytes(b)
 	// decode BlobVersionedHashes
-	stx.BlobVersionedHashes = []libcommon.Hash{}
+	stx.BlobVersionedHashes = []common.Hash{}
 	if err = decodeBlobVersionedHashes(&stx.BlobVersionedHashes, s); err != nil {
 		return err
 	}
@@ -375,13 +375,13 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	return s.ListEnd()
 }
 
-func decodeBlobVersionedHashes(hashes *[]libcommon.Hash, s *rlp.Stream) error {
+func decodeBlobVersionedHashes(hashes *[]common.Hash, s *rlp.Stream) error {
 	_, err := s.List()
 	if err != nil {
 		return fmt.Errorf("open BlobVersionedHashes: %w", err)
 	}
 	var b []byte
-	_hash := libcommon.Hash{}
+	_hash := common.Hash{}
 
 	for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
 		if len(b) == 32 {

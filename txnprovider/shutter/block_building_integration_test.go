@@ -32,7 +32,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	params2 "github.com/erigontech/erigon-lib/chain/params"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
@@ -209,15 +209,15 @@ type blockBuildingUniverse struct {
 	contractsDeployer    testhelpers.ContractsDeployer
 	contractsDeployment  testhelpers.ContractsDeployment
 	acc1PrivKey          *ecdsa.PrivateKey
-	acc1                 libcommon.Address
+	acc1                 common.Address
 	acc2PrivKey          *ecdsa.PrivateKey
-	acc2                 libcommon.Address
+	acc2                 common.Address
 	acc3PrivKey          *ecdsa.PrivateKey
-	acc3                 libcommon.Address
+	acc3                 common.Address
 	acc4PrivKey          *ecdsa.PrivateKey
-	acc4                 libcommon.Address
+	acc4                 common.Address
 	acc5PrivKey          *ecdsa.PrivateKey
-	acc5                 libcommon.Address
+	acc5                 common.Address
 	transactor           testhelpers.EncryptedTransactor
 	txnInclusionVerifier testhelpers.TxnInclusionVerifier
 	shutterConfig        shuttercfg.Config
@@ -337,13 +337,13 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	genesis.Config = &chainConfig
 	genesis.Alloc[params2.ConsolidationRequestAddress] = types.GenesisAccount{
 		Code:    []byte{0}, // Can't be empty
-		Storage: make(map[libcommon.Hash]libcommon.Hash, 0),
+		Storage: make(map[common.Hash]common.Hash, 0),
 		Balance: big.NewInt(0),
 		Nonce:   0,
 	}
 	genesis.Alloc[params2.WithdrawalRequestAddress] = types.GenesisAccount{
 		Code:    []byte{0}, // Can't be empty
-		Storage: make(map[libcommon.Hash]libcommon.Hash, 0),
+		Storage: make(map[common.Hash]common.Hash, 0),
 		Balance: big.NewInt(0),
 		Nonce:   0,
 	}

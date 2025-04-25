@@ -29,6 +29,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/seg"
 
@@ -37,7 +38,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/length"
 	downloadertype "github.com/erigontech/erigon-lib/downloader/snaptype"
@@ -94,7 +94,7 @@ var readDomains = &cobra.Command{
 	Args:      cobra.ArbitraryArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		ctx, _ := libcommon.RootContext()
+		ctx, _ := common.RootContext()
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
@@ -520,7 +520,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	case "account":
 		for _, addr := range addrs {
 
-			acc, err := r.ReadAccountData(libcommon.BytesToAddress(addr))
+			acc, err := r.ReadAccountData(common.BytesToAddress(addr))
 			if err != nil {
 				logger.Error("failed to read account", "addr", addr, "err", err)
 				continue
@@ -529,7 +529,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 		}
 	case "storage":
 		for _, addr := range addrs {
-			a, s := libcommon.BytesToAddress(addr[:length.Addr]), libcommon.BytesToHash(addr[length.Addr:])
+			a, s := common.BytesToAddress(addr[:length.Addr]), common.BytesToHash(addr[length.Addr:])
 			st, err := r.ReadAccountStorage(a, 0, &s)
 			if err != nil {
 				logger.Error("failed to read storage", "addr", a.String(), "key", s.String(), "err", err)
@@ -539,7 +539,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 		}
 	case "code":
 		for _, addr := range addrs {
-			code, err := r.ReadAccountCode(libcommon.BytesToAddress(addr), 0)
+			code, err := r.ReadAccountCode(common.BytesToAddress(addr), 0)
 			if err != nil {
 				logger.Error("failed to read code", "addr", addr, "err", err)
 				continue

@@ -387,7 +387,7 @@ func TestSetCodeTxnParsing(t *testing.T) {
 			}
 
 			hex := hexutil.Bytes(w.Bytes()).String()
-			//hex := libcommon.BytesToHash().Hex()
+			//hex := common.BytesToHash().Hex()
 			authj, err := json.Marshal(txn.(*SetCodeTransaction).GetAuthorizations())
 			if err != nil {
 				t.Error(err)

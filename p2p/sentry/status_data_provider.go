@@ -25,7 +25,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -40,7 +40,7 @@ var ErrNoHead = errors.New("ReadChainHead: ReadCurrentHeader error")
 type ChainHead struct {
 	HeadHeight uint64
 	HeadTime   uint64
-	HeadHash   libcommon.Hash
+	HeadHash   common.Hash
 	HeadTd     *uint256.Int
 }
 
@@ -48,7 +48,7 @@ type StatusDataProvider struct {
 	db kv.RoDB
 
 	networkId   uint64
-	genesisHash libcommon.Hash
+	genesisHash common.Hash
 	genesisHead ChainHead
 	heightForks []uint64
 	timeForks   []uint64

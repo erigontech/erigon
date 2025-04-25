@@ -36,7 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/params"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/config3"
@@ -60,7 +60,7 @@ var allocs embed.FS
 // GenesisMismatchError is raised when trying to overwrite an existing
 // genesis block with an incompatible one.
 type GenesisMismatchError struct {
-	Stored, New libcommon.Hash
+	Stored, New common.Hash
 }
 
 func (e *GenesisMismatchError) Error() string {
@@ -105,7 +105,7 @@ func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, override
 	return c, b, nil
 }
 
-func configOrDefault(g *types.Genesis, genesisHash libcommon.Hash) *chain.Config {
+func configOrDefault(g *types.Genesis, genesisHash common.Hash) *chain.Config {
 	if g != nil {
 		return g.Config
 	}
@@ -139,7 +139,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *b
 		}
 	}
 
-	if (storedHash == libcommon.Hash{}) {
+	if (storedHash == common.Hash{}) {
 		custom := true
 		if genesis == nil {
 			logger.Info("Writing main-net genesis block")
@@ -293,20 +293,20 @@ func write(tx kv.RwTx, g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (
 }
 
 // GenesisBlockForTesting creates and writes a block in which addr has the given wei balance.
-func GenesisBlockForTesting(db kv.RwDB, addr libcommon.Address, balance *big.Int, dirs datadir.Dirs, logger log.Logger) *types.Block {
+func GenesisBlockForTesting(db kv.RwDB, addr common.Address, balance *big.Int, dirs datadir.Dirs, logger log.Logger) *types.Block {
 	g := types.Genesis{Alloc: types.GenesisAlloc{addr: {Balance: balance}}, Config: chain.TestChainConfig}
 	block := MustCommitGenesis(&g, db, dirs, logger)
 	return block
 }
 
 type GenAccount struct {
-	Addr    libcommon.Address
+	Addr    common.Address
 	Balance *big.Int
 }
 
 func GenesisWithAccounts(db kv.RwDB, accs []GenAccount, dirs datadir.Dirs, logger log.Logger) *types.Block {
 	g := types.Genesis{Config: chain.TestChainConfig}
-	allocs := make(map[libcommon.Address]types.GenesisAccount)
+	allocs := make(map[common.Address]types.GenesisAccount)
 	for _, acc := range accs {
 		allocs[acc.Addr] = types.GenesisAccount{Balance: acc.Balance}
 	}
@@ -373,8 +373,8 @@ func AmoyGenesisBlock() *types.Genesis {
 		Timestamp:  1700225065,
 		GasLimit:   10000000,
 		Difficulty: big.NewInt(1),
-		Mixhash:    libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
-		Coinbase:   libcommon.HexToAddress("0x0000000000000000000000000000000000000000"),
+		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
 		Alloc:      readPrealloc("allocs/amoy.json"),
 	}
 }
@@ -387,8 +387,8 @@ func BorMainnetGenesisBlock() *types.Genesis {
 		Timestamp:  1590824836,
 		GasLimit:   10000000,
 		Difficulty: big.NewInt(1),
-		Mixhash:    libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
-		Coinbase:   libcommon.HexToAddress("0x0000000000000000000000000000000000000000"),
+		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
 		Alloc:      readPrealloc("allocs/bor_mainnet.json"),
 	}
 }
@@ -400,8 +400,8 @@ func BorDevnetGenesisBlock() *types.Genesis {
 		Timestamp:  1558348305,
 		GasLimit:   10000000,
 		Difficulty: big.NewInt(1),
-		Mixhash:    libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
-		Coinbase:   libcommon.HexToAddress("0x0000000000000000000000000000000000000000"),
+		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
 		Alloc:      readPrealloc("allocs/bor_devnet.json"),
 	}
 }
@@ -410,7 +410,7 @@ func GnosisGenesisBlock() *types.Genesis {
 	return &types.Genesis{
 		Config:     params2.GnosisChainConfig,
 		Timestamp:  0,
-		AuRaSeal:   types.NewAuraSeal(0, libcommon.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")),
+		AuRaSeal:   types.NewAuraSeal(0, common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")),
 		GasLimit:   0x989680,
 		Difficulty: big.NewInt(0x20000),
 		Alloc:      readPrealloc("allocs/gnosis.json"),
@@ -421,7 +421,7 @@ func ChiadoGenesisBlock() *types.Genesis {
 	return &types.Genesis{
 		Config:     params2.ChiadoChainConfig,
 		Timestamp:  0,
-		AuRaSeal:   types.NewAuraSeal(0, libcommon.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")),
+		AuRaSeal:   types.NewAuraSeal(0, common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")),
 		GasLimit:   0x989680,
 		Difficulty: big.NewInt(0x20000),
 		Alloc:      readPrealloc("allocs/chiado.json"),
@@ -436,17 +436,17 @@ func TestGenesisBlock() *types.Genesis {
 //	DevnetSignPrivateKey = crypto.HexToECDSA(sha256.Sum256([]byte("erigon devnet key")))
 //	DevnetEtherbase=crypto.PubkeyToAddress(DevnetSignPrivateKey.PublicKey)
 var DevnetSignPrivateKey, _ = crypto.HexToECDSA("26e86e45f6fc45ec6e2ecd128cec80fa1d1505e5507dcd2ae58c3130a7a97b48")
-var DevnetEtherbase = libcommon.HexToAddress("67b1d87101671b127f5f8714789c7192f7ad340e")
+var DevnetEtherbase = common.HexToAddress("67b1d87101671b127f5f8714789c7192f7ad340e")
 
 // DevnetSignKey is defined like this to allow the devnet process to pre-allocate keys
 // for nodes and then pass the address via --miner.etherbase - the function will be called
 // to retieve the mining key
-var DevnetSignKey = func(address libcommon.Address) *ecdsa.PrivateKey {
+var DevnetSignKey = func(address common.Address) *ecdsa.PrivateKey {
 	return DevnetSignPrivateKey
 }
 
 // DeveloperGenesisBlock returns the 'geth --dev' genesis block.
-func DeveloperGenesisBlock(period uint64, faucet libcommon.Address) *types.Genesis {
+func DeveloperGenesisBlock(period uint64, faucet common.Address) *types.Genesis {
 	// Override the default period to the user requested one
 	config := *params2.AllCliqueProtocolChanges
 	config.Clique.Period = period
@@ -522,7 +522,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		if g.ParentBeaconBlockRoot != nil {
 			head.ParentBeaconBlockRoot = g.ParentBeaconBlockRoot
 		} else {
-			head.ParentBeaconBlockRoot = &libcommon.Hash{}
+			head.ParentBeaconBlockRoot = &common.Hash{}
 		}
 	}
 
@@ -534,7 +534,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		}
 	}
 
-	var root libcommon.Hash
+	var root common.Hash
 	var statedb *state.IntraBlockState // reader behind this statedb is dead at the moment of return, tx is rolled back
 
 	ctx := context.Background()
@@ -583,12 +583,12 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		}
 		// See https://github.com/NethermindEth/nethermind/blob/master/src/Nethermind/Nethermind.Consensus.AuRa/InitializationSteps/LoadGenesisBlockAuRa.cs
 		if hasConstructorAllocation && g.Config.Aura != nil {
-			statedb.CreateAccount(libcommon.Address{}, false)
+			statedb.CreateAccount(common.Address{}, false)
 		}
 
 		keys := sortedAllocKeys(g.Alloc)
 		for _, key := range keys {
-			addr := libcommon.BytesToAddress([]byte(key))
+			addr := common.BytesToAddress([]byte(key))
 			account := g.Alloc[addr]
 
 			balance, overflow := uint256.FromBig(account.Balance)
@@ -622,7 +622,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		if err != nil {
 			return err
 		}
-		root = libcommon.BytesToHash(rh)
+		root = common.BytesToHash(rh)
 		return nil
 	})
 

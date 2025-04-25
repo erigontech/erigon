@@ -24,7 +24,7 @@ import (
 	"io"
 	"math/big"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
@@ -59,7 +59,7 @@ func (l *JSONLogger) Tracer() *tracers.Tracer {
 	}
 }
 
-func (l *JSONLogger) OnTxStart(env *tracing.VMContext, tx types.Transaction, from libcommon.Address) {
+func (l *JSONLogger) OnTxStart(env *tracing.VMContext, tx types.Transaction, from common.Address) {
 	l.env = env
 }
 
@@ -111,5 +111,5 @@ func (l *JSONLogger) OnExit(depth int, output []byte, gasUsed uint64, err error,
 	if err != nil {
 		errMsg = err.Error()
 	}
-	_ = l.encoder.Encode(endLog{libcommon.Bytes2Hex(output), math.HexOrDecimal64(gasUsed), errMsg})
+	_ = l.encoder.Encode(endLog{common.Bytes2Hex(output), math.HexOrDecimal64(gasUsed), errMsg})
 }

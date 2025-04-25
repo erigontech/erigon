@@ -35,7 +35,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
@@ -120,7 +120,7 @@ type MockSentry struct {
 	sentMessages         []*proto_sentry.OutboundMessageData
 	StreamWg             sync.WaitGroup
 	ReceiveWg            sync.WaitGroup
-	Address              libcommon.Address
+	Address              common.Address
 	Eth1ExecutionService *eth1.EthereumExecutionModule
 
 	Notifications *shards.Notifications
@@ -438,8 +438,8 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		snapDb         kv.RwDB
 		snapDownloader = proto_downloader.NewMockDownloaderClient(ctrl)
 
-		recents    *lru.ARCCache[libcommon.Hash, *bor.Snapshot]
-		signatures *lru.ARCCache[libcommon.Hash, libcommon.Address]
+		recents    *lru.ARCCache[common.Hash, *bor.Snapshot]
+		signatures *lru.ARCCache[common.Hash, common.Address]
 	)
 
 	snapDownloader.EXPECT().
@@ -619,7 +619,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 
 // Mock is convenience function to create a mock with some pre-set values
 func Mock(tb testing.TB) *MockSentry {
-	funds := big.NewInt(1 * libcommon.Ether)
+	funds := big.NewInt(1 * common.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
 	chainConfig := chain.TestChainConfig
@@ -633,7 +633,7 @@ func Mock(tb testing.TB) *MockSentry {
 }
 
 func MockWithTxPool(t *testing.T) *MockSentry {
-	funds := big.NewInt(1 * libcommon.Ether)
+	funds := big.NewInt(1 * common.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
 	chainConfig := chain.TestChainConfig
@@ -649,7 +649,7 @@ func MockWithTxPool(t *testing.T) *MockSentry {
 }
 
 func MockWithTxPoolCancun(t *testing.T) *MockSentry {
-	funds := big.NewInt(1 * libcommon.Ether)
+	funds := big.NewInt(1 * common.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
 	chainConfig := params.AllProtocolChanges
@@ -665,11 +665,11 @@ func MockWithTxPoolCancun(t *testing.T) *MockSentry {
 }
 
 func MockWithZeroTTD(t *testing.T, withPosDownloader bool) *MockSentry {
-	funds := big.NewInt(1 * libcommon.Ether)
+	funds := big.NewInt(1 * common.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
 	chainConfig := params.AllProtocolChanges
-	chainConfig.TerminalTotalDifficulty = libcommon.Big0
+	chainConfig.TerminalTotalDifficulty = common.Big0
 	gspec := &types.Genesis{
 		Config: chainConfig,
 		Alloc: types.GenesisAlloc{
@@ -680,11 +680,11 @@ func MockWithZeroTTD(t *testing.T, withPosDownloader bool) *MockSentry {
 }
 
 func MockWithZeroTTDGnosis(t *testing.T, withPosDownloader bool) *MockSentry {
-	funds := big.NewInt(1 * libcommon.Ether)
+	funds := big.NewInt(1 * common.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
 	chainConfig := chain.TestChainAuraConfig
-	chainConfig.TerminalTotalDifficulty = libcommon.Big0
+	chainConfig.TerminalTotalDifficulty = common.Big0
 	chainConfig.TerminalTotalDifficultyPassed = true
 	gspec := &types.Genesis{
 		Config: chainConfig,

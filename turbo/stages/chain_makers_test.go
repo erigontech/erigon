@@ -28,7 +28,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	protosentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -140,7 +140,7 @@ func TestGenerateChain(t *testing.T) {
 	}
 
 	// Test of receipts
-	hashPacket := make([]libcommon.Hash, 0, len(chain.Blocks))
+	hashPacket := make([]common.Hash, 0, len(chain.Blocks))
 	for _, block := range chain.Blocks {
 		hashPacket = append(hashPacket, block.Hash())
 	}
@@ -167,9 +167,9 @@ func TestGenerateChain(t *testing.T) {
 	if protosentry.MessageId_RECEIPTS_66 != msg.Id {
 		t.Errorf("receipt id %d do not match the expected id %d", msg.Id, protosentry.MessageId_RECEIPTS_66)
 	}
-	r1 := types.Receipt{Type: 0, PostState: []byte{}, Status: 1, CumulativeGasUsed: 21000, Bloom: [256]byte{}, Logs: types.Logs{}, TxHash: libcommon.HexToHash("0x9ca7a9e6bf23353fc5ac37f5c5676db1accec4af83477ac64cdcaa37f3a837f9"), ContractAddress: libcommon.HexToAddress("0x0000000000000000000000000000000000000000"), GasUsed: 21000, BlockHash: libcommon.HexToHash("0x5c7909bf8d4d8db71f0f6091aa412129591a8e41ff2230369ddf77a00bf57149"), BlockNumber: big.NewInt(1), TransactionIndex: 0}
-	r2 := types.Receipt{Type: 0, PostState: []byte{}, Status: 1, CumulativeGasUsed: 21000, Bloom: [256]byte{}, Logs: types.Logs{}, TxHash: libcommon.HexToHash("0xf190eed1578cdcfe69badd05b7ef183397f336dc3de37baa4adbfb4bc657c11e"), ContractAddress: libcommon.HexToAddress("0x0000000000000000000000000000000000000000"), GasUsed: 21000, BlockHash: libcommon.HexToHash("0xe4d4617526870ba7c5b81900e31bd2525c02f27fe06fd6c3caf7bed05f3271f4"), BlockNumber: big.NewInt(2), TransactionIndex: 0}
-	r3 := types.Receipt{Type: 0, PostState: []byte{}, Status: 1, CumulativeGasUsed: 42000, Bloom: [256]byte{}, Logs: types.Logs{}, TxHash: libcommon.HexToHash("0x309a030e44058e435a2b01302006880953e2c9319009db97013eb130d7a24eab"), ContractAddress: libcommon.HexToAddress("0x0000000000000000000000000000000000000000"), GasUsed: 21000, BlockHash: libcommon.HexToHash("0xe4d4617526870ba7c5b81900e31bd2525c02f27fe06fd6c3caf7bed05f3271f4"), BlockNumber: big.NewInt(2), TransactionIndex: 1}
+	r1 := types.Receipt{Type: 0, PostState: []byte{}, Status: 1, CumulativeGasUsed: 21000, Bloom: [256]byte{}, Logs: types.Logs{}, TxHash: common.HexToHash("0x9ca7a9e6bf23353fc5ac37f5c5676db1accec4af83477ac64cdcaa37f3a837f9"), ContractAddress: common.HexToAddress("0x0000000000000000000000000000000000000000"), GasUsed: 21000, BlockHash: common.HexToHash("0x5c7909bf8d4d8db71f0f6091aa412129591a8e41ff2230369ddf77a00bf57149"), BlockNumber: big.NewInt(1), TransactionIndex: 0}
+	r2 := types.Receipt{Type: 0, PostState: []byte{}, Status: 1, CumulativeGasUsed: 21000, Bloom: [256]byte{}, Logs: types.Logs{}, TxHash: common.HexToHash("0xf190eed1578cdcfe69badd05b7ef183397f336dc3de37baa4adbfb4bc657c11e"), ContractAddress: common.HexToAddress("0x0000000000000000000000000000000000000000"), GasUsed: 21000, BlockHash: common.HexToHash("0xe4d4617526870ba7c5b81900e31bd2525c02f27fe06fd6c3caf7bed05f3271f4"), BlockNumber: big.NewInt(2), TransactionIndex: 0}
+	r3 := types.Receipt{Type: 0, PostState: []byte{}, Status: 1, CumulativeGasUsed: 42000, Bloom: [256]byte{}, Logs: types.Logs{}, TxHash: common.HexToHash("0x309a030e44058e435a2b01302006880953e2c9319009db97013eb130d7a24eab"), ContractAddress: common.HexToAddress("0x0000000000000000000000000000000000000000"), GasUsed: 21000, BlockHash: common.HexToHash("0xe4d4617526870ba7c5b81900e31bd2525c02f27fe06fd6c3caf7bed05f3271f4"), BlockNumber: big.NewInt(2), TransactionIndex: 1}
 
 	encodedEmpty, err := rlp.EncodeToBytes(types.Receipts{})
 	if err != nil {
