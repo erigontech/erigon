@@ -393,8 +393,8 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 			plainKeys, updates = sortUpdatesByHashIncrease(t, trieSequential, plainKeys, updates)
 		}
 
-		trieSequential.SetTrace(true)
-		trieBatch.SetTrace(true)
+		trieSequential.SetTrace(false)
+		trieBatch.SetTrace(false)
 
 		{
 			fmt.Printf("3. Trie sequential update (%d updates)\n", len(updates))
@@ -444,8 +444,8 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 			plainKeys, updates = sortUpdatesByHashIncrease(t, trieSequential, plainKeys, updates)
 		}
 
-		trieSequential.SetTrace(true)
-		trieBatch.SetTrace(true)
+		trieSequential.SetTrace(false)
+		trieBatch.SetTrace(false)
 
 		{
 			fmt.Printf("5. Trie sequential update (%d updates)\n", len(updates))
@@ -551,8 +551,8 @@ func Test_ParallelHexPatriciaHashed_EdgeCases(t *testing.T) {
 	plainKeys, updates = sortUpdatesByHashIncrease(t, trieSequential, plainKeys, updates)
 	ctx := context.Background()
 
-	trieSequential.SetTrace(true)
-	trieBatch.SetTrace(true)
+	trieSequential.SetTrace(false)
+	trieBatch.SetTrace(false)
 
 	var rSeq, rBatch []byte
 	{
@@ -1800,8 +1800,8 @@ func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
 
 	trieTwo := NewHexPatriciaHashed(length.Addr, msTwo)
 
-	trieOne.SetTrace(true)
-	trieTwo.SetTrace(true)
+	trieOne.SetTrace(false)
+	trieTwo.SetTrace(false)
 
 	var rSeq, rBatch []byte
 	{
