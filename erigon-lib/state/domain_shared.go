@@ -77,6 +77,7 @@ type dataWithPrevStep struct {
 }
 
 type SharedDomains interface {
+	kv.TemporalGetter
 	SetChangesetAccumulator(acc *StateChangeSet)
 	SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *StateChangeSet)
 	GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumber uint64) ([kv.DomainLen][]kv.DomainEntryDiff, bool, error)
@@ -98,10 +99,9 @@ type SharedDomains interface {
 	SetTrace(b bool)
 	ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum uint64, logPrefix string) (rootHash []byte, err error)
 	UpdateCommitmentData(prefix string, data, prev []byte, prevStep uint64) error
-	IterateStoragePrefix(prefix []byte, it func(k []byte, v []byte, step uint64) error) error //investigate
+	IterateStoragePrefix(prefix []byte, it func(k []byte, v []byte, step uint64) (bool, error)) error //investigate
 	Close()
 	Flush(ctx context.Context, tx kv.RwTx) error                                           // override
-	GetLatest(domain kv.Domain, k []byte) (v []byte, step uint64, err error)               // override
 	DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error // override
 	DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error      // override
 	DomainDelPrefix(domain kv.Domain, prefix []byte) error                                 // override
@@ -687,13 +687,12 @@ func (sd *BufferedSharedDomains) SetTrace(b bool) {
 	sd.sdCtx.SetTrace(b)
 }
 
-	// uSize := sd.sdCtx.updates.Size()
+func (sd *BufferedSharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
 	rootHash, err = sd.sdCtx.ComputeCommitment(ctx, saveStateAfter, blockNum, logPrefix)
-	// fmt.Println("JG ComputeCommitment", "updates", uSize, "rootHash", hexutil.Encode(rootHash))
-	return rootHash, err
+	return
 }
 
-func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte) ([]byte, bool, error) {
+func (sd *BufferedSharedDomains) HasPrefix(domain kv.Domain, prefix []byte) ([]byte, bool, error) {
 	var firstKey []byte
 	var hasPrefix bool
 	err := sd.IteratePrefix(domain, prefix, func(k []byte, v []byte, step uint64) (bool, error) {
@@ -711,7 +710,7 @@ func (sd *BufferedSharedDomains) IterateStoragePrefix(prefix []byte, it func(k [
 	return sd.IteratePrefix(kv.StorageDomain, prefix, it)
 }
 
-func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, it func(k []byte, v []byte, step uint64) (cont bool, err error)) error {
+func (sd *BufferedSharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, it func(k []byte, v []byte, step uint64) (cont bool, err error)) error {
 	var haveRamUpdates bool
 	var ramIter btree2.MapIter[string, dataWithPrevStep]
 	if domain == kv.StorageDomain {
@@ -719,7 +718,7 @@ func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, it func(
 		ramIter = sd.storage.Iter()
 	}
 
-	return sd.AggTx().d[domain].debugIteratePrefix(prefix, haveRamUpdates, ramIter, it, sd.txNum, sd.StepSize(), sd.roTtx)
+	return sd.AggTx().d[domain].debugIteratePrefix(prefix, haveRamUpdates, ramIter, it, sd.txNum, sd.StepSize(), sd.roTx)
 }
 
 func (sd *BufferedSharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
