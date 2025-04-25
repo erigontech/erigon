@@ -223,6 +223,10 @@ func (tx *Tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, as
 	return it, nil
 }
 
+func (tx *Tx) HasPrefix(domain kv.Domain, prefix []byte) (firstKey []byte, ok bool, err error) {
+	panic("implement me pls. or use SharedDomains")
+}
+
 func (tx *Tx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err error) {
 	v, step, ok, err := tx.aggtx.GetLatest(name, k, tx.MdbxTx)
 	if err != nil {

@@ -25,10 +25,11 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/mdbx-go/mdbx"
+
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/mdbx-go/mdbx"
 )
 
 //Variables Naming:
@@ -536,6 +537,7 @@ type (
 
 type TemporalGetter interface {
 	GetLatest(name Domain, k []byte) (v []byte, step uint64, err error)
+	HasPrefix(name Domain, prefix []byte) (firstKey []byte, ok bool, err error)
 }
 type TemporalTx interface {
 	Tx
