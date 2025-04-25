@@ -252,4 +252,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.GDBMeFlag,
 
 	&utils.ExperimentalConcurrentCommitmentFlag,
+
+	// CHANGE(taiko) : include --taiko flag
+	&utils.TaikoFlag,
 }
