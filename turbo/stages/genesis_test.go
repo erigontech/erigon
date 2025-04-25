@@ -174,7 +174,7 @@ func TestSetupGenesis(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			dirs := datadir.New(tmpdir)
-			db, _ := temporaltest.NewTestDB(t, dirs)
+			db := temporaltest.NewTestDB(t, dirs)
 			//cc := tool.ChainConfigFromDB(db)
 			freezingCfg := ethconfig.Defaults.Snapshot
 			//freezingCfg.ChainName = cc.ChainName //TODO: nil-pointer?

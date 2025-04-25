@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon-lib/downloader"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/backup"
+	"github.com/erigontech/erigon-lib/kv/kvcfg"
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -1184,13 +1185,27 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	defer sn.Close()
 	defer borSn.Close()
 	defer agg.Close()
+
+	chainConfig := fromdb.ChainConfig(db)
+	genesis := core.GenesisBlockByChainName(chain)
+	br, _ := blocksIO(db, logger)
+	cfg := stagedsync.StageCustomTraceCfg(db, dirs, br, chainConfig, engine, genesis, &syncCfg)
+	var producingDomain kv.Domain
+	if cfg.ExecArgs.ProduceReceiptDomain {
+		producingDomain = kv.RCacheDomain
+	} else if cfg.ExecArgs.ProduceRCacheDomain {
+		producingDomain = kv.RCacheDomain
+	} else {
+		panic("assert: which domain need to produce?")
+	}
+
 	if reset {
 		tx, err := db.BeginTemporalRw(ctx)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
-		tables := db.Debug().DomainTables(kv.ReceiptDomain)
+		tables := db.Debug().DomainTables(producingDomain)
 		if err := backup.ClearTables(ctx, tx, tables...); err != nil {
 			return err
 		}
@@ -1212,12 +1227,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
-	chainConfig := fromdb.ChainConfig(db)
-
-	genesis := core.GenesisBlockByChainName(chain)
-	br, _ := blocksIO(db, logger)
-	cfg := stagedsync.StageCustomTraceCfg(db, dirs, br, chainConfig, engine, genesis, &syncCfg)
-	err = stagedsync.SpawnCustomTrace(cfg, ctx, logger)
+	err = stagedsync.SpawnCustomTrace(cfg, producingDomain, ctx, logger)
 	if err != nil {
 		return err
 	}
@@ -1348,6 +1358,26 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 	var err error
 
 	openSnapshotOnce.Do(func() {
+		if err := db.View(context.Background(), func(tx kv.Tx) (err error) {
+			syncCfg.KeepExecutionProofs, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
+			if err != nil {
+				return err
+			}
+			syncCfg.PersistReceiptsCache, err = kvcfg.PersistReceipts.Enabled(tx)
+			if err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			panic(err)
+		}
+		if syncCfg.KeepExecutionProofs {
+			libstate.EnableHistoricalCommitment()
+		}
+		if syncCfg.PersistReceiptsCache {
+			libstate.EnableHistoricalRCache()
+		}
+
 		dirs := datadir.New(datadirCli)
 
 		chainConfig := fromdb.ChainConfig(db)
@@ -1454,19 +1484,6 @@ const blockBufferSize = 128
 
 func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.MiningConfig, logger log.Logger) (consensus.Engine, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
-
-	if err := db.View(context.Background(), func(tx kv.Tx) (err error) {
-		syncCfg.KeepExecutionProofs, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
-		if err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		panic(err)
-	}
-	if syncCfg.KeepExecutionProofs {
-		libstate.EnableHistoricalCommitment()
-	}
 
 	vmConfig := &vm.Config{}
 

@@ -36,6 +36,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/kv/kvcfg"
 	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
@@ -273,7 +274,9 @@ func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadi
 	if err := rawdb.WriteDBCommitmentHistoryEnabled(tx, cfg.KeepExecutionProofs); err != nil {
 		return err
 	}
-	logger.Warn("enabling commitment history. this is an experimental flag so run at your own risk!", "enabled", cfg.KeepExecutionProofs)
+	if cfg.KeepExecutionProofs {
+		logger.Warn("[experiment] enabling commitment history. this is an experimental flag so run at your own risk!", "enabled", cfg.KeepExecutionProofs)
+	}
 	return nil
 }
 
@@ -301,6 +304,15 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	latestBlockBuiltStore := builder.NewLatestBlockBuiltStore()
 
 	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
+		var notChanged bool
+		notChanged, config.PersistReceiptsCache, err = kvcfg.PersistReceipts.EnsureNotChanged(tx, config.PersistReceiptsCache)
+		if err != nil {
+			return err
+		}
+		if !notChanged {
+			return fmt.Errorf("cli flag changed: %s", kvcfg.PersistReceipts)
+		}
+
 		if err := checkAndSetCommitmentHistoryFlag(tx, logger, dirs, config); err != nil {
 			return err
 		}

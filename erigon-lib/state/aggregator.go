@@ -304,6 +304,7 @@ func (a *Aggregator) closeDirtyFiles() {
 	wg.Wait()
 }
 
+func (a *Aggregator) EnableDomain(domain kv.Domain)   { a.d[domain].disable = false }
 func (a *Aggregator) SetCollateAndBuildWorkers(i int) { a.collateAndBuildWorkers = i }
 func (a *Aggregator) SetMergeWorkers(i int)           { a.mergeWorkers = i }
 func (a *Aggregator) SetCompressWorkers(i int) {
@@ -525,6 +526,10 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(a.collateAndBuildWorkers)
 	for _, d := range a.d {
+		if d.disable {
+			continue
+		}
+
 		d := d
 		dc := d.BeginFilesRo()
 		firstStepNotInFiles := dc.FirstStepNotInFiles()
@@ -567,6 +572,10 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 
 	// indices are built concurrently
 	for iikey, ii := range a.iis {
+		if ii.disable {
+			continue
+		}
+
 		ii := ii
 		dc := ii.BeginFilesRo()
 		firstStepNotInFiles := dc.FirstStepNotInFiles()
@@ -1245,6 +1254,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
 			if !slices.Contains(kv.StateDomains, kd) {
 				continue
 			}
+
 			if kd == kv.CommitmentDomain || cr.values.Equal(&dr.values) {
 				continue
 			}
@@ -1258,6 +1268,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
 						"commitment", cr.values.String("vals", at.StepSize()))
 					continue
 				}
+
 				restorePrevRange = true
 			}
 		}

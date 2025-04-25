@@ -41,6 +41,7 @@ type Generator struct {
 	receiptCacheTrace  bool
 
 	blockReader services.FullBlockReader
+	txNumReader rawdbv3.TxNumsReader
 	engine      consensus.EngineReader
 }
 
@@ -70,9 +71,12 @@ func NewGenerator(blockReader services.FullBlockReader, engine consensus.EngineR
 		panic(err)
 	}
 
+	txNumReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(context.Background(), blockReader))
+
 	return &Generator{
 		receiptsCache:      receiptsCache,
 		blockReader:        blockReader,
+		txNumReader:        txNumReader,
 		engine:             engine,
 		receiptsCacheTrace: receiptsCacheTrace,
 		receiptCacheTrace:  receiptsCacheTrace,
@@ -87,8 +91,6 @@ func (g *Generator) LogStats() {
 	if g == nil || !g.receiptsCacheTrace {
 		return
 	}
-	//m := g.receiptsCache.Metrics()
-	//log.Warn("[dbg] ReceiptsCache", "hit", m.Hits, "total", m.Hits+m.Misses, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", receiptsCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
 }
 
 func (g *Generator) GetCachedReceipts(ctx context.Context, blockHash common.Hash) (types.Receipts, bool) {
@@ -144,7 +146,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	txnHash := txn.Hash()
 
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
-	receiptFromDB, ok, err := rawdb.ReadReceiptCache(tx, blockNum, blockHash, uint32(index), txnHash)
+	receiptFromDB, ok, err := rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, uint32(index), txnHash, g.txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +202,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
 	blockHash := block.Hash()
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
-	receiptsFromDB, err := rawdb.ReadReceiptsCache(tx, block)
+	receiptsFromDB, err := rawdb.ReadReceiptsCacheV2(tx, block, g.txNumReader)
 	if err != nil {
 		return nil, err
 	}

@@ -33,12 +33,16 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
@@ -464,10 +468,12 @@ func TestHeadStorage(t *testing.T) {
 func TestBlockReceiptStorage(t *testing.T) {
 	t.Parallel()
 	m := mock.Mock(t)
-	tx, err := m.DB.BeginRw(m.Ctx)
+	m.DB.(state.HasAgg).Agg().(*state.Aggregator).EnableDomain(kv.RCacheDomain)
+	tx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 	br := m.BlockReader
+	txNumReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(context.Background(), br))
 	require := require.New(t)
 	ctx := m.Ctx
 
@@ -522,32 +528,34 @@ func TestBlockReceiptStorage(t *testing.T) {
 	require.NoError(rawdb.WriteBody(tx, hash, 1, body))
 	require.NoError(rawdb.WriteSenders(tx, hash, 1, body.SendersFromTxs()))
 
-	// Insert the receipt slice into the database and check presence
-	require.NoError(rawdb.WriteReceiptsCache(tx, 1, hash, receipts))
+	{
+		sd, err := state.NewSharedDomains(tx.(kv.TemporalRwTx), log.New())
+		require.NoError(err)
+		defer sd.Close()
+		base, err := txNumReader.Min(tx, 1)
+		require.NoError(err)
+		// Insert the receipt slice into the database and check presence
+		sd.SetTxNum(base)
+		require.NoError(rawdb.WriteReceiptCacheV2(sd, nil))
+		for i, r := range receipts {
+			sd.SetTxNum(base + 1 + uint64(i))
+			require.NoError(rawdb.WriteReceiptCacheV2(sd, r))
+		}
+		sd.SetTxNum(base + uint64(len(receipts)) + 1)
+		require.NoError(rawdb.WriteReceiptCacheV2(sd, nil))
+		require.NoError(sd.Flush(ctx, tx))
+	}
 
 	b, _, err := br.BlockWithSenders(ctx, tx, hash, 1)
 	require.NoError(err)
 	require.NotNil(b)
-	rs, err := rawdb.ReadReceiptsCache(tx, b)
+	rs, err := rawdb.ReadReceiptsCacheV2(tx, b, txNumReader)
 	require.NoError(err)
 	require.NotEmpty(rs)
 	require.NoError(checkReceiptsRLP(rs, receipts))
 
-	// Delete the body and ensure that the receipts are no longer returned (metadata can't be recomputed)
-	rawdb.DeleteHeader(tx, hash, 1)
-	rawdb.DeleteBody(tx, hash, 1)
-	{
-		b, _, err := br.BlockWithSenders(ctx, tx, hash, 1)
-		require.NoError(err)
-		require.Nil(b)
-	}
-
-	rs, err = rawdb.ReadReceiptsCache(tx, b)
-	require.NoError(err)
-	require.NotNil(rs)
-
 	// Ensure that receipts without metadata can be returned without the block body too
-	rFromDB, err := rawdb.ReadReceiptsCache(tx, b)
+	rFromDB, err := rawdb.ReadReceiptsCacheV2(tx, b, txNumReader)
 	require.NoError(err)
 	require.NoError(checkReceiptsRLP(rFromDB, receipts))
 
@@ -557,24 +565,6 @@ func TestBlockReceiptStorage(t *testing.T) {
 	b, _, err = br.BlockWithSenders(ctx, tx, hash, 1)
 	require.NoError(err)
 	require.NotNil(b)
-
-	{ //prune: [0, to)
-		require.NoError(rawdb.PruneReceiptsCache(tx, 1, 1)) // exclude upper bound
-		rs, err = rawdb.ReadReceiptsCache(tx, b)
-		require.NoError(err)
-		require.NotEmpty(rs)
-
-		require.NoError(rawdb.PruneReceiptsCache(tx, 2, 0)) // limit preserved
-		rs, err = rawdb.ReadReceiptsCache(tx, b)
-		require.NoError(err)
-		require.NotEmpty(rs)
-
-		require.NoError(rawdb.PruneReceiptsCache(tx, 2, 1)) // prune block 1
-		rs, err = rawdb.ReadReceiptsCache(tx, b)
-		require.NoError(err)
-		require.Empty(rs)
-	}
-
 }
 
 // Tests block storage and retrieval operations with withdrawals.
