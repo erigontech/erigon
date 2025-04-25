@@ -1574,7 +1574,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	finalRoot, err := RebuildCommitmentFiles(ctx, db, &rawdbv3.TxNums, agg.logger)
 	require.NoError(t, err)
 	require.NotEmpty(t, finalRoot)
-	require.NotEqualValues(t, commitment.EmptyRootHash, finalRoot)
+	require.NotEqual(t, commitment.EmptyRootHash, finalRoot)
 
 	require.EqualValues(t, roots[len(roots)-1][:], finalRoot[:])
 }
