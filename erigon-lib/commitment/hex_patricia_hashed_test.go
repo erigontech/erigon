@@ -1469,7 +1469,7 @@ func Test_ParallelHexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMidd
 		trieBatch := NewConcurrentPatriciaHashed(batch, stateBatch)
 		updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:somewhere+1], updates[:somewhere+1])
 
-		trieBatch.SetTrace(true)
+		trieBatch.SetTrace(false)
 		rh, err := trieBatch.Process(ctx, updsTwo, "")
 		require.NoError(t, err)
 		t.Logf("(first half) batch of %d root hash %x\n", somewhere, rh)
