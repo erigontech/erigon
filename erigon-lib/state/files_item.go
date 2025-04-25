@@ -382,6 +382,13 @@ func (files visibleFiles) LatestMergedRange() MergeRange {
 	}
 	return MergeRange{}
 }
+func (files visibleFiles) String(stepSize uint64) string {
+	res := make([]string, 0, len(files))
+	for _, file := range files {
+		res = append(res, fmt.Sprintf("%d-%d", file.startTxNum/stepSize, file.endTxNum/stepSize))
+	}
+	return strings.Join(res, ",")
+}
 
 // fileItemsWithMissedAccessors returns list of files with missed accessors
 // here "accessors" are generated dynamically by `accessorsFor`

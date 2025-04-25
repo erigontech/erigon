@@ -426,6 +426,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 					}
 				}
 			}
+			p.Processed.Add(1)
 
 			select {
 			case <-ctx.Done():
@@ -1226,6 +1227,10 @@ func (ht *HistoryRoTx) encodeTs(txNum uint64, key []byte) []byte {
 // HistorySeek searches history for a value of specified key before txNum
 // second return value is true if the value is found in the history (even if it is nil)
 func (ht *HistoryRoTx) HistorySeek(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
+	if ht.h.disable {
+		return nil, false, nil
+	}
+
 	v, ok, err := ht.historySeekInFiles(key, txNum)
 	if err != nil {
 		return nil, false, err
