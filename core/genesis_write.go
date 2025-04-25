@@ -182,13 +182,13 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *b
 	if err := newCfg.CheckConfigForkOrder(); err != nil {
 		return newCfg, nil, err
 	}
-	storedCfg, storedErr := rawdb.ReadChainConfig(tx, storedHash)
+	storedCfg, storedErr := ReadChainConfig(tx, storedHash)
 	if storedErr != nil && newCfg.Bor == nil {
 		return newCfg, nil, storedErr
 	}
 	if storedCfg == nil {
 		logger.Warn("Found genesis block without chain config")
-		err1 := rawdb.WriteChainConfig(tx, storedHash, newCfg)
+		err1 := WriteChainConfig(tx, storedHash, newCfg)
 		if err1 != nil {
 			return newCfg, nil, err1
 		}
@@ -210,7 +210,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *b
 			return newCfg, storedBlock, compatibilityErr
 		}
 	}
-	if err := rawdb.WriteChainConfig(tx, storedHash, newCfg); err != nil {
+	if err := WriteChainConfig(tx, storedHash, newCfg); err != nil {
 		return newCfg, nil, err
 	}
 	return newCfg, storedBlock, nil
@@ -285,7 +285,7 @@ func write(tx kv.RwTx, g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (
 	if err := rawdb.WriteHeadHeaderHash(tx, block.Hash()); err != nil {
 		return nil, nil, err
 	}
-	if err := rawdb.WriteChainConfig(tx, block.Hash(), config); err != nil {
+	if err := WriteChainConfig(tx, block.Hash(), config); err != nil {
 		return nil, nil, err
 	}
 

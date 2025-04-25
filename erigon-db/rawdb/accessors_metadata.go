@@ -22,65 +22,11 @@ package rawdb
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
-
-// ReadChainConfig retrieves the consensus settings based on the given genesis hash.
-func ReadChainConfig(db kv.Getter, hash common.Hash) (*chain.Config, error) {
-	data, err := db.GetOne(kv.ConfigTable, hash[:])
-	if err != nil {
-		return nil, err
-	}
-	if len(data) == 0 {
-		return nil, nil
-	}
-
-	var config chain.Config
-	if err := json.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("invalid chain config JSON: %x, %w", hash, err)
-	}
-
-	if config.BorJSON != nil {
-		borConfig := &borcfg.BorConfig{}
-		if err := json.Unmarshal(config.BorJSON, borConfig); err != nil {
-			return nil, fmt.Errorf("invalid chain config 'bor' JSON: %x, %w", hash, err)
-		}
-		config.Bor = borConfig
-	}
-	return &config, nil
-}
-
-// WriteChainConfig writes the chain config settings to the database.
-func WriteChainConfig(db kv.Putter, hash common.Hash, cfg *chain.Config) error {
-	if cfg == nil {
-		return nil
-	}
-
-	if cfg.Bor != nil {
-		borJSON, err := json.Marshal(cfg.Bor)
-		if err != nil {
-			return fmt.Errorf("failed to JSON encode chain config 'bor': %w", err)
-		}
-		cfg.BorJSON = borJSON
-	}
-
-	data, err := json.Marshal(cfg)
-	if err != nil {
-		return fmt.Errorf("failed to JSON encode chain config: %w", err)
-	}
-
-	if err := db.Put(kv.ConfigTable, hash[:], data); err != nil {
-		return fmt.Errorf("failed to store chain config: %w", err)
-	}
-	return nil
-}
 
 func WriteGenesisIfNotExist(db kv.RwTx, g *types.Genesis) error {
 	has, err := db.Has(kv.ConfigTable, kv.GenesisKey)
