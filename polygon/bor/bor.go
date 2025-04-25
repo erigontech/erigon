@@ -1211,7 +1211,7 @@ func (c *Bor) Authorize(currentSigner libcommon.Address, signFn SignerFn) {
 func (c *Bor) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *types.BlockWithReceipts, results chan<- *types.BlockWithReceipts, stop <-chan struct{}) error {
 	block := blockWithReceipts.Block
 	receipts := blockWithReceipts.Receipts
-	header := block.HeaderNoCopy()
+	header := block.Header()
 	// Sealing the genesis block is not supported
 	number := header.Number.Uint64()
 
