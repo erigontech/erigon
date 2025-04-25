@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/execution/consensus/merge"
+	"github.com/erigontech/erigon/execution/consensus/taiko"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/params"
@@ -44,7 +45,7 @@ import (
 
 func CreateConsensusEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainConfig *chain.Config, config interface{}, notify []string, noVerify bool,
 	heimdallClient heimdall.Client, withoutHeimdall bool, blockReader services.FullBlockReader, readonly bool,
-	logger log.Logger, polygonBridge *bridge.Service, heimdallService *heimdall.Service,
+	logger log.Logger, polygonBridge *bridge.Service, heimdallService *heimdall.Service, chainDB kv.RwDB,
 ) consensus.Engine {
 	var eng consensus.Engine
 
@@ -130,6 +131,11 @@ func CreateConsensusEngine(ctx context.Context, nodeConfig *nodecfg.Config, chai
 		}
 	}
 
+	// CHANGE(taiko) : check if chainconfig is Taiko , then isntantiate Taiko consensus engine
+	if chainConfig.Taiko {
+		eng = taiko.New(chainConfig, chainDB)
+	}
+
 	if eng == nil {
 		panic("unknown config" + spew.Sdump(config))
 	}
@@ -157,5 +163,5 @@ func CreateConsensusEngineBareBones(ctx context.Context, chainConfig *chain.Conf
 	}
 
 	return CreateConsensusEngine(ctx, &nodecfg.Config{}, chainConfig, consensusConfig, nil /* notify */, true, /* noVerify */
-		nil /* heimdallClient */, true /* withoutHeimdall */, nil /* blockReader */, false /* readonly */, logger, nil, nil)
+		nil /* heimdallClient */, true /* withoutHeimdall */, nil /* blockReader */, false /* readonly */, logger, nil, nil, nil)
 }
