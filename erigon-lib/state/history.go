@@ -939,17 +939,6 @@ func (h *History) integrateDirtyFiles(sf HistoryFiles, txNumFrom, txNumTo uint64
 }
 
 func (h *History) isEmpty(tx kv.Tx) (bool, error) {
-	if h.historyLargeValues {
-		k, err := kv.FirstKey(tx, h.valuesTable)
-		if err != nil {
-			return false, err
-		}
-		k2, err := kv.FirstKey(tx, h.keysTable)
-		if err != nil {
-			return false, err
-		}
-		return k == nil && k2 == nil, nil
-	}
 	k, err := kv.FirstKey(tx, h.valuesTable)
 	if err != nil {
 		return false, err

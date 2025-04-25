@@ -207,5 +207,8 @@ func TestGenerateChain(t *testing.T) {
 	if string(b) != string(msg.GetData()) {
 		t.Errorf("receipt data %s do not match the expected msg %s", string(msg.GetData()), string(b))
 	}
+	if string(b) != string(msg.GetData()) {
+		t.Errorf("receipt data %s do not match the expected msg %s", string(msg.GetData()), string(b))
+	}
 
 }
