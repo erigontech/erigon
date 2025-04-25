@@ -31,18 +31,18 @@ linters:
     - unconvert
     - wastedassign
     - zerologlint
+    - perfsprint
   disable:
     - testifylint #TODO: enable me
     - staticcheck #TODO: enable me
+    - recvcheck  #TODO: enable me
     - contextcheck
     - err113
     - exhaustive
     - gosec
     - makezero
     - musttag
-    - perfsprint
     - protogetter
-    - recvcheck
     - unparam
     - wrapcheck
   settings:
