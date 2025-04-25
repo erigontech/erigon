@@ -148,7 +148,9 @@ func (r *ForkableAgg) BuildFiles(num RootNum, unalignedIncluded bool) chan struc
 }
 
 func (r *ForkableAgg) MergeLoop(ctx context.Context) error {
-	// TODO
+	// multipe calls not allowed
+	// use snaps.MergeConfig...
+	//
 	return nil
 }
 
