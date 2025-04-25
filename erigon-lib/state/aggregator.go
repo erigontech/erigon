@@ -525,10 +525,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(a.collateAndBuildWorkers)
 	for _, d := range a.d {
-		if d.disable {
-			continue
-		}
-
 		d := d
 		dc := d.BeginFilesRo()
 		firstStepNotInFiles := dc.FirstStepNotInFiles()
@@ -571,10 +567,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 
 	// indices are built concurrently
 	for iikey, ii := range a.iis {
-		if ii.disable {
-			continue
-		}
-
 		ii := ii
 		dc := ii.BeginFilesRo()
 		firstStepNotInFiles := dc.FirstStepNotInFiles()
@@ -1389,6 +1381,7 @@ func (a *Aggregator) IntegrateMergedDirtyFiles(outs *SelectedStaticFiles, in *Me
 func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 	at := a.BeginFilesRo()
 	defer at.Close()
+
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 

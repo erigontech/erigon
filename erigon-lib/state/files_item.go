@@ -243,6 +243,7 @@ func deleteMergeFile(dirtyFiles *btree2.BTreeG[*filesItem], outs []*filesItem, f
 		// otherwise: mark it as `canDelete=true` and last reader of this file - will remove it inside `aggRoTx.Close()`
 		if out.refcount.Load() == 0 {
 			out.closeFilesAndRemove()
+
 			if filenameBase == traceFileLife && out.decompressor != nil {
 				logger.Warn("[agg.dbg] deleteMergeFile: remove", "f", out.decompressor.FileName())
 			}
