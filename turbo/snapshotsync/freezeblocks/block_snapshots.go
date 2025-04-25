@@ -506,7 +506,6 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 		DumpBodies, func(context.Context) uint64 { return firstTxNum }, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
 		return lastTxNum, err
 	}
-
 	if _, err = dumpRange(ctx, coresnaptype.Transactions.FileInfo(snapDir, blockFrom, blockTo),
 		DumpTxs, func(context.Context) uint64 { return firstTxNum }, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
 		return lastTxNum, err
@@ -534,7 +533,7 @@ func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstK
 
 	compressCfg := BlockCompressCfg
 	compressCfg.Workers = workers
-	sn, err := seg.NewCompressor(ctx, "Snapshot "+f.Type.Name(), f.Path, tmpDir, compressCfg, log.LvlTrace, logger)
+	sn, err := seg.NewCompressor(ctx, "Snapshot "+f.Type.Name(), f.Path, tmpDir, compressCfg, log.LvlInfo, logger)
 	if err != nil {
 		return lastKeyValue, err
 	}
@@ -558,7 +557,7 @@ func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstK
 	}
 
 	ext := filepath.Ext(f.Name())
-	logger.Log(lvl, "[snapshots] Compression start", "file", f.Name()[:len(f.Name())-len(ext)], "workers", sn.WorkersAmount())
+	logger.Log(lvl, "[snapshots] Compression start", "file", f.Name()[:len(f.Name())-len(ext)], "workers", sn.WorkersAmount(), "stack", dbg.Stack())
 
 	if err := sn.Compress(); err != nil {
 		return lastKeyValue, fmt.Errorf("compress: %w", err)
@@ -591,20 +590,26 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
 	numBuf := make([]byte, 8)
-
 	parse := func(ctx *txpool.TxnParseContext, v, valueBuf []byte, senders []common2.Address, j int) ([]byte, error) {
 		var sender [20]byte
-		slot := txpool.TxnSlot{}
 
-		if _, err := ctx.ParseTransaction(v, 0, &slot, sender[:], false /* hasEnvelope */, false /* wrappedWithBlobs */, nil); err != nil {
+		tx, err := types.UnmarshalTransactionFromBinary(v, false)
+		if err != nil {
 			return valueBuf, err
 		}
+
+		signer := types.LatestSigner(chainConfig)
+		sender, err = tx.Sender(*signer)
+		if err != nil {
+			return valueBuf, err
+		}
+
 		if len(senders) > 0 {
 			sender = senders[j]
 		}
 
 		valueBuf = valueBuf[:0]
-		valueBuf = append(valueBuf, slot.IDHash[:1]...)
+		valueBuf = append(valueBuf, tx.Hash().Bytes()[:1]...)
 		valueBuf = append(valueBuf, sender[:]...)
 		valueBuf = append(valueBuf, v...)
 		return valueBuf, nil
@@ -708,7 +713,6 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		collected := -1
 		collectorLock := sync.Mutex{}
 		collections := sync.NewCond(&collectorLock)
-
 		var j int
 
 		if err := tx.ForAmount(kv.EthTx, numBuf, body.TxCount-2, func(_, tv []byte) error {
@@ -716,20 +720,25 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			j++
 
 			parsers.Go(func() error {
+				if rec := recover(); rec != nil {
+					fmt.Printf("rec: %v\n", rec)
+				}
+
 				parseCtx := parseCtxs[tx%workers]
 
 				parseCtx.WithSender(len(senders) == 0)
 				parseCtx.WithAllowPreEip2s(blockNum <= chainConfig.HomesteadBlock.Uint64())
 
 				valueBuf, err := parse(parseCtx, tv, valueBufs[tx%workers], senders, tx)
-
 				if err != nil {
+					collectorLock.Lock()
+					defer collectorLock.Unlock()
+					collected = tx
+					collections.Broadcast() // to fail fast on it.
 					return fmt.Errorf("%w, block: %d", err, blockNum)
 				}
-
 				collectorLock.Lock()
 				defer collectorLock.Unlock()
-
 				for collected < tx-1 {
 					collections.Wait()
 				}
@@ -738,7 +747,6 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 				if err := collect(valueBuf); err != nil {
 					return err
 				}
-
 				collected = tx
 				collections.Broadcast()
 
@@ -775,6 +783,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 	}); err != nil {
 		return 0, fmt.Errorf("BigChunks: %w", err)
 	}
+	println("exiting big chunks")
 	return 0, nil
 }
 

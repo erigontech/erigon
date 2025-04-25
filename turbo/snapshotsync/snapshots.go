@@ -312,7 +312,7 @@ func DirtySegmentLess(i, j *DirtySegment) bool {
 	if i.to != j.to {
 		return i.to < j.to
 	}
-	return int(i.version) < int(j.version)
+	return i.version.Less(j.version)
 }
 
 func (s *DirtySegment) Type() snaptype.Type {
@@ -851,7 +851,7 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 	// Use-Cases:
 	//   1. developers can add new types in future. and users will not have files of this type
 	//   2. some types are network-specific. example: borevents exists only on Bor-consensus networks
-	//   3. user can manually remove 1 .idx file: `rm snapshots/v1-type1-0000-1000.idx`
+	//   3. user can manually remove 1 .idx file: `rm snapshots/v1.0-type1-0000-1000.idx`
 	//   4. user can manually remove all .idx files of given type: `rm snapshots/*type1*.idx`
 	//   5. file-types may have different height: 10 headers, 10 bodies, 9 transactions (for example if `kill -9` came during files building/merge). still need index all 3 types.
 

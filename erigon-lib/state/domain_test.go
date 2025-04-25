@@ -34,6 +34,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
@@ -41,6 +44,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/common/page"
 	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/order"
@@ -48,8 +52,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
 	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/require"
 )
 
 type rndGen struct {
@@ -74,13 +76,14 @@ func testDbAndDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain) {
 func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain) {
 	t.Helper()
 	dirs := datadir2.New(t.TempDir())
-	cfg := Schema[kv.AccountsDomain]
+	cfg := Schema.AccountsDomain
 	cfg.crossDomainIntegrity = nil //no other domains
 
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 	salt := uint32(1)
 
+	cfg.hist.iiCfg.version = IIVersionTypes{snaptype.V1_0, snaptype.V1_0}
 	cfg.hist.iiCfg.dirs = dirs
 	cfg.hist.iiCfg.salt = &salt
 	//cfg.hist.historyValuesOnCompressedPage = 16
@@ -197,9 +200,9 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		c, err := d.collate(ctx, 0, 0, 16, tx)
 
 		require.NoError(t, err)
-		require.True(t, strings.HasSuffix(c.valuesPath, "v1-accounts.0-1.kv"))
+		require.True(t, strings.HasSuffix(c.valuesPath, "v1.0-accounts.0-1.kv"))
 		require.Equal(t, 2, c.valuesCount)
-		require.True(t, strings.HasSuffix(c.historyPath, "v1-accounts.0-1.v"))
+		require.True(t, strings.HasSuffix(c.historyPath, "v1.0-accounts.0-1.v"))
 		require.Equal(t, page.WordsAmount2PagesAmount(3, d.historyValuesOnCompressedPage), c.historyComp.Count())
 		require.Equal(t, 2*c.valuesCount, c.efHistoryComp.Count())
 
@@ -1045,18 +1048,20 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 }
 
 func emptyTestDomain(aggStep uint64) *Domain {
-	cfg := Schema[kv.AccountsDomain]
+	cfg := Schema.AccountsDomain
 	cfg.crossDomainIntegrity = nil
 
 	salt := uint32(1)
 	cfg.hist.iiCfg.salt = &salt
 	cfg.hist.iiCfg.dirs = datadir2.New(os.TempDir())
-	cfg.hist.iiCfg.name = kv.InvertedIdx("dummy")
+	cfg.hist.iiCfg.name = kv.InvertedIdx(0)
+	cfg.hist.iiCfg.version = IIVersionTypes{snaptype.V1_0, snaptype.V1_0}
 
 	d, err := NewDomain(cfg, aggStep, log.New())
 	if err != nil {
 		panic(err)
 	}
+
 	return d
 }
 
@@ -1066,12 +1071,12 @@ func TestScanStaticFilesD(t *testing.T) {
 	d := emptyTestDomain(1)
 
 	files := []string{
-		"v1-accounts.0-1.kv",
-		"v1-accounts.1-2.kv",
-		"v1-accounts.0-4.kv",
-		"v1-accounts.2-3.kv",
-		"v1-accounts.3-4.kv",
-		"v1-accounts.4-5.kv",
+		"v1.0-accounts.0-1.kv",
+		"v1.0-accounts.1-2.kv",
+		"v1.0-accounts.0-4.kv",
+		"v1.0-accounts.2-3.kv",
+		"v1.0-accounts.3-4.kv",
+		"v1.0-accounts.4-5.kv",
 	}
 	d.scanDirtyFiles(files)
 	var found []string
@@ -1135,9 +1140,9 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	c, err := d.collate(ctx, 0, 0, maxTx, tx)
 
 	require.NoError(t, err)
-	require.True(t, strings.HasSuffix(c.valuesPath, "v1-accounts.0-1.kv"))
+	require.True(t, strings.HasSuffix(c.valuesPath, "v1.0-accounts.0-1.kv"))
 	require.Equal(t, 3, c.valuesCount)
-	require.True(t, strings.HasSuffix(c.historyPath, "v1-accounts.0-1.v"))
+	require.True(t, strings.HasSuffix(c.historyPath, "v1.0-accounts.0-1.v"))
 	require.EqualValues(t, page.WordsAmount2PagesAmount(int(3*maxTx), d.hist.historyValuesOnCompressedPage), c.historyComp.Count())
 	require.Equal(t, 3, c.efHistoryComp.Count()/2)
 

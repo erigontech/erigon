@@ -32,6 +32,8 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common"
@@ -48,8 +50,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/require"
 )
 
 func TestAggregatorV3_Merge(t *testing.T) {
@@ -1088,7 +1088,8 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 
 	var latestCommitTxNum uint64
 	commit := func(txn uint64) error {
-		domains.Flush(ctx, tx)
+		err = domains.Flush(ctx, tx)
+		require.NoError(t, err)
 		ac.Close()
 		err = tx.Commit()
 		require.NoError(t, err)
@@ -1550,7 +1551,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	buckets, err := rwTx.ListBuckets()
 	require.NoError(t, err)
 	for i, b := range buckets {
-		if strings.Contains(strings.ToLower(b), "commitment") {
+		if strings.Contains(strings.ToLower(b), kv.CommitmentDomain.String()) {
 			size, err := rwTx.BucketSize(b)
 			require.NoError(t, err)
 			t.Logf("cleaned table #%d %s: %d keys", i, b, size)
@@ -1562,7 +1563,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	require.NoError(t, rwTx.Commit())
 
 	for _, fn := range fnames {
-		if strings.Contains(fn, "v1-commitment") {
+		if strings.Contains(fn, kv.CommitmentDomain.String()) {
 			require.NoError(t, os.Remove(fn))
 			t.Logf("removed file %s", filepath.Base(fn))
 		}
