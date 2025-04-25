@@ -26,7 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
@@ -41,7 +41,7 @@ import (
 	"github.com/erigontech/erigon/p2p/forkid"
 )
 
-func testSentryServer(db kv.Getter, genesis *types.Genesis, genesisHash libcommon.Hash) *GrpcServer {
+func testSentryServer(db kv.Getter, genesis *types.Genesis, genesisHash common.Hash) *GrpcServer {
 	s := &GrpcServer{
 		ctx: context.Background(),
 	}

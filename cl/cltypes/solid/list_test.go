@@ -23,7 +23,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 func TestHashVector(t *testing.T) {
@@ -224,7 +223,7 @@ func TestTransactionsSSZ(t *testing.T) {
 	expectedRoot := common.HexToHash("55b3a5969a59aaac27189b17dba3e6f17f64ff9b9f52734cafa9fd5d9010cb3b") // Example expected root
 	root, err := transactionsSSZ.HashSSZ()
 	require.NoError(t, err)
-	assert.Equal(t, expectedRoot, libcommon.Hash(root))
+	assert.Equal(t, expectedRoot, common.Hash(root))
 
 	// Test EncodingSizeSSZ
 	expectedEncodingSize := len(encodedData)

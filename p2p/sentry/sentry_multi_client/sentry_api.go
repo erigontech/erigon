@@ -22,7 +22,7 @@ import (
 
 	"google.golang.org/grpc"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/rlp"
@@ -108,7 +108,7 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 				Origin:  eth.HashOrNumber{Hash: req.Hash},
 			},
 		}
-		if req.Hash == (libcommon.Hash{}) {
+		if req.Hash == (common.Hash{}) {
 			reqData.Origin.Number = req.Number
 		}
 		bytes, err := rlp.EncodeToBytes(reqData)

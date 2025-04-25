@@ -22,9 +22,9 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/types"
@@ -219,7 +219,7 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 	}
 
 	if stopped {
-		return libcommon.ErrStopped
+		return common.ErrStopped
 	}
 	e.logger.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", bodyProgress)
 
@@ -239,13 +239,13 @@ func logDownloadingBodies(logPrefix string, committed, remaining uint64, totalDe
 	dbg.ReadMemStats(&m)
 	logger.Info(fmt.Sprintf("[%s] Downloading bodies", logPrefix),
 		"block", committed,
-		"delivery/sec", libcommon.ByteCount(uint64(speed)),
-		"wasted/sec", libcommon.ByteCount(uint64(wastedSpeed)),
+		"delivery/sec", common.ByteCount(uint64(speed)),
+		"wasted/sec", common.ByteCount(uint64(wastedSpeed)),
 		"remaining", remaining,
 		"delivered", totalDelivered,
-		"cache", libcommon.ByteCount(uint64(bodyCacheSize)),
-		"alloc", libcommon.ByteCount(m.Alloc),
-		"sys", libcommon.ByteCount(m.Sys),
+		"cache", common.ByteCount(uint64(bodyCacheSize)),
+		"alloc", common.ByteCount(m.Alloc),
+		"sys", common.ByteCount(m.Sys),
 	)
 }
 
@@ -256,7 +256,7 @@ func logWritingBodies(logPrefix string, committed, headerProgress uint64, logger
 	logger.Info(fmt.Sprintf("[%s] Writing bodies", logPrefix),
 		"block", committed,
 		"remaining", remaining,
-		"alloc", libcommon.ByteCount(m.Alloc),
-		"sys", libcommon.ByteCount(m.Sys),
+		"alloc", common.ByteCount(m.Alloc),
+		"sys", common.ByteCount(m.Sys),
 	)
 }

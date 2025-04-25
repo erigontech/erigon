@@ -32,7 +32,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/abi"
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
@@ -150,7 +150,7 @@ func TestCall(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 	state := state.New(state.NewReaderV3(domains))
-	address := libcommon.HexToAddress("0xaa")
+	address := common.HexToAddress("0xaa")
 	state.SetCode(address, []byte{
 		byte(vm.PUSH1), 10,
 		byte(vm.PUSH1), 0,
@@ -200,7 +200,7 @@ func testTemporalTxSD(t testing.TB, db *temporal.DB) (kv.RwTx, *stateLib.SharedD
 func BenchmarkCall(b *testing.B) {
 	var definition = `[{"constant":true,"inputs":[],"name":"seller","outputs":[{"name":"","type":"address"}],"type":"function"},{"constant":false,"inputs":[],"name":"abort","outputs":[],"type":"function"},{"constant":true,"inputs":[],"name":"value","outputs":[{"name":"","type":"uint256"}],"type":"function"},{"constant":false,"inputs":[],"name":"refund","outputs":[],"type":"function"},{"constant":true,"inputs":[],"name":"buyer","outputs":[{"name":"","type":"address"}],"type":"function"},{"constant":false,"inputs":[],"name":"confirmReceived","outputs":[],"type":"function"},{"constant":true,"inputs":[],"name":"state","outputs":[{"name":"","type":"uint8"}],"type":"function"},{"constant":false,"inputs":[],"name":"confirmPurchase","outputs":[],"type":"function"},{"inputs":[],"type":"constructor"},{"anonymous":false,"inputs":[],"name":"Aborted","type":"event"},{"anonymous":false,"inputs":[],"name":"PurchaseConfirmed","type":"event"},{"anonymous":false,"inputs":[],"name":"ItemReceived","type":"event"},{"anonymous":false,"inputs":[],"name":"Refunded","type":"event"}]`
 
-	var code = libcommon.Hex2Bytes("6060604052361561006c5760e060020a600035046308551a53811461007457806335a063b4146100865780633fa4f245146100a6578063590e1ae3146100af5780637150d8ae146100cf57806373fac6f0146100e1578063c19d93fb146100fe578063d696069714610112575b610131610002565b610133600154600160a060020a031681565b610131600154600160a060020a0390811633919091161461015057610002565b61014660005481565b610131600154600160a060020a039081163391909116146102d557610002565b610133600254600160a060020a031681565b610131600254600160a060020a0333811691161461023757610002565b61014660025460ff60a060020a9091041681565b61013160025460009060ff60a060020a9091041681146101cc57610002565b005b600160a060020a03166060908152602090f35b6060908152602090f35b60025460009060a060020a900460ff16811461016b57610002565b600154600160a060020a03908116908290301631606082818181858883f150506002805460a060020a60ff02191660a160020a179055506040517f72c874aeff0b183a56e2b79c71b46e1aed4dee5e09862134b8821ba2fddbf8bf9250a150565b80546002023414806101dd57610002565b6002805460a060020a60ff021973ffffffffffffffffffffffffffffffffffffffff1990911633171660a060020a1790557fd5d55c8a68912e9a110618df8d5e2e83b8d83211c57a8ddd1203df92885dc881826060a15050565b60025460019060a060020a900460ff16811461025257610002565b60025460008054600160a060020a0390921691606082818181858883f150508354604051600160a060020a0391821694503090911631915082818181858883f150506002805460a060020a60ff02191660a160020a179055506040517fe89152acd703c9d8c7d28829d443260b411454d45394e7995815140c8cbcbcf79250a150565b60025460019060a060020a900460ff1681146102f057610002565b6002805460008054600160a060020a0390921692909102606082818181858883f150508354604051600160a060020a0391821694503090911631915082818181858883f150506002805460a060020a60ff02191660a160020a179055506040517f8616bbbbad963e4e65b1366f1d75dfb63f9e9704bbbf91fb01bec70849906cf79250a15056")
+	var code = common.Hex2Bytes("6060604052361561006c5760e060020a600035046308551a53811461007457806335a063b4146100865780633fa4f245146100a6578063590e1ae3146100af5780637150d8ae146100cf57806373fac6f0146100e1578063c19d93fb146100fe578063d696069714610112575b610131610002565b610133600154600160a060020a031681565b610131600154600160a060020a0390811633919091161461015057610002565b61014660005481565b610131600154600160a060020a039081163391909116146102d557610002565b610133600254600160a060020a031681565b610131600254600160a060020a0333811691161461023757610002565b61014660025460ff60a060020a9091041681565b61013160025460009060ff60a060020a9091041681146101cc57610002565b005b600160a060020a03166060908152602090f35b6060908152602090f35b60025460009060a060020a900460ff16811461016b57610002565b600154600160a060020a03908116908290301631606082818181858883f150506002805460a060020a60ff02191660a160020a179055506040517f72c874aeff0b183a56e2b79c71b46e1aed4dee5e09862134b8821ba2fddbf8bf9250a150565b80546002023414806101dd57610002565b6002805460a060020a60ff021973ffffffffffffffffffffffffffffffffffffffff1990911633171660a060020a1790557fd5d55c8a68912e9a110618df8d5e2e83b8d83211c57a8ddd1203df92885dc881826060a15050565b60025460019060a060020a900460ff16811461025257610002565b60025460008054600160a060020a0390921691606082818181858883f150508354604051600160a060020a0391821694503090911631915082818181858883f150506002805460a060020a60ff02191660a160020a179055506040517fe89152acd703c9d8c7d28829d443260b411454d45394e7995815140c8cbcbcf79250a150565b60025460019060a060020a900460ff1681146102f057610002565b6002805460008054600160a060020a0390921692909102606082818181858883f150508354604051600160a060020a0391821694503090911631915082818181858883f150506002805460a060020a60ff02191660a160020a179055506040517f8616bbbbad963e4e65b1366f1d75dfb63f9e9704bbbf91fb01bec70849906cf79250a15056")
 
 	abi, err := abi.JSON(strings.NewReader(definition))
 	if err != nil {
@@ -255,19 +255,19 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 
 	var (
 		statedb  = state.New(state.NewReaderV3(domains))
-		sender   = libcommon.BytesToAddress([]byte("sender"))
-		receiver = libcommon.BytesToAddress([]byte("receiver"))
+		sender   = common.BytesToAddress([]byte("sender"))
+		receiver = common.BytesToAddress([]byte("receiver"))
 	)
 
 	statedb.CreateAccount(sender, true)
-	statedb.SetCode(receiver, libcommon.FromHex(code))
+	statedb.SetCode(receiver, common.FromHex(code))
 	runtimeConfig := Config{
 		Origin:      sender,
 		State:       statedb,
 		GasLimit:    10000000,
 		Difficulty:  big.NewInt(0x200000),
 		Time:        new(big.Int).SetUint64(0),
-		Coinbase:    libcommon.Address{},
+		Coinbase:    common.Address{},
 		BlockNumber: new(big.Int).SetUint64(1),
 		ChainConfig: &chain.Config{
 			ChainID:               big.NewInt(1),
@@ -304,9 +304,9 @@ func BenchmarkEVM_CREATE2_1200(bench *testing.B) {
 	benchmarkEVM_Create(bench, "5b5862124f80600080f5600152600056")
 }
 
-func fakeHeader(n uint64, parentHash libcommon.Hash) *types.Header {
+func fakeHeader(n uint64, parentHash common.Hash) *types.Header {
 	return &types.Header{
-		Coinbase:   libcommon.HexToAddress("0x00000000000000000000000000000000deadbeef"),
+		Coinbase:   common.HexToAddress("0x00000000000000000000000000000000deadbeef"),
 		Number:     new(big.Int).SetUint64(n),
 		ParentHash: parentHash,
 		Time:       n,
@@ -320,11 +320,11 @@ func fakeHeader(n uint64, parentHash libcommon.Hash) *types.Header {
 // FakeChainHeaderReader implements consensus.ChainHeaderReader interface
 type FakeChainHeaderReader struct{}
 
-func (cr *FakeChainHeaderReader) GetHeaderByHash(hash libcommon.Hash) *types.Header {
+func (cr *FakeChainHeaderReader) GetHeaderByHash(hash common.Hash) *types.Header {
 	return nil
 }
 func (cr *FakeChainHeaderReader) GetHeaderByNumber(number uint64) *types.Header {
-	return cr.GetHeaderByHash(libcommon.BigToHash(new(big.Int).SetUint64(number)))
+	return cr.GetHeaderByHash(common.BigToHash(new(big.Int).SetUint64(number)))
 }
 func (cr *FakeChainHeaderReader) Config() *chain.Config                 { return nil }
 func (cr *FakeChainHeaderReader) CurrentHeader() *types.Header          { return nil }
@@ -332,11 +332,11 @@ func (cr *FakeChainHeaderReader) CurrentFinalizedHeader() *types.Header { return
 func (cr *FakeChainHeaderReader) CurrentSafeHeader() *types.Header      { return nil }
 
 // GetHeader returns a fake header with the parentHash equal to the number - 1
-func (cr *FakeChainHeaderReader) GetHeader(hash libcommon.Hash, number uint64) *types.Header {
+func (cr *FakeChainHeaderReader) GetHeader(hash common.Hash, number uint64) *types.Header {
 	return &types.Header{
-		Coinbase:   libcommon.HexToAddress("0x00000000000000000000000000000000deadbeef"),
+		Coinbase:   common.HexToAddress("0x00000000000000000000000000000000deadbeef"),
 		Number:     new(big.Int).SetUint64(number),
-		ParentHash: libcommon.BigToHash(new(big.Int).SetUint64(number - 1)),
+		ParentHash: common.BigToHash(new(big.Int).SetUint64(number - 1)),
 		Time:       number,
 		Nonce:      types.BlockNonce{0x1},
 		Extra:      []byte{},
@@ -344,17 +344,17 @@ func (cr *FakeChainHeaderReader) GetHeader(hash libcommon.Hash, number uint64) *
 		GasLimit:   100000,
 	}
 }
-func (cr *FakeChainHeaderReader) GetBlock(hash libcommon.Hash, number uint64) *types.Block {
+func (cr *FakeChainHeaderReader) GetBlock(hash common.Hash, number uint64) *types.Block {
 	return nil
 }
-func (cr *FakeChainHeaderReader) HasBlock(hash libcommon.Hash, number uint64) bool  { return false }
-func (cr *FakeChainHeaderReader) GetTd(hash libcommon.Hash, number uint64) *big.Int { return nil }
-func (cr *FakeChainHeaderReader) FrozenBlocks() uint64                              { return 0 }
-func (cr *FakeChainHeaderReader) FrozenBorBlocks() uint64                           { return 0 }
-func (cr *FakeChainHeaderReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
+func (cr *FakeChainHeaderReader) HasBlock(hash common.Hash, number uint64) bool  { return false }
+func (cr *FakeChainHeaderReader) GetTd(hash common.Hash, number uint64) *big.Int { return nil }
+func (cr *FakeChainHeaderReader) FrozenBlocks() uint64                           { return 0 }
+func (cr *FakeChainHeaderReader) FrozenBorBlocks() uint64                        { return 0 }
+func (cr *FakeChainHeaderReader) BorEventsByBlock(hash common.Hash, number uint64) []rlp.RawValue {
 	return nil
 }
-func (cr *FakeChainHeaderReader) BorStartEventId(hash libcommon.Hash, number uint64) uint64 {
+func (cr *FakeChainHeaderReader) BorStartEventId(hash common.Hash, number uint64) uint64 {
 	return 0
 }
 func (cr *FakeChainHeaderReader) BorSpan(spanId uint64) []byte { return nil }
@@ -369,13 +369,13 @@ func (d *dummyChain) Engine() consensus.Engine {
 }
 
 // GetHeader returns the hash corresponding to their hash.
-func (d *dummyChain) GetHeader(h libcommon.Hash, n uint64) *types.Header {
+func (d *dummyChain) GetHeader(h common.Hash, n uint64) *types.Header {
 	d.counter++
-	parentHash := libcommon.Hash{}
-	s := libcommon.LeftPadBytes(new(big.Int).SetUint64(n-1).Bytes(), 32)
+	parentHash := common.Hash{}
+	s := common.LeftPadBytes(new(big.Int).SetUint64(n-1).Bytes(), 32)
 	copy(parentHash[:], s)
 
-	//parentHash := libcommon.Hash{byte(n - 1)}
+	//parentHash := common.Hash{byte(n - 1)}
 	//fmt.Printf("GetHeader(%x, %d) => header with parent %x\n", h, n, parentHash)
 	return fakeHeader(n, parentHash)
 }
@@ -386,8 +386,8 @@ func TestBlockhash(t *testing.T) {
 	t.Parallel()
 	// Current head
 	n := uint64(1000)
-	parentHash := libcommon.Hash{}
-	s := libcommon.LeftPadBytes(new(big.Int).SetUint64(n-1).Bytes(), 32)
+	parentHash := common.Hash{}
+	s := common.LeftPadBytes(new(big.Int).SetUint64(n-1).Bytes(), 32)
 	copy(parentHash[:], s)
 	header := fakeHeader(n, parentHash)
 
@@ -424,9 +424,9 @@ func TestBlockhash(t *testing.T) {
 
 	*/
 	// The contract above
-	data := libcommon.Hex2Bytes("6080604052348015600f57600080fd5b50600436106045576000357c010000000000000000000000000000000000000000000000000000000090048063f8a8fd6d14604a575b600080fd5b60506074565b60405180848152602001838152602001828152602001935050505060405180910390f35b600080600080439050600080600083409050600184034092506000600290505b61010481101560c35760008186034090506000816001900414151560b6578093505b5080806001019150506094565b508083839650965096505050505090919256fea165627a7a72305820462d71b510c1725ff35946c20b415b0d50b468ea157c8c77dff9466c9cb85f560029")
+	data := common.Hex2Bytes("6080604052348015600f57600080fd5b50600436106045576000357c010000000000000000000000000000000000000000000000000000000090048063f8a8fd6d14604a575b600080fd5b60506074565b60405180848152602001838152602001828152602001935050505060405180910390f35b600080600080439050600080600083409050600184034092506000600290505b61010481101560c35760008186034090506000816001900414151560b6578093505b5080806001019150506094565b508083839650965096505050505090919256fea165627a7a72305820462d71b510c1725ff35946c20b415b0d50b468ea157c8c77dff9466c9cb85f560029")
 	// The method call to 'test()'
-	input := libcommon.Hex2Bytes("f8a8fd6d")
+	input := common.Hex2Bytes("f8a8fd6d")
 	chain := &dummyChain{}
 	cfg := &Config{
 		GetHashFn:   core.GetHashFn(header, chain.GetHeader),
@@ -480,17 +480,17 @@ func benchmarkNonModifyingCode(b *testing.B, gas uint64, code []byte, name strin
 	cfg.State = state.New(state.NewReaderV3(domains))
 	cfg.GasLimit = gas
 	var (
-		destination = libcommon.BytesToAddress([]byte("contract"))
+		destination = common.BytesToAddress([]byte("contract"))
 		vmenv       = NewEnv(cfg)
 		sender      = vm.AccountRef(cfg.Origin)
 	)
 	cfg.State.CreateAccount(destination, true)
-	eoa := libcommon.HexToAddress("E0")
+	eoa := common.HexToAddress("E0")
 	{
 		cfg.State.CreateAccount(eoa, true)
 		cfg.State.SetNonce(eoa, 100)
 	}
-	reverting := libcommon.HexToAddress("EE")
+	reverting := common.HexToAddress("EE")
 	{
 		cfg.State.CreateAccount(reverting, true)
 		cfg.State.SetCode(reverting, []byte{

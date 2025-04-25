@@ -21,7 +21,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/consensus"
 )
@@ -44,7 +44,7 @@ func (cr readerMock) CurrentSafeHeader() *types.Header {
 	return nil
 }
 
-func (r readerMock) GetHeader(libcommon.Hash, uint64) *types.Header {
+func (r readerMock) GetHeader(common.Hash, uint64) *types.Header {
 	return nil
 }
 
@@ -52,11 +52,11 @@ func (r readerMock) GetHeaderByNumber(uint64) *types.Header {
 	return nil
 }
 
-func (r readerMock) GetHeaderByHash(libcommon.Hash) *types.Header {
+func (r readerMock) GetHeaderByHash(common.Hash) *types.Header {
 	return nil
 }
 
-func (r readerMock) GetTd(libcommon.Hash, uint64) *big.Int {
+func (r readerMock) GetTd(common.Hash, uint64) *big.Int {
 	return nil
 }
 

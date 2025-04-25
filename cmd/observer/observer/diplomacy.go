@@ -26,9 +26,9 @@ import (
 
 	"golang.org/x/sync/semaphore"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cmd/observer/database"
 	"github.com/erigontech/erigon/cmd/observer/observer/node_utils"
 	"github.com/erigontech/erigon/cmd/observer/utils"
@@ -99,7 +99,7 @@ func (diplomacy *Diplomacy) selectCandidates(ctx context.Context, candidatesChan
 		}
 
 		if len(candidates) == 0 {
-			if err := libcommon.Sleep(ctx, 1*time.Second); err != nil {
+			if err := common.Sleep(ctx, 1*time.Second); err != nil {
 				return err
 			}
 		}

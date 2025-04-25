@@ -19,11 +19,11 @@ package clique
 import (
 	"encoding/binary"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 // SnapshotFullKey = SnapshotBucket + num (uint64 big endian) + hash
-func SnapshotFullKey(number uint64, hash libcommon.Hash) []byte {
+func SnapshotFullKey(number uint64, hash common.Hash) []byte {
 	return append(EncodeBlockNumber(number), hash.Bytes()...)
 }
 

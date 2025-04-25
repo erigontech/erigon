@@ -32,7 +32,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
 	libcrypto "github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -64,15 +64,15 @@ type Transaction interface {
 	GetTipCap() *uint256.Int                              // max_priority_fee_per_gas in EIP-1559
 	GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int // effective_gas_price in EIP-1559
 	GetFeeCap() *uint256.Int                              // max_fee_per_gas in EIP-1559
-	GetBlobHashes() []libcommon.Hash
+	GetBlobHashes() []common.Hash
 	GetGasLimit() uint64
 	GetBlobGas() uint64
 	GetValue() *uint256.Int
-	GetTo() *libcommon.Address
+	GetTo() *common.Address
 	AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error)
 	WithSignature(signer Signer, sig []byte) (Transaction, error)
-	Hash() libcommon.Hash
-	SigningHash(chainID *big.Int) libcommon.Hash
+	Hash() common.Hash
+	SigningHash(chainID *big.Int) common.Hash
 	GetData() []byte
 	GetAccessList() AccessList
 	Protected() bool
@@ -88,10 +88,10 @@ type Transaction interface {
 	// Sender may cache the address, allowing it to be used regardless of
 	// signing method. The cache is invalidated if the cached signer does
 	// not match the signer used in the current call.
-	Sender(Signer) (libcommon.Address, error)
-	cachedSender() (libcommon.Address, bool)
-	GetSender() (libcommon.Address, bool)
-	SetSender(libcommon.Address)
+	Sender(Signer) (common.Address, error)
+	cachedSender() (common.Address, bool)
+	GetSender() (common.Address, bool)
+	SetSender(common.Address)
 	IsContractDeploy() bool
 	Unwrap() Transaction // If this is a network wrapper, returns the unwrapped txn. Otherwise returns itself.
 }
@@ -100,8 +100,8 @@ type Transaction interface {
 // implementations of different transaction types
 type TransactionMisc struct {
 	// caches
-	hash atomic.Pointer[libcommon.Hash]
-	from atomic.Pointer[libcommon.Address]
+	hash atomic.Pointer[common.Hash]
+	from atomic.Pointer[common.Address]
 }
 
 // RLP-marshalled legacy transactions and binary-marshalled (not wrapped into an RLP string) typed (EIP-2718) transactions
@@ -254,7 +254,7 @@ func MarshalTransactionsBinary(txs Transactions) ([][]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		result[i] = libcommon.CopyBytes(buf.Bytes())
+		result[i] = common.CopyBytes(buf.Bytes())
 	}
 	return result, nil
 }
@@ -333,7 +333,7 @@ type TransactionsGroupedBySender []Transactions
 func TxDifference(a, b Transactions) Transactions {
 	keep := make(Transactions, 0, len(a))
 
-	remove := make(map[libcommon.Hash]struct{})
+	remove := make(map[common.Hash]struct{})
 	for _, txn := range b {
 		remove[txn.Hash()] = struct{}{}
 	}
@@ -358,8 +358,8 @@ func (s TxByNonce) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
 // Message is a fully derived transaction and implements core.Message
 type Message struct {
-	to               *libcommon.Address
-	from             libcommon.Address
+	to               *common.Address
+	from             common.Address
 	nonce            uint64
 	amount           uint256.Int
 	gasLimit         uint64
@@ -371,11 +371,11 @@ type Message struct {
 	accessList       AccessList
 	checkNonce       bool
 	isFree           bool
-	blobHashes       []libcommon.Hash
+	blobHashes       []common.Hash
 	authorizations   []Authorization
 }
 
-func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
+func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
 	gasPrice *uint256.Int, feeCap, tipCap *uint256.Int, data []byte, accessList AccessList, checkNonce bool,
 	isFree bool, maxFeePerBlobGas *uint256.Int,
 ) *Message {
@@ -405,8 +405,8 @@ func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amo
 	return &m
 }
 
-func (m *Message) From() libcommon.Address         { return m.from }
-func (m *Message) To() *libcommon.Address          { return m.to }
+func (m *Message) From() common.Address            { return m.from }
+func (m *Message) To() *common.Address             { return m.to }
 func (m *Message) GasPrice() *uint256.Int          { return &m.gasPrice }
 func (m *Message) FeeCap() *uint256.Int            { return &m.feeCap }
 func (m *Message) TipCap() *uint256.Int            { return &m.tipCap }
@@ -450,7 +450,7 @@ func (m *Message) MaxFeePerBlobGas() *uint256.Int {
 	return &m.maxFeePerBlobGas
 }
 
-func (m *Message) BlobHashes() []libcommon.Hash { return m.blobHashes }
+func (m *Message) BlobHashes() []common.Hash { return m.blobHashes }
 
 func DecodeSSZ(data []byte, dest codec.Deserializable) error {
 	err := dest.Deserialize(codec.NewDecodingReader(bytes.NewReader(data), uint64(len(data))))

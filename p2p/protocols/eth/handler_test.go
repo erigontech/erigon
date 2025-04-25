@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
 	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
@@ -301,7 +300,7 @@ func TestGetBlockReceipts(t *testing.T) {
 	receiptsGetter := receipts.NewGenerator(m.BlockReader, m.Engine)
 	// Collect the hashes to request, and the response to expect
 	var (
-		hashes   []libcommon.Hash
+		hashes   []common.Hash
 		receipts []rlp.RawValue
 	)
 	tx, err := m.DB.BeginTemporalRo(m.Ctx)

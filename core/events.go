@@ -20,8 +20,7 @@
 package core
 
 import (
-	libcommon "github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types"
 )
 
@@ -33,7 +32,7 @@ type RemovedLogsEvent struct{ Logs []*types.Log }
 
 type ChainEvent struct {
 	Block *types.Block
-	Hash  libcommon.Hash
+	Hash  common.Hash
 	Logs  []*types.Log
 }
 

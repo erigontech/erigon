@@ -22,19 +22,18 @@ package vm
 import (
 	"fmt"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
 
 	"github.com/erigontech/erigon/core/tracing"
 )
 
 // ContractRef is a reference to the contract's backing object
 type ContractRef interface {
-	Address() libcommon.Address
+	Address() common.Address
 }
 
 // AccountRef implements ContractRef.
@@ -44,10 +43,10 @@ type ContractRef interface {
 // proves difficult because of the cached jump destinations which
 // are fetched from the parent contract (i.e. the caller), which
 // is a ContractRef.
-type AccountRef libcommon.Address
+type AccountRef common.Address
 
 // Address casts AccountRef to a Address
-func (ar AccountRef) Address() libcommon.Address { return (libcommon.Address)(ar) }
+func (ar AccountRef) Address() common.Address { return (common.Address)(ar) }
 
 // Contract represents an ethereum contract in the state database. It contains
 // the contract code, calling arguments. Contract implements ContractRef
@@ -55,16 +54,16 @@ type Contract struct {
 	// CallerAddress is the result of the caller which initialised this
 	// contract. However when the "call method" is delegated this value
 	// needs to be initialised to that of the caller's caller.
-	CallerAddress libcommon.Address
+	CallerAddress common.Address
 	caller        ContractRef
-	self          libcommon.Address
+	self          common.Address
 	jumpdests     *JumpDestCache // Aggregated result of JUMPDEST analysis.
 	analysis      bitvec         // Locally cached result of JUMPDEST analysis
 	skipAnalysis  bool
 
 	Code     []byte
-	CodeHash libcommon.Hash
-	CodeAddr *libcommon.Address
+	CodeHash common.Hash
+	CodeAddr *common.Address
 	Input    []byte
 
 	Gas   uint64
@@ -72,7 +71,7 @@ type Contract struct {
 }
 
 type JumpDestCache struct {
-	*simplelru.LRU[libcommon.Hash, bitvec]
+	*simplelru.LRU[common.Hash, bitvec]
 	hit, total int
 	trace      bool
 }
@@ -83,7 +82,7 @@ var (
 )
 
 func NewJumpDestCache() *JumpDestCache {
-	c, err := simplelru.NewLRU[libcommon.Hash, bitvec](jumpDestCacheLimit, nil)
+	c, err := simplelru.NewLRU[common.Hash, bitvec](jumpDestCacheLimit, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -98,7 +97,7 @@ func (c *JumpDestCache) LogStats() {
 }
 
 // NewContract returns a new contract environment for the execution of EVM.
-func NewContract(caller ContractRef, addr libcommon.Address, value *uint256.Int, gas uint64, skipAnalysis bool, jumpDest *JumpDestCache) *Contract {
+func NewContract(caller ContractRef, addr common.Address, value *uint256.Int, gas uint64, skipAnalysis bool, jumpDest *JumpDestCache) *Contract {
 	return &Contract{
 		CallerAddress: caller.Address(), caller: caller, self: addr,
 		value:        value,
@@ -135,7 +134,7 @@ func (c *Contract) isCode(udest uint64) bool {
 	// Do we have a contract hash already?
 	// If we do have a hash, that means it's a 'regular' contract. For regular
 	// contracts ( not temporary initcode), we store the analysis in a map
-	if c.CodeHash != (libcommon.Hash{}) {
+	if c.CodeHash != (common.Hash{}) {
 		// Does parent context have the analysis?
 		c.jumpdests.total++
 		analysis, exist := c.jumpdests.Get(c.CodeHash)
@@ -188,7 +187,7 @@ func (c *Contract) GetOp(n uint64) OpCode {
 //
 // Caller will recursively call caller when the contract is a delegate
 // call, including that of caller's caller.
-func (c *Contract) Caller() libcommon.Address {
+func (c *Contract) Caller() common.Address {
 	return c.CallerAddress
 }
 
@@ -223,7 +222,7 @@ func (c *Contract) RefundGas(gas uint64, tracer *tracing.Hooks, reason tracing.G
 }
 
 // Address returns the contracts address
-func (c *Contract) Address() libcommon.Address {
+func (c *Contract) Address() common.Address {
 	return c.self
 }
 
@@ -234,7 +233,7 @@ func (c *Contract) Value() *uint256.Int {
 
 // SetCallCode sets the code of the contract and address of the backing data
 // object
-func (c *Contract) SetCallCode(addr *libcommon.Address, hash libcommon.Hash, code []byte) {
+func (c *Contract) SetCallCode(addr *common.Address, hash common.Hash, code []byte) {
 	c.Code = code
 	c.CodeHash = hash
 	c.CodeAddr = addr
@@ -242,7 +241,7 @@ func (c *Contract) SetCallCode(addr *libcommon.Address, hash libcommon.Hash, cod
 
 // SetCodeOptionalHash can be used to provide code, but it's optional to provide hash.
 // In case hash is not provided, the jumpdest analysis will not be saved to the parent context
-func (c *Contract) SetCodeOptionalHash(addr *libcommon.Address, codeAndHash *codeAndHash) {
+func (c *Contract) SetCodeOptionalHash(addr *common.Address, codeAndHash *codeAndHash) {
 	c.Code = codeAndHash.code
 	c.CodeHash = codeAndHash.hash
 	c.CodeAddr = addr
