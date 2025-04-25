@@ -373,6 +373,18 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	// genesis.Timestamp = uint64(time.Now().Unix() - 1)
 	genesis.Timestamp = 1743777048
 	genesis.Config = chainConfig
+	genesis.Alloc[params2.ConsolidationRequestAddress] = types.GenesisAccount{
+		Code:    []byte{0}, // Can't be empty
+		Storage: make(map[common.Hash]common.Hash, 0),
+		Balance: big.NewInt(0),
+		Nonce:   0,
+	}
+	genesis.Alloc[params2.WithdrawalRequestAddress] = types.GenesisAccount{
+		Code:    []byte{0}, // Can't be empty
+		Storage: make(map[common.Hash]common.Hash, 0),
+		Balance: big.NewInt(0),
+		Nonce:   0,
+	}
 
 	// 1_000 ETH in wei in the bank
 	bank := testhelpers.NewBank(testKey, new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil))

@@ -101,7 +101,7 @@ func getChainConfig() *chain.Config {
 	chainConfig.TerminalTotalDifficulty = big.NewInt(0)
 	chainConfig.ShanghaiTime = big.NewInt(0)
 	chainConfig.CancunTime = big.NewInt(0)
-	chainConfig.PragueTime = nil
+	chainConfig.PragueTime = big.NewInt(0)
 	return &chainConfig
 }
 
@@ -171,6 +171,18 @@ func newTestBackend(t *testing.T) (*eth.Ethereum, *core.ChainPack, error) {
 	genesis.Alloc = types.GenesisAlloc{
 		testAddr:           {Balance: testBalance},
 		revertContractAddr: {Code: revertCode, Balance: testBalance},
+		params2.WithdrawalRequestAddress: {
+			Code:    []byte{0x00}, // Can't be empty
+			Storage: make(map[common.Hash]common.Hash, 0),
+			Balance: big.NewInt(0),
+			Nonce:   0,
+		},
+		params2.ConsolidationRequestAddress: {
+			Code:    []byte{0x00}, // Can't be empty
+			Storage: make(map[common.Hash]common.Hash, 0),
+			Balance: big.NewInt(0),
+			Nonce:   0,
+		},
 	}
 
 	ethConfig := ethconfig.Defaults
