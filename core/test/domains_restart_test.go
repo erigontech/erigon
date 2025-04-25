@@ -44,7 +44,7 @@ import (
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	state2 "github.com/erigontech/erigon/core/state"
-	reset2 "github.com/erigontech/erigon/erigon-db/rawdb/rawdbreset"
+	"github.com/erigontech/erigon/eth/rawdbreset"
 	"github.com/erigontech/erigon/params"
 )
 
@@ -237,7 +237,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	domCtx.Close()
 	domains.Close()
 
-	err = reset2.ResetExec(ctx, db, agg, networkname.Test, "", log.New())
+	err = rawdbreset.ResetExec(ctx, db, agg, networkname.Test, "", log.New())
 	require.NoError(t, err)
 	// ======== reset domains end ========
 
@@ -407,7 +407,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	domCtx.Close()
 	domains.Close()
 
-	err = reset2.ResetExec(ctx, db, agg, networkname.Test, "", log.New())
+	err = rawdbreset.ResetExec(ctx, db, agg, networkname.Test, "", log.New())
 	require.NoError(t, err)
 	// ======== reset domains end ========
 
