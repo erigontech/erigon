@@ -156,6 +156,11 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		}
 		ibs.SetTxContext(txnIndex)
 		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
+		// CHANGE(taiko): decode the basefeeSharingPctg config from the extradata, and
+		// add it to the Message, if its an ontake block.
+		if chainConfig.IsOntake(block.Number().Uint64()) {
+			msg.BasefeeSharingPctg = core.DecodeOntakeExtraData(block.Header().Extra)
+		}
 
 		txCtx := evmtypes.TxContext{
 			TxHash:     txnHash,
