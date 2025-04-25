@@ -31,13 +31,14 @@ import (
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 )
 
 var _ txnprovider.TxnProvider = (*Pool)(nil)
 
 type Pool struct {
 	logger                  log.Logger
-	config                  Config
+	config                  shuttercfg.Config
 	baseTxnProvider         txnprovider.TxnProvider
 	blockListener           *BlockListener
 	blockTracker            *BlockTracker
@@ -51,7 +52,7 @@ type Pool struct {
 
 func NewPool(
 	logger log.Logger,
-	config Config,
+	config shuttercfg.Config,
 	baseTxnProvider txnprovider.TxnProvider,
 	contractBackend bind.ContractBackend,
 	stateChangesClient stateChangesClient,

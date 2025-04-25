@@ -43,8 +43,8 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types/accounts"
-	reset2 "github.com/erigontech/erigon/core/rawdb/rawdbreset"
 	state2 "github.com/erigontech/erigon/core/state"
+	reset2 "github.com/erigontech/erigon/erigon-db/rawdb/rawdbreset"
 	"github.com/erigontech/erigon/params"
 )
 
@@ -100,7 +100,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	domCtx := agg.BeginFilesRo()
 	defer domCtx.Close()
 
-	domains, err := state.NewSharedDomains(tx, log.New())
+	domains, err := state.NewSharedDomains(tx.(kv.TemporalTx), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	domains.SetTxNum(0)
@@ -212,7 +212,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	require.NoError(t, err)
 	domCtx = agg.BeginFilesRo()
 	defer domCtx.Close()
-	domains, err = state.NewSharedDomains(tx, log.New())
+	domains, err = state.NewSharedDomains(tx.(kv.TemporalTx), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -246,7 +246,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	defer tx.Rollback()
 	domCtx = agg.BeginFilesRo()
 	defer domCtx.Close()
-	domains, err = state.NewSharedDomains(tx, log.New())
+	domains, err = state.NewSharedDomains(tx.(kv.TemporalTx), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	writer = state2.NewWriterV4(domains)
@@ -306,7 +306,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	domCtx := agg.BeginFilesRo()
 	defer domCtx.Close()
 
-	domains, err := state.NewSharedDomains(tx, log.New())
+	domains, err := state.NewSharedDomains(tx.(kv.TemporalTx), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	domains.SetTxNum(0)
@@ -396,7 +396,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 
 	domCtx = agg.BeginFilesRo()
 	defer domCtx.Close()
-	domains, err = state.NewSharedDomains(tx, log.New())
+	domains, err = state.NewSharedDomains(tx.(kv.TemporalTx), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -416,7 +416,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	defer tx.Rollback()
 	domCtx = agg.BeginFilesRo()
 	defer domCtx.Close()
-	domains, err = state.NewSharedDomains(tx, log.New())
+	domains, err = state.NewSharedDomains(tx.(kv.TemporalTx), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -479,7 +479,7 @@ func TestCommit(t *testing.T) {
 
 	domCtx := agg.BeginFilesRo()
 	defer domCtx.Close()
-	domains, err := state.NewSharedDomains(tx, log.New())
+	domains, err := state.NewSharedDomains(tx.(kv.TemporalTx), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 

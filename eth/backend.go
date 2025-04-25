@@ -85,11 +85,11 @@ import (
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	rpcdaemoncli "github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/rawdb/blockio"
 	snaptype2 "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/erigon-db/rawdb"
+	"github.com/erigontech/erigon/erigon-db/rawdb/blockio"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconsensusconfig"
@@ -226,10 +226,6 @@ type Ethereum struct {
 	heimdallService     *heimdall.Service
 	stopNode            func() error
 	bgComponentsEg      errgroup.Group
-}
-
-func (e *Ethereum) BlockChain() core.BlockChain {
-	panic("implment blockchain return")
 }
 
 func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {
@@ -724,6 +720,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			backend.stateDiffClient,
 			blockBuilderNotifyNewTxns,
 			logger,
+			direct.NewEthBackendClientDirect(backend.ethBackendRPC),
 		)
 		if err != nil {
 			return nil, err
@@ -1264,6 +1261,10 @@ func (s *Ethereum) Engine() consensus.Engine {
 	return s.engine
 }
 
+func (e *Ethereum) BlockChain() core.BlockChain {
+	panic("implment blockchain return")
+}
+
 func (s *Ethereum) APIs() []rpc.API {
 	return s.apiList
 }
@@ -1558,6 +1559,9 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 		if err != nil {
 			return err
 		}
+
+		s.downloader.HandleTorrentClientStatus()
+
 		bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
 		if err != nil {
 			return fmt.Errorf("new server: %w", err)
@@ -1701,7 +1705,7 @@ func (s *Ethereum) Start() error {
 			// which make use of snapshots and expect them to be initialize
 			// TODO: get the snapshots to call the downloader directly - which will avoid this
 			go func() {
-				err := stages2.StageLoopIteration(s.sentryCtx, s.chainDB, wrap.TxContainer{}, s.polygonDownloadSync, true, true, s.logger, s.blockReader, hook)
+				err := stages2.StageLoopIteration(s.sentryCtx, s.chainDB, wrap.NewTxContainer(nil, nil), s.polygonDownloadSync, true, true, s.logger, s.blockReader, hook)
 
 				if err != nil && !errors.Is(err, context.Canceled) {
 					s.logger.Error("[polygon.sync] downloader stage crashed - stopping node", "err", err)

@@ -49,11 +49,11 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/misc"
@@ -257,6 +257,7 @@ type spanReader interface {
 	Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error)
 }
 
+//go:generate mockgen -typed=true -destination=./bridge_reader_mock.go -package=bor . bridgeReader
 type bridgeReader interface {
 	Events(ctx context.Context, blockNum uint64) ([]*types.Message, error)
 	EventsWithinTime(ctx context.Context, timeFrom, timeTo time.Time) ([]*types.Message, error)

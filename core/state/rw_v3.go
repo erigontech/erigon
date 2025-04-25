@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon-lib/state"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -244,7 +243,7 @@ var (
 	mxState3Unwind        = metrics.GetOrCreateSummary("state3_unwind")
 )
 
-func (rs *ParallelExecutionState) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwindTo uint64, accumulator *shards.Accumulator, changeset *[kv.DomainLen][]state.DomainEntryDiff) error {
+func (rs *ParallelExecutionState) Unwind(ctx context.Context, tx kv.TemporalRwTx, blockUnwindTo, txUnwindTo uint64, accumulator *shards.Accumulator, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
 	mxState3UnwindRunning.Inc()
 	defer mxState3UnwindRunning.Dec()
 	st := time.Now()

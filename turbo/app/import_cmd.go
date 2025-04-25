@@ -38,8 +38,8 @@ import (
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
@@ -243,7 +243,7 @@ func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack, logger log.Logge
 	blockReader, _ := ethereum.BlockIO()
 
 	hook := stages.NewHook(ethereum.SentryCtx(), ethereum.ChainDB(), ethereum.Notifications(), ethereum.StagedSync(), blockReader, ethereum.ChainConfig(), logger, sentryControlServer.SetStatus)
-	err := stages.StageLoopIteration(ethereum.SentryCtx(), ethereum.ChainDB(), wrap.TxContainer{}, ethereum.StagedSync(), initialCycle, firstCycle, logger, blockReader, hook)
+	err := stages.StageLoopIteration(ethereum.SentryCtx(), ethereum.ChainDB(), wrap.NewTxContainer(nil, nil), ethereum.StagedSync(), initialCycle, firstCycle, logger, blockReader, hook)
 	if err != nil {
 		return err
 	}

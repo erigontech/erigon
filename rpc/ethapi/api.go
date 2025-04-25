@@ -53,6 +53,7 @@ type CallArgs struct {
 	AccessList           *types.AccessList         `json:"accessList"`
 	ChainID              *hexutil.Big              `json:"chainId,omitempty"`
 	AuthorizationList    []types.JsonAuthorization `json:"authorizationList"`
+
 	SkipL1Charging       *bool                     `json:"skipL1Charging"` // Arbitrum
 }
 
@@ -244,6 +245,7 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 	return tx, nil
 }
 
+// Arbiturm
 // Raises the vanilla gas cap by the tx's l1 data costs in l2 terms. This creates a new gas cap that after
 // data payments are made, equals the original vanilla cap for the remaining, L2-specific work the tx does.
 func (args *CallArgs) L2OnlyGasCap(gasCap uint64, header *types.Header) (uint64, error) {
@@ -257,6 +259,7 @@ func (args *CallArgs) L2OnlyGasCap(gasCap uint64, header *types.Header) (uint64,
 
 // Allows ArbOS to update the gas cap so that it ignores the message's specific L1 poster costs.
 var InterceptRPCGasCap = func(gascap *uint64, msg *types.Message, header *types.Header) {}
+// End arbitrum
 
 // Account indicates the overriding fields of account during the execution of
 // a message call.

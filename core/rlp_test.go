@@ -27,6 +27,7 @@ import (
 
 	"golang.org/x/crypto/sha3"
 
+	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -35,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
@@ -49,7 +49,7 @@ func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir 
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
-			Config: params.TestChainConfig,
+			Config: chain.TestChainConfig,
 			Alloc:  types.GenesisAlloc{address: {Balance: funds}},
 		}
 	)
@@ -58,7 +58,7 @@ func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir 
 	db := m.DB
 
 	// We need to generate as many blocks +1 as uncles
-	chain, _ := core.GenerateChain(params.TestChainConfig, genesis, engine, db, uncles+1, func(n int, b *core.BlockGen) {
+	chain, _ := core.GenerateChain(chain.TestChainConfig, genesis, engine, db, uncles+1, func(n int, b *core.BlockGen) {
 		if n == uncles {
 			// Add transactions and stuff on the last block
 			for i := 0; i < transactions; i++ {

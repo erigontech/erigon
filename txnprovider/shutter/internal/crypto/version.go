@@ -1,4 +1,7 @@
-// Copyright 2025 The Erigon Authors
+// Copyright 2017 The go-ethereum Authors
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify

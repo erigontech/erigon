@@ -1,4 +1,4 @@
-name: Integration tests - ERIGON
+name: All tests - ERIGON
 
 on:
   push:
@@ -19,7 +19,7 @@ on:
 
 jobs:
   # 
-  # This first job is used to determine if changes are within out-of-scope dirs or files (in such a case integration tests are not run because they would be meaningless)
+  # This first job is used to determine if changes are within out-of-scope dirs or files (in such case the tests are not run because they would be meaningless)
   # NOTE: this logic is needed because the simple 'paths-ignore:' doesn't work since this workflow is set as a mandatory/required check for this repo
   # - '**/.github/workflows/**' is currently commented to avoid unintended freeze in case of concurrent changes outside the excluded paths (further development will be done in due course)
   # 
@@ -77,9 +77,17 @@ jobs:
         if: runner.os == 'Linux' && needs.source-of-changes.outputs.changed_files != 'true'
         run: sudo apt update && sudo apt install build-essential
         
-      - name: Run integration tests on ${{ matrix.os }}
+      - name: Run all tests on ${{ matrix.os }}
         if: needs.source-of-changes.outputs.changed_files != 'true'
-        run: GOGC=80 make test-integration
+        run: GOGC=80 make test-all
+
+      - name: SonarCloud
+        if: runner.os == 'Linux' && needs.source-of-changes.outputs.changed_files != 'true'
+        uses: SonarSource/sonarcloud-github-action@v2.3.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        continue-on-error: true
 
       - name: This ${{ matrix.os }} check does not make sense for changes within out-of-scope directories
         if: needs.source-of-changes.outputs.changed_files == 'true'
@@ -122,9 +130,9 @@ jobs:
         run: |
           choco upgrade mingw -y --no-progress --version 13.2.0
 
-      - name: Run integration tests on ${{ matrix.os }}
+      - name: Run all tests on ${{ matrix.os }}
         if: needs.source-of-changes.outputs.changed_files != 'true'
-        run: .\wmake.ps1 test-integration
+        run: .\wmake.ps1 test-all
 
       - name: This ${{ matrix.os }} check does not make sense for changes within out-of-scope directories
         if: needs.source-of-changes.outputs.changed_files == 'true'

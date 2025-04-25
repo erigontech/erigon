@@ -59,11 +59,11 @@ import (
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/rawdb/blockio"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/erigon-db/rawdb"
+	"github.com/erigontech/erigon/erigon-db/rawdb/blockio"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconsensusconfig"
@@ -365,6 +365,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			stateChangesClient,
 			func() {}, /* builderNotifyNewTxns */
 			logger,
+			nil,
 			txpool.WithP2PFetcherWg(&mock.ReceiveWg),
 			txpool.WithP2PSenderWg(nil),
 			txpool.WithFeeCalculator(nil),
@@ -632,10 +633,10 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 
 // Mock is convenience function to create a mock with some pre-set values
 func Mock(tb testing.TB) *MockSentry {
-	funds := big.NewInt(1 * params.Ether)
+	funds := big.NewInt(1 * libcommon.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
-	chainConfig := params.TestChainConfig
+	chainConfig := chain.TestChainConfig
 	gspec := &types.Genesis{
 		Config: chainConfig,
 		Alloc: types.GenesisAlloc{
@@ -646,10 +647,10 @@ func Mock(tb testing.TB) *MockSentry {
 }
 
 func MockWithTxPool(t *testing.T) *MockSentry {
-	funds := big.NewInt(1 * params.Ether)
+	funds := big.NewInt(1 * libcommon.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
-	chainConfig := params.TestChainConfig
+	chainConfig := chain.TestChainConfig
 	gspec := &types.Genesis{
 		Config: chainConfig,
 		Alloc: types.GenesisAlloc{
@@ -662,7 +663,7 @@ func MockWithTxPool(t *testing.T) *MockSentry {
 }
 
 func MockWithTxPoolCancun(t *testing.T) *MockSentry {
-	funds := big.NewInt(1 * params.Ether)
+	funds := big.NewInt(1 * libcommon.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
 	chainConfig := params.AllProtocolChanges
@@ -678,7 +679,7 @@ func MockWithTxPoolCancun(t *testing.T) *MockSentry {
 }
 
 func MockWithZeroTTD(t *testing.T, withPosDownloader bool) *MockSentry {
-	funds := big.NewInt(1 * params.Ether)
+	funds := big.NewInt(1 * libcommon.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
 	chainConfig := params.AllProtocolChanges
@@ -693,10 +694,10 @@ func MockWithZeroTTD(t *testing.T, withPosDownloader bool) *MockSentry {
 }
 
 func MockWithZeroTTDGnosis(t *testing.T, withPosDownloader bool) *MockSentry {
-	funds := big.NewInt(1 * params.Ether)
+	funds := big.NewInt(1 * libcommon.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
-	chainConfig := params.TestChainAuraConfig
+	chainConfig := chain.TestChainAuraConfig
 	chainConfig.TerminalTotalDifficulty = libcommon.Big0
 	chainConfig.TerminalTotalDifficultyPassed = true
 	gspec := &types.Genesis{
@@ -789,7 +790,7 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 	initialCycle, firstCycle := MockInsertAsInitialCycle, false
 	hook := stages2.NewHook(ms.Ctx, ms.DB, ms.Notifications, ms.Sync, ms.BlockReader, ms.ChainConfig, ms.Log, nil)
 
-	if err = stages2.StageLoopIteration(ms.Ctx, ms.DB, wrap.TxContainer{}, ms.Sync, initialCycle, firstCycle, ms.Log, ms.BlockReader, hook); err != nil {
+	if err = stages2.StageLoopIteration(ms.Ctx, ms.DB, wrap.NewTxContainer(nil, nil), ms.Sync, initialCycle, firstCycle, ms.Log, ms.BlockReader, hook); err != nil {
 		return err
 	}
 	if ms.TxPool != nil {

@@ -15,8 +15,8 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/holiman/uint256"
@@ -265,7 +265,7 @@ func makeEip1559Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) types
 }
 
 // makeEip4844Tx builds an EIP-4844 blob transaction.
-func makeEip4844Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) *types.BlobTx {
+func makeEip4844Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) types.Transaction {
 	blobTx := &types.BlobTx{
 		DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: types.CommonTx{
 			Nonce:    commonTx.Nonce,
@@ -349,7 +349,7 @@ func makeRetryableTxFunc(commonTx *types.CommonTx, rawTx map[string]interface{})
 	}
 
 	// Gas limit: taken from the commonTx already parsed.
-	tx.Gas = commonTx.Gas
+	tx.Gas = commonTx.GasLimit
 
 	// RetryTo: expected as a hex string address. If empty, nil indicates contract creation.
 	if retryToHex, ok := rawTx["retryTo"].(string); ok && retryToHex != "" {
@@ -407,7 +407,7 @@ func makeArbitrumRetryTx(commonTx *types.CommonTx, rawTx map[string]interface{})
 	}
 
 	// Gas limit is taken from the common transaction fields.
-	tx.Gas = commonTx.Gas
+	tx.Gas = commonTx.GasLimit
 
 	// To is optional. A non-empty hex string is converted to an address pointer;
 	// if missing or empty, nil indicates contract creation.
@@ -473,7 +473,7 @@ func makeArbitrumContractTx(commonTx *types.CommonTx, rawTx map[string]interface
 	}
 
 	// Gas limit: obtained from the common transaction fields.
-	tx.Gas = commonTx.Gas
+	tx.Gas = commonTx.GasLimit
 
 	// To: if present and non-empty, convert to an address pointer;
 	// if missing or empty, nil indicates contract creation.
@@ -517,7 +517,7 @@ func makeArbitrumUnsignedTx(commonTx *types.CommonTx, rawTx map[string]interface
 	}
 
 	// Gas: taken directly from commonTx.
-	tx.Gas = commonTx.Gas
+	tx.Gas = commonTx.GasLimit
 
 	// To: if provided and non-empty, convert to an address pointer.
 	if toStr, ok := rawTx["to"].(string); ok && toStr != "" {

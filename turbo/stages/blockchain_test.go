@@ -46,10 +46,10 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
@@ -197,9 +197,11 @@ func TestLastBlock(t *testing.T) {
 
 // Tests that given a starting canonical chain of a given size, it can be extended
 // with various length chains.
-func TestExtendCanonicalBlocks(t *testing.T) { testExtendCanonical(t) }
+func TestExtendCanonicalBlocks(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
 
-func testExtendCanonical(t *testing.T) {
 	t.Parallel()
 	length := 5
 
@@ -255,6 +257,10 @@ func TestLongerForkHeaders(t *testing.T) { testLongerFork(t, false) }
 func TestLongerForkBlocks(t *testing.T)  { testLongerFork(t, true) }
 
 func testLongerFork(t *testing.T, full bool) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	length := 10
 
 	// Make first chain starting from genesis
@@ -446,6 +452,10 @@ func testBadHashes(t *testing.T) {
 
 // Tests that chain reorganisations handle transaction removals and reinsertions.
 func TestChainTxReorgs(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	var (
 		key1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -455,7 +465,7 @@ func TestChainTxReorgs(t *testing.T) {
 		addr2   = crypto.PubkeyToAddress(key2.PublicKey)
 		addr3   = crypto.PubkeyToAddress(key3.PublicKey)
 		gspec   = &types.Genesis{
-			Config:   params2.TestChainConfig,
+			Config:   libchain.TestChainConfig,
 			GasLimit: 3141592,
 			Alloc: types.GenesisAlloc{
 				addr1: {Balance: big.NewInt(1000000)},
@@ -761,6 +771,10 @@ func TestEIP155Transition(t *testing.T) {
 }
 
 func TestModes(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	// run test on all combination of flags
 	runWithModesPermuations(
@@ -1071,7 +1085,7 @@ func TestDoubleAccountRemoval(t *testing.T) {
 		input       = hexutil.MustDecode("0xadbd8465")
 		kill        = hexutil.MustDecode("0x41c0e1b5")
 		gspec       = &types.Genesis{
-			Config: params2.TestChainConfig,
+			Config: libchain.TestChainConfig,
 			Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds}},
 		}
 	)
@@ -1146,6 +1160,10 @@ func TestDoubleAccountRemoval(t *testing.T) {
 //
 // https://github.com/ethereum/go-ethereum/pull/15941
 func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	// Generate a canonical chain to act as the main dataset
 	m, m2 := mock.Mock(t), mock.Mock(t)
@@ -1209,6 +1227,10 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 // Tests that doing large reorgs works even if the state associated with the
 // forking point is not available any more.
 func TestLargeReorgTrieGC(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	// Generate the original common chain segment and the two competing forks
 
@@ -1269,6 +1291,10 @@ func TestLargeReorgTrieGC(t *testing.T) {
 //   - https://github.com/ethereum/go-ethereum/issues/18977
 //   - https://github.com/ethereum/go-ethereum/pull/18988
 func TestLowDiffLongChain(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	// Generate a canonical chain to act as the main dataset
 	m := mock.Mock(t)
@@ -1352,7 +1378,7 @@ func TestDeleteCreateRevert(t *testing.T) {
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
-			Config: params2.TestChainConfig,
+			Config: libchain.TestChainConfig,
 			Alloc: types.GenesisAlloc{
 				address: {Balance: funds},
 				// The address 0xAAAAA selfdestructs if called
@@ -1469,7 +1495,7 @@ func TestDeleteRecreateSlots(t *testing.T) {
 	t.Logf("Destination address: %x\n", aa)
 
 	gspec := &types.Genesis{
-		Config: params2.TestChainConfig,
+		Config: libchain.TestChainConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
@@ -1586,7 +1612,7 @@ func TestCVE2020_26265(t *testing.T) {
 		} // Code for CALLER
 	)
 	gspec := &types.Genesis{
-		Config: params2.TestChainConfig,
+		Config: libchain.TestChainConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
@@ -1664,7 +1690,7 @@ func TestDeleteRecreateAccount(t *testing.T) {
 	aaStorage[libcommon.HexToHash("02")] = libcommon.HexToHash("02")
 
 	gspec := &types.Genesis{
-		Config: params2.TestChainConfig,
+		Config: libchain.TestChainConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
@@ -1725,6 +1751,10 @@ func TestDeleteRecreateAccount(t *testing.T) {
 // Expected outcome is that _all_ slots are cleared from A, due to the selfdestruct,
 // and then the new slots exist
 func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	var (
 		// Generate a canonical chain to act as the main dataset
@@ -1786,7 +1816,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 	aa := crypto.CreateAddress2(bb, [32]byte{}, initHash[:])
 	t.Logf("Destination address: %x\n", aa)
 	gspec := &types.Genesis{
-		Config: params2.TestChainConfig,
+		Config: libchain.TestChainConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
@@ -1990,7 +2020,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 	t.Logf("Destination address: %x\n", aa)
 
 	gspec := &types.Genesis{
-		Config: params2.TestChainConfig,
+		Config: libchain.TestChainConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address aa has some funds
@@ -2071,7 +2101,7 @@ func TestEIP2718Transition(t *testing.T) {
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
-			Config: params2.TestChainConfig,
+			Config: libchain.TestChainConfig,
 			Alloc: types.GenesisAlloc{
 				address: {Balance: funds},
 				// The address 0xAAAA sloads 0x00 and 0x01
@@ -2163,7 +2193,7 @@ func TestEIP1559Transition(t *testing.T) {
 		key2, _ = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
 		addr1   = crypto.PubkeyToAddress(key1.PublicKey)
 		addr2   = crypto.PubkeyToAddress(key2.PublicKey)
-		funds   = new(uint256.Int).Mul(u256.Num1, new(uint256.Int).SetUint64(params2.Ether))
+		funds   = new(uint256.Int).Mul(u256.Num1, new(uint256.Int).SetUint64(libcommon.Ether))
 		gspec   = &types.Genesis{
 			Config: params2.SepoliaChainConfig,
 			Alloc: types.GenesisAlloc{
@@ -2209,7 +2239,7 @@ func TestEIP1559Transition(t *testing.T) {
 					Data:     []byte{},
 				},
 				ChainID:    &chainID,
-				FeeCap:     new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(params2.GWei)),
+				FeeCap:     new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(libcommon.GWei)),
 				TipCap:     u256.Num2,
 				AccessList: accesses,
 			}
@@ -2269,7 +2299,7 @@ func TestEIP1559Transition(t *testing.T) {
 	chain, err = core.GenerateChain(m.ChainConfig, block, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{2})
 
-		var txn types.Transaction = types.NewTransaction(0, aa, u256.Num0, 30000, new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(params2.GWei)), nil)
+		var txn types.Transaction = types.NewTransaction(0, aa, u256.Num0, 30000, new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(libcommon.GWei)), nil)
 		txn, _ = types.SignTx(txn, *signer, key2)
 
 		b.AddTx(txn)

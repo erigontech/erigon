@@ -21,8 +21,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
-
-	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/erigon-db/rawdb"
 )
 
 type NonTransactionalEpochReader struct {

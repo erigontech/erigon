@@ -47,10 +47,10 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/erigon-db/rawdb"
 	params2 "github.com/erigontech/erigon/params"
 )
 
@@ -290,7 +290,7 @@ func WriteCustomGenesisBlock(tx kv.RwTx, gen *types.Genesis, block *types.Block,
 		return err
 	}
 	if genesisBlockNum != block.NumberU64() {
-		panic("sadsfafsdf")
+		return fmt.Errorf("genesis block number and given block number mismatches (gen %d != block %d)", genesisBlockNum, block.NumberU64())
 	}
 	if err := rawdbv3.TxNums.Append(tx, genesisBlockNum, uint64(block.Transactions().Len()+1)); err != nil {
 		return err
@@ -310,7 +310,7 @@ func WriteCustomGenesisBlock(tx kv.RwTx, gen *types.Genesis, block *types.Block,
 
 // GenesisBlockForTesting creates and writes a block in which addr has the given wei balance.
 func GenesisBlockForTesting(db kv.RwDB, addr libcommon.Address, balance *big.Int, dirs datadir.Dirs, logger log.Logger) *types.Block {
-	g := types.Genesis{Alloc: types.GenesisAlloc{addr: {Balance: balance}}, Config: params2.TestChainConfig}
+	g := types.Genesis{Alloc: types.GenesisAlloc{addr: {Balance: balance}}, Config: chain.TestChainConfig}
 	block := MustCommitGenesis(&g, db, dirs, logger)
 	return block
 }
@@ -321,7 +321,7 @@ type GenAccount struct {
 }
 
 func GenesisWithAccounts(db kv.RwDB, accs []GenAccount, dirs datadir.Dirs, logger log.Logger) *types.Block {
-	g := types.Genesis{Config: params2.TestChainConfig}
+	g := types.Genesis{Config: chain.TestChainConfig}
 	allocs := make(map[libcommon.Address]types.GenesisAccount)
 	for _, acc := range accs {
 		allocs[acc.Addr] = types.GenesisAccount{Balance: acc.Balance}
@@ -444,7 +444,7 @@ func ChiadoGenesisBlock() *types.Genesis {
 	}
 }
 func TestGenesisBlock() *types.Genesis {
-	return &types.Genesis{Config: params2.TestChainConfig}
+	return &types.Genesis{Config: chain.TestChainConfig}
 }
 
 func ArbSepoliaRollupGenesisBlock() *types.Genesis {
@@ -572,7 +572,6 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		} else {
 			head.RequestsHash = &types.EmptyRequestsHash
 		}
-
 	}
 
 	var root libcommon.Hash

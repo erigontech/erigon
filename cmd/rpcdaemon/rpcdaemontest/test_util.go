@@ -46,7 +46,6 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc/jsonrpc/contracts"
 	privateapi2 "github.com/erigontech/erigon/turbo/privateapi"
 	"github.com/erigontech/erigon/turbo/stages/mock"
@@ -92,7 +91,7 @@ func CreateTestSentry(t *testing.T) (*mock.MockSentry, *core.ChainPack, []*core.
 
 	var (
 		gspec = &types.Genesis{
-			Config: params.TestChainConfig,
+			Config: chain.TestChainConfig,
 			Alloc: types.GenesisAlloc{
 				address:  {Balance: big.NewInt(9000000000000000000)},
 				address1: {Balance: big.NewInt(200000000000000000)},
@@ -135,7 +134,7 @@ func getChainInstance(
 	config *chain.Config,
 	parent *types.Block,
 	engine consensus.Engine,
-	db kv.RwDB,
+	db kv.TemporalRwDB,
 	contractBackend *backends.SimulatedBackend,
 ) (*core.ChainPack, error) {
 	var err error
@@ -150,7 +149,7 @@ func generateChain(
 	config *chain.Config,
 	parent *types.Block,
 	engine consensus.Engine,
-	db kv.RwDB,
+	db kv.TemporalRwDB,
 	contractBackend *backends.SimulatedBackend,
 ) (*core.ChainPack, error) {
 	var (
@@ -352,7 +351,7 @@ func CreateTestSentryForTraces(t *testing.T) *mock.MockSentry {
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
-			Config: params.TestChainConfig,
+			Config: chain.TestChainConfig,
 			Alloc: types.GenesisAlloc{
 				address: {Balance: funds},
 				// The address 0x00ff
@@ -509,7 +508,7 @@ func CreateTestSentryForTracesCollision(t *testing.T) *mock.MockSentry {
 	t.Logf("Destination address: %x\n", aa)
 
 	gspec := &types.Genesis{
-		Config: params.TestChainConfig,
+		Config: chain.TestChainConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called

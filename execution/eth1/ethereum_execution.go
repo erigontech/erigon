@@ -36,8 +36,8 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/execution/builder"
@@ -97,7 +97,7 @@ type EthereumExecutionModule struct {
 	blockReader services.FullBlockReader
 
 	// MDBX database
-	db                kv.RwDB // main database
+	db                kv.TemporalRwDB // main database
 	semaphore         *semaphore.Weighted
 	executionPipeline *stagedsync.Sync
 	forkValidator     *engine_helpers.ForkValidator
@@ -129,7 +129,7 @@ type EthereumExecutionModule struct {
 	execution.UnimplementedExecutionServer
 }
 
-func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB,
+func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.TemporalRwDB,
 	executionPipeline *stagedsync.Sync, forkValidator *engine_helpers.ForkValidator,
 	config *chain.Config, builderFunc builder.BlockBuilderFunc,
 	hook *stages.Hook, accumulator *shards.Accumulator,
@@ -221,7 +221,7 @@ func (e *EthereumExecutionModule) unwindToCommonCanonical(tx kv.RwTx, header *ty
 	if err := e.executionPipeline.UnwindTo(currentHeader.Number.Uint64(), stagedsync.ExecUnwind, tx); err != nil {
 		return err
 	}
-	if err := e.executionPipeline.RunUnwind(nil, wrap.TxContainer{Tx: tx}); err != nil {
+	if err := e.executionPipeline.RunUnwind(nil, wrap.NewTxContainer(tx, nil)); err != nil {
 		return err
 	}
 	return nil
