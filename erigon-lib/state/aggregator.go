@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -1241,6 +1242,9 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
 		restorePrevRange := false
 		for k, dr := range &r.domain {
 			kd := kv.Domain(k)
+			if !slices.Contains(kv.StateDomains, kd) {
+				continue
+			}
 			if kd == kv.CommitmentDomain || cr.values.Equal(&dr.values) {
 				continue
 			}
