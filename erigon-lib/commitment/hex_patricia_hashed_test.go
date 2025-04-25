@@ -1432,7 +1432,7 @@ func Test_ParallelHexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMidd
 
 		updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:somewhere+1], updates[:somewhere+1])
 
-		sequential.SetTrace(true)
+		sequential.SetTrace(false)
 		sequentialRoot, err := sequential.Process(ctx, updsOne, "")
 		require.NoError(t, err)
 		//sequential.SetTrace(false)
