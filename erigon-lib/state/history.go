@@ -458,7 +458,7 @@ func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, p
 	}
 }
 
-func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte, originalStep uint64) (err error) {
+func (w *historyBufferedWriter) AddPrevValue(key1, key2 []byte, txNum uint64, original []byte) (err error) {
 	if w.discard {
 		return nil
 	}
@@ -466,6 +466,7 @@ func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte, origin
 	if original == nil {
 		original = []byte{}
 	}
+	binary.BigEndian.PutUint64(w.ii.txNumBytes[:], txNum)
 
 	//defer func() {
 	//	fmt.Printf("addPrevValue [%p;tx=%d] '%x' -> '%x'\n", w, w.ii.txNum, key1, original)
@@ -532,8 +533,6 @@ type historyBufferedWriter struct {
 
 	ii *InvertedIndexBufferedWriter
 }
-
-func (w *historyBufferedWriter) SetTxNum(v uint64) { w.ii.SetTxNum(v) }
 
 func (w *historyBufferedWriter) close() {
 	if w == nil { // allow dobule-close
