@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"reflect"
 	"strings"
+	"errors"
 
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/abi"
@@ -255,7 +256,7 @@ type ChildReceiverOnStateReceiveParams struct {
 // Solidity: function onStateReceive(uint256 , bytes data) returns()
 func ParseChildReceiverOnStateReceiveParams(calldata []byte) (*ChildReceiverOnStateReceiveParams, error) {
 	if len(calldata) <= 4 {
-		return nil, fmt.Errorf("invalid calldata input")
+		return nil, errors.New("invalid calldata input")
 	}
 
 	_abi, err := abi.JSON(strings.NewReader(ChildReceiverABI))
@@ -272,7 +273,7 @@ func ParseChildReceiverOnStateReceiveParams(calldata []byte) (*ChildReceiverOnSt
 	value := reflect.ValueOf(paramsResult).Elem()
 
 	if value.NumField() != len(out) {
-		return nil, fmt.Errorf("failed to match calldata with param field number")
+		return nil, errors.New("failed to match calldata with param field number")
 	}
 
 	out0 := *abi.ConvertType(out[0], new(*big.Int)).(**big.Int)
