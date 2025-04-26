@@ -725,19 +725,9 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter b
 // IterateStoragePrefix iterates over key-value pairs of the storage domain that start with given prefix
 //
 // k and v lifetime is bounded by the lifetime of the iterator
-func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v []byte, step uint64) (cont bool, err error)) error {
-	return sd.IteratePrefix(kv.StorageDomain, prefix, it)
-}
-
-func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, it func(k []byte, v []byte, step uint64) (cont bool, err error)) error {
-	var haveRamUpdates bool
-	var ramIter btree2.MapIter[string, dataWithPrevStep]
-	if domain == kv.StorageDomain {
-		haveRamUpdates = sd.storage.Len() > 0
-		ramIter = sd.storage.Iter()
-	}
-
-	return sd.AggTx().d[domain].debugIteratePrefix(prefix, haveRamUpdates, ramIter, it, sd.txNum, sd.StepSize(), sd.roTtx)
+func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v []byte, step uint64) error) error {
+	haveRamUpdates := sd.storage.Len() > 0
+	return sd.aggTx.d[kv.StorageDomain].debugIteratePrefix(prefix, haveRamUpdates, sd.storage.Iter(), it, sd.txNum, sd.StepSize(), sd.roTx)
 }
 
 func (sd *SharedDomains) Close() {
