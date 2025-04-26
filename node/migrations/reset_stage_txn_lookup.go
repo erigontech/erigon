@@ -22,7 +22,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/eth/rawdbreset"
+	reset2 "github.com/erigontech/erigon/eth/rawdbreset"
 )
 
 // for new txn index.
@@ -39,7 +39,7 @@ var ResetStageTxnLookup = Migration{
 			return err
 		}
 
-		if err := rawdbreset.ResetTxLookup(tx); err != nil {
+		if err := reset2.ResetTxLookup(tx); err != nil {
 			return err
 		}
 

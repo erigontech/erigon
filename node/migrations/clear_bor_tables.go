@@ -6,7 +6,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/eth/rawdbreset"
+	reset2 "github.com/erigontech/erigon/eth/rawdbreset"
 )
 
 var ClearBorTables = Migration{
@@ -23,7 +23,7 @@ var ClearBorTables = Migration{
 			return err
 		}
 
-		if err := rawdbreset.ResetBorHeimdall(context.Background(), tx, db); err != nil {
+		if err := reset2.ResetBorHeimdall(context.Background(), tx, db); err != nil {
 			return err
 		}
 
