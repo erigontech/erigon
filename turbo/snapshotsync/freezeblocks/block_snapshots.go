@@ -31,7 +31,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
@@ -63,7 +62,6 @@ import (
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
-	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 type RoSnapshots struct {
@@ -587,35 +585,34 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 	warmupCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	chainID, _ := uint256.FromBig(chainConfig.ChainID)
-
 	numBuf := make([]byte, 8)
-	parse := func(ctx *txpool.TxnParseContext, v, valueBuf []byte, senders []common2.Address, j int) ([]byte, error) {
+	parse := func(v, valueBuf []byte, senders []common2.Address, j int) ([]byte, error) {
 		var sender [20]byte
-
-		tx, err := types.UnmarshalTransactionFromBinary(v, false)
+		txn2, err := types.DecodeTransaction(v)
 		if err != nil {
-			return valueBuf, err
+			return nil, err
 		}
-
-		signer := types.LatestSigner(chainConfig)
-		sender, err = tx.Sender(*signer)
-		if err != nil {
-			return valueBuf, err
-		}
-
+		hash := txn2.Hash()
+		hashFirstByte := hash[:1]
 		if len(senders) > 0 {
+			txn2.SetSender(senders[j])
 			sender = senders[j]
+		} else {
+			signer := types.LatestSignerForChainID(chainConfig.ChainID)
+			sender, err = txn2.Sender(*signer)
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		valueBuf = valueBuf[:0]
-		valueBuf = append(valueBuf, tx.Hash().Bytes()[:1]...)
+		valueBuf = append(valueBuf, hashFirstByte...)
 		valueBuf = append(valueBuf, sender[:]...)
 		valueBuf = append(valueBuf, v...)
 		return valueBuf, nil
 	}
 
-	addSystemTx := func(ctx *txpool.TxnParseContext, tx kv.Tx, txId types.BaseTxnID) error {
+	addSystemTx := func(tx kv.Tx, txId types.BaseTxnID) error {
 		binary.BigEndian.PutUint64(numBuf, txId.U64())
 		tv, err := tx.GetOne(kv.EthTx, numBuf)
 		if err != nil {
@@ -628,12 +625,10 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			return nil
 		}
 
-		ctx.WithSender(false)
-
 		valueBuf := bufPool.Get().(*[16 * 4096]byte)
 		defer bufPool.Put(valueBuf)
 
-		parsed, err := parse(ctx, tv, valueBuf[:], nil, 0)
+		parsed, err := parse(tv, valueBuf[:], nil, 0)
 		if err != nil {
 			return err
 		}
@@ -695,16 +690,14 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		parsers.SetLimit(workers)
 
 		valueBufs := make([][]byte, workers)
-		parseCtxs := make([]*txpool.TxnParseContext, workers)
 
 		for i := 0; i < workers; i++ {
 			valueBuf := bufPool.Get().(*[16 * 4096]byte)
 			defer bufPool.Put(valueBuf)
 			valueBufs[i] = valueBuf[:]
-			parseCtxs[i] = txpool.NewTxnParseContext(*chainID)
 		}
 
-		if err := addSystemTx(parseCtxs[0], tx, body.BaseTxnID); err != nil {
+		if err := addSystemTx(tx, body.BaseTxnID); err != nil {
 			return false, err
 		}
 
@@ -720,16 +713,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			j++
 
 			parsers.Go(func() error {
-				if rec := recover(); rec != nil {
-					fmt.Printf("rec: %v\n", rec)
-				}
-
-				parseCtx := parseCtxs[tx%workers]
-
-				parseCtx.WithSender(len(senders) == 0)
-				parseCtx.WithAllowPreEip2s(blockNum <= chainConfig.HomesteadBlock.Uint64())
-
-				valueBuf, err := parse(parseCtx, tv, valueBufs[tx%workers], senders, tx)
+				valueBuf, err := parse(tv, valueBufs[tx%workers], senders, tx)
 				if err != nil {
 					collectorLock.Lock()
 					defer collectorLock.Unlock()
@@ -762,7 +746,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			return false, fmt.Errorf("ForAmount parser: %w", err)
 		}
 
-		if err := addSystemTx(parseCtxs[0], tx, types.BaseTxnID(body.BaseTxnID.LastSystemTx(body.TxCount))); err != nil {
+		if err := addSystemTx(tx, types.BaseTxnID(body.BaseTxnID.LastSystemTx(body.TxCount))); err != nil {
 			return false, err
 		}
 
@@ -770,13 +754,13 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		case <-ctx.Done():
 			return false, ctx.Err()
 		case <-logEvery.C:
-			var m runtime.MemStats
 			if lvl >= log.LvlInfo {
+				var m runtime.MemStats
 				dbg.ReadMemStats(&m)
+				logger.Log(lvl, "[snapshots] Dumping txs", "block num", blockNum, "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+			} else {
+				logger.Log(lvl, "[snapshots] Dumping txs", "block num", blockNum)
 			}
-			logger.Log(lvl, "[snapshots] Dumping txs", "block num", blockNum,
-				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys),
-			)
 		default:
 		}
 		return true, nil
