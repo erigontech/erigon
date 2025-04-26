@@ -447,7 +447,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	}
 
 	buckets := bucketSlice(db.buckets)
-	if err := db.openDBIs(buckets); err != nil {
+	if err := db.openDBIs(ctx, buckets); err != nil {
 		return nil, err
 	}
 
@@ -555,26 +555,50 @@ func (db *MdbxKV) CHandle() unsafe.Pointer {
 // openDBIs - first trying to open existing DBI's in RO transaction
 // otherwise re-try by RW transaction
 // it allow open DB from another process - even if main process holding long RW transaction
-func (db *MdbxKV) openDBIs(buckets []string) error {
-	if db.ReadOnly() || db.Accede() {
-		return db.View(context.Background(), func(tx kv.Tx) error {
-			for _, name := range buckets {
-				if db.buckets[name].IsDeprecated {
-					continue
-				}
+func (db *MdbxKV) openDBIs(ctx context.Context, buckets []string) error {
+	nonDeprecatedBuckets := make([]string, 0, len(buckets))
+	for _, name := range buckets {
+		if db.buckets[name].IsDeprecated {
+			continue
+		}
+		nonDeprecatedBuckets = append(nonDeprecatedBuckets, name)
+	}
+
+	if db.ReadOnly() { // open or fail
+		return db.View(ctx, func(tx kv.Tx) error {
+			for _, name := range nonDeprecatedBuckets {
 				if err := tx.(kv.BucketMigrator).CreateBucket(name); err != nil {
 					return err
 				}
 			}
-			return tx.(*MdbxTx).Commit() // when open db as read-only, commit of this RO transaction is required
+			// when open db as read-only, commit of this RO transaction is required.
+			// it's weird - opening DBI on RO-db is "write/mutation operation" - which will be rolled-back if not committed.
+			return tx.(*MdbxTx).Commit()
 		})
 	}
 
-	return db.Update(context.Background(), func(tx kv.RwTx) error {
-		for _, name := range buckets {
-			if db.buckets[name].IsDeprecated {
-				continue
+	if db.Accede() { // open or create
+		err := db.View(ctx, func(tx kv.Tx) error {
+			for _, name := range nonDeprecatedBuckets {
+				if err := tx.(kv.BucketMigrator).CreateBucket(name); err != nil {
+					return err
+				}
 			}
+			// when open db as read-only, commit of this RO transaction is required.
+			// it's weird - opening DBI on RO-db is "write/mutation operation" - which will be rolled-back if not committed.
+			return tx.(*MdbxTx).Commit()
+		})
+		if err == nil { // success
+			return nil
+		}
+		recoverable := !errors.Is(err, ErrTableDoesntExists)
+		if !recoverable {
+			return err
+		}
+	}
+
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		for _, name := range nonDeprecatedBuckets {
 			if err := tx.(kv.BucketMigrator).CreateBucket(name); err != nil {
 				return err
 			}
@@ -903,15 +927,16 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 	}
 
 	dbi, err = tx.tx.OpenDBI(name, nativeFlags, nil, nil)
-
 	if err != nil {
-		return fmt.Errorf("db-talbe doesn't exists: %s, lable: %s, %w. Tip: try run `integration run_migrations` to create non-existing tables", name, tx.db.opts.label, err)
+		return fmt.Errorf("%w: %s, lable: %s, %w. Tip: try run `integration run_migrations`", ErrTableDoesntExists, name, tx.db.opts.label, err)
 	}
 	cnfCopy.DBI = kv.DBI(dbi)
 
 	tx.db.buckets[name] = cnfCopy
 	return nil
 }
+
+var ErrTableDoesntExists = errors.New("table does not exist")
 
 func (tx *MdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 	dbi := tx.db.buckets[name].DBI
