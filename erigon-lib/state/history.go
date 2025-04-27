@@ -135,6 +135,13 @@ func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error
 		return nil, fmt.Errorf("NewHistory: %s, %w", cfg.iiCfg.filenameBase, err)
 	}
 
+	if h.version.DataV.IsZero() {
+		panic(fmt.Errorf("assert: forgot to set version of %s", h.name))
+	}
+	if h.version.AccessorVI.IsZero() {
+		panic(fmt.Errorf("assert: forgot to set version of %s", h.name))
+	}
+
 	return &h, nil
 }
 
