@@ -226,12 +226,12 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 			return nil
 		}
 
-		fromFileStep, toFileStep, err := statelib.ParseStepsFromFileName(info.Name())
-		if err != nil {
-			return err
+		res, ok, _ := downloadertype.ParseFileName("", info.Name())
+		if !ok {
+			panic("invalid file name")
 		}
 
-		if fromFileStep < fromStepPurification || toFileStep > toStepPurification {
+		if res.From < fromStepPurification || res.To > toStepPurification {
 			return nil
 		}
 
@@ -347,12 +347,11 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 
 		fmt.Printf("Add file to purification of %s: %s\n", domain.String(), path)
 
-		fromFileStep, toFileStep, err := statelib.ParseStepsFromFileName(info.Name())
-		if err != nil {
-			return err
+		res, ok, _ := downloadertype.ParseFileName("", info.Name())
+		if !ok {
+			panic("invalid file name")
 		}
-
-		if fromFileStep < fromStepPurification || toFileStep > toStepPurification {
+		if res.From < fromStepPurification || res.To > toStepPurification {
 			return nil
 		}
 
