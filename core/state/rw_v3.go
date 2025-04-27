@@ -350,10 +350,22 @@ func (w *StateWriterBufferedV3) PrevAndDels() (map[string][]byte, map[string]*ac
 	return w.accountPrevs, w.accountDels, w.storagePrevs, w.codePrevs
 }
 
+var previousNonces = map[common.Address]uint64{}
+var previousNonceMutex sync.Mutex
+
 func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	if w.trace {
 		fmt.Printf("acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
 	}
+
+	previousNonceMutex.Lock()
+	if nonce, ok := previousNonces[address]; ok {
+		if account.Nonce < nonce {
+			fmt.Println(address, account.Nonce, ">", nonce)
+		}
+	}
+	previousNonces[address] = account.Nonce
+	previousNonceMutex.Unlock()
 
 	value := accounts.SerialiseV3(account)
 	if w.accumulator != nil {
