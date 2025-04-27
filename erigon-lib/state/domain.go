@@ -144,6 +144,19 @@ func NewDomain(cfg domainCfg, aggStep uint64, logger log.Logger) (*Domain, error
 		return nil, err
 	}
 
+	if d.version.DataKV.IsZero() {
+		panic(fmt.Errorf("assert: forgot to set version of %s", d.name))
+	}
+	if d.AccessorList.Has(AccessorBTree) && d.version.AccessorBT.IsZero() {
+		panic(fmt.Errorf("assert: forgot to set version of %s", d.name))
+	}
+	if d.AccessorList.Has(AccessorHashMap) && d.version.AccessorKVI.IsZero() {
+		panic(fmt.Errorf("assert: forgot to set version of %s", d.name))
+	}
+	if d.AccessorList.Has(AccessorExistence) && d.version.AccessorKVEI.IsZero() {
+		panic(fmt.Errorf("assert: forgot to set version of %s", d.name))
+	}
+
 	return d, nil
 }
 func (d *Domain) kvFilePath(fromStep, toStep uint64) string {
