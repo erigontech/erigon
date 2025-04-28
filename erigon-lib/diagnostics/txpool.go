@@ -19,7 +19,6 @@ package diagnostics
 import (
 	"context"
 	"encoding/hex"
-	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -110,6 +109,8 @@ func (d *DiagnosticClient) setupTxPoolDiagnostics(rootCtx context.Context) {
 	d.runOnIncommingTxnListener(rootCtx)
 	d.runOnPoolChangeBatchEvent(rootCtx)
 	d.runOnNewBlockListener(rootCtx)
+	d.runOnSenderUpdateListener(rootCtx)
+
 	d.SetupNotifier()
 	//GetPoolTransactions(rootCtx, "localhost:9090")
 }
@@ -140,7 +141,6 @@ func (d *DiagnosticClient) runOnIncommingTxnListener(rootCtx context.Context) {
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
-				fmt.Println("se2323ndi")
 				d.Notify(DiagMessages{
 					MessageType: "txpool",
 					Message: TxpoolDiagMessage{
@@ -200,6 +200,29 @@ func (d *DiagnosticClient) runOnNewBlockListener(rootCtx context.Context) {
 					MessageType: "txpool",
 					Message: TxpoolDiagMessage{
 						Type:    "blockUpdate",
+						Message: info,
+					},
+				})
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) runOnSenderUpdateListener(rootCtx context.Context) {
+	go func() {
+		ctx, ch, closeChannel := Context[SenderInfoUpdate](rootCtx, 1)
+		defer closeChannel()
+
+		StartProviders(ctx, TypeOf(SenderInfoUpdate{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				return
+			case info := <-ch:
+				d.Notify(DiagMessages{
+					MessageType: "txpool",
+					Message: TxpoolDiagMessage{
+						Type:    "senderInfoUpdate",
 						Message: info,
 					},
 				})
