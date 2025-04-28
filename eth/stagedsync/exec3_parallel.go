@@ -860,6 +860,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 		}
 
+		var coinbase libcommon.Address
+
+		if result := be.results[tx]; result != nil {
+			coinbase = result.Coinbase
+		}
+
 		if be.skipCheck[tx] ||
 			state.ValidateVersion(txVersion.TxIndex, be.blockIO, be.versionMap,
 				func(readsource state.ReadSource, readVersion, writtenVersion state.Version) bool {
@@ -896,13 +902,15 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	}
 
 	maxValidated := be.validateTasks.maxComplete()
-	be.scheduleExecution(ctx, pe.in)
+
+	var applyResult txResult
+	var stateWriter *state.StateWriterBufferedV3
 
 	if be.finalizeTasks.minPending() != -1 {
-		stateWriter := state.NewStateWriterBufferedV3(pe.rs, pe.accumulator)
+		stateWriter = state.NewStateWriterBufferedV3(pe.rs, pe.accumulator)
 		stateReader := state.NewBufferedReader(pe.rs, state.NewReaderV3(pe.rs.Domains(), applyTx))
 
-		applyResult := txResult{
+		applyResult = txResult{
 			blockNum:   be.blockNum,
 			traceFroms: map[libcommon.Address]struct{}{},
 			traceTos:   map[libcommon.Address]struct{}{},
@@ -943,13 +951,18 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			be.cntFinalized++
 			be.finalizeTasks.markComplete(tx)
 		}
+	}
 
-		if applyResult.txNum > 0 {
-			pe.executedGas.Add(int64(applyResult.gasUsed))
-			pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
-			applyResult.writeSet = stateWriter.WriteSet()
-			be.applyResults <- &applyResult
-		}
+	// this needs to be called after finalization to make sure
+	// that coinbase updates are considered by subsequent
+	// transactions
+	be.scheduleExecution(ctx, pe.in)
+
+	if applyResult.txNum > 0 {
+		pe.executedGas.Add(int64(applyResult.gasUsed))
+		pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
+		applyResult.writeSet = stateWriter.WriteSet()
+		be.applyResults <- &applyResult
 	}
 
 	if be.finalizeTasks.countComplete() == len(be.tasks) && be.execTasks.countComplete() == len(be.tasks) {
