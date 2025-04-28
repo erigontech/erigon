@@ -502,6 +502,8 @@ Loop:
 		})
 		totalGasUsed += b.GasUsed()
 		blockContext := core.NewEVMBlockContext(header, getHashFn, cfg.engine, cfg.author /* author */, chainConfig)
+		gp := new(core.GasPool).AddGas(header.GasLimit).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(b.Time()))
+
 		// print type of engine
 		if parallel {
 			if err := executor.status(ctx, commitThreshold); err != nil {
@@ -581,7 +583,7 @@ Loop:
 		}
 
 		if parallel {
-			if _, err := executor.execute(ctx, txTasks); err != nil {
+			if _, err := executor.execute(ctx, txTasks, nil /*gasPool*/); err != nil { // For now don't use block's gas pool for parallel
 				return err
 			}
 			agg.BuildFilesInBackground(outputTxNum.Load())
@@ -590,7 +592,7 @@ Loop:
 
 			se.skipPostEvaluation = skipPostEvaluation
 
-			continueLoop, err := se.execute(ctx, txTasks)
+			continueLoop, err := se.execute(ctx, txTasks, gp)
 
 			if err != nil {
 				return err
