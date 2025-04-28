@@ -23,6 +23,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon/core/tracing"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -63,7 +64,6 @@ type HistoricalTraceWorker struct {
 
 	execArgs *ExecArgs
 
-	callTracer  *CallTracer
 	taskGasPool *core.GasPool
 
 	// calculated by .changeBlock()
@@ -77,7 +77,6 @@ type HistoricalTraceWorker struct {
 }
 
 type TraceConsumer struct {
-	NewTracer func() GenericTracer
 	//Reduce receiving results of execution. They are sorted and have no gaps.
 	Reduce func(task *state.TxTask, tx kv.TemporalTx) error
 }
@@ -108,7 +107,6 @@ func NewHistoricalTraceWorker(
 		ctx:         ctx,
 		logger:      logger,
 		taskGasPool: new(core.GasPool),
-		callTracer:  NewCallTracer(consumer.NewTracer().TracingHooks()),
 	}
 	ie.ibs = state.New(ie.stateReader)
 
@@ -150,7 +148,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 
 	var err error
 	rules, header := txTask.Rules, txTask.Header
-	hooks := txTask.Hooks
+	hooks := txTask.Tracer.TracingHooks()
 	ibs.SetHooks(hooks)
 
 	switch {
@@ -191,7 +189,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 		}
 	default:
 		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), rw.execArgs.ChainConfig.GetMaxBlobGasPerBlock(header.Time))
-		rw.callTracer.Reset()
+		//rw.callTracer.Reset()
 		rw.vmConfig.SkipAnalysis = txTask.SkipAnalysis
 		rw.vmConfig.Tracer = hooks
 		ibs.SetTxContext(txTask.TxIndex)
@@ -218,8 +216,8 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 			ibs.SoftFinalise()
 
 			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)
-			txTask.TraceFroms = rw.callTracer.Froms()
-			txTask.TraceTos = rw.callTracer.Tos()
+			txTask.TraceFroms = txTask.Tracer.(*CallTracer).Froms()
+			txTask.TraceTos = txTask.Tracer.(*CallTracer).Tos()
 		}
 	}
 }
@@ -463,9 +461,8 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: true,
 				BlockReceipts:    blockReceipts,
-				Tracer:           consumer.NewTracer(),
+				Tracer:           NewCallTracer(&tracing.Hooks{}),
 			}
-			txTask.Hooks = txTask.Tracer.TracingHooks()
 
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]

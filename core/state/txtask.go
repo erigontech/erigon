@@ -90,7 +90,6 @@ type TxTask struct {
 	// And remove this field if possible - because it will make problems for parallel-execution
 	BlockReceipts types.Receipts
 	Tracer        GenericTracer
-	Hooks         *tracing.Hooks
 
 	Config *chain.Config
 

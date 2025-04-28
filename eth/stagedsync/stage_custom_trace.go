@@ -327,7 +327,6 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 
 	var m runtime.MemStats
 	if err := exec3.CustomTraceMapReduce(fromBlock, toBlock, exec3.TraceConsumer{
-		NewTracer: func() exec3.GenericTracer { return nil },
 		Reduce: func(txTask *state.TxTask, tx kv.TemporalTx) error {
 			if txTask.Error != nil {
 				return txTask.Error

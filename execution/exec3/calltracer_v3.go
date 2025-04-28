@@ -17,6 +17,7 @@
 package exec3
 
 import (
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -35,6 +36,10 @@ func NewCallTracer(hooks *tracing.Hooks) *CallTracer {
 		hooks: hooks,
 	}
 }
+
+func (ct *CallTracer) TracingHooks() *tracing.Hooks        { return ct.hooks }
+func (ct *CallTracer) SetTransaction(tx types.Transaction) {}
+func (ct *CallTracer) Found() bool                         { return true }
 
 func (ct *CallTracer) Tracer() *tracers.Tracer {
 	var hooks tracing.Hooks
