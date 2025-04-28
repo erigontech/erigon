@@ -244,12 +244,12 @@ func TestAPI(t *testing.T) {
 				return err
 			}
 			defer d.Close()
-			if err := d.DomainPut(kv.AccountsDomain, k, nil, v, prevVals[string(k)], uint64(counter.Load())); err != nil {
+			if err := d.DomainPut(tx.(kv.TemporalTx), kv.AccountsDomain, k, nil, v, prevVals[string(k)], uint64(counter.Load())); err != nil {
 				return err
 			}
 			prevVals[string(k)] = v
 			counter.Add(1)
-			return d.Flush(ctx, tx)
+			return d.Flush(ctx, tx.(kv.TemporalRwTx))
 		})
 		require.NoError(err)
 		return txID

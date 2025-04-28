@@ -105,7 +105,7 @@ type PatriciaContext interface {
 	// GetBranch load branch node and fill up the cells
 	// For each cell, it sets the cell type, clears the modified flag, fills the hash,
 	// and for the extension, account, and leaf type, the `l` and `k`
-	Branch(prefix []byte) ([]byte, uint64, error)
+	Branch(rotx kv.TemporalTx, prefix []byte) ([]byte, uint64, error)
 	// store branch data
 	PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error
 	// fetch account with given plain key
@@ -193,12 +193,13 @@ func NewBranchEncoder(sz uint64) *BranchEncoder {
 
 func (be *BranchEncoder) CollectUpdate(
 	ctx PatriciaContext,
+	rotx kv.TemporalTx,
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
 	readCell func(nibble int, skip bool) (*cell, error),
 ) (lastNibble int, err error) {
 
-	prev, prevStep, err := ctx.Branch(prefix)
+	prev, prevStep, err := ctx.Branch(rotx, prefix)
 	if err != nil {
 		return 0, err
 	}

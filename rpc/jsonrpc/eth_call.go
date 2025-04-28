@@ -309,7 +309,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 
 // GetProof implements eth_getProof partially; Proofs are available only with the `latest` block tag.
 func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, storageKeys []hexutil.Bytes, blockNrOrHash rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
-	roTx, err := api.db.BeginRo(ctx)
+	roTx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -329,7 +329,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 	return api.getProof(ctx, roTx, address, storageKeysConverted, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(requestedBlockNr)), api.db, api.logger)
 }
 
-func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address libcommon.Address, storageKeys []libcommon.Hash, blockNrOrHash rpc.BlockNumberOrHash, db kv.RoDB, logger log.Logger) (*accounts.AccProofResult, error) {
+func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address libcommon.Address, storageKeys []libcommon.Hash, blockNrOrHash rpc.BlockNumberOrHash, db kv.RoDB, logger log.Logger) (*accounts.AccProofResult, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -377,7 +377,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address libcommon.
 	sdCtx.TouchKey(kv.AccountsDomain, string(address.Bytes()), nil)
 
 	// generate the trie for proofs, this works by loading the merkle paths to the touched keys
-	proofTrie, _, err := sdCtx.Witness(ctx, header.Root[:], "eth_getProof")
+	proofTrie, _, err := sdCtx.Witness(ctx, roTx, header.Root[:], "eth_getProof")
 	if err != nil {
 		return nil, err
 	}
@@ -425,7 +425,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address libcommon.
 		}
 
 		// generate the trie for proofs, this works by loading the merkle paths to the touched keys
-		proofTrie, _, err = sdCtx.Witness(ctx, header.Root[:], "eth_getProof")
+		proofTrie, _, err = sdCtx.Witness(ctx, roTx, header.Root[:], "eth_getProof")
 		if err != nil {
 			return nil, err
 		}
@@ -527,8 +527,8 @@ func verifyExecResult(execResult *core.EphemeralExecResult, block *types.Block) 
 	return nil
 }
 
-func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rpc.BlockNumberOrHash, txIndex hexutil.Uint, fullBlock bool, maxGetProofRewindBlockCount int, logger log.Logger) (hexutil.Bytes, error) {
-	roTx, err := db.BeginRo(ctx)
+func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrOrHash rpc.BlockNumberOrHash, txIndex hexutil.Uint, fullBlock bool, maxGetProofRewindBlockCount int, logger log.Logger) (hexutil.Bytes, error) {
+	roTx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -646,7 +646,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 
 	hph.SetTrace(false) // disable tracing to avoid mixing with trace from witness computation
 	// generate the block witness, this works by loading the merkle paths to the touched keys (they are loaded from the state at block #blockNr-1)
-	witnessTrie, witnessRootHash, err := hph.GenerateWitness(ctx, updates, codeReads, prevHeader.Root[:], "computeWitness")
+	witnessTrie, witnessRootHash, err := hph.GenerateWitness(ctx, roTx, updates, codeReads, prevHeader.Root[:], "computeWitness")
 	if err != nil {
 		return nil, err
 	}

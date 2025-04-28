@@ -192,7 +192,9 @@ func runCmd(ctx *cli.Context) error {
 		return err
 	}
 	defer sd.Close()
-	stateReader := state.NewReaderV3(sd)
+
+	sharedDomainsTx := state2.NewSharedDomainsTx(sd, tx)
+	stateReader := state.NewReaderV3(sharedDomainsTx)
 	statedb = state.New(stateReader)
 	if ctx.String(SenderFlag.Name) != "" {
 		sender = libcommon.HexToAddress(ctx.String(SenderFlag.Name))

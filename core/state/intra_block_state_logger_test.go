@@ -127,7 +127,8 @@ func TestStateLogger(t *testing.T) {
 			mockCtl := gomock.NewController(t)
 			defer mockCtl.Finish()
 			mt := mockTracer{}
-			state := New(NewReaderV3(domains))
+			sharedDomainsTx := stateLib.NewSharedDomainsTx(domains, tx)
+			state := New(NewReaderV3(sharedDomainsTx))
 			state.SetHooks(mt.Hooks())
 
 			tt.run(state)

@@ -78,7 +78,7 @@ type executor interface {
 	//these are reset by commit - so need to be read from the executor once its processing
 	tx() kv.RwTx
 	readState() *state.ParallelExecutionState
-	domains() *state2.SharedDomains
+	domainsTx() *state2.SharedDomainsTx
 }
 
 type txExecutor struct {
@@ -87,7 +87,7 @@ type txExecutor struct {
 	execStage      *StageState
 	agg            *state2.Aggregator
 	rs             *state.ParallelExecutionState
-	doms           *state2.SharedDomains
+	domsTx         *state2.SharedDomainsTx
 	accumulator    *shards.Accumulator
 	u              Unwinder
 	isMining       bool
@@ -107,8 +107,8 @@ func (te *txExecutor) readState() *state.ParallelExecutionState {
 	return te.rs
 }
 
-func (te *txExecutor) domains() *state2.SharedDomains {
-	return te.doms
+func (te *txExecutor) domainsTx() *state2.SharedDomainsTx {
+	return te.domsTx
 }
 
 func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number uint64) (h *types.Header) {
@@ -225,7 +225,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 	if ok {
 		return fmt.Errorf("cast error: temporal tx %v", temporalTx)
 	}
-	pe.doms.SetTx(temporalTx)
+	pe.domainsTx().SD.SetTx(temporalTx)
 
 	defer pe.applyLoopWg.Wait()
 	applyCtx, cancelApplyCtx := context.WithCancel(ctx)
@@ -250,10 +250,10 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 			}
 		case <-pe.pruneEvery.C:
 			if pe.rs.SizeEstimate() < pe.cfg.batchSize.Bytes() {
-				if pe.doms.BlockNum() != pe.outputBlockNum.GetValueUint64() {
-					panic(fmt.Errorf("%d != %d", pe.doms.BlockNum(), pe.outputBlockNum.GetValueUint64()))
+				if pe.domainsTx().SD.BlockNum() != pe.outputBlockNum.GetValueUint64() {
+					panic(fmt.Errorf("%d != %d", pe.domainsTx().SD.BlockNum(), pe.outputBlockNum.GetValueUint64()))
 				}
-				_, err := pe.doms.ComputeCommitment(ctx, temporalTx, true, pe.outputBlockNum.GetValueUint64(), pe.execStage.LogPrefix())
+				_, err := pe.domainsTx().SD.ComputeCommitment(ctx, temporalTx, true, pe.outputBlockNum.GetValueUint64(), pe.execStage.LogPrefix())
 				if err != nil {
 					return err
 				}
@@ -261,7 +261,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 					return err
 				}
 				if !pe.inMemExec {
-					if err = pe.doms.Flush(ctx, tx.(kv.TemporalRwTx)); err != nil {
+					if err = pe.domainsTx().SD.Flush(ctx, tx.(kv.TemporalRwTx)); err != nil {
 						return err
 					}
 				}
@@ -323,10 +323,10 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 				t2 = time.Since(tt)
 				tt = time.Now()
 
-				if err := pe.doms.Flush(ctx, tx.(kv.TemporalRwTx)); err != nil {
+				if err := pe.domainsTx().SD.Flush(ctx, tx.(kv.TemporalRwTx)); err != nil {
 					return err
 				}
-				pe.doms.ClearRam(true)
+				pe.domainsTx().SD.ClearRam(true)
 				t3 = time.Since(tt)
 
 				if err := pe.execStage.Update(tx, pe.outputBlockNum.GetValueUint64()); err != nil {
@@ -359,7 +359,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 			if ok {
 				return fmt.Errorf("cast error: temporal tx %v", temporalTx)
 			}
-			pe.doms.SetTx(temporalTx)
+			pe.domainsTx().SD.SetTx(temporalTx)
 
 			applyCtx, cancelApplyCtx = context.WithCancel(ctx) //nolint:fatcontext
 			defer cancelApplyCtx()
@@ -369,7 +369,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 			logger.Info("Committed", "time", time.Since(commitStart), "drain", t0, "drain_and_lock", t1, "rs.flush", t2, "agg.flush", t3, "tx.commit", t4)
 		}
 	}
-	if err := pe.doms.Flush(ctx, tx.(kv.TemporalRwTx)); err != nil {
+	if err := pe.domainsTx().SD.Flush(ctx, tx.(kv.TemporalRwTx)); err != nil {
 		return err
 	}
 	if err := pe.execStage.Update(tx, pe.outputBlockNum.GetValueUint64()); err != nil {
@@ -445,7 +445,7 @@ func (pe *parallelExecutor) processResultQueue(ctx context.Context, rotx kv.Temp
 			default:
 			}
 		}
-		if err := pe.rs.ApplyLogsAndTraces(txTask, pe.rs.Domains()); err != nil {
+		if err := pe.rs.ApplyLogsAndTraces(txTask, pe.rs.DomainsTx().SD); err != nil {
 			return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("ParallelExecutionState.Apply: %w", err)
 		}
 		processedBlockNum = txTask.BlockNum

@@ -166,7 +166,8 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.Tem
 		}
 		defer doms.Close()
 
-		if err := customTraceBatch(ctx, cfg, tx, doms, fromBlock, toBlock, logPrefix, logger); err != nil {
+		sharedDomainsTx := state2.NewSharedDomainsTx(doms, tx)
+		if err := customTraceBatch(ctx, cfg, tx, sharedDomainsTx, fromBlock, toBlock, logPrefix, logger); err != nil {
 			return err
 		}
 
@@ -279,7 +280,7 @@ func badFoundBlockNum(tx kv.Tx, fromBlock uint64, txNumsReader rawdbv3.TxNumsRea
 	return fromBlock + i
 }
 
-func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, doms *state2.SharedDomains, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
+func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, doms *state2.SharedDomainsTx, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
 	const logPeriod = 5 * time.Second
 	logEvery := time.NewTicker(logPeriod)
 	defer logEvery.Stop()
@@ -309,8 +310,8 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 				}
 			}
 
-			doms.SetTx(tx)
-			doms.SetTxNum(txTask.TxNum)
+			doms.SD.SetTx(tx)
+			doms.SD.SetTxNum(txTask.TxNum)
 
 			if !txTask.Final {
 				var receipt *types.Receipt

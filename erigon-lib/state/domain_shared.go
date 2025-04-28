@@ -77,31 +77,31 @@ type dataWithPrevStep struct {
 }
 
 type SharedDomainsTx struct {
-	sd *SharedDomains
-	tx kv.TemporalTx
+	SD *SharedDomains
+	Tx kv.TemporalTx
 }
 
 func NewSharedDomainsTx(sd *SharedDomains, tx kv.TemporalTx) *SharedDomainsTx {
 	return &SharedDomainsTx{
-		sd: sd,
-		tx: tx,
+		SD: sd,
+		Tx: tx,
 	}
 }
 
 func (sdg *SharedDomainsTx) GetLatest(domain kv.Domain, key []byte) ([]byte, uint64, error) {
-	return sdg.sd.GetLatest(sdg.tx, domain, key)
+	return sdg.SD.GetLatest(sdg.Tx, domain, key)
 }
 
 func (sdg *SharedDomainsTx) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error {
-	return sdg.sd.DomainDel(sdg.tx, domain, k1, k2, prevVal, prevStep)
+	return sdg.SD.DomainDel(sdg.Tx, domain, k1, k2, prevVal, prevStep)
 }
 
 func (sdg *SharedDomainsTx) DomainDelPrefix(domain kv.Domain, prefix []byte) error {
-	return sdg.sd.DomainDelPrefix(sdg.tx, domain, prefix)
+	return sdg.SD.DomainDelPrefix(sdg.Tx, domain, prefix)
 }
 
 func (sdg *SharedDomainsTx) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error {
-	return sdg.sd.DomainPut(sdg.tx, domain, k1, k2, val, prevVal, prevStep)
+	return sdg.SD.DomainPut(sdg.Tx, domain, k1, k2, val, prevVal, prevStep)
 }
 
 type SharedDomains struct {

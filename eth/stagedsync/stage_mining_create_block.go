@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
@@ -193,7 +194,8 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 	header.Extra = cfg.miner.MiningConfig.ExtraData
 
 	logger.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
-	ibs := state.New(state.NewReaderV3(txc.Doms))
+	sdtx := libstate.NewSharedDomainsTx(txc.Doms, txc.Ttx)
+	ibs := state.New(state.NewReaderV3(sdtx))
 
 	if err = cfg.engine.Prepare(chain, header, ibs); err != nil {
 		logger.Error("Failed to prepare header for mining",

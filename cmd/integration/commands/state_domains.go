@@ -504,7 +504,9 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	}
 	defer agg.Close()
 
-	r := state.NewReaderV3(domains)
+	sharedDomainsTx := state3.NewSharedDomainsTx(domains, temporalTx)
+
+	r := state.NewReaderV3(sharedDomainsTx)
 	if startTxNum != 0 {
 		return fmt.Errorf("failed to seek commitment to txn %d: %w", startTxNum, err)
 	}

@@ -254,8 +254,10 @@ func ExecV3(ctx context.Context,
 
 	var err error
 	var doms *state2.SharedDomains
+	var domsTx *state2.SharedDomainsTx
 	if inMemExec {
 		doms = txc.Doms
+		domsTx = state2.NewSharedDomainsTx(doms, applyTx.(kv.TemporalTx))
 	} else {
 		var err error
 		temporalTx, ok := applyTx.(kv.TemporalTx)
@@ -263,6 +265,7 @@ func ExecV3(ctx context.Context,
 			return errors.New("applyTx is not a temporal transaction")
 		}
 		doms, err = state2.NewSharedDomains(temporalTx, log.New())
+		domsTx = state2.NewSharedDomainsTx(doms, temporalTx)
 		// if we are behind the commitment, we can't execute anything
 		// this can heppen if progress in domain is higher than progress in blocks
 		if errors.Is(err, state2.ErrBehindCommitment) {
@@ -315,7 +318,7 @@ func ExecV3(ctx context.Context,
 			accumulator = shards.NewAccumulator()
 		}
 	}
-	rs := state.NewParallelExecutionState(doms, logger)
+	rs := state.NewParallelExecutionState(domsTx, logger)
 
 	////TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
 	// Now rwLoop closing both (because applyLoop we completely restart)
@@ -366,7 +369,7 @@ func ExecV3(ctx context.Context,
 				cfg:            cfg,
 				execStage:      execStage,
 				rs:             rs,
-				doms:           doms,
+				domsTx:         state2.NewSharedDomainsTx(doms, applyTx.(kv.TemporalTx)),
 				agg:            agg,
 				accumulator:    accumulator,
 				isMining:       isMining,
@@ -405,7 +408,7 @@ func ExecV3(ctx context.Context,
 				cfg:            cfg,
 				execStage:      execStage,
 				rs:             rs,
-				doms:           doms,
+				domsTx:         state2.NewSharedDomainsTx(doms, temporalTx),
 				agg:            agg,
 				u:              u,
 				isMining:       isMining,
@@ -428,8 +431,8 @@ func ExecV3(ctx context.Context,
 	blockComplete.Store(true)
 
 	ts := time.Duration(0)
-	blockNum = executor.domains().BlockNum()
-	outputTxNum.Store(executor.domains().TxNum())
+	blockNum = executor.domainsTx().SD.BlockNum()
+	outputTxNum.Store(executor.domainsTx().SD.TxNum())
 
 	if maxBlockNum < blockNum {
 		return nil
@@ -437,7 +440,7 @@ func ExecV3(ctx context.Context,
 
 	if maxBlockNum > blockNum+16 {
 		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
-			"from", blockNum, "to", maxBlockNum, "fromTxNum", executor.domains().TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx)
+			"from", blockNum, "to", maxBlockNum, "fromTxNum", executor.domainsTx().SD.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx)
 	}
 
 	agg.BuildFilesInBackground(outputTxNum.Load())
@@ -468,9 +471,9 @@ Loop:
 			aggTx := executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 			aggTx.RestrictSubsetFileDeletions(true)
 			start := time.Now()
-			executor.domains().SetChangesetAccumulator(nil) // Make sure we don't have an active changeset accumulator
+			executor.domainsTx().SD.SetChangesetAccumulator(nil) // Make sure we don't have an active changeset accumulator
 			// First compute and commit the progress done so far
-			if _, err := executor.domains().ComputeCommitment(ctx, true, blockNum, execStage.LogPrefix()); err != nil {
+			if _, err := executor.domainsTx().SD.ComputeCommitment(ctx, executor.domainsTx().Tx, true, blockNum, execStage.LogPrefix()); err != nil {
 				return err
 			}
 			ts += time.Since(start)
@@ -479,7 +482,7 @@ Loop:
 		}
 		changeset := &state2.StateChangeSet{}
 		if shouldGenerateChangesets && blockNum > 0 {
-			executor.domains().SetChangesetAccumulator(changeset)
+			executor.domainsTx().SD.SetChangesetAccumulator(changeset)
 		}
 		if !parallel {
 			select {
@@ -488,7 +491,7 @@ Loop:
 			}
 		}
 		inputBlockNum.Store(blockNum)
-		executor.domains().SetBlockNum(blockNum)
+		executor.domainsTx().SD.SetBlockNum(blockNum)
 
 		b, err = blockWithSenders(ctx, cfg.db, executor.tx(), blockReader, blockNum)
 		if err != nil {
@@ -601,8 +604,8 @@ Loop:
 				skipPostEvaluation = true
 				continue
 			}
-			executor.domains().SetTxNum(txTask.TxNum)
-			executor.domains().SetBlockNum(txTask.BlockNum)
+			executor.domainsTx().SD.SetTxNum(txTask.TxNum)
+			executor.domainsTx().SD.SetBlockNum(txTask.BlockNum)
 
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
@@ -690,7 +693,7 @@ Loop:
 			aggTx := executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 			aggTx.RestrictSubsetFileDeletions(true)
 			start := time.Now()
-			_ /*rh*/, err := executor.domains().ComputeCommitment(ctx, true, blockNum, execStage.LogPrefix())
+			_ /*rh*/, err := executor.domainsTx().SD.ComputeCommitment(ctx, executor.domainsTx().Tx, true, blockNum, execStage.LogPrefix())
 			if err != nil {
 				return err
 			}
@@ -703,14 +706,14 @@ Loop:
 			ts += time.Since(start)
 			aggTx.RestrictSubsetFileDeletions(false)
 			if shouldGenerateChangesets {
-				executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
+				executor.domainsTx().SD.SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
 				if !inMemExec {
 					if err := state2.WriteDiffSet(executor.tx(), blockNum, b.Hash(), changeset); err != nil {
 						return err
 					}
 				}
 			}
-			executor.domains().SetChangesetAccumulator(nil)
+			executor.domainsTx().SD.SetChangesetAccumulator(nil)
 
 			if cfg.syncCfg.PersistReceipts > 0 {
 				if len(txTasks) > 0 && txTasks[0].BlockReceipts != nil {
@@ -763,7 +766,7 @@ Loop:
 					t1, t3 time.Duration
 				)
 
-				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), executor.tx(), executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
+				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), executor.tx(), executor.domainsTx(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
 					return err
 				} else if !ok {
 					break Loop
@@ -793,8 +796,8 @@ Loop:
 					break Loop
 				}
 				logger.Info("Committed", "time", time.Since(commitStart),
-					"block", executor.domains().BlockNum(), "txNum", executor.domains().TxNum(),
-					"step", fmt.Sprintf("%.1f", float64(executor.domains().TxNum())/float64(agg.StepSize())),
+					"block", executor.domainsTx().SD.BlockNum(), "txNum", executor.domainsTx().SD.TxNum(),
+					"step", fmt.Sprintf("%.1f", float64(executor.domainsTx().SD.TxNum())/float64(agg.StepSize())),
 					"flush+commitment", t1, "tx.commit", t2, "prune", t3)
 			default:
 			}
@@ -814,7 +817,7 @@ Loop:
 
 	if u != nil && !u.HasUnwindPoint() {
 		if b != nil {
-			_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), executor.tx(), executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
+			_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), executor.tx(), executor.domainsTx(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
 			if err != nil {
 				return err
 			}
@@ -928,7 +931,7 @@ func handleIncorrectRootHashError(header *types.Header, applyTx kv.RwTx, cfg Exe
 }
 
 // flushAndCheckCommitmentV3 - does write state to db and then check commitment
-func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.RwTx, doms *state2.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, inMemExec bool) (bool, error) {
+func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.RwTx, domsTx *state2.SharedDomainsTx, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, inMemExec bool) (bool, error) {
 
 	// E2 state root check was in another stage - means we did flush state even if state root will not match
 	// And Unwind expecting it
@@ -948,11 +951,11 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	if dbg.DiscardCommitment() {
 		return true, nil
 	}
-	if doms.BlockNum() != header.Number.Uint64() {
-		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
+	if domsTx.SD.BlockNum() != header.Number.Uint64() {
+		panic(fmt.Errorf("%d != %d", domsTx.SD.BlockNum(), header.Number.Uint64()))
 	}
 
-	computedRootHash, err := doms.ComputeCommitment(ctx, true, header.Number.Uint64(), e.LogPrefix())
+	computedRootHash, err := domsTx.SD.ComputeCommitment(ctx, domsTx.Tx, true, header.Number.Uint64(), e.LogPrefix())
 	if err != nil {
 		return false, fmt.Errorf("ParallelExecutionState.Apply: %w", err)
 	}
@@ -965,7 +968,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		return handleIncorrectRootHashError(header, applyTx, cfg, e, maxBlockNum, logger, u)
 	}
 	if !inMemExec {
-		if err := doms.Flush(ctx, applyTx); err != nil {
+		if err := domsTx.SD.Flush(ctx, applyTx.(kv.TemporalRwTx)); err != nil {
 			return false, err
 		}
 	}

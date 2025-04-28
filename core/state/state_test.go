@@ -144,6 +144,7 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 		panic(err)
 	}
 	defer domains.Close()
+	sharedDomainsTx := stateLib.NewSharedDomainsTx(domains, tx)
 
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
@@ -153,8 +154,8 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 	}
 	s.tx = tx
 	//s.r = NewWriterV4(s.tx)
-	s.r = NewReaderV3(domains)
-	s.w = NewWriterV4(domains)
+	s.r = NewReaderV3(sharedDomainsTx)
+	s.w = NewWriterV4(sharedDomainsTx)
 	s.state = New(s.r)
 }
 
@@ -261,9 +262,11 @@ func TestSnapshot2(t *testing.T) {
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	w := NewWriterV4(domains)
+	sharedDomainsTx := stateLib.NewSharedDomainsTx(domains, tx)
 
-	state := New(NewReaderV3(domains))
+	w := NewWriterV4(sharedDomainsTx)
+
+	state := New(NewReaderV3(sharedDomainsTx))
 
 	stateobjaddr0 := toAddr([]byte("so0"))
 	stateobjaddr1 := toAddr([]byte("so1"))
@@ -425,7 +428,8 @@ func TestDump(t *testing.T) {
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	st := New(NewReaderV3(domains))
+	sharedDomainsTx := state.NewSharedDomainsTx(domains, tx)
+	st := New(NewReaderV3(sharedDomainsTx))
 
 	// generate a few entries
 	obj1, err := st.GetOrNewStateObject(toAddr([]byte{0x01}))
@@ -439,7 +443,7 @@ func TestDump(t *testing.T) {
 	require.NoError(t, err)
 	obj3.SetBalance(uint256.NewInt(44), tracing.BalanceChangeUnspecified)
 
-	w := NewWriterV4(domains)
+	w := NewWriterV4(sharedDomainsTx)
 	// write some of them to the trie
 	err = w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
 	require.NoError(t, err)
@@ -448,7 +452,7 @@ func TestDump(t *testing.T) {
 	err = st.FinalizeTx(&chain.Rules{}, w)
 	require.NoError(t, err)
 
-	blockWriter := NewWriterV4(domains)
+	blockWriter := NewWriterV4(sharedDomainsTx)
 	err = st.CommitBlock(&chain.Rules{}, blockWriter)
 	require.NoError(t, err)
 	err = domains.Flush(context.Background(), tx)

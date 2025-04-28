@@ -88,10 +88,10 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
-			err = domains.DomainPut(kv.AccountsDomain, addrs[txNum].Bytes(), nil, buf, nil, 0)
+			err = domains.DomainPut(wrapTxWithCtx(rwTx, ac), kv.AccountsDomain, addrs[txNum].Bytes(), nil, buf, nil, 0)
 			require.NoError(t, err)
 
-			err = domains.DomainPut(kv.StorageDomain, addrs[txNum].Bytes(), locs[txNum].Bytes(), []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}, nil, 0)
+			err = domains.DomainPut(wrapTxWithCtx(rwTx, ac), kv.StorageDomain, addrs[txNum].Bytes(), locs[txNum].Bytes(), []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}, nil, 0)
 			require.NoError(t, err)
 
 			var v [8]byte
@@ -100,14 +100,14 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 				pv, step, _, err := ac.GetLatest(kv.CommitmentDomain, commKey2, rwTx)
 				require.NoError(t, err)
 
-				err = domains.DomainPut(kv.CommitmentDomain, commKey2, nil, v[:], pv, step)
+				err = domains.DomainPut(wrapTxWithCtx(rwTx, ac), kv.CommitmentDomain, commKey2, nil, v[:], pv, step)
 				require.NoError(t, err)
 				otherMaxWrite = txNum
 			} else {
 				pv, step, _, err := ac.GetLatest(kv.CommitmentDomain, commKey1, rwTx)
 				require.NoError(t, err)
 
-				err = domains.DomainPut(kv.CommitmentDomain, commKey1, nil, v[:], pv, step)
+				err = domains.DomainPut(wrapTxWithCtx(rwTx, ac), kv.CommitmentDomain, commKey1, nil, v[:], pv, step)
 				require.NoError(t, err)
 				maxWrite = txNum
 			}
@@ -115,7 +115,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 
 		}
 
-		err = domains.Flush(context.Background(), rwTx)
+		err = domains.Flush(context.Background(), wrapTxWithCtx(rwTx, ac))
 		require.NoError(t, err)
 
 		require.NoError(t, err)
@@ -212,14 +212,14 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
-			err = domains.DomainPut(kv.AccountsDomain, addrs[txNum].Bytes(), nil, buf, nil, 0)
+			err = domains.DomainPut(wrapTxWithCtx(rwTx, ac), kv.AccountsDomain, addrs[txNum].Bytes(), nil, buf, nil, 0)
 			require.NoError(t, err)
 
-			err = domains.DomainPut(kv.StorageDomain, addrs[txNum].Bytes(), locs[txNum].Bytes(), []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}, nil, 0)
+			err = domains.DomainPut(wrapTxWithCtx(rwTx, ac), kv.StorageDomain, addrs[txNum].Bytes(), locs[txNum].Bytes(), []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}, nil, 0)
 			require.NoError(t, err)
 
 			if (txNum+1)%agg.StepSize() == 0 {
-				_, err := domains.ComputeCommitment(context.Background(), true, txNum/10, "")
+				_, err := domains.ComputeCommitment(context.Background(), wrapTxWithCtx(rwTx, ac), true, txNum/10, "")
 				require.NoError(t, err)
 			}
 
@@ -227,7 +227,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 			state[string(addrs[txNum].Bytes())+string(locs[txNum].Bytes())] = []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}
 		}
 
-		err = domains.Flush(context.Background(), rwTx)
+		err = domains.Flush(context.Background(), wrapTxWithCtx(rwTx, ac))
 		require.NoError(t, err)
 
 		err = rwTx.Commit()

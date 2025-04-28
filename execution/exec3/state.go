@@ -113,9 +113,9 @@ func (rw *Worker) LogLRUStats() { rw.evm.JumpDestCache.LogStats() }
 func (rw *Worker) ResetState(rs *state.ParallelExecutionState, accumulator *shards.Accumulator) {
 	rw.rs = rs
 	if rw.background {
-		rw.SetReader(state.NewReaderParallelV3(rs.Domains()))
+		rw.SetReader(state.NewReaderParallelV3(rs.DomainsTx()))
 	} else {
-		rw.SetReader(state.NewReaderV3(rs.Domains()))
+		rw.SetReader(state.NewReaderV3(rs.DomainsTx()))
 	}
 	rw.stateWriter = state.NewStateWriterV3(rs, accumulator)
 }
@@ -184,9 +184,9 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		rw.SetReader(state.NewHistoryReaderV3())
 	} else if !txTask.HistoryExecution && rw.historyMode {
 		if rw.background {
-			rw.SetReader(state.NewReaderParallelV3(rw.rs.Domains()))
+			rw.SetReader(state.NewReaderParallelV3(rw.rs.DomainsTx()))
 		} else {
-			rw.SetReader(state.NewReaderV3(rw.rs.Domains()))
+			rw.SetReader(state.NewReaderV3(rw.rs.DomainsTx()))
 		}
 	}
 	if rw.background && rw.chainTx == nil {
@@ -200,7 +200,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 	txTask.Error = nil
 
 	rw.stateReader.SetTxNum(txTask.TxNum)
-	rw.rs.Domains().SetTxNum(txTask.TxNum)
+	rw.rs.DomainsTx().SD.SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetReadSet()
 	rw.stateWriter.ResetWriteSet()
 

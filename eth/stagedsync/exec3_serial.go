@@ -115,7 +115,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			if txTask.TxIndex >= 0 {
 				receipt = txTask.BlockReceipts[txTask.TxIndex]
 			}
-			if err := rawtemporaldb.AppendReceipt(se.doms, receipt, se.blobGasUsed); err != nil {
+			if err := rawtemporaldb.AppendReceipt(se.domainsTx(), receipt, se.blobGasUsed); err != nil {
 				return false, err
 			}
 		} else {
@@ -131,7 +131,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 						CumulativeGasUsed:        lastReceipt.CumulativeGasUsed,
 						FirstLogIndexWithinBlock: uint32(firstIndex),
 					}
-					if err := rawtemporaldb.AppendReceipt(se.doms, &receipt, se.blobGasUsed); err != nil {
+					if err := rawtemporaldb.AppendReceipt(se.domainsTx(), &receipt, se.blobGasUsed); err != nil {
 						return false, err
 					}
 				}
@@ -139,7 +139,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 		}
 
 		// MA applystate
-		if err := se.rs.ApplyState(ctx, txTask); err != nil {
+		if err := se.rs.ApplyState(ctx, se.domsTx.Tx, txTask); err != nil {
 			return false, err
 		}
 
@@ -150,7 +150,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 }
 
 func (se *serialExecutor) commit(ctx context.Context, txNum uint64, blockNum uint64, useExternalTx bool) (t2 time.Duration, err error) {
-	se.doms.Close()
+	se.domainsTx().SD.Close()
 	if err = se.execStage.Update(se.applyTx, blockNum); err != nil {
 		return 0, err
 	}
@@ -175,12 +175,13 @@ func (se *serialExecutor) commit(ctx context.Context, txNum uint64, blockNum uin
 	if !ok {
 		return t2, errors.New("tx is not a temporal tx")
 	}
-	se.doms, err = state2.NewSharedDomains(temporalTx, se.logger)
+	doms, err := state2.NewSharedDomains(temporalTx, se.logger)
 	if err != nil {
 		return t2, err
 	}
-	se.doms.SetTxNum(txNum)
-	se.rs = state.NewParallelExecutionState(se.doms, se.logger)
+	se.domsTx = state2.NewSharedDomainsTx(doms, temporalTx)
+	se.domainsTx().SD.SetTxNum(txNum)
+	se.rs = state.NewParallelExecutionState(se.domainsTx(), se.logger)
 
 	se.applyWorker.ResetTx(se.applyTx)
 	se.applyWorker.ResetState(se.rs, se.accumulator)

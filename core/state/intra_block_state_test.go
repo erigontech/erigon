@@ -277,8 +277,9 @@ func (test *snapshotTest) run() bool {
 		test.err = err
 		return false
 	}
+	sharedDomainsTx := stateLib.NewSharedDomainsTx(domains, tx)
 	var (
-		state        = New(NewReaderV3(domains))
+		state        = New(NewReaderV3(sharedDomainsTx))
 		snapshotRevs = make([]int, len(test.snapshots))
 		sindex       = 0
 	)
@@ -292,7 +293,7 @@ func (test *snapshotTest) run() bool {
 	// Revert all snapshots in reverse order. Each revert must yield a state
 	// that is equivalent to fresh state with all actions up the snapshot applied.
 	for sindex--; sindex >= 0; sindex-- {
-		checkstate := New(NewReaderV3(domains))
+		checkstate := New(NewReaderV3(sharedDomainsTx))
 		for _, action := range test.actions[:test.snapshots[sindex]] {
 			action.fn(action, checkstate)
 		}

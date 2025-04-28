@@ -50,7 +50,7 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 )
 
-func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *stateLib.Aggregator) {
+func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.TemporalRwTx, *stateLib.Aggregator) {
 	tb.Helper()
 	db := memdb.NewStateDB(tb.TempDir())
 	tb.Cleanup(db.Close)
@@ -149,7 +149,8 @@ func TestCall(t *testing.T) {
 	domains, err := stateLib.NewSharedDomains(tx.(kv.TemporalTx), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
-	state := state.New(state.NewReaderV3(domains))
+	sharedDomainsTx := stateLib.NewSharedDomainsTx(domains, tx)
+	state := state.New(state.NewReaderV3(sharedDomainsTx))
 	address := libcommon.HexToAddress("0xaa")
 	state.SetCode(address, []byte{
 		byte(vm.PUSH1), 10,
@@ -185,7 +186,7 @@ func testTemporalDB(t testing.TB) *temporal.DB {
 	return _db
 }
 
-func testTemporalTxSD(t testing.TB, db *temporal.DB) (kv.RwTx, *stateLib.SharedDomains) {
+func testTemporalTxSD(t testing.TB, db *temporal.DB) (kv.TemporalRwTx, *stateLib.SharedDomains) {
 	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
@@ -223,8 +224,9 @@ func BenchmarkCall(b *testing.B) {
 	db := testTemporalDB(b)
 	tx, sd := testTemporalTxSD(b, db)
 	defer tx.Rollback()
-	cfg.r = state.NewReaderV3(sd)
-	cfg.w = state.NewWriterV4(sd)
+	sharedDomainsTx := stateLib.NewSharedDomainsTx(sd, tx)
+	cfg.r = state.NewReaderV3(sharedDomainsTx)
+	cfg.w = state.NewWriterV4(sharedDomainsTx)
 	cfg.State = state.New(cfg.r)
 
 	tmpdir := b.TempDir()
@@ -253,8 +255,9 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(b, err)
 
+	sharedDomainsTx := stateLib.NewSharedDomainsTx(domains, tx)
 	var (
-		statedb  = state.New(state.NewReaderV3(domains))
+		statedb  = state.New(state.NewReaderV3(sharedDomainsTx))
 		sender   = libcommon.BytesToAddress([]byte("sender"))
 		receiver = libcommon.BytesToAddress([]byte("receiver"))
 	)
@@ -477,7 +480,8 @@ func benchmarkNonModifyingCode(b *testing.B, gas uint64, code []byte, name strin
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(b, err)
 
-	cfg.State = state.New(state.NewReaderV3(domains))
+	sharedDomainsTx := stateLib.NewSharedDomainsTx(domains, tx)
+	cfg.State = state.New(state.NewReaderV3(sharedDomainsTx))
 	cfg.GasLimit = gas
 	var (
 		destination = libcommon.BytesToAddress([]byte("contract"))

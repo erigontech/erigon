@@ -85,12 +85,12 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 		val := <-vals
 		txNum := uint64(i)
 		domains.SetTxNum(txNum)
-		err := domains.DomainPut(kv.StorageDomain, key[:length.Addr], key[length.Addr:], val, prev, 0)
+		err := domains.DomainPut(wrapTxWithCtx(tx, ac), kv.StorageDomain, key[:length.Addr], key[length.Addr:], val, prev, 0)
 		prev = val
 		require.NoError(b, err)
 
 		if i%100000 == 0 {
-			_, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
+			_, err := domains.ComputeCommitment(ctx, wrapTxWithCtx(tx, ac), true, domains.BlockNum(), "")
 			require.NoError(b, err)
 		}
 	}

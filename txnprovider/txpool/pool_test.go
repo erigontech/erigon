@@ -936,7 +936,7 @@ func TestShanghaiValidateTxn(t *testing.T) {
 
 			sndr := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(math.MaxUint64)}
 			sndrBytes := accounts3.SerialiseV3(&sndr)
-			err = sd.DomainPut(kv.AccountsDomain, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, nil, sndrBytes, nil, 0)
+			err = sd.DomainPut(tx, kv.AccountsDomain, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, nil, sndrBytes, nil, 0)
 			asrt.NoError(err)
 
 			err = sd.Flush(ctx, tx)
@@ -1046,7 +1046,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 		common.Big0 /* cancunTime */, common.Big0 /* pragueTime */, nil, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 	require.NoError(t, err)
 	pool.blockGasLimit.Store(30_000_000)
-	tx, err := coreDB.BeginRw(ctx)
+	tx, err := coreDB.BeginTemporalRw(ctx)
 	defer tx.Rollback()
 	require.NoError(t, err)
 	sd, err := state.NewSharedDomains(tx.(kv.TemporalTx), logger)
@@ -1055,7 +1055,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 
 	sndr := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(math.MaxUint64)}
 	sndrBytes := accounts3.SerialiseV3(&sndr)
-	err = sd.DomainPut(kv.AccountsDomain, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, nil, sndrBytes, nil, 0)
+	err = sd.DomainPut(tx, kv.AccountsDomain, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, nil, sndrBytes, nil, 0)
 	require.NoError(t, err)
 
 	err = sd.Flush(ctx, tx)

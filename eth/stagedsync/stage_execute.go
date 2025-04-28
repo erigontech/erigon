@@ -166,6 +166,7 @@ var ErrTooDeepUnwind = errors.New("too deep unwind")
 func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, br services.FullBlockReader, accumulator *shards.Accumulator, logger log.Logger) (err error) {
 	var domains *libstate.SharedDomains
 	var tx kv.TemporalRwTx
+	var sdtx *libstate.SharedDomainsTx
 	if txc.Doms == nil {
 		temporalTx, ok := txc.Tx.(kv.TemporalRwTx)
 		if !ok {
@@ -177,12 +178,14 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 			return err
 		}
 		defer domains.Close()
+		sdtx = libstate.NewSharedDomainsTx(domains, temporalTx)
 	} else {
 		tx = txc.Ttx.(kv.TemporalRwTx)
 		domains = txc.Doms
+		sdtx = libstate.NewSharedDomainsTx(txc.Doms, tx)
 	}
 
-	rs := state.NewParallelExecutionState(domains, logger)
+	rs := state.NewParallelExecutionState(sdtx, logger)
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, br))
 

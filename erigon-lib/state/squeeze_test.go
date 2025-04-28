@@ -58,20 +58,20 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 				Incarnation: 0,
 			}
 			buf := accounts3.SerialiseV3(&acc)
-			prev, step, err := domains.GetLatest(kv.AccountsDomain, keys[j])
+			prev, step, err := domains.GetLatest(wrapTxWithCtx(rwTx, ac), kv.AccountsDomain, keys[j])
 			require.NoError(tb, err)
 
-			err = domains.DomainPut(kv.AccountsDomain, keys[j], nil, buf, prev, step)
+			err = domains.DomainPut(wrapTxWithCtx(rwTx, ac), kv.AccountsDomain, keys[j], nil, buf, prev, step)
 			require.NoError(tb, err)
 		}
 		if uint64(i+1)%agg.StepSize() == 0 {
-			rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
+			rh, err := domains.ComputeCommitment(ctx, wrapTxWithCtx(rwTx, ac), true, domains.BlockNum(), "")
 			require.NoError(tb, err)
 			require.NotEmpty(tb, rh)
 		}
 	}
 
-	err = domains.Flush(context.Background(), rwTx)
+	err = domains.Flush(context.Background(), wrapTxWithCtx(rwTx, ac))
 	require.NoError(tb, err)
 	domains.Close() // closes ac
 
@@ -104,7 +104,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	defer domains.Close()
 
 	// get latest commited root
-	latestRoot, err := domains.ComputeCommitment(context.Background(), false, domains.BlockNum(), "")
+	latestRoot, err := domains.ComputeCommitment(context.Background(), wrapTxWithCtx(rwTx, ac), false, domains.BlockNum(), "")
 	require.NoError(t, err)
 	require.NotEmpty(t, latestRoot)
 	domains.Close()
@@ -137,7 +137,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	}
 
 	// check if the commitment is the same
-	root, err := domains.ComputeCommitment(context.Background(), false, domains.BlockNum(), "")
+	root, err := domains.ComputeCommitment(context.Background(), wrapTxWithCtx(rwTx, ac), false, domains.BlockNum(), "")
 	require.NoError(t, err)
 	require.NotEmpty(t, root)
 	require.EqualValues(t, latestRoot, root)

@@ -47,7 +47,7 @@ var execTxsDone = metrics.NewCounter(`exec_txs_done`)
 //   - apply state-changes independently from execution and even in another goroutine (by ApplyState func)
 //   - track which txNums state-changes was applied
 type ParallelExecutionState struct {
-	domains      *libstate.SharedDomains
+	domainsTx    *libstate.SharedDomainsTx
 	triggerLock  sync.Mutex
 	triggers     map[uint64]*TxTask
 	senderTxNums map[common.Address]uint64
@@ -57,9 +57,9 @@ type ParallelExecutionState struct {
 	trace bool
 }
 
-func NewParallelExecutionState(domains *libstate.SharedDomains, logger log.Logger) *ParallelExecutionState {
+func NewParallelExecutionState(domainsTx *libstate.SharedDomainsTx, logger log.Logger) *ParallelExecutionState {
 	return &ParallelExecutionState{
-		domains:      domains,
+		domainsTx:    domainsTx,
 		triggers:     map[uint64]*TxTask{},
 		senderTxNums: map[common.Address]uint64{},
 		logger:       logger,
@@ -171,13 +171,13 @@ func (rs *ParallelExecutionState) applyState(txTask *TxTask, rotx kv.TemporalTx,
 	return nil
 }
 
-func (rs *ParallelExecutionState) Domains() *libstate.SharedDomains {
-	return rs.domains
+func (rs *ParallelExecutionState) DomainsTx() *libstate.SharedDomainsTx {
+	return rs.domainsTx
 }
 
 func (rs *ParallelExecutionState) SetTxNum(txNum, blockNum uint64) {
-	rs.domains.SetTxNum(txNum)
-	rs.domains.SetBlockNum(blockNum)
+	rs.domainsTx.SD.SetTxNum(txNum)
+	rs.domainsTx.SD.SetBlockNum(blockNum)
 }
 
 func (rs *ParallelExecutionState) ApplyState(ctx context.Context, rotx kv.TemporalTx, txTask *TxTask) error {
@@ -186,22 +186,22 @@ func (rs *ParallelExecutionState) ApplyState(ctx context.Context, rotx kv.Tempor
 	}
 	//defer rs.domains.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
-	if err := rs.applyState(txTask, rotx, rs.domains); err != nil {
+	if err := rs.applyState(txTask, rotx, rs.domainsTx.SD); err != nil {
 		return fmt.Errorf("ParallelExecutionState.ApplyState: %w", err)
 	}
 	returnReadList(txTask.ReadLists)
 	returnWriteList(txTask.WriteLists)
 
-	if err := rs.ApplyLogsAndTraces(txTask, rs.domains); err != nil {
+	if err := rs.ApplyLogsAndTraces(txTask, rs.domainsTx.SD); err != nil {
 		return fmt.Errorf("ParallelExecutionState.ApplyLogsAndTraces: %w", err)
 	}
 
-	if (txTask.TxNum+1)%rs.domains.StepSize() == 0 /*&& txTask.TxNum > 0 */ {
+	if (txTask.TxNum+1)%rs.domainsTx.SD.StepSize() == 0 /*&& txTask.TxNum > 0 */ {
 		// We do not update txNum before commitment cuz otherwise committed state will be in the beginning of next file, not in the latest.
 		// That's why we need to make txnum++ on SeekCommitment to get exact txNum for the latest committed state.
 		//fmt.Printf("[commitment] running due to txNum reached aggregation step %d\n", txNum/rs.domains.StepSize())
-		_, err := rs.domains.ComputeCommitment(ctx, rotx, true, txTask.BlockNum,
-			fmt.Sprintf("applying step %d", txTask.TxNum/rs.domains.StepSize()))
+		_, err := rs.domainsTx.SD.ComputeCommitment(ctx, rotx, true, txTask.BlockNum,
+			fmt.Sprintf("applying step %d", txTask.TxNum/rs.domainsTx.SD.StepSize()))
 		if err != nil {
 			return fmt.Errorf("ParallelExecutionState.ComputeCommitment: %w", err)
 		}
@@ -304,7 +304,7 @@ func (rs *ParallelExecutionState) Unwind(ctx context.Context, tx kv.TemporalRwTx
 	if err := stateChanges.Load(tx, "", handle, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := rs.domains.Unwind(ctx, tx, blockUnwindTo, txUnwindTo, changeset); err != nil {
+	if err := rs.domainsTx.SD.Unwind(ctx, tx, blockUnwindTo, txUnwindTo, changeset); err != nil {
 		return err
 	}
 
@@ -316,14 +316,14 @@ func (rs *ParallelExecutionState) DoneCount() uint64 {
 }
 
 func (rs *ParallelExecutionState) SizeEstimate() (r uint64) {
-	if rs.domains != nil {
-		r += rs.domains.SizeEstimate()
+	if rs.domainsTx.SD != nil {
+		r += rs.domainsTx.SD.SizeEstimate()
 	}
 	return r
 }
 
 func (rs *ParallelExecutionState) ReadsValid(readLists map[string]*libstate.KvList) bool {
-	return rs.domains.ReadsValid(readLists)
+	return rs.domainsTx.SD.ReadsValid(readLists)
 }
 
 // StateWriterBufferedV3 - used by parallel workers to accumulate updates and then send them to conflict-resolution.
@@ -348,7 +348,7 @@ func NewStateWriterBufferedV3(rs *ParallelExecutionState, accumulator *shards.Ac
 }
 
 func (w *StateWriterBufferedV3) SetTxNum(ctx context.Context, txNum uint64) {
-	w.rs.domains.SetTxNum(txNum)
+	w.rs.domainsTx.SD.SetTxNum(txNum)
 }
 func (w *StateWriterBufferedV3) SetTx(tx kv.Tx) {}
 
@@ -374,10 +374,10 @@ func (w *StateWriterBufferedV3) UpdateAccountData(rotx kv.TemporalTx, address co
 	}
 	if original.Incarnation > account.Incarnation {
 		//del, before create: to clanup code/storage
-		if err := w.rs.domains.DomainDel(rotx, kv.CodeDomain, address[:], nil, nil, 0); err != nil {
+		if err := w.rs.domainsTx.SD.DomainDel(rotx, kv.CodeDomain, address[:], nil, nil, 0); err != nil {
 			return err
 		}
-		if err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte, step uint64) error {
+		if err := w.rs.domainsTx.SD.IterateStoragePrefix(address[:], func(k, v []byte, step uint64) error {
 			w.writeLists[kv.StorageDomain.String()].Push(string(k), nil)
 			return nil
 		}); err != nil {
@@ -473,16 +473,16 @@ func (w *StateWriterV3) PrevAndDels() (map[string][]byte, map[string]*accounts.A
 	return nil, nil, nil, nil
 }
 
-func (w *StateWriterV3) UpdateAccountData(rotx kv.TemporalTx, address common.Address, original, account *accounts.Account) error {
+func (w *StateWriterV3) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	if w.trace {
 		fmt.Printf("acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
 	}
 	if original.Incarnation > account.Incarnation {
 		//del, before create: to clanup code/storage
-		if err := w.rs.domains.DomainDel(rotx, kv.CodeDomain, address[:], nil, nil, 0); err != nil {
+		if err := w.rs.domainsTx.SD.DomainDel(w.rs.domainsTx.Tx, kv.CodeDomain, address[:], nil, nil, 0); err != nil {
 			return err
 		}
-		if err := w.rs.domains.DomainDelPrefix(rotx, kv.StorageDomain, address[:]); err != nil {
+		if err := w.rs.domainsTx.SD.DomainDelPrefix(w.rs.domainsTx.Tx, kv.StorageDomain, address[:]); err != nil {
 			return err
 		}
 	}
@@ -491,17 +491,17 @@ func (w *StateWriterV3) UpdateAccountData(rotx kv.TemporalTx, address common.Add
 		w.accumulator.ChangeAccount(address, account.Incarnation, value)
 	}
 
-	if err := w.rs.domains.DomainPut(rotx, kv.AccountsDomain, address[:], nil, value, nil, 0); err != nil {
+	if err := w.rs.domainsTx.SD.DomainPut(w.rs.domainsTx.Tx, kv.AccountsDomain, address[:], nil, value, nil, 0); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (w *StateWriterV3) UpdateAccountCode(rotx kv.TemporalTx, address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+func (w *StateWriterV3) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
 	if w.trace {
 		fmt.Printf("code: %x, %x, valLen: %d\n", address.Bytes(), codeHash, len(code))
 	}
-	if err := w.rs.domains.DomainPut(rotx, kv.CodeDomain, address[:], nil, code, nil, 0); err != nil {
+	if err := w.rs.domainsTx.SD.DomainPut(w.rs.domainsTx.Tx, kv.CodeDomain, address[:], nil, code, nil, 0); err != nil {
 		return err
 	}
 	if w.accumulator != nil {
@@ -510,11 +510,11 @@ func (w *StateWriterV3) UpdateAccountCode(rotx kv.TemporalTx, address common.Add
 	return nil
 }
 
-func (w *StateWriterV3) DeleteAccount(rotx kv.TemporalTx, address common.Address, original *accounts.Account) error {
+func (w *StateWriterV3) DeleteAccount(address common.Address, original *accounts.Account) error {
 	if w.trace {
 		fmt.Printf("del acc: %x\n", address)
 	}
-	if err := w.rs.domains.DomainDel(rotx, kv.AccountsDomain, address[:], nil, nil, 0); err != nil {
+	if err := w.rs.domainsTx.SD.DomainDel(w.rs.domainsTx.Tx, kv.AccountsDomain, address[:], nil, nil, 0); err != nil {
 		return err
 	}
 	// if w.accumulator != nil { TODO: investigate later. basically this will always panic. keeping this out should be fine anyway.
@@ -523,7 +523,7 @@ func (w *StateWriterV3) DeleteAccount(rotx kv.TemporalTx, address common.Address
 	return nil
 }
 
-func (w *StateWriterV3) WriteAccountStorage(rotx kv.TemporalTx, address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+func (w *StateWriterV3) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
 	if *original == *value {
 		return nil
 	}
@@ -533,14 +533,14 @@ func (w *StateWriterV3) WriteAccountStorage(rotx kv.TemporalTx, address common.A
 		fmt.Printf("storage: %x,%x,%x\n", address, *key, v)
 	}
 	if len(v) == 0 {
-		return w.rs.domains.DomainDel(rotx, kv.StorageDomain, composite, nil, nil, 0)
+		return w.rs.domainsTx.SD.DomainDel(w.rs.domainsTx.Tx, kv.StorageDomain, composite, nil, nil, 0)
 	}
 	if w.accumulator != nil && key != nil && value != nil {
 		k := *key
 		w.accumulator.ChangeStorage(address, incarnation, k, v)
 	}
 
-	return w.rs.domains.DomainPut(rotx, kv.StorageDomain, composite, nil, v, nil, 0)
+	return w.rs.domainsTx.SD.DomainPut(w.rs.domainsTx.Tx, kv.StorageDomain, composite, nil, v, nil, 0)
 }
 
 func (w *StateWriterV3) CreateContract(address common.Address) error {
@@ -647,17 +647,17 @@ func (r *ReaderV3) ReadAccountIncarnation(address common.Address) (uint64, error
 type ReaderParallelV3 struct {
 	txNum     uint64
 	trace     bool
-	sd        *libstate.SharedDomains
+	sdtx      *libstate.SharedDomainsTx
 	composite []byte
 
 	discardReadList bool
 	readLists       map[string]*libstate.KvList
 }
 
-func NewReaderParallelV3(sd *libstate.SharedDomains) *ReaderParallelV3 {
+func NewReaderParallelV3(sdtx *libstate.SharedDomainsTx) *ReaderParallelV3 {
 	return &ReaderParallelV3{
 		//trace:     true,
-		sd:        sd,
+		sdtx:      sdtx,
 		readLists: newReadList(),
 		composite: make([]byte, 20+32),
 	}
@@ -670,8 +670,8 @@ func (r *ReaderParallelV3) ReadSet() map[string]*libstate.KvList { return r.read
 func (r *ReaderParallelV3) SetTrace(trace bool)                  { r.trace = trace }
 func (r *ReaderParallelV3) ResetReadSet()                        { r.readLists = newReadList() }
 
-func (r *ReaderParallelV3) ReadAccountData(rotx kv.TemporalTx, address common.Address) (*accounts.Account, error) {
-	enc, _, err := r.sd.GetLatest(rotx, kv.AccountsDomain, address[:])
+func (r *ReaderParallelV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
+	enc, _, err := r.sdtx.GetLatest(kv.AccountsDomain, address[:])
 	if err != nil {
 		return nil, err
 	}
@@ -698,8 +698,8 @@ func (r *ReaderParallelV3) ReadAccountData(rotx kv.TemporalTx, address common.Ad
 
 // ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
 // Used to get `prev` account balance
-func (r *ReaderParallelV3) ReadAccountDataForDebug(rotx kv.TemporalTx, address common.Address) (*accounts.Account, error) {
-	enc, _, err := r.sd.GetLatest(rotx, kv.AccountsDomain, address[:])
+func (r *ReaderParallelV3) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
+	enc, _, err := r.sdtx.GetLatest(kv.AccountsDomain, address[:])
 	if err != nil {
 		return nil, err
 	}
@@ -720,9 +720,9 @@ func (r *ReaderParallelV3) ReadAccountDataForDebug(rotx kv.TemporalTx, address c
 	return &acc, nil
 }
 
-func (r *ReaderParallelV3) ReadAccountStorage(rotx kv.TemporalTx, address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+func (r *ReaderParallelV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	r.composite = append(append(r.composite[:0], address[:]...), key.Bytes()...)
-	enc, _, err := r.sd.GetLatest(rotx, kv.StorageDomain, r.composite)
+	enc, _, err := r.sdtx.GetLatest(kv.StorageDomain, r.composite)
 	if err != nil {
 		return nil, err
 	}
@@ -739,8 +739,8 @@ func (r *ReaderParallelV3) ReadAccountStorage(rotx kv.TemporalTx, address common
 	return enc, nil
 }
 
-func (r *ReaderParallelV3) ReadAccountCode(rotx kv.TemporalTx, address common.Address, incarnation uint64) ([]byte, error) {
-	enc, _, err := r.sd.GetLatest(rotx, kv.CodeDomain, address[:])
+func (r *ReaderParallelV3) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {
+	enc, _, err := r.sdtx.GetLatest(kv.CodeDomain, address[:])
 	if err != nil {
 		return nil, err
 	}
@@ -754,8 +754,8 @@ func (r *ReaderParallelV3) ReadAccountCode(rotx kv.TemporalTx, address common.Ad
 	return enc, nil
 }
 
-func (r *ReaderParallelV3) ReadAccountCodeSize(rotx kv.TemporalTx, address common.Address, incarnation uint64) (int, error) {
-	enc, _, err := r.sd.GetLatest(rotx, kv.CodeDomain, address[:])
+func (r *ReaderParallelV3) ReadAccountCodeSize(address common.Address, incarnation uint64) (int, error) {
+	enc, _, err := r.sdtx.GetLatest(kv.CodeDomain, address[:])
 	if err != nil {
 		return 0, err
 	}
