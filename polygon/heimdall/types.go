@@ -286,24 +286,30 @@ var (
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 				var checkpointTo, checkpointFrom CheckpointId
 
-				checkpointId := func(rangeIndex RangeIndex, blockNum uint64) (CheckpointId, error) {
-					checkpointId, _, err := rangeIndex.Lookup(ctx, blockNum)
-					return CheckpointId(checkpointId), err
+				checkpointId := func(rangeIndex RangeIndex, blockNum uint64) (CheckpointId, bool, error) {
+					checkpointId, ok, err := rangeIndex.Lookup(ctx, blockNum)
+					return CheckpointId(checkpointId), ok, err
 				}
 
 				err := db.View(ctx, func(tx kv.Tx) (err error) {
 					rangeIndex := NewTxRangeIndex(db, kv.BorCheckpointEnds, tx)
 
-					checkpointFrom, err = checkpointId(rangeIndex, blockFrom)
-
-					//checkpointFrom, err = CheckpointIdAt(tx, blockFrom)
-
-					if err != nil {
+					if checkpointFrom, _, err = checkpointId(rangeIndex, blockFrom); err != nil {
 						return err
 					}
+					//checkpointFrom, err = CheckpointIdAt(tx, blockFrom)
 
-					checkpointTo, err = checkpointId(rangeIndex, blockTo)
+					var ok bool
+
+					if checkpointTo, ok, err = checkpointId(rangeIndex, blockTo); err != nil {
+						return err
+					}
 					//checkpointTo, err = CheckpointIdAt(tx, blockTo)
+
+					// next checkpoint can be not committed yet
+					if !ok {
+						checkpointTo = checkpointFrom + 1
+					}
 
 					return err
 				})
@@ -354,9 +360,9 @@ var (
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 				var milestoneFrom, milestoneTo MilestoneId
 
-				milestoneId := func(rangeIndex RangeIndex, blockNum uint64) (MilestoneId, error) {
-					milestoneId, _, err := rangeIndex.Lookup(ctx, blockNum)
-					return MilestoneId(milestoneId), err
+				milestoneId := func(rangeIndex RangeIndex, blockNum uint64) (MilestoneId, bool, error) {
+					milestoneId, ok, err := rangeIndex.Lookup(ctx, blockNum)
+					return MilestoneId(milestoneId), ok, err
 				}
 				err := db.View(ctx, func(tx kv.Tx) (err error) {
 					// We have only 3 cases:
@@ -376,16 +382,23 @@ var (
 
 					rangeIndex := NewTxRangeIndex(db, kv.BorMilestoneEnds, tx)
 
-					milestoneFrom, err = milestoneId(rangeIndex, blockFrom)
+					milestoneFrom, _, err = milestoneId(rangeIndex, blockFrom)
 
 					if err != nil && !errors.Is(err, ErrMilestoneNotFound) {
 						return err
 					}
 
-					milestoneTo, err = milestoneId(rangeIndex, blockTo)
+					var ok bool
+
+					milestoneTo, ok, err = milestoneId(rangeIndex, blockTo)
 
 					if err != nil && !errors.Is(err, ErrMilestoneNotFound) {
 						return err
+					}
+
+					// next checkpoint can be not committed yet
+					if !ok {
+						milestoneTo = milestoneFrom + 1
 					}
 
 					return nil
