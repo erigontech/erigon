@@ -65,6 +65,7 @@ type HistoricalTraceWorker struct {
 	execArgs *ExecArgs
 
 	taskGasPool *core.GasPool
+	hooks       *tracing.Hooks
 
 	// calculated by .changeBlock()
 	blockHash common.Hash
@@ -156,6 +157,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 	if tracer != nil {
 		hooks = tracer.TracingHooks()
 	}
+	ibs.SetHooks(rw.hooks)
 
 	switch {
 	case txTask.TxIndex == -1:
