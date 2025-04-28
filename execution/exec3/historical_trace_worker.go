@@ -330,16 +330,17 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 		outputTxNum++
 		stopedAtBlockEnd = txTask.Final
 
+		hooks := txTask.Tracer.TracingHooks()
 		if txTask.Error != nil {
-			if txTask.Hooks != nil && txTask.Hooks.OnTxEnd != nil {
-				txTask.Hooks.OnTxEnd(nil, err)
+			if hooks != nil && hooks.OnTxEnd != nil {
+				hooks.OnTxEnd(nil, err)
 			}
 			return outputTxNum, false, txTask.Error
 		}
 
 		txTask.CreateReceipt(tx)
-		if txTask.Hooks != nil && txTask.Hooks.OnTxEnd != nil {
-			txTask.Hooks.OnTxEnd(txTask.BlockReceipts[txTask.TxIndex], nil)
+		if hooks != nil && hooks.OnTxEnd != nil {
+			hooks.OnTxEnd(txTask.BlockReceipts[txTask.TxIndex], nil)
 		}
 		if err := consumer.Reduce(txTask, tx); err != nil {
 			return outputTxNum, false, err
