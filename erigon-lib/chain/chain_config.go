@@ -95,8 +95,8 @@ type Config struct {
 	// Account Abstraction
 	AllowAA bool
 
-	ArbitrumChainParams ArbitrumChainParams `json:"-"`
-	ArbJSON             json.RawMessage     `json:"arbitrum,omitempty"`
+	ArbitrumChainParams ArbitrumChainParams `json:"arbitrum,omitempty"`
+	//ArbJSON             json.RawMessage     `json:"arbitrum,omitempty"`
 
 	DAOForkSupport bool `json:"daoForkSupport,omitempty"` // Whether the nodes supports or opposes the DAO hard-fork
 

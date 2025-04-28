@@ -59,12 +59,12 @@ func readChainSpec(filename string) *chain.Config {
 		}
 		spec.Bor = borConfig
 	}
-	if spec.ArbJSON != nil {
-		err = json.Unmarshal(spec.ArbJSON, &spec.ArbitrumChainParams)
-		if err != nil {
-			panic(fmt.Sprintf("Could not parse 'arbitrum' chainspec for %s: %v", filename, err))
-		}
-	}
+	//if spec.ArbJSON != nil {
+	//	err = json.Unmarshal(spec.ArbJSON, &spec.ArbitrumChainParams)
+	//	if err != nil {
+	//		panic(fmt.Sprintf("Could not parse 'arbitrum' chainspec for %s: %v", filename, err))
+	//	}
+	//}
 	return spec
 }
 
