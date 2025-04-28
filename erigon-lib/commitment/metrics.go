@@ -168,11 +168,11 @@ func (metrics *Metrics) Branch(plainKey []byte) {
 
 func (metrics *Metrics) StartUnfolding(plainKey []byte) func() {
 	if collectCommitmentMetrics {
-		startUnfold := metrics.Now()
+		start := metrics.Now()
 		metrics.Accounts.UnfoldsInc(plainKey)
 		metrics.unfolds.Add(1)
 		return func() {
-			metrics.TotalUnfoldingTimeInc(startUnfold, plainKey)
+			metrics.TotalUnfoldingTimeInc(start, plainKey)
 
 		}
 	}
@@ -181,10 +181,10 @@ func (metrics *Metrics) StartUnfolding(plainKey []byte) func() {
 
 func (metrics *Metrics) StartFolding(plainKey []byte) func() {
 	if collectCommitmentMetrics {
-		startUnfold := metrics.Now()
+		start := metrics.Now()
 		metrics.Accounts.FoldsInc(plainKey)
 		return func() {
-			metrics.TotalFoldingTimeInc(startUnfold, plainKey)
+			metrics.TotalFoldingTimeInc(start, plainKey)
 		}
 	}
 	return func() {}
