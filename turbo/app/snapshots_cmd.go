@@ -394,9 +394,9 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	if cliCtx.IsSet("domain") {
 		domainNames := cliCtx.StringSlice("domain")
 		for _, domainName := range domainNames {
-			_, err := kv.String2InvertedIdx(cliCtx.String("domain"))
+			_, err := kv.String2InvertedIdx(domainName)
 			if err != nil {
-				_, err = kv.String2Domain(cliCtx.String("domain"))
+				_, err = kv.String2Domain(domainName)
 				if err == nil {
 					return err
 				}
@@ -412,7 +412,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 				}
 				removed++
 			}
-			fmt.Printf("removed %d state segments files. of %s\n", removed, domainName)
+			fmt.Printf("removed %d state segments files of %s\n", removed, domainName)
 		}
 
 	}
