@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/kv/prune"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
@@ -46,7 +47,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/backup"
 	"github.com/erigontech/erigon-lib/kv/kvcfg"
-	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
@@ -561,6 +561,7 @@ func init() {
 	withHeimdall(cmdStageCustomTrace)
 	withWorkers(cmdStageCustomTrace)
 	withChaosMonkey(cmdStageCustomTrace)
+	withProduce(cmdStageCustomTrace)
 	rootCmd.AddCommand(cmdStageCustomTrace)
 
 	withConfig(cmdStagePatriciaTrie)
@@ -1189,11 +1190,11 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	chainConfig := fromdb.ChainConfig(db)
 	genesis := core.GenesisBlockByChainName(chain)
 	br, _ := blocksIO(db, logger)
-	cfg := stagedsync.StageCustomTraceCfg(db, dirs, br, chainConfig, engine, genesis, &syncCfg)
+	cfg := stagedsync.StageCustomTraceCfg(strings.Split(produce, ","), db, dirs, br, chainConfig, engine, genesis, &syncCfg)
 	var producingDomain kv.Domain
-	if cfg.ExecArgs.ProduceReceiptDomain {
+	if cfg.Produce.ReceiptDomain {
 		producingDomain = kv.RCacheDomain
-	} else if cfg.ExecArgs.ProduceRCacheDomain {
+	} else if cfg.Produce.RCacheDomain {
 		producingDomain = kv.RCacheDomain
 	} else {
 		panic("assert: which domain need to produce?")
@@ -1205,7 +1206,21 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 			return err
 		}
 		defer tx.Rollback()
-		tables := db.Debug().DomainTables(producingDomain)
+		var tables []string
+		if cfg.Produce.ReceiptDomain {
+			tables = append(tables, db.Debug().DomainTables(kv.ReceiptDomain)...)
+		}
+		if cfg.Produce.RCacheDomain {
+			tables = append(tables, db.Debug().DomainTables(kv.RCacheDomain)...)
+		}
+		if cfg.Produce.LogIndex {
+			tables = append(tables, db.Debug().InvertedIdxTables(kv.LogAddrIdx)...)
+			tables = append(tables, db.Debug().InvertedIdxTables(kv.LogTopicIdx)...)
+		}
+		if cfg.Produce.TraceIndex {
+			tables = append(tables, db.Debug().InvertedIdxTables(kv.TracesFromIdx)...)
+			tables = append(tables, db.Debug().InvertedIdxTables(kv.TracesToIdx)...)
+		}
 		if err := backup.ClearTables(ctx, tx, tables...); err != nil {
 			return err
 		}

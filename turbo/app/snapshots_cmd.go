@@ -218,7 +218,7 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 				&cli.StringFlag{Name: "step"},
 				&cli.BoolFlag{Name: "latest"},
-				&cli.StringFlag{Name: "domain"},
+				&cli.StringSliceFlag{Name: "domain"},
 			},
 			),
 		},
@@ -392,21 +392,29 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 		fmt.Printf("removed %d state segments files\n", removed)
 	}
 	if cliCtx.IsSet("domain") {
-		domainToRemove, err := kv.String2Domain(cliCtx.String("domain"))
-		if err != nil {
-			return err
-		}
-		var removed int
-		for _, res := range files {
-			if !strings.Contains(res.Name(), domainToRemove.String()) {
-				continue
+		domainNames := cliCtx.StringSlice("domain")
+		for _, domainName := range domainNames {
+			_, err := kv.String2InvertedIdx(cliCtx.String("domain"))
+			if err != nil {
+				_, err = kv.String2Domain(cliCtx.String("domain"))
+				if err == nil {
+					return err
+				}
 			}
-			if err := os.Remove(res.Path); err != nil {
-				return fmt.Errorf("failed to remove %s: %w", res.Path, err)
+
+			var removed int
+			for _, res := range files {
+				if !strings.Contains(res.Name(), domainName) {
+					continue
+				}
+				if err := os.Remove(res.Path); err != nil {
+					return fmt.Errorf("failed to remove %s: %w", res.Path, err)
+				}
+				removed++
 			}
-			removed++
+			fmt.Printf("removed %d state segments files. of %s\n", removed, domainName)
 		}
-		fmt.Printf("removed %d state segments files\n", removed)
+
 	}
 
 	return nil

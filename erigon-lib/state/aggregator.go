@@ -22,9 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-
-	rand2 "golang.org/x/exp/rand"
-
 	"os"
 	"path/filepath"
 	"runtime"
@@ -34,6 +31,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	rand2 "golang.org/x/exp/rand"
 
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/c2h5oh/datasize"
@@ -755,9 +754,15 @@ func (a *Aggregator) IntegrateDirtyFiles(sf *AggV3StaticFiles, txNumFrom, txNumT
 	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
 }
 
-func (a *Aggregator) DomainTables(domains ...kv.Domain) (tables []string) {
-	for _, domain := range domains {
-		tables = append(tables, a.d[domain].Tables()...)
+func (a *Aggregator) DomainTables(names ...kv.Domain) (tables []string) {
+	for _, name := range names {
+		tables = append(tables, a.d[name].Tables()...)
+	}
+	return tables
+}
+func (a *Aggregator) InvertedIdxTables(names ...kv.InvertedIdx) (tables []string) {
+	for _, name := range names {
+		tables = append(tables, a.iis[name].Tables()...)
 	}
 	return tables
 }

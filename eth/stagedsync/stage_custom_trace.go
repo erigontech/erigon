@@ -45,9 +45,37 @@ type CustomTraceCfg struct {
 	tmpdir   string
 	db       kv.TemporalRwDB
 	ExecArgs *exec3.ExecArgs
+
+	Produce Produce
+}
+type Produce struct {
+	ReceiptDomain bool
+	RCacheDomain  bool
+	LogIndex      bool
+	TraceIndex    bool
 }
 
-func StageCustomTraceCfg(db kv.TemporalRwDB, dirs datadir.Dirs, br services.FullBlockReader, cc *chain.Config, engine consensus.Engine, genesis *types.Genesis, syncCfg *ethconfig.Sync) CustomTraceCfg {
+func NewProduce(produceList []string) Produce {
+	var produce Produce
+	for _, p := range produceList {
+		if p == kv.ReceiptDomain.String() {
+			produce.ReceiptDomain = true
+		}
+		if p == kv.RCacheDomain.String() {
+			produce.RCacheDomain = true
+		}
+		if p == "logindex" {
+			produce.LogIndex = true
+		}
+		if p == "traceindex" {
+			produce.TraceIndex = true
+		}
+		panic(fmt.Errorf("assert: unknown Produce %s", p))
+	}
+	return produce
+}
+
+func StageCustomTraceCfg(produce []string, db kv.TemporalRwDB, dirs datadir.Dirs, br services.FullBlockReader, cc *chain.Config, engine consensus.Engine, genesis *types.Genesis, syncCfg *ethconfig.Sync) CustomTraceCfg {
 	execArgs := &exec3.ExecArgs{
 		ChainDB:     db,
 		BlockReader: br,
@@ -56,13 +84,11 @@ func StageCustomTraceCfg(db kv.TemporalRwDB, dirs datadir.Dirs, br services.Full
 		Engine:      engine,
 		Genesis:     genesis,
 		Workers:     syncCfg.ExecWorkerCount,
-
-		ProduceReceiptDomain: dbg.EnvBool("PRODUCE_RECEIPT_DOMAIN", false),
-		ProduceRCacheDomain:  syncCfg.PersistReceiptsCache,
 	}
 	return CustomTraceCfg{
 		db:       db,
 		ExecArgs: execArgs,
+		Produce:  NewProduce(produce),
 	}
 }
 
@@ -102,7 +128,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, producingDomain kv.Domain, ctx context
 
 	batchSize := uint64(100_000)
 	for ; startBlock < endBlock; startBlock += batchSize {
-		if err := customTraceBatchProduce(ctx, cfg.ExecArgs, cfg.db, startBlock, startBlock+batchSize, "custom_trace", producingDomain, logger); err != nil {
+		if err := customTraceBatchProduce(ctx, cfg.Produce, cfg.ExecArgs, cfg.db, startBlock, startBlock+batchSize, "custom_trace", producingDomain, logger); err != nil {
 			return err
 		}
 	}
@@ -153,7 +179,7 @@ Loop:
 	return nil
 }
 
-func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.TemporalRwDB, fromBlock, toBlock uint64, logPrefix string, producingDomain kv.Domain, logger log.Logger) error {
+func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.ExecArgs, db kv.TemporalRwDB, fromBlock, toBlock uint64, logPrefix string, producingDomain kv.Domain, logger log.Logger) error {
 	var lastTxNum uint64
 	{
 		tx, err := db.BeginTemporalRw(ctx)
@@ -168,7 +194,7 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.Tem
 		}
 		defer doms.Close()
 
-		if err := customTraceBatch(ctx, cfg, tx, doms, fromBlock, toBlock, logPrefix, logger); err != nil {
+		if err := customTraceBatch(ctx, produce, cfg, tx, doms, fromBlock, toBlock, logPrefix, logger); err != nil {
 			return err
 		}
 
@@ -281,7 +307,7 @@ func badFoundBlockNum(tx kv.Tx, fromBlock uint64, txNumsReader rawdbv3.TxNumsRea
 	return fromBlock + i
 }
 
-func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, doms *state2.SharedDomains, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
+func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, doms *state2.SharedDomains, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
 	const logPeriod = 5 * time.Second
 	logEvery := time.NewTicker(logPeriod)
 	defer logEvery.Stop()
@@ -314,7 +340,7 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			doms.SetTx(tx)
 			doms.SetTxNum(txTask.TxNum)
 
-			if cfg.ProduceReceiptDomain {
+			if produce.ReceiptDomain {
 				if !txTask.Final {
 					var receipt *types.Receipt
 					if txTask.TxIndex >= 0 {
@@ -349,7 +375,7 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 				}
 			}
 
-			if cfg.ProduceRCacheDomain {
+			if produce.RCacheDomain {
 				var receipt *types.Receipt
 				if !txTask.Final {
 					if txTask.TxIndex >= 0 && txTask.BlockReceipts != nil {
@@ -365,6 +391,31 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 				}
 				if err := rawdb.WriteReceiptCacheV2(doms, receipt); err != nil {
 					return err
+				}
+			}
+
+			if produce.LogIndex {
+				for _, lg := range txTask.Logs {
+					if err := doms.IndexAdd(kv.LogAddrIdx, lg.Address[:]); err != nil {
+						return err
+					}
+					for _, topic := range lg.Topics {
+						if err := doms.IndexAdd(kv.LogTopicIdx, topic[:]); err != nil {
+							return err
+						}
+					}
+				}
+			}
+			if produce.TraceIndex {
+				for addr := range txTask.TraceFroms {
+					if err := doms.IndexAdd(kv.TracesFromIdx, addr[:]); err != nil {
+						return err
+					}
+				}
+				for addr := range txTask.TraceTos {
+					if err := doms.IndexAdd(kv.TracesToIdx, addr[:]); err != nil {
+						return err
+					}
 				}
 			}
 

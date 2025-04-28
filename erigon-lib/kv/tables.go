@@ -758,25 +758,25 @@ const (
 func (idx InvertedIdx) String() string {
 	switch idx {
 	case AccountsHistoryIdx:
-		return "AccountsHistoryIdx"
+		return "accounts"
 	case StorageHistoryIdx:
-		return "StorageHistoryIdx"
+		return "storage"
 	case CodeHistoryIdx:
-		return "CodeHistoryIdx"
+		return "code"
 	case CommitmentHistoryIdx:
-		return "CommitmentHistoryIdx"
+		return "commitment"
 	case ReceiptHistoryIdx:
-		return "ReceiptHistoryIdx"
+		return "receipt"
 	case RCacheHistoryIdx:
-		return "ReceiptCacheHistoryIdx"
+		return "rcache"
 	case LogAddrIdx:
-		return "LogAddrIdx"
+		return "logaddrs"
 	case LogTopicIdx:
-		return "LogTopicIdx"
+		return "logtopics"
 	case TracesFromIdx:
-		return "TracesFromIdx"
+		return "tracesfrom"
 	case TracesToIdx:
-		return "TracesToIdx"
+		return "tracesto"
 	default:
 		return "unknown index"
 	}
@@ -784,25 +784,25 @@ func (idx InvertedIdx) String() string {
 
 func String2InvertedIdx(in string) (InvertedIdx, error) {
 	switch in {
-	case "AccountsHistoryIdx":
+	case "accounts":
 		return AccountsHistoryIdx, nil
-	case "StorageHistoryIdx":
+	case "storage":
 		return StorageHistoryIdx, nil
-	case "CodeHistoryIdx":
+	case "code":
 		return CodeHistoryIdx, nil
-	case "CommitmentHistoryIdx":
+	case "commitment":
 		return CommitmentHistoryIdx, nil
-	case "ReceiptHistoryIdx":
+	case "receipt":
 		return ReceiptHistoryIdx, nil
-	case "ReceiptCacheHistoryIdx":
+	case "rcache":
 		return RCacheHistoryIdx, nil
-	case "LogAddrIdx":
+	case "logaddrs":
 		return LogAddrIdx, nil
-	case "LogTopicIdx":
+	case "logtopics":
 		return LogTopicIdx, nil
-	case "TracesFromIdx":
+	case "tracesfrom":
 		return TracesFromIdx, nil
-	case "TracesToIdx":
+	case "tracesto":
 		return TracesToIdx, nil
 	default:
 		return InvertedIdx(MaxUint16), fmt.Errorf("unknown inverted index name: %s", in)
