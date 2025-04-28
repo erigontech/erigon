@@ -64,6 +64,7 @@ type HistoricalTraceWorker struct {
 
 	execArgs *ExecArgs
 
+	callTracer  *CallTracer
 	taskGasPool *core.GasPool
 	hooks       *tracing.Hooks
 
@@ -109,6 +110,7 @@ func NewHistoricalTraceWorker(
 		ctx:         ctx,
 		logger:      logger,
 		taskGasPool: new(core.GasPool),
+		callTracer:  NewCallTracer(consumer.NewTracer().TracingHooks()),
 	}
 	ie.ibs = state.New(ie.stateReader)
 
@@ -208,18 +210,33 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 		if rw.vmConfig.TraceJumpDest {
 			txContext.TxHash = txTask.Tx.Hash()
 		}
+		if rw.hooks != nil && rw.hooks.OnTxStart != nil {
+			rw.hooks.OnTxStart(rw.evm.GetVMContext(), txTask.Tx, msg.From())
+		}
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, *rw.vmConfig, rules)
 
 		// MA applytx
 		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */, rw.execArgs.Engine)
 		if err != nil {
 			txTask.Error = err
+			if rw.hooks != nil && rw.hooks.OnTxEnd != nil {
+				rw.hooks.OnTxEnd(nil, err)
+			}
 		} else {
 			txTask.Failed = applyRes.Failed()
 			txTask.UsedGas = applyRes.UsedGas
 			// Update the state with pending changes
 			ibs.SoftFinalise()
+
+			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)
+			txTask.TraceFroms = rw.callTracer.Froms()
+			txTask.TraceTos = rw.callTracer.Tos()
+
 			txTask.Logs = ibs.GetRawLogs(txTask.TxIndex)
+			//txTask.CreateReceipt(rw.Tx())
+			//if rw.hooks != nil && rw.hooks.OnTxEnd != nil {
+			//	rw.hooks.OnTxEnd(txTask.BlockReceipts[txTask.TxIndex], nil)
+			//}
 		}
 	}
 }
