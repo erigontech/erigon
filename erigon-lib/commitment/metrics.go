@@ -119,29 +119,31 @@ func (metrics *Metrics) Now() time.Time {
 }
 
 func (metrics *Metrics) CollectFileDepthStats(m map[uint64]skipStat) {
-	if collectCommitmentMetrics {
-		ends := make([]uint64, 0, len(m))
-		for k := range m {
-			ends = append(ends, k)
-		}
-		sort.Slice(ends, func(i, j int) bool { return ends[i] > ends[j] })
-		for i := 0; i < 5 && i < len(ends); i++ {
-			// get stats for specific file depth
-			v := m[ends[i]]
-			// write level i file stats - account and storage loads
-			metrics.loadDepths[i*2], metrics.loadDepths[i*2+1] = v.accLoaded, v.storLoaded
-		}
+	if !collectCommitmentMetrics {
+		return
+	}
+	ends := make([]uint64, 0, len(m))
+	for k := range m {
+		ends = append(ends, k)
+	}
+	sort.Slice(ends, func(i, j int) bool { return ends[i] > ends[j] })
+	for i := 0; i < 5 && i < len(ends); i++ {
+		// get stats for specific file depth
+		v := m[ends[i]]
+		// write level i file stats - account and storage loads
+		metrics.loadDepths[i*2], metrics.loadDepths[i*2+1] = v.accLoaded, v.storLoaded
 	}
 }
 
 func (metrics *Metrics) Updates(plainKey []byte) {
-	if collectCommitmentMetrics {
-		if len(plainKey) == 20 {
-			metrics.addressKeys.Add(1)
-		} else {
-			metrics.storageKeys.Add(1)
-			metrics.Accounts.UpdatesStorageInc(plainKey)
-		}
+	if !collectCommitmentMetrics {
+		return
+	}
+	if len(plainKey) == 20 {
+		metrics.addressKeys.Add(1)
+	} else {
+		metrics.storageKeys.Add(1)
+		metrics.Accounts.UpdatesStorageInc(plainKey)
 	}
 }
 
