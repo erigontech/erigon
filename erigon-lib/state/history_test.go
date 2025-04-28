@@ -65,7 +65,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	cfg.hist.iiCfg.withExistence = false
 	cfg.hist.iiCfg.compression = seg.CompressNone
 	cfg.hist.compression = seg.CompressNone
-	//cfg.hist.historyValuesOnCompressedPage = 16
+	cfg.hist.historyValuesOnCompressedPage = 16
 	h, err := NewHistory(cfg.hist, logger)
 	require.NoError(tb, err)
 	h.DisableFsync()
