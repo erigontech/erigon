@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/consensuschain"
@@ -66,7 +65,6 @@ type HistoricalTraceWorker struct {
 
 	callTracer  *CallTracer
 	taskGasPool *core.GasPool
-	hooks       *tracing.Hooks
 
 	// calculated by .changeBlock()
 	blockHash common.Hash
@@ -150,16 +148,10 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 	rw.ibs.Reset()
 	ibs := rw.ibs
 
-	rules := txTask.Rules
 	var err error
-	header := txTask.Header
-
-	var hooks *tracing.Hooks
-	tracer := rw.consumer.NewTracer()
-	if tracer != nil {
-		hooks = tracer.TracingHooks()
-	}
-	ibs.SetHooks(rw.hooks)
+	rules, header := txTask.Rules, txTask.Header
+	hooks := txTask.Hooks
+	ibs.SetHooks(hooks)
 
 	switch {
 	case txTask.TxIndex == -1:
@@ -211,16 +203,16 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 			txContext.TxHash = txTask.Tx.Hash()
 		}
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, *rw.vmConfig, rules)
-		if rw.hooks != nil && rw.hooks.OnTxStart != nil {
-			rw.hooks.OnTxStart(rw.evm.GetVMContext(), txTask.Tx, msg.From())
+		if hooks != nil && hooks.OnTxStart != nil {
+			hooks.OnTxStart(rw.evm.GetVMContext(), txTask.Tx, msg.From())
 		}
 
 		// MA applytx
 		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */, rw.execArgs.Engine)
 		if err != nil {
 			txTask.Error = err
-			if rw.hooks != nil && rw.hooks.OnTxEnd != nil {
-				rw.hooks.OnTxEnd(nil, err)
+			if hooks != nil && hooks.OnTxEnd != nil {
+				hooks.OnTxEnd(nil, err)
 			}
 		} else {
 			txTask.Failed = applyRes.Failed()
@@ -231,12 +223,6 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)
 			txTask.TraceFroms = rw.callTracer.Froms()
 			txTask.TraceTos = rw.callTracer.Tos()
-
-			txTask.Logs = ibs.GetRawLogs(txTask.TxIndex)
-			//txTask.CreateReceipt(rw.Tx())
-			//if rw.hooks != nil && rw.hooks.OnTxEnd != nil {
-			//	rw.hooks.OnTxEnd(txTask.BlockReceipts[txTask.TxIndex], nil)
-			//}
 		}
 	}
 }
@@ -354,6 +340,9 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 		}
 
 		txTask.CreateReceipt(tx)
+		if txTask.Hooks != nil && txTask.Hooks.OnTxEnd != nil {
+			txTask.Hooks.OnTxEnd(txTask.BlockReceipts[txTask.TxIndex], nil)
+		}
 		if err := consumer.Reduce(txTask, tx); err != nil {
 			return outputTxNum, false, err
 		}
@@ -474,7 +463,10 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: true,
 				BlockReceipts:    blockReceipts,
+				Tracer:           consumer.NewTracer(),
 			}
+			txTask.Hooks = txTask.Tracer.TracingHooks()
+
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
 				txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)

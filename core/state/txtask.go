@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -88,6 +89,8 @@ type TxTask struct {
 	// Need investigate if we can pass here - only limited amount of receipts
 	// And remove this field if possible - because it will make problems for parallel-execution
 	BlockReceipts types.Receipts
+	Tracer        GenericTracer
+	Hooks         *tracing.Hooks
 
 	Config *chain.Config
 
@@ -95,8 +98,14 @@ type TxTask struct {
 	InBatch               bool   // set to true for consecutive RIP-7560 transactions after the first one (first one is false)
 	ValidationResults     []AAValidationResult
 }
+type GenericTracer interface {
+	TracingHooks() *tracing.Hooks
+	SetTransaction(tx types.Transaction)
+	Found() bool
+}
 
 func (t *TxTask) Sender() *common.Address {
+	//consumer.NewTracer().TracingHooks()
 	if t.sender != nil {
 		return t.sender
 	}
@@ -112,6 +121,37 @@ func (t *TxTask) Sender() *common.Address {
 	t.sender = &sender
 	log.Warn("[Execution] expensive lazy sender recovery", "blockNum", t.BlockNum, "txIdx", t.TxIndex)
 	return t.sender
+}
+
+func (t *TxTask) CreateReceiptStateless(tx kv.Tx) {
+	if t.TxIndex < 0 || t.Final {
+		return
+	}
+
+	var cumulativeGasUsed uint64
+	var firstLogIndex uint32
+	if t.TxIndex > 0 {
+		prevR := t.BlockReceipts[t.TxIndex-1]
+		if prevR != nil {
+			cumulativeGasUsed = prevR.CumulativeGasUsed
+			firstLogIndex = prevR.FirstLogIndexWithinBlock + uint32(len(prevR.Logs))
+		} else {
+			var err error
+			cumulativeGasUsed, _, firstLogIndex, err = rawtemporaldb.ReceiptAsOf(tx.(kv.TemporalTx), t.TxNum)
+			if err != nil {
+				panic(err)
+			}
+		}
+	}
+
+	cumulativeGasUsed += t.UsedGas
+	if t.UsedGas == 0 {
+		msg := fmt.Sprintf("no gas used stack: %s tx %+v", dbg.Stack(), t.Tx)
+		panic(msg)
+	}
+
+	r := t.createReceipt(cumulativeGasUsed, firstLogIndex)
+	t.BlockReceipts[t.TxIndex] = r
 }
 
 func (t *TxTask) CreateReceipt(tx kv.Tx) {
