@@ -4,7 +4,15 @@ go 1.23.0
 
 toolchain go1.23.6
 
-replace github.com/erigontech/erigon-lib => ./erigon-lib
+replace (
+	github.com/erigontech/erigon-lib => ./erigon-lib
+	github.com/erigontech/erigon-db => ./erigon-db
+)
+
+require (
+	github.com/erigontech/erigon-lib v0.0.0-00010101000000-000000000000
+	github.com/erigontech/erigon-db v0.0.0-00010101000000-000000000000
+)
 
 replace (
 	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.3-alpha-1
@@ -37,7 +45,6 @@ require (
 	github.com/dop251/goja v0.0.0-20220405120441-9037c2b61cbf
 	github.com/edsrzf/mmap-go v1.2.0
 	github.com/emicklei/dot v1.6.2
-	github.com/erigontech/erigon-lib v0.0.0-00010101000000-000000000000
 	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
 	github.com/gballet/go-verkle v0.0.0-20221121182333-31427a1f2d35
 	github.com/go-chi/chi/v5 v5.1.0
