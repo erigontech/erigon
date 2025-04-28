@@ -91,14 +91,10 @@ func (ti BlockUpdate) Type() Type {
 }
 
 type SenderInfoUpdate struct {
-	Senders []SenderInfo `json:"senders"`
-}
-
-type SenderInfo struct {
-	Address          common.Address
-	StateNonce       uint64
-	StateBalance     uint256.Int
-	HighestPoolNonce uint64
+	SenderId      uint64      `json:"senderId"`
+	SenderNonce   uint64      `json:"senderNonce"`
+	SenderBalance uint256.Int `json:"senderBalance"`
+	BlockGasLimit uint64      `json:"blockGasLimit"`
 }
 
 func (ti SenderInfoUpdate) Type() Type {
