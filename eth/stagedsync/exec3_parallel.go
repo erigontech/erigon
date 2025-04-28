@@ -364,16 +364,6 @@ func (d *blockDuration) Add(i time.Duration) {
 	d.Ema.Update(i)
 }
 
-type blockCount struct {
-	atomic.Int64
-	Ema *metrics.EMA[uint64]
-}
-
-func (c *blockCount) Add(i uint64) {
-	c.Int64.Add(int64(i))
-	c.Ema.Update(i)
-}
-
 type txExecutor struct {
 	sync.RWMutex
 	cfg              ExecuteBlockCfg
