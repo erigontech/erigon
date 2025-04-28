@@ -848,7 +848,7 @@ func String2Domain(in string) (Domain, error) {
 	case "rcache":
 		return RCacheDomain, nil
 	default:
-		return Domain(MaxUint16), fmt.Errorf("unknown history name: %s", in)
+		return Domain(MaxUint16), fmt.Errorf("unknown name: %s", in)
 	}
 }
 

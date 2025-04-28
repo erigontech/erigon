@@ -397,7 +397,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 			_, err := kv.String2InvertedIdx(domainName)
 			if err != nil {
 				_, err = kv.String2Domain(domainName)
-				if err == nil {
+				if err != nil {
 					return err
 				}
 			}
