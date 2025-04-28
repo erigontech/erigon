@@ -93,6 +93,10 @@ var saltMap = map[string]uint32{}
 var saltLock sync.RWMutex
 
 func ReadAndCreateSaltIfNeeded(baseDir string) (uint32, error) {
+	// issue: https://github.com/erigontech/erigon/issues/14300
+	// NOTE: The salt value from this is read after snapshot stage AND the value is not
+	// cached before snapshot stage (which downloads salt-blocks.txt too), and therefore
+	// we're good as far as the above issue is concerned.
 	fpath := filepath.Join(baseDir, "salt-blocks.txt")
 	exists, err := dir.FileExist(fpath)
 	if err != nil {

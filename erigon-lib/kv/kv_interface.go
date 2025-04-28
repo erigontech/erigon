@@ -590,6 +590,7 @@ type TemporalDebugTx interface {
 
 type TemporalDebugDB interface {
 	DomainTables(domain ...Domain) []string
+	ReloadSalt() error
 }
 
 type WithFreezeInfo interface {
