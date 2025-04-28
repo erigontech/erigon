@@ -304,9 +304,9 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 	}
 	defer db.Close()
 
-	m, torrentClient, err := openClient(ctx, cfg.Dirs.Snap, cfg.ClientConfig, logger)
+	m, torrentClient, err := newTorrentClient(ctx, cfg.Dirs.Snap, cfg.ClientConfig)
 	if err != nil {
-		return nil, fmt.Errorf("openClient: %w", err)
+		return nil, fmt.Errorf("newTorrentClient: %w", err)
 	}
 
 	peerID, err := readPeerID(db)
@@ -319,8 +319,6 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 			return nil, fmt.Errorf("save peer id: %w", err)
 		}
 	}
-
-	// TODO: Close mdbx if we are not using it anymore, and remove the field from Downloader.
 
 	stats := AggStats{
 		WebseedActiveTrips:    &atomic.Int64{},
@@ -1267,33 +1265,28 @@ func openMdbx(
 
 // This used to return the MDBX database. Instead that's opened separately now and should be passed
 // in if it's revived.
-func openClient(
+func newTorrentClient(
 	ctx context.Context,
 	snapDir string,
 	cfg *torrent.ClientConfig,
-	logger log.Logger,
 ) (
 	m storage.ClientImplCloser,
 	torrentClient *torrent.Client,
 	err error,
 ) {
-	//c, err = NewMdbxPieceCompletion(db, logger)
-	//if err != nil {
-	//	return nil, nil, nil, nil, fmt.Errorf("torrentcfg.NewMdbxPieceCompletion: %w", err)
-	//}
-
 	//Reasons why using MMAP instead of files-API:
 	// - i see "10K threads exchaused" error earlier (on `--torrent.download.slots=500` and `pd-ssd`)
 	// - "sig-bus" at disk-full - may happen anyway, because DB is mmap
 	// - MMAP - means less GC pressure, more zero-copy
 	// - MMAP files are pre-allocated - which is not cool, but: 1. we can live with it 2. maybe can just resize MMAP in future
+	// Possibly File storage needs more optimization for handles, will test. Should reduce GC
+	// pressure and improve scheduler handling.
 	// See also: https://github.com/erigontech/erigon/pull/10074
 	// TODO: Should we force sqlite, or defer to part-file-only storage completion?
-	m = storage.NewMMap(snapDir)
-	//m = storage.NewFileOpts(storage.NewFileClientOpts{
-	//	ClientBaseDir:   snapDir,
-	//	PieceCompletion: c,
-	//})
+	m = storage.NewFileOpts(storage.NewFileClientOpts{
+		ClientBaseDir: snapDir,
+		UsePartFiles:  g.Some(false),
+	})
 	cfg.DefaultStorage = m
 
 	defer func() {
