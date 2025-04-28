@@ -695,6 +695,10 @@ Loop:
 				t1 = time.Since(tt) + ts
 
 				tt = time.Now()
+				if err = aggregatorRo.GreedyPruneHistory(ctx, kv.CommitmentDomain, executor.tx()); err != nil {
+					return err
+				}
+
 				if _, err := aggregatorRo.PruneSmallBatches(ctx, 10*time.Hour, executor.tx()); err != nil {
 					return err
 				}
@@ -883,9 +887,6 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	}
 	if !inMemExec {
 		if err := doms.Flush(ctx, applyTx); err != nil {
-			return false, err
-		}
-		if err = applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneCommitHistory(ctx, applyTx, nil); err != nil {
 			return false, err
 		}
 	}

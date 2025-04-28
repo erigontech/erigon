@@ -427,8 +427,13 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	pruneTimeout := 250 * time.Millisecond
 	if s.CurrentSyncCycle.IsInitialCycle {
 		pruneTimeout = 12 * time.Hour
+
+		// allow greedy prune on non-chain-tip
+		if err = tx.(*temporal.Tx).AggTx().(*libstate.AggregatorRoTx).GreedyPruneHistory(ctx, kv.CommitmentDomain, tx); err != nil {
+			return err
+		}
 	}
-	if _, err = tx.(*temporal.Tx).AggTx().(*libstate.AggregatorRoTx).PruneSmallBatches(ctx, pruneTimeout, tx); err != nil { // prune part of retired data, before commit
+	if _, err := tx.(*temporal.Tx).AggTx().(*libstate.AggregatorRoTx).PruneSmallBatches(ctx, pruneTimeout, tx); err != nil {
 		return err
 	}
 
