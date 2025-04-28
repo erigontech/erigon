@@ -47,7 +47,7 @@ func (d *DiagnosticClient) SaveNotificationMessagesToJsonFile() {
 		log.Error("[Diagnostics] Error marshalling notification messages", "err", err)
 		return
 	}
-	os.WriteFile("/app/notification_messages.json", data, 0644)
+	os.WriteFile("/erigon/dvovk/notification_messages.json", data, 0644)
 }
 
 // Notify sends a structured diagnostic message to the connected WebSocket client.
