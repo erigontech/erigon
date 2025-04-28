@@ -982,7 +982,8 @@ type HistoryRoTx struct {
 	valsC    kv.Cursor
 	valsCDup kv.CursorDupSort
 
-	_bufTs []byte
+	_bufTs                   []byte
+	compressedPageReadBuffer []byte
 }
 
 func (h *History) BeginFilesRo() *HistoryRoTx {
@@ -1217,7 +1218,7 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	}
 
 	if ht.h.historyValuesOnCompressedPage > 1 {
-		v, ht.snappyReadBuffer = page.Get(historyKey, v, ht.snappyReadBuffer, true)
+		v, ht.compressedPageReadBuffer = page.Get(historyKey, v, ht.compressedPageReadBuffer, true)
 	}
 	return v, true, nil
 }
