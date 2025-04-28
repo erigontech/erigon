@@ -211,9 +211,6 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */, rw.execArgs.Engine)
 		if err != nil {
 			txTask.Error = err
-			if hooks != nil && hooks.OnTxEnd != nil {
-				hooks.OnTxEnd(nil, err)
-			}
 		} else {
 			txTask.Failed = applyRes.Failed()
 			txTask.UsedGas = applyRes.UsedGas
@@ -336,6 +333,9 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 		stopedAtBlockEnd = txTask.Final
 
 		if txTask.Error != nil {
+			if txTask.Hooks != nil && txTask.Hooks.OnTxEnd != nil {
+				txTask.Hooks.OnTxEnd(nil, err)
+			}
 			return outputTxNum, false, txTask.Error
 		}
 
