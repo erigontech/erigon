@@ -116,7 +116,7 @@ func TestEviction(t *testing.T) {
 	c := New(cfg)
 
 	dirs := datadir.New(t.TempDir())
-	db, _ := temporaltest.NewTestDB(t, dirs)
+	db := temporaltest.NewTestDB(t, dirs)
 	k1, k2 := [20]byte{1}, [20]byte{2}
 
 	var id uint64
@@ -180,7 +180,7 @@ func TestAPI(t *testing.T) {
 
 	c := New(DefaultCoherentConfig)
 	k1, k2 := [20]byte{1}, [20]byte{2}
-	db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 
 	acc := accounts.Account{
 		Nonce:       1,
@@ -474,7 +474,7 @@ func TestCode(t *testing.T) {
 	t.Skip("TODO: use state reader/writer instead of Put()")
 	require, ctx := require.New(t), context.Background()
 	c := New(DefaultCoherentConfig)
-	db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	k1, k2 := [20]byte{1}, [20]byte{2}
 
 	_ = db.Update(ctx, func(tx kv.RwTx) error {

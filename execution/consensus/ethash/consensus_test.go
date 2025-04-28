@@ -31,9 +31,9 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 type diffTest struct {
@@ -107,8 +107,8 @@ func randSlice(_min, _max uint32) []byte {
 func TestDifficultyCalculators(t *testing.T) {
 	rand.Seed(2)
 
-	wrap := func(f func(time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentUncleHash libcommon.Hash) *big.Int) func(time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentUncleHash libcommon.Hash) *big.Int {
-		return func(time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentUncleHash libcommon.Hash) *big.Int {
+	wrap := func(f func(time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentUncleHash common.Hash) *big.Int) func(time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentUncleHash common.Hash) *big.Int {
+		return func(time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentUncleHash common.Hash) *big.Int {
 			return f(time, parentTime, parentDifficulty, parentNumber, parentUncleHash)
 		}
 	}
@@ -130,7 +130,7 @@ func TestDifficultyCalculators(t *testing.T) {
 		}
 		bombDelay := rand.Uint64() % 50_000_000
 		for i, pair := range []struct {
-			bigFn  func(time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, uncleHash libcommon.Hash) *big.Int
+			bigFn  func(time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, uncleHash common.Hash) *big.Int
 			u256Fn func(time uint64, parent *types.Header) *big.Int
 		}{
 			{wrap(FrontierDifficultyCalulator), CalcDifficultyFrontierU256},
@@ -156,7 +156,7 @@ func BenchmarkDifficultyCalculator(b *testing.B) {
 	x1 := makeDifficultyCalculator(1000000)
 	x2 := MakeDifficultyCalculatorU256(1000000)
 	h := &types.Header{
-		ParentHash: libcommon.Hash{},
+		ParentHash: common.Hash{},
 		UncleHash:  types.EmptyUncleHash,
 		Difficulty: big.NewInt(0xffffff),
 		Number:     big.NewInt(500000),

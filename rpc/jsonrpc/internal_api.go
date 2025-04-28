@@ -5,8 +5,6 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 // Defines the `internal_` JSON-RPC namespace.
@@ -40,16 +38,15 @@ func (api *InternalAPIImpl) GetTxNumInfo(ctx context.Context, txNum uint64) (*Tx
 		return nil, err
 	}
 	defer tx.Rollback()
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
 
-	ok, bn, err := txNumsReader.FindBlockNum(tx, txNum)
+	ok, bn, err := api._txNumReader.FindBlockNum(tx, txNum)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		return nil, fmt.Errorf("block not found by txnID=%d", txNum)
 	}
-	minTxNum, err := txNumsReader.Min(tx, bn)
+	minTxNum, err := api._txNumReader.Min(tx, bn)
 	if err != nil {
 		return nil, err
 	}

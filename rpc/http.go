@@ -37,9 +37,9 @@ import (
 	"github.com/golang-jwt/jwt/v4"
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 )
 
@@ -261,7 +261,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// single request.
 
 	// The context might be cancelled if the client's connection was closed while waiting for ServeHTTP.
-	if libcommon.FastContextErr(ctx) != nil {
+	if common.FastContextErr(ctx) != nil {
 		// TODO: introduce an log message for all possible cases
 		// s.logger.Warn("rpc.Server.ServeHTTP: client connection was lost. Check if the server is able to keep up with the request rate.", "url", r.URL.String())
 		w.WriteHeader(http.StatusServiceUnavailable)

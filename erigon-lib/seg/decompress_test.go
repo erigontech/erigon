@@ -594,7 +594,7 @@ func rmNewLine(s string) string {
 func TestDecompressTorrent(t *testing.T) {
 	t.Skip()
 
-	fpath := "/mnt/data/chains/mainnet/snapshots/v1-014000-014500-transactions.seg"
+	fpath := "/mnt/data/chains/mainnet/snapshots/v1.0-014000-014500-transactions.seg"
 	st, err := os.Stat(fpath)
 	require.NoError(t, err)
 	fmt.Printf("file: %v, size: %d\n", st.Name(), st.Size())

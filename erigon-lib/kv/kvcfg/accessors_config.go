@@ -24,6 +24,11 @@ import (
 
 type ConfigKey []byte
 
+var (
+	PersistReceipts   = ConfigKey("persist.receipts")
+	CommitmentHistory = ConfigKey("commitment.history")
+)
+
 func (k ConfigKey) Enabled(tx kv.Tx) (bool, error) { return kv.GetBool(tx, kv.DatabaseInfo, k) }
 func (k ConfigKey) FromDB(db kv.RoDB) (enabled bool) {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
@@ -42,7 +47,7 @@ func (k ConfigKey) WriteOnce(tx kv.RwTx, v bool) (bool, error) {
 	_, enabled, err := kv.EnsureNotChangedBool(tx, kv.DatabaseInfo, k, v)
 	return enabled, err
 }
-func (k ConfigKey) EnsureNotChanged(tx kv.RwTx, value bool) (ok, enabled bool, err error) {
+func (k ConfigKey) EnsureNotChanged(tx kv.RwTx, value bool) (notChanged, enabled bool, err error) {
 	return kv.EnsureNotChangedBool(tx, kv.DatabaseInfo, k, value)
 }
 func (k ConfigKey) ForceWrite(tx kv.RwTx, enabled bool) error {

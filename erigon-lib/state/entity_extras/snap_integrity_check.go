@@ -35,7 +35,7 @@ func NewReferencingIntegrityChecker(dependents ...SnapNameSchema) *ReferencingIn
 
 func (r *ReferencingIntegrityChecker) Check(fromRootNum, toRootNum RootNum) (fine bool) {
 	for _, dependent := range r.dependents {
-		fullpath := dependent.DataFile(snaptype.Version(1), fromRootNum, toRootNum)
+		fullpath := dependent.DataFile(snaptype.V1_0, fromRootNum, toRootNum)
 		if _, err := os.Stat(fullpath); os.IsNotExist(err) {
 			return false
 		}

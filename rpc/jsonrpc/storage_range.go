@@ -19,30 +19,30 @@ package jsonrpc
 import (
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 )
 
 // StorageRangeResult is the result of a debug_storageRangeAt API call.
 type StorageRangeResult struct {
-	Storage storageMap      `json:"storage"`
-	NextKey *libcommon.Hash `json:"nextKey"` // nil if Storage includes the last key in the trie.
+	Storage storageMap   `json:"storage"`
+	NextKey *common.Hash `json:"nextKey"` // nil if Storage includes the last key in the trie.
 }
 
 // storageMap a map from storage locations to StorageEntry items
-type storageMap map[libcommon.Hash]StorageEntry
+type storageMap map[common.Hash]StorageEntry
 
 // StorageEntry an entry in storage of the account
 type StorageEntry struct {
-	Key   *libcommon.Hash `json:"key"`
-	Value libcommon.Hash  `json:"value"`
+	Key   *common.Hash `json:"key"`
+	Value common.Hash  `json:"value"`
 }
 
-func storageRangeAt(ttx kv.TemporalTx, contractAddress libcommon.Address, start []byte, txNum uint64, maxResult int) (StorageRangeResult, error) {
+func storageRangeAt(ttx kv.TemporalTx, contractAddress common.Address, start []byte, txNum uint64, maxResult int) (StorageRangeResult, error) {
 	result := StorageRangeResult{Storage: storageMap{}}
 
-	fromKey := append(libcommon.Copy(contractAddress.Bytes()), start...)
+	fromKey := append(common.Copy(contractAddress.Bytes()), start...)
 	toKey, _ := kv.NextSubtree(contractAddress.Bytes())
 
 	r, err := ttx.RangeAsOf(kv.StorageDomain, fromKey, toKey, txNum, order.Asc, kv.Unlim) //no limit because need skip empty records
@@ -58,8 +58,8 @@ func storageRangeAt(ttx kv.TemporalTx, contractAddress libcommon.Address, start 
 		if len(v) == 0 {
 			continue // Skip deleted entries
 		}
-		key := libcommon.BytesToHash(k[20:])
-		seckey, err := libcommon.HashData(k[20:])
+		key := common.BytesToHash(k[20:])
+		seckey, err := common.HashData(k[20:])
 		if err != nil {
 			return StorageRangeResult{}, err
 		}
@@ -76,7 +76,7 @@ func storageRangeAt(ttx kv.TemporalTx, contractAddress libcommon.Address, start 
 		if len(v) == 0 {
 			continue
 		}
-		key := libcommon.BytesToHash(k[20:])
+		key := common.BytesToHash(k[20:])
 		result.NextKey = &key
 		break
 	}
