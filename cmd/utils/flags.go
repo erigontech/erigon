@@ -812,6 +812,11 @@ var (
 		Usage: "Enabling syncing with a stage that uses the polygon sync component",
 	}
 
+	PolygonLogIndex = cli.BoolFlag{
+		Name:  "polygon.logindex",
+		Usage: "Workaround for incorrect logIndex in RPC",
+	}
+
 	ConfigFlag = cli.StringFlag{
 		Name:  "config",
 		Usage: "Sets erigon flags from YAML/TOML file",
@@ -1712,6 +1717,7 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.C
 	cfg.WithHeimdallWaypointRecording = ctx.Bool(WithHeimdallWaypoints.Name)
 	cfg.PolygonSync = ctx.Bool(PolygonSyncFlag.Name)
 	cfg.PolygonSyncStage = ctx.Bool(PolygonSyncStageFlag.Name)
+	cfg.PolygonExtraReceipt = ctx.Bool(PolygonLogIndex.Name)
 
 	if cfg.PolygonSync {
 		cfg.WithHeimdallMilestones = false

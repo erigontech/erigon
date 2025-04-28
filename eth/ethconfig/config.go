@@ -235,8 +235,9 @@ type Config struct {
 	// Heimdall waypoint recording active
 	WithHeimdallWaypointRecording bool
 	// Use polygon checkpoint sync in preference to POW downloader
-	PolygonSync      bool
-	PolygonSyncStage bool
+	PolygonSync         bool
+	PolygonSyncStage    bool
+	PolygonExtraReceipt bool
 
 	// Ethstats service
 	Ethstats string
