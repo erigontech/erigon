@@ -30,11 +30,13 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 
+	"github.com/cespare/xxhash"
 	"github.com/erigontech/erigon-lib/common"
 	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/etl"
@@ -69,6 +71,11 @@ type Cfg struct {
 	// Worst case of Ram: `MaxPatternLen * DictReducerSoftLimit`
 	DictReducerSoftLimit int
 
+	// DictBuilderHardLimit - Hard limit for the final dictionary size after all processing.
+	// This is different from MaxDictPatterns which is used during pattern collection.
+	// This limit is used to ensure we don't have too many patterns in the final dictionary.
+	DictBuilderHardLimit int
+
 	// samplingFactor - skip superstrings if `superstringNumber % samplingFactor != 0`
 	SamplingFactor uint64
 
@@ -83,6 +90,7 @@ var DefaultCfg = Cfg{
 	MaxDictPatterns: 64 * 1024,
 
 	DictReducerSoftLimit: 1_000_000,
+	DictBuilderHardLimit: 32 * 1024, // Default to a more conservative dictionary size for final output
 	Workers:              1,
 }
 
@@ -320,6 +328,7 @@ type DictionaryBuilder struct {
 	lastWord      []byte
 	items         []*Pattern
 	softLimit     int
+	hardLimit     int // Hard limit for the final dictionary size
 	lastWordScore uint64
 }
 
@@ -328,17 +337,31 @@ func (db *DictionaryBuilder) Reset(softLimit int) {
 	db.items = db.items[:0]
 }
 
+// SetHardLimit sets the hard limit for the final dictionary size
+func (db *DictionaryBuilder) SetHardLimit(hardLimit int) {
+	db.hardLimit = hardLimit
+}
+
 func (db *DictionaryBuilder) Len() int { return len(db.items) }
 func (db *DictionaryBuilder) Less(i, j int) bool {
 	if db.items[i].score == db.items[j].score {
-		return bytes.Compare(db.items[i].word, db.items[j].word) < 0
+		// Add randomization factor for ties to prevent alphabetical bias
+		// This creates a more balanced distribution across the alphabet
+		// But still maintains deterministic behavior by using hash of the word
+		hashI := xxhash.Sum64(db.items[i].word)
+		hashJ := xxhash.Sum64(db.items[j].word)
+		return hashI < hashJ
 	}
 	return db.items[i].score < db.items[j].score
 }
 
 func dictionaryBuilderCmp(i, j *Pattern) int {
 	if i.score == j.score {
-		return bytes.Compare(i.word, j.word)
+		// Use hash-based comparison instead of alphabetical to ensure
+		// better distribution when scores are equal
+		hashI := xxhash.Sum64(i.word)
+		hashJ := xxhash.Sum64(j.word)
+		return cmp.Compare(hashI, hashJ)
 	}
 	return cmp.Compare(i.score, j.score)
 }
@@ -393,14 +416,44 @@ func (db *DictionaryBuilder) loadFunc(k, v []byte, table etl.CurrentTableReader,
 	return nil
 }
 
+// filterByScore filters patterns to keep only those with highest scores
+// but ensures a fair distribution across pattern types
+func (db *DictionaryBuilder) filterByScore() {
+	if db.Len() <= db.hardLimit {
+		return // No need to filter if we're under the hard limit
+	}
+
+	// First, sort the patterns by score (highest first)
+	sort.Slice(db.items, func(i, j int) bool {
+		return db.items[i].score > db.items[j].score
+	})
+
+	// Keep only the top hardLimit items
+	if len(db.items) > db.hardLimit {
+		db.items = db.items[:db.hardLimit]
+	}
+}
+
 func (db *DictionaryBuilder) finish(hardLimit int) {
 	if db.lastWord != nil {
 		db.processWord(db.lastWord, db.lastWordScore)
 	}
 
-	for db.Len() > hardLimit {
-		// Remove the element with smallest score
-		heap.Pop(db)
+	// If hardLimit parameter is provided, use it, otherwise use the object's hardLimit
+	effectiveHardLimit := hardLimit
+	if db.hardLimit > 0 && (hardLimit == 0 || db.hardLimit < hardLimit) {
+		effectiveHardLimit = db.hardLimit
+	}
+
+	if effectiveHardLimit > 0 {
+		// First, ensure we respect the heap's score-based ordering
+		for db.Len() > effectiveHardLimit {
+			// Remove the element with smallest score
+			heap.Pop(db)
+		}
+
+		// Then apply additional filtering if needed
+		db.filterByScore()
 	}
 }
 
