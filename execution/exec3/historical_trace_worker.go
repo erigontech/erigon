@@ -23,7 +23,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/core/tracing"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -462,7 +461,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: true,
 				BlockReceipts:    blockReceipts,
-				Tracer:           NewCallTracer(&tracing.Hooks{}),
+				Tracer:           NewCallTracer(nil),
 			}
 
 			if txIndex >= 0 && txIndex < len(txs) {
