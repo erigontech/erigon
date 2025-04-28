@@ -198,10 +198,10 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 			txTask.Error = err
 		}
 	default:
-		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), txTask.Tx.GetBlobGas())
-		rw.vmConfig.Tracer = hooks
-
+		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), rw.execArgs.ChainConfig.GetMaxBlobGasPerBlock(header.Time))
+		rw.callTracer.Reset()
 		rw.vmConfig.SkipAnalysis = txTask.SkipAnalysis
+		rw.vmConfig.Tracer = hooks
 		ibs.SetTxContext(txTask.TxIndex)
 		msg := txTask.TxAsMessage
 		msg.SetCheckNonce(!rw.vmConfig.StatelessExec)
@@ -210,10 +210,10 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 		if rw.vmConfig.TraceJumpDest {
 			txContext.TxHash = txTask.Tx.Hash()
 		}
+		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, *rw.vmConfig, rules)
 		if rw.hooks != nil && rw.hooks.OnTxStart != nil {
 			rw.hooks.OnTxStart(rw.evm.GetVMContext(), txTask.Tx, msg.From())
 		}
-		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, *rw.vmConfig, rules)
 
 		// MA applytx
 		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */, rw.execArgs.Engine)
