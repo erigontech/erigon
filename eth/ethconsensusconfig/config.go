@@ -140,7 +140,8 @@ func CreateConsensusEngine(ctx context.Context, nodeConfig *nodecfg.Config, chai
 		panic("unknown config" + spew.Sdump(config))
 	}
 
-	if chainConfig.TerminalTotalDifficulty == nil {
+	// CHANGE(taiko) : Taiko's TTD is 0 but still we want Taiko engine instead of Merge
+	if chainConfig.Taiko || chainConfig.TerminalTotalDifficulty == nil {
 		return eng
 	} else {
 		return merge.New(eng) // the Merge
