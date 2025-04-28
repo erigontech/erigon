@@ -305,23 +305,6 @@ var (
 					checkpointTo, err = checkpointId(rangeIndex, blockTo)
 					//checkpointTo, err = CheckpointIdAt(tx, blockTo)
 
-					if err != nil {
-						return err
-					}
-
-					if blockFrom > 0 {
-						if prevTo, err := checkpointId(rangeIndex, blockFrom-1); err == nil {
-							if prevTo == checkpointFrom {
-								if prevTo == checkpointTo {
-									checkpointFrom = 0
-									checkpointTo = 0
-								} else {
-									checkpointFrom++
-								}
-							}
-						}
-					}
-
 					return err
 				})
 
@@ -376,6 +359,21 @@ var (
 					return MilestoneId(milestoneId), err
 				}
 				err := db.View(ctx, func(tx kv.Tx) (err error) {
+					// We have only 3 cases:
+					// Suppose we are trying to find the range [A, B) for blocks [1000, 2000)
+					//
+					// Case 1:
+					// Milestones: .., [900, 1000), [1000, 1100), ...
+					// Expecting milestoneFrom to be [1000, 1100)
+					//
+					// Case 2:
+					// Milestones: .., [950, 1050), [1050, 1150), ...
+					// Expecting milestoneFrom to be [950, 1050)
+					//
+					// Case 3:
+					// Milestones: .., [900, 2100), ...
+					// Expecting milestoneFrom to be [900, 2100), milestoneTo to be [900, 2100) as well
+
 					rangeIndex := NewTxRangeIndex(db, kv.BorMilestoneEnds, tx)
 
 					milestoneFrom, err = milestoneId(rangeIndex, blockFrom)
@@ -388,19 +386,6 @@ var (
 
 					if err != nil && !errors.Is(err, ErrMilestoneNotFound) {
 						return err
-					}
-
-					if milestoneFrom > 0 && blockFrom > 0 {
-						if prevTo, err := milestoneId(rangeIndex, blockFrom-1); err == nil && prevTo == milestoneFrom {
-							if prevTo == milestoneFrom {
-								if prevTo == milestoneTo {
-									milestoneFrom = 0
-									milestoneTo = 0
-								} else {
-									milestoneFrom++
-								}
-							}
-						}
 					}
 
 					return nil
@@ -477,6 +462,7 @@ func MilestonesEnabled() bool {
 	return false
 }
 
+// This function extracts values in interval [valueFrom, valueTo)
 func extractValueRange(ctx context.Context, table string, valueFrom, valueTo uint64, db kv.RoDB, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
