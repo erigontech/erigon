@@ -760,19 +760,13 @@ func (a *Aggregator) DomainTables(names ...kv.Domain) (tables []string) {
 	}
 	return tables
 }
-func (a *Aggregator) InvertedIdxTables(names ...kv.InvertedIdx) (tables []string) {
-	for _, name := range names {
-		tables = append(tables, a.iis[name].Tables()...)
-	}
-	return tables
-}
 func (at *AggregatorRoTx) DomainFiles(domains ...kv.Domain) (files VisibleFiles) {
 	for _, domain := range domains {
 		files = append(files, at.d[domain].Files()...)
 	}
 	return files
 }
-func (a *Aggregator) InvertedIndexTables(indices ...kv.InvertedIdx) (tables []string) {
+func (a *Aggregator) InvertedIdxTables(indices ...kv.InvertedIdx) (tables []string) {
 	for _, idx := range indices {
 		if ii := a.searchII(idx); ii != nil {
 			tables = append(tables, ii.Tables()...)
