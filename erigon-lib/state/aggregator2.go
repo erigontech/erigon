@@ -11,16 +11,16 @@ import (
 )
 
 // this is supposed to register domains/iis
+// salt file should exist, else agg created has nil salt.
 func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
-	return NewAggregator2(ctx, dirs, aggregationStep, false, db, logger)
-}
-
-func NewAggregator2(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, noDownloader bool, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
-	salt, err := getStateIndicesSalt(dirs.Snap, noDownloader, logger)
+	salt, err := GetStateIndicesSalt(dirs, false, logger)
 	if err != nil {
 		return nil, err
 	}
+	return NewAggregator2(ctx, dirs, aggregationStep, salt, db, logger)
+}
 
+func NewAggregator2(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, salt *uint32, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
 	a, err := newAggregatorOld(ctx, dirs, aggregationStep, db, logger)
 	if err != nil {
 		return nil, err

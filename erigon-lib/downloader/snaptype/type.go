@@ -141,12 +141,12 @@ func GetIndexSalt(baseDir string) (uint32, error) {
 		return salt, nil
 	}
 
-	saltLock.Lock()
 	salt, err := ReadAndCreateSaltIfNeeded(baseDir)
 	if err != nil {
 		return 0, err
 	}
 
+	saltLock.Lock()
 	saltMap[baseDir] = salt
 	saltLock.Unlock()
 
