@@ -824,7 +824,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 			lcp = lcp[:n]
 		}
 		for i := 0; i < n; i++ {
-			/* If the current suffix is at n-1, then we don’t
+			/* If the current suffix is at n-1, then we don't
 			   have next substring to consider. So lcp is not
 			   defined for this substring, we put zero. */
 			if inv[i] == int32(n-1) {
@@ -964,14 +964,20 @@ func DictionaryBuilderFromCollectors(ctx context.Context, cfg Cfg, logPrefix, tm
 	// We need `maxDictPatterns` words with highest score - but input is not sorted by score (it's sorted by `word`)
 	// so, then let's just put to heap more items and then shrink at `finish()`
 	db := &DictionaryBuilder{softLimit: cfg.DictReducerSoftLimit}
+	if cfg.DictBuilderHardLimit > 0 {
+		db.SetHardLimit(cfg.DictBuilderHardLimit)
+	}
+
 	if err := dictCollector.Load(nil, "", db.loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return nil, err
 	}
+
+	// Use MaxDictPatterns as the initial hard limit during collection
 	db.finish(cfg.MaxDictPatterns)
 
 	db.Sort()
 	if lvl < log.LvlTrace {
-		logger.Log(lvl, fmt.Sprintf("[%s] BuildDict", logPrefix), "took", time.Since(t), "rev_total", dictAggregator.receivedWords, "recv_distribution", dictAggregator.dist, "hard_limit", cfg.MaxDictPatterns, "soft_limit", cfg.DictReducerSoftLimit)
+		logger.Log(lvl, fmt.Sprintf("[%s] BuildDict", logPrefix), "took", time.Since(t), "rev_total", dictAggregator.receivedWords, "recv_distribution", dictAggregator.dist, "hard_limit", cfg.MaxDictPatterns, "soft_limit", cfg.DictReducerSoftLimit, "final_hard_limit", cfg.DictBuilderHardLimit)
 	}
 
 	return db, nil
