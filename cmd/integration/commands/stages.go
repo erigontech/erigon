@@ -1024,7 +1024,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	defer borSn.Close()
 	defer agg.Close()
 	if reset {
-		if err := reset2.ResetExec(ctx, db, agg, chain, "", logger); err != nil {
+		if err := reset2.ResetExec(ctx, db); err != nil {
 			return err
 		}
 		return nil
@@ -1334,7 +1334,7 @@ func printAllStages(db kv.RoDB, ctx context.Context, logger log.Logger) error {
 	defer sn.Close()
 	defer borSn.Close()
 	defer agg.Close()
-	return db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, borSn, agg) })
+	return db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, borSn) })
 }
 
 func printAppliedMigrations(db kv.RwDB, ctx context.Context, logger log.Logger) error {

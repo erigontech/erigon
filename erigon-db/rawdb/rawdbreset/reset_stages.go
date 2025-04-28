@@ -33,7 +33,7 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 )
 
-func ResetState(db kv.RwDB, agg *state.Aggregator, ctx context.Context, chain string, tmpDir string, logger log.Logger) error {
+func ResetState(db kv.TemporalRwDB, ctx context.Context) error {
 	// don't reset senders here
 	if err := db.Update(ctx, ResetTxLookup); err != nil {
 		return err
@@ -45,7 +45,7 @@ func ResetState(db kv.RwDB, agg *state.Aggregator, ctx context.Context, chain st
 		return err
 	}
 
-	if err := ResetExec(ctx, db, agg, chain, tmpDir, logger); err != nil {
+	if err := ResetExec(ctx, db); err != nil {
 		return err
 	}
 	return nil
@@ -159,12 +159,12 @@ func ResetSenders(ctx context.Context, db kv.RwDB, tx kv.RwTx) error {
 	return clearStageProgress(tx, stages.Senders)
 }
 
-func ResetExec(ctx context.Context, db kv.RwDB, agg *state.Aggregator, chain string, tmpDir string, logger log.Logger) (err error) {
+func ResetExec(ctx context.Context, db kv.TemporalRwDB) (err error) {
 	cleanupList := make([]string, 0)
 	cleanupList = append(cleanupList, stateBuckets...)
 	cleanupList = append(cleanupList, stateHistoryBuckets...)
-	cleanupList = append(cleanupList, agg.DomainTables(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain)...)
-	cleanupList = append(cleanupList, agg.InvertedIdxTables(kv.LogAddrIdx, kv.LogTopicIdx, kv.TracesFromIdx, kv.TracesToIdx)...)
+	cleanupList = append(cleanupList, db.Debug().DomainTables(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain)...)
+	cleanupList = append(cleanupList, db.Debug().InvertedIdxTables(kv.LogAddrIdx, kv.LogTopicIdx, kv.TracesFromIdx, kv.TracesToIdx)...)
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if err := clearStageProgress(tx, stages.Execution); err != nil {

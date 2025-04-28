@@ -31,7 +31,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -237,7 +236,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	domCtx.Close()
 	domains.Close()
 
-	err = reset2.ResetExec(ctx, db, agg, networkname.Test, "", log.New())
+	err = reset2.ResetExec(ctx, db)
 	require.NoError(t, err)
 	// ======== reset domains end ========
 
@@ -407,7 +406,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	domCtx.Close()
 	domains.Close()
 
-	err = reset2.ResetExec(ctx, db, agg, networkname.Test, "", log.New())
+	err = reset2.ResetExec(ctx, db)
 	require.NoError(t, err)
 	// ======== reset domains end ========
 
