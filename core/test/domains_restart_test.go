@@ -48,7 +48,7 @@ import (
 )
 
 // if fpath is empty, tempDir is used, otherwise fpath is reused
-func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.RwDB, *state.Aggregator, string) {
+func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.TemporalRwDB, *state.Aggregator, string) {
 	t.Helper()
 
 	path := t.TempDir()
@@ -70,8 +70,8 @@ func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.RwDB,
 
 	tdb, err := temporal.New(db, agg)
 	require.NoError(t, err)
-	db = tdb
-	return db, agg, path
+	t.Cleanup(tdb.Close)
+	return tdb, agg, path
 }
 
 func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
