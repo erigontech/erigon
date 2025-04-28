@@ -94,7 +94,7 @@ func (c *Writer) bytes() []byte {
 	c.vals = append(c.vals, keysAndVals...)
 	lengthsAndKeysAndVals := c.vals
 
-	c.snappyBuf, lengthsAndKeysAndVals = compress.EncodeSnappyIfNeed(c.snappyBuf, lengthsAndKeysAndVals, c.snappyEnabled)
+	c.snappyBuf, lengthsAndKeysAndVals = compress.EncodeZstdIfNeed(c.snappyBuf, lengthsAndKeysAndVals, c.snappyEnabled)
 
 	return lengthsAndKeysAndVals
 }
@@ -114,7 +114,7 @@ var be = binary.BigEndian
 func Get(key, compressedPage []byte, snappyBuf []byte, snappyEnabled bool) (v []byte, snappyBufOut []byte) {
 	var err error
 	var page []byte
-	snappyBuf, page, err = compress.DecodeSnappyIfNeed(snappyBuf, compressedPage, snappyEnabled)
+	snappyBuf, page, err = compress.DecodeZstdIfNeed(snappyBuf, compressedPage, snappyEnabled)
 	if err != nil {
 		panic(err)
 	}
@@ -164,7 +164,7 @@ func FromBytes(buf []byte, snappyEnabled bool) *Reader {
 
 func (r *Reader) Reset(v []byte, snappyEnabled bool) (n int) {
 	var err error
-	r.snappyBuf, v, err = compress.DecodeSnappyIfNeed(r.snappyBuf, v, snappyEnabled)
+	r.snappyBuf, v, err = compress.DecodeZstdIfNeed(r.snappyBuf, v, snappyEnabled)
 	if err != nil {
 		panic(fmt.Errorf("len(v): %d, %w", len(v), err))
 	}
