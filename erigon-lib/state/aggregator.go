@@ -240,7 +240,7 @@ func (a *Aggregator) DisableFsync() {
 }
 
 func (a *Aggregator) ReloadSalt() error {
-	salt, err := GetStateIndicesSalt(a.dirs.Snap, false, a.logger)
+	salt, err := GetStateIndicesSalt(a.dirs, false, a.logger)
 	if err != nil {
 		return err
 	}
