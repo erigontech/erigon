@@ -867,7 +867,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		}
 
 		if be.skipCheck[tx] ||
-			state.ValidateVersion(txVersion.TxIndex, be.blockIO, be.versionMap,
+			state.ValidateVersion(txVersion.TxIndex, be.blockIO, be.versionMap, coinbase,
 				func(readsource state.ReadSource, readVersion, writtenVersion state.Version) bool {
 					return readsource == state.MapRead && readVersion == writtenVersion
 				}) {
@@ -1039,7 +1039,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 			txIndex := execTask.Version().TxIndex
 			if be.txIncarnations[nextTx] > 0 &&
 				(be.execAborted[nextTx] > 0 || be.execFailed[nextTx] > 0 || !be.blockIO.HasReads(txIndex) ||
-					!state.ValidateVersion(txIndex, be.blockIO, be.versionMap,
+					!state.ValidateVersion(txIndex, be.blockIO, be.versionMap, libcommon.Address{},
 						func(_ state.ReadSource, _, writtenVersion state.Version) bool {
 							res := writtenVersion.TxIndex < maxValidated &&
 								writtenVersion.Incarnation == be.txIncarnations[writtenVersion.TxIndex+1]
