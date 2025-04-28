@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -58,9 +59,11 @@ type Produce struct {
 func NewProduce(produceList []string) Produce {
 	var produce Produce
 	for _, p := range produceList {
+		p = strings.TrimSpace(p)
 		if p == kv.ReceiptDomain.String() {
 			produce.ReceiptDomain = true
 		}
+		fmt.Printf("a: %+v, %+v\n", p, kv.RCacheDomain.String())
 		if p == kv.RCacheDomain.String() {
 			produce.RCacheDomain = true
 		}
