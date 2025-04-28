@@ -62,16 +62,19 @@ func NewProduce(produceList []string) Produce {
 		p = strings.TrimSpace(p)
 		if p == kv.ReceiptDomain.String() {
 			produce.ReceiptDomain = true
+			continue
 		}
-		fmt.Printf("a: %+v, %+v\n", p, kv.RCacheDomain.String())
 		if p == kv.RCacheDomain.String() {
 			produce.RCacheDomain = true
+			continue
 		}
 		if p == "logindex" {
 			produce.LogIndex = true
+			continue
 		}
 		if p == "traceindex" {
 			produce.TraceIndex = true
+			continue
 		}
 		panic(fmt.Errorf("assert: unknown Produce %s", p))
 	}
