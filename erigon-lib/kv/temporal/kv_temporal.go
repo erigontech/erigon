@@ -322,3 +322,6 @@ func (tx *Tx) GreedyPruneHistory(ctx context.Context, domain kv.Domain) error {
 func (tx *Tx) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
 	return tx.aggtx.Unwind(ctx, tx.MdbxTx, txNumUnwindTo, changeset)
 }
+func (tx *Tx) ResetTables(ctx context.Context, domains ...kv.Domain) error {
+	return tx.aggtx.DbgResetTables(ctx, tx.MdbxTx, domains)
+}
