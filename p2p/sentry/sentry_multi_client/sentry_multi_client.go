@@ -567,14 +567,7 @@ func (cs *MultiClient) getBlockBodies66(ctx context.Context, inreq *proto_sentry
 	return nil
 }
 
-var (
-	EnableP2PReceipts = dbg.EnvBool("P2P_RECEIPTS", true)
-)
-
 func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient proto_sentry.SentryClient) error {
-	if !EnableP2PReceipts {
-		return nil
-	}
 	var query eth.GetReceiptsPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getReceipts66: %w, data: %x", err, inreq.Data)

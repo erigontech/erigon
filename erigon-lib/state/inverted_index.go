@@ -75,8 +75,9 @@ type InvertedIndex struct {
 }
 
 type iiCfg struct {
-	salt *uint32
-	dirs datadir.Dirs
+	salt    *uint32
+	dirs    datadir.Dirs
+	disable bool // totally disable Domain/History/InvertedIndex - ignore all writes, don't produce files
 
 	filenameBase    string // filename base for all files of this inverted index
 	aggregationStep uint64 // amount of transactions inside single aggregation step
@@ -175,6 +176,9 @@ func (ii *InvertedIndex) openList(fNames []string) error {
 }
 
 func (ii *InvertedIndex) openFolder() error {
+	if ii.disable {
+		return nil
+	}
 	idxFiles, _, _, err := ii.fileNamesOnDisk()
 	if err != nil {
 		return err
@@ -215,11 +219,15 @@ func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
 	ii._visible = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.indexList, false, toTxNum))
 }
 
-func (ii *InvertedIndex) missedMapAccessors() (l []*filesItem) {
+func (ii *InvertedIndex) MissedMapAccessors() (l []*filesItem) {
+	return ii.missedMapAccessors(ii.dirtyFiles.Items())
+}
+
+func (ii *InvertedIndex) missedMapAccessors(source []*filesItem) (l []*filesItem) {
 	if !ii.indexList.Has(AccessorHashMap) {
 		return nil
 	}
-	return fileItemsWithMissingAccessors(ii.dirtyFiles, ii.aggregationStep, func(fromStep, toStep uint64) []string {
+	return fileItemsWithMissedAccessors(source, ii.aggregationStep, func(fromStep, toStep uint64) []string {
 		return []string{
 			ii.efAccessorFilePath(fromStep, toStep),
 		}
@@ -235,8 +243,8 @@ func (ii *InvertedIndex) buildEfAccessor(ctx context.Context, item *filesItem, p
 }
 
 // BuildMissedAccessors - produce .efi/.vi/.kvi from .ef/.v/.kv
-func (ii *InvertedIndex) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
-	for _, item := range ii.missedMapAccessors() {
+func (ii *InvertedIndex) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet, iiFiles *MissedAccessorIIFiles) {
+	for _, item := range iiFiles.missedMapAccessors() {
 		item := item
 		g.Go(func() error {
 			return ii.buildEfAccessor(ctx, item, ps)
@@ -1207,7 +1215,7 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 		Salt:       ii.salt,
 		NoFsync:    ii.noFsync,
 	}
-	return buildAccessor(ctx, data, ii.compression, idxPath, false, cfg, ps, ii.logger)
+	return buildHashMapAccessor(ctx, data, ii.compression, idxPath, false, cfg, ps, ii.logger)
 }
 
 func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumTo uint64) {

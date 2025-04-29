@@ -36,6 +36,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/kv/kvcfg"
 	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
@@ -300,6 +301,15 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	latestBlockBuiltStore := builder.NewLatestBlockBuiltStore()
 
 	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
+		var notChanged bool
+		notChanged, config.PersistReceiptsCacheV2, err = kvcfg.PersistReceipts.EnsureNotChanged(tx, config.PersistReceiptsCacheV2)
+		if err != nil {
+			return err
+		}
+		if !notChanged {
+			return fmt.Errorf("cli flag changed: %s", kvcfg.PersistReceipts)
+		}
+
 		if err := checkAndSetCommitmentHistoryFlag(tx, logger, dirs, config); err != nil {
 			return err
 		}

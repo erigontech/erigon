@@ -280,7 +280,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	cfg.TxPool.Disable = !withTxPool
 	cfg.Dirs = dirs
 	cfg.AlwaysGenerateChangesets = true
-	cfg.PersistReceipts = 4
+	cfg.PersistReceiptsCacheV2 = true
 	cfg.ChaosMonkey = false
 	cfg.Snapshot.ChainName = gspec.Config.ChainName
 

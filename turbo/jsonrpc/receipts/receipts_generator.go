@@ -41,6 +41,7 @@ type Generator struct {
 	receiptCacheTrace  bool
 
 	blockReader services.FullBlockReader
+	txNumReader rawdbv3.TxNumsReader
 	engine      consensus.EngineReader
 }
 
@@ -70,9 +71,12 @@ func NewGenerator(blockReader services.FullBlockReader, engine consensus.EngineR
 		panic(err)
 	}
 
+	txNumReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(context.Background(), blockReader))
+
 	return &Generator{
 		receiptsCache:      receiptsCache,
 		blockReader:        blockReader,
+		txNumReader:        txNumReader,
 		engine:             engine,
 		receiptsCacheTrace: receiptsCacheTrace,
 		receiptCacheTrace:  receiptsCacheTrace,
@@ -152,6 +156,15 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		return receiptFromDB, nil
 	}
 
+	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
+	receiptFromDB, ok, err = rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, uint32(index), txnHash, g.txNumReader)
+	if err != nil {
+		return nil, err
+	}
+	if ok && receiptFromDB != nil && !dbg.AssertEnabled {
+		return receiptFromDB, nil
+	}
+
 	if receipts, ok := g.receiptsCache.Get(blockHash); ok && len(receipts) > index {
 		return receipts[index], nil
 	}
@@ -199,8 +212,18 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
 	blockHash := block.Hash()
+
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
 	receiptsFromDB, err := rawdb.ReadReceiptsCache(tx, block)
+	if err != nil {
+		return nil, err
+	}
+	if len(receiptsFromDB) > 0 && !dbg.AssertEnabled {
+		return receiptsFromDB, nil
+	}
+
+	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
+	receiptsFromDB, err = rawdb.ReadReceiptsCacheV2(tx, block, g.txNumReader)
 	if err != nil {
 		return nil, err
 	}

@@ -111,7 +111,7 @@ func (at *AggregatorRoTx) SqueezeCommitmentFiles() error {
 	}
 
 	rng := &RangesV3{
-		domain: [5]DomainRanges{
+		domain: [kv.DomainLen]DomainRanges{
 			kv.AccountsDomain: {
 				name:    kv.AccountsDomain,
 				values:  MergeRange{"", true, 0, math.MaxUint64},
@@ -322,7 +322,7 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 	defer acRo.Close()
 
 	rng := &RangesV3{
-		domain: [5]DomainRanges{
+		domain: [kv.DomainLen]DomainRanges{
 			kv.AccountsDomain: {
 				name:    kv.AccountsDomain,
 				values:  MergeRange{"", true, 0, math.MaxUint64},

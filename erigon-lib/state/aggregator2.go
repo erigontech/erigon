@@ -37,6 +37,9 @@ func NewAggregator2(ctx context.Context, dirs datadir.Dirs, aggregationStep uint
 	if err := a.registerDomain(kv.ReceiptDomain, salt, dirs, aggregationStep, logger); err != nil {
 		return nil, err
 	}
+	if err := a.registerDomain(kv.RCacheDomain, salt, dirs, aggregationStep, logger); err != nil {
+		return nil, err
+	}
 	if err := a.registerII(kv.LogAddrIdx, salt, dirs, aggregationStep, kv.FileLogAddressIdx, kv.TblLogAddressKeys, kv.TblLogAddressIdx, logger); err != nil {
 		return nil, err
 	}
@@ -166,10 +169,10 @@ var Schema = map[kv.Domain]domainCfg{
 	},
 	kv.ReceiptDomain: {
 		name: kv.ReceiptDomain, valuesTable: kv.TblReceiptVals,
+		CompressCfg: seg.DefaultCfg, Compression: seg.CompressNone,
+		largeValues: false,
 
 		AccessorList: AccessorBTree | AccessorExistence,
-		Compression:  seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
-		CompressCfg:  DomainCompressCfg,
 
 		hist: histCfg{
 			valuesTable: kv.TblReceiptHistoryVals,
@@ -186,6 +189,79 @@ var Schema = map[kv.Domain]domainCfg{
 			},
 		},
 	},
+	kv.RCacheDomain: {
+		name: kv.RCacheDomain, valuesTable: kv.TblRCacheVals,
+		largeValues: true,
+
+		AccessorList: AccessorHashMap,
+		CompressCfg:  DomainCompressCfg, Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+
+		hist: histCfg{
+			valuesTable: kv.TblRCacheHistoryVals,
+			compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+
+			historyLargeValues: true,
+			historyIdx:         kv.RCacheHistoryIdx,
+
+			snapshotsDisabled:             true,
+			historyValuesOnCompressedPage: 16,
+
+			filenameBase: kv.RCacheDomain.String(),
+
+			iiCfg: iiCfg{
+				disable:      true, // disable everything by default
+				filenameBase: kv.RCacheDomain.String(), keysTable: kv.TblRCacheHistoryKeys, valuesTable: kv.TblRCacheIdx,
+				compressorCfg: seg.DefaultCfg,
+			},
+		},
+	},
+}
+
+var StandaloneIISchema = map[kv.InvertedIdx]iiCfg{
+	kv.LogAddrIdx: {
+		filenameBase: kv.FileLogAddressIdx, keysTable: kv.TblLogAddressKeys, valuesTable: kv.TblLogAddressIdx,
+
+		compression: seg.CompressNone,
+		name:        kv.LogAddrIdx,
+	},
+	kv.LogTopicIdx: {
+		filenameBase: kv.FileLogTopicsIdx, keysTable: kv.TblLogTopicsKeys, valuesTable: kv.TblLogTopicsIdx,
+
+		compression: seg.CompressNone,
+		name:        kv.LogTopicIdx,
+	},
+	kv.TracesFromIdx: {
+		filenameBase: kv.FileTracesFromIdx, keysTable: kv.TblTracesFromKeys, valuesTable: kv.TblTracesFromIdx,
+
+		compression: seg.CompressNone,
+		name:        kv.TracesFromIdx,
+	},
+	kv.TracesToIdx: {
+		filenameBase: kv.FileTracesToIdx, keysTable: kv.TblTracesToKeys, valuesTable: kv.TblTracesToIdx,
+
+		compression: seg.CompressNone,
+		name:        kv.TracesToIdx,
+	},
+}
+
+var DomainCompressCfg = seg.Cfg{
+	MinPatternScore:      1000,
+	DictReducerSoftLimit: 2000000,
+	MinPatternLen:        20,
+	MaxPatternLen:        128,
+	SamplingFactor:       4,
+	MaxDictPatterns:      64 * 1024 * 2,
+	Workers:              1,
+}
+
+var HistoryCompressCfg = seg.Cfg{
+	MinPatternScore:      4000,
+	DictReducerSoftLimit: 2000000,
+	MinPatternLen:        20,
+	MaxPatternLen:        128,
+	SamplingFactor:       1,
+	MaxDictPatterns:      64 * 1024,
+	Workers:              1,
 }
 
 func EnableHistoricalCommitment() {
@@ -194,3 +270,12 @@ func EnableHistoricalCommitment() {
 	cfg.hist.snapshotsDisabled = false
 	Schema[kv.CommitmentDomain] = cfg
 }
+func EnableHistoricalRCache() {
+	cfg := Schema[kv.RCacheDomain]
+	cfg.hist.iiCfg.disable = false
+	cfg.hist.historyDisabled = false
+	cfg.hist.snapshotsDisabled = false
+	Schema[kv.RCacheDomain] = cfg
+}
+
+var ExperimentalConcurrentCommitment = false // set true to use concurrent commitment by default

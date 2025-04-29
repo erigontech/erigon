@@ -44,6 +44,8 @@ import (
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/downloader"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/backup"
+	"github.com/erigontech/erigon-lib/kv/kvcfg"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
@@ -962,7 +964,7 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 
 	br, _ := blocksIO(db, logger)
 	if reset {
-		return db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetSenders(ctx, db, tx) })
+		return db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetSenders(ctx, tx) })
 	}
 
 	tx, err := db.BeginRw(ctx)
@@ -1212,7 +1214,37 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	defer sn.Close()
 	defer borSn.Close()
 	defer agg.Close()
+
+	chainConfig, pm := fromdb.ChainConfig(db), fromdb.PruneMode(db)
+	genesis := core.GenesisBlockByChainName(chain)
+	br, _ := blocksIO(db, logger)
+	cfg := stagedsync.StageCustomTraceCfg(db, pm, dirs, br, chainConfig, engine, genesis, &syncCfg)
+
+	var producingDomain kv.Domain
+	if cfg.ExecArgs.ReGenReceiptDomain {
+		producingDomain = kv.ReceiptDomain
+	}
+	if cfg.ExecArgs.ReGenRCacheDomain {
+		producingDomain = kv.RCacheDomain
+	}
+	if producingDomain == 0 {
+		panic("assert: which domain need to produce?")
+	}
+
 	if reset {
+		tx, err := db.BeginTemporalRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		tables := db.Debug().DomainTables(producingDomain)
+		if err := backup.ClearTables(ctx, tx, tables...); err != nil {
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+
 		if err := reset2.Reset(ctx, db, stages.CustomTrace); err != nil {
 			return err
 		}
@@ -1228,12 +1260,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
-	chainConfig, pm := fromdb.ChainConfig(db), fromdb.PruneMode(db)
-
-	genesis := core.GenesisBlockByChainName(chain)
-	br, _ := blocksIO(db, logger)
-	cfg := stagedsync.StageCustomTraceCfg(db, pm, dirs, br, chainConfig, engine, genesis, &syncCfg)
-	err = stagedsync.SpawnCustomTrace(cfg, ctx, logger)
+	err = stagedsync.SpawnCustomTrace(cfg, producingDomain, ctx, logger)
 	if err != nil {
 		return err
 	}
@@ -1364,6 +1391,26 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 	var err error
 
 	openSnapshotOnce.Do(func() {
+		if err := db.View(context.Background(), func(tx kv.Tx) (err error) {
+			syncCfg.KeepExecutionProofs, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
+			if err != nil {
+				return err
+			}
+			syncCfg.PersistReceiptsCacheV2, err = kvcfg.PersistReceipts.Enabled(tx)
+			if err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			panic(err)
+		}
+		if syncCfg.KeepExecutionProofs {
+			libstate.EnableHistoricalCommitment()
+		}
+		if syncCfg.PersistReceiptsCacheV2 {
+			libstate.EnableHistoricalRCache()
+		}
+
 		dirs := datadir.New(datadirCli)
 
 		chainConfig := fromdb.ChainConfig(db)
