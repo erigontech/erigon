@@ -403,7 +403,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 
 			borLogs = borLogs.Filter(addrMap, crit.Topics, 0)
 			for _, filteredLog := range borLogs {
-				allBorLogs = append(logs, &types.ErigonLog{
+				allBorLogs = append(allBorLogs, &types.ErigonLog{
 					Address:     filteredLog.Address,
 					Topics:      filteredLog.Topics,
 					Data:        filteredLog.Data,
