@@ -196,6 +196,8 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 					return nil, err
 				}
 
+				fmt.Println(blockNum, fmt.Sprintf("%d.%d", txTask.Version().TxIndex, txTask.Version().Incarnation), "CB", fmt.Sprintf("%x", result.Coinbase), coinbaseBalance.Uint64())
+
 				execResult := *result.ExecutionResult
 				execResult.CoinbaseInitBalance = coinbaseBalance.Clone()
 
@@ -850,14 +852,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 		}
 
-		var coinbase libcommon.Address
-
-		if result := be.results[tx]; result != nil {
-			coinbase = result.Coinbase
-		}
-
 		if be.skipCheck[tx] ||
-			state.ValidateVersion(txVersion.TxIndex, be.blockIO, be.versionMap, coinbase,
+			state.ValidateVersion(txVersion.TxIndex, be.blockIO, be.versionMap, *pe.cfg.author,
 				func(readsource state.ReadSource, readVersion, writtenVersion state.Version) bool {
 					return readsource == state.MapRead && readVersion == writtenVersion
 				}) {
@@ -946,7 +942,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	// this needs to be called after finalization to make sure
 	// that coinbase updates are considered by subsequent
 	// transactions
-	be.scheduleExecution(ctx, pe.in)
+	be.scheduleExecution(ctx, pe)
 
 	if applyResult.txNum > 0 {
 		pe.executedGas.Add(int64(applyResult.gasUsed))
@@ -1012,7 +1008,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		nil}, nil
 }
 
-func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWithRetry) {
+func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExecutor) {
 	toExecute := make(sort.IntSlice, 0, 2)
 
 	for be.execTasks.minPending() >= 0 {
@@ -1029,7 +1025,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 			txIndex := execTask.Version().TxIndex
 			if be.txIncarnations[nextTx] > 0 &&
 				(be.execAborted[nextTx] > 0 || be.execFailed[nextTx] > 0 || !be.blockIO.HasReads(txIndex) ||
-					!state.ValidateVersion(txIndex, be.blockIO, be.versionMap, libcommon.Address{},
+					!state.ValidateVersion(txIndex, be.blockIO, be.versionMap, *pe.cfg.author,
 						func(_ state.ReadSource, _, writtenVersion state.Version) bool {
 							res := writtenVersion.TxIndex < maxValidated &&
 								writtenVersion.Incarnation == be.txIncarnations[writtenVersion.TxIndex+1]
@@ -1048,7 +1044,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 		be.cntExec++
 
 		if incarnation := be.txIncarnations[nextTx]; incarnation == 0 {
-			in.Add(ctx, &taskVersion{
+			pe.in.Add(ctx, &taskVersion{
 				execTask:   execTask,
 				version:    execTask.Version(),
 				versionMap: be.versionMap,
@@ -1058,7 +1054,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, in *exec.QueueWi
 		} else {
 			version := execTask.Version()
 			version.Incarnation = incarnation
-			in.ReTry(&taskVersion{
+			pe.in.ReTry(&taskVersion{
 				execTask:   execTask,
 				version:    version,
 				versionMap: be.versionMap,
@@ -1307,7 +1303,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 
 			if blockExecutor, ok := pe.blockExecutors[blockResult.BlockNum+1]; ok {
 				blockExecutor.execStarted = time.Now()
-				blockExecutor.scheduleExecution(ctx, pe.in)
+				blockExecutor.scheduleExecution(ctx, pe)
 			}
 		}
 	}
@@ -1385,7 +1381,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 	if scheduleable != nil {
 		pe.blockExecMetrics.BlockCount.Add(1)
 		scheduleable.execStarted = time.Now()
-		scheduleable.scheduleExecution(ctx, pe.in)
+		scheduleable.scheduleExecution(ctx, pe)
 	}
 
 	return nil
