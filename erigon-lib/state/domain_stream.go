@@ -46,8 +46,8 @@ type CursorItem struct {
 	cNonDup kv.Cursor
 
 	iter         btree2.MapIter[string, dataWithPrevStep]
-	dg           *seg.Reader
-	dg2          *seg.Reader
+	idx          *seg.Reader
+	hist         *seg.PagedReader
 	btCursor     *Cursor
 	key          []byte
 	val          []byte
@@ -402,17 +402,17 @@ func (dt *DomainRoTx) debugIteratePrefix(prefix []byte, haveRamUpdates bool,
 					}
 				}
 				if indexList&AccessorHashMap != 0 {
-					ci1.dg.Reset(ci1.latestOffset)
-					if !ci1.dg.HasNext() {
+					ci1.idx.Reset(ci1.latestOffset)
+					if !ci1.idx.HasNext() {
 						break
 					}
-					key, _ := ci1.dg.Next(nil)
+					key, _ := ci1.idx.Next(nil)
 					if key != nil && bytes.HasPrefix(key, prefix) {
 						ci1.key = key
-						ci1.val, ci1.latestOffset = ci1.dg.Next(nil)
+						ci1.val, ci1.latestOffset = ci1.idx.Next(nil)
 						heap.Push(cpPtr, ci1)
 					} else {
-						ci1.dg = nil
+						ci1.idx = nil
 					}
 				}
 			case DB_CURSOR:

@@ -146,13 +146,16 @@ var Schema = map[kv.Domain]domainCfg{
 		replaceKeysInValues: AggregatorSqueezeCommitmentValues,
 
 		hist: histCfg{
-			valuesTable: kv.TblCommitmentHistoryVals,
-			compression: seg.CompressNone,
+			valuesTable:  kv.TblCommitmentHistoryVals,
+			compression:  seg.CompressNone,
+			filenameBase: kv.CommitmentDomain.String(),
+			historyIdx:   kv.CommitmentHistoryIdx,
 
-			snapshotsDisabled:  true,
-			historyLargeValues: false,
-			filenameBase:       kv.CommitmentDomain.String(),
-			historyIdx:         kv.CommitmentHistoryIdx,
+			historyLargeValues:            false,
+			historyValuesOnCompressedPage: 16,
+
+			snapshotsDisabled: true,
+			historyDisabled:   true,
 
 			iiCfg: iiCfg{
 				keysTable: kv.TblCommitmentHistoryKeys, valuesTable: kv.TblCommitmentIdx,
