@@ -479,7 +479,15 @@ func validateSnapshots[T Entity](logger log.Logger, failFast bool, snaps *RoSnap
 				return err
 			}
 
-			logger.Trace("validating entity", "id", entity.RawId(), "kind", reflect.TypeOf(entity))
+			logger.Trace(
+				"validating entity",
+				"id", entity.RawId(),
+				"kind", reflect.TypeOf(entity),
+				"start", entity.BlockNumRange().Start,
+				"end", entity.BlockNumRange().End,
+				"segmentFrom", seg.From(),
+				"segmentTo", seg.To(),
+			)
 
 			if prev == nil {
 				prev = &entity
@@ -558,10 +566,12 @@ OUTER:
 			continue
 		}
 
+		fmt.Printf("snapshot segment %d: %d\n", sn.From(), sn.To())
+
 		gg := sn.Src().MakeGetter()
 		keyCount := idx.KeyCount()
-		for i := keyCount - 1; i >= 0; i-- {
-			offset := idx.OrdinalLookup(i)
+		for j := int64(keyCount) - 1; j >= 0; j-- {
+			offset := idx.OrdinalLookup(uint64(j))
 			gg.Reset(offset)
 			result, _ := gg.Next(nil)
 			entity := makeEntity()
