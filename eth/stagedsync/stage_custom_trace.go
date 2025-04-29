@@ -124,15 +124,15 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 			panic(ok)
 		}
 
-		txNum = ac.DbgDomain(producingDomain).FirstStepNotInFiles() * stepSize
-		log.Info("[dbg] SpawnCustomTrace", "accountsDomain", ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx), "producingDomain", ac.DbgDomain(producingDomain).DbgMaxTxNumInDB(tx), "producingDomainFiles", ac.DbgDomain(producingDomain).Files())
-		ok, startBlock, err = txNumsReader.FindBlockNum(tx, txNum)
+		fromTxNum := ac.DbgDomain(producingDomain).FirstStepNotInFiles() * stepSize
+		ok, startBlock, err = txNumsReader.FindBlockNum(tx, fromTxNum)
 		if err != nil {
 			return fmt.Errorf("getting last executed block: %w", err)
 		}
 		if !ok {
 			panic(ok)
 		}
+		log.Info("[dbg] SpawnCustomTrace", "accountsDomain", ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx), "producingDomain", ac.DbgDomain(producingDomain).DbgMaxTxNumInDB(tx), "producingDomainFiles", ac.DbgDomain(producingDomain).Files())
 		return nil
 	}); err != nil {
 		return err
@@ -143,7 +143,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 
 	batchSize := uint64(100_000)
 	for ; startBlock < endBlock; startBlock += batchSize {
-		to := min(endBlock, startBlock+batchSize)
+		to := min(endBlock+1, startBlock+batchSize)
 		if err := customTraceBatchProduce(ctx, cfg.Produce, cfg.ExecArgs, cfg.db, startBlock, to, "custom_trace", producingDomain, logger); err != nil {
 			return err
 		}
