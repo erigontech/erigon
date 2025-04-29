@@ -17,9 +17,9 @@ jobs:
       - name: Fast checkout git repository
         uses: actions/checkout@v4
 
-      - name: Docker build current branch
-        run: |
-          docker build -t test/erigon:current .
+      # - name: Docker build current branch
+      #   run: |
+      #     docker build -t test/erigon:current .
 
       - name: Docker build noku-team/assertoor image
         run: |
