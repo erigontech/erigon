@@ -306,7 +306,7 @@ func BenchmarkRead(b *testing.B) {
 	b.Run("reset.search", func(b *testing.B) {
 		ef := NewEliasFano(1, 1)
 		for i := 0; i < b.N; i++ {
-			ef.Rese(buf.Bytes()).Seek(1)
+			ef.Reset(buf.Bytes()).Seek(1)
 		}
 	})
 
