@@ -1381,7 +1381,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			if err != nil {
 				return err
 			}
-			syncCfg.PersistReceiptsCache, err = kvcfg.PersistReceipts.Enabled(tx)
+			syncCfg.PersistReceiptsCacheV2, err = kvcfg.PersistReceipts.Enabled(tx)
 			if err != nil {
 				return err
 			}
@@ -1392,7 +1392,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		if syncCfg.KeepExecutionProofs {
 			libstate.EnableHistoricalCommitment()
 		}
-		if syncCfg.PersistReceiptsCache {
+		if syncCfg.PersistReceiptsCacheV2 {
 			libstate.EnableHistoricalRCache()
 		}
 
