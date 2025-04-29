@@ -114,7 +114,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 	if err := cfg.db.View(ctx, func(tx kv.Tx) (err error) {
 		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 		stepSize := ac.StepSize()
-		txNum := ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx)
+		txNum := max(ac.DbgDomain(kv.AccountsDomain).FirstStepNotInFiles()*stepSize, ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx))
 		var ok bool
 		ok, endBlock, err = txNumsReader.FindBlockNum(tx, txNum)
 		if err != nil {
@@ -182,7 +182,7 @@ Loop:
 	if err := cfg.db.View(ctx, func(tx kv.Tx) error {
 		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 		receiptProgress := ac.DbgDomain(producingDomain).DbgMaxTxNumInDB(tx)
-		accProgress := ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx)
+		txNum := max(ac.DbgDomain(kv.AccountsDomain).FirstStepNotInFiles()*stepSize, ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx))
 		if accProgress != receiptProgress {
 			err := fmt.Errorf("[integrity] %s=%d is behind AccountDomain=%d", producingDomain.String(), receiptProgress, accProgress)
 			log.Warn(err.Error())
