@@ -1,8 +1,6 @@
 package state
 
 import (
-	"context"
-
 	"github.com/erigontech/erigon-lib/kv"
 )
 
@@ -228,16 +226,4 @@ type MissedAccessorIIFiles struct {
 
 func (m *MissedAccessorIIFiles) missedMapAccessors() []*filesItem {
 	return m.files[AccessorHashMap]
-}
-
-func (at *AggregatorRoTx) DbgResetTables(ctx context.Context, tx kv.RwTx, domains ...kv.Domain) error {
-	for _, domain := range domains {
-		for _, tbl := range at.d[domain].Tables() {
-			at.a.logger.Info("Clear", "table", tbl)
-			if err := tx.ClearTable(tbl); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
 }

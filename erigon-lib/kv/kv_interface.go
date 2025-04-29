@@ -585,7 +585,6 @@ type TemporalDebugTx interface {
 
 	GreedyPruneHistory(ctx context.Context, domain Domain) error
 	PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error)
-	ResetTables(ctx context.Context, domains ...Domain) error
 	TxNumsInFiles(domains ...Domain) (minTxNum uint64)
 }
 
