@@ -25,12 +25,12 @@ func RestartUnderGDB() {
 	args := os.Args[1:]
 	filteredArgs := []string{}
 	for _, arg := range args {
-		if arg != fmt.Sprintf("--%s", utils.GDBMeFlag.Name) {
+		if arg != "--"+utils.GDBMeFlag.Name {
 			filteredArgs = append(filteredArgs, arg)
 		}
 	}
 
-	runCommand := fmt.Sprintf("run %s", formatArgsForLLDB(filteredArgs))
+	runCommand := "run " + formatArgsForLLDB(filteredArgs)
 
 	// maybe in future it would be a script in a separate file
 	//TODO: discover some more features from lldb and add it here

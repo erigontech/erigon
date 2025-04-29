@@ -261,9 +261,9 @@ func TestLightClientBootstrap(t *testing.T) {
 	require.NoError(t, err)
 
 	expected := f.LightClientBootstraps[reqRoot]
-	require.Equal(t, got.Header, expected.Header)
-	require.Equal(t, got.CurrentSyncCommittee, expected.CurrentSyncCommittee)
-	require.Equal(t, got.CurrentSyncCommitteeBranch, expected.CurrentSyncCommitteeBranch)
+	require.Equal(t, expected.Header, got.Header)
+	require.Equal(t, expected.CurrentSyncCommittee, got.CurrentSyncCommittee)
+	require.Equal(t, expected.CurrentSyncCommitteeBranch, got.CurrentSyncCommitteeBranch)
 }
 
 func TestLightClientUpdates(t *testing.T) {
