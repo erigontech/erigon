@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/erigontech/erigon/execution/exec3/calltracer"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -65,7 +66,7 @@ type Worker struct {
 	resultCh *state.ResultsQueue
 	chain    consensus.ChainReader
 
-	callTracer  *CallTracer
+	callTracer  *calltracer.CallTracer
 	taskGasPool *core.GasPool
 	hooks       *tracing.Hooks
 
@@ -94,7 +95,7 @@ func NewWorker(lock sync.Locker, logger log.Logger, hooks *tracing.Hooks, ctx co
 		engine:   engine,
 
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
-		callTracer:  NewCallTracer(hooks),
+		callTracer:  calltracer.NewCallTracer(hooks),
 		taskGasPool: new(core.GasPool),
 		hooks:       hooks,
 

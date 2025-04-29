@@ -23,6 +23,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/execution/exec3/calltracer"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -147,7 +149,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 
 	var err error
 	rules, header := txTask.Rules, txTask.Header
-	hooks := txTask.Tracer.TracingHooks()
+	hooks := txTask.Tracer.Tracer().Hooks
 	ibs.SetHooks(hooks)
 
 	switch {
@@ -215,8 +217,8 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 			ibs.SoftFinalise()
 
 			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)
-			txTask.TraceFroms = txTask.Tracer.(*CallTracer).Froms()
-			txTask.TraceTos = txTask.Tracer.(*CallTracer).Tos()
+			txTask.TraceFroms = txTask.Tracer.Froms()
+			txTask.TraceTos = txTask.Tracer.Tos()
 		}
 	}
 }
@@ -461,7 +463,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: true,
 				BlockReceipts:    blockReceipts,
-				Tracer:           NewCallTracer(nil),
+				Tracer:           calltracer.NewCallTracer(&tracing.Hooks{}),
 			}
 
 			if txIndex >= 0 && txIndex < len(txs) {

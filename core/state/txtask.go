@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/execution/exec3/calltracer"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -89,7 +90,7 @@ type TxTask struct {
 	// Need investigate if we can pass here - only limited amount of receipts
 	// And remove this field if possible - because it will make problems for parallel-execution
 	BlockReceipts types.Receipts
-	Tracer        GenericTracer
+	Tracer        *calltracer.CallTracer
 
 	Config *chain.Config
 
