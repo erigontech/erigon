@@ -504,7 +504,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 		createDataGas := uint64(len(ret)) * params.CreateDataGas
 		if contract.UseGas(createDataGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage) {
 			evm.intraBlockState.SetCode(address, ret)
-		} else if evm.chainRules.IsHomestead {
+		} else /*if evm.chainRules.IsHomestead */ { // ARBitrum!
 			err = ErrCodeStoreOutOfGas
 		}
 	}

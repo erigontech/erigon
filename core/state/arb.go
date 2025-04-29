@@ -168,6 +168,7 @@ func (s *IntraBlockState) AddStylusPages(new uint16) (uint16, uint16) {
 	return open, ever
 }
 
+// TODO arbitrum - not used in og nitro as well
 func (s *IntraBlockState) AddStylusPagesEver(new uint16) {
 	s.arbExtraData.everWasmPages = common.SaturatingUAdd(s.arbExtraData.everWasmPages, new)
 }
