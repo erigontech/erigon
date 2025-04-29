@@ -114,7 +114,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 	if err := cfg.db.View(ctx, func(tx kv.Tx) (err error) {
 		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 		stepSize := ac.StepSize()
-		txNum := ac.DbgDomain(kv.AccountsDomain).FirstStepNotInFiles() * stepSize
+		txNum := ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx)
 		var ok bool
 		ok, endBlock, err = txNumsReader.FindBlockNum(tx, txNum)
 		if err != nil {
