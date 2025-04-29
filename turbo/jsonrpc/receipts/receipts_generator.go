@@ -91,6 +91,8 @@ func (g *Generator) LogStats() {
 	if g == nil || !g.receiptsCacheTrace {
 		return
 	}
+	//m := g.receiptsCache.Metrics()
+	//log.Warn("[dbg] ReceiptsCache", "hit", m.Hits, "total", m.Hits+m.Misses, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", receiptsCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
 }
 
 func (g *Generator) GetCachedReceipts(ctx context.Context, blockHash common.Hash) (types.Receipts, bool) {
@@ -146,7 +148,16 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	txnHash := txn.Hash()
 
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
-	receiptFromDB, ok, err := rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, uint32(index), txnHash, g.txNumReader)
+	receiptFromDB, ok, err := rawdb.ReadReceiptCache(tx, blockNum, blockHash, uint32(index), txnHash)
+	if err != nil {
+		return nil, err
+	}
+	if ok && receiptFromDB != nil && !dbg.AssertEnabled {
+		return receiptFromDB, nil
+	}
+
+	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
+	receiptFromDB, ok, err = rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, uint32(index), txnHash, g.txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -201,8 +212,18 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
 	blockHash := block.Hash()
+
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
-	receiptsFromDB, err := rawdb.ReadReceiptsCacheV2(tx, block, g.txNumReader)
+	receiptsFromDB, err := rawdb.ReadReceiptsCache(tx, block)
+	if err != nil {
+		return nil, err
+	}
+	if len(receiptsFromDB) > 0 && !dbg.AssertEnabled {
+		return receiptsFromDB, nil
+	}
+
+	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
+	receiptsFromDB, err = rawdb.ReadReceiptsCacheV2(tx, block, g.txNumReader)
 	if err != nil {
 		return nil, err
 	}
