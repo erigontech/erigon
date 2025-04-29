@@ -1248,7 +1248,7 @@ func (r RangesV3) String() string {
 	ss := []string{}
 	for _, d := range &r.domain {
 		if d.any() {
-			ss = append(ss, fmt.Sprintf("%s(%s)", d.name, d.String()))
+			ss = append(ss, fmt.Sprintf("%s(%s)", d.name.String(), d.String()))
 		}
 	}
 
