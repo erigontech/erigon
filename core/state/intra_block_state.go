@@ -859,7 +859,7 @@ func (sdb *IntraBlockState) Snapshot() int {
 	id := sdb.nextRevisionID
 	sdb.nextRevisionID++
 	sdb.validRevisions = append(sdb.validRevisions,
-		revision{id, sdb.journal.length(), new(uint256.Int).Set(sdb.arbExtraData.unexpectedBalanceDelta)})
+		revision{id, sdb.journal.length(), sdb.arbExtraData.unexpectedBalanceDelta.Clone()})
 	return id
 }
 
@@ -874,7 +874,8 @@ func (sdb *IntraBlockState) RevertToSnapshot(revid int) {
 	}
 	revision := sdb.validRevisions[idx]
 	snapshot := revision.journalIndex
-	fmt.Printf("Reverting to snapshot %d: set unexpected delta %d -> %d\n", revid, sdb.arbExtraData.unexpectedBalanceDelta, revision.unexpectedBalanceDelta)
+	fmt.Printf("Reverting to snapshot %d: set unexpected delta %s -> %s (d=%s)\n", revid, sdb.arbExtraData.unexpectedBalanceDelta, revision.unexpectedBalanceDelta,
+		uint256.NewInt(0).Sub(sdb.arbExtraData.unexpectedBalanceDelta, revision.unexpectedBalanceDelta))
 	if sdb.arbExtraData != nil {
 		if sdb.arbExtraData.unexpectedBalanceDelta == nil {
 			sdb.arbExtraData.unexpectedBalanceDelta = uint256.NewInt(0)
