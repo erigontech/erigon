@@ -1206,12 +1206,10 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 			tables = append(tables, db.Debug().DomainTables(kv.RCacheDomain)...)
 		}
 		if cfg.Produce.LogIndex {
-			tables = append(tables, db.Debug().InvertedIdxTables(kv.LogAddrIdx)...)
-			tables = append(tables, db.Debug().InvertedIdxTables(kv.LogTopicIdx)...)
+			tables = append(tables, db.Debug().InvertedIdxTables(kv.LogAddrIdx, kv.LogTopicIdx)...)
 		}
 		if cfg.Produce.TraceIndex {
-			tables = append(tables, db.Debug().InvertedIdxTables(kv.TracesFromIdx)...)
-			tables = append(tables, db.Debug().InvertedIdxTables(kv.TracesToIdx)...)
+			tables = append(tables, db.Debug().InvertedIdxTables(kv.TracesFromIdx, kv.TracesToIdx)...)
 		}
 		if err := backup.ClearTables(ctx, tx, tables...); err != nil {
 			return err
