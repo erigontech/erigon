@@ -810,7 +810,7 @@ func String2InvertedIdx(in string) (InvertedIdx, error) {
 	case "TracesToIdx":
 		return TracesToIdx, nil
 	default:
-		return InvertedIdx(MaxUint16), fmt.Errorf("unknown inverted index name: %s", in)
+		return "", fmt.Errorf("unknown inverted index name: %s", in)
 	}
 }
 
