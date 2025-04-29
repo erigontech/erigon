@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   sync-from-scratch-test:
-    runs-on: [self-hosted, qa]
+    runs-on: [self-hosted, qa, long-running]
     timeout-minutes: 740  # 12 hours plus 20 minutes
     strategy:
       fail-fast: false
