@@ -1192,17 +1192,6 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	genesis := core.GenesisBlockByChainName(chain)
 	br, _ := blocksIO(db, logger)
 	cfg := stagedsync.StageCustomTraceCfg(strings.Split(produce, ","), db, dirs, br, chainConfig, engine, genesis, &syncCfg)
-	var producingDomain kv.Domain
-	if cfg.Produce.ReceiptDomain {
-		producingDomain = kv.RCacheDomain
-	} else if cfg.Produce.RCacheDomain {
-		producingDomain = kv.RCacheDomain
-	} else {
-		panic("assert: which domain need to produce?")
-	}
-
-	fmt.Printf("[dbg] engine: %T\n", engine)
-
 	if reset {
 		tx, err := db.BeginTemporalRw(ctx)
 		if err != nil {
