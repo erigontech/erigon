@@ -150,6 +150,8 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 		return nil, nil
 	}
 
+	txIncarnation := task.Version().Incarnation
+
 	// we want to force a re-read of the conbiase & burnt contract address
 	// if thay where referenced by the tx
 	delete(result.TxIn, result.Coinbase)
@@ -159,7 +161,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 	ibs := state.New(versionedReader)
 	ibs.SetTrace(task.execTask.Task.(*exec.TxTask).Trace)
 	ibs.SetTxContext(task.Version().BlockNum, txIndex)
-	ibs.SetVersion(task.version.Incarnation)
+	ibs.SetVersion(txIncarnation)
 	ibs.ApplyVersionedWrites(result.TxOut)
 	versionedReader.SetStateReader(stateReader)
 
@@ -188,7 +190,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 
 		if traceTx(blockNum, txIndex) {
 			coinbaseBalance, _ := ibs.GetBalance(result.Coinbase)
-			fmt.Println(blockNum, fmt.Sprintf("(%d.%d)", txIndex, txTask.Version().Incarnation), "CB", fmt.Sprintf("%x", result.Coinbase), fmt.Sprintf("%d", &coinbaseBalance))
+			fmt.Println(blockNum, fmt.Sprintf("(%d.%d)", txIndex, task.Version().Incarnation), "CB", fmt.Sprintf("%x", result.Coinbase), fmt.Sprintf("%d", &coinbaseBalance))
 		}
 
 		ibs.AddBalance(result.Coinbase, result.ExecutionResult.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee)
@@ -222,6 +224,17 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 	if txTask.Config.IsByzantium(blockNum) {
 		ibs.FinalizeTx(txTask.Config.Rules(txTask.BlockNumber(), txTask.BlockTime()), stateWriter)
 	}
+
+	var tracePrefix string
+	if dbg.TraceTransactionIO && traceTx(blockNum, txIndex) {
+		tracePrefix = fmt.Sprintf("%d (%d.%d)", blockNum, txIndex, txIncarnation)
+		vm.SetTrace(true)
+	}
+	
+	// we need to flush the finalized writes to the version map so
+	// they are taken into account by subsequent transactions
+	vm.FlushVersionedWrites(ibs.VersionedWrites(true), true, tracePrefix)
+	vm.SetTrace(false)
 
 	// Create a new receipt for the transaction, storing the intermediate root and gas used by the tx.
 	result.Receipt = &types.Receipt{
