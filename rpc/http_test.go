@@ -207,3 +207,73 @@ func TestHTTPPeerInfo(t *testing.T) {
 		t.Errorf("wrong HTTP.Origin %q", info.HTTP.UserAgent)
 	}
 }
+
+// This checks that maxRequestContentLength is not applied to the response of a request.
+func BenchmarkHTTPRespBodyUnlimited(b *testing.B) {
+	if testing.Short() {
+		b.Skip()
+	}
+
+	logger := log.New()
+	const respLength = maxRequestContentLength * 3
+
+	s := NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, true, logger, 100)
+	defer s.Stop()
+	if err := s.RegisterName("test", largeRespService{respLength}); err != nil {
+		b.Fatal(err)
+	}
+	ts := httptest.NewServer(s)
+	defer ts.Close()
+
+	c, err := DialHTTP(ts.URL, logger)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer c.Close()
+
+	var r string
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := c.Call(&r, "test_largeResp"); err != nil {
+			b.Fatal(err)
+		}
+		if len(r) != respLength {
+			b.Fatalf("response has wrong length %d, want %d", len(r), respLength)
+		}
+	}
+}
+
+func BenchmarkHTTPRespBodyUnlimitedNew(b *testing.B) {
+	if testing.Short() {
+		b.Skip()
+	}
+
+	logger := log.New()
+	const respLength = maxRequestContentLength * 3
+
+	s := NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, true, logger, 100)
+	defer s.Stop()
+	s.New = true
+	RegisterName[struct{}, string](s, "test_largeResp", func(ctx context.Context, _ struct{}) (string, error) {
+		return largeRespService{respLength}.LargeResp(), nil
+	})
+	ts := httptest.NewServer(s)
+	defer ts.Close()
+
+	c, err := DialHTTP(ts.URL, logger)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer c.Close()
+	c.New = true
+	var r string
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := c.Call(&r, "test_largeResp"); err != nil {
+			b.Fatal(err)
+		}
+		if len(r) != respLength {
+			b.Fatalf("response has wrong length %d, want %d", len(r), respLength)
+		}
+	}
+}
