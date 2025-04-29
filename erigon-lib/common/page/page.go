@@ -153,7 +153,7 @@ type Reader struct {
 	kLens, vLens, data []byte
 	kOffset, vOffset   uint32
 
-	snappyBuf []byte
+	pageCompressionBuf []byte
 }
 
 func FromBytes(buf []byte, snappyEnabled bool) *Reader {
@@ -164,7 +164,7 @@ func FromBytes(buf []byte, snappyEnabled bool) *Reader {
 
 func (r *Reader) Reset(v []byte, snappyEnabled bool) (n int) {
 	var err error
-	r.snappyBuf, v, err = compress.DecodeSnappyIfNeed(r.snappyBuf, v, snappyEnabled)
+	r.pageCompressionBuf, v, err = compress.DecodeZstdIfNeed(r.pageCompressionBuf, v, snappyEnabled)
 	if err != nil {
 		panic(fmt.Errorf("len(v): %d, %w", len(v), err))
 	}
