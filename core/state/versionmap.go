@@ -310,7 +310,7 @@ func (mvr ReadResult) Status() int {
 	return MVReadResultNone
 }
 
-func ValidateVersion(txIdx int, lastIO *VersionedIO, versionMap *VersionMap, coinbase libcommon.Address, checkVersion func(source ReadSource, readVersion, writeVersion Version) bool) (valid bool) {
+func ValidateVersion(txIdx int, lastIO *VersionedIO, versionMap *VersionMap, checkVersion func(source ReadSource, readVersion, writeVersion Version) bool) (valid bool) {
 	valid = true
 
 	if readSet := lastIO.ReadSet(txIdx); readSet != nil {
@@ -318,9 +318,6 @@ func ValidateVersion(txIdx int, lastIO *VersionedIO, versionMap *VersionMap, coi
 			rr := versionMap.Read(vr.Address, vr.Path, vr.Key, txIdx)
 			switch rr.Status() {
 			case MVReadResultDone:
-				if vr.Address == coinbase {
-					fmt.Println("CB", vr.Address, AccountKey{vr.Path, vr.Key}.String(), vr.Source.VersionedString(vr.Version))
-				}
 				valid = checkVersion(vr.Source, vr.Version, rr.Version())
 			case MVReadResultDependency:
 				valid = false
