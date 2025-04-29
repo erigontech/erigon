@@ -240,8 +240,8 @@ func toCallArg(msg ethereum.CallMsg) interface{} {
 	if msg.FeeCap != nil {
 		arg["maxFeePerGas"] = (*hexutil.Big)(msg.FeeCap.ToBig())
 	}
-	if msg.Tip != nil {
-		arg["maxPriorityFeePerGas"] = (*hexutil.Big)(msg.Tip.ToBig())
+	if msg.TipCap != nil {
+		arg["maxPriorityFeePerGas"] = (*hexutil.Big)(msg.TipCap.ToBig())
 	}
 	if msg.AccessList != nil {
 		arg["accessList"] = msg.AccessList
