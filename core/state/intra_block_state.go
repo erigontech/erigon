@@ -497,10 +497,7 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 			sdb.tracingHooks.OnBalanceChange(addr, prev, new(uint256.Int).Add(prev, amount), reason)
 		}
 
-		sdb.arbExtraData.unexpectedBalanceDelta.Add(
-			sdb.arbExtraData.unexpectedBalanceDelta,
-			amount,
-		)
+		sdb.arbExtraData.unexpectedBalanceDelta.Add(sdb.arbExtraData.unexpectedBalanceDelta, amount)
 
 		bi.increase.Add(&bi.increase, amount)
 		bi.count++
@@ -511,10 +508,7 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 	if err != nil {
 		return err
 	}
-	sdb.arbExtraData.unexpectedBalanceDelta.Add(
-		sdb.arbExtraData.unexpectedBalanceDelta,
-		amount,
-	)
+	sdb.arbExtraData.unexpectedBalanceDelta.Add(sdb.arbExtraData.unexpectedBalanceDelta, amount)
 	stateObject.AddBalance(amount, reason)
 	return nil
 }
@@ -531,10 +525,7 @@ func (sdb *IntraBlockState) SubBalance(addr libcommon.Address, amount *uint256.I
 		return err
 	}
 	if stateObject != nil {
-		sdb.arbExtraData.unexpectedBalanceDelta.Sub(
-			sdb.arbExtraData.unexpectedBalanceDelta,
-			amount,
-		)
+		sdb.arbExtraData.unexpectedBalanceDelta.Sub(sdb.arbExtraData.unexpectedBalanceDelta, amount)
 		stateObject.SubBalance(amount, reason)
 	}
 	return nil
@@ -552,10 +543,8 @@ func (sdb *IntraBlockState) SetBalance(addr libcommon.Address, amount *uint256.I
 				amount = uint256.NewInt(0)
 			}
 			prevBalance := stateObject.Balance()
-			sdb.arbExtraData.unexpectedBalanceDelta.Add(
-				sdb.arbExtraData.unexpectedBalanceDelta, amount)
-			sdb.arbExtraData.unexpectedBalanceDelta.Sub(
-				sdb.arbExtraData.unexpectedBalanceDelta, prevBalance)
+			sdb.arbExtraData.unexpectedBalanceDelta.Add(sdb.arbExtraData.unexpectedBalanceDelta, amount)
+			sdb.arbExtraData.unexpectedBalanceDelta.Sub(sdb.arbExtraData.unexpectedBalanceDelta, prevBalance)
 		}
 		stateObject.SetBalance(amount, reason)
 	}
@@ -567,8 +556,7 @@ func (sdb *IntraBlockState) ExpectBalanceBurn(amount *uint256.Int) {
 	if amount.Sign() < 0 {
 		panic(fmt.Sprintf("ExpectBalanceBurn called with negative amount %v", amount))
 	}
-	sdb.arbExtraData.unexpectedBalanceDelta.Add(
-		sdb.arbExtraData.unexpectedBalanceDelta, amount)
+	sdb.arbExtraData.unexpectedBalanceDelta.Add(sdb.arbExtraData.unexpectedBalanceDelta, amount)
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
@@ -670,8 +658,7 @@ func (sdb *IntraBlockState) Selfdestruct(addr libcommon.Address) (bool, error) {
 	}
 
 	stateObject.markSelfdestructed()
-	sdb.arbExtraData.unexpectedBalanceDelta.Sub(
-		sdb.arbExtraData.unexpectedBalanceDelta, &stateObject.data.Balance)
+	sdb.arbExtraData.unexpectedBalanceDelta.Sub(sdb.arbExtraData.unexpectedBalanceDelta, &stateObject.data.Balance)
 	if bi, exist := sdb.balanceInc[addr]; exist && bi.isEscrow {
 		fmt.Printf("ESCROW unprotected by selfdestruct %x\n", addr)
 		bi.isEscrow = false
@@ -1021,6 +1008,7 @@ func (sdb *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter Sta
 			}
 			sdb.arbExtraData.activatedWasms = make(map[libcommon.Hash]ActivatedWasm)
 		}
+		sdb.arbExtraData.unexpectedBalanceDelta.Clear()
 	}
 	return sdb.MakeWriteSet(chainRules, stateWriter)
 }

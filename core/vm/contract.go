@@ -75,16 +75,6 @@ type Contract struct {
 }
 
 // arbitrum
-func (c *Contract) BurnGas(amount uint64) error {
-	if c.Gas < amount {
-		c.Gas = 0
-		return ErrOutOfGas
-	}
-	c.Gas -= amount
-	return nil
-}
-
-// arbitrum
 func (c *Contract) IsDelegateOrCallcode() bool {
 	return c.delegateOrCallcode
 }
