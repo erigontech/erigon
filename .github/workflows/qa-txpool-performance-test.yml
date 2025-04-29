@@ -11,7 +11,7 @@ on:
 
 jobs:
   assertoor_test:
-    runs-on: [self-hosted, qa]
+    runs-on: ubuntu-latest
 
     steps:
       - name: Fast checkout git repository
@@ -32,20 +32,10 @@ jobs:
         id: kurtosis_test
         uses: ethpandaops/kurtosis-assertoor-github-action@v1
         with:
-          enclave_name: "kurtosis-run1-${{ github.run_id }}"
-          ethereum_package_args: ".github/workflows/kurtosis/txpool-assertoor.io"
-          kurtosis_extra_args: --verbosity detailed --cli-log-level trace
-          persistent_logs: "true"
-
-      - name: Save test overview to file
-        run: echo '${{ steps.kurtosis_test.outputs.test_overview }}' > test_overview.json
-
-      - name: Upload test overview as artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test_overview
-          path: test_overview.json
+            enclave_name: "kurtosis-run1-${{ github.run_id }}"
+            ethereum_package_args: ".github/workflows/kurtosis/txpool-assertoor.io"
+            kurtosis_extra_args: --verbosity detailed --cli-log-level trace
+            persistent_logs: "true"
 
       # todo: save result on mongodb
 
