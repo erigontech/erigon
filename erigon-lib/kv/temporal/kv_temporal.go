@@ -323,5 +323,5 @@ func (tx *Tx) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv.D
 	return tx.aggtx.Unwind(ctx, tx.MdbxTx, txNumUnwindTo, changeset)
 }
 func (tx *Tx) ResetTables(ctx context.Context, domains ...kv.Domain) error {
-	return tx.aggtx.DbgResetTables(ctx, tx.MdbxTx, domains)
+	return tx.aggtx.DbgResetTables(ctx, tx.MdbxTx, domains...)
 }

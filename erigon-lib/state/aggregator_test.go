@@ -1548,7 +1548,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	buckets, err := rwTx.ListBuckets()
+	buckets, err := rwTx.ListTables()
 	require.NoError(t, err)
 	for i, b := range buckets {
 		if strings.Contains(strings.ToLower(b), kv.CommitmentDomain.String()) {
@@ -1556,7 +1556,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 			require.NoError(t, err)
 			t.Logf("cleaned table #%d %s: %d keys", i, b, size)
 
-			err = rwTx.ClearBucket(b)
+			err = rwTx.ClearTable(b)
 			require.NoError(t, err)
 		}
 	}

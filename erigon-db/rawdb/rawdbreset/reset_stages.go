@@ -109,13 +109,13 @@ func ResetBorHeimdall(ctx context.Context, tx kv.RwTx, db kv.RwDB) error {
 		}
 		defer tx.Rollback()
 	}
-	if err := tx.ClearBucket(kv.BorEventNums); err != nil {
+	if err := tx.ClearTable(kv.BorEventNums); err != nil {
 		return err
 	}
-	if err := tx.ClearBucket(kv.BorEvents); err != nil {
+	if err := tx.ClearTable(kv.BorEvents); err != nil {
 		return err
 	}
-	if err := tx.ClearBucket(kv.BorSpans); err != nil {
+	if err := tx.ClearTable(kv.BorSpans); err != nil {
 		return err
 	}
 	if err := clearStageProgress(tx, stages.BorHeimdall); err != nil {
@@ -140,7 +140,7 @@ func ResetPolygonSync(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services
 	}
 
 	for _, table := range tables {
-		if err := tx.ClearBucket(table); err != nil {
+		if err := tx.ClearTable(table); err != nil {
 			return err
 		}
 	}
@@ -180,7 +180,7 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) (err error) {
 }
 
 func ResetTxLookup(tx kv.RwTx) error {
-	if err := tx.ClearBucket(kv.TxLookup); err != nil {
+	if err := tx.ClearTable(kv.TxLookup); err != nil {
 		return err
 	}
 	if err := stages.SaveStageProgress(tx, stages.TxLookup, 0); err != nil {

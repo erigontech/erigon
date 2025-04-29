@@ -234,7 +234,7 @@ func (at *AggregatorRoTx) DbgResetTables(ctx context.Context, tx kv.RwTx, domain
 	for _, domain := range domains {
 		for _, tbl := range at.d[domain].Tables() {
 			at.a.logger.Info("Clear", "table", tbl)
-			if err := tx.ClearBucket(tbl); err != nil {
+			if err := tx.ClearTable(tbl); err != nil {
 				return err
 			}
 		}
