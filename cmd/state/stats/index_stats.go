@@ -28,7 +28,7 @@ import (
 	"strings"
 	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
@@ -61,7 +61,7 @@ func IndexStats(chaindata string, indexBucket string, statsFile string) error {
 	defer tx.Rollback()
 	if err = tx.ForEach(indexBucket, []byte{}, func(k, v []byte) error {
 		if i%100_000 == 0 {
-			fmt.Printf("Processed %s, %s\n", libcommon.PrettyCounter(i), time.Since(startTime))
+			fmt.Printf("Processed %s, %s\n", common.PrettyCounter(i), time.Since(startTime))
 		}
 		if bytes.Equal(k[:lenOfKey], prevKey) {
 			count++
@@ -70,27 +70,27 @@ func IndexStats(chaindata string, indexBucket string, statsFile string) error {
 				added = true
 			}
 			if count > 10 {
-				more10index[string(libcommon.Copy(k[:lenOfKey]))] = count
+				more10index[string(common.Copy(k[:lenOfKey]))] = count
 			}
 			if count > 50 {
-				more50index[string(libcommon.Copy(k[:lenOfKey]))] = count
+				more50index[string(common.Copy(k[:lenOfKey]))] = count
 			}
 			if count > 100 {
-				more100index[string(libcommon.Copy(k[:lenOfKey]))] = count
+				more100index[string(common.Copy(k[:lenOfKey]))] = count
 			}
 			if count > 200 {
-				more200index[string(libcommon.Copy(k[:lenOfKey]))] = count
+				more200index[string(common.Copy(k[:lenOfKey]))] = count
 			}
 			if count > 500 {
-				more500index[string(libcommon.Copy(k[:lenOfKey]))] = count
+				more500index[string(common.Copy(k[:lenOfKey]))] = count
 			}
 			if count > 1000 {
-				more1000index[string(libcommon.Copy(k[:lenOfKey]))] = count
+				more1000index[string(common.Copy(k[:lenOfKey]))] = count
 			}
 		} else {
 			added = false
 			count = 1
-			prevKey = libcommon.Copy(k[:length.Addr])
+			prevKey = common.Copy(k[:length.Addr])
 		}
 
 		return nil
@@ -127,9 +127,9 @@ func IndexStats(chaindata string, indexBucket string, statsFile string) error {
 				Hash         string
 				NumOfIndexes uint64
 			}{
-				Address:      libcommon.BytesToAddress(p).String(),
+				Address:      common.BytesToAddress(p).String(),
 				NumOfIndexes: v,
-				Hash:         libcommon.Bytes2Hex([]byte(hash)),
+				Hash:         common.Bytes2Hex([]byte(hash)),
 			})
 
 		}

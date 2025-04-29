@@ -29,7 +29,7 @@ import (
 	"github.com/gballet/go-verkle"
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
 )
 
@@ -71,12 +71,12 @@ func (tr *TRand) RandBytes(size int) []byte {
 	return arr
 }
 
-func (tr *TRand) RandAddress() libcommon.Address {
-	return libcommon.Address(tr.RandBytes(20))
+func (tr *TRand) RandAddress() common.Address {
+	return common.Address(tr.RandBytes(20))
 }
 
-func (tr *TRand) RandHash() libcommon.Hash {
-	return libcommon.Hash(tr.RandBytes(32))
+func (tr *TRand) RandHash() common.Hash {
+	return common.Hash(tr.RandBytes(32))
 }
 
 func (tr *TRand) RandBoolean() bool {
@@ -115,12 +115,12 @@ func (tr *TRand) RandHeader() *Header {
 	wHash := tr.RandHash()
 	pHash := tr.RandHash()
 	return &Header{
-		ParentHash:            tr.RandHash(),                              // libcommon.Hash
-		UncleHash:             tr.RandHash(),                              // libcommon.Hash
-		Coinbase:              tr.RandAddress(),                           // libcommon.Address
-		Root:                  tr.RandHash(),                              // libcommon.Hash
-		TxHash:                tr.RandHash(),                              // libcommon.Hash
-		ReceiptHash:           tr.RandHash(),                              // libcommon.Hash
+		ParentHash:            tr.RandHash(),                              // common.Hash
+		UncleHash:             tr.RandHash(),                              // common.Hash
+		Coinbase:              tr.RandAddress(),                           // common.Address
+		Root:                  tr.RandHash(),                              // common.Hash
+		TxHash:                tr.RandHash(),                              // common.Hash
+		ReceiptHash:           tr.RandHash(),                              // common.Hash
 		Bloom:                 tr.RandBloom(),                             // Bloom
 		Difficulty:            tr.RandBig(),                               // *big.Int
 		Number:                tr.RandBig(),                               // *big.Int
@@ -128,13 +128,13 @@ func (tr *TRand) RandHeader() *Header {
 		GasUsed:               *tr.RandUint64(),                           // uint64
 		Time:                  *tr.RandUint64(),                           // uint64
 		Extra:                 tr.RandBytes(tr.RandIntInRange(128, 1024)), // []byte
-		MixDigest:             tr.RandHash(),                              // libcommon.Hash
+		MixDigest:             tr.RandHash(),                              // common.Hash
 		Nonce:                 BlockNonce(tr.RandBytes(8)),                // BlockNonce
 		BaseFee:               tr.RandBig(),                               // *big.Int
-		WithdrawalsHash:       &wHash,                                     // *libcommon.Hash
+		WithdrawalsHash:       &wHash,                                     // *common.Hash
 		BlobGasUsed:           tr.RandUint64(),                            // *uint64
 		ExcessBlobGas:         tr.RandUint64(),                            // *uint64
-		ParentBeaconBlockRoot: &pHash,                                     //*libcommon.Hash
+		ParentBeaconBlockRoot: &pHash,                                     //*common.Hash
 	}
 }
 
@@ -162,12 +162,12 @@ func (tr *TRand) RandHeaderReflectAllFields(skipFields ...string) *Header {
 		}
 
 		switch field.Type() {
-		case reflect.TypeOf(libcommon.Hash{}):
+		case reflect.TypeOf(common.Hash{}):
 			field.Set(reflect.ValueOf(tr.RandHash()))
-		case reflect.TypeOf(&libcommon.Hash{}):
+		case reflect.TypeOf(&common.Hash{}):
 			randHash := tr.RandHash()
 			field.Set(reflect.ValueOf(&randHash))
-		case reflect.TypeOf(libcommon.Address{}):
+		case reflect.TypeOf(common.Address{}):
 			field.Set(reflect.ValueOf(tr.RandAddress()))
 		case reflect.TypeOf(Bloom{}):
 			field.Set(reflect.ValueOf(tr.RandBloom()))
@@ -194,7 +194,7 @@ func (tr *TRand) RandHeaderReflectAllFields(skipFields ...string) *Header {
 
 func (tr *TRand) RandAccessTuple() AccessTuple {
 	n := tr.RandIntInRange(1, 5)
-	sk := make([]libcommon.Hash, n)
+	sk := make([]common.Hash, n)
 	for i := 0; i < n; i++ {
 		sk[i] = tr.RandHash()
 	}
@@ -234,7 +234,7 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 	} else {
 		txType = _type
 	}
-	var to *libcommon.Address
+	var to *common.Address
 	if tr.RandIntInRange(0, 10)%2 == 0 {
 		_to := tr.RandAddress()
 		to = &_to
@@ -327,8 +327,8 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 	}
 }
 
-func (tr *TRand) RandHashes(size int) []libcommon.Hash {
-	hashes := make([]libcommon.Hash, size)
+func (tr *TRand) RandHashes(size int) []common.Hash {
+	hashes := make([]common.Hash, size)
 	for i := 0; i < size; i++ {
 		hashes[i] = tr.RandHash()
 	}

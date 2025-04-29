@@ -19,7 +19,7 @@ package types
 import (
 	"crypto/sha256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 const DepositRequestType byte = 0x00
@@ -46,7 +46,7 @@ func (f *FlatRequest) Encode() []byte { return append([]byte{f.Type}, f.RequestD
 
 type FlatRequests []FlatRequest
 
-func (r FlatRequests) Hash() *libcommon.Hash {
+func (r FlatRequests) Hash() *common.Hash {
 	if r == nil {
 		return nil
 	}
@@ -58,7 +58,7 @@ func (r FlatRequests) Hash() *libcommon.Hash {
 		hi := sha256.Sum256(append([]byte{t.Type}, r[i].RequestData...))
 		sha.Write(hi[:])
 	}
-	h := libcommon.BytesToHash(sha.Sum(nil))
+	h := common.BytesToHash(sha.Sum(nil))
 	return &h
 }
 

@@ -30,7 +30,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -49,8 +49,8 @@ import (
 type Config struct {
 	ChainConfig *chain.Config
 	Difficulty  *big.Int
-	Origin      libcommon.Address
-	Coinbase    libcommon.Address
+	Origin      common.Address
+	Coinbase    common.Address
 	BlockNumber *big.Int
 	Time        *big.Int
 	GasLimit    uint64
@@ -63,7 +63,7 @@ type Config struct {
 	State     *state.IntraBlockState
 	r         state.StateReader
 	w         state.StateWriter
-	GetHashFn func(n uint64) libcommon.Hash
+	GetHashFn func(n uint64) common.Hash
 }
 
 // sets defaults on the config
@@ -109,8 +109,8 @@ func setDefaults(cfg *Config) {
 		cfg.BlockNumber = new(big.Int)
 	}
 	if cfg.GetHashFn == nil {
-		cfg.GetHashFn = func(n uint64) libcommon.Hash {
-			return libcommon.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String())))
+		cfg.GetHashFn = func(n uint64) common.Hash {
+			return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String())))
 		}
 	}
 }
@@ -156,7 +156,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		cfg.State = state.New(cfg.r)
 	}
 	var (
-		address = libcommon.BytesToAddress([]byte("contract"))
+		address = common.BytesToAddress([]byte("contract"))
 		vmenv   = NewEnv(cfg)
 		sender  = vm.AccountRef(cfg.Origin)
 		rules   = vmenv.ChainRules()
@@ -167,11 +167,11 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 	cfg.State.SetCode(address, code)
 	// Call the code with the given configuration.
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
-		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, libcommon.Address{})
+		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, common.Address{})
 	}
 	ret, _, err := vmenv.Call(
 		sender,
-		libcommon.BytesToAddress([]byte("contract")),
+		common.BytesToAddress([]byte("contract")),
 		input,
 		cfg.GasLimit,
 		cfg.Value,
@@ -185,7 +185,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 }
 
 // Create executes the code using the EVM create method
-func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, libcommon.Address, uint64, error) {
+func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, uint64, error) {
 	if cfg == nil {
 		cfg = new(Config)
 	}
@@ -246,7 +246,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, libcommon.Addres
 //
 // Call, unlike Execute, requires a config and also requires the State field to
 // be set.
-func Call(address libcommon.Address, input []byte, cfg *Config) ([]byte, uint64, error) {
+func Call(address common.Address, input []byte, cfg *Config) ([]byte, uint64, error) {
 	setDefaults(cfg)
 
 	vmenv := NewEnv(cfg)

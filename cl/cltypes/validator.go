@@ -19,7 +19,7 @@ package cltypes
 import (
 	"encoding/json"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 
@@ -34,10 +34,10 @@ const (
 )
 
 type DepositData struct {
-	PubKey                libcommon.Bytes48 `json:"pubkey"`
-	WithdrawalCredentials libcommon.Hash    `json:"withdrawal_credentials"`
-	Amount                uint64            `json:"amount,string"`
-	Signature             libcommon.Bytes96 `json:"signature"`
+	PubKey                common.Bytes48 `json:"pubkey"`
+	WithdrawalCredentials common.Hash    `json:"withdrawal_credentials"`
+	Amount                uint64         `json:"amount,string"`
+	Signature             common.Bytes96 `json:"signature"`
 }
 
 func (d *DepositData) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -129,8 +129,8 @@ func (*VoluntaryExit) EncodingSizeSSZ() int {
 }
 
 type SignedVoluntaryExit struct {
-	VoluntaryExit *VoluntaryExit    `json:"message"`
-	Signature     libcommon.Bytes96 `json:"signature"`
+	VoluntaryExit *VoluntaryExit `json:"message"`
+	Signature     common.Bytes96 `json:"signature"`
 }
 
 func (e *SignedVoluntaryExit) EncodeSSZ(dst []byte) ([]byte, error) {

@@ -21,7 +21,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/abi"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/holiman/uint256"
@@ -34,7 +34,7 @@ const (
 	DepositLogLen            = 576
 )
 
-var depositTopic = libcommon.HexToHash("0x649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")
+var depositTopic = common.HexToHash("0x649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")
 
 var (
 	// DepositABI is an ABI instance of beacon chain deposit events.
@@ -115,8 +115,8 @@ func unpackDepositLog(data []byte) ([]byte, error) {
 
 // ParseDepositLogs extracts the EIP-6110 deposit values from logs emitted by
 // BeaconDepositContract and returns a FlatRequest object ptr
-func ParseDepositLogs(logs []*types.Log, depositContractAddress libcommon.Address) (*types.FlatRequest, error) {
-	if depositContractAddress == (libcommon.Address{}) {
+func ParseDepositLogs(logs []*types.Log, depositContractAddress common.Address) (*types.FlatRequest, error) {
+	if depositContractAddress == (common.Address{}) {
 		log.Warn("Error in ParseDepositLogs - depositContractAddress is 0x0")
 	}
 	reqData := make([]byte, 0, len(logs)*types.DepositRequestDataLen)

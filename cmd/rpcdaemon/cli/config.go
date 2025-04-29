@@ -38,7 +38,7 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/paths"
@@ -111,7 +111,7 @@ type HeimdallReader interface {
 
 type BridgeReader interface {
 	Events(ctx context.Context, blockNum uint64) ([]*types.Message, error)
-	EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error)
+	EventTxnLookup(ctx context.Context, borTxHash common.Hash) (uint64, bool, error)
 	Close()
 }
 
@@ -280,7 +280,7 @@ func checkDbCompatibility(ctx context.Context, db kv.RoDB) error {
 	defer compatTx.Rollback()
 	major, minor, patch, ok, err := rawdb.ReadDBSchemaVersion(compatTx)
 	if err != nil {
-		return fmt.Errorf("read version for DB schema compability check: %w", compatErr)
+		return fmt.Errorf("read version for DB schema compability check: %w", err)
 	}
 	if ok {
 		var compatible bool
@@ -899,7 +899,7 @@ func ObtainJWTSecret(cfg *httpcfg.HttpCfg, logger log.Logger) ([]byte, error) {
 		cfg.JWTSecretPath = "jwt.hex"
 	}
 	if data, err := os.ReadFile(cfg.JWTSecretPath); err == nil {
-		jwtSecret := libcommon.FromHex(strings.TrimSpace(string(data)))
+		jwtSecret := common.FromHex(strings.TrimSpace(string(data)))
 		if len(jwtSecret) == 32 {
 			return jwtSecret, nil
 		}
@@ -1064,15 +1064,15 @@ func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockR
 	return nil
 }
 
-func (e *remoteConsensusEngine) Author(header *types.Header) (libcommon.Address, error) {
+func (e *remoteConsensusEngine) Author(header *types.Header) (common.Address, error) {
 	if err := e.validateEngineReady(); err != nil {
-		return libcommon.Address{}, err
+		return common.Address{}, err
 	}
 
 	return e.engine.Author(header)
 }
 
-func (e *remoteConsensusEngine) IsServiceTransaction(sender libcommon.Address, syscall consensus.SystemCall) bool {
+func (e *remoteConsensusEngine) IsServiceTransaction(sender common.Address, syscall consensus.SystemCall) bool {
 	if err := e.validateEngineReady(); err != nil {
 		panic(err)
 	}
@@ -1152,11 +1152,11 @@ func (e *remoteConsensusEngine) Seal(_ consensus.ChainHeaderReader, _ *types.Blo
 	panic("remoteConsensusEngine.Seal not supported")
 }
 
-func (e *remoteConsensusEngine) SealHash(_ *types.Header) libcommon.Hash {
+func (e *remoteConsensusEngine) SealHash(_ *types.Header) common.Hash {
 	panic("remoteConsensusEngine.SealHash not supported")
 }
 
-func (e *remoteConsensusEngine) CalcDifficulty(_ consensus.ChainHeaderReader, _ uint64, _ uint64, _ *big.Int, _ uint64, _ libcommon.Hash, _ libcommon.Hash, _ uint64) *big.Int {
+func (e *remoteConsensusEngine) CalcDifficulty(_ consensus.ChainHeaderReader, _ uint64, _ uint64, _ *big.Int, _ uint64, _ common.Hash, _ common.Hash, _ uint64) *big.Int {
 	panic("remoteConsensusEngine.CalcDifficulty not supported")
 }
 

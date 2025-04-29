@@ -24,7 +24,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 )
 
@@ -66,8 +66,8 @@ func MakeSlotIdentityPreimage(slot uint64) (*shutter.IdentityPreimage, error) {
 	// zeros as well). This ensures the block identity preimage is always alphanumerically before
 	// any transaction identity preimages, because sender addresses cannot be that small.
 	var buf bytes.Buffer
-	buf.Write(libcommon.BigToHash(libcommon.Big0).Bytes())
-	buf.Write(libcommon.BigToHash(new(big.Int).SetUint64(slot)).Bytes()[12:])
+	buf.Write(common.BigToHash(common.Big0).Bytes())
+	buf.Write(common.BigToHash(new(big.Int).SetUint64(slot)).Bytes()[12:])
 	return shutter.IdentityPreimageFromBytes(buf.Bytes())
 }
 

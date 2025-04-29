@@ -23,7 +23,7 @@ import (
 	"fmt"
 	"strings"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 )
 
@@ -52,7 +52,7 @@ type Event struct {
 	Sig string
 	// ID returns the canonical representation of the event's signature used by the
 	// abi definition to identify event names and types.
-	ID libcommon.Hash
+	ID common.Hash
 }
 
 // NewEvent creates a new Event.
@@ -85,7 +85,7 @@ func NewEvent(name, rawName string, anonymous bool, inputs Arguments) Event {
 
 	str := fmt.Sprintf("event %v(%v)", rawName, strings.Join(names, ", "))
 	sig := fmt.Sprintf("%v(%v)", rawName, strings.Join(types, ","))
-	id := libcommon.BytesToHash(crypto.Keccak256([]byte(sig)))
+	id := common.BytesToHash(crypto.Keccak256([]byte(sig)))
 
 	return Event{
 		Name:      name,

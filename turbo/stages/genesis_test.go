@@ -28,7 +28,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -46,11 +46,11 @@ import (
 func TestSetupGenesis(t *testing.T) {
 	t.Parallel()
 	var (
-		customghash = libcommon.HexToHash("0x89c99d90b79719238d2645c7642f2c9295246e80775b38cfd162b696817fbd50")
+		customghash = common.HexToHash("0x89c99d90b79719238d2645c7642f2c9295246e80775b38cfd162b696817fbd50")
 		customg     = types.Genesis{
 			Config: &chain.Config{ChainID: big.NewInt(1), HomesteadBlock: big.NewInt(3)},
 			Alloc: types.GenesisAlloc{
-				{1}: {Balance: big.NewInt(1), Storage: map[libcommon.Hash]libcommon.Hash{{1}: {1}}},
+				{1}: {Balance: big.NewInt(1), Storage: map[common.Hash]common.Hash{{1}: {1}}},
 			},
 		}
 		oldcustomg = customg
@@ -63,7 +63,7 @@ func TestSetupGenesis(t *testing.T) {
 		fn         func(t *testing.T, db kv.RwDB) (*chain.Config, *types.Block, error)
 		wantConfig *chain.Config
 		name       string
-		wantHash   libcommon.Hash
+		wantHash   common.Hash
 	}{
 		{
 			name: "genesis without ChainConfig",
@@ -174,7 +174,7 @@ func TestSetupGenesis(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			dirs := datadir.New(tmpdir)
-			db, _ := temporaltest.NewTestDB(t, dirs)
+			db := temporaltest.NewTestDB(t, dirs)
 			//cc := tool.ChainConfigFromDB(db)
 			freezingCfg := ethconfig.Defaults.Snapshot
 			//freezingCfg.ChainName = cc.ChainName //TODO: nil-pointer?
@@ -189,7 +189,7 @@ func TestSetupGenesis(t *testing.T) {
 				t.Errorf("%s:\nreturned %v\nwant     %v", test.name, config, test.wantConfig)
 			}
 
-			if test.wantHash == (libcommon.Hash{}) {
+			if test.wantHash == (common.Hash{}) {
 				if genesis != nil {
 					t.Fatalf("%s: returned non-nil genesis block, want nil", test.name)
 				}
@@ -208,7 +208,7 @@ func TestSetupGenesis(t *testing.T) {
 					}
 					return nil
 				}); dbErr != nil {
-					t.Fatal(err)
+					t.Fatal(dbErr)
 				}
 			}
 		})

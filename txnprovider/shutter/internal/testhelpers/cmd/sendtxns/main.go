@@ -26,7 +26,7 @@ import (
 	"strings"
 	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
@@ -82,7 +82,7 @@ func sendTxns(ctx context.Context, logger log.Logger, fromPkFile, fromStr, toStr
 	rpcClient := requests.NewRequestGenerator(url, logger)
 	transactor := testhelpers.NewTransactor(rpcClient, chainId)
 	amount, _ := new(big.Int).SetString(amountStr, 10)
-	to := libcommon.HexToAddress(toStr)
+	to := common.HexToAddress(toStr)
 	count, err := strconv.Atoi(countStr)
 	if err != nil {
 		return err

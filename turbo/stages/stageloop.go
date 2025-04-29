@@ -26,7 +26,7 @@ import (
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/metrics"
@@ -78,7 +78,7 @@ func StageLoop(
 	defer close(waitForDone)
 
 	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync, hook); err != nil {
-		if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
+		if errors.Is(err, common.ErrStopped) || errors.Is(err, context.Canceled) {
 			return
 		}
 
@@ -106,7 +106,7 @@ func StageLoop(
 		err := StageLoopIteration(ctx, db, wrap.NewTxContainer(nil, nil), sync, initialCycle, false, logger, blockReader, hook)
 
 		if err != nil {
-			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
+			if errors.Is(err, common.ErrStopped) || errors.Is(err, context.Canceled) {
 				return
 			}
 
@@ -301,7 +301,7 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 			logCtx = append(logCtx, "mgas/s", mgasPerSec)
 		}
 	}
-	logCtx = append(logCtx, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+	logCtx = append(logCtx, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	logger.Info("Timings (slower than 50ms)", logCtx...)
 	//if len(tableSizes) > 0 {
 	//	logger.Info("Tables", tableSizes...)
@@ -682,8 +682,8 @@ func NewDefaultStages(ctx context.Context,
 	heimdallClient heimdall.Client,
 	heimdallStore heimdall.Store,
 	bridgeStore bridge.Store,
-	recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
-	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address],
+	recents *lru.ARCCache[common.Hash, *bor.Snapshot],
+	signatures *lru.ARCCache[common.Hash, common.Address],
 	logger log.Logger,
 	tracer *tracers.Tracer,
 ) []*stagedsync.Stage {
@@ -736,7 +736,7 @@ func NewPipelineStages(ctx context.Context,
 	// Hence we run it in the test mode.
 	runInTestMode := cfg.ImportMode
 
-	var depositContract libcommon.Address
+	var depositContract common.Address
 	if cfg.Genesis != nil {
 		depositContract = cfg.Genesis.Config.DepositContract
 	}

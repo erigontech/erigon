@@ -90,6 +90,7 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (tdb kv.
 	if opts.GetLabel() != kv.ChainDB {
 		panic(opts.GetLabel())
 	}
+
 	rawDB := opts.MustOpen()
 	if applyMigrations {
 		migrator := migrations.NewMigrator(opts.GetLabel())

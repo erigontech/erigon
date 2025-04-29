@@ -23,7 +23,7 @@ import (
 
 	"github.com/erigontech/secp256k1"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
 )
@@ -46,7 +46,7 @@ type EmptyStep struct {
 	// This message's step number.
 	step uint64
 	// The hash of the most recent block.
-	parentHash libcommon.Hash //     H256
+	parentHash common.Hash //     H256
 }
 
 func (s *EmptyStep) Less(other *EmptyStep) bool {
@@ -92,19 +92,19 @@ func (s *EmptyStep) verify(validators ValidatorSet) (bool, error) { //nolint
 }
 
 // nolint
-func (s *EmptyStep) author() (libcommon.Address, error) {
+func (s *EmptyStep) author() (common.Address, error) {
 	sRlp, err := EmptyStepRlp(s.step, s.parentHash)
 	if err != nil {
-		return libcommon.Address{}, err
+		return common.Address{}, err
 	}
 	message := crypto.Keccak256(sRlp)
 	public, err := secp256k1.RecoverPubkey(message, s.signature)
 	if err != nil {
-		return libcommon.Address{}, err
+		return common.Address{}, err
 	}
 	ecdsa, err := crypto.UnmarshalPubkeyStd(public)
 	if err != nil {
-		return libcommon.Address{}, err
+		return common.Address{}, err
 	}
 	return crypto.PubkeyToAddress(*ecdsa), nil
 }
@@ -141,10 +141,10 @@ func EmptyStepFullRlp(signature []byte, emptyStepRlp []byte) ([]byte, error) {
 	return rlp.EncodeToBytes(A{s: signature, r: emptyStepRlp})
 }
 
-func EmptyStepRlp(step uint64, parentHash libcommon.Hash) ([]byte, error) {
+func EmptyStepRlp(step uint64, parentHash common.Hash) ([]byte, error) {
 	type A struct {
 		s uint64
-		h libcommon.Hash
+		h common.Hash
 	}
 	return rlp.EncodeToBytes(A{s: step, h: parentHash})
 }

@@ -25,6 +25,8 @@ import (
 	"io"
 	"math/bits"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
+
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/erigontech/secp256k1"
 	"github.com/holiman/uint256"
@@ -515,7 +517,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 
 			authority, err := auth.RecoverSigner(bytes.NewBuffer(nil), make([]byte, 32))
 			if err != nil {
-				return 0, fmt.Errorf("%w: recover authorization signer: %s", ErrParseTxn, err) //nolint
+				return 0, fmt.Errorf("%w: recover authorization signer: %s stack: %s", ErrParseTxn, err, dbg.Stack()) //nolint
 			}
 			slot.Authorities = append(slot.Authorities, authority)
 			authPos += authLen

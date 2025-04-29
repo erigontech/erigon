@@ -110,7 +110,7 @@ func TestSentinelBlocksByRange(t *testing.T) {
 	code := make([]byte, 1)
 	_, err = stream.Read(code)
 	require.NoError(t, err)
-	require.Equal(t, code[0], uint8(0))
+	require.Equal(t, uint8(0), code[0])
 
 	var w bytes.Buffer
 	_, err = io.Copy(&w, stream)
@@ -156,7 +156,7 @@ func TestSentinelBlocksByRange(t *testing.T) {
 		// TODO(issues/5884): figure out why there is this extra byte.
 		r.ReadByte()
 	}
-	require.Equal(t, len(responsePacket), len(blocks))
+	require.Len(t, blocks, len(responsePacket))
 	for i := 0; i < len(blocks); i++ {
 		root1, err := responsePacket[i].HashSSZ()
 		require.NoError(t, err)
@@ -219,7 +219,7 @@ func TestSentinelBlocksByRoots(t *testing.T) {
 	code := make([]byte, 1)
 	_, err = stream.Read(code)
 	require.NoError(t, err)
-	require.Equal(t, code[0], uint8(0))
+	require.Equal(t, uint8(0), code[0])
 
 	var w bytes.Buffer
 	_, err = io.Copy(&w, stream)
@@ -266,7 +266,7 @@ func TestSentinelBlocksByRoots(t *testing.T) {
 		r.ReadByte()
 	}
 
-	require.Equal(t, len(responsePacket), len(blocks))
+	require.Len(t, blocks, len(responsePacket))
 	for i := 0; i < len(responsePacket); i++ {
 		root1, err := responsePacket[i].HashSSZ()
 		require.NoError(t, err)
@@ -324,7 +324,7 @@ func TestSentinelStatusRequest(t *testing.T) {
 	code := make([]byte, 1)
 	_, err = stream.Read(code)
 	require.NoError(t, err)
-	require.Equal(t, code[0], uint8(0))
+	require.Equal(t, uint8(0), code[0])
 
 	resp := &cltypes.Status{}
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(stream, resp, 0); err != nil {

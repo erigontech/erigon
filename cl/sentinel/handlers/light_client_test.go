@@ -31,7 +31,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -247,7 +246,7 @@ func TestLightClientBootstrap(t *testing.T) {
 	}
 	require.NoError(t, err)
 
-	reqData := libcommon.CopyBytes(reqBuf.Bytes())
+	reqData := common.CopyBytes(reqBuf.Bytes())
 	_, err = stream.Write(reqData)
 	require.NoError(t, err)
 
@@ -262,9 +261,9 @@ func TestLightClientBootstrap(t *testing.T) {
 	require.NoError(t, err)
 
 	expected := f.LightClientBootstraps[reqRoot]
-	require.Equal(t, got.Header, expected.Header)
-	require.Equal(t, got.CurrentSyncCommittee, expected.CurrentSyncCommittee)
-	require.Equal(t, got.CurrentSyncCommitteeBranch, expected.CurrentSyncCommitteeBranch)
+	require.Equal(t, expected.Header, got.Header)
+	require.Equal(t, expected.CurrentSyncCommittee, got.CurrentSyncCommittee)
+	require.Equal(t, expected.CurrentSyncCommitteeBranch, got.CurrentSyncCommitteeBranch)
 }
 
 func TestLightClientUpdates(t *testing.T) {
@@ -330,7 +329,7 @@ func TestLightClientUpdates(t *testing.T) {
 	}
 	require.NoError(t, err)
 
-	reqData := libcommon.CopyBytes(reqBuf.Bytes())
+	reqData := common.CopyBytes(reqBuf.Bytes())
 	_, err = stream.Write(reqData)
 	require.NoError(t, err)
 
