@@ -11,7 +11,7 @@ on:
 
 jobs:
   assertoor_test:
-    runs-on: [self-hosted, qa, log-running]
+    runs-on: [self-hosted, qa]
     env:
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
 
