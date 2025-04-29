@@ -861,8 +861,8 @@ func (sdb *IntraBlockState) RevertToSnapshot(revid int) {
 	}
 	revision := sdb.validRevisions[idx]
 	snapshot := revision.journalIndex
-	fmt.Printf("Reverting to snapshot %d: set unexpected delta (d=%s)\n", revid,
-		uint256.NewInt(0).Sub(sdb.arbExtraData.unexpectedBalanceDelta, revision.unexpectedBalanceDelta))
+	//fmt.Printf("Reverting to snapshot %d: set unexpected delta (d=%s)\n", revid,
+	//	uint256.NewInt(0).Sub(sdb.arbExtraData.unexpectedBalanceDelta, revision.unexpectedBalanceDelta))
 	if sdb.arbExtraData != nil {
 		if sdb.arbExtraData.unexpectedBalanceDelta == nil {
 			sdb.arbExtraData.unexpectedBalanceDelta = uint256.NewInt(0)
