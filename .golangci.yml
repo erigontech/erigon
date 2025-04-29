@@ -148,6 +148,8 @@ linters:
       - third_party$
       - builtin$
       - examples$
+      - testdata$
+      - execution-spec-tests$
 formatters:
   enable:
     - gofmt
@@ -160,3 +162,5 @@ formatters:
       - third_party$
       - builtin$
       - examples$
+      - testdata$
+      - execution-spec-tests$
