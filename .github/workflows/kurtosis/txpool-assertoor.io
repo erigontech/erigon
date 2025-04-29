@@ -1,14 +1,11 @@
 participants:
 - el_type: erigon
-  el_image: erigontech/erigon:latest
   cl_type: lighthouse
   count: 1
 - el_type: erigon
-  el_image: erigontech/erigon:latest
   cl_type: lodestar
   count: 1
 - el_type: erigon
-  el_image: erigontech/erigon:latest
   cl_type: prysm
   count: 1
 network_params:
