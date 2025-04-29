@@ -190,4 +190,5 @@ type IntraBlockState interface {
 
 	// Arbitrum
 	RemoveEscrowProtection(addr common.Address)
+	ExpectBalanceBurn(amount *uint256.Int)
 }

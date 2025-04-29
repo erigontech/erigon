@@ -912,25 +912,18 @@ func opSelfdestruct(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 	if interpreter.readOnly {
 		return nil, ErrWriteProtection
 	}
+	fmt.Printf("opSelfdestruct\n")
 
-	// Arbitrum: revert if acting account is a Stylus program
-	if interpreter.evm.chainRules.IsStylus {
-		actingAddress := scope.Contract.Address()
-		code, err := interpreter.evm.intraBlockState.GetCode(actingAddress)
-		if err != nil {
-			return nil, err
-		}
-
-		if state.IsStylusProgram(code) {
-			return nil, ErrExecutionReverted
-		}
-	}
 	beneficiary := scope.Stack.Pop()
 	callerAddr := scope.Contract.Address()
 	beneficiaryAddr := libcommon.Address(beneficiary.Bytes20())
 	balance, err := interpreter.evm.IntraBlockState().GetBalance(callerAddr)
 	if err != nil {
 		return nil, err
+	}
+	if beneficiaryAddr == scope.Contract.Address() {
+		// Arbitrum: calling selfdestruct(this) burns the balance
+		interpreter.evm.IntraBlockState().ExpectBalanceBurn(balance)
 	}
 
 	balanceVal := *balance
@@ -949,6 +942,21 @@ func opSelfdestruct6780(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCon
 	if interpreter.readOnly {
 		return nil, ErrWriteProtection
 	}
+	fmt.Printf("opSelfdestruct6780\n")
+
+	// Arbitrum: revert if acting account is a Stylus program
+	if interpreter.evm.chainRules.IsStylus {
+		actingAddress := scope.Contract.Address()
+		code, err := interpreter.evm.intraBlockState.GetCode(actingAddress)
+		if err != nil {
+			return nil, err
+		}
+
+		if state.IsStylusProgram(code) {
+			return nil, ErrExecutionReverted
+		}
+	}
+
 	beneficiary := scope.Stack.Pop()
 	callerAddr := scope.Contract.Address()
 	beneficiaryAddr := libcommon.Address(beneficiary.Bytes20())
