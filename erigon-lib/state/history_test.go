@@ -136,14 +136,14 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 				for efIt.HasNext() {
 					txNum, err := efIt.Next()
 					require.NoError(t, err)
-					require.EqualValuesf(t, updates[vi].txNum, txNum, "txNum mismatch")
+					require.Equalf(t, updates[vi].txNum, txNum, "txNum mismatch")
 
 					require.Truef(t, hReader.HasNext(), "hReader has no more values")
 					hValBuf, _ = hReader.Next(nil)
 					if updates[vi].value == nil {
 						require.Emptyf(t, hValBuf, "value at %d is not empty (not nil)", vi)
 					} else {
-						require.EqualValuesf(t, updates[vi].value, hValBuf, "value at %d mismatch", vi)
+						require.Equalf(t, updates[vi].value, hValBuf, "value at %d mismatch", vi)
 					}
 					vi++
 				}
@@ -655,7 +655,7 @@ func TestHistoryPruneCorrectness(t *testing.T) {
 		}
 		count++
 	}
-	require.EqualValues(t, pruneIters*int(pruneLimit), count)
+	require.Equal(t, pruneIters*int(pruneLimit), count)
 	icc.Close()
 
 	hc := h.BeginFilesRo()
@@ -1518,7 +1518,7 @@ func Test_HistoryIterate_VariousKeysLen(t *testing.T) {
 		})
 
 		require.Equal(fmt.Sprintf("%#x", writtenKeys[0]), fmt.Sprintf("%#x", keys[0]))
-		require.Equal(len(writtenKeys), len(keys))
+		require.Len(keys, len(writtenKeys))
 		require.Equal(fmt.Sprintf("%#x", writtenKeys), fmt.Sprintf("%#x", keys))
 	}
 

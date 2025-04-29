@@ -207,7 +207,7 @@ func TestGetProof(t *testing.T) {
 			err = trie.VerifyAccountProof(header.Root, proof)
 			require.NoError(t, err)
 
-			require.Equal(t, len(tt.storageKeys), len(proof.StorageProof))
+			require.Len(t, proof.StorageProof, len(tt.storageKeys))
 			for _, storageKey := range tt.storageKeys {
 				found := false
 				for _, storageProof := range proof.StorageProof {

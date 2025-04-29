@@ -18,7 +18,6 @@ package stagedsync_test
 
 import (
 	"bytes"
-	"errors"
 	"math/big"
 	"testing"
 	"time"
@@ -88,7 +87,7 @@ func TestBodiesCanonical(t *testing.T) {
 	err = rawdb.AppendCanonicalTxNums(tx, 5)
 	require.Error(err)
 	var e1 rawdbv3.ErrTxNumsAppendWithGap
-	require.True(errors.As(err, &e1))
+	require.ErrorAs(err, &e1)
 
 	// this should see same error inside then retry from last block available, therefore return no error
 	err = bw.MakeBodiesCanonical(tx, 5)

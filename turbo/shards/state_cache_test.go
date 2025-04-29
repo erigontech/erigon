@@ -53,7 +53,7 @@ func TestCacheBtreeOrderAccountStorage(t *testing.T) {
 	curK := make([]byte, 0, 128)
 	if err := sc.WalkAccounts([]byte{}, func(addrHash common.Hash, account *accounts.Account) (bool, error) {
 		curK = append(curK[:0], addrHash.Bytes()...)
-		assert.True(t, bytes.Compare(lastK, curK) < 0)
+		assert.Negative(t, bytes.Compare(lastK, curK))
 		lastK = append(lastK[:0], curK...)
 		return true, nil
 	}); err != nil {
@@ -69,7 +69,7 @@ func TestCacheBtreeOrderAccountStorage(t *testing.T) {
 	lastK = lastK[:0]
 	if err := sc.WalkStorage(common.BytesToHash(sha3.NewLegacyKeccak256().Sum(a1.Bytes())), 1, nil, func(locHash common.Hash, val []byte) error {
 		curK = append(curK[:0], locHash.Bytes()...)
-		assert.True(t, bytes.Compare(lastK, curK) < 0)
+		assert.Negative(t, bytes.Compare(lastK, curK))
 		lastK = append(lastK[:0], curK...)
 		return nil
 	}); err != nil {

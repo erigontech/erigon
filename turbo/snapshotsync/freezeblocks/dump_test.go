@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/stages/mock"
-	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 func nonceRange(from, to int) []uint64 {
@@ -122,24 +121,21 @@ func TestDump(t *testing.T) {
 
 	for _, test := range tests {
 		m := createDumpTestKV(t, test.chainConfig, test.chainSize)
-		chainID, _ := uint256.FromBig(m.ChainConfig.ChainID)
 		t.Run("txs", func(t *testing.T) {
 			require := require.New(t)
-			slot := txpool.TxnSlot{}
-			parseCtx := txpool.NewTxnParseContext(*chainID)
-			parseCtx.WithSender(false)
-			var sender [20]byte
 
 			var systemTxs int
 			var nonceList []uint64
+
 			_, err := freezeblocks.DumpTxs(m.Ctx, m.DB, m.ChainConfig, 0, uint64(2*test.chainSize), nil, func(v []byte) error {
 				if v == nil {
 					systemTxs++
 				} else {
-					if _, err := parseCtx.ParseTransaction(v[1+20:], 0, &slot, sender[:], false /* hasEnvelope */, false /* wrappedWithBlobs */, nil); err != nil {
+					txn, err := types.DecodeTransaction(v[1+20:])
+					if err != nil {
 						return err
 					}
-					nonceList = append(nonceList, slot.Nonce)
+					nonceList = append(nonceList, txn.GetNonce())
 				}
 				return nil
 			}, 1, log.LvlInfo, log.New())
@@ -150,10 +146,6 @@ func TestDump(t *testing.T) {
 		})
 		t.Run("txs_not_from_zero", func(t *testing.T) {
 			require := require.New(t)
-			slot := txpool.TxnSlot{}
-			parseCtx := txpool.NewTxnParseContext(*chainID)
-			parseCtx.WithSender(false)
-			var sender [20]byte
 
 			var systemTxs int
 			var nonceList []uint64
@@ -161,10 +153,11 @@ func TestDump(t *testing.T) {
 				if v == nil {
 					systemTxs++
 				} else {
-					if _, err := parseCtx.ParseTransaction(v[1+20:], 0, &slot, sender[:], false /* hasEnvelope */, false /* wrappedWithBlobs */, nil); err != nil {
+					txn, err := types.DecodeTransaction(v[1+20:])
+					if err != nil {
 						return err
 					}
-					nonceList = append(nonceList, slot.Nonce)
+					nonceList = append(nonceList, txn.GetNonce())
 				}
 				return nil
 			}, 1, log.LvlInfo, log.New())
@@ -220,7 +213,7 @@ func TestDump(t *testing.T) {
 			require.NoError(err)
 			require.Equal(test.chainSize-3, i)
 			require.Equal(3*(test.chainSize-3)-1, int(txsAmount))
-			require.EqualValues(append([]uint64{0}, baseIdRange(2, 3, test.chainSize-4)...), baseIdList)
+			require.Equal(append([]uint64{0}, baseIdRange(2, 3, test.chainSize-4)...), baseIdList)
 
 			firstTxNum += txsAmount
 			i = 0
@@ -236,7 +229,7 @@ func TestDump(t *testing.T) {
 			require.NoError(err)
 			require.Equal(test.chainSize-1, i)
 			require.Equal(firstTxNum+uint64(3*(test.chainSize-1)), txsAmount)
-			require.EqualValues(baseIdRange(int(firstTxNum), 3, test.chainSize-1), baseIdList)
+			require.Equal(baseIdRange(int(firstTxNum), 3, test.chainSize-1), baseIdList)
 		})
 		t.Run("body_not_from_zero", func(t *testing.T) {
 			require := require.New(t)
@@ -252,7 +245,7 @@ func TestDump(t *testing.T) {
 			}, 1, log.LvlInfo, log.New())
 			require.NoError(err)
 			require.Equal(test.chainSize-2, i)
-			require.EqualValues(baseIdRange(int(firstTxNum), 3, test.chainSize-2), baseIdList)
+			require.Equal(baseIdRange(int(firstTxNum), 3, test.chainSize-2), baseIdList)
 			require.Equal(lastTxNum, baseIdList[len(baseIdList)-1]+3)
 			require.Equal(lastTxNum, firstTxNum+uint64(i*3))
 		})

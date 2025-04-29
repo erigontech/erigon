@@ -2575,28 +2575,39 @@ func (p *TxPool) logStats() {
 
 // Deprecated need switch to streaming-like
 func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx) {
+	var txns []*metaTxn
+	var senders []common.Address
+
 	p.lock.Lock()
-	defer p.lock.Unlock()
+
 	p.all.ascendAll(func(mt *metaTxn) bool {
-		slot := mt.TxnSlot
-		slotRlp := slot.Rlp
-		if slot.Rlp == nil {
-			v, err := tx.GetOne(kv.PoolTransaction, slot.IDHash[:])
+		if sender, found := p.senders.senderID2Addr[mt.TxnSlot.SenderID]; found {
+			txns = append(txns, mt)
+			senders = append(senders, sender)
+		}
+
+		return true
+	})
+
+	p.lock.Unlock()
+
+	for i := range txns {
+		slotRlp := txns[i].TxnSlot.Rlp
+		if slotRlp == nil {
+			v, err := tx.GetOne(kv.PoolTransaction, txns[i].TxnSlot.IDHash[:])
 			if err != nil {
 				p.logger.Warn("[txpool] foreach: get txn from db", "err", err)
-				return true
+				continue
 			}
 			if v == nil {
 				p.logger.Warn("[txpool] foreach: txn not found in db")
-				return true
+				continue
 			}
 			slotRlp = v[20:]
 		}
-		if sender, found := p.senders.senderID2Addr[slot.SenderID]; found {
-			f(slotRlp, sender, mt.currentSubPool)
-		}
-		return true
-	})
+
+		f(slotRlp, senders[i], txns[i].currentSubPool)
+	}
 }
 
 func sendChangeBatchEventToDiagnostics(pool string, event string, orderHashes []diagnostics.TxnHashOrder) {

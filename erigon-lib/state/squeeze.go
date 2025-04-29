@@ -17,6 +17,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
+	downloadertype "github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/stream"
@@ -33,11 +34,8 @@ func (a *Aggregator) Sqeeze(ctx context.Context, domain kv.Domain) error {
 	filesToRemove := []string{}
 	for _, to := range domainFiles(a.dirs, domain) {
 		_, fileName := filepath.Split(to)
-		fromStep, toStep, err := ParseStepsFromFileName(fileName)
-		if err != nil {
-			return err
-		}
-		if toStep-fromStep < DomainMinStepsToCompress {
+		res, _, _ := downloadertype.ParseFileName("", fileName)
+		if res.To-res.From < DomainMinStepsToCompress {
 			continue
 		}
 

@@ -139,6 +139,6 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	root, err := domains.ComputeCommitment(context.Background(), false, domains.BlockNum(), "")
 	require.NoError(t, err)
 	require.NotEmpty(t, root)
-	require.EqualValues(t, latestRoot, root)
-	require.NotEqualValues(t, commitment.EmptyRootHash, root)
+	require.Equal(t, latestRoot, root)
+	require.NotEqual(t, commitment.EmptyRootHash, root)
 }

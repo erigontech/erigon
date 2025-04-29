@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -56,7 +57,7 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	}).MustOpen()
 	tb.Cleanup(db.Close)
 	salt := uint32(1)
-	cfg := iiCfg{salt: &salt, dirs: dirs, filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable}
+	cfg := iiCfg{salt: &salt, dirs: dirs, filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable, version: IIVersionTypes{DataEF: snaptype.V1_0, AccessorEFI: snaptype.V1_0}}
 	ii, err := NewInvertedIndex(cfg, aggStep, logger)
 	require.NoError(tb, err)
 	ii.DisableFsync()
@@ -99,7 +100,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		count++
 	}
 	icc.Close()
-	require.EqualValues(t, count, pruneIters*int(pruneLimit))
+	require.Equal(t, count, pruneIters*int(pruneLimit))
 
 	// this one should not prune anything due to forced=false but no files built
 	stat, err := ic.Prune(context.Background(), rwTx, 0, 10, pruneLimit, logEvery, false, nil)

@@ -58,41 +58,41 @@ func TestCheckPeerStatusCompatibility(t *testing.T) {
 
 	t.Run("ok", func(t *testing.T) {
 		err := checkPeerStatusCompatibility(&goodReply, &status, version, version)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 	t.Run("network mismatch", func(t *testing.T) {
 		reply := goodReply
 		reply.NetworkID = 0
 		err := checkPeerStatusCompatibility(&reply, &status, version, version)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "network")
 	})
 	t.Run("version mismatch min", func(t *testing.T) {
 		reply := goodReply
 		reply.ProtocolVersion = direct.ETH67 - 1
 		err := checkPeerStatusCompatibility(&reply, &status, version, version)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "version is less")
 	})
 	t.Run("version mismatch max", func(t *testing.T) {
 		reply := goodReply
 		reply.ProtocolVersion = direct.ETH67 + 1
 		err := checkPeerStatusCompatibility(&reply, &status, version, version)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "version is more")
 	})
 	t.Run("genesis mismatch", func(t *testing.T) {
 		reply := goodReply
 		reply.Genesis = common.Hash{}
 		err := checkPeerStatusCompatibility(&reply, &status, version, version)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "genesis")
 	})
 	t.Run("fork mismatch", func(t *testing.T) {
 		reply := goodReply
 		reply.ForkID = forkid.ID{}
 		err := checkPeerStatusCompatibility(&reply, &status, version, version)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.ErrorIs(t, err, forkid.ErrLocalIncompatibleOrStale)
 	})
 }

@@ -22,7 +22,9 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	rand2 "math/rand/v2"
+
+	rand2 "golang.org/x/exp/rand"
+
 	"os"
 	"path/filepath"
 	"runtime"

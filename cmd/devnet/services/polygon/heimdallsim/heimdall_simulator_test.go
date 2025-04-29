@@ -104,23 +104,23 @@ func TestSimulatorEvents(t *testing.T) {
 
 	res, err := sim.FetchStateSyncEvents(ctx, 0, time.Now(), 100)
 	require.NoError(t, err)
-	assert.Equal(t, eventsCount, len(res))
+	assert.Len(t, res, eventsCount)
 
 	resLimit, err := sim.FetchStateSyncEvents(ctx, 0, time.Now(), 2)
 	require.NoError(t, err)
-	assert.Equal(t, 2, len(resLimit))
+	assert.Len(t, resLimit, 2)
 	assert.Equal(t, res[:2], resLimit)
 
 	resStart, err := sim.FetchStateSyncEvents(ctx, 10, time.Now(), 5)
 	require.NoError(t, err)
-	assert.Equal(t, 5, len(resStart))
+	assert.Len(t, resStart, 5)
 	assert.Equal(t, uint64(10), resStart[0].ID)
 	assert.Equal(t, res[9:14], resStart)
 
 	lastTime := res[len(res)-1].Time
 	resTime, err := sim.FetchStateSyncEvents(ctx, 0, lastTime.Add(-1*time.Second), 100)
 	require.NoError(t, err)
-	assert.Equal(t, eventsCount-1, len(resTime))
+	assert.Len(t, resTime, eventsCount-1)
 	assert.Equal(t, res[:len(res)-1], resTime)
 }
 

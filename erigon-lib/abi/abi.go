@@ -248,7 +248,6 @@ func (abi *ABI) MethodById(sigdata []byte) (*Method, error) {
 func (abi *ABI) EventByID(topic common.Hash) (*Event, error) {
 	for _, event := range abi.Events {
 		if bytes.Equal(event.ID.Bytes(), topic.Bytes()) {
-			//nolint:scopelint
 			return &event, nil
 		}
 	}

@@ -36,7 +36,7 @@ func TestHexToInt(t *testing.T) {
 
 	for _, testCase := range testCases {
 		got := HexToInt(testCase.hexStr)
-		require.EqualValues(t, testCase.expected, got)
+		require.Equal(t, testCase.expected, got)
 	}
 }
 
@@ -76,7 +76,7 @@ func TestUniqueIDFromEnode(t *testing.T) {
 		if !testCase.shouldError && err != nil {
 			t.Errorf("expected no error, got %s", err)
 		}
-		require.EqualValues(t, got, testCase.expectedRes)
+		require.EqualValues(t, testCase.expectedRes, got)
 	}
 }
 
@@ -115,9 +115,9 @@ func TestNamespaceAndSubMethodFromMethod(t *testing.T) {
 
 	for _, testCase := range testCases {
 		namespace, subMethod, err := NamespaceAndSubMethodFromMethod(testCase.method)
-		require.EqualValues(t, testCase.expectedNamespace, namespace)
-		require.EqualValues(t, testCase.expectedSubMethod, subMethod)
-		require.EqualValues(t, testCase.expectedError, err)
+		require.Equal(t, testCase.expectedNamespace, namespace)
+		require.Equal(t, testCase.expectedSubMethod, subMethod)
+		require.Equal(t, testCase.expectedError, err)
 		if testCase.shouldError {
 			require.Errorf(t, testCase.expectedError, expectedError.Error())
 		}
@@ -136,6 +136,6 @@ func TestGenerateTopic(t *testing.T) {
 
 	for _, testCase := range testCases {
 		got := GenerateTopic(testCase.signature)
-		require.EqualValues(t, testCase.expected, fmt.Sprintf("%s", got[0]))
+		require.Equal(t, testCase.expected, fmt.Sprintf("%s", got[0]))
 	}
 }
