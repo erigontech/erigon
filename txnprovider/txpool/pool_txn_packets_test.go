@@ -148,7 +148,7 @@ func TestPooledTransactionsPacket66(t *testing.T) {
 			requestID, _, err := ParsePooledTransactions66(encodeBuf, 0, ctx, slots, nil)
 			require.NoError(err)
 			require.Equal(tt.requestID, requestID)
-			require.Equal(len(tt.txns), len(slots.Txns))
+			require.Len(slots.Txns, len(tt.txns))
 			for i, txn := range tt.txns {
 				require.Equal(fmt.Sprintf("%x", txn), fmt.Sprintf("%x", slots.Txns[i].Rlp))
 			}
@@ -167,9 +167,9 @@ func TestPooledTransactionsPacket66(t *testing.T) {
 			requestID, _, err := ParsePooledTransactions66(encodeBuf, 0, ctx, slots, func(bytes []byte) error { return ErrRejected })
 			require.NoError(err)
 			require.Equal(tt.requestID, requestID)
-			require.Equal(0, len(slots.Txns))
+			require.Empty(slots.Txns)
 			require.Equal(0, slots.Senders.Len())
-			require.Equal(0, len(slots.IsLocal))
+			require.Empty(slots.IsLocal)
 		})
 	}
 }
@@ -207,7 +207,7 @@ func TestTransactionsPacket(t *testing.T) {
 			slots := &TxnSlots{}
 			_, err := ParseTransactions(encodeBuf, 0, ctx, slots, nil)
 			require.NoError(err)
-			require.Equal(len(tt.txns), len(slots.Txns))
+			require.Len(slots.Txns, len(tt.txns))
 			for i, txn := range tt.txns {
 				require.Equal(fmt.Sprintf("%x", txn), fmt.Sprintf("%x", slots.Txns[i].Rlp))
 			}
@@ -225,9 +225,9 @@ func TestTransactionsPacket(t *testing.T) {
 			slots := &TxnSlots{}
 			_, err := ParseTransactions(encodeBuf, 0, ctx, slots, func(bytes []byte) error { return ErrRejected })
 			require.NoError(err)
-			require.Equal(0, len(slots.Txns))
+			require.Empty(slots.Txns)
 			require.Equal(0, slots.Senders.Len())
-			require.Equal(0, len(slots.IsLocal))
+			require.Empty(slots.IsLocal)
 		})
 	}
 }

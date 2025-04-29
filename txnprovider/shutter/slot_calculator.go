@@ -26,8 +26,10 @@ var ErrTimestampBeforeGenesis = errors.New("timestamp before genesis")
 
 type SlotCalculator interface {
 	CalcSlot(timestamp uint64) (uint64, error)
+	CalcSlotStartTimestamp(slot uint64) uint64
 	CalcSlotAge(slot uint64) time.Duration
 	CalcCurrentSlot() uint64
+	SecondsPerSlot() uint64
 }
 
 type BeaconChainSlotCalculator struct {
@@ -50,9 +52,12 @@ func (sc BeaconChainSlotCalculator) CalcSlot(timestamp uint64) (uint64, error) {
 	return (timestamp - sc.genesisTimestamp) / sc.secondsPerSlot, nil
 }
 
+func (sc BeaconChainSlotCalculator) CalcSlotStartTimestamp(slot uint64) uint64 {
+	return sc.genesisTimestamp + slot*sc.secondsPerSlot
+}
+
 func (sc BeaconChainSlotCalculator) CalcSlotAge(slot uint64) time.Duration {
-	slotStartTimestamp := sc.genesisTimestamp + slot*sc.secondsPerSlot
-	return time.Since(time.Unix(int64(slotStartTimestamp), 0))
+	return time.Since(time.Unix(int64(sc.CalcSlotStartTimestamp(slot)), 0))
 }
 
 func (sc BeaconChainSlotCalculator) CalcCurrentSlot() uint64 {
@@ -62,4 +67,8 @@ func (sc BeaconChainSlotCalculator) CalcCurrentSlot() uint64 {
 	}
 
 	return slot
+}
+
+func (sc BeaconChainSlotCalculator) SecondsPerSlot() uint64 {
+	return sc.secondsPerSlot
 }

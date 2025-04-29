@@ -25,9 +25,8 @@ import (
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 
 	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/p2p"
@@ -393,6 +392,11 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 		return err
 	}
 
+	if event.Source == EventSourceBlockProducer {
+		go s.publishNewBlock(ctx, event.NewBlock)
+		go s.p2pService.PublishNewBlockHashes(event.NewBlock)
+	}
+
 	if event.Source == EventSourceP2PNewBlock {
 		// https://github.com/ethereum/devp2p/blob/master/caps/eth.md#block-propagation
 		// devp2p spec: when a NewBlock announcement message is received from a peer, the client first verifies the
@@ -661,6 +665,26 @@ func (s *Sync) maybePenalizePeerOnBadBlockEvent(ctx context.Context, event Event
 func (s *Sync) Run(ctx context.Context) error {
 	s.logger.Info(syncLogPrefix("waiting for execution client"))
 
+	for {
+		// we have to check if the heimdall we are connected to is synchonised with the chain
+		// to prevent getting empty list of checkpoints/milestones during the sync
+
+		catchingUp, err := s.heimdallSync.IsCatchingUp(ctx)
+		if err != nil {
+			return fmt.Errorf("could not get heimdall status, check if your heimdall URL and if instance is running. err: %w", err)
+		}
+
+		if !catchingUp {
+			break
+		}
+
+		s.logger.Warn(syncLogPrefix("your heimdalld process is behind, please check its logs and <HEIMDALL_HOST>:1317/status api"))
+
+		if err := common.Sleep(ctx, 30*time.Second); err != nil {
+			return err
+		}
+	}
+
 	if err := <-s.bridgeSync.Ready(ctx); err != nil {
 		return err
 	}
@@ -678,26 +702,6 @@ func (s *Sync) Run(ctx context.Context) error {
 	}
 
 	s.logger.Info(syncLogPrefix("running sync component"))
-
-	for {
-		// we have to check if the heimdall we are connected to is synchonised with the chain
-		// to prevent getting empty list of checkpoints/milestones during the sync
-
-		catchingUp, err := s.heimdallSync.IsCatchingUp(ctx)
-		if err != nil {
-			return err
-		}
-
-		if !catchingUp {
-			break
-		}
-
-		s.logger.Warn(syncLogPrefix("your heimdalld process is behind, please check its logs and <HEIMDALL_HOST>:1317/status api"))
-
-		if err := libcommon.Sleep(ctx, 30*time.Second); err != nil {
-			return err
-		}
-	}
 
 	result, err := s.syncToTip(ctx)
 	if err != nil {

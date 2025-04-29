@@ -26,30 +26,32 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/consensus/merge"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethutils"
+	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/consensus/merge"
+	"github.com/erigontech/erigon/execution/eth1"
+	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/jsonrpc"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_logs_spammer"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
-	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
-	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 )
@@ -68,6 +70,7 @@ type EngineServer struct {
 	test             bool
 	caplin           bool // we need to send errors for caplin.
 	executionService execution.ExecutionClient
+	txpool           txpool.TxpoolClient // needed for getBlobs
 
 	chainRW eth1_chain_reader.ChainReaderWriterEth1
 	lock    sync.Mutex
@@ -118,11 +121,9 @@ func (e *EngineServer) Start(
 		e.engineLogSpamer.Start(ctx)
 	}
 	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader, httpConfig.Dirs, nil)
-
 	ethImpl := jsonrpc.NewEthAPI(base, db, eth, txPool, mining, httpConfig.Gascap, httpConfig.Feecap, httpConfig.ReturnDataLimit, httpConfig.AllowUnprotectedTxs, httpConfig.MaxGetProofRewindBlockCount, httpConfig.WebsocketSubscribeLogsChannelSize, e.logger)
+	e.txpool = txPool
 
-	// engineImpl := NewEngineAPI(base, db, engineBackend)
-	// e.startEngineMessageHandler()
 	apiList := []rpc.API{
 		{
 			Namespace: "eth",
@@ -156,13 +157,16 @@ func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, exec
 		if executionRequests != nil {
 			return &rpc.InvalidParamsError{Message: "requests in EngineAPI not supported before Prague"}
 		}
+	} else if executionRequests == nil {
+		return &rpc.InvalidParamsError{Message: "missing requests list"}
 	}
+
 	return nil
 }
 
 // EngineNewPayload validates and possibly executes payload
 func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
-	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, executionRequests []hexutil.Bytes, version clparams.StateVersion,
+	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, version clparams.StateVersion,
 ) (*engine_types.PayloadStatus, error) {
 	if !s.consuming.Load() {
 		return nil, errors.New("engine payload consumption is not enabled")
@@ -261,7 +265,8 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	blockHash := req.BlockHash
 	if header.Hash() != blockHash {
-		s.logger.Error("[NewPayload] invalid block hash", "stated", blockHash, "actual", header.Hash())
+		s.logger.Error("[NewPayload] invalid block hash", "stated", blockHash, "actual", header.Hash(),
+			"payload", req, "parentBeaconBlockRoot", parentBeaconBlockRoot, "requests", executionRequests)
 		return &engine_types.PayloadStatus{
 			Status:          engine_types.InvalidStatus,
 			ValidationError: engine_types.NewStringifiedErrorFromString("invalid block hash"),
@@ -270,7 +275,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	for _, txn := range req.Transactions {
 		if types.TypedTransactionMarshalledAsRlpString(txn) {
-			s.logger.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", libcommon.Bytes2Hex(txn))
+			s.logger.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", common.Bytes2Hex(txn))
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedErrorFromString("typed txn marshalled as RLP string"),
@@ -350,7 +355,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 }
 
 // Check if we can quickly determine the status of a newPayload or forkchoiceUpdated.
-func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, blockHash libcommon.Hash, blockNumber uint64, parentHash libcommon.Hash, forkchoiceMessage *engine_types.ForkChoiceState, newPayload bool) (*engine_types.PayloadStatus, error) {
+func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, blockHash common.Hash, blockNumber uint64, parentHash common.Hash, forkchoiceMessage *engine_types.ForkChoiceState, newPayload bool) (*engine_types.PayloadStatus, error) {
 	// Determine which prefix to use for logs
 	var prefix string
 	if newPayload {
@@ -395,7 +400,7 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 
 	if td != nil && td.Cmp(s.config.TerminalTotalDifficulty) < 0 {
 		s.logger.Warn(fmt.Sprintf("[%s] Beacon Chain request before TTD", prefix), "hash", blockHash)
-		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &libcommon.Hash{}, ValidationError: engine_types.NewStringifiedErrorFromString("Beacon Chain request before TTD")}, nil
+		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &common.Hash{}, ValidationError: engine_types.NewStringifiedErrorFromString("Beacon Chain request before TTD")}, nil
 	}
 
 	var isCanonical bool
@@ -547,7 +552,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}
 	s.engineLogSpamer.RecordRequest()
 
-	status, err := s.getQuickPayloadStatusIfPossible(ctx, forkchoiceState.HeadHash, 0, libcommon.Hash{}, forkchoiceState, false)
+	status, err := s.getQuickPayloadStatusIfPossible(ctx, forkchoiceState.HeadHash, 0, common.Hash{}, forkchoiceState, false)
 	if err != nil {
 		return nil, err
 	}
@@ -646,7 +651,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}, nil
 }
 
-func (s *EngineServer) getPayloadBodiesByHash(ctx context.Context, request []libcommon.Hash) ([]*engine_types.ExecutionPayloadBody, error) {
+func (s *EngineServer) getPayloadBodiesByHash(ctx context.Context, request []common.Hash) ([]*engine_types.ExecutionPayloadBody, error) {
 	if len(request) > 1024 {
 		return nil, &engine_helpers.TooLargeRequestErr
 	}
@@ -719,7 +724,7 @@ func (e *EngineServer) HandleNewPayload(
 	ctx context.Context,
 	logPrefix string,
 	block *types.Block,
-	versionedHashes []libcommon.Hash,
+	versionedHashes []common.Hash,
 ) (*engine_types.PayloadStatus, error) {
 	e.engineLogSpamer.RecordRequest()
 
@@ -760,6 +765,17 @@ func (e *EngineServer) HandleNewPayload(
 			}
 			status, _, latestValidHash, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
 			if err != nil {
+				missingBlkHash, isMissingChainErr := eth1.GetBlockHashFromMissingSegmentError(err)
+				if isMissingChainErr {
+					e.logger.Debug(fmt.Sprintf("[%s] New payload: need to download missing segment", logPrefix), "height", headerNumber, "hash", headerHash, "missingBlkHash", missingBlkHash)
+					if e.test {
+						return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
+					}
+					if e.blockDownloader.StartDownloading(ctx, 0, missingBlkHash, block) {
+						e.logger.Warn(fmt.Sprintf("[%s] New payload: need to recover missing segment", logPrefix), "height", headerNumber, "hash", headerHash, "missingBlkHash", missingBlkHash)
+					}
+					return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
+				}
 				return nil, err
 			}
 
@@ -786,6 +802,17 @@ func (e *EngineServer) HandleNewPayload(
 	status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
 	e.logger.Debug(fmt.Sprintf("[%s] New payload verification ended", logPrefix), "status", status.String(), "err", err)
 	if err != nil {
+		missingBlkHash, isMissingChainErr := eth1.GetBlockHashFromMissingSegmentError(err)
+		if isMissingChainErr {
+			e.logger.Debug(fmt.Sprintf("[%s] New payload: need to download missing segment", logPrefix), "height", headerNumber, "hash", headerHash, "missingBlkHash", missingBlkHash)
+			if e.test {
+				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
+			}
+			if e.blockDownloader.StartDownloading(ctx, 0, missingBlkHash, block) {
+				e.logger.Warn(fmt.Sprintf("[%s] New payload: need to recover missing segment", logPrefix), "height", headerNumber, "hash", headerHash, "missingBlkHash", missingBlkHash)
+			}
+			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
+		}
 		return nil, err
 	}
 
@@ -883,6 +910,36 @@ func (e *EngineServer) HandlesForkChoice(
 
 func (e *EngineServer) SetConsuming(consuming bool) {
 	e.consuming.Store(consuming)
+}
+
+func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV1, error) {
+	if len(blobHashes) > 128 {
+		return nil, &engine_helpers.TooLargeRequestErr
+	}
+	req := &txpool.GetBlobsRequest{BlobHashes: make([]*typesproto.H256, len(blobHashes))}
+	for i := range blobHashes {
+		req.BlobHashes[i] = gointerfaces.ConvertHashToH256(blobHashes[i])
+	}
+	res, err := e.txpool.GetBlobs(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]*engine_types.BlobAndProofV1, len(blobHashes))
+	if len(blobHashes) != len(res.Blobs) || len(blobHashes) != len(res.Proofs) { // Some fault in the underlying txpool, but still return sane resp
+		log.Warn("[GetBlobsV1] txpool returned unexpected number of blobs and proofs in response, returning nil blobs list")
+		return ret, nil
+	}
+	logLine := []string{}
+	for i := range res.Blobs {
+		if res.Blobs[i] != nil {
+			ret[i] = &engine_types.BlobAndProofV1{Blob: res.Blobs[i], Proof: res.Proofs[i]}
+			logLine = append(logLine, fmt.Sprintf(" %d:", i), fmt.Sprintf(" hash=%x len(blob)=%d len(proof)=%d ", blobHashes[i], len(res.Blobs[i]), len(res.Proofs[i])))
+		} else {
+			logLine = append(logLine, fmt.Sprintf(" %d:", i), " nil")
+		}
+	}
+	e.logger.Debug("[GetBlobsV1]", "Responses", logLine)
+	return ret, nil
 }
 
 func waitForStuff(maxWait time.Duration, waitCondnF func() (bool, error)) (bool, error) {

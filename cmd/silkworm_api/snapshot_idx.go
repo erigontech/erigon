@@ -38,7 +38,7 @@ import (
 
 // Build snapshot indexes for given snapshot files.
 // Sample usage:
-// build_idx --datadir erigon-1 --snapshot_path /snapshots/v1-000000-000500-headers.seg,/snapshots/v1-000500-001000-headers.seg
+// build_idx --datadir erigon-1 --snapshot_path /snapshots/v1.0-000000-000500-headers.seg,/snapshots/v1.0-000500-001000-headers.seg
 
 func main() {
 
@@ -74,7 +74,7 @@ func FindIf(segments []snaptype.FileInfo, predicate func(snaptype.FileInfo) bool
 }
 
 func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string, minBlock uint64) error {
-	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}

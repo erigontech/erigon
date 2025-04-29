@@ -7,13 +7,15 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/spf13/afero"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-lib/chain/networkid"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/utils"
-	"github.com/spf13/afero"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestRemoteCheckpointSync(t *testing.T) {
@@ -32,7 +34,7 @@ func TestRemoteCheckpointSync(t *testing.T) {
 	defer mockServer.Close()
 
 	clparams.ConfigurableCheckpointsURLs = []string{mockServer.URL}
-	syncer := NewRemoteCheckpointSync(&clparams.MainnetBeaconConfig, clparams.MainnetNetwork)
+	syncer := NewRemoteCheckpointSync(&clparams.MainnetBeaconConfig, networkid.MainnetChainID)
 	state, err := syncer.GetLatestBeaconState(context.Background())
 	assert.True(t, rec)
 	require.NoError(t, err)
@@ -43,7 +45,7 @@ func TestRemoteCheckpointSync(t *testing.T) {
 	wantRoot, err := state.HashSSZ()
 	require.NoError(t, err)
 
-	assert.Equal(t, haveRoot, wantRoot)
+	assert.Equal(t, wantRoot, haveRoot)
 }
 
 func TestLocalCheckpointSyncFromFile(t *testing.T) {
@@ -68,7 +70,7 @@ func TestLocalCheckpointSyncFromFile(t *testing.T) {
 	wantRoot, err := state.HashSSZ()
 	require.NoError(t, err)
 
-	assert.Equal(t, haveRoot, wantRoot)
+	assert.Equal(t, wantRoot, haveRoot)
 }
 
 func TestLocalCheckpointSyncFromGenesis(t *testing.T) {
@@ -85,5 +87,5 @@ func TestLocalCheckpointSyncFromGenesis(t *testing.T) {
 	wantRoot, err := state.HashSSZ()
 	require.NoError(t, err)
 
-	assert.Equal(t, haveRoot, wantRoot)
+	assert.Equal(t, wantRoot, haveRoot)
 }

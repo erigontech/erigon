@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	blst "github.com/supranational/blst/bindings/go"
 )
 
@@ -33,7 +34,7 @@ func TestRandomSigma(t *testing.T) {
 	lastByteAlways0 := true
 	for i := 0; i < 10; i++ {
 		sigma, err := RandomSigma(rand.Reader)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		if sigma[0] != 0 {
 			firstByteAlways0 = false
 		}
@@ -41,8 +42,8 @@ func TestRandomSigma(t *testing.T) {
 			lastByteAlways0 = false
 		}
 	}
-	assert.True(t, !firstByteAlways0)
-	assert.True(t, !lastByteAlways0)
+	assert.False(t, firstByteAlways0)
+	assert.False(t, lastByteAlways0)
 }
 
 func TestPadding(t *testing.T) {
@@ -92,12 +93,12 @@ func TestPadding(t *testing.T) {
 
 	for _, test := range testCases {
 		m, err := hex.DecodeString(test.mHex)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		bs := []Block{}
 		for _, bHex := range test.bsHex {
 			bBytes, err := hex.DecodeString(bHex)
-			assert.NoError(t, err)
-			assert.Equal(t, 32, len(bBytes))
+			require.NoError(t, err)
+			assert.Len(t, bBytes, 32)
 			var bByteArray [32]byte
 			copy(bByteArray[:], bBytes)
 			b := Block(bByteArray)
@@ -129,8 +130,8 @@ func TestUnpadding(t *testing.T) {
 		bs := []Block{}
 		for _, bHex := range bsHex {
 			bBytes, err := hex.DecodeString(bHex)
-			assert.NoError(t, err)
-			assert.Equal(t, 32, len(bBytes))
+			require.NoError(t, err)
+			assert.Len(t, bBytes, 32)
 			var bByteArray [32]byte
 			copy(bByteArray[:], bBytes)
 			b := Block(bByteArray)
@@ -138,7 +139,7 @@ func TestUnpadding(t *testing.T) {
 		}
 
 		_, err := UnpadMessage(bs)
-		assert.True(t, err != nil)
+		assert.NotEqual(t, err, nil)
 	}
 
 	testCases := []struct {
@@ -175,18 +176,18 @@ func TestUnpadding(t *testing.T) {
 		bs := []Block{}
 		for _, bHex := range test.bsHex {
 			bBytes, err := hex.DecodeString(bHex)
-			assert.NoError(t, err)
-			assert.Equal(t, 32, len(bBytes))
+			require.NoError(t, err)
+			assert.Len(t, bBytes, 32)
 			var bByteArray [32]byte
 			copy(bByteArray[:], bBytes)
 			b := Block(bByteArray)
 			bs = append(bs, b)
 		}
 		m, err := hex.DecodeString(test.mHex)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		unpadded, err := UnpadMessage(bs)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, m, unpadded)
 	}
 }
@@ -201,16 +202,16 @@ func TestPaddingRoundtrip(t *testing.T) {
 	}
 	for i := 0; i < 100; i++ {
 		l, err := rand.Int(rand.Reader, big.NewInt(100))
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		m := make([]byte, l.Int64())
 		_, err = rand.Read(m)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		ms = append(ms, m)
 	}
 	for _, m := range ms {
 		padded := PadMessage(m)
 		unpadded, err := UnpadMessage(padded)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, m, unpadded)
 	}
 }
@@ -225,7 +226,7 @@ func makeKeys(t *testing.T) (*EonPublicKey, *EpochSecretKey, *EpochID) {
 	gammas := []*Gammas{}
 	for i := 0; i < n; i++ {
 		p, err := RandomPolynomial(rand.Reader, threshold-1)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		ps = append(ps, p)
 		gammas = append(gammas, p.Gammas())
 	}
@@ -253,7 +254,7 @@ func makeKeys(t *testing.T) (*EonPublicKey, *EpochSecretKey, *EpochID) {
 		[]int{0, 1},
 		[]*EpochSecretKeyShare{epochSecretKeyShares[0], epochSecretKeyShares[1]},
 		threshold)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	return eonPublicKey, epochSecretKey, epochID
 }
 
@@ -262,11 +263,11 @@ func TestRoundTrip(t *testing.T) {
 
 	m := []byte("hello")
 	sigma, err := RandomSigma(rand.Reader)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	encM := Encrypt(m, eonPublicKey, epochID, sigma)
 	decM, err := encM.Decrypt(epochSecretKey)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, m, decM)
 }
 
@@ -274,7 +275,7 @@ func TestC1Malleability(t *testing.T) {
 	message := []byte("secret message")
 	eonPublicKey, decryptionKey, epochIDPoint := makeKeys(t)
 	originalSigma, err := RandomSigma(rand.Reader)
-	assert.True(t, err == nil, "Could not get random sigma")
+	assert.Equal(t, err, nil, "Could not get random sigma")
 	encryptedMessage := Encrypt(
 		message,
 		eonPublicKey,
@@ -295,18 +296,18 @@ func TestC1Malleability(t *testing.T) {
 		}
 	}
 	msg, err := encryptedMessage.Decrypt(decryptionKey)
-	assert.True(t, !bytes.Equal(message, msg), "decryption successful, in spite of tampered C1")
-	assert.True(t, err != nil, "decryption successful, in spite of tampered C1")
+	assert.False(t, bytes.Equal(message, msg), "decryption successful, in spite of tampered C1")
+	assert.NotEqual(t, err, nil, "decryption successful, in spite of tampered C1")
 }
 
 func TestMessageMalleability(t *testing.T) {
 	messageBlock, err := RandomSigma(rand.Reader)
-	assert.True(t, err == nil, "could not get random message")
+	assert.Equal(t, err, nil, "could not get random message")
 	originalMessage := messageBlock[:]
 
 	eonPublicKey, decryptionKey, epochIDPoint := makeKeys(t)
 	sigma, err := RandomSigma(rand.Reader)
-	assert.True(t, err == nil, "could not get random sigma")
+	assert.Equal(t, err, nil, "could not get random sigma")
 	encryptedMessage := Encrypt(
 		originalMessage,
 		eonPublicKey,
@@ -326,6 +327,6 @@ func TestMessageMalleability(t *testing.T) {
 	malleatedMessage[0] = byte(plaintextB0)
 
 	decryptedMessage, err := encryptedMessage.Decrypt(decryptionKey)
-	assert.True(t, !bytes.Equal(decryptedMessage, malleatedMessage), "message was successfully malleated")
-	assert.True(t, err != nil, "decryption successful, in spite of tampered message")
+	assert.False(t, bytes.Equal(decryptedMessage, malleatedMessage), "message was successfully malleated")
+	assert.NotEqual(t, err, nil, "decryption successful, in spite of tampered message")
 }

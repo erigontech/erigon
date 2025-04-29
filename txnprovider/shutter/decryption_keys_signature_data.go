@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"slices"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/types/clonable"
@@ -55,9 +55,7 @@ func (ip *IdentityPreimage) DecodeSSZ(buf []byte, _ int) error {
 		return fmt.Errorf("%w: len=%d", ErrIncorrectIdentityPreimageSize, len(ip))
 	}
 
-	var newIp IdentityPreimage
-	copy(newIp[:], buf)
-	*ip = newIp
+	copy(ip[:], buf)
 	return nil
 }
 
@@ -74,10 +72,17 @@ func (ip *IdentityPreimage) String() string {
 	return hexutil.Encode(ip[:])
 }
 
-func IdentityPreimageFromSSZ(b []byte) (*IdentityPreimage, error) {
-	ip := new(IdentityPreimage)
+func IdentityPreimageFromBytes(b []byte) (*IdentityPreimage, error) {
+	var ip IdentityPreimage
 	err := ip.DecodeSSZ(b, 0)
-	return ip, err
+	return &ip, err
+}
+
+func IdentityPreimageFromSenderPrefix(prefix [32]byte, sender common.Address) *IdentityPreimage {
+	var ip IdentityPreimage
+	copy(ip[:len(prefix)], prefix[:])
+	copy(ip[len(prefix):], sender.Bytes())
+	return &ip
 }
 
 type IdentityPreimages []*IdentityPreimage
@@ -116,7 +121,7 @@ func (d DecryptionKeysSignatureData) Sign(key *ecdsa.PrivateKey) ([]byte, error)
 	return crypto.Sign(h[:], key)
 }
 
-func (d DecryptionKeysSignatureData) Verify(signature []byte, address libcommon.Address) (bool, error) {
+func (d DecryptionKeysSignatureData) Verify(signature []byte, address common.Address) (bool, error) {
 	h, err := d.HashSSZ()
 	if err != nil {
 		return false, err

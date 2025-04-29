@@ -10,13 +10,13 @@ on:
 
 jobs:
   minimal-node-sync-from-scratch-test:
-    runs-on: self-hosted
-    timeout-minutes: 360 # 6 hours
+    runs-on: [self-hosted, qa]
+    timeout-minutes: 500 # 8 hours plus 20 minutes
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 7200 # 2 hours
-      TOTAL_TIME_SECONDS: 18000 # 5 hours
+      TOTAL_TIME_SECONDS: 28800 # 8 hours
       CHAIN: mainnet
 
     steps:
@@ -50,7 +50,7 @@ jobs:
           test_exit_status=$?
           
           # Save the subsection reached status
-          echo "::set-output name=test_executed::true"
+          echo "test_executed=true" >> "$GITHUB_OUTPUT"
           
           # Check test runner script exit status
           if [ $test_exit_status -eq 0 ]; then

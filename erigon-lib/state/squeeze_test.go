@@ -2,10 +2,11 @@ package state
 
 import (
 	"context"
-	"github.com/erigontech/erigon-lib/common"
-	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 	"math"
 	"testing"
+
+	"github.com/erigontech/erigon-lib/common"
+	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -22,7 +23,6 @@ type testAggConfig struct {
 
 func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Aggregator) {
 	tb.Helper()
-
 	db, agg := testDbAndAggregatorv3(tb, cfg.stepSize)
 	agg.commitmentValuesTransform = !cfg.disableCommitmentBranchTransform
 	agg.d[kv.CommitmentDomain].replaceKeysInValues = agg.commitmentValuesTransform
@@ -37,7 +37,7 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 	require.NoError(tb, err)
 	defer rwTx.Rollback()
 
-	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err := NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(tb, err)
 	defer domains.Close()
 
@@ -83,6 +83,9 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 }
 
 func TestAggregator_SqueezeCommitment(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
 
 	cfgd := &testAggConfig{stepSize: 32, disableCommitmentBranchTransform: true}
 	db, agg := testDbAggregatorWithFiles(t, cfgd)
@@ -95,7 +98,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err := NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -108,7 +111,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	// now do the squeeze
 	agg.commitmentValuesTransform = true
 	agg.d[kv.CommitmentDomain].replaceKeysInValues = true
-	err = ac.SqueezeCommitmentFiles()
+	err = SqueezeCommitmentFiles(ac, log.New())
 	require.NoError(t, err)
 	ac.Close()
 	agg.recalcVisibleFiles(math.MaxUint64)
@@ -117,11 +120,11 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	ac = agg.BeginFilesRo()
 	defer ac.Close()
 
-	domains, err = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err = NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 
 	// collect account keys to trigger commitment
-	acit, err := ac.RangeLatest(rwTx, kv.AccountsDomain, nil, nil, -1)
+	acit, err := ac.DebugRangeLatest(rwTx, kv.AccountsDomain, nil, nil, -1)
 	require.NoError(t, err)
 	defer acit.Close()
 
@@ -136,6 +139,6 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	root, err := domains.ComputeCommitment(context.Background(), false, domains.BlockNum(), "")
 	require.NoError(t, err)
 	require.NotEmpty(t, root)
-	require.EqualValues(t, latestRoot, root)
-	require.NotEqualValues(t, commitment.EmptyRootHash, root)
+	require.Equal(t, latestRoot, root)
+	require.NotEqual(t, commitment.EmptyRootHash, root)
 }

@@ -25,16 +25,16 @@ import (
 	"github.com/golang/snappy"
 	"github.com/spf13/afero"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
-func getBeaconStateFilename(blockRoot libcommon.Hash) string {
+func getBeaconStateFilename(blockRoot common.Hash) string {
 	return fmt.Sprintf("%x.snappy_ssz", blockRoot)
 }
 
-func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash, out *state.CachingBeaconState) (bs *state.CachingBeaconState, err error) {
+func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot common.Hash) (bs *state.CachingBeaconState, err error) {
 	var file afero.File
 	f.stateDumpLock.Lock()
 	defer f.stateDumpLock.Unlock()
@@ -72,11 +72,7 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash, out *s
 		return nil, fmt.Errorf("failed to read snappy buffer: %w, root: %x", err, blockRoot)
 	}
 	f.sszBuffer = f.sszBuffer[:n]
-	if out == nil {
-		bs = state.New(f.beaconCfg)
-	} else {
-		bs = out
-	}
+	bs = state.New(f.beaconCfg)
 
 	if err = bs.DecodeSSZ(f.sszBuffer, int(v[0])); err != nil {
 		return nil, fmt.Errorf("failed to decode beacon state: %w, root: %x, len: %d, decLen: %d, bs: %+v", err, blockRoot, n, len(f.sszBuffer), bs)
@@ -86,7 +82,7 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash, out *s
 }
 
 // dumpBeaconStateOnDisk dumps a beacon state on disk in ssz snappy format
-func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot libcommon.Hash, bs *state.CachingBeaconState, forced bool) (err error) {
+func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot common.Hash, bs *state.CachingBeaconState, forced bool) (err error) {
 	if !forced && bs.Slot()%dumpSlotFrequency != 0 {
 		return
 	}

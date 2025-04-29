@@ -24,7 +24,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/antiquary"
@@ -43,7 +43,7 @@ type StageHistoryReconstructionCfg struct {
 	beaconCfg                *clparams.BeaconChainConfig
 	downloader               *network.BackwardBeaconDownloader
 	sn                       *freezeblocks.CaplinSnapshots
-	startingRoot             libcommon.Hash
+	startingRoot             common.Hash
 	caplinConfig             clparams.CaplinConfig
 	waitForAllRoutines       bool
 	startingSlot             uint64
@@ -60,7 +60,7 @@ type StageHistoryReconstructionCfg struct {
 
 const logIntervalTime = 30 * time.Second
 
-func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig, waitForAllRoutines bool, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, backfillingThrottling time.Duration, executionBlocksCollector block_collector.BlockCollector, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, logger log.Logger) StageHistoryReconstructionCfg {
+func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig, waitForAllRoutines bool, startingRoot common.Hash, startinSlot uint64, tmpdir string, backfillingThrottling time.Duration, executionBlocksCollector block_collector.BlockCollector, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, logger log.Logger) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
 		beaconCfg:                beaconCfg,
 		downloader:               downloader,
@@ -91,11 +91,15 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		cfg.caplinConfig.ArchiveBlocks = false // disable backfilling if not on a supported network
 	}
 
+	var hasFinishedDownloadingElBlocks atomic.Bool
+
 	// Start the procedure
 	logger.Info("Starting downloading History", "from", currentSlot)
 	// Setup slot and block root
 	cfg.downloader.SetSlotToDownload(currentSlot)
 	cfg.downloader.SetExpectedRoot(blockRoot)
+
+	var initialBeaconBlock *cltypes.SignedBeaconBlock
 
 	var currEth1Progress atomic.Int64
 
@@ -115,6 +119,10 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			currEth1Progress.Store(int64(blk.Block.Body.ExecutionPayload.BlockNumber))
 		}
 
+		if initialBeaconBlock == nil {
+			initialBeaconBlock = blk
+		}
+
 		slot := blk.Block.Slot
 		isInCLSnapshots := cfg.sn.SegmentsMax() > blk.Block.Slot
 		// Skip blocks that are already in the snapshots
@@ -130,6 +138,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			blocksToDownload := cfg.beaconCfg.MinSlotsForBlobsSidecarsRequest() * 2
 			hasDownloadEnoughForImmediateBlobsBackfilling = cfg.startingSlot < blocksToDownload || slot > cfg.startingSlot-blocksToDownload
 		}
+
 		if cfg.engine != nil && cfg.engine.SupportInsertion() && blk.Version() >= clparams.BellatrixVersion {
 			frozenBlocksInEL := cfg.engine.FrozenBlocks(ctx)
 
@@ -153,6 +162,9 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			if hasELBlock && !cfg.caplinConfig.ArchiveBlocks {
 				return hasDownloadEnoughForImmediateBlobsBackfilling, tx.Commit()
 			}
+			hasFinishedDownloadingElBlocks.Store(hasELBlock)
+		} else {
+			hasFinishedDownloadingElBlocks.Store(true)
 		}
 		isInElSnapshots := true
 		if blk.Version() >= clparams.BellatrixVersion && cfg.engine != nil && cfg.engine.SupportInsertion() {
@@ -202,26 +214,59 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				speed := blockProgress / ratio
 				prevProgress = currProgress
 
-				if speed == 0 {
+				if speed == 0 || initialBeaconBlock == nil {
 					continue
 				}
+
 				if cfg.sn != nil && cfg.sn.SegmentsMax() == 0 {
 					cfg.sn.OpenFolder()
 				}
+
+				highestBlockSeen := initialBeaconBlock.Block.Slot
+				lowestBlockToReach := cfg.sn.SegmentsMax()
+
 				logArgs = append(logArgs,
 					"slot", currProgress,
 					"blockNumber", currEth1Progress.Load(),
 					"blk/sec", fmt.Sprintf("%.1f", speed),
 					"snapshots", cfg.sn.SegmentsMax(),
 				)
+
+				isDownloadingForBeacon := (hasFinishedDownloadingElBlocks.Load() || cfg.caplinConfig.ArchiveBlocks) && clparams.SupportBackfilling(cfg.beaconCfg.DepositNetworkID)
+
 				if cfg.engine != nil && cfg.engine.SupportInsertion() {
 					logArgs = append(logArgs, "frozenBlocks", cfg.engine.FrozenBlocks(ctx))
+					if !isDownloadingForBeacon {
+						// If we are not backfilling, we are in the EL phase
+						highestBlockSeen = initialBeaconBlock.Block.Body.ExecutionPayload.BlockNumber
+
+						h, err := cfg.engine.CurrentHeader(ctx)
+						if err != nil || h == nil {
+							log.Debug("could not log progress", "err", err)
+							lowestBlockToReach = cfg.engine.FrozenBlocks(ctx)
+						} else {
+							lowestBlockToReach = h.Number.Uint64()
+						}
+					}
 				}
+
 				logMsg := "Node is still syncing... downloading past blocks"
 				if isBackfilling.Load() {
 					logMsg = "Node has finished syncing... full history is being downloaded for archiving purposes"
 				}
-				logger.Info(logMsg, logArgs...)
+				// Log the progress for debugging
+				logger.Debug(logMsg, logArgs...)
+
+				if !isDownloadingForBeacon {
+					log.Info("Downloading Execution History", "progress",
+						fmt.Sprintf("%d/%d", highestBlockSeen-uint64(currEth1Progress.Load()), highestBlockSeen-lowestBlockToReach),
+						"blk/sec", fmt.Sprintf("%.1f", speed))
+				} else {
+					log.Info("Downloading Beacon History", "progress",
+						fmt.Sprintf("%d/%d", highestBlockSeen-currProgress, highestBlockSeen-lowestBlockToReach),
+						"blk/sec", fmt.Sprintf("%.1f", speed))
+				}
+				// More UX-friendly logging
 			case <-finishCh:
 				return
 			case <-ctx.Done():
@@ -238,11 +283,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			}
 		}
 		cfg.antiquary.NotifyBackfilled()
-		fmt.Println(cfg.caplinConfig.ArchiveBlocks)
 		if cfg.caplinConfig.ArchiveBlocks {
 			cfg.logger.Info("Full backfilling finished")
-		} else {
-			cfg.logger.Info("Missing blocks download finished (note: this does not mean that the history is complete, only that the missing blocks need for sync have been downloaded)")
 		}
 
 		close(finishCh)
@@ -366,7 +408,7 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 		default:
 		}
 		// Generate the request
-		req, err := network.BlobsIdentifiersFromBlindedBlocks(batch)
+		req, err := network.BlobsIdentifiersFromBlindedBlocks(batch, cfg.beaconCfg)
 		if err != nil {
 			cfg.logger.Debug("Error generating blob identifiers", "err", err)
 			continue

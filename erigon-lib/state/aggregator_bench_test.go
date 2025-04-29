@@ -22,20 +22,18 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
 )
@@ -46,19 +44,11 @@ func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.RwDB, *Aggregato
 	dirs := datadir.New(b.TempDir())
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	b.Cleanup(db.Close)
-	agg, err := NewAggregator2(context.Background(), dirs, aggStep, db, logger)
+	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, logger)
 	require.NoError(b, err)
 	b.Cleanup(agg.Close)
 	return db, agg
 }
-
-type txWithCtx struct {
-	kv.Tx
-	ac *AggregatorRoTx
-}
-
-func WrapTxWithCtx(tx kv.Tx, ctx *AggregatorRoTx) *txWithCtx { return &txWithCtx{Tx: tx, ac: ctx} }
-func (tx *txWithCtx) AggTx() any                             { return tx.ac }
 
 func BenchmarkAggregator_Processing(b *testing.B) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -82,7 +72,7 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
-	domains, err := NewSharedDomains(WrapTxWithCtx(tx, ac), log.New())
+	domains, err := NewSharedDomains(wrapTxWithCtx(tx, ac), log.New())
 	require.NoError(b, err)
 	defer domains.Close()
 
@@ -111,7 +101,7 @@ func queueKeys(ctx context.Context, seed, ofSize uint64) <-chan []byte {
 	keys := make(chan []byte, 1)
 	go func() {
 		for {
-			if ctx.Err() != nil {
+			if ctx.Err() != nil { //nolint:staticcheck
 				break
 			}
 			bb := make([]byte, ofSize)
@@ -124,17 +114,6 @@ func queueKeys(ctx context.Context, seed, ofSize uint64) <-chan []byte {
 	return keys
 }
 
-func Benchmark_BtreeIndex_Allocation(b *testing.B) {
-	rnd := newRnd(uint64(time.Now().UnixNano()))
-	for i := 0; i < b.N; i++ {
-		now := time.Now()
-		count := rnd.IntN(1000000000)
-		bt := newBtAlloc(uint64(count), uint64(1<<12), true, nil, nil)
-		bt.traverseDfs()
-		fmt.Printf("alloc %v\n", time.Since(now))
-	}
-}
-
 func Benchmark_BtreeIndex_Search(b *testing.B) {
 	logger := log.New()
 	rnd := newRnd(uint64(time.Now().UnixNano()))
@@ -142,7 +121,7 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 	defer os.RemoveAll(tmp)
 	dataPath := "../../data/storage.256-288.kv"
 
-	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 	comp := seg.CompressKeys | seg.CompressVals
 	buildBtreeIndex(b, dataPath, indexPath, comp, 1, logger, true)
 
@@ -160,7 +139,7 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 		p := rnd.IntN(len(keys))
 		cur, err := bt.Seek(getter, keys[p])
 		require.NoErrorf(b, err, "i=%d", i)
-		require.EqualValues(b, keys[p], cur.Key())
+		require.Equal(b, keys[p], cur.Key())
 		require.NotEmptyf(b, cur.Value(), "i=%d", i)
 		cur.Close()
 	}
@@ -174,7 +153,7 @@ func benchInitBtreeIndex(b *testing.B, M uint64, compression seg.FileCompression
 	b.Cleanup(func() { os.RemoveAll(tmp) })
 
 	dataPath := generateKV(b, tmp, 52, 10, 1000000, logger, 0)
-	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bt")
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bt")
 
 	buildBtreeIndex(b, dataPath, indexPath, compression, 1, logger, true)
 
@@ -202,7 +181,7 @@ func Benchmark_BTree_Seek(b *testing.B) {
 			cur, err := bt.Seek(getter, keys[p])
 			require.NoError(b, err)
 
-			require.EqualValues(b, keys[p], cur.key)
+			require.Equal(b, keys[p], cur.key)
 			cur.Close()
 		}
 	})
@@ -214,7 +193,7 @@ func Benchmark_BTree_Seek(b *testing.B) {
 			cur, err := bt.Seek(getter, keys[p])
 			require.NoError(b, err)
 
-			require.EqualValues(b, keys[p], cur.key)
+			require.Equal(b, keys[p], cur.key)
 
 			prevKey := common.Copy(keys[p])
 			ntimer := time.Duration(0)
@@ -285,7 +264,7 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 		}
 
 		require.NoErrorf(b, err, "i=%d", i)
-		require.EqualValues(b, keys[p], key)
+		require.Equal(b, keys[p], key)
 	}
 }
 

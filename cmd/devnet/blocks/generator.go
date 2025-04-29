@@ -23,10 +23,10 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/accounts/abi/bind"
-	"github.com/erigontech/erigon/accounts/abi/bind/backends"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/execution/abi/bind"
+	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 

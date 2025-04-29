@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
 
@@ -56,12 +57,12 @@ var (
 )
 
 type DecryptionKeysValidator struct {
-	config         Config
+	config         shuttercfg.Config
 	slotCalculator SlotCalculator
 	eonTracker     EonTracker
 }
 
-func NewDecryptionKeysValidator(config Config, sc SlotCalculator, et EonTracker) DecryptionKeysValidator {
+func NewDecryptionKeysValidator(config shuttercfg.Config, sc SlotCalculator, et EonTracker) DecryptionKeysValidator {
 	return DecryptionKeysValidator{
 		config:         config,
 		slotCalculator: sc,
@@ -160,7 +161,7 @@ func (v DecryptionKeysValidator) validateSignatures(msg *proto.DecryptionKeys, e
 
 	identityPreimages := make(IdentityPreimages, len(msg.Keys))
 	for i, k := range msg.Keys {
-		ip, err := IdentityPreimageFromSSZ(k.IdentityPreimage)
+		ip, err := IdentityPreimageFromBytes(k.IdentityPreimage)
 		if err != nil {
 			return err
 		}
@@ -210,11 +211,11 @@ func (v DecryptionKeysValidator) validateKeys(msg *proto.DecryptionKeys, eon Eon
 	}
 
 	for _, key := range msg.Keys {
-		eonSecretKey, err := EonSecretKeyFromBytes(key.Key)
+		epochSecretKey, err := EpochSecretKeyFromBytes(key.Key)
 		if err != nil {
 			return fmt.Errorf("issue converting eon secret key for identity: %w: %d", err, key.IdentityPreimage)
 		}
-		ok, err := crypto.VerifyEpochSecretKey(eonSecretKey, &eonPublicKey, key.IdentityPreimage)
+		ok, err := crypto.VerifyEpochSecretKey(epochSecretKey, eonPublicKey, key.IdentityPreimage)
 		if err != nil {
 			return err
 		}
@@ -224,7 +225,7 @@ func (v DecryptionKeysValidator) validateKeys(msg *proto.DecryptionKeys, eon Eon
 
 		// not valid
 		fullErr := fmt.Errorf("verification of eon secret key failed: %w", ErrInvalidKey)
-		ip, err := IdentityPreimageFromSSZ(key.IdentityPreimage)
+		ip, err := IdentityPreimageFromBytes(key.IdentityPreimage)
 		if err != nil {
 			return fmt.Errorf("%w: %w", fullErr, err)
 		}
@@ -263,9 +264,9 @@ func (v DecryptionKeysValidator) validateEonIndex(msg *proto.DecryptionKeys) (Eo
 	return eon, nil
 }
 
-func NewDecryptionKeysExtendedValidator(logger log.Logger, config Config, sc SlotCalculator, et EonTracker) pubsub.ValidatorEx {
+func NewDecryptionKeysExtendedValidator(logger log.Logger, config shuttercfg.Config, sc SlotCalculator, et EonTracker) pubsub.ValidatorEx {
 	dkv := NewDecryptionKeysValidator(config, sc, et)
-	return func(ctx context.Context, id peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
+	validator := func(ctx context.Context, id peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
 		if topic := msg.GetTopic(); topic != DecryptionKeysTopic {
 			logger.Debug("rejecting decryption keys msg due to topic mismatch", "topic", topic, "peer", id)
 			return pubsub.ValidationReject
@@ -289,5 +290,17 @@ func NewDecryptionKeysExtendedValidator(logger log.Logger, config Config, sc Slo
 		}
 
 		return pubsub.ValidationAccept
+	}
+
+	// decorate the validator with metrics
+	return func(ctx context.Context, id peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
+		result := validator(ctx, id, msg)
+		if result == pubsub.ValidationReject {
+			decryptionKeysRejections.Inc()
+		}
+		if result == pubsub.ValidationIgnore {
+			decryptionKeysIgnores.Inc()
+		}
+		return result
 	}
 }

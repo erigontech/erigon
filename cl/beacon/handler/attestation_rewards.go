@@ -22,7 +22,7 @@ import (
 	"io"
 	"net/http"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -109,13 +109,13 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 	if epoch > a.forkchoiceStore.LowestAvailableSlot()/a.beaconChainCfg.SlotsPerEpoch {
 		minRange := epoch * a.beaconChainCfg.SlotsPerEpoch
 		maxRange := (epoch + 1) * a.beaconChainCfg.SlotsPerEpoch
-		var blockRoot libcommon.Hash
+		var blockRoot common.Hash
 		for i := maxRange - 1; i >= minRange; i-- {
 			blockRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, i)
 			if err != nil {
 				return nil, err
 			}
-			if blockRoot == (libcommon.Hash{}) {
+			if blockRoot == (common.Hash{}) {
 				continue
 			}
 			if version == clparams.Phase0Version {

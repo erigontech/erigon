@@ -18,6 +18,7 @@ package shutter
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
@@ -25,8 +26,10 @@ import (
 )
 
 type BlockEvent struct {
-	BlockNum uint64
-	Unwind   bool
+	LatestBlockNum  uint64
+	LatestBlockTime uint64
+	BlocksBatchLen  uint64
+	Unwind          bool
 }
 
 type BlockListener struct {
@@ -35,19 +38,19 @@ type BlockListener struct {
 	events             *event.Observers[BlockEvent]
 }
 
-func NewBlockListener(logger log.Logger, stateChangesClient stateChangesClient) BlockListener {
-	return BlockListener{
+func NewBlockListener(logger log.Logger, stateChangesClient stateChangesClient) *BlockListener {
+	return &BlockListener{
 		logger:             logger,
 		stateChangesClient: stateChangesClient,
 		events:             event.NewObservers[BlockEvent](),
 	}
 }
 
-func (bl BlockListener) RegisterObserver(o event.Observer[BlockEvent]) event.UnregisterFunc {
+func (bl *BlockListener) RegisterObserver(o event.Observer[BlockEvent]) event.UnregisterFunc {
 	return bl.events.Register(o)
 }
 
-func (bl BlockListener) Run(ctx context.Context) error {
+func (bl *BlockListener) Run(ctx context.Context) error {
 	defer bl.logger.Info("block listener stopped")
 	bl.logger.Info("running block listener")
 
@@ -65,12 +68,19 @@ func (bl BlockListener) Run(ctx context.Context) error {
 
 		latestChange := batch.ChangeBatch[len(batch.ChangeBatch)-1]
 		blockEvent := BlockEvent{
-			BlockNum: latestChange.BlockHeight,
-			Unwind:   latestChange.Direction == remoteproto.Direction_UNWIND,
+			LatestBlockNum:  latestChange.BlockHeight,
+			LatestBlockTime: latestChange.BlockTime,
+			BlocksBatchLen:  uint64(len(batch.ChangeBatch)),
+			Unwind:          latestChange.Direction == remoteproto.Direction_UNWIND,
 		}
 
 		bl.events.NotifySync(blockEvent)
 	}
 
-	return err
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return fmt.Errorf("block listener sub.Recv: %w", err)
+	}
 }

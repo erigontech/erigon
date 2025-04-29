@@ -20,7 +20,7 @@ import (
 	"errors"
 	"fmt"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/crypto"
 )
 
@@ -33,19 +33,19 @@ type Eon struct {
 	ActivationBlock uint64
 	Key             []byte
 	Threshold       uint64
-	Members         []libcommon.Address
+	Members         []common.Address
 }
 
-func (e Eon) KeyperAt(index uint64) (libcommon.Address, error) {
+func (e Eon) KeyperAt(index uint64) (common.Address, error) {
 	if index >= uint64(len(e.Members)) {
-		return libcommon.Address{}, fmt.Errorf("%w: %d >= %d", ErrInvalidKeyperIndex, index, len(e.Members))
+		return common.Address{}, fmt.Errorf("%w: %d >= %d", ErrInvalidKeyperIndex, index, len(e.Members))
 	}
 
 	return e.Members[index], nil
 }
 
-func (e Eon) PublicKey() (crypto.EonPublicKey, error) {
-	eonPublicKey := crypto.EonPublicKey{}
+func (e Eon) PublicKey() (*crypto.EonPublicKey, error) {
+	eonPublicKey := new(crypto.EonPublicKey)
 	err := eonPublicKey.Unmarshal(e.Key)
 	return eonPublicKey, err
 }
@@ -54,13 +54,8 @@ func EonLess(a, b Eon) bool {
 	return a.Index < b.Index
 }
 
-type EonSecretKey = crypto.EpochSecretKey
-
-func EonSecretKeyFromBytes(b []byte) (*EonSecretKey, error) {
-	epochSecretKey := new(EonSecretKey)
-	if err := epochSecretKey.Unmarshal(b); err != nil {
-		return nil, err
-	}
-
-	return epochSecretKey, nil
+func EpochSecretKeyFromBytes(b []byte) (*crypto.EpochSecretKey, error) {
+	epochSecretKey := new(crypto.EpochSecretKey)
+	err := epochSecretKey.Unmarshal(b)
+	return epochSecretKey, err
 }

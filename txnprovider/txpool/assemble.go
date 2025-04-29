@@ -23,6 +23,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -41,6 +42,7 @@ func Assemble(
 	stateChangesClient StateChangesClient,
 	builderNotifyNewTxns func(),
 	logger log.Logger,
+	ethBackend remote.ETHBACKENDClient,
 	opts ...Option,
 ) (*TxPool, txpoolproto.TxpoolServer, error) {
 	options := applyOpts(opts...)
@@ -86,6 +88,7 @@ func Assemble(
 		stateChangesClient,
 		builderNotifyNewTxns,
 		newSlotsStreams,
+		ethBackend,
 		logger,
 		opts...,
 	)
@@ -106,7 +109,7 @@ var defaultPoolDBInitializer = func(ctx context.Context, cfg txpoolcfg.Config, l
 		WriteMergeThreshold(3 * 8192).
 		PageSize(16 * datasize.KB).
 		GrowthStep(16 * datasize.MB).
-		DirtySpace(uint64(128 * datasize.MB)).
+		DirtySpace(uint64(64 * datasize.MB)).
 		MapSize(1 * datasize.TB).
 		WriteMap(cfg.MdbxWriteMap)
 	if cfg.MdbxPageSize > 0 {

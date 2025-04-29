@@ -22,7 +22,7 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 type TxnProvider interface {
@@ -40,6 +40,12 @@ type ProvideOption func(opt *ProvideOptions)
 func WithParentBlockNum(blockNum uint64) ProvideOption {
 	return func(opt *ProvideOptions) {
 		opt.ParentBlockNum = blockNum
+	}
+}
+
+func WithBlockTime(blockTime uint64) ProvideOption {
+	return func(opt *ProvideOptions) {
+		opt.BlockTime = blockTime
 	}
 }
 
@@ -68,6 +74,7 @@ func WithTxnIdsFilter(txnIdsFilter mapset.Set[[32]byte]) ProvideOption {
 }
 
 type ProvideOptions struct {
+	BlockTime      uint64
 	ParentBlockNum uint64
 	Amount         int
 	GasTarget      uint64

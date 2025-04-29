@@ -17,7 +17,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//nolint:scopelint
 package state
 
 import (
@@ -57,12 +56,6 @@ type StateWriter interface {
 	CreateContract(address common.Address) error
 }
 
-type WriterWithChangeSets interface {
-	StateWriter
-	WriteChangeSets() error
-	WriteHistory() error
-}
-
 type NoopWriter struct {
 }
 
@@ -89,13 +82,5 @@ func (nw *NoopWriter) WriteAccountStorage(address common.Address, incarnation ui
 }
 
 func (nw *NoopWriter) CreateContract(address common.Address) error {
-	return nil
-}
-
-func (nw *NoopWriter) WriteChangeSets() error {
-	return nil
-}
-
-func (nw *NoopWriter) WriteHistory() error {
 	return nil
 }

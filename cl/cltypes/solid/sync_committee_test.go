@@ -19,14 +19,15 @@ package solid
 import (
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-lib/common"
 )
 
 func TestSyncCommittee(t *testing.T) {
 	// Test NewSyncCommitteeFromParameters
-	committee := make([]libcommon.Bytes48, 512)
+	committee := make([]common.Bytes48, 512)
 	aggregatePublicKey := [48]byte{1, 2, 3} // Example aggregate public key
 	syncCommittee := NewSyncCommitteeFromParameters(committee, aggregatePublicKey)
 	assert.NotNil(t, syncCommittee)
@@ -36,7 +37,7 @@ func TestSyncCommittee(t *testing.T) {
 	assert.Equal(t, committee, gotCommittee)
 
 	// Test SetCommittee
-	newCommittee := make([]libcommon.Bytes48, 512)
+	newCommittee := make([]common.Bytes48, 512)
 	for i := 0; i < 512; i++ {
 		copy(newCommittee[i][:], []byte{byte(i)})
 	}
@@ -46,13 +47,13 @@ func TestSyncCommittee(t *testing.T) {
 
 	// Test AggregatePublicKey
 	gotAggregatePublicKey := syncCommittee.AggregatePublicKey()
-	assert.Equal(t, libcommon.Bytes48(aggregatePublicKey), gotAggregatePublicKey)
+	assert.Equal(t, common.Bytes48(aggregatePublicKey), gotAggregatePublicKey)
 
 	// Test SetAggregatePublicKey
 	newAggregatePublicKey := [48]byte{4, 5, 6} // Example new aggregate public key
 	syncCommittee.SetAggregatePublicKey(newAggregatePublicKey)
 	updatedAggregatePublicKey := syncCommittee.AggregatePublicKey()
-	assert.Equal(t, libcommon.Bytes48(newAggregatePublicKey), updatedAggregatePublicKey)
+	assert.Equal(t, common.Bytes48(newAggregatePublicKey), updatedAggregatePublicKey)
 
 	// Test EncodingSizeSSZ
 	expectedEncodingSize := syncCommitteeSize
@@ -61,15 +62,15 @@ func TestSyncCommittee(t *testing.T) {
 
 	// Test EncodeSSZ and DecodeSSZ
 	encodedData, err := syncCommittee.EncodeSSZ(nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	decodedSyncCommittee := &SyncCommittee{}
 	err = decodedSyncCommittee.DecodeSSZ(encodedData, encodingSize)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, syncCommittee, decodedSyncCommittee)
 
 	// Test Clone
 	clone := syncCommittee.Clone().(*SyncCommittee)
-	assert.NotEqual(t, nil, clone)
+	assert.NotNil(t, clone)
 
 	// Test Copy
 	copy := syncCommittee.Copy()
@@ -83,8 +84,8 @@ func TestSyncCommittee(t *testing.T) {
 	// Test HashSSZ
 	expectedRoot := common.HexToHash("28628f3f10fa1070f2a42aeeeae792cd6ded1ef81030104e765e1498a1cfcfbd") // Example expected root
 	root, err := syncCommittee.HashSSZ()
-	assert.NoError(t, err)
-	assert.Equal(t, expectedRoot, libcommon.Hash(root))
+	require.NoError(t, err)
+	assert.Equal(t, expectedRoot, common.Hash(root))
 
 	// Test Static
 	assert.True(t, syncCommittee.Static())
@@ -92,16 +93,16 @@ func TestSyncCommittee(t *testing.T) {
 
 func TestSyncCommitteeJson(t *testing.T) {
 	// Test MarshalJSON and UnmarshalJSON
-	committee := make([]libcommon.Bytes48, 512)
+	committee := make([]common.Bytes48, 512)
 	for i := 0; i < 512; i++ {
 		copy(committee[i][:], []byte{byte(i)})
 	}
 	aggregatePublicKey := [48]byte{1, 2, 3} // Example aggregate public key
 	syncCommittee := NewSyncCommitteeFromParameters(committee, aggregatePublicKey)
 	encodedData, err := syncCommittee.MarshalJSON()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	decodedSyncCommittee := &SyncCommittee{}
 	err = decodedSyncCommittee.UnmarshalJSON(encodedData)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, syncCommittee, decodedSyncCommittee)
 }

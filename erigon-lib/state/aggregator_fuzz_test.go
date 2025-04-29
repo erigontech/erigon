@@ -21,36 +21,21 @@ package state
 import (
 	"context"
 	"encoding/binary"
-	"github.com/erigontech/erigon-lib/types/accounts"
 	"testing"
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/holiman/uint256"
-
-	"github.com/stretchr/testify/require"
+	"github.com/erigontech/erigon-lib/types/accounts"
 )
-
-func Fuzz_BtreeIndex_Allocation(f *testing.F) {
-	f.Add(uint64(1_000_000), uint64(1024))
-	f.Fuzz(func(t *testing.T, keyCount, M uint64) {
-		if keyCount < M*4 || M < 4 {
-			t.Skip()
-		}
-		bt := newBtAlloc(keyCount, M, false, nil, nil)
-		bt.traverseDfs()
-		require.GreaterOrEqual(t, bt.N, keyCount)
-
-		require.LessOrEqual(t, float64(bt.N-keyCount)/float64(bt.N), 0.05)
-
-	})
-}
 
 func Fuzz_AggregatorV3_Merge(f *testing.F) {
 	db, agg := testFuzzDbAndAggregatorv3(f, 10)
@@ -64,7 +49,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
-	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err := NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(f, err)
 	defer domains.Close()
 
@@ -147,7 +132,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
-		stat, err := ac.Prune(context.Background(), rwTx, 0, logEvery)
+		stat, err := ac.prune(context.Background(), rwTx, 0, logEvery)
 		require.NoError(t, err)
 		t.Logf("Prune: %s", stat)
 
@@ -168,14 +153,14 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 		require.NoError(t, err)
 		require.Truef(t, ex, "key %x not found", commKey1)
 
-		require.EqualValues(t, maxWrite, binary.BigEndian.Uint64(v[:]))
+		require.Equal(t, maxWrite, binary.BigEndian.Uint64(v[:]))
 
 		v, _, ex, err = dc.GetLatest(kv.CommitmentDomain, commKey2, roTx)
 		require.NoError(t, err)
 		require.Truef(t, ex, "key %x not found", commKey2)
 		dc.Close()
 
-		require.EqualValues(t, otherMaxWrite, binary.BigEndian.Uint64(v[:]))
+		require.Equal(t, otherMaxWrite, binary.BigEndian.Uint64(v[:]))
 	})
 
 }
@@ -191,7 +176,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 	}()
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
-	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err := NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(f, err)
 	defer domains.Close()
 
@@ -266,7 +251,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
-		stat, err := ac.Prune(context.Background(), rwTx, 0, logEvery)
+		stat, err := ac.prune(context.Background(), rwTx, 0, logEvery)
 		require.NoError(t, err)
 		t.Logf("Prune: %s", stat)
 
@@ -286,7 +271,7 @@ func testFuzzDbAndAggregatorv3(f *testing.F, aggStep uint64) (kv.RwDB, *Aggregat
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	f.Cleanup(db.Close)
 
-	agg, err := NewAggregator2(context.Background(), dirs, aggStep, db, logger)
+	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, logger)
 	require.NoError(err)
 	f.Cleanup(agg.Close)
 	err = agg.OpenFolder()

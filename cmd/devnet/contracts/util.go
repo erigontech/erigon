@@ -19,18 +19,18 @@ package contracts
 import (
 	"context"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
 	"github.com/erigontech/erigon/cmd/devnet/blocks"
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
-	"github.com/erigontech/erigon/cmd/devnet/requests"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/requests"
 )
 
-func TransactOpts(ctx context.Context, sender libcommon.Address) (*bind.TransactOpts, error) {
+func TransactOpts(ctx context.Context, sender common.Address) (*bind.TransactOpts, error) {
 	node := devnet.SelectNode(ctx)
 
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(accounts.SigKey(sender), node.ChainID())
@@ -50,7 +50,7 @@ func TransactOpts(ctx context.Context, sender libcommon.Address) (*bind.Transact
 	return transactOpts, nil
 }
 
-func DeploymentTransactor(ctx context.Context, deployer libcommon.Address) (*bind.TransactOpts, bind.ContractBackend, error) {
+func DeploymentTransactor(ctx context.Context, deployer common.Address) (*bind.TransactOpts, bind.ContractBackend, error) {
 	node := devnet.SelectNode(ctx)
 
 	transactOpts, err := TransactOpts(ctx, deployer)
@@ -62,23 +62,23 @@ func DeploymentTransactor(ctx context.Context, deployer libcommon.Address) (*bin
 	return transactOpts, NewBackend(node), nil
 }
 
-func Deploy[C any](ctx context.Context, deployer libcommon.Address, deploy func(auth *bind.TransactOpts, backend bind.ContractBackend) (libcommon.Address, types.Transaction, *C, error)) (libcommon.Address, types.Transaction, *C, error) {
+func Deploy[C any](ctx context.Context, deployer common.Address, deploy func(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *C, error)) (common.Address, types.Transaction, *C, error) {
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(accounts.SigKey(deployer), devnet.CurrentChainID(ctx))
 
 	if err != nil {
-		return libcommon.Address{}, nil, nil, err
+		return common.Address{}, nil, nil, err
 	}
 
 	return DeployWithOps[C](ctx, transactOpts, deploy)
 }
 
-func DeployWithOps[C any](ctx context.Context, auth *bind.TransactOpts, deploy func(auth *bind.TransactOpts, backend bind.ContractBackend) (libcommon.Address, types.Transaction, *C, error)) (libcommon.Address, types.Transaction, *C, error) {
+func DeployWithOps[C any](ctx context.Context, auth *bind.TransactOpts, deploy func(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *C, error)) (common.Address, types.Transaction, *C, error) {
 	node := devnet.SelectNode(ctx)
 
 	count, err := node.GetTransactionCount(auth.From, rpc.PendingBlock)
 
 	if err != nil {
-		return libcommon.Address{}, nil, nil, err
+		return common.Address{}, nil, nil, err
 	}
 
 	auth.Nonce = count

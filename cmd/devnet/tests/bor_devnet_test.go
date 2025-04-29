@@ -14,8 +14,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build integration
-
 package tests
 
 import (
@@ -27,15 +25,15 @@ import (
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	accounts_steps "github.com/erigontech/erigon/cmd/devnet/accounts/steps"
 	contracts_steps "github.com/erigontech/erigon/cmd/devnet/contracts/steps"
-	"github.com/erigontech/erigon/cmd/devnet/requests"
 	"github.com/erigontech/erigon/cmd/devnet/services"
+	"github.com/erigontech/erigon/rpc/requests"
 )
 
 func TestStateSync(t *testing.T) {
 	t.Skip()
 
 	runCtx, err := ContextStart(t, networkname.BorDevnet)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	var ctx context.Context = runCtx
 
 	t.Run("InitSubscriptions", func(t *testing.T) {
@@ -43,30 +41,30 @@ func TestStateSync(t *testing.T) {
 	})
 	t.Run("CreateAccountWithFunds", func(t *testing.T) {
 		_, err := accounts_steps.CreateAccountWithFunds(ctx, networkname.Dev, "root-funder", 200.0)
-		require.Nil(t, err)
+		require.NoError(t, err)
 	})
 	t.Run("CreateAccountWithFunds", func(t *testing.T) {
 		_, err := accounts_steps.CreateAccountWithFunds(ctx, networkname.BorDevnet, "child-funder", 200.0)
-		require.Nil(t, err)
+		require.NoError(t, err)
 	})
 	t.Run("DeployChildChainReceiver", func(t *testing.T) {
 		var err error
 		ctx, err = contracts_steps.DeployChildChainReceiver(ctx, "child-funder") //nolint
-		require.Nil(t, err)
+		require.NoError(t, err)
 	})
 	t.Run("DeployRootChainSender", func(t *testing.T) {
 		var err error
 		ctx, err = contracts_steps.DeployRootChainSender(ctx, "root-funder") //nolint
-		require.Nil(t, err)
+		require.NoError(t, err)
 	})
 	t.Run("GenerateSyncEvents", func(t *testing.T) {
-		require.Nil(t, contracts_steps.GenerateSyncEvents(ctx, "root-funder", 10, 2, 2))
+		require.NoError(t, contracts_steps.GenerateSyncEvents(ctx, "root-funder", 10, 2, 2))
 	})
 	t.Run("ProcessRootTransfers", func(t *testing.T) {
-		require.Nil(t, contracts_steps.ProcessRootTransfers(ctx, "root-funder", 10, 2, 2))
+		require.NoError(t, contracts_steps.ProcessRootTransfers(ctx, "root-funder", 10, 2, 2))
 	})
 	t.Run("BatchProcessRootTransfers", func(t *testing.T) {
-		require.Nil(t, contracts_steps.BatchProcessRootTransfers(ctx, "root-funder", 1, 10, 2, 2))
+		require.NoError(t, contracts_steps.BatchProcessRootTransfers(ctx, "root-funder", 1, 10, 2, 2))
 	})
 }
 
@@ -74,29 +72,29 @@ func TestChildChainExit(t *testing.T) {
 	t.Skip("FIXME: step CreateAccountWithFunds fails: Failed to get transfer tx: failed to search reserves for hashes: no block heads subscription")
 
 	runCtx, err := ContextStart(t, networkname.BorDevnet)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	var ctx context.Context = runCtx
 
 	t.Run("CreateAccountWithFunds", func(t *testing.T) {
 		_, err := accounts_steps.CreateAccountWithFunds(ctx, networkname.Dev, "root-funder", 200.0)
-		require.Nil(t, err)
+		require.NoError(t, err)
 	})
 	t.Run("CreateAccountWithFunds", func(t *testing.T) {
 		_, err := accounts_steps.CreateAccountWithFunds(ctx, networkname.BorDevnet, "child-funder", 200.0)
-		require.Nil(t, err)
+		require.NoError(t, err)
 	})
 	t.Run("DeployRootChainReceiver", func(t *testing.T) {
 		var err error
 		ctx, err = contracts_steps.DeployRootChainReceiver(ctx, "root-funder") //nolint
-		require.Nil(t, err)
+		require.NoError(t, err)
 	})
 	t.Run("DeployChildChainSender", func(t *testing.T) {
 		var err error
 		ctx, err = contracts_steps.DeployChildChainSender(ctx, "child-funder") //nolint
-		require.Nil(t, err)
+		require.NoError(t, err)
 	})
 	t.Run("ProcessChildTransfers", func(t *testing.T) {
-		require.Nil(t, contracts_steps.ProcessChildTransfers(ctx, "child-funder", 1, 2, 2))
+		require.NoError(t, contracts_steps.ProcessChildTransfers(ctx, "child-funder", 1, 2, 2))
 	})
 	//t.Run("BatchProcessTransfers", func(t *testing.T) {
 	//	require.Nil(t, contracts_steps.BatchProcessTransfers(ctx, "child-funder", 1, 10, 2, 2))

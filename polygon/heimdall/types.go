@@ -40,8 +40,8 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon/core/rawdb"
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
+	"github.com/erigontech/erigon/erigon-db/rawdb"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 )
 
@@ -153,8 +153,8 @@ var (
 		Enums.Events,
 		"borevents",
 		snaptype.Versions{
-			Current:      1, //2,
-			MinSupported: 1,
+			Current:      snaptype.V1_0, //2,
+			MinSupported: snaptype.V1_0,
 		},
 		EventRangeExtractor{},
 		[]snaptype.Index{Indexes.BorTxnHash},
@@ -206,7 +206,7 @@ var (
 				if err != nil {
 					return err
 				}
-				rs.LogLvl(log.LvlDebug)
+				rs.LogLvl(log.LvlInfo)
 
 				defer d.EnableReadAhead().DisableReadAhead()
 
@@ -250,8 +250,8 @@ var (
 		Enums.Spans,
 		"borspans",
 		snaptype.Versions{
-			Current:      1, //2,
-			MinSupported: 1,
+			Current:      snaptype.V1_0, //2,
+			MinSupported: snaptype.V1_0,
 		},
 		snaptype.RangeExtractorFunc(
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
@@ -279,47 +279,36 @@ var (
 		Enums.Checkpoints,
 		"borcheckpoints",
 		snaptype.Versions{
-			Current:      1, //2,
-			MinSupported: 1,
+			Current:      snaptype.V1_0, //2,
+			MinSupported: snaptype.V1_0,
 		},
 		snaptype.RangeExtractorFunc(
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 				var checkpointTo, checkpointFrom CheckpointId
 
-				checkpointId := func(rangeIndex RangeIndex, blockNum uint64) (CheckpointId, error) {
-					checkpointId, _, err := rangeIndex.Lookup(ctx, blockNum)
-					return CheckpointId(checkpointId), err
+				checkpointId := func(rangeIndex RangeIndex, blockNum uint64) (CheckpointId, bool, error) {
+					checkpointId, ok, err := rangeIndex.Lookup(ctx, blockNum)
+					return CheckpointId(checkpointId), ok, err
 				}
 
 				err := db.View(ctx, func(tx kv.Tx) (err error) {
 					rangeIndex := NewTxRangeIndex(db, kv.BorCheckpointEnds, tx)
 
-					checkpointFrom, err = checkpointId(rangeIndex, blockFrom)
-
+					if checkpointFrom, _, err = checkpointId(rangeIndex, blockFrom); err != nil {
+						return err
+					}
 					//checkpointFrom, err = CheckpointIdAt(tx, blockFrom)
 
-					if err != nil {
+					var ok bool
+
+					if checkpointTo, ok, err = checkpointId(rangeIndex, blockTo); err != nil {
 						return err
 					}
-
-					checkpointTo, err = checkpointId(rangeIndex, blockTo)
 					//checkpointTo, err = CheckpointIdAt(tx, blockTo)
 
-					if err != nil {
-						return err
-					}
-
-					if blockFrom > 0 {
-						if prevTo, err := checkpointId(rangeIndex, blockFrom-1); err == nil {
-							if prevTo == checkpointFrom {
-								if prevTo == checkpointTo {
-									checkpointFrom = 0
-									checkpointTo = 0
-								} else {
-									checkpointFrom++
-								}
-							}
-						}
+					// next checkpoint can be not committed yet
+					if !ok {
+						checkpointTo = checkpointFrom + 1
 					}
 
 					return err
@@ -364,43 +353,52 @@ var (
 		Enums.Milestones,
 		"bormilestones",
 		snaptype.Versions{
-			Current:      1, //2,
-			MinSupported: 1,
+			Current:      snaptype.V1_0, //2,
+			MinSupported: snaptype.V1_0,
 		},
 		snaptype.RangeExtractorFunc(
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 				var milestoneFrom, milestoneTo MilestoneId
 
-				milestoneId := func(rangeIndex RangeIndex, blockNum uint64) (MilestoneId, error) {
-					milestoneId, _, err := rangeIndex.Lookup(ctx, blockNum)
-					return MilestoneId(milestoneId), err
+				milestoneId := func(rangeIndex RangeIndex, blockNum uint64) (MilestoneId, bool, error) {
+					milestoneId, ok, err := rangeIndex.Lookup(ctx, blockNum)
+					return MilestoneId(milestoneId), ok, err
 				}
 				err := db.View(ctx, func(tx kv.Tx) (err error) {
+					// We have only 3 cases:
+					// Suppose we are trying to find the range [A, B) for blocks [1000, 2000)
+					//
+					// Case 1:
+					// Milestones: .., [900, 1000), [1000, 1100), ...
+					// Expecting milestoneFrom to be [1000, 1100)
+					//
+					// Case 2:
+					// Milestones: .., [950, 1050), [1050, 1150), ...
+					// Expecting milestoneFrom to be [950, 1050)
+					//
+					// Case 3:
+					// Milestones: .., [900, 2100), ...
+					// Expecting milestoneFrom to be [900, 2100), milestoneTo to be [900, 2100) as well
+
 					rangeIndex := NewTxRangeIndex(db, kv.BorMilestoneEnds, tx)
 
-					milestoneFrom, err = milestoneId(rangeIndex, blockFrom)
+					milestoneFrom, _, err = milestoneId(rangeIndex, blockFrom)
 
 					if err != nil && !errors.Is(err, ErrMilestoneNotFound) {
 						return err
 					}
 
-					milestoneTo, err = milestoneId(rangeIndex, blockTo)
+					var ok bool
+
+					milestoneTo, ok, err = milestoneId(rangeIndex, blockTo)
 
 					if err != nil && !errors.Is(err, ErrMilestoneNotFound) {
 						return err
 					}
 
-					if milestoneFrom > 0 && blockFrom > 0 {
-						if prevTo, err := milestoneId(rangeIndex, blockFrom-1); err == nil && prevTo == milestoneFrom {
-							if prevTo == milestoneFrom {
-								if prevTo == milestoneTo {
-									milestoneFrom = 0
-									milestoneTo = 0
-								} else {
-									milestoneFrom++
-								}
-							}
-						}
+					// next checkpoint can be not committed yet
+					if !ok {
+						milestoneTo = milestoneFrom + 1
 					}
 
 					return nil
@@ -477,6 +475,7 @@ func MilestonesEnabled() bool {
 	return false
 }
 
+// This function extracts values in interval [valueFrom, valueTo)
 func extractValueRange(ctx context.Context, table string, valueFrom, valueTo uint64, db kv.RoDB, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -529,7 +528,7 @@ func buildValueIndex(ctx context.Context, sn snaptype.FileInfo, salt uint32, d *
 	if err != nil {
 		return err
 	}
-	rs.LogLvl(log.LvlDebug)
+	rs.LogLvl(log.LvlInfo)
 
 	defer d.EnableReadAhead().DisableReadAhead()
 

@@ -160,7 +160,7 @@ func TestNextKey(t *testing.T) {
 		input := decodeHex(parts[0])
 		expectedOutput := decodeHex(parts[1])
 		actualOutput, err := NextKey(input)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, expectedOutput, actualOutput)
 	}
 }
@@ -187,9 +187,9 @@ func TestFileDataProviders(t *testing.T) {
 	collector := NewCollector(t.Name(), "", NewSortableBuffer(1), logger)
 
 	err := extractBucketIntoFiles("logPrefix", tx, sourceBucket, nil, nil, collector, testExtractToMapFunc, nil, nil, logger)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	assert.Equal(t, 10, len(collector.dataProviders))
+	assert.Len(t, collector.dataProviders, 10)
 
 	for _, p := range collector.dataProviders {
 		fp, ok := p.(*fileDataProvider)
@@ -197,7 +197,7 @@ func TestFileDataProviders(t *testing.T) {
 		err := fp.Wait()
 		require.NoError(t, err)
 		_, err = os.Stat(fp.file.Name())
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	}
 
 	collector.Close()
@@ -219,9 +219,9 @@ func TestRAMDataProviders(t *testing.T) {
 
 	collector := NewCollector(t.Name(), "", NewSortableBuffer(BufferOptimalSize), logger)
 	err := extractBucketIntoFiles("logPrefix", tx, sourceBucket, nil, nil, collector, testExtractToMapFunc, nil, nil, logger)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	assert.Equal(t, 1, len(collector.dataProviders))
+	assert.Len(t, collector.dataProviders, 1)
 
 	for _, p := range collector.dataProviders {
 		mp, ok := p.(*memoryDataProvider)
@@ -249,7 +249,7 @@ func TestTransformRAMOnly(t *testing.T) {
 		TransformArgs{},
 		logger,
 	)
-	assert.Nil(t, err)
+	require.NoError(t, err)
 	compareBuckets(t, tx, sourceBucket, destBucket, nil)
 }
 
@@ -269,7 +269,7 @@ func TestEmptySourceBucket(t *testing.T) {
 		TransformArgs{},
 		logger,
 	)
-	assert.Nil(t, err)
+	require.NoError(t, err)
 	compareBuckets(t, tx, sourceBucket, destBucket, nil)
 }
 
@@ -291,7 +291,7 @@ func TestTransformExtractStartKey(t *testing.T) {
 		TransformArgs{ExtractStartKey: []byte(fmt.Sprintf("%10d-key-%010d", 5, 5))},
 		logger,
 	)
-	assert.Nil(t, err)
+	require.NoError(t, err)
 	compareBuckets(t, tx, sourceBucket, destBucket, []byte(fmt.Sprintf("%10d-key-%010d", 5, 5)))
 }
 
@@ -315,7 +315,7 @@ func TestTransformThroughFiles(t *testing.T) {
 		},
 		logger,
 	)
-	assert.Nil(t, err)
+	require.NoError(t, err)
 	compareBuckets(t, tx, sourceBucket, destBucket, nil)
 }
 
@@ -337,7 +337,7 @@ func TestTransformDoubleOnExtract(t *testing.T) {
 		TransformArgs{},
 		logger,
 	)
-	assert.Nil(t, err)
+	require.NoError(t, err)
 	compareBucketsDouble(t, tx, sourceBucket, destBucket)
 }
 
@@ -359,7 +359,7 @@ func TestTransformDoubleOnLoad(t *testing.T) {
 		TransformArgs{},
 		logger,
 	)
-	assert.Nil(t, err)
+	require.NoError(t, err)
 	compareBucketsDouble(t, tx, sourceBucket, destBucket)
 }
 
@@ -369,7 +369,7 @@ func generateTestData(t *testing.T, db kv.Putter, bucket string, count int) {
 		k := []byte(fmt.Sprintf("%10d-key-%010d", i, i))
 		v := []byte(fmt.Sprintf("val-%099d", i))
 		err := db.Put(bucket, k, v)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	}
 }
 
@@ -440,13 +440,13 @@ func compareBuckets(t *testing.T, db kv.Tx, b1, b2 string, startKey []byte) {
 		b1Map[fmt.Sprintf("%x", k)] = fmt.Sprintf("%x", v)
 		return nil
 	})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	b2Map := make(map[string]string)
 	err = db.ForEach(b2, nil, func(k, v []byte) error {
 		b2Map[fmt.Sprintf("%x", k)] = fmt.Sprintf("%x", v)
 		return nil
 	})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, b1Map, b2Map)
 }
 
@@ -458,13 +458,13 @@ func compareBucketsDouble(t *testing.T, db kv.Tx, b1, b2 string) {
 		b1Map[fmt.Sprintf("%x", append(k, 0xBB))] = fmt.Sprintf("%x", append(v, 0xBB))
 		return nil
 	})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	b2Map := make(map[string]string)
 	err = db.ForEach(b2, nil, func(k, v []byte) error {
 		b2Map[fmt.Sprintf("%x", k)] = fmt.Sprintf("%x", v)
 		return nil
 	})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, b1Map, b2Map)
 }
 
@@ -484,9 +484,9 @@ func TestReuseCollectorAfterLoad(t *testing.T) {
 	require.Equal(t, 1, see)
 
 	// buffers are not lost
-	require.Zero(t, len(buf.data))
-	require.Zero(t, len(buf.lens))
-	require.Zero(t, len(buf.offsets))
+	require.Empty(t, buf.data)
+	require.Empty(t, buf.lens)
+	require.Empty(t, buf.offsets)
 	require.NotZero(t, cap(buf.data))
 	require.NotZero(t, cap(buf.lens))
 	require.NotZero(t, cap(buf.offsets))
@@ -545,7 +545,7 @@ func TestAppendAndSortPrefixes(t *testing.T) {
 
 	err := collector.Load(nil, "", func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error {
 		t.Logf("collated %x %x\n", k, v)
-		require.EqualValuesf(keys[i], fmt.Sprintf("%x", k), "i=%d", i)
+		require.Equalf(keys[i], fmt.Sprintf("%x", k), "i=%d", i)
 		i++
 		return nil
 	}, TransformArgs{})

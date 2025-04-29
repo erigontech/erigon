@@ -26,13 +26,8 @@ CGO_CFLAGS += -DMDBX_DISABLE_VALIDATION=0 # Can disable it on CI by separated PR
 #CGO_CFLAGS += -DMDBX_ENABLE_PGOP_STAT=0 # Disabled by default, but may be useful for performance debugging
 CGO_CFLAGS += -DMDBX_ENV_CHECKPID=0 # Erigon doesn't do fork() syscall
 
-# If it is arm64 or aarch64, then we need to use portable version of blst. use or with stringw "arm64" and "aarch64" to support both
-ifeq ($(shell uname -m), arm64)
-	CGO_CFLAGS += -D__BLST_PORTABLE__
-endif
-ifeq ($(shell uname -m), aarch64)
-	CGO_CFLAGS += -D__BLST_PORTABLE__
-endif
+
+CGO_CFLAGS += -D__BLST_PORTABLE__
 
 # Configure GOAMD64 env.variable for AMD64 architecture:
 ifeq ($(shell uname -m),x86_64)
@@ -167,23 +162,26 @@ db-tools:
 	go mod vendor
 	cd vendor/github.com/erigontech/mdbx-go && MDBX_BUILD_TIMESTAMP=unknown make tools
 	mkdir -p $(GOBIN)
-	cd vendor/github.com/erigontech/mdbx-go/mdbxdist && cp mdbx_chk $(GOBIN) && cp mdbx_copy $(GOBIN) && cp mdbx_dump $(GOBIN) && cp mdbx_drop $(GOBIN) && cp mdbx_load $(GOBIN) && cp mdbx_stat $(GOBIN)
+	cd vendor/github.com/erigontech/mdbx-go/libmdbx && cp mdbx_chk $(GOBIN) && cp mdbx_copy $(GOBIN) && cp mdbx_dump $(GOBIN) && cp mdbx_drop $(GOBIN) && cp mdbx_load $(GOBIN) && cp mdbx_stat $(GOBIN)
 	rm -rf vendor
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
 test-erigon-lib:
 	@cd erigon-lib && $(MAKE) test
 
+test-erigon-lib-all:
+	@cd erigon-lib && $(MAKE) test-all
+
 test-erigon-ext:
 	@cd tests/erigon-ext-test && ./test.sh $(GIT_COMMIT)
 
-## test:                              run unit tests with a 100s timeout
+## test:                      run short tests with a 10m timeout
 test: test-erigon-lib
-	$(GOTEST) --timeout 10m -coverprofile=coverage.out
+	$(GOTEST) -short --timeout 10m -coverprofile=coverage-test.out
 
-## test-integration:                  run integration tests with a 30m timeout
-test-integration: test-erigon-lib
-	$(GOTEST) --timeout 240m -tags $(BUILD_TAGS),integration
+## test-all:                  run all tests with a 1h timeout
+test-all: test-erigon-lib-all
+	$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out
 
 ## test-hive						run the hive tests locally off nektos/act workflows simulator
 test-hive:	
@@ -250,6 +248,33 @@ eest-hive:
 	cd "eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
 	cd "eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eest/consume-engine,"",--sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/pectra-devnet-6%40v1.0.0/fixtures_pectra-devnet-6.tar.gz)
 
+
+# define kurtosis assertoor runner
+define run-kurtosis-assertoor
+	docker build -t test/erigon:current . ; \
+	kurtosis enclave rm -f makefile-kurtosis-testnet ; \
+	kurtosis run --enclave makefile-kurtosis-testnet github.com/ethpandaops/ethereum-package --args-file $(1) ; \
+	printf "\nTo view logs: \nkurtosis service logs my-testnet el-1-erigon-lighthouse\n"
+endef
+
+check-kurtosis:
+	@if ! command -v kurtosis >/dev/null 2>&1; then \
+		echo "kurtosis command not found in PATH, please source it in PATH. If Kurtosis is not installed, install it by visiting https://docs.kurtosis.com/install/"; \
+		exit 1; \
+	fi; \
+
+kurtosis-pectra-assertoor:	check-kurtosis
+	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/pectra.io")
+
+kurtosis-reguler-assertoor:	check-kurtosis 
+	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/regular-assertoor.io")
+
+kurtosis-cleanup:
+	@echo "Currently Running Enclaves: "
+	@kurtosis enclave ls
+	@echo "-----------------------------------\n"
+	kurtosis enclave rm -f makefile-kurtosis-testnet
+
 ## lint-deps:                         install lint dependencies
 lint-deps:
 	@cd erigon-lib && $(MAKE) lint-deps
@@ -308,8 +333,18 @@ gencodec:
 graphql:
 	PATH=$(GOBIN):$(PATH) cd ./cmd/rpcdaemon/graphql && go run github.com/99designs/gqlgen .
 
+## grpc:                              generate grpc and protobuf code
+grpc:
+	@cd erigon-lib && $(MAKE) grpc
+	@cd txnprovider/shutter && $(MAKE) proto
+
+## stringer:                          generate stringer code
+stringer:
+	$(GOBUILD) -o $(GOBIN)/stringer golang.org/x/tools/cmd/stringer
+	PATH="$(GOBIN):$(PATH)" go generate -run "stringer" ./...
+
 ## gen:                               generate all auto-generated code in the codebase
-gen: mocks solc abigen gencodec graphql
+gen: mocks solc abigen gencodec graphql grpc stringer
 	@cd erigon-lib && $(MAKE) gen
 
 ## bindings:                          generate test contracts and core contracts

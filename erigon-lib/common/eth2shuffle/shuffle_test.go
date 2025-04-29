@@ -27,7 +27,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common/eth2shuffle"
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func getStandardHashFn() eth2shuffle.HashFn {
@@ -62,6 +62,10 @@ func readEncodedListInput(input string, requiredLen int64, lineIndex int) ([]uin
 }
 
 func TestAgainstSpec(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	// Open CSV file
 	f, err := os.Open("spec/tests.csv")
 	if err != nil {
@@ -90,9 +94,9 @@ func TestAgainstSpec(t *testing.T) {
 			t.Fatalf("list size on line %d cannot be parsed\n", lineIndex)
 		}
 		inputItems, err := readEncodedListInput(line[2], listSize, lineIndex)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		expectedItems, err := readEncodedListInput(line[3], listSize, lineIndex)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		t.Run("", func(listSize uint64, shuffleIn []uint64, shuffleOut []uint64) func(st *testing.T) {
 			return func(st *testing.T) {

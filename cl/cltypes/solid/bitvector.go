@@ -29,7 +29,7 @@ func NewBitVector(c int) *BitVector {
 	return &BitVector{
 		bitLen:    0,
 		bitCap:    c,
-		container: make([]byte, 0),
+		container: make([]byte, (c+7)/8),
 	}
 }
 
@@ -167,4 +167,14 @@ func (b *BitVector) Union(other *BitVector) (*BitVector, error) {
 		}
 	}
 	return new, nil
+}
+
+func (b *BitVector) IsOverlap(other *BitVector) bool {
+	// check by bytes
+	for i := 0; i < len(b.container) && i < len(other.container); i++ {
+		if b.container[i]&other.container[i] != 0 {
+			return true
+		}
+	}
+	return false
 }
