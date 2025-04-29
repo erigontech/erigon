@@ -24,17 +24,16 @@ import (
 	"encoding/json"
 	"errors"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/tracing"
 )
 
 // Context contains some contextual infos for a transaction execution that is not
 // available from within the EVM object.
 type Context struct {
-	BlockHash libcommon.Hash // Hash of the block the txn is contained within (zero if dangling txn or call)
-	TxIndex   int            // Index of the transaction within a block (zero if dangling txn or call)
-	TxHash    libcommon.Hash // Hash of the transaction being traced (zero if dangling call)
+	BlockHash common.Hash // Hash of the block the txn is contained within (zero if dangling txn or call)
+	TxIndex   int         // Index of the transaction within a block (zero if dangling txn or call)
+	TxHash    common.Hash // Hash of the transaction being traced (zero if dangling call)
 }
 
 // Tracer interface extends vm.EVMLogger and additionally

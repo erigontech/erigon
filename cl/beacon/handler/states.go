@@ -23,7 +23,7 @@ import (
 	"net/http"
 	"strconv"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -34,7 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 )
 
-func (a *ApiHandler) blockRootFromStateId(ctx context.Context, tx kv.Tx, stateId *beaconhttp.SegmentID) (root libcommon.Hash, httpStatusErr int, err error) {
+func (a *ApiHandler) blockRootFromStateId(ctx context.Context, tx kv.Tx, stateId *beaconhttp.SegmentID) (root common.Hash, httpStatusErr int, err error) {
 
 	switch {
 	case stateId.Head():
@@ -49,34 +49,34 @@ func (a *ApiHandler) blockRootFromStateId(ctx context.Context, tx kv.Tx, stateId
 	case stateId.Genesis():
 		root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, 0)
 		if err != nil {
-			return libcommon.Hash{}, http.StatusInternalServerError, err
+			return common.Hash{}, http.StatusInternalServerError, err
 		}
-		if root == (libcommon.Hash{}) {
-			return libcommon.Hash{}, http.StatusNotFound, errors.New("genesis block not found")
+		if root == (common.Hash{}) {
+			return common.Hash{}, http.StatusNotFound, errors.New("genesis block not found")
 		}
 		return
 	case stateId.GetSlot() != nil:
 		root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, *stateId.GetSlot())
 		if err != nil {
-			return libcommon.Hash{}, http.StatusInternalServerError, err
+			return common.Hash{}, http.StatusInternalServerError, err
 		}
-		if root == (libcommon.Hash{}) {
-			return libcommon.Hash{}, http.StatusNotFound, fmt.Errorf("block not found %d", *stateId.GetSlot())
+		if root == (common.Hash{}) {
+			return common.Hash{}, http.StatusNotFound, fmt.Errorf("block not found %d", *stateId.GetSlot())
 		}
 		return
 	case stateId.GetRoot() != nil:
 		root, err = beacon_indicies.ReadBlockRootByStateRoot(tx, *stateId.GetRoot())
 		if err != nil {
-			return libcommon.Hash{}, http.StatusInternalServerError, err
+			return common.Hash{}, http.StatusInternalServerError, err
 		}
 		return
 	default:
-		return libcommon.Hash{}, http.StatusInternalServerError, errors.New("cannot parse state id")
+		return common.Hash{}, http.StatusInternalServerError, errors.New("cannot parse state id")
 	}
 }
 
 type rootResponse struct {
-	Root libcommon.Hash `json:"root"`
+	Root common.Hash `json:"root"`
 }
 
 func previousVersion(v clparams.StateVersion) clparams.StateVersion {
@@ -148,7 +148,7 @@ func (a *ApiHandler) getStateRoot(w http.ResponseWriter, r *http.Request) (*beac
 	if err != nil {
 		return nil, err
 	}
-	if stateRoot == (libcommon.Hash{}) {
+	if stateRoot == (common.Hash{}) {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read block header: %x", root))
 	}
 
@@ -383,7 +383,7 @@ func (a *ApiHandler) getSyncCommittees(w http.ResponseWriter, r *http.Request) (
 }
 
 type randaoResponse struct {
-	Randao libcommon.Hash `json:"randao"`
+	Randao common.Hash `json:"randao"`
 }
 
 func (a *ApiHandler) getRandao(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {

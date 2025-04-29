@@ -29,7 +29,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon-lib/kv/backup"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
@@ -39,28 +38,30 @@ import (
 	"github.com/erigontech/secp256k1"
 
 	chain2 "github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/downloader"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/backup"
+	"github.com/erigontech/erigon-lib/kv/kvcfg"
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/wrap"
-
 	"github.com/erigontech/erigon-lib/state/stats"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/rawdb/blockio"
-	reset2 "github.com/erigontech/erigon/core/rawdb/rawdbreset"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/erigon-db/migrations"
+	"github.com/erigontech/erigon/erigon-db/rawdb"
+	"github.com/erigontech/erigon/erigon-db/rawdb/blockio"
+	reset2 "github.com/erigontech/erigon/erigon-db/rawdb/rawdbreset"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconsensusconfig"
 	"github.com/erigontech/erigon/eth/integrity"
@@ -68,7 +69,6 @@ import (
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/migrations"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/sentry"
@@ -331,7 +331,7 @@ var cmdAlloc = &cobra.Command{
 			panic(err)
 		}
 		n := make([]byte, v.Bytes())
-		libcommon.Sleep(cmd.Context(), 265*24*time.Hour)
+		common.Sleep(cmd.Context(), 265*24*time.Hour)
 		_ = n
 	},
 }
@@ -815,8 +815,8 @@ func stageBorHeimdall(db kv.TemporalRwDB, ctx context.Context, unwindTypes []str
 	blockReader, _ := blocksIO(db, logger)
 	var (
 		snapDb     kv.RwDB
-		recents    *lru.ARCCache[libcommon.Hash, *bor.Snapshot]
-		signatures *lru.ARCCache[libcommon.Hash, libcommon.Address]
+		recents    *lru.ARCCache[common.Hash, *bor.Snapshot]
+		signatures *lru.ARCCache[common.Hash, common.Address]
 	)
 	if bor, ok := engine.(*bor.Bor); ok {
 		snapDb = bor.DB
@@ -944,7 +944,7 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 	if integritySlow {
 		secp256k1.ContextForThread(1)
 		for i := block; ; i++ {
-			if err := libcommon.Stopped(ctx.Done()); err != nil {
+			if err := common.Stopped(ctx.Done()); err != nil {
 				return err
 			}
 			h, _ := br.HeaderByNumber(ctx, tx, i)
@@ -1185,13 +1185,27 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	defer sn.Close()
 	defer borSn.Close()
 	defer agg.Close()
+
+	chainConfig := fromdb.ChainConfig(db)
+	genesis := core.GenesisBlockByChainName(chain)
+	br, _ := blocksIO(db, logger)
+	cfg := stagedsync.StageCustomTraceCfg(db, dirs, br, chainConfig, engine, genesis, &syncCfg)
+	var producingDomain kv.Domain
+	if cfg.ExecArgs.ProduceReceiptDomain {
+		producingDomain = kv.RCacheDomain
+	} else if cfg.ExecArgs.ProduceRCacheDomain {
+		producingDomain = kv.RCacheDomain
+	} else {
+		panic("assert: which domain need to produce?")
+	}
+
 	if reset {
 		tx, err := db.BeginTemporalRw(ctx)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
-		tables := db.Debug().DomainTables(kv.ReceiptDomain)
+		tables := db.Debug().DomainTables(producingDomain)
 		if err := backup.ClearTables(ctx, tx, tables...); err != nil {
 			return err
 		}
@@ -1213,12 +1227,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
-	chainConfig := fromdb.ChainConfig(db)
-
-	genesis := core.GenesisBlockByChainName(chain)
-	br, _ := blocksIO(db, logger)
-	cfg := stagedsync.StageCustomTraceCfg(db, dirs, br, chainConfig, engine, genesis, &syncCfg)
-	err = stagedsync.SpawnCustomTrace(cfg, ctx, logger)
+	err = stagedsync.SpawnCustomTrace(cfg, producingDomain, ctx, logger)
 	if err != nil {
 		return err
 	}
@@ -1349,6 +1358,26 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 	var err error
 
 	openSnapshotOnce.Do(func() {
+		if err := db.View(context.Background(), func(tx kv.Tx) (err error) {
+			syncCfg.KeepExecutionProofs, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
+			if err != nil {
+				return err
+			}
+			syncCfg.PersistReceiptsCache, err = kvcfg.PersistReceipts.Enabled(tx)
+			if err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			panic(err)
+		}
+		if syncCfg.KeepExecutionProofs {
+			libstate.EnableHistoricalCommitment()
+		}
+		if syncCfg.PersistReceiptsCache {
+			libstate.EnableHistoricalRCache()
+		}
+
 		dirs := datadir.New(datadirCli)
 
 		chainConfig := fromdb.ChainConfig(db)
@@ -1456,19 +1485,6 @@ const blockBufferSize = 128
 func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.MiningConfig, logger log.Logger) (consensus.Engine, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
 
-	if err := db.View(context.Background(), func(tx kv.Tx) (err error) {
-		syncCfg.KeepExecutionProofs, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
-		if err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		panic(err)
-	}
-	if syncCfg.KeepExecutionProofs {
-		libstate.EnableHistoricalCommitment()
-	}
-
 	vmConfig := &vm.Config{}
 
 	events := shards.NewEvents()
@@ -1545,8 +1561,8 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 
 	var (
 		snapDb        kv.RwDB
-		recents       *lru.ARCCache[libcommon.Hash, *bor.Snapshot]
-		signatures    *lru.ARCCache[libcommon.Hash, libcommon.Address]
+		recents       *lru.ARCCache[common.Hash, *bor.Snapshot]
+		signatures    *lru.ARCCache[common.Hash, common.Address]
 		bridgeStore   bridge.Store
 		heimdallStore heimdall.Store
 	)

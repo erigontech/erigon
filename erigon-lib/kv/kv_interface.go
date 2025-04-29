@@ -25,10 +25,11 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/mdbx-go/mdbx"
+
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/mdbx-go/mdbx"
 )
 
 //Variables Naming:
@@ -531,11 +532,12 @@ type (
 	Domain      uint16
 	Appendable  uint16
 	History     string
-	InvertedIdx string
+	InvertedIdx uint16
 )
 
 type TemporalGetter interface {
 	GetLatest(name Domain, k []byte) (v []byte, step uint64, err error)
+	HasPrefix(name Domain, prefix []byte) (firstKey []byte, ok bool, err error)
 }
 type TemporalTx interface {
 	Tx
@@ -583,6 +585,7 @@ type TemporalDebugTx interface {
 
 	GreedyPruneHistory(ctx context.Context, domain Domain) error
 	PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error)
+	TxNumsInFiles(domains ...Domain) (minTxNum uint64)
 }
 
 type TemporalDebugDB interface {
@@ -612,6 +615,7 @@ type TemporalPutDel interface {
 	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 	//   - user can append k2 into k1, then underlying methods will not preform append
 	DomainPut(domain Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error
+	//DomainPut2(domain Domain, k1 []byte, val []byte, ts uint64) error
 
 	// DomainDel
 	// Optimizations:

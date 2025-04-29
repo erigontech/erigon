@@ -25,15 +25,15 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/consensuschain"
@@ -118,6 +118,10 @@ func (rw *Worker) ResetState(rs *state.ParallelExecutionState, accumulator *shar
 		rw.SetReader(state.NewReaderV3(rs.Domains()))
 	}
 	rw.stateWriter = state.NewStateWriterV3(rs, accumulator)
+}
+
+func (rw *Worker) SetGaspool(gp *core.GasPool) {
+	rw.taskGasPool = gp
 }
 
 func (rw *Worker) Tx() kv.TemporalTx { return rw.chainTx }
@@ -230,7 +234,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
-		syscall := func(contract libcommon.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
+		syscall := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 			ret, _, err := core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, constCall /* constCall */, rw.hooks)
 			return ret, err
 		}
@@ -242,7 +246,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		}
 
 		// End of block transaction in a block
-		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
+		syscall := func(contract common.Address, data []byte) ([]byte, error) {
 			ret, logs, err := core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */, rw.hooks)
 			if err != nil {
 				return nil, err
@@ -265,14 +269,15 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			//if err := ibs.CommitBlock(rules, rw.stateWriter); err != nil {
 			//	txTask.Error = err
 			//}
-			txTask.TraceTos = map[libcommon.Address]struct{}{}
+			txTask.TraceTos = map[common.Address]struct{}{}
 			txTask.TraceTos[txTask.Coinbase] = struct{}{}
 			for _, uncle := range txTask.Uncles {
 				txTask.TraceTos[uncle.Coinbase] = struct{}{}
 			}
 		}
 	default:
-		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), rw.chainConfig.GetMaxBlobGasPerBlock(header.Time))
+		// This doesn't make sense, but I am not sure if this wrong behaviour is needed somewhere else:
+		// rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), rw.chainConfig.GetMaxBlobGasPerBlock(header.Time))
 		rw.callTracer.Reset()
 		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		ibs.SetTxContext(txTask.TxIndex)

@@ -33,13 +33,13 @@ import (
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
-//go:embed testdata/v1-000000-000500-borevents.seg
+//go:embed testdata/v1.0-000000-000500-borevents.seg
 var events []byte
 
-//go:embed testdata/v1-000500-001000-borevents.seg
+//go:embed testdata/v1.0-000500-001000-borevents.seg
 var events2 []byte
 
-//go:embed testdata/v1-000000-000500-borspans.seg
+//go:embed testdata/v1.0-000000-000500-borspans.seg
 var spans []byte
 
 func createFiles(dataDir string) error {
@@ -49,19 +49,19 @@ func createFiles(dataDir string) error {
 		return err
 	}
 
-	destFile := filepath.Join(destPath, "v1-000000-000500-borevents.seg")
+	destFile := filepath.Join(destPath, "v1.0-000000-000500-borevents.seg")
 	err = os.WriteFile(destFile, events, 0755)
 	if err != nil {
 		return err
 	}
 
-	destFile = filepath.Join(destPath, "v1-000500-001000-borevents.seg")
+	destFile = filepath.Join(destPath, "v1.0-000500-001000-borevents.seg")
 	err = os.WriteFile(destFile, events2, 0755)
 	if err != nil {
 		return err
 	}
 
-	destFile = filepath.Join(destPath, "v1-000000-000500-borspans.seg")
+	destFile = filepath.Join(destPath, "v1.0-000000-000500-borspans.seg")
 	err = os.WriteFile(destFile, spans, 0755)
 	if err != nil {
 		return err
@@ -94,7 +94,7 @@ func TestSimulatorEvents(t *testing.T) {
 		t.Skip("fix me on win")
 	}
 
-	// the number of events included in v1-000000-000500-borevents.seg
+	// the number of events included in v1.0-000000-000500-borevents.seg
 	eventsCount := 100
 
 	ctx, cancel := context.WithCancel(context.Background())

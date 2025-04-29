@@ -224,6 +224,25 @@ func (tx *Tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, as
 	return it, nil
 }
 
+func (tx *Tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, bool, error) {
+	it, err := tx.Debug().RangeLatest(name, prefix, nil, 1)
+	if err != nil {
+		return nil, false, err
+	}
+
+	defer it.Close()
+	if !it.HasNext() {
+		return nil, false, nil
+	}
+
+	k, _, err := it.Next()
+	if err != nil {
+		return nil, false, err
+	}
+
+	return k, true, nil
+}
+
 func (tx *Tx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err error) {
 	v, step, ok, err := tx.aggtx.GetLatest(name, k, tx.MdbxTx)
 	if err != nil {
@@ -287,6 +306,9 @@ func (tx *Tx) DomainTables(domain ...kv.Domain) []string { return tx.db.agg.Doma
 func (db *DB) DomainTables(domain ...kv.Domain) []string { return db.agg.DomainTables(domain...) }
 func (tx *Tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
 	return tx.aggtx.DomainFiles(domain...)
+}
+func (tx *Tx) TxNumsInFiles(domains ...kv.Domain) (minTxNum uint64) {
+	return tx.aggtx.TxNumsInFiles(domains...)
 }
 func (tx *Tx) PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error) {
 	return tx.aggtx.PruneSmallBatches(ctx, timeout, tx.MdbxTx)

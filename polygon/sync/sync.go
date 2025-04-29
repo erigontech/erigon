@@ -25,9 +25,8 @@ import (
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 
 	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/p2p"
@@ -681,7 +680,7 @@ func (s *Sync) Run(ctx context.Context) error {
 
 		s.logger.Warn(syncLogPrefix("your heimdalld process is behind, please check its logs and <HEIMDALL_HOST>:1317/status api"))
 
-		if err := libcommon.Sleep(ctx, 30*time.Second); err != nil {
+		if err := common.Sleep(ctx, 30*time.Second); err != nil {
 			return err
 		}
 	}

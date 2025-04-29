@@ -19,7 +19,7 @@ package state_accessors
 import (
 	"testing"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/stretchr/testify/require"
 )
@@ -59,11 +59,11 @@ func TestStateEvents(t *testing.T) {
 			require.Equal(t, withdrawableEpoch, uint64(3))
 		}
 		return nil
-	}, func(validatorIndex uint64, withdrawalCredentials libcommon.Hash) error {
+	}, func(validatorIndex uint64, withdrawalCredentials common.Hash) error {
 		if validatorIndex == 1 {
-			require.Equal(t, withdrawalCredentials, libcommon.Hash([32]byte{2}))
+			require.Equal(t, withdrawalCredentials, common.Hash([32]byte{2}))
 		} else {
-			require.Equal(t, withdrawalCredentials, libcommon.Hash([32]byte{1}))
+			require.Equal(t, withdrawalCredentials, common.Hash([32]byte{1}))
 		}
 		return nil
 	}, func(validatorIndex, activationEpoch uint64) error {

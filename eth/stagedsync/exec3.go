@@ -37,15 +37,15 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	state2 "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/rawdb/rawdbhelpers"
-	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/erigon-db/rawdb"
+	"github.com/erigontech/erigon/erigon-db/rawdb/rawdbhelpers"
+	"github.com/erigontech/erigon/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/turbo/services"
@@ -315,7 +315,7 @@ func ExecV3(ctx context.Context,
 			accumulator = shards.NewAccumulator()
 		}
 	}
-	rs := state.NewParallelExecutionState(doms, logger)
+	rs := state.NewParallelExecutionState(doms, cfg.syncCfg, cfg.chainConfig.Bor != nil, logger)
 
 	////TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
 	// Now rwLoop closing both (because applyLoop we completely restart)
@@ -527,6 +527,8 @@ Loop:
 		})
 		totalGasUsed += b.GasUsed()
 		blockContext := core.NewEVMBlockContext(header, getHashFn, cfg.engine, cfg.author /* author */, chainConfig)
+		gp := new(core.GasPool).AddGas(header.GasLimit).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(b.Time()))
+
 		// print type of engine
 		if parallel {
 			if err := executor.status(ctx, commitThreshold); err != nil {
@@ -651,7 +653,7 @@ Loop:
 		}
 
 		if parallel {
-			_, err := executor.execute(ctx, txTasks)
+			_, err := executor.execute(ctx, txTasks, nil /*gasPool*/) // For now don't use block's gas pool for parallel
 			if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
 				hooks.OnBlockEnd(err)
 			}
@@ -665,7 +667,7 @@ Loop:
 
 			se.skipPostEvaluation = skipPostEvaluation
 
-			continueLoop, err := se.execute(ctx, txTasks)
+			continueLoop, err := se.execute(ctx, txTasks, gp)
 			if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
 				hooks.OnBlockEnd(err)
 			}
@@ -711,14 +713,6 @@ Loop:
 				}
 			}
 			executor.domains().SetChangesetAccumulator(nil)
-
-			if cfg.syncCfg.PersistReceipts > 0 {
-				if len(txTasks) > 0 && txTasks[0].BlockReceipts != nil {
-					if err := rawdb.WriteReceiptsCache(executor.tx(), txTasks[0].BlockNum, txTasks[0].BlockHash, txTasks[0].BlockReceipts); err != nil {
-						return err
-					}
-				}
-			}
 		}
 
 		mxExecBlocks.Add(1)

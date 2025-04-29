@@ -32,6 +32,8 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common"
@@ -48,8 +50,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/require"
 )
 
 func TestAggregatorV3_Merge(t *testing.T) {
@@ -267,25 +267,29 @@ func TestAggregatorV3_DirtyFilesRo(t *testing.T) {
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
 
-	checkDirtyFiles := func(dirtyFiles []*filesItem, expectedLen, expectedRefCnt int) {
-		require.Len(t, dirtyFiles, expectedLen)
+	checkDirtyFiles := func(dirtyFiles []*filesItem, expectedLen, expectedRefCnt int, disabled bool, name string) {
+		if disabled {
+			expectedLen = 0
+		}
+
+		require.Len(t, dirtyFiles, expectedLen, name)
 		for _, f := range dirtyFiles {
-			require.Equal(t, int32(expectedRefCnt), f.refcount.Load())
+			require.Equal(t, int32(expectedRefCnt), f.refcount.Load(), name)
 		}
 	}
 
 	checkAllEntities := func(expectedLen, expectedRefCnt int) {
 		for _, d := range agg.d {
-			checkDirtyFiles(d.dirtyFiles.Items(), expectedLen, expectedRefCnt)
+			checkDirtyFiles(d.dirtyFiles.Items(), expectedLen, expectedRefCnt, d.disable, d.name.String())
 			if d.snapshotsDisabled {
 				continue
 			}
-			checkDirtyFiles(d.History.dirtyFiles.Items(), expectedLen, expectedRefCnt)
-			checkDirtyFiles(d.History.InvertedIndex.dirtyFiles.Items(), expectedLen, expectedRefCnt)
+			checkDirtyFiles(d.History.dirtyFiles.Items(), expectedLen, expectedRefCnt, d.disable, d.name.String())
+			checkDirtyFiles(d.History.InvertedIndex.dirtyFiles.Items(), expectedLen, expectedRefCnt, d.disable, d.name.String())
 		}
 
 		for _, ii := range agg.iis {
-			checkDirtyFiles(ii.dirtyFiles.Items(), expectedLen, expectedRefCnt)
+			checkDirtyFiles(ii.dirtyFiles.Items(), expectedLen, expectedRefCnt, ii.disable, ii.filenameBase)
 		}
 	}
 
@@ -1084,7 +1088,8 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 
 	var latestCommitTxNum uint64
 	commit := func(txn uint64) error {
-		domains.Flush(ctx, tx)
+		err = domains.Flush(ctx, tx)
+		require.NoError(t, err)
 		ac.Close()
 		err = tx.Commit()
 		require.NoError(t, err)
@@ -1274,7 +1279,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	ps := background.NewProgressSet()
 
 	IndexFile := filepath.Join(tmp, fmt.Sprintf("%dk.bt", keyCount/1000))
-	err = BuildBtreeIndexWithDecompressor(IndexFile, decomp, compressFlags, ps, tb.TempDir(), 777, logger, true)
+	err = BuildBtreeIndexWithDecompressor(IndexFile, decomp, compressFlags, ps, tb.TempDir(), 777, logger, true, AccessorBTree|AccessorExistence)
 	require.NoError(tb, err)
 
 	return compPath
@@ -1546,7 +1551,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	buckets, err := rwTx.ListBuckets()
 	require.NoError(t, err)
 	for i, b := range buckets {
-		if strings.Contains(strings.ToLower(b), "commitment") {
+		if strings.Contains(strings.ToLower(b), kv.CommitmentDomain.String()) {
 			size, err := rwTx.BucketSize(b)
 			require.NoError(t, err)
 			t.Logf("cleaned table #%d %s: %d keys", i, b, size)
@@ -1558,7 +1563,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	require.NoError(t, rwTx.Commit())
 
 	for _, fn := range fnames {
-		if strings.Contains(fn, "v1-commitment") {
+		if strings.Contains(fn, kv.CommitmentDomain.String()) {
 			require.NoError(t, os.Remove(fn))
 			t.Logf("removed file %s", filepath.Base(fn))
 		}
@@ -1570,7 +1575,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	finalRoot, err := RebuildCommitmentFiles(ctx, db, &rawdbv3.TxNums, agg.logger)
 	require.NoError(t, err)
 	require.NotEmpty(t, finalRoot)
-	require.NotEqualValues(t, commitment.EmptyRootHash, finalRoot)
+	require.NotEqual(t, commitment.EmptyRootHash, finalRoot)
 
 	require.EqualValues(t, roots[len(roots)-1][:], finalRoot[:])
 }
