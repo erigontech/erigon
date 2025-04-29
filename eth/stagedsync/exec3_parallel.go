@@ -186,6 +186,11 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 			ibs.AddBalance(result.ExecutionResult.BurntContractAddress, result.ExecutionResult.FeeBurnt, tracing.BalanceDecreaseGasBuy)
 		}
 
+		if traceTx(blockNum, txIndex) {
+			coinbaseBalance, _ := ibs.GetBalance(result.Coinbase)
+			fmt.Println(blockNum, fmt.Sprintf("(%d.%d)", txIndex, txTask.Version().Incarnation), "CB", fmt.Sprintf("%x", result.Coinbase), fmt.Sprintf("%d", &coinbaseBalance))
+		}
+
 		ibs.AddBalance(result.Coinbase, result.ExecutionResult.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee)
 
 		if engine != nil {
@@ -195,8 +200,6 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 				if err != nil {
 					return nil, err
 				}
-
-				fmt.Println(blockNum, fmt.Sprintf("%d.%d", txTask.Version().TxIndex, txTask.Version().Incarnation), "CB", fmt.Sprintf("%x", result.Coinbase), coinbaseBalance.Uint64())
 
 				execResult := *result.ExecutionResult
 				execResult.CoinbaseInitBalance = coinbaseBalance.Clone()
