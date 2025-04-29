@@ -98,9 +98,17 @@ func StageCustomTraceCfg(produce []string, db kv.TemporalRwDB, dirs datadir.Dirs
 	}
 }
 
-func SpawnCustomTrace(cfg CustomTraceCfg, producingDomain kv.Domain, ctx context.Context, logger log.Logger) error {
+func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger) error {
 	log.Info("[stage_custom_trace] start params", "produce", cfg.Produce)
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.ExecArgs.BlockReader))
+
+	var producingDomain kv.Domain
+	if cfg.Produce.ReceiptDomain {
+		producingDomain = kv.ReceiptDomain
+	}
+	if cfg.Produce.RCacheDomain {
+		producingDomain = kv.RCacheDomain
+	}
 
 	var startBlock, endBlock uint64
 	if err := cfg.db.View(ctx, func(tx kv.Tx) (err error) {
