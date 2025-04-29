@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 )
@@ -161,4 +162,84 @@ func TestHasPrefix(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, append(acc1.Bytes(), acc1slot1.Bytes()...), firstKey)
 	}
+}
+
+func TestRangeAsOf(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	logger := log.New()
+	logger.SetHandler(log.LvlFilterHandler(log.LvlTrace, log.StderrHandler))
+
+	mdbxDb := memdb.NewTestDB(t, kv.ChainDB)
+	dirs := datadir.New(t.TempDir())
+	aggStep := uint64(1)
+	agg, err := state.NewAggregator(ctx, dirs, aggStep, mdbxDb, logger)
+	require.NoError(t, err)
+	t.Cleanup(agg.Close)
+	temporalDb, err := New(mdbxDb, agg)
+	require.NoError(t, err)
+	t.Cleanup(temporalDb.Close)
+
+	roTtx1, err := temporalDb.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	t.Cleanup(roTtx1.Rollback)
+
+	// empty range when nothing has been written yet
+	acc1 := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	acc1slot1 := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000001")
+	it1, err := roTtx1.RangeAsOf(kv.StorageDomain, acc1.Bytes(), nil, 0, order.Asc, -1)
+	require.NoError(t, err)
+	t.Cleanup(it1.Close)
+	require.False(t, it1.HasNext())
+
+	// write storage at txn num 1 and then delete storage at txn num 2
+	rwTtx1, err := temporalDb.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	t.Cleanup(rwTtx1.Rollback)
+	sd, err := state.NewSharedDomains(rwTtx1, logger)
+	require.NoError(t, err)
+	t.Cleanup(sd.Close)
+	sd.SetTxNum(1)
+	err = sd.DomainPut(kv.StorageDomain, acc1.Bytes(), acc1slot1.Bytes(), []byte{1}, nil, 0)
+	require.NoError(t, err)
+	err = sd.Flush(ctx, rwTtx1)
+	require.NoError(t, err)
+	err = rwTtx1.Commit()
+	require.NoError(t, err)
+	// tnx num 2
+	//rwTtx2, err := temporalDb.BeginTemporalRw(ctx)
+	//require.NoError(t, err)
+	//t.Cleanup(rwTtx2.Rollback)
+	//sd.SetTx(rwTtx2)
+	//sd.SetTxNum(2)
+	//err = sd.DomainDel(kv.StorageDomain, acc1.Bytes(), acc1slot1.Bytes(), nil, 0)
+	//require.NoError(t, err)
+	//err = sd.Flush(ctx, rwTtx2)
+	//require.NoError(t, err)
+	//err = rwTtx2.Commit()
+	//require.NoError(t, err)
+	//err = agg.BuildFiles(2)
+	//require.NoError(t, err)
+
+	// non-empty range at txn num 1
+	roTtx2, err := temporalDb.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	t.Cleanup(roTtx2.Rollback)
+	it2, err := roTtx2.RangeAsOf(kv.StorageDomain, acc1.Bytes(), nil, 2, order.Asc, -1)
+	require.NoError(t, err)
+	t.Cleanup(it2.Close)
+	require.True(t, it2.HasNext())
+	k, v, err := it2.Next()
+	require.NoError(t, err)
+	require.Equal(t, append(acc1.Bytes(), acc1slot1.Bytes()...), k)
+	require.Equal(t, []byte{1}, v)
+
+	// empty range at txn num 2
+	//it3, err := roTtx2.RangeAsOf(kv.StorageDomain, acc1.Bytes(), nil, 2, order.Asc, -1)
+	//require.NoError(t, err)
+	//t.Cleanup(it3.Close)
+	//require.False(t, it3.HasNext())
 }
