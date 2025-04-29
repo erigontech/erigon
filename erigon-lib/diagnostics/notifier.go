@@ -1,10 +1,7 @@
 package diagnostics
 
 import (
-	"encoding/json"
 	"net/http"
-	"os"
-	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/gorilla/websocket"
@@ -28,26 +25,6 @@ var upgrader = websocket.Upgrader{
 // these WebSocket connections.
 func (d *DiagnosticClient) SetupNotifier() {
 	d.metricsMux.HandleFunc("/ws", d.HandleConnections)
-
-	//save notification messages to json file every 10 seconds
-	go func() {
-		for {
-			time.Sleep(10 * time.Second)
-			d.SaveNotificationMessagesToJsonFile()
-		}
-	}()
-}
-
-func (d *DiagnosticClient) SaveNotificationMessagesToJsonFile() {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	data, err := json.Marshal(d.notificationMessages)
-	if err != nil {
-		log.Error("[Diagnostics] Error marshalling notification messages", "err", err)
-		return
-	}
-	os.WriteFile("/erigon/dvovk/notification_messages.json", data, 0644)
 }
 
 // Notify sends a structured diagnostic message to the connected WebSocket client.
