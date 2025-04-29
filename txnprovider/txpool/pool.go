@@ -525,7 +525,6 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 		txn := newTxns.Txns[i]
 
 		if isDiagEnabled {
-			fmt.Println("connected")
 			subpool := "Unknown"
 			orderMarker := SubPoolMarker(0)
 			found := p.all.get(txn.SenderID, txn.Nonce)
@@ -551,7 +550,6 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 			}
 
 			diagTxns = append(diagTxns, diagTxn)
-			fmt.Println("diagTxns", len(diagTxns))
 		}
 
 		if reason == txpoolcfg.Success {
@@ -564,7 +562,6 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 	}
 
 	if isDiagEnabled {
-		fmt.Println("sending diagTxns", len(diagTxns))
 		diagnostics.Send(diagnostics.IncomingTxnUpdate{
 			Txns:    diagTxns,
 			Updates: map[string][][32]byte{},
@@ -2731,37 +2728,6 @@ func sendSenderInfoUpdateToDiagnostics(senderID uint64, senderNonce uint64, send
 		BlockGasLimit: blockGasLimit,
 	})
 }
-
-/*func (p *TxPool) sendSenderInfoUpdateToDiagnostics(cacheView kvcache.CacheView) {
-	if !diagnostics.Client().Connected() {
-		return
-	}
-
-	senders := make([]diagnostics.SenderInfo, 0)
-
-	for i := 0; i < p.unprocessedRemoteTxns.Senders.Len(); i++ {
-		addr := p.unprocessedRemoteTxns.Senders.AddressAt(i)
-		senderID, _ := p.senders.getID(addr)
-		nonce, balance, err := p.senders.info(cacheView, senderID)
-		if err != nil {
-			return
-		}
-
-		highestNonce, _ := p.all.nonce(senderID)
-
-		senders = append(senders, diagnostics.SenderInfo{
-			Address:          addr,
-			StateNonce:       nonce,
-			StateBalance:     balance,
-			HighestPoolNonce: highestNonce,
-		})
-	}
-
-	// Send sender info update to diagnostics
-	diagnostics.Send(diagnostics.SenderInfoUpdate{
-		Senders: senders,
-	})
-}*/
 
 func sendNewBlockEventToDiagnostics(unwindTxns, unwindBlobTxns, minedTxns TxnSlots, blockNum uint64, blkTime uint64) {
 	if !diagnostics.Client().Connected() {

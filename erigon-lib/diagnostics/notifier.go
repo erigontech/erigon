@@ -36,7 +36,6 @@ func (d *DiagnosticClient) Notify(msg DiagMessages) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	d.notificationMessages = append(d.notificationMessages, msg)
 	// If there is no connection, don't bother sending the message
 	if d.conn == nil {
 		return
