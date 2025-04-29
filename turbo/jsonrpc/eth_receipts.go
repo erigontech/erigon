@@ -303,6 +303,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 
 	// Get logs from state sync events for block range
 	if chainConfig.Bor != nil {
+		var allBorLogs []*types.ErigonLog
 		for blockNum := begin; blockNum <= end; blockNum++ {
 			header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)
 			if err != nil {
@@ -342,7 +343,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 
 			borLogs = borLogs.Filter(addrMap, crit.Topics, 0)
 			for _, filteredLog := range borLogs {
-				logs = append(logs, &types.ErigonLog{
+				allBorLogs = append(allBorLogs, &types.ErigonLog{
 					Address:     filteredLog.Address,
 					Topics:      filteredLog.Topics,
 					Data:        filteredLog.Data,
@@ -356,9 +357,37 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				})
 			}
 		}
+
+		// merge bor logs in the correct order
+		logs = mergeSortedLogs(logs, allBorLogs)
 	}
 
 	return logs, nil
+}
+
+func mergeSortedLogs(orig, new []*types.ErigonLog) []*types.ErigonLog {
+	merged := make([]*types.ErigonLog, 0, len(orig)+len(new))
+	i, j := 0, 0
+
+	for i < len(orig) && j < len(new) {
+		if orig[i].BlockNumber <= new[j].BlockNumber {
+			merged = append(merged, orig[i])
+			i++
+		} else {
+			merged = append(merged, new[j])
+			j++
+		}
+	}
+
+	if i < len(orig) {
+		merged = append(merged, orig[i:]...)
+	}
+
+	if j < len(new) {
+		merged = append(merged, new[j:]...)
+	}
+
+	return merged
 }
 
 // The Topic list restricts matches to particular event topics. Each event has a list
