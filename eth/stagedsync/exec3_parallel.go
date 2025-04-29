@@ -221,20 +221,21 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 		}
 	}
 
-	if txTask.Config.IsByzantium(blockNum) {
-		ibs.FinalizeTx(txTask.Config.Rules(txTask.BlockNumber(), txTask.BlockTime()), stateWriter)
-	}
-
 	var tracePrefix string
 	if dbg.TraceTransactionIO && traceTx(blockNum, txIndex) {
 		tracePrefix = fmt.Sprintf("%d (%d.%d)", blockNum, txIndex, txIncarnation)
 		vm.SetTrace(true)
+		fmt.Println(tracePrefix, ibs.VersionedWrites(true))
 	}
-	
+
 	// we need to flush the finalized writes to the version map so
 	// they are taken into account by subsequent transactions
 	vm.FlushVersionedWrites(ibs.VersionedWrites(true), true, tracePrefix)
 	vm.SetTrace(false)
+
+	if txTask.Config.IsByzantium(blockNum) {
+		ibs.FinalizeTx(txTask.Config.Rules(txTask.BlockNumber(), txTask.BlockTime()), stateWriter)
+	}
 
 	// Create a new receipt for the transaction, storing the intermediate root and gas used by the tx.
 	result.Receipt = &types.Receipt{
