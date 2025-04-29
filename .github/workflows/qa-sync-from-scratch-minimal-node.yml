@@ -10,7 +10,7 @@ on:
 
 jobs:
   minimal-node-sync-from-scratch-test:
-    runs-on: [self-hosted, qa]
+    runs-on: [self-hosted, qa, long-running]
     timeout-minutes: 500 # 8 hours plus 20 minutes
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
