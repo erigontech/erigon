@@ -29,8 +29,8 @@ linters:
     - thelper
     - unconvert
     - wastedassign
-    - testifylint
   disable:
+    - testifylint
     - staticcheck #TODO: enable me
     - perfsprint #TODO: enable me
     - recvcheck  #TODO: enable me
