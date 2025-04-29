@@ -96,13 +96,11 @@ type Config struct {
 	AllowAA bool
 
 	ArbitrumChainParams ArbitrumChainParams `json:"arbitrum,omitempty"`
-	//ArbJSON             json.RawMessage     `json:"arbitrum,omitempty"`
 
 	DAOForkSupport bool `json:"daoForkSupport,omitempty"` // Whether the nodes supports or opposes the DAO hard-fork
 
 	// arbitrum state clearing? (https://github.com/ethereum/EIPs/issues/158)
 	EIP158Block *big.Int `json:"eip158Block,omitempty"` // EIP158 HF block - nitro related stuff
-
 }
 
 var (
