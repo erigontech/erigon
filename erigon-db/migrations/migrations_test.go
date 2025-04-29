@@ -137,7 +137,7 @@ func TestApplyWithoutInit(t *testing.T) {
 		applied, err = AppliedMigrations(tx, false)
 		require.NoError(err)
 
-		require.Equal(2, len(applied))
+		require.Len(applied, 2)
 		_, ok := applied[m[1].Name]
 		require.True(ok)
 		_, ok = applied[m[0].Name]
@@ -202,7 +202,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 		applied, err = AppliedMigrations(tx, false)
 		require.NoError(err)
 
-		require.Equal(2, len(applied))
+		require.Len(applied, 2)
 		_, ok := applied[m[1].Name]
 		require.True(ok)
 		_, ok = applied[m[0].Name]
@@ -236,7 +236,7 @@ func TestMarshalStages(t *testing.T) {
 	res, err := UnmarshalMigrationPayload(data)
 	require.NoError(err)
 
-	require.Equal(1, len(res))
+	require.Len(res, 1)
 	v, ok := res[string(stages.Execution)]
 	require.True(ok)
 	require.NotNil(v)
@@ -280,13 +280,13 @@ func TestValidation(t *testing.T) {
 	migrator.Migrations = m
 	logger := log.New()
 	err := migrator.Apply(db, "", "", logger)
-	require.True(errors.Is(err, ErrMigrationNonUniqueName))
+	require.ErrorIs(err, ErrMigrationNonUniqueName)
 
 	var applied map[string][]byte
 	err = db.View(context.Background(), func(tx kv.Tx) error {
 		applied, err = AppliedMigrations(tx, false)
 		require.NoError(err)
-		require.Equal(0, len(applied))
+		require.Empty(applied)
 		return nil
 	})
 	require.NoError(err)
@@ -307,13 +307,13 @@ func TestCommitCallRequired(t *testing.T) {
 	migrator.Migrations = m
 	logger := log.New()
 	err := migrator.Apply(db, "", "", logger)
-	require.True(errors.Is(err, ErrMigrationCommitNotCalled))
+	require.ErrorIs(err, ErrMigrationCommitNotCalled)
 
 	var applied map[string][]byte
 	err = db.View(context.Background(), func(tx kv.Tx) error {
 		applied, err = AppliedMigrations(tx, false)
 		require.NoError(err)
-		require.Equal(0, len(applied))
+		require.Empty(applied)
 		return nil
 	})
 	require.NoError(err)

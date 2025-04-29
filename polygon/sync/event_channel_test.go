@@ -75,6 +75,6 @@ func TestEventChannel(t *testing.T) {
 		events := ch.Events()
 		require.Equal(t, "event2", <-events)
 		require.Equal(t, "event3", <-events)
-		require.Equal(t, 0, len(events))
+		require.Empty(t, events)
 	})
 }

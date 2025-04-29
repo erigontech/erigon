@@ -570,7 +570,7 @@ func TestSyncInterruptLongUnwind(t *testing.T) {
 	state := New(ethconfig.Defaults.Sync, s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New(), stages.ModeApplyingBlocks)
 	db, tx := memdb.NewTestTx(t)
 	_, err := state.Run(db, wrap.NewTxContainer(tx, nil), true /* initialCycle */, false)
-	assert.Error(t, errInterrupted, err)
+	assert.ErrorIs(t, errInterrupted, err)
 
 	//state = NewState(s)
 	//state.unwindOrder = []*Stage{s[0], s[1], s[2]}

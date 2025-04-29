@@ -1461,7 +1461,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 
 	r2, err := sd.ComputeCommitment(context.Background(), true, 1, "")
 	require.NoError(t, err)
-	require.EqualValues(t, root, common.CastToHash(r2))
+	require.Equal(t, root, common.CastToHash(r2))
 
 	codeHash := common.BytesToHash(crypto.Keccak256(code))
 	codeSize, err := r.ReadAccountCodeSize(contract, 1)
@@ -1476,7 +1476,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 
 	r2, err = sd.ComputeCommitment(context.Background(), true, 1, "")
 	require.NoError(t, err)
-	require.EqualValues(t, root, common.CastToHash(r2))
+	require.Equal(t, root, common.CastToHash(r2))
 }
 
 func TestRecreateAndRewind(t *testing.T) {

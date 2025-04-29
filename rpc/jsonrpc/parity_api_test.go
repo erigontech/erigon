@@ -51,7 +51,7 @@ func TestParityAPIImpl_ListStorageKeys_NoOffset(t *testing.T) {
 	if err != nil {
 		t.Errorf("calling ListStorageKeys: %v", err)
 	}
-	assert.Equal(len(answers), len(result))
+	assert.Len(result, len(answers))
 	for k, v := range result {
 		assert.Equal(answers[k], common.Bytes2Hex(v))
 	}
@@ -75,7 +75,7 @@ func TestParityAPIImpl_ListStorageKeys_WithOffset_ExistingPrefix(t *testing.T) {
 	if err != nil {
 		t.Errorf("calling ListStorageKeys: %v", err)
 	}
-	assert.Equal(len(answers), len(result))
+	assert.Len(result, len(answers))
 	for k, v := range result {
 		assert.Equal(answers[k], common.Bytes2Hex(v))
 	}
@@ -96,7 +96,7 @@ func TestParityAPIImpl_ListStorageKeys_WithOffset_NonExistingPrefix(t *testing.T
 	if err != nil {
 		t.Errorf("calling ListStorageKeys: %v", err)
 	}
-	assert.Equal(len(answers), len(result))
+	assert.Len(result, len(answers))
 	for k, v := range result {
 		assert.Equal(answers[k], common.Bytes2Hex(v))
 	}
@@ -113,7 +113,7 @@ func TestParityAPIImpl_ListStorageKeys_WithOffset_EmptyResponse(t *testing.T) {
 	if err != nil {
 		t.Errorf("calling ListStorageKeys: %v", err)
 	}
-	assert.Equal(0, len(result))
+	assert.Empty(result)
 }
 
 func TestParityAPIImpl_ListStorageKeys_AccNotFound(t *testing.T) {
@@ -122,5 +122,5 @@ func TestParityAPIImpl_ListStorageKeys_AccNotFound(t *testing.T) {
 	api := NewParityAPIImpl(newBaseApiForTest(m), m.DB)
 	addr := common.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcaef")
 	_, err := api.ListStorageKeys(context.Background(), addr, 2, nil, latestBlock)
-	assert.Error(err, errors.New("acc not found"))
+	assert.ErrorIs(err, errors.New("acc not found"))
 }

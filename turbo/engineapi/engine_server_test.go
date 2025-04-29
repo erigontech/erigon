@@ -122,7 +122,7 @@ func TestGetBlobsV1(t *testing.T) {
 	blobHashes := append([]common.Hash{{}}, wrappedTxn.Tx.BlobVersionedHashes...)
 	blobsResp, err := engineServer.GetBlobsV1(ctx, blobHashes)
 	require.NoError(err)
-	require.True(blobsResp[0] == nil)
+	require.Equal(blobsResp[0], nil)
 	require.Equal(blobsResp[1].Blob, hexutil.Bytes(wrappedTxn.Blobs[0][:]))
 	require.Equal(blobsResp[2].Blob, hexutil.Bytes(wrappedTxn.Blobs[1][:]))
 	require.Equal(blobsResp[1].Proof, hexutil.Bytes(wrappedTxn.Proofs[0][:]))

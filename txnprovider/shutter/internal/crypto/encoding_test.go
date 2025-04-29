@@ -57,21 +57,21 @@ func TestUnmarshalBroken(t *testing.T) {
 	m := EncryptedMessage{}
 
 	err := m.Unmarshal(d[:16])
-	assert.True(t, err != nil)
+	assert.NotEqual(t, err, nil)
 
 	err = m.Unmarshal(d[:32])
-	assert.True(t, err != nil)
+	assert.NotEqual(t, err, nil)
 
 	err = m.Unmarshal(d[:65])
-	assert.True(t, err != nil)
+	assert.NotEqual(t, err, nil)
 
 	err = m.Unmarshal(d[:len(d)-1])
-	assert.True(t, err != nil)
+	assert.NotEqual(t, err, nil)
 
 	v := d[:]
 	v[0]++
 	err = m.Unmarshal(v)
-	assert.True(t, err != nil)
+	assert.NotEqual(t, err, nil)
 }
 
 func TestMarshal(t *testing.T) {
@@ -108,17 +108,17 @@ func TestMarshal(t *testing.T) {
 
 func TestIdentifyVersion(t *testing.T) {
 	d := encryptedMessage().Marshal()
-	assert.True(t, IdentifyVersion(d) == VersionIdentifier)
+	assert.Equal(t, IdentifyVersion(d), VersionIdentifier)
 
 	// legacy version
-	assert.True(t, IdentifyVersion(d[1:]) != VersionIdentifier)
-	assert.True(t, IdentifyVersion(d[1:]) == 0x00)
+	assert.NotEqual(t, IdentifyVersion(d[1:]), VersionIdentifier)
+	assert.Equal(t, IdentifyVersion(d[1:]), 0x00)
 }
 
 func TestMarshalGammasEmpty(t *testing.T) {
 	g := &Gammas{}
 	m := g.Marshal()
-	assert.True(t, len(m) == 0)
+	assert.Equal(t, len(m), 0)
 }
 
 func TestMarshalGammasError(t *testing.T) {
@@ -135,7 +135,7 @@ func TestMarshalGammasError(t *testing.T) {
 	for _, input := range inputs {
 		g := &Gammas{}
 		err := g.Unmarshal(input)
-		assert.True(t, err != nil)
+		assert.NotEqual(t, err, nil)
 	}
 }
 
@@ -147,7 +147,7 @@ func TestMarshalGammasRoundtrip(t *testing.T) {
 	}
 	for _, gammas := range gammaValues {
 		m := gammas.Marshal()
-		assert.True(t, len(m) == len([]*blst.P2Affine(*gammas))*96)
+		assert.Equal(t, len(m), len([]*blst.P2Affine(*gammas))*96)
 		g := &Gammas{}
 		require.NoError(t, g.Unmarshal(m))
 		assert.Equal(t, gammas, g)

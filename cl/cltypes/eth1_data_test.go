@@ -37,7 +37,7 @@ var expectedTestEth1DataRoot = common.Hex2Bytes("adbafa10f1d6046b59cb720371c5e70
 
 func TestEth1DataMarshalUnmarmashal(t *testing.T) {
 	marshalled, _ := testEth1Data.EncodeSSZ(nil)
-	assert.Equal(t, marshalled, expectedTestEth1DataMarshalled)
+	assert.Equal(t, expectedTestEth1DataMarshalled, marshalled)
 	testData2 := &cltypes.Eth1Data{}
 	require.NoError(t, testData2.DecodeSSZ(marshalled, 0))
 	require.Equal(t, testData2, testEth1Data)
@@ -46,5 +46,5 @@ func TestEth1DataMarshalUnmarmashal(t *testing.T) {
 func TestEth1DataHashTreeRoot(t *testing.T) {
 	root, err := testEth1Data.HashSSZ()
 	require.NoError(t, err)
-	assert.Equal(t, root[:], expectedTestEth1DataRoot)
+	assert.Equal(t, expectedTestEth1DataRoot, root[:])
 }
