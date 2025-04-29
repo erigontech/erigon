@@ -48,19 +48,19 @@ func (sf SelectedStaticFilesV3) Close() {
 	}
 }
 
-func (ac *AggregatorRoTx) staticFilesInRange(r *RangesV3) (*SelectedStaticFilesV3, error) {
+func (at *AggregatorRoTx) staticFilesInRange(r *RangesV3) (*SelectedStaticFilesV3, error) {
 	sf := &SelectedStaticFilesV3{ii: make([][]*filesItem, len(r.invertedIndex))}
-	for id := range ac.d {
+	for id := range at.d {
 		if !r.domain[id].any() {
 			continue
 		}
-		sf.d[id], sf.dIdx[id], sf.dHist[id] = ac.d[id].staticFilesInRange(r.domain[id])
+		sf.d[id], sf.dIdx[id], sf.dHist[id] = at.d[id].staticFilesInRange(r.domain[id])
 	}
 	for id, rng := range r.invertedIndex {
 		if rng == nil || !rng.needMerge {
 			continue
 		}
-		sf.ii[id] = ac.iis[id].staticFilesInRange(rng.from, rng.to)
+		sf.ii[id] = at.iis[id].staticFilesInRange(rng.from, rng.to)
 	}
 	return sf, nil
 }

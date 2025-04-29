@@ -1477,23 +1477,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
-	if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-		ac := agg.BeginFilesRo()
-		defer ac.Close()
-
-		logEvery := time.NewTicker(30 * time.Second)
-		defer logEvery.Stop()
-
-		stat, err := ac.Prune(ctx, tx, math.MaxUint64, logEvery)
-		if err != nil {
-			return err
-		}
-		logger.Info("aftermath prune finished", "stat", stat.String())
-		return err
-	}); err != nil {
-		return err
-	}
-
 	for hasMoreToPrune := true; hasMoreToPrune; {
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
 			ac := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx)
