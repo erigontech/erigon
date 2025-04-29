@@ -22,4 +22,4 @@ assertoor_params:
   run_block_proposal_check: true
   image: test/assertoor:current
   tests:
-  - https://raw.githubusercontent.com/noku-team/assertoor/master/playbooks/dev/tx-pool-check-short.yaml
+  - https://raw.githubusercontent.com/noku-team/assertoor/master/playbooks/dev/tx-pool-check.yaml
