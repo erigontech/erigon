@@ -230,7 +230,7 @@ func (ef *EliasFano) upper(i uint64) uint64 {
 func Seek(data []byte, n uint64) (uint64, bool) {
 	ef, _ := ReadEliasFano(data)
 	//TODO: if startTxNum==0, can do ef.Get(0)
-	return ef.Search(n)
+	return ef.Seek(n)
 }
 
 func (ef *EliasFano) search(v uint64, reverse bool) (nextV uint64, nextI uint64, ok bool) {
@@ -277,7 +277,7 @@ func (ef *EliasFano) search(v uint64, reverse bool) (nextV uint64, nextI uint64,
 }
 
 // Seek returns the value in the sequence, equal or greater than given value
-func (ef *EliasFano) Search(v uint64) (uint64, bool) {
+func (ef *EliasFano) Seek(v uint64) (uint64, bool) {
 	n, _, ok := ef.search(v, false /* reverse */)
 	return n, ok
 }
