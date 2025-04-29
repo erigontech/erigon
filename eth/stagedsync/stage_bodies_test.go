@@ -18,7 +18,6 @@ package stagedsync_test
 
 import (
 	"bytes"
-	"errors"
 	"math/big"
 	"testing"
 	"time"

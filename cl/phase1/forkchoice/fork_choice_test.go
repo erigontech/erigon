@@ -19,7 +19,6 @@ package forkchoice_test
 import (
 	"context"
 	_ "embed"
-	"fmt"
 	"testing"
 
 	"github.com/spf13/afero"
