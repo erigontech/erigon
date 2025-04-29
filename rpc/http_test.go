@@ -20,6 +20,7 @@
 package rpc
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -128,6 +129,39 @@ func TestHTTPRespBodyUnlimited(t *testing.T) {
 	}
 	defer c.Close()
 
+	var r string
+	if err := c.Call(&r, "test_largeResp"); err != nil {
+		t.Fatal(err)
+	}
+	if len(r) != respLength {
+		t.Fatalf("response has wrong length %d, want %d", len(r), respLength)
+	}
+}
+
+// This checks that maxRequestContentLength is not applied to the response of a request.
+func TestHTTPRespBodyUnlimitedNew(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	logger := log.New()
+	const respLength = maxRequestContentLength * 3
+
+	s := NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, true, logger, 100)
+	defer s.Stop()
+	s.New = true
+	RegisterName[struct{}, string](s, "test_largeResp", func(ctx context.Context, _ struct{}) (string, error) {
+		return largeRespService{respLength}.LargeResp(), nil
+	})
+	ts := httptest.NewServer(s)
+	defer ts.Close()
+
+	c, err := DialHTTP(ts.URL, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.New = true
 	var r string
 	if err := c.Call(&r, "test_largeResp"); err != nil {
 		t.Fatal(err)

@@ -21,6 +21,7 @@ package rpc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -42,10 +43,39 @@ var (
 	stringType       = reflect.TypeOf("")
 )
 
+type invoker interface {
+	call(ctx context.Context, raw json.RawMessage, s *jsoniter.Stream) error
+}
+
+type Method[M any, R any] struct {
+	Name string
+	Fn   func(ctx context.Context, req M) (R, error)
+}
+
+func (m Method[M, R]) call(
+	ctx context.Context, raw json.RawMessage, s *jsoniter.Stream,
+) error {
+	var req M
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return err
+		}
+	}
+
+	resp, err := m.Fn(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	s.WriteVal(resp)
+	return nil
+}
+
 type serviceRegistry struct {
-	mu       sync.Mutex
-	services map[string]service
-	logger   log.Logger
+	mu        sync.Mutex
+	callbacks map[string]invoker // registered handlers
+	services  map[string]service
+	logger    log.Logger
 }
 
 // service represents a registered object.
@@ -65,6 +95,20 @@ type callback struct {
 	isSubscribe bool           // true if this is a subscription callback
 	streamable  bool           // support JSON streaming (more efficient for large responses)
 	logger      log.Logger
+}
+
+func registerName[M any, R any](
+	r *serviceRegistry,
+	name string, fn func(ctx context.Context, in M) (R, error),
+) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.callbacks == nil {
+		r.callbacks = make(map[string]invoker)
+	}
+
+	r.callbacks[name] = Method[M, R]{Name: name, Fn: fn}
 }
 
 func (r *serviceRegistry) registerName(name string, rcvr interface{}) error {
@@ -110,6 +154,16 @@ func (r *serviceRegistry) callback(method string) *callback {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.services[elem[0]].callbacks[elem[1]]
+}
+
+func (r *serviceRegistry) invoke(method string) invoker {
+	elem := strings.SplitN(method, serviceMethodSeparator, 2)
+	if len(elem) != 2 {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.callbacks[method]
 }
 
 // subscription returns a subscription callback in the given service.
