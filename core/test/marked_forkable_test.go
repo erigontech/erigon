@@ -129,9 +129,9 @@ func TestMarked_PutToDb(t *testing.T) {
 
 	returnv, err = ma_tx.DebugDb().GetDb(num, []byte{1}, rwtx)
 	require.NoError(t, err)
-	require.Equal(t, returnv, nil) // Equal fails
+	require.True(t, returnv == nil) // Equal fails
 
-	require.Equal(t, state.Marked, ma_tx.Type())
+	require.Equal(t, ma_tx.Type(), state.Marked)
 }
 
 func TestPrune(t *testing.T) {
@@ -251,7 +251,7 @@ func TestBuildFiles_Marked(t *testing.T) {
 	ps := background.NewProgressSet()
 	files, err := ma.BuildFiles(ctx, 0, RootNum(entries_count), db, ps)
 	require.NoError(t, err)
-	require.Equal(t, len(files), 1) // 1 snapshot made
+	require.True(t, len(files) == 1) // 1 snapshot made
 
 	ma.IntegrateDirtyFiles(files)
 	ma.RecalcVisibleFiles(RootNum(entries_count))
@@ -281,7 +281,7 @@ func TestBuildFiles_Marked(t *testing.T) {
 		returnv, err := ma_tx.DebugDb().GetDb(num, nil, rwtx)
 		require.NoError(t, err)
 		if num < Num(firstRootNumNotInSnap) && num >= ma.PruneFrom() {
-			require.Equal(t, returnv, nil)
+			require.True(t, returnv == nil)
 		} else {
 			require.Equal(t, returnv, value)
 		}
@@ -310,7 +310,7 @@ func TestBuildFiles_Marked(t *testing.T) {
 			// these should not be in db (pruned)
 			value, err = rwtx.GetOne(kv.HeaderCanonical, num.EncTo8Bytes())
 			require.NoError(t, err)
-			require.Equal(t, value, nil)
+			require.True(t, value == nil)
 
 			rwtx.ForAmount(kv.Headers, num.EncTo8Bytes(), 1, func(k, v []byte) error {
 				if !bytes.Equal(k[:8], num.EncTo8Bytes()) {
