@@ -17,66 +17,98 @@
 package misc
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/abi"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/holiman/uint256"
 )
 
 const (
 	BLSPubKeyLen             = 48
 	WithdrawalCredentialsLen = 32 // withdrawalCredentials size
 	BLSSigLen                = 96 // signature size
-
+	DepositLogLen            = 576
 )
 
 var depositTopic = libcommon.HexToHash("0x649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")
-
-// Doesn't panic, use carefully
-func bytesTypeNoErr(size int) abi.Type {
-	bytesT, _ := abi.NewType(fmt.Sprintf("bytes%d", size), "", nil)
-	return bytesT
-}
 
 var (
 	// DepositABI is an ABI instance of beacon chain deposit events.
 	DepositABI   = abi.ABI{Events: map[string]abi.Event{"DepositEvent": depositEvent}}
 	bytesT, _    = abi.NewType("bytes", "", nil)
 	depositEvent = abi.NewEvent("DepositEvent", "DepositEvent", false, abi.Arguments{
-		{Name: "pubkey", Type: bytesTypeNoErr(BLSPubKeyLen), Indexed: false},
-		{Name: "withdrawal_credentials", Type: bytesTypeNoErr(WithdrawalCredentialsLen), Indexed: false},
-		{Name: "amount", Type: bytesTypeNoErr(8), Indexed: false},
-		{Name: "signature", Type: bytesTypeNoErr(BLSSigLen), Indexed: false},
-		{Name: "index", Type: bytesTypeNoErr(8), Indexed: false}},
+		{Name: "pubkey", Type: bytesT, Indexed: false},
+		{Name: "withdrawal_credentials", Type: bytesT, Indexed: false},
+		{Name: "amount", Type: bytesT, Indexed: false},
+		{Name: "signature", Type: bytesT, Indexed: false},
+		{Name: "index", Type: bytesT, Indexed: false}},
 	)
 )
 
 // field type overrides for abi upacking
 type depositUnpacking struct {
-	Pubkey                [BLSPubKeyLen]byte
-	WithdrawalCredentials [WithdrawalCredentialsLen]byte
-	Amount                [8]byte
-	Signature             [BLSSigLen]byte
-	Index                 [8]byte
+	Pubkey                []byte
+	WithdrawalCredentials []byte
+	Amount                []byte
+	Signature             []byte
+	Index                 []byte
+}
+
+var InvalidDepositLogErr = errors.New("invalid deposit log: unsupported data layout")
+
+func validateDepositLog(data []byte) error {
+	if len(data) != DepositLogLen {
+		return InvalidDepositLogErr
+	}
+	pubkey_offset := uint256.NewInt(0).SetBytes(data[0:32]).Uint64()
+	withdrawal_credentials_offset := uint256.NewInt(0).SetBytes(data[32:64]).Uint64()
+	amount_offset := uint256.NewInt(0).SetBytes(data[64:96]).Uint64()
+	signature_offset := uint256.NewInt(0).SetBytes(data[96:128]).Uint64()
+	index_offset := uint256.NewInt(0).SetBytes(data[128:160]).Uint64()
+
+	if pubkey_offset != 160 ||
+		withdrawal_credentials_offset != 256 ||
+		amount_offset != 320 ||
+		signature_offset != 384 ||
+		index_offset != 512 {
+		return InvalidDepositLogErr
+	}
+
+	pubkey_size := uint256.NewInt(0).SetBytes(data[pubkey_offset : pubkey_offset+32]).Uint64()
+	withdrawal_credentials_size := uint256.NewInt(0).SetBytes(data[withdrawal_credentials_offset : withdrawal_credentials_offset+32]).Uint64()
+	amount_size := uint256.NewInt(0).SetBytes(data[amount_offset : amount_offset+32]).Uint64()
+	signature_size := uint256.NewInt(0).SetBytes(data[signature_offset : signature_offset+32]).Uint64()
+	index_size := uint256.NewInt(0).SetBytes(data[index_offset : index_offset+32]).Uint64()
+
+	if pubkey_size != 48 ||
+		withdrawal_credentials_size != 32 ||
+		amount_size != 8 ||
+		signature_size != 96 ||
+		index_size != 8 {
+		return InvalidDepositLogErr
+	}
+	return nil
 }
 
 // unpackDepositLog unpacks a serialized DepositEvent.
 func unpackDepositLog(data []byte) ([]byte, error) {
 	var du depositUnpacking
+	if err := validateDepositLog(data); err != nil {
+		return nil, err
+	}
 	if err := DepositABI.UnpackIntoInterface(&du, "DepositEvent", data); err != nil {
 		return nil, err
 	}
-	if len(data) != 576 {
-		log.Warn("Spiderman len not eq 576 for deposit data")
-	}
 	reqData := make([]byte, 0, types.DepositRequestDataLen)
-	reqData = append(reqData, du.Pubkey[:]...)
-	reqData = append(reqData, du.WithdrawalCredentials[:]...)
-	reqData = append(reqData, du.Amount[:]...)
-	reqData = append(reqData, du.Signature[:]...)
-	reqData = append(reqData, du.Index[:]...)
+	reqData = append(reqData, du.Pubkey...)
+	reqData = append(reqData, du.WithdrawalCredentials...)
+	reqData = append(reqData, du.Amount...)
+	reqData = append(reqData, du.Signature...)
+	reqData = append(reqData, du.Index...)
 
 	return reqData, nil
 }
