@@ -541,12 +541,13 @@ func ReadEliasFano(r []byte) (*EliasFano, int) {
 }
 
 // Reset - like ReadEliasFano, but for existing object
-func (ef *EliasFano) Reset(r []byte) {
+func (ef *EliasFano) Reset(r []byte) *EliasFano {
 	ef.count = binary.BigEndian.Uint64(r[:8])
 	ef.u = binary.BigEndian.Uint64(r[8:16])
 	ef.data = unsafe.Slice((*uint64)(unsafe.Pointer(&r[16])), (len(r)-16)/uint64Size)
 	ef.maxOffset = ef.u - 1
 	ef.deriveFields()
+	return ef
 }
 
 func Max(r []byte) uint64   { return binary.BigEndian.Uint64(r[8:16]) - 1 }
