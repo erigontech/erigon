@@ -671,10 +671,12 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 }
 
 func (st *StateTransition) refundGas() {
-	// Return ETH for remaining gas, exchanged at the original rate.
-	remaining := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasRemaining), st.gasPrice)
-	st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)
-
+	// CHANGE(taiko): no gas refunds for sender of anchor tx
+	if !st.msg.IsAnchor() {
+		// Return ETH for remaining gas, exchanged at the original rate.
+		remaining := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasRemaining), st.gasPrice)
+		st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)
+	}
 	// Also return remaining gas to the block gas counter so it is
 	// available for the next transaction.
 	st.gp.AddGas(st.gasRemaining)
