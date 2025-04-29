@@ -3,6 +3,7 @@ run:
   build-tags:
     - nosqlite
     - noboltdb
+    - nosilkworm
 linters:
   enable:
     - asasalint
@@ -24,13 +25,10 @@ linters:
     - prealloc
     - predeclared
     - reassign
-    - rowserrcheck
     - spancheck
-    - sqlclosecheck
     - thelper
     - unconvert
     - wastedassign
-    - zerologlint
     - testifylint
   disable:
     - staticcheck #TODO: enable me
@@ -45,6 +43,9 @@ linters:
     - protogetter
     - unparam
     - wrapcheck
+    - rowserrcheck
+    - sqlclosecheck
+    - zerologlint
   settings:
     goconst:
       min-len: 2
