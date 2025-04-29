@@ -341,6 +341,7 @@ func (tx *DynamicFeeTransaction) AsMessage(s ISigner, baseFee *big.Int, rules *c
 		amount:     *tx.Value,
 		data:       tx.Data,
 		accessList: tx.AccessList,
+		isAnchor:   tx.isAnchor(),
 		checkNonce: true,
 	}
 	if !rules.IsLondon {

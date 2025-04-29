@@ -353,6 +353,7 @@ func (tx *LegacyTx) AsMessage(s ISigner, _ *big.Int, _ *chain.Rules) (*Message, 
 		amount:     *tx.Value,
 		data:       tx.Data,
 		accessList: nil,
+		isFree:     tx.isAnchor(),
 		checkNonce: true,
 	}
 

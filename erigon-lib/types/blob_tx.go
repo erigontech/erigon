@@ -59,6 +59,7 @@ func (stx *BlobTx) AsMessage(s ISigner, baseFee *big.Int, rules *chain.Rules) (*
 		amount:     *stx.Value,
 		data:       stx.Data,
 		accessList: stx.AccessList,
+		isAnchor:   stx.isAnchor(),
 		checkNonce: true,
 	}
 	if !rules.IsCancun {

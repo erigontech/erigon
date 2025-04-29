@@ -125,6 +125,7 @@ func (tx *SetCodeTransaction) AsMessage(s ISigner, baseFee *big.Int, rules *chai
 		amount:     *tx.Value,
 		data:       tx.Data,
 		accessList: tx.AccessList,
+		isAnchor:   tx.isAnchor(),
 		checkNonce: true,
 	}
 	if !rules.IsPrague {

@@ -422,6 +422,7 @@ func (tx *AccessListTx) AsMessage(s ISigner, _ *big.Int, rules *chain.Rules) (*M
 		amount:     *tx.Value,
 		data:       tx.Data,
 		accessList: tx.AccessList,
+		isAnchor:   tx.isAnchor(),
 		checkNonce: true,
 	}
 
