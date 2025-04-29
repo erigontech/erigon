@@ -373,8 +373,8 @@ func (tx *tx) Cursor(bucket string) (kv.Cursor, error) {
 	return c, nil
 }
 
-func (tx *tx) ListBuckets() ([]string, error) {
-	return nil, errors.New("function ListBuckets is not implemented for remoteTx")
+func (tx *tx) ListTables() ([]string, error) {
+	return nil, errors.New("function ListTables is not implemented for remoteTx")
 }
 
 // func (c *remoteCursor) Put(k []byte, v []byte) error            { panic("not supported") }
