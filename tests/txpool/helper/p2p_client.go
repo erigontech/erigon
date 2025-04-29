@@ -8,19 +8,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/eth/protocols/eth"
-	"github.com/erigontech/erigon/p2p"
-	"github.com/erigontech/erigon/p2p/nat"
-	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/nat"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon/p2p/sentry"
 )
 
 var (
@@ -104,11 +104,11 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 		NetworkId:       uint64(resp.Result.Protocols.Eth.Network),
 		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(uint256.MustFromDecimal(strconv.Itoa(resp.Result.Protocols.Eth.Difficulty))),
 		BestHash: gointerfaces.ConvertHashToH256(
-			[32]byte(libcommon.FromHex(resp.Result.Protocols.Eth.Genesis)),
+			[32]byte(common.FromHex(resp.Result.Protocols.Eth.Genesis)),
 		),
 		ForkData: &sentryproto.Forks{
 			Genesis: gointerfaces.ConvertHashToH256(
-				[32]byte(libcommon.FromHex(resp.Result.Protocols.Eth.Genesis)),
+				[32]byte(common.FromHex(resp.Result.Protocols.Eth.Genesis)),
 			),
 		},
 	})

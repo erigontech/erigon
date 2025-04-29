@@ -17,6 +17,7 @@
 package txpool
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -24,18 +25,21 @@ import (
 	"io"
 	"math/bits"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
+
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/erigontech/secp256k1"
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 const (
@@ -159,9 +163,6 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			return 0, fmt.Errorf("%w: unknown transaction type: %d", ErrParseTxn, slot.Type)
 		}
 		p++
-		if slot.Type == AATxnType {
-			p++ // this byte is for the subtype, however we can't receive the batch header over P2P so we can skip it
-		}
 		if p >= len(payload) {
 			return 0, fmt.Errorf("%w: unexpected end of payload after txnType", ErrParseTxn)
 		}
@@ -203,12 +204,12 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		}
 		blobPos := dataPos
 		for blobPos < dataPos+dataLen {
-			blobPos, err = rlp.StringOfLen(payload, blobPos, fixedgas.BlobSize)
+			blobPos, err = rlp.StringOfLen(payload, blobPos, params.BlobSize)
 			if err != nil {
 				return 0, fmt.Errorf("%w: blob: %s", ErrParseTxn, err) //nolint
 			}
-			slot.Blobs = append(slot.Blobs, payload[blobPos:blobPos+fixedgas.BlobSize])
-			blobPos += fixedgas.BlobSize
+			slot.Blobs = append(slot.Blobs, payload[blobPos:blobPos+params.BlobSize])
+			blobPos += params.BlobSize
 		}
 		if blobPos != dataPos+dataLen {
 			return 0, fmt.Errorf("%w: extraneous space in blobs", ErrParseTxn)
@@ -346,7 +347,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 	}
 
 	if slot.Type == AATxnType {
-		return parseTransactionBodyAA(payload, p, slot)
+		return parseTransactionBodyAA(ctx, payload, p, slot, sender)
 	}
 
 	// Remember where signing hash data begins (it will need to be wrapped in an RLP list)
@@ -474,6 +475,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 		p = dataPos + dataLen
 	}
 	if slot.Type == SetCodeTxnType {
+		slot.Authorities = make([]*common.Address, 0)
 		dataPos, dataLen, err = rlp.ParseList(payload, p)
 		if err != nil {
 			return 0, fmt.Errorf("%w: authorizations len: %s", ErrParseTxn, err) //nolint
@@ -485,33 +487,39 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 			if err != nil {
 				return 0, fmt.Errorf("%w: authorization: %s", ErrParseTxn, err) //nolint
 			}
-			var sig Signature
+			auth := types.Authorization{}
 			p2 := authPos
-			rawStart := p2
-			p2, err = rlp.ParseU256(payload, p2, &sig.ChainID)
+			p2, err = rlp.ParseU256(payload, p2, &auth.ChainID)
 			if err != nil {
 				return 0, fmt.Errorf("%w: authorization chainId: %s", ErrParseTxn, err) //nolint
 			}
-			if !sig.ChainID.IsUint64() {
+			if !auth.ChainID.IsUint64() {
 				// https://github.com/ethereum/EIPs/pull/8929
-				return 0, fmt.Errorf("%w: authorization chainId is too big: %s", ErrParseTxn, &sig.ChainID)
+				return 0, fmt.Errorf("%w: authorization chainId is too big: %s", ErrParseTxn, &auth.ChainID)
 			}
 			p2, err = rlp.StringOfLen(payload, p2, length.Addr) // address
 			if err != nil {
 				return 0, fmt.Errorf("%w: authorization address: %s", ErrParseTxn, err) //nolint
 			}
+			auth.Address = common.Address(payload[p2 : p2+length.Addr])
 			p2 += length.Addr
-			p2, _, err = rlp.ParseU64(payload, p2) // nonce
+			p2, auth.Nonce, err = rlp.ParseU64(payload, p2) // nonce
 			if err != nil {
 				return 0, fmt.Errorf("%w: authorization nonce: %s", ErrParseTxn, err) //nolint
 			}
-			rawEnd := p2
-			p2, _, err = parseSignature(payload, p2, false /* legacy */, nil /* cfgChainId */, &sig)
+
+			sig := Signature{}
+			p2, auth.YParity, err = parseSignature(payload, p2, false /* legacy */, nil /* cfgChainId */, &sig)
 			if err != nil {
 				return 0, fmt.Errorf("%w: authorization signature: %s", ErrParseTxn, err) //nolint
 			}
-			slot.Authorizations = append(slot.Authorizations, sig)
-			slot.AuthRaw = append(slot.AuthRaw, common.CopyBytes(payload[rawStart:rawEnd]))
+			auth.R, auth.S = sig.R, sig.S
+
+			authority, err := auth.RecoverSigner(bytes.NewBuffer(nil), make([]byte, 32))
+			if err != nil {
+				return 0, fmt.Errorf("%w: recover authorization signer: %s stack: %s", ErrParseTxn, err, dbg.Stack()) //nolint
+			}
+			slot.Authorities = append(slot.Authorities, authority)
 			authPos += authLen
 			if authPos != p2 {
 				return 0, fmt.Errorf("%w: authorization: unexpected list items", ErrParseTxn)
@@ -670,7 +678,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 	return p, nil
 }
 
-func parseTransactionBodyAA(payload []byte, p int, slot *TxnSlot) (int, error) {
+func parseTransactionBodyAA(ctx *TxnParseContext, payload []byte, p int, slot *TxnSlot, sender []byte) (int, error) {
 	p, err := rlp.ParseU256(payload, p, &slot.ChainID)
 	if err != nil {
 		return 0, fmt.Errorf("%w: chainID: %s", ErrParseTxn, err)
@@ -690,13 +698,21 @@ func parseTransactionBodyAA(payload []byte, p int, slot *TxnSlot) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	slot.SenderAddress = &address
+	slot.SenderAddress = address
+	if ctx.withSender {
+		copy(sender, address[:])
+	}
+
+	slot.SenderValidationData, p, err = getData(payload, p)
+	if err != nil {
+		return 0, err
+	}
 
 	address, p, err = getAddress(payload, p, "deployerAddress")
 	if err != nil {
 		return 0, err
 	}
-	slot.Deployer = &address
+	slot.Deployer = address
 
 	slot.DeployerData, p, err = getData(payload, p)
 	if err != nil {
@@ -707,7 +723,10 @@ func parseTransactionBodyAA(payload []byte, p int, slot *TxnSlot) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	slot.Paymaster = &address
+	slot.Paymaster = address
+	if slot.Paymaster != nil && ctx.withSender {
+		copy(sender, address[:])
+	}
 
 	slot.PaymasterData, p, err = getData(payload, p)
 	if err != nil {
@@ -771,16 +790,20 @@ func parseTransactionBodyAA(payload []byte, p int, slot *TxnSlot) (int, error) {
 	return p, nil
 }
 
-func getAddress(payload []byte, p int, name string) (common.Address, int, error) {
+func getAddress(payload []byte, p int, name string) (*common.Address, int, error) {
 	dataPos, dataLen, err := rlp.ParseString(payload, p)
 	if err != nil {
-		return common.Address{}, 0, fmt.Errorf("%w: to len: %s", ErrParseTxn, err) //nolint
+		return nil, 0, fmt.Errorf("%w: to len: %s", ErrParseTxn, err)
 	}
 	if dataLen != 0 && dataLen != length.Addr {
-		return common.Address{}, 0, fmt.Errorf("%w: unexpected length of '%s' field: %d", ErrParseTxn, name, dataLen)
+		return nil, 0, fmt.Errorf("%w: unexpected length of '%s' field: %d", ErrParseTxn, name, dataLen)
+	}
+	if dataLen == 0 {
+		return nil, dataPos + dataLen, nil
 	}
 
-	return common.BytesToAddress(payload[dataPos : dataPos+dataLen]), dataPos + dataLen, nil
+	address := common.BytesToAddress(payload[dataPos : dataPos+dataLen])
+	return &address, dataPos + dataLen, nil
 }
 
 func getData(payload []byte, p int) ([]byte, int, error) {
@@ -819,18 +842,15 @@ type TxnSlot struct {
 	Commitments []gokzg4844.KZGCommitment
 	Proofs      []gokzg4844.KZGProof
 
-	// EIP-7702: set code tx
-	Authorizations []Signature
-	AuthRaw        [][]byte // rlp encoded chainID+address+nonce, used to recover authorization address in txpool
+	Authorities []*common.Address // Indexed authorization signers for EIP-7702 txns (type-4)
 
 	// RIP-7560: account abstraction
-	SenderAddress, Paymaster, Deployer                              *common.Address
-	PaymasterData, DeployerData, ExecutionData                      []byte
-	PostOpGasLimit, ValidationGasLimit, PaymasterValidationGasLimit uint64
-	NonceKey, BuilderFee                                            uint256.Int
+	SenderAddress, Paymaster, Deployer                               *common.Address
+	SenderValidationData, PaymasterData, DeployerData, ExecutionData []byte
+	PostOpGasLimit, ValidationGasLimit, PaymasterValidationGasLimit  uint64
+	NonceKey, BuilderFee                                             uint256.Int
 }
 
-// nolint
 func (tx *TxnSlot) PrintDebug(prefix string) {
 	fmt.Printf("%s: senderID=%d,nonce=%d,tip=%d,v=%d\n", prefix, tx.SenderID, tx.Nonce, tx.Tip, tx.Value.Uint64())
 	//fmt.Printf("%s: senderID=%d,nonce=%d,tip=%d,hash=%x\n", prefix, tx.senderID, tx.nonce, tx.tip, tx.IdHash)
@@ -842,6 +862,20 @@ func (tx *TxnSlot) ToProtoAccountAbstractionTxn() *typesproto.AccountAbstraction
 		return nil
 	}
 
+	var paymasterData, deployerData, paymaster, deployer []byte
+	if tx.PaymasterData != nil {
+		paymasterData = tx.PaymasterData
+	}
+	if tx.DeployerData != nil {
+		deployerData = tx.DeployerData
+	}
+	if tx.Paymaster != nil {
+		paymaster = tx.Paymaster.Bytes()
+	}
+	if tx.Deployer != nil {
+		deployer = tx.Deployer.Bytes()
+	}
+
 	return &typesproto.AccountAbstractionTransaction{
 		Nonce:                       tx.Nonce,
 		ChainId:                     tx.ChainID.Bytes(),
@@ -849,11 +883,12 @@ func (tx *TxnSlot) ToProtoAccountAbstractionTxn() *typesproto.AccountAbstraction
 		FeeCap:                      tx.FeeCap.Bytes(),
 		Gas:                         tx.Gas,
 		SenderAddress:               tx.SenderAddress.Bytes(),
+		SenderValidationData:        tx.SenderValidationData,
 		ExecutionData:               tx.ExecutionData,
-		Paymaster:                   tx.Paymaster.Bytes(),
-		PaymasterData:               tx.PaymasterData,
-		Deployer:                    tx.Deployer.Bytes(),
-		DeployerData:                tx.DeployerData,
+		Paymaster:                   paymaster,
+		PaymasterData:               paymasterData,
+		Deployer:                    deployer,
+		DeployerData:                deployerData,
 		BuilderFee:                  tx.BuilderFee.Bytes(),
 		ValidationGasLimit:          tx.ValidationGasLimit,
 		PaymasterValidationGasLimit: tx.PaymasterValidationGasLimit,

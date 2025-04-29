@@ -25,7 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
+	"github.com/erigontech/erigon/rpc/jsonrpc"
 )
 
 const (

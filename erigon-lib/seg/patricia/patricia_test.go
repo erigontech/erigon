@@ -97,9 +97,9 @@ func TestFindMatches1(t *testing.T) {
 	mf := NewMatchFinder2(&pt)
 	data := []byte("Who lives here in winter, wolfs")
 	matches := mf.FindLongestMatches(data)
-	for _, m := range matches {
-		fmt.Printf("%+v, match [%s]\n", m, data[m.Start:m.End])
-	}
+	//for _, m := range matches {
+	//	fmt.Printf("%+v, match [%s]\n", m, data[m.Start:m.End])
+	//}
 	if len(matches) != 2 {
 		t.Errorf("expected matches: %d, got %d", 2, len(matches))
 	}
@@ -114,9 +114,9 @@ func TestFindMatches2(t *testing.T) {
 	mf2 := NewMatchFinder2(&pt)
 	data := []byte("Who lives here in winter, wolfs?")
 	matches := mf2.FindLongestMatches(data)
-	for _, m := range matches {
-		fmt.Printf("%+v, match: [%s]\n", m, data[m.Start:m.End])
-	}
+	//for _, m := range matches {
+	//	fmt.Printf("%+v, match: [%s]\n", m, data[m.Start:m.End])
+	//}
 	if len(matches) != 2 {
 		t.Errorf("expected matches: %d, got %d", 2, len(matches))
 	}
@@ -168,9 +168,9 @@ func TestFindMatches3(t *testing.T) {
 	mf2 := NewMatchFinder2(&pt)
 	data := decodeHex("0100000000000000000000003a30000001000000000001001000000044004500")
 	matches := mf2.FindLongestMatches(data)
-	for _, m := range matches {
-		fmt.Printf("%+v, match: [%x]\n", m, data[m.Start:m.End])
-	}
+	//for _, m := range matches {
+	//	fmt.Printf("%+v, match: [%x]\n", m, data[m.Start:m.End])
+	//}
 	if len(matches) != 9 {
 		t.Errorf("expected matches: %d, got %d", 9, len(matches))
 	}
@@ -183,9 +183,9 @@ func TestFindMatches4(t *testing.T) {
 	mf2 := NewMatchFinder2(&pt)
 	data := decodeHex("01")
 	matches := mf2.FindLongestMatches(data)
-	for _, m := range matches {
-		fmt.Printf("%+v, match: [%x]\n", m, data[m.Start:m.End])
-	}
+	//for _, m := range matches {
+	//	fmt.Printf("%+v, match: [%x]\n", m, data[m.Start:m.End])
+	//}
 	if len(matches) != 0 {
 		t.Errorf("expected matches: %d, got %d", 0, len(matches))
 	}
@@ -331,9 +331,9 @@ func TestFindMatches5(t *testing.T) {
 	mf2 := NewMatchFinder2(&pt)
 	data := decodeHex("9d7d9d7d082073e2920896915d0e0239a7e852d86b26e03a188bc5b947972aeec206d63b6744043493d38e72c5281e78f6b364eacac6fa907ecba1640000000000000000000000000000000000000000000000000000000007bfa482043493d38e72c5281e78f6b364eacac6fa907ecba1640000000000000000000000000000000000000000000000000000000000000011043493d38e72c5281e78f6b364eacac6fa907ecba1640000000000000000000000000000000000000000000000000000000000000002043493d38e72c5281e78f6b364eacac6fa907ecba164000000000000000000000000000000000000000000000000000000000000001e0820a516e4eeef0852f3c4ee0f11237e5e5127ed67a64e43a2f2ebef2d6bc26bb384082073404b8fb6bb42e5a0c9bb7d6253d9d72084bed3991df1efd25512e7f713e796043493d38e72c5281e78f6b364eacac6fa907ecba164000000000000000000000000000000000000000000000000000000000000001f043493d38e72c5281e78f6b364eacac6fa907ecba1640000000000000000000000000000000000000000000000000000000000000012082010db8a472df5096168436e756dbf37edce306a01f4fa7a889f7ad8195e1154a9043493d38e72c5281e78f6b364eacac6fa907ecba1640000000000000000000000000000000000000000000000000000000000000006")
 	matches := mf2.FindLongestMatches(data)
-	for _, m := range matches {
-		fmt.Printf("%+v, match: [%x]\n", m, data[m.Start:m.End])
-	}
+	//for _, m := range matches {
+	//	fmt.Printf("%+v, match: [%x]\n", m, data[m.Start:m.End])
+	//}
 	if len(matches) != 88 {
 		t.Errorf("expected matches: %d, got %d", 88, len(matches))
 	}
@@ -936,9 +936,9 @@ func TestFindMatches6(t *testing.T) {
 		"ffffffffffffffffffffffffffffffffffffffff168152602001838152602001828152602001935050505060405180910390a15b806001019050805061064256" +
 		"5b5b600060009054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16ff5b5b5056")
 	matches := mf2.FindLongestMatches(data)
-	for _, m := range matches {
-		fmt.Printf("%+v, match: [%x]\n", m, data[m.Start:m.End])
-	}
+	//for _, m := range matches {
+	//	fmt.Printf("%+v, match: [%x]\n", m, data[m.Start:m.End])
+	//}
 	if len(matches) != 234 {
 		t.Errorf("expected matches: %d, got %d", 234, len(matches))
 	}
@@ -1532,9 +1532,9 @@ func TestFindMatches7(t *testing.T) {
 		"82548255916001019190600101906105b7565b506105de92915061034c565b50505050600160a060020a03841660009081526001602052604090208054839190" +
 		"61000256")
 	matches := mf2.FindLongestMatches(data)
-	for _, m := range matches {
-		fmt.Printf("%+v, match: [%x]\n", m, data[m.Start:m.End])
-	}
+	//for _, m := range matches {
+	//	fmt.Printf("%+v, match: [%x]\n", m, data[m.Start:m.End])
+	//}
 	if len(matches) != 201 {
 		t.Errorf("expected matches: %d, got %d", 201, len(matches))
 	}
@@ -1635,9 +1635,9 @@ func TestFindMatches8(t *testing.T) {
 		"600052604060002060009150909054906101000a900473ffffffffffffffffffffffffffffffffffffffff1681565b600260005060205280600052604060002060" +
 		"00915090505481565b60036000505481565b60046000505481565b6005600050548156")
 	matches := mf2.FindLongestMatches(data)
-	for _, m := range matches {
-		fmt.Printf("%+v, match: [%x]\n", m, data[m.Start:m.End])
-	}
+	//for _, m := range matches {
+	//	fmt.Printf("%+v, match: [%x]\n", m, data[m.Start:m.End])
+	//}
 	if len(matches) != 144 {
 		t.Errorf("expected matches: %d, got %d", 144, len(matches))
 	}

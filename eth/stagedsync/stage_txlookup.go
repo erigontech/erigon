@@ -24,14 +24,14 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
@@ -139,7 +139,7 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 	txNumReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(context.TODO(), cfg.blockReader))
 	data := make([]byte, 16)
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
-		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
+		blocknum, blockHash := binary.BigEndian.Uint64(k), common.CastToHash(v)
 		body, err := cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blocknum)
 		if err != nil {
 			return err
@@ -178,7 +178,7 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 func borTxnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, quitCh <-chan struct{}, cfg TxLookupCfg, logger log.Logger) error {
 	bigNum := new(big.Int)
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.BorTxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
-		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
+		blocknum, blockHash := binary.BigEndian.Uint64(k), common.CastToHash(v)
 		blockNumBytes := bigNum.SetUint64(blocknum).Bytes()
 
 		// we add state sync transactions every bor Sprint amount of blocks
@@ -329,7 +329,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 // deleteTxLookupRange - [blockFrom, blockTo)
 func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) (err error) {
 	err = etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
-		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
+		blocknum, blockHash := binary.BigEndian.Uint64(k), common.CastToHash(v)
 		body, err := cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blocknum)
 		if err != nil {
 			return err
@@ -363,7 +363,7 @@ func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64
 // deleteTxLookupRange - [blockFrom, blockTo)
 func deleteBorTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) error {
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.BorTxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
-		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
+		blocknum, blockHash := binary.BigEndian.Uint64(k), common.CastToHash(v)
 
 		borTxHash := bortypes.ComputeBorTxHash(blocknum, blockHash)
 		if err := next(k, borTxHash.Bytes(), nil); err != nil {

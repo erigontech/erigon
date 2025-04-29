@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -56,7 +57,7 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	}).MustOpen()
 	tb.Cleanup(db.Close)
 	salt := uint32(1)
-	cfg := iiCfg{salt: &salt, dirs: dirs, filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable}
+	cfg := iiCfg{salt: &salt, dirs: dirs, filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable, version: IIVersionTypes{DataEF: snaptype.V1_0, AccessorEFI: snaptype.V1_0}}
 	ii, err := NewInvertedIndex(cfg, aggStep, logger)
 	require.NoError(tb, err)
 	ii.DisableFsync()
@@ -170,22 +171,18 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	writer := ic.NewWriter()
 	defer writer.close()
 
-	writer.SetTxNum(2)
-	err = writer.Add([]byte("key1"))
+	err = writer.Add([]byte("key1"), 2)
 	require.NoError(t, err)
 
-	writer.SetTxNum(3)
-	err = writer.Add([]byte("key2"))
+	err = writer.Add([]byte("key2"), 3)
 	require.NoError(t, err)
 
-	writer.SetTxNum(6)
-	err = writer.Add([]byte("key1"))
+	err = writer.Add([]byte("key1"), 6)
 	require.NoError(t, err)
-	err = writer.Add([]byte("key3"))
+	err = writer.Add([]byte("key3"), 6)
 	require.NoError(t, err)
 
-	writer.SetTxNum(17)
-	err = writer.Add([]byte("key10"))
+	err = writer.Add([]byte("key10"), 17)
 	require.NoError(t, err)
 
 	err = writer.Flush(ctx, tx)
@@ -233,6 +230,10 @@ func TestInvIndexCollationBuild(t *testing.T) {
 }
 
 func TestInvIndexAfterPrune(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	logger := log.New()
@@ -252,18 +253,15 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	writer := ic.NewWriter()
 	defer writer.close()
 
-	writer.SetTxNum(2)
-	err = writer.Add([]byte("key1"))
+	err = writer.Add([]byte("key1"), 2)
 	require.NoError(t, err)
 
-	writer.SetTxNum(3)
-	err = writer.Add([]byte("key2"))
+	err = writer.Add([]byte("key2"), 3)
 	require.NoError(t, err)
 
-	writer.SetTxNum(6)
-	err = writer.Add([]byte("key1"))
+	err = writer.Add([]byte("key1"), 6)
 	require.NoError(t, err)
-	err = writer.Add([]byte("key3"))
+	err = writer.Add([]byte("key3"), 6)
 	require.NoError(t, err)
 
 	err = writer.Flush(ctx, tx)
@@ -346,12 +344,11 @@ func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log
 		// keys are encodings of numbers 1..31
 		// each key changes value on every txNum which is multiple of the key
 		for txNum := uint64(1); txNum <= txs; txNum++ {
-			writer.SetTxNum(txNum)
 			for keyNum := uint64(1); keyNum <= module; keyNum++ {
 				if txNum%keyNum == 0 {
 					var k [8]byte
 					binary.BigEndian.PutUint64(k[:], keyNum)
-					err := writer.Add(k[:])
+					err := writer.Add(k[:], txNum)
 					require.NoError(err)
 				}
 			}
@@ -507,6 +504,10 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 }
 
 func TestInvIndexRanges(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	logger := log.New()
@@ -540,6 +541,10 @@ func TestInvIndexRanges(t *testing.T) {
 }
 
 func TestInvIndexMerge(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	logger := log.New()
 	db, ii, txs := filledInvIndex(t, logger)
 
@@ -548,6 +553,10 @@ func TestInvIndexMerge(t *testing.T) {
 }
 
 func TestInvIndexScanFiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	logger, require := log.New(), require.New(t)
 	db, ii, txs := filledInvIndex(t, logger)
 
@@ -568,6 +577,10 @@ func TestInvIndexScanFiles(t *testing.T) {
 }
 
 func TestChangedKeysIterator(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	logger := log.New()
@@ -636,12 +649,12 @@ func TestScanStaticFiles(t *testing.T) {
 
 	ii := emptyTestInvertedIndex(1)
 	files := []string{
-		"v1-accounts.0-1.ef",
-		"v1-accounts.1-2.ef",
-		"v1-accounts.0-4.ef",
-		"v1-accounts.2-3.ef",
-		"v1-accounts.3-4.ef",
-		"v1-accounts.4-5.ef",
+		"v1.0-accounts.0-1.ef",
+		"v1.0-accounts.1-2.ef",
+		"v1.0-accounts.0-4.ef",
+		"v1.0-accounts.2-3.ef",
+		"v1.0-accounts.3-4.ef",
+		"v1.0-accounts.4-5.ef",
 	}
 	ii.scanDirtyFiles(files)
 	require.Equal(t, 6, ii.dirtyFiles.Len())
@@ -656,16 +669,16 @@ func TestScanStaticFiles(t *testing.T) {
 func TestCtxFiles(t *testing.T) {
 	ii := emptyTestInvertedIndex(1)
 	files := []string{
-		"v1-accounts.0-1.ef", // overlap with same `endTxNum=4`
-		"v1-accounts.1-2.ef",
-		"v1-accounts.0-4.ef",
-		"v1-accounts.2-3.ef",
-		"v1-accounts.3-4.ef",
-		"v1-accounts.4-5.ef",     // no overlap
-		"v1-accounts.480-484.ef", // overlap with same `startTxNum=480`
-		"v1-accounts.480-488.ef",
-		"v1-accounts.480-496.ef",
-		"v1-accounts.480-512.ef",
+		"v1.0-accounts.0-1.ef", // overlap with same `endTxNum=4`
+		"v1.0-accounts.1-2.ef",
+		"v1.0-accounts.0-4.ef",
+		"v1.0-accounts.2-3.ef",
+		"v1.0-accounts.3-4.ef",
+		"v1.0-accounts.4-5.ef",     // no overlap
+		"v1.0-accounts.480-484.ef", // overlap with same `startTxNum=480`
+		"v1.0-accounts.480-488.ef",
+		"v1.0-accounts.480-496.ef",
+		"v1.0-accounts.480-512.ef",
 	}
 	ii.scanDirtyFiles(files)
 	require.Equal(t, 10, ii.dirtyFiles.Len())
@@ -683,7 +696,7 @@ func TestCtxFiles(t *testing.T) {
 		if i == 0 {
 			continue
 		}
-		if item.src.isSubsetOf(visibleFiles[i-1].src) || visibleFiles[i-1].src.isSubsetOf(item.src) {
+		if item.src.isProperSubsetOf(visibleFiles[i-1].src) || visibleFiles[i-1].src.isProperSubsetOf(item.src) {
 			require.Failf(t, "overlaping files", "%d-%d, %d-%d", item.startTxNum, item.endTxNum, visibleFiles[i-1].startTxNum, visibleFiles[i-1].endTxNum)
 		}
 	}
@@ -703,13 +716,13 @@ func TestIsSubset(t *testing.T) {
 	t.Parallel()
 
 	assert := assert.New(t)
-	assert.True((&filesItem{startTxNum: 0, endTxNum: 1}).isSubsetOf(&filesItem{startTxNum: 0, endTxNum: 2}))
-	assert.True((&filesItem{startTxNum: 1, endTxNum: 2}).isSubsetOf(&filesItem{startTxNum: 0, endTxNum: 2}))
-	assert.False((&filesItem{startTxNum: 0, endTxNum: 2}).isSubsetOf(&filesItem{startTxNum: 0, endTxNum: 2}))
-	assert.False((&filesItem{startTxNum: 0, endTxNum: 3}).isSubsetOf(&filesItem{startTxNum: 0, endTxNum: 2}))
-	assert.False((&filesItem{startTxNum: 2, endTxNum: 3}).isSubsetOf(&filesItem{startTxNum: 0, endTxNum: 2}))
-	assert.False((&filesItem{startTxNum: 0, endTxNum: 1}).isSubsetOf(&filesItem{startTxNum: 1, endTxNum: 2}))
-	assert.False((&filesItem{startTxNum: 0, endTxNum: 2}).isSubsetOf(&filesItem{startTxNum: 1, endTxNum: 2}))
+	assert.True((&filesItem{startTxNum: 0, endTxNum: 1}).isProperSubsetOf(&filesItem{startTxNum: 0, endTxNum: 2}))
+	assert.True((&filesItem{startTxNum: 1, endTxNum: 2}).isProperSubsetOf(&filesItem{startTxNum: 0, endTxNum: 2}))
+	assert.False((&filesItem{startTxNum: 0, endTxNum: 2}).isProperSubsetOf(&filesItem{startTxNum: 0, endTxNum: 2}))
+	assert.False((&filesItem{startTxNum: 0, endTxNum: 3}).isProperSubsetOf(&filesItem{startTxNum: 0, endTxNum: 2}))
+	assert.False((&filesItem{startTxNum: 2, endTxNum: 3}).isProperSubsetOf(&filesItem{startTxNum: 0, endTxNum: 2}))
+	assert.False((&filesItem{startTxNum: 0, endTxNum: 1}).isProperSubsetOf(&filesItem{startTxNum: 1, endTxNum: 2}))
+	assert.False((&filesItem{startTxNum: 0, endTxNum: 2}).isProperSubsetOf(&filesItem{startTxNum: 1, endTxNum: 2}))
 }
 
 func TestIsBefore(t *testing.T) {
@@ -728,6 +741,10 @@ func TestIsBefore(t *testing.T) {
 }
 
 func TestInvIndex_OpenFolder(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	db, ii, txs := filledInvIndex(t, log.New())

@@ -27,22 +27,22 @@ import (
 	"golang.org/x/net/context"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/chain/params"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/metrics"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon-lib/wrap"
-	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/txnprovider"
 )
@@ -110,7 +110,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	//}
 	execCfg.author = &cfg.miningState.MiningConfig.Etherbase
 
-	getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
+	getHeader := func(hash common.Hash, number uint64) *types.Header {
 		if execCfg.blockReader == nil {
 			return rawdb.ReadHeader(txc.Tx, hash, number)
 		}
@@ -239,9 +239,9 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 
 	rh, err := txc.Doms.ComputeCommitment(ctx, true, blockHeight, s.LogPrefix())
 	if err != nil {
-		return fmt.Errorf("StateV3.Apply: %w", err)
+		return fmt.Errorf("ParallelExecutionState.Apply: %w", err)
 	}
-	current.Header.Root = libcommon.BytesToHash(rh)
+	current.Header.Root = common.BytesToHash(rh)
 
 	logger.Info("FinalizeBlockExecution", "block", current.Header.Number, "txn", current.Txns.Len(), "gas", current.Header.GasUsed, "receipt", current.Receipts.Len(), "payload", cfg.payloadId)
 
@@ -421,10 +421,10 @@ func addTransactionsToMiningBlock(
 	current *MiningBlock,
 	chainConfig chain.Config,
 	vmConfig *vm.Config,
-	getHeader func(hash libcommon.Hash, number uint64) *types.Header,
+	getHeader func(hash common.Hash, number uint64) *types.Header,
 	engine consensus.Engine,
 	txns types.Transactions,
-	coinbase libcommon.Address,
+	coinbase common.Address,
 	ibs *state.IntraBlockState,
 	interrupt *int32,
 	payloadId uint64,
@@ -441,7 +441,7 @@ func addTransactionsToMiningBlock(
 	var coalescedLogs types.Logs
 	noop := state.NewNoopWriter()
 
-	var miningCommitTx = func(txn types.Transaction, coinbase libcommon.Address, vmConfig *vm.Config, chainConfig chain.Config, ibs *state.IntraBlockState, current *MiningBlock) ([]*types.Log, error) {
+	var miningCommitTx = func(txn types.Transaction, coinbase common.Address, vmConfig *vm.Config, chainConfig chain.Config, ibs *state.IntraBlockState, current *MiningBlock) ([]*types.Log, error) {
 		ibs.SetTxContext(txnIdx)
 		gasSnap := gasPool.Gas()
 		blobGasSnap := gasPool.BlobGas()
@@ -479,7 +479,7 @@ LOOP:
 			}
 		}
 
-		if err := libcommon.Stopped(ctx.Done()); err != nil {
+		if err := common.Stopped(ctx.Done()); err != nil {
 			return nil, true, err
 		}
 

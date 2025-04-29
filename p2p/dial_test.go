@@ -234,6 +234,10 @@ func TestDialSchedStaticDial(t *testing.T) {
 
 // This test checks that removing static nodes stops connecting to them.
 func TestDialSchedRemoveStatic(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	config := dialConfig{

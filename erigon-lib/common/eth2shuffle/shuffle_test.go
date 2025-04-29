@@ -62,6 +62,10 @@ func readEncodedListInput(input string, requiredLen int64, lineIndex int) ([]uin
 }
 
 func TestAgainstSpec(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	// Open CSV file
 	f, err := os.Open("spec/tests.csv")
 	if err != nil {

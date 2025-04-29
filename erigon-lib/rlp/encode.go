@@ -28,9 +28,8 @@ import (
 	"math/bits"
 	"reflect"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/holiman/uint256"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 // https://github.com/ethereum/wiki/wiki/RLP
@@ -380,7 +379,7 @@ func writeInterface(val reflect.Value, w *encBuffer) error {
 }
 
 func makeSliceWriter(typ reflect.Type, ts tags) (writer, error) {
-	etypeinfo := cachedTypeInfo1(typ.Elem(), tags{})
+	etypeinfo := theTC.infoWhileGenerating(typ.Elem(), tags{})
 	if etypeinfo.writerErr != nil {
 		return nil, etypeinfo.writerErr
 	}
@@ -448,7 +447,7 @@ func makeStructWriter(typ reflect.Type) (writer, error) {
 }
 
 func makePtrWriter(typ reflect.Type, ts tags) (writer, error) {
-	etypeinfo := cachedTypeInfo1(typ.Elem(), tags{})
+	etypeinfo := theTC.infoWhileGenerating(typ.Elem(), tags{})
 	if etypeinfo.writerErr != nil {
 		return nil, etypeinfo.writerErr
 	}
@@ -553,7 +552,7 @@ func putint(b []byte, i uint64) (size int) {
 
 // intsize computes the minimum number of bytes required to store i.
 func intsize(i uint64) (size int) {
-	return libcommon.BitLenToByteLen(bits.Len64(i))
+	return common.BitLenToByteLen(bits.Len64(i))
 }
 
 func IntLenExcludingHead(i uint64) int {
@@ -568,7 +567,7 @@ func BigIntLenExcludingHead(i *big.Int) int {
 	if bitLen < 8 {
 		return 0
 	}
-	return libcommon.BitLenToByteLen(bitLen)
+	return common.BitLenToByteLen(bitLen)
 }
 
 func Uint256LenExcludingHead(i *uint256.Int) int {
@@ -576,7 +575,7 @@ func Uint256LenExcludingHead(i *uint256.Int) int {
 	if bitLen < 8 {
 		return 0
 	}
-	return libcommon.BitLenToByteLen(bitLen)
+	return common.BitLenToByteLen(bitLen)
 }
 
 // precondition: len(buffer) >= 9
@@ -609,7 +608,7 @@ func EncodeBigInt(i *big.Int, w io.Writer, buffer []byte) error {
 		return err
 	}
 
-	size := libcommon.BitLenToByteLen(bitLen)
+	size := common.BitLenToByteLen(bitLen)
 	buffer[0] = 0x80 + byte(size)
 	i.FillBytes(buffer[1 : 1+size])
 	_, err := w.Write(buffer[:1+size])
@@ -632,7 +631,7 @@ func EncodeUint256(i *uint256.Int, w io.Writer, buffer []byte) error {
 		_, err := w.Write(buffer[:1])
 		return err
 	}
-	nBytes := byte(libcommon.BitLenToByteLen(nBits))
+	nBytes := byte(common.BitLenToByteLen(nBits))
 	buffer[0] = 0x80 + nBytes
 	if _, err := w.Write(buffer[:1]); err != nil {
 		return err
@@ -672,7 +671,7 @@ func EncodeString(s []byte, w io.Writer, buffer []byte) error {
 
 func EncodeStringSizePrefix(size int, w io.Writer, buffer []byte) error {
 	if size >= 56 {
-		beSize := libcommon.BitLenToByteLen(bits.Len(uint(size)))
+		beSize := common.BitLenToByteLen(bits.Len(uint(size)))
 		binary.BigEndian.PutUint64(buffer[1:], uint64(size))
 		buffer[8-beSize] = byte(beSize) + 183
 		if _, err := w.Write(buffer[8-beSize : 9]); err != nil {
@@ -687,7 +686,7 @@ func EncodeStringSizePrefix(size int, w io.Writer, buffer []byte) error {
 	return nil
 }
 
-func EncodeOptionalAddress(addr *libcommon.Address, w io.Writer, buffer []byte) error {
+func EncodeOptionalAddress(addr *common.Address, w io.Writer, buffer []byte) error {
 	if addr == nil {
 		buffer[0] = 128
 	} else {
@@ -708,7 +707,7 @@ func EncodeOptionalAddress(addr *libcommon.Address, w io.Writer, buffer []byte) 
 
 func EncodeStructSizePrefix(size int, w io.Writer, buffer []byte) error {
 	if size >= 56 {
-		beSize := libcommon.BitLenToByteLen(bits.Len(uint(size)))
+		beSize := common.BitLenToByteLen(bits.Len(uint(size)))
 		binary.BigEndian.PutUint64(buffer[1:], uint64(size))
 		buffer[8-beSize] = byte(beSize) + 247
 		if _, err := w.Write(buffer[8-beSize : 9]); err != nil {

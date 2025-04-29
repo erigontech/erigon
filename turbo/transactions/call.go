@@ -25,18 +25,17 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/rpc"
-	ethapi2 "github.com/erigontech/erigon/turbo/adapter/ethapi"
+	ethapi2 "github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
@@ -128,16 +127,16 @@ func NewEVMBlockContext(engine consensus.EngineReader, header *types.Header, req
 	return core.NewEVMBlockContext(header, blockHashFunc, engine, nil /* author */, config)
 }
 
-func MakeHeaderGetter(requireCanonical bool, tx kv.Getter, headerReader services.HeaderReader) func(uint64) libcommon.Hash {
-	return func(n uint64) libcommon.Hash {
+func MakeHeaderGetter(requireCanonical bool, tx kv.Getter, headerReader services.HeaderReader) func(uint64) common.Hash {
+	return func(n uint64) common.Hash {
 		h, err := headerReader.HeaderByNumber(context.Background(), tx, n)
 		if err != nil {
 			log.Error("Can't get block hash by number", "number", n, "only-canonical", requireCanonical)
-			return libcommon.Hash{}
+			return common.Hash{}
 		}
 		if h == nil {
 			log.Warn("[evm] header is nil", "blockNum", n)
-			return libcommon.Hash{}
+			return common.Hash{}
 		}
 		return h.Hash()
 	}

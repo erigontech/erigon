@@ -68,7 +68,7 @@ func TestBranchData_MergeHexBranches2(t *testing.T) {
 	t.Parallel()
 	row, bm := generateCellRow(t, 16)
 
-	be := NewBranchEncoder(1024, t.TempDir())
+	be := NewBranchEncoder(1024)
 	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*cell, error) {
 		return row[i], nil
 	})
@@ -152,7 +152,7 @@ func TestDecodeBranchWithLeafHashes(t *testing.T) {
 		}
 	}
 
-	be := NewBranchEncoder(1024, t.TempDir())
+	be := NewBranchEncoder(1024)
 	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*cell, error) {
 		return row[i], nil
 	})
@@ -213,7 +213,7 @@ func TestBranchData_ReplacePlainKeys(t *testing.T) {
 		return row[nibble], nil
 	}
 
-	be := NewBranchEncoder(1024, t.TempDir())
+	be := NewBranchEncoder(1024)
 	enc, _, err := be.EncodeBranch(bm, bm, bm, cg)
 	require.NoError(t, err)
 
@@ -262,7 +262,7 @@ func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
 		return row[nibble], nil
 	}
 
-	be := NewBranchEncoder(1024, t.TempDir())
+	be := NewBranchEncoder(1024)
 	enc, _, err := be.EncodeBranch(bm, bm, bm, cg)
 	require.NoError(t, err)
 
@@ -309,7 +309,6 @@ func TestNewUpdates(t *testing.T) {
 		ut := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
 
 		require.NotNil(t, ut.tree)
-		require.NotNil(t, ut.keccak)
 		require.Nil(t, ut.keys)
 		require.Equal(t, ModeUpdate, ut.mode)
 	})
@@ -317,7 +316,6 @@ func TestNewUpdates(t *testing.T) {
 	t.Run("ModeDirect", func(t *testing.T) {
 		ut := NewUpdates(ModeDirect, t.TempDir(), keyHasherNoop)
 
-		require.NotNil(t, ut.keccak)
 		require.NotNil(t, ut.keys)
 		require.Equal(t, ModeDirect, ut.mode)
 	})
