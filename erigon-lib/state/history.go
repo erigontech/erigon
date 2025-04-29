@@ -28,13 +28,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/common/page"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/bitmapdb"
@@ -76,8 +77,7 @@ type rangeIntegrityChecker func(fromStep, toStep uint64) bool
 type histCfg struct {
 	iiCfg iiCfg
 
-	valuesTable  string // bucket for history values; key1+key2+txnNum -> oldValue , stores values BEFORE change
-	filenameBase string // filename base for all history files
+	valuesTable string // bucket for history values; key1+key2+txnNum -> oldValue , stores values BEFORE change
 
 	keepRecentTxnInDB uint64 // When snapshotsDisabled=true, keepRecentTxnInDB is used to keep this amount of txn in db before pruning
 
@@ -96,6 +96,8 @@ type histCfg struct {
 	snapshotsDisabled  bool // don't produce .v and .ef files, keep in db table. old data will be pruned anyway.
 	historyDisabled    bool // skip all write operations to this History (even in DB)
 
+	historyValuesOnCompressedPage int // when collating .v files: concat 16 values and snappy them
+
 	indexList     Accessors
 	compressorCfg seg.Cfg             // compression settings for history files
 	compression   seg.FileCompression // defines type of compression for history files
@@ -103,16 +105,14 @@ type histCfg struct {
 
 	//TODO: re-visit this check - maybe we don't need it. It's about kill in the middle of merge
 	integrity rangeIntegrityChecker
+
+	version HistVersionTypes
 }
 
 func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error) {
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
-	cfg.compressorCfg = seg.DefaultCfg
 	if cfg.indexList == 0 {
 		cfg.indexList = AccessorHashMap
-	}
-	if cfg.iiCfg.filenameBase == "" {
-		cfg.iiCfg.filenameBase = cfg.filenameBase
 	}
 
 	h := History{
@@ -135,17 +135,24 @@ func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error
 		return nil, fmt.Errorf("NewHistory: %s, %w", cfg.iiCfg.filenameBase, err)
 	}
 
+	if h.version.DataV.IsZero() {
+		panic(fmt.Errorf("assert: forgot to set version of %s", h.name))
+	}
+	if h.version.AccessorVI.IsZero() {
+		panic(fmt.Errorf("assert: forgot to set version of %s", h.name))
+	}
+
 	return &h, nil
 }
 
 func (h *History) vFileName(fromStep, toStep uint64) string {
-	return fmt.Sprintf("v1-%s.%d-%d.v", h.filenameBase, fromStep, toStep)
+	return fmt.Sprintf("%s-%s.%d-%d.v", h.version.DataV.String(), h.filenameBase, fromStep, toStep)
 }
 func (h *History) vFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(h.dirs.SnapHistory, h.vFileName(fromStep, toStep))
 }
 func (h *History) vAccessorFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("v1-%s.%d-%d.vi", h.filenameBase, fromStep, toStep))
+	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.vi", h.version.AccessorVI.String(), h.filenameBase, fromStep, toStep))
 }
 
 // openList - main method to open list of files.
@@ -294,9 +301,7 @@ func (h *History) closeWhatNotInList(fNames []string) {
 	}
 }
 
-func (h *History) Tables() []string {
-	return append([]string{h.keysTable, h.valuesTable}, h.InvertedIndex.Tables()...)
-}
+func (h *History) Tables() []string { return append(h.InvertedIndex.Tables(), h.valuesTable) }
 
 func (h *History) Close() {
 	if h == nil {
@@ -306,20 +311,24 @@ func (h *History) Close() {
 	h.closeWhatNotInList([]string{})
 }
 
-func (ht *HistoryRoTx) Files() (res []string) {
+func (ht *HistoryRoTx) Files() (res VisibleFiles) {
 	for _, item := range ht.files {
 		if item.src.decompressor != nil {
-			res = append(res, item.src.decompressor.FileName())
+			res = append(res, item)
 		}
 	}
 	return append(res, ht.iit.Files()...)
 }
 
-func (h *History) missedMapAccessors() (l []*filesItem) {
+func (h *History) MissedMapAccessors() (l []*filesItem) {
+	return h.missedMapAccessors(h.dirtyFiles.Items())
+}
+
+func (h *History) missedMapAccessors(source []*filesItem) (l []*filesItem) {
 	if !h.indexList.Has(AccessorHashMap) {
 		return nil
 	}
-	return fileItemsWithMissingAccessors(h.dirtyFiles, h.aggregationStep, func(fromStep, toStep uint64) []string {
+	return fileItemsWithMissedAccessors(source, h.aggregationStep, func(fromStep, toStep uint64) []string {
 		return []string{
 			h.vAccessorFilePath(fromStep, toStep),
 		}
@@ -343,16 +352,42 @@ func (h *History) buildVi(ctx context.Context, item *filesItem, ps *background.P
 	fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
 	idxPath := h.vAccessorFilePath(fromStep, toStep)
 
-	_, err = h.buildVI(ctx, idxPath, item.decompressor, iiItem.decompressor, iiItem.startTxNum, ps)
+	err = h.buildVI(ctx, idxPath, item.decompressor, iiItem.decompressor, iiItem.startTxNum, ps)
 	if err != nil {
 		return fmt.Errorf("buildVI: %w", err)
 	}
 	return nil
 }
 
-func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHist *seg.Decompressor, efBaseTxNum uint64, ps *background.ProgressSet) (string, error) {
+func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHist *seg.Decompressor, efBaseTxNum uint64, ps *background.ProgressSet) error {
+	var histKey []byte
+	var valOffset uint64
+
+	defer hist.EnableReadAhead().DisableReadAhead()
+	defer efHist.EnableReadAhead().DisableReadAhead()
+
+	iiReader := seg.NewReader(efHist.MakeGetter(), h.InvertedIndex.compression)
+
+	var keyBuf, valBuf []byte
+	cnt := uint64(0)
+	for iiReader.HasNext() {
+		keyBuf, _ = iiReader.Next(keyBuf[:0]) // skip key
+		valBuf, _ = iiReader.Next(valBuf[:0])
+		cnt += multiencseq.Count(efBaseTxNum, valBuf)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+	}
+
+	histReader := seg.NewReader(hist.MakeGetter(), h.compression)
+
+	_, fName := filepath.Split(historyIdxPath)
+	p := ps.AddNew(fName, uint64(efHist.Count())/2)
+	defer ps.Delete(p)
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   hist.Count(),
+		KeyCount:   int(cnt),
 		Enums:      false,
 		BucketSize: recsplit.DefaultBucketSize,
 		LeafSize:   recsplit.DefaultLeafSize,
@@ -362,34 +397,21 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		NoFsync:    h.noFsync,
 	}, h.logger)
 	if err != nil {
-		return "", fmt.Errorf("create recsplit: %w", err)
+		return fmt.Errorf("create recsplit: %w", err)
 	}
 	defer rs.Close()
 	rs.LogLvl(log.LvlTrace)
 
-	var historyKey []byte
-	var txKey [8]byte
-	var valOffset uint64
-
-	_, fName := filepath.Split(historyIdxPath)
-	p := ps.AddNew(fName, uint64(hist.Count()))
-	defer ps.Delete(p)
-
-	defer hist.EnableReadAhead().DisableReadAhead()
-	defer efHist.EnableReadAhead().DisableReadAhead()
-
-	var keyBuf, valBuf []byte
-	histReader := seg.NewReader(hist.MakeGetter(), h.compression)
-	efHistReader := seg.NewReader(efHist.MakeGetter(), h.InvertedIndex.compression)
-
+	i := 0
 	for {
 		histReader.Reset(0)
-		efHistReader.Reset(0)
+		iiReader.Reset(0)
 
 		valOffset = 0
-		for efHistReader.HasNext() {
-			keyBuf, _ = efHistReader.Next(nil)
-			valBuf, _ = efHistReader.Next(nil)
+		for iiReader.HasNext() {
+			keyBuf, _ = iiReader.Next(keyBuf[:0])
+			valBuf, _ = iiReader.Next(valBuf[:0])
+			p.Processed.Add(1)
 
 			// fmt.Printf("ef key %x\n", keyBuf)
 
@@ -398,20 +420,26 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 			for it.HasNext() {
 				txNum, err := it.Next()
 				if err != nil {
-					return "", err
+					return err
 				}
-				binary.BigEndian.PutUint64(txKey[:], txNum)
-				historyKey = append(append(historyKey[:0], txKey[:]...), keyBuf...)
-				if err = rs.AddKey(historyKey, valOffset); err != nil {
-					return "", err
+				histKey = historyKey(txNum, keyBuf, histKey[:0])
+				if err = rs.AddKey(histKey, valOffset); err != nil {
+					return err
 				}
-				valOffset, _ = histReader.Skip()
-				p.Processed.Add(1)
+				if h.historyValuesOnCompressedPage == 0 {
+					valOffset, _ = histReader.Skip()
+				} else {
+					i++
+					if i%h.historyValuesOnCompressedPage == 0 {
+						valOffset, _ = histReader.Skip()
+					}
+				}
 			}
+			p.Processed.Add(1)
 
 			select {
 			case <-ctx.Done():
-				return "", ctx.Err()
+				return ctx.Err()
 			default:
 			}
 		}
@@ -421,18 +449,18 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 				log.Info("Building recsplit. Collision happened. It's ok. Restarting...")
 				rs.ResetNextSalt()
 			} else {
-				return "", fmt.Errorf("build idx: %w", err)
+				return fmt.Errorf("build idx: %w", err)
 			}
 		} else {
 			break
 		}
 	}
-	return historyIdxPath, nil
+	return nil
 }
 
-func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
-	h.InvertedIndex.BuildMissedAccessors(ctx, g, ps)
-	for _, item := range h.missedMapAccessors() {
+func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet, historyFiles *MissedAccessorHistoryFiles) {
+	h.InvertedIndex.BuildMissedAccessors(ctx, g, ps, historyFiles.ii)
+	for _, item := range historyFiles.missedMapAccessors() {
 		item := item
 		g.Go(func() error {
 			return h.buildVi(ctx, item, ps)
@@ -440,7 +468,7 @@ func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, p
 	}
 }
 
-func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte, originalStep uint64) (err error) {
+func (w *historyBufferedWriter) AddPrevValue(key1, key2 []byte, txNum uint64, original []byte) (err error) {
 	if w.discard {
 		return nil
 	}
@@ -448,6 +476,7 @@ func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte, origin
 	if original == nil {
 		original = []byte{}
 	}
+	binary.BigEndian.PutUint64(w.ii.txNumBytes[:], txNum)
 
 	//defer func() {
 	//	fmt.Printf("addPrevValue [%p;tx=%d] '%x' -> '%x'\n", w, w.ii.txNum, key1, original)
@@ -514,8 +543,6 @@ type historyBufferedWriter struct {
 
 	ii *InvertedIndexBufferedWriter
 }
-
-func (w *historyBufferedWriter) SetTxNum(v uint64) { w.ii.SetTxNum(v) }
 
 func (w *historyBufferedWriter) close() {
 	if w == nil { // allow dobule-close
@@ -664,11 +691,12 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	}
 
 	var (
-		keyBuf      = make([]byte, 0, 256)
-		numBuf      = make([]byte, 8)
-		bitmap      = bitmapdb.NewBitmap64()
-		prevEf      []byte
-		prevKey     []byte
+		keyBuf  = make([]byte, 0, 256)
+		numBuf  = make([]byte, 8)
+		bitmap  = bitmapdb.NewBitmap64()
+		prevEf  []byte
+		prevKey []byte
+
 		initialized bool
 	)
 	efHistoryComp = seg.NewWriter(efComp, seg.CompressNone) // coll+build must be fast - no compression
@@ -676,6 +704,10 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	defer bitmapdb.ReturnToPool64(bitmap)
 
 	baseTxNum := step * h.aggregationStep
+	cnt := 0
+	var histKeyBuf []byte
+	//log.Warn("[dbg] collate", "name", h.filenameBase, "sampling", h.historyValuesOnCompressedPage)
+	historyWriter := page.NewWriter(historyComp, h.historyValuesOnCompressedPage, true)
 	loadBitmapsFunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		txNum := binary.BigEndian.Uint64(v)
 		if !initialized {
@@ -693,21 +725,11 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 		it := bitmap.Iterator()
 
 		for it.HasNext() {
+			cnt++
 			vTxNum := it.Next()
+
 			binary.BigEndian.PutUint64(numBuf, vTxNum)
-			if h.historyLargeValues {
-				keyBuf = append(append(keyBuf[:0], prevKey...), numBuf...)
-				key, val, err := c.SeekExact(keyBuf)
-				if err != nil {
-					return fmt.Errorf("seekExact %s history val [%x]: %w", h.filenameBase, key, err)
-				}
-				if len(val) == 0 {
-					val = nil
-				}
-				if err = historyComp.AddWord(val); err != nil {
-					return fmt.Errorf("add %s history val [%x]=>[%x]: %w", h.filenameBase, key, val, err)
-				}
-			} else {
+			if !h.historyLargeValues {
 				val, err := cd.SeekBothRange(prevKey, numBuf)
 				if err != nil {
 					return fmt.Errorf("seekBothRange %s history val [%x]: %w", h.filenameBase, prevKey, err)
@@ -717,22 +739,37 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 				} else {
 					val = nil
 				}
-				if err = historyComp.AddWord(val); err != nil {
-					return fmt.Errorf("add %s history val [%x]=>[%x]: %w", h.filenameBase, prevKey, val, err)
+
+				histKeyBuf = historyKey(vTxNum, prevKey, histKeyBuf)
+				if err := historyWriter.Add(histKeyBuf, val); err != nil {
+					return fmt.Errorf("add %s history val [%x]: %w", h.filenameBase, prevKey, err)
 				}
+				continue
+			}
+			keyBuf = append(append(keyBuf[:0], prevKey...), numBuf...)
+			key, val, err := c.SeekExact(keyBuf)
+			if err != nil {
+				return fmt.Errorf("seekExact %s history val [%x]: %w", h.filenameBase, key, err)
+			}
+			if len(val) == 0 {
+				val = nil
 			}
 
 			seqBuilder.AddOffset(vTxNum)
+			histKeyBuf = historyKey(vTxNum, prevKey, histKeyBuf)
+			if err := historyWriter.Add(histKeyBuf, val); err != nil {
+				return fmt.Errorf("add %s history val [%x]: %w", h.filenameBase, key, err)
+			}
 		}
 		bitmap.Clear()
 		seqBuilder.Build()
 
 		prevEf = seqBuilder.AppendBytes(prevEf[:0])
 
-		if err = efHistoryComp.AddWord(prevKey); err != nil {
+		if _, err = efHistoryComp.Write(prevKey); err != nil {
 			return fmt.Errorf("add %s ef history key [%x]: %w", h.filenameBase, prevKey, err)
 		}
-		if err = efHistoryComp.AddWord(prevEf); err != nil {
+		if _, err = efHistoryComp.Write(prevEf); err != nil {
 			return fmt.Errorf("add %s ef history val: %w", h.filenameBase, err)
 		}
 
@@ -752,7 +789,9 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 			return HistoryCollation{}, err
 		}
 	}
-
+	if err = historyWriter.Flush(); err != nil {
+		return HistoryCollation{}, fmt.Errorf("add %s history val: %w", h.filenameBase, err)
+	}
 	closeComp = false
 	mxCollationSizeHist.SetUint64(uint64(historyComp.Count()))
 
@@ -762,7 +801,6 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 		efBaseTxNum:   step * h.aggregationStep,
 		historyPath:   historyPath,
 		historyComp:   historyComp,
-		historyCount:  historyComp.Count(),
 	}, nil
 }
 
@@ -879,7 +917,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	}
 
 	historyIdxPath := h.vAccessorFilePath(step, step+1)
-	historyIdxPath, err = h.buildVI(ctx, historyIdxPath, historyDecomp, efHistoryDecomp, collation.efBaseTxNum, ps)
+	err = h.buildVI(ctx, historyIdxPath, historyDecomp, efHistoryDecomp, collation.efBaseTxNum, ps)
 	if err != nil {
 		return HistoryFiles{}, fmt.Errorf("build %s .vi: %w", h.filenameBase, err)
 	}
@@ -915,17 +953,6 @@ func (h *History) integrateDirtyFiles(sf HistoryFiles, txNumFrom, txNumTo uint64
 }
 
 func (h *History) isEmpty(tx kv.Tx) (bool, error) {
-	if h.historyLargeValues {
-		k, err := kv.FirstKey(tx, h.valuesTable)
-		if err != nil {
-			return false, err
-		}
-		k2, err := kv.FirstKey(tx, h.keysTable)
-		if err != nil {
-			return false, err
-		}
-		return k == nil && k2 == nil, nil
-	}
 	k, err := kv.FirstKey(tx, h.valuesTable)
 	if err != nil {
 		return false, err
@@ -955,7 +982,8 @@ type HistoryRoTx struct {
 	valsC    kv.Cursor
 	valsCDup kv.CursorDupSort
 
-	_bufTs []byte
+	_bufTs           []byte
+	snappyReadBuffer []byte
 }
 
 func (h *History) BeginFilesRo() *HistoryRoTx {
@@ -1176,32 +1204,47 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	if reader.Empty() {
 		return nil, false, nil
 	}
-	offset, ok := reader.Lookup(ht.encodeTs(histTxNum, key))
+	historyKey := ht.encodeTs(histTxNum, key)
+	offset, ok := reader.Lookup(historyKey)
 	if !ok {
 		return nil, false, nil
 	}
 	g := ht.statelessGetter(historyItem.i)
 	g.Reset(offset)
-
+	//fmt.Printf("[dbg] hist.seek: offset=%d\n", offset)
 	v, _ := g.Next(nil)
 	if traceGetAsOf == ht.h.filenameBase {
 		fmt.Printf("DomainGetAsOf(%s, %x, %d) -> %s, histTxNum=%d, isNil(v)=%t\n", ht.h.filenameBase, key, txNum, g.FileName(), histTxNum, v == nil)
 	}
+
+	if ht.h.historyValuesOnCompressedPage > 1 {
+		v, ht.snappyReadBuffer = page.Get(historyKey, v, ht.snappyReadBuffer, true)
+	}
 	return v, true, nil
 }
 
-func (ht *HistoryRoTx) encodeTs(txNum uint64, key []byte) []byte {
-	if ht._bufTs == nil {
-		ht._bufTs = make([]byte, 8+len(key))
+func historyKey(txNum uint64, key []byte, buf []byte) []byte {
+	if buf == nil || cap(buf) < 8+len(key) {
+		buf = make([]byte, 8+len(key))
 	}
-	binary.BigEndian.PutUint64(ht._bufTs, txNum)
-	ht._bufTs = append(ht._bufTs[:8], key...)
-	return ht._bufTs[:8+len(key)]
+	buf = buf[:8+len(key)]
+	binary.BigEndian.PutUint64(buf, txNum)
+	copy(buf[8:], key)
+	return buf
+}
+
+func (ht *HistoryRoTx) encodeTs(txNum uint64, key []byte) []byte {
+	ht._bufTs = historyKey(txNum, key, ht._bufTs)
+	return ht._bufTs
 }
 
 // HistorySeek searches history for a value of specified key before txNum
 // second return value is true if the value is found in the history (even if it is nil)
 func (ht *HistoryRoTx) HistorySeek(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
+	if ht.h.disable {
+		return nil, false, nil
+	}
+
 	v, ok, err := ht.historySeekInFiles(key, txNum)
 	if err != nil {
 		return nil, false, err
@@ -1266,7 +1309,8 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 		return nil, false, nil
 	}
 	// `val == []byte{}` means key was created in this txNum and doesn't exist before.
-	return val[8:], true, nil
+	v := val[8:]
+	return v, true, nil
 }
 
 func (ht *HistoryRoTx) RangeAsOf(ctx context.Context, startTxNum uint64, from, to []byte, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
@@ -1305,7 +1349,7 @@ func (ht *HistoryRoTx) RangeAsOf(ctx context.Context, startTxNum uint64, from, t
 }
 
 func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By, limit int) (stream.KV, error) {
-	if asc == false {
+	if asc == order.Desc {
 		panic("not supported yet")
 	}
 	if len(ht.iit.files) == 0 {

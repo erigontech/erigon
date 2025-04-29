@@ -31,14 +31,14 @@ func TestSetStorageModeIfNotExist(t *testing.T) {
 	_, tx := memdb.NewTestTx(t)
 	prune, err := Get(tx)
 	require.NoError(t, err)
-	assert.Equal(t, Mode{true, Distance(math.MaxUint64), Distance(math.MaxUint64), Experiments{}}, prune)
+	assert.Equal(t, Mode{true, Distance(math.MaxUint64), Distance(math.MaxUint64)}, prune)
 
-	err = setIfNotExist(tx, Mode{true, Distance(1), Distance(2), Experiments{}})
+	err = setIfNotExist(tx, Mode{true, Distance(1), Distance(2)})
 	require.NoError(t, err)
 
 	prune, err = Get(tx)
 	require.NoError(t, err)
-	assert.Equal(t, Mode{true, Distance(1), Distance(2), Experiments{}}, prune)
+	assert.Equal(t, Mode{true, Distance(1), Distance(2)}, prune)
 }
 
 var distanceTests = []struct {

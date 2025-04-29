@@ -28,11 +28,12 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"golang.org/x/sync/errgroup"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	shuttercrypto "github.com/erigontech/erigon/txnprovider/shutter/internal/crypto"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
@@ -41,7 +42,7 @@ import (
 
 type DecryptionKeysProcessor struct {
 	logger            log.Logger
-	config            Config
+	config            shuttercfg.Config
 	encryptedTxnsPool *EncryptedTxnsPool
 	decryptedTxnsPool *DecryptedTxnsPool
 	blockListener     *BlockListener
@@ -54,7 +55,7 @@ type DecryptionKeysProcessor struct {
 
 func NewDecryptionKeysProcessor(
 	logger log.Logger,
-	config Config,
+	config shuttercfg.Config,
 	encryptedTxnsPool *EncryptedTxnsPool,
 	decryptedTxnsPool *DecryptedTxnsPool,
 	blockListener *BlockListener,
@@ -272,15 +273,15 @@ func (dkp *DecryptionKeysProcessor) decryptTxn(keys map[TxnIndex]*proto.Key, sub
 }
 
 // threadSafeParseTxn is needed because txnParseCtx.ParseTransaction is not thread safe
-func (dkp *DecryptionKeysProcessor) threadSafeParseTxn(rlp []byte) (*txpool.TxnSlot, libcommon.Address, error) {
+func (dkp *DecryptionKeysProcessor) threadSafeParseTxn(rlp []byte) (*txpool.TxnSlot, common.Address, error) {
 	dkp.txnParseCtxMu.Lock()
 	defer dkp.txnParseCtxMu.Unlock()
 
 	var txnSlot txpool.TxnSlot
-	var sender libcommon.Address
+	var sender common.Address
 	_, err := dkp.txnParseCtx.ParseTransaction(rlp, 0, &txnSlot, sender[:], true, true, nil)
 	if err != nil {
-		return nil, libcommon.Address{}, err
+		return nil, common.Address{}, err
 	}
 
 	return &txnSlot, sender, nil

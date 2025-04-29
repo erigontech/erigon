@@ -25,10 +25,9 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/polygon/bor/finality/rawdb"
 	"github.com/stretchr/testify/require"
 
@@ -54,7 +53,7 @@ func NewMockService(db kv.RwDB) *Service {
 				db:       db,
 			},
 			LockedMilestoneIDs:   make(map[string]struct{}),
-			FutureMilestoneList:  make(map[uint64]libcommon.Hash),
+			FutureMilestoneList:  make(map[uint64]common.Hash),
 			FutureMilestoneOrder: make([]uint64, 0),
 			MaxCapacity:          10,
 		},
@@ -77,7 +76,7 @@ func TestWhitelistedCheckpoint(t *testing.T) {
 	_, _, err := rawdb.ReadFinality[*rawdb.Checkpoint](db)
 	require.NotNil(t, err, "Error should be nil while reading from the db")
 	//Adding the checkpoint
-	s.ProcessCheckpoint(11, libcommon.Hash{})
+	s.ProcessCheckpoint(11, common.Hash{})
 
 	require.Equal(t, cp.doExist, true, "expected true as cp exist")
 
@@ -87,7 +86,7 @@ func TestWhitelistedCheckpoint(t *testing.T) {
 	require.Equal(t, cp.doExist, false, "expected false as no cp exist at this point")
 
 	//Adding the checkpoint
-	s.ProcessCheckpoint(12, libcommon.Hash{1})
+	s.ProcessCheckpoint(12, common.Hash{1})
 
 	// //Receiving the stored checkpoint
 	doExist, number, hash := s.GetWhitelistedCheckpoint()
@@ -95,20 +94,20 @@ func TestWhitelistedCheckpoint(t *testing.T) {
 	// //Validating the values received
 	require.Equal(t, doExist, true, "expected true ascheckpoint exist at this point")
 	require.Equal(t, number, uint64(12), "expected number to be 11 but got", number)
-	require.Equal(t, hash, libcommon.Hash{1}, "expected the 1 hash but got", hash)
-	require.NotEqual(t, hash, libcommon.Hash{}, "expected the hash to be different from zero hash")
+	require.Equal(t, hash, common.Hash{1}, "expected the 1 hash but got", hash)
+	require.NotEqual(t, hash, common.Hash{}, "expected the hash to be different from zero hash")
 
 	s.PurgeWhitelistedCheckpoint()
 	doExist, number, hash = s.GetWhitelistedCheckpoint()
 	//Validating the values received from the db, not memory
 	require.Equal(t, doExist, true, "expected true ascheckpoint exist at this point")
 	require.Equal(t, number, uint64(12), "expected number to be 11 but got", number)
-	require.Equal(t, hash, libcommon.Hash{1}, "expected the 1 hash but got", hash)
-	require.NotEqual(t, hash, libcommon.Hash{}, "expected the hash to be different from zero hash")
+	require.Equal(t, hash, common.Hash{1}, "expected the 1 hash but got", hash)
+	require.NotEqual(t, hash, common.Hash{}, "expected the hash to be different from zero hash")
 
 	checkpointNumber, checkpointHash, err := rawdb.ReadFinality[*rawdb.Checkpoint](db)
 	require.Nil(t, err, "Error should be nil while reading from the db")
-	require.Equal(t, checkpointHash, libcommon.Hash{1}, "expected the 1 hash but got", hash)
+	require.Equal(t, checkpointHash, common.Hash{1}, "expected the 1 hash but got", hash)
 	require.Equal(t, checkpointNumber, uint64(12), "expected number to be 11 but got", number)
 }
 
@@ -339,7 +338,7 @@ func TestIsValidChain(t *testing.T) {
 	res = s.IsValidChain(chainA[len(chainA)-1].Number.Uint64(), chainA)
 	require.Equal(t, res, true, "expected chain to be valid as incoming chain matches with the locked value ")
 
-	hash3 := libcommon.Hash{3}
+	hash3 := common.Hash{3}
 
 	//Locking for sprintNumber 16 with different hash
 	milestone.LockMutex(chainA[len(chainA)-4].Number.Uint64())

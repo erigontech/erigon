@@ -27,12 +27,12 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/types"
 )
 
 // TransactionTest checks RLP decoding and sender derivation of transactions.
@@ -56,13 +56,13 @@ type ttForks struct {
 
 type ttFork struct {
 	Exception    string                `json:"exception"`
-	Sender       libcommon.Address     `json:"sender"`
-	Hash         libcommon.Hash        `json:"hash"`
+	Sender       common.Address        `json:"sender"`
+	Hash         common.Hash           `json:"hash"`
 	IntrinsicGas *math.HexOrDecimal256 `json:"intrinsicGas"`
 }
 
 func (tt *TransactionTest) Run(chainID *big.Int) error {
-	validateTx := func(rlpData hexutil.Bytes, signer types.Signer, rules *chain.Rules) (*libcommon.Address, *libcommon.Hash, uint64, error) {
+	validateTx := func(rlpData hexutil.Bytes, signer types.Signer, rules *chain.Rules) (*common.Address, *common.Hash, uint64, error) {
 		tx, err := types.DecodeTransaction(rlpData)
 		if err != nil {
 			return nil, nil, 0, err

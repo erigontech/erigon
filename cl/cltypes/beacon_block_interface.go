@@ -1,7 +1,7 @@
 package cltypes
 
 import (
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
@@ -10,14 +10,14 @@ type GenericBeaconBlock interface {
 	Version() clparams.StateVersion
 	GetSlot() uint64
 	GetProposerIndex() uint64
-	GetParentRoot() libcommon.Hash
+	GetParentRoot() common.Hash
 	GetBody() GenericBeaconBody
 }
 
 type GenericBeaconBody interface {
 	HashSSZ() ([32]byte, error)
 	GetPayloadHeader() (*Eth1Header, error)
-	GetRandaoReveal() libcommon.Bytes96
+	GetRandaoReveal() common.Bytes96
 	GetEth1Data() *Eth1Data
 	GetSyncAggregate() *SyncAggregate
 

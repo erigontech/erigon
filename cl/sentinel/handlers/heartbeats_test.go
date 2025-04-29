@@ -27,7 +27,8 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/chain/networkid"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -202,7 +203,7 @@ func TestMetadataV2(t *testing.T) {
 
 	f := mock_services.NewForkChoiceStorageMock(t)
 	ethClock := getEthClock(t)
-	nc := clparams.NetworkConfigs[clparams.MainnetNetwork]
+	nc := clparams.NetworkConfigs[networkid.MainnetChainID]
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
 		ctx,
@@ -260,7 +261,7 @@ func TestMetadataV1(t *testing.T) {
 
 	f := mock_services.NewForkChoiceStorageMock(t)
 
-	nc := clparams.NetworkConfigs[clparams.MainnetNetwork]
+	nc := clparams.NetworkConfigs[networkid.MainnetChainID]
 	ethClock := getEthClock(t)
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
@@ -320,13 +321,13 @@ func TestStatus(t *testing.T) {
 
 	hs := handshake.New(ctx, getEthClock(t), &clparams.MainnetBeaconConfig, nil)
 	s := &cltypes.Status{
-		FinalizedRoot:  libcommon.Hash{1, 2, 4},
-		HeadRoot:       libcommon.Hash{1, 2, 4},
+		FinalizedRoot:  common.Hash{1, 2, 4},
+		HeadRoot:       common.Hash{1, 2, 4},
 		FinalizedEpoch: 1,
 		HeadSlot:       1,
 	}
 	hs.SetStatus(s)
-	nc := clparams.NetworkConfigs[clparams.MainnetNetwork]
+	nc := clparams.NetworkConfigs[networkid.MainnetChainID]
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
 		ctx,

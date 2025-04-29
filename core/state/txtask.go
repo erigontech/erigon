@@ -26,16 +26,22 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/erigon-db/rawdb/rawtemporaldb"
 )
+
+type AAValidationResult struct {
+	PaymasterContext []byte
+	GasUsed          uint64
+}
 
 // ReadWriteSet contains ReadSet, WriteSet and BalanceIncrease of a transaction,
 // which is processed by a single thread that writes into the ReconState1 and
@@ -47,22 +53,22 @@ type TxTask struct {
 	Header          *types.Header
 	Txs             types.Transactions
 	Uncles          []*types.Header
-	Coinbase        libcommon.Address
+	Coinbase        common.Address
 	Withdrawals     types.Withdrawals
-	BlockHash       libcommon.Hash
-	sender          *libcommon.Address
+	BlockHash       common.Hash
+	sender          *common.Address
 	SkipAnalysis    bool
 	TxIndex         int // -1 for block initialisation
 	Final           bool
 	Failed          bool
 	Tx              types.Transaction
-	GetHashFn       func(n uint64) libcommon.Hash
+	GetHashFn       func(n uint64) common.Hash
 	TxAsMessage     *types.Message
 	EvmBlockContext evmtypes.BlockContext
 
 	HistoryExecution bool // use history reader for that txn instead of state reader
 
-	BalanceIncreaseSet map[libcommon.Address]uint256.Int
+	BalanceIncreaseSet map[common.Address]uint256.Int
 	ReadLists          map[string]*state.KvList
 	WriteLists         map[string]*state.KvList
 	AccountPrevs       map[string][]byte
@@ -71,8 +77,8 @@ type TxTask struct {
 	CodePrevs          map[string]uint64
 	Error              error
 	Logs               []*types.Log
-	TraceFroms         map[libcommon.Address]struct{}
-	TraceTos           map[libcommon.Address]struct{}
+	TraceFroms         map[common.Address]struct{}
+	TraceTos           map[common.Address]struct{}
 
 	UsedGas uint64
 
@@ -84,9 +90,13 @@ type TxTask struct {
 	BlockReceipts types.Receipts
 
 	Config *chain.Config
+
+	AAValidationBatchSize uint64 // number of consecutive RIP-7560 transactions, should be 0 for single transactions and transactions that are not first in the transaction order
+	InBatch               bool   // set to true for consecutive RIP-7560 transactions after the first one (first one is false)
+	ValidationResults     []AAValidationResult
 }
 
-func (t *TxTask) Sender() *libcommon.Address {
+func (t *TxTask) Sender() *common.Address {
 	if t.sender != nil {
 		return t.sender
 	}
@@ -131,12 +141,17 @@ func (t *TxTask) CreateReceipt(tx kv.Tx) {
 		panic(msg)
 	}
 
-	r := t.createReceipt(cumulativeGasUsed)
-	r.FirstLogIndexWithinBlock = firstLogIndex
+	r := t.createReceipt(cumulativeGasUsed, firstLogIndex)
 	t.BlockReceipts[t.TxIndex] = r
 }
 
-func (t *TxTask) createReceipt(cumulativeGasUsed uint64) *types.Receipt {
+func (t *TxTask) createReceipt(cumulativeGasUsed uint64, firstLogIndex uint32) *types.Receipt {
+	logIndex := firstLogIndex
+	for i := range t.Logs {
+		t.Logs[i].Index = uint(logIndex)
+		logIndex++
+	}
+
 	receipt := &types.Receipt{
 		BlockNumber:       t.Header.Number,
 		BlockHash:         t.BlockHash,
@@ -146,6 +161,8 @@ func (t *TxTask) createReceipt(cumulativeGasUsed uint64) *types.Receipt {
 		CumulativeGasUsed: cumulativeGasUsed,
 		TxHash:            t.Tx.Hash(),
 		Logs:              t.Logs,
+
+		FirstLogIndexWithinBlock: firstLogIndex,
 	}
 	blockNum := t.Header.Number.Uint64()
 	for _, l := range receipt.Logs {
@@ -161,9 +178,9 @@ func (t *TxTask) createReceipt(cumulativeGasUsed uint64) *types.Receipt {
 
 	receipt.Bloom = types.LogsBloom(receipt.Logs) // why do we need to add this?
 	// if the transaction created a contract, store the creation address in the receipt.
-	//if msg.To() == nil {
-	//	receipt.ContractAddress = crypto.CreateAddress(evm.Origin, tx.GetNonce())
-	//}
+	if t.TxAsMessage.To() == nil {
+		receipt.ContractAddress = crypto.CreateAddress(*t.Sender(), t.Tx.GetNonce())
+	}
 
 	return receipt
 }

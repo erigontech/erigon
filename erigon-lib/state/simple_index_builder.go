@@ -14,11 +14,11 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-	ae "github.com/erigontech/erigon-lib/state/appendable_extras"
+	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 )
 
 // interfaces defined here are not required to be implemented in
-// appendables. These are just helpers when SimpleAccessorBuilder is used. Also can be used to provide some structure
+// forkables. These are just helpers when SimpleAccessorBuilder is used. Also can be used to provide some structure
 // to build more custom indexes.
 type IndexInputDataQuery interface {
 	GetStream(ctx context.Context) stream.Trio[[]byte, uint64, uint64] // (word/value, index, offset)
@@ -64,7 +64,8 @@ func NewAccessorArgs(enums, lessFalsePositives bool) *AccessorArgs {
 type SimpleAccessorBuilder struct {
 	args     *AccessorArgs
 	indexPos uint64
-	id       AppendableId
+	id       ForkableId
+	parser   ee.SnapNameSchema
 	kf       IndexKeyFactory
 	fetcher  FirstEntityNumFetcher
 	logger   log.Logger
@@ -74,10 +75,11 @@ type FirstEntityNumFetcher = func(from, to RootNum, seg *seg.Decompressor) Num
 
 var _ AccessorIndexBuilder = (*SimpleAccessorBuilder)(nil)
 
-func NewSimpleAccessorBuilder(args *AccessorArgs, id AppendableId, logger log.Logger, options ...AccessorBuilderOptions) *SimpleAccessorBuilder {
+func NewSimpleAccessorBuilder(args *AccessorArgs, id ForkableId, logger log.Logger, options ...AccessorBuilderOptions) *SimpleAccessorBuilder {
 	b := &SimpleAccessorBuilder{
 		args:   args,
 		id:     id,
+		parser: id.SnapshotConfig().Schema,
 		logger: logger,
 	}
 
@@ -103,8 +105,8 @@ type AccessorBuilderOptions func(*SimpleAccessorBuilder)
 
 func WithIndexPos(indexPos uint64) AccessorBuilderOptions {
 	return func(s *SimpleAccessorBuilder) {
-		if int(s.indexPos) >= len(s.id.IndexPrefix()) {
-			panic("indexPos greater than indexPrefix length")
+		if int(s.indexPos) >= len(s.id.IndexFileTag()) {
+			panic("indexPos greater than indexFileTag length")
 		}
 		s.indexPos = indexPos
 	}
@@ -126,7 +128,7 @@ func (s *SimpleAccessorBuilder) SetFirstEntityNumFetcher(fetcher FirstEntityNumF
 }
 
 func (s *SimpleAccessorBuilder) GetInputDataQuery(from, to RootNum) *DecompressorIndexInputDataQuery {
-	sgname := ae.SnapFilePath(s.id, snaptype.Version(1), from, to)
+	sgname := s.parser.DataFile(snaptype.V1_0, from, to)
 	decomp, _ := seg.NewDecompressor(sgname)
 	return &DecompressorIndexInputDataQuery{decomp: decomp, baseDataId: uint64(s.fetcher(from, to, decomp))}
 }
@@ -142,12 +144,12 @@ func (s *SimpleAccessorBuilder) AllowsOrdinalLookupByNum() bool {
 func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *background.Progress) (i *recsplit.Index, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("%s: at=%d-%d, %v, %s", s.id.IndexPrefix()[s.indexPos], from, to, rec, dbg.Stack())
+			err = fmt.Errorf("%s: at=%d-%d, %v, %s", s.id.IndexFileTag()[s.indexPos], from, to, rec, dbg.Stack())
 		}
 	}()
 	iidq := s.GetInputDataQuery(from, to)
 	defer iidq.Close()
-	idxFile := ae.IdxFilePath(s.id, snaptype.Version(1), from, to, s.indexPos)
+	idxFile := s.parser.AccessorIdxFile(snaptype.V1_0, from, to, s.indexPos)
 
 	keyCount := iidq.GetCount()
 	if p != nil {

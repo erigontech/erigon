@@ -20,7 +20,7 @@ import (
 	"context"
 	"errors"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -60,11 +60,11 @@ func StageTrieCfg(db kv.TemporalRwDB, checkRoot, saveNewHashesToDB, badBlockHalt
 
 var ErrInvalidStateRootHash = errors.New("invalid state root hash")
 
-func RebuildPatriciaTrieBasedOnFiles(ctx context.Context, cfg TrieCfg) (libcommon.Hash, error) {
+func RebuildPatriciaTrieBasedOnFiles(ctx context.Context, cfg TrieCfg) (common.Hash, error) {
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.blockReader))
 	rh, err := state.RebuildCommitmentFiles(ctx, cfg.db, &txNumsReader, log.New())
 	if err != nil {
 		return trie.EmptyRoot, err
 	}
-	return libcommon.BytesToHash(rh), err
+	return common.BytesToHash(rh), err
 }

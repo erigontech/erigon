@@ -22,9 +22,9 @@ package core
 import (
 	"sync"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/debug"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 // txSenderCacherRequest is a request for recovering transaction senders with a
@@ -73,7 +73,7 @@ func NewTxSenderCacher(threads int) *TxSenderCacher {
 // data structures.
 func (cacher *TxSenderCacher) cache() {
 	for task := range cacher.tasks {
-		if err := libcommon.Stopped(cacher.exitCh); err != nil {
+		if err := common.Stopped(cacher.exitCh); err != nil {
 			return
 		}
 
@@ -84,7 +84,7 @@ func (cacher *TxSenderCacher) cache() {
 }
 
 func (cacher *TxSenderCacher) Close() {
-	libcommon.SafeClose(cacher.exitCh)
+	common.SafeClose(cacher.exitCh)
 	close(cacher.tasks)
 	cacher.wg.Wait()
 }
