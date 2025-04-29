@@ -120,6 +120,10 @@ func (rw *Worker) ResetState(rs *state.ParallelExecutionState, accumulator *shar
 	rw.stateWriter = state.NewStateWriterV3(rs, accumulator)
 }
 
+func (rw *Worker) SetGaspool(gp *core.GasPool) {
+	rw.taskGasPool = gp
+}
+
 func (rw *Worker) Tx() kv.TemporalTx { return rw.chainTx }
 func (rw *Worker) DiscardReadList()  { rw.stateReader.DiscardReadList() }
 func (rw *Worker) ResetTx(chainTx kv.Tx) {
@@ -272,7 +276,8 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			}
 		}
 	default:
-		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), rw.chainConfig.GetMaxBlobGasPerBlock(header.Time))
+		// This doesn't make sense, but I am not sure if this wrong behaviour is needed somewhere else:
+		// rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), rw.chainConfig.GetMaxBlobGasPerBlock(header.Time))
 		rw.callTracer.Reset()
 		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		ibs.SetTxContext(txTask.TxIndex)
