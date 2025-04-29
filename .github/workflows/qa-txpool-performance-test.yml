@@ -45,9 +45,10 @@ jobs:
           # Download the Kurtosis artifact
           echo "Downloading artifact enclave-dump-kurtosis-run1-${{ github.run_id }}"
           mkdir -p kurtosis_artifacts
-          # Download the artifact using GitHub Actions
-          actions/download-artifact@v3
           
+          # Download the artifact (specify the name of the artifact you uploaded)
+          curl -L -o kurtosis_artifacts/enclave-dump-kurtosis-run1-${{ github.run_id }}.zip https://github.com/${{ github.repository }}/actions/artifacts/${{ github.run_id }}/enclave-dump-kurtosis-run1-${{ github.run_id }}.zip
+
           # Extract the zip content
           unzip kurtosis_artifacts/enclave-dump-kurtosis-run1-${{ github.run_id }}.zip -d kurtosis_artifacts
 
