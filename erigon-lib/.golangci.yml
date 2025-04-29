@@ -29,6 +29,7 @@ linters:
     - thelper
     - unconvert
     - wastedassign
+    - govet
   disable:
     - testifylint
     - staticcheck #TODO: enable me

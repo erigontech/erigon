@@ -23,6 +23,7 @@ linters:
     - spancheck
     - unconvert
     - wastedassign
+    - govet
   disable:
     - testifylint
     - staticcheck #TODO: enable me
