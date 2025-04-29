@@ -872,7 +872,15 @@ func (sdb *IntraBlockState) RevertToSnapshot(revid int) {
 	if idx == len(sdb.validRevisions) || sdb.validRevisions[idx].id != revid {
 		panic(fmt.Errorf("revision id %v cannot be reverted", revid))
 	}
-	snapshot := sdb.validRevisions[idx].journalIndex
+	revision := sdb.validRevisions[idx]
+	snapshot := revision.journalIndex
+	fmt.Printf("Reverting to snapshot %d: set unexpected delta %d -> %d\n", revid, sdb.arbExtraData.unexpectedBalanceDelta, revision.unexpectedBalanceDelta)
+	if sdb.arbExtraData != nil {
+		if sdb.arbExtraData.unexpectedBalanceDelta == nil {
+			sdb.arbExtraData.unexpectedBalanceDelta = uint256.NewInt(0)
+		}
+		sdb.arbExtraData.unexpectedBalanceDelta.Set(revision.unexpectedBalanceDelta)
+	}
 
 	// Replay the journal to undo changes and remove invalidated snapshots
 	sdb.journal.revert(sdb, snapshot)
