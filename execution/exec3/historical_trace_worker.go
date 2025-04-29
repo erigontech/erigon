@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	state2 "github.com/erigontech/erigon/erigon-lib/state"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/execution/consensus"
@@ -373,6 +374,13 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	toTxNum, err := txNumsReader.Max(tx, toBlock)
 	if err != nil {
 		return err
+	}
+
+	// If db is empty, and have only files - then limit by files progress. Because files can have half-block progress
+	ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+	stepSize := ac.StepSize()
+	if ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx) > 1 {
+		toTxNum = min(toTxNum, ac.DbgDomain(kv.AccountsDomain).FirstStepNotInFiles()*stepSize)
 	}
 
 	// "Map-Reduce on history" is conflict-free - means we don't need "Retry" feature.

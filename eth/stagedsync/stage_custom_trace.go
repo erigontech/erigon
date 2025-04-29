@@ -133,6 +133,14 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 			panic(ok)
 		}
 		log.Info("[dbg] SpawnCustomTrace", "accountsDomain", ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx), "producingDomain", ac.DbgDomain(producingDomain).DbgMaxTxNumInDB(tx), "producingDomainFiles", ac.DbgDomain(producingDomain).Files())
+		{
+			txNumInFiles := ac.DbgDomain(kv.AccountsDomain).FirstStepNotInFiles() * stepSize
+			txNumInDB := ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx)
+			_, e1, _ := txNumsReader.FindBlockNum(tx, txNumInFiles)
+			_, e2, _ := txNumsReader.FindBlockNum(tx, txNumInDB)
+
+			log.Info("[dbg] SpawnCustomTrace2", "e1", e1, "e2", e2)
+		}
 		return nil
 	}); err != nil {
 		return err
@@ -185,7 +193,10 @@ Loop:
 		receiptProgress := ac.DbgDomain(producingDomain).DbgMaxTxNumInDB(tx)
 		accProgress := max(ac.DbgDomain(kv.AccountsDomain).FirstStepNotInFiles()*stepSize, ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx))
 		if accProgress != receiptProgress {
-			err := fmt.Errorf("[integrity] %s=%d is behind AccountDomain=%d", producingDomain.String(), receiptProgress, accProgress)
+			_, e1, _ := txNumsReader.FindBlockNum(tx, receiptProgress)
+			_, e2, _ := txNumsReader.FindBlockNum(tx, accProgress)
+
+			err := fmt.Errorf("[integrity] %s=%d (%d) is behind AccountDomain=%d(%d)", producingDomain.String(), receiptProgress, e1, accProgress, e2)
 			log.Warn(err.Error())
 			return nil
 		}

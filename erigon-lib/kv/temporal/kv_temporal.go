@@ -214,6 +214,9 @@ func (tx *Tx) Commit() error {
 func (tx *Tx) HistoryStartFrom(name kv.Domain) uint64 {
 	return tx.aggtx.HistoryStartFrom(name)
 }
+func (tx *Tx) HistoryEndTxNum(name kv.Domain) uint64 {
+	return tx.aggtx.HistoryEndTxNum(name, tx.MdbxTx)
+}
 
 func (tx *Tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
 	it, err := tx.aggtx.RangeAsOf(tx.ctx, tx.MdbxTx, name, fromKey, toKey, asOfTs, asc, limit)
