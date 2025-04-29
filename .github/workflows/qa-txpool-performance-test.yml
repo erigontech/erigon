@@ -12,6 +12,8 @@ on:
 jobs:
   assertoor_test:
     runs-on: ubuntu-latest
+    env:
+      ERIGON_QA_PATH: /home/qarunner/erigon-qa
 
     steps:
       - name: Fast checkout git repository
@@ -37,12 +39,75 @@ jobs:
             kurtosis_extra_args: --verbosity detailed --cli-log-level trace
             persistent_logs: "true"
 
-      # todo: save result on mongodb
+      - name: Parse Kurtosis output log and create JSON
+        if: ${{ steps.kurtosis_test.outputs.test_result != 'failure' }}
+        run: |
+          # Download the Kurtosis artifact
+          echo "Downloading artifact enclave-dump-kurtosis-run1-${{ github.run_id }}"
+          mkdir -p kurtosis_artifacts
+          # Download the artifact using GitHub Actions
+          actions/download-artifact@v3
+          
+          # Extract the zip content
+          unzip kurtosis_artifacts/enclave-dump-kurtosis-run1-${{ github.run_id }}.zip -d kurtosis_artifacts
 
-      # - name: Run Pectra Kurtosis + assertoor tests
-      #   uses: ethpandaops/kurtosis-assertoor-github-action@v1
-      #   with:
-      #       enclave_name: "kurtosis-run2-${{ github.run_id }}"
-      #       ethereum_package_args: ".github/workflows/kurtosis/pectra.io"
-      #       kurtosis_extra_args: --verbosity detailed --cli-log-level trace
-      #       persistent_logs: "true"
+          # Find the folder starting with 'assertoor--'
+          assertoor_folder=$(find kurtosis_artifacts -type d -name 'assertoor--*' | head -n 1)
+
+          # Parse the output.log file within the assertoor-- folder
+          output_log="${assertoor_folder}/output.log"
+          echo "Parsing file: $output_log"
+          
+          # Create an empty JSON file if there are no results
+          output_json="${{ github.workspace }}/outputs_kurtosis.json"
+          echo "{}" > $output_json
+          
+          # Initialize an empty JSON object
+          result_json={}
+
+          # Parse the output.log file to find lines with msg="outputs_json"
+          while IFS= read -r line; do
+            if [[ "$line" == *'msg="outputs_json:'* ]]; then
+              # Extract the JSON object
+              json_obj=$(echo "$line" | sed 's/.*msg="outputs_json: \(.*\)"/\1/')
+              
+              # Extract the task value from the JSON
+              task=$(echo "$json_obj" | jq -r '.task')
+              
+              # Add the JSON object to the task's key
+              if [ -z "${result_json[$task]}" ]; then
+                result_json[$task]="[]"
+              fi
+              result_json[$task]+=",$json_obj"
+            fi
+          done < "$output_log"
+
+          # Write the JSON object to the final file
+          echo "{ $(for key in "${!result_json[@]}"; do echo "\"$key\": [${result_json[$key]}]"; done) }" > $output_json
+
+      # If the test fails, create an empty JSON object
+      - name: Create empty JSON if test fails
+        if: ${{ steps.kurtosis_test.outputs.test_result == 'failure' }}
+        run: |
+          output_json="${{ github.workspace }}/outputs_kurtosis.json"
+          echo "{}" > $output_json
+
+      - name: Save test results
+        env:
+          TEST_RESULT: ${{ steps.kurtosis_test.outputs.test_result }}
+        run: |
+          python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
+            --repo erigon \
+            --commit $(git rev-parse HEAD) \
+            --branch ${{ github.ref_name }} \
+            --test_name txpool-performance \
+            --runner ${{ runner.name }} \
+            --outcome $TEST_RESULT \
+            --result_file ${{ github.workspace }}/outputs_kurtosis.json
+
+      # Clean up, always
+      - name: Clean test results
+        if: always()
+        run: |
+          rm -rf kurtosis_artifacts
+          rm -rf outputs_kurtosis.json
