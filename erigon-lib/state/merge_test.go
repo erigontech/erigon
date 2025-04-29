@@ -490,11 +490,11 @@ func Test_mergeEliasFano(t *testing.T) {
 	merged, _ := eliasfano32.ReadEliasFano(menc)
 	require.NoError(t, err)
 	require.EqualValues(t, len(uniq), merged.Count())
-	require.EqualValues(t, merged.Count(), eliasfano32.Count(menc))
+	require.Equal(t, merged.Count(), eliasfano32.Count(menc))
 	mergedLists := append(firstList, secondList...)
 	sort.Ints(mergedLists)
 	require.EqualValues(t, mergedLists[len(mergedLists)-1], merged.Max())
-	require.EqualValues(t, merged.Max(), eliasfano32.Max(menc))
+	require.Equal(t, merged.Max(), eliasfano32.Max(menc))
 
 	mit := merged.Iterator()
 	for mit.HasNext() {

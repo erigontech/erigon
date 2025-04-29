@@ -31,8 +31,8 @@ linters:
     - unconvert
     - wastedassign
     - zerologlint
+    - testifylint
   disable:
-    - testifylint #TODO: enable me
     - staticcheck #TODO: enable me
     - perfsprint #TODO: enable me
     - recvcheck  #TODO: enable me
