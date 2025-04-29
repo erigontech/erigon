@@ -336,7 +336,7 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 			if hooks != nil && hooks.OnTxEnd != nil {
 				hooks.OnTxEnd(nil, err)
 			}
-			return outputTxNum, false, txTask.Error
+			return outputTxNum, false, fmt.Errorf("bn=%d, tn=%d: %w", txTask.BlockNum, txTask.TxNum, txTask.Error)
 		}
 
 		txTask.CreateReceipt(tx)
