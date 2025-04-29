@@ -85,7 +85,7 @@ func TestUnmarked_PutToDb(t *testing.T) {
 	returnv, err = uma_tx.Get(Num(1), rwtx)
 	require.NoError(t, err)
 	//require.True(t, returnv == nil)a
-	require.Equal(t, returnv, nil)
+	require.True(t, returnv == nil)
 }
 
 func TestUnmarkedPrune(t *testing.T) {
@@ -201,7 +201,7 @@ func TestBuildFiles_Unmarked(t *testing.T) {
 		returnv, err := uma_tx.DebugDb().GetDb(num, rwtx)
 		require.NoError(t, err)
 		if num < firstSpanIdNotInSnap {
-			require.Equal(t, returnv, nil)
+			require.True(t, returnv == nil)
 		} else {
 			require.Equal(t, returnv, value)
 		}
@@ -213,7 +213,7 @@ func TestBuildFiles_Unmarked(t *testing.T) {
 			require.Equal(t, returnv, value)
 		} else {
 			require.False(t, found)
-			require.Equal(t, returnv, nil)
+			require.True(t, returnv == nil)
 		}
 	}
 }
