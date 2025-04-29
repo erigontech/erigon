@@ -55,13 +55,6 @@ func ReadChainConfig(db kv.Getter, hash libcommon.Hash) (*chain.Config, error) {
 		}
 		config.Bor = borConfig
 	}
-	if config.ArbJSON != nil {
-		arbConfig := &chain.ArbitrumChainParams{}
-		if err := json.Unmarshal(config.ArbJSON, arbConfig); err != nil {
-			return nil, fmt.Errorf("invalid chain config 'arbitrum' JSON: %x, %w", hash, err)
-		}
-		config.ArbitrumChainParams = *arbConfig
-	}
 	return &config, nil
 }
 
@@ -77,13 +70,6 @@ func WriteChainConfig(db kv.Putter, hash libcommon.Hash, cfg *chain.Config) erro
 			return fmt.Errorf("failed to JSON encode chain config 'bor': %w", err)
 		}
 		cfg.BorJSON = borJSON
-	}
-	if cfg.ArbitrumChainParams != (chain.ArbitrumChainParams{}) {
-		arbJSON, err := json.Marshal(cfg.ArbitrumChainParams)
-		if err != nil {
-			return fmt.Errorf("failed to JSON encode chain config 'arbitrum': %w", err)
-		}
-		cfg.ArbJSON = arbJSON
 	}
 
 	data, err := json.Marshal(cfg)
