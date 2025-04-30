@@ -50,10 +50,11 @@ var idxVerify = &cobra.Command{
 				return
 			}
 			baseTxNum := efInfo.startStep * config3.DefaultStepSize
+			targetFileName := strings.Replace(file.Name(), "v1-", "v1.0-", 1)
 
-			targetIndexFilename := targetDirCli + "/snapshots/accessor/" + file.Name() + "i"
+			targetIndexFilename := targetDirCli + "/snapshots/accessor/" + targetFileName + "i"
 			if manuallyOptimized {
-				targetIndexFilename = targetDirCli + "/snapshots/accessor/" + file.Name() + "i.new"
+				targetIndexFilename = targetDirCli + "/snapshots/accessor/" + targetFileName + "i.new"
 			}
 			targetEfi, err := recsplit.OpenIndex(targetIndexFilename)
 			if err != nil {
@@ -75,9 +76,9 @@ var idxVerify = &cobra.Command{
 			defer sourceIdx.Close()
 
 			// reencoded optimized .ef file
-			targetFilename := targetDirCli + "/snapshots/idx/" + file.Name()
+			targetFilename := targetDirCli + "/snapshots/idx/" + targetFileName
 			if manuallyOptimized {
-				targetFilename = targetDirCli + "/snapshots/idx/" + file.Name() + ".new"
+				targetFilename = targetDirCli + "/snapshots/idx/" + targetFileName + ".new"
 			}
 			targetIdx, err := seg.NewDecompressor(targetFilename)
 			if err != nil {
