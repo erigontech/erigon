@@ -1391,6 +1391,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 	var err error
 
 	openSnapshotOnce.Do(func() {
+		log.Info("[dbg] here1")
 		if err := db.View(context.Background(), func(tx kv.Tx) (err error) {
 			syncCfg.KeepExecutionProofs, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
 			if err != nil {
