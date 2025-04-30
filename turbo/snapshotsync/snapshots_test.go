@@ -208,6 +208,10 @@ func TestFindMergeRange(t *testing.T) {
 }
 
 func TestMergeSnapshots(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	logger := log.New()
 	dir, require := t.TempDir(), require.New(t)
 	createFile := func(from, to uint64) {
@@ -304,6 +308,10 @@ func TestMergeSnapshots(t *testing.T) {
 }
 
 func TestDeleteSnapshots(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	logger := log.New()
 	dir, require := t.TempDir(), require.New(t)
 	createFile := func(from, to uint64) {
@@ -332,6 +340,10 @@ func TestDeleteSnapshots(t *testing.T) {
 }
 
 func TestRemoveOverlaps(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	logger := log.New()
 	dir, require := t.TempDir(), require.New(t)
 	createFile := func(from, to uint64) {
@@ -363,28 +375,37 @@ func TestRemoveOverlaps(t *testing.T) {
 	}
 
 	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, coresnaptype.BlockSnapshotTypes, 0, true, logger)
-
 	defer s.Close()
-	require.NoError(s.OpenSegments(coresnaptype.BlockSnapshotTypes, false))
 
 	list, err := snaptype.Segments(s.Dir())
 	require.NoError(err)
 	require.Equal(45, len(list))
 
-	s.RemoveOverlaps()
+	list, err = snaptype.IdxFiles(s.Dir())
+	require.NoError(err)
+	require.Equal(60, len(list))
+
+	//corner case: small header.seg was removed, but header.idx left as garbage. such garbage must be cleaned.
+	os.Remove(filepath.Join(s.Dir(), list[15].Name()))
+
+	require.NoError(s.OpenSegments(coresnaptype.BlockSnapshotTypes, false))
+	require.NoError(s.RemoveOverlaps())
 
 	list, err = snaptype.Segments(s.Dir())
 	require.NoError(err)
-
 	require.Equal(15, len(list))
 
 	for i, info := range list {
 		if i%5 < 2 {
-			require.Equal(100_000, int(info.Len()))
+			require.Equal(100_000, int(info.Len()), info.Name())
 		} else {
-			require.Equal(10_000, int(info.Len()))
+			require.Equal(10_000, int(info.Len()), info.Name())
 		}
 	}
+
+	list, err = snaptype.IdxFiles(s.Dir())
+	require.NoError(err)
+	require.Equal(20, len(list))
 }
 
 func TestCanRetire(t *testing.T) {

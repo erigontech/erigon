@@ -106,6 +106,10 @@ func TestTrackingFetcherFetchHeadersUpdatesPeerTracker(t *testing.T) {
 }
 
 func TestTrackingFetcherFetchBodiesUpdatesPeerTracker(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	peerId1 := PeerIdFromUint64(1)

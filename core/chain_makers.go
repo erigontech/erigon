@@ -21,28 +21,23 @@ package core
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/params"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	libstate "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/consensus/merge"
-	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/consensus/merge"
+	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
@@ -318,14 +313,14 @@ func (cp *ChainPack) NumberOfPoWBlocks() int {
 // Blocks created by GenerateChain do not contain valid proof of work
 // values. Inserting them into BlockChain requires use of FakePow or
 // a similar non-validating proof of work implementation.
-func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.Engine, db kv.RwDB, n int, gen func(int, *BlockGen)) (*ChainPack, error) {
+func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.Engine, db kv.TemporalRwDB, n int, gen func(int, *BlockGen)) (*ChainPack, error) {
 	if config == nil {
-		config = params.TestChainConfig
+		config = chain.TestChainConfig
 	}
 	headers, blocks, receipts := make([]*types.Header, n), make(types.Blocks, n), make([]types.Receipts, n)
 	chainreader := &FakeChainReader{Cfg: config, current: parent}
 	ctx := context.Background()
-	tx, errBegin := db.BeginRw(context.Background())
+	tx, errBegin := db.BeginTemporalRw(context.Background())
 	if errBegin != nil {
 		return nil, errBegin
 	}
@@ -360,9 +355,9 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		b.header = makeHeader(chainreader, parent, ibs, b.engine)
 		// Mutate the state and block according to any hard-fork specs
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
-			limit := new(big.Int).Add(daoBlock, params.DAOForkExtraRange)
+			limit := new(big.Int).Add(daoBlock, misc.DAOForkExtraRange)
 			if b.header.Number.Cmp(daoBlock) >= 0 && b.header.Number.Cmp(limit) < 0 {
-				b.header.Extra = libcommon.CopyBytes(params.DAOForkBlockExtra)
+				b.header.Extra = libcommon.CopyBytes(misc.DAOForkBlockExtra)
 			}
 		}
 		if b.engine != nil {
@@ -423,154 +418,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	tx.Rollback()
 
 	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil
-}
-
-func hashKeyAndAddIncarnation(k []byte, h *libcommon.Hasher) (newK []byte, err error) {
-	if len(k) == length.Addr {
-		newK = make([]byte, length.Hash)
-	} else {
-		newK = make([]byte, length.Hash*2+length.Incarnation)
-	}
-	h.Sha.Reset()
-	//nolint:errcheck
-	h.Sha.Write(k[:length.Addr])
-	//nolint:errcheck
-	h.Sha.Read(newK[:length.Hash])
-	if len(k) == length.Addr+length.Incarnation+length.Hash { // PlainState storage
-		copy(newK[length.Hash:], k[length.Addr:length.Addr+length.Incarnation])
-		h.Sha.Reset()
-		//nolint:errcheck
-		h.Sha.Write(k[length.Addr+length.Incarnation:])
-		//nolint:errcheck
-		h.Sha.Read(newK[length.Hash+length.Incarnation:])
-	} else if len(k) == length.Addr+length.Hash { // e4 Domain storage
-		binary.BigEndian.PutUint64(newK[length.Hash:], 1)
-		h.Sha.Reset()
-		//nolint:errcheck
-		h.Sha.Write(k[len(k)-length.Hash:])
-		//nolint:errcheck
-		h.Sha.Read(newK[length.Hash+length.Incarnation:])
-	}
-	return newK, nil
-}
-
-func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) (hashRoot libcommon.Hash, err error) {
-	domains, err := libstate.NewSharedDomains(tx, log.New())
-	if err != nil {
-		return hashRoot, fmt.Errorf("NewSharedDomains: %w", err)
-	}
-	defer domains.Close()
-
-	if err := tx.ClearBucket(kv.HashedAccountsDeprecated); err != nil {
-		return hashRoot, fmt.Errorf("clear HashedAccounts bucket: %w", err)
-	}
-	if err := tx.ClearBucket(kv.HashedStorageDeprecated); err != nil {
-		return hashRoot, fmt.Errorf("clear HashedStorage bucket: %w", err)
-	}
-	if err := tx.ClearBucket(kv.TrieOfAccounts); err != nil {
-		return hashRoot, fmt.Errorf("clear TrieOfAccounts bucket: %w", err)
-	}
-	if err := tx.ClearBucket(kv.TrieOfStorage); err != nil {
-		return hashRoot, fmt.Errorf("clear TrieOfStorage bucket: %w", err)
-	}
-
-	h := libcommon.NewHasher()
-	defer libcommon.ReturnHasherToPool(h)
-
-	it, err := tx.(kv.TemporalTx).Debug().RangeLatest(kv.AccountsDomain, nil, nil, -1)
-	if err != nil {
-		return libcommon.Hash{}, err
-	}
-
-	for it.HasNext() {
-		k, v, err := it.Next()
-		if err != nil {
-			return hashRoot, fmt.Errorf("interate over plain state: %w", err)
-		}
-		if len(v) > 0 {
-			v, err = accounts.ConvertV3toV2(v)
-			if err != nil {
-				return hashRoot, fmt.Errorf("interate over plain state: %w", err)
-			}
-		}
-		newK, err := hashKeyAndAddIncarnation(k, h)
-		if err != nil {
-			return hashRoot, fmt.Errorf("clear HashedAccounts bucket: %w", err)
-		}
-		if err := tx.Put(kv.HashedAccountsDeprecated, newK, v); err != nil {
-			return hashRoot, fmt.Errorf("clear HashedAccounts bucket: %w", err)
-		}
-	}
-
-	it, err = tx.(kv.TemporalTx).Debug().RangeLatest(kv.StorageDomain, nil, nil, -1)
-	if err != nil {
-		return libcommon.Hash{}, err
-	}
-	for it.HasNext() {
-		k, v, err := it.Next()
-		if err != nil {
-			return hashRoot, fmt.Errorf("interate over plain state: %w", err)
-		}
-		newK, err := hashKeyAndAddIncarnation(k, h)
-		if err != nil {
-			return hashRoot, fmt.Errorf("clear HashedStorage bucket: %w", err)
-		}
-		fmt.Printf("storage %x -> %x\n", k, newK)
-		if err := tx.Put(kv.HashedStorageDeprecated, newK, v); err != nil {
-			return hashRoot, fmt.Errorf("clear HashedStorage bucket: %w", err)
-		}
-
-	}
-
-	if trace {
-		if GenerateTrace {
-			fmt.Printf("State after %d================\n", header.Number)
-			it, err := tx.Range(kv.HashedAccountsDeprecated, nil, nil, order.Asc, kv.Unlim)
-			if err != nil {
-				return hashRoot, err
-			}
-			for it.HasNext() {
-				k, v, err := it.Next()
-				if err != nil {
-					return hashRoot, err
-				}
-				fmt.Printf("%x: %x\n", k, v)
-			}
-			fmt.Printf("..................\n")
-			it, err = tx.Range(kv.HashedStorageDeprecated, nil, nil, order.Asc, kv.Unlim)
-			if err != nil {
-				return hashRoot, err
-			}
-			for it.HasNext() {
-				k, v, err := it.Next()
-				if err != nil {
-					return hashRoot, err
-				}
-				fmt.Printf("%x: %x\n", k, v)
-			}
-			fmt.Printf("===============================\n")
-		}
-		root, err := domains.ComputeCommitment(context.Background(), true, domains.BlockNum(), "")
-		if err != nil {
-			return hashRoot, err
-		}
-		hashRoot.SetBytes(root)
-		return hashRoot, nil
-	}
-	root, err := domains.ComputeCommitment(context.Background(), true, domains.BlockNum(), "")
-	if err != nil {
-		return hashRoot, err
-	}
-	hashRoot.SetBytes(root)
-	return hashRoot, nil
-
-	//var root libcommon.Hash
-	//rootB, err := tx.(*temporal.Tx).Agg().ComputeCommitment(false, false)
-	//if err != nil {
-	//	return root, err
-	//}
-	//root = libcommon.BytesToHash(rootB)
-	//return root, err
 }
 
 func MakeEmptyHeader(parent *types.Header, chainConfig *chain.Config, timestamp uint64, targetGasLimit *uint64) *types.Header {

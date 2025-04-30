@@ -46,8 +46,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	libstate "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/consensus/ethash"
-	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
@@ -55,8 +53,10 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	trace_logger "github.com/erigontech/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon/execution/consensus/ethash"
+	"github.com/erigontech/erigon/execution/consensus/merge"
+	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/tests"
-	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 )
 
 const (
@@ -621,7 +621,7 @@ func NewHeader(env stEnv) *types.Header {
 	return &header
 }
 
-func CalculateStateRoot(tx kv.RwTx) (*libcommon.Hash, error) {
+func CalculateStateRoot(tx kv.TemporalRwTx) (*libcommon.Hash, error) {
 	// Generate hashed state
 	c, err := tx.RwCursor(kv.PlainState)
 	if err != nil {

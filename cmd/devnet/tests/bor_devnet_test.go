@@ -14,8 +14,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build integration
-
 package tests
 
 import (
@@ -27,8 +25,8 @@ import (
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	accounts_steps "github.com/erigontech/erigon/cmd/devnet/accounts/steps"
 	contracts_steps "github.com/erigontech/erigon/cmd/devnet/contracts/steps"
-	"github.com/erigontech/erigon/cmd/devnet/requests"
 	"github.com/erigontech/erigon/cmd/devnet/services"
+	"github.com/erigontech/erigon/rpc/requests"
 )
 
 func TestStateSync(t *testing.T) {

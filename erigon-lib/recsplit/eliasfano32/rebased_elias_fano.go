@@ -37,12 +37,13 @@ func (ref *RebasedEliasFano) Reset(baseNum uint64, raw []byte) {
 	ref.ef.Reset(raw)
 }
 
+// TODO: rename to Seek in order to comply with latest .ef rename
 func (ref *RebasedEliasFano) Search(v uint64) (uint64, bool) {
 	if v < ref.baseNum {
 		v = ref.baseNum
 	}
 
-	n, found := ref.ef.Search(v - ref.baseNum)
+	n, found := ref.ef.Seek(v - ref.baseNum)
 	return ref.baseNum + n, found
 }
 

@@ -193,7 +193,7 @@ var idxOptimize = &cobra.Command{
 				logger.Error("Failed to build accessor", "error", err)
 				return
 			}
-			if err := state.BuildAccessor(ctx, data, seg.CompressNone, idxPath, false, cfg, ps, logger); err != nil {
+			if err := state.BuildHashMapAccessor(ctx, data, seg.CompressNone, idxPath, false, cfg, ps, logger); err != nil {
 				logger.Error("Failed to build accessor", "error", err)
 				return
 			}

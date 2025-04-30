@@ -115,8 +115,7 @@ func (r *beaconSnapshotReader) ReadBlockBySlot(ctx context.Context, tx kv.Tx, sl
 			return nil, nil
 		}
 
-		buf = buf[:0]
-		buf, _ = gg.Next(buf)
+		buf, _ = gg.Next(buf[:0])
 	}
 	if len(buf) == 0 {
 		return nil, nil
@@ -178,8 +177,7 @@ func (r *beaconSnapshotReader) ReadBlindedBlockBySlot(ctx context.Context, tx kv
 			return nil, nil
 		}
 
-		buf = buf[:0]
-		buf, _ = gg.Next(buf)
+		buf, _ = gg.Next(buf[:0])
 	}
 	if len(buf) == 0 {
 		return nil, nil
@@ -259,8 +257,7 @@ func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, ro
 			return nil, nil
 		}
 
-		buf = buf[:0]
-		buf, _ = gg.Next(buf)
+		buf, _ = gg.Next(buf[:0])
 	}
 
 	if len(buf) == 0 {

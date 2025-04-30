@@ -32,12 +32,13 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/tracers"
+	debugtracer "github.com/erigontech/erigon/eth/tracers/debug"
+	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/tests"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -123,6 +124,28 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 			tracer, err := tracers.New(tracerName, new(tracers.Context), test.TracerConfig)
 			if err != nil {
 				t.Fatalf("failed to create call tracer: %v", err)
+			}
+			if outputDir, ok := os.LookupEnv("PRESTATE_TRACER_TEST_DEBUG_TRACER_OUTPUT_DIR"); ok {
+				recordOptions := debugtracer.RecordOptions{
+					DisableOnOpcodeMemoryRecording:    true,
+					DisableOnOpcodeStackRecording:     true,
+					DisableOnBlockchainInitRecording:  true,
+					DisableOnBlockStartRecording:      true,
+					DisableOnBlockEndRecording:        true,
+					DisableOnGenesisBlockRecording:    true,
+					DisableOnSystemCallStartRecording: true,
+					DisableOnSystemCallEndRecording:   true,
+					DisableOnBalanceChangeRecording:   true,
+					DisableOnNonceChangeRecording:     true,
+					DisableOnStorageChangeRecording:   true,
+					DisableOnLogRecording:             true,
+				}
+				tracer = debugtracer.New(
+					outputDir,
+					debugtracer.WithWrappedTracer(tracer),
+					debugtracer.WithRecordOptions(recordOptions),
+					debugtracer.WithFlushMode(debugtracer.FlushModeTxn),
+				)
 			}
 			statedb.SetHooks(tracer.Hooks)
 			msg, err := tx.AsMessage(*signer, (*big.Int)(test.Context.BaseFee), rules)

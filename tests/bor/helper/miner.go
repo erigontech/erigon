@@ -77,10 +77,8 @@ func NewNodeConfig() *nodecfg.Config {
 }
 
 // InitNode initializes a node with the given genesis file and config
-func InitMiner(ctx context.Context, dirName string, genesis *types.Genesis, privKey *ecdsa.PrivateKey, withoutHeimdall bool, minerID int) (*node.Node, *eth.Ethereum, error) {
+func InitMiner(ctx context.Context, logger log.Logger, dirName string, genesis *types.Genesis, privKey *ecdsa.PrivateKey, withoutHeimdall bool, minerID int) (*node.Node, *eth.Ethereum, error) {
 	// Define the basic configurations for the Ethereum node
-
-	logger := log.New()
 
 	nodeCfg := &nodecfg.Config{
 		Name:    "erigon",
@@ -151,6 +149,7 @@ func InitMiner(ctx context.Context, dirName string, genesis *types.Genesis, priv
 		RPCTxFeeCap:     1, // 1 ether
 		Snapshot:        ethconfig.BlocksFreezing{NoDownloader: true, ChainName: genesis.Config.ChainName},
 		StateStream:     true,
+		PolygonSync:     true,
 	}
 	ethCfg.TxPool.DBDir = nodeCfg.Dirs.TxPool
 	ethCfg.TxPool.CommitEvery = 15 * time.Second

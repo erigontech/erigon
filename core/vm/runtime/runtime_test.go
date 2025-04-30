@@ -38,17 +38,16 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
-	stateLib "github.com/erigontech/erigon-lib/state"
-
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/accounts/abi"
-	"github.com/erigontech/erigon/consensus"
+	stateLib "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/asm"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon/execution/abi"
+	"github.com/erigontech/erigon/execution/consensus"
 )
 
 func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *stateLib.Aggregator) {
@@ -56,7 +55,7 @@ func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *stateLib.Aggregator) {
 	db := memdb.NewStateDB(tb.TempDir())
 	tb.Cleanup(db.Close)
 
-	agg, err := stateLib.NewAggregator2(context.Background(), datadir.New(tb.TempDir()), 16, db, log.New())
+	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, log.New())
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -147,7 +146,7 @@ func TestExecute(t *testing.T) {
 func TestCall(t *testing.T) {
 	t.Parallel()
 	_, tx, _ := NewTestTemporalDb(t)
-	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	domains, err := stateLib.NewSharedDomains(tx.(kv.TemporalTx), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	state := state.New(state.NewReaderV3(domains))
@@ -177,7 +176,7 @@ func testTemporalDB(t testing.TB) *temporal.DB {
 
 	t.Cleanup(db.Close)
 
-	agg, err := stateLib.NewAggregator2(context.Background(), datadir.New(t.TempDir()), 16, db, log.New())
+	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, log.New())
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 

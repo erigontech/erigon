@@ -132,7 +132,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 	if !externalState {
 		db := memdb.NewStateDB(tempdir)
 		defer db.Close()
-		agg, err := state3.NewAggregator2(context.Background(), datadir.New(tempdir), config3.DefaultStepSize, db, log.New())
+		agg, err := state3.NewAggregator(context.Background(), datadir.New(tempdir), config3.DefaultStepSize, db, log.New())
 		if err != nil {
 			return nil, nil, err
 		}
@@ -146,7 +146,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 			return nil, nil, err
 		}
 		defer tx.Rollback()
-		sd, err := state3.NewSharedDomains(tx, log.New())
+		sd, err := state3.NewSharedDomains(tx.(kv.TemporalRwTx), log.New())
 		if err != nil {
 			return nil, nil, err
 		}
@@ -200,7 +200,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, libcommon.Addres
 
 		db := memdb.NewStateDB(tmp)
 		defer db.Close()
-		agg, err := state3.NewAggregator2(context.Background(), datadir.New(tmp), config3.DefaultStepSize, db, log.New())
+		agg, err := state3.NewAggregator(context.Background(), datadir.New(tmp), config3.DefaultStepSize, db, log.New())
 		if err != nil {
 			return nil, [20]byte{}, 0, err
 		}
@@ -214,7 +214,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, libcommon.Addres
 			return nil, [20]byte{}, 0, err
 		}
 		defer tx.Rollback()
-		sd, err := state3.NewSharedDomains(tx, log.New())
+		sd, err := state3.NewSharedDomains(tx.(kv.TemporalRwTx), log.New())
 		if err != nil {
 			return nil, [20]byte{}, 0, err
 		}

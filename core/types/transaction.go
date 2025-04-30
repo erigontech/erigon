@@ -31,8 +31,8 @@ import (
 	"github.com/protolambda/ztyp/codec"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/params"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/math"
 	libcrypto "github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -197,15 +197,7 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 	case SetCodeTxType:
 		t = &SetCodeTransaction{}
 	case AccountAbstractionTxType:
-		if data[1] == 0x00 {
-			t = &AccountAbstractionTransaction{}
-			s = rlp.NewStream(bytes.NewReader(data[2:]), uint64(len(data)-2))
-		} else if data[1] == 0x01 {
-			t = &AccountAbstractionBatchHeaderTransaction{}
-			s = rlp.NewStream(bytes.NewReader(data[2:]), uint64(len(data)-2))
-		} else {
-			return nil, ErrTxTypeNotSupported
-		}
+		t = &AccountAbstractionTransaction{}
 	default:
 		if data[0] >= 0x80 {
 			// txn is type legacy which is RLP encoded
@@ -452,7 +444,7 @@ func (m *Message) ChangeGas(globalGasCap, desiredGas uint64) {
 	m.gasLimit = gas
 }
 
-func (m *Message) BlobGas() uint64 { return fixedgas.BlobGasPerBlob * uint64(len(m.blobHashes)) }
+func (m *Message) BlobGas() uint64 { return params.BlobGasPerBlob * uint64(len(m.blobHashes)) }
 
 func (m *Message) MaxFeePerBlobGas() *uint256.Int {
 	return &m.maxFeePerBlobGas

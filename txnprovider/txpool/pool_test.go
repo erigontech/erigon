@@ -24,13 +24,16 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/state"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/erigontech/erigon-lib/chain/params"
+	"github.com/erigontech/erigon-lib/state"
+
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -45,9 +48,7 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
-	"github.com/stretchr/testify/require"
 )
 
 func TestNonceFromAddress(t *testing.T) {
@@ -59,7 +60,7 @@ func TestNonceFromAddress(t *testing.T) {
 	db := memdb.NewTestPoolDB(t)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 	require.True(pool != nil)
 	var stateVersionID uint64 = 0
@@ -185,7 +186,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0 /* shanghaiTime */, nil /* agraBlock */, common.Big0 /* cancunTime */, common.Big0 /* pragueTime */, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0 /* shanghaiTime */, nil /* agraBlock */, common.Big0 /* cancunTime */, common.Big0 /* pragueTime */, nil, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(t, err)
 	require.True(t, pool != nil)
 
@@ -269,38 +270,38 @@ func TestMultipleAuthorizations(t *testing.T) {
 
 	logger := log.New()
 
-	// txn with existing authorization should not be accepted
+	// a new txn with authority same as one in an existing authorization should not be accepted
 	{
 		var txnSlots TxnSlots
 		txnSlot1 := &TxnSlot{
-			Tip:            *uint256.NewInt(300000),
-			FeeCap:         *uint256.NewInt(300000),
-			Gas:            100000,
-			Nonce:          0,
-			Authorizations: []Signature{auth},
-			AuthRaw:        [][]byte{data.Bytes()},
-			Type:           SetCodeTxnType,
+			Tip:         *uint256.NewInt(300000),
+			FeeCap:      *uint256.NewInt(300000),
+			Gas:         100000,
+			Nonce:       0,
+			Authorities: []*common.Address{&authAddress},
+			Type:        SetCodeTxnType,
 		}
 		txnSlot1.IDHash[0] = 1
 		txnSlots.Append(txnSlot1, addr1[:], true)
+		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
+		require.NoError(t, err)
+		assert.Equal(t, reasons, []txpoolcfg.DiscardReason{txpoolcfg.Success})
 
+		txnSlots = TxnSlots{}
 		txnSlot2 := &TxnSlot{
-			Tip:            *uint256.NewInt(300000),
-			FeeCap:         *uint256.NewInt(300000),
-			Gas:            100000,
-			Nonce:          0,
-			Authorizations: []Signature{auth},
-			AuthRaw:        [][]byte{data.Bytes()},
-			Type:           SetCodeTxnType,
+			Tip:         *uint256.NewInt(300000),
+			FeeCap:      *uint256.NewInt(300000),
+			Gas:         100000,
+			Nonce:       0,
+			Authorities: []*common.Address{&authAddress},
+			Type:        SetCodeTxnType,
 		}
 		txnSlot2.IDHash[0] = 2
 		txnSlots.Append(txnSlot2, addr2[:], true)
-
 		require.NoError(t, pool.senders.registerNewSenders(&txnSlots, logger))
-
-		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
+		reasons, err = pool.AddLocalTxns(ctx, txnSlots)
 		require.NoError(t, err)
-		assert.Equal(t, reasons, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.ErrAuthorityReserved})
+		assert.Equal(t, reasons, []txpoolcfg.DiscardReason{txpoolcfg.ErrAuthorityReserved})
 
 		assert.Len(t, pool.auths, 1) // auth address should be in pool auth
 		_, ok := pool.auths[authAddress]
@@ -316,13 +317,12 @@ func TestMultipleAuthorizations(t *testing.T) {
 	{
 		var txnSlots TxnSlots
 		txnSlot1 := &TxnSlot{
-			Tip:            *uint256.NewInt(300000),
-			FeeCap:         *uint256.NewInt(300000),
-			Gas:            100000,
-			Nonce:          1,
-			Authorizations: []Signature{auth},
-			AuthRaw:        [][]byte{data.Bytes()},
-			Type:           SetCodeTxnType,
+			Tip:         *uint256.NewInt(300000),
+			FeeCap:      *uint256.NewInt(300000),
+			Gas:         100000,
+			Nonce:       1,
+			Authorities: []*common.Address{&authAddress},
+			Type:        SetCodeTxnType,
 		}
 		txnSlot1.IDHash[0] = 3
 		txnSlots.Append(txnSlot1, addr1[:], true)
@@ -334,13 +334,12 @@ func TestMultipleAuthorizations(t *testing.T) {
 
 		txnSlots = TxnSlots{}
 		txnSlot2 := &TxnSlot{
-			Tip:            *uint256.NewInt(900000),
-			FeeCap:         *uint256.NewInt(900000),
-			Gas:            100000,
-			Nonce:          1,
-			Authorizations: []Signature{auth},
-			AuthRaw:        [][]byte{data.Bytes()},
-			Type:           SetCodeTxnType,
+			Tip:         *uint256.NewInt(900000),
+			FeeCap:      *uint256.NewInt(900000),
+			Gas:         100000,
+			Nonce:       1,
+			Authorities: []*common.Address{&authAddress},
+			Type:        SetCodeTxnType,
 		}
 		txnSlot2.IDHash[0] = 4
 		txnSlots.Append(txnSlot2, addr1[:], true)
@@ -355,17 +354,16 @@ func TestMultipleAuthorizations(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// do not allow transactions from delegated addresses
+	// do not allow transactions from a sender if there is a pending delegated txn its authority
 	{
 		var txnSlots TxnSlots
 		txnSlot1 := &TxnSlot{
-			Tip:            *uint256.NewInt(300000),
-			FeeCap:         *uint256.NewInt(300000),
-			Gas:            100000,
-			Nonce:          1,
-			Authorizations: []Signature{auth},
-			AuthRaw:        [][]byte{data.Bytes()},
-			Type:           SetCodeTxnType,
+			Tip:         *uint256.NewInt(300000),
+			FeeCap:      *uint256.NewInt(300000),
+			Gas:         100000,
+			Nonce:       1,
+			Authorities: []*common.Address{&authAddress},
+			Type:        SetCodeTxnType,
 		}
 		txnSlot1.IDHash[0] = 5
 		txnSlots.Append(txnSlot1, addr1[:], true)
@@ -443,7 +441,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 	require.NotEqual(nil, pool)
 	var stateVersionID uint64 = 0
@@ -566,7 +564,7 @@ func TestReverseNonces(t *testing.T) {
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 	require.True(pool != nil)
 	var stateVersionID uint64 = 0
@@ -696,7 +694,7 @@ func TestTxnPoke(t *testing.T) {
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 	require.True(pool != nil)
 	var stateVersionID uint64 = 0
@@ -886,25 +884,25 @@ func TestShanghaiValidateTxn(t *testing.T) {
 		},
 		"shanghai exactly on bound - create tx": {
 			expected:   txpoolcfg.Success,
-			dataLen:    fixedgas.MaxInitCodeSize,
+			dataLen:    params.MaxInitCodeSize,
 			isShanghai: true,
 			creation:   true,
 		},
 		"shanghai one over bound - create tx": {
 			expected:   txpoolcfg.InitCodeTooLarge,
-			dataLen:    fixedgas.MaxInitCodeSize + 1,
+			dataLen:    params.MaxInitCodeSize + 1,
 			isShanghai: true,
 			creation:   true,
 		},
 		"shanghai exactly on bound - calldata tx": {
 			expected:   txpoolcfg.Success,
-			dataLen:    fixedgas.MaxInitCodeSize,
+			dataLen:    params.MaxInitCodeSize,
 			isShanghai: true,
 			creation:   false,
 		},
 		"shanghai one over bound - calldata tx": {
 			expected:   txpoolcfg.Success,
-			dataLen:    fixedgas.MaxInitCodeSize + 1,
+			dataLen:    params.MaxInitCodeSize + 1,
 			isShanghai: true,
 			creation:   false,
 		},
@@ -933,7 +931,7 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			asrt.NoError(err)
 			defer sd.Close()
 			cache := kvcache.NewDummy()
-			pool, err := New(ctx, ch, nil, coreDB, cfg, cache, *u256.N1, shanghaiTime, nil /* agraBlock */, nil /* cancunTime */, nil, nil, nil, nil, func() {}, nil, logger, WithFeeCalculator(nil))
+			pool, err := New(ctx, ch, nil, coreDB, cfg, cache, *u256.N1, shanghaiTime, nil /* agraBlock */, nil /* cancunTime */, nil, nil, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 			asrt.NoError(err)
 
 			sndr := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(math.MaxUint64)}
@@ -979,7 +977,7 @@ func TestTooHighGasLimitTxnValidation(t *testing.T) {
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 	require.True(pool != nil)
 	var stateVersionID uint64 = 0
@@ -1045,13 +1043,13 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	cache := kvcache.NewDummy()
 	logger := log.New()
 	pool, err := New(ctx, ch, nil, coreDB, cfg, cache, chainID, common.Big0 /* shanghaiTime */, nil, /* agraBlock */
-		common.Big0 /* cancunTime */, common.Big0 /* pragueTime */, nil, nil, nil, func() {}, nil, logger, WithFeeCalculator(nil))
+		common.Big0 /* cancunTime */, common.Big0 /* pragueTime */, nil, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 	require.NoError(t, err)
 	pool.blockGasLimit.Store(30_000_000)
 	tx, err := coreDB.BeginRw(ctx)
 	defer tx.Rollback()
 	require.NoError(t, err)
-	sd, err := state.NewSharedDomains(tx, logger)
+	sd, err := state.NewSharedDomains(tx.(kv.TemporalTx), logger)
 	require.NoError(t, err)
 	defer sd.Close()
 
@@ -1064,16 +1062,13 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	require.NoError(t, err)
 
 	txn := &TxnSlot{
-		FeeCap:         *uint256.NewInt(21000),
-		Gas:            500000,
-		SenderID:       0,
-		Type:           SetCodeTxnType,
-		Authorizations: make([]Signature, 1),
+		FeeCap:      *uint256.NewInt(21000),
+		Gas:         500000,
+		SenderID:    0,
+		Type:        SetCodeTxnType,
+		Authorities: make([]*common.Address, 1),
 	}
-	txn.Authorizations[0].ChainID = chainID
-	txn.Authorizations[0].V.Set(maxUint256)
-	txn.Authorizations[0].R.Set(maxUint256)
-	txn.Authorizations[0].S.Set(maxUint256)
+	txn.Authorities[0] = &common.Address{}
 
 	txns := TxnSlots{
 		Txns:    append([]*TxnSlot{}, txn),
@@ -1098,7 +1093,7 @@ func TestBlobTxnReplacement(t *testing.T) {
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0, nil, common.Big0, nil, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0, nil, common.Big0, nil, nil, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 
 	require.True(pool != nil)
@@ -1282,7 +1277,7 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	txnPool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, big.NewInt(0), big.NewInt(0), nil, nil, nil, nil, nil, func() {}, nil, logger, WithFeeCalculator(nil))
+	txnPool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, big.NewInt(0), big.NewInt(0), nil, nil, nil, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 	require.NoError(err)
 	require.True(txnPool != nil)
 
@@ -1393,7 +1388,7 @@ func TestBlobSlots(t *testing.T) {
 	cfg.TotalBlobPoolLimit = 20
 
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0, nil, common.Big0, nil, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0, nil, common.Big0, nil, nil, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 	require.True(pool != nil)
 	var stateVersionID uint64 = 0
@@ -1476,7 +1471,7 @@ func TestGetBlobsV1(t *testing.T) {
 	cfg.TotalBlobPoolLimit = 20
 
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0, nil, common.Big0, nil, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0, nil, common.Big0, nil, nil, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 	require.True(pool != nil)
 	pool.blockGasLimit.Store(30000000)
@@ -1551,7 +1546,7 @@ func TestGasLimitChanged(t *testing.T) {
 	db := memdb.NewTestPoolDB(t)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 	require.True(pool != nil)
 	var stateVersionID uint64 = 0
@@ -1635,7 +1630,7 @@ func BenchmarkProcessRemoteTxns(b *testing.B) {
 	b.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, nil, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 	require.True(pool != nil)
 

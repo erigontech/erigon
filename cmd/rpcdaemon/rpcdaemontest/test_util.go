@@ -30,8 +30,6 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
-	privateapi2 "github.com/erigontech/erigon/turbo/privateapi"
-
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
@@ -40,16 +38,16 @@ import (
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/accounts/abi/bind"
-	"github.com/erigontech/erigon/accounts/abi/bind/backends"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/turbo/builder"
-	"github.com/erigontech/erigon/turbo/jsonrpc/contracts"
+	"github.com/erigontech/erigon/execution/abi/bind"
+	"github.com/erigontech/erigon/execution/abi/bind/backends"
+	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/consensus/ethash"
+	"github.com/erigontech/erigon/rpc/jsonrpc/contracts"
+	privateapi2 "github.com/erigontech/erigon/turbo/privateapi"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
@@ -93,7 +91,7 @@ func CreateTestSentry(t *testing.T) (*mock.MockSentry, *core.ChainPack, []*core.
 
 	var (
 		gspec = &types.Genesis{
-			Config: params.TestChainConfig,
+			Config: chain.TestChainConfig,
 			Alloc: types.GenesisAlloc{
 				address:  {Balance: big.NewInt(9000000000000000000)},
 				address1: {Balance: big.NewInt(200000000000000000)},
@@ -136,7 +134,7 @@ func getChainInstance(
 	config *chain.Config,
 	parent *types.Block,
 	engine consensus.Engine,
-	db kv.RwDB,
+	db kv.TemporalRwDB,
 	contractBackend *backends.SimulatedBackend,
 ) (*core.ChainPack, error) {
 	var err error
@@ -151,7 +149,7 @@ func generateChain(
 	config *chain.Config,
 	parent *types.Block,
 	engine consensus.Engine,
-	db kv.RwDB,
+	db kv.TemporalRwDB,
 	contractBackend *backends.SimulatedBackend,
 ) (*core.ChainPack, error) {
 	var (
@@ -353,7 +351,7 @@ func CreateTestSentryForTraces(t *testing.T) *mock.MockSentry {
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
-			Config: params.TestChainConfig,
+			Config: chain.TestChainConfig,
 			Alloc: types.GenesisAlloc{
 				address: {Balance: funds},
 				// The address 0x00ff
@@ -510,7 +508,7 @@ func CreateTestSentryForTracesCollision(t *testing.T) *mock.MockSentry {
 	t.Logf("Destination address: %x\n", aa)
 
 	gspec := &types.Genesis{
-		Config: params.TestChainConfig,
+		Config: chain.TestChainConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
