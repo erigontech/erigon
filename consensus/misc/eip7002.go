@@ -17,8 +17,8 @@
 package misc
 
 import (
-	"github.com/erigontech/erigon/consensus"
 	"fmt"
+	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/params"
