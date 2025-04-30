@@ -597,8 +597,6 @@ OUTER:
 			continue
 		}
 
-		fmt.Printf("snapshot segment %d: %d\n", sn.From(), sn.To())
-
 		gg := sn.Src().MakeGetter()
 		keyCount := idx.KeyCount()
 		for j := int64(keyCount) - 1; j >= 0; j-- {
