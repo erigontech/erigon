@@ -193,8 +193,8 @@ func (s *SpanSnapshotStore) LastEntity(ctx context.Context) (*Span, bool, error)
 	return snapshotStoreLastEntity(ctx, s)
 }
 
-func (s *SpanSnapshotStore) ValidateSnapshots(logger log.Logger, failFast bool) error {
-	return validateSnapshots(logger, failFast, s.snapshots, s.SnapType(), generics.New[Span])
+func (s *SpanSnapshotStore) ValidateSnapshots(ctx context.Context, logger log.Logger, failFast bool) error {
+	return validateSnapshots(ctx, logger, s.EntityStore, failFast, s.snapshots, s.SnapType(), generics.New[Span])
 }
 
 type MilestoneSnapshotStore struct {
@@ -320,8 +320,8 @@ func (s *MilestoneSnapshotStore) LastEntity(ctx context.Context) (*Milestone, bo
 	return snapshotStoreLastEntity(ctx, s)
 }
 
-func (s *MilestoneSnapshotStore) ValidateSnapshots(logger log.Logger, failFast bool) error {
-	return validateSnapshots(logger, failFast, s.snapshots, s.SnapType(), generics.New[Milestone])
+func (s *MilestoneSnapshotStore) ValidateSnapshots(ctx context.Context, logger log.Logger, failFast bool) error {
+	return validateSnapshots(ctx, logger, s.EntityStore, failFast, s.snapshots, s.SnapType(), generics.New[Milestone])
 }
 
 type CheckpointSnapshotStore struct {
@@ -437,11 +437,19 @@ func (s *CheckpointSnapshotStore) LastEntity(ctx context.Context) (*Checkpoint, 
 	return snapshotStoreLastEntity(ctx, s)
 }
 
-func (s *CheckpointSnapshotStore) ValidateSnapshots(logger log.Logger, failFast bool) error {
-	return validateSnapshots(logger, failFast, s.snapshots, s.SnapType(), generics.New[Checkpoint])
+func (s *CheckpointSnapshotStore) ValidateSnapshots(ctx context.Context, logger log.Logger, failFast bool) error {
+	return validateSnapshots(ctx, logger, s.EntityStore, failFast, s.snapshots, s.SnapType(), generics.New[Checkpoint])
 }
 
-func validateSnapshots[T Entity](logger log.Logger, failFast bool, snaps *RoSnapshots, t snaptype.Type, makeEntity func() T) error {
+func validateSnapshots[T Entity](
+	ctx context.Context,
+	logger log.Logger,
+	dbStore EntityStore[T],
+	failFast bool,
+	snaps *RoSnapshots,
+	t snaptype.Type,
+	makeEntity func() T,
+) error {
 	tx := snaps.ViewType(t)
 	defer tx.Close()
 
@@ -466,7 +474,15 @@ func validateSnapshots[T Entity](logger log.Logger, failFast bool, snaps *RoSnap
 				return err
 			}
 
-			logger.Trace("validating entity", "id", entity.RawId(), "kind", reflect.TypeOf(entity))
+			logger.Trace(
+				"validating entity",
+				"id", entity.RawId(),
+				"kind", reflect.TypeOf(entity),
+				"start", entity.BlockNumRange().Start,
+				"end", entity.BlockNumRange().End,
+				"segmentFrom", seg.From(),
+				"segmentTo", seg.To(),
+			)
 
 			if prev == nil {
 				prev = &entity
@@ -483,12 +499,35 @@ func validateSnapshots[T Entity](logger log.Logger, failFast bool, snaps *RoSnap
 				accumulatedErr = errors.New("missing entities")
 			}
 
-			accumulatedErr = fmt.Errorf("%w: [%d, %d)", accumulatedErr, expectedId, entity.RawId())
+			accumulatedErr = fmt.Errorf("%w: snap [%d, %d)", accumulatedErr, expectedId, entity.RawId())
 			if failFast {
 				return accumulatedErr
 			}
 
 			prev = &entity
+		}
+	}
+
+	// make sure snapshots connect with data in the db and there are no gaps at all
+	lastInDb, ok, err := dbStore.LastEntityId(ctx)
+	if err != nil {
+		return err
+	}
+	if !ok || prev == nil {
+		return nil
+	}
+	for i := (*prev).RawId() + 1; i <= lastInDb; i++ {
+		_, ok, err := dbStore.Entity(ctx, i)
+		if err != nil {
+			return err
+		}
+		if ok {
+			continue
+		}
+		// we've found a gap between snapshots and db
+		accumulatedErr = fmt.Errorf("%w: db [%d]", accumulatedErr, i)
+		if failFast {
+			return accumulatedErr
 		}
 	}
 
