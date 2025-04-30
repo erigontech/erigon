@@ -28,6 +28,7 @@ require (
 	github.com/containerd/cgroups/v3 v3.0.3
 	github.com/crate-crypto/go-ipa v0.0.0-20221111143132-9aa5d42120bc
 	github.com/crate-crypto/go-kzg-4844 v1.1.0
+	github.com/davecgh/go-spew v1.1.1
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0
 	github.com/edsrzf/mmap-go v1.2.0
 	github.com/elastic/go-freelru v0.16.0
@@ -44,6 +45,8 @@ require (
 	github.com/holiman/bloomfilter/v2 v2.0.3
 	github.com/holiman/uint256 v1.3.2
 	github.com/klauspost/compress v1.18.0
+	github.com/mattn/go-colorable v0.1.13
+	github.com/mattn/go-isatty v0.0.20
 	github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 	github.com/pelletier/go-toml/v2 v2.2.3
@@ -61,6 +64,7 @@ require (
 	go.uber.org/mock v0.5.0
 	golang.org/x/crypto v0.37.0
 	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394
+	golang.org/x/net v0.37.0
 	golang.org/x/sync v0.13.0
 	golang.org/x/sys v0.32.0
 	golang.org/x/time v0.11.0
@@ -114,7 +118,6 @@ require (
 	github.com/consensys/bavard v0.1.29 // indirect
 	github.com/consensys/gnark-crypto v0.17.0 // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
-	github.com/davecgh/go-spew v1.1.1
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-llsqlite/adapter v0.0.0-20230927005056-7f5ce7f0c916 // indirect
@@ -126,8 +129,6 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/huandu/xstrings v1.4.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
-	github.com/mattn/go-colorable v0.1.13
-	github.com/mattn/go-isatty v0.0.20
 	github.com/mmcloughlin/addchain v0.4.0 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect
@@ -162,7 +163,6 @@ require (
 	go.opentelemetry.io/otel v1.34.0 // indirect
 	go.opentelemetry.io/otel/trace v1.34.0 // indirect
 	go.uber.org/goleak v1.3.0 // indirect
-	golang.org/x/net v0.37.0
 	golang.org/x/text v0.24.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/mathutil v1.6.0 // indirect
