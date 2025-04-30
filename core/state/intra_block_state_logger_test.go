@@ -132,7 +132,7 @@ func TestStateLogger(t *testing.T) {
 
 			tt.run(state)
 			tt.checker(t, state)
-			require.Equal(t, mt.balanceChangeTraces, tt.wantBalanceChangeTraces)
+			require.Equal(t, tt.wantBalanceChangeTraces, mt.balanceChangeTraces)
 		})
 	}
 }

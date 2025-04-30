@@ -403,12 +403,12 @@ func TestUncompressed(t *testing.T) {
 		_, ok := g.BinarySearch([]byte(""), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
 		require.True(ok)
 		k, _ := g.Next(nil)
-		require.Equal("", string(k))
+		require.Empty(string(k))
 
 		_, ok = g.BinarySearch(nil, d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
 		require.True(ok)
 		k, _ = g.Next(nil)
-		require.Equal("", string(k))
+		require.Empty(string(k))
 	})
 
 }

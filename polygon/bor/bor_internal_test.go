@@ -134,6 +134,6 @@ func TestCommitStatesIndore(t *testing.T) {
 		Chain: cr,
 	}, syscall, nil, true)
 
-	require.Nil(t, err)
-	require.Equal(t, called, 1)
+	require.NoError(t, err)
+	require.Equal(t, 1, called)
 }

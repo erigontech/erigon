@@ -62,7 +62,7 @@ func TestGenesisBlockHashes(t *testing.T) {
 		require.NoError(t, err)
 		expect := params.GenesisHashByChainName(network)
 		require.NotNil(t, expect, network)
-		require.EqualValues(t, block.Hash(), *expect, network)
+		require.Equal(t, block.Hash(), *expect, network)
 	}
 	for _, network := range networkname.All {
 		check(network)

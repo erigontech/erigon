@@ -100,7 +100,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		count++
 	}
 	icc.Close()
-	require.EqualValues(t, count, pruneIters*int(pruneLimit))
+	require.Equal(t, count, pruneIters*int(pruneLimit))
 
 	// this one should not prune anything due to forced=false but no files built
 	stat, err := ic.Prune(context.Background(), rwTx, 0, 10, pruneLimit, logEvery, false, nil)

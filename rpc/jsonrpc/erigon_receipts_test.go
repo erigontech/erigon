@@ -59,7 +59,7 @@ func TestGetLogs(t *testing.T) {
 			Addresses: common.Addresses{common.Address{}},
 		})
 		require.NoError(err)
-		assert.Equal(0, len(logs))
+		assert.Empty(logs)
 
 		// filter by wrong address
 		logs, err = ethApi.GetLogs(m.Ctx, filters.FilterCriteria{
@@ -68,7 +68,7 @@ func TestGetLogs(t *testing.T) {
 			Topics:    [][]common.Hash{{common.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")}},
 		})
 		require.NoError(err)
-		assert.Equal(1, len(logs))
+		assert.Len(logs, 1)
 	}
 }
 
@@ -101,7 +101,7 @@ func TestErigonGetLatestLogs(t *testing.T) {
 		t.Errorf("calling erigon_getLatestLogs: %v", err)
 	}
 	require.NotNil(t, actual)
-	assert.EqualValues(expectedErigonLogs, actual)
+	assert.Equal(expectedErigonLogs, actual)
 
 	expectedLog := &types.ErigonLog{
 		Address:     common.HexToAddress("0x3CB5b6E26e0f37F2514D45641F15Bd6fEC2E0c4c"),
@@ -115,7 +115,7 @@ func TestErigonGetLatestLogs(t *testing.T) {
 		Removed:     false,
 		Timestamp:   100,
 	}
-	assert.EqualValues(expectedLog, actual[0])
+	assert.Equal(expectedLog, actual[0])
 }
 
 func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {

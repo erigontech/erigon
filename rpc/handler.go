@@ -24,6 +24,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -152,12 +153,7 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 }
 
 func (h *handler) isRpcMethodNeedsCheck(method string) bool {
-	for _, m := range h.slowLogBlacklist {
-		if m == method {
-			return false
-		}
-	}
-	return true
+	return !slices.Contains(h.slowLogBlacklist, method)
 }
 
 // handleBatch executes all messages in a batch and returns the responses.

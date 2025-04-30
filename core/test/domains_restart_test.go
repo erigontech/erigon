@@ -132,7 +132,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 
 		n, err := rnd.Read(loc[:])
 		require.NoError(t, err)
-		require.EqualValues(t, length.Hash, n)
+		require.Equal(t, length.Hash, n)
 
 		acc, addr := randomAccount(t)
 		interesting := txNum/aggStep > maxStep-1
@@ -275,7 +275,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 			rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
 			require.NoError(t, err)
 			fmt.Printf("tx %d rh %x\n", txNum, rh)
-			require.EqualValues(t, hashes[j], rh)
+			require.Equal(t, hashes[j], rh)
 			j++
 		}
 	}
@@ -339,7 +339,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 
 		n, err := rnd.Read(loc[:])
 		require.NoError(t, err)
-		require.EqualValues(t, length.Hash, n)
+		require.Equal(t, length.Hash, n)
 
 		acc, addr := randomAccount(t)
 		addrs = append(addrs, addr)
@@ -423,12 +423,12 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	writer = state2.NewWriterV4(domains)
 
 	txToStart := domains.TxNum()
-	require.EqualValues(t, txToStart, 0)
+	require.EqualValues(t, 0, txToStart)
 	txToStart = testStartedFromTxNum
 
 	rh, err := domains.ComputeCommitment(ctx, false, domains.BlockNum(), "")
 	require.NoError(t, err)
-	require.EqualValues(t, params.TestGenesisStateRoot, common.BytesToHash(rh))
+	require.Equal(t, params.TestGenesisStateRoot, common.BytesToHash(rh))
 	//require.NotEqualValues(t, latestHash, common.BytesToHash(rh))
 	//common.BytesToHash(rh))
 
@@ -449,7 +449,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 			rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
 			require.NoError(t, err)
 			//fmt.Printf("tx %d rh %x\n", txNum, rh)
-			require.EqualValues(t, hashes[j], rh)
+			require.Equal(t, hashes[j], rh)
 			j++
 		}
 	}
