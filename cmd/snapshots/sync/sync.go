@@ -223,7 +223,7 @@ func NewTorrentClient(ctx context.Context, config CreateNewTorrentClientConfig) 
 		return nil, err
 	}
 
-	logLevel, _, err := downloadercfg.Int2LogLevel(config.Verbosity)
+	logLevel, err := downloadercfg.Int2LogLevel(config.Verbosity)
 
 	if err != nil {
 		return nil, err

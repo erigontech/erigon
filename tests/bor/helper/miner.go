@@ -116,7 +116,7 @@ func InitMiner(ctx context.Context, logger log.Logger, dirName string, genesis *
 		return nil, nil, err
 	}
 
-	torrentLogLevel, _, err := downloadercfg.Int2LogLevel(3)
+	torrentLogLevel, err := downloadercfg.Int2LogLevel(3)
 	if err != nil {
 		return nil, nil, err
 	}

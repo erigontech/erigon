@@ -19,6 +19,8 @@ package downloadercfg
 import (
 	"context"
 	"fmt"
+	analog "github.com/anacrolix/log"
+	"log/slog"
 	"net"
 	"net/url"
 	"os"
@@ -31,7 +33,6 @@ import (
 	"github.com/erigontech/erigon-lib/chain/networkname"
 
 	"github.com/anacrolix/dht/v2"
-	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/time/rate"
@@ -106,13 +107,13 @@ func New(
 	ctx context.Context,
 	dirs datadir.Dirs,
 	version string,
-	verbosity lg.Level,
+	verbosity log.Lvl,
 	downloadRate, uploadRate datasize.ByteSize,
 	port, connsPerFile, downloadSlots int,
 	staticPeers, webseeds []string,
 	chainName string,
 	mdbxWriteMap bool,
-) (*Cfg, error) {
+) (_ *Cfg, err error) {
 	torrentConfig := Default()
 	//torrentConfig.PieceHashersPerTorrent = runtime.NumCPU()
 	torrentConfig.DataDir = dirs.Snap // `DataDir` of torrent-client-lib is different from Erigon's `DataDir`. Just same naming.
@@ -129,10 +130,29 @@ func New(
 	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()), DefaultNetworkChunkSize)       // default: unlimited
 	torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(downloadRate.Bytes()), 2*DefaultNetworkChunkSize) // default: unlimited
 
-	// debug
-	//torrentConfig.Debug = true
-	torrentConfig.Logger = torrentConfig.Logger.WithFilterLevel(verbosity)
+	var analogLevel analog.Level
+	analogLevel, torrentConfig.Debug, err = erigonToAnalogLevel(verbosity)
+	if err != nil {
+		panic(err)
+	}
+	torrentConfig.Logger = torrentConfig.Logger.WithFilterLevel(analogLevel)
 	torrentConfig.Logger.SetHandlers(adapterHandler{})
+	slogLevel := erigonToSlogLevel(verbosity)
+	torrentConfig.Slogger = slog.New(&slogHandler{
+		enabled: func(level slog.Level, names []string) bool {
+			if slices.Contains(names, "tracker") {
+				level -= 4
+			}
+			return level >= slogLevel
+		},
+		//minLevel: slogLevel,
+	})
+	// Previously this used a logger passed to the callers of this function. Do we need it here?
+	log.Info(
+		"torrent verbosity",
+		"erigon", verbosity,
+		"anacrolix", analogLevel.LogString(),
+		"slog", slogLevel)
 
 	// TODO: This doesn't look right. Enabling DHT only for static peers will introduce very
 	// different runtime behaviour. Is it assumed those peers are torrent client endpoints and we

@@ -1101,7 +1101,9 @@ func (d *Downloader) addTorrent(ctx context.Context, infoHash metainfo.Hash, nam
 	spec.DisplayName = cmp.Or(spec.DisplayName, name)
 	spec.Sources = nil
 	for s := range d.webSeedUrlStrs() {
-		spec.Sources = append(spec.Sources, s+name+".torrent")
+		u := s + name + ".torrent"
+		//fmt.Printf("%v: adding torrent source %q\n", snapTup, u)
+		spec.Sources = append(spec.Sources, u)
 	}
 	t, ok, err = d.addTorrentFile(spec)
 	if err != nil {
@@ -1285,7 +1287,7 @@ func newTorrentClient(
 	// TODO: Should we force sqlite, or defer to part-file-only storage completion?
 	m = storage.NewFileOpts(storage.NewFileClientOpts{
 		ClientBaseDir: snapDir,
-		UsePartFiles:  g.Some(false),
+		UsePartFiles:  g.Some(true),
 	})
 	cfg.DefaultStorage = m
 

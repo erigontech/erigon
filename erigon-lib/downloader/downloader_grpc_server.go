@@ -66,9 +66,9 @@ func (s *GrpcServer) ProhibitNewDownloads(ctx context.Context, req *proto_downlo
 // After "download once" - Erigon will produce and seed new files
 // Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
 func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddRequest) (*emptypb.Empty, error) {
-	for _, item := range request.Items {
-		fmt.Printf("%v: %v\n", Proto2InfoHash(item.TorrentHash), item.Path)
-	}
+	//for _, item := range request.Items {
+	//	fmt.Printf("%v: %v\n", Proto2InfoHash(item.TorrentHash), item.Path)
+	//}
 
 	if len(s.d.torrentClient.Torrents()) == 0 || s.d.startTime.IsZero() {
 		s.d.startTime = time.Now()

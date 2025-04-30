@@ -17,30 +17,46 @@
 package downloadercfg
 
 import (
+	"bytes"
 	"fmt"
-	lg "github.com/anacrolix/log"
+	analog "github.com/anacrolix/log"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func init() {
-	lg.Default.Handlers = []lg.Handler{adapterHandler{}}
+	// Erigon's inherited log library does filtering per handler. anacrolix/log does filtering at
+	// the logger level...
+	analog.Default.Handlers = []analog.Handler{adapterHandler{}}
 }
 
-func Int2LogLevel(level int) (lvl lg.Level, dbg bool, err error) {
+// Converts flag int to Erigon log level. Surely there's a helper for this somewhere else...
+func Int2LogLevel(level int) (lvl log.Lvl, err error) {
+	if level < 0 || level > 5 {
+		err = fmt.Errorf("invalid level set, expected a number between 0-5 but got: %d", level)
+		return
+	}
+	lvl = log.Lvl(level)
+	return
+}
+
+// dbg was an old field I guess used for the fact analog doesn't have a trace level. Probably don't
+// need it anymore.
+func erigonToAnalogLevel(level log.Lvl) (lvl analog.Level, dbg bool, err error) {
 	switch level {
-	case 0:
-		lvl = lg.Critical
-	case 1:
-		lvl = lg.Error
-	case 2:
-		lvl = lg.Warning
-	case 3:
-		lvl = lg.Info
-	case 4:
-		lvl = lg.Debug
-	case 5:
-		lvl = lg.Debug
+	case log.LvlCrit:
+		lvl = analog.Critical
+	case log.LvlError:
+		lvl = analog.Error
+	case log.LvlWarn:
+		lvl = analog.Warning
+	case log.LvlInfo:
+		lvl = analog.Info
+	case log.LvlDebug:
+		lvl = analog.Debug
+	case log.LvlTrace:
+		// Should this be analog.NotSet?
+		lvl = analog.Debug
 		dbg = true
 	default:
 		return lvl, dbg, fmt.Errorf("invalid level set, expected a number between 0-5 but got: %d", level)
@@ -48,26 +64,26 @@ func Int2LogLevel(level int) (lvl lg.Level, dbg bool, err error) {
 	return lvl, dbg, nil
 }
 
-func anacrolixToErigonLogLevel(level lg.Level) log.Lvl {
+func anacrolixToErigonLogLevel(level analog.Level) log.Lvl {
 	switch level {
-	case lg.Never:
+	case analog.Never:
 		// This should never occur. Maybe log that a message leaked?
 		panic(level)
 		return log.LvlTrace + 1
-	case lg.NotSet:
+	case analog.NotSet:
 		// This is usually bad practice. Set an appropriate default so it doesn't happen.
 		return log.LvlWarn
-	case lg.Debug:
+	case analog.Debug:
 		return log.LvlDebug
-	case lg.Info:
+	case analog.Info:
 		return log.LvlInfo
-	case lg.Warning:
+	case analog.Warning:
 		return log.LvlWarn
-	case lg.Error:
+	case analog.Error:
 		return log.LvlError
-	case lg.Critical:
+	case analog.Critical:
 		return log.LvlCrit
-	case lg.Disabled:
+	case analog.Disabled:
 		panic(level)
 		// This should never occur. Maybe log that a message leaked?
 		return log.LvlError
@@ -79,18 +95,16 @@ func anacrolixToErigonLogLevel(level lg.Level) log.Lvl {
 
 type noopHandler struct{}
 
-func (b noopHandler) Handle(r lg.Record) {
+func (b noopHandler) Handle(r analog.Record) {
 }
 
 type adapterHandler struct{}
 
-func (b adapterHandler) Handle(r lg.Record) {
+func (b adapterHandler) Handle(r analog.Record) {
 	// Note that anacrolix/log now partly supports stdlib slog, so if Erigon switches to that, it
 	// would be better to use that too. anacrolix/torrent might change eventually too.
 	lvl := anacrolixToErigonLogLevel(r.Level)
-	// TODO: anacrolix/log has context values we can pull out... Also can we use the two line
-	// formatter or a newer implementation for the single line?
-	msg := "[downloader torrent client] " + string(lg.LineFormatter(r))
+	msg := "[downloader torrent client] " + string(bytes.TrimSuffix(analog.LineFormatter(r), []byte{'\n'}))
 	log.Log(lvl, msg)
 }
 
