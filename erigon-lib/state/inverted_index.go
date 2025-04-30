@@ -561,7 +561,8 @@ type InvertedIndexRoTx struct {
 
 	seekInFilesCache *IISeekInFilesCache
 
-	ef *multiencseq.SequenceBuilder // re-usable
+	// TODO: retrofit recent optimization in main and reenable the next line
+	// ef *multiencseq.SequenceBuilder // re-usable
 }
 
 // hashKey - change of salt will require re-gen of indices
