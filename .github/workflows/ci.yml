@@ -74,7 +74,7 @@ jobs:
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     strategy:
       matrix:
-        os: [ windows-2022 ]
+        os: [ windows-2025 ]
     runs-on: ${{ matrix.os }}
 
     steps:

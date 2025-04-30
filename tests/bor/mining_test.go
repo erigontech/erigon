@@ -36,7 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/tests/bor/helper"

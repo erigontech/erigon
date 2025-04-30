@@ -60,7 +60,7 @@ func TestState(t *testing.T) {
 	st.skipLoad(`dynamicAccountOverwriteEmpty_Paris.json`)
 
 	dirs := datadir.New(t.TempDir())
-	db, _ := temporaltest.NewTestDB(t, dirs)
+	db := temporaltest.NewTestDB(t, dirs)
 	st.walk(t, stateTestDir, func(t *testing.T, name string, test *StateTest) {
 		for _, subtest := range test.Subtests() {
 			subtest := subtest

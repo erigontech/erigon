@@ -22,10 +22,13 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	rand2 "math/rand/v2"
+
+	rand2 "golang.org/x/exp/rand"
+
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -97,7 +100,7 @@ const AggregatorSqueezeCommitmentValues = true
 const MaxNonFuriousDirtySpacePerTx = 64 * datasize.MB
 
 func commitmentFileMustExist(dirs datadir.Dirs, fromStep, toStep uint64) bool {
-	fPath := filepath.Join(dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.kv", kv.CommitmentDomain, fromStep, toStep))
+	fPath := filepath.Join(dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kv", commitmentDomainVersion.String(), kv.CommitmentDomain, fromStep, toStep))
 	exists, err := dir.FileExist(fPath)
 	if err != nil {
 		panic(err)
@@ -197,7 +200,7 @@ func getStateIndicesSalt(baseDir string) (salt *uint32, err error) {
 }
 
 func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.Dirs, logger log.Logger) (err error) {
-	cfg := Schema[name]
+	cfg := Schema.GetDomainCfg(name)
 	//TODO: move dynamic part of config to InvertedIndex
 	cfg.restrictSubsetFileDeletions = a.commitmentValuesTransform
 	cfg.hist.iiCfg.salt = salt
@@ -210,7 +213,7 @@ func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.D
 }
 
 func (a *Aggregator) registerII(idx kv.InvertedIdx, salt *uint32, dirs datadir.Dirs, logger log.Logger) error {
-	idxCfg := StandaloneIISchema[idx]
+	idxCfg := Schema.GetIICfg(idx)
 	idxCfg.salt = salt
 	idxCfg.dirs = dirs
 
@@ -309,6 +312,7 @@ func (a *Aggregator) closeDirtyFiles() {
 	wg.Wait()
 }
 
+func (a *Aggregator) EnableDomain(domain kv.Domain)   { a.d[domain].disable = false }
 func (a *Aggregator) SetCollateAndBuildWorkers(i int) { a.collateAndBuildWorkers = i }
 func (a *Aggregator) SetMergeWorkers(i int)           { a.mergeWorkers = i }
 func (a *Aggregator) SetCompressWorkers(i int) {
@@ -530,6 +534,10 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(a.collateAndBuildWorkers)
 	for _, d := range a.d {
+		if d.disable {
+			continue
+		}
+
 		d := d
 		dc := d.BeginFilesRo()
 		firstStepNotInFiles := dc.FirstStepNotInFiles()
@@ -572,6 +580,10 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 
 	// indices are built concurrently
 	for iikey, ii := range a.iis {
+		if ii.disable {
+			continue
+		}
+
 		ii := ii
 		dc := ii.BeginFilesRo()
 		firstStepNotInFiles := dc.FirstStepNotInFiles()
@@ -700,6 +712,11 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 
 	a.onFreeze(in.FrozenList())
 	return true, nil
+}
+
+func (a *Aggregator) RemoveOverlapsAfterMerge(ctx context.Context) (err error) {
+	a.cleanAfterMerge(nil)
+	return nil
 }
 
 func (a *Aggregator) MergeLoop(ctx context.Context) (err error) {
@@ -1242,6 +1259,10 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
 		restorePrevRange := false
 		for k, dr := range &r.domain {
 			kd := kv.Domain(k)
+			if !slices.Contains(kv.StateDomains, kd) {
+				continue
+			}
+
 			if kd == kv.CommitmentDomain || cr.values.Equal(&dr.values) {
 				continue
 			}
@@ -1255,6 +1276,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
 						"commitment", cr.values.String("vals", at.StepSize()))
 					continue
 				}
+
 				restorePrevRange = true
 			}
 		}
@@ -1386,10 +1408,18 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 	defer a.dirtyFilesLock.Unlock()
 
 	for id, d := range at.d {
-		d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])
+		if in == nil {
+			d.cleanAfterMerge(nil, nil, nil)
+		} else {
+			d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])
+		}
 	}
 	for id, ii := range at.iis {
-		ii.cleanAfterMerge(in.iis[id])
+		if in == nil {
+			ii.cleanAfterMerge(nil)
+		} else {
+			ii.cleanAfterMerge(in.iis[id])
+		}
 	}
 }
 

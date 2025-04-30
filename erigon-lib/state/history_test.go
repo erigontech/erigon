@@ -53,7 +53,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	//TODO: tests will fail if set histCfg.compression = CompressKeys | CompressValues
 	salt := uint32(1)
-	cfg := Schema[kv.AccountsDomain]
+	cfg := Schema.AccountsDomain
 
 	cfg.hist.iiCfg.dirs = dirs
 	cfg.hist.iiCfg.salt = &salt
@@ -136,14 +136,14 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 				for efIt.HasNext() {
 					txNum, err := efIt.Next()
 					require.NoError(t, err)
-					require.EqualValuesf(t, updates[vi].txNum, txNum, "txNum mismatch")
+					require.Equalf(t, updates[vi].txNum, txNum, "txNum mismatch")
 
 					require.Truef(t, hReader.HasNext(), "hReader has no more values")
 					hValBuf, _ = hReader.Next(nil)
 					if updates[vi].value == nil {
 						require.Emptyf(t, hValBuf, "value at %d is not empty (not nil)", vi)
 					} else {
-						require.EqualValuesf(t, updates[vi].value, hValBuf, "value at %d mismatch", vi)
+						require.Equalf(t, updates[vi].value, hValBuf, "value at %d mismatch", vi)
 					}
 					vi++
 				}
@@ -193,27 +193,23 @@ func TestHistoryCollationBuild(t *testing.T) {
 		writer := hc.NewWriter()
 		defer writer.close()
 
-		writer.SetTxNum(2)
-		err = writer.AddPrevValue([]byte("key1"), nil, nil, 0)
+		err = writer.AddPrevValue([]byte("key1"), nil, 2, nil)
 		require.NoError(err)
 
-		writer.SetTxNum(3)
-		err = writer.AddPrevValue([]byte("key2"), nil, nil, 0)
+		err = writer.AddPrevValue([]byte("key2"), nil, 3, nil)
 		require.NoError(err)
 
-		writer.SetTxNum(6)
-		err = writer.AddPrevValue([]byte("key1"), nil, []byte("value1.1"), 0)
+		err = writer.AddPrevValue([]byte("key1"), nil, 6, []byte("value1.1"))
 		require.NoError(err)
-		err = writer.AddPrevValue([]byte("key2"), nil, []byte("value2.1"), 0)
+		err = writer.AddPrevValue([]byte("key2"), nil, 6, []byte("value2.1"))
 		require.NoError(err)
 
 		flusher := writer
 		writer = hc.NewWriter()
 
-		writer.SetTxNum(7)
-		err = writer.AddPrevValue([]byte("key2"), nil, []byte("value2.2"), 0)
+		err = writer.AddPrevValue([]byte("key2"), nil, 7, []byte("value2.2"))
 		require.NoError(err)
-		err = writer.AddPrevValue([]byte("key3"), nil, nil, 0)
+		err = writer.AddPrevValue([]byte("key3"), nil, 7, nil)
 		require.NoError(err)
 
 		err = flusher.Flush(ctx, tx)
@@ -311,24 +307,20 @@ func TestHistoryAfterPrune(t *testing.T) {
 		writer := hc.NewWriter()
 		defer writer.close()
 
-		writer.SetTxNum(2)
-		err = writer.AddPrevValue([]byte("key1"), nil, nil, 0)
+		err = writer.AddPrevValue([]byte("key1"), nil, 2, nil)
 		require.NoError(err)
 
-		writer.SetTxNum(3)
-		err = writer.AddPrevValue([]byte("key2"), nil, nil, 0)
+		err = writer.AddPrevValue([]byte("key2"), nil, 3, nil)
 		require.NoError(err)
 
-		writer.SetTxNum(6)
-		err = writer.AddPrevValue([]byte("key1"), nil, []byte("value1.1"), 0)
+		err = writer.AddPrevValue([]byte("key1"), nil, 6, []byte("value1.1"))
 		require.NoError(err)
-		err = writer.AddPrevValue([]byte("key2"), nil, []byte("value2.1"), 0)
+		err = writer.AddPrevValue([]byte("key2"), nil, 6, []byte("value2.1"))
 		require.NoError(err)
 
-		writer.SetTxNum(7)
-		err = writer.AddPrevValue([]byte("key2"), nil, []byte("value2.2"), 0)
+		err = writer.AddPrevValue([]byte("key2"), nil, 7, []byte("value2.2"))
 		require.NoError(err)
-		err = writer.AddPrevValue([]byte("key3"), nil, nil, 0)
+		err = writer.AddPrevValue([]byte("key3"), nil, 7, nil)
 		require.NoError(err)
 
 		err = writer.Flush(ctx, tx)
@@ -397,11 +389,9 @@ func TestHistoryCanPrune(t *testing.T) {
 
 		addr = common.FromHex("ed7229d50cde8de174cc64a882a0833ca5f11669")
 		prev := make([]byte, 0)
-		prevStep := uint64(0)
 		val := make([]byte, 8)
 
 		for i := uint64(0); i < stepsTotal*h.aggregationStep; i++ {
-			writer.SetTxNum(i)
 			if cap(val) == 0 {
 				val = make([]byte, 8)
 			}
@@ -411,10 +401,9 @@ func TestHistoryCanPrune(t *testing.T) {
 				binary.BigEndian.PutUint64(val, i)
 			}
 
-			err = writer.AddPrevValue(addr[:], val, prev, prevStep)
+			err = writer.AddPrevValue(addr[:], val, i, prev)
 			require.NoError(err)
 
-			prevStep = i / h.aggregationStep
 			prev = common.Copy(val)
 		}
 
@@ -666,7 +655,7 @@ func TestHistoryPruneCorrectness(t *testing.T) {
 		}
 		count++
 	}
-	require.EqualValues(t, pruneIters*int(pruneLimit), count)
+	require.Equal(t, pruneIters*int(pruneLimit), count)
 	icc.Close()
 
 	hc := h.BeginFilesRo()
@@ -730,14 +719,10 @@ func filledHistoryValues(tb testing.TB, largeValues bool, values map[string][]up
 		// keys are encodings of numbers 1..31
 		// each key changes value on every txNum which is multiple of the key
 		var flusher flusher
-		var keyFlushCount, ps = 0, uint64(0)
+		var keyFlushCount = 0
 		for key, upds := range values {
 			for i := 0; i < len(upds); i++ {
-				writer.SetTxNum(upds[i].txNum)
-				if i > 0 {
-					ps = upds[i].txNum / hc.h.aggregationStep
-				}
-				err := writer.AddPrevValue([]byte(key), nil, upds[i].value, ps)
+				err := writer.AddPrevValue([]byte(key), nil, upds[i].txNum, upds[i].value)
 				require.NoError(tb, err)
 			}
 			keyFlushCount++
@@ -780,7 +765,6 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 	var prevVal [32][]byte
 	var flusher flusher
 	for txNum := uint64(1); txNum <= txs; txNum++ {
-		writer.SetTxNum(txNum)
 		for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
 			if txNum%keyNum == 0 {
 				valNum := txNum / keyNum
@@ -790,7 +774,7 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 				binary.BigEndian.PutUint64(v[:], valNum)
 				k[0] = 1   //mark key to simplify debug
 				v[0] = 255 //mark value to simplify debug
-				err = writer.AddPrevValue(k[:], nil, prevVal[keyNum], 0)
+				err = writer.AddPrevValue(k[:], nil, txNum, prevVal[keyNum])
 				require.NoError(tb, err)
 				prevVal[keyNum] = v[:]
 			}
@@ -1412,12 +1396,12 @@ func TestScanStaticFilesH(t *testing.T) {
 	_, h := newTestDomain()
 
 	files := []string{
-		"v1-accounts.0-1.v",
-		"v1-accounts.1-2.v",
-		"v1-accounts.0-4.v",
-		"v1-accounts.2-3.v",
-		"v1-accounts.3-4.v",
-		"v1-accounts.4-5.v",
+		"v1.0-accounts.0-1.v",
+		"v1.0-accounts.1-2.v",
+		"v1.0-accounts.0-4.v",
+		"v1.0-accounts.2-3.v",
+		"v1.0-accounts.3-4.v",
+		"v1.0-accounts.4-5.v",
 	}
 	h.scanDirtyFiles(files)
 	require.Equal(t, 6, h.dirtyFiles.Len())
@@ -1455,22 +1439,20 @@ func writeSomeHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	var prevVal [7][]byte
 	var flusher flusher
 	for txNum := uint64(1); txNum <= txs; txNum++ {
-		writer.SetTxNum(txNum)
-
 		for ik, k := range keys {
 			var v [8]byte
 			binary.BigEndian.PutUint64(v[:], txNum)
 			if ik == 0 && txNum%33 == 0 {
 				continue
 			}
-			err = writer.AddPrevValue(k, nil, prevVal[ik], 0)
+			err = writer.AddPrevValue(k, nil, txNum, prevVal[ik])
 			require.NoError(tb, err)
 
 			prevVal[ik] = v[:]
 		}
 
 		if txNum%33 == 0 {
-			err = writer.AddPrevValue(keys[0], nil, nil, 0)
+			err = writer.AddPrevValue(keys[0], nil, txNum, nil)
 			require.NoError(tb, err)
 		}
 
@@ -1536,7 +1518,7 @@ func Test_HistoryIterate_VariousKeysLen(t *testing.T) {
 		})
 
 		require.Equal(fmt.Sprintf("%#x", writtenKeys[0]), fmt.Sprintf("%#x", keys[0]))
-		require.Equal(len(writtenKeys), len(keys))
+		require.Len(keys, len(writtenKeys))
 		require.Equal(fmt.Sprintf("%#x", writtenKeys), fmt.Sprintf("%#x", keys))
 	}
 

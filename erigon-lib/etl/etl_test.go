@@ -545,7 +545,7 @@ func TestAppendAndSortPrefixes(t *testing.T) {
 
 	err := collector.Load(nil, "", func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error {
 		t.Logf("collated %x %x\n", k, v)
-		require.EqualValuesf(keys[i], fmt.Sprintf("%x", k), "i=%d", i)
+		require.Equalf(keys[i], fmt.Sprintf("%x", k), "i=%d", i)
 		i++
 		return nil
 	}, TransformArgs{})

@@ -124,24 +124,6 @@ func (m Mode) String() string {
 	return strings.TrimLeft(short+long, " ")
 }
 
-func Override(db kv.RwTx, sm Mode) error {
-	var (
-		err error
-	)
-
-	err = set(db, kv.PruneHistory, sm.History)
-	if err != nil {
-		return err
-	}
-
-	err = set(db, kv.PruneBlocks, sm.Blocks)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
 // EnsureNotChanged - prohibit change some configs after node creation. prohibit from human mistakes
 func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 	err := setIfNotExist(tx, pruneMode)
@@ -220,22 +202,6 @@ func get(db kv.Getter, key []byte) (BlockAmount, error) {
 	}
 
 	return nil, nil
-}
-
-func set(db kv.Putter, key []byte, blockAmount BlockAmount) error {
-	v := make([]byte, 8)
-	binary.BigEndian.PutUint64(v, blockAmount.toValue())
-	if err := db.Put(kv.DatabaseInfo, key, v); err != nil {
-		return err
-	}
-
-	keyType := keyType(key)
-
-	if err := db.Put(kv.DatabaseInfo, keyType, blockAmount.dbType()); err != nil {
-		return err
-	}
-
-	return nil
 }
 
 func keyType(name []byte) []byte {

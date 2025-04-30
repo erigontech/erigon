@@ -25,9 +25,9 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/turbo/engineapi"
 	enginetypes "github.com/erigontech/erigon/turbo/engineapi/engine_types"
 	"github.com/erigontech/erigon/txnprovider/shutter"
@@ -36,13 +36,13 @@ import (
 type MockCl struct {
 	slotCalculator        shutter.SlotCalculator
 	engineApiClient       *engineapi.JsonRpcClient
-	suggestedFeeRecipient libcommon.Address
-	prevBlockHash         libcommon.Hash
+	suggestedFeeRecipient common.Address
+	prevBlockHash         common.Hash
 	prevRandao            *big.Int
 	prevBeaconBlockRoot   *big.Int
 }
 
-func NewMockCl(sc shutter.SlotCalculator, elClient *engineapi.JsonRpcClient, feeRecipient libcommon.Address, elGenesis *types.Block) *MockCl {
+func NewMockCl(sc shutter.SlotCalculator, elClient *engineapi.JsonRpcClient, feeRecipient common.Address, elGenesis *types.Block) *MockCl {
 	return &MockCl{
 		slotCalculator:        sc,
 		engineApiClient:       elClient,
@@ -62,10 +62,10 @@ func (cl *MockCl) BuildBlock(ctx context.Context, opts ...BlockBuildingOption) (
 		HeadHash:           cl.prevBlockHash,
 	}
 
-	parentBeaconBlockRoot := libcommon.BigToHash(cl.prevBeaconBlockRoot)
+	parentBeaconBlockRoot := common.BigToHash(cl.prevBeaconBlockRoot)
 	payloadAttributes := enginetypes.PayloadAttributes{
 		Timestamp:             hexutil.Uint64(timestamp),
-		PrevRandao:            libcommon.BigToHash(cl.prevRandao),
+		PrevRandao:            common.BigToHash(cl.prevRandao),
 		SuggestedFeeRecipient: cl.suggestedFeeRecipient,
 		Withdrawals:           make([]*types.Withdrawal, 0),
 		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
@@ -84,7 +84,7 @@ func (cl *MockCl) BuildBlock(ctx context.Context, opts ...BlockBuildingOption) (
 	}
 
 	// give block builder time to build a block
-	err = libcommon.Sleep(ctx, time.Duration(cl.slotCalculator.SecondsPerSlot())*time.Second)
+	err = common.Sleep(ctx, time.Duration(cl.slotCalculator.SecondsPerSlot())*time.Second)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +97,7 @@ func (cl *MockCl) BuildBlock(ctx context.Context, opts ...BlockBuildingOption) (
 
 	// insert the newly built block
 	payloadStatus, err := retryEngineSyncing(ctx, func() (*enginetypes.PayloadStatus, enginetypes.EngineStatus, error) {
-		r, err := cl.engineApiClient.NewPayloadV4(ctx, payloadRes.ExecutionPayload, []libcommon.Hash{}, &parentBeaconBlockRoot, []hexutil.Bytes{})
+		r, err := cl.engineApiClient.NewPayloadV4(ctx, payloadRes.ExecutionPayload, []common.Hash{}, &parentBeaconBlockRoot, []hexutil.Bytes{})
 		return r, r.Status, err
 	})
 	if err != nil {

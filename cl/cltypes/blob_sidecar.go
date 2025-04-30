@@ -19,7 +19,7 @@ package cltypes
 import (
 	"encoding/json"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -34,13 +34,13 @@ const CommitmentBranchSize = 17
 type BlobSidecar struct {
 	Index                    uint64                   `json:"index,string"`
 	Blob                     Blob                     `json:"blob"` // define byte vector of 4096 * 32 bytes
-	KzgCommitment            libcommon.Bytes48        `json:"kzg_commitment"`
-	KzgProof                 libcommon.Bytes48        `json:"kzg_proof"`
+	KzgCommitment            common.Bytes48           `json:"kzg_commitment"`
+	KzgProof                 common.Bytes48           `json:"kzg_proof"`
 	SignedBlockHeader        *SignedBeaconBlockHeader `json:"signed_block_header"`
 	CommitmentInclusionProof solid.HashVectorSSZ      `json:"kzg_commitment_inclusion_proof"`
 }
 
-func NewBlobSidecar(index uint64, blob *Blob, kzgCommitment libcommon.Bytes48, kzgProof libcommon.Bytes48, signedBlockHeader *SignedBeaconBlockHeader, commitmentInclusionProof solid.HashVectorSSZ) *BlobSidecar {
+func NewBlobSidecar(index uint64, blob *Blob, kzgCommitment common.Bytes48, kzgProof common.Bytes48, signedBlockHeader *SignedBeaconBlockHeader, commitmentInclusionProof solid.HashVectorSSZ) *BlobSidecar {
 	return &BlobSidecar{
 		Index:                    index,
 		Blob:                     *blob,
@@ -59,8 +59,8 @@ func (b *BlobSidecar) UnmarshalJSON(buf []byte) error {
 	var tmp struct {
 		Index                    uint64                   `json:"index,string"`
 		Blob                     *Blob                    `json:"blob"`
-		KzgCommitment            libcommon.Bytes48        `json:"kzg_commitment"`
-		KzgProof                 libcommon.Bytes48        `json:"kzg_proof"`
+		KzgCommitment            common.Bytes48           `json:"kzg_commitment"`
+		KzgProof                 common.Bytes48           `json:"kzg_proof"`
 		SignedBlockHeader        *SignedBeaconBlockHeader `json:"signed_block_header"`
 		CommitmentInclusionProof solid.HashVectorSSZ      `json:"kzg_commitment_inclusion_proof"`
 	}
@@ -109,11 +109,11 @@ func (b *BlobSidecar) getSchema() []interface{} {
 }
 
 type BlobIdentifier struct {
-	BlockRoot libcommon.Hash `json:"block_root"`
-	Index     uint64         `json:"index,string"`
+	BlockRoot common.Hash `json:"block_root"`
+	Index     uint64      `json:"index,string"`
 }
 
-func NewBlobIdentifier(blockRoot libcommon.Hash, index uint64) *BlobIdentifier {
+func NewBlobIdentifier(blockRoot common.Hash, index uint64) *BlobIdentifier {
 	return &BlobIdentifier{
 		BlockRoot: blockRoot,
 		Index:     index,
@@ -147,7 +147,7 @@ func (b *BlobIdentifier) getSchema() []interface{} {
 	}
 }
 
-func VerifyCommitmentInclusionProof(commitment libcommon.Bytes48, commitmentInclusionProof solid.HashVectorSSZ, commitmentIndex uint64, version clparams.StateVersion, bodyRoot [32]byte) bool {
+func VerifyCommitmentInclusionProof(commitment common.Bytes48, commitmentInclusionProof solid.HashVectorSSZ, commitmentIndex uint64, version clparams.StateVersion, bodyRoot [32]byte) bool {
 	// Initialize the merkle tree leaf
 	value, err := merkle_tree.HashTreeRoot(commitment[:])
 	if err != nil {

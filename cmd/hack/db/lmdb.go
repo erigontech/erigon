@@ -805,7 +805,6 @@ func defragSteps(filename string, bucketsCfg kv.TableCfg, generateFs ...func(kv.
 		var display bool
 		if err = db.Update(context.Background(), func(tx kv.RwTx) error {
 			var err1 error
-			//nolint:scopelint
 			display, err1 = generateF(db, tx)
 			return err1
 		}); err != nil {

@@ -7,7 +7,7 @@ import (
 	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
@@ -15,10 +15,10 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/trie"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
@@ -42,7 +42,7 @@ type WitnessStore struct {
 	TrieStateWriter *state.TrieStateWriter
 	Statedb         *state.IntraBlockState
 	ChainReader     *ChainReaderImpl
-	GetHashFn       func(n uint64) libcommon.Hash
+	GetHashFn       func(n uint64) common.Hash
 }
 
 func StageWitnessCfg(enableWitnessGeneration bool, maxWitnessLimit uint64, chainConfig *chain.Config, engine consensus.Engine, blockReader services.FullBlockReader, dirs datadir.Dirs) WitnessCfg {
@@ -58,7 +58,7 @@ func StageWitnessCfg(enableWitnessGeneration bool, maxWitnessLimit uint64, chain
 
 // PrepareForWitness abstracts the process of initialising bunch of necessary things required for witness
 // generation and puts them in a WitnessStore.
-func PrepareForWitness(tx kv.TemporalTx, block *types.Block, prevRoot libcommon.Hash, cfg *WitnessCfg, ctx context.Context, logger log.Logger) (*WitnessStore, error) {
+func PrepareForWitness(tx kv.TemporalTx, block *types.Block, prevRoot common.Hash, cfg *WitnessCfg, ctx context.Context, logger log.Logger) (*WitnessStore, error) {
 	blockNr := block.NumberU64()
 	txNumsReader := rawdbv3.TxNums
 	reader, err := rpchelper.CreateHistoryStateReader(tx, txNumsReader, blockNr, 0, cfg.chainConfig.ChainName)
@@ -77,7 +77,7 @@ func PrepareForWitness(tx kv.TemporalTx, block *types.Block, prevRoot libcommon.
 
 	chainReader := NewChainReaderImpl(cfg.chainConfig, tx, cfg.blockReader, logger)
 
-	getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
+	getHeader := func(hash common.Hash, number uint64) *types.Header {
 		h, e := cfg.blockReader.Header(ctx, tx, hash, number)
 		if e != nil {
 			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
@@ -127,20 +127,20 @@ func RewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr, lates
 	return nil
 }
 
-func ExecuteBlockStatelessly(block *types.Block, prevHeader *types.Header, chainReader consensus.ChainReader, tds *state.TrieDbState, cfg *WitnessCfg, buf *bytes.Buffer, getHashFn func(n uint64) libcommon.Hash, logger log.Logger) (libcommon.Hash, error) {
+func ExecuteBlockStatelessly(block *types.Block, prevHeader *types.Header, chainReader consensus.ChainReader, tds *state.TrieDbState, cfg *WitnessCfg, buf *bytes.Buffer, getHashFn func(n uint64) common.Hash, logger log.Logger) (common.Hash, error) {
 	blockNr := block.NumberU64()
 	nw, err := trie.NewWitnessFromReader(bytes.NewReader(buf.Bytes()), false)
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 
 	statelessIbs, err := state.NewStateless(prevHeader.Root, nw, blockNr-1, true /* trace */, false /* is binary */)
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 	execResult, err := core.ExecuteBlockEphemerally(cfg.chainConfig, &vm.Config{}, getHashFn, cfg.engine, block, statelessIbs, statelessIbs, chainReader, nil, logger)
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 	_ = execResult
 	return statelessIbs.Finalize(), nil

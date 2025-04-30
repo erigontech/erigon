@@ -19,7 +19,7 @@ package solid
 import (
 	"encoding/json"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
@@ -27,13 +27,13 @@ import (
 )
 
 type TransactionsSSZ struct {
-	underlying [][]byte       // underlying transaction list
-	root       libcommon.Hash // root
+	underlying [][]byte    // underlying transaction list
+	root       common.Hash // root
 }
 
 func (t *TransactionsSSZ) UnmarshalJSON(buf []byte) error {
 	tmp := []hexutil.Bytes{}
-	t.root = libcommon.Hash{}
+	t.root = common.Hash{}
 	if err := json.Unmarshal(buf, &tmp); err != nil {
 		return err
 	}
@@ -67,7 +67,7 @@ func (t *TransactionsSSZ) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf) < 4 {
 		return ssz.ErrLowBufferSize
 	}
-	t.root = libcommon.Hash{}
+	t.root = common.Hash{}
 	length := ssz.DecodeOffset(buf[:4]) / 4
 	t.underlying = make([][]byte, length)
 	for i := uint32(0); i < length; i++ {
@@ -106,7 +106,7 @@ func (t *TransactionsSSZ) EncodeSSZ(buf []byte) (dst []byte, err error) {
 
 func (t *TransactionsSSZ) HashSSZ() ([32]byte, error) {
 	var err error
-	if t.root != (libcommon.Hash{}) {
+	if t.root != (common.Hash{}) {
 		return t.root, nil
 	}
 	t.root, err = merkle_tree.TransactionsListRoot(t.underlying)
