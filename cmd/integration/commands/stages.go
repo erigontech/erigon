@@ -1410,6 +1410,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		if syncCfg.PersistReceiptsCacheV2 {
 			libstate.EnableHistoricalRCache()
 		}
+		log.Info("[dbg] cfg", "syncCfg", syncCfg)
 
 		dirs := datadir.New(datadirCli)
 
