@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math/big"
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -31,7 +30,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
@@ -116,12 +114,6 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 		return fmt.Errorf("txnLookupTransform: %w", err)
 	}
 
-	if cfg.borConfig != nil {
-		if err = borTxnLookupTransform(logPrefix, tx, startBlock, endBlock+1, ctx.Done(), cfg, logger); err != nil {
-			return fmt.Errorf("borTxnLookupTransform: %w", err)
-		}
-	}
-
 	if err = s.Update(tx, endBlock); err != nil {
 		return err
 	}
@@ -166,32 +158,6 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 		return nil
 	}, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit:            ctx.Done(),
-		ExtractStartKey: hexutil.EncodeTs(blockFrom),
-		ExtractEndKey:   hexutil.EncodeTs(blockTo),
-		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
-			return []interface{}{"block", binary.BigEndian.Uint64(k)}
-		},
-	}, logger)
-}
-
-// txnLookupTransform - [startKey, endKey)
-func borTxnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, quitCh <-chan struct{}, cfg TxLookupCfg, logger log.Logger) error {
-	bigNum := new(big.Int)
-	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.BorTxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
-		blocknum, blockHash := binary.BigEndian.Uint64(k), common.CastToHash(v)
-		blockNumBytes := bigNum.SetUint64(blocknum).Bytes()
-
-		// we add state sync transactions every bor Sprint amount of blocks
-		if cfg.borConfig.IsSprintStart(blocknum) && rawdb.HasBorReceipts(tx, blocknum) {
-			txnHash := bortypes.ComputeBorTxHash(blocknum, blockHash)
-			if err := next(k, txnHash.Bytes(), blockNumBytes); err != nil {
-				return err
-			}
-		}
-
-		return nil
-	}, etl.IdentityLoadFunc, etl.TransformArgs{
-		Quit:            quitCh,
 		ExtractStartKey: hexutil.EncodeTs(blockFrom),
 		ExtractEndKey:   hexutil.EncodeTs(blockTo),
 		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
