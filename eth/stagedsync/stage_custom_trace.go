@@ -231,7 +231,8 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 			return err
 		}
 
-		if cfg.ChainConfig.Bor == nil { //assert
+		//asserts
+		if produce.ReceiptDomain {
 			if err = AssertReceipts(ctx, cfg, tx, fromBlock, toBlock); err != nil {
 				return err
 			}
@@ -275,6 +276,9 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 
 func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, fromBlock, toBlock uint64) (err error) {
 	if !dbg.AssertEnabled {
+		return nil
+	}
+	if cfg.ChainConfig.Bor != nil { //TODO: enable me
 		return nil
 	}
 
