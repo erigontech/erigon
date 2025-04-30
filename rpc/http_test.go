@@ -277,3 +277,64 @@ func BenchmarkHTTPRespBodyUnlimitedNew(b *testing.B) {
 		}
 	}
 }
+
+//func BenchmarkHTTPRespBodySimple(b *testing.B) {
+//	if testing.Short() {
+//		b.Skip()
+//	}
+//
+//	logger := log.New()
+//
+//	s := NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, true, logger, 100)
+//	defer s.Stop()
+//	if err := s.RegisterName("test", simpleRespService{}); err != nil {
+//		b.Fatal(err)
+//	}
+//	ts := httptest.NewServer(s)
+//	defer ts.Close()
+//
+//	c, err := DialHTTP(ts.URL, logger)
+//	if err != nil {
+//		b.Fatal(err)
+//	}
+//	defer c.Close()
+//
+//	var r string
+//	b.ResetTimer()
+//	for i := 0; i < b.N; i++ {
+//		if err := c.Call(&r, "test_blockNumber"); err != nil {
+//			b.Fatal(err)
+//		}
+//	}
+//}
+
+func BenchmarkHTTPRespBodySimple(b *testing.B) {
+	if testing.Short() {
+		b.Skip()
+	}
+
+	logger := log.New()
+
+	s := NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, true, logger, 100)
+	defer s.Stop()
+	s.New = true
+	RegisterName[struct{}, string](s, "test_blockNumber", func(ctx context.Context, _ struct{}) (string, error) {
+		return simpleRespService{}.BlockNumber(), nil
+	})
+	ts := httptest.NewServer(s)
+	defer ts.Close()
+
+	c, err := DialHTTP(ts.URL, logger)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer c.Close()
+	c.New = true
+	var r string
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := c.Call(&r, "test_blockNumber"); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
