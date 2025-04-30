@@ -34,12 +34,14 @@ func (se *serialExecutor) status(ctx context.Context, commitThreshold uint64) er
 	return nil
 }
 
-func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (cont bool, err error) {
+func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp *core.GasPool) (cont bool, err error) {
 	for _, txTask := range tasks {
 		if txTask.Error != nil {
 			return false, nil
 		}
-
+		if gp != nil {
+			se.applyWorker.SetGaspool(gp)
+		}
 		se.applyWorker.RunTxTaskNoLock(txTask, se.isMining, se.skipPostEvaluation)
 		if err := func() error {
 			if errors.Is(txTask.Error, context.Canceled) {

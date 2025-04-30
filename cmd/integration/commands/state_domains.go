@@ -165,11 +165,11 @@ var purifyDomains = &cobra.Command{
 
 		purifyDB := mdbx.MustOpen(tmpDir)
 		defer purifyDB.Close()
-		var purificationDomains []string
+		var purificationDomains []kv.Domain
 		if purifyOnlyCommitment {
-			purificationDomains = []string{"commitment"}
+			purificationDomains = []kv.Domain{kv.CommitmentDomain}
 		} else {
-			purificationDomains = []string{"account", "storage" /*"code",*/, "commitment", "receipt"}
+			purificationDomains = []kv.Domain{kv.AccountsDomain, kv.StorageDomain /*"code",*/, kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain}
 		}
 		//purificationDomains := []string{"commitment"}
 		for _, domain := range purificationDomains {
@@ -190,18 +190,18 @@ var purifyDomains = &cobra.Command{
 	},
 }
 
-func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domain string) error {
+func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domain kv.Domain) error {
 	var tbl string
 	switch domain {
-	case "account":
+	case kv.AccountsDomain:
 		tbl = kv.MaxTxNum
-	case "storage":
+	case kv.StorageDomain:
 		tbl = kv.HeaderNumber
-	case "code":
+	case kv.CodeDomain:
 		tbl = kv.HeaderCanonical
-	case "commitment":
+	case kv.CommitmentDomain:
 		tbl = kv.HeaderTD
-	case "receipt":
+	case kv.ReceiptDomain:
 		tbl = kv.BadHeaderNumber
 	default:
 		return fmt.Errorf("invalid domain %s", domain)
@@ -216,7 +216,7 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 		if info.IsDir() {
 			return nil
 		}
-		if !strings.Contains(info.Name(), domain) {
+		if !strings.Contains(info.Name(), domain.String()) {
 			return nil
 		}
 		// Here you can decide if you only want to process certain file extensions
@@ -226,12 +226,12 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 			return nil
 		}
 
-		fromFileStep, toFileStep, err := statelib.ParseStepsFromFileName(info.Name())
-		if err != nil {
-			return err
+		res, ok, _ := downloadertype.ParseFileName("", info.Name())
+		if !ok {
+			panic("invalid file name")
 		}
 
-		if fromFileStep < fromStepPurification || toFileStep > toStepPurification {
+		if res.From < fromStepPurification || res.To > toStepPurification {
 			return nil
 		}
 
@@ -304,14 +304,9 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 	return tx.Commit()
 }
 
-func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domainName string) error {
-	domain, err := kv.String2Domain(domainName)
-	if err != nil {
-		return err
-	}
-
-	compressionType := statelib.Schema[domain].Compression
-	compressCfg := statelib.Schema[domain].CompressCfg
+func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domain kv.Domain) error {
+	compressionType := statelib.Schema.GetDomainCfg(domain).Compression
+	compressCfg := statelib.Schema.GetDomainCfg(domain).CompressCfg
 	compressCfg.Workers = runtime.NumCPU()
 	var tbl string
 	switch domain {
@@ -328,7 +323,7 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 	case kv.RCacheDomain:
 		tbl = kv.BlockBody
 	default:
-		return fmt.Errorf("invalid domainName %s", domainName)
+		return fmt.Errorf("invalid domainName %s", domain.String())
 	}
 	// Iterate over all the files in  dirs.SnapDomain and print them
 	filesNamesToPurify := []string{}
@@ -340,7 +335,7 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 		if info.IsDir() {
 			return nil
 		}
-		if !strings.Contains(info.Name(), domainName) {
+		if !strings.Contains(info.Name(), domain.String()) {
 			return nil
 		}
 		// Here you can decide if you only want to process certain file extensions
@@ -350,21 +345,20 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 			return nil
 		}
 
-		fmt.Printf("Add file to purification of %s: %s\n", domainName, path)
+		fmt.Printf("Add file to purification of %s: %s\n", domain.String(), path)
 
-		fromFileStep, toFileStep, err := statelib.ParseStepsFromFileName(info.Name())
-		if err != nil {
-			return err
+		res, ok, _ := downloadertype.ParseFileName("", info.Name())
+		if !ok {
+			panic("invalid file name")
 		}
-
-		if fromFileStep < fromStepPurification || toFileStep > toStepPurification {
+		if res.From < fromStepPurification || res.To > toStepPurification {
 			return nil
 		}
 
 		filesNamesToPurify = append(filesNamesToPurify, info.Name())
 		return nil
 	}); err != nil {
-		return fmt.Errorf("failed to walk through the domainDir %s: %w", domainName, err)
+		return fmt.Errorf("failed to walk through the domainDir %s: %w", domain.String(), err)
 	}
 	// sort the files by name
 	sort.Slice(filesNamesToPurify, func(i, j int) bool {

@@ -30,6 +30,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -301,10 +302,8 @@ func validateRequest(r *http.Request) (int, error) {
 	}
 	// Check content-type
 	if mt, _, err := mime.ParseMediaType(r.Header.Get("content-type")); err == nil {
-		for _, accepted := range acceptedContentTypes {
-			if accepted == mt {
-				return 0, nil
-			}
+		if slices.Contains(acceptedContentTypes, mt) {
+			return 0, nil
 		}
 	}
 	// Invalid content-type

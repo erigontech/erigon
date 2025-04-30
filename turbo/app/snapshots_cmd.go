@@ -575,15 +575,15 @@ func doIntegrity(cliCtx *cli.Context) error {
 				return err
 			}
 		case integrity.BorSpans:
-			if err := integrity.ValidateBorSpans(logger, dirs, borSnaps, failFast); err != nil {
+			if err := integrity.ValidateBorSpans(ctx, logger, dirs, borSnaps, failFast); err != nil {
 				return err
 			}
 		case integrity.BorCheckpoints:
-			if err := integrity.ValidateBorCheckpoints(logger, dirs, borSnaps, failFast); err != nil {
+			if err := integrity.ValidateBorCheckpoints(ctx, logger, dirs, borSnaps, failFast); err != nil {
 				return err
 			}
 		case integrity.BorMilestones:
-			if err := integrity.ValidateBorMilestones(logger, dirs, borSnaps, failFast); err != nil {
+			if err := integrity.ValidateBorMilestones(ctx, logger, dirs, borSnaps, failFast); err != nil {
 				return err
 			}
 		case integrity.ReceiptsNoDups:
@@ -690,18 +690,12 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 		if path == dirs.SnapDomain {
 			return nil
 		}
-		rangeString := strings.Split(info.Name(), ".")[1]
-		rangeNums := strings.Split(rangeString, "-")
-		// convert the range to uint64
-		from, err := strconv.ParseUint(rangeNums[0], 10, 64)
-		if err != nil {
-			return fmt.Errorf("failed to parse to %s: %w", rangeNums[1], err)
-		}
 
-		to, err := strconv.ParseUint(rangeNums[1], 10, 64)
-		if err != nil {
-			return fmt.Errorf("failed to parse to %s: %w", rangeNums[1], err)
+		res, _, ok := snaptype.ParseFileName(dirs.SnapDomain, info.Name())
+		if !ok {
+			return fmt.Errorf("failed to parse filename %s: %w", info.Name(), err)
 		}
+		from, to := res.From, res.To
 		maxStep = max(maxStep, to)
 
 		if !strings.HasSuffix(info.Name(), ".kv") || !strings.Contains(info.Name(), "accounts") {
@@ -716,7 +710,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 				return fmt.Errorf("missing file %s at path %s", expectedFileName, filepath.Join(dirs.SnapDomain, expectedFileName))
 			}
 			// check that the index file exist
-			if libstate.Schema[snapType].AccessorList.Has(libstate.AccessorBTree) {
+			if libstate.Schema.GetDomainCfg(snapType).AccessorList.Has(libstate.AccessorBTree) {
 				fileName := strings.Replace(expectedFileName, ".kv", ".bt", 1)
 				exists, err := dir.FileExist(filepath.Join(dirs.SnapDomain, fileName))
 				if err != nil {
@@ -726,7 +720,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 					return fmt.Errorf("missing file %s", fileName)
 				}
 			}
-			if libstate.Schema[snapType].AccessorList.Has(libstate.AccessorExistence) {
+			if libstate.Schema.GetDomainCfg(snapType).AccessorList.Has(libstate.AccessorExistence) {
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvei", 1)
 				exists, err := dir.FileExist(filepath.Join(dirs.SnapDomain, fileName))
 				if err != nil {
@@ -736,7 +730,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 					return fmt.Errorf("missing file %s", fileName)
 				}
 			}
-			if libstate.Schema[snapType].AccessorList.Has(libstate.AccessorHashMap) {
+			if libstate.Schema.GetDomainCfg(snapType).AccessorList.Has(libstate.AccessorHashMap) {
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvi", 1)
 				exists, err := dir.FileExist(filepath.Join(dirs.SnapDomain, fileName))
 				if err != nil {
@@ -764,14 +758,12 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 		if path == dirs.SnapIdx {
 			return nil
 		}
-		rangeString := strings.Split(info.Name(), ".")[1]
-		rangeNums := strings.Split(rangeString, "-")
-
-		to, err := strconv.ParseUint(rangeNums[1], 10, 64)
-		if err != nil {
-			return fmt.Errorf("failed to parse to %s: %w", rangeNums[1], err)
+		res, _, ok := snaptype.ParseFileName(dirs.SnapIdx, info.Name())
+		if !ok {
+			return fmt.Errorf("failed to parse filename %s: %w", info.Name(), err)
 		}
-		maxStep = max(maxStep, to)
+
+		maxStep = max(maxStep, res.To)
 
 		if !strings.HasSuffix(info.Name(), ".ef") || !strings.Contains(info.Name(), "accounts") {
 			return nil
@@ -1173,6 +1165,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	if chainConfig.Bor != nil {
 		const PolygonSync = true
 		if PolygonSync {
+			borSnaps.DownloadComplete() // mark as ready
 			bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, true, 0), borSnaps, chainConfig.Bor)
 			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, true, 0), borSnaps)
 		} else {

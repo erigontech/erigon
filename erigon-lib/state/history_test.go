@@ -53,7 +53,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	//TODO: tests will fail if set histCfg.compression = CompressKeys | CompressValues
 	salt := uint32(1)
-	cfg := Schema[kv.AccountsDomain]
+	cfg := Schema.AccountsDomain
 
 	cfg.hist.iiCfg.dirs = dirs
 	cfg.hist.iiCfg.salt = &salt
@@ -136,14 +136,14 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 				for efIt.HasNext() {
 					txNum, err := efIt.Next()
 					require.NoError(t, err)
-					require.EqualValuesf(t, updates[vi].txNum, txNum, "txNum mismatch")
+					require.Equalf(t, updates[vi].txNum, txNum, "txNum mismatch")
 
 					require.Truef(t, hReader.HasNext(), "hReader has no more values")
 					hValBuf, _ = hReader.Next(nil)
 					if updates[vi].value == nil {
 						require.Emptyf(t, hValBuf, "value at %d is not empty (not nil)", vi)
 					} else {
-						require.EqualValuesf(t, updates[vi].value, hValBuf, "value at %d mismatch", vi)
+						require.Equalf(t, updates[vi].value, hValBuf, "value at %d mismatch", vi)
 					}
 					vi++
 				}
@@ -655,7 +655,7 @@ func TestHistoryPruneCorrectness(t *testing.T) {
 		}
 		count++
 	}
-	require.EqualValues(t, pruneIters*int(pruneLimit), count)
+	require.Equal(t, pruneIters*int(pruneLimit), count)
 	icc.Close()
 
 	hc := h.BeginFilesRo()
@@ -1396,12 +1396,12 @@ func TestScanStaticFilesH(t *testing.T) {
 	_, h := newTestDomain()
 
 	files := []string{
-		"v1-accounts.0-1.v",
-		"v1-accounts.1-2.v",
-		"v1-accounts.0-4.v",
-		"v1-accounts.2-3.v",
-		"v1-accounts.3-4.v",
-		"v1-accounts.4-5.v",
+		"v1.0-accounts.0-1.v",
+		"v1.0-accounts.1-2.v",
+		"v1.0-accounts.0-4.v",
+		"v1.0-accounts.2-3.v",
+		"v1.0-accounts.3-4.v",
+		"v1.0-accounts.4-5.v",
 	}
 	h.scanDirtyFiles(files)
 	require.Equal(t, 6, h.dirtyFiles.Len())
@@ -1518,7 +1518,7 @@ func Test_HistoryIterate_VariousKeysLen(t *testing.T) {
 		})
 
 		require.Equal(fmt.Sprintf("%#x", writtenKeys[0]), fmt.Sprintf("%#x", keys[0]))
-		require.Equal(len(writtenKeys), len(keys))
+		require.Len(keys, len(writtenKeys))
 		require.Equal(fmt.Sprintf("%#x", writtenKeys), fmt.Sprintf("%#x", keys))
 	}
 

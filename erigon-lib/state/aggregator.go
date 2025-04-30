@@ -22,7 +22,9 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	rand2 "math/rand/v2"
+
+	rand2 "golang.org/x/exp/rand"
+
 	"os"
 	"path/filepath"
 	"runtime"
@@ -98,7 +100,7 @@ const AggregatorSqueezeCommitmentValues = true
 const MaxNonFuriousDirtySpacePerTx = 64 * datasize.MB
 
 func commitmentFileMustExist(dirs datadir.Dirs, fromStep, toStep uint64) bool {
-	fPath := filepath.Join(dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.kv", kv.CommitmentDomain, fromStep, toStep))
+	fPath := filepath.Join(dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kv", commitmentDomainVersion.String(), kv.CommitmentDomain, fromStep, toStep))
 	exists, err := dir.FileExist(fPath)
 	if err != nil {
 		panic(err)
@@ -192,7 +194,7 @@ func getStateIndicesSalt(baseDir string) (salt *uint32, err error) {
 }
 
 func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.Dirs, logger log.Logger) (err error) {
-	cfg := Schema[name]
+	cfg := Schema.GetDomainCfg(name)
 	//TODO: move dynamic part of config to InvertedIndex
 	cfg.restrictSubsetFileDeletions = a.commitmentValuesTransform
 	cfg.hist.iiCfg.salt = salt
@@ -205,7 +207,7 @@ func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.D
 }
 
 func (a *Aggregator) registerII(idx kv.InvertedIdx, salt *uint32, dirs datadir.Dirs, logger log.Logger) error {
-	idxCfg := StandaloneIISchema[idx]
+	idxCfg := Schema.GetIICfg(idx)
 	idxCfg.salt = salt
 	idxCfg.dirs = dirs
 

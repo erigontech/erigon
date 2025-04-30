@@ -62,14 +62,14 @@ func TestTxPoolContent(t *testing.T) {
 	reply, err := txPool.Add(ctx, &txpool.AddRequest{RlpTxs: [][]byte{buf.Bytes()}})
 	require.NoError(err)
 	for _, res := range reply.Imported {
-		require.Equal(res, txpool.ImportResult_SUCCESS, fmt.Sprintf("%s", reply.Errors))
+		require.Equal(txpool.ImportResult_SUCCESS, res, fmt.Sprintf("%s", reply.Errors))
 	}
 
 	content, err := api.Content(ctx)
 	require.NoError(err)
 
 	sender := m.Address.String()
-	require.Equal(1, len(content["pending"][sender]))
+	require.Len(content["pending"][sender], 1)
 	require.Equal(expectValue, content["pending"][sender]["0"].Value.ToInt().Uint64())
 
 	status, err := api.Status(ctx)

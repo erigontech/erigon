@@ -300,6 +300,8 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) 
 		// id, add 27 to become equivalent to unprotected Homestead signatures.
 		V.Add(&t.V, u256.Num27)
 		R, S = &t.R, &t.S
+	case *AccountAbstractionTransaction:
+		return txn.Sender(Signer{})
 	default:
 		return common.Address{}, ErrTxTypeNotSupported
 	}

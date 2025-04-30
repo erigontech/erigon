@@ -70,7 +70,7 @@ func TestSyncCommittee(t *testing.T) {
 
 	// Test Clone
 	clone := syncCommittee.Clone().(*SyncCommittee)
-	assert.NotEqual(t, nil, clone)
+	assert.NotNil(t, clone)
 
 	// Test Copy
 	copy := syncCommittee.Copy()

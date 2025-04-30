@@ -722,7 +722,7 @@ func TestPreShanghaiBodyNoPanicOnWithdrawals(t *testing.T) {
 	rlp.DecodeBytes(bstring, body)
 
 	require.Nil(body.Withdrawals)
-	require.Equal(2, len(body.Transactions))
+	require.Len(body.Transactions, 2)
 }
 
 // Tests pre-shanghai bodyForStorage to make sure withdrawals doesn't panic
@@ -752,7 +752,7 @@ func TestShanghaiBodyForStorageHasWithdrawals(t *testing.T) {
 	rlp.DecodeBytes(bstring, body)
 
 	require.NotNil(body.Withdrawals)
-	require.Equal(2, len(body.Withdrawals))
+	require.Len(body.Withdrawals, 2)
 	require.Equal(uint32(2), body.TxCount)
 }
 
@@ -768,7 +768,7 @@ func TestShanghaiBodyForStorageNoWithdrawals(t *testing.T) {
 	rlp.DecodeBytes(bstring, body)
 
 	require.NotNil(body.Withdrawals)
-	require.Equal(0, len(body.Withdrawals))
+	require.Empty(body.Withdrawals)
 	require.Equal(uint32(2), body.TxCount)
 }
 

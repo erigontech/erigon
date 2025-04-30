@@ -882,7 +882,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 				afterPrune++
 				return nil
 			})
-			require.Greater(afterPrune, uint64(0))
+			require.Positive(afterPrune)
 			require.NoError(err)
 		} else {
 			found, err := bitmapdb.Get64(tx, kv.E2AccountsHistory, address[:], 0, 1024)
@@ -919,7 +919,6 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 
 			err := tx.ForEach(bucketName, nil, func(k, v []byte) error {
 				// we ignore empty account history
-				//nolint:scopelint
 				if bucketName == dbutils.AccountsHistory && len(v) == 0 {
 					return nil
 				}
@@ -1174,7 +1173,6 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 	forks := make([]*core.ChainPack, chain.Length())
 	for i := 0; i < len(forks); i++ {
 		fork, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, i+1, func(j int, b *core.BlockGen) {
-			//nolint:scopelint
 			if j == i {
 				b.SetCoinbase(common.Address{2})
 				b.OffsetTime(-2) // By reducing time, we increase difficulty of the fork, so that it can overwrite the canonical chain

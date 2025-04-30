@@ -22,6 +22,7 @@ package event
 import (
 	"errors"
 	"reflect"
+	"slices"
 	"sync"
 )
 
@@ -224,7 +225,7 @@ func (cs caseList) find(channel interface{}) int {
 
 // delete removes the given case from cs.
 func (cs caseList) delete(index int) caseList {
-	return append(cs[:index], cs[index+1:]...)
+	return slices.Delete(cs, index, index+1)
 }
 
 // deactivate moves the case at index into the non-accessible portion of the cs slice.

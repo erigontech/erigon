@@ -82,6 +82,8 @@ type iiCfg struct {
 	dirs    datadir.Dirs
 	disable bool // totally disable Domain/History/InvertedIndex - ignore all writes, don't produce files
 
+	version IIVersionTypes
+
 	filenameBase string // filename base for all files of this inverted index
 	keysTable    string // bucket name for index keys;    txnNum_u64 -> key (k+auto_increment)
 	valuesTable  string // bucket name for index values;  k -> txnNum_u64 , Needs to be table with DupSort
@@ -126,14 +128,21 @@ func NewInvertedIndex(cfg iiCfg, aggStep uint64, logger log.Logger) (*InvertedIn
 		panic("assert: empty `aggregationStep`")
 	}
 
+	if ii.version.DataEF.IsZero() {
+		panic(fmt.Errorf("assert: forgot to set version of %s", ii.name))
+	}
+	if ii.version.AccessorEFI.IsZero() {
+		panic(fmt.Errorf("assert: forgot to set version of %s", ii.name))
+	}
+
 	return &ii, nil
 }
 
 func (ii *InvertedIndex) efAccessorFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("v1-%s.%d-%d.efi", ii.filenameBase, fromStep, toStep))
+	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.efi", ii.version.AccessorEFI.String(), ii.filenameBase, fromStep, toStep))
 }
 func (ii *InvertedIndex) efFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(ii.dirs.SnapIdx, fmt.Sprintf("v1-%s.%d-%d.ef", ii.filenameBase, fromStep, toStep))
+	return filepath.Join(ii.dirs.SnapIdx, fmt.Sprintf("%s-%s.%d-%d.ef", ii.version.DataEF.String(), ii.filenameBase, fromStep, toStep))
 }
 
 func filesFromDir(dir string) ([]string, error) {
@@ -272,12 +281,25 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 					continue
 				}
 				if !exists {
-					_, fName := filepath.Split(fPath)
-					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: file does not exists", "f", fName)
-					invalidFileItemsLock.Lock()
-					invalidFileItems = append(invalidFileItems, item)
-					invalidFileItemsLock.Unlock()
-					continue
+					ii.version.DataEF = ii.version.DataEF.Downgrade()
+					fPath = ii.efFilePath(fromStep, toStep)
+					existsDowngrade, err := dir.FileExist(fPath)
+					if err != nil {
+						_, fName := filepath.Split(fPath)
+						ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: FileExists error", "f", fName, "err", err)
+						invalidFileItemsLock.Lock()
+						invalidFileItems = append(invalidFileItems, item)
+						invalidFileItemsLock.Unlock()
+						continue
+					}
+					if !existsDowngrade {
+						_, fName := filepath.Split(fPath)
+						ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: file does not exists", "f", fName)
+						invalidFileItemsLock.Lock()
+						invalidFileItems = append(invalidFileItems, item)
+						invalidFileItemsLock.Unlock()
+						continue
+					}
 				}
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
@@ -1199,12 +1221,12 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 	//  - but most important i see `.ef` files became "randomly warm":
 	// From:
 	//```sh
-	//vmtouch -v /mnt/erigon/snapshots/idx/v1-storage.1680-1682.ef
+	//vmtouch -v /mnt/erigon/snapshots/idx/v1.0-storage.1680-1682.ef
 	//[ ooooooooo ooooooo oooooooooooooooooo oooooooo  oo o o  ooo ] 93/81397
 	//```
 	// To:
 	//```sh
-	//vmtouch -v /mnt/erigon/snapshots/idx/v1-storage.1680-1682.ef
+	//vmtouch -v /mnt/erigon/snapshots/idx/v1.0-storage.1680-1682.ef
 	//[oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo] 16279/81397
 	//```
 	// It happens because: EVM does read much non-existing keys, like "create storage key if it doesn't exists". And
