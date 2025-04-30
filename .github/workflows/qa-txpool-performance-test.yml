@@ -112,3 +112,12 @@ jobs:
         run: |
           rm -rf kurtosis_artifacts
           rm -rf outputs_kurtosis.json
+
+      - name: Clean docker containers and images
+        if: always()
+        run: |
+          docker rm -f $(docker ps -a -q)
+          docker rmi -f $(docker images -q)
+          docker system prune -a -f
+          docker volume rm $(docker volume ls -q)
+          docker network rm $(docker network ls -q)
