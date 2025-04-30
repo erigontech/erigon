@@ -186,7 +186,6 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	latestBlock = 999999999
 
 	// forces negative numbers to fail (too large) but allows zero
 	startNum := uint64(startNumber.Int64())
