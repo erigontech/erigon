@@ -584,6 +584,7 @@ func (sd *SharedDomains) writeAccountStorage(addr, loc []byte, value, preVal []b
 	compositeS := string(composite)
 	sd.sdCtx.TouchKey(kv.StorageDomain, compositeS, value)
 	sd.put(kv.StorageDomain, compositeS, value)
+	fmt.Printf("--- debug --- writeAccountStorage: addr=%s, loc=%s, val=%v, prevVal=%v, composite=%v\n", common.BytesToAddress(addr), common.BytesToHash(loc), value, preVal, composite)
 	return sd.domainWriters[kv.StorageDomain].PutWithPrev(composite, nil, value, sd.txNum, preVal, prevStep)
 }
 
@@ -596,6 +597,7 @@ func (sd *SharedDomains) delAccountStorage(addr, loc []byte, preVal []byte, prev
 	compositeS := string(composite)
 	sd.sdCtx.TouchKey(kv.StorageDomain, compositeS, nil)
 	sd.put(kv.StorageDomain, compositeS, nil)
+	fmt.Printf("--- debug --- delAccountStorage: addr=%s, loc=%s, val=%v, prevVal=%v, composite=%v\n", common.BytesToAddress(addr), common.BytesToHash(loc), nil, preVal, composite)
 	return sd.domainWriters[kv.StorageDomain].DeleteWithPrev(composite, nil, sd.txNum, preVal, prevStep)
 }
 
@@ -749,12 +751,14 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, k []byte) (v []byte, step u
 		return sd.LatestCommitment(k)
 	}
 	if v, prevStep, ok := sd.get(domain, k); ok {
+		fmt.Printf("--- debug --- GetLatest sd.get: k=%v, val=%v, prevStep=%v\n", common.BytesToAddress(k), v, prevStep)
 		return v, prevStep, nil
 	}
 	v, step, err = sd.roTtx.GetLatest(domain, k)
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
+	fmt.Printf("--- debug --- GetLatest roTtx.GetLatest: k=%v, val=%v, prevStep=%v\n", common.BytesToAddress(k), v, step)
 	return v, step, nil
 }
 
@@ -788,10 +792,14 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 	}
 	if prevVal == nil {
 		var err error
-		prevVal, prevStep, err = sd.GetLatest(domain, k1)
+		composite := make([]byte, 0, len(k1)+len(k2))
+		composite = append(append(composite, k1...), k2...)
+		prevVal, prevStep, err = sd.GetLatest(domain, composite)
 		if err != nil {
 			return err
 		}
+
+		fmt.Printf("--- debug --- DomainPut prevVal: k1=%v, prevVal=%v, prevStep=%v\n", common.BytesToAddress(k1), prevVal, prevStep)
 	}
 
 	switch domain {
@@ -824,7 +832,9 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error {
 	if prevVal == nil {
 		var err error
-		prevVal, prevStep, err = sd.GetLatest(domain, k1)
+		composite := make([]byte, 0, len(k1)+len(k2))
+		composite = append(append(composite, k1...), k2...)
+		prevVal, prevStep, err = sd.GetLatest(domain, composite)
 		if err != nil {
 			return err
 		}
@@ -859,6 +869,7 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 	}
 	tombs := make([]tuple, 0, 8)
 	if err := sd.IterateStoragePrefix(prefix, func(k, v []byte, step uint64) (bool, error) {
+		fmt.Printf("--- debug --- DomainDelPrefix: addr=%s, loc=%s, val=%v, step=%v\n", common.BytesToAddress(k[:20]), common.BytesToHash(k[20:]), v, step)
 		tombs = append(tombs, tuple{k, v, step})
 		return true, nil
 	}); err != nil {

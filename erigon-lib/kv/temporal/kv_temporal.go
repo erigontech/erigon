@@ -18,8 +18,10 @@ package temporal
 
 import (
 	"context"
+	"fmt"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/order"
@@ -225,7 +227,12 @@ func (tx *Tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, as
 }
 
 func (tx *Tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, bool, error) {
-	it, err := tx.Debug().RangeLatest(name, prefix, nil, 1)
+	to, ok := kv.NextSubtree(prefix)
+	if !ok {
+		to = nil
+	}
+
+	it, err := tx.Debug().RangeLatest(name, prefix, to, 1)
 	if err != nil {
 		return nil, false, err
 	}
@@ -235,9 +242,39 @@ func (tx *Tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, bool, error) {
 		return nil, false, nil
 	}
 
-	k, _, err := it.Next()
+	k, v, err := it.Next()
 	if err != nil {
 		return nil, false, err
+	}
+
+	//
+	// TODO remove debug logging
+	//
+	for {
+		fmt.Printf("--- debug HasPrefix --- kLen=%d, vLen=%d\n", len(k), len(v))
+
+		var addr common.Address
+		if len(k) > 0 {
+			addr = common.BytesToAddress(k[:20])
+		}
+		var loc common.Hash
+		if len(k) > 20 {
+			loc = common.BytesToHash(k[20:])
+		}
+		var val common.Hash
+		if len(v) > 0 {
+			val = common.BytesToHash(v)
+		}
+		fmt.Printf("--- debug HasPrefix --- addr=%s, loc=%s, val=%s\n", addr, loc, val)
+
+		if !it.HasNext() {
+			break
+		}
+
+		k, v, err = it.Next()
+		if err != nil {
+			return nil, false, err
+		}
 	}
 
 	return k, true, nil

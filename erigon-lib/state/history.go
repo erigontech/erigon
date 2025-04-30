@@ -478,6 +478,7 @@ func (w *historyBufferedWriter) AddPrevValue(key1, key2 []byte, txNum uint64, or
 	}
 	binary.BigEndian.PutUint64(w.ii.txNumBytes[:], txNum)
 
+	fmt.Printf("--- debug --- AddPrevValue addr=%s, loc=%s, val=%v, txNum=%d\n", common.BytesToAddress(key1[:20]), common.BytesToHash(key1[20:]), original, txNum)
 	//defer func() {
 	//	fmt.Printf("addPrevValue [%p;tx=%d] '%x' -> '%x'\n", w, w.ii.txNum, key1, original)
 	//}()
