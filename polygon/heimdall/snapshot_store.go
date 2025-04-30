@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 
 	"golang.org/x/sync/errgroup"
 
@@ -193,6 +194,10 @@ func (s *SpanSnapshotStore) LastEntity(ctx context.Context) (*Span, bool, error)
 	return snapshotStoreLastEntity(ctx, s)
 }
 
+func (s *SpanSnapshotStore) RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]*Span, error) {
+	return snapshotStoreRangeFromBlockNum(ctx, startBlockNum, s.EntityStore, s.snapshots, s.SnapType(), generics.New[Span])
+}
+
 func (s *SpanSnapshotStore) ValidateSnapshots(ctx context.Context, logger log.Logger, failFast bool) error {
 	return validateSnapshots(ctx, logger, s.EntityStore, failFast, s.snapshots, s.SnapType(), generics.New[Span])
 }
@@ -320,6 +325,10 @@ func (s *MilestoneSnapshotStore) LastEntity(ctx context.Context) (*Milestone, bo
 	return snapshotStoreLastEntity(ctx, s)
 }
 
+func (s *MilestoneSnapshotStore) RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]*Milestone, error) {
+	return snapshotStoreRangeFromBlockNum(ctx, startBlockNum, s.EntityStore, s.snapshots, s.SnapType(), generics.New[Milestone])
+}
+
 func (s *MilestoneSnapshotStore) ValidateSnapshots(ctx context.Context, logger log.Logger, failFast bool) error {
 	return validateSnapshots(ctx, logger, s.EntityStore, failFast, s.snapshots, s.SnapType(), generics.New[Milestone])
 }
@@ -437,6 +446,10 @@ func (s *CheckpointSnapshotStore) LastEntity(ctx context.Context) (*Checkpoint, 
 	return snapshotStoreLastEntity(ctx, s)
 }
 
+func (s *CheckpointSnapshotStore) RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]*Checkpoint, error) {
+	return snapshotStoreRangeFromBlockNum(ctx, startBlockNum, s.EntityStore, s.snapshots, s.SnapType(), generics.New[Checkpoint])
+}
+
 func (s *CheckpointSnapshotStore) ValidateSnapshots(ctx context.Context, logger log.Logger, failFast bool) error {
 	return validateSnapshots(ctx, logger, s.EntityStore, failFast, s.snapshots, s.SnapType(), generics.New[Checkpoint])
 }
@@ -541,4 +554,73 @@ func snapshotStoreLastEntity[T Entity](ctx context.Context, store EntityStore[T]
 	}
 
 	return store.Entity(ctx, entityId)
+}
+
+func snapshotStoreRangeFromBlockNum[T Entity](
+	ctx context.Context,
+	startBlockNum uint64,
+	dbStore EntityStore[T],
+	snapshots *RoSnapshots,
+	snapType snaptype.Type,
+	makeEntity func() T,
+) ([]T, error) {
+	dbEntities, err := dbStore.RangeFromBlockNum(ctx, startBlockNum)
+	if err != nil {
+		return nil, err
+	}
+	if len(dbEntities) > 0 && dbEntities[0].BlockNumRange().End < startBlockNum {
+		// this should not happen unless there is a bug in the db store
+		return nil, fmt.Errorf("unexpected first entity end in db range: expected >= %d, got %d", startBlockNum, dbEntities[0].BlockNumRange().End)
+	}
+	if len(dbEntities) > 0 && dbEntities[0].BlockNumRange().Start <= startBlockNum {
+		// all entities in the given range have been found in the db store
+		return dbEntities, nil
+	}
+
+	// otherwise there may be some earlier entities in the range that are in the snapshot files
+	// we start scanning backwards until entityEnd < startBlockNum, or we reach the end
+	var fromEntityStart uint64
+	if len(dbEntities) > 0 {
+		fromEntityStart = dbEntities[0].BlockNumRange().Start
+	}
+	toEntityEnd := startBlockNum
+	tx := snapshots.ViewType(snapType)
+	defer tx.Close()
+	segments := tx.Segments
+	var snapshotEntities []T
+
+OUTER:
+	for i := len(segments) - 1; i >= 0; i-- {
+		sn := segments[i]
+		idx := sn.Src().Index()
+		if idx == nil || idx.KeyCount() == 0 {
+			continue
+		}
+
+		gg := sn.Src().MakeGetter()
+		keyCount := idx.KeyCount()
+		for j := int64(keyCount) - 1; j >= 0; j-- {
+			offset := idx.OrdinalLookup(uint64(j))
+			gg.Reset(offset)
+			result, _ := gg.Next(nil)
+			entity := makeEntity()
+			if err := json.Unmarshal(result, &entity); err != nil {
+				return nil, err
+			}
+
+			entityStart := entity.BlockNumRange().Start
+			entityEnd := entity.BlockNumRange().End
+			if fromEntityStart > 0 && entityStart >= fromEntityStart {
+				continue
+			} else if entityEnd < toEntityEnd {
+				break OUTER
+			} else {
+				snapshotEntities = append(snapshotEntities, entity)
+			}
+		}
+	}
+
+	// prepend snapshot dbEntities that fall in the range
+	slices.Reverse(snapshotEntities)
+	return append(snapshotEntities, dbEntities...), nil
 }
