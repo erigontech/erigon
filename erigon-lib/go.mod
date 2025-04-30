@@ -15,7 +15,6 @@ require (
 	github.com/erigontech/interfaces v0.0.0-20250403152627-37abc29fd1da
 	github.com/erigontech/mdbx-go v0.39.6
 	github.com/erigontech/secp256k1 v1.2.0
-	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
 )
 
 require (
@@ -33,6 +32,7 @@ require (
 	github.com/edsrzf/mmap-go v1.2.0
 	github.com/elastic/go-freelru v0.16.0
 	github.com/erigontech/speedtest v0.0.2
+	github.com/gballet/go-verkle v0.0.0-20221121182333-31427a1f2d35
 	github.com/go-stack/stack v1.8.1
 	github.com/go-test/deep v1.1.1
 	github.com/gofrs/flock v0.12.1
@@ -51,6 +51,7 @@ require (
 	github.com/prometheus/client_model v0.6.1
 	github.com/protolambda/ztyp v0.2.2
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
+	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
 	github.com/shirou/gopsutil/v4 v4.24.8
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.10.0
@@ -116,7 +117,6 @@ require (
 	github.com/davecgh/go-spew v1.1.1
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/gballet/go-verkle v0.0.0-20221121182333-31427a1f2d35
 	github.com/go-llsqlite/adapter v0.0.0-20230927005056-7f5ce7f0c916 // indirect
 	github.com/go-llsqlite/crawshaw v0.5.2-0.20240425034140-f30eb7704568 // indirect
 	github.com/go-logr/logr v1.4.2 // indirect
