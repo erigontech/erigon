@@ -110,3 +110,12 @@ It allows to process this blocks again
 ```
 1. ./build/bin/integration clear_bad_blocks --datadir=<datadir>
 ```
+
+# Manually delete and generate some Domain/Index - by parallel executing blocks on existing historical state 
+
+```cgo
+# can be 1 or several domain/indices
+erigon seg rm-state-snapshots --domain=rcache,logtopics,logaddrs,tracesfrom,tracesto
+integration stage_custom_trace --produce=rcache,logindex,traceindex --reset
+integration stage_custom_trace --produce=rcache,logindex,traceindex
+```
