@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
@@ -191,11 +190,6 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 	if err := deleteTxLookupRange(tx, s.LogPrefix(), blockFrom, blockTo+1, ctx, cfg, logger); err != nil {
 		return fmt.Errorf("unwind TxLookUp: %w", err)
 	}
-	if cfg.borConfig != nil {
-		if err := deleteBorTxLookupRange(tx, s.LogPrefix(), blockFrom, blockTo+1, ctx, cfg, logger); err != nil {
-			return fmt.Errorf("unwind BorTxLookUp: %w", err)
-		}
-	}
 	if err := u.Done(tx); err != nil {
 		return err
 	}
@@ -235,11 +229,9 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	}
 	var blockTo uint64
 
-	var pruneBor bool
 	// Forward stage doesn't write anything before PruneTo point
 	if cfg.prune.History.Enabled() {
 		blockTo = cfg.prune.History.PruneTo(s.ForwardProgress)
-		pruneBor = true
 	} else {
 		blockTo = cfg.blockReader.CanPruneTo(s.ForwardProgress)
 	}
@@ -267,12 +259,6 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 			err = deleteTxLookupRange(tx, logPrefix, pruneBlockNum, pruneBlockNum+1, ctx, cfg, logger)
 			if err != nil {
 				return fmt.Errorf("prune TxLookUp: %w", err)
-			}
-
-			if cfg.borConfig != nil && pruneBor {
-				if err = deleteBorTxLookupRange(tx, logPrefix, pruneBlockNum, pruneBlockNum+1, ctx, cfg, logger); err != nil {
-					return fmt.Errorf("prune BorTxLookUp: %w", err)
-				}
 			}
 
 			if time.Since(t) > pruneTimeout {
@@ -324,25 +310,4 @@ func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64
 		return err
 	}
 	return nil
-}
-
-// deleteTxLookupRange - [blockFrom, blockTo)
-func deleteBorTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) error {
-	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.BorTxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
-		blocknum, blockHash := binary.BigEndian.Uint64(k), common.CastToHash(v)
-
-		borTxHash := bortypes.ComputeBorTxHash(blocknum, blockHash)
-		if err := next(k, borTxHash.Bytes(), nil); err != nil {
-			return err
-		}
-
-		return nil
-	}, etl.IdentityLoadFunc, etl.TransformArgs{
-		Quit:            ctx.Done(),
-		ExtractStartKey: hexutil.EncodeTs(blockFrom),
-		ExtractEndKey:   hexutil.EncodeTs(blockTo),
-		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
-			return []interface{}{"block", binary.BigEndian.Uint64(k)}
-		},
-	}, logger)
 }
