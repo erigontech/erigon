@@ -1206,7 +1206,6 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	}
 
 	engine, vmConfig, sync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
-	log.Info("[dbg] here2")
 	must(sync.SetCurrentStage(stages.Execution))
 	sn, borSn, agg, _, _, _, err := allSnapshots(ctx, db, logger)
 	if err != nil {
@@ -1219,6 +1218,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	chainConfig, pm := fromdb.ChainConfig(db), fromdb.PruneMode(db)
 	genesis := core.GenesisBlockByChainName(chain)
 	br, _ := blocksIO(db, logger)
+	syncCfg.PersistReceiptsCacheV2 = true
 	cfg := stagedsync.StageCustomTraceCfg(db, pm, dirs, br, chainConfig, engine, genesis, &syncCfg)
 
 	var producingDomain kv.Domain
