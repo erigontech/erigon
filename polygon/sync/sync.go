@@ -891,10 +891,17 @@ func (s *Sync) sync(
 		}
 
 		if err := s.commitExecution(ctx, newTip, newTip); err != nil {
-			// note: if we face a failure during execution of finalized waypoints blocks, it means that
-			// we're wrong and the blocks are not considered as bad blocks, so we should terminate
-			err = s.handleWaypointExecutionErr(ctx, tip, err)
-			return syncToTipResult{}, err
+			if errors.Is(err, ErrUfcTooFarBehind) {
+				s.logger.Warn(
+					syncLogPrefix("ufc skipped during sync to tip - likely due to domain ahead of blocks"),
+					"err", err,
+				)
+			} else {
+				// note: if we face a failure during execution of finalized waypoints blocks, it means that
+				// we're wrong and the blocks are not considered as bad blocks, so we should terminate
+				err = s.handleWaypointExecutionErr(ctx, tip, err)
+				return syncToTipResult{}, err
+			}
 		}
 
 		tip = newTip
