@@ -261,7 +261,7 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 		defer func() {
 			if rec := recover(); rec != nil {
 				err = fmt.Errorf("'reduce worker' paniced: %s, %s", rec, dbg.Stack())
-				log.Warn("[StageCustomTrace]", "err", err)
+				log.Warn("[HistoricalTraceWorker]", "err", err)
 			}
 		}()
 		defer rws.Close()
@@ -271,7 +271,7 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 		defer func() {
 			if rec := recover(); rec != nil {
 				err = fmt.Errorf("'reduce worker' paniced: %s, %s", rec, dbg.Stack())
-				log.Warn("[StageCustomTrace]", "err", err)
+				log.Warn("[HistoricalTraceWorker]", "err", err)
 			}
 		}()
 		return doHistoryReduce(consumer, cfg.ChainDB, ctx, toTxNum, outputTxNum, rws)
