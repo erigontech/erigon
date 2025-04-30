@@ -40,7 +40,7 @@ jobs:
             persistent_logs: "true"
 
   assertoor_pectra_test:
-    runs-on: self-hosted
+    runs-on: qa
 
     steps:
       - name: Fast checkout git repository
