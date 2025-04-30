@@ -41,7 +41,7 @@ require (
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/edsrzf/mmap-go v1.2.0 // indirect
 	github.com/elastic/go-freelru v0.16.0 // indirect
-	github.com/erigontech/erigon-snapshot v1.3.1-0.20250317154231-2ce6d6e9e6fc // indirect
+	github.com/erigontech/erigon-snapshot v1.3.1-0.20250423075753-cd01bd989ad6 // indirect
 	github.com/erigontech/mdbx-go v0.39.6 // indirect
 	github.com/erigontech/secp256k1 v1.2.0 // indirect
 	github.com/erigontech/speedtest v0.0.2 // indirect

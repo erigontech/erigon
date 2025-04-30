@@ -5,13 +5,13 @@ go 1.23.0
 toolchain go1.23.6
 
 replace (
-	github.com/erigontech/erigon-lib => ./erigon-lib
 	github.com/erigontech/erigon-db => ./erigon-db
+	github.com/erigontech/erigon-lib => ./erigon-lib
 )
 
 require (
-	github.com/erigontech/erigon-lib v0.0.0-00010101000000-000000000000
 	github.com/erigontech/erigon-db v0.0.0-00010101000000-000000000000
+	github.com/erigontech/erigon-lib v0.0.0-00010101000000-000000000000
 )
 
 replace (
