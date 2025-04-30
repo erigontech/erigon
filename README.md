@@ -415,7 +415,7 @@ make erigon rpcdaemon
 ```
 
 - Supported JSON-RPC
-  calls: [eth](./cmd/rpcdaemon/commands/eth_api.go), [debug](./cmd/rpcdaemon/commands/debug_api.go), [net](./cmd/rpcdaemon/commands/net_api.go), [web3](./cmd/rpcdaemon/commands/web3_api.go)
+  calls: [eth](./rpc/jsonrpc/eth_api.go), [debug](./rpc/jsonrpc/debug_api.go), [net](./rpc/jsonrpc/net_api.go), [web3](./rpc/jsonrpc/web3_api.go)
 - increase throughput by: `--rpc.batch.concurrency`, `--rpc.batch.limit`, `--db.read.concurrency`
 - increase throughput by disabling: `--http.compression`, `--ws.compression`
 
