@@ -1,9 +1,7 @@
 package stats
 
 import (
-	"fmt"
 	"runtime"
-	"strings"
 
 	common2 "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -22,16 +20,6 @@ func LogStats(at *state.AggregatorRoTx, tx kv.Tx, logger log.Logger, tx2block fu
 	if err != nil {
 		logger.Warn("[snapshots:history] Stat", "err", err)
 		return
-	}
-	accFiles := at.DomainFiles(kv.AccountsDomain)
-	str := make([]string, 0, len(accFiles))
-	for _, item := range accFiles {
-		bn, err := tx2block(item.EndRootNum())
-		if err != nil {
-			logger.Warn("[snapshots:history] Stat", "err", err)
-			return
-		}
-		str = append(str, fmt.Sprintf("%d=%dK", item.EndRootNum()/at.StepSize(), bn/1_000))
 	}
 
 	var lastCommitmentBlockNum, lastCommitmentTxNum uint64
@@ -55,7 +43,6 @@ func LogStats(at *state.AggregatorRoTx, tx kv.Tx, logger log.Logger, tx2block fu
 	logger.Info("[snapshots:history] Stat",
 		"blocks", common2.PrettyCounter(domainBlockNumProgress+1),
 		"txs", common2.PrettyCounter(at.Agg().EndTxNumMinimax()),
-		"txNum2blockNum", strings.Join(str, ","),
 		"first_history_idx_in_db", firstHistoryIndexBlockInDB,
 		"last_commitment_block", lastCommitmentBlockNum,
 		"last_commitment_tx_num", lastCommitmentTxNum,
