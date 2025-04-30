@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/assert"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
@@ -148,9 +149,11 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 			return err
 		}
 
-		{ //assert
-			if err = AssertReceipts(ctx, cfg, ttx, fromBlock, toBlock); err != nil {
-				return err
+		{ //asserts
+			if producingDomain == kv.ReceiptDomain {
+				if err = AssertReceipts(ctx, cfg, ttx, fromBlock, toBlock); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -192,6 +195,9 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 }
 
 func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, fromBlock, toBlock uint64) (err error) {
+	if !assert.Enable {
+		return
+	}
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
