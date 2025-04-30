@@ -68,6 +68,47 @@ func TestMultiEncSeq(t *testing.T) {
 		requireSequenceChecks(t, s)
 		requireRawDataChecks(t, b)
 	})
+
+	t.Run("reset", func(t *testing.T) {
+		b := make([]byte, 0)
+
+		// type: simple encoding, count: 3
+		b = append(b, 0b10000010)
+
+		// append serialized simple sequence
+		seq := simpleseq.NewSimpleSequence(1000, 3)
+		seq.AddOffset(1000)
+		seq.AddOffset(1015)
+		seq.AddOffset(1027)
+		b = seq.AppendBytes(b)
+
+		// check deserialization through reset
+		var s SequenceReader
+		s.Reset(1000, b)
+		require.Equal(t, SimpleEncoding, s.EncodingType())
+		requireSequenceChecks(t, &s)
+		requireRawDataChecks(t, b)
+
+		// RESET
+		b = make([]byte, 0)
+
+		// type: rebased elias fano
+		b = append(b, 0b10010000)
+
+		// append serialized elias fano (rebased -1000)
+		ef := eliasfano32.NewEliasFano(3, 27)
+		ef.AddOffset(0)
+		ef.AddOffset(15)
+		ef.AddOffset(27)
+		ef.Build()
+		b = ef.AppendBytes(b)
+
+		// check deserialization
+		s.Reset(1000, b)
+		require.Equal(t, RebasedEliasFano, s.EncodingType())
+		requireSequenceChecks(t, &s)
+		requireRawDataChecks(t, b)
+	})
 }
 
 func requireSequenceChecks(t *testing.T, s *SequenceReader) {
