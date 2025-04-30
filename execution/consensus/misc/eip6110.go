@@ -64,31 +64,31 @@ func validateDepositLog(data []byte) error {
 	if len(data) != DepositLogLen {
 		return InvalidDepositLogErr
 	}
-	pubkey_offset := uint256.NewInt(0).SetBytes(data[0:32]).Uint64()
-	withdrawal_credentials_offset := uint256.NewInt(0).SetBytes(data[32:64]).Uint64()
-	amount_offset := uint256.NewInt(0).SetBytes(data[64:96]).Uint64()
-	signature_offset := uint256.NewInt(0).SetBytes(data[96:128]).Uint64()
-	index_offset := uint256.NewInt(0).SetBytes(data[128:160]).Uint64()
+	pubkeyOffset := uint256.NewInt(0).SetBytes(data[0:32])
+	withdrawalCredentialsOffset := uint256.NewInt(0).SetBytes(data[32:64])
+	amountOffset := uint256.NewInt(0).SetBytes(data[64:96])
+	signatureOffset := uint256.NewInt(0).SetBytes(data[96:128])
+	indexOffset := uint256.NewInt(0).SetBytes(data[128:160])
 
-	if pubkey_offset != 160 ||
-		withdrawal_credentials_offset != 256 ||
-		amount_offset != 320 ||
-		signature_offset != 384 ||
-		index_offset != 512 {
+	if pubkeyOffset.CmpUint64(160) != 0 ||
+		withdrawalCredentialsOffset.CmpUint64(256) != 0 ||
+		amountOffset.CmpUint64(320) != 0 ||
+		signatureOffset.CmpUint64(384) != 0 ||
+		indexOffset.CmpUint64(512) != 0 {
 		return InvalidDepositLogErr
 	}
 
-	pubkey_size := uint256.NewInt(0).SetBytes(data[pubkey_offset : pubkey_offset+32]).Uint64()
-	withdrawal_credentials_size := uint256.NewInt(0).SetBytes(data[withdrawal_credentials_offset : withdrawal_credentials_offset+32]).Uint64()
-	amount_size := uint256.NewInt(0).SetBytes(data[amount_offset : amount_offset+32]).Uint64()
-	signature_size := uint256.NewInt(0).SetBytes(data[signature_offset : signature_offset+32]).Uint64()
-	index_size := uint256.NewInt(0).SetBytes(data[index_offset : index_offset+32]).Uint64()
+	pubkeySize := uint256.NewInt(0).SetBytes(data[160:192])
+	withdrawalCredentialsSize := uint256.NewInt(0).SetBytes(data[256:288])
+	amountSize := uint256.NewInt(0).SetBytes(data[320:352])
+	signatureSize := uint256.NewInt(0).SetBytes(data[384:416])
+	indexSize := uint256.NewInt(0).SetBytes(data[512:544])
 
-	if pubkey_size != 48 ||
-		withdrawal_credentials_size != 32 ||
-		amount_size != 8 ||
-		signature_size != 96 ||
-		index_size != 8 {
+	if pubkeySize.CmpUint64(BLSPubKeyLen) != 0 ||
+		withdrawalCredentialsSize.CmpUint64(WithdrawalCredentialsLen) != 0 ||
+		amountSize.CmpUint64(8) != 0 ||
+		signatureSize.CmpUint64(BLSSigLen) != 0 ||
+		indexSize.CmpUint64(8) != 0 {
 		return InvalidDepositLogErr
 	}
 	return nil
