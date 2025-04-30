@@ -84,24 +84,24 @@ func processFromHeaders(headers []string, ethAPI EthAPI, netAPI NetAPI, w http.R
 		if lHeader == synced {
 			errCheckSynced = checkSynced(ethAPI, r)
 		}
-		if strings.HasPrefix(lHeader, minPeerCount) {
-			peers, err := strconv.Atoi(strings.TrimPrefix(lHeader, minPeerCount))
+		if after, ok := strings.CutPrefix(lHeader, minPeerCount); ok {
+			peers, err := strconv.Atoi(after)
 			if err != nil {
 				errCheckPeer = err
 				break
 			}
 			errCheckPeer = checkMinPeers(uint(peers), netAPI)
 		}
-		if strings.HasPrefix(lHeader, checkBlock) {
-			block, err := strconv.Atoi(strings.TrimPrefix(lHeader, checkBlock))
+		if after, ok := strings.CutPrefix(lHeader, checkBlock); ok {
+			block, err := strconv.Atoi(after)
 			if err != nil {
 				errCheckBlock = err
 				break
 			}
 			errCheckBlock = checkBlockNumber(rpc.BlockNumber(block), ethAPI)
 		}
-		if strings.HasPrefix(lHeader, maxSecondsBehind) {
-			seconds, err := strconv.Atoi(strings.TrimPrefix(lHeader, maxSecondsBehind))
+		if after, ok := strings.CutPrefix(lHeader, maxSecondsBehind); ok {
+			seconds, err := strconv.Atoi(after)
 			if err != nil {
 				errCheckSeconds = err
 				break
