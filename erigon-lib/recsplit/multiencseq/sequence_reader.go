@@ -64,7 +64,7 @@ func Count(baseNum uint64, data []byte) uint64 {
 // TODO: optimize me - to avoid object allocation (this TODO was inherited from elias_fano.go)
 func Seek(baseNum uint64, data []byte, n uint64) (uint64, bool) {
 	seq := ReadMultiEncSeq(baseNum, data)
-	return seq.search(n)
+	return seq.seek(n)
 }
 
 func (s *SequenceReader) EncodingType() EncodingType {
@@ -136,11 +136,11 @@ func (s *SequenceReader) Reset(baseNum uint64, raw []byte) {
 	panic(fmt.Sprintf("unknown sequence encoding: %d", raw[0]))
 }
 
-func (s *SequenceReader) search(v uint64) (uint64, bool) {
+func (s *SequenceReader) seek(v uint64) (uint64, bool) {
 	if s.currentEnc == SimpleEncoding {
-		return s.sseq.Search(v)
+		return s.sseq.Seek(v)
 	} else if s.currentEnc == PlainEliasFano || s.currentEnc == RebasedEliasFano {
-		return s.ref.Search(v)
+		return s.ref.Seek(v)
 	}
 
 	panic(fmt.Sprintf("unknown sequence encoding: %d", s.currentEnc))

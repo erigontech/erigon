@@ -37,34 +37,34 @@ func TestSimpleSequence(t *testing.T) {
 			"0000001b"), b)
 	})
 
-	t.Run("search", func(t *testing.T) {
+	t.Run("seek", func(t *testing.T) {
 		// before baseNum
-		v, found := s.Search(10)
+		v, found := s.Seek(10)
 		require.True(t, found)
 		require.Equal(t, uint64(1001), v)
 
 		// at baseNum
-		v, found = s.Search(1000)
+		v, found = s.Seek(1000)
 		require.True(t, found)
 		require.Equal(t, uint64(1001), v)
 
 		// at elem
-		v, found = s.Search(1007)
+		v, found = s.Seek(1007)
 		require.True(t, found)
 		require.Equal(t, uint64(1007), v)
 
 		// between elems
-		v, found = s.Search(1014)
+		v, found = s.Seek(1014)
 		require.True(t, found)
 		require.Equal(t, uint64(1015), v)
 
 		// at last
-		v, found = s.Search(1027)
+		v, found = s.Seek(1027)
 		require.True(t, found)
 		require.Equal(t, uint64(1027), v)
 
 		// after last
-		v, found = s.Search(1028)
+		v, found = s.Seek(1028)
 		require.False(t, found)
 		require.Equal(t, uint64(0), v)
 	})

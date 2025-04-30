@@ -93,7 +93,7 @@ func (s *SimpleSequence) reverseSearch(v uint64) (int, bool) {
 	return int(c) - idx - 1, true
 }
 
-func (s *SimpleSequence) Search(v uint64) (uint64, bool) {
+func (s *SimpleSequence) Seek(v uint64) (uint64, bool) {
 	idx, found := s.search(v)
 	if !found {
 		return 0, false
