@@ -351,6 +351,12 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 }
 
 func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx context.Context, tx kv.TemporalTx, cfg *ExecArgs, logger log.Logger) (err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("'CustomTraceMapReduce' paniced: %s, %s", rec, dbg.Stack())
+		}
+	}()
+
 	br := cfg.BlockReader
 	chainConfig := cfg.ChainConfig
 	if chainConfig.ChainName == networkname.Gnosis && cfg.Workers > 1 {
