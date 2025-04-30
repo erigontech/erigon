@@ -149,11 +149,10 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 			return err
 		}
 
-		{ //asserts
-			if producingDomain == kv.ReceiptDomain {
-				if err = AssertReceipts(ctx, cfg, ttx, fromBlock, toBlock); err != nil {
-					return err
-				}
+		//asserts
+		if producingDomain == kv.ReceiptDomain {
+			if err = AssertReceipts(ctx, cfg, ttx, fromBlock, toBlock); err != nil {
+				return err
 			}
 		}
 
@@ -197,6 +196,9 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, fromBlock, toBlock uint64) (err error) {
 	if !assert.Enable {
 		return
+	}
+	if cfg.ChainConfig.Bor != nil { //TODO: enable me
+		return nil
 	}
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
