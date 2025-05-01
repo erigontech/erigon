@@ -307,7 +307,8 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	steps := 0
 	for {
 		steps++
-		if steps%1000 == 0 && in.evm.Cancelled() {
+		//if steps%1000 == 0 && in.evm.Cancelled() {
+		if in.evm.Cancelled() {
 			break
 		}
 		if in.cfg.Tracer != nil {

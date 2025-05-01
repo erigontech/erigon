@@ -77,9 +77,7 @@ func WasmStateStoreCost(db *state.IntraBlockState, program common.Address, key, 
 	}
 
 	if arbmath.BigEquals(original.ToBig(), value.Big()) {
-		if original.IsZero() {
-			// if original == value {
-			// if original == (common.Hash{}) { // reset to original inexistent slot (2.2.2.1)
+		if original.IsZero() { // reset to original inexistent slot (2.2.2.1)
 			// EIP 2200 Original clause:
 			//evm.StateDB.AddRefund(params.SstoreSetGasEIP2200 - params.SloadGasEIP2200)
 			db.AddRefund(params.SstoreSetGasEIP2200 - params.WarmStorageReadCostEIP2929)
