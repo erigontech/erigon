@@ -160,6 +160,7 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.Tem
 		}
 
 		lastTxNum = doms.TxNum()
+		log.Warn("[dbg] commit")
 		if err := tx.Commit(); err != nil {
 			return err
 		}
