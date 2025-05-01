@@ -25,10 +25,10 @@ import (
 )
 
 func TestConfigValueLookup(t *testing.T) {
-	backupMultiplier := map[string]uint64{
-		"0":        2,
-		"25275000": 5,
-		"29638656": 2,
+	backupMultiplier := map[uint64]uint64{
+		0:        2,
+		25275000: 5,
+		29638656: 2,
 	}
 	assert.Equal(t, uint64(2), ConfigValueLookup(backupMultiplier, 0))
 	assert.Equal(t, uint64(2), ConfigValueLookup(backupMultiplier, 1))
@@ -39,10 +39,10 @@ func TestConfigValueLookup(t *testing.T) {
 	assert.Equal(t, uint64(2), ConfigValueLookup(backupMultiplier, 29638656))
 	assert.Equal(t, uint64(2), ConfigValueLookup(backupMultiplier, 29638656+1))
 
-	config := map[string]uint64{
-		"0":         1,
-		"90000000":  2,
-		"100000000": 3,
+	config := map[uint64]uint64{
+		0:         1,
+		90000000:  2,
+		100000000: 3,
 	}
 	assert.Equal(t, uint64(1), ConfigValueLookup(config, 0))
 	assert.Equal(t, uint64(1), ConfigValueLookup(config, 1))
@@ -56,9 +56,9 @@ func TestConfigValueLookup(t *testing.T) {
 	address1 := common.HexToAddress("0x70bcA57F4579f58670aB2d18Ef16e02C17553C38")
 	address2 := common.HexToAddress("0x617b94CCCC2511808A3C9478ebb96f455CF167aA")
 
-	burntContract := map[string]common.Address{
-		"22640000": address1,
-		"41874000": address2,
+	burntContract := map[uint64]common.Address{
+		22640000: address1,
+		41874000: address2,
 	}
 	assert.Equal(t, address1, ConfigValueLookup(burntContract, 22640000))
 	assert.Equal(t, address1, ConfigValueLookup(burntContract, 22640000+1))

@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
-	"strconv"
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain/params"
@@ -344,7 +343,7 @@ func (c *Config) GetBurntContract(num uint64) *common.Address {
 	if len(c.BurntContract) == 0 {
 		return nil
 	}
-	addr := ConfigValueLookup(c.BurntContract, num)
+	addr := ConfigValueLookup(common.ParseMapKeysIntoUint64(c.BurntContract), num)
 	return &addr
 }
 
@@ -588,28 +587,17 @@ func (c *CliqueConfig) String() string {
 
 // Looks up a config value as of a given block number (or time).
 // The assumption here is that config is a càdlàg map of starting_from_block -> value.
-// For example, config of {"0": "0xA", "10": "0xB", "20": "0xC"}
+// For example, config of {0: "0xA", 10: "0xB", 20: "0xC"}
 // means that the config value is 0xA for blocks 0–9,
 // 0xB for blocks 10–19, and 0xC for block 20 and above.
-func ConfigValueLookup[T uint64 | common.Address](field map[string]T, number uint64) T {
-	fieldUint := make(map[uint64]T)
-	for k, v := range field {
-		keyUint, err := strconv.ParseUint(k, 10, 64)
-		if err != nil {
-			panic(err)
-		}
-		fieldUint[keyUint] = v
-	}
-
-	keys := common.SortedKeys(fieldUint)
-
+func ConfigValueLookup[T any](field map[uint64]T, number uint64) T {
+	keys := common.SortedKeys(field)
 	for i := 0; i < len(keys)-1; i++ {
 		if number >= keys[i] && number < keys[i+1] {
-			return fieldUint[keys[i]]
+			return field[keys[i]]
 		}
 	}
-
-	return fieldUint[keys[len(keys)-1]]
+	return field[keys[len(keys)-1]]
 }
 
 // Rules is syntactic sugar over Config. It can be used for functions
