@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon-lib/crypto/cryptopool"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
@@ -95,16 +94,11 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	}
 	var stateReader state.StateReader
 	if latest {
-		sd, err := state2.NewSharedDomains(tx, api.logger)
+		cacheView, err := api.stateCache.View(ctx, tx)
 		if err != nil {
 			return nil, err
 		}
-		defer sd.Close()
-		cacheView, err := api.stateCache.View(ctx, sd)
-		if err != nil {
-			return nil, err
-		}
-		stateReader = rpchelper.CreateLatestCachedStateReader(cacheView)
+		stateReader = rpchelper.CreateLatestCachedStateReader(cacheView, tx)
 	} else {
 		stateReader, err = rpchelper.CreateHistoryStateReader(tx, api._txNumReader, stateBlockNumber+1, 0, chainConfig.ChainName)
 		if err != nil {

@@ -19,10 +19,8 @@ package kvcache
 import (
 	"context"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/kv"
-	libstate "github.com/erigontech/erigon-lib/state"
 )
 
 // DummyCache - doesn't remember anything - can be used when service is not remote
@@ -33,22 +31,22 @@ var _ Cache = (*DummyCache)(nil)    // compile-time interface check
 var _ CacheView = (*DummyView)(nil) // compile-time interface check
 
 func NewDummy() *DummyCache { return &DummyCache{} }
-func (c *DummyCache) View(_ context.Context, sd *libstate.SharedDomains) (CacheView, error) {
-	return &DummyView{cache: c, sd: sd}, nil
+func (c *DummyCache) View(_ context.Context, tx kv.Tx) (CacheView, error) {
+	return &DummyView{cache: c, tx: tx}, nil
 }
 func (c *DummyCache) OnNewBlock(sc *remote.StateChangeBatch) {}
 func (c *DummyCache) Evict() int                             { return 0 }
 func (c *DummyCache) Len() int                               { return 0 }
-func (c *DummyCache) Get(k []byte, sd *libstate.SharedDomains, id uint64) ([]byte, error) {
+func (c *DummyCache) Get(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
 	if len(k) == 20 {
-		v, _, err := sd.GetLatest(kv.AccountsDomain, k)
+		v, _, err := tx.(kv.TemporalTx).GetLatest(kv.AccountsDomain, k)
 		return v, err
 	}
-	v, _, err := sd.GetLatest(kv.StorageDomain, k)
+	v, _, err := tx.(kv.TemporalTx).GetLatest(kv.StorageDomain, k)
 	return v, err
 }
-func (c *DummyCache) GetCode(k []byte, sd *libstate.SharedDomains, id uint64) ([]byte, error) {
-	v, _, err := sd.GetLatest(kv.CodeDomain, k)
+func (c *DummyCache) GetCode(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
+	v, _, err := tx.(kv.TemporalTx).GetLatest(kv.CodeDomain, k)
 	return v, err
 }
 func (c *DummyCache) ValidateCurrentRoot(_ context.Context, _ kv.Tx) (*CacheValidationResult, error) {
@@ -57,12 +55,8 @@ func (c *DummyCache) ValidateCurrentRoot(_ context.Context, _ kv.Tx) (*CacheVali
 
 type DummyView struct {
 	cache *DummyCache
-	sd    *libstate.SharedDomains
+	tx    kv.Tx
 }
 
-func (c *DummyView) Get(k []byte) ([]byte, error)     { return c.cache.Get(k, c.sd, 0) }
-func (c *DummyView) GetCode(k []byte) ([]byte, error) { return c.cache.GetCode(k, c.sd, 0) }
-
-func (c *DummyView) HasStorage(addr libcommon.Address) (bool, error) {
-	return
-}
+func (c *DummyView) Get(k []byte) ([]byte, error)     { return c.cache.Get(k, c.tx, 0) }
+func (c *DummyView) GetCode(k []byte) ([]byte, error) { return c.cache.GetCode(k, c.tx, 0) }
