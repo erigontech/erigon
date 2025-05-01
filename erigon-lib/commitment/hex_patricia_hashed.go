@@ -714,7 +714,7 @@ func (hph *HexPatriciaHashed) computeCellHashLen(cell *cell, depth int) int {
 	return length.Hash + 1
 }
 
-func (hph *HexPatriciaHashed) computeCellHashWithStorage(cell *cell, depth int, buf []byte) ([]byte, bool, []byte, error) {
+func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, depth int, buf []byte) ([]byte, bool, []byte, error) {
 	var err error
 	var storageRootHash [length.Hash]byte
 	var storageRootHashIsSet bool
@@ -1122,7 +1122,7 @@ func (hph *HexPatriciaHashed) PrintGrid() {
 			cell := &hph.grid[row][col]
 			if cell.hashedExtLen > 0 || cell.accountAddrLen > 0 {
 				var cellHash []byte
-				cellHash, _, _, err := hph.computeCellHashWithStorage(cell, hph.depths[row], nil)
+				cellHash, _, _, err := hph.witnessComputeCellHashWithStorage(cell, hph.depths[row], nil)
 				if err != nil {
 					panic("failed to compute cell hash")
 				}
@@ -1137,8 +1137,8 @@ func (hph *HexPatriciaHashed) PrintGrid() {
 }
 
 // this function is only related to the witness
-func (hph *HexPatriciaHashed) createAccountNode(c *cell, row int, hashedKey []byte, codeReads map[common.Hash]witnesstypes.CodeWithHash) (*trie.AccountNode, error) {
-	_, storageIsSet, storageRootHash, err := hph.computeCellHashWithStorage(c, hph.depths[row], nil)
+func (hph *HexPatriciaHashed) witnessCreateAccountNode(c *cell, row int, hashedKey []byte, codeReads map[common.Hash]witnesstypes.CodeWithHash) (*trie.AccountNode, error) {
+	_, storageIsSet, storageRootHash, err := hph.witnessComputeCellHashWithStorage(c, hph.depths[row], nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1193,7 +1193,7 @@ func (hph *HexPatriciaHashed) nCellsInRow(row int) int { //nolint:unused
 }
 
 // Traverse the grid following `hashedKey` and produce the witness `trie.Trie` for that key
-func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[common.Hash]witnesstypes.CodeWithHash) (*trie.Trie, error) {
+func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[common.Hash]witnesstypes.CodeWithHash) (*trie.Trie, error) {
 	rootNode := &trie.FullNode{}
 	var currentNode trie.Node = rootNode
 	keyPos := 0 // current position in hashedKey (usually same as row, but could be different due to extension nodes)
@@ -1226,14 +1226,14 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[common.Hash
 					storageValueNode := trie.ValueNode(storageUpdate.Storage[:storageUpdate.StorageLen])
 					nextNode = &trie.ShortNode{Key: extensionKey, Val: storageValueNode}
 				} else if cellToExpand.accountAddrLen > 0 {
-					accNode, err := hph.createAccountNode(cellToExpand, row, hashedKey, codeReads)
+					accNode, err := hph.witnessCreateAccountNode(cellToExpand, row, hashedKey, codeReads)
 					if err != nil {
 						return nil, err
 					}
 					nextNode = &trie.ShortNode{Key: extensionKey, Val: accNode}
 					extNodeSubTrie := trie.NewInMemoryTrie(nextNode)
 					subTrieRoot := extNodeSubTrie.Root()
-					cellHash, _, _, _ := hph.computeCellHashWithStorage(cellToExpand, hph.depths[row], nil)
+					cellHash, _, _, _ := hph.witnessComputeCellHashWithStorage(cellToExpand, hph.depths[row], nil)
 					if !bytes.Equal(subTrieRoot, cellHash[1:]) {
 						return nil, fmt.Errorf("subTrieRoot(%x) != cellHash(%x)", subTrieRoot, cellHash[1:])
 					}
@@ -1251,7 +1251,7 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[common.Hash
 			nextNode = &storageValueNode //nolint:ineffassign, wastedassign
 			break
 		} else if cellToExpand.accountAddrLen > 0 { // account cell
-			accNode, err := hph.createAccountNode(cellToExpand, row, hashedKey, codeReads)
+			accNode, err := hph.witnessCreateAccountNode(cellToExpand, row, hashedKey, codeReads)
 			if err != nil {
 				return nil, err
 			}
@@ -1275,7 +1275,7 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[common.Hash
 					fullNode.Children[col] = nil
 					continue
 				}
-				cellHash, _, _, err := hph.computeCellHashWithStorage(currentCell, hph.depths[row], nil)
+				cellHash, _, _, err := hph.witnessComputeCellHashWithStorage(currentCell, hph.depths[row], nil)
 				if err != nil {
 					return nil, err
 				}
@@ -2049,7 +2049,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		//hph.updateCell(plainKey, hashedKey, update)
 
 		// convert grid to trie.Trie
-		tr, err = hph.ToTrie(hashedKey, codeReads) // build witness trie for this key, based on the current state of the grid
+		tr, err = hph.toWitnessTrie(hashedKey, codeReads) // build witness trie for this key, based on the current state of the grid
 		if err != nil {
 			return err
 		}
