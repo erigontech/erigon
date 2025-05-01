@@ -247,6 +247,9 @@ func (vr versionedStateReader) applyVersionedUpdates(address libcommon.Address, 
 		account.Balance = update
 	}
 	if update, ok := versionedUpdate[uint64](vr.versionMap, address, NoncePath, libcommon.Hash{}, vr.txIndex); ok {
+		if addr := fmt.Sprintf("%x", address); addr == "9ead03f7136fc6b4bdb0780b00a1c14ae5a8b6d0" {
+			fmt.Println(addr, "update nonce", account.Nonce, update)
+		}
 		account.Nonce = update
 	}
 	if update, ok := versionedUpdate[libcommon.Hash](vr.versionMap, address, CodeHashPath, libcommon.Hash{}, vr.txIndex); ok {
