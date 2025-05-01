@@ -301,6 +301,13 @@ func (c *Config) GetBurntContract(num uint64) *common.Address {
 	return &addr
 }
 
+func (c *Config) GetMinBlobGasPrice() uint64 {
+	if c != nil && c.MinBlobGasPrice != nil {
+		return *c.MinBlobGasPrice
+	}
+	return 1 // MIN_BLOB_GASPRICE (EIP-4844)
+}
+
 func (c *Config) getBlobConfig(time uint64) *params.BlobConfig {
 	c.onceBlobSchedule.Do(func() {
 		c.parsedBlobSchedule = map[uint64]*params.BlobConfig{
@@ -333,13 +340,6 @@ func (c *Config) getBlobConfig(time uint64) *params.BlobConfig {
 		}
 	})
 	return ConfigValueLookup(c.parsedBlobSchedule, time)
-}
-
-func (c *Config) GetMinBlobGasPrice() uint64 {
-	if c != nil && c.MinBlobGasPrice != nil {
-		return *c.MinBlobGasPrice
-	}
-	return 1 // MIN_BLOB_GASPRICE (EIP-4844)
 }
 
 func (c *Config) GetMaxBlobsPerBlock(time uint64) uint64 {
