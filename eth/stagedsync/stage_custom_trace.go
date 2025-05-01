@@ -198,7 +198,7 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.Tem
 	}); err != nil {
 		return err
 	}
-	if err := agg.BuildFiles2(ctx, fromStep, toStep); err != nil {
+	if err := agg.BuildFiles2(ctx, fromStep, toStep+1); err != nil {
 		return err
 	}
 
