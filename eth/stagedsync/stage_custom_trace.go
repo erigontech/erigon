@@ -45,7 +45,7 @@ import (
 
 type CustomTraceCfg struct {
 	tmpdir   string
-	db       kv.RwDB
+	db       kv.TemporalRwDB
 	prune    prune.Mode
 	ExecArgs *exec3.ExecArgs
 }
@@ -77,9 +77,8 @@ func SpawnCustomTrace(cfg CustomTraceCfg, producingDomain kv.Domain, ctx context
 	stepSize := cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator).StepSize()
 	if err := cfg.db.View(ctx, func(tx kv.Tx) (err error) {
 		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.ExecArgs.BlockReader))
-
 		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
-		txNum := ac.DbgDomain(kv.AccountsDomain).FirstStepNotInFiles() * stepSize
+		txNum := max(ac.DbgDomain(kv.AccountsDomain).FirstStepNotInFiles()*stepSize, ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx))
 		var ok bool
 		ok, endBlock, err = txNumsReader.FindBlockNum(tx, txNum)
 		if err != nil {
@@ -130,17 +129,21 @@ func SpawnCustomTrace(cfg CustomTraceCfg, producingDomain kv.Domain, ctx context
 	return nil
 }
 
-func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwDB, fromBlock, toBlock uint64, logPrefix string, producingDomain kv.Domain, logger log.Logger) error {
+func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.TemporalRwDB, fromBlock, toBlock uint64, logPrefix string, producingDomain kv.Domain, logger log.Logger) error {
 	var lastTxNum uint64
-	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		ttx := tx.(kv.TemporalRwTx)
+	{
+		tx, err := db.BeginTemporalRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
 		doms, err := state2.NewSharedDomains(tx, logger)
 		if err != nil {
 			return err
 		}
 		defer doms.Close()
 
-		if err := customTraceBatch(ctx, cfg, ttx, doms, fromBlock, toBlock, logPrefix, logger); err != nil {
+		if err := customTraceBatch(ctx, cfg, tx, doms, fromBlock, toBlock, logPrefix, logger); err != nil {
 			return err
 		}
 
@@ -151,7 +154,7 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 
 		//asserts
 		if producingDomain == kv.ReceiptDomain {
-			if err = AssertReceipts(ctx, cfg, ttx, fromBlock, toBlock); err != nil {
+			if err = AssertReceipts(ctx, cfg, tx, fromBlock, toBlock); err != nil {
 				return err
 			}
 		}
@@ -160,9 +163,6 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 		if err := tx.Commit(); err != nil {
 			return err
 		}
-		return nil
-	}); err != nil {
-		return err
 	}
 
 	agg := db.(state2.HasAgg).Agg().(*state2.Aggregator)
