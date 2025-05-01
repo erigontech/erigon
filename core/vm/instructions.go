@@ -912,7 +912,6 @@ func opSelfdestruct(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 	if interpreter.readOnly {
 		return nil, ErrWriteProtection
 	}
-	fmt.Printf("opSelfdestruct\n")
 
 	beneficiary := scope.Stack.Pop()
 	callerAddr := scope.Contract.Address()
@@ -942,7 +941,6 @@ func opSelfdestruct6780(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCon
 	if interpreter.readOnly {
 		return nil, ErrWriteProtection
 	}
-	fmt.Printf("opSelfdestruct6780\n")
 
 	// Arbitrum: revert if acting account is a Stylus program
 	if interpreter.evm.chainRules.IsStylus {

@@ -1,8 +1,8 @@
-package state
+package vm
 
 import (
-	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -14,7 +14,7 @@ import (
 
 // Computes the cost of doing a state load in wasm
 // Note: the code here is adapted from gasSLoadEIP2929
-func WasmStateLoadCost(db *IntraBlockState, program common.Address, key common.Hash) uint64 {
+func WasmStateLoadCost(db *state.IntraBlockState, program common.Address, key common.Hash) uint64 {
 	// Check slot presence in the access list
 	if _, slotPresent := db.SlotInAccessList(program, key); !slotPresent {
 		// If the caller cannot afford the cost, this change will be rolled back
@@ -28,7 +28,7 @@ func WasmStateLoadCost(db *IntraBlockState, program common.Address, key common.H
 // Computes the cost of doing a state store in wasm
 // Note: the code here is adapted from makeGasSStoreFunc with the most recent parameters as of The Merge
 // Note: the sentry check must be done by the caller
-func WasmStateStoreCost(db *IntraBlockState, program common.Address, key, value common.Hash) uint64 {
+func WasmStateStoreCost(db *state.IntraBlockState, program common.Address, key, value common.Hash) uint64 {
 	clearingRefund := params.SstoreClearsScheduleRefundEIP3529
 
 	cost := uint64(0)
@@ -56,12 +56,12 @@ func WasmStateStoreCost(db *IntraBlockState, program common.Address, key, value 
 	}
 	original := uint256.NewInt(0)
 	err = db.GetCommittedState(program, &key, original)
-	if original == current {
-		if original.IsZero() {
-			// if original == (common.Hash{}) { // create slot (2.1.1)
+	if original.Eq(current) {
+		if original.IsZero() { // create slot (2.1.1)
 			return cost + params.SstoreSetGasEIP2200
 		}
-		if value == (common.Hash{}) { // delete slot (2.1.2b)
+		if value.Cmp(common.Hash{}) == 0 {
+			//if value == (common.Hash{}) { // delete slot (2.1.2b)
 			db.AddRefund(clearingRefund)
 		}
 		// EIP-2200 original clause:
@@ -69,19 +69,15 @@ func WasmStateStoreCost(db *IntraBlockState, program common.Address, key, value 
 		return cost + (params.SstoreResetGasEIP2200 - params.ColdSloadCostEIP2929) // write existing slot (2.1.2)
 	}
 	if !original.IsZero() {
-		if current.IsZero() {
-			// if original != (common.Hash{}) {
-			// if current == (common.Hash{}) { // recreate slot (2.2.1.1)
+		if current.IsZero() { // recreate slot (2.2.1.1)
 			db.SubRefund(clearingRefund)
-		} else if value == (common.Hash{}) { // delete slot (2.2.1.2)
+		} else if value.Cmp(common.Hash{}) == 0 { // value == (common.Hash{}) { // delete slot (2.2.1.2)
 			db.AddRefund(clearingRefund)
 		}
 	}
 
 	if arbmath.BigEquals(original.ToBig(), value.Big()) {
-		if original.IsZero() {
-			// if original == value {
-			// if original == (common.Hash{}) { // reset to original inexistent slot (2.2.2.1)
+		if original.IsZero() { // reset to original inexistent slot (2.2.2.1)
 			// EIP 2200 Original clause:
 			//evm.StateDB.AddRefund(params.SstoreSetGasEIP2200 - params.SloadGasEIP2200)
 			db.AddRefund(params.SstoreSetGasEIP2200 - params.WarmStorageReadCostEIP2929)
@@ -98,8 +94,6 @@ func WasmStateStoreCost(db *IntraBlockState, program common.Address, key, value 
 	//return params.SloadGasEIP2200, nil // dirty update (2.2)
 	return cost + params.WarmStorageReadCostEIP2929 // dirty update (2.2)
 }
-
-var ErrOutOfGas = errors.New("out of gas") // importing from vm causes cyclic import
 
 // Computes the cost of starting a call from wasm
 //
