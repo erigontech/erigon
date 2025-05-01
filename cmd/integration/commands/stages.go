@@ -618,7 +618,7 @@ func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 	br, bw := blocksIO(db, logger)
 	_, _, _, _, _ = newSync(ctx, db, nil /* miningConfig */, logger)
 
-	return db.Update(ctx, func(tx kv.RwTx) error {
+	return db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 		if reset {
 			if err := stages.SaveStageProgress(tx, stages.Snapshots, 0); err != nil {
 				return fmt.Errorf("saving Snapshots progress failed: %w", err)
@@ -631,11 +631,7 @@ func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 		ac := agg.BeginFilesRo()
 		defer ac.Close()
 
-		temporalTx, ok := tx.(kv.TemporalTx)
-		if !ok {
-			return errors.New("tx is not a temporal tx")
-		}
-		domains, err := libstate.NewSharedDomains(temporalTx, logger)
+		domains, err := libstate.NewSharedDomains(tx, logger)
 		if err != nil {
 			return err
 		}
@@ -1108,17 +1104,13 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 
 	if chainTipMode {
 		var sendersProgress, execProgress uint64
-		if err := db.View(ctx, func(tx kv.Tx) error {
+		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 			var err error
 			if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
 				return err
 			}
 			if execProgress == 0 {
-				temporalTx, ok := tx.(kv.TemporalTx)
-				if !ok {
-					return errors.New("tx is not a temporal tx")
-				}
-				doms, err := libstate.NewSharedDomains(temporalTx, log.New())
+				doms, err := libstate.NewSharedDomains(tx, log.New())
 				if err != nil {
 					panic(err)
 				}

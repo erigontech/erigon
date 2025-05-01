@@ -1046,7 +1046,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 		common.Big0 /* cancunTime */, common.Big0 /* pragueTime */, nil, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 	require.NoError(t, err)
 	pool.blockGasLimit.Store(30_000_000)
-	tx, err := coreDB.BeginRw(ctx)
+	tx, err := coreDB.BeginTemporalRw(ctx)
 	defer tx.Rollback()
 	require.NoError(t, err)
 	sd, err := state.NewSharedDomains(tx.(kv.TemporalTx), logger)
