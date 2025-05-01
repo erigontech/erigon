@@ -1,8 +1,8 @@
-package state
+package vm
 
 import (
-	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -14,7 +14,7 @@ import (
 
 // Computes the cost of doing a state load in wasm
 // Note: the code here is adapted from gasSLoadEIP2929
-func WasmStateLoadCost(db *IntraBlockState, program common.Address, key common.Hash) uint64 {
+func WasmStateLoadCost(db *state.IntraBlockState, program common.Address, key common.Hash) uint64 {
 	// Check slot presence in the access list
 	if _, slotPresent := db.SlotInAccessList(program, key); !slotPresent {
 		// If the caller cannot afford the cost, this change will be rolled back
@@ -28,7 +28,7 @@ func WasmStateLoadCost(db *IntraBlockState, program common.Address, key common.H
 // Computes the cost of doing a state store in wasm
 // Note: the code here is adapted from makeGasSStoreFunc with the most recent parameters as of The Merge
 // Note: the sentry check must be done by the caller
-func WasmStateStoreCost(db *IntraBlockState, program common.Address, key, value common.Hash) uint64 {
+func WasmStateStoreCost(db *state.IntraBlockState, program common.Address, key, value common.Hash) uint64 {
 	clearingRefund := params.SstoreClearsScheduleRefundEIP3529
 
 	cost := uint64(0)
@@ -96,8 +96,6 @@ func WasmStateStoreCost(db *IntraBlockState, program common.Address, key, value 
 	//return params.SloadGasEIP2200, nil // dirty update (2.2)
 	return cost + params.WarmStorageReadCostEIP2929 // dirty update (2.2)
 }
-
-var ErrOutOfGas = errors.New("out of gas") // importing from vm causes cyclic import
 
 // Computes the cost of starting a call from wasm
 //
