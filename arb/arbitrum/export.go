@@ -2,6 +2,8 @@ package arbitrum
 
 import (
 	"context"
+	"fmt"
+	"runtime"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
@@ -25,6 +27,9 @@ func EstimateGas(
 	overrides *ethapi.StateOverrides,
 	gasCap uint64,
 ) (hexutil.Uint64, error) {
+
+	_, file, line, _ := runtime.Caller(1)
+	fmt.Printf("EstimateGas called from %s:%d\n", file, line)
 	return 0, nil
 
 	// 	EstimateGas(ctx context.Context, call CallMsg) (uint64, error)
