@@ -45,13 +45,11 @@ ifeq ($(shell uname -s), Darwin)
 	endif
 endif
 
-# about netgo see: https://github.com/golang/go/issues/30310#issuecomment-471669125 and https://github.com/golang/go/issues/57757
-
 ifneq ($(shell "$(CURDIR)/turbo/silkworm/silkworm_compat_check.sh"),)
 	BUILD_TAGS := nosilkworm
 endif
 
-override BUILD_TAGS := $(BUILD_TAGS),$(EXTRA_BUILD_TAGS)
+override BUILD_TAGS += $(EXTRA_BUILD_TAGS)
 
 GOPRIVATE = github.com/erigontech/silkworm-go
 
