@@ -228,7 +228,6 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 		vm.SetTrace(true)
 		fmt.Println(tracePrefix, ibs.VersionedWrites(true))
 	}
-
 	// we need to flush the finalized writes to the version map so
 	// they are taken into account by subsequent transactions
 	vm.FlushVersionedWrites(ibs.VersionedWrites(true), true, tracePrefix)
