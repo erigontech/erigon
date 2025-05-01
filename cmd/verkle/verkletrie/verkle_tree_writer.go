@@ -199,7 +199,7 @@ func (v *VerkleTreeWriter) WriteContractCodeChunks(codeKeys [][]byte, chunks [][
 }
 
 func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() (common.Hash, error) {
-	if err := v.db.ClearBucket(kv.VerkleTrie); err != nil {
+	if err := v.db.ClearTable(kv.VerkleTrie); err != nil {
 		return common.Hash{}, err
 	}
 

@@ -286,5 +286,5 @@ type Sync struct {
 	ChaosMonkey              bool
 	AlwaysGenerateChangesets bool
 	KeepExecutionProofs      bool
-	PersistReceiptsCache     bool
+	PersistReceiptsCacheV2   bool
 }

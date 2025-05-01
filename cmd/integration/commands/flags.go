@@ -32,6 +32,7 @@ var (
 	block, pruneTo, unwind       uint64
 	unwindEvery                  uint64
 	batchSizeStr                 string
+	produce                      string
 	reset, noCommit              bool
 	bucket                       string
 	datadirCli, toChaindata      string
@@ -141,6 +142,10 @@ func withDataDir(cmd *cobra.Command) {
 
 func withBatchSize(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&batchSizeStr, "batchSize", cli.BatchSizeFlag.Value, cli.BatchSizeFlag.Usage)
+}
+
+func withProduce(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&produce, "produce", "", "Comma separated produce data types")
 }
 
 func withIntegrityChecks(cmd *cobra.Command) {

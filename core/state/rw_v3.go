@@ -243,7 +243,7 @@ func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *li
 		}
 	}
 
-	if rs.syncCfg.PersistReceiptsCache {
+	if rs.syncCfg.PersistReceiptsCacheV2 {
 		var receipt *types.Receipt
 		if !txTask.Final {
 			if txTask.TxIndex >= 0 && txTask.BlockReceipts != nil {
