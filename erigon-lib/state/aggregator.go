@@ -477,7 +477,7 @@ func (a *Aggregator) BuildMissedIndicesInBackground(ctx context.Context, workers
 		defer a.buildingFiles.Store(false)
 		aggTx := a.BeginFilesRo()
 		defer aggTx.Close()
-		if err := a.BuildMissedIndices(ctx, workers); err != nil {
+		if err := a.BuildMissedAccessors(ctx, workers); err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
 				return
 			}
