@@ -43,7 +43,7 @@ import (
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	state2 "github.com/erigontech/erigon/core/state"
-	reset2 "github.com/erigontech/erigon/erigon-db/rawdb/rawdbreset"
+	reset2 "github.com/erigontech/erigon/eth/rawdbreset"
 	"github.com/erigontech/erigon/params"
 )
 

@@ -24,13 +24,12 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
 )
 
 // migrations apply sequentially in order of this array, skips applied migrations
@@ -267,33 +266,4 @@ func (m *Migrator) Apply(db kv.RwDB, dataDir, chaindata string, logger log.Logge
 		),
 	)
 	return nil
-}
-
-func MarshalMigrationPayload(db kv.Getter) ([]byte, error) {
-	s := map[string][]byte{}
-
-	for _, stage := range stages.AllStages {
-		v, err := db.GetOne(kv.SyncStageProgress, []byte(stage))
-		if err != nil {
-			return nil, err
-		}
-		if len(v) > 0 {
-			s[string(stage)] = common.CopyBytes(v)
-		}
-	}
-
-	b, err := json.Marshal(s)
-	if err != nil {
-		return nil, err
-	}
-	return b, nil
-}
-
-func UnmarshalMigrationPayload(data []byte) (map[string][]byte, error) {
-	s := map[string][]byte{}
-
-	if err := json.Unmarshal(data, &s); err != nil {
-		return nil, err
-	}
-	return s, nil
 }
