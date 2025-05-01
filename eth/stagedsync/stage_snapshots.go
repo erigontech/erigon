@@ -468,7 +468,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				return err
 			}
 
-			_ = tx.ClearBucket(kv.MaxTxNum)
+			_ = tx.ClearTable(kv.MaxTxNum)
 			if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
 				select {
 				case <-ctx.Done():

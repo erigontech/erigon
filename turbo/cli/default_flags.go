@@ -138,7 +138,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.DeveloperPeriodFlag,
 	&utils.VMEnableDebugFlag,
 	&utils.NetworkIdFlag,
-	&utils.PersistReceiptsFlag,
+	&utils.PersistReceiptsV2Flag,
 	&utils.FakePoWFlag,
 	&utils.GpoBlocksFlag,
 	&utils.GpoPercentileFlag,

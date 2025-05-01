@@ -2341,7 +2341,7 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 
 	txHashes := p.isLocalLRU.Keys()
 	encID := make([]byte, 8)
-	if err := tx.ClearBucket(kv.RecentLocalTransaction); err != nil {
+	if err := tx.ClearTable(kv.RecentLocalTransaction); err != nil {
 		return err
 	}
 	for i, txHash := range txHashes {

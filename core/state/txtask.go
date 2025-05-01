@@ -23,6 +23,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/execution/exec3/calltracer"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
@@ -88,6 +90,7 @@ type TxTask struct {
 	// Need investigate if we can pass here - only limited amount of receipts
 	// And remove this field if possible - because it will make problems for parallel-execution
 	BlockReceipts types.Receipts
+	Tracer        *calltracer.CallTracer
 
 	Config *chain.Config
 
@@ -95,8 +98,14 @@ type TxTask struct {
 	InBatch               bool   // set to true for consecutive RIP-7560 transactions after the first one (first one is false)
 	ValidationResults     []AAValidationResult
 }
+type GenericTracer interface {
+	TracingHooks() *tracing.Hooks
+	SetTransaction(tx types.Transaction)
+	Found() bool
+}
 
 func (t *TxTask) Sender() *common.Address {
+	//consumer.NewTracer().TracingHooks()
 	if t.sender != nil {
 		return t.sender
 	}
@@ -127,6 +136,7 @@ func (t *TxTask) CreateReceipt(tx kv.Tx) {
 			cumulativeGasUsed = prevR.CumulativeGasUsed
 			firstLogIndex = prevR.FirstLogIndexWithinBlock + uint32(len(prevR.Logs))
 		} else {
+			fmt.Printf("a: %d\n", t.TxIndex)
 			var err error
 			cumulativeGasUsed, _, firstLogIndex, err = rawtemporaldb.ReceiptAsOf(tx.(kv.TemporalTx), t.TxNum)
 			if err != nil {

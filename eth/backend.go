@@ -306,7 +306,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
 		var notChanged bool
-		notChanged, config.PersistReceiptsCache, err = kvcfg.PersistReceipts.EnsureNotChanged(tx, config.PersistReceiptsCache)
+		notChanged, config.PersistReceiptsCacheV2, err = kvcfg.PersistReceipts.EnsureNotChanged(tx, config.PersistReceiptsCacheV2)
 		if err != nil {
 			return err
 		}

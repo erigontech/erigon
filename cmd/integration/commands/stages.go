@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/kv/prune"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
@@ -48,7 +49,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/backup"
 	"github.com/erigontech/erigon-lib/kv/kvcfg"
-	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
@@ -561,6 +561,7 @@ func init() {
 	withHeimdall(cmdStageCustomTrace)
 	withWorkers(cmdStageCustomTrace)
 	withChaosMonkey(cmdStageCustomTrace)
+	withProduce(cmdStageCustomTrace)
 	rootCmd.AddCommand(cmdStageCustomTrace)
 
 	withConfig(cmdStagePatriciaTrie)
@@ -1023,7 +1024,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	defer borSn.Close()
 	defer agg.Close()
 	if reset {
-		if err := reset2.ResetExec(ctx, db, agg, chain, "", logger); err != nil {
+		if err := reset2.ResetExec(ctx, db); err != nil {
 			return err
 		}
 		return nil
@@ -1059,6 +1060,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		/*badBlockHalt=*/ true,
 		dirs, br, nil, genesis, syncCfg, nil)
 
+	fmt.Printf("[dbg] engine: %T\n", engine)
 	if unwind > 0 {
 		if err := db.View(ctx, func(tx kv.Tx) error {
 			minUnwindableBlockNum, _, err := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).CanUnwindBeforeBlockNum(s.BlockNumber-unwind, tx)
@@ -1189,23 +1191,26 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	chainConfig := fromdb.ChainConfig(db)
 	genesis := core.GenesisBlockByChainName(chain)
 	br, _ := blocksIO(db, logger)
-	cfg := stagedsync.StageCustomTraceCfg(db, dirs, br, chainConfig, engine, genesis, &syncCfg)
-	var producingDomain kv.Domain
-	if cfg.ExecArgs.ProduceReceiptDomain {
-		producingDomain = kv.RCacheDomain
-	} else if cfg.ExecArgs.ProduceRCacheDomain {
-		producingDomain = kv.RCacheDomain
-	} else {
-		panic("assert: which domain need to produce?")
-	}
-
+	cfg := stagedsync.StageCustomTraceCfg(strings.Split(produce, ","), db, dirs, br, chainConfig, engine, genesis, &syncCfg)
 	if reset {
 		tx, err := db.BeginTemporalRw(ctx)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
-		tables := db.Debug().DomainTables(producingDomain)
+		var tables []string
+		if cfg.Produce.ReceiptDomain {
+			tables = append(tables, db.Debug().DomainTables(kv.ReceiptDomain)...)
+		}
+		if cfg.Produce.RCacheDomain {
+			tables = append(tables, db.Debug().DomainTables(kv.RCacheDomain)...)
+		}
+		if cfg.Produce.LogIndex {
+			tables = append(tables, db.Debug().InvertedIdxTables(kv.LogAddrIdx, kv.LogTopicIdx)...)
+		}
+		if cfg.Produce.TraceIndex {
+			tables = append(tables, db.Debug().InvertedIdxTables(kv.TracesFromIdx, kv.TracesToIdx)...)
+		}
 		if err := backup.ClearTables(ctx, tx, tables...); err != nil {
 			return err
 		}
@@ -1227,7 +1232,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
-	err = stagedsync.SpawnCustomTrace(cfg, producingDomain, ctx, logger)
+	err = stagedsync.SpawnCustomTrace(cfg, ctx, logger)
 	if err != nil {
 		return err
 	}
@@ -1319,7 +1324,7 @@ func printAllStages(db kv.RoDB, ctx context.Context, logger log.Logger) error {
 	defer sn.Close()
 	defer borSn.Close()
 	defer agg.Close()
-	return db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, borSn, agg) })
+	return db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, borSn) })
 }
 
 func printAppliedMigrations(db kv.RwDB, ctx context.Context, logger log.Logger) error {
@@ -1363,7 +1368,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			if err != nil {
 				return err
 			}
-			syncCfg.PersistReceiptsCache, err = kvcfg.PersistReceipts.Enabled(tx)
+			syncCfg.PersistReceiptsCacheV2, err = kvcfg.PersistReceipts.Enabled(tx)
 			if err != nil {
 				return err
 			}
@@ -1374,7 +1379,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		if syncCfg.KeepExecutionProofs {
 			libstate.EnableHistoricalCommitment()
 		}
-		if syncCfg.PersistReceiptsCache {
+		if syncCfg.PersistReceiptsCacheV2 {
 			libstate.EnableHistoricalRCache()
 		}
 
