@@ -191,7 +191,8 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 
 		if traceTx(blockNum, txIndex) {
 			coinbaseBalance, _ := ibs.GetBalance(result.Coinbase)
-			fmt.Println(blockNum, fmt.Sprintf("(%d.%d)", txIndex, task.Version().Incarnation), "CB", fmt.Sprintf("%x", result.Coinbase), fmt.Sprintf("%d", &coinbaseBalance))
+			nonce, _ := ibs.GetNonce(result.Coinbase)
+			fmt.Println(blockNum, fmt.Sprintf("(%d.%d)", txIndex, task.Version().Incarnation), "CB", fmt.Sprintf("%x", result.Coinbase), fmt.Sprintf("%d", &coinbaseBalance), "nonce", nonce)
 		}
 
 		ibs.AddBalance(result.Coinbase, result.ExecutionResult.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee)
