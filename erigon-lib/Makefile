@@ -1,7 +1,7 @@
 GOBINREL = build/bin
 GOBIN = $(CURDIR)/$(GOBINREL)
 
-BUILD_TAGS = noboltdb,disable_libutp
+BUILD_TAGS = disable_libutp
 
 CGO_CXXFLAGS ?= $(shell go env CGO_CXXFLAGS 2>/dev/null)
 ifeq ($(CGO_CXXFLAGS),)
