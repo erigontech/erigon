@@ -870,10 +870,8 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 	if txCount != 0 {
 		txnSeg, ok, release := r.sn.ViewSingleFile(coresnaptype.Transactions, blockHeight)
 		if !ok {
-			if dbgLogs {
-				log.Info(dbgPrefix+"no transactions file for this block num", "r.sn.BlocksAvailable()", r.sn.BlocksAvailable())
-			}
-			return
+			err = fmt.Errorf("no transactions snapshot file for blockNum=%d, BlocksAvailable=%d", blockHeight, r.sn.BlocksAvailable())
+			return nil, nil, err
 		}
 		defer release()
 		txs, senders, err = r.txsFromSnapshot(baseTxnId, txCount, txnSeg, buf)
