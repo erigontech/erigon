@@ -17,14 +17,14 @@ import (
 	"github.com/erigontech/erigon-lib/state"
 )
 
-func TestHasPrefixForStorageDomain(t *testing.T) {
+func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 	t.Parallel()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
 	logger := log.New()
-	logger.SetHandler(log.LvlFilterHandler(log.LvlTrace, log.StderrHandler))
+	logger.SetHandler(log.LvlFilterHandler(log.LvlCrit, log.StderrHandler))
 
 	mdbxDb := memdb.NewTestDB(t, kv.ChainDB)
 	dirs := datadir.New(t.TempDir())
@@ -74,7 +74,7 @@ func TestHasPrefixForStorageDomain(t *testing.T) {
 		t.Cleanup(c1.Close)
 		k, v, err := c1.Next()
 		require.NoError(t, err)
-		require.Equal(t, append(acc1.Bytes(), acc1slot1.Bytes()...), k)
+		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), k)
 		wantValueBytes := make([]byte, 8)                      // 8 bytes for uint64 step num
 		binary.BigEndian.PutUint64(wantValueBytes, ^uint64(1)) // step num
 		wantValueBytes = append(wantValueBytes, byte(1))       // value we wrote to the storage slot
@@ -97,7 +97,7 @@ func TestHasPrefixForStorageDomain(t *testing.T) {
 		firstKey, ok, err := roTtx1.HasPrefix(kv.StorageDomain, acc1.Bytes())
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.Equal(t, append(acc1.Bytes(), acc1slot1.Bytes()...), firstKey)
+		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
 	}
 
 	// --- check 3: storage exists in files only - TemporalTx.HasPrefix should catch this
@@ -140,7 +140,7 @@ func TestHasPrefixForStorageDomain(t *testing.T) {
 		t.Cleanup(c2.Close)
 		k, v, err := c2.Next() // acc2 storage from step 2 will be there
 		require.NoError(t, err)
-		require.Equal(t, append(acc2.Bytes(), acc2slot2.Bytes()...), k)
+		require.Equal(t, append(append([]byte{}, acc2.Bytes()...), acc2slot2.Bytes()...), k)
 		wantValueBytes := make([]byte, 8)                      // 8 bytes for uint64 step num
 		binary.BigEndian.PutUint64(wantValueBytes, ^uint64(2)) // step num
 		wantValueBytes = append(wantValueBytes, byte(2))       // value we wrote to the storage slot
@@ -160,7 +160,7 @@ func TestHasPrefixForStorageDomain(t *testing.T) {
 		firstKey, ok, err := roTtx2.HasPrefix(kv.StorageDomain, acc1.Bytes())
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.Equal(t, append(acc1.Bytes(), acc1slot1.Bytes()...), firstKey)
+		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
 	}
 
 	// --- check 4: delete storage - TemporalTx.HasPrefix should catch this and say it does not exist
@@ -208,18 +208,18 @@ func TestHasPrefixForStorageDomain(t *testing.T) {
 		firstKey, ok, err := roTtx4.HasPrefix(kv.StorageDomain, acc1.Bytes())
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.Equal(t, append(acc1.Bytes(), acc1slot1.Bytes()...), firstKey)
+		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
 	}
 }
 
-func TestRangeAsOfForStorageDomain(t *testing.T) {
+func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	t.Parallel()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
 	logger := log.New()
-	logger.SetHandler(log.LvlFilterHandler(log.LvlTrace, log.StderrHandler))
+	logger.SetHandler(log.LvlFilterHandler(log.LvlCrit, log.StderrHandler))
 
 	mdbxDb := memdb.NewTestDB(t, kv.ChainDB)
 	dirs := datadir.New(t.TempDir())
