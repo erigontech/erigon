@@ -1193,7 +1193,7 @@ func (hph *HexPatriciaHashed) nCellsInRow(row int) int { //nolint:unused
 }
 
 // Traverse the grid following `hashedKey` and produce the witness `trie.Trie` for that key
-func (hph *HexPatriciaHashed) witnessToTrie(hashedKey []byte, codeReads map[common.Hash]witnesstypes.CodeWithHash) (*trie.Trie, error) {
+func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[common.Hash]witnesstypes.CodeWithHash) (*trie.Trie, error) {
 	rootNode := &trie.FullNode{}
 	var currentNode trie.Node = rootNode
 	keyPos := 0 // current position in hashedKey (usually same as row, but could be different due to extension nodes)
@@ -2049,7 +2049,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		//hph.updateCell(plainKey, hashedKey, update)
 
 		// convert grid to trie.Trie
-		tr, err = hph.witnessToTrie(hashedKey, codeReads) // build witness trie for this key, based on the current state of the grid
+		tr, err = hph.toWitnessTrie(hashedKey, codeReads) // build witness trie for this key, based on the current state of the grid
 		if err != nil {
 			return err
 		}
