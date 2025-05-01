@@ -105,10 +105,30 @@ func SpawnCustomTrace(cfg CustomTraceCfg, producingDomain kv.Domain, ctx context
 
 	log.Info("SpawnCustomTrace", "startBlock", startBlock, "endBlock", endBlock)
 
-	batchSize := uint64(10)
+	batchSize := uint64(1)
 	for ; startBlock < endBlock; startBlock += batchSize {
 		if err := customTraceBatchProduce(ctx, cfg.ExecArgs, cfg.db, startBlock, startBlock+batchSize, "custom_trace", producingDomain, logger); err != nil {
 			return err
+		}
+	}
+
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+	chkEvery := time.NewTicker(3 * time.Second)
+	defer chkEvery.Stop()
+
+Loop:
+	for {
+		select {
+		case <-cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator).WaitForBuildAndMerge(ctx):
+			break Loop
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-logEvery.C:
+			var m runtime.MemStats
+			dbg.ReadMemStats(&m)
+			//TODO: log progress and list of domains/files
+			logger.Info("[snapshots] Building files", "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 		}
 	}
 
