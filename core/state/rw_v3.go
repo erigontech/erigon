@@ -591,7 +591,7 @@ type ReaderV3 struct {
 func NewReaderV3(tx kv.TemporalGetter) *ReaderV3 {
 	return &ReaderV3{
 		//trace:     true,
-		tx:        tx, // tx may be SharedDomains which is useful to check if address has no storage keys at all
+		tx:        tx,
 		composite: make([]byte, 20+32),
 	}
 }
@@ -604,7 +604,7 @@ func (r *ReaderV3) SetTrace(trace bool)                  { r.trace = trace }
 func (r *ReaderV3) ResetReadSet()                        {}
 
 func (r *ReaderV3) HasStorage(address common.Address) (bool, error) {
-	_, _, ok, err := r.tx.HasPrefix(address)
+	_, _, ok, err := r.tx.HasPrefix(kv.StorageDomain, address.Bytes())
 	return ok, err
 }
 
