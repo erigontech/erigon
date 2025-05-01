@@ -120,11 +120,10 @@ jobs:
           -w /erigon --entrypoint /bin/bash
           ${{ env.BUILDER_IMAGE }}
           -c "git config --global --add safe.directory /erigon;
-          make GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosilkworm 
+          make GOARCH=arm64 GOBIN=/erigon-build
           erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool"
 
-        ## temporary disable silkworm in 3.x.x
-      - name: Build for linux/amd64 (with nosilkworm tag)
+      - name: Build for linux/amd64
         run: >
           docker run --platform linux/amd64
           --rm
@@ -135,12 +134,10 @@ jobs:
           -w /erigon --entrypoint /bin/bash
           ${{ env.BUILDER_IMAGE }}
           -c "git config --global --add safe.directory /erigon;
-          make GOARCH=amd64 GOAMD64=v1 GOAMD64_VERSION=v1 GOBIN=/erigon-build BUILD_TAGS=nosilkworm 
+          make GOARCH=amd64 GOAMD64=v1 GOAMD64_VERSION=v1 GOBIN=/erigon-build
           erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool;
-          if [ ${WITH_SILKWORM} ]; then find / -name libsilkworm_capi.so -exec install {} /erigon-build \; ; fi;"
-
-        ## temporary disable silkworm in 3.x.x
-      - name: Build for linux/amd64/v2 (with nosilkworm tag)
+ 
+      - name: Build for linux/amd64/v2
         run: >
           docker run --platform linux/amd64/v2
           --rm
@@ -151,9 +148,8 @@ jobs:
           -w /erigon --entrypoint /bin/bash
           ${{ env.BUILDER_IMAGE }}
           -c "git config --global --add safe.directory /erigon;
-          make GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build BUILD_TAGS=nosilkworm 
+          make GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build
           erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool;
-          if [ ${WITH_SILKWORM} ]; then find / -name libsilkworm_capi.so -exec install {} /erigon-build \; ; fi;"
 
       - name: Create archives and checksums
         env:

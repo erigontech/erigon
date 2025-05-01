@@ -45,10 +45,6 @@ ifeq ($(shell uname -s), Darwin)
 	endif
 endif
 
-ifneq ($(shell "$(CURDIR)/turbo/silkworm/silkworm_compat_check.sh"),)
-	BUILD_TAGS := nosilkworm
-endif
-
 override BUILD_TAGS += $(EXTRA_BUILD_TAGS)
 
 GOPRIVATE = github.com/erigontech/silkworm-go
