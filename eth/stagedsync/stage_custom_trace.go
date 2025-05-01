@@ -88,7 +88,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, producingDomain kv.Domain, ctx context
 			panic(ok)
 		}
 
-		txNum = ac.DbgDomain(producingDomain).FirstStepNotInFiles() * stepSize
+		txNum = max(ac.DbgDomain(producingDomain).FirstStepNotInFiles()*stepSize, ac.DbgDomain(producingDomain).DbgMaxTxNumInDB(tx))
 		log.Info("[dbg] SpawnCustomTrace", "accountsDomain", ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx), "producingDomain", ac.DbgDomain(producingDomain).DbgMaxTxNumInDB(tx), "producingDomainFiles", ac.DbgDomain(producingDomain).Files())
 		ok, startBlock, err = txNumsReader.FindBlockNum(tx, txNum)
 		if err != nil {
