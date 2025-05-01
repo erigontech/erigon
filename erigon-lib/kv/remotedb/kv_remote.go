@@ -184,8 +184,9 @@ func (db *DB) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	}
 	return &tx{ctx: ctx, db: db, stream: stream, streamCancelFn: streamCancelFn, viewID: msg.ViewId, id: msg.TxId}, nil
 }
-func (db *DB) Debug() kv.TemporalDebugDB                 { return kv.TemporalDebugDB(db) }
-func (db *DB) DomainTables(domain ...kv.Domain) []string { panic("not implemented") }
+func (db *DB) Debug() kv.TemporalDebugDB                           { return kv.TemporalDebugDB(db) }
+func (db *DB) DomainTables(domain ...kv.Domain) []string           { panic("not implemented") }
+func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string { panic("not implemented") }
 
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	t, err := db.BeginRo(ctx) //nolint:gocritic
@@ -372,8 +373,8 @@ func (tx *tx) Cursor(bucket string) (kv.Cursor, error) {
 	return c, nil
 }
 
-func (tx *tx) ListBuckets() ([]string, error) {
-	return nil, errors.New("function ListBuckets is not implemented for remoteTx")
+func (tx *tx) ListTables() ([]string, error) {
+	return nil, errors.New("function ListTables is not implemented for remoteTx")
 }
 
 // func (c *remoteCursor) Put(k []byte, v []byte) error            { panic("not supported") }

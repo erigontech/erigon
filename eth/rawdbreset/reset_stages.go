@@ -20,20 +20,20 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-db/rawdb/blockio"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/backup"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
-	"github.com/erigontech/erigon/erigon-db/rawdb/blockio"
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
-func ResetState(db kv.RwDB, agg *state.Aggregator, ctx context.Context, chain string, tmpDir string, logger log.Logger) error {
+func ResetState(db kv.TemporalRwDB, ctx context.Context) error {
 	// don't reset senders here
 	if err := db.Update(ctx, ResetTxLookup); err != nil {
 		return err
@@ -45,7 +45,7 @@ func ResetState(db kv.RwDB, agg *state.Aggregator, ctx context.Context, chain st
 		return err
 	}
 
-	if err := ResetExec(ctx, db, agg, chain, tmpDir, logger); err != nil {
+	if err := ResetExec(ctx, db); err != nil {
 		return err
 	}
 	return nil
@@ -109,13 +109,13 @@ func ResetBorHeimdall(ctx context.Context, tx kv.RwTx, db kv.RwDB) error {
 		}
 		defer tx.Rollback()
 	}
-	if err := tx.ClearBucket(kv.BorEventNums); err != nil {
+	if err := tx.ClearTable(kv.BorEventNums); err != nil {
 		return err
 	}
-	if err := tx.ClearBucket(kv.BorEvents); err != nil {
+	if err := tx.ClearTable(kv.BorEvents); err != nil {
 		return err
 	}
-	if err := tx.ClearBucket(kv.BorSpans); err != nil {
+	if err := tx.ClearTable(kv.BorSpans); err != nil {
 		return err
 	}
 	if err := clearStageProgress(tx, stages.BorHeimdall); err != nil {
@@ -140,7 +140,7 @@ func ResetPolygonSync(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services
 	}
 
 	for _, table := range tables {
-		if err := tx.ClearBucket(table); err != nil {
+		if err := tx.ClearTable(table); err != nil {
 			return err
 		}
 	}
@@ -159,12 +159,12 @@ func ResetSenders(ctx context.Context, db kv.RwDB, tx kv.RwTx) error {
 	return clearStageProgress(tx, stages.Senders)
 }
 
-func ResetExec(ctx context.Context, db kv.RwDB, agg *state.Aggregator, chain string, tmpDir string, logger log.Logger) (err error) {
+func ResetExec(ctx context.Context, db kv.TemporalRwDB) (err error) {
 	cleanupList := make([]string, 0)
 	cleanupList = append(cleanupList, stateBuckets...)
 	cleanupList = append(cleanupList, stateHistoryBuckets...)
-	cleanupList = append(cleanupList, agg.DomainTables(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain)...)
-	cleanupList = append(cleanupList, agg.InvertedIndexTables(kv.LogAddrIdx, kv.LogTopicIdx, kv.TracesFromIdx, kv.TracesToIdx)...)
+	cleanupList = append(cleanupList, db.Debug().DomainTables(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain)...)
+	cleanupList = append(cleanupList, db.Debug().InvertedIdxTables(kv.LogAddrIdx, kv.LogTopicIdx, kv.TracesFromIdx, kv.TracesToIdx)...)
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if err := clearStageProgress(tx, stages.Execution); err != nil {
@@ -180,7 +180,7 @@ func ResetExec(ctx context.Context, db kv.RwDB, agg *state.Aggregator, chain str
 }
 
 func ResetTxLookup(tx kv.RwTx) error {
-	if err := tx.ClearBucket(kv.TxLookup); err != nil {
+	if err := tx.ClearTable(kv.TxLookup); err != nil {
 		return err
 	}
 	if err := stages.SaveStageProgress(tx, stages.TxLookup, 0); err != nil {
