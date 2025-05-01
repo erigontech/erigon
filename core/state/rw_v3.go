@@ -576,20 +576,8 @@ func (r *ReaderV3) SetTrace(trace bool)                  { r.trace = trace }
 func (r *ReaderV3) ResetReadSet()                        {}
 
 func (r *ReaderV3) HasStorage(address common.Address) (bool, error) {
-	sd, ok := r.tx.(*state.SharedDomains)
-	if !ok {
-		panic("AddressHasNoStorage: ReaderV3.tx is not SharedDomains")
-	}
-
-	var hasStorage bool
-	err := sd.IterateStoragePrefix(address.Bytes(), func(ask []byte, val []byte, step uint64) (bool, error) {
-		hasStorage = true
-		return false, nil
-	})
-	if err != nil {
-		return false, err
-	}
-	return hasStorage, nil
+	_, _, ok, err := r.tx.HasPrefix(address)
+	return ok, err
 }
 
 func (r *ReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
@@ -688,17 +676,12 @@ func (r *ReaderParallelV3) SetTrace(trace bool)                  { r.trace = tra
 func (r *ReaderParallelV3) ResetReadSet()                        { r.readLists = newReadList() }
 
 func (r *ReaderParallelV3) HasStorage(address common.Address) (bool, error) {
-	var hasStorage bool
-	err := r.sd.IterateStoragePrefix(address.Bytes(), func(ask []byte, val []byte, step uint64) (bool, error) {
-		hasStorage = true
-		if !r.discardReadList {
-			// lifecycle of `r.readList` is less than lifecycle of `r.rs` and `r.tx`, also `r.rs` and `r.tx` do store data immutable way
-			r.readLists[kv.StorageDomain.String()].Push(string(ask), common.Copy(val))
-		}
-		return false, nil
-	})
+	firstK, firstV, hasStorage, err := r.sd.HasPrefix(kv.StorageDomain, address.Bytes())
 	if err != nil {
 		return false, err
+	}
+	if !r.discardReadList {
+		r.readLists[kv.StorageDomain.String()].Push(string(firstK), firstV)
 	}
 	return hasStorage, nil
 }
