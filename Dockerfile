@@ -19,7 +19,7 @@ ADD . .
 RUN --mount=type=cache,target=/root/.cache \
     --mount=type=cache,target=/tmp/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    make BUILD_TAGS=noboltdb,nosilkworm rpcdaemon
+    make BUILD_TAGS=nosilkworm rpcdaemon
 
 RUN --mount=type=cache,target=/root/.cache \
     --mount=type=cache,target=/tmp/go-build \

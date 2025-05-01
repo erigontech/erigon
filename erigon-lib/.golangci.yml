@@ -1,7 +1,6 @@
 version: "2"
 run:
   build-tags:
-    - noboltdb
     - nosilkworm
 linters:
   enable:
