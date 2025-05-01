@@ -14,12 +14,13 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package exec3
+package calltracer
 
 import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/eth/tracers"
 )
@@ -35,6 +36,10 @@ func NewCallTracer(hooks *tracing.Hooks) *CallTracer {
 		hooks: hooks,
 	}
 }
+
+func (ct *CallTracer) TracingHooks() *tracing.Hooks        { return ct.hooks }
+func (ct *CallTracer) SetTransaction(tx types.Transaction) {}
+func (ct *CallTracer) Found() bool                         { return true }
 
 func (ct *CallTracer) Tracer() *tracers.Tracer {
 	var hooks tracing.Hooks

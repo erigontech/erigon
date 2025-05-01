@@ -11,13 +11,17 @@ on:
 jobs:
   minimal-node-sync-from-scratch-test:
     runs-on: [self-hosted, qa, long-running]
-    timeout-minutes: 500 # 8 hours plus 20 minutes
+    timeout-minutes: 740  # 12 hours plus 20 minutes
+    strategy:
+      fail-fast: false
+      matrix:
+        chain: [ mainnet, bor-mainnet ]  # Chain name as specified on the erigon command line
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 7200 # 2 hours
-      TOTAL_TIME_SECONDS: 28800 # 8 hours
-      CHAIN: mainnet
+      TOTAL_TIME_SECONDS: 43200 # 12 hours
+      CHAIN: ${{ matrix.chain }}
 
     steps:
       - name: Check out repository
@@ -80,7 +84,7 @@ jobs:
         if: steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: test-results
+          name: test-results-${{ env.CHAIN }}
           path: |
             ${{ github.workspace }}/result-${{ env.CHAIN }}.json
             ${{ github.workspace }}/erigon_data/logs/erigon.log

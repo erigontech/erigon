@@ -218,7 +218,7 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 				&cli.StringFlag{Name: "step"},
 				&cli.BoolFlag{Name: "latest"},
-				&cli.StringFlag{Name: "domain"},
+				&cli.StringSliceFlag{Name: "domain"},
 			},
 			),
 		},
@@ -392,21 +392,29 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 		fmt.Printf("removed %d state segments files\n", removed)
 	}
 	if cliCtx.IsSet("domain") {
-		domainToRemove, err := kv.String2Domain(cliCtx.String("domain"))
-		if err != nil {
-			return err
-		}
-		var removed int
-		for _, res := range files {
-			if !strings.Contains(res.Name(), domainToRemove.String()) {
-				continue
+		domainNames := cliCtx.StringSlice("domain")
+		for _, domainName := range domainNames {
+			_, err := kv.String2InvertedIdx(domainName)
+			if err != nil {
+				_, err = kv.String2Domain(domainName)
+				if err != nil {
+					return err
+				}
 			}
-			if err := os.Remove(res.Path); err != nil {
-				return fmt.Errorf("failed to remove %s: %w", res.Path, err)
+
+			var removed int
+			for _, res := range files {
+				if !strings.Contains(res.Name(), domainName) {
+					continue
+				}
+				if err := os.Remove(res.Path); err != nil {
+					return fmt.Errorf("failed to remove %s: %w", res.Path, err)
+				}
+				removed++
 			}
-			removed++
+			fmt.Printf("removed %d state segments files of %s\n", removed, domainName)
 		}
-		fmt.Printf("removed %d state segments files\n", removed)
+
 	}
 
 	return nil
@@ -575,15 +583,15 @@ func doIntegrity(cliCtx *cli.Context) error {
 				return err
 			}
 		case integrity.BorSpans:
-			if err := integrity.ValidateBorSpans(logger, dirs, borSnaps, failFast); err != nil {
+			if err := integrity.ValidateBorSpans(ctx, logger, dirs, borSnaps, failFast); err != nil {
 				return err
 			}
 		case integrity.BorCheckpoints:
-			if err := integrity.ValidateBorCheckpoints(logger, dirs, borSnaps, failFast); err != nil {
+			if err := integrity.ValidateBorCheckpoints(ctx, logger, dirs, borSnaps, failFast); err != nil {
 				return err
 			}
 		case integrity.BorMilestones:
-			if err := integrity.ValidateBorMilestones(logger, dirs, borSnaps, failFast); err != nil {
+			if err := integrity.ValidateBorMilestones(ctx, logger, dirs, borSnaps, failFast); err != nil {
 				return err
 			}
 		case integrity.ReceiptsNoDups:
@@ -1165,6 +1173,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	if chainConfig.Bor != nil {
 		const PolygonSync = true
 		if PolygonSync {
+			borSnaps.DownloadComplete() // mark as ready
 			bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, true, 0), borSnaps, chainConfig.Bor)
 			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, true, 0), borSnaps)
 		} else {
