@@ -23,19 +23,19 @@ import (
 
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/eth1/eth1_utils"
 )
 
 var errNotFound = errors.New("notfound")
 
-func (e *EthereumExecutionModule) parseSegmentRequest(ctx context.Context, tx kv.Tx, req *execution.GetSegmentRequest) (blockHash libcommon.Hash, blockNumber uint64, err error) {
+func (e *EthereumExecutionModule) parseSegmentRequest(ctx context.Context, tx kv.Tx, req *execution.GetSegmentRequest) (blockHash common.Hash, blockNumber uint64, err error) {
 	switch {
 	// Case 1: Only hash is given.
 	case req.BlockHash != nil && req.BlockNumber == nil:
@@ -43,7 +43,7 @@ func (e *EthereumExecutionModule) parseSegmentRequest(ctx context.Context, tx kv
 		var blockNumberPtr *uint64
 		blockNumberPtr, err = e.blockReader.HeaderNumber(ctx, tx, blockHash)
 		if err != nil {
-			return libcommon.Hash{}, 0, err
+			return common.Hash{}, 0, err
 		}
 		if blockNumberPtr == nil {
 			err = errNotFound
@@ -176,7 +176,7 @@ func (e *EthereumExecutionModule) GetBodiesByRange(ctx context.Context, req *exe
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByRange: ReadCanonicalHash error %w", err)
 		}
-		if hash == (libcommon.Hash{}) {
+		if hash == (common.Hash{}) {
 			// break early if beyond the last known canonical header
 			break
 		}
@@ -228,7 +228,7 @@ func (e *EthereumExecutionModule) GetHeaderHashNumber(ctx context.Context, req *
 	return &execution.GetHeaderHashNumberResponse{BlockNumber: blockNumber}, nil
 }
 
-func (e *EthereumExecutionModule) isCanonicalHash(ctx context.Context, tx kv.Tx, hash libcommon.Hash) (bool, error) {
+func (e *EthereumExecutionModule) isCanonicalHash(ctx context.Context, tx kv.Tx, hash common.Hash) (bool, error) {
 	blockNumber, err := e.blockReader.HeaderNumber(ctx, tx, hash)
 	if err != nil {
 		return false, fmt.Errorf("ethereumExecutionModule.isCanonicalHash: HeaderNumber error %w", err)

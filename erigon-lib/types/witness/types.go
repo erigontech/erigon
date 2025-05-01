@@ -1,16 +1,16 @@
 package witness
 
 import (
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
 type AccountWithAddress struct {
-	Address libcommon.Address
+	Address common.Address
 	Account *accounts.Account
 }
 
 type CodeWithHash struct {
 	Code     []byte
-	CodeHash libcommon.Hash
+	CodeHash common.Hash
 }

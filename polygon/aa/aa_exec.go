@@ -5,15 +5,17 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/big"
 
+	"github.com/erigontech/erigon-lib/abi"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/execution/abi"
 )
 
 func ValidateAATransaction(
@@ -66,6 +68,11 @@ func ValidateAATransaction(
 
 	// TODO: Nonce manager frame
 	// applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
+
+	senderNonce, _ := ibs.GetNonce(*tx.SenderAddress)
+	if tx.Nonce > senderNonce+1 { // ibs returns last used nonce
+		return nil, 0, errors.New("nonce too low")
+	}
 
 	// Deployer frame
 	msg := tx.DeployerFrame()
@@ -236,6 +243,14 @@ func ExecuteAATransaction(
 ) (executionStatus uint64, gasUsed uint64, err error) {
 	executionStatus = types.ExecutionStatusSuccess
 
+	nonce, err := ibs.GetNonce(*tx.SenderAddress)
+	if err != nil {
+		return 0, 0, err
+	}
+	if err = ibs.SetNonce(*tx.SenderAddress, nonce+1); err != nil {
+		return 0, 0, err
+	}
+
 	// Execution frame
 	msg := tx.ExecutionFrame()
 	applyRes, err := core.ApplyFrame(evm, msg, gasPool)
@@ -287,6 +302,20 @@ func ExecuteAATransaction(
 	gasPool.AddGas(params.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit - gasUsed)
 
 	return executionStatus, gasUsed, nil
+}
+
+func CreateAAReceipt(txnHash common.Hash, status, gasUsed, cumGasUsed, blockNum, txnIndex uint64, logs types.Logs) *types.Receipt {
+	receipt := &types.Receipt{Type: types.AccountAbstractionTxType, CumulativeGasUsed: cumGasUsed}
+	receipt.Status = status
+	receipt.TxHash = txnHash
+	receipt.GasUsed = gasUsed
+	// Set the receipt logs and create a bloom for filtering
+	receipt.Logs = logs
+	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
+	receipt.BlockNumber = big.NewInt(int64(blockNum))
+	receipt.TransactionIndex = uint(txnIndex)
+
+	return receipt
 }
 
 // TODO: get rid of?

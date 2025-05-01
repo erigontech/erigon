@@ -159,7 +159,6 @@ type ServiceTestSuite struct {
 }
 
 func (suite *ServiceTestSuite) SetupSuite() {
-	suite.T().Parallel()
 	ctrl := gomock.NewController(suite.T())
 	tempDir := suite.T().TempDir()
 	dataDir := fmt.Sprintf("%s/datadir", tempDir)
@@ -183,7 +182,7 @@ func (suite *ServiceTestSuite) SetupSuite() {
 	})
 
 	err := suite.service.store.Prepare(suite.ctx)
-	require.NoError(suite.T(), err)
+	suite.Require().NoError(err)
 
 	suite.service.RegisterMilestoneObserver(func(milestone *Milestone) {
 		suite.observedMilestones = append(suite.observedMilestones, milestone)
@@ -198,17 +197,17 @@ func (suite *ServiceTestSuite) SetupSuite() {
 	})
 
 	lastMilestone, ok, err := suite.service.SynchronizeMilestones(suite.ctx)
-	require.NoError(suite.T(), err)
-	require.True(suite.T(), ok)
-	require.Equal(suite.T(), suite.expectedLastMilestone, uint64(lastMilestone.Id))
+	suite.Require().NoError(err)
+	suite.Require().True(ok)
+	suite.Require().Equal(suite.expectedLastMilestone, uint64(lastMilestone.Id))
 
 	lastCheckpoint, ok, err := suite.service.SynchronizeCheckpoints(suite.ctx)
-	require.NoError(suite.T(), err)
-	require.True(suite.T(), ok)
-	require.Equal(suite.T(), suite.expectedLastCheckpoint, uint64(lastCheckpoint.Id))
+	suite.Require().NoError(err)
+	suite.Require().True(ok)
+	suite.Require().Equal(suite.expectedLastCheckpoint, uint64(lastCheckpoint.Id))
 
 	err = suite.service.SynchronizeSpans(suite.ctx, math.MaxInt)
-	require.NoError(suite.T(), err)
+	suite.Require().NoError(err)
 }
 
 func (suite *ServiceTestSuite) TearDownSuite() {
@@ -216,7 +215,7 @@ func (suite *ServiceTestSuite) TearDownSuite() {
 	suite.cancel()
 	err := suite.eg.Wait()
 	suite.logger.Info("test has been torn down")
-	require.ErrorIs(suite.T(), err, context.Canceled)
+	suite.Require().ErrorIs(err, context.Canceled)
 }
 
 func (suite *ServiceTestSuite) TestMilestones() {
@@ -251,7 +250,7 @@ func (suite *ServiceTestSuite) TestMilestones() {
 }
 
 func (suite *ServiceTestSuite) TestRegisterMilestoneObserver() {
-	require.Len(suite.T(), suite.observedMilestones, int(suite.expectedLastMilestone-suite.expectedFirstMilestone+1))
+	suite.Require().Len(suite.observedMilestones, int(suite.expectedLastMilestone-suite.expectedFirstMilestone+1))
 }
 
 func (suite *ServiceTestSuite) TestCheckpoints() {
@@ -317,7 +316,7 @@ func (suite *ServiceTestSuite) TestSpans() {
 }
 
 func (suite *ServiceTestSuite) TestRegisterSpanObserver() {
-	require.Len(suite.T(), suite.observedSpans, int(suite.expectedLastSpan+1)) // +1 for span 0
+	suite.Require().Len(suite.observedSpans, int(suite.expectedLastSpan+1)) // +1 for span 0
 }
 
 func (suite *ServiceTestSuite) TestProducers() {
@@ -343,7 +342,7 @@ func (suite *ServiceTestSuite) producersSubTest(blockNum uint64) {
 		require.NoError(t, err)
 
 		errInfoMsgArgs := []interface{}{"wantProducers: %v\nhaveProducers: %v\n", wantProducers, haveProducers}
-		require.Equal(t, len(wantProducers.Signers), len(haveProducers.Validators), errInfoMsgArgs...)
+		require.Len(t, haveProducers.Validators, len(wantProducers.Signers), errInfoMsgArgs...)
 		for _, signer := range wantProducers.Signers {
 			wantDifficulty := signer.Difficulty
 			_, producer := haveProducers.GetByAddress(signer.Signer)
@@ -365,8 +364,8 @@ func (suite *ServiceTestSuite) producersSubTest(blockNum uint64) {
 
 func (suite *ServiceTestSuite) setupSpans() {
 	files, err := dir.ReadDir(suite.spansTestDataDir)
-	require.NoError(suite.T(), err)
-	require.Greater(suite.T(), len(files), 0)
+	suite.Require().NoError(err)
+	require.NotEmpty(suite.T(), files)
 
 	slices.SortFunc(files, func(a, b os.DirEntry) int {
 		idA := extractIdFromFileName(suite.T(), a.Name(), "span")
@@ -414,8 +413,8 @@ func (suite *ServiceTestSuite) setupSpans() {
 
 func (suite *ServiceTestSuite) setupCheckpoints() {
 	files, err := dir.ReadDir(suite.checkpointsTestDataDir)
-	require.NoError(suite.T(), err)
-	require.Greater(suite.T(), len(files), 0)
+	suite.Require().NoError(err)
+	require.NotEmpty(suite.T(), files)
 
 	// leave a few of the last checkpoints for sequential flow, all spans before them for batch flow
 	lastSequentialFetchIdx := len(files) - 1
@@ -461,8 +460,8 @@ func (suite *ServiceTestSuite) setupCheckpoints() {
 
 func (suite *ServiceTestSuite) setupMilestones() {
 	files, err := dir.ReadDir(suite.milestonesTestDataDir)
-	require.NoError(suite.T(), err)
-	require.Greater(suite.T(), len(files), 0)
+	suite.Require().NoError(err)
+	require.NotEmpty(suite.T(), files)
 
 	slices.SortFunc(files, func(a, b os.DirEntry) int {
 		idA := extractIdFromFileName(suite.T(), a.Name(), "milestone")

@@ -10,7 +10,7 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
@@ -104,11 +104,11 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 		NetworkId:       uint64(resp.Result.Protocols.Eth.Network),
 		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(uint256.MustFromDecimal(strconv.Itoa(resp.Result.Protocols.Eth.Difficulty))),
 		BestHash: gointerfaces.ConvertHashToH256(
-			[32]byte(libcommon.FromHex(resp.Result.Protocols.Eth.Genesis)),
+			[32]byte(common.FromHex(resp.Result.Protocols.Eth.Genesis)),
 		),
 		ForkData: &sentryproto.Forks{
 			Genesis: gointerfaces.ConvertHashToH256(
-				[32]byte(libcommon.FromHex(resp.Result.Protocols.Eth.Genesis)),
+				[32]byte(common.FromHex(resp.Result.Protocols.Eth.Genesis)),
 			),
 		},
 	})

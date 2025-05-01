@@ -214,6 +214,9 @@ func (tx *Tx) Commit() error {
 func (tx *Tx) HistoryStartFrom(name kv.Domain) uint64 {
 	return tx.aggtx.HistoryStartFrom(name)
 }
+func (tx *Tx) HistoryEndTxNum(name kv.Domain) uint64 {
+	return tx.aggtx.HistoryEndTxNum(name, tx.MdbxTx)
+}
 
 func (tx *Tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
 	it, err := tx.aggtx.RangeAsOf(tx.ctx, tx.MdbxTx, name, fromKey, toKey, asOfTs, asc, limit)
@@ -222,6 +225,25 @@ func (tx *Tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, as
 	}
 	tx.resourcesToClose = append(tx.resourcesToClose, it)
 	return it, nil
+}
+
+func (tx *Tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, bool, error) {
+	it, err := tx.Debug().RangeLatest(name, prefix, nil, 1)
+	if err != nil {
+		return nil, false, err
+	}
+
+	defer it.Close()
+	if !it.HasNext() {
+		return nil, false, nil
+	}
+
+	k, _, err := it.Next()
+	if err != nil {
+		return nil, false, err
+	}
+
+	return k, true, nil
 }
 
 func (tx *Tx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err error) {
@@ -283,10 +305,15 @@ func (tx *Tx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step uint64
 func (tx *Tx) GetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	return tx.aggtx.DebugGetLatestFromFiles(domain, k, maxTxNum)
 }
-func (tx *Tx) DomainTables(domain ...kv.Domain) []string { return tx.db.agg.DomainTables(domain...) }
 func (db *DB) DomainTables(domain ...kv.Domain) []string { return db.agg.DomainTables(domain...) }
 func (tx *Tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
 	return tx.aggtx.DomainFiles(domain...)
+}
+func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string {
+	return db.agg.InvertedIdxTables(domain...)
+}
+func (tx *Tx) TxNumsInFiles(domains ...kv.Domain) (minTxNum uint64) {
+	return tx.aggtx.TxNumsInFiles(domains...)
 }
 func (tx *Tx) PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error) {
 	return tx.aggtx.PruneSmallBatches(ctx, timeout, tx.MdbxTx)

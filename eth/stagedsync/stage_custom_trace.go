@@ -20,19 +20,21 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"strings"
 	"time"
 
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3"
@@ -44,9 +46,42 @@ type CustomTraceCfg struct {
 	tmpdir   string
 	db       kv.TemporalRwDB
 	ExecArgs *exec3.ExecArgs
+
+	Produce Produce
+}
+type Produce struct {
+	ReceiptDomain bool
+	RCacheDomain  bool
+	LogIndex      bool
+	TraceIndex    bool
 }
 
-func StageCustomTraceCfg(db kv.TemporalRwDB, dirs datadir.Dirs, br services.FullBlockReader, cc *chain.Config, engine consensus.Engine, genesis *types.Genesis, syncCfg *ethconfig.Sync) CustomTraceCfg {
+func NewProduce(produceList []string) Produce {
+	var produce Produce
+	for _, p := range produceList {
+		p = strings.TrimSpace(p)
+		if p == kv.ReceiptDomain.String() {
+			produce.ReceiptDomain = true
+			continue
+		}
+		if p == kv.RCacheDomain.String() {
+			produce.RCacheDomain = true
+			continue
+		}
+		if p == "logindex" {
+			produce.LogIndex = true
+			continue
+		}
+		if p == "traceindex" {
+			produce.TraceIndex = true
+			continue
+		}
+		panic(fmt.Errorf("assert: unknown Produce %s", p))
+	}
+	return produce
+}
+
+func StageCustomTraceCfg(produce []string, db kv.TemporalRwDB, dirs datadir.Dirs, br services.FullBlockReader, cc *chain.Config, engine consensus.Engine, genesis *types.Genesis, syncCfg *ethconfig.Sync) CustomTraceCfg {
 	execArgs := &exec3.ExecArgs{
 		ChainDB:     db,
 		BlockReader: br,
@@ -55,23 +90,31 @@ func StageCustomTraceCfg(db kv.TemporalRwDB, dirs datadir.Dirs, br services.Full
 		Engine:      engine,
 		Genesis:     genesis,
 		Workers:     syncCfg.ExecWorkerCount,
-
-		ProduceReceiptDomain: dbg.EnvBool("PRODUCE_RECEIPT_DOMAIN", true),
 	}
 	return CustomTraceCfg{
 		db:       db,
 		ExecArgs: execArgs,
+		Produce:  NewProduce(produce),
 	}
 }
 
 func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger) error {
+	log.Info("[stage_custom_trace] start params", "produce", cfg.Produce)
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.ExecArgs.BlockReader))
+
+	var producingDomain kv.Domain
+	if cfg.Produce.ReceiptDomain {
+		producingDomain = kv.ReceiptDomain
+	}
+	if cfg.Produce.RCacheDomain {
+		producingDomain = kv.RCacheDomain
+	}
 
 	var startBlock, endBlock uint64
 	if err := cfg.db.View(ctx, func(tx kv.Tx) (err error) {
 		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 		stepSize := ac.StepSize()
-		txNum := ac.DbgDomain(kv.AccountsDomain).FirstStepNotInFiles() * stepSize
+		txNum := max(ac.DbgDomain(kv.AccountsDomain).FirstStepNotInFiles()*stepSize, ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx))
 		var ok bool
 		ok, endBlock, err = txNumsReader.FindBlockNum(tx, txNum)
 		if err != nil {
@@ -81,14 +124,22 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 			panic(ok)
 		}
 
-		txNum = ac.DbgDomain(kv.ReceiptDomain).FirstStepNotInFiles() * stepSize
-		log.Info("[dbg] SpawnCustomTrace", "accountsDomainProgress", ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx), "receiptDomainProgress", ac.DbgDomain(kv.ReceiptDomain).DbgMaxTxNumInDB(tx), "receiptDomainFiles", ac.DbgDomain(kv.ReceiptDomain).Files())
-		ok, startBlock, err = txNumsReader.FindBlockNum(tx, txNum)
+		fromTxNum := ac.DbgDomain(producingDomain).FirstStepNotInFiles() * stepSize
+		ok, startBlock, err = txNumsReader.FindBlockNum(tx, fromTxNum)
 		if err != nil {
 			return fmt.Errorf("getting last executed block: %w", err)
 		}
 		if !ok {
 			panic(ok)
+		}
+		log.Info("[dbg] SpawnCustomTrace", "accountsDomain", ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx), "producingDomain", ac.DbgDomain(producingDomain).DbgMaxTxNumInDB(tx), "producingDomainFiles", ac.DbgDomain(producingDomain).Files())
+		{
+			txNumInFiles := ac.DbgDomain(kv.AccountsDomain).FirstStepNotInFiles() * stepSize
+			txNumInDB := ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx)
+			_, e1, _ := txNumsReader.FindBlockNum(tx, txNumInFiles)
+			_, e2, _ := txNumsReader.FindBlockNum(tx, txNumInDB)
+
+			log.Info("[dbg] SpawnCustomTrace2", "e1", e1, "e2", e2)
 		}
 		return nil
 	}); err != nil {
@@ -100,7 +151,8 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 
 	batchSize := uint64(100_000)
 	for ; startBlock < endBlock; startBlock += batchSize {
-		if err := customTraceBatchProduce(ctx, cfg.ExecArgs, cfg.db, startBlock, startBlock+batchSize, "custom_trace", logger); err != nil {
+		to := min(endBlock+1, startBlock+batchSize)
+		if err := customTraceBatchProduce(ctx, cfg.Produce, cfg.ExecArgs, cfg.db, startBlock, to, "custom_trace", producingDomain, logger); err != nil {
 			return err
 		}
 	}
@@ -121,7 +173,7 @@ Loop:
 			var m runtime.MemStats
 			dbg.ReadMemStats(&m)
 			//TODO: log progress and list of domains/files
-			logger.Info("[snapshots] Building files", "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+			logger.Info("[snapshots] Building files", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 		}
 	}
 
@@ -137,10 +189,14 @@ Loop:
 	log.Info("SpawnCustomTrace finish")
 	if err := cfg.db.View(ctx, func(tx kv.Tx) error {
 		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
-		receiptProgress := ac.DbgDomain(kv.ReceiptDomain).DbgMaxTxNumInDB(tx)
-		accProgress := ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx)
+		stepSize := ac.StepSize()
+		receiptProgress := ac.DbgDomain(producingDomain).DbgMaxTxNumInDB(tx)
+		accProgress := max(ac.DbgDomain(kv.AccountsDomain).FirstStepNotInFiles()*stepSize, ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx))
 		if accProgress != receiptProgress {
-			err := fmt.Errorf("[integrity] ReceiptDomain=%d is behind AccountDomain=%d", receiptProgress, accProgress)
+			_, e1, _ := txNumsReader.FindBlockNum(tx, receiptProgress)
+			_, e2, _ := txNumsReader.FindBlockNum(tx, accProgress)
+
+			err := fmt.Errorf("[integrity] %s=%d (%d) is behind AccountDomain=%d(%d)", producingDomain.String(), receiptProgress, e1, accProgress, e2)
 			log.Warn(err.Error())
 			return nil
 		}
@@ -151,7 +207,7 @@ Loop:
 	return nil
 }
 
-func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.TemporalRwDB, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
+func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.ExecArgs, db kv.TemporalRwDB, fromBlock, toBlock uint64, logPrefix string, producingDomain kv.Domain, logger log.Logger) error {
 	var lastTxNum uint64
 	{
 		tx, err := db.BeginTemporalRw(ctx)
@@ -166,7 +222,7 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.Tem
 		}
 		defer doms.Close()
 
-		if err := customTraceBatch(ctx, cfg, tx, doms, fromBlock, toBlock, logPrefix, logger); err != nil {
+		if err := customTraceBatch(ctx, produce, cfg, tx, doms, fromBlock, toBlock, logPrefix, logger); err != nil {
 			return err
 		}
 
@@ -175,7 +231,8 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.Tem
 			return err
 		}
 
-		if cfg.ChainConfig.Bor == nil { //assert
+		//asserts
+		if produce.ReceiptDomain {
 			if err = AssertReceipts(ctx, cfg, tx, fromBlock, toBlock); err != nil {
 				return err
 			}
@@ -194,7 +251,7 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.Tem
 	}
 	if err := db.View(ctx, func(tx kv.Tx) error {
 		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
-		fromStep = ac.DbgDomain(kv.ReceiptDomain).FirstStepNotInFiles()
+		fromStep = ac.DbgDomain(producingDomain).FirstStepNotInFiles()
 		return nil
 	}); err != nil {
 		return err
@@ -204,6 +261,9 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.Tem
 	}
 
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
+		if err := tx.(kv.TemporalRwTx).Debug().GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
+			return err
+		}
 		if _, err := tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 10*time.Hour); err != nil {
 			return err
 		}
@@ -216,6 +276,9 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.Tem
 
 func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, fromBlock, toBlock uint64) (err error) {
 	if !dbg.AssertEnabled {
+		return nil
+	}
+	if cfg.ChainConfig.Bor != nil { //TODO: enable me
 		return nil
 	}
 
@@ -279,7 +342,7 @@ func badFoundBlockNum(tx kv.Tx, fromBlock uint64, txNumsReader rawdbv3.TxNumsRea
 	return fromBlock + i
 }
 
-func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, doms *state2.SharedDomains, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
+func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, doms *state2.SharedDomains, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
 	const logPeriod = 5 * time.Second
 	logEvery := time.NewTicker(logPeriod)
 	defer logEvery.Stop()
@@ -292,7 +355,6 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 
 	var m runtime.MemStats
 	if err := exec3.CustomTraceMapReduce(fromBlock, toBlock, exec3.TraceConsumer{
-		NewTracer: func() exec3.GenericTracer { return nil },
 		Reduce: func(txTask *state.TxTask, tx kv.TemporalTx) error {
 			if txTask.Error != nil {
 				return txTask.Error
@@ -312,44 +374,90 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			doms.SetTx(tx)
 			doms.SetTxNum(txTask.TxNum)
 
-			if !txTask.Final {
-				var receipt *types.Receipt
-				if txTask.TxIndex >= 0 {
-					receipt = txTask.BlockReceipts[txTask.TxIndex]
+			if produce.ReceiptDomain {
+				if !txTask.Final {
+					var receipt *types.Receipt
+					if txTask.TxIndex >= 0 {
+						receipt = txTask.BlockReceipts[txTask.TxIndex]
+					}
+					if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock); err != nil {
+						return err
+					}
 				}
-				if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock); err != nil {
+
+				if txTask.Final { // block changed
+					if cfg.ChainConfig.Bor != nil && txTask.TxIndex >= 1 {
+						// get last receipt and store the last log index + 1
+						lastReceipt := txTask.BlockReceipts[txTask.TxIndex-1]
+						if lastReceipt == nil {
+							return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
+						}
+						if len(lastReceipt.Logs) > 0 {
+							firstIndex := lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
+							receipt := types.Receipt{
+								CumulativeGasUsed:        lastReceipt.CumulativeGasUsed,
+								FirstLogIndexWithinBlock: uint32(firstIndex),
+							}
+							//log.Info("adding extra", "firstLog", firstIndex)
+							if err := rawtemporaldb.AppendReceipt(doms, &receipt, cumulativeBlobGasUsedInBlock); err != nil {
+								return err
+							}
+						}
+					}
+
+					cumulativeBlobGasUsedInBlock = 0
+				}
+			}
+
+			if produce.RCacheDomain {
+				var receipt *types.Receipt
+				if !txTask.Final {
+					if txTask.TxIndex >= 0 && txTask.BlockReceipts != nil {
+						receipt = txTask.BlockReceipts[txTask.TxIndex]
+					}
+				} else {
+					if cfg.ChainConfig.Bor != nil && txTask.TxIndex >= 1 {
+						receipt = txTask.BlockReceipts[txTask.TxIndex-1]
+						if receipt == nil {
+							return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
+						}
+					}
+				}
+				if err := rawdb.WriteReceiptCacheV2(doms, receipt); err != nil {
 					return err
 				}
 			}
 
-			if txTask.Final { // block changed
-				if cfg.ChainConfig.Bor != nil && txTask.TxIndex >= 1 {
-					// get last receipt and store the last log index + 1
-					lastReceipt := txTask.BlockReceipts[txTask.TxIndex-1]
-					if lastReceipt == nil {
-						return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
+			if produce.LogIndex {
+				for _, lg := range txTask.Logs {
+					if err := doms.IndexAdd(kv.LogAddrIdx, lg.Address[:]); err != nil {
+						return err
 					}
-					if len(lastReceipt.Logs) > 0 {
-						firstIndex := lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
-						receipt := types.Receipt{
-							CumulativeGasUsed:        lastReceipt.CumulativeGasUsed,
-							FirstLogIndexWithinBlock: uint32(firstIndex),
-						}
-						//log.Info("adding extra", "firstLog", firstIndex)
-						if err := rawtemporaldb.AppendReceipt(doms, &receipt, cumulativeBlobGasUsedInBlock); err != nil {
+					for _, topic := range lg.Topics {
+						if err := doms.IndexAdd(kv.LogTopicIdx, topic[:]); err != nil {
 							return err
 						}
 					}
 				}
-
-				cumulativeBlobGasUsedInBlock = 0
+			}
+			if produce.TraceIndex {
+				for addr := range txTask.TraceFroms {
+					if err := doms.IndexAdd(kv.TracesFromIdx, addr[:]); err != nil {
+						return err
+					}
+				}
+				for addr := range txTask.TraceTos {
+					if err := doms.IndexAdd(kv.TracesToIdx, addr[:]); err != nil {
+						return err
+					}
+				}
 			}
 
 			select {
 			case <-logEvery.C:
 				if prevTxNumLog > 0 {
 					dbg.ReadMemStats(&m)
-					log.Info(fmt.Sprintf("[%s] Scanned", logPrefix), "block", txTask.BlockNum, "txs/sec", (txTask.TxNum-prevTxNumLog)/uint64(logPeriod.Seconds()), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+					log.Info(fmt.Sprintf("[%s] Scanned", logPrefix), "block", txTask.BlockNum, "txs/sec", (txTask.TxNum-prevTxNumLog)/uint64(logPeriod.Seconds()), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 				}
 				prevTxNumLog = txTask.TxNum
 			default:

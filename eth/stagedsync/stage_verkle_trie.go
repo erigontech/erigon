@@ -20,21 +20,21 @@ import (
 	"context"
 	"fmt"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/verkle/verkletrie"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 )
 
-func SpawnVerkleTrie(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ctx context.Context, logger log.Logger) (libcommon.Hash, error) {
+func SpawnVerkleTrie(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ctx context.Context, logger log.Logger) (common.Hash, error) {
 	var err error
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
-			return libcommon.Hash{}, err
+			return common.Hash{}, err
 		}
 		defer tx.Rollback()
 	}
@@ -44,27 +44,27 @@ func SpawnVerkleTrie(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ctx con
 	}
 	to, err := s.ExecutionAt(tx)
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 	verkleWriter := verkletrie.NewVerkleTreeWriter(tx, cfg.tmpDir, logger)
 	if err := verkletrie.IncrementAccount(tx, tx, 10, verkleWriter, from, to, cfg.tmpDir); err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
-	var newRoot libcommon.Hash
+	var newRoot common.Hash
 	if newRoot, err = verkletrie.IncrementStorage(tx, tx, 10, verkleWriter, from, to, cfg.tmpDir); err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 	if cfg.checkRoot {
 		header := rawdb.ReadHeaderByNumber(tx, to)
 		if header.Root != newRoot {
-			return libcommon.Hash{}, fmt.Errorf("invalid verkle root, header has %x, computed: %x", header.Root, newRoot)
+			return common.Hash{}, fmt.Errorf("invalid verkle root, header has %x, computed: %x", header.Root, newRoot)
 		}
 	}
 	if err := s.Update(tx, to); err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 	if err := stages.SaveStageProgress(tx, stages.VerkleTrie, to); err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 	if !useExternalTx {
 		return newRoot, tx.Commit()

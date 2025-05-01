@@ -293,7 +293,7 @@ func (c *Comparison) Compare(t *testing.T, aRaw, bRaw json.RawMessage, aCode, bC
 		if !ok {
 			return ErrExpressionMustReturnBool
 		}
-		if !assert.Equal(t, bres, true, `expr: %s`, expr) {
+		if !assert.True(t, bres, `expr: %s`, expr) {
 			if os.Getenv("HIDE_HARNESS_LOG") != "1" {
 				// b1, _ := json.Marshal(b)
 				// panic(string(b1))

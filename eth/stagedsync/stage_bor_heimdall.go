@@ -29,11 +29,11 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/dataflow"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
@@ -68,8 +68,8 @@ type BorHeimdallCfg struct {
 	blockReader     services.FullBlockReader
 	hd              *headerdownload.HeaderDownload
 	penalize        func(context.Context, []headerdownload.PenaltyItem)
-	recents         *lru.ARCCache[libcommon.Hash, *bor.Snapshot]
-	signatures      *lru.ARCCache[libcommon.Hash, libcommon.Address]
+	recents         *lru.ARCCache[common.Hash, *bor.Snapshot]
+	signatures      *lru.ARCCache[common.Hash, common.Address]
 	recordWaypoints bool
 	unwindCfg       bordb.HeimdallUnwindCfg
 }
@@ -85,8 +85,8 @@ func StageBorHeimdallCfg(
 	blockReader services.FullBlockReader,
 	hd *headerdownload.HeaderDownload,
 	penalize func(context.Context, []headerdownload.PenaltyItem),
-	recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
-	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address],
+	recents *lru.ARCCache[common.Hash, *bor.Snapshot],
+	signatures *lru.ARCCache[common.Hash, common.Address],
 	recordWaypoints bool,
 	userUnwindTypeOverrides []string,
 ) BorHeimdallCfg {
@@ -185,12 +185,12 @@ func BorHeimdallForward(
 		lastBlockNum = cfg.blockReader.FrozenBorBlocks()
 	}
 
-	recents, err := lru.NewARC[libcommon.Hash, *bor.Snapshot](inmemorySnapshots)
+	recents, err := lru.NewARC[common.Hash, *bor.Snapshot](inmemorySnapshots)
 	if err != nil {
 		return err
 	}
 
-	signatures, err := lru.NewARC[libcommon.Hash, libcommon.Address](sync.InMemorySignatures)
+	signatures, err := lru.NewARC[common.Hash, common.Address](sync.InMemorySignatures)
 	if err != nil {
 		return err
 	}
@@ -479,10 +479,10 @@ func BorHeimdallForward(
 
 func loadSnapshot(
 	blockNum uint64,
-	hash libcommon.Hash,
+	hash common.Hash,
 	config *borcfg.BorConfig,
-	recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
-	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address],
+	recents *lru.ARCCache[common.Hash, *bor.Snapshot],
+	signatures *lru.ARCCache[common.Hash, common.Address],
 	snapDb kv.RwDB,
 	logger log.Logger,
 ) *bor.Snapshot {
@@ -508,9 +508,9 @@ func persistValidatorSets(
 	config *borcfg.BorConfig,
 	chain consensus.ChainHeaderReader,
 	blockNum uint64,
-	hash libcommon.Hash,
-	recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
-	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address],
+	hash common.Hash,
+	recents *lru.ARCCache[common.Hash, *bor.Snapshot],
+	signatures *lru.ARCCache[common.Hash, common.Address],
 	snapDb kv.RwDB,
 	logger log.Logger,
 	logPrefix string,
@@ -605,7 +605,7 @@ func persistValidatorSets(
 		var err error
 		if snap, err = snap.Apply(parent, headers, logger); err != nil {
 			if snap != nil {
-				var badHash libcommon.Hash
+				var badHash common.Hash
 				for _, header := range headers {
 					if header.Number.Uint64() == snap.Number+1 {
 						badHash = header.Hash()
@@ -674,8 +674,8 @@ func initValidatorSets(
 	chain consensus.ChainHeaderReader,
 	blockNum uint64,
 	lastPersistedBlockNum uint64,
-	recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
-	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address],
+	recents *lru.ARCCache[common.Hash, *bor.Snapshot],
+	signatures *lru.ARCCache[common.Hash, common.Address],
 	snapDb kv.RwDB,
 	logger log.Logger,
 	logPrefix string,

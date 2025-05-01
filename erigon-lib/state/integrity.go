@@ -58,6 +58,11 @@ func (at *AggregatorRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx context.
 		if err != nil {
 			return err
 		}
+	case kv.RCacheHistoryIdx:
+		err := at.d[kv.RCacheDomain].ht.iit.IntegrityInvertedIndexAllValuesAreInRange(ctx, failFast, fromStep)
+		if err != nil {
+			return err
+		}
 	default:
 		// check the ii
 		if v := at.searchII(name); v != nil {
@@ -191,4 +196,8 @@ func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx cont
 		//log.Warn(fmt.Sprintf("[dbg] see1: %s, min=%d,max=%d, before_max=%d, all: %d", item.src.decompressor.FileName(), ef.Min(), ef.Max(), last2, stream.ToArrU64Must(ef.Iterator())))
 	}
 	return nil
+}
+
+func InitAccountSchemaIntegrity() {
+	Schema.AccountsDomain.crossDomainIntegrity = domainIntegrityCheck
 }

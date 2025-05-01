@@ -42,8 +42,8 @@ func TestRandomSigma(t *testing.T) {
 			lastByteAlways0 = false
 		}
 	}
-	assert.True(t, !firstByteAlways0)
-	assert.True(t, !lastByteAlways0)
+	assert.False(t, firstByteAlways0)
+	assert.False(t, lastByteAlways0)
 }
 
 func TestPadding(t *testing.T) {
@@ -98,7 +98,7 @@ func TestPadding(t *testing.T) {
 		for _, bHex := range test.bsHex {
 			bBytes, err := hex.DecodeString(bHex)
 			require.NoError(t, err)
-			assert.Equal(t, 32, len(bBytes))
+			assert.Len(t, bBytes, 32)
 			var bByteArray [32]byte
 			copy(bByteArray[:], bBytes)
 			b := Block(bByteArray)
@@ -131,7 +131,7 @@ func TestUnpadding(t *testing.T) {
 		for _, bHex := range bsHex {
 			bBytes, err := hex.DecodeString(bHex)
 			require.NoError(t, err)
-			assert.Equal(t, 32, len(bBytes))
+			assert.Len(t, bBytes, 32)
 			var bByteArray [32]byte
 			copy(bByteArray[:], bBytes)
 			b := Block(bByteArray)
@@ -139,7 +139,7 @@ func TestUnpadding(t *testing.T) {
 		}
 
 		_, err := UnpadMessage(bs)
-		assert.True(t, err != nil)
+		assert.NotEqual(t, err, nil)
 	}
 
 	testCases := []struct {
@@ -177,7 +177,7 @@ func TestUnpadding(t *testing.T) {
 		for _, bHex := range test.bsHex {
 			bBytes, err := hex.DecodeString(bHex)
 			require.NoError(t, err)
-			assert.Equal(t, 32, len(bBytes))
+			assert.Len(t, bBytes, 32)
 			var bByteArray [32]byte
 			copy(bByteArray[:], bBytes)
 			b := Block(bByteArray)
@@ -275,7 +275,7 @@ func TestC1Malleability(t *testing.T) {
 	message := []byte("secret message")
 	eonPublicKey, decryptionKey, epochIDPoint := makeKeys(t)
 	originalSigma, err := RandomSigma(rand.Reader)
-	assert.True(t, err == nil, "Could not get random sigma")
+	assert.Equal(t, err, nil, "Could not get random sigma")
 	encryptedMessage := Encrypt(
 		message,
 		eonPublicKey,
@@ -296,18 +296,18 @@ func TestC1Malleability(t *testing.T) {
 		}
 	}
 	msg, err := encryptedMessage.Decrypt(decryptionKey)
-	assert.True(t, !bytes.Equal(message, msg), "decryption successful, in spite of tampered C1")
-	assert.True(t, err != nil, "decryption successful, in spite of tampered C1")
+	assert.False(t, bytes.Equal(message, msg), "decryption successful, in spite of tampered C1")
+	assert.NotEqual(t, err, nil, "decryption successful, in spite of tampered C1")
 }
 
 func TestMessageMalleability(t *testing.T) {
 	messageBlock, err := RandomSigma(rand.Reader)
-	assert.True(t, err == nil, "could not get random message")
+	assert.Equal(t, err, nil, "could not get random message")
 	originalMessage := messageBlock[:]
 
 	eonPublicKey, decryptionKey, epochIDPoint := makeKeys(t)
 	sigma, err := RandomSigma(rand.Reader)
-	assert.True(t, err == nil, "could not get random sigma")
+	assert.Equal(t, err, nil, "could not get random sigma")
 	encryptedMessage := Encrypt(
 		originalMessage,
 		eonPublicKey,
@@ -327,6 +327,6 @@ func TestMessageMalleability(t *testing.T) {
 	malleatedMessage[0] = byte(plaintextB0)
 
 	decryptedMessage, err := encryptedMessage.Decrypt(decryptionKey)
-	assert.True(t, !bytes.Equal(decryptedMessage, malleatedMessage), "message was successfully malleated")
-	assert.True(t, err != nil, "decryption successful, in spite of tampered message")
+	assert.False(t, bytes.Equal(decryptedMessage, malleatedMessage), "message was successfully malleated")
+	assert.NotEqual(t, err, nil, "decryption successful, in spite of tampered message")
 }

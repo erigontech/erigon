@@ -9,13 +9,13 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/stretchr/testify/require"
 )
 
 func TestAppendReceipt(t *testing.T) {
 	dirs, require := datadir.New(t.TempDir()), require.New(t)
-	db, _ := temporaltest.NewTestDB(t, dirs)
+	db := temporaltest.NewTestDB(t, dirs)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(err)
 	defer tx.Rollback()

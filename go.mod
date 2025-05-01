@@ -4,7 +4,15 @@ go 1.23.0
 
 toolchain go1.23.6
 
-replace github.com/erigontech/erigon-lib => ./erigon-lib
+replace (
+	github.com/erigontech/erigon-db => ./erigon-db
+	github.com/erigontech/erigon-lib => ./erigon-lib
+)
+
+require (
+	github.com/erigontech/erigon-db v0.0.0-00010101000000-000000000000
+	github.com/erigontech/erigon-lib v0.0.0-00010101000000-000000000000
+)
 
 replace (
 	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.3-alpha-1
@@ -37,7 +45,6 @@ require (
 	github.com/dop251/goja v0.0.0-20220405120441-9037c2b61cbf
 	github.com/edsrzf/mmap-go v1.2.0
 	github.com/emicklei/dot v1.6.2
-	github.com/erigontech/erigon-lib v0.0.0-00010101000000-000000000000
 	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
 	github.com/gballet/go-verkle v0.0.0-20221121182333-31427a1f2d35
 	github.com/go-chi/chi/v5 v5.1.0
@@ -74,7 +81,6 @@ require (
 	github.com/pelletier/go-toml/v2 v2.2.3
 	github.com/pion/randutil v0.1.0
 	github.com/pion/stun v0.6.1
-	github.com/protolambda/ztyp v0.2.2
 	github.com/prysmaticlabs/go-bitfield v0.0.0-20240618144021-706c95b2dd15
 	github.com/prysmaticlabs/gohashtree v0.0.4-beta
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
@@ -125,6 +131,7 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/protolambda/ztyp v0.2.2 // indirect
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
 	github.com/tklauser/go-sysconf v0.3.14 // indirect
 	github.com/tklauser/numcpus v0.8.0 // indirect
@@ -177,7 +184,7 @@ require (
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/elastic/gosigar v0.14.3 // indirect
-	github.com/erigontech/erigon-snapshot v1.3.1-0.20250317154231-2ce6d6e9e6fc // indirect
+	github.com/erigontech/erigon-snapshot v1.3.1-0.20250501041114-4a48ac232c83 // indirect
 	github.com/flynn/noise v1.1.0 // indirect
 	github.com/francoispqt/gojay v1.2.13 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect

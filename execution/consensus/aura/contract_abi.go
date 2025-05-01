@@ -22,13 +22,13 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/execution/abi"
+	"github.com/erigontech/erigon-lib/abi"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/aura/contracts"
 )
 
-func callBlockRewardAbi(contractAddr libcommon.Address, syscall consensus.SystemCall, beneficiaries []libcommon.Address, rewardKind []consensus.RewardKind) ([]libcommon.Address, []*uint256.Int) {
+func callBlockRewardAbi(contractAddr common.Address, syscall consensus.SystemCall, beneficiaries []common.Address, rewardKind []consensus.RewardKind) ([]common.Address, []*uint256.Int) {
 	castedKind := make([]uint16, len(rewardKind))
 	for i := range rewardKind {
 		castedKind[i] = uint16(rewardKind[i])
@@ -48,7 +48,7 @@ func callBlockRewardAbi(contractAddr libcommon.Address, syscall consensus.System
 	if err != nil {
 		panic(err)
 	}
-	beneficiariesRes := res[0].([]libcommon.Address)
+	beneficiariesRes := res[0].([]common.Address)
 	rewardsBig := res[1].([]*big.Int)
 	rewardsU256 := make([]*uint256.Int, len(rewardsBig))
 	for i := 0; i < len(rewardsBig); i++ {
@@ -61,7 +61,7 @@ func callBlockRewardAbi(contractAddr libcommon.Address, syscall consensus.System
 	return beneficiariesRes, rewardsU256
 }
 
-func callBlockGasLimitAbi(contractAddr libcommon.Address, syscall consensus.SystemCall) *uint256.Int {
+func callBlockGasLimitAbi(contractAddr common.Address, syscall consensus.SystemCall) *uint256.Int {
 	packed, err := blockGasLimitAbi().Pack("blockGasLimit")
 	if err != nil {
 		panic(err)
@@ -125,8 +125,8 @@ func withdrawalAbi() abi.ABI {
 	return a
 }
 
-func getCertifier(registrar libcommon.Address, syscall consensus.SystemCall) *libcommon.Address {
-	hashedKey, err := libcommon.HashData([]byte("service_transaction_checker"))
+func getCertifier(registrar common.Address, syscall consensus.SystemCall) *common.Address {
+	hashedKey, err := common.HashData([]byte("service_transaction_checker"))
 	if err != nil {
 		panic(err)
 	}
@@ -145,6 +145,6 @@ func getCertifier(registrar libcommon.Address, syscall consensus.SystemCall) *li
 	if err != nil {
 		panic(err)
 	}
-	certifier := res[0].(libcommon.Address)
+	certifier := res[0].(common.Address)
 	return &certifier
 }

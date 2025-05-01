@@ -25,9 +25,8 @@ import (
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 
 	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/p2p"
@@ -681,7 +680,7 @@ func (s *Sync) Run(ctx context.Context) error {
 
 		s.logger.Warn(syncLogPrefix("your heimdalld process is behind, please check its logs and <HEIMDALL_HOST>:1317/status api"))
 
-		if err := libcommon.Sleep(ctx, 30*time.Second); err != nil {
+		if err := common.Sleep(ctx, 30*time.Second); err != nil {
 			return err
 		}
 	}
@@ -929,10 +928,17 @@ func (s *Sync) sync(
 		}
 
 		if err := s.commitExecution(ctx, newTip, newTip); err != nil {
-			// note: if we face a failure during execution of finalized waypoints blocks, it means that
-			// we're wrong and the blocks are not considered as bad blocks, so we should terminate
-			err = s.handleWaypointExecutionErr(ctx, tip, err)
-			return syncToTipResult{}, false, err
+			if errors.Is(err, ErrUfcTooFarBehind) {
+				s.logger.Warn(
+					syncLogPrefix("ufc skipped during sync to tip - likely due to domain ahead of blocks"),
+					"err", err,
+				)
+			} else {
+				// note: if we face a failure during execution of finalized waypoints blocks, it means that
+				// we're wrong and the blocks are not considered as bad blocks, so we should terminate
+				err = s.handleWaypointExecutionErr(ctx, tip, err)
+				return syncToTipResult{}, false, err
+			}
 		}
 
 		tip = newTip

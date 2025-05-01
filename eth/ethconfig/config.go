@@ -36,8 +36,8 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/kv/prune"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
@@ -286,5 +286,5 @@ type Sync struct {
 	ChaosMonkey              bool
 	AlwaysGenerateChangesets bool
 	KeepExecutionProofs      bool
-	PersistReceipts          uint64
+	PersistReceiptsCacheV2   bool
 }

@@ -21,20 +21,20 @@ import (
 	"fmt"
 	"strconv"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	proto_txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
 
 // TxPoolAPI the interface for the txpool_ RPC commands
 type TxPoolAPI interface {
 	Content(ctx context.Context) (map[string]map[string]map[string]*ethapi.RPCTransaction, error)
-	ContentFrom(ctx context.Context, addr libcommon.Address) (map[string]map[string]*ethapi.RPCTransaction, error)
+	ContentFrom(ctx context.Context, addr common.Address) (map[string]map[string]*ethapi.RPCTransaction, error)
 }
 
 // TxPoolAPIImpl data structure to store things needed for net_ commands
@@ -65,9 +65,9 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 		"queued":  make(map[string]map[string]*ethapi.RPCTransaction),
 	}
 
-	pending := make(map[libcommon.Address][]types.Transaction, 8)
-	baseFee := make(map[libcommon.Address][]types.Transaction, 8)
-	queued := make(map[libcommon.Address][]types.Transaction, 8)
+	pending := make(map[common.Address][]types.Transaction, 8)
+	baseFee := make(map[common.Address][]types.Transaction, 8)
+	queued := make(map[common.Address][]types.Transaction, 8)
 	for i := range reply.Txs {
 		txn, err := types.DecodeWrappedTransaction(reply.Txs[i].RlpTx)
 		if err != nil {
@@ -134,7 +134,7 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 	return content, nil
 }
 
-func (api *TxPoolAPIImpl) ContentFrom(ctx context.Context, addr libcommon.Address) (map[string]map[string]*ethapi.RPCTransaction, error) {
+func (api *TxPoolAPIImpl) ContentFrom(ctx context.Context, addr common.Address) (map[string]map[string]*ethapi.RPCTransaction, error) {
 	reply, err := api.pool.All(ctx, &proto_txpool.AllRequest{})
 	if err != nil {
 		return nil, err

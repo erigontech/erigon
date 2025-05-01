@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
-	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/libp2p/go-libp2p"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	libp2pcrypto "github.com/libp2p/go-libp2p/core/crypto"
@@ -38,6 +37,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 )
 
 const (

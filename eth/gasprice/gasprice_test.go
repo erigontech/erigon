@@ -28,12 +28,12 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/gasprice"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
@@ -56,8 +56,8 @@ func newTestBackend(t *testing.T) *mock.MockSentry {
 
 	// Generate testing blocks
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 32, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(libcommon.Address{1})
-		tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), libcommon.HexToAddress("deadbeef"), uint256.NewInt(100), 21000, uint256.NewInt(uint64(int64(i+1)*libcommon.GWei)), nil), *signer, key)
+		b.SetCoinbase(common.Address{1})
+		tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt(100), 21000, uint256.NewInt(uint64(int64(i+1)*common.GWei)), nil), *signer, key)
 		if txErr != nil {
 			t.Fatalf("failed to create tx: %v", txErr)
 		}
@@ -77,7 +77,7 @@ func TestSuggestPrice(t *testing.T) {
 	config := gaspricecfg.Config{
 		Blocks:     2,
 		Percentile: 60,
-		Default:    big.NewInt(libcommon.GWei),
+		Default:    big.NewInt(common.GWei),
 	}
 
 	m := newTestBackend(t) //, big.NewInt(16), c.pending)
@@ -94,7 +94,7 @@ func TestSuggestPrice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to retrieve recommended gas price: %v", err)
 	}
-	expect := big.NewInt(libcommon.GWei * int64(30))
+	expect := big.NewInt(common.GWei * int64(30))
 	if got.Cmp(expect) != 0 {
 		t.Fatalf("Gas price mismatch, want %d, got %d", expect, got)
 	}
