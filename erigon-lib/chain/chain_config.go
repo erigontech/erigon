@@ -20,6 +20,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"strconv"
+	"sync"
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain/params"
@@ -69,9 +71,12 @@ type Config struct {
 	PragueTime   *big.Int `json:"pragueTime,omitempty"`
 	OsakaTime    *big.Int `json:"osakaTime,omitempty"`
 
-	// Optional EIP-4844 parameters (see also EIP-7691 & EIP-7840)
-	MinBlobGasPrice *uint64       `json:"minBlobGasPrice,omitempty"`
-	BlobSchedule    *BlobSchedule `json:"blobSchedule,omitempty"`
+	// Optional EIP-4844 parameters (see also EIP-7691, EIP-7840, EIP-7892)
+	MinBlobGasPrice *uint64                       `json:"minBlobGasPrice,omitempty"`
+	BlobSchedule    map[string]*params.BlobConfig `json:"blobSchedule,omitempty"`
+
+	onceBlobSchedule   sync.Once
+	parsedBlobSchedule map[uint64]*params.BlobConfig
 
 	// (Optional) governance contract where EIP-1559 fees will be sent to, which otherwise would be burnt since the London fork.
 	// A key corresponds to the block number, starting from which the fees are sent to the address (map value).
@@ -127,57 +132,6 @@ var (
 		Aura:                  &AuRaConfig{},
 	}
 )
-
-type BlobConfig struct {
-	Target                *uint64 `json:"target,omitempty"`
-	Max                   *uint64 `json:"max,omitempty"`
-	BaseFeeUpdateFraction *uint64 `json:"baseFeeUpdateFraction,omitempty"`
-}
-
-// See EIP-7840: Add blob schedule to EL config files
-type BlobSchedule struct {
-	Cancun *BlobConfig `json:"cancun,omitempty"`
-	Prague *BlobConfig `json:"prague,omitempty"`
-}
-
-func (b *BlobSchedule) TargetBlobsPerBlock(isPrague bool) uint64 {
-	if isPrague {
-		if b != nil && b.Prague != nil && b.Prague.Target != nil {
-			return *b.Prague.Target
-		}
-		return 6 // EIP-7691
-	}
-	if b != nil && b.Cancun != nil && b.Cancun.Target != nil {
-		return *b.Cancun.Target
-	}
-	return 3 // EIP-4844
-}
-
-func (b *BlobSchedule) MaxBlobsPerBlock(isPrague bool) uint64 {
-	if isPrague {
-		if b != nil && b.Prague != nil && b.Prague.Max != nil {
-			return *b.Prague.Max
-		}
-		return 9 // EIP-7691
-	}
-	if b != nil && b.Cancun != nil && b.Cancun.Max != nil {
-		return *b.Cancun.Max
-	}
-	return 6 // EIP-4844
-}
-
-func (b *BlobSchedule) BaseFeeUpdateFraction(isPrague bool) uint64 {
-	if isPrague {
-		if b != nil && b.Prague != nil && b.Prague.BaseFeeUpdateFraction != nil {
-			return *b.Prague.BaseFeeUpdateFraction
-		}
-		return 5007716 // EIP-7691
-	}
-	if b != nil && b.Cancun != nil && b.Cancun.BaseFeeUpdateFraction != nil {
-		return *b.Cancun.BaseFeeUpdateFraction
-	}
-	return 3338477 // EIP-4844
-}
 
 type BorConfig interface {
 	fmt.Stringer
@@ -347,6 +301,40 @@ func (c *Config) GetBurntContract(num uint64) *common.Address {
 	return &addr
 }
 
+func (c *Config) getBlobConfig(time uint64) *params.BlobConfig {
+	c.onceBlobSchedule.Do(func() {
+		c.parsedBlobSchedule = map[uint64]*params.BlobConfig{
+			0: {},
+		}
+		if c.CancunTime != nil {
+			c.parsedBlobSchedule[c.CancunTime.Uint64()] = &params.DefaultCancunBlobConfig
+		}
+		if c.PragueTime != nil {
+			c.parsedBlobSchedule[c.PragueTime.Uint64()] = &params.DefaultPragueBlobConfig
+		}
+		if c.OsakaTime != nil {
+			c.parsedBlobSchedule[c.OsakaTime.Uint64()] = &params.DefaultOsakaBlobConfig
+		}
+		for key, val := range c.BlobSchedule {
+			switch {
+			case key == "cancun":
+				c.parsedBlobSchedule[c.CancunTime.Uint64()] = val
+			case key == "prague":
+				c.parsedBlobSchedule[c.PragueTime.Uint64()] = val
+			case key == "osaka":
+				c.parsedBlobSchedule[c.OsakaTime.Uint64()] = val
+			default:
+				keyU64, err := strconv.ParseUint(key, 10, 64)
+				if err != nil {
+					panic(err)
+				}
+				c.parsedBlobSchedule[keyU64] = val
+			}
+		}
+	})
+	return ConfigValueLookup(c.parsedBlobSchedule, time)
+}
+
 func (c *Config) GetMinBlobGasPrice() uint64 {
 	if c != nil && c.MinBlobGasPrice != nil {
 		return *c.MinBlobGasPrice
@@ -354,32 +342,20 @@ func (c *Config) GetMinBlobGasPrice() uint64 {
 	return 1 // MIN_BLOB_GASPRICE (EIP-4844)
 }
 
-func (c *Config) GetMaxBlobGasPerBlock(t uint64) uint64 {
-	return c.GetMaxBlobsPerBlock(t) * params.BlobGasPerBlob
-}
-
 func (c *Config) GetMaxBlobsPerBlock(time uint64) uint64 {
-	var b *BlobSchedule
-	if c != nil {
-		b = c.BlobSchedule
-	}
-	return b.MaxBlobsPerBlock(c.IsPrague(time))
+	return c.getBlobConfig(time).Max
 }
 
-func (c *Config) GetTargetBlobGasPerBlock(t uint64) uint64 {
-	var b *BlobSchedule
-	if c != nil {
-		b = c.BlobSchedule
-	}
-	return b.TargetBlobsPerBlock(c.IsPrague(t)) * params.BlobGasPerBlob
+func (c *Config) GetMaxBlobGasPerBlock(time uint64) uint64 {
+	return c.getBlobConfig(time).Max * params.BlobGasPerBlob
 }
 
-func (c *Config) GetBlobGasPriceUpdateFraction(t uint64) uint64 {
-	var b *BlobSchedule
-	if c != nil {
-		b = c.BlobSchedule
-	}
-	return b.BaseFeeUpdateFraction(c.IsPrague(t))
+func (c *Config) GetTargetBlobGasPerBlock(time uint64) uint64 {
+	return c.getBlobConfig(time).Target * params.BlobGasPerBlob
+}
+
+func (c *Config) GetBlobGasPriceUpdateFraction(time uint64) uint64 {
+	return c.getBlobConfig(time).BaseFeeUpdateFraction
 }
 
 func (c *Config) SecondsPerSlot() uint64 {

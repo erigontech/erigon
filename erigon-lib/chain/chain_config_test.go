@@ -17,10 +17,12 @@
 package chain
 
 import (
+	"math/big"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 )
 
@@ -68,17 +70,22 @@ func TestConfigValueLookup(t *testing.T) {
 }
 
 func TestNilBlobSchedule(t *testing.T) {
-	var b *BlobSchedule
+	var c Config
+	c.CancunTime = big.NewInt(1)
+	c.PragueTime = big.NewInt(2)
+
+	// Everything should be 0 before Cancun
+	assert.Equal(t, uint64(0), c.GetTargetBlobGasPerBlock(0))
+	assert.Equal(t, uint64(0), c.GetMaxBlobsPerBlock(0))
+	assert.Equal(t, uint64(0), c.GetBlobGasPriceUpdateFraction(0))
 
 	// Original EIP-4844 values
-	isPrague := false
-	assert.Equal(t, uint64(3), b.TargetBlobsPerBlock(isPrague))
-	assert.Equal(t, uint64(6), b.MaxBlobsPerBlock(isPrague))
-	assert.Equal(t, uint64(3338477), b.BaseFeeUpdateFraction(isPrague))
+	assert.Equal(t, uint64(3*params.BlobGasPerBlob), c.GetTargetBlobGasPerBlock(1))
+	assert.Equal(t, uint64(6), c.GetMaxBlobsPerBlock(1))
+	assert.Equal(t, uint64(3338477), c.GetBlobGasPriceUpdateFraction(1))
 
 	// EIP-7691: Blob throughput increase
-	isPrague = true
-	assert.Equal(t, uint64(6), b.TargetBlobsPerBlock(isPrague))
-	assert.Equal(t, uint64(9), b.MaxBlobsPerBlock(isPrague))
-	assert.Equal(t, uint64(5007716), b.BaseFeeUpdateFraction(isPrague))
+	assert.Equal(t, uint64(6*params.BlobGasPerBlob), c.GetTargetBlobGasPerBlock(2))
+	assert.Equal(t, uint64(9), c.GetMaxBlobsPerBlock(2))
+	assert.Equal(t, uint64(5007716), c.GetBlobGasPriceUpdateFraction(2))
 }
