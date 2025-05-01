@@ -227,8 +227,8 @@ func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockHash libcom
 	maxBlockNumInFiles := s.snapshots.VisibleBlocksAvailable(heimdall.Events.Enum())
 	if maxBlockNumInFiles == 0 || blockNum > maxBlockNumInFiles {
 		return s.Store.(interface {
-			blockEventIdsRange(context.Context, uint64, uint64) (uint64, uint64, bool, error)
-		}).blockEventIdsRange(ctx, blockNum, s.LastFrozenEventId())
+			blockEventIdsRange(context.Context, libcommon.Hash, uint64, uint64) (uint64, uint64, bool, error)
+		}).blockEventIdsRange(ctx, blockHash, blockNum, s.LastFrozenEventId())
 	}
 
 	tx := s.snapshots.ViewType(heimdall.Events)
@@ -245,6 +245,10 @@ func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockHash libcom
 		}
 
 		idxBorTxnHash := sn.Src().Index()
+		if idxBorTxnHash == nil || idxBorTxnHash.KeyCount() == 0 {
+			continue
+		}
+
 		reader := recsplit.NewIndexReader(idxBorTxnHash)
 		txnHash := types.ComputeBorTxHash(blockNum, blockHash)
 		blockEventId, exists := reader.Lookup(txnHash[:])
@@ -258,7 +262,7 @@ func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockHash libcom
 				continue
 			}
 		}
-		
+
 		var buf []byte
 		for gg.HasNext() {
 			buf, _ = gg.Next(buf[:0])
