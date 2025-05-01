@@ -15,7 +15,7 @@ ADD . .
 RUN --mount=type=cache,target=/root/.cache \
     --mount=type=cache,target=/tmp/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    make BUILD_TAGS=nosqlite,noboltdb,nosilkworm all
+    make BUILD_TAGS=noboltdb,nosilkworm all
 
 
 FROM docker.io/library/golang:1.24.1-alpine3.20 AS tools-builder
