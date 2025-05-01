@@ -258,9 +258,14 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				logger.Debug(logMsg, logArgs...)
 
 				if !isDownloadingForBeacon {
-					log.Info("Downloading Execution History", "progress",
-						fmt.Sprintf("%d/%d", highestBlockSeen-uint64(currEth1Progress.Load()), highestBlockSeen-lowestBlockToReach),
-						"blk/sec", fmt.Sprintf("%.1f", speed))
+					remaining := float64(highestBlockSeen-lowestBlockToReach)
+					log.Info("Downloading Execution History",
+						"progress", fmt.Sprintf("%.2f%%", (float64(
+							highestBlockSeen-uint64(currEth1Progress.Load()))/
+							remaining)*100),
+						"ETA", (time.Duration(remaining/speed) * time.Second).String(),
+						"blk/sec", fmt.Sprintf("%.1f", speed), 
+						"current", currEth1Progress.Load())
 				} else {
 					log.Info("Downloading Beacon History", "progress",
 						fmt.Sprintf("%d/%d", highestBlockSeen-currProgress, highestBlockSeen-lowestBlockToReach),
