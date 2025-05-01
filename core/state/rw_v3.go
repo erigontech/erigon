@@ -556,14 +556,14 @@ func (w *StateWriterV3) CreateContract(address common.Address) error {
 type ReaderV3 struct {
 	txNum     uint64
 	trace     bool
-	sd        *libstate.SharedDomains
+	tx        kv.TemporalGetter
 	composite []byte
 }
 
-func NewReaderV3(sd *libstate.SharedDomains) *ReaderV3 {
+func NewReaderV3(tx kv.TemporalGetter) *ReaderV3 {
 	return &ReaderV3{
 		//trace:     true,
-		sd:        sd,
+		tx:        tx, // tx may be SharedDomains which is useful to check if address has no storage keys at all
 		composite: make([]byte, 20+32),
 	}
 }
@@ -576,8 +576,13 @@ func (r *ReaderV3) SetTrace(trace bool)                  { r.trace = trace }
 func (r *ReaderV3) ResetReadSet()                        {}
 
 func (r *ReaderV3) HasStorage(address common.Address) (bool, error) {
+	sd, ok := r.tx.(*state.SharedDomains)
+	if !ok {
+		panic("AddressHasNoStorage: ReaderV3.tx is not SharedDomains")
+	}
+
 	var hasStorage bool
-	err := r.sd.IterateStoragePrefix(address.Bytes(), func(ask []byte, val []byte, step uint64) (bool, error) {
+	err := sd.IterateStoragePrefix(address.Bytes(), func(ask []byte, val []byte, step uint64) (bool, error) {
 		hasStorage = true
 		return false, nil
 	})
@@ -588,7 +593,7 @@ func (r *ReaderV3) HasStorage(address common.Address) (bool, error) {
 }
 
 func (r *ReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, _, err := r.sd.GetLatest(kv.AccountsDomain, address[:])
+	enc, _, err := r.tx.GetLatest(kv.AccountsDomain, address[:])
 	if err != nil {
 		return nil, err
 	}
@@ -615,7 +620,7 @@ func (r *ReaderV3) ReadAccountDataForDebug(address common.Address) (*accounts.Ac
 
 func (r *ReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	r.composite = append(append(r.composite[:0], address[:]...), key.Bytes()...)
-	enc, _, err := r.sd.GetLatest(kv.StorageDomain, r.composite)
+	enc, _, err := r.tx.GetLatest(kv.StorageDomain, r.composite)
 	if err != nil {
 		return nil, err
 	}
@@ -630,7 +635,7 @@ func (r *ReaderV3) ReadAccountStorage(address common.Address, incarnation uint64
 }
 
 func (r *ReaderV3) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {
-	enc, _, err := r.sd.GetLatest(kv.CodeDomain, address[:])
+	enc, _, err := r.tx.GetLatest(kv.CodeDomain, address[:])
 	if err != nil {
 		return nil, err
 	}
@@ -641,7 +646,7 @@ func (r *ReaderV3) ReadAccountCode(address common.Address, incarnation uint64) (
 }
 
 func (r *ReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64) (int, error) {
-	enc, _, err := r.sd.GetLatest(kv.CodeDomain, address[:])
+	enc, _, err := r.tx.GetLatest(kv.CodeDomain, address[:])
 	if err != nil {
 		return 0, err
 	}

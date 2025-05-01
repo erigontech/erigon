@@ -25,7 +25,6 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
@@ -34,7 +33,6 @@ import (
 	protosentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
@@ -108,17 +106,14 @@ func TestGenerateChain(t *testing.T) {
 		return
 	}
 
-	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	tx, err := m.DB.BeginRw(m.Ctx)
 	if err != nil {
 		fmt.Printf("beginro error: %v\n", err)
 		return
 	}
 	defer tx.Rollback()
 
-	sd, err := libstate.NewSharedDomains(tx, m.Log)
-	require.NoError(t, err)
-	defer sd.Close()
-	st := state.New(m.NewStateReader(sd))
+	st := state.New(m.NewStateReader(tx))
 
 	if big.NewInt(5).Cmp(current(m, tx).Number()) != 0 {
 		t.Errorf("wrong block number: %d", current(m, tx).Number())

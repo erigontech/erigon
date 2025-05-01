@@ -32,7 +32,6 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -40,7 +39,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	libstate "github.com/erigontech/erigon-lib/state"
 
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core"
@@ -143,7 +141,7 @@ func (bt *BlockTest) Run(t *testing.T, checkStateRoot bool) error {
 		return err
 	}
 
-	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	tx, err := m.DB.BeginRo(m.Ctx)
 	if err != nil {
 		return err
 	}
@@ -153,10 +151,7 @@ func (bt *BlockTest) Run(t *testing.T, checkStateRoot bool) error {
 	if libcommon.Hash(bt.json.BestBlock) != cmlast {
 		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", bt.json.BestBlock, cmlast)
 	}
-	sd, err := libstate.NewSharedDomains(tx, m.Log)
-	require.NoError(t, err)
-	defer sd.Close()
-	newDB := state.New(m.NewStateReader(sd))
+	newDB := state.New(m.NewStateReader(tx))
 	if err := bt.validatePostState(newDB); err != nil {
 		return fmt.Errorf("post state validation failed: %w", err)
 	}

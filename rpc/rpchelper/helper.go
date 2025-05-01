@@ -185,6 +185,9 @@ func NewLatestDomainStateReader(sd *state2.SharedDomains) state.StateReader {
 	return state.NewReaderV3(sd)
 }
 
+func NewLatestStateReader(tx kv.Tx) state.StateReader {
+	return state.NewReaderV3(tx.(kv.TemporalGetter))
+}
 func NewLatestStateWriter(txc wrap.TxContainer, blockReader services.FullBlockReader, blockNum uint64) state.StateWriter {
 	domains := txc.Doms
 	minTxNum, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(context.Background(), blockReader)).Min(domains.Tx(), blockNum)

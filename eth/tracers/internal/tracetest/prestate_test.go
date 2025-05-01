@@ -32,7 +32,6 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dir"
-	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
@@ -117,13 +116,10 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 			}
 			rules := test.Genesis.Config.Rules(context.BlockNumber, context.Time)
 			m := mock.Mock(t)
-			dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
+			dbTx, err := m.DB.BeginRw(m.Ctx)
 			require.NoError(t, err)
 			defer dbTx.Rollback()
-			sd, err := libstate.NewSharedDomains(dbTx, m.Log)
-			require.NoError(t, err)
-			defer sd.Close()
-			statedb, err := tests.MakePreState(rules, dbTx, sd, test.Genesis.Alloc, context.BlockNumber)
+			statedb, err := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, context.BlockNumber)
 			require.NoError(t, err)
 			tracer, err := tracers.New(tracerName, new(tracers.Context), test.TracerConfig)
 			if err != nil {

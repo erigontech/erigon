@@ -30,7 +30,6 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
-	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
@@ -88,14 +87,11 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	if err = m.InsertChain(chain); err != nil {
 		t.Fatal(err)
 	}
-	tx, err := m.DB.BeginTemporalRo(context.Background())
+	tx, err := m.DB.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	sd, err := libstate.NewSharedDomains(tx, m.Log)
-	require.NoError(t, err)
-	defer sd.Close()
-	st := state.New(m.NewStateReader(sd))
+	st := state.New(m.NewStateReader(tx))
 	exist, err := st.Exist(to)
 	if err != nil {
 		t.Error(err)
@@ -175,14 +171,11 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tx, err := m.DB.BeginTemporalRo(context.Background())
+	tx, err := m.DB.BeginRo(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	sd, err := libstate.NewSharedDomains(tx, m.Log)
-	require.NoError(t, err)
-	defer sd.Close()
-	st := state.New(m.NewStateReader(sd))
+	st := state.New(m.NewStateReader(tx))
 	exist, err := st.Exist(to)
 	if err != nil {
 		t.Error(err)
@@ -252,14 +245,11 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tx, err := m.DB.BeginTemporalRo(context.Background())
+	tx, err := m.DB.BeginRo(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	sd, err := libstate.NewSharedDomains(tx, m.Log)
-	require.NoError(t, err)
-	defer sd.Close()
-	st := state.New(m.NewStateReader(sd))
+	st := state.New(m.NewStateReader(tx))
 	exist, err := st.Exist(to)
 	if err != nil {
 		t.Error(err)
@@ -329,14 +319,11 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tx, err := m.DB.BeginTemporalRo(context.Background())
+	tx, err := m.DB.BeginRo(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	sd, err := libstate.NewSharedDomains(tx, m.Log)
-	require.NoError(t, err)
-	defer sd.Close()
-	st := state.New(m.NewStateReader(sd))
+	st := state.New(m.NewStateReader(tx))
 	exist, err := st.Exist(to)
 	if err != nil {
 		t.Error(err)
@@ -406,14 +393,11 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tx, err := m.DB.BeginTemporalRo(context.Background())
+	tx, err := m.DB.BeginRo(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	sd, err := libstate.NewSharedDomains(tx, m.Log)
-	require.NoError(t, err)
-	defer sd.Close()
-	st := state.New(m.NewStateReader(sd))
+	st := state.New(m.NewStateReader(tx))
 	exist, err := st.Exist(to)
 	if err != nil {
 		t.Error(err)
@@ -465,11 +449,8 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
-		sd, err := libstate.NewSharedDomains(tx, m.Log)
-		require.NoError(t, err)
-		defer sd.Close()
-		st := state.New(m.NewStateReader(sd))
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+		st := state.New(m.NewStateReader(tx))
 		exist, err := st.Exist(from)
 		if err != nil {
 			return err
@@ -498,11 +479,8 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 		t.Fatal("should fail")
 	}
 
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
-		sd, err := libstate.NewSharedDomains(tx, m.Log)
-		require.NoError(t, err)
-		defer sd.Close()
-		st := state.New(m.NewStateReader(sd))
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+		st := state.New(m.NewStateReader(tx))
 		exist, err := st.Exist(from)
 		if err != nil {
 			return err
@@ -527,11 +505,8 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
-		sd, err := libstate.NewSharedDomains(tx, m.Log)
-		require.NoError(t, err)
-		defer sd.Close()
-		st := state.New(m.NewStateReader(sd))
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+		st := state.New(m.NewStateReader(tx))
 		exist, err := st.Exist(from)
 		if err != nil {
 			return err
@@ -584,11 +559,8 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
-		sd, err := libstate.NewSharedDomains(tx, m.Log)
-		require.NoError(t, err)
-		defer sd.Close()
-		st := state.New(m.NewStateReader(sd))
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+		st := state.New(m.NewStateReader(tx))
 		exist, err := st.Exist(from)
 		if err != nil {
 			return err
@@ -613,11 +585,8 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
-		sd, err := libstate.NewSharedDomains(tx, m.Log)
-		require.NoError(t, err)
-		defer sd.Close()
-		st := state.New(m.NewStateReader(sd))
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+		st := state.New(m.NewStateReader(tx))
 		exist, err := st.Exist(from)
 		if err != nil {
 			return err
@@ -690,11 +659,8 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
-		sd, err := libstate.NewSharedDomains(tx, m.Log)
-		require.NoError(t, err)
-		defer sd.Close()
-		st := state.New(m.NewStateReader(sd))
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+		st := state.New(m.NewStateReader(tx))
 		exist, err := st.Exist(from)
 		if err != nil {
 			return err
@@ -720,11 +686,8 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
-		sd, err := libstate.NewSharedDomains(tx, m.Log)
-		require.NoError(t, err)
-		defer sd.Close()
-		st := state.New(m.NewStateReader(sd))
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+		st := state.New(m.NewStateReader(tx))
 		exist, err := st.Exist(from)
 		if err != nil {
 			return err
@@ -801,11 +764,8 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
-		sd, err := libstate.NewSharedDomains(tx, m.Log)
-		require.NoError(t, err)
-		defer sd.Close()
-		st := state.New(m.NewStateReader(sd))
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+		st := state.New(m.NewStateReader(tx))
 		exist, err := st.Exist(from)
 		if err != nil {
 			return err
@@ -830,11 +790,8 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
-		sd, err := libstate.NewSharedDomains(tx, m.Log)
-		require.NoError(t, err)
-		defer sd.Close()
-		st := state.New(m.NewStateReader(sd))
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+		st := state.New(m.NewStateReader(tx))
 		exist, err := st.Exist(from)
 		if err != nil {
 			return err

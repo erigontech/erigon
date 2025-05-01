@@ -31,7 +31,6 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
-	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
@@ -103,11 +102,8 @@ func TestSelfDestructReceive(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	if err := m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
-		sd, err := libstate.NewSharedDomains(tx, m.Log)
-		require.NoError(t, err)
-		defer sd.Close()
-		st := state.New(m.NewStateReader(sd))
+	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
+		st := state.New(m.NewStateReader(tx))
 		exist, err := st.Exist(address)
 		if err != nil {
 			return err
@@ -137,14 +133,11 @@ func TestSelfDestructReceive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
 		// If we got this far, the newly created blockchain (with empty trie cache) loaded trie from the database
 		// and that means that the state of the accounts written in the first block was correct.
 		// This test checks that the storage root of the account is properly set to the root of the empty tree
-		sd, err := libstate.NewSharedDomains(tx, m.Log)
-		require.NoError(t, err)
-		defer sd.Close()
-		st := state.New(m.NewStateReader(sd))
+		st := state.New(m.NewStateReader(tx))
 		exist, err := st.Exist(address)
 		if err != nil {
 			t.Error(err)

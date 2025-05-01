@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
-	libstate "github.com/erigontech/erigon-lib/state"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
@@ -408,14 +407,11 @@ func TestOeTracer(t *testing.T) {
 			rules := test.Genesis.Config.Rules(context.BlockNumber, context.Time)
 
 			m := mock.Mock(t)
-			dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
+			dbTx, err := m.DB.BeginRw(m.Ctx)
 			require.NoError(t, err)
 			defer dbTx.Rollback()
-			sd, err := libstate.NewSharedDomains(dbTx, m.Log)
-			require.NoError(t, err)
-			defer sd.Close()
-			statedb, err := tests.MakePreState(rules, dbTx, sd, test.Genesis.Alloc, context.BlockNumber)
-			require.NoError(t, err)
+
+			statedb, _ := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, context.BlockNumber)
 			msg, err := tx.AsMessage(*signer, (*big.Int)(test.Context.BaseFee), rules)
 			require.NoError(t, err)
 			txContext := core.NewEVMTxContext(msg)

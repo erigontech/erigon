@@ -896,8 +896,8 @@ func (ms *MockSentry) NewHistoryStateReader(blockNum uint64, tx kv.TemporalTx) s
 	return r
 }
 
-func (ms *MockSentry) NewStateReader(sd *libstate.SharedDomains) state.StateReader {
-	return state.NewReaderV3(sd)
+func (ms *MockSentry) NewStateReader(tx kv.Tx) state.StateReader {
+	return state.NewReaderV3(tx.(kv.TemporalGetter))
 }
 func (ms *MockSentry) HistoryV3Components() *libstate.Aggregator {
 	return ms.agg
