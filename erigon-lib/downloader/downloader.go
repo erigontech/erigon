@@ -2898,3 +2898,11 @@ func (d *Downloader) CompletedTorrents() map[string]completedTorrentInfo {
 
 	return d.completedTorrents
 }
+
+// Expose torrent client status to HTTP on the public/default serve mux used by GOPPROF=http. Only
+// do this if you have a single instance.
+func (d *Downloader) HandleTorrentClientStatus() {
+	http.HandleFunc("/downloaderTorrentClientStatus", func(w http.ResponseWriter, r *http.Request) {
+		d.torrentClient.WriteStatus(w)
+	})
+}
