@@ -138,7 +138,7 @@ func (rs *ParallelExecutionState) applyState(txTask *TxTask, domains *libstate.S
 
 			for i, key := range list.Keys {
 				if list.Vals[i] == nil {
-					if err := domains.DomainDel(domain, []byte(key), nil, nil, 0); err != nil {
+					if err := domains.DomainDel(domain, []byte(key), nil, 0); err != nil {
 						return err
 					}
 				} else {
@@ -166,7 +166,7 @@ func (rs *ParallelExecutionState) applyState(txTask *TxTask, domains *libstate.S
 		}
 		acc.Balance.Add(&acc.Balance, &increase)
 		if emptyRemoval && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() {
-			if err := domains.DomainDel(kv.AccountsDomain, addrBytes, nil, enc0, step0); err != nil {
+			if err := domains.DomainDel(kv.AccountsDomain, addrBytes, enc0, step0); err != nil {
 				return err
 			}
 		} else {
@@ -402,7 +402,7 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 	}
 	if original.Incarnation > account.Incarnation {
 		//del, before create: to clanup code/storage
-		if err := w.rs.domains.DomainDel(kv.CodeDomain, address[:], nil, nil, 0); err != nil {
+		if err := w.rs.domains.DomainDel(kv.CodeDomain, address[:], nil, 0); err != nil {
 			return err
 		}
 		if err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte, step uint64) (bool, error) {
@@ -440,6 +440,15 @@ func (w *StateWriterBufferedV3) DeleteAccount(address common.Address, original *
 		w.accumulator.DeleteAccount(address)
 	}
 	w.writeLists[kv.AccountsDomain.String()].Push(string(address.Bytes()), nil)
+
+	//if err := w.rs.domains.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
+	//	return err
+	//}
+	//commitment delete already has been applied via account
+	//if err := w.rs.domains.DomainDel(kv.CodeDomain, address[:], nil, nil, 0); err != nil {
+	//	return err
+	//}
+
 	return nil
 }
 
@@ -507,7 +516,7 @@ func (w *StateWriterV3) UpdateAccountData(address common.Address, original, acco
 	}
 	if original.Incarnation > account.Incarnation {
 		//del, before create: to clanup code/storage
-		if err := w.rs.domains.DomainDel(kv.CodeDomain, address[:], nil, nil, 0); err != nil {
+		if err := w.rs.domains.DomainDel(kv.CodeDomain, address[:], nil, 0); err != nil {
 			return err
 		}
 		if err := w.rs.domains.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
@@ -542,7 +551,13 @@ func (w *StateWriterV3) DeleteAccount(address common.Address, original *accounts
 	if w.trace {
 		fmt.Printf("del acc: %x\n", address)
 	}
-	if err := w.rs.domains.DomainDel(kv.AccountsDomain, address[:], nil, nil, 0); err != nil {
+	if err := w.rs.domains.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
+		return err
+	}
+	if err := w.rs.domains.DomainDel(kv.CodeDomain, address[:], nil, 0); err != nil {
+		return err
+	}
+	if err := w.rs.domains.DomainDel(kv.AccountsDomain, address[:], nil, 0); err != nil {
 		return err
 	}
 	// if w.accumulator != nil { TODO: investigate later. basically this will always panic. keeping this out should be fine anyway.
@@ -561,7 +576,7 @@ func (w *StateWriterV3) WriteAccountStorage(address common.Address, incarnation 
 		fmt.Printf("storage: %x,%x,%x\n", address, *key, v)
 	}
 	if len(v) == 0 {
-		return w.rs.domains.DomainDel(kv.StorageDomain, composite, nil, nil, 0)
+		return w.rs.domains.DomainDel(kv.StorageDomain, composite, nil, 0)
 	}
 	if w.accumulator != nil && key != nil && value != nil {
 		k := *key

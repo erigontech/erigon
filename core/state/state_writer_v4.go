@@ -23,17 +23,18 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
 var _ StateWriter = (*WriterV4)(nil)
 
 type WriterV4 struct {
-	tx    kv.TemporalPutDel
+	tx    *state.SharedDomains
 	trace bool
 }
 
-func NewWriterV4(tx kv.TemporalPutDel) *WriterV4 {
+func NewWriterV4(tx *state.SharedDomains) *WriterV4 {
 	return &WriterV4{
 		tx:    tx,
 		trace: false,
@@ -45,7 +46,7 @@ func (w *WriterV4) UpdateAccountData(address common.Address, original, account *
 		fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash)
 	}
 	if original.Incarnation > account.Incarnation {
-		if err := w.tx.DomainDel(kv.CodeDomain, address.Bytes(), nil, nil, 0); err != nil {
+		if err := w.tx.DomainDel(kv.CodeDomain, address.Bytes(), nil, 0); err != nil {
 			return err
 		}
 		if err := w.tx.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
@@ -67,7 +68,17 @@ func (w *WriterV4) DeleteAccount(address common.Address, original *accounts.Acco
 	if w.trace {
 		fmt.Printf("del account: %x\n", address)
 	}
-	return w.tx.DomainDel(kv.AccountsDomain, address.Bytes(), nil, nil, 0)
+
+	if err := w.tx.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
+		return err
+	}
+	if err := w.tx.DomainDel(kv.CodeDomain, address[:], nil, 0); err != nil {
+		return err
+	}
+	if err := w.tx.DomainDel(kv.AccountsDomain, address.Bytes(), nil, 0); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (w *WriterV4) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
