@@ -96,5 +96,5 @@ func (w *WriterV4) CreateContract(address common.Address) (err error) {
 	//if err = sd.DomainDel(kv.CodeDomain, address[:], nil, nil); err != nil {
 	//	return err
 	//}
-	return w.tx.DomainDelPrefix(kv.StorageDomain, address[:])
+	return nil
 }
