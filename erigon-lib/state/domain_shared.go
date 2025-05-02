@@ -640,15 +640,16 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter b
 	return
 }
 
-func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte) ([]byte, bool, error) {
-	var firstKey []byte
+func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
+	var firstKey, firstValue []byte
 	var hasPrefix bool
 	err := sd.IteratePrefix(domain, prefix, func(k []byte, v []byte, step uint64) (bool, error) {
 		firstKey = common.CopyBytes(k)
+		firstValue = common.CopyBytes(v)
 		hasPrefix = true
 		return false, nil // do not continue, end on first occurrence
 	})
-	return firstKey, hasPrefix, err
+	return firstKey, firstValue, hasPrefix, err
 }
 
 // IterateStoragePrefix iterates over key-value pairs of the storage domain that start with given prefix

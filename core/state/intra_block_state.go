@@ -125,7 +125,7 @@ func (sdb *IntraBlockState) SetTrace(trace bool) {
 	sdb.trace = trace
 }
 
-func (sdb *IntraBlockState) HasStorage(addr libcommon.Address) (bool, error) {
+func (sdb *IntraBlockState) HasStorage(addr common.Address) (bool, error) {
 	so, err := sdb.getStateObject(addr)
 	if err != nil {
 		return false, err

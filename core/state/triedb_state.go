@@ -697,8 +697,8 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 	return enc, nil
 }
 
-func (tds *TrieDbState) HasStorage(address libcommon.Address) (bool, error) {
-	addrHash := libcommon.Hash(crypto.Keccak256(address.Bytes()))
+func (tds *TrieDbState) HasStorage(address common.Address) (bool, error) {
+	addrHash := common.Hash(crypto.Keccak256(address.Bytes()))
 	// check if we know about any storage updates with non-empty values
 	for _, v := range tds.currentBuffer.storageUpdates[addrHash] {
 		if len(v) > 0 {
