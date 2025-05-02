@@ -118,7 +118,7 @@ func (rw *Worker) ResetState(rs *state.ParallelExecutionState, accumulator *shar
 	} else {
 		rw.SetReader(state.NewReaderV3(rs.Domains()))
 	}
-	rw.stateWriter = state.NewStateWriterV3(rs, accumulator)
+	rw.stateWriter = state.NewStateWriterV3(rs.Domains(), accumulator)
 }
 
 func (rw *Worker) SetGaspool(gp *core.GasPool) {
