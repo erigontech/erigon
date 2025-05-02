@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
@@ -222,12 +223,12 @@ func (s *SnapshotStore) EventTxnToBlockNum(ctx context.Context, txnHash libcommo
 	return blockNum, true, nil
 }
 
-func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (uint64, uint64, bool, error) {
+func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockHash libcommon.Hash, blockNum uint64) (uint64, uint64, bool, error) {
 	maxBlockNumInFiles := s.snapshots.VisibleBlocksAvailable(heimdall.Events.Enum())
 	if maxBlockNumInFiles == 0 || blockNum > maxBlockNumInFiles {
 		return s.Store.(interface {
-			blockEventIdsRange(context.Context, uint64, uint64) (uint64, uint64, bool, error)
-		}).blockEventIdsRange(ctx, blockNum, s.LastFrozenEventId())
+			blockEventIdsRange(context.Context, libcommon.Hash, uint64, uint64) (uint64, uint64, bool, error)
+		}).blockEventIdsRange(ctx, blockHash, blockNum, s.LastFrozenEventId())
 	}
 
 	tx := s.snapshots.ViewType(heimdall.Events)
@@ -243,7 +244,25 @@ func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockNum uint64)
 			break
 		}
 
+		idxBorTxnHash := sn.Src().Index()
+		if idxBorTxnHash == nil || idxBorTxnHash.KeyCount() == 0 {
+			continue
+		}
+
+		reader := recsplit.NewIndexReader(idxBorTxnHash)
+		txnHash := types.ComputeBorTxHash(blockNum, blockHash)
+		blockEventId, exists := reader.Lookup(txnHash[:])
+		var offset uint64
+
 		gg := sn.Src().MakeGetter()
+		if exists {
+			offset = idxBorTxnHash.OrdinalLookup(blockEventId)
+			gg.Reset(offset)
+			if !gg.MatchPrefix(txnHash[:]) {
+				continue
+			}
+		}
+
 		var buf []byte
 		for gg.HasNext() {
 			buf, _ = gg.Next(buf[:0])
@@ -342,7 +361,7 @@ func (s *SnapshotStore) borBlockByEventHash(txnHash libcommon.Hash, segments []*
 }
 
 func (s *SnapshotStore) BorStartEventId(ctx context.Context, hash libcommon.Hash, blockHeight uint64) (uint64, error) {
-	startEventId, _, ok, err := s.BlockEventIdsRange(ctx, blockHeight)
+	startEventId, _, ok, err := s.BlockEventIdsRange(ctx, hash, blockHeight)
 	if !ok || err != nil {
 		return 0, err
 	}
@@ -350,7 +369,7 @@ func (s *SnapshotStore) BorStartEventId(ctx context.Context, hash libcommon.Hash
 }
 
 func (s *SnapshotStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
-	startEventId, endEventId, ok, err := s.BlockEventIdsRange(ctx, blockHeight)
+	startEventId, endEventId, ok, err := s.BlockEventIdsRange(ctx, hash, blockHeight)
 	if err != nil {
 		return nil, err
 	}

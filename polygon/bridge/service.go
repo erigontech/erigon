@@ -422,8 +422,8 @@ func (s *Service) Unwind(ctx context.Context, blockNum uint64) error {
 }
 
 // Events returns all sync events at blockNum
-func (s *Service) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
-	return s.reader.Events(ctx, blockNum)
+func (s *Service) Events(ctx context.Context, blockHash libcommon.Hash, blockNum uint64) ([]*types.Message, error) {
+	return s.reader.Events(ctx, blockHash, blockNum)
 }
 
 func (s *Service) EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error) {
