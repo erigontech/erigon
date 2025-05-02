@@ -142,7 +142,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 			return err
 		}
 		defer sd.Close()
-		simStateWriter = state.NewWriterV4(sd)
+		simStateWriter = state.NewWriter(sd, nil)
 		simStateReader = state.NewReaderV3(sd)
 
 		executionAt, err := s.ExecutionAt(mb)

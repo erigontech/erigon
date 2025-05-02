@@ -55,7 +55,7 @@ type Worker struct {
 	blockReader services.FullBlockReader
 	in          *state.QueueWithRetry
 	rs          *state.ParallelExecutionState
-	stateWriter *state.StateWriterV3
+	stateWriter *state.Writer
 	stateReader state.ResettableStateReader
 	historyMode bool // if true - stateReader is HistoryReaderV3, otherwise it's state reader
 	chainConfig *chain.Config
@@ -118,7 +118,7 @@ func (rw *Worker) ResetState(rs *state.ParallelExecutionState, accumulator *shar
 	} else {
 		rw.SetReader(state.NewReaderV3(rs.Domains()))
 	}
-	rw.stateWriter = state.NewStateWriterV3(rs.Domains(), accumulator)
+	rw.stateWriter = state.NewWriter(rs.Domains(), accumulator)
 }
 
 func (rw *Worker) SetGaspool(gp *core.GasPool) {

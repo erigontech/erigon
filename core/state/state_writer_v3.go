@@ -28,32 +28,32 @@ import (
 	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
-// StateWriterV3 - used by parallel workers to accumulate updates and then send them to conflict-resolution.
-type StateWriterV3 struct {
-	tx          *libstate.SharedDomains
+// Writer - used by parallel workers to accumulate updates and then send them to conflict-resolution.
+type Writer struct {
+	tx          kv.TemporalPutDel
 	trace       bool
 	accumulator *shards.Accumulator
 }
 
-func NewStateWriterV3(tx *libstate.SharedDomains, accumulator *shards.Accumulator) *StateWriterV3 {
-	return &StateWriterV3{
+func NewWriter(tx kv.TemporalPutDel, accumulator *shards.Accumulator) *Writer {
+	return &Writer{
 		tx:          tx,
 		accumulator: accumulator,
 		//trace: true,
 	}
 }
 
-func (w *StateWriterV3) ResetWriteSet() {}
+func (w *Writer) ResetWriteSet() {}
 
-func (w *StateWriterV3) WriteSet() map[string]*libstate.KvList {
+func (w *Writer) WriteSet() map[string]*libstate.KvList {
 	return nil
 }
 
-func (w *StateWriterV3) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
+func (w *Writer) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
 	return nil, nil, nil, nil
 }
 
-func (w *StateWriterV3) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+func (w *Writer) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	if w.trace {
 		fmt.Printf("acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
 	}
@@ -77,7 +77,7 @@ func (w *StateWriterV3) UpdateAccountData(address common.Address, original, acco
 	return nil
 }
 
-func (w *StateWriterV3) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+func (w *Writer) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
 	if w.trace {
 		fmt.Printf("code: %x, %x, valLen: %d\n", address.Bytes(), codeHash, len(code))
 	}
@@ -90,7 +90,7 @@ func (w *StateWriterV3) UpdateAccountCode(address common.Address, incarnation ui
 	return nil
 }
 
-func (w *StateWriterV3) DeleteAccount(address common.Address, original *accounts.Account) error {
+func (w *Writer) DeleteAccount(address common.Address, original *accounts.Account) error {
 	if w.trace {
 		fmt.Printf("del acc: %x\n", address)
 	}
@@ -109,7 +109,7 @@ func (w *StateWriterV3) DeleteAccount(address common.Address, original *accounts
 	return nil
 }
 
-func (w *StateWriterV3) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+func (w *Writer) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
 	if *original == *value {
 		return nil
 	}
@@ -129,7 +129,7 @@ func (w *StateWriterV3) WriteAccountStorage(address common.Address, incarnation 
 	return w.tx.DomainPut(kv.StorageDomain, composite, nil, v, nil, 0)
 }
 
-func (w *StateWriterV3) CreateContract(address common.Address) error {
+func (w *Writer) CreateContract(address common.Address) error {
 	if w.trace {
 		fmt.Printf("create contract: %x\n", address)
 	}
