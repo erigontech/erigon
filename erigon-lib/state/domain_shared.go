@@ -830,6 +830,7 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error {
 	composite := k1
 	if k2 != nil {
+		composite = make([]byte, 0, len(k1)+len(k2))
 		composite = append(composite, k2...)
 	}
 	if prevVal == nil {
