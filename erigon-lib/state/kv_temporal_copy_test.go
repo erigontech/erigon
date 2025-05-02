@@ -224,7 +224,12 @@ func (tx *Tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, as
 }
 
 func (tx *Tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
-	it, err := tx.Debug().RangeLatest(name, prefix, nil, 1)
+	to, ok := kv.NextSubtree(prefix)
+	if !ok {
+		to = nil
+	}
+
+	it, err := tx.Debug().RangeLatest(name, prefix, to, 1)
 	if err != nil {
 		return nil, nil, false, err
 	}

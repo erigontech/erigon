@@ -641,15 +641,15 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter b
 }
 
 func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
-	var firstKey, firstValue []byte
+	var firstKey, firstVal []byte
 	var hasPrefix bool
 	err := sd.IteratePrefix(domain, prefix, func(k []byte, v []byte, step uint64) (bool, error) {
 		firstKey = common.CopyBytes(k)
-		firstValue = common.CopyBytes(v)
+		firstVal = common.CopyBytes(v)
 		hasPrefix = true
 		return false, nil // do not continue, end on first occurrence
 	})
-	return firstKey, firstValue, hasPrefix, err
+	return firstKey, firstVal, hasPrefix, err
 }
 
 // IterateStoragePrefix iterates over key-value pairs of the storage domain that start with given prefix
@@ -789,7 +789,9 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 	}
 	if prevVal == nil {
 		var err error
-		prevVal, prevStep, err = sd.GetLatest(domain, k1)
+		composite := make([]byte, 0, len(k1)+len(k2))
+		composite = append(append(composite, k1...), k2...)
+		prevVal, prevStep, err = sd.GetLatest(domain, composite)
 		if err != nil {
 			return err
 		}
@@ -825,7 +827,9 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error {
 	if prevVal == nil {
 		var err error
-		prevVal, prevStep, err = sd.GetLatest(domain, k1)
+		composite := make([]byte, 0, len(k1)+len(k2))
+		composite = append(append(composite, k1...), k2...)
+		prevVal, prevStep, err = sd.GetLatest(domain, composite)
 		if err != nil {
 			return err
 		}
