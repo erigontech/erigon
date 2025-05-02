@@ -562,7 +562,7 @@ func (sd *SharedDomains) deleteAccount(addr, prev []byte, prevStep uint64) error
 	}
 
 	// commitment delete already has been applied via account
-	if err := sd.DomainDel(kv.CodeDomain, addr, nil, nil, prevStep); err != nil {
+	if err := sd.DomainDel(kv.CodeDomain, addr, nil, prevStep); err != nil {
 		return err
 	}
 
