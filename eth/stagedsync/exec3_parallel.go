@@ -157,14 +157,12 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 	delete(result.TxIn, result.Coinbase)
 	delete(result.TxIn, result.ExecutionResult.BurntContractAddress)
 
-	versionedReader := state.NewVersionedStateReader(txIndex, result.TxIn, vm)
-	ibs := state.New(versionedReader)
+	ibs := state.New(state.NewVersionedStateReader(txIndex, result.TxIn, vm, stateReader))
 	ibs.SetTrace(task.execTask.Task.(*exec.TxTask).Trace)
 	ibs.SetTxContext(task.Version().BlockNum, txIndex)
 	ibs.SetVersion(txIncarnation)
 	ibs.ApplyVersionedWrites(result.TxOut)
 	ibs.SetVersionMap(&state.VersionMap{})
-	versionedReader.SetStateReader(stateReader)
 
 	txTask, ok := task.Task.(*exec.TxTask)
 

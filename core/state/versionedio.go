@@ -1,11 +1,9 @@
 package state
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -197,12 +195,8 @@ type versionedStateReader struct {
 	stateReader StateReader
 }
 
-func NewVersionedStateReader(txIndex int, reads ReadSet, versionMap *VersionMap) *versionedStateReader {
-	return &versionedStateReader{txIndex, reads, versionMap, nil}
-}
-
-func (vr *versionedStateReader) SetStateReader(stateReader StateReader) {
-	vr.stateReader = stateReader
+func NewVersionedStateReader(txIndex int, reads ReadSet, versionMap *VersionMap, stateReader StateReader) *versionedStateReader {
+	return &versionedStateReader{txIndex, reads, versionMap, stateReader}
 }
 
 func (vr *versionedStateReader) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
@@ -368,96 +362,6 @@ func (writes VersionedWrites) HasNewWrite(cmpSet []*VersionedWrite) bool {
 	return false
 }
 
-func (writes VersionedWrites) stateObjects() (map[libcommon.Address][]*stateObject, error) {
-	stateObjects := map[libcommon.Address][]*stateObject{}
-
-	for i := range writes {
-		so := writes[i].Val.(*stateObject)
-		addr := writes[i].Address
-		path := writes[i].Path
-
-		if so != nil {
-			prevs, ok := stateObjects[addr]
-
-			if ok {
-				isPrev := false
-
-				for _, prev := range prevs {
-					if prev == so {
-						isPrev = true
-						break
-					}
-				}
-				if isPrev {
-					continue
-				}
-			} else {
-				stateObjects[addr] = []*stateObject{so}
-			}
-
-			if path == StatePath {
-				stateKey := writes[i].Key
-				var state uint256.Int
-				so.GetState(stateKey, &state)
-				if len(prevs) > 0 {
-					var prevState uint256.Int
-					prevs[len(prevs)-1].GetState(stateKey, &state)
-					if prevState.Eq(&state) {
-						continue
-					}
-				}
-			} else if path == AddressPath {
-				continue
-			} else {
-				switch path {
-				case BalancePath:
-					b := so.Balance()
-					if len(prevs) > 0 {
-						prev := prevs[len(prevs)-1].Balance()
-						if prev.Eq(&b) {
-							continue
-						}
-					}
-				case NoncePath:
-					n := so.Nonce()
-					if len(prevs) > 0 {
-						prev := prevs[len(prevs)-1].Nonce()
-						if prev == n {
-							continue
-						}
-					}
-				case CodePath:
-					c, err := so.Code()
-					if err != nil {
-						return nil, err
-					}
-					if len(prevs) > 0 {
-						prev, err := prevs[len(prevs)-1].Code()
-						if err != nil {
-							return nil, err
-						}
-						if bytes.Equal(prev, c) {
-							continue
-						}
-					}
-				case SelfDestructPath:
-					if len(prevs) > 0 {
-						if so.deleted == prevs[len(prevs)-1].deleted {
-							continue
-						}
-					}
-				default:
-					panic(fmt.Errorf("unknown key type: %d", path))
-				}
-
-				stateObjects[addr] = append(prevs, so)
-			}
-		}
-
-	}
-	return stateObjects, nil
-}
-
 func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path AccountPath, key libcommon.Hash, commited bool, defaultV T, copyV func(T) T, readStorage func(sdb *stateObject) (T, error)) (T, ReadSource, error) {
 	if s.versionMap == nil {
 		so, err := s.getStateObject(addr)
@@ -600,24 +504,6 @@ func versionedRead[T any](s *IntraBlockState, addr libcommon.Address, path Accou
 	s.versionedReads.Set(vr)
 
 	return v, vr.Source, nil
-}
-
-func ApplyVersionedWrites(chainRules *chain.Rules, writes VersionedWrites, stateWriter StateWriter, trace bool) error {
-	stateObjects, err := writes.stateObjects()
-
-	if err != nil {
-		return err
-	}
-
-	for addr, sos := range stateObjects {
-		for _, so := range sos {
-			if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, so.IsDirty(), trace, nil); err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
 }
 
 // note that TxIndex starts at -1 (the begin system tx)
