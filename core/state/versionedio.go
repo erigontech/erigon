@@ -217,10 +217,6 @@ func (vr *versionedStateReader) ReadAccountData(address libcommon.Address) (*acc
 			return nil, err
 		}
 
-		if addr := fmt.Sprintf("%x", address); addr == "9ead03f7136fc6b4bdb0780b00a1c14ae5a8b6d0" {
-			fmt.Println(addr, "ReadAccountData - reader", account.Nonce)
-		}
-
 		if account != nil {
 			updated := vr.applyVersionedUpdates(address, *account)
 			return &updated, nil
