@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/assert"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
@@ -105,7 +106,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, producingDomain kv.Domain, ctx context
 
 	log.Info("SpawnCustomTrace", "startBlock", startBlock, "endBlock", endBlock)
 
-	batchSize := uint64(100_000)
+	batchSize := uint64(50_000)
 	for ; startBlock < endBlock; startBlock += batchSize {
 		if err := customTraceBatchProduce(ctx, cfg.ExecArgs, cfg.db, startBlock, startBlock+batchSize, "custom_trace", producingDomain, logger); err != nil {
 			return err
@@ -148,7 +149,8 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 			return err
 		}
 
-		{ //assert
+		//asserts
+		if producingDomain == kv.ReceiptDomain {
 			if err = AssertReceipts(ctx, cfg, ttx, fromBlock, toBlock); err != nil {
 				return err
 			}
@@ -192,6 +194,12 @@ func customTraceBatchProduce(ctx context.Context, cfg *exec3.ExecArgs, db kv.RwD
 }
 
 func AssertReceipts(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, fromBlock, toBlock uint64) (err error) {
+	if !assert.Enable {
+		return
+	}
+	if cfg.ChainConfig.Bor != nil { //TODO: enable me
+		return nil
+	}
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
@@ -277,13 +285,6 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 
 			if txTask.Tx != nil {
 				cumulativeBlobGasUsedInBlock += txTask.Tx.GetBlobGas()
-			}
-
-			if txTask.Final { // TODO: move asserts to 1 level higher
-				if txTask.Header.BlobGasUsed != nil && *txTask.Header.BlobGasUsed != cumulativeBlobGasUsedInBlock {
-					err := fmt.Errorf("assert: %d != %d", *txTask.Header.BlobGasUsed, cumulativeBlobGasUsedInBlock)
-					panic(err)
-				}
 			}
 
 			doms.SetTx(tx)

@@ -1218,6 +1218,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	chainConfig, pm := fromdb.ChainConfig(db), fromdb.PruneMode(db)
 	genesis := core.GenesisBlockByChainName(chain)
 	br, _ := blocksIO(db, logger)
+	syncCfg.PersistReceiptsCacheV2 = true
 	cfg := stagedsync.StageCustomTraceCfg(db, pm, dirs, br, chainConfig, engine, genesis, &syncCfg)
 
 	var producingDomain kv.Domain
@@ -1410,6 +1411,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		if syncCfg.PersistReceiptsCacheV2 {
 			libstate.EnableHistoricalRCache()
 		}
+		log.Info("[dbg] cfg", "syncCfg", syncCfg)
 
 		dirs := datadir.New(datadirCli)
 
