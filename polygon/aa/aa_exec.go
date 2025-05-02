@@ -151,7 +151,7 @@ func ValidateAATransaction(
 		validationGasUsed += applyRes.UsedGas
 	}
 
-	log.Info("validation gas report", "gasUsed", validationGasUsed, "nonceManager", 0, "refund", 0)
+	log.Info("validation gas report", "gasUsed", validationGasUsed, "nonceManager", 0, "refund", 0, "pretransactioncost", preTxCost)
 
 	return paymasterContext, validationGasUsed, nil
 }
@@ -278,27 +278,29 @@ func ExecuteAATransaction(
 	log.Info("execution gas used", "gasUsed", applyRes.UsedGas, "penalty", executionGasPenalty)
 
 	// Paymaster post-op frame
-	msg, err = tx.PaymasterPostOp(paymasterContext, gasUsed, !applyRes.Failed())
-	if err != nil {
-		return 0, 0, err
-	}
-
-	applyRes, err = core.ApplyFrame(evm, msg, gasPool)
-	if err != nil {
-		return 0, 0, err
-	}
-	if applyRes.Failed() {
-		if executionStatus == types.ExecutionStatusExecutionFailure {
-			executionStatus = types.ExecutionStatusExecutionAndPostOpFailure
-		} else {
-			executionStatus = types.ExecutionStatusPostOpFailure
+	if len(paymasterContext) != 0 {
+		msg, err = tx.PaymasterPostOp(paymasterContext, gasUsed, !applyRes.Failed())
+		if err != nil {
+			return 0, 0, err
 		}
-	}
 
-	validationGasPenalty := (tx.PostOpGasLimit - applyRes.UsedGas) * types.AA_GAS_PENALTY_PCT / 100
-	gasRefund += capRefund(tx.PostOpGasLimit-applyRes.UsedGas, applyRes.UsedGas)
-	gasUsed += applyRes.UsedGas + validationGasPenalty
-	log.Info("post op gas used", "gasUsed", applyRes.UsedGas, "penalty", validationGasPenalty)
+		applyRes, err = core.ApplyFrame(evm, msg, gasPool)
+		if err != nil {
+			return 0, 0, err
+		}
+		if applyRes.Failed() {
+			if executionStatus == types.ExecutionStatusExecutionFailure {
+				executionStatus = types.ExecutionStatusExecutionAndPostOpFailure
+			} else {
+				executionStatus = types.ExecutionStatusPostOpFailure
+			}
+		}
+
+		validationGasPenalty := (tx.PostOpGasLimit - applyRes.UsedGas) * types.AA_GAS_PENALTY_PCT / 100
+		gasRefund += capRefund(tx.PostOpGasLimit-applyRes.UsedGas, applyRes.UsedGas)
+		gasUsed += applyRes.UsedGas + validationGasPenalty
+		log.Info("post op gas used", "gasUsed", applyRes.UsedGas, "penalty", validationGasPenalty)
+	}
 
 	if err = refundGas(header, tx, ibs, gasUsed-gasRefund); err != nil {
 		return 0, 0, err
