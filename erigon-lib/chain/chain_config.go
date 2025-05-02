@@ -72,11 +72,10 @@ type Config struct {
 	OsakaTime    *big.Int `json:"osakaTime,omitempty"`
 
 	// Optional EIP-4844 parameters (see also EIP-7691, EIP-7840, EIP-7892)
-	MinBlobGasPrice *uint64                       `json:"minBlobGasPrice,omitempty"`
-	BlobSchedule    map[string]*params.BlobConfig `json:"blobSchedule,omitempty"`
-
-	onceBlobSchedule   sync.Once
-	parsedBlobSchedule map[uint64]*params.BlobConfig
+	MinBlobGasPrice       *uint64                       `json:"minBlobGasPrice,omitempty"`
+	BlobSchedule          map[string]*params.BlobConfig `json:"blobSchedule,omitempty"`
+	parseBlobScheduleOnce sync.Once
+	parsedBlobSchedule    map[uint64]*params.BlobConfig
 
 	// (Optional) governance contract where EIP-1559 fees will be sent to, which otherwise would be burnt since the London fork.
 	// A key corresponds to the block number, starting from which the fees are sent to the address (map value).
@@ -114,6 +113,26 @@ var (
 		MuirGlacierBlock:      big.NewInt(0),
 		BerlinBlock:           big.NewInt(0),
 		Ethash:                new(EthashConfig),
+	}
+
+	TestChainConfigCancun = &Config{
+		ChainID:                       big.NewInt(1),
+		HomesteadBlock:                big.NewInt(0),
+		TangerineWhistleBlock:         big.NewInt(0),
+		SpuriousDragonBlock:           big.NewInt(0),
+		ByzantiumBlock:                big.NewInt(0),
+		ConstantinopleBlock:           big.NewInt(0),
+		PetersburgBlock:               big.NewInt(0),
+		IstanbulBlock:                 big.NewInt(0),
+		MuirGlacierBlock:              big.NewInt(0),
+		BerlinBlock:                   big.NewInt(0),
+		LondonBlock:                   big.NewInt(0),
+		ArrowGlacierBlock:             big.NewInt(0),
+		GrayGlacierBlock:              big.NewInt(0),
+		TerminalTotalDifficulty:       big.NewInt(0),
+		TerminalTotalDifficultyPassed: true,
+		ShanghaiTime:                  big.NewInt(0),
+		CancunTime:                    big.NewInt(0),
 	}
 
 	TestChainAuraConfig = &Config{
@@ -309,7 +328,8 @@ func (c *Config) GetMinBlobGasPrice() uint64 {
 }
 
 func (c *Config) getBlobConfig(time uint64) *params.BlobConfig {
-	c.onceBlobSchedule.Do(func() {
+	c.parseBlobScheduleOnce.Do(func() {
+		// Populate with default values
 		c.parsedBlobSchedule = map[uint64]*params.BlobConfig{
 			0: {},
 		}
@@ -322,6 +342,8 @@ func (c *Config) getBlobConfig(time uint64) *params.BlobConfig {
 		if c.OsakaTime != nil {
 			c.parsedBlobSchedule[c.OsakaTime.Uint64()] = &params.DefaultOsakaBlobConfig
 		}
+
+		// Override with supplied values
 		for key, val := range c.BlobSchedule {
 			switch {
 			case key == "cancun":
@@ -339,6 +361,7 @@ func (c *Config) getBlobConfig(time uint64) *params.BlobConfig {
 			}
 		}
 	})
+
 	return ConfigValueLookup(c.parsedBlobSchedule, time)
 }
 
