@@ -19,7 +19,7 @@ package solid
 import (
 	"encoding/json"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -345,7 +345,7 @@ func (v *ValidatorSet) SetMinPreviousInclusionDelayAttestation(idx int, val *Pen
 	v.getPhase0(idx).MinPreviousInclusionDelayAttestation = val
 }
 
-func (v *ValidatorSet) SetWithdrawalCredentialForValidatorAtIndex(index int, creds libcommon.Hash) {
+func (v *ValidatorSet) SetWithdrawalCredentialForValidatorAtIndex(index int, creds common.Hash) {
 	v.zeroTreeHash(index)
 	v.Get(index).SetWithdrawalCredentials(creds)
 }

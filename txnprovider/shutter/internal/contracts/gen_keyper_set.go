@@ -10,10 +10,10 @@ import (
 	"strings"
 
 	ethereum "github.com/erigontech/erigon"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/abi"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/event"
-	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/abi/bind"
 )
 
@@ -23,7 +23,7 @@ var (
 	_ = strings.NewReader
 	_ = ethereum.NotFound
 	_ = bind.Bind
-	_ = libcommon.Big1
+	_ = common.Big1
 	_ = types.BloomLookup
 	_ = event.NewSubscription
 	_ = fmt.Errorf
@@ -37,15 +37,15 @@ const KeyperSetABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\
 var KeyperSetBin = "0x6080604052348015600e575f5ffd5b503380603357604051631e4fbdf760e01b81525f600482015260240160405180910390fd5b603a81603f565b50608e565b5f80546001600160a01b038381166001600160a01b0319831681178455604051919092169283917f8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e09190a35050565b6106b98061009b5f395ff3fe608060405234801561000f575f5ffd5b50600436106100e5575f3560e01c80638da5cb5b11610088578063cde1532d11610063578063cde1532d146101c3578063dbf4ab4e146101ec578063e75235b814610204578063f2fde38b14610216575f5ffd5b80638da5cb5b1461018b5780639eab52531461019b578063cab63661146101b0575f5ffd5b80632e8e6cad116100c35780632e8e6cad146101285780636f4d469b14610153578063715018a6146101665780638d4e40831461016e575f5ffd5b806317c4de35146100e957806317d5430a146100fe5780631de7725314610120575b5f5ffd5b6100fc6100f7366004610527565b610229565b005b6001545b60405167ffffffffffffffff90911681526020015b60405180910390f35b6100fc61027f565b61013b610136366004610527565b61029b565b6040516001600160a01b039091168152602001610117565b6100fc610161366004610555565b6102d3565b6100fc610394565b5f54600160a01b900460ff165b6040519015158152602001610117565b5f546001600160a01b031661013b565b6101a36103a7565b60405161011791906105c6565b6100fc6101be366004610611565b610407565b61017b6101d1366004610611565b600254600160401b90046001600160a01b0390811691161490565b600254600160401b90046001600160a01b031661013b565b60025467ffffffffffffffff16610102565b6100fc610224366004610611565b61046a565b6102316104ac565b5f54600160a01b900460ff161561025b5760405163475a253560e01b815260040160405180910390fd5b6002805467ffffffffffffffff191667ffffffffffffffff92909216919091179055565b6102876104ac565b5f805460ff60a01b1916600160a01b179055565b5f60018267ffffffffffffffff16815481106102b9576102b9610637565b5f918252602090912001546001600160a01b031692915050565b6102db6104ac565b5f54600160a01b900460ff16156103055760405163475a253560e01b815260040160405180910390fd5b5f5b67ffffffffffffffff811682111561038f57600183838367ffffffffffffffff1681811061033757610337610637565b905060200201602081019061034c9190610611565b81546001810183555f928352602090922090910180546001600160a01b0319166001600160a01b03909216919091179055806103878161064b565b915050610307565b505050565b61039c6104ac565b6103a55f6104d8565b565b606060018054806020026020016040519081016040528092919081815260200182805480156103fd57602002820191905f5260205f20905b81546001600160a01b031681526001909101906020018083116103df575b5050505050905090565b61040f6104ac565b5f54600160a01b900460ff16156104395760405163475a253560e01b815260040160405180910390fd5b600280546001600160a01b03909216600160401b0268010000000000000000600160e01b0319909216919091179055565b6104726104ac565b6001600160a01b0381166104a057604051631e4fbdf760e01b81525f60048201526024015b60405180910390fd5b6104a9816104d8565b50565b5f546001600160a01b031633146103a55760405163118cdaa760e01b8152336004820152602401610497565b5f80546001600160a01b038381166001600160a01b0319831681178455604051919092169283917f8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e09190a35050565b5f60208284031215610537575f5ffd5b813567ffffffffffffffff8116811461054e575f5ffd5b9392505050565b5f5f60208385031215610566575f5ffd5b823567ffffffffffffffff81111561057c575f5ffd5b8301601f8101851361058c575f5ffd5b803567ffffffffffffffff8111156105a2575f5ffd5b8560208260051b84010111156105b6575f5ffd5b6020919091019590945092505050565b602080825282518282018190525f918401906040840190835b818110156106065783516001600160a01b03168352602093840193909201916001016105df565b509095945050505050565b5f60208284031215610621575f5ffd5b81356001600160a01b038116811461054e575f5ffd5b634e487b7160e01b5f52603260045260245ffd5b5f67ffffffffffffffff821667ffffffffffffffff810361067a57634e487b7160e01b5f52601160045260245ffd5b6001019291505056fea2646970667358221220247f8f5d02424f7b23b35c015748a1e1b4030a3d2455cf1bff0e96d6699a226364736f6c634300081c0033"
 
 // DeployKeyperSet deploys a new Ethereum contract, binding an instance of KeyperSet to it.
-func DeployKeyperSet(auth *bind.TransactOpts, backend bind.ContractBackend) (libcommon.Address, types.Transaction, *KeyperSet, error) {
+func DeployKeyperSet(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *KeyperSet, error) {
 	parsed, err := abi.JSON(strings.NewReader(KeyperSetABI))
 	if err != nil {
-		return libcommon.Address{}, nil, nil, err
+		return common.Address{}, nil, nil, err
 	}
 
-	address, tx, contract, err := bind.DeployContract(auth, parsed, libcommon.FromHex(KeyperSetBin), backend)
+	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(KeyperSetBin), backend)
 	if err != nil {
-		return libcommon.Address{}, nil, nil, err
+		return common.Address{}, nil, nil, err
 	}
 	return address, tx, &KeyperSet{KeyperSetCaller: KeyperSetCaller{contract: contract}, KeyperSetTransactor: KeyperSetTransactor{contract: contract}, KeyperSetFilterer: KeyperSetFilterer{contract: contract}}, nil
 }
@@ -110,7 +110,7 @@ type KeyperSetTransactorRaw struct {
 }
 
 // NewKeyperSet creates a new instance of KeyperSet, bound to a specific deployed contract.
-func NewKeyperSet(address libcommon.Address, backend bind.ContractBackend) (*KeyperSet, error) {
+func NewKeyperSet(address common.Address, backend bind.ContractBackend) (*KeyperSet, error) {
 	contract, err := bindKeyperSet(address, backend, backend, backend)
 	if err != nil {
 		return nil, err
@@ -119,7 +119,7 @@ func NewKeyperSet(address libcommon.Address, backend bind.ContractBackend) (*Key
 }
 
 // NewKeyperSetCaller creates a new read-only instance of KeyperSet, bound to a specific deployed contract.
-func NewKeyperSetCaller(address libcommon.Address, caller bind.ContractCaller) (*KeyperSetCaller, error) {
+func NewKeyperSetCaller(address common.Address, caller bind.ContractCaller) (*KeyperSetCaller, error) {
 	contract, err := bindKeyperSet(address, caller, nil, nil)
 	if err != nil {
 		return nil, err
@@ -128,7 +128,7 @@ func NewKeyperSetCaller(address libcommon.Address, caller bind.ContractCaller) (
 }
 
 // NewKeyperSetTransactor creates a new write-only instance of KeyperSet, bound to a specific deployed contract.
-func NewKeyperSetTransactor(address libcommon.Address, transactor bind.ContractTransactor) (*KeyperSetTransactor, error) {
+func NewKeyperSetTransactor(address common.Address, transactor bind.ContractTransactor) (*KeyperSetTransactor, error) {
 	contract, err := bindKeyperSet(address, nil, transactor, nil)
 	if err != nil {
 		return nil, err
@@ -137,7 +137,7 @@ func NewKeyperSetTransactor(address libcommon.Address, transactor bind.ContractT
 }
 
 // NewKeyperSetFilterer creates a new log filterer instance of KeyperSet, bound to a specific deployed contract.
-func NewKeyperSetFilterer(address libcommon.Address, filterer bind.ContractFilterer) (*KeyperSetFilterer, error) {
+func NewKeyperSetFilterer(address common.Address, filterer bind.ContractFilterer) (*KeyperSetFilterer, error) {
 	contract, err := bindKeyperSet(address, nil, nil, filterer)
 	if err != nil {
 		return nil, err
@@ -146,7 +146,7 @@ func NewKeyperSetFilterer(address libcommon.Address, filterer bind.ContractFilte
 }
 
 // bindKeyperSet binds a generic wrapper to an already deployed contract.
-func bindKeyperSet(address libcommon.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
+func bindKeyperSet(address common.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
 	parsed, err := abi.JSON(strings.NewReader(KeyperSetABI))
 	if err != nil {
 		return nil, err
@@ -195,15 +195,15 @@ func (_KeyperSet *KeyperSetTransactorRaw) Transact(opts *bind.TransactOpts, meth
 // GetMember is a free data retrieval call binding the contract method 0x2e8e6cad.
 //
 // Solidity: function getMember(uint64 index) view returns(address)
-func (_KeyperSet *KeyperSetCaller) GetMember(opts *bind.CallOpts, index uint64) (libcommon.Address, error) {
+func (_KeyperSet *KeyperSetCaller) GetMember(opts *bind.CallOpts, index uint64) (common.Address, error) {
 	var out []interface{}
 	err := _KeyperSet.contract.Call(opts, &out, "getMember", index)
 
 	if err != nil {
-		return *new(libcommon.Address), err
+		return *new(common.Address), err
 	}
 
-	out0 := *abi.ConvertType(out[0], new(libcommon.Address)).(*libcommon.Address)
+	out0 := *abi.ConvertType(out[0], new(common.Address)).(*common.Address)
 
 	return out0, err
 
@@ -212,29 +212,29 @@ func (_KeyperSet *KeyperSetCaller) GetMember(opts *bind.CallOpts, index uint64) 
 // GetMember is a free data retrieval call binding the contract method 0x2e8e6cad.
 //
 // Solidity: function getMember(uint64 index) view returns(address)
-func (_KeyperSet *KeyperSetSession) GetMember(index uint64) (libcommon.Address, error) {
+func (_KeyperSet *KeyperSetSession) GetMember(index uint64) (common.Address, error) {
 	return _KeyperSet.Contract.GetMember(&_KeyperSet.CallOpts, index)
 }
 
 // GetMember is a free data retrieval call binding the contract method 0x2e8e6cad.
 //
 // Solidity: function getMember(uint64 index) view returns(address)
-func (_KeyperSet *KeyperSetCallerSession) GetMember(index uint64) (libcommon.Address, error) {
+func (_KeyperSet *KeyperSetCallerSession) GetMember(index uint64) (common.Address, error) {
 	return _KeyperSet.Contract.GetMember(&_KeyperSet.CallOpts, index)
 }
 
 // GetMembers is a free data retrieval call binding the contract method 0x9eab5253.
 //
 // Solidity: function getMembers() view returns(address[])
-func (_KeyperSet *KeyperSetCaller) GetMembers(opts *bind.CallOpts) ([]libcommon.Address, error) {
+func (_KeyperSet *KeyperSetCaller) GetMembers(opts *bind.CallOpts) ([]common.Address, error) {
 	var out []interface{}
 	err := _KeyperSet.contract.Call(opts, &out, "getMembers")
 
 	if err != nil {
-		return *new([]libcommon.Address), err
+		return *new([]common.Address), err
 	}
 
-	out0 := *abi.ConvertType(out[0], new([]libcommon.Address)).(*[]libcommon.Address)
+	out0 := *abi.ConvertType(out[0], new([]common.Address)).(*[]common.Address)
 
 	return out0, err
 
@@ -243,14 +243,14 @@ func (_KeyperSet *KeyperSetCaller) GetMembers(opts *bind.CallOpts) ([]libcommon.
 // GetMembers is a free data retrieval call binding the contract method 0x9eab5253.
 //
 // Solidity: function getMembers() view returns(address[])
-func (_KeyperSet *KeyperSetSession) GetMembers() ([]libcommon.Address, error) {
+func (_KeyperSet *KeyperSetSession) GetMembers() ([]common.Address, error) {
 	return _KeyperSet.Contract.GetMembers(&_KeyperSet.CallOpts)
 }
 
 // GetMembers is a free data retrieval call binding the contract method 0x9eab5253.
 //
 // Solidity: function getMembers() view returns(address[])
-func (_KeyperSet *KeyperSetCallerSession) GetMembers() ([]libcommon.Address, error) {
+func (_KeyperSet *KeyperSetCallerSession) GetMembers() ([]common.Address, error) {
 	return _KeyperSet.Contract.GetMembers(&_KeyperSet.CallOpts)
 }
 
@@ -288,15 +288,15 @@ func (_KeyperSet *KeyperSetCallerSession) GetNumMembers() (uint64, error) {
 // GetPublisher is a free data retrieval call binding the contract method 0xdbf4ab4e.
 //
 // Solidity: function getPublisher() view returns(address)
-func (_KeyperSet *KeyperSetCaller) GetPublisher(opts *bind.CallOpts) (libcommon.Address, error) {
+func (_KeyperSet *KeyperSetCaller) GetPublisher(opts *bind.CallOpts) (common.Address, error) {
 	var out []interface{}
 	err := _KeyperSet.contract.Call(opts, &out, "getPublisher")
 
 	if err != nil {
-		return *new(libcommon.Address), err
+		return *new(common.Address), err
 	}
 
-	out0 := *abi.ConvertType(out[0], new(libcommon.Address)).(*libcommon.Address)
+	out0 := *abi.ConvertType(out[0], new(common.Address)).(*common.Address)
 
 	return out0, err
 
@@ -305,14 +305,14 @@ func (_KeyperSet *KeyperSetCaller) GetPublisher(opts *bind.CallOpts) (libcommon.
 // GetPublisher is a free data retrieval call binding the contract method 0xdbf4ab4e.
 //
 // Solidity: function getPublisher() view returns(address)
-func (_KeyperSet *KeyperSetSession) GetPublisher() (libcommon.Address, error) {
+func (_KeyperSet *KeyperSetSession) GetPublisher() (common.Address, error) {
 	return _KeyperSet.Contract.GetPublisher(&_KeyperSet.CallOpts)
 }
 
 // GetPublisher is a free data retrieval call binding the contract method 0xdbf4ab4e.
 //
 // Solidity: function getPublisher() view returns(address)
-func (_KeyperSet *KeyperSetCallerSession) GetPublisher() (libcommon.Address, error) {
+func (_KeyperSet *KeyperSetCallerSession) GetPublisher() (common.Address, error) {
 	return _KeyperSet.Contract.GetPublisher(&_KeyperSet.CallOpts)
 }
 
@@ -350,7 +350,7 @@ func (_KeyperSet *KeyperSetCallerSession) GetThreshold() (uint64, error) {
 // IsAllowedToBroadcastEonKey is a free data retrieval call binding the contract method 0xcde1532d.
 //
 // Solidity: function isAllowedToBroadcastEonKey(address a) view returns(bool)
-func (_KeyperSet *KeyperSetCaller) IsAllowedToBroadcastEonKey(opts *bind.CallOpts, a libcommon.Address) (bool, error) {
+func (_KeyperSet *KeyperSetCaller) IsAllowedToBroadcastEonKey(opts *bind.CallOpts, a common.Address) (bool, error) {
 	var out []interface{}
 	err := _KeyperSet.contract.Call(opts, &out, "isAllowedToBroadcastEonKey", a)
 
@@ -367,14 +367,14 @@ func (_KeyperSet *KeyperSetCaller) IsAllowedToBroadcastEonKey(opts *bind.CallOpt
 // IsAllowedToBroadcastEonKey is a free data retrieval call binding the contract method 0xcde1532d.
 //
 // Solidity: function isAllowedToBroadcastEonKey(address a) view returns(bool)
-func (_KeyperSet *KeyperSetSession) IsAllowedToBroadcastEonKey(a libcommon.Address) (bool, error) {
+func (_KeyperSet *KeyperSetSession) IsAllowedToBroadcastEonKey(a common.Address) (bool, error) {
 	return _KeyperSet.Contract.IsAllowedToBroadcastEonKey(&_KeyperSet.CallOpts, a)
 }
 
 // IsAllowedToBroadcastEonKey is a free data retrieval call binding the contract method 0xcde1532d.
 //
 // Solidity: function isAllowedToBroadcastEonKey(address a) view returns(bool)
-func (_KeyperSet *KeyperSetCallerSession) IsAllowedToBroadcastEonKey(a libcommon.Address) (bool, error) {
+func (_KeyperSet *KeyperSetCallerSession) IsAllowedToBroadcastEonKey(a common.Address) (bool, error) {
 	return _KeyperSet.Contract.IsAllowedToBroadcastEonKey(&_KeyperSet.CallOpts, a)
 }
 
@@ -412,15 +412,15 @@ func (_KeyperSet *KeyperSetCallerSession) IsFinalized() (bool, error) {
 // Owner is a free data retrieval call binding the contract method 0x8da5cb5b.
 //
 // Solidity: function owner() view returns(address)
-func (_KeyperSet *KeyperSetCaller) Owner(opts *bind.CallOpts) (libcommon.Address, error) {
+func (_KeyperSet *KeyperSetCaller) Owner(opts *bind.CallOpts) (common.Address, error) {
 	var out []interface{}
 	err := _KeyperSet.contract.Call(opts, &out, "owner")
 
 	if err != nil {
-		return *new(libcommon.Address), err
+		return *new(common.Address), err
 	}
 
-	out0 := *abi.ConvertType(out[0], new(libcommon.Address)).(*libcommon.Address)
+	out0 := *abi.ConvertType(out[0], new(common.Address)).(*common.Address)
 
 	return out0, err
 
@@ -429,35 +429,35 @@ func (_KeyperSet *KeyperSetCaller) Owner(opts *bind.CallOpts) (libcommon.Address
 // Owner is a free data retrieval call binding the contract method 0x8da5cb5b.
 //
 // Solidity: function owner() view returns(address)
-func (_KeyperSet *KeyperSetSession) Owner() (libcommon.Address, error) {
+func (_KeyperSet *KeyperSetSession) Owner() (common.Address, error) {
 	return _KeyperSet.Contract.Owner(&_KeyperSet.CallOpts)
 }
 
 // Owner is a free data retrieval call binding the contract method 0x8da5cb5b.
 //
 // Solidity: function owner() view returns(address)
-func (_KeyperSet *KeyperSetCallerSession) Owner() (libcommon.Address, error) {
+func (_KeyperSet *KeyperSetCallerSession) Owner() (common.Address, error) {
 	return _KeyperSet.Contract.Owner(&_KeyperSet.CallOpts)
 }
 
 // AddMembers is a paid mutator transaction binding the contract method 0x6f4d469b.
 //
 // Solidity: function addMembers(address[] newMembers) returns()
-func (_KeyperSet *KeyperSetTransactor) AddMembers(opts *bind.TransactOpts, newMembers []libcommon.Address) (types.Transaction, error) {
+func (_KeyperSet *KeyperSetTransactor) AddMembers(opts *bind.TransactOpts, newMembers []common.Address) (types.Transaction, error) {
 	return _KeyperSet.contract.Transact(opts, "addMembers", newMembers)
 }
 
 // AddMembers is a paid mutator transaction binding the contract method 0x6f4d469b.
 //
 // Solidity: function addMembers(address[] newMembers) returns()
-func (_KeyperSet *KeyperSetSession) AddMembers(newMembers []libcommon.Address) (types.Transaction, error) {
+func (_KeyperSet *KeyperSetSession) AddMembers(newMembers []common.Address) (types.Transaction, error) {
 	return _KeyperSet.Contract.AddMembers(&_KeyperSet.TransactOpts, newMembers)
 }
 
 // AddMembers is a paid mutator transaction binding the contract method 0x6f4d469b.
 //
 // Solidity: function addMembers(address[] newMembers) returns()
-func (_KeyperSet *KeyperSetTransactorSession) AddMembers(newMembers []libcommon.Address) (types.Transaction, error) {
+func (_KeyperSet *KeyperSetTransactorSession) AddMembers(newMembers []common.Address) (types.Transaction, error) {
 	return _KeyperSet.Contract.AddMembers(&_KeyperSet.TransactOpts, newMembers)
 }
 
@@ -506,21 +506,21 @@ func (_KeyperSet *KeyperSetTransactorSession) SetFinalized() (types.Transaction,
 // SetPublisher is a paid mutator transaction binding the contract method 0xcab63661.
 //
 // Solidity: function setPublisher(address _publisher) returns()
-func (_KeyperSet *KeyperSetTransactor) SetPublisher(opts *bind.TransactOpts, _publisher libcommon.Address) (types.Transaction, error) {
+func (_KeyperSet *KeyperSetTransactor) SetPublisher(opts *bind.TransactOpts, _publisher common.Address) (types.Transaction, error) {
 	return _KeyperSet.contract.Transact(opts, "setPublisher", _publisher)
 }
 
 // SetPublisher is a paid mutator transaction binding the contract method 0xcab63661.
 //
 // Solidity: function setPublisher(address _publisher) returns()
-func (_KeyperSet *KeyperSetSession) SetPublisher(_publisher libcommon.Address) (types.Transaction, error) {
+func (_KeyperSet *KeyperSetSession) SetPublisher(_publisher common.Address) (types.Transaction, error) {
 	return _KeyperSet.Contract.SetPublisher(&_KeyperSet.TransactOpts, _publisher)
 }
 
 // SetPublisher is a paid mutator transaction binding the contract method 0xcab63661.
 //
 // Solidity: function setPublisher(address _publisher) returns()
-func (_KeyperSet *KeyperSetTransactorSession) SetPublisher(_publisher libcommon.Address) (types.Transaction, error) {
+func (_KeyperSet *KeyperSetTransactorSession) SetPublisher(_publisher common.Address) (types.Transaction, error) {
 	return _KeyperSet.Contract.SetPublisher(&_KeyperSet.TransactOpts, _publisher)
 }
 
@@ -548,27 +548,27 @@ func (_KeyperSet *KeyperSetTransactorSession) SetThreshold(_threshold uint64) (t
 // TransferOwnership is a paid mutator transaction binding the contract method 0xf2fde38b.
 //
 // Solidity: function transferOwnership(address newOwner) returns()
-func (_KeyperSet *KeyperSetTransactor) TransferOwnership(opts *bind.TransactOpts, newOwner libcommon.Address) (types.Transaction, error) {
+func (_KeyperSet *KeyperSetTransactor) TransferOwnership(opts *bind.TransactOpts, newOwner common.Address) (types.Transaction, error) {
 	return _KeyperSet.contract.Transact(opts, "transferOwnership", newOwner)
 }
 
 // TransferOwnership is a paid mutator transaction binding the contract method 0xf2fde38b.
 //
 // Solidity: function transferOwnership(address newOwner) returns()
-func (_KeyperSet *KeyperSetSession) TransferOwnership(newOwner libcommon.Address) (types.Transaction, error) {
+func (_KeyperSet *KeyperSetSession) TransferOwnership(newOwner common.Address) (types.Transaction, error) {
 	return _KeyperSet.Contract.TransferOwnership(&_KeyperSet.TransactOpts, newOwner)
 }
 
 // TransferOwnership is a paid mutator transaction binding the contract method 0xf2fde38b.
 //
 // Solidity: function transferOwnership(address newOwner) returns()
-func (_KeyperSet *KeyperSetTransactorSession) TransferOwnership(newOwner libcommon.Address) (types.Transaction, error) {
+func (_KeyperSet *KeyperSetTransactorSession) TransferOwnership(newOwner common.Address) (types.Transaction, error) {
 	return _KeyperSet.Contract.TransferOwnership(&_KeyperSet.TransactOpts, newOwner)
 }
 
 // KeyperSetAddMembersParams is an auto generated read-only Go binding of transcaction calldata params
 type KeyperSetAddMembersParams struct {
-	Param_newMembers []libcommon.Address
+	Param_newMembers []common.Address
 }
 
 // Parse AddMembers method from calldata of a transaction
@@ -596,7 +596,7 @@ func ParseKeyperSetAddMembersParams(calldata []byte) (*KeyperSetAddMembersParams
 		return nil, fmt.Errorf("failed to match calldata with param field number")
 	}
 
-	out0 := *abi.ConvertType(out[0], new([]libcommon.Address)).(*[]libcommon.Address)
+	out0 := *abi.ConvertType(out[0], new([]common.Address)).(*[]common.Address)
 
 	return &KeyperSetAddMembersParams{
 		Param_newMembers: out0,
@@ -605,7 +605,7 @@ func ParseKeyperSetAddMembersParams(calldata []byte) (*KeyperSetAddMembersParams
 
 // KeyperSetSetPublisherParams is an auto generated read-only Go binding of transcaction calldata params
 type KeyperSetSetPublisherParams struct {
-	Param__publisher libcommon.Address
+	Param__publisher common.Address
 }
 
 // Parse SetPublisher method from calldata of a transaction
@@ -633,7 +633,7 @@ func ParseKeyperSetSetPublisherParams(calldata []byte) (*KeyperSetSetPublisherPa
 		return nil, fmt.Errorf("failed to match calldata with param field number")
 	}
 
-	out0 := *abi.ConvertType(out[0], new(libcommon.Address)).(*libcommon.Address)
+	out0 := *abi.ConvertType(out[0], new(common.Address)).(*common.Address)
 
 	return &KeyperSetSetPublisherParams{
 		Param__publisher: out0,
@@ -679,7 +679,7 @@ func ParseKeyperSetSetThresholdParams(calldata []byte) (*KeyperSetSetThresholdPa
 
 // KeyperSetTransferOwnershipParams is an auto generated read-only Go binding of transcaction calldata params
 type KeyperSetTransferOwnershipParams struct {
-	Param_newOwner libcommon.Address
+	Param_newOwner common.Address
 }
 
 // Parse TransferOwnership method from calldata of a transaction
@@ -707,7 +707,7 @@ func ParseKeyperSetTransferOwnershipParams(calldata []byte) (*KeyperSetTransferO
 		return nil, fmt.Errorf("failed to match calldata with param field number")
 	}
 
-	out0 := *abi.ConvertType(out[0], new(libcommon.Address)).(*libcommon.Address)
+	out0 := *abi.ConvertType(out[0], new(common.Address)).(*common.Address)
 
 	return &KeyperSetTransferOwnershipParams{
 		Param_newOwner: out0,
@@ -783,19 +783,19 @@ func (it *KeyperSetOwnershipTransferredIterator) Close() error {
 
 // KeyperSetOwnershipTransferred represents a OwnershipTransferred event raised by the KeyperSet contract.
 type KeyperSetOwnershipTransferred struct {
-	PreviousOwner libcommon.Address
-	NewOwner      libcommon.Address
+	PreviousOwner common.Address
+	NewOwner      common.Address
 	Raw           types.Log // Blockchain specific contextual infos
 }
 
-func (_KeyperSet *KeyperSetFilterer) OwnershipTransferredEventID() libcommon.Hash {
-	return libcommon.HexToHash("0x8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0")
+func (_KeyperSet *KeyperSetFilterer) OwnershipTransferredEventID() common.Hash {
+	return common.HexToHash("0x8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0")
 }
 
 // FilterOwnershipTransferred is a free log retrieval operation binding the contract event 0x8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0.
 //
 // Solidity: event OwnershipTransferred(address indexed previousOwner, address indexed newOwner)
-func (_KeyperSet *KeyperSetFilterer) FilterOwnershipTransferred(opts *bind.FilterOpts, previousOwner []libcommon.Address, newOwner []libcommon.Address) (*KeyperSetOwnershipTransferredIterator, error) {
+func (_KeyperSet *KeyperSetFilterer) FilterOwnershipTransferred(opts *bind.FilterOpts, previousOwner []common.Address, newOwner []common.Address) (*KeyperSetOwnershipTransferredIterator, error) {
 
 	var previousOwnerRule []interface{}
 	for _, previousOwnerItem := range previousOwner {
@@ -816,7 +816,7 @@ func (_KeyperSet *KeyperSetFilterer) FilterOwnershipTransferred(opts *bind.Filte
 // WatchOwnershipTransferred is a free log subscription operation binding the contract event 0x8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0.
 //
 // Solidity: event OwnershipTransferred(address indexed previousOwner, address indexed newOwner)
-func (_KeyperSet *KeyperSetFilterer) WatchOwnershipTransferred(opts *bind.WatchOpts, sink chan<- *KeyperSetOwnershipTransferred, previousOwner []libcommon.Address, newOwner []libcommon.Address) (event.Subscription, error) {
+func (_KeyperSet *KeyperSetFilterer) WatchOwnershipTransferred(opts *bind.WatchOpts, sink chan<- *KeyperSetOwnershipTransferred, previousOwner []common.Address, newOwner []common.Address) (event.Subscription, error) {
 
 	var previousOwnerRule []interface{}
 	for _, previousOwnerItem := range previousOwner {

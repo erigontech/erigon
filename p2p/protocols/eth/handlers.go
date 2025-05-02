@@ -23,24 +23,24 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
 func AnswerGetBlockHeadersQuery(db kv.Tx, query *GetBlockHeadersPacket, blockReader services.HeaderAndCanonicalReader) ([]*types.Header, error) {
-	hashMode := query.Origin.Hash != (libcommon.Hash{})
+	hashMode := query.Origin.Hash != (common.Hash{})
 	first := true
 	maxNonCanonical := uint64(100)
 
 	// Gather headers until the fetch or network limits is reached
 	var (
-		bytes   libcommon.StorageSize
+		bytes   common.StorageSize
 		headers []*types.Header
 		unknown bool
 		err     error
@@ -89,7 +89,7 @@ func AnswerGetBlockHeadersQuery(db kv.Tx, query *GetBlockHeadersPacket, blockRea
 				unknown = true
 			} else {
 				query.Origin.Hash, query.Origin.Number = blockReader.ReadAncestor(db, query.Origin.Hash, query.Origin.Number, ancestor, &maxNonCanonical)
-				unknown = query.Origin.Hash == libcommon.Hash{}
+				unknown = query.Origin.Hash == common.Hash{}
 			}
 		case hashMode && !query.Reverse:
 			// Hash based traversal towards the leaf block
@@ -168,7 +168,7 @@ func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader
 
 type ReceiptsGetter interface {
 	GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block) (types.Receipts, error)
-	GetCachedReceipts(ctx context.Context, blockHash libcommon.Hash) (types.Receipts, bool)
+	GetCachedReceipts(ctx context.Context, blockHash common.Hash) (types.Receipts, bool)
 }
 
 type cachedReceipts struct {

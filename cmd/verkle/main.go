@@ -29,7 +29,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"go.uber.org/zap/buffer"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
@@ -191,12 +191,12 @@ func GenerateVerkleTree(ctx context.Context, cfg optionsCfg, logger log.Logger) 
 	// Verkle Tree to be built
 	logger.Info("Started Verkle Tree creation")
 
-	var root libcommon.Hash
+	var root common.Hash
 	if root, err = verkleWriter.CommitVerkleTreeFromScratch(); err != nil {
 		return err
 	}
 
-	logger.Info("Verkle Tree Generation completed", "elapsed", time.Since(start), "root", libcommon.Bytes2Hex(root[:]))
+	logger.Info("Verkle Tree Generation completed", "elapsed", time.Since(start), "root", common.Bytes2Hex(root[:]))
 
 	var progress uint64
 	if progress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
@@ -221,7 +221,7 @@ func analyseOut(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
 	}
 	defer tx.Rollback()
 
-	buckets, err := tx.ListBuckets()
+	buckets, err := tx.ListTables()
 	if err != nil {
 		return err
 	}
@@ -295,7 +295,7 @@ func dump(ctx context.Context, cfg optionsCfg) error {
 		}
 		select {
 		case <-logInterval.C:
-			log.Info("Dumping verkle tree to plain text", "key", libcommon.Bytes2Hex(k))
+			log.Info("Dumping verkle tree to plain text", "key", common.Bytes2Hex(k))
 		default:
 		}
 	}
@@ -350,7 +350,7 @@ func dump_acc_preimages(ctx context.Context, cfg optionsCfg) error {
 
 		select {
 		case <-logInterval.C:
-			log.Info("Dumping preimages to plain text", "key", libcommon.Bytes2Hex(k))
+			log.Info("Dumping preimages to plain text", "key", common.Bytes2Hex(k))
 		default:
 		}
 	}
@@ -389,15 +389,15 @@ func dump_storage_preimages(ctx context.Context, cfg optionsCfg, logger log.Logg
 	}
 	logger.Info("Current Block Number", "num", num)
 	var currentIncarnation uint64
-	var currentAddress libcommon.Address
-	var addressHash libcommon.Hash
+	var currentAddress common.Address
+	var addressHash common.Hash
 	var buf buffer.Buffer
 	for k, v, err := stateCursor.First(); k != nil; k, v, err = stateCursor.Next() {
 		if err != nil {
 			return err
 		}
 		if len(k) == 20 {
-			if currentAddress != (libcommon.Address{}) {
+			if currentAddress != (common.Address{}) {
 				if err := collector.Collect(addressHash[:], buf.Bytes()); err != nil {
 					return err
 				}
@@ -407,11 +407,11 @@ func dump_storage_preimages(ctx context.Context, cfg optionsCfg, logger log.Logg
 			if err := acc.DecodeForStorage(v); err != nil {
 				return err
 			}
-			currentAddress = libcommon.BytesToAddress(k)
+			currentAddress = common.BytesToAddress(k)
 			currentIncarnation = acc.Incarnation
 			addressHash = utils.Sha256(currentAddress[:])
 		} else {
-			address := libcommon.BytesToAddress(k[:20])
+			address := common.BytesToAddress(k[:20])
 			if address != currentAddress {
 				continue
 			}
@@ -425,7 +425,7 @@ func dump_storage_preimages(ctx context.Context, cfg optionsCfg, logger log.Logg
 
 		select {
 		case <-logInterval.C:
-			logger.Info("Computing preimages to plain text", "key", libcommon.Bytes2Hex(k))
+			logger.Info("Computing preimages to plain text", "key", common.Bytes2Hex(k))
 		default:
 		}
 	}

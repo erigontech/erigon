@@ -141,7 +141,7 @@ Technical details:
 ```
 # Use it if you see weird behavior, bugs, bans, hardware issues, etc...
 downloader --verify --datadir=<your_datadir>
-downloader --verify --verify.files=v1-1-2-transaction.seg --datadir=<your_datadir>
+downloader --verify --verify.files=v1.0-1-2-transaction.seg --datadir=<your_datadir>
 ```
 
 ## Create cheap seedbox

@@ -19,8 +19,10 @@ package datadir
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/gofrs/flock"
@@ -86,6 +88,10 @@ func New(datadir string) Dirs {
 	dir.MustExist(dirs.Chaindata, dirs.Tmp,
 		dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapCaplin,
 		dirs.Downloader, dirs.TxPool, dirs.Nodes, dirs.CaplinBlobs, dirs.CaplinIndexing, dirs.CaplinLatest, dirs.CaplinGenesis)
+	err := dirs.RenameOldVersions()
+	if err != nil {
+		panic(err)
+	}
 	return dirs
 }
 
@@ -195,5 +201,88 @@ func CopyFile(from, to string) error {
 		os.Remove(to)
 		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
 	}
+	return nil
+}
+
+func (d Dirs) RenameOldVersions() error {
+	directories := []string{
+		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
+		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
+		d.Nodes, d.CaplinBlobs, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis,
+	}
+	renamed := 0
+	for _, dirPath := range directories {
+		err := filepath.WalkDir(dirPath, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+
+			if !entry.IsDir() {
+				name := entry.Name()
+				if strings.HasPrefix(name, "v1-") {
+					if strings.HasSuffix(name, ".torrent") {
+						if err := os.Remove(path); err != nil {
+							return err
+						}
+						return nil
+					}
+					newName := strings.Replace(name, "v1-", "v1.0-", 1)
+					oldPath := path
+					path = filepath.Join(filepath.Dir(path), newName)
+
+					if err := os.Rename(oldPath, path); err != nil {
+						return err
+					}
+					renamed++
+				}
+			}
+			return nil
+		})
+
+		if err != nil {
+			return err
+		}
+	}
+
+	// Удаление директории Downloader
+	if d.Downloader != "" && renamed > 0 {
+		if err := os.RemoveAll(d.Downloader); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (d Dirs) RenameNewVersions() error {
+	directories := []string{
+		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
+		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
+		d.Nodes, d.CaplinBlobs, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis,
+	}
+
+	for _, dirPath := range directories {
+		err := filepath.WalkDir(dirPath, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+
+			if !d.IsDir() && strings.HasPrefix(d.Name(), "v1.0-") {
+				newName := strings.Replace(d.Name(), "v1.0-", "v1-", 1)
+				oldPath := path
+				newPath := filepath.Join(filepath.Dir(path), newName)
+
+				if err := os.Rename(oldPath, newPath); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }

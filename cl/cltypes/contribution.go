@@ -17,7 +17,7 @@
 package cltypes
 
 import (
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/types/clonable"
@@ -33,9 +33,9 @@ var _ ssz2.SizedObjectSSZ = (*Contribution)(nil)
  * to be aggregated and the BLS signature of the attestation.
  */
 type ContributionAndProof struct {
-	AggregatorIndex uint64            `json:"aggregator_index,string"`
-	Contribution    *Contribution     `json:"contribution"`
-	SelectionProof  libcommon.Bytes96 `json:"selection_proof"`
+	AggregatorIndex uint64         `json:"aggregator_index,string"`
+	Contribution    *Contribution  `json:"contribution"`
+	SelectionProof  common.Bytes96 `json:"selection_proof"`
 }
 
 func (a *ContributionAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -61,7 +61,7 @@ func (a *ContributionAndProof) HashSSZ() ([32]byte, error) {
 
 type SignedContributionAndProof struct {
 	Message   *ContributionAndProof `json:"message"`
-	Signature libcommon.Bytes96     `json:"signature"`
+	Signature common.Bytes96        `json:"signature"`
 }
 
 func (a *SignedContributionAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -86,17 +86,17 @@ func (a *SignedContributionAndProof) HashSSZ() ([32]byte, error) {
 var SyncCommitteeAggregationBitsSize = 16
 
 type Contribution struct {
-	Slot              uint64            `json:"slot,string"`
-	BeaconBlockRoot   libcommon.Hash    `json:"beacon_block_root"`
-	SubcommitteeIndex uint64            `json:"subcommittee_index,string"`
-	AggregationBits   hexutil.Bytes     `json:"aggregation_bits"`
-	Signature         libcommon.Bytes96 `json:"signature"`
+	Slot              uint64         `json:"slot,string"`
+	BeaconBlockRoot   common.Hash    `json:"beacon_block_root"`
+	SubcommitteeIndex uint64         `json:"subcommittee_index,string"`
+	AggregationBits   hexutil.Bytes  `json:"aggregation_bits"`
+	Signature         common.Bytes96 `json:"signature"`
 }
 
 type ContributionKey struct {
-	Slot              uint64         `json:"slot,string"`
-	BeaconBlockRoot   libcommon.Hash `json:"beacon_block_root"`
-	SubcommitteeIndex uint64         `json:"subcommittee_index,string"`
+	Slot              uint64      `json:"slot,string"`
+	BeaconBlockRoot   common.Hash `json:"beacon_block_root"`
+	SubcommitteeIndex uint64      `json:"subcommittee_index,string"`
 }
 
 func (a *Contribution) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -134,8 +134,8 @@ func (a *Contribution) HashSSZ() ([32]byte, error) {
  * and signature is the aggregate BLS signature of the committee.
  */
 type SyncContribution struct {
-	SyncCommiteeBits      libcommon.Bytes64 `json:"sync_committee_bits"`
-	SyncCommiteeSignature libcommon.Bytes96 `json:"signature"`
+	SyncCommiteeBits      common.Bytes64 `json:"sync_committee_bits"`
+	SyncCommiteeSignature common.Bytes96 `json:"signature"`
 }
 
 // return sum of the committee bits
@@ -180,10 +180,10 @@ func (agg *SyncContribution) HashSSZ() ([32]byte, error) {
 }
 
 type SyncCommitteeMessage struct {
-	Slot            uint64            `json:"slot,string"`
-	BeaconBlockRoot libcommon.Hash    `json:"beacon_block_root"`
-	ValidatorIndex  uint64            `json:"validator_index,string"`
-	Signature       libcommon.Bytes96 `json:"signature"`
+	Slot            uint64         `json:"slot,string"`
+	BeaconBlockRoot common.Hash    `json:"beacon_block_root"`
+	ValidatorIndex  uint64         `json:"validator_index,string"`
+	Signature       common.Bytes96 `json:"signature"`
 }
 
 func (a *SyncCommitteeMessage) EncodeSSZ(dst []byte) ([]byte, error) {

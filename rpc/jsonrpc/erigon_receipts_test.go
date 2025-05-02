@@ -26,18 +26,18 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/filters"
-	params2 "github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -56,19 +56,19 @@ func TestGetLogs(t *testing.T) {
 		logs, err = ethApi.GetLogs(context.Background(), filters.FilterCriteria{
 			FromBlock: big.NewInt(10),
 			ToBlock:   big.NewInt(10),
-			Addresses: libcommon.Addresses{libcommon.Address{}},
+			Addresses: common.Addresses{common.Address{}},
 		})
 		require.NoError(err)
-		assert.Equal(0, len(logs))
+		assert.Empty(logs)
 
 		// filter by wrong address
 		logs, err = ethApi.GetLogs(m.Ctx, filters.FilterCriteria{
 			FromBlock: big.NewInt(10),
 			ToBlock:   big.NewInt(10),
-			Topics:    [][]libcommon.Hash{{libcommon.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")}},
+			Topics:    [][]common.Hash{{common.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")}},
 		})
 		require.NoError(err)
-		assert.Equal(1, len(logs))
+		assert.Len(logs, 1)
 	}
 }
 
@@ -101,21 +101,21 @@ func TestErigonGetLatestLogs(t *testing.T) {
 		t.Errorf("calling erigon_getLatestLogs: %v", err)
 	}
 	require.NotNil(t, actual)
-	assert.EqualValues(expectedErigonLogs, actual)
+	assert.Equal(expectedErigonLogs, actual)
 
 	expectedLog := &types.ErigonLog{
-		Address:     libcommon.HexToAddress("0x3CB5b6E26e0f37F2514D45641F15Bd6fEC2E0c4c"),
-		Topics:      []libcommon.Hash{libcommon.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")},
+		Address:     common.HexToAddress("0x3CB5b6E26e0f37F2514D45641F15Bd6fEC2E0c4c"),
+		Topics:      []common.Hash{common.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")},
 		Data:        []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 151, 160, 176, 241, 203, 220, 75, 75, 222, 127, 170, 33, 171, 34, 107, 143, 20, 185, 234, 201},
 		BlockNumber: 10,
-		TxHash:      libcommon.HexToHash("0xb6449d8e167a8826d050afe4c9f07095236ff769a985f02649b1023c2ded2059"),
+		TxHash:      common.HexToHash("0xb6449d8e167a8826d050afe4c9f07095236ff769a985f02649b1023c2ded2059"),
 		TxIndex:     0,
-		BlockHash:   libcommon.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef"),
+		BlockHash:   common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef"),
 		Index:       0,
 		Removed:     false,
 		Timestamp:   100,
 	}
-	assert.EqualValues(expectedLog, actual[0])
+	assert.Equal(expectedLog, actual[0])
 }
 
 func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {
@@ -143,13 +143,13 @@ func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {
 
 	var lastBlock uint64
 	var blockCount uint64
-	containsTopics := make([][]libcommon.Hash, 0)
+	containsTopics := make([][]common.Hash, 0)
 
 	for i := range expectedLogs {
 		if expectedLogs[i].BlockNumber != lastBlock {
 			blockCount++
 		}
-		containsTopics = append(containsTopics, []libcommon.Hash{
+		containsTopics = append(containsTopics, []common.Hash{
 			expectedLogs[i].Topics[0],
 		})
 	}
@@ -228,7 +228,7 @@ func TestGetBlockReceiptsByBlockHash(t *testing.T) {
 			}
 
 			a, _ := json.Marshal(receiptsFromBlock)
-			assert.Equal(t, expect[block.Number.Uint64()], string(a))
+			assert.JSONEq(t, expect[block.Number.Uint64()], string(a))
 		}
 		return nil
 	})
@@ -240,7 +240,7 @@ func TestGetBlockReceiptsByBlockHash(t *testing.T) {
 // wraps it into a mock backend.
 func mockWithGenerator(t *testing.T, blocks int, generator func(int, *core.BlockGen)) *mock.MockSentry {
 	m := mock.MockWithGenesis(t, &types.Genesis{
-		Config: params2.TestChainConfig,
+		Config: chain.TestChainConfig,
 		Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
 	}, testKey, false)
 	if blocks > 0 {

@@ -22,12 +22,12 @@ import (
 	"fmt"
 	"math/big"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/dataflow"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/turbo/adapter"
@@ -63,7 +63,7 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (err error) {
 func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullBlockReader, currentTime uint64, blockPropagator adapter.BlockPropagator) (*BodyRequest, error) {
 	var bodyReq *BodyRequest
 	blockNums := make([]uint64, 0, bd.blockBufferSize)
-	hashes := make([]libcommon.Hash, 0, bd.blockBufferSize)
+	hashes := make([]common.Hash, 0, bd.blockBufferSize)
 
 	for blockNum := bd.requestedLow; len(blockNums) < bd.blockBufferSize && blockNum < bd.maxProgress; blockNum++ {
 		if bd.delivered.Contains(blockNum) {
@@ -89,7 +89,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 			continue
 		}
 
-		var hash libcommon.Hash
+		var hash common.Hash
 		var header *types.Header
 		request := true
 		if bd.deliveriesH[blockNum] != nil {
@@ -174,7 +174,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 }
 
 // checks if we have the block prefetched, returns true if found and stored or false if not present
-func (bd *BodyDownload) checkPrefetchedBlock(hash libcommon.Hash, tx kv.RwTx, blockNum uint64, blockPropagator adapter.BlockPropagator) bool {
+func (bd *BodyDownload) checkPrefetchedBlock(hash common.Hash, tx kv.RwTx, blockNum uint64, blockPropagator adapter.BlockPropagator) bool {
 	header, body := bd.prefetchedBlocks.Get(hash)
 
 	if body == nil {
@@ -390,7 +390,7 @@ func (bd *BodyDownload) AddToPrefetch(header *types.Header, body *types.RawBody)
 // or if the code is continuing from a previous run and this isn't present, by reading from the DB as the RequestMoreBodies would have.
 // as the requestedLow count is incremented before a call to this function we need the process count so that we can anticipate this,
 // effectively reversing time a little to get the actual position we need in the slice prior to requestedLow being incremented
-func (bd *BodyDownload) GetHeader(blockNum uint64, blockReader services.FullBlockReader, tx kv.Tx) (*types.Header, libcommon.Hash, error) {
+func (bd *BodyDownload) GetHeader(blockNum uint64, blockReader services.FullBlockReader, tx kv.Tx) (*types.Header, common.Hash, error) {
 	var header *types.Header
 	if bd.deliveriesH[blockNum] != nil {
 		header = bd.deliveriesH[blockNum]
@@ -398,10 +398,10 @@ func (bd *BodyDownload) GetHeader(blockNum uint64, blockReader services.FullBloc
 		var err error
 		header, err = blockReader.HeaderByNumber(context.Background(), tx, blockNum)
 		if err != nil {
-			return nil, libcommon.Hash{}, err
+			return nil, common.Hash{}, err
 		}
 		if header == nil {
-			return nil, libcommon.Hash{}, fmt.Errorf("header not found: blockNum=%d, trace=%s", blockNum, dbg.Stack())
+			return nil, common.Hash{}, fmt.Errorf("header not found: blockNum=%d, trace=%s", blockNum, dbg.Stack())
 		}
 	}
 	return header, header.Hash(), nil

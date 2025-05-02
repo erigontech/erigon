@@ -26,8 +26,8 @@ import (
 	"io"
 	"math/big"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 )
 
@@ -90,7 +90,7 @@ func Fuzz(data []byte) int {
 
 var minDifficulty = big.NewInt(0x2000)
 
-type calculator func(time uint64, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentUncleHash libcommon.Hash) *big.Int
+type calculator func(time uint64, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentUncleHash common.Hash) *big.Int
 type calculatorU256 func(time uint64, parent *types.Header) *big.Int
 
 func (f *fuzzer) fuzz() int {
