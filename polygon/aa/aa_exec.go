@@ -11,6 +11,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
@@ -51,9 +52,13 @@ func ValidateAATransaction(
 		return nil, 0, err
 	}
 
-	validationGasUsed = 0
+	preTxCost, err := tx.PreTransactionGasCost()
+	if err != nil {
+		return nil, 0, err
+	}
+	validationGasUsed = preTxCost
 
-	if err = chargeGas(header, tx, gasPool, ibs); err != nil {
+	if err = chargeGas(header, tx, gasPool, ibs, preTxCost); err != nil {
 		return nil, 0, err
 	}
 
@@ -145,6 +150,8 @@ func ValidateAATransaction(
 		entryPointTracer.Reset()
 		validationGasUsed += applyRes.UsedGas
 	}
+
+	log.Info("validation gas report", "gasUsed", validationGasUsed, "nonceManager", 0, "refund", 0)
 
 	return paymasterContext, validationGasUsed, nil
 }
@@ -268,6 +275,7 @@ func ExecuteAATransaction(
 	executionGasPenalty := (tx.GasLimit - applyRes.UsedGas) * types.AA_GAS_PENALTY_PCT / 100
 	gasUsed = validationGasUsed + applyRes.UsedGas + executionGasPenalty
 	gasRefund := capRefund(execRefund+validationRefund, gasUsed)
+	log.Info("execution gas used", "gasUsed", applyRes.UsedGas, "penalty", executionGasPenalty)
 
 	// Paymaster post-op frame
 	msg, err = tx.PaymasterPostOp(paymasterContext, gasUsed, !applyRes.Failed())
@@ -290,6 +298,7 @@ func ExecuteAATransaction(
 	validationGasPenalty := (tx.PostOpGasLimit - applyRes.UsedGas) * types.AA_GAS_PENALTY_PCT / 100
 	gasRefund += capRefund(tx.PostOpGasLimit-applyRes.UsedGas, applyRes.UsedGas)
 	gasUsed += applyRes.UsedGas + validationGasPenalty
+	log.Info("post op gas used", "gasUsed", applyRes.UsedGas, "penalty", validationGasPenalty)
 
 	if err = refundGas(header, tx, ibs, gasUsed-gasRefund); err != nil {
 		return 0, 0, err
