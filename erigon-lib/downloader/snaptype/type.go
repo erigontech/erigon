@@ -117,8 +117,8 @@ func (v Version) String() string {
 	return fmt.Sprintf("v%d.%d", v.Major, v.Minor)
 }
 
-func ReplaceVersion(s string, old, new Version) string {
-	return strings.Replace(s, old.String(), new.String(), -1)
+func ReplaceVersion(s string, oldVer, newVer Version) string {
+	return strings.ReplaceAll(s, oldVer.String(), newVer.String())
 }
 
 type Versions struct {
