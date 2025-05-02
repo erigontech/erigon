@@ -191,7 +191,7 @@ func NewBranchEncoder(sz uint64) *BranchEncoder {
 	}
 }
 
-func (be *BranchEncoder) SetMetricsCollector(metrics *Metrics) {
+func (be *BranchEncoder) setMetrics(metrics *Metrics) {
 	be.metrics = metrics
 }
 
@@ -223,11 +223,11 @@ func (be *BranchEncoder) CollectUpdate(
 	}
 	// fmt.Printf("\ncollectBranchUpdate [%x] -> %s\n", prefix, BranchData(update).String())
 	// has to copy :(
-	if be.metrics != nil {
-		be.metrics.updateBranch.Add(1)
-	}
 	if err = ctx.PutBranch(common.Copy(prefix), common.Copy(update), prev, prevStep); err != nil {
 		return 0, err
+	}
+	if be.metrics != nil {
+		be.metrics.updateBranch.Add(1)
 	}
 	mxTrieBranchesUpdated.Inc()
 	return lastNibble, nil

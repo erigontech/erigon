@@ -2,11 +2,12 @@ package commitment
 
 import (
 	"encoding/csv"
-	"encoding/hex"
+	"fmt"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/length"
 	"os"
 	"sort"
 	"strconv"
-	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -15,7 +16,7 @@ import (
 ERIGON_COMMITMENT_TRACE - file path prefix to write commitment metrics
 */
 func init() {
-	metricsFile = os.Getenv("ERIGON_COMMITMENT_TRACE")
+	metricsFile = dbg.EnvString("ERIGON_COMMITMENT_TRACE", "")
 	collectCommitmentMetrics = metricsFile != ""
 }
 
@@ -25,25 +26,24 @@ var (
 )
 
 type CsvMetrics interface {
-	Reset()
 	Headers() []string
 	Values() [][]string
 }
 
 type Metrics struct {
-	Accounts            *AccountMetrics
-	updates             atomic.Uint64
-	addressKeys         atomic.Uint64
-	storageKeys         atomic.Uint64
-	loadBranch          atomic.Uint64
-	loadAccount         atomic.Uint64
-	loadStorage         atomic.Uint64
-	updateBranch        atomic.Uint64
-	loadDepths          [10]uint64
-	unfolds             atomic.Uint64
-	totalUnfoldingTime  time.Duration
-	totalFoldingTime    time.Duration
-	totalProcessingTime time.Duration
+	Accounts        *AccountMetrics
+	updates         atomic.Uint64
+	addressKeys     atomic.Uint64
+	storageKeys     atomic.Uint64
+	loadBranch      atomic.Uint64
+	loadAccount     atomic.Uint64
+	loadStorage     atomic.Uint64
+	updateBranch    atomic.Uint64
+	loadDepths      [10]uint64
+	unfolds         atomic.Uint64
+	spentUnfolding  time.Duration
+	spentFolding    time.Duration
+	spentProcessing time.Duration
 }
 
 func NewMetrics() *Metrics {
@@ -52,7 +52,18 @@ func NewMetrics() *Metrics {
 	}
 }
 
-func (metrics *Metrics) Headers() []string {
+func (m *Metrics) WriteToCSV() {
+	if collectCommitmentMetrics {
+		if err := writeMetricsToCSV(m, metricsFile+"_process.csv"); err != nil {
+			panic(err)
+		}
+		if err := writeMetricsToCSV(m.Accounts, metricsFile+"_accounts.csv"); err != nil {
+			panic(err)
+		}
+	}
+}
+
+func (m *Metrics) Headers() []string {
 	return []string{
 		"updates",
 		"address plainKey",
@@ -73,142 +84,140 @@ func (metrics *Metrics) Headers() []string {
 	}
 }
 
-func (metrics *Metrics) Values() [][]string {
+func (m *Metrics) Values() [][]string {
 	return [][]string{
-		[]string{
-			strconv.FormatUint(metrics.updates.Load(), 10),
-			strconv.FormatUint(metrics.addressKeys.Load(), 10),
-			strconv.FormatUint(metrics.storageKeys.Load(), 10),
-			strconv.FormatUint(metrics.loadBranch.Load(), 10),
-			strconv.FormatUint(metrics.loadAccount.Load(), 10),
-			strconv.FormatUint(metrics.loadStorage.Load(), 10),
-			strconv.FormatUint(metrics.updateBranch.Load(), 10),
-			strconv.FormatUint(metrics.loadDepths[0], 10) + "/" + strconv.FormatUint(metrics.loadDepths[1], 10),
-			strconv.FormatUint(metrics.loadDepths[2], 10) + "/" + strconv.FormatUint(metrics.loadDepths[3], 10),
-			strconv.FormatUint(metrics.loadDepths[4], 10) + "/" + strconv.FormatUint(metrics.loadDepths[5], 10),
-			strconv.FormatUint(metrics.loadDepths[6], 10) + "/" + strconv.FormatUint(metrics.loadDepths[7], 10),
-			strconv.FormatUint(metrics.loadDepths[8], 10) + "/" + strconv.FormatUint(metrics.loadDepths[9], 10),
-			strconv.FormatUint(metrics.unfolds.Load(), 10),
-			strconv.Itoa(int(metrics.totalUnfoldingTime.Milliseconds())),
-			strconv.Itoa(int(metrics.totalFoldingTime.Milliseconds())),
-			strconv.Itoa(int(metrics.totalProcessingTime.Milliseconds())),
+		{
+			strconv.FormatUint(m.updates.Load(), 10),
+			strconv.FormatUint(m.addressKeys.Load(), 10),
+			strconv.FormatUint(m.storageKeys.Load(), 10),
+			strconv.FormatUint(m.loadBranch.Load(), 10),
+			strconv.FormatUint(m.loadAccount.Load(), 10),
+			strconv.FormatUint(m.loadStorage.Load(), 10),
+			strconv.FormatUint(m.updateBranch.Load(), 10),
+			strconv.FormatUint(m.loadDepths[0], 10) + "/" + strconv.FormatUint(m.loadDepths[1], 10),
+			strconv.FormatUint(m.loadDepths[2], 10) + "/" + strconv.FormatUint(m.loadDepths[3], 10),
+			strconv.FormatUint(m.loadDepths[4], 10) + "/" + strconv.FormatUint(m.loadDepths[5], 10),
+			strconv.FormatUint(m.loadDepths[6], 10) + "/" + strconv.FormatUint(m.loadDepths[7], 10),
+			strconv.FormatUint(m.loadDepths[8], 10) + "/" + strconv.FormatUint(m.loadDepths[9], 10),
+			strconv.FormatUint(m.unfolds.Load(), 10),
+			strconv.FormatInt(m.spentUnfolding.Milliseconds(), 10),
+			strconv.FormatInt(m.spentFolding.Milliseconds(), 10),
+			strconv.FormatInt(m.spentProcessing.Milliseconds(), 10),
 		},
 	}
 }
 
-func (metrics *Metrics) Reset() {
-	metrics.Accounts.Reset()
-	metrics.updates.Store(0)
-	metrics.addressKeys.Store(0)
-	metrics.storageKeys.Store(0)
-	metrics.loadBranch.Store(0)
-	metrics.loadAccount.Store(0)
-	metrics.loadStorage.Store(0)
-	metrics.updateBranch.Store(0)
-	metrics.unfolds.Store(0)
-	metrics.totalUnfoldingTime = 0
-	metrics.totalFoldingTime = 0
-	metrics.totalProcessingTime = 0
-}
-
-func (metrics *Metrics) Now() time.Time {
-	if collectCommitmentMetrics {
-		return time.Now()
-	}
-	return time.Time{}
-}
-
-func (metrics *Metrics) CollectFileDepthStats(m map[uint64]skipStat) {
+func (m *Metrics) Reset() {
 	if !collectCommitmentMetrics {
 		return
 	}
-	ends := make([]uint64, 0, len(m))
-	for k := range m {
+
+	m.Accounts.Reset()
+	m.updates.Store(0)
+	m.addressKeys.Store(0)
+	m.storageKeys.Store(0)
+	m.loadBranch.Store(0)
+	m.loadAccount.Store(0)
+	m.loadStorage.Store(0)
+	m.updateBranch.Store(0)
+	m.unfolds.Store(0)
+	m.spentUnfolding = 0
+	m.spentFolding = 0
+	m.spentProcessing = 0
+}
+
+func (m *Metrics) CollectFileDepthStats(endTxNumStats map[uint64]skipStat) {
+	if !collectCommitmentMetrics {
+		return
+	}
+	ends := make([]uint64, 0, len(endTxNumStats))
+	for k := range endTxNumStats {
 		ends = append(ends, k)
 	}
+	// sort by file endTxNum
 	sort.Slice(ends, func(i, j int) bool { return ends[i] > ends[j] })
 	for i := 0; i < 5 && i < len(ends); i++ {
 		// get stats for specific file depth
-		v := m[ends[i]]
+		v := endTxNumStats[ends[i]]
 		// write level i file stats - account and storage loads
-		metrics.loadDepths[i*2], metrics.loadDepths[i*2+1] = v.accLoaded, v.storLoaded
+		m.loadDepths[i*2], m.loadDepths[i*2+1] = v.accLoaded, v.storLoaded
 	}
 }
 
-func (metrics *Metrics) Updates(plainKey []byte) {
+func (m *Metrics) Updates(plainKey []byte) {
 	if !collectCommitmentMetrics {
 		return
 	}
-	if len(plainKey) == 20 {
-		metrics.addressKeys.Add(1)
+	if len(plainKey) == length.Addr {
+		m.addressKeys.Add(1)
 	} else {
-		metrics.storageKeys.Add(1)
-		metrics.Accounts.UpdatesStorageInc(plainKey)
+		m.storageKeys.Add(1)
+
+		m.Accounts.collect(plainKey, func(mx *AccountStats) {
+			mx.StorageUpates++
+		})
 	}
 }
 
-func (metrics *Metrics) Account(plainKey []byte) {
+func (m *Metrics) AccountLoad(plainKey []byte) {
 	if collectCommitmentMetrics {
-		metrics.loadAccount.Add(1)
-		metrics.Accounts.LoadAccountInc(plainKey)
+		m.loadAccount.Add(1)
+		m.Accounts.collect(plainKey, func(mx *AccountStats) {
+			mx.LoadAccount++
+		})
 	}
 }
 
-func (metrics *Metrics) Storage(plainKey []byte) {
+func (m *Metrics) StorageLoad(plainKey []byte) {
 	if collectCommitmentMetrics {
-		metrics.loadStorage.Add(1)
-		metrics.Accounts.LoadStorageInc(plainKey)
+		m.loadStorage.Add(1)
+		m.Accounts.collect(plainKey, func(mx *AccountStats) {
+			mx.LoadStorage++
+		})
 	}
 }
 
-func (metrics *Metrics) Branch(plainKey []byte) {
+func (m *Metrics) BranchLoad(plainKey []byte) {
 	if collectCommitmentMetrics {
-		metrics.loadBranch.Add(1)
-		metrics.Accounts.LoadBranchInc(plainKey)
+		m.loadBranch.Add(1)
+		m.Accounts.collect(plainKey, func(mx *AccountStats) {
+			mx.LoadBranch++
+		})
 	}
 }
 
-func (metrics *Metrics) StartUnfolding(plainKey []byte) func() {
+func (m *Metrics) StartUnfolding(plainKey []byte) func() {
 	if collectCommitmentMetrics {
-		start := metrics.Now()
-		metrics.Accounts.UnfoldsInc(plainKey)
-		metrics.unfolds.Add(1)
+		start := time.Now()
+		m.unfolds.Add(1)
 		return func() {
-			metrics.TotalUnfoldingTimeInc(start, plainKey)
-
+			d := time.Since(start)
+			m.spentUnfolding += d
+			m.Accounts.collect(plainKey, func(mx *AccountStats) {
+				mx.SpentUnfolding += d
+			})
 		}
 	}
 	return func() {}
 }
 
-func (metrics *Metrics) StartFolding(plainKey []byte) func() {
+func (m *Metrics) StartFolding(plainKey []byte) func() {
 	if collectCommitmentMetrics {
-		start := metrics.Now()
-		metrics.Accounts.FoldsInc(plainKey)
+		start := time.Now()
 		return func() {
-			metrics.TotalFoldingTimeInc(start, plainKey)
+			d := time.Since(start)
+			m.spentFolding += d
+			m.Accounts.collect(plainKey, func(mx *AccountStats) {
+				mx.SpentFolding += d
+			})
 		}
 	}
 	return func() {}
 }
 
-func (metrics *Metrics) TotalUnfoldingTimeInc(t time.Time, plainKey []byte) {
+func (m *Metrics) TotalProcessingTimeInc(t time.Time) {
 	if collectCommitmentMetrics {
-		metrics.totalUnfoldingTime += time.Since(t)
-		metrics.Accounts.TotalUnfoldingTimeInc(plainKey, t)
-	}
-}
-
-func (metrics *Metrics) TotalFoldingTimeInc(t time.Time, plainKey []byte) {
-	if collectCommitmentMetrics {
-		metrics.totalFoldingTime += time.Since(t)
-		metrics.Accounts.TotalFoldingTimeInc(plainKey, t)
-	}
-}
-
-func (metrics *Metrics) TotalProcessingTimeInc(t time.Time) {
-	if collectCommitmentMetrics {
-		metrics.totalProcessingTime += time.Since(t)
+		m.spentProcessing += time.Since(t)
 	}
 }
 
@@ -219,23 +228,39 @@ func NewAccounts() *AccountMetrics {
 }
 
 type AccountStats struct {
-	StorageUpates      uint64
-	LoadBranch         uint64
-	LoadAccount        uint64
-	LoadStorage        uint64
-	Unfolds            uint64
-	TotalUnfoldingTime time.Duration
-	Folds              uint64
-	TotalFoldingTime   time.Duration
+	StorageUpates  uint64
+	LoadBranch     uint64
+	LoadAccount    uint64
+	LoadStorage    uint64
+	Unfolds        uint64
+	Folds          uint64
+	SpentUnfolding time.Duration
+	SpentFolding   time.Duration
 }
 
 type AccountMetrics struct {
-	m sync.Mutex
+	//m sync.Mutex
 	// will be separate value for each key in parallel processing
 	AccountStats map[string]*AccountStats
 }
 
-func (processAccount *AccountMetrics) Headers() []string {
+func (am *AccountMetrics) collect(plainKey []byte, fn func(mx *AccountStats)) {
+	//am.m.Lock()
+	//defer am.m.Unlock()
+
+	var addr string
+	if len(plainKey) > 0 {
+		addr = toStringZeroCopy(plainKey[:min(length.Addr, len(plainKey))])
+	}
+	as, ok := am.AccountStats[addr]
+	if !ok {
+		as = &AccountStats{}
+	}
+	fn(as)
+	am.AccountStats[addr] = as
+}
+
+func (am *AccountMetrics) Headers() []string {
 	return []string{
 		"account",
 		"storage updates",
@@ -249,129 +274,33 @@ func (processAccount *AccountMetrics) Headers() []string {
 	}
 }
 
-func (processAccount *AccountMetrics) Values() [][]string {
-	processAccount.m.Lock()
-	defer processAccount.m.Unlock()
-	// + 1 to add one empty line between "process" calls
-	values := make([][]string, len(processAccount.AccountStats)+1, len(processAccount.AccountStats)+1)
-	ind := 1
-	for i, account := range processAccount.AccountStats {
-		values[ind] = []string{
-			i,
-			strconv.FormatUint(account.StorageUpates, 10),
-			strconv.FormatUint(account.LoadBranch, 10),
-			strconv.FormatUint(account.LoadAccount, 10),
-			strconv.FormatUint(account.LoadStorage, 10),
-			strconv.FormatUint(account.Unfolds, 10),
-			strconv.Itoa(int(account.TotalUnfoldingTime.Microseconds())),
-			strconv.FormatUint(account.Folds, 10),
-			strconv.Itoa(int(account.TotalFoldingTime.Microseconds())),
+func (am *AccountMetrics) Values() [][]string {
+	//am.m.Lock()
+	//defer am.m.Unlock()
+
+	values := make([][]string, len(am.AccountStats)+1, len(am.AccountStats)+1) // + 1 to add one empty line between "process" calls
+	vi := 1
+	for addr, stat := range am.AccountStats {
+		values[vi] = []string{
+			fmt.Sprintf("%x", addr),
+			strconv.FormatUint(stat.StorageUpates, 10),
+			strconv.FormatUint(stat.LoadBranch, 10),
+			strconv.FormatUint(stat.LoadAccount, 10),
+			strconv.FormatUint(stat.LoadStorage, 10),
+			strconv.FormatUint(stat.Unfolds, 10),
+			strconv.Itoa(int(stat.SpentUnfolding.Microseconds())),
+			strconv.FormatUint(stat.Folds, 10),
+			strconv.Itoa(int(stat.SpentFolding.Microseconds())),
 		}
-		ind++
+		vi++
 	}
 	return values
 }
 
-func (processAccount *AccountMetrics) Reset() {
-	processAccount.m.Lock()
-	defer processAccount.m.Unlock()
-	processAccount.AccountStats = make(map[string]*AccountStats)
-}
-
-func (processAccount *AccountMetrics) UpdatesStorageInc(plainKey []byte) {
-	if collectCommitmentMetrics && len(plainKey) > 20 {
-		processAccount.m.Lock()
-		defer processAccount.m.Unlock()
-		account := hex.EncodeToString(plainKey[0:20])
-		if _, ok := processAccount.AccountStats[account]; !ok {
-			processAccount.AccountStats[account] = &AccountStats{}
-		}
-		processAccount.AccountStats[account].StorageUpates++
-	}
-}
-
-func (processAccount *AccountMetrics) LoadBranchInc(plainKey []byte) {
-	if collectCommitmentMetrics && len(plainKey) > 20 {
-		processAccount.m.Lock()
-		defer processAccount.m.Unlock()
-		account := hex.EncodeToString(plainKey[0:20])
-		if _, ok := processAccount.AccountStats[account]; !ok {
-			processAccount.AccountStats[account] = &AccountStats{}
-		}
-		processAccount.AccountStats[account].LoadBranch++
-	}
-}
-
-func (processAccount *AccountMetrics) LoadAccountInc(plainKey []byte) {
-	if collectCommitmentMetrics && len(plainKey) > 20 {
-		processAccount.m.Lock()
-		defer processAccount.m.Unlock()
-		account := hex.EncodeToString(plainKey[0:20])
-		if _, ok := processAccount.AccountStats[account]; !ok {
-			processAccount.AccountStats[account] = &AccountStats{}
-		}
-		processAccount.AccountStats[account].LoadAccount++
-	}
-}
-
-func (processAccount *AccountMetrics) LoadStorageInc(plainKey []byte) {
-	if collectCommitmentMetrics && len(plainKey) > 20 {
-		processAccount.m.Lock()
-		defer processAccount.m.Unlock()
-		account := hex.EncodeToString(plainKey[0:20])
-		if _, ok := processAccount.AccountStats[account]; !ok {
-			processAccount.AccountStats[account] = &AccountStats{}
-		}
-		processAccount.AccountStats[account].LoadStorage++
-	}
-}
-
-func (processAccount *AccountMetrics) UnfoldsInc(plainKey []byte) {
-	if collectCommitmentMetrics && len(plainKey) > 20 {
-		processAccount.m.Lock()
-		defer processAccount.m.Unlock()
-		account := hex.EncodeToString(plainKey[0:20])
-		if _, ok := processAccount.AccountStats[account]; !ok {
-			processAccount.AccountStats[account] = &AccountStats{}
-		}
-		processAccount.AccountStats[account].Unfolds++
-	}
-}
-
-func (processAccount *AccountMetrics) FoldsInc(plainKey []byte) {
-	if collectCommitmentMetrics && len(plainKey) > 20 {
-		processAccount.m.Lock()
-		defer processAccount.m.Unlock()
-		account := hex.EncodeToString(plainKey[0:20])
-		if _, ok := processAccount.AccountStats[account]; !ok {
-			processAccount.AccountStats[account] = &AccountStats{}
-		}
-		processAccount.AccountStats[account].Folds++
-	}
-}
-
-func (processAccount *AccountMetrics) TotalUnfoldingTimeInc(plainKey []byte, t time.Time) {
-	if collectCommitmentMetrics && len(plainKey) > 20 {
-		processAccount.m.Lock()
-		defer processAccount.m.Unlock()
-		account := hex.EncodeToString(plainKey[0:20])
-		if _, ok := processAccount.AccountStats[account]; !ok {
-			processAccount.AccountStats[account] = &AccountStats{}
-		}
-		processAccount.AccountStats[account].TotalUnfoldingTime += time.Since(t)
-	}
-}
-
-func (processAccount *AccountMetrics) TotalFoldingTimeInc(plainKey []byte, t time.Time) {
-	if collectCommitmentMetrics && len(plainKey) > 20 {
-		processAccount.m.Lock()
-		defer processAccount.m.Unlock()
-		account := hex.EncodeToString(plainKey[0:20])
-		if _, ok := processAccount.AccountStats[account]; !ok {
-			processAccount.AccountStats[account] = &AccountStats{}
-		}
-		processAccount.AccountStats[account].TotalFoldingTime += time.Since(t)
-	}
+func (am *AccountMetrics) Reset() {
+	//am.m.Lock()
+	//defer am.m.Unlock()
+	am.AccountStats = make(map[string]*AccountStats)
 }
 
 func writeMetricsToCSV(metrics CsvMetrics, filePath string) error {
