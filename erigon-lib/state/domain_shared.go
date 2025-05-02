@@ -801,23 +801,23 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 
 	switch domain {
 	case kv.AccountsDomain:
-		return sd.updateAccountData(k1, val, prevVal, prevStep)
+		return sd.updateAccountData(composite, val, prevVal, prevStep)
 	case kv.StorageDomain:
-		return sd.writeAccountStorage(k1, k2, val, prevVal, prevStep)
+		return sd.writeAccountStorage(composite, nil, val, prevVal, prevStep)
 	case kv.CodeDomain:
 		if bytes.Equal(prevVal, val) {
 			return nil
 		}
-		return sd.updateAccountCode(k1, val, prevVal, prevStep)
+		return sd.updateAccountCode(composite, val, prevVal, prevStep)
 	case kv.CommitmentDomain, kv.RCacheDomain:
 		sd.put(domain, toStringZeroCopy(composite), val)
-		return sd.domainWriters[domain].PutWithPrev(k1, k2, val, sd.txNum, prevVal, prevStep)
+		return sd.domainWriters[domain].PutWithPrev(composite, nil, val, sd.txNum, prevVal, prevStep)
 	default:
 		if bytes.Equal(prevVal, val) {
 			return nil
 		}
 		sd.put(domain, toStringZeroCopy(composite), val)
-		return sd.domainWriters[domain].PutWithPrev(k1, k2, val, sd.txNum, prevVal, prevStep)
+		return sd.domainWriters[domain].PutWithPrev(composite, nil, val, sd.txNum, prevVal, prevStep)
 	}
 }
 
@@ -841,19 +841,19 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []by
 
 	switch domain {
 	case kv.AccountsDomain:
-		return sd.deleteAccount(k1, prevVal, prevStep)
+		return sd.deleteAccount(composite, prevVal, prevStep)
 	case kv.StorageDomain:
-		return sd.delAccountStorage(k1, k2, prevVal, prevStep)
+		return sd.delAccountStorage(composite, nil, prevVal, prevStep)
 	case kv.CodeDomain:
 		if prevVal == nil {
 			return nil
 		}
-		return sd.updateAccountCode(k1, nil, prevVal, prevStep)
+		return sd.updateAccountCode(composite, nil, prevVal, prevStep)
 	case kv.CommitmentDomain:
 		return sd.updateCommitmentData(toStringZeroCopy(composite), nil, prevVal, prevStep)
 	default:
 		sd.put(domain, toStringZeroCopy(composite), nil)
-		return sd.domainWriters[domain].DeleteWithPrev(k1, k2, sd.txNum, prevVal, prevStep)
+		return sd.domainWriters[domain].DeleteWithPrev(composite, nil, sd.txNum, prevVal, prevStep)
 	}
 }
 
