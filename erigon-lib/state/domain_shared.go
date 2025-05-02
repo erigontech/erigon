@@ -789,7 +789,8 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 	}
 	composite := k1
 	if k2 != nil {
-		composite = append(composite, k2...)
+		composite = make([]byte, 0, len(k1)+len(k2))
+		composite = append(append(composite, k1...), k2...)
 	}
 	if prevVal == nil {
 		var err error
