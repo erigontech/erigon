@@ -930,7 +930,7 @@ func TestReproduceCrash(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	tsw := state.NewWriter(sd)
+	tsw := state.NewWriter(sd, nil)
 	tsr := state.NewReaderV3(sd)
 	sd.SetTxNum(1)
 	sd.SetBlockNum(1)
