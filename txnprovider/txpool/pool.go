@@ -151,7 +151,7 @@ type TxPool struct {
 	ethBackend              remote.ETHBACKENDClient
 	builderNotifyNewTxns    func()
 	logger                  log.Logger
-	auths                   map[common.Address]*metaTxn // All accounts with a pooled authorization
+	auths                   map[NonceAuthority]*metaTxn // All authority accounts with a pooled authorization
 	blobHashToTxn           map[common.Hash]struct {
 		index   int
 		txnHash common.Hash
@@ -238,7 +238,7 @@ func New(
 		builderNotifyNewTxns:    builderNotifyNewTxns,
 		newSlotsStreams:         newSlotsStreams,
 		logger:                  logger,
-		auths:                   map[common.Address]*metaTxn{},
+		auths:                   map[NonceAuthority]*metaTxn{},
 		blobHashToTxn: map[common.Hash]struct {
 			index   int
 			txnHash common.Hash
@@ -1596,13 +1596,13 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		return txpoolcfg.FeeTooLow
 	}
 
-	// Do not allow transaction from if sender has authority
+	// Do not allow transaction from this same (sender + nonce) if sender has existing pooled authorization as authority
 	addr, ok := p.senders.getAddr(mt.TxnSlot.SenderID)
 	if !ok {
 		p.logger.Info("senderID not registered, discarding transaction for safety")
 		return txpoolcfg.InvalidSender
 	}
-	if _, ok := p.auths[addr]; ok {
+	if _, ok := p.auths[NonceAuthority{nonce: mt.TxnSlot.Nonce, authority: addr}]; ok {
 		return txpoolcfg.ErrAuthorityReserved
 	}
 
@@ -1610,10 +1610,9 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 	if mt.TxnSlot.Type == SetCodeTxnType {
 		foundDuplicate := false
 		for _, a := range mt.TxnSlot.Authorities {
-			p.logger.Debug("setCodeTxn ", "authority", a.String())
-			if _, ok := p.auths[*a]; ok {
+			if _, ok := p.auths[a]; ok {
 				foundDuplicate = true
-				p.logger.Debug("setCodeTxn ", "DUPLICATE authority", a.String(), "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
+				p.logger.Debug("setCodeTxn ", "DUPLICATE authority", a.authority.String(), "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
 				break
 			}
 		}
@@ -1622,7 +1621,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 			return txpoolcfg.ErrAuthorityReserved
 		} else {
 			for _, a := range mt.TxnSlot.Authorities {
-				p.auths[*a] = mt
+				p.auths[a] = mt
 			}
 		}
 	}
@@ -1677,7 +1676,7 @@ func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
 	}
 	if mt.TxnSlot.Type == SetCodeTxnType {
 		for _, a := range mt.TxnSlot.Authorities {
-			delete(p.auths, *a)
+			delete(p.auths, a)
 		}
 	}
 }

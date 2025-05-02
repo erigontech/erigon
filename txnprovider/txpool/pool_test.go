@@ -270,7 +270,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 
 	logger := log.New()
 
-	// a new txn with authority same as one in an existing authorization should not be accepted
+	// a new txn with authority+nonce same as one in an existing authorization should not be accepted
 	{
 		var txnSlots TxnSlots
 		txnSlot1 := &TxnSlot{
@@ -278,7 +278,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 			FeeCap:      *uint256.NewInt(300000),
 			Gas:         100000,
 			Nonce:       0,
-			Authorities: []*common.Address{&authAddress},
+			Authorities: []NonceAuthority{{nonce: 0, authority: authAddress}},
 			Type:        SetCodeTxnType,
 		}
 		txnSlot1.IDHash[0] = 1
@@ -293,7 +293,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 			FeeCap:      *uint256.NewInt(300000),
 			Gas:         100000,
 			Nonce:       0,
-			Authorities: []*common.Address{&authAddress},
+			Authorities: []NonceAuthority{{nonce: 0, authority: authAddress}},
 			Type:        SetCodeTxnType,
 		}
 		txnSlot2.IDHash[0] = 2
@@ -304,7 +304,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.ErrAuthorityReserved}, reasons)
 
 		assert.Len(t, pool.auths, 1) // auth address should be in pool auth
-		_, ok := pool.auths[authAddress]
+		_, ok := pool.auths[NonceAuthority{nonce: 0, authority: authAddress}]
 		assert.True(t, ok)
 
 		err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{[]*TxnSlot{txnSlot1}, Addresses{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []bool{true}})
@@ -321,7 +321,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 			FeeCap:      *uint256.NewInt(300000),
 			Gas:         100000,
 			Nonce:       1,
-			Authorities: []*common.Address{&authAddress},
+			Authorities: []NonceAuthority{{nonce: 0, authority: authAddress}},
 			Type:        SetCodeTxnType,
 		}
 		txnSlot1.IDHash[0] = 3
@@ -338,7 +338,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 			FeeCap:      *uint256.NewInt(900000),
 			Gas:         100000,
 			Nonce:       1,
-			Authorities: []*common.Address{&authAddress},
+			Authorities: []NonceAuthority{{nonce: 0, authority: authAddress}},
 			Type:        SetCodeTxnType,
 		}
 		txnSlot2.IDHash[0] = 4
@@ -354,15 +354,15 @@ func TestMultipleAuthorizations(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// do not allow transactions from a sender if there is a pending delegated txn its authority
+	// do not allow transactions from a sender if there is a pending delegated txn its authority at that nonce, but allow higher nonces
 	{
 		var txnSlots TxnSlots
 		txnSlot1 := &TxnSlot{
 			Tip:         *uint256.NewInt(300000),
 			FeeCap:      *uint256.NewInt(300000),
 			Gas:         100000,
-			Nonce:       1,
-			Authorities: []*common.Address{&authAddress},
+			Nonce:       0,
+			Authorities: []NonceAuthority{{nonce: 0, authority: authAddress}},
 			Type:        SetCodeTxnType,
 		}
 		txnSlot1.IDHash[0] = 5
@@ -378,7 +378,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 			Tip:    *uint256.NewInt(300000),
 			FeeCap: *uint256.NewInt(300000),
 			Gas:    100000,
-			Nonce:  1,
+			Nonce:  0,
 			Type:   DynamicFeeTxnType,
 		}
 		txnSlot2.IDHash[0] = 6
@@ -387,6 +387,21 @@ func TestMultipleAuthorizations(t *testing.T) {
 		reasons, err = pool.AddLocalTxns(ctx, txnSlots)
 		require.NoError(t, err)
 		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.ErrAuthorityReserved}, reasons)
+
+		txnSlots = TxnSlots{}
+		txnSlot3 := &TxnSlot{
+			Tip:    *uint256.NewInt(300000),
+			FeeCap: *uint256.NewInt(300000),
+			Gas:    100000,
+			Nonce:  1,
+			Type:   DynamicFeeTxnType,
+		}
+		txnSlot3.IDHash[0] = 6
+
+		txnSlots.Append(txnSlot3, authAddress.Bytes(), true)
+		reasons, err = pool.AddLocalTxns(ctx, txnSlots)
+		require.NoError(t, err)
+		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
 	}
 }
 
@@ -1066,9 +1081,8 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 		Gas:         500000,
 		SenderID:    0,
 		Type:        SetCodeTxnType,
-		Authorities: make([]*common.Address, 1),
+		Authorities: []NonceAuthority{{nonce: 0, authority: common.Address{}}},
 	}
-	txn.Authorities[0] = &common.Address{}
 
 	txns := TxnSlots{
 		Txns:    append([]*TxnSlot{}, txn),
