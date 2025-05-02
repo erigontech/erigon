@@ -622,15 +622,6 @@ func (sd *SharedDomains) updateCommitmentData(prefix string, data, prev []byte, 
 
 func (sd *SharedDomains) deleteAccount(addr, prev []byte, prevStep uint64) error {
 	addrS := string(addr)
-	if err := sd.DomainDelPrefix(kv.StorageDomain, addr); err != nil {
-		return err
-	}
-
-	// commitment delete already has been applied via account
-	if err := sd.DomainDel(kv.CodeDomain, addr, nil, nil, prevStep); err != nil {
-		return err
-	}
-
 	sd.sdCtx.TouchKey(kv.AccountsDomain, addrS, nil)
 	sd.put(kv.AccountsDomain, addrS, nil)
 	if err := sd.domainWriters[kv.AccountsDomain].DeleteWithPrev(addr, nil, prev, prevStep); err != nil {
@@ -892,10 +883,10 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 //   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
-func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error {
+func (sd *SharedDomains) DomainDel(domain kv.Domain, k, prevVal []byte, prevStep uint64) error {
 	if prevVal == nil {
 		var err error
-		prevVal, prevStep, err = sd.GetLatest(domain, k1)
+		prevVal, prevStep, err = sd.GetLatest(domain, k)
 		if err != nil {
 			return err
 		}
@@ -903,19 +894,19 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []by
 
 	switch domain {
 	case kv.AccountsDomain:
-		return sd.deleteAccount(k1, prevVal, prevStep)
+		return sd.deleteAccount(k, prevVal, prevStep)
 	case kv.StorageDomain:
-		return sd.delAccountStorage(k1, k2, prevVal, prevStep)
+		return sd.delAccountStorage(k, nil, prevVal, prevStep)
 	case kv.CodeDomain:
 		if prevVal == nil {
 			return nil
 		}
-		return sd.updateAccountCode(k1, nil, prevVal, prevStep)
+		return sd.updateAccountCode(k, nil, prevVal, prevStep)
 	case kv.CommitmentDomain:
-		return sd.updateCommitmentData(toStringZeroCopy(k1), nil, prevVal, prevStep)
+		return sd.updateCommitmentData(toStringZeroCopy(k), nil, prevVal, prevStep)
 	default:
-		sd.put(domain, toStringZeroCopy(append(k1, k2...)), nil)
-		return sd.domainWriters[domain].DeleteWithPrev(k1, k2, prevVal, prevStep)
+		sd.put(domain, toStringZeroCopy(k), nil)
+		return sd.domainWriters[domain].DeleteWithPrev(k, nil, prevVal, prevStep)
 	}
 }
 
@@ -936,7 +927,7 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 		return err
 	}
 	for _, tomb := range tombs {
-		if err := sd.DomainDel(kv.StorageDomain, tomb.k, nil, tomb.v, tomb.step); err != nil {
+		if err := sd.DomainDel(kv.StorageDomain, tomb.k, tomb.v, tomb.step); err != nil {
 			return err
 		}
 	}
