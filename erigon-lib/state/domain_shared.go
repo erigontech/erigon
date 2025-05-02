@@ -557,6 +557,15 @@ func (sd *SharedDomains) updateCommitmentData(prefix string, data, prev []byte, 
 
 func (sd *SharedDomains) deleteAccount(addr, prev []byte, prevStep uint64) error {
 	addrS := string(addr)
+	if err := sd.DomainDelPrefix(kv.StorageDomain, addr); err != nil {
+		return err
+	}
+
+	// commitment delete already has been applied via account
+	if err := sd.DomainDel(kv.CodeDomain, addr, nil, nil, prevStep); err != nil {
+		return err
+	}
+
 	sd.sdCtx.TouchKey(kv.AccountsDomain, addrS, nil)
 	sd.put(kv.AccountsDomain, addrS, nil)
 	if err := sd.domainWriters[kv.AccountsDomain].DeleteWithPrev(addr, nil, sd.txNum, prev, prevStep); err != nil {
