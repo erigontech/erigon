@@ -82,10 +82,15 @@ func (w *WriterV4) DeleteAccount(address common.Address, original *accounts.Acco
 }
 
 func (w *WriterV4) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+	composite := append(address.Bytes(), key.Bytes()...)
+	v := value.Bytes()
 	if w.trace {
-		fmt.Printf("storage: %x,%x,%x\n", address, *key, value.Bytes())
+		fmt.Printf("storage: %x,%x,%x\n", address, *key, v)
 	}
-	return w.tx.DomainPut(kv.StorageDomain, address.Bytes(), key.Bytes(), value.Bytes(), nil, 0)
+	if len(v) == 0 {
+		return w.tx.DomainDel(kv.StorageDomain, composite, nil, 0)
+	}
+	return w.tx.DomainPut(kv.StorageDomain, composite, nil, value.Bytes(), nil, 0)
 }
 
 func (w *WriterV4) CreateContract(address common.Address) (err error) {
