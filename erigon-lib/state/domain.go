@@ -119,6 +119,14 @@ type domainCfg struct {
 	version DomainVersionTypes
 }
 
+func (d domainCfg) GetVersions() VersionTypes {
+	return VersionTypes{
+		Domain: &d.version,
+		Hist:   &d.hist.version,
+		II:     &d.hist.iiCfg.version,
+	}
+}
+
 type domainVisible struct {
 	files  []visibleFile
 	name   kv.Domain

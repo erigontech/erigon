@@ -117,6 +117,10 @@ func (v Version) String() string {
 	return fmt.Sprintf("v%d.%d", v.Major, v.Minor)
 }
 
+func ReplaceVersion(s string, old, new Version) string {
+	return strings.Replace(s, old.String(), new.String(), -1)
+}
+
 type Versions struct {
 	Current      Version
 	MinSupported Version
