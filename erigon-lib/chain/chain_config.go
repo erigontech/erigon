@@ -348,11 +348,17 @@ func (c *Config) getBlobConfig(time uint64) *params.BlobConfig {
 		for key, val := range c.BlobSchedule {
 			switch {
 			case key == "cancun":
-				c.parsedBlobSchedule[c.CancunTime.Uint64()] = val
+				if c.CancunTime != nil {
+					c.parsedBlobSchedule[c.CancunTime.Uint64()] = val
+				}
 			case key == "prague":
-				c.parsedBlobSchedule[c.PragueTime.Uint64()] = val
+				if c.PragueTime != nil {
+					c.parsedBlobSchedule[c.PragueTime.Uint64()] = val
+				}
 			case key == "osaka":
-				c.parsedBlobSchedule[c.OsakaTime.Uint64()] = val
+				if c.OsakaTime != nil {
+					c.parsedBlobSchedule[c.OsakaTime.Uint64()] = val
+				}
 			default:
 				keyU64, err := strconv.ParseUint(key, 10, 64)
 				if err != nil {

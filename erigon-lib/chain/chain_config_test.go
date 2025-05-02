@@ -185,3 +185,36 @@ func TestBlobParameterOnlyHardforks(t *testing.T) {
 	assert.Equal(t, uint64(56), c.GetMaxBlobsPerBlock(time))
 	assert.Equal(t, uint64(5007716), c.GetBlobGasPriceUpdateFraction(time))
 }
+
+func TestBlobParameterInactiveHardfork(t *testing.T) {
+	cancunTime := uint64(1710338135)
+	pragueTime := uint64(1746612311)
+
+	var c Config
+	c.CancunTime = big.NewInt(int64(cancunTime))
+	c.PragueTime = big.NewInt(int64(pragueTime))
+	// Osaka is not activated yet
+
+	c.BlobSchedule = map[string]*params.BlobConfig{
+		"cancun": {
+			Target:                3,
+			Max:                   6,
+			BaseFeeUpdateFraction: 3338477,
+		},
+		"prague": {
+			Target:                6,
+			Max:                   9,
+			BaseFeeUpdateFraction: 5007716,
+		},
+		"osaka": {
+			Target:                12,
+			Max:                   24,
+			BaseFeeUpdateFraction: 3338477,
+		},
+	}
+
+	time := pragueTime * 2
+	assert.Equal(t, uint64(6*params.BlobGasPerBlob), c.GetTargetBlobGasPerBlock(time))
+	assert.Equal(t, uint64(9), c.GetMaxBlobsPerBlock(time))
+	assert.Equal(t, uint64(5007716), c.GetBlobGasPriceUpdateFraction(time))
+}
