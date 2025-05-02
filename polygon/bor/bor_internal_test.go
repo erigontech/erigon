@@ -53,7 +53,7 @@ var _ bridgeReader = mockBridgeReader{}
 
 type mockBridgeReader struct{}
 
-func (m mockBridgeReader) Events(context.Context, libcommon.Hash,uint64) ([]*types.Message, error) {
+func (m mockBridgeReader) Events(context.Context, libcommon.Hash, uint64) ([]*types.Message, error) {
 	panic("mock")
 }
 
