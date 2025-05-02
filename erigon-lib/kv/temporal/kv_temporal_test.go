@@ -48,10 +48,11 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 
 	// --- check 1: non-existing storage ---
 	{
-		firstKey, ok, err := rwTtx1.HasPrefix(kv.StorageDomain, acc1.Bytes())
+		firstKey, firstVal, ok, err := rwTtx1.HasPrefix(kv.StorageDomain, acc1.Bytes())
 		require.NoError(t, err)
 		require.False(t, ok)
 		require.Nil(t, firstKey)
+		require.Nil(t, firstVal)
 	}
 
 	// --- check 2: storage exists in DB - TemporalTx.HasPrefix should catch this ---
@@ -94,10 +95,11 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		require.Equal(t, uint64(0), roTtx1.Debug().TxNumsInFiles(kv.StorageDomain))
 
 		// finally, verify TemporalTx.HasPrefix returns true
-		firstKey, ok, err := roTtx1.HasPrefix(kv.StorageDomain, acc1.Bytes())
+		firstKey, firstVal, ok, err := roTtx1.HasPrefix(kv.StorageDomain, acc1.Bytes())
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
+		require.Equal(t, []byte{1}, firstVal)
 	}
 
 	// --- check 3: storage exists in files only - TemporalTx.HasPrefix should catch this
@@ -157,10 +159,11 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		require.Equal(t, uint64(2), roTtx2.Debug().TxNumsInFiles(kv.StorageDomain))
 
 		// finally, verify TemporalTx.HasPrefix returns true
-		firstKey, ok, err := roTtx2.HasPrefix(kv.StorageDomain, acc1.Bytes())
+		firstKey, firstVal, ok, err := roTtx2.HasPrefix(kv.StorageDomain, acc1.Bytes())
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
+		require.Equal(t, []byte{1}, firstVal)
 	}
 
 	// --- check 4: delete storage - TemporalTx.HasPrefix should catch this and say it does not exist
@@ -181,10 +184,11 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(roTtx3.Rollback)
 
-		firstKey, ok, err := roTtx3.HasPrefix(kv.StorageDomain, acc1.Bytes())
+		firstKey, firstVal, ok, err := roTtx3.HasPrefix(kv.StorageDomain, acc1.Bytes())
 		require.NoError(t, err)
 		require.False(t, ok)
 		require.Nil(t, firstKey)
+		require.Nil(t, firstVal)
 	}
 
 	// --- check 5: write to it again after deletion - TemporalTx.HasPrefix should catch
@@ -205,10 +209,11 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(roTtx4.Rollback)
 
-		firstKey, ok, err := roTtx4.HasPrefix(kv.StorageDomain, acc1.Bytes())
+		firstKey, firstVal, ok, err := roTtx4.HasPrefix(kv.StorageDomain, acc1.Bytes())
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
+		require.Equal(t, []byte{3}, firstVal)
 	}
 }
 
