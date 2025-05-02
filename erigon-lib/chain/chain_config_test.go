@@ -28,6 +28,20 @@ import (
 )
 
 func TestConfigValueLookup(t *testing.T) {
+	foo := map[uint64]string{5: "A", 10: "B", 20: "C"}
+	assert.Equal(t, "", ConfigValueLookup(foo, 0))
+	assert.Equal(t, "", ConfigValueLookup(foo, 4))
+	assert.Equal(t, "A", ConfigValueLookup(foo, 5))
+	assert.Equal(t, "A", ConfigValueLookup(foo, 9))
+	assert.Equal(t, "B", ConfigValueLookup(foo, 10))
+	assert.Equal(t, "B", ConfigValueLookup(foo, 11))
+	assert.Equal(t, "B", ConfigValueLookup(foo, 15))
+	assert.Equal(t, "B", ConfigValueLookup(foo, 19))
+	assert.Equal(t, "C", ConfigValueLookup(foo, 20))
+	assert.Equal(t, "C", ConfigValueLookup(foo, 21))
+	assert.Equal(t, "C", ConfigValueLookup(foo, 100))
+	assert.Equal(t, "C", ConfigValueLookup(foo, 1_000_000_000_000))
+
 	backupMultiplier := map[uint64]uint64{
 		0:        2,
 		25275000: 5,
@@ -63,6 +77,7 @@ func TestConfigValueLookup(t *testing.T) {
 		22640000: address1,
 		41874000: address2,
 	}
+	assert.Equal(t, common.Address{}, ConfigValueLookup(burntContract, 10000000))
 	assert.Equal(t, address1, ConfigValueLookup(burntContract, 22640000))
 	assert.Equal(t, address1, ConfigValueLookup(burntContract, 22640000+1))
 	assert.Equal(t, address1, ConfigValueLookup(burntContract, 41874000-1))

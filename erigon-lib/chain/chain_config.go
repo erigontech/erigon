@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/generics"
 )
 
 // Config is the core config which determines the blockchain settings.
@@ -586,11 +587,15 @@ func (c *CliqueConfig) String() string {
 
 // Looks up a config value as of a given block number (or time).
 // The assumption here is that config is a càdlàg map of starting_from_block -> value.
-// For example, config of {0: "0xA", 10: "0xB", 20: "0xC"}
-// means that the config value is 0xA for blocks 0–9,
-// 0xB for blocks 10–19, and 0xC for block 20 and above.
+// For example, config of {5: "A", 10: "B", 20: "C"}
+// means that the config value is "A" for blocks 5–9,
+// "B" for blocks 10–19, and "C" for block 20 and above.
+// For blocks 0–4 an empty string will be returned.
 func ConfigValueLookup[T any](field map[uint64]T, number uint64) T {
 	keys := common.SortedKeys(field)
+	if number < keys[0] {
+		return generics.Zero[T]()
+	}
 	for i := 0; i < len(keys)-1; i++ {
 		if number >= keys[i] && number < keys[i+1] {
 			return field[keys[i]]
