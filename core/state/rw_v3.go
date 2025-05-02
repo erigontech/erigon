@@ -478,14 +478,14 @@ func (w *StateWriterBufferedV3) CreateContract(address common.Address) error {
 
 // StateWriterV3 - used by parallel workers to accumulate updates and then send them to conflict-resolution.
 type StateWriterV3 struct {
-	rs          *ParallelExecutionState
+	domains     *libstate.SharedDomains
 	trace       bool
 	accumulator *shards.Accumulator
 }
 
-func NewStateWriterV3(rs *ParallelExecutionState, accumulator *shards.Accumulator) *StateWriterV3 {
+func NewStateWriterV3(domains *libstate.SharedDomains, accumulator *shards.Accumulator) *StateWriterV3 {
 	return &StateWriterV3{
-		rs:          rs,
+		domains:     domains,
 		accumulator: accumulator,
 		//trace: true,
 	}
@@ -507,10 +507,10 @@ func (w *StateWriterV3) UpdateAccountData(address common.Address, original, acco
 	}
 	if original.Incarnation > account.Incarnation {
 		//del, before create: to clanup code/storage
-		if err := w.rs.domains.DomainDel(kv.CodeDomain, address[:], nil, nil, 0); err != nil {
+		if err := w.domains.DomainDel(kv.CodeDomain, address[:], nil, nil, 0); err != nil {
 			return err
 		}
-		if err := w.rs.domains.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
+		if err := w.domains.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
 			return err
 		}
 	}
@@ -519,7 +519,7 @@ func (w *StateWriterV3) UpdateAccountData(address common.Address, original, acco
 		w.accumulator.ChangeAccount(address, account.Incarnation, value)
 	}
 
-	if err := w.rs.domains.DomainPut(kv.AccountsDomain, address[:], nil, value, nil, 0); err != nil {
+	if err := w.domains.DomainPut(kv.AccountsDomain, address[:], nil, value, nil, 0); err != nil {
 		return err
 	}
 	return nil
@@ -529,7 +529,7 @@ func (w *StateWriterV3) UpdateAccountCode(address common.Address, incarnation ui
 	if w.trace {
 		fmt.Printf("code: %x, %x, valLen: %d\n", address.Bytes(), codeHash, len(code))
 	}
-	if err := w.rs.domains.DomainPut(kv.CodeDomain, address[:], nil, code, nil, 0); err != nil {
+	if err := w.domains.DomainPut(kv.CodeDomain, address[:], nil, code, nil, 0); err != nil {
 		return err
 	}
 	if w.accumulator != nil {
@@ -542,7 +542,7 @@ func (w *StateWriterV3) DeleteAccount(address common.Address, original *accounts
 	if w.trace {
 		fmt.Printf("del acc: %x\n", address)
 	}
-	if err := w.rs.domains.DomainDel(kv.AccountsDomain, address[:], nil, nil, 0); err != nil {
+	if err := w.domains.DomainDel(kv.AccountsDomain, address[:], nil, nil, 0); err != nil {
 		return err
 	}
 	// if w.accumulator != nil { TODO: investigate later. basically this will always panic. keeping this out should be fine anyway.
@@ -561,14 +561,14 @@ func (w *StateWriterV3) WriteAccountStorage(address common.Address, incarnation 
 		fmt.Printf("storage: %x,%x,%x\n", address, *key, v)
 	}
 	if len(v) == 0 {
-		return w.rs.domains.DomainDel(kv.StorageDomain, composite, nil, nil, 0)
+		return w.domains.DomainDel(kv.StorageDomain, composite, nil, nil, 0)
 	}
 	if w.accumulator != nil && key != nil && value != nil {
 		k := *key
 		w.accumulator.ChangeStorage(address, incarnation, k, v)
 	}
 
-	return w.rs.domains.DomainPut(kv.StorageDomain, composite, nil, v, nil, 0)
+	return w.domains.DomainPut(kv.StorageDomain, composite, nil, v, nil, 0)
 }
 
 func (w *StateWriterV3) CreateContract(address common.Address) error {
