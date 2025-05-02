@@ -82,8 +82,7 @@ func (r *CachedReader3) ReadAccountStorage(address common.Address, incarnation u
 }
 
 func (r *CachedReader3) HasStorage(address common.Address) (bool, error) {
-	//TODO implement me
-	panic("implement me")
+	return r.cache.HasStorage(address)
 }
 
 func (r *CachedReader3) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {

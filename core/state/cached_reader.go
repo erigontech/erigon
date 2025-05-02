@@ -83,7 +83,7 @@ func (cr *CachedReader) HasStorage(address common.Address) (bool, error) {
 	// in reality is very rare; for all the other most likely situations in which we query
 	// if an account has storage (and that account is newly created and doesn't have storage)
 	// the cache will say that there is no known storage in which case we will still need to
-	// check in the DB to be absolutely sure (this deems such an "optimisation" almost useless)
+	// check in the DB to be absolutely sure anyway (this deems such an "optimisation" useless)
 	return cr.r.HasStorage(address)
 }
 

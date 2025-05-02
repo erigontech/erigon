@@ -604,8 +604,8 @@ func (r *ReaderV3) SetTrace(trace bool)                  { r.trace = trace }
 func (r *ReaderV3) ResetReadSet()                        {}
 
 func (r *ReaderV3) HasStorage(address common.Address) (bool, error) {
-	_, _, ok, err := r.tx.HasPrefix(kv.StorageDomain, address.Bytes())
-	return ok, err
+	_, _, hasStorage, err := r.tx.HasPrefix(kv.StorageDomain, address.Bytes())
+	return hasStorage, err
 }
 
 func (r *ReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
