@@ -787,10 +787,12 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 	if val == nil {
 		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)
 	}
+	composite := k1
+	if k2 != nil {
+		composite = append(composite, k2...)
+	}
 	if prevVal == nil {
 		var err error
-		composite := make([]byte, 0, len(k1)+len(k2))
-		composite = append(append(composite, k1...), k2...)
 		prevVal, prevStep, err = sd.GetLatest(domain, composite)
 		if err != nil {
 			return err
@@ -808,13 +810,13 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 		}
 		return sd.updateAccountCode(k1, val, prevVal, prevStep)
 	case kv.CommitmentDomain, kv.RCacheDomain:
-		sd.put(domain, toStringZeroCopy(append(k1, k2...)), val)
+		sd.put(domain, toStringZeroCopy(composite), val)
 		return sd.domainWriters[domain].PutWithPrev(k1, k2, val, sd.txNum, prevVal, prevStep)
 	default:
 		if bytes.Equal(prevVal, val) {
 			return nil
 		}
-		sd.put(domain, toStringZeroCopy(append(k1, k2...)), val)
+		sd.put(domain, toStringZeroCopy(composite), val)
 		return sd.domainWriters[domain].PutWithPrev(k1, k2, val, sd.txNum, prevVal, prevStep)
 	}
 }
@@ -825,10 +827,12 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
 func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error {
+	composite := k1
+	if k2 != nil {
+		composite = append(composite, k2...)
+	}
 	if prevVal == nil {
 		var err error
-		composite := make([]byte, 0, len(k1)+len(k2))
-		composite = append(append(composite, k1...), k2...)
 		prevVal, prevStep, err = sd.GetLatest(domain, composite)
 		if err != nil {
 			return err
@@ -846,9 +850,9 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []by
 		}
 		return sd.updateAccountCode(k1, nil, prevVal, prevStep)
 	case kv.CommitmentDomain:
-		return sd.updateCommitmentData(toStringZeroCopy(k1), nil, prevVal, prevStep)
+		return sd.updateCommitmentData(toStringZeroCopy(composite), nil, prevVal, prevStep)
 	default:
-		sd.put(domain, toStringZeroCopy(append(k1, k2...)), nil)
+		sd.put(domain, toStringZeroCopy(composite), nil)
 		return sd.domainWriters[domain].DeleteWithPrev(k1, k2, sd.txNum, prevVal, prevStep)
 	}
 }
