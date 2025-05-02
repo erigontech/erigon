@@ -574,7 +574,7 @@ func (s *KvServer) HasPrefix(_ context.Context, req *remote.HasPrefixReq) (*remo
 			return errors.New("server DB doesn't implement kv.Temporal interface")
 		}
 
-		reply.FirstKey, reply.FirstVal, reply.Ok, err = ttx.HasPrefix(domain, req.Prefix)
+		reply.FirstKey, reply.FirstVal, reply.HasPrefix, err = ttx.HasPrefix(domain, req.Prefix)
 		return err
 	})
 	if err != nil {

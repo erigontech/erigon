@@ -1884,7 +1884,7 @@ type HasPrefixReply struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	FirstKey      []byte                 `protobuf:"bytes,1,opt,name=first_key,json=firstKey,proto3" json:"first_key,omitempty"`
 	FirstVal      []byte                 `protobuf:"bytes,2,opt,name=first_val,json=firstVal,proto3" json:"first_val,omitempty"`
-	Ok            bool                   `protobuf:"varint,3,opt,name=ok,proto3" json:"ok,omitempty"`
+	HasPrefix     bool                   `protobuf:"varint,3,opt,name=has_prefix,json=hasPrefix,proto3" json:"has_prefix,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1933,9 +1933,9 @@ func (x *HasPrefixReply) GetFirstVal() []byte {
 	return nil
 }
 
-func (x *HasPrefixReply) GetOk() bool {
+func (x *HasPrefixReply) GetHasPrefix() bool {
 	if x != nil {
-		return x.Ok
+		return x.HasPrefix
 	}
 	return false
 }
@@ -2078,11 +2078,12 @@ const file_remote_kv_proto_rawDesc = "" +
 	"\fHasPrefixReq\x12\x13\n" +
 	"\x05tx_id\x18\x01 \x01(\x04R\x04txId\x12\x14\n" +
 	"\x05table\x18\x02 \x01(\tR\x05table\x12\x16\n" +
-	"\x06prefix\x18\x03 \x01(\fR\x06prefix\"Z\n" +
+	"\x06prefix\x18\x03 \x01(\fR\x06prefix\"i\n" +
 	"\x0eHasPrefixReply\x12\x1b\n" +
 	"\tfirst_key\x18\x01 \x01(\fR\bfirstKey\x12\x1b\n" +
-	"\tfirst_val\x18\x02 \x01(\fR\bfirstVal\x12\x0e\n" +
-	"\x02ok\x18\x03 \x01(\bR\x02ok*\xfb\x01\n" +
+	"\tfirst_val\x18\x02 \x01(\fR\bfirstVal\x12\x1d\n" +
+	"\n" +
+	"has_prefix\x18\x03 \x01(\bR\thasPrefix*\xfb\x01\n" +
 	"\x02Op\x12\t\n" +
 	"\x05FIRST\x10\x00\x12\r\n" +
 	"\tFIRST_DUP\x10\x01\x12\b\n" +
