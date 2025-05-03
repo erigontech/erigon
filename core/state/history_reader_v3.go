@@ -30,13 +30,14 @@ var PrunedError = errors.New("old data not available due to pruning")
 
 // HistoryReaderV3 Implements StateReader and StateWriter
 type HistoryReaderV3 struct {
-	txNum uint64
-	trace bool
-	ttx   kv.TemporalTx
+	txNum     uint64
+	trace     bool
+	ttx       kv.TemporalTx
+	composite []byte
 }
 
 func NewHistoryReaderV3() *HistoryReaderV3 {
-	return &HistoryReaderV3{}
+	return &HistoryReaderV3{composite: make([]byte, 20+32)}
 }
 
 func (hr *HistoryReaderV3) String() string {
@@ -96,8 +97,8 @@ func (hr *HistoryReaderV3) ReadAccountDataForDebug(address common.Address) (*acc
 }
 
 func (hr *HistoryReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	k := append(address[:], key.Bytes()...)
-	enc, _, err := hr.ttx.GetAsOf(kv.StorageDomain, k, hr.txNum)
+	hr.composite = append(append(hr.composite[:0], address[:]...), key.Bytes()...)
+	enc, _, err := hr.ttx.GetAsOf(kv.StorageDomain, hr.composite, hr.txNum)
 	if hr.trace {
 		fmt.Printf("ReadAccountStorage [%x] [%x] => [%x]\n", address, *key, enc)
 	}
