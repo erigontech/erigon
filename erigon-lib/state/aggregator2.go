@@ -97,6 +97,12 @@ func (s *SchemaGen) GetVersioned(name string) (Versioned, error) {
 		return &s.StorageDomain, nil
 	case "code":
 		return &s.CodeDomain, nil
+	case "commitment":
+		return &s.CommitmentDomain, nil
+	case "receipt":
+		return &s.ReceiptDomain, nil
+	case "rcache":
+		return &s.RCacheDomain, nil
 	case "logtopics":
 		return &s.LogTopicIdx, nil
 	case "logaddrs":
