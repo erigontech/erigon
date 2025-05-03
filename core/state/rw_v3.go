@@ -243,7 +243,7 @@ func (rs *StateV3) ApplyLogsAndTraces4(txTask *TxTask, domains *libstate.SharedD
 
 	if rs.syncCfg.PersistReceiptsCacheV2 {
 		var receipt *types.Receipt
-		if len(txTask.BlockReceipts) > txTask.TxIndex {
+		if txTask.TxIndex > 0 && len(txTask.BlockReceipts) > txTask.TxIndex {
 			receipt = txTask.BlockReceipts[txTask.TxIndex]
 		}
 		if err := rawdb.WriteReceiptCacheV2(domains, receipt); err != nil {
