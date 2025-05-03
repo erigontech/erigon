@@ -591,9 +591,9 @@ func (w *Writer) CreateContract(address common.Address) error {
 	if w.trace {
 		fmt.Printf("create contract: %x\n", address)
 	}
-	//if err := w.tx.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
-	//	return err
-	//}
+	if err := w.tx.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
+		return err
+	}
 	return nil
 }
 
