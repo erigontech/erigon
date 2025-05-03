@@ -57,7 +57,7 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 				Incarnation: 0,
 			}
 			buf := accounts3.SerialiseV3(&acc)
-			prev, step, err := domains.GetLatest(kv.AccountsDomain, keys[j])
+			prev, step, err := domains.GetLatest(kv.AccountsDomain, rwTx, keys[j])
 			require.NoError(tb, err)
 
 			err = domains.DomainPut(kv.AccountsDomain, rwTx, keys[j], nil, buf, prev, step)

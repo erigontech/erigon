@@ -2127,7 +2127,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		default:
 		}
 		if hph.trace || hph.traceDomain {
-			fmt.Printf("%d/%d) plainKey [%x] %s hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, update, hashedKey, hph.currentKey[:hph.currentKeyLen])
+			fmt.Printf("%d/%d) plainKey [%x] %s hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, stateUpdate, hashedKey, hph.currentKey[:hph.currentKeyLen])
 		}
 		if err := hph.followAndUpdate(hashedKey, plainKey, stateUpdate); err != nil {
 			return fmt.Errorf("followAndUpdate: %w", err)

@@ -38,7 +38,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
-	state2 "github.com/erigontech/erigon-lib/state"
+	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon-lib/wrap"
@@ -536,7 +536,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	chainReader := NewChainReaderImpl(cfg.chainConfig, applyTx, blockReader, logger)
-	agg := cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator)
+	agg := cfg.db.(libstate.HasAgg).Agg().(*libstate.Aggregator)
 	if !inMemExec && !isMining {
 		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
 		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
@@ -555,7 +555,7 @@ func ExecV3(ctx context.Context,
 		if !ok {
 			return errors.New("applyTx is not a temporal transaction")
 		}
-		doms, err = state2.NewSharedDomains(temporalTx, log.New())
+		doms, err = libstate.NewSharedDomains(temporalTx, log.New())
 		// if we are behind the commitment, we can't execute anything
 		// this can heppen if progress in domain is higher than progress in blocks
 		if errors.Is(err, libstate.ErrBehindCommitment) {
@@ -1161,7 +1161,7 @@ func ExecV3(ctx context.Context,
 }
 
 // nolint
-func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *state2.SharedDomains) {
+func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *libstate.SharedDomains) {
 	if doms != nil {
 		doms.Flush(context.Background(), tx, 0)
 	}
@@ -1223,7 +1223,7 @@ func handleIncorrectRootHashError(header *types.Header, applyTx kv.RwTx, cfg Exe
 		return false, nil
 	}
 
-	aggTx := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+	aggTx := applyTx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx)
 	unwindToLimit, err := aggTx.CanUnwindToBlockNum(applyTx)
 	if err != nil {
 		return false, err

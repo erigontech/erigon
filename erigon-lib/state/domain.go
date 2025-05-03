@@ -1437,7 +1437,7 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 	useExistenceFilter := dt.d.AccessorList.Has(AccessorExistence)
 	useCache := dt.name != kv.CommitmentDomain && maxTxNum == math.MaxUint64
 
-	hi, _ := dt.ht.iit.hashKey(filekey)
+	hi, _ := dt.ht.iit.hashKey(k)
 
 	dt.readerMutex.RLock()
 	getFromFileCache := dt.getFromFileCache
@@ -1752,7 +1752,7 @@ func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, uint64, bool, e
 		}()
 	}
 
-	v, foundStep, found, err = dt.getLatestFromDB(key, roTx)
+	v, foundStep, found, err = dt.getLatestFromDb(key, roTx)
 	if err != nil {
 		return nil, 0, false, fmt.Errorf("getLatestFromDb: %w", err)
 	}
