@@ -127,10 +127,11 @@ func (b *BackwardBeaconDownloader) Peers() (uint64, error) {
 // If the block's root hash does not match the expected root hash, it will be rejected and the function will continue to the next block.
 func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 	count := uint64(64)
-	fmt.Printf("[dbg] ")
 	start := b.slotToDownload.Load() - count + 1
+	log.Warn(fmt.Sprintf("[dbg] BackwardBeaconDownloader.RequestMore: %d", start))
 	// Overflow? round to 0.
 	if start > b.slotToDownload.Load() {
+		panic(1)
 		start = 0
 	}
 	var atomicResp atomic.Value
