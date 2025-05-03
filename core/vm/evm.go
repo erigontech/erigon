@@ -407,7 +407,11 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	if err != nil {
 		return nil, common.Address{}, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
-	if nonce != 0 || (contractHash != (common.Hash{}) && contractHash != trie.EmptyCodeHash) {
+	hasStorage, err := evm.intraBlockState.HasStorage(address)
+	if err != nil {
+		return nil, common.Address{}, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+	}
+	if nonce != 0 || (contractHash != (common.Hash{}) && contractHash != trie.EmptyCodeHash) || hasStorage {
 		err = ErrContractAddressCollision
 		if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
 			evm.Config().Tracer.OnGasChange(gasRemaining, 0, tracing.GasChangeCallFailedExecution)

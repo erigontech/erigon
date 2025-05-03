@@ -160,6 +160,7 @@ type IntraBlockState interface {
 	// Empty returns whether the given account is empty. Empty
 	// is defined according to EIP161 (balance = nonce = code = 0).
 	Empty(common.Address) (bool, error)
+	HasStorage(addr common.Address) (bool, error)
 
 	Prepare(rules *chain.Rules, sender, coinbase common.Address, dest *common.Address,
 		precompiles []common.Address, txAccesses types.AccessList, authorities []common.Address) error
