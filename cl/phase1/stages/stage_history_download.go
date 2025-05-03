@@ -118,7 +118,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		if blk.Version() >= clparams.BellatrixVersion {
 			currEth1Progress.Store(int64(blk.Block.Body.ExecutionPayload.BlockNumber))
 		}
-		log.Warn("[dbg] SetOnNewBlock", "currEth1Progress", currEth1Progress.Load())
+
 		if initialBeaconBlock == nil {
 			initialBeaconBlock = blk
 		}
@@ -249,6 +249,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 						}
 					}
 				}
+
+				log.Warn("[dbg] SetOnNewBlock", "currEth1Progress", currEth1Progress.Load())
 
 				logMsg := "Node is still syncing... downloading past blocks"
 				if isBackfilling.Load() {
