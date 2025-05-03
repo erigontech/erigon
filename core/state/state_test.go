@@ -152,7 +152,6 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 		panic(err)
 	}
 	s.tx = tx
-	//s.r = NewWriter(s.tx)
 	s.r = NewReaderV3(domains)
 	s.w = NewWriter(domains, nil)
 	s.state = New(s.r)
