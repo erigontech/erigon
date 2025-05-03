@@ -17,7 +17,6 @@
 package fork_graph
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -26,20 +25,16 @@ import (
 	"github.com/golang/snappy"
 	"github.com/spf13/afero"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
-func getBeaconStateFilename(blockRoot libcommon.Hash) string {
+func getBeaconStateFilename(blockRoot common.Hash) string {
 	return fmt.Sprintf("%x.snappy_ssz", blockRoot)
 }
 
-func getBeaconStateCacheFilename(blockRoot libcommon.Hash) string {
-	return fmt.Sprintf("%x.cache", blockRoot)
-}
-
-func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash, out *state.CachingBeaconState) (bs *state.CachingBeaconState, err error) {
+func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot common.Hash) (bs *state.CachingBeaconState, err error) {
 	var file afero.File
 	f.stateDumpLock.Lock()
 	defer f.stateDumpLock.Unlock()
@@ -77,37 +72,17 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash, out *s
 		return nil, fmt.Errorf("failed to read snappy buffer: %w, root: %x", err, blockRoot)
 	}
 	f.sszBuffer = f.sszBuffer[:n]
-	if out == nil {
-		bs = state.New(f.beaconCfg)
-	} else {
-		bs = out
-	}
+	bs = state.New(f.beaconCfg)
 
 	if err = bs.DecodeSSZ(f.sszBuffer, int(v[0])); err != nil {
 		return nil, fmt.Errorf("failed to decode beacon state: %w, root: %x, len: %d, decLen: %d, bs: %+v", err, blockRoot, n, len(f.sszBuffer), bs)
-	}
-
-	// decode the cache file
-	cacheFile, err := f.fs.Open(getBeaconStateCacheFilename(blockRoot))
-	if err != nil {
-		return
-	}
-	defer cacheFile.Close()
-
-	b := bytes.Buffer{}
-	if _, err := io.Copy(&b, cacheFile); err != nil {
-		return nil, err
-	}
-
-	if err := bs.DecodeCaches(&b); err != nil {
-		return nil, err
 	}
 
 	return
 }
 
 // dumpBeaconStateOnDisk dumps a beacon state on disk in ssz snappy format
-func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot libcommon.Hash, bs *state.CachingBeaconState, forced bool) (err error) {
+func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot common.Hash, bs *state.CachingBeaconState, forced bool) (err error) {
 	if !forced && bs.Slot()%dumpSlotFrequency != 0 {
 		return
 	}
@@ -154,31 +129,8 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot libcommon.Hash, bs *stat
 		return err
 	}
 
-	b := bytes.NewBuffer(f.sszBuffer)
-	b.Reset()
-
-	if err := bs.EncodeCaches(b); err != nil {
-		log.Error("failed to encode caches", "err", err)
-		return err
-	}
 	if err = dumpedFile.Sync(); err != nil {
 		log.Error("failed to sync dumped file", "err", err)
-		return
-	}
-
-	cacheFile, err := f.fs.OpenFile(getBeaconStateCacheFilename(blockRoot), os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o755)
-	if err != nil {
-		log.Error("failed to open cache file", "err", err)
-		return
-	}
-	defer cacheFile.Close()
-
-	if _, err = cacheFile.Write(b.Bytes()); err != nil {
-		log.Error("failed to write cache file", "err", err)
-		return
-	}
-	if err = cacheFile.Sync(); err != nil {
-		log.Error("failed to sync cache file", "err", err)
 		return
 	}
 

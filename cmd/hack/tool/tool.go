@@ -20,9 +20,10 @@ import (
 	"context"
 	"strconv"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core"
 )
 
 func Check(e error) {
@@ -39,7 +40,7 @@ func ParseFloat64(str string) float64 {
 func ChainConfig(tx kv.Tx) *chain.Config {
 	genesisBlockHash, err := rawdb.ReadCanonicalHash(tx, 0)
 	Check(err)
-	chainConfig, err := rawdb.ReadChainConfig(tx, genesisBlockHash)
+	chainConfig, err := core.ReadChainConfig(tx, genesisBlockHash)
 	Check(err)
 	return chainConfig
 }

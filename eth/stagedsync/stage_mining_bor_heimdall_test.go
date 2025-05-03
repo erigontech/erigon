@@ -23,13 +23,16 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/eth/stagedsync/stagedsynctest"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 func TestMiningBorHeimdallForwardPersistsSpans(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	ctx := context.Background()

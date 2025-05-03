@@ -26,13 +26,8 @@ CGO_CFLAGS += -DMDBX_DISABLE_VALIDATION=0 # Can disable it on CI by separated PR
 #CGO_CFLAGS += -DMDBX_ENABLE_PGOP_STAT=0 # Disabled by default, but may be useful for performance debugging
 CGO_CFLAGS += -DMDBX_ENV_CHECKPID=0 # Erigon doesn't do fork() syscall
 
-# If it is arm64 or aarch64, then we need to use portable version of blst. use or with stringw "arm64" and "aarch64" to support both
-ifeq ($(shell uname -m), arm64)
-	CGO_CFLAGS += -D__BLST_PORTABLE__
-endif
-ifeq ($(shell uname -m), aarch64)
-	CGO_CFLAGS += -D__BLST_PORTABLE__
-endif
+
+CGO_CFLAGS += -D__BLST_PORTABLE__
 
 # Configure GOAMD64 env.variable for AMD64 architecture:
 ifeq ($(shell uname -m),x86_64)
@@ -57,12 +52,14 @@ ifneq ($(shell "$(CURDIR)/turbo/silkworm/silkworm_compat_check.sh"),)
 	BUILD_TAGS := $(BUILD_TAGS),nosilkworm
 endif
 
+override BUILD_TAGS := $(BUILD_TAGS),$(EXTRA_BUILD_TAGS)
+
 GOPRIVATE = github.com/erigontech/silkworm-go
 
 PACKAGE = github.com/erigontech/erigon
 
-GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false
-GO_FLAGS += -ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/params.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/params.GitTag=${GIT_TAG}"
+override GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false
+override GO_FLAGS += -ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/params.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/params.GitTag=${GIT_TAG}"
 
 GOBUILD = ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" $(GO) build $(GO_FLAGS)
 GO_DBG_BUILD = ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS) -DMDBX_DEBUG=1" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" $(GO) build -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
@@ -125,7 +122,7 @@ dbg:
 %.cmd:
 	@# Note: $* is replaced by the command name
 	@echo "Building $*"
-	@cd ./cmd/$* && $(GOBUILD) -o $(GOBIN)/$*
+	cd ./cmd/$* && $(GOBUILD) -o $(GOBIN)/$*
 	@echo "Run \"$(GOBIN)/$*\" to launch $*."
 
 ## geth:                              run erigon (TODO: remove?)
@@ -167,23 +164,32 @@ db-tools:
 	go mod vendor
 	cd vendor/github.com/erigontech/mdbx-go && MDBX_BUILD_TIMESTAMP=unknown make tools
 	mkdir -p $(GOBIN)
-	cd vendor/github.com/erigontech/mdbx-go/mdbxdist && cp mdbx_chk $(GOBIN) && cp mdbx_copy $(GOBIN) && cp mdbx_dump $(GOBIN) && cp mdbx_drop $(GOBIN) && cp mdbx_load $(GOBIN) && cp mdbx_stat $(GOBIN)
+	cd vendor/github.com/erigontech/mdbx-go/libmdbx && cp mdbx_chk $(GOBIN) && cp mdbx_copy $(GOBIN) && cp mdbx_dump $(GOBIN) && cp mdbx_drop $(GOBIN) && cp mdbx_load $(GOBIN) && cp mdbx_stat $(GOBIN)
 	rm -rf vendor
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
 test-erigon-lib:
 	@cd erigon-lib && $(MAKE) test
 
+test-erigon-lib-all:
+	@cd erigon-lib && $(MAKE) test-all
+
+test-erigon-db:
+	@cd erigon-db && $(MAKE) test
+
+test-erigon-db-all:
+	@cd erigon-db && $(MAKE) test-all
+
 test-erigon-ext:
 	@cd tests/erigon-ext-test && ./test.sh $(GIT_COMMIT)
 
-## test:                              run unit tests with a 100s timeout
-test: test-erigon-lib
-	$(GOTEST) --timeout 10m -coverprofile=coverage.out
+## test:                      run short tests with a 10m timeout
+test: test-erigon-lib test-erigon-db
+	$(GOTEST) -short --timeout 10m -coverprofile=coverage-test.out
 
-## test-integration:                  run integration tests with a 30m timeout
-test-integration: test-erigon-lib
-	$(GOTEST) --timeout 240m -tags $(BUILD_TAGS),integration
+## test-all:                  run all tests with a 1h timeout
+test-all: test-erigon-lib-all test-erigon-db-all
+	$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out
 
 ## test-hive						run the hive tests locally off nektos/act workflows simulator
 test-hive:	
@@ -200,9 +206,9 @@ test-hive:
 
 # Define the run_suite function
 define run_suite
-    echo -e "\n\n============================================================"; \
+    printf "\n\n============================================================"; \
     echo "Running test: $1-$2"; \
-    echo -e "\n"; \
+    printf "\n"; \
     ./hive --sim ethereum/$1 --sim.limit=$2 --sim.parallelism=8 --client erigon $3 2>&1 | tee output.log; \
     if [ $$? -gt 0 ]; then \
         echo "Exitcode gt 0"; \
@@ -215,28 +221,28 @@ define run_suite
     fi; \
     tests=$$(echo "$$status_line" | sed -n 's/.*tests=\([0-9]*\).*/\1/p'); \
     failed=$$(echo "$$status_line" | sed -n 's/.*failed=\([0-9]*\).*/\1/p'); \
-    echo -e "\n"; \
+    printf "\n"; \
     echo "-----------   Results for $1-$2    -----------"; \
     echo "Tests: $$tests, Failed: $$failed"; \
-    echo -e "\n\n============================================================"
+    printf "\n\n============================================================"
 endef
 
 hive-local:
 	docker build -t "test/erigon:$(SHORT_COMMIT)" . 
-	rm -rf "hive-test-$(SHORT_COMMIT)" && mkdir "hive-local-$(SHORT_COMMIT)"
+	rm -rf "hive-local-$(SHORT_COMMIT)" && mkdir "hive-local-$(SHORT_COMMIT)"
 	cd "hive-local-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
 
 	cd "hive-local-$(SHORT_COMMIT)/hive" && \
 	sed -i "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
 	sed -i "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile
 	cd "hive-local-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
-	cd "hive-local-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs
+	cd "hive-local-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
 	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,exchange-capabilities)
 	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,withdrawals)
 	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,cancun)
 	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,api)
 	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,auth)
-	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,rpc,compat)
+	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,rpc-compat,)
 
 eest-hive:
 	docker build -t "test/erigon:$(SHORT_COMMIT)" . 
@@ -247,8 +253,35 @@ eest-hive:
 	sed -i "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
 	sed -i "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile
 	cd "eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
-	cd "eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs
-	cd "eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eest/consume-engine,"",--sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/pectra-devnet-5%40v1.1.0/fixtures_pectra-devnet-5.tar.gz --sim.buildarg branch=pectra-devnet-5)
+	cd "eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
+	cd "eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eest/consume-engine,"",--sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.3.0/fixtures_develop.tar.gz)
+
+
+# define kurtosis assertoor runner
+define run-kurtosis-assertoor
+	docker build -t test/erigon:current . ; \
+	kurtosis enclave rm -f makefile-kurtosis-testnet ; \
+	kurtosis run --enclave makefile-kurtosis-testnet github.com/ethpandaops/ethereum-package --args-file $(1) ; \
+	printf "\nTo view logs: \nkurtosis service logs my-testnet el-1-erigon-lighthouse\n"
+endef
+
+check-kurtosis:
+	@if ! command -v kurtosis >/dev/null 2>&1; then \
+		echo "kurtosis command not found in PATH, please source it in PATH. If Kurtosis is not installed, install it by visiting https://docs.kurtosis.com/install/"; \
+		exit 1; \
+	fi; \
+
+kurtosis-pectra-assertoor:	check-kurtosis
+	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/pectra.io")
+
+kurtosis-reguler-assertoor:	check-kurtosis 
+	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/regular-assertoor.io")
+
+kurtosis-cleanup:
+	@echo "Currently Running Enclaves: "
+	@kurtosis enclave ls
+	@echo "-----------------------------------\n"
+	kurtosis enclave rm -f makefile-kurtosis-testnet
 
 ## lint-deps:                         install lint dependencies
 lint-deps:
@@ -264,6 +297,7 @@ lint:
 	@cd erigon-lib && $(MAKE) lint
 	@./erigon-lib/tools/golangci_lint.sh
 	@./erigon-lib/tools/mod_tidy_check.sh
+	@cd erigon-db && ./../erigon-lib/tools/mod_tidy_check.sh
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
 clean:
@@ -308,8 +342,18 @@ gencodec:
 graphql:
 	PATH=$(GOBIN):$(PATH) cd ./cmd/rpcdaemon/graphql && go run github.com/99designs/gqlgen .
 
+## grpc:                              generate grpc and protobuf code
+grpc:
+	@cd erigon-lib && $(MAKE) grpc
+	@cd txnprovider/shutter && $(MAKE) proto
+
+## stringer:                          generate stringer code
+stringer:
+	$(GOBUILD) -o $(GOBIN)/stringer golang.org/x/tools/cmd/stringer
+	PATH="$(GOBIN):$(PATH)" go generate -run "stringer" ./...
+
 ## gen:                               generate all auto-generated code in the codebase
-gen: mocks solc abigen gencodec graphql
+gen: mocks solc abigen gencodec graphql grpc stringer
 	@cd erigon-lib && $(MAKE) gen
 
 ## bindings:                          generate test contracts and core contracts

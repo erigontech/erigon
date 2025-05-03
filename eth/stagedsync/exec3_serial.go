@@ -6,20 +6,15 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/erigontech/erigon/cmd/state/exec3"
-	"github.com/erigontech/erigon/eth/consensuschain"
-	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/consensus"
+	state2 "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/exec"
-	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/execution/consensus"
+	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 )
 
 type serialExecutor struct {
@@ -210,11 +205,30 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 
 		if !task.IsBlockEnd() {
 			var receipt *types.Receipt
-			if txTask.TxIndex >= 0 && !txTask.IsBlockEnd() {
+			if txTask.TxIndex >= 0 {
 				receipt = blockReceipts[txTask.TxIndex-startTxIndex]
 			}
 			if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), receipt, se.blobGasUsed); err != nil {
 				return false, err
+			}
+		} else {
+			if se.cfg.chainConfig.Bor != nil && txTask.TxIndex >= 1 {
+				// get last receipt and store the last log index + 1
+				lastReceipt := txTask.BlockReceipts[txTask.TxIndex-1]
+				if lastReceipt == nil {
+					return false, fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
+				}
+				if len(lastReceipt.Logs) > 0 {
+					firstIndex := lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
+					receipt := types.Receipt{
+						CumulativeGasUsed:        lastReceipt.CumulativeGasUsed,
+						FirstLogIndexWithinBlock: uint32(firstIndex),
+					}
+					lastReceipt.FirstLogIndexWithinBlock = uint32(firstIndex)
+					if err := rawtemporaldb.AppendReceipt(se.doms, &receipt, se.blobGasUsed); err != nil {
+						return false, err
+					}
+				}
 			}
 		}
 

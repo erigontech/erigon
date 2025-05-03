@@ -24,12 +24,13 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBeaconState_SetVersion(t *testing.T) {
 	state := GetTestState()
 	state.SetVersion(clparams.Phase0Version)
-	assert.Equal(t, state.Version(), clparams.Phase0Version)
+	assert.Equal(t, clparams.Phase0Version, state.Version())
 }
 
 func TestBeaconState_SetSlot(t *testing.T) {
@@ -76,7 +77,7 @@ func TestBeaconState_SetWithdrawableEpochForValidatorAtIndex(t *testing.T) {
 	index := 0
 	epoch := uint64(5)
 	err := state.SetWithdrawableEpochForValidatorAtIndex(index, epoch)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, epoch, state.validators.Get(index).WithdrawableEpoch())
 }
 
@@ -85,7 +86,7 @@ func TestBeaconState_SetWithdrawableEpochForValidatorAtIndex_InvalidIndex(t *tes
 	index := 10000000000000
 	epoch := uint64(5)
 	err := state.SetWithdrawableEpochForValidatorAtIndex(index, epoch)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 }
 
 func TestBeaconState_SetEffectiveBalanceForValidatorAtIndex(t *testing.T) {
@@ -164,7 +165,7 @@ func TestBeaconState_SetValidatorSlashed(t *testing.T) {
 	index := 0
 	slashed := true
 	err := state.SetValidatorSlashed(index, slashed)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, slashed, state.validators.Get(index).Slashed())
 }
 
@@ -173,7 +174,7 @@ func TestBeaconState_SetValidatorSlashed_InvalidIndex(t *testing.T) {
 	index := 10
 	slashed := true
 	err := state.SetValidatorSlashed(index, slashed)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 func TestBeaconState_SetValidatorMinCurrentInclusionDelayAttestation(t *testing.T) {
@@ -187,7 +188,7 @@ func TestBeaconState_SetValidatorMinCurrentInclusionDelayAttestation(t *testing.
 	}
 
 	err := state.SetValidatorMinCurrentInclusionDelayAttestation(index, value)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, value, state.validators.MinCurrentInclusionDelayAttestation(index))
 }
 
@@ -196,7 +197,7 @@ func TestBeaconState_SetValidatorIsCurrentMatchingSourceAttester(t *testing.T) {
 	index := 0
 	value := true
 	err := state.SetValidatorIsCurrentMatchingSourceAttester(index, value)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, value, state.validators.IsCurrentMatchingSourceAttester(index))
 }
 
@@ -205,7 +206,7 @@ func TestBeaconState_SetValidatorIsCurrentMatchingTargetAttester(t *testing.T) {
 	index := 0
 	value := true
 	err := state.SetValidatorIsCurrentMatchingTargetAttester(index, value)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, value, state.validators.IsCurrentMatchingTargetAttester(index))
 }
 
@@ -214,7 +215,7 @@ func TestBeaconState_SetValidatorIsCurrentMatchingHeadAttester(t *testing.T) {
 	index := 0
 	value := true
 	err := state.SetValidatorIsCurrentMatchingHeadAttester(index, value)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, value, state.validators.IsCurrentMatchingHeadAttester(index))
 }
 
@@ -227,7 +228,7 @@ func TestBeaconState_SetValidatorMinPreviousInclusionDelayAttestation(t *testing
 		ProposerIndex:   3,
 	}
 	err := state.SetValidatorMinPreviousInclusionDelayAttestation(index, value)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, value, state.validators.MinPreviousInclusionDelayAttestation(index))
 }
 
@@ -236,7 +237,7 @@ func TestBeaconState_SetValidatorIsPreviousMatchingSourceAttester(t *testing.T) 
 	index := 0
 	value := true
 	err := state.SetValidatorIsPreviousMatchingSourceAttester(index, value)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, value, state.validators.IsPreviousMatchingSourceAttester(index))
 }
 
@@ -245,7 +246,7 @@ func TestBeaconState_SetValidatorIsPreviousMatchingTargetAttester(t *testing.T) 
 	index := 0
 	value := true
 	err := state.SetValidatorIsPreviousMatchingTargetAttester(index, value)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, value, state.validators.IsPreviousMatchingTargetAttester(index))
 }
 
@@ -301,7 +302,7 @@ func TestBeaconState_AddInactivityScore(t *testing.T) {
 func TestBeaconState_SetValidatorInactivityScore(t *testing.T) {
 	state := GetTestState()
 	err := state.SetValidatorInactivityScore(0, 1)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, uint64(1), state.inactivityScores.Get(0))
 }
 
@@ -318,7 +319,7 @@ func TestBeaconState_SetValidatorIsPreviousMatchingHeadAttester(t *testing.T) {
 	index := 0
 	value := true
 	err := state.SetValidatorIsPreviousMatchingHeadAttester(index, value)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, value, state.validators.IsPreviousMatchingHeadAttester(index))
 }
 
@@ -327,7 +328,7 @@ func TestBeaconState_SetValidatorBalance(t *testing.T) {
 	index := 0
 	balance := uint64(1000)
 	err := state.SetValidatorBalance(index, balance)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, balance, state.balances.Get(index))
 }
 

@@ -27,29 +27,28 @@ import (
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-
-	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/tracers"
 	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
 	"github.com/erigontech/erigon/eth/tracers/logger"
-	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
 type BlockGetter interface {
 	// GetBlockByHash retrieves a block from the database by hash, caching it if found.
-	GetBlockByHash(hash libcommon.Hash) (*types.Block, error)
+	GetBlockByHash(hash common.Hash) (*types.Block, error)
 	// GetBlock retrieves a block from the database by hash and number,
 	// caching it if found.
-	GetBlock(hash libcommon.Hash, number uint64) *types.Block
+	GetBlock(hash common.Hash, number uint64) *types.Block
 }
 
 // ComputeBlockContext returns the execution environment of a certain block.
@@ -82,15 +81,8 @@ func ComputeTxContext(statedb *state.IntraBlockState, engine consensus.EngineRea
 	txn := block.Transactions()[txIndex]
 	statedb.SetTxContext(block.NumberU64(), txIndex)
 	msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
-	if msg.FeeCap().IsZero() && engine != nil {
-		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			return core.SysCallContract(contract, data, cfg, statedb, block.HeaderNoCopy(), engine, true /* constCall */)
-		}
-		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
-	}
-
-	TxContext := core.NewEVMTxContext(msg)
-	return msg, TxContext, nil
+	txContext := core.NewEVMTxContext(msg)
+	return msg, txContext, nil
 }
 
 // TraceTx configures a new tracer according to the provided configuration, and
@@ -98,17 +90,19 @@ func ComputeTxContext(statedb *state.IntraBlockState, engine consensus.EngineRea
 // be tracer dependent.
 func TraceTx(
 	ctx context.Context,
+	engine consensus.EngineReader,
+	tx types.Transaction,
 	message core.Message,
 	blockCtx evmtypes.BlockContext,
 	txCtx evmtypes.TxContext,
-	blockHash libcommon.Hash,
+	blockHash common.Hash,
 	txnIndex int,
 	ibs evmtypes.IntraBlockState,
 	config *tracersConfig.TraceConfig,
 	chainConfig *chain.Config,
 	stream *jsoniter.Stream,
 	callTimeout time.Duration,
-) (gasUsed uint64, err error) {
+) (usedGas uint64, err error) {
 	tracer, streaming, cancel, err := AssembleTracer(ctx, config, txCtx.TxHash, blockHash, txnIndex, stream, callTimeout)
 	if err != nil {
 		stream.WriteNil()
@@ -119,27 +113,39 @@ func TraceTx(
 
 	execCb := func(evm *vm.EVM, refunds bool) (*evmtypes.ExecutionResult, error) {
 		gp := new(core.GasPool).AddGas(message.Gas()).AddBlobGas(message.BlobGas())
-		res, err := core.ApplyMessage(evm, message, gp, refunds, false /* gasBailout */)
-		if err != nil {
-			return res, err
+		if tracer != nil && tracer.OnTxStart != nil {
+			tracer.OnTxStart(evm.GetVMContext(), tx, message.From())
 		}
-		gasUsed = res.GasUsed
-		return res, nil
+		result, err := core.ApplyMessage(evm, message, gp, refunds, false /* gasBailout */, engine)
+		if err != nil {
+			if tracer != nil && tracer.OnTxEnd != nil {
+				tracer.OnTxEnd(nil, err)
+			}
+
+			return result, err
+		} else {
+			if tracer != nil && tracer.OnTxEnd != nil {
+				tracer.OnTxEnd(&types.Receipt{GasUsed: result.UsedGas}, nil)
+			}
+		}
+
+		usedGas = result.UsedGas
+		return result, err
 	}
 
 	err = ExecuteTraceTx(blockCtx, txCtx, ibs, config, chainConfig, stream, tracer, streaming, execCb)
-	return gasUsed, err
+	return usedGas, err
 }
 
 func AssembleTracer(
 	ctx context.Context,
 	config *tracersConfig.TraceConfig,
-	txHash libcommon.Hash,
-	blockHash libcommon.Hash,
+	txHash common.Hash,
+	blockHash common.Hash,
 	txnIndex int,
 	stream *jsoniter.Stream,
 	callTimeout time.Duration,
-) (vm.EVMLogger, bool, context.CancelFunc, error) {
+) (*tracers.Tracer, bool, context.CancelFunc, error) {
 	// Assemble the structured logger or the JavaScript tracer
 	switch {
 	case config != nil && config.Tracer != nil:
@@ -155,7 +161,7 @@ func AssembleTracer(
 
 		// Construct the JavaScript tracer to execute with
 		cfg := json.RawMessage("{}")
-		if config != nil && config.TracerConfig != nil {
+		if config.TracerConfig != nil {
 			cfg = *config.TracerConfig
 		}
 		tracer, err := tracers.New(*config.Tracer, &tracers.Context{TxHash: txHash, TxIndex: txnIndex, BlockHash: blockHash}, cfg)
@@ -172,9 +178,9 @@ func AssembleTracer(
 
 		return tracer, false, cancel, nil
 	case config == nil:
-		return logger.NewJsonStreamLogger(nil, ctx, stream), true, func() {}, nil
+		return logger.NewJsonStreamLogger(nil, ctx, stream).Tracer(), true, func() {}, nil
 	default:
-		return logger.NewJsonStreamLogger(config.LogConfig, ctx, stream), true, func() {}, nil
+		return logger.NewJsonStreamLogger(config.LogConfig, ctx, stream).Tracer(), true, func() {}, nil
 	}
 }
 
@@ -185,12 +191,12 @@ func ExecuteTraceTx(
 	config *tracersConfig.TraceConfig,
 	chainConfig *chain.Config,
 	stream *jsoniter.Stream,
-	tracer vm.EVMLogger,
+	tracer *tracers.Tracer,
 	streaming bool,
 	execCb func(evm *vm.EVM, refunds bool) (*evmtypes.ExecutionResult, error),
 ) error {
 	// Run the transaction with tracing enabled.
-	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: true, Tracer: tracer, NoBaseFee: true})
+	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Tracer: tracer.Hooks, NoBaseFee: true})
 
 	var refunds = true
 	if config != nil && config.NoRefunds != nil && *config.NoRefunds {
@@ -233,7 +239,7 @@ func ExecuteTraceTx(
 		stream.WriteString(returnVal)
 		stream.WriteObjectEnd()
 	} else {
-		r, err := tracer.(tracers.Tracer).GetResult()
+		r, err := tracer.GetResult()
 		if err != nil {
 			stream.WriteNil()
 			return err

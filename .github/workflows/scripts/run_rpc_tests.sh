@@ -4,12 +4,16 @@ set +e # Disable exit on error
 
 # Array of disabled tests
 disabled_tests=(
+    # Failing after the PR https://github.com/erigontech/erigon/pull/13617 that fixed this incompatibility
+    # issues https://hive.pectra-devnet-5.ethpandaops.io/suite.html?suiteid=1738266984-51ae1a2f376e5de5e9ba68f034f80e32.json&suitename=rpc-compat
+    net_listening/test_1.json
     # Erigon2 and Erigon3 never supported this api methods
     trace_rawTransaction
     # to investigate
     engine_exchangeCapabilities/test_1.json
     engine_exchangeTransitionConfigurationV1/test_01.json
     engine_getClientVersionV1/test_1.json
+    # these tests require Fix on erigon DM on repeipts domain
     # these tests requires Erigon active
     admin_nodeInfo/test_01.json
     admin_peers/test_01.json
@@ -32,6 +36,6 @@ disabled_tests=(
 # Transform the array into a comma-separated string
 disabled_test_list=$(IFS=,; echo "${disabled_tests[*]}")
 
-python3 ./run_tests.py -p 8545 --continue -f --json-diff -x "$disabled_test_list"
+python3 ./run_tests.py --port 8545 --engine-port 8545 --continue -f --json-diff --serial -x "$disabled_test_list" 
 
 exit $?

@@ -24,7 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"os"
@@ -1748,7 +1748,7 @@ func selectDownloadPeer(ctx context.Context, peerUrls []*url.URL, t *torrent.Tor
 		}
 
 	default:
-		peerIndex := rand.Intn(len(peerUrls))
+		peerIndex := rand.IntN(len(peerUrls))
 		peerUrl := peerUrls[peerIndex]
 		downloadUrl := peerUrl.JoinPath(t.Name())
 		peerInfo, err := getWebpeerTorrentInfo(ctx, downloadUrl)
@@ -2443,6 +2443,9 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 				return nil
 			}
 		} else {
+			if ff.Type == nil {
+				return fmt.Errorf("nil ptr after parsing file: %s", name)
+			}
 			if !d.cfg.SnapshotConfig.Seedable(ff) {
 				return nil
 			}
@@ -2700,7 +2703,6 @@ func (d *Downloader) Close() {
 	if err := d.pieceCompletionDB.Close(); err != nil {
 		d.logger.Warn("[snapshots] pieceCompletionDB.close", "err", err)
 	}
-	d.logger.Info("[snapshots] closing db")
 	d.db.Close()
 	d.logger.Info("[snapshots] downloader stopped")
 }
@@ -2894,4 +2896,12 @@ func (d *Downloader) CompletedTorrents() map[string]completedTorrentInfo {
 	defer d.lock.RUnlock()
 
 	return d.completedTorrents
+}
+
+// Expose torrent client status to HTTP on the public/default serve mux used by GOPPROF=http. Only
+// do this if you have a single instance.
+func (d *Downloader) HandleTorrentClientStatus() {
+	http.HandleFunc("/downloaderTorrentClientStatus", func(w http.ResponseWriter, r *http.Request) {
+		d.torrentClient.WriteStatus(w)
+	})
 }

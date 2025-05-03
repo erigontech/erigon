@@ -23,8 +23,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Giulio2002/bls"
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
+	"github.com/erigontech/erigon/cl/utils/bls"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto/kzg"
@@ -85,11 +85,14 @@ func (b *blobSidecarService) ProcessMessage(ctx context.Context, subnetId *uint6
 		return b.verifyAndStoreBlobSidecar(msg)
 	}
 
+	sidecarVersion := b.beaconCfg.GetCurrentStateVersion(msg.SignedBlockHeader.Header.Slot / b.beaconCfg.SlotsPerEpoch)
 	// [REJECT] The sidecar's index is consistent with MAX_BLOBS_PER_BLOCK -- i.e. blob_sidecar.index < MAX_BLOBS_PER_BLOCK.
-	if msg.Index >= b.beaconCfg.MaxBlobsPerBlock {
+	maxBlobsPerBlock := b.beaconCfg.MaxBlobsPerBlockByVersion(sidecarVersion)
+	if msg.Index >= maxBlobsPerBlock {
 		return errors.New("blob index out of range")
 	}
-	sidecarSubnetIndex := msg.Index % b.beaconCfg.MaxBlobsPerBlock
+	// [REJECT] The sidecar is for the correct subnet -- i.e. compute_subnet_for_blob_sidecar(blob_sidecar.index) == subnet_id
+	sidecarSubnetIndex := msg.Index % b.beaconCfg.BlobSidecarSubnetCountByVersion(sidecarVersion)
 	if sidecarSubnetIndex != *subnetId {
 		return ErrBlobIndexOutOfRange
 	}
@@ -101,6 +104,7 @@ func (b *blobSidecarService) ProcessMessage(ctx context.Context, subnetId *uint6
 		return ErrIgnore
 	}
 
+	// [IGNORE] The sidecar is from a slot greater than the latest finalized slot -- i.e. validate that block_header.slot > compute_start_slot_at_epoch(store.finalized_checkpoint.epoch)
 	if b.forkchoiceStore.FinalizedSlot() >= sidecarSlot {
 		return ErrIgnore
 	}
@@ -139,7 +143,7 @@ func (b *blobSidecarService) verifyAndStoreBlobSidecar(msg *cltypes.BlobSidecar)
 	}
 
 	start := time.Now()
-	if err := kzgCtx.VerifyBlobKZGProof(gokzg4844.Blob(msg.Blob), gokzg4844.KZGCommitment(msg.KzgCommitment), gokzg4844.KZGProof(msg.KzgProof)); err != nil {
+	if err := kzgCtx.VerifyBlobKZGProof(msg.Blob[:], gokzg4844.KZGCommitment(msg.KzgCommitment), gokzg4844.KZGProof(msg.KzgProof)); err != nil {
 		return fmt.Errorf("blob KZG proof verification failed: %v", err)
 	}
 

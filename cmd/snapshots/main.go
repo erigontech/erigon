@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/mem"
 	"github.com/erigontech/erigon/cmd/snapshots/cmp"
 	"github.com/erigontech/erigon/cmd/snapshots/copy"
+	"github.com/erigontech/erigon/cmd/snapshots/genfromrpc"
 	"github.com/erigontech/erigon/cmd/snapshots/manifest"
 	"github.com/erigontech/erigon/cmd/snapshots/sync"
 	"github.com/erigontech/erigon/cmd/snapshots/torrents"
@@ -56,6 +57,7 @@ func main() {
 		&verify.Command,
 		&torrents.Command,
 		&manifest.Command,
+		&genfromrpc.Command,
 	}
 
 	app.Flags = []cli.Flag{}

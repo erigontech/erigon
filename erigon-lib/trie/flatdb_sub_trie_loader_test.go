@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -77,56 +76,4 @@ func TestCreateLoadingPrefixes(t *testing.T) {
 	assert.Equal("[]", fmt.Sprintf("%x", dbPrefixes))
 	assert.Equal("[0]", fmt.Sprintf("%d", fixedbits))
 	assert.Equal("[]", fmt.Sprintf("%x", hooks))
-}
-
-func TestIsBefore(t *testing.T) {
-	assert := assert.New(t)
-
-	is := keyIsBefore([]byte("a"), []byte("b"))
-	assert.Equal(true, is)
-
-	is = keyIsBefore([]byte("b"), []byte("a"))
-	assert.Equal(false, is)
-
-	is = keyIsBefore([]byte("b"), []byte(""))
-	assert.Equal(false, is)
-
-	is = keyIsBefore(nil, []byte("b"))
-	assert.Equal(false, is)
-
-	is = keyIsBefore([]byte("b"), nil)
-	assert.Equal(true, is)
-
-	contract := fmt.Sprintf("2%063x", 0)
-	storageKey := common.Hex2Bytes(contract + "ffffffff" + fmt.Sprintf("10%062x", 0))
-	cacheKey := common.Hex2Bytes(contract + "ffffffff" + "20")
-	is = keyIsBefore(cacheKey, storageKey)
-	assert.False(is)
-
-	storageKey = common.Hex2Bytes(contract + "ffffffffffffffff" + fmt.Sprintf("20%062x", 0))
-	cacheKey = common.Hex2Bytes(contract + "ffffffffffffffff" + "10")
-	is = keyIsBefore(cacheKey, storageKey)
-	assert.True(is)
-}
-
-func TestIsSequence(t *testing.T) {
-	assert := assert.New(t)
-
-	type tc struct {
-		prev, next string
-		expect     bool
-	}
-
-	cases := []tc{
-		{prev: "1234", next: "1235", expect: true},
-		{prev: "12ff", next: "13", expect: true},
-		{prev: "12ff", next: "13000000", expect: true},
-		{prev: "1234", next: "5678", expect: false},
-	}
-	for _, tc := range cases {
-		next, _ := kv.NextSubtree(common.FromHex(tc.prev))
-		res := isSequenceOld(next, common.FromHex(tc.next))
-		assert.Equal(tc.expect, res, "%s, %s", tc.prev, tc.next)
-	}
-
 }

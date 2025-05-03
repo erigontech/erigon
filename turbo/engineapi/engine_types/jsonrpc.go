@@ -22,14 +22,12 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 // ExecutionPayload represents an execution payload (aka block)
@@ -38,16 +36,16 @@ type ExecutionPayload struct {
 	FeeRecipient  common.Address      `json:"feeRecipient"  gencodec:"required"`
 	StateRoot     common.Hash         `json:"stateRoot"     gencodec:"required"`
 	ReceiptsRoot  common.Hash         `json:"receiptsRoot"  gencodec:"required"`
-	LogsBloom     hexutility.Bytes    `json:"logsBloom"     gencodec:"required"`
+	LogsBloom     hexutil.Bytes       `json:"logsBloom"     gencodec:"required"`
 	PrevRandao    common.Hash         `json:"prevRandao"    gencodec:"required"`
 	BlockNumber   hexutil.Uint64      `json:"blockNumber"   gencodec:"required"`
 	GasLimit      hexutil.Uint64      `json:"gasLimit"      gencodec:"required"`
 	GasUsed       hexutil.Uint64      `json:"gasUsed"       gencodec:"required"`
 	Timestamp     hexutil.Uint64      `json:"timestamp"     gencodec:"required"`
-	ExtraData     hexutility.Bytes    `json:"extraData"     gencodec:"required"`
+	ExtraData     hexutil.Bytes       `json:"extraData"     gencodec:"required"`
 	BaseFeePerGas *hexutil.Big        `json:"baseFeePerGas" gencodec:"required"`
 	BlockHash     common.Hash         `json:"blockHash"     gencodec:"required"`
-	Transactions  []hexutility.Bytes  `json:"transactions"  gencodec:"required"`
+	Transactions  []hexutil.Bytes     `json:"transactions"  gencodec:"required"`
 	Withdrawals   []*types.Withdrawal `json:"withdrawals"`
 	BlobGasUsed   *hexutil.Uint64     `json:"blobGasUsed"`
 	ExcessBlobGas *hexutil.Uint64     `json:"excessBlobGas"`
@@ -78,13 +76,19 @@ type TransitionConfiguration struct {
 
 // BlobsBundleV1 holds the blobs of an execution payload
 type BlobsBundleV1 struct {
-	Commitments []hexutility.Bytes `json:"commitments" gencodec:"required"`
-	Proofs      []hexutility.Bytes `json:"proofs"      gencodec:"required"`
-	Blobs       []hexutility.Bytes `json:"blobs"       gencodec:"required"`
+	Commitments []hexutil.Bytes `json:"commitments" gencodec:"required"`
+	Proofs      []hexutil.Bytes `json:"proofs"      gencodec:"required"`
+	Blobs       []hexutil.Bytes `json:"blobs"       gencodec:"required"`
+}
+
+// BlobAndProofV1 holds one item for engine_getBlobsV1
+type BlobAndProofV1 struct {
+	Blob  hexutil.Bytes `json:"blob" gencodec:"required"`
+	Proof hexutil.Bytes `json:"proof" gencodec:"required"`
 }
 
 type ExecutionPayloadBody struct {
-	Transactions []hexutility.Bytes  `json:"transactions" gencodec:"required"`
+	Transactions []hexutil.Bytes     `json:"transactions" gencodec:"required"`
 	Withdrawals  []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
 }
 
@@ -96,16 +100,16 @@ type PayloadStatus struct {
 }
 
 type ForkChoiceUpdatedResponse struct {
-	PayloadId     *hexutility.Bytes `json:"payloadId"` // We need to reformat the uint64 so this makes more sense.
-	PayloadStatus *PayloadStatus    `json:"payloadStatus"`
+	PayloadId     *hexutil.Bytes `json:"payloadId"` // We need to reformat the uint64 so this makes more sense.
+	PayloadStatus *PayloadStatus `json:"payloadStatus"`
 }
 
 type GetPayloadResponse struct {
-	ExecutionPayload      *ExecutionPayload  `json:"executionPayload" gencodec:"required"`
-	BlockValue            *hexutil.Big       `json:"blockValue"`
-	BlobsBundle           *BlobsBundleV1     `json:"blobsBundle"`
-	ExecutionRequests     []hexutility.Bytes `json:"executionRequests"`
-	ShouldOverrideBuilder bool               `json:"shouldOverrideBuilder"`
+	ExecutionPayload      *ExecutionPayload `json:"executionPayload" gencodec:"required"`
+	BlockValue            *hexutil.Big      `json:"blockValue"`
+	BlobsBundle           *BlobsBundleV1    `json:"blobsBundle"`
+	ExecutionRequests     []hexutil.Bytes   `json:"executionRequests"`
+	ShouldOverrideBuilder bool              `json:"shouldOverrideBuilder"`
 }
 
 type ClientVersionV1 struct {
@@ -129,14 +133,26 @@ func NewStringifiedErrorFromString(err string) *StringifiedError {
 	return &StringifiedError{err: errors.New(err)}
 }
 
-func (e StringifiedError) MarshalJSON() ([]byte, error) {
+func (e *StringifiedError) MarshalJSON() ([]byte, error) {
 	if e.err == nil {
 		return json.Marshal(nil)
 	}
 	return json.Marshal(e.err.Error())
 }
 
-func (e StringifiedError) Error() error {
+func (e *StringifiedError) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 || string(data) == "null" {
+		return nil
+	}
+	var errStr string
+	if err := json.Unmarshal(data, &errStr); err != nil {
+		return err
+	}
+	e.err = errors.New(errStr)
+	return nil
+}
+
+func (e *StringifiedError) Error() error {
 	return e.err
 }
 
@@ -147,8 +163,8 @@ func ConvertRpcBlockToExecutionPayload(payload *execution.Block) *ExecutionPaylo
 	var bloom types.Bloom = gointerfaces.ConvertH2048ToBloom(header.LogsBloom)
 	baseFee := gointerfaces.ConvertH256ToUint256Int(header.BaseFeePerGas).ToBig()
 
-	// Convert slice of hexutility.Bytes to a slice of slice of bytes
-	transactions := make([]hexutility.Bytes, len(body.Transactions))
+	// Convert slice of hexutil.Bytes to a slice of slice of bytes
+	transactions := make([]hexutil.Bytes, len(body.Transactions))
 	for i, transaction := range body.Transactions {
 		transactions[i] = transaction
 	}
@@ -185,8 +201,8 @@ func ConvertPayloadFromRpc(payload *types2.ExecutionPayload) *ExecutionPayload {
 	var bloom types.Bloom = gointerfaces.ConvertH2048ToBloom(payload.LogsBloom)
 	baseFee := gointerfaces.ConvertH256ToUint256Int(payload.BaseFeePerGas).ToBig()
 
-	// Convert slice of hexutility.Bytes to a slice of slice of bytes
-	transactions := make([]hexutility.Bytes, len(payload.Transactions))
+	// Convert slice of hexutil.Bytes to a slice of slice of bytes
+	transactions := make([]hexutil.Bytes, len(payload.Transactions))
 	for i, transaction := range payload.Transactions {
 		transactions[i] = transaction
 	}
@@ -224,18 +240,18 @@ func ConvertBlobsFromRpc(bundle *types2.BlobsBundleV1) *BlobsBundleV1 {
 		return nil
 	}
 	res := &BlobsBundleV1{
-		Commitments: make([]hexutility.Bytes, len(bundle.Commitments)),
-		Proofs:      make([]hexutility.Bytes, len(bundle.Proofs)),
-		Blobs:       make([]hexutility.Bytes, len(bundle.Blobs)),
+		Commitments: make([]hexutil.Bytes, len(bundle.Commitments)),
+		Proofs:      make([]hexutil.Bytes, len(bundle.Proofs)),
+		Blobs:       make([]hexutil.Bytes, len(bundle.Blobs)),
 	}
 	for i, commitment := range bundle.Commitments {
-		res.Commitments[i] = hexutility.Bytes(commitment)
+		res.Commitments[i] = hexutil.Bytes(commitment)
 	}
 	for i, proof := range bundle.Proofs {
-		res.Proofs[i] = hexutility.Bytes(proof)
+		res.Proofs[i] = hexutil.Bytes(proof)
 	}
 	for i, blob := range bundle.Blobs {
-		res.Blobs[i] = hexutility.Bytes(blob)
+		res.Blobs[i] = hexutil.Bytes(blob)
 	}
 	return res
 }
@@ -272,9 +288,9 @@ func ConvertWithdrawalsFromRpc(in []*types2.Withdrawal) []*types.Withdrawal {
 	return out
 }
 
-func ConvertPayloadId(payloadId uint64) *hexutility.Bytes {
+func ConvertPayloadId(payloadId uint64) *hexutil.Bytes {
 	encodedPayloadId := make([]byte, 8)
 	binary.BigEndian.PutUint64(encodedPayloadId, payloadId)
-	ret := hexutility.Bytes(encodedPayloadId)
+	ret := hexutil.Bytes(encodedPayloadId)
 	return &ret
 }

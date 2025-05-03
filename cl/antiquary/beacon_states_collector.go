@@ -25,7 +25,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/klauspost/compress/zstd"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -63,7 +63,6 @@ type beaconStatesCollector struct {
 	balancesCollector                *etl.Collector
 	randaoMixesCollector             *etl.Collector
 	intraRandaoMixesCollector        *etl.Collector
-	proposersCollector               *etl.Collector
 	slashingsCollector               *etl.Collector
 	blockRootsCollector              *etl.Collector
 	stateRootsCollector              *etl.Collector
@@ -77,6 +76,17 @@ type beaconStatesCollector struct {
 	activeValidatorIndiciesCollector *etl.Collector
 	balancesDumpsCollector           *etl.Collector
 	effectiveBalancesDumpCollector   *etl.Collector
+	// electra -- collectors
+	pendingDepositsCollector           *etl.Collector
+	pendingConsolidationsCollector     *etl.Collector
+	pendingWithdrawalsCollector        *etl.Collector
+	pendingDepositsCollectorDump       *etl.Collector
+	pendingConsolidationsCollectorDump *etl.Collector
+	pendingWithdrawalsCollectorDump    *etl.Collector
+	// electra -- diffs data structures
+	pendingDepositsWriter       *base_encoding.SSZQueueEncoder[*solid.PendingDeposit]
+	pendingConsolidationsWriter *base_encoding.SSZQueueEncoder[*solid.PendingConsolidation]
+	pendingWithdrawalsWriter    *base_encoding.SSZQueueEncoder[*solid.PendingPartialWithdrawal]
 
 	buffers []etl.Buffer
 
@@ -107,7 +117,6 @@ func newBeaconStatesCollector(beaconCfg *clparams.BeaconChainConfig, tmpdir stri
 		balancesCollector:                etl.NewCollector(kv.ValidatorBalance, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
 		randaoMixesCollector:             etl.NewCollector(kv.RandaoMixes, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
 		intraRandaoMixesCollector:        etl.NewCollector(kv.IntraRandaoMixes, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
-		proposersCollector:               etl.NewCollector(kv.Proposers, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
 		slashingsCollector:               etl.NewCollector(kv.ValidatorSlashings, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
 		blockRootsCollector:              etl.NewCollector(kv.BlockRoot, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
 		stateRootsCollector:              etl.NewCollector(kv.StateRoot, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
@@ -121,8 +130,20 @@ func newBeaconStatesCollector(beaconCfg *clparams.BeaconChainConfig, tmpdir stri
 		activeValidatorIndiciesCollector: etl.NewCollector(kv.ActiveValidatorIndicies, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
 		balancesDumpsCollector:           etl.NewCollector(kv.BalancesDump, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
 		effectiveBalancesDumpCollector:   etl.NewCollector(kv.EffectiveBalancesDump, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlTrace),
-		logger:                           logger,
-		beaconCfg:                        beaconCfg,
+		// electra
+		pendingDepositsCollector:           etl.NewCollector(kv.PendingDeposits, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlInfo),
+		pendingConsolidationsCollector:     etl.NewCollector(kv.PendingConsolidations, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlInfo),
+		pendingWithdrawalsCollector:        etl.NewCollector(kv.PendingPartialWithdrawals, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlInfo),
+		pendingDepositsCollectorDump:       etl.NewCollector(kv.PendingDepositsDump, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlInfo),
+		pendingConsolidationsCollectorDump: etl.NewCollector(kv.PendingConsolidationsDump, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlInfo),
+		pendingWithdrawalsCollectorDump:    etl.NewCollector(kv.PendingPartialWithdrawalsDump, tmpdir, makeETLBuffer(), logger).LogLvl(log.LvlInfo),
+
+		pendingDepositsWriter:       base_encoding.NewSSZQueueEncoder[*solid.PendingDeposit](func(a, b *solid.PendingDeposit) bool { return *a == *b }),
+		pendingConsolidationsWriter: base_encoding.NewSSZQueueEncoder[*solid.PendingConsolidation](func(a, b *solid.PendingConsolidation) bool { return *a == *b }),
+		pendingWithdrawalsWriter:    base_encoding.NewSSZQueueEncoder[*solid.PendingPartialWithdrawal](func(a, b *solid.PendingPartialWithdrawal) bool { return *a == *b }),
+
+		logger:    logger,
+		beaconCfg: beaconCfg,
 
 		buf:        buf,
 		compressor: compressor,
@@ -135,11 +156,6 @@ func (i *beaconStatesCollector) addGenesisState(ctx context.Context, state *stat
 	i.compressor.Reset(i.buf)
 
 	slot := state.Slot()
-	epoch := slot / i.beaconCfg.SlotsPerEpoch
-	// Setup state events handlers
-	if err := i.proposersCollector.Collect(base_encoding.Encode64ToBytes4(epoch), getProposerDutiesValue(state)); err != nil {
-		return err
-	}
 
 	events := state_accessors.NewStateEvents()
 
@@ -177,6 +193,17 @@ func (i *beaconStatesCollector) addGenesisState(ctx context.Context, state *stat
 
 		committee = *state.NextSyncCommittee()
 		if err := i.nextSyncCommitteeCollector.Collect(base_encoding.Encode64ToBytes4(committeeSlot), committee[:]); err != nil {
+			return err
+		}
+	}
+	if state.Version() >= clparams.ElectraVersion {
+		if err := antiquateListSSZ(ctx, slot, state.PendingDeposits(), i.buf, i.compressor, i.pendingDepositsCollectorDump); err != nil {
+			return err
+		}
+		if err := antiquateListSSZ(ctx, slot, state.PendingConsolidations(), i.buf, i.compressor, i.pendingConsolidationsCollectorDump); err != nil {
+			return err
+		}
+		if err := antiquateListSSZ(ctx, slot, state.PendingPartialWithdrawals(), i.buf, i.compressor, i.pendingWithdrawalsCollectorDump); err != nil {
 			return err
 		}
 	}
@@ -239,20 +266,70 @@ func (i *beaconStatesCollector) collectBalancesDump(slot uint64, uncompressed []
 	return antiquateField(context.Background(), slot, uncompressed, i.buf, i.compressor, i.balancesDumpsCollector)
 }
 
-func (i *beaconStatesCollector) collectIntraEpochRandaoMix(slot uint64, randao libcommon.Hash) error {
+func (i *beaconStatesCollector) collectPendingDepositsDump(slot uint64, pendingDeposits *solid.ListSSZ[*solid.PendingDeposit]) error {
+	i.buf.Reset()
+	i.compressor.Reset(i.buf)
+	return antiquateListSSZ(context.Background(), slot, pendingDeposits, i.buf, i.compressor, i.pendingDepositsCollectorDump)
+}
+
+func (i *beaconStatesCollector) preStateTransitionHook(preState *state.CachingBeaconState) {
+	if preState.Version() >= clparams.ElectraVersion {
+		i.pendingDepositsWriter.Initialize(preState.PendingDeposits())
+		i.pendingConsolidationsWriter.Initialize(preState.PendingConsolidations())
+		i.pendingWithdrawalsWriter.Initialize(preState.PendingPartialWithdrawals())
+	}
+}
+
+func (i *beaconStatesCollector) collectElectraQueuesDiffs(slot uint64, pendingDeposits *solid.ListSSZ[*solid.PendingDeposit], pendingConsolidations *solid.ListSSZ[*solid.PendingConsolidation], pendingWithdrawals *solid.ListSSZ[*solid.PendingPartialWithdrawal]) error {
+	i.buf.Reset()
+	if err := i.pendingDepositsWriter.WriteDiff(i.buf, pendingDeposits); err != nil {
+		return err
+	}
+	if err := i.pendingDepositsCollector.Collect(base_encoding.Encode64ToBytes4(slot), i.buf.Bytes()); err != nil {
+		return err
+	}
+	i.buf.Reset()
+
+	if err := i.pendingConsolidationsWriter.WriteDiff(i.buf, pendingConsolidations); err != nil {
+		return err
+	}
+	if err := i.pendingConsolidationsCollector.Collect(base_encoding.Encode64ToBytes4(slot), i.buf.Bytes()); err != nil {
+		return err
+	}
+	i.buf.Reset()
+
+	if err := i.pendingWithdrawalsWriter.WriteDiff(i.buf, pendingWithdrawals); err != nil {
+		return err
+	}
+	return i.pendingWithdrawalsCollector.Collect(base_encoding.Encode64ToBytes4(slot), i.buf.Bytes())
+}
+
+func (i *beaconStatesCollector) collectPendingConsolidationsDump(slot uint64, pendingConsolidations *solid.ListSSZ[*solid.PendingConsolidation]) error {
+	i.buf.Reset()
+	i.compressor.Reset(i.buf)
+	return antiquateListSSZ(context.Background(), slot, pendingConsolidations, i.buf, i.compressor, i.pendingConsolidationsCollectorDump)
+}
+
+func (i *beaconStatesCollector) collectPendingWithdrawalsDump(slot uint64, pendingWithdrawals *solid.ListSSZ[*solid.PendingPartialWithdrawal]) error {
+	i.buf.Reset()
+	i.compressor.Reset(i.buf)
+	return antiquateListSSZ(context.Background(), slot, pendingWithdrawals, i.buf, i.compressor, i.pendingWithdrawalsCollectorDump)
+}
+
+func (i *beaconStatesCollector) collectIntraEpochRandaoMix(slot uint64, randao common.Hash) error {
 	return i.intraRandaoMixesCollector.Collect(base_encoding.Encode64ToBytes4(slot), randao[:])
 }
 
-func (i *beaconStatesCollector) collectEpochRandaoMix(epoch uint64, randao libcommon.Hash) error {
+func (i *beaconStatesCollector) collectEpochRandaoMix(epoch uint64, randao common.Hash) error {
 	slot := epoch * i.beaconCfg.SlotsPerEpoch
 	return i.randaoMixesCollector.Collect(base_encoding.Encode64ToBytes4(slot), randao[:])
 }
 
-func (i *beaconStatesCollector) collectStateRoot(slot uint64, stateRoot libcommon.Hash) error {
+func (i *beaconStatesCollector) collectStateRoot(slot uint64, stateRoot common.Hash) error {
 	return i.stateRootsCollector.Collect(base_encoding.Encode64ToBytes4(slot), stateRoot[:])
 }
 
-func (i *beaconStatesCollector) collectBlockRoot(slot uint64, blockRoot libcommon.Hash) error {
+func (i *beaconStatesCollector) collectBlockRoot(slot uint64, blockRoot common.Hash) error {
 	return i.blockRootsCollector.Collect(base_encoding.Encode64ToBytes4(slot), blockRoot[:])
 }
 
@@ -263,10 +340,6 @@ func (i *beaconStatesCollector) collectActiveIndices(epoch uint64, activeIndices
 	}
 	slot := epoch * i.beaconCfg.SlotsPerEpoch
 	return i.activeValidatorIndiciesCollector.Collect(base_encoding.Encode64ToBytes4(slot), i.buf.Bytes())
-}
-
-func (i *beaconStatesCollector) collectFlattenedProposers(epoch uint64, proposers []byte) error {
-	return i.proposersCollector.Collect(base_encoding.Encode64ToBytes4(epoch), proposers)
 }
 
 func (i *beaconStatesCollector) collectCurrentSyncCommittee(slot uint64, committee *solid.SyncCommittee) error {
@@ -323,9 +396,7 @@ func (i *beaconStatesCollector) flush(ctx context.Context, tx kv.RwTx) error {
 	if err := i.balancesCollector.Load(tx, kv.ValidatorBalance, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := i.proposersCollector.Load(tx, kv.Proposers, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
-	}
+
 	if err := i.slashingsCollector.Load(tx, kv.ValidatorSlashings, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
@@ -365,6 +436,24 @@ func (i *beaconStatesCollector) flush(ctx context.Context, tx kv.RwTx) error {
 	if err := i.effectiveBalancesDumpCollector.Load(tx, kv.EffectiveBalancesDump, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
+	if err := i.pendingDepositsCollector.Load(tx, kv.PendingDeposits, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := i.pendingConsolidationsCollector.Load(tx, kv.PendingConsolidations, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := i.pendingWithdrawalsCollector.Load(tx, kv.PendingPartialWithdrawals, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := i.pendingDepositsCollectorDump.Load(tx, kv.PendingDepositsDump, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := i.pendingConsolidationsCollectorDump.Load(tx, kv.PendingConsolidationsDump, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := i.pendingWithdrawalsCollectorDump.Load(tx, kv.PendingPartialWithdrawalsDump, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
 
 	return i.balancesDumpsCollector.Load(tx, kv.BalancesDump, loadfunc, etl.TransformArgs{Quit: ctx.Done()})
 }
@@ -374,7 +463,6 @@ func (i *beaconStatesCollector) close() {
 	i.balancesCollector.Close()
 	i.randaoMixesCollector.Close()
 	i.intraRandaoMixesCollector.Close()
-	i.proposersCollector.Close()
 	i.slashingsCollector.Close()
 	i.blockRootsCollector.Close()
 	i.stateRootsCollector.Close()
@@ -388,6 +476,13 @@ func (i *beaconStatesCollector) close() {
 	i.activeValidatorIndiciesCollector.Close()
 	i.balancesDumpsCollector.Close()
 	i.effectiveBalancesDumpCollector.Close()
+	i.pendingDepositsCollector.Close()
+	i.pendingConsolidationsCollector.Close()
+	i.pendingWithdrawalsCollector.Close()
+	i.pendingConsolidationsCollectorDump.Close()
+	i.pendingDepositsCollectorDump.Close()
+	i.pendingWithdrawalsCollectorDump.Close()
+
 	for _, b := range i.buffers {
 		b.Reset()
 	}
@@ -413,6 +508,24 @@ func antiquateField(ctx context.Context, slot uint64, uncompressed []byte, buffe
 	buffer.Reset()
 	compressor.Reset(buffer)
 
+	if _, err := compressor.Write(uncompressed); err != nil {
+		return err
+	}
+	if err := compressor.Close(); err != nil {
+		return err
+	}
+	roundedSlot := slot - (slot % clparams.SlotsPerDump)
+	return collector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), buffer.Bytes())
+}
+
+func antiquateListSSZ[T solid.EncodableHashableSSZ](ctx context.Context, slot uint64, l *solid.ListSSZ[T], buffer *bytes.Buffer, compressor *zstd.Encoder, collector *etl.Collector) error {
+	buffer.Reset()
+	compressor.Reset(buffer)
+
+	uncompressed, err := l.EncodeSSZ(nil)
+	if err != nil {
+		return err
+	}
 	if _, err := compressor.Write(uncompressed); err != nil {
 		return err
 	}

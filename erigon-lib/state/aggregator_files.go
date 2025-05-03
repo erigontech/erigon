@@ -17,29 +17,40 @@
 package state
 
 import (
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 )
 
-type SelectedStaticFilesV3 struct {
+type SelectedStaticFiles struct {
 	d     [kv.DomainLen][]*filesItem
 	dHist [kv.DomainLen][]*filesItem
 	dIdx  [kv.DomainLen][]*filesItem
-	ii    map[kv.InvertedIdx][]*filesItem
+	ii    [][]*filesItem
 }
 
-func NewSelectedStaticFilesV3() *SelectedStaticFilesV3 {
-	return &SelectedStaticFilesV3{ii: make(map[kv.InvertedIdx][]*filesItem)}
+func (sf *SelectedStaticFiles) DomainFiles(name kv.Domain) []FilesItem {
+	return common.SliceMap(sf.d[name], func(item *filesItem) FilesItem { return item })
 }
 
-func (sf SelectedStaticFilesV3) Close() {
+func (sf *SelectedStaticFiles) DomainHistoryFiles(name kv.Domain) []FilesItem {
+	return common.SliceMap(sf.dHist[name], func(item *filesItem) FilesItem { return item })
+}
+
+func (sf *SelectedStaticFiles) DomainInvertedIndexFiles(name kv.Domain) []FilesItem {
+	return common.SliceMap(sf.dIdx[name], func(item *filesItem) FilesItem { return item })
+}
+
+func (sf *SelectedStaticFiles) InvertedIndexFiles(id int) []FilesItem {
+	return common.SliceMap(sf.ii[id], func(item *filesItem) FilesItem { return item })
+}
+
+func (sf *SelectedStaticFiles) Close() {
 	clist := make([][]*filesItem, 0, int(kv.DomainLen)+len(sf.ii))
 	for id := range sf.d {
 		clist = append(clist, sf.d[id], sf.dIdx[id], sf.dHist[id])
 	}
 
-	for _, i := range sf.ii {
-		clist = append(clist, i)
-	}
+	clist = append(clist, sf.ii...)
 	for _, group := range clist {
 		for _, item := range group {
 			if item != nil {
@@ -54,32 +65,36 @@ func (sf SelectedStaticFilesV3) Close() {
 	}
 }
 
-func (ac *AggregatorRoTx) staticFilesInRange(r *RangesV3) (*SelectedStaticFilesV3, error) {
-	sf := NewSelectedStaticFilesV3()
-	for id := range ac.d {
+func (at *AggregatorRoTx) FilesInRange(r *Ranges) (*SelectedStaticFiles, error) {
+	sf := &SelectedStaticFiles{ii: make([][]*filesItem, len(r.invertedIndex))}
+	for id := range at.d {
 		if !r.domain[id].any() {
 			continue
 		}
-		sf.d[id], sf.dIdx[id], sf.dHist[id] = ac.d[id].staticFilesInRange(r.domain[id])
+		sf.d[id], sf.dIdx[id], sf.dHist[id] = at.d[id].staticFilesInRange(r.domain[id])
 	}
 	for id, rng := range r.invertedIndex {
 		if rng == nil || !rng.needMerge {
 			continue
 		}
-		sf.ii[id] = ac.iis[id].staticFilesInRange(rng.from, rng.to)
+		sf.ii[id] = at.iis[id].staticFilesInRange(rng.from, rng.to)
 	}
 	return sf, nil
+}
+
+func (at *AggregatorRoTx) InvertedIndicesLen() int {
+	return len(at.iis)
+}
+
+func (at *AggregatorRoTx) InvertedIndexName(id int) kv.InvertedIdx {
+	return at.iis[id].name
 }
 
 type MergedFilesV3 struct {
 	d     [kv.DomainLen]*filesItem
 	dHist [kv.DomainLen]*filesItem
 	dIdx  [kv.DomainLen]*filesItem
-	iis   map[kv.InvertedIdx]*filesItem
-}
-
-func NewMergedFilesV3() *MergedFilesV3 {
-	return &MergedFilesV3{iis: make(map[kv.InvertedIdx]*filesItem)}
+	iis   []*filesItem
 }
 
 func (mf MergedFilesV3) FrozenList() (frozen []string) {
@@ -104,15 +119,15 @@ func (mf MergedFilesV3) FrozenList() (frozen []string) {
 	}
 	return frozen
 }
-func (mf MergedFilesV3) Close() {
+func (mf *MergedFilesV3) Close() {
+	if mf == nil {
+		return
+	}
 	clist := make([]*filesItem, 0, kv.DomainLen+4)
 	for id := range mf.d {
 		clist = append(clist, mf.d[id], mf.dHist[id], mf.dIdx[id])
 	}
-	for _, ii := range mf.iis {
-		clist = append(clist, ii)
-	}
-
+	clist = append(clist, mf.iis...)
 	for _, item := range clist {
 		if item != nil {
 			if item.decompressor != nil {

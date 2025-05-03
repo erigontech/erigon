@@ -19,16 +19,17 @@ package state
 import (
 	"sort"
 
-	"github.com/Giulio2002/bls"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/bls"
 )
 
 func (b *CachingBeaconState) UpgradeToAltair() error {
-	b.previousStateRoot = libcommon.Hash{}
+	b.previousStateRoot = common.Hash{}
 	epoch := Epoch(b.BeaconState)
 	// update version
 	fork := b.Fork()
@@ -85,7 +86,7 @@ func (b *CachingBeaconState) UpgradeToAltair() error {
 }
 
 func (b *CachingBeaconState) UpgradeToBellatrix() error {
-	b.previousStateRoot = libcommon.Hash{}
+	b.previousStateRoot = common.Hash{}
 	epoch := Epoch(b.BeaconState)
 	// update version
 	fork := b.Fork()
@@ -100,7 +101,7 @@ func (b *CachingBeaconState) UpgradeToBellatrix() error {
 }
 
 func (b *CachingBeaconState) UpgradeToCapella() error {
-	b.previousStateRoot = libcommon.Hash{}
+	b.previousStateRoot = common.Hash{}
 	epoch := Epoch(b.BeaconState)
 	// update version
 	fork := b.Fork()
@@ -122,7 +123,7 @@ func (b *CachingBeaconState) UpgradeToCapella() error {
 }
 
 func (b *CachingBeaconState) UpgradeToDeneb() error {
-	b.previousStateRoot = libcommon.Hash{}
+	b.previousStateRoot = common.Hash{}
 	epoch := Epoch(b.BeaconState)
 	// update version
 	fork := b.Fork()
@@ -140,7 +141,7 @@ func (b *CachingBeaconState) UpgradeToDeneb() error {
 }
 
 func (b *CachingBeaconState) UpgradeToElectra() error {
-	b.previousStateRoot = libcommon.Hash{}
+	b.previousStateRoot = common.Hash{}
 	epoch := Epoch(b.BeaconState)
 	// update version
 	fork := b.Fork()
@@ -155,8 +156,7 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 	// Update the state root cache
 	b.SetVersion(clparams.ElectraVersion)
 
-	//earliestExitEpoch := ComputeActivationExitEpoch(b.BeaconConfig(), epoch)
-	earliestExitEpoch := epoch // for Mekong testnet
+	earliestExitEpoch := ComputeActivationExitEpoch(b.BeaconConfig(), epoch)
 	b.ValidatorSet().Range(func(i int, v solid.Validator, _ int) bool {
 		if v.ExitEpoch() != b.BeaconConfig().FarFutureEpoch {
 			if v.ExitEpoch() > earliestExitEpoch {
@@ -241,5 +241,6 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 		}
 		return true
 	})
+	log.Info("Upgrade to Electra complete")
 	return nil
 }

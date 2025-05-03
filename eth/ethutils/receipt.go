@@ -21,13 +21,12 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon/consensus/misc"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/consensus/misc"
 )
 
 func MarshalReceipt(
@@ -70,7 +69,7 @@ func MarshalReceipt(
 	}
 
 	if !chainConfig.IsLondon(header.Number.Uint64()) {
-		fields["effectiveGasPrice"] = (*hexutil.Big)(txn.GetPrice().ToBig())
+		fields["effectiveGasPrice"] = (*hexutil.Big)(txn.GetTipCap().ToBig())
 	} else {
 		baseFee, _ := uint256.FromBig(header.BaseFee)
 		gasPrice := new(big.Int).Add(header.BaseFee, txn.GetEffectiveGasTip(baseFee).ToBig())

@@ -23,19 +23,19 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon-lib/state"
+	libstate "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
@@ -47,7 +47,10 @@ type StateV3 struct {
 	addrIncBuf          []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
 	logger              log.Logger
 
-	trace bool
+	logger log.Logger
+
+	syncCfg ethconfig.Sync
+	trace   bool
 }
 
 func NewStateV3(domains *state.SharedDomains, logger log.Logger) *StateV3 {
@@ -117,7 +120,7 @@ func (rs *StateV3) Domains() *state.SharedDomains {
 	return rs.domains
 }
 
-func (rs *StateV3) SetTxNum(txNum, blockNum uint64) {
+func (rs *ParallelExecutionState) SetTxNum(txNum, blockNum uint64) {
 	rs.domains.SetTxNum(txNum)
 	rs.domains.SetBlockNum(blockNum)
 }
@@ -155,7 +158,7 @@ func (rs *StateV3) ApplyState4(ctx context.Context,
 		_, err := rs.domains.ComputeCommitment(ctx, roTx, true, blockNum,
 			fmt.Sprintf("applying step %d", txNum/rs.domains.StepSize()))
 		if err != nil {
-			return fmt.Errorf("StateV3.ComputeCommitment: %w", err)
+			return fmt.Errorf("ParallelExecutionState.ComputeCommitment: %w", err)
 		}
 	}
 
@@ -185,6 +188,26 @@ func (rs *StateV3) ApplyLogsAndTraces4(logs []*types.Log, traceFroms map[common.
 			}
 		}
 	}
+
+	if rs.syncCfg.PersistReceiptsCacheV2 {
+		var receipt *types.Receipt
+		if !txTask.Final {
+			if txTask.TxIndex >= 0 && txTask.BlockReceipts != nil {
+				receipt = txTask.BlockReceipts[txTask.TxIndex]
+			}
+		} else {
+			if rs.isBor && txTask.TxIndex >= 1 {
+				receipt = txTask.BlockReceipts[txTask.TxIndex-1]
+				if receipt == nil {
+					return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
+				}
+			}
+		}
+		if err := rawdb.WriteReceiptCacheV2(domains, receipt); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -193,7 +216,7 @@ var (
 	mxState3Unwind        = metrics.GetOrCreateSummary("state3_unwind")
 )
 
-func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwindTo uint64, accumulator *shards.Accumulator, changeset *[kv.DomainLen][]state.DomainEntryDiff) error {
+func (rs *ParallelExecutionState) Unwind(ctx context.Context, tx kv.TemporalRwTx, blockUnwindTo, txUnwindTo uint64, accumulator *shards.Accumulator, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
 	mxState3UnwindRunning.Inc()
 	defer mxState3UnwindRunning.Dec()
 	st := time.Now()
@@ -211,8 +234,7 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwi
 				var address common.Address
 				copy(address[:], k)
 
-				newV := make([]byte, acc.EncodingLengthForStorage())
-				acc.EncodeForStorage(newV)
+				newV := accounts.SerialiseV3(&acc)
 				if accumulator != nil {
 					accumulator.ChangeAccount(address, acc.Incarnation, newV)
 				}
@@ -263,11 +285,11 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwi
 	return nil
 }
 
-func (rs *StateV3) DoneCount() uint64 {
+func (rs *ParallelExecutionState) DoneCount() uint64 {
 	return execTxsDone.GetValueUint64()
 }
 
-func (rs *StateV3) SizeEstimate() (r uint64) {
+func (rs *ParallelExecutionState) SizeEstimate() (r uint64) {
 	if rs.domains != nil {
 		r += rs.domains.SizeEstimate()
 	}
@@ -354,7 +376,18 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 	if w.trace {
 		fmt.Printf("acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
 	}
-
+	if original.Incarnation > account.Incarnation {
+		//del, before create: to clanup code/storage
+		if err := w.rs.domains.DomainDel(kv.CodeDomain, address[:], nil, nil, 0); err != nil {
+			return err
+		}
+		if err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte, step uint64) (bool, error) {
+			w.writeLists[kv.StorageDomain.String()].Push(string(k), nil)
+			return true, nil
+		}); err != nil {
+			return err
+		}
+	}
 	value := accounts.SerialiseV3(account)
 	if w.accumulator != nil {
 		w.accumulator.ChangeAccount(address, account.Incarnation, value)

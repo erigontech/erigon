@@ -465,6 +465,21 @@ func (s *KvServer) Snapshots(_ context.Context, _ *remote.SnapshotsRequest) (rep
 	return reply, nil
 }
 
+func (s *KvServer) Sequence(_ context.Context, req *remote.SequenceReq) (reply *remote.SequenceReply, err error) {
+	reply = &remote.SequenceReply{}
+	if err := s.with(req.TxId, func(tx kv.Tx) error {
+		ttx, ok := tx.(kv.TemporalTx)
+		if !ok {
+			return errors.New("server DB doesn't implement kv.Temporal interface")
+		}
+		reply.Value, err = ttx.ReadSequence(req.Table)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return reply, nil
+}
+
 type StateChangePubSub struct {
 	chans map[uint]chan *remote.StateChangeBatch
 	id    uint
@@ -588,7 +603,11 @@ func (s *KvServer) IndexRange(_ context.Context, req *remote.IndexRangeReq) (*re
 		if !ok {
 			return errors.New("server DB doesn't implement kv.Temporal interface")
 		}
-		it, err := ttx.IndexRange(kv.InvertedIdx(req.Table), req.K, from, int(req.ToTs), order.By(req.OrderAscend), limit)
+		ii, err := kv.String2InvertedIdx(req.Table)
+		if err != nil {
+			return err
+		}
+		it, err := ttx.IndexRange(ii, req.K, from, int(req.ToTs), order.By(req.OrderAscend), limit)
 		if err != nil {
 			return err
 		}

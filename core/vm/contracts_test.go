@@ -27,7 +27,10 @@ import (
 	"testing"
 	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/stretchr/testify/require"
 )
 
 // precompiledTest defines the input/output pairs for precompiled contract tests.
@@ -48,26 +51,26 @@ type precompiledFailureTest struct {
 
 // allPrecompiles does not map to the actual set of precompiles, as it also contains
 // repriced versions of precompiles at certain slots
-var allPrecompiles = map[libcommon.Address]PrecompiledContract{
-	libcommon.BytesToAddress([]byte{1}):          &ecrecover{},
-	libcommon.BytesToAddress([]byte{2}):          &sha256hash{},
-	libcommon.BytesToAddress([]byte{3}):          &ripemd160hash{},
-	libcommon.BytesToAddress([]byte{4}):          &dataCopy{},
-	libcommon.BytesToAddress([]byte{5}):          &bigModExp{eip2565: false},
-	libcommon.BytesToAddress([]byte{0xf5}):       &bigModExp{eip2565: true},
-	libcommon.BytesToAddress([]byte{6}):          &bn256AddIstanbul{},
-	libcommon.BytesToAddress([]byte{7}):          &bn256ScalarMulIstanbul{},
-	libcommon.BytesToAddress([]byte{8}):          &bn256PairingIstanbul{},
-	libcommon.BytesToAddress([]byte{9}):          &blake2F{},
-	libcommon.BytesToAddress([]byte{10}):         &bls12381G1Add{},
-	libcommon.BytesToAddress([]byte{12}):         &bls12381G1MultiExp{},
-	libcommon.BytesToAddress([]byte{13}):         &bls12381G2Add{},
-	libcommon.BytesToAddress([]byte{15}):         &bls12381G2MultiExp{},
-	libcommon.BytesToAddress([]byte{16}):         &bls12381Pairing{},
-	libcommon.BytesToAddress([]byte{17}):         &bls12381MapFpToG1{},
-	libcommon.BytesToAddress([]byte{18}):         &bls12381MapFp2ToG2{},
-	libcommon.BytesToAddress([]byte{20}):         &pointEvaluation{},
-	libcommon.BytesToAddress([]byte{0x01, 0x00}): &p256Verify{},
+var allPrecompiles = map[common.Address]PrecompiledContract{
+	common.BytesToAddress([]byte{0x01}):       &ecrecover{},
+	common.BytesToAddress([]byte{0x02}):       &sha256hash{},
+	common.BytesToAddress([]byte{0x03}):       &ripemd160hash{},
+	common.BytesToAddress([]byte{0x04}):       &dataCopy{},
+	common.BytesToAddress([]byte{0x05}):       &bigModExp{eip2565: false},
+	common.BytesToAddress([]byte{0xf5}):       &bigModExp{eip2565: true},
+	common.BytesToAddress([]byte{0x06}):       &bn256AddIstanbul{},
+	common.BytesToAddress([]byte{0x07}):       &bn256ScalarMulIstanbul{},
+	common.BytesToAddress([]byte{0x08}):       &bn256PairingIstanbul{},
+	common.BytesToAddress([]byte{0x09}):       &blake2F{},
+	common.BytesToAddress([]byte{0x0a}):       &pointEvaluation{},
+	common.BytesToAddress([]byte{0x0b}):       &bls12381G1Add{},
+	common.BytesToAddress([]byte{0x0c}):       &bls12381G1MultiExp{},
+	common.BytesToAddress([]byte{0x0d}):       &bls12381G2Add{},
+	common.BytesToAddress([]byte{0x0e}):       &bls12381G2MultiExp{},
+	common.BytesToAddress([]byte{0x0f}):       &bls12381Pairing{},
+	common.BytesToAddress([]byte{0x10}):       &bls12381MapFpToG1{},
+	common.BytesToAddress([]byte{0x11}):       &bls12381MapFp2ToG2{},
+	common.BytesToAddress([]byte{0x01, 0x00}): &p256Verify{},
 }
 
 // EIP-152 test vectors
@@ -95,21 +98,21 @@ var blake2FMalformedInputTests = []precompiledFailureTest{
 }
 
 func testPrecompiled(t *testing.T, addr string, test precompiledTest) {
-	p := allPrecompiles[libcommon.HexToAddress(addr)]
-	in := libcommon.Hex2Bytes(test.Input)
+	p := allPrecompiles[common.HexToAddress(addr)]
+	in := common.Hex2Bytes(test.Input)
 	gas := p.RequiredGas(in)
 	t.Run(fmt.Sprintf("%s-Gas=%d", test.Name, gas), func(t *testing.T) {
 		t.Parallel()
-		if res, _, err := RunPrecompiledContract(p, in, gas); err != nil {
+		if res, _, err := RunPrecompiledContract(p, in, gas, nil); err != nil {
 			t.Error(err)
-		} else if libcommon.Bytes2Hex(res) != test.Expected {
-			t.Errorf("Expected %v, got %v", test.Expected, libcommon.Bytes2Hex(res))
+		} else if common.Bytes2Hex(res) != test.Expected {
+			t.Errorf("Expected %v, got %v", test.Expected, common.Bytes2Hex(res))
 		}
 		if expGas := test.Gas; expGas != gas {
 			t.Errorf("%v: gas wrong, expected %d, got %d", test.Name, expGas, gas)
 		}
 		// Verify that the precompile did not touch the input buffer
-		exp := libcommon.Hex2Bytes(test.Input)
+		exp := common.Hex2Bytes(test.Input)
 		if !bytes.Equal(in, exp) {
 			t.Errorf("Precompiled %v modified input data", addr)
 		}
@@ -117,18 +120,18 @@ func testPrecompiled(t *testing.T, addr string, test precompiledTest) {
 }
 
 func testPrecompiledOOG(t *testing.T, addr string, test precompiledTest) {
-	p := allPrecompiles[libcommon.HexToAddress(addr)]
-	in := libcommon.Hex2Bytes(test.Input)
+	p := allPrecompiles[common.HexToAddress(addr)]
+	in := common.Hex2Bytes(test.Input)
 	gas := p.RequiredGas(in) - 1
 
 	t.Run(fmt.Sprintf("%s-Gas=%d", test.Name, gas), func(t *testing.T) {
 		t.Parallel()
-		_, _, err := RunPrecompiledContract(p, in, gas)
+		_, _, err := RunPrecompiledContract(p, in, gas, nil)
 		if err.Error() != "out of gas" {
 			t.Errorf("Expected error [out of gas], got [%v]", err)
 		}
 		// Verify that the precompile did not touch the input buffer
-		exp := libcommon.Hex2Bytes(test.Input)
+		exp := common.Hex2Bytes(test.Input)
 		if !bytes.Equal(in, exp) {
 			t.Errorf("Precompiled %v modified input data", addr)
 		}
@@ -136,17 +139,17 @@ func testPrecompiledOOG(t *testing.T, addr string, test precompiledTest) {
 }
 
 func testPrecompiledFailure(addr string, test precompiledFailureTest, t *testing.T) {
-	p := allPrecompiles[libcommon.HexToAddress(addr)]
-	in := libcommon.Hex2Bytes(test.Input)
+	p := allPrecompiles[common.HexToAddress(addr)]
+	in := common.Hex2Bytes(test.Input)
 	gas := p.RequiredGas(in)
 	t.Run(test.Name, func(t *testing.T) {
 		t.Parallel()
-		_, _, err := RunPrecompiledContract(p, in, gas)
+		_, _, err := RunPrecompiledContract(p, in, gas, nil)
 		if err == nil || err.Error() != test.ExpectedError {
 			t.Errorf("Expected error [%v], got [%v]", test.ExpectedError, err)
 		}
 		// Verify that the precompile did not touch the input buffer
-		exp := libcommon.Hex2Bytes(test.Input)
+		exp := common.Hex2Bytes(test.Input)
 		if !bytes.Equal(in, exp) {
 			t.Errorf("Precompiled %v modified input data", addr)
 		}
@@ -157,8 +160,8 @@ func benchmarkPrecompiled(b *testing.B, addr string, test precompiledTest) {
 	if test.NoBenchmark {
 		return
 	}
-	p := allPrecompiles[libcommon.HexToAddress(addr)]
-	in := libcommon.Hex2Bytes(test.Input)
+	p := allPrecompiles[common.HexToAddress(addr)]
+	in := common.Hex2Bytes(test.Input)
 	reqGas := p.RequiredGas(in)
 
 	var (
@@ -173,7 +176,7 @@ func benchmarkPrecompiled(b *testing.B, addr string, test precompiledTest) {
 		bench.ResetTimer()
 		for i := 0; i < bench.N; i++ {
 			copy(data, in)
-			res, _, err = RunPrecompiledContract(p, data, reqGas)
+			res, _, err = RunPrecompiledContract(p, data, reqGas, nil)
 		}
 		bench.StopTimer()
 		elapsed := uint64(time.Since(start))
@@ -190,8 +193,8 @@ func benchmarkPrecompiled(b *testing.B, addr string, test precompiledTest) {
 			bench.Error(err)
 			return
 		}
-		if libcommon.Bytes2Hex(res) != test.Expected {
-			bench.Errorf("Expected %v, got %v", test.Expected, libcommon.Bytes2Hex(res))
+		if common.Bytes2Hex(res) != test.Expected {
+			bench.Errorf("Expected %v, got %v", test.Expected, common.Bytes2Hex(res))
 			return
 		}
 	})
@@ -260,6 +263,15 @@ func TestPrecompiledModExpOOG(t *testing.T) {
 	}
 }
 
+func TestModExpPrecompilePotentialOutOfRange(t *testing.T) {
+	modExpContract := allPrecompiles[common.BytesToAddress([]byte{0xf5})]
+	hexString := "0x0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000ffffffffffffffff0000000000000000000000000000000000000000000000000000000000000000ee"
+	input := hexutil.MustDecode(hexString)
+	maxGas := uint64(math.MaxUint64)
+	_, _, err := RunPrecompiledContract(modExpContract, input, maxGas, nil)
+	require.NoError(t, err)
+}
+
 // Tests the sample inputs from the elliptic curve scalar multiplication EIP 213.
 func TestPrecompiledBn256ScalarMul(t *testing.T)      { testJson("bn256ScalarMul", "07", t) }
 func BenchmarkPrecompiledBn256ScalarMul(b *testing.B) { benchJson("bn256ScalarMul", "07", b) }
@@ -310,32 +322,31 @@ func benchJson(name, addr string, b *testing.B) {
 	}
 }
 
-func TestPrecompiledBLS12381G1Add(t *testing.T)      { testJson("blsG1Add", "0a", t) }
+func TestPrecompiledBLS12381G1Add(t *testing.T)      { testJson("blsG1Add", "0b", t) }
 func TestPrecompiledBLS12381G1MultiExp(t *testing.T) { testJson("blsG1MultiExp", "0c", t) }
 func TestPrecompiledBLS12381G2Add(t *testing.T)      { testJson("blsG2Add", "0d", t) }
-func TestPrecompiledBLS12381G2MultiExp(t *testing.T) { testJson("blsG2MultiExp", "0f", t) }
-func TestPrecompiledBLS12381Pairing(t *testing.T)    { testJson("blsPairing", "10", t) }
-func TestPrecompiledBLS12381MapG1(t *testing.T)      { testJson("blsMapG1", "11", t) }
-func TestPrecompiledBLS12381MapG2(t *testing.T)      { testJson("blsMapG2", "12", t) }
-func TestPrecompiledPointEvaluation(t *testing.T)    { testJson("pointEvaluation", "14", t) }
+func TestPrecompiledBLS12381G2MultiExp(t *testing.T) { testJson("blsG2MultiExp", "0e", t) }
+func TestPrecompiledBLS12381Pairing(t *testing.T)    { testJson("blsPairing", "0f", t) }
+func TestPrecompiledBLS12381MapG1(t *testing.T)      { testJson("blsMapG1", "10", t) }
+func TestPrecompiledBLS12381MapG2(t *testing.T)      { testJson("blsMapG2", "11", t) }
+func TestPrecompiledPointEvaluation(t *testing.T)    { testJson("pointEvaluation", "0a", t) }
 
-func BenchmarkPrecompiledBLS12381G1Add(b *testing.B)      { benchJson("blsG1Add", "0a", b) }
-func BenchmarkPrecompiledBLS12381G1Mul(b *testing.B)      { benchJson("blsG1Mul", "0b", b) }
+func BenchmarkPrecompiledBLS12381G1Add(b *testing.B)      { benchJson("blsG1Add", "0b", b) }
 func BenchmarkPrecompiledBLS12381G1MultiExp(b *testing.B) { benchJson("blsG1MultiExp", "0c", b) }
 func BenchmarkPrecompiledBLS12381G2Add(b *testing.B)      { benchJson("blsG2Add", "0d", b) }
-func BenchmarkPrecompiledBLS12381G2MultiExp(b *testing.B) { benchJson("blsG2MultiExp", "0f", b) }
-func BenchmarkPrecompiledBLS12381Pairing(b *testing.B)    { benchJson("blsPairing", "10", b) }
-func BenchmarkPrecompiledBLS12381MapG1(b *testing.B)      { benchJson("blsMapG1", "11", b) }
-func BenchmarkPrecompiledBLS12381MapG2(b *testing.B)      { benchJson("blsMapG2", "12", b) }
+func BenchmarkPrecompiledBLS12381G2MultiExp(b *testing.B) { benchJson("blsG2MultiExp", "0e", b) }
+func BenchmarkPrecompiledBLS12381Pairing(b *testing.B)    { benchJson("blsPairing", "0f", b) }
+func BenchmarkPrecompiledBLS12381MapG1(b *testing.B)      { benchJson("blsMapG1", "10", b) }
+func BenchmarkPrecompiledBLS12381MapG2(b *testing.B)      { benchJson("blsMapG2", "11", b) }
 
 // Failure tests
-func TestPrecompiledBLS12381G1AddFail(t *testing.T)      { testJsonFail("blsG1Add", "0a", t) }
+func TestPrecompiledBLS12381G1AddFail(t *testing.T)      { testJsonFail("blsG1Add", "0b", t) }
 func TestPrecompiledBLS12381G1MultiExpFail(t *testing.T) { testJsonFail("blsG1MultiExp", "0c", t) }
 func TestPrecompiledBLS12381G2AddFail(t *testing.T)      { testJsonFail("blsG2Add", "0d", t) }
-func TestPrecompiledBLS12381G2MultiExpFail(t *testing.T) { testJsonFail("blsG2MultiExp", "0f", t) }
-func TestPrecompiledBLS12381PairingFail(t *testing.T)    { testJsonFail("blsPairing", "10", t) }
-func TestPrecompiledBLS12381MapG1Fail(t *testing.T)      { testJsonFail("blsMapG1", "11", t) }
-func TestPrecompiledBLS12381MapG2Fail(t *testing.T)      { testJsonFail("blsMapG2", "12", t) }
+func TestPrecompiledBLS12381G2MultiExpFail(t *testing.T) { testJsonFail("blsG2MultiExp", "0e", t) }
+func TestPrecompiledBLS12381PairingFail(t *testing.T)    { testJsonFail("blsPairing", "0f", t) }
+func TestPrecompiledBLS12381MapG1Fail(t *testing.T)      { testJsonFail("blsMapG1", "10", t) }
+func TestPrecompiledBLS12381MapG2Fail(t *testing.T)      { testJsonFail("blsMapG2", "11", t) }
 
 func loadJson(name string) ([]precompiledTest, error) {
 	data, err := os.ReadFile(fmt.Sprintf("testdata/precompiles/%v.json", name))

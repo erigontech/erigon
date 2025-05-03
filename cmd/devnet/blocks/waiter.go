@@ -20,26 +20,26 @@ import (
 	"context"
 
 	ethereum "github.com/erigontech/erigon"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
-	"github.com/erigontech/erigon/cmd/devnet/requests"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/requests"
 )
 
 type BlockHandler interface {
-	Handle(ctx context.Context, node devnet.Node, block *requests.Block, transaction *jsonrpc.RPCTransaction) error
+	Handle(ctx context.Context, node devnet.Node, block *requests.Block, transaction *ethapi.RPCTransaction) error
 }
 
-type BlockHandlerFunc func(ctx context.Context, node devnet.Node, block *requests.Block, transaction *jsonrpc.RPCTransaction) error
+type BlockHandlerFunc func(ctx context.Context, node devnet.Node, block *requests.Block, transaction *ethapi.RPCTransaction) error
 
-func (f BlockHandlerFunc) Handle(ctx context.Context, node devnet.Node, block *requests.Block, transaction *jsonrpc.RPCTransaction) error {
+func (f BlockHandlerFunc) Handle(ctx context.Context, node devnet.Node, block *requests.Block, transaction *ethapi.RPCTransaction) error {
 	return f(ctx, node, block, transaction)
 }
 
-type BlockMap map[libcommon.Hash]*requests.Block
+type BlockMap map[common.Hash]*requests.Block
 
 type waitResult struct {
 	err      error
@@ -48,27 +48,27 @@ type waitResult struct {
 
 type blockWaiter struct {
 	result     chan waitResult
-	hashes     chan map[libcommon.Hash]struct{}
-	waitHashes map[libcommon.Hash]struct{}
+	hashes     chan map[common.Hash]struct{}
+	waitHashes map[common.Hash]struct{}
 	headersSub ethereum.Subscription
 	handler    BlockHandler
 	logger     log.Logger
 }
 
 type Waiter interface {
-	Await(libcommon.Hash) (*requests.Block, error)
-	AwaitMany(...libcommon.Hash) (BlockMap, error)
+	Await(common.Hash) (*requests.Block, error)
+	AwaitMany(...common.Hash) (BlockMap, error)
 }
 
 type waitError struct {
 	err error
 }
 
-func (w waitError) Await(libcommon.Hash) (*requests.Block, error) {
+func (w waitError) Await(common.Hash) (*requests.Block, error) {
 	return nil, w.err
 }
 
-func (w waitError) AwaitMany(...libcommon.Hash) (BlockMap, error) {
+func (w waitError) AwaitMany(...common.Hash) (BlockMap, error) {
 	return nil, w.err
 }
 
@@ -76,8 +76,8 @@ type wait struct {
 	waiter *blockWaiter
 }
 
-func (w wait) Await(hash libcommon.Hash) (*requests.Block, error) {
-	w.waiter.hashes <- map[libcommon.Hash]struct{}{hash: {}}
+func (w wait) Await(hash common.Hash) (*requests.Block, error) {
+	w.waiter.hashes <- map[common.Hash]struct{}{hash: {}}
 	res := <-w.waiter.result
 
 	if len(res.blockMap) > 0 {
@@ -89,12 +89,12 @@ func (w wait) Await(hash libcommon.Hash) (*requests.Block, error) {
 	return nil, res.err
 }
 
-func (w wait) AwaitMany(hashes ...libcommon.Hash) (BlockMap, error) {
+func (w wait) AwaitMany(hashes ...common.Hash) (BlockMap, error) {
 	if len(hashes) == 0 {
 		return nil, nil
 	}
 
-	hashMap := map[libcommon.Hash]struct{}{}
+	hashMap := map[common.Hash]struct{}{}
 
 	for _, hash := range hashes {
 		hashMap[hash] = struct{}{}
@@ -113,7 +113,7 @@ func BlockWaiter(ctx context.Context, handler BlockHandler) (Waiter, context.Can
 
 	waiter := &blockWaiter{
 		result:  make(chan waitResult, 1),
-		hashes:  make(chan map[libcommon.Hash]struct{}, 1),
+		hashes:  make(chan map[common.Hash]struct{}, 1),
 		handler: handler,
 		logger:  devnet.Logger(ctx),
 	}
@@ -134,7 +134,7 @@ func BlockWaiter(ctx context.Context, handler BlockHandler) (Waiter, context.Can
 }
 
 func (c *blockWaiter) receive(ctx context.Context, node devnet.Node, headers chan *types.Header) {
-	blockMap := map[libcommon.Hash]*requests.Block{}
+	blockMap := map[common.Hash]*requests.Block{}
 
 	defer close(c.result)
 

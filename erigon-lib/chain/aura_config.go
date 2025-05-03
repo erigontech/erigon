@@ -18,7 +18,7 @@ package chain
 
 import (
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 )
 
 // Different ways of specifying validators.
@@ -84,7 +84,7 @@ type AuRaConfig struct {
 	// See https://github.com/gnosischain/specs/blob/master/execution/withdrawals.md
 	WithdrawalContractAddress *common.Address `json:"withdrawalContractAddress"`
 
-	RewriteBytecode map[uint64]map[common.Address]hexutility.Bytes `json:"rewriteBytecode"`
+	RewriteBytecode map[uint64]map[common.Address]hexutil.Bytes `json:"rewriteBytecode"`
 }
 
 // String implements the stringer interface, returning the consensus engine details.

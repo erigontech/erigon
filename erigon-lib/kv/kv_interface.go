@@ -19,9 +19,14 @@ package kv
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/mdbx-go/mdbx"
+
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/metrics"
@@ -76,34 +81,104 @@ import (
 //      1. Application - rely on TemporalDB (Ex: ExecutionLayer) or just DB (Ex: TxPool, Sentry, Downloader).
 
 const ReadersLimit = 32000 // MDBX_READERS_LIMIT=32767
+const dbLabelName = "db"
+
+type DBGauges struct { // these gauges are shared by all MDBX instances, but need to be filtered by label
+	DbSize        *metrics.GaugeVec
+	TxLimit       *metrics.GaugeVec
+	TxSpill       *metrics.GaugeVec
+	TxUnspill     *metrics.GaugeVec
+	TxDirty       *metrics.GaugeVec
+	TxRetired     *metrics.GaugeVec
+	UnsyncedBytes *metrics.GaugeVec
+
+	DbPgopsNewly   *metrics.GaugeVec
+	DbPgopsCow     *metrics.GaugeVec
+	DbPgopsClone   *metrics.GaugeVec
+	DbPgopsSplit   *metrics.GaugeVec
+	DbPgopsMerge   *metrics.GaugeVec
+	DbPgopsSpill   *metrics.GaugeVec
+	DbPgopsUnspill *metrics.GaugeVec
+	DbPgopsWops    *metrics.GaugeVec
+
+	GcLeafMetric     *metrics.GaugeVec
+	GcOverflowMetric *metrics.GaugeVec
+	GcPagesMetric    *metrics.GaugeVec
+}
+
+type DBSummaries struct { // the summaries are particular to a DB instance
+	DbCommitPreparation metrics.Summary
+	DbCommitWrite       metrics.Summary
+	DbCommitSync        metrics.Summary
+	DbCommitEnding      metrics.Summary
+	DbCommitTotal       metrics.Summary
+}
+
+// this only needs to be called once during startup
+func InitMDBXMGauges() *DBGauges {
+	return &DBGauges{
+		DbSize:         metrics.GetOrCreateGaugeVec(`db_size`, []string{dbLabelName}),
+		TxLimit:        metrics.GetOrCreateGaugeVec(`tx_limit`, []string{dbLabelName}),
+		TxSpill:        metrics.GetOrCreateGaugeVec(`tx_spill`, []string{dbLabelName}),
+		TxUnspill:      metrics.GetOrCreateGaugeVec(`tx_unspill`, []string{dbLabelName}),
+		TxDirty:        metrics.GetOrCreateGaugeVec(`tx_dirty`, []string{dbLabelName}),
+		UnsyncedBytes:  metrics.GetOrCreateGaugeVec(`unsynced_bytes`, []string{dbLabelName}),
+		TxRetired:      metrics.GetOrCreateGaugeVec(`tx_retired`, []string{dbLabelName}),
+		DbPgopsNewly:   metrics.GetOrCreateGaugeVec(`db_pgops{phase="newly"}`, []string{dbLabelName}),
+		DbPgopsCow:     metrics.GetOrCreateGaugeVec(`db_pgops{phase="cow"}`, []string{dbLabelName}),
+		DbPgopsClone:   metrics.GetOrCreateGaugeVec(`db_pgops{phase="clone"}`, []string{dbLabelName}),
+		DbPgopsSplit:   metrics.GetOrCreateGaugeVec(`db_pgops{phase="split"}`, []string{dbLabelName}),
+		DbPgopsMerge:   metrics.GetOrCreateGaugeVec(`db_pgops{phase="merge"}`, []string{dbLabelName}),
+		DbPgopsSpill:   metrics.GetOrCreateGaugeVec(`db_pgops{phase="spill"}`, []string{dbLabelName}),
+		DbPgopsUnspill: metrics.GetOrCreateGaugeVec(`db_pgops{phase="unspill"}`, []string{dbLabelName}),
+		DbPgopsWops:    metrics.GetOrCreateGaugeVec(`db_pgops{phase="wops"}`, []string{dbLabelName}),
+
+		GcLeafMetric:     metrics.GetOrCreateGaugeVec(`db_gc_leaf`, []string{dbLabelName}),
+		GcOverflowMetric: metrics.GetOrCreateGaugeVec(`db_gc_overflow`, []string{dbLabelName}),
+		GcPagesMetric:    metrics.GetOrCreateGaugeVec(`db_gc_pages`, []string{dbLabelName}),
+	}
+}
+
+// initialize summaries for a particular MDBX instance
+func InitSummaries(dbLabel Label) {
+	_, ok := MDBXSummaries.Load(dbLabel)
+	if !ok {
+		dbName := string(dbLabel)
+		MDBXSummaries.Store(dbName, &DBSummaries{
+			DbCommitPreparation: metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "preparation"}),
+			DbCommitWrite:       metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "write"}),
+			DbCommitSync:        metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "sync"}),
+			DbCommitEnding:      metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "ending"}),
+			DbCommitTotal:       metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "total"}),
+		})
+	}
+}
+
+func RecordSummaries(dbLabel Label, latency mdbx.CommitLatency) error {
+	_summaries, ok := MDBXSummaries.Load(string(dbLabel))
+	if !ok {
+		return fmt.Errorf("MDBX summaries not initialized yet for db=%s", string(dbLabel))
+	}
+	// cast to *DBSummaries
+	summaries, ok := _summaries.(*DBSummaries)
+	if !ok {
+		return fmt.Errorf("type casting to *DBSummaries failed")
+	}
+
+	summaries.DbCommitPreparation.Observe(latency.Preparation.Seconds())
+	summaries.DbCommitWrite.Observe(latency.Write.Seconds())
+	summaries.DbCommitSync.Observe(latency.Sync.Seconds())
+	summaries.DbCommitEnding.Observe(latency.Ending.Seconds())
+	summaries.DbCommitTotal.Observe(latency.Whole.Seconds())
+	return nil
+
+}
+
+var MDBXGauges *DBGauges = InitMDBXMGauges() // global mdbx gauges. each gauge can be filtered by db name
+var MDBXSummaries sync.Map                   // dbName => Summaries mapping
 
 var (
 	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.ChaindataDeprecatedTables can be deleted")
-
-	DbSize    = metrics.GetOrCreateGauge(`db_size`)    //nolint
-	TxLimit   = metrics.GetOrCreateGauge(`tx_limit`)   //nolint
-	TxSpill   = metrics.GetOrCreateGauge(`tx_spill`)   //nolint
-	TxUnspill = metrics.GetOrCreateGauge(`tx_unspill`) //nolint
-	TxDirty   = metrics.GetOrCreateGauge(`tx_dirty`)   //nolint
-	TxRetired = metrics.GetOrCreateGauge(`tx_retired`) //nolint
-
-	DbCommitPreparation = metrics.GetOrCreateSummary(`db_commit_seconds{phase="preparation"}`) //nolint
-	//DbGCWallClock       = metrics.GetOrCreateSummary(`db_commit_seconds{phase="gc_wall_clock"}`) //nolint
-	//DbGCCpuTime         = metrics.GetOrCreateSummary(`db_commit_seconds{phase="gc_cpu_time"}`)   //nolint
-	//DbCommitAudit       = metrics.GetOrCreateSummary(`db_commit_seconds{phase="audit"}`)         //nolint
-	DbCommitWrite  = metrics.GetOrCreateSummary(`db_commit_seconds{phase="write"}`)  //nolint
-	DbCommitSync   = metrics.GetOrCreateSummary(`db_commit_seconds{phase="sync"}`)   //nolint
-	DbCommitEnding = metrics.GetOrCreateSummary(`db_commit_seconds{phase="ending"}`) //nolint
-	DbCommitTotal  = metrics.GetOrCreateSummary(`db_commit_seconds{phase="total"}`)  //nolint
-
-	DbPgopsNewly   = metrics.GetOrCreateGauge(`db_pgops{phase="newly"}`)   //nolint
-	DbPgopsCow     = metrics.GetOrCreateGauge(`db_pgops{phase="cow"}`)     //nolint
-	DbPgopsClone   = metrics.GetOrCreateGauge(`db_pgops{phase="clone"}`)   //nolint
-	DbPgopsSplit   = metrics.GetOrCreateGauge(`db_pgops{phase="split"}`)   //nolint
-	DbPgopsMerge   = metrics.GetOrCreateGauge(`db_pgops{phase="merge"}`)   //nolint
-	DbPgopsSpill   = metrics.GetOrCreateGauge(`db_pgops{phase="spill"}`)   //nolint
-	DbPgopsUnspill = metrics.GetOrCreateGauge(`db_pgops{phase="unspill"}`) //nolint
-	DbPgopsWops    = metrics.GetOrCreateGauge(`db_pgops{phase="wops"}`)    //nolint
 	/*
 		DbPgopsPrefault = metrics.NewCounter(`db_pgops{phase="prefault"}`) //nolint
 		DbPgopsMinicore = metrics.NewCounter(`db_pgops{phase="minicore"}`) //nolint
@@ -136,11 +211,6 @@ var (
 	//DbGcSelfPnlMergeTime   = metrics.GetOrCreateSummary(`db_gc_pnl_seconds{phase="slef_merge_time"}`) //nolint
 	//DbGcSelfPnlMergeVolume = metrics.NewCounter(`db_gc_pnl{phase="self_merge_volume"}`)               //nolint
 	//DbGcSelfPnlMergeCalls  = metrics.NewCounter(`db_gc_pnl{phase="slef_merge_calls"}`)                //nolint
-
-	GcLeafMetric     = metrics.GetOrCreateGauge(`db_gc_leaf`)     //nolint
-	GcOverflowMetric = metrics.GetOrCreateGauge(`db_gc_overflow`) //nolint
-	GcPagesMetric    = metrics.GetOrCreateGauge(`db_gc_pages`)    //nolint
-
 )
 
 type DBVerbosityLvl int8
@@ -218,6 +288,9 @@ type Putter interface {
 		// use id
 	*/
 	IncrementSequence(table string, amount uint64) (uint64, error)
+
+	// allow set arbitrary value to sequence (for example to decrement it to exact value)
+	ResetSequence(table string, newValue uint64) error
 	Append(table string, k, v []byte) error
 	AppendDup(table string, k, v []byte) error
 
@@ -463,15 +536,17 @@ type (
 	Domain      uint16
 	Appendable  uint16
 	History     string
-	InvertedIdx string
+	InvertedIdx uint16
 )
 
 type TemporalGetter interface {
 	GetLatest(name Domain, k []byte) (v []byte, step uint64, err error)
+	HasPrefix(name Domain, prefix []byte) (firstKey []byte, ok bool, err error)
 }
 type TemporalTx interface {
 	Tx
 	TemporalGetter
+	WithFreezeInfo
 
 	// return the earliest known txnum in history of a given domain
 	HistoryStartFrom(domainName Domain) uint64
@@ -499,11 +574,44 @@ type TemporalTx interface {
 	// HistoryRange - producing "state patch" - sorted list of keys updated at [fromTs,toTs) with their most-recent value.
 	//   no duplicates
 	HistoryRange(name Domain, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error)
+
+	Debug() TemporalDebugTx
+	AggTx() any
+}
+
+// TemporalDebugTx - set of slow low-level funcs for debug purposes
+type TemporalDebugTx interface {
+	RangeLatest(domain Domain, from, to []byte, limit int) (stream.KV, error)
+	GetLatestFromDB(domain Domain, k []byte) (v []byte, step uint64, found bool, err error)
+	GetLatestFromFiles(domain Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error)
+
+	DomainFiles(domain ...Domain) VisibleFiles
+
+	GreedyPruneHistory(ctx context.Context, domain Domain) error
+	PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error)
+	TxNumsInFiles(domains ...Domain) (minTxNum uint64)
+}
+
+type TemporalDebugDB interface {
+	DomainTables(names ...Domain) []string
+	InvertedIdxTables(names ...InvertedIdx) []string
+}
+
+type WithFreezeInfo interface {
+	FreezeInfo() FreezeInfo
+}
+
+type FreezeInfo interface {
+	AllFiles() VisibleFiles
+	Files(domainName Domain) VisibleFiles
 }
 
 type TemporalRwTx interface {
 	RwTx
 	TemporalTx
+	TemporalPutDel
+
+	Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff) error
 }
 
 type TemporalPutDel interface {
@@ -511,8 +619,8 @@ type TemporalPutDel interface {
 	// Optimizations:
 	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 	//   - user can append k2 into k1, then underlying methods will not preform append
-	//   - if `val == nil` it will call DomainDel
 	DomainPut(domain Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error
+	//DomainPut2(domain Domain, k1 []byte, val []byte, ts uint64) error
 
 	// DomainDel
 	// Optimizations:
@@ -528,6 +636,7 @@ type TemporalRoDB interface {
 	SnapshotNotifier
 	ViewTemporal(ctx context.Context, f func(tx TemporalTx) error) error
 	BeginTemporalRo(ctx context.Context) (TemporalTx, error)
+	Debug() TemporalDebugDB
 }
 type TemporalRwDB interface {
 	RwDB
@@ -545,11 +654,11 @@ type HasSpaceDirty interface {
 
 // BucketMigrator used for buckets migration, don't use it in usual app code
 type BucketMigrator interface {
-	ListBuckets() ([]string, error)
-	DropBucket(string) error
-	CreateBucket(string) error
-	ExistsBucket(string) (bool, error)
-	ClearBucket(string) error
+	ListTables() ([]string, error)
+	DropTable(string) error
+	CreateTable(string) error
+	ExistsTable(string) (bool, error)
+	ClearTable(string) error
 }
 
 // PendingMutations in-memory storage of changes

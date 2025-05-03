@@ -23,8 +23,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 )
 
 // BlockContext provides the EVM with auxiliary information. Once provided
@@ -74,6 +74,7 @@ type ExecutionResult struct {
 	FeeTipped            *uint256.Int
 	FeeBurnt             *uint256.Int
 	BurntContractAddress common.Address
+	EvmRefund            uint64 // Gas refunded by EVM without considering refundQuotient
 }
 
 // Unwrap returns the internal evm error which allows us for further

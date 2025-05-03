@@ -34,8 +34,10 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/exec3"
+	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 	"github.com/erigontech/erigon/turbo/shards"
-	"golang.org/x/sync/errgroup"
 )
 
 /*
@@ -59,18 +61,18 @@ Flush of data to lower-level-of-abstraction is done by method `agg.ApplyState` (
 only for performance - to reduce time of RwLock on state, but by meaning `ApplyState+ApplyHistory` it's 1 method to
 flush changes from TxTask to lower-level-of-abstraction).
 
-- StateV3 - it's all updates which are stored in RAM - all parallel workers can see this updates.
+- ParallelExecutionState - it's all updates which are stored in RAM - all parallel workers can see this updates.
 Execution of txs always done on Valid version of state (no partial-updates of state).
-Flush of updates to lower-level-of-abstractions done by method `StateV3.Flush`.
+Flush of updates to lower-level-of-abstractions done by method `ParallelExecutionState.Flush`.
 On this level-of-abstraction also exists ReaderV3.
-IntraBlockState does call ReaderV3, and ReaderV3 call StateV3(in-mem-cache) or DB (RoTx).
+IntraBlockState does call ReaderV3, and ReaderV3 call ParallelExecutionState(in-mem-cache) or DB (RoTx).
 WAL - also on this level-of-abstraction - agg.ApplyHistory does write updates from TxTask to WAL.
-WAL it's like StateV3 just without reading api (can only write there). WAL flush to disk periodically (doesn't need much RAM).
+WAL it's like ParallelExecutionState just without reading api (can only write there). WAL flush to disk periodically (doesn't need much RAM).
 
 - RoTx - see everything what committed to DB. Commit is done by rwLoop goroutine.
 rwloop does:
   - stop all Workers
-  - call StateV3.Flush()
+  - call ParallelExecutionState.Flush()
   - commit
   - open new RoTx
   - set new RoTx to all Workers

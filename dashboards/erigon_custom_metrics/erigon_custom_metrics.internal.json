@@ -113,7 +113,7 @@
             {
               "editorMode": "code",
               "exemplar": false,
-              "expr": "((aggregate_and_proof_signatures{instance=\"validator-bm-ethgiuweak-e3caplin-c1-n1\"}/577)*3)*0.4",
+              "expr": "((aggregate_and_proof_signatures{instance=\"BEPI\"}/577)*3)*0.4",
               "instant": true,
               "legendFormat": "Aggregate verification",
               "range": false,
@@ -296,7 +296,7 @@
           "targets": [
             {
               "editorMode": "code",
-              "expr": "aggregate_quality_50{instance=\"dev-bm-e3-ethmainnet-n1\"}*100",
+              "expr": "aggregate_quality_50{instance=\"BEPI\"}*100",
               "legendFormat": "{{label_name}} {{instance}} 50th",
               "range": true,
               "refId": "A"
@@ -307,7 +307,7 @@
                 "uid": "grafanacloud-prom"
               },
               "editorMode": "code",
-              "expr": "aggregate_quality_25{instance=\"dev-bm-e3-ethmainnet-n1\"}*100",
+              "expr": "aggregate_quality_25{instance=\"BEPI\"}*100",
               "hide": false,
               "instant": false,
               "legendFormat": "{{label_name}} {{instance}} 25th",
@@ -320,7 +320,7 @@
                 "uid": "grafanacloud-prom"
               },
               "editorMode": "code",
-              "expr": "aggregate_quality_75{instance=\"dev-bm-e3-ethmainnet-n1\"}*100",
+              "expr": "aggregate_quality_75{instance=\"BEPI\"}*100",
               "hide": false,
               "instant": false,
               "legendFormat": "{{label_name}} {{instance}} 75th",
@@ -333,7 +333,7 @@
                 "uid": "grafanacloud-prom"
               },
               "editorMode": "code",
-              "expr": "aggregate_quality_max{instance=\"dev-bm-e3-ethmainnet-n1\"}*100",
+              "expr": "aggregate_quality_max{instance=\"BEPI\"}*100",
               "hide": false,
               "instant": false,
               "legendFormat": "{{label_name}} {{instance}} max",
@@ -346,7 +346,7 @@
                 "uid": "grafanacloud-prom"
               },
               "editorMode": "code",
-              "expr": "aggregate_quality_min{instance=\"dev-bm-e3-ethmainnet-n1\"}*100",
+              "expr": "aggregate_quality_min{instance=\"BEPI\"}*100",
               "hide": false,
               "instant": false,
               "legendFormat": "{{label_name}} {{instance}} min",
@@ -555,7 +555,7 @@
           "targets": [
             {
               "editorMode": "code",
-              "expr": "execution_time{instance=\"dev-bm-e3-ethmainnet-n1\"}",
+              "expr": "execution_time{instance=\"BEPI\"}",
               "legendFormat": "Block Execution",
               "range": true,
               "refId": "A"
@@ -566,7 +566,7 @@
                 "uid": "grafanacloud-prom"
               },
               "editorMode": "code",
-              "expr": "blob_verification_time{instance=\"dev-bm-e3-ethmainnet-n1\"}",
+              "expr": "blob_verification_time{instance=\"BEPI\"}",
               "hide": false,
               "instant": false,
               "legendFormat": "Blob verificaton time",
@@ -579,7 +579,7 @@
                 "uid": "grafanacloud-prom"
               },
               "editorMode": "code",
-              "expr": "block_importing_latency{instance=\"dev-bm-e3-ethmainnet-n1\"}",
+              "expr": "block_importing_latency{instance=\"BEPI\"}",
               "hide": false,
               "instant": false,
               "legendFormat": "Network Latency",
@@ -592,7 +592,7 @@
                 "uid": "grafanacloud-prom"
               },
               "editorMode": "code",
-              "expr": "(4000-block_importing_latency{instance=\"dev-bm-e3-ethmainnet-n1\"}-blob_verification_time{instance=\"dev-bm-e3-ethmainnet-n1\"}-execution_time{instance=\"dev-bm-e3-ethmainnet-n1\"}-full_block_processing_time{instance=\"dev-bm-e3-ethmainnet-n1\"}) > 0",
+              "expr": "(4000-block_importing_latency{instance=\"BEPI\"}-blob_verification_time{instance=\"BEPI\"}-execution_time{instance=\"BEPI\"}-full_block_processing_time{instance=\"BEPI\"}) > 0",
               "hide": false,
               "instant": false,
               "legendFormat": "Spare time",
@@ -605,7 +605,7 @@
                 "uid": "grafanacloud-prom"
               },
               "editorMode": "code",
-              "expr": "full_block_processing_time{instance=\"dev-bm-e3-ethmainnet-n1\"}",
+              "expr": "full_block_processing_time{instance=\"BEPI\"}",
               "hide": false,
               "instant": false,
               "legendFormat": "Consensus Processing",
@@ -1473,7 +1473,7 @@
               "refId": "A"
             }
           ],
-          "title": "NewPayload: time spent",
+          "title": "ValidateChain: time spent",
           "type": "timeseries"
         },
         {
@@ -2379,7 +2379,7 @@
                   "options": {
                     "mode": "exclude",
                     "names": [
-                      "{__name__=\"aggregation_per_signature\", instance=\"snapshotter-bm-e3-ethmainnet-n1\", job=\"erigon\"}"
+                      "{__name__=\"BEPI\", instance=\"BEPI\", job=\"BEPI\"}"
                     ],
                     "prefix": "All except:",
                     "readOnly": true
@@ -5543,18 +5543,6 @@
               "legendFormat": "dirty: {{instance}}",
               "range": true,
               "refId": "B"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
-              "editorMode": "code",
-              "expr": "tx_retired{instance=~\"$instance\"}",
-              "interval": "",
-              "legendFormat": "limit: {{instance}}",
-              "range": true,
-              "refId": "C"
             }
           ],
           "title": "Tx Size",

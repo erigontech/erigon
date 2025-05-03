@@ -141,6 +141,10 @@ func (m *MemoryMutation) ReadSequence(bucket string) (uint64, error) {
 	return m.memTx.ReadSequence(bucket)
 }
 
+func (m *MemoryMutation) ResetSequence(bucket string, newValue uint64) error {
+	return m.memTx.ResetSequence(bucket, newValue)
+}
+
 func (m *MemoryMutation) ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error {
 	if amount == 0 {
 		return nil
@@ -470,33 +474,33 @@ func (m *MemoryMutation) Count(bucket string) (uint64, error) {
 	panic("not implemented")
 }
 
-func (m *MemoryMutation) DropBucket(bucket string) error {
+func (m *MemoryMutation) DropTable(bucket string) error {
 	panic("Not implemented")
 }
 
-func (m *MemoryMutation) ExistsBucket(bucket string) (bool, error) {
+func (m *MemoryMutation) ExistsTable(bucket string) (bool, error) {
 	panic("Not implemented")
 }
 
-func (m *MemoryMutation) ListBuckets() ([]string, error) {
+func (m *MemoryMutation) ListTables() ([]string, error) {
 	panic("Not implemented")
 }
 
-func (m *MemoryMutation) ClearBucket(bucket string) error {
+func (m *MemoryMutation) ClearTable(bucket string) error {
 	m.clearedTables[bucket] = struct{}{}
-	return m.memTx.ClearBucket(bucket)
+	return m.memTx.ClearTable(bucket)
 }
 
 func (m *MemoryMutation) CollectMetrics() {
 }
 
-func (m *MemoryMutation) CreateBucket(bucket string) error {
-	return m.memTx.CreateBucket(bucket)
+func (m *MemoryMutation) CreateTable(bucket string) error {
+	return m.memTx.CreateTable(bucket)
 }
 
 func (m *MemoryMutation) Flush(ctx context.Context, tx kv.RwTx) error {
 	// Obtain buckets touched.
-	buckets, err := m.memTx.ListBuckets()
+	buckets, err := m.memTx.ListTables()
 	if err != nil {
 		return err
 	}
@@ -507,7 +511,7 @@ func (m *MemoryMutation) Flush(ctx context.Context, tx kv.RwTx) error {
 			return ctx.Err()
 		default:
 		}
-		if err := tx.ClearBucket(bucket); err != nil {
+		if err := tx.ClearTable(bucket); err != nil {
 			return err
 		}
 	}
@@ -580,7 +584,7 @@ func (m *MemoryMutation) Diff() (*MemoryDiff, error) {
 		deletedEntries: make(map[string][]string),
 	}
 	// Obtain buckets touched.
-	buckets, err := m.memTx.ListBuckets()
+	buckets, err := m.memTx.ListTables()
 	if err != nil {
 		return nil, err
 	}
@@ -731,6 +735,10 @@ func (m *MemoryMutation) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte,
 	return m.db.(kv.TemporalTx).GetAsOf(name, k, ts)
 }
 
+func (m *MemoryMutation) HasPrefix(name kv.Domain, prefix []byte) (firstKey []byte, ok bool, err error) {
+	return m.db.(kv.TemporalTx).HasPrefix(name, prefix)
+}
+
 func (m *MemoryMutation) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
 	// panic("not supported")
 	return m.db.(kv.TemporalTx).RangeAsOf(name, fromKey, toKey, ts, asc, limit)
@@ -754,3 +762,7 @@ func (m *MemoryMutation) HistoryRange(name kv.Domain, fromTs, toTs int, asc orde
 func (m *MemoryMutation) HistoryStartFrom(name kv.Domain) uint64 {
 	return m.db.(kv.TemporalTx).HistoryStartFrom(name)
 }
+func (m *MemoryMutation) FreezeInfo() kv.FreezeInfo {
+	panic("not supported")
+}
+func (m *MemoryMutation) Debug() kv.TemporalDebugTx { return m.db.(kv.TemporalTx).Debug() }

@@ -30,27 +30,27 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/pion/randutil"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/devnet/blocks"
-	"github.com/erigontech/erigon/cmd/devnet/requests"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/requests"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 	"github.com/erigontech/erigon/turbo/transactions"
@@ -111,11 +111,11 @@ func (rg *requestGenerator) GetBlockByNumber(ctx context.Context, blockNum rpc.B
 	if bn := int(blockNum.Uint64()); bn < len(rg.chain.Blocks) {
 		block := rg.chain.Blocks[bn]
 
-		transactions := make([]*jsonrpc.RPCTransaction, len(block.Transactions()))
+		transactions := make([]*ethapi.RPCTransaction, len(block.Transactions()))
 
 		for i, txn := range block.Transactions() {
 			rg.txBlockMap[txn.Hash()] = block
-			transactions[i] = jsonrpc.NewRPCTransaction(txn, block.Hash(), blockNum.Uint64(), uint64(i), block.BaseFee())
+			transactions[i] = ethapi.NewRPCTransaction(txn, block.Hash(), blockNum.Uint64(), uint64(i), block.BaseFee())
 		}
 
 		return &requests.Block{
@@ -239,6 +239,9 @@ func TestMerkle(t *testing.T) {
 }
 
 func TestBlockGeneration(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
 
 	_, chain, err := generateBlocks(t, 1600)
 
@@ -270,6 +273,10 @@ func TestBlockGeneration(t *testing.T) {
 }
 
 func TestBlockProof(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	sentry, chain, err := generateBlocks(t, 1600)
 
 	if err != nil {
@@ -350,7 +357,7 @@ func TestReceiptProof(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fmt.Println(hexutility.Encode(parentNodesBytes), hexutility.Encode(append([]byte{0}, receiptProof.path...)))
+	fmt.Println(hexutil.Encode(parentNodesBytes), hexutil.Encode(append([]byte{0}, receiptProof.path...)))
 }
 
 func generateBlocks(t *testing.T, number int) (*mock.MockSentry, *core.ChainPack, error) {

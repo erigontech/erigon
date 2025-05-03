@@ -39,6 +39,7 @@ type ExecutionHeaderData struct {
 type ExecutionHeaderMessage struct {
 	Header             *cltypes.Eth1Header                    `json:"header"`
 	BlobKzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment] `json:"blob_kzg_commitments"`
+	ExecutionRequests  *cltypes.ExecutionRequests             `json:"execution_requests,omitempty"`
 	Value              string                                 `json:"value"`
 	PubKey             common.Bytes48                         `json:"pubkey"`
 }

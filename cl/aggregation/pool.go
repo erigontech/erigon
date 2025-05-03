@@ -26,4 +26,5 @@ type AggregationPool interface {
 	// AddAttestation adds a single attestation to the pool.
 	AddAttestation(att *solid.Attestation) error
 	GetAggregatationByRoot(root common.Hash) *solid.Attestation
+	GetAggregatationByRootAndCommittee(root common.Hash, committeeIndex uint64) *solid.Attestation
 }

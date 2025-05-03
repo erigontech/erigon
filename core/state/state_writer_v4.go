@@ -21,7 +21,7 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types/accounts"
@@ -43,10 +43,7 @@ func NewWriterV4(domains *state.SharedDomains, tx kv.Tx) *WriterV4 {
 	}
 }
 
-func (cw *WriterV4) WriteChangeSets() error { return nil }
-func (cw *WriterV4) WriteHistory() error    { return nil }
-
-func (w *WriterV4) UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error {
+func (w *WriterV4) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	if w.trace {
 		fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash)
 	}
@@ -62,21 +59,21 @@ func (w *WriterV4) UpdateAccountData(address libcommon.Address, original, accoun
 	return w.sd.DomainPut(kv.AccountsDomain, w.tx, address.Bytes(), nil, value, nil, 0)
 }
 
-func (w *WriterV4) UpdateAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash, code []byte) error {
+func (w *WriterV4) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
 	if w.trace {
 		fmt.Printf("code: %x, %x, valLen: %d\n", address.Bytes(), codeHash, len(code))
 	}
 	return w.sd.DomainPut(kv.CodeDomain, w.tx, address.Bytes(), nil, code, nil, 0)
 }
 
-func (w *WriterV4) DeleteAccount(address libcommon.Address, original *accounts.Account) error {
+func (w *WriterV4) DeleteAccount(address common.Address, original *accounts.Account) error {
 	if w.trace {
 		fmt.Printf("del account: %x\n", address)
 	}
 	return w.sd.DomainDel(kv.AccountsDomain, w.tx, address.Bytes(), nil, nil, 0)
 }
 
-func (w *WriterV4) WriteAccountStorage(address libcommon.Address, incarnation uint64, key libcommon.Hash, original, value uint256.Int) error {
+func (w *WriterV4) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error {
 	vb := value.Bytes32() // using [32]byte instead of []byte to avoid heap escape
 	if w.trace {
 		fmt.Printf("storage: %x,%x,%x\n", address, key, vb[32-value.ByteLen():])
@@ -84,14 +81,14 @@ func (w *WriterV4) WriteAccountStorage(address libcommon.Address, incarnation ui
 	return w.sd.DomainPut(kv.StorageDomain, w.tx, address[:], key[:], vb[32-value.ByteLen():], nil, 0)
 }
 
-func (w *WriterV4) DeleteAccountStorage(address libcommon.Address, incarnation uint64, key libcommon.Hash) error {
+func (w *WriterV4) DeleteAccountStorage(address common.Address, incarnation uint64, key common.Hash) error {
 	if w.trace {
 		fmt.Printf("storage delete: %x,%x\n", address, key)
 	}
 	return w.sd.DomainDel(kv.StorageDomain, w.tx, address[:], key[:], nil, 0)
 }
 
-func (w *WriterV4) CreateContract(address libcommon.Address) (err error) {
+func (w *WriterV4) CreateContract(address common.Address) (err error) {
 	if w.trace {
 		fmt.Printf("create contract: %x\n", address)
 	}

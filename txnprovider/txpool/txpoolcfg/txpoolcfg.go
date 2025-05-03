@@ -57,6 +57,9 @@ type Config struct {
 	MdbxWriteMap    bool
 
 	NoGossip bool // this mode doesn't broadcast any txns, and if receive remote-txn - skip it
+
+	// Account Abstraction
+	AllowAA bool
 }
 
 var DefaultConfig = Config{
@@ -118,6 +121,8 @@ const (
 	NoAuthorizations     DiscardReason = 32 // EIP-7702 transactions with an empty authorization list are invalid
 	GasLimitTooHigh      DiscardReason = 33 // Gas limit is too high
 	ErrAuthorityReserved DiscardReason = 34 // EIP-7702 transaction with authority already reserved
+	InvalidAA            DiscardReason = 35 // Invalid RIP-7560 transaction
+	ErrGetCode           DiscardReason = 36 // Error getting code during AA validation
 )
 
 func (r DiscardReason) String() string {
@@ -182,6 +187,20 @@ func (r DiscardReason) String() string {
 		return "blobs limit in txpool is full"
 	case NoAuthorizations:
 		return "EIP-7702 transactions with an empty authorization list are invalid"
+	case GasLimitTooHigh:
+		return "gas limit is too high"
+	case BlobHashCheckFail:
+		return "KZGcommitment's versioned hash has to be equal to blob_versioned_hash at the same index"
+	case UnmatchedBlobTxExt:
+		return "KZGcommitments must match the corresponding blobs and proofs"
+	case UnequalBlobTxExt:
+		return "blob_versioned_hashes, blobs, commitments and proofs must have equal number"
+	case ErrAuthorityReserved:
+		return "EIP-7702 transaction with authority already reserved"
+	case InvalidAA:
+		return "RIP-7560 transaction failed validation"
+	case ErrGetCode:
+		return "error getting account code during RIP-7560 validation"
 	default:
 		panic(fmt.Sprintf("discard reason: %d", r))
 	}

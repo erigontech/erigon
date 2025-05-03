@@ -14,7 +14,7 @@ import (
 
 	event "github.com/erigontech/erigon-lib/event"
 	sentryproto "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	eth "github.com/erigontech/erigon/eth/protocols/eth"
+	eth "github.com/erigontech/erigon/p2p/protocols/eth"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -22,6 +22,7 @@ import (
 type MockpeerEventRegistrar struct {
 	ctrl     *gomock.Controller
 	recorder *MockpeerEventRegistrarMockRecorder
+	isgomock struct{}
 }
 
 // MockpeerEventRegistrarMockRecorder is the mock recorder for MockpeerEventRegistrar.

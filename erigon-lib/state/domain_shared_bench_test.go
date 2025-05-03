@@ -40,7 +40,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
-	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err := NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	maxTx := stepSize * 258
@@ -95,7 +95,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 			v, _, ok, err := ac2.GetLatest(kv.AccountsDomain, keys[i], rwTx)
 
 			require.True(t, ok)
-			require.EqualValuesf(t, latest, v, "unexpected %d, wanted %d", binary.BigEndian.Uint64(v), maxTx-1)
+			require.Equalf(t, latest, v, "unexpected %d, wanted %d", binary.BigEndian.Uint64(v), maxTx-1)
 			require.NoError(t, err)
 		}
 	}
@@ -127,7 +127,7 @@ func BenchmarkSharedDomains_ComputeCommitment(b *testing.B) {
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
-	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err := NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(b, err)
 	defer domains.Close()
 

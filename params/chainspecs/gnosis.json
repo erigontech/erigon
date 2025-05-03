@@ -15,10 +15,20 @@
   "terminalTotalDifficultyPassed": true,
   "shanghaiTime": 1690889660,
   "cancunTime": 1710181820,
+  "pragueTime": 1746021820,
   "minBlobGasPrice": 1000000000,
-  "maxBlobGasPerBlock": 262144,
-  "targetBlobGasPerBlock": 131072,
-  "blobGasPriceUpdateFraction": 1112826,
+  "blobSchedule": {
+    "cancun": {
+      "target": 1,
+      "max": 2,
+      "baseFeeUpdateFraction": 1112826
+    },
+    "prague": {
+      "target": 1,
+      "max": 2,
+      "baseFeeUpdateFraction": 1112826
+    }
+  },
   "burntContract": {
     "19040000": "0x6BBe78ee9e474842Dbd4AB4987b3CeFE88426A92"
   },

@@ -29,6 +29,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tidwall/btree"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	common2 "github.com/erigontech/erigon-lib/common"
@@ -43,9 +46,6 @@ import (
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
-	"github.com/erigontech/erigon/turbo/silkworm"
-	"github.com/tidwall/btree"
-	"golang.org/x/sync/errgroup"
 )
 
 type SortedRange interface {
@@ -284,21 +284,20 @@ func (s *VisibleSegment) IsIndexed() bool {
 	return s.src.IsIndexed()
 }
 
-func (v *VisibleSegment) Get(globalId uint64) ([]byte, error) {
-	idxSlot := v.src.Index()
+func (s *VisibleSegment) Get(globalId uint64) ([]byte, error) {
+	idxSlot := s.src.Index()
 
 	if idxSlot == nil {
 		return nil, nil
 	}
 	blockOffset := idxSlot.OrdinalLookup(globalId - idxSlot.BaseDataID())
 
-	gg := v.src.MakeGetter()
+	gg := s.src.MakeGetter()
 	gg.Reset(blockOffset)
 	if !gg.HasNext() {
 		return nil, nil
 	}
-	var buf []byte
-	buf, _ = gg.Next(buf)
+	buf, _ := gg.Next(nil)
 	if len(buf) == 0 {
 		return nil, nil
 	}
@@ -313,7 +312,7 @@ func DirtySegmentLess(i, j *DirtySegment) bool {
 	if i.to != j.to {
 		return i.to < j.to
 	}
-	return int(i.version) < int(j.version)
+	return i.version.Less(j.version)
 }
 
 func (s *DirtySegment) Type() snaptype.Type {
@@ -505,6 +504,7 @@ type BlockSnapshots interface {
 	SetSegmentsMin(uint64)
 
 	DownloadComplete()
+	RemoveOverlaps() error
 	DownloadReady() bool
 	Ready(context.Context) <-chan error
 }
@@ -569,6 +569,10 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	s.segmentsMin.Store(segmentsMin)
 	s.recalcVisibleFiles()
 
+	if cfg.NoDownloader {
+		s.DownloadComplete()
+	}
+
 	return s
 }
 
@@ -598,9 +602,10 @@ func (s *RoSnapshots) VisibleBlocksAvailable(t snaptype.Enum) uint64 {
 
 func (s *RoSnapshots) DownloadComplete() {
 	wasReady := s.downloadReady.Swap(true)
-
-	if !wasReady && s.SegmentsReady() {
-		s.ready.set()
+	if !wasReady {
+		if s.SegmentsReady() {
+			s.ready.set()
+		}
 	}
 }
 
@@ -846,7 +851,7 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 	// Use-Cases:
 	//   1. developers can add new types in future. and users will not have files of this type
 	//   2. some types are network-specific. example: borevents exists only on Bor-consensus networks
-	//   3. user can manually remove 1 .idx file: `rm snapshots/v1-type1-0000-1000.idx`
+	//   3. user can manually remove 1 .idx file: `rm snapshots/v1.0-type1-0000-1000.idx`
 	//   4. user can manually remove all .idx files of given type: `rm snapshots/*type1*.idx`
 	//   5. file-types may have different height: 10 headers, 10 bodies, 9 transactions (for example if `kill -9` came during files building/merge). still need index all 3 types.
 
@@ -981,7 +986,12 @@ func (s *RoSnapshots) InitSegments(fileNames []string) error {
 	}
 
 	s.recalcVisibleFiles()
-	s.segmentsReady.Store(true)
+	wasReady := s.segmentsReady.Swap(true)
+	if !wasReady {
+		if s.downloadReady.Load() {
+			s.ready.set()
+		}
+	}
 
 	return nil
 }
@@ -1146,7 +1156,12 @@ func (s *RoSnapshots) OpenFolder() error {
 	}
 
 	s.recalcVisibleFiles()
-	s.segmentsReady.Store(true)
+	wasReady := s.segmentsReady.Swap(true)
+	if !wasReady {
+		if s.downloadReady.Load() {
+			s.ready.set()
+		}
+	}
 	return nil
 }
 
@@ -1218,7 +1233,21 @@ func (s *RoSnapshots) closeWhatNotInList(l []string) {
 
 func (s *RoSnapshots) RemoveOverlaps() error {
 	list, err := snaptype.Segments(s.dir)
+	if err != nil {
+		return err
+	}
+	if _, toRemove := findOverlaps(list); len(toRemove) > 0 {
+		filesToRemove := make([]string, 0, len(toRemove))
 
+		for _, info := range toRemove {
+			filesToRemove = append(filesToRemove, info.Path)
+		}
+
+		removeOldFiles(filesToRemove, s.dir)
+	}
+
+	//it's possible that .seg was remove but .idx not (kill between deletes, etc...)
+	list, err = snaptype.IdxFiles(s.dir)
 	if err != nil {
 		return err
 	}
@@ -1232,7 +1261,6 @@ func (s *RoSnapshots) RemoveOverlaps() error {
 
 		removeOldFiles(filesToRemove, s.dir)
 	}
-
 	return nil
 }
 
@@ -1442,76 +1470,6 @@ func (s *RoSnapshots) PrintDebug() {
 			return true
 		})
 	}
-}
-
-func mappedHeaderSnapshot(sn *DirtySegment) *silkworm.MappedHeaderSnapshot {
-	segmentRegion := silkworm.NewMemoryMappedRegion(sn.FilePath(), sn.DataHandle(), sn.Size())
-	idxRegion := silkworm.NewMemoryMappedRegion(sn.Index().FilePath(), sn.Index().DataHandle(), sn.Index().Size())
-	return silkworm.NewMappedHeaderSnapshot(segmentRegion, idxRegion)
-}
-
-func mappedBodySnapshot(sn *DirtySegment) *silkworm.MappedBodySnapshot {
-	segmentRegion := silkworm.NewMemoryMappedRegion(sn.FilePath(), sn.DataHandle(), sn.Size())
-	idxRegion := silkworm.NewMemoryMappedRegion(sn.Index().FilePath(), sn.Index().DataHandle(), sn.Index().Size())
-	return silkworm.NewMappedBodySnapshot(segmentRegion, idxRegion)
-}
-
-func mappedTxnSnapshot(sn *DirtySegment) *silkworm.MappedTxnSnapshot {
-	segmentRegion := silkworm.NewMemoryMappedRegion(sn.FilePath(), sn.DataHandle(), sn.Size())
-	idxTxnHash := sn.Index(coresnaptype.Indexes.TxnHash)
-	idxTxnHashRegion := silkworm.NewMemoryMappedRegion(idxTxnHash.FilePath(), idxTxnHash.DataHandle(), idxTxnHash.Size())
-	idxTxnHash2BlockNum := sn.Index(coresnaptype.Indexes.TxnHash2BlockNum)
-	idxTxnHash2BlockRegion := silkworm.NewMemoryMappedRegion(idxTxnHash2BlockNum.FilePath(), idxTxnHash2BlockNum.DataHandle(), idxTxnHash2BlockNum.Size())
-	return silkworm.NewMappedTxnSnapshot(segmentRegion, idxTxnHashRegion, idxTxnHash2BlockRegion)
-}
-
-func (s *RoSnapshots) AddSnapshotsToSilkworm(silkwormInstance *silkworm.Silkworm) error {
-	v := s.View()
-	defer v.Close()
-
-	s.visibleLock.RLock()
-	defer s.visibleLock.RUnlock()
-
-	mappedHeaderSnapshots := make([]*silkworm.MappedHeaderSnapshot, 0)
-	if vis := v.segments[coresnaptype.Enums.Headers]; vis != nil {
-		for _, headerSegment := range vis.Segments {
-			mappedHeaderSnapshots = append(mappedHeaderSnapshots, mappedHeaderSnapshot(headerSegment.src))
-		}
-	}
-
-	mappedBodySnapshots := make([]*silkworm.MappedBodySnapshot, 0)
-	if vis := v.segments[coresnaptype.Enums.Bodies]; vis != nil {
-		for _, bodySegment := range vis.Segments {
-			mappedBodySnapshots = append(mappedBodySnapshots, mappedBodySnapshot(bodySegment.src))
-		}
-		return nil
-
-	}
-
-	mappedTxnSnapshots := make([]*silkworm.MappedTxnSnapshot, 0)
-	if txs := v.segments[coresnaptype.Enums.Transactions]; txs != nil {
-		for _, txnSegment := range txs.Segments {
-			mappedTxnSnapshots = append(mappedTxnSnapshots, mappedTxnSnapshot(txnSegment.src))
-		}
-	}
-
-	if len(mappedHeaderSnapshots) != len(mappedBodySnapshots) || len(mappedBodySnapshots) != len(mappedTxnSnapshots) {
-		return errors.New("addSnapshots: the number of headers/bodies/txs snapshots must be the same")
-	}
-
-	for i := 0; i < len(mappedHeaderSnapshots); i++ {
-		mappedSnapshot := &silkworm.MappedChainSnapshot{
-			Headers: mappedHeaderSnapshots[i],
-			Bodies:  mappedBodySnapshots[i],
-			Txs:     mappedTxnSnapshots[i],
-		}
-		err := silkwormInstance.AddSnapshot(mappedSnapshot)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 type View struct {

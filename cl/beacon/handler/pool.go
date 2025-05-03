@@ -68,18 +68,39 @@ func (a *ApiHandler) GetEthV1BeaconPoolAttestations(w http.ResponseWriter, r *ht
 		if slot != nil && atts[i].Data.Slot != *slot {
 			continue
 		}
-		attVersion := a.beaconChainCfg.GetCurrentStateVersion(a.ethClock.GetEpochAtSlot(atts[i].Data.Slot))
 		cIndex := atts[i].Data.CommitteeIndex
-		if attVersion.AfterOrEqual(clparams.ElectraVersion) {
-			index, err := atts[i].GetCommitteeIndexFromBits()
-			if err != nil {
-				log.Warn("[Beacon REST] failed to get committee bits", "err", err)
-				continue
-			}
-			cIndex = index
-		}
 		if committeeIndex != nil && cIndex != *committeeIndex {
 			continue
+		}
+		ret = append(ret, atts[i])
+	}
+
+	return newBeaconResponse(ret), nil
+}
+
+func (a *ApiHandler) GetEthV2BeaconPoolAttestations(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	slot, err := beaconhttp.Uint64FromQueryParams(r, "slot")
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
+	committeeIndex, err := beaconhttp.Uint64FromQueryParams(r, "committee_index")
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
+	atts := a.operationsPool.AttestationsPool.Raw()
+	if slot == nil && committeeIndex == nil {
+		return newBeaconResponse(atts), nil
+	}
+	ret := make([]any, 0, len(atts))
+	for i := range atts {
+		if slot != nil && atts[i].Data.Slot != *slot {
+			continue
+		}
+		if committeeIndex != nil {
+			indices := atts[i].CommitteeBits.GetOnIndices()
+			if len(indices) != 1 || uint64(indices[0]) != *committeeIndex {
+				continue
+			}
 		}
 		ret = append(ret, atts[i])
 	}
@@ -101,34 +122,96 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 			return
 		}
 		var (
-			slot                  = attestation.Data.Slot
-			epoch                 = a.ethClock.GetEpochAtSlot(slot)
-			attClVersion          = a.beaconChainCfg.GetCurrentStateVersion(epoch)
-			cIndex                = attestation.Data.CommitteeIndex
-			committeeCountPerSlot = a.syncedData.CommitteeCount(slot / a.beaconChainCfg.SlotsPerEpoch)
-		)
-
-		if attClVersion.AfterOrEqual(clparams.ElectraVersion) {
-			index, err := attestation.GetCommitteeIndexFromBits()
-			if err != nil {
-				failures = append(failures, poolingFailure{
-					Index:   i,
-					Message: err.Error(),
-				})
-				continue
+			slot                      = attestation.Data.Slot
+			cIndex                    = attestation.Data.CommitteeIndex
+			committeeCountPerSlot     = a.syncedData.CommitteeCount(slot / a.beaconChainCfg.SlotsPerEpoch)
+			attestationWithGossipData = &services.AttestationForGossip{
+				Attestation:      attestation,
+				ImmediateProcess: true, // we want to process attestation immediately
 			}
-			cIndex = index
-		}
-
+		)
 		subnet := subnets.ComputeSubnetForAttestation(committeeCountPerSlot, slot, cIndex, a.beaconChainCfg.SlotsPerEpoch, a.netConfig.AttestationSubnetCount)
 		encodedSSZ, err := attestation.EncodeSSZ(nil)
 		if err != nil {
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 			return
 		}
-		attestationWithGossipData := &services.AttestationForGossip{
-			Attestation:      attestation,
-			ImmediateProcess: true, // we want to process attestation immediately
+
+		if err := a.attestationService.ProcessMessage(r.Context(), &subnet, attestationWithGossipData); err != nil && !errors.Is(err, services.ErrIgnore) {
+			log.Warn("[Beacon REST] failed to process attestation in attestation service", "err", err)
+			failures = append(failures, poolingFailure{
+				Index:   i,
+				Message: err.Error(),
+			})
+			continue
+		}
+		if a.sentinel != nil {
+			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
+				Data:     encodedSSZ,
+				Name:     gossip.TopicNamePrefixBeaconAttestation,
+				SubnetId: &subnet,
+			}); err != nil {
+				a.logger.Debug("[Beacon REST] failed to publish attestation to gossip", "err", err)
+			}
+		}
+	}
+	if len(failures) > 0 {
+		errResp := poolingError{
+			Code:     http.StatusBadRequest,
+			Message:  "some failures",
+			Failures: failures,
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		if err := json.NewEncoder(w).Encode(errResp); err != nil {
+			log.Warn("failed to encode response", "err", err)
+		}
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *http.Request) {
+	v := r.Header.Get("Eth-Consensus-Version")
+	if v == "" {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("missing version header")).WriteTo(w)
+		return
+	}
+	clVersion, err := clparams.StringToClVersion(v)
+	if err != nil {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+		return
+	}
+
+	if clVersion < clparams.ElectraVersion {
+		a.PostEthV1BeaconPoolAttestations(w, r)
+		return
+	}
+
+	req := []*solid.SingleAttestation{}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+		return
+	}
+	failures := []poolingFailure{}
+	for i, attestation := range req {
+		if a.syncedData.Syncing() {
+			beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("head state not available")).WriteTo(w)
+			return
+		}
+		var (
+			slot                      = attestation.AttestationData().Slot
+			cIndex                    = attestation.CommitteeIndex
+			committeeCountPerSlot     = a.syncedData.CommitteeCount(slot / a.beaconChainCfg.SlotsPerEpoch)
+			attestationWithGossipData = &services.AttestationForGossip{
+				SingleAttestation: attestation,
+				ImmediateProcess:  true, // we want to process attestation immediately
+			}
+		)
+		subnet := subnets.ComputeSubnetForAttestation(committeeCountPerSlot, slot, cIndex, a.beaconChainCfg.SlotsPerEpoch, a.netConfig.AttestationSubnetCount)
+		encodedSSZ, err := attestation.EncodeSSZ(nil)
+		if err != nil {
+			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+			return
 		}
 
 		if err := a.attestationService.ProcessMessage(r.Context(), &subnet, attestationWithGossipData); err != nil && !errors.Is(err, services.ErrIgnore) {

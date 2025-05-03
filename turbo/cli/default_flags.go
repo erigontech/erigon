@@ -84,10 +84,11 @@ var DefaultFlags = []cli.Flag{
 	&utils.RpcBatchLimit,
 	&utils.RpcReturnDataLimit,
 	&utils.AllowUnprotectedTxs,
-	&utils.RpcMaxGetProofRewindBlockCount,
 	&utils.RPCGlobalTxFeeCapFlag,
 	&utils.TxpoolApiAddrFlag,
 	&utils.TraceMaxtracesFlag,
+	&utils.KeepExecutionProofsFlag,
+
 	&HTTPReadTimeoutFlag,
 	&HTTPWriteTimeoutFlag,
 	&HTTPIdleTimeoutFlag,
@@ -137,6 +138,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.DeveloperPeriodFlag,
 	&utils.VMEnableDebugFlag,
 	&utils.NetworkIdFlag,
+	&utils.PersistReceiptsV2Flag,
 	&utils.FakePoWFlag,
 	&utils.GpoBlocksFlag,
 	&utils.GpoPercentileFlag,
@@ -151,6 +153,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.MinerNotifyFlag,
 	&utils.MinerGasLimitFlag,
 	&utils.MinerEtherbaseFlag,
+	&utils.MinerGasPriceFlag,
 	&utils.MinerExtraDataFlag,
 	&utils.MinerNoVerfiyFlag,
 	&utils.MinerSigningKeyFileFlag,
@@ -172,6 +175,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.WithHeimdallWaypoints,
 	&utils.PolygonSyncFlag,
 	&utils.PolygonSyncStageFlag,
+	&utils.AAFlag,
 	&utils.EthStatsURLFlag,
 	&utils.OverridePragueFlag,
 
@@ -241,4 +245,10 @@ var DefaultFlags = []cli.Flag{
 	&utils.ShutterEnabledFlag,
 	&utils.ShutterP2pBootstrapNodesFlag,
 	&utils.ShutterP2pListenPortFlag,
+
+	&utils.PolygonPosSingleSlotFinalityFlag,
+	&utils.PolygonPosSingleSlotFinalityBlockAtFlag,
+	&utils.GDBMeFlag,
+
+	&utils.ExperimentalConcurrentCommitmentFlag,
 }

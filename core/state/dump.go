@@ -186,12 +186,12 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		account := DumpAccount{
 			Balance:  acc.Balance.ToBig().String(),
 			Nonce:    acc.Nonce,
-			Root:     hexutility.Bytes(emptyHash[:]), // We cannot provide historical storage hash
-			CodeHash: hexutility.Bytes(emptyCodeHash[:]),
+			Root:     hexutil.Bytes(emptyHash[:]), // We cannot provide historical storage hash
+			CodeHash: hexutil.Bytes(emptyCodeHash[:]),
 			Storage:  make(map[string]string),
 		}
 		if acc.CodeHash != emptyCodeHash {
-			account.CodeHash = hexutility.Bytes(acc.CodeHash.Bytes())
+			account.CodeHash = hexutil.Bytes(acc.CodeHash.Bytes())
 
 			if !excludeCode {
 				r, _, err := ttx.GetLatest(kv.CodeDomain, k)
@@ -229,9 +229,9 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 					continue // Skip deleted entries
 				}
 				loc := k[20:]
-				account.Storage[libcommon.BytesToHash(loc).String()] = libcommon.Bytes2Hex(vs)
-				h, _ := libcommon.HashData(loc)
-				t.Update(h.Bytes(), libcommon.Copy(vs))
+				account.Storage[common.BytesToHash(loc).String()] = common.Bytes2Hex(vs)
+				h, _ := common.HashData(loc)
+				t.Update(h.Bytes(), common.Copy(vs))
 			}
 			r.Close()
 

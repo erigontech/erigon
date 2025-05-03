@@ -27,11 +27,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/commitment"
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-db/rawdb/rawdbhelpers"
+	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
+	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/cmp"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	metrics2 "github.com/erigontech/erigon-lib/common/metrics"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
@@ -39,14 +41,13 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
-	libstate "github.com/erigontech/erigon-lib/state"
+	state2 "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/exec"
-	"github.com/erigontech/erigon/core/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -64,7 +65,8 @@ var (
 )
 
 const (
-	changesetSafeRange = 32 // Safety net for long-sync, keep last 32 changesets
+	changesetSafeRange     = 32   // Safety net for long-sync, keep last 32 changesets
+	maxUnwindJumpAllowance = 1000 // Maximum number of blocks we are allowed to unwind
 )
 
 func NewProgress(initialBlockNum, initialTxNum, commitThreshold uint64, updateMetrics bool, logPrefix string, logger log.Logger) *Progress {
@@ -503,9 +505,10 @@ func ExecV3(ctx context.Context,
 	parallel bool, //nolint
 	maxBlockNum uint64,
 	logger log.Logger,
+	hooks *tracing.Hooks,
 	initialCycle bool,
 	isMining bool,
-) error {
+) (execErr error) {
 	inMemExec := txc.Doms != nil
 
 	blockReader := cfg.blockReader
@@ -534,7 +537,8 @@ func ExecV3(ctx context.Context,
 		}()
 	}
 
-	agg := cfg.db.(libstate.HasAgg).Agg().(*libstate.Aggregator)
+	chainReader := NewChainReaderImpl(cfg.chainConfig, applyTx, blockReader, logger)
+	agg := cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator)
 	if !inMemExec && !isMining {
 		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
 		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
@@ -548,7 +552,12 @@ func ExecV3(ctx context.Context,
 	if inMemExec {
 		doms = txc.Doms
 	} else {
-		doms, err = libstate.NewSharedDomains(applyTx, log.New())
+		var err error
+		temporalTx, ok := applyTx.(kv.TemporalTx)
+		if !ok {
+			return errors.New("applyTx is not a temporal transaction")
+		}
+		doms, err = state2.NewSharedDomains(temporalTx, log.New())
 		// if we are behind the commitment, we can't execute anything
 		// this can heppen if progress in domain is higher than progress in blocks
 		if errors.Is(err, libstate.ErrBehindCommitment) {
@@ -1154,12 +1163,12 @@ func ExecV3(ctx context.Context,
 }
 
 // nolint
-func dumpPlainStateDebug(tx kv.RwTx, doms *libstate.SharedDomains) {
+func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *state2.SharedDomains) {
 	if doms != nil {
 		doms.Flush(context.Background(), tx, 0)
 	}
 	{
-		it, err := libstate.AggTx(tx).RangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
+		it, err := tx.Debug().RangeLatest(kv.AccountsDomain, nil, nil, -1)
 		if err != nil {
 			panic(err)
 		}
@@ -1174,7 +1183,7 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *libstate.SharedDomains) {
 		}
 	}
 	{
-		it, err := libstate.AggTx(tx).RangeLatest(tx, kv.StorageDomain, nil, nil, -1)
+		it, err := tx.Debug().RangeLatest(kv.StorageDomain, nil, nil, -1)
 		if err != nil {
 			panic(1)
 		}
@@ -1187,7 +1196,7 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *libstate.SharedDomains) {
 		}
 	}
 	{
-		it, err := libstate.AggTx(tx).RangeLatest(tx, kv.CommitmentDomain, nil, nil, -1)
+		it, err := tx.Debug().RangeLatest(kv.CommitmentDomain, nil, nil, -1)
 		if err != nil {
 			panic(1)
 		}
@@ -1202,6 +1211,46 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *libstate.SharedDomains) {
 			}
 		}
 	}
+}
+
+func handleIncorrectRootHashError(header *types.Header, applyTx kv.RwTx, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, logger log.Logger, u Unwinder) (bool, error) {
+	if cfg.badBlockHalt {
+		return false, errors.New("wrong trie root")
+	}
+	if cfg.hd != nil && cfg.hd.POSSync() {
+		cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
+	}
+	minBlockNum := e.BlockNumber
+	if maxBlockNum <= minBlockNum {
+		return false, nil
+	}
+
+	aggTx := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+	unwindToLimit, err := aggTx.CanUnwindToBlockNum(applyTx)
+	if err != nil {
+		return false, err
+	}
+	minBlockNum = max(minBlockNum, unwindToLimit)
+
+	// Binary search, but not too deep
+	jump := cmp.InRange(1, maxUnwindJumpAllowance, (maxBlockNum-minBlockNum)/2)
+	unwindTo := maxBlockNum - jump
+
+	// protect from too far unwind
+	allowedUnwindTo, ok, err := aggTx.CanUnwindBeforeBlockNum(unwindTo, applyTx)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, fmt.Errorf("%w: requested=%d, minAllowed=%d", ErrTooDeepUnwind, unwindTo, allowedUnwindTo)
+	}
+	logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
+	if u != nil {
+		if err := u.UnwindTo(allowedUnwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash), applyTx); err != nil {
+			return false, err
+		}
+	}
+	return false, nil
 }
 
 // flushAndCheckCommitmentV3 - does write state to db and then check commitment
@@ -1220,63 +1269,24 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
 
-	rh, err := doms.ComputeCommitment(ctx, applyTx, true, header.Number.Uint64(), e.LogPrefix())
+	computedRootHash, err := doms.ComputeCommitment(ctx, applyTx, true, header.Number.Uint64(), e.LogPrefix())
 	if err != nil {
-		return false, fmt.Errorf("StateV3.Apply: %w", err)
+		return false, fmt.Errorf("ParallelExecutionState.Apply: %w", err)
 	}
 	if cfg.blockProduction {
-		header.Root = common.BytesToHash(rh)
+		header.Root = common.BytesToHash(computedRootHash)
 		return true, nil
 	}
-	if bytes.Equal(rh, header.Root.Bytes()) {
-		if !inMemExec {
-			if err := doms.Flush(ctx, applyTx, pruneTimeout); err != nil {
-				return false, err
-			}
-			if err = libstate.AggTx(applyTx).PruneCommitHistory(ctx, applyTx, nil); err != nil {
-				return false, err
-			}
-		}
-		return true, nil
+	if !bytes.Equal(computedRootHash, header.Root.Bytes()) {
+		logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), computedRootHash, header.Root.Bytes(), header.Hash()))
+		return handleIncorrectRootHashError(header, applyTx, cfg, e, maxBlockNum, logger, u)
 	}
-	logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
-	if cfg.badBlockHalt {
-		return false, errors.New("wrong trie root")
-	}
-	if cfg.hd != nil && cfg.hd.POSSync() {
-		cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
-	}
-	minBlockNum := e.BlockNumber
-	if maxBlockNum <= minBlockNum {
-		return false, nil
-	}
-
-	aggTx := libstate.AggTx(applyTx)
-	unwindToLimit, err := aggTx.CanUnwindToBlockNum(applyTx)
-	if err != nil {
-		return false, err
-	}
-	minBlockNum = max(minBlockNum, unwindToLimit)
-
-	// Binary search, but not too deep
-	jump := cmp.InRange(1, 1000, (maxBlockNum-minBlockNum)/2)
-	unwindTo := maxBlockNum - jump
-
-	// protect from too far unwind
-	allowedUnwindTo, ok, err := aggTx.CanUnwindBeforeBlockNum(unwindTo, applyTx)
-	if err != nil {
-		return false, err
-	}
-	if !ok {
-		return false, fmt.Errorf("%w: requested=%d, minAllowed=%d", ErrTooDeepUnwind, unwindTo, allowedUnwindTo)
-	}
-	logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
-	if u != nil {
-		if err := u.UnwindTo(allowedUnwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash), applyTx); err != nil {
+	if !inMemExec {
+		if err := doms.Flush(ctx, applyTx); err != nil {
 			return false, err
 		}
 	}
-	return false, nil
+	return true, nil
 }
 
 func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, blockNum uint64) (b *types.Block, err error) {

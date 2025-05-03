@@ -24,7 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -76,7 +76,7 @@ func setupAggregateAndProofTest(t *testing.T) (AggregateAndProofService, *synced
 	syncedDataManager := synced_data.NewSyncedDataManager(cfg, true)
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	p := pool.OperationsPool{}
-	p.AttestationsPool = pool.NewOperationPool[libcommon.Bytes96, *solid.Attestation](100, "test")
+	p.AttestationsPool = pool.NewOperationPool[common.Bytes96, *solid.Attestation](100, "test")
 	batchSignatureVerifier := NewBatchSignatureVerifier(context.TODO(), nil)
 	go batchSignatureVerifier.Start()
 	blockService := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, cfg, p, true, batchSignatureVerifier)

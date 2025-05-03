@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/aggregation"
@@ -105,7 +104,7 @@ func NewAttestationService(
 
 func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64, att *AttestationForGossip) error {
 	var (
-		root           libcommon.Hash
+		root           common.Hash
 		slot           uint64
 		committeeIndex uint64
 		targetEpoch    uint64
@@ -122,6 +121,9 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 
 	var err error
 	if clVersion >= clparams.ElectraVersion {
+		if att.SingleAttestation == nil {
+			return errors.New("single attestation is empty")
+		}
 		root = att.SingleAttestation.Data.BeaconBlockRoot
 		slot = att.SingleAttestation.Data.Slot
 		committeeIndex = att.SingleAttestation.CommitteeIndex
@@ -130,6 +132,9 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		data = att.SingleAttestation.Data
 	} else {
 		// deneb and before case
+		if att.Attestation == nil {
+			return errors.New("attestation is empty")
+		}
 		root = att.Attestation.Data.BeaconBlockRoot
 		slot = att.Attestation.Data.Slot
 		committeeIndex = att.Attestation.Data.CommitteeIndex
@@ -224,7 +229,8 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 			// [REJECT] The attester is a member of the committee -- i.e. attestation.attester_index in get_beacon_committee(state, attestation.data.slot, index).
 			memIndexInCommittee := contains(att.SingleAttestation.AttesterIndex, beaconCommittee)
 			if memIndexInCommittee < 0 {
-				return errors.New("attester is not a member of the committee")
+				//return errors.New("attester is not a member of the committee")
+				return fmt.Errorf("attester is not a member of the committee. attester index %d committeeIndex %v", att.SingleAttestation.AttesterIndex, committeeIndex)
 			}
 			vIndex = att.SingleAttestation.AttesterIndex
 			attestation = att.SingleAttestation.ToAttestation(memIndexInCommittee)

@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -49,7 +50,7 @@ const DefaultPieceSize = 2 * 1024 * 1024
 
 // DefaultNetworkChunkSize - how much data request per 1 network call to peer.
 // default: 16Kb
-const DefaultNetworkChunkSize = 8 * 1024 * 1024
+const DefaultNetworkChunkSize = 256 * 1024
 
 type Cfg struct {
 	ClientConfig  *torrent.ClientConfig
@@ -240,7 +241,7 @@ func New(ctx context.Context, dirs datadir.Dirs, version string, verbosity lg.Le
 // LoadSnapshotsHashes checks local preverified.toml. If file exists, used local hashes.
 // If there are no such file, try to fetch hashes from the web and create local file.
 func LoadSnapshotsHashes(ctx context.Context, dirs datadir.Dirs, chainName string) (*snapcfg.Cfg, error) {
-	if !networkname.IsKnownNetwork(chainName) {
+	if !slices.Contains(networkname.All, chainName) {
 		log.Root().Warn("No snapshot hashes for chain", "chain", chainName)
 		return snapcfg.NewNonSeededCfg(chainName), nil
 	}

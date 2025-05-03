@@ -7,9 +7,9 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 var _ = (*btHeaderMarshaling)(nil)
@@ -28,7 +28,7 @@ func (b btHeader) MarshalJSON() ([]byte, error) {
 		StateRoot             common.Hash
 		TransactionsTrie      common.Hash
 		UncleHash             common.Hash
-		ExtraData             hexutility.Bytes
+		ExtraData             hexutil.Bytes
 		Difficulty            *math.HexOrDecimal256
 		GasLimit              math.HexOrDecimal64
 		GasUsed               math.HexOrDecimal64
@@ -80,7 +80,7 @@ func (b *btHeader) UnmarshalJSON(input []byte) error {
 		StateRoot             *common.Hash
 		TransactionsTrie      *common.Hash
 		UncleHash             *common.Hash
-		ExtraData             *hexutility.Bytes
+		ExtraData             *hexutil.Bytes
 		Difficulty            *math.HexOrDecimal256
 		GasLimit              *math.HexOrDecimal64
 		GasUsed               *math.HexOrDecimal64

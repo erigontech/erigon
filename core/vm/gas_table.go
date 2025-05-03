@@ -25,11 +25,10 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/chain/params"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
-
 	"github.com/erigontech/erigon/core/vm/stack"
-	"github.com/erigontech/erigon/params"
 )
 
 // memoryGasCost calculates the quadratic gas for memory expansion. It does so
@@ -105,7 +104,7 @@ var (
 
 func gasSStore(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	value, x := stack.Back(1), stack.Back(0)
-	key := libcommon.Hash(x.Bytes32())
+	key := common.Hash(x.Bytes32())
 	var current uint256.Int
 	evm.IntraBlockState().GetState(contract.Address(), key, &current)
 	// The legacy gas metering only takes into consideration the current state
@@ -193,7 +192,7 @@ func gasSStoreEIP2200(evm *EVM, contract *Contract, stack *stack.Stack, mem *Mem
 	}
 	// Gas sentry honoured, do the actual gas calculation based on the stored value
 	value, x := stack.Back(1), stack.Back(0)
-	key := libcommon.Hash(x.Bytes32())
+	key := common.Hash(x.Bytes32())
 	var current uint256.Int
 	evm.IntraBlockState().GetState(contract.Address(), key, &current)
 
@@ -359,7 +358,7 @@ func gasCreate2Eip3860(_ *EVM, contract *Contract, stack *stack.Stack, mem *Memo
 }
 
 func gasExpFrontier(_ *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
-	expByteLen := uint64(libcommon.BitLenToByteLen(stack.Data[stack.Len()-2].BitLen()))
+	expByteLen := uint64(common.BitLenToByteLen(stack.Data[stack.Len()-2].BitLen()))
 
 	var (
 		gas      = expByteLen * params.ExpByteFrontier // no overflow check required. Max is 256 * ExpByte gas
@@ -372,7 +371,7 @@ func gasExpFrontier(_ *EVM, contract *Contract, stack *stack.Stack, mem *Memory,
 }
 
 func gasExpEIP160(_ *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
-	expByteLen := uint64(libcommon.BitLenToByteLen(stack.Data[stack.Len()-2].BitLen()))
+	expByteLen := uint64(common.BitLenToByteLen(stack.Data[stack.Len()-2].BitLen()))
 
 	var (
 		gas      = expByteLen * params.ExpByteEIP160 // no overflow check required. Max is 256 * ExpByte gas
@@ -388,7 +387,7 @@ func gasCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memo
 	var (
 		gas            uint64
 		transfersValue = !stack.Back(2).IsZero()
-		address        = libcommon.Address(stack.Back(1).Bytes20())
+		address        = common.Address(stack.Back(1).Bytes20())
 	)
 	if evm.ChainRules().IsSpuriousDragon {
 		empty, err := evm.IntraBlockState().Empty(address)
@@ -505,7 +504,7 @@ func gasSelfdestruct(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memo
 	// TangerineWhistle (EIP150) gas reprice fork:
 	if evm.ChainRules().IsTangerineWhistle {
 		gas = params.SelfdestructGasEIP150
-		var address = libcommon.Address(stack.Back(0).Bytes20())
+		var address = common.Address(stack.Back(0).Bytes20())
 
 		if evm.ChainRules().IsSpuriousDragon {
 			// if empty and transfers value

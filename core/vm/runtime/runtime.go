@@ -30,7 +30,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	state3 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 )
 
@@ -48,8 +49,8 @@ import (
 type Config struct {
 	ChainConfig *chain.Config
 	Difficulty  *big.Int
-	Origin      libcommon.Address
-	Coinbase    libcommon.Address
+	Origin      common.Address
+	Coinbase    common.Address
 	BlockNumber *big.Int
 	Time        *big.Int
 	GasLimit    uint64
@@ -62,7 +63,7 @@ type Config struct {
 	State     *state.IntraBlockState
 	r         state.StateReader
 	w         state.StateWriter
-	GetHashFn func(n uint64) (libcommon.Hash, error)
+	GetHashFn func(n uint64) (common.Hash, error)
 }
 
 // sets defaults on the config
@@ -108,8 +109,8 @@ func setDefaults(cfg *Config) {
 		cfg.BlockNumber = new(big.Int)
 	}
 	if cfg.GetHashFn == nil {
-		cfg.GetHashFn = func(n uint64) (libcommon.Hash, error) {
-			return libcommon.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String()))), nil
+		cfg.GetHashFn = func(n uint64) (common.Hash, error) {
+			return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String()))), nil
 		}
 	}
 }
@@ -131,7 +132,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 	if !externalState {
 		db := memdb.NewStateDB(tempdir)
 		defer db.Close()
-		agg, err := state3.NewAggregator2(context.Background(), datadir.New(tempdir), config3.DefaultStepSize, db, log.New())
+		agg, err := state3.NewAggregator(context.Background(), datadir.New(tempdir), config3.DefaultStepSize, db, log.New())
 		if err != nil {
 			return nil, nil, err
 		}
@@ -145,7 +146,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 			return nil, nil, err
 		}
 		defer tx.Rollback()
-		sd, err := state3.NewSharedDomains(tx, log.New())
+		sd, err := state3.NewSharedDomains(tx.(kv.TemporalRwTx), log.New())
 		if err != nil {
 			return nil, nil, err
 		}
@@ -155,7 +156,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		cfg.State = state.New(cfg.r)
 	}
 	var (
-		address = libcommon.BytesToAddress([]byte("contract"))
+		address = common.BytesToAddress([]byte("contract"))
 		vmenv   = NewEnv(cfg)
 		sender  = vm.AccountRef(cfg.Origin)
 		rules   = vmenv.ChainRules()
@@ -165,20 +166,26 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 	// set the receiver's (the executing contract) code for execution.
 	cfg.State.SetCode(address, code)
 	// Call the code with the given configuration.
+	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
+		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, common.Address{})
+	}
 	ret, _, err := vmenv.Call(
 		sender,
-		libcommon.BytesToAddress([]byte("contract")),
+		common.BytesToAddress([]byte("contract")),
 		input,
 		cfg.GasLimit,
 		cfg.Value,
 		false, /* bailout */
 	)
+	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxEnd != nil {
+		cfg.EVMConfig.Tracer.OnTxEnd(nil, err)
+	}
 
 	return ret, cfg.State, err
 }
 
 // Create executes the code using the EVM create method
-func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, libcommon.Address, uint64, error) {
+func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, uint64, error) {
 	if cfg == nil {
 		cfg = new(Config)
 	}
@@ -193,7 +200,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, libcommon.Addres
 
 		db := memdb.NewStateDB(tmp)
 		defer db.Close()
-		agg, err := state3.NewAggregator2(context.Background(), datadir.New(tmp), config3.DefaultStepSize, db, log.New())
+		agg, err := state3.NewAggregator(context.Background(), datadir.New(tmp), config3.DefaultStepSize, db, log.New())
 		if err != nil {
 			return nil, [20]byte{}, 0, err
 		}
@@ -207,7 +214,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, libcommon.Addres
 			return nil, [20]byte{}, 0, err
 		}
 		defer tx.Rollback()
-		sd, err := state3.NewSharedDomains(tx, log.New())
+		sd, err := state3.NewSharedDomains(tx.(kv.TemporalRwTx), log.New())
 		if err != nil {
 			return nil, [20]byte{}, 0, err
 		}
@@ -239,7 +246,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, libcommon.Addres
 //
 // Call, unlike Execute, requires a config and also requires the State field to
 // be set.
-func Call(address libcommon.Address, input []byte, cfg *Config) ([]byte, uint64, error) {
+func Call(address common.Address, input []byte, cfg *Config) ([]byte, uint64, error) {
 	setDefaults(cfg)
 
 	vmenv := NewEnv(cfg)

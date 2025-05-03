@@ -1,5 +1,7 @@
-GOBINREL = build/bin
+BUILD = build
+GOBINREL = $(BUILD)/bin
 GOBIN = $(CURDIR)/$(GOBINREL)
+OPENZEPPELIN = $(BUILD)/openzeppelin
 
 OS = $(shell uname -s)
 ARCH = $(shell uname -m)
@@ -15,7 +17,7 @@ PROTOC_OS = linux
 endif
 
 PROTOC_INCLUDE = build/include/google
-PROTO_DIR = $(CURDIR)/proto
+PROTO_DIR = $(CURDIR)/internal/proto
 
 $(GOBINREL):
 	mkdir -p "$(GOBIN)"
@@ -32,6 +34,32 @@ $(GOBINREL)/protoc: $(GOBINREL)
 $(GOBINREL)/protoc-gen-go: $(GOBINREL)
 	go build -o "$(GOBIN)/protoc-gen-go" google.golang.org/protobuf/cmd/protoc-gen-go
 
+$(GOBINREL)/abigen: $(GOBINREL)
+	go build -tags abigen -o "$(GOBIN)/abigen" ../../cmd/abigen
+
+$(OPENZEPPELIN):
+	mkdir -p $(OPENZEPPELIN)
+	$(eval OPENZEPPELIN_TMP_DIR := $(shell mktemp -d))
+	$(eval LATEST_VERSION := $(shell curl -s https://api.github.com/repos/OpenZeppelin/openzeppelin-contracts/tags | jq -r '.[].name' | head -n1))
+	$(eval LATEST_VERSION_NUM := $(shell echo $(LATEST_VERSION) | cut -c 2-))
+	curl -sSL https://github.com/OpenZeppelin/openzeppelin-contracts/archive/refs/tags/$(LATEST_VERSION).zip -o $(OPENZEPPELIN_TMP_DIR)/tmp.zip
+	cd $(OPENZEPPELIN_TMP_DIR) && unzip tmp.zip
+	cp -R $(OPENZEPPELIN_TMP_DIR)/openzeppelin-contracts-$(LATEST_VERSION_NUM)/* $(OPENZEPPELIN)
+	rm -rf "$(OPENZEPPELIN_TMP_DIR)"
+
 .PHONY: proto
 proto: $(GOBINREL)/protoc $(GOBINREL)/protoc-gen-go
 	PATH="$(GOBIN):$(PATH)" protoc -I=$(PROTO_DIR) --go_out=$(PROTO_DIR) $(PROTO_DIR)/shutter.proto
+
+.PHONY: contracts
+contracts: $(OPENZEPPELIN) solc abigen
+
+.PHONY: solc
+solc:
+	@type "solc" 2> /dev/null || (echo 'Please install solc'; exit 1)
+	PATH="$(GOBIN):$(PATH)" go generate -run "solc" ./...
+
+.PHONY: abigen
+abigen: $(GOBINREL)/abigen
+	@test -x $(GOBIN)/abigen || (echo 'Please build abigen by running `make devtools`'; exit 1)
+	PATH="$(GOBIN):$(PATH)" go generate -run "abigen" ./...

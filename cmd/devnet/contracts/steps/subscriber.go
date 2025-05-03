@@ -21,23 +21,21 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-
-	ethereum "github.com/erigontech/erigon"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/accounts/abi/bind"
+	ethereum "github.com/erigontech/erigon"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
 	"github.com/erigontech/erigon/cmd/devnet/contracts"
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
 	"github.com/erigontech/erigon/cmd/devnet/devnetutils"
-	"github.com/erigontech/erigon/cmd/devnet/requests"
 	"github.com/erigontech/erigon/cmd/devnet/scenarios"
 	"github.com/erigontech/erigon/cmd/devnet/transactions"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/requests"
 )
 
 func init() {
@@ -46,12 +44,12 @@ func init() {
 	)
 }
 
-func DeployAndCallLogSubscriber(ctx context.Context, deployer string) (*libcommon.Hash, error) {
+func DeployAndCallLogSubscriber(ctx context.Context, deployer string) (*common.Hash, error) {
 	logger := devnet.Logger(ctx)
 
 	node := devnet.SelectNode(ctx)
 
-	deployerAddress := libcommon.HexToAddress(deployer)
+	deployerAddress := common.HexToAddress(deployer)
 
 	// subscriptionContract is the handler to the contract for further operations
 	tx, address, subscriptionContract, transactOpts, err := DeploySubsriptionContract(node, deployerAddress)
@@ -87,7 +85,7 @@ func DeployAndCallLogSubscriber(ctx context.Context, deployer string) (*libcommo
 	logs, err := node.FilterLogs(ctx, ethereum.FilterQuery{
 		FromBlock: big.NewInt(0),
 		ToBlock:   new(big.Int).SetUint64(blockNum),
-		Addresses: []libcommon.Address{address}})
+		Addresses: []common.Address{address}})
 
 	if err != nil || len(logs) == 0 {
 		return nil, fmt.Errorf("failed to get logs: %v", err)
@@ -95,7 +93,7 @@ func DeployAndCallLogSubscriber(ctx context.Context, deployer string) (*libcommo
 
 	// compare the log events
 	errs, ok := requests.Compare(requests.NewLog(eventHash, blockNum, address,
-		devnetutils.GenerateTopic("SubscriptionEvent()"), hexutility.Bytes{}, 1,
+		devnetutils.GenerateTopic("SubscriptionEvent()"), hexutil.Bytes{}, 1,
 		block.Hash, hexutil.Uint(0), false), logs[0])
 
 	if !ok {
@@ -109,26 +107,26 @@ func DeployAndCallLogSubscriber(ctx context.Context, deployer string) (*libcommo
 }
 
 // DeploySubsriptionContract creates and signs a transaction using the developer address, returns the contract and the signed transaction
-func DeploySubsriptionContract(node devnet.Node, deployer libcommon.Address) (types.Transaction, libcommon.Address, *contracts.Subscription, *bind.TransactOpts, error) {
+func DeploySubsriptionContract(node devnet.Node, deployer common.Address) (types.Transaction, common.Address, *contracts.Subscription, *bind.TransactOpts, error) {
 	// initialize transactOpts
 	transactOpts, err := initializeTransactOps(node, deployer)
 
 	if err != nil {
-		return nil, libcommon.Address{}, nil, nil, fmt.Errorf("failed to initialize transactOpts: %v", err)
+		return nil, common.Address{}, nil, nil, fmt.Errorf("failed to initialize transactOpts: %v", err)
 	}
 
 	// deploy the contract and get the contract handler
 	address, tx, subscriptionContract, err := contracts.DeploySubscription(transactOpts, contracts.NewBackend(node))
 
 	if err != nil {
-		return nil, libcommon.Address{}, nil, nil, fmt.Errorf("failed to deploy subscription: %v", err)
+		return nil, common.Address{}, nil, nil, fmt.Errorf("failed to deploy subscription: %v", err)
 	}
 
 	return tx, address, subscriptionContract, transactOpts, nil
 }
 
 // EmitFallbackEvent emits an event from the contract using the fallback method
-func EmitFallbackEvent(node devnet.Node, subContract *contracts.Subscription, opts *bind.TransactOpts, logger log.Logger) (libcommon.Hash, error) {
+func EmitFallbackEvent(node devnet.Node, subContract *contracts.Subscription, opts *bind.TransactOpts, logger log.Logger) (common.Hash, error) {
 	logger.Info("EMITTING EVENT FROM FALLBACK...")
 
 	// adding one to the nonce before initiating another transaction
@@ -136,14 +134,14 @@ func EmitFallbackEvent(node devnet.Node, subContract *contracts.Subscription, op
 
 	tx, err := subContract.Fallback(opts, []byte{})
 	if err != nil {
-		return libcommon.Hash{}, fmt.Errorf("failed to emit event from fallback: %v", err)
+		return common.Hash{}, fmt.Errorf("failed to emit event from fallback: %v", err)
 	}
 
 	return tx.Hash(), nil
 }
 
 // initializeTransactOps initializes the transactOpts object for a contract transaction
-func initializeTransactOps(node devnet.Node, transactor libcommon.Address) (*bind.TransactOpts, error) {
+func initializeTransactOps(node devnet.Node, transactor common.Address) (*bind.TransactOpts, error) {
 	count, err := node.GetTransactionCount(transactor, rpc.LatestBlock)
 
 	if err != nil {

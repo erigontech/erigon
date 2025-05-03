@@ -20,18 +20,17 @@ import (
 	"encoding/json"
 	"os"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
-
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/turbo/debug"
-
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/node"
+	"github.com/erigontech/erigon/turbo/debug"
 )
 
 var initCommand = cli.Command{
@@ -41,6 +40,7 @@ var initCommand = cli.Command{
 	ArgsUsage: "<genesisPath>",
 	Flags: []cli.Flag{
 		&utils.DataDirFlag,
+		&utils.ChainFlag,
 	},
 	//Category: "BLOCKCHAIN COMMANDS",
 	Description: `
@@ -55,8 +55,9 @@ It expects the genesis file as argument.`,
 // the zero'd block (i.e. genesis) or will fail hard if it can't succeed.
 func initGenesis(cliCtx *cli.Context) error {
 	var logger log.Logger
+	var tracer *tracers.Tracer
 	var err error
-	if logger, _, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+	if logger, tracer, _, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
 	// Make sure we have a valid genesis JSON
@@ -86,6 +87,12 @@ func initGenesis(cliCtx *cli.Context) error {
 	chaindb, err := node.OpenDatabase(cliCtx.Context, stack.Config(), kv.ChainDB, "", false, logger)
 	if err != nil {
 		utils.Fatalf("Failed to open database: %v", err)
+	}
+
+	if tracer != nil {
+		if tracer.Hooks != nil && tracer.Hooks.OnBlockchainInit != nil {
+			tracer.Hooks.OnBlockchainInit(genesis.Config)
+		}
 	}
 	_, hash, err := core.CommitGenesisBlock(chaindb, genesis, datadir.New(cliCtx.String(utils.DataDirFlag.Name)), logger)
 	if err != nil {

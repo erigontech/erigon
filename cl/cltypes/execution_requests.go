@@ -1,16 +1,16 @@
 package cltypes
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
-	"github.com/erigontech/erigon/core/types"
 )
 
 var (
@@ -84,11 +84,12 @@ func (e *ExecutionRequests) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-func ComputeExecutionRequestHash(executionRequests []hexutility.Bytes) common.Hash {
-	requests := make(types.FlatRequests, len(types.KnownRequestTypes))
-	for i, r := range types.KnownRequestTypes {
-		requests[i] = types.FlatRequest{Type: r, RequestData: executionRequests[i]}
+func ComputeExecutionRequestHash(executionRequests []hexutil.Bytes) common.Hash {
+	sha := sha256.New()
+	for _, r := range executionRequests {
+		hi := sha256.Sum256(r)
+		sha.Write(hi[:])
 	}
-	rh := requests.Hash()
-	return *rh
+	h := common.BytesToHash(sha.Sum(nil))
+	return h
 }

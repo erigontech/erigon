@@ -18,11 +18,10 @@ package heimdall
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	commonerrors "github.com/erigontech/erigon-lib/common/errors"
 	"github.com/erigontech/erigon-lib/common/generics"
 	"github.com/erigontech/erigon-lib/event"
@@ -93,7 +92,7 @@ func (s *Scraper[TEntity]) Run(ctx context.Context) error {
 
 		if idRange.Start > idRange.End {
 			s.syncEvent.SetAndBroadcast()
-			if err := libcommon.Sleep(ctx, s.pollDelay); err != nil {
+			if err := common.Sleep(ctx, s.pollDelay); err != nil {
 				s.syncEvent.Reset()
 				return err
 			}
@@ -149,18 +148,10 @@ func (s *Scraper[TEntity]) RegisterObserver(observer func([]TEntity)) event.Unre
 	return s.observers.Register(observer)
 }
 
-func (s *Scraper[TEntity]) Synchronize(ctx context.Context) (TEntity, error) {
+func (s *Scraper[TEntity]) Synchronize(ctx context.Context) (TEntity, bool, error) {
 	if err := s.syncEvent.Wait(ctx); err != nil {
-		return generics.Zero[TEntity](), err
+		return generics.Zero[TEntity](), false, err
 	}
 
-	last, ok, err := s.store.LastEntity(ctx)
-	if err != nil {
-		return generics.Zero[TEntity](), err
-	}
-	if !ok {
-		return generics.Zero[TEntity](), errors.New("unexpected last entity not available")
-	}
-
-	return last, nil
+	return s.store.LastEntity(ctx)
 }

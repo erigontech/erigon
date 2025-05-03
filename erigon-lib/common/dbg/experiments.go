@@ -25,12 +25,14 @@ import (
 	"sync"
 	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/mmap"
 )
 
 var (
+	MaxReorgDepth = EnvInt("MAX_REORG_DEPTH", 512)
+
 	doMemstat           = EnvBool("NO_MEMSTAT", true)
 	saveHeapProfile     = EnvBool("SAVE_HEAP_PROFILE", false)
 	heapProfileFilePath = EnvString("HEAP_PROFILE_FILE_PATH", "")
@@ -204,8 +206,8 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 	if logger != nil {
 		logger.Info(
 			"[Experiment] heap profile threshold check",
-			"alloc", libcommon.ByteCount(memStats.Alloc),
-			"total", libcommon.ByteCount(totalMemory),
+			"alloc", common.ByteCount(memStats.Alloc),
+			"total", common.ByteCount(totalMemory),
 		)
 	}
 	if memStats.Alloc < (totalMemory/100)*45 {

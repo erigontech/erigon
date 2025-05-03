@@ -21,6 +21,18 @@ import (
 	"github.com/erigontech/erigon-lib/state"
 )
 
+func NewTxContainer(Tx kv.RwTx, doms *state.SharedDomains) TxContainer {
+	txContainer := TxContainer{
+		Tx:   Tx,
+		Doms: doms,
+		Ttx:  nil,
+	}
+	if ttx, ok := Tx.(kv.TemporalTx); ok {
+		txContainer.Ttx = ttx
+	}
+	return txContainer
+}
+
 type TxContainer struct {
 	Tx   kv.RwTx
 	Ttx  kv.TemporalTx

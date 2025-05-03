@@ -32,7 +32,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/p2p"
@@ -89,16 +89,38 @@ type BlockDownloader struct {
 	blockLimit         uint
 }
 
-func (d *BlockDownloader) DownloadBlocksUsingCheckpoints(ctx context.Context, start uint64) (*types.Header, error) {
+func (d *BlockDownloader) DownloadBlocksUsingCheckpoints(ctx context.Context, start uint64, end *uint64) (*types.Header, error) {
 	checkpoints, err := d.waypointReader.CheckpointsFromBlock(ctx, start)
 	if err != nil {
 		return nil, err
 	}
 
-	return d.downloadBlocksUsingWaypoints(ctx, heimdall.AsWaypoints(checkpoints), d.checkpointVerifier)
+	if len(checkpoints) == 0 {
+		return nil, nil
+	}
+
+	firstCheckpoint := checkpoints[0]
+	if firstCheckpointStart := firstCheckpoint.StartBlock().Uint64(); firstCheckpointStart > start {
+		return nil, fmt.Errorf(
+			"unexpected first checkpoint with id %d has start %d which is greater than download start %d",
+			firstCheckpoint.Id,
+			firstCheckpointStart,
+			start,
+		)
+	}
+
+	// validate that there are no gaps
+	for i := 1; i < len(checkpoints); i++ {
+		prev, curr := checkpoints[i-1], checkpoints[i]
+		if curr.RawId() != prev.RawId()+1 {
+			return nil, fmt.Errorf("unexpected checkpoint gap between %d and %d", prev.RawId(), curr.RawId())
+		}
+	}
+
+	return d.downloadBlocksUsingWaypoints(ctx, start, heimdall.AsWaypoints(checkpoints), d.checkpointVerifier, end)
 }
 
-func (d *BlockDownloader) DownloadBlocksUsingMilestones(ctx context.Context, start uint64) (*types.Header, error) {
+func (d *BlockDownloader) DownloadBlocksUsingMilestones(ctx context.Context, start uint64, end *uint64) (*types.Header, error) {
 	milestones, err := d.waypointReader.MilestonesFromBlock(ctx, start)
 	if err != nil {
 		return nil, err
@@ -124,28 +146,53 @@ func (d *BlockDownloader) DownloadBlocksUsingMilestones(ctx context.Context, sta
 		milestones[0].Fields.StartBlock = new(big.Int).SetUint64(start)
 	}
 
-	return d.downloadBlocksUsingWaypoints(ctx, heimdall.AsWaypoints(milestones), d.milestoneVerifier)
+	// we may have gaps in milestones due to their nature, luckily we have a way to handle that
+	// as mentioned earlier we can override the start without breaking the RootHash validity due
+	// to how it is calculated for milestones
+	for i := 1; i < len(milestones); i++ {
+		prev, curr := milestones[i-1], milestones[i]
+		if prev.EndBlock().Uint64()+1 != curr.StartBlock().Uint64() {
+			d.logger.Warn(
+				syncLogPrefix("gap between milestones, overriding milestone start"),
+				"currId", curr.Id,
+				"prevId", prev.Id,
+				"prevEndBlock", prev.EndBlock(),
+				"currStartBlock", curr.StartBlock(),
+			)
+
+			curr.Fields.StartBlock = new(big.Int).SetUint64(prev.EndBlock().Uint64() + 1)
+		}
+	}
+
+	return d.downloadBlocksUsingWaypoints(ctx, start, heimdall.AsWaypoints(milestones), d.milestoneVerifier, end)
 }
 
 func (d *BlockDownloader) downloadBlocksUsingWaypoints(
 	ctx context.Context,
+	start uint64,
 	waypoints heimdall.Waypoints,
 	verifier WaypointHeadersVerifier,
+	end *uint64,
 ) (*types.Header, error) {
 	if len(waypoints) == 0 {
 		return nil, nil
 	}
 
 	waypoints = d.limitWaypoints(waypoints)
+	waypoints = limitWaypointsEndBlock(waypoints, end)
 
-	d.logger.Info(
-		syncLogPrefix("downloading blocks using waypoints"),
+	initialInfoLogArgs := []interface{}{
+		"start", start,
 		"waypointsLen", len(waypoints),
-		"start", waypoints[0].StartBlock().Uint64(),
-		"end", waypoints[len(waypoints)-1].EndBlock().Uint64(),
+		"waypointsStart", waypoints[0].StartBlock().Uint64(),
+		"waypointsEnd", waypoints[len(waypoints)-1].EndBlock().Uint64(),
 		"kind", reflect.TypeOf(waypoints[0]),
 		"blockLimit", d.blockLimit,
-	)
+	}
+	if end != nil {
+		initialInfoLogArgs = append(initialInfoLogArgs, "end", *end)
+	}
+	d.logger.Info(syncLogPrefix("downloading blocks using waypoints"), initialInfoLogArgs...)
 
 	// waypoint rootHash->[blocks part of waypoint]
 	waypointBlocksMemo, err := lru.New[common.Hash, []*types.Block](d.p2pService.MaxPeers())
@@ -292,6 +339,15 @@ func (d *BlockDownloader) downloadBlocksUsingWaypoints(
 			"blks/sec", float64(len(blocks))/math.Max(time.Since(batchFetchStartTime).Seconds(), 0.0001),
 		)
 
+		if end != nil {
+			for i := range blocks {
+				if blocks[i].Number().Uint64() > *end {
+					blocks = blocks[:i]
+					break
+				}
+			}
+		}
+
 		batchFetchStartTime = time.Now() // reset for next time
 
 		d.logger.Info(
@@ -384,6 +440,21 @@ func (d *BlockDownloader) limitWaypoints(waypoints []heimdall.Waypoint) []heimda
 
 		waypoints = waypoints[:i+1]
 		break
+	}
+
+	return waypoints
+}
+
+func limitWaypointsEndBlock(waypoints []heimdall.Waypoint, end *uint64) []heimdall.Waypoint {
+	if end == nil {
+		return waypoints
+	}
+
+	for i, waypoint := range waypoints {
+		if waypoint.StartBlock().Uint64() > *end {
+			waypoints = waypoints[:i]
+			break
+		}
 	}
 
 	return waypoints

@@ -42,7 +42,7 @@ import (
 func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (libcommon.Hash, error),
 	engine consensus.EngineReader, author *libcommon.Address, config *chain.Config) evmtypes.BlockContext {
 	// If we don't have an explicit author (i.e. not mining), extract from the header
-	var beneficiary libcommon.Address
+	var beneficiary common.Address
 	if author == nil {
 		beneficiary, _ = engine.Author(header) // Ignore error, we're past header validation
 	} else {
@@ -56,10 +56,10 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (libc
 		}
 	}
 
-	var prevRandDao *libcommon.Hash
+	var prevRandDao *common.Hash
 	if header.Difficulty.Cmp(merge.ProofOfStakeDifficulty) == 0 {
 		// EIP-4399. We use ProofOfStakeDifficulty (i.e. 0) as a telltale of Proof-of-Stake blocks.
-		prevRandDao = new(libcommon.Hash)
+		prevRandDao = new(common.Hash)
 		*prevRandDao = header.MixDigest
 	}
 
@@ -198,7 +198,7 @@ func GetHashFn(ref *types.Header, getHeader func(hash libcommon.Hash, number uin
 
 // CanTransfer checks whether there are enough funds in the address' account to make a transfer.
 // This does not take the necessary gas in to account to make the transfer valid.
-func CanTransfer(db evmtypes.IntraBlockState, addr libcommon.Address, amount *uint256.Int) (bool, error) {
+func CanTransfer(db evmtypes.IntraBlockState, addr common.Address, amount *uint256.Int) (bool, error) {
 	balance, err := db.GetBalance(addr)
 	if err != nil {
 		return false, err

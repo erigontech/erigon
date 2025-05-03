@@ -25,13 +25,11 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/valyala/fastjson"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/state"
 )
 
@@ -374,22 +372,22 @@ func compareBalances(balance, balanceg *EthBalance) bool {
 	return true
 }
 
-func extractAccountMap(ma *DebugModifiedAccounts) map[libcommon.Address]struct{} {
+func extractAccountMap(ma *DebugModifiedAccounts) map[common.Address]struct{} {
 	r := ma.Result
-	rset := make(map[libcommon.Address]struct{})
+	rset := make(map[common.Address]struct{})
 	for _, a := range r {
 		rset[a] = struct{}{}
 	}
 	return rset
 }
 
-func printStorageRange(sm map[libcommon.Hash]storageEntry) {
+func printStorageRange(sm map[common.Hash]storageEntry) {
 	for k := range sm {
 		fmt.Printf("%x\n", k)
 	}
 }
 
-func compareStorageRanges(sm, smg map[libcommon.Hash]storageEntry) bool {
+func compareStorageRanges(sm, smg map[common.Hash]storageEntry) bool {
 	for k, v := range sm {
 		vg, ok := smg[k]
 		if !ok {
@@ -428,11 +426,11 @@ func compareStorageRanges(sm, smg map[libcommon.Hash]storageEntry) bool {
 	// block in which the transaction was included
 	BlockNumber hexutil.Uint64 `json:"blockNumber"`
 	// hash of the transaction
-	TxHash libcommon.Hash    `json:"transactionHash" gencodec:"required"`
+	TxHash common.Hash    `json:"transactionHash" gencodec:"required"`
 	// index of the transaction in the block
 	TxIndex hexutil.Uint  `json:"transactionIndex" gencodec:"required"`
 	// hash of the block in which the transaction was included
-	BlockHash libcommon.Hash `json:"blockHash"`
+	BlockHash common.Hash `json:"blockHash"`
 	// index of the log in the receipt
 	Index hexutil.Uint    `json:"logIndex" gencodec:"required"`
 
@@ -505,16 +503,16 @@ func compareReceipts(receipt, receiptg *EthReceipt) bool {
 	return true
 }
 
-func getTopics(v *fastjson.Value) []libcommon.Hash {
-	topicSet := make(map[libcommon.Hash]struct{})
+func getTopics(v *fastjson.Value) []common.Hash {
+	topicSet := make(map[common.Hash]struct{})
 	r := v.GetArray("result")
 	for _, l := range r {
 		for _, t := range l.GetArray("topics") {
-			topic := libcommon.HexToHash(t.String())
+			topic := common.HexToHash(t.String())
 			topicSet[topic] = struct{}{}
 		}
 	}
-	topics := make([]libcommon.Hash, len(topicSet))
+	topics := make([]common.Hash, len(topicSet))
 	i := 0
 	for t := range topicSet {
 		topics[i] = t
@@ -523,8 +521,8 @@ func getTopics(v *fastjson.Value) []libcommon.Hash {
 	return topics
 }
 
-func compareAccountRanges(erigon, geth map[libcommon.Address]state.DumpAccount) bool {
-	allAddresses := make(map[libcommon.Address]struct{})
+func compareAccountRanges(erigon, geth map[common.Address]state.DumpAccount) bool {
+	allAddresses := make(map[common.Address]struct{})
 	for k := range erigon {
 		allAddresses[k] = struct{}{}
 	}
@@ -575,12 +573,12 @@ func compareProofs(proof, gethProof *EthGetProof) bool {
 	rg := gethProof.Result
 
 	/*
-	   	Address      libcommon.Address  `json:"address"`
+	   	Address      common.Address  `json:"address"`
 	   	AccountProof []string        `json:"accountProof"`
 	   	Balance      *hexutil.Big    `json:"balance"`
-	   	CodeHash     libcommon.Hash     `json:"codeHash"`
+	   	CodeHash     common.Hash     `json:"codeHash"`
 	   	Nonce        hexutil.Uint64  `json:"nonce"`
-	   	StorageHash  libcommon.Hash     `json:"storageHash"`
+	   	StorageHash  common.Hash     `json:"storageHash"`
 	   	StorageProof []StorageResult `json:"storageProof"`
 	   }
 	   type StorageResult struct {
@@ -653,8 +651,8 @@ func compareProofs(proof, gethProof *EthGetProof) bool {
 
 func post(client *http.Client, url, request string, response interface{}) error {
 	//fmt.Printf("Request=%s\n", request)
-	log.Info("Getting", "url", url, "request", request)
-	start := time.Now()
+	//log.Info("Getting", "url", url, "request", request)
+	//start := time.Now()
 	r, err := client.Post(url, "application/json", strings.NewReader(request))
 	if err != nil {
 		return err
@@ -672,14 +670,14 @@ func post(client *http.Client, url, request string, response interface{}) error 
 		fmt.Printf("json: %s\n", string(b))
 		panic(err)
 	}
-	log.Info("Got in", "time", time.Since(start).Seconds())
+	//log.Info("Got in", "time", time.Since(start).Seconds())
 	return err
 }
 
 func post2(client *http.Client, url, request string) ([]byte, *fastjson.Value, error) {
-	fmt.Printf("Request=%s\n", request)
-	log.Info("Getting", "url", url, "request", request)
-	start := time.Now()
+	//fmt.Printf("Request=%s\n", request)
+	//log.Info("Getting", "url", url, "request", request)
+	//start := time.Now()
 	r, err := client.Post(url, "application/json", strings.NewReader(request))
 	if err != nil {
 		return nil, nil, err
@@ -698,7 +696,7 @@ func post2(client *http.Client, url, request string) ([]byte, *fastjson.Value, e
 	if err != nil {
 		return nil, nil, fmt.Errorf("parsing http response: %w", err)
 	}
-	log.Info("Got in", "time", time.Since(start).Seconds())
+	//log.Info("Got in", "time", time.Since(start).Seconds())
 	return response, v, nil
 }
 

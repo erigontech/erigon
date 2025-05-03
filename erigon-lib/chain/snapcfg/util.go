@@ -20,23 +20,26 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
 
-	"github.com/pkg/errors"
-
+	snapshothashes "github.com/erigontech/erigon-snapshot"
+	"github.com/erigontech/erigon-snapshot/webseed"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/tidwall/btree"
 
-	snapshothashes "github.com/erigontech/erigon-snapshot"
-	"github.com/erigontech/erigon-snapshot/webseed"
-
 	"github.com/erigontech/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/version"
 )
+
+var snapshotGitBranch = dbg.EnvString("SNAPS_GIT_BRANCH", version.DefaultSnapshotGitBranch)
 
 var (
 	Mainnet    = fromToml(snapshothashes.Mainnet)
@@ -151,11 +154,11 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 			continue
 		}
 
-		if version < minVersion {
+		if version.Less(minVersion) {
 			continue
 		}
 
-		if version > preferredVersion {
+		if preferredVersion.Less(version) {
 			continue
 		}
 
@@ -163,7 +166,7 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 			v, _, _ := strings.Cut(current.Name, "-")
 			cv, _ := snaptype.ParseVersion(v)
 
-			if version > cv {
+			if cv.Less(version) {
 				bestVersions.Set(name, p)
 			}
 		} else {
@@ -224,11 +227,11 @@ func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion sna
 			continue
 		}
 
-		if version < minVersion {
+		if version.Less(minVersion) {
 			continue
 		}
 
-		if version > preferredVersion {
+		if preferredVersion.Less(version) {
 			continue
 		}
 
@@ -236,7 +239,7 @@ func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion sna
 			v, _, _ := strings.Cut(current.Name, "-")
 			cv, _ := snaptype.ParseVersion(v)
 
-			if version > cv {
+			if cv.Less(version) {
 				bestVersions.Set(name, p)
 			}
 		} else {
@@ -296,7 +299,7 @@ func ExtractBlockFromName(name string, v snaptype.Version) (block uint64, err er
 		return 0, err
 	}
 
-	if v != 0 && v != version {
+	if !v.IsZero() && v != version {
 		return 0, errWrongVersion
 	}
 
@@ -369,8 +372,17 @@ func doSort(in map[string]string) Preverified {
 }
 
 func newCfg(networkName string, preverified Preverified) *Cfg {
-	maxBlockNum, _ := preverified.MaxBlock(0)
-	return &Cfg{ExpectBlocks: maxBlockNum, Preverified: preverified, networkName: networkName}
+	maxBlockNum, _ := preverified.MaxBlock(snaptype.ZeroVersion)
+	cfg := &Cfg{ExpectBlocks: maxBlockNum, Preverified: preverified, networkName: networkName}
+	cfg.PreverifiedParsed = make([]*snaptype.FileInfo, len(preverified))
+	for i, p := range cfg.Preverified {
+		info, _, ok := snaptype.ParseFileName("", p.Name)
+		if !ok {
+			continue
+		}
+		cfg.PreverifiedParsed[i] = &info
+	}
+	return cfg
 }
 
 func NewNonSeededCfg(networkName string) *Cfg {
@@ -378,9 +390,10 @@ func NewNonSeededCfg(networkName string) *Cfg {
 }
 
 type Cfg struct {
-	ExpectBlocks uint64
-	Preverified  Preverified
-	networkName  string
+	ExpectBlocks      uint64
+	Preverified       Preverified          // immutable
+	PreverifiedParsed []*snaptype.FileInfo //Preverified field after `snaptype.ParseFileName("", p.Name)`
+	networkName       string
 }
 
 // Seedable - can seed it over Bittorrent network to other nodes
@@ -398,12 +411,11 @@ func (c Cfg) IsFrozen(info snaptype.FileInfo) bool {
 func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 	hasType := t == snaptype.MinCoreEnum
 
-	for _, p := range c.Preverified {
-		info, _, ok := snaptype.ParseFileName("", p.Name)
-		if !ok {
+	for _, info := range c.PreverifiedParsed {
+		if info == nil {
 			continue
 		}
-		if strings.Contains(p.Name, "caplin") {
+		if strings.Contains(info.Name(), "caplin") {
 			continue
 		}
 
@@ -544,9 +556,15 @@ func webseedsParse(in []byte) (res []string) {
 }
 
 func LoadRemotePreverified(ctx context.Context) (loaded bool, err error) {
-	loaded, err = snapshothashes.LoadSnapshots(ctx)
+	loaded, err = snapshothashes.LoadSnapshots(ctx, snapshothashes.R2, snapshotGitBranch)
 	if err != nil {
-		return false, err
+		log.Root().Warn("Failed to load snapshot hashes from R2; falling back to GitHub", "err", err)
+
+		// Fallback to github if R2 fails
+		loaded, err = snapshothashes.LoadSnapshots(ctx, snapshothashes.Github, snapshotGitBranch)
+		if err != nil {
+			return false, err
+		}
 	}
 
 	// Re-load the preverified hashes

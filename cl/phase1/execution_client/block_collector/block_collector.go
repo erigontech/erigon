@@ -22,15 +22,15 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/utils"
-	"github.com/erigontech/erigon/core/types"
 )
 
 var (
@@ -98,7 +98,7 @@ func (b *blockCollector) Flush(ctx context.Context) error {
 		if len(v) == 0 {
 			return nil
 		}
-		v, err = utils.DecompressSnappy(v)
+		v, err = utils.DecompressSnappy(v, false)
 		if err != nil {
 			return err
 		}
@@ -174,7 +174,7 @@ func (b *blockCollector) Flush(ctx context.Context) error {
 }
 
 // serializes block value
-func encodeBlock(payload *cltypes.Eth1Block, parentRoot common.Hash, executionRequestsList []hexutility.Bytes) ([]byte, error) {
+func encodeBlock(payload *cltypes.Eth1Block, parentRoot common.Hash, executionRequestsList []hexutil.Bytes) ([]byte, error) {
 	encodedPayload, err := payload.EncodeSSZ(nil)
 	if err != nil {
 		return nil, fmt.Errorf("error encoding execution payload during download: %s", err)

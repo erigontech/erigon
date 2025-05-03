@@ -21,10 +21,12 @@ package rlp
 
 import (
 	"bytes"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
 	"math/big"
+	"runtime"
 	"sync"
 	"testing"
 
@@ -32,7 +34,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 )
 
@@ -511,8 +514,8 @@ func BenchmarkEncodeBigInts(b *testing.B) {
 }
 
 func TestStringLen56(t *testing.T) {
-	str := hexutility.MustDecodeHex("7907ca011864321def1e92a3021868f397516ce37c959f25f8dddd3161d7b8301152b35f135c814fae9f487206471b6b0d713cd51a2d3598")
-	require.Equal(t, 56, len(str))
+	str := hexutil.MustDecodeHex("7907ca011864321def1e92a3021868f397516ce37c959f25f8dddd3161d7b8301152b35f135c814fae9f487206471b6b0d713cd51a2d3598")
+	require.Len(t, str, 56)
 
 	strLen := StringLen(str)
 	assert.Equal(t, 56+2, strLen)
@@ -522,6 +525,80 @@ func TestStringLen56(t *testing.T) {
 
 	dataPos, dataLen, err := ParseString(encoded, 0)
 	require.NoError(t, err)
-	assert.Equal(t, dataPos, 2)
-	assert.Equal(t, dataLen, 56)
+	assert.Equal(t, 2, dataPos)
+	assert.Equal(t, 56, dataLen)
+}
+
+// Any buffer of 32 bytes or more should be fine for EncodeUint256.
+// See https://github.com/erigontech/erigon/pull/13574
+func TestEncodeUint256Buffer(t *testing.T) {
+	i := uint256.NewInt(128)
+	output := "8180"
+
+	var writer1 bytes.Buffer
+	var buf32 [32]byte
+	require.NoError(t, EncodeUint256(i, &writer1, buf32[:]))
+	assert.Equal(t, output, common.Bytes2Hex(writer1.Bytes()))
+
+	var writer2 bytes.Buffer
+	var buf33 [33]byte
+	require.NoError(t, EncodeUint256(i, &writer2, buf33[:]))
+	assert.Equal(t, output, common.Bytes2Hex(writer2.Bytes()))
+
+	var writer3 bytes.Buffer
+	var buf31 [31]byte
+	require.Panics(t, func() { EncodeUint256(i, &writer3, buf31[:]) })
+}
+
+func TestEncodeUint256Random(t *testing.T) {
+	for size := 1; size <= 32; size++ {
+		t.Run(fmt.Sprintf("size=%d", size), func(t *testing.T) {
+			randomBytes := make([]byte, size)
+			_, err := rand.Read(randomBytes)
+			require.NoError(t, err)
+
+			i := new(uint256.Int).SetBytes(randomBytes)
+			var writer bytes.Buffer
+			var buf [32]byte
+			require.NoError(t, EncodeUint256(i, &writer, buf[:]))
+			encoded := bytes.NewReader(writer.Bytes())
+
+			s := NewStream(encoded, 0)
+			decoded, err := s.Uint256Bytes()
+			require.NoError(t, err)
+			assert.Equal(t, i, uint256.NewInt(0).SetBytes(decoded))
+		})
+	}
+}
+
+func BenchmarkEncodeConcurrentInterface(b *testing.B) {
+	type struct1 struct {
+		A string
+		B *big.Int
+		C [20]byte
+	}
+	value := []interface{}{
+		uint(999),
+		&struct1{A: "hello", B: big.NewInt(0xFFFFFFFF)},
+		[10]byte{1, 2, 3, 4, 5, 6},
+		[]string{"yeah", "yeah", "yeah"},
+	}
+
+	var wg sync.WaitGroup
+	for cpu := 0; cpu < runtime.NumCPU(); cpu++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			var buffer bytes.Buffer
+			for i := 0; i < b.N; i++ {
+				buffer.Reset()
+				err := Encode(&buffer, value)
+				if err != nil {
+					panic(err)
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }

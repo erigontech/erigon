@@ -85,9 +85,9 @@ func TestGetStateFork(t *testing.T) {
 			// unmarshal the json
 			require.NoError(t, json.NewDecoder(resp.Body).Decode(&jsonVal))
 			data := jsonVal["data"].(map[string]interface{})
-			require.Equal(t, data["current_version"], "0x00000000")
-			require.Equal(t, data["previous_version"], "0x00000000")
-			require.Equal(t, data["epoch"], "0")
+			require.Equal(t, "0x00000000", data["current_version"])
+			require.Equal(t, "0x00000000", data["previous_version"])
+			require.Equal(t, "0", data["epoch"])
 		})
 	}
 }
@@ -377,7 +377,7 @@ func TestGetStateSyncCommittees(t *testing.T) {
 			// read the all of the octect
 			out, err := io.ReadAll(resp.Body)
 			require.NoError(t, err)
-			require.Equal(t, string(out), expected)
+			require.Equal(t, expected, string(out))
 		})
 	}
 }
@@ -435,7 +435,7 @@ func TestGetStateSyncCommitteesHistorical(t *testing.T) {
 			// read the all of the octect
 			out, err := io.ReadAll(resp.Body)
 			require.NoError(t, err)
-			require.Equal(t, string(out), expected)
+			require.Equal(t, expected, string(out))
 		})
 	}
 }
@@ -477,7 +477,7 @@ func TestGetStateFinalityCheckpoints(t *testing.T) {
 			code:    http.StatusOK,
 		},
 	}
-	expected := `{"data":{"finalized":{"epoch":"1","root":"0xde46b0f2ed5e72f0cec20246403b14c963ec995d7c2825f3532b0460c09d5693"},"current_justified":{"epoch":"3","root":"0xa6e47f164b1a3ca30ea3b2144bd14711de442f51e5b634750a12a1734e24c987"},"previous_justified":{"epoch":"2","root":"0x4c3ee7969e485696669498a88c17f70e6999c40603e2f4338869004392069063"}},"execution_optimistic":false,"finalized":false,"version":"bellatrix"}` + "\n"
+	expected := `{"data":{"finalized":{"epoch":"1","root":"0xde46b0f2ed5e72f0cec20246403b14c963ec995d7c2825f3532b0460c09d5693"},"current_justified":{"epoch":"3","root":"0xa6e47f164b1a3ca30ea3b2144bd14711de442f51e5b634750a12a1734e24c987"},"previous_justified":{"epoch":"2","root":"0x4c3ee7969e485696669498a88c17f70e6999c40603e2f4338869004392069063"}},"execution_optimistic":false,"finalized":false}` + "\n"
 	for _, c := range cases {
 		t.Run(c.blockID, func(t *testing.T) {
 			server := httptest.NewServer(handler.mux)
@@ -493,7 +493,7 @@ func TestGetStateFinalityCheckpoints(t *testing.T) {
 			// read the all of the octect
 			out, err := io.ReadAll(resp.Body)
 			require.NoError(t, err)
-			require.Equal(t, string(out), expected)
+			require.Equal(t, expected, string(out))
 		})
 	}
 }
@@ -550,7 +550,7 @@ func TestGetRandao(t *testing.T) {
 			// read the all of the octect
 			out, err := io.ReadAll(resp.Body)
 			require.NoError(t, err)
-			require.Equal(t, string(out), expected)
+			require.Equal(t, expected, string(out))
 		})
 	}
 }

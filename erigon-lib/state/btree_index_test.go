@@ -19,7 +19,6 @@ package state
 import (
 	"bytes"
 	"fmt"
-	"path"
 	"path/filepath"
 	"testing"
 
@@ -64,7 +63,7 @@ func Test_BtreeIndex_Init(t *testing.T) {
 	require.NoError(t, err)
 	defer decomp.Close()
 
-	err = BuildBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), decomp, seg.CompressNone, background.NewProgressSet(), tmp, 1, logger, true)
+	err = BuildBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), decomp, seg.CompressNone, background.NewProgressSet(), tmp, 1, logger, true, AccessorBTree|AccessorExistence)
 	require.NoError(t, err)
 
 	bt, err := OpenBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), M, decomp, seg.CompressKeys|seg.CompressVals)
@@ -83,7 +82,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 
 	t.Run("empty index", func(t *testing.T) {
 		dataPath := generateKV(t, tmp, 52, 180, 0, logger, 0)
-		indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
+		indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 		buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 
 		kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)
@@ -94,7 +93,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	})
 	dataPath := generateKV(t, tmp, 52, 180, keyCount, logger, 0)
 
-	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 
 	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)
@@ -129,7 +128,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	require.NoError(t, err)
 	for i := 0; i < len(keys); i++ {
 		k := c.Key()
-		require.EqualValues(t, keys[i], k)
+		require.Equal(t, keys[i], k)
 		c.Next()
 	}
 	c.Close()
@@ -137,7 +136,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	for i := 0; i < len(keys); i++ {
 		cur, err := bt.Seek(getter, keys[i])
 		require.NoErrorf(t, err, "i=%d", i)
-		require.EqualValuesf(t, keys[i], cur.key, "i=%d", i)
+		require.Equalf(t, keys[i], cur.key, "i=%d", i)
 		require.NotEmptyf(t, cur.Value(), "i=%d", i)
 		cur.Close()
 		// require.EqualValues(t, uint64(i), cur.Value())
@@ -152,12 +151,16 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 		}
 		cur, err := bt.Seek(getter, keys[i])
 		require.NoError(t, err)
-		require.EqualValues(t, keys[i], cur.Key())
+		require.Equal(t, keys[i], cur.Key())
 		cur.Close()
 	}
 }
 
 func Test_BtreeIndex_Build(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	tmp := t.TempDir()
@@ -169,7 +172,7 @@ func Test_BtreeIndex_Build(t *testing.T) {
 	keys, err := pivotKeysFromKV(dataPath)
 	require.NoError(t, err)
 
-	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 	require.NoError(t, err)
 
@@ -196,7 +199,7 @@ func Test_BtreeIndex_Build(t *testing.T) {
 	for i := 0; i < 10000; i++ {
 		c, err := bt.Seek(getter, keys[i])
 		require.NoError(t, err)
-		require.EqualValues(t, keys[i], c.Key())
+		require.Equal(t, keys[i], c.Key())
 		c.Close()
 	}
 }
@@ -208,11 +211,15 @@ func buildBtreeIndex(tb testing.TB, dataPath, indexPath string, compressed seg.F
 	require.NoError(tb, err)
 	defer decomp.Close()
 
-	err = BuildBtreeIndexWithDecompressor(indexPath, decomp, compressed, background.NewProgressSet(), filepath.Dir(indexPath), seed, logger, noFsync)
+	err = BuildBtreeIndexWithDecompressor(indexPath, decomp, compressed, background.NewProgressSet(), filepath.Dir(indexPath), seed, logger, noFsync, AccessorBTree|AccessorExistence)
 	require.NoError(tb, err)
 }
 
 func Test_BtreeIndex_Seek2(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	tmp := t.TempDir()
@@ -222,7 +229,7 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 	compressFlags := seg.CompressKeys | seg.CompressVals
 	dataPath := generateKV(t, tmp, 52, 48, keyCount, logger, compressFlags)
 
-	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 
 	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)
@@ -259,15 +266,15 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 		defer cur.Close()
 
 		require.NoError(t, err)
-		require.EqualValues(t, keys[0], cur.Key())
+		require.Equal(t, keys[0], cur.Key())
 		require.NotEmptyf(t, cur.Value(), "i=%d", 0)
 
 		k, v, _, err := bt.dataLookup(0, getter)
 		require.NoError(t, err)
 		cur.Reset(0, getter)
 
-		require.EqualValues(t, k, cur.Key())
-		require.EqualValues(t, v, cur.Value())
+		require.Equal(t, k, cur.Key())
+		require.Equal(t, v, cur.Value())
 
 		totalKeys := kv.Count() / 2
 
@@ -278,16 +285,16 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 			b := cur.Next()
 			require.True(t, b)
 
-			require.EqualValuesf(t, k, cur.Key(), "i=%d", i)
-			require.EqualValuesf(t, v, cur.Value(), "i=%d", i)
+			require.Equalf(t, k, cur.Key(), "i=%d", i)
+			require.Equalf(t, v, cur.Value(), "i=%d", i)
 
 			curS, err := bt.Seek(getter, cur.Key())
 			require.NoError(t, err)
 
-			require.EqualValuesf(t, cur.Key(), curS.Key(), "i=%d", i)
-			require.EqualValuesf(t, cur.Value(), curS.Value(), "i=%d", i)
-			require.EqualValues(t, cur.d, curS.d)
-			require.EqualValues(t, cur.getter, curS.getter)
+			require.Equalf(t, cur.Key(), curS.Key(), "i=%d", i)
+			require.Equalf(t, cur.Value(), curS.Value(), "i=%d", i)
+			require.Equal(t, cur.d, curS.d)
+			require.Equal(t, cur.getter, curS.getter)
 		}
 	})
 
@@ -301,7 +308,7 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 		}
 		cur, err := bt.Seek(getter, keys[i])
 		require.NoError(t, err)
-		require.EqualValues(t, keys[i], cur.Key())
+		require.Equal(t, keys[i], cur.Key())
 	}
 }
 
@@ -361,7 +368,7 @@ func TestBpsTree_Seek(t *testing.T) {
 
 		//k, _, err := it.KVFromGetter(g)
 		//require.NoError(t, err)
-		require.EqualValues(t, keys[i], c.Key())
+		require.Equal(t, keys[i], c.Key())
 	}
 }
 

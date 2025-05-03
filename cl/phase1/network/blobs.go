@@ -35,7 +35,7 @@ var requestBlobBatchExpiration = 15 * time.Second
 // This is just a bunch of functions to handle blobs
 
 // BlobsIdentifiersFromBlocks returns a list of blob identifiers from a list of blocks, which should then be forwarded to the network.
-func BlobsIdentifiersFromBlocks(blocks []*cltypes.SignedBeaconBlock) (*solid.ListSSZ[*cltypes.BlobIdentifier], error) {
+func BlobsIdentifiersFromBlocks(blocks []*cltypes.SignedBeaconBlock, cfg *clparams.BeaconChainConfig) (*solid.ListSSZ[*cltypes.BlobIdentifier], error) {
 	ids := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](0, 40)
 	for _, block := range blocks {
 		if block.Version() < clparams.DenebVersion {
@@ -46,6 +46,9 @@ func BlobsIdentifiersFromBlocks(blocks []*cltypes.SignedBeaconBlock) (*solid.Lis
 			return nil, err
 		}
 		kzgCommitments := block.Block.Body.BlobKzgCommitments.Len()
+		if ids.Len()+kzgCommitments > cfg.MaxRequestBlobSidecarsByVersion(block.Version()) {
+			break
+		}
 		for i := 0; i < kzgCommitments; i++ {
 			ids.Append(&cltypes.BlobIdentifier{
 				BlockRoot: blockRoot,
@@ -56,7 +59,7 @@ func BlobsIdentifiersFromBlocks(blocks []*cltypes.SignedBeaconBlock) (*solid.Lis
 	return ids, nil
 }
 
-func BlobsIdentifiersFromBlindedBlocks(blocks []*cltypes.SignedBlindedBeaconBlock) (*solid.ListSSZ[*cltypes.BlobIdentifier], error) {
+func BlobsIdentifiersFromBlindedBlocks(blocks []*cltypes.SignedBlindedBeaconBlock, cfg *clparams.BeaconChainConfig) (*solid.ListSSZ[*cltypes.BlobIdentifier], error) {
 	ids := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](0, 40)
 	for _, block := range blocks {
 		if block.Version() < clparams.DenebVersion {
@@ -67,6 +70,9 @@ func BlobsIdentifiersFromBlindedBlocks(blocks []*cltypes.SignedBlindedBeaconBloc
 			return nil, err
 		}
 		kzgCommitments := block.Block.Body.BlobKzgCommitments.Len()
+		if ids.Len()+kzgCommitments > cfg.MaxRequestBlobSidecarsByVersion(block.Version()) {
+			break
+		}
 		for i := 0; i < kzgCommitments; i++ {
 			ids.Append(&cltypes.BlobIdentifier{
 				BlockRoot: blockRoot,
@@ -102,11 +108,11 @@ Loop:
 				// this is so we do not get stuck on a side-fork
 				responses, pid, err := r.SendBlobsSidecarByIdentifierReq(ctx, req)
 				if err != nil {
-					log.Debug("RequestBlobsFrantically: error", "err", err, "peer", pid)
+					log.Trace("RequestBlobsFrantically: error", "err", err, "peer", pid)
 					return
 				}
 				if responses == nil {
-					log.Debug("RequestBlobsFrantically: response is nil", "peer", pid)
+					log.Trace("RequestBlobsFrantically: response is nil", "peer", pid)
 					return
 				}
 				if len(atomicResp.Load().(*PeerAndSidecars).Responses) > 0 {
@@ -120,7 +126,7 @@ Loop:
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-timer.C:
-			log.Debug("RequestBlobsFrantically: timeout")
+			log.Trace("RequestBlobsFrantically: timeout")
 			return nil, errors.New("timeout")
 		default:
 			if len(atomicResp.Load().(*PeerAndSidecars).Responses) > 0 {

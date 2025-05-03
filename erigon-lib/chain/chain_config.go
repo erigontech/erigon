@@ -23,8 +23,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
 )
 
 // Config is the core config which determines the blockchain settings.
@@ -70,16 +70,9 @@ type Config struct {
 	PragueTime   *big.Int `json:"pragueTime,omitempty"`
 	OsakaTime    *big.Int `json:"osakaTime,omitempty"`
 
-	// Optional EIP-4844 parameters
-	MinBlobGasPrice            *uint64 `json:"minBlobGasPrice,omitempty"`
-	MaxBlobGasPerBlock         *uint64 `json:"maxBlobGasPerBlock,omitempty"`
-	TargetBlobGasPerBlock      *uint64 `json:"targetBlobGasPerBlock,omitempty"`
-	BlobGasPriceUpdateFraction *uint64 `json:"blobGasPriceUpdateFraction,omitempty"`
-
-	// EIP-7691
-	MaxBlobGasPerBlockPrague         *uint64 `json:"maxBlobGasPerBlockPrague,omitempty"`
-	TargetBlobGasPerBlockPrague      *uint64 `json:"targetBlobGasPerBlockPrague,omitempty"`
-	BlobGasPriceUpdateFractionPrague *uint64 `json:"blobGasPriceUpdateFractionPrague,omitempty"`
+	// Optional EIP-4844 parameters (see also EIP-7691 & EIP-7840)
+	MinBlobGasPrice *uint64       `json:"minBlobGasPrice,omitempty"`
+	BlobSchedule    *BlobSchedule `json:"blobSchedule,omitempty"`
 
 	// (Optional) governance contract where EIP-1559 fees will be sent to, which otherwise would be burnt since the London fork.
 	// A key corresponds to the block number, starting from which the fees are sent to the address (map value).
@@ -98,6 +91,93 @@ type Config struct {
 
 	Bor     BorConfig       `json:"-"`
 	BorJSON json.RawMessage `json:"bor,omitempty"`
+
+	// Account Abstraction
+	AllowAA bool
+}
+
+var (
+	TestChainConfig = &Config{
+		ChainID:               big.NewInt(1337),
+		Consensus:             EtHashConsensus,
+		HomesteadBlock:        big.NewInt(0),
+		TangerineWhistleBlock: big.NewInt(0),
+		SpuriousDragonBlock:   big.NewInt(0),
+		ByzantiumBlock:        big.NewInt(0),
+		ConstantinopleBlock:   big.NewInt(0),
+		PetersburgBlock:       big.NewInt(0),
+		IstanbulBlock:         big.NewInt(0),
+		MuirGlacierBlock:      big.NewInt(0),
+		BerlinBlock:           big.NewInt(0),
+		Ethash:                new(EthashConfig),
+	}
+
+	TestChainAuraConfig = &Config{
+		ChainID:               big.NewInt(1),
+		Consensus:             AuRaConsensus,
+		HomesteadBlock:        big.NewInt(0),
+		TangerineWhistleBlock: big.NewInt(0),
+		SpuriousDragonBlock:   big.NewInt(0),
+		ByzantiumBlock:        big.NewInt(0),
+		ConstantinopleBlock:   big.NewInt(0),
+		PetersburgBlock:       big.NewInt(0),
+		IstanbulBlock:         big.NewInt(0),
+		MuirGlacierBlock:      big.NewInt(0),
+		BerlinBlock:           big.NewInt(0),
+		LondonBlock:           big.NewInt(0),
+		Aura:                  &AuRaConfig{},
+	}
+)
+
+type BlobConfig struct {
+	Target                *uint64 `json:"target,omitempty"`
+	Max                   *uint64 `json:"max,omitempty"`
+	BaseFeeUpdateFraction *uint64 `json:"baseFeeUpdateFraction,omitempty"`
+}
+
+// See EIP-7840: Add blob schedule to EL config files
+type BlobSchedule struct {
+	Cancun *BlobConfig `json:"cancun,omitempty"`
+	Prague *BlobConfig `json:"prague,omitempty"`
+}
+
+func (b *BlobSchedule) TargetBlobsPerBlock(isPrague bool) uint64 {
+	if isPrague {
+		if b != nil && b.Prague != nil && b.Prague.Target != nil {
+			return *b.Prague.Target
+		}
+		return 6 // EIP-7691
+	}
+	if b != nil && b.Cancun != nil && b.Cancun.Target != nil {
+		return *b.Cancun.Target
+	}
+	return 3 // EIP-4844
+}
+
+func (b *BlobSchedule) MaxBlobsPerBlock(isPrague bool) uint64 {
+	if isPrague {
+		if b != nil && b.Prague != nil && b.Prague.Max != nil {
+			return *b.Prague.Max
+		}
+		return 9 // EIP-7691
+	}
+	if b != nil && b.Cancun != nil && b.Cancun.Max != nil {
+		return *b.Cancun.Max
+	}
+	return 6 // EIP-4844
+}
+
+func (b *BlobSchedule) BaseFeeUpdateFraction(isPrague bool) uint64 {
+	if isPrague {
+		if b != nil && b.Prague != nil && b.Prague.BaseFeeUpdateFraction != nil {
+			return *b.Prague.BaseFeeUpdateFraction
+		}
+		return 5007716 // EIP-7691
+	}
+	if b != nil && b.Cancun != nil && b.Cancun.BaseFeeUpdateFraction != nil {
+		return *b.Cancun.BaseFeeUpdateFraction
+	}
+	return 3338477 // EIP-4844
 }
 
 type BorConfig interface {
@@ -276,50 +356,31 @@ func (c *Config) GetMinBlobGasPrice() uint64 {
 }
 
 func (c *Config) GetMaxBlobGasPerBlock(t uint64) uint64 {
-	if c != nil {
-		if c.IsPrague(t) {
-			if c.MaxBlobGasPerBlockPrague != nil {
-				return *c.MaxBlobGasPerBlockPrague
-			}
-			return 1179648 // EIP-7691
-		} else if c.MaxBlobGasPerBlock != nil {
-			return *c.MaxBlobGasPerBlock
-		}
-	}
-	return 786432 // MAX_BLOB_GAS_PER_BLOCK (EIP-4844)
-}
-
-func (c *Config) GetTargetBlobGasPerBlock(t uint64) uint64 {
-	if c != nil {
-		if c.IsPrague(t) {
-			if c.TargetBlobGasPerBlockPrague != nil {
-				return *c.TargetBlobGasPerBlockPrague
-			}
-			return 786432
-		} else if c.TargetBlobGasPerBlock != nil {
-			return *c.TargetBlobGasPerBlock
-		}
-	}
-	return 393216 // TARGET_BLOB_GAS_PER_BLOCK (EIP-4844)
-}
-
-func (c *Config) GetBlobGasPriceUpdateFraction(t uint64) uint64 {
-	if c != nil {
-		if c.IsPrague(t) {
-			if c.BlobGasPriceUpdateFractionPrague != nil {
-				return *c.BlobGasPriceUpdateFractionPrague
-			}
-			return 5007716
-
-		} else if c.BlobGasPriceUpdateFraction != nil {
-			return *c.BlobGasPriceUpdateFraction
-		}
-	}
-	return 3338477 // BLOB_GASPRICE_UPDATE_FRACTION (EIP-4844)
+	return c.GetMaxBlobsPerBlock(t) * params.BlobGasPerBlob
 }
 
 func (c *Config) GetMaxBlobsPerBlock(time uint64) uint64 {
-	return c.GetMaxBlobGasPerBlock(time) / fixedgas.BlobGasPerBlob
+	var b *BlobSchedule
+	if c != nil {
+		b = c.BlobSchedule
+	}
+	return b.MaxBlobsPerBlock(c.IsPrague(time))
+}
+
+func (c *Config) GetTargetBlobGasPerBlock(t uint64) uint64 {
+	var b *BlobSchedule
+	if c != nil {
+		b = c.BlobSchedule
+	}
+	return b.TargetBlobsPerBlock(c.IsPrague(t)) * params.BlobGasPerBlob
+}
+
+func (c *Config) GetBlobGasPriceUpdateFraction(t uint64) uint64 {
+	var b *BlobSchedule
+	if c != nil {
+		b = c.BlobSchedule
+	}
+	return b.BaseFeeUpdateFraction(c.IsPrague(t))
 }
 
 func (c *Config) SecondsPerSlot() uint64 {
