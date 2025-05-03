@@ -12,6 +12,7 @@ func InitSchemas() {
 	Schema.AccountsDomain.hist.version.AccessorVI = version.V1_0_standart
 	Schema.AccountsDomain.hist.iiCfg.version.DataEF = version.V2_0_standart
 	Schema.AccountsDomain.hist.iiCfg.version.AccessorEFI = version.V1_1_standart
+	Schema.AccountsDomain.hist.iiCfg.version.AccessorEFEI = version.V1_0_standart
 
 	Schema.StorageDomain.version.DataKV = version.V1_0_standart
 	Schema.StorageDomain.version.AccessorBT = version.V1_0_standart
@@ -20,6 +21,7 @@ func InitSchemas() {
 	Schema.StorageDomain.hist.version.AccessorVI = version.V1_0_standart
 	Schema.StorageDomain.hist.iiCfg.version.DataEF = version.V2_0_standart
 	Schema.StorageDomain.hist.iiCfg.version.AccessorEFI = version.V1_1_standart
+	Schema.StorageDomain.hist.iiCfg.version.AccessorEFEI = version.V1_0_standart
 
 	Schema.CodeDomain.version.DataKV = version.V1_0_standart
 	Schema.CodeDomain.version.AccessorBT = version.V1_0_standart
@@ -28,6 +30,7 @@ func InitSchemas() {
 	Schema.CodeDomain.hist.version.AccessorVI = version.V1_0_standart
 	Schema.CodeDomain.hist.iiCfg.version.DataEF = version.V2_0_standart
 	Schema.CodeDomain.hist.iiCfg.version.AccessorEFI = version.V1_1_standart
+	Schema.CodeDomain.hist.iiCfg.version.AccessorEFEI = version.V1_0_standart
 
 	Schema.CommitmentDomain.version.DataKV = version.V1_0_standart
 	Schema.CommitmentDomain.version.AccessorKVI = version.V1_0_standart
@@ -35,6 +38,7 @@ func InitSchemas() {
 	Schema.CommitmentDomain.hist.version.AccessorVI = version.V1_0_standart
 	Schema.CommitmentDomain.hist.iiCfg.version.DataEF = version.V2_0_standart
 	Schema.CommitmentDomain.hist.iiCfg.version.AccessorEFI = version.V1_1_standart
+	Schema.CommitmentDomain.hist.iiCfg.version.AccessorEFEI = version.V1_0_standart
 
 	Schema.ReceiptDomain.version.DataKV = version.V1_0_standart
 	Schema.ReceiptDomain.version.AccessorBT = version.V1_0_standart
@@ -43,6 +47,7 @@ func InitSchemas() {
 	Schema.ReceiptDomain.hist.version.AccessorVI = version.V1_0_standart
 	Schema.ReceiptDomain.hist.iiCfg.version.DataEF = version.V2_0_standart
 	Schema.ReceiptDomain.hist.iiCfg.version.AccessorEFI = version.V1_1_standart
+	Schema.ReceiptDomain.hist.iiCfg.version.AccessorEFEI = version.V1_0_standart
 
 	Schema.RCacheDomain.version.DataKV = version.V1_0_standart
 	Schema.RCacheDomain.version.AccessorKVI = version.V1_0_standart
@@ -50,18 +55,23 @@ func InitSchemas() {
 	Schema.RCacheDomain.hist.version.AccessorVI = version.V1_0_standart
 	Schema.RCacheDomain.hist.iiCfg.version.DataEF = version.V2_0_standart
 	Schema.RCacheDomain.hist.iiCfg.version.AccessorEFI = version.V1_1_standart
+	Schema.RCacheDomain.hist.iiCfg.version.AccessorEFEI = version.V1_0_standart
 
 	Schema.LogAddrIdx.version.DataEF = version.V2_0_standart
 	Schema.LogAddrIdx.version.AccessorEFI = version.V1_1_standart
+	Schema.LogAddrIdx.version.AccessorEFEI = version.V1_0_standart
 
 	Schema.LogTopicIdx.version.DataEF = version.V2_0_standart
 	Schema.LogTopicIdx.version.AccessorEFI = version.V1_1_standart
+	Schema.LogTopicIdx.version.AccessorEFEI = version.V1_0_standart
 
 	Schema.TracesFromIdx.version.DataEF = version.V2_0_standart
 	Schema.TracesFromIdx.version.AccessorEFI = version.V1_1_standart
+	Schema.TracesFromIdx.version.AccessorEFEI = version.V1_0_standart
 
 	Schema.TracesToIdx.version.DataEF = version.V2_0_standart
 	Schema.TracesToIdx.version.AccessorEFI = version.V1_1_standart
+	Schema.TracesToIdx.version.AccessorEFEI = version.V1_0_standart
 }
 
 type DomainVersionTypes struct {
@@ -77,8 +87,9 @@ type HistVersionTypes struct {
 }
 
 type IIVersionTypes struct {
-	DataEF      version.Versions
-	AccessorEFI version.Versions
+	DataEF       version.Versions
+	AccessorEFI  version.Versions
+	AccessorEFEI version.Versions
 }
 
 type VersionTypes struct {

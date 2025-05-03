@@ -668,7 +668,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 		}
 
 		if strings.HasSuffix(filename, ".kvei") {
-			filter, err := existence.NewFilter(0, filename)
+			filter, err := existence.NewFilter(0, filename, true)
 			require.NoError(t, err)
 			require.NoError(t, filter.Build())
 			filter.Close()
