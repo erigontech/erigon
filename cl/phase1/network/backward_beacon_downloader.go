@@ -17,7 +17,6 @@
 package network
 
 import (
-	"fmt"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -128,10 +127,8 @@ func (b *BackwardBeaconDownloader) Peers() (uint64, error) {
 func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 	count := uint64(64)
 	start := b.slotToDownload.Load() - count + 1
-	log.Warn(fmt.Sprintf("[dbg] BackwardBeaconDownloader.RequestMore: %d", start))
 	// Overflow? round to 0.
 	if start > b.slotToDownload.Load() {
-		panic(1)
 		start = 0
 	}
 	var atomicResp atomic.Value
