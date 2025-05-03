@@ -145,7 +145,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 			}
 		}
 
-		if txTask.TxIndex > 0 && len(txTask.BlockReceipts) > 0 {
+		if txTask.TxIndex > 0 && len(txTask.BlockReceipts) > 0 && len(txTask.BlockReceipts) >= txTask.TxIndex {
 			receipt := txTask.BlockReceipts[txTask.TxIndex]
 			if len(receipt.Logs) > 0 && int(receipt.FirstLogIndexWithinBlock) != int(receipt.Logs[0].Index) {
 				panic(fmt.Sprintf("assert: FirstLogIndexWithinBlock is wrong: %d %d, blockNum=%d", receipt.FirstLogIndexWithinBlock, receipt.Logs[0].Index, receipt.BlockNumber.Uint64()))
