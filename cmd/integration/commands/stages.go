@@ -1238,6 +1238,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 			return err
 		}
 		defer tx.Rollback()
+		log.Info("[reset] domain", "domain", producingDomain.String())
 		tables := db.Debug().DomainTables(producingDomain)
 		if err := backup.ClearTables(ctx, tx, tables...); err != nil {
 			return err
