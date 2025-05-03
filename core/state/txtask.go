@@ -135,10 +135,11 @@ func (t *TxTask) CreateReceipt(tx kv.Tx) {
 		if prevR != nil {
 			cumulativeGasUsed = prevR.CumulativeGasUsed
 			firstLogIndex = prevR.FirstLogIndexWithinBlock + uint32(len(prevR.Logs))
+			fmt.Printf("[dbg] here1: %d %d, %d\n", t.TxNum, prevR.FirstLogIndexWithinBlock, firstLogIndex)
 		} else {
-			fmt.Printf("a: %d\n", t.TxIndex)
 			var err error
 			cumulativeGasUsed, _, firstLogIndex, err = rawtemporaldb.ReceiptAsOf(tx.(kv.TemporalTx), t.TxNum)
+			fmt.Printf("[dbg] here2: %d, %d\n", t.TxNum, firstLogIndex)
 			if err != nil {
 				panic(err)
 			}
@@ -151,6 +152,7 @@ func (t *TxTask) CreateReceipt(tx kv.Tx) {
 		panic(msg)
 	}
 
+	fmt.Printf("[dbg] here2: %d, %d\n", t.TxNum, firstLogIndex)
 	r := t.createReceipt(cumulativeGasUsed, firstLogIndex)
 	t.BlockReceipts[t.TxIndex] = r
 }
@@ -190,6 +192,10 @@ func (t *TxTask) createReceipt(cumulativeGasUsed uint64, firstLogIndex uint32) *
 	// if the transaction created a contract, store the creation address in the receipt.
 	if t.TxAsMessage != nil && t.TxAsMessage.To() == nil {
 		receipt.ContractAddress = crypto.CreateAddress(*t.Sender(), t.Tx.GetNonce())
+	}
+
+	if len(receipt.Logs) > 0 && int(receipt.FirstLogIndexWithinBlock) != int(receipt.Logs[0].Index) {
+		panic(fmt.Sprintf("assert: FirstLogIndexWithinBlock is wrong: %d %d, blockNum=%d", receipt.FirstLogIndexWithinBlock, receipt.Logs[0].Index, receipt.BlockNumber.Uint64()))
 	}
 
 	return receipt
