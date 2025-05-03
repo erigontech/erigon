@@ -76,15 +76,11 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHa
 		args.Gas = (*hexutil.Uint64)(&api.GasCap)
 	}
 
-	blockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters) // DoCall cannot be executed on non-canonical blocks
+	header, err := headerByNumberOrHash(ctx, tx, blockNrOrHash, api)
 	if err != nil {
 		return nil, err
 	}
-	block, err := api.blockWithSenders(ctx, tx, hash, blockNumber)
-	if err != nil {
-		return nil, err
-	}
-	if block == nil {
+	if header == nil {
 		return nil, nil
 	}
 
@@ -92,7 +88,6 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHa
 	if err != nil {
 		return nil, err
 	}
-	header := block.HeaderNoCopy()
 	result, err := transactions.DoCall(ctx, engine, args, tx, blockNrOrHash, header, overrides, api.GasCap, chainConfig, stateReader, api._blockReader, api.evmCallTimeout)
 	if err != nil {
 		return nil, err
