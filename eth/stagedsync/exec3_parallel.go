@@ -386,6 +386,7 @@ func (pe *parallelExecutor) processResultQueue(ctx context.Context, inputTxNum u
 	defer rwsIt.Close()
 	//defer fmt.Println("PRQ", "Done")
 
+	var blobGasUsed uint64
 	var i int
 	outputTxNum = inputTxNum
 	for rwsIt.HasNext(outputTxNum) {
@@ -421,12 +422,16 @@ func (pe *parallelExecutor) processResultQueue(ctx context.Context, inputTxNum u
 			i++
 		}
 
+		if txTask.Tx != nil {
+			blobGasUsed += txTask.Tx.GetBlobGas()
+		}
 		if txTask.Final {
 			pe.rs.SetTxNum(txTask.TxNum, txTask.BlockNum)
-			err := pe.rs.ApplyState(ctx, txTask)
+			err := pe.rs.ApplyState(ctx, txTask, blobGasUsed)
 			if err != nil {
 				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("ParallelExecutionState.Apply: %w", err)
 			}
+			blobGasUsed = 0
 
 			if processedBlockNum > pe.lastBlockNum.Load() {
 				pe.outputBlockNum.SetUint64(processedBlockNum)
@@ -445,7 +450,7 @@ func (pe *parallelExecutor) processResultQueue(ctx context.Context, inputTxNum u
 			default:
 			}
 		}
-		if err := pe.rs.ApplyLogsAndTraces(txTask, pe.rs.Domains()); err != nil {
+		if err := pe.rs.ApplyLogsAndTraces(txTask, pe.rs.Domains(), blobGasUsed); err != nil {
 			return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("ParallelExecutionState.Apply: %w", err)
 		}
 		processedBlockNum = txTask.BlockNum
