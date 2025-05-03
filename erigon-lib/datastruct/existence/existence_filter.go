@@ -14,39 +14,49 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package state
+package existence
 
 import (
 	"bufio"
 	"fmt"
-	"hash"
 	"os"
 	"path/filepath"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
+	fusefilter2 "github.com/erigontech/erigon-lib/datastruct/fusefilter"
 	"github.com/erigontech/erigon-lib/log/v3"
 	bloomfilter "github.com/holiman/bloomfilter/v2"
 )
 
-type ExistenceFilter struct {
+type Filter struct {
 	filter             *bloomfilter.Filter
+	fuseWriter         *fusefilter2.Writer
+	fuseReader         *fusefilter2.Reader
+	useFuse            bool
 	empty              bool
 	FileName, FilePath string
 	f                  *os.File
 	noFsync            bool // fsync is enabled by default, but tests can manually disable
 }
 
-func NewExistenceFilter(keysCount uint64, filePath string) (*ExistenceFilter, error) {
-
-	m := bloomfilter.OptimalM(keysCount, 0.01)
+func NewExistenceFilter(keysCount uint64, filePath string) (*Filter, error) {
 	//TODO: make filters compatible by usinig same seed/keys
 	_, fileName := filepath.Split(filePath)
-	e := &ExistenceFilter{FilePath: filePath, FileName: fileName}
+	e := &Filter{FilePath: filePath, FileName: fileName, useFuse: true}
 	if keysCount < 2 {
 		e.empty = true
 	} else {
 		var err error
+		if e.useFuse {
+			e.fuseWriter, err = fusefilter2.NewWriter(filePath)
+			if err != nil {
+				return nil, err
+			}
+			return e, nil
+		}
+
+		m := bloomfilter.OptimalM(keysCount, 0.01)
 		e.filter, err = bloomfilter.New(m)
 		if err != nil {
 			return nil, fmt.Errorf("%w, %s", err, fileName)
@@ -55,25 +65,29 @@ func NewExistenceFilter(keysCount uint64, filePath string) (*ExistenceFilter, er
 	return e, nil
 }
 
-func (b *ExistenceFilter) AddHash(hash uint64) {
+func (b *Filter) AddHash(hash uint64) {
 	if b.empty {
+		return
+	}
+	if b.useFuse {
+		if err := b.fuseWriter.AddHash(hash); err != nil {
+			panic(err)
+		}
 		return
 	}
 	b.filter.AddHash(hash)
 }
-func (b *ExistenceFilter) ContainsHash(v uint64) bool {
+func (b *Filter) ContainsHash(v uint64) bool {
 	if b.empty {
 		return true
 	}
+	if b.useFuse {
+		return b.fuseReader.ContainsHash(v)
+	}
+
 	return b.filter.ContainsHash(v)
 }
-func (b *ExistenceFilter) Contains(v hash.Hash64) bool {
-	if b.empty {
-		return true
-	}
-	return b.filter.Contains(v)
-}
-func (b *ExistenceFilter) Build() error {
+func (b *Filter) Build() error {
 	if b.empty {
 		cf, err := os.Create(b.FilePath)
 		if err != nil {
@@ -81,6 +95,10 @@ func (b *ExistenceFilter) Build() error {
 		}
 		defer cf.Close()
 		return nil
+	}
+
+	if b.useFuse {
+		return b.fuseWriter.Build()
 	}
 
 	log.Trace("[agg] write file", "file", b.FileName)
@@ -106,12 +124,20 @@ func (b *ExistenceFilter) Build() error {
 	return nil
 }
 
-func (b *ExistenceFilter) DisableFsync() { b.noFsync = true }
+func (b *Filter) DisableFsync() {
+	if b.empty {
+		return
+	}
+	b.noFsync = true
+	if b.useFuse {
+		b.fuseWriter.DisableFsync()
+	}
+}
 
 // fsync - other processes/goroutines must see only "fully-complete" (valid) files. No partial-writes.
 // To achieve it: write to .tmp file then `rename` when file is ready.
 // Machine may power-off right after `rename` - it means `fsync` must be before `rename`
-func (b *ExistenceFilter) fsync(f *os.File) error {
+func (b *Filter) fsync(f *os.File) error {
 	if b.noFsync {
 		return nil
 	}
@@ -122,10 +148,10 @@ func (b *ExistenceFilter) fsync(f *os.File) error {
 	return nil
 }
 
-func OpenExistenceFilter(filePath string) (exFilder *ExistenceFilter, err error) {
+func OpenFilter(filePath string) (exFilder *Filter, err error) {
 	var validationPassed = false
 	_, fileName := filepath.Split(filePath)
-	idx := &ExistenceFilter{FilePath: filePath, FileName: fileName}
+	idx := &Filter{FilePath: filePath, FileName: fileName, useFuse: true}
 	defer func() {
 		// recover from panic if one occurred. Set err to nil if no panic
 		if rec := recover(); rec != nil {
@@ -160,17 +186,28 @@ func OpenExistenceFilter(filePath string) (exFilder *ExistenceFilter, err error)
 		return idx, nil
 	}
 
+	if idx.useFuse {
+		idx.fuseReader, err = fusefilter2.NewReader(filePath)
+		if err != nil {
+			return nil, fmt.Errorf("OpenFilter: %w, %s", err, fileName)
+		}
+		return idx, nil
+	}
 	filter := new(bloomfilter.Filter)
 	_, err = filter.UnmarshalFromReaderNoVerify(bufio.NewReaderSize(f, 1*1024*1024))
 	if err != nil {
-		return nil, fmt.Errorf("OpenExistenceFilter: %w, %s", err, fileName)
+		return nil, fmt.Errorf("OpenFilter: %w, %s", err, fileName)
 	}
 	idx.filter = filter
 	return idx, nil
 }
-func (b *ExistenceFilter) Close() {
+
+func (b *Filter) Close() {
 	if b == nil || b.f == nil {
 		return
+	}
+	if b.useFuse {
+		b.fuseReader.Close()
 	}
 	b.f.Close()
 	b.f = nil

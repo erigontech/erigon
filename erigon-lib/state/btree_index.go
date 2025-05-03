@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
@@ -359,15 +360,15 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 	defer kv.EnableReadAhead().DisableReadAhead()
 	bloomPath := strings.TrimSuffix(indexPath, ".bt") + ".kvei"
 
-	var bloom *ExistenceFilter
+	var existenceFilter *existence.Filter
 	if accessors.Has(AccessorExistence) {
 		var err error
-		bloom, err = NewExistenceFilter(uint64(kv.Count()/2), bloomPath)
+		existenceFilter, err = existence.NewExistenceFilter(uint64(kv.Count()/2), bloomPath)
 		if err != nil {
 			return err
 		}
 		if noFsync {
-			bloom.DisableFsync()
+			existenceFilter.DisableFsync()
 		}
 	}
 
@@ -402,8 +403,8 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 			return err
 		}
 		hi, _ := murmur3.Sum128WithSeed(key, salt)
-		if bloom != nil {
-			bloom.AddHash(hi)
+		if existenceFilter != nil {
+			existenceFilter.AddHash(hi)
 		}
 		pos, _ = getter.Skip()
 
@@ -414,8 +415,8 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 		return err
 	}
 
-	if bloom != nil {
-		if err := bloom.Build(); err != nil {
+	if existenceFilter != nil {
+		if err := existenceFilter.Build(); err != nil {
 			return err
 		}
 	}

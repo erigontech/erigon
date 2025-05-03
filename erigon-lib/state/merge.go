@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/page"
+	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
@@ -558,7 +559,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 			return nil, nil, nil, fmt.Errorf("merge %s FileExist err [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
 		if exists {
-			valuesIn.existence, err = OpenExistenceFilter(bloomIndexPath)
+			valuesIn.existence, err = existence.OpenFilter(bloomIndexPath)
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("merge %s existence [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 			}
@@ -699,6 +700,11 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 	}
 	if outItem.index, err = recsplit.OpenIndex(iit.ii.efAccessorFilePath(fromStep, toStep)); err != nil {
 		return nil, err
+	}
+	if iit.ii.indexList.Has(AccessorExistence) {
+		if outItem.existence, err = existence.OpenFilter(iit.ii.efAccessorExistenceFilterFilePath(fromStep, toStep)); err != nil {
+			return nil, err
+		}
 	}
 
 	closeItem = false

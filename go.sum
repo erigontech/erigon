@@ -55,6 +55,8 @@ github.com/AskAlexSharov/bloomfilter/v2 v2.0.9 h1:BuZqNjRlYmcXJIsI7nrIkejYMz9mgF
 github.com/AskAlexSharov/bloomfilter/v2 v2.0.9/go.mod h1:zpoh+gs7qcpqrHr3dB55AMiJwo0iURXE7ZOP9L9hSkA=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
 github.com/BurntSushi/xgb v0.0.0-20160522181843-27f122750802/go.mod h1:IVnqGOEym/WlBOVXweHU+Q+/VP0lqqI8lqeDx9IjBqo=
+github.com/FastFilter/xorfilter v0.2.1 h1:lbdeLG9BdpquK64ZsleBS8B4xO/QW1IM0gMzF7KaBKc=
+github.com/FastFilter/xorfilter v0.2.1/go.mod h1:aumvdkhscz6YBZF9ZA/6O4fIoNod4YR50kIVGGZ7l9I=
 github.com/Masterminds/goutils v1.1.1 h1:5nUrii3FMTL5diU80unEVvNevw1nH4+ZV4DSLVJLSYI=
 github.com/Masterminds/goutils v1.1.1/go.mod h1:8cTjp+g8YejhMuvIA5y2vz3BpJxksy863GQaJW2MFNU=
 github.com/Masterminds/semver/v3 v3.2.0 h1:3MEsd0SM6jqZojhjLWWeBY+Kcjy9i6MQAeY7YgDP83g=

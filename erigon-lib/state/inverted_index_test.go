@@ -57,7 +57,8 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	}).MustOpen()
 	tb.Cleanup(db.Close)
 	salt := uint32(1)
-	cfg := iiCfg{salt: &salt, dirs: dirs, filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable, version: IIVersionTypes{DataEF: snaptype.V1_0, AccessorEFI: snaptype.V1_0}}
+	cfg := iiCfg{salt: &salt, dirs: dirs, filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable, version: IIVersionTypes{DataEF: snaptype.V1_0, AccessorEFI: snaptype.V1_0, AccessorEFEI: snaptype.V1_0}}
+	cfg.indexList = AccessorHashMap | AccessorExistence
 	ii, err := NewInvertedIndex(cfg, aggStep, logger)
 	require.NoError(tb, err)
 	ii.DisableFsync()
@@ -222,7 +223,12 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	require.Equal(t, [][]uint64{{2, 6}, {3}, {6}}, intArrs)
 	r := recsplit.NewIndexReader(sf.index)
 	for i := 0; i < len(words); i++ {
-		offset, _ := r.TwoLayerLookup([]byte(words[i]))
+		var offset uint64
+		if ii.indexList.Has(AccessorExistence) {
+			offset, _ = r.Lookup([]byte(words[i]))
+		} else {
+			offset, _ = r.TwoLayerLookup([]byte(words[i]))
+		}
 		g.Reset(offset)
 		w, _ := g.Next(nil)
 		require.Equal(t, words[i], string(w))

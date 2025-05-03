@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/page"
+	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/bitmapdb"
@@ -811,7 +812,7 @@ type HistoryFiles struct {
 	historyIdx      *recsplit.Index
 	efHistoryDecomp *seg.Decompressor
 	efHistoryIdx    *recsplit.Index
-	efExistence     *ExistenceFilter
+	efExistence     *existence.Filter
 }
 
 func (sf HistoryFiles) CleanupOnError() {
@@ -846,7 +847,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		historyDecomp, efHistoryDecomp *seg.Decompressor
 		historyIdx, efHistoryIdx       *recsplit.Index
 
-		efExistence *ExistenceFilter
+		efExistence *existence.Filter
 		closeComp   = true
 		err         error
 	)
@@ -910,6 +911,11 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		}
 		if efHistoryIdx, err = recsplit.OpenIndex(h.InvertedIndex.efAccessorFilePath(step, step+1)); err != nil {
 			return HistoryFiles{}, err
+		}
+		if h.InvertedIndex.indexList.Has(AccessorExistence) {
+			if efExistence, err = existence.OpenFilter(h.InvertedIndex.efAccessorExistenceFilterFilePath(step, step+1)); err != nil {
+				return HistoryFiles{}, err
+			}
 		}
 	}
 

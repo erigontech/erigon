@@ -57,6 +57,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 
 	cfg.hist.iiCfg.dirs = dirs
 	cfg.hist.iiCfg.salt = &salt
+	cfg.hist.iiCfg.indexList = AccessorHashMap | AccessorExistence
 
 	cfg.hist.historyLargeValues = largeValues
 
@@ -254,9 +255,18 @@ func TestHistoryCollationBuild(t *testing.T) {
 		require.Equal([][]uint64{{2, 6}, {3, 6, 7}, {7}}, intArrs)
 		r := recsplit.NewIndexReader(sf.efHistoryIdx)
 		for i := 0; i < len(keyWords); i++ {
-			offset, ok := r.TwoLayerLookup([]byte(keyWords[i]))
-			if !ok {
-				continue
+			var offset uint64
+			var ok bool
+			if h.InvertedIndex.indexList.Has(AccessorExistence) {
+				offset, ok = r.Lookup([]byte(keyWords[i]))
+				if !ok {
+					continue
+				}
+			} else {
+				offset, ok = r.TwoLayerLookup([]byte(keyWords[i]))
+				if !ok {
+					continue
+				}
 			}
 			ge.Reset(offset)
 			w, _ := ge.Next(nil)

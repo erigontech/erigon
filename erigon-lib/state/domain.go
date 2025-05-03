@@ -28,7 +28,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -36,11 +36,13 @@ import (
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
 )
@@ -415,7 +417,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 				}
 				if exists {
-					if item.existence, err = OpenExistenceFilter(fPath); err != nil {
+					if item.existence, err = existence.OpenFilter(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
@@ -697,9 +699,23 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) (v []byte, ok boo
 		if reader.Empty() {
 			return nil, false, 0, nil
 		}
-		offset, ok := reader.TwoLayerLookup(filekey)
-		if !ok {
-			return nil, false, 0, nil
+		if dt.d.AccessorList.Has(AccessorExistence) {
+			hi, lo := dt.ht.iit.hashKey(filekey)
+			if dt.files[i].src.existence != nil {
+				ok = dt.files[i].src.existence.ContainsHash(hi)
+				if !ok {
+					return nil, false, 0, nil
+				}
+			}
+			offset, ok = reader.LookupHash(hi, lo)
+			if !ok {
+				return nil, false, 0, nil
+			}
+		} else {
+			offset, ok = reader.TwoLayerLookup(filekey)
+			if !ok {
+				return nil, false, 0, nil
+			}
 		}
 		g.Reset(offset)
 
@@ -994,7 +1010,7 @@ type StaticFiles struct {
 	valuesDecomp *seg.Decompressor
 	valuesIdx    *recsplit.Index
 	valuesBt     *BtIndex
-	bloom        *ExistenceFilter
+	bloom        *existence.Filter
 }
 
 // CleanupOnError - call it on collation fail. It closing all files
@@ -1036,7 +1052,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, co
 		valuesDecomp *seg.Decompressor
 		valuesIdx    *recsplit.Index
 		bt           *BtIndex
-		bloom        *ExistenceFilter
+		bloom        *existence.Filter
 		err          error
 	)
 	closeComp := true
@@ -1095,7 +1111,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, co
 			return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 		}
 		if exists {
-			bloom, err = OpenExistenceFilter(fPath)
+			bloom, err = existence.OpenFilter(fPath)
 			if err != nil {
 				return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 			}
@@ -1138,7 +1154,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		valuesDecomp *seg.Decompressor
 		valuesIdx    *recsplit.Index
 		bt           *BtIndex
-		bloom        *ExistenceFilter
+		bloom        *existence.Filter
 	)
 	closeComp := true
 	defer func() {
@@ -1197,7 +1213,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 			return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 		}
 		if exists {
-			bloom, err = OpenExistenceFilter(fPath)
+			bloom, err = existence.OpenFilter(fPath)
 			if err != nil {
 				return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 			}
@@ -1216,9 +1232,6 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep uint64, data *seg.Decompressor, ps *background.ProgressSet) error {
 	idxPath := d.kviAccessorFilePath(fromStep, toStep)
 	cfg := recsplit.RecSplitArgs{
-		Enums:              true,
-		LessFalsePositives: true,
-
 		BucketSize: recsplit.DefaultBucketSize,
 		LeafSize:   recsplit.DefaultLeafSize,
 		TmpDir:     d.dirs.Tmp,
@@ -1226,7 +1239,23 @@ func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep uint
 		Salt:       d.salt,
 		NoFsync:    d.noFsync,
 	}
-	return buildHashMapAccessor(ctx, data, d.Compression, idxPath, false, cfg, ps, d.logger)
+
+	if d.AccessorList.Has(AccessorExistence) {
+		cfg.Enums, cfg.LessFalsePositives = false, false
+	} else {
+		cfg.Enums, cfg.LessFalsePositives = true, true
+	}
+
+	if err := buildHashMapAccessor(ctx, data, d.Compression, idxPath, false, cfg, ps, d.logger); err != nil {
+		return err
+	}
+
+	if d.AccessorList.Has(AccessorExistence) {
+		if err := buildExistanceFilter(ctx, data, d.Compression, d.kvExistenceIdxFilePath(fromStep, toStep), *cfg.Salt, ps); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (d *Domain) MissedBtreeAccessors() (l []*filesItem) {
@@ -1247,11 +1276,15 @@ func (d *Domain) MissedMapAccessors() (l []*filesItem) {
 }
 
 func (d *Domain) missedMapAccessors(source []*filesItem) (l []*filesItem) {
-	if !d.AccessorList.Has(AccessorHashMap) {
-		return nil
-	}
-	return fileItemsWithMissedAccessors(source, d.aggregationStep, func(fromStep uint64, toStep uint64) []string {
-		return []string{d.kviAccessorFilePath(fromStep, toStep)}
+	return fileItemsWithMissedAccessors(source, d.aggregationStep, func(fromStep, toStep uint64) []string {
+		var files []string
+		if d.AccessorList.Has(AccessorHashMap) || d.AccessorList.Has(AccessorHashMap2Layer) {
+			files = append(files, d.kviAccessorFilePath(fromStep, toStep))
+		}
+		if d.AccessorList.Has(AccessorExistence) {
+			files = append(files, d.kvExistenceIdxFilePath(fromStep, toStep))
+		}
+		return files
 	})
 }
 
@@ -1344,6 +1377,42 @@ func buildHashMapAccessor(ctx context.Context, d *seg.Decompressor, compressed s
 		} else {
 			break
 		}
+	}
+	return nil
+}
+
+func buildExistanceFilter(ctx context.Context, d *seg.Decompressor, compressed seg.FileCompression, idxPath string, salt uint32, ps *background.ProgressSet) error {
+	_, fileName := filepath.Split(idxPath)
+	count := d.Count() / 2
+	p := ps.AddNew(fileName, uint64(count))
+	defer ps.Delete(p)
+
+	defer d.EnableMadvNormal().DisableReadAhead()
+
+	g := seg.NewReader(d.MakeGetter(), compressed)
+
+	existenceFilter, err := existence.NewExistenceFilter(uint64(count), idxPath)
+	if err != nil {
+		return err
+	}
+	defer existenceFilter.Close()
+	//if noFsync {
+	//	existenceFilter.DisableFsync()
+	//}
+
+	key := make([]byte, 0, 64)
+	for g.HasNext() {
+		key, _ = g.Next(key[:0])
+		hi, _ := murmur3.Sum128WithSeed(key, salt)
+		if existenceFilter != nil {
+			existenceFilter.AddHash(hi)
+		}
+		_, _ = g.Skip()
+
+		p.Processed.Add(1)
+	}
+	if err = existenceFilter.Build(); err != nil {
+		return fmt.Errorf("build idx: %w", err)
 	}
 	return nil
 }
