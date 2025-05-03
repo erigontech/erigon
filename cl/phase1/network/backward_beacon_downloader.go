@@ -17,6 +17,7 @@
 package network
 
 import (
+	"fmt"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -126,6 +127,7 @@ func (b *BackwardBeaconDownloader) Peers() (uint64, error) {
 // If the block's root hash does not match the expected root hash, it will be rejected and the function will continue to the next block.
 func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 	count := uint64(64)
+	fmt.Printf("[dbg] ")
 	start := b.slotToDownload.Load() - count + 1
 	// Overflow? round to 0.
 	if start > b.slotToDownload.Load() {
