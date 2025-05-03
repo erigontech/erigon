@@ -134,6 +134,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 						FirstLogIndexWithinBlock: uint32(firstIndex),
 					}
 					lastReceipt.FirstLogIndexWithinBlock = uint32(firstIndex)
+
 					fmt.Printf("[dbg] here100: %d, %d, %d=%d\n", txTask.TxNum, txTask.TxIndex, lastReceipt.FirstLogIndexWithinBlock, firstIndex)
 					if err := rawtemporaldb.AppendReceipt(se.doms, &receipt, se.blobGasUsed); err != nil {
 						return false, err
@@ -141,6 +142,13 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 				} else {
 					fmt.Printf("[dbg] here101: %d, %d, %d\n", txTask.TxNum, txTask.TxIndex, lastReceipt.FirstLogIndexWithinBlock)
 				}
+			}
+		}
+
+		if txTask.TxIndex > 0 && len(txTask.BlockReceipts) > 0 {
+			receipt := txTask.BlockReceipts[txTask.TxIndex]
+			if len(receipt.Logs) > 0 && int(receipt.FirstLogIndexWithinBlock) != int(receipt.Logs[0].Index) {
+				panic(fmt.Sprintf("assert: FirstLogIndexWithinBlock is wrong: %d %d, blockNum=%d", receipt.FirstLogIndexWithinBlock, receipt.Logs[0].Index, receipt.BlockNumber.Uint64()))
 			}
 		}
 

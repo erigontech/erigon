@@ -257,6 +257,10 @@ func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *li
 				}
 			}
 		}
+		if len(receipt.Logs) > 0 && int(receipt.FirstLogIndexWithinBlock) != int(receipt.Logs[0].Index) {
+			panic(fmt.Sprintf("assert: FirstLogIndexWithinBlock is wrong: %d %d, blockNum=%d", receipt.FirstLogIndexWithinBlock, receipt.Logs[0].Index, receipt.BlockNumber.Uint64()))
+		}
+
 		fmt.Printf("[dbg] here88: tn=%d, ti=%d, %d, %t\n", txTask.TxNum, txTask.TxIndex, len(txTask.BlockReceipts), receipt == nil)
 		if err := rawdb.WriteReceiptCacheV2(domains, receipt); err != nil {
 			return err
