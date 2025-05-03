@@ -134,6 +134,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 						FirstLogIndexWithinBlock: uint32(firstIndex),
 					}
 					lastReceipt.FirstLogIndexWithinBlock = uint32(firstIndex)
+					fmt.Printf("[dbg] here100: %d, %d, %d\n", txTask.TxNum, txTask.TxIndex, lastReceipt.FirstLogIndexWithinBlock)
 					if err := rawtemporaldb.AppendReceipt(se.doms, &receipt, se.blobGasUsed); err != nil {
 						return false, err
 					}
