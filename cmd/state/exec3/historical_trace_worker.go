@@ -108,6 +108,7 @@ func NewHistoricalTraceWorker(
 		ctx:         ctx,
 		logger:      logger,
 		taskGasPool: new(core.GasPool),
+		stateWriter: state.NewNoopWriter(),
 	}
 	ie.ibs = state.New(ie.stateReader)
 
@@ -143,7 +144,6 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 
 	rw.stateReader.SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetReadSet()
-	rw.stateWriter = state.NewNoopWriter()
 
 	rw.ibs.Reset()
 	ibs := rw.ibs
