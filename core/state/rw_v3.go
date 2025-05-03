@@ -270,7 +270,7 @@ func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *li
 					CumulativeGasUsed:        lastReceipt.CumulativeGasUsed,
 					FirstLogIndexWithinBlock: uint32(firstIndex),
 				}
-				lastReceipt.FirstLogIndexWithinBlock = uint32(firstIndex)
+				//lastReceipt.FirstLogIndexWithinBlock = uint32(firstIndex)
 				fmt.Printf("[dbg] here100: %d, %d, %d=%d\n", txTask.TxNum, txTask.TxIndex, receipt.FirstLogIndexWithinBlock, firstIndex)
 				if err := rawtemporaldb.AppendReceipt(domains, &receiptToWriteInDB, blobGasUsed); err != nil {
 					return err
