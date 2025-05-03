@@ -25,13 +25,13 @@ import (
 	"github.com/gballet/go-verkle"
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/trie/vtree"
 	"github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
 )
 
 func int256ToVerkleFormat(x *uint256.Int, buffer []byte) {
@@ -199,7 +199,7 @@ func (v *VerkleTreeWriter) WriteContractCodeChunks(codeKeys [][]byte, chunks [][
 }
 
 func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() (common.Hash, error) {
-	if err := v.db.ClearBucket(kv.VerkleTrie); err != nil {
+	if err := v.db.ClearTable(kv.VerkleTrie); err != nil {
 		return common.Hash{}, err
 	}
 

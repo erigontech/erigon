@@ -276,7 +276,7 @@ func SysCallContract(contract common.Address, data []byte, chainConfig *chain.Co
 func SysCallContractWithBlockContext(contract common.Address, data []byte, chainConfig *chain.Config, ibs evmtypes.IntraBlockState, blockContext evmtypes.BlockContext, engine consensus.EngineReader, constCall bool, tracer *tracing.Hooks) (result []byte, logs []*types.Log, err error) {
 	innerTracer := &tracing.Hooks{}
 	if tracer != nil {
-		innerTracer = tracer
+		//innerTracer = tracer
 		if tracer.OnSystemCallStart != nil {
 			tracer.OnSystemCallStart()
 		}

@@ -930,7 +930,7 @@ func TestReproduceCrash(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	tsw := state.NewWriterV4(sd)
+	tsw := state.NewStateWriterV3(sd, nil)
 	tsr := state.NewReaderV3(sd)
 	sd.SetTxNum(1)
 	sd.SetBlockNum(1)
@@ -1354,7 +1354,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	r, tsw := state.NewReaderV3(sd), state.NewWriterV4(sd)
+	r, tsw := state.NewReaderV3(sd), state.NewStateWriterV3(sd, nil)
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
@@ -1404,7 +1404,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	r, w := state.NewReaderV3(sd), state.NewWriterV4(sd)
+	r, w := state.NewReaderV3(sd), state.NewStateWriterV3(sd, nil)
 
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
@@ -1442,7 +1442,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	r, w := state.NewReaderV3(sd), state.NewWriterV4(sd)
+	r, w := state.NewReaderV3(sd), state.NewStateWriterV3(sd, nil)
 
 	intraBlockState := state.New(r)
 	// Start the 1st transaction

@@ -2,6 +2,7 @@ package state
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -82,6 +83,37 @@ type SchemaGen struct {
 	LogTopicIdx      iiCfg
 	TracesFromIdx    iiCfg
 	TracesToIdx      iiCfg
+}
+
+type Versioned interface {
+	GetVersions() VersionTypes
+}
+
+func (s *SchemaGen) GetVersioned(name string) (Versioned, error) {
+	switch name {
+	case "accounts":
+		return &s.AccountsDomain, nil
+	case "storage":
+		return &s.StorageDomain, nil
+	case "code":
+		return &s.CodeDomain, nil
+	case "commitment":
+		return &s.CommitmentDomain, nil
+	case "receipt":
+		return &s.ReceiptDomain, nil
+	case "rcache":
+		return &s.RCacheDomain, nil
+	case "logtopics":
+		return &s.LogTopicIdx, nil
+	case "logaddrs":
+		return &s.LogAddrIdx, nil
+	case "tracesfrom":
+		return &s.TracesFromIdx, nil
+	case "tracesto":
+		return &s.TracesToIdx, nil
+	default:
+		return nil, fmt.Errorf("unknown schema version '%s'", name)
+	}
 }
 
 func (s *SchemaGen) GetDomainCfg(name kv.Domain) domainCfg {

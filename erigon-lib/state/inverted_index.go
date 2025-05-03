@@ -97,6 +97,12 @@ type iiCfg struct {
 	indexList Accessors
 }
 
+func (ii iiCfg) GetVersions() VersionTypes {
+	return VersionTypes{
+		II: &ii.version,
+	}
+}
+
 type iiVisible struct {
 	files  []visibleFile
 	name   string

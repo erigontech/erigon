@@ -119,6 +119,14 @@ type domainCfg struct {
 	version DomainVersionTypes
 }
 
+func (d domainCfg) GetVersions() VersionTypes {
+	return VersionTypes{
+		Domain: &d.version,
+		Hist:   &d.hist.version,
+		II:     &d.hist.iiCfg.version,
+	}
+}
+
 type domainVisible struct {
 	files  []visibleFile
 	name   kv.Domain
@@ -1514,6 +1522,10 @@ func (dt *DomainRoTx) HistoryStartFrom() uint64 {
 		return 0
 	}
 	return dt.ht.files[0].startTxNum
+}
+
+func (dt *DomainRoTx) HistoryEndTxNum(tx kv.Tx) uint64 {
+	return max(dt.FirstStepNotInFiles()*dt.d.aggregationStep, dt.DbgMaxTxNumInDB(tx))
 }
 
 // GetAsOf does not always require usage of roTx. If it is possible to determine

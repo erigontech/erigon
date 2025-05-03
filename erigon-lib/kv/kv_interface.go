@@ -424,7 +424,7 @@ type Tx interface {
 	BucketSize(table string) (uint64, error)
 	Count(bucket string) (uint64, error)
 
-	ListBuckets() ([]string, error)
+	ListTables() ([]string, error)
 }
 
 // RwTx
@@ -589,7 +589,8 @@ type TemporalDebugTx interface {
 }
 
 type TemporalDebugDB interface {
-	DomainTables(domain ...Domain) []string
+	DomainTables(names ...Domain) []string
+	InvertedIdxTables(names ...InvertedIdx) []string
 }
 
 type WithFreezeInfo interface {
@@ -649,11 +650,11 @@ type HasSpaceDirty interface {
 
 // BucketMigrator used for buckets migration, don't use it in usual app code
 type BucketMigrator interface {
-	ListBuckets() ([]string, error)
-	DropBucket(string) error
-	CreateBucket(string) error
-	ExistsBucket(string) (bool, error)
-	ClearBucket(string) error
+	ListTables() ([]string, error)
+	DropTable(string) error
+	CreateTable(string) error
+	ExistsTable(string) (bool, error)
+	ClearTable(string) error
 }
 
 // PendingMutations in-memory storage of changes

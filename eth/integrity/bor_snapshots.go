@@ -135,26 +135,41 @@ func ValidateBorEvents(ctx context.Context, db kv.TemporalRoDB, blockReader serv
 	return nil
 }
 
-func ValidateBorSpans(logger log.Logger, dirs datadir.Dirs, snaps *heimdall.RoSnapshots, failFast bool) error {
+func ValidateBorSpans(ctx context.Context, logger log.Logger, dirs datadir.Dirs, snaps *heimdall.RoSnapshots, failFast bool) error {
 	baseStore := heimdall.NewMdbxStore(logger, dirs.DataDir, true, 32)
 	snapshotStore := heimdall.NewSpanSnapshotStore(baseStore.Spans(), snaps)
-	err := snapshotStore.ValidateSnapshots(logger, failFast)
+	err := snapshotStore.Prepare(ctx)
+	if err != nil {
+		return err
+	}
+	defer snapshotStore.Close()
+	err = snapshotStore.ValidateSnapshots(ctx, logger, failFast)
 	logger.Info("[integrity] ValidateBorSpans: done", "err", err)
 	return err
 }
 
-func ValidateBorCheckpoints(logger log.Logger, dirs datadir.Dirs, snaps *heimdall.RoSnapshots, failFast bool) error {
+func ValidateBorCheckpoints(ctx context.Context, logger log.Logger, dirs datadir.Dirs, snaps *heimdall.RoSnapshots, failFast bool) error {
 	baseStore := heimdall.NewMdbxStore(logger, dirs.DataDir, true, 32)
 	snapshotStore := heimdall.NewCheckpointSnapshotStore(baseStore.Checkpoints(), snaps)
-	err := snapshotStore.ValidateSnapshots(logger, failFast)
+	err := snapshotStore.Prepare(ctx)
+	if err != nil {
+		return err
+	}
+	defer snapshotStore.Close()
+	err = snapshotStore.ValidateSnapshots(ctx, logger, failFast)
 	logger.Info("[integrity] ValidateBorCheckpoints: done", "err", err)
 	return err
 }
 
-func ValidateBorMilestones(logger log.Logger, dirs datadir.Dirs, snaps *heimdall.RoSnapshots, failFast bool) error {
+func ValidateBorMilestones(ctx context.Context, logger log.Logger, dirs datadir.Dirs, snaps *heimdall.RoSnapshots, failFast bool) error {
 	baseStore := heimdall.NewMdbxStore(logger, dirs.DataDir, true, 32)
 	snapshotStore := heimdall.NewMilestoneSnapshotStore(baseStore.Milestones(), snaps)
-	err := snapshotStore.ValidateSnapshots(logger, failFast)
+	err := snapshotStore.Prepare(ctx)
+	if err != nil {
+		return err
+	}
+	defer snapshotStore.Close()
+	err = snapshotStore.ValidateSnapshots(ctx, logger, failFast)
 	logger.Info("[integrity] ValidateBorMilestones: done", "err", err)
 	return err
 }
