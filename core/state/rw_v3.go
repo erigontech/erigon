@@ -243,17 +243,8 @@ func (rs *StateV3) ApplyLogsAndTraces4(txTask *TxTask, domains *libstate.SharedD
 
 	if rs.syncCfg.PersistReceiptsCacheV2 {
 		var receipt *types.Receipt
-		if !txTask.Final {
-			if txTask.TxIndex >= 0 && txTask.BlockReceipts != nil {
-				receipt = txTask.BlockReceipts[txTask.TxIndex]
-			}
-		} else {
-			if rs.isBor && txTask.TxIndex >= 1 {
-				receipt = txTask.BlockReceipts[txTask.TxIndex-1]
-				if receipt == nil {
-					return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
-				}
-			}
+		if len(txTask.BlockReceipts) > txTask.TxIndex {
+			receipt = txTask.BlockReceipts[txTask.TxIndex]
 		}
 		if err := rawdb.WriteReceiptCacheV2(domains, receipt); err != nil {
 			return err
