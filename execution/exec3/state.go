@@ -22,8 +22,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/erigontech/erigon/execution/exec3/calltracer"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon/execution/exec3/calltracer"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -118,7 +119,7 @@ func (rw *Worker) ResetState(rs *state.ParallelExecutionState, accumulator *shar
 	} else {
 		rw.SetReader(state.NewReaderV3(rs.Domains()))
 	}
-	rw.stateWriter = state.NewStateWriterV3(rs, accumulator)
+	rw.stateWriter = state.NewStateWriterV3(rs.Domains(), accumulator)
 }
 
 func (rw *Worker) SetGaspool(gp *core.GasPool) {
