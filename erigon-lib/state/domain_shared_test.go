@@ -300,10 +300,10 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.Equal(int(stepSize), iterCount(domains))
 
 		domains.SetTxNum(stepSize)
-		if err := domains.DomainDel(kv.StorageDomain, addr, nil, 0); err != nil {
+		if err := domains.DomainDel(kv.StorageDomain, append(addr, st(1)...), nil, 0); err != nil {
 			panic(err)
 		}
-		if err := domains.DomainDel(kv.StorageDomain, addr, nil, 0); err != nil {
+		if err := domains.DomainDel(kv.StorageDomain, append(addr, st(2)...), nil, 0); err != nil {
 			panic(err)
 		}
 		for i := stepSize; i < stepSize*2+2; i++ {
