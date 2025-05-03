@@ -671,7 +671,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 		}
 
 		if strings.HasSuffix(filename, ".kvei") {
-			filter, err := existence.NewFilter(0, filename)
+			filter, err := existence.NewFilter(0, filename, true)
 			require.NoError(t, err)
 			filter.DisableFsync()
 			require.NoError(t, filter.Build())

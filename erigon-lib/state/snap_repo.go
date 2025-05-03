@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"sync"
 
+	btree2 "github.com/tidwall/btree"
+
 	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -12,7 +14,6 @@ import (
 	"github.com/erigontech/erigon-lib/seg"
 	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 	"github.com/erigontech/erigon-lib/version"
-	btree2 "github.com/tidwall/btree"
 )
 
 // i) manages dirtyfiles and visible files,
