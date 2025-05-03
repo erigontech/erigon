@@ -102,6 +102,7 @@ func NewHistoricalTraceWorker(
 		execArgs: execArgs,
 
 		stateReader: stateReader,
+		stateWriter: state.NewNoopWriter(),
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, execArgs.ChainConfig, vm.Config{}),
 		vmConfig:    &vm.Config{},
 		ibs:         state.New(stateReader),
@@ -143,10 +144,9 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 
 	rw.stateReader.SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetReadSet()
-	rw.stateWriter = state.NewNoopWriter()
 
-	rw.ibs.Reset()
 	ibs := rw.ibs
+	ibs.Reset()
 
 	var err error
 	rules, header := txTask.Rules, txTask.Header
