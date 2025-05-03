@@ -502,8 +502,8 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 			continue
 		}
 		//Erigon3 doesn't provide history of commitment (.v, .ef files), but does provide .kv:
-		// - prohibit v1-commitment...v, v2-commitment...ef, etc...
-		// - allow v1-commitment...kv
+		// - prohibit v1.0-commitment...v, v2.0-commitment...ef, etc...
+		// - allow v1.0-commitment...kv
 		e3blackListed := strings.Contains(name, "commitment") && (strings.HasSuffix(name, ".v.torrent") || strings.HasSuffix(name, ".ef.torrent"))
 		if e3blackListed {
 			_, fName := filepath.Split(name)

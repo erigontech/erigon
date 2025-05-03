@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"net/http"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 )
@@ -42,8 +42,8 @@ func (a *ApiHandler) getHeaders(w http.ResponseWriter, r *http.Request) (*beacon
 		return nil, err
 	}
 	defer tx.Rollback()
-	var candidates []libcommon.Hash
-	var potentialRoot libcommon.Hash
+	var candidates []common.Hash
+	var potentialRoot common.Hash
 	// First lets find some good candidates for the query. TODO(Giulio2002): this does not give all the headers.
 	switch {
 	case queryParentHash != nil:
@@ -120,7 +120,7 @@ func (a *ApiHandler) getHeader(w http.ResponseWriter, r *http.Request) (*beaconh
 	if signedHeader == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("block not found %x", root))
 	}
-	var canonicalRoot libcommon.Hash
+	var canonicalRoot common.Hash
 	canonicalRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, signedHeader.Header.Slot)
 	if err != nil {
 		return nil, err

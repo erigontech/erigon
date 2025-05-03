@@ -28,7 +28,7 @@ import (
 	"math/big"
 	"slices"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
@@ -64,15 +64,15 @@ type Receipt struct {
 
 	// Implementation fields: These fields are added by geth when processing a transaction.
 	// They are stored in the chain database.
-	TxHash          libcommon.Hash    `json:"transactionHash" gencodec:"required"`
-	ContractAddress libcommon.Address `json:"contractAddress"`
-	GasUsed         uint64            `json:"gasUsed" gencodec:"required"`
+	TxHash          common.Hash    `json:"transactionHash" gencodec:"required"`
+	ContractAddress common.Address `json:"contractAddress"`
+	GasUsed         uint64         `json:"gasUsed" gencodec:"required"`
 
 	// Inclusion information: These fields provide information about the inclusion of the
 	// transaction corresponding to this receipt.
-	BlockHash        libcommon.Hash `json:"blockHash,omitempty"`
-	BlockNumber      *big.Int       `json:"blockNumber,omitempty"`
-	TransactionIndex uint           `json:"transactionIndex"`
+	BlockHash        common.Hash `json:"blockHash,omitempty"`
+	BlockNumber      *big.Int    `json:"blockNumber,omitempty"`
+	TransactionIndex uint        `json:"transactionIndex"`
 
 	FirstLogIndexWithinBlock uint32 `json:"-"` // field which used to store in db and re-calc
 }
@@ -105,7 +105,7 @@ type storedReceiptRLP struct {
 	Logs []*LogForStorage
 
 	TransactionIndex uint
-	ContractAddress  libcommon.Address
+	ContractAddress  common.Address
 	GasUsed          uint64
 }
 
@@ -239,7 +239,7 @@ func (r *Receipt) decodePayload(s *rlp.Stream) error {
 			return fmt.Errorf("open Topics: %w", err)
 		}
 		for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
-			log.Topics = append(log.Topics, libcommon.Hash{})
+			log.Topics = append(log.Topics, common.Hash{})
 			if len(b) != 32 {
 				return fmt.Errorf("wrong size for Topic: %d", len(b))
 			}
@@ -320,7 +320,7 @@ func (r *Receipt) setStatus(postStateOrStatus []byte) error {
 		r.Status = ReceiptStatusSuccessful
 	case bytes.Equal(postStateOrStatus, receiptStatusFailedRLP):
 		r.Status = ReceiptStatusFailed
-	case len(postStateOrStatus) == len(libcommon.Hash{}):
+	case len(postStateOrStatus) == len(common.Hash{}):
 		r.PostState = postStateOrStatus
 	default:
 		return fmt.Errorf("invalid receipt status %x", postStateOrStatus)
@@ -350,10 +350,10 @@ func (r *Receipt) Copy() *Receipt {
 		CumulativeGasUsed: r.CumulativeGasUsed,
 		Bloom:             BytesToBloom(r.Bloom.Bytes()),
 		Logs:              r.Logs.Copy(),
-		TxHash:            libcommon.BytesToHash(r.TxHash.Bytes()),
-		ContractAddress:   libcommon.BytesToAddress(r.ContractAddress.Bytes()),
+		TxHash:            common.BytesToHash(r.TxHash.Bytes()),
+		ContractAddress:   common.BytesToAddress(r.ContractAddress.Bytes()),
 		GasUsed:           r.GasUsed,
-		BlockHash:         libcommon.BytesToHash(r.BlockHash.Bytes()),
+		BlockHash:         common.BytesToHash(r.BlockHash.Bytes()),
 		BlockNumber:       big.NewInt(0).Set(r.BlockNumber),
 		TransactionIndex:  r.TransactionIndex,
 
@@ -474,7 +474,7 @@ func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 
 // DeriveFields fills the receipts with their computed fields based on consensus
 // data and contextual infos like containing block and transactions.
-func (r Receipts) DeriveFields(hash libcommon.Hash, number uint64, txs Transactions, senders []libcommon.Address) error {
+func (r Receipts) DeriveFields(hash common.Hash, number uint64, txs Transactions, senders []common.Address) error {
 	logIndex := uint(0) // logIdx is unique within the block and starts from 0
 	if len(txs) != len(r) {
 		return fmt.Errorf("transaction and receipt count mismatch, txn count = %d, receipts count = %d", len(txs), len(r))
@@ -522,7 +522,7 @@ func (r Receipts) DeriveFields(hash libcommon.Hash, number uint64, txs Transacti
 
 // DeriveFieldsV3ForSingleReceipt fills the receipts with their computed fields based on consensus
 // data and contextual infos like containing block and transactions.
-func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon.Hash, blockNum uint64, txn Transaction, prevCumulativeGasUsed uint64) error {
+func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash common.Hash, blockNum uint64, txn Transaction, prevCumulativeGasUsed uint64) error {
 	logIndex := r.FirstLogIndexWithinBlock // logIdx is unique within the block and starts from 0
 
 	sender, ok := txn.cachedSender()
@@ -568,7 +568,7 @@ func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon
 
 // DeriveFieldsV4ForCachedReceipt fills the receipts with their computed fields based on consensus
 // data and contextual infos like containing block and transactions.
-func (r *Receipt) DeriveFieldsV4ForCachedReceipt(blockHash libcommon.Hash, blockNum uint64, txnHash libcommon.Hash) {
+func (r *Receipt) DeriveFieldsV4ForCachedReceipt(blockHash common.Hash, blockNum uint64, txnHash common.Hash) {
 	logIndex := r.FirstLogIndexWithinBlock // logIdx is unique within the block and starts from 0
 
 	r.BlockHash = blockHash

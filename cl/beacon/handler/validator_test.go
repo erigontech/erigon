@@ -24,7 +24,6 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
 	mockaggregation "github.com/erigontech/erigon/cl/aggregation/mock_services"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -85,7 +84,7 @@ func (t *validatorTestSuite) TearDownTest() {
 }
 
 func (t *validatorTestSuite) TestGetEthV1ValidatorAggregateAttestation() {
-	mockDataRoot := libcommon.HexToHash("0x123").String()
+	mockDataRoot := common.HexToHash("0x123").String()
 
 	tests := []struct {
 		name    string
@@ -116,9 +115,9 @@ func (t *validatorTestSuite) TestGetEthV1ValidatorAggregateAttestation() {
 				// 	solid.NewAttestionDataFromParameters(
 				// 		123456,
 				// 		1,
-				// 		libcommon.HexToHash(mockDataRoot),
-				// 		solid.NewCheckpointFromParameters(libcommon.Hash{}, 1),
-				// 		solid.NewCheckpointFromParameters(libcommon.Hash{}, 1),
+				// 		common.HexToHash(mockDataRoot),
+				// 		solid.NewCheckpointFromParameters(common.Hash{}, 1),
+				// 		solid.NewCheckpointFromParameters(common.Hash{}, 1),
 				// 	),
 				// 	[96]byte{},
 				// )
@@ -127,12 +126,12 @@ func (t *validatorTestSuite) TestGetEthV1ValidatorAggregateAttestation() {
 					Data: &solid.AttestationData{
 						Slot:            123456,
 						CommitteeIndex:  1,
-						BeaconBlockRoot: libcommon.HexToHash(mockDataRoot),
+						BeaconBlockRoot: common.HexToHash(mockDataRoot),
 						Source:          solid.Checkpoint{Epoch: 1},
 						Target:          solid.Checkpoint{Epoch: 1},
 					},
 				}
-				t.mockAggrPool.EXPECT().GetAggregatationByRoot(libcommon.HexToHash(mockDataRoot)).Return(ret).Times(1)
+				t.mockAggrPool.EXPECT().GetAggregatationByRoot(common.HexToHash(mockDataRoot)).Return(ret).Times(1)
 			},
 			expCode: http.StatusBadRequest,
 			expBody: map[string]any{
@@ -150,9 +149,9 @@ func (t *validatorTestSuite) TestGetEthV1ValidatorAggregateAttestation() {
 				// 	solid.NewAttestionDataFromParameters(
 				// 		1,
 				// 		1,
-				// 		libcommon.HexToHash(mockDataRoot),
-				// 		solid.NewCheckpointFromParameters(libcommon.Hash{}, 1),
-				// 		solid.NewCheckpointFromParameters(libcommon.Hash{}, 1),
+				// 		common.HexToHash(mockDataRoot),
+				// 		solid.NewCheckpointFromParameters(common.Hash{}, 1),
+				// 		solid.NewCheckpointFromParameters(common.Hash{}, 1),
 				// 	),
 				// 	[96]byte{0, 1, 2, 3, 4, 5},
 				// )
@@ -161,13 +160,13 @@ func (t *validatorTestSuite) TestGetEthV1ValidatorAggregateAttestation() {
 					Data: &solid.AttestationData{
 						Slot:            1,
 						CommitteeIndex:  1,
-						BeaconBlockRoot: libcommon.HexToHash(mockDataRoot),
+						BeaconBlockRoot: common.HexToHash(mockDataRoot),
 						Source:          solid.Checkpoint{Epoch: 1},
 						Target:          solid.Checkpoint{Epoch: 1},
 					},
 					Signature: [96]byte{0, 1, 2, 3, 4, 5},
 				}
-				t.mockAggrPool.EXPECT().GetAggregatationByRoot(libcommon.HexToHash(mockDataRoot)).Return(ret).Times(1)
+				t.mockAggrPool.EXPECT().GetAggregatationByRoot(common.HexToHash(mockDataRoot)).Return(ret).Times(1)
 			},
 			expCode: http.StatusOK,
 			expBody: map[string]any{
@@ -180,11 +179,11 @@ func (t *validatorTestSuite) TestGetEthV1ValidatorAggregateAttestation() {
 						"beacon_block_root": mockDataRoot,
 						"source": map[string]any{
 							"epoch": "1",
-							"root":  libcommon.Hash{}.String(),
+							"root":  common.Hash{}.String(),
 						},
 						"target": map[string]any{
 							"epoch": "1",
-							"root":  libcommon.Hash{}.String(),
+							"root":  common.Hash{}.String(),
 						},
 					},
 				},

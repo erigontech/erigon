@@ -26,7 +26,7 @@ import (
 	"reflect"
 	"strings"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 )
 
@@ -40,7 +40,7 @@ type Error struct {
 	Sig string
 	// ID returns the canonical representation of the event's signature used by the
 	// abi definition to identify event names and types.
-	ID libcommon.Hash
+	ID common.Hash
 }
 
 func NewError(name string, inputs Arguments) Error {
@@ -67,7 +67,7 @@ func NewError(name string, inputs Arguments) Error {
 
 	str := fmt.Sprintf("error %v(%v)", name, strings.Join(names, ", "))
 	sig := fmt.Sprintf("%v(%v)", name, strings.Join(types, ","))
-	id := libcommon.BytesToHash(crypto.Keccak256([]byte(sig)))
+	id := common.BytesToHash(crypto.Keccak256([]byte(sig)))
 
 	return Error{
 		Name:   name,

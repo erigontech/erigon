@@ -76,7 +76,7 @@ func TestGetStatus(t *testing.T) {
 		}
 		builderClient.httpClient = mockHttpClient
 		err := builderClient.GetStatus(ctx)
-		require.ErrorIs(t, err, nil)
+		require.NoError(t, err)
 	})
 
 	t.Run("200 OK", func(t *testing.T) {

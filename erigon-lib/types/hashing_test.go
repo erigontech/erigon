@@ -23,8 +23,7 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/trie"
 )
@@ -33,7 +32,7 @@ func genTransactions(n uint64) Transactions {
 	txs := Transactions{}
 
 	for i := uint64(0); i < n; i++ {
-		tx := NewTransaction(i, libcommon.Address{}, uint256.NewInt(1000+i), 10+i, uint256.NewInt(1000+i), []byte(fmt.Sprintf("hello%d", i)))
+		tx := NewTransaction(i, common.Address{}, uint256.NewInt(1000+i), 10+i, uint256.NewInt(1000+i), []byte(fmt.Sprintf("hello%d", i)))
 		txs = append(txs, tx)
 	}
 
@@ -88,23 +87,23 @@ func checkDeriveSha(t *testing.T, list DerivableList) {
 	}
 }
 
-func hashesEqual(h1, h2 libcommon.Hash) bool {
+func hashesEqual(h1, h2 common.Hash) bool {
 	if len(h1) != len(h2) {
 		return false
 	}
 	return h1.Hex() == h2.Hex()
 }
 
-func legacyDeriveSha(list DerivableList) libcommon.Hash {
+func legacyDeriveSha(list DerivableList) common.Hash {
 	keybuf := new(bytes.Buffer)
 	valbuf := new(bytes.Buffer)
-	trie := trie.NewTestRLPTrie(libcommon.Hash{})
+	trie := trie.NewTestRLPTrie(common.Hash{})
 	for i := 0; i < list.Len(); i++ {
 		keybuf.Reset()
 		valbuf.Reset()
 		_ = rlp.Encode(keybuf, uint(i))
 		list.EncodeIndex(i, valbuf)
-		trie.Update(keybuf.Bytes(), libcommon.CopyBytes(valbuf.Bytes()))
+		trie.Update(keybuf.Bytes(), common.CopyBytes(valbuf.Bytes()))
 	}
 	return trie.Hash()
 }

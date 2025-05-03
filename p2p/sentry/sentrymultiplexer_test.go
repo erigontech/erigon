@@ -377,5 +377,5 @@ func TestPeers(t *testing.T) {
 	peersReply, err := mux.Peers(context.Background(), &emptypb.Empty{})
 	require.NoError(t, err)
 	require.NotNil(t, peersReply)
-	require.Equal(t, 10, len(peersReply.GetPeers()))
+	require.Len(t, peersReply.GetPeers(), 10)
 }

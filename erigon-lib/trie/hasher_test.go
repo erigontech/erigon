@@ -20,14 +20,14 @@ import (
 	"fmt"
 	"testing"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 func TestValue(t *testing.T) {
 	t.Skip("should be restored. skipped for Erigon")
 
 	h := newHasher(false)
-	var hn libcommon.Hash
+	var hn common.Hash
 	h.hash(ValueNode("BLAH"), false, hn[:])
 	expected := "0x0"
 	actual := fmt.Sprintf("0x%x", hn[:])

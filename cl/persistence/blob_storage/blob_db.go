@@ -28,7 +28,7 @@ import (
 	"sync/atomic"
 
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -44,11 +44,11 @@ const (
 )
 
 type BlobStorage interface {
-	WriteBlobSidecars(ctx context.Context, blockRoot libcommon.Hash, blobSidecars []*cltypes.BlobSidecar) error
-	RemoveBlobSidecars(ctx context.Context, slot uint64, blockRoot libcommon.Hash) error
-	ReadBlobSidecars(ctx context.Context, slot uint64, blockRoot libcommon.Hash) (out []*cltypes.BlobSidecar, found bool, err error)
-	WriteStream(w io.Writer, slot uint64, blockRoot libcommon.Hash, idx uint64) error // Used for P2P networking
-	KzgCommitmentsCount(ctx context.Context, blockRoot libcommon.Hash) (uint32, error)
+	WriteBlobSidecars(ctx context.Context, blockRoot common.Hash, blobSidecars []*cltypes.BlobSidecar) error
+	RemoveBlobSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) error
+	ReadBlobSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) (out []*cltypes.BlobSidecar, found bool, err error)
+	WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error // Used for P2P networking
+	KzgCommitmentsCount(ctx context.Context, blockRoot common.Hash) (uint32, error)
 	Prune() error
 }
 
@@ -64,7 +64,7 @@ func NewBlobStore(db kv.RwDB, fs afero.Fs, slotsKept uint64, beaconChainConfig *
 	return &BlobStore{fs: fs, db: db, slotsKept: slotsKept, beaconChainConfig: beaconChainConfig, ethClock: ethClock}
 }
 
-func blobSidecarFilePath(slot, index uint64, blockRoot libcommon.Hash) (folderpath, filepath string) {
+func blobSidecarFilePath(slot, index uint64, blockRoot common.Hash) (folderpath, filepath string) {
 	subdir := slot / subdivisionSlot
 	folderpath = strconv.FormatUint(subdir, 10)
 	filepath = fmt.Sprintf("%s/%s_%d", folderpath, blockRoot.String(), index)
@@ -78,7 +78,7 @@ indicies:
 */
 
 // WriteBlobSidecars writes the sidecars on the database. it assumes that all blobSidecars are for the same blockRoot and we have all of them.
-func (bs *BlobStore) WriteBlobSidecars(ctx context.Context, blockRoot libcommon.Hash, blobSidecars []*cltypes.BlobSidecar) error {
+func (bs *BlobStore) WriteBlobSidecars(ctx context.Context, blockRoot common.Hash, blobSidecars []*cltypes.BlobSidecar) error {
 
 	for _, blobSidecar := range blobSidecars {
 		folderPath, filePath := blobSidecarFilePath(
@@ -115,7 +115,7 @@ func (bs *BlobStore) WriteBlobSidecars(ctx context.Context, blockRoot libcommon.
 }
 
 // ReadBlobSidecars reads the sidecars from the database. it assumes that all blobSidecars are for the same blockRoot and we have all of them.
-func (bs *BlobStore) ReadBlobSidecars(ctx context.Context, slot uint64, blockRoot libcommon.Hash) ([]*cltypes.BlobSidecar, bool, error) {
+func (bs *BlobStore) ReadBlobSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) ([]*cltypes.BlobSidecar, bool, error) {
 	tx, err := bs.db.BeginRo(ctx)
 	if err != nil {
 		return nil, false, err
@@ -173,7 +173,7 @@ func (bs *BlobStore) Prune() error {
 	return nil
 }
 
-func (bs *BlobStore) WriteStream(w io.Writer, slot uint64, blockRoot libcommon.Hash, idx uint64) error {
+func (bs *BlobStore) WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error {
 	_, filePath := blobSidecarFilePath(slot, idx, blockRoot)
 	file, err := bs.fs.Open(filePath)
 	if err != nil {
@@ -184,7 +184,7 @@ func (bs *BlobStore) WriteStream(w io.Writer, slot uint64, blockRoot libcommon.H
 	return err
 }
 
-func (bs *BlobStore) KzgCommitmentsCount(ctx context.Context, blockRoot libcommon.Hash) (uint32, error) {
+func (bs *BlobStore) KzgCommitmentsCount(ctx context.Context, blockRoot common.Hash) (uint32, error) {
 	tx, err := bs.db.BeginRo(context.Background())
 	if err != nil {
 		return 0, err
@@ -200,7 +200,7 @@ func (bs *BlobStore) KzgCommitmentsCount(ctx context.Context, blockRoot libcommo
 	return binary.LittleEndian.Uint32(val), nil
 }
 
-func (bs *BlobStore) RemoveBlobSidecars(ctx context.Context, slot uint64, blockRoot libcommon.Hash) error {
+func (bs *BlobStore) RemoveBlobSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) error {
 	tx, err := bs.db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -225,7 +225,7 @@ func (bs *BlobStore) RemoveBlobSidecars(ctx context.Context, slot uint64, blockR
 }
 
 type sidecarsPayload struct {
-	blockRoot libcommon.Hash
+	blockRoot common.Hash
 	sidecars  []*cltypes.BlobSidecar
 }
 

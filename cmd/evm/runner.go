@@ -36,7 +36,7 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	common2 "github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -147,8 +147,8 @@ func runCmd(ctx *cli.Context) error {
 		debugLogger   *logger.StructLogger
 		statedb       *state.IntraBlockState
 		chainConfig   *chain.Config
-		sender        = libcommon.BytesToAddress([]byte("sender"))
-		receiver      = libcommon.BytesToAddress([]byte("receiver"))
+		sender        = common.BytesToAddress([]byte("sender"))
+		receiver      = common.BytesToAddress([]byte("receiver"))
 		genesisConfig *types.Genesis
 	)
 	if machineFriendlyOutput {
@@ -192,12 +192,12 @@ func runCmd(ctx *cli.Context) error {
 	stateReader := state.NewReaderV3(sd)
 	statedb = state.New(stateReader)
 	if ctx.String(SenderFlag.Name) != "" {
-		sender = libcommon.HexToAddress(ctx.String(SenderFlag.Name))
+		sender = common.HexToAddress(ctx.String(SenderFlag.Name))
 	}
 	statedb.CreateAccount(sender, true)
 
 	if ctx.String(ReceiverFlag.Name) != "" {
-		receiver = libcommon.HexToAddress(ctx.String(ReceiverFlag.Name))
+		receiver = common.HexToAddress(ctx.String(ReceiverFlag.Name))
 	}
 
 	var code []byte
@@ -242,7 +242,7 @@ func runCmd(ctx *cli.Context) error {
 		if err != nil {
 			return err
 		}
-		code = libcommon.Hex2Bytes(bin)
+		code = common.Hex2Bytes(bin)
 	}
 	initialGas := ctx.Uint64(GasFlag.Name)
 	if genesisConfig.GasLimit != 0 {

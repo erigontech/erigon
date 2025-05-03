@@ -424,7 +424,7 @@ type Tx interface {
 	BucketSize(table string) (uint64, error)
 	Count(bucket string) (uint64, error)
 
-	ListBuckets() ([]string, error)
+	ListTables() ([]string, error)
 }
 
 // RwTx
@@ -532,7 +532,7 @@ type (
 	Domain      uint16
 	Appendable  uint16
 	History     string
-	InvertedIdx string
+	InvertedIdx uint16
 )
 
 type TemporalGetter interface {
@@ -589,7 +589,8 @@ type TemporalDebugTx interface {
 }
 
 type TemporalDebugDB interface {
-	DomainTables(domain ...Domain) []string
+	DomainTables(names ...Domain) []string
+	InvertedIdxTables(names ...InvertedIdx) []string
 }
 
 type WithFreezeInfo interface {
@@ -615,6 +616,7 @@ type TemporalPutDel interface {
 	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 	//   - user can append k2 into k1, then underlying methods will not preform append
 	DomainPut(domain Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error
+	//DomainPut2(domain Domain, k1 []byte, val []byte, ts uint64) error
 
 	// DomainDel
 	// Optimizations:
@@ -648,11 +650,11 @@ type HasSpaceDirty interface {
 
 // BucketMigrator used for buckets migration, don't use it in usual app code
 type BucketMigrator interface {
-	ListBuckets() ([]string, error)
-	DropBucket(string) error
-	CreateBucket(string) error
-	ExistsBucket(string) (bool, error)
-	ClearBucket(string) error
+	ListTables() ([]string, error)
+	DropTable(string) error
+	CreateTable(string) error
+	ExistsTable(string) (bool, error)
+	ClearTable(string) error
 }
 
 // PendingMutations in-memory storage of changes

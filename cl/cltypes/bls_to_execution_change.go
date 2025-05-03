@@ -19,7 +19,7 @@ package cltypes
 import (
 	"fmt"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
@@ -27,9 +27,9 @@ import (
 
 // Change to EL engine
 type BLSToExecutionChange struct {
-	ValidatorIndex uint64            `json:"validator_index,string"`
-	From           libcommon.Bytes48 `json:"from_bls_pubkey"`
-	To             libcommon.Address `json:"to_execution_address"`
+	ValidatorIndex uint64         `json:"validator_index,string"`
+	From           common.Bytes48 `json:"from_bls_pubkey"`
+	To             common.Address `json:"to_execution_address"`
 }
 
 func (b *BLSToExecutionChange) EncodeSSZ(buf []byte) ([]byte, error) {
@@ -60,7 +60,7 @@ func (*BLSToExecutionChange) Static() bool {
 
 type SignedBLSToExecutionChange struct {
 	Message   *BLSToExecutionChange `json:"message"`
-	Signature libcommon.Bytes96     `json:"signature"`
+	Signature common.Bytes96        `json:"signature"`
 }
 
 func (s *SignedBLSToExecutionChange) EncodeSSZ(buf []byte) ([]byte, error) {

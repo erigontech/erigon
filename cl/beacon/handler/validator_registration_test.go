@@ -25,7 +25,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 )
@@ -37,11 +37,11 @@ func TestPostEthV1ValidatorPreparation(t *testing.T) {
 	req := []ValidatorPreparationPayload{
 		{
 			ValidatorIndex: 1,
-			FeeRecipient:   libcommon.Address{1},
+			FeeRecipient:   common.Address{1},
 		},
 		{
 			ValidatorIndex: 2,
-			FeeRecipient:   libcommon.Address{2},
+			FeeRecipient:   common.Address{2},
 		},
 	}
 
@@ -56,6 +56,6 @@ func TestPostEthV1ValidatorPreparation(t *testing.T) {
 	a1, _ := vp.GetFeeRecipient(1)
 	a2, _ := vp.GetFeeRecipient(2)
 
-	require.Equal(t, libcommon.Address{1}, a1)
-	require.Equal(t, libcommon.Address{2}, a2)
+	require.Equal(t, common.Address{1}, a1)
+	require.Equal(t, common.Address{2}, a2)
 }

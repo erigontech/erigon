@@ -22,7 +22,7 @@ import (
 	"net/http"
 	"strconv"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -31,18 +31,18 @@ import (
 const maxEpochsLookaheadForDuties = 32
 
 type attesterDutyResponse struct {
-	Pubkey                  libcommon.Bytes48 `json:"pubkey"`
-	ValidatorIndex          uint64            `json:"validator_index,string"`
-	CommitteeIndex          uint64            `json:"committee_index,string"`
-	CommitteeLength         uint64            `json:"committee_length,string"`
-	ValidatorCommitteeIndex uint64            `json:"validator_committee_index,string"`
-	CommitteesAtSlot        uint64            `json:"committees_at_slot,string"`
-	Slot                    uint64            `json:"slot,string"`
+	Pubkey                  common.Bytes48 `json:"pubkey"`
+	ValidatorIndex          uint64         `json:"validator_index,string"`
+	CommitteeIndex          uint64         `json:"committee_index,string"`
+	CommitteeLength         uint64         `json:"committee_length,string"`
+	ValidatorCommitteeIndex uint64         `json:"validator_committee_index,string"`
+	CommitteesAtSlot        uint64         `json:"committees_at_slot,string"`
+	Slot                    uint64         `json:"slot,string"`
 }
 
-func (a *ApiHandler) getDependentRoot(epoch uint64, attester bool) (libcommon.Hash, error) {
+func (a *ApiHandler) getDependentRoot(epoch uint64, attester bool) (common.Hash, error) {
 	var (
-		dependentRoot libcommon.Hash
+		dependentRoot common.Hash
 		err           error
 	)
 	return dependentRoot, a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {

@@ -66,7 +66,7 @@ func (b *EpochProcessing) Run(t *testing.T, root fs.FS, c spectest.TestCase) (er
 	expectedRoot, err := expectedState.HashSSZ()
 	require.NoError(t, err)
 
-	assert.EqualValues(t, expectedRoot, haveRoot)
+	assert.Equal(t, expectedRoot, haveRoot)
 	return nil
 }
 

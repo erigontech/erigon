@@ -55,7 +55,7 @@ func (m *Mapmutation) BucketSize(table string) (uint64, error) {
 	panic("implement me")
 }
 
-func (m *Mapmutation) ListBuckets() ([]string, error) {
+func (m *Mapmutation) ListTables() ([]string, error) {
 	//TODO implement me
 	panic("implement me")
 }
@@ -100,22 +100,22 @@ func (m *Mapmutation) RangeDupSort(table string, key []byte, fromPrefix, toPrefi
 	panic("implement me")
 }
 
-func (m *Mapmutation) DropBucket(s string) error {
+func (m *Mapmutation) DropTable(s string) error {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (m *Mapmutation) CreateBucket(s string) error {
+func (m *Mapmutation) CreateTable(s string) error {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (m *Mapmutation) ExistsBucket(s string) (bool, error) {
+func (m *Mapmutation) ExistsTable(s string) (bool, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (m *Mapmutation) ClearBucket(s string) error {
+func (m *Mapmutation) ClearTable(s string) error {
 	//TODO implement me
 	panic("implement me")
 }

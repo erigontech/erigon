@@ -19,9 +19,9 @@ package aura
 import (
 	"context"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
 )
 
 type NonTransactionalEpochReader struct {
@@ -33,13 +33,13 @@ func newEpochReader(db kv.RwDB) *NonTransactionalEpochReader {
 	return &NonTransactionalEpochReader{db: db}
 }
 
-func (cr *NonTransactionalEpochReader) GetEpoch(hash libcommon.Hash, number uint64) (v []byte, err error) {
+func (cr *NonTransactionalEpochReader) GetEpoch(hash common.Hash, number uint64) (v []byte, err error) {
 	return v, cr.db.View(context.Background(), func(tx kv.Tx) error {
 		v, err = rawdb.ReadEpoch(tx, number, hash)
 		return err
 	})
 }
-func (cr *NonTransactionalEpochReader) PutEpoch(hash libcommon.Hash, number uint64, proof []byte) error {
+func (cr *NonTransactionalEpochReader) PutEpoch(hash common.Hash, number uint64, proof []byte) error {
 	if cr.readonly {
 		return nil
 	}
@@ -47,13 +47,13 @@ func (cr *NonTransactionalEpochReader) PutEpoch(hash libcommon.Hash, number uint
 		return rawdb.WriteEpoch(tx, number, hash, proof)
 	})
 }
-func (cr *NonTransactionalEpochReader) GetPendingEpoch(hash libcommon.Hash, number uint64) (v []byte, err error) {
+func (cr *NonTransactionalEpochReader) GetPendingEpoch(hash common.Hash, number uint64) (v []byte, err error) {
 	return v, cr.db.View(context.Background(), func(tx kv.Tx) error {
 		v, err = rawdb.ReadPendingEpoch(tx, number, hash)
 		return err
 	})
 }
-func (cr *NonTransactionalEpochReader) PutPendingEpoch(hash libcommon.Hash, number uint64, proof []byte) error {
+func (cr *NonTransactionalEpochReader) PutPendingEpoch(hash common.Hash, number uint64, proof []byte) error {
 	if cr.readonly {
 		return nil
 	}
@@ -61,7 +61,7 @@ func (cr *NonTransactionalEpochReader) PutPendingEpoch(hash libcommon.Hash, numb
 		return rawdb.WritePendingEpoch(tx, number, hash, proof)
 	})
 }
-func (cr *NonTransactionalEpochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash libcommon.Hash, transitionProof []byte, err error) {
+func (cr *NonTransactionalEpochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash common.Hash, transitionProof []byte, err error) {
 	return blockNum, blockHash, transitionProof, cr.db.View(context.Background(), func(tx kv.Tx) error {
 		blockNum, blockHash, transitionProof, err = rawdb.FindEpochBeforeOrEqualNumber(tx, number)
 		return err

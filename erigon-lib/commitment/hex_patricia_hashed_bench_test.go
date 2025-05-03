@@ -29,6 +29,7 @@ import (
 
 func Benchmark_HexPatriciaHashed_Process(b *testing.B) {
 	b.SetParallelism(1)
+	metricsFile = "./ericom"
 
 	rnd := rand.New(rand.NewSource(133777))
 	keysCount := rnd.Intn(100_0000)

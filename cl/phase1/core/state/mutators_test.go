@@ -83,7 +83,7 @@ func TestDecreaseBalance(t *testing.T) {
 			s := getTestStateBalances(t)
 			require.NoError(t, state2.DecreaseBalance(s, testInd, tc.delta))
 			afterBalance, _ := s.ValidatorBalance(int(testInd))
-			require.Equal(t, afterBalance, tc.expectedBalance)
+			require.Equal(t, tc.expectedBalance, afterBalance)
 		})
 	}
 }

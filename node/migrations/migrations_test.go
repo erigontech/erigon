@@ -18,7 +18,6 @@ package migrations
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -27,7 +26,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
 )
 
 func TestApplyWithInit(t *testing.T) {
@@ -137,7 +135,7 @@ func TestApplyWithoutInit(t *testing.T) {
 		applied, err = AppliedMigrations(tx, false)
 		require.NoError(err)
 
-		require.Equal(2, len(applied))
+		require.Len(applied, 2)
 		_, ok := applied[m[1].Name]
 		require.True(ok)
 		_, ok = applied[m[0].Name]
@@ -202,7 +200,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 		applied, err = AppliedMigrations(tx, false)
 		require.NoError(err)
 
-		require.Equal(2, len(applied))
+		require.Len(applied, 2)
 		_, ok := applied[m[1].Name]
 		require.True(ok)
 		_, ok = applied[m[0].Name]
@@ -221,25 +219,6 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 		return nil
 	})
 	require.NoError(err)
-}
-
-func TestMarshalStages(t *testing.T) {
-	require := require.New(t)
-	_, tx := memdb.NewTestTx(t)
-
-	err := stages.SaveStageProgress(tx, stages.Execution, 42)
-	require.NoError(err)
-
-	data, err := MarshalMigrationPayload(tx)
-	require.NoError(err)
-
-	res, err := UnmarshalMigrationPayload(data)
-	require.NoError(err)
-
-	require.Equal(1, len(res))
-	v, ok := res[string(stages.Execution)]
-	require.True(ok)
-	require.NotNil(v)
 }
 
 func TestValidation(t *testing.T) {
@@ -280,13 +259,13 @@ func TestValidation(t *testing.T) {
 	migrator.Migrations = m
 	logger := log.New()
 	err := migrator.Apply(db, "", "", logger)
-	require.True(errors.Is(err, ErrMigrationNonUniqueName))
+	require.ErrorIs(err, ErrMigrationNonUniqueName)
 
 	var applied map[string][]byte
 	err = db.View(context.Background(), func(tx kv.Tx) error {
 		applied, err = AppliedMigrations(tx, false)
 		require.NoError(err)
-		require.Equal(0, len(applied))
+		require.Empty(applied)
 		return nil
 	})
 	require.NoError(err)
@@ -307,13 +286,13 @@ func TestCommitCallRequired(t *testing.T) {
 	migrator.Migrations = m
 	logger := log.New()
 	err := migrator.Apply(db, "", "", logger)
-	require.True(errors.Is(err, ErrMigrationCommitNotCalled))
+	require.ErrorIs(err, ErrMigrationCommitNotCalled)
 
 	var applied map[string][]byte
 	err = db.View(context.Background(), func(tx kv.Tx) error {
 		applied, err = AppliedMigrations(tx, false)
 		require.NoError(err)
-		require.Equal(0, len(applied))
+		require.Empty(applied)
 		return nil
 	})
 	require.NoError(err)

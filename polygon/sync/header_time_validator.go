@@ -22,7 +22,7 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
@@ -30,7 +30,7 @@ import (
 
 type HeaderTimeValidator struct {
 	borConfig            *borcfg.BorConfig
-	signaturesCache      *lru.ARCCache[libcommon.Hash, libcommon.Address]
+	signaturesCache      *lru.ARCCache[common.Hash, common.Address]
 	blockProducersReader blockProducersReader
 }
 

@@ -21,7 +21,7 @@ import (
 	"errors"
 	"fmt"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types/clonable"
@@ -64,8 +64,8 @@ var (
 
 // Definition of SignedBeaconBlock
 type SignedBeaconBlock struct {
-	Block     *BeaconBlock      `json:"message"`
-	Signature libcommon.Bytes96 `json:"signature"`
+	Block     *BeaconBlock   `json:"message"`
+	Signature common.Bytes96 `json:"signature"`
 }
 
 func NewSignedBeaconBlock(beaconCfg *clparams.BeaconChainConfig, version clparams.StateVersion) *SignedBeaconBlock {
@@ -132,11 +132,11 @@ func (b *SignedBeaconBlock) Static() bool {
 
 // Definition of BeaconBlock
 type BeaconBlock struct {
-	Slot          uint64         `json:"slot,string"`
-	ProposerIndex uint64         `json:"proposer_index,string"`
-	ParentRoot    libcommon.Hash `json:"parent_root"`
-	StateRoot     libcommon.Hash `json:"state_root"`
-	Body          *BeaconBody    `json:"body"`
+	Slot          uint64      `json:"slot,string"`
+	ProposerIndex uint64      `json:"proposer_index,string"`
+	ParentRoot    common.Hash `json:"parent_root"`
+	StateRoot     common.Hash `json:"state_root"`
+	Body          *BeaconBody `json:"body"`
 }
 
 func NewBeaconBlock(beaconCfg *clparams.BeaconChainConfig, version clparams.StateVersion) *BeaconBlock {
@@ -193,7 +193,7 @@ func (b *BeaconBlock) GetProposerIndex() uint64 {
 	return b.ProposerIndex
 }
 
-func (b *BeaconBlock) GetParentRoot() libcommon.Hash {
+func (b *BeaconBlock) GetParentRoot() common.Hash {
 	return b.ParentRoot
 }
 
@@ -204,11 +204,11 @@ func (b *BeaconBlock) GetBody() GenericBeaconBody {
 // Definition of BeaconBody
 type BeaconBody struct {
 	// A byte array used for randomness in the beacon chain
-	RandaoReveal libcommon.Bytes96 `json:"randao_reveal"`
+	RandaoReveal common.Bytes96 `json:"randao_reveal"`
 	// Data related to the Ethereum 1.0 chain
 	Eth1Data *Eth1Data `json:"eth1_data"`
 	// A byte array used to customize validators' behavior
-	Graffiti libcommon.Hash `json:"graffiti"`
+	Graffiti common.Hash `json:"graffiti"`
 	// A list of slashing events for validators who included invalid blocks in the chain
 	ProposerSlashings *solid.ListSSZ[*ProposerSlashing] `json:"proposer_slashings"`
 	// A list of slashing events for validators who included invalid attestations in the chain
@@ -423,9 +423,9 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 	}
 
 	var tmp struct {
-		RandaoReveal       libcommon.Bytes96                           `json:"randao_reveal"`
+		RandaoReveal       common.Bytes96                              `json:"randao_reveal"`
 		Eth1Data           *Eth1Data                                   `json:"eth1_data"`
-		Graffiti           libcommon.Hash                              `json:"graffiti"`
+		Graffiti           common.Hash                                 `json:"graffiti"`
 		ProposerSlashings  *solid.ListSSZ[*ProposerSlashing]           `json:"proposer_slashings"`
 		AttesterSlashings  *solid.ListSSZ[*AttesterSlashing]           `json:"attester_slashings"`
 		Attestations       *solid.ListSSZ[*solid.Attestation]          `json:"attestations"`
@@ -478,7 +478,7 @@ func (b *BeaconBody) GetPayloadHeader() (*Eth1Header, error) {
 	return b.ExecutionPayload.PayloadHeader()
 }
 
-func (b *BeaconBody) GetRandaoReveal() libcommon.Bytes96 {
+func (b *BeaconBody) GetRandaoReveal() common.Bytes96 {
 	return b.RandaoReveal
 }
 
@@ -598,7 +598,7 @@ func (b *DenebBeaconBlock) GetProposerIndex() uint64 {
 	return b.Block.GetProposerIndex()
 }
 
-func (b *DenebBeaconBlock) GetParentRoot() libcommon.Hash {
+func (b *DenebBeaconBlock) GetParentRoot() common.Hash {
 	return b.Block.GetParentRoot()
 }
 

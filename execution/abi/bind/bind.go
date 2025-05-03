@@ -301,7 +301,7 @@ var intTypeRegexp = regexp.MustCompile(`(u)?int([0-9]*)`)
 func bindBasicTypeGo(kind abi.Type) string {
 	switch kind.T {
 	case abi.AddressTy:
-		return "libcommon.Address"
+		return "common.Address"
 	case abi.IntTy, abi.UintTy:
 		parts := intTypeRegexp.FindStringSubmatch(kind.String())
 		switch parts[2] {
@@ -431,7 +431,7 @@ func bindTopicTypeGo(kind abi.Type, structs map[string]*tmplStruct) string {
 	// We only convert stringS and bytes to hash, still need to deal with
 	// array(both fixed-size and dynamic-size) and struct.
 	if bound == "string" || bound == typeBytes {
-		bound = "libcommon.Hash"
+		bound = "common.Hash"
 	}
 	return bound
 }

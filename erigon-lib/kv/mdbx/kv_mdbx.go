@@ -219,7 +219,7 @@ func (opts MdbxOpts) InMem(tmpDir string) MdbxOpts {
 	opts.inMem = true
 	opts.flags = mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.NoMemInit
 	opts.growthStep = 2 * datasize.MB
-	opts.mapSize = 512 * datasize.MB
+	opts.mapSize = 16 * datasize.GB
 	opts.dirtySpace = uint64(32 * datasize.MB)
 	opts.shrinkThreshold = 0 // disable
 	opts.pageSize = 4096
@@ -562,7 +562,7 @@ func (db *MdbxKV) openDBIs(buckets []string) error {
 				if db.buckets[name].IsDeprecated {
 					continue
 				}
-				if err := tx.(kv.BucketMigrator).CreateBucket(name); err != nil {
+				if err := tx.(kv.BucketMigrator).CreateTable(name); err != nil {
 					return err
 				}
 			}
@@ -575,7 +575,7 @@ func (db *MdbxKV) openDBIs(buckets []string) error {
 			if db.buckets[name].IsDeprecated {
 				continue
 			}
-			if err := tx.(kv.BucketMigrator).CreateBucket(name); err != nil {
+			if err := tx.(kv.BucketMigrator).CreateTable(name); err != nil {
 				return err
 			}
 		}
@@ -744,9 +744,9 @@ func (db *MdbxKV) Env() *mdbx.Env { return db.env }
 func (db *MdbxKV) AllTables() kv.TableCfg {
 	return db.buckets
 }
-func (tx *MdbxTx) IsRo() bool                     { return tx.readOnly }
-func (tx *MdbxTx) ViewID() uint64                 { return tx.tx.ID() }
-func (tx *MdbxTx) ListBuckets() ([]string, error) { return tx.tx.ListDBI() }
+func (tx *MdbxTx) IsRo() bool                    { return tx.readOnly }
+func (tx *MdbxTx) ViewID() uint64                { return tx.tx.ID() }
+func (tx *MdbxTx) ListTables() ([]string, error) { return tx.tx.ListDBI() }
 
 func (db *MdbxKV) AllDBI() map[string]kv.DBI {
 	res := map[string]kv.DBI{}
@@ -867,7 +867,7 @@ func (db *MdbxKV) Update(ctx context.Context, f func(tx kv.RwTx) error) (err err
 	return nil
 }
 
-func (tx *MdbxTx) CreateBucket(name string) error {
+func (tx *MdbxTx) CreateTable(name string) error {
 	cnfCopy := tx.db.buckets[name]
 	dbi, err := tx.tx.OpenDBI(name, mdbx.DBAccede, nil, nil)
 	if err != nil && !mdbx.IsNotFound(err) {
@@ -937,7 +937,7 @@ func (tx *MdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 	return nil
 }
 
-func (tx *MdbxTx) ClearBucket(bucket string) error {
+func (tx *MdbxTx) ClearTable(bucket string) error {
 	dbi := tx.db.buckets[bucket].DBI
 	if dbi == NonExistingDBI {
 		return nil
@@ -945,7 +945,7 @@ func (tx *MdbxTx) ClearBucket(bucket string) error {
 	return tx.tx.Drop(mdbx.DBI(dbi), false)
 }
 
-func (tx *MdbxTx) DropBucket(bucket string) error {
+func (tx *MdbxTx) DropTable(bucket string) error {
 	if cfg, ok := tx.db.buckets[bucket]; !(ok && cfg.IsDeprecated) {
 		return fmt.Errorf("%w, bucket: %s", kv.ErrAttemptToDeleteNonDeprecatedBucket, bucket)
 	}
@@ -953,7 +953,7 @@ func (tx *MdbxTx) DropBucket(bucket string) error {
 	return tx.dropEvenIfBucketIsNotDeprecated(bucket)
 }
 
-func (tx *MdbxTx) ExistsBucket(bucket string) (bool, error) {
+func (tx *MdbxTx) ExistsTable(bucket string) (bool, error) {
 	if cfg, ok := tx.db.buckets[bucket]; ok {
 		return cfg.DBI != NonExistingDBI, nil
 	}

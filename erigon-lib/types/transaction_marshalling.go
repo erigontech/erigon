@@ -28,7 +28,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/valyala/fastjson"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 )
 
@@ -37,17 +37,17 @@ type txJSON struct {
 	Type hexutil.Uint64 `json:"type"`
 
 	// Common transaction fields:
-	Nonce                *hexutil.Uint64    `json:"nonce"`
-	GasPrice             *hexutil.Big       `json:"gasPrice"`
-	MaxFeePerGas         *hexutil.Big       `json:"maxFeePerGas"`
-	MaxPriorityFeePerGas *hexutil.Big       `json:"maxPriorityFeePerGas"`
-	Gas                  *hexutil.Uint64    `json:"gas"`
-	Value                *hexutil.Big       `json:"value"`
-	Data                 *hexutil.Bytes     `json:"input"`
-	V                    *hexutil.Big       `json:"v"`
-	R                    *hexutil.Big       `json:"r"`
-	S                    *hexutil.Big       `json:"s"`
-	To                   *libcommon.Address `json:"to"`
+	Nonce                *hexutil.Uint64 `json:"nonce"`
+	GasPrice             *hexutil.Big    `json:"gasPrice"`
+	MaxFeePerGas         *hexutil.Big    `json:"maxFeePerGas"`
+	MaxPriorityFeePerGas *hexutil.Big    `json:"maxPriorityFeePerGas"`
+	Gas                  *hexutil.Uint64 `json:"gas"`
+	Value                *hexutil.Big    `json:"value"`
+	Data                 *hexutil.Bytes  `json:"input"`
+	V                    *hexutil.Big    `json:"v"`
+	R                    *hexutil.Big    `json:"r"`
+	S                    *hexutil.Big    `json:"s"`
+	To                   *common.Address `json:"to"`
 
 	// Access list transaction fields:
 	ChainID        *hexutil.Big         `json:"chainId,omitempty"`
@@ -55,24 +55,24 @@ type txJSON struct {
 	Authorizations *[]JsonAuthorization `json:"authorizationList,omitempty"`
 
 	// Blob transaction fields:
-	MaxFeePerBlobGas    *hexutil.Big     `json:"maxFeePerBlobGas,omitempty"`
-	BlobVersionedHashes []libcommon.Hash `json:"blobVersionedHashes,omitempty"`
+	MaxFeePerBlobGas    *hexutil.Big  `json:"maxFeePerBlobGas,omitempty"`
+	BlobVersionedHashes []common.Hash `json:"blobVersionedHashes,omitempty"`
 	// Blob wrapper fields:
 	Blobs       Blobs     `json:"blobs,omitempty"`
 	Commitments BlobKzgs  `json:"commitments,omitempty"`
 	Proofs      KZGProofs `json:"proofs,omitempty"`
 
 	// Only used for encoding:
-	Hash libcommon.Hash `json:"hash"`
+	Hash common.Hash `json:"hash"`
 }
 
 type JsonAuthorization struct {
-	ChainID hexutil.Big       `json:"chainId"`
-	Address libcommon.Address `json:"address"`
-	Nonce   hexutil.Uint64    `json:"nonce"`
-	YParity hexutil.Uint64    `json:"yParity"`
-	R       hexutil.Big       `json:"r"`
-	S       hexutil.Big       `json:"s"`
+	ChainID hexutil.Big    `json:"chainId"`
+	Address common.Address `json:"address"`
+	Nonce   hexutil.Uint64 `json:"nonce"`
+	YParity hexutil.Uint64 `json:"yParity"`
+	R       hexutil.Big    `json:"r"`
+	S       hexutil.Big    `json:"s"`
 }
 
 func (a JsonAuthorization) FromAuthorization(authorization Authorization) JsonAuthorization {
@@ -497,7 +497,7 @@ func (tx *SetCodeTransaction) UnmarshalJSON(input []byte) error {
 		return err
 	}
 
-	if err := tx.DynamicFeeTransaction.unmarshalJson(dec); err != nil {
+	if err := tx.unmarshalJson(dec); err != nil {
 		return err
 	}
 	tx.Authorizations = make([]Authorization, len(*dec.Authorizations))
@@ -574,7 +574,7 @@ func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 	if dec.BlobVersionedHashes != nil {
 		tx.BlobVersionedHashes = dec.BlobVersionedHashes
 	} else {
-		tx.BlobVersionedHashes = []libcommon.Hash{}
+		tx.BlobVersionedHashes = []common.Hash{}
 	}
 
 	if dec.V == nil {

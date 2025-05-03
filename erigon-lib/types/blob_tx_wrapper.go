@@ -29,7 +29,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/rlp"
 )
@@ -56,9 +56,9 @@ type BlobTxWrapper struct {
 /* Blob methods */
 
 func (b *Blob) payloadSize() int {
-	size := 1                                                    // 0xb7..0xbf
-	size += libcommon.BitLenToByteLen(bits.Len(params.BlobSize)) // length encoding size
-	size += params.BlobSize                                      // byte_array it self
+	size := 1                                                 // 0xb7..0xbf
+	size += common.BitLenToByteLen(bits.Len(params.BlobSize)) // length encoding size
+	size += params.BlobSize                                   // byte_array it self
 	return size
 }
 
@@ -218,10 +218,10 @@ func (blobs *Blobs) DecodeRLP(s *rlp.Stream) error {
 }
 
 // Return KZG commitments, versioned hashes and the proofs that correspond to these blobs
-func (blobs Blobs) ComputeCommitmentsAndProofs() (commitments []KZGCommitment, versionedHashes []libcommon.Hash, proofs []KZGProof, err error) {
+func (blobs Blobs) ComputeCommitmentsAndProofs() (commitments []KZGCommitment, versionedHashes []common.Hash, proofs []KZGProof, err error) {
 	commitments = make([]KZGCommitment, len(blobs))
 	proofs = make([]KZGProof, len(blobs))
-	versionedHashes = make([]libcommon.Hash, len(blobs))
+	versionedHashes = make([]common.Hash, len(blobs))
 
 	kzgCtx := libkzg.Ctx()
 	for i := 0; i < len(blobs); i++ {
@@ -236,7 +236,7 @@ func (blobs Blobs) ComputeCommitmentsAndProofs() (commitments []KZGCommitment, v
 		}
 		commitments[i] = KZGCommitment(commitment)
 		proofs[i] = KZGProof(proof)
-		versionedHashes[i] = libcommon.Hash(libkzg.KZGToVersionedHash(commitment))
+		versionedHashes[i] = common.Hash(libkzg.KZGToVersionedHash(commitment))
 	}
 
 	return commitments, versionedHashes, proofs, nil
@@ -264,8 +264,8 @@ func toProofs(_proofs KZGProofs) []gokzg4844.KZGProof {
 	return proofs
 }
 
-func (c KZGCommitment) ComputeVersionedHash() libcommon.Hash {
-	return libcommon.Hash(libkzg.KZGToVersionedHash(gokzg4844.KZGCommitment(c)))
+func (c KZGCommitment) ComputeVersionedHash() common.Hash {
+	return common.Hash(libkzg.KZGToVersionedHash(gokzg4844.KZGCommitment(c)))
 }
 
 /* BlobTxWrapper methods */
@@ -305,12 +305,12 @@ func (txw *BlobTxWrapper) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int 
 }
 func (txw *BlobTxWrapper) GetFeeCap() *uint256.Int { return txw.Tx.GetFeeCap() }
 
-func (txw *BlobTxWrapper) GetBlobHashes() []libcommon.Hash { return txw.Tx.GetBlobHashes() }
+func (txw *BlobTxWrapper) GetBlobHashes() []common.Hash { return txw.Tx.GetBlobHashes() }
 
-func (txw *BlobTxWrapper) GetGasLimit() uint64       { return txw.Tx.GetGasLimit() }
-func (txw *BlobTxWrapper) GetBlobGas() uint64        { return txw.Tx.GetBlobGas() }
-func (txw *BlobTxWrapper) GetValue() *uint256.Int    { return txw.Tx.GetValue() }
-func (txw *BlobTxWrapper) GetTo() *libcommon.Address { return txw.Tx.GetTo() }
+func (txw *BlobTxWrapper) GetGasLimit() uint64    { return txw.Tx.GetGasLimit() }
+func (txw *BlobTxWrapper) GetBlobGas() uint64     { return txw.Tx.GetBlobGas() }
+func (txw *BlobTxWrapper) GetValue() *uint256.Int { return txw.Tx.GetValue() }
+func (txw *BlobTxWrapper) GetTo() *common.Address { return txw.Tx.GetTo() }
 
 func (txw *BlobTxWrapper) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
 	return txw.Tx.AsMessage(s, baseFee, rules)
@@ -319,9 +319,9 @@ func (txw *BlobTxWrapper) WithSignature(signer Signer, sig []byte) (Transaction,
 	return txw.Tx.WithSignature(signer, sig)
 }
 
-func (txw *BlobTxWrapper) Hash() libcommon.Hash { return txw.Tx.Hash() }
+func (txw *BlobTxWrapper) Hash() common.Hash { return txw.Tx.Hash() }
 
-func (txw *BlobTxWrapper) SigningHash(chainID *big.Int) libcommon.Hash {
+func (txw *BlobTxWrapper) SigningHash(chainID *big.Int) common.Hash {
 	return txw.Tx.SigningHash(chainID)
 }
 
@@ -335,13 +335,13 @@ func (txw *BlobTxWrapper) RawSignatureValues() (*uint256.Int, *uint256.Int, *uin
 	return txw.Tx.RawSignatureValues()
 }
 
-func (txw *BlobTxWrapper) cachedSender() (libcommon.Address, bool) { return txw.Tx.cachedSender() }
+func (txw *BlobTxWrapper) cachedSender() (common.Address, bool) { return txw.Tx.cachedSender() }
 
-func (txw *BlobTxWrapper) Sender(s Signer) (libcommon.Address, error) { return txw.Tx.Sender(s) }
+func (txw *BlobTxWrapper) Sender(s Signer) (common.Address, error) { return txw.Tx.Sender(s) }
 
-func (txw *BlobTxWrapper) GetSender() (libcommon.Address, bool) { return txw.Tx.GetSender() }
+func (txw *BlobTxWrapper) GetSender() (common.Address, bool) { return txw.Tx.GetSender() }
 
-func (txw *BlobTxWrapper) SetSender(address libcommon.Address) { txw.Tx.SetSender(address) }
+func (txw *BlobTxWrapper) SetSender(address common.Address) { txw.Tx.SetSender(address) }
 
 func (txw *BlobTxWrapper) IsContractDeploy() bool { return txw.Tx.IsContractDeploy() }
 

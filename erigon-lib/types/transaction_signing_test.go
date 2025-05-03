@@ -26,7 +26,7 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 )
 
@@ -123,7 +123,7 @@ func TestEIP155SigningVitalik(t *testing.T) {
 	} {
 		signer := LatestSignerForChainID(big.NewInt(1))
 
-		txn, err := DecodeTransaction(libcommon.Hex2Bytes(test.txRlp))
+		txn, err := DecodeTransaction(common.Hex2Bytes(test.txRlp))
 		if err != nil {
 			t.Errorf("%d: %v", i, err)
 			continue
@@ -135,7 +135,7 @@ func TestEIP155SigningVitalik(t *testing.T) {
 			continue
 		}
 
-		addr := libcommon.HexToAddress(test.addr)
+		addr := common.HexToAddress(test.addr)
 		if from != addr {
 			t.Errorf("%d: expected %x got %x", i, addr, from)
 		}
@@ -147,7 +147,7 @@ func TestChainId(t *testing.T) {
 	t.Parallel()
 	key, _ := defaultTestKey()
 
-	var txn Transaction = NewTransaction(0, libcommon.Address{}, new(uint256.Int), 0, new(uint256.Int), nil)
+	var txn Transaction = NewTransaction(0, common.Address{}, new(uint256.Int), 0, new(uint256.Int), nil)
 
 	var err error
 	txn, err = SignTx(txn, *LatestSignerForChainID(big.NewInt(1)), key)

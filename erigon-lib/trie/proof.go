@@ -21,7 +21,7 @@ import (
 	"errors"
 	"fmt"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -49,7 +49,7 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 		case *ShortNode:
 			if fromLevel == 0 {
 				if rlp, err := hasher.hashChildren(n, 0); err == nil {
-					proof = append(proof, libcommon.CopyBytes(rlp))
+					proof = append(proof, common.CopyBytes(rlp))
 				} else {
 					return nil, err
 				}
@@ -71,7 +71,7 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 		case *DuoNode:
 			if fromLevel == 0 {
 				if rlp, err := hasher.hashChildren(n, 0); err == nil {
-					proof = append(proof, libcommon.CopyBytes(rlp))
+					proof = append(proof, common.CopyBytes(rlp))
 				} else {
 					return nil, err
 				}
@@ -93,7 +93,7 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 		case *FullNode:
 			if fromLevel == 0 {
 				if rlp, err := hasher.hashChildren(n, 0); err == nil {
-					proof = append(proof, libcommon.CopyBytes(rlp))
+					proof = append(proof, common.CopyBytes(rlp))
 				} else {
 					return nil, err
 				}
@@ -215,9 +215,9 @@ type rawProofElement struct {
 }
 
 // proofMap creates a map from hash to proof node
-func proofMap(proof []hexutil.Bytes) (map[libcommon.Hash]Node, map[libcommon.Hash]rawProofElement, error) {
-	res := map[libcommon.Hash]Node{}
-	raw := map[libcommon.Hash]rawProofElement{}
+func proofMap(proof []hexutil.Bytes) (map[common.Hash]Node, map[common.Hash]rawProofElement, error) {
+	res := map[common.Hash]Node{}
+	raw := map[common.Hash]rawProofElement{}
 	for i, proofB := range proof {
 		hash := crypto.Keccak256Hash(proofB)
 		var err error
@@ -233,7 +233,7 @@ func proofMap(proof []hexutil.Bytes) (map[libcommon.Hash]Node, map[libcommon.Has
 	return res, raw, nil
 }
 
-func verifyProof(root libcommon.Hash, key []byte, proofs map[libcommon.Hash]Node, used map[libcommon.Hash]rawProofElement) ([]byte, error) {
+func verifyProof(root common.Hash, key []byte, proofs map[common.Hash]Node, used map[common.Hash]rawProofElement) ([]byte, error) {
 	nextIndex := 0
 	key = keybytesToHex(key)
 	var node Node = HashNode{hash: root[:]}
@@ -258,7 +258,7 @@ func verifyProof(root libcommon.Hash, key []byte, proofs map[libcommon.Hash]Node
 			node, key = nt.Val, key[len(shortHex):]
 		case HashNode:
 			var ok bool
-			h := libcommon.BytesToHash(nt.hash)
+			h := common.BytesToHash(nt.hash)
 			node, ok = proofs[h]
 			if !ok {
 				return nil, fmt.Errorf("missing hash %s", nt)
@@ -286,7 +286,7 @@ func verifyProof(root libcommon.Hash, key []byte, proofs map[libcommon.Hash]Node
 	}
 }
 
-func VerifyAccountProof(stateRoot libcommon.Hash, proof *accounts.AccProofResult) error {
+func VerifyAccountProof(stateRoot common.Hash, proof *accounts.AccProofResult) error {
 	accountKey := crypto.Keccak256Hash(proof.Address[:])
 	return VerifyAccountProofByHash(stateRoot, accountKey, proof)
 }
@@ -294,7 +294,7 @@ func VerifyAccountProof(stateRoot libcommon.Hash, proof *accounts.AccProofResult
 // VerifyAccountProofByHash will verify an account proof under the assumption
 // that the pre-image of the accountKey hashes to the provided accountKey.
 // Consequently, the Address of the proof is ignored in the validation.
-func VerifyAccountProofByHash(stateRoot libcommon.Hash, accountKey libcommon.Hash, proof *accounts.AccProofResult) error {
+func VerifyAccountProofByHash(stateRoot common.Hash, accountKey common.Hash, proof *accounts.AccProofResult) error {
 	pm, used, err := proofMap(proof.AccountProof)
 	if err != nil {
 		return fmt.Errorf("could not construct proofMap: %w", err)
@@ -311,9 +311,9 @@ func VerifyAccountProofByHash(stateRoot libcommon.Hash, accountKey libcommon.Has
 			return errors.New("account is not in state, but has non-zero nonce")
 		case proof.Balance.ToInt().Sign() != 0:
 			return errors.New("account is not in state, but has balance")
-		case proof.StorageHash != libcommon.Hash{}:
+		case proof.StorageHash != common.Hash{}:
 			return errors.New("account is not in state, but has non-empty storage hash")
-		case proof.CodeHash != libcommon.Hash{}:
+		case proof.CodeHash != common.Hash{}:
 			return errors.New("account is not in state, but has non-empty code hash")
 		default:
 			return nil
@@ -337,8 +337,8 @@ func VerifyAccountProofByHash(stateRoot libcommon.Hash, accountKey libcommon.Has
 	return nil
 }
 
-func VerifyStorageProof(storageRoot libcommon.Hash, proof accounts.StorProofResult) error {
-	keyhash := &libcommon.Hash{}
+func VerifyStorageProof(storageRoot common.Hash, proof accounts.StorProofResult) error {
+	keyhash := &common.Hash{}
 	keyhash.SetBytes(hexutil.FromHex(proof.Key))
 	storageKey := crypto.Keccak256Hash(keyhash[:])
 	return VerifyStorageProofByHash(storageRoot, storageKey, proof)
@@ -347,8 +347,8 @@ func VerifyStorageProof(storageRoot libcommon.Hash, proof accounts.StorProofResu
 // VerifyAccountProofByHash will verify a storage proof under the assumption
 // that the pre-image of the storage key hashes to the provided keyHash.
 // Consequently, the Key of the proof is ignored in the validation.
-func VerifyStorageProofByHash(storageRoot libcommon.Hash, keyHash libcommon.Hash, proof accounts.StorProofResult) error {
-	if storageRoot == EmptyRoot || storageRoot == (libcommon.Hash{}) {
+func VerifyStorageProofByHash(storageRoot common.Hash, keyHash common.Hash, proof accounts.StorProofResult) error {
+	if storageRoot == EmptyRoot || storageRoot == (common.Hash{}) {
 		if proof.Value.ToInt().Sign() != 0 {
 			return errors.New("empty storage root cannot have non-zero values")
 		}

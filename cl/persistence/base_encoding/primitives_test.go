@@ -91,7 +91,7 @@ func TestDiff64Effective(t *testing.T) {
 	new2, err := ApplyCompressedSerializedUint64ListDiff(previous, nil, out, false)
 	require.NoError(t, err)
 
-	require.Equal(t, new2, expected)
+	require.Equal(t, expected, new2)
 }
 
 func TestDiffValidators(t *testing.T) {

@@ -21,7 +21,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/holiman/uint256"
 	"pgregory.net/rapid"
@@ -57,7 +57,7 @@ func TestInterpreterReadonly(t *testing.T) {
 
 		dummyContract := NewContract(
 			&dummyContractRef{},
-			libcommon.Address{},
+			common.Address{},
 			new(uint256.Int),
 			0,
 			false,
@@ -315,7 +315,7 @@ func TestReadonlyBasicCases(t *testing.T) {
 
 				dummyContract := NewContract(
 					&dummyContractRef{},
-					libcommon.Address{},
+					common.Address{},
 					new(uint256.Int),
 					0,
 					false,
@@ -408,7 +408,7 @@ func (st *testSequential) Run(_ *Contract, _ []byte, _ bool) ([]byte, error) {
 	c := NewJumpDestCache()
 	nextContract := NewContract(
 		&dummyContractRef{},
-		libcommon.Address{},
+		common.Address{},
 		new(uint256.Int),
 		0,
 		false,

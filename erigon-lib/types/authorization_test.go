@@ -20,9 +20,8 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/holiman/uint256"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 // Tests that the correct signer is recovered from an Authorization object
@@ -32,7 +31,7 @@ func TestRecoverSigner(t *testing.T) {
 
 	auth := Authorization{
 		ChainID: *uint256.NewInt(7088110746),
-		Address: libcommon.Address{180, 125, 156, 99, 77, 80, 241, 96, 13, 77, 247, 103, 233, 71, 76, 37, 160, 48, 52, 40},
+		Address: common.Address{180, 125, 156, 99, 77, 80, 241, 96, 13, 77, 247, 103, 233, 71, 76, 37, 160, 48, 52, 40},
 		Nonce:   1,
 		YParity: 1,
 		R:       uint256.Int{11238962557009670571, 14017651393191758745, 18358999445216475025, 5549385460848219779},
@@ -44,7 +43,7 @@ func TestRecoverSigner(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	expectedSigner := libcommon.HexToAddress("0x8ED5ABe9DE62dB2F266b06b86203f71e4C1e357f")
+	expectedSigner := common.HexToAddress("0x8ED5ABe9DE62dB2F266b06b86203f71e4C1e357f")
 	if *authorityPtr != expectedSigner {
 		t.Errorf("mismatch in recovered signer: got %v, want %v", *authorityPtr, expectedSigner)
 	}

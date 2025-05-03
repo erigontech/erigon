@@ -127,7 +127,7 @@ func TestSendRawTransaction(t *testing.T) {
 
 	//send same txn second time and expect error
 	_, err = api.SendRawTransaction(ctx, buf.Bytes())
-	require.NotNil(err)
+	require.Error(err)
 	expectedErr := txpool_proto.ImportResult_name[int32(txpool_proto.ImportResult_ALREADY_EXISTS)] + ": " + txpoolcfg.AlreadyKnown.String()
 	require.Equal(expectedErr, err.Error())
 	mockSentry.ReceiveWg.Wait()

@@ -177,7 +177,7 @@ func TestEncodeBig(t *testing.T) {
 	for idx, test := range encodeBigTests {
 		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
 			enc := EncodeBig(test.input.(*big.Int))
-			require.EqualValues(t, test.want, enc)
+			require.Equal(t, test.want, enc)
 		})
 	}
 }
@@ -188,7 +188,7 @@ func TestDecodeBig(t *testing.T) {
 			dec, err := DecodeBig(test.input)
 			checkError(t, test.input, err, test.wantErr)
 			if test.want != nil {
-				require.EqualValues(t, test.want.(*big.Int).String(), dec.String())
+				require.Equal(t, test.want.(*big.Int).String(), dec.String())
 			}
 		})
 	}
@@ -198,7 +198,7 @@ func TestEncodeUint64(t *testing.T) {
 	for idx, test := range encodeUint64Tests {
 		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
 			enc := EncodeUint64(test.input.(uint64))
-			require.EqualValues(t, test.want, enc)
+			require.Equal(t, test.want, enc)
 		})
 	}
 }

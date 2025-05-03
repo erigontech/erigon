@@ -32,7 +32,7 @@ import (
 
 	"github.com/gballet/go-verkle"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/rlp"
 )
@@ -43,8 +43,8 @@ const (
 )
 
 var (
-	EmptyRootHash     = libcommon.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
-	EmptyRequestsHash = libcommon.HexToHash("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855") // sha256.Sum256([]byte(""))
+	EmptyRootHash     = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
+	EmptyRequestsHash = common.HexToHash("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855") // sha256.Sum256([]byte(""))
 	EmptyUncleHash    = rlpHash([]*Header(nil))
 )
 
@@ -80,35 +80,35 @@ func (n *BlockNonce) UnmarshalText(input []byte) error {
 // Header represents a block header in the Ethereum blockchain.
 // DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree
 type Header struct {
-	ParentHash  libcommon.Hash    `json:"parentHash"       gencodec:"required"`
-	UncleHash   libcommon.Hash    `json:"sha3Uncles"       gencodec:"required"`
-	Coinbase    libcommon.Address `json:"miner"`
-	Root        libcommon.Hash    `json:"stateRoot"        gencodec:"required"`
-	TxHash      libcommon.Hash    `json:"transactionsRoot" gencodec:"required"`
-	ReceiptHash libcommon.Hash    `json:"receiptsRoot"     gencodec:"required"`
-	Bloom       Bloom             `json:"logsBloom"        gencodec:"required"`
-	Difficulty  *big.Int          `json:"difficulty"       gencodec:"required"`
-	Number      *big.Int          `json:"number"           gencodec:"required"`
-	GasLimit    uint64            `json:"gasLimit"         gencodec:"required"`
-	GasUsed     uint64            `json:"gasUsed"          gencodec:"required"`
-	Time        uint64            `json:"timestamp"        gencodec:"required"`
-	Extra       []byte            `json:"extraData"        gencodec:"required"`
-	MixDigest   libcommon.Hash    `json:"mixHash"` // prevRandao after EIP-4399
-	Nonce       BlockNonce        `json:"nonce"`
+	ParentHash  common.Hash    `json:"parentHash"       gencodec:"required"`
+	UncleHash   common.Hash    `json:"sha3Uncles"       gencodec:"required"`
+	Coinbase    common.Address `json:"miner"`
+	Root        common.Hash    `json:"stateRoot"        gencodec:"required"`
+	TxHash      common.Hash    `json:"transactionsRoot" gencodec:"required"`
+	ReceiptHash common.Hash    `json:"receiptsRoot"     gencodec:"required"`
+	Bloom       Bloom          `json:"logsBloom"        gencodec:"required"`
+	Difficulty  *big.Int       `json:"difficulty"       gencodec:"required"`
+	Number      *big.Int       `json:"number"           gencodec:"required"`
+	GasLimit    uint64         `json:"gasLimit"         gencodec:"required"`
+	GasUsed     uint64         `json:"gasUsed"          gencodec:"required"`
+	Time        uint64         `json:"timestamp"        gencodec:"required"`
+	Extra       []byte         `json:"extraData"        gencodec:"required"`
+	MixDigest   common.Hash    `json:"mixHash"` // prevRandao after EIP-4399
+	Nonce       BlockNonce     `json:"nonce"`
 	// AuRa extensions (alternative to MixDigest & Nonce)
 	AuRaStep uint64 `json:"auraStep,omitempty"`
 	AuRaSeal []byte `json:"auraSeal,omitempty"`
 
-	BaseFee         *big.Int        `json:"baseFeePerGas"`   // EIP-1559
-	WithdrawalsHash *libcommon.Hash `json:"withdrawalsRoot"` // EIP-4895
+	BaseFee         *big.Int     `json:"baseFeePerGas"`   // EIP-1559
+	WithdrawalsHash *common.Hash `json:"withdrawalsRoot"` // EIP-4895
 
 	// BlobGasUsed & ExcessBlobGas were added by EIP-4844 and are ignored in legacy headers.
 	BlobGasUsed   *uint64 `json:"blobGasUsed"`
 	ExcessBlobGas *uint64 `json:"excessBlobGas"`
 
-	ParentBeaconBlockRoot *libcommon.Hash `json:"parentBeaconBlockRoot"` // EIP-4788
+	ParentBeaconBlockRoot *common.Hash `json:"parentBeaconBlockRoot"` // EIP-4788
 
-	RequestsHash *libcommon.Hash `json:"requestsHash"` // EIP-7685
+	RequestsHash *common.Hash `json:"requestsHash"` // EIP-7685
 
 	// The verkle proof is ignored in legacy headers
 	Verkle        bool
@@ -119,7 +119,7 @@ type Header struct {
 	// but assembling/mining may use `NewEmptyHeaderForAssembling` to create temporary mutable Header object
 	// then pass it to `block.WithSeal(header)` - to produce new block with immutable `Header`
 	mutable bool
-	hash    atomic.Pointer[libcommon.Hash]
+	hash    atomic.Pointer[common.Hash]
 }
 
 // NewEmptyHeaderForAssembling - returns mutable header object - for assembling/sealing/etc...
@@ -485,7 +485,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	if len(b) != 32 {
 		return fmt.Errorf("wrong size for WithdrawalsHash: %d", len(b))
 	}
-	h.WithdrawalsHash = new(libcommon.Hash)
+	h.WithdrawalsHash = new(common.Hash)
 	h.WithdrawalsHash.SetBytes(b)
 
 	var blobGasUsed uint64
@@ -528,7 +528,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	if len(b) != 32 {
 		return fmt.Errorf("wrong size for ParentBeaconBlockRoot: %d", len(b))
 	}
-	h.ParentBeaconBlockRoot = new(libcommon.Hash)
+	h.ParentBeaconBlockRoot = new(common.Hash)
 	h.ParentBeaconBlockRoot.SetBytes(b)
 
 	// RequestsHash
@@ -545,7 +545,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	if len(b) != 32 {
 		return fmt.Errorf("wrong size for RequestsHash: %d", len(b))
 	}
-	h.RequestsHash = new(libcommon.Hash)
+	h.RequestsHash = new(common.Hash)
 	h.RequestsHash.SetBytes(b)
 
 	if h.Verkle {
@@ -576,12 +576,12 @@ type headerMarshaling struct {
 	BaseFee       *hexutil.Big
 	BlobGasUsed   *hexutil.Uint64
 	ExcessBlobGas *hexutil.Uint64
-	Hash          libcommon.Hash `json:"hash"` // adds call to Hash() in MarshalJSON
+	Hash          common.Hash `json:"hash"` // adds call to Hash() in MarshalJSON
 }
 
 // Hash returns the block hash of the header, which is simply the keccak256 hash of its
 // RLP encoding.
-func (h *Header) Hash() (hash libcommon.Hash) {
+func (h *Header) Hash() (hash common.Hash) {
 	if h.mutable {
 		return rlpHash(h)
 	}
@@ -593,30 +593,30 @@ func (h *Header) Hash() (hash libcommon.Hash) {
 	return hash
 }
 
-var headerSize = libcommon.StorageSize(reflect.TypeOf(Header{}).Size())
+var headerSize = common.StorageSize(reflect.TypeOf(Header{}).Size())
 
 // Size returns the approximate memory used by all internal contents. It is used
 // to approximate and limit the memory consumption of various caches.
-func (h *Header) Size() libcommon.StorageSize {
+func (h *Header) Size() common.StorageSize {
 	s := headerSize
-	s += libcommon.StorageSize(len(h.Extra) + libcommon.BitLenToByteLen(h.Difficulty.BitLen()) + libcommon.BitLenToByteLen(h.Number.BitLen()))
+	s += common.StorageSize(len(h.Extra) + common.BitLenToByteLen(h.Difficulty.BitLen()) + common.BitLenToByteLen(h.Number.BitLen()))
 	if h.BaseFee != nil {
-		s += libcommon.StorageSize(libcommon.BitLenToByteLen(h.BaseFee.BitLen()))
+		s += common.StorageSize(common.BitLenToByteLen(h.BaseFee.BitLen()))
 	}
 	if h.WithdrawalsHash != nil {
-		s += libcommon.StorageSize(32)
+		s += common.StorageSize(32)
 	}
 	if h.BlobGasUsed != nil {
-		s += libcommon.StorageSize(8)
+		s += common.StorageSize(8)
 	}
 	if h.ExcessBlobGas != nil {
-		s += libcommon.StorageSize(8)
+		s += common.StorageSize(8)
 	}
 	if h.ParentBeaconBlockRoot != nil {
-		s += libcommon.StorageSize(32)
+		s += common.StorageSize(32)
 	}
 	if h.RequestsHash != nil {
-		s += libcommon.StorageSize(32)
+		s += common.StorageSize(32)
 	}
 	return s
 }
@@ -740,7 +740,7 @@ type Block struct {
 }
 
 // Copy transaction senders from body into the transactions
-func (b *Body) SendersToTxs(senders []libcommon.Address) {
+func (b *Body) SendersToTxs(senders []common.Address) {
 	if senders == nil {
 		return
 	}
@@ -750,8 +750,8 @@ func (b *Body) SendersToTxs(senders []libcommon.Address) {
 }
 
 // Copy transaction senders from transactions to the body
-func (b *Body) SendersFromTxs() []libcommon.Address {
-	senders := make([]libcommon.Address, len(b.Transactions))
+func (b *Body) SendersFromTxs() []common.Address {
+	senders := make([]common.Address, len(b.Transactions))
 	for i, txn := range b.Transactions {
 		if sender, ok := txn.GetSender(); ok {
 			senders[i] = sender
@@ -1068,7 +1068,7 @@ func NewBlockForAsembling(header *Header, txs []Transaction, uncles []*Header, r
 
 // NewBlockFromStorage like NewBlock but used to create Block object when read it from DB
 // in this case no reason to copy parts, or re-calculate headers fields - they are all stored in DB
-func NewBlockFromStorage(hash libcommon.Hash, header *Header, txs []Transaction, uncles []*Header, withdrawals []*Withdrawal) *Block {
+func NewBlockFromStorage(hash common.Hash, header *Header, txs []Transaction, uncles []*Header, withdrawals []*Withdrawal) *Block {
 	header.hash.Store(&hash)
 	b := &Block{header: header, transactions: txs, uncles: uncles, withdrawals: withdrawals}
 	return b
@@ -1128,7 +1128,7 @@ func CopyHeader(h *Header) *Header {
 		cpy.BaseFee.Set(h.BaseFee)
 	}
 	if h.WithdrawalsHash != nil {
-		cpy.WithdrawalsHash = new(libcommon.Hash)
+		cpy.WithdrawalsHash = new(common.Hash)
 		cpy.WithdrawalsHash.SetBytes(h.WithdrawalsHash.Bytes())
 	}
 	if h.BlobGasUsed != nil {
@@ -1140,11 +1140,11 @@ func CopyHeader(h *Header) *Header {
 		cpy.ExcessBlobGas = &excessBlobGas
 	}
 	if h.ParentBeaconBlockRoot != nil {
-		cpy.ParentBeaconBlockRoot = new(libcommon.Hash)
+		cpy.ParentBeaconBlockRoot = new(common.Hash)
 		cpy.ParentBeaconBlockRoot.SetBytes(h.ParentBeaconBlockRoot.Bytes())
 	}
 	if h.RequestsHash != nil {
-		cpy.RequestsHash = new(libcommon.Hash)
+		cpy.RequestsHash = new(common.Hash)
 		cpy.RequestsHash.SetBytes(h.RequestsHash.Bytes())
 	}
 	cpy.Verkle = h.Verkle
@@ -1254,7 +1254,7 @@ func (bb *Block) EncodeRLP(w io.Writer) error {
 func (b *Block) Uncles() []*Header          { return b.uncles }
 func (b *Block) Transactions() Transactions { return b.transactions }
 
-func (b *Block) Transaction(hash libcommon.Hash) Transaction {
+func (b *Block) Transaction(hash common.Hash) Transaction {
 	for _, transaction := range b.transactions {
 		if transaction.Hash() == hash {
 			return transaction
@@ -1269,28 +1269,28 @@ func (b *Block) GasUsed() uint64      { return b.header.GasUsed }
 func (b *Block) Difficulty() *big.Int { return new(big.Int).Set(b.header.Difficulty) }
 func (b *Block) Time() uint64         { return b.header.Time }
 
-func (b *Block) NumberU64() uint64           { return b.header.Number.Uint64() }
-func (b *Block) MixDigest() libcommon.Hash   { return b.header.MixDigest }
-func (b *Block) Nonce() BlockNonce           { return b.header.Nonce }
-func (b *Block) NonceU64() uint64            { return b.header.Nonce.Uint64() }
-func (b *Block) Bloom() Bloom                { return b.header.Bloom }
-func (b *Block) Coinbase() libcommon.Address { return b.header.Coinbase }
-func (b *Block) Root() libcommon.Hash        { return b.header.Root }
-func (b *Block) ParentHash() libcommon.Hash  { return b.header.ParentHash }
-func (b *Block) TxHash() libcommon.Hash      { return b.header.TxHash }
-func (b *Block) ReceiptHash() libcommon.Hash { return b.header.ReceiptHash }
-func (b *Block) UncleHash() libcommon.Hash   { return b.header.UncleHash }
-func (b *Block) Extra() []byte               { return libcommon.CopyBytes(b.header.Extra) }
+func (b *Block) NumberU64() uint64        { return b.header.Number.Uint64() }
+func (b *Block) MixDigest() common.Hash   { return b.header.MixDigest }
+func (b *Block) Nonce() BlockNonce        { return b.header.Nonce }
+func (b *Block) NonceU64() uint64         { return b.header.Nonce.Uint64() }
+func (b *Block) Bloom() Bloom             { return b.header.Bloom }
+func (b *Block) Coinbase() common.Address { return b.header.Coinbase }
+func (b *Block) Root() common.Hash        { return b.header.Root }
+func (b *Block) ParentHash() common.Hash  { return b.header.ParentHash }
+func (b *Block) TxHash() common.Hash      { return b.header.TxHash }
+func (b *Block) ReceiptHash() common.Hash { return b.header.ReceiptHash }
+func (b *Block) UncleHash() common.Hash   { return b.header.UncleHash }
+func (b *Block) Extra() []byte            { return common.CopyBytes(b.header.Extra) }
 func (b *Block) BaseFee() *big.Int {
 	if b.header.BaseFee == nil {
 		return nil
 	}
 	return new(big.Int).Set(b.header.BaseFee)
 }
-func (b *Block) WithdrawalsHash() *libcommon.Hash       { return b.header.WithdrawalsHash }
-func (b *Block) Withdrawals() Withdrawals               { return b.withdrawals }
-func (b *Block) ParentBeaconBlockRoot() *libcommon.Hash { return b.header.ParentBeaconBlockRoot }
-func (b *Block) RequestsHash() *libcommon.Hash          { return b.header.RequestsHash }
+func (b *Block) WithdrawalsHash() *common.Hash       { return b.header.WithdrawalsHash }
+func (b *Block) Withdrawals() Withdrawals            { return b.withdrawals }
+func (b *Block) ParentBeaconBlockRoot() *common.Hash { return b.header.ParentBeaconBlockRoot }
+func (b *Block) RequestsHash() *common.Hash          { return b.header.RequestsHash }
 
 // Header returns a deep-copy of the entire block header using CopyHeader()
 func (b *Block) Header() *Header       { return CopyHeader(b.header) }
@@ -1302,7 +1302,7 @@ func (b *Block) Body() *Body {
 	bd.SendersFromTxs()
 	return bd
 }
-func (b *Block) SendersToTxs(senders []libcommon.Address) {
+func (b *Block) SendersToTxs(senders []common.Address) {
 	if len(senders) == 0 {
 		return
 	}
@@ -1340,14 +1340,14 @@ func (b *Body) RawBody() *RawBody {
 
 // Size returns the true RLP encoded storage size of the block, either by encoding
 // and returning it, or returning a previously cached value.
-func (b *Block) Size() libcommon.StorageSize {
+func (b *Block) Size() common.StorageSize {
 	if size := b.size.Load(); size > 0 {
-		return libcommon.StorageSize(size)
+		return common.StorageSize(size)
 	}
 	c := writeCounter(0)
 	rlp.Encode(&c, b)
 	b.size.Store(uint64(c))
-	return libcommon.StorageSize(c)
+	return common.StorageSize(c)
 }
 
 // SanityCheck can be used to prevent that unbounded fields are
@@ -1396,14 +1396,14 @@ func (b *Block) HashCheck(fullCheck bool) error {
 	return nil
 }
 
-type writeCounter libcommon.StorageSize
+type writeCounter common.StorageSize
 
 func (c *writeCounter) Write(b []byte) (int, error) {
 	*c += writeCounter(len(b))
 	return len(b), nil
 }
 
-func CalcUncleHash(uncles []*Header) libcommon.Hash {
+func CalcUncleHash(uncles []*Header) common.Hash {
 	if len(uncles) == 0 {
 		return EmptyUncleHash
 	}
@@ -1477,7 +1477,7 @@ func (b *Block) WithSeal(header *Header) *Block {
 
 // Hash returns the keccak256 hash of b's header.
 // The hash is computed on the first call and cached thereafter.
-func (b *Block) Hash() libcommon.Hash { return b.header.Hash() }
+func (b *Block) Hash() common.Hash { return b.header.Hash() }
 
 type Blocks []*Block
 

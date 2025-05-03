@@ -36,7 +36,7 @@ import (
 
 	"golang.org/x/sync/semaphore"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon-lib/common/mclock"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -851,7 +851,7 @@ running:
 
 		case pd := <-srv.delpeer:
 			// A peer disconnected.
-			d := libcommon.PrettyDuration(mclock.Now() - pd.created)
+			d := common.PrettyDuration(mclock.Now() - pd.created)
 			delete(peers, pd.ID())
 			srv.logger.Trace("Removing p2p peer", "peercount", len(peers), "url", pd.Node(), "duration", d, "err", pd.err)
 			srv.dialsched.peerRemoved(pd.rw)

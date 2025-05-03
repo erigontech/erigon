@@ -21,7 +21,7 @@ package shutter
 import (
 	"math/big"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
 )
 
@@ -32,7 +32,7 @@ type EncryptedTxnSubmission struct {
 	EonIndex             EonIndex
 	TxnIndex             TxnIndex
 	IdentityPrefix       [32]byte
-	Sender               libcommon.Address
+	Sender               common.Address
 	EncryptedTransaction []byte
 	GasLimit             *big.Int
 	BlockNum             uint64

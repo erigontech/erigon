@@ -37,6 +37,7 @@ import (
 var ErrForkChoiceUpdateFailure = errors.New("fork choice update failure")
 var ErrForkChoiceUpdateBadBlock = errors.New("fork choice update bad block")
 var ErrExecutionClientBusy = errors.New("execution client busy")
+var ErrUfcTooFarBehind = errors.New("ufc too far behind")
 
 type ExecutionClient interface {
 	Prepare(ctx context.Context) error
@@ -124,6 +125,8 @@ func (e *executionClient) UpdateForkChoice(ctx context.Context, tip *types.Heade
 			return fmt.Errorf("%w: status=%d, validationErr='%s'", ErrForkChoiceUpdateBadBlock, r.Status, r.ValidationError)
 		case executionproto.ExecutionStatus_Busy:
 			return ErrExecutionClientBusy // gets retried
+		case executionproto.ExecutionStatus_TooFarAway:
+			return ErrUfcTooFarBehind
 		default:
 			return fmt.Errorf("%w: status=%d, validationErr='%s'", ErrForkChoiceUpdateFailure, r.Status, r.ValidationError)
 		}

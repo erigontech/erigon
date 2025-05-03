@@ -43,7 +43,7 @@ func TestDBSQLiteInsertAndFind(t *testing.T) {
 
 	candidates, err := db.FindCandidates(ctx, 1)
 	require.NoError(t, err)
-	require.Equal(t, 1, len(candidates))
+	require.Len(t, candidates, 1)
 
 	candidateID := candidates[0]
 	assert.Equal(t, id, candidateID)

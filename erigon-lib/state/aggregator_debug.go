@@ -1,6 +1,8 @@
 package state
 
-import "github.com/erigontech/erigon-lib/kv"
+import (
+	"github.com/erigontech/erigon-lib/kv"
+)
 
 type aggDirtyFilesRoTx struct {
 	agg    *Aggregator
@@ -224,4 +226,15 @@ type MissedAccessorIIFiles struct {
 
 func (m *MissedAccessorIIFiles) missedMapAccessors() []*filesItem {
 	return m.files[AccessorHashMap]
+}
+
+func (at *AggregatorRoTx) DbgDomain(idx kv.Domain) *DomainRoTx         { return at.d[idx] }
+func (at *AggregatorRoTx) DbgII(idx kv.InvertedIdx) *InvertedIndexRoTx { return at.searchII(idx) }
+func (at *AggregatorRoTx) searchII(idx kv.InvertedIdx) *InvertedIndexRoTx {
+	for _, iit := range at.iis {
+		if iit.name == idx {
+			return iit
+		}
+	}
+	return nil
 }

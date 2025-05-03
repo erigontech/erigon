@@ -114,5 +114,13 @@ var (
 			metrics.GetOrCreateSummary(`kv_get{level="L4",domain="receipt"}`),
 			metrics.GetOrCreateSummary(`kv_get{level="recent",domain="receipt"}`),
 		},
+		kv.RCacheDomain: {
+			metrics.GetOrCreateSummary(`kv_get{level="L0",domain="rcache"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L1",domain="rcache"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L2",domain="rcache"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L3",domain="rcache"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L4",domain="rcache"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="recent",domain="rcache"}`),
+		},
 	}
 )

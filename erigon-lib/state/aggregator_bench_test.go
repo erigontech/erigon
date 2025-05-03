@@ -101,7 +101,7 @@ func queueKeys(ctx context.Context, seed, ofSize uint64) <-chan []byte {
 	keys := make(chan []byte, 1)
 	go func() {
 		for {
-			if ctx.Err() != nil {
+			if ctx.Err() != nil { //nolint:staticcheck
 				break
 			}
 			bb := make([]byte, ofSize)
@@ -139,7 +139,7 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 		p := rnd.IntN(len(keys))
 		cur, err := bt.Seek(getter, keys[p])
 		require.NoErrorf(b, err, "i=%d", i)
-		require.EqualValues(b, keys[p], cur.Key())
+		require.Equal(b, keys[p], cur.Key())
 		require.NotEmptyf(b, cur.Value(), "i=%d", i)
 		cur.Close()
 	}
@@ -181,7 +181,7 @@ func Benchmark_BTree_Seek(b *testing.B) {
 			cur, err := bt.Seek(getter, keys[p])
 			require.NoError(b, err)
 
-			require.EqualValues(b, keys[p], cur.key)
+			require.Equal(b, keys[p], cur.key)
 			cur.Close()
 		}
 	})
@@ -193,7 +193,7 @@ func Benchmark_BTree_Seek(b *testing.B) {
 			cur, err := bt.Seek(getter, keys[p])
 			require.NoError(b, err)
 
-			require.EqualValues(b, keys[p], cur.key)
+			require.Equal(b, keys[p], cur.key)
 
 			prevKey := common.Copy(keys[p])
 			ntimer := time.Duration(0)
@@ -264,7 +264,7 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 		}
 
 		require.NoErrorf(b, err, "i=%d", i)
-		require.EqualValues(b, keys[p], key)
+		require.Equal(b, keys[p], key)
 	}
 }
 

@@ -28,7 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/types"
@@ -69,7 +69,7 @@ func TestSelfDestructReceive(t *testing.T) {
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	require.NoError(t, err)
 
-	var contractAddress libcommon.Address
+	var contractAddress common.Address
 	var selfDestructorContract *contracts.SelfDestructor
 
 	// There are two blocks

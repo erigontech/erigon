@@ -105,6 +105,15 @@ type histCfg struct {
 
 	//TODO: re-visit this check - maybe we don't need it. It's about kill in the middle of merge
 	integrity rangeIntegrityChecker
+
+	version HistVersionTypes
+}
+
+func (h histCfg) GetVersions() VersionTypes {
+	return VersionTypes{
+		Hist: &h.version,
+		II:   &h.iiCfg.version,
+	}
 }
 
 func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error) {
@@ -133,17 +142,24 @@ func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error
 		return nil, fmt.Errorf("NewHistory: %s, %w", cfg.iiCfg.filenameBase, err)
 	}
 
+	if h.version.DataV.IsZero() {
+		panic(fmt.Errorf("assert: forgot to set version of %s", h.name))
+	}
+	if h.version.AccessorVI.IsZero() {
+		panic(fmt.Errorf("assert: forgot to set version of %s", h.name))
+	}
+
 	return &h, nil
 }
 
 func (h *History) vFileName(fromStep, toStep uint64) string {
-	return fmt.Sprintf("v1-%s.%d-%d.v", h.filenameBase, fromStep, toStep)
+	return fmt.Sprintf("%s-%s.%d-%d.v", h.version.DataV.String(), h.filenameBase, fromStep, toStep)
 }
 func (h *History) vFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(h.dirs.SnapHistory, h.vFileName(fromStep, toStep))
 }
 func (h *History) vAccessorFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("v1-%s.%d-%d.vi", h.filenameBase, fromStep, toStep))
+	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.vi", h.version.AccessorVI.String(), h.filenameBase, fromStep, toStep))
 }
 
 // openList - main method to open list of files.
@@ -426,6 +442,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 					}
 				}
 			}
+			p.Processed.Add(1)
 
 			select {
 			case <-ctx.Done():
@@ -1226,6 +1243,10 @@ func (ht *HistoryRoTx) encodeTs(txNum uint64, key []byte) []byte {
 // HistorySeek searches history for a value of specified key before txNum
 // second return value is true if the value is found in the history (even if it is nil)
 func (ht *HistoryRoTx) HistorySeek(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
+	if ht.h.disable {
+		return nil, false, nil
+	}
+
 	v, ok, err := ht.historySeekInFiles(key, txNum)
 	if err != nil {
 		return nil, false, err

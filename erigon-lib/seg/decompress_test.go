@@ -403,12 +403,12 @@ func TestUncompressed(t *testing.T) {
 		_, ok := g.BinarySearch([]byte(""), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
 		require.True(ok)
 		k, _ := g.Next(nil)
-		require.Equal("", string(k))
+		require.Empty(string(k))
 
 		_, ok = g.BinarySearch(nil, d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
 		require.True(ok)
 		k, _ = g.Next(nil)
-		require.Equal("", string(k))
+		require.Empty(string(k))
 	})
 
 }
@@ -594,7 +594,7 @@ func rmNewLine(s string) string {
 func TestDecompressTorrent(t *testing.T) {
 	t.Skip()
 
-	fpath := "/mnt/data/chains/mainnet/snapshots/v1-014000-014500-transactions.seg"
+	fpath := "/mnt/data/chains/mainnet/snapshots/v1.0-014000-014500-transactions.seg"
 	st, err := os.Stat(fpath)
 	require.NoError(t, err)
 	fmt.Printf("file: %v, size: %d\n", st.Name(), st.Size())

@@ -23,7 +23,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -108,7 +108,7 @@ func (s *Service) FetchBodies(ctx context.Context, headers []*types.Header, peer
 	return s.fetcher.FetchBodies(ctx, headers, peerId, opts...)
 }
 
-func (s *Service) FetchBlocksBackwardsByHash(ctx context.Context, hash libcommon.Hash, amount uint64, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[[]*types.Block], error) {
+func (s *Service) FetchBlocksBackwardsByHash(ctx context.Context, hash common.Hash, amount uint64, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[[]*types.Block], error) {
 	return s.fetcher.FetchBlocksBackwardsByHash(ctx, hash, amount, peerId, opts...)
 }
 

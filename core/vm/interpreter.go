@@ -28,7 +28,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
 
@@ -102,12 +102,12 @@ func (ctx *ScopeContext) StackData() []uint256.Int {
 }
 
 // Caller returns the current caller.
-func (ctx *ScopeContext) Caller() libcommon.Address {
+func (ctx *ScopeContext) Caller() common.Address {
 	return ctx.Contract.Caller()
 }
 
 // Address returns the address where this scope of execution is taking place.
-func (ctx *ScopeContext) Address() libcommon.Address {
+func (ctx *ScopeContext) Address() common.Address {
 	return ctx.Contract.Address()
 }
 
@@ -126,7 +126,7 @@ func (ctx *ScopeContext) Code() []byte {
 	return ctx.Contract.Code
 }
 
-func (ctx *ScopeContext) CodeHash() libcommon.Hash {
+func (ctx *ScopeContext) CodeHash() common.Hash {
 	return ctx.Contract.CodeHash
 }
 
@@ -152,8 +152,8 @@ type VM struct {
 	evm *EVM
 	cfg Config
 
-	hasher    keccakState    // Keccak256 hasher instance shared across opcodes
-	hasherBuf libcommon.Hash // Keccak256 hasher result array shared across opcodes
+	hasher    keccakState // Keccak256 hasher instance shared across opcodes
+	hasherBuf common.Hash // Keccak256 hasher result array shared across opcodes
 
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse

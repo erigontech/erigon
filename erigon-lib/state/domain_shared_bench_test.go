@@ -95,7 +95,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 			v, _, ok, err := ac2.GetLatest(kv.AccountsDomain, keys[i], rwTx)
 
 			require.True(t, ok)
-			require.EqualValuesf(t, latest, v, "unexpected %d, wanted %d", binary.BigEndian.Uint64(v), maxTx-1)
+			require.Equalf(t, latest, v, "unexpected %d, wanted %d", binary.BigEndian.Uint64(v), maxTx-1)
 			require.NoError(t, err)
 		}
 	}

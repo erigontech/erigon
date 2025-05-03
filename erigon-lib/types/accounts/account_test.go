@@ -21,7 +21,7 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 )
 
@@ -82,8 +82,8 @@ func TestAccountEncodeWithCode(t *testing.T) {
 		Initialised: true,
 		Nonce:       2,
 		Balance:     *new(uint256.Int).SetUint64(1000),
-		Root:        libcommon.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-		CodeHash:    libcommon.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
+		CodeHash:    common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
 		Incarnation: 4,
 	}
 
@@ -103,8 +103,8 @@ func TestAccountEncodeWithCodeWithStorageSizeHack(t *testing.T) {
 		Initialised: true,
 		Nonce:       2,
 		Balance:     *new(uint256.Int).SetUint64(1000),
-		Root:        libcommon.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-		CodeHash:    libcommon.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
+		CodeHash:    common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
 		Incarnation: 5,
 	}
 
@@ -145,8 +145,8 @@ func TestEncodeAccountWithEmptyBalanceNonNilContractAndNotZeroIncarnation(t *tes
 		Initialised: true,
 		Nonce:       0,
 		Balance:     *uint256.NewInt(0),
-		Root:        libcommon.HexToHash("123"),
-		CodeHash:    libcommon.HexToHash("123"),
+		Root:        common.HexToHash("123"),
+		CodeHash:    common.HexToHash("123"),
 		Incarnation: 1,
 	}
 	encodedAccount := SerialiseV3(&a)
@@ -248,8 +248,8 @@ func TestIncarnationWithNonEmptyAccount(t *testing.T) {
 		Initialised: true,
 		Nonce:       2,
 		Balance:     *new(uint256.Int).SetUint64(1000),
-		Root:        libcommon.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-		CodeHash:    libcommon.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
+		CodeHash:    common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
 		Incarnation: 4,
 	}
 
@@ -269,8 +269,8 @@ func TestIncarnationWithNoIncarnation(t *testing.T) {
 		Initialised: true,
 		Nonce:       2,
 		Balance:     *new(uint256.Int).SetUint64(1000),
-		Root:        libcommon.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-		CodeHash:    libcommon.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
+		CodeHash:    common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
 		Incarnation: 0,
 	}
 

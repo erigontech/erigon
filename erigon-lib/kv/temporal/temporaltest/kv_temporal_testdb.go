@@ -30,7 +30,7 @@ import (
 )
 
 // nolint:thelper
-func NewTestDB(tb testing.TB, dirs datadir.Dirs) (kv.TemporalRwDB, *state.Aggregator) {
+func NewTestDB(tb testing.TB, dirs datadir.Dirs) kv.TemporalRwDB {
 	if tb != nil {
 		tb.Helper()
 	}
@@ -60,5 +60,5 @@ func NewTestDB(tb testing.TB, dirs datadir.Dirs) (kv.TemporalRwDB, *state.Aggreg
 	if tb != nil {
 		tb.Cleanup(db.Close)
 	}
-	return db, agg
+	return db
 }

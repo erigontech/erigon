@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -181,7 +181,7 @@ func (b *blockService) publishBlockGossipEvent(block *cltypes.SignedBeaconBlock)
 	// publish block to event handler
 	b.emitter.State().SendBlockGossip(&beaconevents.BlockGossipData{
 		Slot:  block.Block.Slot,
-		Block: libcommon.Hash(blockRoot),
+		Block: common.Hash(blockRoot),
 	})
 }
 

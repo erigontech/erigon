@@ -101,7 +101,7 @@ func backupTable(ctx context.Context, srcTx kv.Tx, dst kv.RwDB, table string, lo
 	total, _ = srcTx.Count(table)
 
 	if err := dst.Update(ctx, func(tx kv.RwTx) error {
-		return tx.ClearBucket(table)
+		return tx.ClearTable(table)
 	}); err != nil {
 		return err
 	}
@@ -169,7 +169,7 @@ const ReadAheadThreads = 2048
 func ClearTables(ctx context.Context, tx kv.RwTx, tables ...string) error {
 	for _, tbl := range tables {
 		log.Info("Clear", "table", tbl)
-		if err := tx.ClearBucket(tbl); err != nil {
+		if err := tx.ClearTable(tbl); err != nil {
 			return err
 		}
 	}

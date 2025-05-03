@@ -28,26 +28,26 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
 )
 
 type CommonTx struct {
 	TransactionMisc
 
-	Nonce    uint64             // nonce of sender account
-	GasLimit uint64             // gas limit
-	To       *libcommon.Address `rlp:"nil"` // nil means contract creation
-	Value    *uint256.Int       // wei amount
-	Data     []byte             // contract invocation input data
-	V, R, S  uint256.Int        // signature values
+	Nonce    uint64          // nonce of sender account
+	GasLimit uint64          // gas limit
+	To       *common.Address `rlp:"nil"` // nil means contract creation
+	Value    *uint256.Int    // wei amount
+	Data     []byte          // contract invocation input data
+	V, R, S  uint256.Int     // signature values
 }
 
 func (ct *CommonTx) GetNonce() uint64 {
 	return ct.Nonce
 }
 
-func (ct *CommonTx) GetTo() *libcommon.Address {
+func (ct *CommonTx) GetTo() *common.Address {
 	return ct.To
 }
 
@@ -67,14 +67,14 @@ func (ct *CommonTx) GetData() []byte {
 	return ct.Data
 }
 
-func (ct *CommonTx) GetSender() (libcommon.Address, bool) {
+func (ct *CommonTx) GetSender() (common.Address, bool) {
 	if sc := ct.from.Load(); sc != nil {
 		return *sc, true
 	}
-	return libcommon.Address{}, false
+	return common.Address{}, false
 }
 
-func (ct *CommonTx) SetSender(addr libcommon.Address) {
+func (ct *CommonTx) SetSender(addr common.Address) {
 	ct.from.Store(&addr)
 }
 
@@ -86,9 +86,9 @@ func (ct *CommonTx) IsContractDeploy() bool {
 	return ct.GetTo() == nil
 }
 
-func (ct *CommonTx) GetBlobHashes() []libcommon.Hash {
+func (ct *CommonTx) GetBlobHashes() []common.Hash {
 	// Only blob txs have blob hashes
-	return []libcommon.Hash{}
+	return []common.Hash{}
 }
 
 // LegacyTx is the transaction data of regular Ethereum transactions.
@@ -130,7 +130,7 @@ func (tx *LegacyTx) Unwrap() Transaction {
 
 // NewTransaction creates an unsigned legacy transaction.
 // Deprecated: use NewTx instead.
-func NewTransaction(nonce uint64, to libcommon.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, data []byte) *LegacyTx {
+func NewTransaction(nonce uint64, to common.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, data []byte) *LegacyTx {
 	return &LegacyTx{
 		CommonTx: CommonTx{
 			Nonce:    nonce,
@@ -164,7 +164,7 @@ func (tx *LegacyTx) copy() *LegacyTx {
 			TransactionMisc: TransactionMisc{},
 			Nonce:           tx.Nonce,
 			To:              tx.To, // TODO: copy pointed-to address
-			Data:            libcommon.CopyBytes(tx.Data),
+			Data:            common.CopyBytes(tx.Data),
 			GasLimit:        tx.GasLimit,
 			// These are initialized below.
 			Value: new(uint256.Int),
@@ -313,7 +313,7 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("wrong size for To: %d", len(b))
 	}
 	if len(b) > 0 {
-		tx.To = &libcommon.Address{}
+		tx.To = &common.Address{}
 		copy((*tx.To)[:], b)
 	}
 	if b, err = s.Uint256Bytes(); err != nil {
@@ -374,7 +374,7 @@ func (tx *LegacyTx) WithSignature(signer Signer, sig []byte) (Transaction, error
 }
 
 // Hash computes the hash (but not for signatures!)
-func (tx *LegacyTx) Hash() libcommon.Hash {
+func (tx *LegacyTx) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
@@ -391,7 +391,7 @@ func (tx *LegacyTx) Hash() libcommon.Hash {
 	return hash
 }
 
-func (tx *LegacyTx) SigningHash(chainID *big.Int) libcommon.Hash {
+func (tx *LegacyTx) SigningHash(chainID *big.Int) common.Hash {
 	if chainID != nil && chainID.Sign() != 0 {
 		return rlpHash([]interface{}{
 			tx.Nonce,
@@ -423,14 +423,14 @@ func (tx *LegacyTx) GetChainID() *uint256.Int {
 	return DeriveChainId(&tx.V)
 }
 
-func (tx *LegacyTx) cachedSender() (sender libcommon.Address, ok bool) {
+func (tx *LegacyTx) cachedSender() (sender common.Address, ok bool) {
 	s := tx.from.Load()
 	if s == nil {
 		return sender, false
 	}
 	return *s, true
 }
-func (tx *LegacyTx) Sender(signer Signer) (libcommon.Address, error) {
+func (tx *LegacyTx) Sender(signer Signer) (common.Address, error) {
 	if from := tx.from.Load(); from != nil {
 		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
 			return *from, nil
@@ -439,7 +439,7 @@ func (tx *LegacyTx) Sender(signer Signer) (libcommon.Address, error) {
 
 	addr, err := signer.Sender(tx)
 	if err != nil {
-		return libcommon.Address{}, err
+		return common.Address{}, err
 	}
 	tx.from.Store(&addr)
 	return addr, nil

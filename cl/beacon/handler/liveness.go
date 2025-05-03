@@ -23,7 +23,7 @@ import (
 	"sort"
 	"strconv"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -79,7 +79,7 @@ func (a *ApiHandler) liveness(w http.ResponseWriter, r *http.Request) (*beaconht
 	for _, idx := range idxs {
 		liveSet[idx] = &live{Index: int(idx), IsLive: false}
 	}
-	var lastBlockRootProcess libcommon.Hash
+	var lastBlockRootProcess common.Hash
 	var lastSlotProcess uint64
 	// we need to obtain the relevant data:
 	// Use the blocks in the epoch as heuristic
@@ -134,7 +134,7 @@ func (a *ApiHandler) liveness(w http.ResponseWriter, r *http.Request) (*beaconht
 	return newBeaconResponse(resp), nil
 }
 
-func (a *ApiHandler) obtainCurrentEpochParticipationFromEpoch(tx kv.Tx, epoch uint64, blockRoot libcommon.Hash, blockSlot uint64) (*solid.ParticipationBitList, *solid.ParticipationBitList, error) {
+func (a *ApiHandler) obtainCurrentEpochParticipationFromEpoch(tx kv.Tx, epoch uint64, blockRoot common.Hash, blockSlot uint64) (*solid.ParticipationBitList, *solid.ParticipationBitList, error) {
 	prevEpoch := epoch
 	if epoch > 0 {
 		prevEpoch--

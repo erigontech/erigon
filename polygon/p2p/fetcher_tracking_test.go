@@ -183,7 +183,7 @@ func TestTrackingFetcherFetchBodiesUpdatesPeerTracker(t *testing.T) {
 		require.Nil(t, bodies.Data)
 
 		peerIds = test.peerTracker.ListPeersMayHaveBlockNum(1) // neither peerId1 nor peerId2 have block num 1
-		require.Len(t, peerIds, 0)
+		require.Empty(t, peerIds)
 	})
 }
 

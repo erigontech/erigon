@@ -8,6 +8,8 @@ ADD go.mod go.mod
 ADD go.sum go.sum
 ADD erigon-lib/go.mod erigon-lib/go.mod
 ADD erigon-lib/go.sum erigon-lib/go.sum
+ADD erigon-db/go.mod erigon-db/go.mod
+ADD erigon-db/go.sum erigon-db/go.sum
 
 RUN go mod download
 ADD . .
@@ -28,6 +30,8 @@ ADD go.mod go.mod
 ADD go.sum go.sum
 ADD erigon-lib/go.mod erigon-lib/go.mod
 ADD erigon-lib/go.sum erigon-lib/go.sum
+ADD erigon-db/go.mod erigon-db/go.mod
+ADD erigon-db/go.sum erigon-db/go.sum
 
 RUN mkdir -p /app/build/bin
 

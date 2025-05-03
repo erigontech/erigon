@@ -28,14 +28,14 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
 )
 
 // AccessTuple is the element type of an access list.
 type AccessTuple struct {
-	Address     libcommon.Address `json:"address"`
-	StorageKeys []libcommon.Hash  `json:"storageKeys"`
+	Address     common.Address `json:"address"`
+	StorageKeys []common.Hash  `json:"storageKeys"`
 }
 
 // AccessList is an EIP-2930 access list.
@@ -65,7 +65,7 @@ func (tx *AccessListTx) copy() *AccessListTx {
 				TransactionMisc: TransactionMisc{},
 				Nonce:           tx.Nonce,
 				To:              tx.To, // TODO: copy pointed-to address
-				Data:            libcommon.CopyBytes(tx.Data),
+				Data:            common.CopyBytes(tx.Data),
 				GasLimit:        tx.GasLimit,
 				// These are copied below.
 				Value: new(uint256.Int),
@@ -308,7 +308,7 @@ func decodeAccessList(al *AccessList, s *rlp.Stream) error {
 	i := 0
 	for _, err = s.List(); err == nil; _, err = s.List() {
 		// decode tuple
-		*al = append(*al, AccessTuple{StorageKeys: []libcommon.Hash{}})
+		*al = append(*al, AccessTuple{StorageKeys: []common.Hash{}})
 		tuple := &(*al)[len(*al)-1]
 		if b, err = s.Bytes(); err != nil {
 			return fmt.Errorf("read Address: %w", err)
@@ -321,7 +321,7 @@ func decodeAccessList(al *AccessList, s *rlp.Stream) error {
 			return fmt.Errorf("open StorageKeys: %w", err)
 		}
 		for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
-			tuple.StorageKeys = append(tuple.StorageKeys, libcommon.Hash{})
+			tuple.StorageKeys = append(tuple.StorageKeys, common.Hash{})
 			if len(b) != 32 {
 				return fmt.Errorf("wrong size for StorageKey: %d", len(b))
 			}
@@ -376,7 +376,7 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("wrong size for To: %d", len(b))
 	}
 	if len(b) > 0 {
-		tx.To = &libcommon.Address{}
+		tx.To = &common.Address{}
 		copy((*tx.To)[:], b)
 	}
 	if b, err = s.Uint256Bytes(); err != nil {
@@ -448,7 +448,7 @@ func (tx *AccessListTx) WithSignature(signer Signer, sig []byte) (Transaction, e
 }
 
 // Hash computes the hash (but not for signatures!)
-func (tx *AccessListTx) Hash() libcommon.Hash {
+func (tx *AccessListTx) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
@@ -467,7 +467,7 @@ func (tx *AccessListTx) Hash() libcommon.Hash {
 	return hash
 }
 
-func (tx *AccessListTx) SigningHash(chainID *big.Int) libcommon.Hash {
+func (tx *AccessListTx) SigningHash(chainID *big.Int) common.Hash {
 	return prefixedRlpHash(
 		AccessListTxType,
 		[]interface{}{
@@ -492,7 +492,7 @@ func (tx *AccessListTx) GetChainID() *uint256.Int {
 	return tx.ChainID
 }
 
-func (tx *AccessListTx) cachedSender() (sender libcommon.Address, ok bool) {
+func (tx *AccessListTx) cachedSender() (sender common.Address, ok bool) {
 	s := tx.from.Load()
 	if s == nil {
 		return sender, false
@@ -500,9 +500,9 @@ func (tx *AccessListTx) cachedSender() (sender libcommon.Address, ok bool) {
 	return *s, true
 }
 
-var zeroAddr = libcommon.Address{}
+var zeroAddr = common.Address{}
 
-func (tx *AccessListTx) Sender(signer Signer) (libcommon.Address, error) {
+func (tx *AccessListTx) Sender(signer Signer) (common.Address, error) {
 	if from := tx.from.Load(); from != nil {
 		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
 			return *from, nil
@@ -511,7 +511,7 @@ func (tx *AccessListTx) Sender(signer Signer) (libcommon.Address, error) {
 
 	addr, err := signer.Sender(tx)
 	if err != nil {
-		return libcommon.Address{}, err
+		return common.Address{}, err
 	}
 	tx.from.Store(&addr)
 	return addr, nil

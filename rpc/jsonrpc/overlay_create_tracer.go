@@ -19,14 +19,14 @@ package jsonrpc
 import (
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/tracers"
 )
 
 type OverlayCreateTracer struct {
-	contractAddress libcommon.Address
+	contractAddress common.Address
 	isCapturing     bool
 	code            []byte
 	gasCap          uint64
@@ -45,13 +45,13 @@ func (ct *OverlayCreateTracer) Tracer() *tracers.Tracer {
 }
 
 // Top call frame
-func (ct *OverlayCreateTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (ct *OverlayCreateTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	ct.evm = env
 }
 func (ct *OverlayCreateTracer) CaptureEnd(output []byte, usedGas uint64, err error) {}
 
 // Rest of the frames
-func (ct *OverlayCreateTracer) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (ct *OverlayCreateTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	if ct.isCapturing {
 		return
 	}

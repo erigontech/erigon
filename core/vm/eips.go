@@ -27,7 +27,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain/params"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 var activators = map[int]func(*JumpTable){
@@ -204,7 +204,7 @@ func enable1153(jt *JumpTable) {
 // opTload implements TLOAD opcode
 func opTload(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	loc := scope.Stack.Peek()
-	hash := libcommon.Hash(loc.Bytes32())
+	hash := common.Hash(loc.Bytes32())
 	val := interpreter.evm.IntraBlockState().GetTransientState(scope.Contract.Address(), hash)
 	loc.SetBytes(val.Bytes())
 	return nil, nil

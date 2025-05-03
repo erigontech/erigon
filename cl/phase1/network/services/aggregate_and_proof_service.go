@@ -26,10 +26,10 @@ import (
 
 	"github.com/erigontech/erigon/cl/utils/bls"
 
+	"github.com/erigontech/erigon-lib/common"
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -349,7 +349,7 @@ func AggregateMessageSignature(
 			return err
 		}
 		pk := val.PublicKeyBytes()
-		pks = append(pks, libcommon.CopyBytes(pk))
+		pks = append(pks, common.CopyBytes(pk))
 		return nil
 	}); err != nil {
 		return nil, nil, nil, err

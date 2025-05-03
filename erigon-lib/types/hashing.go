@@ -25,7 +25,7 @@ import (
 	"io"
 	"sync"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/crypto/cryptopool"
 	"github.com/erigontech/erigon-lib/rlp"
@@ -43,7 +43,7 @@ type DerivableList interface {
 	EncodeIndex(i int, w *bytes.Buffer)
 }
 
-func DeriveSha(list DerivableList) libcommon.Hash {
+func DeriveSha(list DerivableList) common.Hash {
 	if list.Len() < 1 {
 		return trie.EmptyRoot
 	}
@@ -168,7 +168,7 @@ func intsize(i uint) (size int) {
 	}
 }
 
-func RawRlpHash(rawRlpData rlp.RawValue) (h libcommon.Hash) {
+func RawRlpHash(rawRlpData rlp.RawValue) (h common.Hash) {
 	sha := crypto.NewKeccakState()
 	sha.Write(rawRlpData) //nolint:errcheck
 	sha.Read(h[:])        //nolint:errcheck
@@ -176,7 +176,7 @@ func RawRlpHash(rawRlpData rlp.RawValue) (h libcommon.Hash) {
 	return h
 }
 
-func rlpHash(x interface{}) (h libcommon.Hash) {
+func rlpHash(x interface{}) (h common.Hash) {
 	sha := crypto.NewKeccakState()
 	rlp.Encode(sha, x) //nolint:errcheck
 	sha.Read(h[:])     //nolint:errcheck
@@ -186,7 +186,7 @@ func rlpHash(x interface{}) (h libcommon.Hash) {
 
 // prefixedRlpHash writes the prefix into the hasher before rlp-encoding the
 // given interface. It's used for typed transactions.
-func prefixedRlpHash(prefix byte, x interface{}) (h libcommon.Hash) {
+func prefixedRlpHash(prefix byte, x interface{}) (h common.Hash) {
 	sha := crypto.NewKeccakState()
 	//nolint:errcheck
 	sha.Write([]byte{prefix})

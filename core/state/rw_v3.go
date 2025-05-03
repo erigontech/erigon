@@ -26,6 +26,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -34,7 +35,9 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	libstate "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
@@ -52,17 +55,22 @@ type ParallelExecutionState struct {
 	triggers     map[uint64]*TxTask
 	senderTxNums map[common.Address]uint64
 
+	isBor bool
+
 	logger log.Logger
 
-	trace bool
+	syncCfg ethconfig.Sync
+	trace   bool
 }
 
-func NewParallelExecutionState(domains *libstate.SharedDomains, logger log.Logger) *ParallelExecutionState {
+func NewParallelExecutionState(domains *libstate.SharedDomains, syncCfg ethconfig.Sync, isBor bool, logger log.Logger) *ParallelExecutionState {
 	return &ParallelExecutionState{
 		domains:      domains,
 		triggers:     map[uint64]*TxTask{},
 		senderTxNums: map[common.Address]uint64{},
 		logger:       logger,
+		syncCfg:      syncCfg,
+		isBor:        isBor,
 		//trace: true,
 	}
 }
@@ -234,6 +242,17 @@ func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *li
 			}
 		}
 	}
+
+	if rs.syncCfg.PersistReceiptsCacheV2 {
+		var receipt *types.Receipt
+		if txTask.TxIndex > 0 && txTask.TxIndex < len(txTask.BlockReceipts) {
+			receipt = txTask.BlockReceipts[txTask.TxIndex]
+		}
+		if err := rawdb.WriteReceiptCacheV2(domains, receipt); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -450,14 +469,14 @@ func (w *StateWriterBufferedV3) CreateContract(address common.Address) error {
 
 // StateWriterV3 - used by parallel workers to accumulate updates and then send them to conflict-resolution.
 type StateWriterV3 struct {
-	rs          *ParallelExecutionState
+	domains     *libstate.SharedDomains
 	trace       bool
 	accumulator *shards.Accumulator
 }
 
-func NewStateWriterV3(rs *ParallelExecutionState, accumulator *shards.Accumulator) *StateWriterV3 {
+func NewStateWriterV3(domains *libstate.SharedDomains, accumulator *shards.Accumulator) *StateWriterV3 {
 	return &StateWriterV3{
-		rs:          rs,
+		domains:     domains,
 		accumulator: accumulator,
 		//trace: true,
 	}
@@ -479,10 +498,10 @@ func (w *StateWriterV3) UpdateAccountData(address common.Address, original, acco
 	}
 	if original.Incarnation > account.Incarnation {
 		//del, before create: to clanup code/storage
-		if err := w.rs.domains.DomainDel(kv.CodeDomain, address[:], nil, nil, 0); err != nil {
+		if err := w.domains.DomainDel(kv.CodeDomain, address[:], nil, nil, 0); err != nil {
 			return err
 		}
-		if err := w.rs.domains.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
+		if err := w.domains.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
 			return err
 		}
 	}
@@ -491,7 +510,7 @@ func (w *StateWriterV3) UpdateAccountData(address common.Address, original, acco
 		w.accumulator.ChangeAccount(address, account.Incarnation, value)
 	}
 
-	if err := w.rs.domains.DomainPut(kv.AccountsDomain, address[:], nil, value, nil, 0); err != nil {
+	if err := w.domains.DomainPut(kv.AccountsDomain, address[:], nil, value, nil, 0); err != nil {
 		return err
 	}
 	return nil
@@ -501,7 +520,7 @@ func (w *StateWriterV3) UpdateAccountCode(address common.Address, incarnation ui
 	if w.trace {
 		fmt.Printf("code: %x, %x, valLen: %d\n", address.Bytes(), codeHash, len(code))
 	}
-	if err := w.rs.domains.DomainPut(kv.CodeDomain, address[:], nil, code, nil, 0); err != nil {
+	if err := w.domains.DomainPut(kv.CodeDomain, address[:], nil, code, nil, 0); err != nil {
 		return err
 	}
 	if w.accumulator != nil {
@@ -514,7 +533,7 @@ func (w *StateWriterV3) DeleteAccount(address common.Address, original *accounts
 	if w.trace {
 		fmt.Printf("del acc: %x\n", address)
 	}
-	if err := w.rs.domains.DomainDel(kv.AccountsDomain, address[:], nil, nil, 0); err != nil {
+	if err := w.domains.DomainDel(kv.AccountsDomain, address[:], nil, nil, 0); err != nil {
 		return err
 	}
 	// if w.accumulator != nil { TODO: investigate later. basically this will always panic. keeping this out should be fine anyway.
@@ -533,23 +552,23 @@ func (w *StateWriterV3) WriteAccountStorage(address common.Address, incarnation 
 		fmt.Printf("storage: %x,%x,%x\n", address, *key, v)
 	}
 	if len(v) == 0 {
-		return w.rs.domains.DomainDel(kv.StorageDomain, composite, nil, nil, 0)
+		return w.domains.DomainDel(kv.StorageDomain, composite, nil, nil, 0)
 	}
 	if w.accumulator != nil && key != nil && value != nil {
 		k := *key
 		w.accumulator.ChangeStorage(address, incarnation, k, v)
 	}
 
-	return w.rs.domains.DomainPut(kv.StorageDomain, composite, nil, v, nil, 0)
+	return w.domains.DomainPut(kv.StorageDomain, composite, nil, v, nil, 0)
 }
 
 func (w *StateWriterV3) CreateContract(address common.Address) error {
 	if w.trace {
 		fmt.Printf("create contract: %x\n", address)
 	}
-	//if err := w.rs.domains.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
-	//	return err
-	//}
+	if err := w.domains.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
+		return err
+	}
 	return nil
 }
 

@@ -216,7 +216,7 @@ func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Merge
 			}
 		}
 	}
-	return &MergeRange{string(iit.name), minFound, startTxNum, endTxNum}
+	return &MergeRange{iit.name.String(), minFound, startTxNum, endTxNum}
 }
 
 type HistoryRanges struct {
@@ -317,7 +317,7 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 			if ok {
 				indexFiles = append(indexFiles, idxFile)
 			} else {
-				walkErr := fmt.Errorf("History.staticFilesInRange: required file not found: v1-%s.%d-%d.efi", ht.h.filenameBase, item.startTxNum/ht.h.aggregationStep, item.endTxNum/ht.h.aggregationStep)
+				walkErr := fmt.Errorf("History.staticFilesInRange: required file not found: %s-%s.%d-%d.efi", ht.h.InvertedIndex.version.AccessorEFI.String(), ht.h.filenameBase, item.startTxNum/ht.h.aggregationStep, item.endTxNum/ht.h.aggregationStep)
 				return nil, nil, walkErr
 			}
 		}
@@ -537,7 +537,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		if toStep == 0 && dt.d.filenameBase == "commitment" {
 			btM = 128
 		}
-		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, btM, valuesIn.decompressor, dt.d.Compression, *dt.d.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync)
+		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, btM, valuesIn.decompressor, dt.d.Compression, *dt.d.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync, dt.d.AccessorList)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
@@ -1047,13 +1047,42 @@ func hasCoverVisibleFile(visibleFiles []visibleFile, item *filesItem) bool {
 	return false
 }
 
-func (at *AggregatorRoTx) DbgDomain(idx kv.Domain) *DomainRoTx         { return at.d[idx] }
-func (at *AggregatorRoTx) DbgII(idx kv.InvertedIdx) *InvertedIndexRoTx { return at.searchII(idx) }
-func (at *AggregatorRoTx) searchII(idx kv.InvertedIdx) *InvertedIndexRoTx {
-	for _, iit := range at.iis {
-		if iit.name == idx {
-			return iit
+type Ranges struct {
+	domain        [kv.DomainLen]DomainRanges
+	invertedIndex []*MergeRange
+}
+
+func NewRanges(domain [kv.DomainLen]DomainRanges, invertedIndex []*MergeRange) Ranges {
+	return Ranges{domain: domain, invertedIndex: invertedIndex}
+}
+
+func (r Ranges) String() string {
+	ss := []string{}
+	for _, d := range &r.domain {
+		if d.any() {
+			ss = append(ss, fmt.Sprintf("%s(%s)", d.name, d.String()))
 		}
 	}
-	return nil
+
+	aggStep := r.domain[kv.AccountsDomain].aggStep
+	for _, mr := range r.invertedIndex {
+		if mr != nil && mr.needMerge {
+			ss = append(ss, fmt.Sprintf("%s(%d-%d)", mr.name, mr.from/aggStep, mr.to/aggStep))
+		}
+	}
+	return strings.Join(ss, ", ")
+}
+
+func (r Ranges) any() bool {
+	for _, d := range &r.domain {
+		if d.any() {
+			return true
+		}
+	}
+	for _, ii := range r.invertedIndex {
+		if ii != nil && ii.needMerge {
+			return true
+		}
+	}
+	return false
 }

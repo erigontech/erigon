@@ -17,7 +17,7 @@
 package cltypes
 
 import (
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
@@ -30,7 +30,7 @@ import (
 type AggregateAndProof struct {
 	AggregatorIndex uint64             `json:"aggregator_index,string"`
 	Aggregate       *solid.Attestation `json:"aggregate"`
-	SelectionProof  libcommon.Bytes96  `json:"selection_proof"`
+	SelectionProof  common.Bytes96     `json:"selection_proof"`
 }
 
 func (a *AggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -56,7 +56,7 @@ func (a *AggregateAndProof) HashSSZ() ([32]byte, error) {
 
 type SignedAggregateAndProof struct {
 	Message   *AggregateAndProof `json:"message"`
-	Signature libcommon.Bytes96  `json:"signature"`
+	Signature common.Bytes96     `json:"signature"`
 }
 
 func (a *SignedAggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -81,8 +81,8 @@ func (a *SignedAggregateAndProof) HashSSZ() ([32]byte, error) {
  * and signature is the aggregate BLS signature of the committee.
  */
 type SyncAggregate struct {
-	SyncCommiteeBits      libcommon.Bytes64 `json:"sync_committee_bits"`
-	SyncCommiteeSignature libcommon.Bytes96 `json:"sync_committee_signature"`
+	SyncCommiteeBits      common.Bytes64 `json:"sync_committee_bits"`
+	SyncCommiteeSignature common.Bytes96 `json:"sync_committee_signature"`
 }
 
 func NewSyncAggregate() *SyncAggregate {

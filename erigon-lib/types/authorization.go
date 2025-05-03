@@ -10,7 +10,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain/params"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
@@ -18,7 +18,7 @@ import (
 
 type Authorization struct {
 	ChainID uint256.Int
-	Address libcommon.Address
+	Address common.Address
 	Nonce   uint64
 	YParity uint8
 	R       uint256.Int
@@ -36,7 +36,7 @@ func (ath *Authorization) copy() *Authorization {
 	}
 }
 
-func (ath *Authorization) RecoverSigner(data *bytes.Buffer, buf []byte) (*libcommon.Address, error) {
+func (ath *Authorization) RecoverSigner(data *bytes.Buffer, buf []byte) (*common.Address, error) {
 	if ath.Nonce == math.MaxUint64 {
 		return nil, errors.New("failed assertion: auth.nonce < 2**64 - 1")
 	}
@@ -65,7 +65,7 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, buf []byte) (*libcom
 	return RecoverSignerFromRLP(data.Bytes(), ath.YParity, ath.R, ath.S)
 }
 
-func RecoverSignerFromRLP(rlp []byte, yParity uint8, r uint256.Int, s uint256.Int) (*libcommon.Address, error) {
+func RecoverSignerFromRLP(rlp []byte, yParity uint8, r uint256.Int, s uint256.Int) (*common.Address, error) {
 	hashData := []byte{params.SetCodeMagicPrefix}
 	hashData = append(hashData, rlp...)
 	hash := crypto.Keccak256Hash(hashData)
@@ -93,7 +93,7 @@ func RecoverSignerFromRLP(rlp []byte, yParity uint8, r uint256.Int, s uint256.In
 		return nil, errors.New("invalid public key")
 	}
 
-	var authority libcommon.Address
+	var authority common.Address
 	copy(authority[:], crypto.Keccak256(pubKey[1:])[12:])
 	return &authority, nil
 }
@@ -141,7 +141,7 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 		if len(b) != 20 {
 			return fmt.Errorf("wrong size for Address: %d", len(b))
 		}
-		auth.Address = libcommon.BytesToAddress(b)
+		auth.Address = common.BytesToAddress(b)
 
 		// nonce
 		if auth.Nonce, err = s.Uint(); err != nil {

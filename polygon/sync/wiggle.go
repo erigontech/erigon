@@ -20,7 +20,7 @@ import (
 	"context"
 	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
@@ -29,11 +29,11 @@ import (
 
 type wiggleCalc struct {
 	borConfig            *borcfg.BorConfig
-	signaturesCache      *lru.ARCCache[libcommon.Hash, libcommon.Address]
+	signaturesCache      *lru.ARCCache[common.Hash, common.Address]
 	blockProducersReader blockProducersReader
 }
 
-func NewWiggleCalculator(borConfig *borcfg.BorConfig, signaturesCache *lru.ARCCache[libcommon.Hash, libcommon.Address], blockProducersReader blockProducersReader) *wiggleCalc {
+func NewWiggleCalculator(borConfig *borcfg.BorConfig, signaturesCache *lru.ARCCache[common.Hash, common.Address], blockProducersReader blockProducersReader) *wiggleCalc {
 	return &wiggleCalc{
 		borConfig:            borConfig,
 		signaturesCache:      signaturesCache,

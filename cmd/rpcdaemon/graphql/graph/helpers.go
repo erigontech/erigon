@@ -6,11 +6,11 @@ import (
 	"reflect"
 	"strconv"
 
+	"github.com/erigontech/erigon-lib/common"
 	hexutil2 "github.com/erigontech/erigon-lib/common/hexutil"
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	"github.com/erigontech/erigon-lib/types"
@@ -33,14 +33,14 @@ func convertDataToStringP(abstractMap map[string]interface{}, field string) *str
 		result = v.String()
 	case hexutil2.Uint64:
 		result = v.String()
-	case *libcommon.Address:
+	case *common.Address:
 		if reflect.ValueOf(abstractMap[field]).IsZero() {
 			return nil
 		}
 		result = v.String()
-	case libcommon.Address:
+	case common.Address:
 		result = v.String()
-	case libcommon.Hash:
+	case common.Hash:
 		result = v.String()
 	case types.Bloom:
 		result = hex.EncodeToString(v.Bytes())

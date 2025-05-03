@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/aggregation"
@@ -105,7 +104,7 @@ func NewAttestationService(
 
 func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64, att *AttestationForGossip) error {
 	var (
-		root           libcommon.Hash
+		root           common.Hash
 		slot           uint64
 		committeeIndex uint64
 		targetEpoch    uint64

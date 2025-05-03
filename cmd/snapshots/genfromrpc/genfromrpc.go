@@ -7,6 +7,10 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/holiman/uint256"
+	"github.com/urfave/cli/v2"
+
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -15,10 +19,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/holiman/uint256"
-	"github.com/urfave/cli/v2"
 )
 
 // CLI flags

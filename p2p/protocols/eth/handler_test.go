@@ -27,17 +27,16 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
 	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 	"github.com/erigontech/erigon/turbo/stages/mock"
@@ -301,7 +300,7 @@ func TestGetBlockReceipts(t *testing.T) {
 	receiptsGetter := receipts.NewGenerator(m.BlockReader, m.Engine)
 	// Collect the hashes to request, and the response to expect
 	var (
-		hashes   []libcommon.Hash
+		hashes   []common.Hash
 		receipts []rlp.RawValue
 	)
 	tx, err := m.DB.BeginTemporalRo(m.Ctx)
