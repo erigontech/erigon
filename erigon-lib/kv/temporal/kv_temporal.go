@@ -191,14 +191,11 @@ func (tx *tx) ForceReopenAggCtx() {
 	tx.aggtx.Close()
 	tx.aggtx = tx.Agg().BeginFilesRo()
 }
-func (tx *Tx) FreezeInfo() kv.FreezeInfo { return tx.aggtx }
-func (tx *Tx) Debug() kv.TemporalDebugTx { return tx }
+func (tx *tx) FreezeInfo() kv.FreezeInfo { return tx.aggtx }
 
-func (tx *Tx) WarmupDB(force bool) error { return tx.MdbxTx.WarmupDB(force) }
-func (tx *Tx) LockDBInRam() error        { return tx.MdbxTx.LockDBInRam() }
-func (tx *Tx) AggTx() any                { return tx.aggtx }
-func (tx *Tx) Agg() *state.Aggregator    { return tx.db.agg }
-func (tx *Tx) Rollback() {
+func (tx *tx) AggTx() any             { return tx.aggtx }
+func (tx *tx) Agg() *state.Aggregator { return tx.db.agg }
+func (tx *tx) Rollback() {
 	tx.autoClose()
 }
 
@@ -217,6 +214,9 @@ func (tx *Tx) Rollback() {
 	rb.Rollback()
 }
 
+func (tx *Tx) WarmupDB(force bool) error { return tx.WarmupDB(force) }
+func (tx *Tx) LockDBInRam() error        { return tx.LockDBInRam() }
+
 func (tx *Tx) Apply(f func(tx kv.Tx) error) error {
 	tx.tx.mu.RLock()
 	applyTx := tx.Tx
@@ -226,6 +226,12 @@ func (tx *Tx) Apply(f func(tx kv.Tx) error) error {
 	}
 	return applyTx.Apply(f)
 }
+
+func (tx *RwTx) WarmupDB(force bool) error { return tx.WarmupDB(force) }
+func (tx *RwTx) LockDBInRam() error        { return tx.LockDBInRam() }
+
+func (tx *RwTx) Debug() kv.TemporalDebugTx { return tx }
+func (tx *Tx) Debug() kv.TemporalDebugTx   { return tx }
 
 func (tx *RwTx) Apply(f func(tx kv.Tx) error) error {
 	tx.tx.mu.RLock()
@@ -273,7 +279,7 @@ func (rwtx *RwTx) AsyncClone(asyncTx kv.RwTx) *asyncClone {
 			RwTx: asyncTx,
 			tx: tx{
 				db:               rwtx.db,
-				filesTx:          rwtx.filesTx,
+				aggtx:            rwtx.aggtx,
 				resourcesToClose: nil,
 				ctx:              rwtx.ctx,
 			}}}
@@ -310,7 +316,7 @@ func (tx *RwTx) Commit() error {
 }
 
 func (tx *tx) historyStartFrom(name kv.Domain) uint64 {
-	return tx.aggTx.HistoryStartFrom(name)
+	return tx.aggtx.HistoryStartFrom(name)
 }
 
 func (tx *Tx) HistoryStartFrom(name kv.Domain) uint64 {
@@ -322,7 +328,7 @@ func (tx *RwTx) HistoryStartFrom(name kv.Domain) uint64 {
 }
 
 func (tx *tx) rangeAsOf(name kv.Domain, rtx kv.Tx, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
-	it, err := tx.filesTx.RangeAsOf(tx.ctx, rtx, name, fromKey, toKey, asOfTs, asc, limit)
+	it, err := tx.aggtx.RangeAsOf(tx.ctx, rtx, name, fromKey, toKey, asOfTs, asc, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -339,11 +345,26 @@ func (tx *RwTx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 }
 
 func (tx *tx) getLatest(name kv.Domain, dbTx kv.Tx, k []byte) (v []byte, step uint64, err error) {
-	v, step, ok, err := tx.filesTx.GetLatest(name, k, dbTx)
+	v, step, ok, err := tx.aggtx.GetLatest(name, k, dbTx)
+	if err != nil {
+		return nil, step, err
+	}
+	if !ok {
+		return nil, step, nil
+	}
+	return v, step, err
 }
 
 func (tx *Tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, bool, error) {
-	it, err := tx.Debug().RangeLatest(name, prefix, nil, 1)
+	return tx.hasPrefix(name, tx.Tx, prefix)
+}
+
+func (tx *RwTx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, bool, error) {
+	return tx.hasPrefix(name, tx.RwTx, prefix)
+}
+
+func (tx *tx) hasPrefix(name kv.Domain, dbTx kv.Tx, prefix []byte) ([]byte, bool, error) {
+	it, err := tx.rangeLatest(name, dbTx, prefix, nil, 1)
 	if err != nil {
 		return nil, false, err
 	}
@@ -362,17 +383,6 @@ func (tx *Tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, bool, error) {
 }
 
 func (tx *Tx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err error) {
-	v, step, ok, err := tx.aggtx.GetLatest(name, k, tx.MdbxTx)
-	if err != nil {
-		return nil, step, err
-	}
-	if !ok {
-		return nil, step, nil
-	}
-	return v, step, nil
-}
-
-func (tx *Tx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err error) {
 	return tx.getLatest(name, tx.Tx, k)
 }
 
@@ -381,7 +391,7 @@ func (tx *RwTx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err 
 }
 
 func (tx *tx) getAsOf(name kv.Domain, gtx kv.Tx, key []byte, ts uint64) (v []byte, ok bool, err error) {
-	return tx.filesTx.GetAsOf(gtx, name, key, ts)
+	return tx.aggtx.GetAsOf(name, key, ts, gtx)
 }
 
 func (tx *Tx) GetAsOf(name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
@@ -393,7 +403,7 @@ func (tx *RwTx) GetAsOf(name kv.Domain, key []byte, ts uint64) (v []byte, ok boo
 }
 
 func (tx *tx) historySeek(name kv.Domain, dbTx kv.Tx, key []byte, ts uint64) (v []byte, ok bool, err error) {
-	return tx.filesTx.HistorySeek(name, key, ts, dbTx)
+	return tx.aggtx.HistorySeek(name, key, ts, dbTx)
 }
 
 func (tx *Tx) HistorySeek(name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
@@ -405,7 +415,7 @@ func (tx *RwTx) HistorySeek(name kv.Domain, key []byte, ts uint64) (v []byte, ok
 }
 
 func (tx *tx) indexRange(name kv.InvertedIdx, dbTx kv.Tx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error) {
-	timestamps, err = tx.filesTx.IndexRange(name, k, fromTs, toTs, asc, limit, dbTx)
+	timestamps, err = tx.aggtx.IndexRange(name, k, fromTs, toTs, asc, limit, dbTx)
 	if err != nil {
 		return nil, err
 	}
@@ -422,7 +432,7 @@ func (tx *RwTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc 
 }
 
 func (tx *tx) historyRange(name kv.Domain, dbTx kv.Tx, fromTs, toTs int, asc order.By, limit int) (stream.KV, error) {
-	it, err := tx.aggTx.HistoryRange(name, fromTs, toTs, asc, limit, dbTx)
+	it, err := tx.aggtx.HistoryRange(name, fromTs, toTs, asc, limit, dbTx)
 	if err != nil {
 		return nil, err
 	}
@@ -440,44 +450,63 @@ func (tx *RwTx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, lim
 
 // Write methods
 
-func (tx *Tx) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error {
+func (tx *tx) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error {
 	panic("implement me pls. or use SharedDomains")
 }
-func (tx *Tx) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error {
+func (tx *tx) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error {
 	panic("implement me pls. or use SharedDomains")
 }
-func (tx *Tx) DomainDelPrefix(domain kv.Domain, prefix []byte) error {
+func (tx *tx) DomainDelPrefix(domain kv.Domain, prefix []byte) error {
 	panic("implement me pls. or use SharedDomains")
 }
 
 // Debug methods
 
 func (tx *Tx) RangeLatest(domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
-	return tx.aggtx.DebugRangeLatest(tx.MdbxTx, domain, from, to, limit)
+	return tx.rangeLatest(domain, tx.Tx, from, to, limit)
 }
+
+func (tx *RwTx) RangeLatest(domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
+	return tx.rangeLatest(domain, tx.RwTx, from, to, limit)
+}
+
+func (tx *tx) rangeLatest(domain kv.Domain, dbTx kv.Tx, from, to []byte, limit int) (stream.KV, error) {
+	return tx.aggtx.DebugRangeLatest(dbTx, domain, from, to, limit)
+}
+
 func (tx *Tx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step uint64, found bool, err error) {
-	return tx.aggtx.DebugGetLatestFromDB(domain, k, tx.MdbxTx)
+	return tx.getLatestFromDB(domain, tx.Tx, k)
 }
-func (tx *Tx) GetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
+
+func (tx *RwTx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step uint64, found bool, err error) {
+	return tx.getLatestFromDB(domain, tx.RwTx, k)
+}
+
+func (tx *tx) getLatestFromDB(domain kv.Domain, dbTx kv.Tx, k []byte) (v []byte, step uint64, found bool, err error) {
+	return tx.aggtx.DebugGetLatestFromDB(domain, k, dbTx)
+}
+
+func (tx *tx) GetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	return tx.aggtx.DebugGetLatestFromFiles(domain, k, maxTxNum)
 }
 func (db *DB) DomainTables(domain ...kv.Domain) []string { return db.agg.DomainTables(domain...) }
-func (tx *Tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
+func (tx *tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
 	return tx.aggtx.DomainFiles(domain...)
 }
 func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string {
 	return db.agg.InvertedIdxTables(domain...)
 }
-func (tx *Tx) TxNumsInFiles(domains ...kv.Domain) (minTxNum uint64) {
+func (tx *tx) TxNumsInFiles(domains ...kv.Domain) (minTxNum uint64) {
 	return tx.aggtx.TxNumsInFiles(domains...)
 }
-func (tx *Tx) PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error) {
-	return tx.aggtx.PruneSmallBatches(ctx, timeout, tx.MdbxTx)
+
+func (tx *RwTx) PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error) {
+	return tx.aggtx.PruneSmallBatches(ctx, timeout, tx.RwTx)
 }
-func (tx *Tx) GreedyPruneHistory(ctx context.Context, domain kv.Domain) error {
-	return tx.aggtx.GreedyPruneHistory(ctx, domain, tx.MdbxTx)
+func (tx *RwTx) GreedyPruneHistory(ctx context.Context, domain kv.Domain) error {
+	return tx.aggtx.GreedyPruneHistory(ctx, domain, tx.RwTx)
 }
 
-func (tx *Tx) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
-	return tx.aggtx.Unwind(ctx, tx.MdbxTx, txNumUnwindTo, changeset)
+func (tx *RwTx) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
+	return tx.aggtx.Unwind(ctx, tx.RwTx, txNumUnwindTo, changeset)
 }

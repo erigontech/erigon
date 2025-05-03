@@ -500,7 +500,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 				return applyRes, err
 			}
 
-			return core.ApplyMessage(evm, message, gasPool, true, false)
+			return core.ApplyMessage(evm, message, gasPool, true, false, engine)
 		}()
 
 		if result.Err == nil {

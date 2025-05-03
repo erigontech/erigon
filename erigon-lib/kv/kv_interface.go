@@ -424,7 +424,7 @@ type Tx interface {
 	BucketSize(table string) (uint64, error)
 	Count(bucket string) (uint64, error)
 
-	ListBuckets() ([]string, error)
+	ListTables() ([]string, error)
 
 	Apply(f func(tx Tx) error) error
 }
@@ -587,8 +587,6 @@ type TemporalDebugTx interface {
 
 	DomainFiles(domain ...Domain) VisibleFiles
 
-	GreedyPruneHistory(ctx context.Context, domain Domain) error
-	PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error)
 	TxNumsInFiles(domains ...Domain) (minTxNum uint64)
 }
 
@@ -611,6 +609,8 @@ type TemporalRwTx interface {
 	TemporalTx
 	TemporalPutDel
 
+	GreedyPruneHistory(ctx context.Context, domain Domain) error
+	PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error)
 	Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff) error
 }
 

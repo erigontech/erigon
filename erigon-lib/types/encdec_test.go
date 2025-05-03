@@ -241,7 +241,7 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 	} else {
 		to = nil
 	}
-	commonTx := 
+
 	switch txType {
 	case LegacyTxType:
 		return &LegacyTx{
@@ -277,7 +277,7 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 		}
 	case DynamicFeeTxType:
 		return &DynamicFeeTransaction{
-			CommonTx:   CommonTx{
+			CommonTx: CommonTx{
 				Nonce:    *tr.RandUint64(),
 				GasLimit: *tr.RandUint64(),
 				To:       to,
@@ -296,7 +296,16 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 		r := *tr.RandUint64()
 		return &BlobTx{
 			DynamicFeeTransaction: DynamicFeeTransaction{
-				CommonTx:   commonTx, //nolint
+				CommonTx: CommonTx{
+					Nonce:    *tr.RandUint64(),
+					GasLimit: *tr.RandUint64(),
+					To:       to,
+					Value:    uint256.NewInt(*tr.RandUint64()), // wei amount
+					Data:     tr.RandBytes(tr.RandIntInRange(128, 1024)),
+					V:        *tr.RandUint256(),
+					R:        *tr.RandUint256(),
+					S:        *tr.RandUint256(),
+				},
 				ChainID:    uint256.NewInt(*tr.RandUint64()),
 				TipCap:     uint256.NewInt(*tr.RandUint64()),
 				FeeCap:     uint256.NewInt(*tr.RandUint64()),
@@ -308,7 +317,16 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 	case SetCodeTxType:
 		return &SetCodeTransaction{
 			DynamicFeeTransaction: DynamicFeeTransaction{
-				CommonTx:   commonTx, //nolint
+				CommonTx: CommonTx{
+					Nonce:    *tr.RandUint64(),
+					GasLimit: *tr.RandUint64(),
+					To:       to,
+					Value:    uint256.NewInt(*tr.RandUint64()), // wei amount
+					Data:     tr.RandBytes(tr.RandIntInRange(128, 1024)),
+					V:        *tr.RandUint256(),
+					R:        *tr.RandUint256(),
+					S:        *tr.RandUint256(),
+				},
 				ChainID:    uint256.NewInt(*tr.RandUint64()),
 				TipCap:     uint256.NewInt(*tr.RandUint64()),
 				FeeCap:     uint256.NewInt(*tr.RandUint64()),
@@ -319,11 +337,11 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 	case AccountAbstractionTxType:
 		senderAddress, paymaster, deployer := tr.RandAddress(), tr.RandAddress(), tr.RandAddress()
 		return &AccountAbstractionTransaction{
-			Nonce:                       commonTx.Nonce,
+			Nonce:                       *tr.RandUint64(),
 			ChainID:                     uint256.NewInt(*tr.RandUint64()),
 			Tip:                         uint256.NewInt(*tr.RandUint64()),
 			FeeCap:                      uint256.NewInt(*tr.RandUint64()),
-			GasLimit:                    commonTx.GasLimit,
+			GasLimit:                    *tr.RandUint64(),
 			AccessList:                  tr.RandAccessList(tr.RandIntInRange(0, 5)),
 			SenderAddress:               &senderAddress,
 			SenderValidationData:        tr.RandBytes(tr.RandIntInRange(128, 1024)),

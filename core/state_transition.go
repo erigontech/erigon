@@ -134,25 +134,29 @@ func NewStateTransition(evm *vm.EVM, msg Message, gp *GasPool) *StateTransition 
 // `refunds` is false when it is not required to apply gas refunds
 // `gasBailout` is true when it is not required to fail transaction if the balance is not enough to pay gas.
 // for trace_call to replicate OE/Parity behaviour
-func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, engine consensus.EngineReader) (
+func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, engine consensus.EngineReader, tracer *tracing.Hooks) (*evmtypes.ExecutionResult, error) {
+	return applyMessage(evm, msg, gp, refunds, gasBailout, false, engine, tracer)
+}
+
+func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, noFeeBurnAndTip bool, engine consensus.EngineReader, tracer *tracing.Hooks) (
 	*evmtypes.ExecutionResult, error) {
 	// Only zero-gas transactions may be service ones
 	if msg.FeeCap().IsZero() && !msg.IsFree() && engine != nil {
 		blockContext := evm.Context
 		blockContext.Coinbase = state.SystemAddress
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			ret, _, err := SysCallContractWithBlockContext(contract, data, evm.ChainConfig(), evm.IntraBlockState(), blockContext, engine, true /* constCall */, nil)
+			ret, _, err := SysCallContractWithBlockContext(contract, data, evm.ChainConfig(), evm.IntraBlockState(), blockContext, engine, true /* constCall */, tracer)
 			return ret, err
 		}
 		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 	}
-	return NewStateTransition(evm, msg, gp).TransitionDb(refunds, gasBailout)
+	st := NewStateTransition(evm, msg, gp)
+	st.noFeeBurnAndTip = noFeeBurnAndTip
+	return st.TransitionDb(refunds, gasBailout)
 }
 
-func ApplyMessageNoFeeBurnOrTip(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error) {
-	st := NewStateTransition(evm, msg, gp)
-	st.noFeeBurnAndTip = true
-	return st.TransitionDb(refunds, gasBailout)
+func ApplyMessageNoFeeBurnOrTip(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, engine consensus.EngineReader, tracer *tracing.Hooks) (*evmtypes.ExecutionResult, error) {
+	return applyMessage(evm, msg, gp, refunds, gasBailout, true, engine, tracer)
 }
 
 func ApplyFrame(evm *vm.EVM, msg Message, gp *GasPool) (*evmtypes.ExecutionResult, error) {

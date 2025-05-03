@@ -27,10 +27,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-db/rawdb/rawdbhelpers"
-	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/cmp"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -46,6 +43,7 @@ import (
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/exec"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
@@ -990,7 +988,7 @@ func ExecV3(ctx context.Context,
 					switch applyResult := applyResult.(type) {
 					case *txResult:
 						uncommittedGas += applyResult.gasUsed
-						pe.rs.SetTxNum(applyResult.txNum, applyResult.blockNum)
+						pe.rs.SetTxNum(applyResult.blockNum, applyResult.txNum)
 						if err := pe.rs.ApplyState4(ctx, applyTx,
 							applyResult.blockNum, applyResult.txNum, applyResult.writeSet,
 							nil, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,

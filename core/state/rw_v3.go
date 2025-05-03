@@ -118,7 +118,7 @@ func (rs *StateV3) Domains() *state.SharedDomains {
 	return rs.domains
 }
 
-func (rs *ParallelExecutionState) SetTxNum(txNum, blockNum uint64) {
+func (rs *StateV3) SetTxNum(blockNum, txNum uint64) {
 	rs.domains.SetTxNum(txNum)
 	rs.domains.SetBlockNum(blockNum)
 }
@@ -214,7 +214,7 @@ var (
 	mxState3Unwind        = metrics.GetOrCreateSummary("state3_unwind")
 )
 
-func (rs *ParallelExecutionState) Unwind(ctx context.Context, tx kv.TemporalRwTx, blockUnwindTo, txUnwindTo uint64, accumulator *shards.Accumulator, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
+func (rs *StateV3) Unwind(ctx context.Context, tx kv.TemporalRwTx, blockUnwindTo, txUnwindTo uint64, accumulator *shards.Accumulator, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
 	mxState3UnwindRunning.Inc()
 	defer mxState3UnwindRunning.Dec()
 	st := time.Now()
@@ -283,11 +283,11 @@ func (rs *ParallelExecutionState) Unwind(ctx context.Context, tx kv.TemporalRwTx
 	return nil
 }
 
-func (rs *ParallelExecutionState) DoneCount() uint64 {
+func (rs *StateV3) DoneCount() uint64 {
 	return execTxsDone.GetValueUint64()
 }
 
-func (rs *ParallelExecutionState) SizeEstimate() (r uint64) {
+func (rs *StateV3) SizeEstimate() (r uint64) {
 	if rs.domains != nil {
 		r += rs.domains.SizeEstimate()
 	}
@@ -376,7 +376,7 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 	}
 	if original.Incarnation > account.Incarnation {
 		//del, before create: to clanup code/storage
-		if err := w.rs.domains.DomainDel(kv.CodeDomain, address[:], nil, nil, 0); err != nil {
+		if err := w.rs.domains.DomainDel(kv.CodeDomain, w.tx, address[:], nil, nil, 0); err != nil {
 			return err
 		}
 		if err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte, step uint64) (bool, error) {
