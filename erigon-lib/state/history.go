@@ -109,6 +109,13 @@ type histCfg struct {
 	version HistVersionTypes
 }
 
+func (h histCfg) GetVersions() VersionTypes {
+	return VersionTypes{
+		Hist: &h.version,
+		II:   &h.iiCfg.version,
+	}
+}
+
 func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error) {
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
 	if cfg.indexList == 0 {
