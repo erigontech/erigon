@@ -35,6 +35,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv/memdb"
@@ -263,7 +264,7 @@ func (test *snapshotTest) run() bool {
 	}
 	defer tx.Rollback()
 
-	domains, err := statelib.NewSharedDomains(tx, log.New())
+	domains, err := libstate.NewSharedDomains(tx, log.New())
 	if err != nil {
 		test.err = err
 		return false
@@ -461,7 +462,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	db := memdb.NewStateDB("")
 	defer db.Close()
 
-	agg, err := statelib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
+	agg, err := libstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
 	assert.NoError(t, err)
 	defer agg.Close()
 
@@ -472,7 +473,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := statelib.NewSharedDomains(tx, log.New())
+	domains, err := libstate.NewSharedDomains(tx, log.New())
 	assert.NoError(t, err)
 	defer domains.Close()
 
@@ -493,8 +494,8 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 		states = append(states, sCopy)
 	}
 
-	addr := libcommon.HexToAddress("0x01")
-	key := libcommon.HexToHash("0x01")
+	addr := common.HexToAddress("0x01")
+	key := common.HexToHash("0x01")
 	val := *uint256.NewInt(1)
 	balance := uint256.NewInt(100)
 
@@ -552,7 +553,7 @@ func TestVersionMapRevert(t *testing.T) {
 	db := memdb.NewStateDB("")
 	defer db.Close()
 
-	agg, err := statelib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
+	agg, err := libstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
 	assert.NoError(t, err)
 	defer agg.Close()
 
@@ -563,7 +564,7 @@ func TestVersionMapRevert(t *testing.T) {
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := statelib.NewSharedDomains(tx, log.New())
+	domains, err := libstate.NewSharedDomains(tx, log.New())
 	assert.NoError(t, err)
 	defer domains.Close()
 	rs := NewStateV3(domains, log.New())
@@ -582,8 +583,8 @@ func TestVersionMapRevert(t *testing.T) {
 		states = append(states, sCopy)
 	}
 
-	addr := libcommon.HexToAddress("0x01")
-	key := libcommon.HexToHash("0x01")
+	addr := common.HexToAddress("0x01")
+	key := common.HexToHash("0x01")
 	val := *uint256.NewInt(1)
 	balance := uint256.NewInt(100)
 
@@ -631,7 +632,7 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	db := memdb.NewStateDB("")
 	defer db.Close()
 
-	agg, err := statelib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
+	agg, err := libstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
 	assert.NoError(t, err)
 	defer agg.Close()
 
@@ -642,7 +643,7 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := statelib.NewSharedDomains(tx, log.New())
+	domains, err := libstate.NewSharedDomains(tx, log.New())
 	assert.NoError(t, err)
 	defer domains.Close()
 
@@ -660,8 +661,8 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 		states = append(states, sCopy)
 	}
 
-	addr := libcommon.HexToAddress("0x01")
-	key := libcommon.HexToHash("0x01")
+	addr := common.HexToAddress("0x01")
+	key := common.HexToHash("0x01")
 	val := *uint256.NewInt(1)
 	balance := uint256.NewInt(100)
 
@@ -718,7 +719,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	db := memdb.NewStateDB("")
 	defer db.Close()
 
-	agg, err := statelib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
+	agg, err := libstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
 	assert.NoError(t, err)
 	defer agg.Close()
 
@@ -729,7 +730,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := statelib.NewSharedDomains(tx, log.New())
+	domains, err := libstate.NewSharedDomains(tx, log.New())
 	assert.NoError(t, err)
 	defer domains.Close()
 
@@ -748,8 +749,8 @@ func TestVersionMapOverwrite(t *testing.T) {
 		states = append(states, sCopy)
 	}
 
-	addr := libcommon.HexToAddress("0x01")
-	key := libcommon.HexToHash("0x01")
+	addr := common.HexToAddress("0x01")
+	key := common.HexToHash("0x01")
 	val1 := *uint256.NewInt(1)
 	balance1 := uint256.NewInt(100)
 	val2 := *uint256.NewInt(2)
@@ -823,7 +824,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	db := memdb.NewStateDB("")
 	defer db.Close()
 
-	agg, err := statelib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
+	agg, err := libstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
 	assert.NoError(t, err)
 	defer agg.Close()
 
@@ -834,7 +835,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := statelib.NewSharedDomains(tx, log.New())
+	domains, err := libstate.NewSharedDomains(tx, log.New())
 	assert.NoError(t, err)
 	defer domains.Close()
 
@@ -853,9 +854,9 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 		states = append(states, sCopy)
 	}
 
-	addr := libcommon.HexToAddress("0x01")
-	key1 := libcommon.HexToHash("0x01")
-	key2 := libcommon.HexToHash("0x02")
+	addr := common.HexToAddress("0x01")
+	key1 := common.HexToHash("0x01")
+	key2 := common.HexToHash("0x02")
 	val1 := *uint256.NewInt(1)
 	balance1 := uint256.NewInt(100)
 	val2 := *uint256.NewInt(2)
@@ -958,7 +959,7 @@ func TestApplyVersionedWrites(t *testing.T) {
 	db := memdb.NewStateDB("")
 	defer db.Close()
 
-	agg, err := statelib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
+	agg, err := libstate.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
 	assert.NoError(t, err)
 	defer agg.Close()
 
@@ -969,7 +970,7 @@ func TestApplyVersionedWrites(t *testing.T) {
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := statelib.NewSharedDomains(tx, log.New())
+	domains, err := libstate.NewSharedDomains(tx, log.New())
 	assert.NoError(t, err)
 	defer domains.Close()
 	rs := NewStateV3(domains, log.New())
@@ -993,11 +994,11 @@ func TestApplyVersionedWrites(t *testing.T) {
 		states = append(states, sCopy)
 	}
 
-	addr1 := libcommon.HexToAddress("0x01")
-	addr2 := libcommon.HexToAddress("0x02")
-	addr3 := libcommon.HexToAddress("0x03")
-	key1 := libcommon.HexToHash("0x01")
-	key2 := libcommon.HexToHash("0x02")
+	addr1 := common.HexToAddress("0x01")
+	addr2 := common.HexToAddress("0x02")
+	addr3 := common.HexToAddress("0x03")
+	key1 := common.HexToHash("0x01")
+	key2 := common.HexToHash("0x02")
 	val1 := *uint256.NewInt(1)
 	balance1 := uint256.NewInt(100)
 	val2 := *uint256.NewInt(2)

@@ -84,7 +84,7 @@ type EphemeralExecResult struct {
 // writes the result to the provided stateWriter
 func ExecuteBlockEphemerally(
 	chainConfig *chain.Config, vmConfig *vm.Config,
-	blockHashFunc func(n uint64) (libcommon.Hash, error),
+	blockHashFunc func(n uint64) (common.Hash, error),
 	engine consensus.Engine, block *types.Block,
 	stateReader state.StateReader, stateWriter state.StateWriter,
 	chainReader consensus.ChainReader, getTracer func(txIndex int, txHash common.Hash) (*tracing.Hooks, error),
@@ -135,7 +135,7 @@ func ExecuteBlockEphemerally(
 			vmConfig.Tracer = tracer
 			writeTrace = true
 		}
-		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, stateWriter, header, txn, usedGas, usedBlobGas, *vmConfig)
+		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, stateWriter, header, txn, gasUsed, usedBlobGas, *vmConfig)
 		if writeTrace && vmConfig.Tracer != nil && vmConfig.Tracer.Flush != nil {
 			vmConfig.Tracer.Flush(txn)
 			vmConfig.Tracer = nil

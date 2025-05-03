@@ -11,13 +11,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
+	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -25,14 +27,11 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/cmd/state/exec3"
-	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/exec"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3"
@@ -85,7 +84,7 @@ type executor interface {
 	executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint64, maxBlockNum uint64, readAhead chan uint64, applyResults chan applyResult) error
 
 	wait(ctx context.Context) error
-	getHeader(ctx context.Context, hash libcommon.Hash, number uint64) (h *types.Header, err error)
+	getHeader(ctx context.Context, hash common.Hash, number uint64) (h *types.Header, err error)
 
 	//these are reset by commit - so need to be read from the executor once its processing
 	readState() *state.StateV3Buffered
@@ -105,8 +104,8 @@ type applyResult interface {
 type blockResult struct {
 	BlockNum  uint64
 	BlockTime uint64
-	BlockHash libcommon.Hash
-	StateRoot libcommon.Hash
+	BlockHash common.Hash
+	StateRoot common.Hash
 	Err       error
 	GasUsed   uint64
 	lastTxNum uint64
@@ -124,8 +123,8 @@ type txResult struct {
 	txNum      uint64
 	gasUsed    int64
 	logs       []*types.Log
-	traceFroms map[libcommon.Address]struct{}
-	traceTos   map[libcommon.Address]struct{}
+	traceFroms map[common.Address]struct{}
+	traceTos   map[common.Address]struct{}
 	writeSet   map[string]*libstate.KvList
 }
 
@@ -430,7 +429,7 @@ func (te *txExecutor) domains() *libstate.SharedDomains {
 	return te.doms
 }
 
-func (te *txExecutor) getHeader(ctx context.Context, hash libcommon.Hash, number uint64) (h *types.Header, err error) {
+func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number uint64) (h *types.Header, err error) {
 
 	if te.applyTx != nil {
 		err := te.applyTx.Apply(func(tx kv.Tx) (err error) {
@@ -507,7 +506,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 			skipAnalysis := core.SkipAnalysis(te.cfg.chainConfig, blockNum)
 			getHashFnMutex := sync.Mutex{}
 
-			blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, func(hash libcommon.Hash, number uint64) (h *types.Header, err error) {
+			blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, func(hash common.Hash, number uint64) (h *types.Header, err error) {
 				getHashFnMutex.Lock()
 				defer getHashFnMutex.Unlock()
 				err = tx.Apply(func(tx kv.Tx) (err error) {
@@ -811,7 +810,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 			// Remove entries that were previously written but are no longer written
 
-			cmpMap := map[libcommon.Address]map[state.AccountKey]struct{}{}
+			cmpMap := map[common.Address]map[state.AccountKey]struct{}{}
 
 			for _, w := range res.TxOut {
 				keys, ok := cmpMap[w.Address]
@@ -916,8 +915,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 		applyResult = txResult{
 			blockNum:   be.blockNum,
-			traceFroms: map[libcommon.Address]struct{}{},
-			traceTos:   map[libcommon.Address]struct{}{},
+			traceFroms: map[common.Address]struct{}{},
+			traceTos:   map[common.Address]struct{}{},
 		}
 
 		toFinalize := make(sort.IntSlice, 0, 2)
@@ -1267,7 +1266,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 
 					txTask := result.Task.(*taskVersion).Task.(*exec.TxTask)
 
-					syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
+					syscall := func(contract common.Address, data []byte) ([]byte, error) {
 						return core.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, txTask.Header, pe.cfg.engine, false)
 					}
 
@@ -1328,7 +1327,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 }
 
 func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *execRequest) (err error) {
-	prevSenderTx := map[libcommon.Address]int{}
+	prevSenderTx := map[common.Address]int{}
 	var scheduleable *blockExecutor
 	var executor *blockExecutor
 

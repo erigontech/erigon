@@ -24,21 +24,21 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3/calltracer"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 )
 
@@ -63,14 +63,14 @@ type Task interface {
 
 	Tx() types.Transaction
 	TxType() uint8
-	TxHash() libcommon.Hash
-	TxSender() (*libcommon.Address, error)
+	TxHash() common.Hash
+	TxSender() (*common.Address, error)
 	TxMessage() (*types.Message, error)
 
 	BlockNumber() uint64
-	BlockHash() libcommon.Hash
+	BlockHash() common.Hash
 	BlockTime() uint64
-	BlockRoot() libcommon.Hash
+	BlockRoot() common.Hash
 
 	IsBlockEnd() bool
 	IsHistoric() bool
@@ -92,15 +92,15 @@ type Result struct {
 	Task
 	ExecutionResult *evmtypes.ExecutionResult
 	Err             error
-	Coinbase        libcommon.Address
+	Coinbase        common.Address
 	TxIn            state.ReadSet
 	TxOut           state.VersionedWrites
 
 	Receipt *types.Receipt
 	Logs    []*types.Log
 
-	TraceFroms map[libcommon.Address]struct{}
-	TraceTos   map[libcommon.Address]struct{}
+	TraceFroms map[common.Address]struct{}
+	TraceTos   map[common.Address]struct{}
 
 	ShouldRerunWithoutFeeDelay bool
 }
@@ -131,11 +131,12 @@ func (r *Result) CreateReceipt(prev *types.Receipt) (*types.Receipt, error) {
 
 	cumulativeGasUsed += r.ExecutionResult.GasUsed
 
-	r.Receipt = r.createReceipt(txIndex, cumulativeGasUsed, firstLogIndex)
-	return r.Receipt, nil
+	var err error
+	r.Receipt, err = r.createReceipt(txIndex, cumulativeGasUsed, firstLogIndex)
+	return r.Receipt, err
 }
 
-func (r *Result) createReceipt(txIndex uint64, cumulativeGasUsed uint64, firstLogIndex uint32) *types.Receipt {
+func (r *Result) createReceipt(txIndex int, cumulativeGasUsed uint64, firstLogIndex uint32) (*types.Receipt, error) {
 	logIndex := firstLogIndex
 	for i := range r.Logs {
 		r.Logs[i].Index = uint(logIndex)
@@ -168,11 +169,22 @@ func (r *Result) createReceipt(txIndex uint64, cumulativeGasUsed uint64, firstLo
 
 	receipt.Bloom = types.LogsBloom(receipt.Logs) // why do we need to add this?
 	// if the transaction created a contract, store the creation address in the receipt.
-	if r.TxMessage() != nil && r.TxMessage().To() == nil {
-		receipt.ContractAddress = crypto.CreateAddress(*r.TxSender(), r.Tx().GetNonce())
+
+	txMessage, err := r.TxMessage()
+
+	if err != nil {
+		return nil, err
 	}
 
-	return receipt
+	if txMessage != nil && txMessage.To() == nil {
+		txSender, err := r.TxSender()
+		if err != nil {
+			return nil, err
+		}
+		receipt.ContractAddress = crypto.CreateAddress(*txSender, r.Tx().GetNonce())
+	}
+
+	return receipt, nil
 }
 
 type ErrExecAbortError struct {
@@ -206,7 +218,7 @@ type TxTask struct {
 	SkipAnalysis       bool
 	EvmBlockContext    evmtypes.BlockContext
 	HistoryExecution   bool // use history reader for that txn instead of state reader
-	BalanceIncreaseSet map[libcommon.Address]uint256.Int
+	BalanceIncreaseSet map[common.Address]uint256.Int
 
 	Incarnation int
 	Tracer      *calltracer.CallTracer
@@ -219,7 +231,7 @@ type TxTask struct {
 	InBatch               bool   // set to true for consecutive RIP-7560 transactions after the first one (first one is false)
 	ValidationResults     []AAValidationResult
 
-	sender       *libcommon.Address
+	sender       *common.Address
 	message      *types.Message
 	signer       *types.Signer
 	dependencies []int
@@ -257,14 +269,14 @@ func (t *TxTask) TxType() uint8 {
 	return t.Tx().Type()
 }
 
-func (t *TxTask) TxHash() libcommon.Hash {
+func (t *TxTask) TxHash() common.Hash {
 	if t.TxIndex < 0 || t.TxIndex >= len(t.Txs) {
-		return libcommon.Hash{}
+		return common.Hash{}
 	}
 	return t.Tx().Hash()
 }
 
-func (t *TxTask) TxSender() (*libcommon.Address, error) {
+func (t *TxTask) TxSender() (*common.Address, error) {
 	if t.sender != nil {
 		return t.sender, nil
 	}
@@ -299,7 +311,7 @@ func (t *TxTask) TxMessage() (*types.Message, error) {
 			return nil, err
 		}
 
-		t.message = &message
+		t.message = message
 	}
 
 	return t.message, nil
@@ -312,16 +324,16 @@ func (t *TxTask) BlockNumber() uint64 {
 	return t.Header.Number.Uint64()
 }
 
-func (t *TxTask) BlockHash() libcommon.Hash {
+func (t *TxTask) BlockHash() common.Hash {
 	if t.Header == nil {
-		return libcommon.Hash{}
+		return common.Hash{}
 	}
 	return t.Header.Hash()
 }
 
-func (t *TxTask) BlockRoot() libcommon.Hash {
+func (t *TxTask) BlockRoot() common.Hash {
 	if t.Header == nil {
-		return libcommon.Hash{}
+		return common.Hash{}
 	}
 	return t.Header.Root
 }
@@ -414,7 +426,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
-		syscall := func(contract libcommon.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
+		syscall := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 			return core.SysCallContract(contract, data, chainConfig, ibs, header, engine, constCall /* constCall */)
 		}
 		engine.Initialize(chainConfig, chainReader, header, ibs, syscall, txTask.Logger, nil)
@@ -430,7 +442,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		//	txTask.Error = err
 		//}
 		result.ExecutionResult = &evmtypes.ExecutionResult{}
-		result.TraceTos = map[libcommon.Address]struct{}{}
+		result.TraceTos = map[common.Address]struct{}{}
 		result.TraceTos[txTask.Header.Coinbase] = struct{}{}
 		for _, uncle := range txTask.Uncles {
 			result.TraceTos[uncle.Coinbase] = struct{}{}
@@ -447,7 +459,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 
 		if msg.FeeCap().IsZero() && engine != nil {
 			// Only zero-gas transactions may be service ones
-			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
+			syscall := func(contract common.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, chainConfig, ibs, header, engine, true /* constCall */)
 			}
 			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))

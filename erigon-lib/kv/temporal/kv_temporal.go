@@ -18,6 +18,8 @@ package temporal
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"time"
 
 	"github.com/erigontech/erigon-lib/kv"
@@ -29,7 +31,7 @@ import (
 
 var ( // Compile time interface checks
 	_ kv.TemporalRwDB    = (*DB)(nil)
-	_ kv.TemporalRwTx    = (*Tx)(nil)
+	_ kv.TemporalRwTx    = (*RwTx)(nil)
 	_ kv.TemporalDebugTx = (*Tx)(nil)
 )
 
@@ -435,6 +437,7 @@ func (tx *Tx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit
 func (tx *RwTx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (stream.KV, error) {
 	return tx.historyRange(name, tx.RwTx, fromTs, toTs, asc, limit)
 }
+
 // Write methods
 
 func (tx *Tx) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error {

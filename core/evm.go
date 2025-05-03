@@ -28,19 +28,18 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/consensus/merge"
-	"github.com/erigontech/erigon/consensus/misc"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/consensus/merge"
+	"github.com/erigontech/erigon/execution/consensus/misc"
 	lru "github.com/hashicorp/golang-lru/v2"
 )
 
 // NewEVMBlockContext creates a new context for use in the EVM.
-func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (libcommon.Hash, error),
-	engine consensus.EngineReader, author *libcommon.Address, config *chain.Config) evmtypes.BlockContext {
+func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (common.Hash, error),
+	engine consensus.EngineReader, author *common.Address, config *chain.Config) evmtypes.BlockContext {
 	// If we don't have an explicit author (i.e. not mining), extract from the header
 	var beneficiary common.Address
 	if author == nil {
@@ -114,7 +113,7 @@ var hashLookupCache = func() *lru.Cache[uint64, common.Hash] {
 var hashLookupCacheLock sync.Mutex
 
 // GetHashFn returns a GetHashFunc which retrieves header hashes by number
-func GetHashFn(ref *types.Header, getHeader func(hash libcommon.Hash, number uint64) (*types.Header, error)) func(n uint64) (libcommon.Hash, error) {
+func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64) (*types.Header, error)) func(n uint64) (common.Hash, error) {
 	refNumber := ref.Number.Uint64() - 1
 	refHash := ref.ParentHash
 	lastKnownNumber := refNumber
@@ -127,7 +126,7 @@ func GetHashFn(ref *types.Header, getHeader func(hash libcommon.Hash, number uin
 		hashLookupCache.Add(refNumber, refHash)
 	}
 
-	return func(n uint64) (libcommon.Hash, error) {
+	return func(n uint64) (common.Hash, error) {
 		hashLookupCacheLock.Lock()
 		defer hashLookupCacheLock.Unlock()
 
@@ -148,7 +147,7 @@ func GetHashFn(ref *types.Header, getHeader func(hash libcommon.Hash, number uin
 
 		if n > lastKnownNumber {
 			if n > refNumber {
-				return libcommon.Hash{}, fmt.Errorf("block number out of range: max=%d", refNumber)
+				return common.Hash{}, fmt.Errorf("block number out of range: max=%d", refNumber)
 			}
 			lastKnownNumber = refNumber
 			lastKnownHash = refHash
@@ -178,7 +177,7 @@ func GetHashFn(ref *types.Header, getHeader func(hash libcommon.Hash, number uin
 			}()
 
 			if err != nil {
-				return libcommon.Hash{}, err
+				return common.Hash{}, err
 			}
 			if header == nil {
 				break
@@ -192,7 +191,7 @@ func GetHashFn(ref *types.Header, getHeader func(hash libcommon.Hash, number uin
 				return lastKnownHash, nil
 			}
 		}
-		return libcommon.Hash{}, nil
+		return common.Hash{}, nil
 	}
 }
 

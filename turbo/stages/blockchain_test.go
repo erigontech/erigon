@@ -1540,18 +1540,18 @@ func TestDeleteRecreateSlots(t *testing.T) {
 	if !got.IsZero() {
 		t.Errorf("got %d exp %d", got.Uint64(), 0)
 	}
-	key2 := libcommon.HexToHash("02")
+	key2 := common.HexToHash("02")
 	statedb.GetState(aa, key2, &got)
 	if !got.IsZero() {
 		t.Errorf("got %d exp %d", got.Uint64(), 0)
 	}
 	// Also, 3 and 4 should be set
-	key3 := libcommon.HexToHash("03")
+	key3 := common.HexToHash("03")
 	statedb.GetState(aa, key3, &got)
 	if got.Uint64() != 3 {
 		t.Errorf("got %d exp %d", got.Uint64(), 3)
 	}
-	key4 := libcommon.HexToHash("04")
+	key4 := common.HexToHash("04")
 	statedb.GetState(aa, key4, &got)
 	if got.Uint64() != 4 {
 		t.Errorf("got %d exp %d", got.Uint64(), 4)
@@ -1728,7 +1728,7 @@ func TestDeleteRecreateAccount(t *testing.T) {
 		if !got.IsZero() {
 			t.Errorf("got %x exp %x", got, 0)
 		}
-		key2 := libcommon.HexToHash("02")
+		key2 := common.HexToHash("02")
 		statedb.GetState(aa, key2, &got)
 		if !got.IsZero() {
 			t.Errorf("got %x exp %x", got, 0)
@@ -1913,7 +1913,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 			if !got.IsZero() {
 				t.Errorf("block %d, got %x exp %x", blockNum, got, 0)
 			}
-			key2 := libcommon.HexToHash("02")
+			key2 := common.HexToHash("02")
 			statedb.GetState(aa, key2, &got)
 			if !got.IsZero() {
 				t.Errorf("block %d, got %x exp %x", blockNum, got, 0)

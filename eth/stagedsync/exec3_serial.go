@@ -7,13 +7,17 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/exec"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/exec3"
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 )
 
@@ -118,7 +122,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 				// End of block transaction in a block
 				ibs := state.New(state.NewReaderV3(se.rs.Domains(), se.applyTx))
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
-				syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
+				syscall := func(contract common.Address, data []byte) ([]byte, error) {
 					return core.SysCallContract(contract, data, se.cfg.chainConfig, ibs, txTask.Header, se.cfg.engine, false /* constCall */)
 				}
 

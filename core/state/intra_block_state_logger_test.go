@@ -84,7 +84,7 @@ func TestStateLogger(t *testing.T) {
 				require.NoError(t, err)
 				balance := so.Balance()
 				if !reflect.DeepEqual(&balance, uint256.NewInt(3)) {
-					t.Errorf("Incorrect Balance for  %s expectedBalance: %s, got:%s", libcommon.Address{}, uint256.NewInt(3), &balance)
+					t.Errorf("Incorrect Balance for  %s expectedBalance: %s, got:%s", common.Address{}, uint256.NewInt(3), &balance)
 				}
 			},
 			wantBalanceChangeTraces: []balanceChangeTrace{
@@ -128,7 +128,7 @@ func TestStateLogger(t *testing.T) {
 			mockCtl := gomock.NewController(t)
 			defer mockCtl.Finish()
 			mt := mockTracer{}
-			state := New(NewReaderV3(domains))
+			state := New(NewReaderV3(domains, tx))
 			state.SetHooks(mt.Hooks())
 
 			tt.run(state)

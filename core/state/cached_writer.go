@@ -20,7 +20,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
 
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -72,7 +71,7 @@ func (cw *CachedWriter) WriteAccountStorage(address common.Address, incarnation 
 	return nil
 }
 
-func (cw *CachedWriter) DeleteAccountStorage(address libcommon.Address, incarnation uint64, key libcommon.Hash) error {
+func (cw *CachedWriter) DeleteAccountStorage(address common.Address, incarnation uint64, key common.Hash) error {
 	if err := cw.w.DeleteAccountStorage(address, incarnation, key); err != nil {
 		return err
 	}

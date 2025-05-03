@@ -254,7 +254,7 @@ func (so *stateObject) SetState(key common.Hash, value uint256.Int, force bool) 
 	})
 
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnStorageChange != nil {
-		so.db.tracingHooks.OnStorageChange(so.address, key, prev, value)
+		so.db.tracingHooks.OnStorageChange(so.address, &key, prev, value)
 	}
 	so.setState(key, value)
 

@@ -190,7 +190,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		} else {
 			var _usedGas uint64
 			_usedGas, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout)
-			usedGas += _usedGas
+			gasUsed += _usedGas
 		}
 		if err == nil {
 			err = ibs.FinalizeTx(rules, state.NewNoopWriter())
@@ -571,7 +571,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 			}
 			txCtx = core.NewEVMTxContext(msg)
 			ibs := evm.IntraBlockState().(*state.IntraBlockState)
-			ibs.SetTxContext(txnIndex)
+			ibs.SetTxContext(block.NumberU64(), txnIndex)
 			_, err = transactions.TraceTx(ctx, api.engine(), transaction, msg, blockCtx, txCtx, block.Hash(), txnIndex, evm.IntraBlockState(), config, chainConfig, stream, api.evmCallTimeout)
 			if err != nil {
 				stream.WriteArrayEnd()

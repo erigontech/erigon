@@ -63,7 +63,7 @@ func ComputeBlockContext(ctx context.Context, engine consensus.EngineReader, hea
 	// Create the parent state database
 	statedb := state.New(reader)
 
-	getHeader := func(hash libcommon.Hash, n uint64) (*types.Header, error) {
+	getHeader := func(hash common.Hash, n uint64) (*types.Header, error) {
 		return headerReader.HeaderByNumber(ctx, dbtx, n)
 	}
 
@@ -125,11 +125,11 @@ func TraceTx(
 			return result, err
 		} else {
 			if tracer != nil && tracer.OnTxEnd != nil {
-				tracer.OnTxEnd(&types.Receipt{GasUsed: result.UsedGas}, nil)
+				tracer.OnTxEnd(&types.Receipt{GasUsed: result.GasUsed}, nil)
 			}
 		}
 
-		usedGas = result.UsedGas
+		usedGas = result.GasUsed
 		return result, err
 	}
 

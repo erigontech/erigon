@@ -23,6 +23,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-db/rawdb"
@@ -32,7 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
-	libstate "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -46,11 +47,8 @@ type StateV3 struct {
 	applyPrevAccountBuf []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
 	addrIncBuf          []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
 	logger              log.Logger
-
-	logger log.Logger
-
-	syncCfg ethconfig.Sync
-	trace   bool
+	syncCfg             ethconfig.Sync
+	trace               bool
 }
 
 func NewStateV3(domains *state.SharedDomains, logger log.Logger) *StateV3 {
@@ -304,7 +302,7 @@ type bufferedAccount struct {
 	originalIncarnation uint64
 	data                *accounts.Account
 	code                []byte
-	storage             map[libcommon.Hash]uint256.Int
+	storage             map[common.Hash]uint256.Int
 }
 
 type StateV3Buffered struct {
@@ -608,7 +606,7 @@ func (w *StateWriterV3) WriteAccountStorage(address common.Address, incarnation 
 	return w.rs.domains.DomainPut(kv.StorageDomain, w.tx, composite, nil, v, nil, 0)
 }
 
-func (w *StateWriterV3) DeleteAccountStorage(address libcommon.Address, incarnation uint64, key libcommon.Hash) error {
+func (w *StateWriterV3) DeleteAccountStorage(address common.Address, incarnation uint64, key common.Hash) error {
 	if w.trace {
 		fmt.Printf("storage delete: %x,%x\n", address, key)
 	}

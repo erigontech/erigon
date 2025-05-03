@@ -105,7 +105,7 @@ func (e *TraceWorker) GetLogs(txIndex int, txnHash common.Hash, blockNumber uint
 	return e.ibs.GetLogs(txIndex, txnHash, blockNumber, blockHash)
 }
 
-func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, gasBailout bool) error {
+func (e *TraceWorker) ExecTxn(txNum uint64, blockNum uint64, txIndex int, txn types.Transaction, gasBailout bool) error {
 	e.stateReader.SetTxNum(txNum)
 	e.ibs.Reset()
 	e.ibs.SetTxContext(blockNum, txIndex)
@@ -139,7 +139,7 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, 
 	} else {
 		_, err = core.ApplyMessage(e.evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */, e.engine)
 		if err != nil {
-			return fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, e.blockNum, txNum, e.ibs.Error())
+			return fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, e.blockNum, txNum)
 		}
 	}
 

@@ -285,7 +285,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 		return nil, common.Hash{}, err
 	}
 
-	var root libcommon.Hash
+	var root common.Hash
 	rootBytes, err := domains.ComputeCommitment(context2.Background(), tx, true, header.Number.Uint64(), "")
 	if err != nil {
 		return statedb, root, fmt.Errorf("ComputeCommitment: %w", err)
@@ -370,8 +370,8 @@ func rlpHash(x interface{}) (h common.Hash) {
 	return h
 }
 
-func vmTestBlockHash(n uint64) (libcommon.Hash, error) {
-	return libcommon.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String()))), nil
+func vmTestBlockHash(n uint64) (common.Hash, error) {
+	return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String()))), nil
 }
 
 func toMessage(tx stTransaction, ps stPostState, baseFee *big.Int) (core.Message, error) {
