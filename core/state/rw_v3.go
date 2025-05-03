@@ -259,20 +259,21 @@ func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *li
 	} else {
 		if rs.isBor && txTask.TxIndex >= 1 {
 			// get last receipt and store the last log index + 1
-			lastReceipt := txTask.BlockReceipts[txTask.TxIndex-1]
-			if lastReceipt == nil {
+			prevTxnReceipt := txTask.BlockReceipts[txTask.TxIndex-1]
+			if prevTxnReceipt == nil {
 				return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
 			}
-			if len(lastReceipt.Logs) > 0 {
-				firstIndex := lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
-				receipt = lastReceipt
-				receiptToWriteInDB := types.Receipt{
-					CumulativeGasUsed:        lastReceipt.CumulativeGasUsed,
-					FirstLogIndexWithinBlock: uint32(firstIndex),
+
+			if len(prevTxnReceipt.Logs) > 0 {
+				lastLogIndex := prevTxnReceipt.Logs[len(prevTxnReceipt.Logs)-1].Index
+				finalSystemTxnReceipt := &types.Receipt{
+					CumulativeGasUsed:        prevTxnReceipt.CumulativeGasUsed,
+					FirstLogIndexWithinBlock: uint32(lastLogIndex + 1),
 				}
+				receipt = nil
 				//lastReceipt.FirstLogIndexWithinBlock = uint32(firstIndex)
-				fmt.Printf("[dbg] here100: %d, %d, %d=%d\n", txTask.TxNum, txTask.TxIndex, receipt.FirstLogIndexWithinBlock, firstIndex)
-				if err := rawtemporaldb.AppendReceipt(domains, &receiptToWriteInDB, blobGasUsed); err != nil {
+				fmt.Printf("[dbg] here100: %d, %d, %d=%d\n", txTask.TxNum, txTask.TxIndex, receipt.FirstLogIndexWithinBlock, lastLogIndex)
+				if err := rawtemporaldb.AppendReceipt(domains, finalSystemTxnReceipt, blobGasUsed); err != nil {
 					return err
 				}
 				if receipt != nil && len(receipt.Logs) > 0 && int(receipt.FirstLogIndexWithinBlock) != int(receipt.Logs[0].Index) {
@@ -282,7 +283,7 @@ func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *li
 				if receipt != nil && len(receipt.Logs) > 0 && int(receipt.FirstLogIndexWithinBlock) != int(receipt.Logs[0].Index) {
 					panic(fmt.Sprintf("assert: FirstLogIndexWithinBlock is wrong: %d %d, blockNum=%d, tn=%d, ti=%d", receipt.FirstLogIndexWithinBlock, receipt.Logs[0].Index, receipt.BlockNumber.Uint64(), txTask.TxNum, txTask.TxIndex))
 				}
-				fmt.Printf("[dbg] here101: %d, %d, %d\n", txTask.TxNum, txTask.TxIndex, lastReceipt.FirstLogIndexWithinBlock)
+				fmt.Printf("[dbg] here101: %d, %d, %d\n", txTask.TxNum, txTask.TxIndex, prevTxnReceipt.FirstLogIndexWithinBlock)
 			}
 			if receipt != nil && len(receipt.Logs) > 0 && int(receipt.FirstLogIndexWithinBlock) != int(receipt.Logs[0].Index) {
 				panic(fmt.Sprintf("assert: FirstLogIndexWithinBlock is wrong: %d %d, blockNum=%d, tn=%d, ti=%d", receipt.FirstLogIndexWithinBlock, receipt.Logs[0].Index, receipt.BlockNumber.Uint64(), txTask.TxNum, txTask.TxIndex))
