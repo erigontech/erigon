@@ -162,7 +162,8 @@ var Schema = SchemaGen{
 		name: kv.AccountsDomain, valuesTable: kv.TblAccountVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressNone,
 
-		Accessors: AccessorBTree | AccessorExistence,
+		//Accessors:            AccessorBTree | AccessorExistence,
+		Accessors:            AccessorBTree,
 
 		hist: histCfg{
 			valuesTable:   kv.TblAccountHistoryVals,
@@ -174,6 +175,7 @@ var Schema = SchemaGen{
 			iiCfg: iiCfg{
 				filenameBase: kv.AccountsDomain.String(), keysTable: kv.TblAccountHistoryKeys, valuesTable: kv.TblAccountIdx,
 				CompressorCfg: seg.DefaultCfg,
+				Accessors:     AccessorHashMap | AccessorExistence,
 			},
 		},
 	},
@@ -181,7 +183,8 @@ var Schema = SchemaGen{
 		name: kv.StorageDomain, valuesTable: kv.TblStorageVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
 
-		Accessors: AccessorBTree | AccessorExistence,
+		//Accessors: AccessorBTree | AccessorExistence,
+		Accessors: AccessorBTree,
 
 		hist: histCfg{
 			valuesTable:   kv.TblStorageHistoryVals,
@@ -193,6 +196,7 @@ var Schema = SchemaGen{
 			iiCfg: iiCfg{
 				filenameBase: kv.StorageDomain.String(), keysTable: kv.TblStorageHistoryKeys, valuesTable: kv.TblStorageIdx,
 				CompressorCfg: seg.DefaultCfg,
+				Accessors:     AccessorHashMap | AccessorExistence,
 			},
 		},
 	},
@@ -200,7 +204,8 @@ var Schema = SchemaGen{
 		name: kv.CodeDomain, valuesTable: kv.TblCodeVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
 
-		Accessors:   AccessorBTree | AccessorExistence,
+		//Accessors:   AccessorBTree | AccessorExistence,
+		Accessors:   AccessorBTree,
 		largeValues: true,
 
 		hist: histCfg{
@@ -213,6 +218,7 @@ var Schema = SchemaGen{
 			iiCfg: iiCfg{
 				filenameBase: kv.CodeDomain.String(), keysTable: kv.TblCodeHistoryKeys, valuesTable: kv.TblCodeIdx,
 				CompressorCfg: seg.DefaultCfg,
+				Accessors:     AccessorHashMap | AccessorExistence,
 			},
 		},
 	},
@@ -220,6 +226,7 @@ var Schema = SchemaGen{
 		name: kv.CommitmentDomain, valuesTable: kv.TblCommitmentVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
 
+		//Accessors:           AccessorHashMap | AccessorExistence,
 		Accessors:           AccessorHashMap,
 		replaceKeysInValues: AggregatorSqueezeCommitmentValues,
 
@@ -237,6 +244,7 @@ var Schema = SchemaGen{
 			iiCfg: iiCfg{
 				filenameBase: kv.CommitmentDomain.String(), keysTable: kv.TblCommitmentHistoryKeys, valuesTable: kv.TblCommitmentIdx,
 				CompressorCfg: seg.DefaultCfg,
+				Accessors:     AccessorHashMap | AccessorExistence,
 			},
 		},
 	},
@@ -257,6 +265,7 @@ var Schema = SchemaGen{
 			iiCfg: iiCfg{
 				filenameBase: kv.ReceiptDomain.String(), keysTable: kv.TblReceiptHistoryKeys, valuesTable: kv.TblReceiptIdx,
 				CompressorCfg: seg.DefaultCfg,
+				Accessors:     AccessorHashMap,
 			},
 		},
 	},
@@ -281,6 +290,7 @@ var Schema = SchemaGen{
 				disable:      true, // disable everything by default
 				filenameBase: kv.RCacheDomain.String(), keysTable: kv.TblRCacheHistoryKeys, valuesTable: kv.TblRCacheIdx,
 				CompressorCfg: seg.DefaultCfg,
+				Accessors:     AccessorHashMap,
 			},
 		},
 	},
@@ -290,24 +300,28 @@ var Schema = SchemaGen{
 
 		Compression: seg.CompressNone,
 		name:        kv.LogAddrIdx,
+		Accessors:   AccessorHashMap | AccessorExistence,
 	},
 	LogTopicIdx: iiCfg{
 		filenameBase: kv.FileLogTopicsIdx, keysTable: kv.TblLogTopicsKeys, valuesTable: kv.TblLogTopicsIdx,
 
 		Compression: seg.CompressNone,
 		name:        kv.LogTopicIdx,
+		Accessors:   AccessorHashMap | AccessorExistence,
 	},
 	TracesFromIdx: iiCfg{
 		filenameBase: kv.FileTracesFromIdx, keysTable: kv.TblTracesFromKeys, valuesTable: kv.TblTracesFromIdx,
 
 		Compression: seg.CompressNone,
 		name:        kv.TracesFromIdx,
+		Accessors:   AccessorHashMap | AccessorExistence,
 	},
 	TracesToIdx: iiCfg{
 		filenameBase: kv.FileTracesToIdx, keysTable: kv.TblTracesToKeys, valuesTable: kv.TblTracesToIdx,
 
 		Compression: seg.CompressNone,
 		name:        kv.TracesToIdx,
+		Accessors:   AccessorHashMap | AccessorExistence,
 	},
 }
 
