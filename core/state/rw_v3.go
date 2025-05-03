@@ -248,12 +248,12 @@ func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *li
 		if !txTask.Final {
 			if txTask.TxIndex >= 0 && txTask.BlockReceipts != nil {
 				receipt = txTask.BlockReceipts[txTask.TxIndex]
-				fmt.Printf("[dbg] here80: tn=%d, ti=%d, %d, %t\n", txTask.TxNum, txTask.TxIndex, len(txTask.BlockReceipts), receipt == nil)
+				fmt.Printf("[dbg] here80: tn=%d, ti=%d, %d\n", txTask.TxNum, txTask.TxIndex, receipt.FirstLogIndexWithinBlock)
 			}
 		} else {
 			if rs.isBor && txTask.TxIndex >= 1 {
-				fmt.Printf("[dbg] here81: tn=%d, ti=%d, %d, %t\n", txTask.TxNum, txTask.TxIndex, len(txTask.BlockReceipts), receipt == nil)
 				receipt = txTask.BlockReceipts[txTask.TxIndex-1]
+				fmt.Printf("[dbg] here81: tn=%d, ti=%d, %d\n", txTask.TxNum, txTask.TxIndex, receipt.FirstLogIndexWithinBlock)
 				if receipt == nil {
 					return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
 				}
