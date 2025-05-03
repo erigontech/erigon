@@ -277,8 +277,7 @@ func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *li
 		}
 	}
 
-	if txTask.TxIndex > 0 && len(txTask.BlockReceipts) > 0 && len(txTask.BlockReceipts) > txTask.TxIndex {
-		receipt := txTask.BlockReceipts[txTask.TxIndex]
+	if receipt != nil {
 		if len(receipt.Logs) > 0 && int(receipt.FirstLogIndexWithinBlock) != int(receipt.Logs[0].Index) {
 			panic(fmt.Sprintf("assert: FirstLogIndexWithinBlock is wrong: %d %d, blockNum=%d", receipt.FirstLogIndexWithinBlock, receipt.Logs[0].Index, receipt.BlockNumber.Uint64()))
 		}
