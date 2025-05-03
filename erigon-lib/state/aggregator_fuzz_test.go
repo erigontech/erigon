@@ -88,7 +88,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
-			err = domains.DomainPut(kv.AccountsDomain, addrs[txNum].Bytes(), nil, buf, nil, 0)
+			err = domains.DomainPut(kv.AccountsDomain, rwTx, addrs[txNum].Bytes(), nil, buf, nil, 0)
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.StorageDomain, rwTx, addrs[txNum].Bytes(), locs[txNum].Bytes(), []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}, nil, 0)
@@ -212,7 +212,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
-			err = domains.DomainPut(kv.AccountsDomain, addrs[txNum].Bytes(), nil, buf, nil, 0)
+			err = domains.DomainPut(kv.AccountsDomain, rwTx, addrs[txNum].Bytes(), nil, buf, nil, 0)
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.StorageDomain, rwTx, addrs[txNum].Bytes(), locs[txNum].Bytes(), []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}, nil, 0)
