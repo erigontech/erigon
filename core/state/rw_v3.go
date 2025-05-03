@@ -257,7 +257,7 @@ func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *li
 				}
 			}
 		}
-		fmt.Printf("[dbg] here88: %d, %d, %t\n", txTask.TxNum, len(txTask.BlockReceipts), receipt == nil)
+		fmt.Printf("[dbg] here88: tn=%d, ti=%d, %d, %t\n", txTask.TxNum, txTask.TxIndex, len(txTask.BlockReceipts), receipt == nil)
 		if err := rawdb.WriteReceiptCacheV2(domains, receipt); err != nil {
 			return err
 		}
