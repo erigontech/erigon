@@ -83,7 +83,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	t.Cleanup(db.Close)
 	salt := uint32(1)
 
-	cfg.hist.iiCfg.version = IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
+	cfg.hist.iiCfg.version = IIVersionTypes{version.V1_0_standart, version.V1_0_standart, version.V1_0_standart}
 	cfg.hist.iiCfg.dirs = dirs
 	cfg.hist.iiCfg.salt.Store(&salt)
 	//cfg.hist.historyValuesOnCompressedPage = 16
@@ -492,6 +492,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 		require.NoError(t, err)
 		d.integrateDirtyFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
 		d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
+		require.Greater(t, len(d._visible.files), 0, d.dirtyFilesEndTxNumMinimax())
 
 		dc := d.BeginFilesRo()
 		_, err = dc.Prune(ctx, tx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64, logEvery)
@@ -1054,7 +1055,8 @@ func emptyTestDomain(aggStep uint64) *Domain {
 	cfg.hist.iiCfg.salt.Store(&salt)
 	cfg.hist.iiCfg.dirs = datadir2.New(os.TempDir())
 	cfg.hist.iiCfg.name = kv.InvertedIdx(0)
-	cfg.hist.iiCfg.version = IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
+	cfg.hist.iiCfg.version = IIVersionTypes{version.V1_0_standart, version.V1_0_standart, version.V1_0_standart}
+	cfg.hist.iiCfg.Accessors = AccessorHashMap | AccessorExistence
 
 	d, err := NewDomain(cfg, aggStep, log.New())
 	if err != nil {

@@ -36,6 +36,7 @@ require (
 )
 
 require (
+	github.com/FastFilter/xorfilter v0.2.1 // indirect
 	github.com/RoaringBitmap/roaring v1.2.3 // indirect
 	github.com/ajwerner/btree v0.0.0-20211221152037-f427b3e689c0 // indirect
 	github.com/alecthomas/assert/v2 v2.8.1 // indirect

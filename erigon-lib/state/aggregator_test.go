@@ -1466,8 +1466,18 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 			idx := f.src.index.GetReaderFromPool()
 			r := dt.dataReader(f.src.decompressor)
 
-			offset, ok := idx.TwoLayerLookup(keyCommitmentState)
-			require.True(t, ok)
+			var offset uint64
+			var ok bool
+			if ac.d[kv.CommitmentDomain].d.Accessors.Has(AccessorExistence) {
+				hi, _ := ac.d[kv.CommitmentDomain].ht.iit.hashKey(keyCommitmentState)
+				ok = f.src.existence.ContainsHash(hi)
+				require.True(t, ok)
+				offset, ok = idx.Lookup(keyCommitmentState)
+				require.True(t, ok)
+			} else {
+				offset, ok = idx.TwoLayerLookup(keyCommitmentState)
+				require.True(t, ok)
+			}
 			r.Reset(offset)
 			k, _ = r.Next(nil)
 			stateVal, _ = r.Next(nil)
@@ -1645,7 +1655,7 @@ func generateDomainFiles(t *testing.T, name string, dirs datadir.Dirs, ranges []
 		accessors := AccessorBTree | AccessorExistence
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
 			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone).
-			BtIndex().Existence().
+			BtIndex().Existence(dirs.SnapDomain, ExistenceExtensionKvei).
 			Build()
 		return name, schema
 	})
@@ -1664,10 +1674,11 @@ func generateDomainFiles(t *testing.T, name string, dirs datadir.Dirs, ranges []
 	populateFiles2(t, dirs, domainHR, ranges)
 
 	domainII := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (dn string, schema SnapNameSchema) {
-		accessors := AccessorHashMap
+		accessors := AccessorHashMap | AccessorExistence
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
 			Data(dirs.SnapIdx, name, DataExtensionEf, seg.CompressNone).
 			Accessor(dirs.SnapAccessors).
+			Existence(dirs.SnapAccessors, ExistenceExtensionEfei).
 			Build()
 		return name, schema
 	})

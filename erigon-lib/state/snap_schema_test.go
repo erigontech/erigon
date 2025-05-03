@@ -109,7 +109,7 @@ func TestE3SnapSchemaForDomain1(t *testing.T) {
 	p := NewE3SnapSchemaBuilder(AccessorBTree|AccessorExistence, stepSize).
 		Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressKeys).
 		BtIndex().
-		Existence().Build()
+		Existence(dirs.SnapDomain, ExistenceExtensionKvei).Build()
 
 	stepFrom := RootNum(stepSize * 288)
 	stepTo := RootNum(stepSize * 296)

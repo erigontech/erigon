@@ -16,7 +16,7 @@ import (
 // seg.Decompressor
 // they could also optionally have the following files:
 // i) accessor index: essentially recsplit index; e.g kvi, vi, efi, idx
-// ii) existence filter: kvei
+// ii) existence filter: kvei, efei
 // iii) bt index: btree index; e.g. .bt
 
 // snapshot name schema holder and parser
@@ -197,12 +197,13 @@ func (s *E2SnapSchema) DataFileCompression() seg.FileCompression {
 type E3SnapSchema struct {
 	stepSize uint64
 
-	dataExtension       DataExtension
 	dataFileTag         string
 	dataFileCompression seg.FileCompression
 	accessors           Accessors
 
+	dataExtension        DataExtension
 	accessorIdxExtension AccessorExtension
+	existenceExtension   ExistenceExtension
 	// caches
 	dataFileMetadata      *_fileMetadata
 	indexFileMetadata     *_fileMetadata
@@ -267,12 +268,17 @@ func (b *E3SnapSchemaBuilder) Accessor(accessorFolder string) *E3SnapSchemaBuild
 	return b
 }
 
-// Data() should be called first
-func (b *E3SnapSchemaBuilder) Existence() *E3SnapSchemaBuilder {
+func (b *E3SnapSchemaBuilder) Existence(folder string, extension ExistenceExtension) *E3SnapSchemaBuilder {
 	b.e.existenceFileMetadata = &_fileMetadata{
-		folder:    b.e.dataFileMetadata.folder, // assuming "data" and existence in same folder, which is currently the case
+		folder:    folder,
 		supported: true,
 	}
+	if !extension.IsSet() {
+		panic(fmt.Sprintf("existence extension not set %s", extension))
+	}
+
+	b.e.existenceExtension = extension
+
 	return b
 }
 
@@ -344,7 +350,7 @@ func (s *E3SnapSchema) Parse(fileName string) (f *SnapInfo, ok bool) {
 		return info, true
 	} else if s.accessorIdxExtension.Equals(info.Ext) && s.indexFileMetadata.supported {
 		return info, true
-	} else if info.Ext == ".kvei" && s.existenceFileMetadata.supported {
+	} else if ExistenceExtension(info.Ext).IsSet() && s.existenceFileMetadata.supported {
 		return info, true
 	} else if info.Ext == ".bt" && s.btIdxFileMetadata.supported {
 		return info, true
@@ -378,7 +384,7 @@ func (s *E3SnapSchema) ExistenceFile(version Version, from, to RootNum) string {
 	if !s.existenceFileMetadata.supported {
 		panic(fmt.Sprintf("%s not supported for %s", AccessorExistence, s.dataFileTag))
 	}
-	return filepath.Join(s.existenceFileMetadata.folder, fmt.Sprintf("%s-%s.%d-%d.kvei", version, s.dataFileTag, from/RootNum(s.stepSize), to/RootNum(s.stepSize)))
+	return filepath.Join(s.existenceFileMetadata.folder, fmt.Sprintf("%s-%s.%d-%d%s", version, s.dataFileTag, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.existenceExtension))
 }
 
 func (s *E3SnapSchema) DataTag() string {
@@ -416,7 +422,7 @@ func (s *E3SnapSchema) FileExtensions() (extensions []string) {
 	}
 
 	if s.existenceFileMetadata.supported {
-		extensions = append(extensions, ".kvei")
+		extensions = append(extensions, s.existenceExtension.String())
 	}
 
 	return
