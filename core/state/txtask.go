@@ -136,7 +136,6 @@ func (t *TxTask) CreateReceipt(tx kv.Tx) {
 			cumulativeGasUsed = prevR.CumulativeGasUsed
 			firstLogIndex = prevR.FirstLogIndexWithinBlock + uint32(len(prevR.Logs))
 		} else {
-			fmt.Printf("a: %d\n", t.TxIndex)
 			var err error
 			cumulativeGasUsed, _, firstLogIndex, err = rawtemporaldb.ReceiptAsOf(tx.(kv.TemporalTx), t.TxNum)
 			if err != nil {

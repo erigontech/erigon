@@ -22,8 +22,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/erigontech/erigon/execution/exec3/calltracer"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon/execution/exec3/calltracer"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
