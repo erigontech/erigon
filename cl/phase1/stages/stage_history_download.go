@@ -250,7 +250,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 					}
 				}
 
-				log.Warn("[dbg] SetOnNewBlock", "currEth1Progress", currEth1Progress.Load())
+				log.Warn("[dbg] SetOnNewBlock", "currEth1Progress", currEth1Progress.Load(), "highestBlockSeen", highestBlockSeen, "lowestBlockToReach", lowestBlockToReach)
 
 				logMsg := "Node is still syncing... downloading past blocks"
 				if isBackfilling.Load() {
