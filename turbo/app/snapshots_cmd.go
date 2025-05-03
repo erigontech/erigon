@@ -211,8 +211,8 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
 		},
 		{
-			Name:    "rm-state-snapshots",
-			Aliases: []string{"rm-state-segments", "rm-state"},
+			Name:    "rm-state",
+			Aliases: []string{"rm-state-segments", "rm-state-snapshots"},
 			Action:  doRmStateSnapshots,
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
