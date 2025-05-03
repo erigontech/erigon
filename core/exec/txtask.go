@@ -29,7 +29,10 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/execution/exec3/calltracer"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -79,6 +82,11 @@ type Task interface {
 	isNil() bool
 }
 
+type AAValidationResult struct {
+	PaymasterContext []byte
+	GasUsed          uint64
+}
+
 // Result is the ouput of the task execute process
 type Result struct {
 	Task
@@ -123,22 +131,28 @@ func (r *Result) CreateReceipt(prev *types.Receipt) (*types.Receipt, error) {
 
 	cumulativeGasUsed += r.ExecutionResult.GasUsed
 
-	r.Receipt = r.createReceipt(txIndex, cumulativeGasUsed)
-	r.Receipt.FirstLogIndexWithinBlock = firstLogIndex
+	r.Receipt = r.createReceipt(txIndex, cumulativeGasUsed, firstLogIndex)
 	return r.Receipt, nil
 }
 
-func (r *Result) createReceipt(txIndex int, cumulativeGasUsed uint64) *types.Receipt {
+func (r *Result) createReceipt(txIndex uint64, cumulativeGasUsed uint64, firstLogIndex uint32) *types.Receipt {
+	logIndex := firstLogIndex
+	for i := range r.Logs {
+		r.Logs[i].Index = uint(logIndex)
+		logIndex++
+	}
+
 	blockNum := r.Version().BlockNum
 	receipt := &types.Receipt{
-		BlockNumber:       big.NewInt(int64(blockNum)),
-		BlockHash:         r.BlockHash(),
-		TransactionIndex:  uint(txIndex),
-		Type:              r.TxType(),
-		GasUsed:           r.ExecutionResult.GasUsed,
-		CumulativeGasUsed: cumulativeGasUsed,
-		TxHash:            r.TxHash(),
-		Logs:              r.Logs,
+		BlockNumber:              big.NewInt(int64(blockNum)),
+		BlockHash:                r.BlockHash(),
+		TransactionIndex:         uint(txIndex),
+		Type:                     r.TxType(),
+		GasUsed:                  r.ExecutionResult.GasUsed,
+		CumulativeGasUsed:        cumulativeGasUsed,
+		TxHash:                   r.TxHash(),
+		Logs:                     r.Logs,
+		FirstLogIndexWithinBlock: firstLogIndex,
 	}
 
 	for _, l := range receipt.Logs {
@@ -151,10 +165,13 @@ func (r *Result) createReceipt(txIndex int, cumulativeGasUsed uint64) *types.Rec
 	} else {
 		receipt.Status = types.ReceiptStatusSuccessful
 	}
+
+	receipt.Bloom = types.LogsBloom(receipt.Logs) // why do we need to add this?
 	// if the transaction created a contract, store the creation address in the receipt.
-	//if msg.To() == nil {
-	//	receipt.ContractAddress = crypto.CreateAddress(evm.Origin, tx.GetNonce())
-	//}
+	if r.TxMessage() != nil && r.TxMessage().To() == nil {
+		receipt.ContractAddress = crypto.CreateAddress(*r.TxSender(), r.Tx().GetNonce())
+	}
+
 	return receipt
 }
 
@@ -192,16 +209,26 @@ type TxTask struct {
 	BalanceIncreaseSet map[libcommon.Address]uint256.Int
 
 	Incarnation int
+	Tracer      *calltracer.CallTracer
 
-	Config *chain.Config
-	Engine consensus.Engine
-	Logger log.Logger
-	Trace  bool
+	Config                *chain.Config
+	Engine                consensus.Engine
+	Logger                log.Logger
+	Trace                 bool
+	AAValidationBatchSize uint64 // number of consecutive RIP-7560 transactions, should be 0 for single transactions and transactions that are not first in the transaction order
+	InBatch               bool   // set to true for consecutive RIP-7560 transactions after the first one (first one is false)
+	ValidationResults     []AAValidationResult
 
 	sender       *libcommon.Address
 	message      *types.Message
 	signer       *types.Signer
 	dependencies []int
+}
+
+type GenericTracer interface {
+	TracingHooks() *tracing.Hooks
+	SetTransaction(tx types.Transaction)
+	Found() bool
 }
 
 func (t *TxTask) compare(other Task) int {
