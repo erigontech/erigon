@@ -24,10 +24,10 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -253,10 +253,8 @@ func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *li
 		if err := rawtemporaldb.AppendReceipt(domains, receipt, blobGasUsed); err != nil {
 			return err
 		}
-		if receipt != nil {
-			if len(receipt.Logs) > 0 && int(receipt.FirstLogIndexWithinBlock) != int(receipt.Logs[0].Index) {
-				panic(fmt.Sprintf("assert: FirstLogIndexWithinBlock is wrong: %d %d, blockNum=%d, tn=%d, ti=%d", receipt.FirstLogIndexWithinBlock, receipt.Logs[0].Index, receipt.BlockNumber.Uint64(), txTask.TxNum, txTask.TxIndex))
-			}
+		if receipt != nil && len(receipt.Logs) > 0 && int(receipt.FirstLogIndexWithinBlock) != int(receipt.Logs[0].Index) {
+			panic(fmt.Sprintf("assert: FirstLogIndexWithinBlock is wrong: %d %d, blockNum=%d, tn=%d, ti=%d", receipt.FirstLogIndexWithinBlock, receipt.Logs[0].Index, receipt.BlockNumber.Uint64(), txTask.TxNum, txTask.TxIndex))
 		}
 	} else {
 		if rs.isBor && txTask.TxIndex >= 1 {
@@ -281,17 +279,13 @@ func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *li
 				fmt.Printf("[dbg] here101: %d, %d, %d\n", txTask.TxNum, txTask.TxIndex, lastReceipt.FirstLogIndexWithinBlock)
 			}
 		}
-		if receipt != nil {
-			if len(receipt.Logs) > 0 && int(receipt.FirstLogIndexWithinBlock) != int(receipt.Logs[0].Index) {
-				panic(fmt.Sprintf("assert: FirstLogIndexWithinBlock is wrong: %d %d, blockNum=%d, tn=%d, ti=%d", receipt.FirstLogIndexWithinBlock, receipt.Logs[0].Index, receipt.BlockNumber.Uint64(), txTask.TxNum, txTask.TxIndex))
-			}
+		if receipt != nil && len(receipt.Logs) > 0 && int(receipt.FirstLogIndexWithinBlock) != int(receipt.Logs[0].Index) {
+			panic(fmt.Sprintf("assert: FirstLogIndexWithinBlock is wrong: %d %d, blockNum=%d, tn=%d, ti=%d", receipt.FirstLogIndexWithinBlock, receipt.Logs[0].Index, receipt.BlockNumber.Uint64(), txTask.TxNum, txTask.TxIndex))
 		}
 	}
 
-	if receipt != nil {
-		if len(receipt.Logs) > 0 && int(receipt.FirstLogIndexWithinBlock) != int(receipt.Logs[0].Index) {
-			panic(fmt.Sprintf("assert: FirstLogIndexWithinBlock is wrong: %d %d, blockNum=%d, tn=%d, ti=%d", receipt.FirstLogIndexWithinBlock, receipt.Logs[0].Index, receipt.BlockNumber.Uint64(), txTask.TxNum, txTask.TxIndex))
-		}
+	if receipt != nil && len(receipt.Logs) > 0 && int(receipt.FirstLogIndexWithinBlock) != int(receipt.Logs[0].Index) {
+		panic(fmt.Sprintf("assert: FirstLogIndexWithinBlock is wrong: %d %d, blockNum=%d, tn=%d, ti=%d", receipt.FirstLogIndexWithinBlock, receipt.Logs[0].Index, receipt.BlockNumber.Uint64(), txTask.TxNum, txTask.TxIndex))
 	}
 
 	if rs.syncCfg.PersistReceiptsCacheV2 {
