@@ -6,11 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/execution/consensus"
@@ -110,46 +108,6 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 				}
 			}
 			return false, nil
-		}
-
-		if !txTask.Final {
-			var receipt *types.Receipt
-			if txTask.TxIndex >= 0 {
-				receipt = txTask.BlockReceipts[txTask.TxIndex]
-			}
-			if err := rawtemporaldb.AppendReceipt(se.doms, receipt, se.blobGasUsed); err != nil {
-				return false, err
-			}
-		} else {
-			if se.cfg.chainConfig.Bor != nil && txTask.TxIndex >= 1 {
-				// get last receipt and store the last log index + 1
-				lastReceipt := txTask.BlockReceipts[txTask.TxIndex-1]
-				if lastReceipt == nil {
-					return false, fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
-				}
-				if len(lastReceipt.Logs) > 0 {
-					firstIndex := lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
-					receipt := types.Receipt{
-						CumulativeGasUsed:        lastReceipt.CumulativeGasUsed,
-						FirstLogIndexWithinBlock: uint32(firstIndex),
-					}
-					lastReceipt.FirstLogIndexWithinBlock = uint32(firstIndex)
-
-					fmt.Printf("[dbg] here100: %d, %d, %d=%d\n", txTask.TxNum, txTask.TxIndex, lastReceipt.FirstLogIndexWithinBlock, firstIndex)
-					if err := rawtemporaldb.AppendReceipt(se.doms, &receipt, se.blobGasUsed); err != nil {
-						return false, err
-					}
-				} else {
-					fmt.Printf("[dbg] here101: %d, %d, %d\n", txTask.TxNum, txTask.TxIndex, lastReceipt.FirstLogIndexWithinBlock)
-				}
-			}
-		}
-
-		if txTask.TxIndex > 0 && len(txTask.BlockReceipts) > 0 && len(txTask.BlockReceipts) > txTask.TxIndex {
-			receipt := txTask.BlockReceipts[txTask.TxIndex]
-			if len(receipt.Logs) > 0 && int(receipt.FirstLogIndexWithinBlock) != int(receipt.Logs[0].Index) {
-				panic(fmt.Sprintf("assert: FirstLogIndexWithinBlock is wrong: %d %d, blockNum=%d", receipt.FirstLogIndexWithinBlock, receipt.Logs[0].Index, receipt.BlockNumber.Uint64()))
-			}
 		}
 
 		// MA applystate
