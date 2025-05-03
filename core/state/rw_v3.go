@@ -24,6 +24,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-db/rawdb"
@@ -188,7 +189,7 @@ func (rs *ParallelExecutionState) SetTxNum(txNum, blockNum uint64) {
 	rs.domains.SetBlockNum(blockNum)
 }
 
-func (rs *ParallelExecutionState) ApplyState(ctx context.Context, txTask *TxTask) error {
+func (rs *ParallelExecutionState) ApplyState(ctx context.Context, txTask *TxTask, blobGasUsed uint64) error {
 	if txTask.HistoryExecution {
 		return nil
 	}
@@ -200,7 +201,7 @@ func (rs *ParallelExecutionState) ApplyState(ctx context.Context, txTask *TxTask
 	returnReadList(txTask.ReadLists)
 	returnWriteList(txTask.WriteLists)
 
-	if err := rs.ApplyLogsAndTraces(txTask, rs.domains); err != nil {
+	if err := rs.ApplyLogsAndTraces(txTask, rs.domains, blobGasUsed); err != nil {
 		return fmt.Errorf("ParallelExecutionState.ApplyLogsAndTraces: %w", err)
 	}
 
@@ -219,7 +220,7 @@ func (rs *ParallelExecutionState) ApplyState(ctx context.Context, txTask *TxTask
 	return nil
 }
 
-func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *libstate.SharedDomains) error {
+func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *libstate.SharedDomains, blobGasUsed uint64) error {
 	for addr := range txTask.TraceFroms {
 		if err := domains.IndexAdd(kv.TracesFromIdx, addr[:]); err != nil {
 			return err
@@ -243,27 +244,47 @@ func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *li
 		}
 	}
 
-	if rs.syncCfg.PersistReceiptsCacheV2 {
-		var receipt *types.Receipt
-		if !txTask.Final {
-			if txTask.TxIndex >= 0 && txTask.BlockReceipts != nil {
-				receipt = txTask.BlockReceipts[txTask.TxIndex]
-				fmt.Printf("[dbg] here80: tn=%d, ti=%d, %d\n", txTask.TxNum, txTask.TxIndex, receipt.FirstLogIndexWithinBlock)
+	var receipt *types.Receipt
+	if !txTask.Final {
+		if txTask.TxIndex >= 0 {
+			receipt = txTask.BlockReceipts[txTask.TxIndex]
+		}
+		if err := rawtemporaldb.AppendReceipt(domains, receipt, blobGasUsed); err != nil {
+			return err
+		}
+	} else {
+		if rs.isBor && txTask.TxIndex >= 1 {
+			// get last receipt and store the last log index + 1
+			lastReceipt := txTask.BlockReceipts[txTask.TxIndex-1]
+			if lastReceipt == nil {
+				return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
 			}
-		} else {
-			if rs.isBor && txTask.TxIndex >= 1 {
-				receipt = txTask.BlockReceipts[txTask.TxIndex-1]
-				fmt.Printf("[dbg] here81: tn=%d, ti=%d, %d\n", txTask.TxNum, txTask.TxIndex, receipt.FirstLogIndexWithinBlock)
-				if receipt == nil {
-					return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
+			if len(lastReceipt.Logs) > 0 {
+				firstIndex := lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
+				receipt = lastReceipt
+				receiptToWriteInDB := types.Receipt{
+					CumulativeGasUsed:        lastReceipt.CumulativeGasUsed,
+					FirstLogIndexWithinBlock: uint32(firstIndex),
 				}
+				lastReceipt.FirstLogIndexWithinBlock = uint32(firstIndex)
+				fmt.Printf("[dbg] here100: %d, %d, %d=%d\n", txTask.TxNum, txTask.TxIndex, lastReceipt.FirstLogIndexWithinBlock, firstIndex)
+				if err := rawtemporaldb.AppendReceipt(domains, &receiptToWriteInDB, blobGasUsed); err != nil {
+					return err
+				}
+			} else {
+				fmt.Printf("[dbg] here101: %d, %d, %d\n", txTask.TxNum, txTask.TxIndex, lastReceipt.FirstLogIndexWithinBlock)
 			}
 		}
-		if receipt != nil && len(receipt.Logs) > 0 && int(receipt.FirstLogIndexWithinBlock) != int(receipt.Logs[0].Index) {
+	}
+
+	if txTask.TxIndex > 0 && len(txTask.BlockReceipts) > 0 && len(txTask.BlockReceipts) > txTask.TxIndex {
+		receipt := txTask.BlockReceipts[txTask.TxIndex]
+		if len(receipt.Logs) > 0 && int(receipt.FirstLogIndexWithinBlock) != int(receipt.Logs[0].Index) {
 			panic(fmt.Sprintf("assert: FirstLogIndexWithinBlock is wrong: %d %d, blockNum=%d", receipt.FirstLogIndexWithinBlock, receipt.Logs[0].Index, receipt.BlockNumber.Uint64()))
 		}
+	}
 
-		fmt.Printf("[dbg] here88: tn=%d, ti=%d, %d, %t\n", txTask.TxNum, txTask.TxIndex, len(txTask.BlockReceipts), receipt == nil)
+	if rs.syncCfg.PersistReceiptsCacheV2 {
 		if err := rawdb.WriteReceiptCacheV2(domains, receipt); err != nil {
 			return err
 		}

@@ -153,7 +153,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 		}
 
 		// MA applystate
-		if err := se.rs.ApplyState(ctx, txTask); err != nil {
+		if err := se.rs.ApplyState(ctx, txTask, se.blobGasUsed); err != nil {
 			return false, err
 		}
 
