@@ -248,6 +248,7 @@ func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *li
 	if !txTask.Final {
 		if txTask.TxIndex >= 0 {
 			receipt = txTask.BlockReceipts[txTask.TxIndex]
+			fmt.Printf("[dbg] here102: %d, %d, %d=%d\n", txTask.TxNum, txTask.TxIndex, receipt.FirstLogIndexWithinBlock, len(receipt.Logs))
 		}
 		if err := rawtemporaldb.AppendReceipt(domains, receipt, blobGasUsed); err != nil {
 			return err
@@ -267,7 +268,7 @@ func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *li
 					FirstLogIndexWithinBlock: uint32(firstIndex),
 				}
 				lastReceipt.FirstLogIndexWithinBlock = uint32(firstIndex)
-				fmt.Printf("[dbg] here100: %d, %d, %d=%d\n", txTask.TxNum, txTask.TxIndex, lastReceipt.FirstLogIndexWithinBlock, firstIndex)
+				fmt.Printf("[dbg] here100: %d, %d, %d=%d\n", txTask.TxNum, txTask.TxIndex, receipt.FirstLogIndexWithinBlock, firstIndex)
 				if err := rawtemporaldb.AppendReceipt(domains, &receiptToWriteInDB, blobGasUsed); err != nil {
 					return err
 				}
