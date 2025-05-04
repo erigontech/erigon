@@ -146,7 +146,7 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 		return nil
 	}
 
-	if err := ExecV3(ctx, s, u, workersCount, cfg, txc, dbg.Exec3Parallel, to, logger, initialCycle, isMining); err != nil {
+	if err := ExecV3(ctx, s, u, workersCount, cfg, txc, dbg.Exec3Parallel, to, logger, cfg.vmConfig.Tracer, initialCycle, isMining); err != nil {
 		return err
 	}
 	return nil
@@ -174,7 +174,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 		domains = txc.Doms
 	}
 
-	rs := state.NewParallelExecutionState(domains, cfg.syncCfg, cfg.chainConfig.Bor != nil, logger)
+	rs := state.NewStateV3(domains, cfg.syncCfg, cfg.chainConfig.Bor != nil, logger)
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, br))
 
@@ -432,11 +432,11 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		pruneTimeout = 12 * time.Hour
 
 		// allow greedy prune on non-chain-tip
-		if err = tx.(kv.TemporalRwTx).Debug().GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
+		if err = libstate.AggTx(tx).GreedyPruneHistory(ctx, kv.CommitmentDomain, tx); err != nil {
 			return err
 		}
 	}
-	if _, err = libstate.AggTx(tx).Debug().PruneSmallBatches(ctx, pruneTimeout, tx); err != nil { // prune part of retired data, before commit
+	if _, err = libstate.AggTx(tx).PruneSmallBatches(ctx, pruneTimeout, tx); err != nil { // prune part of retired data, before commit
 		return err
 	}
 

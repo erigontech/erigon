@@ -133,7 +133,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context,
 		}
 
 		if tracer != nil && tracer.TracingHooks().OnTxEnd != nil {
-			tracer.TracingHooks().OnTxEnd(&types.Receipt{GasUsed: res.UsedGas}, nil)
+			tracer.TracingHooks().OnTxEnd(&types.Receipt{GasUsed: res.GasUsed}, nil)
 		}
 		_ = ibs.FinalizeTx(rules, cachedWriter)
 

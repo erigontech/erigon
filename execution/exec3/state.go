@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/exec"
@@ -99,7 +100,7 @@ type Worker struct {
 	chainTx     kv.Tx
 	background  bool // if true - worker does manage RoTx (begin/rollback) in .ResetTx()
 	blockReader services.FullBlockReader
-	in          *state.QueueWithRetry
+	in          *exec.QueueWithRetry
 	rs          *state.StateV3Buffered
 	stateWriter state.StateWriter
 	stateReader state.ResettableStateReader

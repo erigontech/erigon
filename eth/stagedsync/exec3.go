@@ -535,7 +535,6 @@ func ExecV3(ctx context.Context,
 		}()
 	}
 
-	chainReader := NewChainReaderImpl(cfg.chainConfig, applyTx, blockReader, logger)
 	agg := cfg.db.(libstate.HasAgg).Agg().(*libstate.Aggregator)
 	if !inMemExec && !isMining {
 		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))

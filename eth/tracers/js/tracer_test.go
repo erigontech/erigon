@@ -56,8 +56,8 @@ type dummyStatedb struct {
 }
 
 func (*dummyStatedb) GetRefund() uint64 { return 1337 }
-func (*dummyStatedb) GetBalance(addr common.Address) (*uint256.Int, error) {
-	return &uint256.Int{}, nil
+func (*dummyStatedb) GetBalance(addr common.Address) (uint256.Int, error) {
+	return uint256.Int{}, nil
 }
 
 type vmContext struct {

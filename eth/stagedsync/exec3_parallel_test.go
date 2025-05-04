@@ -557,7 +557,7 @@ func executeParallelWithCheck(t *testing.T, pe *parallelExecutor, tasks []exec.T
 
 	applyResults := make(chan applyResult, 1000)
 
-	pe.execRequests <- &execRequest{tasks, applyResults, profile}
+	pe.execRequests <- &execRequest{0, common.Hash{}, tasks, applyResults, profile}
 
 	defer pe.wait(ctx)
 

@@ -139,7 +139,7 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 	}
 
 	location := common.HexToHash(index)
-	res, err := reader.ReadAccountStorage(address, acc.Incarnation, &location)
+	res, _, err := reader.ReadAccountStorage(address, acc.Incarnation, location)
 	if err != nil {
 		res = empty
 	}

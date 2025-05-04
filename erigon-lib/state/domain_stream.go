@@ -360,7 +360,7 @@ func (dt *DomainRoTx) debugIteratePrefix(prefix []byte, haveRamUpdates bool,
 	}
 
 	for i, item := range dt.files {
-		cursor, err := item.src.bindex.Seek(dt.statelessGetter(i), prefix)
+		cursor, err := item.src.bindex.Seek(dt.reader(i), prefix)
 		if err != nil {
 			return err
 		}

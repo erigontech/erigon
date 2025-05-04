@@ -121,7 +121,7 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 	db := memdb.NewStateDB("")
 	defer db.Close()
 
-	agg, err := state.NewAggregator2(context.Background(), datadir.New(""), 16, db, log.New())
+	agg, err := state.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
 	if err != nil {
 		panic(err)
 	}

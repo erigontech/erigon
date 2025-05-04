@@ -237,7 +237,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 
 	iterCount := func(domains *SharedDomains) int {
 		var list [][]byte
-		require.NoError(domains.IterateStoragePrefix(rwTx, nil, func(k []byte, v []byte, step uint64) (bool, error) {
+		require.NoError(domains.IterateStoragePrefix(nil, rwTx, func(k []byte, v []byte, step uint64) (bool, error) {
 			list = append(list, k)
 			return true, nil
 		}))
@@ -515,14 +515,14 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 		require.NoError(t, err)
 
 		existed := make(map[string]struct{})
-		err = domains.IterateStoragePrefix(rwTx, k0, func(k []byte, v []byte, step uint64) (bool, error) {
+		err = domains.IterateStoragePrefix( k0, rwTx,func(k []byte, v []byte, step uint64) (bool, error) {
 			existed[string(k)] = struct{}{}
 			return true, nil
 		})
 		require.NoError(t, err)
 
 		missed := 0
-		err = domains.IterateStoragePrefix(rwTx, k0, func(k []byte, v []byte, step uint64) (bool, error) {
+		err = domains.IterateStoragePrefix(k0, rwTx, func(k []byte, v []byte, step uint64) (bool, error) {
 			if _, been := existed[string(k)]; !been {
 				missed++
 			}
@@ -535,7 +535,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 		require.NoError(t, err)
 
 		notRemoved := 0
-		err = domains.IterateStoragePrefix(rwTx, k0, func(k []byte, v []byte, step uint64) (bool, error) {
+		err = domains.IterateStoragePrefix(k0, rwTx, func(k []byte, v []byte, step uint64) (bool, error) {
 			notRemoved++
 			if _, been := existed[string(k)]; !been {
 				missed++

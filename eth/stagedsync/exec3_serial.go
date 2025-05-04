@@ -169,6 +169,8 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 					return err
 				}
 				blockReceipts = append(blockReceipts, receipt)
+			} else {
+				se.onBlockStart(ctx, txTask.BlockNumber(), txTask.BlockHash())
 			}
 
 			if se.cfg.syncCfg.ChaosMonkey && se.enableChaosMonkey {

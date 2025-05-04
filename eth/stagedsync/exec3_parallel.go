@@ -384,21 +384,21 @@ func (d *blockDuration) Add(i time.Duration) {
 
 type txExecutor struct {
 	sync.RWMutex
-	cfg              ExecuteBlockCfg
-	agg              *libstate.Aggregator
-	rs               *state.StateV3Buffered
-	doms             *libstate.SharedDomains
-	accumulator      *shards.Accumulator
-	u                Unwinder
-	isMining         bool
-	inMemExec        bool
-	applyTx          kv.Tx
-	logger           log.Logger
-	logPrefix        string
-	progress         *Progress
-	taskExecMetrics  *exec3.WorkerMetrics
-	blockExecMetrics *blockExecMetrics
-
+	cfg                      ExecuteBlockCfg
+	agg                      *libstate.Aggregator
+	rs                       *state.StateV3Buffered
+	doms                     *libstate.SharedDomains
+	accumulator              *shards.Accumulator
+	u                        Unwinder
+	isMining                 bool
+	inMemExec                bool
+	applyTx                  kv.Tx
+	logger                   log.Logger
+	logPrefix                string
+	progress                 *Progress
+	taskExecMetrics          *exec3.WorkerMetrics
+	blockExecMetrics         *blockExecMetrics
+	hooks                    *tracing.Hooks
 	shouldGenerateChangesets bool
 
 	lastExecutedBlockNum  atomic.Int64
@@ -429,7 +429,6 @@ func (te *txExecutor) domains() *libstate.SharedDomains {
 }
 
 func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number uint64) (h *types.Header, err error) {
-
 	if te.applyTx != nil {
 		err := te.applyTx.Apply(func(tx kv.Tx) (err error) {
 			h, err = te.cfg.blockReader.Header(ctx, te.applyTx, hash, number)
@@ -451,8 +450,65 @@ func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number ui
 	return h, nil
 }
 
-func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint64, maxBlockNum uint64, readAhead chan uint64, applyResults chan applyResult) error {
+func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHash common.Hash) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			te.logger.Warn("hook paniced: %s", rec, "stack", dbg.Stack())
+		}
+	}()
 
+	if te.hooks == nil {
+		return
+	}
+
+	if blockHash == (common.Hash{}) {
+		te.logger.Warn("hooks ignored: zero block hash")
+		return
+	}
+
+	if blockNum == 0 {
+		if te.hooks.OnGenesisBlock != nil {
+			var b *types.Block
+			if err := te.applyTx.Apply(func(tx kv.Tx) (err error) {
+				b, err = te.cfg.blockReader.BlockByHash(ctx, tx, blockHash)
+				return err
+			}); err != nil {
+				te.logger.Warn("hook: OnGenesisBlock: abandoned", "err", err)
+			}
+			te.hooks.OnGenesisBlock(b, te.cfg.genesis.Alloc)
+		}
+	} else {
+		if te.hooks.OnBlockStart != nil {
+			var b *types.Block
+			var td *big.Int
+			var finalized *types.Header
+			var safe *types.Header
+
+			if err := te.applyTx.Apply(func(tx kv.Tx) (err error) {
+				b, err = te.cfg.blockReader.BlockByHash(ctx, tx, blockHash)
+				if err != nil {
+					return err
+				}
+				chainReader := NewChainReaderImpl(te.cfg.chainConfig, te.applyTx, te.cfg.blockReader, te.logger)
+				td = chainReader.GetTd(b.ParentHash(), b.NumberU64()-1)
+				finalized = chainReader.CurrentFinalizedHeader()
+				safe = chainReader.CurrentSafeHeader()
+				return nil
+			}); err != nil {
+				te.logger.Warn("hook: OnBlockStart: abandoned", "err", err)
+			}
+
+			te.hooks.OnBlockStart(tracing.BlockEvent{
+				Block:     b,
+				TD:        td,
+				Finalized: finalized,
+				Safe:      safe,
+			})
+		}
+	}
+}
+
+func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint64, maxBlockNum uint64, readAhead chan uint64, applyResults chan applyResult) error {
 	inputTxNum, _, offsetFromBlockBeginning, err := restoreTxNum(ctx, &te.cfg, tx, te.doms, maxBlockNum)
 
 	if err != nil {
@@ -554,7 +610,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 				inputTxNum++
 			}
 
-			te.execRequests <- &execRequest{txTasks, applyResults, false}
+			te.execRequests <- &execRequest{b.Number().Uint64(), b.Hash(), txTasks, applyResults, false}
 
 			mxExecBlocks.Add(1)
 
@@ -637,6 +693,8 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.R
 }
 
 type execRequest struct {
+	blockNum     uint64
+	blockHash    common.Hash
 	tasks        []exec.Task
 	applyResults chan applyResult
 	profile      bool
@@ -1318,6 +1376,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			}
 
 			if blockExecutor, ok := pe.blockExecutors[blockResult.BlockNum+1]; ok {
+				pe.onBlockStart(ctx, blockExecutor.blockNum, blockExecutor.blockHash)
 				blockExecutor.execStarted = time.Now()
 				blockExecutor.scheduleExecution(ctx, pe)
 			}

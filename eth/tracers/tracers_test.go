@@ -125,7 +125,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to execute transaction: %v", err)
 	}
-	tracer.OnTxEnd(&types.Receipt{GasUsed: exeRes.UsedGas}, nil)
+	tracer.OnTxEnd(&types.Receipt{GasUsed: exeRes.GasUsed}, nil)
 	// Retrieve the trace result and compare against the etalon
 	res, err := tracer.GetResult()
 	if err != nil {

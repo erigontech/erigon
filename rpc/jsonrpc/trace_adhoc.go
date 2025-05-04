@@ -25,9 +25,6 @@ import (
 	"math"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -497,11 +494,11 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed uint64, e
 			switch topTrace.Type {
 			case CALL:
 				topTrace.Result.(*TraceResult).GasUsed = new(hexutil.Big)
-				topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(usedGas)
+				topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(gasUsed)
 				topTrace.Result.(*TraceResult).Output = common.CopyBytes(output)
 			case CREATE:
 				topTrace.Result.(*CreateTraceResult).GasUsed = new(hexutil.Big)
-				topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(usedGas)
+				topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(gasUsed)
 				topTrace.Result.(*CreateTraceResult).Code = common.CopyBytes(output)
 			}
 		} else {
@@ -1163,7 +1160,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 	if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
-		ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.UsedGas}, nil)
+		ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.GasUsed}, nil)
 	}
 	traceResult.Output = common.CopyBytes(execResult.ReturnData)
 	if traceTypeStateDiff {
@@ -1473,7 +1470,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		}
 
 		if tracer != nil && tracer.Hooks.OnTxEnd != nil {
-			tracer.Hooks.OnTxEnd(&types.Receipt{GasUsed: execResult.UsedGas}, nil)
+			tracer.Hooks.OnTxEnd(&types.Receipt{GasUsed: execResult.GasUsed}, nil)
 		}
 
 		chainRules := chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time)
