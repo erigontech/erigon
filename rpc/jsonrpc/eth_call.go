@@ -453,7 +453,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address common.Add
 			return nil, errors.New("cannot verify store proof")
 		}
 
-		res, err := reader.ReadAccountStorage(address, acc.Incarnation, &keyHash)
+		res, err := reader.ReadAccountStorage(address, &keyHash)
 		if err != nil {
 			res = []byte{}
 			logger.Warn(fmt.Sprintf("couldn't read account storage for the address %s\n", address.String()))

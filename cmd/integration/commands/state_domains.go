@@ -29,21 +29,19 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/etl"
-	"github.com/erigontech/erigon-lib/seg"
-
-	state3 "github.com/erigontech/erigon-lib/state"
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/length"
 	downloadertype "github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	kv2 "github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/seg"
+	state3 "github.com/erigontech/erigon-lib/state"
 	statelib "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core"
@@ -524,7 +522,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	case "storage":
 		for _, addr := range addrs {
 			a, s := common.BytesToAddress(addr[:length.Addr]), common.BytesToHash(addr[length.Addr:])
-			st, err := r.ReadAccountStorage(a, 0, &s)
+			st, err := r.ReadAccountStorage(a, &s)
 			if err != nil {
 				logger.Error("failed to read storage", "addr", a.String(), "key", s.String(), "err", err)
 				continue
@@ -533,7 +531,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 		}
 	case "code":
 		for _, addr := range addrs {
-			code, err := r.ReadAccountCode(common.BytesToAddress(addr), 0)
+			code, err := r.ReadAccountCode(common.BytesToAddress(addr))
 			if err != nil {
 				logger.Error("failed to read code", "addr", addr, "err", err)
 				continue

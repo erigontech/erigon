@@ -345,7 +345,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		if !account.IsEmptyCodeHash() && transaction.Type() != types.AccountAbstractionTxType {
 			isEoaCodeAllowed := false
 			if config.IsPrague(header.Time) {
-				code, err := simStateReader.ReadAccountCode(sender, account.Incarnation)
+				code, err := simStateReader.ReadAccountCode(sender)
 				if err != nil {
 					return nil, err
 				}
