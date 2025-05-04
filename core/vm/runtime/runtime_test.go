@@ -224,7 +224,7 @@ func BenchmarkCall(b *testing.B) {
 	tx, sd := testTemporalTxSD(b, db)
 	defer tx.Rollback()
 	cfg.r = state.NewReaderV3(sd)
-	cfg.w = state.NewStateWriterV3(sd, nil)
+	cfg.w = state.NewWriter(sd, nil)
 	cfg.State = state.New(cfg.r)
 
 	tmpdir := b.TempDir()

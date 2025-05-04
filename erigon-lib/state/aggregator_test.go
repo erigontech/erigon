@@ -881,7 +881,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txN
 			}
 			usedKeys[string(key)] = struct{}{}
 
-			err := domains.DomainDel(kv.AccountsDomain, key, nil, nil, 0)
+			err := domains.DomainDel(kv.AccountsDomain, key, nil, 0)
 			require.NoError(t, err)
 
 		case r > 66 && r <= 80:
