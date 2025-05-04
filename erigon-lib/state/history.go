@@ -28,6 +28,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon-lib/datastruct/existence"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -98,7 +99,7 @@ type histCfg struct {
 
 	historyValuesOnCompressedPage int // when collating .v files: concat 16 values and snappy them
 
-	indexList     Accessors
+	accessors     Accessors
 	compressorCfg seg.Cfg             // compression settings for history files
 	compression   seg.FileCompression // defines type of compression for history files
 	historyIdx    kv.InvertedIdx
@@ -118,8 +119,8 @@ func (h histCfg) GetVersions() VersionTypes {
 
 func NewHistory(cfg histCfg, aggStep uint64, logger log.Logger) (*History, error) {
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
-	if cfg.indexList == 0 {
-		cfg.indexList = AccessorHashMap
+	if cfg.accessors == 0 {
+		cfg.accessors = AccessorHashMap
 	}
 
 	h := History{
@@ -332,7 +333,7 @@ func (h *History) MissedMapAccessors() (l []*filesItem) {
 }
 
 func (h *History) missedMapAccessors(source []*filesItem) (l []*filesItem) {
-	if !h.indexList.Has(AccessorHashMap) {
+	if !h.accessors.Has(AccessorHashMap) {
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, h.aggregationStep, func(fromStep, toStep uint64) []string {
@@ -811,7 +812,7 @@ type HistoryFiles struct {
 	historyIdx      *recsplit.Index
 	efHistoryDecomp *seg.Decompressor
 	efHistoryIdx    *recsplit.Index
-	efExistence     *ExistenceFilter
+	efExistence     *existence.ExistenceFilter
 }
 
 func (sf HistoryFiles) CleanupOnError() {
@@ -832,7 +833,7 @@ func (sf HistoryFiles) CleanupOnError() {
 	}
 }
 func (h *History) reCalcVisibleFiles(toTxNum uint64) {
-	h._visibleFiles = calcVisibleFiles(h.dirtyFiles, h.indexList, false, toTxNum)
+	h._visibleFiles = calcVisibleFiles(h.dirtyFiles, h.accessors, false, toTxNum)
 	h.InvertedIndex.reCalcVisibleFiles(toTxNum)
 }
 
@@ -846,7 +847,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		historyDecomp, efHistoryDecomp *seg.Decompressor
 		historyIdx, efHistoryIdx       *recsplit.Index
 
-		efExistence *ExistenceFilter
+		efExistence *existence.ExistenceFilter
 		closeComp   = true
 		err         error
 	)

@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -531,18 +532,18 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 	}
 
-	if dt.d.AccessorList.Has(AccessorBTree) {
+	if dt.d.Accessors.Has(AccessorBTree) {
 		btPath := dt.d.kvBtAccessorFilePath(fromStep, toStep)
 		btM := DefaultBtreeM
 		if toStep == 0 && dt.d.filenameBase == "commitment" {
 			btM = 128
 		}
-		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, btM, valuesIn.decompressor, dt.d.Compression, *dt.d.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync, dt.d.AccessorList)
+		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, btM, valuesIn.decompressor, dt.d.Compression, *dt.d.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync, dt.d.Accessors)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
 	}
-	if dt.d.AccessorList.Has(AccessorHashMap) {
+	if dt.d.Accessors.Has(AccessorHashMap) {
 		if err = dt.d.buildHashMapAccessor(ctx, fromStep, toStep, valuesIn.decompressor, ps); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s buildHashMapAccessor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
@@ -551,14 +552,14 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		}
 	}
 
-	if dt.d.AccessorList.Has(AccessorExistence) {
+	if dt.d.Accessors.Has(AccessorExistence) {
 		bloomIndexPath := dt.d.kvExistenceIdxFilePath(fromStep, toStep)
 		exists, err := dir.FileExist(bloomIndexPath)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s FileExist err [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
 		if exists {
-			valuesIn.existence, err = OpenExistenceFilter(bloomIndexPath)
+			valuesIn.existence, err = existence.OpenExistenceFilter(bloomIndexPath)
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("merge %s existence [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 			}

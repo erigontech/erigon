@@ -66,7 +66,7 @@ var dbgCommBtIndex = dbg.EnvBool("AGG_COMMITMENT_BT", false)
 
 func init() {
 	if dbgCommBtIndex {
-		Schema.CommitmentDomain.AccessorList = AccessorBTree | AccessorExistence
+		Schema.CommitmentDomain.Accessors = AccessorBTree | AccessorExistence
 	}
 	InitSchemas()
 	InitAccountSchemaIntegrity()
@@ -157,7 +157,7 @@ var Schema = SchemaGen{
 		name: kv.AccountsDomain, valuesTable: kv.TblAccountVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressNone,
 
-		AccessorList:         AccessorBTree | AccessorExistence,
+		Accessors:            AccessorBTree | AccessorExistence,
 		crossDomainIntegrity: domainIntegrityCheck,
 
 		hist: histCfg{
@@ -177,7 +177,7 @@ var Schema = SchemaGen{
 		name: kv.StorageDomain, valuesTable: kv.TblStorageVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
 
-		AccessorList: AccessorBTree | AccessorExistence,
+		Accessors: AccessorBTree | AccessorExistence,
 
 		hist: histCfg{
 			valuesTable:   kv.TblStorageHistoryVals,
@@ -196,8 +196,8 @@ var Schema = SchemaGen{
 		name: kv.CodeDomain, valuesTable: kv.TblCodeVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
 
-		AccessorList: AccessorBTree | AccessorExistence,
-		largeValues:  true,
+		Accessors:   AccessorBTree | AccessorExistence,
+		largeValues: true,
 
 		hist: histCfg{
 			valuesTable:   kv.TblCodeHistoryVals,
@@ -216,7 +216,7 @@ var Schema = SchemaGen{
 		name: kv.CommitmentDomain, valuesTable: kv.TblCommitmentVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
 
-		AccessorList:        AccessorHashMap,
+		Accessors:           AccessorHashMap,
 		replaceKeysInValues: AggregatorSqueezeCommitmentValues,
 
 		hist: histCfg{
@@ -241,7 +241,7 @@ var Schema = SchemaGen{
 		CompressCfg: seg.DefaultCfg, Compression: seg.CompressNone,
 		largeValues: false,
 
-		AccessorList: AccessorBTree | AccessorExistence,
+		Accessors: AccessorBTree | AccessorExistence,
 
 		hist: histCfg{
 			valuesTable:   kv.TblReceiptHistoryVals,
@@ -260,8 +260,8 @@ var Schema = SchemaGen{
 		name: kv.RCacheDomain, valuesTable: kv.TblRCacheVals,
 		largeValues: true,
 
-		AccessorList: AccessorHashMap,
-		CompressCfg:  DomainCompressCfg, Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+		Accessors:   AccessorHashMap,
+		CompressCfg: DomainCompressCfg, Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
 
 		hist: histCfg{
 			valuesTable: kv.TblRCacheHistoryVals,

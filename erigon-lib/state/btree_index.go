@@ -32,6 +32,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/edsrzf/mmap-go"
+	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/spaolacci/murmur3"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -359,10 +360,10 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 	defer kv.EnableReadAhead().DisableReadAhead()
 	bloomPath := strings.TrimSuffix(indexPath, ".bt") + ".kvei"
 
-	var bloom *ExistenceFilter
+	var bloom *existence.ExistenceFilter
 	if accessors.Has(AccessorExistence) {
 		var err error
-		bloom, err = NewExistenceFilter(uint64(kv.Count()/2), bloomPath)
+		bloom, err = existence.NewExistenceFilter(uint64(kv.Count()/2), bloomPath)
 		if err != nil {
 			return err
 		}

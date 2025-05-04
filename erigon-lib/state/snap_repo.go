@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -361,7 +362,7 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 					f.logger.Debug("SnapshotRepo.openDirtyFiles: FileExist", "f", fName, "err", err)
 				}
 				if exists {
-					if item.existence, err = OpenExistenceFilter(fPath); err != nil {
+					if item.existence, err = existence.OpenExistenceFilter(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files maybe good

@@ -39,7 +39,7 @@ func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
 	cfg.dirs = datadir.New(os.TempDir())
 
 	ii, err := NewInvertedIndex(cfg, aggStep, log.New())
-	ii.indexList = 0
+	ii.accessors = 0
 	if err != nil {
 		panic(err)
 	}
@@ -52,8 +52,8 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	newTestDomain := func() (*InvertedIndex, *History) {
 		d := emptyTestDomain(1)
 		d.History.InvertedIndex.integrity = nil
-		d.History.InvertedIndex.indexList = 0
-		d.History.indexList = 0
+		d.History.InvertedIndex.accessors = 0
+		d.History.accessors = 0
 		return d.History.InvertedIndex, d.History
 	}
 	t.Run("ii: > 2 unmerged files", func(t *testing.T) {

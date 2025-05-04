@@ -32,6 +32,7 @@ import (
 	"sync"
 	"time"
 
+	existence2 "github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
@@ -94,7 +95,7 @@ type iiCfg struct {
 
 	// external checker for integrity of inverted index ranges
 	integrity rangeIntegrityChecker
-	indexList Accessors
+	accessors Accessors
 }
 
 func (ii iiCfg) GetVersions() VersionTypes {
@@ -118,8 +119,8 @@ func NewInvertedIndex(cfg iiCfg, aggStep uint64, logger log.Logger) (*InvertedIn
 	}
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
 	cfg.compressorCfg = seg.DefaultCfg
-	if cfg.indexList == 0 {
-		cfg.indexList = AccessorHashMap
+	if cfg.accessors == 0 {
+		cfg.accessors = AccessorHashMap
 	}
 
 	ii := InvertedIndex{
@@ -232,7 +233,7 @@ const (
 )
 
 func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
-	ii._visible = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.indexList, false, toTxNum))
+	ii._visible = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.accessors, false, toTxNum))
 }
 
 func (ii *InvertedIndex) MissedMapAccessors() (l []*filesItem) {
@@ -240,7 +241,7 @@ func (ii *InvertedIndex) MissedMapAccessors() (l []*filesItem) {
 }
 
 func (ii *InvertedIndex) missedMapAccessors(source []*filesItem) (l []*filesItem) {
-	if !ii.indexList.Has(AccessorHashMap) {
+	if !ii.accessors.Has(AccessorHashMap) {
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, ii.aggregationStep, func(fromStep, toStep uint64) []string {
@@ -1130,7 +1131,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (
 type InvertedFiles struct {
 	decomp    *seg.Decompressor
 	index     *recsplit.Index
-	existence *ExistenceFilter
+	existence *existence2.ExistenceFilter
 }
 
 func (sf InvertedFiles) CleanupOnError() {
@@ -1158,7 +1159,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, coll Inver
 	var (
 		decomp    *seg.Decompressor
 		index     *recsplit.Index
-		existence *ExistenceFilter
+		existence *existence2.ExistenceFilter
 		err       error
 	)
 	mxRunningFilesBuilding.Inc()

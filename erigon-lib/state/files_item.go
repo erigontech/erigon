@@ -24,6 +24,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	existence2 "github.com/erigontech/erigon-lib/datastruct/existence"
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/common/dir"
@@ -49,7 +50,7 @@ type filesItem struct {
 	decompressor         *seg.Decompressor
 	index                *recsplit.Index
 	bindex               *BtIndex
-	existence            *ExistenceFilter
+	existence            *existence2.ExistenceFilter
 	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
 
 	// Frozen: file of size StepsInFrozenFile. Completely immutable.
@@ -67,7 +68,7 @@ type FilesItem interface {
 	Segment() *seg.Decompressor
 	AccessorIndex() *recsplit.Index
 	BtIndex() *BtIndex
-	ExistenceFilter() *ExistenceFilter
+	ExistenceFilter() *existence2.ExistenceFilter
 }
 
 var _ FilesItem = (*filesItem)(nil)
@@ -93,7 +94,7 @@ func (i *filesItem) AccessorIndex() *recsplit.Index { return i.index }
 
 func (i *filesItem) BtIndex() *BtIndex { return i.bindex }
 
-func (i *filesItem) ExistenceFilter() *ExistenceFilter { return i.existence }
+func (i *filesItem) ExistenceFilter() *existence2.ExistenceFilter { return i.existence }
 
 // isProperSubsetOf - when `j` covers `i` but not equal `i`
 func (i *filesItem) isProperSubsetOf(j *filesItem) bool {
