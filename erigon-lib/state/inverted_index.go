@@ -32,7 +32,6 @@ import (
 	"sync"
 	"time"
 
-	existence2 "github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
@@ -43,6 +42,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/bitmapdb"
@@ -1131,7 +1131,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (
 type InvertedFiles struct {
 	decomp    *seg.Decompressor
 	index     *recsplit.Index
-	existence *existence2.Filter
+	existence *existence.Filter
 }
 
 func (sf InvertedFiles) CleanupOnError() {
@@ -1159,7 +1159,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, coll Inver
 	var (
 		decomp    *seg.Decompressor
 		index     *recsplit.Index
-		existence *existence2.Filter
+		existence *existence.Filter
 		err       error
 	)
 	mxRunningFilesBuilding.Inc()
