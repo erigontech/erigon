@@ -69,7 +69,7 @@ func TestCreate2Revive(t *testing.T) {
 		}
 		signer = types.LatestSignerForChainID(nil)
 	)
-
+	gspec.Config.ParseBlobSchedule()
 	m := mock.MockWithGenesis(t, gspec, key, false)
 
 	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -252,6 +252,7 @@ func TestCreate2Polymorth(t *testing.T) {
 		}
 		signer = types.LatestSignerForChainID(nil)
 	)
+	gspec.Config.ParseBlobSchedule()
 	m := mock.MockWithGenesis(t, gspec, key, false)
 
 	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -516,7 +517,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 			},
 		}
 	)
-
+	gspec.Config.ParseBlobSchedule()
 	m := mock.MockWithGenesis(t, gspec, key, false)
 
 	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -675,7 +676,7 @@ func TestReorgOverStateChange(t *testing.T) {
 			},
 		}
 	)
-
+	gspec.Config.ParseBlobSchedule()
 	m := mock.MockWithGenesis(t, gspec, key, false)
 
 	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -840,7 +841,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 			},
 		}
 	)
-
+	gspec.Config.ParseBlobSchedule()
 	m := mock.MockWithGenesis(t, gspec, key, false)
 
 	var err error
@@ -984,7 +985,7 @@ func TestEip2200Gas(t *testing.T) {
 			},
 		}
 	)
-
+	gspec.Config.ParseBlobSchedule()
 	m := mock.MockWithGenesis(t, gspec, key, false)
 
 	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -1085,7 +1086,7 @@ func TestWrongIncarnation(t *testing.T) {
 			},
 		}
 	)
-
+	gspec.Config.ParseBlobSchedule()
 	m := mock.MockWithGenesis(t, gspec, key, false)
 
 	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -1210,6 +1211,8 @@ func TestWrongIncarnation2(t *testing.T) {
 		}
 		signer = types.LatestSignerForChainID(nil)
 	)
+
+	gspec.Config.ParseBlobSchedule()
 
 	knownContractAddress := common.HexToAddress("0xdb7d6ab1f17c6b31909ae466702703daef9269cf")
 
@@ -1710,6 +1713,8 @@ func TestTxLookupUnwind(t *testing.T) {
 		}
 		signer = types.LatestSignerForChainID(nil)
 	)
+
+	gspec.Config.ParseBlobSchedule()
 
 	m := mock.MockWithGenesis(t, gspec, key, false)
 	chain1, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *core.BlockGen) {

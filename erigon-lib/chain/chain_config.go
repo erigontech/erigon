@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math/big"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain/params"
@@ -73,10 +72,9 @@ type Config struct {
 	OsakaTime    *big.Int `json:"osakaTime,omitempty"`
 
 	// Optional EIP-4844 parameters (see also EIP-7691, EIP-7840, EIP-7892)
-	MinBlobGasPrice       *uint64                       `json:"minBlobGasPrice,omitempty"`
-	BlobSchedule          map[string]*params.BlobConfig `json:"blobSchedule,omitempty"`
-	parseBlobScheduleOnce sync.Once
-	parsedBlobSchedule    map[uint64]*params.BlobConfig
+	MinBlobGasPrice    *uint64                       `json:"minBlobGasPrice,omitempty"`
+	BlobSchedule       map[string]*params.BlobConfig `json:"blobSchedule,omitempty"`
+	parsedBlobSchedule map[uint64]*params.BlobConfig
 
 	// (Optional) governance contract where EIP-1559 fees will be sent to, which otherwise would be burnt since the London fork.
 	// A key corresponds to the block number, starting from which the fees are sent to the address (map value).
@@ -153,6 +151,12 @@ var (
 	}
 )
 
+func init() {
+	TestChainConfig.ParseBlobSchedule()
+	TestChainConfigCancun.ParseBlobSchedule()
+	TestChainAuraConfig.ParseBlobSchedule()
+}
+
 type BorConfig interface {
 	fmt.Stringer
 	IsAgra(num uint64) bool
@@ -172,6 +176,49 @@ func timestampToTime(unixTime *big.Int) *time.Time {
 	}
 	t := time.Unix(unixTime.Int64(), 0).UTC()
 	return &t
+}
+
+// Must be called after construction or after changing BlobSchedule
+func (c *Config) ParseBlobSchedule() error {
+	// Populate with default values
+	c.parsedBlobSchedule = map[uint64]*params.BlobConfig{
+		0: {},
+	}
+	if c.CancunTime != nil {
+		c.parsedBlobSchedule[c.CancunTime.Uint64()] = &params.DefaultCancunBlobConfig
+	}
+	if c.PragueTime != nil {
+		c.parsedBlobSchedule[c.PragueTime.Uint64()] = &params.DefaultPragueBlobConfig
+	}
+	if c.OsakaTime != nil {
+		c.parsedBlobSchedule[c.OsakaTime.Uint64()] = &params.DefaultOsakaBlobConfig
+	}
+
+	// Override with supplied values
+	for key, val := range c.BlobSchedule {
+		switch {
+		case key == "cancun":
+			if c.CancunTime != nil {
+				c.parsedBlobSchedule[c.CancunTime.Uint64()] = val
+			}
+		case key == "prague":
+			if c.PragueTime != nil {
+				c.parsedBlobSchedule[c.PragueTime.Uint64()] = val
+			}
+		case key == "osaka":
+			if c.OsakaTime != nil {
+				c.parsedBlobSchedule[c.OsakaTime.Uint64()] = val
+			}
+		default:
+			keyU64, err := strconv.ParseUint(key, 10, 64)
+			if err != nil {
+				return fmt.Errorf("failed to parse key %s in BlobSchedule: %w", key, err)
+			}
+			c.parsedBlobSchedule[keyU64] = val
+		}
+	}
+
+	return nil
 }
 
 func (c *Config) String() string {
@@ -329,46 +376,6 @@ func (c *Config) GetMinBlobGasPrice() uint64 {
 }
 
 func (c *Config) getBlobConfig(time uint64) *params.BlobConfig {
-	c.parseBlobScheduleOnce.Do(func() {
-		// Populate with default values
-		c.parsedBlobSchedule = map[uint64]*params.BlobConfig{
-			0: {},
-		}
-		if c.CancunTime != nil {
-			c.parsedBlobSchedule[c.CancunTime.Uint64()] = &params.DefaultCancunBlobConfig
-		}
-		if c.PragueTime != nil {
-			c.parsedBlobSchedule[c.PragueTime.Uint64()] = &params.DefaultPragueBlobConfig
-		}
-		if c.OsakaTime != nil {
-			c.parsedBlobSchedule[c.OsakaTime.Uint64()] = &params.DefaultOsakaBlobConfig
-		}
-
-		// Override with supplied values
-		for key, val := range c.BlobSchedule {
-			switch {
-			case key == "cancun":
-				if c.CancunTime != nil {
-					c.parsedBlobSchedule[c.CancunTime.Uint64()] = val
-				}
-			case key == "prague":
-				if c.PragueTime != nil {
-					c.parsedBlobSchedule[c.PragueTime.Uint64()] = val
-				}
-			case key == "osaka":
-				if c.OsakaTime != nil {
-					c.parsedBlobSchedule[c.OsakaTime.Uint64()] = val
-				}
-			default:
-				keyU64, err := strconv.ParseUint(key, 10, 64)
-				if err != nil {
-					panic(err)
-				}
-				c.parsedBlobSchedule[keyU64] = val
-			}
-		}
-	})
-
 	return ConfigValueLookup(c.parsedBlobSchedule, time)
 }
 

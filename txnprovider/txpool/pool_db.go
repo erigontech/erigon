@@ -87,6 +87,7 @@ func ChainConfig(tx kv.Getter) (*chain.Config, error) {
 	if err := json.Unmarshal(v, &config); err != nil {
 		return nil, fmt.Errorf("invalid chain config JSON in pool db: %w", err)
 	}
+	config.ParseBlobSchedule()
 	return &config, nil
 }
 

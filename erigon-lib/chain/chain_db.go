@@ -45,6 +45,7 @@ func GetConfig(db kv.Getter, buf []byte) (*Config, error) {
 	if err := json.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("invalid chain config JSON: %s, %w", data, err)
 	}
+	config.ParseBlobSchedule()
 	return &config, nil
 }
 

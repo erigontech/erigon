@@ -60,6 +60,8 @@ func readChainSpec(filename string) *chain.Config {
 		spec.Bor = borConfig
 	}
 
+	spec.ParseBlobSchedule()
+
 	return spec
 }
 
@@ -151,6 +153,11 @@ var (
 
 	CliqueSnapshot = NewSnapshotConfig(10, 1024, 16384, true, "")
 )
+
+func init() {
+	AllProtocolChanges.ParseBlobSchedule()
+	AllCliqueProtocolChanges.ParseBlobSchedule()
+}
 
 type ConsensusSnapshotConfig struct {
 	CheckpointInterval uint64 // Number of blocks after which to save the vote snapshot to the database

@@ -62,6 +62,7 @@ func TestGenerateChain(t *testing.T) {
 		Config: &chain.Config{HomesteadBlock: new(big.Int), ChainID: big.NewInt(1)},
 		Alloc:  types.GenesisAlloc{addr1: {Balance: big.NewInt(1000000)}},
 	}
+	gspec.Config.ParseBlobSchedule()
 	m := mock.MockWithGenesis(t, gspec, key1, false)
 
 	// This call generates a chain of 5 blocks. The function runs for

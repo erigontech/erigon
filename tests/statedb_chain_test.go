@@ -62,7 +62,7 @@ func TestSelfDestructReceive(t *testing.T) {
 		// this code generates a log
 		signer = types.LatestSignerForChainID(nil)
 	)
-
+	gspec.Config.ParseBlobSchedule()
 	m := mock.MockWithGenesis(t, gspec, key, false)
 
 	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)

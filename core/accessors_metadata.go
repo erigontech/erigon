@@ -54,6 +54,9 @@ func ReadChainConfig(db kv.Getter, hash common.Hash) (*chain.Config, error) {
 		}
 		config.Bor = borConfig
 	}
+
+	config.ParseBlobSchedule()
+
 	return &config, nil
 }
 

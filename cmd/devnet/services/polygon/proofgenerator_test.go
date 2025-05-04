@@ -424,20 +424,23 @@ func getGenesis(accounts int, funds ...*big.Int) initialData {
 		allocs[addr] = types.GenesisAccount{Balance: accountFunds}
 	}
 
+	config := &chain.Config{
+		ChainID:               big.NewInt(1),
+		HomesteadBlock:        new(big.Int),
+		TangerineWhistleBlock: new(big.Int),
+		SpuriousDragonBlock:   big.NewInt(1),
+		ByzantiumBlock:        big.NewInt(1),
+		ConstantinopleBlock:   big.NewInt(1),
+	}
+	config.ParseBlobSchedule()
+
 	return initialData{
 		keys:         keys,
 		addresses:    addresses,
 		transactOpts: transactOpts,
 		genesisSpec: &types.Genesis{
-			Config: &chain.Config{
-				ChainID:               big.NewInt(1),
-				HomesteadBlock:        new(big.Int),
-				TangerineWhistleBlock: new(big.Int),
-				SpuriousDragonBlock:   big.NewInt(1),
-				ByzantiumBlock:        big.NewInt(1),
-				ConstantinopleBlock:   big.NewInt(1),
-			},
-			Alloc: allocs,
+			Config: config,
+			Alloc:  allocs,
 		},
 	}
 }

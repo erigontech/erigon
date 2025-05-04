@@ -220,6 +220,7 @@ func BenchmarkCall(b *testing.B) {
 		b.Fatal(err)
 	}
 	cfg := &Config{ChainConfig: &chain.Config{}, BlockNumber: big.NewInt(0), Time: big.NewInt(0), Value: uint256.MustFromBig(big.NewInt(13377))}
+	cfg.ChainConfig.ParseBlobSchedule()
 	db := testTemporalDB(b)
 	tx, sd := testTemporalTxSD(b, db)
 	defer tx.Rollback()
@@ -279,6 +280,7 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 		},
 		EVMConfig: vm.Config{},
 	}
+	runtimeConfig.ChainConfig.ParseBlobSchedule()
 	// Warm up the intpools and stuff
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

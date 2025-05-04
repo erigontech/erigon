@@ -88,6 +88,7 @@ func setDefaults(cfg *Config) {
 			PragueTime:            new(big.Int),
 			OsakaTime:             new(big.Int),
 		}
+		cfg.ChainConfig.ParseBlobSchedule()
 	}
 
 	if cfg.Difficulty == nil {

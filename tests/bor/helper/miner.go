@@ -55,6 +55,8 @@ func InitGenesis(fileLocation string, sprintSize uint64, chainName string) types
 		genesis.Config.Bor = borConfig
 	}
 
+	genesis.Config.ParseBlobSchedule()
+
 	return *genesis
 }
 

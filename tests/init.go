@@ -393,6 +393,12 @@ var Forks = map[string]*chain.Config{
 	},
 }
 
+func init() {
+	for _, config := range Forks {
+		config.ParseBlobSchedule()
+	}
+}
+
 // Returns the set of defined fork names
 func AvailableForks() []string {
 	var availableForks []string //nolint:prealloc

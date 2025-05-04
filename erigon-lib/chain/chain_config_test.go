@@ -89,6 +89,7 @@ func TestNilBlobSchedule(t *testing.T) {
 	var c Config
 	c.CancunTime = big.NewInt(1)
 	c.PragueTime = big.NewInt(2)
+	c.ParseBlobSchedule()
 
 	// Everything should be 0 before Cancun
 	assert.Equal(t, uint64(0), c.GetTargetBlobGasPerBlock(0))
@@ -139,6 +140,7 @@ func TestBlobParameterOnlyHardforks(t *testing.T) {
 			BaseFeeUpdateFraction: 5007716,
 		},
 	}
+	c.ParseBlobSchedule()
 
 	time := uint64(0)
 	assert.Equal(t, uint64(0), c.GetTargetBlobGasPerBlock(time))
@@ -212,6 +214,7 @@ func TestBlobParameterInactiveHardfork(t *testing.T) {
 			BaseFeeUpdateFraction: 3338477,
 		},
 	}
+	c.ParseBlobSchedule()
 
 	time := pragueTime * 2
 	assert.Equal(t, uint64(6*params.BlobGasPerBlob), c.GetTargetBlobGasPerBlock(time))

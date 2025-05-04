@@ -56,8 +56,10 @@ func TestSetupGenesis(t *testing.T) {
 		oldcustomg = customg
 		tmpdir     = t.TempDir()
 	)
+	customg.Config.ParseBlobSchedule()
 	logger := log.New()
 	oldcustomg.Config = &chain.Config{ChainID: big.NewInt(1), HomesteadBlock: big.NewInt(2)}
+	oldcustomg.Config.ParseBlobSchedule()
 	tests := []struct {
 		wantErr    error
 		fn         func(t *testing.T, db kv.RwDB) (*chain.Config, *types.Block, error)
