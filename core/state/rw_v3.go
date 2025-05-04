@@ -620,7 +620,7 @@ func (r *ReaderV3) ReadAccountDataForDebug(address common.Address) (*accounts.Ac
 	return r.ReadAccountData(address)
 }
 
-func (r *ReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+func (r *ReaderV3) ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error) {
 	r.composite = append(append(r.composite[:0], address[:]...), key.Bytes()...)
 	enc, _, err := r.tx.GetLatest(kv.StorageDomain, r.composite)
 	if err != nil {
@@ -636,7 +636,7 @@ func (r *ReaderV3) ReadAccountStorage(address common.Address, incarnation uint64
 	return enc, nil
 }
 
-func (r *ReaderV3) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {
+func (r *ReaderV3) ReadAccountCode(address common.Address) ([]byte, error) {
 	enc, _, err := r.tx.GetLatest(kv.CodeDomain, address[:])
 	if err != nil {
 		return nil, err
@@ -647,7 +647,7 @@ func (r *ReaderV3) ReadAccountCode(address common.Address, incarnation uint64) (
 	return enc, nil
 }
 
-func (r *ReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64) (int, error) {
+func (r *ReaderV3) ReadAccountCodeSize(address common.Address) (int, error) {
 	enc, _, err := r.tx.GetLatest(kv.CodeDomain, address[:])
 	if err != nil {
 		return 0, err
@@ -739,7 +739,7 @@ func (r *ReaderParallelV3) ReadAccountDataForDebug(address common.Address) (*acc
 	return &acc, nil
 }
 
-func (r *ReaderParallelV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+func (r *ReaderParallelV3) ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error) {
 	r.composite = append(append(r.composite[:0], address[:]...), key.Bytes()...)
 	enc, _, err := r.sd.GetLatest(kv.StorageDomain, r.composite)
 	if err != nil {
@@ -758,7 +758,7 @@ func (r *ReaderParallelV3) ReadAccountStorage(address common.Address, incarnatio
 	return enc, nil
 }
 
-func (r *ReaderParallelV3) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {
+func (r *ReaderParallelV3) ReadAccountCode(address common.Address) ([]byte, error) {
 	enc, _, err := r.sd.GetLatest(kv.CodeDomain, address[:])
 	if err != nil {
 		return nil, err
@@ -773,7 +773,7 @@ func (r *ReaderParallelV3) ReadAccountCode(address common.Address, incarnation u
 	return enc, nil
 }
 
-func (r *ReaderParallelV3) ReadAccountCodeSize(address common.Address, incarnation uint64) (int, error) {
+func (r *ReaderParallelV3) ReadAccountCodeSize(address common.Address) (int, error) {
 	enc, _, err := r.sd.GetLatest(kv.CodeDomain, address[:])
 	if err != nil {
 		return 0, err
