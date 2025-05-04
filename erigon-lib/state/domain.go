@@ -698,25 +698,9 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) (v []byte, ok boo
 		if reader.Empty() {
 			return nil, false, 0, nil
 		}
-		var offset uint64
-		var ok bool
-		if dt.d.Accessors.Has(AccessorExistence) {
-			hi, lo := dt.ht.iit.hashKey(filekey)
-			if dt.files[i].src.existence != nil {
-				ok = dt.files[i].src.existence.ContainsHash(hi)
-				if !ok {
-					return nil, false, 0, nil
-				}
-			}
-			offset, ok = reader.LookupHash(hi, lo)
-			if !ok {
-				return nil, false, 0, nil
-			}
-		} else {
-			offset, ok = reader.TwoLayerLookup(filekey)
-			if !ok {
-				return nil, false, 0, nil
-			}
+		offset, ok := reader.TwoLayerLookup(filekey)
+		if !ok {
+			return nil, false, 0, nil
 		}
 		g.Reset(offset)
 
