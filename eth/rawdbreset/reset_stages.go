@@ -127,7 +127,7 @@ func ResetBorHeimdall(ctx context.Context, tx kv.RwTx, db kv.RwDB) error {
 	return nil
 }
 
-func ResetPolygonSync(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, cc chain.Config, logger log.Logger) error {
+func ResetPolygonSync(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, cc *chain.Config, logger log.Logger) error {
 	tables := []string{
 		kv.BorEventNums,
 		kv.BorEvents,
