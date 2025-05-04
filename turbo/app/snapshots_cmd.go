@@ -724,7 +724,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 
 			oldVersion = newVersion
 			// check that the index file exist
-			if libstate.Schema.GetDomainCfg(snapType).AccessorList.Has(libstate.AccessorBTree) {
+			if libstate.Schema.GetDomainCfg(snapType).Accessors.Has(libstate.AccessorBTree) {
 				newVersion = libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorBT
 				fileName := strings.Replace(expectedFileName, ".kv", ".bt", 1)
 				fileName = snaptype.ReplaceVersion(fileName, oldVersion, newVersion)
@@ -736,7 +736,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 					return fmt.Errorf("missing file %s", fileName)
 				}
 			}
-			if libstate.Schema.GetDomainCfg(snapType).AccessorList.Has(libstate.AccessorExistence) {
+			if libstate.Schema.GetDomainCfg(snapType).Accessors.Has(libstate.AccessorExistence) {
 				newVersion = libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVEI
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvei", 1)
 				fileName = snaptype.ReplaceVersion(fileName, oldVersion, newVersion)
@@ -748,7 +748,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 					return fmt.Errorf("missing file %s", fileName)
 				}
 			}
-			if libstate.Schema.GetDomainCfg(snapType).AccessorList.Has(libstate.AccessorHashMap) {
+			if libstate.Schema.GetDomainCfg(snapType).Accessors.Has(libstate.AccessorHashMap) {
 				newVersion = libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVI
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvi", 1)
 				fileName = snaptype.ReplaceVersion(fileName, oldVersion, newVersion)
