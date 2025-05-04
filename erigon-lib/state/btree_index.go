@@ -360,10 +360,10 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 	defer kv.EnableReadAhead().DisableReadAhead()
 	bloomPath := strings.TrimSuffix(indexPath, ".bt") + ".kvei"
 
-	var bloom *existence.ExistenceFilter
+	var bloom *existence.Filter
 	if accessors.Has(AccessorExistence) {
 		var err error
-		bloom, err = existence.NewExistenceFilter(uint64(kv.Count()/2), bloomPath)
+		bloom, err = existence.NewFilter(uint64(kv.Count()/2), bloomPath)
 		if err != nil {
 			return err
 		}

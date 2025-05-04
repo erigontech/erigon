@@ -1131,7 +1131,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (
 type InvertedFiles struct {
 	decomp    *seg.Decompressor
 	index     *recsplit.Index
-	existence *existence2.ExistenceFilter
+	existence *existence2.Filter
 }
 
 func (sf InvertedFiles) CleanupOnError() {
@@ -1159,7 +1159,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, coll Inver
 	var (
 		decomp    *seg.Decompressor
 		index     *recsplit.Index
-		existence *existence2.ExistenceFilter
+		existence *existence2.Filter
 		err       error
 	)
 	mxRunningFilesBuilding.Inc()

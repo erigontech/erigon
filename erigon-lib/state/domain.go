@@ -416,7 +416,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 				}
 				if exists {
-					if item.existence, err = existence.OpenExistenceFilter(fPath); err != nil {
+					if item.existence, err = existence.OpenFilter(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
@@ -995,7 +995,7 @@ type StaticFiles struct {
 	valuesDecomp *seg.Decompressor
 	valuesIdx    *recsplit.Index
 	valuesBt     *BtIndex
-	bloom        *existence.ExistenceFilter
+	bloom        *existence.Filter
 }
 
 // CleanupOnError - call it on collation fail. It closing all files
@@ -1037,7 +1037,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, co
 		valuesDecomp *seg.Decompressor
 		valuesIdx    *recsplit.Index
 		bt           *BtIndex
-		bloom        *existence.ExistenceFilter
+		bloom        *existence.Filter
 		err          error
 	)
 	closeComp := true
@@ -1096,7 +1096,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, co
 			return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 		}
 		if exists {
-			bloom, err = existence.OpenExistenceFilter(fPath)
+			bloom, err = existence.OpenFilter(fPath)
 			if err != nil {
 				return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 			}
@@ -1139,7 +1139,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		valuesDecomp *seg.Decompressor
 		valuesIdx    *recsplit.Index
 		bt           *BtIndex
-		bloom        *existence.ExistenceFilter
+		bloom        *existence.Filter
 	)
 	closeComp := true
 	defer func() {
@@ -1198,7 +1198,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 			return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 		}
 		if exists {
-			bloom, err = existence.OpenExistenceFilter(fPath)
+			bloom, err = existence.OpenFilter(fPath)
 			if err != nil {
 				return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 			}

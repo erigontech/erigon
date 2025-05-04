@@ -812,7 +812,7 @@ type HistoryFiles struct {
 	historyIdx      *recsplit.Index
 	efHistoryDecomp *seg.Decompressor
 	efHistoryIdx    *recsplit.Index
-	efExistence     *existence.ExistenceFilter
+	efExistence     *existence.Filter
 }
 
 func (sf HistoryFiles) CleanupOnError() {
@@ -847,7 +847,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		historyDecomp, efHistoryDecomp *seg.Decompressor
 		historyIdx, efHistoryIdx       *recsplit.Index
 
-		efExistence *existence.ExistenceFilter
+		efExistence *existence.Filter
 		closeComp   = true
 		err         error
 	)
