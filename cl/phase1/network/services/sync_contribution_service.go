@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -164,6 +165,17 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 		}
 
 		if signedContribution.ImmediateVerification {
+			for i := 0; i < len(aggregateVerificationData.Signatures); i++ {
+				d := AggregateVerificationData{
+					Signatures: [][]byte{aggregateVerificationData.Signatures[i]},
+					SignRoots:  [][]byte{aggregateVerificationData.SignRoots[i]},
+					Pks:        [][]byte{aggregateVerificationData.Pks[i]},
+				}
+				if err := s.batchSignatureVerifier.ImmediateVerification(&d); err != nil {
+					log.Warn("immediate verification failed", "err", err, "index", i)
+				}
+			}
+
 			return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
 		}
 
