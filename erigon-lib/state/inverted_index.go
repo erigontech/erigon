@@ -90,12 +90,12 @@ type iiCfg struct {
 	valuesTable  string // bucket name for index values;  k -> txnNum_u64 , Needs to be table with DupSort
 	name         kv.InvertedIdx
 
-	compression   seg.FileCompression // compression type for inverted index keys and values
-	compressorCfg seg.Cfg             // advanced configuration for compressor encodings
+	Compression   seg.FileCompression // compression type for inverted index keys and values
+	CompressorCfg seg.Cfg             // advanced configuration for compressor encodings
 
 	// external checker for integrity of inverted index ranges
 	integrity rangeIntegrityChecker
-	accessors Accessors
+	Accessors Accessors
 }
 
 func (ii iiCfg) GetVersions() VersionTypes {
@@ -118,9 +118,9 @@ func NewInvertedIndex(cfg iiCfg, aggStep uint64, logger log.Logger) (*InvertedIn
 		panic("assert: empty `filenameBase`")
 	}
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
-	cfg.compressorCfg = seg.DefaultCfg
-	if cfg.accessors == 0 {
-		cfg.accessors = AccessorHashMap
+	cfg.CompressorCfg = seg.DefaultCfg
+	if cfg.Accessors == 0 {
+		cfg.Accessors = AccessorHashMap
 	}
 
 	ii := InvertedIndex{
@@ -233,7 +233,7 @@ const (
 )
 
 func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
-	ii._visible = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.accessors, false, toTxNum))
+	ii._visible = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, false, toTxNum))
 }
 
 func (ii *InvertedIndex) MissedMapAccessors() (l []*filesItem) {
@@ -241,7 +241,7 @@ func (ii *InvertedIndex) MissedMapAccessors() (l []*filesItem) {
 }
 
 func (ii *InvertedIndex) missedMapAccessors(source []*filesItem) (l []*filesItem) {
-	if !ii.accessors.Has(AccessorHashMap) {
+	if !ii.Accessors.Has(AccessorHashMap) {
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, ii.aggregationStep, func(fromStep, toStep uint64) []string {
@@ -585,7 +585,7 @@ func (iit *InvertedIndexRoTx) statelessGetter(i int) *seg.Reader {
 	r := iit.getters[i]
 	if r == nil {
 		g := iit.files[i].src.decompressor.MakeGetter()
-		r = seg.NewReader(g, iit.ii.compression)
+		r = seg.NewReader(g, iit.ii.Compression)
 		iit.getters[i] = r
 	}
 	return r
@@ -997,7 +997,7 @@ func (iit *InvertedIndexRoTx) IterateChangedKeys(startTxNum, endTxNum uint64, ro
 		if item.endTxNum >= endTxNum {
 			ii1.hasNextInDb = false
 		}
-		g := seg.NewReader(item.src.decompressor.MakeGetter(), iit.ii.compression)
+		g := seg.NewReader(item.src.decompressor.MakeGetter(), iit.ii.Compression)
 		if g.HasNext() {
 			key, _ := g.Next(nil)
 			heap.Push(&ii1.h, &ReconItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum, g: g, txNum: ^item.endTxNum, key: key})
@@ -1063,11 +1063,11 @@ func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (
 		}
 	}()
 
-	comp, err := seg.NewCompressor(ctx, "collate idx "+ii.filenameBase, coll.iiPath, ii.dirs.Tmp, ii.compressorCfg, log.LvlTrace, ii.logger)
+	comp, err := seg.NewCompressor(ctx, "collate idx "+ii.filenameBase, coll.iiPath, ii.dirs.Tmp, ii.CompressorCfg, log.LvlTrace, ii.logger)
 	if err != nil {
 		return InvertedIndexCollation{}, fmt.Errorf("create %s compressor: %w", ii.filenameBase, err)
 	}
-	coll.writer = seg.NewWriter(comp, ii.compression)
+	coll.writer = seg.NewWriter(comp, ii.Compression)
 
 	var (
 		prevEf      []byte
@@ -1250,7 +1250,7 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 		Salt:       ii.salt,
 		NoFsync:    ii.noFsync,
 	}
-	return buildHashMapAccessor(ctx, data, ii.compression, idxPath, false, cfg, ps, ii.logger)
+	return buildHashMapAccessor(ctx, data, ii.Compression, idxPath, false, cfg, ps, ii.logger)
 }
 
 func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumTo uint64) {
