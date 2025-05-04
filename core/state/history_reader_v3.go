@@ -96,7 +96,7 @@ func (hr *HistoryReaderV3) ReadAccountDataForDebug(address common.Address) (*acc
 	return hr.ReadAccountData(address)
 }
 
-func (hr *HistoryReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+func (hr *HistoryReaderV3) ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error) {
 	hr.composite = append(append(hr.composite[:0], address[:]...), key[:]...)
 	enc, _, err := hr.ttx.GetAsOf(kv.StorageDomain, hr.composite, hr.txNum)
 	if hr.trace {
@@ -105,7 +105,7 @@ func (hr *HistoryReaderV3) ReadAccountStorage(address common.Address, incarnatio
 	return enc, err
 }
 
-func (hr *HistoryReaderV3) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {
+func (hr *HistoryReaderV3) ReadAccountCode(address common.Address) ([]byte, error) {
 	//  must pass key2=Nil here: because Erigon4 does concatinate key1+key2 under the hood
 	//code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
 	code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address[:], hr.txNum)
@@ -115,7 +115,7 @@ func (hr *HistoryReaderV3) ReadAccountCode(address common.Address, incarnation u
 	return code, err
 }
 
-func (hr *HistoryReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64) (int, error) {
+func (hr *HistoryReaderV3) ReadAccountCodeSize(address common.Address) (int, error) {
 	enc, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address[:], hr.txNum)
 	return len(enc), err
 }
