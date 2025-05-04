@@ -637,7 +637,7 @@ func (r *ReaderV3) ReadAccountDataForDebug(address common.Address) (*accounts.Ac
 }
 
 func (r *ReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	r.composite = append(append(r.composite[:0], address[:]...), key.Bytes()...)
+	r.composite = append(append(r.composite[:0], address[:]...), key[:]...)
 	enc, _, err := r.tx.GetLatest(kv.StorageDomain, r.composite)
 	if err != nil {
 		return nil, err
@@ -756,7 +756,7 @@ func (r *ReaderParallelV3) ReadAccountDataForDebug(address common.Address) (*acc
 }
 
 func (r *ReaderParallelV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	r.composite = append(append(r.composite[:0], address[:]...), key.Bytes()...)
+	r.composite = append(append(r.composite[:0], address[:]...), key[:]...)
 	enc, _, err := r.sd.GetLatest(kv.StorageDomain, r.composite)
 	if err != nil {
 		return nil, err
