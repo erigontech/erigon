@@ -40,7 +40,7 @@ jobs:
           persistent_logs: "true"
 
       - name: Parse Kurtosis output log and create JSON
-        if: ${{ steps.kurtosis_test.outputs.test_result != 'failure' }}
+        if: success()
         run: |
           # Download the Kurtosis artifact
           echo "Downloading artifact enclave-dump-kurtosis-run1-${{ github.run_id }}"
@@ -88,7 +88,7 @@ jobs:
 
       # If the test fails, create an empty JSON object
       - name: Create empty JSON if test fails
-        if: ${{ failure() || steps.kurtosis_test.outcome == 'failure' || steps.kurtosis_test.outputs.test_result == 'failure' }}
+        if: ${{ failure() }}
         run: |
           output_json="${{ github.workspace }}/outputs_kurtosis.json"
           echo "{}" > $output_json
