@@ -76,6 +76,7 @@ func WasmStateStoreCost(db *state.IntraBlockState, program common.Address, key, 
 		}
 	}
 
+	//original.CmpBig(value.Big()) == 0
 	if arbmath.BigEquals(original.ToBig(), value.Big()) {
 		if original.IsZero() { // reset to original inexistent slot (2.2.2.1)
 			// EIP 2200 Original clause:

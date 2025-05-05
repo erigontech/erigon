@@ -96,8 +96,8 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 		GasLimit:         header.GasLimit,
 		PrevRanDao:       prevRandDao,
 		BlobBaseFee:      blobBaseFee,
-		BaseFeeInBlock:   baseFee.Clone(),
-		ArbOSVersion:     arbOsVersion,
+		//BaseFeeInBlock:   baseFee.Clone(),
+		ArbOSVersion: arbOsVersion,
 	}
 }
 
