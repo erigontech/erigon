@@ -170,6 +170,7 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 					Signatures: [][]byte{aggregateVerificationData.Signatures[i]},
 					SignRoots:  [][]byte{aggregateVerificationData.SignRoots[i]},
 					Pks:        [][]byte{aggregateVerificationData.Pks[i]},
+					F:          func() {},
 				}
 				if err := s.batchSignatureVerifier.ImmediateVerification(&d); err != nil {
 					log.Warn("immediate verification failed", "err", err, "index", i)
