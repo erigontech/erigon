@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/turbo/debug"
 
-	_ "github.com/erigontech/erigon/core/snaptype"    //hack
+	_ "github.com/erigontech/erigon-db/snaptype"      //hack
 	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
 )
 
