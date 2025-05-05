@@ -19,6 +19,7 @@ package exec
 import (
 	"container/heap"
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"sync"
@@ -34,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3/calltracer"
+	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -90,11 +92,12 @@ type AAValidationResult struct {
 // Result is the ouput of the task execute process
 type Result struct {
 	Task
-	ExecutionResult *evmtypes.ExecutionResult
-	Err             error
-	Coinbase        common.Address
-	TxIn            state.ReadSet
-	TxOut           state.VersionedWrites
+	ExecutionResult   *evmtypes.ExecutionResult
+	ValidationResults []AAValidationResult
+	Err               error
+	Coinbase          common.Address
+	TxIn              state.ReadSet
+	TxOut             state.VersionedWrites
 
 	Receipt *types.Receipt
 	Logs    []*types.Log
@@ -229,7 +232,6 @@ type TxTask struct {
 	Trace                 bool
 	AAValidationBatchSize uint64 // number of consecutive RIP-7560 transactions, should be 0 for single transactions and transactions that are not first in the transaction order
 	InBatch               bool   // set to true for consecutive RIP-7560 transactions after the first one (first one is false)
-	ValidationResults     []AAValidationResult
 
 	sender       *common.Address
 	message      *types.Message
@@ -427,7 +429,8 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			return core.SysCallContract(contract, data, chainConfig, ibs, header, engine, constCall /* constCall */)
+			ret, _, err := core.SysCallContract(contract, data, chainConfig, ibs, header, engine, constCall /* constCall */, vmCfg.Tracer)
+			return ret, err
 		}
 		engine.Initialize(chainConfig, chainReader, header, ibs, syscall, txTask.Logger, nil)
 		result.Err = ibs.FinalizeTx(rules, state.NewNoopWriter())
@@ -448,7 +451,8 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			result.TraceTos[uncle.Coinbase] = struct{}{}
 		}
 	default:
-		gasPool.Reset(txTask.Tx().GetGas(), chainConfig.GetMaxBlobGasPerBlock(txTask.Header.Time))
+		// This doesn't make sense, but I am not sure if this wrong behaviour is needed somewhere else:
+		//gasPool.Reset(txTask.Tx().GetGasLimit(), chainConfig.GetMaxBlobGasPerBlock(txTask.Header.Time))
 		vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		msg, err := txTask.TxMessage()
 
@@ -457,15 +461,22 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			return &result
 		}
 
-		if msg.FeeCap().IsZero() && engine != nil {
-			// Only zero-gas transactions may be service ones
-			syscall := func(contract common.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, chainConfig, ibs, header, engine, true /* constCall */)
-			}
-			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
-		}
-
 		evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmCfg, rules)
+
+		if txTask.Tx().Type() == types.AccountAbstractionTxType {
+			if !chainConfig.AllowAA {
+				result.Err = errors.New("account abstraction transactions are not allowed")
+				return &result
+			}
+			aaTxn, ok := txTask.Tx().(*types.AccountAbstractionTransaction)
+			if !ok {
+				result.Err = fmt.Errorf("invalid transaction type, expected AccountAbstractionTx, got %T", txTask.Tx)
+				return &result
+			}
+
+			result = *txTask.executeAA(aaTxn, evm, gasPool, ibs, chainConfig)
+			break
+		}
 
 		result.Coinbase = evm.Context.Coinbase
 
@@ -527,6 +538,78 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		result.TxOut = txTask.VersionedWrites(ibs)
 	}
 
+	return &result
+}
+
+func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
+	evm *vm.EVM,
+	gasPool *core.GasPool,
+	ibs *state.IntraBlockState,
+	chainConfig *chain.Config) *Result {
+	var result Result
+
+	if !txTask.InBatch {
+		// this is the first transaction in an AA transaction batch, run all validation frames, then execute execution frames in its own txtask
+		startIdx := uint64(txTask.TxIndex)
+		endIdx := startIdx + txTask.AAValidationBatchSize
+
+		validationResults := make([]AAValidationResult, txTask.AAValidationBatchSize+1)
+		log.Info("🕵️‍♂️[aa] found AA bundle", "startIdx", startIdx, "endIdx", endIdx)
+
+		var outerErr error
+		for i := startIdx; i <= endIdx; i++ {
+			// check if next n transactions are AA transactions and run validation
+			if txTask.Txs[i].Type() == types.AccountAbstractionTxType {
+				aaTxn, ok := txTask.Txs[i].(*types.AccountAbstractionTransaction)
+				if !ok {
+					result.Err = fmt.Errorf("invalid transaction type, expected AccountAbstractionTx, got %T", txTask.Tx)
+					return &result
+				}
+				paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, ibs, gasPool, txTask.Header, evm, chainConfig)
+				if err != nil {
+					outerErr = err
+					break
+				}
+
+				validationResults[i-startIdx] = AAValidationResult{
+					PaymasterContext: paymasterContext,
+					GasUsed:          validationGasUsed,
+				}
+			} else {
+				outerErr = fmt.Errorf("invalid txcount, expected txn %d to be type %d", i, types.AccountAbstractionTxType)
+				break
+			}
+		}
+
+		if outerErr != nil {
+			result.Err = outerErr
+			return &result
+		}
+
+		log.Info("✅[aa] validated AA bundle", "len", startIdx-endIdx)
+
+		result.ValidationResults = validationResults
+	}
+
+	if len(result.ValidationResults) == 0 {
+		result.Err = fmt.Errorf("found RIP-7560 but no remaining validation results, txIndex %d", txTask.TxIndex)
+	}
+
+	validationRes := result.ValidationResults[0]
+	result.ValidationResults = result.ValidationResults[1:]
+
+	status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, validationRes.PaymasterContext, validationRes.GasUsed, gasPool, evm, txTask.Header, ibs)
+
+	if err != nil {
+		result.Err = err
+		return &result
+	}
+
+	result.ExecutionResult.GasUsed = gasUsed
+	// Update the state with pending changes
+	ibs.SoftFinalise()
+	result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
+	log.Info("🚀[aa] executed AA bundle transaction", "txIndex", txTask.TxIndex, "status", status)
 	return &result
 }
 

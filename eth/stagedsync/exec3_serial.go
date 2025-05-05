@@ -47,7 +47,7 @@ func (se *serialExecutor) wait(ctx context.Context) error {
 	return nil
 }
 
-func (se *serialExecutor) commit(ctx context.Context, execStage *StageState, tx kv.RwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.RwTx, time.Duration, error) {
+func (se *serialExecutor) commit(ctx context.Context, execStage *StageState, tx kv.TemporalRwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.RwTx, time.Duration, error) {
 	return se.txExecutor.commit(ctx, execStage, tx, useExternalTx, se.resetWorkers)
 }
 
@@ -123,7 +123,12 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 				ibs := state.New(state.NewReaderV3(se.rs.Domains(), se.applyTx))
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 				syscall := func(contract common.Address, data []byte) ([]byte, error) {
-					return core.SysCallContract(contract, data, se.cfg.chainConfig, ibs, txTask.Header, se.cfg.engine, false /* constCall */)
+					ret, logs, err := core.SysCallContract(contract, data, se.cfg.chainConfig, ibs, txTask.Header, se.cfg.engine, false /* constCall */, se.hooks)
+					if err != nil {
+						return nil, err
+					}
+					result.Logs = append(result.Logs, logs...)
+					return ret, err
 				}
 
 				chainReader := consensuschain.NewReader(se.cfg.chainConfig, se.applyTx, se.cfg.blockReader, se.logger)
@@ -135,7 +140,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 				} else {
 					_, _, _, err = se.cfg.engine.Finalize(
 						se.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles,
-						blockReceipts, txTask.Withdrawals, chainReader, syscall, se.logger)
+						blockReceipts, txTask.Withdrawals, chainReader, syscall, false, se.logger)
 				}
 
 				if !se.isMining && !se.inMemExec && startTxIndex == 0 && !isInitialCycle {
@@ -146,7 +151,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 				}
 				checkReceipts := !se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber()) && !se.cfg.vmConfig.NoReceipts && !se.isMining
 				if txTask.BlockNumber() > 0 && startTxIndex == 0 { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-					if err := core.BlockPostValidation(se.gasUsed, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, se.isMining); err != nil {
+					if err := core.BlockPostValidation(se.gasUsed, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, se.isMining, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
 						return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 					}
 				}
@@ -222,7 +227,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 				// get last receipt and store the last log index + 1
 				lastReceipt := blockReceipts[txTask.TxIndex-1]
 				if lastReceipt == nil {
-					return false, fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
+					return false, fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNumber())
 				}
 				if len(lastReceipt.Logs) > 0 {
 					firstIndex := lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
@@ -237,9 +242,8 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 			}
 		}
 
-		// MA applystate
 		if err := se.rs.ApplyState4(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum, nil,
-			txTask.BalanceIncreaseSet, result.Logs, result.TraceFroms, result.TraceTos,
+			txTask.BalanceIncreaseSet, blockReceipts, result.Logs, result.TraceFroms, result.TraceTos,
 			se.cfg.chainConfig, se.cfg.chainConfig.Rules(txTask.BlockNumber(), txTask.BlockTime()), txTask.HistoryExecution); err != nil {
 			return false, err
 		}

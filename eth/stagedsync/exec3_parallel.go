@@ -88,7 +88,7 @@ type executor interface {
 	readState() *state.StateV3Buffered
 	domains() *libstate.SharedDomains
 
-	commit(ctx context.Context, execStage *StageState, tx kv.RwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.RwTx, time.Duration, error)
+	commit(ctx context.Context, execStage *StageState, tx kv.TemporalRwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.RwTx, time.Duration, error)
 	resetWorkers(ctx context.Context, rs *state.StateV3Buffered, applyTx kv.Tx) error
 
 	LogExecuted(tx kv.Tx)
@@ -120,6 +120,7 @@ type txResult struct {
 	blockTime  uint64
 	txNum      uint64
 	gasUsed    int64
+	receipts   []*types.Receipt
 	logs       []*types.Log
 	traceFroms map[common.Address]struct{}
 	traceTos   map[common.Address]struct{}
@@ -1001,6 +1002,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if txResult.Receipt != nil {
 				applyResult.gasUsed += int64(txResult.Receipt.GasUsed)
 				be.gasUsed += txResult.Receipt.GasUsed
+				applyResult.receipts = append(applyResult.receipts, txResult.Receipt)
 			}
 			applyResult.blockTime = txTask.BlockTime()
 			applyResult.logs = append(applyResult.logs, txResult.Logs...)
@@ -1038,7 +1040,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			deps = state.BuildDAG(be.blockIO, pe.logger)
 		}
 
+		isPartial := len(be.tasks) > 0 && be.tasks[0].Version().TxIndex != -1
+
 		txTask := be.tasks[len(be.tasks)-1].Task
+
 		be.result = &blockResult{
 			be.blockNum,
 			txTask.BlockTime(),
@@ -1048,7 +1053,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			be.gasUsed,
 			txTask.Version().TxNum,
 			true,
-			len(be.tasks) > 0 && be.tasks[0].Version().TxIndex != -1,
+			isPartial,
 			be.blockIO,
 			be.stats,
 			&deps,
@@ -1160,7 +1165,7 @@ func (pe *parallelExecutor) LogComplete(tx kv.Tx) {
 	pe.progress.LogComplete(tx, pe.rs.StateV3, pe)
 }
 
-func (pe *parallelExecutor) commit(ctx context.Context, execStage *StageState, tx kv.RwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.RwTx, time.Duration, error) {
+func (pe *parallelExecutor) commit(ctx context.Context, execStage *StageState, tx kv.TemporalRwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.RwTx, time.Duration, error) {
 	pe.pause()
 	defer pe.resume()
 
@@ -1322,7 +1327,12 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					txTask := result.Task.(*taskVersion).Task.(*exec.TxTask)
 
 					syscall := func(contract common.Address, data []byte) ([]byte, error) {
-						return core.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, txTask.Header, pe.cfg.engine, false)
+						ret, logs, err := core.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, txTask.Header, pe.cfg.engine, false, pe.hooks)
+						if err != nil {
+							return nil, err
+						}
+						result.Logs = append(result.Logs, logs...)
+						return ret, err
 					}
 
 					chainReader := consensuschain.NewReader(pe.cfg.chainConfig, applyTx, pe.cfg.blockReader, pe.logger)
@@ -1335,7 +1345,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						_, _, _, err =
 							pe.cfg.engine.Finalize(
 								pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, blockReceipts,
-								txTask.Withdrawals, chainReader, syscall, pe.logger)
+								txTask.Withdrawals, chainReader, syscall, false, pe.logger)
 					}
 
 					if err != nil {

@@ -377,7 +377,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 				if !txTask.IsBlockEnd() {
 					var receipt *types.Receipt
 					if txTask.TxIndex >= 0 {
-						receipt = result.BlockReceipts[txTask.TxIndex]
+						receipt = result.Receipt
 					}
 					if err := rawtemporaldb.AppendReceipt(doms.AsPutDel(tx), receipt, cumulativeBlobGasUsedInBlock); err != nil {
 						return err
@@ -389,7 +389,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 						// get last receipt and store the last log index + 1
 						lastReceipt := txTask.BlockReceipts[txTask.TxIndex-1]
 						if lastReceipt == nil {
-							return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
+							return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNumber())
 						}
 						if len(lastReceipt.Logs) > 0 {
 							firstIndex := lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
@@ -411,14 +411,12 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 			if produce.RCacheDomain {
 				var receipt *types.Receipt
 				if !txTask.IsBlockEnd() {
-					if txTask.TxIndex >= 0 && txTask.BlockReceipts != nil {
-						receipt = txTask.BlockReceipts[txTask.TxIndex]
-					}
+					receipt = result.Receipt
 				} else {
 					if cfg.ChainConfig.Bor != nil && txTask.TxIndex >= 1 {
 						receipt = txTask.BlockReceipts[txTask.TxIndex-1]
 						if receipt == nil {
-							return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
+							return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNumber())
 						}
 					}
 				}

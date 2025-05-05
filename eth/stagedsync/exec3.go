@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
+	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
@@ -985,11 +986,17 @@ func ExecV3(ctx context.Context,
 						pe.rs.SetTxNum(applyResult.blockNum, applyResult.txNum)
 						if err := pe.rs.ApplyState4(ctx, applyTx,
 							applyResult.blockNum, applyResult.txNum, applyResult.writeSet,
-							nil, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
+							nil, applyResult.receipts, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
 							pe.cfg.chainConfig, pe.cfg.chainConfig.Rules(applyResult.blockNum, applyResult.blockTime), false); err != nil {
 							return err
 						}
 					case *blockResult:
+						if applyResult.BlockNum > 0 && !applyResult.isPartial { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
+							if err := core.BlockPostValidation(applyResult.GasUsed, be.blobGasUsed, checkReceipts, blockReceipts,
+								txTask.Header, pe.isMining, txTask.Txs, pe.cfg.chainConfig, pe.logger); err != nil {
+								return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
+							}
+						}
 						if applyResult.BlockNum > lastBlockResult.BlockNum {
 							pe.doms.SetTxNum(applyResult.lastTxNum)
 							pe.doms.SetBlockNum(applyResult.BlockNum)
