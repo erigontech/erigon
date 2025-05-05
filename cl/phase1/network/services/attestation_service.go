@@ -298,8 +298,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 			// send to subscribers
 			if att.Attestation != nil {
 				s.emitters.Operation().SendAttestation(att.Attestation)
-			}
-			if att.SingleAttestation != nil {
+			} else if att.SingleAttestation != nil {
 				s.emitters.Operation().SendSingleAttestation(att.SingleAttestation)
 			}
 		},
