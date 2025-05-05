@@ -1057,17 +1057,13 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 
 	if chainTipMode {
 		var sendersProgress, execProgress uint64
-		if err := db.View(ctx, func(tx kv.Tx) error {
+		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 			var err error
 			if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
 				return err
 			}
 			if execProgress == 0 {
-				temporalTx, ok := tx.(kv.TemporalTx)
-				if !ok {
-					return errors.New("tx is not a temporal tx")
-				}
-				doms, err := libstate.NewSharedDomains(temporalTx, log.New())
+				doms, err := libstate.NewSharedDomains(tx, log.New())
 				if err != nil {
 					panic(err)
 				}

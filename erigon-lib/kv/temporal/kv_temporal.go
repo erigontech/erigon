@@ -135,6 +135,18 @@ func (db *DB) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
 	return tx.Commit()
 }
 
+func (db *DB) UpdateTemporal(ctx context.Context, f func(tx kv.TemporalRwTx) error) error {
+	tx, err := db.BeginTemporalRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err = f(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.RwTx, error) {
 	kvTx, err := db.RwDB.BeginRwNosync(ctx) //nolint:gocritic
 	if err != nil {
