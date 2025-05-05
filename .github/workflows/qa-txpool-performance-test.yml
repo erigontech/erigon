@@ -120,4 +120,3 @@ jobs:
           docker rmi -f $(docker images -q)
           docker system prune -a -f
           docker volume rm $(docker volume ls -q)
-          docker network rm $(docker network ls -q)
