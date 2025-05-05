@@ -117,6 +117,9 @@ jobs:
       - name: Clean docker containers and images
         if: always()
         run: |
+          # stop all containers
+          docker stop $(docker ps -a -q)
+          # remove containers and images
           docker rm -f $(docker ps -a -q)
           docker rmi -f $(docker images -q)
           docker system prune -a -f
