@@ -1290,7 +1290,7 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 func buildHashMapAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("buildHashMapAccessor: %s, %s, stack: %s", data.FileName(), rec, dbg.Stack())
+			err = fmt.Errorf("buildHashMapAccessor: %s, %s, stack: %s", d.FileName(), rec, dbg.Stack())
 		}
 	}()
 
