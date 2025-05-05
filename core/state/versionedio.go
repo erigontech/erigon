@@ -274,20 +274,20 @@ func (vr versionedStateReader) ReadAccountDataForDebug(address common.Address) (
 	return nil, nil
 }
 
-func (vr versionedStateReader) ReadAccountStorage(address common.Address, incarnation uint64, key common.Hash) (uint256.Int, bool, error) {
+func (vr versionedStateReader) ReadAccountStorage(address common.Address, key common.Hash) (uint256.Int, bool, error) {
 	if r, ok := vr.reads[address][AccountKey{Path: StatePath, Key: key}]; ok && r.Val != nil {
 		val := r.Val.(uint256.Int)
 		return val, true, nil
 	}
 
 	if vr.stateReader != nil {
-		return vr.stateReader.ReadAccountStorage(address, incarnation, key)
+		return vr.stateReader.ReadAccountStorage(address, key)
 	}
 
 	return uint256.Int{}, false, nil
 }
 
-func (vr versionedStateReader) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {
+func (vr versionedStateReader) ReadAccountCode(address common.Address) ([]byte, error) {
 	if r, ok := vr.reads[address][AccountKey{Path: CodePath}]; ok && r.Val != nil {
 		if code, ok := r.Val.([]byte); ok {
 			return code, nil
@@ -295,13 +295,13 @@ func (vr versionedStateReader) ReadAccountCode(address common.Address, incarnati
 	}
 
 	if vr.stateReader != nil {
-		return vr.stateReader.ReadAccountCode(address, incarnation)
+		return vr.stateReader.ReadAccountCode(address)
 	}
 
 	return nil, nil
 }
 
-func (vr versionedStateReader) ReadAccountCodeSize(address common.Address, incarnation uint64) (int, error) {
+func (vr versionedStateReader) ReadAccountCodeSize(address common.Address) (int, error) {
 	if r, ok := vr.reads[address][AccountKey{Path: CodePath}]; ok && r.Val != nil {
 		if code, ok := r.Val.([]byte); ok {
 			return len(code), nil
@@ -309,7 +309,7 @@ func (vr versionedStateReader) ReadAccountCodeSize(address common.Address, incar
 	}
 
 	if vr.stateReader != nil {
-		return vr.stateReader.ReadAccountCodeSize(address, incarnation)
+		return vr.stateReader.ReadAccountCodeSize(address)
 	}
 
 	return 0, nil

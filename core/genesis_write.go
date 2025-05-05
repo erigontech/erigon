@@ -570,7 +570,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		defer sd.Close()
 
 		//r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
-		r, w := state.NewReaderV3(sd), state.NewWriter(sd, nil)
+		r, w := state.NewReaderV3(sd, tx), state.NewWriter(sd.AsPutDel(tx), nil)
 		statedb = state.New(r)
 		statedb.SetTrace(false)
 

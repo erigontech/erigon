@@ -58,6 +58,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	state2 "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/state/stats"
 	"github.com/erigontech/erigon-lib/types"
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -344,7 +345,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	{
 		cfg.blockReader.Snapshots().LogStat("download")
 		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.blockReader))
-		state.AggTx(tx).LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
+		stats.LogStats(state.AggTx(tx), tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
 			_, histBlockNumProgress, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
 			return histBlockNumProgress, err
 		})

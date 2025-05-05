@@ -196,7 +196,7 @@ func NewLatestStateWriter(txc wrap.TxContainer, blockReader services.FullBlockRe
 		panic(err)
 	}
 	domains.SetTxNum(uint64(int(minTxNum) + /* 1 system txNum in beginning of block */ 1))
-	return state.NewWriter(domains, nil)
+	return state.NewWriter(domains.AsPutDel(txc.Tx), nil)
 }
 
 func CreateLatestCachedStateReader(cache kvcache.CacheView, tx kv.TemporalTx) state.StateReader {

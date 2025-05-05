@@ -151,8 +151,8 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 		panic(err)
 	}
 	s.tx = tx
-	s.r = NewReaderV3(domains)
-	s.w = NewWriter(domains, nil)
+	s.r = NewReaderV3(domains, tx)
+	s.w = NewWriter(domains.AsPutDel(tx), nil)
 	s.state = New(s.r)
 }
 
@@ -259,7 +259,7 @@ func TestSnapshot2(t *testing.T) {
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	w := NewWriter(domains, nil)
+	w := NewWriter(domains.AsPutDel(tx), nil)
 
 	state := New(NewReaderV3(domains, tx))
 
@@ -439,7 +439,7 @@ func TestDump(t *testing.T) {
 	require.NoError(t, err)
 	obj3.SetBalance(uint256.NewInt(44), tracing.BalanceChangeUnspecified)
 
-	w := NewWriter(domains, nil)
+	w := NewWriter(domains.AsPutDel(tx), nil)
 	// write some of them to the trie
 	err = w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
 	require.NoError(t, err)

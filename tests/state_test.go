@@ -67,7 +67,7 @@ func TestState(t *testing.T) {
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
 			t.Run(key, func(t *testing.T) {
 				withTrace(t, func(vmconfig vm.Config) error {
-					tx, err := db.BeginRw(context.Background())
+					tx, err := db.BeginTemporalRw(context.Background())
 					if err != nil {
 						t.Fatal(err)
 					}

@@ -179,7 +179,7 @@ Loop:
 	}
 
 	if err := cfg.db.Update(ctx, func(tx kv.RwTx) error {
-		if _, err := tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 10*time.Hour); err != nil {
+		if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, 10*time.Hour); err != nil {
 			return err
 		}
 		return nil
@@ -188,8 +188,8 @@ Loop:
 	}
 
 	log.Info("SpawnCustomTrace finish")
-	if err := cfg.db.View(ctx, func(tx kv.Tx) error {
-		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+	if err := cfg.db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		ac := tx.AggTx().(*state2.AggregatorRoTx)
 		stepSize := ac.StepSize()
 		receiptProgress := ac.DbgDomain(producingDomain).DbgMaxTxNumInDB(tx)
 		accProgress := max(ac.DbgDomain(kv.AccountsDomain).FirstStepNotInFiles()*stepSize, ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx))

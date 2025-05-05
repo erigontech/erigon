@@ -103,7 +103,7 @@ type Worker struct {
 	blockReader services.FullBlockReader
 	in          *exec.QueueWithRetry
 	rs          *state.StateV3Buffered
-	stateWriter state.Writer
+	stateWriter state.StateWriter
 	stateReader state.ResettableStateReader
 	historyMode bool // if true - stateReader is HistoryReaderV3, otherwise it's state reader
 	chainConfig *chain.Config
@@ -206,7 +206,7 @@ func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.Tx, stateRead
 	if stateWriter != nil {
 		rw.stateWriter = stateWriter
 	} else {
-		rw.stateWriter = state.NewStateWriterV3(rs.Domains(), rw.chainTx, accumulator)
+		rw.stateWriter = state.NewWriter(rs.Domains().AsPutDel(rw.chainTx), accumulator)
 	}
 }
 

@@ -494,14 +494,13 @@ func NewWriter(tx kv.TemporalPutDel, accumulator *shards.Accumulator) *Writer {
 	return &Writer{
 		tx:          tx,
 		accumulator: accumulator,
-		tx:          tx,
 		//trace:       true,
 	}
 }
 
 func (w *Writer) ResetWriteSet() {}
 
-func (w *Writer) WriteSet() map[string]*libstate.KvList {
+func (w *Writer) WriteSet() map[string]*state.KvList {
 	return nil
 }
 
@@ -566,8 +565,8 @@ func (w *Writer) DeleteAccount(address common.Address, original *accounts.Accoun
 	return nil
 }
 
-func (w *Writer) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
-	if *original == *value {
+func (w *Writer) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error {
+	if original == value {
 		return nil
 	}
 
@@ -579,9 +578,8 @@ func (w *Writer) WriteAccountStorage(address common.Address, incarnation uint64,
 	if len(v) == 0 {
 		return w.tx.DomainDel(kv.StorageDomain, composite, nil, 0)
 	}
-	if w.accumulator != nil && key != nil && value != nil {
-		k := *key
-		w.accumulator.ChangeStorage(address, incarnation, k, v)
+	if w.accumulator != nil {
+		w.accumulator.ChangeStorage(address, incarnation, key, v)
 	}
 
 	return w.tx.DomainPut(kv.StorageDomain, composite, nil, v, nil, 0)
@@ -651,11 +649,11 @@ func (r *ReaderV3) ReadAccountDataForDebug(address common.Address) (*accounts.Ac
 	return r.ReadAccountData(address)
 }
 
-func (r *ReaderV3) ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error) {
+func (r *ReaderV3) ReadAccountStorage(address common.Address, key common.Hash) (uint256.Int, bool, error) {
 	var composite [20 + 32]byte
 	copy(composite[0:20], address[0:20])
 	copy(composite[20:], key[:])
-	enc, _, err := r.tx.GetLatest(kv.StorageDomain, composite)
+	enc, _, err := r.sd.GetLatest(kv.StorageDomain, r.tx, composite[:])
 	if err != nil {
 		return uint256.Int{}, false, err
 	}
@@ -672,7 +670,7 @@ func (r *ReaderV3) ReadAccountStorage(address common.Address, key *common.Hash) 
 }
 
 func (r *ReaderV3) ReadAccountCode(address common.Address) ([]byte, error) {
-	enc, _, err := r.tx.GetLatest(kv.CodeDomain, address[:])
+	enc, _, err := r.sd.GetLatest(kv.CodeDomain, r.tx, address[:])
 	if err != nil {
 		return nil, err
 	}
@@ -683,7 +681,7 @@ func (r *ReaderV3) ReadAccountCode(address common.Address) ([]byte, error) {
 }
 
 func (r *ReaderV3) ReadAccountCodeSize(address common.Address) (int, error) {
-	enc, _, err := r.tx.GetLatest(kv.CodeDomain, address[:])
+	enc, _, err := r.sd.GetLatest(kv.CodeDomain, r.tx, address[:])
 	if err != nil {
 		return 0, err
 	}
@@ -780,7 +778,7 @@ func (r *bufferedReader) ReadAccountCode(address common.Address) ([]byte, error)
 		return so.code, nil
 	}
 
-	return r.reader.ReadAccountCode(address, incarnation)
+	return r.reader.ReadAccountCode(address)
 }
 
 func (r *bufferedReader) ReadAccountCodeSize(address common.Address) (int, error) {
@@ -796,7 +794,7 @@ func (r *bufferedReader) ReadAccountCodeSize(address common.Address) (int, error
 		return len(code), nil
 	}
 
-	return r.reader.ReadAccountCodeSize(address, incarnation)
+	return r.reader.ReadAccountCodeSize(address)
 }
 
 func (r *bufferedReader) ReadAccountIncarnation(address common.Address) (uint64, error) {

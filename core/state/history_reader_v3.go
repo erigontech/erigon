@@ -94,7 +94,7 @@ func (hr *HistoryReaderV3) ReadAccountDataForDebug(address common.Address) (*acc
 	return hr.ReadAccountData(address)
 }
 
-func (hr *HistoryReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key common.Hash) (uint256.Int, bool, error) {
+func (hr *HistoryReaderV3) ReadAccountStorage(address common.Address, key common.Hash) (uint256.Int, bool, error) {
 	k := append(address[:], key[:]...)
 	enc, ok, err := hr.ttx.GetAsOf(kv.StorageDomain, k, hr.txNum)
 	if hr.trace {

@@ -167,7 +167,7 @@ func (t *StateTest) Subtests() []StateSubtest {
 }
 
 // Run executes a specific subtest and verifies the post-state and logs
-func (t *StateTest) Run(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, common.Hash, error) {
+func (t *StateTest) Run(tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, common.Hash, error) {
 	state, root, err := t.RunNoVerify(tx, subtest, vmconfig, dirs)
 	if err != nil {
 		return state, types.EmptyRootHash, err
@@ -185,7 +185,7 @@ func (t *StateTest) Run(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config, di
 }
 
 // RunNoVerify runs a specific subtest and returns the statedb and post-state root
-func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, common.Hash, error) {
+func (t *StateTest) RunNoVerify(tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, common.Hash, error) {
 	config, eips, err := GetChainConfig(subtest.Fork)
 	if err != nil {
 		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}

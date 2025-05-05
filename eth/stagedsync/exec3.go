@@ -1204,7 +1204,7 @@ func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *libstate.SharedDomains) {
 	}
 }
 
-func handleIncorrectRootHashError(header *types.Header, applyTx kv.RwTx, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, logger log.Logger, u Unwinder) (bool, error) {
+func handleIncorrectRootHashError(header *types.Header, applyTx kv.TemporalRwTx, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, logger log.Logger, u Unwinder) (bool, error) {
 	if cfg.badBlockHalt {
 		return false, errors.New("wrong trie root")
 	}
@@ -1216,7 +1216,7 @@ func handleIncorrectRootHashError(header *types.Header, applyTx kv.RwTx, cfg Exe
 		return false, nil
 	}
 
-	aggTx := applyTx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx)
+	aggTx := applyTx.AggTx().(*libstate.AggregatorRoTx)
 	unwindToLimit, err := aggTx.CanUnwindToBlockNum(applyTx)
 	if err != nil {
 		return false, err
