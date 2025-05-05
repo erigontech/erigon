@@ -1082,11 +1082,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		config.CaplinConfig.NetworkId = clparams.NetworkType(config.NetworkID)
 		config.CaplinConfig.LoopBlockLimit = uint64(config.LoopBlockLimit)
 		if config.CaplinConfig.EnableEngineAPI {
-			jwtSecret, err := os.ReadFile(httpRpcCfg.JWTSecretPath)
+			jwtSecretHex, err := os.ReadFile(httpRpcCfg.JWTSecretPath)
 			if err != nil {
 				logger.Error("failed to read jwt secret", "err", err, "path", httpRpcCfg.JWTSecretPath)
 				return nil, err
 			}
+			jwtSecret := common.FromHex(strings.TrimSpace(string(jwtSecretHex)))
 			executionEngine, err = executionclient.NewExecutionClientRPC(jwtSecret, httpRpcCfg.AuthRpcHTTPListenAddress, httpRpcCfg.AuthRpcPort)
 			if err != nil {
 				logger.Error("failed to create execution client", "err", err)
