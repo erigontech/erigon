@@ -29,7 +29,7 @@ jobs:
 
   Build:
     runs-on: ubuntu-22.04 ## revert it to "ubuntu-latest" once https://github.com/actions/runner-images/issues/11471 fixed
-    timeout-minutes: 45
+    timeout-minutes: 90
     outputs:
       docker_build_tag: ${{ steps.built_tag_export.outputs.docker_build_tag }}
 
