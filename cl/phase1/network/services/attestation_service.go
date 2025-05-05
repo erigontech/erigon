@@ -289,16 +289,19 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		F: func() {
 			start := time.Now()
 			defer monitor.ObserveAggregateAttestation(start)
-			err = s.committeeSubscribe.AggregateAttestation(attestation)
-			if errors.Is(err, aggregation.ErrIsSuperset) {
+			if err = s.committeeSubscribe.AggregateAttestation(attestation); errors.Is(err, aggregation.ErrIsSuperset) {
 				return
-			}
-
-			if err != nil {
+			} else if err != nil {
 				log.Warn("could not check aggregate attestation", "err", err)
 				return
 			}
-			s.emitters.Operation().SendAttestation(attestation)
+			// send to subscribers
+			if att.Attestation != nil {
+				s.emitters.Operation().SendAttestation(att.Attestation)
+			}
+			if att.SingleAttestation != nil {
+				s.emitters.Operation().SendSingleAttestation(att.SingleAttestation)
+			}
 		},
 	}
 
