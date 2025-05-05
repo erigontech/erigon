@@ -30,8 +30,8 @@ jobs:
           docker build -t test/assertoor:current .
           cd ..
 
-      - name: Run regular Kurtosis + assertoor tests
-        id: kurtosis_test
+      - name: Run self hosted Kurtosis + assertoor tests
+        id: noku_kurtosis_test
         uses: noku-team/kurtosis-assertoor-github-action@v1
         with:
           enclave_name: "kurtosis-run1-${{ github.run_id }}"
@@ -96,7 +96,7 @@ jobs:
       - name: Save test results
         if: always()
         env:
-          TEST_RESULT: ${{ steps.kurtosis_test.outputs.test_result || 'failure' }}
+          TEST_RESULT: ${{ steps.noku_kurtosis_test.outputs.test_result || 'failure' }}
         run: |
           python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
             --repo erigon \
