@@ -50,8 +50,8 @@ var idxVerify = &cobra.Command{
 				return
 			}
 			baseTxNum := efInfo.startStep * config3.DefaultStepSize
-			targetEFFileName := strings.Replace(file.Name(), "v1-", "v2.0-", 1)
-			targetEFIFileName := strings.Replace(file.Name(), "v1-", "v1.1-", 1)
+			targetEFFileName := strings.Replace(file.Name(), "v1.0-", "v2.0-", 1)
+			targetEFIFileName := strings.Replace(file.Name(), "v1.0-", "v1.1-", 1)
 
 			targetIndexFilename := targetDirCli + "/snapshots/accessor/" + targetEFIFileName + "i"
 			if manuallyOptimized {

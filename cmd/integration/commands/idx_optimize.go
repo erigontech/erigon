@@ -24,8 +24,9 @@ import (
 
 // TODO: this utility can be safely deleted after PR https://github.com/erigontech/erigon/pull/12907/ is rolled out in production
 func parseEFFilename(fileName string) (*efFileInfo, error) {
-	parts := strings.Split(fileName, ".")
-	stepParts := strings.Split(parts[1], "-")
+	partsByDot := strings.Split(fileName, ".")
+	partsByDash := strings.Split(fileName, "-")
+	stepParts := strings.Split(partsByDot[2], "-")
 	startStep, err := strconv.ParseUint(stepParts[0], 10, 64)
 	if err != nil {
 		return nil, err
@@ -36,7 +37,7 @@ func parseEFFilename(fileName string) (*efFileInfo, error) {
 	}
 
 	return &efFileInfo{
-		prefix:    parts[0],
+		prefix:    partsByDash[0],
 		stepSize:  endStep - startStep,
 		startStep: startStep,
 		endStep:   endStep,
