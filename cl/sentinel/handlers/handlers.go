@@ -163,7 +163,7 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 		err = fn(s)
 		if err != nil {
 			l["err"] = err
-			log.Warn("[pubsubhandler] stream handler error", l)
+			log.Warn("[pubsubhandler] stream handler returned error", "protocol", name, "peer", s.Conn().RemotePeer().String(), "err", err)
 			_ = s.Reset()
 			_ = s.Close()
 			return
