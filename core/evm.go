@@ -105,13 +105,13 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 func NewEVMTxContext(msg Message) evmtypes.TxContext {
 	etx := evmtypes.TxContext{
 		Origin:     msg.From(),
-		GasPrice:   msg.GasPrice(),
+		GasPrice:   msg.GasPrice().Clone(),
 		BlobHashes: msg.BlobHashes(),
 	}
-	// TODO is it specific to arbiturm only?
-	if mf := msg.MaxFeePerBlobGas(); mf != nil {
-		etx.BlobFee = mf.Clone()
-	}
+	//// TODO is it specific to arbiturm only?
+	//if mf := msg.MaxFeePerBlobGas(); mf != nil {
+	//	etx.BlobFee = mf.Clone()
+	//}
 	return etx
 }
 
