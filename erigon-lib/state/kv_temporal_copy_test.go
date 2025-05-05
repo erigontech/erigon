@@ -18,6 +18,7 @@ package state
 
 import (
 	"context"
+	"time"
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
@@ -26,8 +27,9 @@ import (
 )
 
 var ( // Compile time interface checks
-	_ kv.TemporalRwDB = (*DB)(nil)
-	_ kv.TemporalRwTx = (*Tx)(nil)
+	_ kv.TemporalRwDB    = (*DB)(nil)
+	_ kv.TemporalRwTx    = (*Tx)(nil)
+	_ kv.TemporalDebugTx = (*Tx)(nil)
 )
 
 //Variables Naming:
@@ -68,12 +70,12 @@ type DB struct {
 	agg *Aggregator
 }
 
-func New(db kv.RwDB, agg *Aggregator) (*DB, error) {
-	return &DB{RwDB: db, agg: agg}, nil
+func New(db kv.RwDB, agg *Aggregator) *DB {
+	return &DB{RwDB: db, agg: agg}
 }
 func (db *DB) Agg() any                  { return db.agg }
 func (db *DB) InternalDB() kv.RwDB       { return db.RwDB }
-func (db *DB) Debug() kv.TemporalDebugDB { return db }
+func (db *DB) Debug() kv.TemporalDebugDB { return kv.TemporalDebugDB(db) }
 
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	kvTx, err := db.RwDB.BeginRo(ctx) //nolint:gocritic
@@ -176,6 +178,7 @@ func (tx *Tx) ForceReopenAggCtx() {
 	tx.aggtx.Close()
 	tx.aggtx = tx.Agg().BeginFilesRo()
 }
+func (tx *Tx) Debug() kv.TemporalDebugTx { return tx }
 
 func (tx *Tx) WarmupDB(force bool) error { return tx.MdbxTx.WarmupDB(force) }
 func (tx *Tx) LockDBInRam() error        { return tx.MdbxTx.LockDBInRam() }
@@ -255,5 +258,46 @@ func (tx *Tx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit
 	return it, nil
 }
 
+// Write methods
+
+func (tx *Tx) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error {
+	panic("implement me pls. or use SharedDomains")
+}
+func (tx *Tx) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error {
+	panic("implement me pls. or use SharedDomains")
+}
+func (tx *Tx) DomainDelPrefix(domain kv.Domain, prefix []byte) error {
+	panic("implement me pls. or use SharedDomains")
+}
+
 // Debug methods
+
+func (tx *Tx) RangeLatest(domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
+	return tx.aggtx.DebugRangeLatest(tx.MdbxTx, domain, from, to, limit)
+}
+func (tx *Tx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step uint64, found bool, err error) {
+	return tx.aggtx.DebugGetLatestFromDB(domain, k, tx.MdbxTx)
+}
+func (tx *Tx) GetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
+	return tx.aggtx.DebugGetLatestFromFiles(domain, k, maxTxNum)
+}
 func (db *DB) DomainTables(domain ...kv.Domain) []string { return db.agg.DomainTables(domain...) }
+func (tx *Tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
+	return tx.aggtx.DomainFiles(domain...)
+}
+func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string {
+	return db.agg.InvertedIdxTables(domain...)
+}
+func (tx *Tx) TxNumsInFiles(domains ...kv.Domain) (minTxNum uint64) {
+	return tx.aggtx.TxNumsInFiles(domains...)
+}
+func (tx *Tx) PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error) {
+	return tx.aggtx.PruneSmallBatches(ctx, timeout, tx.MdbxTx)
+}
+func (tx *Tx) GreedyPruneHistory(ctx context.Context, domain kv.Domain) error {
+	return tx.aggtx.GreedyPruneHistory(ctx, domain, tx.MdbxTx)
+}
+
+func (tx *Tx) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
+	return tx.aggtx.Unwind(ctx, tx.MdbxTx, txNumUnwindTo, changeset)
+}

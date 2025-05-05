@@ -29,14 +29,13 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/kv/stream"
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 // generate the messages and services
@@ -185,6 +184,10 @@ func (db *DB) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	}
 	return &tx{ctx: ctx, db: db, stream: stream, streamCancelFn: streamCancelFn, viewID: msg.ViewId, id: msg.TxId}, nil
 }
+func (db *DB) Debug() kv.TemporalDebugDB                           { return kv.TemporalDebugDB(db) }
+func (db *DB) DomainTables(domain ...kv.Domain) []string           { panic("not implemented") }
+func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string { panic("not implemented") }
+
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	t, err := db.BeginRo(ctx) //nolint:gocritic
 	if err != nil {
@@ -230,7 +233,7 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) (err e
 }
 
 func (tx *tx) AggTx() any                 { panic("not implemented") }
-func (db *DB) Debug() kv.TemporalDebugDB  { panic("not implemented") }
+func (tx *tx) Debug() kv.TemporalDebugTx  { panic("not implemented") }
 func (db *DB) OnFreeze(f kv.OnFreezeFunc) { panic("not implemented") }
 
 func (tx *tx) ViewID() uint64  { return tx.viewID }
@@ -366,7 +369,7 @@ func (tx *tx) Cursor(bucket string) (kv.Cursor, error) {
 }
 
 func (tx *tx) ListBuckets() ([]string, error) {
-	return nil, errors.New("function ListBuckets is not implemented for remoteTx")
+	return nil, errors.New("function ListTables is not implemented for remoteTx")
 }
 
 // func (c *remoteCursor) Put(k []byte, v []byte) error            { panic("not supported") }
@@ -651,6 +654,11 @@ func (tx *tx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err er
 		return nil, 0, err
 	}
 	return reply.V, 0, nil
+}
+
+func (tx *tx) HasPrefix(domain kv.Domain, prefix []byte) (firstKey []byte, ok bool, err error) {
+	//TODO implement me
+	panic("implement me")
 }
 
 func (tx *tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {

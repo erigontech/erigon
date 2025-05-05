@@ -128,10 +128,7 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 	}
 	defer agg.Close()
 
-	_db, err := temporal.New(db, agg)
-	if err != nil {
-		panic(err)
-	}
+	_db := temporal.New(db, agg)
 
 	tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	if err != nil {
@@ -400,10 +397,7 @@ func NewTestTemporalDb(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *state.
 	}
 	tb.Cleanup(agg.Close)
 
-	_db, err := temporal.New(db, agg)
-	if err != nil {
-		tb.Fatal(err)
-	}
+	_db := temporal.New(db, agg)
 	tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	if err != nil {
 		tb.Fatal(err)

@@ -45,13 +45,13 @@ func ResetState(db kv.RwDB, agg *state.Aggregator, ctx context.Context, chain st
 		return err
 	}
 
-	if err := ResetExec(ctx, db, agg, chain, tmpDir, logger); err != nil {
+	if err := ResetExec(ctx, db, agg); err != nil {
 		return err
 	}
 	return nil
 }
 
-func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, logger log.Logger) error {
+func ResetBlocks(tx kv.RwTx, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, logger log.Logger) error {
 	// keep Genesis
 	if err := rawdb.TruncateBlocks(context.Background(), tx, 1); err != nil {
 		return err
@@ -88,7 +88,7 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services.Full
 
 	if br.FrozenBlocks() > 0 {
 		logger.Info("filling db from snapshots", "blocks", br.FrozenBlocks())
-		if err := stagedsync.FillDBFromSnapshots("filling_db_from_snapshots", context.Background(), tx, dirs, br, agg, logger); err != nil {
+		if err := stagedsync.FillDBFromSnapshots("filling_db_from_snapshots", context.Background(), tx, dirs, br, logger); err != nil {
 			return err
 		}
 		_ = stages.SaveStageProgress(tx, stages.Snapshots, br.FrozenBlocks())
@@ -127,7 +127,7 @@ func ResetBorHeimdall(ctx context.Context, tx kv.RwTx, db kv.RwDB) error {
 	return nil
 }
 
-func ResetPolygonSync(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, cc chain.Config, logger log.Logger) error {
+func ResetPolygonSync(tx kv.RwTx, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, cc chain.Config, logger log.Logger) error {
 	tables := []string{
 		kv.BorEventNums,
 		kv.BorEvents,
@@ -144,7 +144,7 @@ func ResetPolygonSync(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services
 		}
 	}
 
-	if err := ResetBlocks(tx, db, agg, br, bw, dirs, logger); err != nil {
+	if err := ResetBlocks(tx, br, bw, dirs, logger); err != nil {
 		return err
 	}
 
@@ -158,12 +158,12 @@ func ResetSenders(ctx context.Context, tx kv.RwTx) error {
 	return clearStageProgress(tx, stages.Senders)
 }
 
-func ResetExec(ctx context.Context, db kv.RwDB, agg *state.Aggregator, chain string, tmpDir string, logger log.Logger) (err error) {
+func ResetExec(ctx context.Context, db kv.RwDB, agg *state.Aggregator) (err error) {
 	cleanupList := make([]string, 0)
 	cleanupList = append(cleanupList, stateBuckets...)
 	cleanupList = append(cleanupList, stateHistoryBuckets...)
 	cleanupList = append(cleanupList, agg.DomainTables(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain)...)
-	cleanupList = append(cleanupList, agg.InvertedIndexTables(kv.LogAddrIdx, kv.LogTopicIdx, kv.TracesFromIdx, kv.TracesToIdx)...)
+	cleanupList = append(cleanupList, agg.InvertedIdxTables(kv.LogAddrIdx, kv.LogTopicIdx, kv.TracesFromIdx, kv.TracesToIdx)...)
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if err := clearStageProgress(tx, stages.Execution); err != nil {

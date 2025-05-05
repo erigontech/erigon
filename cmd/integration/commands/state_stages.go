@@ -25,19 +25,16 @@ import (
 	"os"
 	"time"
 
-	stateLib "github.com/erigontech/erigon-lib/state"
-
-	"github.com/erigontech/erigon-lib/wrap"
-
 	"github.com/c2h5oh/datasize"
 	"github.com/spf13/cobra"
-
-	"github.com/erigontech/erigon-lib/log/v3"
 
 	chain2 "github.com/erigontech/erigon-lib/chain"
 	common2 "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	stateLib "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core"
@@ -156,13 +153,6 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig params.MiningConfig, ctx 
 		return err
 	}
 
-	sn, borSn, agg, _, _, _, err := allSnapshots(ctx, db, logger1)
-	if err != nil {
-		return err
-	}
-	defer sn.Close()
-	defer borSn.Close()
-	defer agg.Close()
 	engine, vmConfig, stateStages, miningStages, miner := newSync(ctx, db, &miningConfig, logger1)
 	chainConfig, pm := fromdb.ChainConfig(db), fromdb.PruneMode(db)
 
@@ -390,13 +380,6 @@ func checkMinedBlock(b1, b2 *types.Block, chainConfig *chain2.Config) {
 func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log.Logger) error {
 	chainConfig := fromdb.ChainConfig(db)
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
-	sn, borSn, agg, _, _, _, err := allSnapshots(ctx, db, logger)
-	if err != nil {
-		return err
-	}
-	defer sn.Close()
-	defer borSn.Close()
-	defer agg.Close()
 	engine, vmConfig, sync, _, _ := newSync(ctx, db, nil, logger)
 
 	tx, err := db.BeginRw(ctx)

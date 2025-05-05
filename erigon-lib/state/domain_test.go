@@ -1597,7 +1597,7 @@ func TestDomainRange(t *testing.T) {
 	}
 
 	{
-		it, err := dc.RangeLatest(tx, nil, nil, -1)
+		it, err := dc.DebugRangeLatest(tx, nil, nil, -1)
 		require.NoError(err)
 		keys, vals, err := stream.ToArrayKV(it)
 		require.NoError(err)
@@ -1997,7 +1997,7 @@ func TestDomain_Unwind(t *testing.T) {
 	//maxTx := uint64(float64(d.aggregationStep) * 1.5)
 	maxTx := d.aggregationStep - 2
 	currTx := maxTx - 1
-	diffSetMap := map[uint64][]DomainEntryDiff{}
+	diffSetMap := map[uint64][]kv.DomainEntryDiff{}
 
 	writeKeys := func(t *testing.T, d *Domain, db kv.RwDB, maxTx uint64) {
 		t.Helper()
@@ -2010,7 +2010,7 @@ func TestDomain_Unwind(t *testing.T) {
 		defer writer.close()
 		var preval1, preval2, preval3, preval4 []byte
 		for i := uint64(0); i < maxTx; i++ {
-			writer.diff = &StateDiffDomain{}
+			writer.diff = &kv.DomainDiff{}
 			writer.SetTxNum(i)
 			if i%3 == 0 && i > 0 { // once in 3 txn put key3 -> value3.i and skip other keys update
 				if i%12 == 0 { // once in 12 txn delete key3 before update
@@ -2059,7 +2059,7 @@ func TestDomain_Unwind(t *testing.T) {
 		writer := dc.NewWriter()
 		defer writer.close()
 
-		totalDiff := []DomainEntryDiff{}
+		totalDiff := []kv.DomainEntryDiff{}
 		if currTx > unwindTo {
 			totalDiff = diffSetMap[currTx]
 			fmt.Println(currTx)
@@ -2069,7 +2069,7 @@ func TestDomain_Unwind(t *testing.T) {
 			}
 		}
 
-		err = dc.Unwind(ctx, tx, unwindTo/d.aggregationStep, unwindTo, totalDiff)
+		err = dc.unwind(ctx, tx, unwindTo/d.aggregationStep, unwindTo, totalDiff)
 		currTx = unwindTo
 		require.NoError(t, err)
 		dc.Close()
@@ -2097,10 +2097,10 @@ func TestDomain_Unwind(t *testing.T) {
 			defer ectx.Close()
 			uc := d.BeginFilesRo()
 			defer uc.Close()
-			et, err := ectx.RangeLatest(etx, nil, nil, -1)
+			et, err := ectx.DebugRangeLatest(etx, nil, nil, -1)
 			require.NoError(t, err)
 
-			ut, err := uc.RangeLatest(utx, nil, nil, -1)
+			ut, err := uc.DebugRangeLatest(utx, nil, nil, -1)
 			require.NoError(t, err)
 			compareIterators(t, et, ut)
 		})
@@ -2481,7 +2481,7 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 	var ki int
 	for key, updates := range data {
 
-		v, found, st, en, err := dc.getFromFiles([]byte(key), 0)
+		v, found, st, en, err := dc.getLatestFromFiles([]byte(key), 0)
 		require.True(t, found)
 		require.NoError(t, err)
 		for i := len(updates) - 1; i >= 0; i-- {

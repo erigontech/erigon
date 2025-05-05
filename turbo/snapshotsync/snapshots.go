@@ -754,7 +754,7 @@ func (s *RoSnapshots) EnableMadvWillNeed() *RoSnapshots {
 
 	for _, t := range s.enums {
 		for _, sn := range v.segments[t].Segments {
-			sn.src.EnableMadvWillNeed()
+			sn.src.MadvWillNeed()
 		}
 	}
 	return s

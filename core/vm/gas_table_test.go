@@ -108,9 +108,7 @@ func testTemporalDB(t *testing.T) *temporal.DB {
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 
-	_db, err := temporal.New(db, agg)
-	require.NoError(t, err)
-	return _db
+	return temporal.New(db, agg)
 }
 
 func testTemporalTxSD(t *testing.T, db *temporal.DB) (kv.RwTx, *state3.SharedDomains) {

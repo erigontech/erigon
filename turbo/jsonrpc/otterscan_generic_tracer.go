@@ -22,7 +22,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cmd/state/exec3"
+	"github.com/erigontech/erigon/execution/exec3"
 
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"

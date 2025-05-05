@@ -105,7 +105,7 @@ func (r *Reader) Events(ctx context.Context, blockHash libcommon.Hash, blockNum 
 			nil,
 		)
 
-		eventsRaw = append(eventsRaw, &msg)
+		eventsRaw = append(eventsRaw, msg)
 	}
 
 	return eventsRaw, nil
@@ -198,7 +198,7 @@ func messageFromData(to libcommon.Address, data []byte) *types.Message {
 		nil,
 	)
 
-	return &msg
+	return msg
 }
 
 // NewStateSyncEventMessages creates a corresponding message that can be passed to EVM for multiple state sync events
@@ -221,7 +221,7 @@ func NewStateSyncEventMessages(stateSyncEvents []rlp.RawValue, stateReceiverCont
 			nil,   // maxFeePerBlobGas
 		)
 
-		msgs[i] = &msg
+		msgs[i] = msg
 	}
 
 	return msgs

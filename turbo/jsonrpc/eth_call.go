@@ -827,15 +827,13 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		// Set the accesslist to the last al
 		args.AccessList = &accessList
 
-		var msg types.Message
-
 		var baseFee *uint256.Int = nil
 		// check if EIP-1559
 		if header.BaseFee != nil {
 			baseFee, _ = uint256.FromBig(header.BaseFee)
 		}
 
-		msg, err = args.ToMessage(api.GasCap, baseFee)
+		msg, err := args.ToMessage(api.GasCap, baseFee)
 		if err != nil {
 			return nil, err
 		}
@@ -848,7 +846,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 
 		evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, config)
 		gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
-		res, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
+		res, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		if err != nil {
 			return nil, err
 		}

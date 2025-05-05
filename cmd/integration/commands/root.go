@@ -113,5 +113,6 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (tdb kv.
 	if err != nil {
 		return nil, err
 	}
-	return temporal.New(rawDB, agg)
+	tdb = temporal.New(rawDB, agg)
+	return tdb, nil
 }

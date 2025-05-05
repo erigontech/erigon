@@ -176,10 +176,7 @@ func runCmd(ctx *cli.Context) error {
 		return err
 	}
 	defer agg.Close()
-	tdb, err := temporal.New(db, agg)
-	if err != nil {
-		return err
-	}
+	tdb := temporal.New(db, agg)
 	tx, err := tdb.BeginTemporalRw(context.Background())
 	if err != nil {
 		return err
