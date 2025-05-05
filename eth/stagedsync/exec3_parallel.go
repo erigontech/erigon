@@ -88,7 +88,7 @@ type executor interface {
 	readState() *state.StateV3Buffered
 	domains() *libstate.SharedDomains
 
-	commit(ctx context.Context, execStage *StageState, tx kv.TemporalRwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.RwTx, time.Duration, error)
+	commit(ctx context.Context, execStage *StageState, tx kv.RwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.RwTx, time.Duration, error)
 	resetWorkers(ctx context.Context, rs *state.StateV3Buffered, applyTx kv.Tx) error
 
 	LogExecuted(tx kv.Tx)
@@ -625,7 +625,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 	return nil
 }
 
-func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.TemporalRwTx, useExternalTx bool, resetWorkers func(ctx context.Context, rs *state.StateV3Buffered, applyTx kv.Tx) error) (kv.RwTx, time.Duration, error) {
+func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.RwTx, useExternalTx bool, resetWorkers func(ctx context.Context, rs *state.StateV3Buffered, applyTx kv.Tx) error) (kv.RwTx, time.Duration, error) {
 	err := execStage.Update(tx, te.lastCommittedBlockNum)
 
 	if err != nil {
@@ -658,7 +658,12 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.T
 		}
 	}
 
-	doms, err := libstate.NewSharedDomains(tx, te.logger)
+	temporalTx, ok := tx.(kv.TemporalTx)
+	if !ok {
+		return nil, t2, errors.New("tx is not a temporal tx")
+	}
+
+	doms, err := libstate.NewSharedDomains(temporalTx, te.logger)
 
 	if err != nil {
 		tx.Rollback()
@@ -1165,7 +1170,7 @@ func (pe *parallelExecutor) LogComplete(tx kv.Tx) {
 	pe.progress.LogComplete(tx, pe.rs.StateV3, pe)
 }
 
-func (pe *parallelExecutor) commit(ctx context.Context, execStage *StageState, tx kv.TemporalRwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.RwTx, time.Duration, error) {
+func (pe *parallelExecutor) commit(ctx context.Context, execStage *StageState, tx kv.RwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.RwTx, time.Duration, error) {
 	pe.pause()
 	defer pe.resume()
 
@@ -1384,7 +1389,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			}
 
 			if blockExecutor, ok := pe.blockExecutors[blockResult.BlockNum+1]; ok {
-				pe.onBlockStart(ctx, blockExecutor.blockNum, blockExecutor.blockHash)
+				pe.onBlockStart(ctx, blockExecutor.blockNum, blockExecutor.BlockHash)
 				blockExecutor.execStarted = time.Now()
 				blockExecutor.scheduleExecution(ctx, pe)
 			}

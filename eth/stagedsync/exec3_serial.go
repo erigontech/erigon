@@ -47,7 +47,7 @@ func (se *serialExecutor) wait(ctx context.Context) error {
 	return nil
 }
 
-func (se *serialExecutor) commit(ctx context.Context, execStage *StageState, tx kv.TemporalRwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.RwTx, time.Duration, error) {
+func (se *serialExecutor) commit(ctx context.Context, execStage *StageState, tx kv.RwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.RwTx, time.Duration, error) {
 	return se.txExecutor.commit(ctx, execStage, tx, useExternalTx, se.resetWorkers)
 }
 

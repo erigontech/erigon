@@ -992,6 +992,10 @@ func ExecV3(ctx context.Context,
 						}
 					case *blockResult:
 						if applyResult.BlockNum > 0 && !applyResult.isPartial { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
+							checkReceipts := !cfg.vmConfig.StatelessExec &&
+								cfg.chainConfig.IsByzantium(applyResult.BlockNum) &&
+								!cfg.vmConfig.NoReceipts && !isMining
+							
 							if err := core.BlockPostValidation(applyResult.GasUsed, be.blobGasUsed, checkReceipts, blockReceipts,
 								txTask.Header, pe.isMining, txTask.Txs, pe.cfg.chainConfig, pe.logger); err != nil {
 								return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
@@ -1161,12 +1165,19 @@ func ExecV3(ctx context.Context,
 }
 
 // nolint
-func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *libstate.SharedDomains) {
+func dumpPlainStateDebug(tx kv.RwTx, doms *libstate.SharedDomains) {
 	if doms != nil {
 		doms.Flush(context.Background(), tx, 0)
 	}
+
+	temporalRwTx, ok := tx.(kv.TemporalRwTx)
+
+	if !ok {
+		return
+	}
+
 	{
-		it, err := tx.Debug().RangeLatest(kv.AccountsDomain, nil, nil, -1)
+		it, err := temporalRwTx.Debug().RangeLatest(kv.AccountsDomain, nil, nil, -1)
 		if err != nil {
 			panic(err)
 		}
@@ -1181,7 +1192,7 @@ func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *libstate.SharedDomains) {
 		}
 	}
 	{
-		it, err := tx.Debug().RangeLatest(kv.StorageDomain, nil, nil, -1)
+		it, err := temporalRwTx.Debug().RangeLatest(kv.StorageDomain, nil, nil, -1)
 		if err != nil {
 			panic(1)
 		}
@@ -1194,7 +1205,7 @@ func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *libstate.SharedDomains) {
 		}
 	}
 	{
-		it, err := tx.Debug().RangeLatest(kv.CommitmentDomain, nil, nil, -1)
+		it, err := temporalRwTx.Debug().RangeLatest(kv.CommitmentDomain, nil, nil, -1)
 		if err != nil {
 			panic(1)
 		}
@@ -1211,7 +1222,7 @@ func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *libstate.SharedDomains) {
 	}
 }
 
-func handleIncorrectRootHashError(header *types.Header, applyTx kv.TemporalRwTx, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, logger log.Logger, u Unwinder) (bool, error) {
+func handleIncorrectRootHashError(header *types.Header, applyTx kv.RwTx, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, logger log.Logger, u Unwinder) (bool, error) {
 	if cfg.badBlockHalt {
 		return false, errors.New("wrong trie root")
 	}
@@ -1223,7 +1234,13 @@ func handleIncorrectRootHashError(header *types.Header, applyTx kv.TemporalRwTx,
 		return false, nil
 	}
 
-	aggTx := applyTx.AggTx().(*libstate.AggregatorRoTx)
+	temporalTx, ok := applyTx.(kv.TemporalRwTx)
+
+	if !ok {
+		return false, errors.New("tx is not a temporal tx")
+	}
+
+	aggTx := temporalTx.AggTx().(*libstate.AggregatorRoTx)
 	unwindToLimit, err := aggTx.CanUnwindToBlockNum(applyTx)
 	if err != nil {
 		return false, err
@@ -1265,6 +1282,11 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	}
 	if doms.BlockNum() != header.Number.Uint64() {
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
+	}
+
+	applyTx, ok := applyTx.(kv.TemporalRwTx)
+	if !ok {
+		return false, errors.New("tx is not a temporal tx")
 	}
 
 	computedRootHash, err := doms.ComputeCommitment(ctx, applyTx, true, header.Number.Uint64(), e.LogPrefix())

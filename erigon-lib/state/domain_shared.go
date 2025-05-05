@@ -230,8 +230,8 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.TemporalRwTx, block
 	return sd.Flush(ctx, rwTx, 0)
 }
 
-func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.TemporalTx, blockNum uint64) ([]byte, error) {
-	it, err := roTx.HistoryRange(kv.StorageDomain, int(sd.TxNum()), math.MaxInt64, order.Asc, -1)
+func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Tx, blockNum uint64) ([]byte, error) {
+	it, err := sd.aggTx.HistoryRange(kv.StorageDomain, int(sd.TxNum()), math.MaxInt64, order.Asc, -1, roTx)
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +244,7 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Temporal
 		sd.sdCtx.TouchKey(kv.AccountsDomain, string(k), nil)
 	}
 
-	it, err = roTx.HistoryRange(kv.StorageDomain, int(sd.TxNum()), math.MaxInt64, order.Asc, -1)
+	it, err = sd.aggTx.HistoryRange(kv.StorageDomain, int(sd.TxNum()), math.MaxInt64, order.Asc, -1, roTx)
 	if err != nil {
 		return nil, err
 	}
@@ -386,7 +386,7 @@ func (sd *SharedDomains) LatestCommitment(roTx kv.Tx, prefix []byte) ([]byte, ui
 		// sd cache values as is (without transformation) so safe to return
 		return v, prevStep, nil
 	}
-	v, step, found, err := roTtx.Debug().GetLatestFromDB(kv.CommitmentDomain, prefix)
+	v, step, found, err := aggTx.DebugGetLatestFromDB(kv.CommitmentDomain, prefix, roTx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
 	}
@@ -397,7 +397,7 @@ func (sd *SharedDomains) LatestCommitment(roTx kv.Tx, prefix []byte) ([]byte, ui
 
 	// getLatestFromFiles doesn't provide same semantics as getLatestFromDB - it returns start/end tx
 	// of file where the value is stored (not exact step when kv has been set)
-	v, _, startTx, endTx, err := sd.roTtx.Debug().GetLatestFromFiles(kv.CommitmentDomain, prefix, 0)
+	v, _, startTx, endTx, err := aggTx.DebugGetLatestFromFiles(kv.CommitmentDomain, prefix, 0)
 	if err != nil {
 		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
 	}
