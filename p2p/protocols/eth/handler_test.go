@@ -27,19 +27,17 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
 	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
-	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
-	params2 "github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -262,9 +260,6 @@ func TestGetBlockHeaders(t *testing.T) {
 }
 
 func TestGetBlockReceipts(t *testing.T) {
-	if !sentry_multi_client.EnableP2PReceipts {
-		t.Skip("")
-	}
 	// Define three accounts to simulate transactions with
 	acc1Key, _ := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
 	acc2Key, _ := crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
@@ -305,7 +300,7 @@ func TestGetBlockReceipts(t *testing.T) {
 	receiptsGetter := receipts.NewGenerator(m.BlockReader, m.Engine)
 	// Collect the hashes to request, and the response to expect
 	var (
-		hashes   []libcommon.Hash
+		hashes   []common.Hash
 		receipts []rlp.RawValue
 	)
 	tx, err := m.DB.BeginTemporalRo(m.Ctx)
@@ -350,7 +345,7 @@ func TestGetBlockReceipts(t *testing.T) {
 // wraps it into a mock backend.
 func mockWithGenerator(t *testing.T, blocks int, generator func(int, *core.BlockGen)) *mock.MockSentry {
 	m := mock.MockWithGenesis(t, &types.Genesis{
-		Config: params2.TestChainConfig,
+		Config: chain.TestChainConfig,
 		Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
 	}, testKey, false)
 	if blocks > 0 {

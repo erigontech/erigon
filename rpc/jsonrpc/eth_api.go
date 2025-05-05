@@ -39,10 +39,9 @@ import (
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/filters"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/misc"
@@ -268,7 +267,7 @@ func (api *BaseAPI) chainConfigWithGenesis(ctx context.Context, tx kv.Tx) (*chai
 	if genesisBlock == nil {
 		return nil, nil, errors.New("genesis block not found in database")
 	}
-	cc, err = rawdb.ReadChainConfig(tx, genesisBlock.Hash())
+	cc, err = core.ReadChainConfig(tx, genesisBlock.Hash())
 	if err != nil {
 		return nil, nil, err
 	}

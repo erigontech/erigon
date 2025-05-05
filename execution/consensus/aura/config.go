@@ -24,17 +24,17 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon/execution/consensus"
 )
 
 // Draws a validator nonce modulo number of validators.
-func GetFromValidatorSet(set ValidatorSet, parent libcommon.Hash, nonce uint, call consensus.Call) (libcommon.Address, error) {
+func GetFromValidatorSet(set ValidatorSet, parent common.Hash, nonce uint, call consensus.Call) (common.Address, error) {
 	//d, err := set.defaultCaller(parent)
 	//if err != nil {
-	//	return libcommon.Address{}, err
+	//	return common.Address{}, err
 	//}
 	return set.getWithCaller(parent, nonce, call)
 }
@@ -66,12 +66,12 @@ func newValidatorSetFromJson(j *chain.ValidatorSetJson, posdaoTransition *uint64
 
 type Code struct {
 	Code     []byte
-	CodeHash libcommon.Hash
+	CodeHash common.Hash
 }
 
 type BlockRewardContract struct {
 	blockNum uint64
-	address  libcommon.Address // On-chain address.
+	address  common.Address // On-chain address.
 }
 
 type BlockRewardContractList []BlockRewardContract
@@ -91,7 +91,7 @@ func (r BlockRewardList) Less(i, j int) bool { return r[i].blockNum < r[j].block
 func (r BlockRewardList) Len() int           { return len(r) }
 func (r BlockRewardList) Swap(i, j int)      { r[i], r[j] = r[j], r[i] }
 
-func NewBlockRewardContract(address libcommon.Address) *BlockRewardContract {
+func NewBlockRewardContract(address common.Address) *BlockRewardContract {
 	return &BlockRewardContract{address: address}
 }
 
@@ -124,21 +124,21 @@ type AuthorityRoundParams struct {
 	// Transition block to strict empty steps validation.
 	StrictEmptyStepsTransition uint64
 	// If set, enables random number contract integration. It maps the transition block to the contract address.
-	RandomnessContractAddress map[uint64]libcommon.Address
+	RandomnessContractAddress map[uint64]common.Address
 	// The addresses of contracts that determine the block gas limit with their associated block
 	// numbers.
-	BlockGasLimitContractTransitions map[uint64]libcommon.Address
+	BlockGasLimitContractTransitions map[uint64]common.Address
 	// If set, this is the block number at which the consensus engine switches from AuRa to AuRa
 	// with POSDAO modifications.
 	PosdaoTransition *uint64
 	// Stores human-readable keys associated with addresses, like DNS information.
 	// This contract is primarily required to store the address of the Certifier contract.
-	Registrar *libcommon.Address
+	Registrar *common.Address
 
 	// See https://github.com/gnosischain/specs/blob/master/execution/withdrawals.md
-	WithdrawalContractAddress *libcommon.Address
+	WithdrawalContractAddress *common.Address
 
-	RewriteBytecode map[uint64]map[libcommon.Address][]byte
+	RewriteBytecode map[uint64]map[common.Address][]byte
 }
 
 func FromJson(jsonParams *chain.AuRaConfig) (AuthorityRoundParams, error) {
@@ -197,9 +197,9 @@ func FromJson(jsonParams *chain.AuRaConfig) (AuthorityRoundParams, error) {
 	}
 	sort.Sort(params.BlockReward)
 
-	params.RewriteBytecode = make(map[uint64]map[libcommon.Address][]byte, len(jsonParams.RewriteBytecode))
+	params.RewriteBytecode = make(map[uint64]map[common.Address][]byte, len(jsonParams.RewriteBytecode))
 	for block, overrides := range jsonParams.RewriteBytecode {
-		params.RewriteBytecode[block] = make(map[libcommon.Address][]byte, len(overrides))
+		params.RewriteBytecode[block] = make(map[common.Address][]byte, len(overrides))
 		for address, code := range overrides {
 			params.RewriteBytecode[block][address] = []byte(code)
 		}

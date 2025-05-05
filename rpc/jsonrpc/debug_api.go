@@ -24,6 +24,7 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
@@ -32,7 +33,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
@@ -182,7 +182,7 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 	}
 	defer tx.Rollback()
 
-	latestBlock, err := stages.GetStageProgress(tx, stages.Finish)
+	latestBlock, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
 		return nil, err
 	}

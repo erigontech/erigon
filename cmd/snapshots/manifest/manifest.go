@@ -39,11 +39,11 @@ import (
 )
 
 var (
-	VersionFlag = cli.IntFlag{
+	VersionFlag = cli.StringFlag{
 		Name:     "version",
 		Usage:    `Manifest file versions`,
 		Required: false,
-		Value:    0,
+		Value:    "0.0",
 	}
 )
 
@@ -150,8 +150,8 @@ func manifest(cliCtx *cli.Context, command string) error {
 
 	var version *snaptype.Version
 
-	if val := cliCtx.Int(VersionFlag.Name); val != 0 {
-		v := snaptype.Version(val)
+	if val := cliCtx.String(VersionFlag.Name); val != "0.0" && val != "" {
+		v, _ := snaptype.ParseVersion("v" + val)
 		version = &v
 	}
 

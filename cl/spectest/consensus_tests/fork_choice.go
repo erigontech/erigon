@@ -28,7 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain/networkid"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon/cl/abstract"
@@ -153,21 +153,21 @@ func (f *ForkChoiceStep) GetChecks() *ForkChoiceChecks {
 
 type ForkChoiceChecks struct {
 	Head *struct {
-		Slot *int            `yaml:"slot,omitempty"`
-		Root *libcommon.Hash `yaml:"root,omitempty"`
+		Slot *int         `yaml:"slot,omitempty"`
+		Root *common.Hash `yaml:"root,omitempty"`
 	} `yaml:"head,omitempty"`
 	Time                *int `yaml:"time,omitempty"`
 	GenesisTime         *int `yaml:"genesis_time,omitempty"`
 	JustifiedCheckpoint *struct {
-		Epoch *int            `yaml:"epoch,omitempty"`
-		Root  *libcommon.Hash `yaml:"root,omitempty"`
+		Epoch *int         `yaml:"epoch,omitempty"`
+		Root  *common.Hash `yaml:"root,omitempty"`
 	} `yaml:"justified_checkpoint,omitempty"`
 
 	FinalizedCheckpoint *struct {
-		Epoch *int            `yaml:"epoch,omitempty"`
-		Root  *libcommon.Hash `yaml:"root,omitempty"`
+		Epoch *int         `yaml:"epoch,omitempty"`
+		Root  *common.Hash `yaml:"root,omitempty"`
 	} `yaml:"finalized_checkpoint,omitempty"`
-	ProposerBoostRoot *libcommon.Hash `yaml:"proposer_boost_root,omitempty"`
+	ProposerBoostRoot *common.Hash `yaml:"proposer_boost_root,omitempty"`
 }
 
 type ForkChoicePayloadStatus struct {
@@ -250,15 +250,15 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 				blobSidecarService := services.NewBlobSidecarService(ctx, &clparams.MainnetBeaconConfig, forkStore, nil, ethClock, emitters, true)
 
 				blobs.Range(func(index int, value *cltypes.Blob, length int) bool {
-					var proof libcommon.Bytes48
+					var proof common.Bytes48
 					proofStr := step.Proofs[index]
-					proofBytes := libcommon.Hex2Bytes(proofStr[2:])
+					proofBytes := common.Hex2Bytes(proofStr[2:])
 					copy(proof[:], proofBytes)
 					err = blobSidecarService.ProcessMessage(ctx, nil, &cltypes.BlobSidecar{
 						Index:             uint64(index),
 						SignedBlockHeader: blk.SignedBeaconBlockHeader(),
 						Blob:              *value,
-						KzgCommitment:     libcommon.Bytes48(*blk.Block.Body.BlobKzgCommitments.Get(index)),
+						KzgCommitment:     common.Bytes48(*blk.Block.Body.BlobKzgCommitments.Get(index)),
 						KzgProof:          proof,
 					})
 					return true
@@ -305,10 +305,10 @@ func doCheck(t *testing.T, stepstr string, store *forkchoice.ForkChoiceStore, e 
 		root, v, err := store.GetHead(nil)
 		require.NoError(t, err, stepstr)
 		if e.Head.Root != nil {
-			assert.EqualValues(t, *e.Head.Root, root, stepstr)
+			assert.Equal(t, *e.Head.Root, root, stepstr)
 		}
 		if e.Head.Slot != nil {
-			assert.EqualValues(t, *e.Head.Slot, int(v), stepstr)
+			assert.Equal(t, *e.Head.Slot, int(v), stepstr)
 		}
 	}
 	if e.Time != nil {
@@ -319,13 +319,13 @@ func doCheck(t *testing.T, stepstr string, store *forkchoice.ForkChoiceStore, e 
 		//assert.EqualValues(t, e.Time, store.GenesisTime())
 	}*/
 	if e.ProposerBoostRoot != nil {
-		assert.EqualValues(t, *e.ProposerBoostRoot, store.ProposerBoostRoot(), stepstr)
+		assert.Equal(t, *e.ProposerBoostRoot, store.ProposerBoostRoot(), stepstr)
 	}
 
 	if e.FinalizedCheckpoint != nil {
 		cp := store.FinalizedCheckpoint()
 		if e.FinalizedCheckpoint.Root != nil {
-			assert.EqualValues(t, *e.FinalizedCheckpoint.Root, cp.Root, stepstr)
+			assert.Equal(t, *e.FinalizedCheckpoint.Root, cp.Root, stepstr)
 		}
 		if e.FinalizedCheckpoint.Epoch != nil {
 			assert.EqualValues(t, *e.FinalizedCheckpoint.Epoch, cp.Epoch, stepstr)
@@ -334,7 +334,7 @@ func doCheck(t *testing.T, stepstr string, store *forkchoice.ForkChoiceStore, e 
 	if e.JustifiedCheckpoint != nil {
 		cp := store.JustifiedCheckpoint()
 		if e.JustifiedCheckpoint.Root != nil {
-			assert.EqualValues(t, *e.JustifiedCheckpoint.Root, cp.Root, stepstr)
+			assert.Equal(t, *e.JustifiedCheckpoint.Root, cp.Root, stepstr)
 		}
 		if e.JustifiedCheckpoint.Epoch != nil {
 			assert.EqualValues(t, *e.JustifiedCheckpoint.Epoch, cp.Epoch, stepstr)

@@ -17,8 +17,8 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	ee "github.com/erigontech/erigon-lib/state/entity_extras"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/snaptype"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -135,6 +135,10 @@ func TestMarked_PutToDb(t *testing.T) {
 }
 
 func TestPrune(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	// prune
 	for pruneTo := RootNum(0); ; pruneTo++ {
 		var entries_count uint64

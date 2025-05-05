@@ -16,7 +16,7 @@ our daemon will only contain one method: `myNamespace_getBlockNumberByHash` whic
 
         "github.com/erigontech/erigon-lib/kv"
         "github.com/erigontech/erigon-lib/common"
-        "github.com/erigontech/erigon/core/rawdb"
+        "github.com/erigontech/erigon-db/rawdb"
     )
 
     type API struct {

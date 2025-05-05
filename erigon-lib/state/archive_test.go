@@ -32,6 +32,9 @@ import (
 )
 
 func TestArchiveWriter(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
 
 	tmp := t.TempDir()
 	logger := log.New()
@@ -59,9 +62,9 @@ func TestArchiveWriter(t *testing.T) {
 		for _, k := range keys {
 			upd := td[string(k)]
 
-			err := w.AddWord(k)
+			_, err := w.Write(k)
 			require.NoError(tb, err)
-			err = w.AddWord(upd[0].value)
+			_, err = w.Write(upd[0].value)
 			require.NoError(tb, err)
 		}
 		err := w.Compress()
@@ -76,8 +79,8 @@ func TestArchiveWriter(t *testing.T) {
 
 			fk, _ := g.Next(nil)
 			fv, _ := g.Next(nil)
-			require.EqualValues(tb, k, fk)
-			require.EqualValues(tb, upd[0].value, fv)
+			require.Equal(tb, k, fk)
+			require.Equal(tb, upd[0].value, fv)
 		}
 	}
 

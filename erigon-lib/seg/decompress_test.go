@@ -30,6 +30,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/common/page"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
@@ -62,6 +63,35 @@ func prepareLoremDict(t *testing.T) *Decompressor {
 	return d
 }
 
+func prepareLoremDictOnPagedWriter(t *testing.T, sampling int, pageCompression bool) *Decompressor {
+	t.Helper()
+	logger, require := log.New(), require.New(t)
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "compressed")
+	t.Name()
+	cfg := DefaultCfg
+	cfg.MinPatternScore = 1
+	cfg.Workers = 2
+	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	require.NoError(err)
+	defer c.Close()
+	wr := NewWriter(c, CompressNone)
+	defer wr.Close()
+
+	p := page.NewWriter(wr, sampling, pageCompression)
+	for k, w := range loremStrings {
+		key := fmt.Sprintf("key %d", k)
+		val := fmt.Sprintf("%s %d", w, k)
+		require.NoError(p.Add([]byte(key), []byte(val)))
+	}
+	require.NoError(p.Flush())
+	require.NoError(wr.Compress())
+
+	d, err := NewDecompressor(file)
+	require.NoError(err)
+	return d
+}
+
 func TestDecompressSkip(t *testing.T) {
 	d := prepareLoremDict(t)
 	defer d.Close()
@@ -80,6 +110,51 @@ func TestDecompressSkip(t *testing.T) {
 		}
 		i++
 	}
+
+	g.Reset(0)
+	_, offset := g.Next(nil)
+	require.Equal(t, 8, int(offset))
+	_, offset = g.Next(nil)
+	require.Equal(t, 16, int(offset))
+}
+
+func TestPagedReader(t *testing.T) {
+	d := prepareLoremDictOnPagedWriter(t, 2, false)
+	defer d.Close()
+	require := require.New(t)
+	g1 := NewPagedReader(d.MakeGetter(), 2, false)
+	var buf []byte
+	_, _, buf, o1 := g1.Next2(buf[:0])
+	require.Zero(o1)
+	_, _, buf, o1 = g1.Next2(buf[:0])
+	require.Zero(o1)
+	_, _, buf, o1 = g1.Next2(buf[:0])
+	require.NotZero(o1)
+
+	g := NewPagedReader(d.MakeGetter(), 2, false)
+	i := 0
+	for g.HasNext() {
+		w := loremStrings[i]
+		if i%2 == 0 {
+			g.Skip()
+		} else {
+			var word []byte
+			_, word, buf, _ = g.Next2(buf[:0])
+			expected := fmt.Sprintf("%s %d", w, i)
+			require.Equal(expected, string(word))
+		}
+		i++
+	}
+
+	g.Reset(0)
+	_, offset := g.Next(buf[:0])
+	require.Equal(0, int(offset))
+	_, offset = g.Next(buf[:0])
+	require.Equal(0x2a, int(offset))
+	_, offset = g.Next(buf[:0])
+	require.Equal(0x2a, int(offset))
+	_, offset = g.Next(buf[:0])
+	require.Equal(0x52, int(offset))
 }
 
 func TestDecompressMatchOK(t *testing.T) {
@@ -328,12 +403,12 @@ func TestUncompressed(t *testing.T) {
 		_, ok := g.BinarySearch([]byte(""), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
 		require.True(ok)
 		k, _ := g.Next(nil)
-		require.Equal("", string(k))
+		require.Empty(string(k))
 
 		_, ok = g.BinarySearch(nil, d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
 		require.True(ok)
 		k, _ = g.Next(nil)
-		require.Equal("", string(k))
+		require.Empty(string(k))
 	})
 
 }
@@ -519,7 +594,7 @@ func rmNewLine(s string) string {
 func TestDecompressTorrent(t *testing.T) {
 	t.Skip()
 
-	fpath := "/mnt/data/chains/mainnet/snapshots/v1-014000-014500-transactions.seg"
+	fpath := "/mnt/data/chains/mainnet/snapshots/v1.0-014000-014500-transactions.seg"
 	st, err := os.Stat(fpath)
 	require.NoError(t, err)
 	fmt.Printf("file: %v, size: %d\n", st.Name(), st.Size())

@@ -30,14 +30,11 @@ import (
 
 	"github.com/goccy/go-json"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
-
-	"github.com/erigontech/erigon/turbo/testlog"
-
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
+	"github.com/erigontech/erigon/turbo/testlog"
 )
 
 // Tests whether remote HTTP servers are correctly notified of new work.
@@ -74,11 +71,11 @@ func TestRemoteNotify(t *testing.T) {
 		if want := ethash.SealHash(header).Hex(); work[0] != want {
 			t.Errorf("work packet hash mismatch: have %s, want %s", work[0], want)
 		}
-		if want := libcommon.BytesToHash(SeedHash(header.Number.Uint64())).Hex(); work[1] != want {
+		if want := common.BytesToHash(SeedHash(header.Number.Uint64())).Hex(); work[1] != want {
 			t.Errorf("work packet seed mismatch: have %s, want %s", work[1], want)
 		}
 		target := new(big.Int).Div(new(big.Int).Lsh(big.NewInt(1), 256), header.Difficulty)
-		if want := libcommon.BytesToHash(target.Bytes()).Hex(); work[2] != want {
+		if want := common.BytesToHash(target.Bytes()).Hex(); work[2] != want {
 			t.Errorf("work packet target mismatch: have %s, want %s", work[2], want)
 		}
 	case <-time.After(3 * time.Second):
@@ -244,7 +241,7 @@ func TestStaleSubmission(t *testing.T) {
 	defer ethash.Close()
 	api := &API{ethash}
 
-	fakeNonce, fakeDigest := types.BlockNonce{0x01, 0x02, 0x03}, libcommon.HexToHash("deadbeef")
+	fakeNonce, fakeDigest := types.BlockNonce{0x01, 0x02, 0x03}, common.HexToHash("deadbeef")
 
 	testcases := []struct {
 		headers     []*types.Header
@@ -254,7 +251,7 @@ func TestStaleSubmission(t *testing.T) {
 		// Case1: submit solution for the latest mining package
 		{
 			[]*types.Header{
-				{ParentHash: libcommon.BytesToHash([]byte{0xa}), Number: big.NewInt(1), Difficulty: big.NewInt(100000000)},
+				{ParentHash: common.BytesToHash([]byte{0xa}), Number: big.NewInt(1), Difficulty: big.NewInt(100000000)},
 			},
 			0,
 			true,
@@ -262,8 +259,8 @@ func TestStaleSubmission(t *testing.T) {
 		// Case2: submit solution for the previous package but have same parent.
 		{
 			[]*types.Header{
-				{ParentHash: libcommon.BytesToHash([]byte{0xb}), Number: big.NewInt(2), Difficulty: big.NewInt(100000000)},
-				{ParentHash: libcommon.BytesToHash([]byte{0xb}), Number: big.NewInt(2), Difficulty: big.NewInt(100000001)},
+				{ParentHash: common.BytesToHash([]byte{0xb}), Number: big.NewInt(2), Difficulty: big.NewInt(100000000)},
+				{ParentHash: common.BytesToHash([]byte{0xb}), Number: big.NewInt(2), Difficulty: big.NewInt(100000001)},
 			},
 			0,
 			true,
@@ -271,8 +268,8 @@ func TestStaleSubmission(t *testing.T) {
 		// Case3: submit stale but acceptable solution
 		{
 			[]*types.Header{
-				{ParentHash: libcommon.BytesToHash([]byte{0xc}), Number: big.NewInt(3), Difficulty: big.NewInt(100000000)},
-				{ParentHash: libcommon.BytesToHash([]byte{0xd}), Number: big.NewInt(9), Difficulty: big.NewInt(100000000)},
+				{ParentHash: common.BytesToHash([]byte{0xc}), Number: big.NewInt(3), Difficulty: big.NewInt(100000000)},
+				{ParentHash: common.BytesToHash([]byte{0xd}), Number: big.NewInt(9), Difficulty: big.NewInt(100000000)},
 			},
 			0,
 			true,
@@ -280,8 +277,8 @@ func TestStaleSubmission(t *testing.T) {
 		// Case4: submit very old solution
 		{
 			[]*types.Header{
-				{ParentHash: libcommon.BytesToHash([]byte{0xe}), Number: big.NewInt(10), Difficulty: big.NewInt(100000000)},
-				{ParentHash: libcommon.BytesToHash([]byte{0xf}), Number: big.NewInt(17), Difficulty: big.NewInt(100000000)},
+				{ParentHash: common.BytesToHash([]byte{0xe}), Number: big.NewInt(10), Difficulty: big.NewInt(100000000)},
+				{ParentHash: common.BytesToHash([]byte{0xf}), Number: big.NewInt(17), Difficulty: big.NewInt(100000000)},
 			},
 			0,
 			false,

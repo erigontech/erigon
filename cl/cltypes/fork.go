@@ -17,16 +17,16 @@
 package cltypes
 
 import (
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
 
 // Fork data, contains if we were on bellatrix/alteir/phase0 and transition epoch.
 type Fork struct {
-	PreviousVersion libcommon.Bytes4 `json:"previous_version"`
-	CurrentVersion  libcommon.Bytes4 `json:"current_version"`
-	Epoch           uint64           `json:"epoch,string"`
+	PreviousVersion common.Bytes4 `json:"previous_version"`
+	CurrentVersion  common.Bytes4 `json:"current_version"`
+	Epoch           uint64        `json:"epoch,string"`
 }
 
 func (*Fork) Static() bool {

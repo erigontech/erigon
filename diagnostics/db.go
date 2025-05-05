@@ -161,7 +161,7 @@ func writeDbTables(w http.ResponseWriter, r *http.Request, dataDir string, dbnam
 
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		var e error
-		buckets, e := tx.ListBuckets()
+		buckets, e := tx.ListTables()
 		if e != nil {
 			return e
 		}

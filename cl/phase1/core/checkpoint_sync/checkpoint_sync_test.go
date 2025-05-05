@@ -45,7 +45,7 @@ func TestRemoteCheckpointSync(t *testing.T) {
 	wantRoot, err := state.HashSSZ()
 	require.NoError(t, err)
 
-	assert.Equal(t, haveRoot, wantRoot)
+	assert.Equal(t, wantRoot, haveRoot)
 }
 
 func TestLocalCheckpointSyncFromFile(t *testing.T) {
@@ -70,7 +70,7 @@ func TestLocalCheckpointSyncFromFile(t *testing.T) {
 	wantRoot, err := state.HashSSZ()
 	require.NoError(t, err)
 
-	assert.Equal(t, haveRoot, wantRoot)
+	assert.Equal(t, wantRoot, haveRoot)
 }
 
 func TestLocalCheckpointSyncFromGenesis(t *testing.T) {
@@ -87,5 +87,5 @@ func TestLocalCheckpointSyncFromGenesis(t *testing.T) {
 	wantRoot, err := state.HashSSZ()
 	require.NoError(t, err)
 
-	assert.Equal(t, haveRoot, wantRoot)
+	assert.Equal(t, wantRoot, haveRoot)
 }

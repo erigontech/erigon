@@ -22,13 +22,14 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	btree2 "github.com/tidwall/btree"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
-	btree2 "github.com/tidwall/btree"
 )
 
 type CursorType uint8
@@ -46,8 +47,8 @@ type CursorItem struct {
 	cNonDup kv.Cursor
 
 	iter         btree2.MapIter[string, dataWithPrevStep]
-	dg           *seg.Reader
-	dg2          *seg.Reader
+	idx          *seg.Reader
+	hist         *seg.PagedReader
 	btCursor     *Cursor
 	key          []byte
 	val          []byte
@@ -300,14 +301,11 @@ func (hi *DomainLatestIterFile) Next() ([]byte, []byte, error) {
 }
 
 // debugIteratePrefix iterates over key-value pairs of the storage domain that start with given prefix
-// Such iteration is not intended to be used in public API, therefore it uses read-write transaction
-// inside the domain. Another version of this for public API use needs to be created, that uses
-// roTx instead and supports ending the iterations before it reaches the end.
 //
 // k and v lifetime is bounded by the lifetime of the iterator
 func (dt *DomainRoTx) debugIteratePrefix(prefix []byte, haveRamUpdates bool,
 	ramIter btree2.MapIter[string, dataWithPrevStep],
-	it func(k []byte, v []byte, step uint64) error,
+	it func(k []byte, v []byte, step uint64) (cont bool, err error),
 	txNum, stepSize uint64,
 	roTx kv.Tx,
 ) error {
@@ -389,7 +387,7 @@ func (dt *DomainRoTx) debugIteratePrefix(prefix []byte, haveRamUpdates bool,
 					}
 				}
 			case FILE_CURSOR:
-				indexList := dt.d.AccessorList
+				indexList := dt.d.Accessors
 				if indexList.Has(AccessorBTree) {
 					if ci1.btCursor.Next() {
 						ci1.key = ci1.btCursor.Key()
@@ -402,17 +400,17 @@ func (dt *DomainRoTx) debugIteratePrefix(prefix []byte, haveRamUpdates bool,
 					}
 				}
 				if indexList.Has(AccessorHashMap) {
-					ci1.dg.Reset(ci1.latestOffset)
-					if !ci1.dg.HasNext() {
+					ci1.idx.Reset(ci1.latestOffset)
+					if !ci1.idx.HasNext() {
 						break
 					}
-					key, _ := ci1.dg.Next(nil)
+					key, _ := ci1.idx.Next(nil)
 					if key != nil && bytes.HasPrefix(key, prefix) {
 						ci1.key = key
-						ci1.val, ci1.latestOffset = ci1.dg.Next(nil)
+						ci1.val, ci1.latestOffset = ci1.idx.Next(nil)
 						heap.Push(cpPtr, ci1)
 					} else {
-						ci1.dg = nil
+						ci1.idx = nil
 					}
 				}
 			case DB_CURSOR:
@@ -439,8 +437,12 @@ func (dt *DomainRoTx) debugIteratePrefix(prefix []byte, haveRamUpdates bool,
 			}
 		}
 		if len(lastVal) > 0 {
-			if err := it(lastKey, lastVal, lastStep); err != nil {
+			cont, err := it(lastKey, lastVal, lastStep)
+			if err != nil {
 				return err
+			}
+			if !cont {
+				return nil
 			}
 		}
 	}

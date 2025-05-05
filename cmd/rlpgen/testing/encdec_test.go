@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/holiman/uint256"
 )
 
@@ -50,12 +50,12 @@ func (tr *TRand) RandBytes(size int) []byte {
 	return arr
 }
 
-func (tr *TRand) RandAddress() libcommon.Address {
-	return libcommon.Address(tr.RandBytes(20))
+func (tr *TRand) RandAddress() common.Address {
+	return common.Address(tr.RandBytes(20))
 }
 
-func (tr *TRand) RandHash() libcommon.Hash {
-	return libcommon.Hash(tr.RandBytes(32))
+func (tr *TRand) RandHash() common.Hash {
+	return common.Hash(tr.RandBytes(32))
 }
 
 func (tr *TRand) RandBloom() types.Bloom {
@@ -147,26 +147,26 @@ func randTestingStruct(tr *TRand) *TestingStruct {
 	}
 
 	l = tr.RandIntInRange(0, 8)
-	_addrSlice := make([]libcommon.Address, l)
+	_addrSlice := make([]common.Address, l)
 	for i := 0; i < l; i++ {
 		_addrSlice[i] = tr.RandAddress()
 	}
 
 	l = tr.RandIntInRange(0, 8)
-	_addrSlicePtr := make([]*libcommon.Address, l)
+	_addrSlicePtr := make([]*common.Address, l)
 	for i := 0; i < l; i++ {
 		addr := tr.RandAddress()
 		_addrSlicePtr[i] = &addr
 	}
 
 	l = tr.RandIntInRange(0, 8)
-	_hashSlice := make([]libcommon.Hash, l)
+	_hashSlice := make([]common.Hash, l)
 	for i := 0; i < l; i++ {
 		_hashSlice[i] = tr.RandHash()
 	}
 
 	l = tr.RandIntInRange(0, 8)
-	_hashSlicePtr := make([]*libcommon.Hash, l)
+	_hashSlicePtr := make([]*common.Hash, l)
 	for i := 0; i < l; i++ {
 		hash := tr.RandHash()
 		_hashSlicePtr[i] = &hash
@@ -195,9 +195,9 @@ func randTestingStruct(tr *TRand) *TestingStruct {
 		d:  types.BlockNonce(tr.RandBytes(8)),
 		dd: (*types.BlockNonce)(tr.RandBytes(8)),
 		e:  tr.RandAddress(),
-		ee: (*libcommon.Address)(tr.RandBytes(20)),
+		ee: (*common.Address)(tr.RandBytes(20)),
 		f:  tr.RandHash(),
-		ff: (*libcommon.Hash)(tr.RandBytes(32)),
+		ff: (*common.Hash)(tr.RandBytes(32)),
 		g:  tr.RandBloom(),
 		gg: (*types.Bloom)(tr.RandBytes(256)),
 		h:  tr.RandBytes(tr.RandIntInRange(0, 128)),

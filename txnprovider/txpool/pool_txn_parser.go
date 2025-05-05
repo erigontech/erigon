@@ -25,6 +25,8 @@ import (
 	"io"
 	"math/bits"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
+
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/erigontech/secp256k1"
 	"github.com/holiman/uint256"
@@ -37,7 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 const (
@@ -515,7 +517,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 
 			authority, err := auth.RecoverSigner(bytes.NewBuffer(nil), make([]byte, 32))
 			if err != nil {
-				return 0, fmt.Errorf("%w: recover authorization signer: %s", ErrParseTxn, err) //nolint
+				return 0, fmt.Errorf("%w: recover authorization signer: %s stack: %s", ErrParseTxn, err, dbg.Stack()) //nolint
 			}
 			slot.Authorities = append(slot.Authorities, authority)
 			authPos += authLen
@@ -860,6 +862,20 @@ func (tx *TxnSlot) ToProtoAccountAbstractionTxn() *typesproto.AccountAbstraction
 		return nil
 	}
 
+	var paymasterData, deployerData, paymaster, deployer []byte
+	if tx.PaymasterData != nil {
+		paymasterData = tx.PaymasterData
+	}
+	if tx.DeployerData != nil {
+		deployerData = tx.DeployerData
+	}
+	if tx.Paymaster != nil {
+		paymaster = tx.Paymaster.Bytes()
+	}
+	if tx.Deployer != nil {
+		deployer = tx.Deployer.Bytes()
+	}
+
 	return &typesproto.AccountAbstractionTransaction{
 		Nonce:                       tx.Nonce,
 		ChainId:                     tx.ChainID.Bytes(),
@@ -869,10 +885,10 @@ func (tx *TxnSlot) ToProtoAccountAbstractionTxn() *typesproto.AccountAbstraction
 		SenderAddress:               tx.SenderAddress.Bytes(),
 		SenderValidationData:        tx.SenderValidationData,
 		ExecutionData:               tx.ExecutionData,
-		Paymaster:                   tx.Paymaster.Bytes(),
-		PaymasterData:               tx.PaymasterData,
-		Deployer:                    tx.Deployer.Bytes(),
-		DeployerData:                tx.DeployerData,
+		Paymaster:                   paymaster,
+		PaymasterData:               paymasterData,
+		Deployer:                    deployer,
+		DeployerData:                deployerData,
 		BuilderFee:                  tx.BuilderFee.Bytes(),
 		ValidationGasLimit:          tx.ValidationGasLimit,
 		PaymasterValidationGasLimit: tx.PaymasterValidationGasLimit,

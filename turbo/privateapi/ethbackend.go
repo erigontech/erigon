@@ -25,26 +25,28 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	params2 "github.com/erigontech/erigon-lib/chain/params"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/cmd/state/commands"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
-	"github.com/erigontech/erigon/turbo/transactions"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 // EthBackendAPIVersion
@@ -73,7 +75,7 @@ type EthBackendServer struct {
 }
 
 type EthBackend interface {
-	Etherbase() (libcommon.Address, error)
+	Etherbase() (common.Address, error)
 	NetVersion() (uint64, error)
 	NetPeerCount() (uint64, error)
 	NodesInfo(limit int) (*remote.NodesInfoReply, error)
@@ -200,7 +202,7 @@ func (s *EthBackendServer) PendingBlock(ctx context.Context, _ *emptypb.Empty) (
 }
 
 func (s *EthBackendServer) Etherbase(_ context.Context, _ *remote.EtherbaseRequest) (*remote.EtherbaseReply, error) {
-	out := &remote.EtherbaseReply{Address: gointerfaces.ConvertAddressToH160(libcommon.Address{})}
+	out := &remote.EtherbaseReply{Address: gointerfaces.ConvertAddressToH160(common.Address{})}
 
 	base, err := s.eth.Etherbase()
 	if err != nil {
@@ -269,7 +271,7 @@ func (s *EthBackendServer) ProtocolVersion(_ context.Context, _ *remote.Protocol
 }
 
 func (s *EthBackendServer) ClientVersion(_ context.Context, _ *remote.ClientVersionRequest) (*remote.ClientVersionReply, error) {
-	return &remote.ClientVersionReply{NodeName: libcommon.MakeName("erigon", params.Version)}, nil
+	return &remote.ClientVersionReply{NodeName: common.MakeName("erigon", params.Version)}, nil
 }
 
 func (s *EthBackendServer) TxnLookup(ctx context.Context, req *remote.TxnLookupRequest) (*remote.TxnLookupReply, error) {
@@ -437,32 +439,40 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remote.AAValid
 	}
 	defer tx.Rollback()
 
-	aaTxn := types.FromProto(req.Tx)
-	stateReader := state.NewHistoryReaderV3()
-	stateReader.SetTx(tx.(kv.TemporalTx))
-	ibs := state.New(stateReader)
-
 	currentBlock, err := s.blockReader.CurrentBlock(tx)
 	if err != nil {
 		return nil, err
 	}
-
 	header := currentBlock.HeaderNoCopy()
-	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, nil, s.chainConfig)
-	_, txContext, err := transactions.ComputeTxContext(ibs, nil, nil, nil, currentBlock, s.chainConfig, 0)
+
+	aaTxn := types.FromProto(req.Tx)
+	stateReader := state.NewHistoryReaderV3()
+	stateReader.SetTx(tx.(kv.TemporalTx))
+
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, s.blockReader))
+	maxTxNum, err := txNumsReader.Max(tx, header.Number.Uint64())
 	if err != nil {
 		return nil, err
 	}
 
-	ot := commands.NewOpcodeTracer(header.Number.Uint64(), true, false)
-	evm := vm.NewEVM(blockContext, txContext, ibs, s.chainConfig, vm.Config{Tracer: ot.Tracer().Hooks, ReadOnly: true})
-	validationGasLimit := aaTxn.ValidationGasLimit + aaTxn.PaymasterValidationGasLimit
-	_, _, err = aa.ValidateAATransaction(aaTxn, ibs, new(core.GasPool).AddGas(validationGasLimit), header, evm, s.chainConfig)
+	stateReader.SetTxNum(maxTxNum)
+	ibs := state.New(stateReader)
+
+	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &common.Address{}, s.chainConfig)
+
+	//ot := commands.NewOpcodeTracer(header.Number.Uint64(), true, false)
+	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, s.chainConfig, vm.Config{Tracer: nil, ReadOnly: true})
+	//ibs.SetHooks(ot.Tracer().Hooks)
+	//ot.OnTxStart(evm.GetVMContext(), nil, common.Address{})
+
+	totalGasLimit := params2.TxAAGas + aaTxn.ValidationGasLimit + aaTxn.PaymasterValidationGasLimit + aaTxn.GasLimit + aaTxn.PostOpGasLimit
+	_, _, err = aa.ValidateAATransaction(aaTxn, ibs, new(core.GasPool).AddGas(totalGasLimit), header, evm, s.chainConfig)
 	if err != nil {
+		log.Info("err", "err", err.Error())
 		return &remote.AAValidationReply{Valid: false}, nil
 	}
 
 	// read tracer
 
-	return &remote.AAValidationReply{Valid: err == nil}, nil
+	return &remote.AAValidationReply{Valid: true}, nil
 }

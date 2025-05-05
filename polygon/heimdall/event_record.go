@@ -24,7 +24,7 @@ import (
 	"math/big"
 	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/polygon/bor/borabi"
@@ -32,12 +32,12 @@ import (
 
 // EventRecord represents state record
 type EventRecord struct {
-	ID       uint64            `json:"id" yaml:"id"`
-	Contract libcommon.Address `json:"contract" yaml:"contract"`
-	Data     hexutil.Bytes     `json:"data" yaml:"data"`
-	TxHash   libcommon.Hash    `json:"tx_hash" yaml:"tx_hash"`
-	LogIndex uint64            `json:"log_index" yaml:"log_index"`
-	ChainID  string            `json:"bor_chain_id" yaml:"bor_chain_id"`
+	ID       uint64         `json:"id" yaml:"id"`
+	Contract common.Address `json:"contract" yaml:"contract"`
+	Data     hexutil.Bytes  `json:"data" yaml:"data"`
+	TxHash   common.Hash    `json:"tx_hash" yaml:"tx_hash"`
+	LogIndex uint64         `json:"log_index" yaml:"log_index"`
+	ChainID  string         `json:"bor_chain_id" yaml:"bor_chain_id"`
 }
 
 type EventRecordWithTime struct {

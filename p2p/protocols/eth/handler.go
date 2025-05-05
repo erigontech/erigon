@@ -22,11 +22,10 @@ package eth
 import (
 	"math/big"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
-
-	"github.com/erigontech/erigon/core/rawdb"
 )
 
 const (
@@ -55,15 +54,15 @@ const (
 // NodeInfo represents a short summary of the `eth` sub-protocol metadata
 // known about the host peer.
 type NodeInfo struct {
-	Network    uint64         `json:"network"`    // Ethereum network ID (1=mainnet, 11155111=Sepolia)
-	Difficulty *big.Int       `json:"difficulty"` // Total difficulty of the host's blockchain
-	Genesis    libcommon.Hash `json:"genesis"`    // SHA3 hash of the host's genesis block
-	Config     *chain.Config  `json:"config"`     // ChainDB configuration for the fork rules
-	Head       libcommon.Hash `json:"head"`       // Hex hash of the host's best owned block
+	Network    uint64        `json:"network"`    // Ethereum network ID (1=mainnet, 11155111=Sepolia)
+	Difficulty *big.Int      `json:"difficulty"` // Total difficulty of the host's blockchain
+	Genesis    common.Hash   `json:"genesis"`    // SHA3 hash of the host's genesis block
+	Config     *chain.Config `json:"config"`     // ChainDB configuration for the fork rules
+	Head       common.Hash   `json:"head"`       // Hex hash of the host's best owned block
 }
 
 // ReadNodeInfo retrieves some `eth` protocol metadata about the running host node.
-func ReadNodeInfo(getter kv.Getter, config *chain.Config, genesisHash libcommon.Hash, network uint64) *NodeInfo {
+func ReadNodeInfo(getter kv.Getter, config *chain.Config, genesisHash common.Hash, network uint64) *NodeInfo {
 	headHash := rawdb.ReadHeadHeaderHash(getter)
 	headNumber := rawdb.ReadHeaderNumber(getter, headHash)
 	var td *big.Int

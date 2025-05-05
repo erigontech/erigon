@@ -25,15 +25,15 @@ import (
 	"strings"
 	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	common "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/jwt"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/execution_client/rpc_helper"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 )
@@ -73,15 +73,15 @@ func NewExecutionClientRPC(jwtSecret []byte, addr string, port int) (*ExecutionC
 func (cc *ExecutionClientRpc) NewPayload(
 	ctx context.Context,
 	payload *cltypes.Eth1Block,
-	beaconParentRoot *libcommon.Hash,
-	versionedHashes []libcommon.Hash,
+	beaconParentRoot *common.Hash,
+	versionedHashes []common.Hash,
 	executionRequestsList []hexutil.Bytes,
 ) (PayloadStatus, error) {
 	if payload == nil {
 		return PayloadStatusValidated, nil
 	}
 
-	reversedBaseFeePerGas := libcommon.Copy(payload.BaseFeePerGas[:])
+	reversedBaseFeePerGas := common.Copy(payload.BaseFeePerGas[:])
 	for i, j := 0, len(reversedBaseFeePerGas)-1; i < j; i, j = i+1, j-1 {
 		reversedBaseFeePerGas[i], reversedBaseFeePerGas[j] = reversedBaseFeePerGas[j], reversedBaseFeePerGas[i]
 	}
@@ -153,7 +153,7 @@ func (cc *ExecutionClientRpc) NewPayload(
 	return newPayloadStatusByEngineStatus(payloadStatus.Status), checkPayloadStatus(payloadStatus)
 }
 
-func (cc *ExecutionClientRpc) ForkChoiceUpdate(ctx context.Context, finalized libcommon.Hash, head libcommon.Hash, attributes *engine_types.PayloadAttributes) ([]byte, error) {
+func (cc *ExecutionClientRpc) ForkChoiceUpdate(ctx context.Context, finalized common.Hash, head common.Hash, attributes *engine_types.PayloadAttributes) ([]byte, error) {
 	forkChoiceRequest := engine_types.ForkChoiceState{
 		HeadHash:           head,
 		SafeBlockHash:      head,
@@ -214,7 +214,7 @@ func (cc *ExecutionClientRpc) CurrentHeader(ctx context.Context) (*types.Header,
 	panic("unimplemented")
 }
 
-func (cc *ExecutionClientRpc) IsCanonicalHash(ctx context.Context, hash libcommon.Hash) (bool, error) {
+func (cc *ExecutionClientRpc) IsCanonicalHash(ctx context.Context, hash common.Hash) (bool, error) {
 	panic("unimplemented")
 }
 
@@ -244,7 +244,7 @@ func (cc *ExecutionClientRpc) GetBodiesByRange(ctx context.Context, start, count
 }
 
 // GetBodiesByHashes gets block bodies with given hashes
-func (cc *ExecutionClientRpc) GetBodiesByHashes(ctx context.Context, hashes []libcommon.Hash) ([]*types.RawBody, error) {
+func (cc *ExecutionClientRpc) GetBodiesByHashes(ctx context.Context, hashes []common.Hash) ([]*types.RawBody, error) {
 	result := []*engine_types.ExecutionPayloadBody{}
 
 	if err := cc.client.CallContext(ctx, &result, rpc_helper.GetPayloadBodiesByHashV1, hashes); err != nil {
@@ -267,7 +267,7 @@ func (cc *ExecutionClientRpc) FrozenBlocks(ctx context.Context) uint64 {
 }
 
 // HasBlock checks if block with given hash is present
-func (cc *ExecutionClientRpc) HasBlock(ctx context.Context, hash libcommon.Hash) (bool, error) {
+func (cc *ExecutionClientRpc) HasBlock(ctx context.Context, hash common.Hash) (bool, error) {
 	panic("unimplemented")
 }
 

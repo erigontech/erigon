@@ -23,7 +23,6 @@ type testAggConfig struct {
 
 func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Aggregator) {
 	tb.Helper()
-
 	db, agg := testDbAndAggregatorv3(tb, cfg.stepSize)
 	agg.commitmentValuesTransform = !cfg.disableCommitmentBranchTransform
 	agg.d[kv.CommitmentDomain].replaceKeysInValues = agg.commitmentValuesTransform
@@ -84,6 +83,9 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 }
 
 func TestAggregator_SqueezeCommitment(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
 
 	cfgd := &testAggConfig{stepSize: 32, disableCommitmentBranchTransform: true}
 	db, agg := testDbAggregatorWithFiles(t, cfgd)
@@ -137,6 +139,6 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	root, err := domains.ComputeCommitment(context.Background(), false, domains.BlockNum(), "")
 	require.NoError(t, err)
 	require.NotEmpty(t, root)
-	require.EqualValues(t, latestRoot, root)
-	require.NotEqualValues(t, commitment.EmptyRootHash, root)
+	require.Equal(t, latestRoot, root)
+	require.NotEqual(t, commitment.EmptyRootHash, root)
 }

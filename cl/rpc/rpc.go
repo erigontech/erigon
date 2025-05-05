@@ -33,7 +33,7 @@ import (
 	"github.com/golang/snappy"
 	"go.uber.org/zap/buffer"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -224,7 +224,7 @@ func (b *BeaconRpcP2P) SendBlobsSidecarByIdentifierReq(ctx context.Context, req 
 		return nil, "", err
 	}
 
-	data := libcommon.CopyBytes(buffer.Bytes())
+	data := common.CopyBytes(buffer.Bytes())
 	return b.sendBlobsSidecar(ctx, communication.BlobSidecarByRootProtocolV1, data, uint64(req.Len()))
 }
 
@@ -238,7 +238,7 @@ func (b *BeaconRpcP2P) SendBlobsSidecarByRangerReq(ctx context.Context, start, c
 		return nil, "", err
 	}
 
-	data := libcommon.CopyBytes(buffer.Bytes())
+	data := common.CopyBytes(buffer.Bytes())
 	return b.sendBlobsSidecar(ctx, communication.BlobSidecarByRangeProtocolV1, data, count*b.beaconConfig.MaxBlobsPerBlock)
 }
 
@@ -254,7 +254,7 @@ func (b *BeaconRpcP2P) SendBeaconBlocksByRangeReq(ctx context.Context, start, co
 		return nil, "", err
 	}
 
-	data := libcommon.CopyBytes(buffer.Bytes())
+	data := common.CopyBytes(buffer.Bytes())
 	return b.sendBlocksRequest(ctx, communication.BeaconBlocksByRangeProtocolV2, data, count)
 }
 
@@ -268,7 +268,7 @@ func (b *BeaconRpcP2P) SendBeaconBlocksByRootReq(ctx context.Context, roots [][3
 	if err := ssz_snappy.EncodeAndWrite(&buffer, req); err != nil {
 		return nil, "", err
 	}
-	data := libcommon.CopyBytes(buffer.Bytes())
+	data := common.CopyBytes(buffer.Bytes())
 	return b.sendBlocksRequest(ctx, communication.BeaconBlocksByRootProtocolV2, data, uint64(len(roots)))
 }
 
@@ -281,7 +281,7 @@ func (b *BeaconRpcP2P) Peers() (uint64, error) {
 	return amount.Active, nil
 }
 
-func (b *BeaconRpcP2P) SetStatus(finalizedRoot libcommon.Hash, finalizedEpoch uint64, headRoot libcommon.Hash, headSlot uint64) error {
+func (b *BeaconRpcP2P) SetStatus(finalizedRoot common.Hash, finalizedEpoch uint64, headRoot common.Hash, headSlot uint64) error {
 	forkDigest, err := b.ethClock.CurrentForkDigest()
 	if err != nil {
 		return err

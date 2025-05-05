@@ -129,7 +129,7 @@ func (ma *MixedcaseAddress) Original() string {
 	return ma.original
 }
 
-// Addresses is a slice of libcommon.Address, implementing sort.Interface
+// Addresses is a slice of common.Address, implementing sort.Interface
 type Addresses []Address
 
 func (addrs Addresses) Len() int {
@@ -142,7 +142,7 @@ func (addrs Addresses) Swap(i, j int) {
 	addrs[i], addrs[j] = addrs[j], addrs[i]
 }
 
-// Hashes is a slice of libcommon.Hash, implementing sort.Interface
+// Hashes is a slice of common.Hash, implementing sort.Interface
 type Hashes []Hash
 
 func (hashes Hashes) Len() int {

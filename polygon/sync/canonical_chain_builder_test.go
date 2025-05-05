@@ -27,7 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 type mockDifficultyCalculator struct{}
@@ -119,7 +119,7 @@ func (test *connectCCBTest) testConnect(
 	start := newTip.Number.Uint64() - (count - 1)
 
 	actualHeaders := builder.HeadersInRange(start, count)
-	require.Equal(t, len(expectedHeaders), len(actualHeaders))
+	require.Len(t, actualHeaders, len(expectedHeaders))
 	for i, h := range actualHeaders {
 		assert.Equal(t, expectedHeaders[i].Hash(), h.Hash())
 	}
@@ -133,7 +133,7 @@ func TestCCBEmptyState(t *testing.T) {
 	assert.Equal(t, root.Hash(), tip.Hash())
 
 	headers := test.builder.HeadersInRange(0, 1)
-	require.Equal(t, 1, len(headers))
+	require.Len(t, headers, 1)
 	assert.Equal(t, root.Hash(), headers[0].Hash())
 }
 

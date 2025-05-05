@@ -24,16 +24,18 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/execution/exec3/calltracer"
+
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/consensuschain"
@@ -54,7 +56,7 @@ type Worker struct {
 	blockReader services.FullBlockReader
 	in          *state.QueueWithRetry
 	rs          *state.ParallelExecutionState
-	stateWriter *state.StateWriterV3
+	stateWriter *state.Writer
 	stateReader state.ResettableStateReader
 	historyMode bool // if true - stateReader is HistoryReaderV3, otherwise it's state reader
 	chainConfig *chain.Config
@@ -65,7 +67,7 @@ type Worker struct {
 	resultCh *state.ResultsQueue
 	chain    consensus.ChainReader
 
-	callTracer  *CallTracer
+	callTracer  *calltracer.CallTracer
 	taskGasPool *core.GasPool
 	hooks       *tracing.Hooks
 
@@ -94,7 +96,7 @@ func NewWorker(lock sync.Locker, logger log.Logger, hooks *tracing.Hooks, ctx co
 		engine:   engine,
 
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
-		callTracer:  NewCallTracer(hooks),
+		callTracer:  calltracer.NewCallTracer(hooks),
 		taskGasPool: new(core.GasPool),
 		hooks:       hooks,
 
@@ -117,7 +119,11 @@ func (rw *Worker) ResetState(rs *state.ParallelExecutionState, accumulator *shar
 	} else {
 		rw.SetReader(state.NewReaderV3(rs.Domains()))
 	}
-	rw.stateWriter = state.NewStateWriterV3(rs, accumulator)
+	rw.stateWriter = state.NewWriter(rs.Domains(), accumulator)
+}
+
+func (rw *Worker) SetGaspool(gp *core.GasPool) {
+	rw.taskGasPool = gp
 }
 
 func (rw *Worker) Tx() kv.TemporalTx { return rw.chainTx }
@@ -230,7 +236,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
-		syscall := func(contract libcommon.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
+		syscall := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 			ret, _, err := core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, constCall /* constCall */, rw.hooks)
 			return ret, err
 		}
@@ -242,7 +248,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		}
 
 		// End of block transaction in a block
-		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
+		syscall := func(contract common.Address, data []byte) ([]byte, error) {
 			ret, logs, err := core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */, rw.hooks)
 			if err != nil {
 				return nil, err
@@ -265,14 +271,15 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			//if err := ibs.CommitBlock(rules, rw.stateWriter); err != nil {
 			//	txTask.Error = err
 			//}
-			txTask.TraceTos = map[libcommon.Address]struct{}{}
+			txTask.TraceTos = map[common.Address]struct{}{}
 			txTask.TraceTos[txTask.Coinbase] = struct{}{}
 			for _, uncle := range txTask.Uncles {
 				txTask.TraceTos[uncle.Coinbase] = struct{}{}
 			}
 		}
 	default:
-		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), rw.chainConfig.GetMaxBlobGasPerBlock(header.Time))
+		// This doesn't make sense, but I am not sure if this wrong behaviour is needed somewhere else:
+		// rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), rw.chainConfig.GetMaxBlobGasPerBlock(header.Time))
 		rw.callTracer.Reset()
 		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		ibs.SetTxContext(txTask.TxIndex)
@@ -284,11 +291,18 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 				break
 			}
 
+			msg, err := txTask.Tx.AsMessage(types.Signer{}, nil, nil)
+			if err != nil {
+				txTask.Error = err
+				break
+			}
+
+			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.vmCfg, rules)
 			rw.execAATxn(txTask)
+			break
 		}
 
 		msg := txTask.TxAsMessage
-
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.vmCfg, rules)
 
 		if rw.hooks != nil && rw.hooks.OnTxStart != nil {
@@ -339,11 +353,11 @@ func (rw *Worker) execAATxn(txTask *state.TxTask) {
 		startIdx := uint64(txTask.TxIndex)
 		endIdx := startIdx + txTask.AAValidationBatchSize
 
-		validationResults := make([]state.AAValidationResult, txTask.AAValidationBatchSize)
-		log.Debug("🕵️‍♂️[aa] found AA bundle", "startIdx", startIdx, "endIdx", endIdx-1)
+		validationResults := make([]state.AAValidationResult, txTask.AAValidationBatchSize+1)
+		log.Info("🕵️‍♂️[aa] found AA bundle", "startIdx", startIdx, "endIdx", endIdx)
 
 		var outerErr error
-		for i := startIdx; i < endIdx; i++ {
+		for i := startIdx; i <= endIdx; i++ {
 			// check if next n transactions are AA transactions and run validation
 			if txTask.Txs[i].Type() == types.AccountAbstractionTxType {
 				aaTxn, ok := txTask.Tx.(*types.AccountAbstractionTransaction)
@@ -372,7 +386,7 @@ func (rw *Worker) execAATxn(txTask *state.TxTask) {
 			txTask.Error = outerErr
 			return
 		}
-		log.Debug("✅[aa] validated AA bundle", "len", startIdx-endIdx)
+		log.Info("✅[aa] validated AA bundle", "len", startIdx-endIdx)
 
 		txTask.ValidationResults = validationResults
 	}
@@ -398,8 +412,9 @@ func (rw *Worker) execAATxn(txTask *state.TxTask) {
 	txTask.Logs = rw.ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)
 	txTask.TraceFroms = rw.callTracer.Froms()
 	txTask.TraceTos = rw.callTracer.Tos()
+	txTask.CreateReceipt(rw.Tx())
 
-	log.Debug("✅[aa] executed AA bundle transaction", "txIndex", txTask.TxIndex)
+	log.Info("🚀[aa] executed AA bundle transaction", "txIndex", txTask.TxIndex, "status", status)
 }
 
 func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger log.Logger, hooks *tracing.Hooks, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.ParallelExecutionState, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int, dirs datadir.Dirs, isMining bool) (reconWorkers []*Worker, applyWorker *Worker, rws *state.ResultsQueue, clear func(), wait func()) {

@@ -310,7 +310,7 @@ func TestGetOneAfterClearBucket(t *testing.T) {
 	batch := NewMemoryBatch(rwTx, "", log.Root())
 	defer batch.Close()
 
-	err := batch.ClearBucket(kv.HeaderNumber)
+	err := batch.ClearTable(kv.HeaderNumber)
 	require.NoError(t, err)
 
 	cond := batch.isTableCleared(kv.HeaderNumber)
@@ -333,7 +333,7 @@ func TestSeekExactAfterClearBucket(t *testing.T) {
 	batch := NewMemoryBatch(rwTx, "", log.Root())
 	defer batch.Close()
 
-	err := batch.ClearBucket(kv.HeaderNumber)
+	err := batch.ClearTable(kv.HeaderNumber)
 	require.NoError(t, err)
 
 	cond := batch.isTableCleared(kv.HeaderNumber)
@@ -369,7 +369,7 @@ func TestFirstAfterClearBucket(t *testing.T) {
 	batch := NewMemoryBatch(rwTx, "", log.Root())
 	defer batch.Close()
 
-	err := batch.ClearBucket(kv.HeaderNumber)
+	err := batch.ClearTable(kv.HeaderNumber)
 	require.NoError(t, err)
 
 	err = batch.Put(kv.HeaderNumber, []byte("BBBB"), []byte("value5"))

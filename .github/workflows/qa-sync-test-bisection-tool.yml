@@ -1,0 +1,119 @@
+name: QA - Sync Test Bisection Tool
+
+on:
+  workflow_dispatch:
+    inputs:
+      starting_commit:
+        description: 'Commit where the test passes (good commit)'
+        required: true
+      ending_commit:
+        description: 'Commit where the test fails (bad commit)'
+        required: true
+      chain:
+        description: 'Chain to test (default: mainnet)'
+        required: false
+        default: 'mainnet'
+
+jobs:
+  bisect:
+    runs-on: [self-hosted, qa, long-running]
+    timeout-minutes: 7200  # 5 days
+    env:
+      ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
+      ERIGON_QA_PATH: /home/qarunner/erigon-qa
+      TRACKING_TIME_SECONDS: 120 # 2 minutes
+      TOTAL_TIME_SECONDS: 28800 # 8 hours
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for git bisect
+
+      - name: Set up Git user
+        run: |
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+
+      - name: Create scripts directory
+        run: mkdir -p $GITHUB_WORKSPACE/.github/scripts
+
+      - name: Create test script
+        run: |
+          cat << 'EOF' > $GITHUB_WORKSPACE/.github/scripts/test_script.sh
+          #!/bin/bash
+
+          set -e
+
+          CHAIN="$1"
+
+          # Move to the GitHub workspace
+          cd $GITHUB_WORKSPACE
+
+          # Build Erigon RPCDaemon
+          make clean
+          rm -rf $ERIGON_DATA_DIR
+          make erigon
+
+          # Run Erigon and wait sync
+          cd build/bin
+          python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
+            ${{ github.workspace }}/build/bin $ERIGON_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN minimal_node
+
+          # Capture monitoring script exit status
+          TEST_EXIT_STATUS=$?
+
+          # Exit with the test result
+          if [ $TEST_EXIT_STATUS -eq 0 ]; then
+            # Test passed
+            exit 0
+          else
+            # Test failed
+            exit 1
+          fi
+          EOF
+
+      - name: Make test script executable
+        run: chmod +x $GITHUB_WORKSPACE/.github/scripts/test_script.sh
+
+      - name: Pause the Erigon instance dedicated to DB maintenance
+        run: |
+          python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
+
+      - name: Start Git Bisect
+        run: |
+          git bisect start
+          git bisect bad ${{ inputs.ending_commit }}
+          git bisect good ${{ inputs.starting_commit }}
+
+      - name: Run Git Bisect with Test Script
+        id: bisect_run
+        run: |
+          set -o pipefail
+          git bisect run $GITHUB_WORKSPACE/.github/scripts/test_script.sh ${{ inputs.chain }}
+
+      - name: Get Bisect Result
+        if: success()
+        id: bisect_result
+        run: |
+          BISECT_COMMIT=$(git rev-parse HEAD)
+          BISECT_MESSAGE=$(git log -1 --pretty=format:"%h %s")
+          echo "BISECT_COMMIT=$BISECT_COMMIT" >> $GITHUB_OUTPUT
+          echo "BISECT_MESSAGE=$BISECT_MESSAGE" >> $GITHUB_OUTPUT
+          git bisect reset
+
+      - name: Output Offending Commit
+        if: success()
+        run: |
+          echo "The first bad commit is ${{ steps.bisect_result.outputs.BISECT_COMMIT }}"
+          echo "Commit message: ${{ steps.bisect_result.outputs.BISECT_MESSAGE }}"
+
+      - name: Clean up Erigon data directory
+        if: always()
+        run: |
+          rm -rf $ERIGON_DATA_DIR
+
+      - name: Resume the Erigon instance dedicated to DB maintenance
+        if: always()
+        run: |
+          python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true

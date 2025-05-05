@@ -22,7 +22,7 @@ type ForkableId uint16
 const AllForkableId = math.MaxUint16
 
 type holder struct {
-	// tag - "type" of snapshot file. e.g. tag is "bodies" for "v1-007300-007400-bodies.seg" file
+	// tag - "type" of snapshot file. e.g. tag is "bodies" for "v1.0-007300-007400-bodies.seg" file
 	name                string
 	snapshotDataFileTag string   // name to be used in snapshot file
 	indexFileTag        []string // one indexFileTag for each index

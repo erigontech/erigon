@@ -63,7 +63,7 @@ func (i *rcloneInfo) Version() snaptype.Version {
 		return i.snapInfo.Version
 	}
 
-	return 0
+	return snaptype.ZeroVersion
 }
 
 func (i *rcloneInfo) From() uint64 {

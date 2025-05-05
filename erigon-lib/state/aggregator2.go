@@ -2,6 +2,7 @@ package state
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -37,6 +38,9 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	if err := a.registerDomain(kv.ReceiptDomain, salt, dirs, logger); err != nil {
 		return nil, err
 	}
+	if err := a.registerDomain(kv.RCacheDomain, salt, dirs, logger); err != nil {
+		return nil, err
+	}
 	if err := a.registerII(kv.LogAddrIdx, salt, dirs, logger); err != nil {
 		return nil, err
 	}
@@ -62,151 +66,252 @@ var dbgCommBtIndex = dbg.EnvBool("AGG_COMMITMENT_BT", false)
 
 func init() {
 	if dbgCommBtIndex {
-		cfg := Schema[kv.CommitmentDomain]
-		cfg.AccessorList = AccessorBTree | AccessorExistence
-		Schema[kv.CommitmentDomain] = cfg
+		Schema.CommitmentDomain.Accessors = AccessorBTree | AccessorExistence
+	}
+	InitSchemas()
+	InitAccountSchemaIntegrity()
+}
+
+type SchemaGen struct {
+	AccountsDomain   domainCfg
+	StorageDomain    domainCfg
+	CodeDomain       domainCfg
+	CommitmentDomain domainCfg
+	ReceiptDomain    domainCfg
+	RCacheDomain     domainCfg
+	LogAddrIdx       iiCfg
+	LogTopicIdx      iiCfg
+	TracesFromIdx    iiCfg
+	TracesToIdx      iiCfg
+}
+
+type Versioned interface {
+	GetVersions() VersionTypes
+}
+
+func (s *SchemaGen) GetVersioned(name string) (Versioned, error) {
+	switch name {
+	case "accounts":
+		return &s.AccountsDomain, nil
+	case "storage":
+		return &s.StorageDomain, nil
+	case "code":
+		return &s.CodeDomain, nil
+	case "commitment":
+		return &s.CommitmentDomain, nil
+	case "receipt":
+		return &s.ReceiptDomain, nil
+	case "rcache":
+		return &s.RCacheDomain, nil
+	case "logtopics":
+		return &s.LogTopicIdx, nil
+	case "logaddrs":
+		return &s.LogAddrIdx, nil
+	case "tracesfrom":
+		return &s.TracesFromIdx, nil
+	case "tracesto":
+		return &s.TracesToIdx, nil
+	default:
+		return nil, fmt.Errorf("unknown schema version '%s'", name)
 	}
 }
 
-var Schema = map[kv.Domain]domainCfg{
-	kv.AccountsDomain: {
+func (s *SchemaGen) GetDomainCfg(name kv.Domain) domainCfg {
+	switch name {
+	case kv.AccountsDomain:
+		return s.AccountsDomain
+	case kv.StorageDomain:
+		return s.StorageDomain
+	case kv.CodeDomain:
+		return s.CodeDomain
+	case kv.CommitmentDomain:
+		return s.CommitmentDomain
+	case kv.ReceiptDomain:
+		return s.ReceiptDomain
+	case kv.RCacheDomain:
+		return s.RCacheDomain
+	default:
+		return domainCfg{}
+	}
+}
+
+func (s *SchemaGen) GetIICfg(name kv.InvertedIdx) iiCfg {
+	switch name {
+	case kv.LogAddrIdx:
+		return s.LogAddrIdx
+	case kv.LogTopicIdx:
+		return s.LogTopicIdx
+	case kv.TracesFromIdx:
+		return s.TracesFromIdx
+	case kv.TracesToIdx:
+		return s.TracesToIdx
+	default:
+		return iiCfg{}
+	}
+}
+
+var ExperimentalConcurrentCommitment = false // set true to use concurrent commitment by default
+
+var Schema = SchemaGen{
+	AccountsDomain: domainCfg{
 		name: kv.AccountsDomain, valuesTable: kv.TblAccountVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressNone,
 
-		AccessorList:         AccessorBTree | AccessorExistence,
+		Accessors:            AccessorBTree | AccessorExistence,
 		crossDomainIntegrity: domainIntegrityCheck,
 
 		hist: histCfg{
 			valuesTable:   kv.TblAccountHistoryVals,
-			compressorCfg: seg.DefaultCfg, compression: seg.CompressNone,
+			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
 
 			historyLargeValues: false,
 			historyIdx:         kv.AccountsHistoryIdx,
 
 			iiCfg: iiCfg{
 				filenameBase: kv.AccountsDomain.String(), keysTable: kv.TblAccountHistoryKeys, valuesTable: kv.TblAccountIdx,
-				compressorCfg: seg.DefaultCfg,
+				CompressorCfg: seg.DefaultCfg,
 			},
 		},
 	},
-	kv.StorageDomain: {
+	StorageDomain: domainCfg{
 		name: kv.StorageDomain, valuesTable: kv.TblStorageVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
 
-		AccessorList: AccessorBTree | AccessorExistence,
+		Accessors: AccessorBTree | AccessorExistence,
 
 		hist: histCfg{
 			valuesTable:   kv.TblStorageHistoryVals,
-			compressorCfg: seg.DefaultCfg, compression: seg.CompressNone,
+			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
 
 			historyLargeValues: false,
 			historyIdx:         kv.StorageHistoryIdx,
 
 			iiCfg: iiCfg{
 				filenameBase: kv.StorageDomain.String(), keysTable: kv.TblStorageHistoryKeys, valuesTable: kv.TblStorageIdx,
-				compressorCfg: seg.DefaultCfg,
+				CompressorCfg: seg.DefaultCfg,
 			},
 		},
 	},
-	kv.CodeDomain: {
+	CodeDomain: domainCfg{
 		name: kv.CodeDomain, valuesTable: kv.TblCodeVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
 
-		AccessorList: AccessorBTree | AccessorExistence,
-		largeValues:  true,
+		Accessors:   AccessorBTree | AccessorExistence,
+		largeValues: true,
 
 		hist: histCfg{
 			valuesTable:   kv.TblCodeHistoryVals,
-			compressorCfg: seg.DefaultCfg, compression: seg.CompressKeys | seg.CompressVals,
+			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressKeys | seg.CompressVals,
 
 			historyLargeValues: true,
 			historyIdx:         kv.CodeHistoryIdx,
 
 			iiCfg: iiCfg{
 				filenameBase: kv.CodeDomain.String(), keysTable: kv.TblCodeHistoryKeys, valuesTable: kv.TblCodeIdx,
-				compressorCfg: seg.DefaultCfg,
+				CompressorCfg: seg.DefaultCfg,
 			},
 		},
 	},
-	kv.CommitmentDomain: {
+	CommitmentDomain: domainCfg{
 		name: kv.CommitmentDomain, valuesTable: kv.TblCommitmentVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
 
-		AccessorList:        AccessorHashMap,
+		Accessors:           AccessorHashMap,
 		replaceKeysInValues: AggregatorSqueezeCommitmentValues,
 
 		hist: histCfg{
 			valuesTable:   kv.TblCommitmentHistoryVals,
-			compressorCfg: HistoryCompressCfg, compression: seg.CompressNone, // seg.CompressKeys | seg.CompressVals,
+			CompressorCfg: HistoryCompressCfg, Compression: seg.CompressNone, // seg.CompressKeys | seg.CompressVals,
 			historyIdx: kv.CommitmentHistoryIdx,
 
-			historyLargeValues: false,
-			compressSingleVal:  false,
+			historyLargeValues:            false,
+			historyValuesOnCompressedPage: 16,
 
 			snapshotsDisabled: true,
 			historyDisabled:   true,
 
 			iiCfg: iiCfg{
 				filenameBase: kv.CommitmentDomain.String(), keysTable: kv.TblCommitmentHistoryKeys, valuesTable: kv.TblCommitmentIdx,
-				compressorCfg: seg.DefaultCfg,
+				CompressorCfg: seg.DefaultCfg,
 			},
 		},
 	},
-	kv.ReceiptDomain: {
+	ReceiptDomain: domainCfg{
 		name: kv.ReceiptDomain, valuesTable: kv.TblReceiptVals,
 		CompressCfg: seg.DefaultCfg, Compression: seg.CompressNone,
+		largeValues: false,
 
-		AccessorList: AccessorBTree | AccessorExistence,
+		Accessors: AccessorBTree | AccessorExistence,
 
 		hist: histCfg{
 			valuesTable:   kv.TblReceiptHistoryVals,
-			compressorCfg: seg.DefaultCfg, compression: seg.CompressNone,
+			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
 
 			historyLargeValues: false,
 			historyIdx:         kv.ReceiptHistoryIdx,
 
 			iiCfg: iiCfg{
 				filenameBase: kv.ReceiptDomain.String(), keysTable: kv.TblReceiptHistoryKeys, valuesTable: kv.TblReceiptIdx,
-				compressorCfg: seg.DefaultCfg,
+				CompressorCfg: seg.DefaultCfg,
 			},
 		},
+	},
+	RCacheDomain: domainCfg{
+		name: kv.RCacheDomain, valuesTable: kv.TblRCacheVals,
+		largeValues: true,
+
+		Accessors:   AccessorHashMap,
+		CompressCfg: DomainCompressCfg, Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+
+		hist: histCfg{
+			valuesTable: kv.TblRCacheHistoryVals,
+			Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+
+			historyLargeValues: true,
+			historyIdx:         kv.RCacheHistoryIdx,
+
+			snapshotsDisabled:             true,
+			historyValuesOnCompressedPage: 16,
+
+			iiCfg: iiCfg{
+				disable:      true, // disable everything by default
+				filenameBase: kv.RCacheDomain.String(), keysTable: kv.TblRCacheHistoryKeys, valuesTable: kv.TblRCacheIdx,
+				CompressorCfg: seg.DefaultCfg,
+			},
+		},
+	},
+
+	LogAddrIdx: iiCfg{
+		filenameBase: kv.FileLogAddressIdx, keysTable: kv.TblLogAddressKeys, valuesTable: kv.TblLogAddressIdx,
+
+		Compression: seg.CompressNone,
+		name:        kv.LogAddrIdx,
+	},
+	LogTopicIdx: iiCfg{
+		filenameBase: kv.FileLogTopicsIdx, keysTable: kv.TblLogTopicsKeys, valuesTable: kv.TblLogTopicsIdx,
+
+		Compression: seg.CompressNone,
+		name:        kv.LogTopicIdx,
+	},
+	TracesFromIdx: iiCfg{
+		filenameBase: kv.FileTracesFromIdx, keysTable: kv.TblTracesFromKeys, valuesTable: kv.TblTracesFromIdx,
+
+		Compression: seg.CompressNone,
+		name:        kv.TracesFromIdx,
+	},
+	TracesToIdx: iiCfg{
+		filenameBase: kv.FileTracesToIdx, keysTable: kv.TblTracesToKeys, valuesTable: kv.TblTracesToIdx,
+
+		Compression: seg.CompressNone,
+		name:        kv.TracesToIdx,
 	},
 }
 
 func EnableHistoricalCommitment() {
-	cfg := Schema[kv.CommitmentDomain]
+	cfg := Schema.CommitmentDomain
 	cfg.hist.historyDisabled = false
 	cfg.hist.snapshotsDisabled = false
-	Schema[kv.CommitmentDomain] = cfg
-}
-
-var ExperimentalConcurrentCommitment = false // set true to use concurrent commitment by default
-
-var StandaloneIISchema = map[kv.InvertedIdx]iiCfg{
-	kv.LogAddrIdx: {
-		filenameBase: kv.FileLogAddressIdx, keysTable: kv.TblLogAddressKeys, valuesTable: kv.TblLogAddressIdx,
-
-		compression: seg.CompressNone,
-		name:        kv.LogAddrIdx,
-	},
-	kv.LogTopicIdx: {
-		filenameBase: kv.FileLogTopicsIdx, keysTable: kv.TblLogTopicsKeys, valuesTable: kv.TblLogTopicsIdx,
-
-		compression: seg.CompressNone,
-		name:        kv.LogTopicIdx,
-	},
-	kv.TracesFromIdx: {
-		filenameBase: kv.FileTracesFromIdx, keysTable: kv.TblTracesFromKeys, valuesTable: kv.TblTracesFromIdx,
-
-		compression: seg.CompressNone,
-		name:        kv.TracesFromIdx,
-	},
-	kv.TracesToIdx: {
-		filenameBase: kv.FileTracesToIdx, keysTable: kv.TblTracesToKeys, valuesTable: kv.TblTracesToIdx,
-
-		compression: seg.CompressNone,
-		name:        kv.TracesToIdx,
-	},
+	Schema.CommitmentDomain = cfg
 }
 
 var DomainCompressCfg = seg.Cfg{
@@ -227,4 +332,12 @@ var HistoryCompressCfg = seg.Cfg{
 	SamplingFactor:       1,
 	MaxDictPatterns:      64 * 1024,
 	Workers:              1,
+}
+
+func EnableHistoricalRCache() {
+	cfg := Schema.RCacheDomain
+	cfg.hist.iiCfg.disable = false
+	cfg.hist.historyDisabled = false
+	cfg.hist.snapshotsDisabled = false
+	Schema.RCacheDomain = cfg
 }
