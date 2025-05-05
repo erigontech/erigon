@@ -30,6 +30,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/spaolacci/murmur3"
@@ -78,7 +79,7 @@ type InvertedIndex struct {
 }
 
 type iiCfg struct {
-	salt    *uint32
+	salt    *atomic.Uint32
 	dirs    datadir.Dirs
 	disable bool // totally disable Domain/History/InvertedIndex - ignore all writes, don't produce files
 
@@ -93,6 +94,15 @@ type iiCfg struct {
 	// external checker for integrity of inverted index ranges
 	integrity rangeIntegrityChecker
 	indexList Accessors
+}
+
+func (cfg *iiCfg) Salt() *uint32 {
+	if cfg.salt == nil {
+		return nil
+	}
+	x := cfg.salt.Load()
+	return &x
+
 }
 
 type iiVisible struct {
@@ -473,6 +483,7 @@ func (ii *InvertedIndex) BeginFilesRo() *InvertedIndexRoTx {
 		visible: ii._visible,
 		files:   files,
 		name:    ii.name,
+		salt:    ii.Salt(),
 	}
 }
 func (iit *InvertedIndexRoTx) Close() {
@@ -539,7 +550,8 @@ type InvertedIndexRoTx struct {
 
 	seekInFilesCache *IISeekInFilesCache
 
-	ef *eliasfano32.EliasFano // re-usable
+	ef   *eliasfano32.EliasFano // re-usable
+	salt *uint32
 }
 
 // hashKey - change of salt will require re-gen of indices

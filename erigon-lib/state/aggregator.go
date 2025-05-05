@@ -249,14 +249,21 @@ func (a *Aggregator) ReloadSalt() error {
 		return fmt.Errorf("salt not found on ReloadSalt")
 	}
 
+	loadSalt := func(ii *iiCfg, salt uint32) {
+		if ii.salt == nil {
+			ii.salt = new(atomic.Uint32)
+		}
+		ii.salt.Store(salt)
+	}
+
 	for _, d := range a.d {
-		d.hist.iiCfg.salt = salt
-		d.History.histCfg.iiCfg.salt = salt
-		d.History.InvertedIndex.salt = salt
+		loadSalt(&d.hist.iiCfg, *salt)
+		loadSalt(&d.History.histCfg.iiCfg, *salt)
+		loadSalt(&d.History.InvertedIndex.iiCfg, *salt)
 	}
 
 	for _, ii := range a.iis {
-		ii.salt = salt
+		loadSalt(&ii.iiCfg, *salt)
 	}
 
 	return nil
