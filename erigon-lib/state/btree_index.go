@@ -798,7 +798,7 @@ func OpenBtreeIndexAndDataFile(indexPath, dataPath string, M uint64, compressed 
 func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, compression seg.FileCompression, ps *background.ProgressSet, tmpdir string, salt uint32, logger log.Logger, noFsync bool, accessors Accessors) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("buildHashMapAccessor: %s, %s, stack: %s", kv.FileName(), rec, dbg.Stack())
+			err = fmt.Errorf("BuildBtreeIndexWithDecompressor: %s, %s, stack: %s", kv.FileName(), rec, dbg.Stack())
 		}
 	}()
 
