@@ -2079,7 +2079,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	}
 
 	if clparams.EmbeddedSupported(cfg.NetworkID) || cfg.CaplinConfig.IsDevnet() {
-		cfg.InternalCL = !ctx.Bool(ExternalConsensusFlag.Name) && !cfg.CaplinConfig.EnableEngineAPI
+		cfg.InternalCL = !ctx.Bool(ExternalConsensusFlag.Name)
 	}
 
 	if ctx.IsSet(TrustedSetupFile.Name) {
