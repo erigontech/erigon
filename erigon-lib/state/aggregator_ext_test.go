@@ -23,6 +23,7 @@ import (
 	"fmt"
 	randOld "math/rand"
 	"math/rand/v2"
+	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -645,6 +646,142 @@ func Test_helper_decodeAccountv3Bytes(t *testing.T) {
 	acc := accounts.Account{}
 	_ = accounts.DeserialiseV3(&acc, input)
 	fmt.Printf("input %x nonce %d balance %d codeHash %d\n", input, acc.Nonce, acc.Balance.Uint64(), acc.CodeHash.Bytes())
+}
+
+func TestAggregatorV3_RestartOnFiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	t.Parallel()
+
+	logger := log.New()
+	aggStep := uint64(100)
+	ctx := context.Background()
+	db, agg := testDbAndAggregatorv3(t, aggStep)
+	dirs := agg.Dirs()
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer func() {
+		if tx != nil {
+			tx.Rollback()
+		}
+	}()
+	ac := agg.BeginFilesRo()
+	defer ac.Close()
+	domains, err := state.NewSharedDomains(wrapTxWithCtx(tx, ac), log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	txs := aggStep * 5
+	t.Logf("step=%d tx_count=%d\n", aggStep, txs)
+
+	rnd := newRnd(0)
+	keys := make([][]byte, txs)
+
+	for txNum := uint64(1); txNum <= txs; txNum++ {
+		domains.SetTxNum(txNum)
+
+		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
+		n, err := rnd.Read(addr)
+		require.NoError(t, err)
+		require.Equal(t, length.Addr, n)
+
+		n, err = rnd.Read(loc)
+		require.NoError(t, err)
+		require.Equal(t, length.Hash, n)
+
+		acc := accounts.Account{
+			Nonce:       txNum,
+			Balance:     *uint256.NewInt(1000000000000),
+			CodeHash:    common.Hash{},
+			Incarnation: 0,
+		}
+		buf := accounts.SerialiseV3(&acc)
+		err = domains.DomainPut(kv.AccountsDomain, addr, nil, buf[:], nil, 0)
+		require.NoError(t, err)
+
+		err = domains.DomainPut(kv.StorageDomain, addr, loc, []byte{addr[0], loc[0]}, nil, 0)
+		require.NoError(t, err)
+
+		keys[txNum-1] = append(addr, loc...)
+	}
+
+	// flush and build files
+	err = domains.Flush(context.Background(), tx)
+	require.NoError(t, err)
+
+	latestStepInDB := ac.DbgDomain(kv.AccountsDomain).HistoryEndTxNum(tx)
+	require.Equal(t, int(5*aggStep), int(latestStepInDB))
+
+	err = tx.Commit()
+	require.NoError(t, err)
+
+	err = agg.BuildFiles(txs)
+	require.NoError(t, err)
+
+	tx = nil
+	agg.Close()
+	db.Close()
+
+	// remove database files
+	require.NoError(t, os.RemoveAll(dirs.Chaindata))
+
+	// open new db and aggregator instances
+	newDb := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
+	t.Cleanup(newDb.Close)
+
+	newAgg, err := state.NewAggregator(context.Background(), agg.Dirs(), aggStep, newDb, logger)
+	require.NoError(t, err)
+	require.NoError(t, newAgg.OpenFolder())
+
+	newTx, err := newDb.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer newTx.Rollback()
+
+	ac = newAgg.BeginFilesRo()
+	defer ac.Close()
+	tx2 := wrapTxWithCtx(newTx, ac)
+	newDoms, err := state.NewSharedDomains(tx2, log.New())
+	require.NoError(t, err)
+	defer newDoms.Close()
+
+	_, err = newDoms.SeekCommitment(ctx, tx2)
+	require.NoError(t, err)
+	latestTx := newDoms.TxNum()
+	t.Logf("seek to latest_tx=%d", latestTx)
+
+	miss := uint64(0)
+	for i, key := range keys {
+		if uint64(i+1) >= txs-aggStep {
+			continue // finishtx always stores last agg step in db which we deleted, so missing  values which were not aggregated is expected
+		}
+		stored, _, _, err := ac.GetLatest(kv.AccountsDomain, key[:length.Addr], tx2)
+		require.NoError(t, err)
+		if len(stored) == 0 {
+			miss++
+			//fmt.Printf("%x [%d/%d]", key, miss, i+1) // txnum starts from 1
+			continue
+		}
+		acc := accounts.Account{}
+		err = accounts.DeserialiseV3(&acc, stored)
+		require.NoError(t, err)
+
+		require.Equal(t, i+1, int(acc.Nonce))
+
+		storedV, _, found, err := ac.GetLatest(kv.StorageDomain, key, tx2)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.NotEmpty(t, storedV)
+		_ = key[0]
+		_ = storedV[0]
+		require.Equal(t, key[0], storedV[0])
+		require.Equal(t, key[length.Addr], storedV[1])
+	}
+	newAgg.Close()
+
+	require.NoError(t, err)
 }
 
 // wrapTxWithCtx - deprecated copy of kv_temporal.go - visible only in tests
