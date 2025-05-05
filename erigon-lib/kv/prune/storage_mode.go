@@ -169,8 +169,7 @@ func (p Distance) PruneTo(stageHead uint64) uint64 {
 
 // EnsureNotChanged - prohibit change some configs after node creation. prohibit from human mistakes
 func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
-	err := setIfNotExist(tx, pruneMode)
-	if err != nil {
+	if err := setIfNotExist(tx, pruneMode); err != nil {
 		return pruneMode, err
 	}
 
@@ -180,19 +179,15 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 	}
 
 	if pruneMode.Initialised {
-
 		// If storage mode is not explicitly specified, we take whatever is in the database
 		if !reflect.DeepEqual(pm, pruneMode) {
-			return pm, errors.New("not allowed change of --prune flag, last time you used: " + pm.String())
+			return pm, errors.New("changing --prune.* flags is prohibited, last time you used: --prune.mode=" + pm.String())
 		}
 	}
 	return pm, nil
 }
 
-func setIfNotExist(db kv.GetPut, pm Mode) error {
-	var (
-		err error
-	)
+func setIfNotExist(db kv.GetPut, pm Mode) (err error) {
 	if !pm.Initialised {
 		pm = DefaultMode
 	}
@@ -203,12 +198,10 @@ func setIfNotExist(db kv.GetPut, pm Mode) error {
 	}
 
 	for key, value := range pruneDBData {
-		err = setOnEmpty(db, []byte(key), value)
-		if err != nil {
+		if err = setOnEmpty(db, []byte(key), value); err != nil {
 			return err
 		}
 	}
-
 	return nil
 }
 
