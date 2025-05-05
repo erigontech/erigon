@@ -64,27 +64,47 @@ jobs:
           echo "{}" > $output_json
 
           # Initialize an empty JSON object
-          result_json={}
+          declare -A result_json
 
           # Parse the output.log file to find lines with msg="outputs_json"
           while IFS= read -r line; do
             if [[ "$line" == *'msg="outputs_json:'* ]]; then
-              # Extract the JSON object
-              json_obj=$(echo "$line" | sed 's/.*msg="outputs_json: \(.*\)"/\1/')
+              # Extract the JSON object and unescape the quotes
+              json_str=$(echo "$line" | sed 's/.*msg="outputs_json: \(.*\)"/\1/' | sed 's/\\"/"/g')
               
               # Extract the task value from the JSON
-              task=$(echo "$json_obj" | jq -r '.task')
+              task=$(echo "$json_str" | jq -r '.task')
               
-              # Add the JSON object to the task's key
-              if [ -z "${result_json[$task]}" ]; then
-                result_json[$task]="[]"
+              # Skip if task is empty
+              if [ -n "$task" ]; then
+                # Initialize array for this task if it doesn't exist
+                result_json[$task]="${result_json[$task]:-}"
+                
+                # Add comma separator if not the first entry
+                if [ -n "${result_json[$task]}" ]; then
+                  result_json[$task]="${result_json[$task]},"
+                fi
+                
+                # Add the JSON object
+                result_json[$task]="${result_json[$task]}$json_str"
               fi
-              result_json[$task]+=",$json_obj"
             fi
           done < "$output_log"
 
           # Write the JSON object to the final file
-          echo "{ $(for key in "${!result_json[@]}"; do echo "\"$key\": [${result_json[$key]}]"; done) }" > $output_json
+          echo "{" > $output_json
+          first_task=true
+          for task in "${!result_json[@]}"; do
+            # Add comma for all but first task
+            if [ "$first_task" = true ]; then
+              first_task=false
+            else
+              echo "," >> $output_json
+            fi
+            # Write the task array to the file
+            echo "\"$task\": [${result_json[$task]}]" >> $output_json
+          done
+          echo "}" >> $output_json
 
       # If the test fails, create an empty JSON object
       - name: Create empty JSON if test fails
