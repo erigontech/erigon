@@ -1087,7 +1087,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				logger.Error("failed to read jwt secret", "err", err, "path", httpRpcCfg.JWTSecretPath)
 				return nil, err
 			}
-			jwtSecret := common.FromHex(strings.TrimSpace(string(jwtSecretHex)))
+			jwtSecret := libcommon.FromHex(strings.TrimSpace(string(jwtSecretHex)))
 			executionEngine, err = executionclient.NewExecutionClientRPC(jwtSecret, httpRpcCfg.AuthRpcHTTPListenAddress, httpRpcCfg.AuthRpcPort)
 			if err != nil {
 				logger.Error("failed to create execution client", "err", err)
