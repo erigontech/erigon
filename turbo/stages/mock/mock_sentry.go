@@ -886,7 +886,7 @@ func (ms *MockSentry) NewHistoryStateReader(blockNum uint64, tx kv.TemporalTx) s
 	return r
 }
 
-func (ms *MockSentry) NewStateReader(tx kv.Tx) state.StateReader {
+func (ms *MockSentry) NewStateReader(tx kv.TemporalTx) state.StateReader {
 	domains, err := libstate.NewSharedDomains(tx, log.New())
 	if err != nil {
 		return nil

@@ -186,7 +186,7 @@ func NewLatestDomainStateReader(sd *state2.SharedDomains, tx kv.Tx) state.StateR
 }
 
 func NewLatestStateReader(domains *state2.SharedDomains, tx kv.Tx) state.StateReader {
-	return state.NewReaderV3(domains, tx.(kv.TemporalGetter))
+	return state.NewReaderV3(domains, tx)
 }
 
 func NewLatestStateWriter(txc wrap.TxContainer, blockReader services.FullBlockReader, blockNum uint64) state.StateWriter {

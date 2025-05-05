@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/core/exec"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/consensus"
@@ -260,10 +261,10 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		ac := state2.AggTx(tx)
-		if err := ac.Debug().GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
+		if err := ac.GreedyPruneHistory(ctx, kv.CommitmentDomain, tx); err != nil {
 			return err
 		}
-		if _, err := ac.Debug().PruneSmallBatches(ctx, 10*time.Hour); err != nil {
+		if _, err := ac.PruneSmallBatches(ctx, 10*time.Hour, tx); err != nil {
 			return err
 		}
 		return nil
@@ -354,9 +355,9 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 
 	var m runtime.MemStats
 	if err := exec3.CustomTraceMapReduce(fromBlock, toBlock, exec3.TraceConsumer{
-		Reduce: func(txTask *state.TxTask, tx kv.TemporalTx) error {
-			if txTask.Error != nil {
-				return txTask.Error
+		Reduce: func(result *exec.Result, tx kv.TemporalTx) error {
+			if result.Err != nil {
+				return result.Err
 			}
 
 			txTask := result.Task.(*exec.TxTask)
@@ -377,9 +378,9 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 				if !txTask.IsBlockEnd() {
 					var receipt *types.Receipt
 					if txTask.TxIndex >= 0 {
-						receipt = txTask.BlockReceipts[txTask.TxIndex]
+						receipt = result.BlockReceipts[txTask.TxIndex]
 					}
-					if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock); err != nil {
+					if err := rawtemporaldb.AppendReceipt(doms.AsPutDel(tx), receipt, cumulativeBlobGasUsedInBlock); err != nil {
 						return err
 					}
 				}
@@ -398,7 +399,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 								FirstLogIndexWithinBlock: uint32(firstIndex),
 							}
 							//log.Info("adding extra", "firstLog", firstIndex)
-							if err := rawtemporaldb.AppendReceipt(doms, &receipt, cumulativeBlobGasUsedInBlock); err != nil {
+							if err := rawtemporaldb.AppendReceipt(doms.AsPutDel(tx), &receipt, cumulativeBlobGasUsedInBlock); err != nil {
 								return err
 							}
 						}
@@ -410,7 +411,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 
 			if produce.RCacheDomain {
 				var receipt *types.Receipt
-				if !txTask.Final {
+				if !txTask.IsBlockEnd() {
 					if txTask.TxIndex >= 0 && txTask.BlockReceipts != nil {
 						receipt = txTask.BlockReceipts[txTask.TxIndex]
 					}
@@ -422,13 +423,13 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 						}
 					}
 				}
-				if err := rawdb.WriteReceiptCacheV2(doms, receipt); err != nil {
+				if err := rawdb.WriteReceiptCacheV2(doms.AsPutDel(tx), receipt); err != nil {
 					return err
 				}
 			}
 
 			if produce.LogIndex {
-				for _, lg := range txTask.Logs {
+				for _, lg := range result.Logs {
 					if err := doms.IndexAdd(kv.LogAddrIdx, lg.Address[:]); err != nil {
 						return err
 					}
@@ -440,12 +441,12 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 				}
 			}
 			if produce.TraceIndex {
-				for addr := range txTask.TraceFroms {
+				for addr := range result.TraceFroms {
 					if err := doms.IndexAdd(kv.TracesFromIdx, addr[:]); err != nil {
 						return err
 					}
 				}
-				for addr := range txTask.TraceTos {
+				for addr := range result.TraceTos {
 					if err := doms.IndexAdd(kv.TracesToIdx, addr[:]); err != nil {
 						return err
 					}

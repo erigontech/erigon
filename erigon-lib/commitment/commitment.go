@@ -138,7 +138,7 @@ func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *
 		//fn := func(key []byte) []byte { return hexToBin(key) }
 		//tree := NewUpdateTree(mode, tmpdir, fn)
 		//return trie, tree
-		panic("omg its not supported")
+		panic("VariantBinPatriciaTrie not supported")
 	case VariantHexPatriciaTrie:
 		fallthrough
 	default:
@@ -861,7 +861,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 				stat.ExtCount++
 				medians["ext"] = append(medians["ext"], c.extLen)
 			default:
-				panic("unexpected cell " + fmt.Sprintf("%s", c.FullString()))
+				panic("unexpected cell " + c.FullString())
 			}
 			if c.extLen > 0 {
 				switch tv {
@@ -965,7 +965,7 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 		t.keys = make(map[string]struct{})
 		t.initCollector()
 	} else if t.mode == ModeUpdate {
-		t.tree = btree.NewG[*KeyUpdate](64, keyUpdateLessFn)
+		t.tree = btree.NewG(64, keyUpdateLessFn)
 	}
 	return t
 }
@@ -976,7 +976,7 @@ func (t *Updates) SetMode(m Mode) {
 		t.keys = make(map[string]struct{})
 		t.initCollector()
 	} else if t.mode == ModeUpdate && t.tree == nil {
-		t.tree = btree.NewG[*KeyUpdate](64, keyUpdateLessFn)
+		t.tree = btree.NewG(64, keyUpdateLessFn)
 	}
 	t.Reset()
 }

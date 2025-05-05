@@ -42,13 +42,14 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	state2 "github.com/erigontech/erigon-lib/state"
+	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -204,7 +205,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	}
 
 	txc := wrap.NewTxContainer(tx, nil)
-	domains, err := state2.NewSharedDomains(txc.Ttx, log.New())
+	domains, err := libstate.NewSharedDomains(txc.Ttx, log.New())
 	if err != nil {
 		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
@@ -271,11 +272,16 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	snapshot := statedb.Snapshot()
 	gaspool := new(core.GasPool)
 	gaspool.AddGas(block.GasLimit()).AddBlobGas(config.GetMaxBlobGasPerBlock(header.Time))
-	if _, err = core.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */); err != nil {
+	var res *evmtypes.ExecutionResult
+	if res, err = core.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */, nil); err != nil {
 		statedb.RevertToSnapshot(snapshot, nil)
 	}
 	if vmconfig.Tracer != nil && vmconfig.Tracer.OnTxEnd != nil {
-		vmconfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: res.UsedGas}, nil)
+		var receipt types.Receipt
+		if err == nil {
+			receipt.GasUsed = res.GasUsed
+		}
+		vmconfig.Tracer.OnTxEnd(&receipt, err)
 	}
 
 	if err = statedb.FinalizeTx(evm.ChainRules(), w); err != nil {
@@ -293,7 +299,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	return statedb, common.BytesToHash(rootBytes), nil
 }
 
-func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
+func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, accounts types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
 	domains, err := libstate.NewSharedDomains(tx, log.New())
 	if err != nil {
 		return nil, err
@@ -329,12 +335,12 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, b
 	}
 
 	txc := wrap.NewTxContainer(tx, nil)
-	domains, err := state2.NewSharedDomains(txc.Ttx, log.New())
+	domains, err = libstate.NewSharedDomains(txc.Ttx, log.New())
 	if err != nil {
 		return nil, err
 	}
 	defer domains.Close()
-	defer domains.Flush(context2.Background(), tx)
+	defer domains.Flush(context2.Background(), tx, 0)
 	txc.Doms = domains
 
 	w := rpchelper.NewLatestStateWriter(txc, nil, blockNr-1)

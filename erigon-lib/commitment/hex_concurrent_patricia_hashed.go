@@ -148,6 +148,12 @@ func (p *ConcurrentPatriciaHashed) SetTrace(b bool) {
 		p.mounts[i].SetTrace(b)
 	}
 }
+func (p *ConcurrentPatriciaHashed) SetTraceDomain(b bool) {
+	p.root.SetTraceDomain(b)
+	for i := range p.mounts {
+		p.mounts[i].SetTraceDomain(b)
+	}
+}
 
 // pass -1 to enable trace just for root trie
 func (p *ConcurrentPatriciaHashed) SetParticularTrace(b bool, n int) {

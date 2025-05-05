@@ -479,7 +479,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 
 			// Apply the transaction to the current state (included in the env).
 			if !calcFees {
-				applyRes, err := core.ApplyMessageNoFeeBurnOrTip(evm, message, gasPool, true, false)
+				applyRes, err := core.ApplyMessageNoFeeBurnOrTip(evm, message, gasPool, true, false, engine)
 
 				if applyRes == nil || err != nil {
 					return nil, ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: err}

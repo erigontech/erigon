@@ -303,7 +303,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			continue
 		}
 
-		err = exec.ExecTxn(txNum, txIndex, txn, false)
+		err = exec.ExecTxn(txNum, blockNum, txIndex, txn, false)
 		if err != nil {
 			return nil, err
 		}

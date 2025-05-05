@@ -298,7 +298,7 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 
 	ctx := context.Background()
 
-	uniqTest := func(t *testing.T, sortHashedKeys bool, trace bool) {
+	uniqTest := func(t *testing.T, sortHashedKeys bool, _ bool) {
 		t.Helper()
 
 		stateSeq := NewMockState(t)
@@ -1872,7 +1872,7 @@ func generatePlainKeysWithSameHashPrefix(tb testing.TB, keyLen int, prefixLen in
 }
 
 // Ordering is crucial for trie. since trie do hashing by itself and reorder updates inside Process{Keys,Updates}, have to reorder them for some tests
-func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [][]byte, updates []Update) ([][]byte, []Update) {
+func sortUpdatesByHashIncrease(t *testing.T, _ *HexPatriciaHashed, plainKeys [][]byte, updates []Update) ([][]byte, []Update) {
 	t.Helper()
 
 	ku := make([]*KeyUpdate, len(plainKeys))

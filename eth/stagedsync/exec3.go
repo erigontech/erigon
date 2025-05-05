@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-db/rawdb/rawdbhelpers"
+	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/cmp"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -749,7 +750,6 @@ func ExecV3(ctx context.Context,
 					return fmt.Errorf("nil block %d", blockNum)
 				}
 
-				metrics2.UpdateBlockConsumerPreExecutionDelay(b.Time(), blockNum, logger)
 				txs := b.Transactions()
 				header := b.HeaderNoCopy()
 				skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
@@ -767,7 +767,7 @@ func ExecV3(ctx context.Context,
 					if err != nil {
 						return err
 					}
-					accumulator.StartChange(b.NumberU64(), b.Hash(), txs, false)
+					accumulator.StartChange(header, txs, false)
 				}
 
 				var txTasks []exec.Task
@@ -856,11 +856,6 @@ func ExecV3(ctx context.Context,
 				if offsetFromBlockBeginning > 0 {
 					// after history execution no offset will be required
 					offsetFromBlockBeginning = 0
-				}
-
-				// MA commitTx
-				if !inMemExec && !isMining {
-					metrics2.UpdateBlockConsumerPostExecutionDelay(b.Time(), blockNum, logger)
 				}
 
 				select {
@@ -1055,7 +1050,6 @@ func ExecV3(ctx context.Context,
 							}
 						}
 
-						//fmt.Println("Block Complete", blockResult.BlockNum)
 						if dbg.StopAfterBlock > 0 && applyResult.BlockNum == dbg.StopAfterBlock {
 							return fmt.Errorf("stopping: block %d complete", applyResult.BlockNum)
 						}
@@ -1279,7 +1273,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		return handleIncorrectRootHashError(header, applyTx, cfg, e, maxBlockNum, logger, u)
 	}
 	if !inMemExec {
-		if err := doms.Flush(ctx, applyTx); err != nil {
+		if err := doms.Flush(ctx, applyTx, 150*time.Millisecond); err != nil {
 			return false, err
 		}
 	}

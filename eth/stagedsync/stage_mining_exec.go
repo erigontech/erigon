@@ -100,7 +100,6 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	logPrefix := s.LogPrefix()
 	current := cfg.miningState.MiningBlock
 	preparedTxns := current.PreparedTxns
-	noempty := true
 	stateReader := state.NewReaderV3(txc.Doms, txc.Tx)
 	ibs := state.New(stateReader)
 	// Clique consensus needs forced author in the evm context

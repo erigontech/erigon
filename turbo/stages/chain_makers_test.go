@@ -105,7 +105,7 @@ func TestGenerateChain(t *testing.T) {
 		return
 	}
 
-	tx, err := m.DB.BeginRw(m.Ctx)
+	tx, err := m.DB.BeginTemporalRw(m.Ctx)
 	if err != nil {
 		fmt.Printf("beginro error: %v\n", err)
 		return

@@ -201,7 +201,7 @@ func (rs *StateV3) ApplyLogsAndTraces4(logs []*types.Log, traceFroms map[common.
 				}
 			}
 		}
-		if err := rawdb.WriteReceiptCacheV2(domains, receipt); err != nil {
+		if err := rawdb.WriteReceiptCacheV2(rs.domains.AsPutDel(rs.tx), receipt); err != nil {
 			return err
 		}
 	}
@@ -476,24 +476,6 @@ func (w *StateWriterBufferedV3) WriteAccountStorage(address common.Address, inca
 	return nil
 }
 
-func (w *StateWriterBufferedV3) DeleteAccountStorage(address common.Address, incarnation uint64, key common.Hash) error {
-	compositeS := string(append(address[:], key[:]...))
-	w.writeLists[kv.StorageDomain.String()].Push(compositeS, nil)
-	if w.trace {
-		fmt.Printf("storage delete: %x,%x\n", address, key)
-	}
-	w.rs.accountsMutex.Lock()
-	obj, ok := w.rs.accounts[address]
-	if !ok {
-		obj = &bufferedAccount{}
-	}
-	if obj.storage != nil {
-		delete(obj.storage, key)
-	}
-	w.rs.accountsMutex.Unlock()
-	return nil
-}
-
 func (w *StateWriterBufferedV3) CreateContract(address common.Address) error {
 	if w.trace {
 		fmt.Printf("create contract: %x\n", address)
@@ -604,14 +586,6 @@ func (w *StateWriterV3) WriteAccountStorage(address common.Address, incarnation 
 	}
 
 	return w.rs.domains.DomainPut(kv.StorageDomain, w.tx, composite, nil, v, nil, 0)
-}
-
-func (w *StateWriterV3) DeleteAccountStorage(address common.Address, incarnation uint64, key common.Hash) error {
-	if w.trace {
-		fmt.Printf("storage delete: %x,%x\n", address, key)
-	}
-	composite := append(address[:], key[:]...)
-	return w.rs.domains.DomainDel(kv.StorageDomain, w.tx, composite, nil, nil, 0)
 }
 
 func (w *StateWriterV3) CreateContract(address common.Address) error {

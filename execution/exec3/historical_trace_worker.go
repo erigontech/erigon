@@ -81,7 +81,7 @@ type HistoricalTraceWorker struct {
 
 type TraceConsumer struct {
 	//Reduce receiving results of execution. They are sorted and have no gaps.
-	Reduce func(task *state.TxTask, tx kv.TemporalTx) error
+	Reduce func(task *exec.Result, tx kv.TemporalTx) error
 }
 
 func NewHistoricalTraceWorker(
@@ -153,10 +153,11 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.Result {
 	ibs := rw.ibs
 
 	rules := rw.execArgs.ChainConfig.Rules(txTask.BlockNumber(), txTask.BlockTime())
-	var err error
-	rules, header := txTask.Rules, txTask.Header
+	header := txTask.Header
 	hooks := txTask.Tracer.Tracer().Hooks
 	ibs.SetHooks(hooks)
+
+	var err error
 
 	switch {
 	case txTask.TxIndex == -1:
@@ -173,7 +174,8 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.Result {
 
 		// Block initialisation
 		syscall := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			ret, _, err := core.SysCallContract(contract, data, rw.execArgs.ChainConfig, ibs, header, rw.execArgs.Engine, constCall /* constCall */, hooks)
+			ret, logs, err := core.SysCallContract(contract, data, rw.execArgs.ChainConfig, ibs, header, rw.execArgs.Engine, constCall /* constCall */, hooks)
+			result.Logs = append(result.Logs, logs...)
 			return ret, err
 		}
 		rw.execArgs.Engine.Initialize(rw.execArgs.ChainConfig, rw.chain, header, ibs, syscall, rw.logger, nil)
@@ -186,46 +188,49 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.Result {
 		// End of block transaction in a block
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
 			ret, logs, err := core.SysCallContract(contract, data, rw.execArgs.ChainConfig, ibs, header, rw.execArgs.Engine, false /* constCall */, hooks)
-			txTask.Logs = append(txTask.Logs, logs...)
+			result.Logs = append(result.Logs, logs...)
 			return ret, err
 		}
 
-		_, _, _, err := rw.execArgs.Engine.Finalize(rw.execArgs.ChainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, true /* skipReceiptsEval */, rw.logger)
+		_, _, _, err := rw.execArgs.Engine.Finalize(rw.execArgs.ChainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, result.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, true /* skipReceiptsEval */, rw.logger)
 		if err != nil {
-			txTask.Error = err
+			result.Err = err
 		}
 	default:
-		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), rw.execArgs.ChainConfig.GetMaxBlobGasPerBlock(header.Time))
-		//rw.callTracer.Reset()
-		rw.vmConfig.SkipAnalysis = txTask.SkipAnalysis
-		rw.vmConfig.Tracer = hooks
-		ibs.SetTxContext(txTask.TxIndex)
-		msg := txTask.TxAsMessage
-		msg.SetCheckNonce(!rw.vmConfig.StatelessExec)
+		result.Err = func() error {
+			rw.taskGasPool.Reset(txTask.Tx().GetGasLimit(), rw.execArgs.ChainConfig.GetMaxBlobGasPerBlock(header.Time))
+			//rw.callTracer.Reset()
+			rw.vmConfig.SkipAnalysis = txTask.SkipAnalysis
+			rw.vmConfig.Tracer = hooks
+			ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
+			msg, err := txTask.TxMessage()
+			msg.SetCheckNonce(!rw.vmConfig.StatelessExec)
 
-		txContext := core.NewEVMTxContext(msg)
-		if rw.vmConfig.TraceJumpDest {
-			txContext.TxHash = txTask.TxHash()
-		}
-		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, *rw.vmConfig, rules)
-		if hooks != nil && hooks.OnTxStart != nil {
-			hooks.OnTxStart(rw.evm.GetVMContext(), txTask.Tx, msg.From())
-		}
+			txContext := core.NewEVMTxContext(msg)
+			if rw.vmConfig.TraceJumpDest {
+				txContext.TxHash = txTask.TxHash()
+			}
+			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, *rw.vmConfig, rules)
+			if hooks != nil && hooks.OnTxStart != nil {
+				hooks.OnTxStart(rw.evm.GetVMContext(), txTask.Tx(), msg.From())
+			}
 
-		// MA applytx
-		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */, rw.execArgs.Engine)
-		if err != nil {
-			txTask.Error = err
-		} else {
-			txTask.Failed = applyRes.Failed()
-			txTask.UsedGas = applyRes.UsedGas
+			// MA applytx
+			applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */, rw.execArgs.Engine)
+			if err != nil {
+				return err
+			}
+			
+			result.ExecutionResult = applyRes
 			// Update the state with pending changes
 			ibs.SoftFinalise()
 
-			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)
-			txTask.TraceFroms = txTask.Tracer.Froms()
-			txTask.TraceTos = txTask.Tracer.Tos()
-		}
+			result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.Tx().Hash(), txTask.BlockNumber(), txTask.BlockHash())
+			result.TraceFroms = txTask.Tracer.Froms()
+			result.TraceTos = txTask.Tracer.Tos()
+
+			return nil
+		}()
 	}
 
 	return &result
@@ -290,7 +295,7 @@ func doHistoryReduce(consumer TraceConsumer, db kv.TemporalRoDB, ctx context.Con
 	defer tx.Rollback()
 
 	for outputTxNum.Load() <= toTxNum {
-		err = rws.DrainNonBlocking(ctx)
+		_, err = rws.DrainNonBlocking(ctx)
 		if err != nil {
 			return err
 		}
@@ -338,23 +343,23 @@ func processResultQueueHistorical(consumer *TraceConsumer, rws *exec.ResultsQueu
 		outputTxNum++
 		stopedAtBlockEnd = result.IsBlockEnd()
 
-		hooks := txTask.Tracer.TracingHooks()
-		if txTask.Error != nil {
+		hooks := result.Tracer.TracingHooks()
+		if result.Err != nil {
 			if hooks != nil && hooks.OnTxEnd != nil {
 				hooks.OnTxEnd(nil, err)
 			}
-			return outputTxNum, false, fmt.Errorf("bn=%d, tn=%d: %w", txTask.BlockNum, txTask.TxNum, txTask.Error)
+			return outputTxNum, false, fmt.Errorf("bn=%d, tn=%d: %w", result.BlockNumber(), result.TxNum(), result.Err)
 		}
 
-		txTask.CreateReceipt(tx)
+		result.CreateReceipt(tx)
 		if hooks != nil && hooks.OnTxEnd != nil {
-			hooks.OnTxEnd(txTask.BlockReceipts[txTask.TxIndex], nil)
+			hooks.OnTxEnd(result.BlockReceipts[result.TxIndex], nil)
 		}
 		if err := consumer.Reduce(result, tx); err != nil {
 			return outputTxNum, false, err
 		}
 
-		if forceStopAtBlockEnd && txTask.IsBlockEnd() {
+		if forceStopAtBlockEnd && result.IsBlockEnd() {
 			break
 		}
 	}
@@ -383,7 +388,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	}
 
 	// If db is empty, and have only files - then limit by files progress. Because files can have half-block progress
-	ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+	ac := tx.AggTx().(*state2.AggregatorRoTx)
 	stepSize := ac.StepSize()
 	if ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx) > 1 {
 		toTxNum = min(toTxNum, ac.DbgDomain(kv.AccountsDomain).FirstStepNotInFiles()*stepSize)

@@ -71,14 +71,6 @@ func (cw *CachedWriter) WriteAccountStorage(address common.Address, incarnation 
 	return nil
 }
 
-func (cw *CachedWriter) DeleteAccountStorage(address common.Address, incarnation uint64, key common.Hash) error {
-	if err := cw.w.DeleteAccountStorage(address, incarnation, key); err != nil {
-		return err
-	}
-	cw.cache.SetStorageDelete(address[:], incarnation, key[:])
-	return nil
-}
-
 func (cw *CachedWriter) CreateContract(address common.Address) error {
 	return cw.w.CreateContract(address)
 }

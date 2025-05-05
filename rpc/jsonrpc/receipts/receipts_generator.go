@@ -16,7 +16,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
@@ -53,7 +52,7 @@ type ReceiptEnv struct {
 	usedBlobGas *uint64
 	gp          *core.GasPool
 	noopWriter  *state.NoopWriter
-	getHeader   func(hash common.Hash, number uint64) *types.Header
+	getHeader   func(hash common.Hash, number uint64) (*types.Header, error)
 	header      *types.Header
 }
 
@@ -116,12 +115,8 @@ func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *c
 
 	noopWriter := state.NewNoopWriter()
 
-	getHeader := func(hash common.Hash, number uint64) *types.Header {
-		h, e := g.blockReader.Header(ctx, tx, hash, number)
-		if e != nil {
-			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
-		}
-		return h
+	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
+		return g.blockReader.Header(ctx, tx, hash, number)
 	}
 	return &ReceiptEnv{
 		ibs:         ibs,
@@ -244,7 +239,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	}
 
 	for i, txn := range block.Transactions() {
-		genEnv.ibs.SetTxContext(i)
+		genEnv.ibs.SetTxContext(block.NumberU64(), i)
 		receipt, _, err := core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.usedGas, genEnv.usedBlobGas, vm.Config{})
 		if err != nil {
 			return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", block.NumberU64(), i, err)

@@ -851,27 +851,6 @@ func (tsw *TrieStateWriter) WriteAccountStorage(address common.Address, incarnat
 	return nil
 }
 
-func (tsw *TrieStateWriter) DeleteAccountStorage(address common.Address, incarnation uint64, key common.Hash) error {
-	addrHash := common.Hash(crypto.Keccak256(address.Bytes()))
-
-	m, ok := tsw.tds.currentBuffer.storageUpdates[addrHash]
-	if !ok {
-		return nil
-	}
-	tsw.tds.currentBuffer.storageIncarnation[addrHash] = incarnation
-	seckey, err := common.HashData(key.Bytes())
-	if err != nil {
-		return err
-	}
-	var storageKey common.StorageKey
-	copy(storageKey[:], dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey))
-
-	delete(tsw.tds.currentBuffer.storageReads, storageKey)
-	delete(m, seckey)
-	//fmt.Printf("WriteAccountStorage %x %x: %x, buffer %d\n", addrHash, seckey, value, len(tsw.tds.buffers))
-	return nil
-}
-
 // ExtractWitness produces block witness for the block just been processed, in a serialised form
 func (tds *TrieDbState) ExtractWitness(trace bool, isBinary bool) (*trie.Witness, error) {
 	rs := tds.retainListBuilder.Build(isBinary)

@@ -251,34 +251,6 @@ func (s *Stateless) WriteAccountStorage(address common.Address, incarnation uint
 	return nil
 }
 
-func (s *Stateless) DeleteAccountStorage(address common.Address, incarnation uint64, key common.Hash) error {
-	addrHash, err := common.HashData(address[:])
-	if err != nil {
-		return err
-	}
-
-	d, ok := s.storageDeletes[addrHash]
-	if !ok {
-		d = make(map[common.Hash]struct{})
-		s.storageDeletes[addrHash] = d
-	}
-
-	seckey, err := common.HashData(key[:])
-	if err != nil {
-		return err
-	}
-	d[seckey] = struct{}{}
-
-	if m, ok := s.storageWrites[addrHash]; ok {
-		delete(m, seckey)
-	}
-
-	if s.trace {
-		fmt.Printf("Stateless: DeleteAccountStorage %x key %x\n", address, key)
-	}
-	return nil
-}
-
 // CreateContract is a part of StateWriter interface
 // This implementation registers given address in the internal map `created`
 func (s *Stateless) CreateContract(address common.Address) error {
