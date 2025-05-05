@@ -129,6 +129,7 @@ func (rs *StateV3) ApplyState4(ctx context.Context,
 	txNum uint64,
 	writeLists WriteLists,
 	balanceIncreases map[common.Address]uint256.Int,
+	receipts []*types.Receipt,
 	logs []*types.Log,
 	traceFroms map[common.Address]struct{},
 	traceTos map[common.Address]struct{},
@@ -145,7 +146,7 @@ func (rs *StateV3) ApplyState4(ctx context.Context,
 	}
 	writeLists.Return()
 
-	if err := rs.ApplyLogsAndTraces4(logs, traceFroms, traceTos, rs.domains); err != nil {
+	if err := rs.ApplyLogsAndTraces4(receipts, logs, traceFroms, traceTos, rs.domains); err != nil {
 		return fmt.Errorf("StateV3.ApplyLogsAndTraces: %w", err)
 	}
 
@@ -163,7 +164,7 @@ func (rs *StateV3) ApplyState4(ctx context.Context,
 	return nil
 }
 
-func (rs *StateV3) ApplyLogsAndTraces4(logs []*types.Log, traceFroms map[common.Address]struct{}, traceTos map[common.Address]struct{}, domains *state.SharedDomains) error {
+func (rs *StateV3) ApplyLogsAndTraces4(receipts []*types.Receipt, logs []*types.Log, traceFroms map[common.Address]struct{}, traceTos map[common.Address]struct{}, domains *state.SharedDomains) error {
 	for addr := range traceFroms {
 		if err := domains.IndexAdd(kv.TracesFromIdx, addr[:]); err != nil {
 			return err
@@ -188,12 +189,13 @@ func (rs *StateV3) ApplyLogsAndTraces4(logs []*types.Log, traceFroms map[common.
 	}
 
 	if rs.syncCfg.PersistReceiptsCacheV2 {
-		var receipt *types.Receipt
-		if txTask.TxIndex > 0 && txTask.TxIndex < len(txTask.BlockReceipts) {
-			receipt = txTask.BlockReceipts[txTask.TxIndex]
-		}
-		if err := rawdb.WriteReceiptCacheV2(rs.domains.AsPutDel(rs.tx), receipt); err != nil {
-			return err
+		for _, receipt := range receipts {
+			//if txTask.TxIndex > 0 && txTask.TxIndex < len(txTask.BlockReceipts) {
+			//	receipt = txTask.BlockReceipts[txTask.TxIndex]
+			//}
+			if err := rawdb.WriteReceiptCacheV2(rs.domains.AsPutDel(rs.tx), receipt); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -370,7 +372,7 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 		if err := w.rs.domains.DomainDel(kv.CodeDomain, w.tx, address[:], nil, 0); err != nil {
 			return err
 		}
-		if err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte, step uint64) (bool, error) {
+		if err := w.rs.domains.IterateStoragePrefix(address[:], w.tx, func(k, v []byte, step uint64) (bool, error) {
 			w.writeLists[kv.StorageDomain.String()].Push(string(k), nil)
 			return true, nil
 		}); err != nil {

@@ -32,10 +32,9 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	state2 "github.com/erigontech/erigon-lib/state"
+	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/exec"
-	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3"
@@ -113,7 +112,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 
 	var startBlock, endBlock uint64
 	if err := cfg.db.View(ctx, func(tx kv.Tx) (err error) {
-		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+		ac := libstate.AggTx(tx)
 		stepSize := ac.StepSize()
 		txNum := max(ac.DbgDomain(kv.AccountsDomain).FirstStepNotInFiles()*stepSize, ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx))
 		var ok bool
@@ -166,7 +165,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 Loop:
 	for {
 		select {
-		case <-cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator).WaitForBuildAndMerge(ctx):
+		case <-cfg.db.(libstate.HasAgg).Agg().(*libstate.Aggregator).WaitForBuildAndMerge(ctx):
 			break Loop
 		case <-ctx.Done():
 			return ctx.Err()
@@ -189,7 +188,7 @@ Loop:
 
 	log.Info("SpawnCustomTrace finish")
 	if err := cfg.db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		ac := tx.AggTx().(*state2.AggregatorRoTx)
+		ac := tx.AggTx().(*libstate.AggregatorRoTx)
 		stepSize := ac.StepSize()
 		receiptProgress := ac.DbgDomain(producingDomain).DbgMaxTxNumInDB(tx)
 		accProgress := max(ac.DbgDomain(kv.AccountsDomain).FirstStepNotInFiles()*stepSize, ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx))
@@ -217,7 +216,7 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 		}
 		defer tx.Rollback()
 
-		doms, err := state2.NewSharedDomains(tx, logger)
+		doms, err := libstate.NewSharedDomains(tx, logger)
 		if err != nil {
 			return err
 		}
@@ -243,13 +242,13 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 		}
 	}
 
-	agg := db.(state2.HasAgg).Agg().(*state2.Aggregator)
+	agg := db.(libstate.HasAgg).Agg().(*libstate.Aggregator)
 	var fromStep, toStep uint64
 	if lastTxNum/agg.StepSize() > 0 {
 		toStep = lastTxNum / agg.StepSize()
 	}
 	if err := db.View(ctx, func(tx kv.Tx) error {
-		ac := state2.AggTx(tx)
+		ac := libstate.AggTx(tx)
 		fromStep = ac.DbgDomain(producingDomain).FirstStepNotInFiles()
 		return nil
 	}); err != nil {
@@ -260,7 +259,7 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 	}
 
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		ac := state2.AggTx(tx)
+		ac := libstate.AggTx(tx)
 		if err := ac.GreedyPruneHistory(ctx, kv.CommitmentDomain, tx); err != nil {
 			return err
 		}
@@ -342,7 +341,7 @@ func badFoundBlockNum(tx kv.Tx, fromBlock uint64, txNumsReader rawdbv3.TxNumsRea
 	return fromBlock + i
 }
 
-func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, doms *state2.SharedDomains, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
+func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, doms *libstate.SharedDomains, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
 	const logPeriod = 5 * time.Second
 	logEvery := time.NewTicker(logPeriod)
 	defer logEvery.Stop()

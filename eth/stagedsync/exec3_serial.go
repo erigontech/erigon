@@ -151,7 +151,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 					}
 				}
 
-				stateWriter := state.NewStateWriterV3(se.rs.StateV3, se.applyTx, se.accumulator)
+				stateWriter := state.NewWriter(se.doms.AsPutDel(se.applyTx), se.accumulator)
 
 				if err = ibs.MakeWriteSet(se.cfg.chainConfig.Rules(txTask.BlockNumber(), txTask.BlockTime()), stateWriter); err != nil {
 					panic(err)
@@ -220,7 +220,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 		} else {
 			if se.cfg.chainConfig.Bor != nil && txTask.TxIndex >= 1 {
 				// get last receipt and store the last log index + 1
-				lastReceipt := txTask.BlockReceipts[txTask.TxIndex-1]
+				lastReceipt := blockReceipts[txTask.TxIndex-1]
 				if lastReceipt == nil {
 					return false, fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNum)
 				}
@@ -230,7 +230,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 						CumulativeGasUsed:        lastReceipt.CumulativeGasUsed,
 						FirstLogIndexWithinBlock: uint32(firstIndex),
 					}
-					if err := rawtemporaldb.AppendReceipt(se.doms, &receipt, se.blobGasUsed); err != nil {
+					if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), &receipt, se.blobGasUsed); err != nil {
 						return false, err
 					}
 				}
