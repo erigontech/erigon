@@ -28,16 +28,90 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 )
 
-var DefaultMode = Mode{
-	Initialised: true,
-	History:     Distance(math.MaxUint64),
-	Blocks:      Distance(math.MaxUint64),
+var (
+	ArchiveMode = Mode{
+		Initialised: true,
+		History:     Distance(math.MaxUint64),
+		Blocks:      Distance(math.MaxUint64),
+	}
+	FullMode = Mode{
+		Initialised: true,
+		Blocks:      Distance(math.MaxUint64),
+		History:     Distance(config3.DefaultPruneDistance),
+	}
+	MinimalMode = Mode{
+		Initialised: true,
+		Blocks:      Distance(config3.DefaultPruneDistance),
+		History:     Distance(config3.DefaultPruneDistance),
+	}
+
+	DefaultMode = ArchiveMode
+
+	ErrUnknownPruneMode       = fmt.Errorf("--prune.mode must be one of %s, %s, %s", archiveModeStr, fullModeStr, minimalModeStr)
+	ErrDistanceOnlyForArchive = fmt.Errorf("--prune.distance and --prune.distance.blocks are only allowed with --prune.mode=%s", archiveModeStr)
+)
+
+const (
+	archiveModeStr = "archive"
+	fullModeStr    = "full"
+	minimalModeStr = "minimal"
+)
+
+type Mode struct {
+	Initialised bool // Set when the values are initialised (not default)
+	History     BlockAmount
+	Blocks      BlockAmount
 }
 
-func FromCli(distanceHistory, distanceBlocks uint64) (Mode, error) {
-	mode := DefaultMode
-	mode.History = Distance(distanceHistory)
-	mode.Blocks = Distance(distanceBlocks)
+func (m Mode) String() string {
+	if !m.Initialised {
+		return archiveModeStr
+	}
+	if m.History.toValue() == FullMode.History.toValue() && m.Blocks.toValue() == FullMode.Blocks.toValue() {
+		return fullModeStr
+	}
+	if m.History.toValue() == MinimalMode.History.toValue() && m.Blocks.toValue() == MinimalMode.Blocks.toValue() {
+		return minimalModeStr
+	}
+
+	short := archiveModeStr
+	if m.History.toValue() != DefaultMode.History.toValue() {
+		short += fmt.Sprintf(" --prune.distance=%d", m.History.toValue())
+	}
+	if m.Blocks.toValue() != DefaultMode.Blocks.toValue() {
+		short += fmt.Sprintf(" --prune.distance.blocks=%d", m.Blocks.toValue())
+	}
+	return strings.TrimLeft(short, " ")
+}
+
+func FromCli(pruneMode string, distanceHistory, distanceBlocks uint64) (Mode, error) {
+	var mode Mode
+	switch pruneMode {
+	case archiveModeStr, "":
+		mode = ArchiveMode
+		if distanceHistory > 0 {
+			mode.History = Distance(distanceHistory)
+		}
+		if distanceBlocks > 0 {
+			mode.Blocks = Distance(distanceBlocks)
+		}
+	case fullModeStr:
+		mode = FullMode
+	case minimalModeStr:
+		mode = MinimalMode
+	default:
+		return Mode{}, ErrUnknownPruneMode
+	}
+
+	if pruneMode != archiveModeStr {
+		// Override is not allowed for full/minimal mode
+		if distanceHistory > 0 && distanceHistory != mode.History.toValue() {
+			return Mode{}, ErrDistanceOnlyForArchive
+		}
+		if distanceBlocks > 0 && distanceBlocks != mode.Blocks.toValue() {
+			return Mode{}, ErrDistanceOnlyForArchive
+		}
+	}
 	return mode, nil
 }
 
@@ -62,12 +136,6 @@ func Get(db kv.Getter) (Mode, error) {
 	}
 
 	return prune, nil
-}
-
-type Mode struct {
-	Initialised bool // Set when the values are initialised (not default)
-	History     BlockAmount
-	Blocks      BlockAmount
 }
 
 type BlockAmount interface {
@@ -97,31 +165,6 @@ func (p Distance) PruneTo(stageHead uint64) uint64 {
 		return 0
 	}
 	return stageHead - uint64(p)
-}
-
-func (m Mode) String() string {
-	if !m.Initialised {
-		return "default"
-	}
-	const defaultVal uint64 = config3.FullImmutabilityThreshold
-	long := ""
-	short := ""
-	if m.History.Enabled() {
-		if m.History.useDefaultValue() {
-			short += fmt.Sprintf(" --prune.h.older=%d", defaultVal)
-		} else {
-			long += fmt.Sprintf(" --prune.h.%s=%d", m.History.dbType(), m.History.toValue())
-		}
-	}
-	if m.Blocks.Enabled() {
-		if m.Blocks.useDefaultValue() {
-			short += fmt.Sprintf(" --prune.b.older=%d", defaultVal)
-		} else {
-			long += fmt.Sprintf(" --prune.b.%s=%d", m.Blocks.dbType(), m.Blocks.toValue())
-		}
-	}
-
-	return strings.TrimLeft(short+long, " ")
 }
 
 // EnsureNotChanged - prohibit change some configs after node creation. prohibit from human mistakes
