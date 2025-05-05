@@ -118,7 +118,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 		if txCtx.GasPrice == nil || txCtx.GasPrice.IsZero() {
 			if chainConfig.IsArbitrum() {
 				blockCtx.BaseFeeInBlock = new(uint256.Int)
-				if !blockCtx.BaseFee.IsZero() {
+				if blockCtx.BaseFee != nil && !blockCtx.BaseFee.IsZero() {
 					blockCtx.BaseFeeInBlock.Set(blockCtx.BaseFee)
 				}
 			}
