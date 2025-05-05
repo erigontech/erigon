@@ -29,33 +29,33 @@ import (
 	"github.com/erigontech/erigon/params"
 )
 
-var ArchiveMode = Mode{
-	Initialised: true,
-	History:     Distance(math.MaxUint64),
-	Blocks:      Distance(math.MaxUint64),
-	Experiments: Experiments{}, // all off
-}
+var (
+	ArchiveMode = Mode{
+		Initialised: true,
+		History:     Distance(math.MaxUint64),
+		Blocks:      Distance(math.MaxUint64),
+		Experiments: Experiments{}, // all off
+	}
+	FullMode = Mode{
+		Initialised: true,
+		Blocks:      Distance(math.MaxUint64),
+		History:     Distance(config3.DefaultPruneDistance),
+		Experiments: Experiments{},
+	}
+	MinimalMode = Mode{
+		Initialised: true,
+		Blocks:      Distance(config3.DefaultPruneDistance),
+		History:     Distance(config3.DefaultPruneDistance),
+		Experiments: Experiments{},
+	}
 
-var FullMode = Mode{
-	Initialised: true,
-	Blocks:      Distance(math.MaxUint64),
-	History:     Distance(config3.DefaultPruneDistance),
-	Experiments: Experiments{},
-}
+	DefaultMode = ArchiveMode
 
-var MinimalMode = Mode{
-	Initialised: true,
-	Blocks:      Distance(config3.DefaultPruneDistance),
-	History:     Distance(config3.DefaultPruneDistance),
-	Experiments: Experiments{},
-}
-
-var DefaultMode = ArchiveMode
+	ErrUnknownPruneMode       = errors.New("--prune.mode must be one of archive, full, minimal")
+	ErrDistanceOnlyForArchive = errors.New("--prune.distance and --prune.distance.blocks are only allowed with --prune.mode=archive")
+)
 
 type Experiments struct{}
-
-var ErrUnknownPruneMode = errors.New("--prune.mode must be one of archive, full, minimal")
-var ErrDistanceOnlyForArchive = errors.New("--prune.distance and --prune.distance.blocks are only allowed with --prune.mode=archive")
 
 func FromCli(distanceHistory, distanceBlocks uint64, pruneMode string, experiments []string) (Mode, error) {
 	var mode Mode
@@ -307,35 +307,6 @@ func setOnEmpty(db kv.GetPut, key []byte, blockAmount BlockAmount) error {
 			return err
 		}
 		if err = db.Put(kv.DatabaseInfo, keyType(key), blockAmount.dbType()); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func setMode(db kv.RwTx, key []byte, currentValue bool) error {
-	val := []byte{2}
-	if currentValue {
-		val = []byte{1}
-	}
-	if err := db.Put(kv.DatabaseInfo, key, val); err != nil {
-		return err
-	}
-	return nil
-}
-
-func setModeOnEmpty(db kv.GetPut, key []byte, currentValue bool) error {
-	mode, err := db.GetOne(kv.DatabaseInfo, key)
-	if err != nil {
-		return err
-	}
-	if len(mode) == 0 {
-		val := []byte{2}
-		if currentValue {
-			val = []byte{1}
-		}
-		if err = db.Put(kv.DatabaseInfo, key, val); err != nil {
 			return err
 		}
 	}
