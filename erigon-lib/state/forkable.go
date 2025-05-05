@@ -298,7 +298,7 @@ func (m *MarkedTx) HasRootNumUpto(ctx context.Context, to RootNum, tx kv.Tx) (bo
 	iLastNum := binary.BigEndian.Uint64(lastNum)
 	eto, err := a.rel.RootNum2Num(to, tx)
 	if err != nil {
-		return false, fmt.Errorf("err RootNum2Num %v %v", to, err)
+		return false, fmt.Errorf("err RootNum2Num %v %w", to, err)
 	}
 
 	return iLastNum >= eto.Uint64(), nil
@@ -371,7 +371,7 @@ func (m *UnmarkedTx) HasRootNumUpto(ctx context.Context, to RootNum, tx kv.Tx) (
 	iLastNum := binary.BigEndian.Uint64(lastNum)
 	eto, err := a.rel.RootNum2Num(to, tx)
 	if err != nil {
-		return false, fmt.Errorf("err RootNum2Num %v %v", to, err)
+		return false, fmt.Errorf("err RootNum2Num %v %w", to, err)
 	}
 
 	return iLastNum >= eto.Uint64(), nil
@@ -457,7 +457,7 @@ func (m *BufferedTx) HasRootNumUpto(ctx context.Context, to RootNum, tx kv.Tx) (
 	iLastNum := binary.BigEndian.Uint64(lastNum)
 	eto, err := a.rel.RootNum2Num(to, tx)
 	if err != nil {
-		return false, fmt.Errorf("err RootNum2Num %v %v", to, err)
+		return false, fmt.Errorf("err RootNum2Num %v %w", to, err)
 	}
 
 	return iLastNum >= eto.Uint64(), nil

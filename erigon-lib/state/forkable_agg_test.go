@@ -356,6 +356,7 @@ func setup(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
 }
 
 func setupHeader(t *testing.T, log log.Logger, dirs datadir.Dirs) (ForkableId, *Forkable[MarkedTxI]) {
+	t.Helper()
 	headerId := registerEntity(dirs, "headers")
 
 	builder := NewSimpleAccessorBuilder(NewAccessorArgs(true, false), headerId, log,
@@ -375,6 +376,7 @@ func setupHeader(t *testing.T, log log.Logger, dirs datadir.Dirs) (ForkableId, *
 }
 
 func setupBodies(t *testing.T, log log.Logger, dirs datadir.Dirs) (ForkableId, *Forkable[MarkedTxI]) {
+	t.Helper()
 	bodyId := registerEntity(dirs, "bodies")
 
 	builder := NewSimpleAccessorBuilder(NewAccessorArgs(true, false), bodyId, log,
@@ -428,6 +430,7 @@ func (tr *TRand) RandBytes(size int) []byte {
 }
 
 func fillForkables(t *testing.T, rwtx kv.RwTx, headerTx, bodyTx MarkedTxI, amount int) (canonicalHashes [][]byte) {
+	t.Helper()
 	tr := NewTRand()
 	canonicalHashes = make([][]byte, amount)
 

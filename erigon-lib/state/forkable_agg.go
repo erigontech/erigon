@@ -32,7 +32,7 @@ type ForkableAgg struct {
 	visibleFilesMinimaxRootNum atomic.Uint64
 
 	buildingFiles atomic.Bool
-	mergingFiles  atomic.Bool
+	//mergingFiles  atomic.Bool
 
 	collateAndBuildWorkers int
 
@@ -320,7 +320,7 @@ func (r *ForkableAgg) recalcVisibleFiles(toRootNum RootNum) {
 	r.visibleFilesLock.Lock()
 	defer r.visibleFilesLock.Unlock()
 
-	dfMiniMaxRootNum := RootNum(toRootNum)
+	dfMiniMaxRootNum := toRootNum
 	r.loop(func(p *ProtoForkable) error {
 		if !p.unaligned {
 			dfMiniMaxRootNum = min(dfMiniMaxRootNum, p.snaps.DirtyFilesMaxRootNum())
