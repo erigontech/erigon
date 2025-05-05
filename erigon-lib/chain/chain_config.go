@@ -21,10 +21,12 @@ import (
 	"fmt"
 	"math/big"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/generics"
 )
 
 // Config is the core config which determines the blockchain settings.
@@ -32,6 +34,8 @@ import (
 // Config is stored in the database on a per block basis. This means
 // that any network, identified by its genesis block, can have its own
 // set of configuration options.
+//
+// Config must be copied only with jinzhu/copier since it contains a sync.Once.
 type Config struct {
 	ChainName string   `json:"chainName"` // chain name, eg: mainnet, sepolia, bor-mainnet
 	ChainID   *big.Int `json:"chainId"`   // chainId identifies the current chain and is used for replay protection
@@ -70,9 +74,11 @@ type Config struct {
 	PragueTime   *big.Int `json:"pragueTime,omitempty"`
 	OsakaTime    *big.Int `json:"osakaTime,omitempty"`
 
-	// Optional EIP-4844 parameters (see also EIP-7691 & EIP-7840)
-	MinBlobGasPrice *uint64       `json:"minBlobGasPrice,omitempty"`
-	BlobSchedule    *BlobSchedule `json:"blobSchedule,omitempty"`
+	// Optional EIP-4844 parameters (see also EIP-7691, EIP-7840, EIP-7892)
+	MinBlobGasPrice       *uint64                       `json:"minBlobGasPrice,omitempty"`
+	BlobSchedule          map[string]*params.BlobConfig `json:"blobSchedule,omitempty"`
+	parseBlobScheduleOnce sync.Once                     `copier:"-"`
+	parsedBlobSchedule    map[uint64]*params.BlobConfig
 
 	// (Optional) governance contract where EIP-1559 fees will be sent to, which otherwise would be burnt since the London fork.
 	// A key corresponds to the block number, starting from which the fees are sent to the address (map value).
@@ -112,6 +118,26 @@ var (
 		Ethash:                new(EthashConfig),
 	}
 
+	TestChainConfigCancun = &Config{
+		ChainID:                       big.NewInt(1),
+		HomesteadBlock:                big.NewInt(0),
+		TangerineWhistleBlock:         big.NewInt(0),
+		SpuriousDragonBlock:           big.NewInt(0),
+		ByzantiumBlock:                big.NewInt(0),
+		ConstantinopleBlock:           big.NewInt(0),
+		PetersburgBlock:               big.NewInt(0),
+		IstanbulBlock:                 big.NewInt(0),
+		MuirGlacierBlock:              big.NewInt(0),
+		BerlinBlock:                   big.NewInt(0),
+		LondonBlock:                   big.NewInt(0),
+		ArrowGlacierBlock:             big.NewInt(0),
+		GrayGlacierBlock:              big.NewInt(0),
+		TerminalTotalDifficulty:       big.NewInt(0),
+		TerminalTotalDifficultyPassed: true,
+		ShanghaiTime:                  big.NewInt(0),
+		CancunTime:                    big.NewInt(0),
+	}
+
 	TestChainAuraConfig = &Config{
 		ChainID:               big.NewInt(1),
 		Consensus:             AuRaConsensus,
@@ -128,57 +154,6 @@ var (
 		Aura:                  &AuRaConfig{},
 	}
 )
-
-type BlobConfig struct {
-	Target                *uint64 `json:"target,omitempty"`
-	Max                   *uint64 `json:"max,omitempty"`
-	BaseFeeUpdateFraction *uint64 `json:"baseFeeUpdateFraction,omitempty"`
-}
-
-// See EIP-7840: Add blob schedule to EL config files
-type BlobSchedule struct {
-	Cancun *BlobConfig `json:"cancun,omitempty"`
-	Prague *BlobConfig `json:"prague,omitempty"`
-}
-
-func (b *BlobSchedule) TargetBlobsPerBlock(isPrague bool) uint64 {
-	if isPrague {
-		if b != nil && b.Prague != nil && b.Prague.Target != nil {
-			return *b.Prague.Target
-		}
-		return 6 // EIP-7691
-	}
-	if b != nil && b.Cancun != nil && b.Cancun.Target != nil {
-		return *b.Cancun.Target
-	}
-	return 3 // EIP-4844
-}
-
-func (b *BlobSchedule) MaxBlobsPerBlock(isPrague bool) uint64 {
-	if isPrague {
-		if b != nil && b.Prague != nil && b.Prague.Max != nil {
-			return *b.Prague.Max
-		}
-		return 9 // EIP-7691
-	}
-	if b != nil && b.Cancun != nil && b.Cancun.Max != nil {
-		return *b.Cancun.Max
-	}
-	return 6 // EIP-4844
-}
-
-func (b *BlobSchedule) BaseFeeUpdateFraction(isPrague bool) uint64 {
-	if isPrague {
-		if b != nil && b.Prague != nil && b.Prague.BaseFeeUpdateFraction != nil {
-			return *b.Prague.BaseFeeUpdateFraction
-		}
-		return 5007716 // EIP-7691
-	}
-	if b != nil && b.Cancun != nil && b.Cancun.BaseFeeUpdateFraction != nil {
-		return *b.Cancun.BaseFeeUpdateFraction
-	}
-	return 3338477 // EIP-4844
-}
 
 type BorConfig interface {
 	fmt.Stringer
@@ -344,7 +319,7 @@ func (c *Config) GetBurntContract(num uint64) *common.Address {
 	if len(c.BurntContract) == 0 {
 		return nil
 	}
-	addr := ConfigValueLookup(c.BurntContract, num)
+	addr := ConfigValueLookup(common.ParseMapKeysIntoUint64(c.BurntContract), num)
 	return &addr
 }
 
@@ -355,32 +330,64 @@ func (c *Config) GetMinBlobGasPrice() uint64 {
 	return 1 // MIN_BLOB_GASPRICE (EIP-4844)
 }
 
-func (c *Config) GetMaxBlobGasPerBlock(t uint64) uint64 {
-	return c.GetMaxBlobsPerBlock(t) * params.BlobGasPerBlob
+func (c *Config) getBlobConfig(time uint64) *params.BlobConfig {
+	c.parseBlobScheduleOnce.Do(func() {
+		// Populate with default values
+		c.parsedBlobSchedule = map[uint64]*params.BlobConfig{
+			0: {},
+		}
+		if c.CancunTime != nil {
+			c.parsedBlobSchedule[c.CancunTime.Uint64()] = &params.DefaultCancunBlobConfig
+		}
+		if c.PragueTime != nil {
+			c.parsedBlobSchedule[c.PragueTime.Uint64()] = &params.DefaultPragueBlobConfig
+		}
+		if c.OsakaTime != nil {
+			c.parsedBlobSchedule[c.OsakaTime.Uint64()] = &params.DefaultOsakaBlobConfig
+		}
+
+		// Override with supplied values
+		for key, val := range c.BlobSchedule {
+			switch {
+			case key == "cancun":
+				if c.CancunTime != nil {
+					c.parsedBlobSchedule[c.CancunTime.Uint64()] = val
+				}
+			case key == "prague":
+				if c.PragueTime != nil {
+					c.parsedBlobSchedule[c.PragueTime.Uint64()] = val
+				}
+			case key == "osaka":
+				if c.OsakaTime != nil {
+					c.parsedBlobSchedule[c.OsakaTime.Uint64()] = val
+				}
+			default:
+				keyU64, err := strconv.ParseUint(key, 10, 64)
+				if err != nil {
+					panic(err)
+				}
+				c.parsedBlobSchedule[keyU64] = val
+			}
+		}
+	})
+
+	return ConfigValueLookup(c.parsedBlobSchedule, time)
 }
 
 func (c *Config) GetMaxBlobsPerBlock(time uint64) uint64 {
-	var b *BlobSchedule
-	if c != nil {
-		b = c.BlobSchedule
-	}
-	return b.MaxBlobsPerBlock(c.IsPrague(time))
+	return c.getBlobConfig(time).Max
 }
 
-func (c *Config) GetTargetBlobGasPerBlock(t uint64) uint64 {
-	var b *BlobSchedule
-	if c != nil {
-		b = c.BlobSchedule
-	}
-	return b.TargetBlobsPerBlock(c.IsPrague(t)) * params.BlobGasPerBlob
+func (c *Config) GetMaxBlobGasPerBlock(time uint64) uint64 {
+	return c.getBlobConfig(time).Max * params.BlobGasPerBlob
 }
 
-func (c *Config) GetBlobGasPriceUpdateFraction(t uint64) uint64 {
-	var b *BlobSchedule
-	if c != nil {
-		b = c.BlobSchedule
-	}
-	return b.BaseFeeUpdateFraction(c.IsPrague(t))
+func (c *Config) GetTargetBlobGasPerBlock(time uint64) uint64 {
+	return c.getBlobConfig(time).Target * params.BlobGasPerBlob
+}
+
+func (c *Config) GetBlobGasPriceUpdateFraction(time uint64) uint64 {
+	return c.getBlobConfig(time).BaseFeeUpdateFraction
 }
 
 func (c *Config) SecondsPerSlot() uint64 {
@@ -588,28 +595,21 @@ func (c *CliqueConfig) String() string {
 
 // Looks up a config value as of a given block number (or time).
 // The assumption here is that config is a càdlàg map of starting_from_block -> value.
-// For example, config of {"0": "0xA", "10": "0xB", "20": "0xC"}
-// means that the config value is 0xA for blocks 0–9,
-// 0xB for blocks 10–19, and 0xC for block 20 and above.
-func ConfigValueLookup[T uint64 | common.Address](field map[string]T, number uint64) T {
-	fieldUint := make(map[uint64]T)
-	for k, v := range field {
-		keyUint, err := strconv.ParseUint(k, 10, 64)
-		if err != nil {
-			panic(err)
-		}
-		fieldUint[keyUint] = v
+// For example, config of {5: "A", 10: "B", 20: "C"}
+// means that the config value is "A" for blocks 5–9,
+// "B" for blocks 10–19, and "C" for block 20 and above.
+// For blocks 0–4 an empty string will be returned.
+func ConfigValueLookup[T any](field map[uint64]T, number uint64) T {
+	keys := common.SortedKeys(field)
+	if number < keys[0] {
+		return generics.Zero[T]()
 	}
-
-	keys := common.SortedKeys(fieldUint)
-
 	for i := 0; i < len(keys)-1; i++ {
 		if number >= keys[i] && number < keys[i+1] {
-			return fieldUint[keys[i]]
+			return field[keys[i]]
 		}
 	}
-
-	return fieldUint[keys[len(keys)-1]]
+	return field[keys[len(keys)-1]]
 }
 
 // Rules is syntactic sugar over Config. It can be used for functions

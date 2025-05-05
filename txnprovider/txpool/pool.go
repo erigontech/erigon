@@ -127,6 +127,7 @@ type TxPool struct {
 	promoted                Announcements
 	cfg                     txpoolcfg.Config
 	chainID                 uint256.Int
+	chainConfig             *chain.Config
 	lastSeenBlock           atomic.Uint64
 	lastSeenCond            *sync.Cond
 	lastFinalizedBlock      atomic.Uint64
@@ -143,7 +144,6 @@ type TxPool struct {
 	isPostCancun            atomic.Bool
 	pragueTime              *uint64
 	isPostPrague            atomic.Bool
-	blobSchedule            *chain.BlobSchedule
 	feeCalculator           FeeCalculator
 	p2pFetcher              *Fetch
 	p2pSender               *Send
@@ -173,12 +173,11 @@ func New(
 	chainDB kv.TemporalRoDB,
 	cfg txpoolcfg.Config,
 	cache kvcache.Cache,
-	chainID uint256.Int,
+	chainConfig *chain.Config,
 	shanghaiTime *big.Int,
 	agraBlock *big.Int,
 	cancunTime *big.Int,
 	pragueTime *big.Int,
-	blobSchedule *chain.BlobSchedule,
 	sentryClients []sentryproto.SentryClient,
 	stateChangesClient StateChangesClient,
 	builderNotifyNewTxns func(),
@@ -208,6 +207,11 @@ func New(
 		tracedSenders[common.BytesToAddress([]byte(sender))] = struct{}{}
 	}
 
+	configChainID, overflow := uint256.FromBig(chainConfig.ChainID)
+	if overflow {
+		return nil, errors.New("chainID overflow")
+	}
+
 	lock := &sync.Mutex{}
 
 	res := &TxPool{
@@ -227,12 +231,12 @@ func New(
 		poolDB:                  poolDB,
 		_chainDB:                chainDB,
 		cfg:                     cfg,
-		chainID:                 chainID,
+		chainID:                 *configChainID,
+		chainConfig:             chainConfig,
 		unprocessedRemoteTxns:   &TxnSlots{},
 		unprocessedRemoteByHash: map[string]int{},
 		minedBlobTxnsByBlock:    map[uint64][]*metaTxn{},
 		minedBlobTxnsByHash:     map[string]*metaTxn{},
-		blobSchedule:            blobSchedule,
 		feeCalculator:           options.feeCalculator,
 		ethBackend:              ethBackend,
 		builderNotifyNewTxns:    builderNotifyNewTxns,
@@ -274,7 +278,7 @@ func New(
 		res.pragueTime = &pragueTimeU64
 	}
 
-	res.p2pFetcher = NewFetch(ctx, sentryClients, res, stateChangesClient, poolDB, chainID, logger, opts...)
+	res.p2pFetcher = NewFetch(ctx, sentryClients, res, stateChangesClient, poolDB, res.chainID, logger, opts...)
 	res.p2pSender = NewSend(ctx, sentryClients, logger, opts...)
 
 	return res, nil
@@ -1181,7 +1185,8 @@ func (p *TxPool) isPrague() bool {
 }
 
 func (p *TxPool) GetMaxBlobsPerBlock() uint64 {
-	return p.blobSchedule.MaxBlobsPerBlock(p.isPrague())
+	now := time.Now().Unix()
+	return p.chainConfig.GetMaxBlobsPerBlock(uint64(now))
 }
 
 // Check that the serialized txn should not exceed a certain max size
