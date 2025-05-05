@@ -34,10 +34,10 @@ jobs:
         id: kurtosis_test
         uses: noku-team/kurtosis-assertoor-github-action@v1
         with:
-            enclave_name: "kurtosis-run1-${{ github.run_id }}"
-            ethereum_package_args: ".github/workflows/kurtosis/txpool-assertoor.io"
-            kurtosis_extra_args: --verbosity detailed --cli-log-level trace
-            persistent_logs: "true"
+          enclave_name: "kurtosis-run1-${{ github.run_id }}"
+          ethereum_package_args: ".github/workflows/kurtosis/txpool-assertoor.io"
+          kurtosis_extra_args: --verbosity detailed --cli-log-level trace
+          persistent_logs: "true"
 
       - name: Parse Kurtosis output log and create JSON
         if: ${{ steps.kurtosis_test.outputs.test_result != 'failure' }}
@@ -45,7 +45,7 @@ jobs:
           # Download the Kurtosis artifact
           echo "Downloading artifact enclave-dump-kurtosis-run1-${{ github.run_id }}"
           mkdir -p kurtosis_artifacts
-          
+
           # Download the artifact (specify the name of the artifact you uploaded)
           curl -L -o kurtosis_artifacts/enclave-dump-kurtosis-run1-${{ github.run_id }}.zip https://github.com/${{ github.repository }}/actions/artifacts/${{ github.run_id }}/enclave-dump-kurtosis-run1-${{ github.run_id }}.zip
 
@@ -58,11 +58,11 @@ jobs:
           # Parse the output.log file within the assertoor-- folder
           output_log="${assertoor_folder}/output.log"
           echo "Parsing file: $output_log"
-          
+
           # Create an empty JSON file if there are no results
           output_json="${{ github.workspace }}/outputs_kurtosis.json"
           echo "{}" > $output_json
-          
+
           # Initialize an empty JSON object
           result_json={}
 
@@ -88,14 +88,15 @@ jobs:
 
       # If the test fails, create an empty JSON object
       - name: Create empty JSON if test fails
-        if: ${{ steps.kurtosis_test.outputs.test_result == 'failure' }}
+        if: ${{ failure() || steps.kurtosis_test.outcome == 'failure' || steps.kurtosis_test.outputs.test_result == 'failure' }}
         run: |
           output_json="${{ github.workspace }}/outputs_kurtosis.json"
           echo "{}" > $output_json
 
       - name: Save test results
+        if: always()
         env:
-          TEST_RESULT: ${{ steps.kurtosis_test.outputs.test_result }}
+          TEST_RESULT: ${{ steps.kurtosis_test.outputs.test_result || 'failure' }}
         run: |
           python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
             --repo erigon \
