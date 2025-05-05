@@ -94,16 +94,25 @@ jobs:
             --outcome $TEST_RESULT \
             --result_file ${{ github.workspace }}/result-${{ matrix.chain }}.json
 
-      - name: Upload test results
-        if: steps.test_step.outputs.test_executed == 'true'
+      - name: Upload test results (Lighthouse)
+        if: ${{ steps.test_step.outputs.test_executed == 'true' && matrix.client == 'lighthouse' }}
         uses: actions/upload-artifact@v4
         with:
           name: test-results-${{ matrix.client }}-${{ matrix.chain }}
           path: |
             ${{ github.workspace }}/result-${{ matrix.chain }}.json
             ${{ github.workspace }}/erigon_data/logs/erigon.log
-            ${{ matrix.client == 'lighthouse' && '$CL_DATA_DIR/data/beacon/logs/beacon.log' || '' }}
-            ${{ matrix.client == 'prysm' && '$CL_DATA_DIR/data/beacon.log' || '' }}
+            ${{ github.workspace }}/consensus/data/beacon/logs/beacon.log
+
+      - name: Upload test results (Prysm)
+        if: ${{ steps.test_step.outputs.test_executed == 'true' && matrix.client == 'prysm' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.client }}-${{ matrix.chain }}
+          path: |
+            ${{ github.workspace }}/result-${{ matrix.chain }}.json
+            ${{ github.workspace }}/erigon_data/logs/erigon.log
+            ${{ github.workspace }}/consensus/data/beacon.log
 
       - name: Clean up Erigon data directory
         if: always()
