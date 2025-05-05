@@ -606,57 +606,49 @@ func init() {
 }
 
 func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
-	sn, borSn, agg, _, _, _, err := allSnapshots(ctx, db, logger)
-	if err != nil {
-		return err
-	}
-
-	defer sn.Close()
-	defer borSn.Close()
-	defer agg.Close()
-
 	br, bw := blocksIO(db, logger)
 	_, _, _, _, _ = newSync(ctx, db, nil /* miningConfig */, logger)
 
-	return db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-		if reset {
-			if err := stages.SaveStageProgress(tx, stages.Snapshots, 0); err != nil {
-				return fmt.Errorf("saving Snapshots progress failed: %w", err)
-			}
-		}
-		dirs := datadir.New(datadirCli)
-		if err := reset2.ResetBlocks(tx, db, agg, br, bw, dirs, logger); err != nil {
-			return fmt.Errorf("resetting blocks: %w", err)
-		}
-		ac := agg.BeginFilesRo()
-		defer ac.Close()
+	tx, err := db.BeginTemporalRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 
-		domains, err := libstate.NewSharedDomains(tx, logger)
-		if err != nil {
-			return err
+	if reset {
+		if err := stages.SaveStageProgress(tx, stages.Snapshots, 0); err != nil {
+			return fmt.Errorf("saving Snapshots progress failed: %w", err)
 		}
-		defer domains.Close()
-		//txnUm := domains.TxNum()
-		blockNum := domains.BlockNum()
+	}
+	dirs := datadir.New(datadirCli)
+	if err := reset2.ResetBlocks(tx, db, br, bw, dirs, logger); err != nil {
+		return fmt.Errorf("resetting blocks: %w", err)
+	}
+	domains, err := libstate.NewSharedDomains(tx, logger)
+	if err != nil {
+		return err
+	}
+	defer domains.Close()
+	//txnUm := domains.TxNum()
+	blockNum := domains.BlockNum()
 
-		// stagedsync.SpawnStageSnapshots(s, ctx, rwTx, logger)
-		progress, err := stages.GetStageProgress(tx, stages.Snapshots)
+	// stagedsync.SpawnStageSnapshots(s, ctx, rwTx, logger)
+	progress, err := stages.GetStageProgress(tx, stages.Snapshots)
+	if err != nil {
+		return fmt.Errorf("re-read Snapshots progress: %w", err)
+	}
+
+	if blockNum > progress {
+		if err := stages.SaveStageProgress(tx, stages.Execution, blockNum); err != nil {
+			return fmt.Errorf("saving Snapshots progress failed: %w", err)
+		}
+		progress, err = stages.GetStageProgress(tx, stages.Snapshots)
 		if err != nil {
 			return fmt.Errorf("re-read Snapshots progress: %w", err)
 		}
-
-		if blockNum > progress {
-			if err := stages.SaveStageProgress(tx, stages.Execution, blockNum); err != nil {
-				return fmt.Errorf("saving Snapshots progress failed: %w", err)
-			}
-			progress, err = stages.GetStageProgress(tx, stages.Snapshots)
-			if err != nil {
-				return fmt.Errorf("re-read Snapshots progress: %w", err)
-			}
-		}
-		logger.Info("Progress", "snapshots", progress)
-		return nil
-	})
+	}
+	logger.Info("Progress", "snapshots", progress)
+	return nil
 }
 
 func stageHeaders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
@@ -665,14 +657,6 @@ func stageHeaders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 		return err
 	}
 
-	sn, borSn, agg, _, _, _, err := allSnapshots(ctx, db, logger)
-	if err != nil {
-		return err
-	}
-
-	defer sn.Close()
-	defer borSn.Close()
-	defer agg.Close()
 	br, bw := blocksIO(db, logger)
 	_, _, _, _, _ = newSync(ctx, db, nil /* miningConfig */, logger)
 
@@ -694,7 +678,7 @@ func stageHeaders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if reset {
-			if err := reset2.ResetBlocks(tx, db, agg, br, bw, dirs, logger); err != nil {
+			if err := reset2.ResetBlocks(tx, db, br, bw, dirs, logger); err != nil {
 				return err
 			}
 			return nil
@@ -768,13 +752,12 @@ func stageBorHeimdall(db kv.TemporalRwDB, ctx context.Context, unwindTypes []str
 		return nil
 	}
 	if unwind > 0 {
-		sn, borSn, agg, _, bridgeStore, heimdallStore, err := allSnapshots(ctx, db, logger)
+		sn, borSn, _, _, bridgeStore, heimdallStore, err := allSnapshots(ctx, db, logger)
 		if err != nil {
 			return err
 		}
 		defer sn.Close()
 		defer borSn.Close()
-		defer agg.Close()
 
 		stageState := stage(sync, nil, db, stages.BorHeimdall)
 
@@ -802,13 +785,10 @@ func stageBorHeimdall(db kv.TemporalRwDB, ctx context.Context, unwindTypes []str
 		return nil
 	}
 
-	sn, borSn, agg, _, bridgeStore, heimdallStore, err := allSnapshots(ctx, db, logger)
+	_, _, _, _, bridgeStore, heimdallStore, err := allSnapshots(ctx, db, logger)
 	if err != nil {
 		return err
 	}
-	defer sn.Close()
-	defer borSn.Close()
-	defer agg.Close()
 	blockReader, _ := blocksIO(db, logger)
 	var (
 		snapDb     kv.RwDB
@@ -837,13 +817,6 @@ func stageBorHeimdall(db kv.TemporalRwDB, ctx context.Context, unwindTypes []str
 }
 
 func stageBodies(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
-	sn, borSn, agg, _, _, _, err := allSnapshots(ctx, db, logger)
-	if err != nil {
-		return err
-	}
-	defer sn.Close()
-	defer borSn.Close()
-	defer agg.Close()
 	chainConfig := fromdb.ChainConfig(db)
 	_, _, sync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
 	br, bw := blocksIO(db, logger)
@@ -880,21 +853,17 @@ func stageBodies(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) err
 func stagePolygonSync(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	engine, _, stageSync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
 	heimdallClient := engine.(*bor.Bor).HeimdallClient
-	sn, borSn, agg, _, bridgeStore, heimdallStore, err := allSnapshots(ctx, db, logger)
+	_, _, _, _, bridgeStore, heimdallStore, err := allSnapshots(ctx, db, logger)
 	if err != nil {
 		return err
 	}
-
-	defer sn.Close()
-	defer borSn.Close()
-	defer agg.Close()
 	blockReader, blockWriter := blocksIO(db, logger)
 	dirs := datadir.New(datadirCli)
 	chainConfig := fromdb.ChainConfig(db)
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if reset {
-			return reset2.ResetPolygonSync(tx, db, agg, blockReader, blockWriter, dirs, *chainConfig, logger)
+			return reset2.ResetPolygonSync(tx, db, blockReader, blockWriter, dirs, logger)
 		}
 
 		stageState := stage(stageSync, tx, nil, stages.PolygonSync)
@@ -915,21 +884,13 @@ func stagePolygonSync(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	tmpdir := datadir.New(datadirCli).Tmp
 	chainConfig := fromdb.ChainConfig(db)
-	sn, borSn, agg, _, _, _, err := allSnapshots(ctx, db, logger)
-	if err != nil {
-		return err
-	}
-
-	defer sn.Close()
-	defer borSn.Close()
-	defer agg.Close()
 	_, _, sync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
 
 	must(sync.SetCurrentStage(stages.Senders))
 
 	br, _ := blocksIO(db, logger)
 	if reset {
-		return db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetSenders(ctx, db, tx) })
+		return db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetSenders(ctx, tx) })
 	}
 
 	tx, err := db.BeginRw(ctx)
@@ -1011,14 +972,6 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 
 	engine, vmConfig, sync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
 	must(sync.SetCurrentStage(stages.Execution))
-	sn, borSn, agg, _, _, _, err := allSnapshots(ctx, db, logger)
-	if err != nil {
-		return err
-	}
-
-	defer sn.Close()
-	defer borSn.Close()
-	defer agg.Close()
 	if reset {
 		if err := reset2.ResetExec(ctx, db); err != nil {
 			return err
@@ -1172,13 +1125,6 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 
 	engine, vmConfig, sync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
 	must(sync.SetCurrentStage(stages.Execution))
-	sn, borSn, agg, _, _, _, err := allSnapshots(ctx, db, logger)
-	if err != nil {
-		return err
-	}
-	defer sn.Close()
-	defer borSn.Close()
-	defer agg.Close()
 
 	chainConfig := fromdb.ChainConfig(db)
 	genesis := core.GenesisBlockByChainName(chain)
@@ -1224,7 +1170,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
-	err = stagedsync.SpawnCustomTrace(cfg, ctx, logger)
+	err := stagedsync.SpawnCustomTrace(cfg, ctx, logger)
 	if err != nil {
 		return err
 	}
@@ -1233,16 +1179,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 }
 
 func stagePatriciaTrie(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
-	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
-	_ = pm
-	sn, _, agg, _, _, _, err := allSnapshots(ctx, db, logger)
-	if err != nil {
-		return err
-	}
-	defer sn.Close()
-	defer agg.Close()
-	_, _, _, _, _ = newSync(ctx, db, nil /* miningConfig */, logger)
-
+	dirs := datadir.New(datadirCli)
 	if reset {
 		return reset2.Reset(ctx, db, stages.Execution)
 	}
@@ -1262,14 +1199,6 @@ func stageTxLookup(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) e
 	_, _, sync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
 	chainConfig := fromdb.ChainConfig(db)
 	must(sync.SetCurrentStage(stages.TxLookup))
-	sn, borSn, agg, _, _, _, err := allSnapshots(ctx, db, logger)
-	if err != nil {
-		return err
-	}
-	defer sn.Close()
-	defer borSn.Close()
-	defer agg.Close()
-
 	if reset {
 		return db.Update(ctx, reset2.ResetTxLookup)
 	}
@@ -1312,10 +1241,9 @@ func stageTxLookup(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) e
 }
 
 func printAllStages(db kv.RoDB, ctx context.Context, logger log.Logger) error {
-	sn, borSn, agg, _, _, _, _ := allSnapshots(ctx, db, logger) // ignore error here to get some stat.
+	sn, borSn, _, _, _, _, _ := allSnapshots(ctx, db, logger) // ignore error here to get some stat.
 	defer sn.Close()
 	defer borSn.Close()
-	defer agg.Close()
 	return db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, borSn) })
 }
 
