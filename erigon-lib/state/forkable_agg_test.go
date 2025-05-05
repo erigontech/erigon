@@ -340,6 +340,13 @@ func TestForkableAggState(t *testing.T) {
 	// check AlignedMaxRootNum, MaxRootNum, HasRootNumUpto
 }
 
+func TestMergedFileGet(t *testing.T) {
+	// ideally - smallest step file => adduncompressed word (fast build)
+	// merged file -- addWord (compressed)
+	// this reflects in the GetFiles() as well...ensure that is the case, and correct logic is applied
+	// we go with this simple logic..this is not something user should bother with.
+}
+
 func setup(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
 	tb.Helper()
 	logger := log.New()
