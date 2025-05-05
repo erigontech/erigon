@@ -1810,7 +1810,7 @@ func setWhitelist(ctx *cli.Context, cfg *ethconfig.Config) {
 func setBeaconAPI(ctx *cli.Context, cfg *ethconfig.Config) error {
 	cfg.CaplinConfig.EnableEngineAPI = ctx.Bool(CaplinUseEngineApiFlag.Name)
 
-	if cfg.CaplinConfig.EnableEngineAPI {
+	if cfg.CaplinConfig.EnableEngineAPI && ctx.IsSet(BeaconAPIFlag.Name) {
 		log.Warn("Beacon API flag is set, but engine API is enabled. Beacon API is automatically disabled.")
 		return nil
 	}
