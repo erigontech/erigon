@@ -32,7 +32,7 @@ jobs:
 
       - name: Run regular Kurtosis + assertoor tests
         id: kurtosis_test
-        uses: noku-team/kurtosis-assertoor-github-action
+        uses: noku-team/kurtosis-assertoor-github-action@v1
         with:
             enclave_name: "kurtosis-run1-${{ github.run_id }}"
             ethereum_package_args: ".github/workflows/kurtosis/txpool-assertoor.io"
