@@ -626,7 +626,7 @@ func init() {
 	withDataDir(cmdSetPrune)
 	withChain(cmdSetPrune)
 	cmdSetPrune.Flags().StringVar(&pruneFlag, "prune", "archive", "archive|full|minimal")
-	cmdSetPrune.Flags().Uint64Var(&pruneB, "prune.distance.block", 0, "")
+	cmdSetPrune.Flags().Uint64Var(&pruneB, "prune.distance.blocks", 0, "")
 	cmdSetPrune.Flags().Uint64Var(&pruneH, "prune.distance", 0, "")
 	cmdSetPrune.Flags().Uint64Var(&pruneR, "prune.r.older", 0, "")
 	cmdSetPrune.Flags().Uint64Var(&pruneT, "prune.t.older", 0, "")
