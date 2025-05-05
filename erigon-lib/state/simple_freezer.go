@@ -41,7 +41,7 @@ func (sf *SimpleRelationalFreezer) Freeze(ctx context.Context, from, to RootNum,
 	defer cursor.Close()
 
 	// bytes.Compare assume big endianness
-	for k, v, err := cursor.Seek(entityNumFrom); k != nil && bytes.Compare(k, entityNumTo) < 0; k, _, err = cursor.Next() {
+	for k, v, err := cursor.Seek(entityNumFrom); k != nil && bytes.Compare(k, entityNumTo) < 0; k, v, err = cursor.Next() {
 		if err != nil {
 			return err
 		}
@@ -94,7 +94,7 @@ func (sf *SimpleMarkedFreezer) Freeze(ctx context.Context, from, to RootNum, col
 	combK := mfork.valsTblKey2
 
 	// bytes.Compare assume big endianness
-	for k, v, err := cursor.Seek(entityNumFrom); k != nil && bytes.Compare(k, entityNumTo) < 0; k, _, err = cursor.Next() {
+	for k, v, err := cursor.Seek(entityNumFrom); k != nil && bytes.Compare(k, entityNumTo) < 0; k, v, err = cursor.Next() {
 		if err != nil {
 			return err
 		}

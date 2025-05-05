@@ -93,6 +93,7 @@ func NewSimpleAccessorBuilder(args *AccessorArgs, id ForkableId, logger log.Logg
 
 	if b.fetcher == nil {
 		// assume rootnum and num is same
+		logger.Debug("using default first entity num fetcher for %s", id)
 		b.fetcher = func(from, to RootNum, seg *seg.Decompressor) Num {
 			return Num(from)
 		}
@@ -236,7 +237,7 @@ func (d *DecompressorIndexInputDataQuery) GetStream(ctx context.Context) stream.
 func (d *DecompressorIndexInputDataQuery) GetBaseDataId() uint64 {
 	// discuss: adding base data id to snapshotfile?
 	// or might need to add callback to get first basedataid...
-	return 0
+	return d.baseDataId
 	//return d.from
 }
 

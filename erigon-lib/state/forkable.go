@@ -29,7 +29,12 @@ type Forkable[T ForkableBaseTxI] struct {
 	*ProtoForkable
 
 	canonicalTbl string // for marked structures
-	valsTbl      string
+
+	// whether this forkable is responsible for updating the canonical table (multiple forkables can share the same canonical table)
+	// only one forkable should be responsible for updating the canonical table.
+	updateCanonical bool
+
+	valsTbl string
 
 	//	ts4Bytes   bool               // caplin entities are encoded as 4 bytes
 	pruneFrom  Num                // should this be rootnum? Num is fine for now.
@@ -55,6 +60,12 @@ func App_WithIndexBuilders(builders ...AccessorIndexBuilder) AppOpts {
 func App_WithPruneFrom(pruneFrom Num) AppOpts {
 	return func(a ForkableConfig) {
 		a.SetPruneFrom(pruneFrom)
+	}
+}
+
+func App_WithUpdateCanonical() AppOpts {
+	return func(a ForkableConfig) {
+		a.UpdateCanonicalTbl()
 	}
 }
 
@@ -197,6 +208,10 @@ func (a *Forkable[T]) SetPruneFrom(pruneFrom Num) {
 	a.pruneFrom = pruneFrom
 }
 
+func (a *Forkable[T]) UpdateCanonicalTbl() {
+	a.updateCanonical = true
+}
+
 // align the snapshots of this forkable entity
 // with others members of entity set
 func (a *Forkable[T]) Aligned(aligned bool) {
@@ -238,8 +253,10 @@ func (m *MarkedTx) GetDb(num Num, hash []byte, tx kv.Tx) (Bytes, error) {
 func (m *MarkedTx) Put(num Num, hash []byte, val Bytes, tx kv.RwTx) error {
 	// can then val
 	a := m.ap
-	if err := tx.Append(a.canonicalTbl, a.encTs(num), hash); err != nil {
-		return err
+	if m.ap.updateCanonical {
+		if err := tx.Append(a.canonicalTbl, a.encTs(num), hash); err != nil {
+			return err
+		}
 	}
 
 	key := m.ap.valsTblKey(num, hash)
@@ -272,19 +289,19 @@ func (m *MarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.Rw
 	return ee.DeleteRangeFromTbl(a.valsTbl, fromKeyPrefix, toKeyPrefix, limit, tx)
 }
 
-func (m *MarkedTx) HasRootNumUpto(ctx context.Context, to RootNum, tx kv.Tx) bool {
+func (m *MarkedTx) HasRootNumUpto(ctx context.Context, to RootNum, tx kv.Tx) (bool, error) {
 	a := m.ap
 	lastNum, _ := kv.LastKey(tx, a.canonicalTbl)
 	if len(lastNum) == 0 {
-		return false
+		return false, nil
 	}
 	iLastNum := binary.BigEndian.Uint64(lastNum)
 	eto, err := a.rel.RootNum2Num(to, tx)
 	if err != nil {
-		panic(fmt.Sprintf("err RootNum2Num %v %v", to, err))
+		return false, fmt.Errorf("err RootNum2Num %v %v", to, err)
 	}
 
-	return iLastNum >= eto.Uint64()
+	return iLastNum >= eto.Uint64(), nil
 }
 
 func (m *MarkedTx) DebugFiles() ForkableFilesTxI {
@@ -345,19 +362,19 @@ func (m *UnmarkedTx) Prune(ctx context.Context, to RootNum, limit uint64, tx kv.
 	return ee.DeleteRangeFromTbl(ap.valsTbl, eFrom, eTo, limit, tx)
 }
 
-func (m *UnmarkedTx) HasRootNumUpto(ctx context.Context, to RootNum, tx kv.Tx) bool {
+func (m *UnmarkedTx) HasRootNumUpto(ctx context.Context, to RootNum, tx kv.Tx) (bool, error) {
 	a := m.ap
 	lastNum, _ := kv.LastKey(tx, a.valsTbl)
 	if len(lastNum) == 0 {
-		return false
+		return false, nil
 	}
 	iLastNum := binary.BigEndian.Uint64(lastNum)
 	eto, err := a.rel.RootNum2Num(to, tx)
 	if err != nil {
-		panic(fmt.Sprintf("err RootNum2Num %v %v", to, err))
+		return false, fmt.Errorf("err RootNum2Num %v %v", to, err)
 	}
 
-	return iLastNum >= eto.Uint64()
+	return iLastNum >= eto.Uint64(), nil
 }
 
 func (m *UnmarkedTx) DebugFiles() ForkableFilesTxI {
@@ -431,19 +448,19 @@ func (m *BufferedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error
 	return nil
 }
 
-func (m *BufferedTx) HasRootNumUpto(ctx context.Context, to RootNum, tx kv.Tx) bool {
+func (m *BufferedTx) HasRootNumUpto(ctx context.Context, to RootNum, tx kv.Tx) (bool, error) {
 	a := m.ap
 	lastNum, _ := kv.LastKey(tx, a.valsTbl)
 	if len(lastNum) == 0 {
-		return false
+		return false, nil
 	}
 	iLastNum := binary.BigEndian.Uint64(lastNum)
 	eto, err := a.rel.RootNum2Num(to, tx)
 	if err != nil {
-		panic(fmt.Sprintf("err RootNum2Num %v %v", to, err))
+		return false, fmt.Errorf("err RootNum2Num %v %v", to, err)
 	}
 
-	return iLastNum >= eto.Uint64()
+	return iLastNum >= eto.Uint64(), nil
 }
 
 func (m *BufferedTx) Close() {

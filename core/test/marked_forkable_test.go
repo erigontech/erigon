@@ -65,6 +65,7 @@ func setupHeader(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) (F
 		state.App_WithFreezer(freezer),
 		state.App_WithPruneFrom(Num(1)),
 		state.App_WithIndexBuilders(builder),
+		state.App_WithUpdateCanonical(),
 	)
 	require.NoError(t, err)
 

@@ -71,7 +71,7 @@ type ForkableFilesTxI interface {
 type ForkableDbCommonTxI interface {
 	Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (uint64, error)
 	Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error
-	HasRootNumUpto(ctx context.Context, to RootNum, tx kv.Tx) bool
+	HasRootNumUpto(ctx context.Context, to RootNum, tx kv.Tx) (bool, error)
 	Close()
 }
 
@@ -152,5 +152,6 @@ type ForkableConfig interface {
 	SetFreezer(freezer Freezer)
 	SetIndexBuilders(builders ...AccessorIndexBuilder)
 	SetPruneFrom(pruneFrom Num)
+	UpdateCanonicalTbl()
 	// Any other option setters you need
 }

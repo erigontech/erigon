@@ -292,7 +292,8 @@ func (a *ProtoForkableTx) GetFromFile(entityNum Num, idx int) (v Bytes, found bo
 	g.Reset(offset)
 	var word []byte
 	if g.HasNext() {
-		word, _ = g.Next(word[:0])
+		word, _ = g.NextUncompressed()
+		//word, _ = g.Next(word[:0])
 		return word, true, nil
 	}
 	ap := a.a

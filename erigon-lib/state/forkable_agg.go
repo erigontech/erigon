@@ -198,7 +198,11 @@ func (r *ForkableAgg) buildFile(ctx context.Context, to RootNum) (built bool, er
 
 			var skip bool
 			if err := r.db.View(ctx2, func(dbtx kv.Tx) (err error) {
-				skip = !tx.HasRootNumUpto(ctx2, p.a, to, dbtx)
+				if dontskip, err := tx.HasRootNumUpto(ctx2, p.a, to, dbtx); err != nil {
+					return err
+				} else {
+					skip = !dontskip
+				}
 				return nil
 			}); err != nil {
 				return err
@@ -463,13 +467,13 @@ func (r *ForkableAggTemporalTx) MaxRootNum(forId ForkableId) RootNum {
 	})
 }
 
-func (r *ForkableAggTemporalTx) HasRootNumUpto(ctx context.Context, forId ForkableId, to RootNum, tx kv.Tx) bool {
-	return loopOverDebugDbs(r, forId, func(db ForkableDbCommonTxI) bool {
+func (r *ForkableAggTemporalTx) HasRootNumUpto(ctx context.Context, forId ForkableId, to RootNum, tx kv.Tx) (bool, error) {
+	return loopOverDebugDbs(r, forId, func(db ForkableDbCommonTxI) (bool, error) {
 		return db.HasRootNumUpto(ctx, to, tx)
 	})
 }
 
-func loopOverDebugDbs[R any](r *ForkableAggTemporalTx, forId ForkableId, fn func(ForkableDbCommonTxI) R) R {
+func loopOverDebugDbs[R any](r *ForkableAggTemporalTx, forId ForkableId, fn func(ForkableDbCommonTxI) (R, error)) (R, error) {
 	for i, mt := range r.marked {
 		if r.f.marked[i].a == forId {
 			dbg := mt.(ForkableDebugAPI[MarkedDbTxI])
