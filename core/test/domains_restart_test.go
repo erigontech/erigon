@@ -43,7 +43,7 @@ import (
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	state2 "github.com/erigontech/erigon/core/state"
-	reset2 "github.com/erigontech/erigon/erigon-db/rawdb/rawdbreset"
+	reset2 "github.com/erigontech/erigon/eth/rawdbreset"
 	"github.com/erigontech/erigon/params"
 )
 
@@ -121,7 +121,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 		accs  = make([]*accounts.Account, 0)
 		locs  = make([]common.Hash, 0)
 
-		writer = state2.NewWriterV4(domains)
+		writer = state2.NewWriter(domains, nil)
 	)
 
 	for txNum := uint64(1); txNum <= txs; txNum++ {
@@ -248,7 +248,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	domains, err = state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
-	writer = state2.NewWriterV4(domains)
+	writer = state2.NewWriter(domains, nil)
 
 	txToStart := domains.TxNum()
 
@@ -327,7 +327,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		accs  = make([]*accounts.Account, 0)
 		locs  = make([]common.Hash, 0)
 
-		writer = state2.NewWriterV4(domains)
+		writer = state2.NewWriter(domains, nil)
 	)
 
 	testStartedFromTxNum := uint64(1)
@@ -419,7 +419,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	writer = state2.NewWriterV4(domains)
+	writer = state2.NewWriter(domains, nil)
 
 	txToStart := domains.TxNum()
 	require.EqualValues(t, 0, txToStart)

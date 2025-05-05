@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
@@ -49,7 +50,7 @@ type filesItem struct {
 	decompressor         *seg.Decompressor
 	index                *recsplit.Index
 	bindex               *BtIndex
-	existence            *ExistenceFilter
+	existence            *existence.Filter
 	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
 
 	// Frozen: file of size StepsInFrozenFile. Completely immutable.
@@ -67,7 +68,7 @@ type FilesItem interface {
 	Segment() *seg.Decompressor
 	AccessorIndex() *recsplit.Index
 	BtIndex() *BtIndex
-	ExistenceFilter() *ExistenceFilter
+	ExistenceFilter() *existence.Filter
 }
 
 var _ FilesItem = (*filesItem)(nil)
@@ -93,7 +94,7 @@ func (i *filesItem) AccessorIndex() *recsplit.Index { return i.index }
 
 func (i *filesItem) BtIndex() *BtIndex { return i.bindex }
 
-func (i *filesItem) ExistenceFilter() *ExistenceFilter { return i.existence }
+func (i *filesItem) ExistenceFilter() *existence.Filter { return i.existence }
 
 // isProperSubsetOf - when `j` covers `i` but not equal `i`
 func (i *filesItem) isProperSubsetOf(j *filesItem) bool {
