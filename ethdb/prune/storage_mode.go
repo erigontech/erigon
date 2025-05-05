@@ -60,7 +60,7 @@ type Experiments struct{}
 func FromCli(distanceHistory, distanceBlocks uint64, pruneMode string, experiments []string) (Mode, error) {
 	var mode Mode
 	switch pruneMode {
-	case "archive":
+	case "archive", "":
 		mode = ArchiveMode
 		if distanceHistory > 0 {
 			mode.History = Distance(distanceHistory)

@@ -86,6 +86,12 @@ func TestParseCLIMode(t *testing.T) {
 		_, err := FromCli(1, 2, "garb", nil)
 		assert.ErrorIs(t, err, ErrUnknownPruneMode)
 	})
+	t.Run("empty", func(t *testing.T) {
+		mode, err := FromCli(0, 0, "", nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ArchiveMode, mode)
+		assert.Equal(t, "archive", mode.String())
+	})
 
 }
 
