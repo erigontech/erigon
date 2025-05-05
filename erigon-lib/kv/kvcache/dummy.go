@@ -31,22 +31,22 @@ var _ Cache = (*DummyCache)(nil)    // compile-time interface check
 var _ CacheView = (*DummyView)(nil) // compile-time interface check
 
 func NewDummy() *DummyCache { return &DummyCache{} }
-func (c *DummyCache) View(_ context.Context, tx kv.Tx) (CacheView, error) {
+func (c *DummyCache) View(_ context.Context, tx kv.TemporalTx) (CacheView, error) {
 	return &DummyView{cache: c, tx: tx}, nil
 }
 func (c *DummyCache) OnNewBlock(sc *remote.StateChangeBatch) {}
 func (c *DummyCache) Evict() int                             { return 0 }
 func (c *DummyCache) Len() int                               { return 0 }
-func (c *DummyCache) Get(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
+func (c *DummyCache) Get(k []byte, tx kv.TemporalTx, id uint64) ([]byte, error) {
 	if len(k) == 20 {
-		v, _, err := tx.(kv.TemporalTx).GetLatest(kv.AccountsDomain, k)
+		v, _, err := tx.GetLatest(kv.AccountsDomain, k)
 		return v, err
 	}
-	v, _, err := tx.(kv.TemporalTx).GetLatest(kv.StorageDomain, k)
+	v, _, err := tx.GetLatest(kv.StorageDomain, k)
 	return v, err
 }
-func (c *DummyCache) GetCode(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
-	v, _, err := tx.(kv.TemporalTx).GetLatest(kv.CodeDomain, k)
+func (c *DummyCache) GetCode(k []byte, tx kv.TemporalTx, id uint64) ([]byte, error) {
+	v, _, err := tx.GetLatest(kv.CodeDomain, k)
 	return v, err
 }
 func (c *DummyCache) ValidateCurrentRoot(_ context.Context, _ kv.Tx) (*CacheValidationResult, error) {
@@ -55,7 +55,7 @@ func (c *DummyCache) ValidateCurrentRoot(_ context.Context, _ kv.Tx) (*CacheVali
 
 type DummyView struct {
 	cache *DummyCache
-	tx    kv.Tx
+	tx    kv.TemporalTx
 }
 
 func (c *DummyView) Get(k []byte) ([]byte, error)     { return c.cache.Get(k, c.tx, 0) }

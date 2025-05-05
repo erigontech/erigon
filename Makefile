@@ -174,15 +174,21 @@ test-erigon-lib:
 test-erigon-lib-all:
 	@cd erigon-lib && $(MAKE) test-all
 
+test-erigon-db:
+	@cd erigon-db && $(MAKE) test
+
+test-erigon-db-all:
+	@cd erigon-db && $(MAKE) test-all
+
 test-erigon-ext:
 	@cd tests/erigon-ext-test && ./test.sh $(GIT_COMMIT)
 
 ## test:                      run short tests with a 10m timeout
-test: test-erigon-lib
+test: test-erigon-lib test-erigon-db
 	$(GOTEST) -short --timeout 10m -coverprofile=coverage-test.out
 
 ## test-all:                  run all tests with a 1h timeout
-test-all: test-erigon-lib-all
+test-all: test-erigon-lib-all test-erigon-db-all
 	$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out
 
 ## test-hive						run the hive tests locally off nektos/act workflows simulator
@@ -291,6 +297,7 @@ lint:
 	@cd erigon-lib && $(MAKE) lint
 	@./erigon-lib/tools/golangci_lint.sh
 	@./erigon-lib/tools/mod_tidy_check.sh
+	@cd erigon-db && ./../erigon-lib/tools/mod_tidy_check.sh
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
 clean:

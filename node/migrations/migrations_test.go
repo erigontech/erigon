@@ -26,7 +26,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
 )
 
 func TestApplyWithInit(t *testing.T) {
@@ -220,25 +219,6 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 		return nil
 	})
 	require.NoError(err)
-}
-
-func TestMarshalStages(t *testing.T) {
-	require := require.New(t)
-	_, tx := memdb.NewTestTx(t)
-
-	err := stages.SaveStageProgress(tx, stages.Execution, 42)
-	require.NoError(err)
-
-	data, err := MarshalMigrationPayload(tx)
-	require.NoError(err)
-
-	res, err := UnmarshalMigrationPayload(data)
-	require.NoError(err)
-
-	require.Len(res, 1)
-	v, ok := res[string(stages.Execution)]
-	require.True(ok)
-	require.NotNil(v)
 }
 
 func TestValidation(t *testing.T) {

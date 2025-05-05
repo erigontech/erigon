@@ -75,7 +75,7 @@ func Assemble(
 		ctx,
 		newTxns,
 		poolDB,
-		chainDB,
+		chainDB.(kv.TemporalRwDB),
 		cfg,
 		cache,
 		*chainID,
