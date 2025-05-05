@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-db/rawdb"
+	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
@@ -42,8 +43,6 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/version"
-	coresnaptype "github.com/erigontech/erigon/core/snaptype"
-
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 )
 
