@@ -930,8 +930,8 @@ func TestReproduceCrash(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	tsw := state.NewStateWriterV3(sd, tx)
-	tsr := state.NewReaderV3(sd, tx)
+	tsw := state.NewWriter(sd, nil)
+	tsr := state.NewReaderV3(sd)
 	sd.SetTxNum(1)
 	sd.SetBlockNum(1)
 
@@ -1354,7 +1354,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	r, tsw := state.NewReaderV3(sd, tx), state.NewWriterV4(sd, tx)
+	r, tsw := state.NewReaderV3(sd), state.NewWriter(sd, nil)
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
@@ -1373,7 +1373,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	sd.SetTxNum(2)
 	sd.SetBlockNum(1)
 
-	trieCode, tcErr := r.ReadAccountCode(contract, 1)
+	trieCode, tcErr := r.ReadAccountCode(contract)
 	require.NoError(t, tcErr, "you can receive the new code")
 	assert.Equal(t, oldCode, trieCode, "new code should be received")
 
@@ -1384,7 +1384,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 
-	trieCode, tcErr = r.ReadAccountCode(contract, 1)
+	trieCode, tcErr = r.ReadAccountCode(contract)
 	require.NoError(t, tcErr, "you can receive the new code")
 	assert.Equal(t, newCode, trieCode, "new code should be received")
 
@@ -1404,7 +1404,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	r, w := state.NewReaderV3(sd, tx), state.NewWriterV4(sd, tx)
+	r, w := state.NewReaderV3(sd), state.NewWriter(sd, nil)
 
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
@@ -1421,11 +1421,11 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 		t.Errorf("error committing block: %v", err)
 	}
 
-	codeSize, err := r.ReadAccountCodeSize(contract, 1)
+	codeSize, err := r.ReadAccountCodeSize(contract)
 	require.NoError(t, err, "you can receive the new code")
 	assert.Equal(t, len(code), codeSize, "new code should be received")
 
-	code2, err := r.ReadAccountCode(contract, 1)
+	code2, err := r.ReadAccountCode(contract)
 	require.NoError(t, err, "you can receive the new code")
 	assert.Equal(t, code, code2, "new code should be received")
 }
@@ -1442,7 +1442,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	r, w := state.NewReaderV3(sd, tx), state.NewWriterV4(sd, tx)
+	r, w := state.NewReaderV3(sd), state.NewWriter(sd, nil)
 
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
@@ -1464,13 +1464,13 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	require.Equal(t, root, common.CastToHash(r2))
 
 	codeHash := common.BytesToHash(crypto.Keccak256(code))
-	codeSize, err := r.ReadAccountCodeSize(contract, 1)
+	codeSize, err := r.ReadAccountCodeSize(contract)
 	require.NoError(t, err, "you can receive the code size ")
 	assert.Equal(t, len(code), codeSize, "you can receive the code size")
 
 	require.NoError(t, tx.Delete(kv.Code, codeHash[:]), nil)
 
-	codeSize2, err := r.ReadAccountCodeSize(contract, 1)
+	codeSize2, err := r.ReadAccountCodeSize(contract)
 	require.NoError(t, err, "you can still receive code size even with empty DB")
 	assert.Equal(t, len(code), codeSize2, "code size should be received even with empty DB")
 

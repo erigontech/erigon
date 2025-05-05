@@ -100,7 +100,7 @@ var _ txnprovider.TxnProvider = (*TxPool)(nil)
 //
 // It preserve TxnSlot objects immutable
 type TxPool struct {
-	_chainDB               kv.RoDB // remote db - use it wisely
+	_chainDB               kv.TemporalRoDB // remote db - use it wisely
 	_stateCache            kvcache.Cache
 	poolDB                 kv.RwDB
 	lock                   *sync.Mutex
@@ -170,7 +170,7 @@ func New(
 	ctx context.Context,
 	newTxns chan Announcements,
 	poolDB kv.RwDB,
-	chainDB kv.RoDB,
+	chainDB kv.TemporalRoDB,
 	cfg txpoolcfg.Config,
 	cache kvcache.Cache,
 	chainID uint256.Int,
@@ -287,7 +287,7 @@ func (p *TxPool) start(ctx context.Context) error {
 
 	return p.poolDB.View(ctx, func(tx kv.Tx) error {
 		coreDb, _ := p.chainDB()
-		coreTx, err := coreDb.BeginRo(ctx)
+		coreTx, err := coreDb.BeginTemporalRo(ctx)
 		if err != nil {
 			return err
 		}
@@ -311,7 +311,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 
 	coreDB, cache := p.chainDB()
 	cache.OnNewBlock(stateChanges)
-	coreTx, err := coreDB.BeginRo(ctx)
+	coreTx, err := coreDB.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
 	}
@@ -479,7 +479,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 
 	defer processBatchTxnsTimer.ObserveDuration(time.Now())
 	coreDB, cache := p.chainDB()
-	coreTx, err := coreDB.BeginRo(ctx)
+	coreTx, err := coreDB.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
 	}
@@ -1318,7 +1318,7 @@ func fillDiscardReasons(reasons []txpoolcfg.DiscardReason, newTxns TxnSlots, dis
 
 func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
 	coreDb, cache := p.chainDB()
-	coreTx, err := coreDb.BeginRo(ctx)
+	coreTx, err := coreDb.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1374,7 +1374,7 @@ func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcf
 	return reasons, nil
 }
 
-func (p *TxPool) chainDB() (kv.RoDB, kvcache.Cache) {
+func (p *TxPool) chainDB() (kv.TemporalRoDB, kvcache.Cache) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	return p._chainDB, p._stateCache
@@ -2398,7 +2398,7 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 	return nil
 }
 
-func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
+func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.TemporalTx) error {
 	if p.lastSeenBlock.Load() == 0 {
 		lastSeenBlock, err := LastSeenBlock(tx)
 		if err != nil {

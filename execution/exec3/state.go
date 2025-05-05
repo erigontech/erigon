@@ -23,8 +23,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/execution/exec3/calltracer"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon/execution/exec3/calltracer"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -102,7 +103,7 @@ type Worker struct {
 	blockReader services.FullBlockReader
 	in          *exec.QueueWithRetry
 	rs          *state.StateV3Buffered
-	stateWriter state.StateWriter
+	stateWriter state.Writer
 	stateReader state.ResettableStateReader
 	historyMode bool // if true - stateReader is HistoryReaderV3, otherwise it's state reader
 	chainConfig *chain.Config
@@ -205,7 +206,7 @@ func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.Tx, stateRead
 	if stateWriter != nil {
 		rw.stateWriter = stateWriter
 	} else {
-		rw.stateWriter = state.NewStateWriterV3(rs.StateV3, rw.chainTx, accumulator)
+		rw.stateWriter = state.NewStateWriterV3(rs.Domains(), rw.chainTx, accumulator)
 	}
 }
 

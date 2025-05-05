@@ -529,7 +529,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	require.NoError(rawdb.WriteSenders(tx, hash, 1, body.SendersFromTxs()))
 
 	{
-		sd, err := state.NewSharedDomains(tx.(kv.TemporalRwTx), log.New())
+		sd, err := state.NewSharedDomains(tx, log.New())
 		require.NoError(err)
 		defer sd.Close()
 		base, err := txNumReader.Min(tx, 1)

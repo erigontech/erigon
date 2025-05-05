@@ -30,13 +30,14 @@ var PrunedError = errors.New("old data not available due to pruning")
 
 // HistoryReaderV3 Implements StateReader and StateWriter
 type HistoryReaderV3 struct {
-	txNum uint64
-	trace bool
-	ttx   kv.TemporalTx
+	txNum     uint64
+	trace     bool
+	ttx       kv.TemporalTx
+	composite []byte
 }
 
 func NewHistoryReaderV3() *HistoryReaderV3 {
-	return &HistoryReaderV3{}
+	return &HistoryReaderV3{composite: make([]byte, 20+32)}
 }
 
 func (hr *HistoryReaderV3) String() string {
@@ -106,7 +107,7 @@ func (hr *HistoryReaderV3) ReadAccountStorage(address common.Address, incarnatio
 	return res, ok, err
 }
 
-func (hr *HistoryReaderV3) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {
+func (hr *HistoryReaderV3) ReadAccountCode(address common.Address) ([]byte, error) {
 	//  must pass key2=Nil here: because Erigon4 does concatinate key1+key2 under the hood
 	//code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
 	code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address[:], hr.txNum)
@@ -116,7 +117,7 @@ func (hr *HistoryReaderV3) ReadAccountCode(address common.Address, incarnation u
 	return code, err
 }
 
-func (hr *HistoryReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64) (int, error) {
+func (hr *HistoryReaderV3) ReadAccountCodeSize(address common.Address) (int, error) {
 	enc, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address[:], hr.txNum)
 	return len(enc), err
 }

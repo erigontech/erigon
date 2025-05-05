@@ -311,11 +311,11 @@ func (a *Aggregator) SetMergeWorkers(i int)           { a.mergeWorkers = i }
 func (a *Aggregator) SetCompressWorkers(i int) {
 	for _, d := range a.d {
 		d.CompressCfg.Workers = i
-		d.History.compressorCfg.Workers = i
-		d.History.InvertedIndex.compressorCfg.Workers = i
+		d.History.CompressorCfg.Workers = i
+		d.History.InvertedIndex.CompressorCfg.Workers = i
 	}
 	for _, ii := range a.iis {
-		ii.compressorCfg.Workers = i
+		ii.CompressorCfg.Workers = i
 	}
 }
 

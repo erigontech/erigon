@@ -106,7 +106,7 @@ func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNr
 	if acc == nil || err != nil {
 		return hexutil.Bytes(""), nil
 	}
-	res, _ := reader.ReadAccountCode(address, acc.Incarnation)
+	res, _ := reader.ReadAccountCode(address)
 	if res == nil {
 		return hexutil.Bytes(""), nil
 	}
@@ -139,8 +139,11 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 	}
 
 	location := common.HexToHash(index)
-	res, _, err := reader.ReadAccountStorage(address, acc.Incarnation, location)
-	return hexutil.Encode(res.PaddedBytes(32)), err
+	res, err := reader.ReadAccountStorage(address, location)
+	if err != nil {
+		res = empty
+	}
+	return hexutil.Encode(common.LeftPadBytes(res, 32)), err
 }
 
 // Exist returns whether an account for a given address exists in the database.

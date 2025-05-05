@@ -374,7 +374,7 @@ func (sdb *IntraBlockState) GetCodeSize(addr common.Address) (int, error) {
 				return len(s.code), nil
 			}
 			readStart := time.Now()
-			l, err := sdb.stateReader.ReadAccountCodeSize(addr, s.data.Incarnation)
+			l, err := sdb.stateReader.ReadAccountCodeSize(addr)
 			sdb.storageReadDuration += time.Since(readStart)
 			sdb.storageReadCount++
 			if err != nil {
@@ -1021,16 +1021,7 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 	if previous != nil && previous.selfdestructed {
 		prevInc = previous.data.Incarnation
 	} else {
-		readStart := time.Now()
-		inc, err := sdb.stateReader.ReadAccountIncarnation(addr)
-		sdb.storageReadDuration += time.Since(readStart)
-		sdb.storageReadCount++
-
-		if err == nil {
-			prevInc = inc
-		} else {
-			return err
-		}
+		prevInc = 0 
 	}
 	if previous != nil && prevInc < previous.data.PrevIncarnation {
 		prevInc = previous.data.PrevIncarnation

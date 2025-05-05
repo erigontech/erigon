@@ -363,17 +363,16 @@ func (s txEntityStore[TEntity]) PutEntity(ctx context.Context, id uint64, entity
 		return err
 	}
 
-	if indexer, ok := s.blockNumToIdIndex.(RangeIndexer); ok {
-		if txIndexer, ok := indexer.(TransactionalRangeIndex); ok {
-			indexer = txIndexer.WithTx(tx).(RangeIndexer)
-		}
-
-		if err = indexer.Put(ctx, entity.BlockNumRange(), id); err != nil {
-			return err
-		}
+	indexer, ok := s.blockNumToIdIndex.(RangeIndexer)
+	if !ok {
+		return nil
 	}
 
-	return nil
+	if txIndexer, ok := s.blockNumToIdIndex.(TransactionalRangeIndexer); ok {
+		indexer = txIndexer.WithTx(tx)
+	}
+
+	return indexer.Put(ctx, entity.BlockNumRange(), id)
 }
 
 func (s txEntityStore[TEntity]) RangeFromId(ctx context.Context, startId uint64) ([]TEntity, error) {
@@ -415,7 +414,7 @@ func (s txEntityStore[TEntity]) RangeFromBlockNum(ctx context.Context, startBloc
 func (s txEntityStore[TEntity]) EntityIdFromBlockNum(ctx context.Context, blockNum uint64) (uint64, bool, error) {
 	indexer := s.blockNumToIdIndex
 
-	if txIndexer, ok := indexer.(TransactionalRangeIndex); ok {
+	if txIndexer, ok := indexer.(TransactionalRangeIndexer); ok {
 		indexer = txIndexer.WithTx(s.tx)
 	}
 

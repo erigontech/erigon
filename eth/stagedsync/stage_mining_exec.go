@@ -138,8 +138,8 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 			return err
 		}
 		defer sd.Close()
-		simStateWriter = state.NewWriterV4(sd, txc.Tx)
-		simStateReader = state.NewReaderV3(sd, txc.Tx)
+		simStateWriter = state.NewWriter(sd, nil)
+		simStateReader = state.NewReaderV3(sd)
 
 		executionAt, err := s.ExecutionAt(mb)
 		if err != nil {
@@ -341,7 +341,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		if !account.IsEmptyCodeHash() && transaction.Type() != types.AccountAbstractionTxType {
 			isEoaCodeAllowed := false
 			if config.IsPrague(header.Time) {
-				code, err := simStateReader.ReadAccountCode(sender, account.Incarnation)
+				code, err := simStateReader.ReadAccountCode(sender)
 				if err != nil {
 					return nil, err
 				}

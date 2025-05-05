@@ -196,7 +196,7 @@ func (so *stateObject) GetCommittedState(key common.Hash, out *uint256.Int) erro
 	}
 	// Load from DB in case it is missing.
 	readStart := time.Now()
-	res, ok, err := so.db.stateReader.ReadAccountStorage(so.address, so.data.GetIncarnation(), key)
+	res, ok, err := so.db.stateReader.ReadAccountStorage(so.address, key)
 	so.db.storageReadDuration += time.Since(readStart)
 	so.db.storageReadCount++
 
@@ -343,7 +343,7 @@ func (so *stateObject) Code() ([]byte, error) {
 	}
 
 	readStart := time.Now()
-	code, err := so.db.stateReader.ReadAccountCode(so.Address(), so.data.Incarnation)
+	code, err := so.db.stateReader.ReadAccountCode(so.Address())
 	so.db.storageReadDuration += time.Since(readStart)
 	so.db.storageReadCount++
 

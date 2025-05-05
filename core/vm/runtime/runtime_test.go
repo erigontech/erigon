@@ -50,7 +50,7 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 )
 
-func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *stateLib.Aggregator) {
+func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.TemporalRwTx, *stateLib.Aggregator) {
 	tb.Helper()
 	db := memdb.NewStateDB(tb.TempDir())
 	tb.Cleanup(db.Close)
@@ -146,7 +146,7 @@ func TestExecute(t *testing.T) {
 func TestCall(t *testing.T) {
 	t.Parallel()
 	_, tx, _ := NewTestTemporalDb(t)
-	domains, err := stateLib.NewSharedDomains(tx.(kv.TemporalTx), log.New())
+	domains, err := stateLib.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	state := state.New(state.NewReaderV3(domains, tx))
@@ -224,7 +224,7 @@ func BenchmarkCall(b *testing.B) {
 	tx, sd := testTemporalTxSD(b, db)
 	defer tx.Rollback()
 	cfg.r = state.NewReaderV3(sd, tx)
-	cfg.w = state.NewWriterV4(sd, tx)
+	cfg.w = state.NewWriter(sd, tx)
 	cfg.State = state.New(cfg.r)
 
 	tmpdir := b.TempDir()

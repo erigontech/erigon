@@ -578,7 +578,7 @@ func (sd *SharedDomains) deleteAccount(roTx kv.Tx, addr, prev []byte, prevStep u
 	}
 
 	// commitment delete already has been applied via account
-	if err := sd.DomainDel(kv.CodeDomain, roTx, addr, nil, nil, prevStep); err != nil {
+	if err := sd.DomainDel(kv.CodeDomain, roTx, addr, nil, prevStep); err != nil {
 		return err
 	}
 
@@ -841,10 +841,10 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.Tx, k1, k2 []byte, 
 //   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
-func (sd *SharedDomains) DomainDel(domain kv.Domain, roTx kv.Tx, k1, k2 []byte, prevVal []byte, prevStep uint64) error {
+func (sd *SharedDomains) DomainDel(domain kv.Domain, roTx kv.Tx, k []byte, prevVal []byte, prevStep uint64) error {
 	if prevVal == nil {
 		var err error
-		prevVal, prevStep, err = sd.GetLatest(domain, roTx, k1)
+		prevVal, prevStep, err = sd.GetLatest(domain, roTx, k)
 		if err != nil {
 			return err
 		}
@@ -852,19 +852,19 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, roTx kv.Tx, k1, k2 []byte, 
 
 	switch domain {
 	case kv.AccountsDomain:
-		return sd.deleteAccount(roTx, k1, prevVal, prevStep)
+		return sd.deleteAccount(k, prevVal, prevStep)
 	case kv.StorageDomain:
-		return sd.delAccountStorage(k1, k2, prevVal, prevStep)
+		return sd.delAccountStorage(k, nil, prevVal, prevStep)
 	case kv.CodeDomain:
 		if prevVal == nil {
 			return nil
 		}
-		return sd.updateAccountCode(k1, nil, prevVal, prevStep)
+		return sd.updateAccountCode(k, nil, prevVal, prevStep)
 	case kv.CommitmentDomain:
-		return sd.updateCommitmentData(toStringZeroCopy(k1), nil, prevVal, prevStep)
+		return sd.updateCommitmentData(toStringZeroCopy(k), nil, prevVal, prevStep)
 	default:
-		sd.put(domain, toStringZeroCopy(append(k1, k2...)), nil)
-		return sd.domainWriters[domain].DeleteWithPrev(k1, k2, sd.txNum, prevVal, prevStep)
+		sd.put(domain, toStringZeroCopy(k), nil)
+		return sd.domainWriters[domain].DeleteWithPrev(k, nil, sd.txNum, prevVal, prevStep)
 	}
 }
 
@@ -885,7 +885,7 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.Tx, prefix []
 		return err
 	}
 	for _, tomb := range tombs {
-		if err := sd.DomainDel(kv.StorageDomain, roTx, tomb.k, nil, tomb.v, tomb.step); err != nil {
+		if err := sd.DomainDel(kv.StorageDomain, roTx, tomb.k, tomb.v, tomb.step); err != nil {
 			return err
 		}
 	}

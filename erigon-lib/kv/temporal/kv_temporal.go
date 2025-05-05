@@ -137,7 +137,19 @@ func (db *DB) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
 	return tx.Commit()
 }
 
-func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.TemporalRwTx, error) {
+func (db *DB) UpdateTemporal(ctx context.Context, f func(tx kv.TemporalRwTx) error) error {
+	tx, err := db.BeginTemporalRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err = f(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.RwTx, error) {
 	kvTx, err := db.RwDB.BeginRwNosync(ctx) //nolint:gocritic
 	if err != nil {
 		return nil, err
@@ -453,7 +465,7 @@ func (tx *RwTx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, lim
 func (tx *tx) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error {
 	panic("implement me pls. or use SharedDomains")
 }
-func (tx *tx) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error {
+func (tx *tx) DomainDel(domain kv.Domain, k []byte, prevVal []byte, prevStep uint64) error {
 	panic("implement me pls. or use SharedDomains")
 }
 func (tx *tx) DomainDelPrefix(domain kv.Domain, prefix []byte) error {
