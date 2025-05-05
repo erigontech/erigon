@@ -59,7 +59,7 @@ func NewForkableAgg(ctx context.Context, dirs datadir.Dirs, db kv.RoDB, logger l
 		leakDetector:           dbg.NewLeakDetector("forkable_agg", dbg.SlowTx()),
 		logger:                 logger,
 		collateAndBuildWorkers: 1,
-		//ps:          background.NewProgressSet(),
+		ps:                     background.NewProgressSet(),
 
 		// marked:   ap.marked,
 		// unmarked: ap.unmarked,
@@ -227,10 +227,9 @@ func (r *ForkableAgg) buildFile(ctx context.Context, to RootNum) (built bool, er
 	})
 
 	if err := g.Wait(); err != nil {
-		closeCfiles = true
 		return false, err
 	}
-
+	closeCfiles = false
 	tx.Close() // no need for tx in index building
 
 	for _, df := range cfiles {
@@ -241,6 +240,8 @@ func (r *ForkableAgg) buildFile(ctx context.Context, to RootNum) (built bool, er
 			return nil
 		})
 	}
+
+	r.recalcVisibleFiles(r.dirtyFilesEndRootNumMinimax())
 
 	return len(cfiles) > 0, nil
 }
@@ -384,24 +385,29 @@ type ForkableAggTemporalTx struct {
 
 	// TODO _leakId logic
 
+	mp map[ForkableId]uint32
 	// TODO map from forkableId -> stragety+index in array; strategy encoded in lowest 2-bits.
 }
 
-func (r *ForkableAgg) BeginTemporalTx() *ForkableAggTemporalTx {
+func NewForkableAggTemporalTx(r *ForkableAgg) *ForkableAggTemporalTx {
 	marked := make([]MarkedTxI, 0, len(r.marked))
 	unmarked := make([]UnmarkedTxI, 0, len(r.unmarked))
 	buffered := make([]BufferedTxI, 0, len(r.buffered))
+	mp := make(map[ForkableId]uint32)
 
-	for _, ap := range r.marked {
+	for i, ap := range r.marked {
 		marked = append(marked, ap.BeginTemporalTx())
+		mp[ap.a] = (uint32(i) << 2) | uint32(Marked)
 	}
 
-	for _, ap := range r.unmarked {
+	for i, ap := range r.unmarked {
 		unmarked = append(unmarked, ap.BeginTemporalTx())
+		mp[ap.a] = (uint32(i) << 2) | uint32(Unmarked)
 	}
 
-	for _, ap := range r.buffered {
+	for i, ap := range r.buffered {
 		buffered = append(buffered, ap.BeginTemporalTx())
+		mp[ap.a] = (uint32(i) << 2) | uint32(Buffered)
 	}
 
 	return &ForkableAggTemporalTx{
@@ -409,7 +415,37 @@ func (r *ForkableAgg) BeginTemporalTx() *ForkableAggTemporalTx {
 		marked:   marked,
 		unmarked: unmarked,
 		buffered: buffered,
+		mp:       mp,
 	}
+}
+
+func (r *ForkableAggTemporalTx) Marked(id ForkableId) MarkedTxI {
+	index, ok := r.mp[id]
+	if !ok {
+		panic(fmt.Errorf("forkable %s not found", id))
+	}
+
+	return r.marked[index>>2]
+}
+
+func (r *ForkableAggTemporalTx) Unmarked(id ForkableId) UnmarkedTxI {
+	index, ok := r.mp[id]
+	if !ok {
+		panic(fmt.Errorf("forkable %s not found", id))
+	}
+	return r.unmarked[index>>2]
+}
+
+func (r *ForkableAggTemporalTx) Buffered(id ForkableId) BufferedTxI {
+	index, ok := r.mp[id]
+	if !ok {
+		panic(fmt.Errorf("forkable %s not found", id))
+	}
+	return r.buffered[index>>2]
+}
+
+func (r *ForkableAgg) BeginTemporalTx() *ForkableAggTemporalTx {
+	return NewForkableAggTemporalTx(r)
 }
 
 func (r *ForkableAggTemporalTx) AlignedMaxRootNum() RootNum {

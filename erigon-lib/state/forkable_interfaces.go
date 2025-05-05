@@ -151,7 +151,6 @@ const (
 type ForkableConfig interface {
 	SetFreezer(freezer Freezer)
 	SetIndexBuilders(builders ...AccessorIndexBuilder)
-	SetTs4Bytes(ts4Bytes bool)
 	SetPruneFrom(pruneFrom Num)
 	// Any other option setters you need
 }

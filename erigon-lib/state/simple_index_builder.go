@@ -88,7 +88,7 @@ func NewSimpleAccessorBuilder(args *AccessorArgs, id ForkableId, logger log.Logg
 	}
 
 	if b.kf == nil {
-		b.kf = &SimpleIndexKeyFactory{num: make([]byte, binary.MaxVarintLen64)}
+		b.kf = NewSimpleIndexKeyFactory() //&SimpleIndexKeyFactory{num: make([]byte, binary.MaxVarintLen64)}
 	}
 
 	if b.fetcher == nil {
@@ -285,14 +285,22 @@ type SimpleIndexKeyFactory struct {
 	num []byte
 }
 
+func NewSimpleIndexKeyFactory() *SimpleIndexKeyFactory {
+	return &SimpleIndexKeyFactory{num: make([]byte, binary.MaxVarintLen64)}
+}
+
 func (n *SimpleIndexKeyFactory) Refresh() {}
 
 func (n *SimpleIndexKeyFactory) Make(_ []byte, index uint64) []byte {
+	if n.num == nil {
+		panic("index key factory closed or not initialized properly")
+	}
+
 	// everywhere except heimdall indexes, which use BigIndian format
 	nm := binary.PutUvarint(n.num, index)
 	return n.num[:nm]
 }
 
 func (n *SimpleIndexKeyFactory) Close() {
-	n.num = []byte{}
+	//n.num = nil
 }

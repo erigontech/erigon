@@ -161,7 +161,7 @@ func (a *ProtoForkable) BeginFilesRo() *ProtoForkableTx {
 	visibleFiles := a.snaps.visibleFiles()
 	for i := range visibleFiles {
 		src := visibleFiles[i].src
-		if src.frozen {
+		if !src.frozen {
 			src.refcount.Add(1)
 		}
 	}

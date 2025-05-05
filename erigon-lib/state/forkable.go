@@ -31,7 +31,7 @@ type Forkable[T ForkableBaseTxI] struct {
 	canonicalTbl string // for marked structures
 	valsTbl      string
 
-	ts4Bytes   bool               // caplin entities are encoded as 4 bytes
+	//	ts4Bytes   bool               // caplin entities are encoded as 4 bytes
 	pruneFrom  Num                // should this be rootnum? Num is fine for now.
 	beginTxGen func(files bool) T // returns a tx, with "files ro tx" or not
 
@@ -49,12 +49,6 @@ func App_WithFreezer(freezer Freezer) AppOpts {
 func App_WithIndexBuilders(builders ...AccessorIndexBuilder) AppOpts {
 	return func(a ForkableConfig) {
 		a.SetIndexBuilders(builders...)
-	}
-}
-
-func App_WithTs4Bytes(ts4Bytes bool) AppOpts {
-	return func(a ForkableConfig) {
-		a.SetTs4Bytes(ts4Bytes)
 	}
 }
 
@@ -158,7 +152,29 @@ func (a *Forkable[T]) PruneFrom() Num {
 }
 
 func (a *Forkable[T]) encTs(ts ee.EncToBytesI) []byte {
-	return ts.EncToBytes(!a.ts4Bytes)
+	return ts.EncToBytes(true)
+}
+
+func (a *Forkable[MarkedTxI]) valsTblKey(ts Num, hash []byte) []byte {
+	// key for valsTbl
+	// relevant only for marked forkable
+	// assuming hash is common.Hash which is 32 bytes
+	const HashBytes = 32
+	k := make([]byte, 8+HashBytes)
+	binary.BigEndian.PutUint64(k, uint64(ts))
+	copy(k[8:], hash)
+	return k
+}
+
+func (a *Forkable[MarkedTxI]) valsTblKey2(ts []byte, hash []byte) []byte {
+	// key for valsTbl
+	// relevant only for marked forkable
+	// assuming hash is common.Hash which is 32 bytes
+	const HashBytes = 32
+	k := make([]byte, 8+HashBytes)
+	copy(k, ts)
+	copy(k[8:], hash)
+	return k
 }
 
 func (a *Forkable[T]) BeginTemporalTx() T {
@@ -179,10 +195,6 @@ func (a *Forkable[T]) SetIndexBuilders(builders ...AccessorIndexBuilder) {
 
 func (a *Forkable[T]) SetPruneFrom(pruneFrom Num) {
 	a.pruneFrom = pruneFrom
-}
-
-func (a *Forkable[T]) SetTs4Bytes(ts4Bytes bool) {
-	a.ts4Bytes = ts4Bytes
 }
 
 // align the snapshots of this forkable entity
@@ -220,7 +232,7 @@ func (m *MarkedTx) GetDb(num Num, hash []byte, tx kv.Tx) (Bytes, error) {
 		}
 		hash = canHash
 	}
-	return tx.GetOne(a.valsTbl, m.combK(num, hash))
+	return tx.GetOne(a.valsTbl, m.ap.valsTblKey(num, hash))
 }
 
 func (m *MarkedTx) Put(num Num, hash []byte, val Bytes, tx kv.RwTx) error {
@@ -230,7 +242,7 @@ func (m *MarkedTx) Put(num Num, hash []byte, val Bytes, tx kv.RwTx) error {
 		return err
 	}
 
-	key := m.combK(num, hash)
+	key := m.ap.valsTblKey(num, hash)
 	return tx.Put(a.valsTbl, key, val)
 }
 
@@ -273,16 +285,6 @@ func (m *MarkedTx) HasRootNumUpto(ctx context.Context, to RootNum, tx kv.Tx) boo
 	}
 
 	return iLastNum >= eto.Uint64()
-}
-
-func (m *MarkedTx) combK(ts Num, hash []byte) []byte {
-	// relevant only for marked forkable
-	// assuming hash is common.Hash which is 32 bytes
-	const HashBytes = 32
-	k := make([]byte, 8+HashBytes)
-	binary.BigEndian.PutUint64(k, uint64(ts))
-	copy(k[8:], hash)
-	return k
 }
 
 func (m *MarkedTx) DebugFiles() ForkableFilesTxI {
