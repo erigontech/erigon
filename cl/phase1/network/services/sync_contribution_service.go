@@ -173,9 +173,11 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 					F:          func() {},
 				}
 				if err := s.batchSignatureVerifier.ImmediateVerification(&d); err != nil {
-					sig := common.Bytes2Hex(aggregateVerificationData.Signatures[i])
 					log.Warn("immediate verification failed", "err", err, "index", i, "aggregation_bits", contributionAndProof.Contribution.AggregationBits, "subcommittee_index", contributionAndProof.Contribution.SubcommitteeIndex,
-						"slot", contributionAndProof.Contribution.Slot, "aggregator_index", contributionAndProof.AggregatorIndex, "subcommiteePubsKeys", len(subcommiteePubsKeys), "signature", sig)
+						"slot", contributionAndProof.Contribution.Slot, "aggregator_index", contributionAndProof.AggregatorIndex, "subcommiteePubsKeys", len(subcommiteePubsKeys))
+				} else if i == 2 && err == nil {
+					log.Warn("immediate verification succeeded", "index", i, "aggregation_bits", contributionAndProof.Contribution.AggregationBits, "subcommittee_index", contributionAndProof.Contribution.SubcommitteeIndex,
+						"slot", contributionAndProof.Contribution.Slot, "aggregator_index", contributionAndProof.AggregatorIndex, "subcommiteePubsKeys", len(subcommiteePubsKeys))
 				}
 			}
 
