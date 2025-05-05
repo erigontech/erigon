@@ -222,6 +222,7 @@ func (a *Aggregator) registerII(idx kv.InvertedIdx, salt *uint32, dirs datadir.D
 	return nil
 }
 
+func (a *Aggregator) Dirs() datadir.Dirs         { return a.dirs }
 func (a *Aggregator) StepSize() uint64           { return a.aggregationStep }
 func (a *Aggregator) OnFreeze(f kv.OnFreezeFunc) { a.onFreeze = f }
 func (a *Aggregator) DisableFsync() {

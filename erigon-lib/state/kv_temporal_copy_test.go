@@ -84,7 +84,7 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	}
 	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db, ctx: ctx}
 
-	tx.aggtx = db.agg.BeginFilesRo()
+	tx.Aggtx = db.agg.BeginFilesRo()
 	return tx, nil
 }
 func (db *DB) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) error {
@@ -116,7 +116,7 @@ func (db *DB) BeginTemporalRw(ctx context.Context) (kv.TemporalRwTx, error) {
 	}
 	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db, ctx: ctx}
 
-	tx.aggtx = db.agg.BeginFilesRo()
+	tx.Aggtx = db.agg.BeginFilesRo()
 	return tx, nil
 }
 func (db *DB) BeginRw(ctx context.Context) (kv.RwTx, error) {
@@ -141,7 +141,7 @@ func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.RwTx, error) {
 	}
 	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db, ctx: ctx}
 
-	tx.aggtx = db.agg.BeginFilesRo()
+	tx.Aggtx = db.agg.BeginFilesRo()
 	return tx, nil
 }
 func (db *DB) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
@@ -169,21 +169,21 @@ func (db *DB) OnFreeze(f kv.OnFreezeFunc) { db.agg.OnFreeze(f) }
 type Tx struct {
 	*mdbx.MdbxTx
 	db               *DB
-	aggtx            *AggregatorRoTx
+	Aggtx            *AggregatorRoTx
 	resourcesToClose []kv.Closer
 	ctx              context.Context
 }
 
 func (tx *Tx) ForceReopenAggCtx() {
-	tx.aggtx.Close()
-	tx.aggtx = tx.Agg().BeginFilesRo()
+	tx.Aggtx.Close()
+	tx.Aggtx = tx.Agg().BeginFilesRo()
 }
-func (tx *Tx) FreezeInfo() kv.FreezeInfo { return tx.aggtx }
+func (tx *Tx) FreezeInfo() kv.FreezeInfo { return tx.Aggtx }
 func (tx *Tx) Debug() kv.TemporalDebugTx { return tx }
 
 func (tx *Tx) WarmupDB(force bool) error { return tx.MdbxTx.WarmupDB(force) }
 func (tx *Tx) LockDBInRam() error        { return tx.MdbxTx.LockDBInRam() }
-func (tx *Tx) AggTx() any                { return tx.aggtx }
+func (tx *Tx) AggTx() any                { return tx.Aggtx }
 func (tx *Tx) Agg() *Aggregator          { return tx.db.agg }
 func (tx *Tx) Rollback() {
 	tx.autoClose()
@@ -198,7 +198,7 @@ func (tx *Tx) autoClose() {
 	for _, closer := range tx.resourcesToClose {
 		closer.Close()
 	}
-	tx.aggtx.Close()
+	tx.Aggtx.Close()
 }
 func (tx *Tx) Commit() error {
 	tx.autoClose()
@@ -211,14 +211,14 @@ func (tx *Tx) Commit() error {
 }
 
 func (tx *Tx) HistoryStartFrom(name kv.Domain) uint64 {
-	return tx.aggtx.HistoryStartFrom(name)
+	return tx.Aggtx.HistoryStartFrom(name)
 }
 func (tx *Tx) HistoryEndTxNum(name kv.Domain) uint64 {
-	return tx.aggtx.HistoryEndTxNum(name, tx.MdbxTx)
+	return tx.Aggtx.HistoryEndTxNum(name, tx.MdbxTx)
 }
 
 func (tx *Tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
-	it, err := tx.aggtx.RangeAsOf(tx.ctx, tx.MdbxTx, name, fromKey, toKey, asOfTs, asc, limit)
+	it, err := tx.Aggtx.RangeAsOf(tx.ctx, tx.MdbxTx, name, fromKey, toKey, asOfTs, asc, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -246,7 +246,7 @@ func (tx *Tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, bool, error) {
 }
 
 func (tx *Tx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err error) {
-	v, step, ok, err := tx.aggtx.GetLatest(name, k, tx.MdbxTx)
+	v, step, ok, err := tx.Aggtx.GetLatest(name, k, tx.MdbxTx)
 	if err != nil {
 		return nil, step, err
 	}
@@ -256,15 +256,15 @@ func (tx *Tx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err er
 	return v, step, nil
 }
 func (tx *Tx) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
-	return tx.aggtx.GetAsOf(name, k, ts, tx.MdbxTx)
+	return tx.Aggtx.GetAsOf(name, k, ts, tx.MdbxTx)
 }
 
 func (tx *Tx) HistorySeek(name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
-	return tx.aggtx.HistorySeek(name, key, ts, tx.MdbxTx)
+	return tx.Aggtx.HistorySeek(name, key, ts, tx.MdbxTx)
 }
 
 func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error) {
-	timestamps, err = tx.aggtx.IndexRange(name, k, fromTs, toTs, asc, limit, tx.MdbxTx)
+	timestamps, err = tx.Aggtx.IndexRange(name, k, fromTs, toTs, asc, limit, tx.MdbxTx)
 	if err != nil {
 		return nil, err
 	}
@@ -273,7 +273,7 @@ func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc or
 }
 
 func (tx *Tx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (stream.KV, error) {
-	it, err := tx.aggtx.HistoryRange(name, fromTs, toTs, asc, limit, tx.MdbxTx)
+	it, err := tx.Aggtx.HistoryRange(name, fromTs, toTs, asc, limit, tx.MdbxTx)
 	if err != nil {
 		return nil, err
 	}
@@ -296,31 +296,31 @@ func (tx *Tx) DomainDelPrefix(domain kv.Domain, prefix []byte) error {
 // Debug methods
 
 func (tx *Tx) RangeLatest(domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
-	return tx.aggtx.DebugRangeLatest(tx.MdbxTx, domain, from, to, limit)
+	return tx.Aggtx.DebugRangeLatest(tx.MdbxTx, domain, from, to, limit)
 }
 func (tx *Tx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step uint64, found bool, err error) {
-	return tx.aggtx.DebugGetLatestFromDB(domain, k, tx.MdbxTx)
+	return tx.Aggtx.DebugGetLatestFromDB(domain, k, tx.MdbxTx)
 }
 func (tx *Tx) GetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
-	return tx.aggtx.DebugGetLatestFromFiles(domain, k, maxTxNum)
+	return tx.Aggtx.DebugGetLatestFromFiles(domain, k, maxTxNum)
 }
 func (db *DB) DomainTables(domain ...kv.Domain) []string { return db.agg.DomainTables(domain...) }
 func (tx *Tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
-	return tx.aggtx.DomainFiles(domain...)
+	return tx.Aggtx.DomainFiles(domain...)
 }
 func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string {
 	return db.agg.InvertedIdxTables(domain...)
 }
 func (tx *Tx) TxNumsInFiles(domains ...kv.Domain) (minTxNum uint64) {
-	return tx.aggtx.TxNumsInFiles(domains...)
+	return tx.Aggtx.TxNumsInFiles(domains...)
 }
 func (tx *Tx) PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error) {
-	return tx.aggtx.PruneSmallBatches(ctx, timeout, tx.MdbxTx)
+	return tx.Aggtx.PruneSmallBatches(ctx, timeout, tx.MdbxTx)
 }
 func (tx *Tx) GreedyPruneHistory(ctx context.Context, domain kv.Domain) error {
-	return tx.aggtx.GreedyPruneHistory(ctx, domain, tx.MdbxTx)
+	return tx.Aggtx.GreedyPruneHistory(ctx, domain, tx.MdbxTx)
 }
 
 func (tx *Tx) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
-	return tx.aggtx.Unwind(ctx, tx.MdbxTx, txNumUnwindTo, changeset)
+	return tx.Aggtx.Unwind(ctx, tx.MdbxTx, txNumUnwindTo, changeset)
 }
