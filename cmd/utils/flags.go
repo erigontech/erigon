@@ -611,6 +611,16 @@ var (
 		Usage: "Sequencer decoded transaction cache time-to-live",
 		Value: 600 * time.Second,
 	}
+	SequencerResequenceInfoTreeOffset = cli.StringFlag{
+		Name:  "zkevm.sequencer-resequence-info-tree-offset",
+		Usage: "A tuple describing an info tree offset to use during resequencing.  Designed to recover from a skipped leaf in the info tree.  Format <index>:<offset>:<expected_ger_hash>",
+		Value: "",
+	}
+	AlwaysGenerateBatchL2Data = cli.BoolFlag{
+		Name:  "zkevm.always-generate-batch-l2-data",
+		Usage: "Always generate the batch L2 data",
+		Value: true,
+	}
 	ExecutorUrls = cli.StringFlag{
 		Name:  "zkevm.executor-urls",
 		Usage: "A comma separated list of grpc addresses that host executors",

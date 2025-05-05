@@ -298,7 +298,7 @@ func prepareHeader(tx kv.RwTx, previousBlockNumber, deltaTimestamp, forcedTimest
 	return header, parentBlock, nil
 }
 
-func prepareL1AndInfoTreeRelatedStuff(sdb *stageDb, batchState *BatchState, proposedTimestamp uint64, reuseL1InfoIndex bool) (
+func prepareL1AndInfoTreeRelatedStuff(logPrefix string, sdb *stageDb, batchState *BatchState, proposedTimestamp uint64, reuseL1InfoIndex bool, l1InfoTreeOffset *ethconfig.L1InfoTreeOffset) (
 	infoTreeIndexProgress uint64,
 	l1TreeUpdate *zktypes.L1InfoTreeUpdate,
 	l1TreeUpdateIndex uint64,
@@ -325,6 +325,15 @@ func prepareL1AndInfoTreeRelatedStuff(sdb *stageDb, batchState *BatchState, prop
 			// If we are in the middle of a block (AtNewBlockBoundary -> false), it means the original block will be requenced into multiple blocks, so we will leave l1TreeUpdateIndex as 0 for the rest of blocks.
 			if batchState.resequenceBatchJob.AtNewBlockBoundary() {
 				l1TreeUpdateIndex = uint64(batchState.resequenceBatchJob.CurrentBlock().L1InfoTreeIndex)
+
+				// check for and handle an info tree offset if we have one
+				if l1InfoTreeOffset != nil && l1TreeUpdateIndex != 0 {
+					log.Info(fmt.Sprintf("[%s] Resequence checking L1 info tree offset", logPrefix), "foundIndex", l1TreeUpdateIndex, "offset", l1InfoTreeOffset.Offset)
+					if l1TreeUpdateIndex >= l1InfoTreeOffset.Index {
+						l1TreeUpdateIndex = uint64(int64(l1TreeUpdateIndex) + l1InfoTreeOffset.Offset)
+						log.Info(fmt.Sprintf("[%s] Resequence using L1 info tree offset", logPrefix), "newIndex", l1TreeUpdateIndex)
+					}
+				}
 			}
 			if infoTreeIndexProgress >= l1TreeUpdateIndex {
 				shouldWriteGerToContract = false
@@ -340,9 +349,21 @@ func prepareL1AndInfoTreeRelatedStuff(sdb *stageDb, batchState *BatchState, prop
 			}
 			return
 		}
+
 		if l1TreeUpdate, err = sdb.hermezDb.GetL1InfoTreeUpdate(l1TreeUpdateIndex); err != nil {
 			return
 		}
+
+		// if we are at the exact point for an info tree index offset then we want to check for the expected ger hash and error if it doesn't match
+		if batchState.isResequence() && reuseL1InfoIndex {
+			if l1InfoTreeOffset != nil && l1InfoTreeOffset.Index == uint64(batchState.resequenceBatchJob.CurrentBlock().L1InfoTreeIndex) {
+				if l1InfoTreeOffset.ExpectedGerHash != l1TreeUpdate.GER {
+					err = fmt.Errorf("resequence info tree offset expected ger hash %s does not match actual ger hash %s", l1InfoTreeOffset.ExpectedGerHash, l1TreeUpdate.GER)
+					return
+				}
+			}
+		}
+
 		if infoTreeIndexProgress >= l1TreeUpdateIndex {
 			shouldWriteGerToContract = false
 		}

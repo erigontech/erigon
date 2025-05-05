@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/zk/hermez_db"
 	"github.com/erigontech/erigon/zkevm/etherman"
 )
 
@@ -127,4 +128,46 @@ func newEtherMan(cfg *ethconfig.Zk) *etherman.Client {
 		panic(err)
 	}
 	return em
+}
+
+func infoTreeChange(chaindata string, keyPtr, offsetPtr *int) error {
+	if keyPtr == nil || offsetPtr == nil {
+		return fmt.Errorf("key and offset must be provided")
+	}
+
+	key := *keyPtr
+	offset := *offsetPtr
+
+	db := mdbx.MustOpen(chaindata)
+	defer db.Close()
+
+	tx, err := db.BeginRw(context.Background())
+	if err != nil {
+		return err
+	}
+
+	toChange := make(map[uint64]uint64)
+
+	tx.ForEach(kv.BLOCK_L1_INFO_TREE_INDEX, nil, func(k, v []byte) error {
+		blockNumber := hermez_db.BytesToUint64(k)
+		index := hermez_db.BytesToUint64(v)
+
+		if index >= uint64(key) {
+			toChange[blockNumber] = index + uint64(offset)
+		}
+
+		return nil
+	})
+
+	for blockNumber, index := range toChange {
+		fmt.Printf("blockNumber: %d, index: %d\n", blockNumber, index)
+		tx.Put(kv.BLOCK_L1_INFO_TREE_INDEX, hermez_db.Uint64ToBytes(blockNumber), hermez_db.Uint64ToBytes(index))
+		tx.Put(kv.BLOCK_L1_INFO_TREE_INDEX_PROGRESS, hermez_db.Uint64ToBytes(blockNumber), hermez_db.Uint64ToBytes(index))
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	return nil
 }

@@ -367,9 +367,14 @@ func (api *ZkEvmAPIImpl) GetBatchDataByNumbers(ctx context.Context, batchNumbers
 }
 
 func (api *ZkEvmAPIImpl) getOrCalcBatchData(ctx context.Context, tx kv.Tx, dbReader state.ReadOnlyHermezDb, batchNo uint64) ([]byte, error) {
-	batchData, err := dbReader.GetL1BatchData(batchNo)
-	if err != nil {
-		return nil, err
+	var batchData []byte
+	var err error
+
+	if !api.config.Zk.AlwaysGenerateBatchL2Data {
+		batchData, err = dbReader.GetL1BatchData(batchNo)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	//found in db, do not calculate

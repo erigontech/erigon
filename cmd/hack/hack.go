@@ -75,6 +75,8 @@ var (
 	output      = flag.String("output", "", "output path")
 	cfglocation = flag.String("cfglocation", "", "where the dynamic config files are located")
 	chain       = flag.String("chain", "", "name of chain used for zkcfgmerge")
+	key         = flag.Int("key", 1, "key to use from a table")
+	offset      = flag.Int("offset", 0, "offset to apply")
 )
 
 func dbSlice(chaindata string, bucket string, prefix []byte) {
@@ -1610,6 +1612,8 @@ func main() {
 		err = dumpAll(*chaindata, *output)
 	case "zkCfgMerge":
 		err = mergeZkConfig(*cfglocation, *chain, *output)
+	case "infoTreeChange":
+		err = infoTreeChange(*chaindata, key, offset)
 	}
 
 	if err != nil {
