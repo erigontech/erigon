@@ -733,6 +733,7 @@ func (e *EngineServer) HandleNewPayload(
 	headerNumber := header.Number.Uint64()
 	headerHash := block.Hash()
 
+	s := time.Now()
 	e.logger.Info(fmt.Sprintf("[%s] Handling new payload", logPrefix), "height", headerNumber, "hash", headerHash)
 
 	if headerNumber == 0 {
@@ -790,11 +791,11 @@ func (e *EngineServer) HandleNewPayload(
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 	}
-
+	fmt.Println("Time to get parent", time.Since(s))
 	if err := e.chainRW.InsertBlockAndWait(ctx, block); err != nil {
 		return nil, err
 	}
-
+	fmt.Println("Time to insert block", time.Since(s))
 	if math.AbsoluteDifference(*currentHeadNumber, headerNumber) >= 32 {
 		return &engine_types.PayloadStatus{Status: engine_types.AcceptedStatus}, nil
 	}
@@ -802,6 +803,7 @@ func (e *EngineServer) HandleNewPayload(
 	e.logger.Debug(fmt.Sprintf("[%s] New payload begin verification", logPrefix))
 	status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
 	e.logger.Debug(fmt.Sprintf("[%s] New payload verification ended", logPrefix), "status", status.String(), "err", err)
+	fmt.Println("Time to validate chain", time.Since(s))
 	if err != nil {
 		missingBlkHash, isMissingChainErr := eth1.GetBlockHashFromMissingSegmentError(err)
 		if isMissingChainErr {
