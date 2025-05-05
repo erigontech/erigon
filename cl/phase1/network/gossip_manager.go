@@ -181,7 +181,11 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		if err := obj.SignedContributionAndProof.DecodeSSZ(data.Data, int(version)); err != nil {
 			return err
 		}
-		return g.syncContributionService.ProcessMessage(ctx, data.SubnetId, obj)
+		err := g.syncContributionService.ProcessMessage(ctx, data.SubnetId, obj)
+		if err == nil {
+			log.Debug("Received sync committee contribution via gossip", "slot", obj.SignedContributionAndProof.Message.Contribution.Slot)
+		}
+		return err
 	case gossip.TopicNameVoluntaryExit:
 		obj := &services.SignedVoluntaryExitForGossip{
 			Receiver:            copyOfPeerData(data),
