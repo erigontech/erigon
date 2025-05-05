@@ -311,31 +311,6 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 		filtered := r.Logs.Filter(addrMap, crit.Topics, 0)
 
-		//err = exec.ExecTxn(txNum, txIndex, txn, false)
-		//if err != nil {
-		//	return nil, err
-		//}
-		//rawLogs := exec.GetRawLogs(txIndex)
-
-		// `ReadReceipt` does fill `rawLogs` calulated fields. but we don't need it anymore.
-		//r, err := rawtemporaldb.ReceiptAsOfWithApply(tx, txNum, rawLogs, txIndex, blockHash, blockNum, txn)
-		//if err != nil {
-		//	return nil, err
-		//}
-		//var filtered types.Logs
-		//if r == nil { // if receipt data is not released yet. fallback to manual field filling. can remove in future.
-		//	rawLogs := r.Logs
-		//	fmt.Println("getLogsV3:Error receipt is nil")
-		//	filtered = rawLogs.Filter(addrMap, crit.Topics, 0)
-		//	for _, log := range filtered {
-		//		log.BlockNumber = blockNum
-		//		log.BlockHash = blockHash
-		//		log.TxHash = txn.Hash()
-		//	}
-		// else {
-		//	filtered = r.Logs.Filter(addrMap, crit.Topics, 0)
-		//}
-
 		for _, filteredLog := range filtered {
 			logs = append(logs, &types.ErigonLog{
 				Address:     filteredLog.Address,
