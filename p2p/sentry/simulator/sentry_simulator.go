@@ -25,6 +25,7 @@ import (
 
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -36,7 +37,6 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 	coretypes "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/snapshots/sync"
-	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/discover/v4wire"

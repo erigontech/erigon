@@ -29,8 +29,8 @@ import (
 	"strings"
 	"time"
 
+	_ "github.com/erigontech/erigon-db/snaptype" //hack
 	"github.com/erigontech/erigon-lib/common/dbg"
-	_ "github.com/erigontech/erigon/core/snaptype"    //hack
 	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
 
 	"github.com/anacrolix/torrent/metainfo"
