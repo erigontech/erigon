@@ -10,7 +10,7 @@ on:
   #       - docker_pectra
 
 jobs:
-  assertoor_test:
+  tx_pool_assertoor_test:
     runs-on: [self-hosted, qa, long-running]
     env:
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
