@@ -6,7 +6,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	reset2 "github.com/erigontech/erigon/erigon-db/rawdb/rawdbreset"
+	reset2 "github.com/erigontech/erigon/eth/rawdbreset"
 )
 
 var ClearBorTables = Migration{

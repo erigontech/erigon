@@ -38,9 +38,10 @@ import (
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
-	common "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -53,7 +54,6 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/misc"
@@ -1414,7 +1414,7 @@ func (c *Bor) checkAndCommitSpan(
 
 	currentSpan, err := c.spanner.GetCurrentSpan(syscall)
 	if err != nil {
-		return err
+		return fmt.Errorf("GetCurrentSpan: %w", err)
 	}
 
 	// Whenever `checkAndCommitSpan` is called for the first time, during the start of 'technically'
@@ -1423,13 +1423,17 @@ func (c *Bor) checkAndCommitSpan(
 	// is committed eventually when we commit 1st span (as per the contract). The check below
 	// takes care of that and commits the 1st span (hence the `currentSpan.Id+1` param).
 	if currentSpan.EndBlock == 0 {
-		return c.fetchAndCommitSpan(uint64(currentSpan.Id+1), state, header, chain, syscall)
+		if err := c.fetchAndCommitSpan(uint64(currentSpan.Id+1), state, header, chain, syscall); err != nil {
+			return fmt.Errorf("fetchAndCommitSpan: %w", err)
+		}
 	}
 
 	// For subsequent calls, commit the next span on the first block of the last sprint of a span
 	sprintLength := c.config.CalculateSprintLength(headerNumber)
 	if currentSpan.EndBlock > sprintLength && currentSpan.EndBlock-sprintLength+1 == headerNumber {
-		return c.fetchAndCommitSpan(uint64(currentSpan.Id+1), state, header, chain, syscall)
+		if err := c.fetchAndCommitSpan(uint64(currentSpan.Id+1), state, header, chain, syscall); err != nil {
+			return fmt.Errorf("fetchAndCommitSpan2: %w", err)
+		}
 	}
 
 	return nil

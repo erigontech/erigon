@@ -111,3 +111,6 @@ jobs:
 
       - name: Test erigon-lib
         run: cd erigon-lib && make test
+
+      - name: Test erigon-db
+        run: cd erigon-db && make test

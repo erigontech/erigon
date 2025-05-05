@@ -18,9 +18,7 @@ package rawdb
 
 import (
 	"encoding/binary"
-	"math/big"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/types"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
@@ -34,19 +32,6 @@ func HasBorReceipts(db kv.Getter, number uint64) bool {
 		return false
 	}
 	return true
-}
-
-func ReadBorTxLookupEntry(db kv.Getter, borTxHash common.Hash) (*uint64, error) {
-	blockNumBytes, err := db.GetOne(kv.BorTxLookup, borTxHash.Bytes())
-	if err != nil {
-		return nil, err
-	}
-	if blockNumBytes == nil {
-		return nil, nil
-	}
-
-	blockNum := (new(big.Int).SetBytes(blockNumBytes)).Uint64()
-	return &blockNum, nil
 }
 
 // ReadBorTransactionForBlock retrieves a specific bor (fake) transaction associated with a block, along with

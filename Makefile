@@ -52,12 +52,14 @@ ifneq ($(shell "$(CURDIR)/turbo/silkworm/silkworm_compat_check.sh"),)
 	BUILD_TAGS := $(BUILD_TAGS),nosilkworm
 endif
 
+override BUILD_TAGS := $(BUILD_TAGS),$(EXTRA_BUILD_TAGS)
+
 GOPRIVATE = github.com/erigontech/silkworm-go
 
 PACKAGE = github.com/erigontech/erigon
 
-GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false
-GO_FLAGS += -ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/params.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/params.GitTag=${GIT_TAG}"
+override GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false
+override GO_FLAGS += -ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/params.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/params.GitTag=${GIT_TAG}"
 
 GOBUILD = ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" $(GO) build $(GO_FLAGS)
 GO_DBG_BUILD = ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS) -DMDBX_DEBUG=1" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" $(GO) build -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
@@ -120,7 +122,7 @@ dbg:
 %.cmd:
 	@# Note: $* is replaced by the command name
 	@echo "Building $*"
-	@cd ./cmd/$* && $(GOBUILD) -o $(GOBIN)/$*
+	cd ./cmd/$* && $(GOBUILD) -o $(GOBIN)/$*
 	@echo "Run \"$(GOBIN)/$*\" to launch $*."
 
 ## geth:                              run erigon (TODO: remove?)
@@ -172,15 +174,21 @@ test-erigon-lib:
 test-erigon-lib-all:
 	@cd erigon-lib && $(MAKE) test-all
 
+test-erigon-db:
+	@cd erigon-db && $(MAKE) test
+
+test-erigon-db-all:
+	@cd erigon-db && $(MAKE) test-all
+
 test-erigon-ext:
 	@cd tests/erigon-ext-test && ./test.sh $(GIT_COMMIT)
 
 ## test:                      run short tests with a 10m timeout
-test: test-erigon-lib
+test: test-erigon-lib test-erigon-db
 	$(GOTEST) -short --timeout 10m -coverprofile=coverage-test.out
 
 ## test-all:                  run all tests with a 1h timeout
-test-all: test-erigon-lib-all
+test-all: test-erigon-lib-all test-erigon-db-all
 	$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out
 
 ## test-hive						run the hive tests locally off nektos/act workflows simulator
@@ -246,7 +254,7 @@ eest-hive:
 	sed -i "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile
 	cd "eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
 	cd "eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eest/consume-engine,"",--sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/pectra-devnet-6%40v1.0.0/fixtures_pectra-devnet-6.tar.gz)
+	cd "eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eest/consume-engine,"",--sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.3.0/fixtures_develop.tar.gz)
 
 
 # define kurtosis assertoor runner
@@ -289,6 +297,7 @@ lint:
 	@cd erigon-lib && $(MAKE) lint
 	@./erigon-lib/tools/golangci_lint.sh
 	@./erigon-lib/tools/mod_tidy_check.sh
+	@cd erigon-db && ./../erigon-lib/tools/mod_tidy_check.sh
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
 clean:

@@ -26,6 +26,7 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/net/context"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
@@ -41,7 +42,6 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/polygon/aa"
@@ -142,7 +142,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 			return err
 		}
 		defer sd.Close()
-		simStateWriter = state.NewWriterV4(sd)
+		simStateWriter = state.NewWriter(sd, nil)
 		simStateReader = state.NewReaderV3(sd)
 
 		executionAt, err := s.ExecutionAt(mb)
@@ -345,7 +345,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		if !account.IsEmptyCodeHash() && transaction.Type() != types.AccountAbstractionTxType {
 			isEoaCodeAllowed := false
 			if config.IsPrague(header.Time) {
-				code, err := simStateReader.ReadAccountCode(sender, account.Incarnation)
+				code, err := simStateReader.ReadAccountCode(sender)
 				if err != nil {
 					return nil, err
 				}

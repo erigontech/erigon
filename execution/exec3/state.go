@@ -24,6 +24,8 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/execution/exec3/calltracer"
+
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -54,7 +56,7 @@ type Worker struct {
 	blockReader services.FullBlockReader
 	in          *state.QueueWithRetry
 	rs          *state.ParallelExecutionState
-	stateWriter *state.StateWriterV3
+	stateWriter *state.Writer
 	stateReader state.ResettableStateReader
 	historyMode bool // if true - stateReader is HistoryReaderV3, otherwise it's state reader
 	chainConfig *chain.Config
@@ -65,7 +67,7 @@ type Worker struct {
 	resultCh *state.ResultsQueue
 	chain    consensus.ChainReader
 
-	callTracer  *CallTracer
+	callTracer  *calltracer.CallTracer
 	taskGasPool *core.GasPool
 	hooks       *tracing.Hooks
 
@@ -94,7 +96,7 @@ func NewWorker(lock sync.Locker, logger log.Logger, hooks *tracing.Hooks, ctx co
 		engine:   engine,
 
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
-		callTracer:  NewCallTracer(hooks),
+		callTracer:  calltracer.NewCallTracer(hooks),
 		taskGasPool: new(core.GasPool),
 		hooks:       hooks,
 
@@ -117,7 +119,7 @@ func (rw *Worker) ResetState(rs *state.ParallelExecutionState, accumulator *shar
 	} else {
 		rw.SetReader(state.NewReaderV3(rs.Domains()))
 	}
-	rw.stateWriter = state.NewStateWriterV3(rs, accumulator)
+	rw.stateWriter = state.NewWriter(rs.Domains(), accumulator)
 }
 
 func (rw *Worker) SetGaspool(gp *core.GasPool) {

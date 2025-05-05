@@ -50,7 +50,7 @@ type CacheValidationResult struct {
 
 type Cache interface {
 	// View - returns CacheView consistent with given kv.Tx
-	View(ctx context.Context, tx kv.Tx) (CacheView, error)
+	View(ctx context.Context, tx kv.TemporalTx) (CacheView, error)
 	OnNewBlock(sc *remote.StateChangeBatch)
 	Len() int
 	ValidateCurrentRoot(ctx context.Context, tx kv.Tx) (*CacheValidationResult, error)
@@ -132,7 +132,7 @@ type CoherentRoot struct {
 // CoherentView - dumb object, which proxy all requests to Coherent object.
 // It's thread-safe, because immutable
 type CoherentView struct {
-	tx             kv.Tx
+	tx             kv.TemporalTx
 	cache          *Coherent
 	stateVersionID uint64
 }
@@ -327,7 +327,7 @@ func (c *Coherent) OnNewBlock(stateChanges *remote.StateChangeBatch) {
 	//log.Info("on new block handled", "viewID", stateChanges.StateVersionID)
 }
 
-func (c *Coherent) View(ctx context.Context, tx kv.Tx) (CacheView, error) {
+func (c *Coherent) View(ctx context.Context, tx kv.TemporalTx) (CacheView, error) {
 	id, err := tx.ReadSequence(string(kv.PlainStateVersion))
 	if err != nil {
 		return nil, err
@@ -378,7 +378,7 @@ func (c *Coherent) getFromCache(k []byte, id uint64, code bool) (*Element, *Cohe
 	}
 	return it, r, nil
 }
-func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) (v []byte, err error) {
+func (c *Coherent) Get(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err error) {
 	it, r, err := c.getFromCache(k, id, false)
 	if err != nil {
 		return nil, err
@@ -394,9 +394,9 @@ func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) (v []byte, err error) {
 
 	if c.cfg.StateV3 {
 		if len(k) == 20 {
-			v, _, err = tx.(kv.TemporalTx).GetLatest(kv.AccountsDomain, k)
+			v, _, err = tx.GetLatest(kv.AccountsDomain, k)
 		} else {
-			v, _, err = tx.(kv.TemporalTx).GetLatest(kv.StorageDomain, k)
+			v, _, err = tx.GetLatest(kv.StorageDomain, k)
 		}
 	} else {
 		v, err = tx.GetOne(kv.PlainState, k)
@@ -416,7 +416,7 @@ func (c *Coherent) Get(k []byte, tx kv.Tx, id uint64) (v []byte, err error) {
 	return v, nil
 }
 
-func (c *Coherent) GetCode(k []byte, tx kv.Tx, id uint64) (v []byte, err error) {
+func (c *Coherent) GetCode(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err error) {
 	it, r, err := c.getFromCache(k, id, true)
 	if err != nil {
 		return nil, err
@@ -430,7 +430,7 @@ func (c *Coherent) GetCode(k []byte, tx kv.Tx, id uint64) (v []byte, err error) 
 	c.codeMiss.Inc()
 
 	if c.cfg.StateV3 {
-		v, _, err = tx.(kv.TemporalTx).GetLatest(kv.CodeDomain, k)
+		v, _, err = tx.GetLatest(kv.CodeDomain, k)
 	} else {
 		v, err = tx.GetOne(kv.Code, k)
 	}
@@ -641,7 +641,7 @@ func DebugStats(cache Cache) []Stat {
 	sort.Slice(res, func(i, j int) bool { return res[i].BlockNum < res[j].BlockNum })
 	return res
 }
-func AssertCheckValues(ctx context.Context, tx kv.Tx, cache Cache) (int, error) {
+func AssertCheckValues(ctx context.Context, tx kv.TemporalTx, cache Cache) (int, error) {
 	defer func(t time.Time) { fmt.Printf("AssertCheckValues:327: %s\n", time.Since(t)) }(time.Now())
 	view, err := cache.View(ctx, tx)
 	if err != nil {

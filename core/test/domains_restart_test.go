@@ -31,7 +31,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -44,12 +43,12 @@ import (
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	state2 "github.com/erigontech/erigon/core/state"
-	reset2 "github.com/erigontech/erigon/erigon-db/rawdb/rawdbreset"
+	reset2 "github.com/erigontech/erigon/eth/rawdbreset"
 	"github.com/erigontech/erigon/params"
 )
 
 // if fpath is empty, tempDir is used, otherwise fpath is reused
-func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.RwDB, *state.Aggregator, string) {
+func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.TemporalRwDB, *state.Aggregator, string) {
 	t.Helper()
 
 	path := t.TempDir()
@@ -71,8 +70,8 @@ func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.RwDB,
 
 	tdb, err := temporal.New(db, agg)
 	require.NoError(t, err)
-	db = tdb
-	return db, agg, path
+	t.Cleanup(tdb.Close)
+	return tdb, agg, path
 }
 
 func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
@@ -89,7 +88,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	ctx := context.Background()
 
 	db, agg, datadir := testDbAndAggregatorv3(t, "", aggStep)
-	tx, err := db.BeginRw(ctx)
+	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer func() {
 		if tx != nil {
@@ -100,7 +99,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	domCtx := agg.BeginFilesRo()
 	defer domCtx.Close()
 
-	domains, err := state.NewSharedDomains(tx.(kv.TemporalTx), log.New())
+	domains, err := state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	domains.SetTxNum(0)
@@ -122,7 +121,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 		accs  = make([]*accounts.Account, 0)
 		locs  = make([]common.Hash, 0)
 
-		writer = state2.NewWriterV4(domains)
+		writer = state2.NewWriter(domains, nil)
 	)
 
 	for txNum := uint64(1); txNum <= txs; txNum++ {
@@ -208,11 +207,11 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 
 	db, agg, _ = testDbAndAggregatorv3(t, datadir, aggStep)
 
-	tx, err = db.BeginRw(ctx)
+	tx, err = db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	domCtx = agg.BeginFilesRo()
 	defer domCtx.Close()
-	domains, err = state.NewSharedDomains(tx.(kv.TemporalTx), log.New())
+	domains, err = state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -237,19 +236,19 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	domCtx.Close()
 	domains.Close()
 
-	err = reset2.ResetExec(ctx, db, agg, networkname.Test, "", log.New())
+	err = reset2.ResetExec(ctx, db)
 	require.NoError(t, err)
 	// ======== reset domains end ========
 
-	tx, err = db.BeginRw(ctx)
+	tx, err = db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 	domCtx = agg.BeginFilesRo()
 	defer domCtx.Close()
-	domains, err = state.NewSharedDomains(tx.(kv.TemporalTx), log.New())
+	domains, err = state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
-	writer = state2.NewWriterV4(domains)
+	writer = state2.NewWriter(domains, nil)
 
 	txToStart := domains.TxNum()
 
@@ -295,7 +294,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	ctx := context.Background()
 
 	db, agg, datadir := testDbAndAggregatorv3(t, "", aggStep)
-	tx, err := db.BeginRw(ctx)
+	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer func() {
 		if tx != nil {
@@ -306,7 +305,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	domCtx := agg.BeginFilesRo()
 	defer domCtx.Close()
 
-	domains, err := state.NewSharedDomains(tx.(kv.TemporalTx), log.New())
+	domains, err := state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	domains.SetTxNum(0)
@@ -328,7 +327,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		accs  = make([]*accounts.Account, 0)
 		locs  = make([]common.Hash, 0)
 
-		writer = state2.NewWriterV4(domains)
+		writer = state2.NewWriter(domains, nil)
 	)
 
 	testStartedFromTxNum := uint64(1)
@@ -390,13 +389,13 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 
 	db, agg, _ = testDbAndAggregatorv3(t, datadir, aggStep)
 
-	tx, err = db.BeginRw(ctx)
+	tx, err = db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
 	domCtx = agg.BeginFilesRo()
 	defer domCtx.Close()
-	domains, err = state.NewSharedDomains(tx.(kv.TemporalTx), log.New())
+	domains, err = state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -407,20 +406,20 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	domCtx.Close()
 	domains.Close()
 
-	err = reset2.ResetExec(ctx, db, agg, networkname.Test, "", log.New())
+	err = reset2.ResetExec(ctx, db)
 	require.NoError(t, err)
 	// ======== reset domains end ========
 
-	tx, err = db.BeginRw(ctx)
+	tx, err = db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 	domCtx = agg.BeginFilesRo()
 	defer domCtx.Close()
-	domains, err = state.NewSharedDomains(tx.(kv.TemporalTx), log.New())
+	domains, err = state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
-	writer = state2.NewWriterV4(domains)
+	writer = state2.NewWriter(domains, nil)
 
 	txToStart := domains.TxNum()
 	require.EqualValues(t, 0, txToStart)
@@ -473,13 +472,13 @@ func TestCommit(t *testing.T) {
 
 	ctx := context.Background()
 	db, agg, _ := testDbAndAggregatorv3(t, "", aggStep)
-	tx, err := db.BeginRw(ctx)
+	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
 	domCtx := agg.BeginFilesRo()
 	defer domCtx.Close()
-	domains, err := state.NewSharedDomains(tx.(kv.TemporalTx), log.New())
+	domains, err := state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
