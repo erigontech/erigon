@@ -51,11 +51,12 @@ type StateV3 struct {
 	trace               bool
 }
 
-func NewStateV3(domains *state.SharedDomains, logger log.Logger) *StateV3 {
+func NewStateV3(domains *state.SharedDomains, syncCfg ethconfig.Sync, logger log.Logger) *StateV3 {
 	return &StateV3{
 		domains:             domains,
 		applyPrevAccountBuf: make([]byte, 256),
 		logger:              logger,
+		syncCfg:             syncCfg,
 		//trace: true,
 	}
 }
@@ -312,7 +313,7 @@ func NewStateV3Buffered(state *StateV3) *StateV3Buffered {
 
 func (s *StateV3Buffered) WithDomains(domains *state.SharedDomains) *StateV3Buffered {
 	return &StateV3Buffered{
-		StateV3:       NewStateV3(domains, s.logger),
+		StateV3:       NewStateV3(domains, s.syncCfg, s.logger),
 		accounts:      s.accounts,
 		accountsMutex: s.accountsMutex,
 	}

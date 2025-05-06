@@ -77,6 +77,7 @@ type Task interface {
 	IsBlockEnd() bool
 	IsHistoric() bool
 
+	TracingHooks() *tracing.Hooks
 	// elements in dependencies -> transaction indexes on which transaction i is dependent on
 	Dependencies() []int
 
@@ -223,9 +224,9 @@ type TxTask struct {
 	HistoryExecution   bool // use history reader for that txn instead of state reader
 	BalanceIncreaseSet map[common.Address]uint256.Int
 
-	Incarnation int
-	Tracer      *calltracer.CallTracer
-
+	Incarnation           int
+	Tracer                *calltracer.CallTracer
+	Hooks                 *tracing.Hooks
 	Config                *chain.Config
 	Engine                consensus.Engine
 	Logger                log.Logger
@@ -317,6 +318,10 @@ func (t *TxTask) TxMessage() (*types.Message, error) {
 	}
 
 	return t.message, nil
+}
+
+func (t *TxTask) TracingHooks() *tracing.Hooks {
+	return t.Hooks
 }
 
 func (t *TxTask) BlockNumber() uint64 {

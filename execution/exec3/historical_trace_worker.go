@@ -353,7 +353,7 @@ func processResultQueueHistorical(consumer *TraceConsumer, rws *exec.ResultsQueu
 
 		result.CreateReceipt(tx)
 		if hooks != nil && hooks.OnTxEnd != nil {
-			hooks.OnTxEnd(result.BlockReceipts[result.TxIndex], nil)
+			hooks.OnTxEnd(result.Receipt, nil)
 		}
 		if err := consumer.Reduce(result, tx); err != nil {
 			return outputTxNum, false, err
@@ -485,7 +485,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
-				txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
+				txTask.TxMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
 				if err != nil {
 					return err
 				}

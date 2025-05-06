@@ -100,19 +100,21 @@ type applyResult interface {
 }
 
 type blockResult struct {
-	BlockNum  uint64
-	BlockTime uint64
-	BlockHash common.Hash
-	StateRoot common.Hash
-	Err       error
-	GasUsed   uint64
-	lastTxNum uint64
-	complete  bool
-	isPartial bool
-	TxIO      *state.VersionedIO
-	Stats     map[int]ExecutionStat
-	Deps      *state.DAG
-	AllDeps   map[int]map[int]bool
+	BlockNum    uint64
+	BlockTime   uint64
+	BlockHash   common.Hash
+	StateRoot   common.Hash
+	Err         error
+	GasUsed     uint64
+	BlobGasUsed uint64
+	lastTxNum   uint64
+	complete    bool
+	isPartial   bool
+	TxIO        *state.VersionedIO
+	Receipts    types.Receipts
+	Stats       map[int]ExecutionStat
+	Deps        *state.DAG
+	AllDeps     map[int]map[int]bool
 }
 
 type txResult struct {
@@ -599,6 +601,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 					Config:           te.cfg.chainConfig,
 					Engine:           te.cfg.engine,
 					Trace:            traceTx(blockNum, txIndex),
+					Hooks:            te.hooks,
 				}
 
 				if te.cfg.genesis != nil {
@@ -706,7 +709,8 @@ type execRequest struct {
 
 type blockExecutor struct {
 	sync.Mutex
-	blockNum uint64
+	blockNum  uint64
+	blockHash common.Hash
 
 	tasks   []*execTask
 	results []*execResult
@@ -750,7 +754,8 @@ type blockExecutor struct {
 	cntExec, cntSpecExec, cntSuccess, cntAbort, cntTotalValidations, cntValidationFail, cntFinalized int
 
 	// cummulative gas for this block
-	gasUsed uint64
+	gasUsed     uint64
+	blobGasUsed uint64
 
 	execFailed, execAborted []int
 
@@ -763,9 +768,10 @@ type blockExecutor struct {
 	result      *blockResult
 }
 
-func newBlockExec(blockNum uint64, applyResults chan applyResult, profile bool) *blockExecutor {
+func newBlockExec(blockNum uint64, blockHash common.Hash, applyResults chan applyResult, profile bool) *blockExecutor {
 	return &blockExecutor{
 		blockNum:     blockNum,
+		blockHash:    blockHash,
 		begin:        time.Now(),
 		stats:        map[int]ExecutionStat{},
 		skipCheck:    map[int]bool{},
@@ -1049,6 +1055,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 		txTask := be.tasks[len(be.tasks)-1].Task
 
+		var receipts types.Receipts
+
+		for _, txResult := range be.results {
+			if receipt := txResult.Receipt; receipt != nil {
+				receipts = append(receipts, receipt)
+			}
+		}
+
 		be.result = &blockResult{
 			be.blockNum,
 			txTask.BlockTime(),
@@ -1056,10 +1070,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			txTask.BlockRoot(),
 			nil,
 			be.gasUsed,
+			be.blobGasUsed,
 			txTask.Version().TxNum,
 			true,
 			isPartial,
 			be.blockIO,
+			receipts,
 			be.stats,
 			&deps,
 			allDeps}
@@ -1081,10 +1097,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		txTask.BlockRoot(),
 		nil,
 		be.gasUsed,
+		be.blobGasUsed,
 		lastTxNum,
 		false,
 		len(be.tasks) > 0 && be.tasks[0].Version().TxIndex != -1,
 		be.blockIO,
+		nil,
 		be.stats,
 		nil,
 		nil}, nil
@@ -1389,7 +1407,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			}
 
 			if blockExecutor, ok := pe.blockExecutors[blockResult.BlockNum+1]; ok {
-				pe.onBlockStart(ctx, blockExecutor.blockNum, blockExecutor.BlockHash)
+				pe.onBlockStart(ctx, blockExecutor.blockNum, blockExecutor.blockHash)
 				blockExecutor.execStarted = time.Now()
 				blockExecutor.scheduleExecution(ctx, pe)
 			}
@@ -1416,7 +1434,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			executor, ok = pe.blockExecutors[blockNum]
 
 			if !ok {
-				executor = newBlockExec(blockNum, execRequest.applyResults, execRequest.profile)
+				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.applyResults, execRequest.profile)
 			}
 		}
 

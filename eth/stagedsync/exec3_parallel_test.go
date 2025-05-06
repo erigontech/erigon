@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/core/exec"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/params"
 	"github.com/stretchr/testify/assert"
@@ -500,7 +501,7 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 				db:          db,
 			},
 			doms:   domains,
-			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, logger)),
+			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, logger)),
 			logger: logger,
 		},
 		workerCount: runtime.NumCPU() - 1,
@@ -613,7 +614,7 @@ func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation property
 				db:          db,
 			},
 			doms:   domains,
-			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, logger)),
+			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, logger)),
 			logger: logger,
 		},
 		workerCount: runtime.NumCPU() - 1,

@@ -617,7 +617,7 @@ func ExecV3(ctx context.Context,
 			accumulator = shards.NewAccumulator()
 		}
 	}
-	rs := state.NewStateV3Buffered(state.NewStateV3(doms, logger))
+	rs := state.NewStateV3Buffered(state.NewStateV3(doms, cfg.syncCfg, logger))
 
 	commitThreshold := cfg.batchSize.Bytes()
 
@@ -645,6 +645,7 @@ func ExecV3(ctx context.Context,
 				logPrefix:                execStage.LogPrefix(),
 				progress:                 NewProgress(blockNum, outputTxNum.Load(), commitThreshold, false, execStage.LogPrefix(), logger),
 				enableChaosMonkey:        execStage.CurrentSyncCycle.IsInitialCycle,
+				hooks:                    hooks,
 			},
 			workerCount: workerCount,
 		}
@@ -670,6 +671,7 @@ func ExecV3(ctx context.Context,
 				logPrefix:                execStage.LogPrefix(),
 				progress:                 NewProgress(blockNum, outputTxNum.Load(), commitThreshold, false, execStage.LogPrefix(), logger),
 				enableChaosMonkey:        execStage.CurrentSyncCycle.IsInitialCycle,
+				hooks:                    hooks,
 			},
 		}
 
@@ -790,6 +792,7 @@ func ExecV3(ctx context.Context,
 						Config:           chainConfig,
 						Engine:           cfg.engine,
 						Trace:            traceTx(blockNum, txIndex),
+						Hooks:            hooks,
 					}
 
 					if cfg.genesis != nil {
@@ -995,10 +998,20 @@ func ExecV3(ctx context.Context,
 							checkReceipts := !cfg.vmConfig.StatelessExec &&
 								cfg.chainConfig.IsByzantium(applyResult.BlockNum) &&
 								!cfg.vmConfig.NoReceipts && !isMining
-							
-							if err := core.BlockPostValidation(applyResult.GasUsed, be.blobGasUsed, checkReceipts, blockReceipts,
-								txTask.Header, pe.isMining, txTask.Txs, pe.cfg.chainConfig, pe.logger); err != nil {
-								return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
+
+							b, err = blockReader.BlockByHash(ctx, applyTx, applyResult.BlockHash)
+
+							if err != nil {
+								return fmt.Errorf("can't retrieve block %n: for post validation: %w", applyResult.BlockNum, err)
+							}
+
+							if b.NumberU64() != applyResult.BlockNum {
+								return fmt.Errorf("block numbers don't match expected: %n: got: %n for hash %x", applyResult.BlockNum, b.NumberU64(), applyResult.BlockHash)
+							}
+
+							if err := core.BlockPostValidation(applyResult.GasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
+								b.HeaderNoCopy(), pe.isMining, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {
+								return fmt.Errorf("%w, block=%d, %v", consensus.ErrInvalidBlock, applyResult.BlockNum, err) //same as in stage_exec.go
 							}
 						}
 						if applyResult.BlockNum > lastBlockResult.BlockNum {

@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/exec"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/consensuschain"
@@ -113,13 +112,10 @@ type Worker struct {
 	results *exec.ResultsQueue
 	chain   consensus.ChainReader
 
-	callTracer  *calltracer.CallTracer
 	taskGasPool *core.GasPool
-	hooks       *tracing.Hooks
 
 	evm   *vm.EVM
 	ibs   *state.IntraBlockState
-	vmCfg vm.Config
 
 	dirs datadir.Dirs
 
@@ -145,16 +141,13 @@ func NewWorker(ctx context.Context, background bool, metrics *WorkerMetrics, cha
 		engine:  engine,
 
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
-		callTracer:  calltracer.NewCallTracer(hooks),
 		taskGasPool: new(core.GasPool),
-		hooks:       hooks,
 
 		dirs:    dirs,
 		metrics: metrics,
 	}
 	w.runnable.Store(true)
 	w.taskGasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(0))
-	w.vmCfg = vm.Config{Tracer: w.callTracer.Tracer().Hooks}
 	w.ibs = state.New(w.stateReader)
 	return w
 }
@@ -331,27 +324,30 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.Result {
 	}
 
 	txIndex := txTask.Version().TxIndex
-
-	if txIndex != -1 && !txTask.IsBlockEnd() {
-		rw.callTracer.Reset()
-	}
-
 	txTask.Reset(rw.ibs)
 
 	if txIndex >= 0 {
 		rw.ibs.SetTxContext(txTask.Version().BlockNum, txIndex)
 	}
 
-	result := txTask.Execute(rw.evm, rw.vmCfg, rw.engine, rw.genesis, rw.taskGasPool, rw.ibs,
+	var vmCfg vm.Config
+	var callTracer *calltracer.CallTracer
+
+	if txIndex != -1 && !txTask.IsBlockEnd() {
+		callTracer = calltracer.NewCallTracer(txTask.TracingHooks())
+		vmCfg.Tracer = callTracer.Tracer().Hooks
+	}
+
+	result := txTask.Execute(rw.evm, vmCfg, rw.engine, rw.genesis, rw.taskGasPool, rw.ibs,
 		rw.stateWriter, rw.chainConfig, rw.chain, rw.dirs, true)
 
 	if result.Task == nil {
 		result.Task = txTask
 	}
 
-	if txIndex != -1 && !txTask.IsBlockEnd() {
-		result.TraceFroms = rw.callTracer.Froms()
-		result.TraceTos = rw.callTracer.Tos()
+	if callTracer != nil {
+		result.TraceFroms = callTracer.Froms()
+		result.TraceTos = callTracer.Tos()
 	}
 
 	return result

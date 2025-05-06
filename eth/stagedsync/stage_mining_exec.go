@@ -364,7 +364,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 			}
 			// Make sure the transaction gasFeeCap is greater than the block's baseFee.
 			if !transaction.GetFeeCap().IsZero() || !transaction.GetTipCap().IsZero() {
-				if err := core.CheckEip1559TxGasFeeCap(sender, transaction.GetFeeCap(), transaction.GetTipCap(), baseFee256, false /* isFree */); err != nil {
+				if err := core.CheckEip1559TxfeeCap(sender, transaction.GetFeeCap(), transaction.GetTipCap(), baseFee256, false /* isFree */); err != nil {
 					transactions = transactions[1:]
 					feeTooLowCnt++
 					continue
