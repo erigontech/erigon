@@ -521,7 +521,8 @@ var knownWebseeds = map[string][]string{}
 func GetWebseeds(chain string) []string {
 	ret, ok := knownWebseeds[chain]
 	if !ok {
-		knownWebseeds[chain] = webseedsParse(webseed.ForChain(chain))
+		ret = webseedsParse(webseed.ForChain(chain))
+		knownWebseeds[chain] = ret
 	}
 	return ret
 }
