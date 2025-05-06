@@ -247,8 +247,9 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 			return g.blobService.ProcessMessage(ctx, data.SubnetId, blobSideCar)
 		case gossip.IsTopicSyncCommittee(data.Name):
 			obj := &services.SyncCommitteeMessageForGossip{
-				Receiver:             copyOfPeerData(data),
-				SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{},
+				Receiver:              copyOfPeerData(data),
+				SyncCommitteeMessage:  &cltypes.SyncCommitteeMessage{},
+				ImmediateVerification: true,
 			}
 			if err := obj.SyncCommitteeMessage.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
 				return err
