@@ -82,7 +82,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	salt := uint32(1)
 
 	cfg.hist.iiCfg.dirs = dirs
-	cfg.hist.iiCfg.salt = &salt
+	cfg.hist.iiCfg.salt.Store(&salt)
 	//cfg.hist.historyValuesOnCompressedPage = 16
 	d, err := NewDomain(cfg, aggStep, logger)
 	require.NoError(t, err)
@@ -1049,7 +1049,7 @@ func emptyTestDomain(aggStep uint64) *Domain {
 	cfg.crossDomainIntegrity = nil
 
 	salt := uint32(1)
-	cfg.hist.iiCfg.salt = &salt
+	cfg.hist.iiCfg.salt.Store(&salt)
 	cfg.hist.iiCfg.dirs = datadir2.New(os.TempDir())
 	cfg.hist.iiCfg.name = kv.InvertedIdx("dummy")
 

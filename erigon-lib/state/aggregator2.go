@@ -2,6 +2,7 @@ package state
 
 import (
 	"context"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -92,6 +93,7 @@ var Schema = map[kv.Domain]domainCfg{
 			iiCfg: iiCfg{
 				filenameBase: kv.AccountsDomain.String(), keysTable: kv.TblAccountHistoryKeys, valuesTable: kv.TblAccountIdx,
 				compressorCfg: seg.DefaultCfg,
+				salt:          new(atomic.Pointer[uint32]),
 			},
 		},
 	},
@@ -111,6 +113,7 @@ var Schema = map[kv.Domain]domainCfg{
 			iiCfg: iiCfg{
 				filenameBase: kv.StorageDomain.String(), keysTable: kv.TblStorageHistoryKeys, valuesTable: kv.TblStorageIdx,
 				compressorCfg: seg.DefaultCfg,
+				salt:          new(atomic.Pointer[uint32]),
 			},
 		},
 	},
@@ -131,6 +134,7 @@ var Schema = map[kv.Domain]domainCfg{
 			iiCfg: iiCfg{
 				filenameBase: kv.CodeDomain.String(), keysTable: kv.TblCodeHistoryKeys, valuesTable: kv.TblCodeIdx,
 				compressorCfg: seg.DefaultCfg,
+				salt:          new(atomic.Pointer[uint32]),
 			},
 		},
 	},
@@ -155,6 +159,7 @@ var Schema = map[kv.Domain]domainCfg{
 			iiCfg: iiCfg{
 				filenameBase: kv.CommitmentDomain.String(), keysTable: kv.TblCommitmentHistoryKeys, valuesTable: kv.TblCommitmentIdx,
 				compressorCfg: seg.DefaultCfg,
+				salt:          new(atomic.Pointer[uint32]),
 			},
 		},
 	},
@@ -175,6 +180,7 @@ var Schema = map[kv.Domain]domainCfg{
 			iiCfg: iiCfg{
 				filenameBase: kv.ReceiptDomain.String(), keysTable: kv.TblReceiptHistoryKeys, valuesTable: kv.TblReceiptIdx,
 				compressorCfg: seg.DefaultCfg,
+				salt:          new(atomic.Pointer[uint32]),
 			},
 		},
 	},
@@ -199,6 +205,7 @@ var Schema = map[kv.Domain]domainCfg{
 				disable:      true, // disable everything by default
 				filenameBase: kv.RCacheDomain.String(), keysTable: kv.TblRCacheHistoryKeys, valuesTable: kv.TblRCacheIdx,
 				compressorCfg: seg.DefaultCfg,
+				salt:          new(atomic.Pointer[uint32]),
 			},
 		},
 	},
@@ -210,24 +217,28 @@ var StandaloneIISchema = map[kv.InvertedIdx]iiCfg{
 
 		compression: seg.CompressNone,
 		name:        kv.LogAddrIdx,
+		salt:        new(atomic.Pointer[uint32]),
 	},
 	kv.LogTopicIdx: {
 		filenameBase: kv.FileLogTopicsIdx, keysTable: kv.TblLogTopicsKeys, valuesTable: kv.TblLogTopicsIdx,
 
 		compression: seg.CompressNone,
 		name:        kv.LogTopicIdx,
+		salt:        new(atomic.Pointer[uint32]),
 	},
 	kv.TracesFromIdx: {
 		filenameBase: kv.FileTracesFromIdx, keysTable: kv.TblTracesFromKeys, valuesTable: kv.TblTracesFromIdx,
 
 		compression: seg.CompressNone,
 		name:        kv.TracesFromIdx,
+		salt:        new(atomic.Pointer[uint32]),
 	},
 	kv.TracesToIdx: {
 		filenameBase: kv.FileTracesToIdx, keysTable: kv.TblTracesToKeys, valuesTable: kv.TblTracesToIdx,
 
 		compression: seg.CompressNone,
 		name:        kv.TracesToIdx,
+		salt:        new(atomic.Pointer[uint32]),
 	},
 }
 

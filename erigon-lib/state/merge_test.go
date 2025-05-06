@@ -37,7 +37,7 @@ func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
 	salt := uint32(1)
 	cfg := Schema[kv.AccountsDomain].hist.iiCfg
 
-	cfg.salt = &salt
+	cfg.salt.Store(&salt)
 	cfg.dirs = datadir.New(os.TempDir())
 
 	ii, err := NewInvertedIndex(cfg, aggStep, log.New())

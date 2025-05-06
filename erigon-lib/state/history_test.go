@@ -56,7 +56,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	cfg := Schema[kv.AccountsDomain]
 
 	cfg.hist.iiCfg.dirs = dirs
-	cfg.hist.iiCfg.salt = &salt
+	cfg.hist.iiCfg.salt.Store(&salt)
 
 	cfg.hist.historyLargeValues = largeValues
 

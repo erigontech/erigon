@@ -79,7 +79,7 @@ type InvertedIndex struct {
 }
 
 type iiCfg struct {
-	salt    *atomic.Uint32
+	salt    *atomic.Pointer[uint32]
 	dirs    datadir.Dirs
 	disable bool // totally disable Domain/History/InvertedIndex - ignore all writes, don't produce files
 
@@ -94,15 +94,6 @@ type iiCfg struct {
 	// external checker for integrity of inverted index ranges
 	integrity rangeIntegrityChecker
 	indexList Accessors
-}
-
-func (cfg *iiCfg) Salt() *uint32 {
-	if cfg.salt == nil {
-		return nil
-	}
-	x := cfg.salt.Load()
-	return &x
-
 }
 
 type iiVisible struct {
@@ -483,7 +474,7 @@ func (ii *InvertedIndex) BeginFilesRo() *InvertedIndexRoTx {
 		visible: ii._visible,
 		files:   files,
 		name:    ii.name,
-		salt:    ii.Salt(),
+		salt:    *ii.salt.Load(),
 	}
 }
 func (iit *InvertedIndexRoTx) Close() {
@@ -551,14 +542,14 @@ type InvertedIndexRoTx struct {
 	seekInFilesCache *IISeekInFilesCache
 
 	ef   *eliasfano32.EliasFano // re-usable
-	salt *uint32
+	salt uint32
 }
 
 // hashKey - change of salt will require re-gen of indices
 func (iit *InvertedIndexRoTx) hashKey(k []byte) (uint64, uint64) {
 	// this inlinable alloc-free version, it's faster than pre-allocated `hasher` object
 	// because `hasher` object is interface and need call many methods on it
-	return murmur3.Sum128WithSeed(k, *iit.salt)
+	return murmur3.Sum128WithSeed(k, iit.salt)
 }
 
 func (iit *InvertedIndexRoTx) statelessGetter(i int) *seg.Reader {
@@ -1230,7 +1221,7 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 		LeafSize:   recsplit.DefaultLeafSize,
 		TmpDir:     ii.dirs.Tmp,
 		IndexFile:  idxPath,
-		Salt:       ii.salt,
+		Salt:       ii.salt.Load(),
 		NoFsync:    ii.noFsync,
 	}
 	return buildHashMapAccessor(ctx, data, ii.compression, idxPath, false, cfg, ps, ii.logger)

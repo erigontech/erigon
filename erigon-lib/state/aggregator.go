@@ -202,9 +202,7 @@ func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.D
 	cfg := Schema[name]
 	//TODO: move dynamic part of config to InvertedIndex
 	cfg.restrictSubsetFileDeletions = a.commitmentValuesTransform
-	if salt != nil {
-		cfg.hist.iiCfg.salt.Store(*salt)
-	}
+	cfg.hist.iiCfg.salt.Store(salt)
 	cfg.hist.iiCfg.dirs = dirs
 	a.d[name], err = NewDomain(cfg, a.aggregationStep, logger)
 	if err != nil {
@@ -215,9 +213,7 @@ func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.D
 
 func (a *Aggregator) registerII(idx kv.InvertedIdx, salt *uint32, dirs datadir.Dirs, logger log.Logger) error {
 	idxCfg := StandaloneIISchema[idx]
-	if salt != nil {
-		idxCfg.salt.Store(*salt)
-	}
+	idxCfg.salt.Store(salt)
 	idxCfg.dirs = dirs
 
 	if ii := a.searchII(idx); ii != nil {
@@ -253,21 +249,14 @@ func (a *Aggregator) ReloadSalt() error {
 		return fmt.Errorf("salt not found on ReloadSalt")
 	}
 
-	loadSalt := func(ii *iiCfg, salt uint32) {
-		if ii.salt == nil {
-			ii.salt = new(atomic.Uint32)
-		}
-		ii.salt.Store(salt)
-	}
-
 	for _, d := range a.d {
-		loadSalt(&d.hist.iiCfg, *salt)
-		loadSalt(&d.History.histCfg.iiCfg, *salt)
-		loadSalt(&d.History.InvertedIndex.iiCfg, *salt)
+		d.hist.iiCfg.salt.Store(salt)
+		d.History.histCfg.iiCfg.salt.Store(salt)
+		d.History.InvertedIndex.iiCfg.salt.Store(salt)
 	}
 
 	for _, ii := range a.iis {
-		loadSalt(&ii.iiCfg, *salt)
+		ii.iiCfg.salt.Store(salt)
 	}
 
 	return nil
