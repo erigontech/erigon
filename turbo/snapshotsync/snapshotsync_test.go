@@ -17,6 +17,7 @@
 package snapshotsync
 
 import (
+	"github.com/erigontech/erigon-lib/chain/networkname"
 	"strings"
 	"testing"
 
@@ -25,7 +26,8 @@ import (
 )
 
 func TestBlackListForPruning(t *testing.T) {
-	preverified := snapcfg.Mainnet
+	// Reuse the same public API everyone else is using. Note we aren't loading remote here now.
+	preverified := snapcfg.KnownCfg(networkname.Mainnet).Preverified
 
 	maxStep, err := getMaxStepRangeInSnapshots(preverified)
 	if err != nil {

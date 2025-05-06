@@ -2076,9 +2076,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		logger.Info("torrent verbosity", "level", lvl.LogString())
 		version := "erigon: " + params2.VersionWithCommit(params2.GitCommit)
 		webseedsList := common.CliString2Array(ctx.String(WebSeedsFlag.Name))
-		if known, ok := snapcfg.KnownWebseeds[chain]; ok {
-			webseedsList = append(webseedsList, known...)
-		}
+		webseedsList = append(webseedsList, snapcfg.GetWebseeds(chain)...)
 		cfg.Downloader, err = downloadercfg2.New(ctx.Context, cfg.Dirs, version, lvl, downloadRate, uploadRate,
 			ctx.Int(TorrentPortFlag.Name), ctx.Int(TorrentConnsPerFileFlag.Name), ctx.Int(TorrentDownloadSlotsFlag.Name),
 			common.CliString2Array(ctx.String(TorrentStaticPeersFlag.Name)),

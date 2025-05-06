@@ -71,9 +71,7 @@ func Setup(ctx *cli.Context, node *node.ErigonNode, metricsMux *http.ServeMux, p
 
 	chain := ctx.String(chainFlag)
 	webseedsList := common.CliString2Array(ctx.String(webSeedsFlag))
-	if known, ok := snapcfg.KnownWebseeds[chain]; ok {
-		webseedsList = append(webseedsList, known...)
-	}
+	webseedsList = append(webseedsList, snapcfg.GetWebseeds(chain)...)
 
 	speedTest := ctx.Bool(diagnoticsSpeedTestFlag)
 	diagnostic, err := diaglib.NewDiagnosticClient(ctx.Context, diagMux, node.Backend().DataDir(), speedTest, webseedsList)

@@ -18,7 +18,9 @@ package downloadercfg
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/url"
 	"os"
@@ -246,33 +248,22 @@ func LoadSnapshotsHashes(ctx context.Context, dirs datadir.Dirs, chainName strin
 		return snapcfg.NewNonSeededCfg(chainName), nil
 	}
 
+	// TODO: Should the chain name should be incorporated here?
 	preverifiedPath := filepath.Join(dirs.Snap, "preverified.toml")
-	exists, err := dir.FileExist(preverifiedPath)
-	if err != nil {
-		return nil, err
-	}
-	if exists {
-		// Load hashes from local preverified.toml
-		haveToml, err := os.ReadFile(preverifiedPath)
-		if err != nil {
-			return nil, err
-		}
-		snapcfg.SetToml(chainName, haveToml)
-	} else {
-		// Fetch the snapshot hashes from the web
-		fetched, err := snapcfg.LoadRemotePreverified(ctx)
+	tomlBytes, err := os.ReadFile(preverifiedPath)
+	if errors.Is(err, fs.ErrNotExist) {
+		tomlBytes, err = snapcfg.LoadRemotePreverified(ctx, chainName)
 		if err != nil {
 			log.Root().Crit("Snapshot hashes for supported networks was not loaded. Please check your network connection and/or GitHub status here https://www.githubstatus.com/", "chain", chainName, "err", err)
-			return nil, fmt.Errorf("failed to fetch remote snapshot hashes for chain %s", chainName)
+			return nil, fmt.Errorf("failed to fetch remote snapshot hashes for chain %w", chainName)
 		}
-		if !fetched {
-			log.Root().Crit("Snapshot hashes for supported networks was not loaded. Please check your network connection and/or GitHub status here https://www.githubstatus.com/", "chain", chainName)
-			return nil, fmt.Errorf("remote snapshot hashes was not fetched for chain %s", chainName)
-		}
-		if err := dir.WriteFileWithFsync(preverifiedPath, snapcfg.GetToml(chainName), 0644); err != nil {
+		if err := dir.WriteFileWithFsync(preverifiedPath, tomlBytes, 0644); err != nil {
 			return nil, err
 		}
+	} else if err != nil {
+		return nil, fmt.Errorf("reading preverified.toml: %w", err)
 	}
+	snapcfg.SetToml(chainName, tomlBytes)
 	return snapcfg.KnownCfg(chainName), nil
 }
 
