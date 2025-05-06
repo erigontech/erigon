@@ -329,6 +329,7 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 
 	msg := st.msg
 	st.gasRemaining += st.msg.Gas()
+	st.initialGas = st.msg.Gas()
 	sender := vm.AccountRef(msg.From())
 	contractCreation := msg.To() == nil
 	rules := st.evm.ChainRules()
