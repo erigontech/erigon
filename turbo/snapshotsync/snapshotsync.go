@@ -19,6 +19,7 @@ package snapshotsync
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -184,23 +185,20 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 			continue
 		}
 		var _, to uint64
-		var err error
 		if isStateSnapshot(name) {
 			// parse "from" (0) and "to" (64) from the name
-			// parse the snapshot "kind". e.g kind of 'idx/v1-accounts.0-64.ef' is "idx/v1-accounts"
-			rangeString := strings.Split(name, ".")[1]
-			rangeNums := strings.Split(rangeString, "-")
-			// convert the range to uint64
-			to, err = strconv.ParseUint(rangeNums[1], 10, 64)
-			if err != nil {
-				return nil, err
+			// parse the snapshot "kind". e.g kind of 'idx/v1.0-accounts.0-64.ef' is "idx/v1.0-accounts"
+			res, _, ok := snaptype.ParseFileName("", name)
+			if !ok {
+				return blackList, errors.New("invalid state snapshot name")
 			}
+			to = res.To
 			if stepPrune < to {
 				continue
 			}
 			blackList[name] = struct{}{}
 		} else {
-			// e.g 'v1-000000-000100-beaconblocks.seg'
+			// e.g 'v1.0-000000-000100-beaconblocks.seg'
 			// parse "from" (000000) and "to" (000100) from the name. 100 is 100'000 blocks
 			s, _, ok := snaptype.ParseFileName("", name)
 			if !ok {
@@ -265,7 +263,11 @@ func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error)
 		if !strings.HasPrefix(p.Name, "domain") {
 			continue
 		}
-		rangeString := strings.Split(p.Name, ".")[1]
+		name := strings.TrimPrefix(p.Name, "domain/")
+		versionString := strings.Split(name, "-")[0]
+		name = strings.TrimPrefix(name, versionString)
+
+		rangeString := strings.Split(name, ".")[1]
 		rangeNums := strings.Split(rangeString, "-")
 		// convert the range to uint64
 		to, err := strconv.ParseUint(rangeNums[1], 10, 64)
@@ -357,7 +359,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 		if !syncCfg.KeepExecutionProofs && isStateHistory(p.Name) && strings.Contains(p.Name, kv.CommitmentDomain.String()) {
 			continue
 		}
-		if !syncCfg.PersistReceiptsCache && isStateHistory(p.Name) && strings.Contains(p.Name, kv.RCacheDomain.String()) {
+		if !syncCfg.PersistReceiptsCacheV2 && isStateHistory(p.Name) && strings.Contains(p.Name, kv.RCacheDomain.String()) {
 			continue
 		}
 

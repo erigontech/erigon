@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -57,7 +58,7 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	}).MustOpen()
 	tb.Cleanup(db.Close)
 	salt := uint32(1)
-	cfg := iiCfg{salt: new(atomic.Pointer[uint32]), dirs: dirs, filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable}
+	cfg := iiCfg{salt: new(atomic.Pointer[uint32]), dirs: dirs, filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable, version: IIVersionTypes{DataEF: snaptype.V1_0, AccessorEFI: snaptype.V1_0}}
 	cfg.salt.Store(&salt)
 	ii, err := NewInvertedIndex(cfg, aggStep, logger)
 	require.NoError(tb, err)
@@ -101,7 +102,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		count++
 	}
 	icc.Close()
-	require.EqualValues(t, count, pruneIters*int(pruneLimit))
+	require.Equal(t, count, pruneIters*int(pruneLimit))
 
 	// this one should not prune anything due to forced=false but no files built
 	stat, err := ic.Prune(context.Background(), rwTx, 0, 10, pruneLimit, logEvery, false, nil)
@@ -650,12 +651,12 @@ func TestScanStaticFiles(t *testing.T) {
 
 	ii := emptyTestInvertedIndex(1)
 	files := []string{
-		"v1-accounts.0-1.ef",
-		"v1-accounts.1-2.ef",
-		"v1-accounts.0-4.ef",
-		"v1-accounts.2-3.ef",
-		"v1-accounts.3-4.ef",
-		"v1-accounts.4-5.ef",
+		"v1.0-accounts.0-1.ef",
+		"v1.0-accounts.1-2.ef",
+		"v1.0-accounts.0-4.ef",
+		"v1.0-accounts.2-3.ef",
+		"v1.0-accounts.3-4.ef",
+		"v1.0-accounts.4-5.ef",
 	}
 	ii.scanDirtyFiles(files)
 	require.Equal(t, 6, ii.dirtyFiles.Len())
@@ -670,16 +671,16 @@ func TestScanStaticFiles(t *testing.T) {
 func TestCtxFiles(t *testing.T) {
 	ii := emptyTestInvertedIndex(1)
 	files := []string{
-		"v1-accounts.0-1.ef", // overlap with same `endTxNum=4`
-		"v1-accounts.1-2.ef",
-		"v1-accounts.0-4.ef",
-		"v1-accounts.2-3.ef",
-		"v1-accounts.3-4.ef",
-		"v1-accounts.4-5.ef",     // no overlap
-		"v1-accounts.480-484.ef", // overlap with same `startTxNum=480`
-		"v1-accounts.480-488.ef",
-		"v1-accounts.480-496.ef",
-		"v1-accounts.480-512.ef",
+		"v1.0-accounts.0-1.ef", // overlap with same `endTxNum=4`
+		"v1.0-accounts.1-2.ef",
+		"v1.0-accounts.0-4.ef",
+		"v1.0-accounts.2-3.ef",
+		"v1.0-accounts.3-4.ef",
+		"v1.0-accounts.4-5.ef",     // no overlap
+		"v1.0-accounts.480-484.ef", // overlap with same `startTxNum=480`
+		"v1.0-accounts.480-488.ef",
+		"v1.0-accounts.480-496.ef",
+		"v1.0-accounts.480-512.ef",
 	}
 	ii.scanDirtyFiles(files)
 	require.Equal(t, 10, ii.dirtyFiles.Len())

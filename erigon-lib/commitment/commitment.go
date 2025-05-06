@@ -181,6 +181,7 @@ type BranchEncoder struct {
 	buf       *bytes.Buffer
 	bitmapBuf [binary.MaxVarintLen64]byte
 	merger    *BranchMerger
+	metrics   *Metrics
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -188,6 +189,10 @@ func NewBranchEncoder(sz uint64) *BranchEncoder {
 		buf:    bytes.NewBuffer(make([]byte, sz)),
 		merger: NewHexBranchMerger(sz / 2),
 	}
+}
+
+func (be *BranchEncoder) setMetrics(metrics *Metrics) {
+	be.metrics = metrics
 }
 
 func (be *BranchEncoder) CollectUpdate(
@@ -220,6 +225,9 @@ func (be *BranchEncoder) CollectUpdate(
 	// has to copy :(
 	if err = ctx.PutBranch(common.Copy(prefix), common.Copy(update), prev, prevStep); err != nil {
 		return 0, err
+	}
+	if be.metrics != nil {
+		be.metrics.updateBranch.Add(1)
 	}
 	mxTrieBranchesUpdated.Inc()
 	return lastNibble, nil

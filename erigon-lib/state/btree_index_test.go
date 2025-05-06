@@ -128,7 +128,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	require.NoError(t, err)
 	for i := 0; i < len(keys); i++ {
 		k := c.Key()
-		require.EqualValues(t, keys[i], k)
+		require.Equal(t, keys[i], k)
 		c.Next()
 	}
 	c.Close()
@@ -151,7 +151,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 		}
 		cur, err := bt.Seek(getter, keys[i])
 		require.NoError(t, err)
-		require.EqualValues(t, keys[i], cur.Key())
+		require.Equal(t, keys[i], cur.Key())
 		cur.Close()
 	}
 }
@@ -199,7 +199,7 @@ func Test_BtreeIndex_Build(t *testing.T) {
 	for i := 0; i < 10000; i++ {
 		c, err := bt.Seek(getter, keys[i])
 		require.NoError(t, err)
-		require.EqualValues(t, keys[i], c.Key())
+		require.Equal(t, keys[i], c.Key())
 		c.Close()
 	}
 }
@@ -266,15 +266,15 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 		defer cur.Close()
 
 		require.NoError(t, err)
-		require.EqualValues(t, keys[0], cur.Key())
+		require.Equal(t, keys[0], cur.Key())
 		require.NotEmptyf(t, cur.Value(), "i=%d", 0)
 
 		k, v, _, err := bt.dataLookup(0, getter)
 		require.NoError(t, err)
 		cur.Reset(0, getter)
 
-		require.EqualValues(t, k, cur.Key())
-		require.EqualValues(t, v, cur.Value())
+		require.Equal(t, k, cur.Key())
+		require.Equal(t, v, cur.Value())
 
 		totalKeys := kv.Count() / 2
 
@@ -308,7 +308,7 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 		}
 		cur, err := bt.Seek(getter, keys[i])
 		require.NoError(t, err)
-		require.EqualValues(t, keys[i], cur.Key())
+		require.Equal(t, keys[i], cur.Key())
 	}
 }
 
@@ -368,7 +368,7 @@ func TestBpsTree_Seek(t *testing.T) {
 
 		//k, _, err := it.KVFromGetter(g)
 		//require.NoError(t, err)
-		require.EqualValues(t, keys[i], c.Key())
+		require.Equal(t, keys[i], c.Key())
 	}
 }
 

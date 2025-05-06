@@ -127,7 +127,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 	}
 
 	externalState := cfg.State != nil
-	var tx kv.RwTx
+	var tx kv.TemporalRwTx
 	var err error
 	if !externalState {
 		db := memdb.NewStateDB(tempdir)
@@ -152,13 +152,13 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 			return nil, nil, err
 		}
 		defer tx.Rollback()
-		sd, err := state3.NewSharedDomains(tx.(kv.TemporalRwTx), log.New())
+		sd, err := state3.NewSharedDomains(tx, log.New())
 		if err != nil {
 			return nil, nil, err
 		}
 		defer sd.Close()
 		cfg.r = state.NewReaderV3(sd)
-		cfg.w = state.NewWriterV4(sd)
+		cfg.w = state.NewWriter(sd, nil)
 		cfg.State = state.New(cfg.r)
 	}
 	var (
@@ -198,7 +198,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 	setDefaults(cfg)
 
 	externalState := cfg.State != nil
-	var tx kv.RwTx
+	var tx kv.TemporalRwTx
 	var err error
 	if !externalState {
 		tmp := filepath.Join(os.TempDir(), "create-vm")
@@ -220,13 +220,13 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 			return nil, [20]byte{}, 0, err
 		}
 		defer tx.Rollback()
-		sd, err := state3.NewSharedDomains(tx.(kv.TemporalRwTx), log.New())
+		sd, err := state3.NewSharedDomains(tx, log.New())
 		if err != nil {
 			return nil, [20]byte{}, 0, err
 		}
 		defer sd.Close()
 		cfg.r = state.NewReaderV3(sd)
-		cfg.w = state.NewWriterV4(sd)
+		cfg.w = state.NewWriter(sd, nil)
 		cfg.State = state.New(cfg.r)
 	}
 	var (

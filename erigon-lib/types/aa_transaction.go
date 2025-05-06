@@ -11,6 +11,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/abi"
 	"github.com/erigontech/erigon-lib/chain"
+	params2 "github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
@@ -128,7 +129,7 @@ func (tx *AccountAbstractionTransaction) GetFeeCap() *uint256.Int {
 }
 
 func (tx *AccountAbstractionTransaction) GetGasLimit() uint64 {
-	return tx.GasLimit
+	return params2.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit
 }
 
 func (tx *AccountAbstractionTransaction) GetTipCap() *uint256.Int {
@@ -160,7 +161,11 @@ func (tx *AccountAbstractionTransaction) Type() byte {
 }
 
 func (tx *AccountAbstractionTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
-	return nil, errors.New("do not use")
+	return &Message{
+		to:         nil,
+		gasPrice:   *tx.FeeCap,
+		blobHashes: []common.Hash{},
+	}, nil
 }
 
 func (tx *AccountAbstractionTransaction) WithSignature(signer Signer, sig []byte) (Transaction, error) {

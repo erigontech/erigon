@@ -184,9 +184,10 @@ func (db *DB) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	}
 	return &tx{ctx: ctx, db: db, stream: stream, streamCancelFn: streamCancelFn, viewID: msg.ViewId, id: msg.TxId}, nil
 }
-func (db *DB) Debug() kv.TemporalDebugDB                 { return kv.TemporalDebugDB(db) }
-func (db *DB) DomainTables(domain ...kv.Domain) []string { panic("not implemented") }
-func (db *DB) ReloadSalt() error                         { panic("not implemented") }
+func (db *DB) Debug() kv.TemporalDebugDB                           { return kv.TemporalDebugDB(db) }
+func (db *DB) DomainTables(domain ...kv.Domain) []string           { panic("not implemented") }
+func (db *DB) ReloadSalt() error                                   { panic("not implemented") }
+func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string { panic("not implemented") }
 
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	t, err := db.BeginRo(ctx) //nolint:gocritic
@@ -373,8 +374,8 @@ func (tx *tx) Cursor(bucket string) (kv.Cursor, error) {
 	return c, nil
 }
 
-func (tx *tx) ListBuckets() ([]string, error) {
-	return nil, errors.New("function ListBuckets is not implemented for remoteTx")
+func (tx *tx) ListTables() ([]string, error) {
+	return nil, errors.New("function ListTables is not implemented for remoteTx")
 }
 
 // func (c *remoteCursor) Put(k []byte, v []byte) error            { panic("not supported") }
@@ -694,7 +695,7 @@ func (tx *tx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit
 
 func (tx *tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error) {
 	return stream.PaginateU64(func(pageToken string) (arr []uint64, nextPageToken string, err error) {
-		req := &remote.IndexRangeReq{TxId: tx.id, Table: string(name), K: k, FromTs: int64(fromTs), ToTs: int64(toTs), OrderAscend: bool(asc), Limit: int64(limit), PageToken: pageToken}
+		req := &remote.IndexRangeReq{TxId: tx.id, Table: name.String(), K: k, FromTs: int64(fromTs), ToTs: int64(toTs), OrderAscend: bool(asc), Limit: int64(limit), PageToken: pageToken}
 		reply, err := tx.db.remoteKV.IndexRange(tx.ctx, req)
 		if err != nil {
 			return nil, "", err

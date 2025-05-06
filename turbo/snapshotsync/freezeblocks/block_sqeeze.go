@@ -16,7 +16,7 @@ func Sqeeze(ctx context.Context, dirs datadir.Dirs, from, to string, logger log.
 		return err
 	}
 	defer decompressor.Close()
-	defer decompressor.EnableReadAhead().DisableReadAhead()
+	defer decompressor.MadvSequential().DisableReadAhead()
 	g := decompressor.MakeGetter()
 
 	compressCfg := BlockCompressCfg

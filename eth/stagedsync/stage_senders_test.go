@@ -19,18 +19,18 @@ package stagedsync_test
 import (
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
@@ -154,21 +154,21 @@ func TestSenders(t *testing.T) {
 		hash = header.Hash()
 		found, senders, _ := br.BlockWithSenders(m.Ctx, tx, hash, 1)
 		assert.NotNil(t, found)
-		assert.Equal(t, 2, len(found.Body().Transactions))
-		assert.Equal(t, 2, len(senders))
+		assert.Len(t, found.Body().Transactions, 2)
+		assert.Len(t, senders, 2)
 		header.Number = common.Big2
 		hash = header.Hash()
 		found, senders, _ = br.BlockWithSenders(m.Ctx, tx, hash, 2)
 		assert.NotNil(t, found)
 		assert.NotNil(t, 3, len(found.Body().Transactions))
-		assert.Equal(t, 3, len(senders))
+		assert.Len(t, senders, 3)
 		header.Number = common.Big3
 		hash = header.Hash()
 		found, senders, _ = br.BlockWithSenders(m.Ctx, tx, hash, 3)
 		assert.NotNil(t, found)
 		assert.NotNil(t, 0, len(found.Body().Transactions))
 		assert.NotNil(t, 2, len(found.Body().Uncles))
-		assert.Equal(t, 0, len(senders))
+		assert.Empty(t, senders)
 	}
 
 	{
@@ -177,12 +177,12 @@ func TestSenders(t *testing.T) {
 
 		txs, err := rawdb.CanonicalTransactions(tx, 1, 2)
 		require.NoError(err)
-		assert.Equal(t, 2, len(txs))
+		assert.Len(t, txs, 2)
 		txs, err = rawdb.CanonicalTransactions(tx, 5, 3)
 		require.NoError(err)
-		assert.Equal(t, 3, len(txs))
+		assert.Len(t, txs, 3)
 		txs, err = rawdb.CanonicalTransactions(tx, 5, 1024)
 		require.NoError(err)
-		assert.Equal(t, 3, len(txs))
+		assert.Len(t, txs, 3)
 	}
 }

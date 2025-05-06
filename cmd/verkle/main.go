@@ -221,7 +221,7 @@ func analyseOut(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
 	}
 	defer tx.Rollback()
 
-	buckets, err := tx.ListBuckets()
+	buckets, err := tx.ListTables()
 	if err != nil {
 		return err
 	}

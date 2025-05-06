@@ -26,7 +26,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -42,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/exec3/calltracer"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
@@ -77,7 +77,6 @@ type HistoricalTraceWorker struct {
 }
 
 type TraceConsumer struct {
-	NewTracer func() GenericTracer
 	//Reduce receiving results of execution. They are sorted and have no gaps.
 	Reduce func(task *state.TxTask, tx kv.TemporalTx) error
 }
@@ -147,15 +146,10 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 	rw.ibs.Reset()
 	ibs := rw.ibs
 
-	rules := txTask.Rules
 	var err error
-	header := txTask.Header
-
-	var hooks *tracing.Hooks
-	tracer := rw.consumer.NewTracer()
-	if tracer != nil {
-		hooks = tracer.TracingHooks()
-	}
+	rules, header := txTask.Rules, txTask.Header
+	hooks := txTask.Tracer.Tracer().Hooks
+	ibs.SetHooks(hooks)
 
 	switch {
 	case txTask.TxIndex == -1:
@@ -184,7 +178,8 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 
 		// End of block transaction in a block
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			ret, _, err := core.SysCallContract(contract, data, rw.execArgs.ChainConfig, ibs, header, rw.execArgs.Engine, false /* constCall */, hooks)
+			ret, logs, err := core.SysCallContract(contract, data, rw.execArgs.ChainConfig, ibs, header, rw.execArgs.Engine, false /* constCall */, hooks)
+			txTask.Logs = append(txTask.Logs, logs...)
 			return ret, err
 		}
 
@@ -193,10 +188,10 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 			txTask.Error = err
 		}
 	default:
-		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), txTask.Tx.GetBlobGas())
-		rw.vmConfig.Tracer = hooks
-
+		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), rw.execArgs.ChainConfig.GetMaxBlobGasPerBlock(header.Time))
+		//rw.callTracer.Reset()
 		rw.vmConfig.SkipAnalysis = txTask.SkipAnalysis
+		rw.vmConfig.Tracer = hooks
 		ibs.SetTxContext(txTask.TxIndex)
 		msg := txTask.TxAsMessage
 		msg.SetCheckNonce(!rw.vmConfig.StatelessExec)
@@ -206,6 +201,9 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 			txContext.TxHash = txTask.Tx.Hash()
 		}
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, *rw.vmConfig, rules)
+		if hooks != nil && hooks.OnTxStart != nil {
+			hooks.OnTxStart(rw.evm.GetVMContext(), txTask.Tx, msg.From())
+		}
 
 		// MA applytx
 		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */, rw.execArgs.Engine)
@@ -216,7 +214,10 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 			txTask.UsedGas = applyRes.UsedGas
 			// Update the state with pending changes
 			ibs.SoftFinalise()
-			txTask.Logs = ibs.GetRawLogs(txTask.TxIndex)
+
+			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)
+			txTask.TraceFroms = txTask.Tracer.Froms()
+			txTask.TraceTos = txTask.Tracer.Tos()
 		}
 	}
 }
@@ -242,9 +243,6 @@ type ExecArgs struct {
 	Dirs        datadir.Dirs
 	ChainConfig *chain.Config
 	Workers     int
-
-	ProduceReceiptDomain bool
-	ProduceRCacheDomain  bool
 }
 
 func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, in *state.QueueWithRetry, workerCount int, outputTxNum *atomic.Uint64, logger log.Logger) *errgroup.Group {
@@ -332,11 +330,18 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 		outputTxNum++
 		stopedAtBlockEnd = txTask.Final
 
+		hooks := txTask.Tracer.TracingHooks()
 		if txTask.Error != nil {
-			return outputTxNum, false, txTask.Error
+			if hooks != nil && hooks.OnTxEnd != nil {
+				hooks.OnTxEnd(nil, err)
+			}
+			return outputTxNum, false, fmt.Errorf("bn=%d, tn=%d: %w", txTask.BlockNum, txTask.TxNum, txTask.Error)
 		}
 
 		txTask.CreateReceipt(tx)
+		if hooks != nil && hooks.OnTxEnd != nil {
+			hooks.OnTxEnd(txTask.BlockReceipts[txTask.TxIndex], nil)
+		}
 		if err := consumer.Reduce(txTask, tx); err != nil {
 			return outputTxNum, false, err
 		}
@@ -349,9 +354,16 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 }
 
 func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx context.Context, tx kv.TemporalTx, cfg *ExecArgs, logger log.Logger) (err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("'CustomTraceMapReduce' paniced: %s, %s", rec, dbg.Stack())
+			log.Warn("[StageCustomTrace]", "err", err)
+		}
+	}()
+
 	br := cfg.BlockReader
 	chainConfig := cfg.ChainConfig
-	if chainConfig.ChainName == networkname.Gnosis {
+	if chainConfig.Aura != nil && cfg.Workers > 1 {
 		panic("gnosis consensus doesn't support parallel exec yet: https://github.com/erigontech/erigon/issues/12054")
 	}
 
@@ -379,7 +391,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 		WorkerCount = cfg.Workers
 	}
 
-	log.Info("[Receipt] batch start", "fromBlock", fromBlock, "toBlock", toBlock, "workers", cfg.Workers, "toTxNum", toTxNum)
+	log.Info("[custom_trace] batch start", "fromBlock", fromBlock, "toBlock", toBlock, "workers", cfg.Workers, "toTxNum", toTxNum)
 	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {
 		if tx != nil && WorkerCount == 1 {
 			h, _ = cfg.BlockReader.Header(ctx, tx, hash, number)
@@ -457,7 +469,9 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: true,
 				BlockReceipts:    blockReceipts,
+				Tracer:           calltracer.NewCallTracer(&tracing.Hooks{}),
 			}
+
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
 				txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)

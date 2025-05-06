@@ -88,11 +88,12 @@ func NewSimpleAccessorBuilder(args *AccessorArgs, id ForkableId, logger log.Logg
 	}
 
 	if b.kf == nil {
-		b.kf = &SimpleIndexKeyFactory{num: make([]byte, binary.MaxVarintLen64)}
+		b.kf = NewSimpleIndexKeyFactory() //&SimpleIndexKeyFactory{num: make([]byte, binary.MaxVarintLen64)}
 	}
 
 	if b.fetcher == nil {
 		// assume rootnum and num is same
+		logger.Debug("using default first entity num fetcher for %s", id)
 		b.fetcher = func(from, to RootNum, seg *seg.Decompressor) Num {
 			return Num(from)
 		}
@@ -128,7 +129,7 @@ func (s *SimpleAccessorBuilder) SetFirstEntityNumFetcher(fetcher FirstEntityNumF
 }
 
 func (s *SimpleAccessorBuilder) GetInputDataQuery(from, to RootNum) *DecompressorIndexInputDataQuery {
-	sgname := s.parser.DataFile(snaptype.Version(1), from, to)
+	sgname := s.parser.DataFile(snaptype.V1_0, from, to)
 	decomp, _ := seg.NewDecompressor(sgname)
 	return &DecompressorIndexInputDataQuery{decomp: decomp, baseDataId: uint64(s.fetcher(from, to, decomp))}
 }
@@ -149,7 +150,7 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *
 	}()
 	iidq := s.GetInputDataQuery(from, to)
 	defer iidq.Close()
-	idxFile := s.parser.AccessorIdxFile(snaptype.Version(1), from, to, s.indexPos)
+	idxFile := s.parser.AccessorIdxFile(snaptype.V1_0, from, to, s.indexPos)
 
 	keyCount := iidq.GetCount()
 	if p != nil {
@@ -180,7 +181,7 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *
 	s.kf.Refresh()
 	defer s.kf.Close()
 
-	defer iidq.decomp.EnableReadAhead().DisableReadAhead()
+	defer iidq.decomp.MadvSequential().DisableReadAhead()
 
 	for {
 		stream := iidq.GetStream(ctx)
@@ -236,7 +237,7 @@ func (d *DecompressorIndexInputDataQuery) GetStream(ctx context.Context) stream.
 func (d *DecompressorIndexInputDataQuery) GetBaseDataId() uint64 {
 	// discuss: adding base data id to snapshotfile?
 	// or might need to add callback to get first basedataid...
-	return 0
+	return d.baseDataId
 	//return d.from
 }
 
@@ -285,14 +286,22 @@ type SimpleIndexKeyFactory struct {
 	num []byte
 }
 
+func NewSimpleIndexKeyFactory() *SimpleIndexKeyFactory {
+	return &SimpleIndexKeyFactory{num: make([]byte, binary.MaxVarintLen64)}
+}
+
 func (n *SimpleIndexKeyFactory) Refresh() {}
 
 func (n *SimpleIndexKeyFactory) Make(_ []byte, index uint64) []byte {
+	if n.num == nil {
+		panic("index key factory closed or not initialized properly")
+	}
+
 	// everywhere except heimdall indexes, which use BigIndian format
 	nm := binary.PutUvarint(n.num, index)
 	return n.num[:nm]
 }
 
 func (n *SimpleIndexKeyFactory) Close() {
-	n.num = []byte{}
+	//n.num = nil
 }

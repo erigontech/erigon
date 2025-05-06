@@ -264,14 +264,14 @@ github.com/envoyproxy/go-control-plane v0.9.4/go.mod h1:6rpuAdCZL397s3pYoYcLgu1m
 github.com/envoyproxy/go-control-plane v0.9.7/go.mod h1:cwu0lG7PUMfa9snN8LXBig5ynNVH9qI8YYLbd1fK2po=
 github.com/envoyproxy/go-control-plane v0.9.9-0.20201210154907-fd9021fe5dad/go.mod h1:cXg6YxExXjJnVBQHBLXeUAgxn2UodCpnH306RInaBQk=
 github.com/envoyproxy/protoc-gen-validate v0.1.0/go.mod h1:iSmxcyjqTsJpI2R4NaDN7+kN2VEUnK/pcBlmesArF7c=
-github.com/erigontech/erigon-snapshot v1.3.1-0.20250317154231-2ce6d6e9e6fc h1:MAuInN3QwppF4OXno4JkhwjMD1ece29ayvDFIUELQ6k=
-github.com/erigontech/erigon-snapshot v1.3.1-0.20250317154231-2ce6d6e9e6fc/go.mod h1:ooHlCl+eEYzebiPu+FP6Q6SpPUeMADn8Jxabv3IKb9M=
+github.com/erigontech/erigon-snapshot v1.3.1-0.20250501041114-4a48ac232c83 h1:q/bh24/m3V0FIHdLU+eYwoFtHd1x4khYyHhujDaiWek=
+github.com/erigontech/erigon-snapshot v1.3.1-0.20250501041114-4a48ac232c83/go.mod h1:ooHlCl+eEYzebiPu+FP6Q6SpPUeMADn8Jxabv3IKb9M=
 github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116 h1:KCFa2uXEfZoBjV4buzjWmCmoqVLXiGCq0ZmQ2OjeRvQ=
 github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116/go.mod h1:8vQ+VjvLu2gkPs8EwdPrOTAAo++WuLuBi54N7NuAF0I=
 github.com/erigontech/go-kzg-4844 v0.0.0-20250130131058-ce13be60bc86 h1:UKcIbFZUGIKzK4aQbkv/dYiOVxZSUuD3zKadhmfwdwU=
 github.com/erigontech/go-kzg-4844 v0.0.0-20250130131058-ce13be60bc86/go.mod h1:JolLjpSff1tCCJKaJx4psrlEdlXuJEC996PL3tTAFks=
-github.com/erigontech/mdbx-go v0.39.6 h1:6GUjpfpBsbpWkg4wF6Hns/yCx06y02YEwoBP+lgqx4I=
-github.com/erigontech/mdbx-go v0.39.6/go.mod h1:tHUS492F5YZvccRqatNdpTDQAaN+Vv4HRARYq89KqeY=
+github.com/erigontech/mdbx-go v0.39.8 h1:Hp2pjywZexBA3EQQSU9KM1nUpHIppMNHbX8OMGc5tlM=
+github.com/erigontech/mdbx-go v0.39.8/go.mod h1:tHUS492F5YZvccRqatNdpTDQAaN+Vv4HRARYq89KqeY=
 github.com/erigontech/secp256k1 v1.2.0 h1:Q/HCBMdYYT0sh1xPZ9ZYEnU30oNyb/vt715cJhj7n7A=
 github.com/erigontech/secp256k1 v1.2.0/go.mod h1:GokhPepsMB+EYDs7I5JZCprxHW6+yfOcJKaKtoZ+Fls=
 github.com/erigontech/silkworm-go v0.24.0 h1:fFe74CjQM5LI7ouMYjmqfFaqIFzQTpMrt+ls+a5PxpE=
@@ -505,6 +505,8 @@ github.com/jbenet/go-temp-err-catcher v0.1.0/go.mod h1:0kJRvmDZXNMIiJirNPEYfhpPw
 github.com/jedib0t/go-pretty/v6 v6.5.9 h1:ACteMBRrrmm1gMsXe9PSTOClQ63IXDUt03H5U+UV8OU=
 github.com/jedib0t/go-pretty/v6 v6.5.9/go.mod h1:zbn98qrYlh95FIhwwsbIip0LYpwSG8SUOScs+v9/t0E=
 github.com/jellevandenhooff/dkim v0.0.0-20150330215556-f50fe3d243e1/go.mod h1:E0B/fFc00Y+Rasa88328GlI/XbtyysCtTHZS8h7IrBU=
+github.com/jinzhu/copier v0.4.0 h1:w3ciUoD19shMCRargcpm0cm91ytaBhDvuRpz1ODO/U8=
+github.com/jinzhu/copier v0.4.0/go.mod h1:DfbEm0FYsaqBcKcFuvmOZb218JkPGtvSHsKg8S8hyyg=
 github.com/json-iterator/go v1.1.6/go.mod h1:+SdeFBvtyEkXs7REEP0seUULqWtbJapLOCVDaaPEHmU=
 github.com/json-iterator/go v1.1.9/go.mod h1:KdQUCv79m/52Kvf8AW2vK1V8akMuk1QjK/uOdHXbAo4=
 github.com/json-iterator/go v1.1.12 h1:PV8peI4a0ysnczrg+LtxykD8LfKY9ML6u2jnxaEnrnM=

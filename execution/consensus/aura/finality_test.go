@@ -39,7 +39,7 @@ func TestRollingFinality(t *testing.T) {
 		for i := 0; i < 6; i++ {
 			l, err := f.push(common.Hash{byte(i)}, uint64(i%3), []common.Address{signers[i%3]})
 			require.NoError(t, err)
-			assert.Equal(t, 0, len(l))
+			assert.Empty(t, l)
 		}
 		// after pushing a block signed by a fourth validator, the first four
 		// blocks of the unverified chain become verified.
@@ -48,7 +48,7 @@ func TestRollingFinality(t *testing.T) {
 		for i := uint64(0); i < 4; i++ {
 			assert.Equal(t, common.Hash{byte(i)}, l[i].hash)
 		}
-		assert.Equal(t, 4, len(l))
+		assert.Len(t, l, 4)
 	})
 	t.Run("FromAncestry", func(t *testing.T) {
 		signers := []common.Address{{0}, {1}, {2}, {3}, {4}, {5}}

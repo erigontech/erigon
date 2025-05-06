@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
@@ -356,13 +357,13 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 	p := ps.AddNew(indexFileName, uint64(kv.Count()/2))
 	defer ps.Delete(p)
 
-	defer kv.EnableReadAhead().DisableReadAhead()
+	defer kv.MadvSequential().DisableReadAhead()
 	bloomPath := strings.TrimSuffix(indexPath, ".bt") + ".kvei"
 
-	var bloom *ExistenceFilter
+	var bloom *existence.Filter
 	if accessors.Has(AccessorExistence) {
 		var err error
-		bloom, err = NewExistenceFilter(uint64(kv.Count()/2), bloomPath)
+		bloom, err = existence.NewFilter(uint64(kv.Count()/2), bloomPath)
 		if err != nil {
 			return err
 		}
@@ -473,7 +474,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 		return &Cursor{ef: idx.ef, returnInto: &idx.pool}
 	}
 
-	defer kv.EnableMadvNormal().DisableReadAhead()
+	defer kv.MadvNormal().DisableReadAhead()
 	kvGetter := seg.NewReader(kv.MakeGetter(), compress)
 
 	if len(idx.data[pos:]) == 0 {

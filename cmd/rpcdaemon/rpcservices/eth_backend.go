@@ -29,6 +29,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/gointerfaces"
@@ -37,7 +38,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/polygon/heimdall"

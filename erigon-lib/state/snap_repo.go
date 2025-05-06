@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -100,8 +101,17 @@ func (f *SnapshotRepo) IntegrateDirtyFiles(files []*filesItem) {
 	}
 }
 
-func (f *SnapshotRepo) RecalcVisibleFiles(to RootNum) {
+func (f *SnapshotRepo) DirtyFilesMaxRootNum() RootNum {
+	fi, found := f.dirtyFiles.Max()
+	if !found {
+		return 0
+	}
+	return RootNum(fi.endTxNum)
+}
+
+func (f *SnapshotRepo) RecalcVisibleFiles(to RootNum) (maxRootNum RootNum) {
 	f.current = f.calcVisibleFiles(to)
+	return RootNum(f.current.EndTxNum())
 }
 
 type VisibleFile = kv.VisibleFile
@@ -128,7 +138,7 @@ func (f *SnapshotRepo) DirtyFilesWithNoBtreeAccessors() (l []*filesItem) {
 	}
 	p := f.schema
 	ss := f.stepSize
-	v := ee.Version(1)
+	v := snaptype.V1_0
 
 	return fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep uint64, toStep uint64) []string {
 		from, to := RootNum(fromStep*ss), RootNum(toStep*ss)
@@ -143,7 +153,7 @@ func (f *SnapshotRepo) DirtyFilesWithNoHashAccessors() (l []*filesItem) {
 	}
 	p := f.schema
 	ss := f.stepSize
-	v := ee.Version(1)
+	v := snaptype.V1_0
 	accCount := f.schema.AccessorIdxCount()
 	files := make([]string, accCount)
 
@@ -184,6 +194,16 @@ func (f *SnapshotRepo) CloseFilesAfterRootNum(after RootNum) {
 		log.Debug(fmt.Sprintf("[snapshots] closing %s, instructed_close_after_%d", fName, rootNum))
 		item.closeFiles()
 	}
+}
+
+func (f *SnapshotRepo) CloseVisibleFilesAfterRootNum(after RootNum) {
+	var i int
+	for i = len(f.current) - 1; i >= 0; i-- {
+		if f.current[i].endTxNum <= uint64(after) {
+			break
+		}
+	}
+	f.current = f.current[:i+1]
 }
 
 func (f *SnapshotRepo) Garbage(visibleFiles []visibleFile, merged *filesItem) (outs []*filesItem) {
@@ -291,7 +311,7 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 	invalidFilesMu := sync.Mutex{}
 	invalidFileItems := make([]*filesItem, 0)
 	p := f.schema
-	version := snaptype.Version(1)
+	version := snaptype.V1_0
 	f.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.decompressor == nil {
@@ -361,7 +381,7 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 					f.logger.Debug("SnapshotRepo.openDirtyFiles: FileExist", "f", fName, "err", err)
 				}
 				if exists {
-					if item.existence, err = OpenExistenceFilter(fPath); err != nil {
+					if item.existence, err = existence.OpenFilter(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files maybe good

@@ -29,21 +29,19 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/etl"
-	"github.com/erigontech/erigon-lib/seg"
-
-	state3 "github.com/erigontech/erigon-lib/state"
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/length"
 	downloadertype "github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	kv2 "github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/seg"
+	state3 "github.com/erigontech/erigon-lib/state"
 	statelib "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core"
@@ -165,11 +163,11 @@ var purifyDomains = &cobra.Command{
 
 		purifyDB := mdbx.MustOpen(tmpDir)
 		defer purifyDB.Close()
-		var purificationDomains []string
+		var purificationDomains []kv.Domain
 		if purifyOnlyCommitment {
-			purificationDomains = []string{"commitment"}
+			purificationDomains = []kv.Domain{kv.CommitmentDomain}
 		} else {
-			purificationDomains = []string{"account", "storage" /*"code",*/, "commitment", "receipt"}
+			purificationDomains = []kv.Domain{kv.AccountsDomain, kv.StorageDomain /*"code",*/, kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain}
 		}
 		//purificationDomains := []string{"commitment"}
 		for _, domain := range purificationDomains {
@@ -190,18 +188,18 @@ var purifyDomains = &cobra.Command{
 	},
 }
 
-func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domain string) error {
+func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domain kv.Domain) error {
 	var tbl string
 	switch domain {
-	case "account":
+	case kv.AccountsDomain:
 		tbl = kv.MaxTxNum
-	case "storage":
+	case kv.StorageDomain:
 		tbl = kv.HeaderNumber
-	case "code":
+	case kv.CodeDomain:
 		tbl = kv.HeaderCanonical
-	case "commitment":
+	case kv.CommitmentDomain:
 		tbl = kv.HeaderTD
-	case "receipt":
+	case kv.ReceiptDomain:
 		tbl = kv.BadHeaderNumber
 	default:
 		return fmt.Errorf("invalid domain %s", domain)
@@ -216,7 +214,7 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 		if info.IsDir() {
 			return nil
 		}
-		if !strings.Contains(info.Name(), domain) {
+		if !strings.Contains(info.Name(), domain.String()) {
 			return nil
 		}
 		// Here you can decide if you only want to process certain file extensions
@@ -226,12 +224,12 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 			return nil
 		}
 
-		fromFileStep, toFileStep, err := statelib.ParseStepsFromFileName(info.Name())
-		if err != nil {
-			return err
+		res, ok, _ := downloadertype.ParseFileName("", info.Name())
+		if !ok {
+			panic("invalid file name")
 		}
 
-		if fromFileStep < fromStepPurification || toFileStep > toStepPurification {
+		if res.From < fromStepPurification || res.To > toStepPurification {
 			return nil
 		}
 
@@ -304,14 +302,9 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 	return tx.Commit()
 }
 
-func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domainName string) error {
-	domain, err := kv.String2Domain(domainName)
-	if err != nil {
-		return err
-	}
-
-	compressionType := statelib.Schema[domain].Compression
-	compressCfg := statelib.Schema[domain].CompressCfg
+func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domain kv.Domain) error {
+	compressionType := statelib.Schema.GetDomainCfg(domain).Compression
+	compressCfg := statelib.Schema.GetDomainCfg(domain).CompressCfg
 	compressCfg.Workers = runtime.NumCPU()
 	var tbl string
 	switch domain {
@@ -328,7 +321,7 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 	case kv.RCacheDomain:
 		tbl = kv.BlockBody
 	default:
-		return fmt.Errorf("invalid domainName %s", domainName)
+		return fmt.Errorf("invalid domainName %s", domain.String())
 	}
 	// Iterate over all the files in  dirs.SnapDomain and print them
 	filesNamesToPurify := []string{}
@@ -340,7 +333,7 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 		if info.IsDir() {
 			return nil
 		}
-		if !strings.Contains(info.Name(), domainName) {
+		if !strings.Contains(info.Name(), domain.String()) {
 			return nil
 		}
 		// Here you can decide if you only want to process certain file extensions
@@ -350,21 +343,20 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 			return nil
 		}
 
-		fmt.Printf("Add file to purification of %s: %s\n", domainName, path)
+		fmt.Printf("Add file to purification of %s: %s\n", domain.String(), path)
 
-		fromFileStep, toFileStep, err := statelib.ParseStepsFromFileName(info.Name())
-		if err != nil {
-			return err
+		res, ok, _ := downloadertype.ParseFileName("", info.Name())
+		if !ok {
+			panic("invalid file name")
 		}
-
-		if fromFileStep < fromStepPurification || toFileStep > toStepPurification {
+		if res.From < fromStepPurification || res.To > toStepPurification {
 			return nil
 		}
 
 		filesNamesToPurify = append(filesNamesToPurify, info.Name())
 		return nil
 	}); err != nil {
-		return fmt.Errorf("failed to walk through the domainDir %s: %w", domainName, err)
+		return fmt.Errorf("failed to walk through the domainDir %s: %w", domain.String(), err)
 	}
 	// sort the files by name
 	sort.Slice(filesNamesToPurify, func(i, j int) bool {
@@ -482,17 +474,6 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 }
 
 func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain string, addrs [][]byte, logger log.Logger) error {
-	sn, bsn, agg, _, _, _, err := allSnapshots(ctx, chainDb, logger)
-	if err != nil {
-		return err
-	}
-	defer sn.Close()
-	defer bsn.Close()
-	defer agg.Close()
-
-	aggTx := agg.BeginFilesRo()
-	defer aggTx.Close()
-
 	stateTx, err := stateDb.BeginRw(ctx)
 	must(err)
 	defer stateTx.Rollback()
@@ -504,7 +485,6 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	if err != nil {
 		return err
 	}
-	defer agg.Close()
 
 	r := state.NewReaderV3(domains)
 	if startTxNum != 0 {
@@ -530,7 +510,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	case "storage":
 		for _, addr := range addrs {
 			a, s := common.BytesToAddress(addr[:length.Addr]), common.BytesToHash(addr[length.Addr:])
-			st, err := r.ReadAccountStorage(a, 0, &s)
+			st, err := r.ReadAccountStorage(a, &s)
 			if err != nil {
 				logger.Error("failed to read storage", "addr", a.String(), "key", s.String(), "err", err)
 				continue
@@ -539,7 +519,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 		}
 	case "code":
 		for _, addr := range addrs {
-			code, err := r.ReadAccountCode(common.BytesToAddress(addr), 0)
+			code, err := r.ReadAccountCode(common.BytesToAddress(addr))
 			if err != nil {
 				logger.Error("failed to read code", "addr", addr, "err", err)
 				continue

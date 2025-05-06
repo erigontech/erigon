@@ -32,6 +32,8 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common"
@@ -48,8 +50,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/require"
 )
 
 func TestAggregatorV3_Merge(t *testing.T) {
@@ -91,11 +91,11 @@ func TestAggregatorV3_Merge(t *testing.T) {
 
 		n, err := rnd.Read(addr)
 		require.NoError(t, err)
-		require.EqualValues(t, length.Addr, n)
+		require.Equal(t, length.Addr, n)
 
 		n, err = rnd.Read(loc)
 		require.NoError(t, err)
-		require.EqualValues(t, length.Hash, n)
+		require.Equal(t, length.Hash, n)
 		acc := accounts.Account{
 			Nonce:       1,
 			Balance:     *uint256.NewInt(0),
@@ -168,14 +168,14 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	require.NoError(t, err)
 	require.Truef(t, ex, "key %x not found", commKey1)
 
-	require.EqualValues(t, maxWrite, binary.BigEndian.Uint64(v[:]))
+	require.Equal(t, maxWrite, binary.BigEndian.Uint64(v[:]))
 
 	v, _, ex, err = dc.GetLatest(kv.CommitmentDomain, commKey2, roTx)
 	require.NoError(t, err)
 	require.Truef(t, ex, "key %x not found", commKey2)
 	dc.Close()
 
-	require.EqualValues(t, otherMaxWrite, binary.BigEndian.Uint64(v[:]))
+	require.Equal(t, otherMaxWrite, binary.BigEndian.Uint64(v[:]))
 }
 
 func TestAggregatorV3_DirtyFilesRo(t *testing.T) {
@@ -217,11 +217,11 @@ func TestAggregatorV3_DirtyFilesRo(t *testing.T) {
 
 		n, err := rnd.Read(addr)
 		require.NoError(t, err)
-		require.EqualValues(t, length.Addr, n)
+		require.Equal(t, length.Addr, n)
 
 		n, err = rnd.Read(loc)
 		require.NoError(t, err)
-		require.EqualValues(t, length.Hash, n)
+		require.Equal(t, length.Hash, n)
 		acc := accounts.Account{
 			Nonce:       1,
 			Balance:     *uint256.NewInt(0),
@@ -347,11 +347,11 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 
 		n, err := rnd.Read(addr)
 		require.NoError(t, err)
-		require.EqualValues(t, length.Addr, n)
+		require.Equal(t, length.Addr, n)
 
 		n, err = rnd.Read(loc)
 		require.NoError(t, err)
-		require.EqualValues(t, length.Hash, n)
+		require.Equal(t, length.Hash, n)
 		acc := accounts.Account{
 			Nonce:       1,
 			Balance:     *uint256.NewInt(txNum * 1e6),
@@ -482,11 +482,11 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 
 		n, err := rnd.Read(addr)
 		require.NoError(t, err)
-		require.EqualValues(t, length.Addr, n)
+		require.Equal(t, length.Addr, n)
 
 		n, err = rnd.Read(loc)
 		require.NoError(t, err)
-		require.EqualValues(t, length.Hash, n)
+		require.Equal(t, length.Hash, n)
 		//keys[txNum-1] = append(addr, loc...)
 		acc := accounts.Account{
 			Nonce:       1,
@@ -563,7 +563,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	require.True(t, ex)
 	dc.Close()
 
-	require.EqualValues(t, maxWrite, binary.BigEndian.Uint64(v[:]))
+	require.Equal(t, maxWrite, binary.BigEndian.Uint64(v[:]))
 }
 
 func TestNewBtIndex(t *testing.T) {
@@ -738,7 +738,7 @@ func compareMapsBytes2(t *testing.T, m1, m2 map[string]vs) {
 	for k, v := range m1 {
 		v2, ok := m2[k]
 		require.Truef(t, ok, "key %x not found", k)
-		require.EqualValues(t, v.s, v2.s)
+		require.Equal(t, v.s, v2.s)
 		if !bytes.Equal(v.v, v2.v) { // empty value==nil
 			t.Logf("key %x expected '%x' but got '%x'\n", k, v, m2[k])
 		}
@@ -750,7 +750,7 @@ func compareMapsBytes2(t *testing.T, m1, m2 map[string]vs) {
 func compareMapsBytes(t *testing.T, m1, m2 map[string][]byte) {
 	t.Helper()
 	for k, v := range m1 {
-		require.EqualValues(t, v, m2[k])
+		require.Equal(t, v, m2[k])
 		delete(m2, k)
 	}
 	require.Emptyf(t, m2, "m2 should be empty got %d: %v", len(m2), m2)
@@ -881,7 +881,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txN
 			}
 			usedKeys[string(key)] = struct{}{}
 
-			err := domains.DomainDel(kv.AccountsDomain, key, nil, nil, 0)
+			err := domains.DomainDel(kv.AccountsDomain, key, nil, 0)
 			require.NoError(t, err)
 
 		case r > 66 && r <= 80:
@@ -963,11 +963,11 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
 		n, err := rnd.Read(addr)
 		require.NoError(t, err)
-		require.EqualValues(t, length.Addr, n)
+		require.Equal(t, length.Addr, n)
 
 		n, err = rnd.Read(loc)
 		require.NoError(t, err)
-		require.EqualValues(t, length.Hash, n)
+		require.Equal(t, length.Hash, n)
 
 		acc := accounts.Account{
 			Nonce:       txNum,
@@ -1045,7 +1045,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		err = accounts.DeserialiseV3(&acc, stored)
 		require.NoError(t, err)
 
-		require.EqualValues(t, i+1, int(acc.Nonce))
+		require.Equal(t, i+1, int(acc.Nonce))
 
 		storedV, _, found, err := ac.GetLatest(kv.StorageDomain, key, tx2)
 		require.NoError(t, err)
@@ -1053,8 +1053,8 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		require.NotEmpty(t, storedV)
 		_ = key[0]
 		_ = storedV[0]
-		require.EqualValues(t, key[0], storedV[0])
-		require.EqualValues(t, key[length.Addr], storedV[1])
+		require.Equal(t, key[0], storedV[0])
+		require.Equal(t, key[length.Addr], storedV[1])
 	}
 	newAgg.Close()
 
@@ -1088,7 +1088,8 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 
 	var latestCommitTxNum uint64
 	commit := func(txn uint64) error {
-		domains.Flush(ctx, tx)
+		err = domains.Flush(ctx, tx)
+		require.NoError(t, err)
 		ac.Close()
 		err = tx.Commit()
 		require.NoError(t, err)
@@ -1116,11 +1117,11 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
 		n, err := rnd.Read(addr)
 		require.NoError(t, err)
-		require.EqualValues(t, length.Addr, n)
+		require.Equal(t, length.Addr, n)
 
 		n, err = rnd.Read(loc)
 		require.NoError(t, err)
-		require.EqualValues(t, length.Hash, n)
+		require.Equal(t, length.Hash, n)
 		keys[txNum-1] = append(addr, loc...)
 
 		acc := accounts.Account{
@@ -1168,8 +1169,8 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 		storedV, _, found, err := aggCtx2.d[kv.StorageDomain].GetLatest(key, tx)
 		require.Truef(t, found, "key %x not found %d", key, i)
 		require.NoError(t, err)
-		require.EqualValues(t, key[0], storedV[0])
-		require.EqualValues(t, key[length.Addr], storedV[1])
+		require.Equal(t, key[0], storedV[0])
+		require.Equal(t, key[length.Addr], storedV[1])
 	}
 	require.NoError(t, err)
 }
@@ -1182,7 +1183,7 @@ func Test_EncodeCommitmentState(t *testing.T) {
 	}
 	n, err := rand.Read(cs.trieState)
 	require.NoError(t, err)
-	require.EqualValues(t, len(cs.trieState), n)
+	require.Equal(t, len(cs.trieState), n)
 
 	buf, err := cs.Encode()
 	require.NoError(t, err)
@@ -1191,8 +1192,8 @@ func Test_EncodeCommitmentState(t *testing.T) {
 	var dec commitmentState
 	err = dec.Decode(buf)
 	require.NoError(t, err)
-	require.EqualValues(t, cs.txNum, dec.txNum)
-	require.EqualValues(t, cs.trieState, dec.trieState)
+	require.Equal(t, cs.txNum, dec.txNum)
+	require.Equal(t, cs.trieState, dec.trieState)
 }
 
 // takes first 100k keys from file
@@ -1241,7 +1242,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	for i := 0; i < keyCount; i++ {
 		key := make([]byte, keySize)
 		n, err := rnd.Read(key[:])
-		require.EqualValues(tb, keySize, n)
+		require.Equal(tb, keySize, n)
 		binary.BigEndian.PutUint64(key[keySize-8:], uint64(i))
 		require.NoError(tb, err)
 
@@ -1313,7 +1314,7 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 	bk, bv := make([]byte, keySize), make([]byte, valueSize)
 	for i := 0; i < keyCount; i++ {
 		n, err := rnd.Read(bk[:])
-		require.EqualValues(tb, keySize, n)
+		require.Equal(tb, keySize, n)
 		require.NoError(tb, err)
 		keys[i] = common.Copy(bk[:n])
 
@@ -1423,7 +1424,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 		rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
 		require.NoError(t, err)
 		require.NotEmpty(t, rh)
-		require.EqualValues(t, roots[i], rh)
+		require.Equal(t, roots[i], rh)
 	}
 
 	err = domains.Flush(context.Background(), rwTx)
@@ -1466,7 +1467,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 		rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
 		require.NoError(t, err)
 		require.NotEmpty(t, rh)
-		require.EqualValues(t, roots[i], rh)
+		require.Equal(t, roots[i], rh)
 	}
 }
 
@@ -1516,7 +1517,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	fnames := []string{}
 	for _, f := range ac.d[kv.CommitmentDomain].files {
 		var k, stateVal []byte
-		if ac.d[kv.CommitmentDomain].d.AccessorList.Has(AccessorHashMap) {
+		if ac.d[kv.CommitmentDomain].d.Accessors.Has(AccessorHashMap) {
 			idx := f.src.index.GetReaderFromPool()
 			r := seg.NewReader(f.src.decompressor.MakeGetter(), compression)
 
@@ -1531,9 +1532,9 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 			k, stateVal, _, found, err = f.src.bindex.Get(keyCommitmentState, seg.NewReader(f.src.decompressor.MakeGetter(), compression))
 			require.NoError(t, err)
 			require.True(t, found)
-			require.EqualValues(t, keyCommitmentState, k)
+			require.Equal(t, keyCommitmentState, k)
 		}
-		require.EqualValues(t, keyCommitmentState, k)
+		require.Equal(t, keyCommitmentState, k)
 		rh, err := commitment.HexTrieExtractStateRoot(stateVal)
 		require.NoError(t, err)
 
@@ -1549,22 +1550,22 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	buckets, err := rwTx.ListBuckets()
+	buckets, err := rwTx.ListTables()
 	require.NoError(t, err)
 	for i, b := range buckets {
-		if strings.Contains(strings.ToLower(b), "commitment") {
+		if strings.Contains(strings.ToLower(b), kv.CommitmentDomain.String()) {
 			size, err := rwTx.BucketSize(b)
 			require.NoError(t, err)
 			t.Logf("cleaned table #%d %s: %d keys", i, b, size)
 
-			err = rwTx.ClearBucket(b)
+			err = rwTx.ClearTable(b)
 			require.NoError(t, err)
 		}
 	}
 	require.NoError(t, rwTx.Commit())
 
 	for _, fn := range fnames {
-		if strings.Contains(fn, "v1-commitment") {
+		if strings.Contains(fn, kv.CommitmentDomain.String()) {
 			require.NoError(t, os.Remove(fn))
 			t.Logf("removed file %s", filepath.Base(fn))
 		}
@@ -1578,5 +1579,5 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	require.NotEmpty(t, finalRoot)
 	require.NotEqual(t, commitment.EmptyRootHash, finalRoot)
 
-	require.EqualValues(t, roots[len(roots)-1][:], finalRoot[:])
+	require.Equal(t, roots[len(roots)-1][:], finalRoot[:])
 }

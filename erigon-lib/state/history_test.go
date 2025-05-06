@@ -53,7 +53,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	//TODO: tests will fail if set histCfg.compression = CompressKeys | CompressValues
 	salt := uint32(1)
-	cfg := Schema[kv.AccountsDomain]
+	cfg := Schema.AccountsDomain
 
 	cfg.hist.iiCfg.dirs = dirs
 	cfg.hist.iiCfg.salt.Store(&salt)
@@ -61,8 +61,8 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	cfg.hist.historyLargeValues = largeValues
 
 	//perf of tests
-	cfg.hist.iiCfg.compression = seg.CompressNone
-	cfg.hist.compression = seg.CompressNone
+	cfg.hist.iiCfg.Compression = seg.CompressNone
+	cfg.hist.Compression = seg.CompressNone
 	//cfg.hist.historyValuesOnCompressedPage = 16
 	aggregationStep := uint64(16)
 	h, err := NewHistory(cfg.hist, aggregationStep, logger)
@@ -109,8 +109,8 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 			require.NotNil(t, sf)
 			defer sf.CleanupOnError()
 
-			efReader := seg.NewReader(sf.efHistoryDecomp.MakeGetter(), h.compression)
-			hReader := seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.compression), h.historyValuesOnCompressedPage, true)
+			efReader := seg.NewReader(sf.efHistoryDecomp.MakeGetter(), h.Compression)
+			hReader := seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.Compression), h.historyValuesOnCompressedPage, true)
 
 			// ef contains all sorted keys
 			// for each key it has a list of txNums
@@ -136,14 +136,14 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 				for efIt.HasNext() {
 					txNum, err := efIt.Next()
 					require.NoError(t, err)
-					require.EqualValuesf(t, updates[vi].txNum, txNum, "txNum mismatch")
+					require.Equalf(t, updates[vi].txNum, txNum, "txNum mismatch")
 
 					require.Truef(t, hReader.HasNext(), "hReader has no more values")
 					hValBuf, _ = hReader.Next(nil)
 					if updates[vi].value == nil {
 						require.Emptyf(t, hValBuf, "value at %d is not empty (not nil)", vi)
 					} else {
-						require.EqualValuesf(t, updates[vi].value, hValBuf, "value at %d mismatch", vi)
+						require.Equalf(t, updates[vi].value, hValBuf, "value at %d mismatch", vi)
 					}
 					vi++
 				}
@@ -229,7 +229,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 		require.NoError(err)
 		defer sf.CleanupOnError()
 		var valWords []string
-		gh := seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.compression), h.historyValuesOnCompressedPage, true)
+		gh := seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.Compression), h.historyValuesOnCompressedPage, true)
 		gh.Reset(0)
 		for gh.HasNext() {
 			w, _ := gh.Next(nil)
@@ -263,7 +263,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 			require.Equal(keyWords[i], string(w))
 		}
 		r = recsplit.NewIndexReader(sf.historyIdx)
-		gh = seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.compression), h.historyValuesOnCompressedPage, true)
+		gh = seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.Compression), h.historyValuesOnCompressedPage, true)
 		var vi int
 		for i := 0; i < len(keyWords); i++ {
 			ints := intArrs[i]
@@ -655,7 +655,7 @@ func TestHistoryPruneCorrectness(t *testing.T) {
 		}
 		count++
 	}
-	require.EqualValues(t, pruneIters*int(pruneLimit), count)
+	require.Equal(t, pruneIters*int(pruneLimit), count)
 	icc.Close()
 
 	hc := h.BeginFilesRo()
@@ -1388,20 +1388,20 @@ func TestScanStaticFilesH(t *testing.T) {
 	newTestDomain := func() (*InvertedIndex, *History) {
 		d := emptyTestDomain(1)
 		d.History.InvertedIndex.integrity = nil
-		d.History.InvertedIndex.indexList = 0
-		d.History.indexList = 0
+		d.History.InvertedIndex.Accessors = 0
+		d.History.Accessors = 0
 		return d.History.InvertedIndex, d.History
 	}
 
 	_, h := newTestDomain()
 
 	files := []string{
-		"v1-accounts.0-1.v",
-		"v1-accounts.1-2.v",
-		"v1-accounts.0-4.v",
-		"v1-accounts.2-3.v",
-		"v1-accounts.3-4.v",
-		"v1-accounts.4-5.v",
+		"v1.0-accounts.0-1.v",
+		"v1.0-accounts.1-2.v",
+		"v1.0-accounts.0-4.v",
+		"v1.0-accounts.2-3.v",
+		"v1.0-accounts.3-4.v",
+		"v1.0-accounts.4-5.v",
 	}
 	h.scanDirtyFiles(files)
 	require.Equal(t, 6, h.dirtyFiles.Len())
@@ -1518,7 +1518,7 @@ func Test_HistoryIterate_VariousKeysLen(t *testing.T) {
 		})
 
 		require.Equal(fmt.Sprintf("%#x", writtenKeys[0]), fmt.Sprintf("%#x", keys[0]))
-		require.Equal(len(writtenKeys), len(keys))
+		require.Len(keys, len(writtenKeys))
 		require.Equal(fmt.Sprintf("%#x", writtenKeys), fmt.Sprintf("%#x", keys))
 	}
 

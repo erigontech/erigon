@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/bitmapdb"
@@ -83,17 +84,25 @@ type iiCfg struct {
 	dirs    datadir.Dirs
 	disable bool // totally disable Domain/History/InvertedIndex - ignore all writes, don't produce files
 
+	version IIVersionTypes
+
 	filenameBase string // filename base for all files of this inverted index
 	keysTable    string // bucket name for index keys;    txnNum_u64 -> key (k+auto_increment)
 	valuesTable  string // bucket name for index values;  k -> txnNum_u64 , Needs to be table with DupSort
 	name         kv.InvertedIdx
 
-	compression   seg.FileCompression // compression type for inverted index keys and values
-	compressorCfg seg.Cfg             // advanced configuration for compressor encodings
+	Compression   seg.FileCompression // compression type for inverted index keys and values
+	CompressorCfg seg.Cfg             // advanced configuration for compressor encodings
 
 	// external checker for integrity of inverted index ranges
 	integrity rangeIntegrityChecker
-	indexList Accessors
+	Accessors Accessors
+}
+
+func (ii iiCfg) GetVersions() VersionTypes {
+	return VersionTypes{
+		II: &ii.version,
+	}
 }
 
 type iiVisible struct {
@@ -110,9 +119,9 @@ func NewInvertedIndex(cfg iiCfg, aggStep uint64, logger log.Logger) (*InvertedIn
 		panic("assert: empty `filenameBase`")
 	}
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
-	cfg.compressorCfg = seg.DefaultCfg
-	if cfg.indexList == 0 {
-		cfg.indexList = AccessorHashMap
+	cfg.CompressorCfg = seg.DefaultCfg
+	if cfg.Accessors == 0 {
+		cfg.Accessors = AccessorHashMap
 	}
 
 	ii := InvertedIndex{
@@ -127,14 +136,21 @@ func NewInvertedIndex(cfg iiCfg, aggStep uint64, logger log.Logger) (*InvertedIn
 		panic("assert: empty `aggregationStep`")
 	}
 
+	if ii.version.DataEF.IsZero() {
+		panic(fmt.Errorf("assert: forgot to set version of %s", ii.name))
+	}
+	if ii.version.AccessorEFI.IsZero() {
+		panic(fmt.Errorf("assert: forgot to set version of %s", ii.name))
+	}
+
 	return &ii, nil
 }
 
 func (ii *InvertedIndex) efAccessorFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("v1-%s.%d-%d.efi", ii.filenameBase, fromStep, toStep))
+	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.efi", ii.version.AccessorEFI.String(), ii.filenameBase, fromStep, toStep))
 }
 func (ii *InvertedIndex) efFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(ii.dirs.SnapIdx, fmt.Sprintf("v1-%s.%d-%d.ef", ii.filenameBase, fromStep, toStep))
+	return filepath.Join(ii.dirs.SnapIdx, fmt.Sprintf("%s-%s.%d-%d.ef", ii.version.DataEF.String(), ii.filenameBase, fromStep, toStep))
 }
 
 func filesFromDir(dir string) ([]string, error) {
@@ -218,7 +234,7 @@ const (
 )
 
 func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
-	ii._visible = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.indexList, false, toTxNum))
+	ii._visible = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, false, toTxNum))
 }
 
 func (ii *InvertedIndex) MissedMapAccessors() (l []*filesItem) {
@@ -226,7 +242,7 @@ func (ii *InvertedIndex) MissedMapAccessors() (l []*filesItem) {
 }
 
 func (ii *InvertedIndex) missedMapAccessors(source []*filesItem) (l []*filesItem) {
-	if !ii.indexList.Has(AccessorHashMap) {
+	if !ii.Accessors.Has(AccessorHashMap) {
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, ii.aggregationStep, func(fromStep, toStep uint64) []string {
@@ -273,12 +289,25 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 					continue
 				}
 				if !exists {
-					_, fName := filepath.Split(fPath)
-					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: file does not exists", "f", fName)
-					invalidFileItemsLock.Lock()
-					invalidFileItems = append(invalidFileItems, item)
-					invalidFileItemsLock.Unlock()
-					continue
+					ii.version.DataEF = ii.version.DataEF.Downgrade()
+					fPath = ii.efFilePath(fromStep, toStep)
+					existsDowngrade, err := dir.FileExist(fPath)
+					if err != nil {
+						_, fName := filepath.Split(fPath)
+						ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: FileExists error", "f", fName, "err", err)
+						invalidFileItemsLock.Lock()
+						invalidFileItems = append(invalidFileItems, item)
+						invalidFileItemsLock.Unlock()
+						continue
+					}
+					if !existsDowngrade {
+						_, fName := filepath.Split(fPath)
+						ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: file does not exists", "f", fName)
+						invalidFileItemsLock.Lock()
+						invalidFileItems = append(invalidFileItems, item)
+						invalidFileItemsLock.Unlock()
+						continue
+					}
 				}
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
@@ -559,7 +588,7 @@ func (iit *InvertedIndexRoTx) statelessGetter(i int) *seg.Reader {
 	r := iit.getters[i]
 	if r == nil {
 		g := iit.files[i].src.decompressor.MakeGetter()
-		r = seg.NewReader(g, iit.ii.compression)
+		r = seg.NewReader(g, iit.ii.Compression)
 		iit.getters[i] = r
 	}
 	return r
@@ -781,6 +810,10 @@ func (ii *InvertedIndex) maxTxNumInDB(tx kv.Tx) uint64 {
 	return 0
 }
 
+func (iit *InvertedIndexRoTx) Progress(tx kv.Tx) uint64 {
+	return max(iit.files.EndTxNum(), iit.ii.maxTxNumInDB(tx))
+}
+
 func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx) bool {
 	return iit.ii.minTxNumInDB(tx) < iit.files.EndTxNum()
 }
@@ -971,7 +1004,7 @@ func (iit *InvertedIndexRoTx) IterateChangedKeys(startTxNum, endTxNum uint64, ro
 		if item.endTxNum >= endTxNum {
 			ii1.hasNextInDb = false
 		}
-		g := seg.NewReader(item.src.decompressor.MakeGetter(), iit.ii.compression)
+		g := seg.NewReader(item.src.decompressor.MakeGetter(), iit.ii.Compression)
 		if g.HasNext() {
 			key, _ := g.Next(nil)
 			heap.Push(&ii1.h, &ReconItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum, g: g, txNum: ^item.endTxNum, key: key})
@@ -1037,11 +1070,11 @@ func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (
 		}
 	}()
 
-	comp, err := seg.NewCompressor(ctx, "collate idx "+ii.filenameBase, coll.iiPath, ii.dirs.Tmp, ii.compressorCfg, log.LvlTrace, ii.logger)
+	comp, err := seg.NewCompressor(ctx, "collate idx "+ii.filenameBase, coll.iiPath, ii.dirs.Tmp, ii.CompressorCfg, log.LvlTrace, ii.logger)
 	if err != nil {
 		return InvertedIndexCollation{}, fmt.Errorf("create %s compressor: %w", ii.filenameBase, err)
 	}
-	coll.writer = seg.NewWriter(comp, ii.compression)
+	coll.writer = seg.NewWriter(comp, ii.Compression)
 
 	var (
 		prevEf      []byte
@@ -1105,7 +1138,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (
 type InvertedFiles struct {
 	decomp    *seg.Decompressor
 	index     *recsplit.Index
-	existence *ExistenceFilter
+	existence *existence.Filter
 }
 
 func (sf InvertedFiles) CleanupOnError() {
@@ -1133,7 +1166,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, coll Inver
 	var (
 		decomp    *seg.Decompressor
 		index     *recsplit.Index
-		existence *ExistenceFilter
+		existence *existence.Filter
 		err       error
 	)
 	mxRunningFilesBuilding.Inc()
@@ -1202,12 +1235,12 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 	//  - but most important i see `.ef` files became "randomly warm":
 	// From:
 	//```sh
-	//vmtouch -v /mnt/erigon/snapshots/idx/v1-storage.1680-1682.ef
+	//vmtouch -v /mnt/erigon/snapshots/idx/v1.0-storage.1680-1682.ef
 	//[ ooooooooo ooooooo oooooooooooooooooo oooooooo  oo o o  ooo ] 93/81397
 	//```
 	// To:
 	//```sh
-	//vmtouch -v /mnt/erigon/snapshots/idx/v1-storage.1680-1682.ef
+	//vmtouch -v /mnt/erigon/snapshots/idx/v1.0-storage.1680-1682.ef
 	//[oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo] 16279/81397
 	//```
 	// It happens because: EVM does read much non-existing keys, like "create storage key if it doesn't exists". And
@@ -1224,7 +1257,7 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 		Salt:       ii.salt.Load(),
 		NoFsync:    ii.noFsync,
 	}
-	return buildHashMapAccessor(ctx, data, ii.compression, idxPath, false, cfg, ps, ii.logger)
+	return buildHashMapAccessor(ctx, data, ii.Compression, idxPath, false, cfg, ps, ii.logger)
 }
 
 func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumTo uint64) {

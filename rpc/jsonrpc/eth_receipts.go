@@ -23,6 +23,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/v2"
 
+	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -31,7 +32,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/eth/ethutils"
 	"github.com/erigontech/erigon/eth/filters"
 	"github.com/erigontech/erigon/execution/exec3"
@@ -303,7 +303,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			continue
 		}
 
-		_, err = exec.ExecTxn(txNum, txIndex, txn, false)
+		err = exec.ExecTxn(txNum, txIndex, txn, false)
 		if err != nil {
 			return nil, err
 		}

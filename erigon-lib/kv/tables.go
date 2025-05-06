@@ -742,18 +742,72 @@ const (
 var StateDomains = []Domain{AccountsDomain, StorageDomain, CodeDomain, CommitmentDomain}
 
 const (
-	AccountsHistoryIdx   InvertedIdx = "AccountsHistoryIdx"
-	StorageHistoryIdx    InvertedIdx = "StorageHistoryIdx"
-	CodeHistoryIdx       InvertedIdx = "CodeHistoryIdx"
-	CommitmentHistoryIdx InvertedIdx = "CommitmentHistoryIdx"
-	ReceiptHistoryIdx    InvertedIdx = "ReceiptHistoryIdx"
-	RCacheHistoryIdx     InvertedIdx = "ReceiptCacheHistoryIdx"
+	AccountsHistoryIdx   InvertedIdx = 0
+	StorageHistoryIdx    InvertedIdx = 1
+	CodeHistoryIdx       InvertedIdx = 2
+	CommitmentHistoryIdx InvertedIdx = 3
+	ReceiptHistoryIdx    InvertedIdx = 4
+	RCacheHistoryIdx     InvertedIdx = 5
 
-	LogTopicIdx   InvertedIdx = "LogTopicIdx"
-	LogAddrIdx    InvertedIdx = "LogAddrIdx"
-	TracesFromIdx InvertedIdx = "TracesFromIdx"
-	TracesToIdx   InvertedIdx = "TracesToIdx"
+	LogTopicIdx   InvertedIdx = 6
+	LogAddrIdx    InvertedIdx = 7
+	TracesFromIdx InvertedIdx = 8
+	TracesToIdx   InvertedIdx = 9
 )
+
+func (idx InvertedIdx) String() string {
+	switch idx {
+	case AccountsHistoryIdx:
+		return "accounts"
+	case StorageHistoryIdx:
+		return "storage"
+	case CodeHistoryIdx:
+		return "code"
+	case CommitmentHistoryIdx:
+		return "commitment"
+	case ReceiptHistoryIdx:
+		return "receipt"
+	case RCacheHistoryIdx:
+		return "rcache"
+	case LogAddrIdx:
+		return "logaddrs"
+	case LogTopicIdx:
+		return "logtopics"
+	case TracesFromIdx:
+		return "tracesfrom"
+	case TracesToIdx:
+		return "tracesto"
+	default:
+		return "unknown index"
+	}
+}
+
+func String2InvertedIdx(in string) (InvertedIdx, error) {
+	switch in {
+	case "accounts":
+		return AccountsHistoryIdx, nil
+	case "storage":
+		return StorageHistoryIdx, nil
+	case "code":
+		return CodeHistoryIdx, nil
+	case "commitment":
+		return CommitmentHistoryIdx, nil
+	case "receipt":
+		return ReceiptHistoryIdx, nil
+	case "rcache":
+		return RCacheHistoryIdx, nil
+	case "logaddrs":
+		return LogAddrIdx, nil
+	case "logtopics":
+		return LogTopicIdx, nil
+	case "tracesfrom":
+		return TracesFromIdx, nil
+	case "tracesto":
+		return TracesToIdx, nil
+	default:
+		return InvertedIdx(MaxUint16), fmt.Errorf("unknown inverted index name: %s", in)
+	}
+}
 
 const (
 	ReceiptsAppendable Appendable = 0
@@ -794,7 +848,7 @@ func String2Domain(in string) (Domain, error) {
 	case "rcache":
 		return RCacheDomain, nil
 	default:
-		return Domain(MaxUint16), fmt.Errorf("unknown history name: %s", in)
+		return Domain(MaxUint16), fmt.Errorf("unknown name: %s", in)
 	}
 }
 

@@ -36,9 +36,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv/kvcfg"
-	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
@@ -47,9 +44,14 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/erigontech/mdbx-go/mdbx"
+
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-db/rawdb/blockio"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/debug"
@@ -74,6 +76,7 @@ import (
 	prototypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
+	"github.com/erigontech/erigon-lib/kv/kvcfg"
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/kv/remotedbserver"
 	"github.com/erigontech/erigon-lib/kv/temporal"
@@ -90,8 +93,6 @@ import (
 	"github.com/erigontech/erigon/core"
 	snaptype2 "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
-	"github.com/erigontech/erigon/erigon-db/rawdb/blockio"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconsensusconfig"
@@ -305,7 +306,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
 		var notChanged bool
-		notChanged, config.PersistReceiptsCache, err = kvcfg.PersistReceipts.EnsureNotChanged(tx, config.PersistReceiptsCache)
+		notChanged, config.PersistReceiptsCacheV2, err = kvcfg.PersistReceipts.EnsureNotChanged(tx, config.PersistReceiptsCacheV2)
 		if err != nil {
 			return err
 		}
@@ -355,7 +356,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	var genesis *types.Block
 	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
 
-		genesisConfig, err := rawdb.ReadGenesis(tx)
+		genesisConfig, err := core.ReadGenesis(tx)
 		if err != nil {
 			return err
 		}
@@ -848,12 +849,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	mining := stagedsync.New(
 		config.Sync,
 		stagedsync.MiningStages(backend.sentryCtx,
-			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, nil, tmpdir, backend.blockReader),
+			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, backend.chainConfig, backend.engine, nil, tmpdir, backend.blockReader),
 			stagedsync.StageBorHeimdallCfg(
 				backend.chainDB,
 				snapDb,
 				miner,
-				*backend.chainConfig,
+				backend.chainConfig,
 				heimdallClient,
 				heimdallStore,
 				bridgeStore,
@@ -882,8 +883,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				stages2.SilkwormForExecutionStage(backend.silkworm, config),
 			),
 			stagedsync.StageSendersCfg(backend.chainDB, chainConfig, config.Sync, false, dirs.Tmp, config.Prune, blockReader, backend.sentriesClient.Hd),
-			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, nil, 0, txnProvider, blockReader),
-			stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore),
+			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, nil, 0, txnProvider, blockReader),
+			stagedsync.StageMiningFinishCfg(backend.chainDB, backend.chainConfig, backend.engine, miner, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore),
 			astridEnabled,
 		), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder,
 		logger, stages.ModeBlockProduction)
@@ -895,12 +896,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		proposingSync := stagedsync.New(
 			config.Sync,
 			stagedsync.MiningStages(backend.sentryCtx,
-				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, param, tmpdir, backend.blockReader),
+				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, backend.chainConfig, backend.engine, param, tmpdir, backend.blockReader),
 				stagedsync.StageBorHeimdallCfg(
 					backend.chainDB,
 					snapDb,
 					miningStatePos,
-					*backend.chainConfig,
+					backend.chainConfig,
 					heimdallClient,
 					heimdallStore,
 					bridgeStore,
@@ -929,8 +930,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 					stages2.SilkwormForExecutionStage(backend.silkworm, config),
 				),
 				stagedsync.StageSendersCfg(backend.chainDB, chainConfig, config.Sync, false, dirs.Tmp, config.Prune, blockReader, backend.sentriesClient.Hd),
-				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, txnProvider, blockReader),
-				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore),
+				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, txnProvider, blockReader),
+				stagedsync.StageMiningFinishCfg(backend.chainDB, backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore),
 				astridEnabled,
 			), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder, logger, stages.ModeBlockProduction)
 		// We start the mining step
@@ -1147,7 +1148,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 		backend.polygonDownloadSync = stagedsync.New(backend.config.Sync, stagedsync.DownloadSyncStages(
 			backend.sentryCtx, stagedsync.StageSnapshotsCfg(
-				backend.chainDB, *backend.sentriesClient.ChainConfig, config.Sync, dirs, blockRetire, backend.downloaderClient,
+				backend.chainDB, backend.sentriesClient.ChainConfig, config.Sync, dirs, blockRetire, backend.downloaderClient,
 				blockReader, backend.notifications, false, false, false, backend.silkworm, config.Prune,
 			)), nil, nil, backend.logger, stages.ModeApplyingBlocks)
 
@@ -1632,7 +1633,7 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
 
-	allSegmentsDownloadComplete, err := rawdb.AllSegmentsDownloadCompleteFromDB(db)
+	allSegmentsDownloadComplete, err := core.AllSegmentsDownloadCompleteFromDB(db)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
