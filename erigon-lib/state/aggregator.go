@@ -1699,6 +1699,22 @@ func (at *AggregatorRoTx) MadvNormal() *AggregatorRoTx {
 			//}
 		}
 	}
+	for _, ii := range at.iis {
+		for _, f := range ii.files {
+			if f.src.decompressor != nil {
+				f.src.decompressor.MadvNormal()
+			}
+			if f.src.index != nil {
+				f.src.index.MadvNormal()
+			}
+			//if f.src.bindex != nil {
+			//	f.src.bindex.MadvNormal()
+			//}
+			//if f.src.existence != nil {
+			//	f.src.existence.MadvNormal()
+			//}
+		}
+	}
 	return at
 }
 func (at *AggregatorRoTx) DisableReadAhead() {
@@ -1718,6 +1734,23 @@ func (at *AggregatorRoTx) DisableReadAhead() {
 			//}
 		}
 	}
+	for _, ii := range at.iis {
+		for _, f := range ii.files {
+			if f.src.decompressor != nil {
+				f.src.decompressor.DisableReadAhead()
+			}
+			if f.src.index != nil {
+				f.src.index.DisableReadAhead()
+			}
+			//if f.src.bindex != nil {
+			//	f.src.bindex.MadvNormal()
+			//}
+			//if f.src.existence != nil {
+			//	f.src.existence.MadvNormal()
+			//}
+		}
+	}
+
 }
 
 func (at *AggregatorRoTx) Close() {
