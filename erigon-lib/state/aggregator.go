@@ -1645,7 +1645,18 @@ func (at *AggregatorRoTx) MadvNormal() {
 func (at *AggregatorRoTx) DisableReadAhead() {
 	for _, d := range at.d {
 		for _, f := range d.files {
-			f.src.decompressor.DisableReadAhead()
+			if f.src.decompressor != nil {
+				f.src.decompressor.DisableReadAhead()
+			}
+			if f.src.index != nil {
+				f.src.index.DisableReadAhead()
+			}
+			if f.src.bindex != nil {
+				//f.src.bindex.DisableReadAhead()
+			}
+			if f.src.existence != nil {
+				//f.src.existence.DisableReadAhead()
+			}
 		}
 	}
 }
