@@ -220,12 +220,20 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 	// read patterns from file
 	d.data = d.mmapHandle1[:d.size]
 	defer d.EnableMadvNormal().DisableReadAhead() //speedup opening on slow drives
+	versionInfoBytes := 0
+	version := d.data[0]
+	if version == V1 {
+		_ = d.data[1:2]
+		versionInfoBytes = 2
+	}
 
-	d.wordsCount = binary.BigEndian.Uint64(d.data[:8])
-	d.emptyWordsCount = binary.BigEndian.Uint64(d.data[8:16])
+	//log.Trace("version of a file is", "v", version)
 
-	pos := uint64(24)
-	dictSize := binary.BigEndian.Uint64(d.data[16:pos])
+	d.wordsCount = binary.BigEndian.Uint64(d.data[versionInfoBytes : versionInfoBytes+8])
+	d.emptyWordsCount = binary.BigEndian.Uint64(d.data[versionInfoBytes+8 : versionInfoBytes+16])
+
+	pos := uint64(versionInfoBytes + 24)
+	dictSize := binary.BigEndian.Uint64(d.data[versionInfoBytes+16 : pos])
 	d.serializedDictSize = dictSize
 
 	if pos+dictSize > uint64(d.size) {
@@ -527,6 +535,7 @@ func (d *Decompressor) EnableReadAhead() *Decompressor {
 	_ = mmap.MadviseSequential(d.mmapHandle1)
 	return d
 }
+
 func (d *Decompressor) EnableMadvNormal() *Decompressor {
 	if d == nil || d.mmapHandle1 == nil {
 		return d
@@ -535,6 +544,7 @@ func (d *Decompressor) EnableMadvNormal() *Decompressor {
 	_ = mmap.MadviseNormal(d.mmapHandle1)
 	return d
 }
+
 func (d *Decompressor) EnableMadvWillNeed() *Decompressor {
 	if d == nil || d.mmapHandle1 == nil {
 		return d
