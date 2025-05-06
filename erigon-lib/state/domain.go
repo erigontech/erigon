@@ -1299,7 +1299,7 @@ func buildHashMapAccessor(ctx context.Context, d *seg.Decompressor, compressed s
 	p := ps.AddNew(fileName, uint64(count))
 	defer ps.Delete(p)
 
-	defer d.EnableMadvNormal().DisableReadAhead()
+	defer d.MadvSequential().DisableReadAhead()
 
 	g := seg.NewReader(d.MakeGetter(), compressed)
 	var rs *recsplit.RecSplit
@@ -1517,10 +1517,6 @@ func (dt *DomainRoTx) HistoryStartFrom() uint64 {
 		return 0
 	}
 	return dt.ht.files[0].startTxNum
-}
-
-func (dt *DomainRoTx) HistoryEndTxNum(tx kv.Tx) uint64 {
-	return max(dt.FirstStepNotInFiles()*dt.d.aggregationStep, dt.DbgMaxTxNumInDB(tx))
 }
 
 // GetAsOf does not always require usage of roTx. If it is possible to determine
@@ -2038,4 +2034,4 @@ func (dt *DomainRoTx) Files() (res VisibleFiles) {
 }
 func (dt *DomainRoTx) Name() kv.Domain { return dt.name }
 
-func (dt *DomainRoTx) DbgMaxTxNumInDB(tx kv.Tx) uint64 { return dt.ht.iit.ii.maxTxNumInDB(tx) }
+func (dt *DomainRoTx) HistoryProgress(tx kv.Tx) uint64 { return dt.ht.iit.Progress(tx) }
