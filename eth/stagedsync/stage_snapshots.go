@@ -290,10 +290,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
-	if err := cfg.db.Debug().ReloadSalt(); err != nil {
-		return err
-	}
-
 	if cfg.notifier.Events != nil {
 		cfg.notifier.Events.OnNewSnapshot()
 	}

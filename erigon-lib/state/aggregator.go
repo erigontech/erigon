@@ -202,7 +202,9 @@ func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.D
 	cfg := Schema[name]
 	//TODO: move dynamic part of config to InvertedIndex
 	cfg.restrictSubsetFileDeletions = a.commitmentValuesTransform
-	cfg.hist.iiCfg.salt = salt
+	if salt != nil {
+		cfg.hist.iiCfg.salt.Store(*salt)
+	}
 	cfg.hist.iiCfg.dirs = dirs
 	a.d[name], err = NewDomain(cfg, a.aggregationStep, logger)
 	if err != nil {
@@ -213,7 +215,9 @@ func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.D
 
 func (a *Aggregator) registerII(idx kv.InvertedIdx, salt *uint32, dirs datadir.Dirs, logger log.Logger) error {
 	idxCfg := StandaloneIISchema[idx]
-	idxCfg.salt = salt
+	if salt != nil {
+		idxCfg.salt.Store(*salt)
+	}
 	idxCfg.dirs = dirs
 
 	if ii := a.searchII(idx); ii != nil {
