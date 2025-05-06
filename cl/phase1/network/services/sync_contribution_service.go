@@ -137,7 +137,7 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 
 		// [IGNORE] The sync committee contribution is the first valid contribution received for the aggregator with index contribution_and_proof.aggregator_index for the slot contribution.slot and subcommittee index contribution.subcommittee_index (this requires maintaining a cache of size SYNC_COMMITTEE_SIZE for this topic that can be flushed after each slot).
 		if s.wasContributionSeen(contributionAndProof) {
-			return ErrIgnore
+			return nil
 		}
 
 		// aggregate signatures for later verification
@@ -191,7 +191,7 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 		// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
 		// in BatchVerification function. After validating signatures, if they are valid we will publish the
 		// gossip ourselves or ban the peer which sent that particular invalid signature.
-		return ErrIgnore
+		return nil
 	})
 }
 
