@@ -64,7 +64,7 @@ type ForkableFilesTxI interface {
 	VisibleFilesMaxRootNum() RootNum
 	VisibleFilesMaxNum() Num
 
-	Files() []FilesItem
+	Files() VisibleFiles
 	GetFromFile(entityNum Num, idx int) (v Bytes, found bool, err error)
 }
 

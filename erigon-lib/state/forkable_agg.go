@@ -32,9 +32,11 @@ type ForkableAgg struct {
 	visibleFilesMinimaxRootNum atomic.Uint64
 
 	buildingFiles atomic.Bool
-	//mergingFiles  atomic.Bool
+	mergingFiles  atomic.Bool
 
 	collateAndBuildWorkers int
+	mergeWorkers           int
+	compressWorkers        int
 
 	ctx       context.Context
 	ctxCancel context.CancelFunc
@@ -88,6 +90,18 @@ func (r *ForkableAgg) RegisterBufferedForkable(ap *Forkable[BufferedTxI]) {
 	}
 }
 
+func (r *ForkableAgg) SetCollateAndBuildWorkers(n int) {
+	r.collateAndBuildWorkers = n
+}
+
+func (r *ForkableAgg) SetMergeWorkers(n int) {
+	r.mergeWorkers = n
+}
+
+func (r *ForkableAgg) SetCompressWorkers(n int) {
+	r.compressWorkers = n
+}
+
 // - "open folder"
 // - close
 // - build files
@@ -109,7 +123,7 @@ func (r *ForkableAgg) OpenFolder() error {
 }
 
 // BuildFiles builds all snapshots (asynchronously) upto a given RootNum
-func (r *ForkableAgg) BuildFiles(num RootNum, unalignedIncluded bool) chan struct{} {
+func (r *ForkableAgg) BuildFiles(num RootNum) chan struct{} {
 	// build in background
 	fin := make(chan struct{})
 
@@ -147,11 +161,119 @@ func (r *ForkableAgg) BuildFiles(num RootNum, unalignedIncluded bool) chan struc
 	return fin
 }
 
-func (r *ForkableAgg) MergeLoop(ctx context.Context) error {
+func (r *ForkableAgg) MergeLoop(ctx context.Context) (err error) {
 	// multipe calls not allowed
 	// use snaps.MergeConfig...
-	//
+	if dbg.NoMerge() || !r.mergingFiles.CompareAndSwap(false, true) {
+		return nil
+	}
+
+	// Merge is background operation. It must not crush application.
+	// Convert panic to error.
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("[snapshots] background files merge: %s, %s", rec, dbg.Stack())
+		}
+	}()
+
+	r.wg.Add(1)
+	defer r.wg.Done()
+	defer r.mergingFiles.Store(false)
+
+	somethingMerged := true
+	for somethingMerged {
+		somethingMerged, err = r.mergeLoopStep(ctx)
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
+}
+
+func (r *ForkableAgg) mergeLoopStep(ctx context.Context) (somethingMerged bool, err error) {
+	r.logger.Debug("[fork_agg] merge", "merge_workers", r.mergeWorkers, "compress_workers", r.compressWorkers)
+
+	aggTx := r.BeginTemporalTx()
+	defer aggTx.Close()
+
+	var mf ForkableMergeFiles
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(r.mergeWorkers)
+	closeFiles := true
+	defer func() {
+		if closeFiles {
+			mf.Close()
+		}
+	}()
+
+	mergeFn := func(ap ForkableFilesTxI, repo *SnapshotRepo, appending *[]*filesItem) {
+		vfs := ap.Files()
+		if len(vfs) == 0 {
+			return
+		}
+		endTxNum := RootNum(vfs.EndRootNum())
+		mergeRange := repo.FindMergeRange(endTxNum, vfs)
+
+		if !mergeRange.needMerge {
+			return
+		}
+
+		var subset []visibleFile
+		for _, vf := range vfs {
+			if mergeRange.from <= vf.StartRootNum() && vf.EndRootNum() <= mergeRange.to {
+				if len(subset) > 0 && subset[len(subset)-1].EndRootNum() != vf.StartRootNum()-1 {
+					panic("expected contiguous files")
+				}
+				vf1, ok := vf.(visibleFile)
+				if !ok {
+					panic("expected visibleFile")
+				}
+				subset = append(subset, vf1)
+			}
+		}
+
+		if subset[0].StartRootNum() != mergeRange.from {
+			r.logger.Error("[fork_agg] merge", "start_file_not_matched", subset[0].StartRootNum(), "merge_range", mergeRange)
+			panic("start file not matched")
+		}
+		if subset[len(subset)-1].EndRootNum() != mergeRange.to {
+			r.logger.Error("[fork_agg] merge", "end_file_not_matched", subset[len(subset)-1].EndRootNum(), "merge_range", mergeRange)
+			panic("end file not matched")
+		}
+
+		// start merging...
+		g.Go(func() (err error) {
+			mergedFile, err := mergeForkableFiles(subset)
+			if err != nil {
+				return err
+			}
+			*appending = append(*appending, mergedFile)
+			return
+		})
+	}
+
+	for i, ap := range aggTx.marked {
+		mergeFn(ap.DebugFiles(), r.marked[i].Repo(), &mf.marked)
+	}
+	for i, ap := range aggTx.unmarked {
+		mergeFn(ap.DebugFiles(), r.unmarked[i].Repo(), &mf.unmarked)
+	}
+	for i, ap := range aggTx.buffered {
+		mergeFn(ap.DebugFiles(), r.buffered[i].Repo(), &mf.buffered)
+	}
+
+	if err := g.Wait(); err != nil {
+		r.logger.Debug("[fork_agg] merge", "err", err)
+		return false, err
+	}
+
+	closeFiles = false
+	r.logger.Debug("[fork_agg] merge", "marked", len(mf.marked), "unmarked", len(mf.unmarked), "buffered", len(mf.buffered))
+
+	// TODO: integrate
+	r.IntegrateMergeFiles(&mf)
+
 }
 
 // buildFile builds a single file
@@ -245,7 +367,7 @@ func (r *ForkableAgg) buildFile(ctx context.Context, to RootNum) (built bool, er
 		})
 	}
 
-	r.recalcVisibleFiles(r.dirtyFilesEndRootNumMinimax())
+	r.recalcVisibleFiles()
 
 	return len(cfiles) > 0, nil
 }
@@ -261,7 +383,7 @@ func (r *ForkableAgg) Close() {
 	r.dirtyFilesLock.Lock()
 	defer r.dirtyFilesLock.Unlock()
 	r.closeDirtyFiles()
-	r.recalcVisibleFiles(r.dirtyFilesEndRootNumMinimax())
+	r.recalcVisibleFiles()
 }
 
 func (r *ForkableAgg) closeDirtyFiles() {
@@ -297,7 +419,7 @@ func (r *ForkableAgg) openFolder() error {
 	if err := eg.Wait(); err != nil {
 		return fmt.Errorf("openFolder: %w", err)
 	}
-	r.recalcVisibleFiles(r.dirtyFilesEndRootNumMinimax())
+	r.recalcVisibleFiles()
 
 	return nil
 }
@@ -315,12 +437,13 @@ func (r *ForkableAgg) dirtyFilesEndRootNumMinimax() RootNum {
 	return dfMiniMaxRootNum
 }
 
-func (r *ForkableAgg) recalcVisibleFiles(toRootNum RootNum) {
+// needs dirtyFiles lock to be taken
+func (r *ForkableAgg) recalcVisibleFiles() {
+	dfMiniMaxRootNum := r.dirtyFilesEndRootNumMinimax()
 	defer r.recalcVisibleFilesMinimaxRootNum()
 	r.visibleFilesLock.Lock()
 	defer r.visibleFilesLock.Unlock()
 
-	dfMiniMaxRootNum := toRootNum
 	r.loop(func(p *ProtoForkable) error {
 		if !p.unaligned {
 			dfMiniMaxRootNum = min(dfMiniMaxRootNum, p.snaps.DirtyFilesMaxRootNum())

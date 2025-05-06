@@ -86,15 +86,20 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 		return nil, false, err
 	}
 	defer sn.Close()
+	compress := a.isCompressionUsed(calcFrom, calcTo)
 
 	{
 		if err = a.freezer.Freeze(ctx, calcFrom, calcTo, func(values []byte) error {
-			// TODO: look at block_Snapshots.go#dumpRange
-			// when snapshot is non-frozen range, it AddsUncompressedword (fast creation)
-			// else AddWord.
-			// BuildFiles perhaps only used for fast builds...and merge is for slow builds.
-			// so using uncompressed here
-			return sn.AddUncompressedWord(values)
+			// https://github.com/erigontech/erigon/pull/11222 -- decision taken here
+			// is that 1k and 10k files will be uncompressed, but 10k files also merged
+			// and not built off db, so following decision is okay:
+			// AddWord -- compressed -- slowbuilds (merge etc.)
+			// AddUncompressedWord -- uncompressed -- fast builds
+			if compress {
+				return sn.AddWord(values)
+			} else {
+				return sn.AddUncompressedWord(values)
+			}
 		}, db); err != nil {
 			return nil, false, err
 		}
@@ -136,6 +141,10 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 		df.index = recsplitIdx
 	}
 	return df, true, nil
+}
+
+func (a *ProtoForkable) isCompressionUsed(from, to RootNum) bool {
+	return uint64(to-from) > a.cfg.MinimumSize
 }
 
 func (a *ProtoForkable) Repo() *SnapshotRepo {
@@ -265,12 +274,12 @@ func (a *ProtoForkableTx) GetFromFiles(entityNum Num) (b Bytes, found bool, file
 	return nil, false, -1, nil
 }
 
-func (a *ProtoForkableTx) Files() []FilesItem {
+func (a *ProtoForkableTx) Files() VisibleFiles {
 	a.NoFilesCheck()
 	v := a.files
-	fi := make([]FilesItem, len(v))
+	fi := make([]VisibleFile, len(v))
 	for i, f := range v {
-		fi[i] = f.src
+		fi[i] = f
 	}
 	return fi
 }
@@ -288,12 +297,17 @@ func (a *ProtoForkableTx) GetFromFile(entityNum Num, idx int) (v Bytes, found bo
 		panic("ordinal lookup by negative num")
 	}
 	offset := indexR.OrdinalLookup(uint64(id))
-	g := a.files[idx].src.decompressor.MakeGetter()
+	file := a.files[idx].src
+	g := file.decompressor.MakeGetter()
 	g.Reset(offset)
 	var word []byte
 	if g.HasNext() {
-		word, _ = g.NextUncompressed()
-		//word, _ = g.Next(word[:0])
+		start, end := file.Range()
+		if a.a.isCompressionUsed(RootNum(start), RootNum(end)) {
+			word, _ = g.Next(word[:0])
+		} else {
+			word, _ = g.NextUncompressed()
+		}
 		return word, true, nil
 	}
 	ap := a.a

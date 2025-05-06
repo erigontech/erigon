@@ -218,6 +218,10 @@ func (a *Forkable[T]) Aligned(aligned bool) {
 	a.unaligned = !aligned
 }
 
+func (a *Forkable[T]) Repo() *SnapshotRepo {
+	return a.snaps
+}
+
 // marked tx
 type MarkedTx struct {
 	*ProtoForkableTx
