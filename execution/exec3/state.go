@@ -22,8 +22,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/erigontech/erigon/execution/exec3/calltracer"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon/execution/exec3/calltracer"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -55,7 +56,7 @@ type Worker struct {
 	blockReader services.FullBlockReader
 	in          *state.QueueWithRetry
 	rs          *state.ParallelExecutionState
-	stateWriter *state.StateWriterV3
+	stateWriter *state.Writer
 	stateReader state.ResettableStateReader
 	historyMode bool // if true - stateReader is HistoryReaderV3, otherwise it's state reader
 	chainConfig *chain.Config
@@ -118,7 +119,7 @@ func (rw *Worker) ResetState(rs *state.ParallelExecutionState, accumulator *shar
 	} else {
 		rw.SetReader(state.NewReaderV3(rs.Domains()))
 	}
-	rw.stateWriter = state.NewStateWriterV3(rs, accumulator)
+	rw.stateWriter = state.NewWriter(rs.Domains(), accumulator)
 }
 
 func (rw *Worker) SetGaspool(gp *core.GasPool) {
@@ -359,7 +360,7 @@ func (rw *Worker) execAATxn(txTask *state.TxTask) {
 		for i := startIdx; i <= endIdx; i++ {
 			// check if next n transactions are AA transactions and run validation
 			if txTask.Txs[i].Type() == types.AccountAbstractionTxType {
-				aaTxn, ok := txTask.Tx.(*types.AccountAbstractionTransaction)
+				aaTxn, ok := txTask.Txs[i].(*types.AccountAbstractionTransaction)
 				if !ok {
 					outerErr = fmt.Errorf("invalid transaction type, expected AccountAbstractionTx, got %T", txTask.Tx)
 					break

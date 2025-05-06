@@ -83,3 +83,9 @@ type IIVersionTypes struct {
 	DataEF      snaptype.Version
 	AccessorEFI snaptype.Version
 }
+
+type VersionTypes struct {
+	Hist   *HistVersionTypes
+	Domain *DomainVersionTypes
+	II     *IIVersionTypes
+}

@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 )
 
@@ -143,37 +144,35 @@ func TestGetBurntContract(t *testing.T) {
 }
 
 func TestMainnetBlobSchedule(t *testing.T) {
+	c := MainnetChainConfig
 	// Original EIP-4844 values
-	assert.Equal(t, uint64(6), MainnetChainConfig.GetMaxBlobsPerBlock(0))
-	assert.Equal(t, uint64(786432), MainnetChainConfig.GetMaxBlobGasPerBlock(0))
-	assert.Equal(t, uint64(393216), MainnetChainConfig.GetTargetBlobGasPerBlock(0))
-	assert.Equal(t, uint64(3338477), MainnetChainConfig.GetBlobGasPriceUpdateFraction(0))
-
-	b := MainnetChainConfig.BlobSchedule
-	isPrague := false
-	assert.Equal(t, uint64(3), b.TargetBlobsPerBlock(isPrague))
-	assert.Equal(t, uint64(6), b.MaxBlobsPerBlock(isPrague))
-	assert.Equal(t, uint64(3338477), b.BaseFeeUpdateFraction(isPrague))
+	time := c.CancunTime.Uint64()
+	assert.Equal(t, uint64(6), c.GetMaxBlobsPerBlock(time))
+	assert.Equal(t, 6*params.BlobGasPerBlob, c.GetMaxBlobGasPerBlock(time))
+	assert.Equal(t, 3*params.BlobGasPerBlob, c.GetTargetBlobGasPerBlock(time))
+	assert.Equal(t, uint64(3338477), c.GetBlobGasPriceUpdateFraction(time))
 
 	// EIP-7691: Blob throughput increase
-	isPrague = true
-	assert.Equal(t, uint64(6), b.TargetBlobsPerBlock(isPrague))
-	assert.Equal(t, uint64(9), b.MaxBlobsPerBlock(isPrague))
-	assert.Equal(t, uint64(5007716), b.BaseFeeUpdateFraction(isPrague))
+	time = c.PragueTime.Uint64()
+	assert.Equal(t, uint64(9), c.GetMaxBlobsPerBlock(time))
+	assert.Equal(t, 9*params.BlobGasPerBlob, c.GetMaxBlobGasPerBlock(time))
+	assert.Equal(t, 6*params.BlobGasPerBlob, c.GetTargetBlobGasPerBlock(time))
+	assert.Equal(t, uint64(5007716), c.GetBlobGasPriceUpdateFraction(time))
 }
 
 func TestGnosisBlobSchedule(t *testing.T) {
-	b := GnosisChainConfig.BlobSchedule
+	c := GnosisChainConfig
 
 	// Cancun values
-	isPrague := false
-	assert.Equal(t, uint64(1), b.TargetBlobsPerBlock(isPrague))
-	assert.Equal(t, uint64(2), b.MaxBlobsPerBlock(isPrague))
-	assert.Equal(t, uint64(1112826), b.BaseFeeUpdateFraction(isPrague))
+	time := c.CancunTime.Uint64()
+	assert.Equal(t, uint64(2), c.GetMaxBlobsPerBlock(time))
+	assert.Equal(t, 2*params.BlobGasPerBlob, c.GetMaxBlobGasPerBlock(time))
+	assert.Equal(t, 1*params.BlobGasPerBlob, c.GetTargetBlobGasPerBlock(time))
+	assert.Equal(t, uint64(1112826), c.GetBlobGasPriceUpdateFraction(time))
 
 	// should remain the same in Pectra for Gnosis
-	isPrague = true
-	assert.Equal(t, uint64(1), b.TargetBlobsPerBlock(isPrague))
-	assert.Equal(t, uint64(2), b.MaxBlobsPerBlock(isPrague))
-	assert.Equal(t, uint64(1112826), b.BaseFeeUpdateFraction(isPrague))
+	assert.Equal(t, uint64(2), c.GetMaxBlobsPerBlock(time))
+	assert.Equal(t, 2*params.BlobGasPerBlob, c.GetMaxBlobGasPerBlock(time))
+	assert.Equal(t, 1*params.BlobGasPerBlob, c.GetTargetBlobGasPerBlock(time))
+	assert.Equal(t, uint64(1112826), c.GetBlobGasPriceUpdateFraction(time))
 }
