@@ -18,6 +18,7 @@ package sync_contribution_pool
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"sync"
 
@@ -69,7 +70,8 @@ func (s *syncContributionPoolImpl) AddSyncContribution(headState *state.CachingB
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	log.Debug("Adding sync contribution", "slot", contribution.Slot, "subcommitteeIndex", contribution.SubcommitteeIndex, "beaconBlockRoot", contribution.BeaconBlockRoot)
+	aggrBits, _ := json.Marshal(contribution.AggregationBits)
+	log.Debug("Adding sync contribution", "slot", contribution.Slot, "subcommitteeIndex", contribution.SubcommitteeIndex, "beaconBlockRoot", contribution.BeaconBlockRoot, "aggregationBits", string(aggrBits))
 	key := syncContributionKey{
 		slot:              contribution.Slot,
 		subcommitteeIndex: contribution.SubcommitteeIndex,
