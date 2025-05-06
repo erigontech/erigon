@@ -209,16 +209,11 @@ func (s *SingleAttestation) Static() bool {
 func (s *SingleAttestation) ToAttestation(memberIndexInCommittee int, committeeLen int) *Attestation {
 	committeeBits := NewBitVector(maxCommitteesPerSlot)
 	committeeBits.SetBitAt(int(s.CommitteeIndex), true)
-	//bitSlice.SetBitAt(memberIndexInCommittee, true)
-	//bitSlice.SetBitAt(committeeLen, true)
+	// flip the bit for the validator and also mark the last bit
 	bytes := make([]byte, committeeLen/8+1)
 	bytes[memberIndexInCommittee/8] |= 1 << (memberIndexInCommittee % 8)
 	bytes[committeeLen/8] |= 1 << (committeeLen % 8)
 	aggregationBits := BitlistFromBytes(bytes, aggregationBitsSizeElectra)
-	//aggregationBits := NewBitList(0, aggregationBitsSizeElectra)
-	//aggregationBits.SetOnBit(memberIndexInCommittee)
-	// Set the last bit to 1
-	//aggregationBits.SetOnBit(committeeLen)
 	return &Attestation{
 		AggregationBits: aggregationBits,
 		Data:            s.Data,

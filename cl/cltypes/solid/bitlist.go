@@ -276,19 +276,11 @@ func (u *BitList) Merge(other *BitList) (*BitList, error) {
 	}
 	// copy by the longer one
 	var ret, unionFrom *BitList
-	//if u.Bits() < other.Bits() {
 	ret = other.Copy()
 	unionFrom = u
-	//} else {
-	//	ret = u.Copy()
-	//	unionFrom = other
-	//}
-	// union
-	//unionFrom.removeMsb()
 	for i := 0; i < len(unionFrom.u); i++ {
 		ret.u[i] |= unionFrom.u[i]
 	}
-	//unionFrom.addMsb()
 	return ret, nil
 }
 
