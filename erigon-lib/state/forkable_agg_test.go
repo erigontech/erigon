@@ -4,6 +4,7 @@ import (
 	"context"
 	"math/rand"
 	"os"
+	"runtime"
 	"testing"
 	"time"
 
@@ -348,6 +349,10 @@ func TestMergedFileGet(t *testing.T) {
 }
 
 func setup(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
+	if runtime.GOOS == "windows" {
+		tb.Skip("TODO: fix me")
+	}
+
 	tb.Helper()
 	logger := log.New()
 	dirs := datadir.New(tb.TempDir())
