@@ -177,6 +177,7 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		obj := &services.SignedContributionAndProofForGossip{
 			Receiver:                   copyOfPeerData(data),
 			SignedContributionAndProof: &cltypes.SignedContributionAndProof{},
+			ImmediateVerification:      true,
 		}
 		if err := obj.SignedContributionAndProof.DecodeSSZ(data.Data, int(version)); err != nil {
 			return err
