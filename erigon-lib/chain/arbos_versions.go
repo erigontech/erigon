@@ -16,6 +16,8 @@
 
 package chain
 
+const ArbosVersion_0 = uint64(0)
+const ArbosVersion_1 = uint64(1)
 const ArbosVersion_2 = uint64(2)
 const ArbosVersion_3 = uint64(3)
 const ArbosVersion_4 = uint64(4)

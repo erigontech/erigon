@@ -762,7 +762,7 @@ func ArbitrumOneParams() ArbitrumChainParams {
 		EnableArbOS:               true,
 		AllowDebugPrecompiles:     false,
 		DataAvailabilityCommittee: false,
-		InitialArbOSVersion:       6,
+		InitialArbOSVersion:       ArbosVersion_6,
 		InitialChainOwner:         common.HexToAddress("0xd345e41ae2cb00311956aa7109fc801ae8c81a52"),
 	}
 }
@@ -772,7 +772,7 @@ func ArbitrumNovaParams() ArbitrumChainParams {
 		EnableArbOS:               true,
 		AllowDebugPrecompiles:     false,
 		DataAvailabilityCommittee: true,
-		InitialArbOSVersion:       1,
+		InitialArbOSVersion:       ArbosVersion_1,
 		InitialChainOwner:         common.HexToAddress("0x9C040726F2A657226Ed95712245DeE84b650A1b5"),
 	}
 }
@@ -782,7 +782,7 @@ func ArbitrumRollupGoerliTestnetParams() ArbitrumChainParams {
 		EnableArbOS:               true,
 		AllowDebugPrecompiles:     false,
 		DataAvailabilityCommittee: false,
-		InitialArbOSVersion:       2,
+		InitialArbOSVersion:       ArbosVersion_2,
 		InitialChainOwner:         common.HexToAddress("0x186B56023d42B2B4E7616589a5C62EEf5FCa21DD"),
 	}
 }
@@ -792,7 +792,7 @@ func ArbitrumDevTestParams() ArbitrumChainParams {
 		EnableArbOS:               true,
 		AllowDebugPrecompiles:     true,
 		DataAvailabilityCommittee: false,
-		InitialArbOSVersion:       32,
+		InitialArbOSVersion:       ArbosVersion_32,
 		InitialChainOwner:         common.Address{},
 	}
 }
@@ -802,7 +802,7 @@ func ArbitrumDevTestDASParams() ArbitrumChainParams {
 		EnableArbOS:               true,
 		AllowDebugPrecompiles:     true,
 		DataAvailabilityCommittee: true,
-		InitialArbOSVersion:       32,
+		InitialArbOSVersion:       ArbosVersion_32,
 		InitialChainOwner:         common.Address{},
 	}
 }
@@ -812,7 +812,7 @@ func ArbitrumAnytrustGoerliTestnetParams() ArbitrumChainParams {
 		EnableArbOS:               true,
 		AllowDebugPrecompiles:     false,
 		DataAvailabilityCommittee: true,
-		InitialArbOSVersion:       2,
+		InitialArbOSVersion:       ArbosVersion_2,
 		InitialChainOwner:         common.HexToAddress("0x186B56023d42B2B4E7616589a5C62EEf5FCa21DD"),
 	}
 }
@@ -822,7 +822,7 @@ func DisableArbitrumParams() ArbitrumChainParams {
 		EnableArbOS:               false,
 		AllowDebugPrecompiles:     false,
 		DataAvailabilityCommittee: false,
-		InitialArbOSVersion:       0,
+		InitialArbOSVersion:       ArbosVersion_0,
 		InitialChainOwner:         common.Address{},
 	}
 }

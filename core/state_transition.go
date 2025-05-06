@@ -28,6 +28,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -210,7 +211,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 
 			isCancun := st.evm.ChainRules().IsCancun
 			if st.evm.ChainRules().IsArbitrum {
-				isCancun = isCancun && st.evm.Context.ArbOSVersion >= 20
+				isCancun = isCancun && st.evm.Context.ArbOSVersion >= chain.ArbosVersion_20
 			}
 			if isCancun {
 				maxBlobFee, overflow := new(uint256.Int).MulOverflow(st.msg.MaxFeePerBlobGas(), new(uint256.Int).SetUint64(st.msg.BlobGas()))
@@ -316,7 +317,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 	isCancun := st.evm.ChainRules().IsCancun
 	// st.evm.ChainConfig().IsCancun(st.evm.Context.Time)
 	if isArb {
-		isCancun = st.evm.Context.ArbOSVersion >= 20
+		isCancun = st.evm.Context.ArbOSVersion >= chain.ArbosVersion_20
 	}
 	if st.msg.BlobGas() > 0 && isCancun && !isArb {
 		blobGasPrice := st.evm.Context.BlobBaseFee
