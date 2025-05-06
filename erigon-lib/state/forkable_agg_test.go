@@ -349,11 +349,11 @@ func TestMergedFileGet(t *testing.T) {
 }
 
 func setup(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
+	tb.Helper()
 	if runtime.GOOS == "windows" {
 		tb.Skip("TODO: fix me")
 	}
 
-	tb.Helper()
 	logger := log.New()
 	dirs := datadir.New(tb.TempDir())
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
