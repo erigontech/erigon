@@ -696,7 +696,7 @@ var (
 	}
 	TorrentDownloadSlotsFlag = cli.IntFlag{
 		Name:  "torrent.download.slots",
-		Value: 128,
+		Value: 32,
 		Usage: "Amount of files to download in parallel.",
 	}
 	TorrentStaticPeersFlag = cli.StringFlag{
