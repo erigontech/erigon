@@ -1519,10 +1519,6 @@ func (dt *DomainRoTx) HistoryStartFrom() uint64 {
 	return dt.ht.files[0].startTxNum
 }
 
-func (dt *DomainRoTx) HistoryEndTxNum(tx kv.Tx) uint64 {
-	return max(dt.FirstStepNotInFiles()*dt.d.aggregationStep, dt.DbgMaxTxNumInDB(tx))
-}
-
 // GetAsOf does not always require usage of roTx. If it is possible to determine
 // historical value based only on static files, roTx will not be used.
 func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {

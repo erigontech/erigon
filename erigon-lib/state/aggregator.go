@@ -1482,10 +1482,6 @@ func (at *AggregatorRoTx) HistoryStartFrom(name kv.Domain) uint64 {
 	return at.d[name].HistoryStartFrom()
 }
 
-func (at *AggregatorRoTx) HistoryEndTxNum(name kv.Domain, tx kv.Tx) uint64 {
-	return at.d[name].HistoryEndTxNum(tx)
-}
-
 func (at *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (timestamps stream.U64, err error) {
 	// check domain iis
 	for _, d := range at.d {
@@ -1627,6 +1623,21 @@ func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo 
 }
 
 // --- Domain part END ---
+
+func (at *AggregatorRoTx) madvNormal() {
+	for _, d := range at.d {
+		for _, f := range d.files {
+			f.src.decompressor.EnableMadvNormal()
+		}
+	}
+}
+func (at *AggregatorRoTx) disableReadAhead() {
+	for _, d := range at.d {
+		for _, f := range d.files {
+			f.src.decompressor.DisableReadAhead()
+		}
+	}
+}
 
 func (at *AggregatorRoTx) Close() {
 	if at == nil || at.a == nil { // invariant: it's safe to call Close multiple times
