@@ -40,7 +40,7 @@ jobs:
           persistent_logs: "true"
 
       - name: Parse Kurtosis output log and create JSON
-        if: success()
+        if: always()
         run: |
           # Download the Kurtosis artifact
           echo "Downloading artifact enclave-dump-kurtosis-run1-${{ github.run_id }}"
