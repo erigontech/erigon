@@ -1691,12 +1691,12 @@ func (at *AggregatorRoTx) MadvNormal() *AggregatorRoTx {
 			if f.src.index != nil {
 				f.src.index.MadvNormal()
 			}
-			if f.src.bindex != nil {
-				//f.src.bindex.MadvNormal()
-			}
-			if f.src.existence != nil {
-				//f.src.existence.MadvNormal()
-			}
+			//if f.src.bindex != nil {
+			//	f.src.bindex.MadvNormal()
+			//}
+			//if f.src.existence != nil {
+			//	f.src.existence.MadvNormal()
+			//}
 		}
 	}
 	return at
@@ -1710,12 +1710,12 @@ func (at *AggregatorRoTx) DisableReadAhead() {
 			if f.src.index != nil {
 				f.src.index.DisableReadAhead()
 			}
-			if f.src.bindex != nil {
-				//f.src.bindex.DisableReadAhead()
-			}
-			if f.src.existence != nil {
-				//f.src.existence.DisableReadAhead()
-			}
+			//if f.src.bindex != nil {
+			//	f.src.bindex.DisableReadAhead()
+			//}
+			//if f.src.existence != nil {
+			//	f.src.existence.DisableReadAhead()
+			//}
 		}
 	}
 }
