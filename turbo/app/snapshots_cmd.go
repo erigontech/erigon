@@ -1444,9 +1444,12 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 
 	logger.Info("Params", "from", from, "to", to, "every", every)
-	if err := br.RetireBlocks(ctx, from, forwardProgress, log.LvlInfo, nil, nil, nil); err != nil {
-		return err
+	if chainConfig.Bor == nil { //TODO: https://github.com/erigontech/erigon/issues/14894
+		if err := br.RetireBlocks(ctx, from, forwardProgress, log.LvlInfo, nil, nil, nil); err != nil {
+			return err
+		}
 	}
+
 	if err := blockReader.Snapshots().RemoveOverlaps(); err != nil {
 		return err
 	}
