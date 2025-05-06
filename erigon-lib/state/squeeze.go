@@ -336,8 +336,8 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		return nil, errors.New("no account files found")
 	}
 
-	acRo.madvNormal()
-	defer acRo.disableReadAhead()
+	acRo.MadvNormal()
+	defer acRo.DisableReadAhead()
 	start := time.Now()
 	defer func() { logger.Info("Commitment DONE", "duration", time.Since(start)) }()
 

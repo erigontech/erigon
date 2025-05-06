@@ -1624,14 +1624,25 @@ func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo 
 
 // --- Domain part END ---
 
-func (at *AggregatorRoTx) madvNormal() {
+func (at *AggregatorRoTx) MadvNormal() {
 	for _, d := range at.d {
 		for _, f := range d.files {
-			f.src.decompressor.EnableMadvNormal()
+			if f.src.decompressor != nil {
+				f.src.decompressor.EnableMadvNormal()
+			}
+			if f.src.index != nil {
+				f.src.index.MadvNormal()
+			}
+			if f.src.bindex != nil {
+				//f.src.bindex.MadvNormal()
+			}
+			if f.src.existence != nil {
+				//f.src.existence.MadvNormal()
+			}
 		}
 	}
 }
-func (at *AggregatorRoTx) disableReadAhead() {
+func (at *AggregatorRoTx) DisableReadAhead() {
 	for _, d := range at.d {
 		for _, f := range d.files {
 			f.src.decompressor.DisableReadAhead()

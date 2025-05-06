@@ -25,7 +25,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
-	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -136,8 +135,6 @@ type Decompressor struct {
 	dictWords          int
 
 	filePath, FileName1 string
-
-	readAheadRefcnt atomic.Int32 // ref-counter: allow enable/disable read-ahead from goroutines. only when refcnt=0 - disable read-ahead once
 }
 
 const (
@@ -505,12 +502,6 @@ func (d *Decompressor) DisableReadAhead() {
 	if d == nil || d.mmapHandle1 == nil {
 		return
 	}
-	leftReaders := d.readAheadRefcnt.Add(-1)
-	if leftReaders < 0 {
-		log.Warn("read-ahead negative counter", "file", d.FileName())
-		return
-	}
-
 	if !dbg.SnapshotMadvRnd { // all files
 		_ = mmap.MadviseNormal(d.mmapHandle1)
 		return
@@ -523,7 +514,6 @@ func (d *Decompressor) EnableReadAhead() *Decompressor {
 	if d == nil || d.mmapHandle1 == nil {
 		return d
 	}
-	d.readAheadRefcnt.Add(1)
 	_ = mmap.MadviseSequential(d.mmapHandle1)
 	return d
 }
@@ -531,7 +521,6 @@ func (d *Decompressor) EnableMadvNormal() *Decompressor {
 	if d == nil || d.mmapHandle1 == nil {
 		return d
 	}
-	d.readAheadRefcnt.Add(1)
 	_ = mmap.MadviseNormal(d.mmapHandle1)
 	return d
 }
@@ -539,7 +528,6 @@ func (d *Decompressor) EnableMadvWillNeed() *Decompressor {
 	if d == nil || d.mmapHandle1 == nil {
 		return d
 	}
-	d.readAheadRefcnt.Add(1)
 	_ = mmap.MadviseWillNeed(d.mmapHandle1)
 	return d
 }
