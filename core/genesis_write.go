@@ -31,6 +31,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
+	"github.com/jinzhu/copier"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-db/rawdb"
@@ -448,7 +449,8 @@ var DevnetSignKey = func(address common.Address) *ecdsa.PrivateKey {
 // DeveloperGenesisBlock returns the 'geth --dev' genesis block.
 func DeveloperGenesisBlock(period uint64, faucet common.Address) *types.Genesis {
 	// Override the default period to the user requested one
-	config := *params2.AllCliqueProtocolChanges
+	var config chain.Config
+	copier.Copy(&config, params2.AllCliqueProtocolChanges)
 	config.Clique.Period = period
 
 	// Assemble and return the genesis with the precompiles and faucet pre-funded
@@ -570,7 +572,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		defer sd.Close()
 
 		//r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
-		r, w := state.NewReaderV3(sd), state.NewStateWriterV3(sd, nil)
+		r, w := state.NewReaderV3(sd), state.NewWriter(sd, nil)
 		statedb = state.New(r)
 		statedb.SetTrace(false)
 

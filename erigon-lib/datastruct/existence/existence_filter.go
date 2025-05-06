@@ -40,7 +40,7 @@ type Filter struct {
 	noFsync            bool // fsync is enabled by default, but tests can manually disable
 }
 
-func NewExistenceFilter(keysCount uint64, filePath string) (*Filter, error) {
+func NewFilter(keysCount uint64, filePath string) (*Filter, error) {
 	//TODO: make filters compatible by usinig same seed/keys
 	_, fileName := filepath.Split(filePath)
 	e := &Filter{FilePath: filePath, FileName: fileName, useFuse: true}
@@ -86,6 +86,12 @@ func (b *Filter) ContainsHash(v uint64) bool {
 	}
 
 	return b.filter.ContainsHash(v)
+}
+func (b *Filter) Contains(v hash.Hash64) bool {
+	if b.empty {
+		return true
+	}
+	return b.filter.Contains(v)
 }
 func (b *Filter) Build() error {
 	if b.empty {
