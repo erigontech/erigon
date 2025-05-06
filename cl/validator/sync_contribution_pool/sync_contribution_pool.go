@@ -164,26 +164,39 @@ func (s *syncContributionPoolImpl) AddSyncCommitteeMessage(headState *state.Cach
 	committee := getSyncCommitteeFromState(headState).GetCommittee()
 	subCommitteeSize := cfg.SyncCommitteeSize / cfg.SyncCommitteeSubnetCount
 	startSubCommittee := subCommittee * subCommitteeSize
+	found := false
 	for i := startSubCommittee; i < startSubCommittee+subCommitteeSize; i++ {
 		if committee[i] == publicKey { // turn on this bit
+			found = true
 			if utils.IsBitOn(contribution.AggregationBits, int(i-startSubCommittee)) {
 				return nil
 			}
 			utils.FlipBitOn(contribution.AggregationBits, int(i-startSubCommittee))
 		}
 	}
+	if !found {
+		log.Warn("Validator not found in sync committee", "validatorIndex", message.ValidatorIndex, "subCommittee", subCommittee, "slot", message.Slot, "beaconBlockRoot", message.BeaconBlockRoot)
+		return nil
+	}
 
 	// Compute the aggregated signature.
-	aggregatedSignature, err := bls.AggregateSignatures([][]byte{
-		contribution.Signature[:],
-		message.Signature[:],
-	})
-	if err != nil {
-		return err
-	}
-	copy(contribution.Signature[:], aggregatedSignature)
 
-	VerifySyncContributionProofAggregatedSignature(headState, contribution, committee[startSubCommittee:startSubCommittee+subCommitteeSize])
+	if bytes.Equal(contribution.Signature[:], bls.InfiniteSignature[:]) {
+		copy(contribution.Signature[:], message.Signature[:])
+	} else {
+		aggregatedSignature, err := bls.AggregateSignatures([][]byte{
+			contribution.Signature[:],
+			message.Signature[:],
+		})
+		if err != nil {
+			return err
+		}
+		copy(contribution.Signature[:], aggregatedSignature)
+	}
+
+	if err := VerifySyncContributionProofAggregatedSignature(headState, contribution, committee[startSubCommittee:startSubCommittee+subCommitteeSize]); err == nil {
+		log.Debug("Sync contribution signature is valid", "signature", common.Bytes2Hex(contribution.Signature[:]), "bits", common.Bytes2Hex(contribution.AggregationBits), "blockRoot", contribution.BeaconBlockRoot, "slot", contribution.Slot, "subcommitteeIndex", contribution.SubcommitteeIndex)
+	}
 	s.syncContributionPoolForAggregates[key] = contribution
 	s.cleanupOldContributions(headState)
 	return nil
