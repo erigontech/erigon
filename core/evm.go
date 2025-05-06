@@ -79,7 +79,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 
 	// assert if network is ARB0 to change pervrandao
 	arbOsVersion := types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
-	if arbOsVersion > 0 {
+	if arbOsVersion > chain.ArbosVersion_0 {
 		difficultyHash := libcommon.BigToHash(header.Difficulty)
 		prevRandDao = &difficultyHash
 	}
