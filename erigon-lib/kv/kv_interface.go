@@ -589,7 +589,7 @@ type TemporalDebugTx interface {
 }
 
 type TemporalDebugDB interface {
-	DomainTables(domain ...Domain) []string
+	DomainTables(names ...Domain) []string
 	InvertedIdxTables(names ...InvertedIdx) []string
 	ReloadSalt() error
 }
