@@ -4,7 +4,15 @@ go 1.23.0
 
 toolchain go1.23.6
 
-replace github.com/erigontech/erigon-lib => ./erigon-lib
+replace (
+	github.com/erigontech/erigon-db => ./erigon-db
+	github.com/erigontech/erigon-lib => ./erigon-lib
+)
+
+require (
+	github.com/erigontech/erigon-db v0.0.0-00010101000000-000000000000
+	github.com/erigontech/erigon-lib v0.0.0-00010101000000-000000000000
+)
 
 replace (
 	github.com/crate-crypto/go-kzg-4844 => github.com/erigontech/go-kzg-4844 v0.0.0-20250130131058-ce13be60bc86
@@ -13,7 +21,7 @@ replace (
 
 require (
 	github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116
-	github.com/erigontech/mdbx-go v0.39.6
+	github.com/erigontech/mdbx-go v0.39.8
 	github.com/erigontech/secp256k1 v1.2.0
 	github.com/erigontech/silkworm-go v0.24.0
 )
@@ -36,7 +44,6 @@ require (
 	github.com/dop251/goja v0.0.0-20220405120441-9037c2b61cbf
 	github.com/edsrzf/mmap-go v1.2.0
 	github.com/emicklei/dot v1.6.2
-	github.com/erigontech/erigon-lib v0.0.0-00010101000000-000000000000
 	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
 	github.com/gballet/go-verkle v0.0.0-20221121182333-31427a1f2d35
 	github.com/go-chi/chi/v5 v5.1.0
@@ -60,6 +67,7 @@ require (
 	github.com/huin/goupnp v1.3.0
 	github.com/jackpal/go-nat-pmp v1.0.2
 	github.com/jedib0t/go-pretty/v6 v6.5.9
+	github.com/jinzhu/copier v0.4.0
 	github.com/json-iterator/go v1.1.12
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/klauspost/compress v1.18.0
@@ -185,7 +193,7 @@ require (
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/elastic/gosigar v0.14.3 // indirect
-	github.com/erigontech/erigon-snapshot v1.3.1-0.20250409081934-fc614113aae6 // indirect
+	github.com/erigontech/erigon-snapshot v1.3.1-0.20250506043316-3253a3fefeec // indirect
 	github.com/flynn/noise v1.1.0 // indirect
 	github.com/francoispqt/gojay v1.2.13 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect

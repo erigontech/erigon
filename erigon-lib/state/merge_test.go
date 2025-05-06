@@ -39,7 +39,7 @@ func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
 	cfg.dirs = datadir.New(os.TempDir())
 
 	ii, err := NewInvertedIndex(cfg, aggStep, log.New())
-	ii.indexList = 0
+	ii.Accessors = 0
 	if err != nil {
 		panic(err)
 	}
@@ -52,8 +52,8 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	newTestDomain := func() (*InvertedIndex, *History) {
 		d := emptyTestDomain(1)
 		d.History.InvertedIndex.integrity = nil
-		d.History.InvertedIndex.indexList = 0
-		d.History.indexList = 0
+		d.History.InvertedIndex.Accessors = 0
+		d.History.Accessors = 0
 		return d.History.InvertedIndex, d.History
 	}
 	t.Run("ii: > 2 unmerged files", func(t *testing.T) {
@@ -490,11 +490,11 @@ func Test_mergeEliasFano(t *testing.T) {
 	merged, _ := eliasfano32.ReadEliasFano(menc)
 	require.NoError(t, err)
 	require.EqualValues(t, len(uniq), merged.Count())
-	require.EqualValues(t, merged.Count(), eliasfano32.Count(menc))
+	require.Equal(t, merged.Count(), eliasfano32.Count(menc))
 	mergedLists := append(firstList, secondList...)
 	sort.Ints(mergedLists)
 	require.EqualValues(t, mergedLists[len(mergedLists)-1], merged.Max())
-	require.EqualValues(t, merged.Max(), eliasfano32.Max(menc))
+	require.Equal(t, merged.Max(), eliasfano32.Max(menc))
 
 	mit := merged.Iterator()
 	for mit.HasNext() {

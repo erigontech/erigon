@@ -47,25 +47,25 @@ func TestNewFilters(t *testing.T) {
 	api := NewEthAPI(NewBaseApi(ff, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
 
 	ptf, err := api.NewPendingTransactionFilter(ctx)
-	assert.Nil(err)
+	assert.NoError(err)
 
 	nf, err := api.NewFilter(ctx, filters.FilterCriteria{})
-	assert.Nil(err)
+	assert.NoError(err)
 
 	bf, err := api.NewBlockFilter(ctx)
-	assert.Nil(err)
+	assert.NoError(err)
 
 	ok, err := api.UninstallFilter(ctx, nf)
-	assert.Nil(err)
-	assert.Equal(ok, true)
+	assert.NoError(err)
+	assert.True(ok)
 
 	ok, err = api.UninstallFilter(ctx, bf)
-	assert.Nil(err)
-	assert.Equal(ok, true)
+	assert.NoError(err)
+	assert.True(ok)
 
 	ok, err = api.UninstallFilter(ctx, ptf)
-	assert.Nil(err)
-	assert.Equal(ok, true)
+	assert.NoError(err)
+	assert.True(ok)
 }
 
 func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {

@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -75,11 +76,13 @@ func TestDump(t *testing.T) {
 		chainSize   int
 	}
 
-	withConfig := func(config chain.Config, sprints map[string]uint64) *chain.Config {
+	withConfig := func(config *chain.Config, sprints map[string]uint64) *chain.Config {
+		var copy chain.Config
+		copier.Copy(&copy, config)
 		bor := *config.Bor.(*borcfg.BorConfig)
 		bor.Sprint = sprints
-		config.Bor = &bor
-		return &config
+		copy.Bor = &bor
+		return &copy
 	}
 
 	tests := []test{
@@ -101,7 +104,7 @@ func TestDump(t *testing.T) {
 		},
 		{
 			chainSize: 1000,
-			chainConfig: withConfig(*params.BorDevnetChainConfig,
+			chainConfig: withConfig(params.BorDevnetChainConfig,
 				map[string]uint64{
 					"0":    64,
 					"800":  16,
@@ -110,7 +113,7 @@ func TestDump(t *testing.T) {
 		},
 		{
 			chainSize: 2000,
-			chainConfig: withConfig(*params.BorDevnetChainConfig,
+			chainConfig: withConfig(params.BorDevnetChainConfig,
 				map[string]uint64{
 					"0":    64,
 					"800":  16,
@@ -213,7 +216,7 @@ func TestDump(t *testing.T) {
 			require.NoError(err)
 			require.Equal(test.chainSize-3, i)
 			require.Equal(3*(test.chainSize-3)-1, int(txsAmount))
-			require.EqualValues(append([]uint64{0}, baseIdRange(2, 3, test.chainSize-4)...), baseIdList)
+			require.Equal(append([]uint64{0}, baseIdRange(2, 3, test.chainSize-4)...), baseIdList)
 
 			firstTxNum += txsAmount
 			i = 0
@@ -229,7 +232,7 @@ func TestDump(t *testing.T) {
 			require.NoError(err)
 			require.Equal(test.chainSize-1, i)
 			require.Equal(firstTxNum+uint64(3*(test.chainSize-1)), txsAmount)
-			require.EqualValues(baseIdRange(int(firstTxNum), 3, test.chainSize-1), baseIdList)
+			require.Equal(baseIdRange(int(firstTxNum), 3, test.chainSize-1), baseIdList)
 		})
 		t.Run("body_not_from_zero", func(t *testing.T) {
 			require := require.New(t)
@@ -245,7 +248,7 @@ func TestDump(t *testing.T) {
 			}, 1, log.LvlInfo, log.New())
 			require.NoError(err)
 			require.Equal(test.chainSize-2, i)
-			require.EqualValues(baseIdRange(int(firstTxNum), 3, test.chainSize-2), baseIdList)
+			require.Equal(baseIdRange(int(firstTxNum), 3, test.chainSize-2), baseIdList)
 			require.Equal(lastTxNum, baseIdList[len(baseIdList)-1]+3)
 			require.Equal(lastTxNum, firstTxNum+uint64(i*3))
 		})

@@ -17,7 +17,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package rawdb_test
+package mock_test
 
 import (
 	"bytes"
@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/sha3"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -40,7 +41,6 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/stages/mock"
@@ -529,7 +529,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	require.NoError(rawdb.WriteSenders(tx, hash, 1, body.SendersFromTxs()))
 
 	{
-		sd, err := state.NewSharedDomains(tx.(kv.TemporalRwTx), log.New())
+		sd, err := state.NewSharedDomains(tx, log.New())
 		require.NoError(err)
 		defer sd.Close()
 		base, err := txNumReader.Min(tx, 1)
@@ -722,7 +722,7 @@ func TestPreShanghaiBodyNoPanicOnWithdrawals(t *testing.T) {
 	rlp.DecodeBytes(bstring, body)
 
 	require.Nil(body.Withdrawals)
-	require.Equal(2, len(body.Transactions))
+	require.Len(body.Transactions, 2)
 }
 
 // Tests pre-shanghai bodyForStorage to make sure withdrawals doesn't panic
@@ -752,7 +752,7 @@ func TestShanghaiBodyForStorageHasWithdrawals(t *testing.T) {
 	rlp.DecodeBytes(bstring, body)
 
 	require.NotNil(body.Withdrawals)
-	require.Equal(2, len(body.Withdrawals))
+	require.Len(body.Withdrawals, 2)
 	require.Equal(uint32(2), body.TxCount)
 }
 
@@ -768,7 +768,7 @@ func TestShanghaiBodyForStorageNoWithdrawals(t *testing.T) {
 	rlp.DecodeBytes(bstring, body)
 
 	require.NotNil(body.Withdrawals)
-	require.Equal(0, len(body.Withdrawals))
+	require.Empty(body.Withdrawals)
 	require.Equal(uint32(2), body.TxCount)
 }
 

@@ -98,10 +98,10 @@ var (
 		Usage: "Explicitly set network id (integer)(For testnets: use --chain <testnet_name> instead)",
 		Value: ethconfig.Defaults.NetworkID,
 	}
-	PersistReceiptsFlag = cli.BoolFlag{
-		Name:  "experiment.persist.receipts",
+	PersistReceiptsV2Flag = cli.BoolFlag{
+		Name:  "experiment.persist.receipts.v2",
 		Usage: "To store receipts in chaindata db (only on chain-tip) - RPC for recent receit/logs will be faster. Values: 1_000 good starting point. 10_000 receitps it's ~1Gb (not much IO increase). Please test before go over 100_000",
-		Value: ethconfig.Defaults.PersistReceiptsCache,
+		Value: ethconfig.Defaults.PersistReceiptsCacheV2,
 	}
 	DeveloperPeriodFlag = cli.IntFlag{
 		Name:  "dev.period",
@@ -1911,8 +1911,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		cfg.KeepExecutionProofs = true
 		state.EnableHistoricalCommitment()
 	}
-	if ctx.Bool(PersistReceiptsFlag.Name) {
-		cfg.PersistReceiptsCache = true
+	if ctx.Bool(PersistReceiptsV2Flag.Name) {
+		cfg.PersistReceiptsCacheV2 = true
 		state.EnableHistoricalRCache()
 	}
 	cfg.CaplinConfig.EnableUPnP = ctx.Bool(CaplinEnableUPNPlag.Name)
@@ -2075,10 +2075,22 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		}
 		version := "erigon: " + params2.VersionWithCommit(params2.GitCommit)
 		webseedsList := common.CliString2Array(ctx.String(WebSeedsFlag.Name))
-		if known, ok := snapcfg.KnownWebseeds[chain]; ok {
-			webseedsList = append(webseedsList, known...)
-		}
-		cfg.Downloader, err = downloadercfg2.New(ctx.Context, cfg.Dirs, version, lvl, downloadRate, uploadRate, ctx.Int(TorrentPortFlag.Name), ctx.Int(TorrentConnsPerFileFlag.Name), ctx.Int(TorrentDownloadSlotsFlag.Name), common.CliString2Array(ctx.String(TorrentStaticPeersFlag.Name)), webseedsList, chain, ctx.Bool(DbWriteMapFlag.Name))
+		webseedsList = append(webseedsList, snapcfg.GetWebseeds(chain)...)
+		cfg.Downloader, err = downloadercfg2.New(
+			ctx.Context,
+			cfg.Dirs,
+			version,
+			lvl,
+			downloadRate,
+			uploadRate,
+			ctx.Int(TorrentPortFlag.Name),
+			ctx.Int(TorrentConnsPerFileFlag.Name),
+			ctx.Int(TorrentDownloadSlotsFlag.Name),
+			common.CliString2Array(ctx.String(TorrentStaticPeersFlag.Name)),
+			webseedsList,
+			chain,
+			ctx.Bool(DbWriteMapFlag.Name),
+		)
 		if err != nil {
 			panic(err)
 		}

@@ -22,6 +22,8 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-db/rawdb/blockio"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -30,8 +32,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/dataflow"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
-	"github.com/erigontech/erigon/erigon-db/rawdb/blockio"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/turbo/adapter"
 	"github.com/erigontech/erigon/turbo/services"
@@ -48,7 +48,7 @@ type BodiesCfg struct {
 	penalise        func(context.Context, []headerdownload.PenaltyItem)
 	blockPropagator adapter.BlockPropagator
 	timeout         int
-	chanConfig      chain.Config
+	chanConfig      *chain.Config
 	blockReader     services.FullBlockReader
 	blockWriter     *blockio.BlockWriter
 }
@@ -56,7 +56,7 @@ type BodiesCfg struct {
 func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload,
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool), penalise func(context.Context, []headerdownload.PenaltyItem),
 	blockPropagator adapter.BlockPropagator, timeout int,
-	chanConfig chain.Config,
+	chanConfig *chain.Config,
 	blockReader services.FullBlockReader,
 	blockWriter *blockio.BlockWriter,
 ) BodiesCfg {

@@ -372,7 +372,7 @@ func WaitForDownloader(
 		if !syncCfg.KeepExecutionProofs && isStateHistory(p.Name) && strings.Contains(p.Name, kv.CommitmentDomain.String()) {
 			continue
 		}
-		if !syncCfg.PersistReceiptsCache && isStateHistory(p.Name) && strings.Contains(p.Name, kv.RCacheDomain.String()) {
+		if !syncCfg.PersistReceiptsCacheV2 && isStateHistory(p.Name) && strings.Contains(p.Name, kv.RCacheDomain.String()) {
 			continue
 		}
 

@@ -19,12 +19,12 @@ package engine_block_downloader
 import (
 	"context"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 )
 

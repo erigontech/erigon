@@ -27,6 +27,8 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-db/rawdb/blockio"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -37,8 +39,6 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
-	"github.com/erigontech/erigon/erigon-db/rawdb/blockio"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/services"
@@ -55,7 +55,7 @@ type HeadersCfg struct {
 	db                kv.RwDB
 	hd                *headerdownload.HeaderDownload
 	bodyDownload      *bodydownload.BodyDownload
-	chainConfig       chain.Config
+	chainConfig       *chain.Config
 	headerReqSend     func(context.Context, *headerdownload.HeaderRequest) ([64]byte, bool)
 	announceNewHashes func(context.Context, []headerdownload.Announce)
 	penalize          func(context.Context, []headerdownload.PenaltyItem)
@@ -74,7 +74,7 @@ func StageHeadersCfg(
 	db kv.RwDB,
 	headerDownload *headerdownload.HeaderDownload,
 	bodyDownload *bodydownload.BodyDownload,
-	chainConfig chain.Config,
+	chainConfig *chain.Config,
 	syncConfig ethconfig.Sync,
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) ([64]byte, bool),
 	announceNewHashes func(context.Context, []headerdownload.Announce),
@@ -177,7 +177,7 @@ func HeadersPOW(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg 
 
 	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, startProgress, cfg.blockReader)
 	cfg.hd.SetHeaderReader(&ChainReaderImpl{
-		config:      &cfg.chainConfig,
+		config:      cfg.chainConfig,
 		tx:          tx,
 		blockReader: cfg.blockReader,
 		logger:      logger,

@@ -17,19 +17,21 @@
 package misc
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/abi"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/holiman/uint256"
 )
 
 const (
 	BLSPubKeyLen             = 48
 	WithdrawalCredentialsLen = 32 // withdrawalCredentials size
 	BLSSigLen                = 96 // signature size
-
+	DepositLogLen            = 576
 )
 
 var depositTopic = common.HexToHash("0x649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")
@@ -56,9 +58,48 @@ type depositUnpacking struct {
 	Index                 []byte
 }
 
+var InvalidDepositLogErr = errors.New("invalid deposit log: unsupported data layout")
+
+func validateDepositLog(data []byte) error {
+	if len(data) != DepositLogLen {
+		return InvalidDepositLogErr
+	}
+	pubkeyOffset := uint256.NewInt(0).SetBytes(data[0:32])
+	withdrawalCredentialsOffset := uint256.NewInt(0).SetBytes(data[32:64])
+	amountOffset := uint256.NewInt(0).SetBytes(data[64:96])
+	signatureOffset := uint256.NewInt(0).SetBytes(data[96:128])
+	indexOffset := uint256.NewInt(0).SetBytes(data[128:160])
+
+	if pubkeyOffset.CmpUint64(160) != 0 ||
+		withdrawalCredentialsOffset.CmpUint64(256) != 0 ||
+		amountOffset.CmpUint64(320) != 0 ||
+		signatureOffset.CmpUint64(384) != 0 ||
+		indexOffset.CmpUint64(512) != 0 {
+		return InvalidDepositLogErr
+	}
+
+	pubkeySize := uint256.NewInt(0).SetBytes(data[160:192])
+	withdrawalCredentialsSize := uint256.NewInt(0).SetBytes(data[256:288])
+	amountSize := uint256.NewInt(0).SetBytes(data[320:352])
+	signatureSize := uint256.NewInt(0).SetBytes(data[384:416])
+	indexSize := uint256.NewInt(0).SetBytes(data[512:544])
+
+	if pubkeySize.CmpUint64(BLSPubKeyLen) != 0 ||
+		withdrawalCredentialsSize.CmpUint64(WithdrawalCredentialsLen) != 0 ||
+		amountSize.CmpUint64(8) != 0 ||
+		signatureSize.CmpUint64(BLSSigLen) != 0 ||
+		indexSize.CmpUint64(8) != 0 {
+		return InvalidDepositLogErr
+	}
+	return nil
+}
+
 // unpackDepositLog unpacks a serialized DepositEvent.
 func unpackDepositLog(data []byte) ([]byte, error) {
 	var du depositUnpacking
+	if err := validateDepositLog(data); err != nil {
+		return nil, err
+	}
 	if err := DepositABI.UnpackIntoInterface(&du, "DepositEvent", data); err != nil {
 		return nil, err
 	}

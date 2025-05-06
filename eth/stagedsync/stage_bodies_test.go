@@ -18,20 +18,19 @@ package stagedsync_test
 
 import (
 	"bytes"
-	"errors"
 	"math/big"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
@@ -88,7 +87,7 @@ func TestBodiesCanonical(t *testing.T) {
 	err = rawdb.AppendCanonicalTxNums(tx, 5)
 	require.Error(err)
 	var e1 rawdbv3.ErrTxNumsAppendWithGap
-	require.True(errors.As(err, &e1))
+	require.ErrorAs(err, &e1)
 
 	// this should see same error inside then retry from last block available, therefore return no error
 	err = bw.MakeBodiesCanonical(tx, 5)

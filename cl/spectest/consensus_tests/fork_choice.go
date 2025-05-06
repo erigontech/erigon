@@ -305,10 +305,10 @@ func doCheck(t *testing.T, stepstr string, store *forkchoice.ForkChoiceStore, e 
 		root, v, err := store.GetHead(nil)
 		require.NoError(t, err, stepstr)
 		if e.Head.Root != nil {
-			assert.EqualValues(t, *e.Head.Root, root, stepstr)
+			assert.Equal(t, *e.Head.Root, root, stepstr)
 		}
 		if e.Head.Slot != nil {
-			assert.EqualValues(t, *e.Head.Slot, int(v), stepstr)
+			assert.Equal(t, *e.Head.Slot, int(v), stepstr)
 		}
 	}
 	if e.Time != nil {
@@ -319,13 +319,13 @@ func doCheck(t *testing.T, stepstr string, store *forkchoice.ForkChoiceStore, e 
 		//assert.EqualValues(t, e.Time, store.GenesisTime())
 	}*/
 	if e.ProposerBoostRoot != nil {
-		assert.EqualValues(t, *e.ProposerBoostRoot, store.ProposerBoostRoot(), stepstr)
+		assert.Equal(t, *e.ProposerBoostRoot, store.ProposerBoostRoot(), stepstr)
 	}
 
 	if e.FinalizedCheckpoint != nil {
 		cp := store.FinalizedCheckpoint()
 		if e.FinalizedCheckpoint.Root != nil {
-			assert.EqualValues(t, *e.FinalizedCheckpoint.Root, cp.Root, stepstr)
+			assert.Equal(t, *e.FinalizedCheckpoint.Root, cp.Root, stepstr)
 		}
 		if e.FinalizedCheckpoint.Epoch != nil {
 			assert.EqualValues(t, *e.FinalizedCheckpoint.Epoch, cp.Epoch, stepstr)
@@ -334,7 +334,7 @@ func doCheck(t *testing.T, stepstr string, store *forkchoice.ForkChoiceStore, e 
 	if e.JustifiedCheckpoint != nil {
 		cp := store.JustifiedCheckpoint()
 		if e.JustifiedCheckpoint.Root != nil {
-			assert.EqualValues(t, *e.JustifiedCheckpoint.Root, cp.Root, stepstr)
+			assert.Equal(t, *e.JustifiedCheckpoint.Root, cp.Root, stepstr)
 		}
 		if e.JustifiedCheckpoint.Epoch != nil {
 			assert.EqualValues(t, *e.JustifiedCheckpoint.Epoch, cp.Epoch, stepstr)

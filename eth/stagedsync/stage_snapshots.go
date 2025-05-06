@@ -39,6 +39,7 @@ import (
 	"github.com/anacrolix/torrent"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
@@ -60,7 +61,6 @@ import (
 	"github.com/erigontech/erigon-lib/state/stats"
 	"github.com/erigontech/erigon-lib/types"
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
-	"github.com/erigontech/erigon/erigon-db/rawdb"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
@@ -84,7 +84,7 @@ const (
 
 type SnapshotsCfg struct {
 	db          kv.RwDB
-	chainConfig chain.Config
+	chainConfig *chain.Config
 	dirs        datadir.Dirs
 
 	blockRetire        services.BlockRetire
@@ -102,7 +102,7 @@ type SnapshotsCfg struct {
 }
 
 func StageSnapshotsCfg(db kv.RwDB,
-	chainConfig chain.Config,
+	chainConfig *chain.Config,
 	syncConfig ethconfig.Sync,
 	dirs datadir.Dirs,
 	blockRetire services.BlockRetire,
@@ -282,7 +282,22 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	// Download only the snapshots that are for the header chain.
 
 	log.Info(fmt.Sprintf("[%s] Syncing header-chain", s.LogPrefix()))
-	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.dirs, true /*headerChain=*/, cfg.blobs, cfg.caplinState, cfg.prune, cstate, agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, cfg.syncConfig); err != nil {
+	if err := snapshotsync.WaitForDownloader(
+		ctx,
+		s.LogPrefix(),
+		cfg.dirs,
+		true, /*headerChain=*/
+		cfg.blobs,
+		cfg.caplinState,
+		cfg.prune,
+		cstate,
+		agg,
+		tx,
+		cfg.blockReader,
+		cfg.chainConfig,
+		cfg.snapshotDownloader,
+		cfg.syncConfig,
+	); err != nil {
 		return err
 	}
 
@@ -292,7 +307,22 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download snapshots"})
 	log.Info(fmt.Sprintf("[%s] Syncing snapshots", s.LogPrefix()))
-	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.dirs, false /*headerChain=*/, cfg.blobs, cfg.caplinState, cfg.prune, cstate, agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, cfg.syncConfig); err != nil {
+	if err := snapshotsync.WaitForDownloader(
+		ctx,
+		s.LogPrefix(),
+		cfg.dirs,
+		false, /*headerChain=*/
+		cfg.blobs,
+		cfg.caplinState,
+		cfg.prune,
+		cstate,
+		agg,
+		tx,
+		cfg.blockReader,
+		cfg.chainConfig,
+		cfg.snapshotDownloader,
+		cfg.syncConfig,
+	); err != nil {
 		return err
 	}
 	if cfg.notifier.Events != nil {
@@ -300,7 +330,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "E2 Indexing"})
-	if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.notifier.Events, &cfg.chainConfig); err != nil {
+	if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.notifier.Events, cfg.chainConfig); err != nil {
 		return err
 	}
 
@@ -340,7 +370,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Fill DB"})
-	if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, cfg.blockReader, agg, logger); err != nil {
+	if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, cfg.blockReader, logger); err != nil {
 		return fmt.Errorf("FillDBFromSnapshots: %w", err)
 	}
 
@@ -372,7 +402,7 @@ func getPruneMarkerSafeThreshold(blockReader services.FullBlockReader) uint64 {
 	return snapProgress - pruneMarkerSafeThreshold
 }
 
-func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, blockReader services.FullBlockReader, agg *state.Aggregator, logger log.Logger) error {
+func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, blockReader services.FullBlockReader, logger log.Logger) error {
 	startTime := time.Now()
 	blocksAvailable := blockReader.FrozenBlocks()
 	logEvery := time.NewTicker(logInterval)
@@ -474,7 +504,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				return err
 			}
 
-			_ = tx.ClearBucket(kv.MaxTxNum)
+			_ = tx.ClearTable(kv.MaxTxNum)
 			if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
 				select {
 				case <-ctx.Done():
