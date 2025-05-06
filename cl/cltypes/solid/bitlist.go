@@ -270,9 +270,6 @@ func (u *BitList) UnmarshalJSON(input []byte) error {
 }
 
 func (u *BitList) Merge(other *BitList) (*BitList, error) {
-	if u.c != other.c {
-		return nil, errors.New("bitlist union: different capacity")
-	}
 	if u.Bits() != other.Bits() {
 		log.Warn("bitlist union: different length", "u", u.Bits(), "other", other.Bits())
 		return nil, errors.New("bitlist union: different length")
