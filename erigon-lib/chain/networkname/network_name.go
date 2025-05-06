@@ -16,6 +16,7 @@
 
 package networkname
 
+// TODO: These should be strongly/new-typed.
 const (
 	Mainnet             = "mainnet"
 	Holesky             = "holesky"
