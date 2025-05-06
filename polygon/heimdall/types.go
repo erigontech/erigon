@@ -208,8 +208,6 @@ var (
 				}
 				rs.LogLvl(log.LvlInfo)
 
-				defer d.MadvSequential().DisableReadAhead()
-
 				for {
 					g.Reset(0)
 					first = true
