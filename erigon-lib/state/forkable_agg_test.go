@@ -23,8 +23,8 @@ func TestOpenFolder(t *testing.T) {
 	// check dirtyFile presence
 
 	dirs, db, log := setup(t)
-	headerId, header := setupHeader(t, log, dirs)
-	bodyId, bodies := setupBodies(t, log, dirs)
+	headerId, header := setupHeader(t, db, log, dirs)
+	bodyId, bodies := setupBodies(t, db, log, dirs)
 
 	agg := NewForkableAgg(context.Background(), dirs, db, log)
 	agg.RegisterMarkedForkable(header)
@@ -139,8 +139,8 @@ func TestRecalcVisibleFilesAligned(t *testing.T) {
 	// different configurations of forkables - aligned and not aligned
 
 	dirs, db, log := setup(t)
-	headerId, header := setupHeader(t, log, dirs)
-	bodyId, bodies := setupBodies(t, log, dirs)
+	headerId, header := setupHeader(t, db, log, dirs)
+	bodyId, bodies := setupBodies(t, db, log, dirs)
 
 	agg := NewForkableAgg(context.Background(), dirs, db, log)
 	agg.RegisterMarkedForkable(header)
@@ -196,8 +196,8 @@ func TestRecalcVisibleFilesAligned(t *testing.T) {
 
 func TestRecalcVisibleFilesUnaligned(t *testing.T) {
 	dirs, db, log := setup(t)
-	headerId, header := setupHeader(t, log, dirs)
-	bodyId, bodies := setupBodies(t, log, dirs)
+	headerId, header := setupHeader(t, db, log, dirs)
+	bodyId, bodies := setupBodies(t, db, log, dirs)
 	bodies.unaligned = true
 
 	agg := NewForkableAgg(context.Background(), dirs, db, log)
@@ -284,8 +284,8 @@ func TestRecalcVisibleFiles2(t *testing.T) {
 func TestClose(t *testing.T) {
 	// dirty files/visible files should be closed
 	dirs, db, log := setup(t)
-	headerId, header := setupHeader(t, log, dirs)
-	bodyId, bodies := setupBodies(t, log, dirs)
+	headerId, header := setupHeader(t, db, log, dirs)
+	bodyId, bodies := setupBodies(t, db, log, dirs)
 	bodies.unaligned = true
 
 	agg := NewForkableAgg(context.Background(), dirs, db, log)
@@ -355,7 +355,7 @@ func setup(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
 	return dirs, db, logger
 }
 
-func setupHeader(t *testing.T, log log.Logger, dirs datadir.Dirs) (ForkableId, *Forkable[MarkedTxI]) {
+func setupHeader(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (ForkableId, *Forkable[MarkedTxI]) {
 	t.Helper()
 	headerId := registerEntity(dirs, "headers")
 
@@ -370,12 +370,15 @@ func setupHeader(t *testing.T, log log.Logger, dirs datadir.Dirs) (ForkableId, *
 
 	freezer := &SimpleMarkedFreezer{mfork: ma}
 	ma.SetFreezer(freezer)
-	cleanup(t, ma.snaps, dirs)
+	t.Cleanup(func() {
+		db.Close()
+		cleanupFiles(t, ma.snaps, dirs)
+	})
 
 	return headerId, ma
 }
 
-func setupBodies(t *testing.T, log log.Logger, dirs datadir.Dirs) (ForkableId, *Forkable[MarkedTxI]) {
+func setupBodies(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (ForkableId, *Forkable[MarkedTxI]) {
 	t.Helper()
 	bodyId := registerEntity(dirs, "bodies")
 
@@ -389,7 +392,10 @@ func setupBodies(t *testing.T, log log.Logger, dirs datadir.Dirs) (ForkableId, *
 
 	freezer := &SimpleMarkedFreezer{mfork: ma}
 	ma.SetFreezer(freezer)
-	cleanup(t, ma.snaps, dirs)
+	t.Cleanup(func() {
+		db.Close()
+		cleanupFiles(t, ma.snaps, dirs)
+	})
 
 	return bodyId, ma
 }
