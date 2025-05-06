@@ -208,6 +208,8 @@ var (
 				}
 				rs.LogLvl(log.LvlInfo)
 
+				defer d.MadvSequential().DisableReadAhead()
+
 				for {
 					g.Reset(0)
 					first = true
@@ -487,6 +489,8 @@ func buildValueIndex(ctx context.Context, sn snaptype.FileInfo, salt uint32, d *
 		return err
 	}
 	rs.LogLvl(log.LvlInfo)
+
+	defer d.MadvSequential().DisableReadAhead()
 
 	for {
 		g := d.MakeGetter()
