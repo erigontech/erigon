@@ -28,7 +28,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -137,7 +136,7 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 
 		// [IGNORE] The sync committee contribution is the first valid contribution received for the aggregator with index contribution_and_proof.aggregator_index for the slot contribution.slot and subcommittee index contribution.subcommittee_index (this requires maintaining a cache of size SYNC_COMMITTEE_SIZE for this topic that can be flushed after each slot).
 		if s.wasContributionSeen(contributionAndProof) {
-			return nil
+			return ErrIgnore
 		}
 
 		// aggregate signatures for later verification
@@ -165,23 +164,6 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 		}
 
 		if signedContribution.ImmediateVerification {
-			for i := 0; i < len(aggregateVerificationData.Signatures); i++ {
-				d := AggregateVerificationData{
-					Signatures: [][]byte{aggregateVerificationData.Signatures[i]},
-					SignRoots:  [][]byte{aggregateVerificationData.SignRoots[i]},
-					Pks:        [][]byte{aggregateVerificationData.Pks[i]},
-					F:          func() {},
-				}
-				sig := common.Bytes2Hex(aggregateVerificationData.Signatures[i])
-				if err := s.batchSignatureVerifier.ImmediateVerification(&d); err != nil {
-					log.Warn("immediate verification failed", "err", err, "index", i, "aggregation_bits", contributionAndProof.Contribution.AggregationBits, "subcommittee_index", contributionAndProof.Contribution.SubcommitteeIndex,
-						"slot", contributionAndProof.Contribution.Slot, "aggregator_index", contributionAndProof.AggregatorIndex, "subcommiteePubsKeys", len(subcommiteePubsKeys), "signature", sig)
-				} else if i == 2 && err == nil {
-					log.Warn("immediate verification succeeded", "index", i, "aggregation_bits", contributionAndProof.Contribution.AggregationBits, "subcommittee_index", contributionAndProof.Contribution.SubcommitteeIndex,
-						"slot", contributionAndProof.Contribution.Slot, "aggregator_index", contributionAndProof.AggregatorIndex, "subcommiteePubsKeys", len(subcommiteePubsKeys), "signature", sig)
-				}
-			}
-
 			return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
 		}
 
@@ -215,7 +197,7 @@ func (s *syncContributionService) GetSignaturesOnContributionSignatures(
 	}
 	// [REJECT] The aggregate signature is valid for the message beacon_block_root and aggregate pubkey derived
 	// from the participation info in aggregation_bits for the subcommittee specified by the contribution.subcommittee_index.
-	signature3, signatureRoot3, pubKey3, err := VerifySyncContributionProofAggregatedSignature(headState, contributionAndProof.Contribution, subcommiteePubsKeys)
+	signature3, signatureRoot3, pubKey3, err := verifySyncContributionProofAggregatedSignature(headState, contributionAndProof.Contribution, subcommiteePubsKeys)
 	if !s.test && err != nil {
 		return nil, err
 	}
@@ -303,7 +285,7 @@ func verifySyncContributionSelectionProof(st *state.CachingBeaconState, contribu
 }
 
 // verifySyncContributionProof verifies the contribution aggregated signature.
-func VerifySyncContributionProofAggregatedSignature(s *state.CachingBeaconState, contribution *cltypes.Contribution, subCommitteeKeys []common.Bytes48) ([]byte, []byte, []byte, error) {
+func verifySyncContributionProofAggregatedSignature(s *state.CachingBeaconState, contribution *cltypes.Contribution, subCommitteeKeys []common.Bytes48) ([]byte, []byte, []byte, error) {
 	domain, err := s.GetDomain(s.BeaconConfig().DomainSyncCommittee, state.Epoch(s))
 	if err != nil {
 		return nil, nil, nil, err

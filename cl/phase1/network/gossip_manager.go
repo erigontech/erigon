@@ -177,18 +177,11 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		obj := &services.SignedContributionAndProofForGossip{
 			Receiver:                   copyOfPeerData(data),
 			SignedContributionAndProof: &cltypes.SignedContributionAndProof{},
-			ImmediateVerification:      true,
 		}
 		if err := obj.SignedContributionAndProof.DecodeSSZ(data.Data, int(version)); err != nil {
 			return err
 		}
-		err := g.syncContributionService.ProcessMessage(ctx, data.SubnetId, obj)
-		if err == nil {
-			log.Debug("Received sync committee contribution via gossip", "slot", obj.SignedContributionAndProof.Message.Contribution.Slot)
-		} else if err != nil {
-			log.Debug("Failed. Received sync committee contribution via gossip", "slot", obj.SignedContributionAndProof.Message.Contribution.Slot, "err", err)
-		}
-		return err
+		return g.syncContributionService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameVoluntaryExit:
 		obj := &services.SignedVoluntaryExitForGossip{
 			Receiver:            copyOfPeerData(data),
@@ -247,9 +240,8 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 			return g.blobService.ProcessMessage(ctx, data.SubnetId, blobSideCar)
 		case gossip.IsTopicSyncCommittee(data.Name):
 			obj := &services.SyncCommitteeMessageForGossip{
-				Receiver:              copyOfPeerData(data),
-				SyncCommitteeMessage:  &cltypes.SyncCommitteeMessage{},
-				ImmediateVerification: true,
+				Receiver:             copyOfPeerData(data),
+				SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{},
 			}
 			if err := obj.SyncCommitteeMessage.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
 				return err
