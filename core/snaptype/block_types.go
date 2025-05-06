@@ -255,9 +255,6 @@ var (
 
 				bodyBuf, word := make([]byte, 0, 4096), make([]byte, 0, 4096)
 
-				defer d.MadvSequential().DisableReadAhead()
-				defer bodiesSegment.MadvSequential().DisableReadAhead()
-
 				for {
 					g, bodyGetter := d.MakeGetter(), bodiesSegment.MakeGetter()
 					var ti, offset, nextPos uint64

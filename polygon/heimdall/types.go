@@ -490,8 +490,6 @@ func buildValueIndex(ctx context.Context, sn snaptype.FileInfo, salt uint32, d *
 	}
 	rs.LogLvl(log.LvlInfo)
 
-	defer d.MadvSequential().DisableReadAhead()
-
 	for {
 		g := d.MakeGetter()
 		var i, offset, nextPos uint64
