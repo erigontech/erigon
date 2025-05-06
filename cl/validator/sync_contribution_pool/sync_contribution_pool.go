@@ -71,7 +71,8 @@ func (s *syncContributionPoolImpl) AddSyncContribution(headState *state.CachingB
 	defer s.mu.Unlock()
 
 	aggrBits, _ := json.Marshal(contribution.AggregationBits)
-	log.Debug("Adding sync contribution", "slot", contribution.Slot, "subcommitteeIndex", contribution.SubcommitteeIndex, "beaconBlockRoot", contribution.BeaconBlockRoot, "aggregationBits", string(aggrBits))
+	sig := common.Bytes2Hex(contribution.Signature[:])
+	log.Debug("Adding sync contribution", "slot", contribution.Slot, "subcommitteeIndex", contribution.SubcommitteeIndex, "beaconBlockRoot", contribution.BeaconBlockRoot, "aggregationBits", string(aggrBits), "signature", sig)
 	key := syncContributionKey{
 		slot:              contribution.Slot,
 		subcommitteeIndex: contribution.SubcommitteeIndex,

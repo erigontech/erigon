@@ -161,6 +161,7 @@ func (a *ApiHandler) GetEthV1ValidatorSyncCommitteeContribution(w http.ResponseW
 	//return newBeaconResponse(a.syncMessagePool.GetSyncContribution(slot, subCommitteeIndex, beaconBlockRoot)), nil
 	c := a.syncMessagePool.GetSyncContribution(slot, subCommitteeIndex, beaconBlockRoot)
 	aggrBits, _ := json.Marshal(c.AggregationBits)
-	log.Debug("[GetEthV1ValidatorSyncCommitteeContribution] contribution", "slot", slot, "subcommitteeIndex", subCommitteeIndex, "beaconBlockRoot", beaconBlockRoot, "aggregationBits", string(aggrBits))
+	sig := common.Bytes2Hex(c.Signature[:])
+	log.Debug("[GetEthV1ValidatorSyncCommitteeContribution] contribution", "slot", slot, "subcommitteeIndex", subCommitteeIndex, "beaconBlockRoot", beaconBlockRoot, "aggregationBits", string(aggrBits), "signature", sig)
 	return newBeaconResponse(c), nil
 }
