@@ -455,7 +455,6 @@ func (idx *Index) DisableReadAhead() {
 	}
 }
 func (idx *Index) MadvSequential() *Index {
-	w
 	idx.readAheadRefcnt.Add(1)
 	_ = mmap.MadviseSequential(idx.mmapHandle1)
 	return idx
