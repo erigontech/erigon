@@ -184,6 +184,8 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		err := g.syncContributionService.ProcessMessage(ctx, data.SubnetId, obj)
 		if err == nil {
 			log.Debug("Received sync committee contribution via gossip", "slot", obj.SignedContributionAndProof.Message.Contribution.Slot)
+		} else if err != nil {
+			log.Debug("Failed. Received sync committee contribution via gossip", "slot", obj.SignedContributionAndProof.Message.Contribution.Slot, "err", err)
 		}
 		return err
 	case gossip.TopicNameVoluntaryExit:

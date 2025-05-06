@@ -158,5 +158,8 @@ func (a *ApiHandler) GetEthV1ValidatorSyncCommitteeContribution(w http.ResponseW
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
-	return newBeaconResponse(a.syncMessagePool.GetSyncContribution(slot, subCommitteeIndex, beaconBlockRoot)), nil
+	//return newBeaconResponse(a.syncMessagePool.GetSyncContribution(slot, subCommitteeIndex, beaconBlockRoot)), nil
+	c := a.syncMessagePool.GetSyncContribution(slot, subCommitteeIndex, beaconBlockRoot)
+	log.Debug("[GetEthV1ValidatorSyncCommitteeContribution] contribution", "slot", slot, "subcommitteeIndex", subCommitteeIndex, "beaconBlockRoot", beaconBlockRoot)
+	return newBeaconResponse(c), nil
 }
