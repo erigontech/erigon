@@ -181,7 +181,7 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *
 	s.kf.Refresh()
 	defer s.kf.Close()
 
-	defer iidq.decomp.EnableReadAhead().DisableReadAhead()
+	defer iidq.decomp.MadvSequential().DisableReadAhead()
 
 	for {
 		stream := iidq.GetStream(ctx)

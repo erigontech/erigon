@@ -740,7 +740,19 @@ func (s *RoSnapshots) EnableReadAhead() *RoSnapshots {
 
 	for _, t := range s.enums {
 		for _, sn := range v.segments[t].Segments {
-			sn.src.EnableReadAhead()
+			sn.src.MadvSequential()
+		}
+	}
+
+	return s
+}
+func (s *RoSnapshots) MadvNormal() *RoSnapshots {
+	v := s.View()
+	defer v.Close()
+
+	for _, t := range s.enums {
+		for _, sn := range v.segments[t].Segments {
+			sn.src.MadvNormal()
 		}
 	}
 
@@ -753,7 +765,7 @@ func (s *RoSnapshots) EnableMadvWillNeed() *RoSnapshots {
 
 	for _, t := range s.enums {
 		for _, sn := range v.segments[t].Segments {
-			sn.src.EnableMadvWillNeed()
+			sn.src.MadvWillNeed()
 		}
 	}
 	return s
