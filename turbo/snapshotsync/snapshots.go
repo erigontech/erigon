@@ -759,6 +759,17 @@ func (s *RoSnapshots) EnableMadvWillNeed() *RoSnapshots {
 	}
 	return s
 }
+func (s *RoSnapshots) MadvNormal() *RoSnapshots {
+	v := s.View()
+	defer v.Close()
+
+	for _, t := range s.enums {
+		for _, sn := range v.segments[t].Segments {
+			sn.src.MadvNormal()
+		}
+	}
+	return s
+}
 
 func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) []*VisibleSegment {
 	newVisibleSegments := make([]*VisibleSegment, 0, dirtySegments.Len())
