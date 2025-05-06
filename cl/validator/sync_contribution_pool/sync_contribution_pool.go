@@ -182,8 +182,40 @@ func (s *syncContributionPoolImpl) AddSyncCommitteeMessage(headState *state.Cach
 		return err
 	}
 	copy(contribution.Signature[:], aggregatedSignature)
+
+	VerifySyncContributionProofAggregatedSignature(headState, contribution, committee[startSubCommittee:startSubCommittee+subCommitteeSize])
 	s.syncContributionPoolForAggregates[key] = contribution
 	s.cleanupOldContributions(headState)
+	return nil
+}
+
+func VerifySyncContributionProofAggregatedSignature(s *state.CachingBeaconState, contribution *cltypes.Contribution, subCommitteeKeys []common.Bytes48) error {
+	domain, err := s.GetDomain(s.BeaconConfig().DomainSyncCommittee, state.Epoch(s))
+	if err != nil {
+		return err
+	}
+
+	msg := utils.Sha256(contribution.BeaconBlockRoot[:], domain)
+	// only use the ones pertaining to the aggregation bits
+	subCommitteePubsKeys := make([][]byte, 0, len(subCommitteeKeys))
+	for i, key := range subCommitteeKeys {
+		if utils.IsBitOn(contribution.AggregationBits, i) {
+			subCommitteePubsKeys = append(subCommitteePubsKeys, common.CopyBytes(key[:]))
+		}
+	}
+
+	pubKeys, err := bls.AggregatePublickKeys(subCommitteePubsKeys)
+	if err != nil {
+		return err
+	}
+
+	//return contribution.Signature[:], msg[:], pubKeys, nil
+	if ok, err := bls.Verify(contribution.Signature[:], msg[:], pubKeys); err != nil {
+		log.Warn("Failed to verify sync contribution signature", "err", err)
+	} else if !ok {
+		log.Warn("contribution signature is not valid", "signature", common.Bytes2Hex(contribution.Signature[:]), "bits", common.Bytes2Hex(contribution.AggregationBits), "blockRoot", contribution.BeaconBlockRoot, "slot", contribution.Slot, "subcommitteeIndex", contribution.SubcommitteeIndex)
+		return err
+	}
 	return nil
 }
 

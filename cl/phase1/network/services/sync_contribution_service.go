@@ -215,7 +215,7 @@ func (s *syncContributionService) GetSignaturesOnContributionSignatures(
 	}
 	// [REJECT] The aggregate signature is valid for the message beacon_block_root and aggregate pubkey derived
 	// from the participation info in aggregation_bits for the subcommittee specified by the contribution.subcommittee_index.
-	signature3, signatureRoot3, pubKey3, err := verifySyncContributionProofAggregatedSignature(headState, contributionAndProof.Contribution, subcommiteePubsKeys)
+	signature3, signatureRoot3, pubKey3, err := VerifySyncContributionProofAggregatedSignature(headState, contributionAndProof.Contribution, subcommiteePubsKeys)
 	if !s.test && err != nil {
 		return nil, err
 	}
@@ -303,7 +303,7 @@ func verifySyncContributionSelectionProof(st *state.CachingBeaconState, contribu
 }
 
 // verifySyncContributionProof verifies the contribution aggregated signature.
-func verifySyncContributionProofAggregatedSignature(s *state.CachingBeaconState, contribution *cltypes.Contribution, subCommitteeKeys []common.Bytes48) ([]byte, []byte, []byte, error) {
+func VerifySyncContributionProofAggregatedSignature(s *state.CachingBeaconState, contribution *cltypes.Contribution, subCommitteeKeys []common.Bytes48) ([]byte, []byte, []byte, error) {
 	domain, err := s.GetDomain(s.BeaconConfig().DomainSyncCommittee, state.Epoch(s))
 	if err != nil {
 		return nil, nil, nil, err
