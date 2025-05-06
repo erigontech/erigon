@@ -255,7 +255,7 @@ func LoadSnapshotsHashes(ctx context.Context, dirs datadir.Dirs, chainName strin
 		tomlBytes, err = snapcfg.LoadRemotePreverified(ctx, chainName)
 		if err != nil {
 			log.Root().Crit("Snapshot hashes for supported networks was not loaded. Please check your network connection and/or GitHub status here https://www.githubstatus.com/", "chain", chainName, "err", err)
-			return nil, fmt.Errorf("failed to fetch remote snapshot hashes for chain %w", chainName)
+			return nil, fmt.Errorf("failed to fetch remote snapshot hashes for chain %q: %w", chainName, err)
 		}
 		if err := dir.WriteFileWithFsync(preverifiedPath, tomlBytes, 0644); err != nil {
 			return nil, err
