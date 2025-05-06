@@ -22,9 +22,9 @@ import (
 	"sort"
 
 	"github.com/holiman/uint256"
-	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon-lib/common"
+	jsonstream "github.com/erigontech/erigon-lib/json"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
@@ -39,7 +39,7 @@ import (
 type JsonStreamLogger struct {
 	ctx          context.Context
 	cfg          LogConfig
-	stream       *jsoniter.Stream
+	stream       jsonstream.Stream
 	hexEncodeBuf [128]byte
 	firstCapture bool
 
@@ -52,7 +52,7 @@ type JsonStreamLogger struct {
 }
 
 // NewStructLogger returns a new logger
-func NewJsonStreamLogger(cfg *LogConfig, ctx context.Context, stream *jsoniter.Stream) *JsonStreamLogger {
+func NewJsonStreamLogger(cfg *LogConfig, ctx context.Context, stream jsonstream.Stream) *JsonStreamLogger {
 	logger := &JsonStreamLogger{
 		ctx:          ctx,
 		stream:       stream,
