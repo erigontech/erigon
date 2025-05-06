@@ -209,10 +209,9 @@ func (s *SingleAttestation) Static() bool {
 func (s *SingleAttestation) ToAttestation(memberIndexInCommittee int, committeeLen int) *Attestation {
 	committeeBits := NewBitVector(maxCommitteesPerSlot)
 	committeeBits.SetBitAt(int(s.CommitteeIndex), true)
-	/*bitSlice := NewBitSlice()
-	bitSlice.SetBitAt(memberIndexInCommittee, true)
-	bitSlice.SetBitAt(committeeLen, true)*/
-	bytes := make([]byte, (committeeLen+1)/8)
+	//bitSlice.SetBitAt(memberIndexInCommittee, true)
+	//bitSlice.SetBitAt(committeeLen, true)
+	bytes := make([]byte, committeeLen/8+1)
 	bytes[memberIndexInCommittee/8] |= 1 << (memberIndexInCommittee % 8)
 	bytes[committeeLen/8] |= 1 << (committeeLen % 8)
 	aggregationBits := BitlistFromBytes(bytes, aggregationBitsSizeElectra)
