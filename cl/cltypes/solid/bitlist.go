@@ -22,6 +22,7 @@ import (
 	"math/bits"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 )
@@ -272,21 +273,25 @@ func (u *BitList) Merge(other *BitList) (*BitList, error) {
 	if u.c != other.c {
 		return nil, errors.New("bitlist union: different capacity")
 	}
+	if u.Bits() != other.Bits() {
+		log.Warn("bitlist union: different length", "u", u.Bits(), "other", other.Bits())
+		return nil, errors.New("bitlist union: different length")
+	}
 	// copy by the longer one
 	var ret, unionFrom *BitList
-	if u.Bits() < other.Bits() {
-		ret = other.Copy()
-		unionFrom = u
-	} else {
-		ret = u.Copy()
-		unionFrom = other
-	}
+	//if u.Bits() < other.Bits() {
+	ret = other.Copy()
+	unionFrom = u
+	//} else {
+	//	ret = u.Copy()
+	//	unionFrom = other
+	//}
 	// union
-	unionFrom.removeMsb()
-	for i := 0; i < unionFrom.l; i++ {
+	//unionFrom.removeMsb()
+	for i := 0; i < len(unionFrom.u); i++ {
 		ret.u[i] |= unionFrom.u[i]
 	}
-	unionFrom.addMsb()
+	//unionFrom.addMsb()
 	return ret, nil
 }
 
