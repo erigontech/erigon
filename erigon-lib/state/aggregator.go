@@ -1578,6 +1578,13 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 	return ac
 }
 
+func (at *AggregatorRoTx) HistoryProgress(name kv.Domain, tx kv.Tx) uint64 {
+	return at.d[name].HistoryProgress(tx)
+}
+func (at *AggregatorRoTx) ProgressII(name kv.InvertedIdx, tx kv.Tx) uint64 {
+	return at.searchII(name).Progress(tx)
+}
+
 // --- Domain part START ---
 
 func (at *AggregatorRoTx) RangeAsOf(ctx context.Context, tx kv.Tx, domain kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
@@ -1620,21 +1627,6 @@ func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo 
 }
 
 // --- Domain part END ---
-
-func (at *AggregatorRoTx) madvNormal() {
-	for _, d := range at.d {
-		for _, f := range d.files {
-			f.src.decompressor.EnableMadvNormal()
-		}
-	}
-}
-func (at *AggregatorRoTx) disableReadAhead() {
-	for _, d := range at.d {
-		for _, f := range d.files {
-			f.src.decompressor.DisableReadAhead()
-		}
-	}
-}
 
 func (at *AggregatorRoTx) Close() {
 	if at == nil || at.a == nil { // invariant: it's safe to call Close multiple times

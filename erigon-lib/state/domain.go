@@ -2038,4 +2038,4 @@ func (dt *DomainRoTx) Files() (res VisibleFiles) {
 }
 func (dt *DomainRoTx) Name() kv.Domain { return dt.name }
 
-func (dt *DomainRoTx) DbgMaxTxNumInDB(tx kv.Tx) uint64 { return dt.ht.iit.ii.maxTxNumInDB(tx) }
+func (dt *DomainRoTx) HistoryProgress(tx kv.Tx) uint64 { return dt.ht.iit.Progress(tx) }
