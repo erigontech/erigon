@@ -155,7 +155,6 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 		return err
 	}
 	endBlock = execProgress
-	defer cfg.ExecArgs.BlockReader.Snapshots().(*freezeblocks.RoSnapshots).EnableReadAhead().DisableReadAhead()
 
 	log.Info("SpawnCustomTrace", "startBlock", startBlock, "endBlock", endBlock)
 
@@ -351,6 +350,9 @@ func badFoundBlockNum(tx kv.Tx, fromBlock uint64, txNumsReader rawdbv3.TxNumsRea
 }
 
 func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs, tx kv.TemporalRwTx, doms *state2.SharedDomains, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
+	defer cfg.BlockReader.Snapshots().(*freezeblocks.RoSnapshots).EnableReadAhead().DisableReadAhead()
+	//defer tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).MadvNormal().DisableReadAhead()
+
 	const logPeriod = 5 * time.Second
 	logEvery := time.NewTicker(logPeriod)
 	defer logEvery.Stop()

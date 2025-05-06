@@ -417,7 +417,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 
 	for _, f := range domainFiles {
 		f := f
-		defer f.decompressor.EnableReadAhead().DisableReadAhead()
+		defer f.decompressor.MadvSequential().DisableReadAhead()
 	}
 
 	fromStep, toStep := r.values.from/r.aggStep, r.values.to/r.aggStep
@@ -572,7 +572,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 
 func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem, startTxNum, endTxNum uint64, ps *background.ProgressSet) (*filesItem, error) {
 	for _, h := range files {
-		defer h.decompressor.EnableReadAhead().DisableReadAhead()
+		defer h.decompressor.MadvSequential().DisableReadAhead()
 	}
 
 	var outItem *filesItem
@@ -724,10 +724,10 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 	}
 	if r.history.needMerge {
 		for _, f := range indexFiles {
-			defer f.decompressor.EnableReadAhead().DisableReadAhead()
+			defer f.decompressor.MadvSequential().DisableReadAhead()
 		}
 		for _, f := range historyFiles {
-			defer f.decompressor.EnableReadAhead().DisableReadAhead()
+			defer f.decompressor.MadvSequential().DisableReadAhead()
 		}
 
 		var comp *seg.Compressor

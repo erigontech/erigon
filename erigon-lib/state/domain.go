@@ -1299,7 +1299,7 @@ func buildHashMapAccessor(ctx context.Context, d *seg.Decompressor, compressed s
 	p := ps.AddNew(fileName, uint64(count))
 	defer ps.Delete(p)
 
-	defer d.EnableMadvNormal().DisableReadAhead()
+	defer d.MadvNormal().DisableReadAhead()
 
 	g := seg.NewReader(d.MakeGetter(), compressed)
 	var rs *recsplit.RecSplit

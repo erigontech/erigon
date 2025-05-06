@@ -145,7 +145,7 @@ func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx cont
 	iterStep := func(item visibleFile) error {
 		g := item.src.decompressor.MakeGetter()
 		g.Reset(0)
-		defer item.src.decompressor.EnableReadAhead().DisableReadAhead()
+		defer item.src.decompressor.MadvSequential().DisableReadAhead()
 
 		for g.HasNext() {
 			k, _ := g.NextUncompressed()
