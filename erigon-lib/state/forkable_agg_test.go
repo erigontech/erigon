@@ -370,8 +370,8 @@ func setupHeader(t *testing.T, log log.Logger, dirs datadir.Dirs) (ForkableId, *
 
 	freezer := &SimpleMarkedFreezer{mfork: ma}
 	ma.SetFreezer(freezer)
+	cleanup(t, ma.snaps, dirs)
 
-	// cleanup?
 	return headerId, ma
 }
 
@@ -389,6 +389,7 @@ func setupBodies(t *testing.T, log log.Logger, dirs datadir.Dirs) (ForkableId, *
 
 	freezer := &SimpleMarkedFreezer{mfork: ma}
 	ma.SetFreezer(freezer)
+	cleanup(t, ma.snaps, dirs)
 
 	return bodyId, ma
 }
