@@ -227,7 +227,7 @@ func VerifySyncContributionProofAggregatedSignature(s *state.CachingBeaconState,
 		log.Warn("Failed to verify sync contribution signature", "err", err)
 	} else if !ok {
 		log.Warn("contribution signature is not valid", "signature", common.Bytes2Hex(contribution.Signature[:]), "bits", common.Bytes2Hex(contribution.AggregationBits), "blockRoot", contribution.BeaconBlockRoot, "slot", contribution.Slot, "subcommitteeIndex", contribution.SubcommitteeIndex)
-		return err
+		return errors.New("sync contribution signature is not valid")
 	}
 	return nil
 }
