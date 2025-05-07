@@ -1,6 +1,11 @@
 package state
 
-import "github.com/erigontech/erigon-lib/kv"
+import (
+	"context"
+	"time"
+
+	"github.com/erigontech/erigon-lib/kv"
+)
 
 type aggDirtyFilesRoTx struct {
 	agg    *Aggregator
@@ -187,6 +192,21 @@ func (f *iiDirtyFilesRoTx) Close() {
 	}
 	f.files = nil
 	f.ii = nil
+}
+
+func (a *Aggregator) PeriodicalyPrintProcessSet(ctx context.Context) {
+	go func() {
+		logEvery := time.NewTicker(30 * time.Second)
+		defer logEvery.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-logEvery.C:
+				a.logger.Info("[agg] ", "files", a.ps.String())
+			}
+		}
+	}()
 }
 
 // fileItems collection of missed files

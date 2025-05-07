@@ -1473,7 +1473,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	defer tx.Rollback()
 
 	d.historyLargeValues = false
-	d.History.compression = seg.CompressNone //seg.CompressKeys | seg.CompressVals
+	d.History.Compression = seg.CompressNone //seg.CompressKeys | seg.CompressVals
 	d.Compression = seg.CompressNone         //seg.CompressKeys | seg.CompressVals
 	d.filenameBase = kv.CommitmentDomain.String()
 
@@ -1543,7 +1543,7 @@ func TestDomainRange(t *testing.T) {
 	defer tx.Rollback()
 
 	d.historyLargeValues = false
-	d.History.compression = seg.CompressNone // seg.CompressKeys | seg.CompressVals
+	d.History.Compression = seg.CompressNone // seg.CompressKeys | seg.CompressVals
 	d.Compression = seg.CompressNone         // seg.CompressKeys | seg.CompressVals
 	d.filenameBase = kv.AccountsDomain.String()
 
@@ -1638,7 +1638,7 @@ func TestDomain_CanPruneAfterAggregation(t *testing.T) {
 	defer tx.Rollback()
 
 	d.historyLargeValues = false
-	d.History.compression = seg.CompressKeys | seg.CompressVals
+	d.History.Compression = seg.CompressKeys | seg.CompressVals
 	d.Compression = seg.CompressKeys | seg.CompressVals
 	d.filenameBase = kv.CommitmentDomain.String()
 
@@ -1734,7 +1734,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	defer tx.Rollback()
 
 	d.historyLargeValues = false
-	d.History.compression = seg.CompressNone //seg.CompressKeys | seg.CompressVals
+	d.History.Compression = seg.CompressNone //seg.CompressKeys | seg.CompressVals
 	d.Compression = seg.CompressNone         //seg.CompressKeys | seg.CompressVals
 
 	dc := d.BeginFilesRo()
@@ -1877,7 +1877,7 @@ func TestDomain_PruneProgress(t *testing.T) {
 	defer rwTx.Rollback()
 
 	d.historyLargeValues = false
-	d.History.compression = seg.CompressKeys | seg.CompressVals
+	d.History.Compression = seg.CompressKeys | seg.CompressVals
 	d.Compression = seg.CompressKeys | seg.CompressVals
 
 	dc := d.BeginFilesRo()

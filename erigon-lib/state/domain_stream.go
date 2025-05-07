@@ -389,7 +389,7 @@ func (dt *DomainRoTx) debugIteratePrefix(prefix []byte, haveRamUpdates bool,
 					}
 				}
 			case FILE_CURSOR:
-				indexList := dt.d.AccessorList
+				indexList := dt.d.Accessors
 				if indexList&AccessorBTree != 0 {
 					if ci1.btCursor.Next() {
 						ci1.key = ci1.btCursor.Key()

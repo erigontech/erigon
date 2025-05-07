@@ -22,7 +22,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"path"
 	"path/filepath"
 	"strings"
 
@@ -30,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/page"
 	"github.com/erigontech/erigon-lib/kv"
@@ -370,6 +370,11 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	if !r.any() {
 		return
 	}
+	defer func() {
+		if rec := recover(); rec != nil { // Merge is background operation, must not crush application. Convert to error.
+			err = fmt.Errorf("[snapshots] background mergeFiles: domain=%s, %s, %s, %s", dt.name, r.String(), rec, dbg.Stack())
+		}
+	}()
 
 	closeFiles := true
 	var kvWriter *seg.Writer
@@ -414,12 +419,13 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	if dt.d.noFsync {
 		kvWriter.DisableFsync()
 	}
-	p := ps.AddNew("merge "+path.Base(kvFilePath), 1)
+	p := ps.AddNew("merge "+kvFile.FileName(), 0)
 	defer ps.Delete(p)
 
 	var cp CursorHeap
 	heap.Init(&cp)
 	for _, item := range domainFiles {
+		p.Total.Add(uint64(item.decompressor.Count()))
 		g := seg.NewReader(item.decompressor.MakeGetter(), dt.d.Compression)
 		g.Reset(0)
 		if g.HasNext() {
@@ -480,6 +486,8 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 			valBuf = append(valBuf[:0], lastVal...)
 			keyFileStartTxNum, keyFileEndTxNum = lastFileStartTxNum, lastFileEndTxNum
 		}
+
+		p.Processed.Add(1)
 	}
 	if keyBuf != nil {
 		if vt != nil {
@@ -510,18 +518,18 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 	}
 
-	if dt.d.AccessorList&AccessorBTree != 0 {
+	if dt.d.Accessors.Has(AccessorBTree) {
 		btPath := dt.d.kvBtAccessorFilePath(fromStep, toStep)
 		btM := DefaultBtreeM
 		if toStep == 0 && dt.d.filenameBase == "commitment" {
 			btM = 128
 		}
-		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, btM, valuesIn.decompressor, dt.d.Compression, *dt.d.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync, dt.d.AccessorList)
+		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, btM, valuesIn.decompressor, dt.d.Compression, *dt.d.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync, dt.d.Accessors)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
 	}
-	if dt.d.AccessorList&AccessorHashMap != 0 {
+	if dt.d.Accessors.Has(AccessorHashMap) {
 		if err = dt.d.buildHashMapAccessor(ctx, fromStep, toStep, valuesIn.decompressor, ps); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s buildAccessor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
@@ -530,7 +538,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		}
 	}
 
-	if dt.d.AccessorList&AccessorExistence != 0 {
+	if dt.d.Accessors.Has(AccessorExistence) {
 		bloomIndexPath := dt.d.kvExistenceIdxFilePath(fromStep, toStep)
 		exists, err := dir.FileExist(bloomIndexPath)
 		if err != nil {
@@ -548,11 +556,9 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	return
 }
 
-func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem, startTxNum, endTxNum uint64, ps *background.ProgressSet) (*filesItem, error) {
-	var outItem *filesItem
+func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem, startTxNum, endTxNum uint64, ps *background.ProgressSet) (outItem *filesItem, err error) {
 	var comp *seg.Compressor
 	var decomp *seg.Decompressor
-	var err error
 	var closeItem = true
 	defer func() {
 		if closeItem {
@@ -573,21 +579,28 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 	fromStep, toStep := startTxNum/iit.ii.aggregationStep, endTxNum/iit.ii.aggregationStep
 
 	datPath := iit.ii.efFilePath(fromStep, toStep)
-	if comp, err = seg.NewCompressor(ctx, "merge idx "+iit.ii.filenameBase, datPath, iit.ii.dirs.Tmp, iit.ii.compressorCfg, log.LvlTrace, iit.ii.logger); err != nil {
+	if comp, err = seg.NewCompressor(ctx, "merge idx "+iit.ii.filenameBase, datPath, iit.ii.dirs.Tmp, iit.ii.CompressorCfg, log.LvlTrace, iit.ii.logger); err != nil {
 		return nil, fmt.Errorf("merge %s inverted index compressor: %w", iit.ii.filenameBase, err)
 	}
 	if iit.ii.noFsync {
 		comp.DisableFsync()
 	}
-	write := seg.NewWriter(comp, iit.ii.compression)
-	p := ps.AddNew(path.Base(datPath), 1)
+	write := seg.NewWriter(comp, iit.ii.Compression)
+	p := ps.AddNew("merge "+comp.FileName(), 0)
 	defer ps.Delete(p)
+
+	defer func() {
+		if rec := recover(); rec != nil { // Merge is background operation, must not crush application. Convert to error.
+			err = fmt.Errorf("[snapshots] background mergeFiles: domain=%s, %s, %s, %s", iit.ii.name.String(), comp.FileName(), rec, dbg.Stack())
+		}
+	}()
 
 	var cp CursorHeap
 	heap.Init(&cp)
 
 	for _, item := range files {
-		g := seg.NewReader(item.decompressor.MakeGetter(), iit.ii.compression)
+		p.Total.Add(uint64(item.decompressor.Count()))
+		g := seg.NewReader(item.decompressor.MakeGetter(), iit.ii.Compression)
 		g.Reset(0)
 		if g.HasNext() {
 			key, _ := g.Next(nil)
@@ -684,6 +697,12 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 	if !r.any() {
 		return nil, nil, nil
 	}
+	defer func() {
+		if rec := recover(); rec != nil { // Merge is background operation, must not crush application. Convert to error.
+			err = fmt.Errorf("[snapshots] background mergeFiles: domain=%s, %s, %s, %s", ht.h.name.String(), r.String(ht.h.aggregationStep), rec, dbg.Stack())
+		}
+	}()
+
 	var closeIndex = true
 	defer func() {
 		if closeIndex {
@@ -723,27 +742,28 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		fromStep, toStep := r.history.from/ht.h.aggregationStep, r.history.to/ht.h.aggregationStep
 		datPath := ht.h.vFilePath(fromStep, toStep)
 		idxPath := ht.h.vAccessorFilePath(fromStep, toStep)
-		if comp, err = seg.NewCompressor(ctx, "merge hist "+ht.h.filenameBase, datPath, ht.h.dirs.Tmp, ht.h.compressorCfg, log.LvlTrace, ht.h.logger); err != nil {
+		if comp, err = seg.NewCompressor(ctx, "merge hist "+ht.h.filenameBase, datPath, ht.h.dirs.Tmp, ht.h.CompressorCfg, log.LvlTrace, ht.h.logger); err != nil {
 			return nil, nil, fmt.Errorf("merge %s history compressor: %w", ht.h.filenameBase, err)
 		}
-		compr := seg.NewWriter(comp, ht.h.compression)
+		compr := seg.NewWriter(comp, ht.h.Compression)
 		if ht.h.noFsync {
 			compr.DisableFsync()
 		}
 		pagedWr := page.NewWriter(compr, ht.h.historyValuesOnCompressedPage, true)
-		p := ps.AddNew(path.Base(datPath), 1)
+		p := ps.AddNew("merge "+comp.FileName(), 0)
 		defer ps.Delete(p)
 
 		var cp CursorHeap
 		heap.Init(&cp)
 		for _, item := range indexFiles {
-			g := seg.NewReader(item.decompressor.MakeGetter(), ht.h.compression)
+			p.Total.Add(uint64(item.decompressor.Count()))
+			g := seg.NewReader(item.decompressor.MakeGetter(), ht.h.Compression)
 			g.Reset(0)
 			if g.HasNext() {
 				var g2 *seg.PagedReader
 				for _, hi := range historyFiles { // full-scan, because it's ok to have different amount files. by unclean-shutdown.
 					if hi.startTxNum == item.startTxNum && hi.endTxNum == item.endTxNum {
-						g2 = seg.NewPagedReader(seg.NewReader(hi.decompressor.MakeGetter(), ht.h.compression), ht.h.historyValuesOnCompressedPage, true)
+						g2 = seg.NewPagedReader(seg.NewReader(hi.decompressor.MakeGetter(), ht.h.Compression), ht.h.historyValuesOnCompressedPage, true)
 						break
 					}
 				}
@@ -796,6 +816,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 					heap.Push(&cp, ci1)
 				}
 			}
+			p.Processed.Add(1)
 		}
 		if err := pagedWr.Flush(); err != nil {
 			return nil, nil, err
@@ -995,6 +1016,8 @@ func garbage(dirtyFiles *btree.BTreeG[*filesItem], visibleFiles []visibleFile, m
 			if item.isSubsetOf(merged) {
 				outs = append(outs, item)
 			}
+			// this case happens when in previous process run, the merged file was created,
+			// but the processed ended before subsumed files could be deleted.
 			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainRoTx`)
 			if item.isBefore(merged) && hasCoverVisibleFile(visibleFiles, item) {
 				outs = append(outs, item)
