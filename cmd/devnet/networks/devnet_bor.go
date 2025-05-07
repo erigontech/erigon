@@ -20,9 +20,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/jinzhu/copier"
-
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
@@ -233,8 +230,7 @@ func NewBorDevnetWithLocalHeimdall(
 	consoleLogLevel log.Lvl,
 	dirLogLevel log.Lvl,
 ) devnet.Devnet {
-	var config chain.Config
-	copier.Copy(&config, params.BorDevnetChainConfig)
+	config := *params.BorDevnetChainConfig
 	borConfig := config.Bor.(*borcfg.BorConfig)
 	if sprintSize > 0 {
 		borConfig.Sprint = map[string]uint64{"0": sprintSize}

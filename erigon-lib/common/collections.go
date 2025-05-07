@@ -18,7 +18,6 @@ package common
 
 import (
 	"math/rand"
-	"strconv"
 )
 
 func SliceMap[T any, U any](s []T, mapFunc func(T) U) []U {
@@ -41,16 +40,4 @@ func SliceTakeLast[T any](s []T, count int) []T {
 		return s[length-count:]
 	}
 	return s
-}
-
-func ParseMapKeysIntoUint64[T any](m map[string]T) map[uint64]T {
-	res := make(map[uint64]T)
-	for k, v := range m {
-		keyU64, err := strconv.ParseUint(k, 10, 64)
-		if err != nil {
-			panic(err)
-		}
-		res[keyU64] = v
-	}
-	return res
 }

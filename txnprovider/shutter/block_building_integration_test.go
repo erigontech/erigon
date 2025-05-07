@@ -27,12 +27,10 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	libp2pcrypto "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/chain"
 	params2 "github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -327,8 +325,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	}
 	t.Cleanup(cleanNode(ethNode))
 
-	var chainConfig chain.Config
-	copier.Copy(&chainConfig, params.ChiadoChainConfig)
+	chainConfig := *params.ChiadoChainConfig
 	chainConfig.ChainName = "shutter-devnet"
 	chainConfig.ChainID = chainId
 	chainConfig.TerminalTotalDifficulty = big.NewInt(0)

@@ -26,8 +26,6 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/jinzhu/copier"
-
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -427,8 +425,7 @@ func TestClique(t *testing.T) {
 			}
 
 			// Assemble a chain of headers from the cast votes
-			var config chain.Config
-			copier.Copy(&config, params.AllCliqueProtocolChanges)
+			config := *params.AllCliqueProtocolChanges
 			config.Clique = &chain.CliqueConfig{
 				Period: 1,
 				Epoch:  tt.epoch,
@@ -522,7 +519,7 @@ func TestClique(t *testing.T) {
 			var snap *clique.Snapshot
 			if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
 				chainReader := stagedsync.ChainReader{
-					Cfg:         &config,
+					Cfg:         config,
 					Db:          tx,
 					BlockReader: m.BlockReader,
 					Logger:      logger,

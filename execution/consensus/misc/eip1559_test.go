@@ -23,8 +23,6 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/jinzhu/copier"
-
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
@@ -34,8 +32,7 @@ import (
 // copyConfig does a _shallow_ copy of a given config. Safe to set new values, but
 // do not use e.g. SetInt() on the numbers. For testing only
 func copyConfig(original *chain.Config) *chain.Config {
-	var copy chain.Config
-	copier.Copy(&copy, original)
+	copy := *original
 	return &copy
 }
 
