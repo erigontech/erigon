@@ -1410,7 +1410,7 @@ func buildExistanceFilter(ctx context.Context, d *seg.Decompressor, compressed s
 		p.Processed.Add(1)
 	}
 	if err = existenceFilter.Build(); err != nil {
-		return fmt.Errorf("build idx: %w", err)
+		return fmt.Errorf("buildExistanceFilter: %w", err)
 	}
 	return nil
 }
