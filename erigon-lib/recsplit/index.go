@@ -448,14 +448,23 @@ func (idx *Index) DisableReadAhead() {
 	_ = mmap.MadviseRandom(idx.mmapHandle1)
 }
 func (idx *Index) MadvSequential() *Index {
+	if idx == nil || idx.mmapHandle1 == nil {
+		return idx
+	}
 	_ = mmap.MadviseSequential(idx.mmapHandle1)
 	return idx
 }
 func (idx *Index) MadvNormal() *Index {
+	if idx == nil || idx.mmapHandle1 == nil {
+		return idx
+	}
 	_ = mmap.MadviseNormal(idx.mmapHandle1)
 	return idx
 }
 func (idx *Index) MadvWillNeed() *Index {
+	if idx == nil || idx.mmapHandle1 == nil {
+		return idx
+	}
 	_ = mmap.MadviseWillNeed(idx.mmapHandle1)
 	return idx
 }

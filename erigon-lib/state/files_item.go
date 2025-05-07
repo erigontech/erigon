@@ -150,6 +150,20 @@ func (i *filesItem) closeFilesAndRemove() {
 	}
 }
 
+func (i *filesItem) madvNormal() {
+	i.decompressor.MadvNormal()
+	i.index.MadvNormal()
+	//	i.bindex.MadvNormal()
+	//	i.existence.MadvNormal()
+}
+
+func (i *filesItem) disableReadAhead() {
+	i.decompressor.DisableReadAhead()
+	i.index.DisableReadAhead()
+	//	i.bindex.DisableReadAhead()
+	//	i.existence.DisableReadAhead()
+}
+
 func scanDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext string, logger log.Logger) (res []*filesItem) {
 	re := regexp.MustCompile("^v([0-9]+)-" + filenameBase + ".([0-9]+)-([0-9]+)." + ext + "$")
 	var err error

@@ -1409,6 +1409,9 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	agg.SetCollateAndBuildWorkers(estimate.StateV3Collate.Workers())
 	agg.SetMergeWorkers(estimate.AlmostAllCPUs())
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+	blockReader, _ := br.IO()
+	defer blockReader.Snapshots().(*freezeblocks.RoSnapshots).MadvNormal().DisableReadAhead()
+	defer agg.MadvNormal().DisableReadAhead()
 
 	if err := br.BuildMissedIndicesIfNeed(ctx, "retire", nil, chainConfig); err != nil {
 		return err
@@ -1426,7 +1429,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}); err != nil {
 		return err
 	}
-	blockReader, _ := br.IO()
+
 	from2, to2, ok := freezeblocks.CanRetire(to, blockReader.FrozenBlocks(), coresnaptype.Enums.Headers, nil)
 	if ok {
 		from, to = from2, to2

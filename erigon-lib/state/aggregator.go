@@ -1685,34 +1685,12 @@ func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo 
 func (at *AggregatorRoTx) MadvNormal() *AggregatorRoTx {
 	for _, d := range at.d {
 		for _, f := range d.files {
-			if f.src.decompressor != nil {
-				f.src.decompressor.MadvNormal()
-			}
-			if f.src.index != nil {
-				f.src.index.MadvNormal()
-			}
-			//if f.src.bindex != nil {
-			//	f.src.bindex.MadvNormal()
-			//}
-			//if f.src.existence != nil {
-			//	f.src.existence.MadvNormal()
-			//}
+			f.src.madvNormal()
 		}
 	}
 	for _, ii := range at.iis {
 		for _, f := range ii.files {
-			if f.src.decompressor != nil {
-				f.src.decompressor.MadvNormal()
-			}
-			if f.src.index != nil {
-				f.src.index.MadvNormal()
-			}
-			//if f.src.bindex != nil {
-			//	f.src.bindex.MadvNormal()
-			//}
-			//if f.src.existence != nil {
-			//	f.src.existence.MadvNormal()
-			//}
+			f.src.madvNormal()
 		}
 	}
 	return at
@@ -1720,37 +1698,48 @@ func (at *AggregatorRoTx) MadvNormal() *AggregatorRoTx {
 func (at *AggregatorRoTx) DisableReadAhead() {
 	for _, d := range at.d {
 		for _, f := range d.files {
-			if f.src.decompressor != nil {
-				f.src.decompressor.DisableReadAhead()
-			}
-			if f.src.index != nil {
-				f.src.index.DisableReadAhead()
-			}
-			//if f.src.bindex != nil {
-			//	f.src.bindex.DisableReadAhead()
-			//}
-			//if f.src.existence != nil {
-			//	f.src.existence.DisableReadAhead()
-			//}
+			f.src.disableReadAhead()
 		}
 	}
 	for _, ii := range at.iis {
 		for _, f := range ii.files {
-			if f.src.decompressor != nil {
-				f.src.decompressor.DisableReadAhead()
-			}
-			if f.src.index != nil {
-				f.src.index.DisableReadAhead()
-			}
-			//if f.src.bindex != nil {
-			//	f.src.bindex.MadvNormal()
-			//}
-			//if f.src.existence != nil {
-			//	f.src.existence.MadvNormal()
-			//}
+			f.src.disableReadAhead()
 		}
 	}
+}
+func (a *Aggregator) MadvNormal() *Aggregator {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	for _, d := range a.d {
+		d.dirtyFiles.Ascend(nil, func(item *filesItem) bool {
+			item.madvNormal()
+			return true
+		})
+	}
+	for _, ii := range a.iis {
+		ii.dirtyFiles.Ascend(nil, func(item *filesItem) bool {
+			item.madvNormal()
+			return true
+		})
+	}
+	return a
+}
 
+func (a *Aggregator) DisableReadAhead() {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	for _, d := range a.d {
+		d.dirtyFiles.Ascend(nil, func(item *filesItem) bool {
+			item.disableReadAhead()
+			return true
+		})
+	}
+	for _, ii := range a.iis {
+		ii.dirtyFiles.Ascend(nil, func(item *filesItem) bool {
+			item.disableReadAhead()
+			return true
+		})
+	}
 }
 
 func (at *AggregatorRoTx) Close() {

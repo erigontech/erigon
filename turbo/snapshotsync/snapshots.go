@@ -748,7 +748,7 @@ func (s *RoSnapshots) EnableReadAhead() *RoSnapshots {
 	return s
 }
 
-func (s *RoSnapshots) EnableMadvWillNeed() *RoSnapshots {
+func (s *RoSnapshots) MadvWillNeed() *RoSnapshots {
 	v := s.View()
 	defer v.Close()
 
