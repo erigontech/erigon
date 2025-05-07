@@ -167,6 +167,7 @@ func (s *syncContributionPoolImpl) AddSyncCommitteeMessage(headState *state.Cach
 				return nil
 			}
 			utils.FlipBitOn(contribution.AggregationBits, int(i-startSubCommittee))
+			// Note: it's possible that one validator appears multiple times in the subcommittee.
 			signatures = append(signatures, common.CopyBytes(message.Signature[:]))
 		}
 	}
