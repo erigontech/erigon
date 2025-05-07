@@ -415,11 +415,6 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		return
 	}
 
-	for _, f := range domainFiles {
-		f := f
-		defer f.decompressor.EnableReadAhead().DisableReadAhead()
-	}
-
 	fromStep, toStep := r.values.from/r.aggStep, r.values.to/r.aggStep
 	kvFilePath := dt.d.kvFilePath(fromStep, toStep)
 
@@ -571,10 +566,6 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 }
 
 func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem, startTxNum, endTxNum uint64, ps *background.ProgressSet) (*filesItem, error) {
-	for _, h := range files {
-		defer h.decompressor.EnableReadAhead().DisableReadAhead()
-	}
-
 	var outItem *filesItem
 	var comp *seg.Compressor
 	var decomp *seg.Decompressor
@@ -728,13 +719,6 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		return nil, nil, err
 	}
 	if r.history.needMerge {
-		for _, f := range indexFiles {
-			defer f.decompressor.EnableReadAhead().DisableReadAhead()
-		}
-		for _, f := range historyFiles {
-			defer f.decompressor.EnableReadAhead().DisableReadAhead()
-		}
-
 		var comp *seg.Compressor
 		var decomp *seg.Decompressor
 		var rs *recsplit.RecSplit

@@ -844,6 +844,10 @@ func (ii *InvertedIndex) maxTxNumInDB(tx kv.Tx) uint64 {
 	return 0
 }
 
+func (iit *InvertedIndexRoTx) Progress(tx kv.Tx) uint64 {
+	return max(iit.files.EndTxNum(), iit.ii.maxTxNumInDB(tx))
+}
+
 func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx) bool {
 	return iit.ii.minTxNumInDB(tx) < iit.files.EndTxNum()
 }

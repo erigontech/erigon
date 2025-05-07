@@ -357,7 +357,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 	p := ps.AddNew(indexFileName, uint64(kv.Count()/2))
 	defer ps.Delete(p)
 
-	defer kv.EnableReadAhead().DisableReadAhead()
+	defer kv.MadvSequential().DisableReadAhead()
 	bloomPath := strings.TrimSuffix(indexPath, ".bt") + ".kvei"
 
 	var bloom *existence.Filter
@@ -474,7 +474,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 		return &Cursor{ef: idx.ef, returnInto: &idx.pool}
 	}
 
-	defer kv.EnableMadvNormal().DisableReadAhead()
+	defer kv.MadvNormal().DisableReadAhead()
 	kvGetter := seg.NewReader(kv.MakeGetter(), compress)
 
 	if len(idx.data[pos:]) == 0 {
