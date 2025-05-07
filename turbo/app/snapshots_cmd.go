@@ -1468,8 +1468,15 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	logger.Info("Prune state history")
 	for hasMoreToPrune := true; hasMoreToPrune; {
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
+			err = tx.(kv.TemporalRwTx).Debug().GreedyPruneHistory(ctx, kv.CommitmentDomain)
+			if err != nil {
+				return err
+			}
 			hasMoreToPrune, err = tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 2*time.Minute)
-			return err
+			if err != nil {
+				return err
+			}
+			return nil
 		}); err != nil {
 			return err
 		}
