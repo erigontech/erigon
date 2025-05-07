@@ -468,6 +468,25 @@ func (d *Downloader) allTorrentsComplete() bool {
 		if !t.Complete().Bool() {
 			return false
 		}
+		ti := t.Info()
+		for f := range ti.UpvertedFilesIter() {
+			fp := filepath.Join(d.SnapDir(), filepath.FromSlash(ti.Name), filepath.Join(f.BestPath()...))
+			fi, err := os.Stat(fp)
+			if err != nil {
+				panic(err)
+			}
+			if fi.Size() != f.Length {
+				d.logger.Crit("snapshot file has wrong size", "name", f.DisplayPath(ti), "expected", f.Length, "actual", fi.Size())
+				if fi.Size() > f.Length {
+					os.Chmod(fp, 0o200)
+					err = os.Truncate(fp, f.Length)
+					if err != nil {
+						panic(err)
+					}
+					os.Chmod(fp, 0o400)
+				}
+			}
+		}
 	}
 	return true
 }
@@ -955,9 +974,9 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	if err != nil {
 		return fmt.Errorf("AddNewSeedableFile: %w", err)
 	}
-	_, _, err = d.addTorrentFile(ts)
+	_, _, err = d.addTorrentSpec(ts)
 	if err != nil {
-		return fmt.Errorf("addTorrentFile: %w", err)
+		return fmt.Errorf("addTorrentSpec: %w", err)
 	}
 	return nil
 }
@@ -992,7 +1011,8 @@ func (d *Downloader) specInfoUnknown(tup SnapshotTuple) *torrent.TorrentSpec {
 }
 
 func (d *Downloader) loadSpecFromDisk(tup SnapshotTuple) (spec g.Option[*torrent.TorrentSpec], err error) {
-	mi, err := metainfo.LoadFromFile(filepath.Join(d.SnapDir(), tup.Name+".torrent"))
+	miPath := filepath.Join(d.SnapDir(), filepath.FromSlash(tup.Name)+".torrent")
+	mi, err := metainfo.LoadFromFile(miPath)
 	if errors.Is(err, fs.ErrNotExist) {
 		err = nil
 		return
@@ -1002,10 +1022,14 @@ func (d *Downloader) loadSpecFromDisk(tup SnapshotTuple) (spec g.Option[*torrent
 	}
 	diskSpec := torrent.TorrentSpecFromMetaInfo(mi)
 	if diskSpec.InfoHash != tup.Hash {
-		// This is recoverable, by deleting the torrent file and returning a spec for unknown info.
-		// Probably better to just error it for now unless someone reports it. Also what if the
-		// metainfo doesn't contain info bytes?
-		err = fmt.Errorf("disk metainfo hash %v does not match expected %v", diskSpec.InfoHash, tup.Hash)
+		d.logger.Warn("disk metainfo hash mismatch",
+			"expected", tup.Hash,
+			"actual", diskSpec.InfoHash,
+			"name", tup.Name)
+		err = os.Remove(miPath)
+		if err != nil {
+			err = fmt.Errorf("removing bad metainfo file: %w", err)
+		}
 		return
 	}
 	spec.Set(diskSpec)
@@ -1024,15 +1048,20 @@ func (d *Downloader) webSeedUrlStrs() iter.Seq[string] {
 	}
 }
 
-func (d *Downloader) addTorrent(ctx context.Context, infoHash metainfo.Hash, name string) error {
+// Add a torrent with a known info hash. Either someone else made it, or it was on disk.
+func (d *Downloader) addPriorTorrent(
+	ctx context.Context,
+	infoHash metainfo.Hash,
+	name string,
+// verify bool,
+) error {
 	if !IsSnapNameAllowed(name) {
 		return fmt.Errorf("snap name %q is not allowed", name)
 	}
 	t, ok := d.torrentClient.Torrent(infoHash)
 	if ok {
-		// Assume the info is already obtained. Pretty sure the node won't try
-		// to add torrents until previous stages are complete and this means the
-		// info is known. This can be changed.
+		// Assume the info is already obtained. Pretty sure the node won't try to add torrents until
+		// previous stages are complete and this means the info is known. This can be changed.
 		existingName := t.Info().Name
 		if existingName != name {
 			return fmt.Errorf("torrent with hash %v already exists with name %q", infoHash, existingName)
@@ -1063,7 +1092,7 @@ func (d *Downloader) addTorrent(ctx context.Context, infoHash metainfo.Hash, nam
 		//fmt.Printf("%v: adding torrent source %q\n", snapTup, u)
 		spec.Sources = append(spec.Sources, u)
 	}
-	t, ok, err = d.addTorrentFile(spec)
+	t, ok, err = d.addTorrentSpec(spec)
 	if err != nil {
 		return err
 	}

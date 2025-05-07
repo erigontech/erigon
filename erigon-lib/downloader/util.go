@@ -303,7 +303,8 @@ func AllTorrentSpecs(dirs datadir.Dirs, torrentFiles *AtomicTorrentFS) (res []*t
 	return res, nil
 }
 
-// if $DOWNLOADER_ONLY_BLOCKS!="" filters out all non-v1 snapshots
+// if $DOWNLOADER_ONLY_BLOCKS!="" filters out all non-v1 snapshots. TODO: This does not belong here.
+// Downloader should be stupid.
 func IsSnapNameAllowed(name string) bool {
 	if dbg.DownloaderOnlyBlocks {
 		for _, p := range []string{"domain", "history", "idx", "accessor"} {
@@ -315,11 +316,11 @@ func IsSnapNameAllowed(name string) bool {
 	return true
 }
 
-// addTorrentFile - adding .torrent file to torrentClient (and checking their hashes), if .torrent file
+// addTorrentSpec - adding .torrent file to torrentClient (and checking their hashes), if .torrent file
 // added first time - pieces verification process will start (disk IO heavy) - Progress
 // kept in `piece completion storage` (surviving reboot). Once it's done - no disk IO needed again.
 // Don't need call torrent.VerifyData manually
-func (d *Downloader) addTorrentFile(
+func (d *Downloader) addTorrentSpec(
 	ts *torrent.TorrentSpec,
 ) (t *torrent.Torrent, new bool, err error) {
 	ts.ChunkSize = downloadercfg.DefaultNetworkChunkSize
