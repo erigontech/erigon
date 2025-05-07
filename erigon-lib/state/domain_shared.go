@@ -915,6 +915,7 @@ type SharedDomainsCommitmentContext struct {
 
 	limitReadAsOfTxNum uint64
 	domainsOnly        bool // if true, do not use history reader and limit to domain files only
+	traceBranches      bool
 }
 
 // Limits max txNum for read operations. If set to 0, all read operations will be from latest value.
@@ -1279,7 +1280,7 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(roTx kv.Tx) (bl
 
 // SeekCommitment [sinceTx, untilTx] searches for last encoded state from DomainCommitted
 // and if state found, sets it up to current domain
-func (sdc *SharedDomainsCommitmentContext) SeekCommitment(tx kv.Tx, cd *DomainRoTx, sinceTx, untilTx uint64) (blockNum, txNum uint64, ok bool, err error) {
+func (sdc *SharedDomainsCommitmentContext) SeekCommitment(tx kv.Tx) (blockNum, txNum uint64, ok bool, err error) {
 	_, _, state, err := sdc.LatestCommitmentState(tx)
 	if err != nil {
 		return 0, 0, false, err
