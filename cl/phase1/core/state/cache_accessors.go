@@ -416,7 +416,7 @@ func (b *CachingBeaconState) GetAttestingIndicies(
 		}
 		for i, member := range committee {
 			if i >= aggrBitsLen {
-				return nil, fmt.Errorf("GetAttestingIndicies: committee is too big, slot: %d, committeeIndex: %d, aggrBitsLen: %d, committeeSize: %d",
+				return nil, fmt.Errorf("GetAttestingIndicies: aggregation bits is too small, slot: %d, committeeIndex: %d, aggrBitsLen: %d, committeeSize: %d",
 					slot, committeeIndex, aggrBitsLen, len(committee))
 			}
 			if aggregationBits.GetBitAt(committeeOffset + i) {
@@ -424,9 +424,6 @@ func (b *CachingBeaconState) GetAttestingIndicies(
 			}
 		}
 		committeeOffset += len(committee)
-	}
-	if committeeOffset != aggrBitsLen {
-		return nil, fmt.Errorf("GetAttestingIndicies: aggregation bits length does not match committee length. agg bits size: %d, committeeOffset: %d", aggrBitsLen, committeeOffset)
 	}
 	return attesters, nil
 }
