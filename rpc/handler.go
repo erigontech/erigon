@@ -201,7 +201,8 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 				}
 
 				buf := bytes.NewBuffer(nil)
-				stream := jsoniter.NewStream(jsoniter.ConfigDefault, buf, 4096)
+				stream := jsonstream.NewJsoniterStream(jsoniter.NewStream(jsoniter.ConfigDefault, buf, 4096))
+				// stream := jsonstream.NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, buf, 4096))
 				if res := h.handleCallMsg(cp, calls[i], stream); res != nil {
 					answersWithNils[i] = res
 				}
@@ -236,7 +237,8 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream jsonstream.Stream) {
 	h.startCallProc(func(cp *callProc) {
 		needWriteStream := false
 		if stream == nil {
-			stream = jsoniter.NewStream(jsoniter.ConfigDefault, nil, 4096)
+			stream = jsonstream.NewJsoniterStream(jsoniter.NewStream(jsoniter.ConfigDefault, nil, 4096))
+			// stream = jsonstream.NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, nil, 4096))
 			needWriteStream = true
 		}
 		answer := h.handleCallMsg(cp, msg, stream)
@@ -548,6 +550,7 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 	_, err := callb.call(ctx, msg.Method, args, stream)
 	if err != nil {
 		writeNilIfNotPresent(stream)
+		_ = stream.ClosePending(1) // the enclosing JSON object is explicitly handled below
 		stream.WriteMore()
 		HandleError(err, stream)
 	}
