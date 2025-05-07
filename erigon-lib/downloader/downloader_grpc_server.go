@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"sync"
 	"time"
 
@@ -44,18 +43,13 @@ func NewGrpcServer(d *Downloader) (*GrpcServer, error) {
 		d: d,
 	}
 
-	d.lock.Lock()
-	d.onTorrentComplete = svr.onTorrentComplete
-	d.lock.Unlock()
-
 	return svr, nil
 }
 
 type GrpcServer struct {
 	proto_downloader.UnimplementedDownloaderServer
-	d           *Downloader
-	mu          sync.RWMutex
-	subscribers []proto_downloader.Downloader_TorrentCompletedServer
+	d  *Downloader
+	mu sync.RWMutex
 }
 
 func (s *GrpcServer) ProhibitNewDownloads(ctx context.Context, req *proto_downloader.ProhibitNewDownloadsRequest) (*emptypb.Empty, error) {
@@ -90,7 +84,7 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 
 		if it.TorrentHash == nil {
 			// if we don't have the torrent hash then we seed a new snapshot
-			// TODO: Make the torrent in place then call addTorrent.
+			// TODO: Make the torrent in place then call addPriorTorrent.
 			if err := s.d.AddNewSeedableFile(ctx, it.Path); err != nil {
 				return nil, err
 			}
@@ -99,7 +93,7 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 			// TODO: Try to fetch the torrent file from provider if we don't have it here.
 		}
 
-		if err := s.d.addTorrent(ctx, Proto2InfoHash(it.TorrentHash), it.Path); err != nil {
+		if err := s.d.addPriorTorrent(ctx, Proto2InfoHash(it.TorrentHash), it.Path); err != nil {
 			return nil, err
 		}
 	}
@@ -133,14 +127,6 @@ func (s *GrpcServer) Delete(ctx context.Context, request *proto_downloader.Delet
 	return &emptypb.Empty{}, nil
 }
 
-func (s *GrpcServer) Verify(ctx context.Context, request *proto_downloader.VerifyRequest) (*emptypb.Empty, error) {
-	err := s.d.VerifyData(ctx, nil, false)
-	if err != nil {
-		return nil, err
-	}
-	return &emptypb.Empty{}, nil
-}
-
 func Proto2InfoHash(in *prototypes.H160) metainfo.Hash {
 	return gointerfaces.ConvertH160toAddress(in)
 }
@@ -157,42 +143,4 @@ func (s *GrpcServer) SetLogPrefix(ctx context.Context, request *proto_downloader
 
 func (s *GrpcServer) Completed(ctx context.Context, request *proto_downloader.CompletedRequest) (*proto_downloader.CompletedReply, error) {
 	return &proto_downloader.CompletedReply{Completed: s.d.Completed()}, nil
-}
-
-func (s *GrpcServer) TorrentCompleted(req *proto_downloader.TorrentCompletedRequest, stream proto_downloader.Downloader_TorrentCompletedServer) error {
-	// Register the new subscriber
-	s.mu.Lock()
-	s.subscribers = append(s.subscribers, stream)
-	s.mu.Unlock()
-
-	//Notifying about all completed torrents to the new subscriber
-	for _, cmpInfo := range s.d.CompletedTorrents() {
-		s.onTorrentComplete(cmpInfo.path, cmpInfo.hash)
-	}
-
-	return nil
-}
-
-// TODO: Is anyone using this?
-func (s *GrpcServer) onTorrentComplete(name string, hash *prototypes.H160) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	var unsub []int
-
-	for i, s := range s.subscribers {
-		if s.Context().Err() != nil {
-			unsub = append(unsub, i)
-			continue
-		}
-
-		s.Send(&proto_downloader.TorrentCompletedReply{
-			Name: name,
-			Hash: hash,
-		})
-	}
-
-	for i := len(unsub) - 1; i >= 0; i-- {
-		s.subscribers = slices.Delete(s.subscribers, unsub[i], unsub[i])
-	}
 }

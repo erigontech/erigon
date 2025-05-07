@@ -95,9 +95,9 @@ const (
 )
 
 type DownloadRequest struct {
-	Version     uint8
 	Path        string
 	TorrentHash string
+	Verify      bool
 }
 
 func NewDownloadRequest(path string, torrentHash string) DownloadRequest {
@@ -125,7 +125,12 @@ func BuildProtoRequest(downloadRequest []DownloadRequest) *proto_downloader.AddR
 }
 
 // RequestSnapshotsDownload - builds the snapshots download request and downloads them
-func RequestSnapshotsDownload(ctx context.Context, downloadRequest []DownloadRequest, downloader proto_downloader.DownloaderClient, logPrefix string) error {
+func RequestSnapshotsDownload(
+	ctx context.Context,
+	downloadRequest []DownloadRequest,
+	downloader proto_downloader.DownloaderClient,
+	logPrefix string,
+) error {
 	preq := &proto_downloader.SetLogPrefixRequest{Prefix: logPrefix}
 	downloader.SetLogPrefix(ctx, preq)
 	// start seed large .seg of large size
@@ -380,7 +385,14 @@ func WaitForDownloader(
 			continue
 		}
 
-		downloadRequest = append(downloadRequest, NewDownloadRequest(p.Name, p.Hash))
+		downloadRequest = append(downloadRequest, DownloadRequest{
+			Path:        p.Name,
+			TorrentHash: p.Hash,
+			// TODO: Why is this so convoluted? Perhaps we should only do this for a local
+			// downloader? Currently I only plan to verify when a torrent is first added, for a
+			// shared downloader that might not make sense.
+			Verify: blockReader.FreezingCfg().Verify,
+		})
 	}
 
 	for {
@@ -417,14 +429,6 @@ func WaitForDownloader(
 			if err != nil {
 				log.Warn("Error while waiting for snapshots progress", "err", err)
 			}
-		}
-	}
-
-	if blockReader.FreezingCfg().Verify {
-		// On the second WaitForDownloader, this will reverify the header chain! TODO: Add the
-		// download request to the VerifyRequest payload so we only block on stuff we want right now.
-		if _, err := snapshotDownloader.Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
-			return err
 		}
 	}
 

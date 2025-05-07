@@ -30,6 +30,7 @@ type AddItem struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
 	TorrentHash   *typesproto.H160       `protobuf:"bytes,2,opt,name=torrent_hash,json=torrentHash,proto3" json:"torrent_hash,omitempty"` // will be resolved as magnet link
+	Verify        bool                   `protobuf:"varint,3,opt,name=verify,proto3" json:"verify,omitempty"`                             // Ignore cached piece state. Force reverification.
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -76,6 +77,13 @@ func (x *AddItem) GetTorrentHash() *typesproto.H160 {
 		return x.TorrentHash
 	}
 	return nil
+}
+
+func (x *AddItem) GetVerify() bool {
+	if x != nil {
+		return x.Verify
+	}
+	return false
 }
 
 type AddRequest struct {
@@ -467,10 +475,11 @@ var File_downloader_downloader_proto protoreflect.FileDescriptor
 const file_downloader_downloader_proto_rawDesc = "" +
 	"\n" +
 	"\x1bdownloader/downloader.proto\x12\n" +
-	"downloader\x1a\x1bgoogle/protobuf/empty.proto\x1a\x11types/types.proto\"M\n" +
+	"downloader\x1a\x1bgoogle/protobuf/empty.proto\x1a\x11types/types.proto\"e\n" +
 	"\aAddItem\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12.\n" +
-	"\ftorrent_hash\x18\x02 \x01(\v2\v.types.H160R\vtorrentHash\"7\n" +
+	"\ftorrent_hash\x18\x02 \x01(\v2\v.types.H160R\vtorrentHash\x12\x16\n" +
+	"\x06verify\x18\x03 \x01(\bR\x06verify\"7\n" +
 	"\n" +
 	"AddRequest\x12)\n" +
 	"\x05items\x18\x01 \x03(\v2\x13.downloader.AddItemR\x05items\"%\n" +
@@ -487,16 +496,14 @@ const file_downloader_downloader_proto_rawDesc = "" +
 	"\x17TorrentCompletedRequest\"L\n" +
 	"\x15TorrentCompletedReply\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1f\n" +
-	"\x04hash\x18\x02 \x01(\v2\v.types.H160R\x04hash2\x90\x04\n" +
+	"\x04hash\x18\x02 \x01(\v2\v.types.H160R\x04hash2\xf3\x02\n" +
 	"\n" +
 	"Downloader\x12Y\n" +
 	"\x14ProhibitNewDownloads\x12'.downloader.ProhibitNewDownloadsRequest\x1a\x16.google.protobuf.Empty\"\x00\x127\n" +
 	"\x03Add\x12\x16.downloader.AddRequest\x1a\x16.google.protobuf.Empty\"\x00\x12=\n" +
-	"\x06Delete\x12\x19.downloader.DeleteRequest\x1a\x16.google.protobuf.Empty\"\x00\x12=\n" +
-	"\x06Verify\x12\x19.downloader.VerifyRequest\x1a\x16.google.protobuf.Empty\"\x00\x12I\n" +
+	"\x06Delete\x12\x19.downloader.DeleteRequest\x1a\x16.google.protobuf.Empty\"\x00\x12I\n" +
 	"\fSetLogPrefix\x12\x1f.downloader.SetLogPrefixRequest\x1a\x16.google.protobuf.Empty\"\x00\x12G\n" +
-	"\tCompleted\x12\x1c.downloader.CompletedRequest\x1a\x1a.downloader.CompletedReply\"\x00\x12\\\n" +
-	"\x10TorrentCompleted\x12#.downloader.TorrentCompletedRequest\x1a!.downloader.TorrentCompletedReply0\x01B\x1eZ\x1c./downloader;downloaderprotob\x06proto3"
+	"\tCompleted\x12\x1c.downloader.CompletedRequest\x1a\x1a.downloader.CompletedReply\"\x00B\x1eZ\x1c./downloader;downloaderprotob\x06proto3"
 
 var (
 	file_downloader_downloader_proto_rawDescOnce sync.Once
@@ -532,19 +539,15 @@ var file_downloader_downloader_proto_depIdxs = []int32{
 	4,  // 3: downloader.Downloader.ProhibitNewDownloads:input_type -> downloader.ProhibitNewDownloadsRequest
 	1,  // 4: downloader.Downloader.Add:input_type -> downloader.AddRequest
 	2,  // 5: downloader.Downloader.Delete:input_type -> downloader.DeleteRequest
-	3,  // 6: downloader.Downloader.Verify:input_type -> downloader.VerifyRequest
-	5,  // 7: downloader.Downloader.SetLogPrefix:input_type -> downloader.SetLogPrefixRequest
-	6,  // 8: downloader.Downloader.Completed:input_type -> downloader.CompletedRequest
-	8,  // 9: downloader.Downloader.TorrentCompleted:input_type -> downloader.TorrentCompletedRequest
-	11, // 10: downloader.Downloader.ProhibitNewDownloads:output_type -> google.protobuf.Empty
-	11, // 11: downloader.Downloader.Add:output_type -> google.protobuf.Empty
-	11, // 12: downloader.Downloader.Delete:output_type -> google.protobuf.Empty
-	11, // 13: downloader.Downloader.Verify:output_type -> google.protobuf.Empty
-	11, // 14: downloader.Downloader.SetLogPrefix:output_type -> google.protobuf.Empty
-	7,  // 15: downloader.Downloader.Completed:output_type -> downloader.CompletedReply
-	9,  // 16: downloader.Downloader.TorrentCompleted:output_type -> downloader.TorrentCompletedReply
-	10, // [10:17] is the sub-list for method output_type
-	3,  // [3:10] is the sub-list for method input_type
+	5,  // 6: downloader.Downloader.SetLogPrefix:input_type -> downloader.SetLogPrefixRequest
+	6,  // 7: downloader.Downloader.Completed:input_type -> downloader.CompletedRequest
+	11, // 8: downloader.Downloader.ProhibitNewDownloads:output_type -> google.protobuf.Empty
+	11, // 9: downloader.Downloader.Add:output_type -> google.protobuf.Empty
+	11, // 10: downloader.Downloader.Delete:output_type -> google.protobuf.Empty
+	11, // 11: downloader.Downloader.SetLogPrefix:output_type -> google.protobuf.Empty
+	7,  // 12: downloader.Downloader.Completed:output_type -> downloader.CompletedReply
+	8,  // [8:13] is the sub-list for method output_type
+	3,  // [3:8] is the sub-list for method input_type
 	3,  // [3:3] is the sub-list for extension type_name
 	3,  // [3:3] is the sub-list for extension extendee
 	0,  // [0:3] is the sub-list for field type_name

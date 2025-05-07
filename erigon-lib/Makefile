@@ -61,6 +61,7 @@ protoc-clean:
 	rm -rf "$(PROTOC_INCLUDE)"
 
 grpc: protoc-all
+	# Use go mod replaces until this is made Go workspace aware. Pass GOWORK in the env to disable for this. Don't do it by default so behaviour is not unexpected.
 	go mod vendor
 	PATH="$(GOBIN):$(PATH)" protoc --proto_path=$(PROTO_PATH) --go_out=gointerfaces -I=$(PROTOC_INCLUDE) \
 		--go_opt=Mtypes/types.proto=./typesproto \

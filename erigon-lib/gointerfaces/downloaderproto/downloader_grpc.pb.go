@@ -23,10 +23,8 @@ const (
 	Downloader_ProhibitNewDownloads_FullMethodName = "/downloader.Downloader/ProhibitNewDownloads"
 	Downloader_Add_FullMethodName                  = "/downloader.Downloader/Add"
 	Downloader_Delete_FullMethodName               = "/downloader.Downloader/Delete"
-	Downloader_Verify_FullMethodName               = "/downloader.Downloader/Verify"
 	Downloader_SetLogPrefix_FullMethodName         = "/downloader.Downloader/SetLogPrefix"
 	Downloader_Completed_FullMethodName            = "/downloader.Downloader/Completed"
-	Downloader_TorrentCompleted_FullMethodName     = "/downloader.Downloader/TorrentCompleted"
 )
 
 // DownloaderClient is the client API for Downloader service.
@@ -40,14 +38,10 @@ type DownloaderClient interface {
 	// Adding new file to downloader: non-existing files it will download, existing - seed
 	Add(ctx context.Context, in *AddRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	Delete(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
-	// Trigger verification of files
-	// If some part of file is bad - such part will be re-downloaded (without returning error)
-	Verify(ctx context.Context, in *VerifyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	// Set log prefix for downloader
 	SetLogPrefix(ctx context.Context, in *SetLogPrefixRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	// Get is download completed
 	Completed(ctx context.Context, in *CompletedRequest, opts ...grpc.CallOption) (*CompletedReply, error)
-	TorrentCompleted(ctx context.Context, in *TorrentCompletedRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TorrentCompletedReply], error)
 }
 
 type downloaderClient struct {
@@ -88,16 +82,6 @@ func (c *downloaderClient) Delete(ctx context.Context, in *DeleteRequest, opts .
 	return out, nil
 }
 
-func (c *downloaderClient) Verify(ctx context.Context, in *VerifyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(emptypb.Empty)
-	err := c.cc.Invoke(ctx, Downloader_Verify_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *downloaderClient) SetLogPrefix(ctx context.Context, in *SetLogPrefixRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(emptypb.Empty)
@@ -118,25 +102,6 @@ func (c *downloaderClient) Completed(ctx context.Context, in *CompletedRequest, 
 	return out, nil
 }
 
-func (c *downloaderClient) TorrentCompleted(ctx context.Context, in *TorrentCompletedRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TorrentCompletedReply], error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Downloader_ServiceDesc.Streams[0], Downloader_TorrentCompleted_FullMethodName, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &grpc.GenericClientStream[TorrentCompletedRequest, TorrentCompletedReply]{ClientStream: stream}
-	if err := x.ClientStream.SendMsg(in); err != nil {
-		return nil, err
-	}
-	if err := x.ClientStream.CloseSend(); err != nil {
-		return nil, err
-	}
-	return x, nil
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type Downloader_TorrentCompletedClient = grpc.ServerStreamingClient[TorrentCompletedReply]
-
 // DownloaderServer is the server API for Downloader service.
 // All implementations must embed UnimplementedDownloaderServer
 // for forward compatibility.
@@ -148,14 +113,10 @@ type DownloaderServer interface {
 	// Adding new file to downloader: non-existing files it will download, existing - seed
 	Add(context.Context, *AddRequest) (*emptypb.Empty, error)
 	Delete(context.Context, *DeleteRequest) (*emptypb.Empty, error)
-	// Trigger verification of files
-	// If some part of file is bad - such part will be re-downloaded (without returning error)
-	Verify(context.Context, *VerifyRequest) (*emptypb.Empty, error)
 	// Set log prefix for downloader
 	SetLogPrefix(context.Context, *SetLogPrefixRequest) (*emptypb.Empty, error)
 	// Get is download completed
 	Completed(context.Context, *CompletedRequest) (*CompletedReply, error)
-	TorrentCompleted(*TorrentCompletedRequest, grpc.ServerStreamingServer[TorrentCompletedReply]) error
 	mustEmbedUnimplementedDownloaderServer()
 }
 
@@ -175,17 +136,11 @@ func (UnimplementedDownloaderServer) Add(context.Context, *AddRequest) (*emptypb
 func (UnimplementedDownloaderServer) Delete(context.Context, *DeleteRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Delete not implemented")
 }
-func (UnimplementedDownloaderServer) Verify(context.Context, *VerifyRequest) (*emptypb.Empty, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Verify not implemented")
-}
 func (UnimplementedDownloaderServer) SetLogPrefix(context.Context, *SetLogPrefixRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SetLogPrefix not implemented")
 }
 func (UnimplementedDownloaderServer) Completed(context.Context, *CompletedRequest) (*CompletedReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Completed not implemented")
-}
-func (UnimplementedDownloaderServer) TorrentCompleted(*TorrentCompletedRequest, grpc.ServerStreamingServer[TorrentCompletedReply]) error {
-	return status.Errorf(codes.Unimplemented, "method TorrentCompleted not implemented")
 }
 func (UnimplementedDownloaderServer) mustEmbedUnimplementedDownloaderServer() {}
 func (UnimplementedDownloaderServer) testEmbeddedByValue()                    {}
@@ -262,24 +217,6 @@ func _Downloader_Delete_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Downloader_Verify_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(VerifyRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DownloaderServer).Verify(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Downloader_Verify_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DownloaderServer).Verify(ctx, req.(*VerifyRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _Downloader_SetLogPrefix_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SetLogPrefixRequest)
 	if err := dec(in); err != nil {
@@ -316,17 +253,6 @@ func _Downloader_Completed_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Downloader_TorrentCompleted_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(TorrentCompletedRequest)
-	if err := stream.RecvMsg(m); err != nil {
-		return err
-	}
-	return srv.(DownloaderServer).TorrentCompleted(m, &grpc.GenericServerStream[TorrentCompletedRequest, TorrentCompletedReply]{ServerStream: stream})
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type Downloader_TorrentCompletedServer = grpc.ServerStreamingServer[TorrentCompletedReply]
-
 // Downloader_ServiceDesc is the grpc.ServiceDesc for Downloader service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -347,10 +273,6 @@ var Downloader_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Downloader_Delete_Handler,
 		},
 		{
-			MethodName: "Verify",
-			Handler:    _Downloader_Verify_Handler,
-		},
-		{
 			MethodName: "SetLogPrefix",
 			Handler:    _Downloader_SetLogPrefix_Handler,
 		},
@@ -359,12 +281,6 @@ var Downloader_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Downloader_Completed_Handler,
 		},
 	},
-	Streams: []grpc.StreamDesc{
-		{
-			StreamName:    "TorrentCompleted",
-			Handler:       _Downloader_TorrentCompleted_Handler,
-			ServerStreams: true,
-		},
-	},
+	Streams:  []grpc.StreamDesc{},
 	Metadata: "downloader/downloader.proto",
 }
