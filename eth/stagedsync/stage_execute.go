@@ -24,9 +24,8 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon/execution/exec3"
 	"golang.org/x/sync/errgroup"
-
-	"github.com/erigontech/erigon/cmd/state/exec3"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -192,7 +191,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	}
 
 	t := time.Now()
-	var changeset *[kv.DomainLen][]libstate.DomainEntryDiff
+	var changeset *[kv.DomainLen][]kv.DomainEntryDiff
 	for currentBlock := u.CurrentBlockNumber; currentBlock > u.UnwindPoint; currentBlock-- {
 		currentHash, ok, err := br.CanonicalHash(ctx, txc.Tx, currentBlock)
 		if err != nil {
@@ -201,7 +200,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 		if !ok {
 			return fmt.Errorf("canonical hash not found %d", currentBlock)
 		}
-		var currentKeys [kv.DomainLen][]libstate.DomainEntryDiff
+		var currentKeys [kv.DomainLen][]kv.DomainEntryDiff
 		currentKeys, ok, err = domains.GetDiffset(txc.Tx, currentHash, currentBlock)
 		if !ok {
 			return fmt.Errorf("domains.GetDiffset(%d, %s): not found", currentBlock, currentHash)

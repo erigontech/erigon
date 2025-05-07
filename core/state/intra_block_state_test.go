@@ -248,12 +248,7 @@ func (test *snapshotTest) run() bool {
 	}
 	defer agg.Close()
 
-	_db, err := temporal.New(db, agg)
-	if err != nil {
-		test.err = err
-		return false
-	}
-
+	_db := temporal.New(db, agg)
 	tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	if err != nil {
 		test.err = err

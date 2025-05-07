@@ -147,10 +147,7 @@ func aggregateResultsFromStateTests(
 	}
 	defer agg.Close()
 
-	db, err := temporal.New(_db, agg)
-	if err != nil {
-		return nil, err
-	}
+	db := temporal.New(_db, agg)
 	defer db.Close()
 
 	tx, txErr := db.BeginRw(context.Background())

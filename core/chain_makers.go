@@ -476,7 +476,7 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 	h := libcommon.NewHasher()
 	defer libcommon.ReturnHasherToPool(h)
 
-	it, err := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).RangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
+	it, err := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).DebugRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
 	if err != nil {
 		return libcommon.Hash{}, err
 	}
@@ -501,7 +501,7 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 		}
 	}
 
-	it, err = tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).RangeLatest(tx, kv.StorageDomain, nil, nil, -1)
+	it, err = tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).DebugRangeLatest(tx, kv.StorageDomain, nil, nil, -1)
 	if err != nil {
 		return libcommon.Hash{}, err
 	}

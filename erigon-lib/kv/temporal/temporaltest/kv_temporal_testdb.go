@@ -53,10 +53,7 @@ func NewTestDB(tb testing.TB, dirs datadir.Dirs) (kv.TemporalRwDB, *state.Aggreg
 		tb.Cleanup(agg.Close)
 	}
 
-	db, err := temporal.New(rawDB, agg)
-	if err != nil {
-		panic(err)
-	}
+	db := temporal.New(rawDB, agg)
 	if tb != nil {
 		tb.Cleanup(agg.Close)
 	}

@@ -613,7 +613,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 		ibs.SetTxContext(txIndex)
 		var execResult *evmtypes.ExecutionResult
-		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailOut)
+		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailOut, engine)
 		if err != nil {
 			if first {
 				first = false
@@ -788,11 +788,11 @@ func (api *TraceAPIImpl) callBlock(
 		return nil, nil, err
 	}
 
-	msgs := make([]types.Message, len(txs))
+	msgs := make([]*types.Message, len(txs))
 	for i, txn := range txs {
 		isBorStateSyncTxn := txn == borStateSyncTxn
 		var txnHash common.Hash
-		var msg types.Message
+		var msg *types.Message
 		var err error
 		if isBorStateSyncTxn {
 			txnHash = borStateSyncTxnHash
@@ -802,14 +802,6 @@ func (api *TraceAPIImpl) callBlock(
 			msg, err = txn.AsMessage(*signer, header.BaseFee, rules)
 			if err != nil {
 				return nil, nil, fmt.Errorf("convert txn into msg: %w", err)
-			}
-
-			// gnosis might have a fee free account here
-			if msg.FeeCap().IsZero() && engine != nil {
-				syscall := func(contract common.Address, data []byte) ([]byte, error) {
-					return core.SysCallContract(contract, data, cfg, ibs, header, engine, true /* constCall */)
-				}
-				msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 			}
 		}
 
@@ -917,7 +909,7 @@ func (api *TraceAPIImpl) callTransaction(
 	}
 
 	var txnHash common.Hash
-	var msg types.Message
+	var msg *types.Message
 	if isBorStateSyncTxn {
 		txnHash = borStateSyncTxnHash
 		// we use an empty message for bor state sync txn since it gets handled differently
@@ -926,14 +918,6 @@ func (api *TraceAPIImpl) callTransaction(
 		msg, err = txn.AsMessage(*signer, header.BaseFee, rules)
 		if err != nil {
 			return nil, fmt.Errorf("convert txn into msg: %w", err)
-		}
-
-		// gnosis might have a fee free account here
-		if msg.FeeCap().IsZero() && engine != nil {
-			syscall := func(contract common.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, cfg, ibs, header, engine, true /* constCall */)
-			}
-			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 		}
 	}
 

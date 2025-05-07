@@ -401,10 +401,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 	backend.blockSnapshots, backend.blockReader, backend.blockWriter = allSnapshots, blockReader, blockWriter
 
-	backend.chainDB, err = temporal.New(rawChainDB, agg)
-	if err != nil {
-		return nil, err
-	}
+	backend.chainDB = temporal.New(rawChainDB, agg)
 
 	// Can happen in some configurations
 	if config.Downloader.ChainName != "" {

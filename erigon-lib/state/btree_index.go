@@ -917,7 +917,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 		return &Cursor{ef: idx.ef, returnInto: &idx.pool}
 	}
 
-	defer kv.EnableMadvNormal().DisableReadAhead()
+	defer kv.MadvNormal().DisableReadAhead()
 	kvGetter := seg.NewReader(kv.MakeGetter(), compress)
 
 	idx.useBplus = true

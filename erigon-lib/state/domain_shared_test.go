@@ -190,7 +190,7 @@ Loop:
 	domains.currentChangesAccumulator = nil
 
 	acu := agg.BeginFilesRo()
-	var a [kv.DomainLen][]DomainEntryDiff
+	var a [kv.DomainLen][]kv.DomainEntryDiff
 	for idx, d := range stateChangeset.Diffs {
 		a[idx] = d.GetDiffSet()
 	}
