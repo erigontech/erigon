@@ -9,6 +9,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
@@ -280,7 +281,7 @@ func TestMergeRangeSnapRepo(t *testing.T) {
 			require.Equal(t, mr.from, mergeFromStep*stepSize)
 			require.Equal(t, mr.to, mergeToStep*stepSize)
 		}
-		cleanup(t, repo, dirs)
+		cleanupFiles(t, repo, dirs)
 	}
 
 	// 0-1, 1-2 => 0-2
@@ -459,7 +460,7 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 		mr := repo.FindMergeRange(RootNum(vf.EndTxNum()), vf)
 		require.Equal(t, mr.needMerge, needMerge)
 		if !mr.needMerge {
-			cleanup(t, repo, dirs)
+			cleanupFiles(t, repo, dirs)
 			return
 		}
 
@@ -480,7 +481,7 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 		repo.CleanAfterMerge(merged, vf)
 		require.Equal(t, repo.dirtyFiles.Len(), dirtyFilesAfterMerge)
 
-		cleanup(t, repo, dirs)
+		cleanupFiles(t, repo, dirs)
 	}
 
 	// 0-1, 1-2 => 0-2
@@ -516,11 +517,10 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 
 // /////////////////////////////////////// helpers and utils
 
-func cleanup(t *testing.T, repo *SnapshotRepo, dirs datadir.Dirs) {
+func cleanupFiles(t *testing.T, repo *SnapshotRepo, dirs datadir.Dirs) {
 	t.Helper()
 	repo.Close()
-	repo.RecalcVisibleFiles(RootNum(MaxUint64))
-
+	repo.RecalcVisibleFiles(0)
 	filepath.Walk(dirs.DataDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -667,7 +667,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 		}
 
 		if strings.HasSuffix(filename, ".kvei") {
-			filter, err := NewExistenceFilter(0, filename)
+			filter, err := existence.NewFilter(0, filename)
 			require.NoError(t, err)
 			require.NoError(t, filter.Build())
 			filter.Close()

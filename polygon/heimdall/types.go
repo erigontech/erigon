@@ -208,7 +208,7 @@ var (
 				}
 				rs.LogLvl(log.LvlInfo)
 
-				defer d.EnableReadAhead().DisableReadAhead()
+				defer d.MadvSequential().DisableReadAhead()
 
 				for {
 					g.Reset(0)
@@ -286,32 +286,20 @@ var (
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 				var checkpointTo, checkpointFrom CheckpointId
 
-				checkpointId := func(rangeIndex RangeIndex, blockNum uint64) (CheckpointId, bool, error) {
-					checkpointId, ok, err := rangeIndex.Lookup(ctx, blockNum)
-					return CheckpointId(checkpointId), ok, err
-				}
-
 				err := db.View(ctx, func(tx kv.Tx) (err error) {
 					rangeIndex := NewTxRangeIndex(db, kv.BorCheckpointEnds, tx)
 
-					if checkpointFrom, _, err = checkpointId(rangeIndex, blockFrom); err != nil {
+					checkpoints, err := rangeIndex.GetIDsBetween(ctx, blockFrom, blockTo)
+					if err != nil {
 						return err
 					}
-					//checkpointFrom, err = CheckpointIdAt(tx, blockFrom)
 
-					var ok bool
-
-					if checkpointTo, ok, err = checkpointId(rangeIndex, blockTo); err != nil {
-						return err
-					}
-					//checkpointTo, err = CheckpointIdAt(tx, blockTo)
-
-					// next checkpoint can be not committed yet
-					if !ok {
-						checkpointTo = checkpointFrom + 1
+					if len(checkpoints) > 0 {
+						checkpointFrom = CheckpointId(checkpoints[0])
+						checkpointTo = CheckpointId(checkpoints[len(checkpoints)-1]) + 1
 					}
 
-					return err
+					return nil
 				})
 
 				if err != nil {
@@ -360,45 +348,17 @@ var (
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 				var milestoneFrom, milestoneTo MilestoneId
 
-				milestoneId := func(rangeIndex RangeIndex, blockNum uint64) (MilestoneId, bool, error) {
-					milestoneId, ok, err := rangeIndex.Lookup(ctx, blockNum)
-					return MilestoneId(milestoneId), ok, err
-				}
 				err := db.View(ctx, func(tx kv.Tx) (err error) {
-					// We have only 3 cases:
-					// Suppose we are trying to find the range [A, B) for blocks [1000, 2000)
-					//
-					// Case 1:
-					// Milestones: .., [900, 1000), [1000, 1100), ...
-					// Expecting milestoneFrom to be [1000, 1100)
-					//
-					// Case 2:
-					// Milestones: .., [950, 1050), [1050, 1150), ...
-					// Expecting milestoneFrom to be [950, 1050)
-					//
-					// Case 3:
-					// Milestones: .., [900, 2100), ...
-					// Expecting milestoneFrom to be [900, 2100), milestoneTo to be [900, 2100) as well
-
 					rangeIndex := NewTxRangeIndex(db, kv.BorMilestoneEnds, tx)
 
-					milestoneFrom, _, err = milestoneId(rangeIndex, blockFrom)
-
+					milestones, err := rangeIndex.GetIDsBetween(ctx, blockFrom, blockTo)
 					if err != nil && !errors.Is(err, ErrMilestoneNotFound) {
 						return err
 					}
 
-					var ok bool
-
-					milestoneTo, ok, err = milestoneId(rangeIndex, blockTo)
-
-					if err != nil && !errors.Is(err, ErrMilestoneNotFound) {
-						return err
-					}
-
-					// next checkpoint can be not committed yet
-					if !ok {
-						milestoneTo = milestoneFrom + 1
+					if len(milestones) > 0 {
+						milestoneFrom = MilestoneId(milestones[0])
+						milestoneTo = MilestoneId(milestones[len(milestones)-1]) + 1
 					}
 
 					return nil
@@ -530,7 +490,7 @@ func buildValueIndex(ctx context.Context, sn snaptype.FileInfo, salt uint32, d *
 	}
 	rs.LogLvl(log.LvlInfo)
 
-	defer d.EnableReadAhead().DisableReadAhead()
+	defer d.MadvSequential().DisableReadAhead()
 
 	for {
 		g := d.MakeGetter()

@@ -313,7 +313,7 @@ func (sdb *IntraBlockState) GetCodeSize(addr common.Address) (int, error) {
 	if stateObject.data.CodeHash == emptyCodeHashH {
 		return 0, nil
 	}
-	l, err := sdb.stateReader.ReadAccountCodeSize(addr, stateObject.data.Incarnation)
+	l, err := sdb.stateReader.ReadAccountCodeSize(addr)
 	if err != nil {
 		sdb.setErrorUnsafe(err)
 		return l, err
@@ -751,12 +751,7 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 	if previous != nil && previous.selfdestructed {
 		prevInc = previous.data.Incarnation
 	} else {
-		if inc, err := sdb.stateReader.ReadAccountIncarnation(addr); err == nil {
-			prevInc = inc
-		} else {
-			sdb.savedErr = err
-			return err
-		}
+		prevInc = 0 // sdb.stateReader.ReadAccountIncarnation(addr)
 	}
 	if previous != nil && prevInc < previous.data.PrevIncarnation {
 		prevInc = previous.data.PrevIncarnation

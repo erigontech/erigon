@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/page"
+	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
@@ -414,11 +415,6 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		return
 	}
 
-	for _, f := range domainFiles {
-		f := f
-		defer f.decompressor.EnableReadAhead().DisableReadAhead()
-	}
-
 	fromStep, toStep := r.values.from/r.aggStep, r.values.to/r.aggStep
 	kvFilePath := dt.d.kvFilePath(fromStep, toStep)
 
@@ -531,18 +527,18 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 	}
 
-	if dt.d.AccessorList.Has(AccessorBTree) {
+	if dt.d.Accessors.Has(AccessorBTree) {
 		btPath := dt.d.kvBtAccessorFilePath(fromStep, toStep)
 		btM := DefaultBtreeM
 		if toStep == 0 && dt.d.filenameBase == "commitment" {
 			btM = 128
 		}
-		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, btM, valuesIn.decompressor, dt.d.Compression, *dt.d.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync, dt.d.AccessorList)
+		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, btM, valuesIn.decompressor, dt.d.Compression, *dt.d.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync, dt.d.Accessors)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
 	}
-	if dt.d.AccessorList.Has(AccessorHashMap) {
+	if dt.d.Accessors.Has(AccessorHashMap) {
 		if err = dt.d.buildHashMapAccessor(ctx, fromStep, toStep, valuesIn.decompressor, ps); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s buildHashMapAccessor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
@@ -551,14 +547,14 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		}
 	}
 
-	if dt.d.AccessorList.Has(AccessorExistence) {
+	if dt.d.Accessors.Has(AccessorExistence) {
 		bloomIndexPath := dt.d.kvExistenceIdxFilePath(fromStep, toStep)
 		exists, err := dir.FileExist(bloomIndexPath)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s FileExist err [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
 		if exists {
-			valuesIn.existence, err = OpenExistenceFilter(bloomIndexPath)
+			valuesIn.existence, err = existence.OpenFilter(bloomIndexPath)
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("merge %s existence [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 			}
@@ -570,10 +566,6 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 }
 
 func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem, startTxNum, endTxNum uint64, ps *background.ProgressSet) (*filesItem, error) {
-	for _, h := range files {
-		defer h.decompressor.EnableReadAhead().DisableReadAhead()
-	}
-
 	var outItem *filesItem
 	var comp *seg.Compressor
 	var decomp *seg.Decompressor
@@ -598,13 +590,13 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 	fromStep, toStep := startTxNum/iit.ii.aggregationStep, endTxNum/iit.ii.aggregationStep
 
 	datPath := iit.ii.efFilePath(fromStep, toStep)
-	if comp, err = seg.NewCompressor(ctx, "merge idx "+iit.ii.filenameBase, datPath, iit.ii.dirs.Tmp, iit.ii.compressorCfg, log.LvlTrace, iit.ii.logger); err != nil {
+	if comp, err = seg.NewCompressor(ctx, "merge idx "+iit.ii.filenameBase, datPath, iit.ii.dirs.Tmp, iit.ii.CompressorCfg, log.LvlTrace, iit.ii.logger); err != nil {
 		return nil, fmt.Errorf("merge %s inverted index compressor: %w", iit.ii.filenameBase, err)
 	}
 	if iit.ii.noFsync {
 		comp.DisableFsync()
 	}
-	write := seg.NewWriter(comp, iit.ii.compression)
+	write := seg.NewWriter(comp, iit.ii.Compression)
 	p := ps.AddNew(path.Base(datPath), 1)
 	defer ps.Delete(p)
 
@@ -612,7 +604,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 	heap.Init(&cp)
 
 	for _, item := range files {
-		g := seg.NewReader(item.decompressor.MakeGetter(), iit.ii.compression)
+		g := seg.NewReader(item.decompressor.MakeGetter(), iit.ii.Compression)
 		g.Reset(0)
 		if g.HasNext() {
 			key, _ := g.Next(nil)
@@ -722,13 +714,6 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		return nil, nil, err
 	}
 	if r.history.needMerge {
-		for _, f := range indexFiles {
-			defer f.decompressor.EnableReadAhead().DisableReadAhead()
-		}
-		for _, f := range historyFiles {
-			defer f.decompressor.EnableReadAhead().DisableReadAhead()
-		}
-
 		var comp *seg.Compressor
 		var decomp *seg.Decompressor
 		var rs *recsplit.RecSplit
@@ -756,10 +741,10 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		fromStep, toStep := r.history.from/ht.h.aggregationStep, r.history.to/ht.h.aggregationStep
 		datPath := ht.h.vFilePath(fromStep, toStep)
 		idxPath := ht.h.vAccessorFilePath(fromStep, toStep)
-		if comp, err = seg.NewCompressor(ctx, "merge hist "+ht.h.filenameBase, datPath, ht.h.dirs.Tmp, ht.h.compressorCfg, log.LvlTrace, ht.h.logger); err != nil {
+		if comp, err = seg.NewCompressor(ctx, "merge hist "+ht.h.filenameBase, datPath, ht.h.dirs.Tmp, ht.h.CompressorCfg, log.LvlTrace, ht.h.logger); err != nil {
 			return nil, nil, fmt.Errorf("merge %s history compressor: %w", ht.h.filenameBase, err)
 		}
-		compr := seg.NewWriter(comp, ht.h.compression)
+		compr := seg.NewWriter(comp, ht.h.Compression)
 		if ht.h.noFsync {
 			compr.DisableFsync()
 		}
@@ -770,13 +755,13 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		var cp CursorHeap
 		heap.Init(&cp)
 		for _, item := range indexFiles {
-			g := seg.NewReader(item.decompressor.MakeGetter(), ht.h.compression)
+			g := seg.NewReader(item.decompressor.MakeGetter(), ht.h.Compression)
 			g.Reset(0)
 			if g.HasNext() {
 				var g2 *seg.PagedReader
 				for _, hi := range historyFiles { // full-scan, because it's ok to have different amount files. by unclean-shutdown.
 					if hi.startTxNum == item.startTxNum && hi.endTxNum == item.endTxNum {
-						g2 = seg.NewPagedReader(seg.NewReader(hi.decompressor.MakeGetter(), ht.h.compression), ht.h.historyValuesOnCompressedPage, true)
+						g2 = seg.NewPagedReader(seg.NewReader(hi.decompressor.MakeGetter(), ht.h.Compression), ht.h.historyValuesOnCompressedPage, true)
 						break
 					}
 				}

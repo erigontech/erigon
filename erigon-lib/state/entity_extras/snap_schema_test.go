@@ -1,9 +1,10 @@
 package entity_extras
 
 import (
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"path/filepath"
 	"testing"
+
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/config3"
