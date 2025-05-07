@@ -1019,8 +1019,8 @@ func (d *Downloader) alreadyHaveThisName(name string) bool {
 }
 
 // Push this up? It's from the preverified list elsewhere. It's derived from
-// snapshotsync.DownloadRequest but seems the Downloader only applies to
-// snapshots now. TODO: Resolve this.
+// snapshotsync.DownloadRequest but seems the Downloader only applies to snapshots now. TODO:
+// Resolve this.
 type SnapshotTuple struct {
 	// Would this be variable to support BitTorrent v1/v2?
 	Hash metainfo.Hash
@@ -1042,12 +1042,14 @@ func (d *Downloader) loadSpecFromDisk(tup SnapshotTuple) (spec g.Option[*torrent
 		err = nil
 		return
 	}
+	if err != nil {
+		return
+	}
 	diskSpec := torrent.TorrentSpecFromMetaInfo(mi)
 	if diskSpec.InfoHash != tup.Hash {
-		// This is recoverable, by deleting the torrent file and returning a
-		// spec for unknown info. Probably better to just error it for now
-		// unless someone reports it. Also what if the metainfo doesn't contain
-		// info bytes?
+		// This is recoverable, by deleting the torrent file and returning a spec for unknown info.
+		// Probably better to just error it for now unless someone reports it. Also what if the
+		// metainfo doesn't contain info bytes?
 		err = fmt.Errorf("disk metainfo hash %v does not match expected %v", diskSpec.InfoHash, tup.Hash)
 		return
 	}
@@ -1090,8 +1092,9 @@ func (d *Downloader) addTorrent(ctx context.Context, infoHash metainfo.Hash, nam
 	}
 	specOpt, err := d.loadSpecFromDisk(snapTup)
 	if err != nil {
-		err = fmt.Errorf("loading metainfo from disk: %w", err)
-		return err
+		// TODO: Should we force a verify here?
+		d.logger.Warn("loading metainfo from disk", "err", err, "name", name)
+		err = nil
 	}
 	// TorrentSpec was created before I knew better about Go's heap...
 	spec := specOpt.UnwrapOr(new(torrent.TorrentSpec))
