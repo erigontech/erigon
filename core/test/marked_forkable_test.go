@@ -251,7 +251,7 @@ func TestBuildFiles_Marked(t *testing.T) {
 
 	ps := background.NewProgressSet()
 	from, to := RootNum(0), RootNum(entries_count)
-	file, built, err := ma.BuildFile(ctx, from, to, db, ps)
+	file, built, err := ma.BuildFile(ctx, from, to, db, 1, ps)
 	require.NoError(t, err)
 	require.NotNil(t, file)
 	require.True(t, built)
@@ -259,7 +259,7 @@ func TestBuildFiles_Marked(t *testing.T) {
 	_, end := file.Range()
 	from, to = RootNum(end), RootNum(entries_count)
 
-	file2, built, err := ma.BuildFile(ctx, from, to, db, ps)
+	file2, built, err := ma.BuildFile(ctx, from, to, db, 1, ps)
 	require.NoError(t, err)
 	require.Nil(t, file2)
 	require.False(t, built)
