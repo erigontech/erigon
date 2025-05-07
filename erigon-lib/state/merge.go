@@ -413,7 +413,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	if dt.d.noFsync {
 		kvWriter.DisableFsync()
 	}
-	p := ps.AddNew("merge "+filepath.Base(kvFilePath), 1)
+	p := ps.AddNew("merge "+kvFile.FileName(), 0)
 	defer ps.Delete(p)
 
 	var cp CursorHeap
@@ -585,13 +585,14 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 		comp.DisableFsync()
 	}
 	write := seg.NewWriter(comp, iit.ii.compression)
-	p := ps.AddNew(filepath.Base(datPath), 1)
+	p := ps.AddNew("merge "+comp.FileName(), 0)
 	defer ps.Delete(p)
 
 	var cp CursorHeap
 	heap.Init(&cp)
 
 	for _, item := range files {
+		p.Total.Add(uint64(item.decompressor.Count()))
 		g := seg.NewReader(item.decompressor.MakeGetter(), iit.ii.compression)
 		g.Reset(0)
 		if g.HasNext() {
@@ -740,7 +741,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		compr.DisableFsync()
 	}
 	pagedWr := page.NewWriter(compr, ht.h.historyValuesOnCompressedPage, true)
-	p := ps.AddNew(filepath.Base(datPath), 1)
+	p := ps.AddNew("merge "+comp.FileName(), 0)
 	defer ps.Delete(p)
 
 	var cp CursorHeap
