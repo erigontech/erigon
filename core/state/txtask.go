@@ -58,7 +58,7 @@ type TxTask struct {
 	Failed          bool
 	Tx              types.Transaction
 	GetHashFn       func(n uint64) libcommon.Hash
-	TxAsMessage     types.Message
+	TxAsMessage     *types.Message
 	EvmBlockContext evmtypes.BlockContext
 
 	HistoryExecution bool // use history reader for that txn instead of state reader

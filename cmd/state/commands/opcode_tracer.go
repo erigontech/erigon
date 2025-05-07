@@ -441,10 +441,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 		return err
 	}
 	defer agg.Close()
-	historyDb, err := temporal.New(rawChainDb, agg)
-	if err != nil {
-		return err
-	}
+	historyDb := temporal.New(rawChainDb, agg)
 	historyTx, err1 := historyDb.BeginTemporalRo(context.Background())
 	if err1 != nil {
 		return err1

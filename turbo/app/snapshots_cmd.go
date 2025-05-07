@@ -36,17 +36,21 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon-lib/common/compress"
+	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/diagnostics"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/node"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/compress"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/disk"
 	"github.com/erigontech/erigon-lib/common/mem"
-	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/downloader"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/etl"
@@ -55,27 +59,24 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
 	libstate "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/state/stats"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core/rawdb/blockio"
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
-	"github.com/erigontech/erigon/diagnostics"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/integrity"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
-	"github.com/erigontech/erigon/turbo/node"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -146,8 +147,6 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&SnapshotFromFlag,
-				&SnapshotToFlag,
-				&SnapshotEveryFlag,
 			}),
 		},
 		{
@@ -211,14 +210,14 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
 		},
 		{
-			Name:    "rm-state",
-			Aliases: []string{"rm-state-segments", "rm-state-snapshots"},
+			Name:    "rm-state-snapshots",
+			Aliases: []string{"rm-state-segments", "rm-state"},
 			Action:  doRmStateSnapshots,
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&cli.StringFlag{Name: "step"},
 				&cli.BoolFlag{Name: "latest"},
-				&cli.StringFlag{Name: "domain"},
+				&cli.StringSliceFlag{Name: "domain"},
 			},
 			),
 		},
@@ -287,16 +286,6 @@ var (
 		Name:  "from",
 		Usage: "From block number",
 		Value: 0,
-	}
-	SnapshotToFlag = cli.Uint64Flag{
-		Name:  "to",
-		Usage: "To block number. Zero - means unlimited.",
-		Value: 0,
-	}
-	SnapshotEveryFlag = cli.Uint64Flag{
-		Name:  "every",
-		Usage: "Do operation every N blocks",
-		Value: 1_000,
 	}
 	SnapshotRebuildFlag = cli.BoolFlag{
 		Name:  "rebuild",
@@ -402,21 +391,29 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 		fmt.Printf("removed %d state segments files\n", removed)
 	}
 	if cliCtx.IsSet("domain") {
-		domainToRemove, err := kv.String2Domain(cliCtx.String("domain"))
-		if err != nil {
-			return err
-		}
-		var removed int
-		for _, res := range files {
-			if !strings.Contains(res.Name(), domainToRemove.String()) {
-				continue
+		domainNames := cliCtx.StringSlice("domain")
+		for _, domainName := range domainNames {
+			_, err := kv.String2InvertedIdx(domainName)
+			if err != nil {
+				_, err = kv.String2Domain(domainName)
+				if err != nil {
+					return err
+				}
 			}
-			if err := os.Remove(res.Path); err != nil {
-				return fmt.Errorf("failed to remove %s: %w", res.Path, err)
+
+			var removed int
+			for _, res := range files {
+				if !strings.Contains(res.Name(), domainName) {
+					continue
+				}
+				if err := os.Remove(res.Path); err != nil {
+					return fmt.Errorf("failed to remove %s: %w", res.Path, err)
+				}
+				removed++
 			}
-			removed++
+			fmt.Printf("removed %d state segments files of %s\n", removed, domainName)
 		}
-		fmt.Printf("removed %d state segments files\n", removed)
+
 	}
 
 	return nil
@@ -544,10 +541,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	}
 	defer clean()
 
-	db, err := temporal.New(chainDB, agg)
-	if err != nil {
-		return err
-	}
+	db := temporal.New(chainDB, agg)
 	defer db.Close()
 
 	checks := append([]integrity.Check{}, integrity.AllChecks...)
@@ -1199,24 +1193,23 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 
 	agg = openAgg(ctx, dirs, chainDB, logger)
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
+	db := temporal.New(chainDB, agg)
 	clean = func() {
 		defer blockSnaps.Close()
 		defer borSnaps.Close()
 		defer csn.Close()
 		defer agg.Close()
+		defer db.Close()
 	}
-	err = chainDB.View(ctx, func(tx kv.Tx) error {
-		ac := agg.BeginFilesRo()
-		defer ac.Close()
-		ac.LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
-			_, histBlockNumProgress, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader)).FindBlockNum(tx, endTxNumMinimax)
-			return histBlockNumProgress, err
-		})
-		return nil
-	})
+	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
-		return
+		panic(err)
 	}
+	defer tx.Rollback()
+	stats.LogStats(tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
+		_, histBlockNumProgress, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader)).FindBlockNum(tx, endTxNumMinimax)
+		return histBlockNumProgress, err
+	})
 
 	ls, er := os.Stat(filepath.Join(dirs.Snap, downloader.ProhibitNewDownloadsFileName))
 	mtime := time.Time{}
@@ -1400,8 +1393,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	ctx := cliCtx.Context
 
 	from := cliCtx.Uint64(SnapshotFromFlag.Name)
-	to := cliCtx.Uint64(SnapshotToFlag.Name)
-	every := cliCtx.Uint64(SnapshotEveryFlag.Name)
 
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
@@ -1427,29 +1418,24 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 
 	//agg.LimitRecentHistoryWithoutFiles(0)
+
+	var to uint64
+	if err := db.View(ctx, func(tx kv.Tx) error {
+		to, err = stages.GetStageProgress(tx, stages.Senders)
+		return err
+	}); err != nil {
+		return err
+	}
 	blockReader, _ := br.IO()
-
-	var forwardProgress uint64
-	if to == 0 {
-		db.View(ctx, func(tx kv.Tx) error {
-			forwardProgress, err = stages.GetStageProgress(tx, stages.Senders)
-			return err
-		})
-		from2, to2, ok := freezeblocks.CanRetire(forwardProgress, blockReader.FrozenBlocks(), coresnaptype.Enums.Headers, nil)
-		if ok {
-			from, to, every = from2, to2, to2-from2
-		}
-	} else {
-		forwardProgress = to
+	from2, to2, ok := freezeblocks.CanRetire(to, blockReader.FrozenBlocks(), coresnaptype.Enums.Headers, nil)
+	if ok {
+		from, to = from2, to2
 	}
-
-	logger.Info("Params", "from", from, "to", to, "every", every)
 	if chainConfig.Bor == nil { //TODO: https://github.com/erigontech/erigon/issues/14894
-		if err := br.RetireBlocks(ctx, from, forwardProgress, log.LvlInfo, nil, nil, nil); err != nil {
+		if err := br.RetireBlocks(ctx, from, to, log.LvlInfo, nil, nil, nil); err != nil {
 			return err
 		}
 	}
-
 	if err := blockReader.Snapshots().RemoveOverlaps(); err != nil {
 		return err
 	}
@@ -1477,16 +1463,16 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	logger.Info("Pruning has ended", "deleted blocks", allDeletedBlocks)
 
-	db, err = temporal.New(db, agg)
-	if err != nil {
-		return err
-	}
+	db = temporal.New(db, agg)
 
 	logger.Info("Prune state history")
 	for hasMoreToPrune := true; hasMoreToPrune; {
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
-			ac := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx)
-			hasMoreToPrune, err = ac.PruneSmallBatches(ctx, 2*time.Minute, tx)
+			err = tx.(kv.TemporalRwTx).Debug().GreedyPruneHistory(ctx, kv.CommitmentDomain)
+			if err != nil {
+				return err
+			}
+			hasMoreToPrune, err = tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 2*time.Minute)
 			if err != nil {
 				return err
 			}
@@ -1522,12 +1508,8 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	for hasMoreToPrune := true; hasMoreToPrune; {
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
-			ac := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx)
-			hasMoreToPrune, err = ac.PruneSmallBatches(ctx, 2*time.Minute, tx)
-			if err != nil {
-				return err
-			}
-			return nil
+			hasMoreToPrune, err = tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 2*time.Minute)
+			return err
 		}); err != nil {
 			return err
 		}

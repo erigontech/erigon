@@ -110,7 +110,7 @@ func (at *AggregatorRoTx) SqueezeCommitmentFiles() error {
 		return nil
 	}
 
-	rng := &RangesV3{
+	rng := &Ranges{
 		domain: [kv.DomainLen]DomainRanges{
 			kv.AccountsDomain: {
 				name:    kv.AccountsDomain,
@@ -193,9 +193,9 @@ func (at *AggregatorRoTx) SqueezeCommitmentFiles() error {
 			return err
 		}
 
-		af.decompressor.EnableMadvNormal()
-		sf.decompressor.EnableMadvNormal()
-		cf.decompressor.EnableMadvNormal()
+		af.decompressor.MadvNormal()
+		sf.decompressor.MadvNormal()
+		cf.decompressor.MadvNormal()
 
 		err = func() error {
 			steps := cf.endTxNum/at.a.aggregationStep - cf.startTxNum/at.a.aggregationStep
@@ -321,7 +321,7 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 	acRo := a.BeginFilesRo() // this tx is used to read existing domain files and closed in the end
 	defer acRo.Close()
 
-	rng := &RangesV3{
+	rng := &Ranges{
 		domain: [kv.DomainLen]DomainRanges{
 			kv.AccountsDomain: {
 				name:    kv.AccountsDomain,
@@ -347,21 +347,10 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 		return nil, errors.New("no account files found")
 	}
 
-	for _, d := range acRo.d {
-		for _, f := range d.files {
-			f.src.decompressor.EnableMadvNormal()
-		}
-	}
+	acRo.MadvNormal()
+	defer acRo.DisableReadAhead()
 
 	start := time.Now()
-	defer func() {
-		for _, d := range acRo.d {
-			for _, f := range d.files {
-				f.src.decompressor.DisableReadAhead()
-			}
-		}
-		a.logger.Info("Commitment DONE", "duration", time.Since(start))
-	}()
 
 	acRo.RestrictSubsetFileDeletions(true)
 	a.commitmentValuesTransform = false
