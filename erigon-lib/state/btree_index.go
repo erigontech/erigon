@@ -23,7 +23,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -317,15 +316,16 @@ func (btw *BtIndexWriter) Close() {
 }
 
 type BtIndex struct {
-	m        mmap.MMap
-	data     []byte
-	ef       *eliasfano32.EliasFano
-	file     *os.File
-	bplus    *BpsTree
-	size     int64
-	modTime  time.Time
-	filePath string
-	pool     sync.Pool
+	filePath, fileName string
+
+	m       mmap.MMap
+	data    []byte
+	ef      *eliasfano32.EliasFano
+	file    *os.File
+	bplus   *BpsTree
+	size    int64
+	modTime time.Time
+	pool    sync.Pool
 }
 
 // Decompressor should be managed by caller (could be closed after index is built). When index is built, external getter should be passed to seekInFiles function
@@ -427,6 +427,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompressor, compress seg.FileCompression) (bt *BtIndex, err error) {
 	idx := &BtIndex{
 		filePath: indexPath,
+		fileName: filepath.Base(indexPath),
 	}
 
 	var validationPassed bool
@@ -557,7 +558,7 @@ func (b *BtIndex) ModTime() time.Time { return b.modTime }
 
 func (b *BtIndex) FilePath() string { return b.filePath }
 
-func (b *BtIndex) FileName() string { return path.Base(b.filePath) }
+func (b *BtIndex) FileName() string { return filepath.Base(b.filePath) }
 
 func (b *BtIndex) Empty() bool { return b == nil || b.ef == nil || b.ef.Count() == 0 }
 

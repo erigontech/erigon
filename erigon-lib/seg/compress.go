@@ -96,13 +96,14 @@ var DefaultCfg = Cfg{
 // and eventually create output file
 type Compressor struct {
 	Cfg
-	ctx              context.Context
-	wg               *sync.WaitGroup
+	ctx context.Context
+	wg  *sync.WaitGroup
+
+	outputFile, fileName string // File where to output the dictionary and compressed data
+	tmpDir, logPrefix    string // temporary directory to use for ETL when building dictionary
+
 	superstrings     chan []byte
 	uncompressedFile *RawWordsFile
-	tmpDir           string // temporary directory to use for ETL when building dictionary
-	logPrefix        string
-	outputFile       string // File where to output the dictionary and compressed data
 	tmpOutFilePath   string // File where to output the dictionary and compressed data
 	suffixCollectors []*etl.Collector
 	// Buffer for "superstring" - transformation of superstrings where each byte of a word, say b,
@@ -151,6 +152,7 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cf
 
 	return &Compressor{
 		Cfg:              cfg,
+		fileName:         fileName,
 		uncompressedFile: uncompressedFile,
 		tmpOutFilePath:   tmpOutFilePath,
 		outputFile:       outputFile,
@@ -175,6 +177,7 @@ func (c *Compressor) Close() {
 
 func (c *Compressor) SetTrace(trace bool) { c.trace = trace }
 func (c *Compressor) WorkersAmount() int  { return c.Workers }
+func (c *Compressor) FileName() string    { return c.fileName }
 
 func (c *Compressor) Count() int { return int(c.wordsCount) }
 
