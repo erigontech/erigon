@@ -29,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/common/u256"
@@ -65,6 +66,19 @@ The state transitioning model does all the necessary work to work out a valid ne
 */
 
 var ErrStateTransitionFailed = errors.New("state transition failed")
+
+type ErrExecAbortError struct {
+	DependencyTxIndex int
+	OriginError       error
+}
+
+func (e ErrExecAbortError) Error() string {
+	if e.DependencyTxIndex >= 0 {
+		return fmt.Sprintf("Execution aborted due to dependency %d", e.DependencyTxIndex)
+	} else {
+		return "Execution aborted"
+	}
+}
 
 type StateTransition struct {
 	gp           *GasPool
@@ -396,7 +410,7 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 //
 // However if any consensus issue encountered, return the error directly with
 // nil evm execution result.
-func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error) {
+func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *evmtypes.ExecutionResult, err error) {
 	coinbase := st.evm.Context.Coinbase
 	senderInitBalance, err := st.state.GetBalance(st.msg.From())
 	if err != nil {
@@ -491,6 +505,24 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		ret   []byte
 		vmerr error // vm errors do not effect consensus and are therefore not assigned to err
 	)
+
+	defer func() {
+		if r := recover(); r != nil {
+			// Recover from dependency panic and retry the execution.
+			if r != state.ErrDependency {
+				log.Debug("Recovered from EVM failure.", "Error:", r, "stack", dbg.Stack())
+			}
+			st.gp.AddGas(st.gasUsed())
+			depTxIndex := st.evm.IntraBlockState().DepTxIndex()
+			if depTxIndex < 0 {
+				err = fmt.Errorf("EVM failure: %s at: %s", r, dbg.Stack())
+			}
+			err = ErrExecAbortError{
+				DependencyTxIndex: depTxIndex,
+				OriginError:       err}
+		}
+	}()
+
 	if contractCreation {
 		// The reason why we don't increment nonce here is that we need the original
 		// nonce to calculate the address of the contract that is being created
@@ -559,7 +591,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		fmt.Printf("(%d.%d) Fees %x: tipped: %d, burnt: %d, price: %d, gas: %d\n", st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), tipAmount, burnAmount, st.gasPrice, st.gasUsed)
 	}
 
-	result := &evmtypes.ExecutionResult{
+	result = &evmtypes.ExecutionResult{
 		GasUsed:             st.gasUsed(),
 		Err:                 vmerr,
 		Reverted:            vmerr == vm.ErrExecutionReverted,

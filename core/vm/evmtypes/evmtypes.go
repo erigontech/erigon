@@ -181,10 +181,12 @@ type IntraBlockState interface {
 
 	SetHooks(hooks *tracing.Hooks)
 
-	// temp
-	Trace() bool
-	TraceAccount(common.Address) bool
+	// parallel processing support
+	DepTxIndex() int
 	TxIndex() int
 	Incarnation() int
+
+	Trace() bool
+	TraceAccount(common.Address) bool
 	Print(chain.Rules, bool)
 }

@@ -49,7 +49,6 @@ type Task interface {
 		vmCfg vm.Config,
 		engine consensus.Engine,
 		genesis *types.Genesis,
-		gasPool *core.GasPool,
 		ibs *state.IntraBlockState,
 		stateWriter state.StateWriter,
 		chainConfig *chain.Config,
@@ -72,6 +71,7 @@ type Task interface {
 	BlockNumber() uint64
 	BlockHash() common.Hash
 	BlockTime() uint64
+	BlockGasLimit() uint64
 	BlockRoot() common.Hash
 
 	IsBlockEnd() bool
@@ -196,19 +196,6 @@ type BlockResult struct {
 	Receipts types.Receipts
 }
 
-type ErrExecAbortError struct {
-	DependencyTxIndex int
-	OriginError       error
-}
-
-func (e ErrExecAbortError) Error() string {
-	if e.DependencyTxIndex >= 0 {
-		return fmt.Sprintf("Execution aborted due to dependency %d", e.DependencyTxIndex)
-	} else {
-		return "Execution aborted"
-	}
-}
-
 type ApplyMessage func(evm *vm.EVM, msg core.Message, gp *core.GasPool, refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error)
 
 // ReadWriteSet contains ReadSet, WriteSet and BalanceIncrease of a transaction,
@@ -236,6 +223,7 @@ type TxTask struct {
 	AAValidationBatchSize uint64 // number of consecutive RIP-7560 transactions, should be 0 for single transactions and transactions that are not first in the transaction order
 	InBatch               bool   // set to true for consecutive RIP-7560 transactions after the first one (first one is false)
 
+	GasPool      *core.GasPool
 	sender       *common.Address
 	message      *types.Message
 	signer       *types.Signer
@@ -354,6 +342,13 @@ func (t *TxTask) BlockTime() uint64 {
 	return t.Header.Time
 }
 
+func (t *TxTask) BlockGasLimit() uint64 {
+	if t.Header == nil {
+		return 0
+	}
+	return t.Header.GasLimit
+}
+
 func (t *TxTask) Version() state.Version {
 	return state.Version{BlockNum: t.BlockNumber(), TxNum: t.TxNum, TxIndex: t.TxIndex}
 }
@@ -403,7 +398,6 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 	vmCfg vm.Config,
 	engine consensus.Engine,
 	genesis *types.Genesis,
-	gasPool *core.GasPool,
 	ibs *state.IntraBlockState,
 	stateWriter state.StateWriter,
 	chainConfig *chain.Config,
@@ -481,7 +475,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 				return &result
 			}
 
-			result = *txTask.executeAA(aaTxn, evm, gasPool, ibs, chainConfig)
+			result = *txTask.executeAA(aaTxn, evm, txTask.GasPool, ibs, chainConfig)
 			break
 		}
 
@@ -492,15 +486,23 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			message, err := txTask.TxMessage()
 
 			if err != nil {
-				return nil, ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: err}
+				return nil, core.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: err}
 			}
 
 			// Apply the transaction to the current state (included in the env).
 			if !calcFees {
-				applyRes, err := core.ApplyMessageNoFeeBurnOrTip(evm, message, gasPool, true, false, engine)
+				applyRes, applyErr := core.ApplyMessageNoFeeBurnOrTip(evm, message, txTask.GasPool, true, false, engine)
 
-				if applyRes == nil || err != nil {
-					return nil, ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: err}
+				if applyErr != nil {
+					if _, ok := applyErr.(core.ErrExecAbortError); !ok {
+						return nil, core.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: applyErr}
+					}
+
+					return nil, applyErr
+				}
+
+				if applyRes == nil {
+					return nil, core.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex()}
 				}
 
 				reads := ibs.VersionedReads()
@@ -518,7 +520,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 				return applyRes, err
 			}
 
-			return core.ApplyMessage(evm, message, gasPool, true, false, engine)
+			return core.ApplyMessage(evm, message, txTask.GasPool, true, false, engine)
 		}()
 
 		if result.Err == nil {

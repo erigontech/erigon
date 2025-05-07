@@ -1546,8 +1546,8 @@ func (at *AggregatorRoTx) FileStream(name kv.Domain, fromTxNum, toTxNum uint64) 
 }
 
 func AggTx(tx kv.Tx) *AggregatorRoTx {
-	if withAggTx, ok := tx.(interface{ AggTx() *AggregatorRoTx }); ok {
-		return withAggTx.AggTx()
+	if withAggTx, ok := tx.(interface{ AggTx() any }); ok {
+		return withAggTx.AggTx().(*AggregatorRoTx)
 	}
 
 	return nil

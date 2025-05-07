@@ -300,7 +300,6 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	vmCfg vm.Config,
 	engine consensus.Engine,
 	genesis *types.Genesis,
-	gasPool *core.GasPool,
 	ibs *state.IntraBlockState,
 	stateWriter state.StateWriter,
 	chainConfig *chain.Config,
@@ -308,31 +307,19 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	dirs datadir.Dirs,
 	calcFees bool) (result *exec.TxResult) {
 
-	defer func() {
-		if r := recover(); r != nil {
-			// Recover from dependency panic and retry the execution.
-			if r != state.ErrDependency {
-				log.Debug("Recovered from EVM failure.", "Error:", r, "stack", dbg.Stack())
-			}
-			var err error
-			if ibs.DepTxIndex() < 0 {
-				err = fmt.Errorf("EVM failure: %s at: %s", r, dbg.Stack())
-			}
-			result = &exec.TxResult{
-				TxIn: ev.VersionedReads(ibs),
-				Err: exec.ErrExecAbortError{
-					DependencyTxIndex: ibs.DepTxIndex(),
-					OriginError:       err}}
-		}
-	}()
-
 	var start time.Time
 	if ev.profile {
 		start = time.Now()
 	}
 
-	result = ev.execTask.Execute(evm, vmCfg, engine, genesis, gasPool, ibs,
-		stateWriter, chainConfig, chainReader, dirs, !ev.shouldDelayFeeCalc)
+	result = ev.execTask.Execute(evm, vmCfg, engine, genesis, ibs, stateWriter,
+		chainConfig, chainReader, dirs, !ev.shouldDelayFeeCalc)
+
+	if ibs.HadInvalidRead() || result.Err != nil {
+		if err, ok := result.Err.(core.ErrExecAbortError); !ok {
+			result.Err = core.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: err}
+		}
+	}
 
 	if result.Err != nil {
 		return result
@@ -346,12 +333,6 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 			Duration:    time.Since(start),
 		}
 		ev.statsMutex.Unlock()
-	}
-
-	if ibs.HadInvalidRead() || result.Err != nil {
-		if err, ok := result.Err.(exec.ErrExecAbortError); !ok {
-			result.Err = exec.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: err}
-		}
 	}
 
 	return result
@@ -581,6 +562,8 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 				return h, err
 			}), te.cfg.engine, te.cfg.author, te.cfg.chainConfig)
 
+			gasPool := (&core.GasPool{}).AddGas(b.GasLimit()).AddBlobGas(te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time()))
+
 			var txTasks []exec.Task
 
 			for txIndex := -1; txIndex <= len(txs); txIndex++ {
@@ -599,7 +582,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 					SkipAnalysis:    skipAnalysis,
 					EvmBlockContext: blockContext,
 					Withdrawals:     b.Withdrawals(),
-
+					GasPool:         gasPool,
 					// use history reader instead of state reader to catch up to the tx where we left off
 					HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
 					Config:           te.cfg.chainConfig,
@@ -800,7 +783,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	be.results[tx] = &execResult{res}
 
 	if res.Err != nil {
-		if execErr, ok := res.Err.(exec.ErrExecAbortError); ok {
+		if execErr, ok := res.Err.(core.ErrExecAbortError); ok {
 			if execErr.OriginError != nil && be.skipCheck[tx] {
 				// If the transaction failed when we know it should not fail, this means the transaction itself is
 				// bad (e.g. wrong nonce), and we should exit the execution immediately
@@ -960,6 +943,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if dbg.TraceTransactionIO && be.txIncarnations[tx] > 1 {
 				fmt.Println(be.blockNum, "FAILED", tx, be.txIncarnations[tx], "failed", be.execFailed[tx], "aborted", be.execAborted[tx])
 			}
+
+			be.tasks[tx].Task.(*exec.TxTask).GasPool.AddGas(be.results[tx].ExecutionResult.GasUsed)
 
 			// 'create validation tasks for all transactions > tx ...'
 			be.validateTasks.pushPendingSet(be.execTasks.getRevalidationRange(tx + 1))

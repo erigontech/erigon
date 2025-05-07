@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/exec"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
@@ -112,8 +111,6 @@ type Worker struct {
 	results *exec.ResultsQueue
 	chain   consensus.ChainReader
 
-	taskGasPool *core.GasPool
-
 	evm *vm.EVM
 	ibs *state.IntraBlockState
 
@@ -140,14 +137,12 @@ func NewWorker(ctx context.Context, background bool, metrics *WorkerMetrics, cha
 		results: results,
 		engine:  engine,
 
-		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
-		taskGasPool: new(core.GasPool),
+		evm: vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
 
 		dirs:    dirs,
 		metrics: metrics,
 	}
 	w.runnable.Store(true)
-	w.taskGasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(0))
 	w.ibs = state.New(w.stateReader)
 	return w
 }
@@ -338,8 +333,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.TxResult {
 		vmCfg.Tracer = callTracer.Tracer().Hooks
 	}
 
-	result := txTask.Execute(rw.evm, vmCfg, rw.engine, rw.genesis, rw.taskGasPool, rw.ibs,
-		rw.stateWriter, rw.chainConfig, rw.chain, rw.dirs, true)
+	result := txTask.Execute(rw.evm, vmCfg, rw.engine, rw.genesis, rw.ibs, rw.stateWriter, rw.chainConfig, rw.chain, rw.dirs, true)
 
 	if result.Task == nil {
 		result.Task = txTask

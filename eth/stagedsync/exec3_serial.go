@@ -95,9 +95,15 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 		}
 	}
 
+	var gasPool *core.GasPool
 	for _, task := range tasks {
 		txTask := task.(*exec.TxTask)
 
+		if gasPool == nil {
+			gasPool = (&core.GasPool{}).AddGas(task.BlockGasLimit()).AddBlobGas(se.cfg.chainConfig.GetMaxBlobGasPerBlock(tasks[0].BlockTime()))
+		}
+
+		txTask.GasPool = gasPool
 		result := se.worker.RunTxTask(txTask)
 
 		if err := func() error {
@@ -265,6 +271,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 			se.executedGas.Add(int64(se.gasUsed))
 			se.gasUsed = 0
 			se.blobGasUsed = 0
+			gasPool = nil
 		}
 	}
 

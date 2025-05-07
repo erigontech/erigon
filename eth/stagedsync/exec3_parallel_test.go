@@ -96,7 +96,6 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	vmCfg vm.Config,
 	engine consensus.Engine,
 	genesis *types.Genesis,
-	gasPool *core.GasPool,
 	ibs *state.IntraBlockState,
 	stateWriter state.StateWriter,
 	chainConfig *chain.Config,
@@ -128,7 +127,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 			val := result.Value()
 
 			if i == 0 && val != nil && (val.(int) != t.nonce) {
-				return &exec.TxResult{Err: exec.ErrExecAbortError{
+				return &exec.TxResult{Err: core.ErrExecAbortError{
 					DependencyTxIndex: -1,
 					OriginError:       fmt.Errorf("invalid nonce: got: %d, expected: %d", val.(int), t.nonce)}}
 			}
@@ -160,7 +159,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	}
 
 	if dep != -1 {
-		return &exec.TxResult{Err: exec.ErrExecAbortError{DependencyTxIndex: dep, OriginError: fmt.Errorf("Dependency error")}}
+		return &exec.TxResult{Err: core.ErrExecAbortError{DependencyTxIndex: dep, OriginError: fmt.Errorf("Dependency error")}}
 	}
 
 	return &exec.TxResult{}
