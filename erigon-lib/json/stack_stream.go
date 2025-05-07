@@ -24,7 +24,6 @@ import (
 )
 
 // InitialStackSize is the initial capacity of the stack
-// Most JSON documents don't have deep nesting, so 16 is a reasonable default
 const InitialStackSize = 16
 
 // stackItem represents the type of item on the stack
@@ -61,7 +60,6 @@ func (s *StackStream) Buffer() []byte {
 // Reset resets the underlying jsoniter.Stream and clears the stack
 func (s *StackStream) Reset(out io.Writer) {
 	s.stream.Reset(out)
-	s.stream.Error = nil
 	s.stack = s.stack[:0]
 }
 
@@ -220,10 +218,6 @@ func (s *StackStream) WriteObjectField(fieldName string) {
 
 // Flush flushes the underlying stream
 func (s *StackStream) Flush() error {
-	err := s.closePendingObjects()
-	if err != nil {
-		return err
-	}
 	return s.stream.Flush()
 }
 
@@ -234,16 +228,21 @@ func (s *StackStream) Error() error {
 
 // BufferAsString returns the content as a string after flushing any incomplete structures
 func (s *StackStream) BufferAsString() (string, error) {
-	err := s.closePendingObjects()
+	err := s.ClosePending(0)
 	if err != nil {
 		return "", err
 	}
 	return string(s.stream.Buffer()), nil
 }
 
-// WriteEmptyArray writes the end of an array
+// WriteEmptyArray writes an empty array into the underlying stream
 func (s *StackStream) WriteEmptyArray() {
 	s.stream.WriteEmptyArray()
+}
+
+// WriteEmptyObject writes an empty object into the underlying stream
+func (s *StackStream) WriteEmptyObject() {
+	s.stream.WriteEmptyObject()
 }
 
 // Size returns the size of the buffer
@@ -277,29 +276,36 @@ func (s *StackStream) GetStackSummary() string {
 		case ItemField:
 			result += fmt.Sprintf("[%d] Field\n", i)
 		case ItemComma:
-			result += fmt.Sprintf("[%d] Comma (expecting value)\n", i)
+			result += fmt.Sprintf("[%d] Comma\n", i)
 		}
 	}
 	return result
 }
 
-// closePendingObjects properly closes all pending JSON constructs on the stack
-// to ensure valid JSON, even when an error occurs during writing
-// This method is optimized for performance
-func (s *StackStream) closePendingObjects() error {
+// ClosePending properly closes all pending JSON elements on the stack to ensure validity even when an error occurs.
+// You can specify how many elements to skip from the end of the stack for cases when they are handled in the user code.
+// @param skipLast number of items to skip from the end of the stack
+func (s *StackStream) ClosePending(skipLast uint) error {
 	stackLen := len(s.stack)
 	if stackLen == 0 {
 		return s.stream.Error
 	}
 
 	// Process the stack in reverse order
-	for i := stackLen - 1; i >= 0; i-- {
+	for i := stackLen - 1; i >= int(skipLast); i-- {
 		item := s.stack[i]
 
-		// Unrolled switch for better performance
-		if item == ItemField || item == ItemComma {
-			// Fields and commas are handled the same way - write null
+		if item == ItemField {
 			s.stream.WriteNil()
+		} else if item == ItemComma {
+			if i-1 < stackLen && s.stack[i-1] == ItemObject {
+				// The previous item is a JSON object: we must add a field after the comma to preserve format validity
+				s.stream.WriteObjectField("")
+				s.stream.WriteString("")
+			} else {
+				// The previous item is a JSON array: write a nil value after the comma
+				s.stream.WriteNil()
+			}
 		} else if item == ItemArray {
 			// Close array
 			s.stream.WriteArrayEnd()
@@ -309,7 +315,6 @@ func (s *StackStream) closePendingObjects() error {
 		}
 	}
 
-	// Clear the stack - more efficient than creating a new one
 	s.stack = s.stack[:0]
 
 	// Return any error from the underlying stream
@@ -321,7 +326,8 @@ func (s *StackStream) push(item stackItem) {
 	s.stack = append(s.stack, item)
 }
 
-// pop removes the top item from the stack
+// pop removes the specified item from the top of the stack, if present
+// @param item the item to pop from the stack
 func (s *StackStream) pop(item stackItem) {
 	if len(s.stack) > 0 && s.stack[len(s.stack)-1] == item {
 		s.stack = s.stack[:len(s.stack)-1]

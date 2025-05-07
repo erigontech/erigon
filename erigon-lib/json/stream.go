@@ -63,4 +63,9 @@ type Stream interface {
 	// Utility methods
 
 	WriteEmptyArray()
+	WriteEmptyObject()
+
+	// Extended functionality
+
+	ClosePending(skipLast uint) error
 }
