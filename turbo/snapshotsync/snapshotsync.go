@@ -336,6 +336,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 
 	// build all download requests
 	for _, p := range preverifiedBlockSnapshots {
+		fmt.Printf("a: %s\n", p.Name)
 		if caplin == NoCaplin && (strings.Contains(p.Name, "beaconblocks") || strings.Contains(p.Name, "blobsidecars") || strings.Contains(p.Name, "caplin")) {
 			continue
 		}
@@ -367,12 +368,16 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 			continue
 		}
 
+		fmt.Printf("b: %s\n", p.Name)
 		downloadRequest = append(downloadRequest, NewDownloadRequest(p.Name, p.Hash))
 	}
 
 	if headerchain {
 		log.Info("[OtterSync] Starting Ottersync")
 		log.Info(greatOtterBanner)
+	} else {
+		panic(1)
+
 	}
 
 	log.Info(fmt.Sprintf("[%s] Requesting downloads", logPrefix))
