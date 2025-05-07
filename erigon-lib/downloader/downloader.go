@@ -2440,13 +2440,16 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	if ok {
 		if isStateFile {
 			if !snaptype.E3Seedable(name) {
+				log.Warn("[dbg.prever] AddNewSeedableFile", "reject", name)
 				return nil
 			}
 		} else {
 			if ff.Type == nil {
+				log.Warn("[dbg.prever] AddNewSeedableFile", "reject3", name)
 				return fmt.Errorf("nil ptr after parsing file: %s", name)
 			}
 			if !d.cfg.SnapshotConfig.Seedable(ff) {
+				log.Warn("[dbg.prever] AddNewSeedableFile", "reject2", name)
 				return nil
 			}
 		}
@@ -2455,16 +2458,20 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	// if we don't have the torrent file we build it if we have the .seg file
 	_, err := BuildTorrentIfNeed(ctx, name, d.SnapDir(), d.torrentFS)
 	if err != nil {
+		log.Warn("[dbg.prever] AddNewSeedableFile", "reject4", name)
 		return fmt.Errorf("AddNewSeedableFile: %w", err)
 	}
 	ts, err := d.torrentFS.LoadByName(name)
 	if err != nil {
+		log.Warn("[dbg.prever] AddNewSeedableFile", "reject5", name)
 		return fmt.Errorf("AddNewSeedableFile: %w", err)
 	}
 	_, _, err = addTorrentFile(ctx, ts, d.torrentClient, d.db, d.webseeds)
 	if err != nil {
+		log.Warn("[dbg.prever] AddNewSeedableFile", "reject6", name)
 		return fmt.Errorf("addTorrentFile: %w", err)
 	}
+	log.Warn("[dbg.prever] AddNewSeedableFile", "added", name)
 	return nil
 }
 
@@ -2484,19 +2491,23 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	// Example:
 	//  - Erigon generated file X with hash H1. User upgraded Erigon. New version has preverified file X with hash H2. Must ignore H2 (don't send to Downloader)
 	if d.alreadyHaveThisName(name) || !IsSnapNameAllowed(name) {
+		log.Warn("[dbg] AddMagnetLink", "reject1", name)
 		return nil
 	}
 	isProhibited, err := d.torrentFS.NewDownloadsAreProhibited(name)
 	if err != nil {
+		log.Warn("[dbg] AddMagnetLink", "reject2", name)
 		return err
 	}
 
 	exists, err := d.torrentFS.Exists(name)
 	if err != nil {
+		log.Warn("[dbg] AddMagnetLink", "reject3", name)
 		return err
 	}
 
 	if isProhibited && !exists {
+		log.Warn("[dbg] AddMagnetLink", "reject4", name)
 		return nil
 	}
 
@@ -2505,13 +2516,16 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	spec, err := torrent.TorrentSpecFromMagnetUri(magnet.String())
 
 	if err != nil {
+		log.Warn("[dbg] AddMagnetLink", "reject5", name)
 		return err
 	}
 	t, ok, err := addTorrentFile(ctx, spec, d.torrentClient, d.db, d.webseeds)
 	if err != nil {
+		log.Warn("[dbg] AddMagnetLink", "reject6", name)
 		return err
 	}
 	if !ok {
+		log.Warn("[dbg] AddMagnetLink", "reject7", name)
 		return nil
 	}
 	d.wg.Add(1)
@@ -2554,6 +2568,9 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 			t.AddWebSeeds(urls)
 		}
 	}(t)
+
+	log.Warn("[dbg] AddMagnetLink", "added", name)
+
 	//log.Debug("[downloader] downloaded both seg and torrent files", "hash", infoHash)
 	return nil
 }
