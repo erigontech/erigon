@@ -22,9 +22,9 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/tidwall/btree"
 
@@ -414,8 +414,10 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	if dt.d.noFsync {
 		kvWriter.DisableFsync()
 	}
-	p := ps.AddNew("merge "+path.Base(kvFilePath), 1)
+	p := ps.AddNew("merge "+filepath.Base(kvFilePath), 1)
 	defer ps.Delete(p)
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
 
 	var cp CursorHeap
 	heap.Init(&cp)
@@ -436,6 +438,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 			})
 		}
 	}
+
 	// In the loop below, the pair `keyBuf=>valBuf` is always 1 item behind `lastKey=>lastVal`.
 	// `lastKey` and `lastVal` are taken from the top of the multi-way merge (assisted by the CursorHeap cp), but not processed right away
 	// instead, the pair from the previous iteration is processed first - `keyBuf=>valBuf`. After that, `keyBuf` and `valBuf` are assigned
@@ -446,6 +449,8 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	for cp.Len() > 0 {
 		lastKey := common.Copy(cp[0].key)
 		lastVal := common.Copy(cp[0].val)
+		//lastKey := cp[0].key //lastKey = append(lastKey[:0], cp[0].key...)
+		//lastVal := cp[0].val //lastVal = append(lastVal[:0], cp[0].val...)
 		lastFileStartTxNum, lastFileEndTxNum := cp[0].startTxNum, cp[0].endTxNum
 		// Advance all the items that have this key (including the top)
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
@@ -479,6 +484,12 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 			keyBuf = append(keyBuf[:0], lastKey...)
 			valBuf = append(valBuf[:0], lastVal...)
 			keyFileStartTxNum, keyFileEndTxNum = lastFileStartTxNum, lastFileEndTxNum
+		}
+
+		select {
+		case <-logEvery.C:
+			log.Trace(fmt.Sprintf("[agg.merge] progress: %s, %x", kvFile.FileName(), keyBuf))
+		default:
 		}
 	}
 	if keyBuf != nil {
@@ -580,7 +591,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 		comp.DisableFsync()
 	}
 	write := seg.NewWriter(comp, iit.ii.compression)
-	p := ps.AddNew(path.Base(datPath), 1)
+	p := ps.AddNew(filepath.Base(datPath), 1)
 	defer ps.Delete(p)
 
 	var cp CursorHeap
@@ -731,7 +742,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 			compr.DisableFsync()
 		}
 		pagedWr := page.NewWriter(compr, ht.h.historyValuesOnCompressedPage, true)
-		p := ps.AddNew(path.Base(datPath), 1)
+		p := ps.AddNew(filepath.Base(datPath), 1)
 		defer ps.Delete(p)
 
 		var cp CursorHeap

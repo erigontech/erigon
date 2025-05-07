@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -758,6 +757,8 @@ func (btw *BtIndexWriter) Close() {
 }
 
 type BtIndex struct {
+	filePath, fileName string
+
 	m        mmap.MMap
 	data     []byte
 	ef       *eliasfano32.EliasFano
@@ -767,7 +768,6 @@ type BtIndex struct {
 	useBplus bool
 	size     int64
 	modTime  time.Time
-	filePath string
 	pool     sync.Pool
 }
 
@@ -871,6 +871,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 	var validationPassed = false
 	idx := &BtIndex{
 		filePath: indexPath,
+		fileName: filepath.Base(indexPath),
 	}
 	defer func() {
 		// recover from panic if one occurred. Set err to nil if no panic
@@ -1006,7 +1007,7 @@ func (b *BtIndex) ModTime() time.Time { return b.modTime }
 
 func (b *BtIndex) FilePath() string { return b.filePath }
 
-func (b *BtIndex) FileName() string { return path.Base(b.filePath) }
+func (b *BtIndex) FileName() string { return filepath.Base(b.filePath) }
 
 func (b *BtIndex) Empty() bool { return b == nil || b.ef == nil || b.ef.Count() == 0 }
 
