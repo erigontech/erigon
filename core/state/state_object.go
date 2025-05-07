@@ -239,9 +239,7 @@ func (so *stateObject) SetStorage(storage Storage) {
 	if so.fakeStorage == nil {
 		so.fakeStorage = make(Storage)
 	}
-	for key, value := range storage {
-		so.fakeStorage[key] = value
-	}
+	maps.Copy(so.fakeStorage, storage)
 	// Don't bother journal since this function should only be used for
 	// debugging and the `fake` storage won't be committed to database.
 }
