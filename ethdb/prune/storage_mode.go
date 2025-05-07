@@ -24,25 +24,67 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/params"
 )
 
-var DefaultMode = Mode{
-	Initialised: true,
-	History:     Distance(math.MaxUint64),
-	Blocks:      Distance(math.MaxUint64),
-	Experiments: Experiments{}, // all off
-}
+var (
+	ArchiveMode = Mode{
+		Initialised: true,
+		History:     Distance(math.MaxUint64),
+		Blocks:      Distance(math.MaxUint64),
+		Experiments: Experiments{}, // all off
+	}
+	FullMode = Mode{
+		Initialised: true,
+		Blocks:      Distance(math.MaxUint64),
+		History:     Distance(config3.DefaultPruneDistance),
+		Experiments: Experiments{},
+	}
+	MinimalMode = Mode{
+		Initialised: true,
+		Blocks:      Distance(config3.DefaultPruneDistance),
+		History:     Distance(config3.DefaultPruneDistance),
+		Experiments: Experiments{},
+	}
 
-type Experiments struct {
-}
+	DefaultMode = ArchiveMode
 
-func FromCli(chainId uint64, distanceHistory, distanceBlocks uint64, experiments []string) (Mode, error) {
-	mode := DefaultMode
+	ErrUnknownPruneMode       = errors.New("--prune.mode must be one of archive, full, minimal")
+	ErrDistanceOnlyForArchive = errors.New("--prune.distance and --prune.distance.blocks are only allowed with --prune.mode=archive")
+)
 
-	mode.History = Distance(distanceHistory)
-	mode.Blocks = Distance(distanceBlocks)
+type Experiments struct{}
+
+func FromCli(distanceHistory, distanceBlocks uint64, pruneMode string, experiments []string) (Mode, error) {
+	var mode Mode
+	switch pruneMode {
+	case "archive", "":
+		mode = ArchiveMode
+		if distanceHistory > 0 {
+			mode.History = Distance(distanceHistory)
+		}
+		if distanceBlocks > 0 {
+			mode.Blocks = Distance(distanceBlocks)
+		}
+	case "full":
+		mode = FullMode
+	case "minimal":
+		mode = MinimalMode
+	default:
+		return Mode{}, ErrUnknownPruneMode
+	}
+
+	if pruneMode != "archive" {
+		// Override is not allowed for full/minimal mode
+		if distanceHistory > 0 && distanceHistory != mode.History.toValue() {
+			return Mode{}, ErrDistanceOnlyForArchive
+		}
+		if distanceBlocks > 0 && distanceBlocks != mode.Blocks.toValue() {
+			return Mode{}, ErrDistanceOnlyForArchive
+		}
+	}
 
 	for _, ex := range experiments {
 		switch ex {
@@ -85,6 +127,28 @@ type Mode struct {
 	Experiments Experiments
 }
 
+func (m Mode) String() string {
+	if !m.Initialised {
+		return "archive"
+	}
+	if m.History.toValue() == FullMode.History.toValue() && m.Blocks.toValue() == FullMode.Blocks.toValue() {
+		return "full"
+	}
+	if m.History.toValue() == MinimalMode.History.toValue() && m.Blocks.toValue() == MinimalMode.Blocks.toValue() {
+		return "minimal"
+	}
+
+	short := "archive"
+	if m.History.toValue() != DefaultMode.History.toValue() {
+		short += fmt.Sprintf(" --prune.distance=%d", m.History.toValue())
+	}
+	if m.Blocks.toValue() != DefaultMode.Blocks.toValue() {
+		short += fmt.Sprintf(" --prune.distance.blocks=%d", m.Blocks.toValue())
+	}
+
+	return strings.TrimLeft(short, " ")
+}
+
 type BlockAmount interface {
 	PruneTo(stageHead uint64) uint64
 	Enabled() bool
@@ -113,32 +177,6 @@ func (p Distance) PruneTo(stageHead uint64) uint64 {
 	}
 	return stageHead - uint64(p)
 }
-
-func (m Mode) String() string {
-	if !m.Initialised {
-		return "default"
-	}
-	const defaultVal uint64 = params.FullImmutabilityThreshold
-	long := ""
-	short := ""
-	if m.History.Enabled() {
-		if m.History.useDefaultValue() {
-			short += fmt.Sprintf(" --prune.h.older=%d", defaultVal)
-		} else {
-			long += fmt.Sprintf(" --prune.h.%s=%d", m.History.dbType(), m.History.toValue())
-		}
-	}
-	if m.Blocks.Enabled() {
-		if m.Blocks.useDefaultValue() {
-			short += fmt.Sprintf(" --prune.b.older=%d", defaultVal)
-		} else {
-			long += fmt.Sprintf(" --prune.b.%s=%d", m.Blocks.dbType(), m.Blocks.toValue())
-		}
-	}
-
-	return strings.TrimLeft(short+long, " ")
-}
-
 func Override(db kv.RwTx, sm Mode) error {
 	var (
 		err error
@@ -173,7 +211,7 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 
 		// If storage mode is not explicitly specified, we take whatever is in the database
 		if !reflect.DeepEqual(pm, pruneMode) {
-			return pm, errors.New("not allowed change of --prune flag, last time you used: " + pm.String())
+			return pm, errors.New("changing --prune.* flags is prohibited, last time you used: --prune.mode=" + pm.String())
 		}
 	}
 	return pm, nil
@@ -269,35 +307,6 @@ func setOnEmpty(db kv.GetPut, key []byte, blockAmount BlockAmount) error {
 			return err
 		}
 		if err = db.Put(kv.DatabaseInfo, keyType(key), blockAmount.dbType()); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func setMode(db kv.RwTx, key []byte, currentValue bool) error {
-	val := []byte{2}
-	if currentValue {
-		val = []byte{1}
-	}
-	if err := db.Put(kv.DatabaseInfo, key, val); err != nil {
-		return err
-	}
-	return nil
-}
-
-func setModeOnEmpty(db kv.GetPut, key []byte, currentValue bool) error {
-	mode, err := db.GetOne(kv.DatabaseInfo, key)
-	if err != nil {
-		return err
-	}
-	if len(mode) == 0 {
-		val := []byte{2}
-		if currentValue {
-			val = []byte{1}
-		}
-		if err = db.Put(kv.DatabaseInfo, key, val); err != nil {
 			return err
 		}
 	}
