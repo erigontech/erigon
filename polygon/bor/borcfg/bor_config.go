@@ -54,7 +54,7 @@ func (c *BorConfig) String() string {
 }
 
 func (c *BorConfig) CalculateProducerDelay(number uint64) uint64 {
-	return chain.ConfigValueLookup(common.ParseMapKeysIntoUint64(c.ProducerDelay), number)
+	return chain.ConfigValueLookup(c.ProducerDelay, number)
 }
 
 func (c *BorConfig) IsSprintStart(number uint64) bool {
@@ -112,11 +112,11 @@ func (c *BorConfig) CalculateSprintNumber(number uint64) uint64 {
 }
 
 func (c *BorConfig) CalculateBackupMultiplier(number uint64) uint64 {
-	return chain.ConfigValueLookup(common.ParseMapKeysIntoUint64(c.BackupMultiplier), number)
+	return chain.ConfigValueLookup(c.BackupMultiplier, number)
 }
 
 func (c *BorConfig) CalculatePeriod(number uint64) uint64 {
-	return chain.ConfigValueLookup(common.ParseMapKeysIntoUint64(c.Period), number)
+	return chain.ConfigValueLookup(c.Period, number)
 }
 
 // isForked returns whether a fork scheduled at block s is active at the given head block.
@@ -169,7 +169,7 @@ func (c *BorConfig) GetAhmedabadBlock() *big.Int {
 }
 
 func (c *BorConfig) CalculateStateSyncDelay(number uint64) uint64 {
-	return chain.ConfigValueLookup(common.ParseMapKeysIntoUint64(c.StateSyncConfirmationDelay), number)
+	return chain.ConfigValueLookup(c.StateSyncConfirmationDelay, number)
 }
 
 func (c *BorConfig) StateReceiverContractAddress() common.Address {
