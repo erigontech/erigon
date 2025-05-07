@@ -78,7 +78,10 @@ func (g *RequestGenerator) debugTraceBlockByNumber(blockNum uint64) string {
 }
 
 func (g *RequestGenerator) debugTraceTransaction(hash string, additionalParams string) string {
-	const template = `{"jsonrpc":"2.0","method":"debug_traceTransaction","params":["%s", {%s}],"id":%d}`
+	if additionalParams != "" {
+		additionalParams = ", {" + additionalParams + "}"
+	}
+	const template = `{"jsonrpc":"2.0","method":"debug_traceTransaction","params":["%s"%s],"id":%d}`
 	return fmt.Sprintf(template, hash, additionalParams, g.reqID.Add(1))
 }
 
