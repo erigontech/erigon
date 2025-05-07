@@ -1469,14 +1469,14 @@ func WriteReceiptsCache(tx kv.RwTx, blockNum uint64, blockHash common.Hash, rece
 	buf := bytes.NewBuffer(nil)
 	for txnIndex, receipt := range receipts {
 		buf.Reset()
-
-		if txnIndex != int(receipts[txnIndex].TransactionIndex) {
-			panic(fmt.Sprintf("assert: txnIndex is wrong %d %d, blockNum=%d, txnIdx=%d", txnIndex, receipts[txnIndex].TransactionIndex, blockNum, txnIndex))
-		}
-		if len(receipt.Logs) > 0 && int(receipt.FirstLogIndexWithinBlock) != int(receipt.Logs[0].Index) {
-			panic(fmt.Sprintf("assert: FirstLogIndexWithinBlock is wrong: %d %d, blockNum=%d, txnIdx=%d", receipt.FirstLogIndexWithinBlock, receipt.Logs[0].Index, blockNum, txnIndex))
-		}
 		if receipt != nil {
+			if txnIndex != int(receipts[txnIndex].TransactionIndex) {
+				panic(fmt.Sprintf("assert: txnIndex is wrong %d %d, blockNum=%d, txnIdx=%d", txnIndex, receipts[txnIndex].TransactionIndex, blockNum, txnIndex))
+			}
+			if len(receipt.Logs) > 0 && int(receipt.FirstLogIndexWithinBlock) != int(receipt.Logs[0].Index) {
+				panic(fmt.Sprintf("assert: FirstLogIndexWithinBlock is wrong: %d %d, blockNum=%d, txnIdx=%d", receipt.FirstLogIndexWithinBlock, receipt.Logs[0].Index, blockNum, txnIndex))
+			}
+
 			storageReceipt := (*types.ReceiptForStorage)(receipt)
 			err := rlp.Encode(buf, storageReceipt)
 			if err != nil {
