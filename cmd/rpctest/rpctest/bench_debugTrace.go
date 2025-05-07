@@ -144,10 +144,15 @@ func BenchDebugTraceBlockByHash(erigonUrl, gethUrl string, needCompare bool, blo
 	return nil
 }
 
-func BenchDebugTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blockFrom uint64, blockTo uint64, recordFileName string, errorFileName string) error {
+func BenchDebugTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blockFrom uint64, blockTo uint64, additionalParams string, recordFileName string, errorFileName string) error {
+	fmt.Println("BenchDebugTraceTransaction: fromBlock:", blockFrom, ", blockTo:", blockTo, ", additionalParams:", additionalParams)
+
 	setRoutes(erigonUrl, gethUrl)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
+	}
+	if additionalParams == "" {
+		additionalParams = "\"disableStorage\": true,\"disableMemory\": true,\"disableStack\": true"
 	}
 
 	var rec *bufio.Writer
@@ -186,6 +191,9 @@ func BenchDebugTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blo
 	var nBlocks = 0
 	var nTransactions = 0
 	for bn := blockFrom; bn < blockTo; bn++ {
+		if nBlocks%50 == 0 {
+			fmt.Println("Processing Block: ", bn)
+		}
 		nBlocks++
 		reqGen.reqID++
 		var erigonBlock EthBlockByNumber
@@ -218,12 +226,15 @@ func BenchDebugTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blo
 			}
 		}
 
-		for _, txn := range erigonBlock.Result.Transactions {
+		for idx, txn := range erigonBlock.Result.Transactions {
+			if idx%30 != 0 {
+				continue
+			}
 			reqGen.reqID++
 			nTransactions++
 
 			var request string
-			request = reqGen.debugTraceTransaction(txn.Hash)
+			request = reqGen.debugTraceTransaction(txn.Hash, additionalParams)
 			errCtx := fmt.Sprintf("bn=%d hash=%s", bn, txn.Hash)
 
 			if err := requestAndCompare(request, "debug_traceTransaction", errCtx, reqGen, needCompare, rec, errs, resultsCh,
