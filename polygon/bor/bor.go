@@ -258,7 +258,7 @@ type spanReader interface {
 }
 
 type bridgeReader interface {
-	Events(ctx context.Context, blockNum uint64) ([]*types.Message, error)
+	Events(ctx context.Context, blockHash libcommon.Hash, blockNum uint64) ([]*types.Message, error)
 	EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error)
 }
 
@@ -1549,7 +1549,7 @@ func (c *Bor) CommitStates(
 	blockNum := header.Number.Uint64()
 
 	if c.useBridgeReader {
-		events, err := c.bridgeReader.Events(c.execCtx, blockNum)
+		events, err := c.bridgeReader.Events(c.execCtx, header.Hash(), blockNum)
 		if err != nil {
 			return err
 		}

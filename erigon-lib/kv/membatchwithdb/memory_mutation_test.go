@@ -218,7 +218,7 @@ func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *stateLib.Aggregator) {
 	}
 	tb.Cleanup(agg.Close)
 
-	_db, err := temporal.New(db, agg)
+	_db := temporal.New(db, agg)
 	if err != nil {
 		tb.Fatal(err)
 	}

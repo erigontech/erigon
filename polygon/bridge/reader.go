@@ -71,8 +71,8 @@ func (r *Reader) Prepare(ctx context.Context) error {
 }
 
 // Events returns all sync events at blockNum
-func (r *Reader) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
-	start, end, ok, err := r.store.BlockEventIdsRange(ctx, blockNum)
+func (r *Reader) Events(ctx context.Context, blockHash libcommon.Hash, blockNum uint64) ([]*types.Message, error) {
+	start, end, ok, err := r.store.BlockEventIdsRange(ctx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +105,7 @@ func (r *Reader) Events(ctx context.Context, blockNum uint64) ([]*types.Message,
 			nil,
 		)
 
-		eventsRaw = append(eventsRaw, &msg)
+		eventsRaw = append(eventsRaw, msg)
 	}
 
 	return eventsRaw, nil
@@ -133,8 +133,10 @@ func NewRemoteReader(client remote.BridgeBackendClient) *RemoteReader {
 	}
 }
 
-func (r *RemoteReader) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
-	reply, err := r.client.BorEvents(ctx, &remote.BorEventsRequest{BlockNum: blockNum})
+func (r *RemoteReader) Events(ctx context.Context, blockHash libcommon.Hash, blockNum uint64) ([]*types.Message, error) {
+	reply, err := r.client.BorEvents(ctx, &remote.BorEventsRequest{
+		BlockNum:  blockNum,
+		BlockHash: gointerfaces.ConvertHashToH256(blockHash)})
 	if err != nil {
 		return nil, err
 	}
@@ -196,7 +198,7 @@ func messageFromData(to libcommon.Address, data []byte) *types.Message {
 		nil,
 	)
 
-	return &msg
+	return msg
 }
 
 // NewStateSyncEventMessages creates a corresponding message that can be passed to EVM for multiple state sync events
@@ -219,7 +221,7 @@ func NewStateSyncEventMessages(stateSyncEvents []rlp.RawValue, stateReceiverCont
 			nil,   // maxFeePerBlobGas
 		)
 
-		msgs[i] = &msg
+		msgs[i] = msg
 	}
 
 	return msgs

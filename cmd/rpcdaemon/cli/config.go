@@ -57,6 +57,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/state/stats"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/health"
@@ -109,7 +110,7 @@ type HeimdallReader interface {
 }
 
 type BridgeReader interface {
-	Events(ctx context.Context, blockNum uint64) ([]*types.Message, error)
+	Events(ctx context.Context, blockHash libcommon.Hash, blockNum uint64) ([]*types.Message, error)
 	EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error)
 	Close()
 }
@@ -410,13 +411,13 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 
 		// Configure sapshots
 
-		snapCfg := cfg.Snap
+		cfg.Snap.ChainName = cc.ChainName
 		// this assumed the rpc deamon never runs with a downloader - if this is
 		// not the case we'll need to adjust the defaults of the --no-downlaoder
 		// flag to the faulse by default
-		snapCfg.NoDownloader = true
-		allSnapshots = freezeblocks.NewRoSnapshots(snapCfg, cfg.Dirs.Snap, 0, logger)
-		allBorSnapshots = heimdall.NewRoSnapshots(snapCfg, cfg.Dirs.Snap, 0, logger)
+		cfg.Snap.NoDownloader = true
+		allSnapshots = freezeblocks.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
+		allBorSnapshots = heimdall.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
 
 		if polygonSync {
 			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, cfg.Dirs.DataDir, true, roTxLimit), allBorSnapshots)
@@ -449,19 +450,11 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			allSnapshots.LogStat("remote")
 			allBorSnapshots.LogStat("bor:remote")
 			_ = agg.OpenFolder() //TODO: must use analog of `OptimisticReopenWithDB`
-
-			rawDB.View(context.Background(), func(tx kv.Tx) error {
-				aggTx := agg.BeginFilesRo()
-				defer aggTx.Close()
-				aggTx.LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
-					_, histBlockNumProgress, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
-					return histBlockNumProgress, err
-				})
-				return nil
-			})
 		} else {
 			logger.Debug("[rpc] download of segments not complete yet. please wait StageSnapshots to finish")
 		}
+
+		db = temporal.New(rawDB, agg)
 
 		wg := errgroup.Group{}
 		wg.SetLimit(1)
@@ -486,14 +479,15 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 				if err = agg.OpenFolder(); err != nil {
 					logger.Error("[snapshots] reopen", "err", err)
 				} else {
-					rawDB.View(context.Background(), func(tx kv.Tx) error {
-						ac := agg.BeginFilesRo()
-						defer ac.Close()
-						ac.LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
-							_, histBlockNumProgress, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
-							return histBlockNumProgress, err
-						})
+					tx, err := db.BeginTemporalRo(ctx)
+					if err != nil {
+						logger.Error("[snapshots] reopen", "err", err)
 						return nil
+					}
+					defer tx.Rollback()
+					stats.LogStats(tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
+						_, histBlockNumProgress, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
+						return histBlockNumProgress, err
 					})
 				}
 				return nil
@@ -501,9 +495,17 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		}
 		onNewSnapshot()
 
-		db, err = temporal.New(rawDB, agg)
-		if err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
+		if allSegmentsDownloadComplete {
+			tx, err := db.BeginTemporalRo(ctx)
+			if err != nil {
+				return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("could not connect to txpool api: %w", err)
+			}
+			defer tx.Rollback()
+
+			stats.LogStats(tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
+				_, histBlockNumProgress, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
+				return histBlockNumProgress, err
+			})
 		}
 		stateCache = kvcache.NewDummy()
 	}
@@ -840,9 +842,9 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		}()
 	}
 
-	logger.Info("JsonRpc endpoint opened", info...)
+	logger.Info("[rpc] endpoint opened", info...)
 	<-ctx.Done()
-	logger.Info("Exiting...")
+	logger.Info("[rpc] Exiting...")
 	return nil
 }
 

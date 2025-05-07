@@ -22,16 +22,15 @@ import (
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring/v2"
+	"github.com/erigontech/erigon/execution/exec3"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/bitmapdb"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cmd/state/exec3"
 	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethutils"
@@ -159,65 +158,6 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		}
 	}
 	return logs, nil
-}
-
-// The Topic list restricts matches to particular event topics. Each event has a list
-// of topics. Topics matches a prefix of that list. An empty element slice matches any
-// topic. Non-empty elements represent an alternative that matches any of the
-// contained topics.
-//
-// Examples:
-// {} or nil          matches any topic list
-// {{A}}              matches topic A in first position
-// {{}, {B}}          matches any topic in first position AND B in second position
-// {{A}, {B}}         matches topic A in first position AND B in second position
-// {{A, B}, {C, D}}   matches topic (A OR B) in first position AND (C OR D) in second position
-func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint64) (*roaring.Bitmap, error) {
-	var result *roaring.Bitmap
-	for _, sub := range topics {
-		var bitmapForORing *roaring.Bitmap
-		for _, topic := range sub {
-			m, err := bitmapdb.Get(c, kv.LogTopicIndex, topic[:], uint32(from), uint32(to))
-			if err != nil {
-				return nil, err
-			}
-			if bitmapForORing == nil {
-				bitmapForORing = m
-				continue
-			}
-			bitmapForORing.Or(m)
-		}
-
-		if bitmapForORing == nil {
-			continue
-		}
-		if result == nil {
-			result = bitmapForORing
-			continue
-		}
-
-		result = roaring.And(bitmapForORing, result)
-	}
-	return result, nil
-}
-func getAddrsBitmap(tx kv.Tx, addrs []common.Address, from, to uint64) (*roaring.Bitmap, error) {
-	if len(addrs) == 0 {
-		return nil, nil
-	}
-	rx := make([]*roaring.Bitmap, len(addrs))
-	defer func() {
-		for _, bm := range rx {
-			bitmapdb.ReturnToPool(bm)
-		}
-	}()
-	for idx, addr := range addrs {
-		m, err := bitmapdb.Get(tx, kv.LogAddressIndex, addr[:], uint32(from), uint32(to))
-		if err != nil {
-			return nil, err
-		}
-		rx[idx] = m
-	}
-	return roaring.FastOr(rx...), nil
 }
 
 func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) (out stream.U64, err error) {
@@ -363,6 +303,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 
 	// Get logs from state sync events for block range
 	if chainConfig.Bor != nil {
+		var allBorLogs []*types.ErigonLog
 		for blockNum := begin; blockNum <= end; blockNum++ {
 			header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)
 			if err != nil {
@@ -402,7 +343,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 
 			borLogs = borLogs.Filter(addrMap, crit.Topics, 0)
 			for _, filteredLog := range borLogs {
-				logs = append(logs, &types.ErigonLog{
+				allBorLogs = append(allBorLogs, &types.ErigonLog{
 					Address:     filteredLog.Address,
 					Topics:      filteredLog.Topics,
 					Data:        filteredLog.Data,
@@ -416,9 +357,37 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				})
 			}
 		}
+
+		// merge bor logs in the correct order
+		logs = mergeSortedLogs(logs, allBorLogs)
 	}
 
 	return logs, nil
+}
+
+func mergeSortedLogs(orig, new []*types.ErigonLog) []*types.ErigonLog {
+	merged := make([]*types.ErigonLog, 0, len(orig)+len(new))
+	i, j := 0, 0
+
+	for i < len(orig) && j < len(new) {
+		if orig[i].BlockNumber <= new[j].BlockNumber {
+			merged = append(merged, orig[i])
+			i++
+		} else {
+			merged = append(merged, new[j])
+			j++
+		}
+	}
+
+	if i < len(orig) {
+		merged = append(merged, orig[i:]...)
+	}
+
+	if j < len(new) {
+		merged = append(merged, new[j:]...)
+	}
+
+	return merged
 }
 
 // The Topic list restricts matches to particular event topics. Each event has a list

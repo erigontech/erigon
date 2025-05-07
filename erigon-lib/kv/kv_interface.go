@@ -19,6 +19,7 @@ package kv
 import (
 	"context"
 	"errors"
+	"time"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
@@ -495,11 +496,30 @@ type TemporalTx interface {
 	// HistoryRange - producing "state patch" - sorted list of keys updated at [fromTs,toTs) with their most-recent value.
 	//   no duplicates
 	HistoryRange(name Domain, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error)
+
+	Debug() TemporalDebugTx
 }
 
+// TemporalDebugTx - set of slow low-level funcs for debug purposes
+type TemporalDebugTx interface {
+	RangeLatest(domain Domain, from, to []byte, limit int) (stream.KV, error)
+	GetLatestFromDB(domain Domain, k []byte) (v []byte, step uint64, found bool, err error)
+	GetLatestFromFiles(domain Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error)
+
+	DomainFiles(domain ...Domain) VisibleFiles
+
+	GreedyPruneHistory(ctx context.Context, domain Domain) error
+	PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error)
+	TxNumsInFiles(domains ...Domain) (minTxNum uint64)
+}
 type TemporalRwTx interface {
 	RwTx
 	TemporalTx
+}
+
+type TemporalDebugDB interface {
+	DomainTables(domain ...Domain) []string
+	InvertedIdxTables(names ...InvertedIdx) []string
 }
 
 type TemporalPutDel interface {
@@ -523,6 +543,7 @@ type TemporalRoDB interface {
 	SnapshotNotifier
 	ViewTemporal(ctx context.Context, f func(tx TemporalTx) error) error
 	BeginTemporalRo(ctx context.Context) (TemporalTx, error)
+	Debug() TemporalDebugDB
 }
 type TemporalRwDB interface {
 	RwDB

@@ -95,7 +95,7 @@ func getBorLogs(msgs []*types.Message, evm *vm.EVM, gp *core.GasPool, ibs *state
 		txContext := core.NewEVMTxContext(msg)
 		evm.Reset(txContext, ibs)
 
-		_, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
+		_, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, nil /* engine */)
 		if err != nil {
 			return nil, err
 		}

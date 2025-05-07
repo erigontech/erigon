@@ -51,7 +51,6 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/ethdb/prune"
-	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -374,50 +373,48 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 		}
 	}
 
-	if sentry_multi_client.EnableP2PReceipts {
-		b, err := rlp.EncodeToBytes(&eth.GetReceiptsPacket66{
-			RequestId:         1,
-			GetReceiptsPacket: hashPacket,
-		})
+	b, err := rlp.EncodeToBytes(&eth.GetReceiptsPacket66{
+		RequestId:         1,
+		GetReceiptsPacket: hashPacket,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m.ReceiveWg.Add(1)
+	for _, err = range m.Send(&protosentry.InboundMessage{Id: protosentry.MessageId_GET_RECEIPTS_66, Data: b, PeerId: m.PeerId}) {
 		if err != nil {
 			t.Fatal(err)
 		}
+	}
 
-		m.ReceiveWg.Add(1)
-		for _, err = range m.Send(&protosentry.InboundMessage{Id: protosentry.MessageId_GET_RECEIPTS_66, Data: b, PeerId: m.PeerId}) {
-			if err != nil {
-				t.Fatal(err)
-			}
-		}
+	m.ReceiveWg.Wait()
 
-		m.ReceiveWg.Wait()
+	msg := m.SentMessage(0)
 
-		msg := m.SentMessage(0)
+	require.Equal(protosentry.MessageId_RECEIPTS_66, msg.Id)
 
-		require.Equal(protosentry.MessageId_RECEIPTS_66, msg.Id)
+	encoded, err := rlp.EncodeToBytes(types.Receipts{})
+	require.NoError(err)
 
-		encoded, err := rlp.EncodeToBytes(types.Receipts{})
-		require.NoError(err)
+	res := make([]rlp.RawValue, 0, queryNum)
+	for i := 0; i < queryNum; i++ {
+		res = append(res, encoded)
+	}
 
-		res := make([]rlp.RawValue, 0, queryNum)
-		for i := 0; i < queryNum; i++ {
-			res = append(res, encoded)
-		}
+	b, err = rlp.EncodeToBytes(&eth.ReceiptsRLPPacket66{
+		RequestId:         1,
+		ReceiptsRLPPacket: res,
+	})
+	require.NoError(err)
+	require.Equal(b, msg.GetData())
 
-		b, err = rlp.EncodeToBytes(&eth.ReceiptsRLPPacket66{
-			RequestId:         1,
-			ReceiptsRLPPacket: res,
-		})
-		require.NoError(err)
-		require.Equal(b, msg.GetData())
-
-		// Make sure the chain total difficulty is the correct one
-		want := new(big.Int).Add(m.Genesis.Difficulty(), big.NewInt(td))
-		have, err := rawdb.ReadTdByHash(tx, rawdb.ReadCurrentHeader(tx).Hash())
-		require.NoError(err)
-		if have.Cmp(want) != 0 {
-			t.Errorf("total difficulty mismatch: have %v, want %v", have, want)
-		}
+	// Make sure the chain total difficulty is the correct one
+	want := new(big.Int).Add(m.Genesis.Difficulty(), big.NewInt(td))
+	have, err := rawdb.ReadTdByHash(tx, rawdb.ReadCurrentHeader(tx).Hash())
+	require.NoError(err)
+	if have.Cmp(want) != 0 {
+		t.Errorf("total difficulty mismatch: have %v, want %v", have, want)
 	}
 }
 

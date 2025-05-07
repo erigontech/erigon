@@ -241,6 +241,18 @@ type visibleFile struct {
 	src *filesItem
 }
 
+func (i visibleFile) Filename() string {
+	return i.src.decompressor.FilePath()
+}
+
+func (i visibleFile) StartRootNum() uint64 {
+	return i.startTxNum
+}
+
+func (i visibleFile) EndRootNum() uint64 {
+	return i.endTxNum
+}
+
 func (i *visibleFile) isSubSetOf(j *visibleFile) bool { return i.src.isSubsetOf(j.src) } //nolint
 func (i *visibleFile) isSubsetOf(j *visibleFile) bool { return i.src.isSubsetOf(j.src) } //nolint
 
@@ -272,21 +284,21 @@ func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l Accessors, trace bool,
 				}
 				continue
 			}
-			if (l&AccessorBTree != 0) && item.bindex == nil {
+			if l.Has(AccessorBTree) && item.bindex == nil {
 				if trace {
 					log.Warn("[dbg] calcVisibleFiles: BTindex not opened", "f", item.decompressor.FileName())
 				}
 				//panic(fmt.Errorf("btindex nil: %s", item.decompressor.FileName()))
 				continue
 			}
-			if (l&AccessorHashMap != 0) && item.index == nil {
+			if l.Has(AccessorHashMap) && item.index == nil {
 				if trace {
 					log.Warn("[dbg] calcVisibleFiles: RecSplit not opened", "f", item.decompressor.FileName())
 				}
 				//panic(fmt.Errorf("index nil: %s", item.decompressor.FileName()))
 				continue
 			}
-			if (l&AccessorExistence != 0) && item.existence == nil {
+			if l.Has(AccessorExistence) && item.existence == nil {
 				if trace {
 					log.Warn("[dbg] calcVisibleFiles: Existence not opened", "f", item.decompressor.FileName())
 				}
@@ -344,36 +356,29 @@ func (files visibleFiles) LatestMergedRange() MergeRange {
 	}
 	return MergeRange{}
 }
-
-func (files visibleFiles) MergedRanges() []MergeRange {
-	if len(files) == 0 {
-		return nil
+func (files visibleFiles) String(stepSize uint64) string {
+	res := make([]string, 0, len(files))
+	for _, file := range files {
+		res = append(res, fmt.Sprintf("%d-%d", file.startTxNum/stepSize, file.endTxNum/stepSize))
 	}
-	res := make([]MergeRange, len(files))
-	for i := len(files) - 1; i >= 0; i-- {
-		res[i] = MergeRange{from: files[i].startTxNum, to: files[i].endTxNum}
-	}
-	return res
+	return strings.Join(res, ",")
 }
 
-// fileItemsWithMissingAccessors returns list of files with missing accessors
+// fileItemsWithMissedAccessors returns list of files with missed accessors
 // here "accessors" are generated dynamically by `accessorsFor`
-func fileItemsWithMissingAccessors(dirtyFiles *btree2.BTreeG[*filesItem], aggregationStep uint64, accessorsFor func(fromStep, toStep uint64) []string) (l []*filesItem) {
-	dirtyFiles.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			fromStep, toStep := item.startTxNum/aggregationStep, item.endTxNum/aggregationStep
-			for _, fName := range accessorsFor(fromStep, toStep) {
-				exists, err := dir.FileExist(fName)
-				if err != nil {
-					panic(err)
-				}
-				if !exists {
-					l = append(l, item)
-					break
-				}
+func fileItemsWithMissedAccessors(dirtyFiles []*filesItem, aggregationStep uint64, accessorsFor func(fromStep, toStep uint64) []string) (l []*filesItem) {
+	for _, item := range dirtyFiles {
+		fromStep, toStep := item.startTxNum/aggregationStep, item.endTxNum/aggregationStep
+		for _, fName := range accessorsFor(fromStep, toStep) {
+			exists, err := dir.FileExist(fName)
+			if err != nil {
+				panic(err)
+			}
+			if !exists {
+				l = append(l, item)
+				break
 			}
 		}
-		return true
-	})
+	}
 	return
 }

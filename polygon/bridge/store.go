@@ -38,7 +38,7 @@ type Store interface {
 
 	EventTxnToBlockNum(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error)
 	Events(ctx context.Context, start, end uint64) ([][]byte, error)
-	BlockEventIdsRange(ctx context.Context, blockNum uint64) (start uint64, end uint64, ok bool, err error) // [start,end)
+	BlockEventIdsRange(ctx context.Context, blockHash libcommon.Hash, blockNum uint64) (start uint64, end uint64, ok bool, err error) // [start,end)
 
 	PutEventTxnToBlockNum(ctx context.Context, eventTxnToBlockNum map[libcommon.Hash]uint64) error
 	PutEvents(ctx context.Context, events []*heimdall.EventRecordWithTime) error

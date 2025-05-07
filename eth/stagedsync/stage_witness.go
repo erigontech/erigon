@@ -5,6 +5,7 @@ import (
 	"context"
 
 	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -117,7 +118,7 @@ func RewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr, lates
 	syncCfg := ethconfig.Defaults.Sync
 	execCfg := StageExecuteBlocksCfg(batch.MemDB(), pruneMode, batchSize, cfg.chainConfig, cfg.engine, vmConfig, nil,
 		/*stateStream=*/ false,
-		/*badBlockHalt=*/ true, dirs, blockReader, nil, nil, syncCfg, nil)
+		/*badBlockHalt=*/ true, dirs, blockReader, nil, nil, syncCfg, nil, false)
 
 	if err := UnwindExecutionStage(unwindState, stageState, txc, ctx, execCfg, logger); err != nil {
 		return err

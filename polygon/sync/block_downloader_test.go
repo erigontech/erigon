@@ -144,6 +144,7 @@ func (hdt blockDownloaderTest) fakeCheckpoints(count int) []*heimdall.Checkpoint
 		start := i*1024 + 1
 		end := start + 1023
 		checkpoints[i] = &heimdall.Checkpoint{
+			Id: heimdall.CheckpointId(i + 1),
 			Fields: heimdall.WaypointFields{
 				StartBlock: big.NewInt(int64(start)),
 				EndBlock:   big.NewInt(int64(end)),

@@ -2,10 +2,11 @@ package state
 
 import (
 	"context"
-	"github.com/erigontech/erigon-lib/common"
-	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 	"math"
 	"testing"
+
+	"github.com/erigontech/erigon-lib/common"
+	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -121,7 +122,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	require.NoError(t, err)
 
 	// collect account keys to trigger commitment
-	acit, err := ac.RangeLatest(rwTx, kv.AccountsDomain, nil, nil, -1)
+	acit, err := ac.DebugRangeLatest(rwTx, kv.AccountsDomain, nil, nil, -1)
 	require.NoError(t, err)
 	defer acit.Close()
 

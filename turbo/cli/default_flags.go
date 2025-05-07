@@ -139,6 +139,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.VMEnableDebugFlag,
 	&utils.NetworkIdFlag,
 	&utils.PersistReceiptsFlag,
+	&utils.PersistReceiptsV2Flag,
 	&utils.FakePoWFlag,
 	&utils.GpoBlocksFlag,
 	&utils.GpoPercentileFlag,
@@ -174,6 +175,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.WithHeimdallWaypoints,
 	&utils.PolygonSyncFlag,
 	&utils.PolygonSyncStageFlag,
+	&utils.PolygonLogIndex,
 	&utils.EthStatsURLFlag,
 	&utils.OverridePragueFlag,
 

@@ -32,8 +32,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/txnprovider/txpool"
-
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
@@ -119,24 +117,21 @@ func TestDump(t *testing.T) {
 
 	for _, test := range tests {
 		m := createDumpTestKV(t, test.chainConfig, test.chainSize)
-		chainID, _ := uint256.FromBig(m.ChainConfig.ChainID)
 		t.Run("txs", func(t *testing.T) {
 			require := require.New(t)
-			slot := txpool.TxnSlot{}
-			parseCtx := txpool.NewTxnParseContext(*chainID)
-			parseCtx.WithSender(false)
-			var sender [20]byte
 
 			var systemTxs int
 			var nonceList []uint64
+
 			_, err := freezeblocks.DumpTxs(m.Ctx, m.DB, m.ChainConfig, 0, uint64(2*test.chainSize), nil, func(v []byte) error {
 				if v == nil {
 					systemTxs++
 				} else {
-					if _, err := parseCtx.ParseTransaction(v[1+20:], 0, &slot, sender[:], false /* hasEnvelope */, false /* wrappedWithBlobs */, nil); err != nil {
+					txn, err := types.DecodeTransaction(v[1+20:])
+					if err != nil {
 						return err
 					}
-					nonceList = append(nonceList, slot.Nonce)
+					nonceList = append(nonceList, txn.GetNonce())
 				}
 				return nil
 			}, 1, log.LvlInfo, log.New())
@@ -147,10 +142,6 @@ func TestDump(t *testing.T) {
 		})
 		t.Run("txs_not_from_zero", func(t *testing.T) {
 			require := require.New(t)
-			slot := txpool.TxnSlot{}
-			parseCtx := txpool.NewTxnParseContext(*chainID)
-			parseCtx.WithSender(false)
-			var sender [20]byte
 
 			var systemTxs int
 			var nonceList []uint64
@@ -158,10 +149,11 @@ func TestDump(t *testing.T) {
 				if v == nil {
 					systemTxs++
 				} else {
-					if _, err := parseCtx.ParseTransaction(v[1+20:], 0, &slot, sender[:], false /* hasEnvelope */, false /* wrappedWithBlobs */, nil); err != nil {
+					txn, err := types.DecodeTransaction(v[1+20:])
+					if err != nil {
 						return err
 					}
-					nonceList = append(nonceList, slot.Nonce)
+					nonceList = append(nonceList, txn.GetNonce())
 				}
 				return nil
 			}, 1, log.LvlInfo, log.New())

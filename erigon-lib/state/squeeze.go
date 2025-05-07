@@ -105,34 +105,34 @@ func (a *Aggregator) sqeezeDomainFile(ctx context.Context, domain kv.Domain, fro
 
 // SqueezeCommitmentFiles should be called only when NO EXECUTION is running.
 // Removes commitment files and suppose following aggregator shutdown and restart  (to integrate new files and rebuild indexes)
-func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
-	if !ac.a.commitmentValuesTransform {
+func (at *AggregatorRoTx) SqueezeCommitmentFiles() error {
+	if !at.a.commitmentValuesTransform {
 		return nil
 	}
 
-	rng := &RangesV3{
-		domain: [5]DomainRanges{
+	rng := &Ranges{
+		domain: [kv.DomainLen]DomainRanges{
 			kv.AccountsDomain: {
 				name:    kv.AccountsDomain,
 				values:  MergeRange{"", true, 0, math.MaxUint64},
 				history: HistoryRanges{},
-				aggStep: ac.a.StepSize(),
+				aggStep: at.a.StepSize(),
 			},
 			kv.StorageDomain: {
 				name:    kv.StorageDomain,
 				values:  MergeRange{"", true, 0, math.MaxUint64},
 				history: HistoryRanges{},
-				aggStep: ac.a.StepSize(),
+				aggStep: at.a.StepSize(),
 			},
 			kv.CommitmentDomain: {
 				name:    kv.CommitmentDomain,
 				values:  MergeRange{"", true, 0, math.MaxUint64},
 				history: HistoryRanges{},
-				aggStep: ac.a.StepSize(),
+				aggStep: at.a.StepSize(),
 			},
 		},
 	}
-	sf, err := ac.staticFilesInRange(rng)
+	sf, err := at.staticFilesInRange(rng)
 	if err != nil {
 		return err
 	}
@@ -172,9 +172,9 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 		processedFiles int
 		sizeDelta      = datasize.B
 		sqExt          = ".squeezed"
-		commitment     = ac.d[kv.CommitmentDomain]
-		accounts       = ac.d[kv.AccountsDomain]
-		storage        = ac.d[kv.StorageDomain]
+		commitment     = at.d[kv.CommitmentDomain]
+		accounts       = at.d[kv.AccountsDomain]
+		storage        = at.d[kv.StorageDomain]
 		logEvery       = time.NewTicker(30 * time.Second)
 	)
 	defer logEvery.Stop()
@@ -193,23 +193,23 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 			return err
 		}
 
-		af.decompressor.EnableMadvNormal()
-		sf.decompressor.EnableMadvNormal()
-		cf.decompressor.EnableMadvNormal()
+		af.decompressor.MadvNormal()
+		sf.decompressor.MadvNormal()
+		cf.decompressor.MadvNormal()
 
 		err = func() error {
-			steps := cf.endTxNum/ac.a.aggregationStep - cf.startTxNum/ac.a.aggregationStep
+			steps := cf.endTxNum/at.a.aggregationStep - cf.startTxNum/at.a.aggregationStep
 			compression := commitment.d.Compression
 			if steps < DomainMinStepsToCompress {
 				compression = seg.CompressNone
 			}
-			ac.a.logger.Info("[squeeze_migration] file start", "original", cf.decompressor.FileName(),
+			at.a.logger.Info("[squeeze_migration] file start", "original", cf.decompressor.FileName(),
 				"progress", fmt.Sprintf("%d/%d", ri+1, len(ranges)), "compress_cfg", commitment.d.CompressCfg, "compress", compression)
 
 			originalPath := cf.decompressor.FilePath()
 			squeezedTmpPath := originalPath + sqExt + ".tmp"
 
-			squeezedCompr, err := seg.NewCompressor(context.Background(), "squeeze", squeezedTmpPath, ac.a.dirs.Tmp,
+			squeezedCompr, err := seg.NewCompressor(context.Background(), "squeeze", squeezedTmpPath, at.a.dirs.Tmp,
 				commitment.d.CompressCfg, log.LvlInfo, commitment.d.logger)
 			if err != nil {
 				return err
@@ -244,16 +244,16 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 						return fmt.Errorf("failed to transform commitment value: %w", err)
 					}
 				}
-				if err = writer.AddWord(k); err != nil {
+				if _, err = writer.Write(k); err != nil {
 					return fmt.Errorf("write key word: %w", err)
 				}
-				if err = writer.AddWord(v); err != nil {
+				if _, err = writer.Write(v); err != nil {
 					return fmt.Errorf("write value word: %w", err)
 				}
 
 				select {
 				case <-logEvery.C:
-					ac.a.logger.Info("[squeeze_migration]", "file", cf.decompressor.FileName(), "k", fmt.Sprintf("%x", k),
+					at.a.logger.Info("[squeeze_migration]", "file", cf.decompressor.FileName(), "k", fmt.Sprintf("%x", k),
 						"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(ki), common.PrettyCounter(cf.decompressor.Count())))
 				default:
 				}
@@ -278,7 +278,7 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 			}
 			temporalFiles = append(temporalFiles, squeezedPath)
 
-			ac.a.logger.Info("[sqeeze_migration] file done", "original", filepath.Base(originalPath),
+			at.a.logger.Info("[sqeeze_migration] file done", "original", filepath.Base(originalPath),
 				"sizeDelta", fmt.Sprintf("%s (%.1f%%)", delta.HR(), deltaP))
 
 			processedFiles++
@@ -295,9 +295,9 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 		if err := os.Rename(path, strings.TrimSuffix(path, sqExt)); err != nil {
 			return err
 		}
-		ac.a.logger.Debug("[squeeze_migration] temporal file renaming", "path", path)
+		at.a.logger.Debug("[squeeze_migration] temporal file renaming", "path", path)
 	}
-	ac.a.logger.Info("[squeeze_migration] done", "sizeDelta", sizeDelta.HR(), "files", len(ranges))
+	at.a.logger.Info("[squeeze_migration] done", "sizeDelta", sizeDelta.HR(), "files", len(ranges))
 
 	return nil
 }
@@ -321,8 +321,8 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 	acRo := a.BeginFilesRo() // this tx is used to read existing domain files and closed in the end
 	defer acRo.Close()
 
-	rng := &RangesV3{
-		domain: [5]DomainRanges{
+	rng := &Ranges{
+		domain: [kv.DomainLen]DomainRanges{
 			kv.AccountsDomain: {
 				name:    kv.AccountsDomain,
 				values:  MergeRange{"", true, 0, math.MaxUint64},
@@ -347,21 +347,10 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 		return nil, errors.New("no account files found")
 	}
 
-	for _, d := range acRo.d {
-		for _, f := range d.files {
-			f.src.decompressor.EnableMadvNormal()
-		}
-	}
+	acRo.MadvNormal()
+	defer acRo.DisableReadAhead()
 
 	start := time.Now()
-	defer func() {
-		for _, d := range acRo.d {
-			for _, f := range d.files {
-				f.src.decompressor.DisableReadAhead()
-			}
-		}
-		a.logger.Info("Commitment DONE", "duration", time.Since(start))
-	}()
 
 	acRo.RestrictSubsetFileDeletions(true)
 	a.commitmentValuesTransform = false

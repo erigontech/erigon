@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/bitmapdb"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/core"
@@ -193,7 +192,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		txCtx = core.NewEVMTxContext(msg)
 		evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Debug: false})
 		// Execute the transaction message
-		_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
+		_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
 		if err != nil {
 			return nil, err
 		}
@@ -222,7 +221,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Debug: true, Tracer: &ct})
 
 	// Execute the transaction message
-	_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
+	_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, api.engine())
 	if ct.err != nil {
 		return nil, err
 	}
@@ -343,23 +342,24 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 
 	hasOverrides := false
 	allBlocks := roaring64.New()
-	for overlayAddress := range *stateOverride {
-		hasOverrides = true
-		fromB, err := bitmapdb.Get64(tx, kv.CallFromIndex, overlayAddress.Bytes(), begin, end+1)
-		if err != nil {
-			log.Error(err.Error())
-			return nil, err
-		}
-
-		toB, err := bitmapdb.Get64(tx, kv.CallToIndex, overlayAddress.Bytes(), begin, end+1)
-		if err != nil {
-			log.Error(err.Error())
-			return nil, err
-		}
-
-		allBlocks.Or(fromB)
-		allBlocks.Or(toB)
-	}
+	//TODO: use E3 iterators
+	//for overlayAddress := range *stateOverride {
+	//	hasOverrides = true
+	//	fromB, err := bitmapdb.Get64(tx, kv.CallFromIndex, overlayAddress.Bytes(), begin, end+1)
+	//	if err != nil {
+	//		log.Error(err.Error())
+	//		return nil, err
+	//	}
+	//
+	//	toB, err := bitmapdb.Get64(tx, kv.CallToIndex, overlayAddress.Bytes(), begin, end+1)
+	//	if err != nil {
+	//		log.Error(err.Error())
+	//		return nil, err
+	//	}
+	//
+	//	allBlocks.Or(fromB)
+	//	allBlocks.Or(toB)
+	//}
 
 	var failed error
 	idx := 0
@@ -528,7 +528,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 		evm.TxContext = txCtx
 
 		// Execute the transaction message
-		res, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
+		res, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, api.engine())
 		if err != nil {
 			log.Error(err.Error())
 			return nil, err

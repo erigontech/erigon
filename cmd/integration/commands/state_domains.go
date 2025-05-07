@@ -311,6 +311,8 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 		tbl = kv.HeaderTD
 	case "receipt":
 		tbl = kv.BadHeaderNumber
+	case kv.RCacheDomain.String():
+		tbl = kv.BlockBody
 	default:
 		return fmt.Errorf("invalid domainName %s", domainName)
 	}
@@ -409,10 +411,10 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 				skipped++
 				continue
 			}
-			if err := comp.AddWord(bufKey); err != nil {
+			if _, err := comp.Write(bufKey); err != nil {
 				return fmt.Errorf("failed to add key %x: %w", bufKey, err)
 			}
-			if err := comp.AddWord(bufVal); err != nil {
+			if _, err := comp.Write(bufVal); err != nil {
 				return fmt.Errorf("failed to add val %x: %w", bufVal, err)
 			}
 			count++
@@ -457,17 +459,6 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 }
 
 func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain string, addrs [][]byte, logger log.Logger) error {
-	sn, bsn, agg, _, _, _, err := allSnapshots(ctx, chainDb, logger)
-	if err != nil {
-		return err
-	}
-	defer sn.Close()
-	defer bsn.Close()
-	defer agg.Close()
-
-	aggTx := agg.BeginFilesRo()
-	defer aggTx.Close()
-
 	stateTx, err := stateDb.BeginRw(ctx)
 	must(err)
 	defer stateTx.Rollback()
@@ -475,7 +466,6 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	if err != nil {
 		return err
 	}
-	defer agg.Close()
 
 	r := state.NewReaderV3(domains)
 	if startTxNum != 0 {
