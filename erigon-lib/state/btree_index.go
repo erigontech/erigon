@@ -195,6 +195,7 @@ func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (*BtIndexWriter
 	return btw, nil
 }
 
+func (btw *BtIndexWriter) FileName() string { return btw.indexFileName }
 func (btw *BtIndexWriter) AddKey(key []byte, offset uint64, keep bool) error {
 	if btw.built {
 		return errors.New("cannot add keys after perfect hash function had been built")
@@ -353,10 +354,6 @@ func OpenBtreeIndexAndDataFile(indexPath, dataPath string, M uint64, compressed 
 }
 
 func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, compression seg.FileCompression, ps *background.ProgressSet, tmpdir string, salt uint32, logger log.Logger, noFsync bool, accessors Accessors) error {
-	_, indexFileName := filepath.Split(indexPath)
-	p := ps.AddNew(indexFileName, uint64(kv.Count()/2))
-	defer ps.Delete(p)
-
 	defer kv.MadvSequential().DisableReadAhead()
 	bloomPath := strings.TrimSuffix(indexPath, ".bt") + ".kvei"
 
@@ -383,6 +380,8 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 		return err
 	}
 	defer iw.Close()
+	p := ps.AddNew(iw.FileName(), uint64(kv.Count()/2))
+	defer ps.Delete(p)
 
 	getter := seg.NewReader(kv.MakeGetter(), compression)
 	getter.Reset(0)

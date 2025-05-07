@@ -1291,13 +1291,10 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 }
 
 func buildHashMapAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {
-	_, fileName := filepath.Split(idxPath)
 	count := d.Count()
 	if !values {
 		count = d.Count() / 2
 	}
-	p := ps.AddNew(fileName, uint64(count))
-	defer ps.Delete(p)
 
 	defer d.MadvSequential().DisableReadAhead()
 
@@ -1310,6 +1307,8 @@ func buildHashMapAccessor(ctx context.Context, d *seg.Decompressor, compressed s
 	}
 	defer rs.Close()
 	rs.LogLvl(log.LvlTrace)
+	p := ps.AddNew(rs.FileName(), uint64(count))
+	defer ps.Delete(p)
 
 	var keyPos, valPos uint64
 	for {
