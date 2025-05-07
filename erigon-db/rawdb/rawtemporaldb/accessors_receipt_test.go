@@ -16,11 +16,11 @@ import (
 func TestAppendReceipt(t *testing.T) {
 	dirs, require := datadir.New(t.TempDir()), require.New(t)
 	db := temporaltest.NewTestDB(t, dirs)
-	tx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(err)
 	defer tx.Rollback()
 
-	ttx := tx.(kv.TemporalTx)
+	ttx := tx
 	doms, err := state.NewSharedDomains(ttx, log.New())
 	require.NoError(err)
 	defer doms.Close()

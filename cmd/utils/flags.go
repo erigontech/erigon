@@ -100,7 +100,7 @@ var (
 	}
 	PersistReceiptsV2Flag = cli.BoolFlag{
 		Name:  "experiment.persist.receipts.v2",
-		Usage: "To store receipts in chaindata db (only on chain-tip) - RPC for recent receit/logs will be faster. Values: 1_000 good starting point. 10_000 receitps it's ~1Gb (not much IO increase). Please test before go over 100_000",
+		Usage: "To store receipts in chaindata db (only on chain-tip) - RPC for recent receipts/logs will be faster. Values: 1_000 good starting point. 10_000 receipts it's ~1Gb (not much IO increase). Please test before go over 100_000",
 		Value: ethconfig.Defaults.PersistReceiptsCacheV2,
 	}
 	DeveloperPeriodFlag = cli.IntFlag{
@@ -696,7 +696,7 @@ var (
 	}
 	TorrentDownloadSlotsFlag = cli.IntFlag{
 		Name:  "torrent.download.slots",
-		Value: 128,
+		Value: 32,
 		Usage: "Amount of files to download in parallel.",
 	}
 	TorrentStaticPeersFlag = cli.StringFlag{
@@ -1506,10 +1506,6 @@ func setDataDir(ctx *cli.Context, cfg *nodecfg.Config) error {
 		cfg.Dirs = datadir.New(ctx.String(DataDirFlag.Name))
 	} else {
 		cfg.Dirs = datadir.New(paths.DataDirForNetwork(paths.DefaultDataDir(), ctx.String(ChainFlag.Name)))
-	}
-	_, err := downloadercfg2.LoadSnapshotsHashes(ctx.Context, cfg.Dirs, ctx.String(ChainFlag.Name))
-	if err != nil {
-		return err
 	}
 
 	cfg.MdbxPageSize = flags.DBPageSizeFlagUnmarshal(ctx, DbPageSizeFlag.Name, DbPageSizeFlag.Usage)

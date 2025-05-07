@@ -724,7 +724,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 
 			oldVersion = newVersion
 			// check that the index file exist
-			if libstate.Schema.GetDomainCfg(snapType).AccessorList.Has(libstate.AccessorBTree) {
+			if libstate.Schema.GetDomainCfg(snapType).Accessors.Has(libstate.AccessorBTree) {
 				newVersion = libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorBT
 				fileName := strings.Replace(expectedFileName, ".kv", ".bt", 1)
 				fileName = snaptype.ReplaceVersion(fileName, oldVersion, newVersion)
@@ -736,7 +736,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 					return fmt.Errorf("missing file %s", fileName)
 				}
 			}
-			if libstate.Schema.GetDomainCfg(snapType).AccessorList.Has(libstate.AccessorExistence) {
+			if libstate.Schema.GetDomainCfg(snapType).Accessors.Has(libstate.AccessorExistence) {
 				newVersion = libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVEI
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvei", 1)
 				fileName = snaptype.ReplaceVersion(fileName, oldVersion, newVersion)
@@ -748,7 +748,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 					return fmt.Errorf("missing file %s", fileName)
 				}
 			}
-			if libstate.Schema.GetDomainCfg(snapType).AccessorList.Has(libstate.AccessorHashMap) {
+			if libstate.Schema.GetDomainCfg(snapType).Accessors.Has(libstate.AccessorHashMap) {
 				newVersion = libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVI
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvi", 1)
 				fileName = snaptype.ReplaceVersion(fileName, oldVersion, newVersion)
@@ -978,8 +978,8 @@ func doDiff(cliCtx *cli.Context) error {
 	}
 	defer dst.Close()
 
-	defer src.EnableReadAhead().DisableReadAhead()
-	defer dst.EnableReadAhead().DisableReadAhead()
+	defer src.MadvSequential().DisableReadAhead()
+	defer dst.MadvSequential().DisableReadAhead()
 
 	i := 0
 	srcG, dstG := src.MakeGetter(), dst.MakeGetter()
@@ -1066,7 +1066,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 	}
 	defer decompressor.Close()
 	func() {
-		defer decompressor.EnableReadAhead().DisableReadAhead()
+		defer decompressor.MadvSequential().DisableReadAhead()
 
 		t := time.Now()
 		g := decompressor.MakeGetter()
@@ -1077,7 +1077,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 		logger.Info("decompress speed", "took", time.Since(t))
 	}()
 	func() {
-		defer decompressor.EnableReadAhead().DisableReadAhead()
+		defer decompressor.MadvSequential().DisableReadAhead()
 
 		t := time.Now()
 		g := decompressor.MakeGetter()
@@ -1260,7 +1260,7 @@ func doUncompress(cliCtx *cli.Context) error {
 		return err
 	}
 	defer decompressor.Close()
-	defer decompressor.EnableReadAhead().DisableReadAhead()
+	defer decompressor.MadvSequential().DisableReadAhead()
 
 	wr := bufio.NewWriterSize(os.Stdout, int(128*datasize.MB))
 	defer wr.Flush()

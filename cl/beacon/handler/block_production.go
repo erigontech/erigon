@@ -225,7 +225,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 
 	log.Debug("[Beacon API] Producing block", "slot", targetSlot)
 	// builder boost factor controls block choice between local execution node or builder
-	var builderBoostFactor uint64
+	builderBoostFactor := uint64(100)
 	builderBoostFactorStr := r.URL.Query().Get("builder_boost_factor")
 	if builderBoostFactorStr != "" {
 		builderBoostFactor, err = strconv.ParseUint(builderBoostFactorStr, 10, 64)

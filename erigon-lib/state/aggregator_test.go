@@ -1515,7 +1515,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	fnames := []string{}
 	for _, f := range ac.d[kv.CommitmentDomain].files {
 		var k, stateVal []byte
-		if ac.d[kv.CommitmentDomain].d.AccessorList.Has(AccessorHashMap) {
+		if ac.d[kv.CommitmentDomain].d.Accessors.Has(AccessorHashMap) {
 			idx := f.src.index.GetReaderFromPool()
 			r := seg.NewReader(f.src.decompressor.MakeGetter(), compression)
 

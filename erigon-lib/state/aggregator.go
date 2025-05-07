@@ -317,11 +317,11 @@ func (a *Aggregator) SetMergeWorkers(i int)           { a.mergeWorkers = i }
 func (a *Aggregator) SetCompressWorkers(i int) {
 	for _, d := range a.d {
 		d.CompressCfg.Workers = i
-		d.History.compressorCfg.Workers = i
-		d.History.InvertedIndex.compressorCfg.Workers = i
+		d.History.CompressorCfg.Workers = i
+		d.History.InvertedIndex.CompressorCfg.Workers = i
 	}
 	for _, ii := range a.iis {
-		ii.compressorCfg.Workers = i
+		ii.CompressorCfg.Workers = i
 	}
 }
 
@@ -1488,10 +1488,6 @@ func (at *AggregatorRoTx) HistoryStartFrom(name kv.Domain) uint64 {
 	return at.d[name].HistoryStartFrom()
 }
 
-func (at *AggregatorRoTx) HistoryEndTxNum(name kv.Domain, tx kv.Tx) uint64 {
-	return at.d[name].HistoryEndTxNum(tx)
-}
-
 func (at *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (timestamps stream.U64, err error) {
 	// check domain iis
 	for _, d := range at.d {
@@ -1584,6 +1580,13 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 	return ac
 }
 
+func (at *AggregatorRoTx) HistoryProgress(name kv.Domain, tx kv.Tx) uint64 {
+	return at.d[name].HistoryProgress(tx)
+}
+func (at *AggregatorRoTx) ProgressII(name kv.InvertedIdx, tx kv.Tx) uint64 {
+	return at.searchII(name).Progress(tx)
+}
+
 // --- Domain part START ---
 
 func (at *AggregatorRoTx) RangeAsOf(ctx context.Context, tx kv.Tx, domain kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
@@ -1627,17 +1630,72 @@ func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo 
 
 // --- Domain part END ---
 
-func (at *AggregatorRoTx) madvNormal() {
+func (at *AggregatorRoTx) MadvNormal() *AggregatorRoTx {
 	for _, d := range at.d {
 		for _, f := range d.files {
-			f.src.decompressor.EnableMadvNormal()
+			if f.src.decompressor != nil {
+				f.src.decompressor.MadvNormal()
+			}
+			if f.src.index != nil {
+				f.src.index.MadvNormal()
+			}
+			//if f.src.bindex != nil {
+			//	f.src.bindex.MadvNormal()
+			//}
+			//if f.src.existence != nil {
+			//	f.src.existence.MadvNormal()
+			//}
 		}
 	}
+	for _, ii := range at.iis {
+		for _, f := range ii.files {
+			if f.src.decompressor != nil {
+				f.src.decompressor.MadvNormal()
+			}
+			if f.src.index != nil {
+				f.src.index.MadvNormal()
+			}
+			//if f.src.bindex != nil {
+			//	f.src.bindex.MadvNormal()
+			//}
+			//if f.src.existence != nil {
+			//	f.src.existence.MadvNormal()
+			//}
+		}
+	}
+	return at
 }
-func (at *AggregatorRoTx) disableReadAhead() {
+func (at *AggregatorRoTx) DisableReadAhead() {
 	for _, d := range at.d {
 		for _, f := range d.files {
-			f.src.decompressor.DisableReadAhead()
+			if f.src.decompressor != nil {
+				f.src.decompressor.DisableReadAhead()
+			}
+			if f.src.index != nil {
+				f.src.index.DisableReadAhead()
+			}
+			//if f.src.bindex != nil {
+			//	f.src.bindex.DisableReadAhead()
+			//}
+			//if f.src.existence != nil {
+			//	f.src.existence.DisableReadAhead()
+			//}
+		}
+	}
+	for _, ii := range at.iis {
+		for _, f := range ii.files {
+			if f.src.decompressor != nil {
+				f.src.decompressor.DisableReadAhead()
+			}
+			if f.src.index != nil {
+				f.src.index.DisableReadAhead()
+			}
+			//if f.src.bindex != nil {
+			//	f.src.bindex.DisableReadAhead()
+			//}
+			//if f.src.existence != nil {
+			//	f.src.existence.DisableReadAhead()
+			//}
 		}
 	}
 }

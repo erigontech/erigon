@@ -66,7 +66,7 @@ var dbgCommBtIndex = dbg.EnvBool("AGG_COMMITMENT_BT", false)
 
 func init() {
 	if dbgCommBtIndex {
-		Schema.CommitmentDomain.AccessorList = AccessorBTree | AccessorExistence
+		Schema.CommitmentDomain.Accessors = AccessorBTree | AccessorExistence
 	}
 	InitSchemas()
 	InitAccountSchemaIntegrity()
@@ -157,19 +157,19 @@ var Schema = SchemaGen{
 		name: kv.AccountsDomain, valuesTable: kv.TblAccountVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressNone,
 
-		AccessorList:         AccessorBTree | AccessorExistence,
+		Accessors:            AccessorBTree | AccessorExistence,
 		crossDomainIntegrity: domainIntegrityCheck,
 
 		hist: histCfg{
 			valuesTable:   kv.TblAccountHistoryVals,
-			compressorCfg: seg.DefaultCfg, compression: seg.CompressNone,
+			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
 
 			historyLargeValues: false,
 			historyIdx:         kv.AccountsHistoryIdx,
 
 			iiCfg: iiCfg{
 				filenameBase: kv.AccountsDomain.String(), keysTable: kv.TblAccountHistoryKeys, valuesTable: kv.TblAccountIdx,
-				compressorCfg: seg.DefaultCfg,
+				CompressorCfg: seg.DefaultCfg,
 			},
 		},
 	},
@@ -177,18 +177,18 @@ var Schema = SchemaGen{
 		name: kv.StorageDomain, valuesTable: kv.TblStorageVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
 
-		AccessorList: AccessorBTree | AccessorExistence,
+		Accessors: AccessorBTree | AccessorExistence,
 
 		hist: histCfg{
 			valuesTable:   kv.TblStorageHistoryVals,
-			compressorCfg: seg.DefaultCfg, compression: seg.CompressNone,
+			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
 
 			historyLargeValues: false,
 			historyIdx:         kv.StorageHistoryIdx,
 
 			iiCfg: iiCfg{
 				filenameBase: kv.StorageDomain.String(), keysTable: kv.TblStorageHistoryKeys, valuesTable: kv.TblStorageIdx,
-				compressorCfg: seg.DefaultCfg,
+				CompressorCfg: seg.DefaultCfg,
 			},
 		},
 	},
@@ -196,19 +196,19 @@ var Schema = SchemaGen{
 		name: kv.CodeDomain, valuesTable: kv.TblCodeVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
 
-		AccessorList: AccessorBTree | AccessorExistence,
-		largeValues:  true,
+		Accessors:   AccessorBTree | AccessorExistence,
+		largeValues: true,
 
 		hist: histCfg{
 			valuesTable:   kv.TblCodeHistoryVals,
-			compressorCfg: seg.DefaultCfg, compression: seg.CompressKeys | seg.CompressVals,
+			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressKeys | seg.CompressVals,
 
 			historyLargeValues: true,
 			historyIdx:         kv.CodeHistoryIdx,
 
 			iiCfg: iiCfg{
 				filenameBase: kv.CodeDomain.String(), keysTable: kv.TblCodeHistoryKeys, valuesTable: kv.TblCodeIdx,
-				compressorCfg: seg.DefaultCfg,
+				CompressorCfg: seg.DefaultCfg,
 			},
 		},
 	},
@@ -216,12 +216,12 @@ var Schema = SchemaGen{
 		name: kv.CommitmentDomain, valuesTable: kv.TblCommitmentVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
 
-		AccessorList:        AccessorHashMap,
+		Accessors:           AccessorHashMap,
 		replaceKeysInValues: AggregatorSqueezeCommitmentValues,
 
 		hist: histCfg{
 			valuesTable:   kv.TblCommitmentHistoryVals,
-			compressorCfg: HistoryCompressCfg, compression: seg.CompressNone, // seg.CompressKeys | seg.CompressVals,
+			CompressorCfg: HistoryCompressCfg, Compression: seg.CompressNone, // seg.CompressKeys | seg.CompressVals,
 			historyIdx: kv.CommitmentHistoryIdx,
 
 			historyLargeValues:            false,
@@ -232,7 +232,7 @@ var Schema = SchemaGen{
 
 			iiCfg: iiCfg{
 				filenameBase: kv.CommitmentDomain.String(), keysTable: kv.TblCommitmentHistoryKeys, valuesTable: kv.TblCommitmentIdx,
-				compressorCfg: seg.DefaultCfg,
+				CompressorCfg: seg.DefaultCfg,
 			},
 		},
 	},
@@ -241,18 +241,18 @@ var Schema = SchemaGen{
 		CompressCfg: seg.DefaultCfg, Compression: seg.CompressNone,
 		largeValues: false,
 
-		AccessorList: AccessorBTree | AccessorExistence,
+		Accessors: AccessorBTree | AccessorExistence,
 
 		hist: histCfg{
 			valuesTable:   kv.TblReceiptHistoryVals,
-			compressorCfg: seg.DefaultCfg, compression: seg.CompressNone,
+			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
 
 			historyLargeValues: false,
 			historyIdx:         kv.ReceiptHistoryIdx,
 
 			iiCfg: iiCfg{
 				filenameBase: kv.ReceiptDomain.String(), keysTable: kv.TblReceiptHistoryKeys, valuesTable: kv.TblReceiptIdx,
-				compressorCfg: seg.DefaultCfg,
+				CompressorCfg: seg.DefaultCfg,
 			},
 		},
 	},
@@ -260,12 +260,12 @@ var Schema = SchemaGen{
 		name: kv.RCacheDomain, valuesTable: kv.TblRCacheVals,
 		largeValues: true,
 
-		AccessorList: AccessorHashMap,
-		CompressCfg:  DomainCompressCfg, Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+		Accessors:   AccessorHashMap,
+		CompressCfg: DomainCompressCfg, Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
 
 		hist: histCfg{
 			valuesTable: kv.TblRCacheHistoryVals,
-			compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+			Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
 
 			historyLargeValues: true,
 			historyIdx:         kv.RCacheHistoryIdx,
@@ -276,7 +276,7 @@ var Schema = SchemaGen{
 			iiCfg: iiCfg{
 				disable:      true, // disable everything by default
 				filenameBase: kv.RCacheDomain.String(), keysTable: kv.TblRCacheHistoryKeys, valuesTable: kv.TblRCacheIdx,
-				compressorCfg: seg.DefaultCfg,
+				CompressorCfg: seg.DefaultCfg,
 			},
 		},
 	},
@@ -284,25 +284,25 @@ var Schema = SchemaGen{
 	LogAddrIdx: iiCfg{
 		filenameBase: kv.FileLogAddressIdx, keysTable: kv.TblLogAddressKeys, valuesTable: kv.TblLogAddressIdx,
 
-		compression: seg.CompressNone,
+		Compression: seg.CompressNone,
 		name:        kv.LogAddrIdx,
 	},
 	LogTopicIdx: iiCfg{
 		filenameBase: kv.FileLogTopicsIdx, keysTable: kv.TblLogTopicsKeys, valuesTable: kv.TblLogTopicsIdx,
 
-		compression: seg.CompressNone,
+		Compression: seg.CompressNone,
 		name:        kv.LogTopicIdx,
 	},
 	TracesFromIdx: iiCfg{
 		filenameBase: kv.FileTracesFromIdx, keysTable: kv.TblTracesFromKeys, valuesTable: kv.TblTracesFromIdx,
 
-		compression: seg.CompressNone,
+		Compression: seg.CompressNone,
 		name:        kv.TracesFromIdx,
 	},
 	TracesToIdx: iiCfg{
 		filenameBase: kv.FileTracesToIdx, keysTable: kv.TblTracesToKeys, valuesTable: kv.TblTracesToIdx,
 
-		compression: seg.CompressNone,
+		Compression: seg.CompressNone,
 		name:        kv.TracesToIdx,
 	},
 }

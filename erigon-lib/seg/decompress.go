@@ -219,7 +219,7 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 	}
 	// read patterns from file
 	d.data = d.mmapHandle1[:d.size]
-	defer d.EnableMadvNormal().DisableReadAhead() //speedup opening on slow drives
+	defer d.MadvNormal().DisableReadAhead() //speedup opening on slow drives
 
 	d.wordsCount = binary.BigEndian.Uint64(d.data[:8])
 	d.emptyWordsCount = binary.BigEndian.Uint64(d.data[8:16])
@@ -496,7 +496,7 @@ func (d *Decompressor) WithReadAhead(f func() error) error {
 	if d == nil || d.mmapHandle1 == nil {
 		return nil
 	}
-	defer d.EnableReadAhead().DisableReadAhead()
+	defer d.MadvSequential().DisableReadAhead()
 	return f()
 }
 
@@ -519,7 +519,7 @@ func (d *Decompressor) DisableReadAhead() {
 	_ = mmap.MadviseRandom(d.mmapHandle1)
 }
 
-func (d *Decompressor) EnableReadAhead() *Decompressor {
+func (d *Decompressor) MadvSequential() *Decompressor {
 	if d == nil || d.mmapHandle1 == nil {
 		return d
 	}
@@ -527,7 +527,7 @@ func (d *Decompressor) EnableReadAhead() *Decompressor {
 	_ = mmap.MadviseSequential(d.mmapHandle1)
 	return d
 }
-func (d *Decompressor) EnableMadvNormal() *Decompressor {
+func (d *Decompressor) MadvNormal() *Decompressor {
 	if d == nil || d.mmapHandle1 == nil {
 		return d
 	}
@@ -535,7 +535,7 @@ func (d *Decompressor) EnableMadvNormal() *Decompressor {
 	_ = mmap.MadviseNormal(d.mmapHandle1)
 	return d
 }
-func (d *Decompressor) EnableMadvWillNeed() *Decompressor {
+func (d *Decompressor) MadvWillNeed() *Decompressor {
 	if d == nil || d.mmapHandle1 == nil {
 		return d
 	}
