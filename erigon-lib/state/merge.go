@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -369,6 +370,13 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	if !r.any() {
 		return
 	}
+	defer func() {
+		// Merge is background operation. It must not crush application.
+		// Convert panic to error.
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("[snapshots] background mergeFiles: domain=%s, %s, %s, %s", dt.name, r.String(), rec, dbg.Stack())
+		}
+	}()
 
 	closeFiles := true
 	var kvWriter *seg.Writer
@@ -553,11 +561,9 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	return
 }
 
-func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem, startTxNum, endTxNum uint64, ps *background.ProgressSet) (*filesItem, error) {
-	var outItem *filesItem
+func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem, startTxNum, endTxNum uint64, ps *background.ProgressSet) (outItem *filesItem, err error) {
 	var comp *seg.Compressor
 	var decomp *seg.Decompressor
-	var err error
 	var closeItem = true
 	defer func() {
 		if closeItem {
@@ -587,6 +593,14 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 	write := seg.NewWriter(comp, iit.ii.compression)
 	p := ps.AddNew("merge "+comp.FileName(), 0)
 	defer ps.Delete(p)
+
+	defer func() {
+		// Merge is background operation. It must not crush application.
+		// Convert panic to error.
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("[snapshots] background mergeFiles: domain=%s, %s, %s, %s", iit.ii.name.String(), comp.FileName(), rec, dbg.Stack())
+		}
+	}()
 
 	var cp CursorHeap
 	heap.Init(&cp)
@@ -690,6 +704,14 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 	if !r.any() {
 		return nil, nil, nil
 	}
+	defer func() {
+		// Merge is background operation. It must not crush application.
+		// Convert panic to error.
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("[snapshots] background mergeFiles: domain=%s, %s, %s, %s", ht.h.name.String(), r.String(ht.h.aggregationStep), rec, dbg.Stack())
+		}
+	}()
+
 	var closeIndex = true
 	defer func() {
 		if closeIndex {
