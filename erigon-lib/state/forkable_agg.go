@@ -173,8 +173,6 @@ func (r *ForkableAgg) BuildFiles(num RootNum) chan struct{} {
 }
 
 func (r *ForkableAgg) MergeLoop(ctx context.Context) (err error) {
-	// multipe calls not allowed
-	// use snaps.MergeConfig...
 	if dbg.NoMerge() || r.mergeDisabled.Load() || !r.mergingFiles.CompareAndSwap(false, true) {
 		r.logger.Debug("MergeLoop disabled or already in progress. Skipping...")
 		return nil
@@ -231,10 +229,10 @@ func (r *ForkableAgg) mergeLoopStep(ctx context.Context) (somethingMerged bool, 
 			return
 		}
 
-		var subset []visibleFile
+		var subset visibleFiles
 		for _, vf := range vfs {
 			if mergeRange.from <= vf.StartRootNum() && vf.EndRootNum() <= mergeRange.to {
-				if len(subset) > 0 && subset[len(subset)-1].EndRootNum() != vf.StartRootNum() {
+				if len(subset) > 0 && subset.EndTxNum() != vf.StartRootNum() {
 					panic("expected contiguous files")
 				}
 				vf1, ok := vf.(visibleFile)
@@ -245,12 +243,12 @@ func (r *ForkableAgg) mergeLoopStep(ctx context.Context) (somethingMerged bool, 
 			}
 		}
 
-		if subset[0].StartRootNum() != mergeRange.from {
-			r.logger.Error("[fork_agg] merge", "start_file_not_matched", subset[0].StartRootNum(), "merge_range", mergeRange)
+		if subset.StartTxNum() != mergeRange.from {
+			r.logger.Error("[fork_agg] merge", "start_file_not_matched", subset.StartTxNum(), "merge_range", mergeRange)
 			panic("start file not matched")
 		}
-		if subset[len(subset)-1].EndRootNum() != mergeRange.to {
-			r.logger.Error("[fork_agg] merge", "end_file_not_matched", subset[len(subset)-1].EndRootNum(), "merge_range", mergeRange)
+		if subset.EndTxNum() != mergeRange.to {
+			r.logger.Error("[fork_agg] merge", "end_file_not_matched", subset.EndTxNum(), "merge_range", mergeRange)
 			panic("end file not matched")
 		}
 
@@ -287,7 +285,6 @@ func (r *ForkableAgg) mergeLoopStep(ctx context.Context) (somethingMerged bool, 
 		return false, nil
 	}
 
-	// TODO: integrate
 	r.IntegrateMergeFiles(&mf)
 	return true, nil
 }

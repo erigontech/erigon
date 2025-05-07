@@ -358,6 +358,13 @@ func (files visibleFiles) EndTxNum() uint64 {
 	return files[len(files)-1].endTxNum
 }
 
+func (files visibleFiles) StartTxNum() uint64 {
+	if len(files) == 0 {
+		return 0
+	}
+	return files[0].startTxNum
+}
+
 func (files visibleFiles) LatestMergedRange() MergeRange {
 	if len(files) == 0 {
 		return MergeRange{}
