@@ -19,6 +19,7 @@ package existence
 import (
 	"bufio"
 	"fmt"
+	"hash"
 	"os"
 	"path/filepath"
 
@@ -43,7 +44,7 @@ type Filter struct {
 func NewFilter(keysCount uint64, filePath string) (*Filter, error) {
 	//TODO: make filters compatible by usinig same seed/keys
 	_, fileName := filepath.Split(filePath)
-	e := &Filter{FilePath: filePath, FileName: fileName, useFuse: true}
+	e := &Filter{FilePath: filePath, FileName: fileName, useFuse: false}
 	if keysCount < 2 {
 		e.empty = true
 	} else {
