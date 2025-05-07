@@ -1197,10 +1197,10 @@ func (ic InvertedIndexCollation) Close() {
 // buildFiles - `step=N` means build file `[N:N+1)` which is equal to [N:N+1)
 func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, coll InvertedIndexCollation, ps *background.ProgressSet) (InvertedFiles, error) {
 	var (
-		decomp    *seg.Decompressor
-		index     *recsplit.Index
-		existence *existence.Filter
-		err       error
+		decomp          *seg.Decompressor
+		mapAccessor     *recsplit.Index
+		existenceFilter *existence.Filter
+		err             error
 	)
 	mxRunningFilesBuilding.Inc()
 	defer mxRunningFilesBuilding.Dec()
@@ -1243,7 +1243,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, coll Inver
 	if err := ii.buildMapAccessor(ctx, step, step+1, decomp, ps); err != nil {
 		return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.filenameBase, err)
 	}
-	if ii.Accessors.Has(AccessorHashMap) || ii.Accessors.Has(AccessorHashMap2Layer) {
+	if ii.Accessors.Has(AccessorHashMap) {
 		if mapAccessor, err = recsplit.OpenIndex(ii.efAccessorFilePath(step, step+1)); err != nil {
 			return InvertedFiles{}, err
 		}
