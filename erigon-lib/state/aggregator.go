@@ -670,7 +670,7 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep uint64) e
 	go func() {
 		defer a.buildingFiles.Store(false)
 		if toStep > fromStep {
-			log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
+			a.logger.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
 		}
 		for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
 			if err := a.buildFiles(ctx, step); err != nil {
@@ -1354,7 +1354,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 		}
 	}()
 
-	at.a.logger.Info(fmt.Sprintf("[snapshots] merge state %s", r.String()))
+	at.a.logger.Debug("[snapshots] merge ", "state", r.String())
 
 	accStorageMerged := new(sync.WaitGroup)
 
@@ -1412,9 +1412,9 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 	err := g.Wait()
 	if err == nil {
 		closeFiles = false
-		at.a.logger.Info(fmt.Sprintf("[snapshots] state merge done %s", r.String()))
+		at.a.logger.Debug("[snapshots] state merge done", "state", r.String())
 	} else {
-		at.a.logger.Warn(fmt.Sprintf("[snapshots] state merge failed err=%v %s", err, r.String()))
+		at.a.logger.Warn("[snapshots] state merge failed %s", "err", err, "state", r.String())
 	}
 	return mf, err
 }
