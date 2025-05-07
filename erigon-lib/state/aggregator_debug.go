@@ -225,3 +225,63 @@ type MissedAccessorIIFiles struct {
 func (m *MissedAccessorIIFiles) missedMapAccessors() []*filesItem {
 	return m.files[AccessorHashMap]
 }
+
+func (at *AggregatorRoTx) MadvNormal() *AggregatorRoTx {
+	for _, d := range at.d {
+		for _, f := range d.files {
+			f.src.madvNormal()
+		}
+	}
+	for _, ii := range at.iis {
+		for _, f := range ii.files {
+			f.src.madvNormal()
+		}
+	}
+	return at
+}
+func (at *AggregatorRoTx) DisableReadAhead() {
+	for _, d := range at.d {
+		for _, f := range d.files {
+			f.src.disableReadAhead()
+		}
+	}
+	for _, ii := range at.iis {
+		for _, f := range ii.files {
+			f.src.disableReadAhead()
+		}
+	}
+}
+func (a *Aggregator) MadvNormal() *Aggregator {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	for _, d := range a.d {
+		d.dirtyFiles.Ascend(nil, func(item *filesItem) bool {
+			item.madvNormal()
+			return true
+		})
+	}
+	for _, ii := range a.iis {
+		ii.dirtyFiles.Ascend(nil, func(item *filesItem) bool {
+			item.madvNormal()
+			return true
+		})
+	}
+	return a
+}
+
+func (a *Aggregator) DisableReadAhead() {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	for _, d := range a.d {
+		d.dirtyFiles.Ascend(nil, func(item *filesItem) bool {
+			item.disableReadAhead()
+			return true
+		})
+	}
+	for _, ii := range a.iis {
+		ii.dirtyFiles.Ascend(nil, func(item *filesItem) bool {
+			item.disableReadAhead()
+			return true
+		})
+	}
+}
