@@ -136,7 +136,7 @@ type execTask struct {
 }
 
 type execResult struct {
-	*exec.Result
+	*exec.TxResult
 }
 
 func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.Engine, vm *state.VersionMap, stateReader state.StateReader, stateWriter state.StateWriter) (*types.Receipt, error) {
@@ -276,6 +276,10 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 
 	result.Receipt.Bloom = types.CreateBloom(types.Receipts{result.Receipt})
 
+	if hooks := result.TracingHooks(); hooks != nil && hooks.OnTxEnd != nil {
+		hooks.OnTxEnd(result.Receipt, result.Err)
+	}
+
 	return result.Receipt, nil
 }
 
@@ -302,7 +306,7 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	chainConfig *chain.Config,
 	chainReader consensus.ChainReader,
 	dirs datadir.Dirs,
-	calcFees bool) (result *exec.Result) {
+	calcFees bool) (result *exec.TxResult) {
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -314,7 +318,7 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 			if ibs.DepTxIndex() < 0 {
 				err = fmt.Errorf("EVM failure: %s at: %s", r, dbg.Stack())
 			}
-			result = &exec.Result{
+			result = &exec.TxResult{
 				TxIn: ev.VersionedReads(ibs),
 				Err: exec.ErrExecAbortError{
 					DependencyTxIndex: ibs.DepTxIndex(),
@@ -546,7 +550,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 			var b *types.Block
 
 			err := tx.Apply(func(tx kv.Tx) error {
-				b, err = blockWithSenders(ctx, te.cfg.db, tx, te.cfg.blockReader, blockNum)
+				b, err = exec3.BlockWithSenders(ctx, te.cfg.db, tx, te.cfg.blockReader, blockNum)
 				return err
 			})
 
@@ -784,7 +788,7 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, applyResults chan appl
 	}
 }
 
-func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, res *exec.Result, applyTx kv.Tx) (result *blockResult, err error) {
+func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, res *exec.TxResult, applyTx kv.Tx) (result *blockResult, err error) {
 
 	task, ok := res.Task.(*taskVersion)
 

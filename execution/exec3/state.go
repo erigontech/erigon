@@ -114,8 +114,8 @@ type Worker struct {
 
 	taskGasPool *core.GasPool
 
-	evm   *vm.EVM
-	ibs   *state.IntraBlockState
+	evm *vm.EVM
+	ibs *state.IntraBlockState
 
 	dirs datadir.Dirs
 
@@ -254,7 +254,7 @@ func (rw *Worker) Run() (err error) {
 	return nil
 }
 
-func (rw *Worker) RunTxTask(txTask exec.Task) (result *exec.Result) {
+func (rw *Worker) RunTxTask(txTask exec.Task) (result *exec.TxResult) {
 	//fmt.Println("RTX", txTask.Version().BlockNum, txTask.Version().TxIndex, txTask.Version().TxNum, txTask.IsBlockEnd())
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
@@ -300,7 +300,7 @@ func (rw *Worker) SetReader(reader state.ResettableStateReader) {
 	}
 }
 
-func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.Result {
+func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.TxResult {
 	if txTask.IsHistoric() && !rw.historyMode {
 		// in case if we cancelled execution and commitment happened in the middle of the block, we have to process block
 		// from the beginning until committed txNum and only then disable history mode.
@@ -314,7 +314,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.Result {
 		chainTx, err := rw.chainDb.(kv.TemporalRoDB).BeginTemporalRo(rw.ctx)
 
 		if err != nil {
-			return &exec.Result{
+			return &exec.TxResult{
 				Task: txTask,
 				Err:  err,
 			}

@@ -102,7 +102,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	chainConfig *chain.Config,
 	chainReader consensus.ChainReader,
 	dirs datadir.Dirs,
-	calcFees bool) *exec.Result {
+	calcFees bool) *exec.TxResult {
 	// Sleep for 50 microsecond to simulate setup time
 	sleep(time.Microsecond * 50)
 
@@ -128,7 +128,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 			val := result.Value()
 
 			if i == 0 && val != nil && (val.(int) != t.nonce) {
-				return &exec.Result{Err: exec.ErrExecAbortError{
+				return &exec.TxResult{Err: exec.ErrExecAbortError{
 					DependencyTxIndex: -1,
 					OriginError:       fmt.Errorf("invalid nonce: got: %d, expected: %d", val.(int), t.nonce)}}
 			}
@@ -160,10 +160,10 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	}
 
 	if dep != -1 {
-		return &exec.Result{Err: exec.ErrExecAbortError{DependencyTxIndex: dep, OriginError: fmt.Errorf("Dependency error")}}
+		return &exec.TxResult{Err: exec.ErrExecAbortError{DependencyTxIndex: dep, OriginError: fmt.Errorf("Dependency error")}}
 	}
 
-	return &exec.Result{}
+	return &exec.TxResult{}
 }
 
 func (t *testExecTask) VersionedWrites(_ *state.IntraBlockState) state.VersionedWrites {

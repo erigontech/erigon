@@ -353,8 +353,8 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 	prevTxNumLog := fromTxNum
 
 	var m runtime.MemStats
-	if err := exec3.CustomTraceMapReduce(fromBlock, toBlock, exec3.TraceConsumer{
-		Reduce: func(result *exec.Result, tx kv.TemporalTx) error {
+	if err := exec3.CustomTraceMapReduce(fromBlock, toBlock, exec3.TraceConsumerFunc(
+		func(blockResult *exec.BlockResult, result *exec.TxResult, tx kv.TemporalTx) error {
 			if result.Err != nil {
 				return result.Err
 			}
@@ -372,12 +372,12 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 			}
 
 			doms.SetTxNum(txTask.TxNum)
-			
+
 			if produce.ReceiptDomain {
 				if txTask.IsBlockEnd() { // block changed
 					if cfg.ChainConfig.Bor != nil && txTask.TxIndex >= 1 {
 						// get last receipt and store the last log index + 1
-						lastReceipt := txTask.BlockReceipts[txTask.TxIndex-1]
+						lastReceipt := blockResult.Receipts[txTask.TxIndex-1]
 						if lastReceipt == nil {
 							return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNumber())
 						}
@@ -412,7 +412,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 					receipt = result.Receipt
 				} else {
 					if cfg.ChainConfig.Bor != nil && txTask.TxIndex >= 1 {
-						receipt = txTask.BlockReceipts[txTask.TxIndex-1]
+						receipt = blockResult.Receipts[txTask.TxIndex-1]
 						if receipt == nil {
 							return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNumber())
 						}
@@ -458,8 +458,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 			default:
 			}
 			return nil
-		},
-	}, ctx, tx, cfg, logger); err != nil {
+		}), ctx, tx, cfg, logger); err != nil {
 		return err
 	}
 

@@ -55,7 +55,7 @@ type Task interface {
 		chainConfig *chain.Config,
 		chainReader consensus.ChainReader,
 		dirs datadir.Dirs,
-		calcFees bool) *Result
+		calcFees bool) *TxResult
 
 	Version() state.Version
 	VersionMap() *state.VersionMap
@@ -90,8 +90,8 @@ type AAValidationResult struct {
 	GasUsed          uint64
 }
 
-// Result is the ouput of the task execute process
-type Result struct {
+// TxResult is the ouput of the task execute process
+type TxResult struct {
 	Task
 	ExecutionResult   *evmtypes.ExecutionResult
 	ValidationResults []AAValidationResult
@@ -109,15 +109,15 @@ type Result struct {
 	ShouldRerunWithoutFeeDelay bool
 }
 
-func (r *Result) compare(other *Result) int {
+func (r *TxResult) compare(other *TxResult) int {
 	return r.Task.compare(other.Task)
 }
 
-func (r *Result) isNil() bool {
+func (r *TxResult) isNil() bool {
 	return r == nil
 }
 
-func (r *Result) CreateReceipt(prev *types.Receipt) (*types.Receipt, error) {
+func (r *TxResult) CreateReceipt(prev *types.Receipt) (*types.Receipt, error) {
 	txIndex := r.Task.Version().TxIndex
 
 	if txIndex < 0 || r.IsBlockEnd() {
@@ -140,7 +140,7 @@ func (r *Result) CreateReceipt(prev *types.Receipt) (*types.Receipt, error) {
 	return r.Receipt, err
 }
 
-func (r *Result) createReceipt(txIndex int, cumulativeGasUsed uint64, firstLogIndex uint32) (*types.Receipt, error) {
+func (r *TxResult) createReceipt(txIndex int, cumulativeGasUsed uint64, firstLogIndex uint32) (*types.Receipt, error) {
 	logIndex := firstLogIndex
 	for i := range r.Logs {
 		r.Logs[i].Index = uint(logIndex)
@@ -191,6 +191,11 @@ func (r *Result) createReceipt(txIndex int, cumulativeGasUsed uint64, firstLogIn
 	return receipt, nil
 }
 
+type BlockResult struct {
+	Complete bool
+	Receipts types.Receipts
+}
+
 type ErrExecAbortError struct {
 	DependencyTxIndex int
 	OriginError       error
@@ -205,9 +210,6 @@ func (e ErrExecAbortError) Error() string {
 }
 
 type ApplyMessage func(evm *vm.EVM, msg core.Message, gp *core.GasPool, refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error)
-
-type Tx struct {
-}
 
 // ReadWriteSet contains ReadSet, WriteSet and BalanceIncrease of a transaction,
 // which is processed by a single thread that writes into the ReconState1 and
@@ -407,8 +409,8 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 	chainConfig *chain.Config,
 	chainReader consensus.ChainReader,
 	dirs datadir.Dirs,
-	calcFees bool) *Result {
-	var result Result
+	calcFees bool) *TxResult {
+	var result TxResult
 
 	ibs.SetTrace(txTask.Trace)
 
@@ -550,8 +552,8 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 	evm *vm.EVM,
 	gasPool *core.GasPool,
 	ibs *state.IntraBlockState,
-	chainConfig *chain.Config) *Result {
-	var result Result
+	chainConfig *chain.Config) *TxResult {
+	var result TxResult
 
 	if !txTask.InBatch {
 		// this is the first transaction in an AA transaction batch, run all validation frames, then execute execution frames in its own txtask
@@ -788,21 +790,21 @@ func (q *QueueWithRetry) Close() {
 // ResultsQueue thread-safe priority-queue of execution results
 
 type ResultsQueue struct {
-	*PriorityQueue[*Result]
+	*PriorityQueue[*TxResult]
 }
 
 func NewResultsQueue(channelLimit, heapLimit int) *ResultsQueue {
-	return &ResultsQueue{NewPriorityQueue[*Result](channelLimit, heapLimit)}
+	return &ResultsQueue{NewPriorityQueue[*TxResult](channelLimit, heapLimit)}
 }
 
 func (q ResultsQueue) FirstTxNumLocked() uint64 { return (*q.results)[0].Version().TxNum }
 
 type ResultsQueueIter struct {
-	*PriorityQueueIter[*Result]
+	*PriorityQueueIter[*TxResult]
 }
 
 func (q ResultsQueue) Iter() *ResultsQueueIter {
-	return &ResultsQueueIter{&PriorityQueueIter[*Result]{q: q.PriorityQueue}}
+	return &ResultsQueueIter{&PriorityQueueIter[*TxResult]{q: q.PriorityQueue}}
 }
 
 func (q *ResultsQueueIter) Has(outputTxNum uint64) bool {
@@ -971,18 +973,18 @@ func (q *PriorityQueue[T]) Len() (l int) {
 	q.Unlock()
 	return l
 }
-func (q *ResultsQueue) LenLocked() (l int)   { return q.results.Len() }
-func (q *ResultsQueue) HasLocked() bool      { return len(*q.results) > 0 }
-func (q *ResultsQueue) PushLocked(t *Result) { heap.Push(q.results, t) }
-func (q *ResultsQueue) Push(t *Result) {
+func (q *ResultsQueue) LenLocked() (l int)     { return q.results.Len() }
+func (q *ResultsQueue) HasLocked() bool        { return len(*q.results) > 0 }
+func (q *ResultsQueue) PushLocked(t *TxResult) { heap.Push(q.results, t) }
+func (q *ResultsQueue) Push(t *TxResult) {
 	q.Lock()
 	heap.Push(q.results, t)
 	q.Unlock()
 }
-func (q *ResultsQueue) PopLocked() (t *Result) {
-	return heap.Pop(q.results).(*Result)
+func (q *ResultsQueue) PopLocked() (t *TxResult) {
+	return heap.Pop(q.results).(*TxResult)
 }
-func (q *ResultsQueue) Dbg() (t *Result) {
+func (q *ResultsQueue) Dbg() (t *TxResult) {
 	if len(*q.results) > 0 {
 		return (*q.results)[0]
 	}

@@ -49,7 +49,7 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
@@ -744,7 +744,7 @@ func ExecV3(ctx context.Context,
 				default:
 				}
 
-				b, err = blockWithSenders(ctx, cfg.db, applyTx, blockReader, blockNum)
+				b, err = exec3.BlockWithSenders(ctx, cfg.db, applyTx, blockReader, blockNum)
 				if err != nil {
 					return err
 				}
@@ -1320,25 +1320,4 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		}
 	}
 	return true, nil
-}
-
-func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, blockNum uint64) (b *types.Block, err error) {
-	if tx == nil {
-		tx, err = db.BeginRo(ctx)
-		if err != nil {
-			return nil, err
-		}
-		defer tx.Rollback()
-	}
-	b, err = blockReader.BlockByNumber(ctx, tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-	if b == nil {
-		return nil, nil
-	}
-	for _, txn := range b.Transactions() {
-		_ = txn.Hash()
-	}
-	return b, err
 }

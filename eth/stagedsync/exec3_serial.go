@@ -174,6 +174,10 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 					return err
 				}
 				blockReceipts = append(blockReceipts, receipt)
+
+				if hooks := result.TracingHooks(); hooks != nil && hooks.OnTxEnd != nil {
+					hooks.OnTxEnd(receipt, result.Err)
+				}
 			} else {
 				se.onBlockStart(ctx, txTask.BlockNumber(), txTask.BlockHash())
 			}
