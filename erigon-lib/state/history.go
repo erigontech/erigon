@@ -381,9 +381,6 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 
 	histReader := seg.NewReader(hist.MakeGetter(), h.compression)
 
-	_, fName := filepath.Split(historyIdxPath)
-	p := ps.AddNew(fName, uint64(hist.Count()))
-	defer ps.Delete(p)
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   int(cnt),
 		Enums:      false,
@@ -399,6 +396,9 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	}
 	defer rs.Close()
 	rs.LogLvl(log.LvlTrace)
+
+	p := ps.AddNew(rs.FileName(), uint64(hist.Count()))
+	defer ps.Delete(p)
 
 	i := 0
 	for {
@@ -871,9 +871,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	}
 
 	{
-		ps := background.NewProgressSet()
-		_, efHistoryFileName := filepath.Split(collation.efHistoryPath)
-		p := ps.AddNew(efHistoryFileName, 1)
+		p := ps.AddNew(collation.efHistoryComp.FileName(), 1)
 		defer ps.Delete(p)
 
 		if err = collation.efHistoryComp.Compress(); err != nil {
@@ -882,9 +880,9 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		ps.Delete(p)
 	}
 	{
-		_, historyFileName := filepath.Split(collation.historyPath)
-		p := ps.AddNew(historyFileName, 1)
+		p := ps.AddNew(collation.historyComp.FileName(), 1)
 		defer ps.Delete(p)
+
 		if err = collation.historyComp.Compress(); err != nil {
 			return HistoryFiles{}, fmt.Errorf("compress %s .v history: %w", h.filenameBase, err)
 		}

@@ -1158,8 +1158,8 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, coll Inver
 
 	{
 		p := ps.AddNew(filepath.Base(coll.iiPath), 1)
+		defer ps.Delete(p)
 		if err = coll.writer.Compress(); err != nil {
-			ps.Delete(p)
 			return InvertedFiles{}, fmt.Errorf("compress %s: %w", ii.filenameBase, err)
 		}
 		coll.Close()
