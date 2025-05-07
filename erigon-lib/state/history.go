@@ -397,7 +397,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	defer rs.Close()
 	rs.LogLvl(log.LvlTrace)
 
-	p := ps.AddNew(rs.FileName(), uint64(hist.Count()))
+	p := ps.AddNew(rs.FileName(), uint64(hist.Count()/2))
 	defer ps.Delete(p)
 
 	i := 0
@@ -409,6 +409,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		for iiReader.HasNext() {
 			keyBuf, _ = iiReader.Next(keyBuf[:0])
 			valBuf, _ = iiReader.Next(valBuf[:0])
+			p.Processed.Add(1)
 
 			// fmt.Printf("ef key %x\n", keyBuf)
 
@@ -431,9 +432,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 						valOffset, _ = histReader.Skip()
 					}
 				}
-				p.Processed.Add(1)
 			}
-			p.Processed.Add(1)
 
 			select {
 			case <-ctx.Done():
