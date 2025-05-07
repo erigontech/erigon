@@ -18,12 +18,9 @@ package cli
 
 import (
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/config3"
-
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -269,47 +266,15 @@ var (
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.Logger) {
-	chainId := cfg.NetworkID
-	if cfg.Genesis != nil {
-		chainId = cfg.Genesis.Config.ChainID.Uint64()
-	}
-	// Sanitize prune flag
-	if ctx.String(PruneModeFlag.Name) != "archive" && (ctx.IsSet(PruneBlocksDistanceFlag.Name) || ctx.IsSet(PruneDistanceFlag.Name)) {
-		utils.Fatalf("error: --prune.distance and --prune.distance.blocks are only allowed with --prune.mode=archive")
-	}
-	distance := ctx.Uint64(PruneDistanceFlag.Name)
-	blockDistance := ctx.Uint64(PruneBlocksDistanceFlag.Name)
+	distanceH := ctx.Uint64(PruneDistanceFlag.Name)
+	distanceB := ctx.Uint64(PruneBlocksDistanceFlag.Name)
 
-	if !ctx.IsSet(PruneBlocksDistanceFlag.Name) {
-		blockDistance = math.MaxUint64
-	}
-	if !ctx.IsSet(PruneDistanceFlag.Name) {
-		distance = math.MaxUint64
-	}
-	mode, err := prune.FromCli(
-		chainId,
-		distance,
-		blockDistance,
-		libcommon.CliString2Array(ctx.String(ExperimentsFlag.Name)),
-	)
-	if err != nil {
-		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
-	}
-	// Full mode prunes all but the latest state
-	if ctx.String(PruneModeFlag.Name) == "full" {
-		mode.Blocks = prune.Distance(math.MaxUint64)
-		mode.History = prune.Distance(config3.DefaultPruneDistance)
-	}
-	// Minimal mode prunes all but the latest state including blocks
-	if ctx.String(PruneModeFlag.Name) == "minimal" {
-		mode.Blocks = prune.Distance(config3.DefaultPruneDistance)
-		mode.History = prune.Distance(config3.DefaultPruneDistance)
-	}
-
+	mode, err := prune.FromCli(distanceH, distanceB, ctx.String(PruneModeFlag.Name), libcommon.CliString2Array(ctx.String(ExperimentsFlag.Name)))
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
 	cfg.Prune = mode
+
 	if ctx.String(BatchSizeFlag.Name) != "" {
 		err := cfg.BatchSize.UnmarshalText([]byte(ctx.String(BatchSizeFlag.Name)))
 		if err != nil {
@@ -399,9 +364,7 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	pruneBlockDistance := f.Uint64(PruneBlocksDistanceFlag.Name, PruneBlocksDistanceFlag.Value, PruneBlocksDistanceFlag.Usage)
 	pruneDistance := f.Uint64(PruneDistanceFlag.Name, PruneDistanceFlag.Value, PruneDistanceFlag.Usage)
 
-	chainId := cfg.NetworkID
-
-	var distance, blockDistance uint64 = math.MaxUint64, math.MaxUint64
+	var distance, blockDistance uint64
 	if pruneBlockDistance != nil {
 		blockDistance = *pruneBlockDistance
 	}
@@ -414,28 +377,10 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	if experiments != nil {
 		experimentsVal = *experiments
 	}
-	mode, err := prune.FromCli(
-		chainId,
-		distance,
-		blockDistance,
-		libcommon.CliString2Array(experimentsVal),
-	)
+	mode, err := prune.FromCli(distance, blockDistance, *pruneMode, libcommon.CliString2Array(experimentsVal))
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
-	switch *pruneMode {
-	case "archive":
-	case "full":
-		mode.Blocks = prune.Distance(math.MaxUint64)
-		mode.History = prune.Distance(config3.DefaultPruneDistance)
-	case "minimal":
-		mode.Blocks = prune.Distance(config3.DefaultPruneDistance) // 2048 is just some blocks to allow reorgs and data for rpc
-		mode.History = prune.Distance(config3.DefaultPruneDistance)
-	default:
-		utils.Fatalf("error: --prune.mode must be one of archive, full, minimal")
-	}
-	mode.Blocks = prune.Distance(blockDistance)
-	mode.History = prune.Distance(distance)
 
 	cfg.Prune = mode
 

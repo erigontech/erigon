@@ -625,9 +625,9 @@ func init() {
 	withConfig(cmdSetPrune)
 	withDataDir(cmdSetPrune)
 	withChain(cmdSetPrune)
-	cmdSetPrune.Flags().StringVar(&pruneFlag, "prune", "hrtc", "")
-	cmdSetPrune.Flags().Uint64Var(&pruneB, "prune.b.older", 0, "")
-	cmdSetPrune.Flags().Uint64Var(&pruneH, "prune.h.older", 0, "")
+	cmdSetPrune.Flags().StringVar(&pruneFlag, "prune", "archive", "archive|full|minimal")
+	cmdSetPrune.Flags().Uint64Var(&pruneB, "prune.distance.blocks", 0, "")
+	cmdSetPrune.Flags().Uint64Var(&pruneH, "prune.distance", 0, "")
 	cmdSetPrune.Flags().Uint64Var(&pruneR, "prune.r.older", 0, "")
 	cmdSetPrune.Flags().Uint64Var(&pruneT, "prune.t.older", 0, "")
 	cmdSetPrune.Flags().Uint64Var(&pruneC, "prune.c.older", 0, "")
@@ -1672,8 +1672,7 @@ func stage(st *stagedsync.Sync, tx kv.Tx, db kv.RoDB, stage stages.SyncStage) *s
 }
 
 func overrideStorageMode(db kv.RwDB, logger log.Logger) error {
-	chainConfig := fromdb.ChainConfig(db)
-	pm, err := prune.FromCli(chainConfig.ChainID.Uint64(), pruneB, pruneH, experiments)
+	pm, err := prune.FromCli(pruneH, pruneB, pruneFlag, experiments)
 	if err != nil {
 		return err
 	}
