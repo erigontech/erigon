@@ -57,7 +57,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 
 	cfg.hist.iiCfg.dirs = dirs
 	cfg.hist.iiCfg.salt = &salt
-	cfg.hist.iiCfg.indexList = AccessorHashMap | AccessorExistence
+	cfg.hist.iiCfg.Accessors = AccessorHashMap | AccessorExistence
 
 	cfg.hist.historyLargeValues = largeValues
 
@@ -257,7 +257,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 		for i := 0; i < len(keyWords); i++ {
 			var offset uint64
 			var ok bool
-			if h.InvertedIndex.indexList.Has(AccessorExistence) {
+			if h.InvertedIndex.Accessors.Has(AccessorExistence) {
 				offset, ok = r.Lookup([]byte(keyWords[i]))
 				if !ok {
 					continue

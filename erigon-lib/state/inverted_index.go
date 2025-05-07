@@ -230,10 +230,9 @@ func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {
 type Accessors = ee.Accessors
 
 const (
-	AccessorBTree         Accessors = ee.AccessorBTree
-	AccessorHashMap       Accessors = ee.AccessorHashMap
-	AccessorExistence     Accessors = ee.AccessorExistence
-	AccessorHashMap2Layer Accessors = ee.AccessorHashMap2Layer
+	AccessorBTree     Accessors = ee.AccessorBTree
+	AccessorHashMap   Accessors = ee.AccessorHashMap
+	AccessorExistence Accessors = ee.AccessorExistence
 )
 
 func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
@@ -247,10 +246,10 @@ func (ii *InvertedIndex) MissedMapAccessors() (l []*filesItem) {
 func (ii *InvertedIndex) missedMapAccessors(source []*filesItem) (l []*filesItem) {
 	return fileItemsWithMissedAccessors(source, ii.aggregationStep, func(fromStep, toStep uint64) []string {
 		var files []string
-		if ii.indexList.Has(AccessorHashMap) || ii.indexList.Has(AccessorHashMap2Layer) {
+		if ii.Accessors.Has(AccessorHashMap) {
 			files = append(files, ii.efAccessorFilePath(fromStep, toStep))
 		}
-		if ii.indexList.Has(AccessorExistence) {
+		if ii.Accessors.Has(AccessorExistence) {
 			files = append(files, ii.efAccessorExistenceFilterFilePath(fromStep, toStep))
 		}
 		return files
@@ -780,7 +779,7 @@ func (iit *InvertedIndexRoTx) iterateRangeOnFiles(key []byte, startTxNum, endTxN
 		orderAscend: asc,
 		limit:       limit,
 		ef:          eliasfano32.NewEliasFano(1, 1),
-		accessors:   iit.ii.indexList,
+		accessors:   iit.ii.Accessors,
 		ii:          iit,
 	}
 	if asc {
@@ -1244,12 +1243,12 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, coll Inver
 	if err := ii.buildMapAccessor(ctx, step, step+1, decomp, ps); err != nil {
 		return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.filenameBase, err)
 	}
-	if ii.indexList.Has(AccessorHashMap) || ii.indexList.Has(AccessorHashMap2Layer) {
+	if ii.Accessors.Has(AccessorHashMap) || ii.Accessors.Has(AccessorHashMap2Layer) {
 		if mapAccessor, err = recsplit.OpenIndex(ii.efAccessorFilePath(step, step+1)); err != nil {
 			return InvertedFiles{}, err
 		}
 	}
-	if ii.indexList.Has(AccessorExistence) {
+	if ii.Accessors.Has(AccessorExistence) {
 		if existenceFilter, err = existence.OpenFilter(ii.efAccessorExistenceFilterFilePath(step, step+1)); err != nil {
 			return InvertedFiles{}, err
 		}
@@ -1269,7 +1268,7 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 		Salt:       ii.salt,
 		NoFsync:    ii.noFsync,
 	}
-	if ii.iiCfg.indexList.Has(AccessorExistence) {
+	if ii.iiCfg.Accessors.Has(AccessorExistence) {
 		cfg.Enums, cfg.LessFalsePositives = false, false
 	} else {
 		// Design decision: `why Enum=true and LessFalsePositives=true`?
@@ -1304,7 +1303,7 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 		return err
 	}
 
-	if ii.iiCfg.indexList.Has(AccessorExistence) {
+	if ii.iiCfg.Accessors.Has(AccessorExistence) {
 		if err := buildExistanceFilter(ctx, data, ii.Compression, ii.efAccessorExistenceFilterFilePath(fromStep, toStep), *cfg.Salt, ps); err != nil {
 			return err
 		}

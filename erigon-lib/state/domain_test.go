@@ -1056,7 +1056,7 @@ func emptyTestDomain(aggStep uint64) *Domain {
 	cfg.hist.iiCfg.dirs = datadir2.New(os.TempDir())
 	cfg.hist.iiCfg.name = kv.InvertedIdx(0)
 	cfg.hist.iiCfg.version = IIVersionTypes{snaptype.V1_0, snaptype.V1_0, snaptype.V1_0}
-	cfg.hist.iiCfg.indexList = AccessorHashMap | AccessorExistence
+	cfg.hist.iiCfg.Accessors = AccessorHashMap | AccessorExistence
 
 	d, err := NewDomain(cfg, aggStep, log.New())
 	if err != nil {

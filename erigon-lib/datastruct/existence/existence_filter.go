@@ -25,15 +25,15 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
-	fusefilter2 "github.com/erigontech/erigon-lib/datastruct/fusefilter"
+	"github.com/erigontech/erigon-lib/datastruct/fusefilter"
 	"github.com/erigontech/erigon-lib/log/v3"
 	bloomfilter "github.com/holiman/bloomfilter/v2"
 )
 
 type Filter struct {
 	filter             *bloomfilter.Filter
-	fuseWriter         *fusefilter2.Writer
-	fuseReader         *fusefilter2.Reader
+	fuseWriter         *fusefilter.Writer
+	fuseReader         *fusefilter.Reader
 	useFuse            bool
 	empty              bool
 	FileName, FilePath string
@@ -50,7 +50,7 @@ func NewFilter(keysCount uint64, filePath string) (*Filter, error) {
 	} else {
 		var err error
 		if e.useFuse {
-			e.fuseWriter, err = fusefilter2.NewWriter(filePath)
+			e.fuseWriter, err = fusefilter.NewWriter(filePath)
 			if err != nil {
 				return nil, err
 			}
@@ -194,7 +194,7 @@ func OpenFilter(filePath string) (exFilder *Filter, err error) {
 	}
 
 	if idx.useFuse {
-		idx.fuseReader, err = fusefilter2.NewReader(filePath)
+		idx.fuseReader, err = fusefilter.NewReader(filePath)
 		if err != nil {
 			return nil, fmt.Errorf("OpenFilter: %w, %s", err, fileName)
 		}
