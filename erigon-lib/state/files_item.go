@@ -381,6 +381,14 @@ func (files visibleFiles) Len() int {
 	return len(files)
 }
 
+func (files visibleFiles) VisibleFiles() []VisibleFile {
+	res := make([]VisibleFile, 0, len(files))
+	for _, file := range files {
+		res = append(res, file)
+	}
+	return res
+}
+
 // fileItemsWithMissedAccessors returns list of files with missed accessors
 // here "accessors" are generated dynamically by `accessorsFor`
 func fileItemsWithMissedAccessors(dirtyFiles []*filesItem, aggregationStep uint64, accessorsFor func(fromStep, toStep uint64) []string) (l []*filesItem) {

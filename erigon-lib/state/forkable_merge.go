@@ -100,6 +100,9 @@ func (f *ProtoForkable) MergeFiles(ctx context.Context, _filesToMerge []visibleF
 	}
 
 	mergedFile = newFilesItemWithSnapConfig(from.Uint64(), to.Uint64(), f.cfg)
+	if mergedFile.decompressor, err = seg.NewDecompressor(segPath); err != nil {
+		return
+	}
 	indexes, err := f.BuildIndexes(ctx, from, to, ps)
 	if err != nil {
 		return

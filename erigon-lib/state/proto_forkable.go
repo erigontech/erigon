@@ -164,6 +164,7 @@ func (a *ProtoForkable) BuildIndexes(ctx context.Context, from, to RootNum, ps *
 		ps.Delete(p)
 	}
 	closeFiles = false
+	return
 }
 
 func (a *ProtoForkable) isCompressionUsed(from, to RootNum) bool {

@@ -539,16 +539,19 @@ func getFreezingRange(rootFrom, rootTo RootNum, cfg *ee.SnapshotConfig) (freezeF
 	    as allowed by the MergeSteps or MinimumSize.
 	**/
 
-	if rootFrom >= rootTo {
-		return rootFrom, rootTo, false
-	}
-
 	from := uint64(rootFrom)
 	to := uint64(rootTo)
 
-	to = to - cfg.SafetyMargin
+	if to < cfg.SafetyMargin {
+		return rootFrom, rootTo, false
+	}
+
+	to -= cfg.SafetyMargin
 	from = (from / cfg.MinimumSize) * cfg.MinimumSize
 	to = (to / cfg.MinimumSize) * cfg.MinimumSize
+	if from >= to {
+		return rootFrom, rootTo, false
+	}
 
 	mergeLimit := getMergeLimit(cfg, from)
 	maxJump := cfg.RootNumPerStep

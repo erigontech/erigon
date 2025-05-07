@@ -272,10 +272,10 @@ func TestMergeRangeSnapRepo(t *testing.T) {
 		require.Positive(t, dataCount)
 		require.NoError(t, repo.OpenFolder())
 		repo.RecalcVisibleFiles(RootNum(MaxUint64))
-		vf := repo.visibleFiles()
+		vf := repo.VisibleFiles()
 		require.Len(t, vf, vfCount)
 
-		mr := repo.FindMergeRange(RootNum(vf.EndTxNum()), vf)
+		mr := repo.FindMergeRange(RootNum(vf.EndRootNum()), vf)
 		require.Equal(t, mr.needMerge, needMerge)
 		if !mr.needMerge {
 			require.Equal(t, mr.from, mergeFromStep*stepSize)
@@ -457,7 +457,7 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 		repo.RecalcVisibleFiles(RootNum(MaxUint64))
 		vf := repo.visibleFiles()
 
-		mr := repo.FindMergeRange(RootNum(vf.EndTxNum()), vf)
+		mr := repo.FindMergeRange(RootNum(vf.EndTxNum()), vf.VisibleFiles())
 		require.Equal(t, mr.needMerge, needMerge)
 		if !mr.needMerge {
 			cleanupFiles(t, repo, dirs)

@@ -33,6 +33,7 @@ type ForkableAgg struct {
 
 	buildingFiles atomic.Bool
 	mergingFiles  atomic.Bool
+	mergeDisabled atomic.Bool
 
 	collateAndBuildWorkers int
 	mergeWorkers           int
@@ -61,6 +62,8 @@ func NewForkableAgg(ctx context.Context, dirs datadir.Dirs, db kv.RoDB, logger l
 		leakDetector:           dbg.NewLeakDetector("forkable_agg", dbg.SlowTx()),
 		logger:                 logger,
 		collateAndBuildWorkers: 1,
+		mergeWorkers:           1,
+		compressWorkers:        1,
 		ps:                     background.NewProgressSet(),
 
 		// marked:   ap.marked,
@@ -100,6 +103,10 @@ func (r *ForkableAgg) SetMergeWorkers(n int) {
 
 func (r *ForkableAgg) SetCompressWorkers(n int) {
 	r.compressWorkers = n
+}
+
+func (r *ForkableAgg) SetMergeDisabled(disabled bool) {
+	r.mergeDisabled.Store(disabled)
 }
 
 // - "open folder"
@@ -142,8 +149,11 @@ func (r *ForkableAgg) BuildFiles(num RootNum) chan struct{} {
 		for built {
 			built, err = r.buildFile(r.ctx, num)
 			if err != nil && (errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped)) {
+				r.logger.Debug("buildFile cancelled/stopped", "err", err)
 				close(fin)
 				return
+			} else if err != nil {
+				panic(err)
 			}
 		}
 
@@ -151,6 +161,7 @@ func (r *ForkableAgg) BuildFiles(num RootNum) chan struct{} {
 			defer close(fin)
 			if err := r.MergeLoop(r.ctx); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
+					r.logger.Debug("MergeLoop cancelled/stopped", "err", err)
 					return
 				}
 				r.logger.Warn("[forkable snapshots] merge", "err", err)
@@ -164,7 +175,8 @@ func (r *ForkableAgg) BuildFiles(num RootNum) chan struct{} {
 func (r *ForkableAgg) MergeLoop(ctx context.Context) (err error) {
 	// multipe calls not allowed
 	// use snaps.MergeConfig...
-	if dbg.NoMerge() || !r.mergingFiles.CompareAndSwap(false, true) {
+	if dbg.NoMerge() || r.mergeDisabled.Load() || !r.mergingFiles.CompareAndSwap(false, true) {
+		r.logger.Debug("MergeLoop disabled or already in progress. Skipping...")
 		return nil
 	}
 
@@ -222,7 +234,7 @@ func (r *ForkableAgg) mergeLoopStep(ctx context.Context) (somethingMerged bool, 
 		var subset []visibleFile
 		for _, vf := range vfs {
 			if mergeRange.from <= vf.StartRootNum() && vf.EndRootNum() <= mergeRange.to {
-				if len(subset) > 0 && subset[len(subset)-1].EndRootNum() != vf.StartRootNum()-1 {
+				if len(subset) > 0 && subset[len(subset)-1].EndRootNum() != vf.StartRootNum() {
 					panic("expected contiguous files")
 				}
 				vf1, ok := vf.(visibleFile)
