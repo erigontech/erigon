@@ -699,7 +699,7 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) (v []byte, ok boo
 		if reader.Empty() {
 			return nil, false, 0, nil
 		}
-		if dt.d.AccessorList.Has(AccessorExistence) {
+		if dt.d.Accessors.Has(AccessorExistence) {
 			hi, lo := dt.ht.iit.hashKey(filekey)
 			if dt.files[i].src.existence != nil {
 				ok = dt.files[i].src.existence.ContainsHash(hi)
@@ -1240,7 +1240,7 @@ func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep uint
 		NoFsync:    d.noFsync,
 	}
 
-	if d.AccessorList.Has(AccessorExistence) {
+	if d.Accessors.Has(AccessorExistence) {
 		cfg.Enums, cfg.LessFalsePositives = false, false
 	} else {
 		cfg.Enums, cfg.LessFalsePositives = true, true
@@ -1250,7 +1250,7 @@ func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep uint
 		return err
 	}
 
-	if d.AccessorList.Has(AccessorExistence) {
+	if d.Accessors.Has(AccessorExistence) {
 		if err := buildExistanceFilter(ctx, data, d.Compression, d.kvExistenceIdxFilePath(fromStep, toStep), *cfg.Salt, ps); err != nil {
 			return err
 		}
@@ -1278,10 +1278,10 @@ func (d *Domain) MissedMapAccessors() (l []*filesItem) {
 func (d *Domain) missedMapAccessors(source []*filesItem) (l []*filesItem) {
 	return fileItemsWithMissedAccessors(source, d.aggregationStep, func(fromStep, toStep uint64) []string {
 		var files []string
-		if d.AccessorList.Has(AccessorHashMap) || d.AccessorList.Has(AccessorHashMap2Layer) {
+		if d.Accessors.Has(AccessorHashMap) {
 			files = append(files, d.kviAccessorFilePath(fromStep, toStep))
 		}
-		if d.AccessorList.Has(AccessorExistence) {
+		if d.Accessors.Has(AccessorExistence) {
 			files = append(files, d.kvExistenceIdxFilePath(fromStep, toStep))
 		}
 		return files
@@ -1387,11 +1387,11 @@ func buildExistanceFilter(ctx context.Context, d *seg.Decompressor, compressed s
 	p := ps.AddNew(fileName, uint64(count))
 	defer ps.Delete(p)
 
-	defer d.EnableMadvNormal().DisableReadAhead()
+	defer d.MadvNormal().DisableReadAhead()
 
 	g := seg.NewReader(d.MakeGetter(), compressed)
 
-	existenceFilter, err := existence.NewExistenceFilter(uint64(count), idxPath)
+	existenceFilter, err := existence.NewFilter(uint64(count), idxPath)
 	if err != nil {
 		return err
 	}
