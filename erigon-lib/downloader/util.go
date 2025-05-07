@@ -50,8 +50,6 @@ import (
 // udpOrHttpTrackers - torrent library spawning several goroutines and producing many requests for each tracker. So we limit amout of trackers by 8
 var udpOrHttpTrackers = []string{
 	"udp://tracker.opentrackr.org:1337/announce",
-	"udp://tracker.openbittorrent.com:6969/announce",
-	"udp://opentracker.i2p.rocks:6969/announce",
 	"udp://tracker.torrent.eu.org:451/announce",
 	"udp://open.stealth.si:80/announce",
 }
