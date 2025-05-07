@@ -27,6 +27,10 @@ import (
 	jsoniter "github.com/json-iterator/go"
 )
 
+func (s *StackStream) closeAllPendingElements() error {
+	return s.ClosePending(0)
+}
+
 func TestStackStream_BasicOperations(t *testing.T) {
 	json := jsoniter.ConfigCompatibleWithStandardLibrary
 	stream := json.BorrowStream(nil)
@@ -150,8 +154,8 @@ func TestStackStream_ClosePendingObjects_Object(t *testing.T) {
 	assert.False(t, ss.IsComplete())
 	assert.Equal(t, 2, ss.GetCurrentDepth()) // Object, Field
 
-	// Flush closing pending objects if necessary
-	err := ss.Flush()
+	// Close pending objects if necessary
+	err := ss.closeAllPendingElements()
 	assert.NoError(t, err)
 
 	// Should have completed the JSON properly
@@ -179,7 +183,7 @@ func TestStackStream_ClosePendingObjects_Array(t *testing.T) {
 	assert.Equal(t, 2, ss.GetCurrentDepth()) // Array, Field
 
 	// Flush closing pending objects if necessary
-	err := ss.Flush()
+	err := ss.closeAllPendingElements()
 	assert.NoError(t, err)
 
 	// Should have completed the JSON properly
@@ -215,7 +219,7 @@ func TestStackStream_ClosePendingObjects_ComplexNested(t *testing.T) {
 	assert.Equal(t, 4, ss.GetCurrentDepth()) // Object, Object, Object, Field
 
 	// Flush closing pending objects if necessary
-	err := ss.Flush()
+	err := ss.closeAllPendingElements()
 	assert.NoError(t, err)
 
 	// Should have completed the JSON properly
@@ -252,7 +256,7 @@ func TestStackStream_ClosePendingObjects_ComplexNestedWithArray(t *testing.T) {
 	assert.Equal(t, 5, ss.GetCurrentDepth()) // Array, Object, Object, Object, Field
 
 	// Flush closing pending objects if necessary
-	err := ss.Flush()
+	err := ss.closeAllPendingElements()
 	assert.NoError(t, err)
 
 	// Should have completed the JSON properly
@@ -451,7 +455,7 @@ func TestStackStream_NestedIncompleteStructures(t *testing.T) {
 			assert.False(t, ss.IsComplete())
 
 			// Flush should complete the structure
-			err := ss.Flush()
+			err := ss.closeAllPendingElements()
 			assert.NoError(t, err)
 
 			// Verify the result
@@ -472,8 +476,8 @@ func TestStackStream_ClosePendingObjectsWithEmptyStack(t *testing.T) {
 	// Stack is already empty
 	assert.True(t, ss.IsComplete())
 
-	// Call closePendingObjects should be a no-op
-	err := ss.closePendingObjects()
+	// Call closeAllPending should be a no-op
+	err := ss.closeAllPendingElements()
 	assert.NoError(t, err)
 	assert.True(t, ss.IsComplete())
 }
@@ -491,13 +495,13 @@ func TestStackStream_MultipleFlushCalls(t *testing.T) {
 	ss.WriteObjectField("test")
 
 	// The first flush should complete the structure
-	err := ss.Flush()
+	err := ss.closeAllPendingElements()
 	assert.NoError(t, err)
 	assert.Equal(t, `{"test":null}`, string(ss.Buffer()))
 	assert.True(t, ss.IsComplete())
 
 	// The second flush should be a no-op
-	err = ss.Flush()
+	err = ss.closeAllPendingElements()
 	assert.NoError(t, err)
 	assert.Equal(t, `{"test":null}`, string(ss.Buffer()))
 	assert.True(t, ss.IsComplete())
@@ -722,8 +726,8 @@ func TestStackStream_ExtremeNesting(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-// TestStackStream_ErrorHandling tests error handling and propagation
-func TestStackStream_ErrorHandling(t *testing.T) {
+// TestStackStream_ErrorHandlingWithoutClosing tests error handling and propagation *without* closing pending elements
+func TestStackStream_ErrorHandlingWithoutClosing(t *testing.T) {
 	json := jsoniter.ConfigCompatibleWithStandardLibrary
 
 	// Test with a writer that will fail
@@ -738,8 +742,31 @@ func TestStackStream_ErrorHandling(t *testing.T) {
 	ss.WriteObjectField("longString")
 	ss.WriteString("This string should cause the writer to fail")
 
-	// Attempt to flush, which should propagate the error
+	// Flush should propagate the error
 	err := ss.Flush()
+	assert.Error(t, err)
+	assert.Equal(t, "write failed", err.Error())
+}
+
+// TestStackStream_ErrorHandlingWithClosing tests error handling and propagation *with* closing pending elements
+func TestStackStream_ErrorHandlingWithClosing(t *testing.T) {
+	json := jsoniter.ConfigCompatibleWithStandardLibrary
+
+	// Test with a writer that will fail
+	failWriter := &failingWriter{failAfter: 10}
+	stream := json.BorrowStream(failWriter)
+	defer json.ReturnStream(stream)
+
+	ss := NewStackStream(stream)
+
+	// Write enough data to trigger the error
+	ss.WriteObjectStart()
+	ss.WriteObjectField("longString")
+	ss.WriteString("This string should cause the writer to fail")
+	err := ss.closeAllPendingElements()
+
+	// Flush should propagate the error
+	err = ss.Flush()
 	assert.Error(t, err)
 	assert.Equal(t, "write failed", err.Error())
 }
@@ -850,7 +877,7 @@ func TestStackStream_IncompleteStructuresWithFlush(t *testing.T) {
 			expected: `{"outer":{"inner":null}}`,
 		},
 		{
-			name: "object with field but no more separator",
+			name: "object with field and separator",
 			buildStructure: func(ss *StackStream) {
 				ss.WriteObjectStart()
 				ss.WriteObjectField("first")
@@ -860,7 +887,7 @@ func TestStackStream_IncompleteStructuresWithFlush(t *testing.T) {
 				ss.WriteInt(42)
 				ss.WriteMore()
 			},
-			expected: `{"first":"value","second":42,null}`,
+			expected: `{"first":"value","second":42,"":""}`,
 		},
 		{
 			name: "multiple nested incomplete structures",
@@ -888,7 +915,7 @@ func TestStackStream_IncompleteStructuresWithFlush(t *testing.T) {
 			assert.False(t, ss.IsComplete())
 
 			// Flush should complete the structure
-			err := ss.Flush()
+			err := ss.closeAllPendingElements()
 			assert.NoError(t, err)
 
 			// Verify the result
@@ -913,8 +940,9 @@ func TestStackStream_BufferAsStringWithErrors(t *testing.T) {
 	ss.WriteObjectField("longString")
 	ss.WriteString("This string should cause the writer to fail")
 
-	// Flush should complete the structure
-	err := ss.Flush()
+	// Complete the structure and flush
+	err := ss.closeAllPendingElements()
+	err = ss.Flush()
 
 	// Attempt to get buffer as a string, which should propagate the error
 	result, err := ss.BufferAsString()

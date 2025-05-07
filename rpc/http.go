@@ -39,6 +39,7 @@ import (
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon-lib/common"
+	jsonstream "github.com/erigontech/erigon-lib/json"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -279,9 +280,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("content-type", contentType)
 	codec := newHTTPServerConn(r, w)
 	defer codec.Close()
-	var stream *jsoniter.Stream
+	var stream jsonstream.Stream
 	if !s.disableStreaming {
-		stream = jsoniter.NewStream(jsoniter.ConfigDefault, w, 4096)
+		stream = jsonstream.NewJsoniterStream(jsoniter.NewStream(jsoniter.ConfigDefault, w, 4096))
+		// stream = jsonstream.NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, w, 4096))
 	}
 	s.serveSingleRequest(ctx, codec, stream)
 }
