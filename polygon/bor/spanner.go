@@ -22,7 +22,7 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/chain"
-	common "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
