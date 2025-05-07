@@ -24,7 +24,6 @@ import (
 	"math"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/tidwall/btree"
 
@@ -433,8 +432,6 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	}
 	p := ps.AddNew("merge "+filepath.Base(kvFilePath), 1)
 	defer ps.Delete(p)
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
 
 	var cp CursorHeap
 	heap.Init(&cp)
@@ -503,11 +500,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 			keyFileStartTxNum, keyFileEndTxNum = lastFileStartTxNum, lastFileEndTxNum
 		}
 
-		select {
-		case <-logEvery.C:
-			log.Trace(fmt.Sprintf("[agg.merge] progress: %s, %x", kvFile.FileName(), keyBuf))
-		default:
-		}
+		p.Processed.Add(1)
 	}
 	if keyBuf != nil {
 		if vt != nil {

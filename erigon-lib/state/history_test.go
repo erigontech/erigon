@@ -178,8 +178,6 @@ func TestHistoryCollationBuild(t *testing.T) {
 	t.Parallel()
 
 	logger := log.New()
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
 	ctx := context.Background()
 
 	test := func(t *testing.T, h *History, db kv.RwDB) {
