@@ -244,6 +244,7 @@ func CreateMetaInfo(info *metainfo.Info, mi *metainfo.MetaInfo) (*metainfo.MetaI
 		}
 		mi = &metainfo.MetaInfo{
 			CreationDate: time.Now().Unix(),
+			// TODO: Differentiate direct web source vs generated locally.
 			CreatedBy:    "erigon",
 			InfoBytes:    infoBytes,
 			AnnounceList: Trackers,
