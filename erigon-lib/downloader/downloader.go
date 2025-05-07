@@ -357,43 +357,6 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 	return d, nil
 }
 
-func fileHashBytes(ctx context.Context, fileInfo snaptype.FileInfo, stats *AggStats, statsLock *sync.RWMutex) ([]byte, error) {
-	exists, err := dir.FileExist(fileInfo.Path)
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
-		return nil, os.ErrNotExist
-	}
-
-	defer func(t time.Time) {
-		statsLock.Lock()
-		defer statsLock.Unlock()
-		stats.LocalFileHashes++
-		stats.LocalFileHashTime += time.Since(t)
-	}(time.Now())
-
-	info := &metainfo.Info{PieceLength: downloadercfg.DefaultPieceSize, Name: fileInfo.Name()}
-
-	if err := info.BuildFromFilePath(fileInfo.Path); err != nil {
-		return nil, fmt.Errorf("can't get local hash for %s: %w", fileInfo.Name(), err)
-	}
-
-	meta, err := CreateMetaInfo(info, nil)
-
-	if err != nil {
-		return nil, fmt.Errorf("can't get local hash for %s: %w", fileInfo.Name(), err)
-	}
-
-	spec, err := torrent.TorrentSpecFromMetaInfoErr(meta)
-
-	if err != nil {
-		return nil, fmt.Errorf("can't get local hash for %s: %w", fileInfo.Name(), err)
-	}
-
-	return spec.InfoHash.Bytes(), nil
-}
-
 func (d *Downloader) MainLoopInBackground(silent bool) {
 	d.wg.Add(1)
 	go func() {
@@ -404,14 +367,6 @@ func (d *Downloader) MainLoopInBackground(silent bool) {
 			}
 		}
 	}()
-}
-
-type downloadStatus struct {
-	name     string
-	length   int64
-	infoHash infohash.T
-	spec     *torrent.TorrentSpec
-	err      error
 }
 
 type seedHash struct {
@@ -1166,56 +1121,6 @@ func SeedableFiles(dirs datadir.Dirs, chainName string, all bool) ([]string, err
 	}
 	files = append(append(append(append(append(files, l1...), l2...), l3...), l4...), l5...)
 	return files, nil
-}
-
-const ParallelVerifyFiles = 4 // keep it small, to allow big `PieceHashersPerTorrent`. More `PieceHashersPerTorrent` - faster handling of big files.
-
-func (d *Downloader) addTorrentFilesFromDisk(logProgress bool) error {
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
-
-	eg, ctx := errgroup.WithContext(d.ctx)
-	eg.SetLimit(ParallelVerifyFiles)
-
-	files, err := AllTorrentSpecs(d.cfg.Dirs, d.torrentFS)
-	if err != nil {
-		return err
-	}
-
-	// reduce mutex contention inside torrentClient - by enabling in/out peers connection after adding all files
-	for _, ts := range files {
-		ts.Trackers = nil
-		ts.DisallowDataDownload = true
-	}
-	defer func() {
-		tl := d.torrentClient.Torrents()
-		for _, t := range tl {
-			t.AllowDataUpload()
-			t.AddTrackers(Trackers)
-		}
-	}()
-
-	for i, ts := range files {
-		eg.Go(func() error {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			_, _, err := d.addTorrentFile(ts)
-			if err != nil {
-				return err
-			}
-			// TODO: This logging belongs *outside* this goroutine.
-			select {
-			case <-logEvery.C:
-				if !logProgress {
-					log.Info("[snapshots] Adding .torrent files", "progress", fmt.Sprintf("%d/%d", i, len(files)))
-				}
-			default:
-			}
-			return nil
-		})
-	}
-	return eg.Wait()
 }
 
 func (d *Downloader) BuildTorrentFilesIfNeed(ctx context.Context, chain string, ignore snapcfg.Preverified) error {
