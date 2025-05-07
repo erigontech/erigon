@@ -37,6 +37,8 @@ func (br *BlockRetire) dbHasEnoughDataForBorRetire(ctx context.Context) (bool, e
 }
 
 func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error, onDelete func(l []string) error) (bool, error) {
+	log.Warn("[dbg] retireBorBlocks", "minBlockNum", minBlockNum, "maxBlockNum", maxBlockNum)
+
 	select {
 	case <-ctx.Done():
 		return false, ctx.Err()
