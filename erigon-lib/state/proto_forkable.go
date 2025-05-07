@@ -3,6 +3,8 @@ package state
 import (
 	"context"
 	"fmt"
+	"os"
+	"path"
 	"sort"
 
 	"github.com/erigontech/erigon-lib/common/background"
@@ -69,7 +71,7 @@ func (a *ProtoForkable) IntegrateDirtyFiles2(files []FilesItem) {
 //  1. typically this would be used to built a single step or "minimum sized snapshot", but can
 //     be used to build bigger files too.
 //  2. The caller is responsible for ensuring that data is available in db to freeze.
-func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.RoDB, ps *background.ProgressSet) (builtFile *filesItem, built bool, err error) {
+func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.RoDB, compressionWorkers int, ps *background.ProgressSet) (builtFile *filesItem, built bool, err error) {
 	log.Debug("freezing %s from %d to %d", a.a.Name(), from, to)
 	calcFrom, calcTo := from, to
 	var canFreeze bool
@@ -81,26 +83,29 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 
 	log.Debug("freezing %s from %d to %d", a.a.Name(), calcFrom, calcTo)
 	path := a.parser.DataFile(snaptype.V1_0, calcFrom, calcTo)
-	sn, err := seg.NewCompressor(ctx, "Snapshot "+a.a.Name(), path, a.a.Dirs().Tmp, seg.DefaultCfg, log.LvlTrace, a.logger)
+	segCfg := seg.DefaultCfg
+	segCfg.Workers = compressionWorkers
+	sn, err := seg.NewCompressor(ctx, "Snapshot "+a.a.Name(), path, a.a.Dirs().Tmp, segCfg, log.LvlTrace, a.logger)
 	if err != nil {
 		return nil, false, err
 	}
 	defer sn.Close()
-	compress := a.isCompressionUsed(calcFrom, calcTo)
+	// TODO: fsync params?
 
 	{
-		if err = a.freezer.Freeze(ctx, calcFrom, calcTo, func(values []byte) error {
+		compress := a.isCompressionUsed(calcFrom, calcTo)
+		var addWordFn func(values []byte) error
+		if compress {
 			// https://github.com/erigontech/erigon/pull/11222 -- decision taken here
 			// is that 1k and 10k files will be uncompressed, but 10k files also merged
 			// and not built off db, so following decision is okay:
 			// AddWord -- compressed -- slowbuilds (merge etc.)
 			// AddUncompressedWord -- uncompressed -- fast builds
-			if compress {
-				return sn.AddWord(values)
-			} else {
-				return sn.AddUncompressedWord(values)
-			}
-		}, db); err != nil {
+			addWordFn = sn.AddWord
+		} else {
+			addWordFn = sn.AddUncompressedWord
+		}
+		if err = a.freezer.Freeze(ctx, calcFrom, calcTo, addWordFn, db); err != nil {
 			return nil, false, err
 		}
 	}
@@ -126,21 +131,39 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 	df := newFilesItemWithSnapConfig(uint64(calcFrom), uint64(calcTo), cfg)
 	df.decompressor = valuesDecomp
 
-	//indexes := make([]*recsplit.Index, len(a.builders))
-	for _, ib := range a.builders {
-		p := &background.Progress{}
-		ps.Add(p)
-		recsplitIdx, err := ib.Build(ctx, calcFrom, calcTo, p)
-		if err != nil {
-			return nil, false, err
-		}
-
-		//indexes[i] = recsplitIdx
-		// TODO: add support for multiple indexes in filesItem.
-
-		df.index = recsplitIdx
+	indexes, err := a.BuildIndexes(ctx, calcFrom, calcTo, ps)
+	if err != nil {
+		return nil, false, err
 	}
+
+	// TODO: add support for multiple indexes in filesItem.
+	df.index = indexes[0]
 	return df, true, nil
+}
+
+func (a *ProtoForkable) BuildIndexes(ctx context.Context, from, to RootNum, ps *background.ProgressSet) (indexes []*recsplit.Index, err error) {
+	closeFiles := true
+	defer func() {
+		if closeFiles {
+			for _, index := range indexes {
+				index.Close()
+				_ = os.Remove(index.FilePath())
+			}
+		}
+	}()
+	for i, ib := range a.builders {
+		filename := path.Base(a.snaps.schema.AccessorIdxFile(snaptype.V1_0, from, to, uint64(i)))
+		p := ps.AddNew(fmt.Sprintf("build_index_%s", filename), 1)
+		defer ps.Delete(p)
+		recsplitIdx, err := ib.Build(ctx, from, to, p)
+		if err != nil {
+			return indexes, err
+		}
+		indexes = append(indexes, recsplitIdx)
+
+		ps.Delete(p)
+	}
+	closeFiles = false
 }
 
 func (a *ProtoForkable) isCompressionUsed(from, to RootNum) bool {

@@ -413,6 +413,18 @@ func TestMergedFileGet(t *testing.T) {
 	require.Equal(t, 2, len(bodyItems))
 }
 
+func TestRedundantMerge(t *testing.T) {
+	// 1. 
+	// we use visibleFiles to merge files
+	// it's possible that the merge process outputs
+	// a file which was already present/created.
+
+
+	// 2. panic handling --
+	// it's there in PRotoForkable#MergeFiles (it gives exact info about files which were being merged)
+	// 
+}
+
 func setup(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
 	tb.Helper()
 	if runtime.GOOS == "windows" {

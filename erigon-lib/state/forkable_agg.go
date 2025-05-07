@@ -207,7 +207,7 @@ func (r *ForkableAgg) mergeLoopStep(ctx context.Context) (somethingMerged bool, 
 		}
 	}()
 
-	mergeFn := func(ap ForkableFilesTxI, repo *SnapshotRepo, appending *[]*filesItem) {
+	mergeFn := func(proto *ProtoForkable, ap ForkableFilesTxI, repo *SnapshotRepo, appending *[]*filesItem) {
 		vfs := ap.Files()
 		if len(vfs) == 0 {
 			return
@@ -244,7 +244,7 @@ func (r *ForkableAgg) mergeLoopStep(ctx context.Context) (somethingMerged bool, 
 
 		// start merging...
 		g.Go(func() (err error) {
-			mergedFile, err := mergeForkableFiles(subset)
+			mergedFile, err := proto.MergeFiles(ctx, subset, r.compressWorkers, r.ps)
 			if err != nil {
 				return err
 			}
@@ -254,13 +254,13 @@ func (r *ForkableAgg) mergeLoopStep(ctx context.Context) (somethingMerged bool, 
 	}
 
 	for i, ap := range aggTx.marked {
-		mergeFn(ap.DebugFiles(), r.marked[i].Repo(), &mf.marked)
+		mergeFn(r.marked[i].ProtoForkable, ap.DebugFiles(), r.marked[i].Repo(), &mf.marked)
 	}
 	for i, ap := range aggTx.unmarked {
-		mergeFn(ap.DebugFiles(), r.unmarked[i].Repo(), &mf.unmarked)
+		mergeFn(r.unmarked[i].ProtoForkable, ap.DebugFiles(), r.unmarked[i].Repo(), &mf.unmarked)
 	}
 	for i, ap := range aggTx.buffered {
-		mergeFn(ap.DebugFiles(), r.buffered[i].Repo(), &mf.buffered)
+		mergeFn(r.buffered[i].ProtoForkable, ap.DebugFiles(), r.buffered[i].Repo(), &mf.buffered)
 	}
 
 	if err := g.Wait(); err != nil {
@@ -271,9 +271,13 @@ func (r *ForkableAgg) mergeLoopStep(ctx context.Context) (somethingMerged bool, 
 	closeFiles = false
 	r.logger.Debug("[fork_agg] merge", "marked", len(mf.marked), "unmarked", len(mf.unmarked), "buffered", len(mf.buffered))
 
+	if len(mf.marked)+len(mf.unmarked)+len(mf.buffered) == 0 {
+		return false, nil
+	}
+
 	// TODO: integrate
 	r.IntegrateMergeFiles(&mf)
-
+	return true, nil
 }
 
 // buildFile builds a single file
@@ -335,7 +339,7 @@ func (r *ForkableAgg) buildFile(ctx context.Context, to RootNum) (built bool, er
 				return nil
 			}
 
-			df, built, err := p.BuildFile(ctx2, fromRootNum, to, r.db, r.ps)
+			df, built, err := p.BuildFile(ctx2, fromRootNum, to, r.db, r.compressWorkers, r.ps)
 			if err != nil {
 				return err
 			}

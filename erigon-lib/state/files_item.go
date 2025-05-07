@@ -377,6 +377,9 @@ func (files visibleFiles) String(stepSize uint64) string {
 	}
 	return strings.Join(res, ",")
 }
+func (files visibleFiles) Len() int {
+	return len(files)
+}
 
 // fileItemsWithMissedAccessors returns list of files with missed accessors
 // here "accessors" are generated dynamically by `accessorsFor`
