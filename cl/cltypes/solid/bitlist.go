@@ -167,23 +167,6 @@ func (u *BitList) addMsb() int {
 	return byteLen
 }
 
-func (u *BitList) SetOnBit(bitIndex int) {
-	if bitIndex >= u.c {
-		return
-	}
-	// remove the last on bit if necessary
-	u.removeMsb()
-	// expand the bitlist if necessary
-	for len(u.u)*8 <= bitIndex {
-		u.u = append(u.u, 0)
-	}
-	// set the bit
-	u.u[bitIndex/8] |= 1 << uint(bitIndex%8)
-	// set last bit
-	byteLen := u.addMsb()
-	u.l = byteLen
-}
-
 // Length gives us the length of the bitlist, just like a roll call tells us how many Rangers there are.
 func (u *BitList) Length() int {
 	return u.l
