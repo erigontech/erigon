@@ -48,7 +48,9 @@ type InvertedIdxStreamFiles struct {
 	hasNext bool
 	err     error
 
-	ef *eliasfano32.EliasFano
+	ef        *eliasfano32.EliasFano
+	accessors Accessors
+	ii        *InvertedIndexRoTx
 }
 
 func (it *InvertedIdxStreamFiles) Close() {
@@ -91,27 +93,44 @@ func (it *InvertedIdxStreamFiles) advanceInFiles() {
 			}
 			item := it.stack[len(it.stack)-1]
 			it.stack = it.stack[:len(it.stack)-1]
-			offset, ok := item.reader.TwoLayerLookup(it.key)
-			if !ok {
-				continue
+			var offset uint64
+			var ok bool
+			if it.accessors.Has(AccessorExistence) {
+				hi, lo := it.ii.hashKey(it.key)
+				if item.src.existence != nil {
+					ok = item.src.existence.ContainsHash(hi)
+					if !ok {
+						continue
+					}
+				}
+				offset, ok = item.reader.LookupHash(hi, lo)
+				if !ok {
+					continue
+				}
+			} else {
+				offset, ok = item.reader.TwoLayerLookup(it.key)
+				if !ok {
+					continue
+				}
 			}
 			g := item.getter
 			g.Reset(offset)
 			k, _ := g.NextUncompressed()
-			if bytes.Equal(k, it.key) {
-				eliasVal, _ := g.NextUncompressed()
-				it.ef.Reset(eliasVal)
-				var efiter *eliasfano32.EliasFanoIter
-				if it.orderAscend {
-					efiter = it.ef.Iterator()
-				} else {
-					efiter = it.ef.ReverseIterator()
-				}
-				if it.startTxNum > 0 {
-					efiter.Seek(uint64(it.startTxNum))
-				}
-				it.efIt = efiter
+			if !bytes.Equal(k, it.key) { // handle MPH false-positives
+				continue
 			}
+			eliasVal, _ := g.NextUncompressed()
+			it.ef.Reset(eliasVal)
+			var efiter *eliasfano32.EliasFanoIter
+			if it.orderAscend {
+				efiter = it.ef.Iterator()
+			} else {
+				efiter = it.ef.ReverseIterator()
+			}
+			if it.startTxNum > 0 {
+				efiter.Seek(uint64(it.startTxNum))
+			}
+			it.efIt = efiter
 		}
 
 		//Asc:  [from, to) AND from < to

@@ -14,6 +14,7 @@ func InitSchemas() {
 	Schema.AccountsDomain.hist.version.AccessorVI = snaptype.V1_0
 	Schema.AccountsDomain.hist.iiCfg.version.DataEF = snaptype.V1_0
 	Schema.AccountsDomain.hist.iiCfg.version.AccessorEFI = snaptype.V1_0
+	Schema.AccountsDomain.hist.iiCfg.version.AccessorEFEI = snaptype.V1_0
 
 	Schema.StorageDomain.version.DataKV = snaptype.V1_0
 	Schema.StorageDomain.version.AccessorBT = snaptype.V1_0
@@ -22,6 +23,7 @@ func InitSchemas() {
 	Schema.StorageDomain.hist.version.AccessorVI = snaptype.V1_0
 	Schema.StorageDomain.hist.iiCfg.version.DataEF = snaptype.V1_0
 	Schema.StorageDomain.hist.iiCfg.version.AccessorEFI = snaptype.V1_0
+	Schema.StorageDomain.hist.iiCfg.version.AccessorEFEI = snaptype.V1_0
 
 	Schema.CodeDomain.version.DataKV = snaptype.V1_0
 	Schema.CodeDomain.version.AccessorBT = snaptype.V1_0
@@ -30,13 +32,16 @@ func InitSchemas() {
 	Schema.CodeDomain.hist.version.AccessorVI = snaptype.V1_0
 	Schema.CodeDomain.hist.iiCfg.version.DataEF = snaptype.V1_0
 	Schema.CodeDomain.hist.iiCfg.version.AccessorEFI = snaptype.V1_0
+	Schema.CodeDomain.hist.iiCfg.version.AccessorEFEI = snaptype.V1_0
 
 	Schema.CommitmentDomain.version.DataKV = snaptype.V1_0
 	Schema.CommitmentDomain.version.AccessorKVI = snaptype.V1_0
+	Schema.CommitmentDomain.version.AccessorKVEI = snaptype.V1_0
 	Schema.CommitmentDomain.hist.version.DataV = snaptype.V1_0
 	Schema.CommitmentDomain.hist.version.AccessorVI = snaptype.V1_0
 	Schema.CommitmentDomain.hist.iiCfg.version.DataEF = snaptype.V1_0
 	Schema.CommitmentDomain.hist.iiCfg.version.AccessorEFI = snaptype.V1_0
+	Schema.CommitmentDomain.hist.iiCfg.version.AccessorEFEI = snaptype.V1_0
 	commitmentDomainVersion = Schema.CommitmentDomain.version.DataKV
 
 	Schema.ReceiptDomain.version.DataKV = snaptype.V1_0
@@ -46,6 +51,7 @@ func InitSchemas() {
 	Schema.ReceiptDomain.hist.version.AccessorVI = snaptype.V1_0
 	Schema.ReceiptDomain.hist.iiCfg.version.DataEF = snaptype.V1_0
 	Schema.ReceiptDomain.hist.iiCfg.version.AccessorEFI = snaptype.V1_0
+	Schema.ReceiptDomain.hist.iiCfg.version.AccessorEFEI = snaptype.V1_0
 
 	Schema.RCacheDomain.version.DataKV = snaptype.V1_0
 	Schema.RCacheDomain.version.AccessorKVI = snaptype.V1_0
@@ -53,18 +59,23 @@ func InitSchemas() {
 	Schema.RCacheDomain.hist.version.AccessorVI = snaptype.V1_0
 	Schema.RCacheDomain.hist.iiCfg.version.DataEF = snaptype.V1_0
 	Schema.RCacheDomain.hist.iiCfg.version.AccessorEFI = snaptype.V1_0
+	Schema.RCacheDomain.hist.iiCfg.version.AccessorEFEI = snaptype.V1_0
 
 	Schema.LogAddrIdx.version.DataEF = snaptype.V1_0
 	Schema.LogAddrIdx.version.AccessorEFI = snaptype.V1_0
+	Schema.LogAddrIdx.version.AccessorEFEI = snaptype.V1_0
 
 	Schema.LogTopicIdx.version.DataEF = snaptype.V1_0
 	Schema.LogTopicIdx.version.AccessorEFI = snaptype.V1_0
+	Schema.LogTopicIdx.version.AccessorEFEI = snaptype.V1_0
 
 	Schema.TracesFromIdx.version.DataEF = snaptype.V1_0
 	Schema.TracesFromIdx.version.AccessorEFI = snaptype.V1_0
+	Schema.TracesFromIdx.version.AccessorEFEI = snaptype.V1_0
 
 	Schema.TracesToIdx.version.DataEF = snaptype.V1_0
 	Schema.TracesToIdx.version.AccessorEFI = snaptype.V1_0
+	Schema.TracesToIdx.version.AccessorEFEI = snaptype.V1_0
 }
 
 type DomainVersionTypes struct {
@@ -80,8 +91,9 @@ type HistVersionTypes struct {
 }
 
 type IIVersionTypes struct {
-	DataEF      snaptype.Version
-	AccessorEFI snaptype.Version
+	DataEF       snaptype.Version
+	AccessorEFI  snaptype.Version
+	AccessorEFEI snaptype.Version
 }
 
 type VersionTypes struct {
