@@ -1251,7 +1251,7 @@ func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep uint
 	}
 
 	if d.Accessors.Has(AccessorExistence) {
-		if err := buildExistanceFilter(ctx, data, d.Compression, d.kvExistenceIdxFilePath(fromStep, toStep), *cfg.Salt, ps); err != nil {
+		if err := buildExistanceFilter(ctx, data, d.Compression, d.kvExistenceIdxFilePath(fromStep, toStep), *cfg.Salt, ps, d.noFsync); err != nil {
 			return err
 		}
 	}
@@ -1381,7 +1381,7 @@ func buildHashMapAccessor(ctx context.Context, d *seg.Decompressor, compressed s
 	return nil
 }
 
-func buildExistanceFilter(ctx context.Context, d *seg.Decompressor, compressed seg.FileCompression, idxPath string, salt uint32, ps *background.ProgressSet) error {
+func buildExistanceFilter(ctx context.Context, d *seg.Decompressor, compressed seg.FileCompression, idxPath string, salt uint32, ps *background.ProgressSet, noFsync bool) error {
 	_, fileName := filepath.Split(idxPath)
 	count := d.Count() / 2
 	p := ps.AddNew(fileName, uint64(count))
@@ -1396,17 +1396,15 @@ func buildExistanceFilter(ctx context.Context, d *seg.Decompressor, compressed s
 		return err
 	}
 	defer existenceFilter.Close()
-	//if noFsync {
-	//	existenceFilter.DisableFsync()
-	//}
+	if noFsync {
+		existenceFilter.DisableFsync()
+	}
 
 	key := make([]byte, 0, 64)
 	for g.HasNext() {
 		key, _ = g.Next(key[:0])
 		hi, _ := murmur3.Sum128WithSeed(key, salt)
-		if existenceFilter != nil {
-			existenceFilter.AddHash(hi)
-		}
+		existenceFilter.AddHash(hi)
 		_, _ = g.Skip()
 
 		p.Processed.Add(1)
