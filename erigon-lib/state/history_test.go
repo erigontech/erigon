@@ -25,6 +25,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -56,6 +57,9 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	cfg := Schema.AccountsDomain
 
 	cfg.hist.iiCfg.dirs = dirs
+	if cfg.hist.iiCfg.salt == nil {
+		cfg.hist.iiCfg.salt = new(atomic.Pointer[uint32])
+	}
 	cfg.hist.iiCfg.salt.Store(&salt)
 
 	cfg.hist.historyLargeValues = largeValues

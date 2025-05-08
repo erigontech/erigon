@@ -95,63 +95,61 @@ type Versioned interface {
 
 func (s *SchemaGen) GetVersioned(name string) (Versioned, error) {
 	switch name {
-	case "accounts":
-		return &s.AccountsDomain, nil
-	case "storage":
-		return &s.StorageDomain, nil
-	case "code":
-		return &s.CodeDomain, nil
-	case "commitment":
-		return &s.CommitmentDomain, nil
-	case "receipt":
-		return &s.ReceiptDomain, nil
-	case "rcache":
-		return &s.RCacheDomain, nil
-	case "logtopics":
-		return &s.LogTopicIdx, nil
-	case "logaddrs":
-		return &s.LogAddrIdx, nil
-	case "tracesfrom":
-		return &s.TracesFromIdx, nil
-	case "tracesto":
-		return &s.TracesToIdx, nil
+	case "accounts", "storage", "code", "commitment", "receipt", "rcache":
+		domain, err := kv.String2Domain(name)
+		if err != nil {
+			return nil, err
+		}
+		return s.GetDomainCfg(domain), nil
+	case "logtopics", "logaddrs", "tracesfrom", "tracesto":
+		ii, err := kv.String2InvertedIdx(name)
+		if err != nil {
+			return nil, err
+		}
+		return s.GetIICfg(ii), nil
 	default:
 		return nil, fmt.Errorf("unknown schema version '%s'", name)
 	}
 }
 
 func (s *SchemaGen) GetDomainCfg(name kv.Domain) domainCfg {
+	var v domainCfg
 	switch name {
 	case kv.AccountsDomain:
-		return s.AccountsDomain
+		v = s.AccountsDomain
 	case kv.StorageDomain:
-		return s.StorageDomain
+		v = s.StorageDomain
 	case kv.CodeDomain:
-		return s.CodeDomain
+		v = s.CodeDomain
 	case kv.CommitmentDomain:
-		return s.CommitmentDomain
+		v = s.CommitmentDomain
 	case kv.ReceiptDomain:
-		return s.ReceiptDomain
+		v = s.ReceiptDomain
 	case kv.RCacheDomain:
-		return s.RCacheDomain
+		v = s.RCacheDomain
 	default:
-		return domainCfg{}
+		v = domainCfg{}
 	}
+	v.hist.iiCfg.salt = new(atomic.Pointer[uint32])
+	return v
 }
 
 func (s *SchemaGen) GetIICfg(name kv.InvertedIdx) iiCfg {
+	var v iiCfg
 	switch name {
 	case kv.LogAddrIdx:
-		return s.LogAddrIdx
+		v = s.LogAddrIdx
 	case kv.LogTopicIdx:
-		return s.LogTopicIdx
+		v = s.LogTopicIdx
 	case kv.TracesFromIdx:
-		return s.TracesFromIdx
+		v = s.TracesFromIdx
 	case kv.TracesToIdx:
-		return s.TracesToIdx
+		v = s.TracesToIdx
 	default:
-		return iiCfg{}
+		v = iiCfg{}
 	}
+	v.salt = new(atomic.Pointer[uint32])
+	return v
 }
 
 var ExperimentalConcurrentCommitment = false // set true to use concurrent commitment by default
@@ -174,7 +172,6 @@ var Schema = SchemaGen{
 			iiCfg: iiCfg{
 				filenameBase: kv.AccountsDomain.String(), keysTable: kv.TblAccountHistoryKeys, valuesTable: kv.TblAccountIdx,
 				CompressorCfg: seg.DefaultCfg,
-				salt:          new(atomic.Pointer[uint32]),
 			},
 		},
 	},
@@ -194,7 +191,6 @@ var Schema = SchemaGen{
 			iiCfg: iiCfg{
 				filenameBase: kv.StorageDomain.String(), keysTable: kv.TblStorageHistoryKeys, valuesTable: kv.TblStorageIdx,
 				CompressorCfg: seg.DefaultCfg,
-				salt:          new(atomic.Pointer[uint32]),
 			},
 		},
 	},
@@ -215,7 +211,6 @@ var Schema = SchemaGen{
 			iiCfg: iiCfg{
 				filenameBase: kv.CodeDomain.String(), keysTable: kv.TblCodeHistoryKeys, valuesTable: kv.TblCodeIdx,
 				CompressorCfg: seg.DefaultCfg,
-				salt:          new(atomic.Pointer[uint32]),
 			},
 		},
 	},
@@ -240,7 +235,6 @@ var Schema = SchemaGen{
 			iiCfg: iiCfg{
 				filenameBase: kv.CommitmentDomain.String(), keysTable: kv.TblCommitmentHistoryKeys, valuesTable: kv.TblCommitmentIdx,
 				CompressorCfg: seg.DefaultCfg,
-				salt:          new(atomic.Pointer[uint32]),
 			},
 		},
 	},
@@ -261,7 +255,6 @@ var Schema = SchemaGen{
 			iiCfg: iiCfg{
 				filenameBase: kv.ReceiptDomain.String(), keysTable: kv.TblReceiptHistoryKeys, valuesTable: kv.TblReceiptIdx,
 				CompressorCfg: seg.DefaultCfg,
-				salt:          new(atomic.Pointer[uint32]),
 			},
 		},
 	},
@@ -286,7 +279,6 @@ var Schema = SchemaGen{
 				disable:      true, // disable everything by default
 				filenameBase: kv.RCacheDomain.String(), keysTable: kv.TblRCacheHistoryKeys, valuesTable: kv.TblRCacheIdx,
 				CompressorCfg: seg.DefaultCfg,
-				salt:          new(atomic.Pointer[uint32]),
 			},
 		},
 	},
@@ -296,28 +288,24 @@ var Schema = SchemaGen{
 
 		Compression: seg.CompressNone,
 		name:        kv.LogAddrIdx,
-		salt:        new(atomic.Pointer[uint32]),
 	},
 	LogTopicIdx: iiCfg{
 		filenameBase: kv.FileLogTopicsIdx, keysTable: kv.TblLogTopicsKeys, valuesTable: kv.TblLogTopicsIdx,
 
 		Compression: seg.CompressNone,
 		name:        kv.LogTopicIdx,
-		salt:        new(atomic.Pointer[uint32]),
 	},
 	TracesFromIdx: iiCfg{
 		filenameBase: kv.FileTracesFromIdx, keysTable: kv.TblTracesFromKeys, valuesTable: kv.TblTracesFromIdx,
 
 		Compression: seg.CompressNone,
 		name:        kv.TracesFromIdx,
-		salt:        new(atomic.Pointer[uint32]),
 	},
 	TracesToIdx: iiCfg{
 		filenameBase: kv.FileTracesToIdx, keysTable: kv.TblTracesToKeys, valuesTable: kv.TblTracesToIdx,
 
 		Compression: seg.CompressNone,
 		name:        kv.TracesToIdx,
-		salt:        new(atomic.Pointer[uint32]),
 	},
 }
 

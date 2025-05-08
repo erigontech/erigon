@@ -31,6 +31,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -78,6 +79,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	dirs := datadir2.New(t.TempDir())
 	cfg := Schema.AccountsDomain
 	cfg.crossDomainIntegrity = nil //no other domains
+	cfg.hist.iiCfg.salt = new(atomic.Pointer[uint32])
 
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
@@ -1050,6 +1052,9 @@ func emptyTestDomain(aggStep uint64) *Domain {
 	cfg.crossDomainIntegrity = nil
 
 	salt := uint32(1)
+	if cfg.hist.iiCfg.salt == nil {
+		cfg.hist.iiCfg.salt = new(atomic.Pointer[uint32])
+	}
 	cfg.hist.iiCfg.salt.Store(&salt)
 	cfg.hist.iiCfg.dirs = datadir2.New(os.TempDir())
 	cfg.hist.iiCfg.name = kv.InvertedIdx(0)
