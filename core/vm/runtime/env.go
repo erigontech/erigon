@@ -20,7 +20,6 @@
 package runtime
 
 import (
-	"fmt"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
@@ -31,9 +30,6 @@ func NewEnv(cfg *Config) *vm.EVM {
 	txContext := evmtypes.TxContext{
 		Origin:   cfg.Origin,
 		GasPrice: cfg.GasPrice,
-
-		//BlobHashes: cfg.B
-		//BlobFee: cfg.BaseFee
 	}
 
 	blockContext := evmtypes.BlockContext{
@@ -47,7 +43,5 @@ func NewEnv(cfg *Config) *vm.EVM {
 		GasLimit:    cfg.GasLimit,
 		BaseFee:     cfg.BaseFee,
 	}
-	fmt.Printf("NEW_ENV: %v\n", blockContext)
-
 	return vm.NewEVM(blockContext, txContext, cfg.State, cfg.ChainConfig, cfg.EVMConfig)
 }

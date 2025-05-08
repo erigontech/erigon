@@ -178,7 +178,6 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	if overflow {
 		return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
 	}
-
 	// compute blob fee for eip-4844 data blobs if any
 	blobGasVal := new(uint256.Int)
 	if st.evm.ChainRules().IsCancun && !st.evm.ChainRules().IsArbitrum {
