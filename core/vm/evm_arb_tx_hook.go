@@ -1,12 +1,11 @@
 package vm
 
 import (
-	"math/big"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/holiman/uint256"
 )
 
 // Depth returns the current depth
@@ -37,7 +36,7 @@ type TxProcessingHook interface {
 	ScheduledTxes() types.Transactions
 	L1BlockNumber(blockCtx evmtypes.BlockContext) (uint64, error)
 	L1BlockHash(blockCtx evmtypes.BlockContext, l1BlocKNumber uint64) (common.Hash, error)
-	GasPriceOp(evm *EVM) *big.Int
+	GasPriceOp(evm *EVM) *uint256.Int
 	FillReceiptInfo(receipt *types.Receipt)
 	MsgIsNonMutating() bool
 	ExecuteWASM(scope *ScopeContext, input []byte, interpreter *EVMInterpreter) ([]byte, error)
@@ -83,8 +82,8 @@ func (p DefaultTxProcessor) L1BlockHash(blockCtx evmtypes.BlockContext, l1BlocKN
 	return blockCtx.GetHash(l1BlocKNumber), nil
 }
 
-func (p DefaultTxProcessor) GasPriceOp(evm *EVM) *big.Int {
-	return evm.GasPrice.ToBig()
+func (p DefaultTxProcessor) GasPriceOp(evm *EVM) *uint256.Int {
+	return p.evm.GasPrice
 }
 
 func (p DefaultTxProcessor) FillReceiptInfo(*types.Receipt) {}
