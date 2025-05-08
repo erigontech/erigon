@@ -213,13 +213,13 @@ define run_suite
     printf "\n"; \
     echo "-----------   Results for $1-$2    -----------"; \
     echo "Tests: $$tests, Failed: $$failed"; \
-    printf "\n\n============================================================"
+    printf "\n\n============================================================\n"
 endef
 
 hive-local:
 	docker build -t "test/erigon:$(SHORT_COMMIT)" . 
 	rm -rf "hive-local-$(SHORT_COMMIT)" && mkdir "hive-local-$(SHORT_COMMIT)"
-	cd "hive-local-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
+	cd "hive-local-$(SHORT_COMMIT)" && git clone https://github.com/erigontech/hive
 
 	cd "hive-local-$(SHORT_COMMIT)/hive" && \
 	sed -i "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
@@ -234,16 +234,42 @@ hive-local:
 	cd "hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,rpc-compat,)
 
 eest-hive:
+	@if [ ! -d "temp" ]; then mkdir temp; fi
 	docker build -t "test/erigon:$(SHORT_COMMIT)" . 
-	rm -rf "eest-hive-$(SHORT_COMMIT)" && mkdir "eest-hive-$(SHORT_COMMIT)"
-	cd "eest-hive-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
-
-	cd "eest-hive-$(SHORT_COMMIT)/hive" && \
+	rm -rf "temp/eest-hive-$(SHORT_COMMIT)" && mkdir "temp/eest-hive-$(SHORT_COMMIT)"
+	cd "temp/eest-hive-$(SHORT_COMMIT)" && git clone https://github.com/erigontech/hive
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && \
 	sed -i "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
 	sed -i "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile
-	cd "eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
-	cd "eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eest/consume-engine,"",--sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.3.0/fixtures_develop.tar.gz)
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eest/consume-engine,"",--sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.4.0/fixtures_develop.tar.gz)
+
+# define kurtosis assertoor runner
+define run-kurtosis-assertoor
+	docker build -t test/erigon:current . ; \
+	kurtosis enclave rm -f makefile-kurtosis-testnet ; \
+	kurtosis run --enclave makefile-kurtosis-testnet github.com/ethpandaops/ethereum-package --args-file $(1) ; \
+	printf "\nTo view logs: \nkurtosis service logs makefile-kurtosis-testnet el-1-erigon-lighthouse\n"
+endef
+
+check-kurtosis:
+	@if ! command -v kurtosis >/dev/null 2>&1; then \
+		echo "kurtosis command not found in PATH, please source it in PATH. If Kurtosis is not installed, install it by visiting https://docs.kurtosis.com/install/"; \
+		exit 1; \
+	fi; \
+
+kurtosis-pectra-assertoor:	check-kurtosis
+	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/pectra.io")
+
+kurtosis-regular-assertoor:	check-kurtosis 
+	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/regular-assertoor.io")
+
+kurtosis-cleanup:
+	@echo "Currently Running Enclaves: "
+	@kurtosis enclave ls
+	@echo "-----------------------------------\n"
+	kurtosis enclave rm -f makefile-kurtosis-testnet
 
 ## lint-deps:                         install lint dependencies
 lint-deps:

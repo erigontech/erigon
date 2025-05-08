@@ -481,7 +481,9 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	firstCycle := false
 	if _, err := e.executionPipeline.Run(e.db, wrap.TxContainer{Tx: tx}, initialCycle, firstCycle); err != nil {
 		err = fmt.Errorf("updateForkChoice: %w", err)
-		e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
+		if !errors.Is(err, context.Canceled) {
+			e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
+		}
 		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		return
 	}
