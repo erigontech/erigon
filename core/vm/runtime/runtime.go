@@ -21,6 +21,7 @@ package runtime
 
 import (
 	"context"
+	"github.com/erigontech/erigon-lib/types"
 	"math"
 	"math/big"
 	"os"
@@ -259,6 +260,10 @@ func Call(address common.Address, input []byte, cfg *Config) ([]byte, uint64, er
 	rules := vmenv.ChainRules()
 	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, &address, vm.ActivePrecompiles(rules), nil, nil)
 
+	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
+		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, common.Address{})
+	}
+
 	// Call the code with the given configuration.
 	ret, leftOverGas, err := vmenv.Call(
 		sender,
@@ -268,6 +273,10 @@ func Call(address common.Address, input []byte, cfg *Config) ([]byte, uint64, er
 		cfg.Value,
 		false, /* bailout */
 	)
+
+	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxEnd != nil {
+		cfg.EVMConfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: cfg.GasLimit - leftOverGas}, err)
+	}
 
 	return ret, leftOverGas, err
 }
