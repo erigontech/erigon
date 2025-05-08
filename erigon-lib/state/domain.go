@@ -656,7 +656,7 @@ type DomainRoTx struct {
 	visible *domainVisible
 	name    kv.Domain
 	ht      *HistoryRoTx
-	salt    uint32
+	salt    *uint32
 
 	d *Domain
 
@@ -729,7 +729,7 @@ func (d *Domain) BeginFilesRo() *DomainRoTx {
 		ht:      d.History.BeginFilesRo(),
 		visible: d._visible,
 		files:   d._visible.files,
-		salt:    *d.salt.Load(),
+		salt:    d.salt.Load(),
 	}
 }
 

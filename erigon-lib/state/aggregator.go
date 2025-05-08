@@ -180,6 +180,7 @@ func GetStateIndicesSalt(dirs datadir.Dirs, genNew bool, logger log.Logger) (sal
 			// Using nil salt for now, actual value should be injected when salt file is downloaded
 			return nil, nil
 		}
+		logger.Info("generating new salt file")
 
 		saltV := rand2.Uint32()
 		salt = &saltV

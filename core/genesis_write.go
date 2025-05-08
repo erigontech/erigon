@@ -545,7 +545,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		genesisTmpDB := mdbx.New(kv.TemporaryDB, logger).InMem(dirs.DataDir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
 		defer genesisTmpDB.Close()
 
-		salt, err := state2.GetStateIndicesSalt(dirs, true, logger) // okay to gen new salt, won't be used
+		salt, err := state2.GetStateIndicesSalt(dirs, false, logger)
 		if err != nil {
 			return err
 		}

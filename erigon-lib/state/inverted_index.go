@@ -503,7 +503,7 @@ func (ii *InvertedIndex) BeginFilesRo() *InvertedIndexRoTx {
 		visible: ii._visible,
 		files:   files,
 		name:    ii.name,
-		salt:    *ii.salt.Load(),
+		salt:    ii.salt.Load(),
 	}
 }
 func (iit *InvertedIndexRoTx) Close() {
@@ -572,14 +572,14 @@ type InvertedIndexRoTx struct {
 
 	// TODO: retrofit recent optimization in main and reenable the next line
 	// ef *multiencseq.SequenceBuilder // re-usable
-	salt uint32
+	salt *uint32
 }
 
 // hashKey - change of salt will require re-gen of indices
 func (iit *InvertedIndexRoTx) hashKey(k []byte) (uint64, uint64) {
 	// this inlinable alloc-free version, it's faster than pre-allocated `hasher` object
 	// because `hasher` object is interface and need call many methods on it
-	return murmur3.Sum128WithSeed(k, iit.salt)
+	return murmur3.Sum128WithSeed(k, *iit.salt)
 }
 
 func (iit *InvertedIndexRoTx) statelessGetter(i int) *seg.Reader {
