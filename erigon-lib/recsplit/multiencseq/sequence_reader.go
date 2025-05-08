@@ -146,17 +146,17 @@ func (s *SequenceReader) seek(v uint64) (uint64, bool) {
 	panic(fmt.Sprintf("unknown sequence encoding: %d", s.currentEnc))
 }
 
-func (s *SequenceReader) Iterator(v int) stream.U64 {
+func (s *SequenceReader) Iterator(from int) stream.U64 {
 	if s.currentEnc == SimpleEncoding {
 		it := s.sseq.Iterator()
-		if v > 0 {
-			it.Seek(uint64(v))
+		if from > 0 {
+			it.Seek(uint64(from))
 		}
 		return it
 	} else if s.currentEnc == PlainEliasFano || s.currentEnc == RebasedEliasFano {
 		it := s.ref.Iterator()
-		if v > 0 {
-			it.Seek(uint64(v))
+		if from > 0 {
+			it.Seek(uint64(from))
 		}
 		return it
 	}
