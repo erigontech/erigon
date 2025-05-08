@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"reflect"
 	"slices"
 	"strconv"
@@ -120,6 +121,17 @@ func HandleError(err error, stream jsonstream.Stream) {
 	}
 }
 
+const JsonStreamAutoCloseOnError = false
+const JsonStreamInitialBufferSize = 4096
+
+func newJsonStream(out io.Writer) jsonstream.Stream {
+	stream := jsoniter.NewStream(jsoniter.ConfigDefault, out, JsonStreamInitialBufferSize)
+	if JsonStreamAutoCloseOnError {
+		return jsonstream.NewStackStream(stream)
+	}
+	return jsonstream.NewJsoniterStream(stream)
+}
+
 func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *serviceRegistry, allowList AllowList, maxBatchConcurrency uint, traceRequests bool, logger log.Logger, rpcSlowLogThreshold time.Duration) *handler {
 	rootCtx, cancelRoot := context.WithCancel(connCtx)
 	forbiddenList := newForbiddenList()
@@ -201,8 +213,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 				}
 
 				buf := bytes.NewBuffer(nil)
-				stream := jsonstream.NewJsoniterStream(jsoniter.NewStream(jsoniter.ConfigDefault, buf, 4096))
-				// stream := jsonstream.NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, buf, 4096))
+				stream := newJsonStream(buf)
 				if res := h.handleCallMsg(cp, calls[i], stream); res != nil {
 					answersWithNils[i] = res
 				}
@@ -237,8 +248,7 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream jsonstream.Stream) {
 	h.startCallProc(func(cp *callProc) {
 		needWriteStream := false
 		if stream == nil {
-			stream = jsonstream.NewJsoniterStream(jsoniter.NewStream(jsoniter.ConfigDefault, nil, 4096))
-			// stream = jsonstream.NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, nil, 4096))
+			stream = newJsonStream(nil)
 			needWriteStream = true
 		}
 		answer := h.handleCallMsg(cp, msg, stream)
