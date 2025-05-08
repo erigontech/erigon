@@ -260,9 +260,10 @@ func runCmd(ctx *cli.Context) error {
 		Time:        new(big.Int).SetUint64(genesisConfig.Timestamp),
 		Coinbase:    genesisConfig.Coinbase,
 		BlockNumber: new(big.Int).SetUint64(genesisConfig.Number),
-		EVMConfig: vm.Config{
-			Tracer: tracer.Hooks,
-		},
+	}
+
+	if tracer != nil {
+		runtimeConfig.EVMConfig = vm.Config{Tracer: tracer.Hooks}
 	}
 
 	if cpuProfilePath := ctx.String(CPUProfileFlag.Name); cpuProfilePath != "" {
