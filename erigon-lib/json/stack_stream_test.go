@@ -152,7 +152,7 @@ func TestStackStream_ClosePendingObjects_Object(t *testing.T) {
 	// Incomplete JSON at this point
 	assert.Equal(t, `{"name":"John","age":`, string(ss.Buffer()))
 	assert.False(t, ss.IsComplete())
-	assert.Equal(t, 2, ss.GetCurrentDepth()) // Object, Field
+	assert.Equal(t, 2, ss.CurrentDepth()) // Object, Field
 
 	// Close pending objects if necessary
 	err := ss.closeAllPendingElements()
@@ -180,7 +180,7 @@ func TestStackStream_ClosePendingObjects_Array(t *testing.T) {
 	// Incomplete JSON at this point
 	assert.Equal(t, `[1,2,`, string(ss.Buffer()))
 	assert.False(t, ss.IsComplete())
-	assert.Equal(t, 2, ss.GetCurrentDepth()) // Array, Field
+	assert.Equal(t, 2, ss.CurrentDepth()) // Array, Field
 
 	// Flush closing pending objects if necessary
 	err := ss.closeAllPendingElements()
@@ -216,7 +216,7 @@ func TestStackStream_ClosePendingObjects_ComplexNested(t *testing.T) {
 	// Incomplete JSON at this point
 	assert.Equal(t, `{"person":{"name":"John","address":{"city":"New York","zip":`, string(ss.Buffer()))
 	assert.False(t, ss.IsComplete())
-	assert.Equal(t, 4, ss.GetCurrentDepth()) // Object, Object, Object, Field
+	assert.Equal(t, 4, ss.CurrentDepth()) // Object, Object, Object, Field
 
 	// Flush closing pending objects if necessary
 	err := ss.closeAllPendingElements()
@@ -253,7 +253,7 @@ func TestStackStream_ClosePendingObjects_ComplexNestedWithArray(t *testing.T) {
 	// Incomplete JSON at this point
 	assert.Equal(t, `[{"person":{"name":"John","address":{"city":"New York","zip":`, string(ss.Buffer()))
 	assert.False(t, ss.IsComplete())
-	assert.Equal(t, 5, ss.GetCurrentDepth()) // Array, Object, Object, Object, Field
+	assert.Equal(t, 5, ss.CurrentDepth()) // Array, Object, Object, Object, Field
 
 	// Flush closing pending objects if necessary
 	err := ss.closeAllPendingElements()
@@ -302,7 +302,7 @@ func TestStackStream_Reset(t *testing.T) {
 	ss.Reset(nil)
 
 	// Should be empty
-	assert.Equal(t, 0, ss.Size())
+	assert.Equal(t, 0, len(ss.Buffer()))
 	assert.True(t, ss.IsComplete())
 
 	// Write new data
@@ -323,7 +323,7 @@ func TestStackStream_GetStackSummary(t *testing.T) {
 	ss := NewStackStream(stream)
 
 	// Empty stack
-	assert.Equal(t, "Empty", ss.GetStackSummary())
+	assert.Equal(t, "Empty", ss.StackSummary())
 
 	// Add items to the stack
 	ss.WriteObjectStart()
@@ -333,7 +333,7 @@ func TestStackStream_GetStackSummary(t *testing.T) {
 	ss.WriteObjectField("name")
 
 	// Check summary
-	summary := ss.GetStackSummary()
+	summary := ss.StackSummary()
 	assert.Contains(t, summary, "Object")
 	assert.Contains(t, summary, "Field")
 	assert.Contains(t, summary, "Array")
@@ -379,7 +379,7 @@ func TestStackStream_RecoveryFromIncompleteState(t *testing.T) {
 	assert.False(t, ss.IsComplete())
 
 	// Get the current state
-	beforeState := ss.GetStackSummary()
+	beforeState := ss.StackSummary()
 	assert.Contains(t, beforeState, "Field")
 
 	// Complete the structure manually
@@ -718,7 +718,7 @@ func TestStackStream_ExtremeNesting(t *testing.T) {
 
 	// Verify the structure is complete
 	assert.True(t, ss.IsComplete())
-	assert.Equal(t, 0, ss.GetCurrentDepth())
+	assert.Equal(t, 0, ss.CurrentDepth())
 
 	// Verify the JSON is valid by parsing it back
 	var result interface{}
@@ -781,26 +781,26 @@ func TestStackStream_StackManipulationEdgeCases(t *testing.T) {
 
 	// Test 1: Popping from an empty stack should not panic
 	ss.pop(ItemObject)
-	assert.Equal(t, 0, ss.GetCurrentDepth())
+	assert.Equal(t, 0, ss.CurrentDepth())
 
 	// Test 2: Popping an item that doesn't match the top of the stack does nothing
 	ss.push(ItemArray)
 	ss.pop(ItemObject)
-	assert.Equal(t, 1, ss.GetCurrentDepth()) // Stack should still have the array
+	assert.Equal(t, 1, ss.CurrentDepth()) // Stack should still have the array
 
 	// Test 3: Multiple pushes and pops
 	ss.Reset(nil)
 	ss.push(ItemObject)
 	ss.push(ItemField)
 	ss.push(ItemComma)
-	assert.Equal(t, 3, ss.GetCurrentDepth())
+	assert.Equal(t, 3, ss.CurrentDepth())
 
 	ss.pop(ItemComma)
 	ss.pop(ItemField)
-	assert.Equal(t, 1, ss.GetCurrentDepth())
+	assert.Equal(t, 1, ss.CurrentDepth())
 
-	// Test 4: Verify stack state with GetStackSummary
-	summary := ss.GetStackSummary()
+	// Test 4: Verify stack state with StackSummary
+	summary := ss.StackSummary()
 	assert.Contains(t, summary, "Object")
 	assert.NotContains(t, summary, "Field")
 	assert.NotContains(t, summary, "Comma")
