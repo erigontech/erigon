@@ -32,7 +32,7 @@ import (
 func (e *EngineBlockDownloader) download(ctx context.Context, hashToDownload common.Hash, requestId int, block *types.Block) {
 	/* Start download process*/
 	// First we schedule the headers download process
-	if !e.scheduleHeadersDownload(requestId, hashToDownload, block.NumberU64()) {
+	if !e.scheduleHeadersDownload(requestId, hashToDownload, block.NumberU64()-1) {
 		e.logger.Warn("[EngineBlockDownloader] could not begin header download")
 		// could it be scheduled? if not nevermind.
 		e.status.Store(headerdownload.Idle)
