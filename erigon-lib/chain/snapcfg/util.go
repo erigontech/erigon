@@ -41,7 +41,7 @@ import (
 )
 
 // TODO(yperbasis) move into params/version.go
-const DefaultSnapshotGitBranch = "release/3.0"
+const DefaultSnapshotGitBranch = "release/3.0.3"
 
 var snapshotGitBranch = dbg.EnvString("SNAPS_GIT_BRANCH", DefaultSnapshotGitBranch)
 
