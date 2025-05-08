@@ -1261,9 +1261,9 @@ func (s *Ethereum) Engine() consensus.Engine {
 	return s.engine
 }
 
-func (e *Ethereum) BlockChain() core.BlockChain {
-	panic("implment blockchain return")
-}
+//func (e *Ethereum) BlockChain() core.BlockChain {
+//	panic("implment blockchain return")
+//}
 
 func (s *Ethereum) APIs() []rpc.API {
 	return s.apiList
@@ -1979,15 +1979,15 @@ func polygonSyncSentry(sentries []protosentry.SentryClient) protosentry.SentryCl
 // }
 
 // TODO
-func NewArbEthereum(
-	blockchain core.BlockChain,
-	chainDb kv.RwDB,
-) *Ethereum {
-	return &Ethereum{
-		// blockchain: blockchain,
-		// chainDb:    chainDb,
-	}
-}
+//func NewArbEthereum(
+//	blockchain core.BlockChain,
+//	chainDb kv.RwDB,
+//) *Ethereum {
+//	return &Ethereum{
+//		// blockchain: blockchain,
+//		// chainDb:    chainDb,
+//	}
+//}
 
 type engineAPISwitcher struct {
 	backend *Ethereum
