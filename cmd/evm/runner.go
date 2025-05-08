@@ -132,7 +132,7 @@ func runCmd(ctx *cli.Context) error {
 	if machineFriendlyOutput {
 		log.Root().SetHandler(log.DiscardHandler())
 	} else {
-		log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+		log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(ctx.Int(VerbosityFlag.Name)), log.StderrHandler))
 	}
 	logconfig := &logger.LogConfig{
 		DisableMemory:     ctx.Bool(DisableMemoryFlag.Name),
