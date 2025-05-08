@@ -32,6 +32,7 @@ const ArbosVersion_20 = uint64(20)
 const ArbosVersion_30 = uint64(30)
 const ArbosVersion_31 = uint64(31)
 const ArbosVersion_32 = uint64(32)
+const ArbosVersion_40 = uint64(40)
 
 const ArbosVersion_FixRedeemGas = ArbosVersion_11
 const ArbosVersion_Stylus = ArbosVersion_30

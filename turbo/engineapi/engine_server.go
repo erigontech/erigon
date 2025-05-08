@@ -258,8 +258,8 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	if (!s.config.IsCancun(header.Time, 0) && version >= clparams.DenebVersion) ||
 		(s.config.IsCancun(header.Time, 0) && version < clparams.DenebVersion) ||
-		(!s.config.IsPrague(header.Time) && version >= clparams.ElectraVersion) ||
-		(s.config.IsPrague(header.Time) && version < clparams.ElectraVersion) {
+		(!s.config.IsPrague(header.Time, 0) && version >= clparams.ElectraVersion) ||
+		(s.config.IsPrague(header.Time, 0) && version < clparams.ElectraVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
@@ -293,7 +293,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	if version >= clparams.DenebVersion {
-		err := ethutils.ValidateBlobs(req.BlobGasUsed.Uint64(), s.config.GetMaxBlobGasPerBlock(header.Time), s.config.GetMaxBlobsPerBlock(header.Time), expectedBlobHashes, &transactions)
+		err := ethutils.ValidateBlobs(req.BlobGasUsed.Uint64(), s.config.GetMaxBlobGasPerBlock(header.Time, 0), s.config.GetMaxBlobsPerBlock(header.Time, 0), expectedBlobHashes, &transactions)
 		if errors.Is(err, ethutils.ErrNilBlobHashes) {
 			return nil, &rpc.InvalidParamsError{Message: "nil blob hashes array"}
 		}
@@ -526,8 +526,8 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 	ts := data.ExecutionPayload.Timestamp
 	if (!s.config.IsCancun(ts, 0) && version >= clparams.DenebVersion) ||
 		(s.config.IsCancun(ts, 0) && version < clparams.DenebVersion) ||
-		(!s.config.IsPrague(ts) && version >= clparams.ElectraVersion) ||
-		(s.config.IsPrague(ts) && version < clparams.ElectraVersion) {
+		(!s.config.IsPrague(ts, 0) && version >= clparams.ElectraVersion) ||
+		(s.config.IsPrague(ts, 0) && version < clparams.ElectraVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 

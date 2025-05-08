@@ -566,7 +566,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		}
 	}
 
-	if g.Config != nil && g.Config.IsPrague(g.Timestamp) {
+	if g.Config != nil && g.Config.IsPrague(g.Timestamp, arbosVersion) {
 		if g.RequestsHash != nil {
 			head.RequestsHash = g.RequestsHash
 		} else {

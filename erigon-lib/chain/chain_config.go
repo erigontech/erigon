@@ -347,7 +347,10 @@ func (c *Config) IsCancun(time, currentArbosVersion uint64) bool {
 }
 
 // IsPrague returns whether time is either equal to the Prague fork time or greater.
-func (c *Config) IsPrague(time uint64) bool {
+func (c *Config) IsPrague(time uint64, currentArbosVersion uint64) bool {
+	if c.IsArbitrum() {
+		return currentArbosVersion >= ArbosVersion_40
+	}
 	return isForked(c.PragueTime, time)
 }
 
@@ -371,32 +374,32 @@ func (c *Config) GetMinBlobGasPrice() uint64 {
 	return 1 // MIN_BLOB_GASPRICE (EIP-4844)
 }
 
-func (c *Config) GetMaxBlobGasPerBlock(t uint64) uint64 {
-	return c.GetMaxBlobsPerBlock(t) * params.BlobGasPerBlob
+func (c *Config) GetMaxBlobGasPerBlock(t uint64, currentArbosVersion uint64) uint64 {
+	return c.GetMaxBlobsPerBlock(t, currentArbosVersion) * params.BlobGasPerBlob
 }
 
-func (c *Config) GetMaxBlobsPerBlock(time uint64) uint64 {
+func (c *Config) GetMaxBlobsPerBlock(time uint64, currentArbosVersion uint64) uint64 {
 	var b *BlobSchedule
 	if c != nil {
 		b = c.BlobSchedule
 	}
-	return b.MaxBlobsPerBlock(c.IsPrague(time))
+	return b.MaxBlobsPerBlock(c.IsPrague(time, currentArbosVersion))
 }
 
-func (c *Config) GetTargetBlobGasPerBlock(t uint64) uint64 {
+func (c *Config) GetTargetBlobGasPerBlock(t uint64, currentArbosVersion uint64) uint64 {
 	var b *BlobSchedule
 	if c != nil {
 		b = c.BlobSchedule
 	}
-	return b.TargetBlobsPerBlock(c.IsPrague(t)) * params.BlobGasPerBlob
+	return b.TargetBlobsPerBlock(c.IsPrague(t, currentArbosVersion)) * params.BlobGasPerBlob
 }
 
-func (c *Config) GetBlobGasPriceUpdateFraction(t uint64) uint64 {
+func (c *Config) GetBlobGasPriceUpdateFraction(t uint64, currentArbosVersion uint64) uint64 {
 	var b *BlobSchedule
 	if c != nil {
 		b = c.BlobSchedule
 	}
-	return b.BaseFeeUpdateFraction(c.IsPrague(t))
+	return b.BaseFeeUpdateFraction(c.IsPrague(t, currentArbosVersion))
 }
 
 func (c *Config) SecondsPerSlot() uint64 {
@@ -666,7 +669,7 @@ func (c *Config) Rules(num uint64, time, currentArbosVersion uint64) *Rules {
 		IsShanghai:         c.IsShanghai(time, currentArbosVersion) || c.IsAgra(num),
 		IsCancun:           c.IsCancun(time, currentArbosVersion),
 		IsNapoli:           c.IsNapoli(num),
-		IsPrague:           c.IsPrague(time),
+		IsPrague:           c.IsPrague(time, currentArbosVersion),
 		IsOsaka:            c.IsOsaka(time),
 		IsAura:             c.Aura != nil,
 		ArbOSVersion:       currentArbosVersion,
