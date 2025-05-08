@@ -22,7 +22,6 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
