@@ -520,7 +520,10 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	agg.Close()
 
 	// Start another aggregator on same datadir
-	anotherAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, db, logger)
+	salt, err := GetStateIndicesSalt(agg.dirs, false, logger)
+	require.NoError(t, err)
+	require.NotNil(t, salt)
+	anotherAgg, err := NewAggregator2(context.Background(), agg.dirs, aggStep, salt, db, logger)
 	require.NoError(t, err)
 	defer anotherAgg.Close()
 
@@ -1009,7 +1012,10 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	newDb := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	t.Cleanup(newDb.Close)
 
-	newAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, newDb, logger)
+	salt, err := GetStateIndicesSalt(dirs, false, logger)
+	require.NoError(t, err)
+	require.NotNil(t, salt)
+	newAgg, err := NewAggregator2(context.Background(), agg.dirs, aggStep, salt, newDb, logger)
 	require.NoError(t, err)
 	require.NoError(t, newAgg.OpenFolder())
 
