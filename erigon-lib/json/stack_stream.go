@@ -245,23 +245,18 @@ func (s *StackStream) WriteEmptyObject() {
 	s.stream.WriteEmptyObject()
 }
 
-// Size returns the size of the buffer
-func (s *StackStream) Size() int {
-	return len(s.stream.Buffer())
-}
-
 // IsComplete checks if the JSON structure is currently complete without open elements
 func (s *StackStream) IsComplete() bool {
 	return len(s.stack) == 0
 }
 
-// GetCurrentDepth returns the current nesting depth
-func (s *StackStream) GetCurrentDepth() int {
+// CurrentDepth returns the current nesting depth
+func (s *StackStream) CurrentDepth() int {
 	return len(s.stack)
 }
 
-// GetStackSummary returns a summary of the current stack state for debugging
-func (s *StackStream) GetStackSummary() string {
+// StackSummary returns a summary of the current stack state for debugging
+func (s *StackStream) StackSummary() string {
 	if len(s.stack) == 0 {
 		return "Empty"
 	}
