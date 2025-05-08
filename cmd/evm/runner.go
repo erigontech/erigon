@@ -152,7 +152,7 @@ func runCmd(ctx *cli.Context) error {
 		genesisConfig *types.Genesis
 	)
 	if machineFriendlyOutput {
-		tracer = logger.NewJSONLogger(logconfig, os.Stdout).Tracer()
+		tracer = logger.NewJSONLogger(logconfig, os.Stderr).Tracer()
 	} else if ctx.Bool(DebugFlag.Name) {
 		debugLogger = logger.NewStructLogger(logconfig)
 		tracer = debugLogger.Tracer()
