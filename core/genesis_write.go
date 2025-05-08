@@ -31,7 +31,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-db/rawdb"
@@ -449,8 +448,7 @@ var DevnetSignKey = func(address common.Address) *ecdsa.PrivateKey {
 // DeveloperGenesisBlock returns the 'geth --dev' genesis block.
 func DeveloperGenesisBlock(period uint64, faucet common.Address) *types.Genesis {
 	// Override the default period to the user requested one
-	var config chain.Config
-	copier.Copy(&config, params2.AllCliqueProtocolChanges)
+	config := *params2.AllCliqueProtocolChanges
 	config.Clique.Period = period
 
 	// Assemble and return the genesis with the precompiles and faucet pre-funded
