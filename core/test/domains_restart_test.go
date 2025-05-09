@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/erigontech/erigon-lib/commitment"
 	"io/fs"
 	"math/rand"
 	"os"
@@ -231,7 +232,11 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	//	cct.Close()
 	//}
 
-	err = domains.SeekCommitment(ctx, tx)
+	//NewSHared
+	cctx, err := state.NewSharedDomainsCommitmentContext(domains, commitment.ModeDirect)
+	require.NoError(t, err)
+
+	_, _, err = cctx.SeekCommitment(ctx, tx)
 	require.NoError(t, err)
 	tx.Rollback()
 
@@ -401,7 +406,12 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	err = domains.SeekCommitment(ctx, tx)
+	cctx, err := state.NewSharedDomainsCommitmentContext(domains, commitment.ModeDirect)
+	require.NoError(t, err)
+
+	_, _, err = cctx.SeekCommitment(ctx, tx)
+	require.NoError(t, err)
+	//err = domains.SeekCommitment(ctx, tx)
 	tx.Rollback()
 	require.NoError(t, err)
 

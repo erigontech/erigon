@@ -96,6 +96,10 @@ type Trie interface {
 	// Set context for state IO
 	ResetContext(ctx PatriciaContext)
 
+	NextKey(hashed, plain []byte, update *Update) error
+
+	FoldAndGetRootHash() (rootHash []byte, err error)
+
 	// Process updates
 	Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error)
 }
@@ -1146,7 +1150,10 @@ func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte, update *U
 	switch t.mode {
 	case ModeDirect:
 		clear(t.keys)
-
+		//err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		//	return fn(k, v, nil)
+		//}, etl.TransformArgs{Quit: ctx.Done()})
+		//
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			return fn(k, v, nil)
 		}, etl.TransformArgs{Quit: ctx.Done()})

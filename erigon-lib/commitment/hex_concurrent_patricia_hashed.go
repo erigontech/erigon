@@ -45,6 +45,16 @@ type ConcurrentPatriciaHashed struct {
 	ctx    [16]PatriciaContext
 }
 
+func (p *ConcurrentPatriciaHashed) NextKey(hashed, plain []byte, update *Update) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (p *ConcurrentPatriciaHashed) FoldAndGetRootHash() (rootHash []byte, err error) {
+	//TODO implement me
+	panic("implement me")
+}
+
 // Subtrie inherits root state, address length
 func NewConcurrentPatriciaHashed(root *HexPatriciaHashed, ctx PatriciaContext) *ConcurrentPatriciaHashed {
 	p := &ConcurrentPatriciaHashed{root: root}
@@ -186,8 +196,8 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 				if phnib.trace {
 					fmt.Printf("\n%x) %d plainKey [%x] hashedKey [%x] currentKey [%x]\n", ni, cnt, plainKey, hashedKey, phnib.currentKey[:phnib.currentKeyLen])
 				}
-				if err := phnib.followAndUpdate(hashedKey, plainKey, nil); err != nil {
-					return fmt.Errorf("followAndUpdate[%x]: %w", ni, err)
+				if err := phnib.NextKey(hashedKey, plainKey, nil); err != nil {
+					return fmt.Errorf("NextKey[%x]: %w", ni, err)
 				}
 				return nil
 			}, etl.TransformArgs{Quit: ctx.Done()})

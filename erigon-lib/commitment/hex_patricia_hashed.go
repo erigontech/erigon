@@ -1486,8 +1486,6 @@ type skipStat struct {
 	accLoaded, accSkipped, accReset, storReset, storLoaded, storSkipped uint64
 }
 
-const DepthWithoutNodeHashes = 35 //nolint
-
 func (hph *HexPatriciaHashed) createCellGetter(b []byte, updateKey []byte, row, depth int) func(nibble int, skip bool) (*cell, error) {
 	hashBefore := make([]byte, 32) // buffer re-used between calls
 	return func(nibble int, skip bool) (*cell, error) {
@@ -1911,7 +1909,7 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 	return rootHash[1:], nil // first byte is 128+hash_len=160
 }
 
-func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateUpdate *Update) (err error) {
+func (hph *HexPatriciaHashed) NextKey(hashedKey, plainKey []byte, stateUpdate *Update) (err error) {
 	//if hph.trace {
 	// fmt.Printf("mnt: %0x current: %x path %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hashedKey)
 	//}
@@ -2121,6 +2119,61 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 	return witnessTrie, rootHash, nil
 }
 
+func (hph *HexPatriciaHashed) FoldAndGetRootHash() ([]byte, error) {
+	// Folding everything up to the root
+	var err error
+	for hph.activeRows > 0 {
+		foldDone := hph.metrics.StartFolding(nil)
+		if err = hph.fold(); err != nil {
+			return nil, fmt.Errorf("final fold: %w", err)
+		}
+		foldDone()
+	}
+
+	rootHash, err := hph.RootHash()
+	if err != nil {
+		return nil, fmt.Errorf("root hash evaluation failed: %w", err)
+	}
+	if hph.trace {
+		fmt.Printf("root hash %x\n", rootHash)
+	}
+
+	hph.metrics.CollectFileDepthStats(hph.hadToLoadL)
+	if dbg.KVReadLevelledMetrics {
+		log.Debug("commitment finished, counters updated (no reset)",
+			//"hadToLoad", common.PrettyCounter(hadToLoad.Load()), "skippedLoad", common.PrettyCounter(skippedLoad.Load()),
+			//"hadToReset", common.PrettyCounter(hadToReset.Load()),
+			"skip ratio", fmt.Sprintf("%.1f%%", 100*(float64(skippedLoad.Load())/float64(hadToLoad.Load()+skippedLoad.Load()))),
+			"reset ratio", fmt.Sprintf("%.1f%%", 100*(float64(hadToReset.Load())/float64(hadToLoad.Load()))),
+			//"keys", common.PrettyCounter(ki), "spent", time.Since(start),
+		)
+		ends := make([]uint64, 0, len(hph.hadToLoadL))
+		for k := range hph.hadToLoadL {
+			ends = append(ends, k)
+		}
+		sort.Slice(ends, func(i, j int) bool { return ends[i] > ends[j] })
+		var Li int
+		for _, k := range ends {
+			v := hph.hadToLoadL[k]
+			accs := fmt.Sprintf("load=%s skip=%s (%.1f%%) reset %.1f%%", common.PrettyCounter(v.accLoaded), common.PrettyCounter(v.accSkipped), 100*(float64(v.accSkipped)/float64(v.accLoaded+v.accSkipped)), 100*(float64(v.accReset)/float64(v.accReset+v.accSkipped)))
+			stors := fmt.Sprintf("load=%s skip=%s (%.1f%%) reset %.1f%%", common.PrettyCounter(v.storLoaded), common.PrettyCounter(v.storSkipped), 100*(float64(v.storSkipped)/float64(v.storLoaded+v.storSkipped)), 100*(float64(v.storReset)/float64(v.storReset+v.storSkipped)))
+			if k == 0 {
+				log.Debug("branchData memoization, new branches", "endStep", k, "accounts", accs, "storages", stors)
+			} else {
+				log.Debug("branchData memoization", "L", Li, "endStep", k, "accounts", accs, "storages", stors)
+				Li++
+
+				mxTrieStateLevelledSkipRatesAccount[min(Li, 5)].Add(float64(v.accSkipped))
+				mxTrieStateLevelledSkipRatesStorage[min(Li, 5)].Add(float64(v.storSkipped))
+				mxTrieStateLevelledLoadRatesAccount[min(Li, 5)].Add(float64(v.accLoaded))
+				mxTrieStateLevelledLoadRatesStorage[min(Li, 5)].Add(float64(v.storLoaded))
+			}
+		}
+	}
+
+	return rootHash, nil
+}
+
 func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error) {
 	var (
 		m  runtime.MemStats
@@ -2156,8 +2209,8 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		if hph.trace {
 			fmt.Printf("\n%d/%d) plainKey [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
 		}
-		if err := hph.followAndUpdate(hashedKey, plainKey, stateUpdate); err != nil {
-			return fmt.Errorf("followAndUpdate: %w", err)
+		if err := hph.NextKey(hashedKey, plainKey, stateUpdate); err != nil {
+			return fmt.Errorf("NextKey: %w", err)
 		}
 		ki++
 		return nil
