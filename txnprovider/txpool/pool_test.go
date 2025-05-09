@@ -176,6 +176,16 @@ func TestNonceFromAddress(t *testing.T) {
 }
 
 func TestMultipleAuthorizations(t *testing.T) {
+
+	/* Test cases Matrix
+	Sender  Nonce Authority Nonce  
+
+		TODO -----
+
+	*/
+
+
+
 	ch := make(chan Announcements, 100)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	db := memdb.NewTestPoolDB(t)
@@ -268,7 +278,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 
 	logger := log.New()
 
-	// a new txn with authority+nonce same as one in an existing authorization should not be accepted
+	// a new txn with authority+nonce same as one in an existing authorization, by a different sender should not be accepted
 	{
 		var txnSlots TxnSlots
 		txnSlot1 := &TxnSlot{
@@ -311,7 +321,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 		assert.Empty(t, pool.auths) // auth address should not be there after block has been mined
 	}
 
-	// fee bump
+	// Bumping the Tip and FeeCap of the existing transaction should replace an existing setCodeTxn
 	{
 		var txnSlots TxnSlots
 		txnSlot1 := &TxnSlot{

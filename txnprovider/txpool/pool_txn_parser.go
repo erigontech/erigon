@@ -519,10 +519,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 			if err != nil {
 				return 0, fmt.Errorf("%w: recover authorization signer: %s stack: %s", ErrParseTxn, err, dbg.Stack()) //nolint
 			}
-			slot.Authorities = append(slot.Authorities, struct {
-				nonce     uint64
-				authority common.Address
-			}{auth.Nonce, *authority})
+			slot.Authorities = append(slot.Authorities, NonceAuthority{auth.Nonce, *authority})
 			authPos += authLen
 			if authPos != p2 {
 				return 0, fmt.Errorf("%w: authorization: unexpected list items", ErrParseTxn)
