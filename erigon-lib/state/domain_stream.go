@@ -19,6 +19,7 @@ package state
 import (
 	"bytes"
 	"container/heap"
+	"context"
 	"encoding/binary"
 	"fmt"
 
@@ -131,7 +132,7 @@ func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 	heap.Init(hi.h)
 	var key, value []byte
 
-	err := hi.roTx.Apply(func(tx kv.Tx) error {
+	err := hi.roTx.Apply(context.Background(), func(tx kv.Tx) error {
 		if dc.d.largeValues {
 			valsCursor, err := hi.roTx.Cursor(dc.d.valuesTable) //nolint:gocritic
 			if err != nil {

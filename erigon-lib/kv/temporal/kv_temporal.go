@@ -229,14 +229,14 @@ func (tx *Tx) Rollback() {
 func (tx *Tx) WarmupDB(force bool) error { return tx.WarmupDB(force) }
 func (tx *Tx) LockDBInRam() error        { return tx.LockDBInRam() }
 
-func (tx *Tx) Apply(f func(tx kv.Tx) error) error {
+func (tx *Tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 	tx.tx.mu.RLock()
 	applyTx := tx.Tx
 	tx.tx.mu.RUnlock()
 	if applyTx == nil {
 		return fmt.Errorf("can't apply: transaction closed")
 	}
-	return applyTx.Apply(f)
+	return applyTx.Apply(ctx, f)
 }
 
 func (tx *RwTx) WarmupDB(force bool) error { return tx.WarmupDB(force) }
@@ -245,24 +245,24 @@ func (tx *RwTx) LockDBInRam() error        { return tx.LockDBInRam() }
 func (tx *RwTx) Debug() kv.TemporalDebugTx { return tx }
 func (tx *Tx) Debug() kv.TemporalDebugTx   { return tx }
 
-func (tx *RwTx) Apply(f func(tx kv.Tx) error) error {
+func (tx *RwTx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 	tx.tx.mu.RLock()
 	applyTx := tx.RwTx
 	tx.tx.mu.RUnlock()
 	if applyTx == nil {
 		return fmt.Errorf("can't apply: transaction closed")
 	}
-	return applyTx.Apply(f)
+	return applyTx.Apply(ctx, f)
 }
 
-func (tx *RwTx) ApplyRW(f func(tx kv.RwTx) error) error {
+func (tx *RwTx) ApplyRW(ctx context.Context, f func(tx kv.RwTx) error) error {
 	tx.tx.mu.RLock()
 	applyTx := tx.RwTx
 	tx.tx.mu.RUnlock()
 	if applyTx == nil {
 		return fmt.Errorf("can't apply: transaction closed")
 	}
-	return applyTx.ApplyRw(f)
+	return applyTx.ApplyRw(ctx, f)
 }
 
 func (tx *RwTx) Rollback() {

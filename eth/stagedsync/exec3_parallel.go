@@ -417,7 +417,7 @@ func (te *txExecutor) domains() *libstate.SharedDomains {
 
 func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number uint64) (h *types.Header, err error) {
 	if te.applyTx != nil {
-		err := te.applyTx.Apply(func(tx kv.Tx) (err error) {
+		err := te.applyTx.Apply(ctx, func(tx kv.Tx) (err error) {
 			h, err = te.cfg.blockReader.Header(ctx, te.applyTx, hash, number)
 			return err
 		})
@@ -456,7 +456,7 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 	if blockNum == 0 {
 		if te.hooks.OnGenesisBlock != nil {
 			var b *types.Block
-			if err := te.applyTx.Apply(func(tx kv.Tx) (err error) {
+			if err := te.applyTx.Apply(ctx, func(tx kv.Tx) (err error) {
 				b, err = te.cfg.blockReader.BlockByHash(ctx, tx, blockHash)
 				return err
 			}); err != nil {
@@ -471,7 +471,7 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 			var finalized *types.Header
 			var safe *types.Header
 
-			if err := te.applyTx.Apply(func(tx kv.Tx) (err error) {
+			if err := te.applyTx.Apply(ctx, func(tx kv.Tx) (err error) {
 				b, err = te.cfg.blockReader.BlockByHash(ctx, tx, blockHash)
 				if err != nil {
 					return err
@@ -529,7 +529,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 			}
 
 			var b *types.Block
-			err := tx.Apply(func(tx kv.Tx) error {
+			err := tx.Apply(ctx, func(tx kv.Tx) error {
 				b, err = exec3.BlockWithSenders(ctx, te.cfg.db, tx, te.cfg.blockReader, blockNum)
 				return err
 			})
@@ -548,7 +548,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 			blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, func(hash common.Hash, number uint64) (h *types.Header, err error) {
 				getHashFnMutex.Lock()
 				defer getHashFnMutex.Unlock()
-				err = tx.Apply(func(tx kv.Tx) (err error) {
+				err = tx.Apply(ctx, func(tx kv.Tx) (err error) {
 					h, err = te.cfg.blockReader.Header(ctx, tx, hash, number)
 					return err
 				})

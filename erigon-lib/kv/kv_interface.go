@@ -426,7 +426,7 @@ type Tx interface {
 
 	ListTables() ([]string, error)
 
-	Apply(f func(tx Tx) error) error
+	Apply(ctx context.Context, f func(tx Tx) error) error
 }
 
 // RwTx
@@ -445,7 +445,7 @@ type RwTx interface {
 
 	Commit() error // Commit all the operations of a transaction into the database.
 
-	ApplyRw(f func(tx RwTx) error) error
+	ApplyRw(ctx context.Context, f func(tx RwTx) error) error
 }
 
 // Cursor - class for navigating through a database
