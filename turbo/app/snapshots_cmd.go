@@ -1623,22 +1623,10 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	borSnaps := blockReader.BorSnapshots()
 	blockSnaps := blockReader.Snapshots()
 
-	//1. retire both blocks and bor stuff
 	if err := br.RetireBlocks(ctx, from, to, log.LvlInfo, nil, nil, nil); err != nil {
 		return err
 	}
 
-	// 2. merge both blocks and bor stuff
-	// if _, err := br.MergeBlocks(ctx, log.LvlInfo, nil); err != nil {
-	// 	return err
-	// }
-	// if isBor {
-	// 	if _, err := br.MergeBorBlocks(ctx, log.LvlInfo, nil, nil); err != nil {
-	// 		return err
-	// 	}
-	// }
-
-	// 3. remove overlaps
 	if err := blockSnaps.RemoveOverlaps(); err != nil {
 		return err
 	}
@@ -1648,7 +1636,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		}
 	}
 
-	// 4. prune stuff
 	deletedBlocks := math.MaxInt // To pass the first iteration
 	allDeletedBlocks := 0
 	for deletedBlocks > 0 { // prune happens by small steps, so need many runs
@@ -1667,7 +1654,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	logger.Info("Pruning has ended", "deleted blocks", allDeletedBlocks)
 
-	// same 4 steps for e3 now...
 	db, err = temporal.New(db, agg)
 	if err != nil {
 		return err
