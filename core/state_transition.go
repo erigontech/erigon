@@ -179,7 +179,6 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	if overflow {
 		return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
 	}
-
 	// compute blob fee for eip-4844 data blobs if any
 	blobGasVal := new(uint256.Int)
 	if st.evm.ChainRules().IsCancun && !st.evm.ChainRules().IsArbitrum {
@@ -473,7 +472,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	}
 
 	msg := st.msg
-	coinbase = st.msg.From() // arbitrum
+	// coinbase = st.msg.From() // arbitrum
 	// st.evm.Context.Coinbase = msg.From()
 	sender := vm.AccountRef(msg.From())
 	contractCreation := msg.To() == nil

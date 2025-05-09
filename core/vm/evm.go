@@ -116,7 +116,16 @@ type EVM struct {
 func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmtypes.IntraBlockState, chainConfig *chain.Config, vmConfig Config) *EVM {
 	if vmConfig.NoBaseFee {
 		if txCtx.GasPrice == nil || txCtx.GasPrice.IsZero() {
+			if chainConfig.IsArbitrum() {
+				blockCtx.BaseFeeInBlock = new(uint256.Int)
+				if blockCtx.BaseFee != nil && !blockCtx.BaseFee.IsZero() {
+					blockCtx.BaseFeeInBlock.Set(blockCtx.BaseFee)
+				}
+			}
 			blockCtx.BaseFee = new(uint256.Int)
+		}
+		if chainConfig.IsArbitrum() && txCtx.BlobFee != nil && txCtx.BlobFee.IsZero() {
+			blockCtx.BlobBaseFee = new(uint256.Int)
 		}
 	}
 	evm := &EVM{

@@ -31,13 +31,12 @@ func WasmStateLoadCost(db *state.IntraBlockState, program common.Address, key co
 func WasmStateStoreCost(db *state.IntraBlockState, program common.Address, key, value common.Hash) uint64 {
 	clearingRefund := params.SstoreClearsScheduleRefundEIP3529
 
-	cost := uint64(0)
 	current := new(uint256.Int)
-	err := db.GetState(program, &key, current)
-	if err != nil {
+	if err := db.GetState(program, &key, current); err != nil {
 		panic(err)
 	}
 
+	var cost uint64
 	// Check slot presence in the access list
 	if addrPresent, slotPresent := db.SlotInAccessList(program, key); !slotPresent {
 		cost = params.ColdSloadCostEIP2929
@@ -48,20 +47,20 @@ func WasmStateStoreCost(db *state.IntraBlockState, program common.Address, key, 
 		}
 	}
 
-	if arbmath.BigEquals(current.ToBig(), value.Big()) {
-		// if current == value { // noop (1)
+	if arbmath.BigEquals(current.ToBig(), value.Big()) { // noop (1)
 		// EIP 2200 original clause:
 		//		return params.SloadGasEIP2200, nil
 		return cost + params.WarmStorageReadCostEIP2929 // SLOAD_GAS
 	}
 	original := uint256.NewInt(0)
-	err = db.GetCommittedState(program, &key, original)
+	if err := db.GetCommittedState(program, &key, original); err != nil {
+		panic(err)
+	}
 	if original.Eq(current) {
 		if original.IsZero() { // create slot (2.1.1)
 			return cost + params.SstoreSetGasEIP2200
 		}
-		if value.Cmp(common.Hash{}) == 0 {
-			//if value == (common.Hash{}) { // delete slot (2.1.2b)
+		if value.Cmp(common.Hash{}) == 0 { // delete slot (2.1.2b)
 			db.AddRefund(clearingRefund)
 		}
 		// EIP-2200 original clause:
@@ -71,7 +70,7 @@ func WasmStateStoreCost(db *state.IntraBlockState, program common.Address, key, 
 	if !original.IsZero() {
 		if current.IsZero() { // recreate slot (2.2.1.1)
 			db.SubRefund(clearingRefund)
-		} else if value.Cmp(common.Hash{}) == 0 { // value == (common.Hash{}) { // delete slot (2.2.1.2)
+		} else if value.Cmp(common.Hash{}) == 0 { // delete slot (2.2.1.2)
 			db.AddRefund(clearingRefund)
 		}
 	}
@@ -131,8 +130,6 @@ func WasmCallCost(db evmtypes.IntraBlockState, contract common.Address, value *u
 				return total, ErrOutOfGas
 			}
 		}
-	}
-	if transfersValue {
 		if apply(params.CallValueTransferGas) {
 			return total, ErrOutOfGas
 		}

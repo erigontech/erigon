@@ -105,9 +105,14 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 func NewEVMTxContext(msg Message) evmtypes.TxContext {
 	return evmtypes.TxContext{
 		Origin:     msg.From(),
-		GasPrice:   msg.GasPrice(),
+		GasPrice:   msg.GasPrice().Clone(),
 		BlobHashes: msg.BlobHashes(),
 	}
+	//// TODO arbiturm only? seems like not working/needed
+	//if mf := msg.MaxFeePerBlobGas(); mf != nil {
+	//	etx.BlobFee = mf.Clone()
+	//}
+	// return etx
 }
 
 // GetHashFn returns a GetHashFunc which retrieves header hashes by number

@@ -376,7 +376,10 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 				logged = true
 			}
 		}
-		// execute the operation
+		// if in.EVM().Context.BlockNumber == 109059161 { // Arbitrum useful for debug
+		// 	fmt.Printf("%s pc %d gas %d cost %d depth %d\n", op, _pc, gasCopy, cost, in.depth)
+		// }
+		//execute the operation
 		res, err = operation.execute(pc, in, callContext)
 
 		if err != nil {
