@@ -106,7 +106,7 @@ jobs:
           done
           echo "}" >> $output_json
 
-      - name: Process tx_pool_latency_analysis data
+      - name: Create HDR plots PNG artifacts
         if: always()
         run: |
           # Check if the JSON file exists
