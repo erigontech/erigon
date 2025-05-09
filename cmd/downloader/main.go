@@ -244,7 +244,21 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 			return err
 		}
 	}
-	cfg, err := downloadercfg.New(ctx, dirs, version, torrentLogLevel, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots, staticPeers, webseedsList, chain, dbWritemap)
+	cfg, err := downloadercfg.New(
+		ctx,
+		dirs,
+		version,
+		torrentLogLevel,
+		downloadRate,
+		uploadRate,
+		torrentPort,
+		torrentConnsPerFile,
+		torrentDownloadSlots,
+		staticPeers,
+		webseedsList,
+		chain,
+		dbWritemap,
+	)
 	if err != nil {
 		return err
 	}

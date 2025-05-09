@@ -1010,14 +1010,24 @@ func (d *Downloader) specInfoUnknown(tup SnapshotTuple) *torrent.TorrentSpec {
 	}
 }
 
-func (d *Downloader) loadSpecFromDisk(tup SnapshotTuple) (spec g.Option[*torrent.TorrentSpec], err error) {
+// Loads metainfo from disk, removing it if it's invalid. Returns Some metainfo if it's valid. TODO:
+// If something fishy happens here (what was an error return before), should we force a verification
+// or something? If the metainfo isn't valid, the data might be wrong.
+func (d *Downloader) loadSpecFromDisk(tup SnapshotTuple) (spec g.Option[*torrent.TorrentSpec]) {
 	miPath := filepath.Join(d.SnapDir(), filepath.FromSlash(tup.Name)+".torrent")
 	mi, err := metainfo.LoadFromFile(miPath)
 	if errors.Is(err, fs.ErrNotExist) {
-		err = nil
 		return
 	}
+	removeMetainfo := func() {
+		err := os.Remove(miPath)
+		if err != nil {
+			d.logger.Error("error removing metainfo file", "err", err, "name", tup.Name)
+		}
+	}
 	if err != nil {
+		d.logger.Error("loading metainfo from disk", "err", err, "name", tup.Name)
+		removeMetainfo()
 		return
 	}
 	diskSpec := torrent.TorrentSpecFromMetaInfo(mi)
@@ -1026,10 +1036,7 @@ func (d *Downloader) loadSpecFromDisk(tup SnapshotTuple) (spec g.Option[*torrent
 			"expected", tup.Hash,
 			"actual", diskSpec.InfoHash,
 			"name", tup.Name)
-		err = os.Remove(miPath)
-		if err != nil {
-			err = fmt.Errorf("removing bad metainfo file: %w", err)
-		}
+		removeMetainfo()
 		return
 	}
 	spec.Set(diskSpec)
@@ -1053,7 +1060,7 @@ func (d *Downloader) addPriorTorrent(
 	ctx context.Context,
 	infoHash metainfo.Hash,
 	name string,
-// verify bool,
+	// verify bool,
 ) error {
 	if !IsSnapNameAllowed(name) {
 		return fmt.Errorf("snap name %q is not allowed", name)
@@ -1074,13 +1081,9 @@ func (d *Downloader) addPriorTorrent(
 		Hash: infoHash,
 		Name: name,
 	}
-	specOpt, err := d.loadSpecFromDisk(snapTup)
-	if err != nil {
-		// TODO: Should we force a verify here?
-		d.logger.Warn("loading metainfo from disk", "err", err, "name", name)
-		err = nil
-	}
-	// TorrentSpec was created before I knew better about Go's heap...
+	specOpt := d.loadSpecFromDisk(snapTup)
+
+	// TorrentSpec was created before I knew better about Go's heap... Set a default
 	spec := specOpt.UnwrapOr(new(torrent.TorrentSpec))
 	// This will trigger a mismatch if info bytes are known and don't match. We
 	// would have already failed if the info bytes aren't known.
@@ -1092,28 +1095,43 @@ func (d *Downloader) addPriorTorrent(
 		//fmt.Printf("%v: adding torrent source %q\n", snapTup, u)
 		spec.Sources = append(spec.Sources, u)
 	}
-	t, ok, err = d.addTorrentSpec(spec)
+	t, ok, err := d.addTorrentSpec(spec)
 	if err != nil {
 		return err
 	}
 	if !ok {
 		return nil
 	}
-	d.wg.Add(1)
-	go func() {
-		defer d.wg.Done()
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.GotInfo():
-		}
+
+	onGotInfo := func() {
 		t.DownloadAll()
-		mi := t.Metainfo()
-		if _, err := d.torrentFS.CreateWithMetaInfo(t.Info(), &mi); err != nil {
-			d.logger.Warn("[snapshots] create torrent file", "err", err)
-			return
+		// The info bytes weren't already on disk. Save them.
+		if !specOpt.Ok {
+			mi := t.Metainfo()
+			// This checks for existence last I checked, which isn't really what we want.
+			if _, err := d.torrentFS.CreateWithMetaInfo(t.Info(), &mi); err != nil {
+				d.logger.Warn("[snapshots] create torrent file", "err", err)
+			}
+
 		}
-	}()
+	}
+
+	// Aggressively minimize goroutines.
+	if t.Info() != nil {
+		onGotInfo()
+	} else {
+		d.wg.Add(1)
+		go func() {
+			defer d.wg.Done()
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.GotInfo():
+			}
+			onGotInfo()
+		}()
+	}
+
 	return nil
 }
 
