@@ -253,6 +253,53 @@ func TestT8n(t *testing.T) {
 	}
 }
 
+func TestEvmRun(t *testing.T) {
+	t.Parallel()
+	tt := cmdtest.NewTestCmd(t, nil)
+	for i, tc := range []struct {
+		input      []string
+		wantStdout string
+		wantStderr string
+	}{
+		{ // json tracing
+			input:      []string{"--json", "--code", "6040", "run"},
+			wantStdout: "./testdata/evmrun/1.out.1.txt",
+			wantStderr: "./testdata/evmrun/1.out.2.txt",
+		},
+		{ // Debug output
+			input:      []string{"--debug", "--code", "6040", "run"},
+			wantStdout: "./testdata/evmrun/2.out.1.txt",
+			wantStderr: "./testdata/evmrun/2.out.2.txt",
+		},
+	} {
+		tt.Logf("args: go run ./cmd/evm %v\n", strings.Join(tc.input, " "))
+		tt.Run("evm-test", tc.input...)
+
+		haveStdOut := tt.Output()
+		tt.WaitExit()
+		haveStdErr := tt.StderrText()
+
+		if have, wantFile := haveStdOut, tc.wantStdout; wantFile != "" {
+			want, err := os.ReadFile(wantFile)
+			if err != nil {
+				t.Fatalf("test %d: could not read expected output: %v", i, err)
+			}
+			if string(haveStdOut) != string(want) {
+				t.Fatalf("test %d, output wrong, have \n%v\nwant\n%v\n", i, string(have), string(want))
+			}
+		}
+		if have, wantFile := haveStdErr, tc.wantStderr; wantFile != "" {
+			want, err := os.ReadFile(wantFile)
+			if err != nil {
+				t.Fatalf("test %d: could not read expected output: %v", i, err)
+			}
+			if have != string(want) {
+				t.Fatalf("test %d, output wrong\nhave %q\nwant %q\n", i, have, string(want))
+			}
+		}
+	}
+}
+
 // cmpJson compares the JSON in two byte slices.
 func cmpJson(a, b []byte) (bool, error) {
 	var j, j2 interface{}
