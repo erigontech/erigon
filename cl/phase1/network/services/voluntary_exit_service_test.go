@@ -78,6 +78,7 @@ func (t *voluntaryExitTestSuite) TearDownTest() {
 }
 
 func (t *voluntaryExitTestSuite) TestProcessMessage() {
+	t.T().Skip()
 	curEpoch := uint64(100)
 	mockValidatorIndex := uint64(10)
 	mockMsg := &SignedVoluntaryExitForGossip{

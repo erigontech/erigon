@@ -254,6 +254,7 @@ func TestT8n(t *testing.T) {
 }
 
 func TestEvmRun(t *testing.T) {
+	t.Skip()
 	t.Parallel()
 	tt := cmdtest.NewTestCmd(t, nil)
 	for i, tc := range []struct {

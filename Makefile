@@ -63,7 +63,7 @@ override GO_FLAGS += -ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X $
 
 GOBUILD = ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" $(GO) build $(GO_FLAGS)
 GO_DBG_BUILD = ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS) -DMDBX_DEBUG=1" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" $(GO) build -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
-GOTEST = ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" GODEBUG=cgocheck=0 GOTRACEBACK=1 $(GO) test $(GO_FLAGS) ./...
+GOTEST = ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" GODEBUG=cgocheck=0 GOTRACEBACK=1 GORACE="history_size=7" $(GO) test $(GO_FLAGS) ./...
 
 default: all
 
@@ -189,7 +189,7 @@ test: test-erigon-lib test-erigon-db
 
 ## test-all:                  run all tests with a 1h timeout
 test-all: test-erigon-lib-all test-erigon-db-all
-	$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out
+	$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out -race
 
 ## test-hive						run the hive tests locally off nektos/act workflows simulator
 test-hive:	
