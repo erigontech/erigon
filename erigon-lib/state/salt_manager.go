@@ -1,16 +1,37 @@
 package state
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/edsrzf/mmap-go"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
 	rand2 "golang.org/x/exp/rand"
 )
+
+var saltManagerInstance *SaltManager
+var so sync.Once
+
+var DEFAULT_SALT = [4]byte{0xff, 0xff, 0xff, 0xff}
+
+// GenState, GenBlock - can this process generate new salts if the files are not present?
+func InitiatializeSaltManager(dirs datadir.Dirs, GenState, GenBlock bool) {
+	so.Do(func() {
+		saltManagerInstance = NewSaltManager(dirs, GenState, GenBlock)
+	})
+}
+
+func SaltManagerInstance() *SaltManager {
+	if saltManagerInstance == nil {
+		panic("SaltManagerInstance not initialized")
+	}
+	return saltManagerInstance
+}
 
 type SaltManager struct {
 	stateMmap, blockMmap *mmap.MMap
@@ -40,10 +61,9 @@ func (m *SaltManager) BlockSalt() *uint32 {
 }
 
 func (m *SaltManager) getSalt(mmap *mmap.MMap) *uint32 {
-	if mmap == nil {
+	if bytes.Equal(*mmap, DEFAULT_SALT[:]) {
 		return nil
 	}
-
 	v := binary.BigEndian.Uint32(*mmap)
 	return &v
 }
@@ -55,12 +75,15 @@ func (m *SaltManager) loadSalt(name string, gen bool, newSaltBytesGen func() []b
 		panic(err)
 	}
 	if !exists {
+		var salt []byte
 		if gen {
-			if err := dir.WriteFileWithFsync(filename, newSaltBytesGen(), os.ModePerm); err != nil {
-				panic(err)
-			}
+			salt = newSaltBytesGen()
 		} else {
-			return nil, nil
+			salt = DEFAULT_SALT[:]
+		}
+
+		if err := dir.WriteFileWithFsync(filename, salt, os.ModePerm); err != nil {
+			panic(err)
 		}
 	}
 

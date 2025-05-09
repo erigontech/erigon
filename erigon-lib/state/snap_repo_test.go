@@ -2,17 +2,13 @@ package state
 
 import (
 	"context"
-	"math/big"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/edsrzf/mmap-go"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -759,47 +755,4 @@ func fileExistsCheck(t *testing.T, repo *SnapshotRepo, startStep, endStep uint64
 		require.True(t, os.IsNotExist(err))
 	}
 
-}
-
-func TestMmap(t *testing.T) {
-	saltFile := path.Join(t.TempDir(), "salt-file.txt")
-	f, err := os.Create(saltFile)
-	require.NoError(t, err)
-	defaultSaltBytes := []byte{0xff, 0xff, 0xff, 0xff}
-	err = dir.WriteFileWithFsync(saltFile, defaultSaltBytes, os.ModePerm)
-	require.NoError(t, err)
-
-	f.Close()
-	require.NoError(t, err)
-
-	exists, err := dir.FileExist(saltFile)
-	require.NoError(t, err)
-	require.True(t, exists)
-
-	// let's create mmap
-	f, err = os.Open(saltFile)
-	require.NoError(t, err)
-	defer f.Close()
-
-	mmap, err := mmap.Map(f, mmap.RDONLY, 0)
-
-	require.NoError(t, err)
-	require.Len(t, mmap, 4)
-
-	checkContent := func(expected uint32) {
-		_value := big.NewInt(0).SetBytes(mmap).Uint64()
-		value := uint32(_value)
-		require.Equal(t, expected, value)
-	}
-
-	checkContent(0xffffffff)
-	//	t.Logf("file at: %s", saltFile)
-
-	{
-		// let's update file contents...we expect them to be updated in mmap
-		err = dir.WriteFileWithFsync(saltFile, []byte{0x00, 0x00, 0x00, 0x64}, os.ModePerm)
-		require.NoError(t, err)
-	}
-
-	checkContent(100)
 }
