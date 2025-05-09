@@ -106,12 +106,63 @@ jobs:
           done
           echo "}" >> $output_json
 
-      # If the test fails, create an empty JSON object
-      - name: Create empty JSON if test fails
-        if: ${{ failure() }}
+      - name: Process tx_pool_latency_analysis data
+        if: always()
         run: |
+          # Check if the JSON file exists
           output_json="${{ github.workspace }}/outputs_kurtosis.json"
-          echo "{}" > $output_json
+          if [ ! -f "$output_json" ]; then
+            echo "JSON file not found, skipping"
+            exit 0
+          fi
+
+          # Check if tx_pool_latency_analysis array exists in the JSON
+          if ! jq -e '.tx_pool_latency_analysis' "$output_json" > /dev/null 2>&1; then
+            echo "tx_pool_latency_analysis array not found in JSON, skipping"
+            exit 0
+          fi
+
+          # Get the array length
+          array_length=$(jq '.tx_pool_latency_analysis | length' "$output_json")
+
+          # Loop through each element in the array
+          for ((i=0; i<array_length; i++)); do
+            # Get tx_count for this element
+            tx_count=$(jq -r ".tx_pool_latency_analysis[$i].tx_count" "$output_json")
+            
+            # Check if tx_pool_latency_hdr_plot exists for this element
+            if jq -e ".tx_pool_latency_analysis[$i].tx_pool_latency_hdr_plot" "$output_json" > /dev/null 2>&1; then
+              # Extract the plot data to a CSV file
+              csv_file="tx_pool_latency_analysis_${i}_${tx_count}.csv"
+              jq -r ".tx_pool_latency_analysis[$i].tx_pool_latency_hdr_plot" "$output_json" > "$csv_file"
+              
+              # Call the Python script to process the CSV file
+              python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
+                --input_file "$csv_file" \
+                --output_file "tx_pool_latency_analysis_${i}_${tx_count}.png"
+              
+              # Delete the CSV file after processing
+              rm -f "$csv_file"
+              
+              echo "Processed tx_pool_latency_analysis[$i] with tx_count=$tx_count"
+            else
+              echo "tx_pool_latency_hdr_plot not found for element $i, skipping"
+            fi
+          done
+
+      - name: Upload PNG images as artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tx-pool-latency-plots
+          path: tx_pool_latency_analysis_*.png
+          if-no-files-found: ignore
+
+      - name: Clean up PNG files
+        if: always()
+        run: |
+          # Remove all generated PNG files
+          rm -f tx_pool_latency_analysis_*.png
 
       - name: Save test results
         if: always()
