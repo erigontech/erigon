@@ -1474,7 +1474,7 @@ func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
 					if err = compressor.Compress(); err != nil {
 						return err
 					}
-					compressor = nil
+					compressor.Close()
 				}
 
 				unmerged_fileinfo := info.Type.FileInfo(dirs.Snap, blockFrom, blockFrom+1000)
@@ -1495,6 +1495,7 @@ func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
 			if err := compressor.Compress(); err != nil {
 				return err
 			}
+			compressor.Close()
 		}
 	} else if info.Type.Enum() != coresnaptype.Enums.Transactions {
 		return fmt.Errorf("unsupported type %s", info.Type.Enum().String())
@@ -1534,7 +1535,7 @@ func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
 			if err = compressor.Compress(); err != nil {
 				return err
 			}
-			compressor = nil
+			compressor.Close()
 		}
 
 		blockTo = blockFrom
@@ -1545,16 +1546,6 @@ func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 
 	decomp.Close()
-	// if err := os.Remove(sourcefile); err != nil {
-	// 	return err
-	// }
-
-	// for _, idxName := range info.Type.IdxFileNames(snaptype.V1_0, info.From, info.To) {
-	// 	if err := os.Remove(filepath.Join(dirs.Snap, idxName)); err != nil {
-	// 		return err
-	// 	}
-	// }
-
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 	chainConfig := fromdb.ChainConfig(chainDB)
