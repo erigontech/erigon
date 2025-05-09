@@ -450,7 +450,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 		}
 
 		if minS == maxS {
-			q := fmt.Sprintf("remove ALL snapshot files?\n\t1) Remove\n\t4) NONONO (Exit)\n (pick number): ")
+			q := "remove ALL snapshot files?\n\t1) Remove\n\t4) NONONO (Exit)\n (pick number): "
 			if promptExit(q) {
 				os.Exit(0)
 			}
@@ -468,7 +468,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 			}
 			if hasStateTrie == 0 && len(commitmentFilesWithState) > 0 {
 				fmt.Printf("this will remove ALL commitment files with state trie\n")
-				q := fmt.Sprintf("Do that anyway?\n\t1) Remove\n\t4) NONONO (Exit)\n (pick number): ")
+				q := "Do that anyway?\n\t1) Remove\n\t4) NONONO (Exit)\n (pick number): "
 				if promptExit(q) {
 					os.Exit(0)
 				}
