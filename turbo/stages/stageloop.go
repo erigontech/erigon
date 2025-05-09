@@ -668,7 +668,7 @@ func SilkwormForExecutionStage(silkworm *silkworm.Silkworm, cfg *ethconfig.Confi
 }
 
 func NewDefaultStages(ctx context.Context,
-	db kv.RwDB,
+	db kv.TemporalRwDB,
 	snapDb kv.RwDB,
 	p2pCfg p2p.Config,
 	cfg *ethconfig.Config,
@@ -711,7 +711,7 @@ func NewDefaultStages(ctx context.Context,
 }
 
 func NewPipelineStages(ctx context.Context,
-	db kv.RwDB,
+	db kv.TemporalRwDB,
 	cfg *ethconfig.Config,
 	p2pCfg p2p.Config,
 	controlServer *sentry_multi_client.MultiClient,
@@ -780,7 +780,7 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 func NewPolygonSyncStages(
 	ctx context.Context,
 	logger log.Logger,
-	db kv.RwDB,
+	db kv.TemporalRwDB,
 	config *ethconfig.Config,
 	chainConfig *chain.Config,
 	consensusEngine consensus.Engine,

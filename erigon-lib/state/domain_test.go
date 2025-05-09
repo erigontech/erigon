@@ -31,6 +31,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -78,6 +79,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	dirs := datadir2.New(t.TempDir())
 	cfg := Schema.AccountsDomain
 	cfg.crossDomainIntegrity = nil //no other domains
+	cfg.hist.iiCfg.salt = new(atomic.Pointer[uint32])
 
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
@@ -85,7 +87,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 
 	cfg.hist.iiCfg.version = IIVersionTypes{snaptype.V1_0, snaptype.V1_0}
 	cfg.hist.iiCfg.dirs = dirs
-	cfg.hist.iiCfg.salt = &salt
+	cfg.hist.iiCfg.salt.Store(&salt)
 	//cfg.hist.historyValuesOnCompressedPage = 16
 	d, err := NewDomain(cfg, aggStep, logger)
 	require.NoError(t, err)
@@ -94,7 +96,6 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	d.DisableFsync()
 	return db, d
 }
-
 func TestDomain_CollationBuild(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -414,7 +415,6 @@ func filledDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain, uint64) {
 func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 	t.Helper()
 	fmt.Printf("txs: %d\n", txs)
-	t.Helper()
 	require := require.New(t)
 	ctx := context.Background()
 	var err error
@@ -1052,7 +1052,10 @@ func emptyTestDomain(aggStep uint64) *Domain {
 	cfg.crossDomainIntegrity = nil
 
 	salt := uint32(1)
-	cfg.hist.iiCfg.salt = &salt
+	if cfg.hist.iiCfg.salt == nil {
+		cfg.hist.iiCfg.salt = new(atomic.Pointer[uint32])
+	}
+	cfg.hist.iiCfg.salt.Store(&salt)
 	cfg.hist.iiCfg.dirs = datadir2.New(os.TempDir())
 	cfg.hist.iiCfg.name = kv.InvertedIdx(0)
 	cfg.hist.iiCfg.version = IIVersionTypes{snaptype.V1_0, snaptype.V1_0}
