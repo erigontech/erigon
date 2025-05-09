@@ -519,7 +519,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 			if err != nil {
 				return 0, fmt.Errorf("%w: recover authorization signer: %s stack: %s", ErrParseTxn, err, dbg.Stack()) //nolint
 			}
-			slot.Authorities = append(slot.Authorities, NonceAuthority{auth.Nonce, *authority})
+			slot.Authorities = append(slot.Authorities, NonceAuthority{auth.Nonce, authority.String()})
 			authPos += authLen
 			if authPos != p2 {
 				return 0, fmt.Errorf("%w: authorization: unexpected list items", ErrParseTxn)
@@ -816,7 +816,7 @@ func getData(payload []byte, p int) ([]byte, int, error) {
 
 type NonceAuthority struct {
 	nonce     uint64
-	authority common.Address
+	authority string
 }
 
 // TxnSlot contains information extracted from an Ethereum transaction, which is enough to manage it inside the transaction.

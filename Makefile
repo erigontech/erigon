@@ -271,7 +271,7 @@ check-kurtosis:
 		exit 1; \
 	fi; \
 
-kurtosis-pectra-assertoor:	check-kurtosis
+	:	check-kurtosis
 	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/pectra.io")
 
 kurtosis-regular-assertoor:	check-kurtosis 
