@@ -609,14 +609,12 @@ Loop:
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
 
-				if txTask.Tx.Type() != types.AccountAbstractionTxType {
-					txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
-					if err != nil {
-						if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
-							hooks.OnBlockEnd(err)
-						}
-						return err
+				txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
+				if err != nil {
+					if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
+						hooks.OnBlockEnd(err)
 					}
+					return err
 				}
 			}
 

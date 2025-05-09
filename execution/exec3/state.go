@@ -291,13 +291,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 				break
 			}
 
-			msg, err := txTask.Tx.AsMessage(types.Signer{}, nil, nil)
-			if err != nil {
-				txTask.Error = err
-				break
-			}
-
-			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.vmCfg, rules)
 			rw.execAATxn(txTask)
 			break
 		}
@@ -358,6 +351,7 @@ func (rw *Worker) execAATxn(txTask *state.TxTask) {
 
 		var outerErr error
 		for i := startIdx; i <= endIdx; i++ {
+			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(txTask.TxAsMessage), rw.ibs, rw.vmCfg, txTask.Rules)
 			// check if next n transactions are AA transactions and run validation
 			if txTask.Txs[i].Type() == types.AccountAbstractionTxType {
 				aaTxn, ok := txTask.Txs[i].(*types.AccountAbstractionTransaction)
@@ -399,6 +393,7 @@ func (rw *Worker) execAATxn(txTask *state.TxTask) {
 	validationRes := txTask.ValidationResults[0]
 	txTask.ValidationResults = txTask.ValidationResults[1:]
 
+	rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(txTask.TxAsMessage), rw.ibs, rw.vmCfg, txTask.Rules)
 	status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, validationRes.PaymasterContext, validationRes.GasUsed, rw.taskGasPool, rw.evm, txTask.Header, rw.ibs)
 	if err != nil {
 		txTask.Error = err
