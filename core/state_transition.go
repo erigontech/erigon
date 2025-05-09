@@ -301,10 +301,8 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 		}
 	}
 
-	isArb := st.evm.ChainConfig().IsArbitrum()
-
 	// Make sure the transaction gasFeeCap is greater than the block's baseFee.
-	if il := st.evm.ChainConfig().IsLondon(st.evm.Context.BlockNumber); il || (!isArb && st.evm.ChainRules().IsLondon) {
+	if st.evm.ChainRules().IsLondon {
 		// Skip the checks if gas fields are zero and baseFee was explicitly disabled (eth_call)
 		skipCheck := st.evm.Config().NoBaseFee && st.feeCap.IsZero() && st.tipCap.IsZero()
 		if !skipCheck {
@@ -314,10 +312,8 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 		}
 	}
 	isCancun := st.evm.ChainRules().IsCancun
-	// st.evm.ChainConfig().IsCancun(st.evm.Context.Time)
-	if isArb {
-		isCancun = st.evm.Context.ArbOSVersion >= chain.ArbosVersion_20
-	}
+	isArb := st.evm.ChainConfig().IsArbitrum()
+
 	if st.msg.BlobGas() > 0 && isCancun && !isArb {
 		blobGasPrice := st.evm.Context.BlobBaseFee
 		if blobGasPrice == nil {

@@ -49,7 +49,7 @@ func MakeSigner(config *chain.Config, blockNumber uint64, blockTime uint64) *Sig
 	}
 	signer.unprotected = true
 	switch {
-	case config.IsPrague(blockTime):
+	case config.IsPrague(blockTime, 0):
 		signer.protected = true
 		signer.accessList = true
 		signer.dynamicFee = true

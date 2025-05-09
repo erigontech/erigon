@@ -117,7 +117,7 @@ func NewWorker(lock sync.Locker, logger log.Logger, hooks *tracing.Hooks, ctx co
 	}
 	w.vmCfg = vm.Config{Tracer: w.callTracer.Tracer().Hooks, NoBaseFee: true}
 	w.evm = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, w.vmCfg)
-	w.taskGasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(0))
+	w.taskGasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(0, 0))
 	w.ibs = state.New(w.stateReader)
 	return w
 }
@@ -331,7 +331,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			}
 		}
 	default:
-		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), rw.chainConfig.GetMaxBlobGasPerBlock(header.Time))
+		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), rw.chainConfig.GetMaxBlobGasPerBlock(header.Time, rules.ArbOSVersion))
 		rw.callTracer.Reset()
 		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		ibs.SetTxContext(txTask.TxIndex)
