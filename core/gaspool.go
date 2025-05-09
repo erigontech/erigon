@@ -32,6 +32,10 @@ type GasPool struct {
 	gas, blobGas uint64
 }
 
+func NewGasPool(gas, blobGas uint64) *GasPool {
+	return &GasPool{gas: gas, blobGas: blobGas}
+}
+
 func (gp *GasPool) Reset(amount, blobGas uint64) {
 	gp.mu.Lock()
 	defer gp.mu.Unlock()

@@ -100,10 +100,10 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 		txTask := task.(*exec.TxTask)
 
 		if gasPool == nil {
-			gasPool = (&core.GasPool{}).AddGas(task.BlockGasLimit()).AddBlobGas(se.cfg.chainConfig.GetMaxBlobGasPerBlock(tasks[0].BlockTime()))
+			gasPool =core.NewGasPool(task.BlockGasLimit(),se.cfg.chainConfig.GetMaxBlobGasPerBlock(tasks[0].BlockTime()))
 		}
 
-		txTask.GasPool = gasPool
+		txTask.ResetGasPool(gasPool)
 		result := se.worker.RunTxTask(txTask)
 
 		if err := func() error {

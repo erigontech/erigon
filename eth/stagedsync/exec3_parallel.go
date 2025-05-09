@@ -529,12 +529,10 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 			}
 
 			var b *types.Block
-
 			err := tx.Apply(func(tx kv.Tx) error {
 				b, err = exec3.BlockWithSenders(ctx, te.cfg.db, tx, te.cfg.blockReader, blockNum)
 				return err
 			})
-
 			if err != nil {
 				return err
 			}
@@ -562,8 +560,6 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 				return h, err
 			}), te.cfg.engine, te.cfg.author, te.cfg.chainConfig)
 
-			gasPool := (&core.GasPool{}).AddGas(b.GasLimit()).AddBlobGas(te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time()))
-
 			var txTasks []exec.Task
 
 			for txIndex := -1; txIndex <= len(txs); txIndex++ {
@@ -582,7 +578,6 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 					SkipAnalysis:    skipAnalysis,
 					EvmBlockContext: blockContext,
 					Withdrawals:     b.Withdrawals(),
-					GasPool:         gasPool,
 					// use history reader instead of state reader to catch up to the tx where we left off
 					HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
 					Config:           te.cfg.chainConfig,
@@ -599,7 +594,11 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 				inputTxNum++
 			}
 
-			te.execRequests <- &execRequest{b.Number().Uint64(), b.Hash(), txTasks, applyResults, false}
+			te.execRequests <- &execRequest{
+				b.Number().Uint64(), b.Hash(),
+				core.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
+				txTasks, applyResults, false,
+			}
 
 			mxExecBlocks.Add(1)
 
@@ -689,6 +688,7 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.R
 type execRequest struct {
 	blockNum     uint64
 	blockHash    common.Hash
+	gasPool      *core.GasPool
 	tasks        []exec.Task
 	applyResults chan applyResult
 	profile      bool
@@ -743,6 +743,7 @@ type blockExecutor struct {
 	// cummulative gas for this block
 	gasUsed     uint64
 	blobGasUsed uint64
+	gasPool     *core.GasPool
 
 	execFailed, execAborted []int
 
@@ -755,7 +756,7 @@ type blockExecutor struct {
 	result      *blockResult
 }
 
-func newBlockExec(blockNum uint64, blockHash common.Hash, applyResults chan applyResult, profile bool) *blockExecutor {
+func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *core.GasPool, applyResults chan applyResult, profile bool) *blockExecutor {
 	return &blockExecutor{
 		blockNum:     blockNum,
 		blockHash:    blockHash,
@@ -768,6 +769,7 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, applyResults chan appl
 		versionMap:   state.NewVersionMap(),
 		profile:      profile,
 		applyResults: applyResults,
+		gasPool:      gasPool,
 	}
 }
 
@@ -944,8 +946,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				fmt.Println(be.blockNum, "FAILED", tx, be.txIncarnations[tx], "failed", be.execFailed[tx], "aborted", be.execAborted[tx])
 			}
 
-			be.tasks[tx].Task.(*exec.TxTask).GasPool.AddGas(be.results[tx].ExecutionResult.GasUsed)
-
 			// 'create validation tasks for all transactions > tx ...'
 			be.validateTasks.pushPendingSet(be.execTasks.getRevalidationRange(tx + 1))
 			be.validateTasks.clearInProgress(tx) // clear in progress - pending will be added again once new incarnation executes
@@ -992,6 +992,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 
 			txResult := be.results[tx]
+
+			if err := be.gasPool.SubGas(txResult.ExecutionResult.GasUsed); err != nil {
+				return nil, err
+			}
+
 			_, err = txResult.finalize(prevReceipt, pe.cfg.engine, be.versionMap, stateReader, stateWriter)
 
 			if err != nil {
@@ -1104,6 +1109,8 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 		toExecute = append(toExecute, be.execTasks.takeNextPending())
 	}
 
+	gasPool := core.NewGasPool(be.gasPool.Gas(), be.gasPool.BlobGas())
+
 	maxValidated := be.validateTasks.maxComplete()
 	for i := 0; i < len(toExecute); i++ {
 		nextTx := toExecute[i]
@@ -1131,6 +1138,8 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 		}
 
 		be.cntExec++
+
+		execTask.ResetGasPool(gasPool)
 
 		if incarnation := be.txIncarnations[nextTx]; incarnation == 0 {
 			pe.in.Add(ctx, &taskVersion{
@@ -1423,7 +1432,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			executor, ok = pe.blockExecutors[blockNum]
 
 			if !ok {
-				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.applyResults, execRequest.profile)
+				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.applyResults, execRequest.profile)
 			}
 		}
 

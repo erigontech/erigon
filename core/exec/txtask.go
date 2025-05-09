@@ -61,6 +61,7 @@ type Task interface {
 	VersionedReads(ibs *state.IntraBlockState) state.ReadSet
 	VersionedWrites(ibs *state.IntraBlockState) state.VersionedWrites
 	Reset(ibs *state.IntraBlockState)
+	ResetGasPool(*core.GasPool)
 
 	Tx() types.Transaction
 	TxType() uint8
@@ -73,6 +74,8 @@ type Task interface {
 	BlockTime() uint64
 	BlockGasLimit() uint64
 	BlockRoot() common.Hash
+
+	GasPool() *core.GasPool
 
 	IsBlockEnd() bool
 	IsHistoric() bool
@@ -223,7 +226,7 @@ type TxTask struct {
 	AAValidationBatchSize uint64 // number of consecutive RIP-7560 transactions, should be 0 for single transactions and transactions that are not first in the transaction order
 	InBatch               bool   // set to true for consecutive RIP-7560 transactions after the first one (first one is false)
 
-	GasPool      *core.GasPool
+	gasPool      *core.GasPool
 	sender       *common.Address
 	message      *types.Message
 	signer       *types.Signer
@@ -347,6 +350,14 @@ func (t *TxTask) BlockGasLimit() uint64 {
 		return 0
 	}
 	return t.Header.GasLimit
+}
+
+func (t *TxTask) GasPool() *core.GasPool {
+	return t.gasPool
+}
+
+func (t *TxTask) ResetGasPool(gasPool *core.GasPool) {
+	t.gasPool=gasPool
 }
 
 func (t *TxTask) Version() state.Version {
@@ -475,7 +486,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 				return &result
 			}
 
-			result = *txTask.executeAA(aaTxn, evm, txTask.GasPool, ibs, chainConfig)
+			result = *txTask.executeAA(aaTxn, evm, txTask.GasPool(), ibs, chainConfig)
 			break
 		}
 
@@ -491,7 +502,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 
 			// Apply the transaction to the current state (included in the env).
 			if !calcFees {
-				applyRes, applyErr := core.ApplyMessageNoFeeBurnOrTip(evm, message, txTask.GasPool, true, false, engine)
+				applyRes, applyErr := core.ApplyMessageNoFeeBurnOrTip(evm, message, txTask.GasPool(), true, false, engine)
 
 				if applyErr != nil {
 					if _, ok := applyErr.(core.ErrExecAbortError); !ok {
@@ -520,7 +531,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 				return applyRes, err
 			}
 
-			return core.ApplyMessage(evm, message, txTask.GasPool, true, false, engine)
+			return core.ApplyMessage(evm, message, txTask.GasPool(), true, false, engine)
 		}()
 
 		if result.Err == nil {
