@@ -161,7 +161,7 @@ var snapshotCommand = cli.Command{
 
 				return doUnmerge(c, dirs)
 			},
-			Usage: "unmerge a particular snapshot file (to 1 step files)",
+			Usage: "unmerge a particular snapshot file (to 1 step files).",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&SnapshotFileFlag,
@@ -1467,33 +1467,77 @@ func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	compresCfg.Workers = workers
 	var word = make([]byte, 0, 4096)
 
-	for g.HasNext() {
-		if blockFrom%1000 == 0 {
-			if compressor != nil {
-				if err = compressor.Compress(); err != nil {
+	if info.Type.Enum() == coresnaptype.Enums.Headers || info.Type.Enum() == coresnaptype.Enums.Bodies {
+		for g.HasNext() {
+			if blockFrom%1000 == 0 {
+				if compressor != nil {
+					if err = compressor.Compress(); err != nil {
+						return err
+					}
+					compressor = nil
+				}
+
+				unmerged_fileinfo := info.Type.FileInfo(dirs.Snap, blockFrom, blockFrom+1000)
+				compressor, err = seg.NewCompressor(ctx, "unmerge", unmerged_fileinfo.Path, dirs.Tmp, compresCfg, log.LvlTrace, logger)
+				if err != nil {
 					return err
 				}
-				compressor = nil
 			}
 
-			unmerged_fileinfo := info.Type.FileInfo(dirs.Snap, blockFrom, blockFrom+1000)
-			compressor, err = seg.NewCompressor(ctx, "unmerge", unmerged_fileinfo.Path, dirs.Tmp, compresCfg, log.LvlTrace, logger)
-			if err != nil {
+			word, _ = g.Next(word[:0])
+			if err := compressor.AddUncompressedWord(word); err != nil {
+				return err
+			}
+			blockFrom++
+		}
+
+		if compressor != nil {
+			if err := compressor.Compress(); err != nil {
 				return err
 			}
 		}
+	} else if info.Type.Enum() != coresnaptype.Enums.Transactions {
+		return fmt.Errorf("unsupported type %s", info.Type.Enum().String())
+	} else {
+		// tx unmerge
+		for ; blockFrom < blockTo; blockFrom += 1000 {
+			um_fileinfo := coresnaptype.Enums.Bodies.Type().FileInfo(dirs.Snap, blockFrom, blockFrom+1000)
+			bodiesSegment, err := seg.NewDecompressor(um_fileinfo.Path)
+			if err != nil {
+				return err
+			}
+			defer bodiesSegment.Close()
 
-		word, _ = g.Next(word[:0])
-		if err := compressor.AddUncompressedWord(word); err != nil {
-			return err
-		}
-		blockFrom++
-	}
+			_, expectedCount, err := coresnaptype.TxsAmountBasedOnBodiesSnapshots(bodiesSegment, um_fileinfo.Len()-1)
+			if err != nil {
+				return err
+			}
 
-	if compressor != nil {
-		if err := compressor.Compress(); err != nil {
-			return err
+			txfileinfo := um_fileinfo.As(coresnaptype.Enums.Transactions.Type())
+			compressor, err = seg.NewCompressor(ctx, "unmerge", txfileinfo.Path, dirs.Tmp, compresCfg, log.LvlTrace, logger)
+			if err != nil {
+				return err
+			}
+
+			for g.HasNext() && expectedCount > 0 {
+				word, _ = g.Next(word[:0])
+				if err := compressor.AddUncompressedWord(word); err != nil {
+					return err
+				}
+				expectedCount--
+			}
+
+			if expectedCount != 0 {
+				return fmt.Errorf("unexpected count %d", expectedCount)
+			}
+
+			if err = compressor.Compress(); err != nil {
+				return err
+			}
+			compressor = nil
 		}
+
+		blockTo = blockFrom
 	}
 
 	if blockFrom != blockTo {
@@ -1501,15 +1545,15 @@ func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 
 	decomp.Close()
-	if err := os.Remove(sourcefile); err != nil {
-		return err
-	}
+	// if err := os.Remove(sourcefile); err != nil {
+	// 	return err
+	// }
 
-	for _, idxName := range info.Type.IdxFileNames(snaptype.V1_0, info.From, info.To) {
-		if err := os.Remove(filepath.Join(dirs.Snap, idxName)); err != nil {
-			return err
-		}
-	}
+	// for _, idxName := range info.Type.IdxFileNames(snaptype.V1_0, info.From, info.To) {
+	// 	if err := os.Remove(filepath.Join(dirs.Snap, idxName)); err != nil {
+	// 		return err
+	// 	}
+	// }
 
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
@@ -1583,36 +1627,37 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	if ok {
 		from, to = from2, to2
 	}
+
+	isBor := blockReader.BorSnapshots() != nil
+	borSnaps := blockReader.BorSnapshots()
+	blockSnaps := blockReader.Snapshots()
+
+	//1. retire both blocks and bor stuff
 	if err := br.RetireBlocks(ctx, from, to, log.LvlInfo, nil, nil, nil); err != nil {
 		return err
 	}
-	if err := blockReader.Snapshots().RemoveOverlaps(); err != nil {
+
+	// 2. merge both blocks and bor stuff
+	if _, err := br.MergeBlocks(ctx, log.LvlInfo, nil); err != nil {
 		return err
 	}
-	if sn := blockReader.BorSnapshots(); sn != nil {
-		if err := sn.RemoveOverlaps(); err != nil {
+	if isBor {
+		if _, err := br.MergeBorBlocks(ctx, log.LvlInfo, nil, nil); err != nil {
 			return err
 		}
 	}
 
-	if err := blockReader.Snapshots().RemoveOverlaps(); err != nil {
+	// 3. remove overlaps
+	if err := blockSnaps.RemoveOverlaps(); err != nil {
 		return err
 	}
-	if sn := blockReader.BorSnapshots(); sn != nil {
-		if err := sn.RemoveOverlaps(); err != nil {
+	if isBor {
+		if err := borSnaps.RemoveOverlaps(); err != nil {
 			return err
 		}
 	}
 
-	if err := blockReader.Snapshots().RemoveOverlaps(); err != nil {
-		return err
-	}
-	if sn := blockReader.BorSnapshots(); sn != nil {
-		if err := sn.RemoveOverlaps(); err != nil {
-			return err
-		}
-	}
-
+	// 4. prune stuff
 	deletedBlocks := math.MaxInt // To pass the first iteration
 	allDeletedBlocks := 0
 	for deletedBlocks > 0 { // prune happens by small steps, so need many runs
@@ -1631,6 +1676,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	logger.Info("Pruning has ended", "deleted blocks", allDeletedBlocks)
 
+	// same 4 steps for e3 now...
 	db, err = temporal.New(db, agg)
 	if err != nil {
 		return err
