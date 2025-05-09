@@ -84,7 +84,7 @@ const (
 
 type SnapshotsCfg struct {
 	db          kv.RwDB
-	chainConfig *chain.Config
+	chainConfig chain.Config
 	dirs        datadir.Dirs
 
 	blockRetire        services.BlockRetire
@@ -102,7 +102,7 @@ type SnapshotsCfg struct {
 }
 
 func StageSnapshotsCfg(db kv.RwDB,
-	chainConfig *chain.Config,
+	chainConfig chain.Config,
 	syncConfig ethconfig.Sync,
 	dirs datadir.Dirs,
 	blockRetire services.BlockRetire,
@@ -294,7 +294,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		agg,
 		tx,
 		cfg.blockReader,
-		cfg.chainConfig,
+		&cfg.chainConfig,
 		cfg.snapshotDownloader,
 		cfg.syncConfig,
 	); err != nil {
@@ -319,7 +319,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		agg,
 		tx,
 		cfg.blockReader,
-		cfg.chainConfig,
+		&cfg.chainConfig,
 		cfg.snapshotDownloader,
 		cfg.syncConfig,
 	); err != nil {
@@ -330,7 +330,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "E2 Indexing"})
-	if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.notifier.Events, cfg.chainConfig); err != nil {
+	if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.notifier.Events, &cfg.chainConfig); err != nil {
 		return err
 	}
 

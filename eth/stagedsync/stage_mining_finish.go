@@ -30,7 +30,7 @@ import (
 
 type MiningFinishCfg struct {
 	db                    kv.RwDB
-	chainConfig           *chain.Config
+	chainConfig           chain.Config
 	engine                consensus.Engine
 	sealCancel            chan struct{}
 	miningState           MiningState
@@ -40,7 +40,7 @@ type MiningFinishCfg struct {
 
 func StageMiningFinishCfg(
 	db kv.RwDB,
-	chainConfig *chain.Config,
+	chainConfig chain.Config,
 	engine consensus.Engine,
 	miningState MiningState,
 	sealCancel chan struct{},

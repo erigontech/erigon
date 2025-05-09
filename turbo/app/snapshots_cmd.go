@@ -979,8 +979,8 @@ func doDiff(cliCtx *cli.Context) error {
 	}
 	defer dst.Close()
 
-	defer src.EnableReadAhead().DisableReadAhead()
-	defer dst.EnableReadAhead().DisableReadAhead()
+	defer src.MadvSequential().DisableReadAhead()
+	defer dst.MadvSequential().DisableReadAhead()
 
 	i := 0
 	srcG, dstG := src.MakeGetter(), dst.MakeGetter()
@@ -1067,7 +1067,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 	}
 	defer decompressor.Close()
 	func() {
-		defer decompressor.EnableReadAhead().DisableReadAhead()
+		defer decompressor.MadvSequential().DisableReadAhead()
 
 		t := time.Now()
 		g := decompressor.MakeGetter()
@@ -1078,7 +1078,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 		logger.Info("decompress speed", "took", time.Since(t))
 	}()
 	func() {
-		defer decompressor.EnableReadAhead().DisableReadAhead()
+		defer decompressor.MadvSequential().DisableReadAhead()
 
 		t := time.Now()
 		g := decompressor.MakeGetter()
@@ -1261,7 +1261,7 @@ func doUncompress(cliCtx *cli.Context) error {
 		return err
 	}
 	defer decompressor.Close()
-	defer decompressor.EnableReadAhead().DisableReadAhead()
+	defer decompressor.MadvSequential().DisableReadAhead()
 
 	wr := bufio.NewWriterSize(os.Stdout, int(128*datasize.MB))
 	defer wr.Flush()
@@ -1451,8 +1451,16 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}); err != nil {
 		return err
 	}
+
 	blockReader, _ := br.IO()
-	from2, to2, ok := freezeblocks.CanRetire(to, blockReader.FrozenBlocks(), coresnaptype.Enums.Headers, nil)
+
+	blocksInSnapshots := blockReader.FrozenBlocks()
+
+	if chainConfig.Bor != nil {
+		blocksInSnapshots = min(blocksInSnapshots, blockReader.FrozenBorBlocks())
+	}
+
+	from2, to2, ok := freezeblocks.CanRetire(to, blocksInSnapshots, coresnaptype.Enums.Headers, nil)
 	if ok {
 		from, to = from2, to2
 	}

@@ -148,6 +148,12 @@ func newAggregatorOld(ctx context.Context, dirs datadir.Dirs, aggregationStep ui
 	}, nil
 }
 
+// TODO: exported for idx_optimize.go
+// TODO: this utility can be safely deleted after PR https://github.com/erigontech/erigon/pull/12907/ is rolled out in production
+func GetStateIndicesSalt(baseDir string) (salt *uint32, err error) {
+	return getStateIndicesSalt(baseDir)
+}
+
 // getStateIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
 // if db is Read-Only (for example remote RPCDaemon or utilities) - we will not create new indices - and existing indices have salt in metadata.
 func getStateIndicesSalt(baseDir string) (salt *uint32, err error) {
@@ -1482,10 +1488,6 @@ func (at *AggregatorRoTx) HistoryStartFrom(name kv.Domain) uint64 {
 	return at.d[name].HistoryStartFrom()
 }
 
-func (at *AggregatorRoTx) HistoryEndTxNum(name kv.Domain, tx kv.Tx) uint64 {
-	return at.d[name].HistoryEndTxNum(tx)
-}
-
 func (at *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (timestamps stream.U64, err error) {
 	// check domain iis
 	for _, d := range at.d {
@@ -1578,6 +1580,13 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 	return ac
 }
 
+func (at *AggregatorRoTx) HistoryProgress(name kv.Domain, tx kv.Tx) uint64 {
+	return at.d[name].HistoryProgress(tx)
+}
+func (at *AggregatorRoTx) ProgressII(name kv.InvertedIdx, tx kv.Tx) uint64 {
+	return at.searchII(name).Progress(tx)
+}
+
 // --- Domain part START ---
 
 func (at *AggregatorRoTx) RangeAsOf(ctx context.Context, tx kv.Tx, domain kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
@@ -1621,17 +1630,72 @@ func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo 
 
 // --- Domain part END ---
 
-func (at *AggregatorRoTx) madvNormal() {
+func (at *AggregatorRoTx) MadvNormal() *AggregatorRoTx {
 	for _, d := range at.d {
 		for _, f := range d.files {
-			f.src.decompressor.EnableMadvNormal()
+			if f.src.decompressor != nil {
+				f.src.decompressor.MadvNormal()
+			}
+			if f.src.index != nil {
+				f.src.index.MadvNormal()
+			}
+			//if f.src.bindex != nil {
+			//	f.src.bindex.MadvNormal()
+			//}
+			//if f.src.existence != nil {
+			//	f.src.existence.MadvNormal()
+			//}
 		}
 	}
+	for _, ii := range at.iis {
+		for _, f := range ii.files {
+			if f.src.decompressor != nil {
+				f.src.decompressor.MadvNormal()
+			}
+			if f.src.index != nil {
+				f.src.index.MadvNormal()
+			}
+			//if f.src.bindex != nil {
+			//	f.src.bindex.MadvNormal()
+			//}
+			//if f.src.existence != nil {
+			//	f.src.existence.MadvNormal()
+			//}
+		}
+	}
+	return at
 }
-func (at *AggregatorRoTx) disableReadAhead() {
+func (at *AggregatorRoTx) DisableReadAhead() {
 	for _, d := range at.d {
 		for _, f := range d.files {
-			f.src.decompressor.DisableReadAhead()
+			if f.src.decompressor != nil {
+				f.src.decompressor.DisableReadAhead()
+			}
+			if f.src.index != nil {
+				f.src.index.DisableReadAhead()
+			}
+			//if f.src.bindex != nil {
+			//	f.src.bindex.DisableReadAhead()
+			//}
+			//if f.src.existence != nil {
+			//	f.src.existence.DisableReadAhead()
+			//}
+		}
+	}
+	for _, ii := range at.iis {
+		for _, f := range ii.files {
+			if f.src.decompressor != nil {
+				f.src.decompressor.DisableReadAhead()
+			}
+			if f.src.index != nil {
+				f.src.index.DisableReadAhead()
+			}
+			//if f.src.bindex != nil {
+			//	f.src.bindex.DisableReadAhead()
+			//}
+			//if f.src.existence != nil {
+			//	f.src.existence.DisableReadAhead()
+			//}
 		}
 	}
 }

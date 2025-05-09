@@ -39,7 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 	"github.com/erigontech/erigon-lib/seg"
 )
 
@@ -209,9 +209,9 @@ func TestInvIndexCollationBuild(t *testing.T) {
 		w, _ := g.Next(nil)
 		words = append(words, string(w))
 		w, _ = g.Next(w[:0])
-		ef, _ := eliasfano32.ReadEliasFano(w)
+		ef := multiencseq.ReadMultiEncSeq(0, w)
 		var ints []uint64
-		it := ef.Iterator()
+		it := ef.Iterator(0)
 		for it.HasNext() {
 			v, _ := it.Next()
 			ints = append(ints, v)

@@ -50,7 +50,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 	"github.com/erigontech/erigon-lib/seg"
 	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 )
@@ -568,7 +568,8 @@ type InvertedIndexRoTx struct {
 
 	seekInFilesCache *IISeekInFilesCache
 
-	ef *eliasfano32.EliasFano // re-usable
+	// TODO: retrofit recent optimization in main and reenable the next line
+	// ef *multiencseq.SequenceBuilder // re-usable
 }
 
 // hashKey - change of salt will require re-gen of indices
@@ -649,12 +650,14 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 		if !bytes.Equal(k, key) {
 			continue
 		}
-		eliasVal, _ := g.Next(nil)
+		encodedSeq, _ := g.Next(nil)
 
-		if iit.ef == nil {
-			iit.ef = eliasfano32.NewEliasFano(1, 1)
-		}
-		equalOrHigherTxNum, found = iit.ef.Reset(eliasVal).Seek(txNum)
+		// TODO: implement merge Reset+Seek
+		// if iit.ef == nil {
+		// 	iit.ef = eliasfano32.NewEliasFano(1, 1)
+		// }
+		// equalOrHigherTxNum, found = iit.ef.Reset(encodedSeq).Seek(txNum)
+		equalOrHigherTxNum, found = multiencseq.Seek(iit.files[i].startTxNum, encodedSeq, txNum)
 		if !found {
 			continue
 		}
@@ -744,7 +747,7 @@ func (iit *InvertedIndexRoTx) iterateRangeOnFiles(key []byte, startTxNum, endTxN
 		indexTable:  iit.ii.valuesTable,
 		orderAscend: asc,
 		limit:       limit,
-		ef:          eliasfano32.NewEliasFano(1, 1),
+		seq:         &multiencseq.SequenceReader{},
 	}
 	if asc {
 		for i := len(iit.files) - 1; i >= 0; i-- {
@@ -805,6 +808,10 @@ func (ii *InvertedIndex) maxTxNumInDB(tx kv.Tx) uint64 {
 		return max(lstInDb, 0)
 	}
 	return 0
+}
+
+func (iit *InvertedIndexRoTx) Progress(tx kv.Tx) uint64 {
+	return max(iit.files.EndTxNum(), iit.ii.maxTxNumInDB(tx))
 }
 
 func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx) bool {
@@ -1090,7 +1097,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (
 			return nil
 		}
 
-		ef := eliasfano32.NewEliasFano(bitmap.GetCardinality(), bitmap.Maximum())
+		ef := multiencseq.NewBuilder(step*ii.aggregationStep, bitmap.GetCardinality(), bitmap.Maximum())
 		it := bitmap.Iterator()
 		for it.HasNext() {
 			ef.AddOffset(it.Next())

@@ -561,7 +561,7 @@ func init() {
 	withHeimdall(cmdStageCustomTrace)
 	withWorkers(cmdStageCustomTrace)
 	withChaosMonkey(cmdStageCustomTrace)
-	withProduce(cmdStageCustomTrace)
+	withDomain(cmdStageCustomTrace)
 	rootCmd.AddCommand(cmdStageCustomTrace)
 
 	withConfig(cmdStagePatriciaTrie)
@@ -771,7 +771,7 @@ func stageBorHeimdall(db kv.TemporalRwDB, ctx context.Context, unwindTypes []str
 		}
 
 		unwindState := sync.NewUnwindState(stages.BorHeimdall, stageState.BlockNumber-unwind, stageState.BlockNumber, true, false)
-		cfg := stagedsync.StageBorHeimdallCfg(db, nil, miningState, chainConfig, nil, heimdallStore, bridgeStore, nil, nil, nil, nil, nil, false, unwindTypes)
+		cfg := stagedsync.StageBorHeimdallCfg(db, nil, miningState, *chainConfig, nil, heimdallStore, bridgeStore, nil, nil, nil, nil, nil, false, unwindTypes)
 		if err := stagedsync.BorHeimdallUnwind(unwindState, ctx, stageState, nil, cfg); err != nil {
 			return err
 		}
@@ -800,7 +800,7 @@ func stageBorHeimdall(db kv.TemporalRwDB, ctx context.Context, unwindTypes []str
 		recents = bor.Recents
 		signatures = bor.Signatures
 	}
-	cfg := stagedsync.StageBorHeimdallCfg(db, snapDb, miningState, chainConfig, heimdallClient, heimdallStore, bridgeStore, blockReader, nil, nil, recents, signatures, false, unwindTypes)
+	cfg := stagedsync.StageBorHeimdallCfg(db, snapDb, miningState, *chainConfig, heimdallClient, heimdallStore, bridgeStore, blockReader, nil, nil, recents, signatures, false, unwindTypes)
 
 	stageState := stage(sync, nil, db, stages.BorHeimdall)
 	if err := stagedsync.BorHeimdallForward(stageState, sync, ctx, nil, cfg, logger); err != nil {
@@ -830,7 +830,7 @@ func stageBodies(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) err
 			}
 
 			u := sync.NewUnwindState(stages.Bodies, s.BlockNumber-unwind, s.BlockNumber, true, false)
-			cfg := stagedsync.StageBodiesCfg(db, nil, nil, nil, nil, 0, chainConfig, br, bw)
+			cfg := stagedsync.StageBodiesCfg(db, nil, nil, nil, nil, 0, *chainConfig, br, bw)
 			if err := stagedsync.UnwindBodiesStage(u, tx, cfg, ctx); err != nil {
 				return err
 			}
@@ -1129,7 +1129,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	chainConfig := fromdb.ChainConfig(db)
 	genesis := core.GenesisBlockByChainName(chain)
 	br, _ := blocksIO(db, logger)
-	cfg := stagedsync.StageCustomTraceCfg(strings.Split(produce, ","), db, dirs, br, chainConfig, engine, genesis, &syncCfg)
+	cfg := stagedsync.StageCustomTraceCfg(strings.Split(domain, ","), db, dirs, br, chainConfig, engine, genesis, &syncCfg)
 	if reset {
 		tx, err := db.BeginTemporalRw(ctx)
 		if err != nil {
@@ -1143,11 +1143,17 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 		if cfg.Produce.RCacheDomain {
 			tables = append(tables, db.Debug().DomainTables(kv.RCacheDomain)...)
 		}
-		if cfg.Produce.LogIndex {
-			tables = append(tables, db.Debug().InvertedIdxTables(kv.LogAddrIdx, kv.LogTopicIdx)...)
+		if cfg.Produce.LogAddr {
+			tables = append(tables, db.Debug().InvertedIdxTables(kv.LogAddrIdx)...)
 		}
-		if cfg.Produce.TraceIndex {
-			tables = append(tables, db.Debug().InvertedIdxTables(kv.TracesFromIdx, kv.TracesToIdx)...)
+		if cfg.Produce.LogTopic {
+			tables = append(tables, db.Debug().InvertedIdxTables(kv.LogTopicIdx)...)
+		}
+		if cfg.Produce.TraceFrom {
+			tables = append(tables, db.Debug().InvertedIdxTables(kv.TracesFromIdx)...)
+		}
+		if cfg.Produce.TraceTo {
+			tables = append(tables, db.Debug().InvertedIdxTables(kv.TracesToIdx)...)
 		}
 		if err := backup.ClearTables(ctx, tx, tables...); err != nil {
 			return err
@@ -1512,8 +1518,8 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 	miningSync := stagedsync.New(
 		cfg.Sync,
 		stagedsync.MiningStages(ctx,
-			stagedsync.StageMiningCreateBlockCfg(db, miner, chainConfig, engine, nil, dirs.Tmp, blockReader),
-			stagedsync.StageBorHeimdallCfg(db, snapDb, miner, chainConfig, heimdallClient, heimdallStore, bridgeStore, blockReader, nil, nil, recents, signatures, false, unwindTypes),
+			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, dirs.Tmp, blockReader),
+			stagedsync.StageBorHeimdallCfg(db, snapDb, miner, *chainConfig, heimdallClient, heimdallStore, bridgeStore, blockReader, nil, nil, recents, signatures, false, unwindTypes),
 			stagedsync.StageExecuteBlocksCfg(
 				db,
 				cfg.Prune,
@@ -1532,8 +1538,8 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 				nil,
 			),
 			stagedsync.StageSendersCfg(db, sentryControlServer.ChainConfig, cfg.Sync, false, dirs.Tmp, cfg.Prune, blockReader, sentryControlServer.Hd),
-			stagedsync.StageMiningExecCfg(db, miner, events, chainConfig, engine, &vm.Config{}, dirs.Tmp, nil, 0, nil, blockReader),
-			stagedsync.StageMiningFinishCfg(db, chainConfig, engine, miner, miningCancel, blockReader, builder.NewLatestBlockBuiltStore()),
+			stagedsync.StageMiningExecCfg(db, miner, events, *chainConfig, engine, &vm.Config{}, dirs.Tmp, nil, 0, nil, blockReader),
+			stagedsync.StageMiningFinishCfg(db, *chainConfig, engine, miner, miningCancel, blockReader, builder.NewLatestBlockBuiltStore()),
 			false,
 		),
 		stagedsync.MiningUnwindOrder,

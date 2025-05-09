@@ -23,7 +23,6 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -76,13 +75,11 @@ func TestDump(t *testing.T) {
 		chainSize   int
 	}
 
-	withConfig := func(config *chain.Config, sprints map[string]uint64) *chain.Config {
-		var copy chain.Config
-		copier.Copy(&copy, config)
+	withConfig := func(config chain.Config, sprints map[string]uint64) *chain.Config {
 		bor := *config.Bor.(*borcfg.BorConfig)
 		bor.Sprint = sprints
-		copy.Bor = &bor
-		return &copy
+		config.Bor = &bor
+		return &config
 	}
 
 	tests := []test{
@@ -104,7 +101,7 @@ func TestDump(t *testing.T) {
 		},
 		{
 			chainSize: 1000,
-			chainConfig: withConfig(params.BorDevnetChainConfig,
+			chainConfig: withConfig(*params.BorDevnetChainConfig,
 				map[string]uint64{
 					"0":    64,
 					"800":  16,
@@ -113,7 +110,7 @@ func TestDump(t *testing.T) {
 		},
 		{
 			chainSize: 2000,
-			chainConfig: withConfig(params.BorDevnetChainConfig,
+			chainConfig: withConfig(*params.BorDevnetChainConfig,
 				map[string]uint64{
 					"0":    64,
 					"800":  16,
