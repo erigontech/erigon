@@ -1106,15 +1106,15 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	sdc.patriciaTrie.SetTrace(sdc.sharedDomains.trace)
 	sdc.Reset()
 
-	if sdc.updates.IsConcurrentCommitment() {
-		rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix)
-	} else {
-		err = sdc.updates.HashSort(ctx, sdc.patriciaTrie.NextKey)
-		if err != nil {
-			return nil, err
-		}
-		rootHash, err = sdc.patriciaTrie.FoldAndGetRootHash()
-	}
+	//if sdc.updates.IsConcurrentCommitment() {
+	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix)
+	//} else {
+	//	err = sdc.updates.HashSort(ctx, sdc.patriciaTrie.NextKey)
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//	rootHash, err = sdc.patriciaTrie.FoldAndGetRootHash()
+	//}
 
 	if err != nil {
 		return nil, err
@@ -1222,6 +1222,9 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 		return 0, 0, err
 	}
 	blockNum, txNum, err = sdc.restorePatriciaState(state)
+	if err != nil {
+		return 0, 0, err
+	}
 
 	if blockNum > 0 {
 		lastBn, _, err := rawdbv3.TxNums.Last(tx)
