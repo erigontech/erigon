@@ -241,6 +241,7 @@ func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[s
 			for _, inDSeg := range inDirtySegments {
 				if inDSeg.from == delSeg.from && inDSeg.to == delSeg.to {
 					skip = true
+					break
 				}
 			}
 			if skip {

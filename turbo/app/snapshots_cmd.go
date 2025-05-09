@@ -1638,14 +1638,14 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 
 	// 2. merge both blocks and bor stuff
-	if _, err := br.MergeBlocks(ctx, log.LvlInfo, nil); err != nil {
-		return err
-	}
-	if isBor {
-		if _, err := br.MergeBorBlocks(ctx, log.LvlInfo, nil, nil); err != nil {
-			return err
-		}
-	}
+	// if _, err := br.MergeBlocks(ctx, log.LvlInfo, nil); err != nil {
+	// 	return err
+	// }
+	// if isBor {
+	// 	if _, err := br.MergeBorBlocks(ctx, log.LvlInfo, nil, nil); err != nil {
+	// 		return err
+	// 	}
+	// }
 
 	// 3. remove overlaps
 	if err := blockSnaps.RemoveOverlaps(); err != nil {
