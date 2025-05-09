@@ -214,6 +214,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	exec := exec3.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, nil)
 	defer exec.Close()
 
+	var blockHash common.Hash
 	var header *types.Header
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
@@ -248,6 +249,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				log.Warn("[rpc] header is nil", "blockNum", blockNum)
 				continue
 			}
+			blockHash = header.Hash()
 			exec.ChangeBlock(header)
 		}
 
@@ -260,14 +262,28 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			continue
 		}
 
-		r, err := api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, header, txn, txIndex, txNum)
+		_, err = exec.ExecTxn(txNum, txIndex, txn, false)
 		if err != nil {
 			return nil, err
 		}
-		if r == nil {
+		rawLogs := exec.GetRawLogs(txIndex)
+
+		// `ReadReceipt` does fill `rawLogs` calulated fields. but we don't need it anymore.
+		r, err := rawtemporaldb.ReceiptAsOfWithApply(tx, txNum, rawLogs, txIndex, blockHash, blockNum, txn)
+		if err != nil {
 			return nil, err
 		}
-		filtered := r.Logs.Filter(addrMap, crit.Topics, 0)
+		var filtered types.Logs
+		if r == nil { // if receipt data is not released yet. fallback to manual field filling. can remove in future.
+			filtered = rawLogs.Filter(addrMap, crit.Topics, 0)
+			for _, log := range filtered {
+				log.BlockNumber = blockNum
+				log.BlockHash = blockHash
+				log.TxHash = txn.Hash()
+			}
+		} else {
+			filtered = r.Logs.Filter(addrMap, crit.Topics, 0)
+		}
 
 		for _, filteredLog := range filtered {
 			logs = append(logs, &types.ErigonLog{
