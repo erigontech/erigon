@@ -133,8 +133,7 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 	}
 
 	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv)
-
-	if _, err := sd.SeekCommitment(context.Background(), tx); err != nil {
+	if _, _, err := sd.sdCtx.SeekCommitment(context.Background(), tx); err != nil {
 		return nil, err
 	}
 
@@ -215,8 +214,8 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.TemporalRwTx, block
 	return sd.Flush(ctx, rwTx)
 }
 
-func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.TemporalTx, blockNum uint64) ([]byte, error) {
-	it, err := roTx.HistoryRange(kv.StorageDomain, int(sd.TxNum()), math.MaxInt64, order.Asc, -1)
+func (sd *SharedDomainsCommitmentContext) rebuildCommitment(ctx context.Context, roTx kv.TemporalTx, blockNum uint64) ([]byte, error) {
+	it, err := roTx.HistoryRange(kv.StorageDomain, int(sd.sharedDomains.TxNum()), math.MaxInt64, order.Asc, -1)
 	if err != nil {
 		return nil, err
 	}
@@ -226,10 +225,10 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Temporal
 		if err != nil {
 			return nil, err
 		}
-		sd.sdCtx.TouchKey(kv.AccountsDomain, string(k), nil)
+		sd.TouchKey(kv.AccountsDomain, string(k), nil)
 	}
 
-	it, err = roTx.HistoryRange(kv.StorageDomain, int(sd.TxNum()), math.MaxInt64, order.Asc, -1)
+	it, err = roTx.HistoryRange(kv.StorageDomain, int(sd.sharedDomains.TxNum()), math.MaxInt64, order.Asc, -1)
 	if err != nil {
 		return nil, err
 	}
@@ -240,67 +239,20 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Temporal
 		if err != nil {
 			return nil, err
 		}
-		sd.sdCtx.TouchKey(kv.StorageDomain, string(k), nil)
+		sd.TouchKey(kv.StorageDomain, string(k), nil)
 	}
 
-	sd.sdCtx.Reset()
+	sd.Reset()
 	return sd.ComputeCommitment(ctx, true, blockNum, "rebuild commit")
 }
 
 // SeekCommitment lookups latest available commitment and sets it as current
-func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromBlockBeginning uint64, err error) {
-	bn, txn, ok, err := sd.sdCtx.SeekCommitment(tx)
+func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (err error) {
+	_, _, err = sd.sdCtx.SeekCommitment(ctx, tx)
 	if err != nil {
-		return 0, err
+		return err
 	}
-	if ok {
-		if bn > 0 {
-			lastBn, _, err := rawdbv3.TxNums.Last(tx)
-			if err != nil {
-				return 0, err
-			}
-			if lastBn < bn {
-				return 0, fmt.Errorf("%w: TxNums index is at block %d and behind commitment %d", ErrBehindCommitment, lastBn, bn)
-			}
-		}
-		sd.SetBlockNum(bn)
-		sd.SetTxNum(txn)
-		return 0, nil
-	}
-	// handle case when we have no commitment, but have executed blocks
-	bnBytes, err := tx.GetOne(kv.SyncStageProgress, []byte("Execution")) //TODO: move stages to erigon-lib
-	if err != nil {
-		return 0, err
-	}
-	if len(bnBytes) == 8 {
-		bn = binary.BigEndian.Uint64(bnBytes)
-		txn, err = rawdbv3.TxNums.Max(tx, bn)
-		if err != nil {
-			return 0, err
-		}
-	}
-	if bn == 0 && txn == 0 {
-		sd.SetBlockNum(0)
-		sd.SetTxNum(0)
-		return 0, nil
-	}
-	sd.SetBlockNum(bn)
-	sd.SetTxNum(txn)
-	newRh, err := sd.rebuildCommitment(ctx, sd.roTtx, bn)
-	if err != nil {
-		return 0, err
-	}
-	if bytes.Equal(newRh, commitment.EmptyRootHash) {
-		sd.SetBlockNum(0)
-		sd.SetTxNum(0)
-		return 0, nil
-	}
-	if sd.trace {
-		fmt.Printf("rebuilt commitment %x %d %d\n", newRh, sd.TxNum(), sd.BlockNum())
-	}
-	sd.SetBlockNum(bn)
-	sd.SetTxNum(txn)
-	return 0, nil
+	return nil
 }
 
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {
@@ -1230,10 +1182,6 @@ const keyCommitmentStateS = "state"
 
 var keyCommitmentState = []byte(keyCommitmentStateS)
 
-func (sd *SharedDomains) LatestCommitmentState(tx kv.Tx) (blockNum, txNum uint64, state []byte, err error) {
-	return sd.sdCtx.LatestCommitmentState()
-}
-
 func _decodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
 	return binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16])
 }
@@ -1256,15 +1204,56 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState() (blockNum, tx
 	return blockNum, txNum, state, nil
 }
 
-// SeekCommitment [sinceTx, untilTx] searches for last encoded state from DomainCommitted
+// SeekCommitment searches for last encoded state from DomainCommitted
 // and if state found, sets it up to current domain
-func (sdc *SharedDomainsCommitmentContext) SeekCommitment(tx kv.Tx) (blockNum, txNum uint64, ok bool, err error) {
+func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, tx kv.Tx) (blockNum, txNum uint64, err error) {
 	_, _, state, err := sdc.LatestCommitmentState()
 	if err != nil {
-		return 0, 0, false, err
+		return 0, 0, err
 	}
 	blockNum, txNum, err = sdc.restorePatriciaState(state)
-	return blockNum, txNum, true, err
+
+	if blockNum > 0 {
+		lastBn, _, err := rawdbv3.TxNums.Last(tx)
+		if err != nil {
+			return 0, 0, err
+		}
+		if lastBn < blockNum {
+			return 0, 0, fmt.Errorf("%w: TxNums index is at block %d and behind commitment %d", ErrBehindCommitment, lastBn, blockNum)
+		}
+		sdc.sharedDomains.SetBlockNum(blockNum)
+		sdc.sharedDomains.SetTxNum(txNum)
+		return blockNum, txNum, err
+	}
+
+	// handle case when we have no commitment, but have executed blocks
+	bnBytes, err := tx.GetOne(kv.SyncStageProgress, []byte("Execution")) //TODO: move stages to erigon-lib
+	if err != nil {
+		return 0, 0, err
+	}
+	if len(bnBytes) == 8 {
+		blockNum = binary.BigEndian.Uint64(bnBytes)
+		txNum, err = rawdbv3.TxNums.Max(tx, blockNum)
+		if err != nil {
+			return 0, 0, err
+		}
+	}
+	sdc.sharedDomains.SetBlockNum(blockNum)
+	sdc.sharedDomains.SetTxNum(txNum)
+	if blockNum == 0 && txNum == 0 {
+		return 0, 0, err
+	}
+	newRh, err := sdc.rebuildCommitment(ctx, sdc.sharedDomains.roTtx, blockNum)
+	if err != nil {
+		return 0, 0, err
+	}
+	if bytes.Equal(newRh, commitment.EmptyRootHash) {
+		sdc.sharedDomains.SetBlockNum(0)
+		sdc.sharedDomains.SetTxNum(0)
+		return 0, 0, nil
+	}
+	log.Info("[commitment] restored state: block=%d txn=%d rootHash=%x\n", blockNum, txNum, newRh)
+	return blockNum, txNum, nil
 }
 
 // After commitment state is retored, method .Reset() should NOT be called until new updates.
