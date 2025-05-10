@@ -959,7 +959,7 @@ func ExecV3(ctx context.Context,
 
 		applyResults := make(chan applyResult, 100_000)
 
-		if err := executor.executeBlocks(ctx, asyncTx, blockNum, maxBlockNum, readAhead, applyResults); err != nil {
+		if err := executor.executeBlocks(executorContext, asyncTx, blockNum, maxBlockNum, readAhead, applyResults); err != nil {
 			return err
 		}
 
