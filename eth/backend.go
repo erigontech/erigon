@@ -1068,7 +1068,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			logger, backend.sentriesClient.Hd, executionRpc,
 			backend.sentriesClient.Bd, backend.sentriesClient.BroadcastNewBlock, backend.sentriesClient.SendBodyRequest, blockReader,
 			backend.chainDB, chainConfig, tmpdir, config.Sync),
-		config.InternalCL, // If the chain supports the engine API, then we should not make the server fail.
+		config.InternalCL && !config.CaplinConfig.EnableEngineAPI, // If the chain supports the engine API, then we should not make the server fail.
 		false,
 		config.Miner.EnabledPOS,
 		!config.PolygonPosSingleSlotFinality,
@@ -1078,6 +1078,19 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	if config.InternalCL && (clparams.EmbeddedSupported(config.NetworkID) || config.CaplinConfig.IsDevnet()) {
 		config.CaplinConfig.NetworkId = clparams.NetworkType(config.NetworkID)
 		config.CaplinConfig.LoopBlockLimit = uint64(config.LoopBlockLimit)
+		if config.CaplinConfig.EnableEngineAPI {
+			jwtSecretHex, err := os.ReadFile(httpRpcCfg.JWTSecretPath)
+			if err != nil {
+				logger.Error("failed to read jwt secret", "err", err, "path", httpRpcCfg.JWTSecretPath)
+				return nil, err
+			}
+			jwtSecret := libcommon.FromHex(strings.TrimSpace(string(jwtSecretHex)))
+			executionEngine, err = executionclient.NewExecutionClientRPC(jwtSecret, httpRpcCfg.AuthRpcHTTPListenAddress, httpRpcCfg.AuthRpcPort)
+			if err != nil {
+				logger.Error("failed to create execution client", "err", err)
+				return nil, err
+			}
+		}
 		go func() {
 			eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, backend.chainDB)
 			if err := caplin1.RunCaplinService(ctx, executionEngine, config.CaplinConfig, dirs, eth1Getter, backend.downloaderClient, creds, segmentsBuildLimiter); err != nil {
