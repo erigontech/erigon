@@ -151,7 +151,7 @@ type TxPool struct {
 	ethBackend              remote.ETHBACKENDClient
 	builderNotifyNewTxns    func()
 	logger                  log.Logger
-	auths                   map[common.Address]*metaTxn // All accounts with a pooled authorization
+	auths                   map[NonceAuthority]*metaTxn // All authority accounts with a pooled authorization
 	blobHashToTxn           map[common.Hash]struct {
 		index   int
 		txnHash common.Hash
@@ -238,11 +238,11 @@ func New(
 		builderNotifyNewTxns:    builderNotifyNewTxns,
 		newSlotsStreams:         newSlotsStreams,
 		logger:                  logger,
-		auths:                   map[common.Address]*metaTxn{},
-		blobHashToTxn: map[common.Hash]struct {
+		auths:                   make(map[NonceAuthority]*metaTxn),
+		blobHashToTxn: make(map[common.Hash]struct {
 			index   int
 			txnHash common.Hash
-		}{},
+		}),
 	}
 
 	if shanghaiTime != nil {
@@ -1064,6 +1064,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 		return txpoolcfg.NonceTooLow
 	}
+
 	// Transactor should have enough funds to cover the costs
 	total := requiredBalance(txn)
 	if senderBalance.Cmp(total) < 0 {
@@ -1596,34 +1597,32 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		return txpoolcfg.FeeTooLow
 	}
 
-	// Do not allow transaction from if sender has authority
-	addr, ok := p.senders.getAddr(mt.TxnSlot.SenderID)
+	// Do not allow transaction from this same (sender + nonce) if sender has existing pooled authorization as authority
+	senderAddr, ok := p.senders.senderID2Addr[mt.TxnSlot.SenderID]
 	if !ok {
 		p.logger.Info("senderID not registered, discarding transaction for safety")
 		return txpoolcfg.InvalidSender
 	}
-	if _, ok := p.auths[addr]; ok {
+	if _, ok := p.auths[NonceAuthority{mt.TxnSlot.Nonce, senderAddr.String()}]; ok {
 		return txpoolcfg.ErrAuthorityReserved
 	}
 
+
+
 	// Check if we have txn with same authorization in the pool
 	if mt.TxnSlot.Type == SetCodeTxnType {
-		foundDuplicate := false
 		for _, a := range mt.TxnSlot.Authorities {
-			p.logger.Debug("setCodeTxn ", "authority", a.String())
-			if _, ok := p.auths[*a]; ok {
-				foundDuplicate = true
-				p.logger.Debug("setCodeTxn ", "DUPLICATE authority", a.String(), "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
-				break
+			// Self authorization nonce should be senderNonce + 1 
+			if a.authority == senderAddr.String() && a.nonce != mt.TxnSlot.Nonce + 1 {
+				return txpoolcfg.NonceTooLow
+			}
+			if _, ok := p.auths[NonceAuthority{a.nonce, a.authority}]; ok {
+				p.logger.Debug("setCodeTxn ", "DUPLICATE authority", a.authority, "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
+				return txpoolcfg.ErrAuthorityReserved
 			}
 		}
-
-		if foundDuplicate {
-			return txpoolcfg.ErrAuthorityReserved
-		} else {
-			for _, a := range mt.TxnSlot.Authorities {
-				p.auths[*a] = mt
-			}
+		for _, a := range mt.TxnSlot.Authorities {
+			p.auths[NonceAuthority{a.nonce, a.authority}] = mt
 		}
 	}
 
@@ -1677,7 +1676,7 @@ func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
 	}
 	if mt.TxnSlot.Type == SetCodeTxnType {
 		for _, a := range mt.TxnSlot.Authorities {
-			delete(p.auths, *a)
+			delete(p.auths, a)
 		}
 	}
 }
