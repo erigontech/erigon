@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 )
 
@@ -90,7 +91,14 @@ func (b *builderClient) GetHeader(ctx context.Context, slot int64, parentHash co
 	// https://ethereum.github.io/builder-specs/#/Builder/getHeader
 	path := fmt.Sprintf("/eth/v1/builder/header/%d/%s/%s", slot, parentHash.Hex(), pubKey.Hex())
 	url := b.url.JoinPath(path).String()
-	header, err := httpCall[ExecutionHeader](ctx, b.httpClient, http.MethodGet, url, nil, nil)
+	var headerIn ExecutionHeader
+	epoch := uint64(slot / int64(b.beaconConfig.SlotsPerEpoch))
+	headerIn.Data = ExecutionHeaderData{Message: ExecutionHeaderMessage{
+		Header:             cltypes.NewEth1Header(b.beaconConfig.GetCurrentStateVersion(epoch)),
+		ExecutionRequests:  cltypes.NewExecutionRequests(b.beaconConfig),
+		BlobKzgCommitments: solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
+	}}
+	header, err := httpCall[ExecutionHeader](ctx, b.httpClient, http.MethodGet, url, nil, nil, headerIn)
 	if err != nil {
 		log.Warn("[mev builder] httpCall error on GetExecutionPayloadHeader", "err", err, "slot", slot, "parentHash", parentHash.Hex(), "pubKey", pubKey.Hex())
 		return nil, err
@@ -109,7 +117,7 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 	headers := map[string]string{
 		"Eth-Consensus-Version": block.Version().String(),
 	}
-	resp, err := httpCall[BlindedBlockResponse](ctx, b.httpClient, http.MethodPost, url, headers, bytes.NewBuffer(payload))
+	resp, err := httpCall(ctx, b.httpClient, http.MethodPost, url, headers, bytes.NewBuffer(payload), BlindedBlockResponse{})
 	if err != nil {
 		log.Warn("[mev builder] httpCall error on SubmitBlindedBlocks", "err", err, "slot", block.Block.Slot)
 		return nil, nil, err
@@ -143,7 +151,7 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 func (b *builderClient) GetStatus(ctx context.Context) error {
 	path := "/eth/v1/builder/status"
 	url := b.url.JoinPath(path).String()
-	_, err := httpCall[json.RawMessage](ctx, b.httpClient, http.MethodGet, url, nil, nil)
+	_, err := httpCall[json.RawMessage](ctx, b.httpClient, http.MethodGet, url, nil, nil, json.RawMessage{})
 	if errors.Is(err, ErrNoContent) {
 		// no content is ok, we just need to check if the server is up
 		return nil
@@ -151,7 +159,7 @@ func (b *builderClient) GetStatus(ctx context.Context) error {
 	return err
 }
 
-func httpCall[T any](ctx context.Context, client *http.Client, method, url string, headers map[string]string, payloadReader io.Reader) (*T, error) {
+func httpCall[T any](ctx context.Context, client *http.Client, method, url string, headers map[string]string, payloadReader io.Reader, body T) (*T, error) {
 	request, err := http.NewRequestWithContext(ctx, method, url, payloadReader)
 	if err != nil {
 		log.Warn("[mev builder] http.NewRequest failed", "err", err, "url", url, "method", method)
@@ -190,7 +198,6 @@ func httpCall[T any](ctx context.Context, client *http.Client, method, url strin
 	}
 
 	// read response body
-	var body T
 	if response.Body == nil {
 		return &body, nil
 	}
