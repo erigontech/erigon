@@ -76,7 +76,7 @@ func (b *builderClient) RegisterValidator(ctx context.Context, registers []*clty
 	if err != nil {
 		return err
 	}
-	_, err = httpCall[json.RawMessage](ctx, b.httpClient, http.MethodPost, url, nil, bytes.NewBuffer(payload))
+	_, err = httpCall[json.RawMessage](ctx, b.httpClient, http.MethodPost, url, nil, bytes.NewBuffer(payload), json.RawMessage{})
 	if errors.Is(err, ErrNoContent) {
 		// no content is ok
 		return nil
