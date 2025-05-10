@@ -175,7 +175,7 @@ func TestBuildFiles_Unmarked(t *testing.T) {
 	from, to := RootNum(0), RootNum(entries_count)
 	files := make([]state.FilesItem, 0)
 	for built {
-		file, built2, err := uma.BuildFile(ctx, from, to, db, ps)
+		file, built2, err := uma.BuildFile(ctx, from, to, db, 1, ps)
 		require.NoError(t, err)
 		if i < int(num_files) {
 			require.NotNil(t, file)

@@ -218,6 +218,10 @@ func (a *Forkable[T]) Aligned(aligned bool) {
 	a.unaligned = !aligned
 }
 
+func (a *Forkable[T]) Repo() *SnapshotRepo {
+	return a.snaps
+}
+
 // marked tx
 type MarkedTx struct {
 	*ProtoForkableTx
@@ -301,7 +305,7 @@ func (m *MarkedTx) HasRootNumUpto(ctx context.Context, to RootNum, tx kv.Tx) (bo
 		return false, fmt.Errorf("err RootNum2Num %v %w", to, err)
 	}
 
-	return iLastNum >= eto.Uint64(), nil
+	return iLastNum+1 >= eto.Uint64(), nil
 }
 
 func (m *MarkedTx) DebugFiles() ForkableFilesTxI {
