@@ -235,23 +235,28 @@ func (tx *Tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, as
 	return it, nil
 }
 
-func (tx *Tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, bool, error) {
-	it, err := tx.Debug().RangeLatest(name, prefix, nil, 1)
+func (tx *Tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
+	to, ok := kv.NextSubtree(prefix)
+	if !ok {
+		to = nil
+	}
+
+	it, err := tx.Debug().RangeLatest(name, prefix, to, 1)
 	if err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
 
 	defer it.Close()
 	if !it.HasNext() {
-		return nil, false, nil
+		return nil, nil, false, nil
 	}
 
-	k, _, err := it.Next()
+	k, v, err := it.Next()
 	if err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
 
-	return k, true, nil
+	return k, v, true, nil
 }
 
 func (tx *Tx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err error) {
