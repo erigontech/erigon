@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon/eth/consensuschain"
@@ -238,49 +237,17 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 		ibs.FinalizeTx(txTask.Config.Rules(txTask.BlockNumber(), txTask.BlockTime()), stateWriter)
 	}
 
-	// Create a new receipt for the transaction, storing the intermediate root and gas used by the tx.
-	result.Receipt = &types.Receipt{
-		Type:      txTask.TxType(),
-		PostState: nil,
-		GasUsed:   result.ExecutionResult.GasUsed,
-		TxHash:    txHash,
-		// Set the receipt logs and create the bloom filter.
-		Logs:             ibs.GetLogs(txTask.TxIndex, txHash, blockNum, blockHash),
-		BlockHash:        blockHash,
-		BlockNumber:      new(big.Int).SetUint64(blockNum),
-		TransactionIndex: uint(txTask.TxIndex),
-	}
-
-	if prevReceipt != nil {
-		result.Receipt.CumulativeGasUsed = prevReceipt.CumulativeGasUsed + result.ExecutionResult.GasUsed
-	} else {
-		result.Receipt.CumulativeGasUsed = result.ExecutionResult.GasUsed
-	}
-
-	if result.ExecutionResult.Failed() {
-		result.Receipt.Status = types.ReceiptStatusFailed
-	} else {
-		result.Receipt.Status = types.ReceiptStatusSuccessful
-	}
-
-	// If the transaction created a contract, store the creation address in the receipt.
-	message, err := task.TxMessage()
+	receipt, err := result.CreateReceipt(prevReceipt)
 
 	if err != nil {
 		return nil, err
 	}
 
-	if message.To() == nil {
-		result.Receipt.ContractAddress = crypto.CreateAddress(message.From(), txTask.Tx().GetNonce())
-	}
-
-	result.Receipt.Bloom = types.CreateBloom(types.Receipts{result.Receipt})
-
 	if hooks := result.TracingHooks(); hooks != nil && hooks.OnTxEnd != nil {
-		hooks.OnTxEnd(result.Receipt, result.Err)
+		hooks.OnTxEnd(receipt, result.Err)
 	}
 
-	return result.Receipt, nil
+	return receipt, nil
 }
 
 type taskVersion struct {
