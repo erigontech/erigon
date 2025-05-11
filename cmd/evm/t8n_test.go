@@ -255,7 +255,7 @@ func TestT8n(t *testing.T) {
 }
 
 func TestEvmRun(t *testing.T) {
-  if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
 		t.Skip("Windows and macOS tests requires fixing.")
 	}
 	t.Parallel()
