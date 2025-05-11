@@ -42,7 +42,9 @@ func (m mockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 
 var (
 	mockUrl, _       = url.Parse("https://anywhere.io")
-	mockBeaconConfig = &clparams.BeaconChainConfig{}
+	mockBeaconConfig = &clparams.BeaconChainConfig{
+		SlotsPerEpoch: 32,
+	}
 
 	//go:embed test_data/mock_blinded_block.json
 	mockBlindedBlockBytes []byte
@@ -216,6 +218,7 @@ func TestGetHeader(t *testing.T) {
 			beaconConfig: mockBeaconConfig,
 		}
 		header, err := builderClient.GetHeader(ctx, mockSlot, mockParentHash, mockPubKey)
+		header.Data.Message.ExecutionRequests = nil
 		require.NoError(t, err)
 		require.NotNil(t, header)
 		// marshal and unmarshal to compare

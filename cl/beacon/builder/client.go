@@ -92,7 +92,11 @@ func (b *builderClient) GetHeader(ctx context.Context, slot int64, parentHash co
 	path := fmt.Sprintf("/eth/v1/builder/header/%d/%s/%s", slot, parentHash.Hex(), pubKey.Hex())
 	url := b.url.JoinPath(path).String()
 	var headerIn ExecutionHeader
-	epoch := uint64(slot / int64(b.beaconConfig.SlotsPerEpoch))
+	var epoch uint64
+	//
+	if b.beaconConfig.SlotsPerEpoch != 0 {
+		epoch = uint64(slot / int64(b.beaconConfig.SlotsPerEpoch))
+	}
 	headerIn.Data = ExecutionHeaderData{Message: ExecutionHeaderMessage{
 		Header:             cltypes.NewEth1Header(b.beaconConfig.GetCurrentStateVersion(epoch)),
 		ExecutionRequests:  cltypes.NewExecutionRequests(b.beaconConfig),
