@@ -106,13 +106,13 @@ func (b *builderClient) GetHeader(ctx context.Context, slot int64, parentHash co
 	return header, nil
 }
 
-func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.SignedBlindedBeaconBlock) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, error) {
+func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.SignedBlindedBeaconBlock) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *cltypes.ExecutionRequests, error) {
 	// https://ethereum.github.io/builder-specs/#/Builder/submitBlindedBlocks
 	path := "/eth/v1/builder/blinded_blocks"
 	url := b.url.JoinPath(path).String()
 	payload, err := json.Marshal(block)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	headers := map[string]string{
 		"Eth-Consensus-Version": block.Version().String(),
@@ -120,16 +120,17 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 	resp, err := httpCall(ctx, b.httpClient, http.MethodPost, url, headers, bytes.NewBuffer(payload), BlindedBlockResponse{})
 	if err != nil {
 		log.Warn("[mev builder] httpCall error on SubmitBlindedBlocks", "err", err, "slot", block.Block.Slot)
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	var eth1Block *cltypes.Eth1Block
 	var blobsBundle *engine_types.BlobsBundleV1
+	var executionRequests *cltypes.ExecutionRequests
 	switch resp.Version {
 	case "bellatrix", "capella":
 		eth1Block = &cltypes.Eth1Block{}
 		if err := json.Unmarshal(resp.Data, block); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 	case "deneb":
 		denebResp := &struct {
@@ -140,12 +141,28 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 			BlobsBundle:      &engine_types.BlobsBundleV1{},
 		}
 		if err := json.Unmarshal(resp.Data, denebResp); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		eth1Block = denebResp.ExecutionPayload
 		blobsBundle = denebResp.BlobsBundle
+	case "electra":
+		denebResp := &struct {
+			ExecutionPayload  *cltypes.Eth1Block          `json:"execution_payload"`
+			BlobsBundle       *engine_types.BlobsBundleV1 `json:"blobs_bundle"`
+			ExecutionRequests *cltypes.ExecutionRequests  `json:"execution_requests"`
+		}{
+			ExecutionPayload:  cltypes.NewEth1Block(clparams.DenebVersion, b.beaconConfig),
+			BlobsBundle:       &engine_types.BlobsBundleV1{},
+			ExecutionRequests: cltypes.NewExecutionRequests(b.beaconConfig),
+		}
+		if err := json.Unmarshal(resp.Data, denebResp); err != nil {
+			return nil, nil, nil, err
+		}
+		eth1Block = denebResp.ExecutionPayload
+		blobsBundle = denebResp.BlobsBundle
+		executionRequests = denebResp.ExecutionRequests
 	}
-	return eth1Block, blobsBundle, nil
+	return eth1Block, blobsBundle, executionRequests, nil
 }
 
 func (b *builderClient) GetStatus(ctx context.Context) error {
