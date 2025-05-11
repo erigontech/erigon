@@ -278,7 +278,7 @@ func TestSubmitBlindedBlocks(t *testing.T) {
 			url:          mockUrl,
 			beaconConfig: mockBeaconConfig,
 		}
-		block, bundle, err := builderClient.SubmitBlindedBlocks(ctx, mockBlindedBlock)
+		block, bundle, _, err := builderClient.SubmitBlindedBlocks(ctx, mockBlindedBlock)
 		require.NoError(t, err)
 		result := struct {
 			Version string `json:"version"`
@@ -319,7 +319,7 @@ func TestSubmitBlindedBlocks(t *testing.T) {
 			url:          mockUrl,
 			beaconConfig: mockBeaconConfig,
 		}
-		block, bundle, err := builderClient.SubmitBlindedBlocks(ctx, mockBlindedBlock)
+		block, bundle, _, err := builderClient.SubmitBlindedBlocks(ctx, mockBlindedBlock)
 		require.Error(t, err)
 		require.Nil(t, block)
 		require.Nil(t, bundle)
