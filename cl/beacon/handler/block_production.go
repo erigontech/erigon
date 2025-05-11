@@ -225,17 +225,17 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 
 	log.Debug("[Beacon API] Producing block", "slot", targetSlot)
 	// builder boost factor controls block choice between local execution node or builder
-	var builderBoostFactor = uint64(10000)
-	// builderBoostFactorStr := r.URL.Query().Get("builder_boost_factor")
-	// if builderBoostFactorStr != "" {
-	// 	builderBoostFactor, err = strconv.ParseUint(builderBoostFactorStr, 10, 64)
-	// 	if err != nil {
-	// 		return nil, beaconhttp.NewEndpointError(
-	// 			http.StatusBadRequest,
-	// 			fmt.Errorf("invalid builder_boost_factor: %v", err),
-	// 		)
-	// 	}
-	// }
+	builderBoostFactor := uint64(100)
+	builderBoostFactorStr := r.URL.Query().Get("builder_boost_factor")
+	if builderBoostFactorStr != "" {
+		builderBoostFactor, err = strconv.ParseUint(builderBoostFactorStr, 10, 64)
+		if err != nil {
+			return nil, beaconhttp.NewEndpointError(
+				http.StatusBadRequest,
+				fmt.Errorf("invalid builder_boost_factor: %v", err),
+			)
+		}
+	}
 
 	baseBlockRoot := a.syncedData.HeadRoot()
 	if baseBlockRoot == (libcommon.Hash{}) {
