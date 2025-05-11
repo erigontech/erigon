@@ -992,7 +992,7 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 		}
 	}
 	// submit and unblind the signedBlindedBlock
-	blockPayload, blobsBundle, err := a.builderClient.SubmitBlindedBlocks(r.Context(), signedBlindedBlock)
+	blockPayload, blobsBundle, executionRequests, err := a.builderClient.SubmitBlindedBlocks(r.Context(), signedBlindedBlock)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
@@ -1038,6 +1038,10 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 				Commitment: libcommon.Bytes48(blobsBundle.Commitments[i]),
 			})
 		}
+	}
+
+	if blockPayload.Version() >= clparams.ElectraVersion {
+		signedBlock.Block.Body.ExecutionRequests = executionRequests
 	}
 
 	// broadcast the block
