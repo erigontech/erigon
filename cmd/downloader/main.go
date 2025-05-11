@@ -236,9 +236,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	version := "erigon: " + params.VersionWithCommit(params.GitCommit)
 
 	webseedsList := common.CliString2Array(webseeds)
-	if known, ok := snapcfg.KnownWebseeds[chain]; ok {
-		webseedsList = append(webseedsList, known...)
-	}
+	webseedsList = append(webseedsList, snapcfg.GetWebseeds(chain)...)
 	if seedbox {
 		_, err = downloadercfg.LoadSnapshotsHashes(ctx, dirs, chain)
 		if err != nil {
@@ -443,14 +441,12 @@ var torrentMagnet = &cobra.Command{
 func manifestVerify(ctx context.Context, logger log.Logger) error {
 	webseedsList := common.CliString2Array(webseeds)
 	if len(webseedsList) == 0 { // fallback to default if exact list not passed
-		if known, ok := snapcfg.KnownWebseeds[chain]; ok {
-			for _, s := range known {
-				//TODO: enable validation of this buckets also. skipping to make CI useful.k
-				if strings.Contains(s, "erigon2-v2") {
-					continue
-				}
-				webseedsList = append(webseedsList, s)
+		for _, s := range snapcfg.GetWebseeds(chain) {
+			//TODO: enable validation of this buckets also. skipping to make CI useful.k
+			if strings.Contains(s, "erigon2-v2") {
+				continue
 			}
+			webseedsList = append(webseedsList, s)
 		}
 	}
 
