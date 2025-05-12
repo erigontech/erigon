@@ -72,7 +72,7 @@ var LightClientGPO = gaspricecfg.Config{
 
 // Defaults contains default settings for use on the Ethereum main net.
 var Defaults = Config{
-	Sync: Sync{
+	Sync: snapshotsync.Sync{
 		ExecWorkerCount:            estimate.BlocksExecution.WorkersHalf(), //only half of CPU, other half will spend for snapshots build/merge/prune
 		BodyCacheLimit:             256 * 1024 * 1024,
 		BodyDownloadTimeoutSeconds: 2,
@@ -135,7 +135,7 @@ func init() {
 
 // Config contains configuration options for ETH protocol.
 type Config struct {
-	Sync
+	snapshotsync.Sync
 
 	// The genesis block, which is inserted if the database is empty.
 	// If nil, the Ethereum main net block is used.
@@ -232,26 +232,4 @@ type Config struct {
 
 	// Account Abstraction
 	AllowAA bool
-}
-
-type Sync struct {
-	// LoopThrottle sets a minimum time between staged loop iterations
-	LoopThrottle     time.Duration
-	ExecWorkerCount  int
-	ReconWorkerCount int
-
-	BodyCacheLimit             datasize.ByteSize
-	BodyDownloadTimeoutSeconds int // TODO: change to duration
-	BreakAfterStage            string
-	LoopBlockLimit             uint
-	ParallelStateFlushing      bool
-
-	UploadLocation   string
-	UploadFrom       types.BlockNumber
-	FrozenBlockLimit uint64
-
-	ChaosMonkey              bool
-	AlwaysGenerateChangesets bool
-	KeepExecutionProofs      bool
-	PersistReceiptsCacheV2   bool
 }

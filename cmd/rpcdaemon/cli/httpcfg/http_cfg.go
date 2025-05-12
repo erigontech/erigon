@@ -22,7 +22,6 @@ import (
 	"github.com/erigontech/erigon-db/snapshotsync"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -75,7 +74,7 @@ type HttpCfg struct {
 	TxPoolApiAddr                     string
 	StateCache                        kvcache.CoherentConfig
 	Snap                              snapshotsync.BlocksFreezing
-	Sync                              ethconfig.Sync
+	Sync                              snapshotsync.Sync
 
 	// GRPC server
 	GRPCServerEnabled      bool

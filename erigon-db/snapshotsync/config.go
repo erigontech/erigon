@@ -16,7 +16,14 @@
 
 package snapshotsync
 
-import "strings"
+import (
+	"strings"
+	"time"
+
+	"github.com/c2h5oh/datasize"
+
+	"github.com/erigontech/erigon-lib/types"
+)
 
 type BlocksFreezing struct {
 	KeepBlocks        bool // produce new snapshots of blocks but don't remove blocks from DB
@@ -48,4 +55,26 @@ var (
 
 func NewSnapCfg(keepBlocks, produceE2, produceE3 bool, chainName string) BlocksFreezing {
 	return BlocksFreezing{KeepBlocks: keepBlocks, ProduceE2: produceE2, ProduceE3: produceE3, ChainName: chainName}
+}
+
+type Sync struct {
+	// LoopThrottle sets a minimum time between staged loop iterations
+	LoopThrottle     time.Duration
+	ExecWorkerCount  int
+	ReconWorkerCount int
+
+	BodyCacheLimit             datasize.ByteSize
+	BodyDownloadTimeoutSeconds int // TODO: change to duration
+	BreakAfterStage            string
+	LoopBlockLimit             uint
+	ParallelStateFlushing      bool
+
+	UploadLocation   string
+	UploadFrom       types.BlockNumber
+	FrozenBlockLimit uint64
+
+	ChaosMonkey              bool
+	AlwaysGenerateChangesets bool
+	KeepExecutionProofs      bool
+	PersistReceiptsCacheV2   bool
 }

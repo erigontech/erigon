@@ -40,6 +40,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-db/rawdb"
+	dbsnapshotsync "github.com/erigontech/erigon-db/snapshotsync"
 	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
@@ -61,7 +62,6 @@ import (
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/state/stats"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -96,13 +96,13 @@ type SnapshotsCfg struct {
 	caplinState      bool
 	silkworm         *silkworm.Silkworm
 	snapshotUploader *snapshotUploader
-	syncConfig       ethconfig.Sync
+	syncConfig       dbsnapshotsync.Sync
 	prune            prune.Mode
 }
 
 func StageSnapshotsCfg(db kv.TemporalRwDB,
 	chainConfig chain.Config,
-	syncConfig ethconfig.Sync,
+	syncConfig dbsnapshotsync.Sync,
 	dirs datadir.Dirs,
 	blockRetire services.BlockRetire,
 	snapshotDownloader protodownloader.DownloaderClient,
