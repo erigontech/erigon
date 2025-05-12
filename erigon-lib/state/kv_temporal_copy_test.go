@@ -314,6 +314,7 @@ func (tx *Tx) GetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v
 	return tx.aggtx.DebugGetLatestFromFiles(domain, k, maxTxNum)
 }
 func (db *DB) DomainTables(domain ...kv.Domain) []string { return db.agg.DomainTables(domain...) }
+func (db *DB) ReloadSalt() error                         { return db.agg.ReloadSalt() }
 func (tx *Tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
 	return tx.aggtx.DomainFiles(domain...)
 }

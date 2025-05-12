@@ -148,15 +148,11 @@ func newAggregatorOld(ctx context.Context, dirs datadir.Dirs, aggregationStep ui
 	}, nil
 }
 
-// TODO: exported for idx_optimize.go
-// TODO: this utility can be safely deleted after PR https://github.com/erigontech/erigon/pull/12907/ is rolled out in production
-func GetStateIndicesSalt(baseDir string) (salt *uint32, err error) {
-	return getStateIndicesSalt(baseDir)
-}
-
-// getStateIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
-// if db is Read-Only (for example remote RPCDaemon or utilities) - we will not create new indices - and existing indices have salt in metadata.
-func getStateIndicesSalt(baseDir string) (salt *uint32, err error) {
+// GetStateIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
+// if db is Read-Only (for example remote RPCDaemon or utilities) - we will not create new indices -
+// and existing indices have salt in metadata.
+func GetStateIndicesSalt(dirs datadir.Dirs, genNew bool, logger log.Logger) (salt *uint32, err error) {
+	baseDir := dirs.Snap
 	saltExists, err := dir.FileExist(filepath.Join(baseDir, "salt.txt"))
 	if err != nil {
 		return nil, err
@@ -179,6 +175,13 @@ func getStateIndicesSalt(baseDir string) (salt *uint32, err error) {
 
 	// Initialize salt if it doesn't exist
 	if !fexists {
+		if !genNew {
+			logger.Info("not generating new salt file as genNew=false")
+			// Using nil salt for now, actual value should be injected when salt file is downloaded
+			return nil, nil
+		}
+		logger.Info("generating new salt file")
+
 		saltV := rand2.Uint32()
 		salt = &saltV
 		saltBytes := make([]byte, 4)
@@ -202,7 +205,7 @@ func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.D
 	cfg := Schema.GetDomainCfg(name)
 	//TODO: move dynamic part of config to InvertedIndex
 	cfg.restrictSubsetFileDeletions = a.commitmentValuesTransform
-	cfg.hist.iiCfg.salt = salt
+	cfg.hist.iiCfg.salt.Store(salt)
 	cfg.hist.iiCfg.dirs = dirs
 	a.d[name], err = NewDomain(cfg, a.aggregationStep, logger)
 	if err != nil {
@@ -213,7 +216,7 @@ func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.D
 
 func (a *Aggregator) registerII(idx kv.InvertedIdx, salt *uint32, dirs datadir.Dirs, logger log.Logger) error {
 	idxCfg := Schema.GetIICfg(idx)
-	idxCfg.salt = salt
+	idxCfg.salt.Store(salt)
 	idxCfg.dirs = dirs
 
 	if ii := a.searchII(idx); ii != nil {
@@ -237,6 +240,29 @@ func (a *Aggregator) DisableFsync() {
 	for _, ii := range a.iis {
 		ii.DisableFsync()
 	}
+}
+
+func (a *Aggregator) ReloadSalt() error {
+	salt, err := GetStateIndicesSalt(a.dirs, false, a.logger)
+	if err != nil {
+		return err
+	}
+
+	if salt == nil {
+		return fmt.Errorf("salt not found on ReloadSalt")
+	}
+
+	for _, d := range a.d {
+		d.hist.iiCfg.salt.Store(salt)
+		d.History.histCfg.iiCfg.salt.Store(salt)
+		d.History.InvertedIndex.iiCfg.salt.Store(salt)
+	}
+
+	for _, ii := range a.iis {
+		ii.iiCfg.salt.Store(salt)
+	}
+
+	return nil
 }
 
 func (a *Aggregator) OpenFolder() error {

@@ -186,6 +186,7 @@ func (db *DB) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 }
 func (db *DB) Debug() kv.TemporalDebugDB                           { return kv.TemporalDebugDB(db) }
 func (db *DB) DomainTables(domain ...kv.Domain) []string           { panic("not implemented") }
+func (db *DB) ReloadSalt() error                                   { panic("not implemented") }
 func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string { panic("not implemented") }
 
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
