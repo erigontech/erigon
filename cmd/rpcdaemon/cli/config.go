@@ -30,7 +30,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon-lib/kv/kvcfg"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -51,6 +50,7 @@ import (
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
+	"github.com/erigontech/erigon-lib/kv/kvcfg"
 	kv2 "github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/remotedb"
@@ -406,9 +406,15 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			if err != nil {
 				return err
 			}
+			if cfg.Sync.KeepExecutionProofs {
+				libstate.EnableHistoricalCommitment()
+			}
 			cfg.Sync.PersistReceiptsCacheV2, err = kvcfg.PersistReceipts.Enabled(tx)
 			if err != nil {
 				return err
+			}
+			if cfg.Sync.PersistReceiptsCacheV2 {
+				libstate.EnableHistoricalRCache()
 			}
 			return nil
 		}); err != nil {
@@ -416,12 +422,6 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		}
 		if cc == nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, errors.New("chain config not found in db. Need start erigon at least once on this db")
-		}
-		if cfg.Sync.KeepExecutionProofs {
-			libstate.EnableHistoricalCommitment()
-		}
-		if cfg.Sync.PersistReceiptsCacheV2 {
-			libstate.EnableHistoricalRCache()
 		}
 
 		// Configure sapshots
@@ -449,8 +449,6 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("create aggregator: %w", err)
 		}
-		log.Warn("[dbg] startup cfg", "cfg.Sync.PersistReceiptsCacheV2 ", cfg.Sync.PersistReceiptsCacheV2, "schema", libstate.Schema[kv.RCacheDomain])
-
 		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
 		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
 
