@@ -31,9 +31,9 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-db/version"
 	"github.com/erigontech/erigon-lib/downloader"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/cmd/snapshots/sync"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/turbo/logging"

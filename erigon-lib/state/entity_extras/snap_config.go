@@ -3,8 +3,8 @@ package entity_extras
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon-db/version"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 // aggregate set level snapshot creation config

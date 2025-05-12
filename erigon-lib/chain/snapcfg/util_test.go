@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
-	"github.com/erigontech/erigon-db/version"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 func TestNameToParts(t *testing.T) {

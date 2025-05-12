@@ -1,7 +1,7 @@
 package state
 
 import (
-	"github.com/erigontech/erigon-db/version"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 var commitmentDomainVersion version.Version

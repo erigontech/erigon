@@ -3,7 +3,7 @@ package entity_extras
 import (
 	"os"
 
-	"github.com/erigontech/erigon-db/version"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 // Example: if 0-1.commitment.kv is visible and has foreign keys to 0-1.account.kv -

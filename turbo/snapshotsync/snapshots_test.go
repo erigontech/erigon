@@ -30,10 +30,10 @@ import (
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
-	"github.com/erigontech/erigon-db/version"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/version"
 
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"

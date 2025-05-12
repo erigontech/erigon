@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/erigontech/erigon-db/version"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 // each entitiy has a data_file (e.g. is .seg, .v, .kv; and even .ef for ii), this could be fed to

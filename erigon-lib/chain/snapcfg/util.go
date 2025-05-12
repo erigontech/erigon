@@ -32,12 +32,12 @@ import (
 	"github.com/pelletier/go-toml/v2"
 	"github.com/tidwall/btree"
 
-	ver "github.com/erigontech/erigon-db/version"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/version"
+	ver "github.com/erigontech/erigon-lib/version"
 )
 
 var snapshotGitBranch = dbg.EnvString("SNAPS_GIT_BRANCH", version.DefaultSnapshotGitBranch)

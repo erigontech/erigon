@@ -43,7 +43,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/seg"
 
-	"github.com/erigontech/erigon-db/version"
+	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/eth/ethconfig"

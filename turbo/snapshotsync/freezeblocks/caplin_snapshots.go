@@ -31,7 +31,6 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon-db/version"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
@@ -42,6 +41,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/version"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"

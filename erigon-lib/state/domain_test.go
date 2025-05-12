@@ -38,7 +38,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-db/version"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
@@ -53,6 +52,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
 	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 type rndGen struct {

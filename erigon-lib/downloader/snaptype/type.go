@@ -27,7 +27,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/erigontech/erigon-db/version"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -36,6 +35,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 type Version = version.Version

@@ -6,12 +6,12 @@ import (
 	"sort"
 
 	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-db/version"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
 	ee "github.com/erigontech/erigon-lib/state/entity_extras"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 /*

@@ -23,7 +23,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-db/version"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 var (

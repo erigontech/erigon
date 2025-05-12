@@ -27,7 +27,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-db/version"
+	"github.com/erigontech/erigon-lib/version"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 

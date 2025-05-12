@@ -32,12 +32,12 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/crypto/cryptopool"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
-	"github.com/erigontech/erigon-db/version"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 func init() {
