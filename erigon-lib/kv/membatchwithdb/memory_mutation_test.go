@@ -29,7 +29,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	stateLib "github.com/erigontech/erigon-lib/state"
 
-	"github.com/erigontech/erigon-db/salt"
+	salt "github.com/erigontech/erigon-lib/entity_extras"
 	"github.com/erigontech/erigon-lib/kv"
 )
 

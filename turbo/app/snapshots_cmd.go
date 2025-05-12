@@ -35,7 +35,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon-db/salt"
+	salt "github.com/erigontech/erigon-lib/entity_extras"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/urfave/cli/v2"

@@ -33,12 +33,12 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon-db/rawdb"
-	"github.com/erigontech/erigon-db/salt"
 	chain2 "github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon-lib/config3"
+	salt "github.com/erigontech/erigon-lib/entity_extras"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"

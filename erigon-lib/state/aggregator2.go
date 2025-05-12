@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/erigontech/erigon-db/salt"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	salt "github.com/erigontech/erigon-lib/entity_extras"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"

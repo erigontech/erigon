@@ -48,7 +48,6 @@ import (
 
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-db/rawdb/blockio"
-	"github.com/erigontech/erigon-db/salt"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
@@ -67,6 +66,7 @@ import (
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/downloader/downloadergrpc"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	salt "github.com/erigontech/erigon-lib/entity_extras"
 	"github.com/erigontech/erigon-lib/event"
 	protodownloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"

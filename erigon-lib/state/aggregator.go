@@ -47,13 +47,13 @@ import (
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/diagnostics"
+	salt "github.com/erigontech/erigon-lib/entity_extras"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/bitmapdb"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-db/salt"
 )
 
 type Aggregator struct {

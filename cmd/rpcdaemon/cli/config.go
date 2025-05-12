@@ -38,7 +38,6 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/erigontech/erigon-db/rawdb"
-	"github.com/erigontech/erigon-db/salt"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -47,6 +46,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/paths"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/direct"
+	salt "github.com/erigontech/erigon-lib/entity_extras"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"

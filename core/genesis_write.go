@@ -34,7 +34,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-db/rawdb"
-	"github.com/erigontech/erigon-db/salt"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/params"
@@ -43,6 +42,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/crypto"
+	salt "github.com/erigontech/erigon-lib/entity_extras"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"

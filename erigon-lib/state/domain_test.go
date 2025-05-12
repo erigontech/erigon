@@ -37,7 +37,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-db/salt"
 	"github.com/erigontech/erigon-db/version"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
@@ -46,6 +45,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/common/page"
 	"github.com/erigontech/erigon-lib/config3"
+	salt "github.com/erigontech/erigon-lib/entity_extras"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/order"

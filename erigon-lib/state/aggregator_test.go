@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/config3"
+	salt "github.com/erigontech/erigon-lib/entity_extras"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
@@ -50,7 +51,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/erigontech/erigon-db/salt"
 )
 
 func TestAggregatorV3_Merge(t *testing.T) {

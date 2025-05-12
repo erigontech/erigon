@@ -36,7 +36,6 @@ import (
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-db/salt"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
 	"github.com/erigontech/erigon-lib/common/background"
@@ -44,6 +43,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/datastruct/existence"
+	salt "github.com/erigontech/erigon-lib/entity_extras"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/bitmapdb"

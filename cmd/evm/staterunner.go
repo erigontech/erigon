@@ -31,8 +31,8 @@ import (
 	mdbx2 "github.com/erigontech/mdbx-go/mdbx"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-db/salt"
 	"github.com/erigontech/erigon-lib/common"
+	salt "github.com/erigontech/erigon-lib/entity_extras"
 	"github.com/erigontech/erigon-lib/kv"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
