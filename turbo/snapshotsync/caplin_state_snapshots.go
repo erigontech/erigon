@@ -217,7 +217,7 @@ func (s *CaplinStateSnapshots) LS() {
 	for _, roTx := range view.roTxs {
 		if roTx != nil {
 			for _, seg := range roTx.Segments {
-				s.logger.Info("[agg] ", "f", seg.src.filePath, "words", seg.src.Decompressor.Count())
+				s.logger.Info("[agg] ", "f", seg.src.CaplinFilePath, "words", seg.src.Decompressor.Count())
 			}
 		}
 	}
@@ -237,7 +237,7 @@ func (s *CaplinStateSnapshots) SegFileNames(from, to uint64) []string {
 			if seg.from >= to || seg.to <= from {
 				continue
 			}
-			res = append(res, seg.src.filePath)
+			res = append(res, seg.src.CaplinFilePath)
 		}
 
 	}
@@ -298,7 +298,7 @@ Loop:
 				if sn2.Decompressor == nil { // it's ok if some segment was not able to open
 					continue
 				}
-				if filePath == sn2.filePath {
+				if filePath == sn2.CaplinFilePath {
 					sn = sn2
 					exists = true
 					break
@@ -309,10 +309,10 @@ Loop:
 		if !exists {
 			sn = &DirtySegment{
 				// segType: f.Type, Unsupported
-				version:  f.Version,
-				Range:    Range{f.From, f.To},
-				frozen:   true,
-				filePath: filePath,
+				version:        f.Version,
+				Range:          Range{f.From, f.To},
+				frozen:         true,
+				CaplinFilePath: filePath,
 			}
 		}
 		if err := s.openSegIfNeed(sn, filePath); err != nil {
