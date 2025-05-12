@@ -1306,6 +1306,8 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 		return
 	}
 
+	log.Warn("[dbg] searching in", "_min", _min, "_max", _max)
+
 	for txnID := _min; txnID < _max+1; txnID++ {
 		v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txnID+1)
 		if err != nil {
@@ -1315,6 +1317,7 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 			return res, nil
 		}
 		if len(v) == 0 {
+			log.Warn("[dbg] found empty val", "bn", block.NumberU64(), "txnID", txnID)
 			continue
 		}
 
