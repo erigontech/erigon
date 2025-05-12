@@ -32,7 +32,7 @@ func NewSaltManager(dirs datadir.Dirs, genState, genBlock bool, logger log.Logge
 		logger:   logger,
 	}
 
-	m.blockFile, m.blockMmap = m.loadSalt("salt-block.txt", genBlock, m.newBlockSaltGen)
+	m.blockFile, m.blockMmap = m.loadSalt("salt-blocks.txt", genBlock, m.newBlockSaltGen)
 	m.stateFile, m.stateMmap = m.loadSalt("salt-state.txt", genState, m.newStateSaltGen)
 	return m
 }
