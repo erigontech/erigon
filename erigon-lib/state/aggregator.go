@@ -93,6 +93,8 @@ type Aggregator struct {
 	logger       log.Logger
 
 	produce bool
+
+	saltM *SaltManager
 }
 
 const AggregatorSqueezeCommitmentValues = true
@@ -126,7 +128,7 @@ func domainIntegrityCheck(name kv.Domain, dirs datadir.Dirs, fromStep, toStep ui
 	}
 }
 
-func newAggregatorOld(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
+func newAggregatorOld(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, saltM *SaltManager, logger log.Logger) (*Aggregator, error) {
 	ctx, ctxCancel := context.WithCancel(ctx)
 	return &Aggregator{
 		ctx:                    ctx,
@@ -145,6 +147,7 @@ func newAggregatorOld(ctx context.Context, dirs datadir.Dirs, aggregationStep ui
 		commitmentValuesTransform: AggregatorSqueezeCommitmentValues,
 
 		produce: true,
+		saltM:   saltM,
 	}, nil
 }
 
@@ -201,12 +204,12 @@ func GetStateIndicesSalt(dirs datadir.Dirs, genNew bool, logger log.Logger) (sal
 	return salt, nil
 }
 
-func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.Dirs, logger log.Logger) (err error) {
+func (a *Aggregator) registerDomain(name kv.Domain, dirs datadir.Dirs, logger log.Logger) (err error) {
 	cfg := Schema.GetDomainCfg(name)
 	//TODO: move dynamic part of config to InvertedIndex
 	cfg.restrictSubsetFileDeletions = a.commitmentValuesTransform
-	cfg.hist.iiCfg.salt.Store(salt)
 	cfg.hist.iiCfg.dirs = dirs
+	cfg.hist.iiCfg.saltM = a.saltM
 	a.d[name], err = NewDomain(cfg, a.aggregationStep, logger)
 	if err != nil {
 		return err
@@ -214,9 +217,9 @@ func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.D
 	return nil
 }
 
-func (a *Aggregator) registerII(idx kv.InvertedIdx, salt *uint32, dirs datadir.Dirs, logger log.Logger) error {
+func (a *Aggregator) registerII(idx kv.InvertedIdx, dirs datadir.Dirs, logger log.Logger) error {
 	idxCfg := Schema.GetIICfg(idx)
-	idxCfg.salt.Store(salt)
+	idxCfg.saltM = a.saltM
 	idxCfg.dirs = dirs
 
 	if ii := a.searchII(idx); ii != nil {
@@ -240,29 +243,6 @@ func (a *Aggregator) DisableFsync() {
 	for _, ii := range a.iis {
 		ii.DisableFsync()
 	}
-}
-
-func (a *Aggregator) ReloadSalt() error {
-	salt, err := GetStateIndicesSalt(a.dirs, false, a.logger)
-	if err != nil {
-		return err
-	}
-
-	if salt == nil {
-		return fmt.Errorf("salt not found on ReloadSalt")
-	}
-
-	for _, d := range a.d {
-		d.hist.iiCfg.salt.Store(salt)
-		d.History.histCfg.iiCfg.salt.Store(salt)
-		d.History.InvertedIndex.iiCfg.salt.Store(salt)
-	}
-
-	for _, ii := range a.iis {
-		ii.iiCfg.salt.Store(salt)
-	}
-
-	return nil
 }
 
 func (a *Aggregator) OpenFolder() error {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -57,7 +58,7 @@ func TestSaltManager_GenNew(t *testing.T) {
 
 func setupSM(t *testing.T, genState, genBlock bool) (datadir.Dirs, *SaltManager) {
 	dirs := datadir.New(t.TempDir())
-	sm := NewSaltManager(dirs, genState, genBlock)
+	sm := NewSaltManager(dirs, genState, genBlock, log.New())
 	t.Cleanup(func() {
 		sm.Close()
 	})

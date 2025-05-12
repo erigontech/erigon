@@ -20,7 +20,6 @@ import (
 	"context"
 	"os"
 	"sort"
-	"sync/atomic"
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -33,16 +32,12 @@ import (
 )
 
 func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
-	salt := uint32(1)
+	dirs := datadir.New(os.TempDir())
 	cfg := Schema.AccountsDomain.hist.iiCfg
-
-	if cfg.salt == nil {
-		cfg.salt = new(atomic.Pointer[uint32])
-	}
-	cfg.salt.Store(&salt)
-	cfg.dirs = datadir.New(os.TempDir())
-
-	ii, err := NewInvertedIndex(cfg, aggStep, log.New())
+	logger := log.New()
+	cfg.saltM = NewSaltManager(dirs, false, false, logger)
+	cfg.dirs = dirs
+	ii, err := NewInvertedIndex(cfg, aggStep, logger)
 	ii.Accessors = 0
 	if err != nil {
 		panic(err)

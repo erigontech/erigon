@@ -591,7 +591,6 @@ type TemporalDebugTx interface {
 type TemporalDebugDB interface {
 	DomainTables(names ...Domain) []string
 	InvertedIdxTables(names ...InvertedIdx) []string
-	ReloadSalt() error
 }
 
 type WithFreezeInfo interface {

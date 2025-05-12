@@ -140,7 +140,9 @@ func aggregateResultsFromStateTests(
 		MustOpen()
 	defer _db.Close()
 
-	agg, err := libstate.NewAggregator(context.Background(), dirs, config3.DefaultStepSize, _db, log.New())
+	logger := log.New()
+	saltM := libstate.NewSaltManager(dirs, true, true, logger)
+	agg, err := libstate.NewAggregator(context.Background(), dirs, config3.DefaultStepSize, saltM, _db, logger)
 	if err != nil {
 		return nil, err
 	}

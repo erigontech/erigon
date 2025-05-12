@@ -3,7 +3,6 @@ package state
 import (
 	"context"
 	"fmt"
-	"sync/atomic"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -12,49 +11,39 @@ import (
 	"github.com/erigontech/erigon-lib/seg"
 )
 
-// this is supposed to register domains/iis
-// salt file should exist, else agg created has nil salt.
-func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
-	salt, err := GetStateIndicesSalt(dirs, false, logger)
+func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, saltM *SaltManager, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
+	a, err := newAggregatorOld(ctx, dirs, aggregationStep, db, saltM, logger)
 	if err != nil {
 		return nil, err
 	}
-	return NewAggregator2(ctx, dirs, aggregationStep, salt, db, logger)
-}
-
-func NewAggregator2(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, salt *uint32, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
-	a, err := newAggregatorOld(ctx, dirs, aggregationStep, db, logger)
-	if err != nil {
+	if err := a.registerDomain(kv.AccountsDomain, dirs, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerDomain(kv.AccountsDomain, salt, dirs, logger); err != nil {
+	if err := a.registerDomain(kv.StorageDomain, dirs, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerDomain(kv.StorageDomain, salt, dirs, logger); err != nil {
+	if err := a.registerDomain(kv.CodeDomain, dirs, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerDomain(kv.CodeDomain, salt, dirs, logger); err != nil {
+	if err := a.registerDomain(kv.CommitmentDomain, dirs, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerDomain(kv.CommitmentDomain, salt, dirs, logger); err != nil {
+	if err := a.registerDomain(kv.ReceiptDomain, dirs, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerDomain(kv.ReceiptDomain, salt, dirs, logger); err != nil {
+	if err := a.registerDomain(kv.RCacheDomain, dirs, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerDomain(kv.RCacheDomain, salt, dirs, logger); err != nil {
+	if err := a.registerII(kv.LogAddrIdx, dirs, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerII(kv.LogAddrIdx, salt, dirs, logger); err != nil {
+	if err := a.registerII(kv.LogTopicIdx, dirs, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerII(kv.LogTopicIdx, salt, dirs, logger); err != nil {
+	if err := a.registerII(kv.TracesFromIdx, dirs, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerII(kv.TracesFromIdx, salt, dirs, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerII(kv.TracesToIdx, salt, dirs, logger); err != nil {
+	if err := a.registerII(kv.TracesToIdx, dirs, logger); err != nil {
 		return nil, err
 	}
 	a.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(100_000) // ~1k blocks of history
@@ -130,7 +119,6 @@ func (s *SchemaGen) GetDomainCfg(name kv.Domain) domainCfg {
 	default:
 		v = domainCfg{}
 	}
-	v.hist.iiCfg.salt = new(atomic.Pointer[uint32])
 	return v
 }
 
@@ -148,7 +136,6 @@ func (s *SchemaGen) GetIICfg(name kv.InvertedIdx) iiCfg {
 	default:
 		v = iiCfg{}
 	}
-	v.salt = new(atomic.Pointer[uint32])
 	return v
 }
 

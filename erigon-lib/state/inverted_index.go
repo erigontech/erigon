@@ -30,7 +30,6 @@ import (
 	"reflect"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/spaolacci/murmur3"
@@ -80,7 +79,6 @@ type InvertedIndex struct {
 }
 
 type iiCfg struct {
-	salt    *atomic.Pointer[uint32]
 	dirs    datadir.Dirs
 	disable bool // totally disable Domain/History/InvertedIndex - ignore all writes, don't produce files
 
@@ -97,6 +95,7 @@ type iiCfg struct {
 	// external checker for integrity of inverted index ranges
 	integrity rangeIntegrityChecker
 	Accessors Accessors
+	saltM     *SaltManager
 }
 
 func (ii iiCfg) GetVersions() VersionTypes {
@@ -503,7 +502,7 @@ func (ii *InvertedIndex) BeginFilesRo() *InvertedIndexRoTx {
 		visible: ii._visible,
 		files:   files,
 		name:    ii.name,
-		salt:    ii.salt.Load(),
+		salt:    ii.saltM.StateSalt(),
 	}
 }
 func (iit *InvertedIndexRoTx) Close() {
@@ -1257,7 +1256,7 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 		LeafSize:   recsplit.DefaultLeafSize,
 		TmpDir:     ii.dirs.Tmp,
 		IndexFile:  idxPath,
-		Salt:       ii.salt.Load(),
+		Salt:       ii.saltM.StateSalt(),
 		NoFsync:    ii.noFsync,
 	}
 	return buildHashMapAccessor(ctx, data, ii.Compression, idxPath, false, cfg, ps, ii.logger)

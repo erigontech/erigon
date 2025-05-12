@@ -209,11 +209,13 @@ func TestForEach(t *testing.T) {
 
 func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *stateLib.Aggregator) {
 	tb.Helper()
-	db := memdb.NewStateDB(tb.TempDir())
+	dirs := datadir.New(tb.TempDir())
+	db := memdb.NewStateDB(dirs.DataDir)
 	tb.Cleanup(db.Close)
 
-	salt := uint32(1)
-	agg, err := stateLib.NewAggregator2(context.Background(), datadir.New(tb.TempDir()), 16, &salt, db, log.New())
+	logger := log.New()
+	saltM := stateLib.NewSaltManager(dirs, true, true, logger)
+	agg, err := stateLib.NewAggregator(context.Background(), dirs, 16, saltM, db, logger)
 	if err != nil {
 		tb.Fatal(err)
 	}

@@ -242,7 +242,10 @@ func (test *snapshotTest) run() bool {
 	db := memdb.NewStateDB("")
 	defer db.Close()
 
-	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
+	dirs := datadir.New("")
+	logger := log.New()
+	saltM := stateLib.NewSaltManager(dirs, true, true, logger)
+	agg, err := stateLib.NewAggregator(context.Background(), dirs, 16, saltM, db, logger)
 	if err != nil {
 		test.err = err
 		return false

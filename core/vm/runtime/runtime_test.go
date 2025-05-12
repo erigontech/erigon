@@ -52,16 +52,12 @@ import (
 
 func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.TemporalRwTx, *stateLib.Aggregator) {
 	tb.Helper()
-	db := memdb.NewStateDB(tb.TempDir())
+	dirs, logger := datadir.New(tb.TempDir()), log.New()
+	db := memdb.NewStateDB(dirs.DataDir)
 	tb.Cleanup(db.Close)
 
-	dirs, logger := datadir.New(tb.TempDir()), log.New()
-	salt, err := stateLib.GetStateIndicesSalt(dirs, true, logger)
-	if err != nil {
-		tb.Fatal(err)
-	}
-
-	agg, err := stateLib.NewAggregator2(context.Background(), dirs, 16, salt, db, logger)
+	saltM := stateLib.NewSaltManager(dirs, true, true, logger)
+	agg, err := stateLib.NewAggregator(context.Background(), dirs, 16, saltM, db, logger)
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -178,11 +174,14 @@ func TestCall(t *testing.T) {
 }
 
 func testTemporalDB(t testing.TB) *temporal.DB {
-	db := memdb.NewStateDB(t.TempDir())
+	dirs := datadir.New(t.TempDir())
+	db := memdb.NewStateDB(dirs.DataDir)
 
 	t.Cleanup(db.Close)
 
-	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, log.New())
+	logger := log.New()
+	saltM := stateLib.NewSaltManager(dirs, true, true, logger)
+	agg, err := stateLib.NewAggregator(context.Background(), dirs, 16, saltM, db, logger)
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 

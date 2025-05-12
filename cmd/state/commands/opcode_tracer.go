@@ -433,10 +433,12 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 
 	datadirPath := filepath.Base(chaindata)
 	dirs := datadir2.New(datadirPath)
+	logger2 := log.New()
 	rawChainDb := mdbx.MustOpen(dirs.Chaindata)
 	defer rawChainDb.Close()
 
-	agg, err := state2.NewAggregator(context.Background(), dirs, config3.DefaultStepSize, rawChainDb, log.New())
+	saltM := state2.NewSaltManager(dirs, true, true, logger2)
+	agg, err := state2.NewAggregator(context.Background(), dirs, config3.DefaultStepSize, saltM, rawChainDb, logger2)
 	if err != nil {
 		return err
 	}
@@ -453,7 +455,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 
 	freezeCfg := ethconfig.Defaults.Snapshot
 	freezeCfg.ChainName = genesis.Config.ChainName
-	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(freezeCfg, dirs.Snap, 0, log.New()), nil, nil, nil)
+	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(freezeCfg, dirs.Snap, 0, logger2), nil, nil, nil)
 
 	chainConfig := genesis.Config
 	vmConfig := vm.Config{Tracer: ot.Tracer().Hooks}

@@ -10,6 +10,7 @@ import (
 	"github.com/edsrzf/mmap-go"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/log/v3"
 	rand2 "golang.org/x/exp/rand"
 )
 
@@ -20,13 +21,15 @@ type SaltManager struct {
 	stateFile, blockFile *os.File
 	genState, genBlock   bool
 	dirs                 datadir.Dirs
+	logger               log.Logger
 }
 
-func NewSaltManager(dirs datadir.Dirs, genState, genBlock bool) *SaltManager {
+func NewSaltManager(dirs datadir.Dirs, genState, genBlock bool, logger log.Logger) *SaltManager {
 	m := &SaltManager{
 		genState: genState,
 		genBlock: genBlock,
 		dirs:     dirs,
+		logger:   logger,
 	}
 
 	m.blockFile, m.blockMmap = m.loadSalt("salt-block.txt", genBlock, m.newBlockSaltGen)
@@ -45,6 +48,11 @@ func (m *SaltManager) BlockSalt() *uint32 {
 func (m *SaltManager) getSalt(mmap *mmap.MMap) *uint32 {
 	dst := make([]byte, 4)
 	mmap.Lock()
+	if len(*mmap) < 4 {
+		m.logger.Warn("salt file mmap is %d; shouldn't happen, maybe it got deleted?", len(*mmap))
+		mmap.Unlock()
+		return nil
+	}
 	copy(dst, (*mmap)[:4])
 	mmap.Unlock()
 	if bytes.Equal(dst, DEFAULT_SALT[:]) {

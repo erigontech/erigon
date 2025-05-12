@@ -420,12 +420,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 		}
 	}
 
-	if !headerchain {
-		if err := agg.ReloadSalt(); err != nil {
-			return err
-		}
-	}
-
 	if err := snapshots.OpenFolder(); err != nil {
 		return err
 	}

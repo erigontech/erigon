@@ -122,7 +122,10 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 	db := memdb.NewStateDB("")
 	defer db.Close()
 
-	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
+	logger := log.New()
+	dirs := datadir.New("")
+	saltM := stateLib.NewSaltManager(dirs, true, true, logger)
+	agg, err := stateLib.NewAggregator(context.Background(), dirs, 16, saltM, db, log.New())
 	if err != nil {
 		panic(err)
 	}
@@ -394,11 +397,8 @@ func NewTestTemporalDb(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *state.
 	tb.Cleanup(db.Close)
 
 	dirs, logger := datadir.New(tb.TempDir()), log.New()
-	salt, err := state.GetStateIndicesSalt(dirs, true, logger)
-	if err != nil {
-		tb.Fatal(err)
-	}
-	agg, err := state.NewAggregator2(context.Background(), dirs, 16, salt, db, log.New())
+	saltM := stateLib.NewSaltManager(dirs, true, true, logger)
+	agg, err := state.NewAggregator(context.Background(), dirs, 16, saltM, db, log.New())
 	if err != nil {
 		tb.Fatal(err)
 	}

@@ -25,7 +25,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -53,14 +52,10 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	dirs := datadir.New(tb.TempDir())
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	//TODO: tests will fail if set histCfg.compression = CompressKeys | CompressValues
-	salt := uint32(1)
 	cfg := Schema.AccountsDomain
 
 	cfg.hist.iiCfg.dirs = dirs
-	if cfg.hist.iiCfg.salt == nil {
-		cfg.hist.iiCfg.salt = new(atomic.Pointer[uint32])
-	}
-	cfg.hist.iiCfg.salt.Store(&salt)
+	cfg.hist.iiCfg.saltM = NewSaltManager(dirs, true, true, logger)
 
 	cfg.hist.historyLargeValues = largeValues
 

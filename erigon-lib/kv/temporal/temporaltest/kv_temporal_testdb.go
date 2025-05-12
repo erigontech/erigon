@@ -42,11 +42,9 @@ func NewTestDB(tb testing.TB, dirs datadir.Dirs) kv.TemporalRwDB {
 		rawDB = memdb.New(dirs.DataDir, kv.ChainDB)
 	}
 
-	salt, err := state.GetStateIndicesSalt(dirs, true, log.New())
-	if err != nil {
-		panic(err)
-	}
-	agg, err := state.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, rawDB, log.New())
+	logger := log.New()
+	saltM := state.NewSaltManager(dirs, true, true, logger)
+	agg, err := state.NewAggregator(context.Background(), dirs, config3.DefaultStepSize, saltM, rawDB, logger)
 	if err != nil {
 		panic(err)
 	}

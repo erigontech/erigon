@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -57,9 +56,8 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 		}
 	}).MustOpen()
 	tb.Cleanup(db.Close)
-	salt := uint32(1)
-	cfg := iiCfg{salt: new(atomic.Pointer[uint32]), dirs: dirs, filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable, version: IIVersionTypes{DataEF: snaptype.V1_0, AccessorEFI: snaptype.V1_0}}
-	cfg.salt.Store(&salt)
+	saltM := NewSaltManager(dirs, true, true, logger)
+	cfg := iiCfg{saltM: saltM, dirs: dirs, filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable, version: IIVersionTypes{DataEF: snaptype.V1_0, AccessorEFI: snaptype.V1_0}}
 	ii, err := NewInvertedIndex(cfg, aggStep, logger)
 	require.NoError(tb, err)
 	ii.DisableFsync()
@@ -563,9 +561,8 @@ func TestInvIndexScanFiles(t *testing.T) {
 	db, ii, txs := filledInvIndex(t, logger)
 
 	// Recreate InvertedIndex to scan the files
-	salt := uint32(1)
 	cfg := ii.iiCfg
-	cfg.salt.Store(&salt)
+	cfg.saltM = NewSaltManager(ii.dirs, true, true, logger)
 
 	var err error
 	ii, err = NewInvertedIndex(cfg, 16, logger)

@@ -31,7 +31,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -79,15 +78,14 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	dirs := datadir2.New(t.TempDir())
 	cfg := Schema.AccountsDomain
 	cfg.crossDomainIntegrity = nil //no other domains
-	cfg.hist.iiCfg.salt = new(atomic.Pointer[uint32])
+
+	cfg.hist.iiCfg.saltM = NewSaltManager(dirs, true, true, logger)
 
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
-	salt := uint32(1)
 
 	cfg.hist.iiCfg.version = IIVersionTypes{snaptype.V1_0, snaptype.V1_0}
 	cfg.hist.iiCfg.dirs = dirs
-	cfg.hist.iiCfg.salt.Store(&salt)
 	//cfg.hist.historyValuesOnCompressedPage = 16
 	d, err := NewDomain(cfg, aggStep, logger)
 	require.NoError(t, err)
@@ -1051,16 +1049,14 @@ func emptyTestDomain(aggStep uint64) *Domain {
 	cfg := Schema.AccountsDomain
 	cfg.crossDomainIntegrity = nil
 
-	salt := uint32(1)
-	if cfg.hist.iiCfg.salt == nil {
-		cfg.hist.iiCfg.salt = new(atomic.Pointer[uint32])
-	}
-	cfg.hist.iiCfg.salt.Store(&salt)
-	cfg.hist.iiCfg.dirs = datadir2.New(os.TempDir())
+	dirs := datadir2.New(os.TempDir())
+	logger := log.New()
+	cfg.hist.iiCfg.saltM = NewSaltManager(dirs, true, true, logger)
+	cfg.hist.iiCfg.dirs = dirs
 	cfg.hist.iiCfg.name = kv.InvertedIdx(0)
 	cfg.hist.iiCfg.version = IIVersionTypes{snaptype.V1_0, snaptype.V1_0}
 
-	d, err := NewDomain(cfg, aggStep, log.New())
+	d, err := NewDomain(cfg, aggStep, logger)
 	if err != nil {
 		panic(err)
 	}

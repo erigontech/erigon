@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
+	libstate "github.com/erigontech/erigon-lib/state"
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/evm/internal/compiler"
@@ -169,7 +170,10 @@ func runCmd(ctx *cli.Context) error {
 	} else {
 		genesisConfig = new(types.Genesis)
 	}
-	agg, err := state2.NewAggregator(context.Background(), datadir.New(os.TempDir()), config3.DefaultStepSize, db, log.New())
+	logger2 := log.New()
+	dirs := datadir.New(os.TempDir())
+	saltM := libstate.NewSaltManager(dirs, true, true, logger2)
+	agg, err := state2.NewAggregator(context.Background(), dirs, config3.DefaultStepSize, saltM, db, logger2)
 	if err != nil {
 		return err
 	}
