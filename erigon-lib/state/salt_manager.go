@@ -17,32 +17,37 @@ import (
 var DEFAULT_SALT = [4]byte{0xff, 0xff, 0xff, 0xff}
 
 type SaltManager struct {
-	stateMmap, blockMmap *mmap.MMap
-	stateFile, blockFile *os.File
-	genState, genBlock   bool
-	dirs                 datadir.Dirs
-	logger               log.Logger
+	mmap   *mmap.MMap
+	file   *os.File
+	gen    bool
+	dirs   datadir.Dirs
+	logger log.Logger
 }
 
-func NewSaltManager(dirs datadir.Dirs, genState, genBlock bool, logger log.Logger) *SaltManager {
+func NewE3SaltManager(dirs datadir.Dirs, genState bool, logger log.Logger) *SaltManager {
 	m := &SaltManager{
-		genState: genState,
-		genBlock: genBlock,
-		dirs:     dirs,
-		logger:   logger,
+		gen:    genState,
+		dirs:   dirs,
+		logger: logger,
 	}
 
-	m.blockFile, m.blockMmap = m.loadSalt("salt-blocks.txt", genBlock, m.newBlockSaltGen)
-	m.stateFile, m.stateMmap = m.loadSalt("salt-state.txt", genState, m.newStateSaltGen)
+	m.file, m.mmap = m.loadSalt("salt-state.txt", genState, newStateSaltGen)
 	return m
 }
 
-func (m *SaltManager) StateSalt() *uint32 {
-	return m.getSalt(m.stateMmap)
+func NewBlockSaltManager(dirs datadir.Dirs, genBlock bool, logger log.Logger) *SaltManager {
+	m := &SaltManager{
+		gen:    genBlock,
+		dirs:   dirs,
+		logger: logger,
+	}
+
+	m.file, m.mmap = m.loadSalt("salt-blocks.txt", genBlock, newBlockSaltGen)
+	return m
 }
 
-func (m *SaltManager) BlockSalt() *uint32 {
-	return m.getSalt(m.blockMmap)
+func (m *SaltManager) Salt() *uint32 {
+	return m.getSalt(m.mmap)
 }
 
 func (m *SaltManager) getSalt(mmap *mmap.MMap) *uint32 {
@@ -98,28 +103,22 @@ func (m *SaltManager) loadSalt(name string, gen bool, newSaltBytesGen func() []b
 }
 
 func (m *SaltManager) Close() {
-	if m.stateMmap != nil {
-		m.stateMmap.Unmap()
+	if m.mmap != nil {
+		m.mmap.Unmap()
 	}
-	if m.blockMmap != nil {
-		m.blockMmap.Unmap()
-	}
-	if m.stateFile != nil {
-		m.stateFile.Close()
-	}
-	if m.blockFile != nil {
-		m.blockFile.Close()
+	if m.file != nil {
+		m.file.Close()
 	}
 }
 
-func (m *SaltManager) newStateSaltGen() []byte {
+func newStateSaltGen() []byte {
 	saltV := rand2.Uint32()
 	saltBytes := make([]byte, 4)
 	binary.BigEndian.PutUint32(saltBytes, saltV)
 	return saltBytes
 }
 
-func (m *SaltManager) newBlockSaltGen() []byte {
+func newBlockSaltGen() []byte {
 	// taken from ReadAndCreateSaltIfNeeded
 	var buf [4]byte
 	_, err := rand.Read(buf[:])
