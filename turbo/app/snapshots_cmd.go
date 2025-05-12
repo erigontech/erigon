@@ -62,6 +62,7 @@ import (
 	"github.com/erigontech/erigon-lib/seg"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/state/stats"
+	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
@@ -738,7 +739,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 		for _, snapType := range kv.StateDomains {
 			newVersion := libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.DataKV
 			expectedFileName := strings.Replace(info.Name(), "accounts", snapType.String(), 1)
-			expectedFileName = snaptype.ReplaceVersion(expectedFileName, oldVersion, newVersion)
+			expectedFileName = version.ReplaceVersion(expectedFileName, oldVersion, newVersion)
 			if _, err := os.Stat(filepath.Join(dirs.SnapDomain, expectedFileName)); err != nil {
 				return fmt.Errorf("missing file %s at path %s", expectedFileName, filepath.Join(dirs.SnapDomain, expectedFileName))
 			}
@@ -748,7 +749,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 			if libstate.Schema.GetDomainCfg(snapType).Accessors.Has(libstate.AccessorBTree) {
 				newVersion = libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorBT
 				fileName := strings.Replace(expectedFileName, ".kv", ".bt", 1)
-				fileName = snaptype.ReplaceVersion(fileName, oldVersion, newVersion)
+				fileName = version.ReplaceVersion(fileName, oldVersion, newVersion)
 				exists, err := dir.FileExist(filepath.Join(dirs.SnapDomain, fileName))
 				if err != nil {
 					return err
@@ -760,7 +761,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 			if libstate.Schema.GetDomainCfg(snapType).Accessors.Has(libstate.AccessorExistence) {
 				newVersion = libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVEI
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvei", 1)
-				fileName = snaptype.ReplaceVersion(fileName, oldVersion, newVersion)
+				fileName = version.ReplaceVersion(fileName, oldVersion, newVersion)
 				exists, err := dir.FileExist(filepath.Join(dirs.SnapDomain, fileName))
 				if err != nil {
 					return err
@@ -772,7 +773,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 			if libstate.Schema.GetDomainCfg(snapType).Accessors.Has(libstate.AccessorHashMap) {
 				newVersion = libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVI
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvi", 1)
-				fileName = snaptype.ReplaceVersion(fileName, oldVersion, newVersion)
+				fileName = version.ReplaceVersion(fileName, oldVersion, newVersion)
 				exists, err := dir.FileExist(filepath.Join(dirs.SnapDomain, fileName))
 				if err != nil {
 					return err
@@ -827,7 +828,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 			// Check accessors
 			newVersion := versioned.GetVersions().II.AccessorEFI
 			efiFileName := strings.Replace(expectedFileName, ".ef", ".efi", 1)
-			efiFileName = snaptype.ReplaceVersion(efiFileName, oldVersion, newVersion)
+			efiFileName = version.ReplaceVersion(efiFileName, oldVersion, newVersion)
 			if _, err := os.Stat(filepath.Join(dirs.SnapAccessors, efiFileName)); err != nil {
 				return fmt.Errorf("missing file %s at path %s", efiFileName, filepath.Join(dirs.SnapAccessors, efiFileName))
 			}
@@ -836,14 +837,14 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 			}
 			newVersion = versioned.GetVersions().Hist.AccessorVI
 			viFileName := strings.Replace(expectedFileName, ".ef", ".vi", 1)
-			viFileName = snaptype.ReplaceVersion(viFileName, oldVersion, newVersion)
+			viFileName = version.ReplaceVersion(viFileName, oldVersion, newVersion)
 			if _, err := os.Stat(filepath.Join(dirs.SnapAccessors, viFileName)); err != nil {
 				return fmt.Errorf("missing file %s at path %s", viFileName, filepath.Join(dirs.SnapAccessors, viFileName))
 			}
 			newVersion = versioned.GetVersions().Hist.DataV
 			// check that .v
 			vFileName := strings.Replace(expectedFileName, ".ef", ".v", 1)
-			vFileName = snaptype.ReplaceVersion(vFileName, oldVersion, newVersion)
+			vFileName = version.ReplaceVersion(vFileName, oldVersion, newVersion)
 			if _, err := os.Stat(filepath.Join(dirs.SnapHistory, vFileName)); err != nil {
 				return fmt.Errorf("missing file %s at path %s", vFileName, filepath.Join(dirs.SnapHistory, vFileName))
 			}

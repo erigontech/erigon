@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/version"
+	ver "github.com/erigontech/erigon-lib/version"
 )
 
 var snapshotGitBranch = dbg.EnvString("SNAPS_GIT_BRANCH", version.DefaultSnapshotGitBranch)
@@ -149,7 +150,7 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 			continue
 		}
 
-		version, err := snaptype.ParseVersion(v)
+		version, err := ver.ParseVersion(v)
 		if err != nil {
 			continue
 		}
@@ -164,7 +165,7 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 
 		if current, ok := bestVersions.Get(name); ok {
 			v, _, _ := strings.Cut(current.Name, "-")
-			cv, _ := snaptype.ParseVersion(v)
+			cv, _ := ver.ParseVersion(v)
 
 			if cv.Less(version) {
 				bestVersions.Set(name, p)
@@ -184,7 +185,7 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 	return versioned
 }
 
-func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion snaptype.Version, types ...snaptype.Enum) Preverified {
+func (p Preverified) Versioned(preferredVersion ver.Version, minVersion ver.Version, types ...snaptype.Enum) Preverified {
 	var bestVersions btree.Map[string, PreverifiedItem]
 
 	for _, p := range p {
@@ -221,7 +222,7 @@ func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion sna
 			}
 		}
 
-		version, err := snaptype.ParseVersion(v)
+		version, err := ver.ParseVersion(v)
 
 		if err != nil {
 			continue
@@ -237,7 +238,7 @@ func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion sna
 
 		if current, ok := bestVersions.Get(name); ok {
 			v, _, _ := strings.Cut(current.Name, "-")
-			cv, _ := snaptype.ParseVersion(v)
+			cv, _ := ver.ParseVersion(v)
 
 			if cv.Less(version) {
 				bestVersions.Set(name, p)
@@ -257,7 +258,7 @@ func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion sna
 	return versioned
 }
 
-func (p Preverified) MaxBlock(version snaptype.Version) (uint64, error) {
+func (p Preverified) MaxBlock(version ver.Version) (uint64, error) {
 	_max := uint64(0)
 	for _, p := range p {
 		_, fileName := filepath.Split(p.Name)
@@ -288,13 +289,13 @@ func (p Preverified) MaxBlock(version snaptype.Version) (uint64, error) {
 
 var errWrongVersion = errors.New("wrong version")
 
-func ExtractBlockFromName(name string, v snaptype.Version) (block uint64, err error) {
+func ExtractBlockFromName(name string, v ver.Version) (block uint64, err error) {
 	i := 0
 	for i < len(name) && name[i] != '-' {
 		i++
 	}
 
-	version, err := snaptype.ParseVersion(name[:i])
+	version, err := ver.ParseVersion(name[:i])
 	if err != nil {
 		return 0, err
 	}
@@ -372,7 +373,7 @@ func doSort(in map[string]string) Preverified {
 }
 
 func newCfg(networkName string, preverified Preverified) *Cfg {
-	maxBlockNum, _ := preverified.MaxBlock(snaptype.ZeroVersion)
+	maxBlockNum, _ := preverified.MaxBlock(ver.ZeroVersion)
 	cfg := &Cfg{ExpectBlocks: maxBlockNum, Preverified: preverified, networkName: networkName}
 	cfg.PreverifiedParsed = make([]*snaptype.FileInfo, len(preverified))
 	for i, p := range cfg.Preverified {

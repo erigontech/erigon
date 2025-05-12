@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/version"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 )
 
@@ -153,8 +154,8 @@ var (
 		Enums.Events,
 		"borevents",
 		snaptype.Versions{
-			Current:      snaptype.V1_0, //2,
-			MinSupported: snaptype.V1_0,
+			Current:      version.V1_0, //2,
+			MinSupported: version.V1_0,
 		},
 		EventRangeExtractor{},
 		[]snaptype.Index{Indexes.BorTxnHash},
@@ -250,8 +251,8 @@ var (
 		Enums.Spans,
 		"borspans",
 		snaptype.Versions{
-			Current:      snaptype.V1_0, //2,
-			MinSupported: snaptype.V1_0,
+			Current:      version.V1_0, //2,
+			MinSupported: version.V1_0,
 		},
 		snaptype.RangeExtractorFunc(
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
@@ -279,8 +280,8 @@ var (
 		Enums.Checkpoints,
 		"borcheckpoints",
 		snaptype.Versions{
-			Current:      snaptype.V1_0, //2,
-			MinSupported: snaptype.V1_0,
+			Current:      version.V1_0, //2,
+			MinSupported: version.V1_0,
 		},
 		snaptype.RangeExtractorFunc(
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
@@ -341,8 +342,8 @@ var (
 		Enums.Milestones,
 		"bormilestones",
 		snaptype.Versions{
-			Current:      snaptype.V1_0, //2,
-			MinSupported: snaptype.V1_0,
+			Current:      version.V1_0, //2,
+			MinSupported: version.V1_0,
 		},
 		snaptype.RangeExtractorFunc(
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {

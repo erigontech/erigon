@@ -35,14 +35,15 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/testlog"
+	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/params"
 )
 
-func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, version snaptype.Version, logger log.Logger) {
+func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, ver snaptype.Version, logger log.Logger) {
 	compressCfg := seg.DefaultCfg
 	compressCfg.MinPatternScore = 100
-	c, err := seg.NewCompressor(context.Background(), "test", filepath.Join(dir, snaptype.SegmentFileName(version, from, to, name)), dir, compressCfg, log.LvlDebug, logger)
+	c, err := seg.NewCompressor(context.Background(), "test", filepath.Join(dir, snaptype.SegmentFileName(ver, from, to, name)), dir, compressCfg, log.LvlDebug, logger)
 	require.NoError(t, err)
 	defer c.Close()
 	c.DisableFsync()
@@ -54,7 +55,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 		KeyCount:   1,
 		BucketSize: 10,
 		TmpDir:     dir,
-		IndexFile:  filepath.Join(dir, snaptype.IdxFileName(snaptype.V1_0, from, to, name.String())),
+		IndexFile:  filepath.Join(dir, snaptype.IdxFileName(version.V1_0, from, to, name.String())),
 		LeafSize:   8,
 	}, logger)
 	require.NoError(t, err)
@@ -69,7 +70,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 			KeyCount:   1,
 			BucketSize: 10,
 			TmpDir:     dir,
-			IndexFile:  filepath.Join(dir, snaptype.IdxFileName(snaptype.V1_0, from, to, coresnaptype.Indexes.TxnHash2BlockNum.Name)),
+			IndexFile:  filepath.Join(dir, snaptype.IdxFileName(version.V1_0, from, to, coresnaptype.Indexes.TxnHash2BlockNum.Name)),
 			LeafSize:   8,
 		}, logger)
 		require.NoError(t, err)
@@ -215,7 +216,7 @@ func TestMergeSnapshots(t *testing.T) {
 	dir, require := t.TempDir(), require.New(t)
 	createFile := func(from, to uint64) {
 		for _, snT := range coresnaptype.BlockSnapshotTypes {
-			createTestSegmentFile(t, from, to, snT.Enum(), dir, snaptype.V1_0, logger)
+			createTestSegmentFile(t, from, to, snT.Enum(), dir, version.V1_0, logger)
 		}
 	}
 
@@ -315,7 +316,7 @@ func TestDeleteSnapshots(t *testing.T) {
 	dir, require := t.TempDir(), require.New(t)
 	createFile := func(from, to uint64) {
 		for _, snT := range coresnaptype.BlockSnapshotTypes {
-			createTestSegmentFile(t, from, to, snT.Enum(), dir, snaptype.V1_0, logger)
+			createTestSegmentFile(t, from, to, snT.Enum(), dir, version.V1_0, logger)
 		}
 	}
 
@@ -347,7 +348,7 @@ func TestRemoveOverlaps(t *testing.T) {
 	dir, require := t.TempDir(), require.New(t)
 	createFile := func(from, to uint64) {
 		for _, snT := range coresnaptype.BlockSnapshotTypes {
-			createTestSegmentFile(t, from, to, snT.Enum(), dir, snaptype.V1_0, logger)
+			createTestSegmentFile(t, from, to, snT.Enum(), dir, version.V1_0, logger)
 		}
 	}
 
@@ -439,7 +440,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		chainSnapshotCfg.ExpectBlocks = math.MaxUint64
 		cfg := ethconfig.BlocksFreezing{ChainName: chain}
 		createFile := func(from, to uint64, name snaptype.Type) {
-			createTestSegmentFile(t, from, to, name.Enum(), dir, snaptype.V1_0, logger)
+			createTestSegmentFile(t, from, to, name.Enum(), dir, version.V1_0, logger)
 		}
 		s := NewRoSnapshots(cfg, dir, coresnaptype.BlockSnapshotTypes, 0, true, logger)
 		defer s.Close()
@@ -577,7 +578,7 @@ func TestCalculateVisibleSegments(t *testing.T) {
 	logger := log.New()
 	dir, require := t.TempDir(), require.New(t)
 	createFile := func(from, to uint64, name snaptype.Type) {
-		createTestSegmentFile(t, from, to, name.Enum(), dir, snaptype.V1_0, logger)
+		createTestSegmentFile(t, from, to, name.Enum(), dir, version.V1_0, logger)
 	}
 
 	for i := uint64(0); i < 7; i++ {
@@ -646,7 +647,7 @@ func TestCalculateVisibleSegmentsWhenGapsInIdx(t *testing.T) {
 	logger := testlog.Logger(t, log.LvlCrit)
 	dir, require := t.TempDir(), require.New(t)
 	createFile := func(from, to uint64, name snaptype.Type) {
-		createTestSegmentFile(t, from, to, name.Enum(), dir, snaptype.V1_0, logger)
+		createTestSegmentFile(t, from, to, name.Enum(), dir, version.V1_0, logger)
 	}
 
 	for i := uint64(0); i < 3; i++ {
@@ -655,7 +656,7 @@ func TestCalculateVisibleSegmentsWhenGapsInIdx(t *testing.T) {
 		createFile(i*500_000, (i+1)*500_000, coresnaptype.Transactions)
 	}
 
-	missingIdxFile := filepath.Join(dir, snaptype.IdxFileName(snaptype.V1_0, 500_000, 1_000_000, coresnaptype.Headers.Name()))
+	missingIdxFile := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 500_000, 1_000_000, coresnaptype.Headers.Name()))
 	err := os.Remove(missingIdxFile)
 	require.NoError(err)
 

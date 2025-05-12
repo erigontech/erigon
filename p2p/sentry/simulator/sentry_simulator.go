@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	coretypes "github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/cmd/snapshots/sync"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/p2p"
@@ -425,7 +426,7 @@ func (s *server) getHeaderByHash(ctx context.Context, hash common.Hash) (*corety
 }
 
 func (s *server) downloadHeaders(ctx context.Context, header *snapshotsync.VisibleSegment) error {
-	fileName := snaptype.SegmentFileName(snaptype.ZeroVersion, header.From(), header.To(), coresnaptype.Enums.Headers)
+	fileName := snaptype.SegmentFileName(version.ZeroVersion, header.From(), header.To(), coresnaptype.Enums.Headers)
 	session := sync.NewTorrentSession(s.downloader, s.chain)
 
 	s.logger.Info("Downloading", "file", fileName)
