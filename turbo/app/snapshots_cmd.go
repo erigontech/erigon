@@ -1407,7 +1407,7 @@ func doCompress(cliCtx *cli.Context) error {
 }
 
 func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
