@@ -1331,6 +1331,7 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 			txn := block.Transactions()[receipt.TransactionIndex]
 			x.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, txn.Hash())
 		}
+		log.Warn("[dbg] found2", "len(res)", len(res))
 		res = append(res, x)
 	}
 	return res, nil
