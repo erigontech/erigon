@@ -28,6 +28,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/devnet/services/polygon/heimdallsim"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -74,6 +76,7 @@ func setup(t *testing.T, ctx context.Context, iterations []uint64) *heimdallsim.
 	logger := log.New()
 	// logger.SetHandler(log.StdoutHandler)
 	dataDir := t.TempDir()
+	snaptype.InitializeSaltManager(datadir.New(dataDir), true, logger)
 
 	err := createFiles(dataDir)
 	if err != nil {

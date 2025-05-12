@@ -418,6 +418,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	// Can happen in some configurations
+	snaptype.InitializeSaltManager(dirs, config.Snapshot.NoDownloader, logger)
 	if err := backend.setUpSnapDownloader(ctx, config.Downloader, chainConfig); err != nil {
 		return nil, err
 	}

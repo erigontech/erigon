@@ -1371,7 +1371,8 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 		return nil
 	}
 
-	if _, err := snaptype.ReadAndCreateSaltIfNeeded(dirs.Snap); err != nil {
+	_, err := snaptype.GetSaltManager()
+	if err != nil {
 		return err
 	}
 

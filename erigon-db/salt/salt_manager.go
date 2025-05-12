@@ -50,6 +50,10 @@ func (m *SaltManager) Salt() *uint32 {
 	return m.getSalt(m.mmap)
 }
 
+func (m *SaltManager) Gen() bool {
+	return m.gen
+}
+
 func (m *SaltManager) getSalt(mmap *mmap.MMap) *uint32 {
 	dst := make([]byte, 4)
 	mmap.Lock()

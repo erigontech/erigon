@@ -1191,6 +1191,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	agg *libstate.Aggregator,
 	clean func(), err error,
 ) {
+	snaptype.InitializeSaltManager(dirs, cfg.NoDownloader, logger)
 	chainConfig := fromdb.ChainConfig(chainDB)
 
 	blockSnaps = freezeblocks.NewRoSnapshots(cfg, dirs.Snap, 0, logger)

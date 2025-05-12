@@ -22,16 +22,17 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 
+	"github.com/erigontech/erigon-db/salt"
 	"github.com/erigontech/erigon-db/version"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
@@ -63,68 +64,29 @@ func (f IndexBuilderFunc) Build(ctx context.Context, info FileInfo, salt uint32,
 	return f(ctx, info, salt, chainConfig, tmpDir, p, lvl, logger)
 }
 
-var saltMap = map[string]uint32{}
-var saltLock sync.RWMutex
+var saltManager *salt.SaltManager
+var so sync.Once
+var ErrSMNotInitialized = errors.New("salt manager not initialized")
+var initialized atomic.Bool
 
-func ReadAndCreateSaltIfNeeded(baseDir string) (uint32, error) {
-	// issue: https://github.com/erigontech/erigon/issues/14300
-	// NOTE: The salt value from this is read after snapshot stage AND the value is not
-	// cached before snapshot stage (which downloads salt-blocks.txt too), and therefore
-	// we're good as far as the above issue is concerned.
-	fpath := filepath.Join(baseDir, "salt-blocks.txt")
-	exists, err := dir.FileExist(fpath)
-	if err != nil {
-		return 0, err
-	}
-
-	if !exists {
-		dir.MustExist(baseDir)
-
-		saltBytes := make([]byte, 4)
-		binary.BigEndian.PutUint32(saltBytes, randUint32())
-		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
-			return 0, err
+func InitializeSaltManager(dirs datadir.Dirs, genNewSaltIfNeeded bool, logger log.Logger) {
+	if initialized.Load() {
+		if saltManager.Gen() != genNewSaltIfNeeded {
+			panic("salt manager already initialized; tried to re-initialize with different gen config")
 		}
+		return
 	}
-	saltBytes, err := os.ReadFile(fpath)
-	if err != nil {
-		return 0, err
-	}
-	if len(saltBytes) != 4 {
-		dir.MustExist(baseDir)
-
-		saltBytes := make([]byte, 4)
-		binary.BigEndian.PutUint32(saltBytes, randUint32())
-		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
-			return 0, err
-		}
-	}
-
-	return binary.BigEndian.Uint32(saltBytes), nil
-
+	so.Do(func() {
+		saltManager = salt.NewBlockSaltManager(dirs, genNewSaltIfNeeded, logger)
+	})
+	initialized.Store(true)
 }
 
-// GetIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
-// if db is Read-Only (for example remote RPCDaemon or utilities) - we will not create new indices -
-// and existing indices have salt in metadata.
-func GetIndexSalt(baseDir string) (uint32, error) {
-	saltLock.RLock()
-	salt, ok := saltMap[baseDir]
-	saltLock.RUnlock()
-	if ok {
-		return salt, nil
+func GetSaltManager() (*salt.SaltManager, error) {
+	if saltManager == nil {
+		return nil, ErrSMNotInitialized
 	}
-
-	salt, err := ReadAndCreateSaltIfNeeded(baseDir)
-	if err != nil {
-		return 0, err
-	}
-
-	saltLock.Lock()
-	saltMap[baseDir] = salt
-	saltLock.Unlock()
-
-	return salt, nil
+	return saltManager, nil
 }
 
 type Index struct {
@@ -256,8 +218,7 @@ func (s snapType) Indexes() []Index {
 }
 
 func (s snapType) BuildIndexes(ctx context.Context, info FileInfo, indexBuilder IndexBuilder, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
-	salt, err := GetIndexSalt(info.Dir())
-
+	sm, err := GetSaltManager()
 	if err != nil {
 		return err
 	}
@@ -266,7 +227,7 @@ func (s snapType) BuildIndexes(ctx context.Context, info FileInfo, indexBuilder 
 		indexBuilder = s.indexBuilder
 	}
 
-	return indexBuilder.Build(ctx, info, salt, chainConfig, tmpDir, p, lvl, logger)
+	return indexBuilder.Build(ctx, info, *sm.Salt(), chainConfig, tmpDir, p, lvl, logger)
 }
 
 func (s snapType) HasIndexFiles(info FileInfo, logger log.Logger) bool {

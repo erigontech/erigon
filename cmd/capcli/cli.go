@@ -392,13 +392,12 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 		return
 	})
 
-	salt, err := snaptype.GetIndexSalt(dirs.Snap)
-
+	sm, err := snaptype.GetSaltManager()
 	if err != nil {
 		return err
 	}
 
-	return freezeblocks.DumpBeaconBlocks(ctx, db, 0, to, salt, dirs, estimate.CompressSnapshot.Workers(), log.LvlInfo, log.Root())
+	return freezeblocks.DumpBeaconBlocks(ctx, db, 0, to, *sm.Salt(), dirs, estimate.CompressSnapshot.Workers(), log.LvlInfo, log.Root())
 }
 
 type CheckSnapshots struct {
@@ -1036,13 +1035,12 @@ func (c *DumpBlobsSnapshots) Run(ctx *Context) error {
 	})
 	from := ((beaconConfig.DenebForkEpoch * beaconConfig.SlotsPerEpoch) / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 
-	salt, err := snaptype.GetIndexSalt(dirs.Snap)
-
+	sm, err := snaptype.GetSaltManager()
 	if err != nil {
 		return err
 	}
 
-	return freezeblocks.DumpBlobsSidecar(ctx, blobStorage, db, from, to, salt, dirs, estimate.CompressSnapshot.Workers(), nil, log.LvlInfo, log.Root())
+	return freezeblocks.DumpBlobsSidecar(ctx, blobStorage, db, from, to, *sm.Salt(), dirs, estimate.CompressSnapshot.Workers(), nil, log.LvlInfo, log.Root())
 }
 
 type CheckBlobsSnapshots struct {
@@ -1270,8 +1268,7 @@ func (c *DumpStateSnapshots) Run(ctx *Context) error {
 	freezingCfg := ethconfig.Defaults.Snapshot
 	freezingCfg.ChainName = c.Chain
 
-	salt, err := snaptype.GetIndexSalt(dirs.Snap)
-
+	sm, err := snaptype.GetSaltManager()
 	if err != nil {
 		return err
 	}
@@ -1283,7 +1280,7 @@ func (c *DumpStateSnapshots) Run(ctx *Context) error {
 	r, _ := stateSn.Get(kv.BlockRoot, 999424)
 	fmt.Printf("%x\n", r)
 
-	if err := stateSn.DumpCaplinState(ctx, stateSn.BlocksAvailable(), to, c.StepSize, salt, dirs, runtime.NumCPU(), log.LvlInfo, log.Root()); err != nil {
+	if err := stateSn.DumpCaplinState(ctx, stateSn.BlocksAvailable(), to, c.StepSize, *sm.Salt(), dirs, runtime.NumCPU(), log.LvlInfo, log.Root()); err != nil {
 		return err
 	}
 	if err := stateSn.OpenFolder(); err != nil {
