@@ -59,7 +59,7 @@ import (
 )
 
 func TestShutterBlockBuilding(t *testing.T) {
-	t.Skip()
+	// t.Skip("")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
