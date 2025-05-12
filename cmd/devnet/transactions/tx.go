@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
 	"github.com/erigontech/erigon/cmd/devnet/devnetutils"
 	"github.com/erigontech/erigon/cmd/devnet/scenarios"
-	"github.com/erigontech/erigon/rpc"
 )
 
 func init() {
@@ -272,7 +271,7 @@ func CreateManyEIP1559TransactionsHigherThanBaseFee(ctx context.Context, to, fro
 
 	node := devnet.SelectNode(ctx)
 
-	res, err := node.GetTransactionCount(fromAddress, rpc.PendingBlock)
+	res, err := node.GetTransactionCount(fromAddress, types.PendingBlock)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get transaction count for address 0x%x: %v", fromAddress, err)
@@ -305,7 +304,7 @@ func CreateTransaction(node devnet.Node, to, from string, value uint64) (types.T
 		return nil, common.Address{}, fmt.Errorf("unknown from account: %s", from)
 	}
 
-	res, err := node.GetTransactionCount(fromAccount.Address, rpc.PendingBlock)
+	res, err := node.GetTransactionCount(fromAccount.Address, types.PendingBlock)
 
 	if err != nil {
 		return nil, common.Address{}, fmt.Errorf("failed to get transaction count for address 0x%x: %v", fromAccount.Address, err)
@@ -327,7 +326,7 @@ func CreateTransaction(node devnet.Node, to, from string, value uint64) (types.T
 func signEIP1559TxsLowerAndHigherThanBaseFee2(ctx context.Context, amountLower, amountHigher int, baseFeePerGas uint64, toAddress common.Address, fromAddress common.Address) ([]types.Transaction, []types.Transaction, error) {
 	node := devnet.SelectNode(ctx)
 
-	res, err := node.GetTransactionCount(fromAddress, rpc.PendingBlock)
+	res, err := node.GetTransactionCount(fromAddress, types.PendingBlock)
 
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get transaction count for address 0x%x: %v", fromAddress, err)

@@ -21,11 +21,11 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
-func (api *OtterscanAPIImpl) HasCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (bool, error) {
+func (api *OtterscanAPIImpl) HasCode(ctx context.Context, address common.Address, blockNrOrHash types.BlockNumberOrHash) (bool, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return false, fmt.Errorf("hasCode cannot open tx: %w", err)

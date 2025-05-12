@@ -25,7 +25,6 @@ import (
 	hexutil2 "github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
 
@@ -131,7 +130,7 @@ func (reqGen *requestGenerator) BlockNumber() (uint64, error) {
 	return uint64(result), nil
 }
 
-func (reqGen *requestGenerator) GetBlockByNumber(ctx context.Context, blockNum rpc.BlockNumber, withTxs bool) (*Block, error) {
+func (reqGen *requestGenerator) GetBlockByNumber(ctx context.Context, blockNum types.BlockNumber, withTxs bool) (*Block, error) {
 	var result Block
 	var err error
 

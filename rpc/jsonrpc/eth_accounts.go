@@ -21,18 +21,19 @@ import (
 	"fmt"
 	"math/big"
 
+	"google.golang.org/grpc"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"google.golang.org/grpc"
 )
 
 // GetBalance implements eth_getBalance. Returns the balance of an account for a given address.
-func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error) {
+func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, blockNrOrHash types.BlockNumberOrHash) (*hexutil.Big, error) {
 	tx, err1 := api.db.BeginTemporalRo(ctx)
 	if err1 != nil {
 		return nil, fmt.Errorf("getBalance cannot open tx: %w", err1)
@@ -56,8 +57,8 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 }
 
 // GetTransactionCount implements eth_getTransactionCount. Returns the number of transactions sent from an address (the nonce).
-func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error) {
-	if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
+func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash types.BlockNumberOrHash) (*hexutil.Uint64, error) {
+	if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == types.PendingBlockNumber {
 		reply, err := api.txPool.Nonce(ctx, &txpool_proto.NonceRequest{
 			Address: gointerfaces.ConvertAddressToH160(address),
 		}, &grpc.EmptyCallOption{})
@@ -87,7 +88,7 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 }
 
 // GetCode implements eth_getCode. Returns the byte code at a given address (if it's a smart contract).
-func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
+func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNrOrHash types.BlockNumberOrHash) (hexutil.Bytes, error) {
 	tx, err1 := api.db.BeginTemporalRo(ctx)
 	if err1 != nil {
 		return nil, fmt.Errorf("getCode cannot open tx: %w", err1)
@@ -114,7 +115,7 @@ func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNr
 }
 
 // GetStorageAt implements eth_getStorageAt. Returns the value from a storage position at a given address.
-func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error) {
+func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash types.BlockNumberOrHash) (string, error) {
 	var empty []byte
 	if err := hexutil.IsValidQuantity(index); err != nil {
 		log.Debug("GetStorageAt: Skipped quantity validation error " + "unable to decode storage key: " + err.Error())
@@ -147,7 +148,7 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 }
 
 // Exist returns whether an account for a given address exists in the database.
-func (api *APIImpl) Exist(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (bool, error) {
+func (api *APIImpl) Exist(ctx context.Context, address common.Address, blockNrOrHash types.BlockNumberOrHash) (bool, error) {
 	tx, err1 := api.db.BeginTemporalRo(ctx)
 	if err1 != nil {
 		return false, err1

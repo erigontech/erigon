@@ -41,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/tracers/config"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/tests"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -50,8 +49,8 @@ func TestEmptyQuery(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	// Call GetTransactionReceipt for transaction which is not in the database
-	var latest = rpc.LatestBlockNumber
-	results, err := api.CallMany(context.Background(), json.RawMessage("[]"), &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
+	var latest = types.LatestBlockNumber
+	results, err := api.CallMany(context.Background(), json.RawMessage("[]"), &types.BlockNumberOrHash{BlockNumber: &latest}, nil)
 	if err != nil {
 		t.Errorf("calling CallMany: %v", err)
 	}
@@ -66,13 +65,13 @@ func TestCoinbaseBalance(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	// Call GetTransactionReceipt for transaction which is not in the database
-	var latest = rpc.LatestBlockNumber
+	var latest = types.LatestBlockNumber
 	results, err := api.CallMany(context.Background(), json.RawMessage(`
 [
 	[{"from":"0x71562b71999873db5b286df957af199ec94617f7","to":"0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e","gas":"0x15f90","gasPrice":"0x4a817c800","value":"0x1"},["trace", "stateDiff"]],
 	[{"from":"0x71562b71999873db5b286df957af199ec94617f7","to":"0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e","gas":"0x15f90","gasPrice":"0x4a817c800","value":"0x1"},["trace", "stateDiff"]]
 ]
-`), &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
+`), &types.BlockNumberOrHash{BlockNumber: &latest}, nil)
 	if err != nil {
 		t.Errorf("calling CallMany: %v", err)
 	}
@@ -92,13 +91,13 @@ func TestSwapBalance(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	// Call GetTransactionReceipt for transaction which is not in the database
-	var latest = rpc.LatestBlockNumber
+	var latest = types.LatestBlockNumber
 	results, err := api.CallMany(context.Background(), json.RawMessage(`
 [
 	[{"from":"0x71562b71999873db5b286df957af199ec94617f7","to":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","gas":"0x5208","gasPrice":"0x0","value":"0x2"},["trace", "stateDiff"]],
 	[{"from":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","to":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x5208","gasPrice":"0x0","value":"0x1"},["trace", "stateDiff"]]
 ]
-`), &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
+`), &types.BlockNumberOrHash{BlockNumber: &latest}, nil)
 
 	/*
 		Let's assume A - 0x71562b71999873db5b286df957af199ec94617f7 B - 0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b
@@ -177,14 +176,14 @@ func TestCorrectStateDiff(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	// Call GetTransactionReceipt for transaction which is not in the database
-	var latest = rpc.LatestBlockNumber
+	var latest = types.LatestBlockNumber
 	results, err := api.CallMany(context.Background(), json.RawMessage(`
 [
 	[{"from":"0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e","to":"0x703c4b2bD70c169f5717101CaeE543299Fc946C7","gas":"0x5208","gasPrice":"0x0","value":"0x1"},["trace", "stateDiff"]],
 	[{"from":"0x71562b71999873db5b286df957af199ec94617f7","to":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","gas":"0x5208","gasPrice":"0x0","value":"0x2"},["trace", "stateDiff"]],
 	[{"from":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","to":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x5208","gasPrice":"0x0","value":"0x1"},["trace", "stateDiff"]]
 ]
-`), &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
+`), &types.BlockNumberOrHash{BlockNumber: &latest}, nil)
 
 	/*
 		C->D 1 wei
@@ -337,8 +336,8 @@ func TestReplayBlockTransactions(t *testing.T) {
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 
 	// Call GetTransactionReceipt for transaction which is not in the database
-	n := rpc.BlockNumber(6)
-	results, err := api.ReplayBlockTransactions(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, []string{"stateDiff"}, new(bool), nil)
+	n := types.BlockNumber(6)
+	results, err := api.ReplayBlockTransactions(m.Ctx, types.BlockNumberOrHash{BlockNumber: &n}, []string{"stateDiff"}, new(bool), nil)
 	if err != nil {
 		t.Errorf("calling ReplayBlockTransactions: %v", err)
 	}

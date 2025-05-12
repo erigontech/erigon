@@ -139,19 +139,19 @@ func (b DirectBackend) SubscribeFilterLogs(ctx context.Context, query ethereum.F
 	return sub, nil
 }
 
-func BlockNumArg(blockNum *big.Int) rpc.BlockNumberOrHash {
-	var blockRef rpc.BlockReference
+func BlockNumArg(blockNum *big.Int) types.BlockNumberOrHash {
+	var blockRef types.BlockReference
 	if blockNum == nil {
-		blockRef = rpc.LatestBlock
+		blockRef = types.LatestBlock
 	} else {
-		blockRef = rpc.AsBlockReference(blockNum)
+		blockRef = types.AsBlockReference(blockNum)
 	}
 
-	return rpc.BlockNumberOrHash(blockRef)
+	return types.BlockNumberOrHash(blockRef)
 }
 
-func PendingBlockNumArg() rpc.BlockNumberOrHash {
-	return rpc.BlockNumberOrHash(rpc.PendingBlock)
+func PendingBlockNumArg() types.BlockNumberOrHash {
+	return types.BlockNumberOrHash(types.PendingBlock)
 }
 
 func CallArgsFromCallMsg(callMsg ethereum.CallMsg) ethapi.CallArgs {

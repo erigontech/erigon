@@ -22,7 +22,7 @@ import (
 	"net/http"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 var (
@@ -34,7 +34,7 @@ func checkTime(
 	seconds int,
 	ethAPI EthAPI,
 ) error {
-	i, err := ethAPI.GetBlockByNumber(r.Context(), rpc.LatestBlockNumber, false)
+	i, err := ethAPI.GetBlockByNumber(r.Context(), types.LatestBlockNumber, false)
 	if err != nil {
 		return err
 	}

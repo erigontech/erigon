@@ -21,11 +21,10 @@ import (
 	"fmt"
 	"math/big"
 
+	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
 	"github.com/erigontech/erigon/cmd/devnet/contracts"
@@ -34,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/cmd/devnet/scenarios"
 	"github.com/erigontech/erigon/cmd/devnet/transactions"
 	"github.com/erigontech/erigon/execution/abi/bind"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/requests"
 )
 
@@ -76,7 +74,7 @@ func DeployAndCallLogSubscriber(ctx context.Context, deployer string) (*common.H
 
 	blockNum := txToBlockMap[eventHash]
 
-	block, err := node.GetBlockByNumber(ctx, rpc.AsBlockNumber(blockNum), true)
+	block, err := node.GetBlockByNumber(ctx, types.AsBlockNumber(blockNum), true)
 
 	if err != nil {
 		return nil, err
@@ -142,7 +140,7 @@ func EmitFallbackEvent(node devnet.Node, subContract *contracts.Subscription, op
 
 // initializeTransactOps initializes the transactOpts object for a contract transaction
 func initializeTransactOps(node devnet.Node, transactor common.Address) (*bind.TransactOpts, error) {
-	count, err := node.GetTransactionCount(transactor, rpc.LatestBlock)
+	count, err := node.GetTransactionCount(transactor, types.LatestBlock)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get transaction count for address 0x%x: %v", transactor, err)

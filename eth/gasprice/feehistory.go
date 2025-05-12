@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/consensus/misc"
-	"github.com/erigontech/erigon/rpc"
 )
 
 var (
@@ -169,20 +168,20 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64) {
 // also returned if requested and available.
 // Note: an error is only returned if retrieving the head header has failed. If there are no
 // retrievable blocks in the specified range then zero block count is returned with no error.
-func (oracle *Oracle) resolveBlockRange(ctx context.Context, lastBlock rpc.BlockNumber, blocks, maxHistory int) (*types.Block, []*types.Receipt, uint64, int, error) {
+func (oracle *Oracle) resolveBlockRange(ctx context.Context, lastBlock types.BlockNumber, blocks, maxHistory int) (*types.Block, []*types.Receipt, uint64, int, error) {
 	var (
-		headBlock       rpc.BlockNumber
+		headBlock       types.BlockNumber
 		pendingBlock    *types.Block
 		pendingReceipts types.Receipts
 	)
 	// query either pending block or head header and set headBlock
-	if lastBlock == rpc.PendingBlockNumber {
+	if lastBlock == types.PendingBlockNumber {
 		if pendingBlock, pendingReceipts = oracle.backend.PendingBlockAndReceipts(); pendingBlock != nil {
-			lastBlock = rpc.BlockNumber(pendingBlock.NumberU64())
+			lastBlock = types.BlockNumber(pendingBlock.NumberU64())
 			headBlock = lastBlock - 1
 		} else {
 			// pending block not supported by backend, process until latest block
-			lastBlock = rpc.LatestBlockNumber
+			lastBlock = types.LatestBlockNumber
 			blocks--
 			if blocks == 0 {
 				return nil, nil, 0, 0, nil
@@ -191,13 +190,13 @@ func (oracle *Oracle) resolveBlockRange(ctx context.Context, lastBlock rpc.Block
 	}
 	if pendingBlock == nil {
 		// if pending block is not fetched then we retrieve the head header to get the head block number
-		if latestHeader, err := oracle.backend.HeaderByNumber(ctx, rpc.LatestBlockNumber); err == nil {
-			headBlock = rpc.BlockNumber(latestHeader.Number.Uint64())
+		if latestHeader, err := oracle.backend.HeaderByNumber(ctx, types.LatestBlockNumber); err == nil {
+			headBlock = types.BlockNumber(latestHeader.Number.Uint64())
 		} else {
 			return nil, nil, 0, 0, err
 		}
 	}
-	if lastBlock == rpc.LatestBlockNumber {
+	if lastBlock == types.LatestBlockNumber {
 		lastBlock = headBlock
 	} else if pendingBlock == nil && lastBlock > headBlock {
 		return nil, nil, 0, 0, fmt.Errorf("%w: requested %d, head %d", ErrRequestBeyondHead, lastBlock, headBlock)
@@ -214,7 +213,7 @@ func (oracle *Oracle) resolveBlockRange(ctx context.Context, lastBlock rpc.Block
 		}
 	}
 	// ensure not trying to retrieve before genesis
-	if rpc.BlockNumber(blocks) > lastBlock+1 {
+	if types.BlockNumber(blocks) > lastBlock+1 {
 		blocks = int(lastBlock + 1)
 	}
 	return pendingBlock, pendingReceipts, uint64(lastBlock), blocks, nil
@@ -234,7 +233,7 @@ func (oracle *Oracle) resolveBlockRange(ctx context.Context, lastBlock rpc.Block
 //
 // Note: baseFee includes the next block after the newest of the returned range, because this
 // value can be derived from the newest block.
-func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLastBlock rpc.BlockNumber, rewardPercentiles []float64) (*big.Int, [][]*big.Int, []*big.Int, []float64, []*big.Int, []float64, error) {
+func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLastBlock types.BlockNumber, rewardPercentiles []float64) (*big.Int, [][]*big.Int, []*big.Int, []float64, []*big.Int, []float64, error) {
 	if blocks < 1 {
 		return common.Big0, nil, nil, nil, nil, nil, nil // returning with no data and no error means there are no retrievable blocks
 	}
@@ -295,12 +294,12 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 			fees.block, fees.receipts = pendingBlock, pendingReceipts
 		} else {
 			if len(rewardPercentiles) != 0 {
-				fees.block, fees.err = oracle.backend.BlockByNumber(ctx, rpc.BlockNumber(blockNumber))
+				fees.block, fees.err = oracle.backend.BlockByNumber(ctx, types.BlockNumber(blockNumber))
 				if fees.block != nil && fees.err == nil {
 					fees.receipts, fees.err = oracle.backend.GetReceiptsGasUsed(ctx, fees.block)
 				}
 			} else {
-				fees.header, fees.err = oracle.backend.HeaderByNumber(ctx, rpc.BlockNumber(blockNumber))
+				fees.header, fees.err = oracle.backend.HeaderByNumber(ctx, types.BlockNumber(blockNumber))
 			}
 		}
 		if fees.block != nil {

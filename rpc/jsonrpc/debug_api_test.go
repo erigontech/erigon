@@ -43,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig"
 	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
@@ -95,7 +94,7 @@ func TestTraceBlockByNumber(t *testing.T) {
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
 		}
-		err = api.TraceBlockByNumber(m.Ctx, rpc.BlockNumber(tx.BlockNumber.ToInt().Uint64()), &tracersConfig.TraceConfig{}, stream)
+		err = api.TraceBlockByNumber(m.Ctx, types.BlockNumber(tx.BlockNumber.ToInt().Uint64()), &tracersConfig.TraceConfig{}, stream)
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
 		}
@@ -112,9 +111,9 @@ func TestTraceBlockByNumber(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
-	err := api.TraceBlockByNumber(m.Ctx, rpc.LatestBlockNumber, &tracersConfig.TraceConfig{}, stream)
+	err := api.TraceBlockByNumber(m.Ctx, types.LatestBlockNumber, &tracersConfig.TraceConfig{}, stream)
 	if err != nil {
-		t.Errorf("traceBlock %v: %v", rpc.LatestBlockNumber, err)
+		t.Errorf("traceBlock %v: %v", types.LatestBlockNumber, err)
 	}
 	if err = stream.Flush(); err != nil {
 		t.Fatalf("error flusing: %v", err)
@@ -316,49 +315,49 @@ func TestAccountRange(t *testing.T) {
 
 	t.Run("valid account", func(t *testing.T) {
 		addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf55")
-		n := rpc.BlockNumber(1)
-		result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
+		n := types.BlockNumber(1)
+		result, err := api.AccountRange(m.Ctx, types.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
 		require.NoError(t, err)
 		require.Len(t, result.Accounts, 2)
 
-		n = rpc.BlockNumber(7)
-		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
+		n = types.BlockNumber(7)
+		result, err = api.AccountRange(m.Ctx, types.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
 		require.NoError(t, err)
 		require.Len(t, result.Accounts, 3)
 	})
 	t.Run("valid contract", func(t *testing.T) {
 		addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
-		n := rpc.BlockNumber(1)
-		result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
+		n := types.BlockNumber(1)
+		result, err := api.AccountRange(m.Ctx, types.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
 		require.NoError(t, err)
 		require.Len(t, result.Accounts, 1)
 
-		n = rpc.BlockNumber(7)
-		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
+		n = types.BlockNumber(7)
+		result, err = api.AccountRange(m.Ctx, types.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
 		require.NoError(t, err)
 		require.Len(t, result.Accounts, 2)
 
-		n = rpc.BlockNumber(10)
-		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
+		n = types.BlockNumber(10)
+		result, err = api.AccountRange(m.Ctx, types.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
 		require.NoError(t, err)
 		require.Len(t, result.Accounts, 2)
 	})
 	t.Run("with storage", func(t *testing.T) {
 		addr := common.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcae5")
 
-		n := rpc.BlockNumber(1)
-		result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 1, false, false)
+		n := types.BlockNumber(1)
+		result, err := api.AccountRange(m.Ctx, types.BlockNumberOrHash{BlockNumber: &n}, addr[:], 1, false, false)
 		require.NoError(t, err)
 		require.Empty(t, result.Accounts)
 
-		n = rpc.BlockNumber(7)
-		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 1, false, false)
+		n = types.BlockNumber(7)
+		result, err = api.AccountRange(m.Ctx, types.BlockNumberOrHash{BlockNumber: &n}, addr[:], 1, false, false)
 		require.NoError(t, err)
 		require.Len(t, result.Accounts[addr].Storage, 35)
 
-		n = rpc.BlockNumber(10)
-		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 1, false, false)
+		n = types.BlockNumber(10)
+		result, err = api.AccountRange(m.Ctx, types.BlockNumberOrHash{BlockNumber: &n}, addr[:], 1, false, false)
 		require.NoError(t, err)
 		require.Len(t, result.Accounts[addr].Storage, 35)
 		require.Equal(t, 1, int(result.Accounts[addr].Nonce))
@@ -374,42 +373,42 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
 
 	t.Run("correct input", func(t *testing.T) {
-		n, n2 := rpc.BlockNumber(1), rpc.BlockNumber(2)
+		n, n2 := types.BlockNumber(1), types.BlockNumber(2)
 		result, err := api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
 		require.NoError(t, err)
 		require.Len(t, result, 3)
 
-		n, n2 = rpc.BlockNumber(5), rpc.BlockNumber(7)
+		n, n2 = types.BlockNumber(5), types.BlockNumber(7)
 		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
 		require.NoError(t, err)
 		require.Len(t, result, 38)
 
-		n, n2 = rpc.BlockNumber(0), rpc.BlockNumber(9)
+		n, n2 = types.BlockNumber(0), types.BlockNumber(9)
 		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
 		require.NoError(t, err)
 		require.Len(t, result, 40)
 
 		//nil value means: to = from + 1
-		n = rpc.BlockNumber(0)
+		n = types.BlockNumber(0)
 		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
 		require.NoError(t, err)
 		require.Len(t, result, 3)
 	})
 	t.Run("invalid input", func(t *testing.T) {
-		n, n2 := rpc.BlockNumber(0), rpc.BlockNumber(11)
+		n, n2 := types.BlockNumber(0), types.BlockNumber(11)
 		_, err := api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
 		require.Error(t, err)
 
-		n, n2 = rpc.BlockNumber(0), rpc.BlockNumber(1_000_000)
+		n, n2 = types.BlockNumber(0), types.BlockNumber(1_000_000)
 		_, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
 		require.Error(t, err)
 
-		n = rpc.BlockNumber(0)
+		n = types.BlockNumber(0)
 		result, err := api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
 		require.NoError(t, err)
 		require.Len(t, result, 3)
 
-		n = rpc.BlockNumber(1_000_000)
+		n = types.BlockNumber(1_000_000)
 		_, err = api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
 		require.Error(t, err)
 	})

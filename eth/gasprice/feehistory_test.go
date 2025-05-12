@@ -26,9 +26,9 @@ import (
 
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/gasprice"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
@@ -47,7 +47,7 @@ func TestFeeHistory(t *testing.T) {
 		pending             bool
 		maxHeader, maxBlock int
 		count               int
-		last                rpc.BlockNumber
+		last                types.BlockNumber
 		percent             []float64
 		expFirst            uint64
 		expCount            int
@@ -57,17 +57,17 @@ func TestFeeHistory(t *testing.T) {
 		{false, 0, 0, 10, 30, []float64{0, 10}, 21, 10, nil},
 		{false, 0, 0, 10, 30, []float64{20, 10}, 0, 0, gasprice.ErrInvalidPercentile},
 		{false, 0, 0, 1000000000, 30, nil, 0, 31, nil},
-		{false, 0, 0, 1000000000, rpc.LatestBlockNumber, nil, 0, 33, nil},
+		{false, 0, 0, 1000000000, types.LatestBlockNumber, nil, 0, 33, nil},
 		{false, 0, 0, 10, 40, nil, 0, 0, gasprice.ErrRequestBeyondHead},
 		//{true, 0, 0, 10, 40, nil, 0, 0, gasprice.ErrRequestBeyondHead},
-		{false, 20, 2, 100, rpc.LatestBlockNumber, nil, 13, 20, nil},
-		{false, 20, 2, 100, rpc.LatestBlockNumber, []float64{0, 10}, 31, 2, nil},
+		{false, 20, 2, 100, types.LatestBlockNumber, nil, 13, 20, nil},
+		{false, 20, 2, 100, types.LatestBlockNumber, []float64{0, 10}, 31, 2, nil},
 		{false, 20, 2, 100, 32, []float64{0, 10}, 31, 2, nil},
-		{false, 0, 0, 1, rpc.PendingBlockNumber, nil, 0, 0, nil},
-		{false, 0, 0, 2, rpc.PendingBlockNumber, nil, 32, 1, nil},
+		{false, 0, 0, 1, types.PendingBlockNumber, nil, 0, 0, nil},
+		{false, 0, 0, 2, types.PendingBlockNumber, nil, 32, 1, nil},
 		{false, 0, 0, 10, 30, overMaxQuery, 0, 0, gasprice.ErrInvalidPercentile},
-		//{true, 0, 0, 2, rpc.PendingBlockNumber, nil, 32, 2, nil},
-		//{true, 0, 0, 2, rpc.PendingBlockNumber, []float64{0, 10}, 32, 2, nil},
+		//{true, 0, 0, 2, types.PendingBlockNumber, nil, 32, 2, nil},
+		//{true, 0, 0, 2, types.PendingBlockNumber, []float64{0, 10}, 32, 2, nil},
 	}
 	for i, c := range cases {
 		config := gaspricecfg.Config{

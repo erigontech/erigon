@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonrpc/contracts"
 	"github.com/erigontech/erigon/rpc/rpccfg"
@@ -120,7 +119,7 @@ func TestCallMany(t *testing.T) {
 	timeout := int64(50000)
 	txIndex := -1
 	res, err := api.CallMany(ctx, []Bundle{{
-		Transactions: []ethapi.CallArgs{callArgAddr1, callArgAddr2}}}, StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), TransactionIndex: &txIndex}, nil, &timeout)
+		Transactions: []ethapi.CallArgs{callArgAddr1, callArgAddr2}}}, StateContext{BlockNumber: types.BlockNumberOrHashWithNumber(types.LatestBlockNumber), TransactionIndex: &txIndex}, nil, &timeout)
 	if err != nil {
 		t.Errorf("eth_callMany: %v", err)
 	}
@@ -143,7 +142,7 @@ func TestCallMany(t *testing.T) {
 
 	txIndex = 2
 	res, err = api.CallMany(ctx, []Bundle{{
-		Transactions: []ethapi.CallArgs{callArgAddr1, callArgAddr2}}}, StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(1), TransactionIndex: &txIndex}, nil, &timeout)
+		Transactions: []ethapi.CallArgs{callArgAddr1, callArgAddr2}}}, StateContext{BlockNumber: types.BlockNumberOrHashWithNumber(1), TransactionIndex: &txIndex}, nil, &timeout)
 	if err != nil {
 		t.Errorf("eth_callMany: %v", err)
 	}
@@ -163,7 +162,7 @@ func TestCallMany(t *testing.T) {
 		t.Errorf("eth_callMany: %s", "balanceUnmatch")
 	}
 	txIndex = -1
-	res, err = api.CallMany(ctx, []Bundle{{Transactions: []ethapi.CallArgs{callArgTransferAddr2, callArgAddr1, callArgAddr2}}}, StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), TransactionIndex: &txIndex}, nil, &timeout)
+	res, err = api.CallMany(ctx, []Bundle{{Transactions: []ethapi.CallArgs{callArgTransferAddr2, callArgAddr1, callArgAddr2}}}, StateContext{BlockNumber: types.BlockNumberOrHashWithNumber(types.LatestBlockNumber), TransactionIndex: &txIndex}, nil, &timeout)
 	if err != nil {
 		t.Errorf("%v", err)
 	}

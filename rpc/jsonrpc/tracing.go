@@ -44,16 +44,16 @@ import (
 )
 
 // TraceBlockByNumber implements debug_traceBlockByNumber. Returns Geth style block traces.
-func (api *PrivateDebugAPIImpl) TraceBlockByNumber(ctx context.Context, blockNum rpc.BlockNumber, config *tracersConfig.TraceConfig, stream *jsoniter.Stream) error {
-	return api.traceBlock(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), config, stream)
+func (api *PrivateDebugAPIImpl) TraceBlockByNumber(ctx context.Context, blockNum types.BlockNumber, config *tracersConfig.TraceConfig, stream *jsoniter.Stream) error {
+	return api.traceBlock(ctx, types.BlockNumberOrHashWithNumber(blockNum), config, stream)
 }
 
 // TraceBlockByHash implements debug_traceBlockByHash. Returns Geth style block traces.
 func (api *PrivateDebugAPIImpl) TraceBlockByHash(ctx context.Context, hash common.Hash, config *tracersConfig.TraceConfig, stream *jsoniter.Stream) error {
-	return api.traceBlock(ctx, rpc.BlockNumberOrHashWithHash(hash, true), config, stream)
+	return api.traceBlock(ctx, types.BlockNumberOrHashWithHash(hash, true), config, stream)
 }
 
-func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream *jsoniter.Stream) error {
+func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash types.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream *jsoniter.Stream) error {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		stream.WriteNil()
@@ -357,7 +357,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 }
 
 // TraceCall implements debug_traceCall. Returns Geth style call traces.
-func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream *jsoniter.Stream) error {
+func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, blockNrOrHash types.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream *jsoniter.Stream) error {
 	dbtx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return fmt.Errorf("create ro transaction: %v", err)
@@ -504,7 +504,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		transactionIndex = len(block.Transactions())
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), transactionIndex, api.filters, api.stateCache, chainConfig.ChainName)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, types.BlockNumberOrHashWithNumber(types.BlockNumber(blockNum-1)), transactionIndex, api.filters, api.stateCache, chainConfig.ChainName)
 	if err != nil {
 		stream.WriteNil()
 		return err

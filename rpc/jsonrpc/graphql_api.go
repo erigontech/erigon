@@ -26,13 +26,12 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/ethutils"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 type GraphQLAPI interface {
-	GetBlockDetails(ctx context.Context, number rpc.BlockNumber) (map[string]interface{}, error)
+	GetBlockDetails(ctx context.Context, number types.BlockNumber) (map[string]interface{}, error)
 	GetChainID(ctx context.Context) (*big.Int, error)
 }
 
@@ -63,7 +62,7 @@ func (api *GraphQLAPIImpl) GetChainID(ctx context.Context) (*big.Int, error) {
 	return response.ChainID, nil
 }
 
-func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.BlockNumber) (map[string]interface{}, error) {
+func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber types.BlockNumber) (map[string]interface{}, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -126,12 +125,12 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 	return response, nil
 }
 
-func (api *GraphQLAPIImpl) getBlockWithSenders(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Block, []common.Address, error) {
-	if number == rpc.PendingBlockNumber {
+func (api *GraphQLAPIImpl) getBlockWithSenders(ctx context.Context, number types.BlockNumber, tx kv.Tx) (*types.Block, []common.Address, error) {
+	if number == types.PendingBlockNumber {
 		return api.pendingBlock(), nil, nil
 	}
 
-	blockHeight, blockHash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
+	blockHeight, blockHash, _, err := rpchelper.GetBlockNumber(ctx, types.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -146,7 +145,7 @@ func (api *GraphQLAPIImpl) getBlockWithSenders(ctx context.Context, number rpc.B
 	return block, block.Body().SendersFromTxs(), nil
 }
 
-func (api *GraphQLAPIImpl) delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (map[string]interface{}, error) {
+func (api *GraphQLAPIImpl) delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number types.BlockNumber, inclTx bool) (map[string]interface{}, error) {
 	additionalFields := make(map[string]interface{})
 	response, err := ethapi.RPCMarshalBlock(b, inclTx, inclTx, additionalFields)
 	if !inclTx {
@@ -154,7 +153,7 @@ func (api *GraphQLAPIImpl) delegateGetBlockByNumber(tx kv.Tx, b *types.Block, nu
 	}
 	response["transactionCount"] = b.Transactions().Len()
 
-	if err == nil && number == rpc.PendingBlockNumber {
+	if err == nil && number == types.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields
 		for _, field := range []string{"hash", "nonce", "miner"} {
 			response[field] = nil

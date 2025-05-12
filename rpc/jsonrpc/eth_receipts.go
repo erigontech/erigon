@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/eth/filters"
 	"github.com/erigontech/erigon/execution/exec3"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -90,7 +89,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		end = num
 	} else {
 		// Convert the RPC block numbers into internal representations
-		latest, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, api._blockReader, nil)
+		latest, _, _, err := rpchelper.GetBlockNumber(ctx, types.BlockNumberOrHashWithNumber(types.LatestExecutedBlockNumber), tx, api._blockReader, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -101,8 +100,8 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 			if fromBlock > 0 {
 				begin = uint64(fromBlock)
 			} else {
-				blockNum := rpc.BlockNumber(fromBlock)
-				begin, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, api.filters)
+				blockNum := types.BlockNumber(fromBlock)
+				begin, _, _, err = rpchelper.GetBlockNumber(ctx, types.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, api.filters)
 				if err != nil {
 					return nil, err
 				}
@@ -118,8 +117,8 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 			if toBlock > 0 {
 				end = uint64(toBlock)
 			} else {
-				blockNum := rpc.BlockNumber(toBlock)
-				end, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, api.filters)
+				blockNum := types.BlockNumber(toBlock)
+				end, _, _, err = rpchelper.GetBlockNumber(ctx, types.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, api.filters)
 				if err != nil {
 					return nil, err
 				}
@@ -476,7 +475,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 }
 
 // GetBlockReceipts - receipts for individual block
-func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]map[string]interface{}, error) {
+func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash types.BlockNumberOrHash) ([]map[string]interface{}, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err

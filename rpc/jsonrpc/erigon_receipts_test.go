@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/filters"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
@@ -77,7 +76,7 @@ func TestErigonGetLatestLogs(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	db := m.DB
 	api := NewErigonAPI(newBaseApiForTest(m), db, nil)
-	expectedLogs, _ := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
+	expectedLogs, _ := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(types.LatestBlockNumber.Int64())})
 
 	expectedErigonLogs := make(types.ErigonLogs, 0)
 	for i := len(expectedLogs) - 1; i >= 0; i-- {
@@ -94,7 +93,7 @@ func TestErigonGetLatestLogs(t *testing.T) {
 			Timestamp:   expectedLogs[i].Timestamp,
 		})
 	}
-	actual, err := api.GetLatestLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())}, filters.LogFilterOptions{
+	actual, err := api.GetLatestLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(types.LatestBlockNumber.Int64())}, filters.LogFilterOptions{
 		LogCount: uint64(len(expectedLogs)),
 	})
 	if err != nil {
@@ -123,7 +122,7 @@ func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	db := m.DB
 	api := NewErigonAPI(newBaseApiForTest(m), db, nil)
-	expectedLogs, _ := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
+	expectedLogs, _ := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(types.LatestBlockNumber.Int64())})
 
 	expectedErigonLogs := make([]*types.ErigonLog, 0)
 	for i := len(expectedLogs) - 1; i >= 0; i-- {

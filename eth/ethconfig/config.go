@@ -42,7 +42,6 @@ import (
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
@@ -248,7 +247,7 @@ type Sync struct {
 	ParallelStateFlushing      bool
 
 	UploadLocation   string
-	UploadFrom       rpc.BlockNumber
+	UploadFrom       types.BlockNumber
 	FrozenBlockLimit uint64
 
 	ChaosMonkey              bool

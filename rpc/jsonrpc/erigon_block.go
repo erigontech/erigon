@@ -38,9 +38,9 @@ import (
 )
 
 // GetHeaderByNumber implements erigon_getHeaderByNumber. Returns a block's header given a block number ignoring the block's transaction and uncle list (may be faster).
-func (api *ErigonImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.BlockNumber) (*types.Header, error) {
+func (api *ErigonImpl) GetHeaderByNumber(ctx context.Context, blockNumber types.BlockNumber) (*types.Header, error) {
 	// Pending block is only known by the miner
-	if blockNumber == rpc.PendingBlockNumber {
+	if blockNumber == types.PendingBlockNumber {
 		block := api.pendingBlock()
 		if block == nil {
 			return nil, nil
@@ -54,7 +54,7 @@ func (api *ErigonImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.Bl
 	}
 	defer tx.Rollback()
 
-	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNumber), tx, api._blockReader, api.filters)
+	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, types.BlockNumberOrHashWithNumber(blockNumber), tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +200,7 @@ func buildBlockResponse(ctx context.Context, br services.FullBlockReader, db kv.
 
 	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, nil, common.Hash{}, additionalFields)
 
-	if err == nil && rpc.BlockNumber(block.NumberU64()) == rpc.PendingBlockNumber {
+	if err == nil && types.BlockNumber(block.NumberU64()) == types.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields
 		for _, field := range []string{"hash", "nonce", "miner"} {
 			response[field] = nil
@@ -209,7 +209,7 @@ func buildBlockResponse(ctx context.Context, br services.FullBlockReader, db kv.
 	return response, err
 }
 
-func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (map[common.Address]*hexutil.Big, error) {
+func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHash types.BlockNumberOrHash) (map[common.Address]*hexutil.Big, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err

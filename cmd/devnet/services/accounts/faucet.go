@@ -25,12 +25,12 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
 	"github.com/erigontech/erigon/cmd/devnet/blocks"
 	"github.com/erigontech/erigon/cmd/devnet/contracts"
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
 	"github.com/erigontech/erigon/execution/abi/bind"
-	"github.com/erigontech/erigon/rpc"
 )
 
 type Faucet struct {
@@ -161,7 +161,7 @@ func (f *Faucet) Balance(ctx context.Context) (*big.Int, error) {
 		return nil, fmt.Errorf("%s has no block producers", f.chainName)
 	}
 
-	return node.GetBalance(f.contractAddress, rpc.LatestBlock)
+	return node.GetBalance(f.contractAddress, types.LatestBlock)
 }
 
 func (f *Faucet) Send(ctx context.Context, destination *accounts.Account, eth float64) (*big.Int, common.Hash, error) {
@@ -179,7 +179,7 @@ func (f *Faucet) Send(ctx context.Context, destination *accounts.Account, eth fl
 
 	node := devnet.SelectNode(ctx)
 
-	count, err := node.GetTransactionCount(f.source.Address, rpc.PendingBlock)
+	count, err := node.GetTransactionCount(f.source.Address, types.PendingBlock)
 
 	if err != nil {
 		return nil, common.Hash{}, err
@@ -206,7 +206,7 @@ func (f *Faucet) Receive(ctx context.Context, source *accounts.Account, eth floa
 		return nil, common.Hash{}, err
 	}
 
-	count, err := node.GetTransactionCount(f.source.Address, rpc.PendingBlock)
+	count, err := node.GetTransactionCount(f.source.Address, types.PendingBlock)
 
 	if err != nil {
 		return nil, common.Hash{}, err

@@ -25,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/cmd/devnet/blocks"
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
 	"github.com/erigontech/erigon/execution/abi/bind"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/requests"
 )
@@ -39,7 +38,7 @@ func TransactOpts(ctx context.Context, sender common.Address) (*bind.TransactOpt
 		return nil, err
 	}
 
-	count, err := node.GetTransactionCount(sender, rpc.PendingBlock)
+	count, err := node.GetTransactionCount(sender, types.PendingBlock)
 
 	if err != nil {
 		return nil, err
@@ -75,7 +74,7 @@ func Deploy[C any](ctx context.Context, deployer common.Address, deploy func(aut
 func DeployWithOps[C any](ctx context.Context, auth *bind.TransactOpts, deploy func(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *C, error)) (common.Address, types.Transaction, *C, error) {
 	node := devnet.SelectNode(ctx)
 
-	count, err := node.GetTransactionCount(auth.From, rpc.PendingBlock)
+	count, err := node.GetTransactionCount(auth.From, types.PendingBlock)
 
 	if err != nil {
 		return common.Address{}, nil, nil, err

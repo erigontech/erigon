@@ -153,7 +153,7 @@ type feeHistoryResult struct {
 	BlobGasUsedRatio []float64        `json:"blobGasUsedRatio,omitempty"`
 }
 
-func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex, lastBlock rpc.BlockNumber, rewardPercentiles []float64) (*feeHistoryResult, error) {
+func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex, lastBlock types.BlockNumber, rewardPercentiles []float64) (*feeHistoryResult, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -257,7 +257,7 @@ func NewGasPriceOracleBackend(tx kv.TemporalTx, baseApi *BaseAPI) *GasPriceOracl
 	return &GasPriceOracleBackend{tx: tx, baseApi: baseApi}
 }
 
-func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
+func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number types.BlockNumber) (*types.Header, error) {
 	header, err := b.baseApi.headerByRPCNumber(ctx, number, b.tx)
 	if err != nil {
 		return nil, err
@@ -267,7 +267,7 @@ func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.B
 	}
 	return header, nil
 }
-func (b *GasPriceOracleBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
+func (b *GasPriceOracleBackend) BlockByNumber(ctx context.Context, number types.BlockNumber) (*types.Block, error) {
 	return b.baseApi.blockByRPCNumber(ctx, number, b.tx)
 }
 func (b *GasPriceOracleBackend) ChainConfig() *chain.Config {

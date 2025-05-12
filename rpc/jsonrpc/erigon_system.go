@@ -22,10 +22,10 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/p2p/forkid"
 	borfinality "github.com/erigontech/erigon/polygon/bor/finality"
 	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -55,35 +55,35 @@ func (api *ErigonImpl) Forks(ctx context.Context) (Forks, error) {
 
 // Post the merge eth_blockNumber will return latest forkChoiceHead block number
 // erigon_blockNumber will return latest executed block number or any block number requested
-func (api *ErigonImpl) BlockNumber(ctx context.Context, rpcBlockNumPtr *rpc.BlockNumber) (hexutil.Uint64, error) {
+func (api *ErigonImpl) BlockNumber(ctx context.Context, rpcBlockNumPtr *types.BlockNumber) (hexutil.Uint64, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
 
-	var rpcBlockNum rpc.BlockNumber
+	var rpcBlockNum types.BlockNumber
 	if rpcBlockNumPtr == nil {
-		rpcBlockNum = rpc.LatestExecutedBlockNumber
+		rpcBlockNum = types.LatestExecutedBlockNumber
 	} else {
 		rpcBlockNum = *rpcBlockNumPtr
 	}
 
 	var blockNum uint64
 	switch rpcBlockNum {
-	case rpc.LatestBlockNumber:
+	case types.LatestBlockNumber:
 		blockNum, err = rpchelper.GetLatestBlockNumber(tx)
 		if err != nil {
 			return 0, err
 		}
-	case rpc.EarliestBlockNumber:
+	case types.EarliestBlockNumber:
 		blockNum = 0
-	case rpc.SafeBlockNumber:
+	case types.SafeBlockNumber:
 		blockNum, err = rpchelper.GetSafeBlockNumber(tx)
 		if err != nil {
 			return 0, err
 		}
-	case rpc.FinalizedBlockNumber:
+	case types.FinalizedBlockNumber:
 		if whitelist.GetWhitelistingService() != nil {
 			num := borfinality.GetFinalizedBlockNumber(tx)
 			if num == 0 {

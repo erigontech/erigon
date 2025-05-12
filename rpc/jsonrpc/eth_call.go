@@ -49,17 +49,16 @@ import (
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/rpc"
 	ethapi2 "github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/transactions"
 )
 
-var latestNumOrHash = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+var latestNumOrHash = types.BlockNumberOrHashWithNumber(types.LatestBlockNumber)
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
-func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides) (hexutil.Bytes, error) {
+func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHash types.BlockNumberOrHash, overrides *ethapi2.StateOverrides) (hexutil.Bytes, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -106,7 +105,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHa
 }
 
 // headerByNumberOrHash - intent to read recent headers only, tries from the lru cache before reading from the db
-func headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, api *APIImpl) (*types.Header, error) {
+func headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash types.BlockNumberOrHash, api *APIImpl) (*types.Header, error) {
 	_, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
@@ -129,7 +128,7 @@ func headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.Block
 }
 
 // EstimateGas implements eth_estimateGas. Returns an estimate of how much gas is necessary to allow the transaction to complete. The transaction will not be added to the blockchain.
-func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides) (hexutil.Uint64, error) {
+func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs, blockNrOrHash *types.BlockNumberOrHash, overrides *ethapi2.StateOverrides) (hexutil.Uint64, error) {
 	var args ethapi2.CallArgs
 	// if we actually get CallArgs here, we use them
 	if argsOrNil != nil {
@@ -303,7 +302,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 }
 
 // GetProof implements eth_getProof partially; Proofs are available only with the `latest` block tag.
-func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNrOrHash rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
+func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNrOrHash types.BlockNumberOrHash) (*accounts.AccProofResult, error) {
 	roTx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -321,10 +320,10 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 	for i, s := range storageKeys {
 		storageKeysConverted[i].SetBytes(s)
 	}
-	return api.getProof(ctx, roTx, address, storageKeysConverted, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(requestedBlockNr)), api.db, api.logger)
+	return api.getProof(ctx, roTx, address, storageKeysConverted, types.BlockNumberOrHashWithNumber(types.BlockNumber(requestedBlockNr)), api.db, api.logger)
 }
 
-func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address common.Address, storageKeys []common.Hash, blockNrOrHash rpc.BlockNumberOrHash, db kv.RoDB, logger log.Logger) (*accounts.AccProofResult, error) {
+func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address common.Address, storageKeys []common.Hash, blockNrOrHash types.BlockNumberOrHash, db kv.RoDB, logger log.Logger) (*accounts.AccProofResult, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -486,11 +485,11 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address common.Add
 	return proof, nil
 }
 
-func (api *APIImpl) GetWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
+func (api *APIImpl) GetWitness(ctx context.Context, blockNrOrHash types.BlockNumberOrHash) (hexutil.Bytes, error) {
 	return api.getWitness(ctx, api.db, blockNrOrHash, 0, true, api.MaxGetProofRewindBlockCount, api.logger)
 }
 
-func (api *APIImpl) GetTxWitness(ctx context.Context, blockNr rpc.BlockNumberOrHash, txIndex hexutil.Uint) (hexutil.Bytes, error) {
+func (api *APIImpl) GetTxWitness(ctx context.Context, blockNr types.BlockNumberOrHash, txIndex hexutil.Uint) (hexutil.Bytes, error) {
 	return api.getWitness(ctx, api.db, blockNr, txIndex, false, api.MaxGetProofRewindBlockCount, api.logger)
 }
 
@@ -522,7 +521,7 @@ func verifyExecResult(execResult *core.EphemeralExecResult, block *types.Block) 
 	return nil
 }
 
-func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rpc.BlockNumberOrHash, txIndex hexutil.Uint, fullBlock bool, maxGetProofRewindBlockCount int, logger log.Logger) (hexutil.Bytes, error) {
+func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash types.BlockNumberOrHash, txIndex hexutil.Uint, fullBlock bool, maxGetProofRewindBlockCount int, logger log.Logger) (hexutil.Bytes, error) {
 	roTx, err := db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -718,8 +717,8 @@ type accessListResult struct {
 // CreateAccessList implements eth_createAccessList. It creates an access list for the given transaction.
 // If the accesslist creation fails an error is returned.
 // If the transaction itself fails, an vmErr is returned.
-func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, optimizeGas *bool) (*accessListResult, error) {
-	bNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs, blockNrOrHash *types.BlockNumberOrHash, optimizeGas *bool) (*accessListResult, error) {
+	bNrOrHash := types.BlockNumberOrHashWithNumber(types.PendingBlockNumber)
 	if blockNrOrHash != nil {
 		bNrOrHash = *blockNrOrHash
 	}

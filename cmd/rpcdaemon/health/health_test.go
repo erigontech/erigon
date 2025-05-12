@@ -28,7 +28,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
-
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -48,7 +48,7 @@ type ethApiStub struct {
 	syncingError  error
 }
 
-func (e *ethApiStub) GetBlockByNumber(_ context.Context, _ rpc.BlockNumber, _ bool) (map[string]interface{}, error) {
+func (e *ethApiStub) GetBlockByNumber(_ context.Context, _ types.BlockNumber, _ bool) (map[string]interface{}, error) {
 	return e.blockResult, e.blockError
 }
 

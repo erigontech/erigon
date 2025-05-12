@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
 
@@ -121,7 +120,7 @@ func (reqGen *requestGenerator) GasPrice() (*big.Int, error) {
 	return result.ToInt(), nil
 }
 
-func (reqGen *requestGenerator) Call(args ethapi.CallArgs, blockRef rpc.BlockReference, overrides *ethapi.StateOverrides) ([]byte, error) {
+func (reqGen *requestGenerator) Call(args ethapi.CallArgs, blockRef types.BlockReference, overrides *ethapi.StateOverrides) ([]byte, error) {
 	var result hexutil.Bytes
 
 	if err := reqGen.rpcCall(context.Background(), &result, Methods.ETHCall, args, blockRef, overrides); err != nil {

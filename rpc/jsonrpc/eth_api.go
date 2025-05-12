@@ -58,28 +58,28 @@ import (
 // EthAPI is a collection of functions that are exposed in the
 type EthAPI interface {
 	// Block related (proposed file: ./eth_blocks.go)
-	GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error)
-	GetBlockByHash(ctx context.Context, hash rpc.BlockNumberOrHash, fullTx bool) (map[string]interface{}, error)
-	GetBlockTransactionCountByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error)
+	GetBlockByNumber(ctx context.Context, number types.BlockNumber, fullTx bool) (map[string]interface{}, error)
+	GetBlockByHash(ctx context.Context, hash types.BlockNumberOrHash, fullTx bool) (map[string]interface{}, error)
+	GetBlockTransactionCountByNumber(ctx context.Context, blockNr types.BlockNumber) (*hexutil.Uint, error)
 	GetBlockTransactionCountByHash(ctx context.Context, blockHash common.Hash) (*hexutil.Uint, error)
 
 	// Transaction related (see ./eth_txs.go)
 	GetTransactionByHash(ctx context.Context, hash common.Hash) (*ethapi.RPCTransaction, error)
 	GetTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, txIndex hexutil.Uint64) (*ethapi.RPCTransaction, error)
-	GetTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, txIndex hexutil.Uint) (*ethapi.RPCTransaction, error)
-	GetRawTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, index hexutil.Uint) (hexutil.Bytes, error)
+	GetTransactionByBlockNumberAndIndex(ctx context.Context, blockNr types.BlockNumber, txIndex hexutil.Uint) (*ethapi.RPCTransaction, error)
+	GetRawTransactionByBlockNumberAndIndex(ctx context.Context, blockNr types.BlockNumber, index hexutil.Uint) (hexutil.Bytes, error)
 	GetRawTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, index hexutil.Uint) (hexutil.Bytes, error)
 	GetRawTransactionByHash(ctx context.Context, hash common.Hash) (hexutil.Bytes, error)
 
 	// Receipt related (see ./eth_receipts.go)
 	GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error)
 	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.Logs, error)
-	GetBlockReceipts(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]map[string]interface{}, error)
+	GetBlockReceipts(ctx context.Context, numberOrHash types.BlockNumberOrHash) ([]map[string]interface{}, error)
 
 	// Uncle related (see ./eth_uncles.go)
-	GetUncleByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, index hexutil.Uint) (map[string]interface{}, error)
+	GetUncleByBlockNumberAndIndex(ctx context.Context, blockNr types.BlockNumber, index hexutil.Uint) (map[string]interface{}, error)
 	GetUncleByBlockHashAndIndex(ctx context.Context, hash common.Hash, index hexutil.Uint) (map[string]interface{}, error)
-	GetUncleCountByBlockNumber(ctx context.Context, number rpc.BlockNumber) (*hexutil.Uint, error)
+	GetUncleCountByBlockNumber(ctx context.Context, number types.BlockNumber) (*hexutil.Uint, error)
 	GetUncleCountByBlockHash(ctx context.Context, hash common.Hash) (*hexutil.Uint, error)
 
 	// Filter related (see ./eth_filters.go)
@@ -93,10 +93,10 @@ type EthAPI interface {
 
 	// Account related (see ./eth_accounts.go)
 	Accounts(ctx context.Context) ([]common.Address, error)
-	GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error)
-	GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error)
-	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error)
-	GetCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
+	GetBalance(ctx context.Context, address common.Address, blockNrOrHash types.BlockNumberOrHash) (*hexutil.Big, error)
+	GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash types.BlockNumberOrHash) (*hexutil.Uint64, error)
+	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash types.BlockNumberOrHash) (string, error)
+	GetCode(ctx context.Context, address common.Address, blockNrOrHash types.BlockNumberOrHash) (hexutil.Bytes, error)
 
 	// System related (see ./eth_system.go)
 	BlockNumber(ctx context.Context) (hexutil.Uint64, error)
@@ -106,14 +106,14 @@ type EthAPI interface {
 	GasPrice(_ context.Context) (*hexutil.Big, error)
 
 	// Sending related (see ./eth_call.go)
-	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *ethapi.StateOverrides) (hexutil.Bytes, error)
-	EstimateGas(ctx context.Context, argsOrNil *ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, overrides *ethapi.StateOverrides) (hexutil.Uint64, error)
+	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash types.BlockNumberOrHash, overrides *ethapi.StateOverrides) (hexutil.Bytes, error)
+	EstimateGas(ctx context.Context, argsOrNil *ethapi.CallArgs, blockNrOrHash *types.BlockNumberOrHash, overrides *ethapi.StateOverrides) (hexutil.Uint64, error)
 	SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error)
 	SendTransaction(_ context.Context, txObject interface{}) (common.Hash, error)
 	Sign(ctx context.Context, _ common.Address, _ hexutil.Bytes) (hexutil.Bytes, error)
 	SignTransaction(_ context.Context, txObject interface{}) (common.Hash, error)
-	GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNr rpc.BlockNumberOrHash) (*accounts.AccProofResult, error)
-	CreateAccessList(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, optimizeGas *bool) (*accessListResult, error)
+	GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNr types.BlockNumberOrHash) (*accounts.AccProofResult, error)
+	CreateAccessList(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *types.BlockNumberOrHash, optimizeGas *bool) (*accessListResult, error)
 
 	// Mining related (see ./eth_mining.go)
 	Coinbase(ctx context.Context) (common.Address, error)
@@ -282,8 +282,8 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 	return api.filters.LastPendingBlock()
 }
 
-func (api *BaseAPI) blockByRPCNumber(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
-	n, h, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
+func (api *BaseAPI) blockByRPCNumber(ctx context.Context, number types.BlockNumber, tx kv.Tx) (*types.Block, error) {
+	n, h, _, err := rpchelper.GetBlockNumber(ctx, types.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -293,8 +293,8 @@ func (api *BaseAPI) blockByRPCNumber(ctx context.Context, number rpc.BlockNumber
 	return block, err
 }
 
-func (api *BaseAPI) headerByRPCNumber(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Header, error) {
-	n, h, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
+func (api *BaseAPI) headerByRPCNumber(ctx context.Context, number types.BlockNumber, tx kv.Tx) (*types.Header, error) {
+	n, h, _, err := rpchelper.GetBlockNumber(ctx, types.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -336,7 +336,7 @@ func (api *BaseAPI) checkPruneHistory(ctx context.Context, tx kv.Tx, block uint6
 		return nil
 	}
 	if p.History.Enabled() {
-		latest, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), tx, api._blockReader, api.filters)
+		latest, _, _, err := rpchelper.GetBlockNumber(ctx, types.BlockNumberOrHashWithNumber(types.LatestBlockNumber), tx, api._blockReader, api.filters)
 		if err != nil {
 			return err
 		}

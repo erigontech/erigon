@@ -42,7 +42,6 @@ import (
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/eth/tracers/config"
 	ptracer "github.com/erigontech/erigon/polygon/tracer"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/transactions"
@@ -904,7 +903,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		isBorStateSyncTxn = true
 	}
 
-	header, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNum), tx)
+	header, err := api.headerByRPCNumber(ctx, types.BlockNumber(blockNum), tx)
 	if err != nil {
 		return nil, err
 	}
@@ -960,7 +959,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 	return trace, nil
 }
 
-func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, traceTypes []string, gasBailOut *bool, traceConfig *config.TraceConfig) ([]*TraceCallResult, error) {
+func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrHash types.BlockNumberOrHash, traceTypes []string, gasBailOut *bool, traceConfig *config.TraceConfig) ([]*TraceCallResult, error) {
 	if gasBailOut == nil {
 		gasBailOut = new(bool) // false by default
 	}
@@ -1031,7 +1030,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 }
 
 // Call implements trace_call.
-func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTypes []string, blockNrOrHash *rpc.BlockNumberOrHash, traceConfig *config.TraceConfig) (*TraceCallResult, error) {
+func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTypes []string, blockNrOrHash *types.BlockNumberOrHash, traceConfig *config.TraceConfig) (*TraceCallResult, error) {
 	tx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -1045,8 +1044,8 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	engine := api.engine()
 
 	if blockNrOrHash == nil {
-		var num = rpc.LatestBlockNumber
-		blockNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
+		var num = types.LatestBlockNumber
+		blockNrOrHash = &types.BlockNumberOrHash{BlockNumber: &num}
 	}
 
 	blockNumber, hash, _, err := rpchelper.GetBlockNumber(ctx, *blockNrOrHash, tx, api._blockReader, api.filters)
@@ -1184,7 +1183,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 }
 
 // CallMany implements trace_callMany.
-func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, parentNrOrHash *rpc.BlockNumberOrHash, traceConfig *config.TraceConfig) ([]*TraceCallResult, error) {
+func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, parentNrOrHash *types.BlockNumberOrHash, traceConfig *config.TraceConfig) ([]*TraceCallResult, error) {
 	dbtx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -1233,8 +1232,8 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	}
 	var baseFee *uint256.Int
 	if parentNrOrHash == nil {
-		var num = rpc.LatestBlockNumber
-		parentNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
+		var num = types.LatestBlockNumber
+		parentNrOrHash = &types.BlockNumberOrHash{BlockNumber: &num}
 	}
 	blockNumber, hash, _, err := rpchelper.GetBlockNumber(ctx, *parentNrOrHash, dbtx, api._blockReader, api.filters)
 	if err != nil {
@@ -1295,7 +1294,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReader state.StateReader,
 	stateCache *shards.StateCache, cachedWriter state.StateWriter, ibs *state.IntraBlockState,
 	txns []types.Transaction, msgs []*types.Message, callParams []TraceCallParam,
-	parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header, gasBailout bool,
+	parentNrOrHash *types.BlockNumberOrHash, header *types.Header, gasBailout bool,
 	traceConfig *config.TraceConfig,
 ) ([]*TraceCallResult, *tracing.Hooks, error) {
 	chainConfig, err := api.chainConfig(ctx, dbtx)
@@ -1305,8 +1304,8 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 	engine := api.engine()
 
 	if parentNrOrHash == nil {
-		var num = rpc.LatestBlockNumber
-		parentNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
+		var num = types.LatestBlockNumber
+		parentNrOrHash = &types.BlockNumberOrHash{BlockNumber: &num}
 	}
 	parentBlockNumber, hash, _, err := rpchelper.GetBlockNumber(ctx, *parentNrOrHash, dbtx, api._blockReader, api.filters)
 	if err != nil {
@@ -1314,7 +1313,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 	}
 	noop := state.NewNoopWriter()
 
-	parentHeader, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(parentBlockNumber), dbtx)
+	parentHeader, err := api.headerByRPCNumber(ctx, types.BlockNumber(parentBlockNumber), dbtx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1512,7 +1511,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader state.StateReader,
 	stateCache *shards.StateCache, cachedWriter state.StateWriter, ibs *state.IntraBlockState,
 	msg *types.Message, callParam TraceCallParam,
-	parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header, gasBailout bool, txIndex int,
+	parentNrOrHash *types.BlockNumberOrHash, header *types.Header, gasBailout bool, txIndex int,
 	traceConfig *config.TraceConfig,
 ) (*TraceCallResult, error) {
 	chainConfig, err := api.chainConfig(ctx, dbtx)
@@ -1522,8 +1521,8 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	engine := api.engine()
 
 	if parentNrOrHash == nil {
-		var num = rpc.LatestBlockNumber
-		parentNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
+		var num = types.LatestBlockNumber
+		parentNrOrHash = &types.BlockNumberOrHash{BlockNumber: &num}
 	}
 	parentBlockNumber, hash, _, err := rpchelper.GetBlockNumber(ctx, *parentNrOrHash, dbtx, api._blockReader, api.filters)
 	if err != nil {
@@ -1531,7 +1530,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	}
 	noop := state.NewNoopWriter()
 
-	parentHeader, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(parentBlockNumber), dbtx)
+	parentHeader, err := api.headerByRPCNumber(ctx, types.BlockNumber(parentBlockNumber), dbtx)
 	if err != nil {
 		return nil, err
 	}

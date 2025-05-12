@@ -32,11 +32,11 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
@@ -55,15 +55,15 @@ type PrivateDebugAPI interface {
 	StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error)
 	TraceTransaction(ctx context.Context, hash common.Hash, config *tracersConfig.TraceConfig, stream *jsoniter.Stream) error
 	TraceBlockByHash(ctx context.Context, hash common.Hash, config *tracersConfig.TraceConfig, stream *jsoniter.Stream) error
-	TraceBlockByNumber(ctx context.Context, number rpc.BlockNumber, config *tracersConfig.TraceConfig, stream *jsoniter.Stream) error
-	AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, start []byte, maxResults int, nocode, nostorage bool) (state.IteratorDump, error)
-	GetModifiedAccountsByNumber(ctx context.Context, startNum rpc.BlockNumber, endNum *rpc.BlockNumber) ([]common.Address, error)
+	TraceBlockByNumber(ctx context.Context, number types.BlockNumber, config *tracersConfig.TraceConfig, stream *jsoniter.Stream) error
+	AccountRange(ctx context.Context, blockNrOrHash types.BlockNumberOrHash, start []byte, maxResults int, nocode, nostorage bool) (state.IteratorDump, error)
+	GetModifiedAccountsByNumber(ctx context.Context, startNum types.BlockNumber, endNum *types.BlockNumber) ([]common.Address, error)
 	GetModifiedAccountsByHash(ctx context.Context, startHash common.Hash, endHash *common.Hash) ([]common.Address, error)
-	TraceCall(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream *jsoniter.Stream) error
+	TraceCall(ctx context.Context, args ethapi.CallArgs, blockNrOrHash types.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream *jsoniter.Stream) error
 	AccountAt(ctx context.Context, blockHash common.Hash, txIndex uint64, account common.Address) (*AccountResult, error)
-	GetRawHeader(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
-	GetRawBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
-	GetRawReceipts(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) ([]hexutil.Bytes, error)
+	GetRawHeader(ctx context.Context, blockNrOrHash types.BlockNumberOrHash) (hexutil.Bytes, error)
+	GetRawBlock(ctx context.Context, blockNrOrHash types.BlockNumberOrHash) (hexutil.Bytes, error)
+	GetRawReceipts(ctx context.Context, blockNrOrHash types.BlockNumberOrHash) ([]hexutil.Bytes, error)
 	GetBadBlocks(ctx context.Context) ([]map[string]interface{}, error)
 	GetRawTransaction(ctx context.Context, hash common.Hash) (hexutil.Bytes, error)
 }
@@ -108,7 +108,7 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 }
 
 // AccountRange implements debug_accountRange. Returns a range of accounts involved in the given block rangeb
-func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, startKey []byte, maxResults int, excludeCode, excludeStorage bool) (state.IteratorDump, error) {
+func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash types.BlockNumberOrHash, startKey []byte, maxResults int, excludeCode, excludeStorage bool) (state.IteratorDump, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return state.IteratorDump{}, err
@@ -118,10 +118,10 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 	var blockNumber uint64
 
 	if number, ok := blockNrOrHash.Number(); ok {
-		if number == rpc.PendingBlockNumber {
+		if number == types.PendingBlockNumber {
 			return state.IteratorDump{}, errors.New("accountRange for pending block not supported")
 		}
-		if number == rpc.LatestBlockNumber {
+		if number == types.LatestBlockNumber {
 			var err error
 
 			blockNumber, err = stages.GetStageProgress(tx, stages.Execution)
@@ -175,7 +175,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 
 // GetModifiedAccountsByNumber implements debug_getModifiedAccountsByNumber. Returns a list of accounts modified in the given block.
 // [from, to)
-func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startNumber rpc.BlockNumber, endNumber *rpc.BlockNumber) ([]common.Address, error) {
+func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startNumber types.BlockNumber, endNumber *types.BlockNumber) ([]common.Address, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -353,7 +353,7 @@ type AccountResult struct {
 }
 
 // GetRawHeader implements debug_getRawHeader - returns a an RLP-encoded header, given a block number or hash
-func (api *PrivateDebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
+func (api *PrivateDebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash types.BlockNumberOrHash) (hexutil.Bytes, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -374,7 +374,7 @@ func (api *PrivateDebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash 
 }
 
 // Implements debug_getRawBlock - Returns an RLP-encoded block
-func (api *PrivateDebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
+func (api *PrivateDebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash types.BlockNumberOrHash) (hexutil.Bytes, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -395,7 +395,7 @@ func (api *PrivateDebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash r
 }
 
 // GetRawReceipts implements debug_getRawReceipts - retrieves and returns an array of EIP-2718 binary-encoded receipts of a single block
-func (api *PrivateDebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) ([]hexutil.Bytes, error) {
+func (api *PrivateDebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHash types.BlockNumberOrHash) ([]hexutil.Bytes, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err

@@ -89,7 +89,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		isBorStateSyncTxn = true
 	}
 
-	header, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNumber), tx)
+	header, err := api.headerByRPCNumber(ctx, types.BlockNumber(blockNumber), tx)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +172,7 @@ func rewardKindToString(kind consensus.RewardKind) string {
 }
 
 // Block implements trace_block
-func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gasBailOut *bool, traceConfig *config.TraceConfig) (ParityTraces, error) {
+func (api *TraceAPIImpl) Block(ctx context.Context, blockNr types.BlockNumber, gasBailOut *bool, traceConfig *config.TraceConfig) (ParityTraces, error) {
 	if gasBailOut == nil {
 		gasBailOut = new(bool) // false by default
 	}
@@ -181,7 +181,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 		return nil, err
 	}
 	defer tx.Rollback()
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, api.filters)
+	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, types.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -726,7 +726,7 @@ func (api *TraceAPIImpl) callBlock(
 		pNo -= 1
 	}
 
-	parentNo := rpc.BlockNumber(pNo)
+	parentNo := types.BlockNumber(pNo)
 	rules := cfg.Rules(blockNumber, block.Time())
 	header := block.Header()
 	txs := block.Transactions()
@@ -758,7 +758,7 @@ func (api *TraceAPIImpl) callBlock(
 	callParams := make([]TraceCallParam, 0, len(txs))
 
 	parentHash := block.ParentHash()
-	parentNrOrHash := rpc.BlockNumberOrHash{
+	parentNrOrHash := types.BlockNumberOrHash{
 		BlockNumber:      &parentNo,
 		BlockHash:        &parentHash,
 		RequireCanonical: true,
@@ -844,7 +844,7 @@ func (api *TraceAPIImpl) callTransaction(
 		pNo -= 1
 	}
 
-	parentNo := rpc.BlockNumber(pNo)
+	parentNo := types.BlockNumber(pNo)
 	rules := cfg.Rules(blockNumber, header.Time)
 	var txn types.Transaction
 	var borStateSyncTxnHash common.Hash
@@ -879,7 +879,7 @@ func (api *TraceAPIImpl) callTransaction(
 	}
 
 	parentHash := header.ParentHash
-	parentNrOrHash := rpc.BlockNumberOrHash{
+	parentNrOrHash := types.BlockNumberOrHash{
 		BlockNumber:      &parentNo,
 		BlockHash:        &parentHash,
 		RequireCanonical: true,

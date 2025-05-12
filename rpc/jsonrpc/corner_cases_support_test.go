@@ -23,12 +23,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
-
 	"github.com/erigontech/erigon-lib/log/v3"
-
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/rpc"
 )
 
 // TestNotFoundMustReturnNil - next methods - when record not found in db - must return nil instead of error
@@ -56,7 +54,7 @@ func TestNotFoundMustReturnNil(t *testing.T) {
 	require.Nil(d)
 	require.NoError(err)
 
-	e, err := api.GetBlockByHash(ctx, rpc.BlockNumberOrHashWithHash(common.Hash{}, true), false)
+	e, err := api.GetBlockByHash(ctx, types.BlockNumberOrHashWithHash(common.Hash{}, true), false)
 	require.Nil(e)
 	require.NoError(err)
 

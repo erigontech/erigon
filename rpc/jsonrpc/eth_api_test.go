@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/turbo/stages/mock"
@@ -48,7 +47,7 @@ func newBaseApiForTest(m *mock.MockSentry) *BaseAPI {
 
 func TestGetBalanceChangesInBlock(t *testing.T) {
 	assert := assert.New(t)
-	myBlockNum := rpc.BlockNumberOrHashWithNumber(0)
+	myBlockNum := types.BlockNumberOrHashWithNumber(0)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	db := m.DB
 	api := NewErigonAPI(newBaseApiForTest(m), db, nil)
@@ -96,7 +95,7 @@ func TestGetStorageAt_ByBlockNumber_WithRequireCanonicalDefault(t *testing.T) {
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
-	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithNumber(0))
+	result, err := api.GetStorageAt(context.Background(), addr, "0x0", types.BlockNumberOrHashWithNumber(0))
 	if err != nil {
 		t.Errorf("calling GetStorageAt: %v", err)
 	}
@@ -110,7 +109,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault(t *testing.T) {
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
-	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(m.Genesis.Hash(), false))
+	result, err := api.GetStorageAt(context.Background(), addr, "0x0", types.BlockNumberOrHashWithHash(m.Genesis.Hash(), false))
 	if err != nil {
 		t.Errorf("calling GetStorageAt: %v", err)
 	}
@@ -124,7 +123,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue(t *testing.T) {
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
-	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(m.Genesis.Hash(), true))
+	result, err := api.GetStorageAt(context.Background(), addr, "0x0", types.BlockNumberOrHashWithHash(m.Genesis.Hash(), true))
 	if err != nil {
 		t.Errorf("calling GetStorageAt: %v", err)
 	}
@@ -144,7 +143,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_BlockNotFoundError
 	}
 	offChainBlock := offChain.Blocks[0]
 
-	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(offChainBlock.Hash(), false)); err != nil {
+	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", types.BlockNumberOrHashWithHash(offChainBlock.Hash(), false)); err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("block %s not found", offChainBlock.Hash().String()[2:]) {
 			t.Errorf("wrong error: %v", err)
 		}
@@ -165,7 +164,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_BlockNotFoundError(t 
 	}
 	offChainBlock := offChain.Blocks[0]
 
-	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(offChainBlock.Hash(), true)); err != nil {
+	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", types.BlockNumberOrHashWithHash(offChainBlock.Hash(), true)); err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("block %s not found", offChainBlock.Hash().String()[2:]) {
 			t.Errorf("wrong error: %v", err)
 		}
@@ -182,7 +181,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(
 
 	orphanedBlock := orphanedChain[0].Blocks[0]
 
-	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), false))
+	result, err := api.GetStorageAt(context.Background(), addr, "0x0", types.BlockNumberOrHashWithHash(orphanedBlock.Hash(), false))
 	if err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", orphanedBlock.Hash().String()[2:]) {
 			t.Errorf("wrong error: %v", err)
@@ -201,7 +200,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *
 
 	orphanedBlock := orphanedChain[0].Blocks[0]
 
-	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), true)); err != nil {
+	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", types.BlockNumberOrHashWithHash(orphanedBlock.Hash(), true)); err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", orphanedBlock.Hash().String()[2:]) {
 			t.Errorf("wrong error: %v", err)
 		}
@@ -221,7 +220,7 @@ func TestCall_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(t *testi
 	if _, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &from,
 		To:   &to,
-	}, rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), false), nil); err != nil {
+	}, types.BlockNumberOrHashWithHash(orphanedBlock.Hash(), false), nil); err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", orphanedBlock.Hash().String()[2:]) {
 			/* Not sure. Here https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1898.md it is not explicitly said that
 			   eth_call should only work with canonical blocks.
@@ -244,7 +243,7 @@ func TestCall_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *testing.
 	if _, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &from,
 		To:   &to,
-	}, rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), true), nil); err != nil {
+	}, types.BlockNumberOrHashWithHash(orphanedBlock.Hash(), true), nil); err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", orphanedBlock.Hash().String()[2:]) {
 			t.Errorf("wrong error: %v", err)
 		}

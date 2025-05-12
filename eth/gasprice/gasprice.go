@@ -32,15 +32,14 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
-	"github.com/erigontech/erigon/rpc"
 )
 
 const sampleNumber = 3 // Number of transactions sampled in a block
 
 // OracleBackend includes all necessary background APIs for oracle.
 type OracleBackend interface {
-	HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error)
-	BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error)
+	HeaderByNumber(ctx context.Context, number types.BlockNumber) (*types.Header, error)
+	BlockByNumber(ctx context.Context, number types.BlockNumber) (*types.Block, error)
 	ChainConfig() *chain.Config
 
 	GetReceiptsGasUsed(ctx context.Context, block *types.Block) (types.Receipts, error)
@@ -119,7 +118,7 @@ func NewOracle(backend OracleBackend, params gaspricecfg.Config, cache Cache, lo
 // baseFee to the returned bigInt
 func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*big.Int, error) {
 	latestHead, latestPrice := oracle.cache.GetLatest()
-	head, err := oracle.backend.HeaderByNumber(ctx, rpc.LatestBlockNumber)
+	head, err := oracle.backend.HeaderByNumber(ctx, types.LatestBlockNumber)
 	if err != nil {
 		return latestPrice, err
 	}
@@ -225,7 +224,7 @@ func (oracle *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit
 		oracle.log.Error("getBlockPrices", "err", err)
 		return err
 	}
-	block, err := oracle.backend.BlockByNumber(ctx, rpc.BlockNumber(blockNum))
+	block, err := oracle.backend.BlockByNumber(ctx, types.BlockNumber(blockNum))
 	if err != nil {
 		oracle.log.Error("getBlockPrices", "err", err)
 		return err

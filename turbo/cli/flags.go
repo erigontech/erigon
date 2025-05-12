@@ -32,11 +32,11 @@ import (
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
@@ -315,9 +315,9 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	}
 
 	if blockno := ctx.String(UploadFromFlag.Name); len(blockno) > 0 {
-		cfg.Sync.UploadFrom = rpc.AsBlockNumber(blockno)
+		cfg.Sync.UploadFrom = types.AsBlockNumber(blockno)
 	} else {
-		cfg.Sync.UploadFrom = rpc.LatestBlockNumber
+		cfg.Sync.UploadFrom = types.LatestBlockNumber
 	}
 
 	if limit := ctx.Uint(FrozenBlockLimitFlag.Name); limit > 0 {

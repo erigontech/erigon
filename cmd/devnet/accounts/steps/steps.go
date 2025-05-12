@@ -23,13 +23,13 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
 	"github.com/erigontech/erigon/cmd/devnet/scenarios"
 	"github.com/erigontech/erigon/cmd/devnet/services"
 	"github.com/erigontech/erigon/cmd/devnet/transactions"
 	"github.com/erigontech/erigon/execution/abi/bind"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/requests"
 )
@@ -135,7 +135,7 @@ func SendFunds(ctx context.Context, chainName string, name string, ethAmount flo
 
 			logger.Info("Faucet account details", "address", faucet.Address(), "account", accountResult)
 
-			accountCode, err := node.GetCode(faucet.Address(), rpc.AsBlockReference(traceResult.BlockHash))
+			accountCode, err := node.GetCode(faucet.Address(), types.AsBlockReference(traceResult.BlockHash))
 
 			if err != nil {
 				return 0, fmt.Errorf("Send transaction failure: get account code failed: %w", err)
@@ -143,7 +143,7 @@ func SendFunds(ctx context.Context, chainName string, name string, ethAmount flo
 
 			logger.Info("Faucet account code", "address", faucet.Address(), "code", accountCode)
 
-			callResults, err := node.TraceCall(rpc.AsBlockReference(blockNum), ethapi.CallArgs{
+			callResults, err := node.TraceCall(types.AsBlockReference(blockNum), ethapi.CallArgs{
 				From: &traceResult.Action.From,
 				To:   &traceResult.Action.To,
 				Data: &traceResult.Action.Input,
@@ -168,7 +168,7 @@ func SendFunds(ctx context.Context, chainName string, name string, ethAmount flo
 		return 0, fmt.Errorf("Unexpected post transfer faucet balance got: %s:, expected: %s", balance, (&big.Int{}).Sub(facuetStartingBalance, sent))
 	}
 
-	balance, err = node.GetBalance(account.Address, rpc.LatestBlock)
+	balance, err = node.GetBalance(account.Address, types.LatestBlock)
 
 	if err != nil {
 		return 0, fmt.Errorf("Failed to get post transfer balance: %w", err)
@@ -181,7 +181,7 @@ func SendFunds(ctx context.Context, chainName string, name string, ethAmount flo
 	return balance.Uint64(), nil
 }
 
-func GetBalance(ctx context.Context, accountName string, blockNum rpc.BlockNumber) (uint64, error) {
+func GetBalance(ctx context.Context, accountName string, blockNum types.BlockNumber) (uint64, error) {
 	logger := devnet.Logger(ctx)
 
 	node := devnet.CurrentNode(ctx)
@@ -200,7 +200,7 @@ func GetBalance(ctx context.Context, accountName string, blockNum rpc.BlockNumbe
 
 	logger.Info("Getting balance", "address", account.Address)
 
-	bal, err := node.GetBalance(account.Address, rpc.AsBlockReference(blockNum))
+	bal, err := node.GetBalance(account.Address, types.AsBlockReference(blockNum))
 
 	if err != nil {
 		logger.Error("FAILURE", "error", err)
@@ -219,7 +219,7 @@ func GetNonce(ctx context.Context, address common.Address) (uint64, error) {
 		node = devnet.SelectBlockProducer(ctx)
 	}
 
-	res, err := node.GetTransactionCount(address, rpc.LatestBlock)
+	res, err := node.GetTransactionCount(address, types.LatestBlock)
 
 	if err != nil {
 		return 0, fmt.Errorf("failed to get transaction count for address 0x%x: %v", address, err)

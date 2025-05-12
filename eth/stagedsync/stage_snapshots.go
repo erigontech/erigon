@@ -65,7 +65,6 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/silkworm"
@@ -229,7 +228,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 		u.init(ctx, logger)
 
-		if cfg.syncConfig.UploadFrom != rpc.EarliestBlockNumber {
+		if cfg.syncConfig.UploadFrom != types.EarliestBlockNumber {
 			u.downloadLatestSnapshots(ctx, cfg.syncConfig.UploadFrom)
 		}
 
@@ -1002,7 +1001,7 @@ func (u *snapshotUploader) updateRemotes(remoteFiles []fs.DirEntry) {
 	}
 }
 
-func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context, blockNumber rpc.BlockNumber) error {
+func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context, blockNumber types.BlockNumber) error {
 
 	entries, err := u.downloadManifest(ctx)
 

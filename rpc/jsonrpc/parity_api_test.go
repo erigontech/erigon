@@ -23,16 +23,14 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/erigontech/erigon/rpc/rpccfg"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
-var latestBlock = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+var latestBlock = types.BlockNumberOrHashWithNumber(types.LatestBlockNumber)
 
 func TestParityAPIImpl_ListStorageKeys_NoOffset(t *testing.T) {
 	assert := assert.New(t)

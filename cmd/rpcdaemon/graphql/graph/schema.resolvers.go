@@ -15,7 +15,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph/model"
-	"github.com/erigontech/erigon/rpc"
 )
 
 // SendRawTransaction is the resolver for the sendRawTransaction field.
@@ -25,19 +24,19 @@ func (r *mutationResolver) SendRawTransaction(ctx context.Context, data string) 
 
 // Block is the resolver for the block field.
 func (r *queryResolver) Block(ctx context.Context, number *string, hash *string) (*model.Block, error) {
-	var blockNumber rpc.BlockNumber
+	var blockNumber types.BlockNumber
 
 	if number != nil {
 		// Block number is not null, test for a positive long integer
 		bNum, err := strconv.ParseUint(*number, 10, 64)
 		if err == nil {
 			// Positive integer, go ahead
-			blockNumber = rpc.BlockNumber(bNum)
+			blockNumber = types.BlockNumber(bNum)
 		} else {
 			bNum, err := hexutil.DecodeUint64(*number)
 			if err == nil {
 				// Hexadecimal, 0x prefixed
-				blockNumber = rpc.BlockNumber(bNum)
+				blockNumber = types.BlockNumber(bNum)
 			} else {
 				var err error
 				return nil, err
@@ -54,13 +53,13 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 	if number == nil && hash == nil {
 		// If neither number or hash is specified (nil), we should deliver "latest" block
 		/*
-			rpc.LatestExecutedBlockNumber = BlockNumber(-5)
-			rpc.FinalizedBlockNumber      = BlockNumber(-4)
-			rpc.SafeBlockNumber           = BlockNumber(-3)
-			rpc.PendingBlockNumber        = BlockNumber(-2)
-			rpc.LatestBlockNumber         = BlockNumber(-1)
+			types.LatestExecutedBlockNumber = BlockNumber(-5)
+			types.FinalizedBlockNumber      = BlockNumber(-4)
+			types.SafeBlockNumber           = BlockNumber(-3)
+			types.PendingBlockNumber        = BlockNumber(-2)
+			types.LatestBlockNumber         = BlockNumber(-1)
 		*/
-		blockNumber = rpc.LatestBlockNumber
+		blockNumber = types.LatestBlockNumber
 	}
 
 	res, err := r.GraphQLAPI.GetBlockDetails(ctx, blockNumber)

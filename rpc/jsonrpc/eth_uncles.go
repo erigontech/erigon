@@ -23,20 +23,19 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 // GetUncleByBlockNumberAndIndex implements eth_getUncleByBlockNumberAndIndex. Returns information about an uncle given a block's number and the index of the uncle.
-func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rpc.BlockNumber, index hexutil.Uint) (map[string]interface{}, error) {
+func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number types.BlockNumber, index hexutil.Uint) (map[string]interface{}, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
+	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, types.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +85,7 @@ func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common
 }
 
 // GetUncleCountByBlockNumber implements eth_getUncleCountByBlockNumber. Returns the number of uncles in the block, if any.
-func (api *APIImpl) GetUncleCountByBlockNumber(ctx context.Context, number rpc.BlockNumber) (*hexutil.Uint, error) {
+func (api *APIImpl) GetUncleCountByBlockNumber(ctx context.Context, number types.BlockNumber) (*hexutil.Uint, error) {
 	n := hexutil.Uint(0)
 
 	tx, err := api.db.BeginTemporalRo(ctx)
@@ -95,7 +94,7 @@ func (api *APIImpl) GetUncleCountByBlockNumber(ctx context.Context, number rpc.B
 	}
 	defer tx.Rollback()
 
-	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
+	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, types.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
 	if err != nil {
 		return &n, err
 	}

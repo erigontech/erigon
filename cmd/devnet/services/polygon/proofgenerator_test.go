@@ -48,7 +48,6 @@ import (
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/requests"
 	"github.com/erigontech/erigon/turbo/services"
@@ -107,7 +106,7 @@ func (rg *requestGenerator) GetRootHash(ctx context.Context, startBlock uint64, 
 	return common.HexToHash(result), nil
 }
 
-func (rg *requestGenerator) GetBlockByNumber(ctx context.Context, blockNum rpc.BlockNumber, withTxs bool) (*requests.Block, error) {
+func (rg *requestGenerator) GetBlockByNumber(ctx context.Context, blockNum types.BlockNumber, withTxs bool) (*requests.Block, error) {
 	if bn := int(blockNum.Uint64()); bn < len(rg.chain.Blocks) {
 		block := rg.chain.Blocks[bn]
 
@@ -327,7 +326,7 @@ func TestReceiptProof(t *testing.T) {
 	var blockNo uint64
 
 	for block == nil {
-		block, err = rg.GetBlockByNumber(context.Background(), rpc.AsBlockNumber(blockNo), true)
+		block, err = rg.GetBlockByNumber(context.Background(), types.AsBlockNumber(blockNo), true)
 
 		if err != nil {
 			t.Fatal(err)

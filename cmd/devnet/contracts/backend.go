@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
 	"github.com/erigontech/erigon/execution/abi/bind"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
 
@@ -40,7 +39,7 @@ type contractBackend struct {
 }
 
 func (cb contractBackend) CodeAt(ctx context.Context, contract common.Address, blockNumber *big.Int) ([]byte, error) {
-	return cb.node.GetCode(contract, rpc.AsBlockReference(blockNumber))
+	return cb.node.GetCode(contract, types.AsBlockReference(blockNumber))
 }
 
 func (cb contractBackend) CallContract(ctx context.Context, call ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
@@ -55,11 +54,11 @@ func (cb contractBackend) CallContract(ctx context.Context, call ethereum.CallMs
 		gasPrice = (*hexutil.Big)(call.GasPrice.ToBig())
 	}
 
-	var blockRef rpc.BlockReference
+	var blockRef types.BlockReference
 	if blockNumber != nil {
-		blockRef = rpc.AsBlockReference(blockNumber)
+		blockRef = types.AsBlockReference(blockNumber)
 	} else {
-		blockRef = rpc.LatestBlock
+		blockRef = types.LatestBlock
 	}
 
 	return cb.node.Call(ethapi.CallArgs{
@@ -73,11 +72,11 @@ func (cb contractBackend) CallContract(ctx context.Context, call ethereum.CallMs
 }
 
 func (cb contractBackend) PendingCodeAt(ctx context.Context, account common.Address) ([]byte, error) {
-	return cb.node.GetCode(account, rpc.PendingBlock)
+	return cb.node.GetCode(account, types.PendingBlock)
 }
 
 func (cb contractBackend) PendingNonceAt(ctx context.Context, account common.Address) (uint64, error) {
-	res, err := cb.node.GetTransactionCount(account, rpc.PendingBlock)
+	res, err := cb.node.GetTransactionCount(account, types.PendingBlock)
 
 	if err != nil {
 		return 0, fmt.Errorf("failed to get transaction count for address 0x%x: %v", account, err)

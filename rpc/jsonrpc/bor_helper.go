@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/valset"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -63,9 +62,9 @@ var (
 
 // getHeaderByNumber returns a block's header given a block number ignoring the block's transaction and uncle list (may be faster).
 // derived from erigon_getHeaderByNumber implementation (see ./erigon_block.go)
-func getHeaderByNumber(ctx context.Context, number rpc.BlockNumber, api *BorImpl, tx kv.Tx) (*types.Header, error) {
+func getHeaderByNumber(ctx context.Context, number types.BlockNumber, api *BorImpl, tx kv.Tx) (*types.Header, error) {
 	// Pending block is only known by the miner
-	if number == rpc.PendingBlockNumber {
+	if number == types.PendingBlockNumber {
 		block := api.pendingBlock()
 		if block == nil {
 			return nil, nil
@@ -73,7 +72,7 @@ func getHeaderByNumber(ctx context.Context, number rpc.BlockNumber, api *BorImpl
 		return block.Header(), nil
 	}
 
-	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
+	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, types.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
 	}
