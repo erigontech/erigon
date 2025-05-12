@@ -7,6 +7,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
+	"github.com/erigontech/erigon-db/snapshotsync"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -31,7 +32,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		BatchSize                           datasize.ByteSize
 		ImportMode                          bool
 		BadBlockHash                        common.Hash
-		Snapshot                            BlocksFreezing
+		Snapshot                            snapshotsync.BlocksFreezing
 		Downloader                          *downloadercfg.Cfg
 		CaplinConfig                        clparams.CaplinConfig
 		Dirs                                datadir.Dirs
@@ -131,7 +132,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		BatchSize                           *datasize.ByteSize
 		ImportMode                          *bool
 		BadBlockHash                        *common.Hash
-		Snapshot                            *BlocksFreezing
+		Snapshot                            *snapshotsync.BlocksFreezing
 		Downloader                          *downloadercfg.Cfg
 		CaplinConfig                        *clparams.CaplinConfig
 		Dirs                                *datadir.Dirs

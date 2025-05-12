@@ -28,6 +28,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	dbsnapshotsync "github.com/erigontech/erigon-db/snapshotsync"
 	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
@@ -219,7 +220,7 @@ type blockReader interface {
 	Snapshots() BlockSnapshots
 	BorSnapshots() BlockSnapshots
 	IterateFrozenBodies(_ func(blockNum uint64, baseTxNum uint64, txCount uint64) error) error
-	FreezingCfg() ethconfig.BlocksFreezing
+	FreezingCfg() dbsnapshotsync.BlocksFreezing
 	AllTypes() []snaptype.Type
 	FrozenFiles() (list []string)
 }
@@ -508,8 +509,8 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 	if firstNonGenesis != nil {
 		firstNonGenesisBlockNumber := binary.BigEndian.Uint64(firstNonGenesis)
 		if snapshots.SegmentsMax()+1 < firstNonGenesisBlockNumber {
-			log.Warn(fmt.Sprintf("[%s] Some blocks are not in snapshots and not in db. this could have happend due to the node being stopped at the wrong time, you can fix this with 'rm -rf %s' (this is not equivalent to a full resync)", logPrefix, dirs.Chaindata), "max_in_snapshots", snapshots.SegmentsMax(), "min_in_db", firstNonGenesisBlockNumber)
-			return fmt.Errorf("some blocks are not in snapshots and not in db. this could have happend due to the node being stopped at the wrong time, you can fix this with 'rm -rf %s' (this is not equivalent to a full resync)", dirs.Chaindata)
+			log.Warn(fmt.Sprintf("[%s] Some blocks are not in snapshots and not in db. this could have happened due to the node being stopped at the wrong time, you can fix this with 'rm -rf %s' (this is not equivalent to a full resync)", logPrefix, dirs.Chaindata), "max_in_snapshots", snapshots.SegmentsMax(), "min_in_db", firstNonGenesisBlockNumber)
+			return fmt.Errorf("some blocks are not in snapshots and not in db. this could have happened due to the node being stopped at the wrong time, you can fix this with 'rm -rf %s' (this is not equivalent to a full resync)", dirs.Chaindata)
 		}
 	}
 	return nil

@@ -26,6 +26,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-db/snapshotsync"
 	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -34,7 +35,6 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/version"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/testlog"
@@ -47,7 +47,7 @@ func TestBlockReaderLastFrozenSpanIdWhenSegmentFilesArePresent(t *testing.T) {
 	dir := t.TempDir()
 	createTestBorEventSegmentFile(t, 0, 500_000, 132, dir, logger)
 	createTestSegmentFile(t, 0, 500_000, heimdall.Enums.Spans, dir, version.V1_0, logger)
-	borRoSnapshots := heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet}, dir, 0, logger)
+	borRoSnapshots := heimdall.NewRoSnapshots(snapshotsync.BlocksFreezing{ChainName: networkname.BorMainnet}, dir, 0, logger)
 	defer borRoSnapshots.Close()
 	err := borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
@@ -66,7 +66,7 @@ func TestBlockReaderLastFrozenSpanIdWhenSegmentFilesAreNotPresent(t *testing.T) 
 
 	logger := testlog.Logger(t, log.LvlInfo)
 	dir := t.TempDir()
-	borRoSnapshots := heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet}, dir, 0, logger)
+	borRoSnapshots := heimdall.NewRoSnapshots(snapshotsync.BlocksFreezing{ChainName: networkname.BorMainnet}, dir, 0, logger)
 	defer borRoSnapshots.Close()
 	err := borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
@@ -137,7 +137,7 @@ func TestBlockReaderLastFrozenSpanIdReturnsLastSegWithIdx(t *testing.T) {
 	idxFileToDelete := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 1_000_000, 1_500_000, heimdall.Spans.Name()))
 	err := os.Remove(idxFileToDelete)
 	require.NoError(t, err)
-	borRoSnapshots := heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet}, dir, 0, logger)
+	borRoSnapshots := heimdall.NewRoSnapshots(snapshotsync.BlocksFreezing{ChainName: networkname.BorMainnet}, dir, 0, logger)
 	defer borRoSnapshots.Close()
 	err = borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
@@ -172,7 +172,7 @@ func TestBlockReaderLastFrozenSpanIdReturnsZeroWhenAllSegmentsDoNotHaveIdx(t *te
 	idxFileToDelete = filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 1_000_000, 1_500_000, heimdall.Spans.Name()))
 	err = os.Remove(idxFileToDelete)
 	require.NoError(t, err)
-	borRoSnapshots := heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet}, dir, 0, logger)
+	borRoSnapshots := heimdall.NewRoSnapshots(snapshotsync.BlocksFreezing{ChainName: networkname.BorMainnet}, dir, 0, logger)
 	defer borRoSnapshots.Close()
 	err = borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
@@ -193,7 +193,7 @@ func TestBlockReaderLastFrozenEventIdWhenSegmentFilesArePresent(t *testing.T) {
 	dir := t.TempDir()
 	createTestBorEventSegmentFile(t, 0, 500_000, 132, dir, logger)
 	createTestSegmentFile(t, 0, 500_000, heimdall.Enums.Spans, dir, version.V1_0, logger)
-	borRoSnapshots := heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet}, dir, 0, logger)
+	borRoSnapshots := heimdall.NewRoSnapshots(snapshotsync.BlocksFreezing{ChainName: networkname.BorMainnet}, dir, 0, logger)
 	defer borRoSnapshots.Close()
 	err := borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
@@ -212,7 +212,7 @@ func TestBlockReaderLastFrozenEventIdWhenSegmentFilesAreNotPresent(t *testing.T)
 
 	logger := testlog.Logger(t, log.LvlInfo)
 	dir := t.TempDir()
-	borRoSnapshots := heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet}, dir, 0, logger)
+	borRoSnapshots := heimdall.NewRoSnapshots(snapshotsync.BlocksFreezing{ChainName: networkname.BorMainnet}, dir, 0, logger)
 	defer borRoSnapshots.Close()
 	err := borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
@@ -241,7 +241,7 @@ func TestBlockReaderLastFrozenEventIdReturnsLastSegWithIdx(t *testing.T) {
 	idxFileToDelete := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 1_000_000, 1_500_000, heimdall.Events.Name()))
 	err := os.Remove(idxFileToDelete)
 	require.NoError(t, err)
-	borRoSnapshots := heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet}, dir, 0, logger)
+	borRoSnapshots := heimdall.NewRoSnapshots(snapshotsync.BlocksFreezing{ChainName: networkname.BorMainnet}, dir, 0, logger)
 	defer borRoSnapshots.Close()
 	err = borRoSnapshots.OpenFolder()
 	require.NoError(t, err)
@@ -276,7 +276,7 @@ func TestBlockReaderLastFrozenEventIdReturnsZeroWhenAllSegmentsDoNotHaveIdx(t *t
 	idxFileToDelete = filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 1_000_000, 1_500_000, heimdall.Events.Name()))
 	err = os.Remove(idxFileToDelete)
 	require.NoError(t, err)
-	borRoSnapshots := heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet}, dir, 0, logger)
+	borRoSnapshots := heimdall.NewRoSnapshots(snapshotsync.BlocksFreezing{ChainName: networkname.BorMainnet}, dir, 0, logger)
 	defer borRoSnapshots.Close()
 	err = borRoSnapshots.OpenFolder()
 	require.NoError(t, err)

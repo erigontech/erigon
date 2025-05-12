@@ -25,36 +25,25 @@ import (
 	"path"
 	"time"
 
+	"github.com/spf13/afero"
+	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc/credentials"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
-	"golang.org/x/sync/semaphore"
-
+	dbsnapshotsync "github.com/erigontech/erigon-db/snapshotsync"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/aggregation"
 	"github.com/erigontech/erigon/cl/antiquary"
 	"github.com/erigontech/erigon/cl/beacon"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/handler"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/rpc"
-	"github.com/erigontech/erigon/cl/sentinel"
-	"github.com/erigontech/erigon/cl/sentinel/service"
-	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/erigontech/erigon/cl/validator/attestation_producer"
-	"github.com/erigontech/erigon/cl/validator/committee_subscription"
-	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
-	"github.com/erigontech/erigon/cl/validator/validator_params"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/turbo/snapshotsync"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-
-	"github.com/spf13/afero"
-
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
@@ -71,13 +60,19 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/phase1/stages"
 	"github.com/erigontech/erigon/cl/pool"
-
+	"github.com/erigontech/erigon/cl/rpc"
+	"github.com/erigontech/erigon/cl/sentinel"
+	"github.com/erigontech/erigon/cl/sentinel/service"
 	"github.com/erigontech/erigon/cl/utils/bls"
-
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cl/validator/attestation_producer"
+	"github.com/erigontech/erigon/cl/validator/committee_subscription"
+	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
+	"github.com/erigontech/erigon/cl/validator/validator_params"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/snapshotsync"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 func OpenCaplinDatabase(ctx context.Context,
@@ -388,7 +383,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			return err
 		}
 	}
-	stateSnapshots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: beaconConfig.ConfigName}, beaconConfig, dirs, snapshotsync.MakeCaplinStateSnapshotsTypes(indexDB), logger)
+	stateSnapshots := snapshotsync.NewCaplinStateSnapshots(dbsnapshotsync.BlocksFreezing{ChainName: beaconConfig.ConfigName}, beaconConfig, dirs, snapshotsync.MakeCaplinStateSnapshotsTypes(indexDB), logger)
 	antiq := antiquary.NewAntiquary(ctx, blobStorage, genesisState, vTables, beaconConfig, dirs, snDownloader, indexDB, stateSnapshots, csn, rcsn, syncedDataManager, logger, config.ArchiveStates, config.ArchiveBlocks, config.ArchiveBlobs, config.SnapshotGenerationEnabled, snBuildSema)
 	// Create the antiquary
 	go func() {

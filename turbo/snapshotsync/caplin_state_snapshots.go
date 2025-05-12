@@ -30,23 +30,21 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/recsplit"
-
+	dbsnapshotsync "github.com/erigontech/erigon-db/snapshotsync"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-
 	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
-	"github.com/erigontech/erigon/eth/ethconfig"
 )
 
 func BeaconSimpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
@@ -151,7 +149,7 @@ type CaplinStateSnapshots struct {
 	tmpdir      string
 	segmentsMax atomic.Uint64 // all types of .seg files are available - up to this number
 	idxMax      atomic.Uint64 // all types of .idx files are available - up to this number
-	cfg         ethconfig.BlocksFreezing
+	cfg         dbsnapshotsync.BlocksFreezing
 	logger      log.Logger
 	// allows for pruning segments - this is the min availible segment
 	segmentsMin atomic.Uint64
@@ -171,7 +169,7 @@ type SnapshotTypes struct {
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
-func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.BeaconChainConfig, dirs datadir.Dirs, snapshotTypes SnapshotTypes, logger log.Logger) *CaplinStateSnapshots {
+func NewCaplinStateSnapshots(cfg dbsnapshotsync.BlocksFreezing, beaconCfg *clparams.BeaconChainConfig, dirs datadir.Dirs, snapshotTypes SnapshotTypes, logger log.Logger) *CaplinStateSnapshots {
 	if cfg.ChainName == "" {
 		log.Debug("[dbg] NewCaplinSnapshots created with empty ChainName", "stack", dbg.Stack())
 	}

@@ -26,6 +26,7 @@ import (
 
 	"github.com/urfave/cli/v2"
 
+	"github.com/erigontech/erigon-db/snapshotsync"
 	snaptype2 "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
@@ -36,7 +37,6 @@ import (
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
@@ -85,7 +85,7 @@ func doSqueeze(cliCtx *cli.Context) error {
 func squeezeCommitment(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
-	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(db).ChainName)
+	cfg := snapshotsync.NewSnapCfg(false, true, true, fromdb.ChainConfig(db).ChainName)
 
 	_, _, _, _, agg, clean, err := openSnaps(ctx, cfg, dirs, 0, db, logger)
 	if err != nil {
@@ -114,7 +114,7 @@ func squeezeCommitment(ctx context.Context, dirs datadir.Dirs, logger log.Logger
 func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
-	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(db).ChainName)
+	cfg := snapshotsync.NewSnapCfg(false, true, true, fromdb.ChainConfig(db).ChainName)
 	_, _, _, _, agg, clean, err := openSnaps(ctx, cfg, dirs, 0, db, logger)
 	if err != nil {
 		return err
@@ -225,7 +225,7 @@ func squeezeBlocks(ctx context.Context, dirs datadir.Dirs, logger log.Logger) er
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
 	chainConfig := fromdb.ChainConfig(db)
-	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+	cfg := snapshotsync.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
 	_, _, _, br, _, clean, err := openSnaps(ctx, cfg, dirs, 0, db, logger)
 	if err != nil {

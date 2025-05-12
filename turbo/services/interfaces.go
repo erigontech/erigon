@@ -19,15 +19,14 @@ package services
 import (
 	"context"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
+	dbsnapshotsync "github.com/erigontech/erigon-db/snapshotsync"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
@@ -126,7 +125,7 @@ type FullBlockReader interface {
 	FrozenBlocks() uint64
 	FrozenBorBlocks() uint64
 	FrozenFiles() (list []string)
-	FreezingCfg() ethconfig.BlocksFreezing
+	FreezingCfg() dbsnapshotsync.BlocksFreezing
 	CanPruneTo(currentBlockInDB uint64) (canPruneBlocksTo uint64)
 
 	Snapshots() snapshotsync.BlockSnapshots

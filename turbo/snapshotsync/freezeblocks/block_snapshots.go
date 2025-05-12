@@ -36,6 +36,7 @@ import (
 
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-db/rawdb/blockio"
+	dbsnapshotsync "github.com/erigontech/erigon-db/snapshotsync"
 	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
@@ -73,7 +74,7 @@ type RoSnapshots struct {
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
-func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, segmentsMin uint64, logger log.Logger) *RoSnapshots {
+func NewRoSnapshots(cfg dbsnapshotsync.BlocksFreezing, snapDir string, segmentsMin uint64, logger log.Logger) *RoSnapshots {
 	return &RoSnapshots{*snapshotsync.NewRoSnapshots(cfg, snapDir, coresnaptype.BlockSnapshotTypes, segmentsMin, true, logger)}
 }
 

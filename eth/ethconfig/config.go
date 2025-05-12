@@ -26,11 +26,11 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 
+	"github.com/erigontech/erigon-db/snapshotsync"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -101,7 +101,7 @@ var Defaults = Config{
 	RPCTxFeeCap: 1, // 1 ether
 
 	ImportMode: false,
-	Snapshot: BlocksFreezing{
+	Snapshot: snapshotsync.BlocksFreezing{
 		KeepBlocks: false,
 		ProduceE2:  true,
 		ProduceE3:  true,
@@ -134,38 +134,6 @@ func init() {
 
 //go:generate gencodec -dir . -type Config -formats toml -out gen_config.go
 
-type BlocksFreezing struct {
-	KeepBlocks        bool // produce new snapshots of blocks but don't remove blocks from DB
-	ProduceE2         bool // produce new block files
-	ProduceE3         bool // produce new state files
-	NoDownloader      bool // possible to use snapshots without calling Downloader
-	Verify            bool // verify snapshots on startup
-	DisableDownloadE3 bool // disable download state snapshots
-	DownloaderAddr    string
-	ChainName         string
-}
-
-func (s BlocksFreezing) String() string {
-	var out []string
-	if s.KeepBlocks {
-		out = append(out, "--"+FlagSnapKeepBlocks+"=true")
-	}
-	if !s.ProduceE2 {
-		out = append(out, "--"+FlagSnapStop+"=true")
-	}
-	return strings.Join(out, " ")
-}
-
-var (
-	FlagSnapKeepBlocks = "snap.keepblocks"
-	FlagSnapStop       = "snap.stop"
-	FlagSnapStateStop  = "snap.state.stop"
-)
-
-func NewSnapCfg(keepBlocks, produceE2, produceE3 bool, chainName string) BlocksFreezing {
-	return BlocksFreezing{KeepBlocks: keepBlocks, ProduceE2: produceE2, ProduceE3: produceE3, ChainName: chainName}
-}
-
 // Config contains configuration options for ETH protocol.
 type Config struct {
 	Sync
@@ -188,7 +156,7 @@ type Config struct {
 
 	BadBlockHash common.Hash // hash of the block marked as bad
 
-	Snapshot     BlocksFreezing
+	Snapshot     snapshotsync.BlocksFreezing
 	Downloader   *downloadercfg.Cfg
 	CaplinConfig clparams.CaplinConfig
 

@@ -23,14 +23,13 @@ import (
 	"fmt"
 	"time"
 
+	dbsnapshotsync "github.com/erigontech/erigon-db/snapshotsync"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
-
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
@@ -53,7 +52,7 @@ type RoSnapshots struct {
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
 //   - segment have [from:to] semantic
-func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, segmentsMin uint64, logger log.Logger) *RoSnapshots {
+func NewRoSnapshots(cfg dbsnapshotsync.BlocksFreezing, snapDir string, segmentsMin uint64, logger log.Logger) *RoSnapshots {
 	return &RoSnapshots{*snapshotsync.NewRoSnapshots(cfg, snapDir, SnapshotTypes(), segmentsMin, false, logger)}
 }
 

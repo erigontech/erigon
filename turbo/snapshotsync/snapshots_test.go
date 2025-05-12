@@ -26,6 +26,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	dbsnapshotsync "github.com/erigontech/erigon-db/snapshotsync"
 	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
@@ -35,7 +36,6 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/version"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/testlog"
 )
@@ -225,7 +225,7 @@ func TestMergeSnapshots(t *testing.T) {
 	for i := uint64(0); i < N; i++ {
 		createFile(i*10_000, (i+1)*10_000)
 	}
-	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, coresnaptype.BlockSnapshotTypes, 0, true, logger)
+	s := NewRoSnapshots(dbsnapshotsync.BlocksFreezing{ChainName: networkname.Mainnet}, dir, coresnaptype.BlockSnapshotTypes, 0, true, logger)
 	defer s.Close()
 	require.NoError(s.OpenFolder())
 	{
@@ -325,7 +325,7 @@ func TestDeleteSnapshots(t *testing.T) {
 	for i := uint64(0); i < N; i++ {
 		createFile(i*10_000, (i+1)*10_000)
 	}
-	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, coresnaptype.BlockSnapshotTypes, 0, true, logger)
+	s := NewRoSnapshots(dbsnapshotsync.BlocksFreezing{ChainName: networkname.Mainnet}, dir, coresnaptype.BlockSnapshotTypes, 0, true, logger)
 	defer s.Close()
 	retireFiles := []string{
 		"v1.0-000000-000010-bodies.seg",
@@ -374,7 +374,7 @@ func TestRemoveOverlaps(t *testing.T) {
 		createFile(200_000+i*10_000, 200_000+(i+1)*10_000)
 	}
 
-	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, coresnaptype.BlockSnapshotTypes, 0, true, logger)
+	s := NewRoSnapshots(dbsnapshotsync.BlocksFreezing{ChainName: networkname.Mainnet}, dir, coresnaptype.BlockSnapshotTypes, 0, true, logger)
 	defer s.Close()
 
 	list, err := snaptype.Segments(s.Dir())
@@ -438,7 +438,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		dir := filepath.Join(baseDir, chain)
 		chainSnapshotCfg := snapcfg.KnownCfg(chain)
 		chainSnapshotCfg.ExpectBlocks = math.MaxUint64
-		cfg := ethconfig.BlocksFreezing{ChainName: chain}
+		cfg := dbsnapshotsync.BlocksFreezing{ChainName: chain}
 		createFile := func(from, to uint64, name snaptype.Type) {
 			createTestSegmentFile(t, from, to, name.Enum(), dir, version.V1_0, logger)
 		}
@@ -590,7 +590,7 @@ func TestCalculateVisibleSegments(t *testing.T) {
 	for i := uint64(0); i < 5; i++ {
 		createFile(i*500_000, (i+1)*500_000, coresnaptype.Transactions)
 	}
-	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
+	cfg := dbsnapshotsync.BlocksFreezing{ChainName: networkname.Mainnet}
 	s := NewRoSnapshots(cfg, dir, coresnaptype.BlockSnapshotTypes, 0, true, logger)
 	defer s.Close()
 
@@ -660,7 +660,7 @@ func TestCalculateVisibleSegmentsWhenGapsInIdx(t *testing.T) {
 	err := os.Remove(missingIdxFile)
 	require.NoError(err)
 
-	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
+	cfg := dbsnapshotsync.BlocksFreezing{ChainName: networkname.Mainnet}
 	s := NewRoSnapshots(cfg, dir, coresnaptype.BlockSnapshotTypes, 0, true, logger)
 	defer s.Close()
 

@@ -32,6 +32,7 @@ import (
 	"github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
+	dbsnapshotsync "github.com/erigontech/erigon-db/snapshotsync"
 	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
@@ -44,7 +45,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 )
 
@@ -529,7 +529,7 @@ type RoSnapshots struct {
 	dir         string
 	segmentsMax atomic.Uint64 // all types of .seg files are available - up to this number
 	idxMax      atomic.Uint64 // all types of .idx files are available - up to this number
-	cfg         ethconfig.BlocksFreezing
+	cfg         dbsnapshotsync.BlocksFreezing
 	logger      log.Logger
 
 	// allows for pruning segments - this is the min availible segment
@@ -544,11 +544,11 @@ type RoSnapshots struct {
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
-func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, segmentsMin uint64, alignMin bool, logger log.Logger) *RoSnapshots {
+func NewRoSnapshots(cfg dbsnapshotsync.BlocksFreezing, snapDir string, types []snaptype.Type, segmentsMin uint64, alignMin bool, logger log.Logger) *RoSnapshots {
 	return newRoSnapshots(cfg, snapDir, types, segmentsMin, alignMin, logger)
 }
 
-func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, segmentsMin uint64, alignMin bool, logger log.Logger) *RoSnapshots {
+func newRoSnapshots(cfg dbsnapshotsync.BlocksFreezing, snapDir string, types []snaptype.Type, segmentsMin uint64, alignMin bool, logger log.Logger) *RoSnapshots {
 	if cfg.ChainName == "" {
 		log.Debug("[dbg] newRoSnapshots created with empty ChainName", "stack", dbg.Stack())
 	}
@@ -576,14 +576,14 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	return s
 }
 
-func (s *RoSnapshots) Cfg() ethconfig.BlocksFreezing { return s.cfg }
-func (s *RoSnapshots) Dir() string                   { return s.dir }
-func (s *RoSnapshots) DownloadReady() bool           { return s.downloadReady.Load() }
-func (s *RoSnapshots) SegmentsReady() bool           { return s.segmentsReady.Load() }
-func (s *RoSnapshots) IndicesMax() uint64            { return s.idxMax.Load() }
-func (s *RoSnapshots) SegmentsMax() uint64           { return s.segmentsMax.Load() }
-func (s *RoSnapshots) SegmentsMin() uint64           { return s.segmentsMin.Load() }
-func (s *RoSnapshots) SetSegmentsMin(min uint64)     { s.segmentsMin.Store(min) }
+func (s *RoSnapshots) Cfg() dbsnapshotsync.BlocksFreezing { return s.cfg }
+func (s *RoSnapshots) Dir() string                        { return s.dir }
+func (s *RoSnapshots) DownloadReady() bool                { return s.downloadReady.Load() }
+func (s *RoSnapshots) SegmentsReady() bool                { return s.segmentsReady.Load() }
+func (s *RoSnapshots) IndicesMax() uint64                 { return s.idxMax.Load() }
+func (s *RoSnapshots) SegmentsMax() uint64                { return s.segmentsMax.Load() }
+func (s *RoSnapshots) SegmentsMin() uint64                { return s.segmentsMin.Load() }
+func (s *RoSnapshots) SetSegmentsMin(min uint64)          { s.segmentsMin.Store(min) }
 func (s *RoSnapshots) BlocksAvailable() uint64 {
 	if s == nil {
 		return 0

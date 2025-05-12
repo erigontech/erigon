@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-db/rawdb"
+	dbsnapshotsync "github.com/erigontech/erigon-db/snapshotsync"
 	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -38,7 +39,6 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/services"
@@ -123,13 +123,13 @@ func (r *RemoteBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, bl
 	}
 	return block.Header(), nil
 }
-func (r *RemoteBlockReader) Snapshots() snapshotsync.BlockSnapshots    { panic("not implemented") }
-func (r *RemoteBlockReader) BorSnapshots() snapshotsync.BlockSnapshots { panic("not implemented") }
-func (r *RemoteBlockReader) AllTypes() []snaptype.Type                 { panic("not implemented") }
-func (r *RemoteBlockReader) FrozenBlocks() uint64                      { panic("not supported") }
-func (r *RemoteBlockReader) FrozenBorBlocks() uint64                   { panic("not supported") }
-func (r *RemoteBlockReader) FrozenFiles() (list []string)              { panic("not supported") }
-func (r *RemoteBlockReader) FreezingCfg() ethconfig.BlocksFreezing     { panic("not supported") }
+func (r *RemoteBlockReader) Snapshots() snapshotsync.BlockSnapshots     { panic("not implemented") }
+func (r *RemoteBlockReader) BorSnapshots() snapshotsync.BlockSnapshots  { panic("not implemented") }
+func (r *RemoteBlockReader) AllTypes() []snaptype.Type                  { panic("not implemented") }
+func (r *RemoteBlockReader) FrozenBlocks() uint64                       { panic("not supported") }
+func (r *RemoteBlockReader) FrozenBorBlocks() uint64                    { panic("not supported") }
+func (r *RemoteBlockReader) FrozenFiles() (list []string)               { panic("not supported") }
+func (r *RemoteBlockReader) FreezingCfg() dbsnapshotsync.BlocksFreezing { panic("not supported") }
 
 func (r *RemoteBlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
 	blockNum, err := r.HeaderNumber(ctx, tx, hash)
@@ -454,7 +454,7 @@ func (r *BlockReader) FrozenFiles() []string {
 	sort.Strings(files)
 	return files
 }
-func (r *BlockReader) FreezingCfg() ethconfig.BlocksFreezing { return r.sn.Cfg() }
+func (r *BlockReader) FreezingCfg() dbsnapshotsync.BlocksFreezing { return r.sn.Cfg() }
 
 func (r *BlockReader) HeadersRange(ctx context.Context, walker func(header *types.Header) error) error {
 	return ForEachHeader(ctx, r.sn, walker)

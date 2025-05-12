@@ -31,6 +31,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-db/snapshotsync"
 	params2 "github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -302,7 +303,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 
 	ethConfig := ethconfig.Config{
 		Dirs: dirs,
-		Snapshot: ethconfig.BlocksFreezing{
+		Snapshot: snapshotsync.BlocksFreezing{
 			NoDownloader: true,
 		},
 		TxPool: txPoolConfig,

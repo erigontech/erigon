@@ -31,6 +31,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/tidwall/btree"
 
+	dbsnapshotsync "github.com/erigontech/erigon-db/snapshotsync"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
@@ -42,13 +43,11 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/version"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 
@@ -70,7 +69,7 @@ type CaplinSnapshots struct {
 	tmpdir      string
 	segmentsMax atomic.Uint64 // all types of .seg files are available - up to this number
 	idxMax      atomic.Uint64 // all types of .idx files are available - up to this number
-	cfg         ethconfig.BlocksFreezing
+	cfg         dbsnapshotsync.BlocksFreezing
 	logger      log.Logger
 	// allows for pruning segments - this is the min availible segment
 	segmentsMin atomic.Uint64
@@ -83,7 +82,7 @@ type CaplinSnapshots struct {
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
-func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.BeaconChainConfig, dirs datadir.Dirs, logger log.Logger) *CaplinSnapshots {
+func NewCaplinSnapshots(cfg dbsnapshotsync.BlocksFreezing, beaconCfg *clparams.BeaconChainConfig, dirs datadir.Dirs, logger log.Logger) *CaplinSnapshots {
 	if cfg.ChainName == "" {
 		log.Debug("[dbg] NewCaplinSnapshots created with empty ChainName", "stack", dbg.Stack())
 	}
