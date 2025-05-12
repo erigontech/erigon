@@ -1253,6 +1253,9 @@ func (ht *HistoryRoTx) encodeTs(txNum uint64, key []byte) []byte {
 // second return value is true if the value is found in the history (even if it is nil)
 func (ht *HistoryRoTx) HistorySeek(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
 	if ht.h.disable {
+		if ht.h.filenameBase == "rcache" {
+			log.Warn("[dbg] disabled")
+		}
 		return nil, false, nil
 	}
 
