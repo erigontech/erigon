@@ -34,6 +34,7 @@ func newStream() *jsoniter.Stream {
 
 // benchmarkSimpleObject is used to compare writing a simple JSON object
 func benchmarkSimpleObject(b *testing.B, s Stream) {
+	b.Helper()
 	for i := 0; i < b.N; i++ {
 		s.WriteObjectStart()
 		s.WriteObjectField("name")
@@ -60,6 +61,7 @@ func BenchmarkSimpleObject_StackStream(b *testing.B) {
 
 // benchmarkNestedStructure is used to compare writing a nested JSON structure
 func benchmarkNestedStructure(b *testing.B, s Stream) {
+	b.Helper()
 	for i := 0; i < b.N; i++ {
 		s.WriteObjectStart()
 		s.WriteObjectField("person")
@@ -98,6 +100,7 @@ func BenchmarkNestedStructure_StackStream(b *testing.B) {
 
 // benchmarkLargeArray is used to compare writing a large array
 func benchmarkLargeArray(b *testing.B, s Stream) {
+	b.Helper()
 	for i := 0; i < b.N; i++ {
 		s.WriteArrayStart()
 		for j := 0; j < 1000; j++ {
@@ -125,6 +128,7 @@ func BenchmarkLargeArray_StackStream(b *testing.B) {
 
 // benchmarkMixedTypes is used to compare writing mixed data types
 func benchmarkMixedTypes(b *testing.B, s Stream) {
+	b.Helper()
 	for i := 0; i < b.N; i++ {
 		s.WriteObjectStart()
 		s.WriteObjectField("string")
@@ -160,6 +164,7 @@ func BenchmarkMixedTypes_StackStream(b *testing.B) {
 
 // benchmarkWriteToBuffer is used to compare writing to a buffer
 func benchmarkWriteToBuffer(b *testing.B, s Stream) {
+	b.Helper()
 	buf := bytes.NewBuffer(nil)
 	for i := 0; i < b.N; i++ {
 		s.Reset(buf)
@@ -188,6 +193,7 @@ func BenchmarkWriteToBuffer_StackStream(b *testing.B) {
 
 // benchmarkIncompleteStructure is used to compare handling incomplete structures
 func benchmarkIncompleteStructure(b *testing.B, s Stream) {
+	b.Helper()
 	for i := 0; i < b.N; i++ {
 		// Create an incomplete structure
 		s.WriteObjectStart()

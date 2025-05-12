@@ -764,6 +764,7 @@ func TestStackStream_ErrorHandlingWithClosing(t *testing.T) {
 	ss.WriteObjectField("longString")
 	ss.WriteString("This string should cause the writer to fail")
 	err := ss.closeAllPendingElements()
+	assert.NoError(t, err)
 
 	// Flush should propagate the error
 	err = ss.Flush()
@@ -942,7 +943,9 @@ func TestStackStream_BufferAsStringWithErrors(t *testing.T) {
 
 	// Complete the structure and flush
 	err := ss.closeAllPendingElements()
+	assert.NoError(t, err)
 	err = ss.Flush()
+	assert.Error(t, err)
 
 	// Attempt to get buffer as a string, which should propagate the error
 	result, err := ss.BufferAsString()
