@@ -456,7 +456,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, requestedMinBlockNum ui
 
 		if includeBor {
 			minBorBlockNum := max(br.blockReader.FrozenBorBlocks(), requestedMinBlockNum)
-			log.Warn("[dbg] ret4", "minBorBlockNum", minBorBlockNum, "maxBlockNum", maxBlockNum)
+			log.Warn("[dbg] ret4", "minBorBlockNum", minBorBlockNum, "maxBlockNum", maxBlockNum, "br.blockReader.FrozenBorBlocks()", br.blockReader.FrozenBorBlocks())
 			okBor, err = br.retireBorBlocks(ctx, minBorBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 			if err != nil {
 				return err
