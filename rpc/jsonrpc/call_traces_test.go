@@ -29,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	jsonstream "github.com/erigontech/erigon-lib/json"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/core"
@@ -66,14 +67,15 @@ func TestCallTraceOneByOne(t *testing.T) {
 	}
 
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
-	// Insert blocks 1 by 1, to tirgget possible "off by one" errors
+	// Insert blocks 1 by 1 to trigger possible "off by one" errors
 	for i := 0; i < chain.Length(); i++ {
 		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
 			t.Fatalf("inserting chain: %v", err)
 		}
 	}
-	stream := jsoniter.ConfigDefault.BorrowStream(nil)
-	defer jsoniter.ConfigDefault.ReturnStream(stream)
+	s := jsoniter.ConfigDefault.BorrowStream(nil)
+	defer jsoniter.ConfigDefault.ReturnStream(s)
+	stream := jsonstream.NewJsoniterStream(s)
 	var fromBlock, toBlock uint64
 	fromBlock = 1
 	toBlock = 10
@@ -115,8 +117,9 @@ func TestCallTraceUnwind(t *testing.T) {
 	if err = m.InsertChain(chainA); err != nil {
 		t.Fatalf("inserting chainA: %v", err)
 	}
-	stream := jsoniter.ConfigDefault.BorrowStream(nil)
-	defer jsoniter.ConfigDefault.ReturnStream(stream)
+	s := jsoniter.ConfigDefault.BorrowStream(nil)
+	defer jsoniter.ConfigDefault.ReturnStream(s)
+	stream := jsonstream.NewJsoniterStream(s)
 	var fromBlock, toBlock uint64
 	fromBlock = 1
 	toBlock = 10
@@ -172,14 +175,15 @@ func TestFilterNoAddresses(t *testing.T) {
 		t.Fatalf("generate chain: %v", err)
 	}
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
-	// Insert blocks 1 by 1, to tirgget possible "off by one" errors
+	// Insert blocks 1 by 1 to trigger possible "off by one" errors
 	for i := 0; i < chain.Length(); i++ {
 		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
 			t.Fatalf("inserting chain: %v", err)
 		}
 	}
-	stream := jsoniter.ConfigDefault.BorrowStream(nil)
-	defer jsoniter.ConfigDefault.ReturnStream(stream)
+	s := jsoniter.ConfigDefault.BorrowStream(nil)
+	defer jsoniter.ConfigDefault.ReturnStream(s)
+	stream := jsonstream.NewJsoniterStream(s)
 	var fromBlock, toBlock uint64
 	fromBlock = 1
 	toBlock = 10
@@ -226,8 +230,9 @@ func TestFilterAddressIntersection(t *testing.T) {
 
 	fromBlock, toBlock := uint64(1), uint64(15)
 	t.Run("second", func(t *testing.T) {
-		stream := jsoniter.ConfigDefault.BorrowStream(nil)
-		defer jsoniter.ConfigDefault.ReturnStream(stream)
+		s := jsoniter.ConfigDefault.BorrowStream(nil)
+		defer jsoniter.ConfigDefault.ReturnStream(s)
+		stream := jsonstream.NewJsoniterStream(s)
 
 		traceReq1 := TraceFilterRequest{
 			FromBlock:   (*hexutil.Uint64)(&fromBlock),
@@ -242,8 +247,9 @@ func TestFilterAddressIntersection(t *testing.T) {
 		assert.Equal(t, []int{6, 7, 8, 9, 10}, blockNumbersFromTraces(t, stream.Buffer()))
 	})
 	t.Run("first", func(t *testing.T) {
-		stream := jsoniter.ConfigDefault.BorrowStream(nil)
-		defer jsoniter.ConfigDefault.ReturnStream(stream)
+		s := jsoniter.ConfigDefault.BorrowStream(nil)
+		defer jsoniter.ConfigDefault.ReturnStream(s)
+		stream := jsonstream.NewJsoniterStream(s)
 
 		traceReq1 := TraceFilterRequest{
 			FromBlock:   (*hexutil.Uint64)(&fromBlock),
@@ -258,8 +264,9 @@ func TestFilterAddressIntersection(t *testing.T) {
 		assert.Equal(t, []int{1, 2, 3, 4, 5}, blockNumbersFromTraces(t, stream.Buffer()))
 	})
 	t.Run("empty", func(t *testing.T) {
-		stream := jsoniter.ConfigDefault.BorrowStream(nil)
-		defer jsoniter.ConfigDefault.ReturnStream(stream)
+		s := jsoniter.ConfigDefault.BorrowStream(nil)
+		defer jsoniter.ConfigDefault.ReturnStream(s)
+		stream := jsonstream.NewJsoniterStream(s)
 
 		traceReq1 := TraceFilterRequest{
 			FromBlock:   (*hexutil.Uint64)(&fromBlock),
