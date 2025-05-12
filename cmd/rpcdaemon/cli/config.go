@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/erigontech/erigon-lib/kv/kvcfg"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -434,6 +435,26 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("create aggregator: %w", err)
 		}
+		if err := db.View(context.Background(), func(tx kv.Tx) (err error) {
+			cfg.Sync.KeepExecutionProofs, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
+			if err != nil {
+				return err
+			}
+			cfg.Sync.PersistReceiptsCacheV2, err = kvcfg.PersistReceipts.Enabled(tx)
+			if err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			panic(err)
+		}
+		if cfg.Sync.KeepExecutionProofs {
+			libstate.EnableHistoricalCommitment()
+		}
+		if cfg.Sync.PersistReceiptsCacheV2 {
+			libstate.EnableHistoricalRCache()
+		}
+
 		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
 		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
 
