@@ -10,11 +10,11 @@ import (
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/datastruct/existence"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
 	ee "github.com/erigontech/erigon-lib/state/entity_extras"
+	"github.com/erigontech/erigon-lib/version"
 	"github.com/stretchr/testify/require"
 )
 
@@ -162,7 +162,7 @@ func TestIntegrateDirtyFile(t *testing.T) {
 	require.NoError(t, err)
 
 	filesItem := newFilesItemWithSnapConfig(0, 1024, repo.cfg)
-	filename := repo.schema.DataFile(snaptype.V1_0, 0, 1024)
+	filename := repo.schema.DataFile(version.V1_0, 0, 1024)
 	comp, err := seg.NewCompressor(context.Background(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 	require.NoError(t, err)
 	defer comp.Close()
@@ -585,7 +585,7 @@ func populateFiles2(t *testing.T, dirs datadir.Dirs, name string, repo *Snapshot
 	t.Helper()
 	allFiles := dhiiFiles{fullPath: true}
 	extensions := repo.cfg.Schema.(*ee.E3SnapSchema).FileExtensions()
-	v := snaptype.V1_0
+	v := version.V1_0
 	acc := repo.schema.AccessorList()
 	for _, r := range ranges {
 		from, to := RootNum(r.fromStep*repo.stepSize), RootNum(r.toStep*repo.stepSize)
@@ -747,7 +747,7 @@ func fileExistsCheck(t *testing.T, repo *SnapshotRepo, startStep, endStep uint64
 	_, found := repo.dirtyFiles.Get(&filesItem{startTxNum: startTxNum, endTxNum: endTxNum})
 	require.Equal(t, found, isFound)
 
-	_, err := os.Stat(repo.cfg.Schema.DataFile(snaptype.V1_0, ee.RootNum(startTxNum), ee.RootNum(endTxNum)))
+	_, err := os.Stat(repo.cfg.Schema.DataFile(version.V1_0, ee.RootNum(startTxNum), ee.RootNum(endTxNum)))
 	if isFound {
 		require.NoError(t, err)
 	} else {
