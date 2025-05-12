@@ -469,6 +469,7 @@ func testVerify(t *testing.T, noValidators int, chainLength int) {
 }
 
 func TestSendBlock(t *testing.T) {
+	t.Skip("issue #15017")
 	heimdall := newTestHeimdall(params.BorDevnetChainConfig)
 	blocks := map[uint64]*types.Block{}
 
