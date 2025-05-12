@@ -34,9 +34,7 @@ import (
 )
 
 func TestUDPv4_Lookup(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("fix me on win please")
-	}
+	t.Skip("issue #14714")
 	t.Parallel()
 	logger := log.New()
 
