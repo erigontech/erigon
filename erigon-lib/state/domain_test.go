@@ -79,7 +79,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	cfg := Schema.AccountsDomain
 	cfg.crossDomainIntegrity = nil //no other domains
 
-	cfg.hist.iiCfg.saltM = NewSaltManager(dirs, true, true, logger)
+	cfg.hist.iiCfg.saltM = NewE3SaltManager(dirs, true, logger)
 
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
@@ -1051,7 +1051,7 @@ func emptyTestDomain(aggStep uint64) *Domain {
 
 	dirs := datadir2.New(os.TempDir())
 	logger := log.New()
-	cfg.hist.iiCfg.saltM = NewSaltManager(dirs, true, true, logger)
+	cfg.hist.iiCfg.saltM = NewE3SaltManager(dirs, true, logger)
 	cfg.hist.iiCfg.dirs = dirs
 	cfg.hist.iiCfg.name = kv.InvertedIdx(0)
 	cfg.hist.iiCfg.version = IIVersionTypes{snaptype.V1_0, snaptype.V1_0}

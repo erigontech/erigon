@@ -43,7 +43,7 @@ func NewTestDB(tb testing.TB, dirs datadir.Dirs) kv.TemporalRwDB {
 	}
 
 	logger := log.New()
-	saltM := state.NewSaltManager(dirs, true, true, logger)
+	saltM := state.NewE3SaltManager(dirs, true, logger)
 	agg, err := state.NewAggregator(context.Background(), dirs, config3.DefaultStepSize, saltM, rawDB, logger)
 	if err != nil {
 		panic(err)

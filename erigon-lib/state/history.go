@@ -401,7 +401,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		LeafSize:   recsplit.DefaultLeafSize,
 		TmpDir:     h.dirs.Tmp,
 		IndexFile:  historyIdxPath,
-		Salt:       h.saltM.StateSalt(),
+		Salt:       h.saltM.Salt(),
 		NoFsync:    h.noFsync,
 	}, h.logger)
 	if err != nil {

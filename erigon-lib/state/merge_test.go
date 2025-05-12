@@ -35,7 +35,7 @@ func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
 	dirs := datadir.New(os.TempDir())
 	cfg := Schema.AccountsDomain.hist.iiCfg
 	logger := log.New()
-	cfg.saltM = NewSaltManager(dirs, false, false, logger)
+	cfg.saltM = NewE3SaltManager(dirs, false, logger)
 	cfg.dirs = dirs
 	ii, err := NewInvertedIndex(cfg, aggStep, logger)
 	ii.Accessors = 0

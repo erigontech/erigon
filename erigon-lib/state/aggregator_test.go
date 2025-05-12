@@ -1012,7 +1012,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	newDb := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	t.Cleanup(newDb.Close)
 
-	saltM := NewSaltManager(dirs, true, true, logger)
+	saltM := NewE3SaltManager(dirs, true, logger)
 	newAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, saltM, newDb, logger)
 	require.NoError(t, err)
 	require.NoError(t, newAgg.OpenFolder())
@@ -1296,7 +1296,7 @@ func testDbAndAggregatorv3(tb testing.TB, aggStep uint64) (kv.RwDB, *Aggregator)
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	tb.Cleanup(db.Close)
 
-	saltM := NewSaltManager(dirs, true, true, logger)
+	saltM := NewE3SaltManager(dirs, true, logger)
 	agg, err := NewAggregator(context.Background(), dirs, aggStep, saltM, db, logger)
 	require.NoError(err)
 	tb.Cleanup(agg.Close)

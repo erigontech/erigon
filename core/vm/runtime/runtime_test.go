@@ -56,7 +56,7 @@ func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.TemporalRwTx, *stateLib.Aggre
 	db := memdb.NewStateDB(dirs.DataDir)
 	tb.Cleanup(db.Close)
 
-	saltM := stateLib.NewSaltManager(dirs, true, true, logger)
+	saltM := stateLib.NewE3SaltManager(dirs, true, logger)
 	agg, err := stateLib.NewAggregator(context.Background(), dirs, 16, saltM, db, logger)
 	if err != nil {
 		tb.Fatal(err)
@@ -180,7 +180,7 @@ func testTemporalDB(t testing.TB) *temporal.DB {
 	t.Cleanup(db.Close)
 
 	logger := log.New()
-	saltM := stateLib.NewSaltManager(dirs, true, true, logger)
+	saltM := stateLib.NewE3SaltManager(dirs, true, logger)
 	agg, err := stateLib.NewAggregator(context.Background(), dirs, 16, saltM, db, logger)
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)

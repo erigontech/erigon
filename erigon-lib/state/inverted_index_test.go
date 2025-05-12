@@ -56,7 +56,7 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 		}
 	}).MustOpen()
 	tb.Cleanup(db.Close)
-	saltM := NewSaltManager(dirs, true, true, logger)
+	saltM := NewE3SaltManager(dirs, true, logger)
 	cfg := iiCfg{saltM: saltM, dirs: dirs, filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable, version: IIVersionTypes{DataEF: snaptype.V1_0, AccessorEFI: snaptype.V1_0}}
 	ii, err := NewInvertedIndex(cfg, aggStep, logger)
 	require.NoError(tb, err)
@@ -562,7 +562,7 @@ func TestInvIndexScanFiles(t *testing.T) {
 
 	// Recreate InvertedIndex to scan the files
 	cfg := ii.iiCfg
-	cfg.saltM = NewSaltManager(ii.dirs, true, true, logger)
+	cfg.saltM = NewE3SaltManager(ii.dirs, true, logger)
 
 	var err error
 	ii, err = NewInvertedIndex(cfg, 16, logger)

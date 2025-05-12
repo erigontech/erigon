@@ -57,6 +57,7 @@ func TestSaltManager_GenNew(t *testing.T) {
 }
 
 func setupSM(t *testing.T, genState, genBlock bool) (datadir.Dirs, *SaltManager, *SaltManager) {
+	t.Helper()
 	dirs := datadir.New(t.TempDir())
 	logger := log.New()
 	sm1, sm2 := NewE3SaltManager(dirs, genState, logger), NewBlockSaltManager(dirs, genBlock, logger)

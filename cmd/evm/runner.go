@@ -172,7 +172,7 @@ func runCmd(ctx *cli.Context) error {
 	}
 	logger2 := log.New()
 	dirs := datadir.New(os.TempDir())
-	saltM := libstate.NewSaltManager(dirs, true, true, logger2)
+	saltM := libstate.NewE3SaltManager(dirs, true, logger2)
 	agg, err := state2.NewAggregator(context.Background(), dirs, config3.DefaultStepSize, saltM, db, logger2)
 	if err != nil {
 		return err

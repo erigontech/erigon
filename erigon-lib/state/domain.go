@@ -729,7 +729,7 @@ func (d *Domain) BeginFilesRo() *DomainRoTx {
 		ht:      d.History.BeginFilesRo(),
 		visible: d._visible,
 		files:   d._visible.files,
-		salt:    d.saltM.StateSalt(),
+		salt:    d.saltM.Salt(),
 	}
 }
 
@@ -1086,7 +1086,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, co
 
 	if d.Accessors.Has(AccessorBTree) {
 		btPath := d.kvBtAccessorFilePath(stepFrom, stepTo)
-		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, d.Compression, *d.saltM.StateSalt(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
+		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, d.Compression, *d.saltM.Salt(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.filenameBase, err)
 		}
@@ -1188,7 +1188,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 
 	if d.Accessors.Has(AccessorBTree) {
 		btPath := d.kvBtAccessorFilePath(step, step+1)
-		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, d.Compression, *d.saltM.StateSalt(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
+		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, d.Compression, *d.saltM.Salt(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.filenameBase, err)
 		}
@@ -1226,7 +1226,7 @@ func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep uint
 		LeafSize:   recsplit.DefaultLeafSize,
 		TmpDir:     d.dirs.Tmp,
 		IndexFile:  idxPath,
-		Salt:       d.saltM.StateSalt(),
+		Salt:       d.saltM.Salt(),
 		NoFsync:    d.noFsync,
 	}
 	return buildHashMapAccessor(ctx, data, d.Compression, idxPath, false, cfg, ps, d.logger)
@@ -1270,7 +1270,7 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 		g.Go(func() error {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
 			idxPath := d.kvBtAccessorFilePath(fromStep, toStep)
-			if err := BuildBtreeIndexWithDecompressor(idxPath, item.decompressor, d.Compression, ps, d.dirs.Tmp, *d.saltM.StateSalt(), d.logger, d.noFsync, d.Accessors); err != nil {
+			if err := BuildBtreeIndexWithDecompressor(idxPath, item.decompressor, d.Compression, ps, d.dirs.Tmp, *d.saltM.Salt(), d.logger, d.noFsync, d.Accessors); err != nil {
 				return fmt.Errorf("failed to build btree index for %s:  %w", item.decompressor.FileName(), err)
 			}
 			return nil

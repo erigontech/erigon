@@ -141,7 +141,7 @@ func aggregateResultsFromStateTests(
 	defer _db.Close()
 
 	logger := log.New()
-	saltM := libstate.NewSaltManager(dirs, true, true, logger)
+	saltM := libstate.NewE3SaltManager(dirs, true, logger)
 	agg, err := libstate.NewAggregator(context.Background(), dirs, config3.DefaultStepSize, saltM, _db, logger)
 	if err != nil {
 		return nil, err

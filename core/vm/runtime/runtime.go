@@ -137,7 +137,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		dirs := datadir.New(tempdir)
 		logger := log.New()
 
-		saltM := state3.NewSaltManager(dirs, true, true, logger)
+		saltM := state3.NewE3SaltManager(dirs, true, logger)
 		agg, err := state3.NewAggregator(context.Background(), dirs, config3.DefaultStepSize, saltM, db, logger)
 		if err != nil {
 			return nil, nil, err
@@ -209,7 +209,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 
 		logger := log.New()
 		dirs := datadir.New(tmp)
-		saltM := state3.NewSaltManager(dirs, true, true, logger)
+		saltM := state3.NewE3SaltManager(dirs, true, logger)
 		agg, err := state3.NewAggregator(context.Background(), dirs, config3.DefaultStepSize, saltM, db, logger)
 		if err != nil {
 			return nil, [20]byte{}, 0, err

@@ -244,7 +244,7 @@ func (test *snapshotTest) run() bool {
 
 	dirs := datadir.New("")
 	logger := log.New()
-	saltM := stateLib.NewSaltManager(dirs, true, true, logger)
+	saltM := stateLib.NewE3SaltManager(dirs, true, logger)
 	agg, err := stateLib.NewAggregator(context.Background(), dirs, 16, saltM, db, logger)
 	if err != nil {
 		test.err = err

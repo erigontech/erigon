@@ -105,7 +105,7 @@ func testTemporalDB(t *testing.T) *temporal.DB {
 	t.Cleanup(db.Close)
 
 	dirs, logger := datadir.New(t.TempDir()), log.New()
-	saltM := state3.NewSaltManager(dirs, true, true, logger)
+	saltM := state3.NewE3SaltManager(dirs, true, logger)
 	agg, err := state3.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, saltM, db, log.New())
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)

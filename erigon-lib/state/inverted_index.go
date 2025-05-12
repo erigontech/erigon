@@ -502,7 +502,7 @@ func (ii *InvertedIndex) BeginFilesRo() *InvertedIndexRoTx {
 		visible: ii._visible,
 		files:   files,
 		name:    ii.name,
-		salt:    ii.saltM.StateSalt(),
+		salt:    ii.saltM.Salt(),
 	}
 }
 func (iit *InvertedIndexRoTx) Close() {
@@ -1256,7 +1256,7 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 		LeafSize:   recsplit.DefaultLeafSize,
 		TmpDir:     ii.dirs.Tmp,
 		IndexFile:  idxPath,
-		Salt:       ii.saltM.StateSalt(),
+		Salt:       ii.saltM.Salt(),
 		NoFsync:    ii.noFsync,
 	}
 	return buildHashMapAccessor(ctx, data, ii.Compression, idxPath, false, cfg, ps, ii.logger)

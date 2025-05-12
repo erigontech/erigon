@@ -44,7 +44,7 @@ func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.RwDB, *Aggregato
 	dirs := datadir.New(b.TempDir())
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	b.Cleanup(db.Close)
-	saltM := NewSaltManager(dirs, true, true, logger)
+	saltM := NewE3SaltManager(dirs, true, logger)
 	agg, err := NewAggregator(context.Background(), dirs, aggStep, saltM, db, logger)
 	require.NoError(b, err)
 	b.Cleanup(agg.Close)

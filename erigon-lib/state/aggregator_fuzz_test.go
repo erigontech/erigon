@@ -271,7 +271,7 @@ func testFuzzDbAndAggregatorv3(f *testing.F, aggStep uint64) (kv.RwDB, *Aggregat
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	f.Cleanup(db.Close)
 
-	saltM := NewSaltManager(dirs, true, true, logger)
+	saltM := NewE3SaltManager(dirs, true, logger)
 	agg, err := NewAggregator(context.Background(), dirs, aggStep, saltM, db, logger)
 	require.NoError(err)
 	f.Cleanup(agg.Close)

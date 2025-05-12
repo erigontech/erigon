@@ -1321,7 +1321,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		blockReader := freezeblocks.NewBlockReader(_allSnapshotsSingleton, _allBorSnapshotsSingleton, _heimdallStoreSingleton, _bridgeStoreSingleton)
 		txNums := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader))
 
-		saltM := libstate.NewSaltManager(dirs, false, false, logger)
+		saltM := libstate.NewE3SaltManager(dirs, false, logger)
 		_aggSingleton, err = libstate.NewAggregator(ctx, dirs, config3.DefaultStepSize, saltM, db, logger)
 		if err != nil {
 			err = fmt.Errorf("aggregator init: %w", err)

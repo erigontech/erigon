@@ -1635,8 +1635,7 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, heimdallStore, bridgeStore)
 
 	createNewE3SaltIfNeeded := snConfig.Snapshot.NoDownloader || snConfig.Snapshot.DisableDownloadE3
-	createNewBlockSaltIfNeeded := snConfig.Snapshot.NoDownloader
-	saltM := libstate.NewSaltManager(dirs, createNewE3SaltIfNeeded, createNewBlockSaltIfNeeded, logger)
+	saltM := libstate.NewE3SaltManager(dirs, createNewE3SaltIfNeeded, logger)
 	agg, err := libstate.NewAggregator(ctx, dirs, config3.DefaultStepSize, saltM, db, logger)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err

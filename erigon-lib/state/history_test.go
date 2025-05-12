@@ -55,7 +55,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	cfg := Schema.AccountsDomain
 
 	cfg.hist.iiCfg.dirs = dirs
-	cfg.hist.iiCfg.saltM = NewSaltManager(dirs, true, true, logger)
+	cfg.hist.iiCfg.saltM = NewE3SaltManager(dirs, true, logger)
 
 	cfg.hist.historyLargeValues = largeValues
 

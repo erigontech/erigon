@@ -214,7 +214,7 @@ func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *stateLib.Aggregator) {
 	tb.Cleanup(db.Close)
 
 	logger := log.New()
-	saltM := stateLib.NewSaltManager(dirs, true, true, logger)
+	saltM := stateLib.NewE3SaltManager(dirs, true, logger)
 	agg, err := stateLib.NewAggregator(context.Background(), dirs, 16, saltM, db, logger)
 	if err != nil {
 		tb.Fatal(err)
