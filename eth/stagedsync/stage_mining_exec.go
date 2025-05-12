@@ -263,7 +263,8 @@ func getNextTransactions(
 	remainingGas := header.GasLimit - header.GasUsed
 	remainingBlobGas := uint64(0)
 	if header.BlobGasUsed != nil {
-		remainingBlobGas = cfg.chainConfig.GetMaxBlobGasPerBlock(header.Time, 0) - *header.BlobGasUsed
+		arbOsVersion := types.GetArbOSVersion(header, &cfg.chainConfig)
+		remainingBlobGas = cfg.chainConfig.GetMaxBlobGasPerBlock(header.Time, arbOsVersion) - *header.BlobGasUsed
 	}
 
 	provideOpts := []txnprovider.ProvideOption{
@@ -342,7 +343,8 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		// Make sure the sender is an EOA (EIP-3607)
 		if !account.IsEmptyCodeHash() {
 			isEoaCodeAllowed := false
-			if config.IsPrague(header.Time, 0) {
+			arbOsVersion := types.GetArbOSVersion(header, &config)
+			if config.IsPrague(header.Time, arbOsVersion) {
 				code, err := simStateReader.ReadAccountCode(sender, account.Incarnation)
 				if err != nil {
 					return nil, err
@@ -434,7 +436,8 @@ func addTransactionsToMiningBlock(
 	txnIdx := ibs.TxnIndex() + 1
 	gasPool := new(core.GasPool).AddGas(header.GasLimit - header.GasUsed)
 	if header.BlobGasUsed != nil {
-		gasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time, 0) - *header.BlobGasUsed)
+		arbOsVersion := types.GetArbOSVersion(header, &chainConfig)
+		gasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time, arbOsVersion) - *header.BlobGasUsed)
 	}
 	signer := types.MakeSigner(&chainConfig, header.Number.Uint64(), header.Time)
 

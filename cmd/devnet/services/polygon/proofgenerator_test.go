@@ -161,7 +161,9 @@ func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash libc
 	var usedGas uint64
 	var usedBlobGas uint64
 
-	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(block.Header().Time))
+	arbOsVersion := types.GetArbOSVersion(block.Header(), chainConfig)
+
+	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(block.Header().Time, arbOsVersion))
 
 	noopWriter := state.NewNoopWriter()
 

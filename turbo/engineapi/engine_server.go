@@ -293,7 +293,8 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	if version >= clparams.DenebVersion {
-		err := ethutils.ValidateBlobs(req.BlobGasUsed.Uint64(), s.config.GetMaxBlobGasPerBlock(header.Time, 0), s.config.GetMaxBlobsPerBlock(header.Time, 0), expectedBlobHashes, &transactions)
+		arbOsVersion := types.GetArbOSVersion(&header, s.config)
+		err := ethutils.ValidateBlobs(req.BlobGasUsed.Uint64(), s.config.GetMaxBlobGasPerBlock(header.Time, arbOsVersion), s.config.GetMaxBlobsPerBlock(header.Time, arbOsVersion), expectedBlobHashes, &transactions)
 		if errors.Is(err, ethutils.ErrNilBlobHashes) {
 			return nil, &rpc.InvalidParamsError{Message: "nil blob hashes array"}
 		}

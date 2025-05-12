@@ -538,10 +538,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		}
 	}
 
-	var arbosVersion uint64
-	if g.Config.IsArbitrum() {
-		arbosVersion = types.DeserializeHeaderExtraInformation(head).ArbOSFormatVersion
-	}
+	arbosVersion := types.GetArbOSVersion(head, g.Config)
 
 	var withdrawals []*types.Withdrawal
 	if g.Config != nil && g.Config.IsShanghai(g.Timestamp, arbosVersion) {
