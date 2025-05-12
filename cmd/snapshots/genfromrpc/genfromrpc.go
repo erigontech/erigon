@@ -309,6 +309,33 @@ func makeEip7702Tx(commonTx *types.CommonTx, rawTx map[string]interface{}) types
 		}},
 	}
 	buildDynamicFeeFields(&tx.DynamicFeeTransaction, rawTx)
+	if rawAuths, ok := rawTx["authorizationList"].([]interface{}); ok {
+		var auths []types.Authorization
+		for _, a := range rawAuths {
+			if auth, ok := a.(map[string]interface{}); ok {
+
+				cid := getUint256FromField(auth, "chainId")
+				yparity := getUint256FromField(auth, "yParity")
+				r := getUint256FromField(auth, "r")
+				s := getUint256FromField(auth, "s")
+				nonce := getUint256FromField(auth, "nonce")
+
+				ja := types.Authorization{
+					Address: common.HexToAddress(auth["address"].(string)),
+				}
+
+				ja.ChainID = *cid
+				ja.YParity = uint8(yparity.Uint64())
+				ja.R.SetFromBig(r.ToBig())
+				ja.S.SetFromBig(s.ToBig())
+				ja.Nonce = nonce.Uint64()
+
+				auths = append(auths, ja)
+			}
+		}
+		tx.Authorizations = auths
+	}
+
 	// TODO: Add any additional EIP-7702–specific processing here.
 	return tx
 }
@@ -643,7 +670,7 @@ func getBlockByNumber(client *rpc.Client, blockNumber *big.Int, verify bool) (*t
 	// Derive the TxHash from the decoded transactions.
 	txHash := types.DeriveSha(txs)
 	if verify && txHash != block.TxHash {
-		return nil, fmt.Errorf("tx hash mismatch, expected %s, got %s. num=%d", txHash, block.TxHash, blockNumber)
+		return nil, fmt.Errorf("tx hash mismatch, expected %s, got %s. num=%d", block.TxHash, txHash, blockNumber)
 	}
 	blk := types.NewBlockFromNetwork(&types.Header{
 		ParentHash:      block.ParentHash,
