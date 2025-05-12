@@ -185,7 +185,8 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 	}
 
 	var rs types.FlatRequests
-	if config.IsPrague(header.Time, 0) && !skipReceiptsEval {
+	arbOsVersion := types.GetArbOSVersion(header, config)
+	if config.IsPrague(header.Time, arbOsVersion) && !skipReceiptsEval {
 		rs = make(types.FlatRequests, 0)
 		allLogs := make(types.Logs, 0)
 		for i, rec := range receipts {
@@ -232,7 +233,8 @@ func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, 
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	if config.IsPrague(header.Time, 0) {
+	arbOsVersion := types.GetArbOSVersion(header, config)
+	if config.IsPrague(header.Time, arbOsVersion) {
 		header.RequestsHash = outRequests.Hash()
 	}
 	return types.NewBlockForAsembling(header, outTxs, uncles, outReceipts, withdrawals), outTxs, outReceipts, outRequests, nil
@@ -295,8 +297,9 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 		return err
 	}
 
+	arbOsVersion := types.GetArbOSVersion(header, chain.Config())
 	// Verify existence / non-existence of withdrawalsHash
-	shanghai := chain.Config().IsShanghai(header.Time, 0)
+	shanghai := chain.Config().IsShanghai(header.Time, arbOsVersion)
 	if shanghai && header.WithdrawalsHash == nil {
 		return errors.New("missing withdrawalsHash")
 	}
@@ -304,7 +307,7 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 		return consensus.ErrUnexpectedWithdrawals
 	}
 
-	if !chain.Config().IsCancun(header.Time, 0) {
+	if !chain.Config().IsCancun(header.Time, arbOsVersion) {
 		return misc.VerifyAbsenceOfCancunHeaderFields(header)
 	}
 	if err := misc.VerifyPresenceOfCancunHeaderFields(header); err != nil {
@@ -316,7 +319,7 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 	}
 
 	// Verify existence / non-existence of requestsHash
-	prague := chain.Config().IsPrague(header.Time, 0)
+	prague := chain.Config().IsPrague(header.Time, arbOsVersion)
 	if prague && header.RequestsHash == nil {
 		return errors.New("missing requestsHash")
 	}
@@ -357,12 +360,13 @@ func (s *Merge) Initialize(config *chain.Config, chain consensus.ChainHeaderRead
 	if !misc.IsPoSHeader(header) {
 		s.eth1Engine.Initialize(config, chain, header, state, syscall, logger, tracer)
 	}
-	if chain.Config().IsCancun(header.Time, 0) {
+	arbOsVersion := types.GetArbOSVersion(header, config)
+	if chain.Config().IsCancun(header.Time, arbOsVersion) {
 		misc.ApplyBeaconRootEip4788(header.ParentBeaconBlockRoot, func(addr libcommon.Address, data []byte) ([]byte, error) {
 			return syscall(addr, data, state, header, false /* constCall */)
 		}, tracer)
 	}
-	if chain.Config().IsPrague(header.Time, 0) {
+	if chain.Config().IsPrague(header.Time, arbOsVersion) {
 		misc.StoreBlockHashesEip2935(header, state, config, chain)
 	}
 }

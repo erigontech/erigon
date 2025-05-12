@@ -2456,3 +2456,11 @@ func DeserializeHeaderExtraInformation(header *Header) HeaderInfo {
 	extra.ArbOSFormatVersion = binary.BigEndian.Uint64(header.MixDigest[16:24])
 	return extra
 }
+
+func GetArbOSVersion(header *Header, chain *chain.Config) uint64 {
+	if !chain.IsArbitrum() {
+		return 0
+	}
+	extraInfo := DeserializeHeaderExtraInformation(header)
+	return extraInfo.ArbOSFormatVersion
+}

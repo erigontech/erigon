@@ -117,7 +117,8 @@ func NewWorker(lock sync.Locker, logger log.Logger, hooks *tracing.Hooks, ctx co
 	}
 	w.vmCfg = vm.Config{Tracer: w.callTracer.Tracer().Hooks, NoBaseFee: true}
 	w.evm = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, w.vmCfg)
-	w.taskGasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(0, 0))
+	arbOSVersion := w.evm.Context.ArbOSVersion
+	w.taskGasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(0, arbOSVersion))
 	w.ibs = state.New(w.stateReader)
 	return w
 }

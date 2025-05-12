@@ -41,10 +41,11 @@ func CalcExcessBlobGas(config *chain.Config, parent *types.Header, currentHeader
 		blobGasUsed = *parent.BlobGasUsed
 	}
 
-	if excessBlobGas+blobGasUsed < config.GetTargetBlobGasPerBlock(currentHeaderTime, 0) {
+	arbOsVersion := types.GetArbOSVersion(parent, config)
+	if excessBlobGas+blobGasUsed < config.GetTargetBlobGasPerBlock(currentHeaderTime, arbOsVersion) {
 		return 0
 	}
-	return excessBlobGas + blobGasUsed - config.GetTargetBlobGasPerBlock(currentHeaderTime, 0)
+	return excessBlobGas + blobGasUsed - config.GetTargetBlobGasPerBlock(currentHeaderTime, arbOsVersion)
 }
 
 // FakeExponential approximates factor * e ** (num / denom) using a taylor expansion
