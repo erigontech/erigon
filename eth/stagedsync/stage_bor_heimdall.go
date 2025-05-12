@@ -28,6 +28,7 @@ import (
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon-db/estimate"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -35,7 +36,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/dataflow"
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/polygon/bor"

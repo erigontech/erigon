@@ -39,6 +39,7 @@ import (
 	"github.com/anacrolix/torrent"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon-db/estimate"
 	"github.com/erigontech/erigon-db/rawdb"
 	dbsnapshotsync "github.com/erigontech/erigon-db/snapshotsync"
 	coresnaptype "github.com/erigontech/erigon-db/snaptype"
@@ -62,7 +63,6 @@ import (
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/state/stats"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/services"
