@@ -228,6 +228,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		return nil, err
 	}
 	if len(receiptsFromDB) > 0 && !dbg.AssertEnabled {
+		log.Warn("[dbg] return from files", "bn", block.NumberU64())
 		return receiptsFromDB, nil
 	}
 	log.Warn("[dbg] not found in files", "bn", block.NumberU64())
