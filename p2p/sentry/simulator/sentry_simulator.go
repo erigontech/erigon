@@ -25,6 +25,7 @@ import (
 
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/erigontech/erigon-db/version"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -425,7 +426,7 @@ func (s *server) getHeaderByHash(ctx context.Context, hash common.Hash) (*corety
 }
 
 func (s *server) downloadHeaders(ctx context.Context, header *snapshotsync.VisibleSegment) error {
-	fileName := snaptype.SegmentFileName(snaptype.ZeroVersion, header.From(), header.To(), coresnaptype.Enums.Headers)
+	fileName := snaptype.SegmentFileName(version.ZeroVersion, header.From(), header.To(), coresnaptype.Enums.Headers)
 	session := sync.NewTorrentSession(s.downloader, s.chain)
 
 	s.logger.Info("Downloading", "file", fileName)

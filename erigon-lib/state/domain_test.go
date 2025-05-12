@@ -38,6 +38,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-db/version"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
@@ -45,7 +46,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/common/page"
 	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/order"
@@ -85,7 +85,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	t.Cleanup(db.Close)
 	salt := uint32(1)
 
-	cfg.hist.iiCfg.version = IIVersionTypes{snaptype.V1_0, snaptype.V1_0}
+	cfg.hist.iiCfg.version = IIVersionTypes{version.V1_0, version.V1_0}
 	cfg.hist.iiCfg.dirs = dirs
 	cfg.hist.iiCfg.salt.Store(&salt)
 	//cfg.hist.historyValuesOnCompressedPage = 16
@@ -1058,7 +1058,7 @@ func emptyTestDomain(aggStep uint64) *Domain {
 	cfg.hist.iiCfg.salt.Store(&salt)
 	cfg.hist.iiCfg.dirs = datadir2.New(os.TempDir())
 	cfg.hist.iiCfg.name = kv.InvertedIdx(0)
-	cfg.hist.iiCfg.version = IIVersionTypes{snaptype.V1_0, snaptype.V1_0}
+	cfg.hist.iiCfg.version = IIVersionTypes{version.V1_0, version.V1_0}
 
 	d, err := NewDomain(cfg, aggStep, log.New())
 	if err != nil {

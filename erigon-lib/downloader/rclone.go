@@ -44,6 +44,7 @@ import (
 	"github.com/spaolacci/murmur3"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon-db/version"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
@@ -63,7 +64,7 @@ func (i *rcloneInfo) Version() snaptype.Version {
 		return i.snapInfo.Version
 	}
 
-	return snaptype.ZeroVersion
+	return version.ZeroVersion
 }
 
 func (i *rcloneInfo) From() uint64 {

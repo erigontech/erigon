@@ -30,6 +30,7 @@ import (
 
 	"github.com/anacrolix/torrent/metainfo"
 
+	"github.com/erigontech/erigon-db/version"
 	"github.com/erigontech/erigon-lib/common/dir"
 )
 
@@ -155,7 +156,7 @@ func parseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	}
 
 	var err error
-	res.Version, err = ParseVersion(parts[0])
+	res.Version, err = version.ParseVersion(parts[0])
 	if err != nil {
 		return res, false
 	}
