@@ -1315,7 +1315,7 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 		}
 		if !ok {
 			log.Warn("[dbg] not found", "txnID", txnID)
-			return res, nil
+			continue
 		}
 		if len(v) == 0 {
 			log.Warn("[dbg] found empty val", "bn", block.NumberU64(), "txnID", txnID)
