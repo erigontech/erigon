@@ -1195,6 +1195,9 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 		return nil, false, err
 	}
 	if !ok {
+		if ht.h.filenameBase == "rcache" {
+			log.Warn("[dbg] historySeekInFiles notFound1")
+		}
 		return nil, false, nil
 	}
 	historyItem, ok := ht.getFile(histTxNum)
@@ -1204,11 +1207,17 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	}
 	reader := ht.statelessIdxReader(historyItem.i)
 	if reader.Empty() {
+		if ht.h.filenameBase == "rcache" {
+			log.Warn("[dbg] historySeekInFiles notFound2")
+		}
 		return nil, false, nil
 	}
 	historyKey := ht.encodeTs(histTxNum, key)
 	offset, ok := reader.Lookup(historyKey)
 	if !ok {
+		if ht.h.filenameBase == "rcache" {
+			log.Warn("[dbg] historySeekInFiles notFound3")
+		}
 		return nil, false, nil
 	}
 	g := ht.statelessGetter(historyItem.i)
@@ -1294,6 +1303,9 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 			return nil, false, err
 		}
 		if kAndTxNum == nil || !bytes.Equal(kAndTxNum[:len(kAndTxNum)-8], key) {
+			if ht.h.filenameBase == "rcache" {
+				log.Warn("[dbg] historySeekInDB notFound1")
+			}
 			return nil, false, nil
 		}
 		// val == []byte{}, means key was created in this txNum and doesn't exist before.
@@ -1308,6 +1320,9 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 		return nil, false, err
 	}
 	if val == nil {
+		if ht.h.filenameBase == "rcache" {
+			log.Warn("[dbg] historySeekInDB notFound2")
+		}
 		return nil, false, nil
 	}
 	// `val == []byte{}` means key was created in this txNum and doesn't exist before.
