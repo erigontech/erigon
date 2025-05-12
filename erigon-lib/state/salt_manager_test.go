@@ -7,59 +7,62 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/stretchr/testify/require"
 )
 
 func TestSaltManager_NoGenNew(t *testing.T) {
-	dirs, i := setupSM(t, false, false)
-	require.Nil(t, i.BlockSalt())
-	require.Nil(t, i.StateSalt())
+	dirs, e3, block := setupSM(t, false, false)
+	require.Nil(t, e3.Salt())
+	require.Nil(t, block.Salt())
 
 	saltFile := path.Join(dirs.Snap, "salt-state.txt")
 	defaultSaltBytes := []byte{0x00, 0x00, 0x00, 0x64}
 	err := dir.WriteFileWithFsync(saltFile, defaultSaltBytes, os.ModePerm)
 	require.NoError(t, err)
 
-	require.Nil(t, i.BlockSalt())
-	require.Equal(t, uint32(100), *i.StateSalt())
+	require.Nil(t, block.Salt())
+	require.Equal(t, uint32(100), *e3.Salt())
 
-	saltFile = path.Join(dirs.Snap, "salt-block.txt")
+	saltFile = path.Join(dirs.Snap, "salt-blocks.txt")
 	defaultSaltBytes = []byte{0x00, 0x00, 0x00, 0x65}
 	err = dir.WriteFileWithFsync(saltFile, defaultSaltBytes, os.ModePerm)
 	require.NoError(t, err)
 
-	require.Equal(t, uint32(101), *i.BlockSalt())
-	require.Equal(t, uint32(100), *i.StateSalt())
+	require.Equal(t, uint32(101), *block.Salt())
+	require.Equal(t, uint32(100), *e3.Salt())
 }
 
 func TestSaltManager_GenNew(t *testing.T) {
-	dirs, i := setupSM(t, true, true)
-	bs := i.BlockSalt()
+	dirs, e3, block := setupSM(t, true, true)
+	bs := block.Salt()
 	require.NotNil(t, bs)
-	require.NotNil(t, i.StateSalt())
+	require.NotNil(t, e3.Salt())
 
 	saltFile := path.Join(dirs.Snap, "salt-state.txt")
 	defaultSaltBytes := []byte{0x00, 0x00, 0x00, 0x64}
 	err := dir.WriteFileWithFsync(saltFile, defaultSaltBytes, os.ModePerm)
 	require.NoError(t, err)
 
-	require.Equal(t, bs, i.BlockSalt())
-	require.Equal(t, uint32(100), *i.StateSalt())
+	require.Equal(t, bs, block.Salt())
+	require.Equal(t, uint32(100), *e3.Salt())
 
-	saltFile = path.Join(dirs.Snap, "salt-block.txt")
+	saltFile = path.Join(dirs.Snap, "salt-blocks.txt")
 	defaultSaltBytes = []byte{0x00, 0x00, 0x00, 0x65}
 	err = dir.WriteFileWithFsync(saltFile, defaultSaltBytes, os.ModePerm)
 	require.NoError(t, err)
 
-	require.Equal(t, uint32(101), *i.BlockSalt())
-	require.Equal(t, uint32(100), *i.StateSalt())
+	require.Equal(t, uint32(101), *block.Salt())
+	require.Equal(t, uint32(100), *e3.Salt())
 }
 
-func setupSM(t *testing.T, genState, genBlock bool) (datadir.Dirs, *SaltManager) {
+func setupSM(t *testing.T, genState, genBlock bool) (datadir.Dirs, *SaltManager, *SaltManager) {
 	dirs := datadir.New(t.TempDir())
-	sm := NewSaltManager(dirs, genState, genBlock)
+	logger := log.New()
+	sm1, sm2 := NewE3SaltManager(dirs, genState, logger), NewBlockSaltManager(dirs, genBlock, logger)
 	t.Cleanup(func() {
-		sm.Close()
+		sm1.Close()
+		sm2.Close()
 	})
-	return dirs, sm
+	return dirs, sm1, sm2
 }
