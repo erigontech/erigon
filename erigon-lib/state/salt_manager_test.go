@@ -11,9 +11,7 @@ import (
 )
 
 func TestSaltManager_NoGenNew(t *testing.T) {
-	dirs := setupSM(t, false, false)
-
-	i := SaltManagerInstance()
+	dirs, i := setupSM(t, false, false)
 	require.Nil(t, i.BlockSalt())
 	require.Nil(t, i.StateSalt())
 
@@ -35,9 +33,7 @@ func TestSaltManager_NoGenNew(t *testing.T) {
 }
 
 func TestSaltManager_GenNew(t *testing.T) {
-	dirs := setupSM(t, true, true)
-
-	i := SaltManagerInstance()
+	dirs, i := setupSM(t, true, true)
 	bs := i.BlockSalt()
 	require.NotNil(t, bs)
 	require.NotNil(t, i.StateSalt())
@@ -59,12 +55,11 @@ func TestSaltManager_GenNew(t *testing.T) {
 	require.Equal(t, uint32(100), *i.StateSalt())
 }
 
-func setupSM(t *testing.T, genState, genBlock bool) datadir.Dirs {
+func setupSM(t *testing.T, genState, genBlock bool) (datadir.Dirs, *SaltManager) {
 	dirs := datadir.New(t.TempDir())
-	InitiatializeSaltManager(dirs, genState, genBlock)
-	require.NotPanics(t, func() { SaltManagerInstance() })
+	sm := NewSaltManager(dirs, genState, genBlock)
 	t.Cleanup(func() {
-		SaltManagerInstance().Close()
+		sm.Close()
 	})
-	return dirs
+	return dirs, sm
 }
