@@ -1612,13 +1612,11 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		return txpoolcfg.ErrAuthorityReserved
 	}
 
-
-
 	// Check if we have txn with same authorization in the pool
 	if mt.TxnSlot.Type == SetCodeTxnType {
 		for _, a := range mt.TxnSlot.Authorities {
-			// Self authorization nonce should be senderNonce + 1 
-			if a.authority == senderAddr.String() && a.nonce != mt.TxnSlot.Nonce + 1 {
+			// Self authorization nonce should be senderNonce + 1
+			if a.authority == senderAddr.String() && a.nonce != mt.TxnSlot.Nonce+1 {
 				return txpoolcfg.NonceTooLow
 			}
 			if _, ok := p.auths[NonceAuthority{a.nonce, a.authority}]; ok {

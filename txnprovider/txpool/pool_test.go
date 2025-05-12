@@ -178,125 +178,125 @@ func TestNonceFromAddress(t *testing.T) {
 func TestMultipleAuthorizations(t *testing.T) {
 	addrA := common.HexToAddress("0xa")
 	addrB := common.HexToAddress("0xb")
-	cases := []struct{
-		title string
-		sender common.Address
-		senderNonce uint64
-		authority *common.Address
-		authNonce	uint64
-		feecap	uint64
-		tipcap uint64
+	cases := []struct {
+		title          string
+		sender         common.Address
+		senderNonce    uint64
+		authority      *common.Address
+		authNonce      uint64
+		feecap         uint64
+		tipcap         uint64
 		expectedReason txpoolcfg.DiscardReason
-		replacedAuth  *NonceAuthority
+		replacedAuth   *NonceAuthority
 	}{{
-			title: "a setcode txn with different sender and authority",
-			sender: addrA,
-			senderNonce: 0,
-			authority: &addrB,
-			authNonce: 0,
-			feecap: 100_000,
-			tipcap: 100_000,
-			expectedReason: txpoolcfg.Success,
-		},  
+		title:          "a setcode txn with different sender and authority",
+		sender:         addrA,
+		senderNonce:    0,
+		authority:      &addrB,
+		authNonce:      0,
+		feecap:         100_000,
+		tipcap:         100_000,
+		expectedReason: txpoolcfg.Success,
+	},
 		{
-		title: "own authorization with correct sender nonce, and same authority nonce",
-			sender: addrA,
-			senderNonce: 1,
-			authority: &addrA,
-			authNonce: 1,
-			feecap: 100_000,
-			tipcap: 100_000,
+			title:          "own authorization with correct sender nonce, and same authority nonce",
+			sender:         addrA,
+			senderNonce:    1,
+			authority:      &addrA,
+			authNonce:      1,
+			feecap:         100_000,
+			tipcap:         100_000,
 			expectedReason: txpoolcfg.NonceTooLow,
 		},
 		{
-		title: "own authorization with correct sender nonce, and one higher authority nonce",
-			sender: addrA,
-			senderNonce: 1,
-			authority: &addrA,
-			authNonce: 2,
-			feecap: 100_000,
-			tipcap: 100_000,
+			title:          "own authorization with correct sender nonce, and one higher authority nonce",
+			sender:         addrA,
+			senderNonce:    1,
+			authority:      &addrA,
+			authNonce:      2,
+			feecap:         100_000,
+			tipcap:         100_000,
 			expectedReason: txpoolcfg.Success,
 		},
 		{
-		title: "send txn with existing own authorization txn senderNonce =(prev auth nonce)",
-			sender: addrA,
-			senderNonce: 2,
-			authority: nil,
-			authNonce: 0,
-			feecap: 100_000,
-			tipcap: 100_000,
+			title:          "send txn with existing own authorization txn senderNonce =(prev auth nonce)",
+			sender:         addrA,
+			senderNonce:    2,
+			authority:      nil,
+			authNonce:      0,
+			feecap:         100_000,
+			tipcap:         100_000,
 			expectedReason: txpoolcfg.ErrAuthorityReserved,
 		},
 
 		{
-		title: "send txn senderNonce=(auth nonce) with existing authorization by another sender",
-			sender: addrB,
-			senderNonce: 0,
-			authority: nil,
-			authNonce: 0,
-			feecap: 100_000,
-			tipcap: 100_000,
+			title:          "send txn senderNonce=(auth nonce) with existing authorization by another sender",
+			sender:         addrB,
+			senderNonce:    0,
+			authority:      nil,
+			authNonce:      0,
+			feecap:         100_000,
+			tipcap:         100_000,
 			expectedReason: txpoolcfg.ErrAuthorityReserved,
 		},
 		{
-		title: "send non-setcode txn senderNonce=(auth nonce + 1) with existing own authorization by another sender, ",
-			sender: addrB,
-			senderNonce: 1,
-			authority: nil,
-			authNonce: 0,
-			feecap: 100_000,
-			tipcap: 100_000,
+			title:          "send non-setcode txn senderNonce=(auth nonce + 1) with existing own authorization by another sender, ",
+			sender:         addrB,
+			senderNonce:    1,
+			authority:      nil,
+			authNonce:      0,
+			feecap:         100_000,
+			tipcap:         100_000,
 			expectedReason: txpoolcfg.Success,
-		},{
-		title: "existing own authorization in pool, new setcode txn with higher nonce and auth nonce",
-			sender: addrB,
-			senderNonce: 2,
-			authority: &addrB,
-			authNonce: 3,
-			feecap: 100_000,
-			tipcap: 100_000,
+		}, {
+			title:          "existing own authorization in pool, new setcode txn with higher nonce and auth nonce",
+			sender:         addrB,
+			senderNonce:    2,
+			authority:      &addrB,
+			authNonce:      3,
+			feecap:         100_000,
+			tipcap:         100_000,
 			expectedReason: txpoolcfg.Success,
 		},
 		{
-		title: "replace own setcode txn with anothers's authority, with higher tipcap", 
-			sender: addrB,
-			senderNonce: 2,
-			authority: &addrA,
-			authNonce: 3,
-			feecap: 200_000,
-			tipcap: 200_000,
+			title:          "replace own setcode txn with anothers's authority, with higher tipcap",
+			sender:         addrB,
+			senderNonce:    2,
+			authority:      &addrA,
+			authNonce:      3,
+			feecap:         200_000,
+			tipcap:         200_000,
 			expectedReason: txpoolcfg.Success,
-			replacedAuth: &NonceAuthority{3, addrB.String()},
+			replacedAuth:   &NonceAuthority{3, addrB.String()},
 		},
 		{
-		title: "replace own setcode txn with non setcode txn, with higher tipcap",
-			sender: addrB,
-			senderNonce: 2,
-			authority: nil,
-			authNonce: 0,
-			feecap: 300_000,
-			tipcap: 300_000,
+			title:          "replace own setcode txn with non setcode txn, with higher tipcap",
+			sender:         addrB,
+			senderNonce:    2,
+			authority:      nil,
+			authNonce:      0,
+			feecap:         300_000,
+			tipcap:         300_000,
 			expectedReason: txpoolcfg.Success,
-			replacedAuth: &NonceAuthority{3, addrA.String()},
+			replacedAuth:   &NonceAuthority{3, addrA.String()},
 		},
 		{
-		title: "replace non setcode txn, with setcode txn with higher tipcap",
-			sender: addrB,
-			senderNonce: 2,
-			authority: &addrA,
-			authNonce: 3,
-			feecap: 400_000,
-			tipcap: 400_000,
+			title:          "replace non setcode txn, with setcode txn with higher tipcap",
+			sender:         addrB,
+			senderNonce:    2,
+			authority:      &addrA,
+			authNonce:      3,
+			feecap:         400_000,
+			tipcap:         400_000,
 			expectedReason: txpoolcfg.Success,
 		},
 		{title: "send new setcode txn with own authority after setcode txn for another authority",
-			sender: addrB,
-			senderNonce: 3,
-			authority: &addrB,
-			authNonce: 4,
-			feecap: 100_000,
-			tipcap: 100_000,
+			sender:         addrB,
+			senderNonce:    3,
+			authority:      &addrB,
+			authNonce:      4,
+			feecap:         100_000,
+			tipcap:         100_000,
 			expectedReason: txpoolcfg.Success,
 		},
 	}
@@ -315,7 +315,6 @@ func TestMultipleAuthorizations(t *testing.T) {
 
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(50_000)
-	// start blocks from 0, set empty hash - then kvcache will also work on this
 	h1 := gointerfaces.ConvertHashToH256([32]byte{})
 	change := &remote.StateChangeBatch{
 		StateVersionId:      stateVersionID,
@@ -325,9 +324,6 @@ func TestMultipleAuthorizations(t *testing.T) {
 			{BlockHeight: 0, BlockHash: h1},
 		},
 	}
-
-	// chainID := uint64(7078815900)
-	// privateKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 
 	acc := accounts3.Account{
@@ -354,48 +350,15 @@ func TestMultipleAuthorizations(t *testing.T) {
 	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	require.NoError(t, err)
 
-	// // Generate auth data for transactions
-	// var b [33]byte
-	// data := bytes.NewBuffer(b[:])
-	// data.Reset()
-
-	// authLen := rlp.U64Len(chainID)
-	// authLen += 1 + length.Addr
-	// authLen += rlp.U64Len(0)
-	// require.NoError(t, rlp.EncodeStructSizePrefix(authLen, data, b[:]))
-	// require.NoError(t, rlp.EncodeInt(chainID, data, b[:]))
-	// require.NoError(t, rlp.EncodeOptionalAddress(&authAddress, data, b[:]))
-	// require.NoError(t, rlp.EncodeInt(0, data, b[:]))
-
-	// hashData := []byte{params.SetCodeMagicPrefix}
-	// hashData = append(hashData, data.Bytes()...)
-	// hash := crypto.Keccak256Hash(hashData)
-
-	// sig, err := crypto.Sign(hash.Bytes(), privateKey)
-	// require.NoError(t, err)
-
-	// r := uint256.NewInt(0).SetBytes(sig[:32])
-	// s := uint256.NewInt(0).SetBytes(sig[32:64])
-	// yParity := sig[64]
-
-	// var auth Signature
-	// auth.ChainID.Set(uint256.NewInt(chainID))
-	// auth.V.Set(uint256.NewInt(uint64(yParity)))
-	// auth.R.Set(r)
-	// auth.S.Set(s)
-
-	// logger := log.New()
-
 	idHash := 0
 	for _, c := range cases {
-		// t.Run(name, func(t *testing.T){
 		t.Log("\n--- Testing " + c.title)
 		var txnSlots TxnSlots
 		txnSlot1 := &TxnSlot{
-			Tip:         *uint256.NewInt(c.tipcap),
-			FeeCap:      *uint256.NewInt(c.feecap),
-			Gas:         100000,
-			Nonce:       c.senderNonce,
+			Tip:    *uint256.NewInt(c.tipcap),
+			FeeCap: *uint256.NewInt(c.feecap),
+			Gas:    100000,
+			Nonce:  c.senderNonce,
 		}
 		if c.authority != nil {
 			txnSlot1.Authorities = []NonceAuthority{{nonce: c.authNonce, authority: c.authority.String()}}
@@ -408,150 +371,14 @@ func TestMultipleAuthorizations(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, []txpoolcfg.DiscardReason{c.expectedReason}, reasons)
 		if c.authority != nil && c.expectedReason == txpoolcfg.Success {
-			_, ok := pool.auths[NonceAuthority{c.authNonce,c.authority.String()}]
+			_, ok := pool.auths[NonceAuthority{c.authNonce, c.authority.String()}]
 			assert.True(t, ok)
 		}
 		if c.replacedAuth != nil {
 			_, ok := pool.auths[*c.replacedAuth]
 			assert.False(t, ok)
 		}
-	// })
 	}
-
-	// // a new txn with authority+nonce same as one in an existing authorization, by a different sender should not be accepted
-	// {
-	// 	var txnSlots TxnSlots
-	// 	txnSlot1 := &TxnSlot{
-	// 		Tip:         *uint256.NewInt(300000),
-	// 		FeeCap:      *uint256.NewInt(300000),
-	// 		Gas:         100000,
-	// 		Nonce:       0,
-	// 		Authorities: []NonceAuthority{{nonce: 0, authority: authAddress}},
-	// 		Type:        SetCodeTxnType,
-	// 	}
-	// 	txnSlot1.IDHash[0] = 1
-	// 	txnSlots.Append(txnSlot1, addr1[:], true)
-	// 	reasons, err := pool.AddLocalTxns(ctx, txnSlots)
-	// 	require.NoError(t, err)
-	// 	assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
-
-	// 	txnSlots = TxnSlots{}
-	// 	txnSlot2 := &TxnSlot{
-	// 		Tip:         *uint256.NewInt(300000),
-	// 		FeeCap:      *uint256.NewInt(300000),
-	// 		Gas:         100000,
-	// 		Nonce:       0,
-	// 		Authorities: []NonceAuthority{{nonce: 0, authority: authAddress}},
-	// 		Type:        SetCodeTxnType,
-	// 	}
-	// 	txnSlot2.IDHash[0] = 2
-	// 	txnSlots.Append(txnSlot2, addr2[:], true)
-	// 	require.NoError(t, pool.senders.registerNewSenders(&txnSlots, logger))
-	// 	reasons, err = pool.AddLocalTxns(ctx, txnSlots)
-	// 	require.NoError(t, err)
-	// 	assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.ErrAuthorityReserved}, reasons)
-
-	// 	assert.Len(t, pool.auths, 1) // auth address should be in pool auth
-	// 	_, ok := pool.auths[NonceAuthority{nonce: 0, authority: authAddress}]
-	// 	assert.True(t, ok)
-
-	// 	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{[]*TxnSlot{txnSlot1}, Addresses{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []bool{true}})
-	// 	require.NoError(t, err)
-
-	// 	assert.Empty(t, pool.auths) // auth address should not be there after block has been mined
-	// }
-
-	// // Bumping the Tip and FeeCap of the existing transaction should replace an existing setCodeTxn
-	// {
-	// 	var txnSlots TxnSlots
-	// 	txnSlot1 := &TxnSlot{
-	// 		Tip:         *uint256.NewInt(300000),
-	// 		FeeCap:      *uint256.NewInt(300000),
-	// 		Gas:         100000,
-	// 		Nonce:       1,
-	// 		Authorities: []NonceAuthority{{nonce: 0, authority: authAddress}},
-	// 		Type:        SetCodeTxnType,
-	// 	}
-	// 	txnSlot1.IDHash[0] = 3
-	// 	txnSlots.Append(txnSlot1, addr1[:], true)
-
-	// 	require.NoError(t, pool.senders.registerNewSenders(&txnSlots, logger))
-	// 	reasons, err := pool.AddLocalTxns(ctx, txnSlots)
-	// 	require.NoError(t, err)
-	// 	assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
-
-	// 	txnSlots = TxnSlots{}
-	// 	txnSlot2 := &TxnSlot{
-	// 		Tip:         *uint256.NewInt(900000),
-	// 		FeeCap:      *uint256.NewInt(900000),
-	// 		Gas:         100000,
-	// 		Nonce:       1,
-	// 		Authorities: []NonceAuthority{{nonce: 0, authority: authAddress}},
-	// 		Type:        SetCodeTxnType,
-	// 	}
-	// 	txnSlot2.IDHash[0] = 4
-	// 	txnSlots.Append(txnSlot2, addr1[:], true)
-
-	// 	require.NoError(t, pool.senders.registerNewSenders(&txnSlots, logger))
-	// 	reasons, err = pool.AddLocalTxns(ctx, txnSlots)
-	// 	require.NoError(t, err)
-	// 	assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
-	// 	assert.Equal(t, pool.queued.Best().TxnSlot, txnSlot2)
-
-	// 	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{[]*TxnSlot{txnSlot1}, Addresses{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []bool{true}})
-	// 	require.NoError(t, err)
-	// }
-
-	// // do not allow transactions from a sender if there is a pending delegated txn its authority at that nonce, but allow higher nonces
-	// {
-	// 	var txnSlots TxnSlots
-	// 	txnSlot1 := &TxnSlot{
-	// 		Tip:         *uint256.NewInt(300000),
-	// 		FeeCap:      *uint256.NewInt(300000),
-	// 		Gas:         100000,
-	// 		Nonce:       0,
-	// 		Authorities: []NonceAuthority{{nonce: 0, authority: authAddress}},
-	// 		Type:        SetCodeTxnType,
-	// 	}
-	// 	txnSlot1.IDHash[0] = 5
-	// 	txnSlots.Append(txnSlot1, addr1[:], true)
-
-	// 	require.NoError(t, pool.senders.registerNewSenders(&txnSlots, logger))
-	// 	reasons, err := pool.AddLocalTxns(ctx, txnSlots)
-	// 	require.NoError(t, err)
-	// 	assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
-
-	// 	txnSlots = TxnSlots{}
-	// 	txnSlot2 := &TxnSlot{
-	// 		Tip:    *uint256.NewInt(300000),
-	// 		FeeCap: *uint256.NewInt(300000),
-	// 		Gas:    100000,
-	// 		Nonce:  0,
-	// 		Type:   DynamicFeeTxnType,
-	// 	}
-	// 	txnSlot2.IDHash[0] = 6
-
-	// 	txnSlots.Append(txnSlot2, authAddress.Bytes(), true)
-	// 	reasons, err = pool.AddLocalTxns(ctx, txnSlots)
-	// 	require.NoError(t, err)
-	// 	assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.ErrAuthorityReserved}, reasons)
-
-	// 	txnSlots = TxnSlots{}
-	// 	txnSlot3 := &TxnSlot{
-	// 		Tip:    *uint256.NewInt(300000),
-	// 		FeeCap: *uint256.NewInt(300000),
-	// 		Gas:    100000,
-	// 		Nonce:  1,
-	// 		Type:   DynamicFeeTxnType,
-	// 	}
-	// 	txnSlot3.IDHash[0] = 6
-
-	// 	txnSlots.Append(txnSlot3, authAddress.Bytes(), true)
-	// 	reasons, err = pool.AddLocalTxns(ctx, txnSlots)
-	// 	require.NoError(t, err)
-	// 	assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
-	// }
-
 }
 
 func TestRecoverSignerFromRLP_ValidData(t *testing.T) {
