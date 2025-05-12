@@ -40,6 +40,7 @@ import (
 
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-db/rawdb/blockio"
+	"github.com/erigontech/erigon-db/salt"
 	chain2 "github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -1321,7 +1322,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		blockReader := freezeblocks.NewBlockReader(_allSnapshotsSingleton, _allBorSnapshotsSingleton, _heimdallStoreSingleton, _bridgeStoreSingleton)
 		txNums := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader))
 
-		saltM := libstate.NewE3SaltManager(dirs, false, logger)
+		saltM := salt.NewE3SaltManager(dirs, false, logger)
 		_aggSingleton, err = libstate.NewAggregator(ctx, dirs, config3.DefaultStepSize, saltM, db, logger)
 		if err != nil {
 			err = fmt.Errorf("aggregator init: %w", err)

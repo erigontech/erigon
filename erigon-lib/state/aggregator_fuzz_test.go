@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon-db/salt"
 )
 
 func Fuzz_AggregatorV3_Merge(f *testing.F) {
@@ -271,7 +272,7 @@ func testFuzzDbAndAggregatorv3(f *testing.F, aggStep uint64) (kv.RwDB, *Aggregat
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	f.Cleanup(db.Close)
 
-	saltM := NewE3SaltManager(dirs, true, logger)
+	saltM := salt.NewE3SaltManager(dirs, true, logger)
 	agg, err := NewAggregator(context.Background(), dirs, aggStep, saltM, db, logger)
 	require.NoError(err)
 	f.Cleanup(agg.Close)

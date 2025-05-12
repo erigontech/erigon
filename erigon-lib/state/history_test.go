@@ -30,6 +30,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-db/salt"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -55,7 +56,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	cfg := Schema.AccountsDomain
 
 	cfg.hist.iiCfg.dirs = dirs
-	cfg.hist.iiCfg.saltM = NewE3SaltManager(dirs, true, logger)
+	cfg.hist.iiCfg.saltM = salt.NewE3SaltManager(dirs, true, logger)
 
 	cfg.hist.historyLargeValues = largeValues
 

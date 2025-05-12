@@ -30,6 +30,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-db/salt"
 	"github.com/erigontech/erigon-lib/abi"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -56,7 +57,7 @@ func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.TemporalRwTx, *stateLib.Aggre
 	db := memdb.NewStateDB(dirs.DataDir)
 	tb.Cleanup(db.Close)
 
-	saltM := stateLib.NewE3SaltManager(dirs, true, logger)
+	saltM := salt.NewE3SaltManager(dirs, true, logger)
 	agg, err := stateLib.NewAggregator(context.Background(), dirs, 16, saltM, db, logger)
 	if err != nil {
 		tb.Fatal(err)
@@ -180,7 +181,7 @@ func testTemporalDB(t testing.TB) *temporal.DB {
 	t.Cleanup(db.Close)
 
 	logger := log.New()
-	saltM := stateLib.NewE3SaltManager(dirs, true, logger)
+	saltM := salt.NewE3SaltManager(dirs, true, logger)
 	agg, err := stateLib.NewAggregator(context.Background(), dirs, 16, saltM, db, logger)
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)

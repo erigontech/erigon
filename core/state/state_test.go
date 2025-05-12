@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 	checker "gopkg.in/check.v1"
 
+	"github.com/erigontech/erigon-db/salt"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -124,7 +125,7 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 
 	logger := log.New()
 	dirs := datadir.New("")
-	saltM := stateLib.NewE3SaltManager(dirs, true, logger)
+	saltM := salt.NewE3SaltManager(dirs, true, logger)
 	agg, err := stateLib.NewAggregator(context.Background(), dirs, 16, saltM, db, log.New())
 	if err != nil {
 		panic(err)
@@ -397,7 +398,7 @@ func NewTestTemporalDb(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *state.
 	tb.Cleanup(db.Close)
 
 	dirs, logger := datadir.New(tb.TempDir()), log.New()
-	saltM := stateLib.NewE3SaltManager(dirs, true, logger)
+	saltM := salt.NewE3SaltManager(dirs, true, logger)
 	agg, err := state.NewAggregator(context.Background(), dirs, 16, saltM, db, log.New())
 	if err != nil {
 		tb.Fatal(err)

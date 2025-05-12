@@ -26,10 +26,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-db/salt"
+	"github.com/erigontech/erigon-db/version"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/config3"
@@ -56,8 +57,8 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 		}
 	}).MustOpen()
 	tb.Cleanup(db.Close)
-	saltM := NewE3SaltManager(dirs, true, logger)
-	cfg := iiCfg{saltM: saltM, dirs: dirs, filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable, version: IIVersionTypes{DataEF: snaptype.V1_0, AccessorEFI: snaptype.V1_0}}
+	saltM := salt.NewE3SaltManager(dirs, true, logger)
+	cfg := iiCfg{saltM: saltM, dirs: dirs, filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable, version: IIVersionTypes{DataEF: version.V1_0, AccessorEFI: version.V1_0}}
 	ii, err := NewInvertedIndex(cfg, aggStep, logger)
 	require.NoError(tb, err)
 	ii.DisableFsync()
@@ -562,7 +563,7 @@ func TestInvIndexScanFiles(t *testing.T) {
 
 	// Recreate InvertedIndex to scan the files
 	cfg := ii.iiCfg
-	cfg.saltM = NewE3SaltManager(ii.dirs, true, logger)
+	cfg.saltM = salt.NewE3SaltManager(ii.dirs, true, logger)
 
 	var err error
 	ii, err = NewInvertedIndex(cfg, 16, logger)

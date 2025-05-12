@@ -34,6 +34,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-db/salt"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/params"
@@ -545,7 +546,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		genesisTmpDB := mdbx.New(kv.TemporaryDB, logger).InMem(dirs.DataDir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
 		defer genesisTmpDB.Close()
 
-		saltM := state2.NewE3SaltManager(dirs, false, logger)
+		saltM := salt.NewE3SaltManager(dirs, false, logger)
 		agg, err := state2.NewAggregator(context.Background(), dirs, config3.DefaultStepSize, saltM, genesisTmpDB, logger)
 		if err != nil {
 			return err

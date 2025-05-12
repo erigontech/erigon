@@ -31,6 +31,7 @@ import (
 	mdbx2 "github.com/erigontech/mdbx-go/mdbx"
 	"github.com/urfave/cli/v2"
 
+	"github.com/erigontech/erigon-db/salt"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 
@@ -141,7 +142,7 @@ func aggregateResultsFromStateTests(
 	defer _db.Close()
 
 	logger := log.New()
-	saltM := libstate.NewE3SaltManager(dirs, true, logger)
+	saltM := salt.NewE3SaltManager(dirs, true, logger)
 	agg, err := libstate.NewAggregator(context.Background(), dirs, config3.DefaultStepSize, saltM, _db, logger)
 	if err != nil {
 		return nil, err

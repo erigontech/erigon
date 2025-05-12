@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/erigontech/erigon-db/salt"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
@@ -11,7 +12,7 @@ import (
 	"github.com/erigontech/erigon-lib/seg"
 )
 
-func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, saltM *SaltManager, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
+func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, saltM *salt.SaltManager, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
 	a, err := newAggregatorOld(ctx, dirs, aggregationStep, db, saltM, logger)
 	if err != nil {
 		return nil, err

@@ -35,6 +35,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v2"
 
+	"github.com/erigontech/erigon-db/salt"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -46,7 +47,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
-	libstate "github.com/erigontech/erigon-lib/state"
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/evm/internal/compiler"
@@ -172,7 +172,7 @@ func runCmd(ctx *cli.Context) error {
 	}
 	logger2 := log.New()
 	dirs := datadir.New(os.TempDir())
-	saltM := libstate.NewE3SaltManager(dirs, true, logger2)
+	saltM := salt.NewE3SaltManager(dirs, true, logger2)
 	agg, err := state2.NewAggregator(context.Background(), dirs, config3.DefaultStepSize, saltM, db, logger2)
 	if err != nil {
 		return err

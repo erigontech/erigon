@@ -38,6 +38,7 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-db/salt"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -456,7 +457,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, heimdallStore, bridgeStore)
 		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader))
 
-		saltM := libstate.NewE3SaltManager(cfg.Dirs, true, logger)
+		saltM := salt.NewE3SaltManager(cfg.Dirs, true, logger)
 		agg, err := libstate.NewAggregator(ctx, cfg.Dirs, config3.DefaultStepSize, saltM, rawDB, logger)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("create aggregator: %w", err)

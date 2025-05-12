@@ -48,6 +48,7 @@ import (
 
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-db/rawdb/blockio"
+	"github.com/erigontech/erigon-db/salt"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
@@ -1635,7 +1636,7 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, heimdallStore, bridgeStore)
 
 	createNewE3SaltIfNeeded := snConfig.Snapshot.NoDownloader || snConfig.Snapshot.DisableDownloadE3
-	saltM := libstate.NewE3SaltManager(dirs, createNewE3SaltIfNeeded, logger)
+	saltM := salt.NewE3SaltManager(dirs, createNewE3SaltIfNeeded, logger)
 	agg, err := libstate.NewAggregator(ctx, dirs, config3.DefaultStepSize, saltM, db, logger)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err

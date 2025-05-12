@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/erigontech/erigon-db/version"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/seg"
 )
 
@@ -119,7 +119,7 @@ func (s *E2SnapSchema) Parse(fileName string) (f *SnapInfo, ok bool) {
 	}
 
 	var err error
-	res.Version, err = snaptype.ParseVersion(parts[0])
+	res.Version, err = version.ParseVersion(parts[0])
 	if err != nil {
 		return res, false
 	}
@@ -333,7 +333,7 @@ func (s *E3SnapSchema) Parse(fileName string) (f *SnapInfo, ok bool) {
 	info.From = fromStep * s.stepSize
 	info.To = toStep * s.stepSize
 
-	info.Version, err = snaptype.ParseVersion(fmt.Sprintf("v%s.%s", subs[1], subs[2]))
+	info.Version, err = version.ParseVersion(fmt.Sprintf("v%s.%s", subs[1], subs[2]))
 	if err != nil {
 		return nil, false
 	}

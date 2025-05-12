@@ -36,6 +36,7 @@ import (
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon-db/salt"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
 	"github.com/erigontech/erigon-lib/common/background"
@@ -95,7 +96,7 @@ type iiCfg struct {
 	// external checker for integrity of inverted index ranges
 	integrity rangeIntegrityChecker
 	Accessors Accessors
-	saltM     *SaltManager
+	saltM     *salt.SaltManager
 }
 
 func (ii iiCfg) GetVersions() VersionTypes {

@@ -26,6 +26,7 @@ import (
 
 	"github.com/urfave/cli/v2"
 
+	"github.com/erigontech/erigon-db/salt"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/config3"
@@ -137,7 +138,7 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
-	saltM := state.NewE3SaltManager(dirs, false, logger)
+	saltM := salt.NewE3SaltManager(dirs, false, logger)
 	aggOld, err := state.NewAggregator(ctx, dirsOld, config3.DefaultStepSize, saltM, db, logger)
 	if err != nil {
 		panic(err)
@@ -179,7 +180,7 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 func squeezeCode(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
-	saltM := state.NewE3SaltManager(dirs, false, logger)
+	saltM := salt.NewE3SaltManager(dirs, false, logger)
 	agg, err := state.NewAggregator(ctx, dirs, config3.DefaultStepSize, saltM, db, logger)
 	if err != nil {
 		return err

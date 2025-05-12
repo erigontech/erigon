@@ -31,6 +31,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-db/salt"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -61,7 +62,7 @@ func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.Tempo
 	db := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 
-	saltM := state.NewE3SaltManager(dirs, true, logger)
+	saltM := salt.NewE3SaltManager(dirs, true, logger)
 	agg, err := state.NewAggregator(context.Background(), dirs, aggStep, saltM, db, logger)
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)

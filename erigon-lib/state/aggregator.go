@@ -53,6 +53,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-db/salt"
 )
 
 type Aggregator struct {
@@ -94,7 +95,7 @@ type Aggregator struct {
 
 	produce bool
 
-	saltM *SaltManager
+	saltM *salt.SaltManager
 }
 
 const AggregatorSqueezeCommitmentValues = true
@@ -128,7 +129,7 @@ func domainIntegrityCheck(name kv.Domain, dirs datadir.Dirs, fromStep, toStep ui
 	}
 }
 
-func newAggregatorOld(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, saltM *SaltManager, logger log.Logger) (*Aggregator, error) {
+func newAggregatorOld(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, saltM *salt.SaltManager, logger log.Logger) (*Aggregator, error) {
 	ctx, ctxCancel := context.WithCancel(ctx)
 	return &Aggregator{
 		ctx:                    ctx,

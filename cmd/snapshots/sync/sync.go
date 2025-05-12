@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
 
+	"github.com/erigontech/erigon-db/version"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -98,7 +99,7 @@ func ParseLocator(value string) (*Locator, error) {
 			loc.LType = TorrentFs
 
 			if len(matches[2]) > 0 {
-				version, err := snaptype.ParseVersion(matches[2])
+				version, err := version.ParseVersion(matches[2])
 				if err != nil {
 					return nil, fmt.Errorf("can't parse version: %s: %w", matches[3], err)
 				}
@@ -116,7 +117,7 @@ func ParseLocator(value string) (*Locator, error) {
 			}
 
 			if len(matches[3]) > 0 {
-				version, err := snaptype.ParseVersion(matches[3])
+				version, err := version.ParseVersion(matches[3])
 				if err != nil {
 					return nil, fmt.Errorf("can't parse version: %s: %w", matches[3], err)
 				}
@@ -313,7 +314,7 @@ func (i *torrentInfo) Version() snaptype.Version {
 		return i.snapInfo.Version
 	}
 
-	return snaptype.ZeroVersion
+	return version.ZeroVersion
 }
 
 func (i *torrentInfo) From() uint64 {
