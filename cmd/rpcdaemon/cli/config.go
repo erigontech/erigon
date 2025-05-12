@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/erigontech/erigon-lib/kv/kvcfg"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -426,6 +427,20 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			cc, err = core.ReadChainConfig(tx, genesisHash)
 			if err != nil {
 				return err
+			}
+			cfg.Sync.KeepExecutionProofs, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
+			if err != nil {
+				return err
+			}
+			if cfg.Sync.KeepExecutionProofs {
+				libstate.EnableHistoricalCommitment()
+			}
+			cfg.Sync.PersistReceiptsCacheV2, err = kvcfg.PersistReceipts.Enabled(tx)
+			if err != nil {
+				return err
+			}
+			if cfg.Sync.PersistReceiptsCacheV2 {
+				libstate.EnableHistoricalRCache()
 			}
 			return nil
 		}); err != nil {
