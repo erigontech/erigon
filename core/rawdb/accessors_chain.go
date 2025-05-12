@@ -1320,6 +1320,7 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 			log.Warn("[dbg] found empty val", "bn", block.NumberU64(), "txnID", txnID)
 			continue
 		}
+		log.Warn("[dbg] found??")
 
 		// Convert the receipts from their storage form to their internal representation
 		receipt := &types.ReceiptForStorage{}
