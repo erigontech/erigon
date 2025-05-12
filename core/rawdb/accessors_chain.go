@@ -1314,6 +1314,7 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 			return nil, fmt.Errorf("unexpected error, couldn't find changeset: txNum=%d, %w", txnID, err)
 		}
 		if !ok {
+			log.Warn("[dbg] not found", "txnID", txnID)
 			return res, nil
 		}
 		if len(v) == 0 {
