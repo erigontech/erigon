@@ -18,13 +18,17 @@ package engine_block_downloader
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/erigon-db/rawdb"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 )
 
@@ -32,10 +36,10 @@ import (
 func (e *EngineBlockDownloader) download(ctx context.Context, hashToDownload common.Hash, requestId int, block *types.Block) {
 	/* Start download process*/
 	// First we schedule the headers download process
-	if !e.scheduleHeadersDownload(requestId, hashToDownload, 0) {
+	if !e.scheduleHeadersDownload(requestId, hashToDownload, block.NumberU64()) {
 		e.logger.Warn("[EngineBlockDownloader] could not begin header download")
 		// could it be scheduled? if not nevermind.
-		e.status.Store(headerdownload.Idle)
+		// e.status.Store(headerdownload.Idle)
 		return
 	}
 	// see the outcome of header download
@@ -88,48 +92,111 @@ func (e *EngineBlockDownloader) download(ctx context.Context, hashToDownload com
 			return
 		}
 	}
-	startBlock, endBlock, err := e.loadDownloadedHeaders(memoryMutation)
+	_, endBlock, err := e.loadDownloadedHeaders(memoryMutation)
 	if err != nil {
 		e.logger.Warn("[EngineBlockDownloader] Could not load headers", "err", err)
 		e.status.Store(headerdownload.Idle)
 		return
 	}
 
-	// bodiesCollector := etl.NewCollector("EngineBlockDownloader", e.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), e.logger)
-	if err := e.downloadAndLoadBodiesSyncronously(ctx, memoryMutation, startBlock, endBlock); err != nil {
-		e.logger.Warn("[EngineBlockDownloader] Could not download bodies", "err", err)
+	if err := stages.SaveStageProgress(memoryMutation, stages.Headers, endBlock); err != nil {
+		e.logger.Error("[EngineBlockDownloader] Failed to save headers progress", "err", err)
 		e.status.Store(headerdownload.Idle)
 		return
 	}
-	tx.Rollback() // Discard the original db tx
-	e.logger.Info("[EngineBlockDownloader] Finished downloading blocks", "from", startBlock-1, "to", endBlock)
-	if block == nil {
-		e.status.Store(headerdownload.Idle)
-		return
+
+	startBlockNr := uint64(0)
+	targetBlockNr := endBlock
+	increment := uint64(2_000)
+	for currentBlockNr := startBlockNr; currentBlockNr < targetBlockNr; currentBlockNr += increment {
+		err = e.downloadAndExecLoopIteration(ctx, memoryMutation, currentBlockNr, currentBlockNr+increment)
+		if err != nil {
+			e.logger.Error("[EngineBlockDownloader] failed to execute blocks ", "startBlock", currentBlockNr, "endBlock", currentBlockNr+increment, "err", err)
+			e.status.Store(headerdownload.Idle)
+			return
+		}
 	}
 	// Can fail, not an issue in this case.
 	e.chainRW.InsertBlockAndWait(ctx, block)
-	// Lastly attempt verification
-	status, _, latestValidHash, err := e.chainRW.ValidateChain(ctx, block.Hash(), block.NumberU64())
+	e.logger.Info("[EngineBlockDownloader] Sync completed")
+	e.status.Store(headerdownload.Synced)
+
+}
+
+func (e *EngineBlockDownloader) downloadAndExecLoopIteration(ctx context.Context, memoryMutation kv.RwTx, startBlockNr, endBlockNr uint64) error {
+	e.logger.Info("[EngineBlockDownloader] LOOP ITERATION downloading and executing ", "startBlock", startBlockNr, "endBlock", endBlockNr)
+	headHash, _, _, err := e.chainRW.GetForkChoice(ctx)
 	if err != nil {
-		e.logger.Warn("[EngineBlockDownloader] block verification failed", "reason", err)
-		e.status.Store(headerdownload.Idle)
-		return
+		return err
 	}
+	latestHeader, err := e.blockReader.HeaderByHash(ctx, memoryMutation, headHash)
+	if err != nil {
+		return err
+	}
+	latestBlockNr := uint64(0)
+	if latestHeader != nil {
+		latestBlockNr = latestHeader.Number.Uint64()
+	}
+
+	if latestBlockNr > startBlockNr {
+		e.logger.Info("[EngineBlockDownloader] Early exit: not downloading bodies or executing because startBlockNr < latestBlockNr ", "startBlockNr", startBlockNr, "latestBlockNr", latestBlockNr)
+		return nil
+	}
+
+	if latestBlockNr > endBlockNr { // this should also not happen
+		e.logger.Error("[EngineBlockDownloader] This should not happen ", "latestBlockNr", latestBlockNr, "endBlockNr", endBlockNr)
+		return errors.New("latestBlockNr>endBlockNr")
+	}
+
+	if err := e.downloadAndLoadBodiesSyncronously(ctx, memoryMutation, uint64(startBlockNr), uint64(endBlockNr)); err != nil {
+		e.logger.Warn("[EngineBlockDownloader] Could not download bodies", "err", err)
+		return err
+	}
+	e.logger.Info("[ITER] Before UpdateFork", "startBlock", startBlockNr, "endBlock", endBlockNr)
+	endBlock, err := rawdb.ReadHeadersByNumber(memoryMutation, uint64(endBlockNr))
+	if err != nil {
+		panic(err)
+	}
+	var endBlockHash common.Hash
+	if len(endBlock) == 0 {
+		roTx, err := e.db.BeginRo(ctx)
+		if err != nil {
+			return err
+		}
+		defer roTx.Rollback()
+		endBlockFromReader, err := e.blockReader.HeaderByNumber(ctx, roTx, endBlockNr) // look into snapshots
+		if err != nil {
+			return err
+		}
+		if endBlockFromReader == nil {
+			panic("endBlock = nil")
+		}
+		endBlockHash = endBlockFromReader.Hash()
+	} else {
+		endBlockHash = endBlock[0].Hash()
+	}
+	// Can fail, not an issue in this case.
+	// e.chainRW.InsertBlockAndWait(ctx, )
+	status, _, latestValidHash, err := e.chainRW.UpdateForkChoice(ctx, endBlockHash, endBlockHash, endBlockHash)
+	e.logger.Info("[ITER] After UpdateFork", "endBlockNr", endBlockNr)
+
+	if err != nil {
+		return err
+	}
+
 	if status == execution.ExecutionStatus_TooFarAway || status == execution.ExecutionStatus_Busy {
-		e.logger.Info("[EngineBlockDownloader] block verification skipped")
-		e.status.Store(headerdownload.Synced)
-		return
+		e.logger.Info("[EngineBlockDownloader] updateForkChoice skipped")
+		return fmt.Errorf("chainRW.UpdateForkChoice() failed. Execution status=%v", status)
 	}
 	if status == execution.ExecutionStatus_BadBlock {
 		e.logger.Warn("[EngineBlockDownloader] block segments downloaded are invalid")
-		e.status.Store(headerdownload.Idle)
-		e.hd.ReportBadHeaderPoS(block.Hash(), latestValidHash)
-		return
+		e.hd.ReportBadHeaderPoS(endBlockHash, latestValidHash)
+		return err
 	}
-	e.logger.Info("[EngineBlockDownloader] blocks verification successful")
-	e.status.Store(headerdownload.Synced)
 
+	e.logger.Info("[EngineBlockDownloader] fork choice update successful")
+	e.status.Store(headerdownload.Idle)
+	return nil
 }
 
 // StartDownloading triggers the download process and returns true if the process started or false if it could not.

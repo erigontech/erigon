@@ -130,13 +130,13 @@ func findOverlaps[T SortedRange](in []T) (res []T, overlapped []T) {
 				break
 			}
 
-			if iTo >= jTo && iFrom <= jFrom {
-				overlapped = append(overlapped, f2)
-				continue
-			}
-			if i < len(in)-1 && (jTo >= iTo && jFrom <= iFrom) {
-				overlapped = append(overlapped, f)
-			}
+			// if iTo >= jTo && iFrom <= jFrom {
+			// 	overlapped = append(overlapped, f2)
+			// 	continue
+			// }
+			// if i < len(in)-1 && (jTo >= iTo && jFrom <= iFrom) {
+			// 	overlapped = append(overlapped, f)
+			// }
 			f = f2
 			iFrom, iTo = f.GetRange()
 		}

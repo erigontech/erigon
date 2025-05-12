@@ -774,7 +774,7 @@ func (e *EngineServer) HandleNewPayload(
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 
-		if !e.blockDownloader.StartDownloading(ctx, 0, header.ParentHash, block) {
+		if !e.blockDownloader.StartDownloading(ctx, 0, header.Hash(), block) {
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 

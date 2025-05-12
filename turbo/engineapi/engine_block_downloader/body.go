@@ -35,13 +35,9 @@ import (
 
 // downloadBodies executes bodies download.
 func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Context, tx kv.RwTx, fromBlock, toBlock uint64) (err error) {
-	headerProgress := toBlock
-	bodyProgress := fromBlock - 1
+	bodyProgress := fromBlock
 
 	if err := stages.SaveStageProgress(tx, stages.Bodies, bodyProgress); err != nil {
-		return err
-	}
-	if err := stages.SaveStageProgress(tx, stages.Headers, headerProgress); err != nil {
 		return err
 	}
 
@@ -50,22 +46,18 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 	timeout := e.timeout
 
 	// This will update bd.maxProgress
-	if err = e.bd.UpdateFromDb(tx); err != nil {
+	if err = e.bd.UpdateFromDb(tx, &toBlock); err != nil {
 		return
 	}
 	defer e.bd.ClearBodyCache()
 
-	if bodyProgress >= headerProgress {
-		return nil
-	}
-
 	logPrefix := "EngineBlockDownloader"
-	if headerProgress <= bodyProgress+16 {
+	if toBlock <= bodyProgress+16 {
 		// When processing small number of blocks, we can afford wasting more bandwidth but get blocks quicker
 		timeout = 1
 	} else {
 		// Do not print logs for short periods
-		e.logger.Info(fmt.Sprintf("[%s] Processing bodies...", logPrefix), "from", bodyProgress, "to", headerProgress)
+		e.logger.Info(fmt.Sprintf("[%s] Processing bodies...", logPrefix), "from", bodyProgress, "to", toBlock)
 	}
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
@@ -126,7 +118,7 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 		for i := uint64(0); i < toProcess; i++ {
 			select {
 			case <-logEvery.C:
-				logWritingBodies(logPrefix, bodyProgress, headerProgress, e.logger)
+				logWritingBodies(logPrefix, bodyProgress, toBlock, e.logger)
 			default:
 			}
 			nextBlock := requestedLow + i
@@ -172,7 +164,7 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 
 		d5 += time.Since(start)
 		start = time.Now()
-		if bodyProgress == headerProgress {
+		if bodyProgress == toBlock {
 			return true, nil
 		}
 
@@ -188,7 +180,7 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 			} else {
 				noProgressCount = 0 // Reset, there was progress
 			}
-			logDownloadingBodies(logPrefix, bodyProgress, headerProgress-requestedLow, totalDelivered, prevDeliveredCount, deliveredCount,
+			logDownloadingBodies(logPrefix, bodyProgress, toBlock-requestedLow, totalDelivered, prevDeliveredCount, deliveredCount,
 				prevWastedCount, wastedCount, e.bd.BodyCacheSize(), e.logger)
 			prevProgress = bodyProgress
 			prevDeliveredCount = deliveredCount

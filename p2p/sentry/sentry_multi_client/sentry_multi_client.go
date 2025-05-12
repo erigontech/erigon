@@ -201,7 +201,7 @@ func NewMultiClient(
 	if !disableBlockDownload {
 		bd = bodydownload.NewBodyDownload(engine, blockBufferSize, int(syncCfg.BodyCacheLimit), blockReader, logger)
 		if err := db.View(context.Background(), func(tx kv.Tx) error {
-			return bd.UpdateFromDb(tx)
+			return bd.UpdateFromDb(tx, nil)
 		}); err != nil {
 			return nil, err
 		}

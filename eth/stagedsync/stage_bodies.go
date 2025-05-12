@@ -97,7 +97,7 @@ func BodiesForward(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, c
 		}
 	}
 	// This will update bd.maxProgress
-	if err = cfg.bd.UpdateFromDb(tx); err != nil {
+	if err = cfg.bd.UpdateFromDb(tx, nil); err != nil {
 		return err
 	}
 	defer cfg.bd.ClearBodyCache()

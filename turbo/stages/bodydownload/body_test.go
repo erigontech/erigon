@@ -33,7 +33,7 @@ func TestCreateBodyDownload(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	bd := bodydownload.NewBodyDownload(ethash.NewFaker(), 128, 100, m.BlockReader, m.Log)
-	if err := bd.UpdateFromDb(tx); err != nil {
+	if err := bd.UpdateFromDb(tx, nil); err != nil {
 		t.Fatalf("update from db: %v", err)
 	}
 }

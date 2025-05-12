@@ -381,6 +381,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 		var genesisErr error
 		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverridePragueTime, dirs, logger)
+		genesisHash := genesis.Hash()
+		fmt.Printf("genesisHash = %x\n", genesisHash)
 		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
 			return genesisErr
 		}
@@ -1093,7 +1095,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	var executionEngine executionclient.ExecutionEngine
 
-	executionEngine, err = executionclient.NewExecutionClientDirect(eth1_chain_reader.NewChainReaderEth1(chainConfig, executionRpc, 1000))
+	executionEngine, err = executionclient.NewExecutionClientDirect(eth1_chain_reader.NewChainReaderEth1(chainConfig, executionRpc, 60000))
 	if err != nil {
 		return nil, err
 	}

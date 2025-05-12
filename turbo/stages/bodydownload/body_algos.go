@@ -35,7 +35,7 @@ import (
 )
 
 // UpdateFromDb reads the state of the database and refreshes the state of the body download
-func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (err error) {
+func (bd *BodyDownload) UpdateFromDb(db kv.Tx, toBlock *uint64) (err error) {
 	var headerProgress, bodyProgress uint64
 	headerProgress, err = stages.GetStageProgress(db, stages.Headers)
 	if err != nil {
@@ -45,7 +45,11 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (err error) {
 	if err != nil {
 		return err
 	}
-	bd.maxProgress = headerProgress + 1
+	if toBlock != nil {
+		bd.maxProgress = *toBlock
+	} else {
+		bd.maxProgress = headerProgress + 1
+	}
 	// Resetting for requesting a new range of blocks
 	bd.requestedLow = bodyProgress + 1
 	bd.requestedMap = make(map[BodyHashes]uint64)
@@ -65,7 +69,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 	blockNums := make([]uint64, 0, bd.blockBufferSize)
 	hashes := make([]common.Hash, 0, bd.blockBufferSize)
 
-	for blockNum := bd.requestedLow; len(blockNums) < bd.blockBufferSize && blockNum < bd.maxProgress; blockNum++ {
+	for blockNum := bd.requestedLow; len(blockNums) < bd.blockBufferSize && blockNum <= bd.maxProgress; blockNum++ {
 		if bd.delivered.Contains(blockNum) {
 			// Already delivered, no need to request
 			continue

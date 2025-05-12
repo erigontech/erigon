@@ -606,6 +606,10 @@ Loop:
 
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
+				// CHANGE(taiko) : mark as  anchor if it is the first transaction
+				if txIndex == 0 {
+					txTask.Tx.MarkAsAnchor()
+				}
 				txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
 				if err != nil {
 					if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {

@@ -724,7 +724,8 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 			return nil, err
 		}
 
-		hh, err := hd.headerReader.HeaderByHash(context.Background(), tx, header.ParentHash)
+		// hh, err := hd.headerReader.HeaderByHash(context.Background(), tx, header.ParentHash)
+		hh, err := hd.headerReader.HeaderByNumber(context.Background(), tx, headerNumber-1)
 		if err != nil {
 			return nil, err
 		}
@@ -734,6 +735,23 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 				hd.badPoSHeaders[headerHash] = header.ParentHash
 				return nil, fmt.Errorf("invalid PoS segment detected: invalid block number. got %d, expected %d", headerNumber, hh.Number.Uint64()+1)
 			}
+			// hh, err = hd.headerReader.HeaderByHash(context.Background(), tx, header.ParentHash)
+			// if err != nil {
+			// 	panic(err)
+			// }
+			// headerByNum, err := hd.headerReader.HeaderByNumber(context.Background(), tx, headerNumber-1)
+			// if err != nil {
+			// 	panic(err)
+			// }
+			// _ = headerByNum
+			// canonicalHash1, ok, err := hd.headerReader.CanonicalHash(context.Background(), tx, hh.Number.Uint64())
+			// if err != nil {
+			// 	panic(err)
+			// }
+			// if !ok {
+			// 	return nil, errors.New("canonical hash for last found block not found")
+			// }
+			// fmt.Printf(canonicalHash1.Hex())
 			hd.posAnchor = nil
 			hd.posStatus = Synced
 			// Wake up stage loop if it is outside any of the stages

@@ -45,7 +45,7 @@ import (
 const (
 	logInterval                 = 30 * time.Second
 	requestLoopCutOff       int = 1
-	forkchoiceTimeoutMillis     = 5000
+	forkchoiceTimeoutMillis     = 40 * 60_000 // leaving 40 minutes time
 )
 
 type RequestBodyFunction func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool)
@@ -228,6 +228,9 @@ func saveHeader(db kv.RwTx, header *types.Header, hash common.Hash) error {
 	}
 	if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
 		return fmt.Errorf("[saveHeader] failed to WriteTd: %w", err)
+	}
+	if blockHeight == 1 {
+		fmt.Printf("SAVING CANONICAL HASH FOR BLOCKHEIGHT = 1\n")
 	}
 	if err = rawdb.WriteCanonicalHash(db, hash, blockHeight); err != nil {
 		return fmt.Errorf("[saveHeader] failed to save canonical hash: %w", err)
