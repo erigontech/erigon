@@ -202,7 +202,7 @@ var (
 				}
 				defer bodiesSegment.Close()
 
-				baseTxnID, expectedCount, err := txsAmountBasedOnBodiesSnapshots(bodiesSegment, sn.Len()-1)
+				baseTxnID, expectedCount, err := TxsAmountBasedOnBodiesSnapshots(bodiesSegment, sn.Len()-1)
 				if err != nil {
 					return err
 				}
@@ -255,8 +255,8 @@ var (
 
 				bodyBuf, word := make([]byte, 0, 4096), make([]byte, 0, 4096)
 
-				defer d.EnableReadAhead().DisableReadAhead()
-				defer bodiesSegment.EnableReadAhead().DisableReadAhead()
+				defer d.MadvSequential().DisableReadAhead()
+				defer bodiesSegment.MadvSequential().DisableReadAhead()
 
 				for {
 					g, bodyGetter := d.MakeGetter(), bodiesSegment.MakeGetter()
@@ -407,7 +407,7 @@ var (
 	E3StateTypes       = []snaptype.Type{Domains, Histories, InvertedIndicies, Accessors, Txt}
 )
 
-func txsAmountBasedOnBodiesSnapshots(bodiesSegment *seg.Decompressor, len uint64) (baseTxID types.BaseTxnID, expectedCount int, err error) {
+func TxsAmountBasedOnBodiesSnapshots(bodiesSegment *seg.Decompressor, len uint64) (baseTxID types.BaseTxnID, expectedCount int, err error) {
 	gg := bodiesSegment.MakeGetter()
 	buf, _ := gg.Next(nil)
 	firstBody := &types.BodyForStorage{}

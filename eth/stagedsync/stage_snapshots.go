@@ -83,7 +83,7 @@ const (
 )
 
 type SnapshotsCfg struct {
-	db          kv.RwDB
+	db          kv.TemporalRwDB
 	chainConfig chain.Config
 	dirs        datadir.Dirs
 
@@ -101,7 +101,7 @@ type SnapshotsCfg struct {
 	prune            prune.Mode
 }
 
-func StageSnapshotsCfg(db kv.RwDB,
+func StageSnapshotsCfg(db kv.TemporalRwDB,
 	chainConfig chain.Config,
 	syncConfig ethconfig.Sync,
 	dirs datadir.Dirs,
@@ -289,6 +289,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.dirs, false, cfg.blobs, cfg.caplinState, cfg.prune, cstate, agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, cfg.syncConfig); err != nil {
 		return err
 	}
+
 	if cfg.notifier.Events != nil {
 		cfg.notifier.Events.OnNewSnapshot()
 	}

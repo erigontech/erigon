@@ -36,6 +36,8 @@ import (
 	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 )
 
+const reorgTooDeepDepth = 3
+
 type ExecutionClientDirect struct {
 	chainRW eth1_chain_reader.ChainReaderWriterEth1
 }
@@ -84,6 +86,12 @@ func (cc *ExecutionClientDirect) NewPayload(
 	headHeader := cc.chainRW.CurrentHeader(ctx)
 	if headHeader == nil || header.Number.Uint64() > headHeader.Number.Uint64()+1 {
 		// can't validate yet
+		return PayloadStatusNotValidated, nil
+	}
+
+	// check if the block is too deep in the reorg accounting for underflow
+	if headHeader.Number.Uint64() > reorgTooDeepDepth && header.Number.Uint64() < headHeader.Number.Uint64()-reorgTooDeepDepth {
+		// reorg too deep
 		return PayloadStatusNotValidated, nil
 	}
 

@@ -360,7 +360,7 @@ func (rw *Worker) execAATxn(txTask *state.TxTask) {
 		for i := startIdx; i <= endIdx; i++ {
 			// check if next n transactions are AA transactions and run validation
 			if txTask.Txs[i].Type() == types.AccountAbstractionTxType {
-				aaTxn, ok := txTask.Tx.(*types.AccountAbstractionTransaction)
+				aaTxn, ok := txTask.Txs[i].(*types.AccountAbstractionTransaction)
 				if !ok {
 					outerErr = fmt.Errorf("invalid transaction type, expected AccountAbstractionTx, got %T", txTask.Tx)
 					break

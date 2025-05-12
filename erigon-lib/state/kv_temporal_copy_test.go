@@ -225,9 +225,6 @@ func (tx *Tx) Commit() error {
 func (tx *Tx) HistoryStartFrom(name kv.Domain) uint64 {
 	return tx.aggtx.HistoryStartFrom(name)
 }
-func (tx *Tx) HistoryEndTxNum(name kv.Domain) uint64 {
-	return tx.aggtx.HistoryEndTxNum(name, tx.MdbxTx)
-}
 
 func (tx *Tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
 	it, err := tx.aggtx.RangeAsOf(tx.ctx, tx.MdbxTx, name, fromKey, toKey, asOfTs, asc, limit)
@@ -317,6 +314,7 @@ func (tx *Tx) GetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v
 	return tx.aggtx.DebugGetLatestFromFiles(domain, k, maxTxNum)
 }
 func (db *DB) DomainTables(domain ...kv.Domain) []string { return db.agg.DomainTables(domain...) }
+func (db *DB) ReloadSalt() error                         { return db.agg.ReloadSalt() }
 func (tx *Tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
 	return tx.aggtx.DomainFiles(domain...)
 }

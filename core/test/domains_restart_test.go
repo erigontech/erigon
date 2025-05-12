@@ -61,7 +61,9 @@ func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.Tempo
 	db := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 
-	agg, err := state.NewAggregator(context.Background(), dirs, aggStep, db, logger)
+	salt, err := state.GetStateIndicesSalt(dirs, true, logger)
+	require.NoError(t, err)
+	agg, err := state.NewAggregator2(context.Background(), dirs, aggStep, salt, db, logger)
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 	err = agg.OpenFolder()

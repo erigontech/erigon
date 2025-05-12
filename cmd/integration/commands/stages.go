@@ -561,7 +561,7 @@ func init() {
 	withHeimdall(cmdStageCustomTrace)
 	withWorkers(cmdStageCustomTrace)
 	withChaosMonkey(cmdStageCustomTrace)
-	withProduce(cmdStageCustomTrace)
+	withDomain(cmdStageCustomTrace)
 	rootCmd.AddCommand(cmdStageCustomTrace)
 
 	withConfig(cmdStagePatriciaTrie)
@@ -1129,7 +1129,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	chainConfig := fromdb.ChainConfig(db)
 	genesis := core.GenesisBlockByChainName(chain)
 	br, _ := blocksIO(db, logger)
-	cfg := stagedsync.StageCustomTraceCfg(strings.Split(produce, ","), db, dirs, br, chainConfig, engine, genesis, &syncCfg)
+	cfg := stagedsync.StageCustomTraceCfg(strings.Split(domain, ","), db, dirs, br, chainConfig, engine, genesis, &syncCfg)
 	if reset {
 		tx, err := db.BeginTemporalRw(ctx)
 		if err != nil {
@@ -1143,11 +1143,17 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 		if cfg.Produce.RCacheDomain {
 			tables = append(tables, db.Debug().DomainTables(kv.RCacheDomain)...)
 		}
-		if cfg.Produce.LogIndex {
-			tables = append(tables, db.Debug().InvertedIdxTables(kv.LogAddrIdx, kv.LogTopicIdx)...)
+		if cfg.Produce.LogAddr {
+			tables = append(tables, db.Debug().InvertedIdxTables(kv.LogAddrIdx)...)
 		}
-		if cfg.Produce.TraceIndex {
-			tables = append(tables, db.Debug().InvertedIdxTables(kv.TracesFromIdx, kv.TracesToIdx)...)
+		if cfg.Produce.LogTopic {
+			tables = append(tables, db.Debug().InvertedIdxTables(kv.LogTopicIdx)...)
+		}
+		if cfg.Produce.TraceFrom {
+			tables = append(tables, db.Debug().InvertedIdxTables(kv.TracesFromIdx)...)
+		}
+		if cfg.Produce.TraceTo {
+			tables = append(tables, db.Debug().InvertedIdxTables(kv.TracesToIdx)...)
 		}
 		if err := backup.ClearTables(ctx, tx, tables...); err != nil {
 			return err
