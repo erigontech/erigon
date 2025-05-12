@@ -449,7 +449,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if cfg.Sync.PersistReceiptsCacheV2 {
 			libstate.EnableHistoricalRCache()
 		}
-		log.Warn("[dbg] startup cfg", "schema", libstate.Schema)
+		log.Warn("[dbg] startup cfg", "cfg.Sync.PersistReceiptsCacheV2 ", cfg.Sync.PersistReceiptsCacheV2, "schema", libstate.Schema[kv.RCacheDomain])
 
 		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
 		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
