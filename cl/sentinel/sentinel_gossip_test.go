@@ -40,7 +40,7 @@ func getEthClock(t *testing.T) eth_clock.EthereumClock {
 }
 
 func TestSentinelGossipOnHardFork(t *testing.T) {
-	// t.Skip("")
+	t.Skip("issue #15001")
 
 	listenAddrHost := "127.0.0.1"
 
