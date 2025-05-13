@@ -836,6 +836,12 @@ func (s *Sync) syncToTip(ctx context.Context) (syncToTipResult, error) {
 		"blk/sec", uint64(float64(blocks)/time.Since(startTime).Seconds()),
 	)
 
+	if result.latestTip != nil {
+		if err := s.heimdallSync.SynchronizeSpans(ctx, result.latestTip.Number.Uint64()); err != nil {
+			return syncToTipResult{}, err
+		}
+	}
+
 	return result, nil
 }
 

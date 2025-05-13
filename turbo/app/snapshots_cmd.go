@@ -263,8 +263,15 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
-			Name:        "publishable",
-			Action:      doPublishable,
+			Name: "publishable",
+			Action: func(cliCtx *cli.Context) error {
+				if err := doPublishable(cliCtx); err != nil {
+					log.Error("[publishable]", "err", err)
+					return err
+				}
+				log.Info("[publishable] snapshots are publishable")
+				return nil
+			},
 			Description: "Check if snapshot is publishable by a webseed client",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
@@ -887,7 +894,6 @@ func doPublishable(cliCtx *cli.Context) error {
 	if !exists {
 		return fmt.Errorf("missing file %s", filepath.Join(dat.Snap, "salt-blocks.txt"))
 	}
-	log.Info("All snapshots are publishable")
 	return nil
 }
 
@@ -1427,8 +1433,16 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}); err != nil {
 		return err
 	}
+
 	blockReader, _ := br.IO()
-	from2, to2, ok := freezeblocks.CanRetire(to, blockReader.FrozenBlocks(), coresnaptype.Enums.Headers, nil)
+
+	blocksInSnapshots := blockReader.FrozenBlocks()
+
+	if chainConfig.Bor != nil {
+		blocksInSnapshots = min(blocksInSnapshots, blockReader.FrozenBorBlocks())
+	}
+
+	from2, to2, ok := freezeblocks.CanRetire(to, blocksInSnapshots, coresnaptype.Enums.Headers, nil)
 	if ok {
 		from, to = from2, to2
 	}
