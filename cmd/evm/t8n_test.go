@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"os"
 	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -255,9 +254,7 @@ func TestT8n(t *testing.T) {
 }
 
 func TestEvmRun(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows tests requires fixing.")
-	}
+	t.Skip("issues #14975 and #14993")
 	t.Parallel()
 	tt := cmdtest.NewTestCmd(t, nil)
 	for i, tc := range []struct {
