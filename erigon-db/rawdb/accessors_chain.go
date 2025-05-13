@@ -1306,6 +1306,7 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 			continue
 		}
 		if len(v) == 0 {
+			log.Warn("[dbg] skip zero-value", "txnID", txnID, "_min", _min, "_max", _max)
 			continue
 		}
 
