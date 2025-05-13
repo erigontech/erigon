@@ -384,7 +384,7 @@ func sequencingBatchStep(
 
 			select {
 			case <-infoTreeTicker.C:
-				newLogs, err := cfg.infoTreeUpdater.CheckForInfoTreeUpdates(logPrefix, sdb.tx)
+				processedLogs, err := cfg.infoTreeUpdater.CheckForInfoTreeUpdates(logPrefix, sdb.tx)
 				if err != nil {
 					return err
 				}
@@ -393,7 +393,7 @@ func sequencingBatchStep(
 				if latest != nil {
 					latestIndex = latest.Index
 				}
-				log.Info(fmt.Sprintf("[%s] Info tree updates", logPrefix), "count", len(newLogs), "latestIndex", latestIndex)
+				log.Info(fmt.Sprintf("[%s] Info tree updates", logPrefix), "count", processedLogs, "latestIndex", latestIndex)
 			default:
 			}
 

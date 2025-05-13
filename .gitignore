@@ -116,3 +116,5 @@ vendor
 
 datadir
 zk/tests/unwinds/datastream/hermez-dynamic-integration8-datastream
+zk/debug_tools/rpc-cache/cache.db
+zk/debug_tools/rpc-cache/rpc-cache

@@ -47,6 +47,11 @@ func TestZkContractsEventsHash(t *testing.T) {
 			expectedHash: UpdateL1InfoTreeTopic,
 		},
 		{
+			name:         "UpdateL1InfoTreeV2",
+			eventSig:     "UpdateL1InfoTreeV2(bytes32,uint32,uint256,uint64)",
+			expectedHash: UpdateL1InfoTreeV2Topic,
+		},
+		{
 			name:         "InitialSequenceBatches",
 			eventSig:     "InitialSequenceBatches(bytes,bytes32,address)",
 			expectedHash: InitialSequenceBatchesTopic,

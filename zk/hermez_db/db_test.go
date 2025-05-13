@@ -11,6 +11,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/erigontech/erigon/zk/types"
 )
 
 type IHermezDb interface {
@@ -676,6 +677,359 @@ func TestTruncateBadTxs(t *testing.T) {
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.truncate, count)
+		})
+	}
+}
+
+func TestTruncateL1InfoTreeUpdates(t *testing.T) {
+	cases := map[string]struct {
+		updates       []*types.L1InfoTreeUpdate
+		truncate      uint64
+		expectedCount uint64
+	}{
+		"simple case with two entries": {
+			updates: []*types.L1InfoTreeUpdate{
+				{
+					Index: 1,
+				},
+				{
+					Index: 2,
+				},
+			},
+			truncate:      2,
+			expectedCount: 1,
+		},
+		"skipped index yields expected count": {
+			updates: []*types.L1InfoTreeUpdate{
+				{
+					Index: 1,
+				},
+				{
+					Index: 3,
+				},
+				{
+					Index: 4,
+				},
+			},
+			truncate:      4,
+			expectedCount: 2,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			tx, cleanup := GetDbTx()
+			defer cleanup()
+			db := NewHermezDb(tx)
+
+			for _, update := range tc.updates {
+				require.NoError(t, db.WriteL1InfoTreeUpdate(update))
+			}
+
+			require.NoError(t, db.TruncateL1InfoTreeUpdates(tc.truncate))
+
+			// now ensure nothing is in the table beyond the truncate point
+			c1, err := db.tx.Cursor(L1_INFO_TREE_UPDATES)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer c1.Close()
+
+			for k, _, err := c1.First(); k != nil; k, _, err = c1.Next() {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(k) == 0 {
+					break
+				}
+				index := BytesToUint64(k)
+				if index > tc.truncate {
+					t.Fatalf("expected index %d to be less than truncate %d", index, tc.truncate)
+				}
+
+			}
+
+			// now ensure the count is correct
+			count, err := c1.Count()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if count != tc.expectedCount {
+				t.Fatalf("expected count %d to be equal to truncate %d", count, tc.truncate)
+			}
+
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestTruncateL1InfoTreeUpdatesByGer(t *testing.T) {
+	cases := map[string]struct {
+		updates       []*types.L1InfoTreeUpdate
+		truncate      uint64
+		expectedCount uint64
+	}{
+		"simple case with two entries": {
+			updates: []*types.L1InfoTreeUpdate{
+				{
+					Index: 1,
+					GER:   common.HexToHash("0x1"),
+				},
+				{
+					Index: 2,
+					GER:   common.HexToHash("0x2"),
+				},
+			},
+			truncate:      2,
+			expectedCount: 1,
+		},
+		"skipped index yields expected count": {
+			updates: []*types.L1InfoTreeUpdate{
+				{
+					Index: 1,
+					GER:   common.HexToHash("0x1"),
+				},
+				{
+					Index: 3,
+					GER:   common.HexToHash("0x3"),
+				},
+				{
+					Index: 4,
+					GER:   common.HexToHash("0x4"),
+				},
+			},
+			truncate:      4,
+			expectedCount: 2,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			tx, cleanup := GetDbTx()
+			defer cleanup()
+			db := NewHermezDb(tx)
+
+			for _, update := range tc.updates {
+				require.NoError(t, db.WriteL1InfoTreeUpdateToGer(update))
+			}
+
+			require.NoError(t, db.TruncateL1InfoTreeUpdatesByGer(tc.truncate))
+
+			// now ensure nothing is in the table beyond the truncate point
+			c1, err := db.tx.Cursor(L1_INFO_TREE_UPDATES_BY_GER)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer c1.Close()
+
+			for k, _, err := c1.First(); k != nil; k, _, err = c1.Next() {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(k) == 0 {
+					break
+				}
+				index := BytesToUint64(k)
+				if index > tc.truncate {
+					t.Fatalf("expected index %d to be less than truncate %d", index, tc.truncate)
+				}
+
+			}
+
+			// now ensure the count is correct
+			count, err := c1.Count()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if count != tc.expectedCount {
+				t.Fatalf("expected count %d to be equal to truncate %d", count, tc.truncate)
+			}
+
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestTruncateL1InfoTreeLeaves(t *testing.T) {
+	type indexToHash struct {
+		index uint64
+		hash  common.Hash
+	}
+
+	cases := map[string]struct {
+		updates       []indexToHash
+		truncate      uint64
+		expectedCount uint64
+	}{
+		"simple case with two entries": {
+			updates: []indexToHash{
+				{
+					index: 1,
+					hash:  common.HexToHash("0x1"),
+				},
+				{
+					index: 2,
+					hash:  common.HexToHash("0x2"),
+				},
+			},
+			truncate:      2,
+			expectedCount: 1,
+		},
+		"skipped index yields expected count": {
+			updates: []indexToHash{
+				{
+					index: 1,
+					hash:  common.HexToHash("0x1"),
+				},
+				{
+					index: 3,
+					hash:  common.HexToHash("0x3"),
+				},
+				{
+					index: 4,
+					hash:  common.HexToHash("0x4"),
+				},
+			},
+			truncate:      4,
+			expectedCount: 2,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			tx, cleanup := GetDbTx()
+			defer cleanup()
+			db := NewHermezDb(tx)
+
+			for _, update := range tc.updates {
+				require.NoError(t, db.WriteL1InfoTreeLeaf(update.index, update.hash))
+			}
+
+			require.NoError(t, db.TruncateL1InfoTreeLeaves(tc.truncate))
+
+			// now ensure nothing is in the table beyond the truncate point
+			c1, err := db.tx.Cursor(L1_INFO_LEAVES)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer c1.Close()
+
+			for k, _, err := c1.First(); k != nil; k, _, err = c1.Next() {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(k) == 0 {
+					break
+				}
+				index := BytesToUint64(k)
+				if index > tc.truncate {
+					t.Fatalf("expected index %d to be less than truncate %d", index, tc.truncate)
+				}
+
+			}
+
+			// now ensure the count is correct
+			count, err := c1.Count()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if count != tc.expectedCount {
+				t.Fatalf("expected count %d to be equal to truncate %d", count, tc.truncate)
+			}
+
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestTruncateL1InfoTreeRoots(t *testing.T) {
+	type indexToHash struct {
+		index uint64
+		hash  common.Hash
+	}
+
+	cases := map[string]struct {
+		updates       []indexToHash
+		truncate      uint64
+		expectedCount uint64
+	}{
+		"simple case with two entries": {
+			updates: []indexToHash{
+				{
+					index: 1,
+					hash:  common.HexToHash("0x1"),
+				},
+				{
+					index: 2,
+					hash:  common.HexToHash("0x2"),
+				},
+			},
+			truncate:      2,
+			expectedCount: 1,
+		},
+		"skipped index yields expected count": {
+			updates: []indexToHash{
+				{
+					index: 1,
+					hash:  common.HexToHash("0x1"),
+				},
+				{
+					index: 3,
+					hash:  common.HexToHash("0x3"),
+				},
+				{
+					index: 4,
+					hash:  common.HexToHash("0x4"),
+				},
+			},
+			truncate:      4,
+			expectedCount: 2,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			tx, cleanup := GetDbTx()
+			defer cleanup()
+			db := NewHermezDb(tx)
+
+			for _, update := range tc.updates {
+				require.NoError(t, db.WriteL1InfoTreeRoot(update.hash, update.index))
+			}
+
+			require.NoError(t, db.TruncateL1InfoTreeRoots(tc.truncate))
+
+			// now ensure nothing is in the table beyond the truncate point
+			c1, err := db.tx.Cursor(L1_INFO_ROOTS)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer c1.Close()
+
+			for k, _, err := c1.First(); k != nil; k, _, err = c1.Next() {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(k) == 0 {
+					break
+				}
+				index := BytesToUint64(k)
+				if index > tc.truncate {
+					t.Fatalf("expected index %d to be less than truncate %d", index, tc.truncate)
+				}
+
+			}
+
+			// now ensure the count is correct
+			count, err := c1.Count()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if count != tc.expectedCount {
+				t.Fatalf("expected count %d to be equal to truncate %d", count, tc.truncate)
+			}
+
+			require.NoError(t, err)
 		})
 	}
 }

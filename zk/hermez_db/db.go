@@ -55,6 +55,7 @@ const BATCH_ENDS = "batch_ends"                                         // batch
 const WITNESS_CACHE = "witness_cache"                                   // block number -> witness for 1 block
 const BAD_TX_HASHES = "bad_tx_hashes"                                   // tx hash -> integer counter
 const BAD_TX_HASHES_LOOKUP = "bad_tx_hashes_lookup"                     // timestamp -> tx hash
+const CONFIRMED_L1_INFO_TREE_UPDATE = "confirmed_l1_info_tree_update"   // 1 - > confirmed l1 info tree index information (fork 12 only)
 
 var HermezDbTables = []string{
 	L1VERIFICATIONS,
@@ -94,6 +95,7 @@ var HermezDbTables = []string{
 	BAD_TX_HASHES,
 	BAD_TX_HASHES_LOOKUP,
 	WITNESS_CACHE,
+	CONFIRMED_L1_INFO_TREE_UPDATE,
 }
 
 type HermezDb struct {
@@ -1215,9 +1217,54 @@ func (db *HermezDb) WriteL1InfoTreeUpdate(update *types.L1InfoTreeUpdate) error 
 	return db.tx.Put(L1_INFO_TREE_UPDATES, idx, marshalled)
 }
 
+func (db *HermezDb) TruncateL1InfoTreeUpdates(fromIndex uint64) error {
+	c, err := db.tx.Cursor(L1_INFO_TREE_UPDATES)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, _, err := c.Seek(Uint64ToBytes(fromIndex)); k != nil; k, _, err = c.Next() {
+		if err != nil {
+			return err
+		}
+
+		if err = db.tx.Delete(L1_INFO_TREE_UPDATES, k); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (db *HermezDb) WriteL1InfoTreeUpdateToGer(update *types.L1InfoTreeUpdate) error {
 	marshalled := update.Marshall()
 	return db.tx.Put(L1_INFO_TREE_UPDATES_BY_GER, update.GER.Bytes(), marshalled)
+}
+
+func (db *HermezDb) TruncateL1InfoTreeUpdatesByGer(fromIndex uint64) error {
+	c, err := db.tx.Cursor(L1_INFO_TREE_UPDATES_BY_GER)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+
+		update := &types.L1InfoTreeUpdate{}
+		update.Unmarshall(v)
+
+		if update.Index >= fromIndex {
+			if err = db.tx.Delete(L1_INFO_TREE_UPDATES_BY_GER, k); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
 
 func (db *HermezDbReader) GetL1InfoTreeUpdateByGer(ger common.Hash) (*types.L1InfoTreeUpdate, error) {
@@ -1578,6 +1625,26 @@ func (db *HermezDb) WriteL1InfoTreeLeaf(l1Index uint64, leaf common.Hash) error 
 	return db.tx.Put(L1_INFO_LEAVES, Uint64ToBytes(l1Index), leaf.Bytes())
 }
 
+func (db *HermezDb) TruncateL1InfoTreeLeaves(fromIndex uint64) error {
+	c, err := db.tx.Cursor(L1_INFO_LEAVES)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, _, err := c.Seek(Uint64ToBytes(fromIndex)); k != nil; k, _, err = c.Next() {
+		if err != nil {
+			return err
+		}
+
+		if err = db.tx.Delete(L1_INFO_LEAVES, k); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (db *HermezDbReader) GetAllL1InfoTreeLeaves() ([]common.Hash, error) {
 	c, err := db.tx.Cursor(L1_INFO_LEAVES)
 	if err != nil {
@@ -1598,6 +1665,28 @@ func (db *HermezDbReader) GetAllL1InfoTreeLeaves() ([]common.Hash, error) {
 
 func (db *HermezDb) WriteL1InfoTreeRoot(hash common.Hash, index uint64) error {
 	return db.tx.Put(L1_INFO_ROOTS, hash.Bytes(), Uint64ToBytes(index))
+}
+
+func (db *HermezDb) TruncateL1InfoTreeRoots(fromIndex uint64) error {
+	c, err := db.tx.Cursor(L1_INFO_ROOTS)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		index := BytesToUint64(v)
+		if index >= fromIndex {
+			if err = db.tx.Delete(L1_INFO_ROOTS, k); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
 
 func (db *HermezDb) GetL1InfoTreeIndexByRoot(hash common.Hash) (uint64, bool, error) {
@@ -1993,4 +2082,20 @@ func (db *HermezDb) TruncateWitnessCacheBelow(below uint64) error {
 	}
 
 	return nil
+}
+
+func (db *HermezDb) WriteConfirmedL1InfoTreeUpdate(index, l1BlockNumber uint64) error {
+	combinedBytes := append(Uint64ToBytes(index), Uint64ToBytes(l1BlockNumber)...)
+	return db.tx.Put(CONFIRMED_L1_INFO_TREE_UPDATE, []byte{1}, combinedBytes)
+}
+
+func (db *HermezDbReader) GetConfirmedL1InfoTreeUpdate() (index, l1BlockNumber uint64, err error) {
+	v, err := db.tx.GetOne(CONFIRMED_L1_INFO_TREE_UPDATE, []byte{1})
+	if err != nil {
+		return 0, 0, err
+	}
+	if len(v) == 0 {
+		return 0, 0, nil
+	}
+	return BytesToUint64(v[:8]), BytesToUint64(v[8:]), nil
 }

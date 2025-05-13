@@ -1123,7 +1123,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			ctx,
 			ethermanClients,
 			[]libcommon.Address{cfg.AddressGerManager},
-			[][]libcommon.Hash{{contracts.UpdateL1InfoTreeTopic}},
+			[][]libcommon.Hash{{contracts.UpdateL1InfoTreeTopic, contracts.UpdateL1InfoTreeV2Topic}},
 			cfg.L1BlockRange,
 			cfg.L1QueryDelay,
 			cfg.L1HighestBlockType,
