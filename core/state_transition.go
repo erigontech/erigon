@@ -471,15 +471,17 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		return nil, err
 	}
 
-	msg := st.msg
+	var (
+		msg       = st.msg
+		sender    = vm.AccountRef(msg.From())
+		rules     = st.evm.ChainRules()
+		vmConfig  = st.evm.Config()
+		isEIP3860 = vmConfig.HasEip3860(rules)
+
+		accessTuples     = slices.Clone[types.AccessList](msg.AccessList())
+		contractCreation = msg.To() == nil
+	)
 	// coinbase = st.msg.From() // arbitrum
-	// st.evm.Context.Coinbase = msg.From()
-	sender := vm.AccountRef(msg.From())
-	contractCreation := msg.To() == nil
-	rules := st.evm.ChainRules()
-	vmConfig := st.evm.Config()
-	isEIP3860 := vmConfig.HasEip3860(rules)
-	accessTuples := slices.Clone[types.AccessList](msg.AccessList())
 
 	if !contractCreation {
 		// Increment the nonce for the next transaction
@@ -579,8 +581,16 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 			gasUsed := st.gasUsed()
 			refund := min(gasUsed/refundQuotient, st.state.GetRefund())
 			gasUsed = gasUsed - refund
+
 			if rules.IsPrague {
+				//if st.evm.ProcessingHook.IsCalldataPricingIncreaseEnabled() {
+				//	// TODO seems like pointless update and check
+				//	if st.gasUsed() < floorGas7623 {
+				//		gasUsed = floorGas7623
+				//	}
+				//} else {
 				gasUsed = max(floorGas7623, gasUsed)
+				//}
 			}
 			st.gasRemaining = st.initialGas - gasUsed
 		}
