@@ -190,18 +190,19 @@ func TestMultipleAuthorizations(t *testing.T) {
 		tipcap         uint64
 		expectedReason txpoolcfg.DiscardReason
 		replacedAuth   *AuthAndNonce
-	}{{
-		title:          "a setcode txn with different sender and authority",
-		sender:         addrA,
-		senderNonce:    0,
-		authority:      &addrB,
-		authNonce:      0,
-		feecap:         100_000,
-		tipcap:         100_000,
-		expectedReason: txpoolcfg.Success,
-	},
+	}{
 		{
-			title:          "own authorization with correct sender nonce, and same authority nonce",
+			title:          "a setcode txn with sender=A and authority=B",
+			sender:         addrA,
+			senderNonce:    0,
+			authority:      &addrB,
+			authNonce:      0,
+			feecap:         100_000,
+			tipcap:         100_000,
+			expectedReason: txpoolcfg.Success,
+		},
+		{
+			title:          "A's own authorization with correct sender nonce, and same nonce for authorization",
 			sender:         addrA,
 			senderNonce:    1,
 			authority:      &addrA,
@@ -221,7 +222,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 			expectedReason: txpoolcfg.Success,
 		},
 		{
-			title:          "send txn with existing own authorization txn senderNonce =(prev auth nonce)",
+			title:          "A sends senderNonce=(prev auth nonce) wtih existing own authorization of A ",
 			sender:         addrA,
 			senderNonce:    2,
 			authority:      nil,
@@ -232,7 +233,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 		},
 
 		{
-			title:          "send txn senderNonce=(auth nonce) with existing authorization by another sender",
+			title:          "B sends with nonce as B's auth nonce of existing authorization sent by A",
 			sender:         addrB,
 			senderNonce:    0,
 			authority:      nil,
@@ -242,7 +243,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 			expectedReason: txpoolcfg.ErrAuthorityReserved,
 		},
 		{
-			title:          "send non-setcode txn senderNonce=(auth nonce + 1) with existing own authorization by another sender, ",
+			title:          "B sends non-setcode txn senderNonce=(auth nonce + 1) with existing own authorization sent by A",
 			sender:         addrB,
 			senderNonce:    1,
 			authority:      nil,
@@ -250,8 +251,9 @@ func TestMultipleAuthorizations(t *testing.T) {
 			feecap:         100_000,
 			tipcap:         100_000,
 			expectedReason: txpoolcfg.Success,
-		}, {
-			title:          "existing own authorization in pool, new setcode txn with higher nonce and auth nonce",
+		},
+		{
+			title:          "B's existing authorization in pool, B sends new setcode txn with higher nonce and auth nonce",
 			sender:         addrB,
 			senderNonce:    2,
 			authority:      &addrB,
@@ -261,7 +263,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 			expectedReason: txpoolcfg.Success,
 		},
 		{
-			title:          "replace own setcode txn with anothers's authority, with higher tipcap",
+			title:          "replace setcode txn sent By B with B's authorization, with higher tipcap and A's authorization",
 			sender:         addrB,
 			senderNonce:    2,
 			authority:      &addrA,
@@ -272,7 +274,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 			replacedAuth:   &AuthAndNonce{addrB.String(), 3},
 		},
 		{
-			title:          "replace own setcode txn with non setcode txn, with higher tipcap",
+			title:          "B sends to replace own setcode txn with non setcode txn, with higher tipcap",
 			sender:         addrB,
 			senderNonce:    2,
 			authority:      nil,
@@ -283,7 +285,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 			replacedAuth:   &AuthAndNonce{addrA.String(), 3},
 		},
 		{
-			title:          "replace non setcode txn, with setcode txn with higher tipcap",
+			title:          "B sends to replace non setcode txn, with setcode txn (A's auth) with higher tipcap",
 			sender:         addrB,
 			senderNonce:    2,
 			authority:      &addrA,
@@ -292,7 +294,8 @@ func TestMultipleAuthorizations(t *testing.T) {
 			tipcap:         400_000,
 			expectedReason: txpoolcfg.Success,
 		},
-		{title: "send new setcode txn with own authority after setcode txn for another authority",
+		{
+			title:          "B sends another setcode txn with B's authorization after setcode txn for A's authorization",
 			sender:         addrB,
 			senderNonce:    3,
 			authority:      &addrB,
@@ -364,7 +367,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 				Nonce:  c.senderNonce,
 			}
 			if c.authority != nil {
-				txnSlot1.Authorities = []AuthAndNonce{{c.authority.String(), c.authNonce}}
+				txnSlot1.AuthAndNonces = []AuthAndNonce{{c.authority.String(), c.authNonce}}
 				txnSlot1.Type = SetCodeTxnType
 			}
 			txnSlot1.IDHash[0] = uint8(idHash)
@@ -1057,11 +1060,11 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	require.NoError(t, err)
 
 	txn := &TxnSlot{
-		FeeCap:      *uint256.NewInt(21000),
-		Gas:         500000,
-		SenderID:    0,
-		Type:        SetCodeTxnType,
-		Authorities: []AuthAndNonce{{nonce: 0, authority: common.Address{}.String()}},
+		FeeCap:        *uint256.NewInt(21000),
+		Gas:           500000,
+		SenderID:      0,
+		Type:          SetCodeTxnType,
+		AuthAndNonces: []AuthAndNonce{{nonce: 0, authority: common.Address{}.String()}},
 	}
 
 	txns := TxnSlots{
