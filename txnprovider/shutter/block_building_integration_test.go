@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-// Exclude when running tests with race detector see issue #15007
+// Skip when running tests with race detector: see issue #15007
 //go:build !race
 
 package shutter_test
