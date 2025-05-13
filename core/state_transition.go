@@ -411,6 +411,23 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 // However if any consensus issue encountered, return the error directly with
 // nil evm execution result.
 func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *evmtypes.ExecutionResult, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			// Recover from dependency panic and retry the execution.
+			if r != state.ErrDependency {
+				log.Debug("Recovered from transition exec failure.", "Error:", r, "stack", dbg.Stack())
+			}
+			st.gp.AddGas(st.gasUsed())
+			depTxIndex := st.evm.IntraBlockState().DepTxIndex()
+			if depTxIndex < 0 {
+				err = fmt.Errorf("transition exec failure: %s at: %s", r, dbg.Stack())
+			}
+			err = ErrExecAbortError{
+				DependencyTxIndex: depTxIndex,
+				OriginError:       err}
+		}
+	}()
+
 	coinbase := st.evm.Context.Coinbase
 	senderInitBalance, err := st.state.GetBalance(st.msg.From())
 	if err != nil {
@@ -505,23 +522,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		ret   []byte
 		vmerr error // vm errors do not effect consensus and are therefore not assigned to err
 	)
-
-	defer func() {
-		if r := recover(); r != nil {
-			// Recover from dependency panic and retry the execution.
-			if r != state.ErrDependency {
-				log.Debug("Recovered from EVM failure.", "Error:", r, "stack", dbg.Stack())
-			}
-			st.gp.AddGas(st.gasUsed())
-			depTxIndex := st.evm.IntraBlockState().DepTxIndex()
-			if depTxIndex < 0 {
-				err = fmt.Errorf("EVM failure: %s at: %s", r, dbg.Stack())
-			}
-			err = ErrExecAbortError{
-				DependencyTxIndex: depTxIndex,
-				OriginError:       err}
-		}
-	}()
 
 	if contractCreation {
 		// The reason why we don't increment nonce here is that we need the original

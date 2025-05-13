@@ -757,7 +757,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 	tx := task.index
 	be.results[tx] = &execResult{res}
-
 	if res.Err != nil {
 		if execErr, ok := res.Err.(core.ErrExecAbortError); ok {
 			if execErr.OriginError != nil && be.skipCheck[tx] {
@@ -1502,13 +1501,13 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	pe.taskExecMetrics = exec3.NewWorkerMetrics()
 	pe.blockExecMetrics = newBlockExecMetrics()
 
-	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers = exec3.NewWorkersPool(
-		ctx, pe.accumulator, true, pe.cfg.db, nil, nil, nil, pe.in,
-		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
-		pe.workerCount+1, pe.taskExecMetrics, pe.cfg.dirs, pe.isMining, pe.logger)
-
 	execLoopCtx, execLoopCtxCancel := context.WithCancel(ctx)
 	pe.execLoopGroup, execLoopCtx = errgroup.WithContext(execLoopCtx)
+
+	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers = exec3.NewWorkersPool(
+		execLoopCtx, pe.accumulator, true, pe.cfg.db, nil, nil, nil, pe.in,
+		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
+		pe.workerCount+1, pe.taskExecMetrics, pe.cfg.dirs, pe.isMining, pe.logger)
 
 	pe.execLoopGroup.Go(func() error {
 		defer pe.rws.Close()

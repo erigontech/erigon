@@ -251,6 +251,7 @@ func (rw *Worker) Run() (err error) {
 
 func (rw *Worker) RunTxTask(txTask exec.Task) (result *exec.TxResult) {
 	//fmt.Println("RTX", txTask.Version().BlockNum, txTask.Version().TxIndex, txTask.Version().TxNum, txTask.IsBlockEnd())
+	//defer fmt.Println("RTX DONE", txTask.Version().BlockNum, txTask.Version().TxIndex)
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 
@@ -326,7 +327,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.TxResult {
 		callTracer = calltracer.NewCallTracer(txTask.TracingHooks())
 	}
 
-	if err := txTask.Reset(rw.evm, rw.ibs, callTracer); err!=nil {
+	if err := txTask.Reset(rw.evm, rw.ibs, callTracer); err != nil {
 		return &exec.TxResult{
 			Task: txTask,
 			Err:  err,
@@ -354,47 +355,42 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 
 	resultsSize := workerCount * 8
 	rws = exec.NewResultsQueue(resultsSize, workerCount)
-	{
-		// we all errors in background workers (except ctx.Cancel), because applyLoop will detect this error anyway.
-		// and in applyLoop all errors are critical
-		ctx, cancel := context.WithCancel(ctx)
-		g, ctx := errgroup.WithContext(ctx)
+
+	g, gctx := errgroup.WithContext(ctx)
+	for i := 0; i < workerCount; i++ {
+		reconWorkers[i] = NewWorker(gctx, background, metrics, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
+
+		if rs != nil {
+			reader := stateReader
+
+			if reader == nil {
+				reader = state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains(), nil))
+			}
+
+			reconWorkers[i].ResetState(rs, nil, reader, stateWriter, accumulator)
+		}
+	}
+	if background {
 		for i := 0; i < workerCount; i++ {
-			reconWorkers[i] = NewWorker(ctx, background, metrics, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
-
-			if rs != nil {
-				reader := stateReader
-
-				if reader == nil {
-					reader = state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains(), nil))
-				}
-
-				reconWorkers[i].ResetState(rs, nil, reader, stateWriter, accumulator)
-			}
+			i := i
+			g.Go(func() error {
+				return reconWorkers[i].Run()
+			})
 		}
-		if background {
-			for i := 0; i < workerCount; i++ {
-				i := i
-				g.Go(func() error {
-					return reconWorkers[i].Run()
-				})
-			}
-			wait = func() { g.Wait() }
-		}
+		wait = func() { g.Wait() }
+	}
 
-		var clearDone bool
-		clear = func() {
-			if clearDone {
-				return
-			}
-			clearDone = true
-			cancel()
-			g.Wait()
-			for _, w := range reconWorkers {
-				w.ResetTx(nil)
-			}
-			//applyWorker.ResetTx(nil)
+	var clearDone bool
+	clear = func() {
+		if clearDone {
+			return
 		}
+		clearDone = true
+		g.Wait()
+		for _, w := range reconWorkers {
+			w.ResetTx(nil)
+		}
+		//applyWorker.ResetTx(nil)
 	}
 	applyWorker = NewWorker(ctx, false, nil, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
 
