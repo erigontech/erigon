@@ -28,8 +28,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	salt "github.com/erigontech/erigon-lib/entity_extras"
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	salt "github.com/erigontech/erigon-lib/state/entity_extras"
 )
 
 func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {

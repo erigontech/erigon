@@ -29,8 +29,8 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	stateLib "github.com/erigontech/erigon-lib/state"
 
-	salt "github.com/erigontech/erigon-lib/entity_extras"
 	"github.com/erigontech/erigon-lib/kv"
+	salt "github.com/erigontech/erigon-lib/state/entity_extras"
 )
 
 func initializeDbNonDupSort(rwTx kv.RwTx) {
