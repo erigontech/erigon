@@ -316,7 +316,6 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 			_, fName := filepath.Split(filePath)
 			res, isStateFile, ok := snaptype.ParseFileName(dirPath, fName)
 			if !ok || !isStateFile {
-				fmt.Printf("skipping %s\n", filePath)
 				continue
 			}
 			if res.From == 0 && res.To == 0 {
