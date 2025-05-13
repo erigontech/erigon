@@ -512,7 +512,8 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		wg := errgroup.Group{}
 		wg.SetLimit(1)
 		onNewSnapshot = func() {
-			wg.Go(func() error { // don't block events processing by network communication
+			wg.Go(func() error {
+				// don't block events processing by network communication
 				reply, err := remoteKvClient.Snapshots(ctx, &remote.SnapshotsRequest{}, grpc.WaitForReady(true))
 				if err != nil {
 					logger.Warn("[snapshots] reopen", "err", err)
@@ -529,6 +530,9 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 					allBorSnapshots.LogStat("bor:reopen")
 				}
 
+				if err = agg.ReloadSalt(); err != nil {
+					return fmt.Errorf("agg ReloadSalt: %w", err)
+				}
 				if err = agg.OpenFolder(); err != nil {
 					logger.Error("[snapshots] reopen", "err", err)
 				} else {
