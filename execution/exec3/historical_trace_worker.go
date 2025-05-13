@@ -183,7 +183,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 		// End of block transaction in a block
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
 			res, err := core.SysCallContract(contract, data, rw.execArgs.ChainConfig, ibs, header, rw.execArgs.Engine, false /* constCall */)
-			txTask.Logs = append(txTask.Logs, ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)...)
+			txTask.Logs = append(txTask.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
 			return res, err
 		}
 
