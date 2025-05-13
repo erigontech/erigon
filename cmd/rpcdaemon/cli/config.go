@@ -476,8 +476,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("create aggregator: %w", err)
 		}
 		if err = agg.ReloadSalt(); err != nil {
-			err = fmt.Errorf("agg ReloadSalt: %w", err)
-			return
+			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("agg ReloadSalt: %w", err)
 		}
 		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
 		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
@@ -512,7 +511,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		wg := errgroup.Group{}
 		wg.SetLimit(1)
 		onNewSnapshot = func() {
-			wg.Go(func() error {
+			wg.Go(func() (err error) {
 				// don't block events processing by network communication
 				reply, err := remoteKvClient.Snapshots(ctx, &remote.SnapshotsRequest{}, grpc.WaitForReady(true))
 				if err != nil {
