@@ -1297,7 +1297,7 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 	}
 
 	for txnID := _min; txnID < _max+1; txnID++ {
-		v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txnID+1)
+		v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txnID)
 		if err != nil {
 			return nil, fmt.Errorf("unexpected error, couldn't find changeset: txNum=%d, %w", txnID, err)
 		}
