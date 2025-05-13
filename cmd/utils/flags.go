@@ -2100,7 +2100,9 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		}
 		version := "erigon: " + params2.VersionWithCommit(params2.GitCommit)
 		webseedsList := common.CliString2Array(ctx.String(WebSeedsFlag.Name))
-		webseedsList = append(webseedsList, snapcfg.GetWebseeds(chain)...)
+		if known, ok := snapcfg.KnownWebseeds[chain]; ok {
+			webseedsList = append(webseedsList, known...)
+		}
 		cfg.Downloader, err = downloadercfg2.New(
 			ctx.Context,
 			cfg.Dirs,

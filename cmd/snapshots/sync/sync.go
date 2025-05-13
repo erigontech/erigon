@@ -209,7 +209,10 @@ func NewTorrentClient(ctx context.Context, config CreateNewTorrentClientConfig) 
 	dirs := datadir.New(torrentDir)
 
 	webseedsList := common.CliString2Array(config.WebSeeds)
-	webseedsList = append(webseedsList, snapcfg.GetWebseeds(config.Chain)...)
+
+	if known, ok := snapcfg.KnownWebseeds[config.Chain]; ok {
+		webseedsList = append(webseedsList, known...)
+	}
 
 	var downloadRate, uploadRate datasize.ByteSize
 
