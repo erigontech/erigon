@@ -293,6 +293,9 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			if err != nil {
 				return nil, err
 			}
+			if header == nil {
+				continue
+			}
 
 			// check for state sync event logs
 			events, err := api.stateSyncEvents(ctx, tx, header.Hash(), blockNum, chainConfig)
