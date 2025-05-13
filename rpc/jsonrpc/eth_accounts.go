@@ -103,11 +103,15 @@ func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNr
 	}
 
 	acc, err := reader.ReadAccountData(address)
+	log.Info("[SPIDERMAN] GetCode ReadAccountData", "acc", acc)
 	if acc == nil || err != nil {
 		return hexutil.Bytes(""), nil
 	}
 	res, _ := reader.ReadAccountCode(address)
+	log.Info("[SPIDERMAN] GetCode ReadAccountCode", "res", res)
+
 	if res == nil {
+		log.Info("[SPIDERMAN] res == nil")
 		return hexutil.Bytes(""), nil
 	}
 	return res, nil

@@ -20,6 +20,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/types/accounts"
 )
@@ -83,7 +84,11 @@ func (r *CachedReader3) ReadAccountStorage(address common.Address, key *common.H
 
 func (r *CachedReader3) ReadAccountCode(address common.Address) ([]byte, error) {
 	code, err := r.cache.GetCode(address[:])
+	log.Info("[SPIDERMAN] CachedReader3.ReadAccountCode: found in cache", "code", code)
+
 	if len(code) == 0 {
+		log.Info("[SPIDERMAN] CachedReader3.ReadAccountCode len code 0, returning nil")
+
 		return nil, nil
 	}
 	return code, err

@@ -18,6 +18,7 @@ package state
 
 import (
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -79,15 +80,21 @@ func (cr *CachedReader) ReadAccountStorage(address common.Address, key *common.H
 // ReadAccountCode is called when code of an account needs to be fetched from the state
 // Usually, one of (address;incarnation) or codeHash is enough to uniquely identify the code
 func (cr *CachedReader) ReadAccountCode(address common.Address) ([]byte, error) {
+	log.Info("[SPIDERMAN] Call to ReadAccountCode")
 	if c, ok := cr.cache.GetCode(address.Bytes(), 1); ok {
+		log.Info("[SPIDERMAN] CachedReader.ReadAccountCode: found in cache, returning", "c", c)
 		return c, nil
 	}
 	c, err := cr.r.ReadAccountCode(address)
 	if err != nil {
 		return nil, err
 	}
+	log.Info("[SPIDERMAN] CachedReader.ReadAccountCode: r.ReadAccountCode ", "c", c)
+
 	if cr.cache != nil && len(c) <= 1024 {
 		cr.cache.SetCodeRead(address.Bytes(), 1, c)
+		log.Info("[SPIDERMAN] CachedReader.ReadAccountCode: store in Cache")
+
 	}
 	return c, nil
 }

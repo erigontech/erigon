@@ -49,3 +49,30 @@ func TestRecoverSigner(t *testing.T) {
 	}
 
 }
+
+
+// Tests that the correct signer is recovered from an Authorization object
+// The data here was obtained from a pectra devnet
+func TestRecoverSignerAgain(t *testing.T) {
+	t.Parallel()
+
+	auth := Authorization{
+		ChainID: *uint256.MustFromHex("0x0"),
+		Address: common.HexToAddress("0x196c646d03932fd3942bea08c3bcc3b221d7dd8d"),
+		Nonce:   0xf,
+		YParity: 0,
+		R:       *uint256.MustFromHex("0xf9f8a5659e56694ba77a3a7d116b51802ba44b187c75845fafc4f1ac29b15583"),
+		S:       *uint256.MustFromHex("0x8c2f7ef233f7c9b12faa4ac8ad08f1eba87785647844782ae8734393b0fa562"),
+	}
+	var b [32]byte
+	data := bytes.NewBuffer(nil)
+	authorityPtr, err := auth.RecoverSigner(data, b[:])
+	if err != nil {
+		t.Error(err)
+	}
+	expectedSigner := common.HexToAddress("0x2742554ab3da43f5f484af2501aecac8394b40cd")
+	if *authorityPtr != expectedSigner {
+		t.Errorf("mismatch in recovered signer: got %v, want %v", *authorityPtr, expectedSigner)
+	}
+
+}

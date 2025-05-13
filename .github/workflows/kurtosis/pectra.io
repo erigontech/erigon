@@ -3,6 +3,7 @@ participants_matrix:
     - el_type: erigon
       el_image: test/erigon:current
       el_log_level: "debug"
+    - el_type: geth
   cl:
     - cl_type: teku
       cl_image: consensys/teku:develop
@@ -19,7 +20,7 @@ network_params:
 
 additional_services:
   - assertoor
-  # - dora
+  - dora
 snooper_enabled: false
 assertoor_params:
   run_stability_check: true

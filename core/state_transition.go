@@ -451,6 +451,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	if err != nil {
 		return nil, err
 	}
+	log.Debug("[state_transition] processed setcode txn", "verifiedAuthorities", verifiedAuthorities, "authorizations", auths)
 
 	if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
 		t.OnGasChange(st.gasRemaining, st.gasRemaining-gas, tracing.GasChangeTxIntrinsicGas)

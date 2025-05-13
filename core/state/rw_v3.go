@@ -654,6 +654,7 @@ func (r *ReaderV3) ReadAccountStorage(address common.Address, key *common.Hash) 
 
 func (r *ReaderV3) ReadAccountCode(address common.Address) ([]byte, error) {
 	enc, _, err := r.tx.GetLatest(kv.CodeDomain, address[:])
+	log.Info("[SPIDERMAN] ReaderV3.ReadAccountCode: GetLatest", "enc", enc)
 	if err != nil {
 		return nil, err
 	}
