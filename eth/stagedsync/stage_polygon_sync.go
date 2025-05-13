@@ -48,7 +48,6 @@ import (
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/p2p"
 	"github.com/erigontech/erigon/polygon/sync"
-	polygonsync "github.com/erigontech/erigon/polygon/sync"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 )
@@ -119,17 +118,17 @@ func NewPolygonSyncStageCfg(
 		BorConfig:    borConfig,
 		EventFetcher: heimdallClient})
 	p2pService := p2p.NewService(logger, maxPeers, sentry, statusDataProvider.GetStatusData)
-	checkpointVerifier := polygonsync.VerifyCheckpointHeaders
-	milestoneVerifier := polygonsync.VerifyMilestoneHeaders
-	blocksVerifier := polygonsync.VerifyBlocks
+	checkpointVerifier := sync.VerifyCheckpointHeaders
+	milestoneVerifier := sync.VerifyMilestoneHeaders
+	blocksVerifier := sync.VerifyBlocks
 
 	signaturesCache, err := lru.NewARC[common.Hash, common.Address](sync.InMemorySignatures)
 	if err != nil {
 		panic(err)
 	}
 
-	syncStore := polygonsync.NewStore(logger, executionEngine, bridgeService)
-	blockDownloader := polygonsync.NewBlockDownloader(
+	syncStore := sync.NewStore(logger, executionEngine, bridgeService)
+	blockDownloader := sync.NewBlockDownloader(
 		logger,
 		p2pService,
 		heimdallService,
@@ -139,8 +138,8 @@ func NewPolygonSyncStageCfg(
 		syncStore,
 		blockLimit,
 	)
-	events := polygonsync.NewTipEvents(logger, p2pService, heimdallService, minedBlockReg)
-	sync := polygonsync.NewSync(
+	events := sync.NewTipEvents(logger, p2pService, heimdallService, minedBlockReg)
+	sync := sync.NewSync(
 		config,
 		logger,
 		syncStore,
@@ -149,7 +148,7 @@ func NewPolygonSyncStageCfg(
 		blocksVerifier,
 		p2pService,
 		blockDownloader,
-		polygonsync.NewCanonicalChainBuilderFactory(chainConfig, borConfig, heimdallService, signaturesCache),
+		sync.NewCanonicalChainBuilderFactory(chainConfig, borConfig, heimdallService, signaturesCache),
 		heimdallService,
 		bridgeService,
 		events.Events(),
@@ -302,9 +301,9 @@ type polygonSyncStageTxAction struct {
 
 type polygonSyncStageService struct {
 	logger          log.Logger
-	sync            *polygonsync.Sync
-	syncStore       polygonsync.Store
-	events          *polygonsync.TipEvents
+	sync            *sync.Sync
+	syncStore       sync.Store
+	events          *sync.TipEvents
 	p2p             *p2p.Service
 	executionEngine *polygonSyncStageExecutionEngine
 	heimdall        *heimdall.Service
@@ -1332,7 +1331,7 @@ func (e *polygonSyncStageExecutionEngine) UpdateForkChoice(ctx context.Context, 
 	case result := <-resultCh:
 		err := result.validationErr
 		if err != nil {
-			err = fmt.Errorf("%w: %w", polygonsync.ErrForkChoiceUpdateBadBlock, err)
+			err = fmt.Errorf("%w: %w", sync.ErrForkChoiceUpdateBadBlock, err)
 		}
 		return result.latestValidHash, err
 	}

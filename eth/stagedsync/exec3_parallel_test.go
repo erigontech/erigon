@@ -93,7 +93,6 @@ func sleep(i time.Duration) {
 }
 
 func (t *testExecTask) Execute(evm *vm.EVM,
-	vmCfg vm.Config,
 	engine consensus.Engine,
 	genesis *types.Genesis,
 	ibs *state.IntraBlockState,

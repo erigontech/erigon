@@ -319,21 +319,21 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.TxResult {
 	}
 
 	txIndex := txTask.Version().TxIndex
-	txTask.Reset(rw.ibs)
 
-	if txIndex >= 0 {
-		rw.ibs.SetTxContext(txTask.Version().BlockNum, txIndex)
-	}
-
-	var vmCfg vm.Config
 	var callTracer *calltracer.CallTracer
 
 	if txIndex != -1 && !txTask.IsBlockEnd() {
 		callTracer = calltracer.NewCallTracer(txTask.TracingHooks())
-		vmCfg.Tracer = callTracer.Tracer().Hooks
 	}
 
-	result := txTask.Execute(rw.evm, vmCfg, rw.engine, rw.genesis, rw.ibs, rw.stateWriter, rw.chainConfig, rw.chain, rw.dirs, true)
+	if err := txTask.Reset(rw.evm, rw.ibs, callTracer); err!=nil {
+		return &exec.TxResult{
+			Task: txTask,
+			Err:  err,
+		}
+	}
+
+	result := txTask.Execute(rw.evm, rw.engine, rw.genesis, rw.ibs, rw.stateWriter, rw.chainConfig, rw.chain, rw.dirs, true)
 
 	if result.Task == nil {
 		result.Task = txTask

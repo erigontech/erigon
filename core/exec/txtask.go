@@ -46,7 +46,6 @@ import (
 
 type Task interface {
 	Execute(evm *vm.EVM,
-		vmCfg vm.Config,
 		engine consensus.Engine,
 		genesis *types.Genesis,
 		ibs *state.IntraBlockState,
@@ -60,7 +59,7 @@ type Task interface {
 	VersionMap() *state.VersionMap
 	VersionedReads(ibs *state.IntraBlockState) state.ReadSet
 	VersionedWrites(ibs *state.IntraBlockState) state.VersionedWrites
-	Reset(ibs *state.IntraBlockState)
+	Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error
 	ResetGasPool(*core.GasPool)
 
 	Tx() types.Transaction
@@ -357,7 +356,7 @@ func (t *TxTask) GasPool() *core.GasPool {
 }
 
 func (t *TxTask) ResetGasPool(gasPool *core.GasPool) {
-	t.gasPool=gasPool
+	t.gasPool = gasPool
 }
 
 func (t *TxTask) Version() state.Version {
@@ -400,13 +399,33 @@ func (t *TxTask) IsHistoric() bool {
 	return t.HistoryExecution
 }
 
-func (t *TxTask) Reset(ibs *state.IntraBlockState) {
+func (t *TxTask) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error {
 	t.BalanceIncreaseSet = nil
 	ibs.Reset()
+
+	if t.TxIndex >= 0 {
+		ibs.SetTxContext(t.BlockNumber(), t.TxIndex)
+	}
+
+	if t.TxIndex != -1 && !t.IsBlockEnd() {
+		var vmCfg vm.Config
+		if callTracer != nil {
+			vmCfg.Tracer = callTracer.Tracer().Hooks
+		}
+		vmCfg.SkipAnalysis = t.SkipAnalysis
+		msg, err := t.TxMessage()
+
+		if err != nil {
+			return err
+		}
+
+		evm.ResetBetweenBlocks(t.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmCfg, t.Config.Rules(t.BlockNumber(), t.BlockTime()))
+	}
+
+	return nil
 }
 
 func (txTask *TxTask) Execute(evm *vm.EVM,
-	vmCfg vm.Config,
 	engine consensus.Engine,
 	genesis *types.Genesis,
 	ibs *state.IntraBlockState,
@@ -441,7 +460,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			ret, _, err := core.SysCallContract(contract, data, chainConfig, ibs, header, engine, constCall /* constCall */, vmCfg.Tracer)
+			ret, _, err := core.SysCallContract(contract, data, chainConfig, ibs, header, engine, constCall /* constCall */, evm.Config().Tracer)
 			return ret, err
 		}
 		engine.Initialize(chainConfig, chainReader, header, ibs, syscall, txTask.Logger, nil)
@@ -452,10 +471,6 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			break
 		}
 
-		//incorrect unwind to block 2
-		//if err := ibs.CommitBlock(rules, rw.stateWriter); err != nil {
-		//	txTask.Error = err
-		//}
 		result.ExecutionResult = &evmtypes.ExecutionResult{}
 		result.TraceTos = map[common.Address]struct{}{}
 		result.TraceTos[txTask.Header.Coinbase] = struct{}{}
@@ -463,18 +478,6 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			result.TraceTos[uncle.Coinbase] = struct{}{}
 		}
 	default:
-		// This doesn't make sense, but I am not sure if this wrong behaviour is needed somewhere else:
-		//gasPool.Reset(txTask.Tx().GetGasLimit(), chainConfig.GetMaxBlobGasPerBlock(txTask.Header.Time))
-		vmCfg.SkipAnalysis = txTask.SkipAnalysis
-		msg, err := txTask.TxMessage()
-
-		if err != nil {
-			result.Err = err
-			return &result
-		}
-
-		evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmCfg, rules)
-
 		if txTask.Tx().Type() == types.AccountAbstractionTxType {
 			if !chainConfig.AllowAA {
 				result.Err = errors.New("account abstraction transactions are not allowed")

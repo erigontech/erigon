@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3"
+	"github.com/erigontech/erigon/execution/exec3/calltracer"
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
@@ -175,10 +176,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 		return nil, nil
 	}
 
-	txHash := task.TxHash()
 	blockNum := txTask.BlockNumber()
-	blockHash := txTask.BlockHash()
-
 	for _, l := range result.Logs {
 		ibs.AddLog(l)
 	}
@@ -188,8 +186,13 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 			ibs.AddBalance(result.ExecutionResult.BurntContractAddress, result.ExecutionResult.FeeBurnt, tracing.BalanceDecreaseGasBuy)
 		}
 
+		coinbaseBalance, err := ibs.GetBalance(result.Coinbase)
+
+		if err != nil {
+			return nil, err
+		}
+
 		if traceTx(blockNum, txIndex) {
-			coinbaseBalance, _ := ibs.GetBalance(result.Coinbase)
 			nonce, _ := ibs.GetNonce(result.Coinbase)
 			fmt.Println(blockNum, fmt.Sprintf("(%d.%d)", txIndex, task.Version().Incarnation), "CB", fmt.Sprintf("%x", result.Coinbase), fmt.Sprintf("%d", &coinbaseBalance), "nonce", nonce)
 		}
@@ -198,12 +201,6 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 
 		if engine != nil {
 			if postApplyMessageFunc := engine.GetPostApplyMessageFunc(); postApplyMessageFunc != nil {
-				coinbaseBalance, err := ibs.GetBalance(result.Coinbase)
-
-				if err != nil {
-					return nil, err
-				}
-
 				execResult := *result.ExecutionResult
 				execResult.CoinbaseInitBalance = coinbaseBalance.Clone()
 
@@ -218,6 +215,9 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.
 					result.Coinbase,
 					&execResult,
 				)
+
+				// capture postApplyMessageFunc side affects
+				result.Logs = append([]*types.Log{}, ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), blockNum, txTask.BlockHash())...)
 			}
 		}
 	}
@@ -264,7 +264,6 @@ func (ev *taskVersion) Trace() bool {
 }
 
 func (ev *taskVersion) Execute(evm *vm.EVM,
-	vmCfg vm.Config,
 	engine consensus.Engine,
 	genesis *types.Genesis,
 	ibs *state.IntraBlockState,
@@ -279,7 +278,12 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 		start = time.Now()
 	}
 
-	result = ev.execTask.Execute(evm, vmCfg, engine, genesis, ibs, stateWriter,
+	// Don't run post apply message during the state transition it is handled in finalize
+	postApplyMessage := evm.Context.PostApplyMessage
+	evm.Context.PostApplyMessage = nil
+	defer func() { evm.Context.PostApplyMessage = postApplyMessage }()
+
+	result = ev.execTask.Execute(evm, engine, genesis, ibs, stateWriter,
 		chainConfig, chainReader, dirs, !ev.shouldDelayFeeCalc)
 
 	if ibs.HadInvalidRead() || result.Err != nil {
@@ -305,10 +309,13 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	return result
 }
 
-func (ev *taskVersion) Reset(ibs *state.IntraBlockState) {
-	ev.execTask.Reset(ibs)
+func (ev *taskVersion) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error {
+	if err := ev.execTask.Reset(evm, ibs, callTracer); err != nil {
+		return err
+	}
 	ibs.SetVersionMap(ev.versionMap)
 	ibs.SetVersion(ev.version.Incarnation)
+	return nil
 }
 
 func (ev *taskVersion) Version() state.Version {

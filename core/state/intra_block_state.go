@@ -220,18 +220,18 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.dep = -1
 }
 
-func (sdb *IntraBlockState) AddLog(log2 *types.Log) {
+func (sdb *IntraBlockState) AddLog(log *types.Log) {
 	sdb.journal.append(addLogChange{txIndex: sdb.txIndex})
-	log2.TxIndex = uint(sdb.txIndex)
-	log2.Index = sdb.logSize
+	log.TxIndex = uint(sdb.txIndex)
+	log.Index = sdb.logSize
 	if sdb.tracingHooks != nil && sdb.tracingHooks.OnLog != nil {
-		sdb.tracingHooks.OnLog(log2)
+		sdb.tracingHooks.OnLog(log)
 	}
 	sdb.logSize++
 	for len(sdb.logs) <= sdb.txIndex {
 		sdb.logs = append(sdb.logs, nil)
 	}
-	sdb.logs[sdb.txIndex] = append(sdb.logs[sdb.txIndex], log2)
+	sdb.logs[sdb.txIndex] = append(sdb.logs[sdb.txIndex], log)
 }
 
 func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash common.Hash, blockNumber uint64, blockHash common.Hash) types.Logs {

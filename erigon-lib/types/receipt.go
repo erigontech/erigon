@@ -439,7 +439,6 @@ func (rs Receipts) Copy() Receipts {
 func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 	r := rs[i]
 	data := &receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, r.Bloom, r.Logs}
-	fmt.Printf("reciept: status=%v,gas=%d,bloom=%x,logs=%d", r.statusEncoding(), r.CumulativeGasUsed, r.Bloom, len(r.Logs))
 	switch r.Type {
 	case LegacyTxType:
 		if err := rlp.Encode(w, data); err != nil {
