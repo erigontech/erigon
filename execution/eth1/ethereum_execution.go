@@ -19,6 +19,7 @@ package eth1
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 	"strings"
 	"sync/atomic"
@@ -204,8 +205,9 @@ func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, b
 
 func (e *EthereumExecutionModule) unwindToCommonCanonical(tx kv.RwTx, header *types.Header) error {
 	currentHeader := header
-
+	fmt.Println("beginning unwind to common canonical")
 	for isCanonical, err := e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()); !isCanonical && err == nil; isCanonical, err = e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()) {
+		fmt.Println("unwinding to common canonical", currentHeader.Number, false, currentHeader.Hash())
 		parentBlockHash, parentBlockNum := currentHeader.ParentHash, currentHeader.Number.Uint64()-1
 		currentHeader, err = e.getHeader(e.bacgroundCtx, tx, parentBlockHash, parentBlockNum)
 		if err != nil {
@@ -215,6 +217,7 @@ func (e *EthereumExecutionModule) unwindToCommonCanonical(tx kv.RwTx, header *ty
 			return makeErrMissingChainSegment(parentBlockHash)
 		}
 	}
+	fmt.Println("unwinding to common canonical", currentHeader.Number, true, currentHeader.Hash())
 	if err := e.hook.BeforeRun(tx, true); err != nil {
 		return err
 	}

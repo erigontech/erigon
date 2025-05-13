@@ -234,6 +234,7 @@ func (e *EthereumExecutionModule) isCanonicalHash(ctx context.Context, tx kv.Tx,
 		return false, fmt.Errorf("ethereumExecutionModule.isCanonicalHash: HeaderNumber error %w", err)
 	}
 	if blockNumber == nil {
+		e.logger.Warn("ethereumExecutionModule.isCanonicalHash: HeaderNumber is nil", "hash", hash)
 		return false, nil
 	}
 
@@ -246,6 +247,7 @@ func (e *EthereumExecutionModule) isCanonicalHash(ctx context.Context, tx kv.Tx,
 		return false, fmt.Errorf("ethereumExecutionModule.isCanonicalHash: ReadTd error %w", err)
 	}
 	if td == nil {
+		e.logger.Warn("ethereumExecutionModule.isCanonicalHash: ReadTd is nil", "blockNumber", *blockNumber, "hash", hash)
 		return false, nil
 	}
 	return expectedHash == hash, nil

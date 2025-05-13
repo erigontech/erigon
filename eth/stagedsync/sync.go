@@ -173,7 +173,7 @@ func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error
 	} else {
 		s.logger.Debug("UnwindTo", "block", unwindPoint, "stack", dbg.Stack())
 	}
-
+	fmt.Println("UnwindTo", "block", unwindPoint)
 	s.unwindPoint = &unwindPoint
 	s.unwindReason = reason
 	return nil

@@ -356,9 +356,11 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 				return
 			}
+			fmt.Println("entry", isCanonicalHash, currentParentHash, currentParentNumber)
 		}
 
 		unwindTarget := currentParentNumber
+		fmt.Println("unwindTargetBefore", unwindTarget)
 		minUnwindableBlock, err := minUnwindableBlock(tx, unwindTarget)
 		if err != nil {
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
@@ -368,6 +370,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			e.logger.Info("Reorg requested too low, capping to the minimum unwindable block", "unwindTarget", unwindTarget, "minUnwindableBlock", minUnwindableBlock)
 			unwindTarget = minUnwindableBlock
 		}
+		fmt.Println("unwindTargetAfter", unwindTarget)
 
 		// if unwindTarget <
 		if err := e.executionPipeline.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
