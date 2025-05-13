@@ -151,7 +151,7 @@ type TxPool struct {
 	ethBackend              remote.ETHBACKENDClient
 	builderNotifyNewTxns    func()
 	logger                  log.Logger
-	auths                   map[NonceAuthority]*metaTxn // All authority accounts with a pooled authorization
+	auths                   map[AuthAndNonce]*metaTxn // All authority accounts with a pooled authorization
 	blobHashToTxn           map[common.Hash]struct {
 		index   int
 		txnHash common.Hash
@@ -238,7 +238,7 @@ func New(
 		builderNotifyNewTxns:    builderNotifyNewTxns,
 		newSlotsStreams:         newSlotsStreams,
 		logger:                  logger,
-		auths:                   make(map[NonceAuthority]*metaTxn),
+		auths:                   make(map[AuthAndNonce]*metaTxn),
 		blobHashToTxn: make(map[common.Hash]struct {
 			index   int
 			txnHash common.Hash
@@ -1603,7 +1603,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		p.logger.Info("senderID not registered, discarding transaction for safety")
 		return txpoolcfg.InvalidSender
 	}
-	if _, ok := p.auths[NonceAuthority{mt.TxnSlot.Nonce, senderAddr.String()}]; ok {
+	if _, ok := p.auths[AuthAndNonce{senderAddr.String(), mt.TxnSlot.Nonce}]; ok {
 		return txpoolcfg.ErrAuthorityReserved
 	}
 
@@ -1614,13 +1614,13 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 			if a.authority == senderAddr.String() && a.nonce != mt.TxnSlot.Nonce+1 {
 				return txpoolcfg.NonceTooLow
 			}
-			if _, ok := p.auths[NonceAuthority{a.nonce, a.authority}]; ok {
+			if _, ok := p.auths[AuthAndNonce{a.authority, a.nonce}]; ok {
 				p.logger.Debug("setCodeTxn ", "DUPLICATE authority", a.authority, "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
 				return txpoolcfg.ErrAuthorityReserved
 			}
 		}
 		for _, a := range mt.TxnSlot.Authorities {
-			p.auths[NonceAuthority{a.nonce, a.authority}] = mt
+			p.auths[AuthAndNonce{a.authority, a.nonce}] = mt
 		}
 	}
 

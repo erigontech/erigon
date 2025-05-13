@@ -189,7 +189,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 		feecap         uint64
 		tipcap         uint64
 		expectedReason txpoolcfg.DiscardReason
-		replacedAuth   *NonceAuthority
+		replacedAuth   *AuthAndNonce
 	}{{
 		title:          "a setcode txn with different sender and authority",
 		sender:         addrA,
@@ -269,7 +269,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 			feecap:         200_000,
 			tipcap:         200_000,
 			expectedReason: txpoolcfg.Success,
-			replacedAuth:   &NonceAuthority{3, addrB.String()},
+			replacedAuth:   &AuthAndNonce{addrB.String(), 3},
 		},
 		{
 			title:          "replace own setcode txn with non setcode txn, with higher tipcap",
@@ -280,7 +280,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 			feecap:         300_000,
 			tipcap:         300_000,
 			expectedReason: txpoolcfg.Success,
-			replacedAuth:   &NonceAuthority{3, addrA.String()},
+			replacedAuth:   &AuthAndNonce{addrA.String(), 3},
 		},
 		{
 			title:          "replace non setcode txn, with setcode txn with higher tipcap",
@@ -354,32 +354,34 @@ func TestMultipleAuthorizations(t *testing.T) {
 
 	idHash := 0
 	for _, c := range cases {
-		t.Log("\n--- Testing " + c.title)
-		var txnSlots TxnSlots
-		txnSlot1 := &TxnSlot{
-			Tip:    *uint256.NewInt(c.tipcap),
-			FeeCap: *uint256.NewInt(c.feecap),
-			Gas:    100000,
-			Nonce:  c.senderNonce,
-		}
-		if c.authority != nil {
-			txnSlot1.Authorities = []NonceAuthority{{nonce: c.authNonce, authority: c.authority.String()}}
-			txnSlot1.Type = SetCodeTxnType
-		}
-		txnSlot1.IDHash[0] = uint8(idHash)
-		idHash++
-		txnSlots.Append(txnSlot1, c.sender[:], true)
-		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
-		require.NoError(t, err)
-		assert.Equal(t, []txpoolcfg.DiscardReason{c.expectedReason}, reasons)
-		if c.authority != nil && c.expectedReason == txpoolcfg.Success {
-			_, ok := pool.auths[NonceAuthority{c.authNonce, c.authority.String()}]
-			assert.True(t, ok)
-		}
-		if c.replacedAuth != nil {
-			_, ok := pool.auths[*c.replacedAuth]
-			assert.False(t, ok)
-		}
+		t.Run(c.title, func(t *testing.T) {
+			t.Log("\n--- Testing " + c.title)
+			var txnSlots TxnSlots
+			txnSlot1 := &TxnSlot{
+				Tip:    *uint256.NewInt(c.tipcap),
+				FeeCap: *uint256.NewInt(c.feecap),
+				Gas:    100000,
+				Nonce:  c.senderNonce,
+			}
+			if c.authority != nil {
+				txnSlot1.Authorities = []AuthAndNonce{{c.authority.String(), c.authNonce}}
+				txnSlot1.Type = SetCodeTxnType
+			}
+			txnSlot1.IDHash[0] = uint8(idHash)
+			idHash++
+			txnSlots.Append(txnSlot1, c.sender[:], true)
+			reasons, err := pool.AddLocalTxns(ctx, txnSlots)
+			require.NoError(t, err)
+			assert.Equal(t, []txpoolcfg.DiscardReason{c.expectedReason}, reasons)
+			if c.authority != nil && c.expectedReason == txpoolcfg.Success {
+				_, ok := pool.auths[AuthAndNonce{c.authority.String(), c.authNonce}]
+				assert.True(t, ok)
+			}
+			if c.replacedAuth != nil {
+				_, ok := pool.auths[*c.replacedAuth]
+				assert.False(t, ok)
+			}
+		})
 	}
 }
 
@@ -1059,7 +1061,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 		Gas:         500000,
 		SenderID:    0,
 		Type:        SetCodeTxnType,
-		Authorities: []NonceAuthority{{nonce: 0, authority: common.Address{}.String()}},
+		Authorities: []AuthAndNonce{{nonce: 0, authority: common.Address{}.String()}},
 	}
 
 	txns := TxnSlots{
