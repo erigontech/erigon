@@ -282,8 +282,15 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
-			Name:        "publishable",
-			Action:      doPublishable,
+			Name: "publishable",
+			Action: func(cliCtx *cli.Context) error {
+				if err := doPublishable(cliCtx); err != nil {
+					log.Error("[publishable]", "err", err)
+					return err
+				}
+				log.Info("[publishable] snapshots are publishable")
+				return nil
+			},
 			Description: "Check if snapshot is publishable by a webseed client",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
