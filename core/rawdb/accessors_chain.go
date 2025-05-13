@@ -1312,9 +1312,11 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 			return nil, fmt.Errorf("unexpected error, couldn't find changeset: txNum=%d, %w", txnID, err)
 		}
 		if !ok {
+			log.Warn("[dbg] skip not found in hist", "txnID", txnID, "_min", _min, "_max", _max)
 			continue
 		}
 		if len(v) == 0 {
+			log.Warn("[dbg] skip zero-value", "txnID", txnID, "_min", _min, "_max", _max)
 			continue
 		}
 
