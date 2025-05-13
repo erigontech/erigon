@@ -96,15 +96,15 @@ func (st *Stack) Len() int {
 
 // Print dumps the content of the stack
 func (st *Stack) Print() {
-	fmt.Println("### stack ###")
+	log.Info("### stack ###")
 	if len(st.Data) > 0 {
 		for i, val := range st.Data {
-			fmt.Printf("%-3d  %v\n", i, val)
+			log.Info(fmt.Sprintf("%-3d  %v\n", i, val))
 		}
 	} else {
-		fmt.Println("-- empty --")
+		log.Info("-- empty --")
 	}
-	fmt.Println("#############")
+	log.Info("#############")
 }
 
 func ReturnNormalStack(s *Stack) {
