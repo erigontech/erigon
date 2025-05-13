@@ -1326,6 +1326,10 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			err = fmt.Errorf("aggregator init: %w", err)
 			return
 		}
+		if err = _aggSingleton.ReloadSalt(); err != nil {
+			err = fmt.Errorf("aggregator ReloadSalt: %w", err)
+			return
+		}
 
 		_aggSingleton.SetProduceMod(snapCfg.ProduceE3)
 
