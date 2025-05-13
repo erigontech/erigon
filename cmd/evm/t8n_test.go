@@ -254,7 +254,7 @@ func TestT8n(t *testing.T) {
 }
 
 func TestEvmRun(t *testing.T) {
-	t.Skip("Issues #14975 and #14993")
+	t.Skip("issues #14975 and #14993")
 	t.Parallel()
 	tt := cmdtest.NewTestCmd(t, nil)
 	for i, tc := range []struct {
