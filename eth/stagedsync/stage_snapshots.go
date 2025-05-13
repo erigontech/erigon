@@ -83,7 +83,7 @@ const (
 )
 
 type SnapshotsCfg struct {
-	db          kv.RwDB
+	db          kv.TemporalRwDB
 	chainConfig chain.Config
 	dirs        datadir.Dirs
 
@@ -101,7 +101,7 @@ type SnapshotsCfg struct {
 	prune            prune.Mode
 }
 
-func StageSnapshotsCfg(db kv.RwDB,
+func StageSnapshotsCfg(db kv.TemporalRwDB,
 	chainConfig chain.Config,
 	syncConfig ethconfig.Sync,
 	dirs datadir.Dirs,
@@ -325,6 +325,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	); err != nil {
 		return err
 	}
+
 	if cfg.notifier.Events != nil {
 		cfg.notifier.Events.OnNewSnapshot()
 	}

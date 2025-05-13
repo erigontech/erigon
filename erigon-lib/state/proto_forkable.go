@@ -6,12 +6,12 @@ import (
 	"sort"
 
 	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
 	ee "github.com/erigontech/erigon-lib/state/entity_extras"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 /*
@@ -80,7 +80,7 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 	}
 
 	log.Debug("freezing %s from %d to %d", a.a.Name(), calcFrom, calcTo)
-	path := a.parser.DataFile(snaptype.V1_0, calcFrom, calcTo)
+	path := a.parser.DataFile(version.V1_0, calcFrom, calcTo)
 	sn, err := seg.NewCompressor(ctx, "Snapshot "+a.a.Name(), path, a.a.Dirs().Tmp, seg.DefaultCfg, log.LvlTrace, a.logger)
 	if err != nil {
 		return nil, false, err

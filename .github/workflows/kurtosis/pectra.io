@@ -6,7 +6,7 @@ participants_matrix:
     - cl_type: teku
       cl_image: consensys/teku:develop
     - cl_type: lighthouse
-      cl_image: sigp/lighthouse:v7.0.0-beta.5
+      cl_image: sigp/lighthouse:v7.0.1
 
 network_params:
   electra_fork_epoch: 1

@@ -55,7 +55,13 @@ func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.TemporalRwTx, *stateLib.Aggre
 	db := memdb.NewStateDB(tb.TempDir())
 	tb.Cleanup(db.Close)
 
-	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, log.New())
+	dirs, logger := datadir.New(tb.TempDir()), log.New()
+	salt, err := stateLib.GetStateIndicesSalt(dirs, true, logger)
+	if err != nil {
+		tb.Fatal(err)
+	}
+
+	agg, err := stateLib.NewAggregator2(context.Background(), dirs, 16, salt, db, logger)
 	if err != nil {
 		tb.Fatal(err)
 	}

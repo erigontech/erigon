@@ -133,7 +133,13 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 	if !externalState {
 		db := memdb.NewStateDB(tempdir)
 		defer db.Close()
-		agg, err := state3.NewAggregator(context.Background(), datadir.New(tempdir), config3.DefaultStepSize, db, log.New())
+		dirs := datadir.New(tempdir)
+		logger := log.New()
+		salt, err := state3.GetStateIndicesSalt(dirs, true, logger)
+		if err != nil {
+			return nil, nil, err
+		}
+		agg, err := state3.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, db, logger)
 		if err != nil {
 			return nil, nil, err
 		}

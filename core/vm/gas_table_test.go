@@ -104,7 +104,10 @@ func testTemporalDB(t *testing.T) *temporal.DB {
 
 	t.Cleanup(db.Close)
 
-	agg, err := state3.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, log.New())
+	dirs, logger := datadir.New(t.TempDir()), log.New()
+	salt, err := state3.GetStateIndicesSalt(dirs, true, logger)
+	require.NoError(t, err)
+	agg, err := state3.NewAggregator2(context.Background(), datadir.New(t.TempDir()), 16, salt, db, log.New())
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 

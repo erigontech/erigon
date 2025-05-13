@@ -293,6 +293,14 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 		}
 	}
 
+	merged, err := br.MergeBlocks(ctx, lvl, seedNewSnapshots)
+	return ok || merged, err
+}
+
+func (br *BlockRetire) MergeBlocks(ctx context.Context, lvl log.Lvl, seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error) (merged bool, err error) {
+	notifier, logger, _, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers.Load()
+	snapshots := br.snapshots()
+
 	merger := snapshotsync.NewMerger(tmpDir, int(workers), lvl, db, br.chainConfig, logger)
 	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(), snapshots.BlocksAvailable())
 	if len(rangesToMerge) == 0 {
@@ -300,9 +308,9 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 		//if err := snapshots.RemoveOverlaps(); err != nil {
 		//	return false, err
 		//}
-		return ok, nil
+		return false, nil
 	}
-	ok = true // have something to merge
+	merged = true
 	onMerge := func(r snapshotsync.Range) error {
 		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 			notifier.OnNewSnapshot()
@@ -318,16 +326,15 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 		}
 		return nil
 	}
-	err := merger.Merge(ctx, &snapshots.RoSnapshots, snapshots.Types(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete)
-	if err != nil {
-		return ok, err
+	if err = merger.Merge(ctx, &snapshots.RoSnapshots, snapshots.Types(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, nil); err != nil {
+		return false, err
 	}
 
 	// remove old garbage files
-	if err := snapshots.RemoveOverlaps(); err != nil {
+	if err = snapshots.RemoveOverlaps(); err != nil {
 		return false, err
 	}
-	return ok, nil
+	return
 }
 
 var ErrNothingToPrune = errors.New("nothing to prune")

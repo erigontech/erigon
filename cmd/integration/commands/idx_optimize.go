@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
@@ -76,9 +76,10 @@ var idxOptimize = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx, _ := common.RootContext()
 		logger := debug.SetupCobra(cmd, "integration")
+		dirs := datadir.New(datadirCli)
 
 		// accessorDir := filepath.Join(datadirCli, "snapshots", "accessor")
-		idxPath := filepath.Join(datadirCli, "snapshots", "idx")
+		idxPath := dirs.SnapIdx
 		idxDir := os.DirFS(idxPath)
 
 		files, err := fs.ReadDir(idxDir, ".")
@@ -112,16 +113,16 @@ var idxOptimize = &cobra.Command{
 			cOpt++
 			baseTxNum := efInfo.startStep * config3.DefaultStepSize
 
-			tmpDir := datadirCli + "/temp"
+			tmpDir := dirs.Tmp
 
-			idxInput, err := seg.NewDecompressor(datadirCli + "/snapshots/idx/" + file.Name())
+			idxInput, err := seg.NewDecompressor(dirs.SnapIdx + file.Name())
 			if err != nil {
 				logger.Error("Failed to open decompressor", "error", err)
 				return
 			}
 			defer idxInput.Close()
 
-			idxOutput, err := seg.NewCompressor(ctx, "optimizoor", datadirCli+"/snapshots/idx/"+file.Name()+".new", tmpDir, seg.DefaultCfg, log.LvlInfo, logger)
+			idxOutput, err := seg.NewCompressor(ctx, "optimizoor", dirs.SnapIdx+file.Name()+".new", tmpDir, seg.DefaultCfg, log.LvlInfo, logger)
 			if err != nil {
 				logger.Error("Failed to open compressor", "error", err)
 				return
@@ -172,12 +173,12 @@ var idxOptimize = &cobra.Command{
 			idxOutput.Close()
 
 			// rebuid .efi; COPIED FROM InvertedIndex.buildMapAccessor
-			salt, err := state.GetStateIndicesSalt(datadirCli + "/snapshots/")
+			salt, err := state.GetStateIndicesSalt(dirs, false, logger)
 			if err != nil {
 				logger.Error("Failed to build accessor", "error", err)
 				return
 			}
-			idxPath := datadirCli + "/snapshots/accessor/" + file.Name() + "i.new"
+			idxPath := dirs.SnapAccessors + file.Name() + "i.new"
 			cfg := recsplit.RecSplitArgs{
 				Enums:              true,
 				LessFalsePositives: true,
@@ -189,7 +190,7 @@ var idxOptimize = &cobra.Command{
 				Salt:       salt,
 				NoFsync:    false,
 			}
-			data, err := seg.NewDecompressor(datadirCli + "/snapshots/idx/" + file.Name() + ".new")
+			data, err := seg.NewDecompressor(dirs.SnapIdx + file.Name() + ".new")
 			if err != nil {
 				logger.Error("Failed to build accessor", "error", err)
 				return
