@@ -37,9 +37,9 @@ jobs:
         run: |
           mkdir -p $CL_DATA_DIR
           if [ "${{ matrix.client }}" == "lighthouse" ]; then
-            curl -LO https://github.com/sigp/lighthouse/releases/download/v7.0.0-beta.0/lighthouse-v7.0.0-beta.0-x86_64-unknown-linux-gnu.tar.gz
-            tar -xvf lighthouse-v7.0.0-beta.0-x86_64-unknown-linux-gnu.tar.gz -C $CL_DATA_DIR
-            rm lighthouse-v7.0.0-beta.0-x86_64-unknown-linux-gnu.tar.gz
+            curl -LO https://github.com/sigp/lighthouse/releases/download/v7.0.1/lighthouse-v7.0.1-x86_64-unknown-linux-gnu.tar.gz
+            tar -xvf lighthouse-v7.0.1-x86_64-unknown-linux-gnu.tar.gz -C $CL_DATA_DIR
+            rm lighthouse-v7.0.1-x86_64-unknown-linux-gnu.tar.gz
           elif [ "${{ matrix.client }}" == "prysm" ]; then
             curl -L https://raw.githubusercontent.com/prysmaticlabs/prysm/master/prysm.sh -o $CL_DATA_DIR/prysm.sh
             chmod +x $CL_DATA_DIR/prysm.sh
