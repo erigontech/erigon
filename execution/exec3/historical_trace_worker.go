@@ -191,6 +191,15 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 		if err != nil {
 			txTask.Error = err
 		}
+		if err != nil {
+			txTask.Error = err
+		} else {
+			txTask.TraceTos = map[common.Address]struct{}{}
+			txTask.TraceTos[txTask.Coinbase] = struct{}{}
+			for _, uncle := range txTask.Uncles {
+				txTask.TraceTos[uncle.Coinbase] = struct{}{}
+			}
+		}
 	default:
 		rw.taskGasPool.Reset(txTask.Tx.GetGas(), txTask.Tx.GetBlobGas())
 		rw.vmConfig.SkipAnalysis = txTask.SkipAnalysis
