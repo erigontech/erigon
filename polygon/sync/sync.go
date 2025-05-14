@@ -809,7 +809,7 @@ func (s *Sync) syncToTip(ctx context.Context) (syncToTipResult, error) {
 		return syncToTipResult{}, err
 	}
 
-	fmt.Println("LAL sync to tip. Latest on start:", latestTipOnStart)
+	fmt.Println("LAL sync to tip. Latest on start:", latestTipOnStart.Number.Uint64())
 
 	result, err := s.syncToTipUsingCheckpoints(ctx, latestTipOnStart)
 	if err != nil {
@@ -888,6 +888,8 @@ func (s *Sync) sync(
 		if err != nil {
 			return syncToTipResult{}, err
 		}
+
+		fmt.Println("LAL waypoint", waypoint.StartBlock().Uint64(), waypoint.EndBlock().Uint64())
 
 		// notify about latest waypoint end block so that eth_syncing API doesn't flicker on initial sync
 		s.notifications.NewLastBlockSeen(waypoint.EndBlock().Uint64())
