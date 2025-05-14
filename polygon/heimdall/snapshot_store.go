@@ -564,6 +564,8 @@ func snapshotStoreRangeFromBlockNum[T Entity](
 	snapType snaptype.Type,
 	makeEntity func() T,
 ) ([]T, error) {
+	fmt.Println("LAL startBlockNum", startBlockNum)
+
 	dbEntities, err := dbStore.RangeFromBlockNum(ctx, startBlockNum)
 	if err != nil {
 		return nil, err
@@ -572,6 +574,10 @@ func snapshotStoreRangeFromBlockNum[T Entity](
 		// this should not happen unless there is a bug in the db store
 		return nil, fmt.Errorf("unexpected first entity end in db range: expected >= %d, got %d", startBlockNum, dbEntities[0].BlockNumRange().End)
 	}
+
+	fmt.Println("LAL entity start", dbEntities[0].BlockNumRange().Start)
+	fmt.Println("LAL entity end", dbEntities[0].BlockNumRange().End)
+
 	if len(dbEntities) > 0 && dbEntities[0].BlockNumRange().Start <= startBlockNum {
 		// all entities in the given range have been found in the db store
 		return dbEntities, nil
