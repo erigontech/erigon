@@ -744,7 +744,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 		oldVersion := res.Version
 		// do a range check over all snapshots types (sanitizes domain and history folder)
 		for _, snapType := range kv.StateDomains {
-			newVersion := libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.DataKV
+			newVersion := libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.DataKV.Current
 			expectedFileName := strings.Replace(info.Name(), "accounts", snapType.String(), 1)
 			expectedFileName = version.ReplaceVersion(expectedFileName, oldVersion, newVersion)
 			if _, err := os.Stat(filepath.Join(dirs.SnapDomain, expectedFileName)); err != nil {
@@ -754,7 +754,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 			oldVersion = newVersion
 			// check that the index file exist
 			if libstate.Schema.GetDomainCfg(snapType).Accessors.Has(libstate.AccessorBTree) {
-				newVersion = libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorBT
+				newVersion = libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorBT.Current
 				fileName := strings.Replace(expectedFileName, ".kv", ".bt", 1)
 				fileName = version.ReplaceVersion(fileName, oldVersion, newVersion)
 				exists, err := dir.FileExist(filepath.Join(dirs.SnapDomain, fileName))
@@ -766,7 +766,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 				}
 			}
 			if libstate.Schema.GetDomainCfg(snapType).Accessors.Has(libstate.AccessorExistence) {
-				newVersion = libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVEI
+				newVersion = libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVEI.Current
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvei", 1)
 				fileName = version.ReplaceVersion(fileName, oldVersion, newVersion)
 				exists, err := dir.FileExist(filepath.Join(dirs.SnapDomain, fileName))
@@ -778,7 +778,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 				}
 			}
 			if libstate.Schema.GetDomainCfg(snapType).Accessors.Has(libstate.AccessorHashMap) {
-				newVersion = libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVI
+				newVersion = libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVI.Current
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvi", 1)
 				fileName = version.ReplaceVersion(fileName, oldVersion, newVersion)
 				exists, err := dir.FileExist(filepath.Join(dirs.SnapDomain, fileName))
@@ -826,14 +826,14 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 			if err != nil {
 				return err
 			}
-			oldVersion := versioned.GetVersions().II.DataEF
+			oldVersion := versioned.GetVersions().II.DataEF.Current
 			expectedFileName := strings.Replace(info.Name(), "accounts", snapType, 1)
 
 			if _, err := os.Stat(filepath.Join(dirs.SnapIdx, expectedFileName)); err != nil {
 				return fmt.Errorf("missing file %s at path %s", expectedFileName, filepath.Join(dirs.SnapIdx, expectedFileName))
 			}
 			// Check accessors
-			newVersion := versioned.GetVersions().II.AccessorEFI
+			newVersion := versioned.GetVersions().II.AccessorEFI.Current
 			efiFileName := strings.Replace(expectedFileName, ".ef", ".efi", 1)
 			efiFileName = version.ReplaceVersion(efiFileName, oldVersion, newVersion)
 			if _, err := os.Stat(filepath.Join(dirs.SnapAccessors, efiFileName)); err != nil {
@@ -842,13 +842,13 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 			if !slices.Contains(viTypes, snapType) {
 				continue
 			}
-			newVersion = versioned.GetVersions().Hist.AccessorVI
+			newVersion = versioned.GetVersions().Hist.AccessorVI.Current
 			viFileName := strings.Replace(expectedFileName, ".ef", ".vi", 1)
 			viFileName = version.ReplaceVersion(viFileName, oldVersion, newVersion)
 			if _, err := os.Stat(filepath.Join(dirs.SnapAccessors, viFileName)); err != nil {
 				return fmt.Errorf("missing file %s at path %s", viFileName, filepath.Join(dirs.SnapAccessors, viFileName))
 			}
-			newVersion = versioned.GetVersions().Hist.DataV
+			newVersion = versioned.GetVersions().Hist.DataV.Current
 			// check that .v
 			vFileName := strings.Replace(expectedFileName, ".ef", ".v", 1)
 			vFileName = version.ReplaceVersion(vFileName, oldVersion, newVersion)

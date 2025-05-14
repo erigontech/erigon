@@ -3,6 +3,9 @@ package version
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -12,11 +15,16 @@ type Version struct {
 	Minor uint64
 }
 
+var ErrVersionIsNotSupported error = errors.New("this version is not supported")
+
 var (
-	ZeroVersion         = Version{}
-	V1_0        Version = Version{1, 0}
-	V1_1        Version = Version{1, 1}
-	V2_0        Version = Version{2, 0}
+	ZeroVersion            = Version{}
+	V1_0          Version  = Version{1, 0}
+	V1_1          Version  = Version{1, 1}
+	V2_0          Version  = Version{2, 0}
+	V1_0_standart Versions = Versions{V1_0, V1_0}
+	V1_1_standart Versions = Versions{V1_1, V1_0}
+	V2_0_standart Versions = Versions{V2_0, V1_0}
 )
 
 func (v Version) Less(rhd Version) bool {
@@ -93,4 +101,45 @@ func ReplaceVersion(s string, oldVer, newVer Version) string {
 type Versions struct {
 	Current      Version
 	MinSupported Version
+}
+
+// To not break existing code. If you want to work somehow with min sup ver, call it.
+func (v Versions) IsZero() bool {
+	return v.Current.Major == 0 && v.Current.Minor == 0
+}
+
+func (v Versions) String() string {
+	return v.Current.String()
+}
+
+// FindFilesWithVersionsByPattern return an filepath by pattern
+func FindFilesWithVersionsByPattern(pattern string) (string, Version, error) {
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return "", Version{}, fmt.Errorf("invalid pattern: %w", err)
+	}
+
+	if len(matches) == 0 {
+		return "", Version{}, os.ErrNotExist
+	}
+	if len(matches) > 1 {
+		sort.Slice(matches, func(i, j int) bool {
+			version1, _ := ParseVersion(matches[i])
+			version2, _ := ParseVersion(matches[j])
+			return version1.Less(version2)
+		})
+		ver, _ := ParseVersion(matches[len(matches)-1])
+		return matches[len(matches)-1], ver, nil
+	}
+
+	ver, _ := ParseVersion(matches[0])
+	return matches[0], ver, nil
+}
+
+func ReplaceVersionWithMask(s string) (string, error) {
+	ver, err := ParseVersion(s)
+	if err != nil {
+		return "", err
+	}
+	return strings.ReplaceAll(s, ver.String(), "*"), nil
 }

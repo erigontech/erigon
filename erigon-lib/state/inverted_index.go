@@ -23,6 +23,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/version"
 	"math"
 	"os"
 	"path"
@@ -42,7 +43,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
@@ -151,6 +151,13 @@ func (ii *InvertedIndex) efAccessorFilePath(fromStep, toStep uint64) string {
 }
 func (ii *InvertedIndex) efFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(ii.dirs.SnapIdx, fmt.Sprintf("%s-%s.%d-%d.ef", ii.version.DataEF.String(), ii.filenameBase, fromStep, toStep))
+}
+
+func (ii *InvertedIndex) efAccessorFilePathMask(fromStep, toStep uint64) string {
+	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("*-%s.%d-%d.efi", ii.filenameBase, fromStep, toStep))
+}
+func (ii *InvertedIndex) efFilePathMask(fromStep, toStep uint64) string {
+	return filepath.Join(ii.dirs.SnapIdx, fmt.Sprintf("*-%s.%d-%d.ef", ii.filenameBase, fromStep, toStep))
 }
 
 func filesFromDir(dir string) ([]string, error) {
@@ -278,35 +285,32 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 			item := item
 			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
 			if item.decompressor == nil {
-				fPath := ii.efFilePath(fromStep, toStep)
-				exists, err := dir.FileExist(fPath)
-				if err != nil {
+				fPathPattern := ii.efFilePathMask(fromStep, toStep)
+				fPath, fileVer, err := version.FindFilesWithVersionsByPattern(fPathPattern)
+				if err != nil && !errors.Is(err, os.ErrNotExist) {
 					_, fName := filepath.Split(fPath)
-					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: FileExists error", "f", fName, "err", err)
+					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: FindFilesWithVersionsByPattern error", "f", fName, "err", err)
 					invalidFileItemsLock.Lock()
 					invalidFileItems = append(invalidFileItems, item)
 					invalidFileItemsLock.Unlock()
 					continue
 				}
-				if !exists {
-					ii.version.DataEF = ii.version.DataEF.Downgrade()
-					fPath = ii.efFilePath(fromStep, toStep)
-					existsDowngrade, err := dir.FileExist(fPath)
-					if err != nil {
-						_, fName := filepath.Split(fPath)
-						ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: FileExists error", "f", fName, "err", err)
-						invalidFileItemsLock.Lock()
-						invalidFileItems = append(invalidFileItems, item)
-						invalidFileItemsLock.Unlock()
-						continue
-					}
-					if !existsDowngrade {
-						_, fName := filepath.Split(fPath)
-						ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: file does not exists", "f", fName)
-						invalidFileItemsLock.Lock()
-						invalidFileItems = append(invalidFileItems, item)
-						invalidFileItemsLock.Unlock()
-						continue
+
+				if errors.Is(err, os.ErrNotExist) {
+					_, fName := filepath.Split(fPath)
+					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: file does not exists", "f", fName)
+					invalidFileItemsLock.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFileItemsLock.Unlock()
+					continue
+				}
+
+				if fileVer.Cmp(ii.version.DataEF.Current) != 0 {
+					if !fileVer.Less(ii.version.DataEF.MinSupported) {
+						ii.version.DataEF.Current = fileVer
+					} else {
+						panic("Version is too low, try to rm ef snapshots")
+						return false
 					}
 				}
 
@@ -326,14 +330,22 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 			}
 
 			if item.index == nil {
-				fPath := ii.efAccessorFilePath(fromStep, toStep)
-				exists, err := dir.FileExist(fPath)
-				if err != nil {
+				fPathPattern := ii.efAccessorFilePathMask(fromStep, toStep)
+				fPath, fileVer, err := version.FindFilesWithVersionsByPattern(fPathPattern)
+				if err != nil && !errors.Is(err, os.ErrNotExist) {
 					_, fName := filepath.Split(fPath)
 					ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 					// don't interrupt on error. other files may be good
 				}
-				if exists {
+				if !errors.Is(err, os.ErrNotExist) {
+					if fileVer.Cmp(ii.version.AccessorEFI.Current) != 0 {
+						if !fileVer.Less(ii.version.AccessorEFI.MinSupported) {
+							ii.version.AccessorEFI.Current = fileVer
+						} else {
+							panic("Version is too low, try to rm ef snapshots")
+							return false
+						}
+					}
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
