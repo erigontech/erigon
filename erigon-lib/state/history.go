@@ -443,7 +443,6 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 					}
 				}
 			}
-			p.Processed.Add(1)
 
 			select {
 			case <-ctx.Done():
