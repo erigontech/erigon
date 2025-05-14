@@ -169,7 +169,7 @@ func (h *History) vFileNameMask(fromStep, toStep uint64) string {
 	return fmt.Sprintf("*-%s.%d-%d.v", h.filenameBase, fromStep, toStep)
 }
 func (h *History) vFilePathMask(fromStep, toStep uint64) string {
-	return filepath.Join(h.dirs.SnapHistory, h.vFileName(fromStep, toStep))
+	return filepath.Join(h.dirs.SnapHistory, h.vFileNameMask(fromStep, toStep))
 }
 func (h *History) vAccessorFilePathMask(fromStep, toStep uint64) string {
 	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("*-%s.%d-%d.vi", h.filenameBase, fromStep, toStep))
