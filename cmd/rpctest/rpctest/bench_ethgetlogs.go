@@ -202,9 +202,10 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 						continue
 					}
 
-					if _, ok := sawTopic[l.Topics[0]]; ok {
+					if _, ok := sawTopic[l.Topics[0]]; ok { //nolint:staticcheck // SA4006: false positive
 						continue
 					}
+
 					sawTopic[l.Topics[0]] = struct{}{}
 
 					res = reqGen.Erigon("eth_getLogs", reqGen.getLogs1(prevBn, bn, l.Address, l.Topics[0]), &resp)
