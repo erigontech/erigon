@@ -205,18 +205,18 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 					if _, ok := sawTopic[l.Topics[0]]; ok {
 						continue
 					}
-					//sawTopic[l.Topics[0]] = struct{}{}
-					//
-					//res = reqGen.Erigon("eth_getLogs", reqGen.getLogs1(prevBn, bn, l.Address, l.Topics[0]), &resp)
-					//if res.Err != nil {
-					//	return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)
-					//}
-					//if resp.Error != nil {
-					//	return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", resp.Error.Code, resp.Error.Message)
-					//}
-					//if len(resp.Result) == 0 {
-					//	return fmt.Errorf("eth_getLogs: at blockNum=%d account %x, topic %x not indexed", bn, l.Address, l.Topics[0])
-					//}
+					sawTopic[l.Topics[0]] = struct{}{}
+
+					res = reqGen.Erigon("eth_getLogs", reqGen.getLogs1(prevBn, bn, l.Address, l.Topics[0]), &resp)
+					if res.Err != nil {
+						return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)
+					}
+					if resp.Error != nil {
+						return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", resp.Error.Code, resp.Error.Message)
+					}
+					if len(resp.Result) == 0 {
+						return fmt.Errorf("eth_getLogs: at blockNum=%d account %x, topic %x not indexed", bn, l.Address, l.Topics[0])
+					}
 				}
 
 				select {
