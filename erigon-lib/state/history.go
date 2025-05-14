@@ -166,13 +166,13 @@ func (h *History) vAccessorFilePath(fromStep, toStep uint64) string {
 }
 
 func (h *History) vFileNameMask(fromStep, toStep uint64) string {
-	return fmt.Sprintf("%s-%s.%d-%d.v", h.version.DataV.String(), h.filenameBase, fromStep, toStep)
+	return fmt.Sprintf("*-%s.%d-%d.v", h.filenameBase, fromStep, toStep)
 }
 func (h *History) vFilePathMask(fromStep, toStep uint64) string {
 	return filepath.Join(h.dirs.SnapHistory, h.vFileName(fromStep, toStep))
 }
 func (h *History) vAccessorFilePathMask(fromStep, toStep uint64) string {
-	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.vi", h.version.AccessorVI.String(), h.filenameBase, fromStep, toStep))
+	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("*-%s.%d-%d.vi", h.filenameBase, fromStep, toStep))
 }
 
 // openList - main method to open list of files.
@@ -249,7 +249,7 @@ func (h *History) openDirtyFiles() error {
 						h.version.DataV.Current = fileVer
 					} else {
 						panic("Version is too low, try to rm ef snapshots")
-						return false
+						//return false
 					}
 				}
 
@@ -294,7 +294,7 @@ func (h *History) openDirtyFiles() error {
 							h.version.AccessorVI.Current = fileVer
 						} else {
 							panic("Version is too low, try to rm ef snapshots")
-							return false
+							//return false
 						}
 					}
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {

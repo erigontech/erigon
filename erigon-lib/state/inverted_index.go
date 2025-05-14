@@ -310,7 +310,7 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 						ii.version.DataEF.Current = fileVer
 					} else {
 						panic("Version is too low, try to rm ef snapshots")
-						return false
+						//return false
 					}
 				}
 
