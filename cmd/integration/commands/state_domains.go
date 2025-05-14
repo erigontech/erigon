@@ -167,7 +167,7 @@ var purifyDomains = &cobra.Command{
 		if purifyOnlyCommitment {
 			purificationDomains = []kv.Domain{kv.CommitmentDomain}
 		} else {
-			purificationDomains = []kv.Domain{kv.AccountsDomain, kv.StorageDomain /*"code",*/, kv.CommitmentDomain}
+			purificationDomains = []kv.Domain{kv.AccountsDomain, kv.StorageDomain /*"code",*/, kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain}
 		}
 		//purificationDomains := []string{"commitment"}
 		for _, domain := range purificationDomains {
