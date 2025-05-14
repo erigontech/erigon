@@ -37,6 +37,56 @@ import (
 
 var ErrInvalidChainId = errors.New("invalid chain id for signer")
 
+func MakeSignerArb(config *chain.Config, blockNumber, blockTime, arbosVersion uint64) *Signer {
+	var signer Signer
+	var chainId uint256.Int
+	if config.ChainID != nil {
+		overflow := chainId.SetFromBig(config.ChainID)
+		if overflow {
+			panic("chainID higher than 2^256-1")
+		}
+	}
+	signer.unprotected = true
+	switch {
+	case config.IsPrague(blockTime, arbosVersion):
+		signer.protected = true
+		signer.accessList = true
+		signer.dynamicFee = true
+		signer.blob = true
+		signer.setCode = true
+		signer.chainID.Set(&chainId)
+		signer.chainIDMul.Mul(&chainId, u256.Num2)
+	case config.IsCancun(blockTime, arbosVersion):
+		// All transaction types are still supported
+		signer.protected = true
+		signer.accessList = true
+		signer.dynamicFee = true
+		signer.blob = true
+		signer.chainID.Set(&chainId)
+		signer.chainIDMul.Mul(&chainId, u256.Num2)
+	case config.IsLondon(blockNumber):
+		signer.protected = true
+		signer.accessList = true
+		signer.dynamicFee = true
+		signer.chainID.Set(&chainId)
+		signer.chainIDMul.Mul(&chainId, u256.Num2)
+	case config.IsBerlin(blockNumber):
+		signer.protected = true
+		signer.accessList = true
+		signer.chainID.Set(&chainId)
+		signer.chainIDMul.Mul(&chainId, u256.Num2)
+	case config.IsSpuriousDragon(blockNumber):
+		signer.protected = true
+		signer.chainID.Set(&chainId)
+		signer.chainIDMul.Mul(&chainId, u256.Num2)
+	case config.IsHomestead(blockNumber):
+	default:
+		// Only allow malleable transactions in Frontier
+		signer.malleable = true
+	}
+	return &signer
+}
+
 // MakeSigner returns a Signer based on the given chain config and block number.
 func MakeSigner(config *chain.Config, blockNumber uint64, blockTime uint64) *Signer {
 	var signer Signer
