@@ -571,11 +571,22 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 			nonrefundable := st.evm.ProcessingHook.NonrefundableGas()
 			if nonrefundable < st.gasUsed() {
 				// Apply refund counter, capped to a refund quotient
-				refund := (st.gasUsed() - nonrefundable) / refundQuotient
+				refund := (st.gasUsed() - nonrefundable) / refundQuotient // Before EIP-3529
 				if refund > st.state.GetRefund() {
 					refund = st.state.GetRefund()
 				}
 				st.gasRemaining += refund
+
+				if rules.IsPrague && st.evm.ProcessingHook.IsCalldataPricingIncreaseEnabled() {
+					// After EIP-7623: Data-heavy transactions pay the floor gas.
+					if st.gasUsed() < floorGas7623 {
+						//prev := st.gasRemaining
+						st.gasRemaining = st.initialGas - floorGas7623
+						//if t := st.evm.Config.Tracer; t != nil && t.OnGasChange != nil {
+						//	t.OnGasChange(prev, st.gasRemaining, tracing.GasChangeTxDataFloor)
+						//}
+					}
+				}
 			}
 		} else { // Other networks
 			gasUsed := st.gasUsed()
