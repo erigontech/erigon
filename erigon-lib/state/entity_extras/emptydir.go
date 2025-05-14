@@ -21,4 +21,4 @@ func CheckSaltFilesExist(dirs datadir.Dirs) (bool, error) {
 	return exists && exists2, nil
 }
 
-var ErrCannotStartWithoutSaltFiles = errors.New("cannot start RPC daemon: salt files missing in datadir. REQUIRED STEPS: (1) Start Erigon and wait for OtterSync to complete. (2) Once salt files exist (snapshot/salt-block.txt, snapshot/salt-state.txt), start RPC daemon independently")
+var ErrCannotStartWithoutSaltFiles = errors.New("cannot start RPC daemon: salt files missing in datadir. REQUIRED STEPS: (1) Start Erigon and wait for OtterSync to complete. (2) Once salt files exist (snapshot/salt-blocks.txt, snapshot/salt-state.txt), start RPC daemon independently")
