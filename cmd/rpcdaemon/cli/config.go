@@ -42,7 +42,6 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/paths"
 	"github.com/erigontech/erigon-lib/config3"
@@ -60,6 +59,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
+	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 	"github.com/erigontech/erigon-lib/state/stats"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
@@ -307,23 +307,6 @@ func checkDbCompatibility(ctx context.Context, db kv.RoDB) error {
 	return nil
 }
 
-func checkSaltFilesExist(dirs datadir.Dirs) error {
-	exists, err := dir.FileExist(filepath.Join(dirs.Snap, "salt-blocks.txt"))
-	if err != nil {
-		return err
-	}
-	exists2, err := dir.FileExist(filepath.Join(dirs.Snap, "salt-state.txt"))
-	if err != nil {
-		return err
-	}
-
-	if !exists && !exists2 {
-		return errors.New("salt files not found")
-	}
-
-	return nil
-}
-
 func EmbeddedServices(ctx context.Context,
 	erigonDB kv.RoDB, stateCacheCfg kvcache.CoherentConfig,
 	rpcFiltersConfig rpchelper.FiltersConfig,
@@ -405,10 +388,14 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		//    Accede mode will check db existence (may wait with retries). It's ok to fail in this case - some supervisor will restart us.
 
 		// using salt files as proxy for empty directory or not
-		existErr := checkSaltFilesExist(cfg.Dirs)
-		if existErr != nil {
-			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("directory is empty: %v", existErr)
+		ok, err := ee.CheckSaltFilesExist(cfg.Dirs)
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 		}
+		if !ok {
+			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, ee.ErrCannotStartWithoutSaltFiles
+		}
+
 		logger.Warn("Opening chain db", "path", cfg.Dirs.Chaindata)
 		limiter := semaphore.NewWeighted(roTxLimit)
 		rawDB, err := kv2.New(kv.ChainDB, logger).RoTxsLimiter(limiter).Path(cfg.Dirs.Chaindata).Accede(true).Open(ctx)
@@ -690,7 +677,6 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	ff = rpchelper.New(ctx, cfg.RpcFiltersConfig, eth, txPool, mining, onNewSnapshot, logger)
 	return db, eth, txPool, mining, stateCache, blockReader, engine, ff, bridgeReader, heimdallReader, err
 }
-
 func StartRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) error {
 	if cfg.Enabled {
 		return startRegularRpcServer(ctx, cfg, rpcAPI, logger)
