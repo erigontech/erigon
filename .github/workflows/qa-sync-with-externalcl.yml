@@ -7,7 +7,7 @@ on:
 
 jobs:
   sync-with-externalcl:
-    runs-on: [self-hosted, qa, linux, X64]
+    runs-on: [self-hosted, qa, linux, X64, long-running]
     timeout-minutes: 1440 # 24 hours
     strategy:
       fail-fast: false
