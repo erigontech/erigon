@@ -125,15 +125,21 @@ func FindFilesWithVersionsByPattern(pattern string) (string, Version, error) {
 	}
 	if len(matches) > 1 {
 		sort.Slice(matches, func(i, j int) bool {
-			version1, _ := ParseVersion(matches[i])
-			version2, _ := ParseVersion(matches[j])
+			_, fName1 := filepath.Split(matches[i])
+			version1, _ := ParseVersion(fName1)
+
+			_, fName2 := filepath.Split(matches[j])
+			version2, _ := ParseVersion(fName2)
+
 			return version1.Less(version2)
 		})
-		ver, _ := ParseVersion(matches[len(matches)-1])
+		_, fName := filepath.Split(matches[len(matches)-1])
+		ver, _ := ParseVersion(fName)
+
 		return matches[len(matches)-1], ver, nil
 	}
-
-	ver, _ := ParseVersion(matches[0])
+	_, fName := filepath.Split(matches[0])
+	ver, _ := ParseVersion(fName)
 	return matches[0], ver, nil
 }
 
