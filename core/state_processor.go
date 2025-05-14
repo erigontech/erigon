@@ -21,6 +21,7 @@ package core
 
 import (
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/params"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/core/state"
@@ -284,53 +285,54 @@ func ApplyArbTransaction(config *chain.Config, blockHashFunc func(n uint64) libc
 //
 // ProcessParentBlockHash stores the parent block hash in the history storage contract
 // as per EIP-2935/7709.
-//func ProcessParentBlockHash(prevHash libcommon.Hash, evm *vm.EVM) {
-//	//if tracer := evm.Config.Tracer; tracer != nil {
-//	//	onSystemCallStart(tracer, evm.GetVMContext())
-//	//	if tracer.OnSystemCallEnd != nil {
-//	//		defer tracer.OnSystemCallEnd()
-//	//	}
-//	//}
-//	//tx
-//	//msg := &Message{
-//	//	From:      params.SystemAddress,
-//	//	GasLimit:  30_000_000,
-//	//	GasPrice:  common.Big0,
-//	//	GasFeeCap: common.Big0,
-//	//	GasTipCap: common.Big0,
-//	//	To:        &params.HistoryStorageAddress,
-//	//	Data:      prevHash.Bytes(),
-//	//}
-//	msg := types.NewMessage(
-//		params.SystemAddress,
-//		&params.HistoryStorageAddress,
-//		0,
-//		libcommon.Num0,
-//		30_000_000,
-//		libcommon.Num0,
-//		libcommon.Num0,
-//		libcommon.Num0,
-//		prevHash[:],
-//		types.AccessList{},
-//		false,
-//		false,
-//		libcommon.Num0,
-//	)
-//
-//	//msg, err := args.ToMessage(30_000_000, evm.Context.BaseFee)
-//	//evm
-//	//evm.SetTxContext(NewEVMTxContext(msg))
-//	//evm.StateDB.AddAddressToAccessList(params.HistoryStorageAddress)
-//
-//	_, _, err := evm.Call(vm.AccountRef(msg.From()), *msg.To(), msg.Data(), msg.Gas(), libcommon.Num0, false)
-//	if err != nil {
-//		panic(err)
-//	}
-//	//if evm.StateDB.AccessEvents() != nil {
-//	//	evm.StateDB.AccessEvents().Merge(evm.AccessEvents)
-//	//}
-//	evm.StateDB.Finalise(true)
-//}
+func ProcessParentBlockHash(prevHash libcommon.Hash, evm *vm.EVM) {
+	//if tracer := evm.Config.Tracer; tracer != nil {
+	//	onSystemCallStart(tracer, evm.GetVMContext())
+	//	if tracer.OnSystemCallEnd != nil {
+	//		defer tracer.OnSystemCallEnd()
+	//	}
+	//}
+	//tx
+	//msg := &Message{
+	//	From:      params.SystemAddress,
+	//	GasLimit:  30_000_000,
+	//	GasPrice:  common.Big0,
+	//	GasFeeCap: common.Big0,
+	//	GasTipCap: common.Big0,
+	//	To:        &params.HistoryStorageAddress,
+	//	Data:      prevHash.Bytes(),
+	//}
+	msg := types.NewMessage(
+		params.SystemAddress,
+		&params.HistoryStorageAddress,
+		0,
+		libcommon.Num0,
+		30_000_000,
+		libcommon.Num0,
+		libcommon.Num0,
+		libcommon.Num0,
+		prevHash[:],
+		types.AccessList{},
+		false,
+		false,
+		libcommon.Num0,
+	)
+
+	//msg, err := args.ToMessage(30_000_000, evm.Context.BaseFee)
+	//evm
+	//evm.SetTxContext(NewEVMTxContext(msg))
+	//evm.StateDB.AddAddressToAccessList(params.HistoryStorageAddress)
+
+	_, _, err := evm.Call(vm.AccountRef(msg.From()), *msg.To(), msg.Data(), msg.Gas(), libcommon.Num0, false)
+	if err != nil {
+		panic(err)
+	}
+	//if evm.StateDB.AccessEvents() != nil {
+	//	evm.StateDB.AccessEvents().Merge(evm.AccessEvents)
+	//}
+	//evm.StateDB.Finalise(true)
+}
+
 //
 // ProcessWithdrawalQueue calls the EIP-7002 withdrawal queue contract.
 // It returns the opaque request data returned by the contract.
