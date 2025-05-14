@@ -999,13 +999,16 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 // - Add authorities to access list (EIP-7702)
 // - Add delegated designation (if it exists for dst) to access list (EIP-7702)
 func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase common.Address, dst *common.Address,
-	precompiles []common.Address, list types.AccessList, authorities []common.Address) error {
+	precompiles []common.Address, list types.AccessList, authorities []common.Address, aaOverride bool) error {
 	if sdb.trace {
 		fmt.Printf("ibs.Prepare %x, %x, %x, %x, %v, %v, %v\n", sender, coinbase, dst, precompiles, list, rules, authorities)
 	}
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions
 		al := newAccessList()
+		if aaOverride { // carry over access list
+			al = sdb.accessList
+		}
 		sdb.accessList = al
 		//sdb.accessList.Reset()
 		//al := sdb.accessList

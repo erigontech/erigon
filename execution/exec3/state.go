@@ -383,6 +383,9 @@ func (rw *Worker) execAATxn(txTask *state.TxTask) {
 		log.Info("✅[aa] validated AA bundle", "len", startIdx-endIdx)
 
 		txTask.ValidationResults = validationResults
+		if err := rw.ibs.MakeWriteSet(txTask.Rules, rw.stateWriter); err != nil {
+			panic(err)
+		}
 	}
 
 	if len(txTask.ValidationResults) == 0 {

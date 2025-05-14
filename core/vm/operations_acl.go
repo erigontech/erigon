@@ -60,7 +60,10 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		}
 		var original uint256.Int
 		slotCommited := common.Hash(x.Bytes32())
-		evm.IntraBlockState().GetCommittedState(contract.Address(), &slotCommited, &original)
+		err := evm.IntraBlockState().GetCommittedState(contract.Address(), &slotCommited, &original) // original differs, fine if GetState instead of GetCommittedState (works with MakeWriteSet but mining is broken)
+		if err != nil {
+			return 0, err
+		}
 		if original.Eq(&current) {
 			if original.IsZero() { // create slot (2.1.1)
 				return cost + params.SstoreSetGasEIP2200, nil

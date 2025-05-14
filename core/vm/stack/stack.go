@@ -107,6 +107,17 @@ func (st *Stack) Print() {
 	log.Info("#############")
 }
 
+func (st *Stack) PrintStr() string {
+	ret := ""
+	if len(st.Data) > 0 {
+		for _, val := range st.Data {
+			ret += fmt.Sprintf("%v ", val.Hex())
+		}
+	}
+
+	return ret
+}
+
 func ReturnNormalStack(s *Stack) {
 	s.Data = s.Data[:0]
 	stackPool.Put(s)
