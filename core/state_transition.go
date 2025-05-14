@@ -576,16 +576,16 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 					refund = st.state.GetRefund()
 				}
 				st.gasRemaining += refund
+			}
 
-				if rules.IsPrague && st.evm.ProcessingHook.IsCalldataPricingIncreaseEnabled() {
-					// After EIP-7623: Data-heavy transactions pay the floor gas.
-					if st.gasUsed() < floorGas7623 {
-						//prev := st.gasRemaining
-						st.gasRemaining = st.initialGas - floorGas7623
-						//if t := st.evm.Config.Tracer; t != nil && t.OnGasChange != nil {
-						//	t.OnGasChange(prev, st.gasRemaining, tracing.GasChangeTxDataFloor)
-						//}
-					}
+			if rules.IsPrague && st.evm.ProcessingHook.IsCalldataPricingIncreaseEnabled() {
+				// After EIP-7623: Data-heavy transactions pay the floor gas.
+				if st.gasUsed() < floorGas7623 {
+					//prev := st.gasRemaining
+					st.gasRemaining = st.initialGas - floorGas7623
+					//if t := st.evm.Config.Tracer; t != nil && t.OnGasChange != nil {
+					//	t.OnGasChange(prev, st.gasRemaining, tracing.GasChangeTxDataFloor)
+					//}
 				}
 			}
 		} else { // Other networks
@@ -616,7 +616,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	amount.Mul(amount, effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
 
 	// code for non-arbitrum; need to doublecheck coinbase here
-	//if err := st.state.AddBalance(coinbase, amount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+	if err := st.state.AddBalance(coinbase, amount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+	}
 	if st.evm.Config().NoBaseFee && msg.FeeCap().Sign() == 0 && msg.TipCap().Sign() == 0 {
 	} else {
 		if err := st.state.AddBalance(tipReceipient, amount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
