@@ -27,6 +27,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/math"
@@ -272,8 +273,9 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 				return fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 			}
 			if !ok {
-				return fmt.Errorf("%w: address %v, codehash: %s", ErrSenderNoEOA,
-					st.msg.From().Hex(), codeHash)
+				code, err := st.state.GetCode(st.msg.From())
+				return fmt.Errorf("%w: address %v, codehash: %s, code: %s, %v", ErrSenderNoEOA,
+					st.msg.From().Hex(), codeHash, common.Bytes2Hex(code), err)
 			}
 		}
 	}
