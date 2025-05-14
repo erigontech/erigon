@@ -270,10 +270,22 @@ func NewDirtySegment(segType snaptype.Type, version snaptype.Version, from uint6
 	}
 }
 
+func (s *DirtySegment) CanDelete() bool {
+	return s.canDelete.Load()
+}
+
 type VisibleSegment struct {
 	Range
 	segType snaptype.Type
 	src     *DirtySegment
+}
+
+func NewVisibleSegment(rng Range, segType snaptype.Type, src *DirtySegment) *VisibleSegment {
+	return &VisibleSegment{
+		Range:   rng,
+		segType: segType,
+		src:     src,
+	}
 }
 
 func (s *VisibleSegment) Src() *DirtySegment {
@@ -339,14 +351,16 @@ func (s *DirtySegment) IsIndexed() bool {
 	if len(s.indexes) < len(s.Type().Indexes()) {
 		return false
 	}
+	return !s.ContainsNilIndex()
+}
 
+func (s *DirtySegment) ContainsNilIndex() bool {
 	for _, i := range s.indexes {
 		if i == nil {
-			return false
+			return true
 		}
 	}
-
-	return true
+	return false
 }
 
 func (s *DirtySegment) FileName() string {
@@ -359,7 +373,7 @@ func (s *DirtySegment) FileInfo(dir string) snaptype.FileInfo {
 
 func (s *DirtySegment) GetRange() (from, to uint64) { return s.from, s.to }
 func (s *DirtySegment) GetType() snaptype.Type      { return s.segType }
-func (s *DirtySegment) isSubSetOf(j *DirtySegment) bool {
+func (s *DirtySegment) IsSubSetOf(j *DirtySegment) bool {
 	return (j.from <= s.from && s.to <= j.to) && (j.from != s.from || s.to != j.to)
 }
 
@@ -389,7 +403,7 @@ func (s *DirtySegment) closeIdx() {
 	s.indexes = nil
 }
 
-func (s *DirtySegment) close() {
+func (s *DirtySegment) Close() {
 	if s != nil {
 		s.closeIdx()
 		s.closeSeg()
@@ -484,7 +498,7 @@ func (s *RoTx) Close() {
 
 		refCnt := src.refcount.Add(-1)
 
-		if refCnt == 0 && src.canDelete.Load() {
+		if refCnt == 0 && src.CanDelete() {
 			src.closeAndRemoveFiles()
 		}
 	}
@@ -775,7 +789,7 @@ func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) []*Visibl
 	newVisibleSegments := make([]*VisibleSegment, 0, dirtySegments.Len())
 	dirtySegments.Walk(func(segments []*DirtySegment) bool {
 		for _, sn := range segments {
-			if sn.canDelete.Load() {
+			if sn.CanDelete() {
 				continue
 			}
 			if !sn.IsIndexed() {
@@ -783,7 +797,7 @@ func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) []*Visibl
 			}
 
 			//protect from overlaps
-			for len(newVisibleSegments) > 0 && newVisibleSegments[len(newVisibleSegments)-1].src.isSubSetOf(sn) {
+			for len(newVisibleSegments) > 0 && newVisibleSegments[len(newVisibleSegments)-1].src.IsSubSetOf(sn) {
 				newVisibleSegments[len(newVisibleSegments)-1].src = nil
 				newVisibleSegments = newVisibleSegments[:len(newVisibleSegments)-1]
 			}
@@ -1237,7 +1251,7 @@ func (s *RoSnapshots) closeWhatNotInList(l []string) {
 	for segtype, delSegments := range toClose {
 		dirtyFiles := s.dirty[segtype]
 		for _, delSeg := range delSegments {
-			delSeg.close()
+			delSeg.Close()
 			dirtyFiles.Delete(delSeg)
 		}
 	}
