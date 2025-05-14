@@ -46,6 +46,13 @@ func ShouldShortCircuitExecution(tx kv.RwTx, logPrefix string, l2ShortCircuitToV
 		return false, 0, err
 	}
 
+	// Get the current head block number to ensure we don't short circuit beyond what we have
+	headHash := rawdb.ReadHeadHeaderHash(tx)
+	headNumber := rawdb.ReadHeaderNumber(tx, headHash)
+	if headNumber == nil {
+		return false, 0, fmt.Errorf("could not get head block number")
+	}
+
 	var shortCircuitBatch, shortCircuitBlock, cycle uint64
 
 	// this is so empty batches work
@@ -68,6 +75,21 @@ func ShouldShortCircuitExecution(tx kv.RwTx, logPrefix string, l2ShortCircuitToV
 		shortCircuitBlock, _, err = hermezDb.GetHighestBlockInBatch(shortCircuitBatch)
 		if err != nil {
 			return false, 0, err
+		}
+
+		// Don't short circuit beyond what we have in the database
+		if shortCircuitBlock > *headNumber {
+			return false, 0, nil
+		}
+
+		// Verify we actually have this block in the database
+		canonicalHash, err := rawdb.ReadCanonicalHash(tx, shortCircuitBlock)
+		if err != nil {
+			return false, 0, fmt.Errorf("failed to read canonical hash: %w", err)
+		}
+		header := rawdb.ReadHeader(tx, canonicalHash, shortCircuitBlock)
+		if header == nil {
+			return false, 0, nil
 		}
 	}
 
