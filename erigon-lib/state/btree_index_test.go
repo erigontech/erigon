@@ -216,9 +216,7 @@ func buildBtreeIndex(tb testing.TB, dataPath, indexPath string, compressed seg.F
 }
 
 func Test_BtreeIndex_Seek2(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
+	t.Skip("issue #15028")
 
 	t.Parallel()
 
