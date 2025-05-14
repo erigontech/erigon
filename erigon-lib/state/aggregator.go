@@ -86,7 +86,7 @@ type Aggregator struct {
 
 	wg sync.WaitGroup // goroutines spawned by Aggregator, to ensure all of them are finish at agg.Close
 
-	onFreeze kv.OnFreezeFunc
+	onFilesChange kv.OnFilesChange
 
 	ps *background.ProgressSet
 
@@ -135,7 +135,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	return &Aggregator{
 		ctx:                    ctx,
 		ctxCancel:              ctxCancel,
-		onFreeze:               func(frozenFileNames []string) {},
+		onFilesChange:          func(frozenFileNames []string) {},
 		dirs:                   dirs,
 		tmpdir:                 dirs.Tmp,
 		aggregationStep:        aggregationStep,
@@ -233,8 +233,8 @@ func (a *Aggregator) registerII(idx kv.InvertedIdx, salt *uint32, dirs datadir.D
 	return nil
 }
 
-func (a *Aggregator) StepSize() uint64           { return a.aggregationStep }
-func (a *Aggregator) OnFreeze(f kv.OnFreezeFunc) { a.onFreeze = f }
+func (a *Aggregator) StepSize() uint64                 { return a.aggregationStep }
+func (a *Aggregator) OnFilesChange(f kv.OnFilesChange) { a.onFilesChange = f }
 func (a *Aggregator) DisableFsync() {
 	for _, d := range a.d {
 		d.DisableFsync()
@@ -454,6 +454,7 @@ func (a *Aggregator) BuildMissedIndices(ctx context.Context, workers int) error 
 	if err := a.OpenFolder(); err != nil {
 		return err
 	}
+	a.onFilesChange(nil)
 	return nil
 }
 
@@ -743,7 +744,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 	a.IntegrateMergedDirtyFiles(outs, in)
 	a.cleanAfterMerge(in)
 
-	a.onFreeze(in.FrozenList())
+	a.onFilesChange(in.FrozenList())
 	return true, nil
 }
 
@@ -1538,6 +1539,8 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 				}
 				a.logger.Warn("[snapshots] merge", "err", err)
 			}
+
+			a.onFilesChange(nil)
 		}()
 	}()
 	return fin

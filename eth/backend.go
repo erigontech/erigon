@@ -1531,10 +1531,10 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 		s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
 	}
 
-	s.chainDB.OnFreeze(func(frozenFileNames []string) {
+	s.chainDB.OnFilesChange(func(frozenFileNames []string) {
 		events := s.notifications.Events
 		events.OnNewSnapshot()
-		if s.downloaderClient != nil {
+		if s.downloaderClient != nil && len(frozenFileNames) > 0 {
 			req := &protodownloader.AddRequest{Items: make([]*protodownloader.AddItem, 0, len(frozenFileNames))}
 			for _, fName := range frozenFileNames {
 				req.Items = append(req.Items, &protodownloader.AddItem{
