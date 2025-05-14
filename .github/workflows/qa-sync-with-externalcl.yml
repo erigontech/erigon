@@ -7,7 +7,7 @@ on:
 
 jobs:
   sync-with-externalcl:
-    runs-on: [self-hosted, qa, linux, X64]
+    runs-on: [self-hosted, qa, linux, X64, long-running]
     timeout-minutes: 1440 # 24 hours
     strategy:
       fail-fast: false
@@ -66,9 +66,6 @@ jobs:
 
           # Capture monitoring script exit status
           test_exit_status=$?
-
-          # Save the subsection reached status
-          echo "::set-output name=test_executed::true"
 
           # Check test runner script exit status
           if [ $test_exit_status -eq 0 ]; then
