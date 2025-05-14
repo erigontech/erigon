@@ -62,7 +62,7 @@ jobs:
 
           # Run Erigon, wait sync and check ability to maintain sync
           python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
-            ${{ github.workspace }}/build/bin $ERIGON_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 ${{ matrix.chain }} minimal_node no_statistics ${{ matrix.client }} $CL_DATA_DIR 3000
+            ${{ github.workspace }}/build/bin $ERIGON_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 ${{ matrix.chain }} minimal_node no_statistics ${{ matrix.client }} $CL_DATA_DIR
 
           # Capture monitoring script exit status
           test_exit_status=$?
