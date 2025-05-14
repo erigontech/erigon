@@ -160,7 +160,7 @@ var snapshotCommand = cli.Command{
 
 				return doUnmerge(c, dirs)
 			},
-			Usage: "unmerge a particular snapshot file (to 1 step files).",
+			Usage: "unmerge a particular snapshot file (into 1 step files).",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&SnapshotFileFlag,
