@@ -614,11 +614,15 @@ OUTER:
 				return nil, err
 			}
 
+			fmt.Println("LAL lookup start", entity.BlockNumRange().Start)
+			fmt.Println("LAL lookup end", entity.BlockNumRange().End)
+
 			entityStart := entity.BlockNumRange().Start
 			entityEnd := entity.BlockNumRange().End
 			if fromEntityStart > 0 && entityStart >= fromEntityStart {
 				continue
 			} else if entityEnd < toEntityEnd {
+				fmt.Println("LAL FOUND", i, j, keyCount)
 				break OUTER
 			} else {
 				snapshotEntities = append(snapshotEntities, entity)
@@ -628,5 +632,11 @@ OUTER:
 
 	// prepend snapshot dbEntities that fall in the range
 	slices.Reverse(snapshotEntities)
+
+	fmt.Println("LAL found in snapshots:")
+	for i := range snapshotEntities {
+		fmt.Print("[", snapshotEntities[i].BlockNumRange().Start, ",", snapshotEntities[i].BlockNumRange().End, ")")
+	}
+
 	return append(snapshotEntities, dbEntities...), nil
 }
