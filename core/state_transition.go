@@ -583,14 +583,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 			gasUsed = gasUsed - refund
 
 			if rules.IsPrague {
-				//if st.evm.ProcessingHook.IsCalldataPricingIncreaseEnabled() {
-				//	// TODO seems like pointless update and check
-				//	if st.gasUsed() < floorGas7623 {
-				//		gasUsed = floorGas7623
-				//	}
-				//} else {
 				gasUsed = max(floorGas7623, gasUsed)
-				//}
 			}
 			st.gasRemaining = st.initialGas - gasUsed
 		}
