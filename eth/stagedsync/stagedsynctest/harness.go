@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon-db/interfaces"
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -52,7 +53,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
@@ -176,7 +176,7 @@ type Harness struct {
 	borConsensusDB             kv.RwDB
 	chainConfig                *chain.Config
 	borConfig                  *borcfg.BorConfig
-	blockReader                services.BlockReader
+	blockReader                interfaces.BlockReader
 	stateSyncStages            []*stagedsync.Stage
 	stateSync                  *stagedsync.Sync
 	miningSyncStages           []*stagedsync.Stage
