@@ -182,12 +182,23 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 
 		// End of block transaction in a block
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			return core.SysCallContract(contract, data, rw.execArgs.ChainConfig, ibs, header, rw.execArgs.Engine, false /* constCall */)
+			res, err := core.SysCallContract(contract, data, rw.execArgs.ChainConfig, ibs, header, rw.execArgs.Engine, false /* constCall */)
+			txTask.Logs = append(txTask.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
+			return res, err
 		}
 
 		_, _, _, err := rw.execArgs.Engine.Finalize(rw.execArgs.ChainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, true /* skipReceiptsEval */, rw.logger)
 		if err != nil {
 			txTask.Error = err
+		}
+		if err != nil {
+			txTask.Error = err
+		} else {
+			txTask.TraceTos = map[common.Address]struct{}{}
+			txTask.TraceTos[txTask.Coinbase] = struct{}{}
+			for _, uncle := range txTask.Uncles {
+				txTask.TraceTos[uncle.Coinbase] = struct{}{}
+			}
 		}
 	default:
 		rw.taskGasPool.Reset(txTask.Tx.GetGas(), txTask.Tx.GetBlobGas())
