@@ -52,7 +52,6 @@ import (
 	proto_types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/dnsdisc"
 	"github.com/erigontech/erigon/p2p/enode"
@@ -284,9 +283,9 @@ func makeP2PServer(
 		urls = params.BootnodeURLsOfChain(chainConfig.ChainName)
 	}
 	if len(p2pConfig.BootstrapNodes) == 0 {
-		bootstrapNodes, err := utils.ParseNodesFromURLs(urls)
+		bootstrapNodes, err := enode.ParseNodesFromURLs(urls)
 		if err != nil {
-			return nil, fmt.Errorf("bad option %s: %w", utils.BootnodesFlag.Name, err)
+			return nil, fmt.Errorf("bad bootnodes option: %w", err)
 		}
 		p2pConfig.BootstrapNodes = bootstrapNodes
 		p2pConfig.BootstrapNodesV5 = bootstrapNodes
