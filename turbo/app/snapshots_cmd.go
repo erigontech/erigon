@@ -898,7 +898,7 @@ func doPublishable(cliCtx *cli.Context) error {
 	if err := checkIfStateSnapshotsPublishable(dat); err != nil {
 		return err
 	}
-	// check if salt-state.txt and salt-block.txt exist
+	// check if salt-state.txt and salt-blocks.txt exist
 	exists, err := dir.FileExist(filepath.Join(dat.Snap, "salt-state.txt"))
 	if err != nil {
 		return err
@@ -938,7 +938,7 @@ func doClearIndexing(cliCtx *cli.Context) error {
 		return fmt.Errorf("failed to delete files in snapDir: %w", err)
 	}
 
-	// remove salt-state.txt and salt-block.txt
+	// remove salt-state.txt and salt-blocks.txt
 	os.Remove(filepath.Join(snapDir, "salt-state.txt"))
 	os.Remove(filepath.Join(snapDir, "salt-blocks.txt"))
 

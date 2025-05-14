@@ -852,6 +852,7 @@ func stageBodies(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) err
 }
 
 func stagePolygonSync(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
+	dirs := datadir.New(datadirCli)
 	engine, _, stageSync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
 	heimdallClient := engine.(*bor.Bor).HeimdallClient
 	_, _, _, _, bridgeStore, heimdallStore, err := allSnapshots(ctx, db, logger)
@@ -860,7 +861,6 @@ func stagePolygonSync(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	}
 
 	blockReader, blockWriter := blocksIO(db, logger)
-	dirs := datadir.New(datadirCli)
 	chainConfig := fromdb.ChainConfig(db)
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
