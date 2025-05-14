@@ -62,7 +62,8 @@ func (v Version) IsZero() bool {
 
 func ParseVersion(v string) (Version, error) {
 	if strings.HasPrefix(v, "v") {
-		strVersions := strings.Split(v[1:], ".")
+		versionString := strings.Split(v, "-")[0]
+		strVersions := strings.Split(versionString[1:], ".")
 		major, err := strconv.ParseUint(strVersions[0], 10, 8)
 		if err != nil {
 			return Version{}, fmt.Errorf("invalid version: %w", err)
@@ -136,10 +137,15 @@ func FindFilesWithVersionsByPattern(pattern string) (string, Version, error) {
 	return matches[0], ver, nil
 }
 
-func ReplaceVersionWithMask(s string) (string, error) {
-	ver, err := ParseVersion(s)
+func ReplaceVersionWithMask(path string) (string, error) {
+	_, fName := filepath.Split(path)
+
+	ver, err := ParseVersion(fName)
 	if err != nil {
 		return "", err
 	}
-	return strings.ReplaceAll(s, ver.String(), "*"), nil
+	fNameOld := fName
+	fName = strings.ReplaceAll(fName, ver.String(), "*")
+
+	return strings.ReplaceAll(path, fNameOld, fName), nil
 }
