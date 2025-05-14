@@ -202,7 +202,8 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 						continue
 					}
 
-					if _, ok := sawTopic[l.Topics[0]]; ok {
+					_, ok := sawTopic[l.Topics[0]]
+					if ok {
 						continue
 					}
 					sawTopic[l.Topics[0]] = struct{}{}
