@@ -407,7 +407,7 @@ func (s *DirtySegment) closeIdx() {
 	s.indexes = nil
 }
 
-func (s *DirtySegment) Close() {
+func (s *DirtySegment) CloseAll() {
 	if s != nil {
 		s.closeIdx()
 		s.closeSeg()
@@ -1259,7 +1259,7 @@ func (s *RoSnapshots) closeWhatNotInList(l []string) {
 	for segtype, delSegments := range toClose {
 		dirtyFiles := s.dirty[segtype]
 		for _, delSeg := range delSegments {
-			delSeg.Close()
+			delSeg.CloseAll()
 			dirtyFiles.Delete(delSeg)
 		}
 	}

@@ -502,7 +502,7 @@ func (s *CaplinStateSnapshots) closeWhatNotInList(l []string) {
 			return true
 		})
 		for _, sn := range toClose {
-			sn.Close()
+			sn.CloseAll()
 			dirtySegments.Delete(sn)
 		}
 	}
