@@ -343,7 +343,7 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 							ii.version.AccessorEFI.Current = fileVer
 						} else {
 							panic("Version is too low, try to rm ef snapshots")
-							return false
+							//return false
 						}
 					}
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
