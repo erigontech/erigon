@@ -256,7 +256,7 @@ func TestT8n(t *testing.T) {
 
 func TestEvmRun(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("Windows tests requires fixing.")
+		t.Skip("Windows tests require fixing.")
 	}
 	t.Parallel()
 	tt := cmdtest.NewTestCmd(t, nil)

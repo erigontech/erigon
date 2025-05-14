@@ -224,7 +224,6 @@ var snapshotCommand = cli.Command{
 			Name: "rm-all-state-snapshots",
 			Action: func(cliCtx *cli.Context) error {
 				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-				os.Remove(filepath.Join(dirs.Snap, "salt-state.txt"))
 				return dir.DeleteFiles(dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors)
 			},
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
@@ -283,8 +282,15 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
-			Name:        "publishable",
-			Action:      doPublishable,
+			Name: "publishable",
+			Action: func(cliCtx *cli.Context) error {
+				if err := doPublishable(cliCtx); err != nil {
+					log.Error("[publishable]", "err", err)
+					return err
+				}
+				log.Info("[publishable] snapshots are publishable")
+				return nil
+			},
 			Description: "Check if snapshot is publishable by a webseed client",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
@@ -914,7 +920,7 @@ func doPublishable(cliCtx *cli.Context) error {
 	if err := checkIfStateSnapshotsPublishable(dat); err != nil {
 		return err
 	}
-	// check if salt-state.txt and salt-block.txt exist
+	// check if salt-state.txt and salt-blocks.txt exist
 	exists, err := dir.FileExist(filepath.Join(dat.Snap, "salt-state.txt"))
 	if err != nil {
 		return err
@@ -955,7 +961,7 @@ func doClearIndexing(cliCtx *cli.Context) error {
 		return fmt.Errorf("failed to delete files in snapDir: %w", err)
 	}
 
-	// remove salt-state.txt and salt-block.txt
+	// remove salt-state.txt and salt-blocks.txt
 	os.Remove(filepath.Join(snapDir, "salt-state.txt"))
 	os.Remove(filepath.Join(snapDir, "salt-blocks.txt"))
 

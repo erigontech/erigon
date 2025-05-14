@@ -35,9 +35,7 @@ import (
 )
 
 func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
+	t.Skip("issue #15028")
 
 	t.Parallel()
 

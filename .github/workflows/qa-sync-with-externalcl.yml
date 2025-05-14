@@ -2,8 +2,8 @@ name: QA - Sync with external CL
 
 on:
   schedule:
-    - cron: '0 8 * * 0'  # Run on Sunday at 08:00 AM UTC
-  workflow_dispatch:     # Run manually
+    - cron: "0 8 * * 0" # Run on Sunday at 08:00 AM UTC
+  workflow_dispatch: # Run manually
 
 jobs:
   sync-with-externalcl:
@@ -37,9 +37,9 @@ jobs:
         run: |
           mkdir -p $CL_DATA_DIR
           if [ "${{ matrix.client }}" == "lighthouse" ]; then
-            curl -LO https://github.com/sigp/lighthouse/releases/download/v7.0.0-beta.0/lighthouse-v7.0.0-beta.0-x86_64-unknown-linux-gnu.tar.gz
-            tar -xvf lighthouse-v7.0.0-beta.0-x86_64-unknown-linux-gnu.tar.gz -C $CL_DATA_DIR
-            rm lighthouse-v7.0.0-beta.0-x86_64-unknown-linux-gnu.tar.gz
+            curl -LO https://github.com/sigp/lighthouse/releases/download/v7.0.1/lighthouse-v7.0.1-x86_64-unknown-linux-gnu.tar.gz
+            tar -xvf lighthouse-v7.0.1-x86_64-unknown-linux-gnu.tar.gz -C $CL_DATA_DIR
+            rm lighthouse-v7.0.1-x86_64-unknown-linux-gnu.tar.gz
           elif [ "${{ matrix.client }}" == "prysm" ]; then
             curl -L https://raw.githubusercontent.com/prysmaticlabs/prysm/master/prysm.sh -o $CL_DATA_DIR/prysm.sh
             chmod +x $CL_DATA_DIR/prysm.sh
@@ -59,17 +59,17 @@ jobs:
         id: test_step
         run: |
           set +e # Disable exit on error
-          
+
           # Run Erigon, wait sync and check ability to maintain sync
           python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
             ${{ github.workspace }}/build/bin $ERIGON_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 ${{ matrix.chain }} minimal_node no_statistics ${{ matrix.client }} $CL_DATA_DIR
-          
+
           # Capture monitoring script exit status
           test_exit_status=$?
-          
+
           # Save the subsection reached status
           echo "::set-output name=test_executed::true"
-          
+
           # Check test runner script exit status
           if [ $test_exit_status -eq 0 ]; then
             echo "Tests completed successfully"
@@ -137,3 +137,14 @@ jobs:
         run: |
           echo "::error::Error detected during tests"
           exit 1
+
+      - name: Display Error Reason
+        if: always()
+        run: |
+          if [ -f "${{ github.workspace }}/result-${{ matrix.chain }}.json" ]; then
+            OUTCOME=$(jq -r '.outcome' "${{ github.workspace }}/result-${{ matrix.chain }}.json" 2>/dev/null || echo "UNKNOWN")
+            if [ "$OUTCOME" != "SUCCESS" ]; then
+              REASON=$(jq -r '.reason // "No reason provided"' "${{ github.workspace }}/result-${{ matrix.chain }}.json")
+              echo "::error::Test failed with reason: $REASON"
+            fi
+          fi
