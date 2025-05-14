@@ -85,6 +85,18 @@ var (
 )
 
 var (
+	InternalDevnetOntakeBlock = new(big.Int).SetUint64(0)
+	PreconfDevnetOntakeBlock  = common.Big0
+	HeklaOntakeBlock          = new(big.Int).SetUint64(840_512)
+	MainnetOntakeBlock        = new(big.Int).SetUint64(538_304)
+
+	InternalDevnetPacayaBlock = new(big.Int).SetUint64(10)
+	PreconfDevnetPacayaBlock  = common.Big0
+	HeklaPacayaBlock          = new(big.Int).SetUint64(1_299_888)
+	MainnetPacayaBlock        = new(big.Int).SetUint64(999_999_999_999)
+)
+
+var (
 	// DefaultCancunBlobConfig is the default blob configuration for the Cancun fork.
 	DefaultCancunBlobConfig = func() *chain.BlobConfig {
 		target := uint64(3)
@@ -324,6 +336,13 @@ func ChainConfigByChainName(chainName string) *chain.Config {
 		return ChiadoChainConfig
 	case networkname.Test:
 		return chain.TestChainConfig
+	// CHANGE(taiko): get taiko mainnet config
+	case networkname.TaikoAlethia:
+		chainConfig := TaikoChainConfig
+		chainConfig.ChainID = TaikoMainnetNetworkID
+		chainConfig.OntakeBlock = MainnetOntakeBlock
+		chainConfig.PacayaBlock = MainnetPacayaBlock
+		return chainConfig
 	default:
 		return nil
 	}

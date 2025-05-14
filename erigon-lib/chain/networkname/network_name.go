@@ -29,6 +29,7 @@ const (
 	BorE2ETestChain2Val = "bor-e2e-test-2Val"
 	Chiado              = "chiado"
 	Test                = "test"
+	TaikoAlethia        = "taiko-alethia"
 )
 
 var All = []string{
@@ -42,4 +43,5 @@ var All = []string{
 	Gnosis,
 	Chiado,
 	Test,
+	TaikoAlethia,
 }

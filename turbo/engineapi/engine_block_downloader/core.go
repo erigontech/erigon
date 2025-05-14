@@ -18,7 +18,6 @@ package engine_block_downloader
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -104,17 +103,34 @@ func (e *EngineBlockDownloader) download(ctx context.Context, hashToDownload com
 		e.status.Store(headerdownload.Idle)
 		return
 	}
-
-	startBlockNr := uint64(0)
+	headHash, _, _, err := e.chainRW.GetForkChoice(ctx)
+	if err != nil {
+		panic(err)
+	}
+	latestHeader, err := e.blockReader.HeaderByHash(ctx, memoryMutation, headHash)
+	if err != nil {
+		panic(err)
+	}
+	latestBlockNr := uint64(0)
+	if latestHeader != nil {
+		latestBlockNr = latestHeader.Number.Uint64()
+	}
+	e.logger.Info("[EngineBlockDownloader] currentForkChoice:  ", "latestBlockNr", latestBlockNr)
 	targetBlockNr := endBlock
 	increment := uint64(2_000)
-	for currentBlockNr := startBlockNr; currentBlockNr < targetBlockNr; currentBlockNr += increment {
+	currentBlockNr := latestBlockNr // start from latest fork choice
+	for currentBlockNr < targetBlockNr {
+		if currentBlockNr+increment >= targetBlockNr { // adjust increment to remainder towards the end
+			increment = targetBlockNr - currentBlockNr
+		}
 		err = e.downloadAndExecLoopIteration(ctx, memoryMutation, currentBlockNr, currentBlockNr+increment)
 		if err != nil {
 			e.logger.Error("[EngineBlockDownloader] failed to execute blocks ", "startBlock", currentBlockNr, "endBlock", currentBlockNr+increment, "err", err)
 			e.status.Store(headerdownload.Idle)
 			return
 		}
+		currentBlockNr += increment
+
 	}
 	// Can fail, not an issue in this case.
 	e.chainRW.InsertBlockAndWait(ctx, block)
@@ -125,28 +141,16 @@ func (e *EngineBlockDownloader) download(ctx context.Context, hashToDownload com
 
 func (e *EngineBlockDownloader) downloadAndExecLoopIteration(ctx context.Context, memoryMutation kv.RwTx, startBlockNr, endBlockNr uint64) error {
 	e.logger.Info("[EngineBlockDownloader] LOOP ITERATION downloading and executing ", "startBlock", startBlockNr, "endBlock", endBlockNr)
-	headHash, _, _, err := e.chainRW.GetForkChoice(ctx)
-	if err != nil {
-		return err
-	}
-	latestHeader, err := e.blockReader.HeaderByHash(ctx, memoryMutation, headHash)
-	if err != nil {
-		return err
-	}
-	latestBlockNr := uint64(0)
-	if latestHeader != nil {
-		latestBlockNr = latestHeader.Number.Uint64()
-	}
 
-	if latestBlockNr > startBlockNr {
-		e.logger.Info("[EngineBlockDownloader] Early exit: not downloading bodies or executing because startBlockNr < latestBlockNr ", "startBlockNr", startBlockNr, "latestBlockNr", latestBlockNr)
-		return nil
-	}
+	// if latestBlockNr > startBlockNr {
+	// 	e.logger.Info("[EngineBlockDownloader] Early exit: not downloading bodies or executing because startBlockNr < latestBlockNr ", "startBlockNr", startBlockNr, "latestBlockNr", latestBlockNr)
+	// 	return nil
+	// }
 
-	if latestBlockNr > endBlockNr { // this should also not happen
-		e.logger.Error("[EngineBlockDownloader] This should not happen ", "latestBlockNr", latestBlockNr, "endBlockNr", endBlockNr)
-		return errors.New("latestBlockNr>endBlockNr")
-	}
+	// if latestBlockNr > endBlockNr { // this should also not happen
+	// 	e.logger.Error("[EngineBlockDownloader] This should not happen ", "latestBlockNr", latestBlockNr, "endBlockNr", endBlockNr)
+	// 	return errors.New("latestBlockNr>endBlockNr")
+	// }
 
 	if err := e.downloadAndLoadBodiesSyncronously(ctx, memoryMutation, uint64(startBlockNr), uint64(endBlockNr)); err != nil {
 		e.logger.Warn("[EngineBlockDownloader] Could not download bodies", "err", err)

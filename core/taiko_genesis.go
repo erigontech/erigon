@@ -11,18 +11,6 @@ import (
 )
 
 var (
-	InternalDevnetOntakeBlock = new(big.Int).SetUint64(0)
-	PreconfDevnetOntakeBlock  = common.Big0
-	HeklaOntakeBlock          = new(big.Int).SetUint64(840_512)
-	MainnetOntakeBlock        = new(big.Int).SetUint64(538_304)
-
-	InternalDevnetPacayaBlock = new(big.Int).SetUint64(10)
-	PreconfDevnetPacayaBlock  = common.Big0
-	HeklaPacayaBlock          = new(big.Int).SetUint64(1_299_888)
-	MainnetPacayaBlock        = new(big.Int).SetUint64(999_999_999_999)
-)
-
-var (
 	logger = log.New("taiko-genesis")
 )
 
@@ -34,13 +22,13 @@ func TaikoGenesisBlock(networkID uint64) *types.Genesis {
 	switch networkID {
 	case params.TaikoMainnetNetworkID.Uint64():
 		chainConfig.ChainID = params.TaikoMainnetNetworkID
-		chainConfig.OntakeBlock = MainnetOntakeBlock
-		chainConfig.PacayaBlock = MainnetPacayaBlock
+		chainConfig.OntakeBlock = params.MainnetOntakeBlock
+		chainConfig.PacayaBlock = params.MainnetPacayaBlock
 		allocJSON = taikoGenesis.MainnetGenesisAllocJSON
 	case params.TaikoInternalL2ANetworkID.Uint64():
 		chainConfig.ChainID = params.TaikoInternalL2ANetworkID
-		chainConfig.OntakeBlock = InternalDevnetOntakeBlock
-		chainConfig.PacayaBlock = InternalDevnetPacayaBlock
+		chainConfig.OntakeBlock = params.InternalDevnetOntakeBlock
+		chainConfig.PacayaBlock = params.InternalDevnetPacayaBlock
 		allocJSON = taikoGenesis.InternalL2AGenesisAllocJSON
 	case params.TaikoInternalL2BNetworkID.Uint64():
 		chainConfig.ChainID = params.TaikoInternalL2BNetworkID
@@ -65,18 +53,18 @@ func TaikoGenesisBlock(networkID uint64) *types.Genesis {
 		allocJSON = taikoGenesis.KatlaGenesisAllocJSON
 	case params.HeklaNetworkID.Uint64():
 		chainConfig.ChainID = params.HeklaNetworkID
-		chainConfig.OntakeBlock = HeklaOntakeBlock
-		chainConfig.PacayaBlock = HeklaPacayaBlock
+		chainConfig.OntakeBlock = params.HeklaOntakeBlock
+		chainConfig.PacayaBlock = params.HeklaPacayaBlock
 		allocJSON = taikoGenesis.HeklaGenesisAllocJSON
 	case params.PreconfDevnetNetworkID.Uint64():
 		chainConfig.ChainID = params.PreconfDevnetNetworkID
-		chainConfig.OntakeBlock = PreconfDevnetOntakeBlock
-		chainConfig.PacayaBlock = PreconfDevnetPacayaBlock
+		chainConfig.OntakeBlock = params.PreconfDevnetOntakeBlock
+		chainConfig.PacayaBlock = params.PreconfDevnetPacayaBlock
 		allocJSON = taikoGenesis.PreconfDevnetGenesisAllocJSON
 	default:
 		chainConfig.ChainID = params.TaikoInternalL2ANetworkID
-		chainConfig.OntakeBlock = InternalDevnetOntakeBlock
-		chainConfig.PacayaBlock = InternalDevnetPacayaBlock
+		chainConfig.OntakeBlock = params.InternalDevnetOntakeBlock
+		chainConfig.PacayaBlock = params.InternalDevnetPacayaBlock
 		allocJSON = taikoGenesis.InternalL2AGenesisAllocJSON
 	}
 
