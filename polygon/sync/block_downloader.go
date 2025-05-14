@@ -90,14 +90,20 @@ type BlockDownloader struct {
 }
 
 func (d *BlockDownloader) DownloadBlocksUsingCheckpoints(ctx context.Context, start uint64, end *uint64) (*types.Header, error) {
+	fmt.Println("LAL DownloadBlocksUsingCheckpoints", start)
+
 	checkpoints, err := d.waypointReader.CheckpointsFromBlock(ctx, start)
 	if err != nil {
 		return nil, err
 	}
 
+	fmt.Println("LAL checkpoints read", len(checkpoints))
+
 	if len(checkpoints) == 0 {
 		return nil, nil
 	}
+
+	fmt.Println("First checkpoint:", checkpoints[0].StartBlock().Uint64(), checkpoints[0].EndBlock().Uint64())
 
 	firstCheckpoint := checkpoints[0]
 	if firstCheckpointStart := firstCheckpoint.StartBlock().Uint64(); firstCheckpointStart > start {

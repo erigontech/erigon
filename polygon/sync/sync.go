@@ -801,16 +801,22 @@ type syncToTipResult struct {
 }
 
 func (s *Sync) syncToTip(ctx context.Context) (syncToTipResult, error) {
+	fmt.Println("LAL sync to tip")
+
 	startTime := time.Now()
 	latestTipOnStart, err := s.execution.CurrentHeader(ctx)
 	if err != nil {
 		return syncToTipResult{}, err
 	}
 
+	fmt.Println("LAL sync to tip. Latest on start:", latestTipOnStart)
+
 	result, err := s.syncToTipUsingCheckpoints(ctx, latestTipOnStart)
 	if err != nil {
 		return syncToTipResult{}, err
 	}
+
+	fmt.Println("LAL OK")
 
 	blocks := result.latestTip.Number.Uint64() - latestTipOnStart.Number.Uint64()
 	s.logger.Info(
