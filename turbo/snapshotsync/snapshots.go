@@ -270,10 +270,6 @@ func NewDirtySegment(segType snaptype.Type, version snaptype.Version, from uint6
 	}
 }
 
-func (s *DirtySegment) CanDelete() bool {
-	return s.canDelete.Load()
-}
-
 type VisibleSegment struct {
 	Range
 	segType snaptype.Type
@@ -290,6 +286,10 @@ func NewVisibleSegment(rng Range, segType snaptype.Type, src *DirtySegment) *Vis
 
 func (s *VisibleSegment) Src() *DirtySegment {
 	return s.src
+}
+
+func (s *VisibleSegment) SetSrc(src *DirtySegment) {
+	s.src = src
 }
 
 func (s *VisibleSegment) IsIndexed() bool {
@@ -345,6 +345,10 @@ func (s *DirtySegment) Index(index ...snaptype.Index) *recsplit.Index {
 	}
 
 	return s.indexes[index[0].Offset]
+}
+
+func (s *DirtySegment) SetIndexes(indexes []*recsplit.Index) {
+	s.indexes = indexes
 }
 
 func (s *DirtySegment) IsIndexed() bool {
@@ -466,6 +470,10 @@ func (s *DirtySegment) openIdx(dir string) (err error) {
 	}
 
 	return nil
+}
+
+func (s *DirtySegment) CanDelete() bool {
+	return s.canDelete.Load()
 }
 
 type VisibleSegments []*VisibleSegment

@@ -372,16 +372,12 @@ func openIdxForCaplinStateIfNeeded(s *snapshotsync.DirtySegment, filePath string
 }
 
 func openIdxIfNeedForCaplinState(s *snapshotsync.DirtySegment, filePath string) (err error) {
-	s.indexes = make([]*recsplit.Index, 1)
-
 	filePath = strings.ReplaceAll(filePath, ".seg", ".idx")
 	index, err := recsplit.OpenIndex(filePath)
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, filePath)
 	}
-
-	s.indexes[0] = index
-
+	s.SetIndexes([]*recsplit.Index{index})
 	return nil
 }
 
@@ -412,7 +408,7 @@ func (s *CaplinStateSnapshots) recalcVisibleFiles() {
 					continue
 				}
 				for len(newVisibleSegments) > 0 && newVisibleSegments[len(newVisibleSegments)-1].Src().IsSubSetOf(sn) {
-					newVisibleSegments[len(newVisibleSegments)-1].src = nil
+					newVisibleSegments[len(newVisibleSegments)-1].SetSrc(nil)
 					newVisibleSegments = newVisibleSegments[:len(newVisibleSegments)-1]
 				}
 				newVisibleSegments = append(newVisibleSegments, snapshotsync.NewVisibleSegment(sn.Range, sn.Type(), sn))

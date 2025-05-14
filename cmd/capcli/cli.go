@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
+	"github.com/erigontech/erigon/cl/persistence/snapshots"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
@@ -62,7 +63,6 @@ import (
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/snapshotsync"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -590,8 +590,8 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 
-	snTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(db)
-	stateSn := snapshotsync.NewCaplinStateSnapshots(freezingCfg, beaconConfig, dirs, snTypes, log.Root())
+	snTypes := snapshots.MakeCaplinStateSnapshotsTypes(db)
+	stateSn := snapshots.NewCaplinStateSnapshots(freezingCfg, beaconConfig, dirs, snTypes, log.Root())
 	if err := stateSn.OpenFolder(); err != nil {
 		return err
 	}
@@ -1273,8 +1273,8 @@ func (c *DumpStateSnapshots) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	snTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(db)
-	stateSn := snapshotsync.NewCaplinStateSnapshots(freezingCfg, beaconConfig, dirs, snTypes, log.Root())
+	snTypes := snapshots.MakeCaplinStateSnapshotsTypes(db)
+	stateSn := snapshots.NewCaplinStateSnapshots(freezingCfg, beaconConfig, dirs, snTypes, log.Root())
 	if err := stateSn.OpenFolder(); err != nil {
 		return err
 	}

@@ -34,13 +34,13 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/persistence/snapshots"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
-	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 
 // pool for buffers
@@ -126,7 +126,7 @@ func (s *Antiquary) readHistoricalProcessingProgress(ctx context.Context) (progr
 	return
 }
 
-func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.Logger, stateSn *snapshotsync.CaplinStateSnapshots, validatorsTable *state_accessors.StaticValidatorTable) (bool, error) {
+func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.Logger, stateSn *snapshots.CaplinStateSnapshots, validatorsTable *state_accessors.StaticValidatorTable) (bool, error) {
 	if stateSn == nil || validatorsTable.Slot() != 0 {
 		return false, nil
 	}

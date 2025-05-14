@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/cl/persistence/genesisdb"
+	"github.com/erigontech/erigon/cl/persistence/snapshots"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
@@ -71,7 +72,6 @@ import (
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/turbo/snapshotsync"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -383,7 +383,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			return err
 		}
 	}
-	stateSnapshots := snapshotsync.NewCaplinStateSnapshots(dbsnapshotsync.BlocksFreezing{ChainName: beaconConfig.ConfigName}, beaconConfig, dirs, snapshotsync.MakeCaplinStateSnapshotsTypes(indexDB), logger)
+	stateSnapshots := snapshots.NewCaplinStateSnapshots(dbsnapshotsync.BlocksFreezing{ChainName: beaconConfig.ConfigName}, beaconConfig, dirs, snapshots.MakeCaplinStateSnapshotsTypes(indexDB), logger)
 	antiq := antiquary.NewAntiquary(ctx, blobStorage, genesisState, vTables, beaconConfig, dirs, snDownloader, indexDB, stateSnapshots, csn, rcsn, syncedDataManager, logger, config.ArchiveStates, config.ArchiveBlocks, config.ArchiveBlobs, config.SnapshotGenerationEnabled, snBuildSema)
 	// Create the antiquary
 	go func() {

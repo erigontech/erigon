@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/cl/persistence/snapshots"
 	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -48,7 +49,6 @@ import (
 	"github.com/erigontech/erigon/cl/validator/committee_subscription"
 	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
-	"github.com/erigontech/erigon/turbo/snapshotsync"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -76,7 +76,7 @@ type ApiHandler struct {
 	sentinel             sentinel.SentinelClient
 	blobStoage           blob_storage.BlobStorage
 	caplinSnapshots      *freezeblocks.CaplinSnapshots
-	caplinStateSnapshots *snapshotsync.CaplinStateSnapshots
+	caplinStateSnapshots *snapshots.CaplinStateSnapshots
 
 	version string // Node's version
 
@@ -143,7 +143,7 @@ func NewApiHandler(
 	blsToExecutionChangeService services.BLSToExecutionChangeService,
 	proposerSlashingService services.ProposerSlashingService,
 	builderClient builder.BuilderClient,
-	caplinStateSnapshots *snapshotsync.CaplinStateSnapshots,
+	caplinStateSnapshots *snapshots.CaplinStateSnapshots,
 	enableMemoizedHeadState bool,
 ) *ApiHandler {
 	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("blobs", maxBlobBundleCacheSize)

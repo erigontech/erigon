@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
+	"github.com/erigontech/erigon/cl/persistence/snapshots"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 
@@ -490,7 +491,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 	// Ugly hack to wait for fsync
 	time.Sleep(15 * time.Second)
 
-	return snapshotsync.BeaconSimpleIdx(ctx, f, salt, tmpDir, p, lvl, logger)
+	return snapshots.BeaconSimpleIdx(ctx, f, salt, tmpDir, p, lvl, logger)
 }
 
 func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage.BlobStorage, fromSlot uint64, toSlot uint64, salt uint32, dirs datadir.Dirs, workers int, blobCountFn BlobCountBySlotFn, lvl log.Lvl, logger log.Logger) error {
@@ -577,7 +578,7 @@ func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 	// Generate .idx file, which is the slot => offset mapping.
 	p := &background.Progress{}
 
-	return snapshotsync.BeaconSimpleIdx(ctx, f, salt, tmpDir, p, lvl, logger)
+	return snapshots.BeaconSimpleIdx(ctx, f, salt, tmpDir, p, lvl, logger)
 }
 
 func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, fromSlot, toSlot uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
@@ -641,7 +642,7 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 		}
 		p := &background.Progress{}
 		noneDone = false
-		if err := snapshotsync.BeaconSimpleIdx(ctx, segment, s.Salt, s.tmpdir, p, log.LvlDebug, logger); err != nil {
+		if err := snapshots.BeaconSimpleIdx(ctx, segment, s.Salt, s.tmpdir, p, log.LvlDebug, logger); err != nil {
 			return err
 		}
 	}

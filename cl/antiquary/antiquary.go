@@ -26,19 +26,18 @@ import (
 
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/cl/persistence/snapshots"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/turbo/snapshotsync"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -52,7 +51,7 @@ type Antiquary struct {
 	downloader                     proto_downloader.DownloaderClient
 	logger                         log.Logger
 	sn                             *freezeblocks.CaplinSnapshots
-	stateSn                        *snapshotsync.CaplinStateSnapshots
+	stateSn                        *snapshots.CaplinStateSnapshots
 	snReader                       freezeblocks.BeaconSnapshotReader
 	snBuildSema                    *semaphore.Weighted // semaphore for building only one type (blocks, caplin, v3) at a time
 	ctx                            context.Context
@@ -69,7 +68,7 @@ type Antiquary struct {
 	balances32   []byte
 }
 
-func NewAntiquary(ctx context.Context, blobStorage blob_storage.BlobStorage, genesisState *state.CachingBeaconState, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, stateSn *snapshotsync.CaplinStateSnapshots, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, syncedData synced_data.SyncedData, logger log.Logger, states, blocks, blobs, snapgen bool, snBuildSema *semaphore.Weighted) *Antiquary {
+func NewAntiquary(ctx context.Context, blobStorage blob_storage.BlobStorage, genesisState *state.CachingBeaconState, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, stateSn *snapshots.CaplinStateSnapshots, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, syncedData synced_data.SyncedData, logger log.Logger, states, blocks, blobs, snapgen bool, snBuildSema *semaphore.Weighted) *Antiquary {
 	backfilled := &atomic.Bool{}
 	blobBackfilled := &atomic.Bool{}
 	backfilled.Store(false)
