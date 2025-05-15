@@ -11,7 +11,9 @@ func erigonToSlogLevel(from log.Lvl) slog.Level {
 }
 
 func slogLevelToErigon(from slog.Level) log.Lvl {
-	return log.Lvl(3 - (from+3)/4)
+	// Fuck sake Go has truncated division. Use bit shift here because it divides toward zero and we
+	// can.
+	return log.Lvl(3 - (from+3)>>2)
 }
 
 type slogHandler struct {
