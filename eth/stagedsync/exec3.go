@@ -517,7 +517,9 @@ Loop:
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
-		signer := *types.MakeSigner(chainConfig, blockNum, header.Time)
+
+		arbosv := types.GetArbOSVersion(header, chainConfig)
+		signer := *types.MakeSignerArb(chainConfig, blockNum, header.Time, arbosv)
 
 		getHashFnMute := &sync.Mutex{}
 		getHashFn := core.GetHashFn(header, func(hash common.Hash, number uint64) (h *types.Header) {

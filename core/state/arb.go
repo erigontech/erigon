@@ -102,6 +102,11 @@ type IntraBlockStateArbitrum interface {
 	GetLogs(txIndex int, txnHash common.Hash, blockNumber uint64, blockHash common.Hash) types.Logs
 	// TxIndex returns the current transaction index set by Prepare.
 	TxnIndex() int
+	IsTxFiltered() bool
+}
+
+func (s *IntraBlockState) IsTxFiltered() bool {
+	return s.arbExtraData.arbTxFilter
 }
 
 func (s *IntraBlockState) ActivateWasm(moduleHash common.Hash, asmMap map[wasmdb.WasmTarget][]byte) {
@@ -173,6 +178,8 @@ func (s *IntraBlockState) AddStylusPagesEver(new uint16) {
 	s.arbExtraData.everWasmPages = common.SaturatingUAdd(s.arbExtraData.everWasmPages, new)
 }
 
+var ErrArbTxFilter error = errors.New("internal error")
+
 type ArbitrumExtraData struct {
 	unexpectedBalanceDelta *uint256.Int                  // total balance change across all accounts
 	userWasms              UserWasms                     // user wasms encountered during execution
@@ -180,6 +187,7 @@ type ArbitrumExtraData struct {
 	everWasmPages          uint16                        // largest number of pages ever allocated during this tx's execution
 	activatedWasms         map[common.Hash]ActivatedWasm // newly activated WASMs
 	recentWasms            RecentWasms
+	arbTxFilter            bool
 }
 
 func (s *IntraBlockState) SetArbFinalizer(f func(*ArbitrumExtraData)) {
