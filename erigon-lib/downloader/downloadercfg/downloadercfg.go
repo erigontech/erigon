@@ -19,6 +19,8 @@ package downloadercfg
 import (
 	"context"
 	"fmt"
+	analog "github.com/anacrolix/log"
+	"log/slog"
 	"net"
 	"net/url"
 	"os"
@@ -31,7 +33,6 @@ import (
 	"github.com/erigontech/erigon-lib/chain/networkname"
 
 	"github.com/anacrolix/dht/v2"
-	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/time/rate"
@@ -44,7 +45,7 @@ import (
 )
 
 // DefaultPieceSize - Erigon serves many big files, bigger pieces will reduce
-// amount of network announcements, but can't go over 2Mb
+// amount of network announcements, but can't go over 2Mb. TODO: This is definitely not true.
 // see https://wiki.theory.org/BitTorrentSpecification#Metainfo_File_Structure
 const DefaultPieceSize = 2 * 1024 * 1024
 
@@ -60,9 +61,10 @@ type Cfg struct {
 	WebSeedFileProviders            []string
 	SnapshotConfig                  *snapcfg.Cfg
 	DownloadTorrentFilesFromWebseed bool
-	AddTorrentsFromDisk             bool
-	SnapshotLock                    bool
-	ChainName                       string
+	// TODO: Have I rendered this obsolete?
+	AddTorrentsFromDisk bool
+
+	ChainName string
 
 	Dirs datadir.Dirs
 
@@ -70,6 +72,7 @@ type Cfg struct {
 }
 
 func Default() *torrent.ClientConfig {
+	// TODO: Add config dump in client status writer output...
 	torrentConfig := torrent.NewDefaultClientConfig()
 	// better don't increase because erigon periodically producing "new seedable files" - and adding them to downloader.
 	// it must not impact chain tip sync - so, limit resources to minimum by default.
@@ -79,38 +82,38 @@ func Default() *torrent.ClientConfig {
 	torrentConfig.MinDialTimeout = 6 * time.Second    //default: 3s
 	torrentConfig.HandshakesTimeout = 8 * time.Second //default: 4s
 
-	// default limit is 1MB, but we have 2MB pieces which brings us to:
-	//   *torrent.PeerConn: waiting for alloc limit reservation: reservation for 1802972 exceeds limiter max 1048576
-	torrentConfig.MaxAllocPeerRequestDataPerConn = int64(DefaultPieceSize)
+	// This needs to be at least the chunk size of requests we expect to service for peers. This has
+	// been as high as 8 MiB unintentionally, but the piece size for all previous torrents has been
+	// 2 MiB. Therefore 2 MiB is required to service those nodes.
+	torrentConfig.MaxAllocPeerRequestDataPerConn = max(torrentConfig.MaxAllocPeerRequestDataPerConn, DefaultPieceSize)
 
 	// this limits the amount of unverified bytes - which will throttle the
 	// number of requests the torrent will handle - it acts as a brake on
 	// parallelism if set (default is 67,108,864)
-	torrentConfig.MaxUnverifiedBytes = 0
+	// TODO: Well this would explain why hashing can't keep up.
+	//torrentConfig.MaxUnverifiedBytes = 0
 
-	// enable dht
+	// enable dht. TODO: We want DHT.
 	torrentConfig.NoDHT = true
-	//torrentConfig.DisableTrackers = true
-	//torrentConfig.DisableWebtorrent = true
-
-	// Reduce defaults - to avoid peers with very bad geography
-	//torrentConfig.MinDialTimeout = 1 * time.Second      // default: 3sec
-	//torrentConfig.NominalDialTimeout = 10 * time.Second // default: 20sec
-	//torrentConfig.HandshakesTimeout = 1 * time.Second   // default: 4sec
-
-	// see: https://en.wikipedia.org/wiki/TCP_half-open
-	//torrentConfig.TotalHalfOpenConns = 100     // default: 100
-	//torrentConfig.HalfOpenConnsPerTorrent = 25 // default: 25
-	//torrentConfig.TorrentPeersHighWater = 500 // default: 500
-	//torrentConfig.TorrentPeersLowWater = 50   // default: 50
 
 	torrentConfig.Seed = true
-	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
+	// TODO: Check the result of this in the client status spew.
+	torrentConfig.UpnpID = torrentConfig.UpnpID + " leecher"
 
 	return torrentConfig
 }
 
-func New(ctx context.Context, dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile, downloadSlots int, staticPeers, webseeds []string, chainName string, lockSnapshots, mdbxWriteMap bool) (*Cfg, error) {
+func New(
+	ctx context.Context,
+	dirs datadir.Dirs,
+	version string,
+	verbosity log.Lvl,
+	downloadRate, uploadRate datasize.ByteSize,
+	port, connsPerFile, downloadSlots int,
+	staticPeers, webseeds []string,
+	chainName string,
+	mdbxWriteMap bool,
+) (_ *Cfg, err error) {
 	torrentConfig := Default()
 	//torrentConfig.PieceHashersPerTorrent = runtime.NumCPU()
 	torrentConfig.DataDir = dirs.Snap // `DataDir` of torrent-client-lib is different from Erigon's `DataDir`. Just same naming.
@@ -124,24 +127,38 @@ func New(ctx context.Context, dirs datadir.Dirs, version string, verbosity lg.Le
 	// check if ipv6 is enabled
 	torrentConfig.DisableIPv6 = !getIpv6Enabled()
 
-	if uploadRate > 512*datasize.MB {
-		torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Inf, DefaultNetworkChunkSize) // default: unlimited
-	} else {
-		torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()), DefaultNetworkChunkSize) // default: unlimited
-	}
+	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()), DefaultNetworkChunkSize)       // default: unlimited
+	torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(downloadRate.Bytes()), 2*DefaultNetworkChunkSize) // default: unlimited
 
-	if downloadRate > 512*datasize.MB {
-		torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Inf, DefaultNetworkChunkSize) // default: unlimited
-	} else {
-		torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(downloadRate.Bytes()), DefaultNetworkChunkSize) // default: unlimited
+	var analogLevel analog.Level
+	analogLevel, torrentConfig.Debug, err = erigonToAnalogLevel(verbosity)
+	if err != nil {
+		panic(err)
 	}
-
-	// debug
-	//torrentConfig.Debug = true
-	torrentConfig.Logger = torrentConfig.Logger.WithFilterLevel(verbosity)
+	torrentConfig.Logger = torrentConfig.Logger.WithFilterLevel(analogLevel)
 	torrentConfig.Logger.SetHandlers(adapterHandler{})
+	slogLevel := erigonToSlogLevel(verbosity)
+	torrentConfig.Slogger = slog.New(&slogHandler{
+		enabled: func(level slog.Level, names []string) bool {
+			if slices.Contains(names, "tracker") {
+				level -= 4
+			}
+			return level >= slogLevel
+		},
+		//minLevel: slogLevel,
+	})
+	// Previously this used a logger passed to the callers of this function. Do we need it here?
+	log.Info(
+		"torrent verbosity",
+		"erigon", verbosity,
+		"anacrolix", analogLevel.LogString(),
+		"slog", slogLevel)
 
-	if len(staticPeers) > 0 {
+	// TODO: This doesn't look right. Enabling DHT only for static peers will introduce very
+	// different runtime behaviour. Is it assumed those peers are torrent client endpoints and we
+	// want to force connecting to them? PEX might be more suited here. DHT should eventually be
+	// enabled regardless, but then this code would make more sense.
+	if len(staticPeers) > 0 && false {
 		torrentConfig.NoDHT = false
 		//defaultNodes := torrentConfig.DhtStartingNodes
 		torrentConfig.DhtStartingNodes = func(network string) dht.StartingNodesGetter {
@@ -229,12 +246,17 @@ func New(ctx context.Context, dirs datadir.Dirs, version string, verbosity lg.Le
 		return nil, err
 	}
 
-	return &Cfg{Dirs: dirs, ChainName: chainName,
-		ClientConfig: torrentConfig, DownloadSlots: downloadSlots,
-		WebSeedUrls: webseedHttpProviders, WebSeedFileProviders: webseedFileProviders,
-		DownloadTorrentFilesFromWebseed: true, AddTorrentsFromDisk: true, SnapshotLock: lockSnapshots,
-		SnapshotConfig: preverifiedCfg,
-		MdbxWriteMap:   mdbxWriteMap,
+	return &Cfg{
+		Dirs:                            dirs,
+		ChainName:                       chainName,
+		ClientConfig:                    torrentConfig,
+		DownloadSlots:                   downloadSlots,
+		WebSeedUrls:                     webseedHttpProviders,
+		WebSeedFileProviders:            webseedFileProviders,
+		DownloadTorrentFilesFromWebseed: true,
+		AddTorrentsFromDisk:             true,
+		SnapshotConfig:                  preverifiedCfg,
+		MdbxWriteMap:                    mdbxWriteMap,
 	}, nil
 }
 

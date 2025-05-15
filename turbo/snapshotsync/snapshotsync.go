@@ -44,7 +44,7 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig"
 )
 
-var greatOtterBanner = `
+var GreatOtterBanner = `
    _____ _             _   _                ____  _   _                                       
   / ____| |           | | (_)              / __ \| | | |                                      
  | (___ | |_ __ _ _ __| |_ _ _ __   __ _  | |  | | |_| |_ ___ _ __ ___ _   _ _ __   ___       
@@ -95,9 +95,9 @@ const (
 )
 
 type DownloadRequest struct {
-	Version     uint8
 	Path        string
 	TorrentHash string
+	Verify      bool
 }
 
 func NewDownloadRequest(path string, torrentHash string) DownloadRequest {
@@ -125,7 +125,12 @@ func BuildProtoRequest(downloadRequest []DownloadRequest) *proto_downloader.AddR
 }
 
 // RequestSnapshotsDownload - builds the snapshots download request and downloads them
-func RequestSnapshotsDownload(ctx context.Context, downloadRequest []DownloadRequest, downloader proto_downloader.DownloaderClient, logPrefix string) error {
+func RequestSnapshotsDownload(
+	ctx context.Context,
+	downloadRequest []DownloadRequest,
+	downloader proto_downloader.DownloaderClient,
+	logPrefix string,
+) error {
 	preq := &proto_downloader.SetLogPrefixRequest{Prefix: logPrefix}
 	downloader.SetLogPrefix(ctx, preq)
 	// start seed large .seg of large size
@@ -288,7 +293,20 @@ func computeBlocksToPrune(blockReader blockReader, p prune.Mode) (blocksToPrune 
 
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs, headerchain, blobs, caplinState bool, prune prune.Mode, caplin CaplinMode, agg *state.Aggregator, tx kv.RwTx, blockReader blockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient, syncCfg ethconfig.Sync) error {
+func WaitForDownloader(
+	ctx context.Context,
+	logPrefix string,
+	dirs datadir.Dirs,
+	headerchain, blobs, caplinState bool,
+	prune prune.Mode,
+	caplin CaplinMode,
+	agg *state.Aggregator,
+	tx kv.RwTx,
+	blockReader blockReader,
+	cc *chain.Config,
+	snapshotDownloader proto_downloader.DownloaderClient,
+	syncCfg ethconfig.Sync,
+) error {
 	snapshots := blockReader.Snapshots()
 	borSnapshots := blockReader.BorSnapshots()
 
@@ -352,8 +370,8 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 		if !caplinState && strings.Contains(p.Name, "caplin/") {
 			continue
 		}
-		if headerchain &&
-			!(strings.Contains(p.Name, "headers") || strings.Contains(p.Name, "bodies") || p.Name == "salt-blocks.txt") {
+		// Can we just do this? The two calls to this function will be distinct files now.
+		if headerchain != (strings.Contains(p.Name, "headers") || strings.Contains(p.Name, "bodies") || p.Name == "salt-blocks.txt") {
 			continue
 		}
 		if !syncCfg.KeepExecutionProofs && isStateHistory(p.Name) && strings.Contains(p.Name, kv.CommitmentDomain.String()) {
@@ -367,15 +385,16 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 			continue
 		}
 
-		downloadRequest = append(downloadRequest, NewDownloadRequest(p.Name, p.Hash))
+		downloadRequest = append(downloadRequest, DownloadRequest{
+			Path:        p.Name,
+			TorrentHash: p.Hash,
+			// TODO: Why is this so convoluted? Perhaps we should only do this for a local
+			// downloader? Currently I only plan to verify when a torrent is first added, for a
+			// shared downloader that might not make sense.
+			Verify: blockReader.FreezingCfg().Verify,
+		})
 	}
 
-	if headerchain {
-		log.Info("[OtterSync] Starting Ottersync")
-		log.Info(greatOtterBanner)
-	}
-
-	log.Info(fmt.Sprintf("[%s] Requesting downloads", logPrefix))
 	for {
 		select {
 		case <-ctx.Done():
@@ -388,14 +407,13 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 			continue
 		}
 		break
-
 	}
 
 	const checkInterval = 20 * time.Second
 	checkEvery := time.NewTicker(checkInterval)
 	defer checkEvery.Stop()
 
-	// Check once without delay, for faster erigon re-start
+	// Check once without delay, for faster erigon re-start. There was a race here, now fixed.
 	completedResp, err := snapshotDownloader.Completed(ctx, &proto_downloader.CompletedRequest{})
 	if err != nil {
 		return err
@@ -411,12 +429,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 			if err != nil {
 				log.Warn("Error while waiting for snapshots progress", "err", err)
 			}
-		}
-	}
-
-	if blockReader.FreezingCfg().Verify {
-		if _, err := snapshotDownloader.Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
-			return err
 		}
 	}
 

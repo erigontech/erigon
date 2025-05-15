@@ -224,7 +224,7 @@ func NewTorrentClient(ctx context.Context, config CreateNewTorrentClientConfig) 
 		return nil, err
 	}
 
-	logLevel, _, err := downloadercfg.Int2LogLevel(config.Verbosity)
+	logLevel, err := downloadercfg.Int2LogLevel(config.Verbosity)
 
 	if err != nil {
 		return nil, err
@@ -232,9 +232,7 @@ func NewTorrentClient(ctx context.Context, config CreateNewTorrentClientConfig) 
 
 	version := "erigon: " + params.VersionWithCommit(params.GitCommit)
 
-	cfg, err := downloadercfg.New(ctx, dirs, version, logLevel, downloadRate, uploadRate,
-		config.TorrentPort,
-		config.ConnsPerFile, 0, nil, webseedsList, config.Chain, true, true)
+	cfg, err := downloadercfg.New(ctx, dirs, version, logLevel, downloadRate, uploadRate, config.TorrentPort, config.ConnsPerFile, 0, nil, webseedsList, config.Chain, true)
 
 	if err != nil {
 		return nil, err
@@ -447,13 +445,13 @@ func (s *torrentSession) Download(ctx context.Context, files ...string) error {
 			case <-t.GotInfo():
 			}
 
-			if !t.Complete.Bool() {
+			if !t.Complete().Bool() {
 				t.AllowDataDownload()
 				t.DownloadAll()
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
-				case <-t.Complete.On():
+				case <-t.Complete().On():
 				}
 			}
 

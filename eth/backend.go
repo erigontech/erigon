@@ -1571,8 +1571,7 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 			downloaderCfg.AddTorrentsFromDisk = false
 		}
 
-		discover := true
-		s.downloader, err = downloader.New(ctx, downloaderCfg, s.logger, log.LvlDebug, discover)
+		s.downloader, err = downloader.New(ctx, downloaderCfg, s.logger, log.LvlDebug)
 		if err != nil {
 			return err
 		}
@@ -1724,7 +1723,7 @@ func (s *Ethereum) Start() error {
 		s.bgComponentsEg.Go(func() error {
 			defer s.logger.Info("[polygon.sync] goroutine terminated")
 			// when we're running in stand alone mode we need to run the downloader before we start the
-			// polygon services becuase they will wait for it to complete before opening thier stores
+			// polygon services because they will wait for it to complete before opening their stores
 			// which make use of snapshots and expect them to be initialize
 			// TODO: get the snapshots to call the downloader directly - which will avoid this
 			go func() {
