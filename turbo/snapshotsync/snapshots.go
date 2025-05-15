@@ -930,10 +930,10 @@ func (s *RoSnapshots) Ls() {
 
 	for _, t := range s.enums {
 		for _, seg := range s.visible[t] {
-			if seg.src.Decompressor == nil {
+			if seg.src == nil || seg.src.Decompressor == nil {
 				continue
 			}
-			log.Info("[snapshots] ", "f", seg.src.FileName(), "from", seg.from, "to", seg.to, "count", seg.src.Count())
+			log.Info("[snapshots] ", "f", seg.src.FileName(), "from", seg.from, "to", seg.to, "count", seg.src.Decompressor.Count())
 		}
 	}
 }
