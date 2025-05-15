@@ -498,6 +498,21 @@ func (br *BlockRetire) RemoveOverlaps() error {
 	return nil
 }
 
+func (br *BlockRetire) MadvNormal() *BlockRetire {
+	br.snapshots().MadvNormal()
+	if br.chainConfig.Bor != nil {
+		br.borSnapshots().RoSnapshots.MadvNormal()
+	}
+	return br
+}
+
+func (br *BlockRetire) DisableReadAhead() {
+	br.snapshots().DisableReadAhead()
+	if br.chainConfig.Bor != nil {
+		br.borSnapshots().RoSnapshots.DisableReadAhead()
+	}
+}
+
 func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
 	firstTxNum := blockReader.FirstTxnNumNotInSnapshots()
 	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, coresnaptype.Enums.Headers, chainConfig) {
