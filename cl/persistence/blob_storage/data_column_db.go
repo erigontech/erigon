@@ -18,13 +18,13 @@ import (
 
 const (
 	// subdivisionSlot = 10_000
-	mutexSize = 32
+	mutexSize = 64
 )
 
 type DataCloumnStorage interface {
 	WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar) error
 	RemoveColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) error
-
+	ReadColumnSidecarByColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (*cltypes.DataColumnSidecar, error)
 	//WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error // Used for P2P networking
 	//KzgCommitmentsCount(ctx context.Context, blockRoot common.Hash) (uint32, error)
 	//Prune() error
@@ -63,7 +63,7 @@ func dataColumnFilePath(slot uint64, blockRoot common.Hash, columnIndex uint64) 
 }
 
 func (s *dataCloumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar) error {
-	mutex := s.acquireDataMutexBySlot(columnData.SignedBlockHeader.Header.Slot)
+	mutex := s.acquireMutexBySlot(columnData.SignedBlockHeader.Header.Slot)
 	mutex.Lock()
 	defer mutex.Unlock()
 
@@ -85,47 +85,104 @@ func (s *dataCloumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRo
 		s.fs.Remove(filepath)
 		return err
 	}
-	defer fh.Close()
 	if err := fh.Sync(); err != nil {
+		fh.Close()
+		s.fs.Remove(filepath)
 		return err
 	}
 
-	// increment the column count
+	// increment the column count and append the column index
+	// | column_count | column_index1 | column_index2 | ... |
+	tx, err := s.db.BeginRw(ctx)
+	if err != nil {
+		fh.Close()
+		s.fs.Remove(filepath)
+		return err
+	}
+	defer tx.Rollback()
+	bytes, err := tx.GetOne(kv.BlockRootToDataColumnCount, blockRoot[:])
+	if err != nil {
+		fh.Close()
+		s.fs.Remove(filepath)
+		return err
+	}
+	curCount := uint32(0)
+	if bytes != nil {
+		curCount = binary.LittleEndian.Uint32(bytes[0:4])
+	}
+	curCount++
+	countBytes := make([]byte, 4)
+	columnIndexBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(countBytes, curCount)
+	binary.LittleEndian.PutUint32(columnIndexBytes, uint32(columnIndex))
+	newBytes := append(countBytes, bytes[4:]...)
+	newBytes = append(newBytes, columnIndexBytes...)
+	if err := tx.Put(kv.BlockRootToDataColumnCount, blockRoot[:], newBytes); err != nil {
+		fh.Close()
+		s.fs.Remove(filepath)
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		fh.Close()
+		s.fs.Remove(filepath)
+		return err
+	}
+	fh.Close()
+	return nil
+}
+
+func (s *dataCloumnStorageImpl) ReadColumnSidecarByColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (*cltypes.DataColumnSidecar, error) {
+	mutex := s.acquireMutexBySlot(slot)
+	mutex.RLock()
+	defer mutex.RUnlock()
+
+	_, filepath := dataColumnFilePath(slot, blockRoot, uint64(columnIndex))
+	fh, err := s.fs.Open(filepath)
+	if err != nil {
+		return nil, err
+	}
+	defer fh.Close()
+	data := &cltypes.DataColumnSidecar{}
+	//version := s.beaconChainConfig.GetCurrentStateVersion(slot / s.beaconChainConfig.SlotsPerEpoch)
+	if err := ssz_snappy.DecodeAndReadNoForkDigest(fh, data, clparams.FuluVersion); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func (s *dataCloumnStorageImpl) RemoveColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) error {
+	mutex := s.acquireMutexBySlot(slot)
+	mutex.Lock()
+	defer mutex.Unlock()
+
 	tx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	bytes, err := tx.GetOne(kv.BlockRootToDataColumns, blockRoot[:])
+	bytes, err := tx.GetOne(kv.BlockRootToDataColumnCount, blockRoot[:])
 	if err != nil {
 		return err
 	}
-	curCount := uint32(0)
-	if bytes != nil {
-		curCount = binary.LittleEndian.Uint32(bytes)
+	if bytes == nil {
+		// No column sidecars, no need to remove
+		return nil
 	}
-	curCount++
-	val := make([]byte, 4)
-	binary.LittleEndian.PutUint32(val, curCount)
-	if err := tx.Put(kv.BlockRootToDataColumns, blockRoot[:], val); err != nil {
+	count := binary.LittleEndian.Uint32(bytes[0:4])
+	for i := uint32(0); i < count; i++ {
+		columnIndex := binary.LittleEndian.Uint32(bytes[4+i*4 : 4+(i+1)*4])
+		_, filepath := dataColumnFilePath(slot, blockRoot, uint64(columnIndex))
+		if err := s.fs.Remove(filepath); err != nil {
+			return err
+		}
+	}
+	if err := tx.Delete(kv.BlockRootToDataColumnCount, blockRoot[:]); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func (s *dataCloumnStorageImpl) RemoveColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) error {
-	mutex := s.acquireDataMutexBySlot(slot)
-	mutex.Lock()
-	defer mutex.Unlock()
-
-	_, filepath := dataColumnFilePath(slot, blockRoot, uint64(columnIndex))
-	if err := s.fs.Remove(filepath); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (s *dataCloumnStorageImpl) acquireDataMutexBySlot(slot uint64) *sync.RWMutex {
+func (s *dataCloumnStorageImpl) acquireMutexBySlot(slot uint64) *sync.RWMutex {
 	index := slot % mutexSize
 	return s.mutexes[index]
 }
