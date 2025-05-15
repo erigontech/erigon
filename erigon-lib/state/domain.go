@@ -28,7 +28,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/metrics"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -36,11 +35,13 @@ import (
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
 )
@@ -100,12 +101,12 @@ type Domain struct {
 type domainCfg struct {
 	hist histCfg
 
-	name         kv.Domain
-	Compression  seg.FileCompression
-	CompressCfg  seg.Cfg
-	AccessorList Accessors // list of indexes for given domain
-	valuesTable  string    // bucket to store domain values; key -> inverted_step + values (Dupsort)
-	largeValues  bool
+	name        kv.Domain
+	Compression seg.FileCompression
+	CompressCfg seg.Cfg
+	Accessors   Accessors // list of indexes for given domain
+	valuesTable string    // bucket to store domain values; key -> inverted_step + values (Dupsort)
+	largeValues bool
 
 	crossDomainIntegrity rangeDomainIntegrityChecker
 
@@ -155,13 +156,13 @@ func NewDomain(cfg domainCfg, aggStep uint64, logger log.Logger) (*Domain, error
 	if d.version.DataKV.IsZero() {
 		panic(fmt.Errorf("assert: forgot to set version of %s", d.name))
 	}
-	if d.AccessorList.Has(AccessorBTree) && d.version.AccessorBT.IsZero() {
+	if d.Accessors.Has(AccessorBTree) && d.version.AccessorBT.IsZero() {
 		panic(fmt.Errorf("assert: forgot to set version of %s", d.name))
 	}
-	if d.AccessorList.Has(AccessorHashMap) && d.version.AccessorKVI.IsZero() {
+	if d.Accessors.Has(AccessorHashMap) && d.version.AccessorKVI.IsZero() {
 		panic(fmt.Errorf("assert: forgot to set version of %s", d.name))
 	}
-	if d.AccessorList.Has(AccessorExistence) && d.version.AccessorKVEI.IsZero() {
+	if d.Accessors.Has(AccessorExistence) && d.version.AccessorKVEI.IsZero() {
 		panic(fmt.Errorf("assert: forgot to set version of %s", d.name))
 	}
 
@@ -377,7 +378,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 				}
 			}
 
-			if item.index == nil && d.AccessorList.Has(AccessorHashMap) {
+			if item.index == nil && d.Accessors.Has(AccessorHashMap) {
 				fPath := d.kviAccessorFilePath(fromStep, toStep)
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
@@ -392,7 +393,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 					}
 				}
 			}
-			if item.bindex == nil && d.AccessorList.Has(AccessorBTree) {
+			if item.bindex == nil && d.Accessors.Has(AccessorBTree) {
 				fPath := d.kvBtAccessorFilePath(fromStep, toStep)
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
@@ -407,7 +408,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 					}
 				}
 			}
-			if item.existence == nil && d.AccessorList.Has(AccessorExistence) {
+			if item.existence == nil && d.Accessors.Has(AccessorExistence) {
 				fPath := d.kvExistenceIdxFilePath(fromStep, toStep)
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
@@ -415,7 +416,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 				}
 				if exists {
-					if item.existence, err = OpenExistenceFilter(fPath); err != nil {
+					if item.existence, err = existence.OpenFilter(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
@@ -458,7 +459,7 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 }
 
 func (d *Domain) reCalcVisibleFiles(toTxNum uint64) {
-	d._visible = newDomainVisible(d.name, calcVisibleFiles(d.dirtyFiles, d.AccessorList, false, toTxNum))
+	d._visible = newDomainVisible(d.name, calcVisibleFiles(d.dirtyFiles, d.Accessors, false, toTxNum))
 	d.History.reCalcVisibleFiles(toTxNum)
 }
 
@@ -655,6 +656,7 @@ type DomainRoTx struct {
 	visible *domainVisible
 	name    kv.Domain
 	ht      *HistoryRoTx
+	salt    *uint32
 
 	d *Domain
 
@@ -684,7 +686,7 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) (v []byte, ok boo
 	}
 
 	g := dt.statelessGetter(i)
-	if dt.d.AccessorList.Has(AccessorBTree) {
+	if dt.d.Accessors.Has(AccessorBTree) {
 		_, v, offset, ok, err = dt.statelessBtree(i).Get(filekey, g)
 		if err != nil || !ok {
 			return nil, false, 0, err
@@ -692,7 +694,7 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) (v []byte, ok boo
 		//fmt.Printf("getLatestFromBtreeColdFiles key %x shard %d %x\n", filekey, exactColdShard, v)
 		return v, true, offset, nil
 	}
-	if dt.d.AccessorList.Has(AccessorHashMap) {
+	if dt.d.Accessors.Has(AccessorHashMap) {
 		reader := dt.statelessIdxReader(i)
 		if reader.Empty() {
 			return nil, false, 0, nil
@@ -727,6 +729,7 @@ func (d *Domain) BeginFilesRo() *DomainRoTx {
 		ht:      d.History.BeginFilesRo(),
 		visible: d._visible,
 		files:   d._visible.files,
+		salt:    d.salt.Load(),
 	}
 }
 
@@ -994,7 +997,7 @@ type StaticFiles struct {
 	valuesDecomp *seg.Decompressor
 	valuesIdx    *recsplit.Index
 	valuesBt     *BtIndex
-	bloom        *ExistenceFilter
+	bloom        *existence.Filter
 }
 
 // CleanupOnError - call it on collation fail. It closing all files
@@ -1036,7 +1039,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, co
 		valuesDecomp *seg.Decompressor
 		valuesIdx    *recsplit.Index
 		bt           *BtIndex
-		bloom        *ExistenceFilter
+		bloom        *existence.Filter
 		err          error
 	)
 	closeComp := true
@@ -1071,7 +1074,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, co
 		return StaticFiles{}, fmt.Errorf("open %s values decompressor: %w", d.filenameBase, err)
 	}
 
-	if d.AccessorList.Has(AccessorHashMap) {
+	if d.Accessors.Has(AccessorHashMap) {
 		if err = d.buildHashMapAccessor(ctx, stepFrom, stepTo, valuesDecomp, ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
 		}
@@ -1081,21 +1084,21 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, co
 		}
 	}
 
-	if d.AccessorList.Has(AccessorBTree) {
+	if d.Accessors.Has(AccessorBTree) {
 		btPath := d.kvBtAccessorFilePath(stepFrom, stepTo)
-		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, d.Compression, *d.salt, ps, d.dirs.Tmp, d.logger, d.noFsync, d.AccessorList)
+		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, d.Compression, *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.filenameBase, err)
 		}
 	}
-	if d.AccessorList.Has(AccessorExistence) {
+	if d.Accessors.Has(AccessorExistence) {
 		fPath := d.kvExistenceIdxFilePath(stepFrom, stepTo)
 		exists, err := dir.FileExist(fPath)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 		}
 		if exists {
-			bloom, err = OpenExistenceFilter(fPath)
+			bloom, err = existence.OpenFilter(fPath)
 			if err != nil {
 				return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 			}
@@ -1138,7 +1141,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		valuesDecomp *seg.Decompressor
 		valuesIdx    *recsplit.Index
 		bt           *BtIndex
-		bloom        *ExistenceFilter
+		bloom        *existence.Filter
 	)
 	closeComp := true
 	defer func() {
@@ -1173,7 +1176,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		return StaticFiles{}, fmt.Errorf("open %s values decompressor: %w", d.filenameBase, err)
 	}
 
-	if d.AccessorList.Has(AccessorHashMap) {
+	if d.Accessors.Has(AccessorHashMap) {
 		if err = d.buildHashMapAccessor(ctx, step, step+1, valuesDecomp, ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
 		}
@@ -1183,21 +1186,21 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		}
 	}
 
-	if d.AccessorList.Has(AccessorBTree) {
+	if d.Accessors.Has(AccessorBTree) {
 		btPath := d.kvBtAccessorFilePath(step, step+1)
-		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, d.Compression, *d.salt, ps, d.dirs.Tmp, d.logger, d.noFsync, d.AccessorList)
+		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, d.Compression, *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.filenameBase, err)
 		}
 	}
-	if d.AccessorList.Has(AccessorExistence) {
+	if d.Accessors.Has(AccessorExistence) {
 		fPath := d.kvExistenceIdxFilePath(step, step+1)
 		exists, err := dir.FileExist(fPath)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 		}
 		if exists {
-			bloom, err = OpenExistenceFilter(fPath)
+			bloom, err = existence.OpenFilter(fPath)
 			if err != nil {
 				return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 			}
@@ -1223,7 +1226,7 @@ func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep uint
 		LeafSize:   recsplit.DefaultLeafSize,
 		TmpDir:     d.dirs.Tmp,
 		IndexFile:  idxPath,
-		Salt:       d.salt,
+		Salt:       d.salt.Load(),
 		NoFsync:    d.noFsync,
 	}
 	return buildHashMapAccessor(ctx, data, d.Compression, idxPath, false, cfg, ps, d.logger)
@@ -1234,7 +1237,7 @@ func (d *Domain) MissedBtreeAccessors() (l []*filesItem) {
 }
 
 func (d *Domain) missedBtreeAccessors(source []*filesItem) (l []*filesItem) {
-	if !d.AccessorList.Has(AccessorBTree) {
+	if !d.Accessors.Has(AccessorBTree) {
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, d.aggregationStep, func(fromStep uint64, toStep uint64) []string {
@@ -1247,7 +1250,7 @@ func (d *Domain) MissedMapAccessors() (l []*filesItem) {
 }
 
 func (d *Domain) missedMapAccessors(source []*filesItem) (l []*filesItem) {
-	if !d.AccessorList.Has(AccessorHashMap) {
+	if !d.Accessors.Has(AccessorHashMap) {
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, d.aggregationStep, func(fromStep uint64, toStep uint64) []string {
@@ -1267,7 +1270,7 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 		g.Go(func() error {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
 			idxPath := d.kvBtAccessorFilePath(fromStep, toStep)
-			if err := BuildBtreeIndexWithDecompressor(idxPath, item.decompressor, d.Compression, ps, d.dirs.Tmp, *d.salt, d.logger, d.noFsync, d.AccessorList); err != nil {
+			if err := BuildBtreeIndexWithDecompressor(idxPath, item.decompressor, d.Compression, ps, d.dirs.Tmp, *d.salt.Load(), d.logger, d.noFsync, d.Accessors); err != nil {
 				return fmt.Errorf("failed to build btree index for %s:  %w", item.decompressor.FileName(), err)
 			}
 			return nil
@@ -1289,6 +1292,12 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 	}
 }
 
+// TODO: exported for idx_optimize.go
+// TODO: this utility can be safely deleted after PR https://github.com/erigontech/erigon/pull/12907/ is rolled out in production
+func BuildHashMapAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {
+	return buildHashMapAccessor(ctx, d, compressed, idxPath, values, cfg, ps, logger)
+}
+
 func buildHashMapAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {
 	_, fileName := filepath.Split(idxPath)
 	count := d.Count()
@@ -1298,7 +1307,7 @@ func buildHashMapAccessor(ctx context.Context, d *seg.Decompressor, compressed s
 	p := ps.AddNew(fileName, uint64(count))
 	defer ps.Delete(p)
 
-	defer d.EnableMadvNormal().DisableReadAhead()
+	defer d.MadvSequential().DisableReadAhead()
 
 	g := seg.NewReader(d.MakeGetter(), compressed)
 	var rs *recsplit.RecSplit
@@ -1444,7 +1453,7 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 	if maxTxNum == 0 {
 		maxTxNum = math.MaxUint64
 	}
-	useExistenceFilter := dt.d.AccessorList.Has(AccessorExistence)
+	useExistenceFilter := dt.d.Accessors.Has(AccessorExistence)
 	useCache := dt.name != kv.CommitmentDomain && maxTxNum == math.MaxUint64
 
 	hi, _ := dt.ht.iit.hashKey(k)
@@ -1516,10 +1525,6 @@ func (dt *DomainRoTx) HistoryStartFrom() uint64 {
 		return 0
 	}
 	return dt.ht.files[0].startTxNum
-}
-
-func (dt *DomainRoTx) HistoryEndTxNum(tx kv.Tx) uint64 {
-	return max(dt.FirstStepNotInFiles()*dt.d.aggregationStep, dt.DbgMaxTxNumInDB(tx))
 }
 
 // GetAsOf does not always require usage of roTx. If it is possible to determine
@@ -2037,4 +2042,4 @@ func (dt *DomainRoTx) Files() (res VisibleFiles) {
 }
 func (dt *DomainRoTx) Name() kv.Domain { return dt.name }
 
-func (dt *DomainRoTx) DbgMaxTxNumInDB(tx kv.Tx) uint64 { return dt.ht.iit.ii.maxTxNumInDB(tx) }
+func (dt *DomainRoTx) HistoryProgress(tx kv.Tx) uint64 { return dt.ht.iit.Progress(tx) }

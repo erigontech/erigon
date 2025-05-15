@@ -104,7 +104,10 @@ func testTemporalDB(t *testing.T) *temporal.DB {
 
 	t.Cleanup(db.Close)
 
-	agg, err := state3.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, log.New())
+	dirs, logger := datadir.New(t.TempDir()), log.New()
+	salt, err := state3.GetStateIndicesSalt(dirs, true, logger)
+	require.NoError(t, err)
+	agg, err := state3.NewAggregator2(context.Background(), datadir.New(t.TempDir()), 16, salt, db, log.New())
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 
@@ -136,7 +139,7 @@ func TestEIP2200(t *testing.T) {
 			tx, sd := testTemporalTxSD(t, testTemporalDB(t))
 			defer tx.Rollback()
 
-			r, w := state.NewReaderV3(sd), state.NewStateWriterV3(sd, nil)
+			r, w := state.NewReaderV3(sd), state.NewWriter(sd, nil)
 			s := state.New(r)
 
 			address := common.BytesToAddress([]byte("contract"))
@@ -199,7 +202,7 @@ func TestCreateGas(t *testing.T) {
 		eface := *(*[2]uintptr)(unsafe.Pointer(&tx))
 		fmt.Printf("init tx %x\n", eface[1])
 
-		domains, err := state3.NewSharedDomains(txc.Tx.(kv.TemporalTx), log.New())
+		domains, err := state3.NewSharedDomains(txc.Ttx, log.New())
 		require.NoError(t, err)
 		defer domains.Close()
 		txc.Doms = domains

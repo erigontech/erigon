@@ -24,7 +24,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/c2h5oh/datasize"
 
@@ -200,9 +199,6 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	var canUseAppend bool
 	isDupSort := kv.ChaindataTablesCfg[bucket].Flags&kv.DupSort != 0 && !kv.ChaindataTablesCfg[bucket].AutoDupSortKeysConversion
 
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-
 	i := 0
 	loadNextFunc := func(_, k, v []byte) error {
 		if i == 0 {
@@ -210,19 +206,6 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 			canUseAppend = haveSortingGuaranties && isEndOfBucket
 		}
 		i++
-
-		select {
-		default:
-		case <-logEvery.C:
-			logArs := []interface{}{"into", bucket}
-			if args.LogDetailsLoad != nil {
-				logArs = append(logArs, args.LogDetailsLoad(k, v)...)
-			} else {
-				logArs = append(logArs, "current_prefix", makeCurrentKeyStr(k))
-			}
-
-			c.logger.Log(c.logLvl, fmt.Sprintf("[%s] ETL [2/2] Loading", c.logPrefix), logArs...)
-		}
 
 		isNil := (c.bufType == SortableSliceBuffer && v == nil) ||
 			(c.bufType == SortableAppendBuffer && len(v) == 0) || //backward compatibility

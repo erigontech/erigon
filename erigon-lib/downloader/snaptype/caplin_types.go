@@ -16,13 +16,15 @@
 
 package snaptype
 
+import "github.com/erigontech/erigon-lib/version"
+
 var (
 	BeaconBlocks = snapType{
 		enum: CaplinEnums.BeaconBlocks,
 		name: "beaconblocks",
 		versions: Versions{
-			Current:      Version{1, 0},
-			MinSupported: Version{1, 0},
+			Current:      version.V1_0,
+			MinSupported: version.V1_0,
 		},
 		indexes: []Index{CaplinIndexes.BeaconBlockSlot},
 	}
@@ -30,8 +32,8 @@ var (
 		enum: CaplinEnums.BlobSidecars,
 		name: "blobsidecars",
 		versions: Versions{
-			Current:      Version{1, 0},
-			MinSupported: Version{1, 0},
+			Current:      version.V1_0,
+			MinSupported: version.V1_0,
 		},
 		indexes: []Index{CaplinIndexes.BlobSidecarSlot},
 	}

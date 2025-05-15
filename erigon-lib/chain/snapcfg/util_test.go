@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 func TestNameToParts(t *testing.T) {
@@ -21,7 +22,7 @@ func TestNameToParts(t *testing.T) {
 			"happy pass",
 			args{
 				name: "v1.0-asd-12-d",
-				v:    snaptype.ZeroVersion,
+				v:    version.ZeroVersion,
 			},
 			12,
 			false,
@@ -30,7 +31,7 @@ func TestNameToParts(t *testing.T) {
 			"happy pass with version",
 			args{
 				name: "v2.0-asd-12-d",
-				v:    snaptype.V2_0,
+				v:    version.V2_0,
 			},
 			12,
 			false,
@@ -39,7 +40,7 @@ func TestNameToParts(t *testing.T) {
 			"happy pass && block in the end",
 			args{
 				name: "v1.0-asd-12",
-				v:    snaptype.ZeroVersion,
+				v:    version.ZeroVersion,
 			},
 			12,
 			false,
@@ -48,7 +49,7 @@ func TestNameToParts(t *testing.T) {
 			"version mismatch",
 			args{
 				name: "v1.0-asd-12",
-				v:    snaptype.V2_0,
+				v:    version.V2_0,
 			},
 			0,
 			true,
@@ -57,7 +58,7 @@ func TestNameToParts(t *testing.T) {
 			"block parse error",
 			args{
 				name: "v1.0-asd-dd12",
-				v:    snaptype.ZeroVersion,
+				v:    version.ZeroVersion,
 			},
 			0,
 			true,
@@ -66,7 +67,7 @@ func TestNameToParts(t *testing.T) {
 			"bad name",
 			args{
 				name: "v1.0-dd12",
-				v:    snaptype.ZeroVersion,
+				v:    version.ZeroVersion,
 			},
 			0,
 			true,

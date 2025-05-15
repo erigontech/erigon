@@ -129,7 +129,7 @@ func TestBitlistMerge(t *testing.T) {
 	require := require.New(t)
 
 	b1 := solid.BitlistFromBytes([]byte{0b11010000}, 10)
-	b2 := solid.BitlistFromBytes([]byte{0b00001101}, 10)
+	b2 := solid.BitlistFromBytes([]byte{0b10000101}, 10)
 
 	merged, err := b1.Merge(b2)
 	require.NoError(err)

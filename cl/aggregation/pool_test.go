@@ -40,17 +40,17 @@ var (
 		},
 	}
 	att1_1 = &solid.Attestation{
-		AggregationBits: solid.BitlistFromBytes([]byte{0b00000011}, 2048),
+		AggregationBits: solid.BitlistFromBytes([]byte{0b01000001}, 2048),
 		Data:            attData1,
 		Signature:       [96]byte{'a', 'b', 'c', 'd', 'e', 'f'},
 	}
 	att1_2 = &solid.Attestation{
-		AggregationBits: solid.BitlistFromBytes([]byte{0b00000011}, 2048),
+		AggregationBits: solid.BitlistFromBytes([]byte{0b01000001}, 2048),
 		Data:            attData1,
 		Signature:       [96]byte{'d', 'e', 'f', 'g', 'h', 'i'},
 	}
 	att1_3 = &solid.Attestation{
-		AggregationBits: solid.BitlistFromBytes([]byte{0b00001100}, 2048),
+		AggregationBits: solid.BitlistFromBytes([]byte{0b01000100}, 2048),
 		Data:            attData1,
 		Signature:       [96]byte{'g', 'h', 'i', 'j', 'k', 'l'},
 	}
@@ -115,13 +115,13 @@ func (t *PoolTestSuite) TestAddAttestationElectra() {
 	expectedCommitteeBits.SetBitAt(10, true)
 
 	att1 := &solid.Attestation{
-		AggregationBits: solid.BitlistFromBytes([]byte{0b00000011}, 2048*64),
+		AggregationBits: solid.BitlistFromBytes([]byte{0b00001001}, 2048*64),
 		Data:            attData1,
 		Signature:       [96]byte{'a', 'b', 'c', 'd', 'e', 'f'},
 		CommitteeBits:   cBits1,
 	}
 	att2 := &solid.Attestation{
-		AggregationBits: solid.BitlistFromBytes([]byte{0b00001101}, 2048*64),
+		AggregationBits: solid.BitlistFromBytes([]byte{0b00001100}, 2048*64),
 		Data:            attData1,
 		Signature:       [96]byte{'d', 'e', 'f', 'g', 'h', 'i'},
 		CommitteeBits:   cBits2,

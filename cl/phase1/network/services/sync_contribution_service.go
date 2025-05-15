@@ -174,7 +174,7 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 		// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
 		// in BatchVerification function. After validating signatures, if they are valid we will publish the
 		// gossip ourselves or ban the peer which sent that particular invalid signature.
-		return ErrIgnore
+		return nil
 	})
 }
 

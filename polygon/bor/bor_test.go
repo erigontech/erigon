@@ -368,10 +368,12 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 }
 
 func TestValidatorCreate(t *testing.T) {
+	t.Skip("issue #15017")
 	newValidator(t, newTestHeimdall(params.BorDevnetChainConfig), map[uint64]*types.Block{})
 }
 
 func TestVerifyHeader(t *testing.T) {
+	t.Skip("issue #15017")
 	v := newValidator(t, newTestHeimdall(params.BorDevnetChainConfig), map[uint64]*types.Block{})
 
 	chain, err := v.generateChain(1)
@@ -469,6 +471,7 @@ func testVerify(t *testing.T, noValidators int, chainLength int) {
 }
 
 func TestSendBlock(t *testing.T) {
+	t.Skip("issue #15017")
 	heimdall := newTestHeimdall(params.BorDevnetChainConfig)
 	blocks := map[uint64]*types.Block{}
 

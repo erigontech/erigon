@@ -50,12 +50,18 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 )
 
-func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *stateLib.Aggregator) {
+func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.TemporalRwTx, *stateLib.Aggregator) {
 	tb.Helper()
 	db := memdb.NewStateDB(tb.TempDir())
 	tb.Cleanup(db.Close)
 
-	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, log.New())
+	dirs, logger := datadir.New(tb.TempDir()), log.New()
+	salt, err := stateLib.GetStateIndicesSalt(dirs, true, logger)
+	if err != nil {
+		tb.Fatal(err)
+	}
+
+	agg, err := stateLib.NewAggregator2(context.Background(), dirs, 16, salt, db, logger)
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -146,7 +152,7 @@ func TestExecute(t *testing.T) {
 func TestCall(t *testing.T) {
 	t.Parallel()
 	_, tx, _ := NewTestTemporalDb(t)
-	domains, err := stateLib.NewSharedDomains(tx.(kv.TemporalTx), log.New())
+	domains, err := stateLib.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	state := state.New(state.NewReaderV3(domains))
@@ -224,7 +230,7 @@ func BenchmarkCall(b *testing.B) {
 	tx, sd := testTemporalTxSD(b, db)
 	defer tx.Rollback()
 	cfg.r = state.NewReaderV3(sd)
-	cfg.w = state.NewStateWriterV3(sd, nil)
+	cfg.w = state.NewWriter(sd, nil)
 	cfg.State = state.New(cfg.r)
 
 	tmpdir := b.TempDir()

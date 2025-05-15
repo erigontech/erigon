@@ -23,6 +23,13 @@ func (f *operationFeed) SendAttestation(value *AttestationData) int {
 	})
 }
 
+func (f *operationFeed) SendSingleAttestation(value *SingleAttestationData) int {
+	return f.feed.Send(&EventStream{
+		Event: OpAttestation,
+		Data:  value,
+	})
+}
+
 func (f *operationFeed) SendVoluntaryExit(value *VoluntaryExitData) int {
 	return f.feed.Send(&EventStream{
 		Event: OpVoluntaryExit,

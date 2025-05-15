@@ -183,7 +183,7 @@ func (so *stateObject) GetCommittedState(key *common.Hash, out *uint256.Int) {
 		return
 	}
 	// Load from DB in case it is missing.
-	enc, err := so.db.stateReader.ReadAccountStorage(so.address, so.data.GetIncarnation(), key)
+	enc, err := so.db.stateReader.ReadAccountStorage(so.address, key)
 	if err != nil {
 		so.setError(err)
 		out.Clear()
@@ -332,7 +332,7 @@ func (so *stateObject) Code() []byte {
 	if so.data.CodeHash == emptyCodeHashH {
 		return nil
 	}
-	code, err := so.db.stateReader.ReadAccountCode(so.Address(), so.data.Incarnation)
+	code, err := so.db.stateReader.ReadAccountCode(so.Address())
 	if err != nil {
 		so.setError(fmt.Errorf("can't load code hash %x: %w", so.data.CodeHash, err))
 	}

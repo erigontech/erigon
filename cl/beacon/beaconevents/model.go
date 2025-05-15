@@ -28,6 +28,7 @@ const (
 type (
 	// Operation event data types
 	AttestationData           = solid.Attestation
+	SingleAttestationData     = solid.SingleAttestation
 	VoluntaryExitData         = cltypes.SignedVoluntaryExit
 	ProposerSlashingData      = cltypes.ProposerSlashing
 	AttesterSlashingData      = cltypes.AttesterSlashing

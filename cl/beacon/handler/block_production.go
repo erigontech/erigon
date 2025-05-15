@@ -225,7 +225,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 
 	log.Debug("[Beacon API] Producing block", "slot", targetSlot)
 	// builder boost factor controls block choice between local execution node or builder
-	var builderBoostFactor uint64
+	builderBoostFactor := uint64(100)
 	builderBoostFactorStr := r.URL.Query().Get("builder_boost_factor")
 	if builderBoostFactorStr != "" {
 		builderBoostFactor, err = strconv.ParseUint(builderBoostFactorStr, 10, 64)
@@ -310,7 +310,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		"proposerIndex", block.ProposerIndex,
 		"slot", targetSlot,
 		"state_root", block.StateRoot,
-		"attestations", block.BeaconBody.Attestations.Len(),
 		"execution_value", block.GetExecutionValue().Uint64(),
 		"version", block.Version(),
 		"blinded", block.IsBlinded(),
@@ -993,7 +992,7 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 		}
 	}
 	// submit and unblind the signedBlindedBlock
-	blockPayload, blobsBundle, err := a.builderClient.SubmitBlindedBlocks(r.Context(), signedBlindedBlock)
+	blockPayload, blobsBundle, executionRequests, err := a.builderClient.SubmitBlindedBlocks(r.Context(), signedBlindedBlock)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
@@ -1039,6 +1038,10 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 				Commitment: common.Bytes48(blobsBundle.Commitments[i]),
 			})
 		}
+	}
+
+	if blockPayload.Version() >= clparams.ElectraVersion {
+		signedBlock.Block.Body.ExecutionRequests = executionRequests
 	}
 
 	// broadcast the block

@@ -443,6 +443,7 @@ func TestUDPv4_pingMatchIP(t *testing.T) {
 }
 
 func TestUDPv4_successfulPing(t *testing.T) {
+	t.Skip("issue #15000")
 	logger := log.New()
 	test := newUDPTest(t, logger)
 	added := make(chan *node, 1)

@@ -31,10 +31,12 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/backup"
 	mdbx2 "github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
+	ee "github.com/erigontech/erigon-lib/state/entity_extras"
 
 	"github.com/erigontech/erigon/turbo/debug"
 )
@@ -430,5 +432,16 @@ MainLoop:
 		return err
 	}
 
+	return nil
+}
+
+func CheckSaltFilesExist(dirs datadir.Dirs) error {
+	ok, err := ee.CheckSaltFilesExist(dirs)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ee.ErrCannotStartWithoutSaltFiles
+	}
 	return nil
 }

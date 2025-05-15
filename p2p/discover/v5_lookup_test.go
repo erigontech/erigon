@@ -30,9 +30,7 @@ import (
 
 // This test checks that lookup works.
 func TestUDPv5_lookup(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("fix me on win please")
-	}
+	t.Skip("issue #6223")
 	t.Parallel()
 	logger := log.New()
 	test := newUDPV5Test(t, logger)

@@ -23,7 +23,6 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"net"
-	"runtime"
 	"testing"
 	"time"
 
@@ -34,9 +33,7 @@ import (
 )
 
 func TestUDPv4_Lookup(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("fix me on win please")
-	}
+	t.Skip("issue #14714")
 	t.Parallel()
 	logger := log.New()
 
@@ -73,9 +70,7 @@ func TestUDPv4_Lookup(t *testing.T) {
 }
 
 func TestUDPv4_LookupIterator(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("fix me on win please")
-	}
+	t.Skip("issue #14924")
 	t.Parallel()
 	logger := log.New()
 

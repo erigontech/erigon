@@ -3,6 +3,7 @@ package entity_extras
 import (
 	"crypto/rand"
 	"encoding/binary"
+	"math"
 	"os"
 	"path"
 	"sync"
@@ -16,6 +17,9 @@ import (
 // the order of registration, and so counting on it being constant across reboots
 // might be tricky.
 type ForkableId uint16
+
+// all forkable id match this
+const AllForkableId = math.MaxUint16
 
 type holder struct {
 	// tag - "type" of snapshot file. e.g. tag is "bodies" for "v1.0-007300-007400-bodies.seg" file
@@ -164,6 +168,10 @@ func (a ForkableId) Salt() (uint32, error) {
 	saltLock.Unlock()
 
 	return salt, nil
+}
+
+func (a ForkableId) MatchAll() bool {
+	return a == AllForkableId
 }
 
 var saltMap = map[string]uint32{}
