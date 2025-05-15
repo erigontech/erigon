@@ -47,7 +47,6 @@ import (
 	"github.com/erigontech/erigon-lib/downloader"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/backup"
-	"github.com/erigontech/erigon-lib/kv/kvcfg"
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -61,6 +60,7 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/ethconfig/features"
 	"github.com/erigontech/erigon/eth/ethconsensusconfig"
 	"github.com/erigontech/erigon/eth/integrity"
 	reset2 "github.com/erigontech/erigon/eth/rawdbreset"
@@ -1289,24 +1289,8 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 	var err error
 
 	openSnapshotOnce.Do(func() {
-		if err := db.View(context.Background(), func(tx kv.Tx) (err error) {
-			syncCfg.KeepExecutionProofs, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
-			if err != nil {
-				return err
-			}
-			syncCfg.PersistReceiptsCacheV2, err = kvcfg.PersistReceipts.Enabled(tx)
-			if err != nil {
-				return err
-			}
-			return nil
-		}); err != nil {
-			panic(err)
-		}
-		if syncCfg.KeepExecutionProofs {
-			libstate.EnableHistoricalCommitment()
-		}
-		if syncCfg.PersistReceiptsCacheV2 {
-			libstate.EnableHistoricalRCache()
+		if syncCfg, err = features.EnableSyncCfg(db, syncCfg); err != nil {
+			return
 		}
 
 		dirs := datadir.New(datadirCli)
