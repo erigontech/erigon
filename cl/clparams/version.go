@@ -44,6 +44,8 @@ func (v StateVersion) String() string {
 		return "deneb"
 	case ElectraVersion:
 		return "electra"
+	case FuluVersion:
+		return "fulu"
 	default:
 		panic("unsupported fork version")
 	}
