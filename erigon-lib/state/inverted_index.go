@@ -286,8 +286,8 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
 			if item.decompressor == nil {
 				fPathPattern := ii.efFilePathMask(fromStep, toStep)
-				fPath, fileVer, err := version.FindFilesWithVersionsByPattern(fPathPattern)
-				if err != nil && !errors.Is(err, os.ErrNotExist) {
+				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathPattern)
+				if err != nil {
 					_, fName := filepath.Split(fPath)
 					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: FindFilesWithVersionsByPattern error", "f", fName, "err", err)
 					invalidFileItemsLock.Lock()
@@ -296,7 +296,7 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 					continue
 				}
 
-				if errors.Is(err, os.ErrNotExist) {
+				if ok {
 					_, fName := filepath.Split(fPath)
 					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: file does not exists", "f", fName)
 					invalidFileItemsLock.Lock()
@@ -305,7 +305,7 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 					continue
 				}
 
-				if fileVer.Cmp(ii.version.DataEF.Current) != 0 {
+				if !fileVer.Eq(ii.version.DataEF.Current) {
 					if !fileVer.Less(ii.version.DataEF.MinSupported) {
 						ii.version.DataEF.Current = fileVer
 					} else {
@@ -331,14 +331,14 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 
 			if item.index == nil {
 				fPathPattern := ii.efAccessorFilePathMask(fromStep, toStep)
-				fPath, fileVer, err := version.FindFilesWithVersionsByPattern(fPathPattern)
-				if err != nil && !errors.Is(err, os.ErrNotExist) {
+				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathPattern)
+				if err != nil {
 					_, fName := filepath.Split(fPath)
 					ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 					// don't interrupt on error. other files may be good
 				}
-				if !errors.Is(err, os.ErrNotExist) {
-					if fileVer.Cmp(ii.version.AccessorEFI.Current) != 0 {
+				if ok {
+					if !fileVer.Eq(ii.version.AccessorEFI.Current) {
 						if !fileVer.Less(ii.version.AccessorEFI.MinSupported) {
 							ii.version.AccessorEFI.Current = fileVer
 						} else {

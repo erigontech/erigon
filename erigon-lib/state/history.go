@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"github.com/erigontech/erigon-lib/version"
 	"math"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -227,8 +226,8 @@ func (h *History) openDirtyFiles() error {
 			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
 			if item.decompressor == nil {
 				fPathMask := h.vFilePathMask(fromStep, toStep)
-				fPath, fileVer, err := version.FindFilesWithVersionsByPattern(fPathMask)
-				if err != nil && !errors.Is(err, os.ErrNotExist) {
+				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+				if err != nil {
 					_, fName := filepath.Split(fPath)
 					h.logger.Debug("[agg] History.openDirtyFiles: FileExist", "f", fName, "err", err)
 					invalidFilesMu.Lock()
@@ -236,7 +235,7 @@ func (h *History) openDirtyFiles() error {
 					invalidFilesMu.Unlock()
 					continue
 				}
-				if errors.Is(err, os.ErrNotExist) {
+				if !ok {
 					_, fName := filepath.Split(fPath)
 					h.logger.Debug("[agg] History.openDirtyFiles: file does not exists", "f", fName)
 					invalidFilesMu.Lock()
@@ -244,7 +243,7 @@ func (h *History) openDirtyFiles() error {
 					invalidFilesMu.Unlock()
 					continue
 				}
-				if fileVer.Cmp(h.version.DataV.Current) != 0 {
+				if !fileVer.Eq(h.version.DataV.Current) {
 					if !fileVer.Less(h.version.DataV.MinSupported) {
 						h.version.DataV.Current = fileVer
 					} else {
@@ -283,13 +282,13 @@ func (h *History) openDirtyFiles() error {
 
 			if item.index == nil {
 				fPathMask := h.vAccessorFilePathMask(fromStep, toStep)
-				fPath, fileVer, err := version.FindFilesWithVersionsByPattern(fPathMask)
-				if err != nil && !errors.Is(err, os.ErrNotExist) {
+				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+				if err != nil {
 					_, fName := filepath.Split(fPath)
 					h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
 				}
-				if !errors.Is(err, os.ErrNotExist) {
-					if fileVer.Cmp(h.version.AccessorVI.Current) != 0 {
+				if ok {
+					if !fileVer.Eq(h.version.AccessorVI.Current) {
 						if !fileVer.Less(h.version.AccessorVI.MinSupported) {
 							h.version.AccessorVI.Current = fileVer
 						} else {

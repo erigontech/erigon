@@ -3,7 +3,6 @@ package version
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -47,6 +46,15 @@ func (v Version) Cmp(rhd Version) int {
 
 	// Both Major and Minor are equal
 	return 0
+}
+
+func (v Version) Eq(rhd Version) bool {
+	if v.Major == rhd.Major {
+		if v.Minor == rhd.Minor {
+			return true
+		}
+	}
+	return false
 }
 
 func (v Version) Downgrade() Version {
@@ -114,14 +122,14 @@ func (v Versions) String() string {
 }
 
 // FindFilesWithVersionsByPattern return an filepath by pattern
-func FindFilesWithVersionsByPattern(pattern string) (string, Version, error) {
+func FindFilesWithVersionsByPattern(pattern string) (string, Version, bool, error) {
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
-		return "", Version{}, fmt.Errorf("invalid pattern: %w", err)
+		return "", Version{}, false, fmt.Errorf("invalid pattern: %w", err)
 	}
 
 	if len(matches) == 0 {
-		return "", Version{}, os.ErrNotExist
+		return "", Version{}, false, nil
 	}
 	if len(matches) > 1 {
 		sort.Slice(matches, func(i, j int) bool {
@@ -136,11 +144,11 @@ func FindFilesWithVersionsByPattern(pattern string) (string, Version, error) {
 		_, fName := filepath.Split(matches[len(matches)-1])
 		ver, _ := ParseVersion(fName)
 
-		return matches[len(matches)-1], ver, nil
+		return matches[len(matches)-1], ver, true, nil
 	}
 	_, fName := filepath.Split(matches[0])
 	ver, _ := ParseVersion(fName)
-	return matches[0], ver, nil
+	return matches[0], ver, true, nil
 }
 
 func ReplaceVersionWithMask(path string) (string, error) {
