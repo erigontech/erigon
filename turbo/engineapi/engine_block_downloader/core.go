@@ -30,10 +30,16 @@ import (
 
 // download is the process that reverse download a specific block hash.
 // chainTip is optional and should be the block tip of the download request, which will be inserted at the end of the procedure if specified.
-func (e *EngineBlockDownloader) download(ctx context.Context, hashToDownload common.Hash, requestId int, chainTip *types.Block) {
+func (e *EngineBlockDownloader) download(
+	ctx context.Context,
+	hashToDownload common.Hash,
+	heightToDownload uint64,
+	requestId int,
+	chainTip *types.Block,
+) {
 	/* Start download process*/
 	// First we schedule the headers download process
-	if !e.scheduleHeadersDownload(requestId, hashToDownload, 0) {
+	if !e.scheduleHeadersDownload(requestId, hashToDownload, heightToDownload) {
 		e.logger.Warn("[EngineBlockDownloader] could not begin header download")
 		// could it be scheduled? if not nevermind.
 		e.status.Store(headerdownload.Idle)
@@ -135,14 +141,14 @@ func (e *EngineBlockDownloader) download(ctx context.Context, hashToDownload com
 
 // StartDownloading triggers the download process and returns true if the process started or false if it could not.
 // chainTip is optional and should be the block tip of the download request, which will be inserted at the end of the procedure if specified.
-func (e *EngineBlockDownloader) StartDownloading(ctx context.Context, requestId int, hashToDownload common.Hash, chainTip *types.Block) bool {
+func (e *EngineBlockDownloader) StartDownloading(requestId int, hashToDownload common.Hash, heightToDownload uint64, chainTip *types.Block) bool {
 	e.lock.Lock()
 	defer e.lock.Unlock()
 	if e.status.Load() == headerdownload.Syncing {
 		return false
 	}
 	e.status.Store(headerdownload.Syncing)
-	go e.download(e.bacgroundCtx, hashToDownload, requestId, chainTip)
+	go e.download(e.bacgroundCtx, hashToDownload, heightToDownload, requestId, chainTip)
 	return true
 }
 
