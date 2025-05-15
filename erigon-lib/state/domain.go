@@ -108,8 +108,6 @@ type domainCfg struct {
 	valuesTable string    // bucket to store domain values; key -> inverted_step + values (Dupsort)
 	largeValues bool
 
-	crossDomainIntegrity rangeDomainIntegrityChecker
-
 	// replaceKeysInValues allows to replace commitment branch values with shorter keys.
 	// for commitment domain only
 	replaceKeysInValues bool
@@ -322,14 +320,7 @@ func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*filesItem) 
 	}
 	l := scanDirtyFiles(fileNames, d.aggregationStep, d.filenameBase, "kv", d.logger)
 	for _, dirtyFile := range l {
-		startStep, endStep := dirtyFile.startTxNum/d.aggregationStep, dirtyFile.endTxNum/d.aggregationStep
-		domainName, _ := kv.String2Domain(d.filenameBase)
-		if d.crossDomainIntegrity != nil && !d.crossDomainIntegrity(domainName, d.dirs, startStep, endStep) {
-			d.logger.Debug("[agg] skip garbage file", "name", d.filenameBase, "startStep", startStep, "endStep", endStep)
-			continue
-		}
-		dirtyFile.frozen = false
-
+		dirtyFile.frozen = false //.kv files merge to infinity
 		if _, has := d.dirtyFiles.Get(dirtyFile); !has {
 			d.dirtyFiles.Set(dirtyFile)
 		}
