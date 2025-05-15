@@ -11,7 +11,7 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
-  
+
 jobs:
   tip-tracking-test:
     runs-on: [self-hosted, qa, Polygon]
@@ -61,7 +61,7 @@ jobs:
         test_exit_status=$?
         
         # Save the subsection reached status
-        echo "::set-output name=test_executed::true"
+        echo "test_executed=true" >> "$GITHUB_OUTPUT"
     
         # Clean up Erigon process if it's still running
         if kill -0 $ERIGON_PID 2> /dev/null; then

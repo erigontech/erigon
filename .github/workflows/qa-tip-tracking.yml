@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   tip-tracking-test:
-    runs-on: [self-hosted, Erigon3]
+    runs-on: [self-hosted, qa, Erigon3]
     timeout-minutes: 600
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
@@ -61,8 +61,8 @@ jobs:
         test_exit_status=$?
         
         # Save the subsection reached status
-        echo "::set-output name=test_executed::true"
-    
+        echo "test_executed=true" >> $GITHUB_OUTPUT
+        
         # Clean up Erigon process if it's still running
         if kill -0 $ERIGON_PID 2> /dev/null; then
           echo "Terminating Erigon"
