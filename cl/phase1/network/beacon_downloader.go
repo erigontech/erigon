@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"golang.org/x/net/context"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -77,11 +78,15 @@ type peerAndBlocks struct {
 	blocks []*cltypes.SignedBeaconBlock
 }
 
+var heimdallRequestMoreCount = uint64(dbg.EnvInt("HEIMDALL_REQUEST_MORE_CNT", 16))
+var heimdallRequestMoreInterval = dbg.EnvDuration("HEIMDALL_REQUEST_MORE_INTERVAL", 300*time.Millisecond)
+var heimdallRequestMoreSleep = dbg.EnvDuration("HEIMDALL_REQUEST_MORE_SLEEP", 10*time.Millisecond)
+
 func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
-	count := uint64(16)
+	count := heimdallRequestMoreCount
 	var atomicResp atomic.Value
 	atomicResp.Store(peerAndBlocks{})
-	reqInterval := time.NewTicker(300 * time.Millisecond)
+	reqInterval := time.NewTicker(heimdallRequestMoreInterval)
 	defer reqInterval.Stop()
 
 Loop:
@@ -138,7 +143,7 @@ Loop:
 			if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
 				break Loop
 			}
-			time.Sleep(10 * time.Millisecond)
+			time.Sleep(heimdallRequestMoreSleep)
 		}
 	}
 
