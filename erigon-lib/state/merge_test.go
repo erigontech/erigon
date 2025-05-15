@@ -264,8 +264,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"v1.0-accounts.1-2.ef",
 		})
 		ii.dirtyFiles.Scan(func(item *filesItem) bool {
-			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-			item.decompressor = &seg.Decompressor{FileName1: fName}
+			item.decompressor = &seg.Decompressor{}
 			return true
 		})
 		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
@@ -277,8 +276,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"v1.0-accounts.0-2.v",
 		})
 		h.dirtyFiles.Scan(func(item *filesItem) bool {
-			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-			item.decompressor = &seg.Decompressor{FileName1: fName}
+			item.decompressor = &seg.Decompressor{}
 			return true
 		})
 		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
@@ -305,8 +303,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"v1.0-accounts.3-4.ef",
 		})
 		ii.dirtyFiles.Scan(func(item *filesItem) bool {
-			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-			item.decompressor = &seg.Decompressor{FileName1: fName}
+			item.decompressor = &seg.Decompressor{}
 			return true
 		})
 		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
@@ -319,8 +316,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"v1.0-accounts.3-4.v",
 		})
 		h.dirtyFiles.Scan(func(item *filesItem) bool {
-			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-			item.decompressor = &seg.Decompressor{FileName1: fName}
+			item.decompressor = &seg.Decompressor{}
 			return true
 		})
 		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
@@ -346,8 +342,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"v1.0-accounts.2-3.ef",
 		})
 		ii.dirtyFiles.Scan(func(item *filesItem) bool {
-			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-			item.decompressor = &seg.Decompressor{FileName1: fName}
+			item.decompressor = &seg.Decompressor{}
 			return true
 		})
 		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
@@ -358,8 +353,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"v1.0-accounts.2-3.v",
 		})
 		h.dirtyFiles.Scan(func(item *filesItem) bool {
-			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-			item.decompressor = &seg.Decompressor{FileName1: fName}
+			item.decompressor = &seg.Decompressor{}
 			return true
 		})
 		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
@@ -384,8 +378,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"v1.0-accounts.0-2.ef",
 		})
 		ii.dirtyFiles.Scan(func(item *filesItem) bool {
-			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-			item.decompressor = &seg.Decompressor{FileName1: fName}
+			item.decompressor = &seg.Decompressor{}
 			return true
 		})
 		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
@@ -397,8 +390,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"v1.0-accounts.2-3.v",
 		})
 		h.dirtyFiles.Scan(func(item *filesItem) bool {
-			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-			item.decompressor = &seg.Decompressor{FileName1: fName}
+			item.decompressor = &seg.Decompressor{}
 			return true
 		})
 		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
@@ -419,8 +411,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			"v1.0-accounts.3-4.ef",
 		})
 		ii.dirtyFiles.Scan(func(item *filesItem) bool {
-			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-			item.decompressor = &seg.Decompressor{FileName1: fName}
+			item.decompressor = &seg.Decompressor{}
 			return true
 		})
 		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
