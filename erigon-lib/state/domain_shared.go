@@ -1254,7 +1254,7 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 		if blockNum == 0 && txNum == 0 {
 			return 0, 0, err
 		}
-		newRh, err := sdc.rebuildCommitment(ctx, sdc.sharedDomains.roTtx, blockNum)
+		newRh, err := sdc.rebuildCommitment(ctx, tx.(kv.TemporalTx), blockNum)
 		if err != nil {
 			return 0, 0, err
 		}
