@@ -749,7 +749,7 @@ var (
 	DbSizeLimitFlag = cli.StringFlag{
 		Name:  "db.size.limit",
 		Usage: "Runtime limit of chaindata db size (can change at any time)",
-		Value: (200 * datasize.GB).String(),
+		Value: (1 * datasize.TB).String(),
 	}
 	DbWriteMapFlag = cli.BoolFlag{
 		Name:  "db.writemap",
