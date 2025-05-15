@@ -1155,9 +1155,9 @@ func (sdc *SharedDomainsCommitmentContext) storeCommitmentState(blockNum uint64,
 	if sdc.sharedDomains.trace {
 		fmt.Printf("[commitment] store txn %d block %d rootHash %x\n", txNum, blockNum, rootHash)
 	}
-	return sdc.PutBranch(keyCommitmentState, encodedState, prevState, prevStep)
-	//sdc.sharedDomains.put(kv.CommitmentDomain, keyCommitmentStateS, encodedState)
-	//return sdc.sharedDomains.domainWriters[kv.CommitmentDomain].PutWithPrev(keyCommitmentState, nil, encodedState, txNum, prevState, prevStep)
+	// return sdc.PutBranch(keyCommitmentState, encodedState, prevState, prevStep)
+	sdc.sharedDomains.put(kv.CommitmentDomain, keyCommitmentStateS, encodedState)
+	return sdc.sharedDomains.domainWriters[kv.CommitmentDomain].PutWithPrev(keyCommitmentState, nil, encodedState, txNum, prevState, prevStep)
 }
 
 func (sdc *SharedDomainsCommitmentContext) encodeCommitmentState(blockNum, txNum uint64) ([]byte, error) {
