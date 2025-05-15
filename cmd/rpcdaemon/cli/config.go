@@ -422,14 +422,13 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if cc == nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, errors.New("chain config not found in db. Need start erigon at least once on this db")
 		}
+		cfg.Snap.ChainName = cc.ChainName
+		// Configure sapshots
 		cfg.Sync, err = features.EnableSyncCfg(rawDB, cfg.Sync)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 		}
 
-		// Configure sapshots
-
-		cfg.Snap.ChainName = cc.ChainName
 		// this assumed the rpc deamon never runs with a downloader - if this is
 		// not the case we'll need to adjust the defaults of the --no-downlaoder
 		// flag to the faulse by default
