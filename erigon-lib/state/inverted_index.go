@@ -296,7 +296,7 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 					continue
 				}
 
-				if ok {
+				if !ok {
 					_, fName := filepath.Split(fPath)
 					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: file does not exists", "f", fName)
 					invalidFileItemsLock.Lock()
