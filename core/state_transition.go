@@ -471,15 +471,17 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		return nil, err
 	}
 
-	msg := st.msg
+	var (
+		msg       = st.msg
+		sender    = vm.AccountRef(msg.From())
+		rules     = st.evm.ChainRules()
+		vmConfig  = st.evm.Config()
+		isEIP3860 = vmConfig.HasEip3860(rules)
+
+		accessTuples     = slices.Clone[types.AccessList](msg.AccessList())
+		contractCreation = msg.To() == nil
+	)
 	// coinbase = st.msg.From() // arbitrum
-	// st.evm.Context.Coinbase = msg.From()
-	sender := vm.AccountRef(msg.From())
-	contractCreation := msg.To() == nil
-	rules := st.evm.ChainRules()
-	vmConfig := st.evm.Config()
-	isEIP3860 := vmConfig.HasEip3860(rules)
-	accessTuples := slices.Clone[types.AccessList](msg.AccessList())
 
 	if !contractCreation {
 		// Increment the nonce for the next transaction
@@ -498,7 +500,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
-	if st.gasRemaining < gas || st.gasRemaining < floorGas7623 {
+	if st.gasRemaining < gas || (!rules.IsArbitrum && st.gasRemaining < floorGas7623) {
 		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, max(gas, floorGas7623))
 	}
 
@@ -569,16 +571,28 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 			nonrefundable := st.evm.ProcessingHook.NonrefundableGas()
 			if nonrefundable < st.gasUsed() {
 				// Apply refund counter, capped to a refund quotient
-				refund := (st.gasUsed() - nonrefundable) / refundQuotient
+				refund := (st.gasUsed() - nonrefundable) / refundQuotient // Before EIP-3529
 				if refund > st.state.GetRefund() {
 					refund = st.state.GetRefund()
 				}
 				st.gasRemaining += refund
 			}
+
+			if rules.IsPrague && st.evm.ProcessingHook.IsCalldataPricingIncreaseEnabled() {
+				// After EIP-7623: Data-heavy transactions pay the floor gas.
+				if st.gasUsed() < floorGas7623 {
+					//prev := st.gasRemaining
+					st.gasRemaining = st.initialGas - floorGas7623
+					//if t := st.evm.Config.Tracer; t != nil && t.OnGasChange != nil {
+					//	t.OnGasChange(prev, st.gasRemaining, tracing.GasChangeTxDataFloor)
+					//}
+				}
+			}
 		} else { // Other networks
 			gasUsed := st.gasUsed()
 			refund := min(gasUsed/refundQuotient, st.state.GetRefund())
 			gasUsed = gasUsed - refund
+
 			if rules.IsPrague {
 				gasUsed = max(floorGas7623, gasUsed)
 			}
@@ -602,7 +616,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	amount.Mul(amount, effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
 
 	// code for non-arbitrum; need to doublecheck coinbase here
-	//if err := st.state.AddBalance(coinbase, amount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+	if err := st.state.AddBalance(coinbase, amount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+	}
 	if st.evm.Config().NoBaseFee && msg.FeeCap().Sign() == 0 && msg.TipCap().Sign() == 0 {
 	} else {
 		if err := st.state.AddBalance(tipReceipient, amount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
