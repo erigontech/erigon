@@ -685,8 +685,7 @@ func TestCtxFiles(t *testing.T) {
 	ii.scanDirtyFiles(files)
 	require.Equal(t, 10, ii.dirtyFiles.Len())
 	ii.dirtyFiles.Scan(func(item *filesItem) bool {
-		fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-		item.decompressor = &seg.Decompressor{FileName1: fName}
+		item.decompressor = &seg.Decompressor{}
 		return true
 	})
 
