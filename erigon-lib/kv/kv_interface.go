@@ -518,6 +518,7 @@ type TemporalRwTx interface {
 }
 
 type TemporalDebugDB interface {
+	OpenFolder() error
 	DomainTables(domain ...Domain) []string
 	InvertedIdxTables(names ...InvertedIdx) []string
 }

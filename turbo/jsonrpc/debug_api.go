@@ -35,9 +35,11 @@ import (
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
+
 	// types2 "github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
+
 	// bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
@@ -69,6 +71,8 @@ type PrivateDebugAPI interface {
 	GetRawReceipts(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) ([]hexutility.Bytes, error)
 	GetBadBlocks(ctx context.Context) ([]map[string]interface{}, error)
 	GetRawTransaction(ctx context.Context, hash common.Hash) (hexutility.Bytes, error)
+
+	RefreshFolder(ctx context.Context) (err error)
 }
 
 // PrivateDebugAPIImpl is implementation of the PrivateDebugAPI interface based on remote Db access
@@ -175,6 +179,11 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 	}
 
 	return res, nil
+}
+
+// debug_refreshFolder()
+func (api *PrivateDebugAPIImpl) RefreshFolder(ctx context.Context) (err error) {
+	return api.db.Debug().OpenFolder()
 }
 
 // GetModifiedAccountsByNumber implements debug_getModifiedAccountsByNumber. Returns a list of accounts modified in the given block.
