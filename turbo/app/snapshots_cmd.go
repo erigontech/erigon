@@ -1189,14 +1189,8 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	clean func(),
 	err error,
 ) {
-	if err := chainDB.View(context.Background(), func(tx kv.Tx) (err error) {
-		_, err = features.EnableSyncCfg(tx, ethconfig.Sync{})
-		if err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		panic(err)
+	if _, err = features.EnableSyncCfg(chainDB, ethconfig.Sync{}); err != nil {
+		return
 	}
 
 	chainConfig := fromdb.ChainConfig(chainDB)

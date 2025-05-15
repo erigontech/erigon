@@ -1289,14 +1289,8 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 	var err error
 
 	openSnapshotOnce.Do(func() {
-		if err := db.View(context.Background(), func(tx kv.Tx) (err error) {
-			syncCfg, err = features.EnableSyncCfg(tx, syncCfg)
-			if err != nil {
-				return err
-			}
-			return nil
-		}); err != nil {
-			panic(err)
+		if syncCfg, err = features.EnableSyncCfg(db, syncCfg); err != nil {
+			return
 		}
 
 		dirs := datadir.New(datadirCli)

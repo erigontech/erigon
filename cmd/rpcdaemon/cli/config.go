@@ -415,16 +415,16 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			if err != nil {
 				return err
 			}
-			cfg.Sync, err = features.EnableSyncCfg(tx, cfg.Sync)
-			if err != nil {
-				return err
-			}
 			return nil
 		}); err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 		}
 		if cc == nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, errors.New("chain config not found in db. Need start erigon at least once on this db")
+		}
+		cfg.Sync, err = features.EnableSyncCfg(rawDB, cfg.Sync)
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 		}
 
 		// Configure sapshots
