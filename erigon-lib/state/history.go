@@ -243,7 +243,7 @@ func (h *History) openDirtyFiles() error {
 					invalidFilesMu.Unlock()
 					continue
 				}
-				if fileVer.Cmp(h.version.DataV.Current) != 0 {
+				if !fileVer.Eq(h.version.DataV.Current) {
 					if !fileVer.Less(h.version.DataV.MinSupported) {
 						h.version.DataV.Current = fileVer
 					} else {
@@ -288,7 +288,7 @@ func (h *History) openDirtyFiles() error {
 					h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
 				}
 				if ok {
-					if fileVer.Cmp(h.version.AccessorVI.Current) != 0 {
+					if !fileVer.Eq(h.version.AccessorVI.Current) {
 						if !fileVer.Less(h.version.AccessorVI.MinSupported) {
 							h.version.AccessorVI.Current = fileVer
 						} else {

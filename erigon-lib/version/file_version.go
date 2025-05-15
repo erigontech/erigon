@@ -48,6 +48,15 @@ func (v Version) Cmp(rhd Version) int {
 	return 0
 }
 
+func (v Version) Eq(rhd Version) bool {
+	if v.Major == rhd.Major {
+		if v.Minor == rhd.Minor {
+			return true
+		}
+	}
+	return false
+}
+
 func (v Version) Downgrade() Version {
 	if v.Minor == 0 {
 		return Version{v.Major - 1, 0}

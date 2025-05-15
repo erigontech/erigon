@@ -305,7 +305,7 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 					continue
 				}
 
-				if fileVer.Cmp(ii.version.DataEF.Current) != 0 {
+				if !fileVer.Eq(ii.version.DataEF.Current) {
 					if !fileVer.Less(ii.version.DataEF.MinSupported) {
 						ii.version.DataEF.Current = fileVer
 					} else {
@@ -338,7 +338,7 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 					// don't interrupt on error. other files may be good
 				}
 				if ok {
-					if fileVer.Cmp(ii.version.AccessorEFI.Current) != 0 {
+					if !fileVer.Eq(ii.version.AccessorEFI.Current) {
 						if !fileVer.Less(ii.version.AccessorEFI.MinSupported) {
 							ii.version.AccessorEFI.Current = fileVer
 						} else {
