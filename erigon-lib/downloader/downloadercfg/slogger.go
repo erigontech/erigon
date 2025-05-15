@@ -27,19 +27,23 @@ func (me *slogHandler) Enabled(ctx context.Context, level slog.Level) bool {
 }
 
 func (me *slogHandler) Handle(ctx context.Context, record slog.Record) error {
-	//me.msgBuf.Reset()
-	//err := me.textHandler.Handle(ctx, record)
-	//if err != nil {
-	//	return err
-	//}
-	log.Log(slogLevelToErigon(record.Level), record.Message, me.attrsToCtx()...)
+	// Unfortunately the *handlers* in Erigon's loggers are loaded with filter levels, which makes
+	// it hard to reuse them with our own log level flags. The global root logger here is still
+	// instrumented but it'll do for now. You need to set the console or log file verbosity to get
+	// our messages through to the canonical loggers.
+	log.Log(slogLevelToErigon(record.Level), record.Message, me.attrsToCtx(record)...)
 	return nil
 }
 
-func (me *slogHandler) attrsToCtx() (ret []any) {
+func (me *slogHandler) attrsToCtx(r slog.Record) (ret []any) {
+	ret = make([]any, 0, 2*(len(me.attrs)+r.NumAttrs()))
 	for _, a := range me.attrs {
 		ret = append(ret, a.Key, a.Value)
 	}
+	r.Attrs(func(attr slog.Attr) bool {
+		ret = append(ret, attr.Key, attr.Value)
+		return true
+	})
 	return
 }
 
