@@ -16,8 +16,8 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"
@@ -88,7 +88,7 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 		return nil, nil, err
 	}
 
-	if cfg.StaticNodes, err = utils.ParseNodesFromURLs([]string{resp.Result.Enode}); err != nil {
+	if cfg.StaticNodes, err = enode.ParseNodesFromURLs([]string{resp.Result.Enode}); err != nil {
 		return nil, nil, err
 	}
 
