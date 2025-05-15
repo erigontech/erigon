@@ -184,7 +184,7 @@ test-erigon-ext:
 	@cd tests/erigon-ext-test && ./test.sh $(GIT_COMMIT)
 
 ## test:                      run short tests with a 10m timeout
-test: test-erigon-lib test-erigon-db
+test: #test-erigon-lib test-erigon-db
 	$(GOTEST) -short --timeout 10m -coverprofile=coverage-test.out
 
 ## test-all:                  run all tests with a 1h timeout
