@@ -47,10 +47,6 @@ type BlobStorage interface {
 	WriteBlobSidecars(ctx context.Context, blockRoot common.Hash, blobSidecars []*cltypes.BlobSidecar) error
 	RemoveBlobSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) error
 	ReadBlobSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) (out []*cltypes.BlobSidecar, found bool, err error)
-
-	WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar) error
-	RemoveColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) error
-
 	WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error // Used for P2P networking
 	KzgCommitmentsCount(ctx context.Context, blockRoot common.Hash) (uint32, error)
 	Prune() error
@@ -223,8 +219,8 @@ func (bs *BlobStore) RemoveBlobSidecars(ctx context.Context, slot uint64, blockR
 		if err := bs.fs.Remove(filePath); err != nil {
 			return err
 		}
-		tx.Delete(kv.BlockRootToKzgCommitments, blockRoot[:])
 	}
+	tx.Delete(kv.BlockRootToKzgCommitments, blockRoot[:])
 	return tx.Commit()
 }
 
