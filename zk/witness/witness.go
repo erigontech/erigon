@@ -315,6 +315,10 @@ func CheckForForcedInfoTreeUpdate(reader *hermez_db.HermezDbReader, blockNum uin
 		if err != nil {
 			return nil, fmt.Errorf("failed to get info tree index: %w", err)
 		}
+		if infoTreeIndex == nil {
+			log.Warn("Info tree index not found when generating witness", "index", index, "blockNum", blockNum)
+			return result, nil
+		}
 		d1 := common.LeftPadBytes(infoTreeIndex.GER.Bytes(), 32)
 		d2 := common.LeftPadBytes(state.GLOBAL_EXIT_ROOT_STORAGE_POS.Bytes(), 32)
 		mapKey := keccak256.Hash(d1, d2)
