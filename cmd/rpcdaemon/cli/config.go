@@ -30,7 +30,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon-lib/kv/kvcfg"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -73,6 +72,7 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/ethconfig/features"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/aura"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
@@ -415,20 +415,6 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			if err != nil {
 				return err
 			}
-			cfg.Sync.KeepExecutionProofs, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
-			if err != nil {
-				return err
-			}
-			if cfg.Sync.KeepExecutionProofs {
-				libstate.EnableHistoricalCommitment()
-			}
-			cfg.Sync.PersistReceiptsCacheV2, err = kvcfg.PersistReceipts.Enabled(tx)
-			if err != nil {
-				return err
-			}
-			if cfg.Sync.PersistReceiptsCacheV2 {
-				libstate.EnableHistoricalRCache()
-			}
 			return nil
 		}); err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
@@ -436,10 +422,13 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if cc == nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, errors.New("chain config not found in db. Need start erigon at least once on this db")
 		}
-
-		// Configure sapshots
-
 		cfg.Snap.ChainName = cc.ChainName
+		// Configure sapshots
+		cfg.Sync, err = features.EnableSyncCfg(rawDB, cfg.Sync)
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
+		}
+
 		// this assumed the rpc deamon never runs with a downloader - if this is
 		// not the case we'll need to adjust the defaults of the --no-downlaoder
 		// flag to the faulse by default
