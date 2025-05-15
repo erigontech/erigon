@@ -23,7 +23,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/version"
 	"math"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -163,6 +165,16 @@ func (h *History) vAccessorFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.vi", h.version.AccessorVI.String(), h.filenameBase, fromStep, toStep))
 }
 
+func (h *History) vFileNameMask(fromStep, toStep uint64) string {
+	return fmt.Sprintf("*-%s.%d-%d.v", h.filenameBase, fromStep, toStep)
+}
+func (h *History) vFilePathMask(fromStep, toStep uint64) string {
+	return filepath.Join(h.dirs.SnapHistory, h.vFileNameMask(fromStep, toStep))
+}
+func (h *History) vAccessorFilePathMask(fromStep, toStep uint64) string {
+	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("*-%s.%d-%d.vi", h.filenameBase, fromStep, toStep))
+}
+
 // openList - main method to open list of files.
 // It's ok if some files was open earlier.
 // If some file already open: noop.
@@ -214,9 +226,9 @@ func (h *History) openDirtyFiles() error {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
 			if item.decompressor == nil {
-				fPath := h.vFilePath(fromStep, toStep)
-				exists, err := dir.FileExist(fPath)
-				if err != nil {
+				fPathMask := h.vFilePathMask(fromStep, toStep)
+				fPath, fileVer, err := version.FindFilesWithVersionsByPattern(fPathMask)
+				if err != nil && !errors.Is(err, os.ErrNotExist) {
 					_, fName := filepath.Split(fPath)
 					h.logger.Debug("[agg] History.openDirtyFiles: FileExist", "f", fName, "err", err)
 					invalidFilesMu.Lock()
@@ -224,7 +236,7 @@ func (h *History) openDirtyFiles() error {
 					invalidFilesMu.Unlock()
 					continue
 				}
-				if !exists {
+				if errors.Is(err, os.ErrNotExist) {
 					_, fName := filepath.Split(fPath)
 					h.logger.Debug("[agg] History.openDirtyFiles: file does not exists", "f", fName)
 					invalidFilesMu.Lock()
@@ -232,6 +244,15 @@ func (h *History) openDirtyFiles() error {
 					invalidFilesMu.Unlock()
 					continue
 				}
+				if fileVer.Cmp(h.version.DataV.Current) != 0 {
+					if !fileVer.Less(h.version.DataV.MinSupported) {
+						h.version.DataV.Current = fileVer
+					} else {
+						panic("Version is too low, try to rm ef snapshots")
+						//return false
+					}
+				}
+
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 					_, fName := filepath.Split(fPath)
 					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
@@ -261,13 +282,21 @@ func (h *History) openDirtyFiles() error {
 			}
 
 			if item.index == nil {
-				fPath := h.vAccessorFilePath(fromStep, toStep)
-				exists, err := dir.FileExist(fPath)
-				if err != nil {
+				fPathMask := h.vAccessorFilePathMask(fromStep, toStep)
+				fPath, fileVer, err := version.FindFilesWithVersionsByPattern(fPathMask)
+				if err != nil && !errors.Is(err, os.ErrNotExist) {
 					_, fName := filepath.Split(fPath)
 					h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
 				}
-				if exists {
+				if !errors.Is(err, os.ErrNotExist) {
+					if fileVer.Cmp(h.version.AccessorVI.Current) != 0 {
+						if !fileVer.Less(h.version.AccessorVI.MinSupported) {
+							h.version.AccessorVI.Current = fileVer
+						} else {
+							panic("Version is too low, try to rm ef snapshots")
+							//return false
+						}
+					}
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
@@ -443,7 +472,6 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 					}
 				}
 			}
-			p.Processed.Add(1)
 
 			select {
 			case <-ctx.Done():
