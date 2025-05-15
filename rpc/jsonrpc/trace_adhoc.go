@@ -575,8 +575,11 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 				setMem = true
 			}
 			if setMem && ot.lastMemLen > 0 {
-				// TODO: error handling
-				cpy, _ := tracers.GetMemoryCopyPadded(memory, int64(ot.lastMemOff), int64(ot.lastMemLen))
+				cpy, err := tracers.GetMemoryCopyPadded(memory, int64(ot.lastMemOff), int64(ot.lastMemLen))
+				if err != nil {
+					log.Warn("GetMemoryCopyPadded failed", "off", ot.lastMemOff, "len", ot.lastMemLen, "err", err)
+					cpy = make([]byte, ot.lastMemLen)
+				}
 				if len(cpy) == 0 {
 					cpy = make([]byte, ot.lastMemLen)
 				}
