@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   sync-with-externalcl:
-    runs-on: [self-hosted, qa, linux, X64]
+    runs-on: [self-hosted, qa, linux, X64, long-running]
     timeout-minutes: 500 # 8+ hours
     strategy:
       matrix:

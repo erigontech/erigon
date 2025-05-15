@@ -21,13 +21,13 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
-
-	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	"github.com/valyala/fastjson"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 )
 
@@ -42,107 +42,109 @@ type CallResult struct {
 	Err         error
 }
 type RequestGenerator struct {
-	reqID  int
-	client *http.Client
+	reqID atomic.Int64
 }
 
 func (g *RequestGenerator) blockNumber() string {
 	const template = `{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":%d}`
-	return fmt.Sprintf(template, g.reqID)
+	return fmt.Sprintf(template, g.reqID.Add(1))
 }
 func (g *RequestGenerator) getBlockByNumber(blockNum uint64, withTxs bool) string {
 	const template = `{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x%x",%t],"id":%d}`
-	return fmt.Sprintf(template, blockNum, withTxs, g.reqID)
+	return fmt.Sprintf(template, blockNum, withTxs, g.reqID.Add(1))
 }
 
 func (g *RequestGenerator) getBlockByHash(hash libcommon.Hash, withTxs bool) string {
 	const template = `{"jsonrpc":"2.0","method":"eth_getBlockByHash","params":["0x%x",%t],"id":%d}`
-	return fmt.Sprintf(template, hash, withTxs, g.reqID)
+	return fmt.Sprintf(template, hash, withTxs, g.reqID.Add(1))
 }
 
 func (g *RequestGenerator) getTransactionByHash(hash string) string {
 	const template = `{"jsonrpc":"2.0","method":"eth_getTransactionByHash","params":["%s"],"id":%d}`
-	return fmt.Sprintf(template, hash, g.reqID)
+	return fmt.Sprintf(template, hash, g.reqID.Add(1))
 }
 
 func (g *RequestGenerator) storageRangeAt(hash libcommon.Hash, i int, to *libcommon.Address, nextKey libcommon.Hash) string {
 	const template = `{"jsonrpc":"2.0","method":"debug_storageRangeAt","params":["0x%x", %d,"0x%x","0x%x",%d],"id":%d}`
-	return fmt.Sprintf(template, hash, i, to, nextKey, 1024, g.reqID)
+	return fmt.Sprintf(template, hash, i, to, nextKey, 1024, g.reqID.Add(1))
 }
 
 func (g *RequestGenerator) traceBlockByHash(hash string) string {
 	const template = `{"jsonrpc":"2.0","method":"debug_traceBlockByHash","params":["%s"],"id":%d}`
-	return fmt.Sprintf(template, hash, g.reqID)
+	return fmt.Sprintf(template, hash, g.reqID.Add(1))
 }
 
 func (g *RequestGenerator) debugTraceBlockByNumber(blockNum uint64) string {
 	const template = `{"jsonrpc":"2.0","method":"debug_traceBlockByNumber","params":[%d],"id":%d}`
-	return fmt.Sprintf(template, blockNum, g.reqID)
+	return fmt.Sprintf(template, blockNum, g.reqID.Add(1))
 }
 
-func (g *RequestGenerator) debugTraceTransaction(hash string) string {
-	const template = `{"jsonrpc":"2.0","method":"debug_traceTransaction","params":["%s"],"id":%d}`
-	return fmt.Sprintf(template, hash, g.reqID)
+func (g *RequestGenerator) debugTraceTransaction(hash string, additionalParams string) string {
+	if additionalParams != "" {
+		additionalParams = ", {" + additionalParams + "}"
+	}
+	const template = `{"jsonrpc":"2.0","method":"debug_traceTransaction","params":["%s"%s],"id":%d}`
+	return fmt.Sprintf(template, hash, additionalParams, g.reqID.Add(1))
 }
 
 func (g *RequestGenerator) getTransactionReceipt(hash string) string {
 	const template = `{"jsonrpc":"2.0","method":"eth_getTransactionReceipt","params":["%s"],"id":%d}`
-	return fmt.Sprintf(template, hash, g.reqID)
+	return fmt.Sprintf(template, hash, g.reqID.Add(1))
 }
 
 func (g *RequestGenerator) getBlockReceipts(bn uint64) string {
 	const template = `{"jsonrpc":"2.0","method":"eth_getBlockReceipts","params":["0x%x"],"id":%d}`
-	return fmt.Sprintf(template, bn, g.reqID)
+	return fmt.Sprintf(template, bn, g.reqID.Load())
 }
 
 func (g *RequestGenerator) getBalance(miner libcommon.Address, bn uint64) string {
 	const template = `{"jsonrpc":"2.0","method":"eth_getBalance","params":["0x%x", "0x%x"],"id":%d}`
-	return fmt.Sprintf(template, miner, bn, g.reqID)
+	return fmt.Sprintf(template, miner, bn, g.reqID.Add(1))
 }
 
 func (g *RequestGenerator) getModifiedAccountsByNumber(prevBn uint64, bn uint64) string {
 	const template = `{"jsonrpc":"2.0","method":"debug_getModifiedAccountsByNumber","params":[%d, %d],"id":%d}`
-	return fmt.Sprintf(template, prevBn, bn, g.reqID)
+	return fmt.Sprintf(template, prevBn, bn, g.reqID.Add(1))
 }
 
 func (g *RequestGenerator) getLogs(prevBn uint64, bn uint64, account libcommon.Address) string {
 	const template = `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x"}],"id":%d}`
-	return fmt.Sprintf(template, prevBn, bn, account, g.reqID)
+	return fmt.Sprintf(template, prevBn, bn, account, g.reqID.Add(1))
 }
 func (g *RequestGenerator) getLogsNoFilters(prevBn uint64, bn uint64) string {
 	const template = `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x"}],"id":%d}`
-	return fmt.Sprintf(template, prevBn, bn, g.reqID)
+	return fmt.Sprintf(template, prevBn, bn, g.reqID.Add(1))
 }
 
 func (g *RequestGenerator) getOverlayLogs(prevBn uint64, bn uint64, account libcommon.Address) string {
 	const template = `{"jsonrpc":"2.0","method":"overlay_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x"},{}],"id":%d}`
-	return fmt.Sprintf(template, prevBn, bn, account, g.reqID)
+	return fmt.Sprintf(template, prevBn, bn, account, g.reqID.Add(1))
 }
 
 func (g *RequestGenerator) getLogs1(prevBn uint64, bn uint64, account libcommon.Address, topic libcommon.Hash) string {
 	const template = `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x", "topics": ["0x%x"]}],"id":%d}`
-	return fmt.Sprintf(template, prevBn, bn, account, topic, g.reqID)
+	return fmt.Sprintf(template, prevBn, bn, account, topic, g.reqID.Add(1))
 }
 
 func (g *RequestGenerator) getOverlayLogs1(prevBn uint64, bn uint64, account libcommon.Address, topic libcommon.Hash) string {
 	const template = `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x", "topics": ["0x%x"]},{}],"id":%d}`
-	return fmt.Sprintf(template, prevBn, bn, account, topic, g.reqID)
+	return fmt.Sprintf(template, prevBn, bn, account, topic, g.reqID.Add(1))
 }
 
 func (g *RequestGenerator) getLogs2(prevBn uint64, bn uint64, account libcommon.Address, topic1, topic2 libcommon.Hash) string {
 	const template = `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x", "topics": ["0x%x", "0x%x"]}],"id":%d}`
-	return fmt.Sprintf(template, prevBn, bn, account, topic1, topic2, g.reqID)
+	return fmt.Sprintf(template, prevBn, bn, account, topic1, topic2, g.reqID.Add(1))
 }
 
 func (g *RequestGenerator) getOverlayLogs2(prevBn uint64, bn uint64, account libcommon.Address, topic1, topic2 libcommon.Hash) string {
 	const template = `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x", "topics": ["0x%x", "0x%x"]},{}],"id":%d}`
-	return fmt.Sprintf(template, prevBn, bn, account, topic1, topic2, g.reqID)
+	return fmt.Sprintf(template, prevBn, bn, account, topic1, topic2, g.reqID.Add(1))
 }
 
 func (g *RequestGenerator) accountRange(bn uint64, page []byte, num int) string { //nolint
 	const template = `{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x%x", "%s", %d, false, false, false], "id":%d}`
 	encodedKey := base64.StdEncoding.EncodeToString(page)
-	return fmt.Sprintf(template, bn, encodedKey, num, g.reqID)
+	return fmt.Sprintf(template, bn, encodedKey, num, g.reqID.Add(1))
 }
 
 func (g *RequestGenerator) getProof(bn uint64, account libcommon.Address, storageList []libcommon.Hash) string {
@@ -151,7 +153,7 @@ func (g *RequestGenerator) getProof(bn uint64, account libcommon.Address, storag
 	for i, location := range storageList {
 		storageStr[i] = fmt.Sprintf(`"x%x"`, location)
 	}
-	return fmt.Sprintf(template, account, strings.Join(storageStr, ","), bn, g.reqID)
+	return fmt.Sprintf(template, account, strings.Join(storageStr, ","), bn, g.reqID.Add(1))
 }
 
 func (g *RequestGenerator) traceCall(from libcommon.Address, to *libcommon.Address, gas *hexutil.Big, gasPrice *hexutil.Big, value *hexutil.Big, data hexutility.Bytes, bn uint64) string {
@@ -172,8 +174,8 @@ func (g *RequestGenerator) traceCall(from libcommon.Address, to *libcommon.Addre
 	if len(data) > 0 {
 		fmt.Fprintf(&sb, `,"data":"%s"`, data)
 	}
-	fmt.Fprintf(&sb, `},["trace", "stateDiff"],"0x%x"], "id":%d}`, bn, g.reqID)
-	//fmt.Fprintf(&sb, `},["trace"],"0x%x"], "id":%d}`, bn, g.reqID)
+	fmt.Fprintf(&sb, `},["trace", "stateDiff"],"0x%x"], "id":%d}`, bn, g.reqID.Add(1))
+	//fmt.Fprintf(&sb, `},["trace"],"0x%x"], "id":%d}`, bn, g.reqID.Add(1))
 	return sb.String()
 }
 
@@ -202,7 +204,7 @@ func (g *RequestGenerator) traceCallMany(from []libcommon.Address, to []*libcomm
 		}
 		fmt.Fprintf(&sb, `},["trace", "stateDiff", "vmTrace"]]`)
 	}
-	fmt.Fprintf(&sb, `],"0x%x"], "id":%d}`, bn, g.reqID)
+	fmt.Fprintf(&sb, `],"0x%x"], "id":%d}`, bn, g.reqID.Add(1))
 	return sb.String()
 }
 
@@ -224,34 +226,34 @@ func (g *RequestGenerator) debugTraceCall(from libcommon.Address, to *libcommon.
 	if len(data) > 0 {
 		fmt.Fprintf(&sb, `,"data":"%s"`, data)
 	}
-	fmt.Fprintf(&sb, `},"0x%x"], "id":%d}`, bn, g.reqID)
+	fmt.Fprintf(&sb, `},"0x%x"], "id":%d}`, bn, g.reqID.Add(1))
 	return sb.String()
 }
 
 func (g *RequestGenerator) traceBlock(bn uint64) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "trace_block", "params": ["0x%x"]`, bn)
-	fmt.Fprintf(&sb, `, "id":%d}`, g.reqID)
+	fmt.Fprintf(&sb, `, "id":%d}`, g.reqID.Add(1))
 	return sb.String()
 }
 
 func (g *RequestGenerator) traceFilterFrom(prevBn uint64, bn uint64, account libcommon.Address) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "trace_filter", "params": [{"fromBlock":"0x%x", "toBlock": "0x%x", "fromAddress": ["0x%x"]}]`, prevBn, bn, account)
-	fmt.Fprintf(&sb, `, "id":%d}`, g.reqID)
+	fmt.Fprintf(&sb, `, "id":%d}`, g.reqID.Add(1))
 	return sb.String()
 }
 
 func (g *RequestGenerator) traceFilterTo(prevBn uint64, bn uint64, account libcommon.Address) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "trace_filter", "params": [{"fromBlock":"0x%x", "toBlock": "0x%x", "toAddress": ["0x%x"]}]`, prevBn, bn, account)
-	fmt.Fprintf(&sb, `, "id":%d}`, g.reqID)
+	fmt.Fprintf(&sb, `, "id":%d}`, g.reqID.Add(1))
 	return sb.String()
 }
 
 func (g *RequestGenerator) traceReplayTransaction(hash string) string {
 	const template = `{"jsonrpc":"2.0","method":"trace_replayTransaction","params":["%s", ["trace", "stateDiff"]],"id":%d}`
-	return fmt.Sprintf(template, hash, g.reqID)
+	return fmt.Sprintf(template, hash, g.reqID.Add(1))
 }
 
 func (g *RequestGenerator) ethCall(from libcommon.Address, to *libcommon.Address, gas *hexutil.Big, gasPrice *hexutil.Big, value *hexutil.Big, data hexutility.Bytes, bn uint64) string {
@@ -272,7 +274,7 @@ func (g *RequestGenerator) ethCall(from libcommon.Address, to *libcommon.Address
 	if value != nil {
 		fmt.Fprintf(&sb, `,"value":"%s"`, value)
 	}
-	fmt.Fprintf(&sb, `},"0x%x"], "id":%d}`, bn, g.reqID)
+	fmt.Fprintf(&sb, `},"0x%x"], "id":%d}`, bn, g.reqID.Add(1))
 	return sb.String()
 }
 
@@ -294,7 +296,7 @@ func (g *RequestGenerator) ethCreateAccessList(from libcommon.Address, to *libco
 	if value != nil {
 		fmt.Fprintf(&sb, `,"value":"%s"`, value)
 	}
-	fmt.Fprintf(&sb, `},"0x%x"], "id":%d}`, bn, g.reqID)
+	fmt.Fprintf(&sb, `},"0x%x"], "id":%d}`, bn, g.reqID.Add(1))
 	return sb.String()
 }
 
@@ -316,7 +318,7 @@ func (g *RequestGenerator) ethCallLatest(from libcommon.Address, to *libcommon.A
 	if value != nil {
 		fmt.Fprintf(&sb, `,"value":"%s"`, value)
 	}
-	fmt.Fprintf(&sb, `},"latest"], "id":%d}`, g.reqID)
+	fmt.Fprintf(&sb, `},"latest"], "id":%d}`, g.reqID.Add(1))
 	return sb.String()
 }
 
@@ -325,27 +327,33 @@ func (g *RequestGenerator) otsGetBlockTransactions(block_number uint64, page_num
 	return fmt.Sprintf(template, block_number, page_number, page_size)
 }
 
+var client = &http.Client{Timeout: 600 * time.Second}
+
 func (g *RequestGenerator) call(target string, method, body string, response interface{}) CallResult {
 	start := time.Now()
-	err := post(g.client, routes[target], body, response)
+	err := post(client, routes[target], body, response)
 	return CallResult{
 		RequestBody: body,
 		Target:      target,
 		Took:        time.Since(start),
-		RequestID:   g.reqID,
+		RequestID:   response.(HasRequestID).GetRequestId(),
 		Method:      method,
 		Err:         err,
 	}
 }
 
+type HasRequestID interface {
+	GetRequestId() int
+}
+
 func (g *RequestGenerator) call2(target string, method, body string) CallResult {
 	start := time.Now()
-	response, val, err := post2(g.client, routes[target], body)
+	response, val, err := post2(client, routes[target], body)
 	return CallResult{
 		RequestBody: body,
 		Target:      target,
 		Took:        time.Since(start),
-		RequestID:   g.reqID,
+		RequestID:   int(g.reqID.Load()),
 		Method:      method,
 		Response:    response,
 		Result:      val,

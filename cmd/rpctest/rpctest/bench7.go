@@ -19,17 +19,12 @@ package rpctest
 import (
 	"errors"
 	"fmt"
-	"net/http"
-	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 func Bench7(erigonURL, gethURL string) error {
 	setRoutes(erigonURL, gethURL)
-	var client = &http.Client{
-		Timeout: time.Second * 600,
-	}
 
 	blockhash := libcommon.HexToHash("0xdd3eb495312b11621669be45a2d50f8a66f2616bc72a610e2cbf1aebf9e4a9aa")
 	reqID := 1

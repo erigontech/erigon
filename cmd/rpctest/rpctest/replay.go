@@ -19,18 +19,13 @@ package rpctest
 import (
 	"bufio"
 	"fmt"
-	"net/http"
 	"os"
-	"time"
 
 	"github.com/valyala/fastjson"
 )
 
 func Replay(erigonURL string, recordFile string) error {
 	setRoutes(erigonURL, "")
-	var client = &http.Client{
-		Timeout: time.Second * 600,
-	}
 	f, err := os.Open(recordFile)
 	if err != nil {
 		fmt.Printf("Cannot open file %s for replay: %v\n", recordFile, err)
@@ -41,9 +36,7 @@ func Replay(erigonURL string, recordFile string) error {
 	var buf [64 * 1024 * 1024]byte // 64 Mb line buffer
 	s.Buffer(buf[:], len(buf))
 	var res CallResult
-	reqGen := &RequestGenerator{
-		client: client,
-	}
+	reqGen := &RequestGenerator{}
 	for s.Scan() {
 		// Request comes firs
 		request := s.Text()

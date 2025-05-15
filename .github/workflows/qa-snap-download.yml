@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   snap-download-test:
-    runs-on: [self-hosted, qa]
+    runs-on: [self-hosted, qa, long-running]
     timeout-minutes: 500
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data

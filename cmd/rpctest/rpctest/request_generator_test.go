@@ -24,10 +24,9 @@ import (
 )
 
 func MockRequestGenerator(reqId int) *RequestGenerator {
-	return &RequestGenerator{
-		reqID:  reqId,
-		client: nil,
-	}
+	r := &RequestGenerator{}
+	r.reqID.Store(int64(reqId))
+	return r
 }
 
 func TestRequestGenerator_blockNumber(t *testing.T) {
@@ -40,8 +39,8 @@ func TestRequestGenerator_blockNumber(t *testing.T) {
 		{3, `{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":3}`},
 	}
 
+	reqGen := MockRequestGenerator(0)
 	for _, testCase := range testCases {
-		reqGen := MockRequestGenerator(testCase.reqId)
 		got := reqGen.blockNumber()
 		require.EqualValues(t, testCase.expected, got)
 	}
@@ -80,8 +79,8 @@ func TestRequestGenerator_getBlockByNumber(t *testing.T) {
 		},
 	}
 
+	reqGen := MockRequestGenerator(0)
 	for _, testCase := range testCases {
-		reqGen := MockRequestGenerator(testCase.reqId)
 		got := reqGen.getBlockByNumber(testCase.blockNum, testCase.withTxs)
 		require.EqualValues(t, testCase.expected, got)
 	}
@@ -122,8 +121,8 @@ func TestRequestGenerator_storageRangeAt(t *testing.T) {
 		},
 	}
 
+	reqGen := MockRequestGenerator(0)
 	for _, testCase := range testCases {
-		reqGen := MockRequestGenerator(testCase.reqId)
 		got := reqGen.storageRangeAt(testCase.hash, testCase.i, &testCase.to, testCase.nextKey)
 		require.EqualValues(t, testCase.expected, got)
 	}
@@ -152,8 +151,8 @@ func TestRequestGenerator_traceBlockByHash(t *testing.T) {
 		},
 	}
 
+	reqGen := MockRequestGenerator(0)
 	for _, testCase := range testCases {
-		reqGen := MockRequestGenerator(testCase.reqId)
 		got := reqGen.traceBlockByHash(testCase.hash)
 		require.EqualValues(t, testCase.expected, got)
 	}
@@ -182,9 +181,9 @@ func TestRequestGenerator_traceTransaction(t *testing.T) {
 		},
 	}
 
+	reqGen := MockRequestGenerator(0)
 	for _, testCase := range testCases {
-		reqGen := MockRequestGenerator(testCase.reqId)
-		got := reqGen.debugTraceTransaction(testCase.hash)
+		got := reqGen.debugTraceTransaction(testCase.hash, "")
 		require.EqualValues(t, testCase.expected, got)
 	}
 }
@@ -212,8 +211,8 @@ func TestRequestGenerator_getTransactionReceipt(t *testing.T) {
 		},
 	}
 
+	reqGen := MockRequestGenerator(0)
 	for _, testCase := range testCases {
-		reqGen := MockRequestGenerator(testCase.reqId)
 		got := reqGen.getTransactionReceipt(testCase.hash)
 		require.EqualValues(t, testCase.expected, got)
 	}
@@ -246,8 +245,8 @@ func TestRequestGenerator_getBalance(t *testing.T) {
 		},
 	}
 
+	reqGen := MockRequestGenerator(0)
 	for _, testCase := range testCases {
-		reqGen := MockRequestGenerator(testCase.reqId)
 		got := reqGen.getBalance(testCase.miner, testCase.blockNum)
 		require.EqualValues(t, testCase.expected, got)
 	}
@@ -280,8 +279,8 @@ func TestRequestGenerator_getModifiedAccountsByNumber(t *testing.T) {
 		},
 	}
 
+	reqGen := MockRequestGenerator(0)
 	for _, testCase := range testCases {
-		reqGen := MockRequestGenerator(testCase.reqId)
 		got := reqGen.getModifiedAccountsByNumber(testCase.prevBlockNum, testCase.blockNum)
 		require.EqualValues(t, testCase.expected, got)
 	}
@@ -318,8 +317,8 @@ func TestRequestGenerator_getLogs(t *testing.T) {
 		},
 	}
 
+	reqGen := MockRequestGenerator(0)
 	for _, testCase := range testCases {
-		reqGen := MockRequestGenerator(testCase.reqId)
 		got := reqGen.getLogs(testCase.prevBlockNum, testCase.blockNum, testCase.account)
 		require.EqualValues(t, testCase.expected, got)
 	}
@@ -360,8 +359,8 @@ func TestRequestGenerator_getLogs1(t *testing.T) {
 		},
 	}
 
+	reqGen := MockRequestGenerator(0)
 	for _, testCase := range testCases {
-		reqGen := MockRequestGenerator(testCase.reqId)
 		got := reqGen.getLogs1(testCase.prevBlockNum, testCase.blockNum, testCase.account, testCase.topic)
 		require.EqualValues(t, testCase.expected, got)
 	}
@@ -406,8 +405,8 @@ func TestRequestGenerator_getLogs2(t *testing.T) {
 		},
 	}
 
+	reqGen := MockRequestGenerator(0)
 	for _, testCase := range testCases {
-		reqGen := MockRequestGenerator(testCase.reqId)
 		got := reqGen.getLogs2(testCase.prevBlockNum, testCase.blockNum, testCase.account, testCase.topic1, testCase.topic2)
 		require.EqualValues(t, testCase.expected, got)
 	}
@@ -444,8 +443,8 @@ func TestRequestGenerator_accountRange(t *testing.T) {
 		},
 	}
 
+	reqGen := MockRequestGenerator(0)
 	for _, testCase := range testCases {
-		reqGen := MockRequestGenerator(testCase.reqId)
 		got := reqGen.accountRange(testCase.blockNum, testCase.page, testCase.num)
 		require.EqualValues(t, testCase.expected, got)
 	}
@@ -481,8 +480,8 @@ func TestRequestGenerator_getProof(t *testing.T) {
 		},
 	}
 
+	reqGen := MockRequestGenerator(0)
 	for _, testCase := range testCases {
-		reqGen := MockRequestGenerator(testCase.reqId)
 		got := reqGen.getProof(testCase.blockNum, testCase.account, testCase.storageList)
 		require.EqualValues(t, testCase.expected, got)
 	}

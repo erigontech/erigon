@@ -50,6 +50,7 @@ import (
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
+	"github.com/erigontech/erigon-lib/kv/kvcfg"
 	kv2 "github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/remotedb"
@@ -400,6 +401,20 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			cc, err = rawdb.ReadChainConfig(tx, genesisHash)
 			if err != nil {
 				return err
+			}
+			cfg.Sync.KeepExecutionProofs, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
+			if err != nil {
+				return err
+			}
+			if cfg.Sync.KeepExecutionProofs {
+				libstate.EnableHistoricalCommitment()
+			}
+			cfg.Sync.PersistReceiptsCacheV2, err = kvcfg.PersistReceipts.Enabled(tx)
+			if err != nil {
+				return err
+			}
+			if cfg.Sync.PersistReceiptsCacheV2 {
+				libstate.EnableHistoricalRCache()
 			}
 			return nil
 		}); err != nil {

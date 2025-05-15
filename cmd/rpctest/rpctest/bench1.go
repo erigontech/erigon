@@ -21,10 +21,8 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
-	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 
@@ -43,20 +41,14 @@ var routes map[string]string
 // fullTest - if false - then call only methods which RPCDaemon currently supports
 func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFrom uint64, blockTo uint64, recordFileName string) error {
 	setRoutes(erigonURL, gethURL)
-	var client = &http.Client{
-		Timeout: time.Second * 600,
-	}
 
 	resultsCh := make(chan CallResult, 1000)
 	defer close(resultsCh)
 	go vegetaWrite(false, []string{"eth_getBlockByNumber", "debug_storageRangeAt"}, resultsCh)
 
 	var res CallResult
-	reqGen := &RequestGenerator{
-		client: client,
-	}
+	reqGen := &RequestGenerator{}
 
-	reqGen.reqID++
 	var blockNumber EthBlockNumber
 	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
 	resultsCh <- res
@@ -71,7 +63,6 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 	prevBn := blockFrom
 	storageCounter := 0
 	for bn := blockFrom; bn <= blockTo; bn++ {
-		reqGen.reqID++
 		var b EthBlockByNumber
 		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b)
 		resultsCh <- res
@@ -115,7 +106,6 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 					smg := make(map[libcommon.Hash]storageEntry)
 					for nextKey != nil {
 						var sr DebugStorageRange
-						reqGen.reqID++
 						res = reqGen.Erigon("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, txn.To, *nextKey), &sr)
 						resultsCh <- res
 						if res.Err != nil {
@@ -172,14 +162,12 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 				continue // TODO: remove me
 			}
 
-			reqGen.reqID++
-
 			var trace EthTxTrace
-			res = reqGen.Erigon("debug_traceTransaction", reqGen.debugTraceTransaction(txn.Hash), &trace)
+			res = reqGen.Erigon("debug_traceTransaction", reqGen.debugTraceTransaction(txn.Hash, ""), &trace)
 			resultsCh <- res
 			if res.Err != nil {
 				fmt.Printf("Could not trace transaction (Erigon) %s: %v\n", txn.Hash, res.Err)
-				print(client, routes[Erigon], reqGen.debugTraceTransaction(txn.Hash))
+				print(client, routes[Erigon], reqGen.debugTraceTransaction(txn.Hash, ""))
 			}
 
 			if trace.Error != nil {
@@ -188,10 +176,10 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 
 			if needCompare {
 				var traceg EthTxTrace
-				res = reqGen.Geth("debug_traceTransaction", reqGen.debugTraceTransaction(txn.Hash), &traceg)
+				res = reqGen.Geth("debug_traceTransaction", reqGen.debugTraceTransaction(txn.Hash, ""), &traceg)
 				resultsCh <- res
 				if res.Err != nil {
-					print(client, routes[Geth], reqGen.debugTraceTransaction(txn.Hash))
+					print(client, routes[Geth], reqGen.debugTraceTransaction(txn.Hash, ""))
 					return fmt.Errorf("Could not trace transaction (geth) %s: %v\n", txn.Hash, res.Err)
 				}
 				if traceg.Error != nil {
@@ -203,7 +191,6 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 					}
 				}
 			}
-			reqGen.reqID++
 
 			var receipt EthReceipt
 			res = reqGen.Erigon("eth_getTransactionReceipt", reqGen.getTransactionReceipt(txn.Hash), &receipt)
@@ -237,7 +224,6 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 		if !fullTest {
 			continue // TODO: remove me
 		}
-		reqGen.reqID++
 
 		var balance EthBalance
 		res = reqGen.Erigon("eth_getBalance", reqGen.getBalance(b.Result.Miner, bn), &balance)
@@ -265,7 +251,7 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 
 		if prevBn < bn && bn%100 == 0 {
 			// Checking modified accounts
-			reqGen.reqID++
+
 			var mag DebugModifiedAccounts
 			res = reqGen.Erigon("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &mag)
 			resultsCh <- res
@@ -287,7 +273,7 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 				accRangeErigon = make(map[libcommon.Address]state.DumpAccount)
 				accRangeGeth = make(map[libcommon.Address]state.DumpAccount)
 				var sr DebugAccountRange
-				reqGen.reqID++
+
 				res = reqGen.Erigon("debug_accountRange", reqGen.accountRange(bn, page, 256), &sr)
 				resultsCh <- res
 

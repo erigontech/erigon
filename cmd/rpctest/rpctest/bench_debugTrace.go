@@ -19,16 +19,11 @@ package rpctest
 import (
 	"bufio"
 	"fmt"
-	"net/http"
 	"os"
-	"time"
 )
 
 func BenchDebugTraceBlockByNumber(erigonUrl, gethUrl string, needCompare bool, blockFrom uint64, blockTo uint64, recordFileName string, errorFileName string) error {
 	setRoutes(erigonUrl, gethUrl)
-	var client = &http.Client{
-		Timeout: time.Second * 600,
-	}
 
 	var rec *bufio.Writer
 	if recordFileName != "" {
@@ -58,14 +53,12 @@ func BenchDebugTraceBlockByNumber(erigonUrl, gethUrl string, needCompare bool, b
 		go vegetaWrite(true, []string{"debug_traceBlockByNumber"}, resultsCh)
 	}
 
-	reqGen := &RequestGenerator{
-		client: client,
-	}
+	reqGen := &RequestGenerator{}
 
 	var nBlocks = 0
 	for bn := blockFrom; bn < blockTo; bn++ {
 		nBlocks++
-		reqGen.reqID++
+
 		request := reqGen.debugTraceBlockByNumber(bn)
 		errCtx := fmt.Sprintf("block %d", bn)
 		if err := requestAndCompare(request, "debug_traceBlockByNumber", errCtx, reqGen, needCompare, rec, errs, resultsCh /* insertOnlyIfSuccess */, false); err != nil {
@@ -79,9 +72,6 @@ func BenchDebugTraceBlockByNumber(erigonUrl, gethUrl string, needCompare bool, b
 
 func BenchDebugTraceBlockByHash(erigonUrl, gethUrl string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) error {
 	setRoutes(erigonUrl, gethUrl)
-	var client = &http.Client{
-		Timeout: time.Second * 600,
-	}
 
 	var rec *bufio.Writer
 	if recordFile != "" {
@@ -111,11 +101,7 @@ func BenchDebugTraceBlockByHash(erigonUrl, gethUrl string, needCompare bool, blo
 		go vegetaWrite(true, []string{"debug_traceBlockByHash"}, resultsCh)
 	}
 
-	reqGen := &RequestGenerator{
-		client: client,
-	}
-
-	reqGen.reqID++
+	reqGen := &RequestGenerator{}
 
 	var res CallResult
 	var nBlocks = 0
@@ -130,7 +116,7 @@ func BenchDebugTraceBlockByHash(erigonUrl, gethUrl string, needCompare bool, blo
 		}
 
 		nBlocks++
-		reqGen.reqID++
+
 		request := reqGen.traceBlockByHash(b.Result.Hash.Hex())
 		errCtx := fmt.Sprintf("block %d, txn %s", bn, b.Result.Hash.Hex())
 		if err := requestAndCompare(request, "debug_traceBlockByHash", errCtx, reqGen, needCompare, rec, errs, resultsCh,
@@ -144,10 +130,12 @@ func BenchDebugTraceBlockByHash(erigonUrl, gethUrl string, needCompare bool, blo
 	return nil
 }
 
-func BenchDebugTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blockFrom uint64, blockTo uint64, recordFileName string, errorFileName string) error {
+func BenchDebugTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blockFrom uint64, blockTo uint64, additionalParams string, recordFileName string, errorFileName string) error {
+	fmt.Println("BenchDebugTraceTransaction: fromBlock:", blockFrom, ", blockTo:", blockTo, ", additionalParams:", additionalParams)
+
 	setRoutes(erigonUrl, gethUrl)
-	var client = &http.Client{
-		Timeout: time.Second * 600,
+	if additionalParams == "" {
+		additionalParams = "\"disableStorage\": true,\"disableMemory\": true,\"disableStack\": true"
 	}
 
 	var rec *bufio.Writer
@@ -178,16 +166,17 @@ func BenchDebugTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blo
 		go vegetaWrite(true, []string{"debug_traceTransaction"}, resultsCh)
 	}
 
-	reqGen := &RequestGenerator{
-		client: client,
-	}
+	reqGen := &RequestGenerator{}
 
 	var res CallResult
 	var nBlocks = 0
 	var nTransactions = 0
 	for bn := blockFrom; bn < blockTo; bn++ {
+		if nBlocks%50 == 0 {
+			fmt.Println("Processing Block: ", bn)
+		}
 		nBlocks++
-		reqGen.reqID++
+
 		var erigonBlock EthBlockByNumber
 		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &erigonBlock)
 		if res.Err != nil {
@@ -218,12 +207,14 @@ func BenchDebugTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blo
 			}
 		}
 
-		for _, txn := range erigonBlock.Result.Transactions {
-			reqGen.reqID++
+		for idx, txn := range erigonBlock.Result.Transactions {
+			if idx%30 != 0 {
+				continue
+			}
 			nTransactions++
 
 			var request string
-			request = reqGen.debugTraceTransaction(txn.Hash)
+			request = reqGen.debugTraceTransaction(txn.Hash, additionalParams)
 			errCtx := fmt.Sprintf("bn=%d hash=%s", bn, txn.Hash)
 
 			if err := requestAndCompare(request, "debug_traceTransaction", errCtx, reqGen, needCompare, rec, errs, resultsCh,
@@ -239,9 +230,7 @@ func BenchDebugTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blo
 
 func BenchDebugTraceCall(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) error {
 	setRoutes(erigonURL, gethURL)
-	var client = &http.Client{
-		Timeout: time.Second * 600,
-	}
+
 	var rec *bufio.Writer
 	if recordFile != "" {
 		f, err := os.Create(recordFile)
@@ -270,13 +259,10 @@ func BenchDebugTraceCall(erigonURL, gethURL string, needCompare bool, blockFrom 
 		go vegetaWrite(true, []string{"debug_traceCall"}, resultsCh)
 	}
 
-	reqGen := &RequestGenerator{
-		client: client,
-	}
+	reqGen := &RequestGenerator{}
 
 	var res CallResult
 
-	reqGen.reqID++
 	var blockNumber EthBlockNumber
 	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
 	if res.Err != nil {
@@ -290,7 +276,7 @@ func BenchDebugTraceCall(erigonURL, gethURL string, needCompare bool, blockFrom 
 	var nBlocks = 0
 	var nTransactions = 0
 	for bn := blockFrom; bn <= blockTo; bn++ {
-		reqGen.reqID++
+
 		var b EthBlockByNumber
 		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b)
 		if res.Err != nil {
@@ -318,7 +304,6 @@ func BenchDebugTraceCall(erigonURL, gethURL string, needCompare bool, blockFrom 
 
 		for _, txn := range b.Result.Transactions {
 			nTransactions++
-			reqGen.reqID++
 
 			request := reqGen.debugTraceCall(txn.From, txn.To, &txn.Gas, &txn.GasPrice, &txn.Value, txn.Input, bn-1)
 			errCtx := fmt.Sprintf("block %d txn %s", bn, txn.Hash)

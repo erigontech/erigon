@@ -85,7 +85,7 @@ var readDomains = &cobra.Command{
 	Use:       "read_domains",
 	Short:     `Run block execution and commitment with Domains.`,
 	Example:   "go run ./cmd/integration read_domains --datadir=... --verbosity=3",
-	ValidArgs: []string{"account", "storage", "code", "commitment"},
+	ValidArgs: []string{kv.AccountsDomain.String(), kv.StorageDomain.String(), kv.CodeDomain.String(), kv.CommitmentDomain.String()},
 	Args:      cobra.ArbitraryArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
@@ -101,7 +101,7 @@ var readDomains = &cobra.Command{
 		for i := 0; i < len(args); i++ {
 			if i == 0 {
 				switch s := strings.ToLower(args[i]); s {
-				case "account", "storage", "code", "commitment":
+				case kv.AccountsDomain.String(), kv.StorageDomain.String(), kv.CodeDomain.String(), kv.CommitmentDomain.String():
 					readFromDomain = s
 				default:
 					logger.Error("invalid domain to read from", "arg", args[i])
@@ -162,9 +162,9 @@ var purifyDomains = &cobra.Command{
 		defer purifyDB.Close()
 		var purificationDomains []string
 		if purifyOnlyCommitment {
-			purificationDomains = []string{"commitment"}
+			purificationDomains = []string{kv.CommitmentDomain.String()}
 		} else {
-			purificationDomains = []string{"account", "storage" /*"code",*/, "commitment", "receipt"}
+			purificationDomains = []string{kv.AccountsDomain.String(), kv.StorageDomain.String() /*"code",*/, kv.CommitmentDomain.String()}
 		}
 		//purificationDomains := []string{"commitment"}
 		for _, domain := range purificationDomains {
@@ -188,16 +188,18 @@ var purifyDomains = &cobra.Command{
 func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domain string) error {
 	var tbl string
 	switch domain {
-	case "account":
+	case kv.AccountsDomain.String():
 		tbl = kv.MaxTxNum
-	case "storage":
+	case kv.StorageDomain.String():
 		tbl = kv.HeaderNumber
-	case "code":
+	case kv.CodeDomain.String():
 		tbl = kv.HeaderCanonical
-	case "commitment":
+	case kv.CommitmentDomain.String():
 		tbl = kv.HeaderTD
-	case "receipt":
+	case kv.ReceiptDomain.String():
 		tbl = kv.BadHeaderNumber
+	case kv.RCacheDomain.String():
+		tbl = kv.BlockBody
 	default:
 		return fmt.Errorf("invalid domain %s", domain)
 	}
@@ -301,15 +303,15 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 
 	var tbl string
 	switch domainName {
-	case "account":
+	case kv.AccountsDomain.String():
 		tbl = kv.MaxTxNum
-	case "storage":
+	case kv.StorageDomain.String():
 		tbl = kv.HeaderNumber
-	case "code":
+	case kv.CodeDomain.String():
 		tbl = kv.HeaderCanonical
-	case "commitment":
+	case kv.CommitmentDomain.String():
 		tbl = kv.HeaderTD
-	case "receipt":
+	case kv.ReceiptDomain.String():
 		tbl = kv.BadHeaderNumber
 	case kv.RCacheDomain.String():
 		tbl = kv.BlockBody
@@ -478,7 +480,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	logger.Info("seek commitment", "block", domains.BlockNum(), "tx", latestTx)
 
 	switch readDomain {
-	case "account":
+	case kv.AccountsDomain.String():
 		for _, addr := range addrs {
 
 			acc, err := r.ReadAccountData(libcommon.BytesToAddress(addr))
@@ -488,7 +490,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 			}
 			fmt.Printf("%x: nonce=%d balance=%d code=%x root=%x\n", addr, acc.Nonce, acc.Balance.Uint64(), acc.CodeHash, acc.Root)
 		}
-	case "storage":
+	case kv.StorageDomain.String():
 		for _, addr := range addrs {
 			a, s := libcommon.BytesToAddress(addr[:length.Addr]), libcommon.BytesToHash(addr[length.Addr:])
 			st, err := r.ReadAccountStorage(a, 0, &s)
@@ -498,7 +500,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 			}
 			fmt.Printf("%s %s -> %x\n", a.String(), s.String(), st)
 		}
-	case "code":
+	case kv.CodeDomain.String():
 		for _, addr := range addrs {
 			code, err := r.ReadAccountCode(libcommon.BytesToAddress(addr), 0)
 			if err != nil {
