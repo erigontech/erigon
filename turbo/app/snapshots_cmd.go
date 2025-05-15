@@ -39,6 +39,7 @@ import (
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-db/rawdb/blockio"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/compress"
@@ -52,6 +53,7 @@ import (
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/kvcfg"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal"
@@ -69,6 +71,7 @@ import (
 	"github.com/erigontech/erigon/diagnostics"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
+	"github.com/erigontech/erigon/eth/ethconfig/features"
 	"github.com/erigontech/erigon/eth/integrity"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/eth/tracers"
@@ -1188,6 +1191,27 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	clean func(),
 	err error,
 ) {
+	if err := chainDB.View(context.Background(), func(tx kv.Tx) (err error) {
+		features.EnableSyncCfg(tx)
+		KeepExecutionProofs, _, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
+		if err != nil {
+			return err
+		}
+		if KeepExecutionProofs {
+			libstate.EnableHistoricalCommitment()
+		}
+		PersistReceiptsCacheV2, err := kvcfg.PersistReceipts.Enabled(tx)
+		if err != nil {
+			return err
+		}
+		if PersistReceiptsCacheV2 {
+			libstate.EnableHistoricalRCache()
+		}
+		return nil
+	}); err != nil {
+		panic(err)
+	}
+
 	chainConfig := fromdb.ChainConfig(chainDB)
 
 	blockSnaps = freezeblocks.NewRoSnapshots(cfg, dirs.Snap, 0, logger)

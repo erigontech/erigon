@@ -30,7 +30,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon-lib/kv/kvcfg"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -73,6 +72,7 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/ethconfig/features"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/aura"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
@@ -415,19 +415,9 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			if err != nil {
 				return err
 			}
-			cfg.Sync.KeepExecutionProofs, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
+			cfg.Sync, err = features.EnableSyncCfg(tx, cfg.Sync)
 			if err != nil {
 				return err
-			}
-			if cfg.Sync.KeepExecutionProofs {
-				libstate.EnableHistoricalCommitment()
-			}
-			cfg.Sync.PersistReceiptsCacheV2, err = kvcfg.PersistReceipts.Enabled(tx)
-			if err != nil {
-				return err
-			}
-			if cfg.Sync.PersistReceiptsCacheV2 {
-				libstate.EnableHistoricalRCache()
 			}
 			return nil
 		}); err != nil {
