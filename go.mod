@@ -12,7 +12,7 @@ replace (
 
 require (
 	github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116
-	github.com/erigontech/mdbx-go v0.38.6-0.20250205222432-e4dd01978d7f
+	github.com/erigontech/mdbx-go v0.38.10
 	github.com/erigontech/secp256k1 v1.1.0
 	github.com/erigontech/silkworm-go v0.18.0
 )
