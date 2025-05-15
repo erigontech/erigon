@@ -662,7 +662,7 @@ func (d *Decompressor) MakeGetter() *Getter {
 		posDict:     d.posDict,
 		data:        d.data[d.wordsStart:],
 		patternDict: d.dict,
-		fName:       d.FileName1,
+		fName:       d.FileName(),
 	}
 }
 
