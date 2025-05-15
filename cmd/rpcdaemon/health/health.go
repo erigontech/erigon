@@ -27,13 +27,13 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/rpc"
 )
 
 type requestBody struct {
-	MinPeerCount *uint            `json:"min_peer_count"`
-	BlockNumber  *rpc.BlockNumber `json:"known_block"`
+	MinPeerCount *uint              `json:"min_peer_count"`
+	BlockNumber  *types.BlockNumber `json:"known_block"`
 }
 
 const (
@@ -98,7 +98,7 @@ func processFromHeaders(headers []string, ethAPI EthAPI, netAPI NetAPI, w http.R
 				errCheckBlock = err
 				break
 			}
-			errCheckBlock = checkBlockNumber(rpc.BlockNumber(block), ethAPI)
+			errCheckBlock = checkBlockNumber(types.BlockNumber(block), ethAPI)
 		}
 		if after, ok := strings.CutPrefix(lHeader, maxSecondsBehind); ok {
 			seconds, err := strconv.Atoi(after)

@@ -22,20 +22,18 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/erigontech/erigon-db/snapshotsync"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/state"
-
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
-
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 )
 
 type Sync struct {
-	cfg             ethconfig.Sync
+	cfg             snapshotsync.Sync
 	unwindPoint     *uint64 // used to run stages
 	prevUnwindPoint *uint64 // used to get value from outside of staged sync after cycle (for example to notify RPCDaemon)
 	unwindReason    UnwindReason
@@ -63,7 +61,7 @@ func (s *Sync) Len() int {
 	return len(s.stages)
 }
 
-func (s *Sync) Cfg() ethconfig.Sync { return s.cfg }
+func (s *Sync) Cfg() snapshotsync.Sync { return s.cfg }
 
 func (s *Sync) UnwindPoint() uint64 {
 	return *s.unwindPoint
@@ -208,7 +206,7 @@ func (s *Sync) SetCurrentStage(id stages.SyncStage) error {
 	return fmt.Errorf("stage not found with id: %v", id)
 }
 
-func New(cfg ethconfig.Sync, stagesList []*Stage, unwindOrder UnwindOrder, pruneOrder PruneOrder, logger log.Logger, mode stages.Mode) *Sync {
+func New(cfg snapshotsync.Sync, stagesList []*Stage, unwindOrder UnwindOrder, pruneOrder PruneOrder, logger log.Logger, mode stages.Mode) *Sync {
 	unwindStages := make([]*Stage, len(stagesList))
 	for i, stageIndex := range unwindOrder {
 		for _, s := range stagesList {

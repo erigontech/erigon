@@ -26,7 +26,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/p2p"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
 
@@ -39,7 +38,7 @@ func (n NopRequestGenerator) PingErigonRpc() PingResult {
 	return PingResult{}
 }
 
-func (n NopRequestGenerator) GetBalance(address common.Address, blockRef rpc.BlockReference) (*big.Int, error) {
+func (n NopRequestGenerator) GetBalance(address common.Address, blockRef types.BlockReference) (*big.Int, error) {
 	return nil, ErrNotImplemented
 }
 
@@ -47,7 +46,7 @@ func (n NopRequestGenerator) AdminNodeInfo() (p2p.NodeInfo, error) {
 	return p2p.NodeInfo{}, ErrNotImplemented
 }
 
-func (n NopRequestGenerator) GetBlockByNumber(ctx context.Context, blockNum rpc.BlockNumber, withTxs bool) (*Block, error) {
+func (n NopRequestGenerator) GetBlockByNumber(ctx context.Context, blockNum types.BlockNumber, withTxs bool) (*Block, error) {
 	return nil, ErrNotImplemented
 }
 
@@ -63,7 +62,7 @@ func (n NopRequestGenerator) TraceTransaction(hash common.Hash) ([]TransactionTr
 	return nil, ErrNotImplemented
 }
 
-func (n NopRequestGenerator) GetTransactionCount(address common.Address, blockRef rpc.BlockReference) (*big.Int, error) {
+func (n NopRequestGenerator) GetTransactionCount(address common.Address, blockRef types.BlockReference) (*big.Int, error) {
 	return nil, ErrNotImplemented
 }
 
@@ -91,11 +90,11 @@ func (n NopRequestGenerator) TxpoolContent() (int, int, int, error) {
 	return 0, 0, 0, ErrNotImplemented
 }
 
-func (n NopRequestGenerator) Call(args ethapi.CallArgs, blockRef rpc.BlockReference, overrides *ethapi.StateOverrides) ([]byte, error) {
+func (n NopRequestGenerator) Call(args ethapi.CallArgs, blockRef types.BlockReference, overrides *ethapi.StateOverrides) ([]byte, error) {
 	return nil, ErrNotImplemented
 }
 
-func (n NopRequestGenerator) TraceCall(blockRef rpc.BlockReference, args ethapi.CallArgs, traceOpts ...TraceOpt) (*TraceCallResult, error) {
+func (n NopRequestGenerator) TraceCall(blockRef types.BlockReference, args ethapi.CallArgs, traceOpts ...TraceOpt) (*TraceCallResult, error) {
 	return nil, ErrNotImplemented
 }
 
@@ -103,7 +102,7 @@ func (n NopRequestGenerator) DebugAccountAt(blockHash common.Hash, txIndex uint6
 	return nil, ErrNotImplemented
 }
 
-func (n NopRequestGenerator) GetCode(address common.Address, blockRef rpc.BlockReference) (hexutil.Bytes, error) {
+func (n NopRequestGenerator) GetCode(address common.Address, blockRef types.BlockReference) (hexutil.Bytes, error) {
 	return nil, ErrNotImplemented
 }
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
+	"github.com/erigontech/erigon-db/snapshotsync"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
@@ -147,7 +148,7 @@ func InitMiner(ctx context.Context, logger log.Logger, dirName string, genesis *
 		ImportMode:      ethconfig.Defaults.ImportMode,
 		RPCGasCap:       50000000,
 		RPCTxFeeCap:     1, // 1 ether
-		Snapshot:        ethconfig.BlocksFreezing{NoDownloader: true, ChainName: genesis.Config.ChainName},
+		Snapshot:        snapshotsync.BlocksFreezing{NoDownloader: true, ChainName: genesis.Config.ChainName},
 		StateStream:     true,
 		PolygonSync:     true,
 	}

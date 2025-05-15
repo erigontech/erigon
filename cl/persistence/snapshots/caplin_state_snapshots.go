@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package snapshotsync
+package snapshots
 
 import (
 	"context"
@@ -30,23 +30,22 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/recsplit"
-
+	dbsnapshotsync "github.com/erigontech/erigon-db/snapshotsync"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-
 	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 
 func BeaconSimpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
@@ -138,8 +137,8 @@ type CaplinStateSnapshots struct {
 	// BeaconBlocks *segments
 	// BlobSidecars *segments
 	// Segments      map[string]*segments
-	dirtyLock sync.RWMutex                            // guards `dirty` field
-	dirty     map[string]*btree.BTreeG[*DirtySegment] // ordered map `type.Enum()` -> DirtySegments
+	dirtyLock sync.RWMutex                                         // guards `dirty` field
+	dirty     map[string]*btree.BTreeG[*snapshotsync.DirtySegment] // ordered map `type.Enum()` -> DirtySegments
 
 	visibleLock sync.RWMutex // guards  `visible` field
 	visible     sync.Map
@@ -151,7 +150,7 @@ type CaplinStateSnapshots struct {
 	tmpdir      string
 	segmentsMax atomic.Uint64 // all types of .seg files are available - up to this number
 	idxMax      atomic.Uint64 // all types of .idx files are available - up to this number
-	cfg         ethconfig.BlocksFreezing
+	cfg         dbsnapshotsync.BlocksFreezing
 	logger      log.Logger
 	// allows for pruning segments - this is the min availible segment
 	segmentsMin atomic.Uint64
@@ -171,7 +170,7 @@ type SnapshotTypes struct {
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
-func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.BeaconChainConfig, dirs datadir.Dirs, snapshotTypes SnapshotTypes, logger log.Logger) *CaplinStateSnapshots {
+func NewCaplinStateSnapshots(cfg dbsnapshotsync.BlocksFreezing, beaconCfg *clparams.BeaconChainConfig, dirs datadir.Dirs, snapshotTypes SnapshotTypes, logger log.Logger) *CaplinStateSnapshots {
 	if cfg.ChainName == "" {
 		log.Debug("[dbg] NewCaplinSnapshots created with empty ChainName", "stack", dbg.Stack())
 	}
@@ -188,14 +187,14 @@ func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.B
 	// 		DirtySegments: btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false}),
 	// 	}
 	// }
-	dirty := make(map[string]*btree.BTreeG[*DirtySegment])
+	dirty := make(map[string]*btree.BTreeG[*snapshotsync.DirtySegment])
 	for k := range snapshotTypes.KeyValueGetters {
-		dirty[k] = btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
+		dirty[k] = btree.NewBTreeGOptions[*snapshotsync.DirtySegment](snapshotsync.DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
 	}
 
 	c := &CaplinStateSnapshots{snapshotTypes: snapshotTypes, dir: dirs.SnapCaplin, tmpdir: dirs.Tmp, cfg: cfg, dirty: dirty, logger: logger, beaconCfg: beaconCfg}
 	for k := range snapshotTypes.KeyValueGetters {
-		c.visible.Store(k, make(VisibleSegments, 0))
+		c.visible.Store(k, make(snapshotsync.VisibleSegments, 0))
 	}
 	c.recalcVisibleFiles()
 	return c
@@ -219,7 +218,7 @@ func (s *CaplinStateSnapshots) LS() {
 	for _, roTx := range view.roTxs {
 		if roTx != nil {
 			for _, seg := range roTx.Segments {
-				s.logger.Info("[agg] ", "f", seg.src.filePath, "words", seg.src.Decompressor.Count())
+				s.logger.Info("[agg] ", "f", seg.Src().CaplinFilePath, "words", seg.Src().Decompressor.Count())
 			}
 		}
 	}
@@ -236,10 +235,10 @@ func (s *CaplinStateSnapshots) SegFileNames(from, to uint64) []string {
 			continue
 		}
 		for _, seg := range roTx.Segments {
-			if seg.from >= to || seg.to <= from {
+			if seg.From() >= to || seg.To() <= from {
 				continue
 			}
-			res = append(res, seg.src.filePath)
+			res = append(res, seg.Src().CaplinFilePath)
 		}
 
 	}
@@ -260,7 +259,7 @@ func (s *CaplinStateSnapshots) Close() {
 	s.closeWhatNotInList(nil)
 }
 
-func (s *CaplinStateSnapshots) openSegIfNeed(sn *DirtySegment, filepath string) error {
+func (s *CaplinStateSnapshots) openSegIfNeed(sn *snapshotsync.DirtySegment, filepath string) error {
 	if sn.Decompressor != nil {
 		return nil
 	}
@@ -288,19 +287,19 @@ Loop:
 
 		var processed bool = true
 		var exists bool
-		var sn *DirtySegment
+		var sn *snapshotsync.DirtySegment
 
 		dirtySegments, ok := s.dirty[f.CaplinTypeString]
 		if !ok {
 			continue
 		}
 		filePath := filepath.Join(s.dir, fName)
-		dirtySegments.Walk(func(segments []*DirtySegment) bool {
+		dirtySegments.Walk(func(segments []*snapshotsync.DirtySegment) bool {
 			for _, sn2 := range segments {
 				if sn2.Decompressor == nil { // it's ok if some segment was not able to open
 					continue
 				}
-				if filePath == sn2.filePath {
+				if filePath == sn2.CaplinFilePath {
 					sn = sn2
 					exists = true
 					break
@@ -309,13 +308,8 @@ Loop:
 			return true
 		})
 		if !exists {
-			sn = &DirtySegment{
-				// segType: f.Type, Unsupported
-				version:  f.Version,
-				Range:    Range{f.From, f.To},
-				frozen:   true,
-				filePath: filePath,
-			}
+			sn = snapshotsync.NewDirtySegment(nil /* segType */, f.Version, f.From, f.To, true /* frozen */)
+			sn.CaplinFilePath = filePath
 		}
 		if err := s.openSegIfNeed(sn, filePath); err != nil {
 			if errors.Is(err, os.ErrNotExist) {
@@ -359,7 +353,7 @@ Loop:
 	return nil
 }
 
-func openIdxForCaplinStateIfNeeded(s *DirtySegment, filePath string, optimistic bool) error {
+func openIdxForCaplinStateIfNeeded(s *snapshotsync.DirtySegment, filePath string, optimistic bool) error {
 	if s.Decompressor == nil {
 		return nil
 	}
@@ -377,34 +371,21 @@ func openIdxForCaplinStateIfNeeded(s *DirtySegment, filePath string, optimistic 
 	return nil
 }
 
-func openIdxIfNeedForCaplinState(s *DirtySegment, filePath string) (err error) {
-	s.indexes = make([]*recsplit.Index, 1)
-	if s.indexes[0] != nil {
-		return nil
-	}
-
+func openIdxIfNeedForCaplinState(s *snapshotsync.DirtySegment, filePath string) (err error) {
 	filePath = strings.ReplaceAll(filePath, ".seg", ".idx")
 	index, err := recsplit.OpenIndex(filePath)
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, filePath)
 	}
-
-	s.indexes[0] = index
-
+	s.SetIndexes([]*recsplit.Index{index})
 	return nil
 }
 
-func isIndexed(s *DirtySegment) bool {
+func isIndexed(s *snapshotsync.DirtySegment) bool {
 	if s.Decompressor == nil {
 		return false
 	}
-
-	for _, idx := range s.indexes {
-		if idx == nil {
-			return false
-		}
-	}
-	return true
+	return !s.ContainsNilIndex()
 }
 
 func (s *CaplinStateSnapshots) recalcVisibleFiles() {
@@ -416,25 +397,21 @@ func (s *CaplinStateSnapshots) recalcVisibleFiles() {
 	s.visibleLock.Lock()
 	defer s.visibleLock.Unlock()
 
-	getNewVisibleSegments := func(dirtySegments *btree.BTreeG[*DirtySegment]) []*VisibleSegment {
-		newVisibleSegments := make([]*VisibleSegment, 0, dirtySegments.Len())
-		dirtySegments.Walk(func(segments []*DirtySegment) bool {
+	getNewVisibleSegments := func(dirtySegments *btree.BTreeG[*snapshotsync.DirtySegment]) []*snapshotsync.VisibleSegment {
+		newVisibleSegments := make([]*snapshotsync.VisibleSegment, 0, dirtySegments.Len())
+		dirtySegments.Walk(func(segments []*snapshotsync.DirtySegment) bool {
 			for _, sn := range segments {
-				if sn.canDelete.Load() {
+				if sn.CanDelete() {
 					continue
 				}
 				if !isIndexed(sn) {
 					continue
 				}
-				for len(newVisibleSegments) > 0 && newVisibleSegments[len(newVisibleSegments)-1].src.isSubSetOf(sn) {
-					newVisibleSegments[len(newVisibleSegments)-1].src = nil
+				for len(newVisibleSegments) > 0 && newVisibleSegments[len(newVisibleSegments)-1].Src().IsSubSetOf(sn) {
+					newVisibleSegments[len(newVisibleSegments)-1].SetSrc(nil)
 					newVisibleSegments = newVisibleSegments[:len(newVisibleSegments)-1]
 				}
-				newVisibleSegments = append(newVisibleSegments, &VisibleSegment{
-					Range:   sn.Range,
-					segType: sn.segType,
-					src:     sn,
-				})
+				newVisibleSegments = append(newVisibleSegments, snapshotsync.NewVisibleSegment(sn.Range, sn.Type(), sn))
 			}
 			return true
 		})
@@ -464,13 +441,13 @@ func (s *CaplinStateSnapshots) idxAvailability() uint64 {
 	// 	}
 	// }
 	s.visible.Range(func(_, v interface{}) bool {
-		segs := v.([]*VisibleSegment)
+		segs := v.([]*snapshotsync.VisibleSegment)
 		if len(segs) == 0 {
 			min = 0
 			return false
 		}
-		if segs[len(segs)-1].to < min {
-			min = segs[len(segs)-1].to
+		if segs[len(segs)-1].To() < min {
+			min = segs[len(segs)-1].To()
 		}
 		return true
 	})
@@ -510,8 +487,8 @@ func (s *CaplinStateSnapshots) closeWhatNotInList(l []string) {
 	}
 
 	for _, dirtySegments := range s.dirty {
-		toClose := make([]*DirtySegment, 0)
-		dirtySegments.Walk(func(segments []*DirtySegment) bool {
+		toClose := make([]*snapshotsync.DirtySegment, 0)
+		dirtySegments.Walk(func(segments []*snapshotsync.DirtySegment) bool {
 			for _, sn := range segments {
 				if sn.Decompressor == nil {
 					continue
@@ -525,7 +502,7 @@ func (s *CaplinStateSnapshots) closeWhatNotInList(l []string) {
 			return true
 		})
 		for _, sn := range toClose {
-			sn.close()
+			sn.CloseAll()
 			dirtySegments.Delete(sn)
 		}
 	}
@@ -533,7 +510,7 @@ func (s *CaplinStateSnapshots) closeWhatNotInList(l []string) {
 
 type CaplinStateView struct {
 	s      *CaplinStateSnapshots
-	roTxs  map[string]*RoTx
+	roTxs  map[string]*snapshotsync.RoTx
 	closed bool
 }
 
@@ -544,7 +521,7 @@ func (s *CaplinStateSnapshots) View() *CaplinStateView {
 	s.visibleSegmentsLock.RLock()
 	defer s.visibleSegmentsLock.RUnlock()
 
-	v := &CaplinStateView{s: s, roTxs: make(map[string]*RoTx)}
+	v := &CaplinStateView{s: s, roTxs: make(map[string]*snapshotsync.RoTx)}
 	// BeginRo increments refcount - which is contended
 	s.dirtySegmentsLock.RLock()
 	defer s.dirtySegmentsLock.RUnlock()
@@ -553,7 +530,7 @@ func (s *CaplinStateSnapshots) View() *CaplinStateView {
 	// 	v.roTxs[k] = segments.BeginRo()
 	// }
 	s.visible.Range(func(k, val interface{}) bool {
-		v.roTxs[k.(string)] = VisibleSegments(val.([]*VisibleSegment)).BeginRo()
+		v.roTxs[k.(string)] = snapshotsync.VisibleSegments(val.([]*snapshotsync.VisibleSegment)).BeginRo()
 		return true
 	})
 	return v
@@ -573,7 +550,7 @@ func (v *CaplinStateView) Close() {
 	v.closed = true
 }
 
-func (v *CaplinStateView) VisibleSegments(tbl string) []*VisibleSegment {
+func (v *CaplinStateView) VisibleSegments(tbl string) []*snapshotsync.VisibleSegment {
 	// if v.s == nil || v.s.visible[tbl] == nil {
 	// 	return nil
 	// }
@@ -582,14 +559,14 @@ func (v *CaplinStateView) VisibleSegments(tbl string) []*VisibleSegment {
 		return nil
 	}
 	if val, ok := v.s.visible.Load(tbl); ok {
-		return val.([]*VisibleSegment)
+		return val.([]*snapshotsync.VisibleSegment)
 	}
 	return nil
 }
 
-func (v *CaplinStateView) VisibleSegment(slot uint64, tbl string) (*VisibleSegment, bool) {
+func (v *CaplinStateView) VisibleSegment(slot uint64, tbl string) (*snapshotsync.VisibleSegment, bool) {
 	for _, seg := range v.VisibleSegments(tbl) {
-		if !(slot >= seg.from && slot < seg.to) {
+		if !(slot >= seg.From() && slot < seg.To()) {
 			continue
 		}
 		return seg, true
@@ -703,7 +680,7 @@ func (s *CaplinStateSnapshots) BuildMissingIndices(ctx context.Context, logger l
 	// }
 
 	// wait for Downloader service to download all expected snapshots
-	segments, _, err := SegmentsCaplin(s.dir, 0)
+	segments, _, err := snapshotsync.SegmentsCaplin(s.dir, 0)
 	if err != nil {
 		return err
 	}

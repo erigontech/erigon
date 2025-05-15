@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-db/rawdb/rawdbhelpers"
+	"github.com/erigontech/erigon-db/snapshotsync"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -41,7 +42,6 @@ import (
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3"
@@ -80,7 +80,7 @@ type ExecuteBlockCfg struct {
 
 	dirs      datadir.Dirs
 	historyV3 bool
-	syncCfg   ethconfig.Sync
+	syncCfg   snapshotsync.Sync
 	genesis   *types.Genesis
 
 	silkworm        *silkworm.Silkworm
@@ -104,7 +104,7 @@ func StageExecuteBlocksCfg(
 	blockReader services.FullBlockReader,
 	hd headerDownloader,
 	genesis *types.Genesis,
-	syncCfg ethconfig.Sync,
+	syncCfg snapshotsync.Sync,
 	silkworm *silkworm.Silkworm,
 ) ExecuteBlockCfg {
 	if dirs.SnapDomain == "" {

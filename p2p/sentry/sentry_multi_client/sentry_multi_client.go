@@ -34,6 +34,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 
+	"github.com/erigontech/erigon-db/snapshotsync"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/direct"
@@ -44,7 +45,6 @@ import (
 	libsentry "github.com/erigontech/erigon-lib/p2p/sentry"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"
@@ -167,7 +167,7 @@ func NewMultiClient(
 	chainConfig *chain.Config,
 	engine consensus.Engine,
 	sentries []proto_sentry.SentryClient,
-	syncCfg ethconfig.Sync,
+	syncCfg snapshotsync.Sync,
 	blockReader services.FullBlockReader,
 	blockBufferSize int,
 	statusDataProvider *sentry.StatusDataProvider,

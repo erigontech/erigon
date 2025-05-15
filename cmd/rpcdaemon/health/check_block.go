@@ -21,10 +21,10 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon-lib/types"
 )
 
-func checkBlockNumber(blockNumber rpc.BlockNumber, api EthAPI) error {
+func checkBlockNumber(blockNumber types.BlockNumber, api EthAPI) error {
 	if api == nil {
 		return errors.New("no connection to the Erigon server or `eth` namespace isn't enabled")
 	}

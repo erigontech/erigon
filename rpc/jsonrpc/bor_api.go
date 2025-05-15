@@ -23,24 +23,24 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/valset"
-	"github.com/erigontech/erigon/rpc"
 )
 
 // BorAPI Bor specific routines
 type BorAPI interface {
 	// Bor snapshot related (see ./bor_snapshot.go)
-	GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error)
-	GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (*common.Address, error)
+	GetSnapshot(number *types.BlockNumber) (*Snapshot, error)
+	GetAuthor(blockNrOrHash *types.BlockNumberOrHash) (*common.Address, error)
 	GetSnapshotAtHash(hash common.Hash) (*Snapshot, error)
-	GetSigners(number *rpc.BlockNumber) ([]common.Address, error)
+	GetSigners(number *types.BlockNumber) ([]common.Address, error)
 	GetSignersAtHash(hash common.Hash) ([]common.Address, error)
 	GetCurrentProposer() (common.Address, error)
 	GetCurrentValidators() ([]*valset.Validator, error)
-	GetSnapshotProposer(blockNrOrHash *rpc.BlockNumberOrHash) (common.Address, error)
-	GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOrHash) (BlockSigners, error)
+	GetSnapshotProposer(blockNrOrHash *types.BlockNumberOrHash) (common.Address, error)
+	GetSnapshotProposerSequence(blockNrOrHash *types.BlockNumberOrHash) (BlockSigners, error)
 	GetRootHash(start uint64, end uint64) (string, error)
 }
 

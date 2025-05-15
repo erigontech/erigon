@@ -31,11 +31,11 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli/v2"
 
+	"github.com/erigontech/erigon-db/snapshotsync"
 	"github.com/erigontech/erigon-lib/chain/networkid"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/params"
@@ -67,6 +67,7 @@ import (
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -663,15 +664,15 @@ var (
 	}
 
 	SnapKeepBlocksFlag = cli.BoolFlag{
-		Name:  ethconfig.FlagSnapKeepBlocks,
+		Name:  snapshotsync.FlagSnapKeepBlocks,
 		Usage: "Keep ancient blocks in db (useful for debug)",
 	}
 	SnapStopFlag = cli.BoolFlag{
-		Name:  ethconfig.FlagSnapStop,
+		Name:  snapshotsync.FlagSnapStop,
 		Usage: "Workaround to stop producing new snapshots, if you meet some snapshots-related critical bug. It will stop move historical data from DB to new immutable snapshots. DB will grow and may slightly slow-down - and removing this flag in future will not fix this effect (db size will not greatly reduce).",
 	}
 	SnapStateStopFlag = cli.BoolFlag{
-		Name:  ethconfig.FlagSnapStateStop,
+		Name:  snapshotsync.FlagSnapStateStop,
 		Usage: "Workaround to stop producing new state files, if you meet some state-related critical bug. It will stop aggregate DB history in a state files. DB will grow and may slightly slow-down - and removing this flag in future will not fix this effect (db size will not greatly reduce).",
 	}
 	SnapSkipStateSnapshotDownloadFlag = cli.BoolFlag{

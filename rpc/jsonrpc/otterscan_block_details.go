@@ -24,10 +24,9 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/rpc"
 )
 
-func (api *OtterscanAPIImpl) GetBlockDetails(ctx context.Context, number rpc.BlockNumber) (map[string]interface{}, error) {
+func (api *OtterscanAPIImpl) GetBlockDetails(ctx context.Context, number types.BlockNumber) (map[string]interface{}, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -67,12 +66,12 @@ func (api *OtterscanAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash com
 	if b == nil {
 		return nil, nil
 	}
-	number := rpc.BlockNumber(b.Number().Int64())
+	number := types.BlockNumber(b.Number().Int64())
 
 	return api.getBlockDetailsImpl(ctx, tx, b, number, b.Body().SendersFromTxs())
 }
 
-func (api *OtterscanAPIImpl) getBlockDetailsImpl(ctx context.Context, tx kv.TemporalTx, b *types.Block, number rpc.BlockNumber, senders []common.Address) (map[string]interface{}, error) {
+func (api *OtterscanAPIImpl) getBlockDetailsImpl(ctx context.Context, tx kv.TemporalTx, b *types.Block, number types.BlockNumber, senders []common.Address) (map[string]interface{}, error) {
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err

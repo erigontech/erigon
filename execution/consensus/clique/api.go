@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
@@ -44,7 +43,7 @@ type API struct {
 }
 
 // GetSnapshot retrieves the state snapshot at a given block.
-func (api *API) GetSnapshot(ctx context.Context, number *rpc.BlockNumber) (*Snapshot, error) {
+func (api *API) GetSnapshot(ctx context.Context, number *types.BlockNumber) (*Snapshot, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -54,7 +53,7 @@ func (api *API) GetSnapshot(ctx context.Context, number *rpc.BlockNumber) (*Snap
 
 	// Retrieve the requested block number (or current if none requested)
 	var header *types.Header
-	if number == nil || *number == rpc.LatestBlockNumber {
+	if number == nil || *number == types.LatestBlockNumber {
 		header = chain.CurrentHeader()
 	} else {
 		header = chain.GetHeaderByNumber(uint64(number.Int64()))
@@ -95,7 +94,7 @@ func (api *API) GetSnapshotAtHash(ctx context.Context, hash common.Hash) (*Snaps
 }
 
 // GetSigners retrieves the list of authorized signers at the specified block.
-func (api *API) GetSigners(ctx context.Context, number *rpc.BlockNumber) ([]common.Address, error) {
+func (api *API) GetSigners(ctx context.Context, number *types.BlockNumber) ([]common.Address, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -105,7 +104,7 @@ func (api *API) GetSigners(ctx context.Context, number *rpc.BlockNumber) ([]comm
 
 	// Retrieve the requested block number (or current if none requested)
 	var header *types.Header
-	if number == nil || *number == rpc.LatestBlockNumber {
+	if number == nil || *number == types.LatestBlockNumber {
 		header = chain.CurrentHeader()
 	} else {
 		header = chain.GetHeaderByNumber(uint64(number.Int64()))

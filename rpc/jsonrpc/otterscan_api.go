@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/eth/ethutils"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/turbo/transactions"
@@ -57,10 +56,10 @@ type OtterscanAPI interface {
 	GetInternalOperations(ctx context.Context, hash common.Hash) ([]*InternalOperation, error)
 	SearchTransactionsBefore(ctx context.Context, addr common.Address, blockNum uint64, pageSize uint16) (*TransactionsWithReceipts, error)
 	SearchTransactionsAfter(ctx context.Context, addr common.Address, blockNum uint64, pageSize uint16) (*TransactionsWithReceipts, error)
-	GetBlockDetails(ctx context.Context, number rpc.BlockNumber) (map[string]interface{}, error)
+	GetBlockDetails(ctx context.Context, number types.BlockNumber) (map[string]interface{}, error)
 	GetBlockDetailsByHash(ctx context.Context, hash common.Hash) (map[string]interface{}, error)
-	GetBlockTransactions(ctx context.Context, number rpc.BlockNumber, pageNumber uint8, pageSize uint8) (map[string]interface{}, error)
-	HasCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (bool, error)
+	GetBlockTransactions(ctx context.Context, number types.BlockNumber, pageNumber uint8, pageSize uint8) (map[string]interface{}, error)
+	HasCode(ctx context.Context, address common.Address, blockNrOrHash types.BlockNumberOrHash) (bool, error)
 	TraceTransaction(ctx context.Context, hash common.Hash) ([]*TraceEntry, error)
 	GetTransactionError(ctx context.Context, hash common.Hash) (hexutil.Bytes, error)
 	GetTransactionBySenderAndNonce(ctx context.Context, addr common.Address, nonce uint64) (*common.Hash, error)
@@ -281,7 +280,7 @@ func (api *OtterscanAPIImpl) traceBlocks(ctx context.Context, addr common.Addres
 	return results[:totalBlocksTraced], hasMore, nil
 }
 
-func delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (map[string]interface{}, error) {
+func delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number types.BlockNumber, inclTx bool) (map[string]interface{}, error) {
 	additionalFields := make(map[string]interface{})
 	response, err := ethapi.RPCMarshalBlock(b, inclTx, inclTx, additionalFields)
 	if !inclTx {
@@ -289,7 +288,7 @@ func delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, 
 	}
 	response["transactionCount"] = b.Transactions().Len()
 
-	if err == nil && number == rpc.PendingBlockNumber {
+	if err == nil && number == types.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields
 		for _, field := range []string{"hash", "nonce", "miner"} {
 			response[field] = nil
@@ -363,12 +362,12 @@ func delegateBlockFees(ctx context.Context, tx kv.Tx, block *types.Block, sender
 	return totalFees, nil
 }
 
-func (api *OtterscanAPIImpl) getBlockWithSenders(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Block, []common.Address, error) {
-	if number == rpc.PendingBlockNumber {
+func (api *OtterscanAPIImpl) getBlockWithSenders(ctx context.Context, number types.BlockNumber, tx kv.Tx) (*types.Block, []common.Address, error) {
+	if number == types.PendingBlockNumber {
 		return api.pendingBlock(), nil, nil
 	}
 
-	n, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
+	n, hash, _, err := rpchelper.GetBlockNumber(ctx, types.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -383,7 +382,7 @@ func (api *OtterscanAPIImpl) getBlockWithSenders(ctx context.Context, number rpc
 	return block, block.Body().SendersFromTxs(), nil
 }
 
-func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rpc.BlockNumber, pageNumber uint8, pageSize uint8) (map[string]interface{}, error) {
+func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number types.BlockNumber, pageNumber uint8, pageSize uint8) (map[string]interface{}, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err

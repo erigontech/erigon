@@ -26,11 +26,12 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 
+	"github.com/erigontech/erigon-db/estimate"
+	"github.com/erigontech/erigon-db/snapshotsync"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -38,11 +39,9 @@ import (
 	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
@@ -73,7 +72,7 @@ var LightClientGPO = gaspricecfg.Config{
 
 // Defaults contains default settings for use on the Ethereum main net.
 var Defaults = Config{
-	Sync: Sync{
+	Sync: snapshotsync.Sync{
 		ExecWorkerCount:            estimate.BlocksExecution.WorkersHalf(), //only half of CPU, other half will spend for snapshots build/merge/prune
 		BodyCacheLimit:             256 * 1024 * 1024,
 		BodyDownloadTimeoutSeconds: 2,
@@ -101,7 +100,7 @@ var Defaults = Config{
 	RPCTxFeeCap: 1, // 1 ether
 
 	ImportMode: false,
-	Snapshot: BlocksFreezing{
+	Snapshot: snapshotsync.BlocksFreezing{
 		KeepBlocks: false,
 		ProduceE2:  true,
 		ProduceE3:  true,
@@ -134,41 +133,9 @@ func init() {
 
 //go:generate gencodec -dir . -type Config -formats toml -out gen_config.go
 
-type BlocksFreezing struct {
-	KeepBlocks        bool // produce new snapshots of blocks but don't remove blocks from DB
-	ProduceE2         bool // produce new block files
-	ProduceE3         bool // produce new state files
-	NoDownloader      bool // possible to use snapshots without calling Downloader
-	Verify            bool // verify snapshots on startup
-	DisableDownloadE3 bool // disable download state snapshots
-	DownloaderAddr    string
-	ChainName         string
-}
-
-func (s BlocksFreezing) String() string {
-	var out []string
-	if s.KeepBlocks {
-		out = append(out, "--"+FlagSnapKeepBlocks+"=true")
-	}
-	if !s.ProduceE2 {
-		out = append(out, "--"+FlagSnapStop+"=true")
-	}
-	return strings.Join(out, " ")
-}
-
-var (
-	FlagSnapKeepBlocks = "snap.keepblocks"
-	FlagSnapStop       = "snap.stop"
-	FlagSnapStateStop  = "snap.state.stop"
-)
-
-func NewSnapCfg(keepBlocks, produceE2, produceE3 bool, chainName string) BlocksFreezing {
-	return BlocksFreezing{KeepBlocks: keepBlocks, ProduceE2: produceE2, ProduceE3: produceE3, ChainName: chainName}
-}
-
 // Config contains configuration options for ETH protocol.
 type Config struct {
-	Sync
+	snapshotsync.Sync
 
 	// The genesis block, which is inserted if the database is empty.
 	// If nil, the Ethereum main net block is used.
@@ -188,7 +155,7 @@ type Config struct {
 
 	BadBlockHash common.Hash // hash of the block marked as bad
 
-	Snapshot     BlocksFreezing
+	Snapshot     snapshotsync.BlocksFreezing
 	Downloader   *downloadercfg.Cfg
 	CaplinConfig clparams.CaplinConfig
 
@@ -265,26 +232,4 @@ type Config struct {
 
 	// Account Abstraction
 	AllowAA bool
-}
-
-type Sync struct {
-	// LoopThrottle sets a minimum time between staged loop iterations
-	LoopThrottle     time.Duration
-	ExecWorkerCount  int
-	ReconWorkerCount int
-
-	BodyCacheLimit             datasize.ByteSize
-	BodyDownloadTimeoutSeconds int // TODO: change to duration
-	BreakAfterStage            string
-	LoopBlockLimit             uint
-	ParallelStateFlushing      bool
-
-	UploadLocation   string
-	UploadFrom       rpc.BlockNumber
-	FrozenBlockLimit uint64
-
-	ChaosMonkey              bool
-	AlwaysGenerateChangesets bool
-	KeepExecutionProofs      bool
-	PersistReceiptsCacheV2   bool
 }

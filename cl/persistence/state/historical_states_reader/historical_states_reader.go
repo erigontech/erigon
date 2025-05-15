@@ -25,6 +25,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -33,12 +35,11 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
+	"github.com/erigontech/erigon/cl/persistence/snapshots"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
-	"github.com/erigontech/erigon/turbo/snapshotsync"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/klauspost/compress/zstd"
 )
 
 var buffersPool = sync.Pool{
@@ -49,7 +50,7 @@ type HistoricalStatesReader struct {
 	cfg            *clparams.BeaconChainConfig
 	validatorTable *state_accessors.StaticValidatorTable // We can save 80% of the I/O by caching the validator table
 	blockReader    freezeblocks.BeaconSnapshotReader
-	stateSn        *snapshotsync.CaplinStateSnapshots
+	stateSn        *snapshots.CaplinStateSnapshots
 	genesisState   *state.CachingBeaconState
 	syncedData     synced_data.SyncedData
 
@@ -60,7 +61,7 @@ func NewHistoricalStatesReader(
 	cfg *clparams.BeaconChainConfig,
 	blockReader freezeblocks.BeaconSnapshotReader,
 	validatorTable *state_accessors.StaticValidatorTable,
-	genesisState *state.CachingBeaconState, stateSn *snapshotsync.CaplinStateSnapshots,
+	genesisState *state.CachingBeaconState, stateSn *snapshots.CaplinStateSnapshots,
 	syncedData synced_data.SyncedData) *HistoricalStatesReader {
 	shuffledIndiciesCache := lru.NewWithTTL[uint64, []uint64]("shuffledIndiciesCacheReader", 64, 2*time.Minute)
 

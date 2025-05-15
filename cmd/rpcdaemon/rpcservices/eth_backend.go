@@ -30,6 +30,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-db/rawdb"
+	dbsnapshotsync "github.com/erigontech/erigon-db/snapshotsync"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/gointerfaces"
@@ -38,7 +39,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/privateapi"
@@ -125,7 +125,7 @@ func (back *RemoteBackend) FrozenFiles() (list []string) { return back.blockRead
 func (back *RemoteBackend) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, err error) {
 	return back.blockReader.CanonicalBodyForStorage(ctx, tx, blockNum)
 }
-func (back *RemoteBackend) FreezingCfg() ethconfig.BlocksFreezing {
+func (back *RemoteBackend) FreezingCfg() dbsnapshotsync.BlocksFreezing {
 	return back.blockReader.FreezingCfg()
 }
 func (back *RemoteBackend) EnsureVersionCompatibility() bool {

@@ -33,9 +33,8 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/turbo/testlog"
-
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon/p2p/discover/v5wire"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"

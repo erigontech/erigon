@@ -39,7 +39,10 @@ import (
 	"github.com/anacrolix/torrent"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon-db/estimate"
 	"github.com/erigontech/erigon-db/rawdb"
+	dbsnapshotsync "github.com/erigontech/erigon-db/snapshotsync"
+	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
@@ -60,12 +63,8 @@ import (
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/state/stats"
 	"github.com/erigontech/erigon-lib/types"
-	coresnaptype "github.com/erigontech/erigon/core/snaptype"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/silkworm"
@@ -97,13 +96,13 @@ type SnapshotsCfg struct {
 	caplinState      bool
 	silkworm         *silkworm.Silkworm
 	snapshotUploader *snapshotUploader
-	syncConfig       ethconfig.Sync
+	syncConfig       dbsnapshotsync.Sync
 	prune            prune.Mode
 }
 
 func StageSnapshotsCfg(db kv.TemporalRwDB,
 	chainConfig chain.Config,
-	syncConfig ethconfig.Sync,
+	syncConfig dbsnapshotsync.Sync,
 	dirs datadir.Dirs,
 	blockRetire services.BlockRetire,
 	snapshotDownloader protodownloader.DownloaderClient,
@@ -229,7 +228,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 		u.init(ctx, logger)
 
-		if cfg.syncConfig.UploadFrom != rpc.EarliestBlockNumber {
+		if cfg.syncConfig.UploadFrom != types.EarliestBlockNumber {
 			u.downloadLatestSnapshots(ctx, cfg.syncConfig.UploadFrom)
 		}
 
@@ -1002,7 +1001,7 @@ func (u *snapshotUploader) updateRemotes(remoteFiles []fs.DirEntry) {
 	}
 }
 
-func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context, blockNumber rpc.BlockNumber) error {
+func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context, blockNumber types.BlockNumber) error {
 
 	entries, err := u.downloadManifest(ctx)
 

@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/execution/abi/bind"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/requests"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	shuttercontracts "github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
@@ -69,7 +68,7 @@ func (t Transactor) createSimpleTransfer(
 ) (types.Transaction, error) {
 	amountU256, _ := uint256.FromBig(amount)
 	fromAddr := crypto.PubkeyToAddress(from.PublicKey)
-	txnCount, err := t.rpcApiClient.GetTransactionCount(fromAddr, rpc.PendingBlock)
+	txnCount, err := t.rpcApiClient.GetTransactionCount(fromAddr, types.PendingBlock)
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +141,7 @@ func (et EncryptedTransactor) SubmitEncryptedTransfer(
 		return EncryptedSubmission{}, err
 	}
 
-	block, err := et.rpcApiClient.GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
+	block, err := et.rpcApiClient.GetBlockByNumber(ctx, types.LatestBlockNumber, false)
 	if err != nil {
 		return EncryptedSubmission{}, err
 	}

@@ -32,9 +32,12 @@ import (
 	"github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon-db/estimate"
+	dbsnapshotsync "github.com/erigontech/erigon-db/snapshotsync"
+	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
-	common2 "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -43,9 +46,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-	coresnaptype "github.com/erigontech/erigon/core/snaptype"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 )
 
 type SortedRange interface {
@@ -258,7 +258,7 @@ type DirtySegment struct {
 	canDelete atomic.Bool
 
 	// only caplin state
-	filePath string
+	CaplinFilePath string
 }
 
 func NewDirtySegment(segType snaptype.Type, version snaptype.Version, from uint64, to uint64, frozen bool) *DirtySegment {
@@ -276,8 +276,20 @@ type VisibleSegment struct {
 	src     *DirtySegment
 }
 
+func NewVisibleSegment(rng Range, segType snaptype.Type, src *DirtySegment) *VisibleSegment {
+	return &VisibleSegment{
+		Range:   rng,
+		segType: segType,
+		src:     src,
+	}
+}
+
 func (s *VisibleSegment) Src() *DirtySegment {
 	return s.src
+}
+
+func (s *VisibleSegment) SetSrc(src *DirtySegment) {
+	s.src = src
 }
 
 func (s *VisibleSegment) IsIndexed() bool {
@@ -335,18 +347,24 @@ func (s *DirtySegment) Index(index ...snaptype.Index) *recsplit.Index {
 	return s.indexes[index[0].Offset]
 }
 
+func (s *DirtySegment) SetIndexes(indexes []*recsplit.Index) {
+	s.indexes = indexes
+}
+
 func (s *DirtySegment) IsIndexed() bool {
 	if len(s.indexes) < len(s.Type().Indexes()) {
 		return false
 	}
+	return !s.ContainsNilIndex()
+}
 
+func (s *DirtySegment) ContainsNilIndex() bool {
 	for _, i := range s.indexes {
 		if i == nil {
-			return false
+			return true
 		}
 	}
-
-	return true
+	return false
 }
 
 func (s *DirtySegment) FileName() string {
@@ -359,7 +377,7 @@ func (s *DirtySegment) FileInfo(dir string) snaptype.FileInfo {
 
 func (s *DirtySegment) GetRange() (from, to uint64) { return s.from, s.to }
 func (s *DirtySegment) GetType() snaptype.Type      { return s.segType }
-func (s *DirtySegment) isSubSetOf(j *DirtySegment) bool {
+func (s *DirtySegment) IsSubSetOf(j *DirtySegment) bool {
 	return (j.from <= s.from && s.to <= j.to) && (j.from != s.from || s.to != j.to)
 }
 
@@ -389,7 +407,7 @@ func (s *DirtySegment) closeIdx() {
 	s.indexes = nil
 }
 
-func (s *DirtySegment) close() {
+func (s *DirtySegment) CloseAll() {
 	if s != nil {
 		s.closeIdx()
 		s.closeSeg()
@@ -454,6 +472,10 @@ func (s *DirtySegment) openIdx(dir string) (err error) {
 	return nil
 }
 
+func (s *DirtySegment) CanDelete() bool {
+	return s.canDelete.Load()
+}
+
 type VisibleSegments []*VisibleSegment
 
 func (s VisibleSegments) BeginRo() *RoTx {
@@ -484,7 +506,7 @@ func (s *RoTx) Close() {
 
 		refCnt := src.refcount.Add(-1)
 
-		if refCnt == 0 && src.canDelete.Load() {
+		if refCnt == 0 && src.CanDelete() {
 			src.closeAndRemoveFiles()
 		}
 	}
@@ -529,7 +551,7 @@ type RoSnapshots struct {
 	dir         string
 	segmentsMax atomic.Uint64 // all types of .seg files are available - up to this number
 	idxMax      atomic.Uint64 // all types of .idx files are available - up to this number
-	cfg         ethconfig.BlocksFreezing
+	cfg         dbsnapshotsync.BlocksFreezing
 	logger      log.Logger
 
 	// allows for pruning segments - this is the min availible segment
@@ -544,11 +566,11 @@ type RoSnapshots struct {
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
-func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, segmentsMin uint64, alignMin bool, logger log.Logger) *RoSnapshots {
+func NewRoSnapshots(cfg dbsnapshotsync.BlocksFreezing, snapDir string, types []snaptype.Type, segmentsMin uint64, alignMin bool, logger log.Logger) *RoSnapshots {
 	return newRoSnapshots(cfg, snapDir, types, segmentsMin, alignMin, logger)
 }
 
-func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, segmentsMin uint64, alignMin bool, logger log.Logger) *RoSnapshots {
+func newRoSnapshots(cfg dbsnapshotsync.BlocksFreezing, snapDir string, types []snaptype.Type, segmentsMin uint64, alignMin bool, logger log.Logger) *RoSnapshots {
 	if cfg.ChainName == "" {
 		log.Debug("[dbg] newRoSnapshots created with empty ChainName", "stack", dbg.Stack())
 	}
@@ -576,14 +598,14 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	return s
 }
 
-func (s *RoSnapshots) Cfg() ethconfig.BlocksFreezing { return s.cfg }
-func (s *RoSnapshots) Dir() string                   { return s.dir }
-func (s *RoSnapshots) DownloadReady() bool           { return s.downloadReady.Load() }
-func (s *RoSnapshots) SegmentsReady() bool           { return s.segmentsReady.Load() }
-func (s *RoSnapshots) IndicesMax() uint64            { return s.idxMax.Load() }
-func (s *RoSnapshots) SegmentsMax() uint64           { return s.segmentsMax.Load() }
-func (s *RoSnapshots) SegmentsMin() uint64           { return s.segmentsMin.Load() }
-func (s *RoSnapshots) SetSegmentsMin(min uint64)     { s.segmentsMin.Store(min) }
+func (s *RoSnapshots) Cfg() dbsnapshotsync.BlocksFreezing { return s.cfg }
+func (s *RoSnapshots) Dir() string                        { return s.dir }
+func (s *RoSnapshots) DownloadReady() bool                { return s.downloadReady.Load() }
+func (s *RoSnapshots) SegmentsReady() bool                { return s.segmentsReady.Load() }
+func (s *RoSnapshots) IndicesMax() uint64                 { return s.idxMax.Load() }
+func (s *RoSnapshots) SegmentsMax() uint64                { return s.segmentsMax.Load() }
+func (s *RoSnapshots) SegmentsMin() uint64                { return s.segmentsMin.Load() }
+func (s *RoSnapshots) SetSegmentsMin(min uint64)          { s.segmentsMin.Store(min) }
 func (s *RoSnapshots) BlocksAvailable() uint64 {
 	if s == nil {
 		return 0
@@ -650,8 +672,8 @@ func (s *RoSnapshots) LogStat(label string) {
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	s.logger.Info(fmt.Sprintf("[snapshots:%s] Stat", label),
-		"blocks", common2.PrettyCounter(s.SegmentsMax()+1), "indices", common2.PrettyCounter(s.IndicesMax()+1),
-		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+		"blocks", common.PrettyCounter(s.SegmentsMax()+1), "indices", common.PrettyCounter(s.IndicesMax()+1),
+		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 }
 
 func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapcfg.Cfg) error {
@@ -775,7 +797,7 @@ func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) []*Visibl
 	newVisibleSegments := make([]*VisibleSegment, 0, dirtySegments.Len())
 	dirtySegments.Walk(func(segments []*DirtySegment) bool {
 		for _, sn := range segments {
-			if sn.canDelete.Load() {
+			if sn.CanDelete() {
 				continue
 			}
 			if !sn.IsIndexed() {
@@ -783,7 +805,7 @@ func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) []*Visibl
 			}
 
 			//protect from overlaps
-			for len(newVisibleSegments) > 0 && newVisibleSegments[len(newVisibleSegments)-1].src.isSubSetOf(sn) {
+			for len(newVisibleSegments) > 0 && newVisibleSegments[len(newVisibleSegments)-1].src.IsSubSetOf(sn) {
 				newVisibleSegments[len(newVisibleSegments)-1].src = nil
 				newVisibleSegments = newVisibleSegments[:len(newVisibleSegments)-1]
 			}
@@ -1237,7 +1259,7 @@ func (s *RoSnapshots) closeWhatNotInList(l []string) {
 	for segtype, delSegments := range toClose {
 		dirtyFiles := s.dirty[segtype]
 		for _, delSeg := range delSegments {
-			delSeg.close()
+			delSeg.CloseAll()
 			dirtyFiles.Delete(delSeg)
 		}
 	}
@@ -1395,7 +1417,7 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 				var m runtime.MemStats
 				dbg.ReadMemStats(&m)
 				sendDiagnostics(startIndexingTime, ps.DiagnosticsData(), m.Alloc, m.Sys)
-				logger.Info(fmt.Sprintf("[%s] Indexing", logPrefix), "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+				logger.Info(fmt.Sprintf("[%s] Indexing", logPrefix), "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 			case <-finish:
 				return
 			case <-ctx.Done():

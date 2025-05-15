@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/eth/filters"
 	"github.com/erigontech/erigon/execution/exec3"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -95,7 +94,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 		if crit.FromBlock != nil {
 			if crit.FromBlock.Sign() >= 0 {
 				begin = crit.FromBlock.Uint64()
-			} else if !crit.FromBlock.IsInt64() || crit.FromBlock.Int64() != int64(rpc.LatestBlockNumber) {
+			} else if !crit.FromBlock.IsInt64() || crit.FromBlock.Int64() != int64(types.LatestBlockNumber) {
 				return nil, fmt.Errorf("negative value for FromBlock: %v", crit.FromBlock)
 			}
 		}
@@ -103,7 +102,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 		if crit.ToBlock != nil {
 			if crit.ToBlock.Sign() >= 0 {
 				end = crit.ToBlock.Uint64()
-			} else if !crit.ToBlock.IsInt64() || crit.ToBlock.Int64() != int64(rpc.LatestBlockNumber) {
+			} else if !crit.ToBlock.IsInt64() || crit.ToBlock.Int64() != int64(types.LatestBlockNumber) {
 				return nil, fmt.Errorf("negative value for ToBlock: %v", crit.ToBlock)
 			}
 		}
@@ -167,7 +166,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		if crit.FromBlock != nil {
 			if crit.FromBlock.Sign() >= 0 {
 				begin = crit.FromBlock.Uint64()
-			} else if !crit.FromBlock.IsInt64() || crit.FromBlock.Int64() != int64(rpc.LatestBlockNumber) {
+			} else if !crit.FromBlock.IsInt64() || crit.FromBlock.Int64() != int64(types.LatestBlockNumber) {
 				return nil, fmt.Errorf("negative value for FromBlock: %v", crit.FromBlock)
 			}
 		}
@@ -175,7 +174,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		if crit.ToBlock != nil {
 			if crit.ToBlock.Sign() >= 0 {
 				end = crit.ToBlock.Uint64()
-			} else if !crit.ToBlock.IsInt64() || crit.ToBlock.Int64() != int64(rpc.LatestBlockNumber) {
+			} else if !crit.ToBlock.IsInt64() || crit.ToBlock.Int64() != int64(types.LatestBlockNumber) {
 				return nil, fmt.Errorf("negative value for ToBlock: %v", crit.ToBlock)
 			}
 		}
@@ -347,7 +346,7 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 		}
 	}
 
-	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithHash(cannonicalBlockHash, true), tx, api._blockReader, api.filters)
+	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, types.BlockNumberOrHashWithHash(cannonicalBlockHash, true), tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -393,7 +392,7 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 }
 
 // GetLogsByNumber implements erigon_getLogsByHash. Returns all the logs that appear in a block given the block's hash.
-// func (api *ErigonImpl) GetLogsByNumber(ctx context.Context, number rpc.BlockNumber) ([][]*types.Log, error) {
+// func (api *ErigonImpl) GetLogsByNumber(ctx context.Context, number types.BlockNumber) ([][]*types.Log, error) {
 // 	tx, err := api.db.Begin(ctx, false)
 // 	if err != nil {
 // 		return nil, err

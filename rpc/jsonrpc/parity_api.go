@@ -26,7 +26,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -36,7 +36,7 @@ var ErrWrongTag = fmt.Errorf("listStorageKeys wrong block tag or number: must be
 
 // ParityAPI the interface for the parity_ RPC commands
 type ParityAPI interface {
-	ListStorageKeys(ctx context.Context, account common.Address, quantity int, offset *hexutil.Bytes, blockNumber rpc.BlockNumberOrHash) ([]hexutil.Bytes, error)
+	ListStorageKeys(ctx context.Context, account common.Address, quantity int, offset *hexutil.Bytes, blockNumber types.BlockNumberOrHash) ([]hexutil.Bytes, error)
 }
 
 // ParityAPIImpl data structure to store things needed for parity_ commands
@@ -54,7 +54,7 @@ func NewParityAPIImpl(base *BaseAPI, db kv.TemporalRoDB) *ParityAPIImpl {
 }
 
 // ListStorageKeys implements parity_listStorageKeys. Returns all storage keys of the given address
-func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Address, quantity int, offset *hexutil.Bytes, blockNumberOrTag rpc.BlockNumberOrHash) ([]hexutil.Bytes, error) {
+func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Address, quantity int, offset *hexutil.Bytes, blockNumberOrTag types.BlockNumberOrHash) ([]hexutil.Bytes, error) {
 	if err := api.checkBlockNumber(blockNumberOrTag); err != nil {
 		return nil, err
 	}
@@ -98,9 +98,9 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 	return keys, nil
 }
 
-func (api *ParityAPIImpl) checkBlockNumber(blockNumber rpc.BlockNumberOrHash) error {
+func (api *ParityAPIImpl) checkBlockNumber(blockNumber types.BlockNumberOrHash) error {
 	num, isNum := blockNumber.Number()
-	if isNum && rpc.LatestBlockNumber == num {
+	if isNum && types.LatestBlockNumber == num {
 		return nil
 	}
 	return ErrWrongTag

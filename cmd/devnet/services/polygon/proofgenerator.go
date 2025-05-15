@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/requests"
 )
@@ -200,7 +199,7 @@ func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash co
 
 	g.Go(func() error {
 		var err error
-		block, err = node.GetBlockByNumber(gctx, rpc.AsBlockNumber(txBlockNum), true)
+		block, err = node.GetBlockByNumber(gctx, types.AsBlockNumber(txBlockNum), true)
 		return err
 	})
 

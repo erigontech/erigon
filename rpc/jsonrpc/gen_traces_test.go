@@ -27,10 +27,10 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 
 	// Force-load native and js packages, to trigger registration
@@ -50,7 +50,7 @@ func TestGeneratedDebugApi(t *testing.T) {
 	var buf bytes.Buffer
 	stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
 	callTracer := "callTracer"
-	err := api.TraceBlockByNumber(context.Background(), rpc.BlockNumber(1), &tracersConfig.TraceConfig{Tracer: &callTracer}, stream)
+	err := api.TraceBlockByNumber(context.Background(), types.BlockNumber(1), &tracersConfig.TraceConfig{Tracer: &callTracer}, stream)
 	if err != nil {
 		t.Errorf("debug_traceBlock %d: %v", 0, err)
 	}
@@ -134,7 +134,7 @@ func TestGeneratedTraceApi(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil)
 	api := NewTraceAPI(baseApi, m.DB, &httpcfg.HttpCfg{})
-	traces, err := api.Block(context.Background(), rpc.BlockNumber(1), new(bool), nil)
+	traces, err := api.Block(context.Background(), types.BlockNumber(1), new(bool), nil)
 	if err != nil {
 		t.Errorf("trace_block %d: %v", 0, err)
 	}

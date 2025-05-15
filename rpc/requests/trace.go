@@ -23,7 +23,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
 
@@ -105,7 +105,7 @@ var TraceOpts = struct {
 	StateDiff: "stateDiff",
 }
 
-func (reqGen *requestGenerator) TraceCall(blockRef rpc.BlockReference, args ethapi.CallArgs, traceOpts ...TraceOpt) (*TraceCallResult, error) {
+func (reqGen *requestGenerator) TraceCall(blockRef types.BlockReference, args ethapi.CallArgs, traceOpts ...TraceOpt) (*TraceCallResult, error) {
 	var b TraceCall
 
 	if args.Data == nil {
@@ -142,7 +142,7 @@ func (reqGen *requestGenerator) TraceCall(blockRef rpc.BlockReference, args etha
 	return &b.Result, nil
 }
 
-func (req *requestGenerator) traceCall(blockRef rpc.BlockReference, callArgs string, traceOpts string) (RPCMethod, string) {
+func (req *requestGenerator) traceCall(blockRef types.BlockReference, callArgs string, traceOpts string) (RPCMethod, string) {
 	const template = `{"jsonrpc":"2.0","method":%q,"params":[%s,%s,"%s"],"id":%d}`
 	return Methods.TraceCall, fmt.Sprintf(template, Methods.TraceCall, callArgs, traceOpts, blockRef.String(), req.reqID)
 }

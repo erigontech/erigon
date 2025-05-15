@@ -19,9 +19,9 @@ package httpcfg
 import (
 	"time"
 
+	"github.com/erigontech/erigon-db/snapshotsync"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -73,8 +73,8 @@ type HttpCfg struct {
 	TraceCompatibility                bool // Bug for bug compatibility for trace_ routines with OpenEthereum
 	TxPoolApiAddr                     string
 	StateCache                        kvcache.CoherentConfig
-	Snap                              ethconfig.BlocksFreezing
-	Sync                              ethconfig.Sync
+	Snap                              snapshotsync.BlocksFreezing
+	Sync                              snapshotsync.Sync
 
 	// GRPC server
 	GRPCServerEnabled      bool

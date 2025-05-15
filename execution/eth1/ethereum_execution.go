@@ -27,6 +27,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-db/snapshotsync"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
@@ -38,7 +39,6 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/consensus"
@@ -117,7 +117,7 @@ type EthereumExecutionModule struct {
 
 	// configuration
 	config  *chain.Config
-	syncCfg ethconfig.Sync
+	syncCfg snapshotsync.Sync
 	// consensus
 	engine consensus.Engine
 
@@ -136,7 +136,7 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.Temp
 	recentLogs *shards.RecentLogs,
 	stateChangeConsumer shards.StateChangeConsumer,
 	logger log.Logger, engine consensus.Engine,
-	syncCfg ethconfig.Sync,
+	syncCfg snapshotsync.Sync,
 	ctx context.Context,
 ) *EthereumExecutionModule {
 	return &EthereumExecutionModule{

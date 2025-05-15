@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/rpc"
 	ethapi2 "github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/turbo/services"
 )
@@ -44,7 +43,7 @@ func DoCall(
 	engine consensus.EngineReader,
 	args ethapi2.CallArgs,
 	tx kv.Tx,
-	blockNrOrHash rpc.BlockNumberOrHash,
+	blockNrOrHash types.BlockNumberOrHash,
 	header *types.Header,
 	overrides *ethapi2.StateOverrides,
 	gasCap uint64,
@@ -55,7 +54,7 @@ func DoCall(
 ) (*evmtypes.ExecutionResult, error) {
 	// todo: Pending state is only known by the miner
 	/*
-		if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
+		if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == types.PendingBlockNumber {
 			block, state, _ := b.eth.miner.Pending()
 			return state, block.Header(), nil
 		}
@@ -207,7 +206,7 @@ func NewReusableCaller(
 	header *types.Header,
 	initialArgs ethapi2.CallArgs,
 	gasCap uint64,
-	blockNrOrHash rpc.BlockNumberOrHash,
+	blockNrOrHash types.BlockNumberOrHash,
 	tx kv.Tx,
 	headerReader services.HeaderReader,
 	chainConfig *chain.Config,

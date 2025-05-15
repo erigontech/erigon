@@ -25,13 +25,11 @@ import (
 	"fmt"
 	"math/big"
 
+	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-
 	"github.com/erigontech/erigon-lib/common/length"
-
-	ethereum "github.com/erigontech/erigon"
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 // FilterCriteria represents a request to create a new filter.
@@ -372,11 +370,11 @@ func (api *PublicFilterAPI) GetLogs(ctx context.Context, crit FilterCriteria) ([
 		filter = NewBlockFilter(api.backend, *crit.BlockHash, crit.Addresses, crit.Topics)
 	} else {
 		// Convert the RPC block numbers into internal representations
-		begin := rpc.LatestBlockNumber.Int64()
+		begin := types.LatestBlockNumber.Int64()
 		if crit.FromBlock != nil {
 			begin = crit.FromBlock.Int64()
 		}
-		end := rpc.LatestBlockNumber.Int64()
+		end := types.LatestBlockNumber.Int64()
 		if crit.ToBlock != nil {
 			end = crit.ToBlock.Int64()
 		}
@@ -427,11 +425,11 @@ func (api *PublicFilterAPI) GetFilterLogs(ctx context.Context, id rpc.ID) ([]*ty
 		filter = NewBlockFilter(api.backend, *f.crit.BlockHash, f.crit.Addresses, f.crit.Topics)
 	} else {
 		// Convert the RPC block numbers into internal representations
-		begin := rpc.LatestBlockNumber.Int64()
+		begin := types.LatestBlockNumber.Int64()
 		if f.crit.FromBlock != nil {
 			begin = f.crit.FromBlock.Int64()
 		}
-		end := rpc.LatestBlockNumber.Int64()
+		end := types.LatestBlockNumber.Int64()
 		if f.crit.ToBlock != nil {
 			end = f.crit.ToBlock.Int64()
 		}
@@ -484,11 +482,11 @@ func (api *PublicFilterAPI) GetFilterChanges(id rpc.ID) (interface{}, error) {
 // UnmarshalJSON sets *args fields with given data.
 func (args *FilterCriteria) UnmarshalJSON(data []byte) error {
 	type input struct {
-		BlockHash *common.Hash     `json:"blockHash"`
-		FromBlock *rpc.BlockNumber `json:"fromBlock"`
-		ToBlock   *rpc.BlockNumber `json:"toBlock"`
-		Addresses interface{}      `json:"address"`
-		Topics    []interface{}    `json:"topics"`
+		BlockHash *common.Hash       `json:"blockHash"`
+		FromBlock *types.BlockNumber `json:"fromBlock"`
+		ToBlock   *types.BlockNumber `json:"toBlock"`
+		Addresses interface{}        `json:"address"`
+		Topics    []interface{}      `json:"topics"`
 	}
 
 	var raw input

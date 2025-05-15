@@ -24,7 +24,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/requests"
 )
@@ -148,7 +147,7 @@ func (c *blockWaiter) receive(ctx context.Context, node devnet.Node, headers cha
 		default:
 		}
 
-		block, err := node.GetBlockByNumber(ctx, rpc.AsBlockNumber(header.Number), true)
+		block, err := node.GetBlockByNumber(ctx, types.AsBlockNumber(header.Number), true)
 
 		if err != nil {
 			c.logger.Error("Block waiter failed to get block", "err", err)

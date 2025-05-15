@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-db/snapshotsync"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/etl"
@@ -34,7 +35,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
 	"github.com/erigontech/erigon/turbo/adapter"
 	"github.com/erigontech/erigon/turbo/services"
@@ -74,7 +74,7 @@ type EngineBlockDownloader struct {
 	tmpdir  string
 	timeout int
 	config  *chain.Config
-	syncCfg ethconfig.Sync
+	syncCfg snapshotsync.Sync
 
 	// lock
 	lock sync.Mutex
@@ -86,7 +86,7 @@ type EngineBlockDownloader struct {
 func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *headerdownload.HeaderDownload, executionClient execution.ExecutionClient,
 	bd *bodydownload.BodyDownload, blockPropagator adapter.BlockPropagator,
 	bodyReqSend RequestBodyFunction, blockReader services.FullBlockReader, db kv.RoDB, config *chain.Config,
-	tmpdir string, syncCfg ethconfig.Sync) *EngineBlockDownloader {
+	tmpdir string, syncCfg snapshotsync.Sync) *EngineBlockDownloader {
 	timeout := syncCfg.BodyDownloadTimeoutSeconds
 	var s atomic.Value
 	s.Store(headerdownload.Idle)

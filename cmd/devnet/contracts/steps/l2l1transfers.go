@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon-lib/abi"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
 	"github.com/erigontech/erigon/cmd/devnet/blocks"
 	"github.com/erigontech/erigon/cmd/devnet/contracts"
@@ -32,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/cmd/devnet/scenarios"
 	"github.com/erigontech/erigon/cmd/devnet/services"
 	"github.com/erigontech/erigon/execution/abi/bind"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/requests"
 )
@@ -177,7 +177,7 @@ func ProcessChildTransfers(ctx context.Context, sourceName string, numberOfTrans
 				}
 
 				for _, traceResult := range traceResults {
-					callResults, err := node.TraceCall(rpc.AsBlockReference(block.Number), ethapi.CallArgs{
+					callResults, err := node.TraceCall(types.AsBlockReference(block.Number), ethapi.CallArgs{
 						From: &traceResult.Action.From,
 						To:   &traceResult.Action.To,
 						Data: &traceResult.Action.Input,

@@ -23,7 +23,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 type DebugAccountAt struct {
@@ -49,7 +49,7 @@ type StorageResult struct {
 	Proof []string     `json:"proof"`
 }
 
-func (reqGen *requestGenerator) GetCode(address common.Address, blockRef rpc.BlockReference) (hexutil.Bytes, error) {
+func (reqGen *requestGenerator) GetCode(address common.Address, blockRef types.BlockReference) (hexutil.Bytes, error) {
 	var result hexutil.Bytes
 
 	if err := reqGen.rpcCall(context.Background(), &result, Methods.ETHGetCode, address, blockRef); err != nil {
@@ -59,7 +59,7 @@ func (reqGen *requestGenerator) GetCode(address common.Address, blockRef rpc.Blo
 	return result, nil
 }
 
-func (reqGen *requestGenerator) GetBalance(address common.Address, blockRef rpc.BlockReference) (*big.Int, error) {
+func (reqGen *requestGenerator) GetBalance(address common.Address, blockRef types.BlockReference) (*big.Int, error) {
 	var result hexutil.Big
 
 	if err := reqGen.rpcCall(context.Background(), &result, Methods.ETHGetBalance, address, blockRef); err != nil {
@@ -69,7 +69,7 @@ func (reqGen *requestGenerator) GetBalance(address common.Address, blockRef rpc.
 	return result.ToInt(), nil
 }
 
-func (reqGen *requestGenerator) GetTransactionCount(address common.Address, blockRef rpc.BlockReference) (*big.Int, error) {
+func (reqGen *requestGenerator) GetTransactionCount(address common.Address, blockRef types.BlockReference) (*big.Int, error) {
 	var result hexutil.Big
 
 	if err := reqGen.rpcCall(context.Background(), &result, Methods.ETHGetTransactionCount, address, blockRef); err != nil {

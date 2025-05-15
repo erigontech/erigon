@@ -76,7 +76,7 @@ func TestEthCallNonCanonical(t *testing.T) {
 	if _, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &from,
 		To:   &to,
-	}, rpc.BlockNumberOrHashWithHash(common.HexToHash("0x3fcb7c0d4569fddc89cbea54b42f163e0c789351d98810a513895ab44b47020b"), true), nil); err != nil {
+	}, types.BlockNumberOrHashWithHash(common.HexToHash("0x3fcb7c0d4569fddc89cbea54b42f163e0c789351d98810a513895ab44b47020b"), true), nil); err != nil {
 		if fmt.Sprintf("%v", err) != "hash 3fcb7c0d4569fddc89cbea54b42f163e0c789351d98810a513895ab44b47020b is not currently canonical" {
 			t.Errorf("wrong error: %v", err)
 		}
@@ -85,7 +85,7 @@ func TestEthCallNonCanonical(t *testing.T) {
 
 func TestEthCallToPrunedBlock(t *testing.T) {
 	pruneTo := uint64(3)
-	ethCallBlockNumber := rpc.BlockNumber(2)
+	ethCallBlockNumber := types.BlockNumber(2)
 
 	m, bankAddress, contractAddress := chainWithDeployedContract(t)
 	doPrune(t, m.DB, pruneTo)
@@ -98,7 +98,7 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 		From: &bankAddress,
 		To:   &contractAddress,
 		Data: &callDataBytes,
-	}, rpc.BlockNumberOrHashWithNumber(ethCallBlockNumber), nil); err != nil {
+	}, types.BlockNumberOrHashWithNumber(ethCallBlockNumber), nil); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -187,7 +187,7 @@ func TestGetProof(t *testing.T) {
 				context.Background(),
 				tt.addr,
 				tt.storageKeys,
-				rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(tt.blockNum)),
+				types.BlockNumberOrHashWithNumber(types.BlockNumber(tt.blockNum)),
 			)
 			if tt.expectedErr != "" {
 				require.EqualError(t, err, tt.expectedErr)
@@ -200,7 +200,7 @@ func TestGetProof(t *testing.T) {
 			tx, err := m.DB.BeginTemporalRo(context.Background())
 			require.NoError(t, err)
 			defer tx.Rollback()
-			header, err := api.headerByRPCNumber(context.Background(), rpc.BlockNumber(tt.blockNum), tx)
+			header, err := api.headerByRPCNumber(context.Background(), types.BlockNumber(tt.blockNum), tx)
 			require.NoError(t, err)
 
 			require.Equal(t, tt.addr, proof.Address)
@@ -246,7 +246,7 @@ func TestGetBlockByTimestampLatestTime(t *testing.T) {
 		t.Error("couldn't get the rpc marshal block")
 	}
 
-	if err == nil && rpc.BlockNumber(latestBlock.NumberU64()) == rpc.PendingBlockNumber {
+	if err == nil && types.BlockNumber(latestBlock.NumberU64()) == types.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields
 		for _, field := range []string{"hash", "nonce", "miner"} {
 			response[field] = nil
@@ -284,7 +284,7 @@ func TestGetBlockByTimestampOldestTime(t *testing.T) {
 		t.Error("couldn't get the rpc marshal block")
 	}
 
-	if err == nil && rpc.BlockNumber(oldestBlock.NumberU64()) == rpc.PendingBlockNumber {
+	if err == nil && types.BlockNumber(oldestBlock.NumberU64()) == types.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields
 		for _, field := range []string{"hash", "nonce", "miner"} {
 			response[field] = nil
@@ -320,7 +320,7 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 		t.Error("couldn't get the rpc marshal block")
 	}
 
-	if err == nil && rpc.BlockNumber(latestBlock.NumberU64()) == rpc.PendingBlockNumber {
+	if err == nil && types.BlockNumber(latestBlock.NumberU64()) == types.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields
 		for _, field := range []string{"hash", "nonce", "miner"} {
 			response[field] = nil
@@ -368,7 +368,7 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 		t.Error("couldn't get the rpc marshal block")
 	}
 
-	if err == nil && rpc.BlockNumber(middleBlock.NumberU64()) == rpc.PendingBlockNumber {
+	if err == nil && types.BlockNumber(middleBlock.NumberU64()) == types.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields
 		for _, field := range []string{"hash", "nonce", "miner"} {
 			response[field] = nil
@@ -409,7 +409,7 @@ func TestGetBlockByTimestamp(t *testing.T) {
 		t.Error("couldn't get the rpc marshal block")
 	}
 
-	if err == nil && rpc.BlockNumber(pickedBlock.NumberU64()) == rpc.PendingBlockNumber {
+	if err == nil && types.BlockNumber(pickedBlock.NumberU64()) == types.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields
 		for _, field := range []string{"hash", "nonce", "miner"} {
 			response[field] = nil

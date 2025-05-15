@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/turbo/stages/mock"
@@ -44,7 +43,7 @@ import (
 func TestGetBlockByNumberWithLatestTag(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
-	b, err := api.GetBlockByNumber(context.Background(), rpc.LatestBlockNumber, false)
+	b, err := api.GetBlockByNumber(context.Background(), types.LatestBlockNumber, false)
 	expected := common.HexToHash("0x5883164d4100b95e1d8e931b8b9574586a1dea7507941e6ad3c1e3a2591485fd")
 	if err != nil {
 		t.Errorf("error getting block number with latest tag: %s", err)
@@ -74,7 +73,7 @@ func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
 	tx.Commit()
 
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
-	block, err := api.GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
+	block, err := api.GetBlockByNumber(ctx, types.LatestBlockNumber, false)
 	if err != nil {
 		t.Errorf("error retrieving block by number: %s", err)
 	}
@@ -104,7 +103,7 @@ func TestGetBlockByNumberWithPendingTag(t *testing.T) {
 	})
 
 	api := NewEthAPI(NewBaseApi(ff, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
-	b, err := api.GetBlockByNumber(context.Background(), rpc.PendingBlockNumber, false)
+	b, err := api.GetBlockByNumber(context.Background(), types.PendingBlockNumber, false)
 	if err != nil {
 		t.Errorf("error getting block number with pending tag: %s", err)
 	}
@@ -115,7 +114,7 @@ func TestGetBlockByNumber_WithFinalizedTag_NoFinalizedBlockInDb(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	ctx := context.Background()
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
-	if _, err := api.GetBlockByNumber(ctx, rpc.FinalizedBlockNumber, false); err != nil {
+	if _, err := api.GetBlockByNumber(ctx, types.FinalizedBlockNumber, false); err != nil {
 		assert.ErrorIs(t, rpchelper.UnknownBlockError, err)
 	}
 }
@@ -142,7 +141,7 @@ func TestGetBlockByNumber_WithFinalizedTag_WithFinalizedBlockInDb(t *testing.T) 
 	tx.Commit()
 
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
-	block, err := api.GetBlockByNumber(ctx, rpc.FinalizedBlockNumber, false)
+	block, err := api.GetBlockByNumber(ctx, types.FinalizedBlockNumber, false)
 	if err != nil {
 		t.Errorf("error retrieving block by number: %s", err)
 	}
@@ -154,7 +153,7 @@ func TestGetBlockByNumber_WithSafeTag_NoSafeBlockInDb(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	ctx := context.Background()
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
-	if _, err := api.GetBlockByNumber(ctx, rpc.SafeBlockNumber, false); err != nil {
+	if _, err := api.GetBlockByNumber(ctx, types.SafeBlockNumber, false); err != nil {
 		assert.ErrorIs(t, rpchelper.UnknownBlockError, err)
 	}
 }
@@ -181,7 +180,7 @@ func TestGetBlockByNumber_WithSafeTag_WithSafeBlockInDb(t *testing.T) {
 	tx.Commit()
 
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
-	block, err := api.GetBlockByNumber(ctx, rpc.SafeBlockNumber, false)
+	block, err := api.GetBlockByNumber(ctx, types.SafeBlockNumber, false)
 	if err != nil {
 		t.Errorf("error retrieving block by number: %s", err)
 	}
@@ -278,7 +277,7 @@ func TestGetBlockTransactionCountByNumber(t *testing.T) {
 
 	expectedAmount := hexutil.Uint(len(bodyWithTx.Transactions))
 
-	txCount, err := api.GetBlockTransactionCountByNumber(ctx, rpc.BlockNumber(header.Number.Uint64()))
+	txCount, err := api.GetBlockTransactionCountByNumber(ctx, types.BlockNumber(header.Number.Uint64()))
 	if err != nil {
 		t.Errorf("failed getting the transaction count, err=%s", err)
 	}
@@ -311,7 +310,7 @@ func TestGetBlockTransactionCountByNumber_ZeroTx(t *testing.T) {
 
 	expectedAmount := hexutil.Uint(len(bodyWithTx.Transactions))
 
-	txCount, err := api.GetBlockTransactionCountByNumber(ctx, rpc.BlockNumber(header.Number.Uint64()))
+	txCount, err := api.GetBlockTransactionCountByNumber(ctx, types.BlockNumber(header.Number.Uint64()))
 	if err != nil {
 		t.Errorf("failed getting the transaction count, err=%s", err)
 	}
