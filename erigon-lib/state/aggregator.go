@@ -1661,6 +1661,12 @@ func (at *AggregatorRoTx) MadvNormal() *AggregatorRoTx {
 		for _, f := range d.files {
 			f.src.MadvNormal()
 		}
+		for _, f := range d.ht.files {
+			f.src.MadvNormal()
+		}
+		for _, f := range d.ht.iit.files {
+			f.src.MadvNormal()
+		}
 	}
 	for _, ii := range at.iis {
 		for _, f := range ii.files {
@@ -1692,6 +1698,12 @@ func (at *Aggregator) MadvNormal() *Aggregator {
 	defer at.dirtyFilesLock.Unlock()
 	for _, d := range at.d {
 		for _, f := range d.dirtyFiles.Items() {
+			f.MadvNormal()
+		}
+		for _, f := range d.History.dirtyFiles.Items() {
+			f.MadvNormal()
+		}
+		for _, f := range d.History.InvertedIndex.dirtyFiles.Items() {
 			f.MadvNormal()
 		}
 	}
