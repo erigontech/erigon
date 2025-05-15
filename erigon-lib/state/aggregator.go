@@ -437,6 +437,9 @@ func (a *Aggregator) BuildMissedIndices(ctx context.Context, workers int) error 
 	defer rotx.Close()
 
 	missedFilesItems := rotx.FilesWithMissedAccessors()
+	if !missedFilesItems.IsEmpty() {
+		defer a.onFilesChange(nil)
+	}
 
 	for _, d := range a.d {
 		d.BuildMissedAccessors(ctx, g, ps, missedFilesItems.domain[d.name])
@@ -454,7 +457,6 @@ func (a *Aggregator) BuildMissedIndices(ctx context.Context, workers int) error 
 	if err := a.OpenFolder(); err != nil {
 		return err
 	}
-	a.onFilesChange(nil)
 	return nil
 }
 
@@ -770,6 +772,7 @@ func (a *Aggregator) MergeLoop(ctx context.Context) (err error) {
 		if !somethingMerged {
 			return nil
 		}
+		a.onFilesChange(nil)
 	}
 }
 
@@ -1529,6 +1532,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
 				break
 			}
+			a.onFilesChange(nil)
 		}
 		go func() {
 			defer close(fin)
@@ -1539,8 +1543,6 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 				}
 				a.logger.Warn("[snapshots] merge", "err", err)
 			}
-
-			a.onFilesChange(nil)
 		}()
 	}()
 	return fin

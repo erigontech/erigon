@@ -578,7 +578,7 @@ type ReaderV3 struct {
 
 func NewReaderV3(tx kv.TemporalGetter) *ReaderV3 {
 	return &ReaderV3{
-		//trace:     true,
+		trace:     true,
 		tx:        tx,
 		composite: make([]byte, 20+32),
 	}
@@ -592,13 +592,13 @@ func (r *ReaderV3) SetTrace(trace bool)                  { r.trace = trace }
 func (r *ReaderV3) ResetReadSet()                        {}
 
 func (r *ReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, _, err := r.tx.GetLatest(kv.AccountsDomain, address[:])
+	enc, step, err := r.tx.GetLatest(kv.AccountsDomain, address[:])
 	if err != nil {
 		return nil, err
 	}
 	if len(enc) == 0 {
 		if r.trace {
-			fmt.Printf("ReadAccountData [%x] => [empty], txNum: %d\n", address, r.txNum)
+			fmt.Printf("ReadAccountData [%x] => [empty], txNum: %d, step: %d\n", address, r.txNum, step)
 		}
 		return nil, nil
 	}

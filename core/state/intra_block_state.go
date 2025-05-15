@@ -28,6 +28,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -517,6 +518,9 @@ func (sdb *IntraBlockState) SetNonce(addr libcommon.Address, nonce uint64) error
 // DESCRIBED: docs/programmers_guide/guide.md#code-hash
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SetCode(addr libcommon.Address, code []byte) error {
+	if sdb.trace {
+		fmt.Printf("SetCode %x, code: %s", addr, common.Bytes2Hex(code))
+	}
 	stateObject, err := sdb.GetOrNewStateObject(addr)
 	if err != nil {
 		return err
