@@ -36,10 +36,15 @@ func (me *slogHandler) Handle(ctx context.Context, record slog.Record) error {
 	return nil
 }
 
-func (me *slogHandler) attrsToCtx() (ret []any) {
+func (me *slogHandler) attrsToCtx(r slog.Record) (ret []any) {
+	ret = make([]any, 0, 2*(len(me.attrs)+r.NumAttrs()))
 	for _, a := range me.attrs {
 		ret = append(ret, a.Key, a.Value)
 	}
+	r.Attrs(func(attr slog.Attr) bool {
+		ret = append(ret, attr.Key, attr.Value)
+		return true
+	})
 	return
 }
 
