@@ -297,7 +297,7 @@ func (a *ProtoForkableTx) GetFromFile(entityNum Num, idx int) (v Bytes, found bo
 		return word, true, nil
 	}
 	ap := a.a
-	return nil, false, fmt.Errorf("entity get error: %s expected %d in snapshot %s but not found", ap.a.Name(), entityNum, a.files[idx].src.decompressor.FileName1)
+	return nil, false, fmt.Errorf("entity get error: %s expected %d in snapshot %s but not found", ap.a.Name(), entityNum, a.files[idx].src.decompressor.FileName())
 }
 
 func (a *ProtoForkableTx) NoFilesCheck() {

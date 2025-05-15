@@ -69,6 +69,7 @@ import (
 	"github.com/erigontech/erigon/diagnostics"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
+	"github.com/erigontech/erigon/eth/ethconfig/features"
 	"github.com/erigontech/erigon/eth/integrity"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/eth/tracers"
@@ -130,7 +131,6 @@ var snapshotCommand = cli.Command{
 			Usage: "Create all missed indices for snapshots. It also removing unsupported versions of existing indices and re-build them",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
-				&SnapshotFromFlag,
 				&SnapshotRebuildFlag,
 			}),
 		},
@@ -148,7 +148,6 @@ var snapshotCommand = cli.Command{
 			Usage: "create snapshots from the specified block number",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
-				&SnapshotFromFlag,
 			}),
 		},
 		{
@@ -307,11 +306,6 @@ var snapshotCommand = cli.Command{
 }
 
 var (
-	SnapshotFromFlag = cli.Uint64Flag{
-		Name:  "from",
-		Usage: "From block number",
-		Value: 0,
-	}
 	SnapshotRebuildFlag = cli.BoolFlag{
 		Name:  "rebuild",
 		Usage: "Force rebuild",
@@ -527,9 +521,8 @@ func doDebugKey(cliCtx *cli.Context) error {
 
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
-	from := cliCtx.Uint64(SnapshotFromFlag.Name)
 
-	_, _, _, _, agg, clean, err := openSnaps(ctx, cfg, dirs, from, chainDB, logger)
+	_, _, _, _, agg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
@@ -562,13 +555,15 @@ func doIntegrity(cliCtx *cli.Context) error {
 
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
-	from := cliCtx.Uint64(SnapshotFromFlag.Name)
 
-	_, borSnaps, _, blockRetire, agg, clean, err := openSnaps(ctx, cfg, dirs, from, chainDB, logger)
+	_, borSnaps, _, blockRetire, agg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
 	defer clean()
+
+	defer blockRetire.MadvNormal().DisableReadAhead()
+	defer agg.MadvNormal().DisableReadAhead()
 
 	db, err := temporal.New(chainDB, agg)
 	if err != nil {
@@ -743,7 +738,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 		oldVersion := res.Version
 		// do a range check over all snapshots types (sanitizes domain and history folder)
 		for _, snapType := range kv.StateDomains {
-			newVersion := libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.DataKV
+			newVersion := libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.DataKV.Current
 			expectedFileName := strings.Replace(info.Name(), "accounts", snapType.String(), 1)
 			expectedFileName = version.ReplaceVersion(expectedFileName, oldVersion, newVersion)
 			if _, err := os.Stat(filepath.Join(dirs.SnapDomain, expectedFileName)); err != nil {
@@ -753,7 +748,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 			oldVersion = newVersion
 			// check that the index file exist
 			if libstate.Schema.GetDomainCfg(snapType).Accessors.Has(libstate.AccessorBTree) {
-				newVersion = libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorBT
+				newVersion = libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorBT.Current
 				fileName := strings.Replace(expectedFileName, ".kv", ".bt", 1)
 				fileName = version.ReplaceVersion(fileName, oldVersion, newVersion)
 				exists, err := dir.FileExist(filepath.Join(dirs.SnapDomain, fileName))
@@ -765,7 +760,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 				}
 			}
 			if libstate.Schema.GetDomainCfg(snapType).Accessors.Has(libstate.AccessorExistence) {
-				newVersion = libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVEI
+				newVersion = libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVEI.Current
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvei", 1)
 				fileName = version.ReplaceVersion(fileName, oldVersion, newVersion)
 				exists, err := dir.FileExist(filepath.Join(dirs.SnapDomain, fileName))
@@ -777,7 +772,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 				}
 			}
 			if libstate.Schema.GetDomainCfg(snapType).Accessors.Has(libstate.AccessorHashMap) {
-				newVersion = libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVI
+				newVersion = libstate.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVI.Current
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvi", 1)
 				fileName = version.ReplaceVersion(fileName, oldVersion, newVersion)
 				exists, err := dir.FileExist(filepath.Join(dirs.SnapDomain, fileName))
@@ -825,14 +820,14 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 			if err != nil {
 				return err
 			}
-			oldVersion := versioned.GetVersions().II.DataEF
+			oldVersion := versioned.GetVersions().II.DataEF.Current
 			expectedFileName := strings.Replace(info.Name(), "accounts", snapType, 1)
 
 			if _, err := os.Stat(filepath.Join(dirs.SnapIdx, expectedFileName)); err != nil {
 				return fmt.Errorf("missing file %s at path %s", expectedFileName, filepath.Join(dirs.SnapIdx, expectedFileName))
 			}
 			// Check accessors
-			newVersion := versioned.GetVersions().II.AccessorEFI
+			newVersion := versioned.GetVersions().II.AccessorEFI.Current
 			efiFileName := strings.Replace(expectedFileName, ".ef", ".efi", 1)
 			efiFileName = version.ReplaceVersion(efiFileName, oldVersion, newVersion)
 			if _, err := os.Stat(filepath.Join(dirs.SnapAccessors, efiFileName)); err != nil {
@@ -841,13 +836,13 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 			if !slices.Contains(viTypes, snapType) {
 				continue
 			}
-			newVersion = versioned.GetVersions().Hist.AccessorVI
+			newVersion = versioned.GetVersions().Hist.AccessorVI.Current
 			viFileName := strings.Replace(expectedFileName, ".ef", ".vi", 1)
 			viFileName = version.ReplaceVersion(viFileName, oldVersion, newVersion)
 			if _, err := os.Stat(filepath.Join(dirs.SnapAccessors, viFileName)); err != nil {
 				return fmt.Errorf("missing file %s at path %s", viFileName, filepath.Join(dirs.SnapAccessors, viFileName))
 			}
-			newVersion = versioned.GetVersions().Hist.DataV
+			newVersion = versioned.GetVersions().Hist.DataV.Current
 			// check that .v
 			vFileName := strings.Replace(expectedFileName, ".ef", ".v", 1)
 			vFileName = version.ReplaceVersion(vFileName, oldVersion, newVersion)
@@ -1139,15 +1134,14 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
-	from := cliCtx.Uint64(SnapshotFromFlag.Name)
 
-	_, _, caplinSnaps, br, agg, clean, err := openSnaps(ctx, cfg, dirs, from, chainDB, logger)
+	_, _, caplinSnaps, br, agg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
 	defer clean()
 
-	if err := br.BuildMissedIndicesIfNeed(ctx, "Indexing", nil, chainConfig); err != nil {
+	if err := br.BuildMissedIndicesIfNeed(ctx, "Indexing", nil); err != nil {
 		return err
 	}
 	if err := caplinSnaps.BuildMissingIndices(ctx, logger); err != nil {
@@ -1171,9 +1165,8 @@ func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(chainDB).ChainName)
-	from := cliCtx.Uint64(SnapshotFromFlag.Name)
 
-	blockSnaps, borSnaps, caplinSnaps, _, agg, clean, err := openSnaps(ctx, cfg, dirs, from, chainDB, logger)
+	blockSnaps, borSnaps, caplinSnaps, _, agg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
@@ -1187,14 +1180,19 @@ func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	return nil
 }
 
-func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, from uint64, chainDB kv.RwDB, logger log.Logger) (
+func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (
 	blockSnaps *freezeblocks.RoSnapshots,
 	borSnaps *heimdall.RoSnapshots,
 	csn *freezeblocks.CaplinSnapshots,
 	br *freezeblocks.BlockRetire,
 	agg *libstate.Aggregator,
-	clean func(), err error,
+	clean func(),
+	err error,
 ) {
+	if _, err = features.EnableSyncCfg(chainDB, ethconfig.Sync{}); err != nil {
+		return
+	}
+
 	chainConfig := fromdb.ChainConfig(chainDB)
 
 	blockSnaps = freezeblocks.NewRoSnapshots(cfg, dirs.Snap, 0, logger)
@@ -1557,13 +1555,13 @@ func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	defer chainDB.Close()
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
-	_, _, _, br, _, clean, err := openSnaps(ctx, cfg, dirs, info.From, chainDB, logger)
+	_, _, _, br, _, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
 	defer clean()
 
-	if err := br.BuildMissedIndicesIfNeed(ctx, "indexing", nil, chainConfig); err != nil {
+	if err := br.BuildMissedIndicesIfNeed(ctx, "indexing", nil); err != nil {
 		return err
 	}
 
@@ -1578,25 +1576,31 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	defer logger.Info("Done")
 	ctx := cliCtx.Context
 
-	from := cliCtx.Uint64(SnapshotFromFlag.Name)
+	from := uint64(0)
 
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
 	chainConfig := fromdb.ChainConfig(db)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
-	_, _, caplinSnaps, br, agg, clean, err := openSnaps(ctx, cfg, dirs, from, db, logger)
+	_, _, caplinSnaps, br, agg, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
 	if err != nil {
 		return err
 	}
 	defer clean()
+
+	defer br.MadvNormal().DisableReadAhead()
+	defer agg.MadvNormal().DisableReadAhead()
+
+	blockSnapBuildSema := semaphore.NewWeighted(max(int64(runtime.NumCPU()), int64(dbg.BuildSnapshotAllowance)))
+	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 
 	// `erigon retire` command is designed to maximize resouces utilization. But `Erigon itself` does minimize background impact (because not in rush).
 	agg.SetCollateAndBuildWorkers(estimate.StateV3Collate.Workers())
 	agg.SetMergeWorkers(estimate.AlmostAllCPUs())
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 
-	if err := br.BuildMissedIndicesIfNeed(ctx, "retire", nil, chainConfig); err != nil {
+	if err := br.BuildMissedIndicesIfNeed(ctx, "retire", nil); err != nil {
 		return err
 	}
 	if err := caplinSnaps.BuildMissingIndices(ctx, logger); err != nil {
@@ -1626,21 +1630,12 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		from, to = from2, to2
 	}
 
-	isBor := blockReader.BorSnapshots() != nil
-	borSnaps := blockReader.BorSnapshots()
-	blockSnaps := blockReader.Snapshots()
-
 	if err := br.RetireBlocks(ctx, from, to, log.LvlInfo, nil, nil, nil); err != nil {
 		return err
 	}
 
-	if err := blockSnaps.RemoveOverlaps(); err != nil {
+	if err := br.RemoveOverlaps(); err != nil {
 		return err
-	}
-	if isBor {
-		if err := borSnaps.RemoveOverlaps(); err != nil {
-			return err
-		}
 	}
 
 	deletedBlocks := math.MaxInt // To pass the first iteration
@@ -1667,9 +1662,14 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 
 	logger.Info("Prune state history")
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
+		return tx.(kv.TemporalRwTx).Debug().GreedyPruneHistory(ctx, kv.CommitmentDomain)
+	}); err != nil {
+		return err
+	}
 	for hasMoreToPrune := true; hasMoreToPrune; {
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
-			hasMoreToPrune, err = tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 2*time.Minute)
+			hasMoreToPrune, err = tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 30*time.Second)
 			return err
 		}); err != nil {
 			return err
@@ -1700,9 +1700,15 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
+	logger.Info("Prune state history")
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
+		return tx.(kv.TemporalRwTx).Debug().GreedyPruneHistory(ctx, kv.CommitmentDomain)
+	}); err != nil {
+		return err
+	}
 	for hasMoreToPrune := true; hasMoreToPrune; {
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
-			hasMoreToPrune, err = tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 2*time.Minute)
+			hasMoreToPrune, err = tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 30*time.Second)
 			return err
 		}); err != nil {
 			return err
