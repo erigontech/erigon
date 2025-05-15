@@ -8,6 +8,10 @@ on:
   schedule:
     - cron: '0 20 * * *'  # Run every night at 20:00 (08:00 PM) UTC
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   performance-test-suite:
     strategy:
@@ -36,7 +40,7 @@ jobs:
       - name: Checkout RPC Tests Repository & Install Requirements
         run: |
           rm -rf ${{runner.workspace}}/rpc-tests
-          git -c advice.detachedHead=false clone --depth 1 --branch remove_aura_fields_from_mainnet https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
+          git -c advice.detachedHead=false clone --depth 1 --branch v1.58.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
           cd ${{runner.workspace}}/rpc-tests
 
       - name: Clean Erigon Build Directory
