@@ -933,7 +933,7 @@ func (s *RoSnapshots) Ls() {
 			if seg.src == nil || seg.src.Decompressor == nil {
 				continue
 			}
-			log.Info("[snapshots] ", "f", seg.src.FileName(), "count", seg.src.Decompressor.Count())
+			log.Info("[snapshots] ", "f", seg.src.Decompressor.FileName(), "count", seg.src.Decompressor.Count())
 		}
 	}
 }
