@@ -1670,16 +1670,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
-	logger.Info("Prune state history")
-	for hasMoreToPrune := true; hasMoreToPrune; {
-		if err := db.Update(ctx, func(tx kv.RwTx) error {
-			hasMoreToPrune, err = tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 2*time.Minute)
-			return err
-		}); err != nil {
-			return err
-		}
-	}
-
 	logger.Info("Work on state history snapshots")
 	indexWorkers := estimate.IndexSnapshot.Workers()
 	if err = agg.BuildMissedAccessors(ctx, indexWorkers); err != nil {
@@ -1704,9 +1694,15 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
+	logger.Info("Prune state history")
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
+		return tx.(kv.TemporalRwTx).Debug().GreedyPruneHistory(ctx, kv.CommitmentDomain)
+	}); err != nil {
+		return err
+	}
 	for hasMoreToPrune := true; hasMoreToPrune; {
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
-			hasMoreToPrune, err = tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 2*time.Minute)
+			hasMoreToPrune, err = tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 30*time.Second)
 			return err
 		}); err != nil {
 			return err
