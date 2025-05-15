@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 type rcloneInfo struct {
@@ -63,7 +64,7 @@ func (i *rcloneInfo) Version() snaptype.Version {
 		return i.snapInfo.Version
 	}
 
-	return snaptype.ZeroVersion
+	return version.ZeroVersion
 }
 
 func (i *rcloneInfo) From() uint64 {

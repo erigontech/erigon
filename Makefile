@@ -189,7 +189,7 @@ test: test-erigon-lib test-erigon-db
 
 ## test-all:                  run all tests with a 1h timeout
 test-all: test-erigon-lib-all test-erigon-db-all
-	$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out
+	$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out -race
 
 ## test-hive						run the hive tests locally off nektos/act workflows simulator
 test-hive:	
@@ -261,7 +261,7 @@ define run-kurtosis-assertoor
 	docker build -t test/erigon:current . ; \
 	kurtosis enclave rm -f makefile-kurtosis-testnet ; \
 	kurtosis run --enclave makefile-kurtosis-testnet github.com/ethpandaops/ethereum-package --args-file $(1) ; \
-	printf "\nTo view logs: \nkurtosis service logs my-testnet el-1-erigon-lighthouse\n"
+	printf "\nTo view logs: \nkurtosis service logs makefile-kurtosis-testnet el-1-erigon-lighthouse\n"
 endef
 
 check-kurtosis:
@@ -273,7 +273,7 @@ check-kurtosis:
 kurtosis-pectra-assertoor:	check-kurtosis
 	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/pectra.io")
 
-kurtosis-reguler-assertoor:	check-kurtosis 
+kurtosis-regular-assertoor:	check-kurtosis 
 	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/regular-assertoor.io")
 
 kurtosis-cleanup:
