@@ -51,6 +51,10 @@ var (
 	PreconfDevnetNetworkID    = big.NewInt(167010)
 )
 
+var (
+	TaikoAlethiaChainName = "taiko-alethia"
+)
+
 var networkIDToChainConfig = map[*big.Int]*chain.Config{
 	TaikoMainnetNetworkID:      TaikoChainConfig,
 	TaikoInternalL2ANetworkID:  TaikoChainConfig,
@@ -78,6 +82,7 @@ func NetworkIDToChainConfigOrDefault(networkID *big.Int) *chain.Config {
 }
 
 var TaikoChainConfig = &chain.Config{
+	ChainName:               TaikoAlethiaChainName,
 	ChainID:                 TaikoInternalL2ANetworkID, // Use Internal Devnet network ID by default.
 	HomesteadBlock:          common.Big0,
 	TangerineWhistleBlock:   common.Big0,

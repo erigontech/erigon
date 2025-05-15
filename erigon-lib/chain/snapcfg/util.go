@@ -27,6 +27,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/erigontech/erigon-lib/log/v3"
 	snapshothashes "github.com/erigontech/erigon-snapshot"
 	"github.com/erigontech/erigon-snapshot/webseed"
 	"github.com/pelletier/go-toml/v2"
@@ -41,13 +42,14 @@ import (
 var snapshotGitBranch = dbg.EnvString("SNAPS_GIT_BRANCH", version.DefaultSnapshotGitBranch)
 
 var (
-	Mainnet    = fromToml(snapshothashes.Mainnet)
-	Holesky    = fromToml(snapshothashes.Holesky)
-	Sepolia    = fromToml(snapshothashes.Sepolia)
-	Amoy       = fromToml(snapshothashes.Amoy)
-	BorMainnet = fromToml(snapshothashes.BorMainnet)
-	Gnosis     = fromToml(snapshothashes.Gnosis)
-	Chiado     = fromToml(snapshothashes.Chiado)
+	Mainnet      = fromToml(snapshothashes.Mainnet)
+	Holesky      = fromToml(snapshothashes.Holesky)
+	Sepolia      = fromToml(snapshothashes.Sepolia)
+	Amoy         = fromToml(snapshothashes.Amoy)
+	BorMainnet   = fromToml(snapshothashes.BorMainnet)
+	Gnosis       = fromToml(snapshothashes.Gnosis)
+	Chiado       = fromToml(snapshothashes.Chiado)
+	TaikoAlethia = fromToml(snapshothashes.TaikoAlethia) // CHANGE(taiko)
 )
 
 type PreverifiedItem struct {
@@ -454,13 +456,14 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 }
 
 var knownPreverified = map[string]Preverified{
-	networkname.Mainnet:    Mainnet,
-	networkname.Holesky:    Holesky,
-	networkname.Sepolia:    Sepolia,
-	networkname.Amoy:       Amoy,
-	networkname.BorMainnet: BorMainnet,
-	networkname.Gnosis:     Gnosis,
-	networkname.Chiado:     Chiado,
+	networkname.Mainnet:      Mainnet,
+	networkname.Holesky:      Holesky,
+	networkname.Sepolia:      Sepolia,
+	networkname.Amoy:         Amoy,
+	networkname.BorMainnet:   BorMainnet,
+	networkname.Gnosis:       Gnosis,
+	networkname.Chiado:       Chiado,
+	networkname.TaikoAlethia: TaikoAlethia, // CHANGE(taiko)
 }
 
 func RegisterKnownTypes(networkName string, types []snaptype.Type) {
@@ -533,13 +536,14 @@ func VersionedCfg(networkName string, preferred snaptype.Version, _min snaptype.
 }
 
 var KnownWebseeds = map[string][]string{
-	networkname.Mainnet:    webseedsParse(webseed.Mainnet),
-	networkname.Sepolia:    webseedsParse(webseed.Sepolia),
-	networkname.Amoy:       webseedsParse(webseed.Amoy),
-	networkname.BorMainnet: webseedsParse(webseed.BorMainnet),
-	networkname.Gnosis:     webseedsParse(webseed.Gnosis),
-	networkname.Chiado:     webseedsParse(webseed.Chiado),
-	networkname.Holesky:    webseedsParse(webseed.Holesky),
+	networkname.Mainnet:      webseedsParse(webseed.Mainnet),
+	networkname.Sepolia:      webseedsParse(webseed.Sepolia),
+	networkname.Amoy:         webseedsParse(webseed.Amoy),
+	networkname.BorMainnet:   webseedsParse(webseed.BorMainnet),
+	networkname.Gnosis:       webseedsParse(webseed.Gnosis),
+	networkname.Chiado:       webseedsParse(webseed.Chiado),
+	networkname.Holesky:      webseedsParse(webseed.Holesky),
+	networkname.TaikoAlethia: webseedsParse(webseed.TaikoAlethia), // CHANGE(taiko)
 }
 
 func webseedsParse(in []byte) (res []string) {
@@ -555,9 +559,15 @@ func webseedsParse(in []byte) (res []string) {
 }
 
 func LoadRemotePreverified(ctx context.Context) (loaded bool, err error) {
-	loaded, err = snapshothashes.LoadSnapshots(ctx, snapshotGitBranch)
+	loaded, err = snapshothashes.LoadSnapshots(ctx, snapshothashes.R2, snapshotGitBranch)
 	if err != nil {
-		return false, err
+		log.Root().Warn("Failed to load snapshot hashes from R2; falling back to GitHub", "err", err)
+
+		// Fallback to github if R2 fails
+		loaded, err = snapshothashes.LoadSnapshots(ctx, snapshothashes.Github, snapshotGitBranch)
+		if err != nil {
+			return false, err
+		}
 	}
 
 	// Re-load the preverified hashes
@@ -568,6 +578,8 @@ func LoadRemotePreverified(ctx context.Context) (loaded bool, err error) {
 	BorMainnet = fromToml(snapshothashes.BorMainnet)
 	Gnosis = fromToml(snapshothashes.Gnosis)
 	Chiado = fromToml(snapshothashes.Chiado)
+	// CHANGE(taiko) : load taiko snapshots
+	TaikoAlethia = fromToml(snapshothashes.TaikoAlethia)
 	// Update the known preverified hashes
 	KnownWebseeds = map[string][]string{
 		networkname.Mainnet:    webseedsParse(webseed.Mainnet),
@@ -577,6 +589,8 @@ func LoadRemotePreverified(ctx context.Context) (loaded bool, err error) {
 		networkname.Gnosis:     webseedsParse(webseed.Gnosis),
 		networkname.Chiado:     webseedsParse(webseed.Chiado),
 		networkname.Holesky:    webseedsParse(webseed.Holesky),
+		// CHANGE(taiko)
+		networkname.TaikoAlethia: webseedsParse(webseed.TaikoAlethia),
 	}
 
 	knownPreverified = map[string]Preverified{
@@ -587,6 +601,8 @@ func LoadRemotePreverified(ctx context.Context) (loaded bool, err error) {
 		networkname.BorMainnet: BorMainnet,
 		networkname.Gnosis:     Gnosis,
 		networkname.Chiado:     Chiado,
+		// CHANGE(taiko)
+		networkname.TaikoAlethia: TaikoAlethia,
 	}
 	return loaded, nil
 }
@@ -614,6 +630,9 @@ func GetToml(networkName string) []byte {
 		return snapshothashes.Gnosis
 	case networkname.Chiado:
 		return snapshothashes.Chiado
+	// CHANGE(taiko)
+	case networkname.TaikoAlethia:
+		return snapshothashes.TaikoAlethia
 	default:
 		return nil
 	}

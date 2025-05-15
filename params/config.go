@@ -76,6 +76,8 @@ var (
 	GnosisGenesisHash     = common.HexToHash("0x4f1dd23188aab3a76b463e4af801b52b1248ef073c648cbdc4c9333d3da79756")
 	ChiadoGenesisHash     = common.HexToHash("0xada44fd8d2ecab8b08f256af07ad3e777f17fb434f8f8e678b312f576212ba9a")
 	TestGenesisHash       = common.HexToHash("0x6116de25352c93149542e950162c7305f207bbc17b0eb725136b78c80aed79cc")
+	// CHANGE(taiko) : Taiko Alethia mainnet genesis hash
+	TaikoAlethiaGenesisHash = common.HexToHash("0x90bc60466882de9637e269e87abab53c9108cf9113188bc4f80bcfcb10e489b9")
 )
 
 var (
@@ -370,6 +372,9 @@ func GenesisHashByChainName(chain string) *common.Hash {
 		return &ChiadoGenesisHash
 	case networkname.Test:
 		return &TestGenesisHash
+	// CHANGE(taiko): taiko genesis hash
+	case networkname.TaikoAlethia:
+		return &TaikoAlethiaGenesisHash
 	default:
 		return nil
 	}

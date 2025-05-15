@@ -50,6 +50,7 @@ func init() {
 	snapcfg.RegisterKnownTypes(networkname.Gnosis, ethereumTypes)
 	snapcfg.RegisterKnownTypes(networkname.Chiado, ethereumTypes)
 	snapcfg.RegisterKnownTypes(networkname.Holesky, ethereumTypes)
+	snapcfg.RegisterKnownTypes(networkname.TaikoAlethia, ethereumTypes) // CHANGE(taiko) : register taiko
 }
 
 var Enums = struct {

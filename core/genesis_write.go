@@ -683,6 +683,8 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 		return ChiadoGenesisBlock()
 	case networkname.Test:
 		return TestGenesisBlock()
+	case networkname.TaikoAlethia: // CHANGE(taiko) : taiko genesis block
+		return TaikoGenesisBlock(params2.TaikoMainnetNetworkID.Uint64())
 	default:
 		return nil
 	}
