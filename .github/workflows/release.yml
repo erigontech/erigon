@@ -61,7 +61,7 @@ jobs:
 
     steps:
       - name: Cleanup
-        run: rm -rf *
+        run: rm -rf * /tmp/docker-build-output
 
       - name: Checkout git repository ${{ env.APP_REPO }} reference ${{ inputs.checkout_ref }}
         uses: actions/checkout@v4
@@ -146,56 +146,6 @@ jobs:
             --tag ${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }} \
             --push \
             .
-          echo "Debug outputs:"
-          du -sh /tmp/docker-build-output
-          ls -lao /tmp/docker-build-output
-          exit 1
-
-      - name: Build for linux/arm64
-        run: >
-          docker run --platform linux/arm64
-          --rm
-          -v $(pwd)/erigon:/erigon:ro
-          -v ${GITHUB_WORKSPACE}/build-arm64:/erigon-build
-          -v ${HOME}/.cache:/root/.cache
-          -v ${HOME}/go/pkg/mod:/go/pkg/mod
-          -w /erigon --entrypoint /bin/bash
-          ${{ env.BUILDER_IMAGE }}
-          -c "git config --global --add safe.directory /erigon;
-          make GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm 
-          erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool"
-
-        ## temporary disable silkworm in 3.x.x
-      - name: Build for linux/amd64 (with nosilkworm tag)
-        run: >
-          docker run --platform linux/amd64
-          --rm
-          -v $(pwd)/erigon:/erigon:ro
-          -v ${GITHUB_WORKSPACE}/build-amd64:/erigon-build
-          -v ${HOME}/.cache:/root/.cache
-          -v ${HOME}/go/pkg/mod:/go/pkg/mod
-          -w /erigon --entrypoint /bin/bash
-          ${{ env.BUILDER_IMAGE }}
-          -c "git config --global --add safe.directory /erigon;
-          make GOARCH=amd64 GOAMD64=v1 GOAMD64_VERSION=v1 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm 
-          erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool;
-          if [ ${WITH_SILKWORM} ]; then find / -name libsilkworm_capi.so -exec install {} /erigon-build \; ; fi;"
-
-        ## temporary disable silkworm in 3.x.x
-      - name: Build for linux/amd64/v2 (with nosilkworm tag)
-        run: >
-          docker run --platform linux/amd64/v2
-          --rm
-          -v $(pwd)/erigon:/erigon:ro
-          -v ${GITHUB_WORKSPACE}/build-amd64v2:/erigon-build
-          -v ${HOME}/.cache:/root/.cache
-          -v ${HOME}/go/pkg/mod:/go/pkg/mod
-          -w /erigon --entrypoint /bin/bash
-          ${{ env.BUILDER_IMAGE }}
-          -c "git config --global --add safe.directory /erigon;
-          make GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm 
-          erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool;
-          if [ ${WITH_SILKWORM} ]; then find / -name libsilkworm_capi.so -exec install {} /erigon-build \; ; fi;"
 
       - name: Create archives and checksums
         env:
@@ -203,18 +153,19 @@ jobs:
         run: |
           cd ${GITHUB_WORKSPACE}
           mkdir $GITHUB_WORKSPACE/release
-          for dir in build-*; do
-            cd $dir
+          for dir in /tmp/docker-build-output/*; do
+            cd $dir/usr/local/bin/
             echo Current directory is $(pwd) . Checksum file and archive will be created for this directory
             sha256sum * > checksums.txt
-            tar czvf $GITHUB_WORKSPACE/release/${APPLICATION}_${RELEASE_VERSION}_linux_$(echo $dir | sed 's,build-,,').tar.gz \
-              --transform "s,^./,${APPLICATION}_${RELEASE_VERSION}_linux_$(echo $dir | sed 's,build-,,')/," .
+            tar czvf $GITHUB_WORKSPACE/release/${APPLICATION}_${RELEASE_VERSION}_linux_$(echo $dir | sed 's,linux_,,; s,_,,;').tar.gz \
+              --transform "s,^./,${APPLICATION}_${RELEASE_VERSION}_linux_$(echo $dir | sed 's,linux_,,; s,_,,;')/," .
             cd -
           done
           cd $GITHUB_WORKSPACE/release
           sha256sum * > ${APPLICATION}_${RELEASE_VERSION}_checksums.txt
           echo Content of release directory:
           find . -type f -ls
+          exit 1;
 
       - name: Upload artifact -- linux/arm64
         uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
