@@ -51,7 +51,7 @@ import (
 
 var sortableBuffersPoolForPruning = sync.Pool{
 	New: func() interface{} {
-		return etl.NewSortableBuffer(etl.BufferOptimalSize/8).Prealloc(1_000, int(1*datasize.MB))
+		return etl.NewSortableBuffer(etl.BufferOptimalSize/8).Prealloc(2_000, int(2*datasize.MB))
 	},
 }
 
