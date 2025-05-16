@@ -7,12 +7,13 @@ env:
   TEST_TRACKING_TIME_SECONDS: 7200 # 2 hours
   TEST_TOTAL_TIME_SECONDS: 432000   # 5 days
   TEST_CHAIN: "mainnet"
-  BUILDER_IMAGE: "golang:1.23-bookworm"
+  BUILDER_IMAGE: "golang:1.24-bookworm"
   DOCKER_BASE_IMAGE: "debian:12-slim"
   APP_REPO: "erigontech/erigon"
   PACKAGE: "github.com/erigontech/erigon"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
-  DOCKERFILE_PATH: "Dockerfile.release"
+  DOCKERHUB_REPOSITORY_DEV: "erigontech/dev-erigon"
+  DOCKERFILE_PATH: "Dockerfile"
   LABEL_DESCRIPTION: "Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency frontier. Archive Node by default."
 
 on:
@@ -46,9 +47,10 @@ on:
 jobs:
 
   build-release:
-    runs-on: ubuntu-latest
+    #runs-on: ubuntu-latest
+    runs-on: [devops-01-self-hosted]
     #runs-on: ubuntu-latest-devops-xxlarge
-    timeout-minutes: 75
+    timeout-minutes: 90
     name: Create git tag, build and publish Release Artifacts
     outputs:
       commit-id: ${{ steps.getCommitId.outputs.id }}
@@ -108,6 +110,40 @@ jobs:
           path: |
             ~/go/pkg
             ~/.cache
+
+
+      - name: Build temporary multiplatform image and store outputs locally for further processing
+        env:
+          BUILD_VERSION: ${{ inputs.release_version }}
+          DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY_DEV }}
+        run: |
+          docker buildx build \
+            --output type=local,dest=/tmp/docker-build-output \
+            --output type=registry \
+            --attest type=provenance,mode=max \
+            --sbom=true \
+            --platform linux/amd64,linux/arm64,linux/amd64/v2 \
+            --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
+            --label org.opencontainers.image.authors="https://github.com/erigontech/erigon/graphs/contributors" \
+            --label org.opencontainers.image.url="https://github.com/erigontech/erigon/blob/${{ inputs.checkout_ref }}/${{ env.DOCKERFILE_PATH }}" \
+            --label org.opencontainers.image.documentation="https://github.com/erigontech/erigon/blob/${{ inputs.checkout_ref }}/${{ env.DOCKERFILE_PATH }}" \
+            --label org.opencontainers.image.source="https://github.com/erigontech/erigon/blob/${{ inputs.checkout_ref }}/${{ env.DOCKERFILE_PATH }}" \
+            --label org.opencontainers.image.version=${{ inputs.release_version }} \
+            --label org.opencontainers.image.revision=${{ needs.build-release.outputs.commit-id }} \
+            --label org.opencontainers.image.vcs-ref-short=${{ needs.build-release.outputs.short-commit-id }} \
+            --label org.opencontainers.image.vendor="${{ github.repository_owner }}" \
+            --label org.opencontainers.image.description="${{ env.LABEL_DESCRIPTION }}" \
+            --label org.opencontainers.image.base.name="${{ env.DOCKER_BASE_IMAGE }}" \
+            --build-arg RELEASE_DOCKER_BASE_IMAGE=${{ env.DOCKER_BASE_IMAGE }} \
+            --build-arg VERSION=${{ env.BUILD_VERSION }} \
+            --build-arg APPLICATION=${{ env.APPLICATION }} \
+            --tag ${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }} \
+            --push \
+            .
+          echo "Debug outputs:"
+          du -sh /tmp/docker-build-output
+          ls -lao /tmp/docker-build-output
+          exit 1
 
       - name: Build for linux/arm64
         run: >
