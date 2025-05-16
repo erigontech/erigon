@@ -64,7 +64,7 @@ jobs:
         run: rm -rf *
 
       - name: Checkout git repository ${{ env.APP_REPO }} reference ${{ inputs.checkout_ref }}
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 ## 4.1.7 release
+        uses: actions/checkout@v4
         with:
           repository: ${{ env.APP_REPO }}
           fetch-depth: 0
@@ -101,10 +101,10 @@ jobs:
           password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action
+        uses: docker/setup-buildx-action@v3
 
       - name: Setup GO build and pkg cache for one week only
         id: cache
