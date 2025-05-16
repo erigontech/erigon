@@ -32,8 +32,8 @@ require (
 	github.com/Masterminds/sprig/v3 v3.2.3
 	github.com/RoaringBitmap/roaring/v2 v2.4.5
 	github.com/alecthomas/kong v0.8.1
-	github.com/anacrolix/sync v0.5.1
-	github.com/anacrolix/torrent v1.58.2-0.20250424130859-3fedaf2077b7
+	github.com/anacrolix/sync v0.5.4
+	github.com/anacrolix/torrent v1.58.2-0.20250516052732-e2dbaf465fb6
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/consensys/gnark-crypto v0.17.0
@@ -121,6 +121,7 @@ require (
 	github.com/cespare/xxhash v1.1.0 // indirect
 	github.com/crate-crypto/go-ipa v0.0.0-20221111143132-9aa5d42120bc // indirect
 	github.com/elastic/go-freelru v0.16.0 // indirect
+	github.com/erigontech/interfaces v0.0.0-20250507071946-0c271a0ff782 // indirect
 	github.com/erigontech/speedtest v0.0.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
@@ -163,7 +164,7 @@ require (
 	github.com/anacrolix/envpprof v1.3.0 // indirect
 	github.com/anacrolix/generics v0.0.3-0.20240902042256-7fb2702ef0ca // indirect
 	github.com/anacrolix/go-libutp v1.3.2 // indirect
-	github.com/anacrolix/log v0.16.0 // indirect
+	github.com/anacrolix/log v0.16.1-0.20250429062012-9dd7c8a776c6 // indirect
 	github.com/anacrolix/missinggo v1.3.0 // indirect
 	github.com/anacrolix/missinggo/perf v1.0.0 // indirect
 	github.com/anacrolix/missinggo/v2 v2.7.4 // indirect
