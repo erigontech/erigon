@@ -48,7 +48,7 @@ type BodiesCfg struct {
 	penalise        func(context.Context, []headerdownload.PenaltyItem)
 	blockPropagator adapter.BlockPropagator
 	timeout         int
-	chanConfig      chain.Config
+	chanConfig      *chain.Config
 	blockReader     services.FullBlockReader
 	blockWriter     *blockio.BlockWriter
 }
@@ -56,7 +56,7 @@ type BodiesCfg struct {
 func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload,
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool), penalise func(context.Context, []headerdownload.PenaltyItem),
 	blockPropagator adapter.BlockPropagator, timeout int,
-	chanConfig chain.Config,
+	chanConfig *chain.Config,
 	blockReader services.FullBlockReader,
 	blockWriter *blockio.BlockWriter,
 ) BodiesCfg {

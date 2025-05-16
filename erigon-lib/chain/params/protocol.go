@@ -23,6 +23,7 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 )
 
 const (
@@ -219,3 +220,30 @@ var (
 	MinimumDifficulty      = big.NewInt(131072) // The minimum that the difficulty may ever be.
 	DurationLimit          = big.NewInt(13)     // The decision boundary on the blocktime duration used to determine whether difficulty should go up or not.
 )
+
+// See EIP-7840: Add blob schedule to EL config files
+// and EIP-7892: Blob Parameter Only Hardforks
+type BlobConfig struct {
+	Target                hexutil.FlexibleUint64 `json:"target"`
+	Max                   hexutil.FlexibleUint64 `json:"max"`
+	BaseFeeUpdateFraction hexutil.FlexibleUint64 `json:"baseFeeUpdateFraction"`
+}
+
+var DefaultCancunBlobConfig = BlobConfig{
+	Target:                3,
+	Max:                   6,
+	BaseFeeUpdateFraction: 3338477,
+}
+
+var DefaultPragueBlobConfig = BlobConfig{
+	Target:                6,
+	Max:                   9,
+	BaseFeeUpdateFraction: 5007716,
+}
+
+// TODO(yperbasis): update when Fusaka's blob config is decided
+var DefaultOsakaBlobConfig = BlobConfig{
+	Target:                6,
+	Max:                   9,
+	BaseFeeUpdateFraction: 5007716,
+}

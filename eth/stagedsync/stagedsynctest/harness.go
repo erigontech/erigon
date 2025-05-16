@@ -73,7 +73,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		chainDataDB,
 		borConsensusDB,
 		miningState,
-		*cfg.ChainConfig,
+		cfg.ChainConfig,
 		heimdallClient,
 		heimdallStore,
 		bridgeStore,

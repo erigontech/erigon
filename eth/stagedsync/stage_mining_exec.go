@@ -53,7 +53,7 @@ type MiningExecCfg struct {
 	db          kv.RwDB
 	miningState MiningState
 	notifier    ChainEventNotifier
-	chainConfig chain.Config
+	chainConfig *chain.Config
 	engine      consensus.Engine
 	blockReader services.FullBlockReader
 	vmConfig    *vm.Config
@@ -67,7 +67,7 @@ func StageMiningExecCfg(
 	db kv.RwDB,
 	miningState MiningState,
 	notifier ChainEventNotifier,
-	chainConfig chain.Config,
+	chainConfig *chain.Config,
 	engine consensus.Engine,
 	vmConfig *vm.Config,
 	tmpdir string,
@@ -189,7 +189,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	if current.Receipts == nil {
 		current.Receipts = types.Receipts{}
 	}
-	chainReader := ChainReaderImpl{config: &cfg.chainConfig, tx: txc.Tx, blockReader: cfg.blockReader, logger: logger}
+	chainReader := ChainReaderImpl{config: cfg.chainConfig, tx: txc.Tx, blockReader: cfg.blockReader, logger: logger}
 
 	if err := cfg.engine.Prepare(chainReader, current.Header, ibs); err != nil {
 		return err
@@ -197,7 +197,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 
 	var err error
 	var block *types.Block
-	block, current.Txns, current.Receipts, current.Requests, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txns, current.Uncles, &state.NoopWriter{}, &cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, chainReader, true, logger, nil)
+	block, current.Txns, current.Receipts, current.Requests, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txns, current.Uncles, &state.NoopWriter{}, cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, chainReader, true, logger, nil)
 	if err != nil {
 		return fmt.Errorf("cannot finalize block execution: %s", err)
 	}
@@ -291,7 +291,7 @@ func getNextTransactions(
 	return txns, nil
 }
 
-func filterBadTransactions(transactions []types.Transaction, chainID *uint256.Int, config chain.Config, blockNumber uint64, header *types.Header, simStateReader state.StateReader, simStateWriter state.StateWriter, logger log.Logger) ([]types.Transaction, error) {
+func filterBadTransactions(transactions []types.Transaction, chainID *uint256.Int, config *chain.Config, blockNumber uint64, header *types.Header, simStateReader state.StateReader, simStateWriter state.StateWriter, logger log.Logger) ([]types.Transaction, error) {
 	initialCnt := len(transactions)
 	var filtered []types.Transaction
 	gasBailout := false
@@ -421,7 +421,7 @@ func addTransactionsToMiningBlock(
 	ctx context.Context,
 	logPrefix string,
 	current *MiningBlock,
-	chainConfig chain.Config,
+	chainConfig *chain.Config,
 	vmConfig *vm.Config,
 	getHeader func(hash common.Hash, number uint64) *types.Header,
 	engine consensus.Engine,
@@ -438,12 +438,12 @@ func addTransactionsToMiningBlock(
 	if header.BlobGasUsed != nil {
 		gasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed)
 	}
-	signer := types.MakeSigner(&chainConfig, header.Number.Uint64(), header.Time)
+	signer := types.MakeSigner(chainConfig, header.Number.Uint64(), header.Time)
 
 	var coalescedLogs types.Logs
 	noop := state.NewNoopWriter()
 
-	var miningCommitTx = func(txn types.Transaction, coinbase common.Address, vmConfig *vm.Config, chainConfig chain.Config, ibs *state.IntraBlockState, current *MiningBlock) ([]*types.Log, error) {
+	var miningCommitTx = func(txn types.Transaction, coinbase common.Address, vmConfig *vm.Config, chainConfig *chain.Config, ibs *state.IntraBlockState, current *MiningBlock) ([]*types.Log, error) {
 		ibs.SetTxContext(txnIdx)
 		gasSnap := gasPool.Gas()
 		blobGasSnap := gasPool.BlobGas()
@@ -451,9 +451,9 @@ func addTransactionsToMiningBlock(
 
 		if txn.Type() == types.AccountAbstractionTxType {
 			aaTxn := txn.(*types.AccountAbstractionTransaction)
-			blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, &coinbase, &chainConfig)
-			evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, &chainConfig, *vmConfig)
-			paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, ibs, gasPool, header, evm, &chainConfig)
+			blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, &coinbase, chainConfig)
+			evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, chainConfig, *vmConfig)
+			paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, ibs, gasPool, header, evm, chainConfig)
 			if err != nil {
 				ibs.RevertToSnapshot(snap)
 				gasPool = new(core.GasPool).AddGas(gasSnap).AddBlobGas(blobGasSnap) // restore gasPool as well as ibs
@@ -476,7 +476,7 @@ func addTransactionsToMiningBlock(
 			return receipt.Logs, nil
 		}
 
-		receipt, _, err := core.ApplyTransaction(&chainConfig, core.GetHashFn(header, getHeader), engine, &coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, header.BlobGasUsed, *vmConfig)
+		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, &coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, header.BlobGasUsed, *vmConfig)
 		if err != nil {
 			ibs.RevertToSnapshot(snap)
 			gasPool = new(core.GasPool).AddGas(gasSnap).AddBlobGas(blobGasSnap) // restore gasPool as well as ibs
