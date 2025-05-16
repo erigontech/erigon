@@ -93,6 +93,8 @@ type Aggregator struct {
 	logger       log.Logger
 
 	produce bool
+
+	dependentMap map[kv.Domain]*DependencyIntegrityChecker
 }
 
 const AggregatorSqueezeCommitmentValues = true
@@ -144,7 +146,8 @@ func newAggregatorOld(ctx context.Context, dirs datadir.Dirs, aggregationStep ui
 
 		commitmentValuesTransform: AggregatorSqueezeCommitmentValues,
 
-		produce: true,
+		produce:      true,
+		dependentMap: make(map[kv.Domain]*DependencyIntegrityChecker),
 	}, nil
 }
 
@@ -263,6 +266,24 @@ func (a *Aggregator) ReloadSalt() error {
 	}
 
 	return nil
+}
+
+func (a *Aggregator) DirtyFiles(forDomain kv.Domain) *btree.BTreeG[*filesItem] {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	return a.d[forDomain].dirtyFiles.Copy()
+}
+
+func (a *Aggregator) AddDependency(dependency kv.Domain, dependent kv.Domain) {
+	checker, ok := a.dependentMap[dependent]
+	if !ok {
+		checker = NewDependencyIntegrityChecker(a.dirs, a.logger)
+	}
+	checker.AddDependency(dependency, &DependentInfo{
+		domain:      dependent,
+		filesGetter: func() *btree.BTreeG[*filesItem] { return a.DirtyFiles(dependent) },
+		accessors:   a.d[dependent].Accessors,
+	})
 }
 
 func (a *Aggregator) OpenFolder() error {

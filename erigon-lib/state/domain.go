@@ -96,6 +96,8 @@ type Domain struct {
 	// _visible - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
 	_visible *domainVisible
+
+	checker *DependencyIntegrityChecker
 }
 
 type domainCfg struct {
@@ -168,6 +170,10 @@ func NewDomain(cfg domainCfg, aggStep uint64, logger log.Logger) (*Domain, error
 
 	return d, nil
 }
+func (d *Domain) SetDependency(checker *DependencyIntegrityChecker) {
+	d.checker = checker
+}
+
 func (d *Domain) kvFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kv", d.version.DataKV.String(), d.filenameBase, fromStep, toStep))
 }

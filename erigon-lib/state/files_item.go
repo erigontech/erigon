@@ -284,39 +284,7 @@ func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l Accessors, trace bool,
 				}
 				continue
 			}
-			if item.canDelete.Load() {
-				if trace {
-					log.Warn("[dbg] calcVisibleFiles: canDelete=true", "f", item.decompressor.FileName())
-				}
-				continue
-			}
-
-			// TODO: need somehow handle this case, but indices do not open in tests TestFindMergeRangeCornerCases
-			if item.decompressor == nil {
-				if trace {
-					log.Warn("[dbg] calcVisibleFiles: decompressor not opened", "from", item.startTxNum, "to", item.endTxNum)
-				}
-				continue
-			}
-			if l.Has(AccessorBTree) && item.bindex == nil {
-				if trace {
-					log.Warn("[dbg] calcVisibleFiles: BTindex not opened", "f", item.decompressor.FileName())
-				}
-				//panic(fmt.Errorf("btindex nil: %s", item.decompressor.FileName()))
-				continue
-			}
-			if l.Has(AccessorHashMap) && item.index == nil {
-				if trace {
-					log.Warn("[dbg] calcVisibleFiles: RecSplit not opened", "f", item.decompressor.FileName())
-				}
-				//panic(fmt.Errorf("index nil: %s", item.decompressor.FileName()))
-				continue
-			}
-			if l.Has(AccessorExistence) && item.existence == nil {
-				if trace {
-					log.Warn("[dbg] calcVisibleFiles: Existence not opened", "f", item.decompressor.FileName())
-				}
-				//panic(fmt.Errorf("existence nil: %s", item.decompressor.FileName()))
+			if !checkFilesItemFields(item, l, trace) {
 				continue
 			}
 
@@ -345,6 +313,43 @@ func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l Accessors, trace bool,
 		newVisibleFiles = []visibleFile{}
 	}
 	return newVisibleFiles
+}
+
+func checkFilesItemFields(item *filesItem, l Accessors, trace bool) (ok bool) {
+	if item.canDelete.Load() {
+		if trace {
+			log.Warn("[dbg] canDelete=true", "f", item.decompressor.FileName())
+		}
+		return false
+	}
+	if item.decompressor == nil {
+		if trace {
+			log.Warn("[dbg] decompressor not opened", "from", item.startTxNum, "to", item.endTxNum)
+		}
+		return false
+	}
+	if l.Has(AccessorBTree) && item.bindex == nil {
+		if trace {
+			log.Warn("[dbg] calcVisibleFiles: BTindex not opened", "f", item.decompressor.FileName())
+		}
+		//panic(fmt.Errorf("btindex nil: %s", item.decompressor.FileName()))
+		return false
+	}
+	if l.Has(AccessorHashMap) && item.index == nil {
+		if trace {
+			log.Warn("[dbg] calcVisibleFiles: RecSplit not opened", "f", item.decompressor.FileName())
+		}
+		//panic(fmt.Errorf("index nil: %s", item.decompressor.FileName()))
+		return false
+	}
+	if l.Has(AccessorExistence) && item.existence == nil {
+		if trace {
+			log.Warn("[dbg] calcVisibleFiles: Existence not opened", "f", item.decompressor.FileName())
+		}
+		//panic(fmt.Errorf("existence nil: %s", item.decompressor.FileName()))
+		return false
+	}
+	return true
 }
 
 // visibleFiles have no garbage (overlaps, unindexed, etc...)
