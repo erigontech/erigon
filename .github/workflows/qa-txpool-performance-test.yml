@@ -202,18 +202,22 @@ jobs:
 
       # Clean up, always
       - name: Clean test results
+        uses: gacts/run-and-post-run@v1.4.2
         if: always()
-        run: |
-          rm -rf kurtosis_artifacts
-          rm -f outputs_kurtosis.json
+        with:
+          post: |
+            rm -rf kurtosis_artifacts
+            rm -f outputs_kurtosis.json
 
       - name: Clean docker containers and images
+        uses: gacts/run-and-post-run@v1.4.2
         if: always()
-        run: |
-          # stop all containers
-          docker stop $(docker ps -a -q)
-          # remove containers and images
-          docker rm -f $(docker ps -a -q)
-          docker rmi -f $(docker images -q)
-          docker system prune -a -f
-          docker volume rm $(docker volume ls -q)
+        with:
+          post: |
+            # stop all containers
+            docker stop $(docker ps -a -q)
+            # remove containers and images
+            docker rm -f $(docker ps -a -q)
+            docker rmi -f $(docker images -q)
+            docker system prune -a -f
+            docker volume rm $(docker volume ls -q)
