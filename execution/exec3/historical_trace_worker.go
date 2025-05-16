@@ -150,7 +150,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 	//ibs.SetTrace(true)
 	txTask.Tracer.Reset() // txTask is retryable
 	hooks := txTask.Tracer.Tracer().Hooks
-	ibs.SetHooks(hooks)
+	ibs.SetHooks(nil)
 
 	var err error
 	rules, header := txTask.Rules, txTask.Header
@@ -205,7 +205,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), rw.execArgs.ChainConfig.GetMaxBlobGasPerBlock(header.Time))
 		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		ibs.SetTxContext(txTask.TxIndex)
-		rw.vmCfg.Tracer = hooks
+		//rw.vmCfg.Tracer = hooks
 		msg := txTask.TxAsMessage
 		txn := txTask.Tx
 

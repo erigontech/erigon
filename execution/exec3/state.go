@@ -212,10 +212,10 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 	rw.stateWriter.ResetWriteSet()
 
 	rw.ibs.Reset()
-	ibs := rw.ibs
+	ibs, hooks := rw.ibs, rw.hooks
 	//ibs.SetTrace(true)
-	ibs.SetHooks(rw.hooks)
-	fmt.Printf("[dbg] worker1: %t\n", rw.hooks == nil)
+	ibs.SetHooks(hooks)
+
 	var err error
 	rules, header := txTask.Rules, txTask.Header
 
@@ -236,10 +236,10 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			ret, _, err := core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, constCall /* constCall */, rw.hooks)
+			ret, _, err := core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, constCall /* constCall */, hooks)
 			return ret, err
 		}
-		rw.engine.Initialize(rw.chainConfig, rw.chain, header, ibs, syscall, rw.logger, rw.hooks)
+		rw.engine.Initialize(rw.chainConfig, rw.chain, header, ibs, syscall, rw.logger, hooks)
 		txTask.Error = ibs.FinalizeTx(rules, noop)
 	case txTask.Final:
 		if txTask.BlockNum == 0 {
@@ -248,7 +248,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 
 		// End of block transaction in a block
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			ret, logs, err := core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */, rw.hooks)
+			ret, logs, err := core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */, hooks)
 			if err != nil {
 				return nil, err
 			}
@@ -276,6 +276,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		rw.callTracer.Reset()
 		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		ibs.SetTxContext(txTask.TxIndex)
+		fmt.Printf("[dbg] tracer: %T %+v\n", rw.vmCfg.Tracer, rw.vmCfg.Tracer)
 		txn := txTask.Tx
 
 		if txTask.Tx.Type() == types.AccountAbstractionTxType {
@@ -298,15 +299,15 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		msg := txTask.TxAsMessage
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.vmCfg, rules)
 
-		if rw.hooks != nil && rw.hooks.OnTxStart != nil {
-			rw.hooks.OnTxStart(rw.evm.GetVMContext(), txn, msg.From())
+		if hooks != nil && hooks.OnTxStart != nil {
+			hooks.OnTxStart(rw.evm.GetVMContext(), txn, msg.From())
 		}
 		// MA applytx
 		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */, rw.engine)
 		if err != nil {
 			txTask.Error = err
-			if rw.hooks != nil && rw.hooks.OnTxEnd != nil {
-				rw.hooks.OnTxEnd(nil, err)
+			if hooks != nil && hooks.OnTxEnd != nil {
+				hooks.OnTxEnd(nil, err)
 			}
 		} else {
 			txTask.Failed = applyRes.Failed()
@@ -319,8 +320,8 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			txTask.TraceTos = rw.callTracer.Tos()
 
 			txTask.CreateReceipt(rw.Tx())
-			if rw.hooks != nil && rw.hooks.OnTxEnd != nil {
-				rw.hooks.OnTxEnd(txTask.BlockReceipts[txTask.TxIndex], nil)
+			if hooks != nil && hooks.OnTxEnd != nil {
+				hooks.OnTxEnd(txTask.BlockReceipts[txTask.TxIndex], nil)
 			}
 		}
 
