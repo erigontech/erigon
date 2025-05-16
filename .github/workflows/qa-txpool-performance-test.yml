@@ -196,5 +196,4 @@ jobs:
           post: |
             # remove created containers and images
             docker rmi test/erigon:current
-            docker rmi test/assertoor:current
             docker volume rm $(docker volume ls -q)
