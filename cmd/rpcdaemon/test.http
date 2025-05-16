@@ -1,6 +1,7 @@
 
 
 # curl --data '{"method":"trace_replayBlockTransactions","params":["0x121eaca",["trace"]],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
+# curl --data '{"method":"eth_getBlockReceipts","params":["0x18103C"],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8547
 POST 127.0.0.1:8545
 Content-Type: application/json
 

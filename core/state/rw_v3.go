@@ -234,7 +234,7 @@ func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *li
 
 	for _, lg := range txTask.Logs {
 		if txTask.BlockNum == 1577020 || txTask.BlockNum == 1577021 || txTask.BlockNum == 1577022 {
-			fmt.Printf("[dbg] reduce1: %x, %d, txidx=%d\n", lg.Address[:], txTask.BlockNum, txTask.TxIndex)
+			fmt.Printf("[dbg] reduce1: %x, %d, txidx=%d, txnum=%d,%d\n", lg.Address[:], txTask.BlockNum, txTask.TxIndex, txTask.TxNum, domains.TxNum())
 		}
 		if err := domains.IndexAdd(kv.LogAddrIdx, lg.Address[:]); err != nil {
 			return err

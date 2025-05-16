@@ -434,7 +434,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 			if produce.LogAddr {
 				for _, lg := range txTask.Logs {
 					if txTask.BlockNum == 1577020 || txTask.BlockNum == 1577021 || txTask.BlockNum == 1577022 {
-						fmt.Printf("[dbg] reduce1: %x, %d, txidx=%d\n", lg.Address[:], txTask.BlockNum, txTask.TxIndex)
+						fmt.Printf("[dbg] reduce1: %x, %d, txidx=%d, txnum=%d,%d\n", lg.Address[:], txTask.BlockNum, txTask.TxIndex, txTask.TxNum, doms.TxNum())
 					}
 
 					if err := doms.IndexAdd(kv.LogAddrIdx, lg.Address[:]); err != nil {
