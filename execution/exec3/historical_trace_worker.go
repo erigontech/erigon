@@ -187,6 +187,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 			}
 			txTask.Logs = append(txTask.Logs, logs...)
 			if txTask.BlockNum == 1577021 {
+				fmt.Printf("[dbg] trace1.amount: %d, txidx=%d\n", len(logs), txTask.TxIndex)
 				for _, l := range logs {
 					fmt.Printf("[dbg] trace1: %x\n", l.Address)
 				}
@@ -206,12 +207,12 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 			}
 		}
 	default:
-		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), cc.GetMaxBlobGasPerBlock(header.Time))
-		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		txTask.Tracer.Reset() // txTask is retryable
 		rw.vmCfg.Tracer = txTask.Tracer.Tracer().Hooks
+		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		ibs.SetTxContext(txTask.TxIndex)
 		txn := txTask.Tx
+		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), cc.GetMaxBlobGasPerBlock(header.Time))
 
 		if txTask.Tx.Type() == types.AccountAbstractionTxType {
 			if !cc.AllowAA {
@@ -252,6 +253,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 
 			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txn.Hash(), txTask.BlockNum, txTask.BlockHash)
 			if txTask.BlockNum == 1577021 {
+				fmt.Printf("[dbg] trace2.amount: %d, txidx=%d\n", len(txTask.Logs), txTask.TxIndex)
 				for _, l := range txTask.Logs {
 					fmt.Printf("[dbg] trace2: %x\n", l.Address)
 				}
