@@ -247,7 +247,7 @@ func (h *History) openDirtyFiles() error {
 					if !fileVer.Less(h.version.DataV.MinSupported) {
 						h.version.DataV.Current = fileVer
 					} else {
-						panic("Version is too low, try to rm ef snapshots")
+						panic("Version is too low, try to rm v history snapshots")
 						//return false
 					}
 				}
@@ -292,7 +292,7 @@ func (h *History) openDirtyFiles() error {
 						if !fileVer.Less(h.version.AccessorVI.MinSupported) {
 							h.version.AccessorVI.Current = fileVer
 						} else {
-							panic("Version is too low, try to rm ef snapshots")
+							panic("Version is too low, try to rm vi history snapshots")
 							//return false
 						}
 					}
