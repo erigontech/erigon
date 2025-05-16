@@ -570,7 +570,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: true,
 				BlockReceipts:    blockReceipts,
-				Tracer:           calltracer.NewCallTracer(&tracing.Hooks{}),
+				Tracer:           calltracer.NewCallTracer(nil),
 			}
 
 			if txIndex >= 0 && txIndex < len(txs) {
