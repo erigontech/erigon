@@ -108,10 +108,9 @@ type HasAgg interface {
 }
 
 func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
-
 	sd := &SharedDomains{
 		logger:  logger,
-		storage: btree2.NewMap[string, dataWithPrevStep](128),
+		storage: btree2.NewMap[string, dataWithPrevStep](64),
 		//trace:   true,
 	}
 	sd.SetTx(tx)
