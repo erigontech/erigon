@@ -91,17 +91,6 @@ func (j *journal) length() int {
 	return len(j.entries)
 }
 
-func (j *journal) accessListAddAccount(addr common.Address) {
-	j.append(accessListAddAccountChange{addr})
-}
-
-func (j *journal) accessListAddSlot(addr common.Address, slot common.Hash) {
-	j.append(accessListAddSlotChange{
-		address: addr,
-		slot:    slot,
-	})
-}
-
 type (
 	// Changes to the account trie.
 	createObjectChange struct {
