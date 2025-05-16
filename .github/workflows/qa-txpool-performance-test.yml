@@ -20,6 +20,12 @@ jobs:
       - name: Fast checkout git repository
         uses: actions/checkout@v4
 
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
+          password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
+
       - name: Docker build current branch
         run: |
           docker build -t test/erigon:current .
