@@ -12,12 +12,15 @@ import (
 // KeyToHexNibbleHash hashes plain key with respect to plain key size (part < 20 bytes for account, part >= 20 bytes for storage)
 // and returns the hashed key in nibblized form suitable for hex trie (each byte represented by 2 nibbles).
 func KeyToHexNibbleHash(key []byte) []byte {
-	addrHash := ecrypto.Keccak256(key[:length.Addr])
+	var hashed []byte
 	if len(key) > length.Addr { // storage
-		storageKeyHash := ecrypto.Keccak256(key[length.Addr:])
-		addrHash = append(addrHash, storageKeyHash...)
+		hashed = make([]byte, 64)
+		copy(hashed[:32], ecrypto.Keccak256(key[:length.Addr]))
+		copy(hashed[32:], ecrypto.Keccak256(key[length.Addr:]))
+	} else {
+		hashed = ecrypto.Keccak256(key)
 	}
-	return splitOntoHexNibbles(addrHash)
+	return splitOntoHexNibbles(hashed)
 }
 
 // hexNibblesToCompactBytes Converts slice of hex nibbles into regular bytes form, combining two nibbles into one byte.
