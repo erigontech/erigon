@@ -22,12 +22,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/version"
 	"math"
 	"path/filepath"
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/erigontech/erigon-lib/version"
 
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
@@ -557,20 +558,21 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWrit
 	discardHistory := discard || dt.d.historyDisabled
 
 	w := &DomainBufferedWriter{
-		discard:   discard,
-		aux:       make([]byte, 0, 128),
-		valsTable: dt.d.valuesTable,
-		largeVals: dt.d.largeValues,
-		values:    etl.NewCollector(dt.name.String()+"domain.flush", tmpdir, etl.NewSortableBuffer(WALCollectorRAM), dt.d.logger).LogLvl(log.LvlTrace),
-
-		h: dt.ht.newWriter(tmpdir, discardHistory),
+		discard:       discard,
+		aux:           make([]byte, 0, 128),
+		valsTable:     dt.d.valuesTable,
+		largeVals:     dt.d.largeValues,
+		h:             dt.ht.newWriter(tmpdir, discardHistory),
+		_valuesEtlBuf: sortableBufferForPruning(),
 	}
+	w.values = etl.NewCollector(dt.name.String()+"domain.flush", tmpdir, w._valuesEtlBuf, dt.d.logger).LogLvl(log.LvlTrace)
 	w.values.SortAndFlushInBackground(true)
 	return w
 }
 
 type DomainBufferedWriter struct {
-	values *etl.Collector
+	_valuesEtlBuf etl.Buffer
+	values        *etl.Collector
 
 	discard bool
 
@@ -592,6 +594,7 @@ func (w *DomainBufferedWriter) Close() {
 	w.h.close()
 	if w.values != nil {
 		w.values.Close()
+		sortableBuffersPoolForPruning.Put(w._valuesEtlBuf)
 	}
 }
 

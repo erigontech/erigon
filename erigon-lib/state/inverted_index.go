@@ -23,7 +23,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/version"
 	"math"
 	"os"
 	"path"
@@ -33,6 +32,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/erigontech/erigon-lib/version"
 
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
@@ -415,10 +416,12 @@ func (iit *InvertedIndexRoTx) NewWriter() *InvertedIndexBufferedWriter {
 }
 
 type InvertedIndexBufferedWriter struct {
-	index, indexKeys *etl.Collector
-	tmpdir           string
-	discard          bool
-	filenameBase     string
+	_indexEtlBuf, _indexKeysEtlBuf etl.Buffer
+	index, indexKeys               *etl.Collector
+
+	tmpdir       string
+	discard      bool
+	filenameBase string
 
 	indexTable, indexKeysTable string
 
@@ -474,9 +477,11 @@ func (w *InvertedIndexBufferedWriter) close() {
 	}
 	if w.index != nil {
 		w.index.Close()
+		sortableBuffersPoolForPruning.Put(w._indexEtlBuf)
 	}
 	if w.indexKeys != nil {
 		w.indexKeys.Close()
+		sortableBuffersPoolForPruning.Put(w._indexKeysEtlBuf)
 	}
 }
 
@@ -486,6 +491,7 @@ var CollateETLRAM = dbg.EnvDataSize("AGG_COLLATE_RAM", etl.BufferOptimalSize/4)
 
 func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *InvertedIndexBufferedWriter {
 	w := &InvertedIndexBufferedWriter{
+		name:            iit.name,
 		discard:         discard,
 		tmpdir:          tmpdir,
 		filenameBase:    iit.ii.filenameBase,
@@ -494,10 +500,11 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *InvertedIn
 		indexKeysTable: iit.ii.keysTable,
 		indexTable:     iit.ii.valuesTable,
 		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
-		indexKeys: etl.NewCollector(iit.ii.filenameBase+".flush.ii.keys", tmpdir, etl.NewSortableBuffer(WALCollectorRAM), iit.ii.logger).LogLvl(log.LvlTrace),
-		index:     etl.NewCollector(iit.ii.filenameBase+".flush.ii.vals", tmpdir, etl.NewSortableBuffer(WALCollectorRAM), iit.ii.logger).LogLvl(log.LvlTrace),
-		name:      iit.name,
+		_indexEtlBuf:     sortableBufferForPruning(),
+		_indexKeysEtlBuf: sortableBufferForPruning(),
 	}
+	w.indexKeys = etl.NewCollector(iit.ii.filenameBase+".flush.ii.keys", tmpdir, w._indexKeysEtlBuf, iit.ii.logger).LogLvl(log.LvlTrace)
+	w.index = etl.NewCollector(iit.ii.filenameBase+".flush.ii.vals", tmpdir, w._indexEtlBuf, iit.ii.logger).LogLvl(log.LvlTrace)
 	w.indexKeys.SortAndFlushInBackground(true)
 	w.index.SortAndFlushInBackground(true)
 	return w

@@ -23,11 +23,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/version"
 	"math"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/erigontech/erigon-lib/version"
 
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
@@ -563,10 +564,11 @@ func (ht *HistoryRoTx) NewWriter() *historyBufferedWriter {
 }
 
 type historyBufferedWriter struct {
-	historyVals      *etl.Collector
-	historyKey       []byte
-	discard          bool
-	historyValsTable string
+	_historyValsEtlBuf etl.Buffer
+	historyVals        *etl.Collector
+	historyKey         []byte
+	discard            bool
+	historyValsTable   string
 
 	// not large:
 	//   keys: txNum -> key1+key2
@@ -586,6 +588,7 @@ func (w *historyBufferedWriter) close() {
 	w.ii.close()
 	if w.historyVals != nil {
 		w.historyVals.Close()
+		sortableBuffersPoolForPruning.Put(w._historyValsEtlBuf)
 	}
 }
 
@@ -596,10 +599,12 @@ func (ht *HistoryRoTx) newWriter(tmpdir string, discard bool) *historyBufferedWr
 		historyKey:       make([]byte, 128),
 		largeValues:      ht.h.historyLargeValues,
 		historyValsTable: ht.h.valuesTable,
-		historyVals:      etl.NewCollector(ht.h.filenameBase+".flush.hist", tmpdir, etl.NewSortableBuffer(WALCollectorRAM), ht.h.logger).LogLvl(log.LvlTrace),
 
 		ii: ht.iit.newWriter(tmpdir, discard),
+
+		_historyValsEtlBuf: sortableBufferForPruning(),
 	}
+	w.historyVals = etl.NewCollector(ht.h.filenameBase+".flush.hist", tmpdir, w._historyValsEtlBuf, ht.h.logger).LogLvl(log.LvlTrace)
 	w.historyVals.SortAndFlushInBackground(true)
 	return w
 }
