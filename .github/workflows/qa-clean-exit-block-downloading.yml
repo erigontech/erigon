@@ -16,7 +16,7 @@ jobs:
   clean-exit-bd-test:
     runs-on: [self-hosted, qa, Erigon3]
     env:
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
+      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-3/datadir
       ERIGON_TESTBED_AREA: /opt/erigon-testbed
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       WORKING_TIME_SECONDS: 600
