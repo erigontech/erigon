@@ -680,6 +680,9 @@ Loop:
 
 // [from, to)
 func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep uint64) error {
+	if toStep < fromStep {
+		return nil
+	}
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		return nil
 	}
