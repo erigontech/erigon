@@ -50,7 +50,7 @@ jobs:
           UNZIP_DIR: kurtosis_artifacts
         with:
           script: |
-            const script = require('./.github/workflows/scripts/download-previous-artifact.js')
+            const script = require('./.github/workflows/scripts/download_previous_artifact.js')
             await script({github, context, core})
 
       - name: Parse Kurtosis output log and create JSON
