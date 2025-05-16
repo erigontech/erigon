@@ -20,10 +20,10 @@ jobs:
             backend: Polygon
             cgroup_name: constrained_res_64G
             prune_mode: full_node
-    runs-on: [ self-hosted, "${{ matrix.backend }}" ]
+    runs-on: [ self-hosted, qa, "${{ matrix.backend }}" ]
     env:
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
-      ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
+      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-3/datadir
+      ERIGON_TESTBED_AREA: /opt/erigon-testbed
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 14400 # 4 hours
       TOTAL_TIME_SECONDS: 28800 # 8 hours
@@ -48,9 +48,10 @@ jobs:
       run: |
         python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
 
-    - name: Restore Erigon Testbed Data Directory
+    - name: Save Erigon Chaindata Directory
+      id: save_chaindata_step
       run: |
-        rsync -a --delete $ERIGON_REFERENCE_DATA_DIR/ $ERIGON_TESTBED_DATA_DIR/
+        mv $ERIGON_REFERENCE_DATA_DIR/chaindata $ERIGON_TESTBED_AREA/chaindata-prev
 
     - name: Run Erigon, wait sync and check ability to maintain sync
       id: test_step
@@ -59,7 +60,7 @@ jobs:
         
         # Run Erigon under memory constraints, wait sync and check ability to maintain sync
         cgexec -g memory:$CGROUP_NAME python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
-          ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN $PRUNE_MODE statistics
+          ${{ github.workspace }}/build/bin $ERIGON_REFERENCE_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN $PRUNE_MODE statistics
   
         # Capture monitoring script exit status
         test_exit_status=$?
@@ -117,15 +118,19 @@ jobs:
       with:
         name: erigon-log-${{ env.CHAIN }}
         path: |
-          ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/erigon.log
-          ${{ env.ERIGON_TESTBED_DATA_DIR }}/proc_stat.log
+          ${{ env.ERIGON_REFERENCE_DATA_DIR }}/logs/erigon.log
+          ${{ env.ERIGON_REFERENCE_DATA_DIR }}/proc_stat.log
 
-    - name: Delete Erigon Testbed Data Directory
-      if: always()
+    - name: Restore Erigon Chaindata Directory
+      if: ${{ always() }}
       run: |
-        rm -rf $ERIGON_TESTBED_DATA_DIR
+        if [ -d "$ERIGON_TESTBED_AREA/chaindata-prev" ]; then
+          rm -rf $ERIGON_REFERENCE_DATA_DIR/chaindata
+          mv $ERIGON_TESTBED_AREA/chaindata-prev $ERIGON_REFERENCE_DATA_DIR/chaindata
+        fi
 
     - name: Resume the Erigon instance dedicated to db maintenance
+      if: ${{ always() }}
       run: |
         python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
 

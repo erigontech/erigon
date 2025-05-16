@@ -6,7 +6,7 @@ on:
       - 'release/3.*'
   workflow_dispatch:
   schedule:
-    - cron: '0 0 * * 0'  # Run on Sunday at 00:00 AM UTC
+    - cron: '0 20 * * *'  # Run every night at 20:00 (08:00 PM) UTC
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -21,10 +21,11 @@ jobs:
             backend: RpcSpecific
           #- chain: bor-mainnet
           #  backend: Polygon
-    runs-on: [ self-hosted, "${{ matrix.backend }}" ]
+    runs-on: [ self-hosted, qa, "${{ matrix.backend }}" ]
     env:
-      ERIGON_DIR: /opt/erigon-versions/reference-version-3
-      ERIGON_DATA_DIR: /opt/erigon-versions/reference-version-3/datadir
+      ERIGON_REFERENCE_DIR: /opt/erigon-versions/reference-version-3
+      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-3/datadir
+      ERIGON_TESTBED_AREA: /opt/erigon-testbed
       RPC_PAST_TEST_DIR: /opt/rpc-past-tests
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       CHAIN: ${{ matrix.chain }}
@@ -39,7 +40,7 @@ jobs:
       - name: Checkout RPC Tests Repository & Install Requirements
         run: |
           rm -rf ${{runner.workspace}}/rpc-tests
-          git -c advice.detachedHead=false clone --depth 1 --branch v1.27.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
+          git -c advice.detachedHead=false clone --depth 1 --branch v1.58.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
           cd ${{runner.workspace}}/rpc-tests
 
       - name: Clean Erigon Build Directory
@@ -55,21 +56,34 @@ jobs:
         run: |
           python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
 
+      - name: Save Erigon Chaindata Directory
+        id: save_chaindata_step
+        run: |
+          rm -rf $ERIGON_TESTBED_AREA/chaindata-prev || true
+          echo "Backup chaindata"
+          cp -r $ERIGON_REFERENCE_DATA_DIR/chaindata $ERIGON_TESTBED_AREA/chaindata-prev
+
       - name: Run RpcDaemon
         id: rpcdaemon_running_step
         working-directory: ${{ github.workspace }}/build/bin
         run: |
-          echo "RpcDaemon starting..."
+          echo "Starting RpcDaemon..."
           
-          ./rpcdaemon --datadir $ERIGON_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws --verbosity 1 > erigon.log 2>&1 &
+          ./rpcdaemon --datadir $ERIGON_REFERENCE_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws > erigon.log 2>&1 &
 
           RPC_DAEMON_PID=$!          
+          RPC_DAEMON_EXIT_STATUS=$?
           echo "RPC_DAEMON_PID=$RPC_DAEMON_PID" >> $GITHUB_ENV
           echo "rpc_daemon_started=true" >> $GITHUB_OUTPUT
           
           sleep 5
           tail erigon.log
           
+          if [ $RPC_DAEMON_EXIT_STATUS -ne 0 ]; then            
+            echo "RpcDaemon failed to start"
+            echo "::error::Error detected during tests: RpcDaemon failed to start"
+            exit 1
+          fi
           echo "RpcDaemon started"
 
       - name: Wait for port 8545 to be opened
@@ -84,6 +98,7 @@ jobs:
           done
           if ! nc -z localhost 8545; then
             echo "Port 8545 did not open in time"
+            echo "::error::Error detected during tests: Port 8545 did not open in time"
             exit 1
           fi
 
@@ -116,7 +131,7 @@ jobs:
                                       --pattern-file pattern/"$network"/"$pattern".tar \
                                       --test-sequence "$sequence" \
                                       --repetitions 5 \
-                                      --erigon-dir $ERIGON_DATA_DIR \
+                                      --erigon-dir $ERIGON_REFERENCE_DATA_DIR \
                                       --silk-dir ${{runner.workspace}}/erigon \
                                       --test-mode 2 \
                                       --test-report \
@@ -130,7 +145,7 @@ jobs:
             mv ${{runner.workspace}}/rpc-tests/perf/reports/mainnet/result.json ${{runner.workspace}}/rpc-tests/perf/reports/mainnet/erigon-$method-result.json
           
             # Detect the pre-built db version
-            db_version=$(python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/prod_info.py $ERIGON_DIR/production.ini production erigon_repo_commit)
+            db_version=$(python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/prod_info.py $ERIGON_REFERENCE_DIR/production.ini production erigon_repo_commit)
           
             # Check test runner script exit status
             if [ $perf_exit_status -eq 0 ]; then           
@@ -192,7 +207,8 @@ jobs:
           run_perf mainnet eth_createAccessList stress_test_eth_createAccessList_16M 1:1,100:30,1000:20,10000:20,20000:20          
           
           # Save the subsection reached status
-          echo "::set-output name=test_executed::true"
+          
+          echo "test_executed=true" >> $GITHUB_OUTPUT
           
           if [ $failed_test -eq 0 ]; then
                   echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
@@ -215,7 +231,17 @@ jobs:
             echo "RpcDaemon has already terminated"
           fi
 
+      - name: Restore Erigon Chaindata Directory
+        if: ${{ always() }}
+        run: |
+          if [ -d "$ERIGON_TESTBED_AREA/chaindata-prev" ] && [ "${{ steps.save_chaindata_step.outcome }}" == "success" ]; then
+          rm -rf $ERIGON_REFERENCE_DATA_DIR/chaindata
+          echo "Restore chaindata"
+          mv $ERIGON_TESTBED_AREA/chaindata-prev $ERIGON_REFERENCE_DATA_DIR/chaindata
+          fi
+
       - name: Resume the Erigon instance dedicated to db maintenance
+        if: ${{ always() }}
         run: |
           python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
 
@@ -225,11 +251,12 @@ jobs:
       #  run: |
       #    set +e # Disable exit on error
       #    open_change_points=0
-      #   python3 $ERIGON_QA_PATH/test_system/qa-tests/change-points/change_point_analysis.py
+      #    python3 $ERIGON_QA_PATH/test_system/qa-tests/change-points/change_point_analysis.py --repo erigon
       #    open_change_points=$?
       #    cp change_point_analysis.pdf $past_test_dir
       #    if [ $open_change_points -ne 0 ]; then
       #      echo "Change point analysis found points that need to be investigated"
+      #      echo "::warning title=Change Point Analysis::Found change points that need to be investigated"
       #      #echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"  -- enable in the future
       #    fi
 
@@ -239,6 +266,14 @@ jobs:
         with:
           name: test-results
           path: ${{ env.past_test_dir }}
+
+      - name: Action to check failure condition
+        if: failure()
+        run: |
+          if [ "${{ steps.test_step.outputs.test_executed }}" != "true" ]; then
+            echo "::error::Test not executed, workflow failed for infrastructure reasons"
+          fi
+          exit 1
 
       - name: Action for Success
         if: steps.test_step.outputs.TEST_RESULT == 'success'

@@ -1,6 +1,7 @@
 name: QA - RPC Integration Tests
 
 on:
+  workflow_dispatch:     # Run manually
   push:
     branches:
       - main
@@ -11,15 +12,13 @@ on:
       - 'release/3.*'
     types:
       - ready_for_review
-  workflow_dispatch:     # Run manually
 
 jobs:
   integration-test-suite:
-    runs-on: [ self-hosted, RpcSpecific ]
-    timeout-minutes: 15
+    runs-on: [ self-hosted, qa, RpcSpecific ]
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-3/datadir
-      ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
+      ERIGON_TESTBED_AREA: /opt/erigon-testbed
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       RPC_PAST_TEST_DIR: /opt/rpc-past-tests
       CHAIN: mainnet
@@ -31,7 +30,7 @@ jobs:
       - name: Checkout RPC Tests Repository & Install Requirements
         run: |
           rm -rf ${{ runner.workspace }}/rpc-tests
-          git -c advice.detachedHead=false clone --depth 1 --branch v1.41.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
+          git -c advice.detachedHead=false clone --depth 1 --branch v1.58.0  https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
           cd ${{ runner.workspace }}/rpc-tests
           pip3 install -r requirements.txt
 
@@ -48,16 +47,33 @@ jobs:
         run: |
           python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
 
+      - name: Save Erigon Chaindata Directory
+        id: save_chaindata_step
+        run: |
+          rm -rf $ERIGON_TESTBED_AREA/chaindata-prev || true
+          echo "Backup chaindata"
+          cp -r $ERIGON_REFERENCE_DATA_DIR/chaindata $ERIGON_TESTBED_AREA/chaindata-prev
+
       - name: Run RpcDaemon
         working-directory: ${{ github.workspace }}/build/bin
         run: |
-          echo "RpcDaemon starting..."
+          echo "Starting RpcDaemon..."
           
-          ./rpcdaemon --datadir $ERIGON_REFERENCE_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws --verbosity 1 > erigon.log 2>&1 &
+          ./rpcdaemon --datadir $ERIGON_REFERENCE_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws > erigon.log 2>&1 &
 
           RPC_DAEMON_PID=$!          
+          RPC_DAEMON_EXIT_STATUS=$?
           echo "RPC_DAEMON_PID=$RPC_DAEMON_PID" >> $GITHUB_ENV
+          echo "rpc_daemon_started=true" >> $GITHUB_OUTPUT
           
+          sleep 5
+          tail erigon.log
+          
+          if [ $RPC_DAEMON_EXIT_STATUS -ne 0 ]; then            
+            echo "RpcDaemon failed to start"
+            echo "::error::Error detected during tests: RpcDaemon failed to start"
+            exit 1
+          fi
           echo "RpcDaemon started"
 
       - name: Wait for port 8545 to be opened
@@ -72,6 +88,7 @@ jobs:
           done
           if ! nc -z localhost 8545; then
             echo "Port 8545 did not open in time"
+            echo "::error::Error detected during tests: Port 8545 did not open in time"
             exit 1
           fi
 
@@ -92,7 +109,7 @@ jobs:
           test_exit_status=$?
           
           # Save the subsection reached status
-          echo "::set-output name=test_executed::true"
+          echo "test_executed=true" >> $GITHUB_OUTPUT
           
           # Check test runner exit status
           if [ $test_exit_status -eq 0 ]; then
@@ -108,10 +125,11 @@ jobs:
           fi
 
       - name: Stop Erigon RpcDaemon
+        if: always()
         working-directory: ${{ github.workspace }}/build/bin
         run: |
           # Clean up rpcdaemon process if it's still running
-          if kill -0 $RPC_DAEMON_PID 2> /dev/null; then
+          if [ -n "$RPC_DAEMON_PID" ] && kill -0 $RPC_DAEMON_PID 2> /dev/null; then
             echo "RpcDaemon stopping..."
             kill $RPC_DAEMON_PID
             echo "RpcDaemon stopped"
@@ -119,7 +137,17 @@ jobs:
             echo "RpcDaemon has already terminated"
           fi
 
+      - name: Restore Erigon Chaindata Directory
+        if: ${{ always() }}
+        run: |
+          if [ -d "$ERIGON_TESTBED_AREA/chaindata-prev" ] && [ "${{ steps.save_chaindata_step.outcome }}" == "success" ]; then
+          rm -rf $ERIGON_REFERENCE_DATA_DIR/chaindata
+          echo "Restore chaindata"
+          mv $ERIGON_TESTBED_AREA/chaindata-prev $ERIGON_REFERENCE_DATA_DIR/chaindata
+          fi
+
       - name: Resume the Erigon instance dedicated to db maintenance
+        if: ${{ always() }}
         run: |
           python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
 
@@ -143,6 +171,14 @@ jobs:
           
           python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --branch ${{ github.ref_name }} --test_name rpc-integration-tests --chain $CHAIN --runner ${{ runner.name }} --db_version $db_version --outcome $TEST_RESULT #--result_file ${{ github.workspace }}/result-$CHAIN.json
 
+      - name: Action to check failure condition
+        if: failure()
+        run: |
+          if [ "${{ steps.test_step.outputs.test_executed }}" != "true" ]; then
+            echo "::error::Test not executed, workflow failed for infrastructure reasons"
+          fi
+          exit 1
+
       - name: Action for Success
         if: steps.test_step.outputs.TEST_RESULT == 'success'
         run: echo "::notice::Tests completed successfully"
@@ -150,5 +186,6 @@ jobs:
       - name: Action for Failure
         if: steps.test_step.outputs.TEST_RESULT != 'success'
         run: |
-          echo "::error::Error detected during tests"
+          echo "::error::Error detected during tests: some tests failed, check the logs or the artifacts for more details"
           exit 1
+
