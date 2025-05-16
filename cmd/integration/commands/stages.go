@@ -1002,14 +1002,13 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 
 	genesis := core.GenesisBlockByChainName(chain)
 	br, _ := blocksIO(db, logger)
-	fmt.Printf("[dbg] begin: %t\n", vmConfig.Tracer == nil)
+
 	notifications := shards.NewNotifications(nil)
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications,
 		/*stateStream=*/ false,
 		/*badBlockHalt=*/ true,
 		dirs, br, nil, genesis, syncCfg, nil)
 
-	fmt.Printf("[dbg] engine: %T\n", engine)
 	if unwind > 0 {
 		if err := db.View(ctx, func(tx kv.Tx) error {
 			minUnwindableBlockNum, _, err := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).CanUnwindBeforeBlockNum(s.BlockNumber-unwind, tx)

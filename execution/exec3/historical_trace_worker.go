@@ -24,6 +24,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/polygon/aa"
 	"golang.org/x/sync/errgroup"
 
@@ -37,7 +38,6 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/consensuschain"
@@ -147,10 +147,9 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 
 	rw.ibs.Reset()
 	ibs := rw.ibs
+	var hooks *tracing.Hooks // nil is ok
+	ibs.SetHooks(hooks)
 	//ibs.SetTrace(true)
-	txTask.Tracer.Reset() // txTask is retryable
-	hooks := txTask.Tracer.Tracer().Hooks
-	ibs.SetHooks(nil)
 
 	var err error
 	rules, header := txTask.Rules, txTask.Header
@@ -204,9 +203,9 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 	default:
 		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), rw.execArgs.ChainConfig.GetMaxBlobGasPerBlock(header.Time))
 		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
+		txTask.Tracer.Reset() // txTask is retryable
+		rw.vmCfg.Tracer = txTask.Tracer.Tracer().Hooks
 		ibs.SetTxContext(txTask.TxIndex)
-		//rw.vmCfg.Tracer = hooks
-		msg := txTask.TxAsMessage
 		txn := txTask.Tx
 
 		if txTask.Tx.Type() == types.AccountAbstractionTxType {
@@ -226,6 +225,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 			break
 		}
 
+		msg := txTask.TxAsMessage
 		txContext := core.NewEVMTxContext(msg)
 		if rw.vmCfg.TraceJumpDest {
 			txContext.TxHash = txn.Hash()
