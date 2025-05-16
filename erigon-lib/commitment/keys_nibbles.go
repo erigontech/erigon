@@ -12,15 +12,26 @@ import (
 // KeyToHexNibbleHash hashes plain key with respect to plain key size (part < 20 bytes for account, part >= 20 bytes for storage)
 // and returns the hashed key in nibblized form suitable for hex trie (each byte represented by 2 nibbles).
 func KeyToHexNibbleHash(key []byte) []byte {
-	var hashed []byte
+	// `nibblized`, `hashed` - are the same array
+	// but `hashed` is 2nd half of `nibblized`
+	// will use 1st half of `nibblized` in the end
+	var nibblized, hashed []byte
 	if len(key) > length.Addr { // storage
-		hashed = make([]byte, 64)
+		nibblized = make([]byte, 128)
+		hashed = nibblized[64:]
 		copy(hashed[:32], ecrypto.Keccak256(key[:length.Addr]))
 		copy(hashed[32:], ecrypto.Keccak256(key[length.Addr:]))
 	} else {
-		hashed = ecrypto.Keccak256(key)
+		nibblized = make([]byte, 64)
+		hashed = nibblized[32:]
+		copy(hashed, ecrypto.Keccak256(key))
 	}
-	return splitOntoHexNibbles(hashed)
+
+	for i, b := range hashed {
+		nibblized[i*2] = (b >> 4) & 0xf
+		nibblized[i*2+1] = b & 0xf
+	}
+	return nibblized
 }
 
 // hexNibblesToCompactBytes Converts slice of hex nibbles into regular bytes form, combining two nibbles into one byte.
@@ -76,12 +87,7 @@ func commonPrefixLen(b1, b2 []byte) int {
 }
 
 // splits each byte in key slice onto 2 nibbles in the resulting slice
-func splitOntoHexNibbles(key []byte) (nibblized []byte) { // nolint:unused
-	nibblized = make([]byte, len(key)*2)
-	for i, b := range key {
-		nibblized[i*2] = (b >> 4) & 0xf
-		nibblized[i*2+1] = b & 0xf
-	}
+func splitOntoHexNibbles(key, nibblized []byte) []byte { // nolint:unused
 	return nibblized
 }
 
