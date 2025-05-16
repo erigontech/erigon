@@ -27,6 +27,7 @@ const (
 	CapellaVersion   StateVersion = 3
 	DenebVersion     StateVersion = 4
 	ElectraVersion   StateVersion = 5
+	FuluVersion      StateVersion = 6
 )
 
 func (v StateVersion) String() string {
@@ -43,6 +44,8 @@ func (v StateVersion) String() string {
 		return "deneb"
 	case ElectraVersion:
 		return "electra"
+	case FuluVersion:
+		return "fulu"
 	default:
 		panic("unsupported fork version")
 	}
