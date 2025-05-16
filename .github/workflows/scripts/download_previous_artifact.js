@@ -11,7 +11,14 @@ module.exports = async ({
 		repo
 	})
 
-	const workflow = workflows.data.workflows.find(w => w.path.includes(process.env.WORKFLOW_FILENAME));
+	// Extract just the filename from WORKFLOW_FILENAME and from each workflow path
+	const targetFilename = process.env.WORKFLOW_FILENAME;
+	const workflow = workflows.data.workflows.find(w => {
+		// Extract the filename from the full path
+		const pathParts = w.path.split('/');
+		const workflowFilename = pathParts[pathParts.length - 1];
+		return workflowFilename === targetFilename;
+	});
 
 	if (!workflow) {
 		core.setFailed("No workflow found");
