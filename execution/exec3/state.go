@@ -285,7 +285,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 				break
 			}
 
-			msg, err := txTask.Tx.AsMessage(types.Signer{}, nil, nil)
+			msg, err := txn.AsMessage(types.Signer{}, nil, nil)
 			if err != nil {
 				txTask.Error = err
 				break
