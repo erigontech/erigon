@@ -432,6 +432,7 @@ func ExecV3(ctx context.Context,
 	ts := time.Duration(0)
 	blockNum = executor.domains().BlockNum()
 	outputTxNum.Store(executor.domains().TxNum())
+	log.Warn("[dbg] exec11", "doms.BlockNum()", doms.BlockNum(), "doms.TxNum()", doms.TxNum(), "maxBlockNum", maxBlockNum)
 
 	if maxBlockNum < blockNum {
 		return nil
@@ -461,6 +462,7 @@ func ExecV3(ctx context.Context,
 
 	// Only needed by bor chains
 	shouldGenerateChangesetsForLastBlocks := cfg.chainConfig.Bor != nil
+	log.Warn("[dbg] exec12", "doms.BlockNum()", doms.BlockNum(), "doms.TxNum()", doms.TxNum(), "maxBlockNum", maxBlockNum)
 
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
