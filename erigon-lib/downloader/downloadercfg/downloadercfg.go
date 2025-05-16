@@ -53,7 +53,7 @@ const DefaultPieceSize = 2 * 1024 * 1024
 
 // DefaultNetworkChunkSize - how much data request per 1 network call to peer.
 // default: 16Kb
-const DefaultNetworkChunkSize = 8 * 1024 * 1024
+const DefaultNetworkChunkSize = 256 << 10
 
 type Cfg struct {
 	ClientConfig  *torrent.ClientConfig
