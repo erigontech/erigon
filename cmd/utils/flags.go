@@ -31,10 +31,11 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli/v2"
+
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 
 	"github.com/erigontech/erigon-lib/chain/networkid"
 	"github.com/erigontech/erigon-lib/chain/networkname"
@@ -685,12 +686,14 @@ var (
 		Usage: "0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set --verbosity to equal or higher level and has default: 2)",
 	}
 	TorrentDownloadRateFlag = cli.StringFlag{
-		Name:  "torrent.download.rate",
+		Name: "torrent.download.rate",
+		// TODO: Set this higher to demonstrate effectiveness.
 		Value: "128mb",
 		Usage: "Bytes per second, example: 32mb",
 	}
 	TorrentUploadRateFlag = cli.StringFlag{
-		Name:  "torrent.upload.rate",
+		Name: "torrent.upload.rate",
+		// TODO: Set this higher to demonstrate effectiveness?
 		Value: "4mb",
 		Usage: "Bytes per second, example: 32mb",
 	}
