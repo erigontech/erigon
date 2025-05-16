@@ -52,7 +52,7 @@ import (
 var aggEtlRAM = dbg.EnvDataSize("AGG_ETL_RAM", etl.BufferOptimalSize/8)
 var sortableBuffersForPruning = etl.NewAllocator(&sync.Pool{
 	New: func() interface{} {
-		return etl.NewSortableBuffer(aggEtlRAM).Prealloc(2048, int(aggEtlRAM/8))
+		return etl.NewSortableBuffer(aggEtlRAM).Prealloc(100_000, int(aggEtlRAM/8))
 	},
 })
 
