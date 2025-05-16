@@ -93,12 +93,6 @@ func Keccak256(data ...[]byte) []byte {
 	cryptopool.ReturnToPoolKeccak256(d)
 	return b
 }
-func Keccak256To(data, to []byte) {
-	d := NewKeccakState()
-	d.Write(data)
-	d.Read(to) //nolint:errcheck
-	cryptopool.ReturnToPoolKeccak256(d)
-}
 
 // Keccak256Hash calculates and returns the Keccak256 hash of the input data,
 // converting it to an internal Hash data structure.
