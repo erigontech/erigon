@@ -142,7 +142,7 @@ jobs:
             --build-arg RELEASE_DOCKER_BASE_IMAGE=${{ env.DOCKER_BASE_IMAGE }} \
             --build-arg VERSION=${{ env.BUILD_VERSION }} \
             --build-arg APPLICATION=${{ env.APPLICATION }} \
-            --build-arg BINARIES=${{ env.BINARIES }} \
+            --build-arg BINARIES='${{ env.BINARIES }}' \
             --tag ${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }} \
             --push \
             .
