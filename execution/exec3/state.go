@@ -212,7 +212,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 	rw.stateWriter.ResetWriteSet()
 
 	rw.ibs.Reset()
-	ibs, hooks := rw.ibs, rw.hooks
+	ibs, hooks, cc := rw.ibs, rw.hooks, rw.chainConfig
 	//ibs.SetTrace(true)
 	ibs.SetHooks(hooks)
 
@@ -236,10 +236,10 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			ret, _, err := core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, constCall /* constCall */, hooks)
+			ret, _, err := core.SysCallContract(contract, data, cc, ibs, header, rw.engine, constCall /* constCall */, hooks)
 			return ret, err
 		}
-		rw.engine.Initialize(rw.chainConfig, rw.chain, header, ibs, syscall, rw.logger, hooks)
+		rw.engine.Initialize(cc, rw.chain, header, ibs, syscall, rw.logger, hooks)
 		txTask.Error = ibs.FinalizeTx(rules, noop)
 	case txTask.Final:
 		if txTask.BlockNum == 0 {
@@ -248,7 +248,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 
 		// End of block transaction in a block
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			ret, logs, err := core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */, hooks)
+			ret, logs, err := core.SysCallContract(contract, data, cc, ibs, header, rw.engine, false /* constCall */, hooks)
 			if err != nil {
 				return nil, err
 			}
@@ -263,9 +263,9 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		}
 
 		if isMining {
-			_, txTask.Txs, txTask.BlockReceipts, _, err = rw.engine.FinalizeAndAssemble(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, nil, rw.logger)
+			_, txTask.Txs, txTask.BlockReceipts, _, err = rw.engine.FinalizeAndAssemble(cc, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, nil, rw.logger)
 		} else {
-			_, _, _, err = rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, skipPostEvaluaion, rw.logger)
+			_, _, _, err = rw.engine.Finalize(cc, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, skipPostEvaluaion, rw.logger)
 		}
 		if err != nil {
 			txTask.Error = err
@@ -283,7 +283,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		txn := txTask.Tx
 
 		if txTask.Tx.Type() == types.AccountAbstractionTxType {
-			if !rw.chainConfig.AllowAA {
+			if !cc.AllowAA {
 				txTask.Error = errors.New("account abstraction transactions are not allowed")
 				break
 			}
