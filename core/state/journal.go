@@ -159,7 +159,7 @@ type (
 	}
 
 	transientStorageChange struct {
-		account  *common.Address
+		account  common.Address
 		key      common.Hash
 		prevalue uint256.Int
 	}
@@ -305,7 +305,7 @@ func (ch fakeStorageChange) dirtied() *common.Address {
 }
 
 func (ch transientStorageChange) revert(s *IntraBlockState) error {
-	s.setTransientState(*ch.account, ch.key, ch.prevalue)
+	s.setTransientState(ch.account, ch.key, ch.prevalue)
 	return nil
 }
 
