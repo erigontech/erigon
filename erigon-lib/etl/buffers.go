@@ -78,6 +78,7 @@ type sortableBuffer struct {
 	offsets     []int
 	lens        []int
 	data        []byte
+	size        int
 	optimalSize int
 }
 
@@ -97,11 +98,10 @@ func (b *sortableBuffer) Put(k, v []byte) {
 	b.data = append(b.data, k...)
 	b.offsets = append(b.offsets, len(b.data))
 	b.data = append(b.data, v...)
+	b.size += lk + lv + 32 // size = len(b.data) // + 8*len(b.offsets) + 8*len(b.lens)
 }
 
-func (b *sortableBuffer) Size() int {
-	return len(b.data) + 8*len(b.offsets) + 8*len(b.lens)
-}
+func (b *sortableBuffer) Size() int { return b.size }
 
 func (b *sortableBuffer) Len() int {
 	return len(b.offsets) / 2
@@ -162,6 +162,7 @@ func (b *sortableBuffer) Reset() {
 	b.offsets = b.offsets[:0]
 	b.lens = b.lens[:0]
 	b.data = b.data[:0]
+	b.size = 0
 }
 func (b *sortableBuffer) SizeLimit() int { return b.optimalSize }
 func (b *sortableBuffer) Sort() {
