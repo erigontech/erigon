@@ -2,8 +2,11 @@ package downloadercfg
 
 import (
 	"context"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"iter"
 	"log/slog"
+	"slices"
+
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func erigonToSlogLevel(from log.Lvl) slog.Level {
@@ -11,15 +14,11 @@ func erigonToSlogLevel(from log.Lvl) slog.Level {
 }
 
 func slogLevelToErigon(from slog.Level) log.Lvl {
-	// Fuck sake Go has truncated division. Use bit shift here because it divides toward zero and we
-	// can.
+	// Go has truncated division. Use bit shift here because it divides toward zero.
 	return log.Lvl(3 - (from+3)>>2)
 }
 
 type slogHandler struct {
-	//minLevel slog.Level
-	//msgBuf      bytes.Buffer
-	//textHandler *slog.TextHandler
 	attrs   []slog.Attr
 	enabled func(level slog.Level, names []string) bool
 }
@@ -37,15 +36,29 @@ func (me *slogHandler) Handle(ctx context.Context, record slog.Record) error {
 	return nil
 }
 
-func (me *slogHandler) attrsToCtx(r slog.Record) (ret []any) {
-	ret = make([]any, 0, 2*(len(me.attrs)+r.NumAttrs()))
-	for _, a := range me.attrs {
-		ret = append(ret, a.Key, a.Value)
+func attrToErilogCtxs(keyPrefix string, attr slog.Attr) iter.Seq[any] {
+	return func(yield func(any) bool) {
+		if attr.Value.Kind() == slog.KindGroup {
+			keyPrefix := keyPrefix + attr.Key + "."
+			for _, a := range attr.Value.Group() {
+				attrToErilogCtxs(keyPrefix, a)(yield)
+			}
+		} else {
+			yield(keyPrefix + attr.Key)
+			// This will not unpack nested groups (again). More work required for that.
+			yield(attr.Value.Resolve())
+		}
 	}
-	r.Attrs(func(attr slog.Attr) bool {
-		ret = append(ret, attr.Key, attr.Value)
-		return true
-	})
+}
+
+func (me *slogHandler) attrsToCtx(r slog.Record) (ret []any) {
+	// This cap allocation does not take into account group expansion.
+	ret = make([]any, 0, 2*(len(me.attrs)+r.NumAttrs()))
+	// Add attrs from the logger, then the record, flattening groups because I don't think erilog
+	// supports nesting.
+	for attr := range chainSeqs(slices.Values(me.attrs), r.Attrs) {
+		ret = slices.AppendSeq(ret, attrToErilogCtxs("", attr))
+	}
 	return
 }
 
@@ -57,7 +70,8 @@ func (me *slogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 }
 
 func (me *slogHandler) WithGroup(name string) slog.Handler {
-	// Let's see if we should use a TextHandler and write it by hand for Erigon first...
+	// Assuming the no-nesting thing is correct, this would add an implicit key prefix to all new
+	// attrs.
 	panic("implement me")
 }
 
