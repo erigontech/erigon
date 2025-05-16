@@ -123,7 +123,7 @@ jobs:
         run: |
           cd erigon;
           docker buildx build \
-            --output type=local,dest=/tmp/docker-build-output \
+            --output type=local,dest=${GITHUB_WORKSPACE}/docker-build-output \
             --output type=registry \
             --attest type=provenance,mode=max \
             --sbom=true \
@@ -153,10 +153,12 @@ jobs:
         run: |
           cd ${GITHUB_WORKSPACE}
           mkdir $GITHUB_WORKSPACE/release
-          for dir in /tmp/docker-build-output/*; do
+          ls -lao
+          for dir in ${GITHUB_WORKSPACE}/docker-build-output/*; do
             cd $dir/usr/local/bin/
             echo Current directory is $(pwd) . Checksum file and archive will be created for this directory
             sha256sum * > checksums.txt
+            ls -lao
             tar czvf $GITHUB_WORKSPACE/release/${APPLICATION}_${RELEASE_VERSION}_linux_$(echo $dir | sed 's,linux_,,; s,_,,;').tar.gz \
               --transform "s,^./,${APPLICATION}_${RELEASE_VERSION}_linux_$(echo $dir | sed 's,linux_,,; s,_,,;')/," .
             cd -
