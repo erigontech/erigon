@@ -120,6 +120,7 @@ jobs:
           rm -rf "$tmp_dir"
       - name: Create HDR plots PNG artifacts
         if: always()
+        id: create_hdr_plots
         run: |
           # Check if the JSON file exists
           output_json="${{ github.workspace }}/outputs_kurtosis.json"
@@ -146,10 +147,14 @@ jobs:
             if jq -e ".tx_pool_latency_analysis[$i].tx_pool_latency_hdr_plot" "$output_json" > /dev/null 2>&1; then
               # Extract the plot data to a CSV file
               csv_file="tx_pool_latency_analysis_${i}_${tx_count}.csv"
-              jq -r ".tx_pool_latency_analysis[$i].tx_pool_latency_hdr_plot" "$output_json" > "$csv_file"
+              
+              # Extract the plot data, replace literal '\n' with actual newlines and '\t' with actual tabs,
+              # and remove all lines starting with '#'
+              jq -r ".tx_pool_latency_analysis[$i].tx_pool_latency_hdr_plot" "$output_json" | \
+                sed 's/\\n/\n/g; s/\\t/\t/g' | grep -v "^#" > "$csv_file"
               
               # Call the Python script to process the CSV file
-              python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
+              python3 $ERIGON_QA_PATH/test_system/qa-tests/tx-pool/hdr_plot.py \
                 --input_file "$csv_file" \
                 --output_file "tx_pool_latency_analysis_${i}_${tx_count}.png"
               
@@ -161,9 +166,11 @@ jobs:
               echo "tx_pool_latency_hdr_plot not found for element $i, skipping"
             fi
           done
+          # Set an output to indicate we processed at least one element
+          echo "processed=true" >> $GITHUB_OUTPUT
 
       - name: Upload PNG images as artifacts
-        if: always()
+        if: steps.create_hdr_plots.outputs.processed == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: tx-pool-latency-plots
@@ -171,7 +178,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Clean up PNG files
-        if: always()
+        if: steps.create_hdr_plots.outputs.processed == 'true'
         run: |
           # Remove all generated PNG files
           rm -f tx_pool_latency_analysis_*.png
@@ -195,7 +202,7 @@ jobs:
         if: always()
         run: |
           rm -rf kurtosis_artifacts
-          rm -rf outputs_kurtosis.json
+          rm -f outputs_kurtosis.json
 
       - name: Clean docker containers and images
         if: always()
