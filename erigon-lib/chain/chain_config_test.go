@@ -17,11 +17,13 @@
 package chain
 
 import (
+	"encoding/json"
 	"math/big"
 	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
@@ -217,4 +219,51 @@ func TestBlobParameterInactiveHardfork(t *testing.T) {
 	assert.Equal(t, 6*params.BlobGasPerBlob, c.GetTargetBlobGasPerBlock(time))
 	assert.Equal(t, uint64(9), c.GetMaxBlobsPerBlock(time))
 	assert.Equal(t, uint64(5007716), c.GetBlobGasPriceUpdateFraction(time))
+}
+
+// See how blob schedule is rendered in EEST fixtures, e.g. from
+// https://github.com/ethereum/execution-spec-tests/releases/tag/v4.5.0
+func TestEestBlobConfigParsing(t *testing.T) {
+	blobConfigJson := `{
+                "Cancun": {
+                    "target": "0x01",
+                    "max": "0x02",
+                    "baseFeeUpdateFraction": "0x100000"
+                }
+            }`
+	blobSchedule := make(map[string]*params.BlobConfig)
+	require.NoError(t, json.Unmarshal([]byte(blobConfigJson), &blobSchedule))
+
+	c := Config{
+		ChainID:                       big.NewInt(1),
+		HomesteadBlock:                big.NewInt(0),
+		TangerineWhistleBlock:         big.NewInt(0),
+		SpuriousDragonBlock:           big.NewInt(0),
+		ByzantiumBlock:                big.NewInt(0),
+		ConstantinopleBlock:           big.NewInt(0),
+		PetersburgBlock:               big.NewInt(0),
+		IstanbulBlock:                 big.NewInt(0),
+		MuirGlacierBlock:              big.NewInt(0),
+		BerlinBlock:                   big.NewInt(0),
+		LondonBlock:                   big.NewInt(0),
+		ArrowGlacierBlock:             big.NewInt(0),
+		GrayGlacierBlock:              big.NewInt(0),
+		TerminalTotalDifficulty:       big.NewInt(0),
+		TerminalTotalDifficultyPassed: true,
+		ShanghaiTime:                  big.NewInt(0),
+		CancunTime:                    big.NewInt(1),
+		BlobSchedule:                  blobSchedule,
+	}
+
+	assert.Equal(t, uint64(0), c.GetTargetBlobGasPerBlock(0))
+	assert.Equal(t, uint64(0), c.GetMaxBlobsPerBlock(0))
+	assert.Equal(t, uint64(0), c.GetBlobGasPriceUpdateFraction(0))
+
+	assert.Equal(t, 1*params.BlobGasPerBlob, c.GetTargetBlobGasPerBlock(1))
+	assert.Equal(t, uint64(2), c.GetMaxBlobsPerBlock(1))
+	assert.Equal(t, uint64(0x100000), c.GetBlobGasPriceUpdateFraction(1))
+
+	assert.Equal(t, 1*params.BlobGasPerBlob, c.GetTargetBlobGasPerBlock(2))
+	assert.Equal(t, uint64(2), c.GetMaxBlobsPerBlock(2))
+	assert.Equal(t, uint64(0x100000), c.GetBlobGasPriceUpdateFraction(2))
 }

@@ -23,6 +23,7 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 )
 
 const (
@@ -223,9 +224,9 @@ var (
 // See EIP-7840: Add blob schedule to EL config files
 // and EIP-7892: Blob Parameter Only Hardforks
 type BlobConfig struct {
-	Target                uint64 `json:"target"`
-	Max                   uint64 `json:"max"`
-	BaseFeeUpdateFraction uint64 `json:"baseFeeUpdateFraction"`
+	Target                hexutil.FlexibleUint64 `json:"target"`
+	Max                   hexutil.FlexibleUint64 `json:"max"`
+	BaseFeeUpdateFraction hexutil.FlexibleUint64 `json:"baseFeeUpdateFraction"`
 }
 
 var DefaultCancunBlobConfig = BlobConfig{

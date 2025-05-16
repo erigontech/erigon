@@ -30,9 +30,10 @@ import (
 )
 
 var (
-	bigT    = reflect.TypeOf((*Big)(nil))
-	uintT   = reflect.TypeOf(Uint(0))
-	uint64T = reflect.TypeOf(Uint64(0))
+	bigT            = reflect.TypeOf((*Big)(nil))
+	uintT           = reflect.TypeOf(Uint(0))
+	uint64T         = reflect.TypeOf(Uint64(0))
+	flexibleUint64T = reflect.TypeOf(FlexibleUint64(0))
 )
 
 // UnmarshalFixedUnprefixedText decodes the input as a string with optional 0x prefix. The
@@ -79,7 +80,7 @@ func (b *Big) UnmarshalJSON(input []byte) error {
 
 // UnmarshalText implements encoding.TextUnmarshaler
 func (b *Big) UnmarshalText(input []byte) error {
-	raw, err := checkNumberText(input)
+	raw, err := checkNumberText(input, false)
 	if err != nil {
 		return err
 	}
@@ -145,24 +146,32 @@ func (b *Uint64) UnmarshalJSON(input []byte) error {
 
 // UnmarshalText implements encoding.TextUnmarshaler
 func (b *Uint64) UnmarshalText(input []byte) error {
-	raw, err := checkNumberText(input)
+	dec, err := unmarshalHexAsUint64(input, false)
 	if err != nil {
 		return err
 	}
+	*b = Uint64(dec)
+	return nil
+}
+
+func unmarshalHexAsUint64(input []byte, allowLeadingZeros bool) (uint64, error) {
+	raw, err := checkNumberText(input, allowLeadingZeros)
+	if err != nil {
+		return 0, err
+	}
 	if len(raw) > 16 {
-		return ErrUint64Range
+		return 0, ErrUint64Range
 	}
 	var dec uint64
 	for _, byte := range raw {
 		nib := decodeNibble(byte)
 		if nib == badNibble {
-			return ErrSyntax
+			return 0, ErrSyntax
 		}
 		dec *= 16
 		dec += nib
 	}
-	*b = Uint64(dec)
-	return nil
+	return dec, nil
 }
 
 // String returns the hex encoding of b.
@@ -209,11 +218,43 @@ func (b Uint) String() string {
 	return EncodeUint64(uint64(b))
 }
 
+// FlexibleUint64 marshals its value as a JSON integer
+// and can unmarshal a JSON decimal integer or a hex string with 0x prefix.
+type FlexibleUint64 uint64
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (b *FlexibleUint64) UnmarshalJSON(input []byte) error {
+	var dec uint64
+	var err error
+	if isString(input) {
+		// hex string
+		input = input[1 : len(input)-1]
+		dec, err = unmarshalHexAsUint64(input, true)
+	} else {
+		// decimal integer
+		dec, err = strconv.ParseUint(string(input), 10, 64)
+	}
+	if err != nil {
+		return wrapTypeError(ErrDecUintInvalid, flexibleUint64T)
+	}
+	*b = FlexibleUint64(dec)
+	return nil
+}
+
+// String returns the decimal encoding of b.
+func (b FlexibleUint64) String() string {
+	return strconv.FormatUint(uint64(b), 10)
+}
+
+func (b FlexibleUint64) Uint64() uint64 {
+	return (uint64)(b)
+}
+
 func isString(input []byte) bool {
 	return len(input) >= 2 && input[0] == '"' && input[len(input)-1] == '"'
 }
 
-func checkNumberText(input []byte) (raw []byte, err error) {
+func checkNumberText(input []byte, allowLeadingZeros bool) (raw []byte, err error) {
 	if len(input) == 0 {
 		return nil, nil // empty strings are allowed
 	}
@@ -224,14 +265,14 @@ func checkNumberText(input []byte) (raw []byte, err error) {
 	if len(input) == 0 {
 		return nil, ErrEmptyNumber
 	}
-	if len(input) > 1 && input[0] == '0' {
+	if !allowLeadingZeros && len(input) > 1 && input[0] == '0' {
 		return nil, ErrLeadingZero
 	}
 	return input, nil
 }
 
 func wrapTypeError(err error, typ reflect.Type) error {
-	// keeping compatiblity with go ethereum tests
+	// keeping compatibility with go ethereum tests
 	// nolint:errorlint
 	//if _, ok := err.(*decError); ok {
 	//	return &json.UnmarshalTypeError{Value: err.Error(), Type: typ}

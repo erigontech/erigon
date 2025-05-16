@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/big"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -348,16 +349,17 @@ func (c *Config) getBlobConfig(time uint64) *params.BlobConfig {
 
 		// Override with supplied values
 		for key, val := range c.BlobSchedule {
+			k := strings.ToLower(key)
 			switch {
-			case key == "cancun":
+			case k == "cancun":
 				if c.CancunTime != nil {
 					c.parsedBlobSchedule[c.CancunTime.Uint64()] = val
 				}
-			case key == "prague":
+			case k == "prague":
 				if c.PragueTime != nil {
 					c.parsedBlobSchedule[c.PragueTime.Uint64()] = val
 				}
-			case key == "osaka":
+			case k == "osaka":
 				if c.OsakaTime != nil {
 					c.parsedBlobSchedule[c.OsakaTime.Uint64()] = val
 				}
@@ -375,19 +377,19 @@ func (c *Config) getBlobConfig(time uint64) *params.BlobConfig {
 }
 
 func (c *Config) GetMaxBlobsPerBlock(time uint64) uint64 {
-	return c.getBlobConfig(time).Max
+	return uint64(c.getBlobConfig(time).Max)
 }
 
 func (c *Config) GetMaxBlobGasPerBlock(time uint64) uint64 {
-	return c.getBlobConfig(time).Max * params.BlobGasPerBlob
+	return uint64(c.getBlobConfig(time).Max) * params.BlobGasPerBlob
 }
 
 func (c *Config) GetTargetBlobGasPerBlock(time uint64) uint64 {
-	return c.getBlobConfig(time).Target * params.BlobGasPerBlob
+	return uint64(c.getBlobConfig(time).Target) * params.BlobGasPerBlob
 }
 
 func (c *Config) GetBlobGasPriceUpdateFraction(time uint64) uint64 {
-	return c.getBlobConfig(time).BaseFeeUpdateFraction
+	return uint64(c.getBlobConfig(time).BaseFeeUpdateFraction)
 }
 
 func (c *Config) SecondsPerSlot() uint64 {
