@@ -56,7 +56,7 @@ func TestHeaderVerification(t *testing.T) {
 		if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
 			for j, valid := range []bool{true, false} {
 				chainReader := stagedsync.ChainReader{
-					Cfg:         libchain.TestChainConfig,
+					Cfg:         *libchain.TestChainConfig,
 					Db:          tx,
 					BlockReader: m.BlockReader,
 					Logger:      logger,
@@ -106,7 +106,7 @@ func TestHeaderWithSealVerification(t *testing.T) {
 		if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
 			for j, valid := range []bool{true, false} {
 				chainReader := stagedsync.ChainReader{
-					Cfg:         libchain.TestChainAuraConfig,
+					Cfg:         *libchain.TestChainAuraConfig,
 					Db:          tx,
 					BlockReader: m.BlockReader,
 					Logger:      logger,

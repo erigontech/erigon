@@ -99,7 +99,7 @@ type testMatcher struct {
 
 type testConfig struct {
 	p      *regexp.Regexp
-	config *chain.Config
+	config chain.Config
 }
 
 type testFailure struct {
@@ -130,7 +130,7 @@ func (tm *testMatcher) whitelist(pattern string) {
 }
 
 // config defines chain config for tests matching the pattern.
-func (tm *testMatcher) config(pattern string, cfg *chain.Config) {
+func (tm *testMatcher) config(pattern string, cfg chain.Config) {
 	tm.configpat = append(tm.configpat, testConfig{regexp.MustCompile(pattern), cfg})
 }
 
@@ -153,6 +153,17 @@ func (tm *testMatcher) findSkip(name string) (reason string, skipload bool) {
 		}
 	}
 	return "", false
+}
+
+// findConfig returns the chain config matching defined patterns.
+func (tm *testMatcher) findConfig(name string) *chain.Config {
+	// TODO(fjl): name can be derived from testing.T when min Go version is 1.8
+	for _, m := range tm.configpat {
+		if m.p.MatchString(name) {
+			return &m.config
+		}
+	}
+	return new(chain.Config)
 }
 
 func (tm *testMatcher) checkFailure(t *testing.T, err error) error {

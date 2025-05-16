@@ -3,6 +3,7 @@ package state
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -12,13 +13,16 @@ import (
 )
 
 // this is supposed to register domains/iis
-
+// salt file should exist, else agg created has nil salt.
 func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
-	salt, err := getStateIndicesSalt(dirs.Snap)
+	salt, err := GetStateIndicesSalt(dirs, false, logger)
 	if err != nil {
 		return nil, err
 	}
+	return NewAggregator2(ctx, dirs, aggregationStep, salt, db, logger)
+}
 
+func NewAggregator2(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, salt *uint32, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
 	a, err := newAggregatorOld(ctx, dirs, aggregationStep, db, logger)
 	if err != nil {
 		return nil, err
@@ -91,63 +95,61 @@ type Versioned interface {
 
 func (s *SchemaGen) GetVersioned(name string) (Versioned, error) {
 	switch name {
-	case "accounts":
-		return &s.AccountsDomain, nil
-	case "storage":
-		return &s.StorageDomain, nil
-	case "code":
-		return &s.CodeDomain, nil
-	case "commitment":
-		return &s.CommitmentDomain, nil
-	case "receipt":
-		return &s.ReceiptDomain, nil
-	case "rcache":
-		return &s.RCacheDomain, nil
-	case "logtopics":
-		return &s.LogTopicIdx, nil
-	case "logaddrs":
-		return &s.LogAddrIdx, nil
-	case "tracesfrom":
-		return &s.TracesFromIdx, nil
-	case "tracesto":
-		return &s.TracesToIdx, nil
+	case kv.AccountsDomain.String(), kv.StorageDomain.String(), kv.CodeDomain.String(), kv.CommitmentDomain.String(), kv.ReceiptDomain.String(), kv.RCacheDomain.String():
+		domain, err := kv.String2Domain(name)
+		if err != nil {
+			return nil, err
+		}
+		return s.GetDomainCfg(domain), nil
+	case kv.LogTopicIdx.String(), kv.LogAddrIdx.String(), kv.TracesFromIdx.String(), kv.TracesToIdx.String():
+		ii, err := kv.String2InvertedIdx(name)
+		if err != nil {
+			return nil, err
+		}
+		return s.GetIICfg(ii), nil
 	default:
 		return nil, fmt.Errorf("unknown schema version '%s'", name)
 	}
 }
 
 func (s *SchemaGen) GetDomainCfg(name kv.Domain) domainCfg {
+	var v domainCfg
 	switch name {
 	case kv.AccountsDomain:
-		return s.AccountsDomain
+		v = s.AccountsDomain
 	case kv.StorageDomain:
-		return s.StorageDomain
+		v = s.StorageDomain
 	case kv.CodeDomain:
-		return s.CodeDomain
+		v = s.CodeDomain
 	case kv.CommitmentDomain:
-		return s.CommitmentDomain
+		v = s.CommitmentDomain
 	case kv.ReceiptDomain:
-		return s.ReceiptDomain
+		v = s.ReceiptDomain
 	case kv.RCacheDomain:
-		return s.RCacheDomain
+		v = s.RCacheDomain
 	default:
-		return domainCfg{}
+		v = domainCfg{}
 	}
+	v.hist.iiCfg.salt = new(atomic.Pointer[uint32])
+	return v
 }
 
 func (s *SchemaGen) GetIICfg(name kv.InvertedIdx) iiCfg {
+	var v iiCfg
 	switch name {
 	case kv.LogAddrIdx:
-		return s.LogAddrIdx
+		v = s.LogAddrIdx
 	case kv.LogTopicIdx:
-		return s.LogTopicIdx
+		v = s.LogTopicIdx
 	case kv.TracesFromIdx:
-		return s.TracesFromIdx
+		v = s.TracesFromIdx
 	case kv.TracesToIdx:
-		return s.TracesToIdx
+		v = s.TracesToIdx
 	default:
-		return iiCfg{}
+		v = iiCfg{}
 	}
+	v.salt = new(atomic.Pointer[uint32])
+	return v
 }
 
 var ExperimentalConcurrentCommitment = false // set true to use concurrent commitment by default

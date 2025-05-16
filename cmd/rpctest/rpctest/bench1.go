@@ -162,11 +162,11 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 			}
 
 			var trace EthTxTrace
-			res = reqGen.Erigon("debug_traceTransaction", reqGen.debugTraceTransaction(txn.Hash), &trace)
+			res = reqGen.Erigon("debug_traceTransaction", reqGen.debugTraceTransaction(txn.Hash, ""), &trace)
 			resultsCh <- res
 			if res.Err != nil {
 				fmt.Printf("Could not trace transaction (Erigon) %s: %v\n", txn.Hash, res.Err)
-				print(client, routes[Erigon], reqGen.debugTraceTransaction(txn.Hash))
+				print(client, routes[Erigon], reqGen.debugTraceTransaction(txn.Hash, ""))
 			}
 
 			if trace.Error != nil {
@@ -175,10 +175,10 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 
 			if needCompare {
 				var traceg EthTxTrace
-				res = reqGen.Geth("debug_traceTransaction", reqGen.debugTraceTransaction(txn.Hash), &traceg)
+				res = reqGen.Geth("debug_traceTransaction", reqGen.debugTraceTransaction(txn.Hash, ""), &traceg)
 				resultsCh <- res
 				if res.Err != nil {
-					print(client, routes[Geth], reqGen.debugTraceTransaction(txn.Hash))
+					print(client, routes[Geth], reqGen.debugTraceTransaction(txn.Hash, ""))
 					return fmt.Errorf("Could not trace transaction (geth) %s: %v\n", txn.Hash, res.Err)
 				}
 				if traceg.Error != nil {

@@ -19,10 +19,9 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon/turbo/cli"
-
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/turbo/cli"
 )
 
 var (
@@ -32,7 +31,7 @@ var (
 	block, pruneTo, unwind       uint64
 	unwindEvery                  uint64
 	batchSizeStr                 string
-	produce                      string
+	domain                       string
 	reset, noCommit              bool
 	bucket                       string
 	datadirCli, toChaindata      string
@@ -144,8 +143,8 @@ func withBatchSize(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&batchSizeStr, "batchSize", cli.BatchSizeFlag.Value, cli.BatchSizeFlag.Usage)
 }
 
-func withProduce(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&produce, "produce", "", "Comma separated produce data types")
+func withDomain(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&domain, "domain", "", "Comma separated names of domain/inverted_indices")
 }
 
 func withIntegrityChecks(cmd *cobra.Command) {

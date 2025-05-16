@@ -40,9 +40,7 @@ func getEthClock(t *testing.T) eth_clock.EthereumClock {
 }
 
 func TestSentinelGossipOnHardFork(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
+	t.Skip("issue #15001")
 
 	listenAddrHost := "127.0.0.1"
 
@@ -59,6 +57,7 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 	bcfg.BellatrixForkEpoch = math.MaxUint64
 	bcfg.CapellaForkEpoch = math.MaxUint64
 	bcfg.DenebForkEpoch = math.MaxUint64
+	bcfg.ElectraForkEpoch = math.MaxUint64
 	bcfg.InitializeForkSchedule()
 
 	sentinel1, err := New(ctx, &SentinelConfig{

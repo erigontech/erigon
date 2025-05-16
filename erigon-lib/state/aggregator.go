@@ -148,9 +148,11 @@ func newAggregatorOld(ctx context.Context, dirs datadir.Dirs, aggregationStep ui
 	}, nil
 }
 
-// getStateIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
-// if db is Read-Only (for example remote RPCDaemon or utilities) - we will not create new indices - and existing indices have salt in metadata.
-func getStateIndicesSalt(baseDir string) (salt *uint32, err error) {
+// GetStateIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
+// if db is Read-Only (for example remote RPCDaemon or utilities) - we will not create new indices -
+// and existing indices have salt in metadata.
+func GetStateIndicesSalt(dirs datadir.Dirs, genNew bool, logger log.Logger) (salt *uint32, err error) {
+	baseDir := dirs.Snap
 	saltExists, err := dir.FileExist(filepath.Join(baseDir, "salt.txt"))
 	if err != nil {
 		return nil, err
@@ -173,6 +175,13 @@ func getStateIndicesSalt(baseDir string) (salt *uint32, err error) {
 
 	// Initialize salt if it doesn't exist
 	if !fexists {
+		if !genNew {
+			logger.Info("not generating new salt file as genNew=false")
+			// Using nil salt for now, actual value should be injected when salt file is downloaded
+			return nil, nil
+		}
+		logger.Info("generating new salt file")
+
 		saltV := rand2.Uint32()
 		salt = &saltV
 		saltBytes := make([]byte, 4)
@@ -196,7 +205,7 @@ func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.D
 	cfg := Schema.GetDomainCfg(name)
 	//TODO: move dynamic part of config to InvertedIndex
 	cfg.restrictSubsetFileDeletions = a.commitmentValuesTransform
-	cfg.hist.iiCfg.salt = salt
+	cfg.hist.iiCfg.salt.Store(salt)
 	cfg.hist.iiCfg.dirs = dirs
 	a.d[name], err = NewDomain(cfg, a.aggregationStep, logger)
 	if err != nil {
@@ -207,7 +216,7 @@ func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.D
 
 func (a *Aggregator) registerII(idx kv.InvertedIdx, salt *uint32, dirs datadir.Dirs, logger log.Logger) error {
 	idxCfg := Schema.GetIICfg(idx)
-	idxCfg.salt = salt
+	idxCfg.salt.Store(salt)
 	idxCfg.dirs = dirs
 
 	if ii := a.searchII(idx); ii != nil {
@@ -231,6 +240,29 @@ func (a *Aggregator) DisableFsync() {
 	for _, ii := range a.iis {
 		ii.DisableFsync()
 	}
+}
+
+func (a *Aggregator) ReloadSalt() error {
+	salt, err := GetStateIndicesSalt(a.dirs, false, a.logger)
+	if err != nil {
+		return err
+	}
+
+	if salt == nil {
+		return fmt.Errorf("salt not found on ReloadSalt")
+	}
+
+	for _, d := range a.d {
+		d.hist.iiCfg.salt.Store(salt)
+		d.History.histCfg.iiCfg.salt.Store(salt)
+		d.History.InvertedIndex.iiCfg.salt.Store(salt)
+	}
+
+	for _, ii := range a.iis {
+		ii.iiCfg.salt.Store(salt)
+	}
+
+	return nil
 }
 
 func (a *Aggregator) OpenFolder() error {
@@ -1482,10 +1514,6 @@ func (at *AggregatorRoTx) HistoryStartFrom(name kv.Domain) uint64 {
 	return at.d[name].HistoryStartFrom()
 }
 
-func (at *AggregatorRoTx) HistoryEndTxNum(name kv.Domain, tx kv.Tx) uint64 {
-	return at.d[name].HistoryEndTxNum(tx)
-}
-
 func (at *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (timestamps stream.U64, err error) {
 	// check domain iis
 	for _, d := range at.d {
@@ -1578,6 +1606,13 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 	return ac
 }
 
+func (at *AggregatorRoTx) HistoryProgress(name kv.Domain, tx kv.Tx) uint64 {
+	return at.d[name].HistoryProgress(tx)
+}
+func (at *AggregatorRoTx) ProgressII(name kv.InvertedIdx, tx kv.Tx) uint64 {
+	return at.searchII(name).Progress(tx)
+}
+
 // --- Domain part START ---
 
 func (at *AggregatorRoTx) RangeAsOf(ctx context.Context, tx kv.Tx, domain kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
@@ -1621,17 +1656,81 @@ func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo 
 
 // --- Domain part END ---
 
-func (at *AggregatorRoTx) madvNormal() {
+func (at *AggregatorRoTx) MadvNormal() *AggregatorRoTx {
 	for _, d := range at.d {
 		for _, f := range d.files {
-			f.src.decompressor.EnableMadvNormal()
+			f.src.MadvNormal()
+		}
+		for _, f := range d.ht.files {
+			f.src.MadvNormal()
+		}
+		for _, f := range d.ht.iit.files {
+			f.src.MadvNormal()
+		}
+	}
+	for _, ii := range at.iis {
+		for _, f := range ii.files {
+			f.src.MadvNormal()
+		}
+	}
+	return at
+}
+func (at *AggregatorRoTx) DisableReadAhead() {
+	for _, d := range at.d {
+		for _, f := range d.files {
+			f.src.DisableReadAhead()
+		}
+		for _, f := range d.ht.files {
+			f.src.DisableReadAhead()
+		}
+		for _, f := range d.ht.iit.files {
+			f.src.DisableReadAhead()
+		}
+	}
+	for _, ii := range at.iis {
+		for _, f := range ii.files {
+			f.src.DisableReadAhead()
 		}
 	}
 }
-func (at *AggregatorRoTx) disableReadAhead() {
+func (at *Aggregator) MadvNormal() *Aggregator {
+	at.dirtyFilesLock.Lock()
+	defer at.dirtyFilesLock.Unlock()
 	for _, d := range at.d {
-		for _, f := range d.files {
-			f.src.decompressor.DisableReadAhead()
+		for _, f := range d.dirtyFiles.Items() {
+			f.MadvNormal()
+		}
+		for _, f := range d.History.dirtyFiles.Items() {
+			f.MadvNormal()
+		}
+		for _, f := range d.History.InvertedIndex.dirtyFiles.Items() {
+			f.MadvNormal()
+		}
+	}
+	for _, ii := range at.iis {
+		for _, f := range ii.dirtyFiles.Items() {
+			f.MadvNormal()
+		}
+	}
+	return at
+}
+func (at *Aggregator) DisableReadAhead() {
+	at.dirtyFilesLock.Lock()
+	defer at.dirtyFilesLock.Unlock()
+	for _, d := range at.d {
+		for _, f := range d.dirtyFiles.Items() {
+			f.DisableReadAhead()
+		}
+		for _, f := range d.History.dirtyFiles.Items() {
+			f.DisableReadAhead()
+		}
+		for _, f := range d.History.InvertedIndex.dirtyFiles.Items() {
+			f.DisableReadAhead()
+		}
+	}
+	for _, ii := range at.iis {
+		for _, f := range ii.dirtyFiles.Items() {
+			f.DisableReadAhead()
 		}
 	}
 }

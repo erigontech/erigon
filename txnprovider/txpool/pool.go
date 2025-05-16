@@ -127,7 +127,6 @@ type TxPool struct {
 	promoted                Announcements
 	cfg                     txpoolcfg.Config
 	chainID                 uint256.Int
-	chainConfig             *chain.Config
 	lastSeenBlock           atomic.Uint64
 	lastSeenCond            *sync.Cond
 	lastFinalizedBlock      atomic.Uint64
@@ -144,6 +143,7 @@ type TxPool struct {
 	isPostCancun            atomic.Bool
 	pragueTime              *uint64
 	isPostPrague            atomic.Bool
+	blobSchedule            *chain.BlobSchedule
 	feeCalculator           FeeCalculator
 	p2pFetcher              *Fetch
 	p2pSender               *Send
@@ -151,7 +151,7 @@ type TxPool struct {
 	ethBackend              remote.ETHBACKENDClient
 	builderNotifyNewTxns    func()
 	logger                  log.Logger
-	auths                   map[common.Address]*metaTxn // All accounts with a pooled authorization
+	auths                   map[AuthAndNonce]*metaTxn // All authority accounts with a pooled authorization
 	blobHashToTxn           map[common.Hash]struct {
 		index   int
 		txnHash common.Hash
@@ -173,11 +173,12 @@ func New(
 	chainDB kv.TemporalRoDB,
 	cfg txpoolcfg.Config,
 	cache kvcache.Cache,
-	chainConfig *chain.Config,
+	chainID uint256.Int,
 	shanghaiTime *big.Int,
 	agraBlock *big.Int,
 	cancunTime *big.Int,
 	pragueTime *big.Int,
+	blobSchedule *chain.BlobSchedule,
 	sentryClients []sentryproto.SentryClient,
 	stateChangesClient StateChangesClient,
 	builderNotifyNewTxns func(),
@@ -207,11 +208,6 @@ func New(
 		tracedSenders[common.BytesToAddress([]byte(sender))] = struct{}{}
 	}
 
-	configChainID, overflow := uint256.FromBig(chainConfig.ChainID)
-	if overflow {
-		return nil, errors.New("chainID overflow")
-	}
-
 	lock := &sync.Mutex{}
 
 	res := &TxPool{
@@ -231,22 +227,22 @@ func New(
 		poolDB:                  poolDB,
 		_chainDB:                chainDB,
 		cfg:                     cfg,
-		chainID:                 *configChainID,
-		chainConfig:             chainConfig,
+		chainID:                 chainID,
 		unprocessedRemoteTxns:   &TxnSlots{},
 		unprocessedRemoteByHash: map[string]int{},
 		minedBlobTxnsByBlock:    map[uint64][]*metaTxn{},
 		minedBlobTxnsByHash:     map[string]*metaTxn{},
+		blobSchedule:            blobSchedule,
 		feeCalculator:           options.feeCalculator,
 		ethBackend:              ethBackend,
 		builderNotifyNewTxns:    builderNotifyNewTxns,
 		newSlotsStreams:         newSlotsStreams,
 		logger:                  logger,
-		auths:                   map[common.Address]*metaTxn{},
-		blobHashToTxn: map[common.Hash]struct {
+		auths:                   make(map[AuthAndNonce]*metaTxn),
+		blobHashToTxn: make(map[common.Hash]struct {
 			index   int
 			txnHash common.Hash
-		}{},
+		}),
 	}
 
 	if shanghaiTime != nil {
@@ -278,7 +274,7 @@ func New(
 		res.pragueTime = &pragueTimeU64
 	}
 
-	res.p2pFetcher = NewFetch(ctx, sentryClients, res, stateChangesClient, poolDB, res.chainID, logger, opts...)
+	res.p2pFetcher = NewFetch(ctx, sentryClients, res, stateChangesClient, poolDB, chainID, logger, opts...)
 	res.p2pSender = NewSend(ctx, sentryClients, logger, opts...)
 
 	return res, nil
@@ -824,7 +820,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 		// not an exact science using intrinsic gas but as close as we could hope for at
 		// this stage
 		isAATxn := mt.TxnSlot.Type == types.AccountAbstractionTxType
-		authorizationLen := uint64(len(mt.TxnSlot.Authorities))
+		authorizationLen := uint64(len(mt.TxnSlot.AuthAndNonces))
 		intrinsicGas, floorGas, _ := fixedgas.CalcIntrinsicGas(uint64(mt.TxnSlot.DataLen), uint64(mt.TxnSlot.DataNonZeroLen), authorizationLen, uint64(mt.TxnSlot.AccessListAddrCount), uint64(mt.TxnSlot.AccessListStorCount), mt.TxnSlot.Creation, true, true, isShanghai, isPrague, isAATxn)
 		if isPrague && floorGas > intrinsicGas {
 			intrinsicGas = floorGas
@@ -1004,7 +1000,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 	}
 
-	authorizationLen := len(txn.Authorities)
+	authorizationLen := len(txn.AuthAndNonces)
 	if txn.Type == SetCodeTxnType {
 		if !p.isPrague() {
 			return txpoolcfg.TypeNotActivated
@@ -1068,6 +1064,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 		return txpoolcfg.NonceTooLow
 	}
+
 	// Transactor should have enough funds to cover the costs
 	total := requiredBalance(txn)
 	if senderBalance.Cmp(total) < 0 {
@@ -1185,8 +1182,7 @@ func (p *TxPool) isPrague() bool {
 }
 
 func (p *TxPool) GetMaxBlobsPerBlock() uint64 {
-	now := time.Now().Unix()
-	return p.chainConfig.GetMaxBlobsPerBlock(uint64(now))
+	return p.blobSchedule.MaxBlobsPerBlock(p.isPrague())
 }
 
 // Check that the serialized txn should not exceed a certain max size
@@ -1601,34 +1597,31 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		return txpoolcfg.FeeTooLow
 	}
 
-	// Do not allow transaction from if sender has authority
-	addr, ok := p.senders.getAddr(mt.TxnSlot.SenderID)
+	// Do not allow transaction from this same (sender + nonce) if sender has existing pooled authorization as authority
+	senderAddr, ok := p.senders.senderID2Addr[mt.TxnSlot.SenderID]
 	if !ok {
 		p.logger.Info("senderID not registered, discarding transaction for safety")
 		return txpoolcfg.InvalidSender
 	}
-	if _, ok := p.auths[addr]; ok {
+	if _, ok := p.auths[AuthAndNonce{senderAddr.String(), mt.TxnSlot.Nonce}]; ok {
 		return txpoolcfg.ErrAuthorityReserved
 	}
 
 	// Check if we have txn with same authorization in the pool
 	if mt.TxnSlot.Type == SetCodeTxnType {
-		foundDuplicate := false
-		for _, a := range mt.TxnSlot.Authorities {
-			p.logger.Debug("setCodeTxn ", "authority", a.String())
-			if _, ok := p.auths[*a]; ok {
-				foundDuplicate = true
-				p.logger.Debug("setCodeTxn ", "DUPLICATE authority", a.String(), "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
-				break
+		for _, a := range mt.TxnSlot.AuthAndNonces {
+			// Self authorization nonce should be senderNonce + 1
+			if a.authority == senderAddr.String() && a.nonce != mt.TxnSlot.Nonce+1 {
+				p.logger.Debug("Self authorization nonce should be senderNonce + 1", "authority", a.authority, "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
+				return txpoolcfg.NonceTooLow
+			}
+			if _, ok := p.auths[AuthAndNonce{a.authority, a.nonce}]; ok {
+				p.logger.Debug("setCodeTxn ", "DUPLICATE authority", a.authority, "at nonce", a.nonce, "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
+				return txpoolcfg.ErrAuthorityReserved
 			}
 		}
-
-		if foundDuplicate {
-			return txpoolcfg.ErrAuthorityReserved
-		} else {
-			for _, a := range mt.TxnSlot.Authorities {
-				p.auths[*a] = mt
-			}
+		for _, a := range mt.TxnSlot.AuthAndNonces {
+			p.auths[AuthAndNonce{a.authority, a.nonce}] = mt
 		}
 	}
 
@@ -1681,8 +1674,8 @@ func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
 		p.totalBlobsInPool.Store(t - uint64(len(mt.TxnSlot.BlobHashes)))
 	}
 	if mt.TxnSlot.Type == SetCodeTxnType {
-		for _, a := range mt.TxnSlot.Authorities {
-			delete(p.auths, *a)
+		for _, a := range mt.TxnSlot.AuthAndNonces {
+			delete(p.auths, a)
 		}
 	}
 }

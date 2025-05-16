@@ -128,7 +128,7 @@ func BenchBlockReceipts(erigonURL, gethURL string, needCompare bool, blockFrom u
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)
 		defer close(resultsCh)
-		go vegetaWrite(true, []string{"eth_getTransactionReceipt"}, resultsCh)
+		go vegetaWrite(true, []string{"eth_getBlockReceipts"}, resultsCh)
 	}
 
 	var res CallResult

@@ -23,6 +23,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/version"
 	"math"
 	"path/filepath"
 	"sync"
@@ -44,7 +45,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 	"github.com/erigontech/erigon-lib/seg"
 )
 
@@ -163,6 +164,16 @@ func (h *History) vAccessorFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.vi", h.version.AccessorVI.String(), h.filenameBase, fromStep, toStep))
 }
 
+func (h *History) vFileNameMask(fromStep, toStep uint64) string {
+	return fmt.Sprintf("*-%s.%d-%d.v", h.filenameBase, fromStep, toStep)
+}
+func (h *History) vFilePathMask(fromStep, toStep uint64) string {
+	return filepath.Join(h.dirs.SnapHistory, h.vFileNameMask(fromStep, toStep))
+}
+func (h *History) vAccessorFilePathMask(fromStep, toStep uint64) string {
+	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("*-%s.%d-%d.vi", h.filenameBase, fromStep, toStep))
+}
+
 // openList - main method to open list of files.
 // It's ok if some files was open earlier.
 // If some file already open: noop.
@@ -214,8 +225,8 @@ func (h *History) openDirtyFiles() error {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
 			if item.decompressor == nil {
-				fPath := h.vFilePath(fromStep, toStep)
-				exists, err := dir.FileExist(fPath)
+				fPathMask := h.vFilePathMask(fromStep, toStep)
+				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
 					h.logger.Debug("[agg] History.openDirtyFiles: FileExist", "f", fName, "err", err)
@@ -224,7 +235,7 @@ func (h *History) openDirtyFiles() error {
 					invalidFilesMu.Unlock()
 					continue
 				}
-				if !exists {
+				if !ok {
 					_, fName := filepath.Split(fPath)
 					h.logger.Debug("[agg] History.openDirtyFiles: file does not exists", "f", fName)
 					invalidFilesMu.Lock()
@@ -232,6 +243,15 @@ func (h *History) openDirtyFiles() error {
 					invalidFilesMu.Unlock()
 					continue
 				}
+				if !fileVer.Eq(h.version.DataV.Current) {
+					if !fileVer.Less(h.version.DataV.MinSupported) {
+						h.version.DataV.Current = fileVer
+					} else {
+						panic("Version is too low, try to rm ef snapshots")
+						//return false
+					}
+				}
+
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 					_, fName := filepath.Split(fPath)
 					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
@@ -261,13 +281,21 @@ func (h *History) openDirtyFiles() error {
 			}
 
 			if item.index == nil {
-				fPath := h.vAccessorFilePath(fromStep, toStep)
-				exists, err := dir.FileExist(fPath)
+				fPathMask := h.vAccessorFilePathMask(fromStep, toStep)
+				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
 					h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
 				}
-				if exists {
+				if ok {
+					if !fileVer.Eq(h.version.AccessorVI.Current) {
+						if !fileVer.Less(h.version.AccessorVI.MinSupported) {
+							h.version.AccessorVI.Current = fileVer
+						} else {
+							panic("Version is too low, try to rm ef snapshots")
+							//return false
+						}
+					}
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
@@ -360,19 +388,19 @@ func (h *History) buildVi(ctx context.Context, item *filesItem, ps *background.P
 	fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
 	idxPath := h.vAccessorFilePath(fromStep, toStep)
 
-	err = h.buildVI(ctx, idxPath, item.decompressor, iiItem.decompressor, ps)
+	err = h.buildVI(ctx, idxPath, item.decompressor, iiItem.decompressor, iiItem.startTxNum, ps)
 	if err != nil {
 		return fmt.Errorf("buildVI: %w", err)
 	}
 	return nil
 }
 
-func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHist *seg.Decompressor, ps *background.ProgressSet) error {
+func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHist *seg.Decompressor, efBaseTxNum uint64, ps *background.ProgressSet) error {
 	var histKey []byte
 	var valOffset uint64
 
-	defer hist.EnableReadAhead().DisableReadAhead()
-	defer efHist.EnableReadAhead().DisableReadAhead()
+	defer hist.MadvSequential().DisableReadAhead()
+	defer efHist.MadvSequential().DisableReadAhead()
 
 	iiReader := seg.NewReader(efHist.MakeGetter(), h.InvertedIndex.Compression)
 
@@ -381,7 +409,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	for iiReader.HasNext() {
 		keyBuf, _ = iiReader.Next(keyBuf[:0]) // skip key
 		valBuf, _ = iiReader.Next(valBuf[:0])
-		cnt += eliasfano32.Count(valBuf)
+		cnt += multiencseq.Count(efBaseTxNum, valBuf)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -401,7 +429,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		LeafSize:   recsplit.DefaultLeafSize,
 		TmpDir:     h.dirs.Tmp,
 		IndexFile:  historyIdxPath,
-		Salt:       h.salt,
+		Salt:       h.salt.Load(),
 		NoFsync:    h.noFsync,
 	}, h.logger)
 	if err != nil {
@@ -423,10 +451,10 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 
 			// fmt.Printf("ef key %x\n", keyBuf)
 
-			ef, _ := eliasfano32.ReadEliasFano(valBuf)
-			efIt := ef.Iterator()
-			for efIt.HasNext() {
-				txNum, err := efIt.Next()
+			seq := multiencseq.ReadMultiEncSeq(efBaseTxNum, valBuf)
+			it := seq.Iterator(0)
+			for it.HasNext() {
+				txNum, err := it.Next()
 				if err != nil {
 					return err
 				}
@@ -443,7 +471,6 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 					}
 				}
 			}
-			p.Processed.Add(1)
 
 			select {
 			case <-ctx.Done():
@@ -597,6 +624,7 @@ type HistoryCollation struct {
 	efHistoryComp *seg.Writer
 	historyPath   string
 	efHistoryPath string
+	efBaseTxNum   uint64
 }
 
 func (c HistoryCollation) Close() {
@@ -708,6 +736,8 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	efHistoryComp = seg.NewWriter(efComp, seg.CompressNone) // coll+build must be fast - no compression
 	collector.SortAndFlushInBackground(true)
 	defer bitmapdb.ReturnToPool64(bitmap)
+
+	baseTxNum := step * h.aggregationStep
 	cnt := 0
 	var histKeyBuf []byte
 	//log.Warn("[dbg] collate", "name", h.filenameBase, "sampling", h.historyValuesOnCompressedPage)
@@ -725,13 +755,13 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 			return nil
 		}
 
-		ef := eliasfano32.NewEliasFano(bitmap.GetCardinality(), bitmap.Maximum())
+		seqBuilder := multiencseq.NewBuilder(baseTxNum, bitmap.GetCardinality(), bitmap.Maximum())
 		it := bitmap.Iterator()
 
 		for it.HasNext() {
 			cnt++
 			vTxNum := it.Next()
-			ef.AddOffset(vTxNum)
+			seqBuilder.AddOffset(vTxNum)
 
 			binary.BigEndian.PutUint64(numBuf, vTxNum)
 			if !h.historyLargeValues {
@@ -766,9 +796,9 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 			}
 		}
 		bitmap.Clear()
-		ef.Build()
+		seqBuilder.Build()
 
-		prevEf = ef.AppendBytes(prevEf[:0])
+		prevEf = seqBuilder.AppendBytes(prevEf[:0])
 
 		if _, err = efHistoryComp.Write(prevKey); err != nil {
 			return fmt.Errorf("add %s ef history key [%x]: %w", h.filenameBase, prevKey, err)
@@ -802,6 +832,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	return HistoryCollation{
 		efHistoryComp: efHistoryComp,
 		efHistoryPath: efHistoryPath,
+		efBaseTxNum:   step * h.aggregationStep,
 		historyPath:   historyPath,
 		historyComp:   historyComp,
 	}, nil
@@ -920,7 +951,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	}
 
 	historyIdxPath := h.vAccessorFilePath(step, step+1)
-	err = h.buildVI(ctx, historyIdxPath, historyDecomp, efHistoryDecomp, ps)
+	err = h.buildVI(ctx, historyIdxPath, historyDecomp, efHistoryDecomp, collation.efBaseTxNum, ps)
 	if err != nil {
 		return HistoryFiles{}, fmt.Errorf("build %s .vi: %w", h.filenameBase, err)
 	}

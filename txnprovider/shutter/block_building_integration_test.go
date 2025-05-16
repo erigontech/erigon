@@ -14,6 +14,9 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
+// Skip when running tests with race detector: see issue #15007
+//go:build !race
+
 package shutter_test
 
 import (
@@ -27,12 +30,10 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	libp2pcrypto "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/chain"
 	params2 "github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -61,10 +62,6 @@ import (
 )
 
 func TestShutterBlockBuilding(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
@@ -327,8 +324,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	}
 	t.Cleanup(cleanNode(ethNode))
 
-	var chainConfig chain.Config
-	copier.Copy(&chainConfig, params.ChiadoChainConfig)
+	chainConfig := *params.ChiadoChainConfig
 	chainConfig.ChainName = "shutter-devnet"
 	chainConfig.ChainID = chainId
 	chainConfig.TerminalTotalDifficulty = big.NewInt(0)

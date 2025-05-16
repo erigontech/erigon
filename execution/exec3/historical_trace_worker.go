@@ -26,14 +26,12 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
@@ -356,9 +354,16 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 }
 
 func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx context.Context, tx kv.TemporalTx, cfg *ExecArgs, logger log.Logger) (err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("'CustomTraceMapReduce' paniced: %s, %s", rec, dbg.Stack())
+			log.Warn("[StageCustomTrace]", "err", err)
+		}
+	}()
+
 	br := cfg.BlockReader
 	chainConfig := cfg.ChainConfig
-	if chainConfig.ChainName == networkname.Gnosis {
+	if chainConfig.Aura != nil && cfg.Workers > 1 {
 		panic("gnosis consensus doesn't support parallel exec yet: https://github.com/erigontech/erigon/issues/12054")
 	}
 
@@ -376,13 +381,6 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 		return err
 	}
 
-	// If db is empty, and have only files - then limit by files progress. Because files can have half-block progress
-	ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
-	stepSize := ac.StepSize()
-	if ac.DbgDomain(kv.AccountsDomain).DbgMaxTxNumInDB(tx) > 1 {
-		toTxNum = min(toTxNum, ac.DbgDomain(kv.AccountsDomain).FirstStepNotInFiles()*stepSize)
-	}
-
 	// "Map-Reduce on history" is conflict-free - means we don't need "Retry" feature.
 	// But still can use this data-type as simple queue.
 	in := state.NewQueueWithRetry(10_000)
@@ -393,7 +391,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 		WorkerCount = cfg.Workers
 	}
 
-	log.Info("[Receipt] batch start", "fromBlock", fromBlock, "toBlock", toBlock, "workers", cfg.Workers, "toTxNum", toTxNum)
+	log.Info("[custom_trace] batch start", "fromBlock", fromBlock, "toBlock", toBlock, "workers", cfg.Workers, "toTxNum", toTxNum)
 	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {
 		if tx != nil && WorkerCount == 1 {
 			h, _ = cfg.BlockReader.Header(ctx, tx, hash, number)
