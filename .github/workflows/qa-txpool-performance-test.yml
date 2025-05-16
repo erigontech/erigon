@@ -46,6 +46,10 @@ jobs:
           # Find the folder starting with 'assertoor--'
           assertoor_folder=$(find ${{ runner.temp }}/kurtosis-run-${{ github.run_id }}/dump -type d -name 'assertoor--*' | head -n 1)
 
+          # List contents of the dump directory for debugging
+          echo "Contents of dump directory:"
+          ls -l ${{ runner.temp }}/kurtosis-run-${{ github.run_id }}/dump
+
           # Exit if no assertoor folder is found
           if [ -z "$assertoor_folder" ]; then
             echo "No directory starting with 'assertoor--' found. Skipping."
