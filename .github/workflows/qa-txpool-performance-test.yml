@@ -214,10 +214,7 @@ jobs:
         if: always()
         with:
           post: |
-            # stop all containers
-            docker stop $(docker ps -a -q)
-            # remove containers and images
-            docker rm -f $(docker ps -a -q)
-            docker rmi -f $(docker images -q)
-            docker system prune -a -f
+            # remove created containers and images
+            docker rmi test/erigon:current
+            docker rmi test/assertoor:current
             docker volume rm $(docker volume ls -q)
