@@ -681,6 +681,7 @@ Loop:
 // [from, to)
 func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep uint64) error {
 	if toStep <= fromStep+1 {
+		log.Warn("[agg.BuildFiles2] skip", "fromStep", fromStep, "toStep", toStep)
 		return nil
 	}
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
@@ -688,9 +689,7 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep uint64) e
 	}
 	go func() {
 		defer a.buildingFiles.Store(false)
-		if toStep > fromStep {
-			log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
-		}
+		log.Warn("[agg.BuildFiles2] ", "fromStep", fromStep, "toStep", toStep)
 		for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
 			if err := a.buildFiles(ctx, step); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
