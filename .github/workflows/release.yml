@@ -117,6 +117,7 @@ jobs:
           BUILD_VERSION: ${{ inputs.release_version }}
           DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY_DEV }}
         run: |
+          cd erigon;
           docker buildx build \
             --output type=local,dest=/tmp/docker-build-output \
             --output type=registry \
