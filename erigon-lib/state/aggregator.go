@@ -687,7 +687,9 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep uint64) e
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		return nil
 	}
+	a.wg.Add(1)
 	go func() {
+		defer a.wg.Done()
 		defer a.buildingFiles.Store(false)
 		log.Warn("[agg.BuildFiles2] ", "fromStep", fromStep, "toStep", toStep)
 		for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
