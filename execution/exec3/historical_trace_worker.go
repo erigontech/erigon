@@ -24,8 +24,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/polygon/aa"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -38,12 +36,14 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3/calltracer"
+	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
@@ -146,7 +146,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 	rw.stateWriter = state.NewNoopWriter()
 
 	rw.ibs.Reset()
-	ibs := rw.ibs
+	ibs, cc := rw.ibs, rw.execArgs.ChainConfig
 	var hooks *tracing.Hooks // nil is ok
 	ibs.SetHooks(hooks)
 	//ibs.SetTrace(true)
@@ -169,10 +169,10 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			ret, _, err := core.SysCallContract(contract, data, rw.execArgs.ChainConfig, ibs, header, rw.execArgs.Engine, constCall /* constCall */, hooks)
+			ret, _, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, constCall /* constCall */, hooks)
 			return ret, err
 		}
-		rw.execArgs.Engine.Initialize(rw.execArgs.ChainConfig, rw.chain, header, ibs, syscall, rw.logger, nil)
+		rw.execArgs.Engine.Initialize(cc, rw.chain, header, ibs, syscall, rw.logger, hooks)
 		txTask.Error = ibs.FinalizeTx(rules, noop)
 	case txTask.Final:
 		if txTask.BlockNum == 0 {
@@ -181,7 +181,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 
 		// End of block transaction in a block
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			ret, logs, err := core.SysCallContract(contract, data, rw.execArgs.ChainConfig, ibs, header, rw.execArgs.Engine, false /* constCall */, hooks)
+			ret, logs, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, false /* constCall */, hooks)
 			if err != nil {
 				return nil, err
 			}
@@ -190,7 +190,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 		}
 
 		skipPostEvaluaion := false // `true` only inMining
-		_, _, _, err := rw.execArgs.Engine.Finalize(rw.execArgs.ChainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, skipPostEvaluaion, rw.logger)
+		_, _, _, err := rw.execArgs.Engine.Finalize(cc, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, skipPostEvaluaion, rw.logger)
 		if err != nil {
 			txTask.Error = err
 		} else {
@@ -201,7 +201,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 			}
 		}
 	default:
-		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), rw.execArgs.ChainConfig.GetMaxBlobGasPerBlock(header.Time))
+		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), cc.GetMaxBlobGasPerBlock(header.Time))
 		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		txTask.Tracer.Reset() // txTask is retryable
 		rw.vmCfg.Tracer = txTask.Tracer.Tracer().Hooks
@@ -209,7 +209,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 		txn := txTask.Tx
 
 		if txTask.Tx.Type() == types.AccountAbstractionTxType {
-			if !rw.execArgs.ChainConfig.AllowAA {
+			if !cc.AllowAA {
 				txTask.Error = errors.New("account abstraction transactions are not allowed")
 				break
 			}
