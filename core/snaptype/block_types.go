@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 func init() {
@@ -90,8 +91,8 @@ var (
 		Enums.Domains,
 		"salt",
 		snaptype.Versions{
-			Current:      snaptype.ZeroVersion, //2,
-			MinSupported: snaptype.ZeroVersion,
+			Current:      version.ZeroVersion, //2,
+			MinSupported: version.ZeroVersion,
 		},
 		nil,
 		nil,
@@ -101,8 +102,8 @@ var (
 		Enums.Headers,
 		"headers",
 		snaptype.Versions{
-			Current:      snaptype.V1_0, //2,
-			MinSupported: snaptype.V1_0,
+			Current:      version.V1_0, //2,
+			MinSupported: version.V1_0,
 		},
 		nil,
 		[]snaptype.Index{Indexes.HeaderHash},
@@ -145,8 +146,8 @@ var (
 		Enums.Bodies,
 		"bodies",
 		snaptype.Versions{
-			Current:      snaptype.V1_0, //2,
-			MinSupported: snaptype.V1_0,
+			Current:      version.V1_0, //2,
+			MinSupported: version.V1_0,
 		},
 		nil,
 		[]snaptype.Index{Indexes.BodyHash},
@@ -182,8 +183,8 @@ var (
 		Enums.Transactions,
 		"transactions",
 		snaptype.Versions{
-			Current:      snaptype.V1_0, //2,
-			MinSupported: snaptype.V1_0,
+			Current:      version.V1_0, //2,
+			MinSupported: version.V1_0,
 		},
 		nil,
 		[]snaptype.Index{Indexes.TxnHash, Indexes.TxnHash2BlockNum},
@@ -202,7 +203,7 @@ var (
 				}
 				defer bodiesSegment.Close()
 
-				baseTxnID, expectedCount, err := txsAmountBasedOnBodiesSnapshots(bodiesSegment, sn.Len()-1)
+				baseTxnID, expectedCount, err := TxsAmountBasedOnBodiesSnapshots(bodiesSegment, sn.Len()-1)
 				if err != nil {
 					return err
 				}
@@ -237,6 +238,7 @@ var (
 				if err != nil {
 					return err
 				}
+				defer txnHashIdx.Close()
 
 				txnHash2BlockNumIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 					KeyCount:   d.Count(),
@@ -250,6 +252,7 @@ var (
 				if err != nil {
 					return err
 				}
+				defer txnHash2BlockNumIdx.Close()
 				txnHashIdx.LogLvl(log.LvlDebug)
 				txnHash2BlockNumIdx.LogLvl(log.LvlDebug)
 
@@ -350,8 +353,8 @@ var (
 		Enums.Domains,
 		"domain",
 		snaptype.Versions{
-			Current:      snaptype.V1_0, //2,
-			MinSupported: snaptype.V1_0,
+			Current:      version.V1_0, //2,
+			MinSupported: version.V1_0,
 		},
 		nil,
 		nil,
@@ -361,8 +364,8 @@ var (
 		Enums.Histories,
 		"history",
 		snaptype.Versions{
-			Current:      snaptype.V1_0, //2,
-			MinSupported: snaptype.V1_0,
+			Current:      version.V1_0, //2,
+			MinSupported: version.V1_0,
 		},
 		nil,
 		nil,
@@ -372,8 +375,8 @@ var (
 		Enums.InvertedIndicies,
 		"idx",
 		snaptype.Versions{
-			Current:      snaptype.V1_0, //2,
-			MinSupported: snaptype.V1_0,
+			Current:      version.V1_0, //2,
+			MinSupported: version.V1_0,
 		},
 		nil,
 		nil,
@@ -384,8 +387,8 @@ var (
 		Enums.Accessor,
 		"accessor",
 		snaptype.Versions{
-			Current:      snaptype.V1_0, //2,
-			MinSupported: snaptype.V1_0,
+			Current:      version.V1_0, //2,
+			MinSupported: version.V1_0,
 		},
 		nil,
 		nil,
@@ -396,8 +399,8 @@ var (
 		Enums.Txt,
 		"txt",
 		snaptype.Versions{
-			Current:      snaptype.V1_0, //2,
-			MinSupported: snaptype.V1_0,
+			Current:      version.V1_0, //2,
+			MinSupported: version.V1_0,
 		},
 		nil,
 		nil,
@@ -407,7 +410,7 @@ var (
 	E3StateTypes       = []snaptype.Type{Domains, Histories, InvertedIndicies, Accessors, Txt}
 )
 
-func txsAmountBasedOnBodiesSnapshots(bodiesSegment *seg.Decompressor, len uint64) (baseTxID types.BaseTxnID, expectedCount int, err error) {
+func TxsAmountBasedOnBodiesSnapshots(bodiesSegment *seg.Decompressor, len uint64) (baseTxID types.BaseTxnID, expectedCount int, err error) {
 	gg := bodiesSegment.MakeGetter()
 	buf, _ := gg.Next(nil)
 	firstBody := &types.BodyForStorage{}

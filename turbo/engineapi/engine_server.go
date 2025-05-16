@@ -751,7 +751,7 @@ func (e *EngineServer) HandleNewPayload(
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 
-		if !e.blockDownloader.StartDownloading(ctx, 0, header.ParentHash, block) {
+		if !e.blockDownloader.StartDownloading(0, header.ParentHash, headerNumber-1, block) {
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 
@@ -771,7 +771,7 @@ func (e *EngineServer) HandleNewPayload(
 					if e.test {
 						return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 					}
-					if e.blockDownloader.StartDownloading(ctx, 0, missingBlkHash, block) {
+					if e.blockDownloader.StartDownloading(0, missingBlkHash, 0, block) {
 						e.logger.Warn(fmt.Sprintf("[%s] New payload: need to recover missing segment", logPrefix), "height", headerNumber, "hash", headerHash, "missingBlkHash", missingBlkHash)
 					}
 					return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
@@ -808,7 +808,7 @@ func (e *EngineServer) HandleNewPayload(
 			if e.test {
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			}
-			if e.blockDownloader.StartDownloading(ctx, 0, missingBlkHash, block) {
+			if e.blockDownloader.StartDownloading(0, missingBlkHash, 0, block) {
 				e.logger.Warn(fmt.Sprintf("[%s] New payload: need to recover missing segment", logPrefix), "height", headerNumber, "hash", headerHash, "missingBlkHash", missingBlkHash)
 			}
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
@@ -867,7 +867,7 @@ func (e *EngineServer) HandlesForkChoice(
 	if headerNumber == nil {
 		e.logger.Debug(fmt.Sprintf("[%s] Fork choice: need to download header with hash %x", logPrefix, headerHash))
 		if !e.test {
-			e.blockDownloader.StartDownloading(ctx, requestId, headerHash, nil)
+			e.blockDownloader.StartDownloading(requestId, headerHash, 0, nil)
 		}
 		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 	}
@@ -877,7 +877,7 @@ func (e *EngineServer) HandlesForkChoice(
 	if header == nil {
 		e.logger.Debug(fmt.Sprintf("[%s] Fork choice: need to download header with hash %x", logPrefix, headerHash))
 		if !e.test {
-			e.blockDownloader.StartDownloading(ctx, requestId, headerHash, nil)
+			e.blockDownloader.StartDownloading(requestId, headerHash, *headerNumber, nil)
 		}
 
 		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil

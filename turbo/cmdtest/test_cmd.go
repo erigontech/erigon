@@ -125,14 +125,14 @@ func (tt *TestCmd) Expect(tplsource string) {
 // Output reads all output from stdout, and returns the data.
 func (tt *TestCmd) Output() []byte {
 	var buf []byte
-	tt.withKillTimeout(func() { buf, _ = io.ReadAll(tt.stdout) })
+	tt.withKillTimeout(30*time.Second, func() { buf, _ = io.ReadAll(tt.stdout) })
 	return buf
 }
 
 func (tt *TestCmd) matchExactOutput(want []byte) error {
 	buf := make([]byte, len(want))
 	n := 0
-	tt.withKillTimeout(func() { n, _ = io.ReadFull(tt.stdout, buf) })
+	tt.withKillTimeout(30*time.Second, func() { n, _ = io.ReadFull(tt.stdout, buf) })
 	buf = buf[:n]
 	if n < len(want) || !bytes.Equal(buf, want) {
 		// Grab any additional buffered output in case of mismatch
@@ -167,7 +167,7 @@ func (tt *TestCmd) ExpectRegexp(regex string) (*regexp.Regexp, []string) {
 		rtee    = &runeTee{in: tt.stdout}
 		matches []int
 	)
-	tt.withKillTimeout(func() { matches = re.FindReaderSubmatchIndex(rtee) })
+	tt.withKillTimeout(5*time.Second, func() { matches = re.FindReaderSubmatchIndex(rtee) })
 	output := rtee.buf.Bytes()
 	if matches == nil {
 		tt.Fatalf("Output did not match:\n---------------- (stdout text)\n%s\n---------------- (regular expression)\n%s",
@@ -187,7 +187,7 @@ func (tt *TestCmd) ExpectRegexp(regex string) (*regexp.Regexp, []string) {
 // printing any additional text on stdout.
 func (tt *TestCmd) ExpectExit() {
 	var output []byte
-	tt.withKillTimeout(func() {
+	tt.withKillTimeout(5*time.Second, func() {
 		output, _ = io.ReadAll(tt.stdout)
 	})
 	tt.WaitExit()
@@ -233,6 +233,15 @@ func (tt *TestCmd) StderrText() string {
 	return tt.stderr.buf.String()
 }
 
+// Stderr returns any stderr output written so far.
+// The returned bytes holds all log lines after ExpectExit has
+// returned.
+func (tt *TestCmd) Stderr() []byte {
+	tt.stderr.mu.Lock()
+	defer tt.stderr.mu.Unlock()
+	return tt.stderr.buf.Bytes()
+}
+
 func (tt *TestCmd) CloseStdin() {
 	tt.stdin.Close()
 }
@@ -244,8 +253,8 @@ func (tt *TestCmd) Kill() {
 	}
 }
 
-func (tt *TestCmd) withKillTimeout(fn func()) {
-	timeout := time.AfterFunc(5*time.Second, func() {
+func (tt *TestCmd) withKillTimeout(duration time.Duration, fn func()) {
+	timeout := time.AfterFunc(duration, func() {
 		tt.Log("killing the child process (timeout)")
 		tt.Kill()
 	})

@@ -60,4 +60,4 @@ tasks:
   configVars:
     privateKey: "eoaPrivateKey"
     targetAddress: "testContractAddr"
-    authorizations: "| [ { codeAddress: .delegateContractAddr, signerPrivkey: .eoaPrivateKey } ]"
+    authorizations: "| [ { codeAddress: .delegateContractAddr, signerPrivkey: .eoaPrivateKey, nonce: 3 } ]"

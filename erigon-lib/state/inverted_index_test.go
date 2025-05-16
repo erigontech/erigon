@@ -27,7 +27,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/version"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -58,7 +58,7 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	}).MustOpen()
 	tb.Cleanup(db.Close)
 	salt := uint32(1)
-	cfg := iiCfg{salt: new(atomic.Pointer[uint32]), dirs: dirs, filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable, version: IIVersionTypes{DataEF: snaptype.V1_0, AccessorEFI: snaptype.V1_0}}
+	cfg := iiCfg{salt: new(atomic.Pointer[uint32]), dirs: dirs, filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable, version: IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
 	cfg.salt.Store(&salt)
 	ii, err := NewInvertedIndex(cfg, aggStep, logger)
 	require.NoError(tb, err)
@@ -685,8 +685,7 @@ func TestCtxFiles(t *testing.T) {
 	ii.scanDirtyFiles(files)
 	require.Equal(t, 10, ii.dirtyFiles.Len())
 	ii.dirtyFiles.Scan(func(item *filesItem) bool {
-		fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-		item.decompressor = &seg.Decompressor{FileName1: fName}
+		item.decompressor = &seg.Decompressor{}
 		return true
 	})
 
