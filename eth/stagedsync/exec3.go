@@ -807,6 +807,7 @@ Loop:
 		default:
 		}
 	}
+	log.Warn("[dbg] exec13", "doms.BlockNum()", doms.BlockNum(), "doms.TxNum()", doms.TxNum(), "maxBlockNum", maxBlockNum)
 
 	//log.Info("Executed", "blocks", inputBlockNum.Load(), "txs", outputTxNum.Load(), "repeats", mxExecRepeats.GetValueUint64())
 
@@ -823,6 +824,7 @@ Loop:
 			fmt.Printf("[dbg] mmmm... do we need action here????\n")
 		}
 	}
+	log.Warn("[dbg] exec14", "doms.BlockNum()", doms.BlockNum(), "doms.TxNum()", doms.TxNum(), "maxBlockNum", maxBlockNum)
 
 	//dumpPlainStateDebug(executor.tx(), executor.domains())
 
