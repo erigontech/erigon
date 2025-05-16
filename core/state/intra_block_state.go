@@ -1047,7 +1047,7 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase common.
 func (sdb *IntraBlockState) AddAddressToAccessList(addr common.Address) (addrMod bool) {
 	addrMod = sdb.accessList.AddAddress(addr)
 	if addrMod {
-		sdb.journal.append(accessListAddAccountChange{&addr})
+		sdb.journal.accessListAddAccount(addr)
 	}
 	return addrMod
 }
@@ -1060,13 +1060,10 @@ func (sdb *IntraBlockState) AddSlotToAccessList(addr common.Address, slot common
 		// scope of 'address' without having the 'address' become already added
 		// to the access list (via call-variant, create, etc).
 		// Better safe than sorry, though
-		sdb.journal.append(accessListAddAccountChange{&addr})
+		sdb.journal.accessListAddAccount(addr)
 	}
 	if slotMod {
-		sdb.journal.append(accessListAddSlotChange{
-			address: &addr,
-			slot:    &slot,
-		})
+		sdb.journal.accessListAddSlot(addr, slot)
 	}
 	return addrMod, slotMod
 }

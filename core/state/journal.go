@@ -91,6 +91,17 @@ func (j *journal) length() int {
 	return len(j.entries)
 }
 
+func (j *journal) accessListAddAccount(addr common.Address) {
+	j.append(accessListAddAccountChange{addr})
+}
+
+func (j *journal) accessListAddSlot(addr common.Address, slot common.Hash) {
+	j.append(accessListAddSlotChange{
+		address: addr,
+		slot:    slot,
+	})
+}
+
 type (
 	// Changes to the account trie.
 	createObjectChange struct {
@@ -151,11 +162,11 @@ type (
 
 	// Changes to the access list
 	accessListAddAccountChange struct {
-		address *common.Address
+		address common.Address
 	}
 	accessListAddSlotChange struct {
-		address *common.Address
-		slot    *common.Hash
+		address common.Address
+		slot    common.Hash
 	}
 
 	transientStorageChange struct {
@@ -346,7 +357,7 @@ func (ch accessListAddAccountChange) revert(s *IntraBlockState) error {
 		(addr) at this point, since no storage adds can remain when come upon
 		a single (addr) change.
 	*/
-	s.accessList.DeleteAddress(*ch.address)
+	s.accessList.DeleteAddress(ch.address)
 	return nil
 }
 
@@ -355,7 +366,7 @@ func (ch accessListAddAccountChange) dirtied() *common.Address {
 }
 
 func (ch accessListAddSlotChange) revert(s *IntraBlockState) error {
-	s.accessList.DeleteSlot(*ch.address, *ch.slot)
+	s.accessList.DeleteSlot(ch.address, ch.slot)
 	return nil
 }
 
