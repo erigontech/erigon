@@ -218,7 +218,9 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 
 	var err error
 	rules, header := txTask.Rules, txTask.Header
-
+	if txTask.BlockNum == 1577021 {
+		fmt.Printf("[dbg] i see you! %d\n", txTask.TxIndex)
+	}
 	switch {
 	case txTask.TxIndex == -1:
 		if txTask.BlockNum == 0 {
@@ -312,6 +314,9 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			txTask.Error = err
 			if hooks != nil && hooks.OnTxEnd != nil {
 				hooks.OnTxEnd(nil, err)
+			}
+			if txTask.BlockNum == 1577021 {
+				fmt.Printf("[dbg] trace3.error! %d\n", txTask.TxIndex)
 			}
 		} else {
 			txTask.Failed = applyRes.Failed()
