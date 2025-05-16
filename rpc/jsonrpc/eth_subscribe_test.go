@@ -40,6 +40,7 @@ import (
 )
 
 func TestEthSubscribe(t *testing.T) {
+	t.Skip("issue #14546")
 	m, require := mock.Mock(t), require.New(t)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 7, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})

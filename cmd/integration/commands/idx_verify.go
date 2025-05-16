@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -27,9 +27,14 @@ var idxVerify = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx, _ := common.RootContext()
 		logger := debug.SetupCobra(cmd, "integration")
+		dirs := datadir.New(sourceDirCli)
 
-		sourceIdxPath := filepath.Join(sourceDirCli, "snapshots", "idx")
-		sourceIdxDir := os.DirFS(sourceIdxPath)
+		if err := CheckSaltFilesExist(dirs); err != nil {
+			logger.Error("Failed to check salt files", "error", err)
+			return
+		}
+
+		sourceIdxDir := os.DirFS(dirs.SnapIdx)
 
 		files, err := fs.ReadDir(sourceIdxDir, ".")
 		if err != nil {
