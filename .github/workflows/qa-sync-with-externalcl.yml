@@ -67,6 +67,9 @@ jobs:
           # Capture monitoring script exit status
           test_exit_status=$?
 
+          # Save the subsection reached status
+          echo "test_executed=true" >> $GITHUB_OUTPUT
+
           # Check test runner script exit status
           if [ $test_exit_status -eq 0 ]; then
             echo "Tests completed successfully"
