@@ -402,7 +402,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 			}
 
 			if item.index == nil && d.Accessors.Has(AccessorHashMap) {
-				fPathMask := d.kviAccessorFilePath(fromStep, toStep)
+				fPathMask := d.kviAccessorFilePathMask(fromStep, toStep)
 				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
