@@ -150,7 +150,28 @@ var PrecompiledContractsPrague = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{0x11}): &bls12381MapFp2ToG2{},
 }
 
+var PrecompiledContractsOsaka = map[common.Address]PrecompiledContract{
+	common.BytesToAddress([]byte{0x01}): &ecrecover{},
+	common.BytesToAddress([]byte{0x02}): &sha256hash{},
+	common.BytesToAddress([]byte{0x03}): &ripemd160hash{},
+	common.BytesToAddress([]byte{0x04}): &dataCopy{},
+	common.BytesToAddress([]byte{0x05}): &bigModExp{eip7883: true},
+	common.BytesToAddress([]byte{0x06}): &bn256AddIstanbul{},
+	common.BytesToAddress([]byte{0x07}): &bn256ScalarMulIstanbul{},
+	common.BytesToAddress([]byte{0x08}): &bn256PairingIstanbul{},
+	common.BytesToAddress([]byte{0x09}): &blake2F{},
+	common.BytesToAddress([]byte{0x0a}): &pointEvaluation{},
+	common.BytesToAddress([]byte{0x0b}): &bls12381G1Add{},
+	common.BytesToAddress([]byte{0x0c}): &bls12381G1MultiExp{},
+	common.BytesToAddress([]byte{0x0d}): &bls12381G2Add{},
+	common.BytesToAddress([]byte{0x0e}): &bls12381G2MultiExp{},
+	common.BytesToAddress([]byte{0x0f}): &bls12381Pairing{},
+	common.BytesToAddress([]byte{0x10}): &bls12381MapFpToG1{},
+	common.BytesToAddress([]byte{0x11}): &bls12381MapFp2ToG2{},
+}
+
 var (
+	PrecompiledAddressesOsaka     []common.Address
 	PrecompiledAddressesPrague    []common.Address
 	PrecompiledAddressesNapoli    []common.Address
 	PrecompiledAddressesCancun    []common.Address
@@ -182,11 +203,16 @@ func init() {
 	for k := range PrecompiledContractsPrague {
 		PrecompiledAddressesPrague = append(PrecompiledAddressesPrague, k)
 	}
+	for k := range PrecompiledContractsOsaka {
+		PrecompiledAddressesOsaka = append(PrecompiledAddressesOsaka, k)
+	}
 }
 
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
 func ActivePrecompiles(rules *chain.Rules) []common.Address {
 	switch {
+	case rules.IsOsaka:
+		return PrecompiledAddressesOsaka
 	case rules.IsPrague:
 		return PrecompiledAddressesPrague
 	case rules.IsNapoli:
