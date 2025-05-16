@@ -19,7 +19,6 @@ package downloadercfg
 import (
 	"context"
 	"fmt"
-	analog "github.com/anacrolix/log"
 	"log/slog"
 	"net"
 	"net/url"
@@ -30,12 +29,15 @@ import (
 	"strings"
 	"time"
 
+	analog "github.com/anacrolix/log"
+
 	"github.com/erigontech/erigon-lib/chain/networkname"
 
 	"github.com/anacrolix/dht/v2"
-	"github.com/anacrolix/torrent"
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/time/rate"
+
+	"github.com/anacrolix/torrent"
 
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -84,14 +86,9 @@ func Default() *torrent.ClientConfig {
 
 	// This needs to be at least the chunk size of requests we expect to service for peers. This has
 	// been as high as 8 MiB unintentionally, but the piece size for all previous torrents has been
-	// 2 MiB. Therefore 2 MiB is required to service those nodes.
+	// 2 MiB. Therefore, 2 MiB is required to service those nodes. TODO: Reevaluate this in Erigon
+	// 3.2 when there are no 3.0 users.
 	torrentConfig.MaxAllocPeerRequestDataPerConn = max(torrentConfig.MaxAllocPeerRequestDataPerConn, DefaultPieceSize)
-
-	// this limits the amount of unverified bytes - which will throttle the
-	// number of requests the torrent will handle - it acts as a brake on
-	// parallelism if set (default is 67,108,864)
-	// TODO: Well this would explain why hashing can't keep up.
-	//torrentConfig.MaxUnverifiedBytes = 0
 
 	// enable dht. TODO: We want DHT.
 	torrentConfig.NoDHT = true
@@ -127,8 +124,8 @@ func New(
 	// check if ipv6 is enabled
 	torrentConfig.DisableIPv6 = !getIpv6Enabled()
 
-	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()), DefaultNetworkChunkSize)       // default: unlimited
-	torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(downloadRate.Bytes()), 2*DefaultNetworkChunkSize) // default: unlimited
+	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()), 0)
+	torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(downloadRate.Bytes()), 0)
 
 	var analogLevel analog.Level
 	analogLevel, torrentConfig.Debug, err = erigonToAnalogLevel(verbosity)
@@ -145,8 +142,9 @@ func New(
 			}
 			return level >= slogLevel
 		},
-		//minLevel: slogLevel,
 	})
+	torrentConfig.Logger.Levelf(analog.Debug, "test")
+	torrentConfig.Slogger.Debug("test")
 	// Previously this used a logger passed to the callers of this function. Do we need it here?
 	log.Info(
 		"torrent verbosity",
