@@ -119,6 +119,7 @@ jobs:
 
           # Clean up
           rm -rf "$tmp_dir"
+          rm -rf kurtosis_artifacts
           echo "processed=true" >> $GITHUB_OUTPUT
 
       - name: Create HDR plots PNG artifacts
