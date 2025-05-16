@@ -577,8 +577,12 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 			if setMem && ot.lastMemLen > 0 {
 				cpy, err := tracers.GetMemoryCopyPadded(memory, int64(ot.lastMemOff), int64(ot.lastMemLen))
 				if err != nil {
-					log.Warn("GetMemoryCopyPadded failed", "off", ot.lastMemOff, "len", ot.lastMemLen, "err", err)
-					cpy = make([]byte, ot.lastMemLen)
+				    log.Warn("Failed to copy memory for trace output; this may happen with invalid offset/length", 
+		                        "off", ot.lastMemOff, 
+		                        "len", ot.lastMemLen, 
+		                        "err", err, 
+		                        "hint", "May affect trace completeness; consider enabling debug logs for deeper insight")
+	                             cpy = make([]byte, ot.lastMemLen)
 				}
 				if len(cpy) == 0 {
 					cpy = make([]byte, ot.lastMemLen)
