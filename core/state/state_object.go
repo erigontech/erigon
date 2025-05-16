@@ -203,7 +203,7 @@ func (so *stateObject) SetState(key *common.Hash, value uint256.Int) {
 	// If the fake storage is set, put the temporary state update here.
 	if so.fakeStorage != nil {
 		so.db.journal.append(fakeStorageChange{
-			account:  &so.address,
+			account:  so.address,
 			key:      *key,
 			prevalue: so.fakeStorage[*key],
 		})
@@ -218,7 +218,7 @@ func (so *stateObject) SetState(key *common.Hash, value uint256.Int) {
 	}
 	// New value is different, update and journal the change
 	so.db.journal.append(storageChange{
-		account:  &so.address,
+		account:  so.address,
 		key:      *key,
 		prevalue: prev,
 	})
@@ -294,7 +294,7 @@ func (so *stateObject) SubBalance(amount *uint256.Int, reason tracing.BalanceCha
 
 func (so *stateObject) SetBalance(amount *uint256.Int, reason tracing.BalanceChangeReason) {
 	so.db.journal.append(balanceChange{
-		account: &so.address,
+		account: so.address,
 		prev:    so.data.Balance,
 	})
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnBalanceChange != nil {
@@ -343,7 +343,7 @@ func (so *stateObject) Code() []byte {
 func (so *stateObject) SetCode(codeHash common.Hash, code []byte) {
 	prevcode := so.Code()
 	so.db.journal.append(codeChange{
-		account:  &so.address,
+		account:  so.address,
 		prevhash: so.data.CodeHash,
 		prevcode: prevcode,
 	})
