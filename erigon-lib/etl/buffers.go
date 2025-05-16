@@ -387,7 +387,7 @@ func (b *oldestEntrySortableBuffer) CheckFlushSize() bool {
 	return b.size >= b.optimalSize
 }
 
-func getBufferByType(tp int, size datasize.ByteSize, prevBuf Buffer) Buffer {
+func getBufferByType(tp int, size datasize.ByteSize) Buffer {
 	switch tp {
 	case SortableSliceBuffer:
 		return NewSortableBuffer(size)
