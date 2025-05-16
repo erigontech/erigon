@@ -151,10 +151,11 @@ jobs:
         env:
           RELEASE_VERSION: ${{ inputs.release_version }}
         run: |
-          cd ${GITHUB_WORKSPACE}
+          cd ${GITHUB_WORKSPACE}/docker-build-output
           mkdir $GITHUB_WORKSPACE/release
           ls -lao
-          for dir in ${GITHUB_WORKSPACE}/docker-build-output/*; do
+          for dir in *; do
+            echo Current directory is $(pwd) .
             cd $dir/usr/local/bin/
             echo Current directory is $(pwd) . Checksum file and archive will be created for this directory
             sha256sum * > checksums.txt
