@@ -55,14 +55,15 @@ jobs:
 
       - name: Parse Kurtosis output log and create JSON
         if: always()
+        id: parse_kurtosis_output
         run: |
           # Find the folder starting with 'assertoor--'
           assertoor_folder=$(find . -type d -name 'assertoor--*' | head -n 1)
 
           # Exit if no assertoor folder is found
           if [ -z "$assertoor_folder" ]; then
-            echo "Error: No directory starting with 'assertoor--' found. Exiting."
-            exit 1
+            echo "No directory starting with 'assertoor--' found. Skipping."
+            exit 0
           fi
 
           # Parse the output.log file within the assertoor-- folder
@@ -118,8 +119,10 @@ jobs:
 
           # Clean up
           rm -rf "$tmp_dir"
+          echo "processed=true" >> $GITHUB_OUTPUT
+
       - name: Create HDR plots PNG artifacts
-        if: always()
+        if: steps.parse_kurtosis_output.outputs.processed == 'true'
         id: create_hdr_plots
         run: |
           # Check if the JSON file exists
