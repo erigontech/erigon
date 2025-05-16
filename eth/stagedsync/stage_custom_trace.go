@@ -252,7 +252,7 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 	}
 
 	agg := db.(state2.HasAgg).Agg().(*state2.Aggregator)
-	if err := agg.BuildFiles(lastTxNum); err != nil {
+	if err := agg.BuildFiles2(ctx, 0, lastTxNum/agg.StepSize()); err != nil {
 		return err
 	}
 
