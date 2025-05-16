@@ -370,8 +370,8 @@ func WaitForDownloader(
 		if !caplinState && strings.Contains(p.Name, "caplin/") {
 			continue
 		}
-		// Can we just do this? The two calls to this function will be distinct files now.
-		if headerchain != (strings.Contains(p.Name, "headers") || strings.Contains(p.Name, "bodies") || p.Name == "salt-blocks.txt") {
+		if headerchain &&
+			!(strings.Contains(p.Name, "headers") || strings.Contains(p.Name, "bodies") || p.Name == "salt-blocks.txt") {
 			continue
 		}
 		if !syncCfg.KeepExecutionProofs && isStateHistory(p.Name) && strings.Contains(p.Name, kv.CommitmentDomain.String()) {
