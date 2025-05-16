@@ -24,8 +24,6 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon/execution/exec3/calltracer"
-
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -40,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/exec3/calltracer"
 	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -82,18 +81,20 @@ type Worker struct {
 
 func NewWorker(lock sync.Locker, logger log.Logger, hooks *tracing.Hooks, ctx context.Context, background bool, chainDb kv.RoDB, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *state.ResultsQueue, engine consensus.Engine, dirs datadir.Dirs, isMining bool) *Worker {
 	w := &Worker{
-		lock:        lock,
-		logger:      logger,
-		chainDb:     chainDb,
-		in:          in,
+		lock:    lock,
+		chainDb: chainDb,
+		in:      in,
+
+		logger: logger,
+		ctx:    ctx,
+
 		background:  background,
 		blockReader: blockReader,
-		chainConfig: chainConfig,
 
-		ctx:      ctx,
-		genesis:  genesis,
-		resultCh: results,
-		engine:   engine,
+		chainConfig: chainConfig,
+		genesis:     genesis,
+		resultCh:    results,
+		engine:      engine,
 
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
 		callTracer:  calltracer.NewCallTracer(hooks),
@@ -215,10 +216,8 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 	//ibs.SetTrace(true)
 	ibs.SetHooks(rw.hooks)
 
-	rules := txTask.Rules
 	var err error
-	header := txTask.Header
-	//fmt.Printf("txNum=%d blockNum=%d history=%t\n", txTask.TxNum, txTask.BlockNum, txTask.HistoryExecution)
+	rules, header := txTask.Rules, txTask.Header
 
 	switch {
 	case txTask.TxIndex == -1:
@@ -267,10 +266,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		if err != nil {
 			txTask.Error = err
 		} else {
-			//incorrect unwind to block 2
-			//if err := ibs.CommitBlock(rules, rw.stateWriter); err != nil {
-			//	txTask.Error = err
-			//}
 			txTask.TraceTos = map[common.Address]struct{}{}
 			txTask.TraceTos[txTask.Coinbase] = struct{}{}
 			for _, uncle := range txTask.Uncles {
@@ -278,12 +273,10 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			}
 		}
 	default:
-		// This doesn't make sense, but I am not sure if this wrong behaviour is needed somewhere else:
-		// rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), rw.chainConfig.GetMaxBlobGasPerBlock(header.Time))
 		rw.callTracer.Reset()
 		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		ibs.SetTxContext(txTask.TxIndex)
-		tx := txTask.Tx
+		txn := txTask.Tx
 
 		if txTask.Tx.Type() == types.AccountAbstractionTxType {
 			if !rw.chainConfig.AllowAA {
@@ -306,7 +299,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.vmCfg, rules)
 
 		if rw.hooks != nil && rw.hooks.OnTxStart != nil {
-			rw.hooks.OnTxStart(rw.evm.GetVMContext(), tx, msg.From())
+			rw.hooks.OnTxStart(rw.evm.GetVMContext(), txn, msg.From())
 		}
 		// MA applytx
 		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */, rw.engine)
@@ -321,7 +314,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			// Update the state with pending changes
 			ibs.SoftFinalise()
 			//txTask.Error = ibs.FinalizeTx(rules, noop)
-			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)
+			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txn.Hash(), txTask.BlockNum, txTask.BlockHash)
 			txTask.TraceFroms = rw.callTracer.Froms()
 			txTask.TraceTos = rw.callTracer.Tos()
 
