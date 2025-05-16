@@ -252,10 +252,7 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 	}
 
 	agg := db.(state2.HasAgg).Agg().(*state2.Aggregator)
-	var fromStep, toStep uint64
-	if lastTxNum/agg.StepSize() > 0 {
-		toStep = lastTxNum / agg.StepSize()
-	}
+	var fromStep uint64
 	if err := db.View(ctx, func(tx kv.Tx) error {
 		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 		fromStep = ac.DbgDomain(producingDomain).FirstStepNotInFiles()
@@ -263,6 +260,7 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 	}); err != nil {
 		return err
 	}
+	toStep := lastTxNum / agg.StepSize()
 	if err := agg.BuildFiles2(ctx, fromStep, toStep); err != nil {
 		return err
 	}
