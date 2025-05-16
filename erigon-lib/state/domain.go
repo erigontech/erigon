@@ -22,12 +22,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/version"
 	"math"
 	"path/filepath"
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/erigontech/erigon-lib/version"
 
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
@@ -47,17 +48,13 @@ import (
 	"github.com/erigontech/erigon-lib/seg"
 )
 
-var sortableBuffersPoolForPruning = sync.Pool{
+// 3_domains * 2 + 3_history * 1 + 4_indices * 2 = 17 etl collectors, 17*(256Mb/8) = 512Mb - for all collectros
+var aggEtlRAM = dbg.EnvDataSize("AGG_ETL_RAM", etl.BufferOptimalSize/8)
+var sortableBuffersForPruning = etl.NewAllocator(&sync.Pool{
 	New: func() interface{} {
-		return etl.NewSortableBuffer(etl.BufferOptimalSize / 8)
+		return etl.NewSortableBuffer(aggEtlRAM).Prealloc(2048, int(aggEtlRAM/8))
 	},
-}
-
-func sortableBufferForPruning() etl.Buffer {
-	sortableBuffer := sortableBuffersPoolForPruning.Get().(etl.Buffer)
-	sortableBuffer.Reset()
-	return sortableBuffer
-}
+})
 
 var (
 	asserts          = dbg.EnvBool("AGG_ASSERTS", false)
@@ -561,9 +558,8 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWrit
 		aux:       make([]byte, 0, 128),
 		valsTable: dt.d.valuesTable,
 		largeVals: dt.d.largeValues,
-		values:    etl.NewCollector(dt.name.String()+"domain.flush", tmpdir, etl.NewSortableBuffer(WALCollectorRAM), dt.d.logger).LogLvl(log.LvlTrace),
-
-		h: dt.ht.newWriter(tmpdir, discardHistory),
+		h:         dt.ht.newWriter(tmpdir, discardHistory),
+		values:    etl.NewCollectorWithAllocator(dt.name.String()+"domain.flush", tmpdir, sortableBuffersForPruning, dt.d.logger).LogLvl(log.LvlTrace),
 	}
 	w.values.SortAndFlushInBackground(true)
 	return w
@@ -1943,10 +1939,7 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 
 	var valsCursor kv.RwCursor
 
-	sortableBuffer := sortableBufferForPruning()
-	defer sortableBuffersPoolForPruning.Put(sortableBuffer)
-
-	ancientDomainValsCollector := etl.NewCollector(dt.name.String()+".domain.collate", dt.d.dirs.Tmp, sortableBuffer, dt.d.logger).LogLvl(log.LvlTrace)
+	ancientDomainValsCollector := etl.NewCollectorWithAllocator(dt.name.String()+".domain.collate", dt.d.dirs.Tmp, sortableBuffersForPruning, dt.d.logger).LogLvl(log.LvlTrace)
 	defer ancientDomainValsCollector.Close()
 
 	if dt.d.largeValues {
