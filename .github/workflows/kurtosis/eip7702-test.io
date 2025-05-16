@@ -18,8 +18,6 @@ tasks:
     prefundMinBalance: 10000000000000000000 # ensure 10 ETH
     walletAddressResultVar: "eoaAddress"
     walletPrivateKeyResultVar: "eoaPrivateKey"
-  configVars:
-    privateKey: "walletPrivkey"
 - name: sleep
   title: "wait for child wallet availablility"
   config:
