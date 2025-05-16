@@ -3,17 +3,16 @@ package commitment
 import (
 	"errors"
 	"fmt"
+	"strings"
+
 	"github.com/erigontech/erigon-lib/common/length"
 	ecrypto "github.com/erigontech/erigon-lib/crypto"
-	"strings"
 )
 
 // KeyToHexNibbleHash hashes plain key with respect to plain key size (part < 20 bytes for account, part >= 20 bytes for storage)
 // and returns the hashed key in nibblized form suitable for hex trie (each byte represented by 2 nibbles).
 func KeyToHexNibbleHash(key []byte) []byte {
-	keyLen := min(length.Addr, len(key))
-
-	addrHash := ecrypto.Keccak256(key[:keyLen])
+	addrHash := ecrypto.Keccak256(key[:length.Addr])
 	if len(key) > length.Addr { // storage
 		storageKeyHash := ecrypto.Keccak256(key[length.Addr:])
 		addrHash = append(addrHash, storageKeyHash...)
