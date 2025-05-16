@@ -637,7 +637,7 @@ func (sdb *IntraBlockState) SetTransientState(addr common.Address, key common.Ha
 	}
 
 	sdb.journal.append(transientStorageChange{
-		account:  &addr,
+		account:  addr,
 		key:      key,
 		prevalue: prev,
 	})
