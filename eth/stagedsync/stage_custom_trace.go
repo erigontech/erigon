@@ -255,7 +255,12 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 	var fromStep uint64
 	if err := db.View(ctx, func(tx kv.Tx) error {
 		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
-		fromStep = ac.DbgDomain(producingDomain).FirstStepNotInFiles()
+		if produce.ReceiptDomain {
+			fromStep = ac.DbgDomain(kv.ReceiptDomain).FirstStepNotInFiles()
+		}
+		if produce.RCacheDomain {
+			fromStep = ac.DbgDomain(kv.RCacheDomain).FirstStepNotInFiles()
+		}
 		return nil
 	}); err != nil {
 		return err
