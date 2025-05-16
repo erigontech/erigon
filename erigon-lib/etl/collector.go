@@ -44,6 +44,9 @@ func (a *Allocator) Put(b Buffer) {
 	if b == nil {
 		return
 	}
+	if cast, ok := b.(*sortableBuffer); ok {
+		log.Warn("[dbg] return buf", "cap(cast.data)", cap(cast.data), "cap(cast.lens)", cap(cast.lens))
+	}
 	a.p.Put(b)
 }
 func (a *Allocator) Get() Buffer {
