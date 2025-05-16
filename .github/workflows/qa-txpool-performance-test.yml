@@ -58,7 +58,7 @@ jobs:
         id: parse_kurtosis_output
         run: |
           # Find the folder starting with 'assertoor--'
-          assertoor_folder=$(find . -type d -name 'assertoor--*' | head -n 1)
+          assertoor_folder=$(find kurtosis_artifacts -type d -name 'assertoor--*' | head -n 1)
 
           # Exit if no assertoor folder is found
           if [ -z "$assertoor_folder" ]; then
