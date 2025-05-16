@@ -57,7 +57,13 @@ jobs:
         if: always()
         run: |
           # Find the folder starting with 'assertoor--'
-          assertoor_folder=$(find kurtosis_artifacts -type d -name 'assertoor--*' | head -n 1)
+          assertoor_folder=$(find . -type d -name 'assertoor--*' | head -n 1)
+
+          # Exit if no assertoor folder is found
+          if [ -z "$assertoor_folder" ]; then
+            echo "Error: No directory starting with 'assertoor--' found. Exiting."
+            exit 1
+          fi
 
           # Parse the output.log file within the assertoor-- folder
           output_log="${assertoor_folder}/output.log"
@@ -67,30 +73,25 @@ jobs:
           output_json="${{ github.workspace }}/outputs_kurtosis.json"
           echo "{}" > $output_json
 
-          # Initialize an empty JSON object
-          declare -A result_json
+          # Create a temporary directory
+          tmp_dir=$(mktemp -d)
 
           # Parse the output.log file to find lines with msg="outputs_json"
           while IFS= read -r line; do
             if [[ "$line" == *'msg="outputs_json:'* ]]; then
               # Extract the JSON object and unescape the quotes
-              json_str=$(echo "$line" | sed 's/.*msg="outputs_json: \(.*\)"/\1/' | sed 's/\\"/"/g')
+              json_str=$(echo "$line" | sed 's/.*msg="outputs_json: \(.*\)".*/\1/' | sed 's/\\"/"/g')
               
-              # Extract the task value from the JSON
-              task=$(echo "$json_str" | jq -r '.task')
+              # Extract the task value from the log line
+              task=$(echo "$line" | sed -n 's/.*task=\([^ ]*\).*/\1/p')
               
               # Skip if task is empty
               if [ -n "$task" ]; then
-                # Initialize array for this task if it doesn't exist
-                result_json[$task]="${result_json[$task]:-}"
-                
-                # Add comma separator if not the first entry
-                if [ -n "${result_json[$task]}" ]; then
-                  result_json[$task]="${result_json[$task]},"
+                # Create or append to task file
+                if [ -f "$tmp_dir/$task" ]; then
+                  echo "," >> "$tmp_dir/$task"
                 fi
-                
-                # Add the JSON object
-                result_json[$task]="${result_json[$task]}$json_str"
+                echo "$json_str" >> "$tmp_dir/$task"
               fi
             fi
           done < "$output_log"
@@ -98,18 +99,25 @@ jobs:
           # Write the JSON object to the final file
           echo "{" > $output_json
           first_task=true
-          for task in "${!result_json[@]}"; do
+          for task_file in "$tmp_dir"/*; do
+            [ -f "$task_file" ] || continue
+            
+            task=$(basename "$task_file")
+            
             # Add comma for all but first task
             if [ "$first_task" = true ]; then
               first_task=false
             else
               echo "," >> $output_json
             fi
+            
             # Write the task array to the file
-            echo "\"$task\": [${result_json[$task]}]" >> $output_json
+            echo "\"$task\": [$(cat "$task_file")]" >> $output_json
           done
           echo "}" >> $output_json
 
+          # Clean up
+          rm -rf "$tmp_dir"
       - name: Create HDR plots PNG artifacts
         if: always()
         run: |
