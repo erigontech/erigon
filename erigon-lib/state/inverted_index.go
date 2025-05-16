@@ -342,7 +342,7 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 						if !fileVer.Less(ii.version.AccessorEFI.MinSupported) {
 							ii.version.AccessorEFI.Current = fileVer
 						} else {
-							panic("Version is too low, try to rm ef snapshots")
+							panic("Version is too low, try to rm efi snapshots")
 							//return false
 						}
 					}
