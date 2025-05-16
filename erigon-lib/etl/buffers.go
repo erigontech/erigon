@@ -98,7 +98,7 @@ func (b *sortableBuffer) Put(k, v []byte) {
 	b.data = append(b.data, k...)
 	b.offsets = append(b.offsets, len(b.data))
 	b.data = append(b.data, v...)
-	b.size += lk + lv + 32 // size = len(b.data) // + 8*len(b.offsets) + 8*len(b.lens)
+	b.size += lk + lv + 32 // size = len(b.data) + 8*len(b.offsets) + 8*len(b.lens)
 }
 
 func (b *sortableBuffer) Size() int { return b.size }
