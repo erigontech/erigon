@@ -26,7 +26,7 @@ jobs:
 
       - name: Run self hosted Kurtosis + assertoor tests
         id: noku_kurtosis_test
-        uses: noku-team/kurtosis-assertoor-github-action@v1.1.3
+        uses: noku-team/kurtosis-assertoor-github-action@v1.1.5
         with:
           enclave_name: ${{ env.ENCLAVE_NAME }}
           ethereum_package_args: ".github/workflows/kurtosis/txpool-assertoor-short.io"
