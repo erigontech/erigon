@@ -314,6 +314,7 @@ func (tx *Tx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step uint64
 func (tx *Tx) GetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	return tx.aggtx.DebugGetLatestFromFiles(domain, k, maxTxNum)
 }
+func (tx *Tx) DomainTables(domain ...kv.Domain) []string { return tx.db.agg.DomainTables(domain...) }
 func (db *DB) DomainTables(domain ...kv.Domain) []string { return db.agg.DomainTables(domain...) }
 func (db *DB) ReloadSalt() error                         { return db.agg.ReloadSalt() }
 func (tx *Tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
@@ -325,6 +326,7 @@ func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string {
 func (tx *Tx) TxNumsInFiles(domains ...kv.Domain) (minTxNum uint64) {
 	return tx.aggtx.TxNumsInFiles(domains...)
 }
+
 func (tx *Tx) PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error) {
 	return tx.aggtx.PruneSmallBatches(ctx, timeout, tx.MdbxTx)
 }

@@ -4,11 +4,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/version"
-
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/version"
 	"github.com/stretchr/testify/require"
 )
 

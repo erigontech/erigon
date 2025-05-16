@@ -24,7 +24,7 @@ import (
 	"github.com/maticnetwork/crand"
 	"github.com/stretchr/testify/require"
 
-	common "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 )
