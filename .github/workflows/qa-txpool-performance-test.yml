@@ -14,6 +14,7 @@ jobs:
     runs-on: [self-hosted, qa, long-running]
     env:
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
+      ENCLAVE_NAME: "kurtosis-run-${{ github.run_id }}"
 
     steps:
       - name: Fast checkout git repository
@@ -23,18 +24,11 @@ jobs:
       #   run: |
       #     docker build -t test/erigon:current .
 
-      - name: Docker build noku-team/assertoor image
-        run: |
-          git clone https://github.com/noku-team/assertoor.git
-          cd assertoor
-          docker build -t test/assertoor:current .
-          cd ..
-
       - name: Run self hosted Kurtosis + assertoor tests
         id: noku_kurtosis_test
         uses: noku-team/kurtosis-assertoor-github-action@v1
         with:
-          enclave_name: "kurtosis-run-${{ github.run_id }}"
+          enclave_name: ${{ env.ENCLAVE_NAME }}
           ethereum_package_args: ".github/workflows/kurtosis/txpool-assertoor.io"
           kurtosis_extra_args: --verbosity detailed --cli-log-level trace
           persistent_logs: "true"
@@ -44,11 +38,7 @@ jobs:
         id: parse_kurtosis_output
         run: |
           # Find the folder starting with 'assertoor--'
-          assertoor_folder=$(find ${{ runner.temp }}/kurtosis-run-${{ github.run_id }}/dump -type d -name 'assertoor--*' | head -n 1)
-
-          # List contents of the dump directory for debugging
-          echo "Contents of dump directory:"
-          ls -l ${{ runner.temp }}/kurtosis-run-${{ github.run_id }}/dump
+          assertoor_folder=$(find ${{ runner.temp }}/${{ env.ENCLAVE_NAME }}/dump -type d -name 'assertoor--*' | head -n 1)
 
           # Exit if no assertoor folder is found
           if [ -z "$assertoor_folder" ]; then
