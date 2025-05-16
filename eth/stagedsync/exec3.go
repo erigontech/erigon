@@ -286,6 +286,8 @@ func ExecV3(ctx context.Context,
 		blockNum, maxTxNum       uint64
 	)
 
+	log.Warn("[dbg] exec10", "doms.BlockNum()", doms.BlockNum(), "doms.TxNum()", doms.TxNum())
+
 	blockNum = doms.BlockNum()
 	outputTxNum.Store(doms.TxNum())
 
