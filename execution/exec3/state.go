@@ -215,7 +215,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 	ibs := rw.ibs
 	//ibs.SetTrace(true)
 	ibs.SetHooks(rw.hooks)
-
+	fmt.Printf("[dbg] worker1: %t\n", rw.hooks == nil)
 	var err error
 	rules, header := txTask.Rules, txTask.Header
 
