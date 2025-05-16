@@ -207,12 +207,12 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 			}
 		}
 	default:
+		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), cc.GetMaxBlobGasPerBlock(header.Time))
+		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		txTask.Tracer.Reset() // txTask is retryable
 		rw.vmCfg.Tracer = txTask.Tracer.Tracer().Hooks
-		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		ibs.SetTxContext(txTask.TxIndex)
 		txn := txTask.Tx
-		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), cc.GetMaxBlobGasPerBlock(header.Time))
 
 		if txTask.Tx.Type() == types.AccountAbstractionTxType {
 			if !cc.AllowAA {
