@@ -702,7 +702,9 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep uint64) e
 			}
 		}
 
+		a.wg.Add(1)
 		go func() {
+			defer a.wg.Done()
 			if err := a.MergeLoop(ctx); err != nil {
 				panic(err)
 			}
