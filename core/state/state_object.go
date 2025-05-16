@@ -138,7 +138,7 @@ func (so *stateObject) markSelfdestructed() {
 
 func (so *stateObject) touch() {
 	so.db.journal.append(touchChange{
-		account: &so.address,
+		account: so.address,
 	})
 	if so.address == ripemd {
 		// Explicitly put it in the dirty-cache, which is otherwise generated from
@@ -361,7 +361,7 @@ func (so *stateObject) setCode(codeHash common.Hash, code []byte) {
 
 func (so *stateObject) SetNonce(nonce uint64) {
 	so.db.journal.append(nonceChange{
-		account: &so.address,
+		account: so.address,
 		prev:    so.data.Nonce,
 	})
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnNonceChange != nil {
