@@ -151,10 +151,11 @@ func (b *sortableBuffer) Get(i int, keyBuf, valBuf []byte) ([]byte, []byte) {
 	return keyBuf, valBuf
 }
 
-func (b *sortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) {
+func (b *sortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) *sortableBuffer {
 	b.lens = make([]int, 0, predictKeysAmount)
 	b.offsets = make([]int, 0, predictKeysAmount)
 	b.data = make([]byte, 0, predictDataSize)
+	return b
 }
 
 func (b *sortableBuffer) Reset() {

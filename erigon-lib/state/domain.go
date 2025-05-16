@@ -28,6 +28,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/version"
 
 	btree2 "github.com/tidwall/btree"
@@ -50,7 +51,7 @@ import (
 
 var sortableBuffersPoolForPruning = sync.Pool{
 	New: func() interface{} {
-		return etl.NewSortableBuffer(etl.BufferOptimalSize / 8)
+		return etl.NewSortableBuffer(etl.BufferOptimalSize/8).Prealloc(1_000, int(2*datasize.MB))
 	},
 }
 
