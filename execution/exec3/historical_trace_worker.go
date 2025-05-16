@@ -187,7 +187,6 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 			}
 			txTask.Logs = append(txTask.Logs, logs...)
 			if txTask.BlockNum == 1577020 || txTask.BlockNum == 1577021 || txTask.BlockNum == 1577022 {
-
 				fmt.Printf("[dbg] trace1.amount: %d, txidx=%d\n", len(logs), txTask.TxIndex)
 				for _, l := range logs {
 					fmt.Printf("[dbg] trace1: %x\n", l.Address)
