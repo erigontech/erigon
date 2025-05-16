@@ -1,11 +1,14 @@
 participants:
 - el_type: erigon
+  # el_image: test/erigon:current
   cl_type: lighthouse
   count: 1
 - el_type: erigon
+  # el_image: test/erigon:current
   cl_type: lodestar
   count: 1
 - el_type: erigon
+  # el_image: test/erigon:current
   cl_type: prysm
   count: 1
 network_params:
@@ -17,6 +20,6 @@ additional_services:
 assertoor_params:
   run_stability_check: false
   run_block_proposal_check: true
-  image: test/assertoor:current
+  image: ghcr.io/noku-team/assertoor:latest
   tests:
   - https://raw.githubusercontent.com/noku-team/assertoor/master/playbooks/dev/tx-pool-check-short.yaml
