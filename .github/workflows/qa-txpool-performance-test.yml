@@ -34,31 +34,17 @@ jobs:
         id: noku_kurtosis_test
         uses: noku-team/kurtosis-assertoor-github-action@v1
         with:
-          enclave_name: "kurtosis-run1-${{ github.run_id }}"
+          enclave_name: "kurtosis-run-${{ github.run_id }}"
           ethereum_package_args: ".github/workflows/kurtosis/txpool-assertoor.io"
           kurtosis_extra_args: --verbosity detailed --cli-log-level trace
           persistent_logs: "true"
-
-      - name: Download kurtosis artifact
-        uses: actions/github-script@v6
-        if: always()
-        continue-on-error: true
-        env:
-          WORKFLOW_FILENAME: qa-txpool-performance-test.yml
-          ARTIFACT_NAME: enclave-dump-kurtosis-run1-${{ github.run_id }}
-          ARTIFACT_FILENAME: enclave-dump-kurtosis-run1-${{ github.run_id }}.zip
-          UNZIP_DIR: kurtosis_artifacts
-        with:
-          script: |
-            const script = require('./.github/workflows/scripts/download_previous_artifact.js')
-            await script({github, context, core})
 
       - name: Parse Kurtosis output log and create JSON
         if: always()
         id: parse_kurtosis_output
         run: |
           # Find the folder starting with 'assertoor--'
-          assertoor_folder=$(find kurtosis_artifacts -type d -name 'assertoor--*' | head -n 1)
+          assertoor_folder=$(find ${{ runner.temp }}/kurtosis-run-${{ github.run_id }}/dump -type d -name 'assertoor--*' | head -n 1)
 
           # Exit if no assertoor folder is found
           if [ -z "$assertoor_folder" ]; then
@@ -119,7 +105,6 @@ jobs:
 
           # Clean up
           rm -rf "$tmp_dir"
-          rm -rf kurtosis_artifacts
           echo "processed=true" >> $GITHUB_OUTPUT
 
       - name: Create HDR plots PNG artifacts
