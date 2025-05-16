@@ -59,6 +59,9 @@ jobs:
       parsed-version: ${{ steps.getCommitId.outputs.parsed_version}}
 
     steps:
+      - name: Cleanup
+        run: rm -rf *
+
       - name: Checkout git repository ${{ env.APP_REPO }} reference ${{ inputs.checkout_ref }}
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 ## 4.1.7 release
         with:
