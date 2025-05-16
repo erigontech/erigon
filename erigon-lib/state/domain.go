@@ -48,14 +48,6 @@ import (
 	"github.com/erigontech/erigon-lib/seg"
 )
 
-// 3_domains * 2 + 3_history * 1 + 4_indices * 2 = 17 etl collectors, 17*(256Mb/8) = 512Mb - for all collectros
-var aggEtlRAM = dbg.EnvDataSize("AGG_ETL_RAM", etl.BufferOptimalSize/8)
-var sortableBuffersForPruning = etl.NewAllocator(&sync.Pool{
-	New: func() interface{} {
-		return etl.NewSortableBuffer(aggEtlRAM).Prealloc(100_000, int(aggEtlRAM/8))
-	},
-})
-
 var (
 	asserts          = dbg.EnvBool("AGG_ASSERTS", false)
 	traceFileLife    = dbg.EnvString("AGG_TRACE_FILE_LIFE", "")
@@ -559,7 +551,7 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWrit
 		valsTable: dt.d.valuesTable,
 		largeVals: dt.d.largeValues,
 		h:         dt.ht.newWriter(tmpdir, discardHistory),
-		values:    etl.NewCollectorWithAllocator(dt.name.String()+"domain.flush", tmpdir, sortableBuffersForPruning, dt.d.logger).LogLvl(log.LvlTrace),
+		values:    etl.NewCollectorWithAllocator(dt.name.String()+"domain.flush", tmpdir, etl.SmallSortableBuffers, dt.d.logger).LogLvl(log.LvlTrace),
 	}
 	w.values.SortAndFlushInBackground(true)
 	return w
@@ -1939,7 +1931,7 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 
 	var valsCursor kv.RwCursor
 
-	ancientDomainValsCollector := etl.NewCollectorWithAllocator(dt.name.String()+".domain.collate", dt.d.dirs.Tmp, sortableBuffersForPruning, dt.d.logger).LogLvl(log.LvlTrace)
+	ancientDomainValsCollector := etl.NewCollectorWithAllocator(dt.name.String()+".domain.collate", dt.d.dirs.Tmp, etl.SmallSortableBuffers, dt.d.logger).LogLvl(log.LvlTrace)
 	defer ancientDomainValsCollector.Close()
 
 	if dt.d.largeValues {

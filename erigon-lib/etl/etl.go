@@ -21,9 +21,11 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/common/dbg"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -175,3 +177,11 @@ var IdentityLoadFunc LoadFunc = func(k []byte, value []byte, _ CurrentTableReade
 func isIdentityLoadFunc(f LoadFunc) bool {
 	return f == nil || reflect.ValueOf(IdentityLoadFunc).Pointer() == reflect.ValueOf(f).Pointer()
 }
+
+// 3_domains * 2 + 3_history * 1 + 4_indices * 2 = 17 etl collectors, 17*(256Mb/8) = 512Mb - for all collectros
+var aggEtlRAM = dbg.EnvDataSize("ETL_SMALL_BUFS_RAM", BufferOptimalSize/8)
+var SmallSortableBuffers = NewAllocator(&sync.Pool{
+	New: func() interface{} {
+		return NewSortableBuffer(aggEtlRAM).Prealloc(100_000, int(aggEtlRAM/8))
+	},
+})
