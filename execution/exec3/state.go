@@ -289,6 +289,11 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		txn := txTask.Tx
 
 		if txTask.Tx.Type() == types.AccountAbstractionTxType {
+			if txTask.BlockNum == 1577020 || txTask.BlockNum == 1577021 || txTask.BlockNum == 1577022 {
+				fmt.Printf("[dbg] trace3.1! %d, %d\n", txTask.BlockNum, txTask.TxIndex)
+				panic(1)
+			}
+
 			if !cc.AllowAA {
 				txTask.Error = errors.New("account abstraction transactions are not allowed")
 				break
@@ -328,7 +333,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			ibs.SoftFinalise()
 			//txTask.Error = ibs.FinalizeTx(rules, noop)
 			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txn.Hash(), txTask.BlockNum, txTask.BlockHash)
-			if txTask.BlockNum == 1577021 {
+			if txTask.BlockNum == 1577020 || txTask.BlockNum == 1577021 || txTask.BlockNum == 1577022 {
 				fmt.Printf("[dbg] trace2.amount: %d, %d, txidx=%d\n", len(txTask.Logs), txTask.BlockNum, txTask.TxIndex)
 				for _, l := range txTask.Logs {
 					fmt.Printf("[dbg] trace2: %x\n", l.Address)
