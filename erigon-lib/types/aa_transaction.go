@@ -533,19 +533,13 @@ func (tx *AccountAbstractionTransaction) MarshalBinary(w io.Writer) error {
 }
 
 func (tx *AccountAbstractionTransaction) PreTransactionGasCost() (uint64, error) {
-	var authorizationsBytes bytes.Buffer
-	b := make([]byte, authorizationsSize(tx.Authorizations)) // NOTE: may be wrong??
-	if err := encodeAuthorizations(tx.Authorizations, &authorizationsBytes, b); err != nil {
-		return 0, err
-	}
-
-	// data should have tx.Authorizations, tx.DeployerData, tx.ExecutionData, tx.PaymasterData
-	data := make([]byte, len(authorizationsBytes.Bytes())+len(tx.DeployerData)+len(tx.ExecutionData)+len(tx.PaymasterData))
-	data = append(data, authorizationsBytes.Bytes()...)
+	// data should have tx.SenderValidationData, tx.DeployerData, tx.ExecutionData, tx.PaymasterData
+	data := make([]byte, 0, len(tx.SenderValidationData)+len(tx.DeployerData)+len(tx.ExecutionData)+len(tx.PaymasterData))
+	data = append(data, tx.SenderValidationData...)
 	data = append(data, tx.DeployerData...)
 	data = append(data, tx.ExecutionData...)
 	data = append(data, tx.PaymasterData...)
-	gas, _, overflow := fixedgas.IntrinsicGas(data, uint64(len(tx.AccessList)), uint64(tx.AccessList.StorageKeys()), true, true, true, true, true, true, uint64(len(tx.Authorizations))) // NOTE: should read homestead and 2028 config from chainconfig
+	gas, _, overflow := fixedgas.IntrinsicGas(data, uint64(len(tx.AccessList)), uint64(tx.AccessList.StorageKeys()), false, true, true, true, true, true, uint64(len(tx.Authorizations))) // NOTE: should read homestead and 2028 config from chainconfig
 
 	if overflow {
 		return 0, errors.New("overflow")
