@@ -18,7 +18,7 @@ jobs:
   tests:
     strategy:
       matrix:
-        #        disable macos-11 until https://github.com/erigontech/erigon/issues/8789
+        #        disable macos-15 until https://github.com/erigontech/erigon/issues/8789
         os: [ ubuntu-24.04 ] # list of os: https://github.com/actions/virtual-environments
     runs-on: ${{ matrix.os }}
 
