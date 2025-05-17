@@ -333,7 +333,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 		if len(downloadedBlocks) == 0 {
 			continue
 		}
-		fmt.Println("Downloaded blocks", len(downloadedBlocks), downloadedBlocks[0])
+		fmt.Println("Downloaded blocks", len(downloadedBlocks), startSlot, lowerBound, count, b.slotToDownload.Load())
 		// stopping condition, are we done?
 		// 1. is there any nil block in the list?
 		if isThereNilBlocks(downloadedBlocks) {
@@ -347,6 +347,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 			break // we are done
 		}
 	}
+	fmt.Println("Gotten all blocks", len(downloadedBlocks), b.slotToDownload.Load(), lowerBound, count)
 
 	// Import new blocks, order is forward so reverse the whole packet
 	for i := len(downloadedBlocks) - 1; i >= 0; i-- {
