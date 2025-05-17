@@ -1,4 +1,4 @@
-name: CI
+name: Unit tests
 on:
   push:
     branches:
@@ -25,7 +25,7 @@ concurrency:
     ]'), github.ref) }}
 
 jobs:
-  tests:
+  linux:
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     strategy:
       matrix:
@@ -70,7 +70,7 @@ jobs:
       - name: Test
         run: make test
 
-  tests-windows:
+  win:
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     strategy:
       matrix:
