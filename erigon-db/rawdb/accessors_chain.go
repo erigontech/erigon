@@ -1269,19 +1269,9 @@ func ReadReceiptCacheV2(tx kv.TemporalTx, blockNum uint64, blockHash common.Hash
 		return nil, false, fmt.Errorf("unexpected error, couldn't find changeset: txNum=%d, %w", _min+uint64(txnIndex)+1, err)
 	}
 	if !ok {
-		log.Warn("[dbg] ReadReceiptCacheV2 not found in history", "txnNum", txnNum, "_min", _min)
 		return nil, false, nil
 	}
 	if len(v) == 0 {
-		log.Warn("[dbg] ReadReceiptCacheV2 skip zero-value", "txnNum", txnNum, "_min", _min)
-		{
-			v, _, _ := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txnNum)
-			log.Warn("[dbg] ReadReceiptCacheV2.1", "txnNum", txnNum, "_min", _min, "len(v)", len(v))
-			v, _, _ = tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txnNum+1)
-			log.Warn("[dbg] ReadReceiptCacheV2.1", "txnNum", txnNum+1, "_min", _min, "len(v)", len(v))
-			v, _, _ = tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txnNum+2)
-			log.Warn("[dbg] ReadReceiptCacheV2.1", "txnNum", txnNum+2, "_min", _min, "len(v)", len(v))
-		}
 		return nil, false, nil
 	}
 
@@ -1292,16 +1282,6 @@ func ReadReceiptCacheV2(tx kv.TemporalTx, blockNum uint64, blockHash common.Hash
 	}
 	res := (*types.Receipt)(receipt)
 	res.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, txnHash)
-	log.Warn("[dbg] ReadReceiptCacheV2 found", "txnNum", txnNum, "logs", len(receipt.Logs), "txidx", receipt.TransactionIndex)
-	{
-		v, _, _ := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txnNum)
-		log.Warn("[dbg] ReadReceiptCacheV2.2", "txnNum", txnNum, "_min", _min, "len(v)", len(v))
-		v, _, _ = tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txnNum+1)
-		log.Warn("[dbg] ReadReceiptCacheV2.2", "txnNum", txnNum+1, "_min", _min, "len(v)", len(v))
-		v, _, _ = tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txnNum+2)
-		log.Warn("[dbg] ReadReceiptCacheV2.2", "txnNum", txnNum+2, "_min", _min, "len(v)", len(v))
-	}
-
 	return res, true, nil
 }
 
@@ -1318,7 +1298,7 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 		return
 	}
 
-	for txnNum := _min - 10; txnNum < _max+1+10; txnNum++ {
+	for txnNum := _min; txnNum < _max+1; txnNum++ {
 		v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txnNum+1)
 		if err != nil {
 			return nil, fmt.Errorf("unexpected error, couldn't find changeset: txNum=%d, %w", txnNum, err)
