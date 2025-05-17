@@ -263,6 +263,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 			startSlot = downloadedBlocks[i].block.Block.Slot
 		}
 
+		fmt.Println(startSlot, start, count, b.slotToDownload.Load())
 		for currEndSlot := startSlot; currEndSlot > start; currEndSlot -= subCount { // inner iterations
 			start := currEndSlot - subCount - 1
 			if currEndSlot < subCount {
@@ -273,7 +274,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 			if isRangePresent(start, currEndSlot, presentMap) { // skip if already present
 				continue
 			}
-			fmt.Println("X")
+
 			// 2. request the chunk in parallel
 			wg.Add(1)
 			go func() {
