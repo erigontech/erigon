@@ -1,4 +1,4 @@
-name: All tests - ERIGON
+name: All tests
 
 on:
   push:
