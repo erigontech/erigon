@@ -23,7 +23,7 @@ func (at *AggregatorRoTx) IntegrityKey(domain kv.Domain, k []byte) error {
 		return err
 	}
 	if len(l) > 0 {
-		at.a.logger.Info("[dbg] found in", "files", l)
+		at.a.logger.Info("[IntegrityKey] found in", "files", l)
 	}
 	return nil
 }
