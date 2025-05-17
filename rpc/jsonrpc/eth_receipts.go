@@ -273,8 +273,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 					})
 				}
 			}
-
-			fmt.Printf("[dbg] nil4 %d, %d\n", blockNum, txNum)
+			x
 			continue
 		}
 
@@ -364,9 +363,6 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64
 
 func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64) (res stream.U64, err error) {
 	for _, addr := range addrs {
-		it2, _ := tx.IndexRange(kv.LogAddrIdx, addr[:], int(from), int(to), true, kv.Unlim)
-		a, _ := stream.ToArray(it2)
-		fmt.Printf("[dbg] IndexRange(%x,[%d,%d)), %d\n", addr, from, to, a)
 		it, err := tx.IndexRange(kv.LogAddrIdx, addr[:], int(from), int(to), true, kv.Unlim)
 		if err != nil {
 			return nil, err
