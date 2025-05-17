@@ -259,7 +259,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txn.Hash(), txTask.BlockNum, txTask.BlockHash)
 			//if txTask.BlockNum == 1577020 || txTask.BlockNum == 1577021 || txTask.BlockNum == 1577022 {
 			if txTask.BlockNum == 1181874 || txTask.BlockNum == 1181875 || txTask.BlockNum == 1181876 {
-				fmt.Printf("[dbg] trace2.amount: %d, %d, txidx=%d\n", len(txTask.Logs), txTask.BlockNum, txTask.TxIndex)
+				fmt.Printf("[dbg] trace2.amount: %d, %d, txidx=%d, logs=%d\n", len(txTask.Logs), txTask.BlockNum, txTask.TxIndex, txTask.Logs)
 				for _, l := range txTask.Logs {
 					fmt.Printf("[dbg] trace2: %x\n", l.Address)
 				}
