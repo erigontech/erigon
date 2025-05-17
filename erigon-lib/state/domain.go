@@ -28,8 +28,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/version"
-
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -46,6 +44,7 @@ import (
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 var (

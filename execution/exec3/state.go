@@ -218,10 +218,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 
 	var err error
 	rules, header := txTask.Rules, txTask.Header
-	//if txTask.BlockNum == 1577020 || txTask.BlockNum == 1577021 || txTask.BlockNum == 1577022 {
-	if txTask.BlockNum == 1181874 || txTask.BlockNum == 1181875 || txTask.BlockNum == 1181876 {
-		fmt.Printf("[dbg] i see you! %d, %d\n", txTask.BlockNum, txTask.TxIndex)
-	}
+
 	switch {
 	case txTask.TxIndex == -1:
 		if txTask.BlockNum == 0 {
@@ -257,13 +254,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			}
 
 			txTask.Logs = append(txTask.Logs, logs...)
-			//if txTask.BlockNum == 1577020 || txTask.BlockNum == 1577021 || txTask.BlockNum == 1577022 {
-			if txTask.BlockNum == 1181874 || txTask.BlockNum == 1181875 || txTask.BlockNum == 1181876 {
-				fmt.Printf("[dbg] trace1.amount: %d, %d, txidx=%d\n", len(logs), txTask.BlockNum, txTask.TxIndex)
-				for _, l := range logs {
-					fmt.Printf("[dbg] trace1: %x\n", l.Address)
-				}
-			}
+
 			return ret, err
 		}
 
@@ -282,21 +273,12 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			}
 		}
 	default:
-		//if txTask.BlockNum == 1577020 || txTask.BlockNum == 1577021 || txTask.BlockNum == 1577022 {
-		if txTask.BlockNum == 1181874 || txTask.BlockNum == 1181875 || txTask.BlockNum == 1181876 {
-			fmt.Printf("[dbg] trace3.0! %d, %d\n", txTask.BlockNum, txTask.TxIndex)
-		}
 		rw.callTracer.Reset()
 		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		ibs.SetTxContext(txTask.TxIndex)
 		txn := txTask.Tx
 
 		if txTask.Tx.Type() == types.AccountAbstractionTxType {
-			if txTask.BlockNum == 1577020 || txTask.BlockNum == 1577021 || txTask.BlockNum == 1577022 {
-				fmt.Printf("[dbg] trace3.1! %d, %d\n", txTask.BlockNum, txTask.TxIndex)
-				panic(1)
-			}
-
 			if !cc.AllowAA {
 				txTask.Error = errors.New("account abstraction transactions are not allowed")
 				break
@@ -326,10 +308,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			if hooks != nil && hooks.OnTxEnd != nil {
 				hooks.OnTxEnd(nil, err)
 			}
-			//if txTask.BlockNum == 1577020 || txTask.BlockNum == 1577021 || txTask.BlockNum == 1577022 {
-			if txTask.BlockNum == 1181874 || txTask.BlockNum == 1181875 || txTask.BlockNum == 1181876 {
-				fmt.Printf("[dbg] trace3.error! %d, %d\n", txTask.BlockNum, txTask.TxIndex)
-			}
 		} else {
 			txTask.Failed = applyRes.Failed()
 			txTask.UsedGas = applyRes.UsedGas
@@ -337,13 +315,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			ibs.SoftFinalise()
 			//txTask.Error = ibs.FinalizeTx(rules, noop)
 			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txn.Hash(), txTask.BlockNum, txTask.BlockHash)
-			//if txTask.BlockNum == 1577020 || txTask.BlockNum == 1577021 || txTask.BlockNum == 1577022 {
-			if txTask.BlockNum == 1181874 || txTask.BlockNum == 1181875 || txTask.BlockNum == 1181876 {
-				fmt.Printf("[dbg] trace2.amount: %d, %d, txidx=%d, txNum=%d, logs=%d\n", len(txTask.Logs), txTask.BlockNum, txTask.TxIndex, txTask.TxNum, len(txTask.Logs))
-				for _, l := range txTask.Logs {
-					fmt.Printf("[dbg] trace2: %x\n", l.Address)
-				}
-			}
 			txTask.TraceFroms = rw.callTracer.Froms()
 			txTask.TraceTos = rw.callTracer.Tos()
 
