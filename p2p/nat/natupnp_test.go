@@ -36,6 +36,7 @@ func TestUPNP_DDWRT(t *testing.T) {
 		t.Skip()
 	}
 
+	// TODO: Failing on Mac: https://github.com/erigontech/erigon/issues/15104
 	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
 		t.Skipf("disabled to avoid firewall prompt")
 	}
