@@ -341,11 +341,11 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 	}
 
 	// Import new blocks, order is forward so reverse the whole packet
-	for i := len(responses) - 1; i >= 0; i-- {
+	for i := len(downloadedBlocks) - 1; i >= 0; i-- {
 		if b.finished.Load() {
 			return nil
 		}
-		segment := responses[i]
+		segment := downloadedBlocks[i].block
 		// is this new block root equal to the expected root?
 		blockRoot, err := segment.Block.HashSSZ()
 		if err != nil {
