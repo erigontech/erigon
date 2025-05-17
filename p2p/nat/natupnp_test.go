@@ -36,7 +36,7 @@ func TestUPNP_DDWRT(t *testing.T) {
 		t.Skip()
 	}
 
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
 		t.Skipf("disabled to avoid firewall prompt")
 	}
 
