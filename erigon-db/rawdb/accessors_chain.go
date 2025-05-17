@@ -1269,6 +1269,7 @@ func ReadReceiptCacheV2(tx kv.TemporalTx, blockNum uint64, blockHash common.Hash
 		return nil, false, fmt.Errorf("unexpected error, couldn't find changeset: txNum=%d, %w", _min+uint64(txnIndex)+1, err)
 	}
 	if !ok {
+		log.Warn("[dbg] ReadReceiptCacheV2 not found in history", "txnNum", txnNum, "_min", _min)
 		return nil, false, nil
 	}
 	if len(v) == 0 {
