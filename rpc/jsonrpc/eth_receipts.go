@@ -273,7 +273,6 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 					})
 				}
 			}
-			x
 			continue
 		}
 
