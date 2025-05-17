@@ -1273,6 +1273,14 @@ func ReadReceiptCacheV2(tx kv.TemporalTx, blockNum uint64, blockHash common.Hash
 	}
 	if len(v) == 0 {
 		log.Warn("[dbg] ReadReceiptCacheV2 skip zero-value", "txnNum", txnNum, "_min", _min)
+		{
+			v, _, _ := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txnNum)
+			log.Warn("[dbg] ReadReceiptCacheV2.1", "txnNum", txnNum, "_min", _min, "len(v)", len(v))
+			v, _, _ = tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txnNum+1)
+			log.Warn("[dbg] ReadReceiptCacheV2.1", "txnNum", txnNum+1, "_min", _min, "len(v)", len(v))
+			v, _, _ = tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txnNum+2)
+			log.Warn("[dbg] ReadReceiptCacheV2.1", "txnNum", txnNum+2, "_min", _min, "len(v)", len(v))
+		}
 		return nil, false, nil
 	}
 
