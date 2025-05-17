@@ -433,12 +433,6 @@ type InvertedIndexBufferedWriter struct {
 func loadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 	return next(k, k, v)
 }
-func loadFunc2(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-	if bytes.Equal(common.FromHex("0xd383fa9abaed4b94e723cdb15ce167cc30af255a"), k) {
-		fmt.Printf("[dbg] ii.load %x, %d\n", k, binary.BigEndian.Uint64(v))
-	}
-	return next(k, k, v)
-}
 
 // Add - !NotThreadSafe. Must use WalRLock/BatchHistoryWriteEnd
 func (w *InvertedIndexBufferedWriter) Add(key []byte, txNum uint64) error {
@@ -450,10 +444,6 @@ func (w *InvertedIndexBufferedWriter) add(key, indexKey []byte, txNum uint64) er
 		return nil
 	}
 	binary.BigEndian.PutUint64(w.txNumBytes[:], txNum)
-
-	if w.filenameBase == kv.LogAddrIdx.String() && bytes.Equal(common.FromHex("0xd383fa9abaed4b94e723cdb15ce167cc30af255a"), key) {
-		fmt.Printf("[dbg] InvertedIndexBufferedWriter.add %x, %d\n", key, txNum)
-	}
 
 	if err := w.indexKeys.Collect(w.txNumBytes[:], key); err != nil {
 		return err
@@ -468,14 +458,9 @@ func (w *InvertedIndexBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) err
 	if w.discard {
 		return nil
 	}
-	if w.filenameBase == kv.LogAddrIdx.String() {
-		if err := w.index.Load(tx, w.indexTable, loadFunc2, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-			return err
-		}
-	} else {
-		if err := w.index.Load(tx, w.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-			return err
-		}
+
+	if err := w.index.Load(tx, w.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
 	}
 
 	if err := w.indexKeys.Load(tx, w.indexKeysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
@@ -751,13 +736,11 @@ func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNu
 		to = make([]byte, 8)
 		binary.BigEndian.PutUint64(to, uint64(endTxNum))
 	}
-	log.Warn("[a] ")
 	it, err := roTx.RangeDupSort(iit.ii.valuesTable, key, from, to, asc, limit)
 	if err != nil {
 		return nil, err
 	}
 	return stream.TransformKV2U64(it, func(_, v []byte) (uint64, error) {
-		fmt.Printf("[dbg] transform: %x, %d\n", key, binary.BigEndian.Uint64(v))
 		return binary.BigEndian.Uint64(v), nil
 	}), nil
 }
@@ -1076,9 +1059,6 @@ func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (
 		txNum := binary.BigEndian.Uint64(k)
 		if txNum >= txTo { // [txFrom; txTo)
 			break
-		}
-		if ii.filenameBase == kv.LogAddrIdx.String() {
-			fmt.Printf("[dbg] collate %x, %d\n", v, binary.BigEndian.Uint64(k))
 		}
 		if err := collector.Collect(v, k); err != nil {
 			return InvertedIndexCollation{}, fmt.Errorf("collect %s history key [%x]=>txn %d [%x]: %w", ii.filenameBase, k, txNum, k, err)
