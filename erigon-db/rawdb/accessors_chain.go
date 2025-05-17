@@ -1262,14 +1262,17 @@ func ReadReceiptCacheV2(tx kv.TemporalTx, blockNum uint64, blockHash common.Hash
 		return nil, false, err
 	}
 
-	v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, _min+uint64(txnIndex)+1)
+	txnNum := _min + uint64(txnIndex)
+	v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txnNum+1)
 	if err != nil {
+		log.Warn("[dbg] skip not found in hist", "txnNum", txnNum, "_min", _min)
 		return nil, false, fmt.Errorf("unexpected error, couldn't find changeset: txNum=%d, %w", _min+uint64(txnIndex)+1, err)
 	}
 	if !ok {
 		return nil, false, nil
 	}
 	if len(v) == 0 {
+		log.Warn("[dbg] skip zero-value", "txnNum", txnNum, "_min", _min)
 		return nil, false, nil
 	}
 
@@ -1280,6 +1283,7 @@ func ReadReceiptCacheV2(tx kv.TemporalTx, blockNum uint64, blockHash common.Hash
 	}
 	res := (*types.Receipt)(receipt)
 	res.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, txnHash)
+	log.Warn("[dbg] skip zero-value", "txnNum", txnNum, "logs", len(receipt.Logs), "txidx", receipt.TransactionIndex)
 	return res, true, nil
 }
 
