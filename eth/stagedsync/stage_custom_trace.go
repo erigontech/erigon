@@ -269,18 +269,16 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec4.Ex
 	}
 
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
-		if err := ac.GreedyPruneHistory(ctx, kv.CommitmentDomain, tx); err != nil {
+		if err := tx.(kv.TemporalRwTx).Debug().GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
 			return err
 		}
-		if _, err := ac.PruneSmallBatches(ctx, 10*time.Hour, tx); err != nil { // prune part of retired data, before commit
+		if _, err := tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 10*time.Hour); err != nil {
 			return err
 		}
 		return nil
 	}); err != nil {
 		return err
 	}
-
 	return nil
 }
 
