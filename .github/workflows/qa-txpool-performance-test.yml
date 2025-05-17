@@ -11,7 +11,7 @@ on:
 
 jobs:
   tx_pool_assertoor_test:
-    runs-on: [self-hosted, qa, long-running]
+    runs-on: [self-hosted, qa, X64, long-running]
     env:
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       ENCLAVE_NAME: "kurtosis-run-${{ github.run_id }}"
