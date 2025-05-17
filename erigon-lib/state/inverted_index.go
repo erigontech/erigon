@@ -1057,6 +1057,9 @@ func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (
 		if txNum >= txTo { // [txFrom; txTo)
 			break
 		}
+		if ii.filenameBase == kv.LogAddrIdx.String() {
+			fmt.Printf("[dbg] collate %x, %d\n", v, binary.BigEndian.Uint64(k))
+		}
 		if err := collector.Collect(v, k); err != nil {
 			return InvertedIndexCollation{}, fmt.Errorf("collect %s history key [%x]=>txn %d [%x]: %w", ii.filenameBase, k, txNum, k, err)
 		}
