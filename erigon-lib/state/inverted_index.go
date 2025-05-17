@@ -434,7 +434,9 @@ func loadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) 
 	return next(k, k, v)
 }
 func loadFunc2(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-	fmt.Printf("[dbg] ii.load %x, %d\n", v, binary.BigEndian.Uint64(k))
+	if bytes.Equal(common.FromHex("0xd383fa9abaed4b94e723cdb15ce167cc30af255a"), k) {
+		fmt.Printf("[dbg] ii.load %x, %d\n", v, binary.BigEndian.Uint64(k))
+	}
 	return next(k, k, v)
 }
 
