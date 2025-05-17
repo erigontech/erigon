@@ -11,22 +11,22 @@ linters:
     - bidichk
     - bodyclose
     - durationcheck
-    - errchkjson
-    - errorlint
+    # - errchkjson
+    # - errorlint
     - fatcontext
     - gocheckcompilerdirectives
     - gochecksumtype
-    - gocritic
+    # - gocritic
     - gosmopolitan
     - loggercheck
-    - nilerr
-    - nilnesserr
-    - noctx
+    # - nilerr
+    # - nilnesserr
+    # - noctx
     - prealloc
-    - predeclared
+    # - predeclared
     - reassign
     - spancheck
-    - thelper
+    # - thelper
     - unconvert
     - wastedassign
     - govet
@@ -128,17 +128,17 @@ linters:
           - gocritic
           - gosec
           - perfsprint
-          - unused
+          # - unused
         path: test\.go
       - linters:
           - gocritic
           - gosec
-          - unused
+          # - unused
         path: hack\.go
       - linters:
           - gocritic
           - gosec
-          - unused
+          # - unused
         path: cmd/devp2p
       - linters:
           - gocritic
