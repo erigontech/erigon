@@ -1292,7 +1292,7 @@ func ReadReceiptCacheV2(tx kv.TemporalTx, blockNum uint64, blockHash common.Hash
 	}
 	res := (*types.Receipt)(receipt)
 	res.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, txnHash)
-	log.Warn("[dbg] ReadReceiptCacheV2 skip zero-value", "txnNum", txnNum, "logs", len(receipt.Logs), "txidx", receipt.TransactionIndex)
+	log.Warn("[dbg] ReadReceiptCacheV2 found", "txnNum", txnNum, "logs", len(receipt.Logs), "txidx", receipt.TransactionIndex)
 	return res, true, nil
 }
 
