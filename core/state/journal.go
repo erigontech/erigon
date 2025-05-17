@@ -281,7 +281,7 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 	if err != nil {
 		return err
 	}
-	obj.setState(&ch.key, ch.prevalue)
+	obj.setState(ch.key, ch.prevalue)
 	return nil
 }
 

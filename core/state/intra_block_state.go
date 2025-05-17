@@ -374,7 +374,7 @@ func (sdb *IntraBlockState) GetDelegatedDesignation(addr common.Address) (common
 
 // GetState retrieves a value from the given account's storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) GetState(addr common.Address, key *common.Hash, value *uint256.Int) error {
+func (sdb *IntraBlockState) GetState(addr common.Address, key common.Hash, value *uint256.Int) error {
 	stateObject, err := sdb.getStateObject(addr)
 	if err != nil {
 		return err
@@ -389,7 +389,7 @@ func (sdb *IntraBlockState) GetState(addr common.Address, key *common.Hash, valu
 
 // GetCommittedState retrieves a value from the given account's committed storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) GetCommittedState(addr common.Address, key *common.Hash, value *uint256.Int) error {
+func (sdb *IntraBlockState) GetCommittedState(addr common.Address, key common.Hash, value *uint256.Int) error {
 	stateObject, err := sdb.getStateObject(addr)
 	if err != nil {
 		return err
@@ -528,7 +528,7 @@ func (sdb *IntraBlockState) SetCode(addr common.Address, code []byte) error {
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) SetState(addr common.Address, key *common.Hash, value uint256.Int) error {
+func (sdb *IntraBlockState) SetState(addr common.Address, key common.Hash, value uint256.Int) error {
 	stateObject, err := sdb.GetOrNewStateObject(addr)
 	if err != nil {
 		return err

@@ -112,7 +112,7 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 				address = common.Hash(stack[len(stack)-1].Bytes32())
 				value   uint256.Int
 			)
-			l.env.IntraBlockState.GetState(contractAddr, &address, &value)
+			l.env.IntraBlockState.GetState(contractAddr, address, &value)
 			l.storage[contractAddr][address] = value.Bytes32()
 			outputStorage = true
 		}

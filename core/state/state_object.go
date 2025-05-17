@@ -148,13 +148,13 @@ func (so *stateObject) touch() {
 }
 
 // GetState returns a value from account storage.
-func (so *stateObject) GetState(key *common.Hash, out *uint256.Int) {
+func (so *stateObject) GetState(key common.Hash, out *uint256.Int) {
 	// If the fake storage is set, only lookup the state here(in the debugging mode)
 	if so.fakeStorage != nil {
-		*out = so.fakeStorage[*key]
+		*out = so.fakeStorage[key]
 		return
 	}
-	value, dirty := so.dirtyStorage[*key]
+	value, dirty := so.dirtyStorage[key]
 	if dirty {
 		*out = value
 		return
@@ -164,15 +164,15 @@ func (so *stateObject) GetState(key *common.Hash, out *uint256.Int) {
 }
 
 // GetCommittedState retrieves a value from the committed account storage trie.
-func (so *stateObject) GetCommittedState(key *common.Hash, out *uint256.Int) {
+func (so *stateObject) GetCommittedState(key common.Hash, out *uint256.Int) {
 	// If the fake storage is set, only lookup the state here(in the debugging mode)
 	if so.fakeStorage != nil {
-		*out = so.fakeStorage[*key]
+		*out = so.fakeStorage[key]
 		return
 	}
 	// If we have the original value cached, return that
 	{
-		value, cached := so.originStorage[*key]
+		value, cached := so.originStorage[key]
 		if cached {
 			*out = value
 			return
@@ -194,20 +194,20 @@ func (so *stateObject) GetCommittedState(key *common.Hash, out *uint256.Int) {
 	} else {
 		out.Clear()
 	}
-	so.originStorage[*key] = *out
-	so.blockOriginStorage[*key] = *out
+	so.originStorage[key] = *out
+	so.blockOriginStorage[key] = *out
 }
 
 // SetState updates a value in account storage.
-func (so *stateObject) SetState(key *common.Hash, value uint256.Int) {
+func (so *stateObject) SetState(key common.Hash, value uint256.Int) {
 	// If the fake storage is set, put the temporary state update here.
 	if so.fakeStorage != nil {
 		so.db.journal.append(fakeStorageChange{
 			account:  so.address,
-			key:      *key,
-			prevalue: so.fakeStorage[*key],
+			key:      key,
+			prevalue: so.fakeStorage[key],
 		})
-		so.fakeStorage[*key] = value
+		so.fakeStorage[key] = value
 		return
 	}
 	// If the new value is the same as old, don't set
@@ -219,7 +219,7 @@ func (so *stateObject) SetState(key *common.Hash, value uint256.Int) {
 	// New value is different, update and journal the change
 	so.db.journal.append(storageChange{
 		account:  so.address,
-		key:      *key,
+		key:      key,
 		prevalue: prev,
 	})
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnStorageChange != nil {
@@ -246,8 +246,8 @@ func (so *stateObject) SetStorage(storage Storage) {
 	// debugging and the `fake` storage won't be committed to database.
 }
 
-func (so *stateObject) setState(key *common.Hash, value uint256.Int) {
-	so.dirtyStorage[*key] = value
+func (so *stateObject) setState(key common.Hash, value uint256.Int) {
+	so.dirtyStorage[key] = value
 }
 
 // updateTrie writes cached storage modifications into the object's storage trie.
