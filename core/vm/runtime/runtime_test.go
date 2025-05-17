@@ -234,7 +234,6 @@ func BenchmarkCall(b *testing.B) {
 	cfg.State = state.New(cfg.r)
 
 	tmpdir := b.TempDir()
-	cfg.Debug = true
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for j := 0; j < 400; j++ {
