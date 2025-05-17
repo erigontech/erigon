@@ -279,10 +279,14 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
+				// give it a 1 second timeout
+				ctxWithTimeout, cancel := context.WithTimeout(ctx, 1*time.Second)
+				defer cancel()
+
 				// 2. request the chunk
-				requestsResult, err := b.requestChunk(ctx, start, subCount, b.slotToDownload.Load())
+				requestsResult, err := b.requestChunk(ctxWithTimeout, start, subCount, b.slotToDownload.Load())
 				if err != nil {
-					log.Debug("Error while requesting chunk", "err", err)
+					log.Trace("Error while requesting chunk", "err", err)
 					return
 				}
 				if requestsResult == nil {
