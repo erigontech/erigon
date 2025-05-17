@@ -313,21 +313,6 @@ func BenchmarkEVM_CREATE2_1200(bench *testing.B) {
 }
 
 func BenchmarkEVM_RETURN(b *testing.B) {
-	db := testTemporalDB(b)
-	tx, err := db.BeginTemporalRw(context.Background())
-	require.NoError(b, err)
-	defer tx.Rollback()
-	domains, err := stateLib.NewSharedDomains(tx, log.New())
-	require.NoError(b, err)
-	defer domains.Close()
-
-	domains.SetTxNum(1)
-	domains.SetBlockNum(1)
-	err = rawdbv3.TxNums.Append(tx, 1, 1)
-	require.NoError(b, err)
-
-	statedb := state.New(state.NewReaderV3(domains))
-
 	// returns a contract that returns a zero-byte slice of len size
 	returnContract := func(size uint64) []byte {
 		contract := []byte{
@@ -339,6 +324,15 @@ func BenchmarkEVM_RETURN(b *testing.B) {
 		return contract
 	}
 
+	db := testTemporalDB(b)
+	tx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(b, err)
+	defer tx.Rollback()
+	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	require.NoError(b, err)
+	defer domains.Close()
+
+	statedb := state.New(state.NewReaderV3(domains))
 	contractAddr := common.BytesToAddress([]byte("contract"))
 
 	for _, n := range []uint64{1_000, 10_000, 100_000, 1_000_000} {
@@ -798,4 +792,37 @@ func TestEip2929Cases(t *testing.T) {
 		prettyPrint("This calls the `identity`-precompile (cheap), then calls an account (expensive) and `staticcall`s the same"+
 			"account (cheap)", code)
 	}
+}
+
+func BenchmarkEVM_SWAP1(b *testing.B) {
+	// returns a contract that does n swaps (SWAP1)
+	swapContract := func(n uint64) []byte {
+		contract := []byte{
+			byte(vm.PUSH0), // PUSH0
+			byte(vm.PUSH0), // PUSH0
+		}
+		for i := uint64(0); i < n; i++ {
+			contract = append(contract, byte(vm.SWAP1))
+		}
+		return contract
+	}
+
+	_, tx, _ := NewTestTemporalDb(b)
+	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	require.NoError(b, err)
+	defer domains.Close()
+	state := state.New(state.NewReaderV3(domains))
+	contractAddr := common.BytesToAddress([]byte("contract"))
+
+	b.Run("10k", func(b *testing.B) {
+		contractCode := swapContract(10_000)
+		state.SetCode(contractAddr, contractCode)
+
+		for i := 0; i < b.N; i++ {
+			_, _, err := Call(contractAddr, []byte{}, &Config{State: state})
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }
