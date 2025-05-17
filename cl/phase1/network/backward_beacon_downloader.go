@@ -18,10 +18,12 @@ package network
 
 import (
 	"math"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/exp/maps"
 	"golang.org/x/net/context"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -119,52 +121,225 @@ func (b *BackwardBeaconDownloader) Peers() (uint64, error) {
 	return b.rpc.Peers()
 }
 
+type requestResult struct {
+	block *cltypes.SignedBeaconBlock
+	peer  string
+}
+
+// RequestChunk requests a chunk of blocks from the remote beacon node.
+func (b *BackwardBeaconDownloader) requestChunk(ctx context.Context, start, count uint64, maxSlot uint64) ([]*requestResult, error) {
+	// 2. request the chunk
+	blocks, peer, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
+	if err != nil {
+		return nil, err
+	}
+	if len(blocks) == 0 {
+		return nil, nil
+	}
+
+	var responses []*requestResult
+	for _, block := range blocks {
+		if block == nil {
+			continue
+		}
+
+		// filter out blocks that are not in the range
+		if block.Block.Slot > maxSlot || block.Block.Slot < start {
+			continue
+		}
+
+		responses = append(responses, &requestResult{
+			block: block,
+			peer:  peer,
+		})
+	}
+	return responses, nil
+}
+
+// isRangePresent checks if a range of blocks is present in the map.
+func isRangePresent(start, end uint64, presentMap map[uint64]bool) bool {
+	for i := start; i <= end; i++ {
+		if !presentMap[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// removeNils removes nil blocks from the list.
+func removeNils(blocks []*requestResult, tempBuffer []*requestResult) []*requestResult {
+	tempBuffer = tempBuffer[:0]
+	// remove nils
+	for _, block := range blocks {
+		if block == nil {
+			continue
+		}
+		tempBuffer = append(tempBuffer, block)
+	}
+	blocks = blocks[:0]
+	for _, block := range tempBuffer {
+		if block == nil {
+			continue
+		}
+		blocks = append(blocks, block)
+	}
+	return blocks
+}
+
+// removeDuplicates removes duplicate blocks from the list (assume that the blocks are sorted by slot).
+func removeDuplicates(blocks []*requestResult, tempBuffer []*requestResult) []*requestResult {
+	tempBuffer = tempBuffer[:0]
+	// remove duplicates
+	seen := make(map[uint64]bool)
+	for _, block := range blocks {
+		if block == nil {
+			continue
+		}
+		if seen[block.block.Block.Slot] {
+			continue
+		}
+		seen[block.block.Block.Slot] = true
+		tempBuffer = append(tempBuffer, block)
+	}
+	blocks = blocks[:0]
+	for _, block := range tempBuffer {
+		if block == nil {
+			continue
+		}
+		blocks = append(blocks, block)
+	}
+	return blocks
+}
+
+// isThereNilBlocksrequests more blocks from the remote beacon node.
+func isThereNilBlocks(blocks []*requestResult) bool {
+	for _, block := range blocks {
+		if block == nil {
+			return true
+		}
+	}
+	return false
+}
+
 // RequestMore downloads a range of blocks in a backward manner.
 // The function sends a request for a range of blocks starting from a given slot and ending count blocks before it.
 // It then processes the response by iterating over the blocks in reverse order and calling a provided callback function onNewBlock on each block.
 // If the callback returns an error or signals that the download should be finished, the function will exit.
 // If the block's root hash does not match the expected root hash, it will be rejected and the function will continue to the next block.
 func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
-	count := uint64(64)
+	subCount := uint64(32)
+	chunks := uint64(32)
+	count := subCount * chunks // 8 chunks of 32 blocks
 	start := b.slotToDownload.Load() - count + 1
 	// Overflow? round to 0.
 	if start > b.slotToDownload.Load() {
 		start = 0
 	}
-	var atomicResp atomic.Value
-	atomicResp.Store([]*cltypes.SignedBeaconBlock{})
+	// 1. initialize the response channel
+	downloadedBlocks := make([]*requestResult, 0, count)
+	downloadedBlocksTempBuffer := make([]*requestResult, 0, count)
 
-Loop:
+	var downloadedBlocksLock sync.Mutex
+	// iteratively download missing ranges
+
+	var wg sync.WaitGroup
+	presentMap := make(map[uint64]bool)
 	for {
-		select {
-		case <-b.reqInterval.C:
-			go func() {
-				if len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)) > 0 {
-					return
-				}
-				responses, peerId, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
-				if err != nil {
-					return
-				}
-				if responses == nil {
-					return
-				}
-				if len(responses) == 0 {
-					b.rpc.BanPeer(peerId)
-					return
-				}
-				atomicResp.Store(responses)
-			}()
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-			if len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)) > 0 {
-				break Loop
+		// re-initialize the map
+		maps.Clear(presentMap)
+		for _, b := range downloadedBlocks {
+			if b == nil {
+				continue
 			}
-			time.Sleep(10 * time.Millisecond)
+			presentMap[b.block.Block.Slot] = true
+		}
+
+		startSlot := b.slotToDownload.Load() - count + 1
+		for i := len(downloadedBlocks) - 1; i >= 0; i-- {
+			if downloadedBlocks[i] == nil {
+				break
+			}
+			startSlot = downloadedBlocks[i].block.Block.Slot
+		}
+
+		for currEndSlot := startSlot; currEndSlot > start; currEndSlot -= subCount { // inner iterations
+			start := currEndSlot - subCount - 1
+			if currEndSlot < subCount {
+				start = 0
+			}
+
+			// check if the range is already present
+			if isRangePresent(start, currEndSlot, presentMap) { // skip if already present
+				continue
+			}
+
+			// 2. request the chunk in parallel
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				// 2. request the chunk
+				requestsResult, err := b.requestChunk(ctx, start, subCount, startSlot)
+				if err != nil {
+					log.Debug("Error while requesting chunk", "err", err)
+					return
+				}
+				if requestsResult == nil {
+					return
+				}
+				downloadedBlocksLock.Lock()
+				defer downloadedBlocksLock.Unlock()
+				downloadedBlocks = append(downloadedBlocks, requestsResult...)
+			}()
+			if start == 0 {
+				break
+			}
+		}
+		wg.Wait()
+
+		// remove all nil entries
+		downloadedBlocks = removeNils(downloadedBlocks, downloadedBlocksTempBuffer)
+		// Sanitize the downloaded blocks
+		// sort the blocks by slot
+		sort.Slice(downloadedBlocks, func(i, j int) bool {
+			return downloadedBlocks[i].block.Block.Slot < downloadedBlocks[j].block.Block.Slot
+		})
+
+		// remove duplicates
+		downloadedBlocks = removeDuplicates(downloadedBlocks, downloadedBlocksTempBuffer)
+
+		// check if the downloaded blocks have the correct parentRoot
+		// if not, remove them from the list
+		currentParentRoot := b.expectedRoot
+		for i := len(downloadedBlocks) - 1; i >= 0; i-- {
+			if downloadedBlocks[i] == nil {
+				continue
+			}
+			currentRoot, err := downloadedBlocks[i].block.Block.HashSSZ()
+			if err != nil {
+				panic(err)
+			}
+			if currentRoot != currentParentRoot {
+				b.rpc.BanPeer(downloadedBlocks[i].peer)
+				downloadedBlocks[i] = nil // nil means that the block was removed
+				log.Debug("Gotten unexpected root", "got", common.Hash(currentRoot), "expected", common.Hash(currentParentRoot))
+				break
+			}
+			currentParentRoot = downloadedBlocks[i].block.Block.ParentRoot
+		}
+
+		// stopping condition, are we done?
+		// 1. is there any nil block in the list?
+		if isThereNilBlocks(downloadedBlocks) {
+			// if there are nil blocks, we need to wait for the next iteration
+			continue
+		}
+		// 2. is the last block in the list the one we are looking for or close to it?
+		marginOfSimilarity := subCount * 2
+		if downloadedBlocks[0].block.Block.Slot <= startSlot+marginOfSimilarity {
+			break // we are done
 		}
 	}
-	responses := atomicResp.Load().([]*cltypes.SignedBeaconBlock)
+
 	// Import new blocks, order is forward so reverse the whole packet
 	for i := len(responses) - 1; i >= 0; i-- {
 		if b.finished.Load() {
