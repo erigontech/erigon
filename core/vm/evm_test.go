@@ -415,7 +415,7 @@ func (st *testSequential) Run(_ *Contract, _ []byte, _ bool) ([]byte, error) {
 		c,
 	)
 
-	return run(st.env, nextContract, nil, st.readOnlys[*st.currentIdx])
+	return st.env.interpreter.Run(nextContract, nil, st.readOnlys[*st.currentIdx])
 }
 
 func trace(isEVMSlice []bool, readOnlySlice []*readOnlyState) string {
