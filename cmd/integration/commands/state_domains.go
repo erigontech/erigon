@@ -66,6 +66,7 @@ func init() {
 	purifyDomains.Flags().BoolVar(&purifyOnlyCommitment, "only-commitment", true, "purify only commitment domain")
 	purifyDomains.Flags().BoolVar(&replaceInDatadir, "replace-in-datadir", false, "replace the purified domains directly in datadir (will remove .kvei and .bt too)")
 	purifyDomains.Flags().Float64Var(&minSkipRatioL0, "min-skip-ratio-l0", 0.1, "minimum ratio of keys to skip in L0")
+	purifyDomains.Flags().Float64Var(&minSkipRatio, "min-skip-ratio", 0.1, "minimum ratio of keys to skip - otherwise keep file unchanged")
 	purifyDomains.Flags().Uint64Var(&fromStepPurification, "from", 0, "step from which domains would be purified")
 	purifyDomains.Flags().Uint64Var(&toStepPurification, "to", 1e18, "step to which domains would be purified")
 	rootCmd.AddCommand(purifyDomains)
@@ -73,14 +74,14 @@ func init() {
 
 // if trie variant is not hex, we could not have another rootHash with to verify it
 var (
-	stepSize             uint64
-	lastStep             uint64
-	minSkipRatioL0       float64
-	outDatadir           string
-	purifyOnlyCommitment bool
-	replaceInDatadir     bool
-	fromStepPurification uint64
-	toStepPurification   uint64
+	stepSize                     uint64
+	lastStep                     uint64
+	minSkipRatioL0, minSkipRatio float64
+	outDatadir                   string
+	purifyOnlyCommitment         bool
+	replaceInDatadir             bool
+	fromStepPurification         uint64
+	toStepPurification           uint64
 )
 
 // write command to just seek and query state by addr and domain from state db and files (if any)
@@ -441,8 +442,12 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 
 		skipRatio := float64(skipped) / float64(count)
 		if skipRatio < minSkipRatioL0 && currentLayer == 0 {
-			fmt.Printf("Skip ratio %.2f is less than min-skip-ratio-l0 %.2f, skipping the domainName and file %s\n", skipRatio, minSkipRatioL0, fileName)
+			fmt.Printf("Skip ratio %.2f is less than min-skip-ratio-l0 %.2f, skipping domain %s\n", skipRatio, minSkipRatioL0, domain)
 			return nil
+		}
+		if skipRatio < minSkipRatio {
+			fmt.Printf("Skip ratio %.2f is less than min-skip-ratio %.2f, skipping %s\n", skipRatio, minSkipRatioL0, fileName)
+			continue
 		}
 		fmt.Printf("Loaded %d keys in file %s. now compressing...\n", count, fileName)
 		if err := comp.Compress(); err != nil {
