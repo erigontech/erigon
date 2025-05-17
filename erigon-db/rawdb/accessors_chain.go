@@ -1256,7 +1256,7 @@ func WriteDBCommitmentHistoryEnabled(tx kv.RwTx, enabled bool) error {
 	return nil
 }
 
-func ReadReceiptCacheV2(tx kv.TemporalTx, blockNum uint64, blockHash common.Hash, txNum uint64) (*types.Receipt, bool, error) {
+func ReadReceiptCacheV2(tx kv.TemporalTx, blockNum uint64, blockHash common.Hash, txnHash common.Hash, txNum uint64) (*types.Receipt, bool, error) {
 	v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txNum+1 /*history storing value BEFORE-change*/)
 	if err != nil {
 		return nil, false, fmt.Errorf("unexpected error, couldn't find changeset: txNum=%d, %w", txNum, err)
