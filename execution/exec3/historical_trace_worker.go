@@ -188,7 +188,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 			txTask.Logs = append(txTask.Logs, logs...)
 			//if txTask.BlockNum == 1577020 || txTask.BlockNum == 1577021 || txTask.BlockNum == 1577022 {
 			if txTask.BlockNum == 1181874 || txTask.BlockNum == 1181875 || txTask.BlockNum == 1181876 {
-				fmt.Printf("[dbg] trace1.amount: %d, txidx=%d\n", len(logs), txTask.TxIndex)
+				fmt.Printf("[dbg] trace1.amount: %d, %d, txidx=%d\n", len(logs), txTask.BlockNum, txTask.TxIndex)
 				for _, l := range logs {
 					fmt.Printf("[dbg] trace1: %x\n", l.Address)
 				}
@@ -248,7 +248,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 			txTask.Error = err
 			//if txTask.BlockNum == 1577020 || txTask.BlockNum == 1577021 || txTask.BlockNum == 1577022 {
 			if txTask.BlockNum == 1181874 || txTask.BlockNum == 1181875 || txTask.BlockNum == 1181876 {
-				fmt.Printf("[dbg] trace3.error! %d\n", txTask.TxIndex)
+				fmt.Printf("[dbg] trace3.error! %d, %d\n", txTask.BlockNum, txTask.TxIndex)
 			}
 		} else {
 			txTask.Failed = applyRes.Failed()
@@ -259,7 +259,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txn.Hash(), txTask.BlockNum, txTask.BlockHash)
 			//if txTask.BlockNum == 1577020 || txTask.BlockNum == 1577021 || txTask.BlockNum == 1577022 {
 			if txTask.BlockNum == 1181874 || txTask.BlockNum == 1181875 || txTask.BlockNum == 1181876 {
-				fmt.Printf("[dbg] trace2.amount: %d, txidx=%d\n", len(txTask.Logs), txTask.TxIndex)
+				fmt.Printf("[dbg] trace2.amount: %d, %d, txidx=%d\n", len(txTask.Logs), txTask.BlockNum, txTask.TxIndex)
 				for _, l := range txTask.Logs {
 					fmt.Printf("[dbg] trace2: %x\n", l.Address)
 				}

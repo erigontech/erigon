@@ -729,11 +729,13 @@ func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNu
 	if asc {
 		isFrozenRange := len(iit.files) > 0 && endTxNum >= 0 && iit.files.EndTxNum() >= uint64(endTxNum)
 		if isFrozenRange {
+			panic(1)
 			return stream.EmptyU64, nil
 		}
 	} else {
 		isFrozenRange := len(iit.files) > 0 && startTxNum >= 0 && iit.files.EndTxNum() >= uint64(startTxNum)
 		if isFrozenRange {
+			panic(2)
 			return stream.EmptyU64, nil
 		}
 	}
@@ -749,6 +751,7 @@ func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNu
 		to = make([]byte, 8)
 		binary.BigEndian.PutUint64(to, uint64(endTxNum))
 	}
+	log.Warn("[a] ")
 	it, err := roTx.RangeDupSort(iit.ii.valuesTable, key, from, to, asc, limit)
 	if err != nil {
 		return nil, err
