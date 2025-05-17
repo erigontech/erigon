@@ -232,7 +232,7 @@ func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *li
 		}
 	}
 
-	if txTask.TxNum == 2449253 {
+	if txTask.BlockNum == 1181874 || txTask.BlockNum == 1181875 || txTask.BlockNum == 1181876 {
 		fmt.Printf("[dbg] ApplyLogsAndTraces: %d, %d, logs=%d\n", txTask.BlockNum, txTask.TxNum, len(txTask.Logs))
 	}
 	for _, lg := range txTask.Logs {
