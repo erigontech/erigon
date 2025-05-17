@@ -228,6 +228,8 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		api._txNumReader,
 		txNumbers, order.Asc)
 	defer it.Close()
+	fmt.Printf("[dbg] hasSomething? %t\n", it.HasNext())
+
 	for it.HasNext() {
 		if err = ctx.Err(); err != nil {
 			return nil, err
@@ -251,6 +253,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				}
 
 				if len(events) == 0 {
+					fmt.Printf("[dbg] nil5 %d, %d\n", blockNum, txNum)
 					continue
 				}
 
@@ -276,6 +279,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				}
 			}
 
+			fmt.Printf("[dbg] nil4 %d, %d\n", blockNum, txNum)
 			continue
 		}
 
@@ -287,6 +291,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			}
 			if header == nil {
 				log.Warn("[rpc] header is nil", "blockNum", blockNum)
+				fmt.Printf("[dbg] nil0 %d, %d\n", blockNum, txNum)
 				continue
 			}
 			//blockHash = header.Hash()
@@ -299,6 +304,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			return nil, err
 		}
 		if txn == nil {
+			fmt.Printf("[dbg] nil1 %d, %d\n", blockNum, txNum)
 			continue
 		}
 
@@ -307,7 +313,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			return nil, err
 		}
 		if r == nil {
-			fmt.Printf("[dbg] nil? %d, %d\n", blockNum, txNum)
+			fmt.Printf("[dbg] nil2 %d, %d\n", blockNum, txNum)
 			return nil, err
 		}
 		filtered := r.Logs.Filter(addrMap, crit.Topics, 0)
