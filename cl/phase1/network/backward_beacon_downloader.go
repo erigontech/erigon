@@ -229,7 +229,7 @@ func isThereNilBlocks(blocks []*requestResult) bool {
 // If the block's root hash does not match the expected root hash, it will be rejected and the function will continue to the next block.
 func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 	subCount := uint64(32)
-	chunks := uint64(2)
+	chunks := uint64(32)
 	count := subCount * chunks // 8 chunks of 32 blocks
 	lowerBound := b.slotToDownload.Load() - count + 1
 	// Overflow? round to 0.
