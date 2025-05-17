@@ -680,6 +680,7 @@ Loop:
 				if !needCalcRoot {
 					break
 				}
+				log.Warn("[dbg] decided to commit", "sz", executor.readState().SizeEstimate(), "commitThreshold", commitThreshold, "skipPostEvaluation", skipPostEvaluation, "what", aggregatorRo.CanPrune(executor.tx(), outputTxNum.Load()))
 
 				var (
 					commitStart = time.Now()
