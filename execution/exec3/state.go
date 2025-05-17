@@ -339,7 +339,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txn.Hash(), txTask.BlockNum, txTask.BlockHash)
 			//if txTask.BlockNum == 1577020 || txTask.BlockNum == 1577021 || txTask.BlockNum == 1577022 {
 			if txTask.BlockNum == 1181874 || txTask.BlockNum == 1181875 || txTask.BlockNum == 1181876 {
-				fmt.Printf("[dbg] trace2.amount: %d, %d, txidx=%d\n", len(txTask.Logs), txTask.BlockNum, txTask.TxIndex)
+				fmt.Printf("[dbg] trace2.amount: %d, %d, txidx=%d, txNum=%d\n", len(txTask.Logs), txTask.BlockNum, txTask.TxIndex, txTask.TxNum)
 				for _, l := range txTask.Logs {
 					fmt.Printf("[dbg] trace2: %x\n", l.Address)
 				}
