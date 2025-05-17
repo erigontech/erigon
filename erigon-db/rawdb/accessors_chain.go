@@ -1262,7 +1262,7 @@ func ReadReceiptCacheV2(tx kv.TemporalTx, blockNum uint64, blockHash common.Hash
 		return nil, false, err
 	}
 
-	txnNum := _min + uint64(txnIndex)
+	txnNum := _min + uint64(txnIndex+1 /*system txn*/)
 	v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txnNum+1)
 	if err != nil {
 		log.Warn("[dbg] ReadReceiptCacheV2 skip not found in hist", "txnNum", txnNum, "_min", _min)
