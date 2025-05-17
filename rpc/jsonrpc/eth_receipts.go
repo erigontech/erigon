@@ -225,7 +225,6 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		api._txNumReader,
 		txNumbers, order.Asc)
 	defer it.Close()
-	fmt.Printf("[dbg] hasSomething? %t\n", it.HasNext())
 
 	for it.HasNext() {
 		if err = ctx.Err(); err != nil {
@@ -235,7 +234,6 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if err != nil {
 			return nil, err
 		}
-		fmt.Printf("[dbg] iter %d, %d, %t\n", blockNum, txNum, isFinalTxn)
 		if isFinalTxn {
 			if chainConfig.Bor != nil {
 				if header == nil {
@@ -251,7 +249,6 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				}
 
 				if len(events) == 0 {
-					fmt.Printf("[dbg] nil5 %d, %d\n", blockNum, txNum)
 					continue
 				}
 
@@ -289,11 +286,9 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			}
 			if header == nil {
 				log.Warn("[rpc] header is nil", "blockNum", blockNum)
-				fmt.Printf("[dbg] nil0 %d, %d\n", blockNum, txNum)
 				continue
 			}
 		}
-		fmt.Printf("[dbg] iter1 %d, %d, %t\n", blockNum, txNum, isFinalTxn)
 
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
@@ -301,22 +296,18 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			return nil, err
 		}
 		if txn == nil {
-			fmt.Printf("[dbg] nil1 %d, %d\n", blockNum, txNum)
 			continue
 		}
-		fmt.Printf("[dbg] iter2 %d, %d, %t\n", blockNum, txNum, isFinalTxn)
 
 		r, err := api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, header, txn, txIndex, txNum)
 		if err != nil {
 			return nil, err
 		}
 		if r == nil {
-			fmt.Printf("[dbg] nil2 %d, %d\n", blockNum, txNum)
 			return nil, err
 		}
 		filtered := r.Logs.Filter(addrMap, crit.Topics, 0)
 
-		fmt.Printf("[dbg] iter3 %d, %d, %t\n", blockNum, txNum, isFinalTxn)
 		for _, filteredLog := range filtered {
 			logs = append(logs, &types.ErigonLog{
 				Address:     filteredLog.Address,
