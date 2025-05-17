@@ -293,6 +293,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				continue
 			}
 		}
+		fmt.Printf("[dbg] iter1 %d, %d, %t\n", blockNum, txNum, isFinalTxn)
 
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
@@ -303,6 +304,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			fmt.Printf("[dbg] nil1 %d, %d\n", blockNum, txNum)
 			continue
 		}
+		fmt.Printf("[dbg] iter2 %d, %d, %t\n", blockNum, txNum, isFinalTxn)
 
 		r, err := api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, header, txn, txIndex, txNum)
 		if err != nil {
@@ -314,6 +316,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 		filtered := r.Logs.Filter(addrMap, crit.Topics, 0)
 
+		fmt.Printf("[dbg] iter3 %d, %d, %t\n", blockNum, txNum, isFinalTxn)
 		for _, filteredLog := range filtered {
 			logs = append(logs, &types.ErigonLog{
 				Address:     filteredLog.Address,
