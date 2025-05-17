@@ -1,4 +1,4 @@
-name: Consensus specification tests
+name: Consensus spec tests
 on:
   push:
     branches:
