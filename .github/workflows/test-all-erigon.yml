@@ -41,7 +41,7 @@ jobs:
               # - '**/.github/workflows/**'
               - '**/.github/workflows/backups-dashboards.yml'
 
-  mac-linux:
+  tests-mac-linux:
     needs: source-of-changes
     strategy:
       matrix:
@@ -94,7 +94,7 @@ jobs:
         run: echo "This check does not make sense for changes within out-of-scope directories"
 
 
-  win:
+  tests-windows:
     needs: source-of-changes
     strategy:
       matrix:
