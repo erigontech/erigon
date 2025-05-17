@@ -91,26 +91,25 @@ func NewHistoricalTraceWorker(
 	execArgs *ExecArgs,
 	logger log.Logger,
 ) *HistoricalTraceWorker {
-	stateReader := state.NewHistoryReaderV3()
 	ie := &HistoricalTraceWorker{
 		consumer: consumer,
 		in:       in,
 		out:      out,
 
+		logger:   logger,
+		ctx:      ctx,
 		execArgs: execArgs,
 
-		stateReader: stateReader,
-		vmCfg:       &vm.Config{},
-		ibs:         state.New(stateReader),
-		background:  background,
-		ctx:         ctx,
-		logger:      logger,
+		stateReader: state.NewHistoryReaderV3(),
 		stateWriter: state.NewNoopWriter(),
+		background:  background,
 
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, execArgs.ChainConfig, vm.Config{}),
 		callTracer:  NewCallTracer(),
 		taskGasPool: new(core.GasPool),
+		vmCfg:       &vm.Config{},
 	}
+	ie.taskGasPool.AddBlobGas(execArgs.ChainConfig.GetMaxBlobGasPerBlock(0))
 	ie.ibs = state.New(ie.stateReader)
 
 	return ie
@@ -125,7 +124,7 @@ func (rw *HistoricalTraceWorker) Run() (err error) {
 	}()
 	defer rw.evm.JumpDestCache.LogStats()
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
-		rw.RunTxTask(txTask)
+		rw.RunTxTaskNoLock(txTask)
 		if err := rw.out.Add(rw.ctx, txTask); err != nil {
 			return err
 		}
@@ -133,7 +132,7 @@ func (rw *HistoricalTraceWorker) Run() (err error) {
 	return nil
 }
 
-func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
+func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 	if rw.background && rw.chainTx == nil {
 		var err error
 		if rw.chainTx, err = rw.execArgs.ChainDB.BeginTemporalRo(rw.ctx); err != nil {
@@ -146,7 +145,6 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 
 	rw.stateReader.SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetReadSet()
-	rw.stateWriter = state.NewNoopWriter()
 	rw.callTracer.Reset()
 	rw.vmCfg.Debug = true
 	rw.vmCfg.Tracer = rw.callTracer
@@ -192,9 +190,6 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 
 		skipPostEvaluaion := false // `true` only inMining
 		_, _, _, err := rw.execArgs.Engine.Finalize(cc, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, skipPostEvaluaion, rw.logger)
-		if err != nil {
-			txTask.Error = err
-		}
 		if err != nil {
 			txTask.Error = err
 		} else {
