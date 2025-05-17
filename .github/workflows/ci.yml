@@ -25,7 +25,7 @@ concurrency:
     ]'), github.ref) }}
 
 jobs:
-  mac-linux:
+  unix:
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     strategy:
       matrix:
