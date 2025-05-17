@@ -232,6 +232,9 @@ func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *li
 		}
 	}
 
+	if txTask.TxNum == 2449253 {
+		fmt.Printf("[dbg] ApplyLogsAndTraces: logs=%d\n", len(txTask.Logs))
+	}
 	for _, lg := range txTask.Logs {
 		if err := domains.IndexAdd(kv.LogAddrIdx, lg.Address[:]); err != nil {
 			return err
@@ -248,6 +251,7 @@ func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *li
 		if txTask.TxIndex >= 0 && txTask.TxIndex < len(txTask.BlockReceipts) {
 			receipt = txTask.BlockReceipts[txTask.TxIndex]
 		}
+		fmt.Printf("")
 		if err := rawdb.WriteReceiptCacheV2(domains, receipt); err != nil {
 			return err
 		}
