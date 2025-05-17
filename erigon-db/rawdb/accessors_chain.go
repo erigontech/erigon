@@ -1256,17 +1256,10 @@ func WriteDBCommitmentHistoryEnabled(tx kv.RwTx, enabled bool) error {
 	return nil
 }
 
-func ReadReceiptCacheV2(tx kv.TemporalTx, blockNum uint64, blockHash common.Hash, txnIndex uint32, txnHash common.Hash, txNumReader rawdbv3.TxNumsReader) (*types.Receipt, bool, error) {
-	_min, err := txNumReader.Min(tx, blockNum)
+func ReadReceiptCacheV2(tx kv.TemporalTx, blockNum uint64, blockHash common.Hash, txnHash common.Hash, txNum uint64) (*types.Receipt, bool, error) {
+	v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txNum+1 /*history storing value BEFORE-change*/)
 	if err != nil {
-		return nil, false, err
-	}
-
-	txnNum := _min + uint64(txnIndex+1 /*system txn*/)
-	v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txnNum+1 /*history storing value BEFORE-change*/)
-	if err != nil {
-		log.Warn("[dbg] ReadReceiptCacheV2 skip not found in hist", "txnNum", txnNum, "_min", _min)
-		return nil, false, fmt.Errorf("unexpected error, couldn't find changeset: txNum=%d, %w", _min+uint64(txnIndex)+1, err)
+		return nil, false, fmt.Errorf("unexpected error, couldn't find changeset: txNum=%d, %w", txNum, err)
 	}
 	if !ok {
 		return nil, false, nil

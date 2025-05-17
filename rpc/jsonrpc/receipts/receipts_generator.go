@@ -154,7 +154,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	if !rpcDisableRCache {
 		var ok bool
 		var err error
-		receiptFromDB, ok, err = rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, uint32(index), txnHash, g.txNumReader)
+		receiptFromDB, ok, err = rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txnHash, txNum)
 		if err != nil {
 			return nil, err
 		}
