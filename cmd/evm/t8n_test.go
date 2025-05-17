@@ -20,11 +20,11 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -255,25 +255,22 @@ func TestT8n(t *testing.T) {
 }
 
 func TestEvmRun(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows tests require fixing.")
-	}
 	t.Parallel()
 	tt := cmdtest.NewTestCmd(t, nil)
 	for i, tc := range []struct {
-		input      []string
-		wantStdout string
-		wantStderr string
+		input          []string
+		wantStdoutFile string
+		wantStderrFile string
 	}{
 		{ // json tracing
-			input:      []string{"--json", "--code", "6040", "run"},
-			wantStdout: "./testdata/evmrun/1.out.1.txt",
-			wantStderr: "./testdata/evmrun/1.out.2.txt",
+			input:          []string{"--json", "--code", "6040", "run"},
+			wantStdoutFile: "./testdata/evmrun/1.out.1.txt",
+			wantStderrFile: "./testdata/evmrun/1.out.2.txt",
 		},
 		{ // Debug output
-			input:      []string{"--debug", "--code", "6040", "run"},
-			wantStdout: "./testdata/evmrun/2.out.1.txt",
-			wantStderr: "./testdata/evmrun/2.out.2.txt",
+			input:          []string{"--debug", "--code", "6040", "run"},
+			wantStdoutFile: "./testdata/evmrun/2.out.1.txt",
+			wantStderrFile: "./testdata/evmrun/2.out.2.txt",
 		},
 	} {
 		tt.Logf("args: go run ./cmd/evm %v\n", strings.Join(tc.input, " "))
@@ -281,24 +278,24 @@ func TestEvmRun(t *testing.T) {
 
 		haveStdOut := tt.Output()
 		tt.WaitExit()
-		haveStdErr := tt.StderrText()
+		haveStdErr := tt.Stderr()
 
-		if have, wantFile := haveStdOut, tc.wantStdout; wantFile != "" {
-			want, err := os.ReadFile(wantFile)
+		if len(tc.wantStdoutFile) > 0 {
+			want, err := os.ReadFile(tc.wantStdoutFile)
 			if err != nil {
 				t.Fatalf("test %d: could not read expected output: %v", i, err)
 			}
-			if string(haveStdOut) != string(want) {
-				t.Fatalf("test %d, output wrong, have \n%v\nwant\n%v\n", i, string(have), string(want))
+			if !bytes.Equal(haveStdOut, want) {
+				t.Fatalf("test %d, output wrong, have \n%v\nwant\n%v\n", i, string(haveStdOut), string(want))
 			}
 		}
-		if have, wantFile := haveStdErr, tc.wantStderr; wantFile != "" {
-			want, err := os.ReadFile(wantFile)
+		if len(tc.wantStderrFile) > 0 {
+			want, err := os.ReadFile(tc.wantStderrFile)
 			if err != nil {
 				t.Fatalf("test %d: could not read expected output: %v", i, err)
 			}
-			if have != string(want) {
-				t.Fatalf("test %d, output wrong\nhave %q\nwant %q\n", i, have, string(want))
+			if !bytes.Equal(haveStdErr, want) {
+				t.Fatalf("test %d, output wrong\nhave %q\nwant %q\n", i, string(haveStdErr), string(want))
 			}
 		}
 	}

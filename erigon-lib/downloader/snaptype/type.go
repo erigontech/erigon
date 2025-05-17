@@ -431,6 +431,7 @@ func BuildIndex(ctx context.Context, info FileInfo, cfg recsplit.RecSplitArgs, l
 	if err != nil {
 		return err
 	}
+	defer rs.Close()
 	rs.LogLvl(lvl)
 
 	defer d.MadvSequential().DisableReadAhead()
@@ -492,6 +493,7 @@ func BuildIndexWithSnapName(ctx context.Context, info FileInfo, cfg recsplit.Rec
 	if err != nil {
 		return err
 	}
+	defer rs.Close()
 	rs.LogLvl(lvl)
 
 	defer d.MadvSequential().DisableReadAhead()

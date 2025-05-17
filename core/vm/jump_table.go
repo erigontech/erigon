@@ -1011,7 +1011,7 @@ func newFrontierInstructionSet() JumpTable {
 			opNum:       16,
 		},
 		SWAP1: {
-			execute:     makeSwap(1),
+			execute:     opSwap1,
 			constantGas: GasFastestStep,
 			numPop:      2,
 			numPush:     2,
@@ -1019,7 +1019,7 @@ func newFrontierInstructionSet() JumpTable {
 			opNum:       1,
 		},
 		SWAP2: {
-			execute:     makeSwap(2),
+			execute:     opSwap2,
 			constantGas: GasFastestStep,
 			numPop:      3,
 			numPush:     3,
@@ -1027,7 +1027,7 @@ func newFrontierInstructionSet() JumpTable {
 			opNum:       2,
 		},
 		SWAP3: {
-			execute:     makeSwap(3),
+			execute:     opSwap3,
 			constantGas: GasFastestStep,
 			numPop:      4,
 			numPush:     4,
@@ -1035,7 +1035,7 @@ func newFrontierInstructionSet() JumpTable {
 			opNum:       3,
 		},
 		SWAP4: {
-			execute:     makeSwap(4),
+			execute:     opSwap4,
 			constantGas: GasFastestStep,
 			numPop:      5,
 			numPush:     5,
@@ -1043,7 +1043,7 @@ func newFrontierInstructionSet() JumpTable {
 			opNum:       4,
 		},
 		SWAP5: {
-			execute:     makeSwap(5),
+			execute:     opSwap5,
 			constantGas: GasFastestStep,
 			numPop:      6,
 			numPush:     6,
@@ -1051,7 +1051,7 @@ func newFrontierInstructionSet() JumpTable {
 			opNum:       5,
 		},
 		SWAP6: {
-			execute:     makeSwap(6),
+			execute:     opSwap6,
 			constantGas: GasFastestStep,
 			numPop:      7,
 			numPush:     7,
@@ -1059,7 +1059,7 @@ func newFrontierInstructionSet() JumpTable {
 			opNum:       6,
 		},
 		SWAP7: {
-			execute:     makeSwap(7),
+			execute:     opSwap7,
 			constantGas: GasFastestStep,
 			numPop:      8,
 			numPush:     8,
@@ -1067,7 +1067,7 @@ func newFrontierInstructionSet() JumpTable {
 			opNum:       7,
 		},
 		SWAP8: {
-			execute:     makeSwap(8),
+			execute:     opSwap8,
 			constantGas: GasFastestStep,
 			numPop:      9,
 			numPush:     9,
@@ -1075,7 +1075,7 @@ func newFrontierInstructionSet() JumpTable {
 			opNum:       8,
 		},
 		SWAP9: {
-			execute:     makeSwap(9),
+			execute:     opSwap9,
 			constantGas: GasFastestStep,
 			numPop:      10,
 			numPush:     10,
@@ -1083,7 +1083,7 @@ func newFrontierInstructionSet() JumpTable {
 			opNum:       9,
 		},
 		SWAP10: {
-			execute:     makeSwap(10),
+			execute:     opSwap10,
 			constantGas: GasFastestStep,
 			numPop:      11,
 			numPush:     11,
@@ -1091,7 +1091,7 @@ func newFrontierInstructionSet() JumpTable {
 			opNum:       10,
 		},
 		SWAP11: {
-			execute:     makeSwap(11),
+			execute:     opSwap11,
 			constantGas: GasFastestStep,
 			numPop:      12,
 			numPush:     12,
@@ -1099,7 +1099,7 @@ func newFrontierInstructionSet() JumpTable {
 			opNum:       11,
 		},
 		SWAP12: {
-			execute:     makeSwap(12),
+			execute:     opSwap12,
 			constantGas: GasFastestStep,
 			numPop:      13,
 			numPush:     13,
@@ -1107,7 +1107,7 @@ func newFrontierInstructionSet() JumpTable {
 			opNum:       12,
 		},
 		SWAP13: {
-			execute:     makeSwap(13),
+			execute:     opSwap13,
 			constantGas: GasFastestStep,
 			numPop:      14,
 			numPush:     14,
@@ -1115,7 +1115,7 @@ func newFrontierInstructionSet() JumpTable {
 			opNum:       13,
 		},
 		SWAP14: {
-			execute:     makeSwap(14),
+			execute:     opSwap14,
 			constantGas: GasFastestStep,
 			numPop:      15,
 			numPush:     15,
@@ -1123,7 +1123,7 @@ func newFrontierInstructionSet() JumpTable {
 			opNum:       14,
 		},
 		SWAP15: {
-			execute:     makeSwap(15),
+			execute:     opSwap15,
 			constantGas: GasFastestStep,
 			numPop:      16,
 			numPush:     16,
@@ -1131,7 +1131,7 @@ func newFrontierInstructionSet() JumpTable {
 			opNum:       15,
 		},
 		SWAP16: {
-			execute:     makeSwap(16),
+			execute:     opSwap16,
 			constantGas: GasFastestStep,
 			numPop:      17,
 			numPush:     17,

@@ -51,7 +51,7 @@ func TestOpenFolder_AccountsDomain(t *testing.T) {
 	// check dirty files
 	repo.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
-			filename := item.decompressor.FileName1
+			filename := item.decompressor.FileName()
 			require.Contains(t, filename, name)
 			require.NotContains(t, filename, "torrent")
 			dataCount--
@@ -105,7 +105,7 @@ func TestOpenFolder_CodeII(t *testing.T) {
 	// check dirty files
 	repo.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
-			filename := item.decompressor.FileName1
+			filename := item.decompressor.FileName()
 			require.Contains(t, filename, name)
 			require.NotContains(t, filename, "torrent")
 			dataCount--
@@ -692,6 +692,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 			if err != nil {
 				t.Fatal(err)
 			}
+			defer rs.Close()
 
 			if err = rs.AddKey([]byte("first_key"), 0); err != nil {
 				t.Error(err)

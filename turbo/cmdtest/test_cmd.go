@@ -233,6 +233,15 @@ func (tt *TestCmd) StderrText() string {
 	return tt.stderr.buf.String()
 }
 
+// Stderr returns any stderr output written so far.
+// The returned bytes holds all log lines after ExpectExit has
+// returned.
+func (tt *TestCmd) Stderr() []byte {
+	tt.stderr.mu.Lock()
+	defer tt.stderr.mu.Unlock()
+	return tt.stderr.buf.Bytes()
+}
+
 func (tt *TestCmd) CloseStdin() {
 	tt.stdin.Close()
 }

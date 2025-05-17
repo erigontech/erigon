@@ -69,8 +69,53 @@ func (st *Stack) Cap() int {
 	return cap(st.Data)
 }
 
-func (st *Stack) Swap(n int) {
-	st.Data[len(st.Data)-n], st.Data[len(st.Data)-1] = st.Data[len(st.Data)-1], st.Data[len(st.Data)-n]
+func (st *Stack) Swap1() {
+	st.Data[st.Len()-2], st.Data[st.Len()-1] = st.Data[st.Len()-1], st.Data[st.Len()-2]
+}
+func (st *Stack) Swap2() {
+	st.Data[st.Len()-3], st.Data[st.Len()-1] = st.Data[st.Len()-1], st.Data[st.Len()-3]
+}
+func (st *Stack) Swap3() {
+	st.Data[st.Len()-4], st.Data[st.Len()-1] = st.Data[st.Len()-1], st.Data[st.Len()-4]
+}
+func (st *Stack) Swap4() {
+	st.Data[st.Len()-5], st.Data[st.Len()-1] = st.Data[st.Len()-1], st.Data[st.Len()-5]
+}
+func (st *Stack) Swap5() {
+	st.Data[st.Len()-6], st.Data[st.Len()-1] = st.Data[st.Len()-1], st.Data[st.Len()-6]
+}
+func (st *Stack) Swap6() {
+	st.Data[st.Len()-7], st.Data[st.Len()-1] = st.Data[st.Len()-1], st.Data[st.Len()-7]
+}
+func (st *Stack) Swap7() {
+	st.Data[st.Len()-8], st.Data[st.Len()-1] = st.Data[st.Len()-1], st.Data[st.Len()-8]
+}
+func (st *Stack) Swap8() {
+	st.Data[st.Len()-9], st.Data[st.Len()-1] = st.Data[st.Len()-1], st.Data[st.Len()-9]
+}
+func (st *Stack) Swap9() {
+	st.Data[st.Len()-10], st.Data[st.Len()-1] = st.Data[st.Len()-1], st.Data[st.Len()-10]
+}
+func (st *Stack) Swap10() {
+	st.Data[st.Len()-11], st.Data[st.Len()-1] = st.Data[st.Len()-1], st.Data[st.Len()-11]
+}
+func (st *Stack) Swap11() {
+	st.Data[st.Len()-12], st.Data[st.Len()-1] = st.Data[st.Len()-1], st.Data[st.Len()-12]
+}
+func (st *Stack) Swap12() {
+	st.Data[st.Len()-13], st.Data[st.Len()-1] = st.Data[st.Len()-1], st.Data[st.Len()-13]
+}
+func (st *Stack) Swap13() {
+	st.Data[st.Len()-14], st.Data[st.Len()-1] = st.Data[st.Len()-1], st.Data[st.Len()-14]
+}
+func (st *Stack) Swap14() {
+	st.Data[st.Len()-15], st.Data[st.Len()-1] = st.Data[st.Len()-1], st.Data[st.Len()-15]
+}
+func (st *Stack) Swap15() {
+	st.Data[st.Len()-16], st.Data[st.Len()-1] = st.Data[st.Len()-1], st.Data[st.Len()-16]
+}
+func (st *Stack) Swap16() {
+	st.Data[st.Len()-17], st.Data[st.Len()-1] = st.Data[st.Len()-1], st.Data[st.Len()-17]
 }
 
 func (st *Stack) Dup(n int) {
