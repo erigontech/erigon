@@ -160,6 +160,9 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		}
 		if ok && receiptFromDB != nil && !dbg.AssertEnabled {
 			fmt.Printf("[dbg] ReadReceiptCacheV2: %d, %d, logs=%d\n", blockNum, txNum, len(receiptFromDB.Logs))
+			for _, log := range receiptFromDB.Logs {
+				fmt.Printf("[dbg] log: %x\n", log.Address)
+			}
 			return receiptFromDB, nil
 		}
 	}
