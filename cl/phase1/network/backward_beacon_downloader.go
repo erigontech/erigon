@@ -17,6 +17,7 @@
 package network
 
 import (
+	"fmt"
 	"math"
 	"sort"
 	"sync"
@@ -333,6 +334,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 			// if there are nil blocks, we need to wait for the next iteration
 			continue
 		}
+		fmt.Println("Downloaded blocks", len(downloadedBlocks), downloadedBlocks[0])
 		// 2. is the last block in the list the one we are looking for or close to it?
 		marginOfSimilarity := subCount * 2
 		if downloadedBlocks[0].block.Block.Slot <= startSlot+marginOfSimilarity {
