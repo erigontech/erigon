@@ -31,6 +31,7 @@ linters:
     - wastedassign
     - govet
   disable:
+    - unused
     - testifylint
     - staticcheck #TODO: enable me
     - perfsprint #TODO: enable me
