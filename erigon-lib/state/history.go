@@ -102,8 +102,8 @@ type histCfg struct {
 	historyValuesOnCompressedPage int // when collating .v files: concat 16 values and snappy them
 
 	Accessors     Accessors
-	CompressorCfg seg.Cfg             // compression settings for history files
-	Compression   seg.FileCompression // defines type of compression for history files
+	CompressorCfg seg.Cfg             // Compression settings for history files
+	Compression   seg.FileCompression // defines type of Compression for history files
 	historyIdx    kv.InvertedIdx
 
 	//TODO: re-visit this check - maybe we don't need it. It's about kill in the middle of merge
@@ -734,7 +734,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 
 		initialized bool
 	)
-	efHistoryComp = seg.NewWriter(efComp, seg.CompressNone) // coll+build must be fast - no compression
+	efHistoryComp = seg.NewWriter(efComp, seg.CompressNone) // coll+build must be fast - no Compression
 	collector.SortAndFlushInBackground(true)
 	defer bitmapdb.ReturnToPool64(bitmap)
 
