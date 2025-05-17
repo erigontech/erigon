@@ -449,7 +449,7 @@ func (w *InvertedIndexBufferedWriter) add(key, indexKey []byte, txNum uint64) er
 	}
 	binary.BigEndian.PutUint64(w.txNumBytes[:], txNum)
 
-	if w.filenameBase == kv.LogAddrIdx.String() {
+	if w.filenameBase == kv.LogAddrIdx.String() && bytes.Equal(common.FromHex("0xd383fa9abaed4b94e723cdb15ce167cc30af255a"), key) {
 		fmt.Printf("[dbg] InvertedIndexBufferedWriter.add %x, %d\n", key, txNum)
 	}
 
