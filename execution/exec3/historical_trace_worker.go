@@ -186,6 +186,12 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 				return nil, err
 			}
 			txTask.Logs = append(txTask.Logs, logs...)
+			if txTask.BlockNum == 1577020 || txTask.BlockNum == 1577021 || txTask.BlockNum == 1577022 {
+				fmt.Printf("[dbg] trace1.amount: %d, txidx=%d\n", len(logs), txTask.TxIndex)
+				for _, l := range logs {
+					fmt.Printf("[dbg] trace1: %x\n", l.Address)
+				}
+			}
 			return ret, err
 		}
 
@@ -239,6 +245,9 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */, rw.execArgs.Engine)
 		if err != nil {
 			txTask.Error = err
+			if txTask.BlockNum == 1577020 || txTask.BlockNum == 1577021 || txTask.BlockNum == 1577022 {
+				fmt.Printf("[dbg] trace3.error! %d\n", txTask.TxIndex)
+			}
 		} else {
 			txTask.Failed = applyRes.Failed()
 			txTask.UsedGas = applyRes.UsedGas
@@ -246,6 +255,12 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 			ibs.SoftFinalise()
 
 			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txn.Hash(), txTask.BlockNum, txTask.BlockHash)
+			if txTask.BlockNum == 1577020 || txTask.BlockNum == 1577021 || txTask.BlockNum == 1577022 {
+				fmt.Printf("[dbg] trace2.amount: %d, txidx=%d\n", len(txTask.Logs), txTask.TxIndex)
+				for _, l := range txTask.Logs {
+					fmt.Printf("[dbg] trace2: %x\n", l.Address)
+				}
+			}
 			txTask.TraceFroms = txTask.Tracer.Froms()
 			txTask.TraceTos = txTask.Tracer.Tos()
 		}
