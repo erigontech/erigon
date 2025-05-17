@@ -2,7 +2,7 @@ module github.com/erigontech/erigon
 
 go 1.23.0
 
-toolchain go1.24.1
+toolchain go1.23.6
 
 replace github.com/erigontech/erigon-lib => ./erigon-lib
 

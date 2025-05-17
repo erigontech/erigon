@@ -2,7 +2,7 @@ module github.com/erigontech/erigon-lib
 
 go 1.23.0
 
-toolchain go1.24.1
+toolchain go1.23.6
 
 replace (
 	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.3-alpha-1
