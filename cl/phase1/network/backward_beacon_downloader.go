@@ -328,14 +328,14 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 			currentParentRoot = downloadedBlocks[i].block.Block.ParentRoot
 		}
 
+		if len(downloadedBlocks) == 0 {
+			continue
+		}
 		fmt.Println("Downloaded blocks", len(downloadedBlocks), downloadedBlocks[0])
 		// stopping condition, are we done?
 		// 1. is there any nil block in the list?
 		if isThereNilBlocks(downloadedBlocks) {
 			// if there are nil blocks, we need to wait for the next iteration
-			continue
-		}
-		if len(downloadedBlocks) == 0 {
 			continue
 		}
 
