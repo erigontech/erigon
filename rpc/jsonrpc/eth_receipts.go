@@ -238,6 +238,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if err != nil {
 			return nil, err
 		}
+		fmt.Printf("[dbg] iter %d, %d\n", blockNum, txNum)
 		if isFinalTxn {
 			if chainConfig.Bor != nil {
 				if header == nil {
