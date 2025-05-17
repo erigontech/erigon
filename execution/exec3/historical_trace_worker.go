@@ -26,7 +26,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -73,7 +72,7 @@ type HistoricalTraceWorker struct {
 	blockCtx  *evmtypes.BlockContext
 	rules     *chain.Rules
 	signer    *types.Signer
-	vmConfig  *vm.Config
+	vmCfg     *vm.Config
 }
 
 type TraceConsumer struct {
@@ -91,26 +90,25 @@ func NewHistoricalTraceWorker(
 	execArgs *ExecArgs,
 	logger log.Logger,
 ) *HistoricalTraceWorker {
-	stateReader := state.NewHistoryReaderV3()
 	ie := &HistoricalTraceWorker{
 		consumer: consumer,
 		in:       in,
 		out:      out,
 
+		logger:   logger,
+		ctx:      ctx,
 		execArgs: execArgs,
 
-		stateReader: stateReader,
-		vmConfig:    &vm.Config{},
-		ibs:         state.New(stateReader),
-		background:  background,
-		ctx:         ctx,
-		logger:      logger,
+		stateReader: state.NewHistoryReaderV3(),
 		stateWriter: state.NewNoopWriter(),
+		background:  background,
 
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, execArgs.ChainConfig, vm.Config{}),
 		callTracer:  NewCallTracer(),
 		taskGasPool: new(core.GasPool),
+		vmCfg:       &vm.Config{},
 	}
+	ie.taskGasPool.AddBlobGas(execArgs.ChainConfig.GetMaxBlobGasPerBlock(0))
 	ie.ibs = state.New(ie.stateReader)
 
 	return ie
@@ -125,7 +123,7 @@ func (rw *HistoricalTraceWorker) Run() (err error) {
 	}()
 	defer rw.evm.JumpDestCache.LogStats()
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
-		rw.RunTxTask(txTask)
+		rw.RunTxTaskNoLock(txTask)
 		if err := rw.out.Add(rw.ctx, txTask); err != nil {
 			return err
 		}
@@ -133,7 +131,7 @@ func (rw *HistoricalTraceWorker) Run() (err error) {
 	return nil
 }
 
-func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
+func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 	if rw.background && rw.chainTx == nil {
 		var err error
 		if rw.chainTx, err = rw.execArgs.ChainDB.BeginTemporalRo(rw.ctx); err != nil {
@@ -142,24 +140,23 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 		rw.stateReader.SetTx(rw.chainTx)
 		rw.chain = consensuschain.NewReader(rw.execArgs.ChainConfig, rw.chainTx, rw.execArgs.BlockReader, rw.logger)
 	}
+	txTask.Error = nil
 
 	rw.stateReader.SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetReadSet()
 	rw.callTracer.Reset()
-	rw.vmConfig.Debug = true
-	rw.vmConfig.Tracer = rw.callTracer
+	rw.vmCfg.Debug = true
+	rw.vmCfg.Tracer = rw.callTracer
 
 	rw.ibs.Reset()
-	ibs := rw.ibs
+	ibs, cc := rw.ibs, rw.execArgs.ChainConfig
 
-	rules := txTask.Rules
 	var err error
-	header := txTask.Header
+	rules, header := txTask.Rules, txTask.Header
 
 	switch {
 	case txTask.TxIndex == -1:
 		if txTask.BlockNum == 0 {
-			// Genesis block
 			_, ibs, err = core.GenesisToBlock(rw.execArgs.Genesis, rw.execArgs.Dirs, rw.logger)
 			if err != nil {
 				panic(fmt.Errorf("GenesisToBlock: %w", err))
@@ -171,9 +168,9 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 
 		// Block initialisation
 		syscall := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			return core.SysCallContract(contract, data, rw.execArgs.ChainConfig, ibs, header, rw.execArgs.Engine, constCall /* constCall */)
+			return core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, constCall /* constCall */)
 		}
-		rw.execArgs.Engine.Initialize(rw.execArgs.ChainConfig, rw.chain, header, ibs, syscall, rw.logger, nil)
+		rw.execArgs.Engine.Initialize(cc, rw.chain, header, ibs, syscall, rw.logger, nil)
 		txTask.Error = ibs.FinalizeTx(rules, noop)
 	case txTask.Final:
 		if txTask.BlockNum == 0 {
@@ -182,15 +179,16 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 
 		// End of block transaction in a block
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			res, err := core.SysCallContract(contract, data, rw.execArgs.ChainConfig, ibs, header, rw.execArgs.Engine, false /* constCall */)
+			res, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, false /* constCall */)
+			if err != nil {
+				return nil, err
+			}
 			txTask.Logs = append(txTask.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
-			return res, err
+			return res, nil
 		}
 
-		_, _, _, err := rw.execArgs.Engine.Finalize(rw.execArgs.ChainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, true /* skipReceiptsEval */, rw.logger)
-		if err != nil {
-			txTask.Error = err
-		}
+		skipPostEvaluaion := false // `true` only inMining
+		_, _, _, err := rw.execArgs.Engine.Finalize(cc, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, skipPostEvaluaion, rw.logger)
 		if err != nil {
 			txTask.Error = err
 		} else {
@@ -201,17 +199,18 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 			}
 		}
 	default:
-		rw.taskGasPool.Reset(txTask.Tx.GetGas(), txTask.Tx.GetBlobGas())
-		rw.vmConfig.SkipAnalysis = txTask.SkipAnalysis
+		rw.taskGasPool.Reset(txTask.Tx.GetGas(), cc.GetMaxBlobGasPerBlock(header.Time))
+		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		ibs.SetTxContext(txTask.TxIndex)
 		msg := txTask.TxAsMessage
-		msg.SetCheckNonce(!rw.vmConfig.StatelessExec)
+		//msg.SetCheckNonce(!rw.vmConfig.StatelessExec)
+		txn := txTask.Tx
 
 		txContext := core.NewEVMTxContext(msg)
-		if rw.vmConfig.TraceJumpDest {
-			txContext.TxHash = txTask.Tx.Hash()
+		if rw.vmCfg.TraceJumpDest {
+			txContext.TxHash = txn.Hash()
 		}
-		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, *rw.vmConfig, rules)
+		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, *rw.vmCfg, rules)
 
 		// MA applytx
 		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */, rw.execArgs.Engine)
@@ -222,7 +221,8 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 			txTask.UsedGas = applyRes.UsedGas
 			// Update the state with pending changes
 			ibs.SoftFinalise()
-			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)
+
+			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txn.Hash(), txTask.BlockNum, txTask.BlockHash)
 			txTask.TraceFroms = rw.callTracer.Froms()
 			txTask.TraceTos = rw.callTracer.Tos()
 		}
@@ -368,7 +368,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 
 	br := cfg.BlockReader
 	chainConfig := cfg.ChainConfig
-	if chainConfig.ChainName == networkname.Gnosis && cfg.Workers > 1 {
+	if chainConfig.Aura != nil && cfg.Workers > 1 {
 		panic("gnosis consensus doesn't support parallel exec yet: https://github.com/erigontech/erigon/issues/12054")
 	}
 
