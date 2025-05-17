@@ -231,10 +231,10 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 	subCount := uint64(32)
 	chunks := uint64(2)
 	count := subCount * chunks // 8 chunks of 32 blocks
-	start := b.slotToDownload.Load() - count + 1
+	lowerBound := b.slotToDownload.Load() - count + 1
 	// Overflow? round to 0.
-	if start > b.slotToDownload.Load() {
-		start = 0
+	if lowerBound > b.slotToDownload.Load() {
+		lowerBound = 0
 	}
 	// 1. initialize the response channel
 	downloadedBlocks := make([]*requestResult, 0, count)
@@ -255,7 +255,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 			presentMap[b.block.Block.Slot] = true
 		}
 
-		startSlot := b.slotToDownload.Load() - count + 1
+		startSlot := b.slotToDownload.Load() + 1
 		for i := len(downloadedBlocks) - 1; i >= 0; i-- {
 			if downloadedBlocks[i] == nil {
 				break
@@ -263,8 +263,8 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 			startSlot = downloadedBlocks[i].block.Block.Slot
 		}
 
-		fmt.Println(startSlot, start, count, b.slotToDownload.Load())
-		for currEndSlot := startSlot; currEndSlot > start; currEndSlot -= subCount { // inner iterations
+		fmt.Println(startSlot, lowerBound, count, b.slotToDownload.Load())
+		for currEndSlot := startSlot; currEndSlot > lowerBound; currEndSlot -= subCount { // inner iterations
 			start := currEndSlot - subCount - 1
 			if currEndSlot < subCount {
 				start = 0
