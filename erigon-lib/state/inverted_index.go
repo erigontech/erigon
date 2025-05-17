@@ -433,6 +433,10 @@ type InvertedIndexBufferedWriter struct {
 func loadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 	return next(k, k, v)
 }
+func loadFunc2(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	fmt.Printf("[dbg] ii.load %x, %d\n", v, binary.BigEndian.Uint64(k))
+	return next(k, k, v)
+}
 
 // Add - !NotThreadSafe. Must use WalRLock/BatchHistoryWriteEnd
 func (w *InvertedIndexBufferedWriter) Add(key []byte, txNum uint64) error {
@@ -444,6 +448,10 @@ func (w *InvertedIndexBufferedWriter) add(key, indexKey []byte, txNum uint64) er
 		return nil
 	}
 	binary.BigEndian.PutUint64(w.txNumBytes[:], txNum)
+
+	if w.filenameBase == kv.LogAddrIdx.String() {
+		fmt.Printf("[dbg] InvertedIndexBufferedWriter.add %x, %d\n", txNum, key)
+	}
 
 	if err := w.indexKeys.Collect(w.txNumBytes[:], key); err != nil {
 		return err
@@ -458,10 +466,16 @@ func (w *InvertedIndexBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) err
 	if w.discard {
 		return nil
 	}
-
-	if err := w.index.Load(tx, w.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
+	if w.filenameBase == kv.LogAddrIdx.String() {
+		if err := w.index.Load(tx, w.indexTable, loadFunc2, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+			return err
+		}
+	} else {
+		if err := w.index.Load(tx, w.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+			return err
+		}
 	}
+
 	if err := w.indexKeys.Load(tx, w.indexKeysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
