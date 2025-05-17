@@ -255,7 +255,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 			presentMap[b.block.Block.Slot] = true
 		}
 
-		startSlot := b.slotToDownload.Load() + 1
+		startSlot := b.slotToDownload.Load()
 		for i := len(downloadedBlocks) - 1; i >= 0; i-- {
 			if downloadedBlocks[i] == nil {
 				break
@@ -265,7 +265,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 
 		fmt.Println(startSlot, lowerBound, count, b.slotToDownload.Load())
 		for currEndSlot := startSlot; currEndSlot > lowerBound; currEndSlot -= subCount { // inner iterations
-			start := currEndSlot - subCount - 1
+			start := currEndSlot - subCount + 1
 			if currEndSlot < subCount {
 				start = 0
 			}
