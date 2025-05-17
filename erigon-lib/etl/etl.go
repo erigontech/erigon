@@ -182,6 +182,6 @@ func isIdentityLoadFunc(f LoadFunc) bool {
 var aggEtlRAM = dbg.EnvDataSize("ETL_SMALL_BUFS_RAM", BufferOptimalSize/8)
 var SmallSortableBuffers = NewAllocator(&sync.Pool{
 	New: func() interface{} {
-		return NewSortableBuffer(aggEtlRAM).Prealloc(10_000, int(aggEtlRAM/16))
+		return NewSortableBuffer(aggEtlRAM).Prealloc(1_02, int(aggEtlRAM/32))
 	},
 })
