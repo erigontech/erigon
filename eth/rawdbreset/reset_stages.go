@@ -408,7 +408,6 @@ const (
 	pruneMarkerSafeThreshold = snaptype.Erigon2MergeLimit * 1.5 // 1.5x the merge limit
 )
 
-func GetPruneMarkerSafeThreshold(blockReader services.FullBlockReader) uint64 
 func GetPruneMarkerSafeThreshold(blockReader services.FullBlockReader) uint64 {
 	snapProgress := min(blockReader.FrozenBorBlocks(), blockReader.FrozenBlocks())
 	if blockReader.BorSnapshots() == nil {
