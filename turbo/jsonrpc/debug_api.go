@@ -202,9 +202,17 @@ func (api *PrivateDebugAPIImpl) GetMeFiles(ctx context.Context) ([]string, error
 	files = append(files, dbg.DomainFiles(kv.CodeDomain).Names()...)
 	files = append(files, dbg.DomainFiles(kv.CommitmentDomain).Names()...)
 
+	tx.Rollback()
+
 	var files2 []string
 	for _, f := range files {
 		files2 = append(files2, path.Base(f))
+	}
+
+	if api._blockReader != nil && api._blockReader.Snapshots() != nil {
+		for _, f := range api._blockReader.Snapshots().DirtyFiles() {
+			files2 = append(files2, path.Base(f))
+		}
 	}
 
 	return files2, nil

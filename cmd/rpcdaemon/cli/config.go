@@ -475,12 +475,17 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		wg.SetLimit(1)
 		onNewSnapshot = func() {
 			wg.Go(func() error { // don't block events processing by network communication
-			log.Info("on new snapshots triggered...")
+				log.Info("on new snapshots triggered...")
 				reply, err := remoteKvClient.Snapshots(ctx, &remote.SnapshotsRequest{}, grpc.WaitForReady(true))
 				if err != nil {
 					logger.Warn("[snapshots] reopen", "err", err)
 					return nil
 				}
+				str := ""
+				for _, f := range reply.BlocksFiles {
+					str += fmt.Sprintf(" %s", f)
+				}
+				logger.Warn("block files received: %s", str)
 				if err := allSnapshots.OpenList(reply.BlocksFiles, true); err != nil {
 					logger.Error("[snapshots] reopen", "err", err)
 				} else {
