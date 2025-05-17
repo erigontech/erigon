@@ -1315,7 +1315,7 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 		if err := rlp.DecodeBytes(v, receipt); err != nil {
 			return nil, fmt.Errorf("ReadReceipts: deserialize %d, len(v)=%d, %w", blockNum, len(v), err)
 		}
-		log.Warn("[dbg] skip zero-value", "txnNum", txnNum, "logs", len(receipt.Logs))
+		log.Warn("[dbg] skip zero-value", "txnNum", txnNum, "logs", len(receipt.Logs), "txidx", receipt.TransactionIndex)
 		x := (*types.Receipt)(receipt)
 		if int(receipt.TransactionIndex) < len(block.Transactions()) {
 			txn := block.Transactions()[receipt.TransactionIndex]

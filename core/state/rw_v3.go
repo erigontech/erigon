@@ -251,6 +251,13 @@ func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *li
 		if txTask.TxIndex >= 0 && txTask.TxIndex < len(txTask.BlockReceipts) {
 			receipt = txTask.BlockReceipts[txTask.TxIndex]
 		}
+		if txTask.BlockNum == 1181874 || txTask.BlockNum == 1181875 || txTask.BlockNum == 1181876 {
+			if receipt == nil {
+				fmt.Printf("[dbg] WriteReceiptCacheV2.nil: %d, %d\n", txTask.BlockNum, txTask.TxNum)
+			} else {
+				fmt.Printf("[dbg] WriteReceiptCacheV2: %d, %d, logs=%d, txIdx=%d\n", txTask.BlockNum, txTask.TxNum, len(receipt.Logs), receipt.TransactionIndex)
+			}
+		}
 		if err := rawdb.WriteReceiptCacheV2(domains, receipt); err != nil {
 			return err
 		}
