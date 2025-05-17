@@ -450,7 +450,7 @@ func (w *InvertedIndexBufferedWriter) add(key, indexKey []byte, txNum uint64) er
 	binary.BigEndian.PutUint64(w.txNumBytes[:], txNum)
 
 	if w.filenameBase == kv.LogAddrIdx.String() {
-		fmt.Printf("[dbg] InvertedIndexBufferedWriter.add %x, %d\n", txNum, key)
+		fmt.Printf("[dbg] InvertedIndexBufferedWriter.add %x, %d\n", key, txNum)
 	}
 
 	if err := w.indexKeys.Collect(w.txNumBytes[:], key); err != nil {
@@ -752,6 +752,7 @@ func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNu
 		return nil, err
 	}
 	return stream.TransformKV2U64(it, func(_, v []byte) (uint64, error) {
+		fmt.Printf("[dbg] transform: %x, %d\n", key, binary.BigEndian.Uint64(v))
 		return binary.BigEndian.Uint64(v), nil
 	}), nil
 }
