@@ -188,6 +188,7 @@ func (api *PrivateDebugAPIImpl) RefreshFolder(ctx context.Context) (err error) {
 	return api.db.Debug().OpenFolder()
 }
 
+// debug_getMeFiles()
 func (api *PrivateDebugAPIImpl) GetMeFiles(ctx context.Context) ([]string, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
