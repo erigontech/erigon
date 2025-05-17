@@ -22,8 +22,6 @@ import (
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring/v2"
-	"github.com/erigontech/erigon/execution/exec3"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
@@ -189,8 +187,6 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	if err != nil {
 		return nil, err
 	}
-	exec := exec3.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, nil)
-	defer exec.Close()
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
 	txNumbers, err := applyFiltersV3(txNumsReader, tx, begin, end, crit)
@@ -241,7 +237,6 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 				continue
 			}
 			blockHash = header.Hash()
-			exec.ChangeBlock(header)
 			timestamp = header.Time
 		}
 		var logIndex uint
@@ -255,11 +250,14 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			continue
 		}
 
-		_, err = exec.ExecTxn(txNum, txIndex, txn, true)
+		r, err := api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, header, txn, txIndex, txNum+1)
 		if err != nil {
 			return nil, err
 		}
-		blockLogs = exec.GetRawLogs(txIndex)
+		if r == nil {
+			return nil, err
+		}
+		blockLogs = r.Logs
 		for _, log := range blockLogs {
 			log.Index = logIndex
 			logIndex++

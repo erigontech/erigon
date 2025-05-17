@@ -22,7 +22,6 @@ import (
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring/v2"
-	"github.com/erigontech/erigon/execution/exec3"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -211,8 +210,6 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	if err != nil {
 		return nil, err
 	}
-	exec := exec3.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, nil)
-	defer exec.Close()
 
 	var header *types.Header
 
@@ -248,7 +245,6 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				log.Warn("[rpc] header is nil", "blockNum", blockNum)
 				continue
 			}
-			exec.ChangeBlock(header)
 		}
 
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
