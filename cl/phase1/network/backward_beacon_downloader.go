@@ -284,6 +284,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 					log.Debug("Error while requesting chunk", "err", err)
 					return
 				}
+				fmt.Println("Gotten chunk", start, subCount)
 				if requestsResult == nil {
 					return
 				}
