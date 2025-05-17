@@ -307,6 +307,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			return nil, err
 		}
 		if r == nil {
+			fmt.Printf("[dbg] nil? %d, %d\n", blockNum, txNum)
 			return nil, err
 		}
 		filtered := r.Logs.Filter(addrMap, crit.Topics, 0)
