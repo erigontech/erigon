@@ -1,142 +1,170 @@
+version: "2"
 run:
-  timeout: 10m
   build-tags:
     - nosqlite
     - noboltdb
-
+    - nosilkworm
 linters:
-  presets:
-    - bugs
-    - error
-    - unused
-    - performance
-  disable:
-    - gosec
-    - exhaustive
-    - musttag
-    - contextcheck
-    - wrapcheck
-    - err113
-    - unparam
-    - makezero
-    - testifylint #TODO: enable me
-    - perfsprint #TODO: enable me
-    - protogetter
-    - typecheck
-    - recvcheck #TODO: enable me
   enable:
+    - asasalint
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - durationcheck
+    # - errchkjson
+    # - errorlint
+    - fatcontext
+    - gocheckcompilerdirectives
+    - gochecksumtype
+    # - gocritic
+    - gosmopolitan
+    - loggercheck
+    # - nilerr
+    # - nilnesserr
+    # - noctx
+    - prealloc
+    # - predeclared
+    - reassign
+    - spancheck
+    # - thelper
     - unconvert
-    - predeclared
     - wastedassign
-    - thelper
+    - govet
+  disable:
+    - testifylint
+    - staticcheck #TODO: enable me
+    - perfsprint #TODO: enable me
+    - recvcheck  #TODO: enable me
+    - contextcheck
+    - err113
+    - exhaustive
+    - gosec
+    - makezero
+    - musttag
+    - protogetter
+    - unparam
+    - wrapcheck
+    - rowserrcheck
+    - sqlclosecheck
+    - zerologlint
+  settings:
+    goconst:
+      min-len: 2
+      min-occurrences: 2
+    gocritic:
+      enabled-checks:
+        - ruleguard
+      disabled-checks:
+        - rangeValCopy
+        - exitAfterDefer
+        - elseif
+        - dupBranchBody
+        - assignOp
+        - singleCaseSwitch
+        - captLocal
+        - commentFormatting
+        - ifElseChain
+        - appendAssign
+        - preferFprint
+        - sloppyReassign
+        - sprintfQuotedString
+        - deferInLoop
+        - nilValReturn
+        - evalOrder
+        - commentedOutCode
+        - returnAfterHttpError
+        - weakCond
+        - builtinShadowDecl
+        - unnecessaryDefer
+        - uncheckedInlineErr
+        - preferStringWriter
+      enabled-tags:
+        - performance
+        - diagnostic
+      settings:
+        hugeParam:
+          sizeThreshold: 1000
+        rangeExprCopy:
+          sizeThreshold: 512
+          skipTestFuncs: true
+        ruleguard:
+          rules: rules.go
+        underef:
+          skipRecvDeref: true
+    gosec:
+      excludes:
+        - G115
+    govet:
+      disable:
+        - deepequalerrors
+        - shadow
+        - unsafeptr
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - all
+          - predeclared
+          - thelper
+        path: rlp/.*\.go
+      - linters:
+          - golint
+        text: should be
+      - linters:
+          - recvcheck
+        text: the methods of
+      - linters:
+          - errcheck
+        text: not checked
+      - linters:
+          - staticcheck
+        text: SA(1019|1029|5011)
+      - linters:
+          - gocritic
+          - gosec
+          - perfsprint
+          # - unused
+        path: test\.go
+      - linters:
+          - gocritic
+          - gosec
+          # - unused
+        path: hack\.go
+      - linters:
+          - gocritic
+          - gosec
+          # - unused
+        path: cmd/devp2p
+      - linters:
+          - gocritic
+          - gosec
+        path: metrics/sample\.go
+      - linters:
+          - gocritic
+          - gosec
+        path: p2p/simulations
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+      - testdata$
+      - execution-spec-tests$
+formatters:
+  enable:
     - gofmt
-    - gocritic
-#    - revive
-#    - forcetypeassert
-#    - stylecheck
-
-linters-settings:
-  gocritic: # see https://golangci-lint.run/usage/linters/#gocritic and https://go-critic.github.io/overview#checks-overview
-    enabled-tags:
-      - performance
-      - diagnostic
-    enabled-checks:
-      - ruleguard
-    disabled-checks:
-      - rangeValCopy
-      - exitAfterDefer
-      - elseif
-      - dupBranchBody
-      - assignOp
-      - singleCaseSwitch
-      - captLocal
-      - commentFormatting
-      - ifElseChain
-      - appendAssign
-      - preferFprint
-
-      # diagnostigs tag: possible bugs. need enable checks in future
-      - sloppyReassign
-      - sprintfQuotedString
-      - deferInLoop
-      - nilValReturn
-      - evalOrder
-      - commentedOutCode
-      - returnAfterHttpError
-      - weakCond
-      - builtinShadowDecl
-      - unnecessaryDefer
-      - uncheckedInlineErr
-      - preferStringWriter
-
-    settings:
-      ruleguard:
-        rules: "rules.go"
-      hugeParam:
-        # size in bytes that makes the warning trigger (default 80)
-        sizeThreshold: 1000
-      rangeExprCopy:
-        # size in bytes that makes the warning trigger (default 512)
-        sizeThreshold: 512
-        # whether to check test functions (default true)
-        skipTestFuncs: true
-      underef:
-        # whether to skip (*x).method() calls where x is a pointer receiver (default true)
-        skipRecvDeref: true
-
-  govet:
-    disable:
-      - deepequalerrors
-      - shadow
-      - unsafeptr
-  goconst:
-    min-len: 2
-    min-occurrences: 2
-  gofmt:
-    simplify: false
-
-issues:
-  exclude-rules:
-    - path: rlp/.*\.go
-      linters:
-        - predeclared
-        - thelper
-        - all
-    - linters:
-        - golint
-      text: "should be"
-    - linters:
-        - recvcheck
-      text: "the methods of"
-    - linters:
-        - errcheck
-      text: "not checked"
-    - linters:
-        - staticcheck
-      text: "SA(1019|1029|5011)"
-    # Exclude some linters from running on tests files.
-    - path: test\.go
-      linters:
-        - gosec
-        - unused
-        - gocritic
-        - perfsprint
-        - typecheck
-    - path: hack\.go
-      linters:
-        - gosec
-        - unused
-        - gocritic
-    - path: cmd/devp2p
-      linters:
-        - gosec
-        - unused
-        - gocritic
-    - path: metrics/sample\.go
-      linters:
-        - gosec
-        - gocritic
-    - path: p2p/simulations
-      linters:
-        - gosec
-        - gocritic
+  settings:
+    gofmt:
+      simplify: false
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+      - testdata$
+      - execution-spec-tests$

@@ -1,6 +1,8 @@
 module github.com/erigontech/erigon-lib
 
-go 1.22.0
+go 1.23.0
+
+toolchain go1.23.6
 
 replace (
 	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.3-alpha-1
@@ -11,7 +13,7 @@ replace (
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20250502073210-6c1e7e3d5165
 	github.com/erigontech/interfaces v0.0.0-20250320135313-d644c7d43f43
-	github.com/erigontech/mdbx-go v0.38.6-0.20250205222432-e4dd01978d7f
+	github.com/erigontech/mdbx-go v0.39.8
 	github.com/erigontech/secp256k1 v1.1.0
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
 )
@@ -55,7 +57,7 @@ require (
 	golang.org/x/crypto v0.32.0
 	golang.org/x/exp v0.0.0-20250128182459-e0ece0dbea4c
 	golang.org/x/sync v0.10.0
-	golang.org/x/sys v0.29.0
+	golang.org/x/sys v0.31.0
 	golang.org/x/time v0.9.0
 	google.golang.org/grpc v1.69.4
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.5.1

@@ -207,7 +207,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 	}
 
-	env, err := mdbx.NewEnv()
+	env, err := mdbx.NewEnv(mdbx.Default)
 	if err != nil {
 		return nil, err
 	}
