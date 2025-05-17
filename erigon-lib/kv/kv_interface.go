@@ -231,9 +231,9 @@ type Closer interface {
 	Close()
 }
 
-type OnFreezeFunc func(frozenFileNames []string)
+type OnFilesChange func(frozenFileNames []string)
 type SnapshotNotifier interface {
-	OnFreeze(f OnFreezeFunc)
+	OnFilesChange(f OnFilesChange)
 }
 
 // RoDB - Read-only version of KV.
@@ -518,6 +518,7 @@ type TemporalRwTx interface {
 }
 
 type TemporalDebugDB interface {
+	OpenFolder() error
 	DomainTables(domain ...Domain) []string
 	InvertedIdxTables(names ...InvertedIdx) []string
 }

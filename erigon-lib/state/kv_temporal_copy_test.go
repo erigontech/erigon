@@ -164,7 +164,8 @@ func (db *DB) Close() {
 	db.agg.Close()
 }
 
-func (db *DB) OnFreeze(f kv.OnFreezeFunc) { db.agg.OnFreeze(f) }
+func (db *DB) OnFilesChange(f kv.OnFilesChange) { db.agg.OnFilesChange(f) }
+func (db *DB) OpenFolder() error                { return db.agg.OpenFolder() }
 
 type Tx struct {
 	*mdbx.MdbxTx

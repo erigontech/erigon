@@ -28,6 +28,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -517,6 +518,9 @@ func (sdb *IntraBlockState) SetNonce(addr libcommon.Address, nonce uint64) error
 // DESCRIBED: docs/programmers_guide/guide.md#code-hash
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SetCode(addr libcommon.Address, code []byte) error {
+	if sdb.trace {
+		fmt.Printf("SetCode %x, code: %s", addr, common.Bytes2Hex(code))
+	}
 	stateObject, err := sdb.GetOrNewStateObject(addr)
 	if err != nil {
 		return err
@@ -809,6 +813,9 @@ func (sdb *IntraBlockState) GetRefund() uint64 {
 
 func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, addr libcommon.Address, stateObject *stateObject, isDirty bool, tracingHooks *tracing.Hooks) error {
 	emptyRemoval := EIP161Enabled && stateObject.empty() && (!isAura || addr != SystemAddress)
+	// fmt.Printf("addr: %s, emptyREmoval: %t, selfd: %t, isDirty: %t, createContract: %t, code: %d, dirtyCode: %t, codehash: %s\n",
+	// 	addr.Hex(), emptyRemoval, stateObject.selfdestructed, isDirty, stateObject.createdContract, len(stateObject.code),
+	// 	stateObject.dirtyCode, stateObject.data.CodeHash.Hex())
 	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
 		if tracingHooks != nil && tracingHooks.OnBalanceChange != nil && !stateObject.Balance().IsZero() && stateObject.selfdestructed {
 			tracingHooks.OnBalanceChange(stateObject.address, stateObject.Balance(), uint256.NewInt(0), tracing.BalanceDecreaseSelfdestructBurn)

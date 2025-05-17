@@ -32,13 +32,13 @@ func EnvString(envVarName string, defaultVal string) string {
 	v, _ := os.LookupEnv(envVarName)
 	if v != "" {
 		WarnOnErigonPrefix(envVarName)
-		log.Info("[env]", envVarName, v)
+		log.Warn("[env]", envVarName, v)
 		return v
 	}
 
 	v, _ = os.LookupEnv("ERIGON_" + envVarName)
 	if v != "" {
-		log.Info("[env]", envVarName, v)
+		log.Warn("[env]", envVarName, v)
 		return v
 	}
 	return defaultVal
