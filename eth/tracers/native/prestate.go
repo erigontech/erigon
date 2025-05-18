@@ -224,7 +224,7 @@ func (t *prestateTracer) OnTxEnd(receipt *types.Receipt, err error) {
 				}
 
 				var newVal uint256.Int
-				t.env.IntraBlockState.GetState(addr, &key, &newVal)
+				t.env.IntraBlockState.GetState(addr, key, &newVal)
 				if new(uint256.Int).SetBytes(val[:]).Eq(&newVal) {
 					// Omit unchanged slots
 					delete(t.pre[addr].Storage, key)
@@ -314,6 +314,6 @@ func (t *prestateTracer) lookupStorage(addr common.Address, key common.Hash) {
 		return
 	}
 	var val uint256.Int
-	t.env.IntraBlockState.GetState(addr, &key, &val)
+	t.env.IntraBlockState.GetState(addr, key, &val)
 	t.pre[addr].Storage[key] = val.Bytes32()
 }

@@ -168,7 +168,7 @@ func (s *StateSuite) TestNull(c *checker.C) {
 	//value := common.FromHex("0x823140710bf13990e4500136726d8b55")
 	var value uint256.Int
 
-	s.state.SetState(address, &common.Hash{}, value)
+	s.state.SetState(address, common.Hash{}, value)
 
 	err := s.state.FinalizeTx(&chain.Rules{}, s.w)
 	c.Check(err, checker.IsNil)
@@ -176,7 +176,7 @@ func (s *StateSuite) TestNull(c *checker.C) {
 	err = s.state.CommitBlock(&chain.Rules{}, s.w)
 	c.Check(err, checker.IsNil)
 
-	s.state.GetCommittedState(address, &common.Hash{}, &value)
+	s.state.GetCommittedState(address, common.Hash{}, &value)
 	if !value.IsZero() {
 		c.Errorf("expected empty hash. got %x", value)
 	}
@@ -219,24 +219,24 @@ func (s *StateSuite) TestSnapshot(c *checker.C) {
 	genesis := s.state.Snapshot()
 
 	// set initial state object value
-	s.state.SetState(stateobjaddr, &storageaddr, *data1)
+	s.state.SetState(stateobjaddr, storageaddr, *data1)
 	snapshot := s.state.Snapshot()
 
 	// set a new state object value, revert it and ensure correct content
-	s.state.SetState(stateobjaddr, &storageaddr, *data2)
+	s.state.SetState(stateobjaddr, storageaddr, *data2)
 	s.state.RevertToSnapshot(snapshot)
 
 	var value uint256.Int
-	s.state.GetState(stateobjaddr, &storageaddr, &value)
+	s.state.GetState(stateobjaddr, storageaddr, &value)
 	c.Assert(value, checker.DeepEquals, data1)
-	s.state.GetCommittedState(stateobjaddr, &storageaddr, &value)
+	s.state.GetCommittedState(stateobjaddr, storageaddr, &value)
 	c.Assert(value, checker.DeepEquals, common.Hash{})
 
 	// revert up to the genesis state and ensure correct content
 	s.state.RevertToSnapshot(genesis)
-	s.state.GetState(stateobjaddr, &storageaddr, &value)
+	s.state.GetState(stateobjaddr, storageaddr, &value)
 	c.Assert(value, checker.DeepEquals, common.Hash{})
-	s.state.GetCommittedState(stateobjaddr, &storageaddr, &value)
+	s.state.GetCommittedState(stateobjaddr, storageaddr, &value)
 	c.Assert(value, checker.DeepEquals, common.Hash{})
 }
 
@@ -271,8 +271,8 @@ func TestSnapshot2(t *testing.T) {
 	data0 := uint256.NewInt(17)
 	data1 := uint256.NewInt(18)
 
-	state.SetState(stateobjaddr0, &storageaddr, *data0)
-	state.SetState(stateobjaddr1, &storageaddr, *data1)
+	state.SetState(stateobjaddr0, storageaddr, *data0)
+	state.SetState(stateobjaddr1, storageaddr, *data1)
 
 	// db, trie are already non-empty values
 	so0, err := state.getStateObject(stateobjaddr0)
@@ -325,7 +325,7 @@ func TestSnapshot2(t *testing.T) {
 	}
 	// Update lazily-loaded values before comparing.
 	var tmp uint256.Int
-	so0Restored.GetState(&storageaddr, &tmp)
+	so0Restored.GetState(storageaddr, &tmp)
 	so0Restored.Code()
 	// non-deleted is equal (restored)
 	compareStateObjects(so0Restored, so0, t)
