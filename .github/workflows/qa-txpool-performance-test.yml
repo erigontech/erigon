@@ -27,9 +27,9 @@ jobs:
           username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
           password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
 
-      - name: Docker build current branch
-        run: |
-          docker build -t test/erigon:current .
+      # - name: Docker build current branch
+      #   run: |
+      #     docker build -t test/erigon:current .
 
       - name: Run self hosted Kurtosis + assertoor tests
         id: noku_kurtosis_test
