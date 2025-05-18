@@ -25,7 +25,6 @@ import (
 	"slices"
 
 	"github.com/holiman/uint256"
-	pool "github.com/libp2p/go-buffer-pool"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
