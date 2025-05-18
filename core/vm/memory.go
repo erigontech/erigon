@@ -40,7 +40,7 @@ type Memory struct {
 // NewMemory returns a new memory model.
 func NewMemory() *Memory {
 	m := memoryPool.Get().(*Memory)
-	m.Reset()
+	m.reset()
 	return m
 }
 
@@ -98,7 +98,7 @@ func (m *Memory) Resize(size uint64) {
 	m.store = append(m.store, zeroes[:l]...)
 }
 
-func (m *Memory) Reset() {
+func (m *Memory) reset() {
 	m.lastGasCost = 0
 	m.store = m.store[:0]
 }
