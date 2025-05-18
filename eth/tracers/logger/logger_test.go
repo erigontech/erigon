@@ -56,6 +56,9 @@ type dummyStatedb struct {
 func (*dummyStatedb) GetRefund() uint64                                               { return 1337 }
 func (*dummyStatedb) GetState(_ common.Address, _ *common.Hash, _ *uint256.Int) error { return nil }
 func (*dummyStatedb) SetState(_ common.Address, _ *common.Hash, _ uint256.Int) error  { return nil }
+func (*dummyStatedb) AddSlotToAccessList(_ common.Address, _ common.Hash) (addrMod, slotMod bool) {
+	return false, false
+}
 
 func TestStoreCapture(t *testing.T) {
 	c := vm.NewJumpDestCache()
