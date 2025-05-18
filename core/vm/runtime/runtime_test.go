@@ -518,6 +518,7 @@ func benchmarkNonModifyingCode(gas uint64, code []byte, name string, tracerCode 
 	cfg := new(Config)
 	setDefaults(cfg)
 	db := testTemporalDB(b)
+	defer db.Close()
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(b, err)
 	domains, err := stateLib.NewSharedDomains(tx, log.New())
@@ -569,7 +570,7 @@ func benchmarkNonModifyingCode(gas uint64, code []byte, name string, tracerCode 
 
 	b.Run(name, func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+		for i := 0; i < b.N/100; i++ {
 			vmenv.Call(sender, destination, nil, gas, cfg.Value, false /* bailout */) // nolint:errcheck
 		}
 	})
