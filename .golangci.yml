@@ -134,7 +134,7 @@ linters:
       - linters:
           - gocritic
           - gosec
-           - unused
+          - unused
         path: hack\.go
       - linters:
           - gocritic
