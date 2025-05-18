@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/core/vm/stack"
 )
 
 const opTestArg = "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
@@ -112,7 +111,7 @@ func init() {
 func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFunc, name string) {
 	var (
 		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
-		stack          = stack.New()
+		stack          = New()
 		pc             = uint64(0)
 		evmInterpreter = env.interpreter.(*EVMInterpreter)
 	)
@@ -121,13 +120,13 @@ func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFu
 		x := new(uint256.Int).SetBytes(common.Hex2Bytes(test.X))
 		y := new(uint256.Int).SetBytes(common.Hex2Bytes(test.Y))
 		expected := new(uint256.Int).SetBytes(common.Hex2Bytes(test.Expected))
-		stack.Push(x)
-		stack.Push(y)
+		stack.push(x)
+		stack.push(y)
 		opFn(&pc, evmInterpreter, &ScopeContext{nil, stack, nil})
-		if len(stack.Data) != 1 {
-			t.Errorf("Expected one item on stack after %v, got %d: ", name, len(stack.Data))
+		if len(stack.data) != 1 {
+			t.Errorf("Expected one item on stack after %v, got %d: ", name, len(stack.data))
 		}
-		actual := stack.Pop()
+		actual := stack.pop()
 
 		if actual.Cmp(expected) != 0 {
 			t.Errorf("Testcase %v %d, %v(%x, %x): expected  %x, got %x", name, i, name, x, y, expected, &actual)
@@ -216,7 +215,7 @@ func TestAddMod(t *testing.T) {
 	t.Parallel()
 	var (
 		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
-		stack          = stack.New()
+		stack          = New()
 		evmInterpreter = NewEVMInterpreter(env, env.Config())
 		pc             = uint64(0)
 	)
@@ -240,11 +239,11 @@ func TestAddMod(t *testing.T) {
 		y := new(uint256.Int).SetBytes(common.Hex2Bytes(test.y))
 		z := new(uint256.Int).SetBytes(common.Hex2Bytes(test.z))
 		expected := new(uint256.Int).SetBytes(common.Hex2Bytes(test.expected))
-		stack.Push(z)
-		stack.Push(y)
-		stack.Push(x)
+		stack.push(z)
+		stack.push(y)
+		stack.push(x)
 		opAddmod(&pc, evmInterpreter, &ScopeContext{nil, stack, nil})
-		actual := stack.Pop()
+		actual := stack.pop()
 		if actual.Cmp(expected) != 0 {
 			t.Errorf("Testcase %d, expected  %x, got %x", i, expected, actual)
 		}
@@ -263,10 +262,10 @@ func TestAddMod(t *testing.T) {
 // 	for i, param := range args {
 // 		x := new(uint256.Int).SetBytes(common.Hex2Bytes(param.x))
 // 		y := new(uint256.Int).SetBytes(common.Hex2Bytes(param.y))
-// 		stack.Push(x)
-// 		stack.Push(y)
+// 		stack.push(x)
+// 		stack.push(y)
 // 		opFn(&pc, interpreter, &callCtx{nil, stack, nil})
-// 		actual := stack.Pop()
+// 		actual := stack.pop()
 // 		result[i] = TwoOperandTestcase{param.x, param.y, fmt.Sprintf("%064x", actual)}
 // 	}
 // 	return result
@@ -304,7 +303,7 @@ func TestJsonTestcases(t *testing.T) {
 func opBenchmark(b *testing.B, op executionFunc, args ...string) {
 	var (
 		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
-		stack          = stack.New()
+		stack          = New()
 		evmInterpreter = NewEVMInterpreter(env, env.Config())
 	)
 
@@ -320,10 +319,10 @@ func opBenchmark(b *testing.B, op executionFunc, args ...string) {
 		for _, arg := range byteArgs {
 			a := new(uint256.Int)
 			a.SetBytes(arg)
-			stack.Push(a)
+			stack.push(a)
 		}
 		op(&pc, evmInterpreter, &ScopeContext{nil, stack, nil})
-		stack.Pop()
+		stack.pop()
 	}
 }
 
@@ -539,7 +538,7 @@ func TestOpMstore(t *testing.T) {
 	t.Parallel()
 	var (
 		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
-		stack          = stack.New()
+		stack          = New()
 		mem            = NewMemory()
 		evmInterpreter = NewEVMInterpreter(env, env.Config())
 	)
@@ -548,12 +547,14 @@ func TestOpMstore(t *testing.T) {
 	mem.Resize(64)
 	pc := uint64(0)
 	v := "abcdef00000000000000abba000000000deaf000000c0de00100000000133700"
-	stack.PushN(*new(uint256.Int).SetBytes(common.Hex2Bytes(v)), *new(uint256.Int))
+	stack.push(new(uint256.Int).SetBytes(common.Hex2Bytes(v)))
+	stack.push(new(uint256.Int))
 	opMstore(&pc, evmInterpreter, &ScopeContext{mem, stack, nil})
 	if got := common.Bytes2Hex(mem.GetCopy(0, 32)); got != v {
 		t.Fatalf("Mstore fail, got %v, expected %v", got, v)
 	}
-	stack.PushN(*new(uint256.Int).SetOne(), *new(uint256.Int))
+	stack.push(new(uint256.Int).SetOne())
+	stack.push(new(uint256.Int))
 	opMstore(&pc, evmInterpreter, &ScopeContext{mem, stack, nil})
 	if common.Bytes2Hex(mem.GetCopy(0, 32)) != "0000000000000000000000000000000000000000000000000000000000000001" {
 		t.Fatalf("Mstore failed to overwrite previous value")
@@ -563,7 +564,7 @@ func TestOpMstore(t *testing.T) {
 func BenchmarkOpMstore(bench *testing.B) {
 	var (
 		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
-		stack          = stack.New()
+		stack          = New()
 		mem            = NewMemory()
 		evmInterpreter = NewEVMInterpreter(env, env.Config())
 	)
@@ -576,7 +577,8 @@ func BenchmarkOpMstore(bench *testing.B) {
 
 	bench.ResetTimer()
 	for i := 0; i < bench.N; i++ {
-		stack.PushN(*value, *memStart)
+		stack.push(value)
+		stack.push(memStart)
 		opMstore(&pc, evmInterpreter, &ScopeContext{mem, stack, nil})
 	}
 }
@@ -586,7 +588,7 @@ func TestOpTstore(t *testing.T) {
 	var (
 		state          = state.New(nil)
 		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, state, chain.TestChainConfig, Config{})
-		stack          = stack.New()
+		stack          = New()
 		mem            = NewMemory()
 		evmInterpreter = NewEVMInterpreter(env, env.Config())
 		caller         = common.Address{}
@@ -600,22 +602,22 @@ func TestOpTstore(t *testing.T) {
 	env.interpreter = evmInterpreter
 	pc := uint64(0)
 	// push the value to the stack
-	stack.Push(new(uint256.Int).SetBytes(value))
+	stack.push(new(uint256.Int).SetBytes(value))
 	// push the location to the stack
-	stack.Push(new(uint256.Int))
+	stack.push(new(uint256.Int))
 	opTstore(&pc, evmInterpreter, &scopeContext)
 	// there should be no elements on the stack after TSTORE
-	if stack.Len() != 0 {
+	if stack.len() != 0 {
 		t.Fatal("stack wrong size")
 	}
 	// push the location to the stack
-	stack.Push(new(uint256.Int))
+	stack.push(new(uint256.Int))
 	opTload(&pc, evmInterpreter, &scopeContext)
 	// there should be one element on the stack after TLOAD
-	if stack.Len() != 1 {
+	if stack.len() != 1 {
 		t.Fatal("stack wrong size")
 	}
-	val := stack.Peek()
+	val := stack.peek()
 	if !bytes.Equal(val.Bytes(), value) {
 		t.Fatal("incorrect element read from transient storage")
 	}
@@ -624,7 +626,7 @@ func TestOpTstore(t *testing.T) {
 func BenchmarkOpKeccak256(bench *testing.B) {
 	var (
 		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
-		stack          = stack.New()
+		stack          = New()
 		mem            = NewMemory()
 		evmInterpreter = NewEVMInterpreter(env, env.Config())
 	)
@@ -635,7 +637,8 @@ func BenchmarkOpKeccak256(bench *testing.B) {
 
 	bench.ResetTimer()
 	for i := 0; i < bench.N; i++ {
-		stack.PushN(*uint256.NewInt(32), *start)
+		stack.push(uint256.NewInt(32))
+		stack.push(start)
 		opKeccak256(&pc, evmInterpreter, &ScopeContext{mem, stack, nil})
 	}
 }
@@ -702,9 +705,9 @@ func TestCreate2Addreses(t *testing.T) {
 		/*
 			stack          := newstack()
 			// salt, but we don't need that for this test
-			stack.Push(big.NewInt(int64(len(code)))) //size
-			stack.Push(big.NewInt(0)) // memstart
-			stack.Push(big.NewInt(0)) // value
+			stack.push(big.NewInt(int64(len(code)))) //size
+			stack.push(big.NewInt(0)) // memstart
+			stack.push(big.NewInt(0)) // value
 			gas, _ := gasCreate2(params.GasTable{}, nil, nil, stack, nil, 0)
 			fmt.Printf("Example %d\n* address `0x%x`\n* salt `0x%x`\n* init_code `0x%x`\n* gas (assuming no mem expansion): `%v`\n* result: `%s`\n\n", i,origin, salt, code, gas, address.String())
 		*/
@@ -799,7 +802,7 @@ func TestOpMCopy(t *testing.T) {
 	} {
 		var (
 			env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
-			stack          = stack.New()
+			stack          = New()
 			pc             = uint64(0)
 			evmInterpreter = NewEVMInterpreter(env, env.Config())
 		)
@@ -813,9 +816,9 @@ func TestOpMCopy(t *testing.T) {
 		src, _ := uint256.FromHex(tc.src)
 		dst, _ := uint256.FromHex(tc.dst)
 
-		stack.Push(len)
-		stack.Push(src)
-		stack.Push(dst)
+		stack.push(len)
+		stack.push(src)
+		stack.push(dst)
 		wantErr := (tc.wantGas == 0)
 		// Calc mem expansion
 		var memorySize uint64
