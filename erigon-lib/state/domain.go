@@ -730,6 +730,10 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) (v []byte, ok boo
 		return v, true, offset, nil
 	}
 	if dt.d.Accessors.Has(AccessorHashMap) {
+		if dt.name.String() == "commitment" {
+			fmt.Println("getLatestFromKVI")
+		}
+		s := time.Now()
 		reader := dt.statelessIdxReader(i)
 		if reader.Empty() {
 			return nil, false, 0, nil
@@ -738,13 +742,25 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) (v []byte, ok boo
 		if !ok {
 			return nil, false, 0, nil
 		}
+		if dt.name.String() == "commitment" {
+			fmt.Println("getLatestFromKVI two-layer-lookup", time.Since(s))
+		}
+		s = time.Now()
 		g.Reset(offset)
 
+		if dt.name.String() == "commitment" {
+			fmt.Println("getLatestFromKVI reset", time.Since(s))
+		}
+
+		s = time.Now()
 		k, _ := g.Next(nil)
 		if !bytes.Equal(filekey, k) { // MPH false-positives protection
 			return nil, false, 0, nil
 		}
 		v, _ := g.Next(nil)
+		if dt.name.String() == "commitment" {
+			fmt.Println("getLatestFromKVI next", time.Since(s))
+		}
 		return v, true, 0, nil
 	}
 	return nil, false, 0, errors.New("no index defined")
