@@ -150,6 +150,17 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
+			Name: "count_txs",
+			Action: func(c *cli.Context) error {
+				dirs := datadir.New(c.String(utils.DataDirFlag.Name))
+				return doCountTxs(c, dirs)
+			},
+			Usage: "erigon seg count_txs",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+			}),
+		},
+		{
 			Name:   "uploader",
 			Action: doUploaderCommand,
 			Usage:  "run erigon in snapshot upload mode (no execution)",
@@ -1389,6 +1400,40 @@ func doCompress(cliCtx *cli.Context) error {
 
 	return nil
 }
+
+func doCountTxs(cliCtx *cli.Context, dirs datadir.Dirs) error {
+	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	if err != nil {
+		return err
+	}
+	defer logger.Info("Done")
+	ctx := cliCtx.Context
+	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	defer db.Close()
+	chainConfig := fromdb.ChainConfig(db)
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+
+	blockSnaps, _, _, _, _, clean, err := openSnaps(ctx, cfg, dirs, 0, db, logger)
+	if err != nil {
+		return nil
+	}
+	defer clean()
+
+	v := blockSnaps.View()
+	segs := v.Txs()
+	total := uint64(0)
+	for _, seg := range segs {
+		log.Info("Segmen", "from", seg.From(), "to", seg.To())
+		kc := seg.Src().Index(coresnaptype.Indexes.TxnHash).KeyCount()
+		total += kc
+		log.Info("txs count", "current_seg", kc, "running_total: ", total)
+	}
+
+	log.Info("summary", "total keys count", total)
+	return nil
+
+}
+
 func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {

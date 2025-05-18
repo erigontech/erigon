@@ -375,7 +375,7 @@ func (a *Aggregator) LS() {
 				if item.decompressor == nil {
 					continue
 				}
-				log.Info("[agg] ", "f", item.decompressor.FileName(), "words", item.decompressor.Count())
+				a.logger.Info("[agg] ", "f", item.decompressor.FileName(), "words", item.decompressor.Count())
 			}
 			return true
 		})
@@ -1509,7 +1509,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 			lastIdInDB(a.db, a.d[kv.CodeDomain]),
 			lastIdInDB(a.db, a.d[kv.StorageDomain]),
 			lastIdInDBNoHistory(a.db, a.d[kv.CommitmentDomain]))
-		log.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB)
+		a.logger.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB)
 
 		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
 		//lastInDB := lastIdInDB(a.db, a.d[kv.AccountsDomain])
