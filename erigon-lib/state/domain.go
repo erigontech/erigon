@@ -1491,6 +1491,7 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 	useExistenceFilter := dt.d.Accessors.Has(AccessorExistence)
 	useCache := dt.name != kv.CommitmentDomain && maxTxNum == math.MaxUint64
 
+	s := time.Now()
 	hi, _ := dt.ht.iit.hashKey(k)
 	if useCache && dt.getFromFileCache == nil {
 		dt.getFromFileCache = dt.visible.newGetFromFileCache()
@@ -1500,6 +1501,7 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 			return cv.v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
 		}
 	}
+	fmt.Println("preparing to get latest from files", time.Since(s))
 
 	for i := len(dt.files) - 1; i >= 0; i-- {
 		if maxTxNum != math.MaxUint64 && dt.files[i].endTxNum > maxTxNum { // skip partially matched files
@@ -1507,11 +1509,13 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 		}
 		// fmt.Printf("getLatestFromFiles: lim=%d %d %d %d %d\n", maxTxNum, dt.files[i].startTxNum, dt.files[i].endTxNum, dt.files[i].startTxNum/dt.d.aggregationStep, dt.files[i].endTxNum/dt.d.aggregationStep)
 		if useExistenceFilter {
+			s := time.Now()
 			if dt.files[i].src.existence != nil {
 				if !dt.files[i].src.existence.ContainsHash(hi) {
 					if traceGetLatest == dt.name {
 						fmt.Printf("GetLatest(%s, %x) -> existence index %s -> false\n", dt.d.filenameBase, k, dt.files[i].src.existence.FileName)
 					}
+					fmt.Println("getLatestFromFiles existence index false", dt.files[i].src.existence.FileName, time.Since(s))
 					continue
 				} else {
 					if traceGetLatest == dt.name {
@@ -1525,14 +1529,17 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 			}
 		}
 
+		s := time.Now()
 		v, found, _, err = dt.getLatestFromFile(i, k)
 		if err != nil {
 			return nil, false, 0, 0, err
 		}
+		fmt.Println("getLatestFromFile", i, time.Since(s))
 		if !found {
 			if traceGetLatest == dt.name {
 				fmt.Printf("GetLatest(%s, %x) -> not found in file %s\n", dt.name.String(), k, dt.files[i].src.decompressor.FileName())
 			}
+			fmt.Println("getLatestFromFile failed")
 			continue
 		}
 		if traceGetLatest == dt.name {
