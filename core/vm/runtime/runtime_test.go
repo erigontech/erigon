@@ -29,8 +29,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/erigontech/erigon/core/vm/program"
-	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -50,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/core/asm"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/program"
 	"github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/execution/consensus"
 )
