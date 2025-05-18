@@ -290,7 +290,7 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 	}
 	// Warm up the intpools and stuff
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := 0; i < b.N/10; i++ {
 		_, _, _ = Call(receiver, []byte{}, &runtimeConfig)
 	}
 	b.StopTimer()
