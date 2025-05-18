@@ -59,6 +59,7 @@ func (*dummyStatedb) SetState(_ common.Address, _ *common.Hash, _ uint256.Int) e
 func (*dummyStatedb) AddSlotToAccessList(_ common.Address, _ common.Hash) (addrMod, slotMod bool) {
 	return false, false
 }
+func (*dummyStatedb) GetCommittedState(common.Address, *common.Hash, *uint256.Int) error { return nil }
 
 func TestStoreCapture(t *testing.T) {
 	c := vm.NewJumpDestCache()
