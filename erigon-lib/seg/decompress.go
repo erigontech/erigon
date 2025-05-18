@@ -220,7 +220,12 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 	}
 	// read patterns from file
 	d.data = d.mmapHandle1[:d.size]
-	defer d.MadvNormal().DisableReadAhead() //speedup opening on slow drives
+	isCommitment := strings.Contains(d.filePath, "commitment")
+	if !isCommitment {
+		defer d.MadvNormal().DisableReadAhead() //speedup opening on slow drives
+	} else {
+		defer d.MadvRandom().DisableReadAhead() //speedup opening on slow drives
+	}
 
 	d.wordsCount = binary.BigEndian.Uint64(d.data[:8])
 	d.emptyWordsCount = binary.BigEndian.Uint64(d.data[8:16])
@@ -534,6 +539,14 @@ func (d *Decompressor) MadvNormal() *Decompressor {
 	}
 	d.readAheadRefcnt.Add(1)
 	_ = mmap.MadviseNormal(d.mmapHandle1)
+	return d
+}
+func (d *Decompressor) MadvRandom() *Decompressor {
+	if d == nil || d.mmapHandle1 == nil {
+		return d
+	}
+	d.readAheadRefcnt.Add(1)
+	_ = mmap.MadviseRandom(d.mmapHandle1)
 	return d
 }
 func (d *Decompressor) MadvWillNeed() *Decompressor {
