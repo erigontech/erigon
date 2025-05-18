@@ -707,12 +707,14 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep uint64) e
 				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
 				panic(err)
 			}
+			a.onFilesChange(nil)
 		}
 
 		go func() {
 			if err := a.MergeLoop(ctx); err != nil {
 				panic(err)
 			}
+			a.onFilesChange(nil)
 		}()
 	}()
 
