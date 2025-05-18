@@ -628,13 +628,13 @@ func BenchmarkSimpleLoop(b *testing.B) {
 	//		Tracer: tracer,
 	//	}})
 	// 100M gas
-	benchmarkNonModifyingCode(100000000, staticCallIdentity, "staticcall-identity-100M", "", b)
-	benchmarkNonModifyingCode(100000000, callIdentity, "call-identity-100M", "", b)
-	benchmarkNonModifyingCode(100000000, loopingCode, "loop-100M", "", b)
-	benchmarkNonModifyingCode(100000000, loopingCode2, "loop2-100M", "", b)
-	benchmarkNonModifyingCode(100000000, callInexistant, "call-nonexist-100M", "", b)
-	benchmarkNonModifyingCode(100000000, callEOA, "call-EOA-100M", "", b)
-	benchmarkNonModifyingCode(100000000, callRevertingContractWithInput, "call-reverting-100M", "", b)
+	benchmarkNonModifyingCode(10000000, staticCallIdentity, "staticcall-identity-10M", "", b)
+	benchmarkNonModifyingCode(10000000, callIdentity, "call-identity-10M", "", b)
+	benchmarkNonModifyingCode(10000000, loopingCode, "loop-10M", "", b)
+	benchmarkNonModifyingCode(10000000, loopingCode2, "loop2-10M", "", b)
+	benchmarkNonModifyingCode(10000000, callInexistant, "call-nonexist-10M", "", b)
+	benchmarkNonModifyingCode(10000000, callEOA, "call-EOA-10M", "", b)
+	benchmarkNonModifyingCode(10000000, callRevertingContractWithInput, "call-reverting-10M", "", b)
 
 	//benchmarkNonModifyingCode(10000000, staticCallIdentity, "staticcall-identity-10M", b)
 	//benchmarkNonModifyingCode(10000000, loopingCode, "loop-10M", b)
