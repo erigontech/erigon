@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -578,6 +579,7 @@ func (g *Getter) nextPos(clean bool) (pos uint64) {
 		if 8-g.dataBit < table.bitLen && int(g.dataP)+1 < dataLen {
 			code |= uint16(data[g.dataP+1]) << (8 - g.dataBit)
 		}
+
 		code &= (uint16(1) << table.bitLen) - 1
 		l = table.lens[code]
 		if l == 0 {
@@ -680,7 +682,12 @@ func (g *Getter) HasNext() bool {
 // After extracting next word, it moves to the beginning of the next one
 func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 	savePos := g.dataP
+	isCommitment := strings.Contains(g.fName, "commitment")
+	s := time.Now()
 	wordLen := g.nextPos(true)
+	if isCommitment {
+		fmt.Println("commitment wordLen", wordLen)
+	}
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
 	if wordLen == 0 {
 		if g.dataBit > 0 {
