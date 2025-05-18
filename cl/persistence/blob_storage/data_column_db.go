@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"strconv"
 	"sync"
 
@@ -185,4 +186,24 @@ func (s *dataCloumnStorageImpl) RemoveColumnSidecars(ctx context.Context, slot u
 func (s *dataCloumnStorageImpl) acquireMutexBySlot(slot uint64) *sync.RWMutex {
 	index := slot % mutexSize
 	return s.mutexes[index]
+}
+
+func (s *dataCloumnStorageImpl) Prune() error {
+	if s.slotsKept == math.MaxUint64 {
+		return nil
+	}
+
+	currentSlot := s.ethClock.GetCurrentSlot()
+	currentSlot -= s.slotsKept
+	currentSlot = (currentSlot / subdivisionSlot) * subdivisionSlot
+	var startPrune uint64
+	minSlotsForBlobSidecarRequest := s.beaconChainConfig.MinSlotsForBlobsSidecarsRequest()
+	if currentSlot >= minSlotsForBlobSidecarRequest {
+		startPrune = currentSlot - minSlotsForBlobSidecarRequest
+	}
+	// delete all the folders that are older than slotsKept
+	for i := startPrune; i < currentSlot; i += subdivisionSlot {
+		s.fs.RemoveAll(strconv.FormatUint(i/subdivisionSlot, 10))
+	}
+	return nil
 }
