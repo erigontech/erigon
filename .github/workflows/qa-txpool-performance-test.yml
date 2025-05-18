@@ -11,7 +11,8 @@ on:
 
 jobs:
   tx_pool_assertoor_test:
-    runs-on: [self-hosted, qa, X64, long-running]
+    # runs-on: [self-hosted, qa, X64, long-running]
+    runs-on: [ubuntu-latest]
     env:
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       ENCLAVE_NAME: "kurtosis-run-${{ github.run_id }}"
@@ -26,19 +27,20 @@ jobs:
           username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
           password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
 
-      - name: Docker build current branch
-        run: |
-          docker build -t test/erigon:current .
+      # - name: Docker build current branch
+      #   run: |
+      #     docker build -t test/erigon:current .
 
       - name: Run self hosted Kurtosis + assertoor tests
         id: noku_kurtosis_test
-        uses: noku-team/kurtosis-assertoor-github-action@v1.1.7
+        # uses: noku-team/kurtosis-assertoor-github-action@v1.1.7
+        uses: ethpandaops/kurtosis-assertoor-github-action@v1
         with:
           enclave_name: ${{ env.ENCLAVE_NAME }}
           ethereum_package_args: ".github/workflows/kurtosis/txpool-assertoor.io"
           kurtosis_extra_args: --verbosity detailed --cli-log-level trace
           persistent_logs: "true"
-          clean_docker: "true"
+          # clean_docker: "true"
 
       - name: Parse Kurtosis output log and create JSON
         if: always()
@@ -111,6 +113,13 @@ jobs:
           # Clean up
           rm -rf "$tmp_dir"
           echo "cleaned up"
+
+      - name: Upload outputs_kurtosis.json as artifact
+        if: always() && steps.parse_kurtosis_output.outputs.success == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: outputs_kurtosis.json
+          path: outputs_kurtosis.json
 
       - name: Create HDR plots PNG artifacts
         id: create_hdr_plots
