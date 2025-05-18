@@ -42,7 +42,6 @@ jobs:
 
       - name: Parse Kurtosis output log and create JSON
         if: always()
-        id: parse_kurtosis_output
         run: |
           # Find the folder starting with 'assertoor--'
           assertoor_folder=$(find ${{ runner.temp }}/${{ env.ENCLAVE_NAME }}/dump -type d -name 'assertoor--*' | head -n 1)
@@ -108,12 +107,9 @@ jobs:
 
           # Clean up
           rm -rf "$tmp_dir"
-          echo "processed=true" >> $GITHUB_OUTPUT
-
           echo "cleaned up"
 
       - name: Create HDR plots PNG artifacts
-        if: steps.parse_kurtosis_output.outputs.processed == 'true'
         id: create_hdr_plots
         run: |
           # Check if the JSON file exists
