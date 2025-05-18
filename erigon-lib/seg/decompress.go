@@ -686,7 +686,7 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 	s := time.Now()
 	wordLen := g.nextPos(true)
 	if isCommitment {
-		fmt.Println("commitment wordLen", wordLen)
+		fmt.Println("commitment wordLen", wordLen, "time", time.Since(s))
 	}
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
 	if wordLen == 0 {
