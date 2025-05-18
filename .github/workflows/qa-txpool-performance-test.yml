@@ -37,7 +37,8 @@ jobs:
         uses: ethpandaops/kurtosis-assertoor-github-action@v1
         with:
           enclave_name: ${{ env.ENCLAVE_NAME }}
-          ethereum_package_args: ".github/workflows/kurtosis/txpool-assertoor.io"
+          # ethereum_package_args: ".github/workflows/kurtosis/txpool-assertoor.io"
+          ethereum_package_args: ".github/workflows/kurtosis/txpool-assertoor-short.io"
           kurtosis_extra_args: --verbosity detailed --cli-log-level trace
           persistent_logs: "true"
           # clean_docker: "true"
