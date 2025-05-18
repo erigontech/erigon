@@ -44,6 +44,7 @@ jobs:
 
       - name: Parse Kurtosis output log and create JSON
         if: always()
+        id: parse_kurtosis_output
         run: |
           # Find the folder starting with 'assertoor--'
           assertoor_folder=$(find ${{ runner.temp }}/${{ env.ENCLAVE_NAME }}/dump -type d -name 'assertoor--*' | head -n 1)
@@ -107,12 +108,15 @@ jobs:
 
           echo "outputs_kurtosis.json: $output_json"
 
+          echo "success=true" >> $GITHUB_OUTPUT
+
           # Clean up
           rm -rf "$tmp_dir"
           echo "cleaned up"
 
       - name: Create HDR plots PNG artifacts
         id: create_hdr_plots
+        if: always() && steps.parse_kurtosis_output.outputs.success == 'true'
         run: |
           # Check if the JSON file exists
           output_json="${{ github.workspace }}/outputs_kurtosis.json"
@@ -162,7 +166,7 @@ jobs:
           echo "processed=true" >> $GITHUB_OUTPUT
 
       - name: Upload PNG images as artifacts
-        if: steps.create_hdr_plots.outputs.processed == 'true'
+        if: always() && steps.create_hdr_plots.outputs.processed == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: tx-pool-latency-plots
@@ -170,7 +174,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Clean up PNG files
-        if: steps.create_hdr_plots.outputs.processed == 'true'
+        if: always() && steps.create_hdr_plots.outputs.processed == 'true'
         run: |
           # Remove all generated PNG files
           rm -f tx_pool_latency_analysis_*.png
