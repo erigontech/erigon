@@ -45,7 +45,7 @@ func NewMemory() *Memory {
 }
 
 // Free returns the memory to the pool.
-func (m *Memory) Free() {
+func (m *Memory) free() {
 	// To reduce peak allocation, return only smaller memory instances to the pool.
 	const maxBufferSize = 16 << 10
 	if cap(m.store) <= maxBufferSize {

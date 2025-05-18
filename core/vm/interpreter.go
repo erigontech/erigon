@@ -274,7 +274,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			}
 		}
 		// this function must execute _after_: the `CaptureState` needs the stacks before
-		mem.Free()
+		mem.free()
 		stack.ReturnNormalStack(locStack)
 		if restoreReadonly {
 			in.readOnly = false
