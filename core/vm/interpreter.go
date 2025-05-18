@@ -370,7 +370,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		err = nil // clear stop token error
 	}
 
-	ret = append(ret, res...)
+	ret = res
 	return
 }
 
