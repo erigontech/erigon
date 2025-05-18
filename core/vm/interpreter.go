@@ -318,9 +318,10 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		if !contract.UseGas(cost, in.cfg.Tracer, tracing.GasChangeIgnored) {
 			return nil, ErrOutOfGas
 		}
+
+		// All ops with a dynamic memory usage also has a dynamic gas cost.
+		var memorySize uint64
 		if operation.dynamicGas != nil {
-			// All ops with a dynamic memory usage also has a dynamic gas cost.
-			var memorySize uint64
 			// calculate the new memory size and expand the memory to fit
 			// the operation
 			// Memory check needs to be done prior to evaluating the dynamic gas portion,
@@ -354,10 +355,9 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 					logged = true
 				}
 			}
-			if memorySize > 0 {
-				mem.Resize(memorySize)
-			}
-		} else if in.cfg.Tracer != nil {
+		}
+
+		if in.cfg.Tracer != nil {
 			if in.evm.config.Tracer.OnGasChange != nil {
 				in.evm.config.Tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
 			}
@@ -366,6 +366,10 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 				logged = true
 			}
 		}
+		if memorySize > 0 {
+			mem.Resize(memorySize)
+		}
+
 		// execute the operation
 		res, err = operation.execute(pc, in, callContext)
 
