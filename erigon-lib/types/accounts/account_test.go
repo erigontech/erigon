@@ -184,28 +184,6 @@ func TestEncodeAccountWithEmptyBalanceAndNotZeroIncarnation(t *testing.T) {
 	}
 }
 
-func isAccountsEqual(t *testing.T, src, dst Account) {
-	t.Helper()
-	if dst.Initialised != src.Initialised {
-		t.Fatal("cant decode the account Initialised", src.Initialised, dst.Initialised)
-	}
-
-	if dst.CodeHash != src.CodeHash {
-		t.Fatal("cant decode the account CodeHash", src.CodeHash, dst.CodeHash)
-	}
-
-	if dst.Balance.Cmp(&src.Balance) != 0 {
-		t.Fatal("cant decode the account Balance", src.Balance, dst.Balance)
-	}
-
-	if dst.Nonce != src.Nonce {
-		t.Fatal("cant decode the account Nonce", src.Nonce, dst.Nonce)
-	}
-	if dst.Incarnation != src.Incarnation {
-		t.Fatal("cant decode the account Version", src.Incarnation, dst.Incarnation)
-	}
-}
-
 func TestIncarnationForEmptyAccount(t *testing.T) {
 	t.Parallel()
 	a := Account{
