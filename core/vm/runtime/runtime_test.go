@@ -571,7 +571,7 @@ func benchmarkNonModifyingCode(gas uint64, code []byte, name string, tracerCode 
 
 	b.Run(name, func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N/100; i++ {
+		for i := 0; i < b.N; i++ {
 			vmenv.Call(sender, destination, nil, gas, cfg.Value, false /* bailout */) // nolint:errcheck
 		}
 	})
