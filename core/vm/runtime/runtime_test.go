@@ -252,10 +252,10 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 	db := testTemporalDB(b)
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(b, err)
-	defer tx.Rollback()
+	//defer tx.Rollback()
 	domains, err := stateLib.NewSharedDomains(tx, log.New())
 	require.NoError(b, err)
-	defer domains.Close()
+	//defer domains.Close()
 
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
