@@ -1063,22 +1063,18 @@ func opPush1(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 // make push instruction function
 func makePush(size uint64, pushByteSize int) executionFunc {
 	return func(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-		codeLen := len(scope.Contract.Code)
+		var (
+			codeLen = len(scope.Contract.Code)
+			start   = min(codeLen, int(*pc+1))
+			end     = min(codeLen, start+pushByteSize)
+		)
+		a := new(uint256.Int).SetBytes(scope.Contract.Code[start:end])
 
-		startMin := int(*pc + 1)
-		if startMin >= codeLen {
-			startMin = codeLen
+		// Missing bytes: pushByteSize - len(pushData)
+		if missing := pushByteSize - (end - start); missing > 0 {
+			a.Lsh(a, uint(8*missing))
 		}
-		endMin := startMin + pushByteSize
-		if startMin+pushByteSize >= codeLen {
-			endMin = codeLen
-		}
-
-		integer := new(uint256.Int)
-		scope.Stack.Push(integer.SetBytes(common.RightPadBytes(
-			// So it doesn't matter what we push onto the stack.
-			scope.Contract.Code[startMin:endMin], pushByteSize)))
-
+		scope.Stack.Push(a)
 		*pc += size
 		return nil, nil
 	}
