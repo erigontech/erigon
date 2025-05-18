@@ -521,6 +521,7 @@ func benchmarkNonModifyingCode(gas uint64, code []byte, name string, tracerCode 
 	defer db.Close()
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(b, err)
+	defer tx.Rollback()
 	domains, err := stateLib.NewSharedDomains(tx, log.New())
 	require.NoError(b, err)
 	defer domains.Close()
