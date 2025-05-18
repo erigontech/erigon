@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/core/vm/stack"
 )
 
 type dummyContractRef struct {
@@ -62,7 +61,7 @@ func TestStoreCapture(t *testing.T) {
 		logger   = NewStructLogger(nil)
 		env      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, chain.TestChainConfig, vm.Config{Tracer: logger.Hooks()})
 		mem      = vm.NewMemory()
-		stack    = stack.New()
+		stack    = vm.New()
 		contract = vm.NewContract(&dummyContractRef{}, common.Address{}, new(uint256.Int), 0, false /* skipAnalysis */, c)
 	)
 	stack.Push(uint256.NewInt(1))

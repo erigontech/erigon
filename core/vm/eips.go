@@ -215,8 +215,8 @@ func opTstore(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 	if interpreter.readOnly {
 		return nil, ErrWriteProtection
 	}
-	loc := scope.Stack.Pop()
-	val := scope.Stack.Pop()
+	loc := scope.Stack.pop()
+	val := scope.Stack.pop()
 	interpreter.evm.IntraBlockState().SetTransientState(scope.Contract.Address(), loc.Bytes32(), val)
 	return nil, nil
 }
@@ -291,9 +291,9 @@ func enable5656(jt *JumpTable) {
 // opMcopy implements the MCOPY opcode (https://eips.ethereum.org/EIPS/eip-5656)
 func opMcopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	var (
-		dst    = scope.Stack.Pop()
-		src    = scope.Stack.Pop()
-		length = scope.Stack.Pop()
+		dst    = scope.Stack.pop()
+		src    = scope.Stack.pop()
+		length = scope.Stack.pop()
 	)
 	// These values are checked for overflow during memory expansion calculation
 	// (the memorySize function on the opcode).
