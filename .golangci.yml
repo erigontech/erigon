@@ -31,7 +31,7 @@ linters:
     - wastedassign
     - govet
   disable:
-    - unused
+    - unused #TODO: enable me
     - testifylint
     - staticcheck #TODO: enable me
     - perfsprint #TODO: enable me
@@ -134,7 +134,7 @@ linters:
       - linters:
           - gocritic
           - gosec
-          # - unused
+           - unused
         path: hack\.go
       - linters:
           - gocritic
