@@ -1501,7 +1501,9 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 			return cv.v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
 		}
 	}
-	fmt.Println("preparing to get latest from files", time.Since(s))
+	if dt.name.String() == "commitment" {
+		fmt.Println("preparing to get latest from files", time.Since(s))
+	}
 
 	for i := len(dt.files) - 1; i >= 0; i-- {
 		if maxTxNum != math.MaxUint64 && dt.files[i].endTxNum > maxTxNum { // skip partially matched files
@@ -1515,7 +1517,9 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 					if traceGetLatest == dt.name {
 						fmt.Printf("GetLatest(%s, %x) -> existence index %s -> false\n", dt.d.filenameBase, k, dt.files[i].src.existence.FileName)
 					}
-					fmt.Println("getLatestFromFiles existence index false", dt.files[i].src.existence.FileName, time.Since(s))
+					if dt.name.String() == "commitment" {
+						fmt.Println("getLatestFromFiles existence index false", dt.files[i].src.existence.FileName, time.Since(s))
+					}
 					continue
 				} else {
 					if traceGetLatest == dt.name {
@@ -1534,12 +1538,16 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 		if err != nil {
 			return nil, false, 0, 0, err
 		}
-		fmt.Println("getLatestFromFile", i, time.Since(s))
+		if dt.name.String() == "commitment" {
+			fmt.Println("getLatestFromFile", i, time.Since(s))
+		}
 		if !found {
 			if traceGetLatest == dt.name {
 				fmt.Printf("GetLatest(%s, %x) -> not found in file %s\n", dt.name.String(), k, dt.files[i].src.decompressor.FileName())
 			}
-			fmt.Println("getLatestFromFile failed")
+			if dt.name.String() == "commitment" {
+				fmt.Println("getLatestFromFile failed")
+			}
 			continue
 		}
 		if traceGetLatest == dt.name {
