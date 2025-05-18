@@ -25,12 +25,12 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-type operation byte
+type operation byte //nolint:unused
 
-const (
-	sub operation = iota
-	add
-	mul
+const ( //nolint:unused
+	sub operation = iota //nolint:unused
+	add                  //nolint:unused
+	mul                  //nolint:unused
 )
 
 func TestHexOrDecimal64(t *testing.T) {
