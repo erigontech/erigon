@@ -104,9 +104,13 @@ jobs:
           done
           echo "}" >> $output_json
 
+          echo "outputs_kurtosis.json: $output_json"
+
           # Clean up
           rm -rf "$tmp_dir"
           echo "processed=true" >> $GITHUB_OUTPUT
+
+          echo "cleaned up"
 
       - name: Create HDR plots PNG artifacts
         if: steps.parse_kurtosis_output.outputs.processed == 'true'
