@@ -579,6 +579,10 @@ func benchmarkNonModifyingCode(gas uint64, code []byte, name string, tracerCode 
 
 // BenchmarkSimpleLoop test a pretty simple loop which loops until OOG
 // 55 ms
+//
+// go test -bench=BenchmarkSimple -run=Benchmark -count 10 ./core/vm/runtime > old.txt
+// go test -bench=BenchmarkSimple -run=Benchmark -count 10 ./core/vm/runtime > new.txt
+// benchstat old.txt new.txt
 func BenchmarkSimpleLoop(b *testing.B) {
 	p, lbl := program.New().Jumpdest()
 	// Call identity, and pop return value
