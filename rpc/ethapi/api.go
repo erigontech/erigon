@@ -566,7 +566,7 @@ func computeGasPrice(txn types.Transaction, blockHash common.Hash, baseFee *big.
 	fee, overflow := uint256.FromBig(baseFee)
 	if fee != nil && !overflow && blockHash != (common.Hash{}) {
 		// price = min(tip + baseFee, gasFeeCap)
-		price := math.Min256(new(uint256.Int).Add(txn.GetTipCap(), fee), txn.GetFeeCap())
+		price := math.U256Min(new(uint256.Int).Add(txn.GetTipCap(), fee), txn.GetFeeCap())
 		return (*hexutil.Big)(price.ToBig())
 	}
 	return nil
