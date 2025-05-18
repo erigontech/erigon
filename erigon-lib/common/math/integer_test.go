@@ -25,10 +25,9 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-type operation byte
+type operation byte //nolint:unused
 
-//nolint:unused
-const (
+const ( //nolint:unused
 	sub operation = iota
 	add
 	mul
