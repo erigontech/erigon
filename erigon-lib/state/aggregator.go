@@ -235,6 +235,7 @@ func (a *Aggregator) registerII(idx kv.InvertedIdx, salt *uint32, dirs datadir.D
 
 func (a *Aggregator) StepSize() uint64                 { return a.aggregationStep }
 func (a *Aggregator) OnFilesChange(f kv.OnFilesChange) { a.onFilesChange = f }
+func (a *Aggregator) CallOnFilesChange()               { a.onFilesChange(nil) }
 func (a *Aggregator) DisableFsync() {
 	for _, d := range a.d {
 		d.DisableFsync()

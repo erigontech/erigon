@@ -414,6 +414,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.notifications = shards.NewNotifications(kvRPC)
 	backend.kvRPC = kvRPC
 
+	backend.chainDB.(*temporal.DB).Agg().(*libstate.Aggregator).CallOnFilesChange()
+	time.Sleep(time.Second * 45)
+	backend.chainDB.(*temporal.DB).Agg().(*libstate.Aggregator).CallOnFilesChange()
+
 	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
 
 	if config.SilkwormExecution || config.SilkwormRpcDaemon || config.SilkwormSentry {
@@ -1503,6 +1507,7 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downloadercfg.Cfg) error {
 	var err error
 	s.chainDB.OnFilesChange(func(frozenFileNames []string) {
+		s.logger.Warn("files changed...sending notification")
 		events := s.notifications.Events
 		events.OnNewSnapshot()
 		if !s.config.Snapshot.NoDownloader && s.downloaderClient != nil && len(frozenFileNames) > 0 {
@@ -1517,6 +1522,7 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 			}
 		}
 	})
+
 	if s.config.Snapshot.NoDownloader {
 		return nil
 	}
