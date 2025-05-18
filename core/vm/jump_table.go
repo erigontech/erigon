@@ -23,14 +23,13 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/chain/params"
-	"github.com/erigontech/erigon/core/vm/stack"
 )
 
 type (
 	executionFunc func(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeContext) ([]byte, error)
-	gasFunc       func(*EVM, *Contract, *stack.Stack, *Memory, uint64) (uint64, error) // last parameter is the requested memory size as a uint64
+	gasFunc       func(*EVM, *Contract, *Stack, *Memory, uint64) (uint64, error) // last parameter is the requested memory size as a uint64
 	// memorySizeFunc returns the required size, and whether the operation overflowed a uint64
-	memorySizeFunc func(*stack.Stack) (size uint64, overflow bool)
+	memorySizeFunc func(*Stack) (size uint64, overflow bool)
 )
 
 type operation struct {
@@ -635,7 +634,7 @@ func newFrontierInstructionSet() JumpTable {
 			opNum:       1,
 		},
 		PUSH2: {
-			execute:     makePush(2, 2),
+			execute:     opPush2,
 			constantGas: GasFastestStep,
 			numPop:      0,
 			numPush:     1,

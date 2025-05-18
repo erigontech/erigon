@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/vm/stack"
 )
 
 // Config are the configuration options for the Interpreter
@@ -72,7 +71,7 @@ type Interpreter interface {
 // but not transients like pc and gas
 type ScopeContext struct {
 	Memory   *Memory
-	Stack    *stack.Stack
+	Stack    *Stack
 	Contract *Contract
 }
 
@@ -91,7 +90,7 @@ func (ctx *ScopeContext) StackData() []uint256.Int {
 	if ctx.Stack == nil {
 		return nil
 	}
-	return ctx.Stack.Data
+	return ctx.Stack.data
 }
 
 // Caller returns the current caller.
@@ -233,7 +232,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	var (
 		op          OpCode        // current opcode
 		mem         = NewMemory() // bound memory
-		locStack    = stack.New()
+		locStack    = New()
 		callContext = &ScopeContext{
 			Memory:   mem,
 			Stack:    locStack,
@@ -274,7 +273,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}
 		// this function must execute _after_: the `CaptureState` needs the stacks before
 		mem.free()
-		stack.ReturnNormalStack(locStack)
+		ReturnNormalStack(locStack)
 		if restoreReadonly {
 			in.readOnly = false
 		}
@@ -301,7 +300,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		operation := in.jt[op]
 		cost = operation.constantGas // For tracing
 		// Validate stack
-		if sLen := locStack.Len(); sLen < operation.numPop {
+		if sLen := locStack.len(); sLen < operation.numPop {
 			return nil, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
 		} else if sLen > operation.maxStack {
 			return nil, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
@@ -368,7 +367,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		err = nil // clear stop token error
 	}
 
-	ret = append(ret, res...)
+	ret = res
 	return
 }
 
