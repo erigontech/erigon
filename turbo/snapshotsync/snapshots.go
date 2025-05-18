@@ -508,7 +508,6 @@ type BlockSnapshots interface {
 	RemoveOverlaps() error
 	DownloadReady() bool
 	Ready(context.Context) <-chan error
-	DirtyFiles() []string
 }
 
 type retireOperators struct {
@@ -965,31 +964,6 @@ func (s *RoSnapshots) OpenFiles() (list []string) {
 					continue
 				}
 				list = append(list, seg.FilePath())
-			}
-			return true
-		})
-	}
-
-	return list
-}
-
-func (s *RoSnapshots) DirtyFiles() []string {
-	list := make([]string, 0)
-	s.dirtyLock.RLock()
-	defer s.dirtyLock.RUnlock()
-
-	for _, t := range s.types {
-		s.dirty[t.Enum()].Walk(func(segs []*DirtySegment) bool {
-			for _, seg := range segs {
-				if seg == nil {
-					continue
-				}
-				fname := seg.FilePath()
-				if seg.Decompressor == nil {
-					fname += "_nodecomp"
-				}
-
-				list = append(list, fname)
 			}
 			return true
 		})

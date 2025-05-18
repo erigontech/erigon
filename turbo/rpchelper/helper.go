@@ -179,7 +179,6 @@ func CreateHistoryStateReader(tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReade
 		return r, state.PrunedError
 	}
 	r.SetTxNum(txNum)
-	fmt.Printf("history reader txNum is %d\n", txNum)
 	return r, nil
 }
 

@@ -165,7 +165,6 @@ func (db *DB) Close() {
 }
 
 func (db *DB) OnFilesChange(f kv.OnFilesChange) { db.agg.OnFilesChange(f) }
-func (db *DB) OpenFolder() error                { return db.agg.OpenFolder() }
 
 type Tx struct {
 	*mdbx.MdbxTx

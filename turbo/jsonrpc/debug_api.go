@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path"
 
 	jsoniter "github.com/json-iterator/go"
 
@@ -72,9 +71,6 @@ type PrivateDebugAPI interface {
 	GetRawReceipts(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) ([]hexutility.Bytes, error)
 	GetBadBlocks(ctx context.Context) ([]map[string]interface{}, error)
 	GetRawTransaction(ctx context.Context, hash common.Hash) (hexutility.Bytes, error)
-
-	RefreshFolder(ctx context.Context) (err error)
-	GetMeFiles(ctx context.Context) ([]string, error)
 }
 
 // PrivateDebugAPIImpl is implementation of the PrivateDebugAPI interface based on remote Db access
@@ -181,42 +177,6 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 	}
 
 	return res, nil
-}
-
-// debug_refreshFolder()
-func (api *PrivateDebugAPIImpl) RefreshFolder(ctx context.Context) (err error) {
-	return api.db.Debug().OpenFolder()
-}
-
-// debug_getMeFiles()
-func (api *PrivateDebugAPIImpl) GetMeFiles(ctx context.Context) ([]string, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
-	if err != nil {
-		return []string{}, err
-	}
-	defer tx.Rollback()
-
-	dbg := tx.Debug()
-	var files []string
-	files = append(files, dbg.DomainFiles(kv.AccountsDomain).Names()...)
-	files = append(files, dbg.DomainFiles(kv.StorageDomain).Names()...)
-	files = append(files, dbg.DomainFiles(kv.CodeDomain).Names()...)
-	files = append(files, dbg.DomainFiles(kv.CommitmentDomain).Names()...)
-
-	tx.Rollback()
-
-	var files2 []string
-	for _, f := range files {
-		files2 = append(files2, path.Base(f))
-	}
-
-	if api._blockReader != nil && api._blockReader.Snapshots() != nil {
-		for _, f := range api._blockReader.Snapshots().DirtyFiles() {
-			files2 = append(files2, path.Base(f))
-		}
-	}
-
-	return files2, nil
 }
 
 // GetModifiedAccountsByNumber implements debug_getModifiedAccountsByNumber. Returns a list of accounts modified in the given block.

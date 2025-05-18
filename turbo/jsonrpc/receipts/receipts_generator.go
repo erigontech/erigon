@@ -236,7 +236,6 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	mu := g.blockExecMutex.lock(blockHash) // parallel requests of same blockNum will executed only once
 	defer g.blockExecMutex.unlock(mu, blockHash)
 	if receipts, ok := g.receiptsCache.Get(blockHash); ok {
-		log.Warn("[dbg] found in cache")
 		return receipts, nil
 	}
 

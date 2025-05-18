@@ -283,7 +283,6 @@ func (tx *Tx) GetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v
 	return tx.aggtx.DebugGetLatestFromFiles(domain, k, maxTxNum)
 }
 func (db *DB) DomainTables(domain ...kv.Domain) []string { return db.agg.DomainTables(domain...) }
-func (db *DB) OpenFolder() error                         { return db.agg.OpenFolder() }
 func (tx *Tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
 	return tx.aggtx.DomainFiles(domain...)
 }

@@ -481,11 +481,6 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 					logger.Warn("[snapshots] reopen", "err", err)
 					return nil
 				}
-				str := ""
-				for _, f := range reply.BlocksFiles {
-					str += fmt.Sprintf(" %s", f)
-				}
-				logger.Warn("block files received: %s", str)
 				if err := allSnapshots.OpenList(reply.BlocksFiles, true); err != nil {
 					logger.Error("[snapshots] reopen", "err", err)
 				} else {

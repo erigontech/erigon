@@ -404,19 +404,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.chainDB = temporal.New(rawChainDB, agg)
 
 	// Can happen in some configurations
-	if config.Downloader.ChainName != "" {
-		if err := backend.setUpSnapDownloader(ctx, config.Downloader); err != nil {
-			return nil, err
-		}
+	if err := backend.setUpSnapDownloader(ctx, config.Downloader); err != nil {
+		return nil, err
 	}
 
 	kvRPC := remotedbserver.NewKvServer(ctx, backend.chainDB, allSnapshots, allBorSnapshots, agg, logger)
 	backend.notifications = shards.NewNotifications(kvRPC)
 	backend.kvRPC = kvRPC
-
-	backend.chainDB.(*temporal.DB).Agg().(*libstate.Aggregator).CallOnFilesChange()
-	time.Sleep(time.Second * 45)
-	backend.chainDB.(*temporal.DB).Agg().(*libstate.Aggregator).CallOnFilesChange()
 
 	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
 
@@ -1510,6 +1504,9 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 		s.logger.Warn("files changed...sending notification")
 		events := s.notifications.Events
 		events.OnNewSnapshot()
+		if downloaderCfg.ChainName != "" {
+			return
+		}
 		if !s.config.Snapshot.NoDownloader && s.downloaderClient != nil && len(frozenFileNames) > 0 {
 			req := &protodownloader.AddRequest{Items: make([]*protodownloader.AddItem, 0, len(frozenFileNames))}
 			for _, fName := range frozenFileNames {
@@ -1523,9 +1520,10 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 		}
 	})
 
-	if s.config.Snapshot.NoDownloader {
+	if downloaderCfg.ChainName != "" || s.config.Snapshot.NoDownloader {
 		return nil
 	}
+
 	if s.config.Snapshot.DownloaderAddr != "" {
 		// connect to external Downloader
 		s.downloaderClient, err = downloadergrpc.NewClient(ctx, s.config.Snapshot.DownloaderAddr)

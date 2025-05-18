@@ -235,7 +235,6 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) (err e
 func (tx *tx) AggTx() any                       { panic("not implemented") }
 func (tx *tx) Debug() kv.TemporalDebugTx        { panic("not implemented") }
 func (db *DB) OnFilesChange(f kv.OnFilesChange) { panic("not implemented") }
-func (db *DB) OpenFolder() error                { panic("not implemented") }
 
 func (tx *tx) ViewID() uint64  { return tx.viewID }
 func (tx *tx) CollectMetrics() {}
