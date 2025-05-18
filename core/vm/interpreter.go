@@ -348,15 +348,9 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			if !contract.UseGas(dynamicCost, in.cfg.Tracer, tracing.GasChangeIgnored) {
 				return nil, ErrOutOfGas
 			}
-			// Do tracing before memory expansion
-			if in.cfg.Tracer != nil {
-				if in.evm.config.Tracer.OnOpcode != nil {
-					in.evm.config.Tracer.OnOpcode(_pc, byte(op), gasCopy, cost, callContext, in.returnData, in.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
 		}
 
+		// Do tracing before memory expansion
 		if in.cfg.Tracer != nil {
 			if in.evm.config.Tracer.OnGasChange != nil {
 				in.evm.config.Tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
