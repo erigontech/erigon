@@ -640,15 +640,16 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter b
 	return
 }
 
-func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte) ([]byte, bool, error) {
-	var firstKey []byte
+func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
+	var firstKey, firstVal []byte
 	var hasPrefix bool
 	err := sd.IteratePrefix(domain, prefix, func(k []byte, v []byte, step uint64) (bool, error) {
 		firstKey = common.CopyBytes(k)
+		firstVal = common.CopyBytes(v)
 		hasPrefix = true
 		return false, nil // do not continue, end on first occurrence
 	})
-	return firstKey, hasPrefix, err
+	return firstKey, firstVal, hasPrefix, err
 }
 
 // IterateStoragePrefix iterates over key-value pairs of the storage domain that start with given prefix
@@ -786,9 +787,14 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 	if val == nil {
 		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)
 	}
+	composite := k1
+	if k2 != nil {
+		composite = make([]byte, 0, len(k1)+len(k2))
+		composite = append(append(composite, k1...), k2...)
+	}
 	if prevVal == nil {
 		var err error
-		prevVal, prevStep, err = sd.GetLatest(domain, k1)
+		prevVal, prevStep, err = sd.GetLatest(domain, composite)
 		if err != nil {
 			return err
 		}
@@ -796,23 +802,23 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 
 	switch domain {
 	case kv.AccountsDomain:
-		return sd.updateAccountData(k1, val, prevVal, prevStep)
+		return sd.updateAccountData(composite, val, prevVal, prevStep)
 	case kv.StorageDomain:
-		return sd.writeAccountStorage(k1, k2, val, prevVal, prevStep)
+		return sd.writeAccountStorage(composite, nil, val, prevVal, prevStep)
 	case kv.CodeDomain:
 		if bytes.Equal(prevVal, val) {
 			return nil
 		}
-		return sd.updateAccountCode(k1, val, prevVal, prevStep)
+		return sd.updateAccountCode(composite, val, prevVal, prevStep)
 	case kv.CommitmentDomain, kv.RCacheDomain:
-		sd.put(domain, toStringZeroCopy(append(k1, k2...)), val)
-		return sd.domainWriters[domain].PutWithPrev(k1, k2, val, sd.txNum, prevVal, prevStep)
+		sd.put(domain, toStringZeroCopy(composite), val)
+		return sd.domainWriters[domain].PutWithPrev(composite, nil, val, sd.txNum, prevVal, prevStep)
 	default:
 		if bytes.Equal(prevVal, val) {
 			return nil
 		}
-		sd.put(domain, toStringZeroCopy(append(k1, k2...)), val)
-		return sd.domainWriters[domain].PutWithPrev(k1, k2, val, sd.txNum, prevVal, prevStep)
+		sd.put(domain, toStringZeroCopy(composite), val)
+		return sd.domainWriters[domain].PutWithPrev(composite, nil, val, sd.txNum, prevVal, prevStep)
 	}
 }
 
