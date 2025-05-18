@@ -1423,6 +1423,7 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int) error {
 
 	if upCell.hashedExtLen == 0 {
 		depth = upDepth + 1
+		fmt.Println("hashedKey", len(hashedKey))
 		unfolded, err := hph.unfoldBranchNode(row, depth, touched && !present)
 		if err != nil {
 			return err
