@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"hash"
 	"slices"
-	"sync"
 
 	"github.com/holiman/uint256"
 
@@ -50,12 +49,6 @@ type Config struct {
 
 	ExtraEips []int // Additional EIPS that are to be enabled
 
-}
-
-var pool = sync.Pool{
-	New: func() any {
-		return NewMemory()
-	},
 }
 
 func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
@@ -238,8 +231,8 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	in.returnData = nil
 
 	var (
-		op          OpCode // current opcode
-		mem         = pool.Get().(*Memory)
+		op          OpCode        // current opcode
+		mem         = NewMemory() // bound memory
 		locStack    = stack.New()
 		callContext = &ScopeContext{
 			Memory:   mem,
@@ -258,8 +251,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		logged  bool   // deferred Tracer should ignore already logged steps
 		res     []byte // result of the opcode execution function
 	)
-
-	mem.Reset()
 
 	contract.Input = input
 
@@ -282,7 +273,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			}
 		}
 		// this function must execute _after_: the `CaptureState` needs the stacks before
-		pool.Put(mem)
+		mem.free()
 		stack.ReturnNormalStack(locStack)
 		if restoreReadonly {
 			in.readOnly = false
