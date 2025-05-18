@@ -27,6 +27,7 @@ import (
 
 type operation byte
 
+//nolint:unused
 const (
 	sub operation = iota
 	add
