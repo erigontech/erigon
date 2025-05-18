@@ -11,8 +11,7 @@ on:
 
 jobs:
   tx_pool_assertoor_test:
-    # runs-on: [self-hosted, qa, X64, long-running]
-    runs-on: [ubuntu-latest]
+    runs-on: [self-hosted, qa, X64, long-running]
     env:
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       ENCLAVE_NAME: "kurtosis-run-${{ github.run_id }}"
@@ -27,20 +26,19 @@ jobs:
           username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
           password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
 
-      # - name: Docker build current branch
-      #   run: |
-      #     docker build -t test/erigon:current .
+      - name: Docker build current branch
+        run: |
+          docker build -t test/erigon:current .
 
       - name: Run self hosted Kurtosis + assertoor tests
         id: noku_kurtosis_test
-        # uses: noku-team/kurtosis-assertoor-github-action@v1.1.7
-        uses: ethpandaops/kurtosis-assertoor-github-action@v1
+        uses: noku-team/kurtosis-assertoor-github-action@v1.1.7
         with:
           enclave_name: ${{ env.ENCLAVE_NAME }}
           ethereum_package_args: ".github/workflows/kurtosis/txpool-assertoor.io"
           kurtosis_extra_args: --verbosity detailed --cli-log-level trace
           persistent_logs: "true"
-          # clean_docker: "true"
+          clean_docker: "true"
 
       - name: Parse Kurtosis output log and create JSON
         if: always()
@@ -193,7 +191,6 @@ jobs:
             --outcome $TEST_RESULT \
             --result_file ${{ github.workspace }}/outputs_kurtosis.json
 
-      # Clean up, always
       - name: Clean test results
         uses: gacts/run-and-post-run@v1.4.2
         if: always()
