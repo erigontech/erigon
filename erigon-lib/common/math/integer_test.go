@@ -28,9 +28,9 @@ import (
 type operation byte //nolint:unused
 
 const ( //nolint:unused
-	sub operation = iota
-	add
-	mul
+	sub operation = iota //nolint:unused
+	add                  //nolint:unused
+	mul                  //nolint:unused
 )
 
 func TestHexOrDecimal64(t *testing.T) {
