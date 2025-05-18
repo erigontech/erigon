@@ -20,7 +20,6 @@
 package vm
 
 import (
-	"fmt"
 	"sync"
 
 	"github.com/holiman/uint256"
@@ -137,19 +136,6 @@ func (st *Stack) Reset() {
 
 func (st *Stack) len() int {
 	return len(st.data)
-}
-
-// Print dumps the content of the stack
-func (st *Stack) Print() {
-	fmt.Println("### stack ###")
-	if len(st.data) > 0 {
-		for i, val := range st.data {
-			fmt.Printf("%-3d  %v\n", i, val)
-		}
-	} else {
-		fmt.Println("-- empty --")
-	}
-	fmt.Println("#############")
 }
 
 func ReturnNormalStack(s *Stack) {
