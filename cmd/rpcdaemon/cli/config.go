@@ -40,11 +40,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
-<<<<<<< HEAD
 	"github.com/erigontech/erigon-lib/common/hexutility"
-=======
-	"github.com/erigontech/erigon-lib/common/hexutil"
->>>>>>> 30040b1ad9 (fast fail integration subcommands on missing salt files (#15039))
 	"github.com/erigontech/erigon-lib/common/paths"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/direct"
