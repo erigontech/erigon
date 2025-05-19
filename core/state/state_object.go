@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/tracing"
 )
@@ -111,7 +110,7 @@ func newObject(db *IntraBlockState, address common.Address, data, original *acco
 		so.data.CodeHash = empty.CodeHash
 	}
 	if so.data.Root == (common.Hash{}) {
-		so.data.Root = trie.EmptyRoot
+		so.data.Root = empty.RootHash
 	}
 	so.original.Copy(original)
 	return &so
