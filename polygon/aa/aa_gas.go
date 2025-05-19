@@ -85,7 +85,7 @@ func payCoinbase(
 	effectiveTip := u256.Num0
 
 	if tx.FeeCap.Gt(baseFee) {
-		effectiveTip = math.Min256(tx.Tip, new(uint256.Int).Sub(tx.FeeCap, baseFee))
+		effectiveTip = math.U256Min(tx.Tip, new(uint256.Int).Sub(tx.FeeCap, baseFee))
 	}
 
 	amount := new(uint256.Int).SetUint64(gasUsed)
