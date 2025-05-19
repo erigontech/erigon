@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"github.com/erigontech/erigon-lib/common"
 	"math"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -25,7 +24,7 @@ import (
 )
 
 type SharedDomainsCommitmentContext struct {
-	mu            sync.Mutex // protects reads from sharedDomains when trie is concurrent
+	//mu            sync.Mutex // protects reads from sharedDomains when trie is concurrent
 	sharedDomains *SharedDomains
 	mainTtx       *TrieContext
 
