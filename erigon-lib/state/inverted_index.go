@@ -33,8 +33,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/version"
-
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
@@ -43,7 +41,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/assert"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/datastruct/existence"
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
@@ -55,6 +53,7 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 	"github.com/erigontech/erigon-lib/seg"
 	ee "github.com/erigontech/erigon-lib/state/entity_extras"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 type InvertedIndex struct {
@@ -1312,11 +1311,11 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 		// key read. `LessFalsePositives=true` feature filtering-out such cases (with `1/256=0.3%` false-positives).
 		cfg.Enums, cfg.LessFalsePositives = true, true
 	}
-	if err := buildHashMapAccessor(ctx, data, ii.compression, idxPath, false, cfg, ps, ii.logger); err != nil {
+	if err := buildHashMapAccessor(ctx, data, ii.Compression, idxPath, false, cfg, ps, ii.logger); err != nil {
 		return err
 	}
 	if ii.iiCfg.Accessors.Has(AccessorExistence) {
-		if err := buildExistanceFilter(ctx, data, ii.compression, ii.efAccessorExistenceFilterFilePath(fromStep, toStep), *cfg.Salt, ps); err != nil {
+		if err := buildExistanceFilter(ctx, data, ii.Compression, ii.efAccessorExistenceFilterFilePath(fromStep, toStep), *cfg.Salt, ps); err != nil {
 			return err
 		}
 	}
