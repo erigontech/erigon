@@ -419,7 +419,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, requestedMinBlockNum ui
 	}
 	includeBor := br.chainConfig.Bor != nil
 
-	if err := br.BuildMissedIndicesIfNeed(ctx, "RetireBlocks", br.notifier, br.chainConfig); err != nil {
+	if err := br.BuildMissedIndicesIfNeed(ctx, "RetireBlocks", br.notifier); err != nil {
 		return err
 	}
 
@@ -471,18 +471,45 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, requestedMinBlockNum ui
 	return nil
 }
 
-func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier, cc *chain.Config) error {
-	if err := br.snapshots().BuildMissedIndices(ctx, logPrefix, notifier, br.dirs, cc, br.logger); err != nil {
+func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier) error {
+	if err := br.snapshots().BuildMissedIndices(ctx, logPrefix, notifier, br.dirs, br.chainConfig, br.logger); err != nil {
 		return err
 	}
 
-	if cc.Bor != nil {
-		if err := br.borSnapshots().RoSnapshots.BuildMissedIndices(ctx, logPrefix, notifier, br.dirs, cc, br.logger); err != nil {
+	if br.chainConfig.Bor != nil {
+		if err := br.borSnapshots().RoSnapshots.BuildMissedIndices(ctx, logPrefix, notifier, br.dirs, br.chainConfig, br.logger); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+func (br *BlockRetire) RemoveOverlaps() error {
+	if err := br.snapshots().RemoveOverlaps(); err != nil {
+		return err
+	}
+
+	if br.chainConfig.Bor != nil {
+		if err := br.borSnapshots().RoSnapshots.RemoveOverlaps(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (br *BlockRetire) MadvNormal() *BlockRetire {
+	br.snapshots().MadvNormal()
+	if br.chainConfig.Bor != nil {
+		br.borSnapshots().RoSnapshots.MadvNormal()
+	}
+	return br
+}
+
+func (br *BlockRetire) DisableReadAhead() {
+	br.snapshots().DisableReadAhead()
+	if br.chainConfig.Bor != nil {
+		br.borSnapshots().RoSnapshots.DisableReadAhead()
+	}
 }
 
 func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
@@ -724,7 +751,10 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			parsers.Go(func() error {
 				valueBuf, err := parse(tv, valueBufs[tx%workers], senders, tx)
 				if err != nil {
-					log.Warn("[snapshots] DumpTxs parsing", "err", err, "blockNum", blockNum, "rlp", hex.EncodeToString(v))
+					collectorLock.Lock()
+					defer collectorLock.Unlock()
+					collected = tx
+					collections.Broadcast() // to fail fast on it.
 					return fmt.Errorf("%w, block: %d", err, blockNum)
 				}
 

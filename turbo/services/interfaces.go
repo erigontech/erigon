@@ -141,7 +141,7 @@ type FullBlockReader interface {
 type BlockRetire interface {
 	PruneAncientBlocks(tx kv.RwTx, limit int) (deleted int, err error)
 	RetireBlocksInBackground(ctx context.Context, miBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error, onDelete func(l []string) error, onFinishRetire func() error)
-	BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier DBEventNotifier, cc *chain.Config) error
+	BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier DBEventNotifier) error
 	SetWorkers(workers int)
 	GetWorkers() int
 }
