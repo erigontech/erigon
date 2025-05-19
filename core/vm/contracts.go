@@ -155,7 +155,7 @@ var PrecompiledContractsOsaka = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{0x02}): &sha256hash{},
 	common.BytesToAddress([]byte{0x03}): &ripemd160hash{},
 	common.BytesToAddress([]byte{0x04}): &dataCopy{},
-	common.BytesToAddress([]byte{0x05}): &bigModExp{eip7883: true},
+	common.BytesToAddress([]byte{0x05}): &bigModExp{osaka: true},
 	common.BytesToAddress([]byte{0x06}): &bn256AddIstanbul{},
 	common.BytesToAddress([]byte{0x07}): &bn256ScalarMulIstanbul{},
 	common.BytesToAddress([]byte{0x08}): &bn256PairingIstanbul{},
@@ -337,7 +337,7 @@ func (c *dataCopy) Run(in []byte) ([]byte, error) {
 // bigModExp implements a native big integer exponential modular operation.
 type bigModExp struct {
 	eip2565 bool
-	eip7883 bool
+	osaka   bool // EIP-7823 & 7883
 }
 
 var (
@@ -453,7 +453,7 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 	adjExpLen := new(big.Int)
 	if expLen.Cmp(big32) > 0 {
 		adjExpLen.Sub(expLen, big32)
-		if c.eip7883 {
+		if c.osaka { // EIP-7883
 			adjExpLen.Mul(big16, adjExpLen)
 		} else {
 			adjExpLen.Mul(big8, adjExpLen)
@@ -464,7 +464,7 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 
 	// Calculate the gas cost of the operation
 	gas := new(big.Int).Set(math.BigMax(modLen, baseLen))
-	if c.eip7883 {
+	if c.osaka {
 		// EIP-7883: ModExp Gas Cost Increase
 		gas = modExpMultComplexityEip7883(gas)
 
@@ -500,12 +500,31 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 	return gas.Uint64()
 }
 
+var (
+	errModExpBaseLengthTooLarge     = errors.New("base length is too large")
+	errModExpExponentLengthTooLarge = errors.New("exponent length is too large")
+	errModExpModulusLengthTooLarge  = errors.New("modulus length is too large")
+)
+
 func (c *bigModExp) Run(input []byte) ([]byte, error) {
 	var (
 		baseLen = new(big.Int).SetBytes(getData(input, 0, 32)).Uint64()
 		expLen  = new(big.Int).SetBytes(getData(input, 32, 32)).Uint64()
 		modLen  = new(big.Int).SetBytes(getData(input, 64, 32)).Uint64()
 	)
+	if c.osaka {
+		// EIP-7823: Set upper bounds for MODEXP
+		if baseLen > 1024 {
+			return nil, errModExpBaseLengthTooLarge
+		}
+		if expLen > 1024 {
+			return nil, errModExpExponentLengthTooLarge
+		}
+		if modLen > 1024 {
+			return nil, errModExpModulusLengthTooLarge
+		}
+	}
+
 	if len(input) > 96 {
 		input = input[96:]
 	} else {
