@@ -60,7 +60,7 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 			prev, step, err := domains.GetLatest(kv.AccountsDomain, keys[j])
 			require.NoError(tb, err)
 
-			err = domains.DomainPut(kv.AccountsDomain, keys[j], nil, buf, prev, step)
+			err = domains.DomainPut(kv.AccountsDomain, keys[j], buf, prev, step)
 			require.NoError(tb, err)
 		}
 		if uint64(i+1)%agg.StepSize() == 0 {

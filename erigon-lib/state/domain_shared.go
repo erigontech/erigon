@@ -735,13 +735,13 @@ func (sd *SharedDomains) getLatestFromFiles(domain kv.Domain, k, k2 []byte, ofMa
 //   - user can provide `prevVal != nil` - then it will not read prev value from storage
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
-func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error {
+func (sd *SharedDomains) DomainPut(domain kv.Domain, k, val, prevVal []byte, prevStep uint64) error {
 	if val == nil {
 		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)
 	}
 	if prevVal == nil {
 		var err error
-		prevVal, prevStep, err = sd.GetLatest(domain, k1)
+		prevVal, prevStep, err = sd.GetLatest(domain, k)
 		if err != nil {
 			return err
 		}
@@ -749,23 +749,23 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 
 	switch domain {
 	case kv.AccountsDomain:
-		return sd.updateAccountData(k1, val, prevVal, prevStep)
+		return sd.updateAccountData(k, val, prevVal, prevStep)
 	case kv.StorageDomain:
-		return sd.writeAccountStorage(k1, k2, val, prevVal, prevStep)
+		return sd.writeAccountStorage(k, nil, val, prevVal, prevStep)
 	case kv.CodeDomain:
 		if bytes.Equal(prevVal, val) {
 			return nil
 		}
-		return sd.updateAccountCode(k1, val, prevVal, prevStep)
+		return sd.updateAccountCode(k, val, prevVal, prevStep)
 	case kv.CommitmentDomain, kv.RCacheDomain:
-		sd.put(domain, toStringZeroCopy(append(k1, k2...)), val)
-		return sd.domainWriters[domain].PutWithPrev(k1, k2, val, sd.txNum, prevVal, prevStep)
+		sd.put(domain, toStringZeroCopy(k), val)
+		return sd.domainWriters[domain].PutWithPrev(k, nil, val, sd.txNum, prevVal, prevStep)
 	default:
 		if bytes.Equal(prevVal, val) {
 			return nil
 		}
-		sd.put(domain, toStringZeroCopy(append(k1, k2...)), val)
-		return sd.domainWriters[domain].PutWithPrev(k1, k2, val, sd.txNum, prevVal, prevStep)
+		sd.put(domain, toStringZeroCopy(k), val)
+		return sd.domainWriters[domain].PutWithPrev(k, nil, val, sd.txNum, prevVal, prevStep)
 	}
 }
 
