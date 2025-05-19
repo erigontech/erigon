@@ -282,7 +282,7 @@ func (i visibleFile) EndRootNum() uint64 {
 	return i.endTxNum
 }
 
-func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l Accessors, trace bool, toTxNum uint64) (roItems []visibleFile) {
+func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l Accessors, checker func(startTxNum, endTxNum uint64) bool, trace bool, toTxNum uint64) (roItems []visibleFile) {
 	newVisibleFiles := make([]visibleFile, 0, files.Len())
 	// trace = true
 	if trace {
@@ -297,6 +297,9 @@ func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l Accessors, trace bool,
 				continue
 			}
 			if !checkForVisibility(item, l, trace) {
+				continue
+			}
+			if checker != nil && !checker(item.startTxNum, item.endTxNum) {
 				continue
 			}
 

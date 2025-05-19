@@ -207,7 +207,6 @@ func GetStateIndicesSalt(dirs datadir.Dirs, genNew bool, logger log.Logger) (sal
 func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.Dirs, logger log.Logger) (err error) {
 	cfg := Schema.GetDomainCfg(name)
 	//TODO: move dynamic part of config to InvertedIndex
-	cfg.restrictSubsetFileDeletions = a.commitmentValuesTransform
 	cfg.hist.iiCfg.salt.Store(salt)
 	cfg.hist.iiCfg.dirs = dirs
 	a.d[name], err = NewDomain(cfg, a.aggregationStep, logger)
@@ -1306,12 +1305,6 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Ranges {
 	return r
 }
 
-func (at *AggregatorRoTx) RestrictSubsetFileDeletions(b bool) {
-	at.a.d[kv.AccountsDomain].restrictSubsetFileDeletions = b
-	at.a.d[kv.StorageDomain].restrictSubsetFileDeletions = b
-	at.a.d[kv.CommitmentDomain].restrictSubsetFileDeletions = b
-}
-
 func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticFiles, r *Ranges) (mf *MergedFilesV3, err error) {
 	mf = &MergedFilesV3{iis: make([]*filesItem, len(at.a.iis))}
 	g, ctx := errgroup.WithContext(ctx)
@@ -1347,7 +1340,6 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 		g.Go(func() (err error) {
 			var vt valueTransformer
 			if at.a.commitmentValuesTransform && kid == kv.CommitmentDomain {
-				at.RestrictSubsetFileDeletions(true)
 				accStorageMerged.Wait()
 
 				vt, err = at.d[kv.CommitmentDomain].commitmentValTransformDomain(r.domain[kid].values, at.d[kv.AccountsDomain], at.d[kv.StorageDomain],
@@ -1362,9 +1354,6 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 			if at.a.commitmentValuesTransform {
 				if kid == kv.AccountsDomain || kid == kv.StorageDomain {
 					accStorageMerged.Done()
-				}
-				if err == nil && kid == kv.CommitmentDomain {
-					at.RestrictSubsetFileDeletions(false)
 				}
 			}
 			return err

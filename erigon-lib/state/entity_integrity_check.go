@@ -8,14 +8,6 @@ import (
 	btree2 "github.com/tidwall/btree"
 )
 
-// this is an equivalent of snap_integrity_check.go, but for
-// current dhii (which don't have SnapNameSchema).
-// dependency/referred: account/storage
-// dependent/referencing: commitment
-type EntityIntegrityChecker interface {
-	CheckAllDependentPresent(dependencyDomain kv.Domain, startTxNum, endTxNum uint64) (IsPresent bool)
-}
-
 type DirtyFilesGetter func() *btree2.BTreeG[*filesItem]
 
 // an DependencyIntegrityChecker used when a dependent domain has
@@ -36,6 +28,8 @@ type DependentInfo struct {
 	accessors   Accessors
 }
 
+// dependency/referred: account/storage
+// dependent/referencing: commitment
 func NewDependencyIntegrityChecker(dirs datadir.Dirs, logger log.Logger) *DependencyIntegrityChecker {
 	return &DependencyIntegrityChecker{
 		dependencyMap: make(map[kv.Domain][]*DependentInfo),
@@ -57,10 +51,25 @@ func (d *DependencyIntegrityChecker) AddDependency(dependency kv.Domain, depende
 	d.dependencyMap[dependency] = arr
 }
 
+type ExistentialQuantifier int
+
+const (
+	All ExistentialQuantifier = iota
+	Any                       = 1
+)
+
+func (e ExistentialQuantifier) All() bool {
+	return e == All
+}
+
+func (e ExistentialQuantifier) Any() bool {
+	return e == Any
+}
+
 // dependency: account
 // is commitment.0-2 present? if no, don't use it for visibleFiles.
 // Also don't consider it for "consuming" (deleting) the smaller files commitment.0-1, 1-2
-func (d *DependencyIntegrityChecker) CheckAllDependentPresent(dependency kv.Domain, startTxNum, endTxNum uint64) (IsPresent bool) {
+func (d *DependencyIntegrityChecker) CheckDependentPresent(dependency kv.Domain, allOrAny ExistentialQuantifier, startTxNum, endTxNum uint64) (IsPresent bool) {
 	arr, ok := d.dependencyMap[dependency]
 	if !ok {
 		return true
@@ -70,18 +79,24 @@ func (d *DependencyIntegrityChecker) CheckAllDependentPresent(dependency kv.Doma
 		dependentFiles := dependent.filesGetter()
 		file, found := dependentFiles.Get(&filesItem{startTxNum: startTxNum, endTxNum: endTxNum})
 
-		if !found {
-			if d.trace {
-				d.logger.Warn("[dbg: Depic]", "dependent", dependent.domain.String(), "startTxNum", startTxNum, "endTxNum", endTxNum, "found", found)
+		if allOrAny.All() {
+			// ALL: used for visibleFilesCalc
+			// all dependent (e.g. commitment) file should be present as well as visible-able
+			if !found || !checkForVisibility(file, dependent.accessors, d.trace) {
+				if d.trace {
+					d.logger.Warn("[dbg: Depic]", "dependent", dependent.domain.String(), "startTxNum", startTxNum, "endTxNum", endTxNum, "found", found)
+				}
+				return false
 			}
-			return false
-		}
-
-		if !checkForVisibility(file, dependent.accessors, d.trace) {
-			if d.trace {
-				d.logger.Warn("[dbg: Depic]", "dependent", dependent.domain.String(), "startTxNum", startTxNum, "endTxNum", endTxNum, "found", true, "checkField", false)
+		} else {
+			// Any: used for garbage collection
+			// any dependent (e.g. commiment) file is present => dependency file can't be deleted
+			if found {
+				if d.trace {
+					d.logger.Warn("[dbg: Depic]", "dependent", dependent.domain.String(), "startTxNum", startTxNum, "endTxNum", endTxNum, "found", true)
+				}
+				return true
 			}
-			return false
 		}
 	}
 

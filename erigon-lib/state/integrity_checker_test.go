@@ -43,9 +43,9 @@ func TestDependency(t *testing.T) {
 	// not adding dependency for storage
 
 	assertFn := func(startTxNum, endTxNum uint64, resultC, resultA, resultS bool) {
-		require.Equal(t, resultA, checker.CheckAllDependentPresent(kv.AccountsDomain, startTxNum, endTxNum))
-		require.Equal(t, resultS, checker.CheckAllDependentPresent(kv.StorageDomain, startTxNum, endTxNum))
-		require.Equal(t, resultC, checker.CheckAllDependentPresent(kv.CommitmentDomain, startTxNum, endTxNum))
+		require.Equal(t, resultA, checker.CheckDependentPresent(kv.AccountsDomain, All, startTxNum, endTxNum))
+		require.Equal(t, resultS, checker.CheckDependentPresent(kv.StorageDomain, All, startTxNum, endTxNum))
+		require.Equal(t, resultC, checker.CheckDependentPresent(kv.CommitmentDomain, All, startTxNum, endTxNum))
 
 	}
 
@@ -85,9 +85,9 @@ func TestDependency_UnindexedMerged(t *testing.T) {
 	// not adding dependency for storage
 
 	assertFn := func(startTxNum, endTxNum uint64, resultC, resultA, resultS bool) {
-		require.Equal(t, resultA, checker.CheckAllDependentPresent(kv.AccountsDomain, startTxNum, endTxNum))
-		require.Equal(t, resultS, checker.CheckAllDependentPresent(kv.StorageDomain, startTxNum, endTxNum))
-		require.Equal(t, resultC, checker.CheckAllDependentPresent(kv.CommitmentDomain, startTxNum, endTxNum))
+		require.Equal(t, resultA, checker.CheckDependentPresent(kv.AccountsDomain, All, startTxNum, endTxNum))
+		require.Equal(t, resultS, checker.CheckDependentPresent(kv.StorageDomain, All, startTxNum, endTxNum))
+		require.Equal(t, resultC, checker.CheckDependentPresent(kv.CommitmentDomain, All, startTxNum, endTxNum))
 
 	}
 
