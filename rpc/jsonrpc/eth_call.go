@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/gointerfaces"
@@ -408,7 +409,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address common.Add
 	proof.StorageHash = acc.Root
 
 	// if storage is not empty touch keys and build trie
-	if proof.StorageHash.Cmp(common.BytesToHash(commitment.EmptyRootHash)) != 0 && len(storageKeys) != 0 {
+	if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash.Bytes())) != 0 && len(storageKeys) != 0 {
 		// touch storage keys
 		for _, storageKey := range storageKeys {
 			sdCtx.TouchKey(kv.StorageDomain, string(common.FromHex(address.Hex()[2:]+storageKey.String()[2:])), nil)
@@ -431,7 +432,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address common.Add
 		proof.StorageProof[i].Key = uint256.NewInt(0).SetBytes(keyHash[:]).Hex()
 
 		// if we have simple non contract account just set values directly without requesting any key proof
-		if proof.StorageHash.Cmp(common.BytesToHash(commitment.EmptyRootHash)) == 0 {
+		if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash.Bytes())) == 0 {
 			proof.StorageProof[i].Proof = nil
 			proof.StorageProof[i].Value = new(hexutil.Big)
 			continue

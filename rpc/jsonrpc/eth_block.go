@@ -25,7 +25,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/crypto/cryptopool"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
@@ -166,8 +166,8 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	// and apply the message.
 	gp := new(core.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 
-	bundleHash := cryptopool.NewLegacyKeccak256()
-	defer cryptopool.ReturnToPoolKeccak256(bundleHash)
+	bundleHash := crypto.NewKeccakState()
+	defer crypto.ReturnToPool(bundleHash)
 
 	results := make([]map[string]interface{}, 0, len(txs))
 	for _, txn := range txs {

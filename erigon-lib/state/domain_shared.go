@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -954,7 +955,7 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 		return nil, err
 	}
 
-	u = &commitment.Update{CodeHash: commitment.EmptyCodeHashArray}
+	u = &commitment.Update{CodeHash: empty.CodeHash}
 	if len(encAccount) == 0 {
 		u.Flags = commitment.DeleteUpdate
 		return u, nil
@@ -1233,7 +1234,7 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 	if err != nil {
 		return 0, 0, false, err
 	}
-	if bytes.Equal(newRh, commitment.EmptyRootHash) {
+	if bytes.Equal(newRh, empty.RootHash.Bytes()) {
 		sdc.sharedDomains.SetBlockNum(0)
 		sdc.sharedDomains.SetTxNum(0)
 		return 0, 0, false, err

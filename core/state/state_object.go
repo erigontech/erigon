@@ -28,15 +28,11 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/tracing"
 )
-
-var emptyCodeHash = crypto.Keccak256(nil)
-var emptyCodeHashH = common.BytesToHash(emptyCodeHash)
 
 type Code []byte
 
@@ -93,7 +89,7 @@ type stateObject struct {
 
 // empty returns whether the account is considered empty.
 func (so *stateObject) empty() bool {
-	return so.data.Nonce == 0 && so.data.Balance.IsZero() && (so.data.CodeHash == emptyCodeHashH)
+	return so.data.Nonce == 0 && so.data.Balance.IsZero() && (so.data.CodeHash == empty.CodeHash)
 }
 
 // newObject creates a state object.
@@ -111,10 +107,10 @@ func newObject(db *IntraBlockState, address common.Address, data, original *acco
 		so.data.Initialised = true
 	}
 	if so.data.CodeHash == (common.Hash{}) {
-		so.data.CodeHash = emptyCodeHashH
+		so.data.CodeHash = empty.CodeHash
 	}
 	if so.data.Root == (common.Hash{}) {
-		so.data.Root = trie.EmptyRoot
+		so.data.Root = empty.RootHash
 	}
 	so.original.Copy(original)
 	return &so
@@ -329,7 +325,7 @@ func (so *stateObject) Code() []byte {
 	if so.code != nil {
 		return so.code
 	}
-	if so.data.CodeHash == emptyCodeHashH {
+	if so.data.CodeHash == empty.CodeHash {
 		return nil
 	}
 	code, err := so.db.stateReader.ReadAccountCode(so.Address())

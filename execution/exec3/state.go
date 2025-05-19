@@ -111,7 +111,7 @@ func NewWorker(lock sync.Locker, logger log.Logger, hooks *tracing.Hooks, ctx co
 	return w
 }
 
-func (rw *Worker) LogLRUStats() { rw.evm.JumpDestCache.LogStats() }
+func (rw *Worker) LogLRUStats() { rw.evm.Config().JumpDestCache.LogStats() }
 
 func (rw *Worker) ResetState(rs *state.ParallelExecutionState, accumulator *shards.Accumulator) {
 	rw.rs = rs

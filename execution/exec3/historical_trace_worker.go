@@ -120,7 +120,7 @@ func (rw *HistoricalTraceWorker) Run() (err error) {
 			err = fmt.Errorf("HistoricalTraceWorker panic: %s, %s", rec, dbg.Stack())
 		}
 	}()
-	defer rw.evm.JumpDestCache.LogStats()
+	defer rw.evm.Config().JumpDestCache.LogStats()
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
 		rw.RunTxTaskNoLock(txTask)
 		if err := rw.out.Add(rw.ctx, txTask); err != nil {

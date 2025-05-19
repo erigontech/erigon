@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/etl"
@@ -1583,7 +1584,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	finalRoot, err := RebuildCommitmentFiles(ctx, db, &rawdbv3.TxNums, agg.logger)
 	require.NoError(t, err)
 	require.NotEmpty(t, finalRoot)
-	require.NotEqual(t, commitment.EmptyRootHash, finalRoot)
+	require.NotEqual(t, empty.RootHash.Bytes(), finalRoot)
 
 	require.Equal(t, roots[len(roots)-1][:], finalRoot[:])
 }
