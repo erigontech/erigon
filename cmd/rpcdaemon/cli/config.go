@@ -38,7 +38,7 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/paths"
@@ -50,7 +50,6 @@ import (
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
-	"github.com/erigontech/erigon-lib/kv/kvcfg"
 	kv2 "github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/remotedb"
@@ -75,6 +74,7 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/ethconfig/features"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/polygon/bor"
@@ -111,8 +111,8 @@ type HeimdallReader interface {
 }
 
 type BridgeReader interface {
-	Events(ctx context.Context, blockHash libcommon.Hash, blockNum uint64) ([]*types.Message, error)
-	EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error)
+	Events(ctx context.Context, blockHash common.Hash, blockNum uint64) ([]*types.Message, error)
+	EventTxnLookup(ctx context.Context, borTxHash common.Hash) (uint64, bool, error)
 	Close()
 }
 
@@ -402,20 +402,6 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			if err != nil {
 				return err
 			}
-			cfg.Sync.KeepExecutionProofs, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
-			if err != nil {
-				return err
-			}
-			if cfg.Sync.KeepExecutionProofs {
-				libstate.EnableHistoricalCommitment()
-			}
-			cfg.Sync.PersistReceiptsCacheV2, err = kvcfg.PersistReceipts.Enabled(tx)
-			if err != nil {
-				return err
-			}
-			if cfg.Sync.PersistReceiptsCacheV2 {
-				libstate.EnableHistoricalRCache()
-			}
 			return nil
 		}); err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
@@ -423,10 +409,13 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if cc == nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, errors.New("chain config not found in db. Need start erigon at least once on this db")
 		}
-
-		// Configure sapshots
-
 		cfg.Snap.ChainName = cc.ChainName
+		// Configure sapshots
+		cfg.Sync, err = features.EnableSyncCfg(rawDB, cfg.Sync)
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
+		}
+
 		// this assumed the rpc deamon never runs with a downloader - if this is
 		// not the case we'll need to adjust the defaults of the --no-downlaoder
 		// flag to the faulse by default
@@ -915,7 +904,7 @@ func ObtainJWTSecret(cfg *httpcfg.HttpCfg, logger log.Logger) ([]byte, error) {
 		cfg.JWTSecretPath = "jwt.hex"
 	}
 	if data, err := os.ReadFile(cfg.JWTSecretPath); err == nil {
-		jwtSecret := libcommon.FromHex(strings.TrimSpace(string(data)))
+		jwtSecret := common.FromHex(strings.TrimSpace(string(data)))
 		if len(jwtSecret) == 32 {
 			return jwtSecret, nil
 		}
@@ -1080,15 +1069,15 @@ func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockR
 	return nil
 }
 
-func (e *remoteConsensusEngine) Author(header *types.Header) (libcommon.Address, error) {
+func (e *remoteConsensusEngine) Author(header *types.Header) (common.Address, error) {
 	if err := e.validateEngineReady(); err != nil {
-		return libcommon.Address{}, err
+		return common.Address{}, err
 	}
 
 	return e.engine.Author(header)
 }
 
-func (e *remoteConsensusEngine) IsServiceTransaction(sender libcommon.Address, syscall consensus.SystemCall) bool {
+func (e *remoteConsensusEngine) IsServiceTransaction(sender common.Address, syscall consensus.SystemCall) bool {
 	if err := e.validateEngineReady(); err != nil {
 		panic(err)
 	}
@@ -1168,11 +1157,11 @@ func (e *remoteConsensusEngine) Seal(_ consensus.ChainHeaderReader, _ *types.Blo
 	panic("remoteConsensusEngine.Seal not supported")
 }
 
-func (e *remoteConsensusEngine) SealHash(_ *types.Header) libcommon.Hash {
+func (e *remoteConsensusEngine) SealHash(_ *types.Header) common.Hash {
 	panic("remoteConsensusEngine.SealHash not supported")
 }
 
-func (e *remoteConsensusEngine) CalcDifficulty(_ consensus.ChainHeaderReader, _ uint64, _ uint64, _ *big.Int, _ uint64, _ libcommon.Hash, _ libcommon.Hash, _ uint64) *big.Int {
+func (e *remoteConsensusEngine) CalcDifficulty(_ consensus.ChainHeaderReader, _ uint64, _ uint64, _ *big.Int, _ uint64, _ common.Hash, _ common.Hash, _ uint64) *big.Int {
 	panic("remoteConsensusEngine.CalcDifficulty not supported")
 }
 
