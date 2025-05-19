@@ -323,6 +323,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 
 	_maxFrom := uint64(0)
 	files := make([]snaptype.FileInfo, 0)
+	commitmentFilesWithState := make([]snaptype.FileInfo, 0)
 	for _, dirPath := range []string{dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors} {
 		filePaths, err := dir.ListFiles(dirPath)
 		if err != nil {
@@ -335,7 +336,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 				fmt.Printf("skipping %s\n", filePath)
 				continue
 			}
-			if res.From == 0 && res.To == 0 {
+			if res.From == 0 && res.To == 0 { // parse steps from file name
 				parts := strings.Split(fName, ".")
 				if len(parts) == 3 || len(parts) == 4 {
 					fsteps := strings.Split(parts[1], "-")
@@ -350,6 +351,67 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 				}
 			}
 
+			// check that commitment file has state in it
+			// When domains are "purified", we want to keep latest commitment file with state key in it
+			if strings.Contains(res.Path, "commitment") && strings.HasSuffix(res.Path, ".kv") {
+				const trieStateKey = "state"
+
+				skipped := false
+				kvi := strings.Replace(res.Path, ".kv", ".kvi", 1)
+				_, ek := os.Stat(kvi)
+				if ek == nil {
+					idx, err := recsplit.OpenIndex(kvi)
+					if err != nil {
+						return err
+					}
+
+					rd := idx.GetReaderFromPool()
+					oft, found := rd.Lookup([]byte(trieStateKey))
+					if found {
+						fmt.Printf("found state key with kvi %s\n", res.Path)
+						commitmentFilesWithState = append(commitmentFilesWithState, res)
+					}
+					skipped = true
+					_ = oft
+					rd.Close()
+					idx.Close()
+				}
+
+				if !skipped { // try to lookup in bt index
+					bt := strings.Replace(res.Path, ".kv", ".bt", 1)
+					_, eb := os.Stat(bt)
+					if eb == nil {
+						rd, btindex, err := libstate.OpenBtreeIndexAndDataFile(bt, res.Path, libstate.DefaultBtreeM, libstate.Schema.CommitmentDomain.Compression, false)
+						if err != nil {
+							return err
+						}
+
+						getter := seg.NewReader(rd.MakeGetter(), libstate.Schema.CommitmentDomain.Compression)
+						//for getter.HasNext() {
+						//	k, _ := getter.Next(nil)
+						//	if bytes.Equal(k, []byte(trieStateKey)) {
+						//		fmt.Printf("found state key without bt in %s\n", res.Path)
+						//		commitmentFilesWithState = append(commitmentFilesWithState, res)
+						//		break
+						//	}
+						//	getter.Skip()
+						//}
+						c, err := btindex.Seek(getter, []byte(trieStateKey))
+						if err != nil {
+							return err
+						}
+						if bytes.Equal(c.Key(), []byte(trieStateKey)) {
+							fmt.Printf("found state key using bt %s\n", res.Path)
+							commitmentFilesWithState = append(commitmentFilesWithState, res)
+						}
+						c.Close()
+						btindex.Close()
+						rd.Close()
+					}
+
+				}
+			}
+
 			files = append(files, res)
 			if removeLatest {
 				_maxFrom = max(_maxFrom, res.From)
@@ -357,35 +419,15 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 		}
 	}
 
-	if cliCtx.IsSet("step") {
+	var toRemove []snaptype.FileInfo
+	if cliCtx.IsSet("step") || removeLatest {
 		steprm := cliCtx.String("step")
 		if steprm == "" && !removeLatest {
 			return errors.New("step to remove is required (eg 0-2) OR flag --latest provided")
 		}
-		if steprm != "" {
-			removeLatest = false // --step has higher priority
-		}
 
 		var minS, maxS uint64
-		if removeLatest {
-		AllowPruneSteps:
-			fmt.Printf("remove latest snapshot files with stepFrom=%d?\n1) Remove\n2) Exit\n (pick number): ", _maxFrom)
-			var ans uint8
-			_, err := fmt.Scanf("%d\n", &ans)
-			if err != nil {
-				return err
-			}
-			switch ans {
-			case 1:
-				minS, maxS = _maxFrom, math.MaxUint64
-				break
-			case 2:
-				return nil
-			default:
-				fmt.Printf("invalid input: %d; Just an answer number expected.\n", ans)
-				goto AllowPruneSteps
-			}
-		} else if steprm != "" {
+		if steprm != "" {
 			parseStep := func(step string) (uint64, uint64, error) {
 				var from, to uint64
 				if _, err := fmt.Sscanf(step, "%d-%d", &from, &to); err != nil {
@@ -398,23 +440,73 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 			if err != nil {
 				return err
 			}
-		} else {
-			panic("unexpected arguments")
+			removeLatest = false // --step has higher priority
 		}
 
-		var removed int
-		for _, res := range files {
-			if res.From >= minS && res.To <= maxS {
-				if err := os.Remove(res.Path); err != nil {
-					return fmt.Errorf("failed to remove %s: %w", res.Path, err)
-				}
-				removed++
+		promptExit := func(s string) (exitNow bool) {
+		AllowPruneSteps:
+			fmt.Printf("\n%s", s)
+			var ans uint8
+			_, err := fmt.Scanf("%d\n", &ans)
+			if err != nil {
+				fmt.Printf("err: %v\n", err)
+				return true
+			}
+			switch ans {
+			case 1:
+				return false
+			case 4:
+				return true
+			default:
+				fmt.Printf("invalid input: %d; Just a number 1 or 4 expected.\n", ans)
+				goto AllowPruneSteps
 			}
 		}
-		fmt.Printf("removed %d state segments files\n", removed)
+
+		if removeLatest {
+			q := fmt.Sprintf("remove latest snapshot files with stepFrom=%d?\n1) Remove\n4) Exit\n (pick number): ", _maxFrom)
+			if promptExit(q) {
+				os.Exit(0)
+			}
+			minS, maxS = _maxFrom, math.MaxUint64
+		}
+
+		if minS == maxS {
+			q := "remove ALL snapshot files?\n\t1) Remove\n\t4) NONONO (Exit)\n (pick number): "
+			if promptExit(q) {
+				os.Exit(0)
+			}
+			minS, maxS = 0, math.MaxUint64
+
+		} else { // prevent all commitment files with trie state from deletion for "purified" domains case
+			hasStateTrie := 0
+			for _, file := range commitmentFilesWithState {
+				if file.To <= minS {
+					hasStateTrie++
+					fmt.Println("KEEP   " + file.Path)
+				} else {
+					fmt.Println("REMOVE " + file.Path)
+				}
+			}
+			if hasStateTrie == 0 && len(commitmentFilesWithState) > 0 {
+				fmt.Printf("this will remove ALL commitment files with state trie\n")
+				q := "Do that anyway?\n\t1) Remove\n\t4) NONONO (Exit)\n (pick number): "
+				if promptExit(q) {
+					os.Exit(0)
+				}
+			}
+		}
+
+		toRemove = toRemove[:0] // reset list
+		for _, res := range files {
+			if res.From >= minS && res.To <= maxS {
+				toRemove = append(toRemove, res)
+			}
+		}
 	}
 	if cliCtx.IsSet("domain") {
 		domainNames := cliCtx.StringSlice("domain")
+		toRemove = toRemove[:0]
 		for _, domainName := range domainNames {
 			_, err := kv.String2InvertedIdx(domainName)
 			if err != nil {
@@ -423,21 +515,30 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 					return err
 				}
 			}
-
-			var removed int
 			for _, res := range files {
 				if !strings.Contains(res.Name(), domainName) {
 					continue
 				}
-				if err := os.Remove(res.Path); err != nil {
-					return fmt.Errorf("failed to remove %s: %w", res.Path, err)
-				}
-				removed++
+				toRemove = append(toRemove, res)
 			}
-			fmt.Printf("removed %d state segments files of %s\n", removed, domainName)
 		}
-
 	}
+
+	var removed uint64
+	var cleanedSize datasize.ByteSize
+	for _, res := range toRemove {
+		s, err := os.Stat(res.Path)
+		if err != nil {
+			return fmt.Errorf("failed to stat %s: %w", res.Path, err)
+		}
+		cleanedSize += datasize.ByteSize(s.Size())
+
+		if err := os.Remove(res.Path); err != nil {
+			return fmt.Errorf("failed to remove %s: %w", res.Path, err)
+		}
+		removed++
+	}
+	fmt.Printf("removed %d (%v) state snapshot segments files\n", removed, cleanedSize.HumanReadable())
 
 	return nil
 }
@@ -1659,21 +1760,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	db, err = temporal.New(db, agg)
 	if err != nil {
 		return err
-	}
-
-	logger.Info("Prune state history")
-	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		return tx.(kv.TemporalRwTx).Debug().GreedyPruneHistory(ctx, kv.CommitmentDomain)
-	}); err != nil {
-		return err
-	}
-	for hasMoreToPrune := true; hasMoreToPrune; {
-		if err := db.Update(ctx, func(tx kv.RwTx) error {
-			hasMoreToPrune, err = tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 30*time.Second)
-			return err
-		}); err != nil {
-			return err
-		}
 	}
 
 	logger.Info("Work on state history snapshots")

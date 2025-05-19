@@ -66,7 +66,7 @@ func (overrides *StateOverrides) Override(state *state.IntraBlockState) error {
 			for key, value := range *account.StateDiff {
 				key := key
 				intValue := new(uint256.Int).SetBytes32(value.Bytes())
-				state.SetState(addr, &key, *intValue)
+				state.SetState(addr, key, *intValue)
 			}
 		}
 	}

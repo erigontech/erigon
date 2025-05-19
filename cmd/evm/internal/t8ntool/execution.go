@@ -95,7 +95,7 @@ func MakePreState(chainRules *chain.Rules, tx kv.RwTx, sd *state3.SharedDomains,
 		for k, v := range a.Storage {
 			key := k
 			val := uint256.NewInt(0).SetBytes(v.Bytes())
-			statedb.SetState(addr, &key, *val)
+			statedb.SetState(addr, key, *val)
 		}
 
 		if len(a.Code) > 0 || len(a.Storage) > 0 {

@@ -238,6 +238,7 @@ var (
 				if err != nil {
 					return err
 				}
+				defer txnHashIdx.Close()
 
 				txnHash2BlockNumIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 					KeyCount:   d.Count(),
@@ -251,6 +252,7 @@ var (
 				if err != nil {
 					return err
 				}
+				defer txnHash2BlockNumIdx.Close()
 				txnHashIdx.LogLvl(log.LvlDebug)
 				txnHash2BlockNumIdx.LogLvl(log.LvlDebug)
 

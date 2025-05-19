@@ -565,7 +565,7 @@ func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstK
 
 	compressCfg := BlockCompressCfg
 	compressCfg.Workers = workers
-	sn, err := seg.NewCompressor(ctx, "Snapshot "+f.Type.Name(), f.Path, tmpDir, compressCfg, log.LvlInfo, logger)
+	sn, err := seg.NewCompressor(ctx, "Snapshot "+f.Type.Name(), f.Path, tmpDir, compressCfg, log.LvlTrace, logger)
 	if err != nil {
 		return lastKeyValue, err
 	}
@@ -589,7 +589,7 @@ func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstK
 	}
 
 	ext := filepath.Ext(f.Name())
-	logger.Log(lvl, "[snapshots] Compression start", "file", f.Name()[:len(f.Name())-len(ext)], "workers", sn.WorkersAmount(), "stack", dbg.Stack())
+	logger.Log(lvl, "[snapshots] Compression start", "file", f.Name()[:len(f.Name())-len(ext)], "workers", sn.WorkersAmount())
 
 	if err := sn.Compress(); err != nil {
 		return lastKeyValue, fmt.Errorf("compress: %w", err)
@@ -801,7 +801,6 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 	}); err != nil {
 		return 0, fmt.Errorf("BigChunks: %w", err)
 	}
-	println("exiting big chunks")
 	return 0, nil
 }
 

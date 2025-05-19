@@ -23,7 +23,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/version"
 	"math"
 	"os"
 	"path"
@@ -42,7 +41,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/assert"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
@@ -54,6 +52,7 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 	"github.com/erigontech/erigon-lib/seg"
 	ee "github.com/erigontech/erigon-lib/state/entity_extras"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 type InvertedIndex struct {
@@ -286,8 +285,8 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
 			if item.decompressor == nil {
 				fPathPattern := ii.efFilePathMask(fromStep, toStep)
-				fPath, fileVer, err := version.FindFilesWithVersionsByPattern(fPathPattern)
-				if err != nil && !errors.Is(err, os.ErrNotExist) {
+				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathPattern)
+				if err != nil {
 					_, fName := filepath.Split(fPath)
 					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: FindFilesWithVersionsByPattern error", "f", fName, "err", err)
 					invalidFileItemsLock.Lock()
@@ -296,7 +295,7 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 					continue
 				}
 
-				if errors.Is(err, os.ErrNotExist) {
+				if !ok {
 					_, fName := filepath.Split(fPath)
 					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: file does not exists", "f", fName)
 					invalidFileItemsLock.Lock()
@@ -305,7 +304,7 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 					continue
 				}
 
-				if fileVer.Cmp(ii.version.DataEF.Current) != 0 {
+				if !fileVer.Eq(ii.version.DataEF.Current) {
 					if !fileVer.Less(ii.version.DataEF.MinSupported) {
 						ii.version.DataEF.Current = fileVer
 					} else {
@@ -331,18 +330,18 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 
 			if item.index == nil {
 				fPathPattern := ii.efAccessorFilePathMask(fromStep, toStep)
-				fPath, fileVer, err := version.FindFilesWithVersionsByPattern(fPathPattern)
-				if err != nil && !errors.Is(err, os.ErrNotExist) {
+				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathPattern)
+				if err != nil {
 					_, fName := filepath.Split(fPath)
 					ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 					// don't interrupt on error. other files may be good
 				}
-				if !errors.Is(err, os.ErrNotExist) {
-					if fileVer.Cmp(ii.version.AccessorEFI.Current) != 0 {
+				if ok {
+					if !fileVer.Eq(ii.version.AccessorEFI.Current) {
 						if !fileVer.Less(ii.version.AccessorEFI.MinSupported) {
 							ii.version.AccessorEFI.Current = fileVer
 						} else {
-							panic("Version is too low, try to rm ef snapshots")
+							panic("Version is too low, try to rm efi snapshots")
 							//return false
 						}
 					}
@@ -416,9 +415,10 @@ func (iit *InvertedIndexRoTx) NewWriter() *InvertedIndexBufferedWriter {
 
 type InvertedIndexBufferedWriter struct {
 	index, indexKeys *etl.Collector
-	tmpdir           string
-	discard          bool
-	filenameBase     string
+
+	tmpdir       string
+	discard      bool
+	filenameBase string
 
 	indexTable, indexKeysTable string
 
@@ -480,12 +480,9 @@ func (w *InvertedIndexBufferedWriter) close() {
 	}
 }
 
-// 3_domains * 2 + 3_history * 1 + 4_indices * 2 = 17 etl collectors, 17*(256Mb/8) = 512Mb - for all collectros
-var WALCollectorRAM = dbg.EnvDataSize("AGG_WAL_RAM", etl.BufferOptimalSize/8)
-var CollateETLRAM = dbg.EnvDataSize("AGG_COLLATE_RAM", etl.BufferOptimalSize/4)
-
 func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *InvertedIndexBufferedWriter {
 	w := &InvertedIndexBufferedWriter{
+		name:            iit.name,
 		discard:         discard,
 		tmpdir:          tmpdir,
 		filenameBase:    iit.ii.filenameBase,
@@ -493,10 +490,10 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *InvertedIn
 
 		indexKeysTable: iit.ii.keysTable,
 		indexTable:     iit.ii.valuesTable,
+
 		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
-		indexKeys: etl.NewCollector(iit.ii.filenameBase+".flush.ii.keys", tmpdir, etl.NewSortableBuffer(WALCollectorRAM), iit.ii.logger).LogLvl(log.LvlTrace),
-		index:     etl.NewCollector(iit.ii.filenameBase+".flush.ii.vals", tmpdir, etl.NewSortableBuffer(WALCollectorRAM), iit.ii.logger).LogLvl(log.LvlTrace),
-		name:      iit.name,
+		indexKeys: etl.NewCollectorWithAllocator(iit.ii.filenameBase+".flush.ii.keys", tmpdir, etl.SmallSortableBuffers, iit.ii.logger).LogLvl(log.LvlTrace),
+		index:     etl.NewCollectorWithAllocator(iit.ii.filenameBase+".flush.ii.vals", tmpdir, etl.SmallSortableBuffers, iit.ii.logger).LogLvl(log.LvlTrace),
 	}
 	w.indexKeys.SortAndFlushInBackground(true)
 	w.index.SortAndFlushInBackground(true)
@@ -917,10 +914,7 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	}
 	defer idxDelCursor.Close()
 
-	sortableBuffer := sortableBufferForPruning()
-	defer sortableBuffersPoolForPruning.Put(sortableBuffer)
-
-	collector := etl.NewCollector(ii.filenameBase+".prune.ii", ii.dirs.Tmp, sortableBuffer, ii.logger)
+	collector := etl.NewCollectorWithAllocator(ii.filenameBase+".prune.ii", ii.dirs.Tmp, etl.SmallSortableBuffers, ii.logger)
 	defer collector.Close()
 	collector.LogLvl(log.LvlTrace)
 	collector.SortAndFlushInBackground(true)
@@ -1048,9 +1042,8 @@ func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (
 	}
 	defer keysCursor.Close()
 
-	collector := etl.NewCollector(ii.filenameBase+".collate.ii", ii.iiCfg.dirs.Tmp, etl.NewSortableBuffer(CollateETLRAM), ii.logger)
+	collector := etl.NewCollectorWithAllocator(ii.filenameBase+".collate.ii", ii.iiCfg.dirs.Tmp, etl.SmallSortableBuffers, ii.logger).LogLvl(log.LvlTrace)
 	defer collector.Close()
-	collector.LogLvl(log.LvlTrace)
 
 	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], txFrom)

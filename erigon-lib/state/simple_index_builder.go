@@ -177,6 +177,7 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *
 	if err != nil {
 		return nil, err
 	}
+	defer rs.Close()
 
 	s.kf.Refresh()
 	defer s.kf.Close()
