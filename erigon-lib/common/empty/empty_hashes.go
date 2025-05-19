@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 )
 
+// `empty` package doesn't have any dependencies by intention - to reduce future "circular deps problems"
 var (
 	// RootHash is the known root hash of an empty merkle trie.
 	RootHash = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
