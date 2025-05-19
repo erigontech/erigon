@@ -161,7 +161,7 @@ func (t *muxTracer) OnCodeChange(a common.Address, prevCodeHash common.Hash, pre
 	}
 }
 
-func (t *muxTracer) OnStorageChange(addr common.Address, slot *common.Hash, prev uint256.Int, new uint256.Int) {
+func (t *muxTracer) OnStorageChange(addr common.Address, slot common.Hash, prev uint256.Int, new uint256.Int) {
 	for _, t := range t.tracers {
 		if t.OnStorageChange != nil {
 			t.OnStorageChange(addr, slot, prev, new)

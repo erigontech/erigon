@@ -692,6 +692,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 			if err != nil {
 				t.Fatal(err)
 			}
+			defer rs.Close()
 
 			if err = rs.AddKey([]byte("first_key"), 0); err != nil {
 				t.Error(err)

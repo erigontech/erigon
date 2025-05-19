@@ -247,7 +247,7 @@ func (b *SimulatedBackend) StorageAt(ctx context.Context, contract common.Addres
 
 	stateDB := b.stateByBlockNumber(tx, blockNumber)
 	var val uint256.Int
-	stateDB.GetState(contract, &key, &val)
+	stateDB.GetState(contract, key, &val)
 	return val.Bytes(), nil
 }
 

@@ -475,7 +475,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 		p = dataPos + dataLen
 	}
 	if slot.Type == SetCodeTxnType {
-		slot.Authorities = make([]*common.Address, 0)
+		slot.AuthAndNonces = make([]AuthAndNonce, 0)
 		dataPos, dataLen, err = rlp.ParseList(payload, p)
 		if err != nil {
 			return 0, fmt.Errorf("%w: authorizations len: %s", ErrParseTxn, err) //nolint
@@ -519,7 +519,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 			if err != nil {
 				return 0, fmt.Errorf("%w: recover authorization signer: %s stack: %s", ErrParseTxn, err, dbg.Stack()) //nolint
 			}
-			slot.Authorities = append(slot.Authorities, authority)
+			slot.AuthAndNonces = append(slot.AuthAndNonces, AuthAndNonce{authority.String(), auth.Nonce})
 			authPos += authLen
 			if authPos != p2 {
 				return 0, fmt.Errorf("%w: authorization: unexpected list items", ErrParseTxn)
@@ -814,6 +814,11 @@ func getData(payload []byte, p int) ([]byte, int, error) {
 	return payload[dataPos : dataPos+dataLen], dataPos + dataLen, nil
 }
 
+type AuthAndNonce struct {
+	authority string
+	nonce     uint64
+}
+
 // TxnSlot contains information extracted from an Ethereum transaction, which is enough to manage it inside the transaction.
 // Also, it contains some auxiliary information, like ephemeral fields, and indices within priority queues
 type TxnSlot struct {
@@ -842,7 +847,7 @@ type TxnSlot struct {
 	Commitments []gokzg4844.KZGCommitment
 	Proofs      []gokzg4844.KZGProof
 
-	Authorities []*common.Address // Indexed authorization signers for EIP-7702 txns (type-4)
+	AuthAndNonces []AuthAndNonce // Indexed authorization signers + nonces for EIP-7702 txns (type-4)
 
 	// RIP-7560: account abstraction
 	SenderAddress, Paymaster, Deployer                               *common.Address

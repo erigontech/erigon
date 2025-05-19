@@ -298,7 +298,7 @@ func (s *SnapshotStore) Events(ctx context.Context, start, end uint64) ([][]byte
 				return result, nil
 			}
 
-			result = append(result, bytes.Clone(common.Copy(buf[length.Hash+length.BlockNum+8:])))
+			result = append(result, bytes.Clone(buf[length.Hash+length.BlockNum+8:]))
 		}
 	}
 

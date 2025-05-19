@@ -111,7 +111,7 @@ func (s *Stateless) ReadAccountData(address common.Address) (*accounts.Account, 
 
 // ReadAccountStorage is a part of the StateReader interface
 // This implementation attempts to look up the storage in the state trie, and fails if it is not found
-func (s *Stateless) ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error) {
+func (s *Stateless) ReadAccountStorage(address common.Address, key common.Hash) ([]byte, error) {
 	if s.trace {
 		fmt.Printf("Stateless: ReadAccountStorage(address=%x, key=%x)\n", address.Bytes(), key.Bytes())
 	}

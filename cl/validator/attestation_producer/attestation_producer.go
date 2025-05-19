@@ -156,7 +156,6 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseStat
 		}
 		return solid.AttestationData{
 			Slot:            slot,
-			CommitteeIndex:  committeeIndex,
 			BeaconBlockRoot: beaconBlockRoot,
 			Source:          baseAttestationData.Source,
 			Target:          targetCheckpoint,
@@ -201,7 +200,6 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseStat
 
 	return solid.AttestationData{
 		Slot:            slot,
-		CommitteeIndex:  committeeIndex,
 		BeaconBlockRoot: baseStateBlockRoot,
 		Source:          baseAttestationData.Source,
 		Target:          targetCheckpoint,

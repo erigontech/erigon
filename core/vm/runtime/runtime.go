@@ -21,7 +21,6 @@ package runtime
 
 import (
 	"context"
-	"github.com/erigontech/erigon-lib/types"
 	"math"
 	"math/big"
 	"os"
@@ -40,6 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state3 "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
@@ -57,7 +57,6 @@ type Config struct {
 	GasLimit    uint64
 	GasPrice    *uint256.Int
 	Value       *uint256.Int
-	Debug       bool
 	EVMConfig   vm.Config
 	BaseFee     *uint256.Int
 

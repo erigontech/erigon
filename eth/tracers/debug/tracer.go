@@ -457,7 +457,7 @@ func (t *Tracer) OnCodeChange(address common.Address, prevCodeHash common.Hash, 
 	})
 }
 
-func (t *Tracer) OnStorageChange(address common.Address, slot *common.Hash, prev, new uint256.Int) {
+func (t *Tracer) OnStorageChange(address common.Address, slot common.Hash, prev, new uint256.Int) {
 	if t.recordOptions.DisableOnStorageChangeRecording {
 		return
 	}
@@ -729,7 +729,7 @@ type OnCodeChangeTrace struct {
 
 type OnStorageChangeTrace struct {
 	Address common.Address `json:"address,omitempty"`
-	Slot    *common.Hash   `json:"slot,omitempty"`
+	Slot    common.Hash    `json:"slot,omitempty"`
 	Prev    uint256.Int    `json:"prev,omitempty"`
 	New     uint256.Int    `json:"new,omitempty"`
 }

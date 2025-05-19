@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"hash"
 	"slices"
-	"sync"
 
 	"github.com/holiman/uint256"
 
@@ -33,7 +32,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/vm/stack"
 )
 
 // Config are the configuration options for the Interpreter
@@ -50,12 +48,6 @@ type Config struct {
 
 	ExtraEips []int // Additional EIPS that are to be enabled
 
-}
-
-var pool = sync.Pool{
-	New: func() any {
-		return NewMemory()
-	},
 }
 
 func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
@@ -79,7 +71,7 @@ type Interpreter interface {
 // but not transients like pc and gas
 type ScopeContext struct {
 	Memory   *Memory
-	Stack    *stack.Stack
+	Stack    *Stack
 	Contract *Contract
 }
 
@@ -98,7 +90,7 @@ func (ctx *ScopeContext) StackData() []uint256.Int {
 	if ctx.Stack == nil {
 		return nil
 	}
-	return ctx.Stack.Data
+	return ctx.Stack.data
 }
 
 // Caller returns the current caller.
@@ -238,9 +230,9 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	in.returnData = nil
 
 	var (
-		op          OpCode // current opcode
-		mem         = pool.Get().(*Memory)
-		locStack    = stack.New()
+		op          OpCode        // current opcode
+		mem         = NewMemory() // bound memory
+		locStack    = New()
 		callContext = &ScopeContext{
 			Memory:   mem,
 			Stack:    locStack,
@@ -257,9 +249,8 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		gasCopy uint64 // for Tracer to log gas remaining before execution
 		logged  bool   // deferred Tracer should ignore already logged steps
 		res     []byte // result of the opcode execution function
+		debug   = in.cfg.Tracer != nil && (in.cfg.Tracer.OnOpcode != nil || in.cfg.Tracer.OnGasChange != nil || in.cfg.Tracer.OnFault != nil)
 	)
-
-	mem.Reset()
 
 	contract.Input = input
 
@@ -273,7 +264,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	in.depth++
 	defer func() {
 		// first: capture data/memory/state/depth/etc... then clenup them
-		if in.cfg.Tracer != nil && err != nil {
+		if debug && err != nil {
 			if !logged && in.cfg.Tracer.OnOpcode != nil {
 				in.cfg.Tracer.OnOpcode(pcCopy, byte(op), gasCopy, cost, callContext, in.returnData, in.depth, VMErrorFromErr(err))
 			}
@@ -282,8 +273,8 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			}
 		}
 		// this function must execute _after_: the `CaptureState` needs the stacks before
-		pool.Put(mem)
-		stack.ReturnNormalStack(locStack)
+		mem.free()
+		ReturnNormalStack(locStack)
 		if restoreReadonly {
 			in.readOnly = false
 		}
@@ -300,7 +291,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		if steps%1000 == 0 && in.evm.Cancelled() {
 			break
 		}
-		if in.cfg.Tracer != nil {
+		if debug {
 			// Capture pre-execution values for tracing.
 			logged, pcCopy, gasCopy = false, _pc, contract.Gas
 		}
@@ -310,7 +301,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		operation := in.jt[op]
 		cost = operation.constantGas // For tracing
 		// Validate stack
-		if sLen := locStack.Len(); sLen < operation.numPop {
+		if sLen := locStack.len(); sLen < operation.numPop {
 			return nil, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
 		} else if sLen > operation.maxStack {
 			return nil, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
@@ -348,21 +339,21 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 				return nil, ErrOutOfGas
 			}
 			// Do tracing before memory expansion
-			if in.cfg.Tracer != nil {
-				if in.evm.config.Tracer.OnOpcode != nil {
-					in.evm.config.Tracer.OnOpcode(_pc, byte(op), gasCopy, cost, callContext, in.returnData, in.depth, VMErrorFromErr(err))
+			if debug {
+				if in.cfg.Tracer.OnOpcode != nil {
+					in.cfg.Tracer.OnOpcode(_pc, byte(op), gasCopy, cost, callContext, in.returnData, in.depth, VMErrorFromErr(err))
 					logged = true
 				}
 			}
 			if memorySize > 0 {
 				mem.Resize(memorySize)
 			}
-		} else if in.cfg.Tracer != nil {
-			if in.evm.config.Tracer.OnGasChange != nil {
-				in.evm.config.Tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
+		} else if debug {
+			if in.cfg.Tracer.OnGasChange != nil {
+				in.cfg.Tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
 			}
-			if in.evm.config.Tracer.OnOpcode != nil {
-				in.evm.config.Tracer.OnOpcode(_pc, byte(op), gasCopy, cost, callContext, in.returnData, in.depth, VMErrorFromErr(err))
+			if in.cfg.Tracer.OnOpcode != nil {
+				in.cfg.Tracer.OnOpcode(_pc, byte(op), gasCopy, cost, callContext, in.returnData, in.depth, VMErrorFromErr(err))
 				logged = true
 			}
 		}
@@ -379,7 +370,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		err = nil // clear stop token error
 	}
 
-	ret = append(ret, res...)
+	ret = res
 	return
 }
 

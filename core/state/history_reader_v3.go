@@ -96,11 +96,11 @@ func (hr *HistoryReaderV3) ReadAccountDataForDebug(address common.Address) (*acc
 	return hr.ReadAccountData(address)
 }
 
-func (hr *HistoryReaderV3) ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error) {
+func (hr *HistoryReaderV3) ReadAccountStorage(address common.Address, key common.Hash) ([]byte, error) {
 	hr.composite = append(append(hr.composite[:0], address[:]...), key[:]...)
 	enc, _, err := hr.ttx.GetAsOf(kv.StorageDomain, hr.composite, hr.txNum)
 	if hr.trace {
-		fmt.Printf("ReadAccountStorage [%x] [%x] => [%x]\n", address, *key, enc)
+		fmt.Printf("ReadAccountStorage [%x] [%x] => [%x]\n", address, key, enc)
 	}
 	return enc, err
 }

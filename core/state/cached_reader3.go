@@ -69,7 +69,7 @@ func (r *CachedReader3) ReadAccountDataForDebug(address common.Address) (*accoun
 	return &a, nil
 }
 
-func (r *CachedReader3) ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error) {
+func (r *CachedReader3) ReadAccountStorage(address common.Address, key common.Hash) ([]byte, error) {
 	compositeKey := append(address[:], key[:]...)
 	enc, err := r.cache.Get(compositeKey)
 	if err != nil {
