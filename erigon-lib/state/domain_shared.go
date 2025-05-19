@@ -28,6 +28,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/erigontech/erigon-lib/common/empty"
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/commitment"
@@ -1037,7 +1038,7 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 		return nil, err
 	}
 
-	u = &commitment.Update{CodeHash: commitment.EmptyCodeHashArray}
+	u = &commitment.Update{CodeHash: empty.CodeHash}
 	if len(encAccount) == 0 {
 		u.Flags = commitment.DeleteUpdate
 		return u, nil
