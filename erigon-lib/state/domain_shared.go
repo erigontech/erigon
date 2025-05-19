@@ -138,14 +138,6 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 		return nil, err
 	}
 
-	// enable concurrent commitment if we are using concurrent patricia trie
-	if pt, ok := sd.sdCtx.patriciaTrie.(*commitment.ConcurrentPatriciaHashed); ok {
-		nextConcurrent, err := pt.CanDoConcurrentNext()
-		if err != nil {
-			return nil, err
-		}
-		sd.sdCtx.updates.SetConcurrentCommitment(nextConcurrent)
-	}
 	return sd, nil
 }
 
@@ -1183,10 +1175,6 @@ const keyCommitmentStateS = "state"
 
 var keyCommitmentState = []byte(keyCommitmentStateS)
 
-func (sd *SharedDomains) LatestCommitmentState(tx kv.Tx) (blockNum, txNum uint64, state []byte, err error) {
-	return sd.sdCtx.LatestCommitmentState()
-}
-
 func _decodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
 	return binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16])
 }
@@ -1207,6 +1195,18 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState() (blockNum, tx
 
 	txNum, blockNum = _decodeTxBlockNums(state)
 	return blockNum, txNum, state, nil
+}
+
+// enable concurrent commitment if we are using concurrent patricia trie and this trie diverges on very top (first branch is straight at nibble 0)
+func (sdc *SharedDomainsCommitmentContext) enableConcurrentCommitmentIfPossible() error {
+	if pt, ok := sdc.patriciaTrie.(*commitment.ConcurrentPatriciaHashed); ok {
+		nextConcurrent, err := pt.CanDoConcurrentNext()
+		if err != nil {
+			return err
+		}
+		sdc.updates.SetConcurrentCommitment(nextConcurrent)
+	}
+	return nil
 }
 
 // SeekCommitment searches for last encoded state from DomainCommitted
@@ -1232,6 +1232,9 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 		}
 		sdc.sharedDomains.SetBlockNum(blockNum)
 		sdc.sharedDomains.SetTxNum(txNum)
+		if err = sdc.enableConcurrentCommitmentIfPossible(); err != nil {
+			return 0, 0, false, err
+		}
 		return blockNum, txNum, true, nil
 	}
 	// handle case when we have no commitment, but have executed blocks
@@ -1263,6 +1266,9 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 	}
 	if sdc.sharedDomains.trace {
 		fmt.Printf("rebuilt commitment %x bn=%d txn=%d\n", newRh, blockNum, txNum)
+	}
+	if err = sdc.enableConcurrentCommitmentIfPossible(); err != nil {
+		return 0, 0, false, err
 	}
 	return blockNum, txNum, true, nil
 }
