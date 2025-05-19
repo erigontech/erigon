@@ -222,7 +222,7 @@ func (t *ValidationRulesTracer) isAssociatedStorage(slot libcommon.Hash, addr li
 	return false
 }
 
-func (t *ValidationRulesTracer) OnStorageChange(addr libcommon.Address, slot *libcommon.Hash, prev, new uint256.Int) {
+func (t *ValidationRulesTracer) OnStorageChange(addr libcommon.Address, slot libcommon.Hash, prev, new uint256.Int) {
 	if t.err != nil {
 		return
 	}
@@ -236,7 +236,7 @@ func (t *ValidationRulesTracer) OnStorageChange(addr libcommon.Address, slot *li
 		return
 	}
 
-	if !t.isAssociatedStorage(*slot, t.senderAddress) {
+	if !t.isAssociatedStorage(slot, t.senderAddress) {
 		t.err = fmt.Errorf("access to non-associated storage slot %s in account %s", slot.Hex(), addr.Hex())
 		return
 	}
