@@ -111,8 +111,10 @@ func (back *RemoteBackend) BlockByHash(ctx context.Context, db kv.Tx, hash commo
 	block, _, err := back.BlockWithSenders(ctx, db, hash, *number)
 	return block, err
 }
-func (back *RemoteBackend) TxsV3Enabled() bool                        { panic("not implemented") }
-func (back *RemoteBackend) Snapshots() snapshotsync.BlockSnapshots    { panic("not implemented") }
+func (back *RemoteBackend) TxsV3Enabled() bool { panic("not implemented") }
+func (back *RemoteBackend) Snapshots() snapshotsync.BlockSnapshots {
+	return back.blockReader.Snapshots()
+}
 func (back *RemoteBackend) BorSnapshots() snapshotsync.BlockSnapshots { panic("not implemented") }
 
 func (back *RemoteBackend) Ready(ctx context.Context) <-chan error {

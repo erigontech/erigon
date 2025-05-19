@@ -534,6 +534,7 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 			if !smthDone {
 				break
 			}
+			a.onFilesChange(nil)
 		}
 
 		keyIter.Close()

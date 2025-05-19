@@ -578,7 +578,6 @@ type ReaderV3 struct {
 
 func NewReaderV3(tx kv.TemporalGetter) *ReaderV3 {
 	return &ReaderV3{
-		//trace:     true,
 		tx:        tx,
 		composite: make([]byte, 20+32),
 	}
