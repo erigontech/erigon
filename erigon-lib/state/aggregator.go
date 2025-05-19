@@ -302,19 +302,12 @@ func (a *Aggregator) OpenList(files []string, readonly bool) error {
 	return a.OpenFolder()
 }
 
-func (a *Aggregator) waitForBuildAndMerge() {
-	for !a.buildingFiles.Load() || !a.mergingFiles.Load() {
-		time.Sleep(100 * time.Millisecond)
-	}
-}
-
 func (a *Aggregator) Close() {
 	if a.ctxCancel == nil { // invariant: it's safe to call Close multiple times
 		return
 	}
 	a.ctxCancel()
 	a.ctxCancel = nil
-	a.waitForBuildAndMerge()
 	a.wg.Wait()
 
 	a.dirtyFilesLock.Lock()
@@ -411,7 +404,7 @@ func (a *Aggregator) LS() {
 	}
 }
 
-func (a *Aggregator) WaitForBuildAndMerge(ctx context.Context) chan struct{} {
+func (a *Aggregator) WaitForBuildAndMerge() chan struct{} {
 	res := make(chan struct{})
 	go func() {
 		defer close(res)
@@ -420,8 +413,6 @@ func (a *Aggregator) WaitForBuildAndMerge(ctx context.Context) chan struct{} {
 		defer chkEvery.Stop()
 		for a.buildingFiles.Load() || a.mergingFiles.Load() {
 			select {
-			case <-ctx.Done():
-				return
 			case <-chkEvery.C: //TODO: more reliable notification
 			}
 		}
