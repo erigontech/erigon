@@ -182,7 +182,7 @@ const (
 )
 
 var (
-	EmptyRootHashBytes = empty.RootHash.Bytes()
+	emptyRootHashBytes = empty.RootHash.Bytes()
 )
 
 func (cell *cell) hashAccKey(keccak keccakState, depth int) error {
@@ -885,7 +885,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 		copy(cell.hash[:], storageRootHash[:])
 		cell.hashLen = len(storageRootHash)
 	} else {
-		buf = append(buf, EmptyRootHashBytes...)
+		buf = append(buf, emptyRootHashBytes...)
 	}
 	return buf, storageRootHashIsSet, storageRootHash[:], nil
 }
@@ -1031,7 +1031,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 		copy(cell.hash[:], storageRootHash[:])
 		cell.hashLen = len(storageRootHash)
 	} else {
-		buf = append(buf, EmptyRootHashBytes...)
+		buf = append(buf, emptyRootHashBytes...)
 	}
 	return buf, nil
 }

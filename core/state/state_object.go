@@ -35,8 +35,6 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 )
 
-var emptyCodeHash = empty.CodeHash
-
 type Code []byte
 
 func (c Code) String() string {
@@ -92,7 +90,7 @@ type stateObject struct {
 
 // empty returns whether the account is considered empty.
 func (so *stateObject) empty() bool {
-	return so.data.Nonce == 0 && so.data.Balance.IsZero() && (so.data.CodeHash == emptyCodeHash)
+	return so.data.Nonce == 0 && so.data.Balance.IsZero() && (so.data.CodeHash == empty.RootHash)
 }
 
 // newObject creates a state object.
@@ -110,7 +108,7 @@ func newObject(db *IntraBlockState, address common.Address, data, original *acco
 		so.data.Initialised = true
 	}
 	if so.data.CodeHash == (common.Hash{}) {
-		so.data.CodeHash = emptyCodeHash
+		so.data.CodeHash = empty.RootHash
 	}
 	if so.data.Root == (common.Hash{}) {
 		so.data.Root = trie.EmptyRoot
@@ -328,7 +326,7 @@ func (so *stateObject) Code() []byte {
 	if so.code != nil {
 		return so.code
 	}
-	if so.data.CodeHash == emptyCodeHash {
+	if so.data.CodeHash == empty.RootHash {
 		return nil
 	}
 	code, err := so.db.stateReader.ReadAccountCode(so.Address())
