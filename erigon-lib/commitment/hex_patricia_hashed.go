@@ -888,7 +888,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 		copy(cell.hash[:], storageRootHash[:])
 		cell.hashLen = len(storageRootHash)
 	} else {
-		buf = append(buf, empty.RootHash...)
+		buf = append(buf, EmptyRootHashBytes...)
 	}
 	return buf, storageRootHashIsSet, storageRootHash[:], nil
 }
@@ -978,7 +978,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 			} else if cell.hashLen > 0 {
 				storageRootHash = cell.hash
 			} else {
-				storageRootHash = *(*[length.Hash]byte)(EmptyRootHash)
+				storageRootHash = empty.RootHash
 			}
 		}
 		if !cell.loaded.account() {
@@ -1034,7 +1034,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 		copy(cell.hash[:], storageRootHash[:])
 		cell.hashLen = len(storageRootHash)
 	} else {
-		buf = append(buf, EmptyRootHash...)
+		buf = append(buf, EmptyRootHashBytes...)
 	}
 	return buf, nil
 }
