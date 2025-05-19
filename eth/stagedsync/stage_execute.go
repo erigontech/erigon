@@ -330,14 +330,14 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, cfg *ExecuteBlockCfg, bl
 
 	for _, sender := range senders {
 		a, _ := stateReader.ReadAccountData(sender)
-		if a == nil || a.Incarnation == 0 { //TODO: incarnation is always 0 in E3?
+		if a == nil {
 			continue
 		}
 
-		//TODO: can get MPH false positives?
-		//if code, _ := stateReader.ReadAccountCode(sender); len(code) > 0 {
-		//	_, _ = code[0], code[len(code)-1]
-		//}
+		//Code domain using .bt index - means no false-positives
+		if code, _ := stateReader.ReadAccountCode(sender); len(code) > 0 {
+			_, _ = code[0], code[len(code)-1]
+		}
 	}
 
 	for _, txn := range block.Transactions() {
@@ -346,13 +346,12 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, cfg *ExecuteBlockCfg, bl
 			continue
 		}
 		a, _ := stateReader.ReadAccountData(*to)
-		_ = a
-		//if a == nil || a.Incarnation == 0 {
-		//	continue
-		//}
-		//if code, _ := stateReader.ReadAccountCode(*to); len(code) > 0 {
-		//	_, _ = code[0], code[len(code)-1]
-		//}
+		if a == nil {
+			continue
+		}
+		if code, _ := stateReader.ReadAccountCode(*to); len(code) > 0 {
+			_, _ = code[0], code[len(code)-1]
+		}
 	}
 	_, _ = stateReader.ReadAccountData(block.Coinbase())
 
