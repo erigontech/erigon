@@ -69,6 +69,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.HTTPApiFlag,
 	&utils.WSPortFlag,
 	&utils.WSEnabledFlag,
+	&utils.WSSubscribeLogsChannelSize,
 	&utils.WSListenAddrFlag,
 	&utils.WSApiFlag,
 	&utils.WsCompressionFlag,
