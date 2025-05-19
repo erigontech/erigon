@@ -265,7 +265,7 @@ func runCmd(ctx *cli.Context) error {
 	if tracer != nil {
 		runtimeConfig.EVMConfig.Tracer = tracer.Hooks
 	}
-	runtimeConfig.EVMConfig.JumpDestCache = vm.NewJumpDestCache(128)
+	runtimeConfig.EVMConfig.JumpDestCache = vm.NewJumpDestCache(16)
 
 	if cpuProfilePath := ctx.String(CPUProfileFlag.Name); cpuProfilePath != "" {
 		f, err := os.Create(cpuProfilePath)
