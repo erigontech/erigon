@@ -91,6 +91,11 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (err erro
 	return nil
 }
 
+func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
+	rootHash, err = sd.sdCtx.ComputeCommitment(ctx, saveStateAfter, blockNum, logPrefix)
+	return
+}
+
 // replaceShortenedKeysInBranch replaces shortened keys in the branch with full keys
 func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch commitment.BranchData, fStartTxNum uint64, fEndTxNum uint64, aggTx *AggregatorRoTx) (commitment.BranchData, error) {
 	logger := sd.logger

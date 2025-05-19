@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -26,12 +27,14 @@ import (
 type SharedDomainsCommitmentContext struct {
 	mu            sync.Mutex // protects reads from sharedDomains when trie is concurrent
 	sharedDomains *SharedDomains
-	updates       *commitment.Updates
-	patriciaTrie  commitment.Trie
-	justRestored  atomic.Bool // set to true when commitment trie was just restored from snapshot
+
+	updates      *commitment.Updates
+	patriciaTrie commitment.Trie
+	justRestored atomic.Bool // set to true when commitment trie was just restored from snapshot
 
 	limitReadAsOfTxNum uint64
 	domainsOnly        bool // if true, do not use history reader and limit to domain files only
+	trace              bool
 }
 
 // Limits max txNum for read operations. If set to 0, all read operations will be from latest value.
@@ -64,7 +67,7 @@ func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, 
 	// Keep dereferenced version inside sd commitmentDomain map ready to read again
 	if !sdc.domainsOnly && sdc.limitReadAsOfTxNum > 0 {
 		branch, _, err := sdc.sharedDomains.roTtx.GetAsOf(kv.CommitmentDomain, pref, sdc.limitReadAsOfTxNum)
-		if sdc.sharedDomains.trace {
+		if sdc.trace {
 			fmt.Printf("[SDC] Branch @%d: %x: %x\n%s\n", sdc.limitReadAsOfTxNum, pref, branch, commitment.BranchData(branch).String())
 		}
 		if err != nil {
@@ -75,11 +78,11 @@ func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, 
 
 	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update.
 	// Dereferenced branch is kept inside sharedDomains commitment domain map (but not written into buffer so not flushed into db, unless updated)
-	v, step, err := sdc.sharedDomains.LatestCommitment(pref)
+	v, step, err := sdc.sharedDomains.GetLatest(kv.CommitmentDomain, pref)
 	if err != nil {
 		return nil, 0, fmt.Errorf("branch failed: %w", err)
 	}
-	if sdc.sharedDomains.trace {
+	if sdc.trace {
 		fmt.Printf("[SDC] Branch: %x: %x\n", pref, v)
 	}
 	if len(v) == 0 {
@@ -92,39 +95,21 @@ func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte,
 	if sdc.limitReadAsOfTxNum > 0 && !sdc.domainsOnly { // do not store branches if explicitly operate on history
 		return nil
 	}
-	prefixS := toStringZeroCopy(prefix)
-	if sdc.sharedDomains.trace {
+	if sdc.trace {
 		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
 	}
 	if sdc.patriciaTrie.Variant() == commitment.VariantConcurrentHexPatricia {
 		sdc.mu.Lock()
 		defer sdc.mu.Unlock()
 	}
-	return sdc.sharedDomains.updateCommitmentData(prefixS, data, prevData, prevStep)
+
+	var tpx kv.TemporalPutDel
+	tpx = sdc.sharedDomains
+
+	return tpx.DomainPut(kv.CommitmentDomain, prefix, nil, data, prevData, prevStep)
 }
 
-func (sdc *SharedDomainsCommitmentContext) readAccount(plainKey []byte) (encAccount []byte, err error) {
-	if sdc.patriciaTrie.Variant() == commitment.VariantConcurrentHexPatricia {
-		sdc.mu.Lock()
-		defer sdc.mu.Unlock()
-	}
-
-	if sdc.limitReadAsOfTxNum > 0 { // read not from latest
-		if sdc.domainsOnly { // read from previous files
-			encAccount, _, err = sdc.sharedDomains.getLatestFromFiles(kv.AccountsDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
-		} else { // read from history
-			encAccount, _, err = sdc.sharedDomains.roTtx.GetAsOf(kv.AccountsDomain, plainKey, sdc.limitReadAsOfTxNum)
-		}
-	} else { // read latest value from domain
-		encAccount, _, err = sdc.sharedDomains.GetLatest(kv.AccountsDomain, plainKey)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("GetAccount failed (latest=%t): %w", sdc.limitReadAsOfTxNum == 0, err)
-	}
-	return encAccount, nil
-}
-
-func (sdc *SharedDomainsCommitmentContext) readCode(plainKey []byte) (code []byte, err error) {
+func (sdc *SharedDomainsCommitmentContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, err error) {
 	if sdc.patriciaTrie.Variant() == commitment.VariantConcurrentHexPatricia {
 		sdc.mu.Lock()
 		defer sdc.mu.Unlock()
@@ -132,44 +117,22 @@ func (sdc *SharedDomainsCommitmentContext) readCode(plainKey []byte) (code []byt
 
 	if sdc.limitReadAsOfTxNum > 0 {
 		if sdc.domainsOnly {
-			code, _, err = sdc.sharedDomains.getLatestFromFiles(kv.CodeDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
+			enc, _, _, _, err = sdc.sharedDomains.roTtx.Debug().GetLatestFromFiles(d, plainKey, sdc.limitReadAsOfTxNum)
 		} else {
-			code, _, err = sdc.sharedDomains.roTtx.GetAsOf(kv.CodeDomain, plainKey, sdc.limitReadAsOfTxNum)
+			enc, _, err = sdc.sharedDomains.roTtx.GetAsOf(d, plainKey, sdc.limitReadAsOfTxNum)
 		}
 	} else {
-		code, _, err = sdc.sharedDomains.GetLatest(kv.CodeDomain, plainKey)
+		enc, _, err = sdc.sharedDomains.GetLatest(d, plainKey)
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("GetAccount/Code: failed to read code (latest=%t): %w", sdc.limitReadAsOfTxNum == 0, err)
-	}
-	return code, nil
-}
-
-func (sdc *SharedDomainsCommitmentContext) readStorage(plainKey []byte) (enc []byte, err error) {
-	if sdc.patriciaTrie.Variant() == commitment.VariantConcurrentHexPatricia {
-		sdc.mu.Lock()
-		defer sdc.mu.Unlock()
-	}
-
-	if sdc.limitReadAsOfTxNum > 0 {
-		if sdc.domainsOnly {
-			enc, _, err = sdc.sharedDomains.getLatestFromFiles(kv.StorageDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
-		} else {
-			enc, _, err = sdc.sharedDomains.roTtx.GetAsOf(kv.StorageDomain, plainKey, sdc.limitReadAsOfTxNum)
-		}
-	} else {
-		enc, _, err = sdc.sharedDomains.GetLatest(kv.StorageDomain, plainKey)
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("GetStorage: failed to read latest storage (latest=%t): %w", sdc.limitReadAsOfTxNum == 0, err)
+		return nil, fmt.Errorf("readDomain %q: failed to read latest storage (latest=%t): %w", d, sdc.limitReadAsOfTxNum == 0, err)
 	}
 	return enc, nil
 }
 
 func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitment.Update, err error) {
-	encAccount, err := sdc.readAccount(plainKey)
+	encAccount, err := sdc.readDomain(kv.AccountsDomain, plainKey)
 	if err != nil {
 		return nil, err
 	}
@@ -197,7 +160,7 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 	}
 
 	if assert.Enable {
-		code, err := sdc.readCode(plainKey)
+		code, err := sdc.readDomain(kv.CodeDomain, plainKey)
 		if err != nil {
 			return nil, err
 		}
@@ -213,7 +176,7 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 }
 
 func (sdc *SharedDomainsCommitmentContext) Storage(plainKey []byte) (u *commitment.Update, err error) {
-	enc, err := sdc.readStorage(plainKey)
+	enc, err := sdc.readDomain(kv.StorageDomain, plainKey)
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +207,7 @@ func (sdc *SharedDomainsCommitmentContext) Trie() commitment.Trie {
 	return sdc.patriciaTrie
 }
 
-// TouchPlainKey marks plainKey as updated and applies different fn for different key types
+// TouchKey marks plainKey as updated and applies different fn for different key types
 // (different behaviour for Code, Account and Storage key modifications).
 func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val []byte) {
 	if sdc.updates.Mode() == commitment.ModeDisabled {
@@ -279,8 +242,9 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
 
 	updateCount := sdc.updates.Size()
-	if sdc.sharedDomains.trace {
-		defer sdc.sharedDomains.logger.Trace("ComputeCommitment", "block", blockNum, "keys", updateCount, "mode", sdc.updates.Mode())
+	if sdc.trace {
+		start := time.Now()
+		defer log.Trace("ComputeCommitment", "block", blockNum, "keys", common.PrettyCounter(updateCount), "mode", sdc.updates.Mode(), "spent", time.Since(start))
 	}
 	if updateCount == 0 {
 		rootHash, err = sdc.patriciaTrie.RootHash()
@@ -288,7 +252,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	}
 
 	// data accessing functions should be set when domain is opened/shared context updated
-	sdc.patriciaTrie.SetTrace(sdc.sharedDomains.trace)
+	sdc.patriciaTrie.SetTrace(sdc.trace)
 	sdc.Reset()
 
 	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix)
@@ -298,7 +262,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	sdc.justRestored.Store(false)
 
 	if saveState {
-		if err := sdc.storeCommitmentState(blockNum, sdc.sharedDomains.txNum, rootHash); err != nil {
+		if err = sdc.encodeAndStoreCommitmentState(blockNum, sdc.sharedDomains.txNum, rootHash); err != nil {
 			return nil, err
 		}
 	}
@@ -402,7 +366,7 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 		sdc.sharedDomains.SetTxNum(0)
 		return 0, 0, false, err
 	}
-	if sdc.sharedDomains.trace {
+	if sdc.trace {
 		fmt.Printf("rebuilt commitment %x bn=%d txn=%d\n", newRh, blockNum, txNum)
 	}
 	if err = sdc.enableConcurrentCommitmentIfPossible(); err != nil {
@@ -412,7 +376,7 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 }
 
 // encodes current trie state and saves it in SharedDomains
-func (sdc *SharedDomainsCommitmentContext) storeCommitmentState(blockNum, txNum uint64, rootHash []byte) error {
+func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(blockNum, txNum uint64, rootHash []byte) error {
 	if sdc.sharedDomains.AggTx() == nil {
 		return fmt.Errorf("store commitment state: AggregatorContext is not initialized")
 	}
@@ -437,8 +401,7 @@ func (sdc *SharedDomainsCommitmentContext) storeCommitmentState(blockNum, txNum 
 
 	log.Debug("[commitment] store state", "block", blockNum, "txNum", txNum, "rootHash", rootHash)
 
-	sdc.sharedDomains.put(kv.CommitmentDomain, keyCommitmentStateS, encodedState)
-	return sdc.sharedDomains.domainWriters[kv.CommitmentDomain].PutWithPrev(keyCommitmentState, nil, encodedState, txNum, prevState, prevStep)
+	return sdc.sharedDomains.DomainPut(kv.CommitmentDomain, keyCommitmentState, nil, encodedState, prevState, prevStep)
 }
 
 // Encodes current trie state and returns it
@@ -504,7 +467,7 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 		return 0, 0, fmt.Errorf("failed restore state : %w", err)
 	}
 	sdc.justRestored.Store(true) // to prevent double reset
-	if sdc.sharedDomains.trace {
+	if sdc.trace {
 		rootHash, err := hext.RootHash()
 		if err != nil {
 			return 0, 0, fmt.Errorf("failed to get root hash after state restore: %w", err)

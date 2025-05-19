@@ -447,11 +447,6 @@ func (sd *SharedDomains) SetTrace(b bool) {
 	sd.trace = b
 }
 
-func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
-	rootHash, err = sd.sdCtx.ComputeCommitment(ctx, saveStateAfter, blockNum, logPrefix)
-	return
-}
-
 func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte) ([]byte, bool, error) {
 	var firstKey []byte
 	var hasPrefix bool
