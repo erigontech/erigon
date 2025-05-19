@@ -267,12 +267,6 @@ func (a *Aggregator) ReloadSalt() error {
 	return nil
 }
 
-func (a *Aggregator) DirtyFiles(forDomain kv.Domain) *btree.BTreeG[*filesItem] {
-	a.dirtyFilesLock.Lock()
-	defer a.dirtyFilesLock.Unlock()
-	return a.d[forDomain].dirtyFiles.Copy()
-}
-
 func (a *Aggregator) AddDependency(dependency kv.Domain, dependent kv.Domain) {
 	checker, ok := a.dependentMap[dependent]
 	if !ok {
@@ -280,7 +274,7 @@ func (a *Aggregator) AddDependency(dependency kv.Domain, dependent kv.Domain) {
 	}
 	checker.AddDependency(dependency, &DependentInfo{
 		domain:      dependent,
-		filesGetter: func() *btree.BTreeG[*filesItem] { return a.DirtyFiles(dependent) },
+		filesGetter: func() *btree.BTreeG[*filesItem] { return a.d[dependent].dirtyFiles },
 		accessors:   a.d[dependent].Accessors,
 	})
 }

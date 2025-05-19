@@ -51,25 +51,31 @@ func (d *DependencyIntegrityChecker) AddDependency(dependency kv.Domain, depende
 	d.dependencyMap[dependency] = arr
 }
 
-type ExistentialQuantifier int
+type Quantifier int
 
 const (
-	All ExistentialQuantifier = iota
-	Any                       = 1
+	All Quantifier = iota
+	Any            = 1
 )
 
-func (e ExistentialQuantifier) All() bool {
+func (e Quantifier) All() bool {
 	return e == All
 }
 
-func (e ExistentialQuantifier) Any() bool {
+func (e Quantifier) Any() bool {
 	return e == Any
 }
 
+// CheckDependentPresent checks if the dependent domain file is present. All/Any are the two quantifiers provided here
+// All: all dependent files are present
+// Any: there exists a dependent file, which is present
+// NOTE: the caller MUST hold a lock on btree2.BTreeG[*filesItem] returned by filesGetter.
+// examples:
 // dependency: account
-// is commitment.0-2 present? if no, don't use it for visibleFiles.
-// Also don't consider it for "consuming" (deleting) the smaller files commitment.0-1, 1-2
-func (d *DependencyIntegrityChecker) CheckDependentPresent(dependency kv.Domain, allOrAny ExistentialQuantifier, startTxNum, endTxNum uint64) (IsPresent bool) {
+// is (dependent) commitment.0-2 present?
+// - if no, don't use it for visibleFiles.
+// - Also don't consider it for "consuming" (deleting) the smaller files commitment.0-1, 1-2
+func (d *DependencyIntegrityChecker) CheckDependentPresent(dependency kv.Domain, allOrAny Quantifier, startTxNum, endTxNum uint64) (IsPresent bool) {
 	arr, ok := d.dependencyMap[dependency]
 	if !ok {
 		return true
