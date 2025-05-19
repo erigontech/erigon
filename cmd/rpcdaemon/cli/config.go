@@ -489,6 +489,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		onNewSnapshot = func() {
 			wg.Go(func() (err error) {
 				// don't block events processing by network communication
+				logger.Info("on new snapshots triggered...")
 				reply, err := remoteKvClient.Snapshots(ctx, &remote.SnapshotsRequest{}, grpc.WaitForReady(true))
 				if err != nil {
 					logger.Warn("[snapshots] reopen", "err", err)
