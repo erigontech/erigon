@@ -560,10 +560,6 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.Tx, blockNum uint
 					Hooks:            te.hooks,
 				}
 
-				if te.cfg.genesis != nil {
-					txTask.Config = te.cfg.genesis.Config
-				}
-
 				txTasks = append(txTasks, txTask)
 				inputTxNum++
 			}
