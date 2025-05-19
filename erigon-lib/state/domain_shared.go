@@ -1218,6 +1218,9 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 	}
 	if state != nil {
 		blockNum, txNum, err = sdc.restorePatriciaState(state)
+		if err != nil {
+			return 0, 0, false, err
+		}
 		if blockNum > 0 {
 			lastBn, _, err := rawdbv3.TxNums.Last(tx)
 			if err != nil {
