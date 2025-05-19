@@ -284,7 +284,7 @@ func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l Accessors, trace bool,
 				}
 				continue
 			}
-			if !checkFilesItemFields(item, l, trace) {
+			if !checkForVisibility(item, l, trace) {
 				continue
 			}
 
@@ -315,7 +315,7 @@ func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l Accessors, trace bool,
 	return newVisibleFiles
 }
 
-func checkFilesItemFields(item *filesItem, l Accessors, trace bool) (ok bool) {
+func checkForVisibility(item *filesItem, l Accessors, trace bool) (canBeVisible bool) {
 	if item.canDelete.Load() {
 		if trace {
 			log.Warn("[dbg] canDelete=true", "f", item.decompressor.FileName())
@@ -330,21 +330,21 @@ func checkFilesItemFields(item *filesItem, l Accessors, trace bool) (ok bool) {
 	}
 	if l.Has(AccessorBTree) && item.bindex == nil {
 		if trace {
-			log.Warn("[dbg] calcVisibleFiles: BTindex not opened", "f", item.decompressor.FileName())
+			log.Warn("[dbg] checkForVisibility: BTindex not opened", "f", item.decompressor.FileName())
 		}
 		//panic(fmt.Errorf("btindex nil: %s", item.decompressor.FileName()))
 		return false
 	}
 	if l.Has(AccessorHashMap) && item.index == nil {
 		if trace {
-			log.Warn("[dbg] calcVisibleFiles: RecSplit not opened", "f", item.decompressor.FileName())
+			log.Warn("[dbg] checkForVisibility: RecSplit not opened", "f", item.decompressor.FileName())
 		}
 		//panic(fmt.Errorf("index nil: %s", item.decompressor.FileName()))
 		return false
 	}
 	if l.Has(AccessorExistence) && item.existence == nil {
 		if trace {
-			log.Warn("[dbg] calcVisibleFiles: Existence not opened", "f", item.decompressor.FileName())
+			log.Warn("[dbg] checkForVisibility: Existence not opened", "f", item.decompressor.FileName())
 		}
 		//panic(fmt.Errorf("existence nil: %s", item.decompressor.FileName()))
 		return false

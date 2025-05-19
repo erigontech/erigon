@@ -15,10 +15,10 @@ import (
 )
 
 func TestDependency(t *testing.T) {
-	// shouldn't allow to delete file
-	// commitment.0-1, 1-2
-	// account.0-1, 1-2, 0-2
-	// storage.0-1, 1-2, 0-2
+	// shouldn't pass dependency file not present in dependent
+	// commitment.0-1, 1-2 => 0-1, 1-2
+	// account.0-1, 1-2, 0-2 => 0-1, 1-2
+	// storage.0-1, 1-2, 0-2 => 0-1, 1-2
 
 	dirs := datadir.New(t.TempDir())
 	logger := log.New()

@@ -58,7 +58,8 @@ func (d *DependencyIntegrityChecker) AddDependency(dependency kv.Domain, depende
 }
 
 // dependency: account
-// is commitment.0-2 present? if no, don't delete account.0-2, also don't use it for visibleFiles...
+// is commitment.0-2 present? if no, don't use it for visibleFiles.
+// Also don't consider it for "consuming" (deleting) the smaller files commitment.0-1, 1-2
 func (d *DependencyIntegrityChecker) CheckAllDependentPresent(dependency kv.Domain, startTxNum, endTxNum uint64) (IsPresent bool) {
 	arr, ok := d.dependencyMap[dependency]
 	if !ok {
@@ -76,7 +77,7 @@ func (d *DependencyIntegrityChecker) CheckAllDependentPresent(dependency kv.Doma
 			return false
 		}
 
-		if !checkFilesItemFields(file, dependent.accessors, false) {
+		if !checkForVisibility(file, dependent.accessors, d.trace) {
 			if d.trace {
 				d.logger.Warn("[dbg: Depic]", "dependent", dependent.domain.String(), "startTxNum", startTxNum, "endTxNum", endTxNum, "found", true, "checkField", false)
 			}
