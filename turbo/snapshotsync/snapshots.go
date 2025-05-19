@@ -748,17 +748,6 @@ func (s *RoSnapshots) MadvSequential() *RoSnapshots {
 	return s
 }
 
-func (s *RoSnapshots) EnableMadvWillNeed() *RoSnapshots {
-	v := s.View()
-	defer v.Close()
-
-	for _, t := range s.enums {
-		for _, sn := range v.segments[t].Segments {
-			sn.src.MadvWillNeed()
-		}
-	}
-	return s
-}
 func (s *RoSnapshots) MadvNormal() *RoSnapshots {
 	v := s.View()
 	defer v.Close()
@@ -766,6 +755,18 @@ func (s *RoSnapshots) MadvNormal() *RoSnapshots {
 	for _, t := range s.enums {
 		for _, sn := range v.segments[t].Segments {
 			sn.src.MadvNormal()
+		}
+	}
+	return s
+}
+
+func (s *RoSnapshots) MadvWillNeed() *RoSnapshots {
+	v := s.View()
+	defer v.Close()
+
+	for _, t := range s.enums {
+		for _, sn := range v.segments[t].Segments {
+			sn.src.MadvWillNeed()
 		}
 	}
 	return s
