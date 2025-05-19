@@ -722,7 +722,7 @@ func (s *RoSnapshots) Ready(ctx context.Context) <-chan error {
 	return errc
 }
 
-// DisableReadAhead - usage: `defer d.EnableReadAhead().DisableReadAhead()`. Please don't use this funcs without `defer` to avoid leak.
+// DisableReadAhead - usage: `defer d.MadvSequential().DisableReadAhead()`. Please don't use this funcs without `defer` to avoid leak.
 func (s *RoSnapshots) DisableReadAhead() *RoSnapshots {
 	v := s.View()
 	defer v.Close()
@@ -735,13 +735,13 @@ func (s *RoSnapshots) DisableReadAhead() *RoSnapshots {
 	return s
 }
 
-func (s *RoSnapshots) EnableReadAhead() *RoSnapshots {
+func (s *RoSnapshots) MadvSequential() *RoSnapshots {
 	v := s.View()
 	defer v.Close()
 
 	for _, t := range s.enums {
 		for _, sn := range v.segments[t].Segments {
-			sn.src.EnableReadAhead()
+			sn.src.MadvSequential()
 		}
 	}
 
