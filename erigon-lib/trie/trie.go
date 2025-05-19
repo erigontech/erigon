@@ -118,7 +118,7 @@ func merge2FullNodes(node1, node2 *FullNode) (bool, error) {
 				// sanity check
 				return false, fmt.Errorf("child of first node is nil , but corresponding child of second node is non-nil")
 			}
-		} else { // child1 is not nil and not a hashnode
+		} else {                                    // child1 is not nil and not a hashnode
 			if _, ok2 := child2.(*HashNode); !ok2 { // if child2 is not hashnode, now they are expected to have the same type , if child2 is a hashnode then no changes are necessary to node1
 				if reflect.TypeOf(child1) != reflect.TypeOf(child2) { // sanity check
 					return false, fmt.Errorf("children have different types: %T != %T", child1, child2)
@@ -335,7 +335,7 @@ func (t *Trie) GetAccountCode(key []byte) (value []byte, gotValue bool) {
 
 	accNode, gotValue := t.getAccount(t.RootNode, hex, 0)
 	if accNode != nil {
-		if bytes.Equal(accNode.Account.CodeHash[:], EmptyCodeHash[:]) {
+		if bytes.Equal(accNode.Account.CodeHash[:], emptyCodeHash[:]) {
 			return nil, gotValue
 		}
 
@@ -357,7 +357,7 @@ func (t *Trie) GetAccountCodeSize(key []byte) (value int, gotValue bool) {
 
 	accNode, gotValue := t.getAccount(t.RootNode, hex, 0)
 	if accNode != nil {
-		if bytes.Equal(accNode.Account.CodeHash[:], EmptyCodeHash[:]) {
+		if bytes.Equal(accNode.Account.CodeHash[:], emptyCodeHash[:]) {
 			return 0, gotValue
 		}
 
@@ -593,7 +593,7 @@ func (t *Trie) NewLoadRequestForCode(addrHash common.Hash, codeHash common.Hash,
 }
 
 func (t *Trie) NeedLoadCode(addrHash common.Hash, codeHash common.Hash, bytecode bool) (bool, *LoadRequestForCode) {
-	if bytes.Equal(codeHash[:], EmptyCodeHash[:]) {
+	if bytes.Equal(codeHash[:], emptyCodeHash[:]) {
 		return false, nil
 	}
 
