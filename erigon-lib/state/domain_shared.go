@@ -207,38 +207,6 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.TemporalRwTx, block
 	return sd.Flush(ctx, rwTx)
 }
 
-func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.TemporalTx, blockNum uint64) ([]byte, error) {
-	it, err := roTx.HistoryRange(kv.StorageDomain, int(sd.TxNum()), math.MaxInt64, order.Asc, -1)
-	if err != nil {
-		return nil, err
-	}
-	defer it.Close()
-	for it.HasNext() {
-		k, _, err := it.Next()
-		if err != nil {
-			return nil, err
-		}
-		sd.sdCtx.TouchKey(kv.AccountsDomain, string(k), nil)
-	}
-
-	it, err = roTx.HistoryRange(kv.StorageDomain, int(sd.TxNum()), math.MaxInt64, order.Asc, -1)
-	if err != nil {
-		return nil, err
-	}
-	defer it.Close()
-
-	for it.HasNext() {
-		k, _, err := it.Next()
-		if err != nil {
-			return nil, err
-		}
-		sd.sdCtx.TouchKey(kv.StorageDomain, string(k), nil)
-	}
-
-	sd.sdCtx.Reset()
-	return sd.ComputeCommitment(ctx, true, blockNum, "rebuild commit")
-}
-
 // SeekCommitment lookups latest available commitment and sets it as current
 func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (err error) {
 	_, _, _, err = sd.sdCtx.SeekCommitment(ctx, tx)
@@ -1255,7 +1223,7 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 		return 0, 0, true, nil
 	}
 
-	newRh, err := sdc.sharedDomains.rebuildCommitment(ctx, sdc.sharedDomains.roTtx, blockNum)
+	newRh, err := sdc.rebuildCommitment(ctx, sdc.sharedDomains.roTtx, blockNum, txNum)
 	if err != nil {
 		return 0, 0, false, err
 	}
@@ -1317,6 +1285,40 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 		log.Info(fmt.Sprintf("[commitment] restored state: block=%d txn=%d rootHash=%x\n", cs.blockNum, cs.txNum, rootHash))
 	}
 	return cs.blockNum, cs.txNum, nil
+}
+
+// Dummy way to rebuild commitment. Dummy because works for small state only.
+// To rebuild commitment correctly for any state size - use RebuildCommitmentFiles.
+func (sdc *SharedDomainsCommitmentContext) rebuildCommitment(ctx context.Context, roTx kv.TemporalTx, blockNum, txNum uint64) ([]byte, error) {
+	it, err := roTx.HistoryRange(kv.StorageDomain, int(txNum), math.MaxInt64, order.Asc, -1)
+	if err != nil {
+		return nil, err
+	}
+	defer it.Close()
+	for it.HasNext() {
+		k, _, err := it.Next()
+		if err != nil {
+			return nil, err
+		}
+		sdc.TouchKey(kv.AccountsDomain, string(k), nil)
+	}
+
+	it, err = roTx.HistoryRange(kv.StorageDomain, int(txNum), math.MaxInt64, order.Asc, -1)
+	if err != nil {
+		return nil, err
+	}
+	defer it.Close()
+
+	for it.HasNext() {
+		k, _, err := it.Next()
+		if err != nil {
+			return nil, err
+		}
+		sdc.TouchKey(kv.StorageDomain, string(k), nil)
+	}
+
+	sdc.Reset()
+	return sdc.ComputeCommitment(ctx, true, blockNum, "rebuild commit")
 }
 
 func toStringZeroCopy(v []byte) string { return unsafe.String(&v[0], len(v)) }
