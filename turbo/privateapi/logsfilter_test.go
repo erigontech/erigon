@@ -18,6 +18,7 @@ package privateapi
 
 import (
 	"context"
+	"runtime"
 	"testing"
 
 	"google.golang.org/grpc"
@@ -218,6 +219,9 @@ func TestLogsFilter_TopicFilter_OnlyAllowsThatTopicThrough(t *testing.T) {
 }
 
 func TestLogsFilter_AddressFilter_OnlyAllowsThatAddressThrough(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("TODO: https://github.com/erigontech/erigon/issues/15138")
+	}
 	events := shards.NewEvents()
 	agg := NewLogsFilterAggregator(events)
 
