@@ -89,7 +89,7 @@ type stateObject struct {
 
 // empty returns whether the account is considered empty.
 func (so *stateObject) empty() bool {
-	return so.data.Nonce == 0 && so.data.Balance.IsZero() && (so.data.CodeHash == empty.RootHash)
+	return so.data.Nonce == 0 && so.data.Balance.IsZero() && (so.data.CodeHash == empty.CodeHash)
 }
 
 // newObject creates a state object.
@@ -325,7 +325,7 @@ func (so *stateObject) Code() []byte {
 	if so.code != nil {
 		return so.code
 	}
-	if so.data.CodeHash == empty.RootHash {
+	if so.data.CodeHash == empty.CodeHash {
 		return nil
 	}
 	code, err := so.db.stateReader.ReadAccountCode(so.Address())
