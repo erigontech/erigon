@@ -291,7 +291,7 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 	if err != nil {
 		return 0, err
 	}
-	if bytes.Equal(newRh, commitment.EmptyRootHash) {
+	if bytes.Equal(newRh, empty.RootHash[:]) {
 		sd.SetBlockNum(0)
 		sd.SetTxNum(0)
 		return 0, nil
