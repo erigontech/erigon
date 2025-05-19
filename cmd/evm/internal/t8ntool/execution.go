@@ -83,7 +83,7 @@ type stEnvMarshaling struct {
 func MakePreState(chainRules *chain.Rules, tx kv.RwTx, sd *state3.SharedDomains, accounts types.GenesisAlloc) (state.StateReader, state.StateWriter) {
 	var blockNr uint64 = 0
 
-	stateReader, stateWriter := rpchelper.NewLatestStateReader(tx), state.NewWriterV4(sd)
+	stateReader, stateWriter := rpchelper.NewLatestStateReader(tx), state.NewWriter(sd, nil)
 	sd.SetBlockNum(blockNr)
 
 	statedb := state.New(stateReader) //ibs
@@ -95,7 +95,7 @@ func MakePreState(chainRules *chain.Rules, tx kv.RwTx, sd *state3.SharedDomains,
 		for k, v := range a.Storage {
 			key := k
 			val := uint256.NewInt(0).SetBytes(v.Bytes())
-			statedb.SetState(addr, &key, *val)
+			statedb.SetState(addr, key, *val)
 		}
 
 		if len(a.Code) > 0 || len(a.Storage) > 0 {

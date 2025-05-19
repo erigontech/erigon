@@ -134,6 +134,18 @@ func (db *DB) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
 	return tx.Commit()
 }
 
+func (db *DB) UpdateTemporal(ctx context.Context, f func(tx kv.TemporalRwTx) error) error {
+	tx, err := db.BeginTemporalRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err = f(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.RwTx, error) {
 	kvTx, err := db.RwDB.BeginRwNosync(ctx) //nolint:gocritic
 	if err != nil {
@@ -283,7 +295,7 @@ func (tx *Tx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit
 func (tx *Tx) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error {
 	panic("implement me pls. or use SharedDomains")
 }
-func (tx *Tx) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error {
+func (tx *Tx) DomainDel(domain kv.Domain, k []byte, prevVal []byte, prevStep uint64) error {
 	panic("implement me pls. or use SharedDomains")
 }
 func (tx *Tx) DomainDelPrefix(domain kv.Domain, prefix []byte) error {
@@ -302,6 +314,7 @@ func (tx *Tx) GetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v
 	return tx.aggtx.DebugGetLatestFromFiles(domain, k, maxTxNum)
 }
 func (db *DB) DomainTables(domain ...kv.Domain) []string { return db.agg.DomainTables(domain...) }
+func (db *DB) ReloadSalt() error                         { return db.agg.ReloadSalt() }
 func (tx *Tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
 	return tx.aggtx.DomainFiles(domain...)
 }

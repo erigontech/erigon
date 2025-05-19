@@ -18,17 +18,24 @@ package rawdbreset
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"math/big"
+	"time"
 
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-db/rawdb/blockio"
-	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/backup"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/eth/stagedsync"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/turbo/services"
 )
@@ -51,7 +58,7 @@ func ResetState(db kv.TemporalRwDB, ctx context.Context) error {
 	return nil
 }
 
-func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, logger log.Logger) error {
+func ResetBlocks(tx kv.RwTx, db kv.RoDB, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, logger log.Logger) error {
 	// keep Genesis
 	if err := rawdb.TruncateBlocks(context.Background(), tx, 1); err != nil {
 		return err
@@ -88,7 +95,7 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services.Full
 
 	if br.FrozenBlocks() > 0 {
 		logger.Info("filling db from snapshots", "blocks", br.FrozenBlocks())
-		if err := stagedsync.FillDBFromSnapshots("filling_db_from_snapshots", context.Background(), tx, dirs, br, agg, logger); err != nil {
+		if err := FillDBFromSnapshots("filling_db_from_snapshots", context.Background(), tx, dirs, br, logger); err != nil {
 			return err
 		}
 		_ = stages.SaveStageProgress(tx, stages.Snapshots, br.FrozenBlocks())
@@ -127,7 +134,7 @@ func ResetBorHeimdall(ctx context.Context, tx kv.RwTx, db kv.RwDB) error {
 	return nil
 }
 
-func ResetPolygonSync(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, cc chain.Config, logger log.Logger) error {
+func ResetPolygonSync(tx kv.RwTx, db kv.RoDB, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, logger log.Logger) error {
 	tables := []string{
 		kv.BorEventNums,
 		kv.BorEvents,
@@ -145,14 +152,14 @@ func ResetPolygonSync(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services
 		}
 	}
 
-	if err := ResetBlocks(tx, db, agg, br, bw, dirs, logger); err != nil {
+	if err := ResetBlocks(tx, db, br, bw, dirs, logger); err != nil {
 		return err
 	}
 
 	return stages.SaveStageProgress(tx, stages.PolygonSync, 0)
 }
 
-func ResetSenders(ctx context.Context, db kv.RwDB, tx kv.RwTx) error {
+func ResetSenders(ctx context.Context, tx kv.RwTx) error {
 	if err := backup.ClearTables(ctx, tx, kv.Senders); err != nil {
 		return nil
 	}
@@ -229,4 +236,185 @@ func Reset(ctx context.Context, db kv.RwDB, stagesList ...stages.SyncStage) erro
 		}
 		return nil
 	})
+}
+
+func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, blockReader services.FullBlockReader, logger log.Logger) error {
+	startTime := time.Now()
+	blocksAvailable := blockReader.FrozenBlocks()
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+	pruneMarkerBlockThreshold := GetPruneMarkerSafeThreshold(blockReader)
+
+	// updating the progress of further stages (but only forward) that are contained inside of snapshots
+	for _, stage := range []stages.SyncStage{stages.Headers, stages.Bodies, stages.BlockHashes, stages.Senders} {
+		progress, err := stages.GetStageProgress(tx, stage)
+
+		if err != nil {
+			return fmt.Errorf("get %s stage progress to advance: %w", stage, err)
+		}
+		if progress >= blocksAvailable {
+			continue
+		}
+
+		if err = stages.SaveStageProgress(tx, stage, blocksAvailable); err != nil {
+			return fmt.Errorf("advancing %s stage: %w", stage, err)
+		}
+
+		switch stage {
+		case stages.Headers:
+			h2n := etl.NewCollector(logPrefix, dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/2), logger)
+			defer h2n.Close()
+			h2n.SortAndFlushInBackground(true)
+			h2n.LogLvl(log.LvlDebug)
+
+			// fill some small tables from snapshots, in future we may store this data in snapshots also, but
+			// for now easier just store them in db
+			td := big.NewInt(0)
+			blockNumBytes := make([]byte, 8)
+			if err := blockReader.HeadersRange(ctx, func(header *types.Header) error {
+				blockNum, blockHash := header.Number.Uint64(), header.Hash()
+				td.Add(td, header.Difficulty)
+				// What can happen if chaindata is deleted is that maybe header.seg progress is lower or higher than
+				// body.seg progress. In this case we need to skip the header, and "normalize" the progress to keep them in sync.
+				if blockNum > blocksAvailable {
+					return nil // This can actually happen as FrozenBlocks() is SegmentIdMax() and not the last .seg
+				}
+				if !dbg.PruneTotalDifficulty() {
+					if err := rawdb.WriteTd(tx, blockHash, blockNum, td); err != nil {
+						return err
+					}
+				}
+
+				// Write marker for pruning only if we are above our safe threshold
+				if blockNum >= pruneMarkerBlockThreshold || blockNum == 0 {
+					if err := rawdb.WriteCanonicalHash(tx, blockHash, blockNum); err != nil {
+						return err
+					}
+					binary.BigEndian.PutUint64(blockNumBytes, blockNum)
+					if err := h2n.Collect(blockHash[:], blockNumBytes); err != nil {
+						return err
+					}
+					if dbg.PruneTotalDifficulty() {
+						if err := rawdb.WriteTd(tx, blockHash, blockNum, td); err != nil {
+							return err
+						}
+					}
+				}
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-logEvery.C:
+					diagnostics.Send(diagnostics.SnapshotFillDBStageUpdate{
+						Stage: diagnostics.SnapshotFillDBStage{
+							StageName: string(stage),
+							Current:   header.Number.Uint64(),
+							Total:     blocksAvailable,
+						},
+						TimeElapsed: time.Since(startTime).Seconds(),
+					})
+					logger.Info(fmt.Sprintf("[%s] Total difficulty index: %s/%s", logPrefix,
+						common.PrettyCounter(header.Number.Uint64()), common.PrettyCounter(blockReader.FrozenBlocks())))
+				default:
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
+			if err := h2n.Load(tx, kv.HeaderNumber, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+				return err
+			}
+			canonicalHash, ok, err := blockReader.CanonicalHash(ctx, tx, blocksAvailable)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return fmt.Errorf("canonical marker not found: %d", blocksAvailable)
+			}
+			if err = rawdb.WriteHeadHeaderHash(tx, canonicalHash); err != nil {
+				return err
+			}
+
+		case stages.Bodies:
+			firstTxNum := blockReader.FirstTxnNumNotInSnapshots()
+			if err := tx.ResetSequence(kv.EthTx, firstTxNum); err != nil {
+				return err
+			}
+
+			_ = tx.ClearTable(kv.MaxTxNum)
+			if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-logEvery.C:
+					diagnostics.Send(diagnostics.SnapshotFillDBStageUpdate{
+						Stage: diagnostics.SnapshotFillDBStage{
+							StageName: string(stage),
+							Current:   blockNum,
+							Total:     blocksAvailable,
+						},
+						TimeElapsed: time.Since(startTime).Seconds(),
+					})
+					logger.Info(fmt.Sprintf("[%s] MaxTxNums index: %s/%s", logPrefix, common.PrettyCounter(blockNum), common.PrettyCounter(blockReader.FrozenBlocks())))
+				default:
+				}
+				if baseTxNum+txAmount == 0 {
+					panic(baseTxNum + txAmount) //uint-underflow
+				}
+				maxTxNum := baseTxNum + txAmount - 1
+				// What can happen if chaindata is deleted is that maybe header.seg progress is lower or higher than
+				// body.seg progress. In this case we need to skip the header, and "normalize" the progress to keep them in sync.
+				if blockNum > blocksAvailable {
+					return nil // This can actually happen as FrozenBlocks() is SegmentIdMax() and not the last .seg
+				}
+				if blockNum >= pruneMarkerBlockThreshold || blockNum == 0 {
+					if err := rawdbv3.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
+						return fmt.Errorf("%w. blockNum=%d, maxTxNum=%d", err, blockNum, maxTxNum)
+					}
+				}
+				return nil
+			}); err != nil {
+				return fmt.Errorf("build txNum => blockNum mapping: %w", err)
+			}
+			if blockReader.FrozenBlocks() > 0 {
+				if err := rawdb.AppendCanonicalTxNums(tx, blockReader.FrozenBlocks()+1); err != nil {
+					return err
+				}
+			} else {
+				if err := rawdb.AppendCanonicalTxNums(tx, 0); err != nil {
+					return err
+				}
+			}
+
+		default:
+			diagnostics.Send(diagnostics.SnapshotFillDBStageUpdate{
+				Stage: diagnostics.SnapshotFillDBStage{
+					StageName: string(stage),
+					Current:   blocksAvailable, // as we are done with other stages
+					Total:     blocksAvailable,
+				},
+				TimeElapsed: time.Since(startTime).Seconds(),
+			})
+		}
+	}
+	return nil
+}
+
+const (
+	/*
+		we strive to read indexes from snapshots instead to db... this means that there can be sometimes (e.g when we merged past indexes),
+		a situation when we need to read indexes and we choose to read them from either a corrupt index or an incomplete index.
+		so we need to extend the threshold to > max_merge_segment_size.
+	*/
+	pruneMarkerSafeThreshold = snaptype.Erigon2MergeLimit * 1.5 // 1.5x the merge limit
+)
+
+func GetPruneMarkerSafeThreshold(blockReader services.FullBlockReader) uint64 {
+	snapProgress := min(blockReader.FrozenBorBlocks(), blockReader.FrozenBlocks())
+	if blockReader.BorSnapshots() == nil {
+		snapProgress = blockReader.FrozenBlocks()
+	}
+	if snapProgress < pruneMarkerSafeThreshold {
+		return 0
+	}
+	return snapProgress - pruneMarkerSafeThreshold
 }

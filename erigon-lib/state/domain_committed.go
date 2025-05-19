@@ -110,7 +110,7 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 	//	}
 	//}
 
-	if dt.d.AccessorList.Has(0) {
+	if dt.d.Accessors.Has(0) {
 		reader := recsplit.NewIndexReader(item.index)
 		defer reader.Close()
 
@@ -135,7 +135,7 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 		}
 		return encodeShorterKey(nil, offset), true
 	}
-	if dt.d.AccessorList.Has(AccessorBTree) {
+	if dt.d.Accessors.Has(AccessorBTree) {
 		if item.bindex == nil {
 			dt.d.logger.Warn("[agg] commitment branch key replacement: file doesn't have index", "name", item.decompressor.FileName())
 		}
@@ -216,7 +216,7 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.Reader) 
 		}
 	}()
 
-	//getter := NewArchiveGetter(item.decompressor.MakeGetter(), dt.d.compression)
+	//getter := NewArchiveGetter(item.decompressor.MakeGetter(), dt.d.Compression)
 	getter.Reset(offset)
 	n := getter.HasNext()
 	if !n || uint64(getter.Size()) <= offset {

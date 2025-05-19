@@ -120,7 +120,7 @@ func TestEviction(t *testing.T) {
 	k1, k2 := [20]byte{1}, [20]byte{2}
 
 	var id uint64
-	_ = db.Update(ctx, func(tx kv.RwTx) error {
+	_ = db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 		_ = tx.Put(kv.PlainState, k1[:], []byte{1})
 		id = tx.ViewID()
 		var versionID [8]byte
@@ -153,7 +153,7 @@ func TestEviction(t *testing.T) {
 	require.Equal(21, c.stateEvict.Size())
 	require.Equal(1, c.stateEvict.Len())
 	require.Equal(c.roots[c.latestStateVersionID].cache.Len(), c.stateEvict.Len())
-	_ = db.Update(ctx, func(tx kv.RwTx) error {
+	_ = db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 		_ = tx.Put(kv.PlainState, k1[:], []byte{1})
 		id = tx.ViewID()
 		cacheView, _ := c.View(ctx, tx)
@@ -201,7 +201,7 @@ func TestAPI(t *testing.T) {
 			res[i] = make(chan []byte, 1) // Buffered channel to prevent deadlock
 			go func(out chan []byte) {
 				defer wg.Done()
-				err := db.View(ctx, func(tx kv.Tx) error {
+				err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 					if expectTxnID != tx.ViewID() {
 						panic(fmt.Sprintf("epxected: %d, got: %d", expectTxnID, tx.ViewID()))
 					}
@@ -237,9 +237,9 @@ func TestAPI(t *testing.T) {
 	prevVals := map[string][]byte{}
 	put := func(k, v []byte) uint64 {
 		var txID uint64
-		err := db.Update(ctx, func(tx kv.RwTx) error {
+		err := db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 			txID = tx.ViewID()
-			d, err := state.NewSharedDomains(tx.(kv.TemporalTx), log.New())
+			d, err := state.NewSharedDomains(tx, log.New())
 			if err != nil {
 				return err
 			}
@@ -477,7 +477,7 @@ func TestCode(t *testing.T) {
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	k1, k2 := [20]byte{1}, [20]byte{2}
 
-	_ = db.Update(ctx, func(tx kv.RwTx) error {
+	_ = db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 		_ = tx.Put(kv.Code, k1[:], k2[:])
 		cacheView, _ := c.View(ctx, tx)
 		view := cacheView.(*CoherentView)

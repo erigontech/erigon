@@ -591,6 +591,7 @@ type TemporalDebugTx interface {
 type TemporalDebugDB interface {
 	DomainTables(names ...Domain) []string
 	InvertedIdxTables(names ...InvertedIdx) []string
+	ReloadSalt() error
 }
 
 type WithFreezeInfo interface {
@@ -623,7 +624,7 @@ type TemporalPutDel interface {
 	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 	//   - user can append k2 into k1, then underlying methods will not preform append
 	//   - if `val == nil` it will call DomainDel
-	DomainDel(domain Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error
+	DomainDel(domain Domain, k, prevVal []byte, prevStep uint64) error
 	DomainDelPrefix(domain Domain, prefix []byte) error
 }
 
@@ -638,6 +639,7 @@ type TemporalRwDB interface {
 	RwDB
 	TemporalRoDB
 	BeginTemporalRw(ctx context.Context) (TemporalRwTx, error)
+	UpdateTemporal(ctx context.Context, f func(tx TemporalRwTx) error) error
 }
 
 // ---- non-importnt utilites

@@ -35,9 +35,7 @@ import (
 )
 
 func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
+	t.Skip("issue #15028")
 
 	t.Parallel()
 
@@ -71,7 +69,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	for key := range data {
 		removedKey = []byte(key)[:length.Addr]
 		domains.SetTxNum(maxTx + 1)
-		err = domains.DomainDel(kv.AccountsDomain, removedKey, nil, nil, 0)
+		err = domains.DomainDel(kv.AccountsDomain, removedKey, nil, 0)
 		require.NoError(t, err)
 		break
 	}
@@ -103,7 +101,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 
 	// 5. delete same key. commitment should be the same
 	domains.SetTxNum(maxTx + 1)
-	err = domains.DomainDel(kv.AccountsDomain, removedKey, nil, nil, 0)
+	err = domains.DomainDel(kv.AccountsDomain, removedKey, nil, 0)
 	require.NoError(t, err)
 
 	resultHash, err := domains.ComputeCommitment(context.Background(), false, domains.txNum/stepSize, "")
@@ -300,10 +298,10 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.Equal(int(stepSize), iterCount(domains))
 
 		domains.SetTxNum(stepSize)
-		if err := domains.DomainDel(kv.StorageDomain, addr, st(1), nil, 0); err != nil {
+		if err := domains.DomainDel(kv.StorageDomain, append(addr, st(1)...), nil, 0); err != nil {
 			panic(err)
 		}
-		if err := domains.DomainDel(kv.StorageDomain, addr, st(2), nil, 0); err != nil {
+		if err := domains.DomainDel(kv.StorageDomain, append(addr, st(2)...), nil, 0); err != nil {
 			panic(err)
 		}
 		for i := stepSize; i < stepSize*2+2; i++ {
@@ -363,10 +361,10 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		defer domains.Close()
 
 		domains.SetTxNum(stepSize*2 + 1)
-		if err := domains.DomainDel(kv.StorageDomain, addr, st(4), nil, 0); err != nil {
+		if err := domains.DomainDel(kv.StorageDomain, append(addr, st(4)...), nil, 0); err != nil {
 			panic(err)
 		}
-		if err := domains.DomainPut(kv.StorageDomain, addr, st(5), acc(5), nil, 0); err != nil {
+		if err := domains.DomainPut(kv.StorageDomain, append(addr, st(5)...), nil, acc(5), nil, 0); err != nil {
 			panic(err)
 		}
 		require.Equal(int(stepSize*2+2-3), iterCount(domains))

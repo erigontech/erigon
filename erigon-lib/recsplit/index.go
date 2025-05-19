@@ -145,7 +145,7 @@ func OpenIndex(indexFilePath string) (idx *Index, err error) {
 		return nil, err
 	}
 	idx.data = idx.mmapHandle1[:idx.size]
-	defer idx.EnableReadAhead().DisableReadAhead()
+	defer idx.MadvSequential().DisableReadAhead()
 
 	// Read number of keys and bytes per record
 	idx.baseDataID = binary.BigEndian.Uint64(idx.data[:8])
@@ -454,14 +454,26 @@ func (idx *Index) DisableReadAhead() {
 		log.Warn("read-ahead negative counter", "file", idx.FileName())
 	}
 }
-func (idx *Index) EnableReadAhead() *Index {
+func (idx *Index) MadvSequential() *Index {
+	if idx == nil || idx.mmapHandle1 == nil {
+		return idx
+	}
 	idx.readAheadRefcnt.Add(1)
 	_ = mmap.MadviseSequential(idx.mmapHandle1)
 	return idx
 }
-func (idx *Index) EnableWillNeed() *Index {
+func (idx *Index) MadvNormal() *Index {
+	if idx == nil || idx.mmapHandle1 == nil {
+		return idx
+	}
 	idx.readAheadRefcnt.Add(1)
-	fmt.Printf("[dbg] madv_will_need: %s\n", idx.fileName)
+	_ = mmap.MadviseNormal(idx.mmapHandle1)
+	return idx
+}
+func (idx *Index) MadvWillNeed() *Index {
+	if idx == nil || idx.mmapHandle1 == nil {
+		return idx
+	}
 	_ = mmap.MadviseWillNeed(idx.mmapHandle1)
 	return idx
 }

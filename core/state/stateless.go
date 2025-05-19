@@ -111,9 +111,9 @@ func (s *Stateless) ReadAccountData(address common.Address) (*accounts.Account, 
 
 // ReadAccountStorage is a part of the StateReader interface
 // This implementation attempts to look up the storage in the state trie, and fails if it is not found
-func (s *Stateless) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+func (s *Stateless) ReadAccountStorage(address common.Address, key common.Hash) ([]byte, error) {
 	if s.trace {
-		fmt.Printf("Stateless: ReadAccountStorage(address=%x, incarnation=%d, key=%x)\n", address.Bytes(), incarnation, key.Bytes())
+		fmt.Printf("Stateless: ReadAccountStorage(address=%x, key=%x)\n", address.Bytes(), key.Bytes())
 	}
 	seckey, err := common.HashData(key[:])
 	if err != nil {
@@ -133,7 +133,7 @@ func (s *Stateless) ReadAccountStorage(address common.Address, incarnation uint6
 }
 
 // ReadAccountCode is a part of the StateReader interface
-func (s *Stateless) ReadAccountCode(address common.Address, incarnation uint64) (code []byte, err error) {
+func (s *Stateless) ReadAccountCode(address common.Address) (code []byte, err error) {
 	if s.trace {
 		fmt.Printf("Getting code for address %x\n", address)
 	}
@@ -156,7 +156,7 @@ func (s *Stateless) ReadAccountCode(address common.Address, incarnation uint64) 
 // ReadAccountCodeSize is a part of the StateReader interface
 // This implementation looks the code up in the codeMap, and returns its size
 // It fails if the code is not found in the map
-func (s *Stateless) ReadAccountCodeSize(address common.Address, incarnation uint64) (codeSize int, err error) {
+func (s *Stateless) ReadAccountCodeSize(address common.Address) (codeSize int, err error) {
 	addrHash, err := common.HashData(address[:])
 	if err != nil {
 		return 0, err

@@ -29,21 +29,19 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/etl"
-	"github.com/erigontech/erigon-lib/seg"
-
-	state3 "github.com/erigontech/erigon-lib/state"
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/length"
 	downloadertype "github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	kv2 "github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/seg"
+	state3 "github.com/erigontech/erigon-lib/state"
 	statelib "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core"
@@ -68,6 +66,7 @@ func init() {
 	purifyDomains.Flags().BoolVar(&purifyOnlyCommitment, "only-commitment", true, "purify only commitment domain")
 	purifyDomains.Flags().BoolVar(&replaceInDatadir, "replace-in-datadir", false, "replace the purified domains directly in datadir (will remove .kvei and .bt too)")
 	purifyDomains.Flags().Float64Var(&minSkipRatioL0, "min-skip-ratio-l0", 0.1, "minimum ratio of keys to skip in L0")
+	purifyDomains.Flags().Float64Var(&minSkipRatio, "min-skip-ratio", 0.1, "minimum ratio of keys to skip - otherwise keep file unchanged")
 	purifyDomains.Flags().Uint64Var(&fromStepPurification, "from", 0, "step from which domains would be purified")
 	purifyDomains.Flags().Uint64Var(&toStepPurification, "to", 1e18, "step to which domains would be purified")
 	rootCmd.AddCommand(purifyDomains)
@@ -75,14 +74,14 @@ func init() {
 
 // if trie variant is not hex, we could not have another rootHash with to verify it
 var (
-	stepSize             uint64
-	lastStep             uint64
-	minSkipRatioL0       float64
-	outDatadir           string
-	purifyOnlyCommitment bool
-	replaceInDatadir     bool
-	fromStepPurification uint64
-	toStepPurification   uint64
+	stepSize                     uint64
+	lastStep                     uint64
+	minSkipRatioL0, minSkipRatio float64
+	outDatadir                   string
+	purifyOnlyCommitment         bool
+	replaceInDatadir             bool
+	fromStepPurification         uint64
+	toStepPurification           uint64
 )
 
 // write command to just seek and query state by addr and domain from state db and files (if any)
@@ -151,6 +150,12 @@ var purifyDomains = &cobra.Command{
 	Example: "go run ./cmd/integration purify_domains --datadir=... --verbosity=3",
 	Args:    cobra.ArbitraryArgs,
 	Run: func(cmd *cobra.Command, args []string) {
+		if minSkipRatioL0 <= 0.0 {
+			panic("--min-skip-ratio-l0 must be > 0")
+		}
+		if minSkipRatio <= 0.0 {
+			panic("--min-skip-ratio must be > 0")
+		}
 		dirs := datadir.New(datadirCli)
 		// Iterate over all the files in  dirs.SnapDomain and print them
 		domainDir := dirs.SnapDomain
@@ -169,7 +174,7 @@ var purifyDomains = &cobra.Command{
 		if purifyOnlyCommitment {
 			purificationDomains = []kv.Domain{kv.CommitmentDomain}
 		} else {
-			purificationDomains = []kv.Domain{kv.AccountsDomain, kv.StorageDomain /*"code",*/, kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain}
+			purificationDomains = []kv.Domain{kv.AccountsDomain, kv.StorageDomain /*"code",*/, kv.CommitmentDomain}
 		}
 		//purificationDomains := []string{"commitment"}
 		for _, domain := range purificationDomains {
@@ -443,8 +448,12 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 
 		skipRatio := float64(skipped) / float64(count)
 		if skipRatio < minSkipRatioL0 && currentLayer == 0 {
-			fmt.Printf("Skip ratio %.2f is less than min-skip-ratio-l0 %.2f, skipping the domainName and file %s\n", skipRatio, minSkipRatioL0, fileName)
+			fmt.Printf("Skip ratio %.2f is less than min-skip-ratio-l0 %.2f, skipping domain %s\n", skipRatio, minSkipRatioL0, domain)
 			return nil
+		}
+		if skipRatio < minSkipRatio {
+			fmt.Printf("Skip ratio %.2f is less than min-skip-ratio %.2f, skipping %s\n", skipRatio, minSkipRatioL0, fileName)
+			continue
 		}
 		fmt.Printf("Loaded %d keys in file %s. now compressing...\n", count, fileName)
 		if err := comp.Compress(); err != nil {
@@ -476,17 +485,6 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 }
 
 func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain string, addrs [][]byte, logger log.Logger) error {
-	sn, bsn, agg, _, _, _, err := allSnapshots(ctx, chainDb, logger)
-	if err != nil {
-		return err
-	}
-	defer sn.Close()
-	defer bsn.Close()
-	defer agg.Close()
-
-	aggTx := agg.BeginFilesRo()
-	defer aggTx.Close()
-
 	stateTx, err := stateDb.BeginRw(ctx)
 	must(err)
 	defer stateTx.Rollback()
@@ -498,7 +496,6 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	if err != nil {
 		return err
 	}
-	defer agg.Close()
 
 	r := state.NewReaderV3(domains)
 	if startTxNum != 0 {
@@ -524,7 +521,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	case "storage":
 		for _, addr := range addrs {
 			a, s := common.BytesToAddress(addr[:length.Addr]), common.BytesToHash(addr[length.Addr:])
-			st, err := r.ReadAccountStorage(a, 0, &s)
+			st, err := r.ReadAccountStorage(a, s)
 			if err != nil {
 				logger.Error("failed to read storage", "addr", a.String(), "key", s.String(), "err", err)
 				continue
@@ -533,7 +530,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 		}
 	case "code":
 		for _, addr := range addrs {
-			code, err := r.ReadAccountCode(common.BytesToAddress(addr), 0)
+			code, err := r.ReadAccountCode(common.BytesToAddress(addr))
 			if err != nil {
 				logger.Error("failed to read code", "addr", addr, "err", err)
 				continue

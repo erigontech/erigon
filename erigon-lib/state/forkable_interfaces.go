@@ -40,7 +40,7 @@ type AccessorIndexBuilder interface {
 // we don't need a separate interface for files...
 // since tx is provided separately anyway.
 type StartRoTx[T ForkableBaseTxI] interface {
-	BeginFilesTx() T
+	BeginTemporalTx() T
 	BeginNoFilesTx() T
 }
 
@@ -71,6 +71,7 @@ type ForkableFilesTxI interface {
 type ForkableDbCommonTxI interface {
 	Prune(ctx context.Context, to RootNum, limit uint64, tx kv.RwTx) (uint64, error)
 	Unwind(ctx context.Context, from RootNum, tx kv.RwTx) error
+	HasRootNumUpto(ctx context.Context, to RootNum, tx kv.Tx) (bool, error)
 	Close()
 }
 
@@ -150,7 +151,7 @@ const (
 type ForkableConfig interface {
 	SetFreezer(freezer Freezer)
 	SetIndexBuilders(builders ...AccessorIndexBuilder)
-	SetTs4Bytes(ts4Bytes bool)
 	SetPruneFrom(pruneFrom Num)
+	UpdateCanonicalTbl()
 	// Any other option setters you need
 }

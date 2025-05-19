@@ -21,6 +21,7 @@ package runtime
 
 import (
 	"context"
+	"github.com/erigontech/erigon-lib/types"
 	"math"
 	"math/big"
 	"os"
@@ -127,12 +128,18 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 	}
 
 	externalState := cfg.State != nil
-	var tx kv.RwTx
+	var tx kv.TemporalRwTx
 	var err error
 	if !externalState {
 		db := memdb.NewStateDB(tempdir)
 		defer db.Close()
-		agg, err := state3.NewAggregator(context.Background(), datadir.New(tempdir), config3.DefaultStepSize, db, log.New())
+		dirs := datadir.New(tempdir)
+		logger := log.New()
+		salt, err := state3.GetStateIndicesSalt(dirs, true, logger)
+		if err != nil {
+			return nil, nil, err
+		}
+		agg, err := state3.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, db, logger)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -146,13 +153,13 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 			return nil, nil, err
 		}
 		defer tx.Rollback()
-		sd, err := state3.NewSharedDomains(tx.(kv.TemporalRwTx), log.New())
+		sd, err := state3.NewSharedDomains(tx, log.New())
 		if err != nil {
 			return nil, nil, err
 		}
 		defer sd.Close()
 		cfg.r = state.NewReaderV3(sd)
-		cfg.w = state.NewWriterV4(sd)
+		cfg.w = state.NewWriter(sd, nil)
 		cfg.State = state.New(cfg.r)
 	}
 	var (
@@ -192,7 +199,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 	setDefaults(cfg)
 
 	externalState := cfg.State != nil
-	var tx kv.RwTx
+	var tx kv.TemporalRwTx
 	var err error
 	if !externalState {
 		tmp := filepath.Join(os.TempDir(), "create-vm")
@@ -214,13 +221,13 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 			return nil, [20]byte{}, 0, err
 		}
 		defer tx.Rollback()
-		sd, err := state3.NewSharedDomains(tx.(kv.TemporalRwTx), log.New())
+		sd, err := state3.NewSharedDomains(tx, log.New())
 		if err != nil {
 			return nil, [20]byte{}, 0, err
 		}
 		defer sd.Close()
 		cfg.r = state.NewReaderV3(sd)
-		cfg.w = state.NewWriterV4(sd)
+		cfg.w = state.NewWriter(sd, nil)
 		cfg.State = state.New(cfg.r)
 	}
 	var (
@@ -259,6 +266,10 @@ func Call(address common.Address, input []byte, cfg *Config) ([]byte, uint64, er
 	rules := vmenv.ChainRules()
 	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, &address, vm.ActivePrecompiles(rules), nil, nil)
 
+	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
+		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, common.Address{})
+	}
+
 	// Call the code with the given configuration.
 	ret, leftOverGas, err := vmenv.Call(
 		sender,
@@ -268,6 +279,10 @@ func Call(address common.Address, input []byte, cfg *Config) ([]byte, uint64, er
 		cfg.Value,
 		false, /* bailout */
 	)
+
+	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxEnd != nil {
+		cfg.EVMConfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: cfg.GasLimit - leftOverGas}, err)
+	}
 
 	return ret, leftOverGas, err
 }

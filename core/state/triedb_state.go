@@ -657,7 +657,7 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Accou
 	return account, nil
 }
 
-func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+func (tds *TrieDbState) ReadAccountStorage(address common.Address, key common.Hash) ([]byte, error) {
 	addrHash := common.Hash(crypto.Keccak256(address.Bytes()))
 	if tds.currentBuffer != nil {
 		if _, ok := tds.currentBuffer.deleted[addrHash]; ok {
@@ -674,11 +674,11 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 		return nil, err
 	}
 
-	storagePlainKey := dbutils.GenerateStoragePlainKey(address, *key)
+	storagePlainKey := dbutils.GenerateStoragePlainKey(address, key)
 
 	if tds.resolveReads {
 		var storageKey common.StorageKey
-		copy(storageKey[:], dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey))
+		copy(storageKey[:], dbutils.GenerateCompositeStorageKey(addrHash, 1, seckey))
 		tds.currentBuffer.storageReads[storageKey] = storagePlainKey
 	}
 
@@ -686,7 +686,7 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 	defer tds.tMu.Unlock()
 	enc, ok := tds.t.Get(dbutils.GenerateCompositeTrieKey(addrHash, seckey))
 	if !ok {
-		enc, err := tds.StateReader.ReadAccountStorage(address, incarnation, key)
+		enc, err := tds.StateReader.ReadAccountStorage(address, key)
 		if err != nil {
 			return nil, err
 		}
@@ -708,13 +708,13 @@ func (tds *TrieDbState) readAccountCodeSizeFromTrie(addrHash []byte) (int, bool)
 	return tds.t.GetAccountCodeSize(addrHash)
 }
 
-func (tds *TrieDbState) ReadAccountCode(address common.Address, incarnation uint64) (code []byte, err error) {
+func (tds *TrieDbState) ReadAccountCode(address common.Address) (code []byte, err error) {
 	addrHash := common.Hash(crypto.Keccak256(address.Bytes()))
 
 	if cached, ok := tds.readAccountCodeFromTrie(addrHash[:]); ok {
 		code, err = cached, nil
 	} else {
-		code, err = tds.StateReader.ReadAccountCode(address, incarnation)
+		code, err = tds.StateReader.ReadAccountCode(address)
 	}
 	if tds.resolveReads {
 		addrHash, err1 := common.HashData(address[:])
@@ -732,19 +732,19 @@ func (tds *TrieDbState) ReadAccountCode(address common.Address, incarnation uint
 	return code, err
 }
 
-func (tds *TrieDbState) ReadAccountCodeSize(address common.Address, incarnation uint64) (codeSize int, err error) {
+func (tds *TrieDbState) ReadAccountCodeSize(address common.Address) (codeSize int, err error) {
 	addrHash := common.Hash(crypto.Keccak256(address.Bytes()))
 	if cached, ok := tds.readAccountCodeSizeFromTrie(addrHash[:]); ok {
 		return cached, nil
 	} else {
-		codeSize, err = tds.StateReader.ReadAccountCodeSize(address, incarnation)
+		codeSize, err = tds.StateReader.ReadAccountCodeSize(address)
 		if err != nil {
 			return 0, err
 		}
 	}
 	if tds.resolveReads {
 		// We will need to read the code explicitly to make sure code is in the witness
-		code, err := tds.ReadAccountCode(address, incarnation)
+		code, err := tds.ReadAccountCode(address)
 		if err != nil {
 			return 0, err
 		}

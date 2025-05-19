@@ -869,6 +869,12 @@ func (s *Sync) syncToTip(ctx context.Context) (syncToTipResult, error) {
 		finalisedTip = result
 	}
 
+	if finalisedTip.latestTip != nil {
+		if err := s.heimdallSync.SynchronizeSpans(ctx, finalisedTip.latestTip.Number.Uint64()); err != nil {
+			return syncToTipResult{}, err
+		}
+	}
+
 	return finalisedTip, nil
 }
 

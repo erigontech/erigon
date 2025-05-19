@@ -76,15 +76,11 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHa
 		args.Gas = (*hexutil.Uint64)(&api.GasCap)
 	}
 
-	blockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters) // DoCall cannot be executed on non-canonical blocks
+	header, _, err := headerByNumberOrHash(ctx, tx, blockNrOrHash, api)
 	if err != nil {
 		return nil, err
 	}
-	block, err := api.blockWithSenders(ctx, tx, hash, blockNumber)
-	if err != nil {
-		return nil, err
-	}
-	if block == nil {
+	if header == nil {
 		return nil, nil
 	}
 
@@ -92,7 +88,6 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHa
 	if err != nil {
 		return nil, err
 	}
-	header := block.HeaderNoCopy()
 	result, err := transactions.DoCall(ctx, engine, args, tx, blockNrOrHash, header, overrides, api.GasCap, chainConfig, stateReader, api._blockReader, api.evmCallTimeout)
 	if err != nil {
 		return nil, err
@@ -111,26 +106,26 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHa
 }
 
 // headerByNumberOrHash - intent to read recent headers only, tries from the lru cache before reading from the db
-func headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, api *APIImpl) (*types.Header, error) {
-	_, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+func headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, api *APIImpl) (*types.Header, bool, error) {
+	_, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	block := api.tryBlockFromLru(hash)
 	if block != nil {
-		return block.Header(), nil
+		return block.Header(), false, nil
 	}
 
 	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	// header can be nil
-	return header, nil
+	return header, isLatest, nil
 }
 
 // EstimateGas implements eth_estimateGas. Returns an estimate of how much gas is necessary to allow the transaction to complete. The transaction will not be added to the blockchain.
@@ -158,35 +153,30 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 	engine := api.engine()
 
-	blockNum, blockHash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, *blockNrOrHash, dbtx, api._blockReader, api.filters) // DoCall cannot be executed on non-canonical blocks
+	header, isLatest, err := headerByNumberOrHash(ctx, dbtx, *blockNrOrHash, api)
 	if err != nil {
 		return 0, err
 	}
 
-	block := api.tryBlockFromLru(blockHash)
-
-	// try and get the block from the lru cache first then try DB before failing
-	if block == nil {
-		block, err = api.blockWithSenders(ctx, dbtx, blockHash, blockNum)
+	// try to check if it is a pending block
+	if header == nil {
+		b := api.filters.LastPendingBlock()
+		blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, *blockNrOrHash, dbtx, api._blockReader, api.filters)
 		if err != nil {
 			return 0, err
 		}
-	}
-
-	// try to check if it is a pending block
-	if block == nil {
-		b := api.filters.LastPendingBlock()
 		if b != nil && blockNum == b.NumberU64() {
-			block = b
+			header = b.HeaderNoCopy()
 		}
 	}
 
-	if block == nil {
-		return 0, errors.New(fmt.Sprintf("could not find the block %s in cache or db", blockNrOrHash.String()))
+	if header == nil {
+		return 0, errors.New(fmt.Sprintf("could not find the header %s in cache or db", blockNrOrHash.String()))
 	}
-	header := block.HeaderNoCopy()
 
-	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, api._txNumReader, blockNum, isLatest, 0, api.stateCache, chainConfig.ChainName)
+	blockNum := *(header.Number)
+
+	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, api._txNumReader, blockNum.Uint64(), isLatest, 0, api.stateCache, chainConfig.ChainName)
 	if err != nil {
 		return 0, err
 	}
@@ -458,7 +448,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address common.Add
 			return nil, errors.New("cannot verify store proof")
 		}
 
-		res, err := reader.ReadAccountStorage(address, acc.Incarnation, &keyHash)
+		res, err := reader.ReadAccountStorage(address, keyHash)
 		if err != nil {
 			res = []byte{}
 			logger.Warn(fmt.Sprintf("couldn't read account storage for the address %s\n", address.String()))
@@ -741,18 +731,13 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	}
 	engine := api.engine()
 
-	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, bNrOrHash, tx, api._blockReader, api.filters) // DoCall cannot be executed on non-canonical blocks
+	header, latest, err := headerByNumberOrHash(ctx, tx, *blockNrOrHash, api)
 	if err != nil {
 		return nil, err
-	}
-	block, err := api.blockWithSenders(ctx, tx, hash, blockNumber)
-	if err != nil {
-		return nil, err
-	}
-	if block == nil {
-		return nil, nil
 	}
 	var stateReader state.StateReader
+
+	blockNumber := header.Number.Uint64()
 
 	if latest {
 		cacheView, err := api.stateCache.View(ctx, tx)
@@ -767,7 +752,6 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		}
 	}
 
-	header := block.Header()
 	// If the gas amount is not set, extract this as it will depend on access
 	// lists and we'll need to reestimate every time
 	nogas := args.Gas == nil

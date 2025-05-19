@@ -333,7 +333,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	}
 	defer domains.Close()
 	stateReader := state.NewReaderV3(domains)
-	stateWriter := state.NewWriterV4(domains)
+	stateWriter := state.NewWriter(domains, nil)
 
 	txNum := -1
 	setBlockNum := func(blockNum uint64) {

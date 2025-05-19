@@ -123,7 +123,7 @@ func (t *TxTask) Sender() *common.Address {
 	return t.sender
 }
 
-func (t *TxTask) CreateReceipt(tx kv.Tx) {
+func (t *TxTask) CreateReceipt(tx kv.TemporalTx) {
 	if t.TxIndex < 0 || t.Final {
 		return
 	}
@@ -136,9 +136,8 @@ func (t *TxTask) CreateReceipt(tx kv.Tx) {
 			cumulativeGasUsed = prevR.CumulativeGasUsed
 			firstLogIndex = prevR.FirstLogIndexWithinBlock + uint32(len(prevR.Logs))
 		} else {
-			fmt.Printf("a: %d\n", t.TxIndex)
 			var err error
-			cumulativeGasUsed, _, firstLogIndex, err = rawtemporaldb.ReceiptAsOf(tx.(kv.TemporalTx), t.TxNum)
+			cumulativeGasUsed, _, firstLogIndex, err = rawtemporaldb.ReceiptAsOf(tx, t.TxNum)
 			if err != nil {
 				panic(err)
 			}
@@ -186,7 +185,6 @@ func (t *TxTask) createReceipt(cumulativeGasUsed uint64, firstLogIndex uint32) *
 		receipt.Status = types.ReceiptStatusSuccessful
 	}
 
-	receipt.Bloom = types.LogsBloom(receipt.Logs) // why do we need to add this?
 	// if the transaction created a contract, store the creation address in the receipt.
 	if t.TxAsMessage != nil && t.TxAsMessage.To() == nil {
 		receipt.ContractAddress = crypto.CreateAddress(*t.Sender(), t.Tx.GetNonce())
