@@ -1155,6 +1155,9 @@ type fnNextKey func(hashed, plain []byte, update *Update) error
 var COM_WARMUP = dbg.EnvBool("COM_WARMUP", false)
 
 func (t *Updates) WarmupHashSort(ctx context.Context, fn, warmup fnNextKey) error {
+	if !COM_WARMUP {
+		return t.HashSort(ctx, fn)
+	}
 	//if t.mode != ModeUpdateWarmup {
 	//	panic("WarmupHashSort should be called only in ModeUpdateWarmup")
 	//}

@@ -2174,6 +2174,9 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		warmupTrie.readOnly = true // do not produce updates on traversal
 		warmupFN = warmupTrie.followAndUpdate
 	}
+	defer func() {
+		log.Debug("commitment finished", "keys", common.PrettyCounter(ki), "spent", time.Since(start), "warmup", COM_WARMUP)
+	}()
 
 	//err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 	err = updates.WarmupHashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
