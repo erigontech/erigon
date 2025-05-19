@@ -340,7 +340,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	start := time.Now()
 	defer func() { logger.Info("Commitment DONE", "duration", time.Since(start)) }()
 
-	acRo.RestrictSubsetFileDeletions(true)
 	a.commitmentValuesTransform = false
 
 	var totalKeysCommitted uint64
