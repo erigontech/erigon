@@ -199,7 +199,7 @@ func validationValidation(tx *types.AccountAbstractionTransaction, header *types
 	if ept.Input == nil {
 		return errors.New("account validation did not call the EntryPoint 'acceptAccount' callback")
 	}
-	if bytes.Compare(ept.From[:], tx.SenderAddress[:]) != 0 {
+	if !bytes.Equal(ept.From[:], tx.SenderAddress[:]) {
 		return fmt.Errorf("invalid call to EntryPoint contract from a wrong account address, wanted %s got %s", tx.SenderAddress.String(), ept.From)
 	}
 
@@ -218,7 +218,7 @@ func paymasterValidation(tx *types.AccountAbstractionTransaction, header *types.
 		return nil, errors.New("paymaster validation did not call the EntryPoint 'acceptPaymaster' callback")
 	}
 
-	if bytes.Compare(ept.From[:], tx.Paymaster[:]) != 0 {
+	if !bytes.Equal(ept.From[:], tx.Paymaster[:]) {
 		return nil, errors.New("invalid call to EntryPoint contract from a wrong paymaster address")
 	}
 	paymasterValidity, err := types.DecodeAcceptPaymaster(ept.Input) // TODO: find better name
@@ -346,10 +346,10 @@ func PerformTxnStaticValidation(
 	senderCodeSize, paymasterCodeSize, deployerCodeSize int,
 ) error {
 	hasPaymaster := txn.Paymaster != nil
-	hasPaymasterData := txn.PaymasterData != nil && len(txn.PaymasterData) != 0
+	hasPaymasterData := len(txn.PaymasterData) != 0
 	hasPaymasterGasLimit := txn.PaymasterValidationGasLimit != 0
 	hasDeployer := txn.Deployer != nil
-	hasDeployerData := txn.DeployerData != nil && len(txn.DeployerData) != 0
+	hasDeployerData := len(txn.DeployerData) != 0
 	hasCodeSender := senderCodeSize != 0
 	hasCodeDeployer := deployerCodeSize != 0
 
