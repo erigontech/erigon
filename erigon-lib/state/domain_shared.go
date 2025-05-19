@@ -1261,7 +1261,7 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 	if sdc.sharedDomains.trace {
 		fmt.Printf("rebuilt commitment %x bn=%d txn=%d\n", newRh, blockNum, txNum)
 	}
-	return blockNum, txNum, true, false
+	return blockNum, txNum, true, nil
 }
 
 // After commitment state is retored, method .Reset() should NOT be called until new updates.
