@@ -464,7 +464,11 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remote.AAValid
 	//ibs.SetHooks(ot.Tracer().Hooks)
 	//ot.OnTxStart(evm.GetVMContext(), nil, common.Address{})
 
-	preTxCost, err := aaTxn.PreTransactionGasCost()
+	vmConfig := evm.Config()
+	rules := s.chainConfig.Rules(header.Number.Uint64(), header.Time)
+	hasEIP3860 := vmConfig.HasEip3860(rules)
+
+	preTxCost, err := aaTxn.PreTransactionGasCost(rules, hasEIP3860)
 	if err != nil {
 		return nil, err
 	}

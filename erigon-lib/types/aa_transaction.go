@@ -532,14 +532,14 @@ func (tx *AccountAbstractionTransaction) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (tx *AccountAbstractionTransaction) PreTransactionGasCost() (uint64, error) {
+func (tx *AccountAbstractionTransaction) PreTransactionGasCost(rules *chain.Rules, hasEIP3860 bool) (uint64, error) {
 	// data should have tx.SenderValidationData, tx.DeployerData, tx.ExecutionData, tx.PaymasterData
 	data := make([]byte, 0, len(tx.SenderValidationData)+len(tx.DeployerData)+len(tx.ExecutionData)+len(tx.PaymasterData))
 	data = append(data, tx.SenderValidationData...)
 	data = append(data, tx.DeployerData...)
 	data = append(data, tx.ExecutionData...)
 	data = append(data, tx.PaymasterData...)
-	gas, _, overflow := fixedgas.IntrinsicGas(data, uint64(len(tx.AccessList)), uint64(tx.AccessList.StorageKeys()), false, true, true, true, true, true, uint64(len(tx.Authorizations))) // NOTE: should read homestead and 2028 config from chainconfig
+	gas, _, overflow := fixedgas.IntrinsicGas(data, uint64(len(tx.AccessList)), uint64(tx.AccessList.StorageKeys()), false, rules.IsHomestead, rules.IsIstanbul, hasEIP3860, rules.IsPrague, true, uint64(len(tx.Authorizations)))
 
 	if overflow {
 		return 0, errors.New("overflow")
@@ -548,8 +548,8 @@ func (tx *AccountAbstractionTransaction) PreTransactionGasCost() (uint64, error)
 	return gas, nil
 }
 
-func (tx *AccountAbstractionTransaction) DeployerFrame() *Message {
-	intrinsicGas, _ := tx.PreTransactionGasCost()
+func (tx *AccountAbstractionTransaction) DeployerFrame(rules *chain.Rules, hasEIP3860 bool) *Message {
+	intrinsicGas, _ := tx.PreTransactionGasCost(rules, hasEIP3860)
 	deployerGasLimit := tx.ValidationGasLimit - intrinsicGas
 	return &Message{
 		to:       tx.Deployer,
@@ -606,7 +606,7 @@ func (tx *AccountAbstractionTransaction) PaymasterFrame(chainID *big.Int) (*Mess
 	}, nil
 }
 
-func (tx *AccountAbstractionTransaction) ValidationFrame(chainID *big.Int, deploymentUsedGas uint64) (*Message, error) {
+func (tx *AccountAbstractionTransaction) ValidationFrame(chainID *big.Int, deploymentUsedGas uint64, rules *chain.Rules, hasEIP3860 bool) (*Message, error) {
 	signingHash := tx.SigningHash(chainID)
 	txAbiEncoding, err := tx.AbiEncode()
 	if err != nil {
@@ -618,7 +618,7 @@ func (tx *AccountAbstractionTransaction) ValidationFrame(chainID *big.Int, deplo
 		return nil, err
 	}
 
-	intrinsicGas, _ := tx.PreTransactionGasCost()
+	intrinsicGas, _ := tx.PreTransactionGasCost(rules, hasEIP3860)
 	accountGasLimit := tx.ValidationGasLimit - intrinsicGas - deploymentUsedGas
 
 	return &Message{

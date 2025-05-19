@@ -52,7 +52,11 @@ func ValidateAATransaction(
 		return nil, 0, err
 	}
 
-	preTxCost, err := tx.PreTransactionGasCost()
+	vmConfig := evm.Config()
+	rules := chainConfig.Rules(header.Number.Uint64(), header.Time)
+	hasEIP3860 := vmConfig.HasEip3860(rules)
+
+	preTxCost, err := tx.PreTransactionGasCost(rules, hasEIP3860)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -64,7 +68,6 @@ func ValidateAATransaction(
 
 	var originalEvmHook tracing.EnterHook
 	entryPointTracer := EntryPointTracer{}
-	vmConfig := evm.Config()
 	if vmConfig.Tracer != nil && vmConfig.Tracer.OnEnter != nil {
 		entryPointTracer = EntryPointTracer{OnEnterSuper: originalEvmHook}
 	}
@@ -80,7 +83,7 @@ func ValidateAATransaction(
 	}
 
 	// Deployer frame
-	msg := tx.DeployerFrame()
+	msg := tx.DeployerFrame(rules, hasEIP3860)
 	applyRes, err := core.ApplyFrame(innerEvm, msg, gasPool)
 	if err != nil {
 		return nil, 0, err
@@ -101,7 +104,7 @@ func ValidateAATransaction(
 	deploymentGasUsed := applyRes.UsedGas
 
 	// Validation frame
-	msg, err = tx.ValidationFrame(chainConfig.ChainID, deploymentGasUsed)
+	msg, err = tx.ValidationFrame(chainConfig.ChainID, deploymentGasUsed, rules, hasEIP3860)
 	if err != nil {
 		return nil, 0, err
 	}
