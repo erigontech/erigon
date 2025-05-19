@@ -29,7 +29,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon-lib/kv/prune"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
@@ -48,7 +47,7 @@ import (
 	"github.com/erigontech/erigon-lib/downloader"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/backup"
-	"github.com/erigontech/erigon-lib/kv/kvcfg"
+	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
@@ -61,6 +60,7 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/ethconfig/features"
 	"github.com/erigontech/erigon/eth/ethconsensusconfig"
 	"github.com/erigontech/erigon/eth/integrity"
 	reset2 "github.com/erigontech/erigon/eth/rawdbreset"
@@ -1009,7 +1009,6 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		/*badBlockHalt=*/ true,
 		dirs, br, nil, genesis, syncCfg, nil)
 
-	fmt.Printf("[dbg] engine: %T\n", engine)
 	if unwind > 0 {
 		if err := db.View(ctx, func(tx kv.Tx) error {
 			minUnwindableBlockNum, _, err := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).CanUnwindBeforeBlockNum(s.BlockNumber-unwind, tx)
@@ -1289,24 +1288,8 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 	var err error
 
 	openSnapshotOnce.Do(func() {
-		if err := db.View(context.Background(), func(tx kv.Tx) (err error) {
-			syncCfg.KeepExecutionProofs, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
-			if err != nil {
-				return err
-			}
-			syncCfg.PersistReceiptsCacheV2, err = kvcfg.PersistReceipts.Enabled(tx)
-			if err != nil {
-				return err
-			}
-			return nil
-		}); err != nil {
-			panic(err)
-		}
-		if syncCfg.KeepExecutionProofs {
-			libstate.EnableHistoricalCommitment()
-		}
-		if syncCfg.PersistReceiptsCacheV2 {
-			libstate.EnableHistoricalRCache()
+		if syncCfg, err = features.EnableSyncCfg(db, syncCfg); err != nil {
+			return
 		}
 
 		dirs := datadir.New(datadirCli)

@@ -8,6 +8,10 @@ on:
     - cron: '0 20 * * 1-6'  # Run every night at 20:00 (08:00 PM) UTC except Sunday
   workflow_dispatch:     # Run manually
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   snap-download-test:
     runs-on: [self-hosted, qa, long-running]
@@ -49,7 +53,7 @@ jobs:
         test_exit_status=$?
         
         # Save the subsection reached status
-        echo "::set-output name=test_executed::true"
+        echo "test_executed=true" >> "$GITHUB_OUTPUT"
         
         # Clean up Erigon process if it's still running
         if kill -0 $ERIGON_PID 2> /dev/null; then

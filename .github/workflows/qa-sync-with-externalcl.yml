@@ -1,13 +1,20 @@
 name: QA - Sync with external CL
 
 on:
+  push:
+    branches:
+      - 'release/3.*'
   schedule:
     - cron: "0 8 * * 0" # Run on Sunday at 08:00 AM UTC
   workflow_dispatch: # Run manually
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   sync-with-externalcl:
-    runs-on: [self-hosted, qa, linux, X64]
+    runs-on: [self-hosted, qa, linux, X64, long-running]
     timeout-minutes: 1440 # 24 hours
     strategy:
       fail-fast: false
@@ -68,7 +75,7 @@ jobs:
           test_exit_status=$?
 
           # Save the subsection reached status
-          echo "::set-output name=test_executed::true"
+          echo "test_executed=true" >> "$GITHUB_OUTPUT"
 
           # Check test runner script exit status
           if [ $test_exit_status -eq 0 ]; then

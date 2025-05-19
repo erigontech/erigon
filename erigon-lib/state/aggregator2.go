@@ -99,13 +99,13 @@ type Versioned interface {
 
 func (s *SchemaGen) GetVersioned(name string) (Versioned, error) {
 	switch name {
-	case "accounts", "storage", "code", "commitment", "receipt", "rcache":
+	case kv.AccountsDomain.String(), kv.StorageDomain.String(), kv.CodeDomain.String(), kv.CommitmentDomain.String(), kv.ReceiptDomain.String(), kv.RCacheDomain.String():
 		domain, err := kv.String2Domain(name)
 		if err != nil {
 			return nil, err
 		}
 		return s.GetDomainCfg(domain), nil
-	case "logtopics", "logaddrs", "tracesfrom", "tracesto":
+	case kv.LogTopicIdx.String(), kv.LogAddrIdx.String(), kv.TracesFromIdx.String(), kv.TracesToIdx.String():
 		ii, err := kv.String2InvertedIdx(name)
 		if err != nil {
 			return nil, err

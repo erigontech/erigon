@@ -913,6 +913,9 @@ func (at *AggregatorRoTx) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx) (un
 // PruneSmallBatches is not cancellable, it's over when it's over or failed.
 // It fills whole timeout with pruning by small batches (of 100 keys) and making some progress
 func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Duration, tx kv.RwTx) (haveMore bool, err error) {
+	if dbg.NoPrune() {
+		return false, nil
+	}
 	// On tip-of-chain timeout is about `3sec`
 	//  On tip of chain:     must be real-time - prune by small batches and prioritize exact-`timeout`
 	//  Not on tip of chain: must be aggressive (prune as much as possible) by bigger batches
@@ -1680,34 +1683,18 @@ func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo 
 func (at *AggregatorRoTx) MadvNormal() *AggregatorRoTx {
 	for _, d := range at.d {
 		for _, f := range d.files {
-			if f.src.decompressor != nil {
-				f.src.decompressor.MadvNormal()
-			}
-			if f.src.index != nil {
-				f.src.index.MadvNormal()
-			}
-			//if f.src.bindex != nil {
-			//	f.src.bindex.MadvNormal()
-			//}
-			//if f.src.existence != nil {
-			//	f.src.existence.MadvNormal()
-			//}
+			f.src.MadvNormal()
+		}
+		for _, f := range d.ht.files {
+			f.src.MadvNormal()
+		}
+		for _, f := range d.ht.iit.files {
+			f.src.MadvNormal()
 		}
 	}
 	for _, ii := range at.iis {
 		for _, f := range ii.files {
-			if f.src.decompressor != nil {
-				f.src.decompressor.MadvNormal()
-			}
-			if f.src.index != nil {
-				f.src.index.MadvNormal()
-			}
-			//if f.src.bindex != nil {
-			//	f.src.bindex.MadvNormal()
-			//}
-			//if f.src.existence != nil {
-			//	f.src.existence.MadvNormal()
-			//}
+			f.src.MadvNormal()
 		}
 	}
 	return at
@@ -1715,34 +1702,59 @@ func (at *AggregatorRoTx) MadvNormal() *AggregatorRoTx {
 func (at *AggregatorRoTx) DisableReadAhead() {
 	for _, d := range at.d {
 		for _, f := range d.files {
-			if f.src.decompressor != nil {
-				f.src.decompressor.DisableReadAhead()
-			}
-			if f.src.index != nil {
-				f.src.index.DisableReadAhead()
-			}
-			//if f.src.bindex != nil {
-			//	f.src.bindex.DisableReadAhead()
-			//}
-			//if f.src.existence != nil {
-			//	f.src.existence.DisableReadAhead()
-			//}
+			f.src.DisableReadAhead()
+		}
+		for _, f := range d.ht.files {
+			f.src.DisableReadAhead()
+		}
+		for _, f := range d.ht.iit.files {
+			f.src.DisableReadAhead()
 		}
 	}
 	for _, ii := range at.iis {
 		for _, f := range ii.files {
-			if f.src.decompressor != nil {
-				f.src.decompressor.DisableReadAhead()
-			}
-			if f.src.index != nil {
-				f.src.index.DisableReadAhead()
-			}
-			//if f.src.bindex != nil {
-			//	f.src.bindex.DisableReadAhead()
-			//}
-			//if f.src.existence != nil {
-			//	f.src.existence.DisableReadAhead()
-			//}
+			f.src.DisableReadAhead()
+		}
+	}
+}
+func (at *Aggregator) MadvNormal() *Aggregator {
+	at.dirtyFilesLock.Lock()
+	defer at.dirtyFilesLock.Unlock()
+	for _, d := range at.d {
+		for _, f := range d.dirtyFiles.Items() {
+			f.MadvNormal()
+		}
+		for _, f := range d.History.dirtyFiles.Items() {
+			f.MadvNormal()
+		}
+		for _, f := range d.History.InvertedIndex.dirtyFiles.Items() {
+			f.MadvNormal()
+		}
+	}
+	for _, ii := range at.iis {
+		for _, f := range ii.dirtyFiles.Items() {
+			f.MadvNormal()
+		}
+	}
+	return at
+}
+func (at *Aggregator) DisableReadAhead() {
+	at.dirtyFilesLock.Lock()
+	defer at.dirtyFilesLock.Unlock()
+	for _, d := range at.d {
+		for _, f := range d.dirtyFiles.Items() {
+			f.DisableReadAhead()
+		}
+		for _, f := range d.History.dirtyFiles.Items() {
+			f.DisableReadAhead()
+		}
+		for _, f := range d.History.InvertedIndex.dirtyFiles.Items() {
+			f.DisableReadAhead()
+		}
+	}
+	for _, ii := range at.iis {
+		for _, f := range ii.dirtyFiles.Items() {
+			f.DisableReadAhead()
 		}
 	}
 }

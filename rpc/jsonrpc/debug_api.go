@@ -252,25 +252,20 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 	}
 	defer tx.Rollback()
 
-	startBlock, err := api.blockByHashWithSenders(ctx, tx, startHash)
+	startNum, err := api.headerNumberByHash(ctx, tx, startHash)
 	if err != nil {
-		return nil, err
-	}
-	if startBlock == nil {
 		return nil, fmt.Errorf("start block %x not found", startHash)
 	}
-	startNum := startBlock.NumberU64()
 	endNum := startNum + 1 // allows for single parameter calls
 
 	if endHash != nil {
-		endBlock, err := api.blockByHashWithSenders(ctx, tx, *endHash)
+		var err error
+		endNum, err = api.headerNumberByHash(ctx, tx, *endHash)
 		if err != nil {
-			return nil, err
-		}
-		if endBlock == nil {
 			return nil, fmt.Errorf("end block %x not found", *endHash)
 		}
-		endNum = endBlock.NumberU64() + 1
+		endNum = endNum + 1
+
 	}
 
 	if startNum > endNum {
