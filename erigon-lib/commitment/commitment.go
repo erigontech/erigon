@@ -1152,7 +1152,8 @@ func (t *Updates) Close() {
 
 type fnNextKey func(hashed, plain []byte, update *Update) error
 
-var COM_WARMUP = dbg.EnvBool("COM_WARMUP", false)
+// TODO remove experimental feature
+var COM_WARMUP = dbg.EnvBool("ERIGON_COM_WARMUP", false)
 
 func (t *Updates) WarmupHashSort(ctx context.Context, fn, warmup fnNextKey) error {
 	if !COM_WARMUP {
