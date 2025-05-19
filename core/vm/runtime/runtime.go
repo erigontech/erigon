@@ -34,11 +34,11 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state3 "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
@@ -56,13 +56,12 @@ type Config struct {
 	GasLimit    uint64
 	GasPrice    *uint256.Int
 	Value       *uint256.Int
-	Debug       bool
 	EVMConfig   vm.Config
 	BaseFee     *uint256.Int
 
-	State     *state.IntraBlockState
-	r         state.StateReader
-	w         state.StateWriter
+	State *state.IntraBlockState
+
+	evm       *vm.EVM
 	GetHashFn func(n uint64) (common.Hash, error)
 }
 
@@ -127,12 +126,16 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 	}
 
 	externalState := cfg.State != nil
-	var tx kv.TemporalRwTx
-	var err error
 	if !externalState {
 		db := memdb.NewStateDB(tempdir)
 		defer db.Close()
-		agg, err := state3.NewAggregator(context.Background(), datadir.New(tempdir), config3.DefaultStepSize, db, log.New())
+		dirs := datadir.New(tempdir)
+		logger := log.New()
+		salt, err := state3.GetStateIndicesSalt(dirs, true, logger)
+		if err != nil {
+			return nil, nil, err
+		}
+		agg, err := state3.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, db, logger)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -141,7 +144,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		if err != nil {
 			return nil, nil, err
 		}
-		tx, err = _db.BeginTemporalRw(context.Background()) //nolint:gocritic
+		tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
 		if err != nil {
 			return nil, nil, err
 		}
@@ -151,9 +154,8 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 			return nil, nil, err
 		}
 		defer sd.Close()
-		cfg.r = state.NewReaderV3(sd,tx)
-		cfg.w = state.NewWriter(sd.AsPutDel(tx), nil)
-		cfg.State = state.New(cfg.r)
+		//cfg.w = state.NewWriter(sd, nil)
+		cfg.State = state.New(state.NewReaderV3(sd, tx))
 	}
 	var (
 		address = common.BytesToAddress([]byte("contract"))
@@ -192,8 +194,6 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 	setDefaults(cfg)
 
 	externalState := cfg.State != nil
-	var tx kv.TemporalRwTx
-	var err error
 	if !externalState {
 		tmp := filepath.Join(os.TempDir(), "create-vm")
 		defer os.RemoveAll(tmp) //nolint
@@ -209,7 +209,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		if err != nil {
 			return nil, [20]byte{}, 0, err
 		}
-		tx, err = _db.BeginTemporalRw(context.Background()) //nolint:gocritic
+		tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
 		if err != nil {
 			return nil, [20]byte{}, 0, err
 		}
@@ -219,9 +219,8 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 			return nil, [20]byte{}, 0, err
 		}
 		defer sd.Close()
-		cfg.r = state.NewReaderV3(sd, tx)
-		cfg.w = state.NewWriter(sd.AsPutDel(tx), nil)
-		cfg.State = state.New(cfg.r)
+		//cfg.w = state.NewWriter(sd, nil)
+		cfg.State = state.New(state.NewReaderV3(sd))
 	}
 	var (
 		vmenv  = NewEnv(cfg)
@@ -259,6 +258,10 @@ func Call(address common.Address, input []byte, cfg *Config) ([]byte, uint64, er
 	rules := vmenv.ChainRules()
 	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, &address, vm.ActivePrecompiles(rules), nil, nil)
 
+	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
+		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, common.Address{})
+	}
+
 	// Call the code with the given configuration.
 	ret, leftOverGas, err := vmenv.Call(
 		sender,
@@ -268,6 +271,10 @@ func Call(address common.Address, input []byte, cfg *Config) ([]byte, uint64, er
 		cfg.Value,
 		false, /* bailout */
 	)
+
+	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxEnd != nil {
+		cfg.EVMConfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: cfg.GasLimit - leftOverGas}, err)
+	}
 
 	return ret, leftOverGas, err
 }

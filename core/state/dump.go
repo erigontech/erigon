@@ -25,8 +25,8 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
@@ -138,7 +138,6 @@ func NewDumper(db kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, blockNumber 
 var ErrTooManyIterations = errors.New("[rpc] dumper: too many iterations protection triggered")
 
 func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bool, startAddress common.Address, maxResults int) ([]byte, error) {
-	var emptyCodeHash = crypto.Keccak256Hash(nil)
 	var emptyHash = common.Hash{}
 	var accountList []*DumpAccount
 	var addrList []common.Address
@@ -186,10 +185,10 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 			Balance:  acc.Balance.ToBig().String(),
 			Nonce:    acc.Nonce,
 			Root:     hexutil.Bytes(emptyHash[:]), // We cannot provide historical storage hash
-			CodeHash: hexutil.Bytes(emptyCodeHash[:]),
+			CodeHash: hexutil.Bytes(empty.CodeHash[:]),
 			Storage:  make(map[string]string),
 		}
-		if acc.CodeHash != emptyCodeHash {
+		if acc.CodeHash != empty.CodeHash {
 			account.CodeHash = hexutil.Bytes(acc.CodeHash.Bytes())
 
 			if !excludeCode {

@@ -155,7 +155,7 @@ type (
 	CodeChangeHook = func(addr common.Address, prevCodeHash common.Hash, prevCode []byte, codeHash common.Hash, code []byte)
 
 	// StorageChangeHook is called when the storage of an account changes.
-	StorageChangeHook = func(addr common.Address, slot *common.Hash, prev, new uint256.Int)
+	StorageChangeHook = func(addr common.Address, slot common.Hash, prev, new uint256.Int)
 
 	// LogHook is called when a log is emitted.
 	LogHook = func(log *types.Log)

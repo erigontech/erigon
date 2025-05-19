@@ -23,10 +23,10 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -39,8 +39,9 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (kv.RwDB, *InvertedIndex) {
@@ -57,7 +58,8 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	}).MustOpen()
 	tb.Cleanup(db.Close)
 	salt := uint32(1)
-	cfg := iiCfg{salt: &salt, dirs: dirs, filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable, version: IIVersionTypes{DataEF: snaptype.V1_0, AccessorEFI: snaptype.V1_0}}
+	cfg := iiCfg{salt: new(atomic.Pointer[uint32]), dirs: dirs, filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable, version: IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
+	cfg.salt.Store(&salt)
 	ii, err := NewInvertedIndex(cfg, aggStep, logger)
 	require.NoError(tb, err)
 	ii.DisableFsync()
@@ -209,9 +211,9 @@ func TestInvIndexCollationBuild(t *testing.T) {
 		w, _ := g.Next(nil)
 		words = append(words, string(w))
 		w, _ = g.Next(w[:0])
-		ef, _ := eliasfano32.ReadEliasFano(w)
+		ef := multiencseq.ReadMultiEncSeq(0, w)
 		var ints []uint64
-		it := ef.Iterator()
+		it := ef.Iterator(0)
 		for it.HasNext() {
 			v, _ := it.Next()
 			ints = append(ints, v)
@@ -563,7 +565,7 @@ func TestInvIndexScanFiles(t *testing.T) {
 	// Recreate InvertedIndex to scan the files
 	salt := uint32(1)
 	cfg := ii.iiCfg
-	cfg.salt = &salt
+	cfg.salt.Store(&salt)
 
 	var err error
 	ii, err = NewInvertedIndex(cfg, 16, logger)
@@ -683,8 +685,7 @@ func TestCtxFiles(t *testing.T) {
 	ii.scanDirtyFiles(files)
 	require.Equal(t, 10, ii.dirtyFiles.Len())
 	ii.dirtyFiles.Scan(func(item *filesItem) bool {
-		fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-		item.decompressor = &seg.Decompressor{FileName1: fName}
+		item.decompressor = &seg.Decompressor{}
 		return true
 	})
 

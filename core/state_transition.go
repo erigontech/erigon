@@ -30,10 +30,10 @@ import (
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
@@ -42,8 +42,6 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/consensus"
 )
-
-var emptyCodeHash = crypto.Keccak256Hash(nil)
 
 /*
 The State Transitioning Model
@@ -297,7 +295,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 		if err != nil {
 			return fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 		}
-		if codeHash != emptyCodeHash && codeHash != (common.Hash{}) {
+		if codeHash != empty.CodeHash && codeHash != (common.Hash{}) {
 			// common.Hash{} means that the sender is not in the state.
 			// Historically there were transactions with 0 gas price and non-existing sender,
 			// so we have to allow that.
@@ -353,6 +351,7 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 
 	msg := st.msg
 	st.gasRemaining += st.msg.Gas()
+	st.initialGas = st.msg.Gas()
 	sender := vm.AccountRef(msg.From())
 	contractCreation := msg.To() == nil
 	rules := st.evm.ChainRules()
@@ -651,7 +650,7 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 			if err != nil {
 				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 			}
-			if codeHash != emptyCodeHash && codeHash != (common.Hash{}) {
+			if codeHash != empty.CodeHash && codeHash != (common.Hash{}) {
 				// check for delegation
 				_, ok, err := st.state.GetDelegatedDesignation(authority)
 				if err != nil {

@@ -23,9 +23,10 @@ import (
 	"fmt"
 	"math/big"
 
+	"golang.org/x/crypto/sha3"
+
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/crypto/cryptopool"
 )
 
 // Address represents the 20 byte address of an Ethereum account.
@@ -80,11 +81,10 @@ func (a *Address) checksumHex() []byte {
 	buf := a.hex()
 
 	// compute checksum
-	sha := cryptopool.NewLegacyKeccak256()
+	sha := sha3.NewLegacyKeccak256()
 	//nolint:errcheck
 	sha.Write(buf[2:])
 	hash := sha.Sum(nil)
-	cryptopool.ReturnToPoolKeccak256(sha)
 
 	for i := 2; i < len(buf); i++ {
 		hashByte := hash[(i-2)/2]

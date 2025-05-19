@@ -1103,7 +1103,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			logger, backend.sentriesClient.Hd, executionRpc,
 			backend.sentriesClient.Bd, backend.sentriesClient.BroadcastNewBlock, backend.sentriesClient.SendBodyRequest, blockReader,
 			backend.chainDB, chainConfig, tmpdir, config.Sync),
-		config.InternalCL, // If the chain supports the engine API, then we should not make the server fail.
+		config.InternalCL && !config.CaplinConfig.EnableEngineAPI, // If the chain supports the engine API, then we should not make the server fail.
 		false,
 		config.Miner.EnabledPOS,
 		!config.PolygonPosSingleSlotFinality,
@@ -1113,6 +1113,19 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	if config.InternalCL && (clparams.EmbeddedSupported(config.NetworkID) || config.CaplinConfig.IsDevnet()) {
 		config.CaplinConfig.NetworkId = clparams.NetworkType(config.NetworkID)
 		config.CaplinConfig.LoopBlockLimit = uint64(config.LoopBlockLimit)
+		if config.CaplinConfig.EnableEngineAPI {
+			jwtSecretHex, err := os.ReadFile(httpRpcCfg.JWTSecretPath)
+			if err != nil {
+				logger.Error("failed to read jwt secret", "err", err, "path", httpRpcCfg.JWTSecretPath)
+				return nil, err
+			}
+			jwtSecret := common.FromHex(strings.TrimSpace(string(jwtSecretHex)))
+			executionEngine, err = executionclient.NewExecutionClientRPC(jwtSecret, httpRpcCfg.AuthRpcHTTPListenAddress, httpRpcCfg.AuthRpcPort)
+			if err != nil {
+				logger.Error("failed to create execution client", "err", err)
+				return nil, err
+			}
+		}
 		go func() {
 			eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, backend.chainDB)
 			if err := caplin1.RunCaplinService(ctx, executionEngine, config.CaplinConfig, dirs, eth1Getter, backend.downloaderClient, creds, segmentsBuildLimiter); err != nil {
@@ -1540,12 +1553,32 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 // sets up blockReader and client downloader
 func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downloadercfg.Cfg, cc *chain.Config) error {
 	var err error
-	if s.config.Snapshot.NoDownloader {
-		return nil
-	}
+	s.chainDB.OnFilesChange(func(frozenFileNames []string) {
+		s.logger.Warn("files changed...sending notification")
+		events := s.notifications.Events
+		events.OnNewSnapshot()
+		if downloaderCfg != nil && downloaderCfg.ChainName == "" {
+			return
+		}
+		if !s.config.Snapshot.NoDownloader && s.downloaderClient != nil && len(frozenFileNames) > 0 {
+			req := &protodownloader.AddRequest{Items: make([]*protodownloader.AddItem, 0, len(frozenFileNames))}
+			for _, fName := range frozenFileNames {
+				req.Items = append(req.Items, &protodownloader.AddItem{
+					Path: filepath.Join("history", fName),
+				})
+			}
+			if _, err := s.downloaderClient.Add(ctx, req); err != nil {
+				s.logger.Warn("[snapshots] notify downloader", "err", err)
+			}
+		}
+	})
 
 	if downloaderCfg != nil && downloaderCfg.ChainName == "" {
 		downloaderCfg.ChainName = cc.ChainName
+		return nil
+	}
+
+	if s.config.Snapshot.NoDownloader {
 		return nil
 	}
 
@@ -1574,22 +1607,6 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 
 		s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
 	}
-
-	s.chainDB.OnFreeze(func(frozenFileNames []string) {
-		events := s.notifications.Events
-		events.OnNewSnapshot()
-		if s.downloaderClient != nil {
-			req := &protodownloader.AddRequest{Items: make([]*protodownloader.AddItem, 0, len(frozenFileNames))}
-			for _, fName := range frozenFileNames {
-				req.Items = append(req.Items, &protodownloader.AddItem{
-					Path: filepath.Join("history", fName),
-				})
-			}
-			if _, err := s.downloaderClient.Add(ctx, req); err != nil {
-				s.logger.Warn("[snapshots] notify downloader", "err", err)
-			}
-		}
-	})
 	return err
 }
 
@@ -1620,7 +1637,13 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		}
 	}
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, heimdallStore, bridgeStore)
-	agg, err := libstate.NewAggregator(ctx, dirs, config3.DefaultStepSize, db, logger)
+
+	createNewSaltFileIfNeeded := snConfig.Snapshot.NoDownloader || snConfig.Snapshot.DisableDownloadE3
+	salt, err := libstate.GetStateIndicesSalt(dirs, createNewSaltFileIfNeeded, logger)
+	if err != nil {
+		return nil, nil, nil, nil, nil, nil, nil, err
+	}
+	agg, err := libstate.NewAggregator2(ctx, dirs, config3.DefaultStepSize, salt, db, logger)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}

@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/trie"
@@ -372,6 +373,9 @@ func (sdb *IntraBlockState) GetCodeSize(addr common.Address) (int, error) {
 			}
 			if s.code != nil {
 				return len(s.code), nil
+			}
+			if stateObject.data.CodeHash == empty.CodeHash {
+				return 0, nil
 			}
 			readStart := time.Now()
 			l, err := sdb.stateReader.ReadAccountCodeSize(addr)
@@ -805,7 +809,7 @@ func (sdb *IntraBlockState) Selfdestruct(addr common.Address) (bool, error) {
 	}
 	prevBalance := stateObject.Balance()
 	sdb.journal.append(selfdestructChange{
-		account:     &addr,
+		account:     addr,
 		prev:        stateObject.selfdestructed,
 		prevbalance: prevBalance,
 	})
@@ -854,7 +858,7 @@ func (sdb *IntraBlockState) SetTransientState(addr common.Address, key common.Ha
 	}
 
 	sdb.journal.append(transientStorageChange{
-		account:  &addr,
+		account:  addr,
 		key:      key,
 		prevalue: prev,
 	})
@@ -991,9 +995,9 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 	newobj = newObject(sdb, addr, account, original)
 	newobj.setNonce(0) // sets the object to dirty
 	if previous == nil {
-		sdb.journal.append(createObjectChange{account: &addr})
+		sdb.journal.append(createObjectChange{account: addr})
 	} else {
-		sdb.journal.append(resetObjectChange{account: &addr, prev: previous})
+		sdb.journal.append(resetObjectChange{account: addr, prev: previous})
 	}
 	newobj.newlyCreated = true
 	sdb.setStateObject(addr, newobj)

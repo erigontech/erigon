@@ -144,7 +144,6 @@ func (c *ConsensusHandlers) Start() {
 
 func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Stream) error) func(s network.Stream) {
 	return func(s network.Stream) {
-		// handle panic
 		defer func() {
 			if r := recover(); r != nil {
 				log.Error("[pubsubhandler] panic in stream handler", "err", r)
@@ -164,8 +163,7 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 		err = fn(s)
 		if err != nil {
 			l["err"] = err
-			log.Trace("[pubsubhandler] stream handler", l)
-			// TODO: maybe we should log this
+			log.Debug("[pubsubhandler] stream handler returned error", "protocol", name, "peer", s.Conn().RemotePeer().String(), "err", err)
 			_ = s.Reset()
 			_ = s.Close()
 			return
@@ -173,7 +171,9 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 		err = s.Close()
 		if err != nil {
 			l["err"] = err
-			if !(strings.Contains(name, "goodbye") && (strings.Contains(err.Error(), "session shut down") || strings.Contains(err.Error(), "stream reset"))) {
+			if !(strings.Contains(name, "goodbye") &&
+				(strings.Contains(err.Error(), "session shut down") ||
+					strings.Contains(err.Error(), "stream reset"))) {
 				log.Trace("[pubsubhandler] close stream", l)
 			}
 		}

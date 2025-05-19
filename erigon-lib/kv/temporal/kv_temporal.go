@@ -179,7 +179,7 @@ func (db *DB) Close() {
 	db.agg.Close()
 }
 
-func (db *DB) OnFreeze(f kv.OnFreezeFunc) { db.agg.OnFreeze(f) }
+func (db *DB) OnFilesChange(f kv.OnFilesChange) { db.agg.OnFilesChange(f) }
 
 type tx struct {
 	db               *DB
@@ -502,7 +502,8 @@ func (tx *tx) GetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v
 	return tx.aggtx.DebugGetLatestFromFiles(domain, k, maxTxNum)
 }
 func (db *DB) DomainTables(domain ...kv.Domain) []string { return db.agg.DomainTables(domain...) }
-func (tx *tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
+func (db *DB) ReloadSalt() error                         { return db.agg.ReloadSalt() }
+func (tx *Tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
 	return tx.aggtx.DomainFiles(domain...)
 }
 func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string {

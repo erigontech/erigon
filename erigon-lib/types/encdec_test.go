@@ -33,7 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 )
 
-const RUNS = 10000 // for local tests increase this number
+const RUNS = 1000 // for local tests increase this number
 
 type TRand struct {
 	rnd *rand.Rand

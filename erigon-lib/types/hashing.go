@@ -27,7 +27,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/crypto/cryptopool"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/rlphacks"
 	"github.com/erigontech/erigon-lib/trie"
@@ -172,7 +171,7 @@ func RawRlpHash(rawRlpData rlp.RawValue) (h common.Hash) {
 	sha := crypto.NewKeccakState()
 	sha.Write(rawRlpData) //nolint:errcheck
 	sha.Read(h[:])        //nolint:errcheck
-	cryptopool.ReturnToPoolKeccak256(sha)
+	crypto.ReturnToPool(sha)
 	return h
 }
 
@@ -180,7 +179,7 @@ func rlpHash(x interface{}) (h common.Hash) {
 	sha := crypto.NewKeccakState()
 	rlp.Encode(sha, x) //nolint:errcheck
 	sha.Read(h[:])     //nolint:errcheck
-	cryptopool.ReturnToPoolKeccak256(sha)
+	crypto.ReturnToPool(sha)
 	return h
 }
 
@@ -195,6 +194,6 @@ func prefixedRlpHash(prefix byte, x interface{}) (h common.Hash) {
 	}
 	//nolint:errcheck
 	sha.Read(h[:])
-	cryptopool.ReturnToPoolKeccak256(sha)
+	crypto.ReturnToPool(sha)
 	return h
 }

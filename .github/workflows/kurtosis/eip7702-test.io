@@ -18,6 +18,7 @@ tasks:
     prefundMinBalance: 10000000000000000000 # ensure 10 ETH
     walletAddressResultVar: "eoaAddress"
     walletPrivateKeyResultVar: "eoaPrivateKey"
+    randomSeed: true
   configVars:
     privateKey: "walletPrivkey"
 - name: sleep
@@ -60,4 +61,4 @@ tasks:
   configVars:
     privateKey: "eoaPrivateKey"
     targetAddress: "testContractAddr"
-    authorizations: "| [ { codeAddress: .delegateContractAddr, signerPrivkey: .eoaPrivateKey } ]"
+    authorizations: "| [ { codeAddress: .delegateContractAddr, signerPrivkey: .eoaPrivateKey, nonce: 3 } ]"

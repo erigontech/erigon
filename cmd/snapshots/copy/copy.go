@@ -29,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/downloader"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/cmd/snapshots/flags"
 	"github.com/erigontech/erigon/cmd/snapshots/sync"
 	"github.com/erigontech/erigon/cmd/utils"
@@ -183,10 +184,10 @@ func copy(cliCtx *cli.Context) error {
 
 	var firstBlock, lastBlock uint64
 
-	version := cliCtx.String(VersionFlag.Name)
+	versionStr := cliCtx.String(VersionFlag.Name)
 
-	if version != "" && version != "0.0" {
-		dst.Version, _ = snaptype.ParseVersion("v" + version) //nolint:govet
+	if versionStr != "" && versionStr != "0.0" {
+		dst.Version, _ = version.ParseVersion("v" + versionStr) //nolint:govet
 	}
 
 	if cliCtx.Args().Len() > pos {

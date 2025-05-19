@@ -293,6 +293,14 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 		}
 	}
 
+	merged, err := br.MergeBlocks(ctx, lvl, seedNewSnapshots)
+	return ok || merged, err
+}
+
+func (br *BlockRetire) MergeBlocks(ctx context.Context, lvl log.Lvl, seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error) (merged bool, err error) {
+	notifier, logger, _, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers.Load()
+	snapshots := br.snapshots()
+
 	merger := snapshotsync.NewMerger(tmpDir, int(workers), lvl, db, br.chainConfig, logger)
 	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(), snapshots.BlocksAvailable())
 	if len(rangesToMerge) == 0 {
@@ -300,9 +308,9 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 		//if err := snapshots.RemoveOverlaps(); err != nil {
 		//	return false, err
 		//}
-		return ok, nil
+		return false, nil
 	}
-	ok = true // have something to merge
+	merged = true
 	onMerge := func(r snapshotsync.Range) error {
 		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 			notifier.OnNewSnapshot()
@@ -318,16 +326,15 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 		}
 		return nil
 	}
-	err := merger.Merge(ctx, &snapshots.RoSnapshots, snapshots.Types(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete)
-	if err != nil {
-		return ok, err
+	if err = merger.Merge(ctx, &snapshots.RoSnapshots, snapshots.Types(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, nil); err != nil {
+		return false, err
 	}
 
 	// remove old garbage files
-	if err := snapshots.RemoveOverlaps(); err != nil {
+	if err = snapshots.RemoveOverlaps(); err != nil {
 		return false, err
 	}
-	return ok, nil
+	return
 }
 
 var ErrNothingToPrune = errors.New("nothing to prune")
@@ -413,7 +420,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, requestedMinBlockNum ui
 	}
 	includeBor := br.chainConfig.Bor != nil
 
-	if err := br.BuildMissedIndicesIfNeed(ctx, "RetireBlocks", br.notifier, br.chainConfig); err != nil {
+	if err := br.BuildMissedIndicesIfNeed(ctx, "RetireBlocks", br.notifier); err != nil {
 		return err
 	}
 
@@ -465,18 +472,45 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, requestedMinBlockNum ui
 	return nil
 }
 
-func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier, cc *chain.Config) error {
-	if err := br.snapshots().BuildMissedIndices(ctx, logPrefix, notifier, br.dirs, cc, br.logger); err != nil {
+func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier) error {
+	if err := br.snapshots().BuildMissedIndices(ctx, logPrefix, notifier, br.dirs, br.chainConfig, br.logger); err != nil {
 		return err
 	}
 
-	if cc.Bor != nil {
-		if err := br.borSnapshots().RoSnapshots.BuildMissedIndices(ctx, logPrefix, notifier, br.dirs, cc, br.logger); err != nil {
+	if br.chainConfig.Bor != nil {
+		if err := br.borSnapshots().RoSnapshots.BuildMissedIndices(ctx, logPrefix, notifier, br.dirs, br.chainConfig, br.logger); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+func (br *BlockRetire) RemoveOverlaps() error {
+	if err := br.snapshots().RemoveOverlaps(); err != nil {
+		return err
+	}
+
+	if br.chainConfig.Bor != nil {
+		if err := br.borSnapshots().RoSnapshots.RemoveOverlaps(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (br *BlockRetire) MadvNormal() *BlockRetire {
+	br.snapshots().MadvNormal()
+	if br.chainConfig.Bor != nil {
+		br.borSnapshots().RoSnapshots.MadvNormal()
+	}
+	return br
+}
+
+func (br *BlockRetire) DisableReadAhead() {
+	br.snapshots().DisableReadAhead()
+	if br.chainConfig.Bor != nil {
+		br.borSnapshots().RoSnapshots.DisableReadAhead()
+	}
 }
 
 func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
@@ -531,7 +565,7 @@ func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstK
 
 	compressCfg := BlockCompressCfg
 	compressCfg.Workers = workers
-	sn, err := seg.NewCompressor(ctx, "Snapshot "+f.Type.Name(), f.Path, tmpDir, compressCfg, log.LvlInfo, logger)
+	sn, err := seg.NewCompressor(ctx, "Snapshot "+f.Type.Name(), f.Path, tmpDir, compressCfg, log.LvlTrace, logger)
 	if err != nil {
 		return lastKeyValue, err
 	}
@@ -555,7 +589,7 @@ func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstK
 	}
 
 	ext := filepath.Ext(f.Name())
-	logger.Log(lvl, "[snapshots] Compression start", "file", f.Name()[:len(f.Name())-len(ext)], "workers", sn.WorkersAmount(), "stack", dbg.Stack())
+	logger.Log(lvl, "[snapshots] Compression start", "file", f.Name()[:len(f.Name())-len(ext)], "workers", sn.WorkersAmount())
 
 	if err := sn.Compress(); err != nil {
 		return lastKeyValue, fmt.Errorf("compress: %w", err)
@@ -767,7 +801,6 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 	}); err != nil {
 		return 0, fmt.Errorf("BigChunks: %w", err)
 	}
-	println("exiting big chunks")
 	return 0, nil
 }
 

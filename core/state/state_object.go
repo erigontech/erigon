@@ -29,16 +29,12 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/tracing"
 )
-
-var emptyCodeHash = crypto.Keccak256(nil)
-var emptyCodeHashH = common.BytesToHash(emptyCodeHash)
 
 type Code []byte
 
@@ -95,7 +91,7 @@ type stateObject struct {
 
 // empty returns whether the account is considered empty.
 func (so *stateObject) empty() bool {
-	return so.data.Nonce == 0 && so.data.Balance.IsZero() && (so.data.CodeHash == emptyCodeHashH)
+	return so.data.Nonce == 0 && so.data.Balance.IsZero() && (so.data.CodeHash == empty.CodeHash)
 }
 
 func (s *stateObject) deepCopy(db *IntraBlockState) *stateObject {
@@ -129,10 +125,10 @@ func newObject(db *IntraBlockState, address common.Address, data, original *acco
 		so.data.Initialised = true
 	}
 	if so.data.CodeHash == (common.Hash{}) {
-		so.data.CodeHash = emptyCodeHashH
+		so.data.CodeHash = empty.CodeHash
 	}
 	if so.data.Root == (common.Hash{}) {
-		so.data.Root = trie.EmptyRoot
+		so.data.Root = empty.RootHash
 	}
 	so.original.Copy(original)
 	return &so
@@ -149,7 +145,7 @@ func (so *stateObject) markSelfdestructed() {
 
 func (so *stateObject) touch() {
 	so.db.journal.append(touchChange{
-		account: &so.address,
+		account: so.address,
 	})
 	if so.address == ripemd {
 		// Explicitly put it in the dirty-cache, which is otherwise generated from
@@ -302,7 +298,7 @@ func (so *stateObject) printTrie() {
 
 func (so *stateObject) SetBalance(amount *uint256.Int, reason tracing.BalanceChangeReason) {
 	so.db.journal.append(balanceChange{
-		account: &so.address,
+		account: so.address,
 		prev:    so.data.Balance,
 	})
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnBalanceChange != nil {
@@ -338,7 +334,7 @@ func (so *stateObject) Code() ([]byte, error) {
 	if so.code != nil {
 		return so.code, nil
 	}
-	if so.data.CodeHash == emptyCodeHashH {
+	if so.data.CodeHash == empty.CodeHash {
 		return nil, nil
 	}
 
@@ -360,7 +356,7 @@ func (so *stateObject) SetCode(codeHash common.Hash, code []byte) error {
 		return err
 	}
 	so.db.journal.append(codeChange{
-		account:  &so.address,
+		account:  so.address,
 		prevhash: so.data.CodeHash,
 		prevcode: prevcode,
 	})
@@ -379,7 +375,7 @@ func (so *stateObject) setCode(codeHash common.Hash, code []byte) {
 
 func (so *stateObject) SetNonce(nonce uint64) {
 	so.db.journal.append(nonceChange{
-		account: &so.address,
+		account: so.address,
 		prev:    so.data.Nonce,
 	})
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnNonceChange != nil {
