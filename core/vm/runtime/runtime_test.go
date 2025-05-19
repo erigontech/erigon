@@ -21,9 +21,11 @@ package runtime
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"math/big"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -46,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/core/asm"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/program"
 	"github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/execution/consensus"
 )
@@ -234,7 +237,6 @@ func BenchmarkCall(b *testing.B) {
 	cfg.State = state.New(cfg.r)
 
 	tmpdir := b.TempDir()
-	cfg.Debug = true
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for j := 0; j < 400; j++ {
@@ -308,6 +310,49 @@ func BenchmarkEVM_CREATE_1200(bench *testing.B) {
 func BenchmarkEVM_CREATE2_1200(bench *testing.B) {
 	// initcode size 1200K, repeatedly calls CREATE2 and then modifies the mem contents
 	benchmarkEVM_Create(bench, "5b5862124f80600080f5600152600056")
+}
+
+func BenchmarkEVM_RETURN(b *testing.B) {
+	// returns a contract that returns a zero-byte slice of len size
+	returnContract := func(size uint64) []byte {
+		contract := []byte{
+			byte(vm.PUSH8), 0, 0, 0, 0, 0, 0, 0, 0, // PUSH8 0xXXXXXXXXXXXXXXXX
+			byte(vm.PUSH0),  // PUSH0
+			byte(vm.RETURN), // RETURN
+		}
+		binary.BigEndian.PutUint64(contract[1:], size)
+		return contract
+	}
+
+	db := testTemporalDB(b)
+	tx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(b, err)
+	defer tx.Rollback()
+	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	require.NoError(b, err)
+	defer domains.Close()
+
+	statedb := state.New(state.NewReaderV3(domains))
+	contractAddr := common.BytesToAddress([]byte("contract"))
+
+	for _, n := range []uint64{1_000, 10_000, 100_000, 1_000_000} {
+		b.Run(strconv.FormatUint(n, 10), func(b *testing.B) {
+			b.ReportAllocs()
+
+			contractCode := returnContract(n)
+			statedb.SetCode(contractAddr, contractCode)
+
+			for i := 0; i < b.N; i++ {
+				ret, _, err := Call(contractAddr, []byte{}, &Config{State: statedb})
+				if err != nil {
+					b.Fatal(err)
+				}
+				if uint64(len(ret)) != n {
+					b.Fatalf("expected return size %d, got %d", n, len(ret))
+				}
+			}
+		})
+	}
 }
 
 func fakeHeader(n uint64, parentHash common.Hash) *types.Header {
@@ -468,12 +513,14 @@ func TestBlockhash(t *testing.T) {
 
 // benchmarkNonModifyingCode benchmarks code, but if the code modifies the
 // state, this should not be used, since it does not reset the state between runs.
-func benchmarkNonModifyingCode(b *testing.B, gas uint64, code []byte, name string) { //nolint:unparam
+func benchmarkNonModifyingCode(gas uint64, code []byte, name string, tracerCode string, b *testing.B) { //nolint:unparam
 	cfg := new(Config)
 	setDefaults(cfg)
 	db := testTemporalDB(b)
+	defer db.Close()
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(b, err)
+	defer tx.Rollback()
 	domains, err := stateLib.NewSharedDomains(tx, log.New())
 	require.NoError(b, err)
 	defer domains.Close()
@@ -485,6 +532,16 @@ func benchmarkNonModifyingCode(b *testing.B, gas uint64, code []byte, name strin
 
 	cfg.State = state.New(state.NewReaderV3(domains))
 	cfg.GasLimit = gas
+	//if len(tracerCode) > 0 {
+	//	tracer, err := tracers.DefaultDirectory.New(tracerCode, new(tracers.Context), nil, cfg.ChainConfig)
+	//	if err != nil {
+	//		b.Fatal(err)
+	//	}
+	//	cfg.EVMConfig = vm.Config{
+	//		Tracer: tracer.Hooks,
+	//	}
+	//}
+
 	var (
 		destination = common.BytesToAddress([]byte("contract"))
 		vmenv       = NewEnv(cfg)
@@ -521,115 +578,66 @@ func benchmarkNonModifyingCode(b *testing.B, gas uint64, code []byte, name strin
 
 // BenchmarkSimpleLoop test a pretty simple loop which loops until OOG
 // 55 ms
+//
+// go test -bench=BenchmarkSimple -run=Benchmark -count 10 ./core/vm/runtime > old.txt
+// go test -bench=BenchmarkSimple -run=Benchmark -count 10 ./core/vm/runtime > new.txt
+// benchstat old.txt new.txt
 func BenchmarkSimpleLoop(b *testing.B) {
+	p, lbl := program.New().Jumpdest()
+	// Call identity, and pop return value
+	staticCallIdentity := p.
+		StaticCall(nil, 0x4, 0, 0, 0, 0).
+		Op(vm.POP).Jump(lbl).Bytes() // pop return value and jump to label
 
-	staticCallIdentity := []byte{
-		byte(vm.JUMPDEST), //  [ count ]
-		// push args for the call
-		byte(vm.PUSH1), 0, // out size
-		byte(vm.DUP1),       // out offset
-		byte(vm.DUP1),       // out insize
-		byte(vm.DUP1),       // in offset
-		byte(vm.PUSH1), 0x4, // address of identity
-		byte(vm.GAS), // gas
-		byte(vm.STATICCALL),
-		byte(vm.POP),      // pop return value
-		byte(vm.PUSH1), 0, // jumpdestination
-		byte(vm.JUMP),
-	}
+	p, lbl = program.New().Jumpdest()
+	callIdentity := p.
+		Call(nil, 0x4, 0, 0, 0, 0, 0).
+		Op(vm.POP).Jump(lbl).Bytes() // pop return value and jump to label
 
-	callIdentity := []byte{
-		byte(vm.JUMPDEST), //  [ count ]
-		// push args for the call
-		byte(vm.PUSH1), 0, // out size
-		byte(vm.DUP1),       // out offset
-		byte(vm.DUP1),       // out insize
-		byte(vm.DUP1),       // in offset
-		byte(vm.DUP1),       // value
-		byte(vm.PUSH1), 0x4, // address of identity
-		byte(vm.GAS), // gas
-		byte(vm.CALL),
-		byte(vm.POP),      // pop return value
-		byte(vm.PUSH1), 0, // jumpdestination
-		byte(vm.JUMP),
-	}
+	p, lbl = program.New().Jumpdest()
+	callInexistant := p.
+		Call(nil, 0xff, 0, 0, 0, 0, 0).
+		Op(vm.POP).Jump(lbl).Bytes() // pop return value and jump to label
 
-	callInexistant := []byte{
-		byte(vm.JUMPDEST), //  [ count ]
-		// push args for the call
-		byte(vm.PUSH1), 0, // out size
-		byte(vm.DUP1),        // out offset
-		byte(vm.DUP1),        // out insize
-		byte(vm.DUP1),        // in offset
-		byte(vm.DUP1),        // value
-		byte(vm.PUSH1), 0xff, // address of existing contract
-		byte(vm.GAS), // gas
-		byte(vm.CALL),
-		byte(vm.POP),      // pop return value
-		byte(vm.PUSH1), 0, // jumpdestination
-		byte(vm.JUMP),
-	}
+	p, lbl = program.New().Jumpdest()
+	callEOA := p.
+		Call(nil, 0xE0, 0, 0, 0, 0, 0). // call addr of EOA
+		Op(vm.POP).Jump(lbl).Bytes()    // pop return value and jump to label
 
-	callEOA := []byte{
-		byte(vm.JUMPDEST), //  [ count ]
-		// push args for the call
-		byte(vm.PUSH1), 0, // out size
-		byte(vm.DUP1),        // out offset
-		byte(vm.DUP1),        // out insize
-		byte(vm.DUP1),        // in offset
-		byte(vm.DUP1),        // value
-		byte(vm.PUSH1), 0xE0, // address of EOA
-		byte(vm.GAS), // gas
-		byte(vm.CALL),
-		byte(vm.POP),      // pop return value
-		byte(vm.PUSH1), 0, // jumpdestination
-		byte(vm.JUMP),
-	}
+	p, lbl = program.New().Jumpdest()
+	// Push as if we were making call, then pop it off again, and loop
+	loopingCode := p.Push(0).
+		Op(vm.DUP1, vm.DUP1, vm.DUP1).
+		Push(0x4).
+		Op(vm.GAS, vm.POP, vm.POP, vm.POP, vm.POP, vm.POP, vm.POP).
+		Jump(lbl).Bytes()
 
-	loopingCode := []byte{
-		byte(vm.JUMPDEST), //  [ count ]
-		// push args for the call
-		byte(vm.PUSH1), 0, // out size
-		byte(vm.DUP1),       // out offset
-		byte(vm.DUP1),       // out insize
-		byte(vm.DUP1),       // in offset
-		byte(vm.PUSH1), 0x4, // address of identity
-		byte(vm.GAS), // gas
+	p, lbl = program.New().Jumpdest()
+	loopingCode2 := p.
+		Push(0x01020304).Push(uint64(0x0102030405)).
+		Op(vm.POP, vm.POP).
+		Op(vm.PUSH6).Append(make([]byte, 6)).Op(vm.JUMP). // Jumpdest zero expressed in 6 bytes
+		Jump(lbl).Bytes()
 
-		byte(vm.POP), byte(vm.POP), byte(vm.POP), byte(vm.POP), byte(vm.POP), byte(vm.POP),
-		byte(vm.PUSH1), 0, // jumpdestination
-		byte(vm.JUMP),
-	}
+	p, lbl = program.New().Jumpdest()
+	callRevertingContractWithInput := p.
+		Call(nil, 0xee, 0, 0, 0x20, 0x0, 0x0).
+		Op(vm.POP).Jump(lbl).Bytes() // pop return value and jump to label
 
-	calllRevertingContractWithInput := []byte{
-		byte(vm.JUMPDEST), //
-		// push args for the call
-		byte(vm.PUSH1), 0, // out size
-		byte(vm.DUP1),        // out offset
-		byte(vm.PUSH1), 0x20, // in size
-		byte(vm.PUSH1), 0x00, // in offset
-		byte(vm.PUSH1), 0x00, // value
-		byte(vm.PUSH1), 0xEE, // address of reverting contract
-		byte(vm.GAS), // gas
-		byte(vm.CALL),
-		byte(vm.POP),      // pop return value
-		byte(vm.PUSH1), 0, // jumpdestination
-		byte(vm.JUMP),
-	}
-
-	//tracer := vm.NewJSONLogger(nil, os.Stdout)
+	//tracer := logger.NewJSONLogger(nil, os.Stdout)
 	//Execute(loopingCode, nil, &Config{
 	//	EVMConfig: vm.Config{
 	//		Debug:  true,
 	//		Tracer: tracer,
 	//	}})
 	// 100M gas
-	benchmarkNonModifyingCode(b, 100000000, staticCallIdentity, "staticcall-identity-100M")
-	benchmarkNonModifyingCode(b, 100000000, callIdentity, "call-identity-100M")
-	benchmarkNonModifyingCode(b, 100000000, loopingCode, "loop-100M")
-	benchmarkNonModifyingCode(b, 100000000, callInexistant, "call-nonexist-100M")
-	benchmarkNonModifyingCode(b, 100000000, callEOA, "call-EOA-100M")
-	benchmarkNonModifyingCode(b, 100000000, calllRevertingContractWithInput, "call-reverting-100M")
+	benchmarkNonModifyingCode(100_000_000, staticCallIdentity, "staticcall-identity-100M", "", b)
+	benchmarkNonModifyingCode(100_000_000, callIdentity, "call-identity-100M", "", b)
+	benchmarkNonModifyingCode(100_000_000, loopingCode, "loop-100M", "", b)
+	benchmarkNonModifyingCode(100_000_000, loopingCode2, "loop2-100M", "", b)
+	benchmarkNonModifyingCode(100_000_000, callInexistant, "call-nonexist-100M", "", b)
+	benchmarkNonModifyingCode(100_000_000, callEOA, "call-EOA-100M", "", b)
+	benchmarkNonModifyingCode(100_000_000, callRevertingContractWithInput, "call-reverting-100M", "", b)
 
 	//benchmarkNonModifyingCode(10000000, staticCallIdentity, "staticcall-identity-10M", b)
 	//benchmarkNonModifyingCode(10000000, loopingCode, "loop-10M", b)
@@ -747,4 +755,37 @@ func TestEip2929Cases(t *testing.T) {
 		prettyPrint("This calls the `identity`-precompile (cheap), then calls an account (expensive) and `staticcall`s the same"+
 			"account (cheap)", code)
 	}
+}
+
+func BenchmarkEVM_SWAP1(b *testing.B) {
+	// returns a contract that does n swaps (SWAP1)
+	swapContract := func(n uint64) []byte {
+		contract := []byte{
+			byte(vm.PUSH0), // PUSH0
+			byte(vm.PUSH0), // PUSH0
+		}
+		for i := uint64(0); i < n; i++ {
+			contract = append(contract, byte(vm.SWAP1))
+		}
+		return contract
+	}
+
+	_, tx, _ := NewTestTemporalDb(b)
+	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	require.NoError(b, err)
+	defer domains.Close()
+	state := state.New(state.NewReaderV3(domains))
+	contractAddr := common.BytesToAddress([]byte("contract"))
+
+	b.Run("10k", func(b *testing.B) {
+		contractCode := swapContract(10_000)
+		state.SetCode(contractAddr, contractCode)
+
+		for i := 0; i < b.N; i++ {
+			_, _, err := Call(contractAddr, []byte{}, &Config{State: state})
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }

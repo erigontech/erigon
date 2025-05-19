@@ -62,11 +62,6 @@ func (evm *EVM) precompile(addr common.Address) (PrecompiledContract, bool) {
 	return p, ok
 }
 
-// run runs the given contract and takes care of running precompiles with a fallback to the byte code interpreter.
-func run(evm *EVM, contract *Contract, input []byte, readOnly bool) ([]byte, error) {
-	return evm.interpreter.Run(contract, input, readOnly)
-}
-
 // EVM is the Ethereum Virtual Machine base object and provides
 // the necessary tools to run a contract on the given state with
 // the provided context. It should be noted that any error
@@ -280,7 +275,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 		if typ == STATICCALL {
 			readOnly = true
 		}
-		ret, err = run(evm, contract, input, readOnly)
+		ret, err = evm.interpreter.Run(contract, input, readOnly)
 		gas = contract.Gas
 	}
 	// When an error was returned by the EVM or when setting the creation code
@@ -433,7 +428,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 		return nil, address, gasRemaining, nil
 	}
 
-	ret, err = run(evm, contract, nil, false)
+	ret, err = evm.interpreter.Run(contract, nil, false)
 
 	// EIP-170: Contract code size limit
 	if err == nil && evm.chainRules.IsSpuriousDragon && len(ret) > evm.maxCodeSize() {

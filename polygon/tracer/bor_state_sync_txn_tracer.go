@@ -177,7 +177,7 @@ func (bsstt *borStateSyncTxnTracer) OnCodeChange(a common.Address, prevCodeHash 
 	}
 }
 
-func (bsstt *borStateSyncTxnTracer) OnStorageChange(a common.Address, k *common.Hash, prev, new uint256.Int) {
+func (bsstt *borStateSyncTxnTracer) OnStorageChange(a common.Address, k common.Hash, prev, new uint256.Int) {
 	if bsstt.Tracer.OnStorageChange != nil {
 		bsstt.Tracer.OnStorageChange(a, k, prev, new)
 	}
