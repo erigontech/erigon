@@ -302,6 +302,15 @@ func (a *Aggregator) OpenList(files []string, readonly bool) error {
 	return a.OpenFolder()
 }
 
+func (a *Aggregator) WaitForFiles() {
+	for {
+		select {
+		case <-a.WaitForBuildAndMerge():
+			return
+		}
+	}
+}
+
 func (a *Aggregator) Close() {
 	if a.ctxCancel == nil { // invariant: it's safe to call Close multiple times
 		return
@@ -309,6 +318,8 @@ func (a *Aggregator) Close() {
 	a.ctxCancel()
 	a.ctxCancel = nil
 	a.wg.Wait()
+
+	a.WaitForFiles()
 
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
