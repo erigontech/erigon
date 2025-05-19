@@ -122,7 +122,7 @@ func (t *ValidationRulesTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, s
 	if t.prevWasGas {
 		// GAS must be followed immediately by a *CALL instruction
 		if opCode != vm.CALL && opCode != vm.CALLCODE && opCode != vm.DELEGATECALL && opCode != vm.STATICCALL {
-			t.err = fmt.Errorf("GAS opcode not followed by CALL instruction")
+			t.err = errors.New("GAS opcode not followed by CALL instruction")
 			return
 		}
 		t.prevWasGas = false
