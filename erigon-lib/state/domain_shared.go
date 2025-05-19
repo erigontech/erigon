@@ -1249,6 +1249,9 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState() (blockNum, tx
 		return 0, 0, nil, err
 	}
 	if len(state) < 16 {
+		if sdc.sharedDomains.roTtx.Debug().TxNumsInFiles(kv.CommitmentDomain) > 0 {
+			return 0, 0, nil, fmt.Errorf("assert: special key `state` not found in commitment files (but we have them), probably files are `purified`")
+		}
 		return 0, 0, nil, nil
 	}
 
