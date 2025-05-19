@@ -710,7 +710,7 @@ func (sd *StateDiff) WriteAccountStorage(address common.Address, incarnation uin
 	}
 	m := make(map[string]interface{})
 	m["*"] = &StateDiffStorage{From: common.BytesToHash(original.Bytes()), To: common.BytesToHash(value.Bytes())}
-	accountDiff.Storage[*key] = m
+	accountDiff.Storage[key] = m
 	return nil
 }
 
