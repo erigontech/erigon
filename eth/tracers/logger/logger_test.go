@@ -23,7 +23,6 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
