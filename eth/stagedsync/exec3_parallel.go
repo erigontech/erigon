@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3"
 	"github.com/erigontech/erigon/execution/exec3/calltracer"
-	"github.com/erigontech/erigon/turbo/shards"
 )
 
 /*
@@ -349,7 +348,6 @@ type txExecutor struct {
 	agg                      *libstate.Aggregator
 	rs                       *state.StateV3Buffered
 	doms                     *libstate.SharedDomains
-	accumulator              *shards.Accumulator
 	u                        Unwinder
 	isMining                 bool
 	inMemExec                bool
@@ -935,7 +933,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	var stateWriter *state.StateWriterBufferedV3
 
 	if be.finalizeTasks.minPending() != -1 {
-		stateWriter = state.NewStateWriterBufferedV3(pe.rs, pe.accumulator)
+		stateWriter = state.NewStateWriterBufferedV3(pe.rs, nil)
 		stateReader := state.NewBufferedReader(pe.rs, state.NewReaderV3(pe.rs.Domains(), applyTx))
 
 		applyResult = txResult{
@@ -1203,7 +1201,7 @@ func (pe *parallelExecutor) resetWorkers(ctx context.Context, rs *state.StateV3B
 	defer pe.Unlock()
 
 	for _, worker := range pe.execWorkers {
-		worker.ResetState(rs, nil, nil, state.NewNoopWriter(), pe.accumulator)
+		worker.ResetState(rs, nil, nil, state.NewNoopWriter(), nil)
 	}
 
 	return nil
@@ -1342,7 +1340,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						return nil, fmt.Errorf("can't finalize block: %w", err)
 					}
 
-					stateWriter := state.NewStateWriterBufferedV3(pe.rs, pe.accumulator)
+					stateWriter := state.NewStateWriterBufferedV3(pe.rs, nil)
 
 					if err = ibs.MakeWriteSet(pe.cfg.chainConfig.Rules(result.BlockNumber(), result.BlockTime()), stateWriter); err != nil {
 						return nil, err
@@ -1501,7 +1499,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	pe.execLoopGroup, execLoopCtx = errgroup.WithContext(execLoopCtx)
 
 	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers = exec3.NewWorkersPool(
-		execLoopCtx, pe.accumulator, true, pe.cfg.db, nil, nil, nil, pe.in,
+		execLoopCtx, nil, true, pe.cfg.db, nil, nil, nil, pe.in,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
 		pe.workerCount+1, pe.taskExecMetrics, pe.cfg.dirs, pe.isMining, pe.logger)
 

@@ -76,7 +76,7 @@ func (se *serialExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buf
 	}
 
 	se.worker.ResetTx(se.applyTx)
-	se.worker.ResetState(rs, se.applyTx, nil, nil, se.accumulator)
+	se.worker.ResetState(rs, se.applyTx, nil, nil, nil)
 
 	return nil
 }
@@ -100,13 +100,13 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 		txTask := task.(*exec.TxTask)
 
 		if gasPool == nil {
-			gasPool =core.NewGasPool(task.BlockGasLimit(),se.cfg.chainConfig.GetMaxBlobGasPerBlock(tasks[0].BlockTime()))
+			gasPool = core.NewGasPool(task.BlockGasLimit(), se.cfg.chainConfig.GetMaxBlobGasPerBlock(tasks[0].BlockTime()))
 		}
 
 		txTask.ResetGasPool(gasPool)
 		txTask.Config = se.cfg.chainConfig
 		txTask.Engine = se.cfg.engine
-		
+
 		result := se.worker.RunTxTask(txTask)
 
 		if err := func() error {
@@ -165,7 +165,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 					}
 				}
 
-				stateWriter := state.NewWriter(se.doms.AsPutDel(se.applyTx), se.accumulator)
+				stateWriter := state.NewWriter(se.doms.AsPutDel(se.applyTx), nil)
 
 				if err = ibs.MakeWriteSet(se.cfg.chainConfig.Rules(txTask.BlockNumber(), txTask.BlockTime()), stateWriter); err != nil {
 					panic(err)

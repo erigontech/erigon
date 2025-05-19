@@ -637,7 +637,6 @@ func ExecV3(ctx context.Context,
 				rs:                       rs,
 				doms:                     doms,
 				agg:                      agg,
-				accumulator:              accumulator,
 				shouldGenerateChangesets: shouldGenerateChangesets,
 				isMining:                 isMining,
 				inMemExec:                inMemExec,
@@ -765,7 +764,7 @@ func ExecV3(ctx context.Context,
 					return executor.getHeader(ctx, hash, number)
 				}), cfg.engine, cfg.author, chainConfig)
 
-				if !parallel && accumulator != nil {
+				if accumulator != nil {
 					txs, err := blockReader.RawTransactions(context.Background(), applyTx, b.NumberU64(), b.NumberU64())
 					if err != nil {
 						return err
