@@ -23,13 +23,13 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 )
 
 type dummyContractRef struct {
