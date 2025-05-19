@@ -1504,7 +1504,7 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 		s.logger.Warn("files changed...sending notification")
 		events := s.notifications.Events
 		events.OnNewSnapshot()
-		if downloaderCfg.ChainName != "" {
+		if downloaderCfg.ChainName == "" {
 			return
 		}
 		if !s.config.Snapshot.NoDownloader && s.downloaderClient != nil && len(frozenFileNames) > 0 {
@@ -1520,7 +1520,7 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 		}
 	})
 
-	if downloaderCfg.ChainName != "" || s.config.Snapshot.NoDownloader {
+	if downloaderCfg.ChainName == "" || s.config.Snapshot.NoDownloader {
 		return nil
 	}
 
