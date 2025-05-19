@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon/diagnostics"
+	"github.com/erigontech/erigon/eth/ethconfig/features"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/node"
 	"github.com/urfave/cli/v2"
@@ -1157,7 +1158,19 @@ func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	return nil
 }
 
-func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (blockSnaps *freezeblocks.RoSnapshots, borSnaps *heimdall.RoSnapshots, csn *freezeblocks.CaplinSnapshots, br *freezeblocks.BlockRetire, agg *libstate.Aggregator, clean func(), err error) {
+func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (
+	blockSnaps *freezeblocks.RoSnapshots,
+	borSnaps *heimdall.RoSnapshots,
+	csn *freezeblocks.CaplinSnapshots,
+	br *freezeblocks.BlockRetire,
+	agg *libstate.Aggregator,
+	clean func(),
+	err error,
+) {
+	if _, err = features.EnableSyncCfg(chainDB, ethconfig.Sync{}); err != nil {
+		return
+	}
+
 	chainConfig := fromdb.ChainConfig(chainDB)
 
 	blockSnaps = freezeblocks.NewRoSnapshots(cfg, dirs.Snap, 0, logger)
