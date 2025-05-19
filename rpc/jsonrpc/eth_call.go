@@ -24,13 +24,13 @@ import (
 	"math/big"
 	"unsafe"
 
-	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/gointerfaces"
