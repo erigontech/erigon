@@ -27,10 +27,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/stretchr/testify/require"
 )
 
 // precompiledTest defines the input/output pairs for precompiled contract tests.
@@ -57,7 +58,8 @@ var allPrecompiles = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{0x03}):       &ripemd160hash{},
 	common.BytesToAddress([]byte{0x04}):       &dataCopy{},
 	common.BytesToAddress([]byte{0x05}):       &bigModExp{eip2565: false},
-	common.BytesToAddress([]byte{0xf5}):       &bigModExp{eip2565: true},
+	common.BytesToAddress([]byte{0xa5}):       &bigModExp{eip2565: true},
+	common.BytesToAddress([]byte{0xb5}):       &bigModExp{eip7883: true},
 	common.BytesToAddress([]byte{0x06}):       &bn256AddIstanbul{},
 	common.BytesToAddress([]byte{0x07}):       &bn256ScalarMulIstanbul{},
 	common.BytesToAddress([]byte{0x08}):       &bn256PairingIstanbul{},
@@ -244,8 +246,11 @@ func BenchmarkPrecompiledIdentity(b *testing.B) {
 func TestPrecompiledModExp(t *testing.T)      { testJson("modexp", "05", t) }
 func BenchmarkPrecompiledModExp(b *testing.B) { benchJson("modexp", "05", b) }
 
-func TestPrecompiledModExpEip2565(t *testing.T)      { testJson("modexp_eip2565", "f5", t) }
-func BenchmarkPrecompiledModExpEip2565(b *testing.B) { benchJson("modexp_eip2565", "f5", b) }
+func TestPrecompiledModExpEip2565(t *testing.T)      { testJson("modexp_eip2565", "a5", t) }
+func BenchmarkPrecompiledModExpEip2565(b *testing.B) { benchJson("modexp_eip2565", "a5", b) }
+
+func TestPrecompiledModExpEip7883(t *testing.T)      { testJson("modexp_eip7883", "b5", t) }
+func BenchmarkPrecompiledModExpEip7883(b *testing.B) { benchJson("modexp_eip7883", "b5", b) }
 
 // Tests the sample inputs from the elliptic curve addition EIP 213.
 func TestPrecompiledBn256Add(t *testing.T)      { testJson("bn256Add", "06", t) }
@@ -264,7 +269,7 @@ func TestPrecompiledModExpOOG(t *testing.T) {
 }
 
 func TestModExpPrecompilePotentialOutOfRange(t *testing.T) {
-	modExpContract := allPrecompiles[common.BytesToAddress([]byte{0xf5})]
+	modExpContract := allPrecompiles[common.BytesToAddress([]byte{0xa5})]
 	hexString := "0x0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000ffffffffffffffff0000000000000000000000000000000000000000000000000000000000000000ee"
 	input := hexutil.MustDecode(hexString)
 	maxGas := uint64(math.MaxUint64)

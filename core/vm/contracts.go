@@ -150,7 +150,28 @@ var PrecompiledContractsPrague = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{0x11}): &bls12381MapFp2ToG2{},
 }
 
+var PrecompiledContractsOsaka = map[common.Address]PrecompiledContract{
+	common.BytesToAddress([]byte{0x01}): &ecrecover{},
+	common.BytesToAddress([]byte{0x02}): &sha256hash{},
+	common.BytesToAddress([]byte{0x03}): &ripemd160hash{},
+	common.BytesToAddress([]byte{0x04}): &dataCopy{},
+	common.BytesToAddress([]byte{0x05}): &bigModExp{eip7883: true},
+	common.BytesToAddress([]byte{0x06}): &bn256AddIstanbul{},
+	common.BytesToAddress([]byte{0x07}): &bn256ScalarMulIstanbul{},
+	common.BytesToAddress([]byte{0x08}): &bn256PairingIstanbul{},
+	common.BytesToAddress([]byte{0x09}): &blake2F{},
+	common.BytesToAddress([]byte{0x0a}): &pointEvaluation{},
+	common.BytesToAddress([]byte{0x0b}): &bls12381G1Add{},
+	common.BytesToAddress([]byte{0x0c}): &bls12381G1MultiExp{},
+	common.BytesToAddress([]byte{0x0d}): &bls12381G2Add{},
+	common.BytesToAddress([]byte{0x0e}): &bls12381G2MultiExp{},
+	common.BytesToAddress([]byte{0x0f}): &bls12381Pairing{},
+	common.BytesToAddress([]byte{0x10}): &bls12381MapFpToG1{},
+	common.BytesToAddress([]byte{0x11}): &bls12381MapFp2ToG2{},
+}
+
 var (
+	PrecompiledAddressesOsaka     []common.Address
 	PrecompiledAddressesPrague    []common.Address
 	PrecompiledAddressesNapoli    []common.Address
 	PrecompiledAddressesCancun    []common.Address
@@ -182,11 +203,16 @@ func init() {
 	for k := range PrecompiledContractsPrague {
 		PrecompiledAddressesPrague = append(PrecompiledAddressesPrague, k)
 	}
+	for k := range PrecompiledContractsOsaka {
+		PrecompiledAddressesOsaka = append(PrecompiledAddressesOsaka, k)
+	}
 }
 
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
 func ActivePrecompiles(rules *chain.Rules) []common.Address {
 	switch {
+	case rules.IsOsaka:
+		return PrecompiledAddressesOsaka
 	case rules.IsPrague:
 		return PrecompiledAddressesPrague
 	case rules.IsNapoli:
@@ -311,10 +337,12 @@ func (c *dataCopy) Run(in []byte) ([]byte, error) {
 // bigModExp implements a native big integer exponential modular operation.
 type bigModExp struct {
 	eip2565 bool
+	eip7883 bool
 }
 
 var (
 	big1      = big.NewInt(1)
+	big2      = big.NewInt(2)
 	big3      = big.NewInt(3)
 	big4      = big.NewInt(4)
 	big7      = big.NewInt(7)
@@ -330,7 +358,7 @@ var (
 	big199680 = big.NewInt(199680)
 )
 
-// modexpMultComplexity implements bigModexp multComplexity formula, as defined in EIP-198
+// modExpMultComplexityEip198 implements modExp multiplication complexity formula, as defined in EIP-198
 //
 // def mult_complexity(x):
 //
@@ -339,7 +367,7 @@ var (
 //	else: return x ** 2 // 16 + 480 * x - 199680
 //
 // where is x is max(length_of_MODULUS, length_of_BASE)
-func modexpMultComplexity(x *big.Int) *big.Int {
+func modExpMultComplexityEip198(x *big.Int) *big.Int {
 	switch {
 	case x.Cmp(big64) <= 0:
 		x.Mul(x, x) // x ** 2
@@ -357,6 +385,41 @@ func modexpMultComplexity(x *big.Int) *big.Int {
 		)
 	}
 	return x
+}
+
+// modExpMultComplexityEip2565 implements modExp multiplication complexity formula, as defined in EIP-2565
+//
+// def mult_complexity(x):
+//
+//	words = math.ceil(x / 8)
+//	return words**2
+//
+// where is x is max(length_of_MODULUS, length_of_BASE)
+func modExpMultComplexityEip2565(x *big.Int) *big.Int {
+	x.Add(x, big7)
+	x.Div(x, big8)
+	return x.Mul(x, x)
+}
+
+// modExpMultComplexityEip7883 implements modExp multiplication complexity formula, as defined in EIP-7883
+//
+// def mult_complexity(x):
+//
+//	words = math.ceil(x / 8)
+//	multiplication_complexity = 0
+//	if x <= 32: multiplication_complexity = words**2
+//	elif x > 32: multiplication_complexity = 2 * words**2
+//	return multiplication_complexity
+//
+// where is x is max(length_of_MODULUS, length_of_BASE)
+func modExpMultComplexityEip7883(x *big.Int) *big.Int {
+	lessOrEq32 := x.Cmp(big32) <= 0
+	x = modExpMultComplexityEip2565(x)
+	if lessOrEq32 {
+		return x
+	} else {
+		return x.Mul(x, big2)
+	}
 }
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
@@ -390,38 +453,45 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 	adjExpLen := new(big.Int)
 	if expLen.Cmp(big32) > 0 {
 		adjExpLen.Sub(expLen, big32)
-		adjExpLen.Mul(big8, adjExpLen)
+		if c.eip7883 {
+			adjExpLen.Mul(big16, adjExpLen)
+		} else {
+			adjExpLen.Mul(big8, adjExpLen)
+		}
 	}
 	adjExpLen.Add(adjExpLen, big.NewInt(int64(msb)))
+	adjExpLen = math.BigMax(adjExpLen, big1)
+
 	// Calculate the gas cost of the operation
 	gas := new(big.Int).Set(math.BigMax(modLen, baseLen))
-	if c.eip2565 {
-		// EIP-2565 has three changes
-		// 1. Different multComplexity (inlined here)
-		// in EIP-2565 (https://eips.ethereum.org/EIPS/eip-2565):
-		//
-		// def mult_complexity(x):
-		//    ceiling(x/8)^2
-		//
-		//where is x is max(length_of_MODULUS, length_of_BASE)
-		gas = gas.Add(gas, big7)
-		gas = gas.Div(gas, big8)
-		gas.Mul(gas, gas)
+	if c.eip7883 {
+		// EIP-7883: ModExp Gas Cost Increase
+		gas = modExpMultComplexityEip7883(gas)
 
-		gas.Mul(gas, math.BigMax(adjExpLen, big1))
+		gas.Mul(gas, adjExpLen)
+		gas.Div(gas, big3)
+		if gas.BitLen() > 64 {
+			return math.MaxUint64
+		}
+
+		return max(500, gas.Uint64())
+	} else if c.eip2565 {
+		// EIP-2565 has three changes compared to EIP-198:
+
+		// 1. Different multiplication complexity
+		gas = modExpMultComplexityEip2565(gas)
+
+		gas.Mul(gas, adjExpLen)
 		// 2. Different divisor (`GQUADDIVISOR`) (3)
 		gas.Div(gas, big3)
 		if gas.BitLen() > 64 {
 			return math.MaxUint64
 		}
 		// 3. Minimum price of 200 gas
-		if gas.Uint64() < 200 {
-			return 200
-		}
-		return gas.Uint64()
+		return max(200, gas.Uint64())
 	}
-	gas = modexpMultComplexity(gas)
-	gas.Mul(gas, math.BigMax(adjExpLen, big1))
+	gas = modExpMultComplexityEip198(gas)
+	gas.Mul(gas, adjExpLen)
 	gas.Div(gas, big20)
 
 	if gas.BitLen() > 64 {

@@ -254,6 +254,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	if err != nil {
 		return nil, err
 	}
+	//genEnv.ibs.SetTrace(true)
 
 	for i, txn := range block.Transactions() {
 		genEnv.ibs.SetTxContext(i)

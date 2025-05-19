@@ -128,6 +128,10 @@ func TestForkChoiceBasic(t *testing.T) {
 }
 
 func TestForkChoiceChainBellatrix(t *testing.T) {
+	if testing.Short() {
+		t.Skip("too slow for testing.Short")
+	}
+
 	ctx := context.Background()
 	blocks, anchorState, _ := tests.GetBellatrixRandom()
 	cfg := clparams.MainnetBeaconConfig
