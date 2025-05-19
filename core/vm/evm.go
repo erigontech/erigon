@@ -140,6 +140,9 @@ func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtype
 	evm.Context = blockCtx
 	evm.TxContext = txCtx
 	evm.intraBlockState = ibs
+	if vmConfig.JumpDestCache == nil && evm.config.JumpDestCache != nil {
+		vmConfig.JumpDestCache = evm.config.JumpDestCache
+	}
 	evm.config = vmConfig
 	evm.chainRules = chainRules
 

@@ -107,6 +107,7 @@ func NewWorker(lock sync.Locker, logger log.Logger, hooks *tracing.Hooks, ctx co
 	}
 	w.taskGasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(0))
 	w.vmCfg = vm.Config{Tracer: w.callTracer.Tracer().Hooks}
+	vm.NewJumpDestCache()
 	w.ibs = state.New(w.stateReader)
 	return w
 }
