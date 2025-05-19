@@ -555,7 +555,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	effectiveTip := st.gasPrice
 	if rules.IsLondon {
 		if st.feeCap.Gt(st.evm.Context.BaseFee) {
-			effectiveTip = math.Min256(st.tipCap, (&uint256.Int{}).Sub(st.feeCap, st.evm.Context.BaseFee))
+			effectiveTip = math.U256Min(st.tipCap, (&uint256.Int{}).Sub(st.feeCap, st.evm.Context.BaseFee))
 		} else {
 			effectiveTip = u256.Num0
 		}

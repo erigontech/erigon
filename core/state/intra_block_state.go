@@ -374,7 +374,7 @@ func (sdb *IntraBlockState) GetCodeSize(addr common.Address) (int, error) {
 			if s.code != nil {
 				return len(s.code), nil
 			}
-			if stateObject.data.CodeHash == empty.CodeHash {
+			if s.data.CodeHash == empty.CodeHash {
 				return 0, nil
 			}
 			readStart := time.Now()
@@ -809,7 +809,7 @@ func (sdb *IntraBlockState) Selfdestruct(addr common.Address) (bool, error) {
 	}
 	prevBalance := stateObject.Balance()
 	sdb.journal.append(selfdestructChange{
-		account:     addr,
+		account:     &addr,
 		prev:        stateObject.selfdestructed,
 		prevbalance: prevBalance,
 	})
@@ -1025,7 +1025,7 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 	if previous != nil && previous.selfdestructed {
 		prevInc = previous.data.Incarnation
 	} else {
-		prevInc = 0 
+		prevInc = 0
 	}
 	if previous != nil && prevInc < previous.data.PrevIncarnation {
 		prevInc = previous.data.PrevIncarnation

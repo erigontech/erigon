@@ -220,7 +220,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		}
 		defer sd.Close()
 		//cfg.w = state.NewWriter(sd, nil)
-		cfg.State = state.New(state.NewReaderV3(sd))
+		cfg.State = state.New(state.NewReaderV3(sd,tx))
 	}
 	var (
 		vmenv  = NewEnv(cfg)

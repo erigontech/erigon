@@ -232,7 +232,7 @@ func (s *StateSuite) TestSnapshot(c *checker.C) {
 	c.Assert(value, checker.DeepEquals, common.Hash{})
 
 	// revert up to the genesis state and ensure correct content
-	s.state.RevertToSnapshot(genesis)
+	s.state.RevertToSnapshot(genesis, nil)
 	s.state.GetState(stateobjaddr, storageaddr, &value)
 	c.Assert(value, checker.DeepEquals, common.Hash{})
 	s.state.GetCommittedState(stateobjaddr, storageaddr, &value)

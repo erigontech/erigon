@@ -102,25 +102,25 @@ type (
 		prev    *stateObject
 	}
 	selfdestructChange struct {
-		account     common.Address
+		account     *common.Address
 		prev        bool // whether account had already selfdestructed
 		prevbalance uint256.Int
 	}
 
 	// Changes to individual accounts.
 	balanceChange struct {
-		account common.Address
+		account *common.Address
 		prev    uint256.Int
 	}
 	balanceIncrease struct {
-		account  common.Address
+		account  *common.Address
 		increase uint256.Int
 	}
 	balanceIncreaseTransfer struct {
 		bi *BalanceIncrease
 	}
 	nonceChange struct {
-		account common.Address
+		account *common.Address
 		prev    uint64
 	}
 	storageChange struct {
@@ -130,12 +130,12 @@ type (
 		wasCommited bool
 	}
 	fakeStorageChange struct {
-		account  common.Address
+		account  *common.Address
 		key      common.Hash
 		prevalue uint256.Int
 	}
 	codeChange struct {
-		account  common.Address
+		account  *common.Address
 		prevcode []byte
 		prevhash common.Hash
 	}
@@ -193,7 +193,7 @@ func (ch resetObjectChange) dirtied() *common.Address {
 }
 
 func (ch selfdestructChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account)
+	obj, err := s.getStateObject(*ch.account)
 	if err != nil {
 		return err
 	}
@@ -216,7 +216,7 @@ func (ch selfdestructChange) revert(s *IntraBlockState) error {
 }
 
 func (ch selfdestructChange) dirtied() *common.Address {
-	return &ch.account
+	return ch.account
 }
 
 var ripemd = common.HexToAddress("0000000000000000000000000000000000000003")
@@ -228,7 +228,7 @@ func (ch touchChange) revert(s *IntraBlockState) error {
 func (ch touchChange) dirtied() *common.Address { return &ch.account }
 
 func (ch balanceChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account)
+	obj, err := s.getStateObject(*ch.account)
 	if err != nil {
 		return err
 	}
@@ -250,22 +250,22 @@ func (ch balanceChange) revert(s *IntraBlockState) error {
 }
 
 func (ch balanceChange) dirtied() *common.Address {
-	return &ch.account
+	return ch.account
 }
 
 func (ch balanceIncrease) revert(s *IntraBlockState) error {
-	if bi, ok := s.balanceInc[ch.account]; ok {
+	if bi, ok := s.balanceInc[*ch.account]; ok {
 		bi.increase.Sub(&bi.increase, &ch.increase)
 		bi.count--
 		if bi.count == 0 {
-			delete(s.balanceInc, ch.account)
+			delete(s.balanceInc, *ch.account)
 		}
 	}
 	return nil
 }
 
 func (ch balanceIncrease) dirtied() *common.Address {
-	return &ch.account
+	return ch.account
 }
 
 func (ch balanceIncreaseTransfer) dirtied() *common.Address {
@@ -277,7 +277,7 @@ func (ch balanceIncreaseTransfer) revert(s *IntraBlockState) error {
 	return nil
 }
 func (ch nonceChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account)
+	obj, err := s.getStateObject(*ch.account)
 	if err != nil {
 		return err
 	}
@@ -296,11 +296,11 @@ func (ch nonceChange) revert(s *IntraBlockState) error {
 }
 
 func (ch nonceChange) dirtied() *common.Address {
-	return &ch.account
+	return ch.account
 }
 
 func (ch codeChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account)
+	obj, err := s.getStateObject(*ch.account)
 	if err != nil {
 		return err
 	}
@@ -322,11 +322,11 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 }
 
 func (ch codeChange) dirtied() *common.Address {
-	return &ch.account
+	return ch.account
 }
 
 func (ch storageChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account)
+	obj, err := s.getStateObject(*ch.account)
 	if err != nil {
 		return err
 	}
@@ -345,11 +345,11 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 }
 
 func (ch storageChange) dirtied() *common.Address {
-	return &ch.account
+	return ch.account
 }
 
 func (ch fakeStorageChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account)
+	obj, err := s.getStateObject(*ch.account)
 	if err != nil {
 		return err
 	}
@@ -358,7 +358,7 @@ func (ch fakeStorageChange) revert(s *IntraBlockState) error {
 }
 
 func (ch fakeStorageChange) dirtied() *common.Address {
-	return &ch.account
+	return ch.account
 }
 
 func (ch transientStorageChange) revert(s *IntraBlockState) error {

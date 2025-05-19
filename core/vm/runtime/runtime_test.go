@@ -233,7 +233,7 @@ func BenchmarkCall(b *testing.B) {
 	tx, sd := testTemporalTxSD(b, db)
 	defer tx.Rollback()
 	//cfg.w = state.NewWriter(sd, nil)
-	cfg.State = state.New(state.NewReaderV3(sd))
+	cfg.State = state.New(state.NewReaderV3(sd,tx))
 	cfg.EVMConfig.JumpDestCache = vm.NewJumpDestCache(128)
 
 	tmpdir := b.TempDir()
@@ -334,7 +334,7 @@ func BenchmarkEVM_RETURN(b *testing.B) {
 	require.NoError(b, err)
 	defer domains.Close()
 
-	statedb := state.New(state.NewReaderV3(domains))
+	statedb := state.New(state.NewReaderV3(domains,tx))
 	contractAddr := common.BytesToAddress([]byte("contract"))
 
 	for _, n := range []uint64{1_000, 10_000, 100_000, 1_000_000} {
@@ -776,7 +776,7 @@ func BenchmarkEVM_SWAP1(b *testing.B) {
 	domains, err := stateLib.NewSharedDomains(tx, log.New())
 	require.NoError(b, err)
 	defer domains.Close()
-	state := state.New(state.NewReaderV3(domains))
+	state := state.New(state.NewReaderV3(domains,tx))
 	contractAddr := common.BytesToAddress([]byte("contract"))
 
 	b.Run("10k", func(b *testing.B) {
