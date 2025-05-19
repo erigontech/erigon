@@ -18,9 +18,13 @@ package state
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/kv"
 	"strings"
+	"time"
 
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -72,6 +76,100 @@ func (cs *commitmentState) Encode() ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+func (sd *SharedDomains) GetCommitmentContext() *SharedDomainsCommitmentContext {
+	return sd.sdCtx
+}
+
+// SeekCommitment lookups latest available commitment and sets it as current
+func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (err error) {
+	_, _, _, err = sd.sdCtx.SeekCommitment(ctx, tx)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// replaceShortenedKeysInBranch replaces shortened keys in the branch with full keys
+func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch commitment.BranchData, fStartTxNum uint64, fEndTxNum uint64, aggTx *AggregatorRoTx) (commitment.BranchData, error) {
+	logger := sd.logger
+	stepSize := aggTx.StepSize()
+
+	if !aggTx.d[kv.CommitmentDomain].d.replaceKeysInValues && aggTx.a.commitmentValuesTransform {
+		panic("domain.replaceKeysInValues is disabled, but agg.commitmentValuesTransform is enabled")
+	}
+
+	if !aggTx.a.commitmentValuesTransform ||
+		len(branch) == 0 ||
+		aggTx.TxNumsInFiles(kv.StateDomains...) == 0 ||
+		bytes.Equal(prefix, keyCommitmentState) ||
+		((fEndTxNum-fStartTxNum)/stepSize)%2 != 0 { // this checks if file has even number of steps, singular files does not transform values.
+
+		return branch, nil // do not transform, return as is
+	}
+
+	sto := aggTx.d[kv.StorageDomain]
+	acc := aggTx.d[kv.AccountsDomain]
+	storageItem, err := sto.rawLookupFileByRange(fStartTxNum, fEndTxNum)
+	if err != nil {
+		logger.Crit("dereference key during commitment read", "failed", err.Error())
+		return nil, err
+	}
+	accountItem, err := acc.rawLookupFileByRange(fStartTxNum, fEndTxNum)
+	if err != nil {
+		logger.Crit("dereference key during commitment read", "failed", err.Error())
+		return nil, err
+	}
+	storageGetter := seg.NewReader(storageItem.decompressor.MakeGetter(), sto.d.Compression)
+	accountGetter := seg.NewReader(accountItem.decompressor.MakeGetter(), acc.d.Compression)
+	metricI := 0
+	for i, f := range aggTx.d[kv.CommitmentDomain].files {
+		if i > 5 {
+			metricI = 5
+			break
+		}
+		if f.startTxNum == fStartTxNum && f.endTxNum == fEndTxNum {
+			metricI = i
+		}
+	}
+
+	aux := make([]byte, 0, 256)
+	return branch.ReplacePlainKeys(aux, func(key []byte, isStorage bool) ([]byte, error) {
+		if isStorage {
+			if len(key) == length.Addr+length.Hash {
+				return nil, nil // save storage key as is
+			}
+			if dbg.KVReadLevelledMetrics {
+				defer branchKeyDerefSpent[metricI].ObserveDuration(time.Now())
+			}
+			// Optimised key referencing a state file record (file number and offset within the file)
+			storagePlainKey, found := sto.lookupByShortenedKey(key, storageGetter)
+			if !found {
+				s0, s1 := fStartTxNum/stepSize, fEndTxNum/stepSize
+				logger.Crit("replace back lost storage full key", "shortened", fmt.Sprintf("%x", key),
+					"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, decodeShorterKey(key)))
+				return nil, fmt.Errorf("replace back lost storage full key: %x", key)
+			}
+			return storagePlainKey, nil
+		}
+
+		if len(key) == length.Addr {
+			return nil, nil // save account key as is
+		}
+
+		if dbg.KVReadLevelledMetrics {
+			defer branchKeyDerefSpent[metricI].ObserveDuration(time.Now())
+		}
+		apkBuf, found := acc.lookupByShortenedKey(key, accountGetter)
+		if !found {
+			s0, s1 := fStartTxNum/stepSize, fEndTxNum/stepSize
+			logger.Crit("replace back lost account full key", "shortened", fmt.Sprintf("%x", key),
+				"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, decodeShorterKey(key)))
+			return nil, fmt.Errorf("replace back lost account full key: %x", key)
+		}
+		return apkBuf, nil
+	})
 }
 
 func decodeShorterKey(from []byte) uint64 {
