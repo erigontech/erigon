@@ -103,10 +103,7 @@ func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte,
 		defer sdc.mu.Unlock()
 	}
 
-	var tpx kv.TemporalPutDel
-	tpx = sdc.sharedDomains
-
-	return tpx.DomainPut(kv.CommitmentDomain, prefix, nil, data, prevData, prevStep)
+	return sdc.sharedDomains.DomainPut(kv.CommitmentDomain, prefix, nil, data, prevData, prevStep)
 }
 
 func (sdc *SharedDomainsCommitmentContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, err error) {
