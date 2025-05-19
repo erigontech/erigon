@@ -30,10 +30,10 @@ import (
 	"reflect"
 	"sync/atomic"
 
-	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/gballet/go-verkle"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/rlp"
 )
@@ -1018,6 +1018,7 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 
 	if len(receipts) == 0 {
 		b.header.ReceiptHash = empty.ReceiptsHash
+		b.header.Bloom = Bloom{}
 	} else {
 		b.header.ReceiptHash = DeriveSha(Receipts(receipts))
 		b.header.Bloom = CreateBloom(receipts)

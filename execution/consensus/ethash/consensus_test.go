@@ -27,12 +27,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/goccy/go-json"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/types"
 )

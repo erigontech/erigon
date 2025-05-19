@@ -108,7 +108,7 @@ func newObject(db *IntraBlockState, address common.Address, data, original *acco
 		so.data.Initialised = true
 	}
 	if so.data.CodeHash == (common.Hash{}) {
-		so.data.CodeHash = empty.RootHash
+		so.data.CodeHash = empty.CodeHash
 	}
 	if so.data.Root == (common.Hash{}) {
 		so.data.Root = trie.EmptyRoot

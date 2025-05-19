@@ -21,12 +21,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/abi"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"

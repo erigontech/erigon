@@ -22,9 +22,9 @@ package ethash
 import (
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/types"
 )
 

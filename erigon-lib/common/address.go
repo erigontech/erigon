@@ -23,9 +23,10 @@ import (
 	"fmt"
 	"math/big"
 
+	"golang.org/x/crypto/sha3"
+
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
-	"golang.org/x/crypto/sha3"
 )
 
 // Address represents the 20 byte address of an Ethereum account.
