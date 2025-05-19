@@ -1067,11 +1067,11 @@ func opPush2(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 		integer = new(uint256.Int)
 	)
 	if *pc+2 < codeLen {
-		scope.Stack.Push(integer.SetBytes2(scope.Contract.Code[*pc+1 : *pc+3]))
+		scope.Stack.push(integer.SetBytes2(scope.Contract.Code[*pc+1 : *pc+3]))
 	} else if *pc+1 < codeLen {
-		scope.Stack.Push(integer.SetUint64(uint64(scope.Contract.Code[*pc+1]) << 8))
+		scope.Stack.push(integer.SetUint64(uint64(scope.Contract.Code[*pc+1]) << 8))
 	} else {
-		scope.Stack.Push(integer.Clear())
+		scope.Stack.push(integer.Clear())
 	}
 	*pc += 2
 	return nil, nil
