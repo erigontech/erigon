@@ -2,6 +2,11 @@
 
 cdk-erigon is a fork of Erigon, currently in Alpha, optimized for syncing with the Polygon Hermez zkEVM network.
 
+
+## Gateway Documentation
+
+Please visit https://docs.gateway.fm/cdk-erigon/what-is-cdk-erigon/ for comprehensive documentation of the cdk-erigon stack.
+
 ***
 ## Release Roadmap
 - **v1.1.x**: RPC (full support)
