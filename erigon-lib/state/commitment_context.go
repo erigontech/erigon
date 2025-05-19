@@ -117,7 +117,11 @@ func (sdc *SharedDomainsCommitmentContext) readDomain(d kv.Domain, plainKey []by
 
 	if sdc.limitReadAsOfTxNum > 0 {
 		if sdc.domainsOnly {
-			enc, _, _, _, err = sdc.sharedDomains.roTtx.Debug().GetLatestFromFiles(d, plainKey, sdc.limitReadAsOfTxNum)
+			var ok bool
+			enc, ok, _, _, err = sdc.sharedDomains.roTtx.Debug().GetLatestFromFiles(d, plainKey, sdc.limitReadAsOfTxNum)
+			if !ok {
+				enc = nil
+			}
 		} else {
 			enc, _, err = sdc.sharedDomains.roTtx.GetAsOf(d, plainKey, sdc.limitReadAsOfTxNum)
 		}
@@ -244,7 +248,9 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	updateCount := sdc.updates.Size()
 	if sdc.trace {
 		start := time.Now()
-		defer log.Trace("ComputeCommitment", "block", blockNum, "keys", common.PrettyCounter(updateCount), "mode", sdc.updates.Mode(), "spent", time.Since(start))
+		defer func() {
+			log.Trace("ComputeCommitment", "block", blockNum, "keys", common.PrettyCounter(updateCount), "mode", sdc.updates.Mode(), "spent", time.Since(start))
+		}()
 	}
 	if updateCount == 0 {
 		rootHash, err = sdc.patriciaTrie.RootHash()

@@ -91,6 +91,46 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (err erro
 	return nil
 }
 
+// LatestCommitment returns latest value for given prefix from CommitmentDomain.
+// Requires separate function because commitment values have references inside and we need to properly dereference them using
+// replaceShortenedKeysInBranch method on each read. Data stored in DB is not referenced (so as in history).
+// Values from domain files with ranges > 2 steps are referenced.
+func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error) {
+	aggTx := sd.AggTx()
+	if v, prevStep, ok := sd.get(kv.CommitmentDomain, prefix); ok {
+		// sd cache values as is (without transformation) so safe to return
+		return v, prevStep, nil
+	}
+	v, step, found, err := sd.roTtx.Debug().GetLatestFromDB(kv.CommitmentDomain, prefix)
+	if err != nil {
+		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
+	}
+	if found {
+		// db store values as is (without transformation) so safe to return
+		return v, step, nil
+	}
+
+	// getLatestFromFiles doesn't provide same semantics as getLatestFromDB - it returns start/end tx
+	// of file where the value is stored (not exact step when kv has been set)
+	v, _, startTx, endTx, err := sd.roTtx.Debug().GetLatestFromFiles(kv.CommitmentDomain, prefix, 0)
+	if err != nil {
+		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
+	}
+
+	if !aggTx.a.commitmentValuesTransform || bytes.Equal(prefix, keyCommitmentState) {
+		sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), v)
+		return v, endTx / sd.StepSize(), nil
+	}
+
+	// replace shortened keys in the branch with full keys to allow HPH work seamlessly
+	rv, err := sd.replaceShortenedKeysInBranch(prefix, commitment.BranchData(v), startTx, endTx, aggTx)
+	if err != nil {
+		return nil, 0, err
+	}
+	sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), rv) // keep dereferenced value in cache (to avoid waste on another dereference)
+	return rv, endTx / sd.StepSize(), nil
+}
+
 func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
 	rootHash, err = sd.sdCtx.ComputeCommitment(ctx, saveStateAfter, blockNum, logPrefix)
 	return

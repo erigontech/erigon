@@ -253,46 +253,6 @@ func (sd *SharedDomains) SizeEstimate() uint64 {
 	return uint64(sd.estSize) * 4
 }
 
-// LatestCommitment returns latest value for given prefix from CommitmentDomain.
-// Requires separate function because commitment values have references inside and we need to properly dereference them using
-// replaceShortenedKeysInBranch method on each read. Data stored in DB is not referenced (so as in history).
-// Values from domain files with ranges > 2 steps are referenced.
-func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error) {
-	aggTx := sd.AggTx()
-	if v, prevStep, ok := sd.get(kv.CommitmentDomain, prefix); ok {
-		// sd cache values as is (without transformation) so safe to return
-		return v, prevStep, nil
-	}
-	v, step, found, err := sd.roTtx.Debug().GetLatestFromDB(kv.CommitmentDomain, prefix)
-	if err != nil {
-		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
-	}
-	if found {
-		// db store values as is (without transformation) so safe to return
-		return v, step, nil
-	}
-
-	// getLatestFromFiles doesn't provide same semantics as getLatestFromDB - it returns start/end tx
-	// of file where the value is stored (not exact step when kv has been set)
-	v, _, startTx, endTx, err := sd.roTtx.Debug().GetLatestFromFiles(kv.CommitmentDomain, prefix, 0)
-	if err != nil {
-		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
-	}
-
-	if !aggTx.a.commitmentValuesTransform || bytes.Equal(prefix, keyCommitmentState) {
-		sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), v)
-		return v, endTx / sd.StepSize(), nil
-	}
-
-	// replace shortened keys in the branch with full keys to allow HPH work seamlessly
-	rv, err := sd.replaceShortenedKeysInBranch(prefix, commitment.BranchData(v), startTx, endTx, aggTx)
-	if err != nil {
-		return nil, 0, err
-	}
-	sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), rv) // keep dereferenced value in cache (to avoid waste on another dereference)
-	return rv, endTx / sd.StepSize(), nil
-}
-
 const CodeSizeTableFake = "CodeSize"
 
 func (sd *SharedDomains) ReadsValid(readLists map[string]*KvList) bool {
@@ -561,25 +521,6 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, k []byte) (v []byte, step u
 	v, step, err = sd.roTtx.GetLatest(domain, k)
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
-	}
-	return v, step, nil
-}
-
-// getLatestFromFiles returns value from domain with respect to limit ofMaxTxnum
-func (sd *SharedDomains) getLatestFromFiles(domain kv.Domain, k, k2 []byte, ofMaxTxnum uint64) (v []byte, step uint64, err error) {
-	if domain == kv.CommitmentDomain {
-		return sd.LatestCommitment(k)
-	}
-	if k2 != nil {
-		k = append(k, k2...)
-	}
-
-	v, ok, _, _, err := sd.roTtx.Debug().GetLatestFromFiles(domain, k, ofMaxTxnum)
-	if err != nil {
-		return nil, 0, fmt.Errorf("domain '%s' %x txn=%d read error: %w", domain, k, ofMaxTxnum, err)
-	}
-	if !ok {
-		return nil, 0, nil
 	}
 	return v, step, nil
 }
