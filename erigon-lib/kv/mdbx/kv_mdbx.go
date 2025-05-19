@@ -209,7 +209,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 	env, err := mdbx.NewEnv(mdbx.Default)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("db.New: %w, acceede=%t, ro=%t, label=%s", err, opts.HasFlag(mdbx.Accede), opts.HasFlag(mdbx.Readonly), opts.label)
 	}
 	if opts.label == kv.ChainDB && opts.verbosity != -1 {
 		err = env.SetDebug(mdbx.LogLvl(opts.verbosity), mdbx.DbgDoNotChange, mdbx.LoggerDoNotChange) // temporary disable error, because it works if call it 1 time, but returns error if call it twice in same process (what often happening in tests)
@@ -299,13 +299,13 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 	err = env.Open(opts.path, opts.flags, 0664)
 	if err != nil {
-		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label, stack2.Trace().String())
+		return nil, fmt.Errorf("db.Open: %w, acceede=%t, ro=%t, label=%s, stack: %s", err, opts.HasFlag(mdbx.Accede), opts.HasFlag(mdbx.Readonly), opts.label, dbg.Stack())
 	}
 
 	// mdbx will not change pageSize if db already exists. means need read real value after env.open()
 	in, err := env.Info(nil)
 	if err != nil {
-		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label, stack2.Trace().String())
+		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label, dbg.Stack())
 	}
 
 	opts.pageSize = datasize.ByteSize(in.PageSize)
