@@ -198,6 +198,24 @@ type MissedAccessorAggFiles struct {
 	ii     map[kv.InvertedIdx]*MissedAccessorIIFiles
 }
 
+func (m *MissedAccessorAggFiles) IsEmpty() bool {
+	if m == nil {
+		return true
+	}
+	for _, v := range m.domain {
+		if !v.IsEmpty() {
+			return false
+		}
+	}
+	for _, v := range m.ii {
+		if !v.IsEmpty() {
+			return false
+		}
+	}
+
+	return true
+}
+
 type MissedAccessorDomainFiles struct {
 	history *MissedAccessorHistoryFiles
 	files   MissedFilesMap
@@ -211,6 +229,18 @@ func (m *MissedAccessorDomainFiles) missedMapAccessors() []*filesItem {
 	return m.files[AccessorHashMap]
 }
 
+func (m *MissedAccessorDomainFiles) IsEmpty() bool {
+	if m == nil {
+		return true
+	}
+	for _, v := range m.files {
+		if len(v) > 0 {
+			return false
+		}
+	}
+	return m.history.IsEmpty()
+}
+
 type MissedAccessorHistoryFiles struct {
 	ii    *MissedAccessorIIFiles
 	files MissedFilesMap
@@ -220,12 +250,36 @@ func (m *MissedAccessorHistoryFiles) missedMapAccessors() []*filesItem {
 	return m.files[AccessorHashMap]
 }
 
+func (m *MissedAccessorHistoryFiles) IsEmpty() bool {
+	if m == nil {
+		return true
+	}
+	for _, v := range m.files {
+		if len(v) > 0 {
+			return false
+		}
+	}
+	return m.ii.IsEmpty()
+}
+
 type MissedAccessorIIFiles struct {
 	files MissedFilesMap
 }
 
 func (m *MissedAccessorIIFiles) missedMapAccessors() []*filesItem {
 	return m.files[AccessorHashMap]
+}
+
+func (m *MissedAccessorIIFiles) IsEmpty() bool {
+	if m == nil {
+		return true
+	}
+	for _, v := range m.files {
+		if len(v) > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func (at *AggregatorRoTx) DbgDomain(idx kv.Domain) *DomainRoTx         { return at.d[idx] }
