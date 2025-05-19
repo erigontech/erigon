@@ -30,6 +30,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
@@ -169,7 +170,7 @@ func (t *StateTest) Subtests() []StateSubtest {
 func (t *StateTest) Run(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, common.Hash, error) {
 	state, root, err := t.RunNoVerify(tx, subtest, vmconfig, dirs)
 	if err != nil {
-		return state, types.EmptyRootHash, err
+		return state, empty.RootHash, err
 	}
 	post := t.json.Post[subtest.Fork][subtest.Index]
 	// N.B: We need to do this in a two-step process, because the first Commit takes care

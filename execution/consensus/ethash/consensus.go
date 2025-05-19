@@ -28,6 +28,7 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
@@ -168,7 +169,7 @@ func getUncles(chain consensus.ChainReader, header *types.Header) (mapset.Set[co
 		}
 		ancestors[parent] = ancestorHeader
 		// If the ancestor doesn't have any uncles, we don't have to iterate them
-		if ancestorHeader.UncleHash != types.EmptyUncleHash {
+		if ancestorHeader.UncleHash != empty.UncleHash {
 			// Need to add those uncles to the blacklist too
 			ancestor := chain.GetBlock(parent, number)
 			if ancestor == nil {
@@ -354,7 +355,7 @@ func makeDifficultyCalculator(bombDelay uint64) func(time, parentTime uint64, pa
 		// (2 if len(parent_uncles) else 1) - (block_timestamp - parent_timestamp) // 9
 		x.Sub(bigTime, bigParentTime)
 		x.Div(x, big9)
-		if parentUncleHash == types.EmptyUncleHash {
+		if parentUncleHash == empty.UncleHash {
 			x.Sub(big1, x)
 		} else {
 			x.Sub(big2, x)

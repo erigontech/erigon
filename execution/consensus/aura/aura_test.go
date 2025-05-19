@@ -21,6 +21,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/abi"
@@ -56,7 +57,7 @@ func TestEmptyBlock(t *testing.T) {
 
 	time := uint64(1539016985)
 	header := core.MakeEmptyHeader(genesisBlock.Header(), chainConfig, time, nil)
-	header.UncleHash = types.EmptyUncleHash
+	header.UncleHash = empty.UncleHash
 	header.TxHash = trie.EmptyRoot
 	header.ReceiptHash = trie.EmptyRoot
 	header.Coinbase = common.HexToAddress("0xcace5b3c29211740e595850e80478416ee77ca21")

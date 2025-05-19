@@ -30,6 +30,7 @@ import (
 	"reflect"
 	"sync/atomic"
 
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/gballet/go-verkle"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -1008,7 +1009,7 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 
 	// TODO: panic if len(txs) != len(receipts)
 	if len(txs) == 0 {
-		b.header.TxHash = EmptyTxsHash
+		b.header.TxHash = empty.TxsHash
 	} else {
 		b.header.TxHash = DeriveSha(Transactions(txs))
 		b.transactions = make(Transactions, len(txs))
@@ -1016,14 +1017,14 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 	}
 
 	if len(receipts) == 0 {
-		b.header.ReceiptHash = EmptyReceiptsHash
+		b.header.ReceiptHash = empty.ReceiptsHash
 	} else {
 		b.header.ReceiptHash = DeriveSha(Receipts(receipts))
 		b.header.Bloom = CreateBloom(receipts)
 	}
 
 	if len(uncles) == 0 {
-		b.header.UncleHash = EmptyUncleHash
+		b.header.UncleHash = empty.UncleHash
 	} else {
 		b.header.UncleHash = CalcUncleHash(uncles)
 		b.uncles = make([]*Header, len(uncles))
@@ -1035,7 +1036,7 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 	if withdrawals == nil {
 		b.header.WithdrawalsHash = nil
 	} else if len(withdrawals) == 0 {
-		b.header.WithdrawalsHash = &EmptyWithdrawalsHash
+		b.header.WithdrawalsHash = &empty.WithdrawalsHash
 		b.withdrawals = make(Withdrawals, len(withdrawals))
 	} else {
 		h := DeriveSha(Withdrawals(withdrawals))
@@ -1359,12 +1360,12 @@ func (b *Block) HashCheck(fullCheck bool) error {
 		// execution-spec-tests contain such scenarios where block has an invalid tx, but receiptHash is default (=EmptyRootHash)
 		// the test is to see if tx is rejected in EL, but in mock_sentry.go, we have HashCheck() before block execution.
 		// Since we want the tx execution to happen, we skip it here and bypass this guard.
-		if len(b.transactions) > 0 && b.ReceiptHash() == EmptyRootHash {
+		if len(b.transactions) > 0 && b.ReceiptHash() == empty.RootHash {
 			return fmt.Errorf("block has empty receipt hash: %x but it includes %x transactions", b.ReceiptHash(), len(b.transactions))
 		}
 	}
 
-	if len(b.transactions) == 0 && b.ReceiptHash() != EmptyRootHash {
+	if len(b.transactions) == 0 && b.ReceiptHash() != empty.RootHash {
 		return fmt.Errorf("block has non-empty receipt hash: %x but no transactions", b.ReceiptHash())
 	}
 
@@ -1398,7 +1399,7 @@ func (c *writeCounter) Write(b []byte) (int, error) {
 
 func CalcUncleHash(uncles []*Header) common.Hash {
 	if len(uncles) == 0 {
-		return EmptyUncleHash
+		return empty.UncleHash
 	}
 	return rlpHash(uncles)
 }
