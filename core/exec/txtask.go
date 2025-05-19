@@ -173,9 +173,7 @@ func (r *TxResult) createReceipt(txIndex int, cumulativeGasUsed uint64, firstLog
 		receipt.Status = types.ReceiptStatusSuccessful
 	}
 
-	receipt.Bloom = types.LogsBloom(receipt.Logs) // why do we need to add this?
 	// if the transaction created a contract, store the creation address in the receipt.
-
 	txMessage, err := r.TxMessage()
 
 	if err != nil {
