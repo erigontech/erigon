@@ -9,19 +9,21 @@ import (
 	"github.com/google/go-cmp/cmp"
 	lru "github.com/hashicorp/golang-lru/v2"
 
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/transactions"
@@ -41,6 +43,7 @@ type Generator struct {
 	receiptCacheTrace  bool
 
 	blockReader services.FullBlockReader
+	txNumReader rawdbv3.TxNumsReader
 	engine      consensus.EngineReader
 }
 
@@ -70,9 +73,12 @@ func NewGenerator(blockReader services.FullBlockReader, engine consensus.EngineR
 		panic(err)
 	}
 
+	txNumReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(context.Background(), blockReader))
+
 	return &Generator{
 		receiptsCache:      receiptsCache,
 		blockReader:        blockReader,
+		txNumReader:        txNumReader,
 		engine:             engine,
 		receiptsCacheTrace: receiptsCacheTrace,
 		receiptCacheTrace:  receiptsCacheTrace,
@@ -87,8 +93,6 @@ func (g *Generator) LogStats() {
 	if g == nil || !g.receiptsCacheTrace {
 		return
 	}
-	//m := g.receiptsCache.Metrics()
-	//log.Warn("[dbg] ReceiptsCache", "hit", m.Hits, "total", m.Hits+m.Misses, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", receiptsCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
 }
 
 func (g *Generator) GetCachedReceipts(ctx context.Context, blockHash common.Hash) (types.Receipts, bool) {
@@ -98,6 +102,8 @@ func (g *Generator) GetCachedReceipts(ctx context.Context, blockHash common.Hash
 func (g *Generator) GetCachedReceipt(ctx context.Context, hash common.Hash) (*types.Receipt, bool) {
 	return g.receiptCache.Get(hash)
 }
+
+var rpcDisableRCache = dbg.EnvBool("RPC_DISABLE_RCACHE", false)
 
 func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *chain.Config, tx kv.TemporalTx, txIndex int) (*ReceiptEnv, error) {
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, g.blockReader))
@@ -144,12 +150,17 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	txnHash := txn.Hash()
 
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
-	receiptFromDB, ok, err := rawdb.ReadReceiptCache(tx, blockNum, blockHash, uint32(index), txnHash)
-	if err != nil {
-		return nil, err
-	}
-	if ok && receiptFromDB != nil && !dbg.AssertEnabled {
-		return receiptFromDB, nil
+	var receiptFromDB *types.Receipt
+	if !rpcDisableRCache {
+		var ok bool
+		var err error
+		receiptFromDB, ok, err = rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txnHash, txNum)
+		if err != nil {
+			return nil, err
+		}
+		if ok && receiptFromDB != nil && !dbg.AssertEnabled {
+			return receiptFromDB, nil
+		}
 	}
 
 	if receipts, ok := g.receiptsCache.Get(blockHash); ok && len(receipts) > index {
@@ -174,9 +185,27 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		return nil, err
 	}
 
-	receipt, _, err = core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.usedGas, genEnv.usedBlobGas, vm.Config{})
-	if err != nil {
-		return nil, fmt.Errorf("ReceiptGen.GetReceipt: bn=%d, txnIdx=%d, %w", blockNum, index, err)
+	if txn.Type() == types.AccountAbstractionTxType {
+		aaTxn := txn.(*types.AccountAbstractionTransaction)
+		blockContext := core.NewEVMBlockContext(header, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, cfg)
+		evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, genEnv.ibs, cfg, vm.Config{})
+		paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, genEnv.ibs, genEnv.gp, header, evm, cfg)
+		if err != nil {
+			return nil, err
+		}
+
+		status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, genEnv.gp, evm, header, genEnv.ibs)
+		if err != nil {
+			return nil, err
+		}
+
+		logs := genEnv.ibs.GetLogs(genEnv.ibs.TxnIndex(), txn.Hash(), header.Number.Uint64(), header.Hash())
+		receipt = aa.CreateAAReceipt(txn.Hash(), status, gasUsed, header.GasUsed, header.Number.Uint64(), uint64(genEnv.ibs.TxnIndex()), logs)
+	} else {
+		receipt, _, err = core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.usedGas, genEnv.usedBlobGas, vm.Config{})
+		if err != nil {
+			return nil, fmt.Errorf("ReceiptGen.GetReceipt: bn=%d, txnIdx=%d, %w", blockNum, index, err)
+		}
 	}
 
 	receipt.BlockHash = blockHash
@@ -199,13 +228,18 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
 	blockHash := block.Hash()
+
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
-	receiptsFromDB, err := rawdb.ReadReceiptsCache(tx, block)
-	if err != nil {
-		return nil, err
-	}
-	if len(receiptsFromDB) > 0 && !dbg.AssertEnabled {
-		return receiptsFromDB, nil
+	var receiptsFromDB types.Receipts
+	if !rpcDisableRCache {
+		var err error
+		receiptsFromDB, err = rawdb.ReadReceiptsCacheV2(tx, block, g.txNumReader)
+		if err != nil {
+			return nil, err
+		}
+		if len(receiptsFromDB) > 0 && !dbg.AssertEnabled {
+			return receiptsFromDB, nil
+		}
 	}
 
 	mu := g.blockExecMutex.lock(blockHash) // parallel requests of same blockNum will executed only once

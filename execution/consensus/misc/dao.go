@@ -27,11 +27,9 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/params"
 )
 
 var (
@@ -59,11 +57,11 @@ func VerifyDAOHeaderExtraData(config *chain.Config, header *types.Header) error 
 		return nil
 	}
 	// Make sure the block is within the fork's modified extra-data range
-	limit := new(big.Int).Add(config.DAOForkBlock, params.DAOForkExtraRange)
+	limit := new(big.Int).Add(config.DAOForkBlock, DAOForkExtraRange)
 	if header.Number.Cmp(config.DAOForkBlock) < 0 || header.Number.Cmp(limit) >= 0 {
 		return nil
 	}
-	if !bytes.Equal(header.Extra, params.DAOForkBlockExtra) {
+	if !bytes.Equal(header.Extra, DAOForkBlockExtra) {
 		return ErrBadProDAOExtra
 	}
 	// All ok, header has the same extra-data we expect
@@ -75,21 +73,21 @@ func VerifyDAOHeaderExtraData(config *chain.Config, header *types.Header) error 
 // contract.
 func ApplyDAOHardFork(statedb *state.IntraBlockState) error {
 	// Retrieve the contract to refund balances into
-	exist, err := statedb.Exist(params.DAORefundContract)
+	exist, err := statedb.Exist(DAORefundContract)
 	if err != nil {
 		return err
 	}
 	if !exist {
-		statedb.CreateAccount(params.DAORefundContract, false)
+		statedb.CreateAccount(DAORefundContract, false)
 	}
 
 	// Move every DAO account and extra-balance account funds into the refund contract
-	for _, addr := range params.DAODrainList() {
+	for _, addr := range DAODrainList() {
 		balance, err := statedb.GetBalance(addr)
 		if err != nil {
 			return err
 		}
-		statedb.AddBalance(params.DAORefundContract, balance, tracing.BalanceIncreaseDaoContract)
+		statedb.AddBalance(DAORefundContract, balance, tracing.BalanceIncreaseDaoContract)
 		statedb.SetBalance(addr, new(uint256.Int), tracing.BalanceDecreaseDaoAccount)
 	}
 	return nil

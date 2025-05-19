@@ -24,7 +24,7 @@ import (
 	"errors"
 	"fmt"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -43,20 +43,20 @@ type Dumper struct {
 
 // DumpAccount represents tan account in the state.
 type DumpAccount struct {
-	Balance   string             `json:"balance"`
-	Nonce     uint64             `json:"nonce"`
-	Root      hexutil.Bytes      `json:"root"`
-	CodeHash  hexutil.Bytes      `json:"codeHash"`
-	Code      hexutil.Bytes      `json:"code,omitempty"`
-	Storage   map[string]string  `json:"storage,omitempty"`
-	Address   *libcommon.Address `json:"address,omitempty"` // Address only present in iterative (line-by-line) mode
-	SecureKey *hexutil.Bytes     `json:"key,omitempty"`     // If we don't have address, we can output the key
+	Balance   string            `json:"balance"`
+	Nonce     uint64            `json:"nonce"`
+	Root      hexutil.Bytes     `json:"root"`
+	CodeHash  hexutil.Bytes     `json:"codeHash"`
+	Code      hexutil.Bytes     `json:"code,omitempty"`
+	Storage   map[string]string `json:"storage,omitempty"`
+	Address   *common.Address   `json:"address,omitempty"` // Address only present in iterative (line-by-line) mode
+	SecureKey *hexutil.Bytes    `json:"key,omitempty"`     // If we don't have address, we can output the key
 }
 
 // Dump represents the full dump in a collected format, as one large map.
 type Dump struct {
-	Root     string                            `json:"root"`
-	Accounts map[libcommon.Address]DumpAccount `json:"accounts"`
+	Root     string                         `json:"root"`
+	Accounts map[common.Address]DumpAccount `json:"accounts"`
 }
 
 // iterativeDump is a 'collector'-implementation which dump output line-by-line iteratively.
@@ -66,41 +66,41 @@ type iterativeDump struct {
 
 // IteratorDump is an implementation for iterating over data.
 type IteratorDump struct {
-	Root     string                            `json:"root"`
-	Accounts map[libcommon.Address]DumpAccount `json:"accounts"`
-	Next     []byte                            `json:"next,omitempty"` // nil if no more accounts
+	Root     string                         `json:"root"`
+	Accounts map[common.Address]DumpAccount `json:"accounts"`
+	Next     []byte                         `json:"next,omitempty"` // nil if no more accounts
 }
 
 // DumpCollector interface which the state trie calls during iteration
 type DumpCollector interface {
 	// OnRoot is called with the state root
-	OnRoot(libcommon.Hash)
+	OnRoot(common.Hash)
 	// OnAccount is called once for each account in the trie
-	OnAccount(libcommon.Address, DumpAccount)
+	OnAccount(common.Address, DumpAccount)
 }
 
 // OnRoot implements DumpCollector interface
-func (d *Dump) OnRoot(root libcommon.Hash) {
+func (d *Dump) OnRoot(root common.Hash) {
 	d.Root = fmt.Sprintf("%x", root)
 }
 
 // OnAccount implements DumpCollector interface
-func (d *Dump) OnAccount(addr libcommon.Address, account DumpAccount) {
+func (d *Dump) OnAccount(addr common.Address, account DumpAccount) {
 	d.Accounts[addr] = account
 }
 
 // OnRoot implements DumpCollector interface
-func (d *IteratorDump) OnRoot(root libcommon.Hash) {
+func (d *IteratorDump) OnRoot(root common.Hash) {
 	d.Root = fmt.Sprintf("%x", root)
 }
 
 // OnAccount implements DumpCollector interface
-func (d *IteratorDump) OnAccount(addr libcommon.Address, account DumpAccount) {
+func (d *IteratorDump) OnAccount(addr common.Address, account DumpAccount) {
 	d.Accounts[addr] = account
 }
 
 // OnAccount implements DumpCollector interface
-func (d iterativeDump) OnAccount(addr libcommon.Address, account DumpAccount) {
+func (d iterativeDump) OnAccount(addr common.Address, account DumpAccount) {
 	dumpAccount := &DumpAccount{
 		Balance:   account.Balance,
 		Nonce:     account.Nonce,
@@ -111,7 +111,7 @@ func (d iterativeDump) OnAccount(addr libcommon.Address, account DumpAccount) {
 		SecureKey: account.SecureKey,
 		Address:   nil,
 	}
-	if addr != (libcommon.Address{}) {
+	if addr != (common.Address{}) {
 		dumpAccount.Address = &addr
 	}
 	//nolint:errcheck
@@ -119,10 +119,10 @@ func (d iterativeDump) OnAccount(addr libcommon.Address, account DumpAccount) {
 }
 
 // OnRoot implements DumpCollector interface
-func (d iterativeDump) OnRoot(root libcommon.Hash) {
+func (d iterativeDump) OnRoot(root common.Hash) {
 	//nolint:errcheck
 	d.Encoder.Encode(struct {
-		Root libcommon.Hash `json:"root"`
+		Root common.Hash `json:"root"`
 	}{root})
 }
 
@@ -137,11 +137,11 @@ func NewDumper(db kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, blockNumber 
 
 var TooMuchIterations = errors.New("[rpc] dumper: too much iterations protection triggered")
 
-func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bool, startAddress libcommon.Address, maxResults int) ([]byte, error) {
+func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bool, startAddress common.Address, maxResults int) ([]byte, error) {
 	var emptyCodeHash = crypto.Keccak256Hash(nil)
-	var emptyHash = libcommon.Hash{}
+	var emptyHash = common.Hash{}
 	var accountList []*DumpAccount
-	var addrList []libcommon.Address
+	var addrList []common.Address
 	var acc accounts.Account
 	var numberOfResults int
 	if maxResults == 0 {
@@ -203,7 +203,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 			}
 		}
 		accountList = append(accountList, &account)
-		addrList = append(addrList, libcommon.BytesToAddress(k))
+		addrList = append(addrList, common.BytesToAddress(k))
 
 		numberOfResults++
 	}
@@ -212,7 +212,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 	for i, addr := range addrList {
 		account := accountList[i]
 		if !excludeStorage {
-			t := trie.New(libcommon.Hash{})
+			t := trie.New(common.Hash{})
 			nextAcc, _ := kv.NextSubtree(addr[:])
 			r, err := ttx.RangeAsOf(kv.StorageDomain, addr[:], nextAcc, txNumForStorage, order.Asc, kv.Unlim) //unlim because need skip empty vals
 			if err != nil {
@@ -228,9 +228,9 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 					continue // Skip deleted entries
 				}
 				loc := k[20:]
-				account.Storage[libcommon.BytesToHash(loc).String()] = libcommon.Bytes2Hex(vs)
-				h, _ := libcommon.HashData(loc)
-				t.Update(h.Bytes(), libcommon.Copy(vs))
+				account.Storage[common.BytesToHash(loc).String()] = common.Bytes2Hex(vs)
+				h, _ := common.HashData(loc)
+				t.Update(h.Bytes(), common.Copy(vs))
 			}
 			r.Close()
 
@@ -245,10 +245,10 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 // RawDump returns the entire state an a single large object
 func (d *Dumper) RawDump(excludeCode, excludeStorage bool) Dump {
 	dump := &Dump{
-		Accounts: make(map[libcommon.Address]DumpAccount),
+		Accounts: make(map[common.Address]DumpAccount),
 	}
 	//nolint:errcheck
-	d.DumpToCollector(dump, excludeCode, excludeStorage, libcommon.Address{}, 0)
+	d.DumpToCollector(dump, excludeCode, excludeStorage, common.Address{}, 0)
 	return *dump
 }
 
@@ -265,13 +265,13 @@ func (d *Dumper) Dump(excludeCode, excludeStorage bool) []byte {
 // IterativeDump dumps out accounts as json-objects, delimited by linebreaks on stdout
 func (d *Dumper) IterativeDump(excludeCode, excludeStorage bool, output *json.Encoder) {
 	//nolint:errcheck
-	d.DumpToCollector(iterativeDump{output}, excludeCode, excludeStorage, libcommon.Address{}, 0)
+	d.DumpToCollector(iterativeDump{output}, excludeCode, excludeStorage, common.Address{}, 0)
 }
 
 // IteratorDump dumps out a batch of accounts starts with the given start key
-func (d *Dumper) IteratorDump(excludeCode, excludeStorage bool, start libcommon.Address, maxResults int) (IteratorDump, error) {
+func (d *Dumper) IteratorDump(excludeCode, excludeStorage bool, start common.Address, maxResults int) (IteratorDump, error) {
 	iterator := &IteratorDump{
-		Accounts: make(map[libcommon.Address]DumpAccount),
+		Accounts: make(map[common.Address]DumpAccount),
 	}
 	var err error
 	iterator.Next, err = d.DumpToCollector(iterator, excludeCode, excludeStorage, start, maxResults)

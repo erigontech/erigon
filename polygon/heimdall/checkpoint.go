@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"math/big"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 type CheckpointId uint64
@@ -59,7 +59,7 @@ func (c *Checkpoint) BlockNumRange() ClosedRange {
 	}
 }
 
-func (c *Checkpoint) RootHash() libcommon.Hash {
+func (c *Checkpoint) RootHash() common.Hash {
 	return c.Fields.RootHash
 }
 
@@ -89,13 +89,13 @@ func (c *Checkpoint) String() string {
 
 func (c *Checkpoint) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Id         CheckpointId      `json:"id"`
-		Proposer   libcommon.Address `json:"proposer"`
-		StartBlock *big.Int          `json:"start_block"`
-		EndBlock   *big.Int          `json:"end_block"`
-		RootHash   libcommon.Hash    `json:"root_hash"`
-		ChainID    string            `json:"bor_chain_id"`
-		Timestamp  uint64            `json:"timestamp"`
+		Id         CheckpointId   `json:"id"`
+		Proposer   common.Address `json:"proposer"`
+		StartBlock *big.Int       `json:"start_block"`
+		EndBlock   *big.Int       `json:"end_block"`
+		RootHash   common.Hash    `json:"root_hash"`
+		ChainID    string         `json:"bor_chain_id"`
+		Timestamp  uint64         `json:"timestamp"`
 	}{
 		c.Id,
 		c.Fields.Proposer,
@@ -110,8 +110,8 @@ func (c *Checkpoint) MarshalJSON() ([]byte, error) {
 func (c *Checkpoint) UnmarshalJSON(b []byte) error {
 	dto := struct {
 		WaypointFields
-		RootHash libcommon.Hash `json:"root_hash"`
-		Id       CheckpointId   `json:"id"`
+		RootHash common.Hash  `json:"root_hash"`
+		Id       CheckpointId `json:"id"`
 	}{}
 
 	if err := json.Unmarshal(b, &dto); err != nil {

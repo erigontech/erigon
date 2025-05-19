@@ -30,10 +30,10 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 var (
@@ -57,7 +57,7 @@ type ID struct {
 // Filter is a fork id filter to validate a remotely advertised ID.
 type Filter func(id ID) error
 
-func NewIDFromForks(heightForks, timeForks []uint64, genesis libcommon.Hash, headHeight, headTime uint64) ID {
+func NewIDFromForks(heightForks, timeForks []uint64, genesis common.Hash, headHeight, headTime uint64) ID {
 	// Calculate the starting checksum from the genesis hash
 	hash := crc32.ChecksumIEEE(genesis[:])
 
@@ -83,7 +83,7 @@ func NewIDFromForks(heightForks, timeForks []uint64, genesis libcommon.Hash, hea
 	return ID{Hash: checksumToBytes(hash), Next: next}
 }
 
-func NextForkHashFromForks(heightForks, timeForks []uint64, genesis libcommon.Hash, headHeight, headTime uint64) [4]byte {
+func NextForkHashFromForks(heightForks, timeForks []uint64, genesis common.Hash, headHeight, headTime uint64) [4]byte {
 	id := NewIDFromForks(heightForks, timeForks, genesis, headHeight, headTime)
 	if id.Next == 0 {
 		return id.Hash
@@ -95,12 +95,12 @@ func NextForkHashFromForks(heightForks, timeForks []uint64, genesis libcommon.Ha
 
 // NewFilterFromForks creates a filter that returns if a fork ID should be rejected or not
 // based on the provided current head.
-func NewFilterFromForks(heightForks, timeForks []uint64, genesis libcommon.Hash, headHeight, headTime uint64) Filter {
+func NewFilterFromForks(heightForks, timeForks []uint64, genesis common.Hash, headHeight, headTime uint64) Filter {
 	return newFilter(heightForks, timeForks, genesis, headHeight, headTime)
 }
 
 // NewStaticFilter creates a filter at block zero.
-func NewStaticFilter(config *chain.Config, genesisHash libcommon.Hash, genesisTime uint64) Filter {
+func NewStaticFilter(config *chain.Config, genesisHash common.Hash, genesisTime uint64) Filter {
 	heightForks, timeForks := GatherForks(config, genesisTime)
 	return newFilter(heightForks, timeForks, genesisHash, 0 /* headHeight */, genesisTime)
 }
@@ -111,7 +111,7 @@ func forkIsTimeBased(fork uint64) bool {
 	return fork >= 1670000000
 }
 
-func newFilter(heightForks, timeForks []uint64, genesis libcommon.Hash, headHeight, headTime uint64) Filter {
+func newFilter(heightForks, timeForks []uint64, genesis common.Hash, headHeight, headTime uint64) Filter {
 	var forks []uint64
 	forks = append(forks, heightForks...)
 	forks = append(forks, timeForks...)
@@ -260,8 +260,8 @@ func GatherForks(config *chain.Config, genesisTime uint64) (heightForks []uint64
 	slices.Sort(heightForks)
 	slices.Sort(timeForks)
 	// Deduplicate block numbers/times applying to multiple forks
-	heightForks = libcommon.RemoveDuplicatesFromSorted(heightForks)
-	timeForks = libcommon.RemoveDuplicatesFromSorted(timeForks)
+	heightForks = common.RemoveDuplicatesFromSorted(heightForks)
+	timeForks = common.RemoveDuplicatesFromSorted(timeForks)
 	// Skip any forks in block 0, that's the genesis ruleset
 	if len(heightForks) > 0 && heightForks[0] == 0 {
 		heightForks = heightForks[1:]

@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
@@ -49,7 +50,7 @@ type filesItem struct {
 	decompressor         *seg.Decompressor
 	index                *recsplit.Index
 	bindex               *BtIndex
-	existence            *ExistenceFilter
+	existence            *existence.Filter
 	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
 
 	// Frozen: file of size StepsInFrozenFile. Completely immutable.
@@ -67,7 +68,8 @@ type FilesItem interface {
 	Segment() *seg.Decompressor
 	AccessorIndex() *recsplit.Index
 	BtIndex() *BtIndex
-	ExistenceFilter() *ExistenceFilter
+	ExistenceFilter() *existence.Filter
+	Range() (startTxNum, endTxNum uint64)
 }
 
 var _ FilesItem = (*filesItem)(nil)
@@ -93,7 +95,23 @@ func (i *filesItem) AccessorIndex() *recsplit.Index { return i.index }
 
 func (i *filesItem) BtIndex() *BtIndex { return i.bindex }
 
-func (i *filesItem) ExistenceFilter() *ExistenceFilter { return i.existence }
+func (i *filesItem) ExistenceFilter() *existence.Filter { return i.existence }
+func (i *filesItem) MadvNormal() {
+	i.decompressor.MadvNormal()
+	i.index.MadvNormal()
+	//i.bindex.MadvNormal()
+	//i.existence.MadvNormal()
+}
+func (i *filesItem) DisableReadAhead() {
+	i.decompressor.DisableReadAhead()
+	i.index.DisableReadAhead()
+	//i.bindex.DisableReadAhead()
+	//i.existence.DisableReadAhead()
+}
+
+func (i *filesItem) Range() (startTxNum, endTxNum uint64) {
+	return i.startTxNum, i.endTxNum
+}
 
 // isProperSubsetOf - when `j` covers `i` but not equal `i`
 func (i *filesItem) isProperSubsetOf(j *filesItem) bool {
@@ -177,7 +195,7 @@ func (i *filesItem) closeFilesAndRemove() {
 }
 
 func scanDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext string, logger log.Logger) (res []*filesItem) {
-	re := regexp.MustCompile("^v([0-9]+)-" + filenameBase + ".([0-9]+)-([0-9]+)." + ext + "$")
+	re := regexp.MustCompile(`^v(\d+(?:\.\d+)?)-` + filenameBase + `\.(\d+)-(\d+)\.` + ext + `$`)
 	var err error
 
 	for _, name := range fileNames {
@@ -216,21 +234,6 @@ func scanDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext strin
 	return res
 }
 
-func ParseStepsFromFileName(fileName string) (from, to uint64, err error) {
-	rangeString := strings.Split(fileName, ".")[1]
-	rangeNums := strings.Split(rangeString, "-")
-	// convert the range to uint64
-	from, err = strconv.ParseUint(rangeNums[0], 10, 64)
-	if err != nil {
-		return 0, 0, fmt.Errorf("failed to parse to %s: %w", rangeNums[1], err)
-	}
-	to, err = strconv.ParseUint(rangeNums[1], 10, 64)
-	if err != nil {
-		return 0, 0, fmt.Errorf("failed to parse to %s: %w", rangeNums[1], err)
-	}
-	return from, to, nil
-}
-
 func deleteMergeFile(dirtyFiles *btree2.BTreeG[*filesItem], outs []*filesItem, filenameBase string, logger log.Logger) {
 	for _, out := range outs {
 		if out == nil {
@@ -266,9 +269,6 @@ type visibleFile struct {
 	i   int
 	src *filesItem
 }
-
-func (i *visibleFile) isSubSetOf(j *visibleFile) bool { return i.src.isProperSubsetOf(j.src) } //nolint
-func (i *visibleFile) isSubsetOf(j *visibleFile) bool { return i.src.isProperSubsetOf(j.src) } //nolint
 
 func (i visibleFile) Filename() string {
 	return i.src.decompressor.FilePath()
@@ -381,6 +381,13 @@ func (files visibleFiles) LatestMergedRange() MergeRange {
 		}
 	}
 	return MergeRange{}
+}
+func (files visibleFiles) String(stepSize uint64) string {
+	res := make([]string, 0, len(files))
+	for _, file := range files {
+		res = append(res, fmt.Sprintf("%d-%d", file.startTxNum/stepSize, file.endTxNum/stepSize))
+	}
+	return strings.Join(res, ",")
 }
 
 // fileItemsWithMissedAccessors returns list of files with missed accessors

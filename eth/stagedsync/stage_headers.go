@@ -27,19 +27,18 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-db/rawdb/blockio"
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/rawdb/blockio"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/services"
@@ -147,7 +146,7 @@ func HeadersPOW(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg 
 	if err != nil {
 		return err
 	}
-	if !ok || hash == (libcommon.Hash{}) { // restore canonical markers after unwind
+	if !ok || hash == (common.Hash{}) { // restore canonical markers after unwind
 		headHash := rawdb.ReadHeadHeaderHash(tx)
 		if err = fixCanonicalChain(logPrefix, logEvery, startProgress, headHash, tx, cfg.blockReader, logger); err != nil {
 			return err
@@ -296,7 +295,7 @@ Loop:
 				dbg.ReadMemStats(&m)
 				logger.Info("Req/resp stats", "req", stats.Requests, "reqMin", stats.ReqMinBlock, "reqMax", stats.ReqMaxBlock,
 					"skel", stats.SkeletonRequests, "skelMin", stats.SkeletonReqMinBlock, "skelMax", stats.SkeletonReqMaxBlock,
-					"resp", stats.Responses, "respMin", stats.RespMinBlock, "respMax", stats.RespMaxBlock, "dups", stats.Duplicates, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+					"resp", stats.Responses, "respMin", stats.RespMinBlock, "respMax", stats.RespMaxBlock, "dups", stats.Duplicates, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 				dbg.SaveHeapProfileNearOOM(dbg.SaveHeapWithLogger(&logger), dbg.SaveHeapWithMemStats(&m))
 				cfg.hd.LogAnchorState()
 				if wasProgress {
@@ -348,7 +347,7 @@ Loop:
 		}
 	}
 	if stopped {
-		return libcommon.ErrStopped
+		return common.ErrStopped
 	}
 	// We do not print the following line if the stage was interrupted
 
@@ -367,21 +366,21 @@ Loop:
 		})
 
 		logger.Info(fmt.Sprintf("[%s] Processed", logPrefix),
-			"highest", headerInserter.GetHighest(), "age", libcommon.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)),
+			"highest", headerInserter.GetHighest(), "age", common.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)),
 			"headers", headers, "in", secs, "blk/sec", uint64(float64(headers)/secs))
 	}
 
 	return nil
 }
 
-func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, hash libcommon.Hash, tx kv.StatelessRwTx, headerReader services.FullBlockReader, logger log.Logger) error {
+func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, hash common.Hash, tx kv.StatelessRwTx, headerReader services.FullBlockReader, logger log.Logger) error {
 	if height == 0 {
 		return nil
 	}
 	ancestorHash := hash
 	ancestorHeight := height
 
-	var ch libcommon.Hash
+	var ch common.Hash
 	var err error
 	for ch, _, err = headerReader.CanonicalHash(context.Background(), tx, ancestorHeight); err == nil && ch != ancestorHash; ch, _, err = headerReader.CanonicalHash(context.Background(), tx, ancestorHeight) {
 		if err = rawdb.WriteCanonicalHash(tx, ancestorHash, ancestorHeight); err != nil {
@@ -460,7 +459,7 @@ func HeadersUnwind(ctx context.Context, u *UnwindState, s *StageState, tx kv.RwT
 	}
 	if unwindBlock {
 		var maxTd big.Int
-		var maxHash libcommon.Hash
+		var maxHash common.Hash
 		var maxNum uint64 = 0
 
 		if test { // If we are not in the test, we can do searching for the heaviest chain in the next cycle
@@ -479,7 +478,7 @@ func HeadersUnwind(ctx context.Context, u *UnwindState, s *StageState, tx kv.RwT
 				if len(k) != 40 {
 					return fmt.Errorf("key in TD table has to be 40 bytes long: %x", k)
 				}
-				var hash libcommon.Hash
+				var hash common.Hash
 				copy(hash[:], k[8:])
 				if cfg.hd.IsBadHeader(hash) {
 					continue
@@ -553,8 +552,8 @@ func logProgressHeaders(
 	logger.Info(fmt.Sprintf("[%s] %s", logPrefix, message),
 		"number", now,
 		"blk/second", speed,
-		"alloc", libcommon.ByteCount(m.Alloc),
-		"sys", libcommon.ByteCount(m.Sys),
+		"alloc", common.ByteCount(m.Alloc),
+		"sys", common.ByteCount(m.Sys),
 		"invalidHeaders", stats.InvalidHeaders,
 		"rejectedBadHeaders", stats.RejectedBadHeaders,
 	)
@@ -587,20 +586,20 @@ func (cr ChainReaderImpl) Config() *chain.Config        { return cr.config }
 func (cr ChainReaderImpl) CurrentHeader() *types.Header { panic("") }
 func (cr ChainReaderImpl) CurrentFinalizedHeader() *types.Header {
 	hash := rawdb.ReadForkchoiceFinalized(cr.tx)
-	if hash == (libcommon.Hash{}) {
+	if hash == (common.Hash{}) {
 		return nil
 	}
 	return cr.GetHeaderByHash(hash)
 }
 func (cr ChainReaderImpl) CurrentSafeHeader() *types.Header {
 	hash := rawdb.ReadForkchoiceSafe(cr.tx)
-	if hash == (libcommon.Hash{}) {
+	if hash == (common.Hash{}) {
 		return nil
 	}
 
 	return cr.GetHeaderByHash(hash)
 }
-func (cr ChainReaderImpl) GetHeader(hash libcommon.Hash, number uint64) *types.Header {
+func (cr ChainReaderImpl) GetHeader(hash common.Hash, number uint64) *types.Header {
 	if cr.blockReader != nil {
 		h, _ := cr.blockReader.Header(context.Background(), cr.tx, hash, number)
 		return h
@@ -614,7 +613,7 @@ func (cr ChainReaderImpl) GetHeaderByNumber(number uint64) *types.Header {
 	}
 	return rawdb.ReadHeaderByNumber(cr.tx, number)
 }
-func (cr ChainReaderImpl) GetHeaderByHash(hash libcommon.Hash) *types.Header {
+func (cr ChainReaderImpl) GetHeaderByHash(hash common.Hash) *types.Header {
 	if cr.blockReader != nil {
 		h, _ := cr.blockReader.HeaderByHash(context.Background(), cr.tx, hash)
 		return h
@@ -622,7 +621,7 @@ func (cr ChainReaderImpl) GetHeaderByHash(hash libcommon.Hash) *types.Header {
 	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
 	return h
 }
-func (cr ChainReaderImpl) GetTd(hash libcommon.Hash, number uint64) *big.Int {
+func (cr ChainReaderImpl) GetTd(hash common.Hash, number uint64) *big.Int {
 	td, err := rawdb.ReadTd(cr.tx, hash, number)
 	if err != nil {
 		cr.logger.Error("ReadTd failed", "err", err)
@@ -632,15 +631,15 @@ func (cr ChainReaderImpl) GetTd(hash libcommon.Hash, number uint64) *big.Int {
 }
 func (cr ChainReaderImpl) FrozenBlocks() uint64    { return cr.blockReader.FrozenBlocks() }
 func (cr ChainReaderImpl) FrozenBorBlocks() uint64 { return cr.blockReader.FrozenBorBlocks() }
-func (cr ChainReaderImpl) GetBlock(hash libcommon.Hash, number uint64) *types.Block {
+func (cr ChainReaderImpl) GetBlock(hash common.Hash, number uint64) *types.Block {
 	b, _, _ := cr.blockReader.BlockWithSenders(context.Background(), cr.tx, hash, number)
 	return b
 }
-func (cr ChainReaderImpl) HasBlock(hash libcommon.Hash, number uint64) bool {
+func (cr ChainReaderImpl) HasBlock(hash common.Hash, number uint64) bool {
 	b, _ := cr.blockReader.BodyRlp(context.Background(), cr.tx, hash, number)
 	return b != nil
 }
-func (cr ChainReaderImpl) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
+func (cr ChainReaderImpl) BorEventsByBlock(hash common.Hash, number uint64) []rlp.RawValue {
 	events, err := cr.blockReader.EventsByBlock(context.Background(), cr.tx, hash, number)
 	if err != nil {
 		cr.logger.Error("BorEventsByBlock failed", "err", err)
@@ -648,7 +647,7 @@ func (cr ChainReaderImpl) BorEventsByBlock(hash libcommon.Hash, number uint64) [
 	}
 	return events
 }
-func (cr ChainReaderImpl) BorStartEventId(hash libcommon.Hash, blockNum uint64) uint64 {
+func (cr ChainReaderImpl) BorStartEventId(hash common.Hash, blockNum uint64) uint64 {
 	id, err := cr.blockReader.BorStartEventId(context.Background(), cr.tx, hash, blockNum)
 	if err != nil {
 		cr.logger.Error("BorEventsByBlock failed", "err", err)

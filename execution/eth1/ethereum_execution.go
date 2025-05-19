@@ -26,18 +26,18 @@ import (
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/execution/builder"
@@ -53,13 +53,13 @@ const maxBlocksLookBehind = 32
 
 var ErrMissingChainSegment = errors.New("missing chain segment")
 
-func makeErrMissingChainSegment(blockHash libcommon.Hash) error {
+func makeErrMissingChainSegment(blockHash common.Hash) error {
 	return errors.Join(ErrMissingChainSegment, errors.New("block hash: "+blockHash.String()))
 }
 
-func GetBlockHashFromMissingSegmentError(err error) (libcommon.Hash, bool) {
+func GetBlockHashFromMissingSegmentError(err error) (common.Hash, bool) {
 	if !errors.Is(err, ErrMissingChainSegment) {
-		return libcommon.Hash{}, false
+		return common.Hash{}, false
 	}
 	// Otherwise, we assume the error is a joined error from makeErrMissingChainSegment.
 	// We define an interface to get access to the underlying errors.
@@ -68,7 +68,7 @@ func GetBlockHashFromMissingSegmentError(err error) (libcommon.Hash, bool) {
 	}
 	uw, ok := err.(unwrapper)
 	if !ok {
-		return libcommon.Hash{}, false
+		return common.Hash{}, false
 	}
 
 	// iterate through suberrors to find one that contains the block hash info.
@@ -82,12 +82,12 @@ func GetBlockHashFromMissingSegmentError(err error) (libcommon.Hash, bool) {
 		}
 	}
 	if hashStr == "" {
-		return libcommon.Hash{}, false
+		return common.Hash{}, false
 	}
 
-	// Convert the extracted string into a libcommon.Hash.
-	// This assumes the existence of libcommon.ParseHash.
-	return libcommon.HexToHash(hashStr), true
+	// Convert the extracted string into a common.Hash.
+	// This assumes the existence of common.ParseHash.
+	return common.HexToHash(hashStr), true
 }
 
 // EthereumExecutionModule describes ethereum execution logic and indexing.
@@ -159,7 +159,7 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.Temp
 	}
 }
 
-func (e *EthereumExecutionModule) getHeader(ctx context.Context, tx kv.Tx, blockHash libcommon.Hash, blockNumber uint64) (*types.Header, error) {
+func (e *EthereumExecutionModule) getHeader(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.Header, error) {
 	if e.blockReader == nil {
 		return rawdb.ReadHeader(tx, blockHash, blockNumber), nil
 	}
@@ -167,12 +167,12 @@ func (e *EthereumExecutionModule) getHeader(ctx context.Context, tx kv.Tx, block
 	return e.blockReader.Header(ctx, tx, blockHash, blockNumber)
 }
 
-func (e *EthereumExecutionModule) getTD(_ context.Context, tx kv.Tx, blockHash libcommon.Hash, blockNumber uint64) (*big.Int, error) {
+func (e *EthereumExecutionModule) getTD(_ context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*big.Int, error) {
 	return rawdb.ReadTd(tx, blockHash, blockNumber)
 
 }
 
-func (e *EthereumExecutionModule) getBody(ctx context.Context, tx kv.Tx, blockHash libcommon.Hash, blockNumber uint64) (*types.Body, error) {
+func (e *EthereumExecutionModule) getBody(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.Body, error) {
 	if e.blockReader == nil {
 		body, _, _ := rawdb.ReadBody(tx, blockHash, blockNumber)
 		return body, nil
@@ -180,22 +180,22 @@ func (e *EthereumExecutionModule) getBody(ctx context.Context, tx kv.Tx, blockHa
 	return e.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
 }
 
-func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, blockNumber uint64) (libcommon.Hash, error) {
-	var canonical libcommon.Hash
+func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, blockNumber uint64) (common.Hash, error) {
+	var canonical common.Hash
 	var err error
 	if e.blockReader == nil {
 		canonical, err = rawdb.ReadCanonicalHash(tx, blockNumber)
 		if err != nil {
-			return libcommon.Hash{}, err
+			return common.Hash{}, err
 		}
 	} else {
 		var ok bool
 		canonical, ok, err = e.blockReader.CanonicalHash(ctx, tx, blockNumber)
 		if err != nil {
-			return libcommon.Hash{}, err
+			return common.Hash{}, err
 		}
 		if !ok {
-			return libcommon.Hash{}, nil
+			return common.Hash{}, nil
 		}
 	}
 
@@ -231,7 +231,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.ValidateChain: ExecutionStatus_Busy")
 		return &execution.ValidationReceipt{
-			LatestValidHash:  gointerfaces.ConvertHashToH256(libcommon.Hash{}),
+			LatestValidHash:  gointerfaces.ConvertHashToH256(common.Hash{}),
 			ValidationStatus: execution.ExecutionStatus_Busy,
 		}, nil
 	}
@@ -264,7 +264,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	}
 	if header == nil || body == nil {
 		return &execution.ValidationReceipt{
-			LatestValidHash:  gointerfaces.ConvertHashToH256(libcommon.Hash{}),
+			LatestValidHash:  gointerfaces.ConvertHashToH256(common.Hash{}),
 			ValidationStatus: execution.ExecutionStatus_MissingSegment,
 		}, nil
 	}
@@ -272,7 +272,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	if math.AbsoluteDifference(*currentBlockNumber, req.Number) >= maxBlocksLookBehind {
 		return &execution.ValidationReceipt{
 			ValidationStatus: execution.ExecutionStatus_TooFarAway,
-			LatestValidHash:  gointerfaces.ConvertHashToH256(libcommon.Hash{}),
+			LatestValidHash:  gointerfaces.ConvertHashToH256(common.Hash{}),
 		}, nil
 	}
 
@@ -306,13 +306,13 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		validationStatus = execution.ExecutionStatus_MissingSegment
 	}
 	isInvalidChain := status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil
-	if isInvalidChain && (lvh != libcommon.Hash{}) && lvh != blockHash {
+	if isInvalidChain && (lvh != common.Hash{}) && lvh != blockHash {
 		if err := e.purgeBadChain(ctx, tx, lvh, blockHash); err != nil {
 			return nil, err
 		}
 	}
 	if isInvalidChain {
-		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain is invalid", "hash", libcommon.Hash(blockHash))
+		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain is invalid", "hash", common.Hash(blockHash))
 		validationStatus = execution.ExecutionStatus_BadBlock
 	}
 	validationReceipt := &execution.ValidationReceipt{
@@ -325,7 +325,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	return validationReceipt, tx.Commit()
 }
 
-func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash libcommon.Hash) error {
+func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash common.Hash) error {
 	tip, err := e.blockReader.HeaderNumber(ctx, tx, headHash)
 	if err != nil {
 		return err

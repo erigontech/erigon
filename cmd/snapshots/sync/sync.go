@@ -26,7 +26,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -46,6 +45,7 @@ import (
 	"github.com/erigontech/erigon-lib/downloader"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/version"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/p2p/nat"
@@ -80,15 +80,15 @@ func (l Locator) String() string {
 		val = l.Src + ":" + l.Root
 	}
 
-	if l.Version > 0 {
-		val += fmt.Sprint(":v", l.Version)
+	if l.Version.Major > 0 || l.Version.Minor > 0 {
+		val += fmt.Sprint(":v", l.Version.String())
 	}
 
 	return val
 }
 
 var locatorExp = regexp.MustCompile(`^(?:(\w+)\:)?([^\:]*)(?:\:(v\d+))?`)
-var srcExp = regexp.MustCompile(`^erigon-v\d+-snapshots-(.*)$`)
+var srcExp = regexp.MustCompile(`^erigon-v\d+(\.\d+)?-snapshots-(.*)$`)
 
 func ParseLocator(value string) (*Locator, error) {
 	if matches := locatorExp.FindStringSubmatch(value); len(matches) > 0 {
@@ -99,12 +99,12 @@ func ParseLocator(value string) (*Locator, error) {
 			loc.LType = TorrentFs
 
 			if len(matches[2]) > 0 {
-				version, err := strconv.ParseUint(matches[2][1:], 10, 8)
+				version, err := version.ParseVersion(matches[2])
 				if err != nil {
 					return nil, fmt.Errorf("can't parse version: %s: %w", matches[3], err)
 				}
 
-				loc.Version = snaptype.Version(version)
+				loc.Version = version
 			}
 
 		case len(matches[1]) > 0:
@@ -117,12 +117,12 @@ func ParseLocator(value string) (*Locator, error) {
 			}
 
 			if len(matches[3]) > 0 {
-				version, err := strconv.ParseUint(matches[3][1:], 10, 8)
+				version, err := version.ParseVersion(matches[3])
 				if err != nil {
 					return nil, fmt.Errorf("can't parse version: %s: %w", matches[3], err)
 				}
 
-				loc.Version = snaptype.Version(version)
+				loc.Version = version
 			}
 
 		default:
@@ -314,7 +314,7 @@ func (i *torrentInfo) Version() snaptype.Version {
 		return i.snapInfo.Version
 	}
 
-	return 0
+	return version.ZeroVersion
 }
 
 func (i *torrentInfo) From() uint64 {

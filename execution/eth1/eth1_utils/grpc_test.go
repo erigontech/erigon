@@ -23,12 +23,11 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
-
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 func makeBlock(txCount, uncleCount, withdrawalCount int) *types.Block {
@@ -36,7 +35,7 @@ func makeBlock(txCount, uncleCount, withdrawalCount int) *types.Block {
 		key, _      = crypto.GenerateKey()
 		txs         = make([]types.Transaction, txCount)
 		receipts    = make([]*types.Receipt, len(txs))
-		signer      = types.LatestSigner(params.TestChainConfig)
+		signer      = types.LatestSigner(chain.TestChainConfig)
 		uncles      = make([]*types.Header, uncleCount)
 		withdrawals = make([]*types.Withdrawal, withdrawalCount)
 	)
@@ -52,7 +51,7 @@ func makeBlock(txCount, uncleCount, withdrawalCount int) *types.Block {
 		amount, _ := uint256.FromBig(math.BigPow(2, int64(i)))
 		price := uint256.NewInt(300000)
 		data := make([]byte, 100)
-		tx := types.NewTransaction(uint64(i), libcommon.Address{}, amount, 123457, price, data)
+		tx := types.NewTransaction(uint64(i), common.Address{}, amount, 123457, price, data)
 		signedTx, err := types.SignTx(tx, *signer, key)
 		if err != nil {
 			panic(err)
@@ -109,9 +108,9 @@ func TestBlockRpcConversion(t *testing.T) {
 		panic(err)
 	}
 	testBlockRaw := testBlock.RawBody()
-	require.Greater(len(testBlockRaw.Transactions), 0)
-	require.Greater(len(testBlockRaw.Uncles), 0)
-	require.Greater(len(testBlockRaw.Withdrawals), 0)
+	require.NotEmpty(testBlockRaw.Transactions)
+	require.NotEmpty(testBlockRaw.Uncles)
+	require.NotEmpty(testBlockRaw.Withdrawals)
 	require.Nil(deep.Equal(testBlockRaw, roundTripBody))
 }
 

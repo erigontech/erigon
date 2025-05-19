@@ -24,6 +24,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
@@ -35,9 +36,8 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon-lib/types"
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -870,10 +870,8 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 	if txCount != 0 {
 		txnSeg, ok, release := r.sn.ViewSingleFile(coresnaptype.Transactions, blockHeight)
 		if !ok {
-			if dbgLogs {
-				log.Info(dbgPrefix+"no transactions file for this block num", "r.sn.BlocksAvailable()", r.sn.BlocksAvailable())
-			}
-			return
+			err = fmt.Errorf("no transactions snapshot file for blockNum=%d, BlocksAvailable=%d", blockHeight, r.sn.BlocksAvailable())
+			return nil, nil, err
 		}
 		defer release()
 		txs, senders, err = r.txsFromSnapshot(baseTxnId, txCount, txnSeg, buf)
@@ -1218,7 +1216,7 @@ func (r *BlockReader) IterateFrozenBodies(f func(blockNum, baseTxNum, txCount ui
 	defer view.Close()
 	for _, sn := range view.Bodies() {
 		sn := sn
-		defer sn.Src().EnableReadAhead().DisableReadAhead()
+		defer sn.Src().MadvSequential().DisableReadAhead()
 
 		var buf []byte
 		g := sn.Src().MakeGetter()

@@ -27,6 +27,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
@@ -40,8 +41,9 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon-lib/version"
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
+
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 )
 
@@ -153,8 +155,8 @@ var (
 		Enums.Events,
 		"borevents",
 		snaptype.Versions{
-			Current:      1, //2,
-			MinSupported: 1,
+			Current:      version.V1_0, //2,
+			MinSupported: version.V1_0,
 		},
 		EventRangeExtractor{},
 		[]snaptype.Index{Indexes.BorTxnHash},
@@ -206,9 +208,10 @@ var (
 				if err != nil {
 					return err
 				}
-				rs.LogLvl(log.LvlDebug)
+				defer rs.Close()
+				rs.LogLvl(log.LvlInfo)
 
-				defer d.EnableReadAhead().DisableReadAhead()
+				defer d.MadvSequential().DisableReadAhead()
 
 				for {
 					g.Reset(0)
@@ -250,8 +253,8 @@ var (
 		Enums.Spans,
 		"borspans",
 		snaptype.Versions{
-			Current:      1, //2,
-			MinSupported: 1,
+			Current:      version.V1_0, //2,
+			MinSupported: version.V1_0,
 		},
 		snaptype.RangeExtractorFunc(
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
@@ -279,50 +282,27 @@ var (
 		Enums.Checkpoints,
 		"borcheckpoints",
 		snaptype.Versions{
-			Current:      1, //2,
-			MinSupported: 1,
+			Current:      version.V1_0, //2,
+			MinSupported: version.V1_0,
 		},
 		snaptype.RangeExtractorFunc(
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 				var checkpointTo, checkpointFrom CheckpointId
 
-				checkpointId := func(rangeIndex RangeIndex, blockNum uint64) (CheckpointId, error) {
-					checkpointId, _, err := rangeIndex.Lookup(ctx, blockNum)
-					return CheckpointId(checkpointId), err
-				}
-
 				err := db.View(ctx, func(tx kv.Tx) (err error) {
 					rangeIndex := NewTxRangeIndex(db, kv.BorCheckpointEnds, tx)
 
-					checkpointFrom, err = checkpointId(rangeIndex, blockFrom)
-
-					//checkpointFrom, err = CheckpointIdAt(tx, blockFrom)
-
+					checkpoints, err := rangeIndex.GetIDsBetween(ctx, blockFrom, blockTo)
 					if err != nil {
 						return err
 					}
 
-					checkpointTo, err = checkpointId(rangeIndex, blockTo)
-					//checkpointTo, err = CheckpointIdAt(tx, blockTo)
-
-					if err != nil {
-						return err
+					if len(checkpoints) > 0 {
+						checkpointFrom = CheckpointId(checkpoints[0])
+						checkpointTo = CheckpointId(checkpoints[len(checkpoints)-1]) + 1
 					}
 
-					if blockFrom > 0 {
-						if prevTo, err := checkpointId(rangeIndex, blockFrom-1); err == nil {
-							if prevTo == checkpointFrom {
-								if prevTo == checkpointTo {
-									checkpointFrom = 0
-									checkpointTo = 0
-								} else {
-									checkpointFrom++
-								}
-							}
-						}
-					}
-
-					return err
+					return nil
 				})
 
 				if err != nil {
@@ -364,43 +344,24 @@ var (
 		Enums.Milestones,
 		"bormilestones",
 		snaptype.Versions{
-			Current:      1, //2,
-			MinSupported: 1,
+			Current:      version.V1_0, //2,
+			MinSupported: version.V1_0,
 		},
 		snaptype.RangeExtractorFunc(
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 				var milestoneFrom, milestoneTo MilestoneId
 
-				milestoneId := func(rangeIndex RangeIndex, blockNum uint64) (MilestoneId, error) {
-					milestoneId, _, err := rangeIndex.Lookup(ctx, blockNum)
-					return MilestoneId(milestoneId), err
-				}
 				err := db.View(ctx, func(tx kv.Tx) (err error) {
 					rangeIndex := NewTxRangeIndex(db, kv.BorMilestoneEnds, tx)
 
-					milestoneFrom, err = milestoneId(rangeIndex, blockFrom)
-
+					milestones, err := rangeIndex.GetIDsBetween(ctx, blockFrom, blockTo)
 					if err != nil && !errors.Is(err, ErrMilestoneNotFound) {
 						return err
 					}
 
-					milestoneTo, err = milestoneId(rangeIndex, blockTo)
-
-					if err != nil && !errors.Is(err, ErrMilestoneNotFound) {
-						return err
-					}
-
-					if milestoneFrom > 0 && blockFrom > 0 {
-						if prevTo, err := milestoneId(rangeIndex, blockFrom-1); err == nil && prevTo == milestoneFrom {
-							if prevTo == milestoneFrom {
-								if prevTo == milestoneTo {
-									milestoneFrom = 0
-									milestoneTo = 0
-								} else {
-									milestoneFrom++
-								}
-							}
-						}
+					if len(milestones) > 0 {
+						milestoneFrom = MilestoneId(milestones[0])
+						milestoneTo = MilestoneId(milestones[len(milestones)-1]) + 1
 					}
 
 					return nil
@@ -477,6 +438,7 @@ func MilestonesEnabled() bool {
 	return false
 }
 
+// This function extracts values in interval [valueFrom, valueTo)
 func extractValueRange(ctx context.Context, table string, valueFrom, valueTo uint64, db kv.RoDB, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -529,9 +491,10 @@ func buildValueIndex(ctx context.Context, sn snaptype.FileInfo, salt uint32, d *
 	if err != nil {
 		return err
 	}
-	rs.LogLvl(log.LvlDebug)
+	defer rs.Close()
+	rs.LogLvl(log.LvlInfo)
 
-	defer d.EnableReadAhead().DisableReadAhead()
+	defer d.MadvSequential().DisableReadAhead()
 
 	for {
 		g := d.MakeGetter()

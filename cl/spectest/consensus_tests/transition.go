@@ -86,6 +86,6 @@ func (b *TransitionCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err
 	require.NoError(t, err)
 	haveRoot, err := startState.HashSSZ()
 	require.NoError(t, err)
-	assert.EqualValues(t, haveRoot, expectedRoot, "state root")
+	assert.EqualValues(t, expectedRoot, haveRoot, "state root")
 	return nil
 }

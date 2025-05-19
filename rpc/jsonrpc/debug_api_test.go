@@ -28,6 +28,7 @@ import (
 	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -37,9 +38,8 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
 	"github.com/erigontech/erigon/params"
@@ -319,12 +319,12 @@ func TestAccountRange(t *testing.T) {
 		n := rpc.BlockNumber(1)
 		result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
 		require.NoError(t, err)
-		require.Equal(t, 2, len(result.Accounts))
+		require.Len(t, result.Accounts, 2)
 
 		n = rpc.BlockNumber(7)
 		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
 		require.NoError(t, err)
-		require.Equal(t, 3, len(result.Accounts))
+		require.Len(t, result.Accounts, 3)
 	})
 	t.Run("valid contract", func(t *testing.T) {
 		addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
@@ -332,17 +332,17 @@ func TestAccountRange(t *testing.T) {
 		n := rpc.BlockNumber(1)
 		result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
 		require.NoError(t, err)
-		require.Equal(t, 1, len(result.Accounts))
+		require.Len(t, result.Accounts, 1)
 
 		n = rpc.BlockNumber(7)
 		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
 		require.NoError(t, err)
-		require.Equal(t, 2, len(result.Accounts))
+		require.Len(t, result.Accounts, 2)
 
 		n = rpc.BlockNumber(10)
 		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
 		require.NoError(t, err)
-		require.Equal(t, 2, len(result.Accounts))
+		require.Len(t, result.Accounts, 2)
 	})
 	t.Run("with storage", func(t *testing.T) {
 		addr := common.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcae5")
@@ -350,17 +350,17 @@ func TestAccountRange(t *testing.T) {
 		n := rpc.BlockNumber(1)
 		result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 1, false, false)
 		require.NoError(t, err)
-		require.Equal(t, 0, len(result.Accounts))
+		require.Empty(t, result.Accounts)
 
 		n = rpc.BlockNumber(7)
 		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 1, false, false)
 		require.NoError(t, err)
-		require.Equal(t, 35, len(result.Accounts[addr].Storage))
+		require.Len(t, result.Accounts[addr].Storage, 35)
 
 		n = rpc.BlockNumber(10)
 		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 1, false, false)
 		require.NoError(t, err)
-		require.Equal(t, 35, len(result.Accounts[addr].Storage))
+		require.Len(t, result.Accounts[addr].Storage, 35)
 		require.Equal(t, 1, int(result.Accounts[addr].Nonce))
 		for _, v := range result.Accounts {
 			hashedCode, _ := common.HashData(v.Code)
@@ -377,23 +377,23 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 		n, n2 := rpc.BlockNumber(1), rpc.BlockNumber(2)
 		result, err := api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
 		require.NoError(t, err)
-		require.Equal(t, 3, len(result))
+		require.Len(t, result, 3)
 
 		n, n2 = rpc.BlockNumber(5), rpc.BlockNumber(7)
 		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
 		require.NoError(t, err)
-		require.Equal(t, 38, len(result))
+		require.Len(t, result, 38)
 
 		n, n2 = rpc.BlockNumber(0), rpc.BlockNumber(9)
 		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
 		require.NoError(t, err)
-		require.Equal(t, 40, len(result))
+		require.Len(t, result, 40)
 
 		//nil value means: to = from + 1
 		n = rpc.BlockNumber(0)
 		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
 		require.NoError(t, err)
-		require.Equal(t, 3, len(result))
+		require.Len(t, result, 3)
 	})
 	t.Run("invalid input", func(t *testing.T) {
 		n, n2 := rpc.BlockNumber(0), rpc.BlockNumber(11)
@@ -407,7 +407,7 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 		n = rpc.BlockNumber(0)
 		result, err := api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
 		require.NoError(t, err)
-		require.Equal(t, 3, len(result))
+		require.Len(t, result, 3)
 
 		n = rpc.BlockNumber(1_000_000)
 		_, err = api.GetModifiedAccountsByNumber(m.Ctx, n, nil)

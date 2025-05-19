@@ -18,20 +18,19 @@ package stagedsync_test
 
 import (
 	"bytes"
-	"errors"
 	"math/big"
 	"testing"
 	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/stretchr/testify/require"
-
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
@@ -88,7 +87,7 @@ func TestBodiesCanonical(t *testing.T) {
 	err = rawdb.AppendCanonicalTxNums(tx, 5)
 	require.Error(err)
 	var e1 rawdbv3.ErrTxNumsAppendWithGap
-	require.True(errors.As(err, &e1))
+	require.ErrorAs(err, &e1)
 
 	// this should see same error inside then retry from last block available, therefore return no error
 	err = bw.MakeBodiesCanonical(tx, 5)
@@ -146,9 +145,9 @@ func TestBodiesUnwind(t *testing.T) {
 		require.Equal(1+5*(3+2), int(lastTxNum))
 	}
 	{
-		_, err = rawdb.WriteRawBodyIfNotExists(tx, libcommon.Hash{11}, 11, b)
+		_, err = rawdb.WriteRawBodyIfNotExists(tx, common.Hash{11}, 11, b)
 		require.NoError(err)
-		err = rawdb.WriteCanonicalHash(tx, libcommon.Hash{11}, 11)
+		err = rawdb.WriteCanonicalHash(tx, common.Hash{11}, 11)
 		require.NoError(err)
 
 		err = bw.MakeBodiesCanonical(tx, 5+1) // block 5 already canonical, start from next one

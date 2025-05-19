@@ -24,6 +24,7 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
@@ -32,7 +33,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
@@ -182,7 +182,7 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 	}
 	defer tx.Rollback()
 
-	latestBlock, err := stages.GetStageProgress(tx, stages.Finish)
+	latestBlock, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
 		return nil, err
 	}
@@ -252,25 +252,20 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 	}
 	defer tx.Rollback()
 
-	startBlock, err := api.blockByHashWithSenders(ctx, tx, startHash)
+	startNum, err := api.headerNumberByHash(ctx, tx, startHash)
 	if err != nil {
-		return nil, err
-	}
-	if startBlock == nil {
 		return nil, fmt.Errorf("start block %x not found", startHash)
 	}
-	startNum := startBlock.NumberU64()
 	endNum := startNum + 1 // allows for single parameter calls
 
 	if endHash != nil {
-		endBlock, err := api.blockByHashWithSenders(ctx, tx, *endHash)
+		var err error
+		endNum, err = api.headerNumberByHash(ctx, tx, *endHash)
 		if err != nil {
-			return nil, err
-		}
-		if endBlock == nil {
 			return nil, fmt.Errorf("end block %x not found", *endHash)
 		}
-		endNum = endBlock.NumberU64() + 1
+		endNum = endNum + 1
+
 	}
 
 	if startNum > endNum {

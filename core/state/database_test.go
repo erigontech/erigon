@@ -32,19 +32,17 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state3 "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/state/contracts"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
@@ -80,11 +78,11 @@ func TestCreate2Revive(t *testing.T) {
 	require.NoError(t, err)
 	transactOpts.GasLimit = 1000000
 
-	var contractAddress libcommon.Address
+	var contractAddress common.Address
 	var revive *contracts.Revive
 	// Change this address whenever you make any changes in the code of the revive contract in
 	// contracts/revive.sol
-	var create2address = libcommon.HexToAddress("e70fd65144383e1189bd710b1e23b61e26315ff4")
+	var create2address = common.HexToAddress("e70fd65144383e1189bd710b1e23b61e26315ff4")
 
 	// There are 4 blocks
 	// In the first block, we deploy the "factory" contract Revive, which can create children contracts via CREATE2 opcode
@@ -168,7 +166,7 @@ func TestCreate2Revive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var key2 libcommon.Hash
+	var key2 common.Hash
 	var check2 uint256.Int
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(m.NewStateReader(tx))
@@ -178,8 +176,8 @@ func TestCreate2Revive(t *testing.T) {
 			t.Error("expected create2address to exist at the block 2", create2address.String())
 		}
 		// We expect number 0x42 in the position [2], because it is the block number 2
-		key2 = libcommon.BigToHash(big.NewInt(2))
-		st.GetState(create2address, &key2, &check2)
+		key2 = common.BigToHash(big.NewInt(2))
+		st.GetState(create2address, key2, &check2)
 		if check2.Uint64() != 0x42 {
 			t.Errorf("expected 0x42 in position 2, got: %x", check2.Uint64())
 		}
@@ -214,14 +212,14 @@ func TestCreate2Revive(t *testing.T) {
 			t.Error("expected create2address to exist at the block 2", create2address.String())
 		}
 		// We expect number 0x42 in the position [4], because it is the block number 4
-		key4 := libcommon.BigToHash(big.NewInt(4))
+		key4 := common.BigToHash(big.NewInt(4))
 		var check4 uint256.Int
-		st.GetState(create2address, &key4, &check4)
+		st.GetState(create2address, key4, &check4)
 		if check4.Uint64() != 0x42 {
 			t.Errorf("expected 0x42 in position 4, got: %x", check4.Uint64())
 		}
 		// We expect number 0x0 in the position [2], because it is the block number 4
-		st.GetState(create2address, &key2, &check2)
+		st.GetState(create2address, key2, &check2)
 		if !check2.IsZero() {
 			t.Errorf("expected 0x0 in position 2, got: %x", check2)
 		}
@@ -262,12 +260,12 @@ func TestCreate2Polymorth(t *testing.T) {
 	require.NoError(t, err)
 	transactOpts.GasLimit = 1000000
 
-	var contractAddress libcommon.Address
+	var contractAddress common.Address
 	var poly *contracts.Poly
 
 	// Change this address whenever you make any changes in the code of the poly contract in
 	// contracts/poly.sol
-	var create2address = libcommon.HexToAddress("c66aa74c220476f244b7f45897a124d1a01ca8a8")
+	var create2address = common.HexToAddress("c66aa74c220476f244b7f45897a124d1a01ca8a8")
 
 	// There are 5 blocks
 	// In the first block, we deploy the "factory" contract Poly, which can create children contracts via CREATE2 opcode
@@ -526,7 +524,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	require.NoError(t, err)
 	transactOpts.GasLimit = 1000000
 
-	var contractAddress libcommon.Address
+	var contractAddress common.Address
 	var selfDestruct *contracts.Selfdestruct
 
 	// Here we generate 3 blocks, two of which (the one with "Change" invocation and "Destruct" invocation will be reverted during the reorg)
@@ -603,7 +601,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var key0 libcommon.Hash
+	var key0 common.Hash
 	var correctValueX uint256.Int
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(m.NewStateReader(tx))
@@ -615,7 +613,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		}
 
 		// Remember value of field "x" (storage item 0) after the first block, to check after rewinding
-		st.GetState(contractAddress, &key0, &correctValueX)
+		st.GetState(contractAddress, key0, &correctValueX)
 		return nil
 	})
 	require.NoError(t, err)
@@ -647,7 +645,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 			t.Error("expected contractAddress to exist at the block 4", contractAddress.String())
 		}
 		var valueX uint256.Int
-		st.GetState(contractAddress, &key0, &valueX)
+		st.GetState(contractAddress, key0, &valueX)
 		if valueX != correctValueX {
 			t.Fatalf("storage value has changed after reorg: %x, expected %x", valueX, correctValueX)
 		}
@@ -685,7 +683,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	require.NoError(t, err)
 	transactOpts.GasLimit = 1000000
 
-	var contractAddress libcommon.Address
+	var contractAddress common.Address
 	var selfDestruct *contracts.Selfdestruct
 
 	// Here we generate 3 blocks, two of which (the one with "Change" invocation and "Destruct" invocation will be reverted during the reorg)
@@ -756,7 +754,7 @@ func TestReorgOverStateChange(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var key0 libcommon.Hash
+	var key0 common.Hash
 	var correctValueX uint256.Int
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(m.NewStateReader(tx))
@@ -768,7 +766,7 @@ func TestReorgOverStateChange(t *testing.T) {
 		}
 
 		// Remember value of field "x" (storage item 0) after the first block, to check after rewinding
-		st.GetState(contractAddress, &key0, &correctValueX)
+		st.GetState(contractAddress, key0, &correctValueX)
 		return nil
 	})
 	require.NoError(t, err)
@@ -792,7 +790,7 @@ func TestReorgOverStateChange(t *testing.T) {
 
 		// Reload blockchain from the database
 		var valueX uint256.Int
-		st.GetState(contractAddress, &key0, &valueX)
+		st.GetState(contractAddress, key0, &valueX)
 		if valueX != correctValueX {
 			t.Fatalf("storage value has changed after reorg: %x, expected %x", valueX, correctValueX)
 		}
@@ -824,7 +822,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		// Address of the contract that will be deployed
-		contractAddr = libcommon.HexToAddress("0x3a220f351252089d385b29beca14e27f204c296a")
+		contractAddr = common.HexToAddress("0x3a220f351252089d385b29beca14e27f204c296a")
 		funds        = big.NewInt(1000000000)
 		gspec        = &types.Genesis{
 			Config: &chain.Config{
@@ -838,7 +836,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 			Alloc: types.GenesisAlloc{
 				address: {Balance: funds},
 				// Pre-existing storage item in an account without code
-				contractAddr: {Balance: funds, Storage: map[libcommon.Hash]libcommon.Hash{{}: libcommon.HexToHash("0x42")}},
+				contractAddr: {Balance: funds, Storage: map[common.Hash]common.Hash{{}: common.HexToHash("0x42")}},
 			},
 		}
 	)
@@ -852,7 +850,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	require.NoError(t, err)
 	transactOpts.GasLimit = 1000000
 
-	var contractAddress libcommon.Address
+	var contractAddress common.Address
 
 	// There is one block, and it ends up deploying Revive contract (could be any other contract, it does not really matter)
 	// On the address contractAddr, where there is a storage item in the genesis, but no contract code
@@ -893,7 +891,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var key0 libcommon.Hash
+	var key0 common.Hash
 	var check0 uint256.Int
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(m.NewStateReader(tx))
@@ -903,7 +901,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 		}
 
-		st.GetState(contractAddress, &key0, &check0)
+		st.GetState(contractAddress, key0, &check0)
 		if !check0.IsZero() {
 			t.Errorf("expected 0x00 in position 0, got: %x", check0.Bytes())
 		}
@@ -921,10 +919,10 @@ func TestReproduceCrash(t *testing.T) {
 	// 2. Setting storageKey 2 to a non-zero value
 	// 3. Setting both storageKey1 and storageKey2 to zero values
 	value0 := uint256.NewInt(0)
-	contract := libcommon.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
-	storageKey1 := libcommon.HexToHash("0x0e4c0e7175f9d22279a4f63ff74f7fa28b7a954a6454debaa62ce43dd9132541")
+	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
+	storageKey1 := common.HexToHash("0x0e4c0e7175f9d22279a4f63ff74f7fa28b7a954a6454debaa62ce43dd9132541")
 	value1 := uint256.NewInt(0x016345785d8a0000)
-	storageKey2 := libcommon.HexToHash("0x0e4c0e7175f9d22279a4f63ff74f7fa28b7a954a6454debaa62ce43dd9132542")
+	storageKey2 := common.HexToHash("0x0e4c0e7175f9d22279a4f63ff74f7fa28b7a954a6454debaa62ce43dd9132542")
 	value2 := uint256.NewInt(0x58c00a51)
 
 	_, tx, _ := state.NewTestTemporalDb(t)
@@ -932,7 +930,7 @@ func TestReproduceCrash(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	tsw := state.NewWriterV4(sd)
+	tsw := state.NewWriter(sd, nil)
 	tsr := state.NewReaderV3(sd)
 	sd.SetTxNum(1)
 	sd.SetBlockNum(1)
@@ -944,20 +942,20 @@ func TestReproduceCrash(t *testing.T) {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 2nd transaction
-	intraBlockState.SetState(contract, &storageKey1, *value1)
+	intraBlockState.SetState(contract, storageKey1, *value1)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 3rd transaction
 	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
-	intraBlockState.SetState(contract, &storageKey2, *value2)
+	intraBlockState.SetState(contract, storageKey2, *value2)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 4th transaction - clearing both storage cells
 	intraBlockState.SubBalance(contract, uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
-	intraBlockState.SetState(contract, &storageKey1, *value0)
-	intraBlockState.SetState(contract, &storageKey2, *value0)
+	intraBlockState.SetState(contract, storageKey1, *value0)
+	intraBlockState.SetState(contract, storageKey2, *value0)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
@@ -994,7 +992,7 @@ func TestEip2200Gas(t *testing.T) {
 	require.NoError(t, err)
 	transactOpts.GasLimit = 1000000
 
-	var contractAddress libcommon.Address
+	var contractAddress common.Address
 	var selfDestruct *contracts.Selfdestruct
 
 	// Here we generate 1 block with 2 transactions, first creates a contract with some initial values in the
@@ -1095,7 +1093,7 @@ func TestWrongIncarnation(t *testing.T) {
 	require.NoError(t, err)
 	transactOpts.GasLimit = 1000000
 
-	var contractAddress libcommon.Address
+	var contractAddress common.Address
 	var changer *contracts.Changer
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *core.BlockGen) {
@@ -1213,7 +1211,7 @@ func TestWrongIncarnation2(t *testing.T) {
 		signer = types.LatestSignerForChainID(nil)
 	)
 
-	knownContractAddress := libcommon.HexToAddress("0xdb7d6ab1f17c6b31909ae466702703daef9269cf")
+	knownContractAddress := common.HexToAddress("0xdb7d6ab1f17c6b31909ae466702703daef9269cf")
 
 	m := mock.MockWithGenesis(t, gspec, key, false)
 
@@ -1222,7 +1220,7 @@ func TestWrongIncarnation2(t *testing.T) {
 	require.NoError(t, err)
 	transactOpts.GasLimit = 1000000
 
-	var contractAddress libcommon.Address
+	var contractAddress common.Address
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *core.BlockGen) {
 		var txn types.Transaction
@@ -1349,14 +1347,14 @@ func TestWrongIncarnation2(t *testing.T) {
 
 func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	t.Parallel()
-	contract := libcommon.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
+	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 
 	_, tx, _ := state.NewTestTemporalDb(t)
 	sd, err := state3.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	r, tsw := state.NewReaderV3(sd), state.NewWriterV4(sd)
+	r, tsw := state.NewReaderV3(sd), state.NewWriter(sd, nil)
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
@@ -1375,7 +1373,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	sd.SetTxNum(2)
 	sd.SetBlockNum(1)
 
-	trieCode, tcErr := r.ReadAccountCode(contract, 1)
+	trieCode, tcErr := r.ReadAccountCode(contract)
 	require.NoError(t, tcErr, "you can receive the new code")
 	assert.Equal(t, oldCode, trieCode, "new code should be received")
 
@@ -1386,7 +1384,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 
-	trieCode, tcErr = r.ReadAccountCode(contract, 1)
+	trieCode, tcErr = r.ReadAccountCode(contract)
 	require.NoError(t, tcErr, "you can receive the new code")
 	assert.Equal(t, newCode, trieCode, "new code should be received")
 
@@ -1398,15 +1396,15 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 // TestCacheCodeSizeSeparately makes sure that we don't store CodeNodes for code sizes
 func TestCacheCodeSizeSeparately(t *testing.T) {
 	t.Parallel()
-	contract := libcommon.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
-	//root := libcommon.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
+	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
+	//root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
 	_, tx, _ := state.NewTestTemporalDb(t)
 	sd, err := state3.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	r, w := state.NewReaderV3(sd), state.NewWriterV4(sd)
+	r, w := state.NewReaderV3(sd), state.NewWriter(sd, nil)
 
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
@@ -1423,11 +1421,11 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 		t.Errorf("error committing block: %v", err)
 	}
 
-	codeSize, err := r.ReadAccountCodeSize(contract, 1)
+	codeSize, err := r.ReadAccountCodeSize(contract)
 	require.NoError(t, err, "you can receive the new code")
 	assert.Equal(t, len(code), codeSize, "new code should be received")
 
-	code2, err := r.ReadAccountCode(contract, 1)
+	code2, err := r.ReadAccountCode(contract)
 	require.NoError(t, err, "you can receive the new code")
 	assert.Equal(t, code, code2, "new code should be received")
 }
@@ -1436,15 +1434,15 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 func TestCacheCodeSizeInTrie(t *testing.T) {
 	t.Parallel()
 	//t.Skip("switch to TG state readers/writers")
-	contract := libcommon.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
-	root := libcommon.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
+	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
+	root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
 	_, tx, _ := state.NewTestTemporalDb(t)
 	sd, err := state3.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	r, w := state.NewReaderV3(sd), state.NewWriterV4(sd)
+	r, w := state.NewReaderV3(sd), state.NewWriter(sd, nil)
 
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
@@ -1463,22 +1461,22 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 
 	r2, err := sd.ComputeCommitment(context.Background(), true, 1, "")
 	require.NoError(t, err)
-	require.EqualValues(t, root, libcommon.CastToHash(r2))
+	require.Equal(t, root, common.CastToHash(r2))
 
-	codeHash := libcommon.BytesToHash(crypto.Keccak256(code))
-	codeSize, err := r.ReadAccountCodeSize(contract, 1)
+	codeHash := common.BytesToHash(crypto.Keccak256(code))
+	codeSize, err := r.ReadAccountCodeSize(contract)
 	require.NoError(t, err, "you can receive the code size ")
 	assert.Equal(t, len(code), codeSize, "you can receive the code size")
 
 	require.NoError(t, tx.Delete(kv.Code, codeHash[:]), nil)
 
-	codeSize2, err := r.ReadAccountCodeSize(contract, 1)
+	codeSize2, err := r.ReadAccountCodeSize(contract)
 	require.NoError(t, err, "you can still receive code size even with empty DB")
 	assert.Equal(t, len(code), codeSize2, "code size should be received even with empty DB")
 
 	r2, err = sd.ComputeCommitment(context.Background(), true, 1, "")
 	require.NoError(t, err)
-	require.EqualValues(t, root, libcommon.CastToHash(r2))
+	require.Equal(t, root, common.CastToHash(r2))
 }
 
 func TestRecreateAndRewind(t *testing.T) {
@@ -1493,7 +1491,7 @@ func TestRecreateAndRewind(t *testing.T) {
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
-			Config: params.TestChainConfig,
+			Config: chain.TestChainConfig,
 			Alloc: types.GenesisAlloc{
 				address: types.GenesisAccount{Balance: funds},
 			},
@@ -1507,8 +1505,8 @@ func TestRecreateAndRewind(t *testing.T) {
 	transactOpts.GasLimit = 1000000
 	var revive *contracts.Revive2
 	var phoenix *contracts.Phoenix
-	var reviveAddress libcommon.Address
-	var phoenixAddress libcommon.Address
+	var reviveAddress common.Address
+	var phoenixAddress common.Address
 
 	chain, err1 := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *core.BlockGen) {
 		var txn types.Transaction
@@ -1523,8 +1521,8 @@ func TestRecreateAndRewind(t *testing.T) {
 			block.AddTx(txn)
 		case 1:
 			// Calculate the address of the Phoenix and create handle to phoenix contract
-			var codeHash libcommon.Hash
-			if codeHash, err = libcommon.HashData(libcommon.FromHex(contracts.PhoenixBin)); err != nil {
+			var codeHash common.Hash
+			if codeHash, err = common.HashData(common.FromHex(contracts.PhoenixBin)); err != nil {
 				panic(err)
 			}
 			phoenixAddress = crypto.CreateAddress2(reviveAddress, [32]byte{}, codeHash.Bytes())
@@ -1585,8 +1583,8 @@ func TestRecreateAndRewind(t *testing.T) {
 			block.AddTx(txn)
 		case 1:
 			// Calculate the address of the Phoenix and create handle to phoenix contract
-			var codeHash libcommon.Hash
-			if codeHash, err = libcommon.HashData(libcommon.FromHex(contracts.PhoenixBin)); err != nil {
+			var codeHash common.Hash
+			if codeHash, err = common.HashData(common.FromHex(contracts.PhoenixBin)); err != nil {
 				panic(err)
 			}
 			phoenixAddress = crypto.CreateAddress2(reviveAddress, [32]byte{}, codeHash.Bytes())
@@ -1631,7 +1629,7 @@ func TestRecreateAndRewind(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var key0 libcommon.Hash
+	var key0 common.Hash
 	var check0 uint256.Int
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(m.NewStateReader(tx))
@@ -1641,7 +1639,7 @@ func TestRecreateAndRewind(t *testing.T) {
 			t.Errorf("expected phoenix %x to exist after first insert", phoenixAddress)
 		}
 
-		st.GetState(phoenixAddress, &key0, &check0)
+		st.GetState(phoenixAddress, key0, &check0)
 		if check0.Cmp(uint256.NewInt(2)) != 0 {
 			t.Errorf("expected 0x02 in position 0, got: 0x%x", check0.Bytes())
 		}
@@ -1662,7 +1660,7 @@ func TestRecreateAndRewind(t *testing.T) {
 			t.Errorf("expected phoenix %x to exist after second insert", phoenixAddress)
 		}
 
-		st.GetState(phoenixAddress, &key0, &check0)
+		st.GetState(phoenixAddress, key0, &check0)
 		if check0.Cmp(uint256.NewInt(1)) != 0 {
 			t.Errorf("expected 0x01 in position 0, got: 0x%x", check0.Bytes())
 		}
@@ -1682,7 +1680,7 @@ func TestRecreateAndRewind(t *testing.T) {
 			t.Errorf("expected phoenix %x to exist after second insert", phoenixAddress)
 		}
 
-		st.GetState(phoenixAddress, &key0, &check0)
+		st.GetState(phoenixAddress, key0, &check0)
 		if check0.Cmp(uint256.NewInt(0)) != 0 {
 			t.Errorf("expected 0x00 in position 0, got: 0x%x", check0.Bytes())
 		}

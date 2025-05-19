@@ -22,7 +22,7 @@ import (
 
 	"google.golang.org/grpc"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
@@ -31,14 +31,14 @@ import (
 )
 
 var (
-	address1   = libcommon.HexToHash("0xdac17f958d2ee523a2206206994597c13d831ec7")
-	topic1     = libcommon.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
+	address1   = common.HexToHash("0xdac17f958d2ee523a2206206994597c13d831ec7")
+	topic1     = common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
 	address160 *types2.H160
 	topic1H256 *types2.H256
 )
 
 func init() {
-	var a libcommon.Address
+	var a common.Address
 	a.SetBytes(address1.Bytes())
 	address160 = gointerfaces.ConvertAddressToH160(a)
 	topic1H256 = gointerfaces.ConvertHashToH256(topic1)

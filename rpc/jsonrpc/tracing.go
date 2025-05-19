@@ -29,9 +29,9 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
@@ -549,7 +549,8 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		stream.WriteArrayStart()
 		// first change blockContext
 		blockHeaderOverride(&blockCtx, bundle.BlockOverride, overrideBlockHash)
-		ibs.Reset()
+		// do not reset ibs, because we want to keep the overrides and state change
+		// ibs.Reset()
 		for txnIndex, txn := range bundle.Transactions {
 			if txn.Gas == nil || *(txn.Gas) == 0 {
 				txn.Gas = (*hexutil.Uint64)(&api.GasCap)

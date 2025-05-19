@@ -30,7 +30,6 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types/clonable"
@@ -374,7 +373,7 @@ func parseQueryValidatorIndex(syncedData synced_data.SyncedData, id string) (uin
 		return 0, err
 	}
 	if isPublicKey {
-		var b48 libcommon.Bytes48
+		var b48 common.Bytes48
 		if err := b48.UnmarshalText([]byte(id)); err != nil {
 			return 0, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 		}
@@ -658,7 +657,7 @@ func responseValidators(w http.ResponseWriter, filterIndicies []uint64, filterSt
 		if _, err = b.WriteString("{\"index\":\"" + strconv.FormatUint(uint64(i), 10) +
 			"\",\"status\":\"" + status.String() +
 			"\",\"balance\":\"" + strconv.FormatUint(balances.Get(i), 10) +
-			"\",\"validator\":{\"pubkey\":\"" + libcommon.Bytes48(v.PublicKey()).Hex() +
+			"\",\"validator\":{\"pubkey\":\"" + common.Bytes48(v.PublicKey()).Hex() +
 			"\",\"withdrawal_credentials\":\"" + v.WithdrawalCredentials().Hex() +
 			"\",\"effective_balance\":\"" + strconv.FormatUint(v.EffectiveBalance(), 10) +
 			"\",\"slashed\":" + strconv.FormatBool(v.Slashed()) +
@@ -781,7 +780,7 @@ func (a *ApiHandler) GetEthV1ValidatorAggregateAttestation(w http.ResponseWriter
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid slot: %w", err))
 	}
 
-	attDataRootHash := libcommon.HexToHash(attDataRoot)
+	attDataRootHash := common.HexToHash(attDataRoot)
 	att := a.aggregatePool.GetAggregatationByRoot(attDataRootHash)
 	if att == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("attestation %s not found", attDataRoot))
@@ -816,7 +815,7 @@ func (a *ApiHandler) GetEthV2ValidatorAggregateAttestation(w http.ResponseWriter
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid committee_index: %w", err))
 	}
 
-	attDataRootHash := libcommon.HexToHash(attDataRoot)
+	attDataRootHash := common.HexToHash(attDataRoot)
 	att := a.aggregatePool.GetAggregatationByRootAndCommittee(attDataRootHash, committeeIndexNum)
 	if att == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("attestation %s not found", attDataRoot))
@@ -826,7 +825,8 @@ func (a *ApiHandler) GetEthV2ValidatorAggregateAttestation(w http.ResponseWriter
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("attestation slot mismatch"))
 	}
 
-	return newBeaconResponse(att), nil
+	version := a.ethClock.StateVersionByEpoch(slotNum / a.beaconChainCfg.SlotsPerEpoch)
+	return newBeaconResponse(att).WithVersion(version), nil
 }
 
 func (a *ApiHandler) GetEthV1ValidatorIdentities(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {

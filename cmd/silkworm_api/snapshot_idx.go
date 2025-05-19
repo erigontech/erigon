@@ -38,7 +38,7 @@ import (
 
 // Build snapshot indexes for given snapshot files.
 // Sample usage:
-// build_idx --datadir erigon-1 --snapshot_path /snapshots/v1-000000-000500-headers.seg,/snapshots/v1-000500-001000-headers.seg
+// build_idx --datadir erigon-1 --snapshot_path /snapshots/v1.0-000000-000500-headers.seg,/snapshots/v1.0-000500-001000-headers.seg
 
 func main() {
 

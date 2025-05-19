@@ -25,16 +25,16 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain/params"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/execution/consensus/clique"
 	params2 "github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/stages/mock"
@@ -57,7 +57,7 @@ func TestReimportMirroredState(t *testing.T) {
 	)
 	genspec := &types.Genesis{
 		ExtraData: make([]byte, clique.ExtraVanity+length.Addr+clique.ExtraSeal),
-		Alloc: map[libcommon.Address]types.GenesisAccount{
+		Alloc: map[common.Address]types.GenesisAccount{
 			addr: {Balance: big.NewInt(10000000000000000)},
 		},
 		Config: params2.AllCliqueProtocolChanges,
@@ -67,7 +67,7 @@ func TestReimportMirroredState(t *testing.T) {
 	m := mock.MockWithGenesisEngine(t, genspec, engine, false, checkStateRoot)
 
 	// Generate a batch of blocks, each properly signed
-	getHeader := func(hash libcommon.Hash, number uint64) (h *types.Header) {
+	getHeader := func(hash common.Hash, number uint64) (h *types.Header) {
 		if err := m.DB.View(m.Ctx, func(tx kv.Tx) (err error) {
 			h, err = m.BlockReader.Header(m.Ctx, tx, hash, number)
 			return err
@@ -86,7 +86,7 @@ func TestReimportMirroredState(t *testing.T) {
 		// first one. The last is needs a state change again to force a reorg.
 		if i != 1 {
 			baseFee, _ := uint256.FromBig(block.GetHeader().BaseFee)
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(addr), libcommon.Address{0x00}, new(uint256.Int), params.TxGas, baseFee, nil), *signer, key)
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(addr), common.Address{0x00}, new(uint256.Int), params.TxGas, baseFee, nil), *signer, key)
 			if err != nil {
 				panic(err)
 			}

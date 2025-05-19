@@ -152,9 +152,8 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 		panic(err)
 	}
 	s.tx = tx
-	//s.r = NewWriterV4(s.tx)
 	s.r = NewReaderV3(domains)
-	s.w = NewWriterV4(domains)
+	s.w = NewWriter(domains, nil)
 	s.state = New(s.r)
 }
 
@@ -169,7 +168,7 @@ func (s *StateSuite) TestNull(c *checker.C) {
 	//value := common.FromHex("0x823140710bf13990e4500136726d8b55")
 	var value uint256.Int
 
-	s.state.SetState(address, &common.Hash{}, value)
+	s.state.SetState(address, common.Hash{}, value)
 
 	err := s.state.FinalizeTx(&chain.Rules{}, s.w)
 	c.Check(err, checker.IsNil)
@@ -177,7 +176,7 @@ func (s *StateSuite) TestNull(c *checker.C) {
 	err = s.state.CommitBlock(&chain.Rules{}, s.w)
 	c.Check(err, checker.IsNil)
 
-	s.state.GetCommittedState(address, &common.Hash{}, &value)
+	s.state.GetCommittedState(address, common.Hash{}, &value)
 	if !value.IsZero() {
 		c.Errorf("expected empty hash. got %x", value)
 	}
@@ -220,24 +219,24 @@ func (s *StateSuite) TestSnapshot(c *checker.C) {
 	genesis := s.state.Snapshot()
 
 	// set initial state object value
-	s.state.SetState(stateobjaddr, &storageaddr, *data1)
+	s.state.SetState(stateobjaddr, storageaddr, *data1)
 	snapshot := s.state.Snapshot()
 
 	// set a new state object value, revert it and ensure correct content
-	s.state.SetState(stateobjaddr, &storageaddr, *data2)
+	s.state.SetState(stateobjaddr, storageaddr, *data2)
 	s.state.RevertToSnapshot(snapshot)
 
 	var value uint256.Int
-	s.state.GetState(stateobjaddr, &storageaddr, &value)
+	s.state.GetState(stateobjaddr, storageaddr, &value)
 	c.Assert(value, checker.DeepEquals, data1)
-	s.state.GetCommittedState(stateobjaddr, &storageaddr, &value)
+	s.state.GetCommittedState(stateobjaddr, storageaddr, &value)
 	c.Assert(value, checker.DeepEquals, common.Hash{})
 
 	// revert up to the genesis state and ensure correct content
 	s.state.RevertToSnapshot(genesis)
-	s.state.GetState(stateobjaddr, &storageaddr, &value)
+	s.state.GetState(stateobjaddr, storageaddr, &value)
 	c.Assert(value, checker.DeepEquals, common.Hash{})
-	s.state.GetCommittedState(stateobjaddr, &storageaddr, &value)
+	s.state.GetCommittedState(stateobjaddr, storageaddr, &value)
 	c.Assert(value, checker.DeepEquals, common.Hash{})
 }
 
@@ -261,7 +260,7 @@ func TestSnapshot2(t *testing.T) {
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	w := NewWriterV4(domains)
+	w := NewWriter(domains, nil)
 
 	state := New(NewReaderV3(domains))
 
@@ -272,8 +271,8 @@ func TestSnapshot2(t *testing.T) {
 	data0 := uint256.NewInt(17)
 	data1 := uint256.NewInt(18)
 
-	state.SetState(stateobjaddr0, &storageaddr, *data0)
-	state.SetState(stateobjaddr1, &storageaddr, *data1)
+	state.SetState(stateobjaddr0, storageaddr, *data0)
+	state.SetState(stateobjaddr1, storageaddr, *data1)
 
 	// db, trie are already non-empty values
 	so0, err := state.getStateObject(stateobjaddr0)
@@ -326,7 +325,7 @@ func TestSnapshot2(t *testing.T) {
 	}
 	// Update lazily-loaded values before comparing.
 	var tmp uint256.Int
-	so0Restored.GetState(&storageaddr, &tmp)
+	so0Restored.GetState(storageaddr, &tmp)
 	so0Restored.Code()
 	// non-deleted is equal (restored)
 	compareStateObjects(so0Restored, so0, t)
@@ -394,7 +393,12 @@ func NewTestTemporalDb(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *state.
 	db := memdb.NewStateDB(tb.TempDir())
 	tb.Cleanup(db.Close)
 
-	agg, err := state.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, log.New())
+	dirs, logger := datadir.New(tb.TempDir()), log.New()
+	salt, err := state.GetStateIndicesSalt(dirs, true, logger)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	agg, err := state.NewAggregator2(context.Background(), dirs, 16, salt, db, log.New())
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -439,7 +443,7 @@ func TestDump(t *testing.T) {
 	require.NoError(t, err)
 	obj3.SetBalance(uint256.NewInt(44), tracing.BalanceChangeUnspecified)
 
-	w := NewWriterV4(domains)
+	w := NewWriter(domains, nil)
 	// write some of them to the trie
 	err = w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
 	require.NoError(t, err)
@@ -448,7 +452,7 @@ func TestDump(t *testing.T) {
 	err = st.FinalizeTx(&chain.Rules{}, w)
 	require.NoError(t, err)
 
-	blockWriter := NewWriterV4(domains)
+	blockWriter := NewWriter(domains, nil)
 	err = st.CommitBlock(&chain.Rules{}, blockWriter)
 	require.NoError(t, err)
 	err = domains.Flush(context.Background(), tx)

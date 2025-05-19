@@ -23,8 +23,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 )
 
 // BlockContext provides the EVM with auxiliary information. Once provided
@@ -143,9 +143,9 @@ type IntraBlockState interface {
 	SubRefund(uint64)
 	GetRefund() uint64
 
-	GetCommittedState(common.Address, *common.Hash, *uint256.Int) error
-	GetState(address common.Address, slot *common.Hash, outValue *uint256.Int) error
-	SetState(common.Address, *common.Hash, uint256.Int) error
+	GetCommittedState(common.Address, common.Hash, *uint256.Int) error
+	GetState(address common.Address, slot common.Hash, outValue *uint256.Int) error
+	SetState(common.Address, common.Hash, uint256.Int) error
 
 	GetTransientState(addr common.Address, key common.Hash) uint256.Int
 	SetTransientState(addr common.Address, key common.Hash, value uint256.Int)

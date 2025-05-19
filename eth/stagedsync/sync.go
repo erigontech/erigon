@@ -22,10 +22,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/wrap"
@@ -327,7 +327,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, txc wrap.TxContainer) error {
 
 		if string(stage.ID) == dbg.StopBeforeStage() { // stop process for debugging reasons
 			s.logger.Warn("STOP_BEFORE_STAGE env flag forced to stop app")
-			return libcommon.ErrStopped
+			return common.ErrStopped
 		}
 
 		if stage.Disabled || stage.Forward == nil {
@@ -343,7 +343,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, txc wrap.TxContainer) error {
 
 		if string(stage.ID) == dbg.StopAfterStage() { // stop process for debugging reasons
 			s.logger.Warn("STOP_AFTER_STAGE env flag forced to stop app")
-			return libcommon.ErrStopped
+			return common.ErrStopped
 		}
 
 		if string(stage.ID) == s.cfg.BreakAfterStage { // break process loop
@@ -401,7 +401,7 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bo
 
 		if string(stage.ID) == dbg.StopBeforeStage() { // stop process for debugging reasons
 			s.logger.Warn("STOP_BEFORE_STAGE env flag forced to stop app")
-			return false, libcommon.ErrStopped
+			return false, common.ErrStopped
 		}
 
 		if stage.Disabled || stage.Forward == nil {
@@ -415,7 +415,7 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bo
 
 		if string(stage.ID) == dbg.StopAfterStage() { // stop process for debugging reasons
 			s.logger.Warn("STOP_AFTER_STAGE env flag forced to stop app")
-			return false, libcommon.ErrStopped
+			return false, common.ErrStopped
 		}
 
 		if string(stage.ID) == s.cfg.BreakAfterStage { // break process loop
@@ -502,17 +502,17 @@ func CollectTableSizes(db kv.RoDB, tx kv.Tx, buckets []string) []interface{} {
 		if err1 != nil {
 			return bucketSizes
 		}
-		bucketSizes = append(bucketSizes, bucket, libcommon.ByteCount(sz))
+		bucketSizes = append(bucketSizes, bucket, common.ByteCount(sz))
 	}
 
 	sz, err1 := tx.BucketSize("freelist")
 	if err1 != nil {
 		return bucketSizes
 	}
-	bucketSizes = append(bucketSizes, "FreeList", libcommon.ByteCount(sz))
+	bucketSizes = append(bucketSizes, "FreeList", common.ByteCount(sz))
 	amountOfFreePagesInDb := sz / 4 // page_id encoded as bigEndian_u32
 	if db != nil {
-		bucketSizes = append(bucketSizes, "ReclaimableSpace", libcommon.ByteCount(amountOfFreePagesInDb*db.PageSize().Bytes()))
+		bucketSizes = append(bucketSizes, "ReclaimableSpace", common.ByteCount(amountOfFreePagesInDb*db.PageSize().Bytes()))
 	}
 
 	return bucketSizes

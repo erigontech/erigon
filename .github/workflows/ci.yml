@@ -1,4 +1,4 @@
-name: CI
+name: Unit tests
 on:
   push:
     branches:
@@ -25,7 +25,7 @@ concurrency:
     ]'), github.ref) }}
 
 jobs:
-  tests:
+  linux:
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     strategy:
       matrix:
@@ -70,19 +70,11 @@ jobs:
       - name: Test
         run: make test
 
-      - name: SonarCloud
-        if: runner.os == 'Linux'
-        uses: SonarSource/sonarcloud-github-action@v2.3.0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        continue-on-error: true
-
-  tests-windows:
+  win:
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     strategy:
       matrix:
-        os: [ windows-2022 ]
+        os: [ windows-2025 ]
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -119,3 +111,6 @@ jobs:
 
       - name: Test erigon-lib
         run: cd erigon-lib && make test
+
+      - name: Test erigon-db
+        run: cd erigon-db && make test

@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
@@ -328,8 +329,8 @@ type BtIndex struct {
 }
 
 // Decompressor should be managed by caller (could be closed after index is built). When index is built, external getter should be passed to seekInFiles function
-func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *seg.Decompressor, compressed seg.FileCompression, seed uint32, ps *background.ProgressSet, tmpdir string, logger log.Logger, noFsync bool) (*BtIndex, error) {
-	err := BuildBtreeIndexWithDecompressor(indexPath, decompressor, compressed, ps, tmpdir, seed, logger, noFsync)
+func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *seg.Decompressor, compressed seg.FileCompression, seed uint32, ps *background.ProgressSet, tmpdir string, logger log.Logger, noFsync bool, accessors Accessors) (*BtIndex, error) {
+	err := BuildBtreeIndexWithDecompressor(indexPath, decompressor, compressed, ps, tmpdir, seed, logger, noFsync, accessors)
 	if err != nil {
 		return nil, err
 	}
@@ -351,20 +352,24 @@ func OpenBtreeIndexAndDataFile(indexPath, dataPath string, M uint64, compressed 
 	return kv, bt, nil
 }
 
-func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, compression seg.FileCompression, ps *background.ProgressSet, tmpdir string, salt uint32, logger log.Logger, noFsync bool) error {
+func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, compression seg.FileCompression, ps *background.ProgressSet, tmpdir string, salt uint32, logger log.Logger, noFsync bool, accessors Accessors) error {
 	_, indexFileName := filepath.Split(indexPath)
 	p := ps.AddNew(indexFileName, uint64(kv.Count()/2))
 	defer ps.Delete(p)
 
-	defer kv.EnableReadAhead().DisableReadAhead()
+	defer kv.MadvSequential().DisableReadAhead()
 	bloomPath := strings.TrimSuffix(indexPath, ".bt") + ".kvei"
 
-	bloom, err := NewExistenceFilter(uint64(kv.Count()/2), bloomPath)
-	if err != nil {
-		return err
-	}
-	if noFsync {
-		bloom.DisableFsync()
+	var bloom *existence.Filter
+	if accessors.Has(AccessorExistence) {
+		var err error
+		bloom, err = existence.NewFilter(uint64(kv.Count()/2), bloomPath)
+		if err != nil {
+			return err
+		}
+		if noFsync {
+			bloom.DisableFsync()
+		}
 	}
 
 	args := BtIndexWriterArgs{
@@ -398,7 +403,9 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 			return err
 		}
 		hi, _ := murmur3.Sum128WithSeed(key, salt)
-		bloom.AddHash(hi)
+		if bloom != nil {
+			bloom.AddHash(hi)
+		}
 		pos, _ = getter.Skip()
 
 		p.Processed.Add(1)
@@ -467,7 +474,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 		return &Cursor{ef: idx.ef, returnInto: &idx.pool}
 	}
 
-	defer kv.EnableMadvNormal().DisableReadAhead()
+	defer kv.MadvNormal().DisableReadAhead()
 	kvGetter := seg.NewReader(kv.MakeGetter(), compress)
 
 	if len(idx.data[pos:]) == 0 {

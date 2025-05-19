@@ -20,9 +20,9 @@ import (
 	"fmt"
 	"testing"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/params"
 	"github.com/holiman/uint256"
 	"pgregory.net/rapid"
 )
@@ -31,7 +31,7 @@ func TestInterpreterReadonly(t *testing.T) {
 	t.Parallel()
 	c := NewJumpDestCache()
 	rapid.Check(t, func(t *rapid.T) {
-		env := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, params.TestChainConfig, Config{})
+		env := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, chain.TestChainConfig, Config{})
 
 		isEVMSliceTest := rapid.SliceOfN(rapid.Bool(), 1, -1).Draw(t, "tevm")
 		readOnlySliceTest := rapid.SliceOfN(rapid.Bool(), len(isEVMSliceTest), len(isEVMSliceTest)).Draw(t, "readonly")
@@ -57,7 +57,7 @@ func TestInterpreterReadonly(t *testing.T) {
 
 		dummyContract := NewContract(
 			&dummyContractRef{},
-			libcommon.Address{},
+			common.Address{},
 			new(uint256.Int),
 			0,
 			false,
@@ -291,7 +291,7 @@ func TestReadonlyBasicCases(t *testing.T) {
 				t.Parallel()
 				readonlySliceTest := testcase.readonlySliceTest
 
-				env := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, params.TestChainConfig, Config{})
+				env := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, chain.TestChainConfig, Config{})
 
 				readonliesGot := make([]*readOnlyState, len(testcase.readonlySliceTest))
 				isEVMGot := make([]bool, len(evmsTestcase.emvs))
@@ -315,7 +315,7 @@ func TestReadonlyBasicCases(t *testing.T) {
 
 				dummyContract := NewContract(
 					&dummyContractRef{},
-					libcommon.Address{},
+					common.Address{},
 					new(uint256.Int),
 					0,
 					false,
@@ -408,14 +408,14 @@ func (st *testSequential) Run(_ *Contract, _ []byte, _ bool) ([]byte, error) {
 	c := NewJumpDestCache()
 	nextContract := NewContract(
 		&dummyContractRef{},
-		libcommon.Address{},
+		common.Address{},
 		new(uint256.Int),
 		0,
 		false,
 		c,
 	)
 
-	return run(st.env, nextContract, nil, st.readOnlys[*st.currentIdx])
+	return st.env.interpreter.Run(nextContract, nil, st.readOnlys[*st.currentIdx])
 }
 
 func trace(isEVMSlice []bool, readOnlySlice []*readOnlyState) string {

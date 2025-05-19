@@ -474,33 +474,33 @@ func (m *MemoryMutation) Count(bucket string) (uint64, error) {
 	panic("not implemented")
 }
 
-func (m *MemoryMutation) DropBucket(bucket string) error {
+func (m *MemoryMutation) DropTable(bucket string) error {
 	panic("Not implemented")
 }
 
-func (m *MemoryMutation) ExistsBucket(bucket string) (bool, error) {
+func (m *MemoryMutation) ExistsTable(bucket string) (bool, error) {
 	panic("Not implemented")
 }
 
-func (m *MemoryMutation) ListBuckets() ([]string, error) {
+func (m *MemoryMutation) ListTables() ([]string, error) {
 	panic("Not implemented")
 }
 
-func (m *MemoryMutation) ClearBucket(bucket string) error {
+func (m *MemoryMutation) ClearTable(bucket string) error {
 	m.clearedTables[bucket] = struct{}{}
-	return m.memTx.ClearBucket(bucket)
+	return m.memTx.ClearTable(bucket)
 }
 
 func (m *MemoryMutation) CollectMetrics() {
 }
 
-func (m *MemoryMutation) CreateBucket(bucket string) error {
-	return m.memTx.CreateBucket(bucket)
+func (m *MemoryMutation) CreateTable(bucket string) error {
+	return m.memTx.CreateTable(bucket)
 }
 
 func (m *MemoryMutation) Flush(ctx context.Context, tx kv.RwTx) error {
 	// Obtain buckets touched.
-	buckets, err := m.memTx.ListBuckets()
+	buckets, err := m.memTx.ListTables()
 	if err != nil {
 		return err
 	}
@@ -511,7 +511,7 @@ func (m *MemoryMutation) Flush(ctx context.Context, tx kv.RwTx) error {
 			return ctx.Err()
 		default:
 		}
-		if err := tx.ClearBucket(bucket); err != nil {
+		if err := tx.ClearTable(bucket); err != nil {
 			return err
 		}
 	}
@@ -584,7 +584,7 @@ func (m *MemoryMutation) Diff() (*MemoryDiff, error) {
 		deletedEntries: make(map[string][]string),
 	}
 	// Obtain buckets touched.
-	buckets, err := m.memTx.ListBuckets()
+	buckets, err := m.memTx.ListTables()
 	if err != nil {
 		return nil, err
 	}
@@ -725,6 +725,10 @@ func (m *MemoryMutation) GetLatest(name kv.Domain, k []byte) (v []byte, step uin
 func (m *MemoryMutation) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
 	// panic("not supported")
 	return m.db.(kv.TemporalTx).GetAsOf(name, k, ts)
+}
+
+func (m *MemoryMutation) HasPrefix(name kv.Domain, prefix []byte) (firstKey []byte, ok bool, err error) {
+	return m.db.(kv.TemporalTx).HasPrefix(name, prefix)
 }
 
 func (m *MemoryMutation) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {

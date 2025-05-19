@@ -30,12 +30,11 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
-
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/tracers"
 )
@@ -43,7 +42,7 @@ import (
 var ErrTraceLimitReached = errors.New("the number of logs reached the specified limit")
 
 // Storage represents a contract's storage.
-type Storage map[libcommon.Hash]libcommon.Hash
+type Storage map[common.Hash]common.Hash
 
 // Copy duplicates the current storage.
 func (s Storage) Copy() Storage {
@@ -67,18 +66,18 @@ type LogConfig struct {
 // StructLog is emitted to the EVM each cycle and lists information about the current internal state
 // prior to the execution of the statement.
 type StructLog struct {
-	Pc            uint64                            `json:"pc"`
-	Op            vm.OpCode                         `json:"op"`
-	Gas           uint64                            `json:"gas"`
-	GasCost       uint64                            `json:"gasCost"`
-	Memory        []byte                            `json:"memory"`
-	MemorySize    int                               `json:"memSize"`
-	Stack         []*big.Int                        `json:"stack"`
-	ReturnData    []byte                            `json:"returnData"`
-	Storage       map[libcommon.Hash]libcommon.Hash `json:"-"`
-	Depth         int                               `json:"depth"`
-	RefundCounter uint64                            `json:"refund"`
-	Err           error                             `json:"-"`
+	Pc            uint64                      `json:"pc"`
+	Op            vm.OpCode                   `json:"op"`
+	Gas           uint64                      `json:"gas"`
+	GasCost       uint64                      `json:"gasCost"`
+	Memory        []byte                      `json:"memory"`
+	MemorySize    int                         `json:"memSize"`
+	Stack         []*big.Int                  `json:"stack"`
+	ReturnData    []byte                      `json:"returnData"`
+	Storage       map[common.Hash]common.Hash `json:"-"`
+	Depth         int                         `json:"depth"`
+	RefundCounter uint64                      `json:"refund"`
+	Err           error                       `json:"-"`
 }
 
 // overrides for gencodec
@@ -127,7 +126,7 @@ type StructLogRes struct {
 type StructLogger struct {
 	cfg LogConfig
 
-	storage map[libcommon.Address]Storage
+	storage map[common.Address]Storage
 	logs    []StructLog
 	output  []byte
 	err     error
@@ -139,7 +138,7 @@ type StructLogger struct {
 // NewStructLogger returns a new logger
 func NewStructLogger(cfg *LogConfig) *StructLogger {
 	logger := &StructLogger{
-		storage: make(map[libcommon.Address]Storage),
+		storage: make(map[common.Address]Storage),
 	}
 	if cfg != nil {
 		logger.cfg = *cfg
@@ -165,7 +164,7 @@ func (l *StructLogger) Tracer() *tracers.Tracer {
 	}
 }
 
-func (l *StructLogger) OnTxStart(env *tracing.VMContext, tx types.Transaction, from libcommon.Address) {
+func (l *StructLogger) OnTxStart(env *tracing.VMContext, tx types.Transaction, from common.Address) {
 	l.env = env
 }
 
@@ -219,17 +218,17 @@ func (l *StructLogger) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scope 
 		// capture SLOAD opcodes and record the read entry in the local storage
 		if op == vm.SLOAD && stackLen >= 1 {
 			var (
-				address = libcommon.Hash(stack[stackLen-1].Bytes32())
+				address = common.Hash(stack[stackLen-1].Bytes32())
 				value   uint256.Int
 			)
-			l.env.IntraBlockState.GetState(contractAddr, &address, &value)
+			l.env.IntraBlockState.GetState(contractAddr, address, &value)
 			l.storage[contractAddr][address] = value.Bytes32()
 		}
 		// capture SSTORE opcodes and record the written entry in the local storage.
 		if op == vm.SSTORE && stackLen >= 2 {
 			var (
-				value   = libcommon.Hash(stack[stackLen-2].Bytes32())
-				address = libcommon.Hash(stack[stackLen-1].Bytes32())
+				value   = common.Hash(stack[stackLen-2].Bytes32())
+				address = common.Hash(stack[stackLen-1].Bytes32())
 			)
 			l.storage[contractAddr][address] = value
 		}
@@ -403,13 +402,13 @@ func (t *mdLogger) Hooks() *tracing.Hooks {
 	}
 }
 
-func (t *mdLogger) OnTxStart(env *tracing.VMContext, tx types.Transaction, from libcommon.Address) {
+func (t *mdLogger) OnTxStart(env *tracing.VMContext, tx types.Transaction, from common.Address) {
 	t.env = env
 }
 
 func (t *mdLogger) CaptureTxEnd(restGas uint64) {}
 
-func (t *mdLogger) captureStartOrEnter(from, to libcommon.Address, create bool, input []byte, gas uint64, value *uint256.Int) {
+func (t *mdLogger) captureStartOrEnter(from, to common.Address, create bool, input []byte, gas uint64, value *uint256.Int) {
 	if !create {
 		fmt.Fprintf(t.out, "From: `%v`\nTo: `%v`\nData: `0x%x`\nGas: `%d`\nValue `%v` wei\n",
 			from.String(), to.String(),
@@ -426,7 +425,7 @@ func (t *mdLogger) captureStartOrEnter(from, to libcommon.Address, create bool, 
 `)
 }
 
-func (t *mdLogger) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *mdLogger) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	if depth != 0 {
 		return
 	}

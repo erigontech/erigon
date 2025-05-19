@@ -29,7 +29,7 @@ import (
 	"github.com/google/btree"
 	"golang.org/x/sync/errgroup"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
@@ -56,13 +56,13 @@ type KsmEonTracker struct {
 }
 
 func NewKsmEonTracker(logger log.Logger, config shuttercfg.Config, bl *BlockListener, cb bind.ContractBackend) *KsmEonTracker {
-	ksmContractAddr := libcommon.HexToAddress(config.KeyperSetManagerContractAddress)
+	ksmContractAddr := common.HexToAddress(config.KeyperSetManagerContractAddress)
 	ksmContract, err := contracts.NewKeyperSetManager(ksmContractAddr, cb)
 	if err != nil {
 		panic(fmt.Errorf("failed to create KeyperSetManager: %w", err))
 	}
 
-	keyBroadcastContractAddr := libcommon.HexToAddress(config.KeyBroadcastContractAddress)
+	keyBroadcastContractAddr := common.HexToAddress(config.KeyBroadcastContractAddress)
 	keyBroadcastContract, err := contracts.NewKeyBroadcastContract(keyBroadcastContractAddr, cb)
 	if err != nil {
 		panic(fmt.Errorf("failed to create KeyBroadcastContract: %w", err))

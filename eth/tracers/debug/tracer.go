@@ -25,10 +25,10 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/tracers"
 )
@@ -85,7 +85,7 @@ func (t *Tracer) Hooks() *tracing.Hooks {
 	}
 }
 
-func (t *Tracer) OnTxStart(vm *tracing.VMContext, txn types.Transaction, from libcommon.Address) {
+func (t *Tracer) OnTxStart(vm *tracing.VMContext, txn types.Transaction, from common.Address) {
 	if t.recordOptions.DisableOnTxStartRecording {
 		return
 	}
@@ -132,7 +132,7 @@ func (t *Tracer) OnTxEnd(receipt *types.Receipt, err error) {
 	t.mustFlushToFile(path.Join(t.outputDir, txnTraceFile))
 }
 
-func (t *Tracer) OnEnter(depth int, typ byte, from, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *Tracer) OnEnter(depth int, typ byte, from, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	if t.recordOptions.DisableOnEnterRecording {
 		return
 	}
@@ -400,7 +400,7 @@ func (t *Tracer) OnSystemCallEnd() {
 	})
 }
 
-func (t *Tracer) OnBalanceChange(address libcommon.Address, oldBalance, newBalance *uint256.Int, reason tracing.BalanceChangeReason) {
+func (t *Tracer) OnBalanceChange(address common.Address, oldBalance, newBalance *uint256.Int, reason tracing.BalanceChangeReason) {
 	if t.recordOptions.DisableOnBalanceChangeRecording {
 		return
 	}
@@ -419,7 +419,7 @@ func (t *Tracer) OnBalanceChange(address libcommon.Address, oldBalance, newBalan
 	})
 }
 
-func (t *Tracer) OnNonceChange(address libcommon.Address, oldNonce, newNonce uint64) {
+func (t *Tracer) OnNonceChange(address common.Address, oldNonce, newNonce uint64) {
 	if t.recordOptions.DisableOnNonceChangeRecording {
 		return
 	}
@@ -437,7 +437,7 @@ func (t *Tracer) OnNonceChange(address libcommon.Address, oldNonce, newNonce uin
 	})
 }
 
-func (t *Tracer) OnCodeChange(address libcommon.Address, prevCodeHash libcommon.Hash, prevCode []byte, newCodeHash libcommon.Hash, newCode []byte) {
+func (t *Tracer) OnCodeChange(address common.Address, prevCodeHash common.Hash, prevCode []byte, newCodeHash common.Hash, newCode []byte) {
 	if t.recordOptions.DisableOnCodeChangeRecording {
 		return
 	}
@@ -457,7 +457,7 @@ func (t *Tracer) OnCodeChange(address libcommon.Address, prevCodeHash libcommon.
 	})
 }
 
-func (t *Tracer) OnStorageChange(address libcommon.Address, slot *libcommon.Hash, prev, new uint256.Int) {
+func (t *Tracer) OnStorageChange(address common.Address, slot common.Hash, prev, new uint256.Int) {
 	if t.recordOptions.DisableOnStorageChangeRecording {
 		return
 	}
@@ -624,7 +624,7 @@ type Trace struct {
 type OnTxStartTrace struct {
 	VMContext   *tracing.VMContext `json:"vmContext,omitempty"`
 	Transaction types.Transaction  `json:"transaction,omitempty"`
-	From        libcommon.Address  `json:"from,omitempty"`
+	From        common.Address     `json:"from,omitempty"`
 }
 
 type OnTxEndTrace struct {
@@ -633,15 +633,15 @@ type OnTxEndTrace struct {
 }
 
 type OnEnterTrace struct {
-	Depth      int               `json:"depth,omitempty"`
-	Type       byte              `json:"type,omitempty"`
-	From       libcommon.Address `json:"from,omitempty"`
-	To         libcommon.Address `json:"to,omitempty"`
-	Precompile bool              `json:"precompile,omitempty"`
-	Input      hexutil.Bytes     `json:"input,omitempty"`
-	Gas        uint64            `json:"gas,omitempty"`
-	Value      *uint256.Int      `json:"value,omitempty"`
-	Code       hexutil.Bytes     `json:"code,omitempty"`
+	Depth      int            `json:"depth,omitempty"`
+	Type       byte           `json:"type,omitempty"`
+	From       common.Address `json:"from,omitempty"`
+	To         common.Address `json:"to,omitempty"`
+	Precompile bool           `json:"precompile,omitempty"`
+	Input      hexutil.Bytes  `json:"input,omitempty"`
+	Gas        uint64         `json:"gas,omitempty"`
+	Value      *uint256.Int   `json:"value,omitempty"`
+	Code       hexutil.Bytes  `json:"code,omitempty"`
 }
 
 type OnExitTrace struct {
@@ -653,30 +653,30 @@ type OnExitTrace struct {
 }
 
 type OnOpcodeTrace struct {
-	PC         uint64            `json:"pc,omitempty"`
-	Op         string            `json:"op,omitempty"`
-	Gas        uint64            `json:"gas,omitempty"`
-	Cost       uint64            `json:"cost,omitempty"`
-	Caller     libcommon.Address `json:"caller,omitempty"`
-	Stack      []hexutil.Bytes   `json:"stack,omitempty"`
-	Memory     hexutil.Bytes     `json:"memory,omitempty"`
-	MemorySize int               `json:"memSize,omitempty"`
-	ReturnData hexutil.Bytes     `json:"returnData,omitempty"`
-	Depth      int               `json:"depth,omitempty"`
-	Error      string            `json:"error,omitempty"`
+	PC         uint64          `json:"pc,omitempty"`
+	Op         string          `json:"op,omitempty"`
+	Gas        uint64          `json:"gas,omitempty"`
+	Cost       uint64          `json:"cost,omitempty"`
+	Caller     common.Address  `json:"caller,omitempty"`
+	Stack      []hexutil.Bytes `json:"stack,omitempty"`
+	Memory     hexutil.Bytes   `json:"memory,omitempty"`
+	MemorySize int             `json:"memSize,omitempty"`
+	ReturnData hexutil.Bytes   `json:"returnData,omitempty"`
+	Depth      int             `json:"depth,omitempty"`
+	Error      string          `json:"error,omitempty"`
 }
 
 type OnFaultTrace struct {
-	PC         uint64            `json:"pc,omitempty"`
-	Op         byte              `json:"op,omitempty"`
-	Gas        uint64            `json:"gas,omitempty"`
-	Cost       uint64            `json:"cost,omitempty"`
-	Caller     libcommon.Address `json:"caller,omitempty"`
-	Stack      []hexutil.Bytes   `json:"stack,omitempty"`
-	Memory     hexutil.Bytes     `json:"memory,omitempty"`
-	MemorySize int               `json:"memSize,omitempty"`
-	Depth      int               `json:"depth,omitempty"`
-	Error      string            `json:"error,omitempty"`
+	PC         uint64          `json:"pc,omitempty"`
+	Op         byte            `json:"op,omitempty"`
+	Gas        uint64          `json:"gas,omitempty"`
+	Cost       uint64          `json:"cost,omitempty"`
+	Caller     common.Address  `json:"caller,omitempty"`
+	Stack      []hexutil.Bytes `json:"stack,omitempty"`
+	Memory     hexutil.Bytes   `json:"memory,omitempty"`
+	MemorySize int             `json:"memSize,omitempty"`
+	Depth      int             `json:"depth,omitempty"`
+	Error      string          `json:"error,omitempty"`
 }
 
 type OnGasChangeTrace struct {
@@ -707,31 +707,31 @@ type OnSystemCallStartTrace struct{}
 type OnSystemCallEndTrace struct{}
 
 type OnBalanceChangeTrace struct {
-	Address    libcommon.Address `json:"address,omitempty"`
-	OldBalance *uint256.Int      `json:"oldBalance,omitempty"`
-	NewBalance *uint256.Int      `json:"newBalance,omitempty"`
-	Reason     string            `json:"reason,omitempty"`
+	Address    common.Address `json:"address,omitempty"`
+	OldBalance *uint256.Int   `json:"oldBalance,omitempty"`
+	NewBalance *uint256.Int   `json:"newBalance,omitempty"`
+	Reason     string         `json:"reason,omitempty"`
 }
 
 type OnNonceChangeTrace struct {
-	Address  libcommon.Address `json:"address,omitempty"`
-	OldNonce uint64            `json:"oldNonce,omitempty"`
-	NewNonce uint64            `json:"newNonce,omitempty"`
+	Address  common.Address `json:"address,omitempty"`
+	OldNonce uint64         `json:"oldNonce,omitempty"`
+	NewNonce uint64         `json:"newNonce,omitempty"`
 }
 
 type OnCodeChangeTrace struct {
-	Address      libcommon.Address `json:"address,omitempty"`
-	PrevCodeHash libcommon.Hash    `json:"prevCodeHash,omitempty"`
-	PrevCode     hexutil.Bytes     `json:"prevCode,omitempty"`
-	NewCodeHash  libcommon.Hash    `json:"newCodeHash,omitempty"`
-	NewCode      hexutil.Bytes     `json:"newCode,omitempty"`
+	Address      common.Address `json:"address,omitempty"`
+	PrevCodeHash common.Hash    `json:"prevCodeHash,omitempty"`
+	PrevCode     hexutil.Bytes  `json:"prevCode,omitempty"`
+	NewCodeHash  common.Hash    `json:"newCodeHash,omitempty"`
+	NewCode      hexutil.Bytes  `json:"newCode,omitempty"`
 }
 
 type OnStorageChangeTrace struct {
-	Address libcommon.Address `json:"address,omitempty"`
-	Slot    *libcommon.Hash   `json:"slot,omitempty"`
-	Prev    uint256.Int       `json:"prev,omitempty"`
-	New     uint256.Int       `json:"new,omitempty"`
+	Address common.Address `json:"address,omitempty"`
+	Slot    common.Hash    `json:"slot,omitempty"`
+	Prev    uint256.Int    `json:"prev,omitempty"`
+	New     uint256.Int    `json:"new,omitempty"`
 }
 
 type OnLogTrace struct {

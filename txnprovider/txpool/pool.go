@@ -55,7 +55,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
@@ -100,7 +100,7 @@ var _ txnprovider.TxnProvider = (*TxPool)(nil)
 //
 // It preserve TxnSlot objects immutable
 type TxPool struct {
-	_chainDB               kv.RoDB // remote db - use it wisely
+	_chainDB               kv.TemporalRoDB // remote db - use it wisely
 	_stateCache            kvcache.Cache
 	poolDB                 kv.RwDB
 	lock                   *sync.Mutex
@@ -151,7 +151,7 @@ type TxPool struct {
 	ethBackend              remote.ETHBACKENDClient
 	builderNotifyNewTxns    func()
 	logger                  log.Logger
-	auths                   map[common.Address]*metaTxn // All accounts with a pooled authorization
+	auths                   map[AuthAndNonce]*metaTxn // All authority accounts with a pooled authorization
 	blobHashToTxn           map[common.Hash]struct {
 		index   int
 		txnHash common.Hash
@@ -170,7 +170,7 @@ func New(
 	ctx context.Context,
 	newTxns chan Announcements,
 	poolDB kv.RwDB,
-	chainDB kv.RoDB,
+	chainDB kv.TemporalRoDB,
 	cfg txpoolcfg.Config,
 	cache kvcache.Cache,
 	chainID uint256.Int,
@@ -238,11 +238,11 @@ func New(
 		builderNotifyNewTxns:    builderNotifyNewTxns,
 		newSlotsStreams:         newSlotsStreams,
 		logger:                  logger,
-		auths:                   map[common.Address]*metaTxn{},
-		blobHashToTxn: map[common.Hash]struct {
+		auths:                   make(map[AuthAndNonce]*metaTxn),
+		blobHashToTxn: make(map[common.Hash]struct {
 			index   int
 			txnHash common.Hash
-		}{},
+		}),
 	}
 
 	if shanghaiTime != nil {
@@ -287,7 +287,7 @@ func (p *TxPool) start(ctx context.Context) error {
 
 	return p.poolDB.View(ctx, func(tx kv.Tx) error {
 		coreDb, _ := p.chainDB()
-		coreTx, err := coreDb.BeginRo(ctx)
+		coreTx, err := coreDb.BeginTemporalRo(ctx)
 		if err != nil {
 			return err
 		}
@@ -311,7 +311,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 
 	coreDB, cache := p.chainDB()
 	cache.OnNewBlock(stateChanges)
-	coreTx, err := coreDB.BeginRo(ctx)
+	coreTx, err := coreDB.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
 	}
@@ -479,7 +479,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 
 	defer processBatchTxnsTimer.ObserveDuration(time.Now())
 	coreDB, cache := p.chainDB()
-	coreTx, err := coreDB.BeginRo(ctx)
+	coreTx, err := coreDB.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
 	}
@@ -820,7 +820,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 		// not an exact science using intrinsic gas but as close as we could hope for at
 		// this stage
 		isAATxn := mt.TxnSlot.Type == types.AccountAbstractionTxType
-		authorizationLen := uint64(len(mt.TxnSlot.Authorities))
+		authorizationLen := uint64(len(mt.TxnSlot.AuthAndNonces))
 		intrinsicGas, floorGas, _ := fixedgas.CalcIntrinsicGas(uint64(mt.TxnSlot.DataLen), uint64(mt.TxnSlot.DataNonZeroLen), authorizationLen, uint64(mt.TxnSlot.AccessListAddrCount), uint64(mt.TxnSlot.AccessListStorCount), mt.TxnSlot.Creation, true, true, isShanghai, isPrague, isAATxn)
 		if isPrague && floorGas > intrinsicGas {
 			intrinsicGas = floorGas
@@ -1000,7 +1000,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 	}
 
-	authorizationLen := len(txn.Authorities)
+	authorizationLen := len(txn.AuthAndNonces)
 	if txn.Type == SetCodeTxnType {
 		if !p.isPrague() {
 			return txpoolcfg.TypeNotActivated
@@ -1064,6 +1064,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 		return txpoolcfg.NonceTooLow
 	}
+
 	// Transactor should have enough funds to cover the costs
 	total := requiredBalance(txn)
 	if senderBalance.Cmp(total) < 0 {
@@ -1318,7 +1319,7 @@ func fillDiscardReasons(reasons []txpoolcfg.DiscardReason, newTxns TxnSlots, dis
 
 func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
 	coreDb, cache := p.chainDB()
-	coreTx, err := coreDb.BeginRo(ctx)
+	coreTx, err := coreDb.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1374,7 +1375,7 @@ func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcf
 	return reasons, nil
 }
 
-func (p *TxPool) chainDB() (kv.RoDB, kvcache.Cache) {
+func (p *TxPool) chainDB() (kv.TemporalRoDB, kvcache.Cache) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	return p._chainDB, p._stateCache
@@ -1596,34 +1597,31 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		return txpoolcfg.FeeTooLow
 	}
 
-	// Do not allow transaction from if sender has authority
-	addr, ok := p.senders.getAddr(mt.TxnSlot.SenderID)
+	// Do not allow transaction from this same (sender + nonce) if sender has existing pooled authorization as authority
+	senderAddr, ok := p.senders.senderID2Addr[mt.TxnSlot.SenderID]
 	if !ok {
 		p.logger.Info("senderID not registered, discarding transaction for safety")
 		return txpoolcfg.InvalidSender
 	}
-	if _, ok := p.auths[addr]; ok {
+	if _, ok := p.auths[AuthAndNonce{senderAddr.String(), mt.TxnSlot.Nonce}]; ok {
 		return txpoolcfg.ErrAuthorityReserved
 	}
 
 	// Check if we have txn with same authorization in the pool
 	if mt.TxnSlot.Type == SetCodeTxnType {
-		foundDuplicate := false
-		for _, a := range mt.TxnSlot.Authorities {
-			p.logger.Debug("setCodeTxn ", "authority", a.String())
-			if _, ok := p.auths[*a]; ok {
-				foundDuplicate = true
-				p.logger.Debug("setCodeTxn ", "DUPLICATE authority", a.String(), "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
-				break
+		for _, a := range mt.TxnSlot.AuthAndNonces {
+			// Self authorization nonce should be senderNonce + 1
+			if a.authority == senderAddr.String() && a.nonce != mt.TxnSlot.Nonce+1 {
+				p.logger.Debug("Self authorization nonce should be senderNonce + 1", "authority", a.authority, "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
+				return txpoolcfg.NonceTooLow
+			}
+			if _, ok := p.auths[AuthAndNonce{a.authority, a.nonce}]; ok {
+				p.logger.Debug("setCodeTxn ", "DUPLICATE authority", a.authority, "at nonce", a.nonce, "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
+				return txpoolcfg.ErrAuthorityReserved
 			}
 		}
-
-		if foundDuplicate {
-			return txpoolcfg.ErrAuthorityReserved
-		} else {
-			for _, a := range mt.TxnSlot.Authorities {
-				p.auths[*a] = mt
-			}
+		for _, a := range mt.TxnSlot.AuthAndNonces {
+			p.auths[AuthAndNonce{a.authority, a.nonce}] = mt
 		}
 	}
 
@@ -1676,8 +1674,8 @@ func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
 		p.totalBlobsInPool.Store(t - uint64(len(mt.TxnSlot.BlobHashes)))
 	}
 	if mt.TxnSlot.Type == SetCodeTxnType {
-		for _, a := range mt.TxnSlot.Authorities {
-			delete(p.auths, *a)
+		for _, a := range mt.TxnSlot.AuthAndNonces {
+			delete(p.auths, a)
 		}
 	}
 }
@@ -2341,7 +2339,7 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 
 	txHashes := p.isLocalLRU.Keys()
 	encID := make([]byte, 8)
-	if err := tx.ClearBucket(kv.RecentLocalTransaction); err != nil {
+	if err := tx.ClearTable(kv.RecentLocalTransaction); err != nil {
 		return err
 	}
 	for i, txHash := range txHashes {
@@ -2398,7 +2396,7 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 	return nil
 }
 
-func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
+func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.TemporalTx) error {
 	if p.lastSeenBlock.Load() == 0 {
 		lastSeenBlock, err := LastSeenBlock(tx)
 		if err != nil {
@@ -2575,28 +2573,39 @@ func (p *TxPool) logStats() {
 
 // Deprecated need switch to streaming-like
 func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx) {
+	var txns []*metaTxn
+	var senders []common.Address
+
 	p.lock.Lock()
-	defer p.lock.Unlock()
+
 	p.all.ascendAll(func(mt *metaTxn) bool {
-		slot := mt.TxnSlot
-		slotRlp := slot.Rlp
-		if slot.Rlp == nil {
-			v, err := tx.GetOne(kv.PoolTransaction, slot.IDHash[:])
+		if sender, found := p.senders.senderID2Addr[mt.TxnSlot.SenderID]; found {
+			txns = append(txns, mt)
+			senders = append(senders, sender)
+		}
+
+		return true
+	})
+
+	p.lock.Unlock()
+
+	for i := range txns {
+		slotRlp := txns[i].TxnSlot.Rlp
+		if slotRlp == nil {
+			v, err := tx.GetOne(kv.PoolTransaction, txns[i].TxnSlot.IDHash[:])
 			if err != nil {
 				p.logger.Warn("[txpool] foreach: get txn from db", "err", err)
-				return true
+				continue
 			}
 			if v == nil {
 				p.logger.Warn("[txpool] foreach: txn not found in db")
-				return true
+				continue
 			}
 			slotRlp = v[20:]
 		}
-		if sender, found := p.senders.senderID2Addr[slot.SenderID]; found {
-			f(slotRlp, sender, mt.currentSubPool)
-		}
-		return true
-	})
+
+		f(slotRlp, senders[i], txns[i].currentSubPool)
+	}
 }
 
 func sendChangeBatchEventToDiagnostics(pool string, event string, orderHashes []diagnostics.TxnHashOrder) {

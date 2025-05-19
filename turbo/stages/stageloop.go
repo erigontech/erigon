@@ -25,8 +25,10 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-db/rawdb/blockio"
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/metrics"
@@ -37,11 +39,9 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/rawdb/blockio"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync"
@@ -78,7 +78,7 @@ func StageLoop(
 	defer close(waitForDone)
 
 	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync, hook); err != nil {
-		if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
+		if errors.Is(err, common.ErrStopped) || errors.Is(err, context.Canceled) {
 			return
 		}
 
@@ -106,7 +106,7 @@ func StageLoop(
 		err := StageLoopIteration(ctx, db, wrap.NewTxContainer(nil, nil), sync, initialCycle, false, logger, blockReader, hook)
 
 		if err != nil {
-			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
+			if errors.Is(err, common.ErrStopped) || errors.Is(err, context.Canceled) {
 				return
 			}
 
@@ -301,7 +301,7 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 			logCtx = append(logCtx, "mgas/s", mgasPerSec)
 		}
 	}
-	logCtx = append(logCtx, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+	logCtx = append(logCtx, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	logger.Info("Timings (slower than 50ms)", logCtx...)
 	//if len(tableSizes) > 0 {
 	//	logger.Info("Tables", tableSizes...)
@@ -668,7 +668,7 @@ func SilkwormForExecutionStage(silkworm *silkworm.Silkworm, cfg *ethconfig.Confi
 }
 
 func NewDefaultStages(ctx context.Context,
-	db kv.RwDB,
+	db kv.TemporalRwDB,
 	snapDb kv.RwDB,
 	p2pCfg p2p.Config,
 	cfg *ethconfig.Config,
@@ -682,8 +682,8 @@ func NewDefaultStages(ctx context.Context,
 	heimdallClient heimdall.Client,
 	heimdallStore heimdall.Store,
 	bridgeStore bridge.Store,
-	recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
-	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address],
+	recents *lru.ARCCache[common.Hash, *bor.Snapshot],
+	signatures *lru.ARCCache[common.Hash, common.Address],
 	logger log.Logger,
 	tracer *tracers.Tracer,
 ) []*stagedsync.Stage {
@@ -711,7 +711,7 @@ func NewDefaultStages(ctx context.Context,
 }
 
 func NewPipelineStages(ctx context.Context,
-	db kv.RwDB,
+	db kv.TemporalRwDB,
 	cfg *ethconfig.Config,
 	p2pCfg p2p.Config,
 	controlServer *sentry_multi_client.MultiClient,
@@ -736,7 +736,7 @@ func NewPipelineStages(ctx context.Context,
 	// Hence we run it in the test mode.
 	runInTestMode := cfg.ImportMode
 
-	var depositContract libcommon.Address
+	var depositContract common.Address
 	if cfg.Genesis != nil {
 		depositContract = cfg.Genesis.Config.DepositContract
 	}
@@ -780,7 +780,7 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 func NewPolygonSyncStages(
 	ctx context.Context,
 	logger log.Logger,
-	db kv.RwDB,
+	db kv.TemporalRwDB,
 	config *ethconfig.Config,
 	chainConfig *chain.Config,
 	consensusEngine consensus.Engine,

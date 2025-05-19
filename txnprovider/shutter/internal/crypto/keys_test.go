@@ -37,14 +37,14 @@ func makeTestG2(n int64) *blst.P2Affine {
 
 func TestEonSecretKeyShare(t *testing.T) {
 	zeroKey := ComputeEonSecretKeyShare([]*big.Int{})
-	assert.Equal(t, big.NewInt(0), (*big.Int)(zeroKey))
+	assert.Equal(t, (*big.Int)(zeroKey), big.NewInt(0))
 
 	key1 := ComputeEonSecretKeyShare([]*big.Int{
 		big.NewInt(10),
 		big.NewInt(20),
 		big.NewInt(30),
 	})
-	assert.Equal(t, big.NewInt(60), (*big.Int)(key1))
+	assert.Equal(t, (*big.Int)(key1), big.NewInt(60))
 
 	key2 := ComputeEonSecretKeyShare([]*big.Int{
 		order,
@@ -53,7 +53,7 @@ func TestEonSecretKeyShare(t *testing.T) {
 		big.NewInt(20),
 		order,
 	})
-	assert.Equal(t, big.NewInt(30), (*big.Int)(key2))
+	assert.Equal(t, (*big.Int)(key2), big.NewInt(30))
 }
 
 func TestEonPublicKeyShare(t *testing.T) {
@@ -334,9 +334,9 @@ func TestVerifyEpochSecretKeyShare(t *testing.T) {
 	assert.True(t, VerifyEpochSecretKeyShare(epsk2, epk2, epochID))
 	assert.True(t, VerifyEpochSecretKeyShare(epsk3, epk3, epochID))
 
-	assert.True(t, !VerifyEpochSecretKeyShare(epsk1, epk2, epochID))
-	assert.True(t, !VerifyEpochSecretKeyShare(epsk2, epk1, epochID))
-	assert.True(t, !VerifyEpochSecretKeyShare(epsk1, epk1, ComputeEpochID([]byte("epoch2"))))
+	assert.False(t, VerifyEpochSecretKeyShare(epsk1, epk2, epochID))
+	assert.False(t, VerifyEpochSecretKeyShare(epsk2, epk1, epochID))
+	assert.False(t, VerifyEpochSecretKeyShare(epsk1, epk1, ComputeEpochID([]byte("epoch2"))))
 }
 
 func TestVerifyEpochSecretKey(t *testing.T) {
@@ -363,7 +363,7 @@ func TestVerifyEpochSecretKey(t *testing.T) {
 
 	ok, err = VerifyEpochSecretKey(epochSecretKey, eonPublicKey, append(epochIDBytes, 0xab))
 	require.NoError(t, err)
-	assert.True(t, !ok)
+	assert.False(t, ok)
 
 	var sigma Block
 	message := []byte("msg")
@@ -373,7 +373,7 @@ func TestVerifyEpochSecretKey(t *testing.T) {
 
 	ok, err = VerifyEpochSecretKeyDeterministic(epochSecretKey, eonPublicKey, append(epochIDBytes, 0xab), sigma, message)
 	require.NoError(t, err)
-	assert.True(t, !ok)
+	assert.False(t, ok)
 }
 
 func TestComputeEpochSecretKey(t *testing.T) {
@@ -403,13 +403,13 @@ func TestComputeEpochSecretKey(t *testing.T) {
 
 	var err error
 	_, err = ComputeEpochSecretKey([]int{0}, epochSecretKeyShares[:1], threshold)
-	assert.True(t, err != nil)
+	assert.NotEqual(t, err, nil)
 	_, err = ComputeEpochSecretKey([]int{0, 1, 2}, epochSecretKeyShares[:2], threshold)
-	assert.True(t, err != nil)
+	assert.NotEqual(t, err, nil)
 	_, err = ComputeEpochSecretKey([]int{0, 1}, epochSecretKeyShares[:1], threshold)
-	assert.True(t, err != nil)
+	assert.NotEqual(t, err, nil)
 	_, err = ComputeEpochSecretKey([]int{0}, epochSecretKeyShares[:2], threshold)
-	assert.True(t, err != nil)
+	assert.NotEqual(t, err, nil)
 
 	epochSecretKey12, err := ComputeEpochSecretKey(
 		[]int{0, 1},

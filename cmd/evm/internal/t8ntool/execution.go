@@ -26,13 +26,13 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
 	state3 "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -43,33 +43,33 @@ type Prestate struct {
 }
 
 type ommer struct {
-	Delta   uint64            `json:"delta"`
-	Address libcommon.Address `json:"address"`
+	Delta   uint64         `json:"delta"`
+	Address common.Address `json:"address"`
 }
 
 //go:generate gencodec -type stEnv -field-override stEnvMarshaling -out gen_stenv.go
 type stEnv struct {
-	Coinbase         libcommon.Address                      `json:"currentCoinbase"   gencodec:"required"`
-	Difficulty       *big.Int                               `json:"currentDifficulty"`
-	Random           *big.Int                               `json:"currentRandom"`
-	MixDigest        libcommon.Hash                         `json:"mixHash,omitempty"`
-	ParentDifficulty *big.Int                               `json:"parentDifficulty"`
-	GasLimit         uint64                                 `json:"currentGasLimit"   gencodec:"required"`
-	Number           uint64                                 `json:"currentNumber"     gencodec:"required"`
-	Timestamp        uint64                                 `json:"currentTimestamp"  gencodec:"required"`
-	ParentTimestamp  uint64                                 `json:"parentTimestamp,omitempty"`
-	BlockHashes      map[math.HexOrDecimal64]libcommon.Hash `json:"blockHashes,omitempty"`
-	Ommers           []ommer                                `json:"ommers,omitempty"`
-	BaseFee          *big.Int                               `json:"currentBaseFee,omitempty"`
-	ParentUncleHash  libcommon.Hash                         `json:"parentUncleHash"`
-	UncleHash        libcommon.Hash                         `json:"uncleHash,omitempty"`
-	Withdrawals      []*types.Withdrawal                    `json:"withdrawals,omitempty"`
-	WithdrawalsHash  *libcommon.Hash                        `json:"withdrawalsRoot,omitempty"`
-	RequestsHash     *libcommon.Hash                        `json:"requestsHash,omitempty"`
+	Coinbase         common.Address                      `json:"currentCoinbase"   gencodec:"required"`
+	Difficulty       *big.Int                            `json:"currentDifficulty"`
+	Random           *big.Int                            `json:"currentRandom"`
+	MixDigest        common.Hash                         `json:"mixHash,omitempty"`
+	ParentDifficulty *big.Int                            `json:"parentDifficulty"`
+	GasLimit         uint64                              `json:"currentGasLimit"   gencodec:"required"`
+	Number           uint64                              `json:"currentNumber"     gencodec:"required"`
+	Timestamp        uint64                              `json:"currentTimestamp"  gencodec:"required"`
+	ParentTimestamp  uint64                              `json:"parentTimestamp,omitempty"`
+	BlockHashes      map[math.HexOrDecimal64]common.Hash `json:"blockHashes,omitempty"`
+	Ommers           []ommer                             `json:"ommers,omitempty"`
+	BaseFee          *big.Int                            `json:"currentBaseFee,omitempty"`
+	ParentUncleHash  common.Hash                         `json:"parentUncleHash"`
+	UncleHash        common.Hash                         `json:"uncleHash,omitempty"`
+	Withdrawals      []*types.Withdrawal                 `json:"withdrawals,omitempty"`
+	WithdrawalsHash  *common.Hash                        `json:"withdrawalsRoot,omitempty"`
+	RequestsHash     *common.Hash                        `json:"requestsHash,omitempty"`
 }
 
 type stEnvMarshaling struct {
-	Coinbase         libcommon.UnprefixedAddress
+	Coinbase         common.UnprefixedAddress
 	Difficulty       *math.HexOrDecimal256
 	Random           *math.HexOrDecimal256
 	ParentDifficulty *math.HexOrDecimal256
@@ -83,7 +83,7 @@ type stEnvMarshaling struct {
 func MakePreState(chainRules *chain.Rules, tx kv.RwTx, sd *state3.SharedDomains, accounts types.GenesisAlloc) (state.StateReader, state.StateWriter) {
 	var blockNr uint64 = 0
 
-	stateReader, stateWriter := rpchelper.NewLatestStateReader(tx), state.NewWriterV4(sd)
+	stateReader, stateWriter := rpchelper.NewLatestStateReader(tx), state.NewWriter(sd, nil)
 	sd.SetBlockNum(blockNr)
 
 	statedb := state.New(stateReader) //ibs
@@ -95,7 +95,7 @@ func MakePreState(chainRules *chain.Rules, tx kv.RwTx, sd *state3.SharedDomains,
 		for k, v := range a.Storage {
 			key := k
 			val := uint256.NewInt(0).SetBytes(v.Bytes())
-			statedb.SetState(addr, &key, *val)
+			statedb.SetState(addr, key, *val)
 		}
 
 		if len(a.Code) > 0 || len(a.Storage) > 0 {
@@ -121,13 +121,13 @@ func MakePreState(chainRules *chain.Rules, tx kv.RwTx, sd *state3.SharedDomains,
 // parent timestamp + difficulty.
 // Note: this method only works for ethash engine.
 func calcDifficulty(config *chain.Config, number, currentTime, parentTime uint64,
-	parentDifficulty *big.Int, parentUncleHash libcommon.Hash) *big.Int {
+	parentDifficulty *big.Int, parentUncleHash common.Hash) *big.Int {
 	uncleHash := parentUncleHash
-	if uncleHash == (libcommon.Hash{}) {
+	if uncleHash == (common.Hash{}) {
 		uncleHash = types.EmptyUncleHash
 	}
 	parent := &types.Header{
-		ParentHash: libcommon.Hash{},
+		ParentHash: common.Hash{},
 		UncleHash:  uncleHash,
 		Difficulty: parentDifficulty,
 		Number:     new(big.Int).SetUint64(number - 1),

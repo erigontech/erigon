@@ -28,7 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain/networkid"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -321,8 +321,8 @@ func TestStatus(t *testing.T) {
 
 	hs := handshake.New(ctx, getEthClock(t), &clparams.MainnetBeaconConfig, nil)
 	s := &cltypes.Status{
-		FinalizedRoot:  libcommon.Hash{1, 2, 4},
-		HeadRoot:       libcommon.Hash{1, 2, 4},
+		FinalizedRoot:  common.Hash{1, 2, 4},
+		HeadRoot:       common.Hash{1, 2, 4},
 		FinalizedEpoch: 1,
 		HeadSlot:       1,
 	}

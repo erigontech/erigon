@@ -28,12 +28,12 @@ import (
 	"github.com/erigontech/erigon-lib/crypto/cryptopool"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
+	borrawdb "github.com/erigontech/erigon/polygon/rawdb"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -241,7 +241,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 				borTxHash = possibleBorTxnHash
 			}
 		} else {
-			borTx = rawdb.ReadBorTransactionForBlock(tx, b.NumberU64())
+			borTx = borrawdb.ReadBorTransactionForBlock(tx, b.NumberU64())
 			if borTx != nil {
 				borTxHash = bortypes.ComputeBorTxHash(b.NumberU64(), b.Hash())
 			}
@@ -307,7 +307,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 				borTxHash = possibleBorTxnHash
 			}
 		} else {
-			borTx = rawdb.ReadBorTransactionForBlock(tx, number)
+			borTx = borrawdb.ReadBorTransactionForBlock(tx, number)
 			if borTx != nil {
 				borTxHash = bortypes.ComputeBorTxHash(number, block.Hash())
 			}

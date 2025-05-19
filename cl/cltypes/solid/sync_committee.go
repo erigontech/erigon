@@ -19,7 +19,7 @@ package solid
 import (
 	"encoding/json"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -31,8 +31,8 @@ const syncCommitteeSize = 48 * 513
 type SyncCommittee [syncCommitteeSize]byte
 
 func NewSyncCommitteeFromParameters(
-	committee []libcommon.Bytes48,
-	aggregatePublicKey libcommon.Bytes48,
+	committee []common.Bytes48,
+	aggregatePublicKey common.Bytes48,
 ) *SyncCommittee {
 	s := &SyncCommittee{}
 	s.SetAggregatePublicKey(aggregatePublicKey)
@@ -40,26 +40,26 @@ func NewSyncCommitteeFromParameters(
 	return s
 }
 
-func (s *SyncCommittee) GetCommittee() []libcommon.Bytes48 {
-	committee := make([]libcommon.Bytes48, 512)
+func (s *SyncCommittee) GetCommittee() []common.Bytes48 {
+	committee := make([]common.Bytes48, 512)
 	for i := range committee {
 		copy(committee[i][:], s[i*48:])
 	}
 	return committee
 }
 
-func (s *SyncCommittee) AggregatePublicKey() (out libcommon.Bytes48) {
+func (s *SyncCommittee) AggregatePublicKey() (out common.Bytes48) {
 	copy(out[:], s[syncCommitteeSize-48:])
 	return
 }
 
-func (s *SyncCommittee) SetCommittee(committee []libcommon.Bytes48) {
+func (s *SyncCommittee) SetCommittee(committee []common.Bytes48) {
 	for i := range committee {
 		copy(s[i*48:], committee[i][:])
 	}
 }
 
-func (s *SyncCommittee) SetAggregatePublicKey(k libcommon.Bytes48) {
+func (s *SyncCommittee) SetAggregatePublicKey(k common.Bytes48) {
 	copy(s[syncCommitteeSize-48:], k[:])
 }
 
@@ -111,8 +111,8 @@ func (s *SyncCommittee) Static() bool {
 
 func (s *SyncCommittee) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Committee          []libcommon.Bytes48 `json:"pubkeys"`
-		AggregatePublicKey libcommon.Bytes48   `json:"aggregate_pubkey"`
+		Committee          []common.Bytes48 `json:"pubkeys"`
+		AggregatePublicKey common.Bytes48   `json:"aggregate_pubkey"`
 	}{
 		Committee:          s.GetCommittee(),
 		AggregatePublicKey: s.AggregatePublicKey(),
@@ -122,8 +122,8 @@ func (s *SyncCommittee) MarshalJSON() ([]byte, error) {
 func (s *SyncCommittee) UnmarshalJSON(input []byte) error {
 	var err error
 	var tmp struct {
-		Committee          []libcommon.Bytes48 `json:"pubkeys"`
-		AggregatePublicKey libcommon.Bytes48   `json:"aggregate_pubkey"`
+		Committee          []common.Bytes48 `json:"pubkeys"`
+		AggregatePublicKey common.Bytes48   `json:"aggregate_pubkey"`
 	}
 	if err = json.Unmarshal(input, &tmp); err != nil {
 		return err

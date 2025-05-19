@@ -25,10 +25,11 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/mdbx-go/mdbx"
+
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/mdbx-go/mdbx"
 )
 
 //Variables Naming:
@@ -423,7 +424,7 @@ type Tx interface {
 	BucketSize(table string) (uint64, error)
 	Count(bucket string) (uint64, error)
 
-	ListBuckets() ([]string, error)
+	ListTables() ([]string, error)
 }
 
 // RwTx
@@ -531,11 +532,12 @@ type (
 	Domain      uint16
 	Appendable  uint16
 	History     string
-	InvertedIdx string
+	InvertedIdx uint16
 )
 
 type TemporalGetter interface {
 	GetLatest(name Domain, k []byte) (v []byte, step uint64, err error)
+	HasPrefix(name Domain, prefix []byte) (firstKey []byte, ok bool, err error)
 }
 type TemporalTx interface {
 	Tx
@@ -583,10 +585,13 @@ type TemporalDebugTx interface {
 
 	GreedyPruneHistory(ctx context.Context, domain Domain) error
 	PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error)
+	TxNumsInFiles(domains ...Domain) (minTxNum uint64)
 }
 
 type TemporalDebugDB interface {
-	DomainTables(domain ...Domain) []string
+	DomainTables(names ...Domain) []string
+	InvertedIdxTables(names ...InvertedIdx) []string
+	ReloadSalt() error
 }
 
 type WithFreezeInfo interface {
@@ -612,13 +617,14 @@ type TemporalPutDel interface {
 	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 	//   - user can append k2 into k1, then underlying methods will not preform append
 	DomainPut(domain Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error
+	//DomainPut2(domain Domain, k1 []byte, val []byte, ts uint64) error
 
 	// DomainDel
 	// Optimizations:
 	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 	//   - user can append k2 into k1, then underlying methods will not preform append
 	//   - if `val == nil` it will call DomainDel
-	DomainDel(domain Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error
+	DomainDel(domain Domain, k, prevVal []byte, prevStep uint64) error
 	DomainDelPrefix(domain Domain, prefix []byte) error
 }
 
@@ -633,6 +639,7 @@ type TemporalRwDB interface {
 	RwDB
 	TemporalRoDB
 	BeginTemporalRw(ctx context.Context) (TemporalRwTx, error)
+	UpdateTemporal(ctx context.Context, f func(tx TemporalRwTx) error) error
 }
 
 // ---- non-importnt utilites
@@ -645,11 +652,11 @@ type HasSpaceDirty interface {
 
 // BucketMigrator used for buckets migration, don't use it in usual app code
 type BucketMigrator interface {
-	ListBuckets() ([]string, error)
-	DropBucket(string) error
-	CreateBucket(string) error
-	ExistsBucket(string) (bool, error)
-	ClearBucket(string) error
+	ListTables() ([]string, error)
+	DropTable(string) error
+	CreateTable(string) error
+	ExistsTable(string) (bool, error)
+	ClearTable(string) error
 }
 
 // PendingMutations in-memory storage of changes

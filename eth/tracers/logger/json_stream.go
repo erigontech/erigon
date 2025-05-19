@@ -24,10 +24,9 @@ import (
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/tracers"
 )
@@ -44,8 +43,8 @@ type JsonStreamLogger struct {
 	hexEncodeBuf [128]byte
 	firstCapture bool
 
-	locations libcommon.Hashes // For sorting
-	storage   map[libcommon.Address]Storage
+	locations common.Hashes // For sorting
+	storage   map[common.Address]Storage
 	logs      []StructLog
 	output    []byte //nolint
 	err       error  //nolint
@@ -57,7 +56,7 @@ func NewJsonStreamLogger(cfg *LogConfig, ctx context.Context, stream *jsoniter.S
 	logger := &JsonStreamLogger{
 		ctx:          ctx,
 		stream:       stream,
-		storage:      make(map[libcommon.Address]Storage),
+		storage:      make(map[common.Address]Storage),
 		firstCapture: true,
 	}
 	if cfg != nil {
@@ -75,7 +74,7 @@ func (l *JsonStreamLogger) Tracer() *tracers.Tracer {
 	}
 }
 
-func (l *JsonStreamLogger) OnTxStart(env *tracing.VMContext, tx types.Transaction, from libcommon.Address) {
+func (l *JsonStreamLogger) OnTxStart(env *tracing.VMContext, tx types.Transaction, from common.Address) {
 	l.env = env
 }
 
@@ -110,18 +109,18 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		// capture SLOAD opcodes and record the read entry in the local storage
 		if op == vm.SLOAD && len(stack) >= 1 {
 			var (
-				address = libcommon.Hash(stack[len(stack)-1].Bytes32())
+				address = common.Hash(stack[len(stack)-1].Bytes32())
 				value   uint256.Int
 			)
-			l.env.IntraBlockState.GetState(contractAddr, &address, &value)
+			l.env.IntraBlockState.GetState(contractAddr, address, &value)
 			l.storage[contractAddr][address] = value.Bytes32()
 			outputStorage = true
 		}
 		// capture SSTORE opcodes and record the written entry in the local storage.
 		if op == vm.SSTORE && len(stack) >= 2 {
 			var (
-				value   = libcommon.Hash(stack[len(stack)-2].Bytes32())
-				address = libcommon.Hash(stack[len(stack)-1].Bytes32())
+				value   = common.Hash(stack[len(stack)-2].Bytes32())
+				address = common.Hash(stack[len(stack)-1].Bytes32())
 			)
 			l.storage[contractAddr][address] = value
 			outputStorage = true

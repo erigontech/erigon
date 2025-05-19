@@ -10,10 +10,10 @@ import (
 	"strings"
 
 	ethereum "github.com/erigontech/erigon"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/abi"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/event"
-	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/abi/bind"
 )
 
@@ -23,7 +23,7 @@ var (
 	_ = strings.NewReader
 	_ = ethereum.NotFound
 	_ = bind.Bind
-	_ = libcommon.Big1
+	_ = common.Big1
 	_ = types.BloomLookup
 	_ = event.NewSubscription
 	_ = fmt.Errorf
@@ -37,15 +37,15 @@ const SequencerABI = "[{\"inputs\":[],\"name\":\"InsufficientFee\",\"type\":\"er
 var SequencerBin = "0x6080604052348015600e575f5ffd5b506104528061001c5f395ff3fe608060405260043610610033575f3560e01c80632d32522e146100375780636a69d2e1146100585780637bbd164b1461006b575b5f5ffd5b348015610042575f5ffd5b50610056610051366004610261565b6100c0565b005b6100566100663660046102b7565b6100fa565b348015610076575f5ffd5b506100a3610085366004610312565b67ffffffffffffffff9081165f908152602081905260409020541690565b60405167ffffffffffffffff909116815260200160405180910390f35b7fa9a0645b33a70f18b8d490681d637cb46a859ec51707787e6f46b942f90e8f59816040516100ef9190610360565b60405180910390a150565b6101048148610386565b3410156101235760405162976f7560e21b815260040160405180910390fd5b67ffffffffffffffff8085165f90815260208190526040902054166101498160016103a3565b67ffffffffffffffff8681165f9081526020819052604090819020805467ffffffffffffffff191693909216929092179055517fa7f1b5467be46c45249fb93063cceef96c63ddad03819246bc7770e32d4f5b7d906101b3908790849088903390899089906103c3565b60405180910390a15050505050565b634e487b7160e01b5f52604160045260245ffd5b5f82601f8301126101e5575f5ffd5b813567ffffffffffffffff8111156101ff576101ff6101c2565b604051601f8201601f19908116603f0116810167ffffffffffffffff8111828210171561022e5761022e6101c2565b604052818152838201602001851015610245575f5ffd5b816020850160208301375f918101602001919091529392505050565b5f60208284031215610271575f5ffd5b813567ffffffffffffffff811115610287575f5ffd5b610293848285016101d6565b949350505050565b803567ffffffffffffffff811681146102b2575f5ffd5b919050565b5f5f5f5f608085870312156102ca575f5ffd5b6102d38561029b565b935060208501359250604085013567ffffffffffffffff8111156102f5575f5ffd5b610301878288016101d6565b949793965093946060013593505050565b5f60208284031215610322575f5ffd5b61032b8261029b565b9392505050565b5f81518084528060208401602086015e5f602082860101526020601f19601f83011685010191505092915050565b602081525f61032b6020830184610332565b634e487b7160e01b5f52601160045260245ffd5b808202811582820484141761039d5761039d610372565b92915050565b67ffffffffffffffff818116838216019081111561039d5761039d610372565b67ffffffffffffffff8716815267ffffffffffffffff8616602082015284604082015260018060a01b038416606082015260c060808201525f61040960c0830185610332565b90508260a083015297965050505050505056fea2646970667358221220ce87ab2b1c8698571a6f44ca2e1b58f338fc3669ec8333291ae9c9e21b2815a864736f6c634300081c0033"
 
 // DeploySequencer deploys a new Ethereum contract, binding an instance of Sequencer to it.
-func DeploySequencer(auth *bind.TransactOpts, backend bind.ContractBackend) (libcommon.Address, types.Transaction, *Sequencer, error) {
+func DeploySequencer(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *Sequencer, error) {
 	parsed, err := abi.JSON(strings.NewReader(SequencerABI))
 	if err != nil {
-		return libcommon.Address{}, nil, nil, err
+		return common.Address{}, nil, nil, err
 	}
 
-	address, tx, contract, err := bind.DeployContract(auth, parsed, libcommon.FromHex(SequencerBin), backend)
+	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(SequencerBin), backend)
 	if err != nil {
-		return libcommon.Address{}, nil, nil, err
+		return common.Address{}, nil, nil, err
 	}
 	return address, tx, &Sequencer{SequencerCaller: SequencerCaller{contract: contract}, SequencerTransactor: SequencerTransactor{contract: contract}, SequencerFilterer: SequencerFilterer{contract: contract}}, nil
 }
@@ -110,7 +110,7 @@ type SequencerTransactorRaw struct {
 }
 
 // NewSequencer creates a new instance of Sequencer, bound to a specific deployed contract.
-func NewSequencer(address libcommon.Address, backend bind.ContractBackend) (*Sequencer, error) {
+func NewSequencer(address common.Address, backend bind.ContractBackend) (*Sequencer, error) {
 	contract, err := bindSequencer(address, backend, backend, backend)
 	if err != nil {
 		return nil, err
@@ -119,7 +119,7 @@ func NewSequencer(address libcommon.Address, backend bind.ContractBackend) (*Seq
 }
 
 // NewSequencerCaller creates a new read-only instance of Sequencer, bound to a specific deployed contract.
-func NewSequencerCaller(address libcommon.Address, caller bind.ContractCaller) (*SequencerCaller, error) {
+func NewSequencerCaller(address common.Address, caller bind.ContractCaller) (*SequencerCaller, error) {
 	contract, err := bindSequencer(address, caller, nil, nil)
 	if err != nil {
 		return nil, err
@@ -128,7 +128,7 @@ func NewSequencerCaller(address libcommon.Address, caller bind.ContractCaller) (
 }
 
 // NewSequencerTransactor creates a new write-only instance of Sequencer, bound to a specific deployed contract.
-func NewSequencerTransactor(address libcommon.Address, transactor bind.ContractTransactor) (*SequencerTransactor, error) {
+func NewSequencerTransactor(address common.Address, transactor bind.ContractTransactor) (*SequencerTransactor, error) {
 	contract, err := bindSequencer(address, nil, transactor, nil)
 	if err != nil {
 		return nil, err
@@ -137,7 +137,7 @@ func NewSequencerTransactor(address libcommon.Address, transactor bind.ContractT
 }
 
 // NewSequencerFilterer creates a new log filterer instance of Sequencer, bound to a specific deployed contract.
-func NewSequencerFilterer(address libcommon.Address, filterer bind.ContractFilterer) (*SequencerFilterer, error) {
+func NewSequencerFilterer(address common.Address, filterer bind.ContractFilterer) (*SequencerFilterer, error) {
 	contract, err := bindSequencer(address, nil, nil, filterer)
 	if err != nil {
 		return nil, err
@@ -146,7 +146,7 @@ func NewSequencerFilterer(address libcommon.Address, filterer bind.ContractFilte
 }
 
 // bindSequencer binds a generic wrapper to an already deployed contract.
-func bindSequencer(address libcommon.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
+func bindSequencer(address common.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
 	parsed, err := abi.JSON(strings.NewReader(SequencerABI))
 	if err != nil {
 		return nil, err
@@ -418,8 +418,8 @@ type SequencerDecryptionProgressSubmitted struct {
 	Raw     types.Log // Blockchain specific contextual infos
 }
 
-func (_Sequencer *SequencerFilterer) DecryptionProgressSubmittedEventID() libcommon.Hash {
-	return libcommon.HexToHash("0xa9a0645b33a70f18b8d490681d637cb46a859ec51707787e6f46b942f90e8f59")
+func (_Sequencer *SequencerFilterer) DecryptionProgressSubmittedEventID() common.Hash {
+	return common.HexToHash("0xa9a0645b33a70f18b8d490681d637cb46a859ec51707787e6f46b942f90e8f59")
 }
 
 // FilterDecryptionProgressSubmitted is a free log retrieval operation binding the contract event 0xa9a0645b33a70f18b8d490681d637cb46a859ec51707787e6f46b942f90e8f59.
@@ -555,14 +555,14 @@ type SequencerTransactionSubmitted struct {
 	Eon                  uint64
 	TxIndex              uint64
 	IdentityPrefix       [32]byte
-	Sender               libcommon.Address
+	Sender               common.Address
 	EncryptedTransaction []byte
 	GasLimit             *big.Int
 	Raw                  types.Log // Blockchain specific contextual infos
 }
 
-func (_Sequencer *SequencerFilterer) TransactionSubmittedEventID() libcommon.Hash {
-	return libcommon.HexToHash("0xa7f1b5467be46c45249fb93063cceef96c63ddad03819246bc7770e32d4f5b7d")
+func (_Sequencer *SequencerFilterer) TransactionSubmittedEventID() common.Hash {
+	return common.HexToHash("0xa7f1b5467be46c45249fb93063cceef96c63ddad03819246bc7770e32d4f5b7d")
 }
 
 // FilterTransactionSubmitted is a free log retrieval operation binding the contract event 0xa7f1b5467be46c45249fb93063cceef96c63ddad03819246bc7770e32d4f5b7d.

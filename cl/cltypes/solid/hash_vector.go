@@ -19,7 +19,7 @@ package solid
 import (
 	"encoding/json"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
@@ -44,7 +44,7 @@ func (arr *hashVector) Bytes() []byte {
 	return arr.u.u[:arr.u.l*length.Hash]
 }
 
-func (h *hashVector) Append(val libcommon.Hash) {
+func (h *hashVector) Append(val common.Hash) {
 	panic("not implemented")
 }
 
@@ -72,7 +72,7 @@ func (h *hashVector) Clone() clonable.Clonable {
 	return NewHashVector(h.u.l)
 }
 
-func (h *hashVector) CopyTo(t IterableSSZ[libcommon.Hash]) {
+func (h *hashVector) CopyTo(t IterableSSZ[common.Hash]) {
 	tu := t.(*hashVector)
 	h.u.CopyTo(tu.u)
 }
@@ -98,11 +98,11 @@ func (h *hashVector) EncodingSizeSSZ() int {
 	return h.u.EncodingSizeSSZ()
 }
 
-func (h *hashVector) Get(index int) (out libcommon.Hash) {
+func (h *hashVector) Get(index int) (out common.Hash) {
 	return h.u.Get(index)
 }
 
-func (h *hashVector) Set(index int, newValue libcommon.Hash) {
+func (h *hashVector) Set(index int, newValue common.Hash) {
 	h.u.Set(index, newValue)
 }
 
@@ -110,10 +110,10 @@ func (h *hashVector) HashSSZ() ([32]byte, error) {
 	return h.u.hashVectorSSZ()
 }
 
-func (h *hashVector) Range(fn func(int, libcommon.Hash, int) bool) {
+func (h *hashVector) Range(fn func(int, common.Hash, int) bool) {
 	h.u.Range(fn)
 }
 
-func (h *hashVector) Pop() libcommon.Hash {
+func (h *hashVector) Pop() common.Hash {
 	panic("didnt ask, dont need it, go fuck yourself")
 }

@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"math/big"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 func AsWaypoints[T Waypoint](wp []T) Waypoints {
@@ -36,19 +36,19 @@ type Waypoint interface {
 	fmt.Stringer
 	StartBlock() *big.Int
 	EndBlock() *big.Int
-	RootHash() libcommon.Hash
+	RootHash() common.Hash
 	Timestamp() uint64
 	Length() uint64
 	CmpRange(n uint64) int
 }
 
 type WaypointFields struct {
-	Proposer   libcommon.Address `json:"proposer"`
-	StartBlock *big.Int          `json:"start_block"`
-	EndBlock   *big.Int          `json:"end_block"`
-	RootHash   libcommon.Hash    `json:"root_hash"`
-	ChainID    string            `json:"bor_chain_id"`
-	Timestamp  uint64            `json:"timestamp"`
+	Proposer   common.Address `json:"proposer"`
+	StartBlock *big.Int       `json:"start_block"`
+	EndBlock   *big.Int       `json:"end_block"`
+	RootHash   common.Hash    `json:"root_hash"`
+	ChainID    string         `json:"bor_chain_id"`
+	Timestamp  uint64         `json:"timestamp"`
 }
 
 func (wf *WaypointFields) Length() uint64 {

@@ -23,17 +23,15 @@ import (
 	"fmt"
 	"hash"
 	"slices"
-	"sync"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/vm/stack"
 )
 
 // Config are the configuration options for the Interpreter
@@ -50,12 +48,6 @@ type Config struct {
 
 	ExtraEips []int // Additional EIPS that are to be enabled
 
-}
-
-var pool = sync.Pool{
-	New: func() any {
-		return NewMemory()
-	},
 }
 
 func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
@@ -79,7 +71,7 @@ type Interpreter interface {
 // but not transients like pc and gas
 type ScopeContext struct {
 	Memory   *Memory
-	Stack    *stack.Stack
+	Stack    *Stack
 	Contract *Contract
 }
 
@@ -98,16 +90,16 @@ func (ctx *ScopeContext) StackData() []uint256.Int {
 	if ctx.Stack == nil {
 		return nil
 	}
-	return ctx.Stack.Data
+	return ctx.Stack.data
 }
 
 // Caller returns the current caller.
-func (ctx *ScopeContext) Caller() libcommon.Address {
+func (ctx *ScopeContext) Caller() common.Address {
 	return ctx.Contract.Caller()
 }
 
 // Address returns the address where this scope of execution is taking place.
-func (ctx *ScopeContext) Address() libcommon.Address {
+func (ctx *ScopeContext) Address() common.Address {
 	return ctx.Contract.Address()
 }
 
@@ -126,7 +118,7 @@ func (ctx *ScopeContext) Code() []byte {
 	return ctx.Contract.Code
 }
 
-func (ctx *ScopeContext) CodeHash() libcommon.Hash {
+func (ctx *ScopeContext) CodeHash() common.Hash {
 	return ctx.Contract.CodeHash
 }
 
@@ -152,8 +144,8 @@ type VM struct {
 	evm *EVM
 	cfg Config
 
-	hasher    keccakState    // Keccak256 hasher instance shared across opcodes
-	hasherBuf libcommon.Hash // Keccak256 hasher result array shared across opcodes
+	hasher    keccakState // Keccak256 hasher instance shared across opcodes
+	hasherBuf common.Hash // Keccak256 hasher result array shared across opcodes
 
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
@@ -238,9 +230,9 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	in.returnData = nil
 
 	var (
-		op          OpCode // current opcode
-		mem         = pool.Get().(*Memory)
-		locStack    = stack.New()
+		op          OpCode        // current opcode
+		mem         = NewMemory() // bound memory
+		locStack    = New()
 		callContext = &ScopeContext{
 			Memory:   mem,
 			Stack:    locStack,
@@ -258,8 +250,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		logged  bool   // deferred Tracer should ignore already logged steps
 		res     []byte // result of the opcode execution function
 	)
-
-	mem.Reset()
 
 	contract.Input = input
 
@@ -282,8 +272,8 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			}
 		}
 		// this function must execute _after_: the `CaptureState` needs the stacks before
-		pool.Put(mem)
-		stack.ReturnNormalStack(locStack)
+		mem.free()
+		ReturnNormalStack(locStack)
 		if restoreReadonly {
 			in.readOnly = false
 		}
@@ -310,7 +300,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		operation := in.jt[op]
 		cost = operation.constantGas // For tracing
 		// Validate stack
-		if sLen := locStack.Len(); sLen < operation.numPop {
+		if sLen := locStack.len(); sLen < operation.numPop {
 			return nil, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
 		} else if sLen > operation.maxStack {
 			return nil, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
@@ -379,7 +369,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		err = nil // clear stop token error
 	}
 
-	ret = append(ret, res...)
+	ret = res
 	return
 }
 

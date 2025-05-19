@@ -10,17 +10,17 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	state2 "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3"
@@ -70,7 +70,7 @@ When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rota
 */
 
 type executor interface {
-	execute(ctx context.Context, tasks []*state.TxTask) (bool, error)
+	execute(ctx context.Context, tasks []*state.TxTask, gp *core.GasPool) (bool, error)
 	status(ctx context.Context, commitThreshold uint64) error
 	wait() error
 	getHeader(ctx context.Context, hash common.Hash, number uint64) (h *types.Header)
@@ -538,7 +538,7 @@ func (pe *parallelExecutor) wait() error {
 	return nil
 }
 
-func (pe *parallelExecutor) execute(ctx context.Context, tasks []*state.TxTask) (bool, error) {
+func (pe *parallelExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp *core.GasPool) (bool, error) {
 	for _, txTask := range tasks {
 		if txTask.Sender() != nil {
 			if ok := pe.rs.RegisterSender(txTask); ok {

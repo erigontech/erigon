@@ -32,30 +32,27 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/temporal"
-
-	"github.com/erigontech/erigon-lib/common/datadir"
-
 	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	common2 "github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
-
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/evm/internal/compiler"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/runtime"
 	"github.com/erigontech/erigon/eth/tracers"
@@ -135,7 +132,7 @@ func runCmd(ctx *cli.Context) error {
 	if machineFriendlyOutput {
 		log.Root().SetHandler(log.DiscardHandler())
 	} else {
-		log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+		log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(ctx.Int(VerbosityFlag.Name)), log.StderrHandler))
 	}
 	logconfig := &logger.LogConfig{
 		DisableMemory:     ctx.Bool(DisableMemoryFlag.Name),
@@ -150,12 +147,12 @@ func runCmd(ctx *cli.Context) error {
 		debugLogger   *logger.StructLogger
 		statedb       *state.IntraBlockState
 		chainConfig   *chain.Config
-		sender        = libcommon.BytesToAddress([]byte("sender"))
-		receiver      = libcommon.BytesToAddress([]byte("receiver"))
+		sender        = common.BytesToAddress([]byte("sender"))
+		receiver      = common.BytesToAddress([]byte("receiver"))
 		genesisConfig *types.Genesis
 	)
 	if machineFriendlyOutput {
-		tracer = logger.NewJSONLogger(logconfig, os.Stdout).Tracer()
+		tracer = logger.NewJSONLogger(logconfig, os.Stderr).Tracer()
 	} else if ctx.Bool(DebugFlag.Name) {
 		debugLogger = logger.NewStructLogger(logconfig)
 		tracer = debugLogger.Tracer()
@@ -195,12 +192,12 @@ func runCmd(ctx *cli.Context) error {
 	stateReader := state.NewReaderV3(sd)
 	statedb = state.New(stateReader)
 	if ctx.String(SenderFlag.Name) != "" {
-		sender = libcommon.HexToAddress(ctx.String(SenderFlag.Name))
+		sender = common.HexToAddress(ctx.String(SenderFlag.Name))
 	}
 	statedb.CreateAccount(sender, true)
 
 	if ctx.String(ReceiverFlag.Name) != "" {
-		receiver = libcommon.HexToAddress(ctx.String(ReceiverFlag.Name))
+		receiver = common.HexToAddress(ctx.String(ReceiverFlag.Name))
 	}
 
 	var code []byte
@@ -245,7 +242,7 @@ func runCmd(ctx *cli.Context) error {
 		if err != nil {
 			return err
 		}
-		code = libcommon.Hex2Bytes(bin)
+		code = common.Hex2Bytes(bin)
 	}
 	initialGas := ctx.Uint64(GasFlag.Name)
 	if genesisConfig.GasLimit != 0 {
@@ -263,9 +260,10 @@ func runCmd(ctx *cli.Context) error {
 		Time:        new(big.Int).SetUint64(genesisConfig.Timestamp),
 		Coinbase:    genesisConfig.Coinbase,
 		BlockNumber: new(big.Int).SetUint64(genesisConfig.Number),
-		EVMConfig: vm.Config{
-			Tracer: tracer.Hooks,
-		},
+	}
+
+	if tracer != nil {
+		runtimeConfig.EVMConfig = vm.Config{Tracer: tracer.Hooks}
 	}
 
 	if cpuProfilePath := ctx.String(CPUProfileFlag.Name); cpuProfilePath != "" {

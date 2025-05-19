@@ -36,12 +36,13 @@ import (
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/go-chi/chi/v5"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/beacon/builder"
@@ -57,7 +58,6 @@ import (
 	"github.com/erigontech/erigon/cl/transition/machine"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/validator/attestation_producer"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 )
 
@@ -193,7 +193,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	ctx := r.Context()
 	// parse request data
 	randaoRevealString := r.URL.Query().Get("randao_reveal")
-	var randaoReveal libcommon.Bytes96
+	var randaoReveal common.Bytes96
 	if err := randaoReveal.UnmarshalText([]byte(randaoRevealString)); err != nil {
 		return nil, beaconhttp.NewEndpointError(
 			http.StatusBadRequest,
@@ -201,11 +201,11 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		)
 	}
 	if r.URL.Query().Has("skip_randao_verification") {
-		randaoReveal = libcommon.Bytes96{0xc0} // infinity bls signature
+		randaoReveal = common.Bytes96{0xc0} // infinity bls signature
 	}
-	graffiti := libcommon.HexToHash(r.URL.Query().Get("graffiti"))
+	graffiti := common.HexToHash(r.URL.Query().Get("graffiti"))
 	if !r.URL.Query().Has("graffiti") {
-		graffiti = libcommon.HexToHash(hex.EncodeToString([]byte(defaultGraffitiString)))
+		graffiti = common.HexToHash(hex.EncodeToString([]byte(defaultGraffitiString)))
 	}
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -225,7 +225,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 
 	log.Debug("[Beacon API] Producing block", "slot", targetSlot)
 	// builder boost factor controls block choice between local execution node or builder
-	var builderBoostFactor uint64
+	builderBoostFactor := uint64(100)
 	builderBoostFactorStr := r.URL.Query().Get("builder_boost_factor")
 	if builderBoostFactorStr != "" {
 		builderBoostFactor, err = strconv.ParseUint(builderBoostFactorStr, 10, 64)
@@ -238,7 +238,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	}
 
 	baseBlockRoot := a.syncedData.HeadRoot()
-	if baseBlockRoot == (libcommon.Hash{}) {
+	if baseBlockRoot == (common.Hash{}) {
 		return nil, beaconhttp.NewEndpointError(
 			http.StatusServiceUnavailable,
 			errors.New("node is syncing"),
@@ -310,7 +310,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		"proposerIndex", block.ProposerIndex,
 		"slot", targetSlot,
 		"state_root", block.StateRoot,
-		"attestations", block.BeaconBody.Attestations.Len(),
 		"execution_value", block.GetExecutionValue().Uint64(),
 		"version", block.Version(),
 		"blinded", block.IsBlinded(),
@@ -345,8 +344,8 @@ func (a *ApiHandler) produceBlock(
 	baseBlock *cltypes.BeaconBlock,
 	baseState *state.CachingBeaconState,
 	targetSlot uint64,
-	randaoReveal libcommon.Bytes96,
-	graffiti libcommon.Hash,
+	randaoReveal common.Bytes96,
+	graffiti common.Hash,
 ) (*cltypes.BlindOrExecutionBeaconBlock, error) {
 	wg := sync.WaitGroup{}
 	wg.Add(2)
@@ -356,7 +355,7 @@ func (a *ApiHandler) produceBlock(
 		localExecValue uint64
 		localErr       error
 		blobs          []*cltypes.Blob
-		kzgProofs      []libcommon.Bytes48
+		kzgProofs      []common.Bytes48
 	)
 	go func() {
 		start := time.Now()
@@ -373,7 +372,7 @@ func (a *ApiHandler) produceBlock(
 					log.Warn("Nil commitment", "slot", targetSlot, "index", i)
 					continue
 				}
-				blobBundle, ok := a.blobBundles.Get(libcommon.Bytes48(*c))
+				blobBundle, ok := a.blobBundles.Get(common.Bytes48(*c))
 				if !ok {
 					log.Warn("Blob not found", "slot", targetSlot, "commitment", c)
 					continue
@@ -548,8 +547,8 @@ func (a *ApiHandler) produceBeaconBody(
 	baseBlock *cltypes.BeaconBlock,
 	baseState *state.CachingBeaconState,
 	targetSlot uint64,
-	randaoReveal libcommon.Bytes96,
-	graffiti libcommon.Hash,
+	randaoReveal common.Bytes96,
+	graffiti common.Hash,
 ) (*cltypes.BeaconBody, uint64, error) {
 	if targetSlot <= baseBlock.Slot {
 		return nil, 0, fmt.Errorf(
@@ -572,7 +571,7 @@ func (a *ApiHandler) produceBeaconBody(
 	latestExecutionPayload := baseState.LatestExecutionPayloadHeader()
 	head := latestExecutionPayload.BlockHash
 	finalizedHash := a.forkchoiceStore.GetEth1Hash(baseState.FinalizedCheckpoint().Root)
-	if finalizedHash == (libcommon.Hash{}) {
+	if finalizedHash == (common.Hash{}) {
 		finalizedHash = head // probably fuck up fcu for EL but not a big deal.
 	}
 	proposerIndex, err := baseState.GetBeaconProposerIndexForSlot(targetSlot)
@@ -624,7 +623,7 @@ func (a *ApiHandler) produceBeaconBody(
 				PrevRandao:            random,
 				SuggestedFeeRecipient: feeRecipient,
 				Withdrawals:           withdrawals,
-				ParentBeaconBlockRoot: (*libcommon.Hash)(&blockRoot),
+				ParentBeaconBlockRoot: (*common.Hash)(&blockRoot),
 			},
 		)
 		if err != nil {
@@ -675,10 +674,10 @@ func (a *ApiHandler) produceBeaconBody(
 						return
 					}
 					// add the bundle to recently produced blobs
-					a.blobBundles.Add(libcommon.Bytes48(bundles.Commitments[i]), BlobBundle{
+					a.blobBundles.Add(common.Bytes48(bundles.Commitments[i]), BlobBundle{
 						Blob:       (*cltypes.Blob)(bundles.Blobs[i]),
-						KzgProof:   libcommon.Bytes48(bundles.Proofs[i]),
-						Commitment: libcommon.Bytes48(bundles.Commitments[i]),
+						KzgProof:   common.Bytes48(bundles.Proofs[i]),
+						Commitment: common.Bytes48(bundles.Commitments[i]),
 					})
 					// Assemble the KZG commitments list
 					var c cltypes.KZGCommitment
@@ -993,7 +992,7 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 		}
 	}
 	// submit and unblind the signedBlindedBlock
-	blockPayload, blobsBundle, err := a.builderClient.SubmitBlindedBlocks(r.Context(), signedBlindedBlock)
+	blockPayload, blobsBundle, executionRequests, err := a.builderClient.SubmitBlindedBlocks(r.Context(), signedBlindedBlock)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
@@ -1033,12 +1032,16 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 		}
 		for i := range blobsBundle.Commitments {
 			// add the bundle to recently produced blobs
-			a.blobBundles.Add(libcommon.Bytes48(blobsBundle.Commitments[i]), BlobBundle{
+			a.blobBundles.Add(common.Bytes48(blobsBundle.Commitments[i]), BlobBundle{
 				Blob:       (*cltypes.Blob)(blobsBundle.Blobs[i]),
-				KzgProof:   libcommon.Bytes48(blobsBundle.Proofs[i]),
-				Commitment: libcommon.Bytes48(blobsBundle.Commitments[i]),
+				KzgProof:   common.Bytes48(blobsBundle.Proofs[i]),
+				Commitment: common.Bytes48(blobsBundle.Commitments[i]),
 			})
 		}
+	}
+
+	if blockPayload.Version() >= clparams.ElectraVersion {
+		signedBlock.Block.Body.ExecutionRequests = executionRequests
 	}
 
 	// broadcast the block
@@ -1122,7 +1125,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 			if commitment == nil {
 				return fmt.Errorf("missing commitment %d", i)
 			}
-			bundle, has := a.blobBundles.Get(libcommon.Bytes48(*commitment))
+			bundle, has := a.blobBundles.Get(common.Bytes48(*commitment))
 			if !has {
 				return fmt.Errorf("missing blob bundle for commitment %x", commitment)
 			}
@@ -1235,8 +1238,8 @@ type attestationCandidate struct {
 	reward      uint64
 }
 
-func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) (map[libcommon.Hash][]*solid.Attestation, error) {
-	pool := map[libcommon.Hash]map[uint64][]*solid.Attestation{} // map root -> committee -> att candidates
+func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) (map[common.Hash][]*solid.Attestation, error) {
+	pool := map[common.Hash]map[uint64][]*solid.Attestation{} // map root -> committee -> att candidates
 	// step 1: Group attestations by data root and committee index for merging
 	// so after this step, pool[dataRoot][committeeIndex] will contain all the attestation candidates for that data root and committee index
 	for _, candidate := range a.operationsPool.AttestationsPool.Raw() {
@@ -1310,7 +1313,7 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 	}
 
 	// step 2: sort each candidates list within (root, committee_bit) by number of set bits in aggregation_bits in descending order
-	maxAttsPerDataRoot := map[libcommon.Hash]int{}
+	maxAttsPerDataRoot := map[common.Hash]int{}
 	type candSort struct {
 		att   *solid.Attestation
 		count int
@@ -1379,7 +1382,7 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 	//   signature: aggregate(sig2, sig4)
 	// }
 
-	mergeAttByCommittees := func(root libcommon.Hash, index int) *solid.Attestation {
+	mergeAttByCommittees := func(root common.Hash, index int) *solid.Attestation {
 		signatures := [][]byte{}
 		commiteeBits := solid.NewBitVector(int(a.beaconChainCfg.MaxCommitteesPerSlot))
 		bitSlice := solid.NewBitSlice()
@@ -1428,7 +1431,7 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 		}
 		return att
 	}
-	mergedCandidates := make(map[libcommon.Hash][]*solid.Attestation)
+	mergedCandidates := make(map[common.Hash][]*solid.Attestation)
 	for root := range pool {
 		mergedCandidates[root] = []*solid.Attestation{}
 		maxAtts := min(maxAttsPerDataRoot[root], int(a.beaconChainCfg.MaxAttestations)) // limit the max attestations to the max attestations
@@ -1445,9 +1448,9 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 	return mergedCandidates, nil
 }
 
-func (a *ApiHandler) denebMergedAttestationCandidates(s abstract.BeaconState) (map[libcommon.Hash][]*solid.Attestation, error) {
+func (a *ApiHandler) denebMergedAttestationCandidates(s abstract.BeaconState) (map[common.Hash][]*solid.Attestation, error) {
 	// Group attestations by their data root
-	hashToAtts := make(map[libcommon.Hash][]*solid.Attestation)
+	hashToAtts := make(map[common.Hash][]*solid.Attestation)
 	for _, candidate := range a.operationsPool.AttestationsPool.Raw() {
 		if err := eth2.IsAttestationApplicable(s, candidate); err != nil {
 			continue // attestation not applicable skip
@@ -1505,7 +1508,7 @@ func (a *ApiHandler) denebMergedAttestationCandidates(s abstract.BeaconState) (m
 func (a *ApiHandler) findBestAttestationsForBlockProduction(
 	s abstract.BeaconState,
 ) *solid.ListSSZ[*solid.Attestation] {
-	var hashToAtts map[libcommon.Hash][]*solid.Attestation
+	var hashToAtts map[common.Hash][]*solid.Attestation
 	if s.Version() < clparams.ElectraVersion {
 		var err error
 		hashToAtts, err = a.denebMergedAttestationCandidates(s)

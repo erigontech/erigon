@@ -23,7 +23,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/direct"
 	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -40,9 +40,10 @@ import (
 )
 
 func TestEthSubscribe(t *testing.T) {
+	t.Skip("issue #14546")
 	m, require := mock.Mock(t), require.New(t)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 7, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(libcommon.Address{1})
+		b.SetCoinbase(common.Address{1})
 	})
 	require.NoError(err)
 

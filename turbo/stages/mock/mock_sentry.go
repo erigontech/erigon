@@ -32,13 +32,13 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/errgroup"
-	"golang.org/x/sync/semaphore"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-db/rawdb/blockio"
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
@@ -56,13 +56,10 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	libstate "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/rawdb/blockio"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -123,7 +120,7 @@ type MockSentry struct {
 	sentMessages         []*proto_sentry.OutboundMessageData
 	StreamWg             sync.WaitGroup
 	ReceiveWg            sync.WaitGroup
-	Address              libcommon.Address
+	Address              common.Address
 	Eth1ExecutionService *eth1.EthereumExecutionModule
 
 	Notifications *shards.Notifications
@@ -133,7 +130,6 @@ type MockSentry struct {
 	TxPoolGrpcServer txpoolproto.TxpoolServer
 
 	HistoryV3      bool
-	agg            *libstate.Aggregator
 	BlockSnapshots *freezeblocks.RoSnapshots
 	BlockReader    services.FullBlockReader
 	ReceiptsReader *receipts.Generator
@@ -148,9 +144,6 @@ func (ms *MockSentry) Close() {
 	}
 	if ms.BlockSnapshots != nil {
 		ms.BlockSnapshots.Close()
-	}
-	if ms.agg != nil {
-		ms.agg.Close()
 	}
 	if ms.DB != nil {
 		ms.DB.Close()
@@ -282,7 +275,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	cfg.TxPool.Disable = !withTxPool
 	cfg.Dirs = dirs
 	cfg.AlwaysGenerateChangesets = true
-	cfg.PersistReceipts = 4
+	cfg.PersistReceiptsCacheV2 = true
 	cfg.ChaosMonkey = false
 	cfg.Snapshot.ChainName = gspec.Config.ChainName
 
@@ -298,7 +291,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	logger.SetHandler(log.LvlFilterHandler(logLvl, log.StderrHandler))
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
-	db, agg := temporaltest.NewTestDB(tb, dirs)
+	db := temporaltest.NewTestDB(tb, dirs)
 
 	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db, nil, nil, nil, logger)
 	allSnapshots := freezeblocks.NewRoSnapshots(cfg.Snapshot, dirs.Snap, 0, logger)
@@ -310,7 +303,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	br := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, heimdallStore, bridgeStore)
 
 	mock := &MockSentry{
-		Ctx: ctx, cancel: ctxCancel, DB: db, agg: agg,
+		Ctx: ctx, cancel: ctxCancel, DB: db,
 		tb:             tb,
 		Log:            logger,
 		Dirs:           dirs,
@@ -445,8 +438,8 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		snapDb         kv.RwDB
 		snapDownloader = proto_downloader.NewMockDownloaderClient(ctrl)
 
-		recents    *lru.ARCCache[libcommon.Hash, *bor.Snapshot]
-		signatures *lru.ARCCache[libcommon.Hash, libcommon.Address]
+		recents    *lru.ARCCache[common.Hash, *bor.Snapshot]
+		signatures *lru.ARCCache[common.Hash, common.Address]
 	)
 
 	snapDownloader.EXPECT().
@@ -525,11 +518,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		return block, nil
 	}
 
-	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
-	agg.SetSnapshotBuildSema(blockSnapBuildSema)
-
-	blockRetire := freezeblocks.NewBlockRetire(1, dirs, mock.BlockReader, blockWriter, mock.DB, nil, nil, mock.ChainConfig, &cfg, mock.Notifications.Events, blockSnapBuildSema, logger)
-	mock.agg.SetProduceMod(mock.BlockReader.FreezingCfg().ProduceE3)
+	blockRetire := freezeblocks.NewBlockRetire(1, dirs, mock.BlockReader, blockWriter, mock.DB, nil, nil, mock.ChainConfig, &cfg, mock.Notifications.Events, nil, logger)
 	mock.Sync = stagedsync.New(
 		cfg.Sync,
 		stagedsync.DefaultStages(mock.Ctx, stagedsync.StageSnapshotsCfg(mock.DB, *mock.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, mock.BlockReader, mock.Notifications, false, false, false, nil, prune), stagedsync.StageHeadersCfg(mock.DB, mock.sentriesClient.Hd, mock.sentriesClient.Bd, *mock.ChainConfig, cfg.Sync, sendHeaderRequest, propagateNewBlockHashes, penalize, cfg.BatchSize, false, mock.BlockReader, blockWriter, dirs.Tmp, mock.Notifications), stagedsync.StageBorHeimdallCfg(mock.DB, snapDb, stagedsync.MiningState{}, *mock.ChainConfig, nil, nil, nil, mock.BlockReader, nil, nil, recents, signatures, false, nil), stagedsync.StageBlockHashesCfg(mock.DB, mock.Dirs.Tmp, mock.ChainConfig, blockWriter), stagedsync.StageBodiesCfg(mock.DB, mock.sentriesClient.Bd, sendBodyRequest, penalize, blockPropagator, cfg.Sync.BodyDownloadTimeoutSeconds, *mock.ChainConfig, mock.BlockReader, blockWriter), stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, cfg.Sync, false, dirs.Tmp, prune, mock.BlockReader, mock.sentriesClient.Hd), stagedsync.StageExecuteBlocksCfg(
@@ -630,10 +619,10 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 
 // Mock is convenience function to create a mock with some pre-set values
 func Mock(tb testing.TB) *MockSentry {
-	funds := big.NewInt(1 * params.Ether)
+	funds := big.NewInt(1 * common.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
-	chainConfig := params.TestChainConfig
+	chainConfig := chain.TestChainConfig
 	gspec := &types.Genesis{
 		Config: chainConfig,
 		Alloc: types.GenesisAlloc{
@@ -644,10 +633,10 @@ func Mock(tb testing.TB) *MockSentry {
 }
 
 func MockWithTxPool(t *testing.T) *MockSentry {
-	funds := big.NewInt(1 * params.Ether)
+	funds := big.NewInt(1 * common.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
-	chainConfig := params.TestChainConfig
+	chainConfig := chain.TestChainConfig
 	gspec := &types.Genesis{
 		Config: chainConfig,
 		Alloc: types.GenesisAlloc{
@@ -660,7 +649,7 @@ func MockWithTxPool(t *testing.T) *MockSentry {
 }
 
 func MockWithTxPoolCancun(t *testing.T) *MockSentry {
-	funds := big.NewInt(1 * params.Ether)
+	funds := big.NewInt(1 * common.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
 	chainConfig := params.AllProtocolChanges
@@ -676,11 +665,11 @@ func MockWithTxPoolCancun(t *testing.T) *MockSentry {
 }
 
 func MockWithZeroTTD(t *testing.T, withPosDownloader bool) *MockSentry {
-	funds := big.NewInt(1 * params.Ether)
+	funds := big.NewInt(1 * common.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
 	chainConfig := params.AllProtocolChanges
-	chainConfig.TerminalTotalDifficulty = libcommon.Big0
+	chainConfig.TerminalTotalDifficulty = common.Big0
 	gspec := &types.Genesis{
 		Config: chainConfig,
 		Alloc: types.GenesisAlloc{
@@ -691,11 +680,11 @@ func MockWithZeroTTD(t *testing.T, withPosDownloader bool) *MockSentry {
 }
 
 func MockWithZeroTTDGnosis(t *testing.T, withPosDownloader bool) *MockSentry {
-	funds := big.NewInt(1 * params.Ether)
+	funds := big.NewInt(1 * common.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
-	chainConfig := params.TestChainAuraConfig
-	chainConfig.TerminalTotalDifficulty = libcommon.Big0
+	chainConfig := chain.TestChainAuraConfig
+	chainConfig.TerminalTotalDifficulty = common.Big0
 	chainConfig.TerminalTotalDifficultyPassed = true
 	gspec := &types.Genesis{
 		Config: chainConfig,
@@ -898,9 +887,6 @@ func (ms *MockSentry) NewHistoryStateReader(blockNum uint64, tx kv.TemporalTx) s
 
 func (ms *MockSentry) NewStateReader(tx kv.Tx) state.StateReader {
 	return state.NewReaderV3(tx.(kv.TemporalGetter))
-}
-func (ms *MockSentry) HistoryV3Components() *libstate.Aggregator {
-	return ms.agg
 }
 
 func (ms *MockSentry) BlocksIO() (services.FullBlockReader, *blockio.BlockWriter) {

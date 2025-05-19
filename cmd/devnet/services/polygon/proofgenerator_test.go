@@ -30,8 +30,9 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/pion/randutil"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -39,11 +40,10 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/devnet/blocks"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/params"
@@ -62,7 +62,7 @@ type requestGenerator struct {
 	sentry     *mock.MockSentry
 	bor        *bor.Bor
 	chain      *core.ChainPack
-	txBlockMap map[libcommon.Hash]*types.Block
+	txBlockMap map[common.Hash]*types.Block
 }
 
 func newRequestGenerator(sentry *mock.MockSentry, chain *core.ChainPack) (*requestGenerator, error) {
@@ -87,24 +87,24 @@ func newRequestGenerator(sentry *mock.MockSentry, chain *core.ChainPack) (*reque
 		chain:      chain,
 		sentry:     sentry,
 		bor:        bor.NewRo(params.BorDevnetChainConfig, db, reader, log.Root()),
-		txBlockMap: map[libcommon.Hash]*types.Block{},
+		txBlockMap: map[common.Hash]*types.Block{},
 	}, nil
 }
 
-func (rg *requestGenerator) GetRootHash(ctx context.Context, startBlock uint64, endBlock uint64) (libcommon.Hash, error) {
+func (rg *requestGenerator) GetRootHash(ctx context.Context, startBlock uint64, endBlock uint64) (common.Hash, error) {
 	tx, err := rg.bor.DB.BeginRo(context.Background())
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 	defer tx.Rollback()
 
 	result, err := rg.bor.GetRootHash(ctx, tx, startBlock, endBlock)
 
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 
-	return libcommon.HexToHash(result), nil
+	return common.HexToHash(result), nil
 }
 
 func (rg *requestGenerator) GetBlockByNumber(ctx context.Context, blockNum rpc.BlockNumber, withTxs bool) (*requests.Block, error) {
@@ -130,7 +130,7 @@ func (rg *requestGenerator) GetBlockByNumber(ctx context.Context, blockNum rpc.B
 	return nil, fmt.Errorf("block %d not found", blockNum.Uint64())
 }
 
-func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash libcommon.Hash) (*types.Receipt, error) {
+func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash common.Hash) (*types.Receipt, error) {
 	rg.Lock()
 	defer rg.Unlock()
 
@@ -165,7 +165,7 @@ func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash libc
 
 	noopWriter := state.NewNoopWriter()
 
-	getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
+	getHeader := func(hash common.Hash, number uint64) *types.Header {
 		h, e := reader.Header(ctx, tx, hash, number)
 		if e != nil {
 			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
@@ -384,7 +384,7 @@ func generateBlocks(t *testing.T, number int) (*mock.MockSentry, *core.ChainPack
 	})
 }
 
-func getBlockTx(from libcommon.Address, to libcommon.Address, amount *uint256.Int) blocks.TxFn {
+func getBlockTx(from common.Address, to common.Address, amount *uint256.Int) blocks.TxFn {
 	return func(block *core.BlockGen, _ bind.ContractBackend) (types.Transaction, bool) {
 		return types.NewTransaction(block.TxNonce(from), to, amount, 21000, new(uint256.Int), nil), false
 	}
@@ -392,7 +392,7 @@ func getBlockTx(from libcommon.Address, to libcommon.Address, amount *uint256.In
 
 type initialData struct {
 	keys         []*ecdsa.PrivateKey
-	addresses    []libcommon.Address
+	addresses    []common.Address
 	transactOpts []*bind.TransactOpts
 	genesisSpec  *types.Genesis
 }
@@ -409,7 +409,7 @@ func getGenesis(accounts int, funds ...*big.Int) initialData {
 		keys[i], _ = crypto.GenerateKey()
 	}
 
-	addresses := make([]libcommon.Address, 0, len(keys))
+	addresses := make([]common.Address, 0, len(keys))
 	transactOpts := make([]*bind.TransactOpts, 0, len(keys))
 	allocs := types.GenesisAlloc{}
 	for _, key := range keys {

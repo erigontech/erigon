@@ -460,7 +460,7 @@ func TestServerSetupConn(t *testing.T) {
 			}
 			srv := &Server{
 				Config:       cfg,
-				newTransport: func(fd net.Conn, dialDest *ecdsa.PublicKey) transport { return test.tt }, //nolint:scopelint
+				newTransport: func(fd net.Conn, dialDest *ecdsa.PublicKey) transport { return test.tt },
 			}
 			if !test.dontstart {
 				if err := srv.TestStart(logger); err != nil {

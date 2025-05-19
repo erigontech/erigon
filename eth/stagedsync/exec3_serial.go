@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/execution/consensus"
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 )
@@ -34,12 +34,14 @@ func (se *serialExecutor) status(ctx context.Context, commitThreshold uint64) er
 	return nil
 }
 
-func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (cont bool, err error) {
+func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp *core.GasPool) (cont bool, err error) {
 	for _, txTask := range tasks {
 		if txTask.Error != nil {
 			return false, nil
 		}
-
+		if gp != nil {
+			se.applyWorker.SetGaspool(gp)
+		}
 		se.applyWorker.RunTxTaskNoLock(txTask, se.isMining, se.skipPostEvaluation)
 		if err := func() error {
 			if errors.Is(txTask.Error, context.Canceled) {
@@ -87,7 +89,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 				return false, err
 			}
 			se.logger.Warn(fmt.Sprintf("[%s] Execution failed", se.execStage.LogPrefix()),
-				"block", txTask.BlockNum, "txNum", txTask.TxNum, "hash", txTask.Header.Hash().String(), "err", err, "inMem", se.inMemExec)
+				"block", txTask.BlockNum, "txNum", txTask.TxNum, "header-hash", txTask.Header.Hash().String(), "err", err, "inMem", se.inMemExec)
 			if se.cfg.hd != nil && se.cfg.hd.POSSync() && errors.Is(err, consensus.ErrInvalidBlock) {
 				se.cfg.hd.ReportBadHeaderPoS(txTask.Header.Hash(), txTask.Header.ParentHash)
 			}
@@ -180,7 +182,7 @@ func (se *serialExecutor) commit(ctx context.Context, txNum uint64, blockNum uin
 		return t2, err
 	}
 	se.doms.SetTxNum(txNum)
-	se.rs = state.NewParallelExecutionState(se.doms, se.logger)
+	se.rs = state.NewParallelExecutionState(se.doms, se.cfg.syncCfg, se.cfg.chainConfig.Bor != nil, se.logger)
 
 	se.applyWorker.ResetTx(se.applyTx)
 	se.applyWorker.ResetState(se.rs, se.accumulator)

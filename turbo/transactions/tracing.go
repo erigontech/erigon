@@ -27,12 +27,12 @@ import (
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/tracers"
@@ -45,10 +45,10 @@ import (
 
 type BlockGetter interface {
 	// GetBlockByHash retrieves a block from the database by hash, caching it if found.
-	GetBlockByHash(hash libcommon.Hash) (*types.Block, error)
+	GetBlockByHash(hash common.Hash) (*types.Block, error)
 	// GetBlock retrieves a block from the database by hash and number,
 	// caching it if found.
-	GetBlock(hash libcommon.Hash, number uint64) *types.Block
+	GetBlock(hash common.Hash, number uint64) *types.Block
 }
 
 // ComputeBlockContext returns the execution environment of a certain block.
@@ -63,7 +63,7 @@ func ComputeBlockContext(ctx context.Context, engine consensus.EngineReader, hea
 	// Create the parent state database
 	statedb := state.New(reader)
 
-	getHeader := func(hash libcommon.Hash, n uint64) *types.Header {
+	getHeader := func(hash common.Hash, n uint64) *types.Header {
 		h, _ := headerReader.HeaderByNumber(ctx, dbtx, n)
 		return h
 	}
@@ -96,7 +96,7 @@ func TraceTx(
 	message core.Message,
 	blockCtx evmtypes.BlockContext,
 	txCtx evmtypes.TxContext,
-	blockHash libcommon.Hash,
+	blockHash common.Hash,
 	txnIndex int,
 	ibs evmtypes.IntraBlockState,
 	config *tracersConfig.TraceConfig,
@@ -141,8 +141,8 @@ func TraceTx(
 func AssembleTracer(
 	ctx context.Context,
 	config *tracersConfig.TraceConfig,
-	txHash libcommon.Hash,
-	blockHash libcommon.Hash,
+	txHash common.Hash,
+	blockHash common.Hash,
 	txnIndex int,
 	stream *jsoniter.Stream,
 	callTimeout time.Duration,
@@ -196,9 +196,10 @@ func ExecuteTraceTx(
 	streaming bool,
 	execCb func(evm *vm.EVM, refunds bool) (*evmtypes.ExecutionResult, error),
 ) error {
+	// Set the tracer hooks to the intra-block state before execute, so the OnLog hook may be set correctly.
+	ibs.SetHooks(tracer.Hooks)
 	// Run the transaction with tracing enabled.
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Tracer: tracer.Hooks, NoBaseFee: true})
-
 	var refunds = true
 	if config != nil && config.NoRefunds != nil && *config.NoRefunds {
 		refunds = false

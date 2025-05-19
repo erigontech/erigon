@@ -32,18 +32,17 @@ import (
 
 	"google.golang.org/grpc"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/concurrent"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	txpool2 "github.com/erigontech/erigon/txnprovider/txpool"
-
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/filters"
+	txpool2 "github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 // Filters holds the state for managing subscriptions to various Ethereum events.
@@ -442,8 +441,8 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria) (<-c
 	id, f := ff.logsSubs.insertLogsFilter(sub)
 
 	// Initialize address and topic maps
-	f.addrs = concurrent.NewSyncMap[libcommon.Address, int]()
-	f.topics = concurrent.NewSyncMap[libcommon.Hash, int]()
+	f.addrs = concurrent.NewSyncMap[common.Address, int]()
+	f.topics = concurrent.NewSyncMap[common.Hash, int]()
 
 	// Handle addresses
 	if len(criteria.Addresses) == 0 {
@@ -469,9 +468,9 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria) (<-c
 	} else {
 		// Limit the number of topics
 		topicCount := 0
-		allowedTopics := [][]libcommon.Hash{}
+		allowedTopics := [][]common.Hash{}
 		for _, topics := range criteria.Topics {
-			allowedTopicsRow := []libcommon.Hash{}
+			allowedTopicsRow := []common.Hash{}
 			for _, topic := range topics {
 				if ff.config.RpcSubscriptionFiltersMaxTopics == 0 || topicCount < ff.config.RpcSubscriptionFiltersMaxTopics {
 					f.topics.Put(topic, 1)

@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -38,8 +39,9 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (kv.RwDB, *InvertedIndex) {
@@ -56,7 +58,8 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	}).MustOpen()
 	tb.Cleanup(db.Close)
 	salt := uint32(1)
-	cfg := iiCfg{salt: &salt, dirs: dirs, filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable}
+	cfg := iiCfg{salt: new(atomic.Pointer[uint32]), dirs: dirs, filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable, version: IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
+	cfg.salt.Store(&salt)
 	ii, err := NewInvertedIndex(cfg, aggStep, logger)
 	require.NoError(tb, err)
 	ii.DisableFsync()
@@ -99,7 +102,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		count++
 	}
 	icc.Close()
-	require.EqualValues(t, count, pruneIters*int(pruneLimit))
+	require.Equal(t, count, pruneIters*int(pruneLimit))
 
 	// this one should not prune anything due to forced=false but no files built
 	stat, err := ic.Prune(context.Background(), rwTx, 0, 10, pruneLimit, logEvery, false, nil)
@@ -170,22 +173,18 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	writer := ic.NewWriter()
 	defer writer.close()
 
-	writer.SetTxNum(2)
-	err = writer.Add([]byte("key1"))
+	err = writer.Add([]byte("key1"), 2)
 	require.NoError(t, err)
 
-	writer.SetTxNum(3)
-	err = writer.Add([]byte("key2"))
+	err = writer.Add([]byte("key2"), 3)
 	require.NoError(t, err)
 
-	writer.SetTxNum(6)
-	err = writer.Add([]byte("key1"))
+	err = writer.Add([]byte("key1"), 6)
 	require.NoError(t, err)
-	err = writer.Add([]byte("key3"))
+	err = writer.Add([]byte("key3"), 6)
 	require.NoError(t, err)
 
-	writer.SetTxNum(17)
-	err = writer.Add([]byte("key10"))
+	err = writer.Add([]byte("key10"), 17)
 	require.NoError(t, err)
 
 	err = writer.Flush(ctx, tx)
@@ -212,9 +211,9 @@ func TestInvIndexCollationBuild(t *testing.T) {
 		w, _ := g.Next(nil)
 		words = append(words, string(w))
 		w, _ = g.Next(w[:0])
-		ef, _ := eliasfano32.ReadEliasFano(w)
+		ef := multiencseq.ReadMultiEncSeq(0, w)
 		var ints []uint64
-		it := ef.Iterator()
+		it := ef.Iterator(0)
 		for it.HasNext() {
 			v, _ := it.Next()
 			ints = append(ints, v)
@@ -256,18 +255,15 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	writer := ic.NewWriter()
 	defer writer.close()
 
-	writer.SetTxNum(2)
-	err = writer.Add([]byte("key1"))
+	err = writer.Add([]byte("key1"), 2)
 	require.NoError(t, err)
 
-	writer.SetTxNum(3)
-	err = writer.Add([]byte("key2"))
+	err = writer.Add([]byte("key2"), 3)
 	require.NoError(t, err)
 
-	writer.SetTxNum(6)
-	err = writer.Add([]byte("key1"))
+	err = writer.Add([]byte("key1"), 6)
 	require.NoError(t, err)
-	err = writer.Add([]byte("key3"))
+	err = writer.Add([]byte("key3"), 6)
 	require.NoError(t, err)
 
 	err = writer.Flush(ctx, tx)
@@ -350,12 +346,11 @@ func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log
 		// keys are encodings of numbers 1..31
 		// each key changes value on every txNum which is multiple of the key
 		for txNum := uint64(1); txNum <= txs; txNum++ {
-			writer.SetTxNum(txNum)
 			for keyNum := uint64(1); keyNum <= module; keyNum++ {
 				if txNum%keyNum == 0 {
 					var k [8]byte
 					binary.BigEndian.PutUint64(k[:], keyNum)
-					err := writer.Add(k[:])
+					err := writer.Add(k[:], txNum)
 					require.NoError(err)
 				}
 			}
@@ -570,7 +565,7 @@ func TestInvIndexScanFiles(t *testing.T) {
 	// Recreate InvertedIndex to scan the files
 	salt := uint32(1)
 	cfg := ii.iiCfg
-	cfg.salt = &salt
+	cfg.salt.Store(&salt)
 
 	var err error
 	ii, err = NewInvertedIndex(cfg, 16, logger)
@@ -656,12 +651,12 @@ func TestScanStaticFiles(t *testing.T) {
 
 	ii := emptyTestInvertedIndex(1)
 	files := []string{
-		"v1-accounts.0-1.ef",
-		"v1-accounts.1-2.ef",
-		"v1-accounts.0-4.ef",
-		"v1-accounts.2-3.ef",
-		"v1-accounts.3-4.ef",
-		"v1-accounts.4-5.ef",
+		"v1.0-accounts.0-1.ef",
+		"v1.0-accounts.1-2.ef",
+		"v1.0-accounts.0-4.ef",
+		"v1.0-accounts.2-3.ef",
+		"v1.0-accounts.3-4.ef",
+		"v1.0-accounts.4-5.ef",
 	}
 	ii.scanDirtyFiles(files)
 	require.Equal(t, 6, ii.dirtyFiles.Len())
@@ -676,22 +671,21 @@ func TestScanStaticFiles(t *testing.T) {
 func TestCtxFiles(t *testing.T) {
 	ii := emptyTestInvertedIndex(1)
 	files := []string{
-		"v1-accounts.0-1.ef", // overlap with same `endTxNum=4`
-		"v1-accounts.1-2.ef",
-		"v1-accounts.0-4.ef",
-		"v1-accounts.2-3.ef",
-		"v1-accounts.3-4.ef",
-		"v1-accounts.4-5.ef",     // no overlap
-		"v1-accounts.480-484.ef", // overlap with same `startTxNum=480`
-		"v1-accounts.480-488.ef",
-		"v1-accounts.480-496.ef",
-		"v1-accounts.480-512.ef",
+		"v1.0-accounts.0-1.ef", // overlap with same `endTxNum=4`
+		"v1.0-accounts.1-2.ef",
+		"v1.0-accounts.0-4.ef",
+		"v1.0-accounts.2-3.ef",
+		"v1.0-accounts.3-4.ef",
+		"v1.0-accounts.4-5.ef",     // no overlap
+		"v1.0-accounts.480-484.ef", // overlap with same `startTxNum=480`
+		"v1.0-accounts.480-488.ef",
+		"v1.0-accounts.480-496.ef",
+		"v1.0-accounts.480-512.ef",
 	}
 	ii.scanDirtyFiles(files)
 	require.Equal(t, 10, ii.dirtyFiles.Len())
 	ii.dirtyFiles.Scan(func(item *filesItem) bool {
-		fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-		item.decompressor = &seg.Decompressor{FileName1: fName}
+		item.decompressor = &seg.Decompressor{}
 		return true
 	})
 

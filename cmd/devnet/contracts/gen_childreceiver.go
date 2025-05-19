@@ -10,10 +10,10 @@ import (
 	"strings"
 
 	ethereum "github.com/erigontech/erigon"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/abi"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/event"
-	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/abi/bind"
 )
 
@@ -23,7 +23,7 @@ var (
 	_ = strings.NewReader
 	_ = ethereum.NotFound
 	_ = bind.Bind
-	_ = libcommon.Big1
+	_ = common.Big1
 	_ = types.BloomLookup
 	_ = event.NewSubscription
 	_ = fmt.Errorf
@@ -37,15 +37,15 @@ const ChildReceiverABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"t
 var ChildReceiverBin = "0x608060405234801561001057600080fd5b5061029c806100206000396000f3fe608060405234801561001057600080fd5b50600436106100365760003560e01c806326c53bea1461003b578063982fb9d814610050575b600080fd5b61004e61004936600461015b565b610082565b005b61007061005e3660046101ef565b60006020819052908152604090205481565b60405190815260200160405180910390f35b33611001146100c85760405162461bcd60e51b815260206004820152600e60248201526d24b73b30b634b21039b2b73232b960911b604482015260640160405180910390fd5b6000806100d783850185610213565b6001600160a01b03821660009081526020819052604090205491935091506100ff828261023f565b6001600160a01b038416600081815260208181526040918290209390935580519182529181018490527ff11e547d796cc64acdf758e7cee90439494fd886a19159454aa61e473fdbafef910160405180910390a1505050505050565b60008060006040848603121561017057600080fd5b83359250602084013567ffffffffffffffff8082111561018f57600080fd5b818601915086601f8301126101a357600080fd5b8135818111156101b257600080fd5b8760208285010111156101c457600080fd5b6020830194508093505050509250925092565b6001600160a01b03811681146101ec57600080fd5b50565b60006020828403121561020157600080fd5b813561020c816101d7565b9392505050565b6000806040838503121561022657600080fd5b8235610231816101d7565b946020939093013593505050565b8082018082111561026057634e487b7160e01b600052601160045260246000fd5b9291505056fea2646970667358221220bb3a513950ddc3581a83b932be35476871cfca25f2faf93bb137e0f50d8c5ad864736f6c63430008140033"
 
 // DeployChildReceiver deploys a new Ethereum contract, binding an instance of ChildReceiver to it.
-func DeployChildReceiver(auth *bind.TransactOpts, backend bind.ContractBackend) (libcommon.Address, types.Transaction, *ChildReceiver, error) {
+func DeployChildReceiver(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *ChildReceiver, error) {
 	parsed, err := abi.JSON(strings.NewReader(ChildReceiverABI))
 	if err != nil {
-		return libcommon.Address{}, nil, nil, err
+		return common.Address{}, nil, nil, err
 	}
 
-	address, tx, contract, err := bind.DeployContract(auth, parsed, libcommon.FromHex(ChildReceiverBin), backend)
+	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(ChildReceiverBin), backend)
 	if err != nil {
-		return libcommon.Address{}, nil, nil, err
+		return common.Address{}, nil, nil, err
 	}
 	return address, tx, &ChildReceiver{ChildReceiverCaller: ChildReceiverCaller{contract: contract}, ChildReceiverTransactor: ChildReceiverTransactor{contract: contract}, ChildReceiverFilterer: ChildReceiverFilterer{contract: contract}}, nil
 }
@@ -110,7 +110,7 @@ type ChildReceiverTransactorRaw struct {
 }
 
 // NewChildReceiver creates a new instance of ChildReceiver, bound to a specific deployed contract.
-func NewChildReceiver(address libcommon.Address, backend bind.ContractBackend) (*ChildReceiver, error) {
+func NewChildReceiver(address common.Address, backend bind.ContractBackend) (*ChildReceiver, error) {
 	contract, err := bindChildReceiver(address, backend, backend, backend)
 	if err != nil {
 		return nil, err
@@ -119,7 +119,7 @@ func NewChildReceiver(address libcommon.Address, backend bind.ContractBackend) (
 }
 
 // NewChildReceiverCaller creates a new read-only instance of ChildReceiver, bound to a specific deployed contract.
-func NewChildReceiverCaller(address libcommon.Address, caller bind.ContractCaller) (*ChildReceiverCaller, error) {
+func NewChildReceiverCaller(address common.Address, caller bind.ContractCaller) (*ChildReceiverCaller, error) {
 	contract, err := bindChildReceiver(address, caller, nil, nil)
 	if err != nil {
 		return nil, err
@@ -128,7 +128,7 @@ func NewChildReceiverCaller(address libcommon.Address, caller bind.ContractCalle
 }
 
 // NewChildReceiverTransactor creates a new write-only instance of ChildReceiver, bound to a specific deployed contract.
-func NewChildReceiverTransactor(address libcommon.Address, transactor bind.ContractTransactor) (*ChildReceiverTransactor, error) {
+func NewChildReceiverTransactor(address common.Address, transactor bind.ContractTransactor) (*ChildReceiverTransactor, error) {
 	contract, err := bindChildReceiver(address, nil, transactor, nil)
 	if err != nil {
 		return nil, err
@@ -137,7 +137,7 @@ func NewChildReceiverTransactor(address libcommon.Address, transactor bind.Contr
 }
 
 // NewChildReceiverFilterer creates a new log filterer instance of ChildReceiver, bound to a specific deployed contract.
-func NewChildReceiverFilterer(address libcommon.Address, filterer bind.ContractFilterer) (*ChildReceiverFilterer, error) {
+func NewChildReceiverFilterer(address common.Address, filterer bind.ContractFilterer) (*ChildReceiverFilterer, error) {
 	contract, err := bindChildReceiver(address, nil, nil, filterer)
 	if err != nil {
 		return nil, err
@@ -146,7 +146,7 @@ func NewChildReceiverFilterer(address libcommon.Address, filterer bind.ContractF
 }
 
 // bindChildReceiver binds a generic wrapper to an already deployed contract.
-func bindChildReceiver(address libcommon.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
+func bindChildReceiver(address common.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
 	parsed, err := abi.JSON(strings.NewReader(ChildReceiverABI))
 	if err != nil {
 		return nil, err
@@ -195,7 +195,7 @@ func (_ChildReceiver *ChildReceiverTransactorRaw) Transact(opts *bind.TransactOp
 // Senders is a free data retrieval call binding the contract method 0x982fb9d8.
 //
 // Solidity: function senders(address ) view returns(uint256)
-func (_ChildReceiver *ChildReceiverCaller) Senders(opts *bind.CallOpts, arg0 libcommon.Address) (*big.Int, error) {
+func (_ChildReceiver *ChildReceiverCaller) Senders(opts *bind.CallOpts, arg0 common.Address) (*big.Int, error) {
 	var out []interface{}
 	err := _ChildReceiver.contract.Call(opts, &out, "senders", arg0)
 
@@ -212,14 +212,14 @@ func (_ChildReceiver *ChildReceiverCaller) Senders(opts *bind.CallOpts, arg0 lib
 // Senders is a free data retrieval call binding the contract method 0x982fb9d8.
 //
 // Solidity: function senders(address ) view returns(uint256)
-func (_ChildReceiver *ChildReceiverSession) Senders(arg0 libcommon.Address) (*big.Int, error) {
+func (_ChildReceiver *ChildReceiverSession) Senders(arg0 common.Address) (*big.Int, error) {
 	return _ChildReceiver.Contract.Senders(&_ChildReceiver.CallOpts, arg0)
 }
 
 // Senders is a free data retrieval call binding the contract method 0x982fb9d8.
 //
 // Solidity: function senders(address ) view returns(uint256)
-func (_ChildReceiver *ChildReceiverCallerSession) Senders(arg0 libcommon.Address) (*big.Int, error) {
+func (_ChildReceiver *ChildReceiverCallerSession) Senders(arg0 common.Address) (*big.Int, error) {
 	return _ChildReceiver.Contract.Senders(&_ChildReceiver.CallOpts, arg0)
 }
 
@@ -352,13 +352,13 @@ func (it *ChildReceiverReceivedIterator) Close() error {
 
 // ChildReceiverReceived represents a Received event raised by the ChildReceiver contract.
 type ChildReceiverReceived struct {
-	Source libcommon.Address
+	Source common.Address
 	Amount *big.Int
 	Raw    types.Log // Blockchain specific contextual infos
 }
 
-func (_ChildReceiver *ChildReceiverFilterer) ReceivedEventID() libcommon.Hash {
-	return libcommon.HexToHash("0xf11e547d796cc64acdf758e7cee90439494fd886a19159454aa61e473fdbafef")
+func (_ChildReceiver *ChildReceiverFilterer) ReceivedEventID() common.Hash {
+	return common.HexToHash("0xf11e547d796cc64acdf758e7cee90439494fd886a19159454aa61e473fdbafef")
 }
 
 // FilterReceived is a free log retrieval operation binding the contract event 0xf11e547d796cc64acdf758e7cee90439494fd886a19159454aa61e473fdbafef.

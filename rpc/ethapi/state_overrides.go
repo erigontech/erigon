@@ -23,13 +23,12 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 )
 
-type StateOverrides map[libcommon.Address]Account
+type StateOverrides map[common.Address]Account
 
 func (overrides *StateOverrides) Override(state *state.IntraBlockState) error {
 
@@ -55,7 +54,7 @@ func (overrides *StateOverrides) Override(state *state.IntraBlockState) error {
 		}
 		// Replace entire state if caller requires.
 		if account.State != nil {
-			intState := map[libcommon.Hash]uint256.Int{}
+			intState := map[common.Hash]uint256.Int{}
 			for key, value := range *account.State {
 				intValue := new(uint256.Int).SetBytes32(value.Bytes())
 				intState[key] = *intValue
@@ -67,7 +66,7 @@ func (overrides *StateOverrides) Override(state *state.IntraBlockState) error {
 			for key, value := range *account.StateDiff {
 				key := key
 				intValue := new(uint256.Int).SetBytes32(value.Bytes())
-				state.SetState(addr, &key, *intValue)
+				state.SetState(addr, key, *intValue)
 			}
 		}
 	}

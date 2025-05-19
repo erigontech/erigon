@@ -21,6 +21,7 @@ package runtime
 
 import (
 	"context"
+	"github.com/erigontech/erigon-lib/types"
 	"math"
 	"math/big"
 	"os"
@@ -30,7 +31,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -49,8 +50,8 @@ import (
 type Config struct {
 	ChainConfig *chain.Config
 	Difficulty  *big.Int
-	Origin      libcommon.Address
-	Coinbase    libcommon.Address
+	Origin      common.Address
+	Coinbase    common.Address
 	BlockNumber *big.Int
 	Time        *big.Int
 	GasLimit    uint64
@@ -63,7 +64,7 @@ type Config struct {
 	State     *state.IntraBlockState
 	r         state.StateReader
 	w         state.StateWriter
-	GetHashFn func(n uint64) libcommon.Hash
+	GetHashFn func(n uint64) common.Hash
 }
 
 // sets defaults on the config
@@ -109,8 +110,8 @@ func setDefaults(cfg *Config) {
 		cfg.BlockNumber = new(big.Int)
 	}
 	if cfg.GetHashFn == nil {
-		cfg.GetHashFn = func(n uint64) libcommon.Hash {
-			return libcommon.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String())))
+		cfg.GetHashFn = func(n uint64) common.Hash {
+			return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String())))
 		}
 	}
 }
@@ -127,12 +128,18 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 	}
 
 	externalState := cfg.State != nil
-	var tx kv.RwTx
+	var tx kv.TemporalRwTx
 	var err error
 	if !externalState {
 		db := memdb.NewStateDB(tempdir)
 		defer db.Close()
-		agg, err := state3.NewAggregator(context.Background(), datadir.New(tempdir), config3.DefaultStepSize, db, log.New())
+		dirs := datadir.New(tempdir)
+		logger := log.New()
+		salt, err := state3.GetStateIndicesSalt(dirs, true, logger)
+		if err != nil {
+			return nil, nil, err
+		}
+		agg, err := state3.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, db, logger)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -146,17 +153,17 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 			return nil, nil, err
 		}
 		defer tx.Rollback()
-		sd, err := state3.NewSharedDomains(tx.(kv.TemporalRwTx), log.New())
+		sd, err := state3.NewSharedDomains(tx, log.New())
 		if err != nil {
 			return nil, nil, err
 		}
 		defer sd.Close()
 		cfg.r = state.NewReaderV3(sd)
-		cfg.w = state.NewWriterV4(sd)
+		cfg.w = state.NewWriter(sd, nil)
 		cfg.State = state.New(cfg.r)
 	}
 	var (
-		address = libcommon.BytesToAddress([]byte("contract"))
+		address = common.BytesToAddress([]byte("contract"))
 		vmenv   = NewEnv(cfg)
 		sender  = vm.AccountRef(cfg.Origin)
 		rules   = vmenv.ChainRules()
@@ -167,11 +174,11 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 	cfg.State.SetCode(address, code)
 	// Call the code with the given configuration.
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
-		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, libcommon.Address{})
+		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, common.Address{})
 	}
 	ret, _, err := vmenv.Call(
 		sender,
-		libcommon.BytesToAddress([]byte("contract")),
+		common.BytesToAddress([]byte("contract")),
 		input,
 		cfg.GasLimit,
 		cfg.Value,
@@ -185,14 +192,14 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 }
 
 // Create executes the code using the EVM create method
-func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, libcommon.Address, uint64, error) {
+func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, uint64, error) {
 	if cfg == nil {
 		cfg = new(Config)
 	}
 	setDefaults(cfg)
 
 	externalState := cfg.State != nil
-	var tx kv.RwTx
+	var tx kv.TemporalRwTx
 	var err error
 	if !externalState {
 		tmp := filepath.Join(os.TempDir(), "create-vm")
@@ -214,13 +221,13 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, libcommon.Addres
 			return nil, [20]byte{}, 0, err
 		}
 		defer tx.Rollback()
-		sd, err := state3.NewSharedDomains(tx.(kv.TemporalRwTx), log.New())
+		sd, err := state3.NewSharedDomains(tx, log.New())
 		if err != nil {
 			return nil, [20]byte{}, 0, err
 		}
 		defer sd.Close()
 		cfg.r = state.NewReaderV3(sd)
-		cfg.w = state.NewWriterV4(sd)
+		cfg.w = state.NewWriter(sd, nil)
 		cfg.State = state.New(cfg.r)
 	}
 	var (
@@ -246,7 +253,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, libcommon.Addres
 //
 // Call, unlike Execute, requires a config and also requires the State field to
 // be set.
-func Call(address libcommon.Address, input []byte, cfg *Config) ([]byte, uint64, error) {
+func Call(address common.Address, input []byte, cfg *Config) ([]byte, uint64, error) {
 	setDefaults(cfg)
 
 	vmenv := NewEnv(cfg)
@@ -259,6 +266,10 @@ func Call(address libcommon.Address, input []byte, cfg *Config) ([]byte, uint64,
 	rules := vmenv.ChainRules()
 	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, &address, vm.ActivePrecompiles(rules), nil, nil)
 
+	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
+		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, common.Address{})
+	}
+
 	// Call the code with the given configuration.
 	ret, leftOverGas, err := vmenv.Call(
 		sender,
@@ -268,6 +279,10 @@ func Call(address libcommon.Address, input []byte, cfg *Config) ([]byte, uint64,
 		cfg.Value,
 		false, /* bailout */
 	)
+
+	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxEnd != nil {
+		cfg.EVMConfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: cfg.GasLimit - leftOverGas}, err)
+	}
 
 	return ret, leftOverGas, err
 }

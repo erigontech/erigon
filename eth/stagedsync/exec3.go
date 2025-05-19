@@ -27,6 +27,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-db/rawdb/rawdbhelpers"
+	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/cmp"
@@ -37,15 +40,12 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	state2 "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/rawdb/rawdbhelpers"
-	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/turbo/services"
@@ -315,7 +315,7 @@ func ExecV3(ctx context.Context,
 			accumulator = shards.NewAccumulator()
 		}
 	}
-	rs := state.NewParallelExecutionState(doms, logger)
+	rs := state.NewParallelExecutionState(doms, cfg.syncCfg, cfg.chainConfig.Bor != nil, logger)
 
 	////TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
 	// Now rwLoop closing both (because applyLoop we completely restart)
@@ -527,6 +527,8 @@ Loop:
 		})
 		totalGasUsed += b.GasUsed()
 		blockContext := core.NewEVMBlockContext(header, getHashFn, cfg.engine, cfg.author /* author */, chainConfig)
+		gp := new(core.GasPool).AddGas(header.GasLimit).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(b.Time()))
+
 		// print type of engine
 		if parallel {
 			if err := executor.status(ctx, commitThreshold); err != nil {
@@ -606,12 +608,15 @@ Loop:
 
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
-				txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
-				if err != nil {
-					if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
-						hooks.OnBlockEnd(err)
+
+				if txTask.Tx.Type() != types.AccountAbstractionTxType {
+					txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
+					if err != nil {
+						if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
+							hooks.OnBlockEnd(err)
+						}
+						return err
 					}
-					return err
 				}
 			}
 
@@ -624,7 +629,7 @@ Loop:
 		var isAASequence bool
 		for _, txTask := range txTasks {
 			txIndex := txTask.TxIndex
-			if txIndex < 0 || txIndex >= len(txs)-1 {
+			if txIndex < 0 || txIndex > len(txs)-1 {
 				continue
 			}
 
@@ -636,9 +641,9 @@ Loop:
 				continue
 			}
 
-			aaBatchSize := uint64(1)
-			for _, tt := range txTasks[txIndex+1:] {
-				if tt.Tx.Type() == types.AccountAbstractionTxType {
+			aaBatchSize := uint64(0)
+			for _, tt := range txTasks {
+				if tt.TxIndex > txIndex && tt.Tx != nil && tt.Tx.Type() == types.AccountAbstractionTxType {
 					aaBatchSize++
 					tt.InBatch = true
 				} else {
@@ -651,7 +656,7 @@ Loop:
 		}
 
 		if parallel {
-			_, err := executor.execute(ctx, txTasks)
+			_, err := executor.execute(ctx, txTasks, nil /*gasPool*/) // For now don't use block's gas pool for parallel
 			if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
 				hooks.OnBlockEnd(err)
 			}
@@ -665,7 +670,7 @@ Loop:
 
 			se.skipPostEvaluation = skipPostEvaluation
 
-			continueLoop, err := se.execute(ctx, txTasks)
+			continueLoop, err := se.execute(ctx, txTasks, gp)
 			if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
 				hooks.OnBlockEnd(err)
 			}
@@ -711,14 +716,6 @@ Loop:
 				}
 			}
 			executor.domains().SetChangesetAccumulator(nil)
-
-			if cfg.syncCfg.PersistReceipts > 0 {
-				if len(txTasks) > 0 && txTasks[0].BlockReceipts != nil {
-					if err := rawdb.WriteReceiptsCache(executor.tx(), txTasks[0].BlockNum, txTasks[0].BlockHash, txTasks[0].BlockReceipts); err != nil {
-						return err
-					}
-				}
-			}
 		}
 
 		mxExecBlocks.Add(1)

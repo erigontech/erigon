@@ -14,6 +14,9 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
+// Skip when running tests with race detector: see issue #15007
+//go:build !race
+
 package shutter_test
 
 import (
@@ -22,10 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"os"
 	"path"
-	"runtime"
-	"runtime/pprof"
 	"testing"
 	"time"
 
@@ -34,12 +34,14 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	params2 "github.com/erigontech/erigon-lib/chain/params"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/core"
@@ -60,28 +62,8 @@ import (
 )
 
 func TestShutterBlockBuilding(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please")
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-
-	go func() {
-		// do a goroutine dump if we haven't finished in a long time
-		err := libcommon.Sleep(ctx, 2*time.Minute)
-		if err != nil {
-			// means we've finished before sleep time - no need for a pprof dump
-			return
-		}
-
-		err = pprof.Lookup("goroutine").WriteTo(os.Stdout, 1)
-		require.NoError(t, err)
-	}()
 
 	uni := initBlockBuildingUniverse(ctx, t)
 	sender1 := uni.acc1PrivKey
@@ -226,15 +208,15 @@ type blockBuildingUniverse struct {
 	contractsDeployer    testhelpers.ContractsDeployer
 	contractsDeployment  testhelpers.ContractsDeployment
 	acc1PrivKey          *ecdsa.PrivateKey
-	acc1                 libcommon.Address
+	acc1                 common.Address
 	acc2PrivKey          *ecdsa.PrivateKey
-	acc2                 libcommon.Address
+	acc2                 common.Address
 	acc3PrivKey          *ecdsa.PrivateKey
-	acc3                 libcommon.Address
+	acc3                 common.Address
 	acc4PrivKey          *ecdsa.PrivateKey
-	acc4                 libcommon.Address
+	acc4                 common.Address
 	acc5PrivKey          *ecdsa.PrivateKey
-	acc5                 libcommon.Address
+	acc5                 common.Address
 	transactor           testhelpers.EncryptedTransactor
 	txnInclusionVerifier testhelpers.TxnInclusionVerifier
 	shutterConfig        shuttercfg.Config
@@ -352,6 +334,18 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	genesis := core.ChiadoGenesisBlock()
 	genesis.Timestamp = uint64(time.Now().Unix() - 1)
 	genesis.Config = &chainConfig
+	genesis.Alloc[params2.ConsolidationRequestAddress] = types.GenesisAccount{
+		Code:    []byte{0}, // Can't be empty
+		Storage: make(map[common.Hash]common.Hash, 0),
+		Balance: big.NewInt(0),
+		Nonce:   0,
+	}
+	genesis.Alloc[params2.WithdrawalRequestAddress] = types.GenesisAccount{
+		Code:    []byte{0}, // Can't be empty
+		Storage: make(map[common.Hash]common.Hash, 0),
+		Balance: big.NewInt(0),
+		Nonce:   0,
+	}
 	// 1_000 ETH in wei in the bank
 	bank := testhelpers.NewBank(new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil))
 	bank.RegisterGenesisAlloc(genesis)

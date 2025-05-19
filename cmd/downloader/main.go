@@ -133,7 +133,7 @@ func init() {
 	withFile(createTorrent)
 	withChainFlag(createTorrent)
 	rootCmd.AddCommand(createTorrent)
-	createTorrent.Flags().BoolVar(&all, "all", false, "Produce all possible .torrent files")
+	createTorrent.Flags().BoolVar(&all, "all", true, "Produce all possible .torrent files")
 
 	rootCmd.AddCommand(torrentCat)
 	rootCmd.AddCommand(torrentMagnet)
@@ -144,7 +144,7 @@ func init() {
 	withDataDir(manifestCmd)
 	withChainFlag(manifestCmd)
 	rootCmd.AddCommand(manifestCmd)
-	manifestCmd.Flags().BoolVar(&all, "all", false, "Produce all possible .torrent files")
+	manifestCmd.Flags().BoolVar(&all, "all", true, "Produce all possible .torrent files")
 
 	manifestVerifyCmd.Flags().StringVar(&webseeds, utils.WebSeedsFlag.Name, utils.WebSeedsFlag.Value, utils.WebSeedsFlag.Usage)
 	manifestVerifyCmd.PersistentFlags().BoolVar(&verifyFailfast, "verify.failfast", false, "Stop on first found error. Report it and exit")
@@ -153,7 +153,7 @@ func init() {
 
 	withDataDir(printTorrentHashes)
 	withChainFlag(printTorrentHashes)
-	printTorrentHashes.Flags().BoolVar(&all, "all", false, "Produce all possible .torrent files")
+	printTorrentHashes.Flags().BoolVar(&all, "all", true, "Produce all possible .torrent files")
 	printTorrentHashes.PersistentFlags().BoolVar(&forceRebuild, "rebuild", false, "Force re-create .torrent files")
 	printTorrentHashes.Flags().StringVar(&targetFile, "targetfile", "", "write output to file")
 	if err := printTorrentHashes.MarkFlagFilename("targetfile"); err != nil {

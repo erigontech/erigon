@@ -27,18 +27,17 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	libstate "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/execution/consensus/misc"
-	params2 "github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
@@ -65,7 +64,7 @@ type BlockGen struct {
 
 // SetCoinbase sets the coinbase of the generated block.
 // It can be called at most once.
-func (b *BlockGen) SetCoinbase(addr libcommon.Address) {
+func (b *BlockGen) SetCoinbase(addr common.Address) {
 	if b.gasPool != nil {
 		if len(b.txs) > 0 {
 			panic("coinbase must be set before adding transactions")
@@ -116,12 +115,12 @@ func (b *BlockGen) AddFailedTx(tx types.Transaction) {
 // further limitations on the content of transactions that can be
 // added. If contract code relies on the BLOCKHASH instruction,
 // the block in chain will be returned.
-func (b *BlockGen) AddTxWithChain(getHeader func(hash libcommon.Hash, number uint64) *types.Header, engine consensus.Engine, txn types.Transaction) {
+func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, txn types.Transaction) {
 	if b.beforeAddTx != nil {
 		b.beforeAddTx()
 	}
 	if b.gasPool == nil {
-		b.SetCoinbase(libcommon.Address{})
+		b.SetCoinbase(common.Address{})
 	}
 	b.ibs.SetTxContext(len(b.txs))
 	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, &b.header.GasUsed, b.header.BlobGasUsed, vm.Config{})
@@ -132,12 +131,12 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash libcommon.Hash, number uin
 	b.receipts = append(b.receipts, receipt)
 }
 
-func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash libcommon.Hash, number uint64) *types.Header, engine consensus.Engine, txn types.Transaction) {
+func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, txn types.Transaction) {
 	if b.beforeAddTx != nil {
 		b.beforeAddTx()
 	}
 	if b.gasPool == nil {
-		b.SetCoinbase(libcommon.Address{})
+		b.SetCoinbase(common.Address{})
 	}
 	b.ibs.SetTxContext(len(b.txs))
 	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, &b.header.GasUsed, b.header.BlobGasUsed, vm.Config{})
@@ -171,7 +170,7 @@ func (b *BlockGen) AddUncheckedReceipt(receipt *types.Receipt) {
 
 // TxNonce returns the next valid transaction nonce for the
 // account at addr. It panics if the account does not exist.
-func (b *BlockGen) TxNonce(addr libcommon.Address) uint64 {
+func (b *BlockGen) TxNonce(addr common.Address) uint64 {
 	exist, err := b.ibs.Exist(addr)
 	if err != nil {
 		panic(fmt.Sprintf("can't get account: %s", err))
@@ -316,7 +315,7 @@ func (cp *ChainPack) NumberOfPoWBlocks() int {
 // a similar non-validating proof of work implementation.
 func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.Engine, db kv.TemporalRwDB, n int, gen func(int, *BlockGen)) (*ChainPack, error) {
 	if config == nil {
-		config = params2.TestChainConfig
+		config = chain.TestChainConfig
 	}
 	headers, blocks, receipts := make([]*types.Header, n), make(types.Blocks, n), make([]types.Receipts, n)
 	chainreader := &FakeChainReader{Cfg: config, current: parent}
@@ -334,7 +333,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	}
 	defer domains.Close()
 	stateReader := state.NewReaderV3(domains)
-	stateWriter := state.NewWriterV4(domains)
+	stateWriter := state.NewWriter(domains, nil)
 
 	txNum := -1
 	setBlockNum := func(blockNum uint64) {
@@ -356,9 +355,9 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		b.header = makeHeader(chainreader, parent, ibs, b.engine)
 		// Mutate the state and block according to any hard-fork specs
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
-			limit := new(big.Int).Add(daoBlock, params2.DAOForkExtraRange)
+			limit := new(big.Int).Add(daoBlock, misc.DAOForkExtraRange)
 			if b.header.Number.Cmp(daoBlock) >= 0 && b.header.Number.Cmp(limit) < 0 {
-				b.header.Extra = libcommon.CopyBytes(params2.DAOForkBlockExtra)
+				b.header.Extra = common.CopyBytes(misc.DAOForkBlockExtra)
 			}
 		}
 		if b.engine != nil {
@@ -395,7 +394,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			if err = domains.Flush(ctx, tx); err != nil {
 				return nil, nil, err
 			}
-			b.header.Root = libcommon.BytesToHash(stateRoot)
+			b.header.Root = common.BytesToHash(stateRoot)
 
 			// Recreating block to make sure Root makes it into the header
 			block := types.NewBlockForAsembling(b.header, b.txs, b.uncles, b.receipts, nil /* withdrawals */)
@@ -425,8 +424,8 @@ func MakeEmptyHeader(parent *types.Header, chainConfig *chain.Config, timestamp 
 	header := types.NewEmptyHeaderForAssembling()
 	header.Root = parent.Root
 	header.ParentHash = parent.Hash()
-	header.Number = new(big.Int).Add(parent.Number, libcommon.Big1)
-	header.Difficulty = libcommon.Big0
+	header.Number = new(big.Int).Add(parent.Number, common.Big1)
+	header.Difficulty = common.Big0
 	header.Time = timestamp
 
 	parentGasLimit := parent.GasLimit
@@ -491,18 +490,18 @@ func (cr *FakeChainReader) CurrentFinalizedHeader() *types.Header {
 func (cr *FakeChainReader) CurrentSafeHeader() *types.Header {
 	return nil
 }
-func (cr *FakeChainReader) GetHeaderByNumber(number uint64) *types.Header              { return nil }
-func (cr *FakeChainReader) GetHeaderByHash(hash libcommon.Hash) *types.Header          { return nil }
-func (cr *FakeChainReader) GetHeader(hash libcommon.Hash, number uint64) *types.Header { return nil }
-func (cr *FakeChainReader) GetBlock(hash libcommon.Hash, number uint64) *types.Block   { return nil }
-func (cr *FakeChainReader) HasBlock(hash libcommon.Hash, number uint64) bool           { return false }
-func (cr *FakeChainReader) GetTd(hash libcommon.Hash, number uint64) *big.Int          { return nil }
-func (cr *FakeChainReader) FrozenBlocks() uint64                                       { return 0 }
-func (cr *FakeChainReader) FrozenBorBlocks() uint64                                    { return 0 }
-func (cr *FakeChainReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
+func (cr *FakeChainReader) GetHeaderByNumber(number uint64) *types.Header           { return nil }
+func (cr *FakeChainReader) GetHeaderByHash(hash common.Hash) *types.Header          { return nil }
+func (cr *FakeChainReader) GetHeader(hash common.Hash, number uint64) *types.Header { return nil }
+func (cr *FakeChainReader) GetBlock(hash common.Hash, number uint64) *types.Block   { return nil }
+func (cr *FakeChainReader) HasBlock(hash common.Hash, number uint64) bool           { return false }
+func (cr *FakeChainReader) GetTd(hash common.Hash, number uint64) *big.Int          { return nil }
+func (cr *FakeChainReader) FrozenBlocks() uint64                                    { return 0 }
+func (cr *FakeChainReader) FrozenBorBlocks() uint64                                 { return 0 }
+func (cr *FakeChainReader) BorEventsByBlock(hash common.Hash, number uint64) []rlp.RawValue {
 	return nil
 }
-func (cr *FakeChainReader) BorStartEventId(hash libcommon.Hash, number uint64) uint64 {
+func (cr *FakeChainReader) BorStartEventId(hash common.Hash, number uint64) uint64 {
 	return 0
 }
 func (cr *FakeChainReader) BorSpan(spanId uint64) *heimdall.Span { return nil }

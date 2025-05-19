@@ -30,10 +30,10 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/tracers"
@@ -44,13 +44,13 @@ import (
 )
 
 // prestateTrace is the result of a prestateTrace run.
-type prestateTrace = map[libcommon.Address]*account
+type prestateTrace = map[common.Address]*account
 
 type account struct {
-	Balance string                            `json:"balance"`
-	Code    string                            `json:"code"`
-	Nonce   uint64                            `json:"nonce"`
-	Storage map[libcommon.Hash]libcommon.Hash `json:"storage"`
+	Balance string                      `json:"balance"`
+	Code    string                      `json:"code"`
+	Nonce   uint64                      `json:"nonce"`
+	Storage map[common.Hash]common.Hash `json:"storage"`
 }
 
 // testcase defines a single test to check the stateDiff tracer against.
@@ -96,7 +96,7 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 			} else if err := json.Unmarshal(blob, test); err != nil {
 				t.Fatalf("failed to parse testcase: %v", err)
 			}
-			tx, err := types.UnmarshalTransactionFromBinary(libcommon.FromHex(test.Input), false /* blobTxnsAreWrappedWithBlobs */)
+			tx, err := types.UnmarshalTransactionFromBinary(common.FromHex(test.Input), false /* blobTxnsAreWrappedWithBlobs */)
 			if err != nil {
 				t.Fatalf("failed to parse testcase input: %v", err)
 			}

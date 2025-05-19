@@ -79,8 +79,8 @@ func TestArchiveWriter(t *testing.T) {
 
 			fk, _ := g.Next(nil)
 			fv, _ := g.Next(nil)
-			require.EqualValues(tb, k, fk)
-			require.EqualValues(tb, upd[0].value, fv)
+			require.Equal(tb, k, fk)
+			require.Equal(tb, upd[0].value, fv)
 		}
 	}
 

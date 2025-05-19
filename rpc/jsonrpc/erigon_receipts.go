@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/ethutils"
 	"github.com/erigontech/erigon/eth/filters"
 	"github.com/erigontech/erigon/execution/exec3"
@@ -253,7 +253,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			continue
 		}
 
-		_, err = exec.ExecTxn(txNum, txIndex, txn, true)
+		err = exec.ExecTxn(txNum, txIndex, txn, true)
 		if err != nil {
 			return nil, err
 		}

@@ -272,6 +272,50 @@ func TestEliasFano(t *testing.T) {
 	assert.Equal(t, ef2.Count(), Count(buf.Bytes()))
 }
 
+func BenchmarkRead(b *testing.B) {
+	offsets := []uint64{1, 4, 6, 8, 10, 14, 16, 19, 22, 34, 37, 39, 41, 43, 48, 51, 54, 58, 62}
+	count := uint64(len(offsets))
+	maxOffset := offsets[0]
+	for _, offset := range offsets {
+		if offset > maxOffset {
+			maxOffset = offset
+		}
+	}
+	ef := NewEliasFano(count, maxOffset)
+	for _, offset := range offsets {
+		ef.AddOffset(offset)
+	}
+	ef.Build()
+	buf := bytes.NewBuffer(nil)
+	require.NoError(b, ef.Write(buf))
+
+	b.Run("read", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			ReadEliasFano(buf.Bytes())
+		}
+	})
+
+	b.Run("reset", func(b *testing.B) {
+		ef := NewEliasFano(1, 1)
+		for i := 0; i < b.N; i++ {
+			ef.Reset(buf.Bytes())
+		}
+	})
+	b.Run("read.search", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			Seek(buf.Bytes(), 1)
+		}
+	})
+
+	b.Run("reset.search", func(b *testing.B) {
+		ef := NewEliasFano(1, 1)
+		for i := 0; i < b.N; i++ {
+			ef.Reset(buf.Bytes()).Seek(1)
+		}
+	})
+
+}
+
 func TestIterator(t *testing.T) {
 	offsets := []uint64{1, 4, 6, 8, 10, 14, 16, 19, 22, 34, 37, 39, 41, 43, 48, 51, 54, 58, 62}
 	count := uint64(len(offsets))

@@ -14,6 +14,9 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
+// Skip when running tests with race detector on macOS: see issue #15007
+//go:build !(darwin && race)
+
 package bor
 
 import (
@@ -36,7 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/tests/bor/helper"
@@ -68,10 +71,6 @@ var (
 // Example : CGO_CFLAGS="-D__BLST_PORTABLE__" go test -run ^TestMiningBenchmark$ github.com/erigontech/erigon/tests/bor -v -count=1
 // In TestMiningBenchmark, we will test the mining performance. We will initialize a single node devnet and fire 5000 txs. We will measure the time it takes to include all the txs. This can be made more advcanced by increasing blockLimit and txsInTxpool.
 func TestMiningBenchmark(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	//usually 15sec is enough
 	ctx, clean := context.WithTimeout(context.Background(), time.Minute)
 	defer clean()

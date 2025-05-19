@@ -31,13 +31,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/tracers"
@@ -55,30 +55,30 @@ type callContext struct {
 	Time       math.HexOrDecimal64   `json:"timestamp"`
 	GasLimit   math.HexOrDecimal64   `json:"gasLimit"`
 	BaseFee    *math.HexOrDecimal256 `json:"baseFeePerGas"`
-	Miner      libcommon.Address     `json:"miner"`
+	Miner      common.Address        `json:"miner"`
 }
 
 // callLog is the result of LOG opCode
 type callLog struct {
-	Index   uint64            `json:"index"`
-	Address libcommon.Address `json:"address"`
-	Topics  []libcommon.Hash  `json:"topics"`
-	Data    hexutil.Bytes     `json:"data"`
+	Index   uint64         `json:"index"`
+	Address common.Address `json:"address"`
+	Topics  []common.Hash  `json:"topics"`
+	Data    hexutil.Bytes  `json:"data"`
 }
 
 // callTrace is the result of a callTracer run.
 type callTrace struct {
-	From     libcommon.Address `json:"from"`
-	Gas      *hexutil.Uint64   `json:"gas"`
-	GasUsed  *hexutil.Uint64   `json:"gasUsed"`
-	To       libcommon.Address `json:"to,omitempty"`
-	Input    hexutil.Bytes     `json:"input"`
-	Output   hexutil.Bytes     `json:"output,omitempty"`
-	Error    string            `json:"error,omitempty"`
-	Revertal string            `json:"revertReason,omitempty"`
-	Calls    []callTrace       `json:"calls,omitempty"`
-	Logs     []callLog         `json:"logs,omitempty"`
-	Value    *hexutil.Big      `json:"value,omitempty"`
+	From     common.Address  `json:"from"`
+	Gas      *hexutil.Uint64 `json:"gas"`
+	GasUsed  *hexutil.Uint64 `json:"gasUsed"`
+	To       common.Address  `json:"to,omitempty"`
+	Input    hexutil.Bytes   `json:"input"`
+	Output   hexutil.Bytes   `json:"output,omitempty"`
+	Error    string          `json:"error,omitempty"`
+	Revertal string          `json:"revertReason,omitempty"`
+	Calls    []callTrace     `json:"calls,omitempty"`
+	Logs     []callLog       `json:"logs,omitempty"`
+	Value    *hexutil.Big    `json:"value,omitempty"`
 	// Gencodec adds overridden fields at the end
 	Type string `json:"type"`
 }
@@ -129,7 +129,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			} else if err := json.Unmarshal(blob, test); err != nil {
 				t.Fatalf("failed to parse testcase: %v", err)
 			}
-			tx, err := types.UnmarshalTransactionFromBinary(libcommon.FromHex(test.Input), false /* blobTxnsAreWrappedWithBlobs */)
+			tx, err := types.UnmarshalTransactionFromBinary(common.FromHex(test.Input), false /* blobTxnsAreWrappedWithBlobs */)
 			if err != nil {
 				t.Fatalf("failed to parse testcase input: %v", err)
 			}
@@ -236,7 +236,7 @@ func BenchmarkTracers(b *testing.B) {
 
 func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 	// Configure a blockchain with the given prestate
-	tx, err := types.DecodeTransaction(libcommon.FromHex(test.Input))
+	tx, err := types.DecodeTransaction(common.FromHex(test.Input))
 	if err != nil {
 		b.Fatalf("failed to parse testcase input: %v", err)
 	}
@@ -291,7 +291,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 // txn to A, A calls B with zero value. B does not already exist.
 // Expected: that enter/exit is invoked and the inner call is shown in the result
 func TestZeroValueToNotExitCall(t *testing.T) {
-	var to = libcommon.HexToAddress("0x00000000000000000000000000000000deadbeef")
+	var to = common.HexToAddress("0x00000000000000000000000000000000deadbeef")
 	privkey, err := crypto.HexToECDSA("0000000000000000deadbeef00000000000000000000000000000000deadbeef")
 	if err != nil {
 		t.Fatalf("err %v", err)
@@ -315,7 +315,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 	context := evmtypes.BlockContext{
 		CanTransfer: core.CanTransfer,
 		Transfer:    consensus.Transfer,
-		Coinbase:    libcommon.Address{},
+		Coinbase:    common.Address{},
 		BlockNumber: 8000000,
 		Time:        5,
 		Difficulty:  big.NewInt(0x30000),

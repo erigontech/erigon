@@ -41,7 +41,7 @@ import (
 	"io"
 	"math/big"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 var (
@@ -116,7 +116,7 @@ func GenerateKey(rand io.Reader, curve elliptic.Curve, params *ECIESParams) (prv
 // MaxSharedKeyLength returns the maximum length of the shared key the
 // public key can produce.
 func MaxSharedKeyLength(pub *PublicKey) int {
-	return libcommon.BitLenToByteLen(pub.Curve.Params().BitSize)
+	return common.BitLenToByteLen(pub.Curve.Params().BitSize)
 }
 
 // ECDH key agreement method used to establish secret keys for encryption.

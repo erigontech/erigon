@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/version"
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/polygon/bridge"
@@ -45,7 +46,7 @@ func TestBlockReaderLastFrozenSpanIdWhenSegmentFilesArePresent(t *testing.T) {
 	logger := testlog.Logger(t, log.LvlInfo)
 	dir := t.TempDir()
 	createTestBorEventSegmentFile(t, 0, 500_000, 132, dir, logger)
-	createTestSegmentFile(t, 0, 500_000, heimdall.Enums.Spans, dir, 1, logger)
+	createTestSegmentFile(t, 0, 500_000, heimdall.Enums.Spans, dir, version.V1_0, logger)
 	borRoSnapshots := heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet}, dir, 0, logger)
 	defer borRoSnapshots.Close()
 	err := borRoSnapshots.OpenFolder()
@@ -79,10 +80,10 @@ func TestBlockReaderLastFrozenSpanIdWhenSegmentFilesAreNotPresent(t *testing.T) 
 	require.Equal(t, uint64(0), blockReader.LastFrozenSpanId())
 }
 
-func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, version snaptype.Version, logger log.Logger) {
+func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, ver version.Version, logger log.Logger) {
 	compressCfg := seg.DefaultCfg
 	compressCfg.MinPatternScore = 100
-	c, err := seg.NewCompressor(context.Background(), "test", filepath.Join(dir, snaptype.SegmentFileName(version, from, to, name)), dir, compressCfg, log.LvlDebug, logger)
+	c, err := seg.NewCompressor(context.Background(), "test", filepath.Join(dir, snaptype.SegmentFileName(ver, from, to, name)), dir, compressCfg, log.LvlDebug, logger)
 	require.NoError(t, err)
 	defer c.Close()
 	c.DisableFsync()
@@ -94,7 +95,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 		KeyCount:   1,
 		BucketSize: 10,
 		TmpDir:     dir,
-		IndexFile:  filepath.Join(dir, snaptype.IdxFileName(1, from, to, name.String())),
+		IndexFile:  filepath.Join(dir, snaptype.IdxFileName(version.V1_0, from, to, name.String())),
 		LeafSize:   8,
 	}, logger)
 	require.NoError(t, err)
@@ -109,7 +110,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 			KeyCount:   1,
 			BucketSize: 10,
 			TmpDir:     dir,
-			IndexFile:  filepath.Join(dir, snaptype.IdxFileName(1, from, to, coresnaptype.Indexes.TxnHash2BlockNum.Name)),
+			IndexFile:  filepath.Join(dir, snaptype.IdxFileName(version.V1_0, from, to, coresnaptype.Indexes.TxnHash2BlockNum.Name)),
 			LeafSize:   8,
 		}, logger)
 		require.NoError(t, err)
@@ -129,11 +130,11 @@ func TestBlockReaderLastFrozenSpanIdReturnsLastSegWithIdx(t *testing.T) {
 	createTestBorEventSegmentFile(t, 0, 500_000, 132, dir, logger)
 	createTestBorEventSegmentFile(t, 500_000, 1_000_000, 264, dir, logger)
 	createTestBorEventSegmentFile(t, 1_000_000, 1_500_000, 528, dir, logger)
-	createTestSegmentFile(t, 0, 500_000, heimdall.Enums.Spans, dir, 1, logger)
-	createTestSegmentFile(t, 500_000, 1_000_000, heimdall.Enums.Spans, dir, 1, logger)
-	createTestSegmentFile(t, 1_000_000, 1_500_000, heimdall.Enums.Spans, dir, 1, logger)
+	createTestSegmentFile(t, 0, 500_000, heimdall.Enums.Spans, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 500_000, 1_000_000, heimdall.Enums.Spans, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 1_000_000, 1_500_000, heimdall.Enums.Spans, dir, version.V1_0, logger)
 	// delete idx file for last bor span segment to simulate segment with missing idx file
-	idxFileToDelete := filepath.Join(dir, snaptype.IdxFileName(1, 1_000_000, 1_500_000, heimdall.Spans.Name()))
+	idxFileToDelete := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 1_000_000, 1_500_000, heimdall.Spans.Name()))
 	err := os.Remove(idxFileToDelete)
 	require.NoError(t, err)
 	borRoSnapshots := heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet}, dir, 0, logger)
@@ -158,17 +159,17 @@ func TestBlockReaderLastFrozenSpanIdReturnsZeroWhenAllSegmentsDoNotHaveIdx(t *te
 	createTestBorEventSegmentFile(t, 0, 500_000, 132, dir, logger)
 	createTestBorEventSegmentFile(t, 500_000, 1_000_000, 264, dir, logger)
 	createTestBorEventSegmentFile(t, 1_000_000, 1_500_000, 528, dir, logger)
-	createTestSegmentFile(t, 0, 500_000, heimdall.Enums.Spans, dir, 1, logger)
-	createTestSegmentFile(t, 500_000, 1_000_000, heimdall.Enums.Spans, dir, 1, logger)
-	createTestSegmentFile(t, 1_000_000, 1_500_000, heimdall.Enums.Spans, dir, 1, logger)
+	createTestSegmentFile(t, 0, 500_000, heimdall.Enums.Spans, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 500_000, 1_000_000, heimdall.Enums.Spans, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 1_000_000, 1_500_000, heimdall.Enums.Spans, dir, version.V1_0, logger)
 	// delete idx file for all bor span segments to simulate segments with missing idx files
-	idxFileToDelete := filepath.Join(dir, snaptype.IdxFileName(1, 1, 500_000, heimdall.Spans.Name()))
+	idxFileToDelete := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 1, 500_000, heimdall.Spans.Name()))
 	err := os.Remove(idxFileToDelete)
 	require.NoError(t, err)
-	idxFileToDelete = filepath.Join(dir, snaptype.IdxFileName(1, 500_000, 1_000_000, heimdall.Spans.Name()))
+	idxFileToDelete = filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 500_000, 1_000_000, heimdall.Spans.Name()))
 	err = os.Remove(idxFileToDelete)
 	require.NoError(t, err)
-	idxFileToDelete = filepath.Join(dir, snaptype.IdxFileName(1, 1_000_000, 1_500_000, heimdall.Spans.Name()))
+	idxFileToDelete = filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 1_000_000, 1_500_000, heimdall.Spans.Name()))
 	err = os.Remove(idxFileToDelete)
 	require.NoError(t, err)
 	borRoSnapshots := heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet}, dir, 0, logger)
@@ -191,7 +192,7 @@ func TestBlockReaderLastFrozenEventIdWhenSegmentFilesArePresent(t *testing.T) {
 	logger := testlog.Logger(t, log.LvlInfo)
 	dir := t.TempDir()
 	createTestBorEventSegmentFile(t, 0, 500_000, 132, dir, logger)
-	createTestSegmentFile(t, 0, 500_000, heimdall.Enums.Spans, dir, 1, logger)
+	createTestSegmentFile(t, 0, 500_000, heimdall.Enums.Spans, dir, version.V1_0, logger)
 	borRoSnapshots := heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet}, dir, 0, logger)
 	defer borRoSnapshots.Close()
 	err := borRoSnapshots.OpenFolder()
@@ -233,11 +234,11 @@ func TestBlockReaderLastFrozenEventIdReturnsLastSegWithIdx(t *testing.T) {
 	createTestBorEventSegmentFile(t, 0, 500_000, 132, dir, logger)
 	createTestBorEventSegmentFile(t, 500_000, 1_000_000, 264, dir, logger)
 	createTestBorEventSegmentFile(t, 1_000_000, 1_500_000, 528, dir, logger)
-	createTestSegmentFile(t, 0, 500_000, heimdall.Enums.Spans, dir, 1, logger)
-	createTestSegmentFile(t, 500_000, 1_000_000, heimdall.Enums.Spans, dir, 1, logger)
-	createTestSegmentFile(t, 1_000_000, 1_500_000, heimdall.Enums.Spans, dir, 1, logger)
+	createTestSegmentFile(t, 0, 500_000, heimdall.Enums.Spans, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 500_000, 1_000_000, heimdall.Enums.Spans, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 1_000_000, 1_500_000, heimdall.Enums.Spans, dir, version.V1_0, logger)
 	// delete idx file for last bor events segment to simulate segment with missing idx file
-	idxFileToDelete := filepath.Join(dir, snaptype.IdxFileName(1, 1_000_000, 1_500_000, heimdall.Events.Name()))
+	idxFileToDelete := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 1_000_000, 1_500_000, heimdall.Events.Name()))
 	err := os.Remove(idxFileToDelete)
 	require.NoError(t, err)
 	borRoSnapshots := heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet}, dir, 0, logger)
@@ -262,17 +263,17 @@ func TestBlockReaderLastFrozenEventIdReturnsZeroWhenAllSegmentsDoNotHaveIdx(t *t
 	createTestBorEventSegmentFile(t, 0, 500_000, 132, dir, logger)
 	createTestBorEventSegmentFile(t, 500_000, 1_000_000, 264, dir, logger)
 	createTestBorEventSegmentFile(t, 1_000_000, 1_500_000, 528, dir, logger)
-	createTestSegmentFile(t, 0, 500_000, heimdall.Enums.Spans, dir, 1, logger)
-	createTestSegmentFile(t, 500_000, 1_000_000, heimdall.Enums.Spans, dir, 1, logger)
-	createTestSegmentFile(t, 1_000_000, 1_500_000, heimdall.Enums.Spans, dir, 1, logger)
+	createTestSegmentFile(t, 0, 500_000, heimdall.Enums.Spans, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 500_000, 1_000_000, heimdall.Enums.Spans, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 1_000_000, 1_500_000, heimdall.Enums.Spans, dir, version.V1_0, logger)
 	// delete idx files for all bor events segment to simulate segment files with missing idx files
-	idxFileToDelete := filepath.Join(dir, snaptype.IdxFileName(1, 0, 500_000, heimdall.Events.Name()))
+	idxFileToDelete := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 0, 500_000, heimdall.Events.Name()))
 	err := os.Remove(idxFileToDelete)
 	require.NoError(t, err)
-	idxFileToDelete = filepath.Join(dir, snaptype.IdxFileName(1, 500_000, 1_000_000, heimdall.Events.Name()))
+	idxFileToDelete = filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 500_000, 1_000_000, heimdall.Events.Name()))
 	err = os.Remove(idxFileToDelete)
 	require.NoError(t, err)
-	idxFileToDelete = filepath.Join(dir, snaptype.IdxFileName(1, 1_000_000, 1_500_000, heimdall.Events.Name()))
+	idxFileToDelete = filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 1_000_000, 1_500_000, heimdall.Events.Name()))
 	err = os.Remove(idxFileToDelete)
 	require.NoError(t, err)
 	borRoSnapshots := heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.BorMainnet}, dir, 0, logger)
@@ -295,7 +296,7 @@ func createTestBorEventSegmentFile(t *testing.T, from, to, eventId uint64, dir s
 	compressor, err := seg.NewCompressor(
 		context.Background(),
 		"test",
-		filepath.Join(dir, snaptype.SegmentFileName(1, from, to, heimdall.Enums.Events)),
+		filepath.Join(dir, snaptype.SegmentFileName(version.V1_0, from, to, heimdall.Enums.Events)),
 		dir,
 		compressCfg,
 		log.LvlDebug,
@@ -315,7 +316,7 @@ func createTestBorEventSegmentFile(t *testing.T, from, to, eventId uint64, dir s
 			KeyCount:   1,
 			BucketSize: 10,
 			TmpDir:     dir,
-			IndexFile:  filepath.Join(dir, snaptype.IdxFileName(1, from, to, heimdall.Events.Name())),
+			IndexFile:  filepath.Join(dir, snaptype.IdxFileName(version.V1_0, from, to, heimdall.Events.Name())),
 			LeafSize:   8,
 		},
 		logger,

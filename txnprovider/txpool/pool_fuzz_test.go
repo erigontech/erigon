@@ -323,7 +323,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 		var prevHashes Hashes
 		ch := make(chan Announcements, 100)
 
-		coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+		coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 		db := memdb.NewTestPoolDB(t)
 
 		cfg := txpoolcfg.DefaultConfig
@@ -416,14 +416,14 @@ func FuzzOnNewBlocks(f *testing.F) {
 
 			// all txns in side data structures must be in some queue
 			for _, txn := range pool.byHash {
-				require.True(txn.bestIndex >= 0, msg)
-				assert.True(txn.worstIndex >= 0, msg)
+				require.GreaterOrEqual(txn.bestIndex, 0, msg)
+				assert.GreaterOrEqual(txn.worstIndex, 0, msg)
 			}
 			for id := range senders {
 				//assert.True(senders[i].all.Len() > 0)
 				pool.all.ascend(id, func(mt *metaTxn) bool {
-					require.True(mt.worstIndex >= 0, msg)
-					assert.True(mt.bestIndex >= 0, msg)
+					require.GreaterOrEqual(mt.worstIndex, 0, msg)
+					assert.GreaterOrEqual(mt.bestIndex, 0, msg)
 					return true
 				})
 			}
@@ -446,7 +446,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 		checkNotify := func(unwindTxns, minedTxns TxnSlots, msg string) {
 			select {
 			case newAnnouncements := <-ch:
-				assert.Greater(newAnnouncements.Len(), 0)
+				assert.Positive(newAnnouncements.Len())
 				for i := 0; i < newAnnouncements.Len(); i++ {
 					_, _, newHash := newAnnouncements.At(i)
 					for j := range unwindTxns.Txns {
@@ -558,7 +558,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 		require.NoError(err)
 
 		p2.senders = pool.senders // senders are not persisted
-		err = coreDB.View(ctx, func(coreTx kv.Tx) error { return p2.fromDB(ctx, tx, coreTx) })
+		err = coreDB.ViewTemporal(ctx, func(coreTx kv.TemporalTx) error { return p2.fromDB(ctx, tx, coreTx) })
 		require.NoError(err)
 		for _, txn := range p2.byHash {
 			assert.Nil(txn.TxnSlot.Rlp)

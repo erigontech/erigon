@@ -23,7 +23,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
@@ -40,7 +40,7 @@ func TestCheckPeerStatusCompatibility(t *testing.T) {
 		ProtocolVersion: uint32(version),
 		NetworkID:       networkID,
 		TD:              big.NewInt(0),
-		Head:            libcommon.Hash{},
+		Head:            common.Hash{},
 		Genesis:         params.MainnetGenesisHash,
 		ForkID:          forkid.NewIDFromForks(heightForks, timeForks, params.MainnetGenesisHash, 0, 0),
 	}
@@ -58,41 +58,41 @@ func TestCheckPeerStatusCompatibility(t *testing.T) {
 
 	t.Run("ok", func(t *testing.T) {
 		err := checkPeerStatusCompatibility(&goodReply, &status, version, version)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 	t.Run("network mismatch", func(t *testing.T) {
 		reply := goodReply
 		reply.NetworkID = 0
 		err := checkPeerStatusCompatibility(&reply, &status, version, version)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "network")
 	})
 	t.Run("version mismatch min", func(t *testing.T) {
 		reply := goodReply
 		reply.ProtocolVersion = direct.ETH67 - 1
 		err := checkPeerStatusCompatibility(&reply, &status, version, version)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "version is less")
 	})
 	t.Run("version mismatch max", func(t *testing.T) {
 		reply := goodReply
 		reply.ProtocolVersion = direct.ETH67 + 1
 		err := checkPeerStatusCompatibility(&reply, &status, version, version)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "version is more")
 	})
 	t.Run("genesis mismatch", func(t *testing.T) {
 		reply := goodReply
-		reply.Genesis = libcommon.Hash{}
+		reply.Genesis = common.Hash{}
 		err := checkPeerStatusCompatibility(&reply, &status, version, version)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "genesis")
 	})
 	t.Run("fork mismatch", func(t *testing.T) {
 		reply := goodReply
 		reply.ForkID = forkid.ID{}
 		err := checkPeerStatusCompatibility(&reply, &status, version, version)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.ErrorIs(t, err, forkid.ErrLocalIncompatibleOrStale)
 	})
 }

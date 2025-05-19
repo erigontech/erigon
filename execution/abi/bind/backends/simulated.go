@@ -31,6 +31,8 @@ import (
 	"github.com/holiman/uint256"
 
 	ethereum "github.com/erigontech/erigon"
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-lib/abi"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
@@ -39,21 +41,17 @@ import (
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	state2 "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/event"
-	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/execution/consensus/misc"
-	params2 "github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -119,7 +117,7 @@ func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, confi
 
 // A simulated backend always uses chainID 1337.
 func NewSimulatedBackend(t *testing.T, alloc types.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
-	b := NewTestSimulatedBackendWithConfig(t, alloc, params2.TestChainConfig, gasLimit)
+	b := NewTestSimulatedBackendWithConfig(t, alloc, chain.TestChainConfig, gasLimit)
 	return b
 }
 
@@ -129,7 +127,6 @@ func NewTestSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, c
 	return b
 }
 func (b *SimulatedBackend) DB() kv.TemporalRwDB                   { return b.m.DB }
-func (b *SimulatedBackend) Agg() *state2.Aggregator               { return b.m.HistoryV3Components() }
 func (b *SimulatedBackend) HistoryV3() bool                       { return b.m.HistoryV3 }
 func (b *SimulatedBackend) Engine() consensus.Engine              { return b.m.Engine }
 func (b *SimulatedBackend) BlockReader() services.FullBlockReader { return b.m.BlockReader }
@@ -250,7 +247,7 @@ func (b *SimulatedBackend) StorageAt(ctx context.Context, contract common.Addres
 
 	stateDB := b.stateByBlockNumber(tx, blockNumber)
 	var val uint256.Int
-	stateDB.GetState(contract, &key, &val)
+	stateDB.GetState(contract, key, &val)
 	return val.Bytes(), nil
 }
 

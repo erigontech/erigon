@@ -17,7 +17,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//nolint:scopelint
 package state
 
 import (
@@ -38,9 +37,9 @@ const (
 type StateReader interface {
 	ReadAccountData(address common.Address) (*accounts.Account, error)
 	ReadAccountDataForDebug(address common.Address) (*accounts.Account, error)
-	ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error)
-	ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error)
-	ReadAccountCodeSize(address common.Address, incarnation uint64) (int, error)
+	ReadAccountStorage(address common.Address, key common.Hash) ([]byte, error)
+	ReadAccountCode(address common.Address) ([]byte, error)
+	ReadAccountCodeSize(address common.Address) (int, error)
 	ReadAccountIncarnation(address common.Address) (uint64, error)
 }
 
