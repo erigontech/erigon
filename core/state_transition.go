@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain/params"
@@ -32,7 +33,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
@@ -42,7 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 )
 
-var emptyCodeHash = crypto.Keccak256Hash(nil)
+var emptyCodeHash = empty.CodeHash
 
 /*
 The State Transitioning Model
