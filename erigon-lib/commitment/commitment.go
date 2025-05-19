@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"math/bits"
 	"sort"
 	"strings"
@@ -182,6 +183,8 @@ type BranchEncoder struct {
 	bitmapBuf [binary.MaxVarintLen64]byte
 	merger    *BranchMerger
 	metrics   *Metrics
+
+	SkipEncoding bool // if true, does not encode branches, only get hashes and latestNibble used for folding
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -209,6 +212,9 @@ func (be *BranchEncoder) CollectUpdate(
 	update, lastNibble, err := be.EncodeBranch(bitmap, touchMap, afterMap, readCell)
 	if err != nil {
 		return 0, err
+	}
+	if be.SkipEncoding {
+		return lastNibble, nil
 	}
 
 	if len(prev) > 0 {
@@ -248,14 +254,16 @@ func (be *BranchEncoder) putUvarAndVal(size uint64, val []byte) error {
 func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCell func(nibble int, skip bool) (*cell, error)) (BranchData, int, error) {
 	be.buf.Reset()
 
-	var encoded [2]byte
-	binary.BigEndian.PutUint16(encoded[:], touchMap)
-	if _, err := be.buf.Write(encoded[:]); err != nil {
-		return nil, 0, err
-	}
-	binary.BigEndian.PutUint16(encoded[:], afterMap)
-	if _, err := be.buf.Write(encoded[:]); err != nil {
-		return nil, 0, err
+	if !be.SkipEncoding {
+		var encoded [2]byte
+		binary.BigEndian.PutUint16(encoded[:], touchMap)
+		if _, err := be.buf.Write(encoded[:]); err != nil {
+			return nil, 0, err
+		}
+		binary.BigEndian.PutUint16(encoded[:], afterMap)
+		if _, err := be.buf.Write(encoded[:]); err != nil {
+			return nil, 0, err
+		}
 	}
 
 	var lastNibble int
@@ -274,7 +282,7 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 			return nil, 0, err
 		}
 
-		if bitmap&bit != 0 {
+		if !be.SkipEncoding && bitmap&bit != 0 {
 			var fields cellFields
 			if cell.extLen > 0 && cell.storageAddrLen == 0 {
 				fields |= fieldExtension
@@ -906,6 +914,8 @@ const (
 	ModeDisabled Mode = 0
 	ModeDirect   Mode = 1
 	ModeUpdate   Mode = 2
+
+	ModeUpdateWarmup Mode = 3
 )
 
 func (m Mode) String() string {
@@ -976,6 +986,7 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 	return t
 }
 
+// Deprecated
 func (t *Updates) SetMode(m Mode) {
 	t.mode = m
 	if t.mode == ModeDirect && t.keys == nil {
@@ -1139,9 +1150,73 @@ func (t *Updates) Close() {
 	}
 }
 
+type fnNextKey func(hashed, plain []byte, update *Update) error
+
+var COM_WARMUP = dbg.EnvBool("COM_WARMUP", false)
+
+func (t *Updates) WarmupHashSort(ctx context.Context, fn, warmup fnNextKey) error {
+	//if t.mode != ModeUpdateWarmup {
+	//	panic("WarmupHashSort should be called only in ModeUpdateWarmup")
+	//}
+
+	clear(t.keys)
+
+	initialised := false
+	prevHashed := make([]byte, 0, length.Hash*4)
+	prevPlain := make([]byte, 0, length.Addr+length.Hash)
+	//prevUpdate := &Update{}
+
+	err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		// warming up current key, processing previous one
+		if warmup != nil {
+			if err := warmup(k, v, nil); err != nil {
+				return fmt.Errorf("failed to warmup key %x: %w", k, err)
+			}
+		}
+
+		if initialised {
+			// process prev key
+			if err := fn(prevHashed, prevPlain, nil); err != nil {
+				return err
+			}
+		}
+
+		// and update previous keys for next iteration
+		prevHashed = append(prevHashed[:0], k...)
+		prevPlain = append(prevPlain[:0], v...)
+		initialised = true
+		return nil
+	}, etl.TransformArgs{Quit: ctx.Done()})
+	if err != nil {
+		return err
+	}
+
+	// dont forget to process latest key pair
+	if len(prevPlain) > 0 {
+		if err := fn(prevHashed, prevPlain, nil); err != nil {
+			return err
+		}
+	}
+
+	t.initCollector()
+
+	return nil
+}
+
 // HashSort sorts and applies fn to each key-value pair in the order of hashed keys.
 func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte, update *Update) error) error {
 	switch t.mode {
+	//case ModeUpdateWarmup:
+	//	clear(t.keys)
+	//
+	//	err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	//		return fn(k, v, nil)
+	//	}, etl.TransformArgs{Quit: ctx.Done()})
+	//	if err != nil {
+	//		return err
+	//	}
+	//
+	//	t.initCollector()
 	case ModeDirect:
 		clear(t.keys)
 
