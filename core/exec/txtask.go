@@ -583,9 +583,10 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 			if txTask.Txs[i].Type() == types.AccountAbstractionTxType {
 				aaTxn, ok := txTask.Txs[i].(*types.AccountAbstractionTransaction)
 				if !ok {
-					result.Err = fmt.Errorf("invalid transaction type, expected AccountAbstractionTx, got %T", txTask.Tx)
-					return &result
+					outerErr = fmt.Errorf("invalid transaction type, expected AccountAbstractionTx, got %T", txTask.Tx)
+					break
 				}
+
 				paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, ibs, gasPool, txTask.Header, evm, chainConfig)
 				if err != nil {
 					outerErr = err
@@ -606,7 +607,6 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 			result.Err = outerErr
 			return &result
 		}
-
 		log.Info("✅[aa] validated AA bundle", "len", startIdx-endIdx)
 
 		result.ValidationResults = validationResults
@@ -616,11 +616,11 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 		result.Err = fmt.Errorf("found RIP-7560 but no remaining validation results, txIndex %d", txTask.TxIndex)
 	}
 
+	aaTxn = txTask.Tx().(*types.AccountAbstractionTransaction) // type cast checked earlier
 	validationRes := result.ValidationResults[0]
 	result.ValidationResults = result.ValidationResults[1:]
 
 	status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, validationRes.PaymasterContext, validationRes.GasUsed, gasPool, evm, txTask.Header, ibs)
-
 	if err != nil {
 		result.Err = err
 		return &result
@@ -630,7 +630,9 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 	// Update the state with pending changes
 	ibs.SoftFinalise()
 	result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
+
 	log.Info("🚀[aa] executed AA bundle transaction", "txIndex", txTask.TxIndex, "status", status)
+
 	return &result
 }
 

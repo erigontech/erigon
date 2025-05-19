@@ -150,14 +150,12 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.TxResult {
 		rw.stateReader.SetTx(rw.chainTx)
 		rw.chain = consensuschain.NewReader(rw.execArgs.ChainConfig, rw.chainTx, rw.execArgs.BlockReader, rw.logger)
 	}
-	txTask.Error = nil
+	result.Err = nil
 
 	rw.stateWriter = state.NewNoopWriter()
 
 	rw.ibs.Reset()
 	ibs, cc := rw.ibs, rw.execArgs.ChainConfig
-	var hooks *tracing.Hooks // nil is ok
-	ibs.SetHooks(hooks)
 	//ibs.SetTrace(true)
 
 	rules := rw.execArgs.ChainConfig.Rules(txTask.BlockNumber(), txTask.BlockTime())
@@ -187,67 +185,67 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.TxResult {
 			return ret, err
 		}
 		rw.execArgs.Engine.Initialize(cc, rw.chain, header, ibs, syscall, rw.logger, hooks)
-		txTask.Error = ibs.FinalizeTx(rules, noop)
-	case txTask.Final:
-		if txTask.BlockNum == 0 {
-			break
-		}
+		result.Err = ibs.FinalizeTx(rules, noop)
+	/*case txTask.IsBlockEnd():
+	if txTask.BlockNumber() == 0 {
+		break
+	}
 
-		// End of block transaction in a block
-		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			ret, logs, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, false /* constCall */, hooks)
-			if err != nil {
-				return nil, err
-			}
-			txTask.Logs = append(txTask.Logs, logs...)
-			return ret, err
-		}
-
-		skipPostEvaluaion := false // `true` only inMining
-		_, _, _, err := rw.execArgs.Engine.Finalize(cc, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, skipPostEvaluaion, rw.logger)
+	// End of block transaction in a block
+	syscall := func(contract common.Address, data []byte) ([]byte, error) {
+		ret, logs, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, false, hooks)
 		if err != nil {
-			txTask.Error = err
-		} else {
-			txTask.TraceTos = map[common.Address]struct{}{}
-			txTask.TraceTos[txTask.Coinbase] = struct{}{}
-			for _, uncle := range txTask.Uncles {
-				txTask.TraceTos[uncle.Coinbase] = struct{}{}
-			}
+			return nil, err
 		}
+		result.Logs = append(result.Logs, logs...)
+		return ret, err
+	}
+
+	skipPostEvaluaion := false // `true` only inMining
+	_, _, _, err := rw.execArgs.Engine.Finalize(cc, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, skipPostEvaluaion, rw.logger)
+	if err != nil {
+		result.Err = err
+	} else {
+		result.TraceTos = map[common.Address]struct{}{}
+		result.TraceTos[result.Coinbase] = struct{}{}
+		for _, uncle := range txTask.Uncles {
+			result.TraceTos[uncle.Coinbase] = struct{}{}
+		}
+	}
+	*/
 	default:
-		rw.taskGasPool.Reset(txTask.Tx.GetGasLimit(), cc.GetMaxBlobGasPerBlock(header.Time))
-		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
-		txTask.Tracer.Reset() // txTask is retryable
-		rw.vmCfg.Tracer = txTask.Tracer.Tracer().Hooks
-		ibs.SetTxContext(txTask.TxIndex)
-		txn := txTask.Tx
+		result.Err = func() error {
+			rw.taskGasPool.Reset(txTask.Tx().GetGasLimit(), cc.GetMaxBlobGasPerBlock(header.Time))
+			rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
+			txTask.Tracer.Reset() // txTask is retryable
+			rw.vmCfg.Tracer = txTask.Tracer.Tracer().Hooks
+			ibs.SetTxContext(txTask.BlockNumber(), txTask.Version().TxIndex)
+			txn := txTask.Tx()
 
-		if txTask.Tx.Type() == types.AccountAbstractionTxType {
-			if !cc.AllowAA {
-				txTask.Error = errors.New("account abstraction transactions are not allowed")
-				break
+			if txn.Type() == types.AccountAbstractionTxType {
+				if !cc.AllowAA {
+					return errors.New("account abstraction transactions are not allowed")
+				}
+
+				msg, err := txn.AsMessage(types.Signer{}, nil, nil)
+				if err != nil {
+					return err
+				}
+
+				rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, *rw.vmCfg, rules)
+				result := rw.execAATxn(txTask)
+				return result.Err
 			}
 
-			msg, err := txn.AsMessage(types.Signer{}, nil, nil)
-			if err != nil {
-				txTask.Error = err
-				break
+			msg, err := txTask.TxMessage()
+			txContext := core.NewEVMTxContext(msg)
+			if rw.vmCfg.TraceJumpDest {
+				txContext.TxHash = txn.Hash()
 			}
-
-			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, *rw.vmCfg, rules)
-			rw.execAATxn(txTask)
-			break
-		}
-
-		msg := txTask.TxAsMessage
-		txContext := core.NewEVMTxContext(msg)
-		if rw.vmCfg.TraceJumpDest {
-			txContext.TxHash = txn.Hash()
-		}
-		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, *rw.vmCfg, rules)
-		if hooks != nil && hooks.OnTxStart != nil {
-			hooks.OnTxStart(rw.evm.GetVMContext(), txn, msg.From())
-		}
+			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, *rw.vmCfg, rules)
+			if hooks != nil && hooks.OnTxStart != nil {
+				hooks.OnTxStart(rw.evm.GetVMContext(), txn, msg.From())
+			}
 
 			// MA applytx
 			applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */, rw.execArgs.Engine)
@@ -270,13 +268,15 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.TxResult {
 	return &result
 }
 
-func (rw *HistoricalTraceWorker) execAATxn(txTask *state.TxTask) {
+func (rw *HistoricalTraceWorker) execAATxn(txTask *exec.TxTask) *exec.TxResult {
+	result := &exec.TxResult{}
+
 	if !txTask.InBatch {
 		// this is the first transaction in an AA transaction batch, run all validation frames, then execute execution frames in its own txtask
 		startIdx := uint64(txTask.TxIndex)
 		endIdx := startIdx + txTask.AAValidationBatchSize
 
-		validationResults := make([]state.AAValidationResult, txTask.AAValidationBatchSize+1)
+		validationResults := make([]exec.AAValidationResult, txTask.AAValidationBatchSize+1)
 		log.Info("🕵️‍♂️[aa] found AA bundle", "startIdx", startIdx, "endIdx", endIdx)
 
 		var outerErr error
@@ -295,7 +295,7 @@ func (rw *HistoricalTraceWorker) execAATxn(txTask *state.TxTask) {
 					break
 				}
 
-				validationResults[i-startIdx] = state.AAValidationResult{
+				validationResults[i-startIdx] = exec.AAValidationResult{
 					PaymasterContext: paymasterContext,
 					GasUsed:          validationGasUsed,
 				}
@@ -306,38 +306,37 @@ func (rw *HistoricalTraceWorker) execAATxn(txTask *state.TxTask) {
 		}
 
 		if outerErr != nil {
-			txTask.Error = outerErr
-			return
+			result.Err = outerErr
+			return result
 		}
 		log.Info("✅[aa] validated AA bundle", "len", startIdx-endIdx)
 
-		txTask.ValidationResults = validationResults
+		result.ValidationResults = validationResults
 	}
 
-	if len(txTask.ValidationResults) == 0 {
-		txTask.Error = fmt.Errorf("found RIP-7560 but no remaining validation results, txIndex %d", txTask.TxIndex)
+	if len(result.ValidationResults) == 0 {
+		result.Err = fmt.Errorf("found RIP-7560 but no remaining validation results, txIndex %d", txTask.TxIndex)
 	}
 
-	aaTxn := txTask.Tx.(*types.AccountAbstractionTransaction) // type cast checked earlier
-	validationRes := txTask.ValidationResults[0]
-	txTask.ValidationResults = txTask.ValidationResults[1:]
+	aaTxn := txTask.Tx().(*types.AccountAbstractionTransaction) // type cast checked earlier
+	validationRes := result.ValidationResults[0]
+	result.ValidationResults = result.ValidationResults[1:]
 
 	status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, validationRes.PaymasterContext, validationRes.GasUsed, rw.taskGasPool, rw.evm, txTask.Header, rw.ibs)
 	if err != nil {
-		txTask.Error = err
-		return
+		result.Err = err
+		return result
 	}
 
-	txTask.Failed = status != 0
-	txTask.UsedGas = gasUsed
+	result.ExecutionResult.GasUsed = gasUsed
 	// Update the state with pending changes
 	rw.ibs.SoftFinalise()
-	txTask.Logs = rw.ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)
-	txTask.TraceFroms = txTask.Tracer.Froms()
-	txTask.TraceTos = txTask.Tracer.Tos()
-	txTask.CreateReceipt(rw.chainTx)
+	result.Logs = rw.ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
+	result.TraceFroms = txTask.Tracer.Froms()
+	result.TraceTos = txTask.Tracer.Tos()
 
 	log.Info("🚀[aa] executed AA bundle transaction", "txIndex", txTask.TxIndex, "status", status)
+	return result
 }
 
 func (rw *HistoricalTraceWorker) ResetTx(chainTx kv.TemporalTx) {

@@ -1212,7 +1212,7 @@ func (sdc *SharedDomainsCommitmentContext) enableConcurrentCommitmentIfPossible(
 
 // SeekCommitment searches for last encoded state from DomainCommitted
 // and if state found, sets it up to current domain
-func (sdc *SharedDomainsCommitmentContext) SeekCommitment(tx kv.Tx) (blockNum, txNum uint64, ok bool, err error) {
+func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, tx kv.Tx) (blockNum, txNum uint64, ok bool, err error) {
 	_, _, state, err := sdc.LatestCommitmentState(tx)
 	if err != nil {
 		return 0, 0, false, err
@@ -1256,7 +1256,7 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(tx kv.Tx) (blockNum, t
 		return 0, 0, true, nil
 	}
 
-	newRh, err := sdc.rebuildCommitment(ctx, sdc.sharedDomains.roTtx, blockNum, txNum)
+	newRh, err := sdc.rebuildCommitment(ctx, sdc.tx, blockNum, txNum)
 	if err != nil {
 		return 0, 0, false, err
 	}
@@ -1351,7 +1351,7 @@ func (sdc *SharedDomainsCommitmentContext) rebuildCommitment(ctx context.Context
 	}
 
 	sdc.Reset()
-	return sdc.ComputeCommitment(ctx, true, blockNum, "rebuild commit")
+	return sdc.ComputeCommitment(ctx, roTx, true, blockNum, "rebuild commit")
 }
 
 func toStringZeroCopy(v []byte) string { return unsafe.String(&v[0], len(v)) }

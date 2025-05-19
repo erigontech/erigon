@@ -226,8 +226,19 @@ func (tx *Tx) Rollback() {
 	rb.Rollback()
 }
 
-func (tx *Tx) WarmupDB(force bool) error { return tx.WarmupDB(force) }
-func (tx *Tx) LockDBInRam() error        { return tx.LockDBInRam() }
+func (tx *Tx) WarmupDB(force bool) error {
+	if mdbxTx, ok := tx.Tx.(*mdbx.MdbxTx); ok {
+		return mdbxTx.WarmupDB(force)
+	}
+	return nil
+}
+
+func (tx *Tx) LockDBInRam() error {
+	if mdbxTx, ok := tx.Tx.(*mdbx.MdbxTx); ok {
+		return mdbxTx.LockDBInRam()
+	}
+	return nil
+}
 
 func (tx *Tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 	tx.tx.mu.RLock()
@@ -239,8 +250,19 @@ func (tx *Tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 	return applyTx.Apply(ctx, f)
 }
 
-func (tx *RwTx) WarmupDB(force bool) error { return tx.WarmupDB(force) }
-func (tx *RwTx) LockDBInRam() error        { return tx.LockDBInRam() }
+func (tx *RwTx) WarmupDB(force bool) error {
+	if mdbxTx, ok := tx.RwTx.(*mdbx.MdbxTx); ok {
+		return mdbxTx.WarmupDB(force)
+	}
+	return nil
+}
+
+func (tx *RwTx) LockDBInRam() error {
+	if mdbxTx, ok := tx.RwTx.(*mdbx.MdbxTx); ok {
+		return mdbxTx.LockDBInRam()
+	}
+	return nil
+}
 
 func (tx *RwTx) Debug() kv.TemporalDebugTx { return tx }
 func (tx *Tx) Debug() kv.TemporalDebugTx   { return tx }
@@ -501,25 +523,29 @@ func (tx *tx) getLatestFromDB(domain kv.Domain, dbTx kv.Tx, k []byte) (v []byte,
 func (tx *tx) GetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	return tx.aggtx.DebugGetLatestFromFiles(domain, k, maxTxNum)
 }
+
 func (db *DB) DomainTables(domain ...kv.Domain) []string { return db.agg.DomainTables(domain...) }
 func (db *DB) ReloadSalt() error                         { return db.agg.ReloadSalt() }
-func (tx *Tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
-	return tx.aggtx.DomainFiles(domain...)
-}
 func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string {
 	return db.agg.InvertedIdxTables(domain...)
+}
+
+func (tx *Tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
+	return tx.aggtx.DomainFiles(domain...)
 }
 func (tx *tx) TxNumsInFiles(domains ...kv.Domain) (minTxNum uint64) {
 	return tx.aggtx.TxNumsInFiles(domains...)
 }
 
+func (tx *RwTx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
+	return tx.aggtx.DomainFiles(domain...)
+}
 func (tx *RwTx) PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error) {
 	return tx.aggtx.PruneSmallBatches(ctx, timeout, tx.RwTx)
 }
 func (tx *RwTx) GreedyPruneHistory(ctx context.Context, domain kv.Domain) error {
 	return tx.aggtx.GreedyPruneHistory(ctx, domain, tx.RwTx)
 }
-
 func (tx *RwTx) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
 	return tx.aggtx.Unwind(ctx, tx.RwTx, txNumUnwindTo, changeset)
 }
