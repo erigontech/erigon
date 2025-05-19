@@ -302,7 +302,7 @@ func (a *Aggregator) OpenList(files []string, readonly bool) error {
 	return a.OpenFolder()
 }
 
-func (a *Aggregator) waitForFiles() {
+func (a *Aggregator) waitForBuildAndMerge() {
 	for !a.buildingFiles.Load() || !a.mergingFiles.Load() {
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -314,7 +314,7 @@ func (a *Aggregator) Close() {
 	}
 	a.ctxCancel()
 	a.ctxCancel = nil
-	a.waitForFiles()
+	a.waitForBuildAndMerge()
 	a.wg.Wait()
 
 	a.dirtyFilesLock.Lock()
