@@ -931,10 +931,10 @@ func (s *RoSnapshots) Ls() {
 
 	for _, t := range s.enums {
 		for _, seg := range s.visible[t] {
-			if seg.src.Decompressor == nil {
+			if seg.src == nil || seg.src.Decompressor == nil {
 				continue
 			}
-			log.Info("[snapshots] ", "f", seg.src.FileName(), "from", seg.from, "to", seg.to)
+			log.Info("[snapshots] ", "f", seg.src.Decompressor.FileName(), "count", seg.src.Decompressor.Count())
 		}
 	}
 }
@@ -1009,7 +1009,7 @@ func (s *RoSnapshots) InitSegments(fileNames []string) error {
 	return nil
 }
 
-func TypedSegments(dir string, minBlock uint64, types []snaptype.Type, allowGaps bool) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
+func TypedSegments(dir string, types []snaptype.Type, allowGaps bool) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
 	list, err := snaptype.Segments(dir)
 
 	if err != nil {
@@ -1152,7 +1152,7 @@ func (s *RoSnapshots) OpenFolder() error {
 		s.dirtyLock.Lock()
 		defer s.dirtyLock.Unlock()
 
-		files, _, err := TypedSegments(s.dir, s.segmentsMin.Load(), s.Types(), false)
+		files, _, err := TypedSegments(s.dir, s.Types(), false)
 		if err != nil {
 			return err
 		}
@@ -1184,7 +1184,7 @@ func (s *RoSnapshots) OpenSegments(types []snaptype.Type, allowGaps bool) error 
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
 
-	files, _, err := TypedSegments(s.dir, s.segmentsMin.Load(), types, allowGaps)
+	files, _, err := TypedSegments(s.dir, types, allowGaps)
 
 	if err != nil {
 		return err
