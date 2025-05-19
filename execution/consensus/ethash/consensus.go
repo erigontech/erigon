@@ -658,10 +658,10 @@ func AccumulateRewards(config *chain.Config, header *types.Header, uncles []*typ
 		r.Add(uncleNum, u256.Num8)
 		r.Sub(r, headerNum)
 		r.Mul(r, blockReward)
-		r.Div(r, u256.Num8)
+		r.Rsh(r, 3) // ÷8
 		uncleRewards = append(uncleRewards, *r)
 
-		r.Div(blockReward, u256.Num32)
+		r.Rsh(blockReward, 5) // ÷32
 		reward.Add(reward, r)
 	}
 	return *reward, uncleRewards
