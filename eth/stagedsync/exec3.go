@@ -789,14 +789,8 @@ func ExecV3(ctx context.Context,
 
 						// use history reader instead of state reader to catch up to the tx where we left off
 						HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
-						Config:           chainConfig,
-						Engine:           cfg.engine,
 						Trace:            traceTx(blockNum, txIndex),
 						Hooks:            hooks,
-					}
-
-					if cfg.genesis != nil {
-						txTask.Config = cfg.genesis.Config
 					}
 
 					if txTask.TxNum > 0 && txTask.TxNum <= outputTxNum.Load() {

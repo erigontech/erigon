@@ -104,6 +104,9 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 		}
 
 		txTask.ResetGasPool(gasPool)
+		txTask.Config = se.cfg.chainConfig
+		txTask.Engine = se.cfg.engine
+		
 		result := se.worker.RunTxTask(txTask)
 
 		if err := func() error {

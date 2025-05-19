@@ -74,9 +74,12 @@ type ErrExecAbortError struct {
 
 func (e ErrExecAbortError) Error() string {
 	if e.DependencyTxIndex >= 0 {
-		return fmt.Sprintf("Execution aborted due to dependency %d", e.DependencyTxIndex)
+		return fmt.Sprintf("execution aborted due to dependency %d", e.DependencyTxIndex)
 	} else {
-		return "Execution aborted"
+		if e.OriginError != nil {
+			return fmt.Sprintf("execution aborted: %s", e.OriginError)
+		}
+		return "execution aborted"
 	}
 }
 
