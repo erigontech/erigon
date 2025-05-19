@@ -699,7 +699,7 @@ func (sd *StateDiff) DeleteAccount(address common.Address, original *accounts.Ac
 	return nil
 }
 
-func (sd *StateDiff) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+func (sd *StateDiff) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value *uint256.Int) error {
 	if *original == *value {
 		return nil
 	}

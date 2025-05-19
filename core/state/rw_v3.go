@@ -443,19 +443,18 @@ func (w *StateWriterBufferedV3) DeleteAccount(address common.Address, original *
 	return nil
 }
 
-func (w *StateWriterBufferedV3) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+func (w *StateWriterBufferedV3) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value *uint256.Int) error {
 	if *original == *value {
 		return nil
 	}
-	compositeS := string(append(address.Bytes(), key.Bytes()...))
+	compositeS := string(append(address[:], key.Bytes()...))
 	w.writeLists[kv.StorageDomain.String()].Push(compositeS, value.Bytes())
 	if w.trace {
-		fmt.Printf("storage: %x,%x,%x\n", address, *key, value.Bytes())
+		fmt.Printf("storage: %x,%x,%x\n", address, key, value.Bytes())
 	}
-	if w.accumulator != nil && key != nil && value != nil {
-		k := *key
+	if w.accumulator != nil && value != nil {
 		v := value.Bytes()
-		w.accumulator.ChangeStorage(address, incarnation, k, v)
+		w.accumulator.ChangeStorage(address, incarnation, key, v)
 	}
 	return nil
 }
@@ -558,21 +557,20 @@ func (w *Writer) DeleteAccount(address common.Address, original *accounts.Accoun
 	return nil
 }
 
-func (w *Writer) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+func (w *Writer) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value *uint256.Int) error {
 	if *original == *value {
 		return nil
 	}
-	composite := append(address.Bytes(), key.Bytes()...)
+	composite := append(address[:], key.Bytes()...)
 	v := value.Bytes()
 	if w.trace {
-		fmt.Printf("storage: %x,%x,%x\n", address, *key, v)
+		fmt.Printf("storage: %x,%x,%x\n", address, key, v)
 	}
 	if len(v) == 0 {
 		return w.tx.DomainDel(kv.StorageDomain, composite, nil, 0)
 	}
-	if w.accumulator != nil && key != nil && value != nil {
-		k := *key
-		w.accumulator.ChangeStorage(address, incarnation, k, v)
+	if w.accumulator != nil && value != nil {
+		w.accumulator.ChangeStorage(address, incarnation, key, v)
 	}
 
 	return w.tx.DomainPut(kv.StorageDomain, composite, nil, v, nil, 0)
