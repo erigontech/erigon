@@ -414,7 +414,7 @@ func TestRemoveOverlaps_CrossingTypeString(t *testing.T) {
 	dir, require := t.TempDir(), require.New(t)
 	createFile := func(from, to uint64) {
 		for _, snT := range coresnaptype.BlockSnapshotTypes {
-			createTestSegmentFile(t, from, to, snT.Enum(), dir, 1, logger)
+			createTestSegmentFile(t, from, to, snT.Enum(), dir, version.V1_0, logger)
 		}
 	}
 
