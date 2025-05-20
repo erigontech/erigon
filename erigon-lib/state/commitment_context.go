@@ -56,7 +56,7 @@ func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode commitment.Mode, 
 		stepSize: sd.StepSize(),
 	}
 	//if commitment.COM_WARMUP {
-	ctx.updates.Warmup = ctx.patriciaTrie.Warmup
+	//ctx.updates.Warmup = ctx.patriciaTrie.Warmup
 	//}
 
 	ctx.mainTtx = trieCtx
