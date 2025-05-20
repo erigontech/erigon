@@ -188,6 +188,8 @@ type BorConfig interface {
 	GetNapoliBlock() *big.Int
 	IsAhmedabad(number uint64) bool
 	GetAhmedabadBlock() *big.Int
+	IsBhilai(num uint64) bool
+	GetBhilaiBlock() *big.Int
 	StateReceiverContractAddress() common.Address
 	CalculateSprintNumber(number uint64) uint64
 	CalculateSprintLength(number uint64) uint64
@@ -205,11 +207,12 @@ func (c *Config) String() string {
 	engine := c.getEngine()
 
 	if c.Bor != nil {
-		return fmt.Sprintf("{ChainID: %v, Agra: %v, Napoli: %v, Ahmedabad: %v, Engine: %v}",
+		return fmt.Sprintf("{ChainID: %v, Agra: %v, Napoli: %v, Ahmedabad: %v, Bhilai: %v, Engine: %v}",
 			c.ChainID,
 			c.Bor.GetAgraBlock(),
 			c.Bor.GetNapoliBlock(),
 			c.Bor.GetAhmedabadBlock(),
+			c.Bor.GetBhilaiBlock(),
 			engine,
 		)
 	}
@@ -323,6 +326,11 @@ func (c *Config) IsAgra(num uint64) bool {
 // Refer to https://forum.polygon.technology/t/pip-33-napoli-upgrade
 func (c *Config) IsNapoli(num uint64) bool {
 	return (c != nil) && (c.Bor != nil) && c.Bor.IsNapoli(num)
+}
+
+// Refer to https://forum.polygon.technology/t/pip-63-bhilai-hardfork
+func (c *Config) IsBhilai(num uint64) bool {
+	return (c != nil) && (c.Bor != nil) && c.Bor.IsBhilai(num)
 }
 
 // IsCancun returns whether time is either equal to the Cancun fork time or greater.
@@ -622,7 +630,7 @@ type Rules struct {
 	IsHomestead, IsTangerineWhistle, IsSpuriousDragon bool
 	IsByzantium, IsConstantinople, IsPetersburg       bool
 	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
-	IsCancun, IsNapoli                                bool
+	IsCancun, IsNapoli, IsBhilai                      bool
 	IsPrague, IsOsaka                                 bool
 	IsAura                                            bool
 }
@@ -648,6 +656,7 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsShanghai:         c.IsShanghai(time) || c.IsAgra(num),
 		IsCancun:           c.IsCancun(time),
 		IsNapoli:           c.IsNapoli(num),
+		IsBhilai:           c.IsBhilai(num),
 		IsPrague:           c.IsPrague(time),
 		IsOsaka:            c.IsOsaka(time),
 		IsAura:             c.Aura != nil,
