@@ -21,7 +21,6 @@ package native
 
 import (
 	"encoding/json"
-
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -63,18 +62,19 @@ func newMuxTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, e
 	t := &muxTracer{names: names, tracers: objects}
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
-			OnTxStart:       t.OnTxStart,
-			OnTxEnd:         t.OnTxEnd,
-			OnEnter:         t.OnEnter,
-			OnExit:          t.OnExit,
-			OnOpcode:        t.OnOpcode,
-			OnFault:         t.OnFault,
-			OnGasChange:     t.OnGasChange,
-			OnBalanceChange: t.OnBalanceChange,
-			OnNonceChange:   t.OnNonceChange,
-			OnCodeChange:    t.OnCodeChange,
-			OnStorageChange: t.OnStorageChange,
-			OnLog:           t.OnLog,
+			OnTxStart:               t.OnTxStart,
+			OnTxEnd:                 t.OnTxEnd,
+			OnEnter:                 t.OnEnter,
+			OnExit:                  t.OnExit,
+			OnOpcode:                t.OnOpcode,
+			OnFault:                 t.OnFault,
+			OnGasChange:             t.OnGasChange,
+			OnBalanceChange:         t.OnBalanceChange,
+			OnNonceChange:           t.OnNonceChange,
+			OnCodeChange:            t.OnCodeChange,
+			OnStorageChange:         t.OnStorageChange,
+			OnLog:                   t.OnLog,
+			CaptureArbitrumTransfer: t.CaptureArbitrumTransfer,
 		},
 		GetResult: t.GetResult,
 		Stop:      t.Stop,
@@ -173,6 +173,14 @@ func (t *muxTracer) OnLog(log *types.Log) {
 	for _, t := range t.tracers {
 		if t.OnLog != nil {
 			t.OnLog(log)
+		}
+	}
+}
+
+func (t *muxTracer) CaptureArbitrumTransfer(from, to *libcommon.Address, value *uint256.Int, before bool, reason string) {
+	for _, t := range t.tracers {
+		if t.CaptureArbitrumTransfer != nil {
+			t.CaptureArbitrumTransfer(from, to, value, before, reason)
 		}
 	}
 }

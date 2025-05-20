@@ -106,6 +106,10 @@ type callFrameMarshaling struct {
 }
 
 type callTracer struct {
+	// Arbitrum: capture transfers occurring outside of evm execution
+	beforeEVMTransfers []arbitrumTransfer
+	afterEVMTransfers  []arbitrumTransfer
+
 	callstack   []callFrame
 	config      callTracerConfig
 	gasLimit    uint64
@@ -143,11 +147,12 @@ func newCallTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, 
 	t := &callTracer{callstack: make([]callFrame, 0, 1), config: config}
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
-			OnTxStart: t.OnTxStart,
-			OnTxEnd:   t.OnTxEnd,
-			OnEnter:   t.OnEnter,
-			OnExit:    t.OnExit,
-			OnLog:     t.OnLog,
+			OnTxStart:               t.OnTxStart,
+			OnTxEnd:                 t.OnTxEnd,
+			OnEnter:                 t.OnEnter,
+			OnExit:                  t.OnExit,
+			OnLog:                   t.OnLog,
+			CaptureArbitrumTransfer: t.CaptureArbitrumTransfer,
 		},
 		GetResult: t.GetResult,
 		Stop:      t.Stop,
