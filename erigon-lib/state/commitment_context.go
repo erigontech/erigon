@@ -55,6 +55,10 @@ func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode commitment.Mode, 
 
 		stepSize: sd.StepSize(),
 	}
+	if commitment.COM_WARMUP {
+		ctx.updates.Warmup = ctx.patriciaTrie.Warmup
+	}
+
 	ctx.mainTtx = trieCtx
 	ctx.patriciaTrie.ResetContext(trieCtx)
 	return ctx
@@ -84,8 +88,6 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 	if sdc.updates.Mode() == commitment.ModeDisabled {
 		return
 	}
-	sdc.updates.Warmup = sdc.patriciaTrie.SetTrace
-
 	switch d {
 	case kv.AccountsDomain:
 		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchAccount)

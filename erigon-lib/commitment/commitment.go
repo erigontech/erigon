@@ -951,7 +951,7 @@ func ParseCommitmentMode(s string) Mode {
 type Updates struct {
 	hasher keyHasher
 	keys   map[string]struct{}       // plain keys to keep only unique keys in etl
-	Warmup func(key []byte)          // function to Warmup the key
+	Warmup func(key []byte) error    // function to Warmup the key
 	etl    *etl.Collector            // all-in-one collector
 	tree   *btree.BTreeG[*KeyUpdate] // TODO since it's thread safe to read, maybe instead of all collectors we can use one tree
 	ku     map[string]*KeyUpdate
@@ -1095,7 +1095,9 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			} else {
 				err = t.nibbles[hashedKey[0]].Collect(hashedKey, keyBytes)
 			}
-			t.Warmup(hashedKey)
+			if t.Warmup != nil {
+				t.Warmup(hashedKey)
+			}
 			if err != nil {
 				log.Warn("failed to collect updated key", "key", key, "err", err)
 			}

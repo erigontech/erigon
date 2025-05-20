@@ -111,7 +111,7 @@ func (hph *HexPatriciaHashed) SpawnSubTrie(ctx PatriciaContext, forNibble int) *
 
 func (hph *HexPatriciaHashed) Warmup(hashedKey []byte) error {
 	// should not affect trie state
-	//hph.readOnly = true
+	hph.readOnly = true
 
 	for hph.needFolding(hashedKey) {
 		//foldDone := hph.metrics.StartFolding(plainKey)
@@ -2174,6 +2174,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		start        = time.Now()
 		logEvery     = time.NewTicker(20 * time.Second)
 	)
+	hph.readOnly = false
 
 	if collectCommitmentMetrics {
 		hph.metrics.Reset()
