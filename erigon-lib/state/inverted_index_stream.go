@@ -106,7 +106,7 @@ func (it *InvertedIdxStreamFiles) advanceInFiles() {
 				var seqIt stream.Uno[uint64]
 				if it.orderAscend {
 					seqIt = it.seq.Iterator(it.startTxNum)
-					log.Info("[dbg] iterateRangeOnFiles: see1", "n", item.Filename(), "seq.Min", it.seq.Min(), "seq.Max", it.seq.Max())
+					log.Info("[dbg] iterateRangeOnFiles: see1", "n", item.Filename(), "seq.Min", it.seq.Min(), "seq.Max", it.seq.Max(), "it.startTxNum", it.startTxNum)
 				} else {
 					seqIt = it.seq.ReverseIterator(it.startTxNum)
 				}
