@@ -225,6 +225,9 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	if err != nil {
 		return logs, err
 	}
+	if debug && !txNumbers.HasNext() {
+		log.Info("[dbg] getLogs: filters are empty")
+	}
 
 	it := rawdbv3.TxNums2BlockNums(tx,
 		api._txNumReader,
