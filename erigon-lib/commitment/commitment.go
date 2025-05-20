@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"math/bits"
 	"sort"
 	"strings"
@@ -32,6 +31,8 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/etl"
@@ -99,6 +100,8 @@ type Trie interface {
 
 	// Process updates
 	Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error)
+
+	Warmup(hashedKey []byte) error
 }
 
 type PatriciaContext interface {
@@ -916,6 +919,7 @@ const (
 	ModeUpdate   Mode = 2
 
 	ModeUpdateWarmup Mode = 3
+	ModeUpdateMap    Mode = 5
 )
 
 func (m Mode) String() string {
@@ -947,8 +951,10 @@ func ParseCommitmentMode(s string) Mode {
 type Updates struct {
 	hasher keyHasher
 	keys   map[string]struct{}       // plain keys to keep only unique keys in etl
+	Warmup func(key []byte)          // function to Warmup the key
 	etl    *etl.Collector            // all-in-one collector
 	tree   *btree.BTreeG[*KeyUpdate] // TODO since it's thread safe to read, maybe instead of all collectors we can use one tree
+	ku     map[string]*KeyUpdate
 	mode   Mode
 	tmpdir string
 
@@ -982,6 +988,9 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 		t.initCollector()
 	} else if t.mode == ModeUpdate {
 		t.tree = btree.NewG[*KeyUpdate](64, keyUpdateLessFn)
+	} else if t.mode == ModeUpdateMap {
+		t.ku = make(map[string]*KeyUpdate)
+		t.initCollector()
 	}
 	return t
 }
@@ -1041,6 +1050,25 @@ func (t *Updates) Size() (updates uint64) {
 // (different behaviour for Code, Account and Storage key modifications).
 func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, val []byte)) {
 	switch t.mode {
+	case ModeUpdateMap:
+		if u, exist := t.ku[key]; exist {
+			fn(u, val)
+		} else {
+			u = &KeyUpdate{plainKey: key, update: new(Update), hashedKey: t.hasher(toBytesZeroCopy(key))}
+			t.ku[key] = u
+			fn(u, val)
+
+			var err error
+			if !t.sortPerNibble {
+				err = t.etl.Collect(u.hashedKey, toBytesZeroCopy(key))
+			} else {
+				err = t.nibbles[u.hashedKey[0]].Collect(u.hashedKey, toBytesZeroCopy(key))
+			}
+			if err != nil {
+				log.Warn("failed to collect updated key", "key", key, "err", err)
+			}
+		}
+
 	case ModeUpdate:
 		pivot, updated := &KeyUpdate{plainKey: key, update: new(Update)}, false
 
@@ -1067,6 +1095,7 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			} else {
 				err = t.nibbles[hashedKey[0]].Collect(hashedKey, keyBytes)
 			}
+			t.Warmup(hashedKey)
 			if err != nil {
 				log.Warn("failed to collect updated key", "key", key, "err", err)
 			}
@@ -1100,10 +1129,10 @@ func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
 	}
 	if !bytes.Equal(acc.CodeHash.Bytes(), c.update.CodeHash[:]) {
 		if len(acc.CodeHash.Bytes()) == 0 {
-			copy(c.update.CodeHash[:], EmptyCodeHash)
+			c.update.CodeHash = empty.CodeHash
 		} else {
 			c.update.Flags |= CodeUpdate
-			copy(c.update.CodeHash[:], acc.CodeHash.Bytes())
+			c.update.CodeHash = acc.CodeHash
 		}
 	}
 }
@@ -1124,7 +1153,7 @@ func (t *Updates) TouchCode(c *KeyUpdate, code []byte) {
 		if c.update.Flags == 0 {
 			c.update.Flags = DeleteUpdate
 		}
-		copy(c.update.CodeHash[:], EmptyCodeHash)
+		c.update.CodeHash = empty.CodeHash
 		return
 	}
 	copy(c.update.CodeHash[:], crypto.Keccak256(code))
@@ -1133,6 +1162,9 @@ func (t *Updates) TouchCode(c *KeyUpdate, code []byte) {
 func (t *Updates) Close() {
 	if t.keys != nil {
 		clear(t.keys)
+	}
+	if t.ku != nil {
+		clear(t.ku)
 	}
 	if t.tree != nil {
 		t.tree.Clear(true)
@@ -1246,6 +1278,21 @@ func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte, update *U
 			return true
 		})
 		t.tree.Clear(true)
+
+	case ModeUpdateMap:
+		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			ku := t.ku[toStringZeroCopy(v)]
+			if ku == nil {
+				fmt.Printf("Update was not found for key %x\n", v)
+			}
+			return fn(k, v, ku.update)
+		}, etl.TransformArgs{Quit: ctx.Done()})
+		if err != nil {
+			return err
+		}
+		clear(t.ku)
+		t.initCollector()
+
 	default:
 		return nil
 	}
@@ -1319,7 +1366,7 @@ func (u *Update) Reset() {
 	u.Balance.Clear()
 	u.Nonce = 0
 	u.StorageLen = 0
-	u.CodeHash = EmptyCodeHashArray
+	u.CodeHash = empty.CodeHash
 }
 
 func (u *Update) Merge(b *Update) {
