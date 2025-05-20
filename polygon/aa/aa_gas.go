@@ -20,11 +20,12 @@ func chargeGas(
 	tx *types.AccountAbstractionTransaction,
 	gasPool *core.GasPool,
 	ibs *state.IntraBlockState,
+	preTxCost uint64,
 ) error {
 	baseFee := uint256.MustFromBig(header.BaseFee)
 	effectiveGasPrice := new(uint256.Int).Add(baseFee, tx.GetEffectiveGasTip(baseFee))
 
-	totalGasLimit := params.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit
+	totalGasLimit := preTxCost + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit
 	preCharge := new(uint256.Int).SetUint64(totalGasLimit)
 	preCharge = preCharge.Mul(preCharge, effectiveGasPrice)
 

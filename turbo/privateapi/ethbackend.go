@@ -25,7 +25,6 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/chain"
-	params2 "github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
@@ -465,7 +464,16 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remote.AAValid
 	//ibs.SetHooks(ot.Tracer().Hooks)
 	//ot.OnTxStart(evm.GetVMContext(), nil, common.Address{})
 
-	totalGasLimit := params2.TxAAGas + aaTxn.ValidationGasLimit + aaTxn.PaymasterValidationGasLimit + aaTxn.GasLimit + aaTxn.PostOpGasLimit
+	vmConfig := evm.Config()
+	rules := s.chainConfig.Rules(header.Number.Uint64(), header.Time)
+	hasEIP3860 := vmConfig.HasEip3860(rules)
+
+	preTxCost, err := aaTxn.PreTransactionGasCost(rules, hasEIP3860)
+	if err != nil {
+		return nil, err
+	}
+
+	totalGasLimit := preTxCost + aaTxn.ValidationGasLimit + aaTxn.PaymasterValidationGasLimit + aaTxn.GasLimit + aaTxn.PostOpGasLimit
 	_, _, err = aa.ValidateAATransaction(aaTxn, ibs, new(core.GasPool).AddGas(totalGasLimit), header, evm, s.chainConfig)
 	if err != nil {
 		log.Info("err", "err", err.Error())
