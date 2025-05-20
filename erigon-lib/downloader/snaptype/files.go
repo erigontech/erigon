@@ -261,6 +261,7 @@ type FileInfo struct {
 
 	CaplinTypeString string // part of file-name - without version, range, ext
 	TypeString       string
+	grouping         string
 }
 
 func (f FileInfo) TorrentFileExists() (bool, error) { return dir.FileExist(f.Path + ".torrent") }
@@ -271,7 +272,13 @@ func (f FileInfo) Len() uint64  { return f.To - f.From }
 
 func (f FileInfo) GetRange() (from, to uint64) { return f.From, f.To }
 func (f FileInfo) GetType() Type               { return f.Type }
-func (f FileInfo) GetTypeString() string       { return f.TypeString }
+func (f FileInfo) GetGrouping() string {
+	if f.grouping == "" {
+		f.grouping = f.Type.Name() + "_" + f.TypeString + "_" + f.Ext
+	}
+
+	return f.grouping
+}
 
 func (f FileInfo) CompareTo(o FileInfo) int {
 	if res := cmp.Compare(f.From, o.From); res != 0 {

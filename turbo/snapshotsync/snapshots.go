@@ -50,8 +50,7 @@ import (
 
 type SortedRange interface {
 	GetRange() (from, to uint64)
-	GetType() snaptype.Type
-	GetTypeString() string
+	GetGrouping() string
 }
 
 // NoOverlaps - keep largest ranges and avoid overlap
@@ -120,7 +119,7 @@ func findOverlaps[T SortedRange](in []T) (res []T, overlapped []T) {
 			f2 := in[j]
 			jFrom, jTo := f2.GetRange()
 
-			if f.GetType().Enum() != f2.GetType().Enum() || f.GetTypeString() != f2.GetTypeString() {
+			if f.GetGrouping() != f2.GetGrouping() {
 				break
 			}
 			if jFrom == jTo {
