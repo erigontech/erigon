@@ -1016,10 +1016,10 @@ func garbage(dirtyFiles *btree.BTreeG[*filesItem], visibleFiles []visibleFile, m
 			}
 
 			if item.isProperSubsetOf(merged) {
-				if checker == nil || !checker(item.startTxNum, item.endTxNum) {
+				// if checker == nil || !checker(item.startTxNum, item.endTxNum) {
 					// no dependent file is present for item, can delete safely...
 					outs = append(outs, item)
-				}
+				// }
 
 			}
 		}
