@@ -29,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/trie"
@@ -310,7 +311,7 @@ func (sdb *IntraBlockState) GetCodeSize(addr common.Address) (int, error) {
 	if stateObject.code != nil {
 		return len(stateObject.code), nil
 	}
-	if stateObject.data.CodeHash == emptyCodeHashH {
+	if stateObject.data.CodeHash == empty.CodeHash {
 		return 0, nil
 	}
 	l, err := sdb.stateReader.ReadAccountCodeSize(addr)

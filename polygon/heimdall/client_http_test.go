@@ -42,6 +42,10 @@ func (ebrc emptyBodyReadCloser) Close() error {
 }
 
 func TestHeimdallClientFetchesTerminateUponTooManyErrors(t *testing.T) {
+	if testing.Short() {
+		t.Skip("too slow for testing.Short")
+	}
+
 	ctx := context.Background()
 	ctrl := gomock.NewController(t)
 	requestHandler := NewMockhttpRequestHandler(ctrl)

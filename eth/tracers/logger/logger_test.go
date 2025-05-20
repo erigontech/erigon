@@ -62,7 +62,7 @@ func (*dummyStatedb) AddSlotToAccessList(_ common.Address, _ common.Hash) (addrM
 func (*dummyStatedb) GetCommittedState(common.Address, common.Hash, *uint256.Int) error { return nil }
 
 func TestStoreCapture(t *testing.T) {
-	c := vm.NewJumpDestCache()
+	c := vm.NewJumpDestCache(128)
 	var (
 		logger   = NewStructLogger(nil)
 		evm      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, chain.TestChainConfig, vm.Config{Tracer: logger.Hooks()})

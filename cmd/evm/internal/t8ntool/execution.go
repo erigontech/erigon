@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
 	state3 "github.com/erigontech/erigon-lib/state"
@@ -124,7 +125,7 @@ func calcDifficulty(config *chain.Config, number, currentTime, parentTime uint64
 	parentDifficulty *big.Int, parentUncleHash common.Hash) *big.Int {
 	uncleHash := parentUncleHash
 	if uncleHash == (common.Hash{}) {
-		uncleHash = types.EmptyUncleHash
+		uncleHash = empty.UncleHash
 	}
 	parent := &types.Header{
 		ParentHash: common.Hash{},

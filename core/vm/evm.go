@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"sync/atomic"
 
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -31,7 +32,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 )
@@ -94,8 +94,6 @@ type EVM struct {
 	// available gas is calculated in gasCall* according to the 63/64 rule and later
 	// applied in opCall*.
 	callGasTemp uint64
-
-	JumpDestCache *JumpDestCache
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
@@ -113,7 +111,9 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 		config:          vmConfig,
 		chainConfig:     chainConfig,
 		chainRules:      chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time),
-		JumpDestCache:   NewJumpDestCache(),
+	}
+	if evm.config.JumpDestCache == nil {
+		evm.config.JumpDestCache = NewJumpDestCache(jumpDestCacheLimit)
 	}
 
 	evm.interpreter = NewEVMInterpreter(evm, vmConfig)
@@ -140,6 +140,9 @@ func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtype
 	evm.Context = blockCtx
 	evm.TxContext = txCtx
 	evm.intraBlockState = ibs
+	if vmConfig.JumpDestCache == nil && evm.config.JumpDestCache != nil {
+		vmConfig.JumpDestCache = evm.config.JumpDestCache
+	}
 	evm.config = vmConfig
 	evm.chainRules = chainRules
 
@@ -264,11 +267,11 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 		}
 		var contract *Contract
 		if typ == CALLCODE {
-			contract = NewContract(caller, caller.Address(), value, gas, evm.config.SkipAnalysis, evm.JumpDestCache)
+			contract = NewContract(caller, caller.Address(), value, gas, evm.config.SkipAnalysis, evm.config.JumpDestCache)
 		} else if typ == DELEGATECALL {
-			contract = NewContract(caller, caller.Address(), value, gas, evm.config.SkipAnalysis, evm.JumpDestCache).AsDelegate()
+			contract = NewContract(caller, caller.Address(), value, gas, evm.config.SkipAnalysis, evm.config.JumpDestCache).AsDelegate()
 		} else {
-			contract = NewContract(caller, addrCopy, value, gas, evm.config.SkipAnalysis, evm.JumpDestCache)
+			contract = NewContract(caller, addrCopy, value, gas, evm.config.SkipAnalysis, evm.config.JumpDestCache)
 		}
 		contract.SetCallCode(&addrCopy, codeHash, code)
 		readOnly := false
@@ -404,7 +407,8 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	if err != nil {
 		return nil, common.Address{}, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
-	if nonce != 0 || (contractHash != (common.Hash{}) && contractHash != trie.EmptyCodeHash) {
+	if nonce != 0 ||
+		(contractHash != (common.Hash{}) && contractHash != empty.CodeHash) { // non-empty storage
 		err = ErrContractAddressCollision
 		if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
 			evm.Config().Tracer.OnGasChange(gasRemaining, 0, tracing.GasChangeCallFailedExecution)
@@ -421,7 +425,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 
 	// Initialise a new contract and set the code that is to be used by the EVM.
 	// The contract is a scoped environment for this execution context only.
-	contract := NewContract(caller, address, value, gasRemaining, evm.config.SkipAnalysis, evm.JumpDestCache)
+	contract := NewContract(caller, address, value, gasRemaining, evm.config.SkipAnalysis, evm.config.JumpDestCache)
 	contract.SetCodeOptionalHash(&address, codeAndHash)
 
 	if evm.config.NoRecursion && depth > 0 {

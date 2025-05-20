@@ -269,8 +269,15 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
-			Name:        "integrity",
-			Action:      doIntegrity,
+			Name: "integrity",
+			Action: func(cliCtx *cli.Context) error {
+				if err := doIntegrity(cliCtx); err != nil {
+					log.Error("[integrity]", "err", err)
+					return err
+				}
+				log.Info("[integrity] snapshots are publishable")
+				return nil
+			},
 			Description: "run slow validation of files. use --check to run single",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,

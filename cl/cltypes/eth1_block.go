@@ -24,6 +24,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -331,7 +332,7 @@ func (b *Eth1Block) RlpHeader(parentRoot *common.Hash, executionReqHash common.H
 
 	header := &types.Header{
 		ParentHash:            b.ParentHash,
-		UncleHash:             types.EmptyUncleHash,
+		UncleHash:             empty.UncleHash,
 		Coinbase:              b.FeeRecipient,
 		Root:                  b.StateRoot,
 		TxHash:                types.DeriveSha(types.BinaryTransactions(b.Transactions.UnderlyngReference())),

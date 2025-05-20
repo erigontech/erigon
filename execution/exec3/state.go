@@ -111,7 +111,7 @@ func NewWorker(lock sync.Locker, logger log.Logger, hooks *tracing.Hooks, ctx co
 	return w
 }
 
-func (rw *Worker) LogLRUStats() { rw.evm.JumpDestCache.LogStats() }
+func (rw *Worker) LogLRUStats() { rw.evm.Config().JumpDestCache.LogStats() }
 
 func (rw *Worker) ResetState(rs *state.ParallelExecutionState, accumulator *shards.Accumulator) {
 	rw.rs = rs
@@ -351,6 +351,7 @@ func (rw *Worker) execAATxn(txTask *state.TxTask) {
 
 		var outerErr error
 		for i := startIdx; i <= endIdx; i++ {
+			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(txTask.TxAsMessage), rw.ibs, rw.vmCfg, txTask.Rules)
 			// check if next n transactions are AA transactions and run validation
 			if txTask.Txs[i].Type() == types.AccountAbstractionTxType {
 				aaTxn, ok := txTask.Txs[i].(*types.AccountAbstractionTransaction)
@@ -392,6 +393,7 @@ func (rw *Worker) execAATxn(txTask *state.TxTask) {
 	validationRes := txTask.ValidationResults[0]
 	txTask.ValidationResults = txTask.ValidationResults[1:]
 
+	rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(txTask.TxAsMessage), rw.ibs, rw.vmCfg, txTask.Rules)
 	status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, validationRes.PaymasterContext, validationRes.GasUsed, rw.taskGasPool, rw.evm, txTask.Header, rw.ibs)
 	if err != nil {
 		txTask.Error = err
@@ -407,7 +409,7 @@ func (rw *Worker) execAATxn(txTask *state.TxTask) {
 	txTask.TraceTos = rw.callTracer.Tos()
 	txTask.CreateReceipt(rw.Tx())
 
-	log.Info("🚀[aa] executed AA bundle transaction", "txIndex", txTask.TxIndex, "status", status)
+	log.Info("🚀[aa] executed AA bundle transaction", "txIndex", txTask.TxIndex, "status", status, "gasUsed", gasUsed)
 }
 
 func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger log.Logger, hooks *tracing.Hooks, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.ParallelExecutionState, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int, dirs datadir.Dirs, isMining bool) (reconWorkers []*Worker, applyWorker *Worker, rws *state.ResultsQueue, clear func(), wait func()) {

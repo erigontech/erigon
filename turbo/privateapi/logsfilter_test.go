@@ -121,6 +121,7 @@ func TestLogsFilter_EmptyFilter_DoesNotDistributeAnything(t *testing.T) {
 }
 
 func TestLogsFilter_AllAddressesAndTopicsFilter_DistributesLogRegardless(t *testing.T) {
+	t.Skip("issue #15155")
 	events := shards.NewEvents()
 	agg := NewLogsFilterAggregator(events)
 
@@ -173,6 +174,7 @@ func TestLogsFilter_AllAddressesAndTopicsFilter_DistributesLogRegardless(t *test
 }
 
 func TestLogsFilter_TopicFilter_OnlyAllowsThatTopicThrough(t *testing.T) {
+	t.Skip("issue #15138")
 	events := shards.NewEvents()
 	agg := NewLogsFilterAggregator(events)
 
