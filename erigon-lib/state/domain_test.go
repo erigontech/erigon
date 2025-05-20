@@ -85,7 +85,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	t.Cleanup(db.Close)
 	salt := uint32(1)
 
-	cfg.hist.iiCfg.version = IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
+	cfg.hist.iiCfg.version = IIVersionTypes{snaptype.V1_0_standart, snaptype.V1_0_standart, snaptype.V1_0_standart}
 	cfg.hist.iiCfg.dirs = dirs
 	cfg.hist.iiCfg.salt.Store(&salt)
 	//cfg.hist.historyValuesOnCompressedPage = 16
@@ -1058,7 +1058,8 @@ func emptyTestDomain(aggStep uint64) *Domain {
 	cfg.hist.iiCfg.salt.Store(&salt)
 	cfg.hist.iiCfg.dirs = datadir2.New(os.TempDir())
 	cfg.hist.iiCfg.name = kv.InvertedIdx(0)
-	cfg.hist.iiCfg.version = IIVersionTypes{version.V1_0_standart, version.V1_0_standart}
+	cfg.hist.iiCfg.version = IIVersionTypes{version.V1_0_standart, version.V1_0_standart, version.V1_0_standart}
+	cfg.hist.iiCfg.Accessors = AccessorHashMap | AccessorExistence
 
 	d, err := NewDomain(cfg, aggStep, log.New())
 	if err != nil {

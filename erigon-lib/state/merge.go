@@ -708,6 +708,11 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 	if outItem.index, err = recsplit.OpenIndex(iit.ii.efAccessorFilePath(fromStep, toStep)); err != nil {
 		return nil, err
 	}
+	if iit.ii.Accessors.Has(AccessorExistence) {
+		if outItem.existence, err = existence.OpenFilter(iit.ii.efAccessorExistenceFilterFilePath(fromStep, toStep)); err != nil {
+			return nil, err
+		}
+	}
 
 	closeItem = false
 	return outItem, nil
