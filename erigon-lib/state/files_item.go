@@ -271,16 +271,14 @@ type visibleFile struct {
 }
 
 func (i visibleFile) Filename() string {
-	return i.src.decompressor.FileName()
+	if i.src != nil && i.src.decompressor != nil {
+		return i.src.decompressor.FileName()
+	}
+	return ""
 }
 
-func (i visibleFile) StartRootNum() uint64 {
-	return i.startTxNum
-}
-
-func (i visibleFile) EndRootNum() uint64 {
-	return i.endTxNum
-}
+func (i visibleFile) StartRootNum() uint64 { return i.startTxNum }
+func (i visibleFile) EndRootNum() uint64   { return i.endTxNum }
 
 func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l Accessors, trace bool, toTxNum uint64) (roItems []visibleFile) {
 	newVisibleFiles := make([]visibleFile, 0, files.Len())
