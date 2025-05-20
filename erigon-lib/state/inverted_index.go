@@ -719,6 +719,7 @@ func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNu
 	} else {
 		isFrozenRange := len(iit.files) > 0 && startTxNum >= 0 && iit.files.EndTxNum() >= uint64(startTxNum)
 		if isFrozenRange {
+			log.Info("[dbg] recentIterateRange early exit: range frozen already")
 			return stream.EmptyU64, nil
 		}
 	}
