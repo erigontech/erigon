@@ -1082,7 +1082,7 @@ func (ht *HistoryRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limi
 		var can bool
 		can, txTo = ht.canPruneUntil(tx, txTo)
 		if !can {
-			return &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}, nil
+			return nil, nil
 		}
 	}
 	return ht.prune(ctx, tx, txFrom, txTo, limit, forced, logEvery)
