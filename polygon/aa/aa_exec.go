@@ -93,7 +93,7 @@ func ValidateAATransaction(
 	}
 	entryPointTracer.Reset()
 
-	deploymentGasUsed := applyRes.UsedGas
+	deploymentGasUsed := applyRes.GasUsed
 
 	// Validation frame
 	msg, err = tx.ValidationFrame(chainConfig.ChainID, deploymentGasUsed)
@@ -117,7 +117,7 @@ func ValidateAATransaction(
 	}
 	entryPointTracer.Reset()
 
-	validationGasUsed += applyRes.UsedGas
+	validationGasUsed += applyRes.GasUsed
 
 	// Paymaster frame
 	msg, err = tx.PaymasterFrame(chainConfig.ChainID)
@@ -143,7 +143,7 @@ func ValidateAATransaction(
 			return nil, 0, err
 		}
 		entryPointTracer.Reset()
-		validationGasUsed += applyRes.UsedGas
+		validationGasUsed += applyRes.GasUsed
 	}
 
 	return paymasterContext, validationGasUsed, nil
@@ -262,11 +262,11 @@ func ExecuteAATransaction(
 		executionStatus = types.ExecutionStatusExecutionFailure
 	}
 
-	execRefund := capRefund(tx.GasLimit-applyRes.UsedGas, applyRes.UsedGas) // TODO: can be moved into statetransition
+	execRefund := capRefund(tx.GasLimit-applyRes.GasUsed, applyRes.GasUsed) // TODO: can be moved into statetransition
 	validationRefund := capRefund(tx.ValidationGasLimit-validationGasUsed, validationGasUsed)
 
-	executionGasPenalty := (tx.GasLimit - applyRes.UsedGas) * types.AA_GAS_PENALTY_PCT / 100
-	gasUsed = validationGasUsed + applyRes.UsedGas + executionGasPenalty
+	executionGasPenalty := (tx.GasLimit - applyRes.GasUsed) * types.AA_GAS_PENALTY_PCT / 100
+	gasUsed = validationGasUsed + applyRes.GasUsed + executionGasPenalty
 	gasRefund := capRefund(execRefund+validationRefund, gasUsed)
 
 	// Paymaster post-op frame
@@ -287,9 +287,9 @@ func ExecuteAATransaction(
 		}
 	}
 
-	validationGasPenalty := (tx.PostOpGasLimit - applyRes.UsedGas) * types.AA_GAS_PENALTY_PCT / 100
-	gasRefund += capRefund(tx.PostOpGasLimit-applyRes.UsedGas, applyRes.UsedGas)
-	gasUsed += applyRes.UsedGas + validationGasPenalty
+	validationGasPenalty := (tx.PostOpGasLimit - applyRes.GasUsed) * types.AA_GAS_PENALTY_PCT / 100
+	gasRefund += capRefund(tx.PostOpGasLimit-applyRes.GasUsed, applyRes.GasUsed)
+	gasUsed += applyRes.GasUsed + validationGasPenalty
 
 	if err = refundGas(header, tx, ibs, gasUsed-gasRefund); err != nil {
 		return 0, 0, err

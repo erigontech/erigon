@@ -612,7 +612,7 @@ func (tx *AccountAbstractionTransaction) PaymasterFrame(chainID *big.Int) (*Mess
 	}, nil
 }
 
-func (tx *AccountAbstractionTransaction) ValidationFrame(chainID *big.Int, deploymentUsedGas uint64) (*Message, error) {
+func (tx *AccountAbstractionTransaction) ValidationFrame(chainID *big.Int, deploymentGasUsed uint64) (*Message, error) {
 	signingHash := tx.SigningHash(chainID)
 	txAbiEncoding, err := tx.AbiEncode()
 	if err != nil {
@@ -625,7 +625,7 @@ func (tx *AccountAbstractionTransaction) ValidationFrame(chainID *big.Int, deplo
 	}
 
 	intrinsicGas, _ := tx.PreTransactionGasCost()
-	accountGasLimit := tx.ValidationGasLimit - intrinsicGas - deploymentUsedGas
+	accountGasLimit := tx.ValidationGasLimit - intrinsicGas - deploymentGasUsed
 
 	return &Message{
 		to:       tx.SenderAddress,
