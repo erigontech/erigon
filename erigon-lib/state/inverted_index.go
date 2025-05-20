@@ -704,7 +704,6 @@ func (iit *InvertedIndexRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc
 	if err != nil {
 		return nil, err
 	}
-	log.Info("[dbg] IdxRange", "addr", fmt.Sprintf("%x", key), "filesIt.HasNext", filesIt.HasNext(), "recentIt.hasNext", recentIt.HasNext())
 	return stream.Union[uint64](filesIt, recentIt, asc, limit), nil
 }
 
@@ -713,13 +712,11 @@ func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNu
 	if asc {
 		isFrozenRange := len(iit.files) > 0 && endTxNum >= 0 && iit.files.EndTxNum() >= uint64(endTxNum)
 		if isFrozenRange {
-			log.Info("[dbg] recentIterateRange early exit: range frozen already")
 			return stream.EmptyU64, nil
 		}
 	} else {
 		isFrozenRange := len(iit.files) > 0 && startTxNum >= 0 && iit.files.EndTxNum() >= uint64(startTxNum)
 		if isFrozenRange {
-			log.Info("[dbg] recentIterateRange early exit: range frozen already")
 			return stream.EmptyU64, nil
 		}
 	}
