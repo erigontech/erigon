@@ -28,7 +28,6 @@ import (
 
 	"github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
@@ -459,17 +458,18 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	// to `lastKey` and `lastVal` correspondingly, and the next step of multi-way merge happens. Therefore, after the multi-way merge loop
 	// (when CursorHeap cp is empty), there is a need to process the last pair `keyBuf=>valBuf`, because it was one step behind
 	var keyBuf, valBuf []byte
+	var lastKey, lastVal []byte
 	var keyFileStartTxNum, keyFileEndTxNum uint64
 	for cp.Len() > 0 {
-		lastKey := common.Copy(cp[0].key)
-		lastVal := common.Copy(cp[0].val)
+		lastKey = append(lastKey[:0], cp[0].key...)
+		lastVal = append(lastVal[:0], cp[0].val...)
 		lastFileStartTxNum, lastFileEndTxNum := cp[0].startTxNum, cp[0].endTxNum
 		// Advance all the items that have this key (including the top)
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 			ci1 := heap.Pop(&cp).(*CursorItem)
 			if ci1.idx.HasNext() {
-				ci1.key, _ = ci1.idx.Next(nil)
-				ci1.val, _ = ci1.idx.Next(nil)
+				ci1.key, _ = ci1.idx.Next(ci1.key[:0])
+				ci1.val, _ = ci1.idx.Next(ci1.val[:0])
 				heap.Push(&cp, ci1)
 			}
 		}
@@ -628,9 +628,10 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 	// to `lastKey` and `lastVal` correspondingly, and the next step of multi-way merge happens. Therefore, after the multi-way merge loop
 	// (when CursorHeap cp is empty), there is a need to process the last pair `keyBuf=>valBuf`, because it was one step behind
 	var keyBuf, valBuf []byte
+	var lastKey, lastVal []byte
 	for cp.Len() > 0 {
-		lastKey := common.Copy(cp[0].key)
-		lastVal := common.Copy(cp[0].val)
+		lastKey = append(lastKey[:0], cp[0].key...)
+		lastVal = append(lastVal[:0], cp[0].val...)
 
 		// Pre-rebase the first sequence
 		preSeq := multiencseq.ReadMultiEncSeq(cp[0].startTxNum, lastVal)
@@ -660,8 +661,8 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 			}
 			// fmt.Printf("multi-way %s [%d] %x\n", ii.keysTable, ci1.endTxNum, ci1.key)
 			if ci1.idx.HasNext() {
-				ci1.key, _ = ci1.idx.Next(nil)
-				ci1.val, _ = ci1.idx.Next(nil)
+				ci1.key, _ = ci1.idx.Next(ci1.key[:0])
+				ci1.val, _ = ci1.idx.Next(ci1.val[:0])
 				// fmt.Printf("heap next push %s [%d] %x\n", ii.keysTable, ci1.endTxNum, ci1.key)
 				heap.Push(&cp, ci1)
 			}
@@ -803,10 +804,10 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		// instead, the pair from the previous iteration is processed first - `keyBuf=>valBuf`. After that, `keyBuf` and `valBuf` are assigned
 		// to `lastKey` and `lastVal` correspondingly, and the next step of multi-way merge happens. Therefore, after the multi-way merge loop
 		// (when CursorHeap cp is empty), there is a need to process the last pair `keyBuf=>valBuf`, because it was one step behind
-		var valBuf []byte
+		var lastKey, valBuf []byte
 		var keyCount int
 		for cp.Len() > 0 {
-			lastKey := common.Copy(cp[0].key)
+			lastKey = append(lastKey[:0], cp[0].key...)
 			// Advance all the items that have this key (including the top)
 			for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 				ci1 := heap.Pop(&cp).(*CursorItem)
@@ -826,8 +827,8 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				// fmt.Printf("fput '%x'->%x\n", lastKey, ci1.val)
 				keyCount += int(count)
 				if ci1.idx.HasNext() {
-					ci1.key, _ = ci1.idx.Next(nil)
-					ci1.val, _ = ci1.idx.Next(nil)
+					ci1.key, _ = ci1.idx.Next(ci1.key[:0])
+					ci1.val, _ = ci1.idx.Next(ci1.val[:0])
 					heap.Push(&cp, ci1)
 				}
 			}
