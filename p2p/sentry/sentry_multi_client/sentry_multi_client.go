@@ -112,6 +112,7 @@ func (cs *MultiClient) RecvMessageLoop(
 		eth.ToProto[direct.ETH67][eth.BlockBodiesMsg],
 		eth.ToProto[direct.ETH67][eth.NewBlockHashesMsg],
 		eth.ToProto[direct.ETH67][eth.NewBlockMsg],
+		eth.ToProto[direct.ETH69][eth.BlockRangeUpdateMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry proto_sentry.SentryClient) (grpc.ClientStream, error) {
 		return sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
@@ -133,6 +134,22 @@ func (cs *MultiClient) PeerEventsLoop(
 	}
 
 	libsentry.ReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "PeerEvents", streamFactory, messageFactory, cs.HandlePeerEvent, wg, cs.logger)
+}
+
+// BlockRangeUpdateLoop sends current available block range to all peers
+func (cs *MultiClient) BlockRangeUpdateLoop(
+	ctx context.Context,
+	sentry proto_sentry.SentryClient,
+	wg *sync.WaitGroup,
+) {
+	streamFactory := func(streamCtx context.Context, sentry proto_sentry.SentryClient) (grpc.ClientStream, error) {
+		return sentry.PeerEvents(streamCtx, &proto_sentry.PeerEventsRequest{}, grpc.WaitForReady(true))
+	}
+	messageFactory := func() *proto_sentry.PeerEvent {
+		return new(proto_sentry.PeerEvent)
+	}
+
+	libsentry.ReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "BlockRangeUpdate", streamFactory, messageFactory, cs.HandlePeerEvent, wg, cs.logger)
 }
 
 // MultiClient - does handle request/response/subscriptions to multiple sentries
@@ -370,11 +387,11 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 			}
 		}
 	}
-	outreq := proto_sentry.PeerMinBlockRequest{
-		PeerId:   peerID,
-		MinBlock: highestBlock,
+	outreq := proto_sentry.PeerLatestBlockRequest{
+		PeerId:            peerID,
+		LatestBlockHeight: highestBlock,
 	}
-	if _, err1 := sentryClient.PeerMinBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
+	if _, err1 := sentryClient.PeerLatestBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
 		cs.logger.Error("Could not send min block for peer", "err", err1)
 	}
 	return nil
@@ -448,11 +465,11 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 		return fmt.Errorf("singleHeaderAsSegment failed: %w", err)
 	}
 	cs.Bd.AddToPrefetch(request.Block.Header(), request.Block.RawBody())
-	outreq := proto_sentry.PeerMinBlockRequest{
-		PeerId:   inreq.PeerId,
-		MinBlock: request.Block.NumberU64(),
+	outreq := proto_sentry.PeerLatestBlockRequest{
+		PeerId:            inreq.PeerId,
+		LatestBlockHeight: request.Block.NumberU64(),
 	}
-	if _, err1 := sentryClient.PeerMinBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
+	if _, err1 := sentryClient.PeerLatestBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
 		cs.logger.Error("Could not send min block for peer", "err", err1)
 	}
 	cs.logger.Trace(fmt.Sprintf("NewBlockMsg{blockNumber: %d} from [%s]", request.Block.NumberU64(), sentry.ConvertH512ToPeerID(inreq.PeerId)))
@@ -622,6 +639,20 @@ func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.In
 	return nil
 }
 
+// blockRange69 handles incoming BLOCK_RANGE_UPDATE messages
+func (cs *MultiClient) blockRange69(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient proto_sentry.SentryClient) error {
+	//	//cs.Bd.AddToPrefetch(request.Block.Header(), request.Block.RawBody())
+	//	//outreq := proto_sentry.PeerLatestBlockRequest{
+	//	//	PeerId:            inreq.PeerId,
+	//	//	LatestBlockHeight: request.Block.NumberU64(),
+	//	}
+	//	if _, err1 := sentryClient.PeerLatestBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
+	//		cs.logger.Error("Could not send min block for peer", "err", err1)
+	//	}
+
+	return nil
+}
+
 func MakeInboundMessage() *proto_sentry.InboundMessage {
 	return new(proto_sentry.InboundMessage)
 }
@@ -668,6 +699,8 @@ func (cs *MultiClient) handleInboundMessage(ctx context.Context, inreq *proto_se
 		return cs.receipts66(ctx, inreq, sentry)
 	case proto_sentry.MessageId_GET_RECEIPTS_66:
 		return cs.getReceipts66(ctx, inreq, sentry)
+	case proto_sentry.MessageId_BLOCK_RANGE_UPDATE_69:
+		return cs.blockRange69(ctx, inreq, sentry)
 	default:
 		return fmt.Errorf("not implemented for message Id: %s", inreq.Id)
 	}
@@ -702,6 +735,9 @@ func (cs *MultiClient) HandlePeerEvent(ctx context.Context, event *proto_sentry.
 		"nodeURL", nodeURL, "clientID", clientID, "capabilities", capabilities)
 	return nil
 }
+
+//func (cs *MultiClient) HandleBlockRangeUpdate(ctx context.Context, event *proto_sentry.PeerEvent, sentryClient proto_sentry.SentryClient) error {
+//}
 
 func (cs *MultiClient) makeStatusData(ctx context.Context) (*proto_sentry.StatusData, error) {
 	return cs.statusDataProvider.GetStatusData(ctx)

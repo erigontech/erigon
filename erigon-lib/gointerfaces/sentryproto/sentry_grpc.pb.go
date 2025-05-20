@@ -23,7 +23,8 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	Sentry_SetStatus_FullMethodName                = "/sentry.Sentry/SetStatus"
 	Sentry_PenalizePeer_FullMethodName             = "/sentry.Sentry/PenalizePeer"
-	Sentry_PeerMinBlock_FullMethodName             = "/sentry.Sentry/PeerMinBlock"
+	Sentry_PeerLatestBlock_FullMethodName          = "/sentry.Sentry/PeerLatestBlock"
+	Sentry_PeerMinimumBlock_FullMethodName         = "/sentry.Sentry/PeerMinimumBlock"
 	Sentry_HandShake_FullMethodName                = "/sentry.Sentry/HandShake"
 	Sentry_SendMessageByMinBlock_FullMethodName    = "/sentry.Sentry/SendMessageByMinBlock"
 	Sentry_SendMessageById_FullMethodName          = "/sentry.Sentry/SendMessageById"
@@ -45,7 +46,8 @@ type SentryClient interface {
 	// SetStatus - force new ETH client state of sentry - network_id, max_block, etc...
 	SetStatus(ctx context.Context, in *StatusData, opts ...grpc.CallOption) (*SetStatusReply, error)
 	PenalizePeer(ctx context.Context, in *PenalizePeerRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
-	PeerMinBlock(ctx context.Context, in *PeerMinBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	PeerLatestBlock(ctx context.Context, in *PeerLatestBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	PeerMinimumBlock(ctx context.Context, in *PeerMinimumBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	// HandShake - pre-requirement for all Send* methods - returns list of ETH protocol versions,
 	// without knowledge of protocol - impossible encode correct P2P message
 	HandShake(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*HandShakeReply, error)
@@ -95,10 +97,20 @@ func (c *sentryClient) PenalizePeer(ctx context.Context, in *PenalizePeerRequest
 	return out, nil
 }
 
-func (c *sentryClient) PeerMinBlock(ctx context.Context, in *PeerMinBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+func (c *sentryClient) PeerLatestBlock(ctx context.Context, in *PeerLatestBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(emptypb.Empty)
-	err := c.cc.Invoke(ctx, Sentry_PeerMinBlock_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, Sentry_PeerLatestBlock_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sentryClient) PeerMinimumBlock(ctx context.Context, in *PeerMinimumBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, Sentry_PeerMinimumBlock_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +262,8 @@ type SentryServer interface {
 	// SetStatus - force new ETH client state of sentry - network_id, max_block, etc...
 	SetStatus(context.Context, *StatusData) (*SetStatusReply, error)
 	PenalizePeer(context.Context, *PenalizePeerRequest) (*emptypb.Empty, error)
-	PeerMinBlock(context.Context, *PeerMinBlockRequest) (*emptypb.Empty, error)
+	PeerLatestBlock(context.Context, *PeerLatestBlockRequest) (*emptypb.Empty, error)
+	PeerMinimumBlock(context.Context, *PeerMinimumBlockRequest) (*emptypb.Empty, error)
 	// HandShake - pre-requirement for all Send* methods - returns list of ETH protocol versions,
 	// without knowledge of protocol - impossible encode correct P2P message
 	HandShake(context.Context, *emptypb.Empty) (*HandShakeReply, error)
@@ -286,8 +299,11 @@ func (UnimplementedSentryServer) SetStatus(context.Context, *StatusData) (*SetSt
 func (UnimplementedSentryServer) PenalizePeer(context.Context, *PenalizePeerRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PenalizePeer not implemented")
 }
-func (UnimplementedSentryServer) PeerMinBlock(context.Context, *PeerMinBlockRequest) (*emptypb.Empty, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method PeerMinBlock not implemented")
+func (UnimplementedSentryServer) PeerLatestBlock(context.Context, *PeerLatestBlockRequest) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PeerLatestBlock not implemented")
+}
+func (UnimplementedSentryServer) PeerMinimumBlock(context.Context, *PeerMinimumBlockRequest) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PeerMinimumBlock not implemented")
 }
 func (UnimplementedSentryServer) HandShake(context.Context, *emptypb.Empty) (*HandShakeReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method HandShake not implemented")
@@ -382,20 +398,38 @@ func _Sentry_PenalizePeer_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Sentry_PeerMinBlock_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(PeerMinBlockRequest)
+func _Sentry_PeerLatestBlock_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PeerLatestBlockRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(SentryServer).PeerMinBlock(ctx, in)
+		return srv.(SentryServer).PeerLatestBlock(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: Sentry_PeerMinBlock_FullMethodName,
+		FullMethod: Sentry_PeerLatestBlock_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SentryServer).PeerMinBlock(ctx, req.(*PeerMinBlockRequest))
+		return srv.(SentryServer).PeerLatestBlock(ctx, req.(*PeerLatestBlockRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Sentry_PeerMinimumBlock_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PeerMinimumBlockRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SentryServer).PeerMinimumBlock(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Sentry_PeerMinimumBlock_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SentryServer).PeerMinimumBlock(ctx, req.(*PeerMinimumBlockRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -618,8 +652,12 @@ var Sentry_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Sentry_PenalizePeer_Handler,
 		},
 		{
-			MethodName: "PeerMinBlock",
-			Handler:    _Sentry_PeerMinBlock_Handler,
+			MethodName: "PeerLatestBlock",
+			Handler:    _Sentry_PeerLatestBlock_Handler,
+		},
+		{
+			MethodName: "PeerMinimumBlock",
+			Handler:    _Sentry_PeerMinimumBlock_Handler,
 		},
 		{
 			MethodName: "HandShake",

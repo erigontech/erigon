@@ -9,10 +9,6 @@ import (
 	"math/rand"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -20,6 +16,11 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 )
 
 var _ sentryproto.SentryClient = (*sentryMultiplexer)(nil)
@@ -85,14 +86,29 @@ func (m *sentryMultiplexer) PenalizePeer(ctx context.Context, in *sentryproto.Pe
 	return &emptypb.Empty{}, g.Wait()
 }
 
-func (m *sentryMultiplexer) PeerMinBlock(ctx context.Context, in *sentryproto.PeerMinBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+func (m *sentryMultiplexer) PeerLatestBlock(ctx context.Context, in *sentryproto.PeerLatestBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	g, gctx := errgroup.WithContext(ctx)
 
 	for _, client := range m.clients {
 		client := client
 
 		g.Go(func() error {
-			_, err := client.PeerMinBlock(gctx, in, opts...)
+			_, err := client.PeerLatestBlock(gctx, in, opts...)
+			return err
+		})
+	}
+
+	return &emptypb.Empty{}, g.Wait()
+}
+
+func (m *sentryMultiplexer) PeerMinimumBlock(ctx context.Context, in *sentryproto.PeerMinimumBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	g, gctx := errgroup.WithContext(ctx)
+
+	for _, client := range m.clients {
+		client := client
+
+		g.Go(func() error {
+			_, err := client.PeerMinimumBlock(gctx, in, opts...)
 			return err
 		})
 	}
