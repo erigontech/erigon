@@ -1909,7 +1909,10 @@ func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {
 }
 
 func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
-	txTo = min(txTo, dt.files.EndTxNum())
+	if dt.files.EndTxNum() > 0 {
+		txTo = min(txTo, dt.files.EndTxNum())
+	}
+
 	if limit == 0 {
 		limit = math.MaxUint64
 	}
