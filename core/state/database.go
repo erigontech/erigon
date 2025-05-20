@@ -52,7 +52,7 @@ type StateWriter interface {
 	UpdateAccountData(address common.Address, original, account *accounts.Account) error
 	UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error
 	DeleteAccount(address common.Address, original *accounts.Account) error
-	WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value *uint256.Int) error
+	WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error
 	CreateContract(address common.Address) error
 }
 
@@ -77,7 +77,7 @@ func (nw *NoopWriter) UpdateAccountCode(address common.Address, incarnation uint
 	return nil
 }
 
-func (nw *NoopWriter) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value *uint256.Int) error {
+func (nw *NoopWriter) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error {
 	return nil
 }
 

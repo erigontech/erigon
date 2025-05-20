@@ -6,10 +6,11 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common"
 	"math"
 	"sync/atomic"
 	"time"
+
+	"github.com/erigontech/erigon-lib/common"
 
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common/assert"
@@ -272,10 +273,8 @@ func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(blockNu
 		return nil
 	}
 
-	log.Debug("[commitment] store state", "block", blockNum, "txNum", txNum, "rootHash", rootHash)
+	log.Debug("[commitment] store state", "block", blockNum, "txNum", txNum, "rootHash", fmt.Sprintf("%x", rootHash))
 	return sdc.mainTtx.PutBranch(keyCommitmentState, encodedState, prevState, prevStep)
-
-	//return sdc.sharedDomains.DomainPut(kv.CommitmentDomain, keyCommitmentState, nil, encodedState, prevState, prevStep)
 }
 
 // Encodes current trie state and returns it

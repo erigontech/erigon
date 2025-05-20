@@ -251,7 +251,7 @@ func (so *stateObject) updateTrie(stateWriter StateWriter) error {
 	for key, value := range so.dirtyStorage {
 		original := so.blockOriginStorage[key]
 		so.originStorage[key] = value
-		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), key, &original, &value); err != nil {
+		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), key, original, value); err != nil {
 			return err
 		}
 	}
