@@ -36,6 +36,7 @@ const (
 	ETH66 = 66
 	ETH67 = 67
 	ETH68 = 68
+	ETH69 = 69
 )
 
 //go:generate mockgen -typed=true -destination=./sentry_client_mock.go -package=direct . SentryClient
@@ -89,7 +90,7 @@ func (c *SentryClientRemote) HandShake(ctx context.Context, in *emptypb.Empty, o
 	c.Lock()
 	defer c.Unlock()
 	switch reply.Protocol {
-	case sentryproto.Protocol_ETH67, sentryproto.Protocol_ETH68:
+	case sentryproto.Protocol_ETH67, sentryproto.Protocol_ETH68, sentryproto.Protocol_ETH69:
 		c.protocol = reply.Protocol
 	default:
 		return nil, fmt.Errorf("unexpected protocol: %d", reply.Protocol)
@@ -137,8 +138,12 @@ func (c *SentryClientDirect) PenalizePeer(ctx context.Context, in *sentryproto.P
 	return c.server.PenalizePeer(ctx, in)
 }
 
-func (c *SentryClientDirect) PeerMinBlock(ctx context.Context, in *sentryproto.PeerMinBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-	return c.server.PeerMinBlock(ctx, in)
+func (c *SentryClientDirect) PeerLatestBlock(ctx context.Context, in *sentryproto.PeerLatestBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	return c.server.PeerLatestBlock(ctx, in)
+}
+
+func (c *SentryClientDirect) PeerMinimumBlock(ctx context.Context, in *sentryproto.PeerMinimumBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	return c.server.PeerMinimumBlock(ctx, in)
 }
 
 func (c *SentryClientDirect) SendMessageByMinBlock(ctx context.Context, in *sentryproto.SendMessageByMinBlockRequest, opts ...grpc.CallOption) (*sentryproto.SentPeers, error) {

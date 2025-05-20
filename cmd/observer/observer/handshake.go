@@ -71,6 +71,15 @@ type StatusMessage struct {
 	Rest            []rlp.RawValue `rlp:"tail"`
 }
 
+type StatusMessage69 struct {
+	ProtocolVersion            uint32
+	NetworkID                  uint64
+	Genesis                    common.Hash
+	ForkID                     *forkid.ID
+	EarliestBlock, LatestBlock uint64
+	LatestBlockHash            common.Hash
+}
+
 type HandshakeErrorID string
 
 const (
@@ -149,7 +158,7 @@ func Handshake(
 	rlpxPort int,
 	pubkey *ecdsa.PublicKey,
 	myPrivateKey *ecdsa.PrivateKey,
-) (*HelloMessage, *StatusMessage, *HandshakeError) {
+) (*HelloMessage, *DiplomatStatus, *HandshakeError) {
 	connectTimeout := 10 * time.Second
 	dialer := net.Dialer{
 		Timeout: connectTimeout,
@@ -198,20 +207,32 @@ func Handshake(
 	}
 
 	var statusMessage StatusMessage
-	if err := readMessage(conn, 16+eth.StatusMsg, HandshakeErrorIDStatusDecode, &statusMessage); err != nil {
+	if err := readMessage(conn, 16+eth.StatusMsg, HandshakeErrorIDStatusDecode, &statusMessage); err == nil {
+		// parse fork ID
+		if (statusMessage.ProtocolVersion >= 64) && (len(statusMessage.Rest) > 0) {
+			var forkID forkid.ID
+			if err := rlp.DecodeBytes(statusMessage.Rest[0], &forkID); err != nil {
+				return &helloMessage, nil, NewHandshakeError(HandshakeErrorIDStatusDecode, err, 0)
+			}
+			statusMessage.ForkID = &forkID
+		}
+
+		return &helloMessage, &DiplomatStatus{
+			NetworkID:       &statusMessage.NetworkID,
+			ProtocolVersion: &statusMessage.ProtocolVersion,
+		}, nil
+	}
+
+	// try reading eth69 status message
+	var statusMessage69 StatusMessage69
+	if err := readMessage(conn, 16+eth.StatusMsg, HandshakeErrorIDStatusDecode, &statusMessage69); err != nil {
 		return &helloMessage, nil, err
 	}
 
-	// parse fork ID
-	if (statusMessage.ProtocolVersion >= 64) && (len(statusMessage.Rest) > 0) {
-		var forkID forkid.ID
-		if err := rlp.DecodeBytes(statusMessage.Rest[0], &forkID); err != nil {
-			return &helloMessage, nil, NewHandshakeError(HandshakeErrorIDStatusDecode, err, 0)
-		}
-		statusMessage.ForkID = &forkID
-	}
-
-	return &helloMessage, &statusMessage, nil
+	return &helloMessage, &DiplomatStatus{
+		NetworkID:       &statusMessage69.NetworkID,
+		ProtocolVersion: &statusMessage69.ProtocolVersion,
+	}, nil
 }
 
 func readMessage(conn *rlpx.Conn, expectedMessageID uint64, decodeError HandshakeErrorID, message interface{}) *HandshakeError {
@@ -252,6 +273,7 @@ func makeOurHelloMessage(myPrivateKey *ecdsa.PrivateKey) HelloMessage {
 	caps := []p2p.Cap{
 		{Name: eth.ProtocolName, Version: direct.ETH67},
 		{Name: eth.ProtocolName, Version: direct.ETH68},
+		{Name: eth.ProtocolName, Version: direct.ETH69},
 	}
 
 	return HelloMessage{
