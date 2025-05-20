@@ -61,9 +61,9 @@ jobs:
 
     steps:
       - name: Cleanup
-        run: 
+        run: |
           rm -rf * /tmp/docker-build-output
-          docker buildx prune -f -a --verbose
+          docker buildx prune --verbose -f -a
 
       - name: Checkout git repository ${{ env.APP_REPO }} reference ${{ inputs.checkout_ref }}
         uses: actions/checkout@v4
