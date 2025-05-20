@@ -86,7 +86,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 	binary.BigEndian.PutUint64(from[:], uint64(0))
 	binary.BigEndian.PutUint64(to[:], uint64(pruneIters)*pruneLimit)
 
-	t.Run("prune when no files", func(t *testing.T) {
+	t.Run("no_files_no_force", func(t *testing.T) {
 		ic := ii.BeginFilesRo()
 		defer ic.Close()
 
@@ -119,7 +119,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		ic.Close()
 	})
 
-	t.Run("prune more than visible files - not allowed", func(t *testing.T) {
+	t.Run("retire_one_step_no_force", func(t *testing.T) {
 		collation, err := ii.collate(context.Background(), 0, tx)
 		require.NoError(t, err)
 		sf, _ := ii.buildFiles(context.Background(), 0, collation, background.NewProgressSet())
@@ -179,9 +179,11 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		require.NoError(t, err)
 		txn, _, err := icc.Seek(from[:])
 		require.NoError(t, err)
+
+		prunedInSep0 := 16 - 1
 		// we pruned by limit so next transaction after prune should be equal to `pruneIters*pruneLimit+1`
 		// If we would prune by txnum then txTo prune should be available after prune is finished
-		require.EqualValues(t, pruneIters*int(pruneLimit), int(binary.BigEndian.Uint64(txn)-1))
+		require.EqualValues(t, pruneIters*int(pruneLimit)+prunedInSep0, int(binary.BigEndian.Uint64(txn)-1))
 		icc.Close()
 
 		// check second table
@@ -192,7 +194,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		require.NoError(t, err)
 		// we pruned by limit so next transaction after prune should be equal to `pruneIters*pruneLimit+1`
 		// If we would prune by txnum then txTo prune should be available after prune is finished
-		require.EqualValues(t, pruneIters*int(pruneLimit), binary.BigEndian.Uint64(txn)-1)
+		require.EqualValues(t, pruneIters*int(pruneLimit)+prunedInSep0, int(binary.BigEndian.Uint64(txn)-1))
 		icc.Close()
 	})
 
