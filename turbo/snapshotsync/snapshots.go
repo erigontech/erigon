@@ -1294,6 +1294,7 @@ type snapshotNotifier interface {
 }
 
 func (s *RoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix string, notifier snapshotNotifier, dirs datadir.Dirs, cc *chain.Config, logger log.Logger) error {
+	s.logger.Info("ye...", "im", s.IndicesMax(), "segmax", s.SegmentsMax(), "producee2", !s.Cfg().ProduceE2)
 	if s.IndicesMax() >= s.SegmentsMax() {
 		return nil
 	}
