@@ -51,7 +51,7 @@ jobs:
     #runs-on: ubuntu-latest
     runs-on: [devops-01-self-hosted]
     #runs-on: ubuntu-latest-devops-xxlarge
-    timeout-minutes: 90
+    timeout-minutes: 30
     name: Create git tag, build and publish Release Artifacts
     outputs:
       commit-id: ${{ steps.getCommitId.outputs.id }}
@@ -107,6 +107,10 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-config-inline: |
+            [worker.oci]
+              max-parallelism = 1
 
       - name: Build temporary multiplatform image and store outputs locally for further processing
         env:
