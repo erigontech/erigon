@@ -769,15 +769,12 @@ func (iit *InvertedIndexRoTx) iterateRangeOnFiles(key []byte, startTxNum, endTxN
 		for i := len(iit.files) - 1; i >= 0; i-- {
 			// [from,to) && from < to
 			if endTxNum >= 0 && int(iit.files[i].startTxNum) >= endTxNum {
-				log.Info("[dbg] iterateRangeOnFiles: contiune1", "n", iit.files[i].Filename())
 				continue
 			}
 			if startTxNum >= 0 && iit.files[i].endTxNum <= uint64(startTxNum) {
-				log.Info("[dbg] iterateRangeOnFiles: break1", "n", iit.files[i].Filename())
 				break
 			}
 			if iit.files[i].src.index.KeyCount() == 0 {
-				log.Info("[dbg] iterateRangeOnFiles: contiune2", "n", iit.files[i].Filename())
 				continue
 			}
 			it.stack = append(it.stack, iit.files[i])
