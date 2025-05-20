@@ -1137,6 +1137,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 		}
 		segmentsMaxSet = true
 	}
+	s.logger.Info("done opening", "maxset", segmentsMaxSet, "max", segmentsMax)
 	if segmentsMaxSet {
 		s.segmentsMax.Store(segmentsMax)
 	}
