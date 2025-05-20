@@ -653,8 +653,13 @@ func (sdb *IntraBlockState) Selfdestruct(addr libcommon.Address) (bool, error) {
 		prevbalance: prevBalance,
 	})
 
-	if sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil && !prevBalance.IsZero() {
-		sdb.tracingHooks.OnBalanceChange(addr, &prevBalance, uint256.NewInt(0), tracing.BalanceDecreaseSelfdestruct)
+	if sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil {
+		if sdb.tracingHooks.OnBalanceChange != nil && !prevBalance.IsZero() {
+			sdb.tracingHooks.OnBalanceChange(addr, &prevBalance, uint256.NewInt(0), tracing.BalanceDecreaseSelfdestruct)
+		}
+		if sdb.tracingHooks.CaptureArbitrumTransfer != nil {
+			sdb.tracingHooks.CaptureArbitrumTransfer(&addr, nil, &prevBalance, false, "selfDestruct")
+		}
 	}
 
 	stateObject.markSelfdestructed()

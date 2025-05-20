@@ -212,12 +212,13 @@ func newJsTracer(code string, ctx *tracers.Context, cfg json.RawMessage) (*trace
 	t.logValue = t.log.setupObject()
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
-			OnTxStart: t.OnTxStart,
-			OnTxEnd:   t.OnTxEnd,
-			OnEnter:   t.OnEnter,
-			OnExit:    t.OnExit,
-			OnOpcode:  t.OnOpcode,
-			OnFault:   t.OnFault,
+			OnTxStart:               t.OnTxStart,
+			OnTxEnd:                 t.OnTxEnd,
+			OnEnter:                 t.OnEnter,
+			OnExit:                  t.OnExit,
+			OnOpcode:                t.OnOpcode,
+			OnFault:                 t.OnFault,
+			CaptureArbitrumTransfer: t.CaptureArbitrumTransfer,
 		},
 		GetResult: t.GetResult,
 		Stop:      t.Stop,
