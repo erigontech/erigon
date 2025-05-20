@@ -738,8 +738,8 @@ func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNu
 		return nil, err
 	}
 	c, _ := roTx.CursorDupSort(iit.ii.valuesTable)
-	kk, see, _ := c.SeekBothRange(key, from)
-	log.Info("[dbg] recentIterateRange", "it.HasNext", it.HasNext(), "key", fmt.Sprintf("%x", key), "kk", fmt.Sprintf("%x", kk), "see", fmt.Sprintf("%x", see))
+	see, _ := c.SeekBothRange(key, from)
+	log.Info("[dbg] recentIterateRange", "it.HasNext", it.HasNext(), "key", fmt.Sprintf("%x", key), "kk", "see", fmt.Sprintf("%x", see))
 
 	return stream.TransformKV2U64(it, func(_, v []byte) (uint64, error) {
 		return binary.BigEndian.Uint64(v), nil
