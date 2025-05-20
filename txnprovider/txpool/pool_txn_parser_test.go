@@ -325,8 +325,8 @@ func TestSetCodeAuthSignatureRecover(t *testing.T) {
 	setCodeTx := types.SetCodeTransaction{}
 	rlpStream := rlp.NewStream(bytes.NewBuffer(txnRlpBytes[1:]), uint64(len(txnRlpBytes)))
 	setCodeTx.DecodeRLP(rlpStream)
-	require.Len(t, txn.Authorities, 1)
-	require.Equal(t, expectedSigner, *txn.Authorities[0])
+	require.Len(t, txn.AuthAndNonces, 1)
+	require.Equal(t, expectedSigner.String(), txn.AuthAndNonces[0].authority)
 }
 
 func TestSetCodeTxnParsing(t *testing.T) {
@@ -344,7 +344,7 @@ func TestSetCodeTxnParsing(t *testing.T) {
 
 	_, err = ctx.ParseTransaction(bodyRlx, 0, &txn, nil, hasEnvelope, false, nil)
 	require.NoError(t, err)
-	assert.Len(t, txn.Authorities, 2)
+	assert.Len(t, txn.AuthAndNonces, 2)
 	assert.Equal(t, SetCodeTxnType, txn.Type)
 
 	// test empty authorizations
@@ -360,7 +360,7 @@ func TestSetCodeTxnParsing(t *testing.T) {
 
 	_, err = ctx.ParseTransaction(bodyRlx, 0, &tx2, nil, hasEnvelope, false, nil)
 	require.NoError(t, err)
-	assert.Empty(t, tx2.Authorities)
+	assert.Empty(t, tx2.AuthAndNonces)
 	assert.Equal(t, SetCodeTxnType, tx2.Type)
 
 	// generated using this in core/types/encdec_test.go

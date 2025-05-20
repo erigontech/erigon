@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -311,18 +310,18 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 	invalidFilesMu := sync.Mutex{}
 	invalidFileItems := make([]*filesItem, 0)
 	p := f.schema
-	version := version.V1_0
 	f.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.decompressor == nil {
-				fPath := p.DataFile(version, ee.RootNum(item.startTxNum), ee.RootNum(item.endTxNum))
-				exists, err := dir.FileExist(fPath)
-				if err != nil || !exists {
+				fPathGen := p.DataFile(version.V1_0, ee.RootNum(item.startTxNum), ee.RootNum(item.endTxNum))
+				fPathMask, _ := version.ReplaceVersionWithMask(fPathGen)
+				fPath, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+				if err != nil || !ok {
 					_, fName := filepath.Split(fPath)
-					if err != nil {
-						f.logger.Debug("SnapshotRepo.openDirtyFiles: FileExist", "f", fName, "err", err)
-					} else {
+					if err == nil {
 						f.logger.Debug("SnapshotRepo.openDirtyFiles: file doesn't exist", "f", fName)
+					} else {
+						f.logger.Debug("SnapshotRepo.openDirtyFiles: FileExist", "f", fName, "err", err)
 					}
 					invalidFilesMu.Lock()
 					invalidFileItems = append(invalidFileItems, item)
@@ -342,14 +341,15 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 			accessors := p.AccessorList()
 
 			if item.index == nil && accessors.Has(AccessorHashMap) {
-				fPath := p.AccessorIdxFile(version, ee.RootNum(item.startTxNum), ee.RootNum(item.endTxNum), 0)
-				exists, err := dir.FileExist(fPath)
+				fPathGen := p.AccessorIdxFile(version.V1_0, ee.RootNum(item.startTxNum), ee.RootNum(item.endTxNum), 0)
+				fPathMask, _ := version.ReplaceVersionWithMask(fPathGen)
+				fPath, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
 					f.logger.Debug("SnapshotRepo.openDirtyFiles: FileExist", "f", fName, "err", err)
 				}
 
-				if exists {
+				if ok {
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
@@ -359,13 +359,14 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 			}
 
 			if item.bindex == nil && accessors.Has(AccessorBTree) {
-				fPath := p.BtIdxFile(version, ee.RootNum(item.startTxNum), ee.RootNum(item.endTxNum))
-				exists, err := dir.FileExist(fPath)
+				fPathGen := p.BtIdxFile(version.V1_0, ee.RootNum(item.startTxNum), ee.RootNum(item.endTxNum))
+				fPathMask, _ := version.ReplaceVersionWithMask(fPathGen)
+				fPath, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
 					f.logger.Warn("[agg] SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
 				}
-				if exists {
+				if ok {
 					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, DefaultBtreeM, item.decompressor, p.DataFileCompression()); err != nil {
 						_, fName := filepath.Split(fPath)
 						f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
@@ -374,13 +375,14 @@ func (f *SnapshotRepo) openDirtyFiles() error {
 				}
 			}
 			if item.existence == nil && accessors.Has(AccessorExistence) {
-				fPath := p.ExistenceFile(version, ee.RootNum(item.startTxNum), ee.RootNum(item.endTxNum))
-				exists, err := dir.FileExist(fPath)
+				fPathGen := p.ExistenceFile(version.V1_0, ee.RootNum(item.startTxNum), ee.RootNum(item.endTxNum))
+				fPathMask, _ := version.ReplaceVersionWithMask(fPathGen)
+				fPath, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
 					f.logger.Debug("SnapshotRepo.openDirtyFiles: FileExist", "f", fName, "err", err)
 				}
-				if exists {
+				if ok {
 					if item.existence, err = existence.OpenFilter(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)

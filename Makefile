@@ -128,7 +128,7 @@ dbg:
 %.cmd: override OUTPUT = $(GOBIN)/$*$(CMD_BUILD_SUFFIX)
 %.cmd:
 	@echo Building '$(OUTPUT)'
-	cd ./cmd/$* && $(GOBUILD) -o $(OUTPUT)
+	@cd ./cmd/$* && $(GOBUILD) -o $(OUTPUT)
 	@echo "Run \"$(GOBIN)/$*\" to launch $*."
 
 ## geth:                              run erigon (TODO: remove?)
@@ -195,7 +195,7 @@ test: test-erigon-lib test-erigon-db
 
 ## test-all:                  run all tests with a 1h timeout
 test-all: test-erigon-lib-all test-erigon-db-all
-	$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out
+	$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out -race
 
 ## test-hive						run the hive tests locally off nektos/act workflows simulator
 test-hive:

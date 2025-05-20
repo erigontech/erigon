@@ -78,6 +78,11 @@ var idxOptimize = &cobra.Command{
 		logger := debug.SetupCobra(cmd, "integration")
 		dirs := datadir.New(datadirCli)
 
+		if err := CheckSaltFilesExist(dirs); err != nil {
+			logger.Error("Failed to check salt files", "error", err)
+			return
+		}
+
 		// accessorDir := filepath.Join(datadirCli, "snapshots", "accessor")
 		idxPath := dirs.SnapIdx
 		idxDir := os.DirFS(idxPath)
