@@ -271,7 +271,7 @@ type visibleFile struct {
 }
 
 func (i visibleFile) Filename() string {
-	return i.src.decompressor.FilePath()
+	return i.src.decompressor.FileName()
 }
 
 func (i visibleFile) StartRootNum() uint64 {
