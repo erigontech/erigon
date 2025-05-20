@@ -258,6 +258,21 @@ func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates
 	return rootHash, nil
 }
 
+func (p *ConcurrentPatriciaHashed) Warmup(hashedKey []byte) error {
+	if p.root.trace {
+		fmt.Printf("WARMUP %x\n", hashedKey)
+	}
+	if err := p.root.Warmup(hashedKey); err != nil {
+		return fmt.Errorf("warmup: %w", err)
+	}
+	//for i := range p.mounts {
+	//	if err := p.mounts[i].warmup(hashedKey); err != nil {
+	//		return fmt.Errorf("warmup: %w", err)
+	//	}
+	//}
+	return nil
+}
+
 func (p *ConcurrentPatriciaHashed) CanDoConcurrentNext() (bool, error) {
 	if p.root.root.extLen == 0 {
 		zeroPrefixBranch, _, err := p.root.ctx.Branch(hexNibblesToCompactBytes([]byte{0}))
