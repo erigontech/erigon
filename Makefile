@@ -1,8 +1,8 @@
 GO ?= go # if using docker, should not need to be installed/linked
 GOAMD64_VERSION ?= v2 # See https://go.dev/wiki/MinimumRequirements#microarchitecture-support
-GOBINREL = build/bin
-GOBIN = $(CURDIR)/$(GOBINREL)
-UNAME = $(shell uname) # Supported: Darwin, Linux
+GOBINREL := build/bin
+GOBIN := $(CURDIR)/$(GOBINREL)
+UNAME := $(shell uname) # Supported: Darwin, Linux
 DOCKER := $(shell command -v docker 2> /dev/null)
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
@@ -59,13 +59,16 @@ GOPRIVATE = github.com/erigontech/silkworm-go
 PACKAGE = github.com/erigontech/erigon
 
 # Add to user provided GO_FLAGS. Insert it after a bunch of other stuff to allow overrides, and before tags to maintain BUILD_TAGS (set that instead if you want to modify it).
-override GO_FLAGS := -trimpath -buildvcs=false \
-	-ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/params.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/params.GitTag=${GIT_TAG}" \
-	$(GO_FLAGS) -tags $(BUILD_TAGS)
 
-GOBUILD = ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" $(GO) build $(GO_FLAGS)
-GO_DBG_BUILD = ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS) -DMDBX_DEBUG=1" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" $(GO) build -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
-GOTEST = ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" GODEBUG=cgocheck=0 GOTRACEBACK=1 $(GO) test $(GO_FLAGS) ./...
+GO_RELEASE_FLAGS := -trimpath -buildvcs=false \
+	-ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/params.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/params.GitTag=${GIT_TAG}"
+GO_BUILD_ENV = ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)"
+
+# Basic release build. Pass EXTRA_BUILD_TAGS if you want to modify the tags set.
+GOBUILD = $(GO_BUILD_ENV) $(GO) build $(GO_RELEASE_FLAGS) $(GO_FLAGS) -tags $(BUILD_TAGS)
+DLV_GO_FLAGS := -gcflags='all="-N -l" -trimpath=false'
+GO_BUILD_DEBUG = $(GO_BUILD_ENV) CGO_CFLAGS="$(CGO_CFLAGS) -DMDBX_DEBUG=1" $(GO) build $(DLV_GO_FLAGS) $(GO_FLAGS) -tags $(BUILD_TAGS),debug
+GOTEST = $(GO_BUILD_ENV) GODEBUG=cgocheck=0 GOTRACEBACK=1 $(GO) test $(GO_FLAGS) ./...
 
 default: all
 
@@ -119,12 +122,13 @@ docker-compose: validate_docker_build_args setup_xdg_data_home
 
 ## dbg                                debug build allows see C stack traces, run it with GOTRACEBACK=crash. You don't need debug build for C pit for profiling. To profile C code use SETCGOTRCKEBACK=1
 dbg:
-	$(GO_DBG_BUILD) -o $(GOBIN)/ ./cmd/...
+	$(GO_BUILD_DEBUG) -o $(GOBIN)/ ./cmd/...
 
+# Deferred (=) because $* isn't defined until the rule is executed.
+%.cmd: override OUTPUT = $(GOBIN)/$*$(CMD_BUILD_SUFFIX)
 %.cmd:
-	@# Note: $* is replaced by the command name
-	@echo "Building $*"
-	cd ./cmd/$* && $(GOBUILD) -o $(GOBIN)/$*
+	@echo Building '$(OUTPUT)'
+	cd ./cmd/$* && $(GOBUILD) -o $(OUTPUT)
 	@echo "Run \"$(GOBIN)/$*\" to launch $*."
 
 ## geth:                              run erigon (TODO: remove?)
