@@ -1108,21 +1108,21 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 //   - E.g. Unwind can't use progress, because it's not linear
 //     and will wrongly update progress of steps cleaning and could end up with inconsistent history.
 func (ht *HistoryRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
-	if ht.files.EndTxNum() > 0 {
-		txTo = min(txTo, ht.files.EndTxNum())
+	if !forced {
+		if ht.files.EndTxNum() > 0 {
+			txTo = min(txTo, ht.files.EndTxNum())
+		}
+		var can bool
+		can, txTo = ht.canPruneUntil(tx, txTo)
+		if !can {
+			return nil, nil
+		}
 	}
 	return ht.prune(ctx, tx, txFrom, txTo, limit, forced, logEvery)
 }
 
 func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
 	//fmt.Printf(" pruneH[%s] %t, %d-%d\n", ht.h.filenameBase, ht.CanPruneUntil(rwTx), txFrom, txTo)
-	if !forced {
-		var can bool
-		can, txTo = ht.canPruneUntil(rwTx, txTo)
-		if !can {
-			return nil, nil
-		}
-	}
 	defer func(t time.Time) { mxPruneTookHistory.ObserveDuration(t) }(time.Now())
 
 	var (
