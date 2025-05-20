@@ -97,10 +97,6 @@ func (c *ConsensusHandlers) blobsSidecarsByRangeHandler(s network.Stream, versio
 	return nil
 }
 
-func (c *ConsensusHandlers) blobsSidecarsByIdsHandlerElectra(s network.Stream) error {
-	return c.blobsSidecarsByIdsHandler(s, clparams.ElectraVersion)
-}
-
 func (c *ConsensusHandlers) blobsSidecarsByIdsHandlerDeneb(s network.Stream) error {
 	return c.blobsSidecarsByIdsHandler(s, clparams.DenebVersion)
 }
