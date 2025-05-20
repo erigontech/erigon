@@ -28,6 +28,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon-lib/version"
+
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -45,18 +47,6 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
 )
-
-var sortableBuffersPoolForPruning = sync.Pool{
-	New: func() interface{} {
-		return etl.NewSortableBuffer(etl.BufferOptimalSize / 8)
-	},
-}
-
-func sortableBufferForPruning() etl.Buffer {
-	sortableBuffer := sortableBuffersPoolForPruning.Get().(etl.Buffer)
-	sortableBuffer.Reset()
-	return sortableBuffer
-}
 
 var (
 	asserts          = dbg.EnvBool("AGG_ASSERTS", false)
@@ -179,6 +169,19 @@ func (d *Domain) kvExistenceIdxFilePath(fromStep, toStep uint64) string {
 }
 func (d *Domain) kvBtAccessorFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.bt", d.version.AccessorBT.String(), d.filenameBase, fromStep, toStep))
+}
+
+func (d *Domain) kvFilePathMask(fromStep, toStep uint64) string {
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("*-%s.%d-%d.kv", d.filenameBase, fromStep, toStep))
+}
+func (d *Domain) kviAccessorFilePathMask(fromStep, toStep uint64) string {
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("*-%s.%d-%d.kvi", d.filenameBase, fromStep, toStep))
+}
+func (d *Domain) kvExistenceIdxFilePathMask(fromStep, toStep uint64) string {
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("*-%s.%d-%d.kvei", d.filenameBase, fromStep, toStep))
+}
+func (d *Domain) kvBtAccessorFilePathMask(fromStep, toStep uint64) string {
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("*-%s.%d-%d.bt", d.filenameBase, fromStep, toStep))
 }
 
 // maxStepInDB - return the latest available step in db (at-least 1 value in such step)
@@ -344,8 +347,8 @@ func (d *Domain) openDirtyFiles() (err error) {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
 			if item.decompressor == nil {
-				fPath := d.kvFilePath(fromStep, toStep)
-				exists, err := dir.FileExist(fPath)
+				fPathMask := d.kvFilePathMask(fromStep, toStep)
+				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
 					d.logger.Debug("[agg] Domain.openDirtyFiles: FileExist err", "f", fName, "err", err)
@@ -354,13 +357,22 @@ func (d *Domain) openDirtyFiles() (err error) {
 					invalidFileItemsLock.Unlock()
 					continue
 				}
-				if !exists {
+				if !ok {
 					_, fName := filepath.Split(fPath)
 					d.logger.Debug("[agg] Domain.openDirtyFiles: file does not exists", "f", fName)
 					invalidFileItemsLock.Lock()
 					invalidFileItems = append(invalidFileItems, item)
 					invalidFileItemsLock.Unlock()
 					continue
+				}
+
+				if !fileVer.Eq(d.version.DataKV.Current) {
+					if !fileVer.Less(d.version.DataKV.MinSupported) {
+						d.version.DataKV.Current = fileVer
+					} else {
+						panic("Version is too low, try to rm kv domain snapshots")
+						//return false
+					}
 				}
 
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
@@ -379,13 +391,21 @@ func (d *Domain) openDirtyFiles() (err error) {
 			}
 
 			if item.index == nil && d.Accessors.Has(AccessorHashMap) {
-				fPath := d.kviAccessorFilePath(fromStep, toStep)
-				exists, err := dir.FileExist(fPath)
+				fPathMask := d.kviAccessorFilePathMask(fromStep, toStep)
+				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 				}
-				if exists {
+				if ok {
+					if !fileVer.Eq(d.version.AccessorKVI.Current) {
+						if !fileVer.Less(d.version.AccessorKVI.MinSupported) {
+							d.version.AccessorKVI.Current = fileVer
+						} else {
+							panic("Version is too low, try to rm kvi domain snapshots")
+							//return false
+						}
+					}
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
@@ -394,13 +414,21 @@ func (d *Domain) openDirtyFiles() (err error) {
 				}
 			}
 			if item.bindex == nil && d.Accessors.Has(AccessorBTree) {
-				fPath := d.kvBtAccessorFilePath(fromStep, toStep)
-				exists, err := dir.FileExist(fPath)
+				fPathMask := d.kvBtAccessorFilePathMask(fromStep, toStep)
+				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 				}
-				if exists {
+				if ok {
+					if !fileVer.Eq(d.version.AccessorBT.Current) {
+						if !fileVer.Less(d.version.AccessorBT.MinSupported) {
+							d.version.AccessorBT.Current = fileVer
+						} else {
+							panic("Version is too low, try to rm bt domain snapshots")
+							//return false
+						}
+					}
 					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, DefaultBtreeM, item.decompressor, d.Compression); err != nil {
 						_, fName := filepath.Split(fPath)
 						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
@@ -409,13 +437,21 @@ func (d *Domain) openDirtyFiles() (err error) {
 				}
 			}
 			if item.existence == nil && d.Accessors.Has(AccessorExistence) {
-				fPath := d.kvExistenceIdxFilePath(fromStep, toStep)
-				exists, err := dir.FileExist(fPath)
+				fPathMask := d.kvExistenceIdxFilePathMask(fromStep, toStep)
+				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 				}
-				if exists {
+				if ok {
+					if !fileVer.Eq(d.version.AccessorKVEI.Current) {
+						if !fileVer.Less(d.version.AccessorKVEI.MinSupported) {
+							d.version.AccessorKVEI.Current = fileVer
+						} else {
+							panic("Version is too low, try to rm kvei domain snapshots")
+							//return false
+						}
+					}
 					if item.existence, err = existence.OpenFilter(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
@@ -514,9 +550,8 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWrit
 		aux:       make([]byte, 0, 128),
 		valsTable: dt.d.valuesTable,
 		largeVals: dt.d.largeValues,
-		values:    etl.NewCollector(dt.name.String()+"domain.flush", tmpdir, etl.NewSortableBuffer(WALCollectorRAM), dt.d.logger).LogLvl(log.LvlTrace),
-
-		h: dt.ht.newWriter(tmpdir, discardHistory),
+		h:         dt.ht.newWriter(tmpdir, discardHistory),
+		values:    etl.NewCollectorWithAllocator(dt.name.String()+"domain.flush", tmpdir, etl.SmallSortableBuffers, dt.d.logger).LogLvl(log.LvlTrace),
 	}
 	w.values.SortAndFlushInBackground(true)
 	return w
@@ -1896,10 +1931,7 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 
 	var valsCursor kv.RwCursor
 
-	sortableBuffer := sortableBufferForPruning()
-	defer sortableBuffersPoolForPruning.Put(sortableBuffer)
-
-	ancientDomainValsCollector := etl.NewCollector(dt.name.String()+".domain.collate", dt.d.dirs.Tmp, sortableBuffer, dt.d.logger).LogLvl(log.LvlTrace)
+	ancientDomainValsCollector := etl.NewCollectorWithAllocator(dt.name.String()+".domain.collate", dt.d.dirs.Tmp, etl.SmallSortableBuffers, dt.d.logger).LogLvl(log.LvlTrace)
 	defer ancientDomainValsCollector.Close()
 
 	if dt.d.largeValues {

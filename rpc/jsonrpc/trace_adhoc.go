@@ -699,7 +699,7 @@ func (sd *StateDiff) DeleteAccount(address common.Address, original *accounts.Ac
 	return nil
 }
 
-func (sd *StateDiff) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+func (sd *StateDiff) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value *uint256.Int) error {
 	if *original == *value {
 		return nil
 	}
@@ -710,7 +710,7 @@ func (sd *StateDiff) WriteAccountStorage(address common.Address, incarnation uin
 	}
 	m := make(map[string]interface{})
 	m["*"] = &StateDiffStorage{From: common.BytesToHash(original.Bytes()), To: common.BytesToHash(value.Bytes())}
-	accountDiff.Storage[*key] = m
+	accountDiff.Storage[key] = m
 	return nil
 }
 

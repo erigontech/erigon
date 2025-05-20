@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -168,7 +169,7 @@ func getUncles(chain consensus.ChainReader, header *types.Header) (mapset.Set[co
 		}
 		ancestors[parent] = ancestorHeader
 		// If the ancestor doesn't have any uncles, we don't have to iterate them
-		if ancestorHeader.UncleHash != types.EmptyUncleHash {
+		if ancestorHeader.UncleHash != empty.UncleHash {
 			// Need to add those uncles to the blacklist too
 			ancestor := chain.GetBlock(parent, number)
 			if ancestor == nil {
@@ -354,7 +355,7 @@ func makeDifficultyCalculator(bombDelay uint64) func(time, parentTime uint64, pa
 		// (2 if len(parent_uncles) else 1) - (block_timestamp - parent_timestamp) // 9
 		x.Sub(bigTime, bigParentTime)
 		x.Div(x, big9)
-		if parentUncleHash == types.EmptyUncleHash {
+		if parentUncleHash == empty.UncleHash {
 			x.Sub(big1, x)
 		} else {
 			x.Sub(big2, x)
@@ -658,10 +659,10 @@ func AccumulateRewards(config *chain.Config, header *types.Header, uncles []*typ
 		r.Add(uncleNum, u256.Num8)
 		r.Sub(r, headerNum)
 		r.Mul(r, blockReward)
-		r.Div(r, u256.Num8)
+		r.Rsh(r, 3) // ÷8
 		uncleRewards = append(uncleRewards, *r)
 
-		r.Div(blockReward, u256.Num32)
+		r.Rsh(blockReward, 5) // ÷32
 		reward.Add(reward, r)
 	}
 	return *reward, uncleRewards

@@ -91,7 +91,7 @@ func generateBlocks2(t *testing.T, from uint64, numberOfBlocks uint64, blockWrit
 				var location common.Hash
 				location.SetBytes(new(big.Int).SetUint64(blockNumber).Bytes())
 				if blockNumber >= from {
-					if err := blockWriter.WriteAccountStorage(addr, newAcc.Incarnation, &location, &oldValue, &newValue); err != nil {
+					if err := blockWriter.WriteAccountStorage(addr, newAcc.Incarnation, location, &oldValue, &newValue); err != nil {
 						t.Fatal(err)
 					}
 				}

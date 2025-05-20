@@ -1,9 +1,16 @@
 name: QA - Sync with external CL
 
 on:
+  push:
+    branches:
+      - 'release/3.*'
   schedule:
     - cron: "0 8 * * 0" # Run on Sunday at 08:00 AM UTC
   workflow_dispatch: # Run manually
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   sync-with-externalcl:

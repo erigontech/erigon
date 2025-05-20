@@ -167,11 +167,11 @@ func TestAllocConstructor(t *testing.T) {
 
 	key0 := common.HexToHash("0000000000000000000000000000000000000000000000000000000000000000")
 	storage0 := &uint256.Int{}
-	state.GetState(address, &key0, storage0)
+	state.GetState(address, key0, storage0)
 	assert.Equal(uint256.NewInt(0x2a), storage0)
 	key1 := common.HexToHash("0000000000000000000000000000000000000000000000000000000000000001")
 	storage1 := &uint256.Int{}
-	state.GetState(address, &key1, storage1)
+	state.GetState(address, key1, storage1)
 	assert.Equal(uint256.NewInt(0x01c9), storage1)
 }
 

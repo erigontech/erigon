@@ -86,7 +86,7 @@ func NewTraceWorker(tx kv.TemporalTx, cc *chain.Config, engine consensus.EngineR
 }
 
 func (e *TraceWorker) Close() {
-	e.evm.JumpDestCache.LogStats()
+	e.evm.Config().JumpDestCache.LogStats()
 }
 
 func (e *TraceWorker) ChangeBlock(header *types.Header) {

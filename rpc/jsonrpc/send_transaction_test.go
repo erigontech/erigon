@@ -91,6 +91,10 @@ func oneBlockStep(mockSentry *mock.MockSentry, require *require.Assertions, t *t
 }
 
 func TestSendRawTransaction(t *testing.T) {
+	if testing.Short() {
+		t.Skip("too slow for testing.Short")
+	}
+
 	mockSentry, require := mock.MockWithTxPool(t), require.New(t)
 	logger := log.New()
 

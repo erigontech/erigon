@@ -2,6 +2,7 @@ participants_matrix:
   el:
     - el_type: erigon
       el_image: test/erigon:current
+      el_log_level: "debug"
   cl:
     - cl_type: teku
       cl_image: consensys/teku:develop

@@ -21,7 +21,6 @@ package runtime
 
 import (
 	"context"
-	"github.com/erigontech/erigon-lib/types"
 	"math"
 	"math/big"
 	"os"
@@ -35,11 +34,11 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state3 "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
@@ -57,13 +56,12 @@ type Config struct {
 	GasLimit    uint64
 	GasPrice    *uint256.Int
 	Value       *uint256.Int
-	Debug       bool
 	EVMConfig   vm.Config
 	BaseFee     *uint256.Int
 
-	State     *state.IntraBlockState
-	r         state.StateReader
-	w         state.StateWriter
+	State *state.IntraBlockState
+
+	evm       *vm.EVM
 	GetHashFn func(n uint64) common.Hash
 }
 
@@ -128,8 +126,6 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 	}
 
 	externalState := cfg.State != nil
-	var tx kv.TemporalRwTx
-	var err error
 	if !externalState {
 		db := memdb.NewStateDB(tempdir)
 		defer db.Close()
@@ -148,7 +144,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		if err != nil {
 			return nil, nil, err
 		}
-		tx, err = _db.BeginTemporalRw(context.Background()) //nolint:gocritic
+		tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
 		if err != nil {
 			return nil, nil, err
 		}
@@ -158,9 +154,8 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 			return nil, nil, err
 		}
 		defer sd.Close()
-		cfg.r = state.NewReaderV3(sd)
-		cfg.w = state.NewWriter(sd, nil)
-		cfg.State = state.New(cfg.r)
+		//cfg.w = state.NewWriter(sd, nil)
+		cfg.State = state.New(state.NewReaderV3(sd))
 	}
 	var (
 		address = common.BytesToAddress([]byte("contract"))
@@ -199,8 +194,6 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 	setDefaults(cfg)
 
 	externalState := cfg.State != nil
-	var tx kv.TemporalRwTx
-	var err error
 	if !externalState {
 		tmp := filepath.Join(os.TempDir(), "create-vm")
 		defer os.RemoveAll(tmp) //nolint
@@ -216,7 +209,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		if err != nil {
 			return nil, [20]byte{}, 0, err
 		}
-		tx, err = _db.BeginTemporalRw(context.Background()) //nolint:gocritic
+		tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
 		if err != nil {
 			return nil, [20]byte{}, 0, err
 		}
@@ -226,9 +219,8 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 			return nil, [20]byte{}, 0, err
 		}
 		defer sd.Close()
-		cfg.r = state.NewReaderV3(sd)
-		cfg.w = state.NewWriter(sd, nil)
-		cfg.State = state.New(cfg.r)
+		//cfg.w = state.NewWriter(sd, nil)
+		cfg.State = state.New(state.NewReaderV3(sd))
 	}
 	var (
 		vmenv  = NewEnv(cfg)

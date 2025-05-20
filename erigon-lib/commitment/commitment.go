@@ -31,6 +31,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/etl"
@@ -995,8 +996,7 @@ func (t *Updates) initCollector() {
 				t.nibbles[i] = nil
 			}
 
-			t.nibbles[i] = etl.NewCollector("commitment", t.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize/4), log.Root().New("update-tree"))
-			t.nibbles[i].LogLvl(log.LvlDebug)
+			t.nibbles[i] = etl.NewCollectorWithAllocator("commitment", t.tmpdir, etl.SmallSortableBuffers, log.Root().New("update-tree")).LogLvl(log.LvlDebug)
 			t.nibbles[i].SortAndFlushInBackground(true)
 		}
 		if t.etl != nil {
@@ -1010,8 +1010,7 @@ func (t *Updates) initCollector() {
 		t.etl.Close()
 		t.etl = nil
 	}
-	t.etl = etl.NewCollector("commitment", t.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize/4), log.Root().New("update-tree"))
-	t.etl.LogLvl(log.LvlDebug)
+	t.etl = etl.NewCollectorWithAllocator("commitment", t.tmpdir, etl.SmallSortableBuffers, log.Root().New("update-tree")).LogLvl(log.LvlDebug)
 	t.etl.SortAndFlushInBackground(true)
 }
 
@@ -1091,10 +1090,10 @@ func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
 	}
 	if !bytes.Equal(acc.CodeHash.Bytes(), c.update.CodeHash[:]) {
 		if len(acc.CodeHash.Bytes()) == 0 {
-			copy(c.update.CodeHash[:], EmptyCodeHash)
+			c.update.CodeHash = empty.CodeHash
 		} else {
 			c.update.Flags |= CodeUpdate
-			copy(c.update.CodeHash[:], acc.CodeHash.Bytes())
+			c.update.CodeHash = acc.CodeHash
 		}
 	}
 }
@@ -1115,7 +1114,7 @@ func (t *Updates) TouchCode(c *KeyUpdate, code []byte) {
 		if c.update.Flags == 0 {
 			c.update.Flags = DeleteUpdate
 		}
-		copy(c.update.CodeHash[:], EmptyCodeHash)
+		c.update.CodeHash = empty.CodeHash
 		return
 	}
 	copy(c.update.CodeHash[:], crypto.Keccak256(code))
@@ -1242,7 +1241,7 @@ func (u *Update) Reset() {
 	u.Balance.Clear()
 	u.Nonce = 0
 	u.StorageLen = 0
-	u.CodeHash = EmptyCodeHashArray
+	u.CodeHash = empty.CodeHash
 }
 
 func (u *Update) Merge(b *Update) {

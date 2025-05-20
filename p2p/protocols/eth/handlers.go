@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
@@ -256,7 +257,7 @@ func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGett
 			if err != nil {
 				return nil, err
 			}
-			if header == nil || header.ReceiptHash != types.EmptyRootHash {
+			if header == nil || header.ReceiptHash != empty.RootHash {
 				continue
 			}
 		}
