@@ -22,6 +22,7 @@ import (
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring/v2"
+	"github.com/erigontech/erigon-lib/common/dbg"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -202,6 +203,7 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 }
 
 func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) ([]*types.ErigonLog, error) {
+	debug := dbg.Enabled(ctx)
 	logs := []*types.ErigonLog{} //nolint
 
 	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
@@ -232,7 +234,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if err = ctx.Err(); err != nil {
 			return nil, err
 		}
-		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := it.Next()
+		txNum, blockNum, txnIndex, isFinalTxn, blockNumChanged, err := it.Next()
 		if err != nil {
 			return nil, err
 		}
@@ -254,7 +256,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 					continue
 				}
 
-				borLogs, err := api.borReceiptGenerator.GenerateBorLogs(ctx, events, api._txNumReader, tx, header, chainConfig, txIndex, len(logs))
+				borLogs, err := api.borReceiptGenerator.GenerateBorLogs(ctx, events, api._txNumReader, tx, header, chainConfig, txnIndex, len(logs))
 				if err != nil {
 					return logs, err
 				}
@@ -294,7 +296,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
-		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
+		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txnIndex)
 		if err != nil {
 			return nil, err
 		}
@@ -302,13 +304,17 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			continue
 		}
 
-		r, err := api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, header, txn, txIndex, txNum)
+		r, err := api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, header, txn, txnIndex, txNum)
 		if err != nil {
 			return nil, err
 		}
 		if r == nil {
-			return nil, err
+			if debug {
+				log.Info("[rpc] getLogs: receipt is nil", "blockNum", blockNum, "txnIndex", txnIndex)
+			}
+			return nil, nil
 		}
+
 		filtered := r.Logs.Filter(addrMap, crit.Topics, 0)
 
 		for _, filteredLog := range filtered {

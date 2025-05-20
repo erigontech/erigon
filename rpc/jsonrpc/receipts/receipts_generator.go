@@ -144,7 +144,8 @@ func (g *Generator) addToCacheReceipt(hash common.Hash, receipt *types.Receipt) 
 	g.receiptCache.Add(hash, receipt.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated).
 }
 
-func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64) (*types.Receipt, error) {
+func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, txnIndex int, txNum uint64) (*types.Receipt, error) {
+	debug := dbg.Enabled(ctx)
 	blockHash := header.Hash()
 	blockNum := header.Number.Uint64()
 	txnHash := txn.Hash()
@@ -158,13 +159,21 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		if err != nil {
 			return nil, err
 		}
-		if ok && receiptFromDB != nil && !dbg.AssertEnabled {
-			return receiptFromDB, nil
+		if ok && receiptFromDB != nil {
+			if debug {
+				log.Info("[dbg] GetReceipt: found in rcache", "blockNum", blockNum)
+			}
+			if !dbg.AssertEnabled {
+				return receiptFromDB, nil
+			}
 		}
 	}
 
-	if receipts, ok := g.receiptsCache.Get(blockHash); ok && len(receipts) > index {
-		return receipts[index], nil
+	if receipts, ok := g.receiptsCache.Get(blockHash); ok && len(receipts) > txnIndex {
+		if debug {
+			log.Info("[dbg] GetReceipt: found in receiptsLRU", "blockNum", blockNum, "txnIndex", txnIndex)
+		}
+		return receipts[txnIndex], nil
 	}
 
 	mu := g.txnExecMutex.lock(txnHash)
@@ -175,7 +184,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 	var receipt *types.Receipt
 
-	genEnv, err := g.PrepareEnv(ctx, header, cfg, tx, index)
+	genEnv, err := g.PrepareEnv(ctx, header, cfg, tx, txnIndex)
 	if err != nil {
 		return nil, err
 	}
@@ -204,17 +213,17 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	} else {
 		receipt, _, err = core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.usedGas, genEnv.usedBlobGas, vm.Config{})
 		if err != nil {
-			return nil, fmt.Errorf("ReceiptGen.GetReceipt: bn=%d, txnIdx=%d, %w", blockNum, index, err)
+			return nil, fmt.Errorf("ReceiptGen.GetReceipt: bn=%d, txnIdx=%d, %w", blockNum, txnIndex, err)
 		}
 	}
 
 	receipt.BlockHash = blockHash
 	receipt.CumulativeGasUsed = cumGasUsed
-	receipt.TransactionIndex = uint(index)
+	receipt.TransactionIndex = uint(txnIndex)
 	receipt.FirstLogIndexWithinBlock = firstLogIndex
 
 	for i := range receipt.Logs {
-		receipt.Logs[i].TxIndex = uint(index)
+		receipt.Logs[i].TxIndex = uint(txnIndex)
 		receipt.Logs[i].Index = uint(firstLogIndex + uint32(i))
 	}
 
@@ -222,6 +231,9 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 	if dbg.AssertEnabled && receiptFromDB != nil {
 		g.assertEqualReceipts(receipt, receiptFromDB)
+		if debug {
+			log.Info("[dbg] GetReceipt: assert passed", "blockNum", blockNum, "txnIndex", txnIndex)
+		}
 	}
 	return receipt, nil
 }
