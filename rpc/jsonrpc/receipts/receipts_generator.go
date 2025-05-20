@@ -228,6 +228,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
 	blockHash := block.Hash()
+	debug := dbg.Enabled(ctx)
 
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
 	var receiptsFromDB types.Receipts
@@ -237,14 +238,22 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		if err != nil {
 			return nil, err
 		}
-		if len(receiptsFromDB) > 0 && !dbg.AssertEnabled {
-			return receiptsFromDB, nil
+		if len(receiptsFromDB) > 0 {
+			if debug {
+				log.Info("[dbg] GetReceipts: found in rcache", "blockNum", block.NumberU64())
+			}
+			if !dbg.AssertEnabled {
+				return receiptsFromDB, nil
+			}
 		}
 	}
 
 	mu := g.blockExecMutex.lock(blockHash) // parallel requests of same blockNum will executed only once
 	defer g.blockExecMutex.unlock(mu, blockHash)
 	if receipts, ok := g.receiptsCache.Get(blockHash); ok {
+		if debug {
+			log.Info("[dbg] GetReceipts: found in receiptsLRU", "blockNum", block.NumberU64())
+		}
 		return receipts, nil
 	}
 
@@ -270,6 +279,9 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 
 		if dbg.AssertEnabled && receiptsFromDB != nil && len(receipts) > 0 {
 			g.assertEqualReceipts(receipt, receiptsFromDB[i])
+			if debug {
+				log.Info("[dbg] GetReceipts: assert passed", "blockNum", block.NumberU64())
+			}
 		}
 	}
 
