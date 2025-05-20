@@ -9,6 +9,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	st "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
@@ -19,10 +20,11 @@ import (
 type dataColumnSidecarService struct {
 	cfg *clparams.BeaconChainConfig
 	//beaconState     *state.CachingBeaconState
-	ethClock        eth_clock.EthereumClock
-	forkChoice      forkchoice.ForkChoiceStorage
-	syncDataManager synced_data.SyncedData
-	seenSidecar     *lru.Cache[seenSidecarKey, struct{}]
+	ethClock             eth_clock.EthereumClock
+	forkChoice           forkchoice.ForkChoiceStorage
+	syncDataManager      synced_data.SyncedData
+	seenSidecar          *lru.Cache[seenSidecarKey, struct{}]
+	columnSidecarStorage blob_storage.DataCloumnStorage
 }
 
 func NewDataColumnSidecarService(
@@ -64,6 +66,8 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 	if _, ok := s.seenSidecar.Get(seenKey); ok {
 		return ErrIgnore
 	}
+
+	s.seenSidecar.Add(seenKey, struct{}{})
 
 	// [REJECT] The sidecar is valid as verified by verify_data_column_sidecar(sidecar).
 	if !das.VerifyDataColumnSidecar(msg) {
@@ -121,7 +125,9 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 		return fmt.Errorf("invalid kzg proofs for data column sidecar")
 	}
 
-	s.seenSidecar.Add(seenKey, struct{}{})
+	if err := s.columnSidecarStorage.WriteColumnSidecars(ctx, msg.SignedBlockHeader.Header.Root, int64(msg.Index), msg); err != nil {
+		return fmt.Errorf("failed to write data column sidecar: %v", err)
+	}
 	return nil
 }
 
