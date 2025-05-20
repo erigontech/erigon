@@ -70,9 +70,13 @@ func (s *Span) Producers() []*valset.Validator {
 	return res
 }
 
-type SpanResponse struct {
+type SpanResponseV1 struct {
 	Height string `json:"height"`
 	Result Span   `json:"result"`
+}
+
+type SpanResponseV2 struct {
+	Span *Span `json:"span"`
 }
 
 type spans []*Span
