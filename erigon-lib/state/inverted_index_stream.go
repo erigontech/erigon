@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/bitmapdb"
@@ -93,6 +94,7 @@ func (it *InvertedIdxStreamFiles) advanceInFiles() {
 			it.stack = it.stack[:len(it.stack)-1]
 			offset, ok := item.reader.TwoLayerLookup(it.key)
 			if !ok {
+				log.Info("[dbg] iterateRangeOnFiles: contiune3", "n", item.Filename())
 				continue
 			}
 			g := item.getter
@@ -104,6 +106,7 @@ func (it *InvertedIdxStreamFiles) advanceInFiles() {
 				var seqIt stream.Uno[uint64]
 				if it.orderAscend {
 					seqIt = it.seq.Iterator(it.startTxNum)
+					log.Info("[dbg] iterateRangeOnFiles: see1", "n", item.Filename(), "seq.Min", it.seq.Min(), "seq.Max", it.seq.Max())
 				} else {
 					seqIt = it.seq.ReverseIterator(it.startTxNum)
 				}
