@@ -359,7 +359,7 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.Reader) 
 		}
 	}()
 
-	//getter := NewArchiveGetter(item.decompressor.MakeGetter(), dt.d.Compression)
+	//getter := NewArchiveGetter(item.decompressor.MakeGetter(), dt.d.compression)
 	getter.Reset(offset)
 	n := getter.HasNext()
 	if !n || uint64(getter.Size()) <= offset {
