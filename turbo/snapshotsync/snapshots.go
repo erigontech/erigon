@@ -425,6 +425,8 @@ func (s *DirtySegment) OpenIdxIfNeed(dir string, optimistic bool) (err error) {
 				}
 			}
 		}
+	} else {
+		log.Warn("refcount not 0 for %s", s.filePath)
 	}
 
 	return nil
@@ -647,6 +649,9 @@ func (s *RoSnapshots) SetRangeExtractor(t snaptype.Type, rangeExtractor snaptype
 	}
 }
 
+// INFO[05-20|09:54:33.835] [snapshots:history] Stat
+//
+//	blocks=384.06k txNum2blockNum="2=267K,3=384K" txs=4.68M first_history_idx_in_db=384064 alloc=103.8MB sys=140.9MB
 func (s *RoSnapshots) LogStat(label string) {
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
@@ -1066,7 +1071,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 
 		segtype := s.dirty[f.Type.Enum()]
 		if segtype == nil {
-			log.Debug("[snapshot] rebuildSegments: unknown type", "t", f.Type.Enum().String())
+			s.logger.Debug("[snapshot] rebuildSegments: unknown type", "t", f.Type.Enum().String())
 			continue
 		}
 
@@ -1087,6 +1092,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 		})
 
 		if !exists {
+			s.logger.Info("creating dirty segment", "type", f.Type, "from", f.From, "to", f.To)
 			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}, frozen: snConfig.IsFrozen(f)}
 		}
 
@@ -1096,6 +1102,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 					if optimistic {
 						continue
 					} else {
+						s.logger.Info("doesn't exist %s", sn.filePath)
 						break
 					}
 				}
@@ -1110,6 +1117,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 		if !exists {
 			// it's possible to iterate over .seg file even if you don't have index
 			// then make segment available even if index open may fail
+			s.logger.Info("setting %s", sn.filePath)
 			segtype.Set(sn)
 		}
 

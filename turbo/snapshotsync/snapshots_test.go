@@ -82,6 +82,14 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 	}
 }
 
+func TestSomething(t *testing.T) {
+	merger := NewMerger("x", 1, log.LvlInfo, nil, params.HoodiChainConfig, log.New())
+	merger.DisableFsync()
+
+	ranges := []Range{{390000, 391000}, {391000, 392000}, {392000, 393000}, {393000, 394000}, {394000, 395000}, {395000, 396000}, {396000, 397000}, {397000, 398000}, {398000, 399000}, {399000, 400000}}
+	merger.FindMergeRanges(ranges, uint64(399999))
+}
+
 func BenchmarkFindMergeRange(t *testing.B) {
 	merger := NewMerger("x", 1, log.LvlInfo, nil, params.MainnetChainConfig, nil)
 	merger.DisableFsync()

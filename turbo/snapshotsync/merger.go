@@ -35,6 +35,12 @@ func NewMerger(tmpDir string, compressWorkers int, lvl log.Lvl, chainDB kv.RoDB,
 }
 func (m *Merger) DisableFsync() { m.noFsync = true }
 
+
+/*
+(390000-391000),(391000-392000),(392000-393000),(393000-394000),(394000-395000),(395000-396000),(396000-397000),
+(397000-398000),(398000-399000),(399000-400000), maxBlockNum=399999
+
+*/
 func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toMerge []Range) {
 	str := ""
 	for _, r := range currentRanges {
