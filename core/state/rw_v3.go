@@ -443,8 +443,8 @@ func (w *StateWriterBufferedV3) DeleteAccount(address common.Address, original *
 	return nil
 }
 
-func (w *StateWriterBufferedV3) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value *uint256.Int) error {
-	if *original == *value {
+func (w *StateWriterBufferedV3) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error {
+	if original == value {
 		return nil
 	}
 	compositeS := string(append(address[:], key.Bytes()...))
@@ -452,7 +452,7 @@ func (w *StateWriterBufferedV3) WriteAccountStorage(address common.Address, inca
 	if w.trace {
 		fmt.Printf("storage: %x,%x,%x\n", address, key, value.Bytes())
 	}
-	if w.accumulator != nil && value != nil {
+	if w.accumulator != nil {
 		v := value.Bytes()
 		w.accumulator.ChangeStorage(address, incarnation, key, v)
 	}
@@ -557,8 +557,8 @@ func (w *Writer) DeleteAccount(address common.Address, original *accounts.Accoun
 	return nil
 }
 
-func (w *Writer) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value *uint256.Int) error {
-	if *original == *value {
+func (w *Writer) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error {
+	if original == value {
 		return nil
 	}
 	composite := append(address[:], key.Bytes()...)
@@ -569,7 +569,7 @@ func (w *Writer) WriteAccountStorage(address common.Address, incarnation uint64,
 	if len(v) == 0 {
 		return w.tx.DomainDel(kv.StorageDomain, composite, nil, 0)
 	}
-	if w.accumulator != nil && value != nil {
+	if w.accumulator != nil {
 		w.accumulator.ChangeStorage(address, incarnation, key, v)
 	}
 
