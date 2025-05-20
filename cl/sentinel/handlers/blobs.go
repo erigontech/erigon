@@ -17,6 +17,8 @@
 package handlers
 
 import (
+	"math"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -28,10 +30,6 @@ import (
 )
 
 const maxBlobsThroughoutputPerRequest = 72
-
-func (c *ConsensusHandlers) blobsSidecarsByRangeHandlerElectra(s network.Stream) error {
-	return c.blobsSidecarsByRangeHandler(s, clparams.ElectraVersion)
-}
 
 func (c *ConsensusHandlers) blobsSidecarsByRangeHandlerDeneb(s network.Stream) error {
 	return c.blobsSidecarsByRangeHandler(s, clparams.DenebVersion)
@@ -54,6 +52,12 @@ func (c *ConsensusHandlers) blobsSidecarsByRangeHandler(s network.Stream, versio
 	maxIter := 32
 	currIter := 0
 	for slot := req.StartSlot; slot < req.StartSlot+req.Count; slot++ {
+		if c.beaconConfig.FuluForkEpoch != math.MaxUint64 &&
+			slot >= c.beaconConfig.FuluForkEpoch*c.beaconConfig.SlotsPerEpoch {
+			// deprecated after Fulu upgrade
+			break
+		}
+
 		if currIter >= maxIter {
 			break
 		}
@@ -126,6 +130,11 @@ func (c *ConsensusHandlers) blobsSidecarsByIdsHandler(s network.Stream, version 
 			break
 		}
 		version := c.beaconConfig.GetCurrentStateVersion(*slot / c.beaconConfig.SlotsPerEpoch)
+		if version >= clparams.FuluVersion {
+			// deprecated after Fulu upgrade
+			break
+		}
+
 		// Read the fork digest
 		forkDigest, err := c.ethClock.ComputeForkDigestForVersion(utils.Uint32ToBytes4(c.beaconConfig.GetForkVersionByVersion(version)))
 		if err != nil {
