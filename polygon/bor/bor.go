@@ -273,7 +273,7 @@ func ValidateHeaderTime(
 	signaturesCache *lru.ARCCache[common.Hash, common.Address],
 ) error {
 	if header.Time > uint64(now.Unix()) {
-		return consensus.ErrFutureBlock
+		return fmt.Errorf("%w: expected: %s(%s), got: %s", consensus.ErrFutureBlock, time.Unix(now.Unix(), 0), now, time.Unix(int64(header.Time), 0))
 	}
 
 	if parent == nil {
@@ -500,8 +500,9 @@ func (c *Bor) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 	number := header.Number.Uint64()
 
 	// Don't waste time checking blocks from the future
-	if header.Time > uint64(time.Now().Unix()) {
-		return consensus.ErrFutureBlock
+	now := time.Now().Unix()
+	if header.Time > uint64(now) {
+		return fmt.Errorf("%w: expected: %s, got: %s", time.Unix(now, 0), consensus.ErrFutureBlock, time.Unix(int64(header.Time), 0))
 	}
 
 	if err := ValidateHeaderUnusedFields(header); err != nil {
