@@ -536,7 +536,9 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 			return err
 		}
 	}
-	compositeS := toStringZeroCopy(composite)
+	//fmt.Printf("k %x comp %x S %x\n", k1, composite, compositeS)
+	//compositeS := toStringZeroCopy(composite) // composite is leaking pointer: once k1 changed it also changed in maps
+	compositeS := string(k1) + string(k2)
 
 	sd.sdCtx.TouchKey(domain, compositeS, val)
 	switch domain {
