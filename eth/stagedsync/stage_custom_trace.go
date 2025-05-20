@@ -432,7 +432,13 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 			}
 
 			if produce.LogAddr {
+				if txTask.BlockNum == 513817 {
+					log.Warn("[dbg] result", "blockNum", txTask.BlockNum, "len(log)", len(txTask.Logs))
+				}
 				for _, lg := range txTask.Logs {
+					if txTask.BlockNum == 513817 {
+						log.Warn("[dbg] IndexAdd", "blockNum", txTask.BlockNum, "log", lg.Address)
+					}
 					if err := doms.IndexAdd(kv.LogAddrIdx, lg.Address[:]); err != nil {
 						return err
 					}
