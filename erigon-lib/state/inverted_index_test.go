@@ -70,9 +70,9 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 	db, ii, _ := filledInvIndexOfSize(t, 1000, 16, 1, log.New())
 	defer ii.Close()
 
-	rwTx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
-	defer rwTx.Rollback()
+	defer tx.Rollback()
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -88,7 +88,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		binary.BigEndian.PutUint64(from[:], uint64(0))
 		binary.BigEndian.PutUint64(to[:], uint64(pruneIters)*pruneLimit)
 
-		icc, err := rwTx.CursorDupSort(ii.keysTable)
+		icc, err := tx.CursorDupSort(ii.keysTable)
 		require.NoError(t, err)
 
 		count := 0
@@ -103,38 +103,38 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		require.EqualValues(t, count, pruneIters*int(pruneLimit))
 
 		// this one should not prune anything due to forced=false but no files built
-		stat, err := ic.Prune(context.Background(), rwTx, 0, 10, pruneLimit, logEvery, false, nil)
+		stat, err := ic.Prune(context.Background(), tx, 0, 10, pruneLimit, logEvery, false, nil)
 		require.NoError(t, err)
 		require.Zero(t, stat.PruneCountTx)
 		require.Zero(t, stat.PruneCountValues)
 
 		// this one should not prune anything as well due to given range [0,1) even it is forced
-		stat, err = ic.Prune(context.Background(), rwTx, 0, 1, pruneLimit, logEvery, true, nil)
+		stat, err = ic.Prune(context.Background(), tx, 0, 1, pruneLimit, logEvery, true, nil)
 		require.NoError(t, err)
 		require.Zero(t, stat.PruneCountTx)
 		require.Zero(t, stat.PruneCountValues)
 
 		// this should prune exactly pruneLimit*pruneIter transactions
 		for i := 0; i < pruneIters; i++ {
-			stat, err = ic.Prune(context.Background(), rwTx, 0, 1000, pruneLimit, logEvery, true, nil)
+			stat, err = ic.Prune(context.Background(), tx, 0, 1000, pruneLimit, logEvery, true, nil)
 			require.NoError(t, err)
 			t.Logf("[%d] stats: %v", i, stat)
 		}
 
 		// ascending - empty
-		it, err := ic.IdxRange(nil, 0, pruneIters*int(pruneLimit), order.Asc, -1, rwTx)
+		it, err := ic.IdxRange(nil, 0, pruneIters*int(pruneLimit), order.Asc, -1, tx)
 		require.NoError(t, err)
 		require.False(t, it.HasNext())
 		it.Close()
 
 		// descending - empty
-		it, err = ic.IdxRange(nil, pruneIters*int(pruneLimit), 0, order.Desc, -1, rwTx)
+		it, err = ic.IdxRange(nil, pruneIters*int(pruneLimit), 0, order.Desc, -1, tx)
 		require.NoError(t, err)
 		require.False(t, it.HasNext())
 		it.Close()
 
 		// straight from pruned - not empty
-		icc, err = rwTx.CursorDupSort(ii.keysTable)
+		icc, err = tx.CursorDupSort(ii.keysTable)
 		require.NoError(t, err)
 		txn, _, err := icc.Seek(from[:])
 		require.NoError(t, err)
@@ -144,7 +144,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		icc.Close()
 
 		// check second table
-		icc, err = rwTx.CursorDupSort(ii.valuesTable)
+		icc, err = tx.CursorDupSort(ii.valuesTable)
 		require.NoError(t, err)
 		key, txn, err := icc.First()
 		t.Logf("key: %x, txn: %x", key, txn)
@@ -158,7 +158,8 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 	})
 
 	t.Run("prune more than visible files - not allowed", func(t *testing.T) {
-		collation, err := ii.collate(context.Background(), 0, rwTx)
+		collation, err := ii.collate(context.Background(), 0, tx)
+		require.NoError(t, err)
 		sf, _ := ii.buildFiles(context.Background(), 0, collation, background.NewProgressSet())
 		txFrom, txTo := firstTxNumOfStep(0, ii.aggregationStep), firstTxNumOfStep(1, ii.aggregationStep)
 		ii.integrateDirtyFiles(sf, txFrom, txTo)
@@ -166,7 +167,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		// without `reCalcVisibleFiles` must be nothing to prune - because files are not visible yet.
 		ic := ii.BeginFilesRo()
 		defer ic.Close()
-		stat, err := ic.Prune(context.Background(), rwTx, 0, 10, pruneLimit, logEvery, false, nil)
+		stat, err := ic.Prune(context.Background(), tx, 0, 10, pruneLimit, logEvery, false, nil)
 		require.NoError(t, err)
 		require.Zero(t, stat.PruneCountTx)
 		require.Zero(t, stat.PruneCountValues)
@@ -176,13 +177,13 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 
 		ic = ii.BeginFilesRo()
 		defer ic.Close()
-		stat, err = ic.Prune(context.Background(), rwTx, 0, 10, pruneLimit, logEvery, false, nil)
+		stat, err = ic.Prune(context.Background(), tx, 0, 10, pruneLimit, logEvery, false, nil)
 		require.NoError(t, err)
 		require.Equal(t, 9, int(stat.PruneCountTx))
 		require.Equal(t, 9, int(stat.PruneCountValues))
 
 		// prune only what left in step 0. Even if requested more. don't allow print more than what we have in visible files
-		stat, err = ic.Prune(context.Background(), rwTx, 0, 20, pruneLimit, logEvery, false, nil)
+		stat, err = ic.Prune(context.Background(), tx, 0, 20, pruneLimit, logEvery, false, nil)
 		require.NoError(t, err)
 		require.Equal(t, 6, int(stat.PruneCountTx))
 		require.Equal(t, 6, int(stat.PruneCountValues))
