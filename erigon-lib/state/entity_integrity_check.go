@@ -81,6 +81,10 @@ func (d *DependencyIntegrityChecker) CheckDependentPresent(dependency kv.Domain,
 		return true
 	}
 
+	if d.trace {
+		d.logger.Warn("[dbg: Depic]", "CheckDependentPresent", dependency)
+	}
+
 	for _, dependent := range arr {
 		dependentFiles := dependent.filesGetter()
 		file, found := dependentFiles.Get(&filesItem{startTxNum: startTxNum, endTxNum: endTxNum})

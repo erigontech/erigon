@@ -542,6 +542,8 @@ func TestMergeFiles(t *testing.T) {
 }
 
 func TestMergeFilesWithDependency(t *testing.T) {
+	t.Parallel()
+
 	newTestDomain := func(dom kv.Domain) *Domain {
 		cfg := Schema.GetDomainCfg(dom)
 		cfg.crossDomainIntegrity = nil
@@ -662,7 +664,13 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		commitment.reCalcVisibleFiles(commitment.dirtyFilesEndTxNumMinimax())
 
 		checkFn := func(dtx *DomainRoTx, garbageCount int) {
-			assert.Len(t, dtx.garbage(account.dirtyFiles.Items()[2]), garbageCount)
+			var mergedF *filesItem
+			items := dtx.d.dirtyFiles.Items()
+
+			if len(items) == 3 {
+				mergedF = items[2]
+			}
+			assert.Len(t, dtx.garbage(mergedF), garbageCount)
 		}
 
 		ac, sc, cc := account.BeginFilesRo(), storage.BeginFilesRo(), commitment.BeginFilesRo()
@@ -670,8 +678,50 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		defer sc.Close()
 		defer cc.Close()
 
-		checkFn(ac, 0)
+		checkFn(ac, 0) // should give 0 because corresponding commitment garbage is not deleted
 		checkFn(sc, 0)
+		checkFn(cc, 2)
+
+		// delete the smaller files
+		commitment.dirtyFiles.Delete(&filesItem{startTxNum: 0, endTxNum: 1})
+		commitment.dirtyFiles.Delete(&filesItem{startTxNum: 1, endTxNum: 2})
+
+		// refresh visible files
+		ac.Close()
+		sc.Close()
+		cc.Close()
+
+		ac, sc, cc = account.BeginFilesRo(), storage.BeginFilesRo(), commitment.BeginFilesRo()
+		defer ac.Close()
+		defer sc.Close()
+		defer cc.Close()
+
+		checkFn(ac, 2)
+		checkFn(sc, 2)
+		checkFn(cc, 0)
+	})
+
+	t.Run("check garbage in all merged (external gc)", func(t *testing.T) {
+		account, storage, commitment := setup()
+		setupFiles(account, false)
+		setupFiles(storage, false)
+		setupFiles(commitment, false)
+
+		account.reCalcVisibleFiles(account.dirtyFilesEndTxNumMinimax())
+		storage.reCalcVisibleFiles(storage.dirtyFilesEndTxNumMinimax())
+		commitment.reCalcVisibleFiles(commitment.dirtyFilesEndTxNumMinimax())
+
+		checkFn := func(dtx *DomainRoTx, garbageCount int) {
+			assert.Len(t, dtx.garbage(nil), garbageCount)
+		}
+
+		ac, sc, cc := account.BeginFilesRo(), storage.BeginFilesRo(), commitment.BeginFilesRo()
+		defer ac.Close()
+		defer sc.Close()
+		defer cc.Close()
+
+		checkFn(ac, 2)
+		checkFn(sc, 2)
 		checkFn(cc, 2)
 
 		// delete the smaller files
@@ -704,7 +754,37 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		commitment.reCalcVisibleFiles(commitment.dirtyFilesEndTxNumMinimax())
 
 		checkFn := func(dtx *DomainRoTx) {
-			assert.Len(t, dtx.garbage(account.dirtyFiles.Items()[2]), 0)
+			var mergedF *filesItem
+			items := dtx.d.dirtyFiles.Items()
+
+			if len(items) == 3 {
+				mergedF = items[2]
+			}
+			assert.Len(t, dtx.garbage(mergedF), 0)
+		}
+
+		ac, sc, cc := account.BeginFilesRo(), storage.BeginFilesRo(), commitment.BeginFilesRo()
+		defer ac.Close()
+		defer sc.Close()
+		defer cc.Close()
+
+		checkFn(ac)
+		checkFn(sc)
+		checkFn(cc)
+	})
+
+	t.Run("check garbage commitment not merged (external gc i.e. mergedFile=nil)", func(t *testing.T) {
+		account, storage, commitment := setup()
+		setupFiles(account, false)
+		setupFiles(storage, false)
+		setupFiles(commitment, true)
+
+		account.reCalcVisibleFiles(account.dirtyFilesEndTxNumMinimax())
+		storage.reCalcVisibleFiles(storage.dirtyFilesEndTxNumMinimax())
+		commitment.reCalcVisibleFiles(commitment.dirtyFilesEndTxNumMinimax())
+
+		checkFn := func(dtx *DomainRoTx) {
+			assert.Len(t, dtx.garbage(nil), 0)
 		}
 
 		ac, sc, cc := account.BeginFilesRo(), storage.BeginFilesRo(), commitment.BeginFilesRo()
