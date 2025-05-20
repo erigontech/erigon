@@ -17,22 +17,3 @@ func chainSeqs[V any](seqs ...iter.Seq[V]) iter.Seq[V] {
 		}
 	}
 }
-
-func yieldFrom[V any](seq iter.Seq[V], yield func(V) bool) bool {
-	for v := range seq {
-		if !yield(v) {
-			return false
-		}
-	}
-	return true
-}
-
-func mapSeq[F, T any](f func(F) T, in iter.Seq[F]) iter.Seq[T] {
-	return func(yield func(T) bool) {
-		for a := range in {
-			if !yield(f(a)) {
-				return
-			}
-		}
-	}
-}

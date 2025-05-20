@@ -102,6 +102,7 @@ node_modules
 
 vendor/
 
+!/cmd/snapshots
 **/snapshots/
 mdbx.dat
 mdbx.lck

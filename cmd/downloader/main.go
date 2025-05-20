@@ -34,7 +34,6 @@ import (
 	_ "github.com/erigontech/erigon/core/snaptype"    //hack
 	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
 
-	"github.com/anacrolix/torrent/metainfo"
 	"github.com/c2h5oh/datasize"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
@@ -46,6 +45,8 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
+
+	"github.com/anacrolix/torrent/metainfo"
 
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
@@ -260,6 +261,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		webseedsList,
 		chain,
 		dbWritemap,
+		downloadercfg.NewCfgOpts{},
 	)
 	if err != nil {
 		return err

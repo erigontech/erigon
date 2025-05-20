@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	g "github.com/anacrolix/generics"
 	"github.com/c2h5oh/datasize"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -48,7 +49,7 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/direct"
-	downloadercfg2 "github.com/erigontech/erigon-lib/downloader/downloadercfg"
+	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
@@ -84,15 +85,6 @@ var (
 		Name:  "datadir",
 		Usage: "Data directory for the databases",
 		Value: flags.DirectoryString(paths.DefaultDataDir()),
-	}
-
-	AncientFlag = flags.DirectoryFlag{
-		Name:  "datadir.ancient",
-		Usage: "Data directory for ancient chain segments (default = inside chaindata)",
-	}
-	MinFreeDiskSpaceFlag = flags.DirectoryFlag{
-		Name:  "datadir.minfreedisk",
-		Usage: "Minimum free disk space in MB, once reached triggers auto shut down (default = --cache.gc converted to MB, 0 = disabled)",
 	}
 	NetworkIdFlag = cli.Uint64Flag{
 		Name:  "networkid",
@@ -706,6 +698,10 @@ var (
 		Name:  "torrent.staticpeers",
 		Usage: "Comma separated host:port to connect to",
 		Value: "",
+	}
+	TorrentDisableTrackers = cli.BoolFlag{
+		Name:  "torrent.trackers.disable",
+		Usage: "Disable conventional BitTorrent trackers",
 	}
 	NoDownloaderFlag = cli.BoolFlag{
 		Name:  "no-downloader",
@@ -2097,7 +2093,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		if err := uploadRate.UnmarshalText([]byte(uploadRateStr)); err != nil {
 			panic(err)
 		}
-		lvl, err := downloadercfg2.Int2LogLevel(ctx.Int(TorrentVerbosityFlag.Name))
+		lvl, err := downloadercfg.Int2LogLevel(ctx.Int(TorrentVerbosityFlag.Name))
 		if err != nil {
 			panic(err)
 		}
@@ -2106,7 +2102,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		if known, ok := snapcfg.KnownWebseeds[chain]; ok {
 			webseedsList = append(webseedsList, known...)
 		}
-		cfg.Downloader, err = downloadercfg2.New(
+		cfg.Downloader, err = downloadercfg.New(
 			ctx.Context,
 			cfg.Dirs,
 			version,
@@ -2120,12 +2116,22 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 			webseedsList,
 			chain,
 			ctx.Bool(DbWriteMapFlag.Name),
+			downloadercfg.NewCfgOpts{
+				DisableTrackers: boolFlagOpt(ctx, &TorrentDisableTrackers)},
 		)
 		if err != nil {
 			panic(err)
 		}
 		downloadernat.DoNat(nodeConfig.P2P.NAT, cfg.Downloader.ClientConfig, logger)
 	}
+}
+
+// Converts flag value to an Option for packages that abstract over flag handling.
+func boolFlagOpt(ctx *cli.Context, flag *cli.BoolFlag) g.Option[bool] {
+	if ctx.IsSet(flag.Name) {
+		return g.Some(ctx.Bool(flag.Name))
+	}
+	return g.None[bool]()
 }
 
 // SetDNSDiscoveryDefaults configures DNS discovery with the given URL if

@@ -29,16 +29,15 @@ import (
 	"strings"
 	"time"
 
+	g "github.com/anacrolix/generics"
 	analog "github.com/anacrolix/log"
-
-	"github.com/erigontech/erigon-lib/chain/networkname"
 
 	"github.com/anacrolix/dht/v2"
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/time/rate"
 
 	"github.com/anacrolix/torrent"
-
+	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -73,7 +72,8 @@ type Cfg struct {
 	MdbxWriteMap bool
 }
 
-func Default() *torrent.ClientConfig {
+// Before options/flags applied.
+func defaultTorrentClientConfig() *torrent.ClientConfig {
 	// TODO: Add config dump in client status writer output...
 	torrentConfig := torrent.NewDefaultClientConfig()
 	// better don't increase because erigon periodically producing "new seedable files" - and adding them to downloader.
@@ -100,6 +100,14 @@ func Default() *torrent.ClientConfig {
 	return torrentConfig
 }
 
+// Typed abstraction to make it easier to get config parameters in. Can't pull flags directly due to
+// import cycles. cmd/util calls us... Move stuff into this struct as the crazy number of arguments
+// annoys you.
+type NewCfgOpts struct {
+	// If set, clobber the default torrent config value.
+	DisableTrackers g.Option[bool]
+}
+
 func New(
 	ctx context.Context,
 	dirs datadir.Dirs,
@@ -110,8 +118,14 @@ func New(
 	staticPeers, webseeds []string,
 	chainName string,
 	mdbxWriteMap bool,
+	opts NewCfgOpts,
 ) (_ *Cfg, err error) {
-	torrentConfig := Default()
+	torrentConfig := defaultTorrentClientConfig()
+
+	if f := opts.DisableTrackers; f.Ok {
+		torrentConfig.DisableTrackers = f.Value
+	}
+
 	//torrentConfig.PieceHashersPerTorrent = runtime.NumCPU()
 	torrentConfig.DataDir = dirs.Snap // `DataDir` of torrent-client-lib is different from Erigon's `DataDir`. Just same naming.
 

@@ -77,7 +77,15 @@ func NewNodeConfig() *nodecfg.Config {
 }
 
 // InitNode initializes a node with the given genesis file and config
-func InitMiner(ctx context.Context, logger log.Logger, dirName string, genesis *types.Genesis, privKey *ecdsa.PrivateKey, withoutHeimdall bool, minerID int) (*node.Node, *eth.Ethereum, error) {
+func InitMiner(
+	ctx context.Context,
+	logger log.Logger,
+	dirName string,
+	genesis *types.Genesis,
+	privKey *ecdsa.PrivateKey,
+	withoutHeimdall bool,
+	minerID int,
+) (*node.Node, *eth.Ethereum, error) {
 	// Define the basic configurations for the Ethereum node
 
 	nodeCfg := &nodecfg.Config{
@@ -121,7 +129,22 @@ func InitMiner(ctx context.Context, logger log.Logger, dirName string, genesis *
 		return nil, nil, err
 	}
 
-	downloaderConfig, err := downloadercfg.New(ctx, datadir.New(dirName), nodeCfg.Version, torrentLogLevel, downloadRate, uploadRate, utils.TorrentPortFlag.Value, utils.TorrentConnsPerFileFlag.Value, utils.TorrentDownloadSlotsFlag.Value, []string{}, []string{}, "", utils.DbWriteMapFlag.Value)
+	downloaderConfig, err := downloadercfg.New(
+		ctx,
+		datadir.New(dirName),
+		nodeCfg.Version,
+		torrentLogLevel,
+		downloadRate,
+		uploadRate,
+		utils.TorrentPortFlag.Value,
+		utils.TorrentConnsPerFileFlag.Value,
+		utils.TorrentDownloadSlotsFlag.Value,
+		[]string{},
+		[]string{},
+		"",
+		utils.DbWriteMapFlag.Value,
+		downloadercfg.NewCfgOpts{},
+	)
 	if err != nil {
 		return nil, nil, err
 	}

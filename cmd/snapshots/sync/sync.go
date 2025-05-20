@@ -29,12 +29,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anacrolix/torrent"
-	"github.com/anacrolix/torrent/metainfo"
-	"github.com/anacrolix/torrent/storage"
 	"github.com/c2h5oh/datasize"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/anacrolix/torrent"
+	"github.com/anacrolix/torrent/metainfo"
+	"github.com/anacrolix/torrent/storage"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -149,19 +150,20 @@ type TorrentClient struct {
 }
 
 type CreateNewTorrentClientConfig struct {
-	Chain        string
-	WebSeeds     string
-	DownloadRate string
-	UploadRate   string
-	Verbosity    int
-	TorrentPort  int
-	ConnsPerFile int
-	DisableIPv6  bool
-	DisableIPv4  bool
-	NatFlag      string
-	Logger       log.Logger
-	TempDir      string
-	CleanDir     bool
+	Chain             string
+	WebSeeds          string
+	DownloadRate      string
+	UploadRate        string
+	Verbosity         int
+	TorrentPort       int
+	ConnsPerFile      int
+	DisableIPv6       bool
+	DisableIPv4       bool
+	NatFlag           string
+	Logger            log.Logger
+	TempDir           string
+	CleanDir          bool
+	DownloaderCfgOpts downloadercfg.NewCfgOpts
 }
 
 func NewTorrentClientConfigFromCobra(cliCtx *cli.Context, chain string) CreateNewTorrentClientConfig {
@@ -232,7 +234,22 @@ func NewTorrentClient(ctx context.Context, config CreateNewTorrentClientConfig) 
 
 	version := "erigon: " + params.VersionWithCommit(params.GitCommit)
 
-	cfg, err := downloadercfg.New(ctx, dirs, version, logLevel, downloadRate, uploadRate, config.TorrentPort, config.ConnsPerFile, 0, nil, webseedsList, config.Chain, true)
+	cfg, err := downloadercfg.New(
+		ctx,
+		dirs,
+		version,
+		logLevel,
+		downloadRate,
+		uploadRate,
+		config.TorrentPort,
+		config.ConnsPerFile,
+		0,
+		nil,
+		webseedsList,
+		config.Chain,
+		true,
+		config.DownloaderCfgOpts,
+	)
 
 	if err != nil {
 		return nil, err

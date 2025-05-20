@@ -23,9 +23,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"golang.org/x/sync/semaphore"
 	"io/fs"
 	"iter"
 	"math"
@@ -43,14 +40,17 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c2h5oh/datasize"
+	"golang.org/x/sync/semaphore"
+
 	g "github.com/anacrolix/generics"
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/time/rate"
+
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
 	"github.com/anacrolix/torrent/types/infohash"
-	"golang.org/x/sync/errgroup"
-	"golang.org/x/time/rate"
-
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -61,6 +61,7 @@ import (
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	prototypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
@@ -286,6 +287,7 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 }
 
 func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosity log.Lvl) (*Downloader, error) {
+	// TODO: Check this!! Upstream any logic that works reliably.
 	requestHandler := &requestHandler{
 		Transport: http.Transport{
 			Proxy:       cfg.ClientConfig.HTTPProxy,
