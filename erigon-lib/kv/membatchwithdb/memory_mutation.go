@@ -701,6 +701,14 @@ func (m *MemoryMutation) Cursor(bucket string) (kv.Cursor, error) {
 	return m.makeCursor(bucket)
 }
 
+func (m *MemoryMutation) Apply(_ context.Context, f func(tx kv.Tx) error) error {
+	return f(m)
+}
+
+func (m *MemoryMutation) ApplyRw(_ context.Context,f func(tx kv.RwTx) error) error {
+	return f(m)
+}
+
 func (m *MemoryMutation) ViewID() uint64 {
 	panic("ViewID Not implemented")
 }
