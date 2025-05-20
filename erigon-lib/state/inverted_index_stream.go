@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"container/heap"
 	"encoding/binary"
+	"fmt"
 
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -111,6 +112,8 @@ func (it *InvertedIdxStreamFiles) advanceInFiles() {
 					seqIt = it.seq.ReverseIterator(it.startTxNum)
 				}
 				it.seqIt = seqIt
+			} else {
+				log.Info("[dbg] iterateRangeOnFiles: false-positive", "n", item.Filename(), "k", fmt.Sprintf("%x", k), "it.key", fmt.Sprintf("%x", it.key))
 			}
 		}
 
