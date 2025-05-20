@@ -980,7 +980,6 @@ func (dt *DomainRoTx) garbage(merged *filesItem) (outs []*filesItem) {
 		}
 	}
 	return garbage(dt.d.dirtyFiles, dt.files, merged, checker)
-
 }
 
 // garbage - returns list of garbage files after merge step is done. at startup pass here last frozen file
@@ -1017,7 +1016,7 @@ func garbage(dirtyFiles *btree.BTreeG[*filesItem], visibleFiles []visibleFile, m
 			}
 
 			if item.isProperSubsetOf(merged) {
-				if checker != nil && !checker(item.startTxNum, item.endTxNum) {
+				if checker == nil || !checker(item.startTxNum, item.endTxNum) {
 					// no dependent file is present for item, can delete safely...
 					outs = append(outs, item)
 				}

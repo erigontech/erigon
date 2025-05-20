@@ -94,7 +94,7 @@ type Aggregator struct {
 
 	produce bool
 
-	dependentMap map[kv.Domain]*DependencyIntegrityChecker
+	checker *DependencyIntegrityChecker
 }
 
 const AggregatorSqueezeCommitmentValues = true
@@ -146,8 +146,7 @@ func newAggregatorOld(ctx context.Context, dirs datadir.Dirs, aggregationStep ui
 
 		commitmentValuesTransform: AggregatorSqueezeCommitmentValues,
 
-		produce:      true,
-		dependentMap: make(map[kv.Domain]*DependencyIntegrityChecker),
+		produce: true,
 	}, nil
 }
 
@@ -268,15 +267,16 @@ func (a *Aggregator) ReloadSalt() error {
 }
 
 func (a *Aggregator) AddDependency(dependency kv.Domain, dependent kv.Domain) {
-	checker, ok := a.dependentMap[dependent]
-	if !ok {
-		checker = NewDependencyIntegrityChecker(a.dirs, a.logger)
+	if a.checker == nil {
+		a.checker = NewDependencyIntegrityChecker(a.dirs, a.logger)
 	}
-	checker.AddDependency(dependency, &DependentInfo{
+
+	a.checker.AddDependency(dependency, &DependentInfo{
 		domain:      dependent,
 		filesGetter: func() *btree.BTreeG[*filesItem] { return a.d[dependent].dirtyFiles },
 		accessors:   a.d[dependent].Accessors,
 	})
+	a.d[dependency].SetDependency(a.checker)
 }
 
 func (a *Aggregator) OpenFolder() error {
@@ -733,6 +733,8 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 	maxSpan := config3.StepsInFrozenFile * a.StepSize()
 	r := aggTx.findMergeRange(toTxNum, maxSpan)
 	if !r.any() {
+		a.cleanAfterMerge(nil)
+		// TODO: add files notification here too.
 		return false, nil
 	}
 

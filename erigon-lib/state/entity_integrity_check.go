@@ -73,7 +73,7 @@ func (e Quantifier) Any() bool {
 // examples:
 // dependency: account
 // is (dependent) commitment.0-2 present?
-// - if no, don't use it for visibleFiles.
+// - if no (or !checkVisibility), don't use it for visibleFiles.
 // - Also don't consider it for "consuming" (deleting) the smaller files commitment.0-1, 1-2
 func (d *DependencyIntegrityChecker) CheckDependentPresent(dependency kv.Domain, allOrAny Quantifier, startTxNum, endTxNum uint64) (IsPresent bool) {
 	arr, ok := d.dependencyMap[dependency]
@@ -110,9 +110,5 @@ func (d *DependencyIntegrityChecker) CheckDependentPresent(dependency kv.Domain,
 		d.logger.Warn("[dbg: Depic]", "dependent", "all present", "startTxNum", startTxNum, "endTxNum", endTxNum)
 	}
 
-	return true
+	return allOrAny.All()
 }
-
-// 1.should delete this file? -- only care about the file (no index etc.)
-// 2. should use recalcVisibleFiles? (commit.0-1 should result in account.0-1 and storage.0-1 in visibleFiles...)
-// both only care about file presence (no index presence check etc.)
