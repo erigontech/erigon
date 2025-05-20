@@ -91,9 +91,9 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchCode)
 	case kv.StorageDomain:
 		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchStorage)
-	case kv.CommitmentDomain, kv.ReceiptDomain:
+	//case kv.CommitmentDomain, kv.ReceiptDomain:
 	default:
-		panic(fmt.Errorf("TouchKey: unknown domain %s", d))
+		//panic(fmt.Errorf("TouchKey: unknown domain %s", d))
 	}
 }
 
