@@ -1102,7 +1102,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 					if optimistic {
 						continue
 					} else {
-						s.logger.Info("doesn't exist %s", sn.filePath)
+						s.logger.Info("doesn't exist", "path", sn.filePath)
 						break
 					}
 				}
@@ -1117,7 +1117,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 		if !exists {
 			// it's possible to iterate over .seg file even if you don't have index
 			// then make segment available even if index open may fail
-			s.logger.Info("setting %s", sn.filePath)
+			s.logger.Info("setting", "path", sn.filePath)
 			segtype.Set(sn)
 		}
 
