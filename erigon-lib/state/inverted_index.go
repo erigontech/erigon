@@ -704,7 +704,7 @@ func (iit *InvertedIndexRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc
 	if err != nil {
 		return nil, err
 	}
-	log.Info("[dbg] getAddrsBitmapV3", "addr", fmt.Sprintf("%x", key), "filesIt.HasNext()", filesIt.HasNext(), "recentIt", recentIt.HasNext())
+	log.Info("[dbg] IdxRange", "addr", fmt.Sprintf("%x", key), "filesIt.HasNext()", filesIt.HasNext(), "recentIt", recentIt.HasNext())
 	return stream.Union[uint64](filesIt, recentIt, asc, limit), nil
 }
 
