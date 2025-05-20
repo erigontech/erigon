@@ -278,7 +278,7 @@ func ExecuteAATransaction(
 	executionGasPenalty := (tx.GasLimit - applyRes.GasUsed) * types.AA_GAS_PENALTY_PCT / 100
 	gasUsed = validationGasUsed + applyRes.GasUsed + executionGasPenalty
 	gasRefund := capRefund(execRefund+validationRefund, gasUsed)
-	log.Info("execution gas used", "gasUsed", applyRes.UsedGas, "penalty", executionGasPenalty)
+	log.Info("execution gas used", "gasUsed", applyRes.GasUsed, "penalty", executionGasPenalty)
 
 	// Paymaster post-op frame
 	if len(paymasterContext) != 0 {
@@ -299,10 +299,10 @@ func ExecuteAATransaction(
 			}
 		}
 
-		validationGasPenalty := (tx.PostOpGasLimit - applyRes.UsedGas) * types.AA_GAS_PENALTY_PCT / 100
-		gasRefund += capRefund(tx.PostOpGasLimit-applyRes.UsedGas, applyRes.UsedGas)
-		gasUsed += applyRes.UsedGas + validationGasPenalty
-		log.Info("post op gas used", "gasUsed", applyRes.UsedGas, "penalty", validationGasPenalty)
+		validationGasPenalty := (tx.PostOpGasLimit - applyRes.GasUsed) * types.AA_GAS_PENALTY_PCT / 100
+		gasRefund += capRefund(tx.PostOpGasLimit-applyRes.GasUsed, applyRes.GasUsed)
+		gasUsed += applyRes.GasUsed + validationGasPenalty
+		log.Info("post op gas used", "gasUsed", applyRes.GasUsed, "penalty", validationGasPenalty)
 	}
 
 	if err = refundGas(header, tx, ibs, gasUsed-gasRefund); err != nil {
