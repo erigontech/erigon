@@ -89,13 +89,13 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 						_min, _ := rawdbv3.TxNums.Min(tx, blockNum)
 						if txNum == _min {
 							minStep = min(minStep, txNum/agg.StepSize())
-							log.Warn(fmt.Sprintf("[integrity] HistoryNoSystemTxs: minStep=%d, step=%d, txNum=%d, blockNum=%d, key=%x", minStep, txNum/agg.StepSize(), txNum, blockNum, key))
+							log.Info(fmt.Sprintf("[integrity] HistoryNoSystemTxs: minStep=%d, step=%d, txNum=%d, blockNum=%d, key=%x", minStep, txNum/agg.StepSize(), txNum, blockNum, key))
 							break
 						}
 
 						select {
 						case <-logEvery.C:
-							log.Warn(fmt.Sprintf("[integrity] HistoryNoSystemTxs: checked=%dK keys", count.Load()/1_000))
+							log.Info(fmt.Sprintf("[integrity] HistoryNoSystemTxs: checked=%dK keys", count.Load()/1_000))
 						default:
 						}
 					}
