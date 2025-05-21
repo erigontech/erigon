@@ -352,9 +352,12 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	if err != nil {
 		return err
 	}
+	if debug {
+		log.Warn("[dbg] filterV3", "allTxs.HasNext", allTxs.HasNext(), "fromBlock", fromBlock, "toBlock", toBlock)
+	}
+
 	it := rawdbv3.TxNums2BlockNums(dbtx, api._txNumReader, allTxs, order.Asc)
 	defer it.Close()
-
 	chainConfig, err := api.chainConfig(ctx, dbtx)
 	if err != nil {
 		return err
@@ -378,9 +381,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	nSeen := uint64(0)
 	nExported := uint64(0)
 	includeAll := len(fromAddresses) == 0 && len(toAddresses) == 0
-	if debug {
-		log.Warn("[dbg] filterV3", "it.HasNext", it.HasNext(), "fromBlock", fromBlock, "toBlock", toBlock, "count", count)
-	}
 
 	var lastBlockHash common.Hash
 	var lastHeader *types.Header
