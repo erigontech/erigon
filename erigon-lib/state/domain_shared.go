@@ -519,7 +519,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, k []byte) (v []byte, step u
 //   - user can provide `prevVal != nil` - then it will not read prev value from storage
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
-func (sd *SharedDomains) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep uint64) error {
+func (sd *SharedDomains) DomainPut(domain kv.Domain, k, v []byte, prevVal []byte, prevStep uint64) error {
 	if v == nil {
 		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)
 	}
