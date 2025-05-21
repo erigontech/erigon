@@ -349,11 +349,11 @@ func (sd *SharedDomains) writeAccountStorage(addr, loc []byte, value, preVal []b
 	return sd.domainWriters[kv.StorageDomain].PutWithPrev(composite, value, sd.txNum, preVal, prevStep)
 }
 
-func (sd *SharedDomains) delAccountStorage(addr, loc []byte, preVal []byte, prevStep uint64) error {
-	composite := addr
+func (sd *SharedDomains) delAccountStorage(k, preVal []byte, prevStep uint64) error {
+	composite := k
 	if loc != nil { // if caller passed already `composite` key, then just use it. otherwise join parts
-		composite = make([]byte, 0, len(addr)+len(loc))
-		composite = append(append(composite, addr...), loc...)
+		composite = make([]byte, 0, len(k)+len(loc))
+		composite = append(append(composite, k...), loc...)
 	}
 	compositeS := string(composite)
 	sd.put(kv.StorageDomain, compositeS, nil)
@@ -575,7 +575,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, k, prevVal []byte, prevStep
 	case kv.AccountsDomain:
 		return sd.deleteAccount(k, prevVal, prevStep)
 	case kv.StorageDomain:
-		return sd.delAccountStorage(k, nil, prevVal, prevStep)
+		return sd.delAccountStorage(k, prevVal, prevStep)
 	case kv.CodeDomain:
 		if prevVal == nil {
 			return nil
