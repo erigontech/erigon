@@ -101,7 +101,7 @@ func ValidateAATransaction(
 	}
 	entryPointTracer.Reset()
 
-	deploymentGasUsed := applyRes.UsedGas
+	deploymentGasUsed := applyRes.GasUsed
 
 	// Validation frame
 	msg, err = tx.ValidationFrame(chainConfig.ChainID, deploymentGasUsed, rules, hasEIP3860)
@@ -125,7 +125,7 @@ func ValidateAATransaction(
 	}
 	entryPointTracer.Reset()
 
-	validationGasUsed += applyRes.UsedGas
+	validationGasUsed += applyRes.GasUsed
 
 	// Paymaster frame
 	msg, err = tx.PaymasterFrame(chainConfig.ChainID)
@@ -151,7 +151,7 @@ func ValidateAATransaction(
 			return nil, 0, err
 		}
 		entryPointTracer.Reset()
-		validationGasUsed += applyRes.UsedGas
+		validationGasUsed += applyRes.GasUsed
 	}
 
 	log.Info("validation gas report", "gasUsed", validationGasUsed, "nonceManager", 0, "refund", 0, "pretransactioncost", preTxCost)
@@ -272,13 +272,13 @@ func ExecuteAATransaction(
 		executionStatus = types.ExecutionStatusExecutionFailure
 	}
 
-	execRefund := capRefund(tx.GasLimit-applyRes.UsedGas, applyRes.UsedGas) // TODO: can be moved into statetransition
+	execRefund := capRefund(tx.GasLimit-applyRes.GasUsed, applyRes.GasUsed) // TODO: can be moved into statetransition
 	validationRefund := capRefund(tx.ValidationGasLimit-validationGasUsed, validationGasUsed)
 
-	executionGasPenalty := (tx.GasLimit - applyRes.UsedGas) * types.AA_GAS_PENALTY_PCT / 100
-	gasUsed = validationGasUsed + applyRes.UsedGas + executionGasPenalty
+	executionGasPenalty := (tx.GasLimit - applyRes.GasUsed) * types.AA_GAS_PENALTY_PCT / 100
+	gasUsed = validationGasUsed + applyRes.GasUsed + executionGasPenalty
 	gasRefund := capRefund(execRefund+validationRefund, gasUsed)
-	log.Info("execution gas used", "gasUsed", applyRes.UsedGas, "penalty", executionGasPenalty)
+	log.Info("execution gas used", "gasUsed", applyRes.GasUsed, "penalty", executionGasPenalty)
 
 	// Paymaster post-op frame
 	if len(paymasterContext) != 0 {
@@ -299,10 +299,10 @@ func ExecuteAATransaction(
 			}
 		}
 
-		validationGasPenalty := (tx.PostOpGasLimit - applyRes.UsedGas) * types.AA_GAS_PENALTY_PCT / 100
-		gasRefund += capRefund(tx.PostOpGasLimit-applyRes.UsedGas, applyRes.UsedGas)
-		gasUsed += applyRes.UsedGas + validationGasPenalty
-		log.Info("post op gas used", "gasUsed", applyRes.UsedGas, "penalty", validationGasPenalty)
+		validationGasPenalty := (tx.PostOpGasLimit - applyRes.GasUsed) * types.AA_GAS_PENALTY_PCT / 100
+		gasRefund += capRefund(tx.PostOpGasLimit-applyRes.GasUsed, applyRes.GasUsed)
+		gasUsed += applyRes.GasUsed + validationGasPenalty
+		log.Info("post op gas used", "gasUsed", applyRes.GasUsed, "penalty", validationGasPenalty)
 	}
 
 	if err = refundGas(header, tx, ibs, gasUsed-gasRefund); err != nil {
