@@ -89,9 +89,9 @@ func TestNoEscape(t *testing.T) {
 }
 
 func TestVerifyData(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please")
-	}
+	// if runtime.GOOS == "windows" {
+	// 	t.Skip("fix me on win please")
+	// }
 
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
