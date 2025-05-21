@@ -474,12 +474,12 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		pruneTimeout = 12 * time.Hour
 
 		// allow greedy prune on non-chain-tip
-		if err = tx.(kv.TemporalRwTx).Debug().GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
+		if err = tx.(kv.TemporalRwTx).GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
 			return err
 		}
 	}
 
-	if _, err := tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, pruneTimeout); err != nil {
+	if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, pruneTimeout); err != nil {
 		return err
 	}
 

@@ -425,6 +425,8 @@ type Tx interface {
 	Count(bucket string) (uint64, error)
 
 	ListTables() ([]string, error)
+
+	Apply(ctx context.Context, f func(tx Tx) error) error
 }
 
 // RwTx
@@ -442,6 +444,8 @@ type RwTx interface {
 	RwCursorDupSort(table string) (RwCursorDupSort, error)
 
 	Commit() error // Commit all the operations of a transaction into the database.
+
+	ApplyRw(ctx context.Context, f func(tx RwTx) error) error
 }
 
 // Cursor - class for navigating through a database
@@ -583,8 +587,6 @@ type TemporalDebugTx interface {
 
 	DomainFiles(domain ...Domain) VisibleFiles
 
-	GreedyPruneHistory(ctx context.Context, domain Domain) error
-	PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error)
 	TxNumsInFiles(domains ...Domain) (minTxNum uint64)
 }
 
@@ -608,6 +610,8 @@ type TemporalRwTx interface {
 	TemporalTx
 	TemporalPutDel
 
+	GreedyPruneHistory(ctx context.Context, domain Domain) error
+	PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error)
 	Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff) error
 }
 
