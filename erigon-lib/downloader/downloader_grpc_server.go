@@ -25,8 +25,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/anacrolix/torrent/metainfo"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	"github.com/anacrolix/torrent/metainfo"
 
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
@@ -84,7 +85,7 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 
 		if it.TorrentHash == nil {
 			// if we don't have the torrent hash then we seed a new snapshot
-			// TODO: Make the torrent in place then call addPriorTorrent.
+			// TODO: Make the torrent in place then call addPreverifiedTorrent.
 			if err := s.d.AddNewSeedableFile(ctx, it.Path); err != nil {
 				return nil, err
 			}
@@ -93,7 +94,9 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 			// TODO: Try to fetch the torrent file from provider if we don't have it here.
 		}
 
-		if err := s.d.addPriorTorrent(ctx, Proto2InfoHash(it.TorrentHash), it.Path); err != nil {
+		// TODO: I'm not sure this context is right here. The torrent should become bound to the
+		// Downloader, not the caller here.
+		if err := s.d.addPreverifiedTorrent(ctx, Proto2InfoHash(it.TorrentHash), it.Path); err != nil {
 			return nil, err
 		}
 	}

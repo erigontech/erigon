@@ -123,6 +123,8 @@ func (tf *AtomicTorrentFS) createFromMetaInfo(name string, mi *metainfo.MetaInfo
 	return tf.writeFile(name, r)
 }
 
+// TODO: Refactor this to not return created? At this point all callers (could) assume the file does
+// not exist.
 func (tf *AtomicTorrentFS) CreateWithMetaInfo(info *metainfo.Info, additionalMetaInfo *metainfo.MetaInfo) (created bool, err error) {
 	name := info.Name
 	if !strings.HasSuffix(name, ".torrent") {

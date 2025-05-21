@@ -363,15 +363,13 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 }
 
 func (d *Downloader) MainLoopInBackground(silent bool) {
-	d.wg.Add(1)
-	go func() {
-		defer d.wg.Done()
+	d.spawn(func() {
 		if err := d.mainLoop(silent); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				d.logger.Warn("[snapshots]", "err", err)
 			}
 		}
-	}()
+	})
 }
 
 type seedHash struct {
@@ -488,8 +486,8 @@ func (d *Downloader) allTorrentsComplete() (ret bool) {
 
 // Basic checks and fixes for a snapshot torrent claiming it's complete from experiments. If passed
 // is false, come back later and check again. You could ask why this isn't in the torrent lib. This
-// is an extra level of pedantry due to some file modification I saw outside of the torrent lib. It
-// may go away with only writing torrent files and preverified after completion.
+// is an extra level of pedantry due to some file modification I saw from outside the torrent lib.
+// It may go away with only writing torrent files and preverified after completion.
 func (d *Downloader) validateCompletedSnapshot(t *torrent.Torrent) (passed bool) {
 	passed = true
 	// This has to be available if it's complete.
@@ -531,9 +529,7 @@ func (d *Downloader) verifyPieces(f *torrent.File) {
 		}
 		g.MakeMapIfNil(&d.piecesBeingVerified)
 		if !g.MapInsert(d.piecesBeingVerified, p, struct{}{}).Ok {
-			d.wg.Add(1)
-			go func() {
-				defer d.wg.Done()
+			d.spawn(func() {
 				err := p.VerifyDataContext(d.ctx)
 				d.lock.Lock()
 				defer d.lock.Unlock()
@@ -542,7 +538,7 @@ func (d *Downloader) verifyPieces(f *torrent.File) {
 					return
 				}
 				panicif.Err(err)
-			}()
+			})
 		}
 	}
 }
@@ -966,9 +962,7 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		defer logEvery.Stop()
-		d.wg.Add(1)
-		go func() {
-			defer d.wg.Done()
+		d.spawn(func() {
 			for {
 				select {
 				case <-ctx.Done():
@@ -981,7 +975,7 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 					)
 				}
 			}
-		}()
+		})
 	}
 
 	g, ctx := errgroup.WithContext(ctx)
@@ -1105,11 +1099,9 @@ func (d *Downloader) webSeedUrlStrs() iter.Seq[string] {
 }
 
 // Add a torrent with a known info hash. Either someone else made it, or it was on disk.
-func (d *Downloader) addPriorTorrent(
-	ctx context.Context,
+func (d *Downloader) addPreverifiedTorrent(
 	infoHash metainfo.Hash,
 	name string,
-	// verify bool,
 ) error {
 	if !IsSnapNameAllowed(name) {
 		return fmt.Errorf("snap name %q is not allowed", name)
@@ -1152,16 +1144,19 @@ func (d *Downloader) addPriorTorrent(
 		return nil
 	}
 
+	// The following is a bit elaborate with avoiding goroutines. Maybe it's overkill.
+
+	metainfoOnDisk := specOpt.Ok
+
 	onGotInfo := func() {
 		t.DownloadAll()
 		// The info bytes weren't already on disk. Save them.
-		if !specOpt.Ok {
-			mi := t.Metainfo()
-			// This checks for existence last I checked, which isn't really what we want.
-			if _, err := d.torrentFS.CreateWithMetaInfo(t.Info(), &mi); err != nil {
-				d.logger.Warn("[snapshots] create torrent file", "err", err)
+		if !metainfoOnDisk {
+			if t.Complete().Bool() {
+				d.saveNewlyCompletedMetainfo(t)
+			} else {
+				d.spawn(func() { d.saveMetainfoWhenComplete(t) })
 			}
-
 		}
 	}
 
@@ -1169,19 +1164,51 @@ func (d *Downloader) addPriorTorrent(
 	if t.Info() != nil {
 		onGotInfo()
 	} else {
-		d.wg.Add(1)
-		go func() {
-			defer d.wg.Done()
+		d.spawn(func() {
 			select {
-			case <-ctx.Done():
+			case <-d.ctx.Done():
 				return
 			case <-t.GotInfo():
 			}
 			onGotInfo()
-		}()
+		})
 	}
 
 	return nil
+}
+
+func (d *Downloader) saveMetainfoWhenComplete(t *torrent.Torrent) {
+	select {
+	case <-d.ctx.Done():
+	case <-t.Complete().On():
+		d.saveNewlyCompletedMetainfo(t)
+	}
+}
+
+func (d *Downloader) saveNewlyCompletedMetainfoErr(t *torrent.Torrent) error {
+	if !t.Complete().Bool() {
+		return errors.New("torrent is not complete")
+	}
+	if !d.validateCompletedSnapshot(t) {
+		return errors.New("completed torrent failed validation")
+	}
+	mi := t.Metainfo()
+	// This checks for existence last I checked, which isn't really what we want.
+	created, err := d.torrentFS.CreateWithMetaInfo(t.Info(), &mi)
+	if err == nil && !created {
+		err = errors.New("metainfo file already exists")
+	}
+	if err != nil {
+		return fmt.Errorf("error creating metainfo file: %w", err)
+	}
+	return nil
+}
+
+func (d *Downloader) saveNewlyCompletedMetainfo(t *torrent.Torrent) {
+	err := d.saveNewlyCompletedMetainfoErr(t)
+	if err != nil {
+		d.logger.Error("error saving metainfo for complete torrent", "err", err, "name", t.Name())
+	}
 }
 
 func SeedableFiles(dirs datadir.Dirs, chainName string, all bool) ([]string, error) {
@@ -1399,4 +1426,12 @@ func (d *Downloader) HandleTorrentClientStatus() {
 	http.HandleFunc("/downloaderTorrentClientStatus", func(w http.ResponseWriter, r *http.Request) {
 		d.torrentClient.WriteStatus(w)
 	})
+}
+
+func (d *Downloader) spawn(f func()) {
+	d.wg.Add(1)
+	go func() {
+		defer d.wg.Done()
+		f()
+	}()
 }

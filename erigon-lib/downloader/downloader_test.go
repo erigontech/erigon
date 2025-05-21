@@ -22,8 +22,9 @@ import (
 	"runtime"
 	"testing"
 
-	lg "github.com/anacrolix/log"
 	"github.com/stretchr/testify/require"
+
+	lg "github.com/anacrolix/log"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 	downloadercfg2 "github.com/erigontech/erigon-lib/downloader/downloadercfg"
@@ -43,14 +44,14 @@ func TestChangeInfoHashOfSameFile(t *testing.T) {
 	d, err := New(context.Background(), cfg, log.New(), log.LvlInfo, true)
 	require.NoError(err)
 	defer d.Close()
-	err = d.addPriorTorrent(d.ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
+	err = d.addPreverifiedTorrent(d.ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
 	require.NoError(err)
 	tt, ok := d.torrentClient.Torrent(snaptype.Hex2InfoHash("aa"))
 	require.True(ok)
 	require.Equal("a.seg", tt.Name())
 
 	// adding same file twice is ok
-	err = d.addPriorTorrent(d.ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
+	err = d.addPreverifiedTorrent(d.ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
 	require.NoError(err)
 
 	// adding same file with another infoHash - is ok, must be skipped
@@ -58,7 +59,7 @@ func TestChangeInfoHashOfSameFile(t *testing.T) {
 	//	- release of re-compressed version of same file,
 	//	- ErigonV1.24 produced file X, then ErigonV1.25 released with new compression algorithm and produced X with anouther infoHash.
 	//		ErigonV1.24 node must keep using existing file instead of downloading new one.
-	err = d.addPriorTorrent(d.ctx, snaptype.Hex2InfoHash("bb"), "a.seg")
+	err = d.addPreverifiedTorrent(d.ctx, snaptype.Hex2InfoHash("bb"), "a.seg")
 	require.NoError(err)
 	tt, ok = d.torrentClient.Torrent(snaptype.Hex2InfoHash("aa"))
 	require.True(ok)
