@@ -504,7 +504,7 @@ func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, p
 	}
 }
 
-func (w *historyBufferedWriter) AddPrevValue(key1, key2 []byte, txNum uint64, original []byte) (err error) {
+func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []byte) (err error) {
 	if w.discard {
 		return nil
 	}
@@ -519,9 +519,9 @@ func (w *historyBufferedWriter) AddPrevValue(key1, key2 []byte, txNum uint64, or
 	//}()
 
 	if w.largeValues {
-		lk := len(key1) + len(key2)
+		lk := len(k)
 
-		w.historyKey = append(append(append(w.historyKey[:0], key1...), key2...), w.ii.txNumBytes[:]...)
+		w.historyKey = append(append(w.historyKey[:0], k...), w.ii.txNumBytes[:]...)
 		historyKey := w.historyKey[:lk+8]
 
 		if err := w.historyVals.Collect(historyKey, original); err != nil {
@@ -536,15 +536,15 @@ func (w *historyBufferedWriter) AddPrevValue(key1, key2 []byte, txNum uint64, or
 		return nil
 	}
 
-	lk := len(key1) + len(key2)
-	w.historyKey = append(append(append(append(w.historyKey[:0], key1...), key2...), w.ii.txNumBytes[:]...), original...)
+	lk := len(k)
+	w.historyKey = append(append(append(w.historyKey[:0], k...), w.ii.txNumBytes[:]...), original...)
 	historyKey := w.historyKey[:lk+8+len(original)]
 	historyKey1 := historyKey[:lk]
 	historyVal := historyKey[lk:]
 	invIdxVal := historyKey[:lk]
 
 	if len(original) > 2048 {
-		log.Error("History value is too large while largeValues=false", "h", w.historyValsTable, "histo", string(w.historyKey[:lk]), "len", len(original), "max", len(w.historyKey)-8-len(key1)-len(key2))
+		log.Error("History value is too large while largeValues=false", "h", w.historyValsTable, "histo", string(w.historyKey[:lk]), "len", len(original), "max", len(w.historyKey)-8-len(k))
 		panic("History value is too large while largeValues=false")
 	}
 
