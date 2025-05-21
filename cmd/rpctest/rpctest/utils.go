@@ -245,7 +245,12 @@ func compareErrors(errVal *fastjson.Value, errValg *fastjson.Value, methodName s
 	return nil
 }
 
-func requestAndCompare(request string, methodName string, errCtx string, reqGen *RequestGenerator, needCompare bool, rec *bufio.Writer, errs *bufio.Writer, channel chan CallResult, insertOnlyIfSuccess bool) error {
+func requestAndCompare(request string, methodName string,
+	errCtx string,
+	reqGen *RequestGenerator, needCompare bool,
+	rec *bufio.Writer, errs *bufio.Writer,
+	channel chan CallResult, insertOnlyIfSuccess bool,
+) error {
 	recording := rec != nil
 	res := reqGen.Erigon2(methodName, request)
 	if res.Err != nil {

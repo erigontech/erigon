@@ -23,6 +23,7 @@ import (
 	"os"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 // Compares response of Erigon with OpenEthereum
@@ -64,6 +65,21 @@ func BenchTraceFilter(erigonURL, oeURL string, needCompare bool, blockFrom uint6
 	if blockNumber.Error != nil {
 		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
 	}
+
+	var resultsCh chan CallResult = nil
+	resultsCh = make(chan CallResult, 1000)
+	defer close(resultsCh)
+	go func() {
+		for r := range resultsCh {
+			if r.Err != nil {
+				log.Warn("[dbg] err", "err", r.Err)
+				continue
+			}
+			result := r.Result.GetArray("result")
+			fmt.Printf("[dbg] %+v\n", result)
+		}
+	}()
+
 	fmt.Printf("Last block: %d\n", blockNumber.Number)
 	rnd := rand.New(rand.NewSource(42)) // nolint:gosec
 	prevBn := blockFrom
@@ -98,14 +114,14 @@ func BenchTraceFilter(erigonURL, oeURL string, needCompare bool, blockFrom uint6
 
 				request := reqGen.traceFilterFrom(prevBn, bn, account)
 				errCtx := fmt.Sprintf("traceFilterFrom fromBlock %d, toBlock %d, fromAddress %x", prevBn, bn, account)
-				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs, nil /* insertOnlyIfSuccess */, false); err != nil {
+				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs, nil, false /* insertOnlyIfSuccess */); err != nil {
 					fmt.Println(err)
 					return err
 				}
 
 				request = reqGen.traceFilterTo(prevBn, bn, account)
 				errCtx = fmt.Sprintf("traceFilterTo fromBlock %d, toBlock %d, fromAddress %x", prevBn, bn, account)
-				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs, nil /* insertOnlyIfSuccess */, false); err != nil {
+				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs, nil, false /* insertOnlyIfSuccess */); err != nil {
 					fmt.Println(err)
 					return err
 				}
