@@ -153,6 +153,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		return nil, err
 	}
 	if ok && receiptFromDB != nil && !dbg.AssertEnabled {
+		fmt.Printf("[dbg] here2\n")
 		return receiptFromDB, nil
 	}
 
@@ -162,8 +163,10 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		return nil, err
 	}
 	if ok && receiptFromDB != nil && !dbg.AssertEnabled {
+		fmt.Printf("[dbg] here3\n")
 		return receiptFromDB, nil
 	}
+	fmt.Printf("[dbg] here1\n")
 
 	if receipts, ok := g.receiptsCache.Get(blockHash); ok && len(receipts) > index {
 		return receipts[index], nil
