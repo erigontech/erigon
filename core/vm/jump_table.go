@@ -64,6 +64,7 @@ var (
 	londonInstructionSet           = newLondonInstructionSet()
 	shanghaiInstructionSet         = newShanghaiInstructionSet()
 	napoliInstructionSet           = newNapoliInstructionSet()
+	bhilaiInstructionSet           = newBhilaiInstructionSet()
 	cancunInstructionSet           = newCancunInstructionSet()
 	pragueInstructionSet           = newPragueInstructionSet()
 )
@@ -106,6 +107,13 @@ func newCancunInstructionSet() JumpTable {
 	instructionSet := newNapoliInstructionSet()
 	enable4844(&instructionSet) // BLOBHASH opcode
 	enable7516(&instructionSet) // BLOBBASEFEE opcode
+	validateAndFillMaxStack(&instructionSet)
+	return instructionSet
+}
+
+func newBhilaiInstructionSet() JumpTable {
+	instructionSet := newNapoliInstructionSet()
+	enable7702(&instructionSet) // EIP-7702: set code tx
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }
