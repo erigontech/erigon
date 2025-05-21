@@ -338,26 +338,14 @@ func (sd *SharedDomains) deleteAccount(addr []byte, txNum uint64, prev []byte, p
 	return nil
 }
 
-func (sd *SharedDomains) writeAccountStorage(addr, loc []byte, value, preVal []byte, prevStep uint64) error {
-	composite := addr
-	if loc != nil { // if caller passed already `composite` key, then just use it. otherwise join parts
-		composite = make([]byte, 0, len(addr)+len(loc))
-		composite = append(append(composite, addr...), loc...)
-	}
-	compositeS := string(composite)
-	sd.put(kv.StorageDomain, compositeS, value)
-	return sd.domainWriters[kv.StorageDomain].PutWithPrev(composite, value, sd.txNum, preVal, prevStep)
+func (sd *SharedDomains) writeAccountStorage(k, v, preVal []byte, prevStep uint64) error {
+	sd.put(kv.StorageDomain, string(k), v)
+	return sd.domainWriters[kv.StorageDomain].PutWithPrev(k, v, sd.txNum, preVal, prevStep)
 }
 
-func (sd *SharedDomains) delAccountStorage(addr, loc []byte, preVal []byte, prevStep uint64) error {
-	composite := addr
-	if loc != nil { // if caller passed already `composite` key, then just use it. otherwise join parts
-		composite = make([]byte, 0, len(addr)+len(loc))
-		composite = append(append(composite, addr...), loc...)
-	}
-	compositeS := string(composite)
-	sd.put(kv.StorageDomain, compositeS, nil)
-	return sd.domainWriters[kv.StorageDomain].DeleteWithPrev(composite, sd.txNum, preVal, prevStep)
+func (sd *SharedDomains) delAccountStorage(k, preVal []byte, prevStep uint64) error {
+	sd.put(kv.StorageDomain, string(k), nil)
+	return sd.domainWriters[kv.StorageDomain].DeleteWithPrev(k, sd.txNum, preVal, prevStep)
 }
 
 func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) {
@@ -538,7 +526,7 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, 
 	sd.sdCtx.TouchKey(domain, ks, v)
 	switch domain {
 	case kv.StorageDomain:
-		return sd.writeAccountStorage(k, nil, v, prevVal, prevStep)
+		return sd.writeAccountStorage(k, v, prevVal, prevStep)
 	case kv.CodeDomain:
 		if bytes.Equal(prevVal, v) {
 			return nil
@@ -575,7 +563,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, k []byte, txNum uint64, pre
 	case kv.AccountsDomain:
 		return sd.deleteAccount(k, txNum, prevVal, prevStep)
 	case kv.StorageDomain:
-		return sd.delAccountStorage(k, nil, prevVal, prevStep)
+		return sd.delAccountStorage(k, prevVal, prevStep)
 	case kv.CodeDomain:
 		if prevVal == nil {
 			return nil
