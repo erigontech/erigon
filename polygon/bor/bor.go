@@ -502,7 +502,7 @@ func (c *Bor) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 	// Don't waste time checking blocks from the future
 	now := time.Now().Unix()
 	if header.Time > uint64(now) {
-		return fmt.Errorf("%w: expected: %s, got: %s", time.Unix(now, 0), consensus.ErrFutureBlock, time.Unix(int64(header.Time), 0))
+		return fmt.Errorf("%w: expected: %s, got: %s", consensus.ErrFutureBlock, time.Unix(now, 0), time.Unix(int64(header.Time), 0))
 	}
 
 	if err := ValidateHeaderUnusedFields(header); err != nil {
