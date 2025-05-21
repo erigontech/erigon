@@ -160,7 +160,7 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to execute transaction: %v", err)
 			}
-			tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.UsedGas}, nil)
+			tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.GasUsed}, nil)
 			// Retrieve the trace result and compare against the expected
 			res, err := tracer.GetResult()
 			if err != nil {

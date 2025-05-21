@@ -84,7 +84,7 @@ type Aggregator struct {
 
 	wg sync.WaitGroup // goroutines spawned by Aggregator, to ensure all of them are finish at agg.Close
 
-	onFreeze kv.OnFreezeFunc
+	onFilesChange kv.OnFilesChange
 
 	ps *background.ProgressSet
 
@@ -131,7 +131,7 @@ func newAggregatorOld(ctx context.Context, dirs datadir.Dirs, aggregationStep ui
 	return &Aggregator{
 		ctx:                    ctx,
 		ctxCancel:              ctxCancel,
-		onFreeze:               func(frozenFileNames []string) {},
+		onFilesChange:          func(frozenFileNames []string) {},
 		dirs:                   dirs,
 		tmpdir:                 dirs.Tmp,
 		aggregationStep:        aggregationStep,
@@ -231,8 +231,8 @@ func (a *Aggregator) registerII(idx kv.InvertedIdx, salt *uint32, dirs datadir.D
 	return nil
 }
 
-func (a *Aggregator) StepSize() uint64           { return a.aggregationStep }
-func (a *Aggregator) OnFreeze(f kv.OnFreezeFunc) { a.onFreeze = f }
+func (a *Aggregator) StepSize() uint64                 { return a.aggregationStep }
+func (a *Aggregator) OnFilesChange(f kv.OnFilesChange) { a.onFilesChange = f }
 func (a *Aggregator) DisableFsync() {
 	for _, d := range a.d {
 		d.DisableFsync()
@@ -386,7 +386,7 @@ func (a *Aggregator) LS() {
 				if item.decompressor == nil {
 					continue
 				}
-				log.Info("[agg] ", "f", item.decompressor.FileName(), "words", item.decompressor.Count())
+				a.logger.Info("[agg] ", "f", item.decompressor.FileName(), "words", item.decompressor.Count())
 			}
 			return true
 		})
@@ -448,6 +448,9 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) erro
 	defer rotx.Close()
 
 	missedFilesItems := rotx.FilesWithMissedAccessors()
+	if !missedFilesItems.IsEmpty() {
+		defer a.onFilesChange(nil)
+	}
 
 	for _, d := range a.d {
 		d.BuildMissedAccessors(ctx, g, ps, missedFilesItems.domain[d.name])
@@ -696,12 +699,14 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep uint64) e
 				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
 				panic(err)
 			}
+			a.onFilesChange(nil)
 		}
 
 		go func() {
 			if err := a.MergeLoop(ctx); err != nil {
 				panic(err)
 			}
+			a.onFilesChange(nil)
 		}()
 	}()
 
@@ -735,7 +740,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 	a.IntegrateMergedDirtyFiles(outs, in)
 	a.cleanAfterMerge(in)
 
-	a.onFreeze(in.FrozenList())
+	a.onFilesChange(in.FrozenList())
 	return true, nil
 }
 
@@ -892,6 +897,9 @@ func (at *AggregatorRoTx) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx) (un
 // PruneSmallBatches is not cancellable, it's over when it's over or failed.
 // It fills whole timeout with pruning by small batches (of 100 keys) and making some progress
 func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Duration, tx kv.RwTx) (haveMore bool, err error) {
+	if dbg.NoPrune() {
+		return false, nil
+	}
 	// On tip-of-chain timeout is about `3sec`
 	//  On tip of chain:     must be real-time - prune by small batches and prioritize exact-`timeout`
 	//  Not on tip of chain: must be aggressive (prune as much as possible) by bigger batches
@@ -1078,7 +1086,7 @@ func (at *AggregatorRoTx) GreedyPruneHistory(ctx context.Context, domain kv.Doma
 	defer logEvery.Stop()
 	defer mxPruneTookAgg.ObserveDuration(time.Now())
 
-	stat, err := cd.ht.Prune(ctx, tx, txFrom, txTo, math.MaxUint64, true, logEvery)
+	stat, err := cd.ht.Prune(ctx, tx, txFrom, txTo, math.MaxUint64, false, logEvery)
 	if err != nil {
 		return err
 	}
@@ -1471,7 +1479,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 			lastIdInDB(a.db, a.d[kv.CodeDomain]),
 			lastIdInDB(a.db, a.d[kv.StorageDomain]),
 			lastIdInDBNoHistory(a.db, a.d[kv.CommitmentDomain]))
-		log.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB)
+		a.logger.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB)
 
 		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
 		//lastInDB := lastIdInDB(a.db, a.d[kv.AccountsDomain])
@@ -1494,6 +1502,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
 				break
 			}
+			a.onFilesChange(nil)
 		}
 		go func() {
 			defer close(fin)
@@ -1504,6 +1513,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 				}
 				a.logger.Warn("[snapshots] merge", "err", err)
 			}
+			a.onFilesChange(nil)
 		}()
 	}()
 	return fin

@@ -23,12 +23,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/version"
 	"math"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/erigontech/erigon-lib/version"
 
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
@@ -102,8 +102,8 @@ type histCfg struct {
 	historyValuesOnCompressedPage int // when collating .v files: concat 16 values and snappy them
 
 	Accessors     Accessors
-	CompressorCfg seg.Cfg             // compression settings for history files
-	Compression   seg.FileCompression // defines type of compression for history files
+	CompressorCfg seg.Cfg             // Compression settings for history files
+	Compression   seg.FileCompression // defines type of Compression for history files
 	historyIdx    kv.InvertedIdx
 
 	//TODO: re-visit this check - maybe we don't need it. It's about kill in the middle of merge
@@ -227,8 +227,8 @@ func (h *History) openDirtyFiles() error {
 			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
 			if item.decompressor == nil {
 				fPathMask := h.vFilePathMask(fromStep, toStep)
-				fPath, fileVer, err := version.FindFilesWithVersionsByPattern(fPathMask)
-				if err != nil && !errors.Is(err, os.ErrNotExist) {
+				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+				if err != nil {
 					_, fName := filepath.Split(fPath)
 					h.logger.Debug("[agg] History.openDirtyFiles: FileExist", "f", fName, "err", err)
 					invalidFilesMu.Lock()
@@ -236,7 +236,7 @@ func (h *History) openDirtyFiles() error {
 					invalidFilesMu.Unlock()
 					continue
 				}
-				if errors.Is(err, os.ErrNotExist) {
+				if !ok {
 					_, fName := filepath.Split(fPath)
 					h.logger.Debug("[agg] History.openDirtyFiles: file does not exists", "f", fName)
 					invalidFilesMu.Lock()
@@ -244,11 +244,11 @@ func (h *History) openDirtyFiles() error {
 					invalidFilesMu.Unlock()
 					continue
 				}
-				if fileVer.Cmp(h.version.DataV.Current) != 0 {
+				if !fileVer.Eq(h.version.DataV.Current) {
 					if !fileVer.Less(h.version.DataV.MinSupported) {
 						h.version.DataV.Current = fileVer
 					} else {
-						panic("Version is too low, try to rm ef snapshots")
+						panic("Version is too low, try to rm v history snapshots")
 						//return false
 					}
 				}
@@ -283,17 +283,17 @@ func (h *History) openDirtyFiles() error {
 
 			if item.index == nil {
 				fPathMask := h.vAccessorFilePathMask(fromStep, toStep)
-				fPath, fileVer, err := version.FindFilesWithVersionsByPattern(fPathMask)
-				if err != nil && !errors.Is(err, os.ErrNotExist) {
+				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+				if err != nil {
 					_, fName := filepath.Split(fPath)
 					h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
 				}
-				if !errors.Is(err, os.ErrNotExist) {
-					if fileVer.Cmp(h.version.AccessorVI.Current) != 0 {
+				if ok {
+					if !fileVer.Eq(h.version.AccessorVI.Current) {
 						if !fileVer.Less(h.version.AccessorVI.MinSupported) {
 							h.version.AccessorVI.Current = fileVer
 						} else {
-							panic("Version is too low, try to rm ef snapshots")
+							panic("Version is too low, try to rm vi history snapshots")
 							//return false
 						}
 					}
@@ -597,9 +597,9 @@ func (ht *HistoryRoTx) newWriter(tmpdir string, discard bool) *historyBufferedWr
 		historyKey:       make([]byte, 128),
 		largeValues:      ht.h.historyLargeValues,
 		historyValsTable: ht.h.valuesTable,
-		historyVals:      etl.NewCollector(ht.h.filenameBase+".flush.hist", tmpdir, etl.NewSortableBuffer(WALCollectorRAM), ht.h.logger).LogLvl(log.LvlTrace),
 
-		ii: ht.iit.newWriter(tmpdir, discard),
+		ii:          ht.iit.newWriter(tmpdir, discard),
+		historyVals: etl.NewCollectorWithAllocator(ht.h.filenameBase+".flush.hist", tmpdir, etl.SmallSortableBuffers, ht.h.logger).LogLvl(log.LvlTrace),
 	}
 	w.historyVals.SortAndFlushInBackground(true)
 	return w
@@ -679,7 +679,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	defer keysCursor.Close()
 
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
-	collector := etl.NewCollector(h.filenameBase+".collate.hist", h.dirs.Tmp, etl.NewSortableBuffer(CollateETLRAM), h.logger).LogLvl(log.LvlTrace)
+	collector := etl.NewCollectorWithAllocator(h.filenameBase+".collate.hist", h.dirs.Tmp, etl.SmallSortableBuffers, h.logger).LogLvl(log.LvlTrace)
 	defer collector.Close()
 
 	for txnmb, k, err := keysCursor.Seek(txKey[:]); txnmb != nil; txnmb, k, err = keysCursor.Next() {
@@ -734,7 +734,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 
 		initialized bool
 	)
-	efHistoryComp = seg.NewWriter(efComp, seg.CompressNone) // coll+build must be fast - no compression
+	efHistoryComp = seg.NewWriter(efComp, seg.CompressNone) // coll+build must be fast - no Compression
 	collector.SortAndFlushInBackground(true)
 	defer bitmapdb.ReturnToPool64(bitmap)
 
@@ -1107,15 +1107,22 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 // `useProgress` flag to restore and update prune progress.
 //   - E.g. Unwind can't use progress, because it's not linear
 //     and will wrongly update progress of steps cleaning and could end up with inconsistent history.
-func (ht *HistoryRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
-	//fmt.Printf(" pruneH[%s] %t, %d-%d\n", ht.h.filenameBase, ht.CanPruneUntil(rwTx), txFrom, txTo)
+func (ht *HistoryRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
 	if !forced {
+		if ht.files.EndTxNum() > 0 {
+			txTo = min(txTo, ht.files.EndTxNum())
+		}
 		var can bool
-		can, txTo = ht.canPruneUntil(rwTx, txTo)
+		can, txTo = ht.canPruneUntil(tx, txTo)
 		if !can {
 			return nil, nil
 		}
 	}
+	return ht.prune(ctx, tx, txFrom, txTo, limit, forced, logEvery)
+}
+
+func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
+	//fmt.Printf(" pruneH[%s] %t, %d-%d\n", ht.h.filenameBase, ht.CanPruneUntil(rwTx), txFrom, txTo)
 	defer func(t time.Time) { mxPruneTookHistory.ObserveDuration(t) }(time.Now())
 
 	var (

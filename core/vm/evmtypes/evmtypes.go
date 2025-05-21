@@ -65,7 +65,7 @@ type TxContext struct {
 // ExecutionResult includes all output after executing given evm
 // message no matter the execution itself is successful or not.
 type ExecutionResult struct {
-	UsedGas             uint64 // Total used gas but include the refunded gas
+	GasUsed             uint64 // Total used gas but include the refunded gas
 	Err                 error  // Any error encountered during the execution(listed in core/vm/errors.go)
 	Reverted            bool   // Whether the execution was aborted by `REVERT`
 	ReturnData          []byte // Returned data from evm(function result or data supplied with revert opcode)
@@ -143,9 +143,9 @@ type IntraBlockState interface {
 	SubRefund(uint64)
 	GetRefund() uint64
 
-	GetCommittedState(common.Address, *common.Hash, *uint256.Int) error
-	GetState(address common.Address, slot *common.Hash, outValue *uint256.Int) error
-	SetState(common.Address, *common.Hash, uint256.Int) error
+	GetCommittedState(common.Address, common.Hash, *uint256.Int) error
+	GetState(address common.Address, slot common.Hash, outValue *uint256.Int) error
+	SetState(common.Address, common.Hash, uint256.Int) error
 
 	GetTransientState(addr common.Address, key common.Hash) uint256.Int
 	SetTransientState(addr common.Address, key common.Hash, value uint256.Int)

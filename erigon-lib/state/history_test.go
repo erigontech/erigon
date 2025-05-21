@@ -52,7 +52,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	tb.Helper()
 	dirs := datadir.New(tb.TempDir())
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
-	//TODO: tests will fail if set histCfg.compression = CompressKeys | CompressValues
+	//TODO: tests will fail if set histCfg.Compression = CompressKeys | CompressValues
 	salt := uint32(1)
 	cfg := Schema.AccountsDomain
 
@@ -556,7 +556,6 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 	require.NoError(t, err)
 	t.Logf("stat=%v", stat)
 
-	fmt.Printf("start hist table:\n")
 	icc, err := rwTx.CursorDupSort(h.valuesTable)
 	require.NoError(t, err)
 	defer icc.Close()

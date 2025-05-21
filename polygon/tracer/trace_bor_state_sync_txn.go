@@ -50,12 +50,12 @@ func TraceBorStateSyncTxnDebugAPI(
 	callTimeout time.Duration,
 	msgs []*types.Message,
 	txIndex int,
-) (usedGas uint64, err error) {
+) (gasUsed uint64, err error) {
 	txCtx := initStateSyncTxContext(blockNum, blockHash)
 	tracer, streaming, cancel, err := transactions.AssembleTracer(ctx, traceConfig, txCtx.TxHash, blockHash, txIndex, stream, callTimeout)
 	if err != nil {
 		stream.WriteNil()
-		return usedGas, err
+		return gasUsed, err
 	}
 
 	defer cancel()
@@ -70,12 +70,12 @@ func TraceBorStateSyncTxnDebugAPI(
 		if err != nil {
 			return res, err
 		}
-		usedGas = res.UsedGas
+		gasUsed = res.GasUsed
 		return res, nil
 	}
 
 	err = transactions.ExecuteTraceTx(blockCtx, txCtx, ibs, traceConfig, chainConfig, stream, tracer, streaming, execCb)
-	return usedGas, err
+	return gasUsed, err
 }
 
 func TraceBorStateSyncTxnTraceAPI(
