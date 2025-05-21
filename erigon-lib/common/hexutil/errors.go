@@ -31,7 +31,6 @@ var (
 	ErrBig256Range      = &decError{"hex number > 256 bits"}
 	ErrTooBigHexString  = &decError{"hex string too long, want at most 32 bytes"}
 	ErrHexStringInvalid = &decError{"hex string invalid"}
-	ErrDecUintInvalid   = &decError{"invalid unsigned decimal integer"}
 )
 
 type decError struct{ msg string }
