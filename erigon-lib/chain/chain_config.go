@@ -333,41 +333,37 @@ func (c *Config) getBlobConfig(time uint64) *params.BlobConfig {
 		}
 
 		// Override with supplied values
-		for key, val := range c.BlobSchedule {
-			switch {
-			case key == "cancun":
-				if c.CancunTime != nil {
-					c.parsedBlobSchedule[c.CancunTime.Uint64()] = val
-				}
-			case key == "prague":
-				if c.PragueTime != nil {
-					c.parsedBlobSchedule[c.PragueTime.Uint64()] = val
-				}
-			case key == "osaka":
-				if c.OsakaTime != nil {
-					c.parsedBlobSchedule[c.OsakaTime.Uint64()] = val
-				}
-			case key == "bpo1":
-				if c.Bpo1Time != nil {
-					c.parsedBlobSchedule[c.Bpo1Time.Uint64()] = val
-				}
-			case key == "bpo2":
-				if c.Bpo2Time != nil {
-					c.parsedBlobSchedule[c.Bpo2Time.Uint64()] = val
-				}
-			case key == "bpo3":
-				if c.Bpo3Time != nil {
-					c.parsedBlobSchedule[c.Bpo3Time.Uint64()] = val
-				}
-			case key == "bpo4":
-				if c.Bpo4Time != nil {
-					c.parsedBlobSchedule[c.Bpo4Time.Uint64()] = val
-				}
-			case key == "bpo5":
-				if c.Bpo5Time != nil {
-					c.parsedBlobSchedule[c.Bpo5Time.Uint64()] = val
-				}
-			}
+		val, ok := c.BlobSchedule["cancun"]
+		if ok && c.CancunTime != nil {
+			c.parsedBlobSchedule[c.CancunTime.Uint64()] = val
+		}
+		val, ok = c.BlobSchedule["prague"]
+		if ok && c.PragueTime != nil {
+			c.parsedBlobSchedule[c.PragueTime.Uint64()] = val
+		}
+		val, ok = c.BlobSchedule["osaka"]
+		if ok && c.OsakaTime != nil {
+			c.parsedBlobSchedule[c.OsakaTime.Uint64()] = val
+		}
+		val, ok = c.BlobSchedule["bpo1"]
+		if ok && c.Bpo1Time != nil {
+			c.parsedBlobSchedule[c.Bpo1Time.Uint64()] = val
+		}
+		val, ok = c.BlobSchedule["bpo2"]
+		if ok && c.Bpo2Time != nil {
+			c.parsedBlobSchedule[c.Bpo2Time.Uint64()] = val
+		}
+		val, ok = c.BlobSchedule["bpo3"]
+		if ok && c.Bpo3Time != nil {
+			c.parsedBlobSchedule[c.Bpo3Time.Uint64()] = val
+		}
+		val, ok = c.BlobSchedule["bpo4"]
+		if ok && c.Bpo4Time != nil {
+			c.parsedBlobSchedule[c.Bpo4Time.Uint64()] = val
+		}
+		val, ok = c.BlobSchedule["bpo5"]
+		if ok && c.Bpo5Time != nil {
+			c.parsedBlobSchedule[c.Bpo5Time.Uint64()] = val
 		}
 	})
 
