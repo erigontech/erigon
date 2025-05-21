@@ -130,8 +130,8 @@ type temporalPutDel struct {
 	tx kv.Tx
 }
 
-func (pd *temporalPutDel) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error {
-	return pd.sd.DomainPut(domain, pd.tx, k1, k2, val, prevVal, prevStep)
+func (pd *temporalPutDel) DomainPut(domain kv.Domain, k1 []byte, val, prevVal []byte, prevStep uint64) error {
+	return pd.sd.DomainPut(domain, pd.tx, k1, val, prevVal, prevStep)
 }
 
 func (pd *temporalPutDel) DomainDel(domain kv.Domain, k []byte, prevVal []byte, prevStep uint64) error {
@@ -552,7 +552,7 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.Tx, k, v []byte, pr
 
 	if prevVal == nil {
 		var err error
-		prevVal, prevStep, err = sd.GetLatest(domain, roTx, , k)
+		prevVal, prevStep, err = sd.GetLatest(domain, roTx, k)
 		if err != nil {
 			return err
 		}
