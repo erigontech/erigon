@@ -150,8 +150,6 @@ func New(
 	if err != nil {
 		panic(err)
 	}
-	torrentConfig.Logger = torrentConfig.Logger.WithFilterLevel(analogLevel)
-	torrentConfig.Logger.SetHandlers(adapterHandler{})
 	slogLevel := erigonToSlogLevel(verbosity)
 	torrentConfig.Slogger = slog.New(&slogHandler{
 		enabled: func(level slog.Level, names []string) bool {
@@ -161,13 +159,15 @@ func New(
 			return level >= slogLevel
 		},
 	})
-	torrentConfig.Logger.Levelf(analog.Debug, "test")
+	//torrentConfig.Logger.Levelf(analog.Debug, "test")
 	torrentConfig.Slogger.Debug("test")
 	// Previously this used a logger passed to the callers of this function. Do we need it here?
 	log.Info(
 		"torrent verbosity",
 		"erigon", verbosity,
+		// Only for deprecated analog.Logger stuff, if it comes up.
 		"anacrolix", analogLevel.LogString(),
+		// This should be the one applied to more modern logging in anacrolix/torrent.
 		"slog", slogLevel)
 
 	// TODO: This doesn't look right. Enabling DHT only for static peers will introduce very
