@@ -82,7 +82,7 @@ func (a *ApiHandler) waitForHeadSlot(slot uint64) {
 		if headSlot >= slot || a.slotWaitedForAttestationProduction.Contains(slot) {
 			return
 		}
-		_, ok, err := a.attestationProducer.CachedAttestationData(slot, 0)
+		_, ok, err := a.attestationProducer.CachedAttestationData(slot)
 		if err != nil {
 			log.Warn("Failed to get attestation data", "err", err)
 		}
@@ -134,7 +134,7 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 
 	a.waitForHeadSlot(*slot)
 
-	attestationData, ok, err := a.attestationProducer.CachedAttestationData(*slot, *committeeIndex)
+	attestationData, ok, err := a.attestationProducer.CachedAttestationData(*slot)
 	if err != nil {
 		log.Warn("Failed to get attestation data", "err", err)
 	}
@@ -167,7 +167,6 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 			headState,
 			a.syncedData.HeadRoot(),
 			*slot,
-			*committeeIndex,
 		)
 
 		if errors.Is(err, attestation_producer.ErrHeadStateBehind) {
@@ -1221,7 +1220,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	}
 
 	if err := a.indiciesDB.View(ctx, func(tx kv.Tx) error {
-		_, err := a.attestationProducer.ProduceAndCacheAttestationData(tx, headState, blockRoot, block.Block.Slot, 0)
+		_, err := a.attestationProducer.ProduceAndCacheAttestationData(tx, headState, blockRoot, block.Block.Slot)
 		return err
 	}); err != nil {
 		return err
