@@ -143,14 +143,35 @@ func KnownDNSNetwork(genesis common.Hash, protocol string) string {
 		net = "holesky"
 	case HoodiGenesisHash:
 		net = "hoodi"
-	case AmoyGenesisHash:
-		net = "amoy"
 	case BorMainnetGenesisHash:
 		return "enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@pos.polygon-peers.io"
 	default:
 		return ""
 	}
 	return dnsPrefix + protocol + "." + net + ".ethdisco.net"
+}
+
+func BootnodeURLsByGenesisHash(genesis common.Hash) []string {
+	switch genesis {
+	case MainnetGenesisHash:
+		return MainnetBootnodes
+	case HoleskyGenesisHash:
+		return HoleskyBootnodes
+	case HoodiGenesisHash:
+		return HoodiBootnodes
+	case SepoliaGenesisHash:
+		return SepoliaBootnodes
+	case AmoyGenesisHash:
+		return AmoyBootnodes
+	case BorMainnetGenesisHash:
+		return BorMainnetBootnodes
+	case GnosisGenesisHash:
+		return GnosisBootnodes
+	case ChiadoGenesisHash:
+		return ChiadoBootnodes
+	default:
+		return []string{}
+	}
 }
 
 func BootnodeURLsOfChain(chain string) []string {

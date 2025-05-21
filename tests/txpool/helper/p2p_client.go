@@ -61,6 +61,7 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 		Name:            "p2p-mock",
 		NodeDatabase:    "dev/nodes/eth67",
 		PrivateKey:      privateKey,
+		// TODO(yperbasis): bootnodes?
 	}
 
 	r, err := http.Post(p.adminRPC, "application/json", strings.NewReader(

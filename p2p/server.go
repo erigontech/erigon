@@ -115,6 +115,8 @@ type Config struct {
 	// protocol.
 	BootstrapNodesV5 []*enode.Node `toml:",omitempty"`
 
+	// TODO(yperbasis): LookupBootstrapNodes
+
 	// Static nodes are used as pre-configured connections which are always
 	// maintained and re-connected on disconnects.
 	StaticNodes []*enode.Node
@@ -181,6 +183,8 @@ type Config struct {
 	MetricsEnabled bool
 
 	DiscoveryDNS []string
+
+	LookupDNSNetwork LookupDNSNetworkFunc
 }
 
 func (config *Config) ListenPort() int {
