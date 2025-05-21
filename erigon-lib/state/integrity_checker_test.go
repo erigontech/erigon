@@ -130,5 +130,13 @@ func getPopulatedCommitmentFilesItem(t *testing.T, dirs datadir.Dirs, startTxNum
 		idx0 = recsplit.MustOpen(base + "index")
 	}
 
+	t.Cleanup(func() {
+		comp.Close()
+		decomp.Close()
+		if idx0 != nil {
+			idx0.Close()
+		}
+	})
+
 	return &filesItem{decompressor: decomp, index: idx0, startTxNum: startTxNum, endTxNum: endTxNum}
 }
