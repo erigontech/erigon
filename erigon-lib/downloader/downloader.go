@@ -98,7 +98,6 @@ type Downloader struct {
 	logPrefix         string
 	startTime         time.Time
 	onTorrentComplete func(name string, hash *prototypes.H160)
-	completedTorrents map[string]completedTorrentInfo
 }
 
 type completedTorrentInfo struct {
@@ -120,14 +119,13 @@ type webDownloadInfo struct {
 }
 
 type AggStats struct {
-	MetadataReady, FilesTotal int32
+	MetadataReady, FilesTotal int
+	NumTorrents               int
 	LastMetadataUpdate        *time.Time
 	PeersUnique               int32
 	ConnectionsTotal          uint64
-	Downloading               int32
 
-	Completed bool
-	Progress  float32
+	TorrentsCompleted int
 
 	BytesCompleted, BytesTotal uint64
 	CompletionRate             uint64
@@ -148,6 +146,10 @@ type AggStats struct {
 	WebseedBytesDownload  *atomic.Int64
 
 	lastTorrentStatus time.Time
+}
+
+func (me *AggStats) AllTorrentsComplete() bool {
+	return me.TorrentsCompleted == me.NumTorrents
 }
 
 type requestHandler struct {
@@ -335,18 +337,17 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 	}
 
 	d := &Downloader{
-		cfg:               cfg,
-		torrentStorage:    m,
-		torrentClient:     torrentClient,
-		stats:             stats,
-		webseeds:          NewWebSeeds(cfg.WebSeedUrls, verbosity, logger),
-		logger:            logger,
-		verbosity:         verbosity,
-		torrentFS:         &AtomicTorrentFS{dir: cfg.Dirs.Snap},
-		webDownloadInfo:   map[string]webDownloadInfo{},
-		downloading:       map[string]*downloadInfo{},
-		logPrefix:         "",
-		completedTorrents: make(map[string]completedTorrentInfo),
+		cfg:             cfg,
+		torrentStorage:  m,
+		torrentClient:   torrentClient,
+		stats:           stats,
+		webseeds:        NewWebSeeds(cfg.WebSeedUrls, verbosity, logger),
+		logger:          logger,
+		verbosity:       verbosity,
+		torrentFS:       &AtomicTorrentFS{dir: cfg.Dirs.Snap},
+		webDownloadInfo: map[string]webDownloadInfo{},
+		downloading:     map[string]*downloadInfo{},
+		logPrefix:       "",
 	}
 	d.webseeds.SetTorrent(d.torrentFS, cfg.DownloadTorrentFilesFromWebseed)
 
@@ -391,7 +392,7 @@ func (d *Downloader) mainLoop(logSeeding bool) error {
 			return d.ctx.Err()
 		case <-logEvery.C:
 			d.ReCalcStats(logInterval)
-			if !d.stats.Completed {
+			if !d.stats.AllTorrentsComplete() {
 				d.logProgress()
 			}
 
@@ -404,7 +405,7 @@ func (d *Downloader) mainLoop(logSeeding bool) error {
 
 			dbg.ReadMemStats(&m)
 
-			if stats.Completed && stats.FilesTotal > 0 {
+			if stats.AllTorrentsComplete() && stats.FilesTotal > 0 {
 				d.logger.Info("[snapshots] Seeding",
 					"up", common.ByteCount(stats.UploadRate)+"/s",
 					"peers", stats.PeersUnique,
@@ -501,7 +502,7 @@ func (d *Downloader) validateCompletedSnapshot(t *torrent.Torrent) (passed bool)
 			d.logger.Crit(
 				"snapshot file has wrong size",
 				"name", f.Path(),
-				"expected", f.Length,
+				"expected", f.Length(),
 				"actual", fi.Size(),
 			)
 			if fi.Size() > f.Length() {
@@ -564,7 +565,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	torrents := torrentClient.Torrents()
 	connStats := torrentClient.Stats()
 
-	stats.Completed = true
 	stats.BytesUpload = uint64(connStats.BytesWrittenData.Int64())
 	stats.BytesHashed = uint64(connStats.BytesHashed.Int64())
 	stats.BytesDownload = uint64(connStats.BytesReadData.Int64())
@@ -581,6 +581,8 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	lastMetadataReady := stats.MetadataReady
 
 	stats.BytesTotal, stats.ConnectionsTotal, stats.MetadataReady = 0, 0, 0
+	stats.TorrentsCompleted = 0
+	stats.NumTorrents = len(torrents)
 
 	var zeroProgress []string
 	var noMetadata []string
@@ -594,24 +596,19 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		diagnostics.Send(diagnostics.SnapshoFilesList{Files: filesList})
 	}
 
-	var dbInfo int
-	var tComplete int
-	var torrentInfo int
-
 	downloadedBytes := int64(0)
 
 	for _, t := range torrents {
 		select {
 		case <-t.GotInfo():
 		default: // if some torrents have no metadata, we are for-sure incomplete
-			stats.Completed = false
 			noMetadata = append(noMetadata, t.Name())
 			continue
 		}
+		stats.FilesTotal += len(t.Files())
 
 		torrentName := t.Name()
 		torrentComplete := t.Complete().Bool()
-		torrentInfo++
 		stats.MetadataReady++
 
 		// call methods once - to reduce internal mutex contention
@@ -622,7 +619,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		var bytesCompleted int64
 
 		if torrentComplete {
-			tComplete++
+			stats.TorrentsCompleted++
 			bytesCompleted = tLen
 			delete(downloading, torrentName)
 		} else {
@@ -669,12 +666,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			Peers:           peers,
 		})
 
-		stats.Completed = stats.Completed && torrentComplete
-	}
-
-	// TODO: This is broken.
-	if len(downloading) > 0 {
-		stats.Completed = false
 	}
 
 	if lastMetadataReady != stats.MetadataReady {
@@ -744,29 +735,17 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	stats.UploadRate = calculateRate(stats.BytesUpload, prevStats.BytesUpload, prevStats.UploadRate, interval)
 	stats.CompletionRate = calculateRate(stats.BytesCompleted, prevStats.BytesCompleted, prevStats.CompletionRate, interval)
 
-	if stats.BytesTotal == 0 {
-		stats.Progress = 0
-	} else {
-		stats.Progress = float32(float64(100) * (float64(stats.BytesCompleted) / float64(stats.BytesTotal)))
-		if int(stats.Progress) == 100 && !stats.Completed {
-			stats.Progress = 99.9
-		}
-	}
-
 	stats.PeersUnique = int32(len(peers))
-	stats.FilesTotal = int32(len(torrents))
+	stats.FilesTotal = len(torrents)
 
 	d.lock.Lock()
 	d.stats = stats
 
 	d.lock.Unlock()
 
-	if !stats.Completed {
+	if !stats.AllTorrentsComplete() {
 		log.Debug("[snapshots] downloading",
 			"len", len(torrents),
-			"torrent", torrentInfo,
-			"db", dbInfo,
-			"t-complete", tComplete,
 			"hashed", common.ByteCount(stats.BytesHashed),
 			"hash-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.HashRate)),
 			"completed", common.ByteCount(stats.BytesCompleted),
@@ -780,8 +759,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			"webseed-max-active", stats.WebseedMaxActiveTrips.Load(),
 			"webseed-discards", stats.WebseedDiscardCount.Load(),
 			"webseed-fails", stats.WebseedServerFails.Load(),
-			"webseed-bytes", common.ByteCount(uint64(stats.WebseedBytesDownload.Load())),
-			"localHashes", stats.LocalFileHashes, "localHashTime", stats.LocalFileHashTime)
+			"webseed-bytes", common.ByteCount(uint64(stats.WebseedBytesDownload.Load())))
 	}
 }
 
@@ -1075,12 +1053,12 @@ func (d *Downloader) loadSpecFromDisk(tup SnapshotTuple) (spec g.Option[*torrent
 	}
 	diskSpec := torrent.TorrentSpecFromMetaInfo(mi)
 	if diskSpec.InfoHash != tup.Hash {
+		// This is allowed if the torrent file was committed to disk. It's assumed the torrent was
+		// downloaded in its entirety with a previous hash.
 		d.logger.Warn("disk metainfo hash mismatch",
 			"expected", tup.Hash,
 			"actual", diskSpec.InfoHash,
 			"name", tup.Name)
-		removeMetainfo()
-		return
 	}
 	spec.Set(diskSpec)
 	return
@@ -1143,6 +1121,9 @@ func (d *Downloader) addPreverifiedTorrent(
 	if !ok {
 		return nil
 	}
+
+	// We could check here if the spec was loaded from disk that the entire file was available. If
+	// it wasn't we could abandon the data or clobber it with the preverified hash.
 
 	// The following is a bit elaborate with avoiding goroutines. Maybe it's overkill.
 
@@ -1356,7 +1337,7 @@ func (d *Downloader) logProgress() {
 		prefix = "snapshots"
 	}
 
-	if d.stats.Completed {
+	if d.stats.AllTorrentsComplete() {
 		log.Info(fmt.Sprintf("[%s] Downloading complete", prefix), "time", time.Since(d.startTime).String())
 	}
 
@@ -1382,11 +1363,23 @@ func (d *Downloader) logProgress() {
 
 	timeLeft := calculateTime(remainingBytes, rate)
 
-	if !d.stats.Completed {
+	if !d.stats.AllTorrentsComplete() {
 		log.Info(fmt.Sprintf("[%s] %s", prefix, status),
-			"progress", fmt.Sprintf("(%d/%d files) %.2f%% - %s/%s", d.stats.MetadataReady, d.stats.FilesTotal, percentDone, common.ByteCount(bytesDone), common.ByteCount(d.stats.BytesTotal)),
+			"files", fmt.Sprintf(
+				"%d/%d",
+				// For now it's 1:1 files:torrents.
+				d.stats.TorrentsCompleted,
+				d.stats.NumTorrents,
+			),
+			"data", fmt.Sprintf(
+				"%.2f%% - %s/%s",
+				percentDone,
+				common.ByteCount(bytesDone),
+				common.ByteCount(d.stats.BytesTotal),
+			),
+			"file-metadata", fmt.Sprintf("%d/%d", d.stats.MetadataReady, d.stats.NumTorrents),
 			"time-left", timeLeft,
-			"total-time", time.Since(d.startTime).Round(time.Second).String(),
+			"total-time", time.Since(d.startTime).Truncate(time.Second).String(),
 			"download-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.DownloadRate)),
 			"completion-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.CompletionRate)),
 			"alloc", common.ByteCount(m.Alloc),
@@ -1400,12 +1393,12 @@ func (d *Downloader) logProgress() {
 		DownloadRate:         d.stats.DownloadRate,
 		UploadRate:           d.stats.UploadRate,
 		Peers:                d.stats.PeersUnique,
-		Files:                d.stats.FilesTotal,
+		Files:                int32(d.stats.FilesTotal),
 		Connections:          d.stats.ConnectionsTotal,
 		Alloc:                m.Alloc,
 		Sys:                  m.Sys,
-		DownloadFinished:     d.stats.Completed,
-		TorrentMetadataReady: d.stats.MetadataReady,
+		DownloadFinished:     d.stats.AllTorrentsComplete(),
+		TorrentMetadataReady: int32(d.stats.MetadataReady),
 	})
 }
 
@@ -1413,7 +1406,7 @@ func calculateTime(amountLeft, rate uint64) string {
 	if rate == 0 {
 		return "inf"
 	}
-	return (time.Duration(amountLeft) * time.Second / time.Duration(rate)).String()
+	return (time.Duration(amountLeft) * time.Second / time.Duration(rate)).Truncate(time.Second).String()
 }
 
 func (d *Downloader) Completed() bool {
