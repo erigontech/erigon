@@ -124,6 +124,7 @@ docker-compose: validate_docker_build_args setup_xdg_data_home
 dbg:
 	$(GO_BUILD_DEBUG) -o $(GOBIN)/ ./cmd/...
 
+.PHONY: %.cmd
 # Deferred (=) because $* isn't defined until the rule is executed.
 %.cmd: override OUTPUT = $(GOBIN)/$*$(CMD_BUILD_SUFFIX)
 %.cmd:
