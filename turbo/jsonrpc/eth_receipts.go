@@ -222,6 +222,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		return logs, err
 	}
 
+	fmt.Printf("[dbg] alex: it.HasNext=%t\n", txNumbers.HasNext())
 	it := rawdbv3.TxNums2BlockNums(tx,
 		txNumsReader,
 		txNumbers, order.Asc)
