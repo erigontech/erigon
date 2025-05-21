@@ -221,7 +221,6 @@ var (
 )
 
 // See EIP-7840: Add blob schedule to EL config files
-// and EIP-7892: Blob Parameter Only Hardforks
 type BlobConfig struct {
 	Target                uint64 `json:"target"`
 	Max                   uint64 `json:"max"`
