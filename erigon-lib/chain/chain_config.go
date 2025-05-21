@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
-	"strconv"
 	"sync"
 	"time"
 
@@ -79,6 +78,11 @@ type Config struct {
 	BlobSchedule          map[string]*params.BlobConfig `json:"blobSchedule,omitempty"`
 	parseBlobScheduleOnce sync.Once                     `copier:"-"`
 	parsedBlobSchedule    map[uint64]*params.BlobConfig
+	Bpo1Time              *big.Int `json:"bpo1Time,omitempty"`
+	Bpo2Time              *big.Int `json:"bpo2Time,omitempty"`
+	Bpo3Time              *big.Int `json:"bpo3Time,omitempty"`
+	Bpo4Time              *big.Int `json:"bpo4Time,omitempty"`
+	Bpo5Time              *big.Int `json:"bpo5Time,omitempty"`
 
 	// (Optional) governance contract where EIP-1559 fees will be sent to, which otherwise would be burnt since the London fork.
 	// A key corresponds to the block number, starting from which the fees are sent to the address (map value).
@@ -169,13 +173,15 @@ func (c *Config) String() string {
 		)
 	}
 
-	return fmt.Sprintf("{ChainID: %v, Terminal Total Difficulty: %v, Shapella: %v, Dencun: %v, Pectra: %v, Fusaka: %v, Engine: %v}",
+	return fmt.Sprintf("{ChainID: %v, Terminal Total Difficulty: %v, Shapella: %v, Dencun: %v, Pectra: %v, Fusaka: %v, BPO1: %v, BPO2: %v, Engine: %v}",
 		c.ChainID,
 		c.TerminalTotalDifficulty,
 		timestampToTime(c.ShanghaiTime),
 		timestampToTime(c.CancunTime),
 		timestampToTime(c.PragueTime),
 		timestampToTime(c.OsakaTime),
+		timestampToTime(c.Bpo1Time),
+		timestampToTime(c.Bpo2Time),
 		engine,
 	)
 }
@@ -341,12 +347,26 @@ func (c *Config) getBlobConfig(time uint64) *params.BlobConfig {
 				if c.OsakaTime != nil {
 					c.parsedBlobSchedule[c.OsakaTime.Uint64()] = val
 				}
-			default:
-				keyU64, err := strconv.ParseUint(key, 10, 64)
-				if err != nil {
-					panic(err)
+			case key == "bpo1":
+				if c.Bpo1Time != nil {
+					c.parsedBlobSchedule[c.Bpo1Time.Uint64()] = val
 				}
-				c.parsedBlobSchedule[keyU64] = val
+			case key == "bpo2":
+				if c.Bpo2Time != nil {
+					c.parsedBlobSchedule[c.Bpo2Time.Uint64()] = val
+				}
+			case key == "bpo3":
+				if c.Bpo3Time != nil {
+					c.parsedBlobSchedule[c.Bpo3Time.Uint64()] = val
+				}
+			case key == "bpo4":
+				if c.Bpo4Time != nil {
+					c.parsedBlobSchedule[c.Bpo4Time.Uint64()] = val
+				}
+			case key == "bpo5":
+				if c.Bpo5Time != nil {
+					c.parsedBlobSchedule[c.Bpo5Time.Uint64()] = val
+				}
 			}
 		}
 	})
