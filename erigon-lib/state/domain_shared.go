@@ -33,20 +33,19 @@ import (
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/erigontech/erigon-lib/common/cryptozerocopy"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon-lib/trie"
-	"github.com/erigontech/erigon-lib/types/accounts"
-
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
+	"github.com/erigontech/erigon-lib/common/cryptozerocopy"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/trie"
+	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
 var ErrBehindCommitment = errors.New("behind commitment")
@@ -428,9 +427,18 @@ func (sd *SharedDomains) SizeEstimate() uint64 {
 	//sd.muMaps.RLock()
 	//defer sd.muMaps.RUnlock()
 
-	// multiply 2: to cover data-structures overhead (and keep accounting cheap)
-	// and muliply 2 more: for Commitment calculation when batch is full
-	return uint64(sd.estSize) * 4
+	// RAM estimation must be pessimistic:
+	//  - over-accounting - is ok, user can increase limit
+	//  - under-accounting - is not ok, peak-ram-usage jumps may trigger OOM killer
+
+	// dataStructsOverhead - to cover data-structures overhead. Also SharedDomains has
+	//  much ETL collectors which also using RAM (not much).
+	const dataStructsOverhead = 2
+	// When batch is full: we will perform Commitment calculation - it's very RAM-intensive
+	// Example: on bor-mainnet 256m batch (1 step executed) can produce 8Gb of commitment
+	const commitmentOverhead = 4
+
+	return uint64(sd.estSize) * dataStructsOverhead * commitmentOverhead
 }
 
 func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error) {
