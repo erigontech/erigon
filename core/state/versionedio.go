@@ -1,8 +1,10 @@
 package state
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -174,13 +176,13 @@ func valueString(path AccountPath, value any) string {
 		num := value.(uint256.Int)
 		return fmt.Sprintf("%x", &num)
 	case NoncePath:
-		return fmt.Sprintf("%d", value.(uint64))
+		return strconv.FormatUint(value.(uint64), 10)
 	case CodePath:
 		l := len(value.([]byte))
 		if l > 40 {
 			l = 40
 		}
-		return fmt.Sprintf("%x", value.([]byte)[0:l])
+		return hex.EncodeToString(value.([]byte)[0:l])
 	}
 
 	return fmt.Sprint(value)
