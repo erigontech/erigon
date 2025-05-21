@@ -76,7 +76,10 @@ func BenchTraceFilter(erigonURL, oeURL string, needCompare bool, blockFrom uint6
 				continue
 			}
 			result := r.Result.GetArray("result")
-			fmt.Printf("[dbg] %+v\n", result)
+			if len(result) == 0 {
+				fmt.Printf("[dbg] empty resp: %s\n", r.RequestBody)
+				panic(1)
+			}
 		}
 	}()
 
@@ -114,7 +117,7 @@ func BenchTraceFilter(erigonURL, oeURL string, needCompare bool, blockFrom uint6
 
 				request := reqGen.traceFilterFrom(prevBn, bn, account)
 				errCtx := fmt.Sprintf("traceFilterFrom fromBlock %d, toBlock %d, fromAddress %x", prevBn, bn, account)
-				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs, nil, false /* insertOnlyIfSuccess */); err != nil {
+				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs, resultsCh, false /* insertOnlyIfSuccess */); err != nil {
 					fmt.Println(err)
 					return err
 				}

@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon-db/rawdb"
@@ -331,6 +332,8 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 }
 
 func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromBlock, toBlock uint64, req TraceFilterRequest, stream *jsoniter.Stream, gasBailOut bool, traceConfig *config.TraceConfig) error {
+	debug := dbg.Enabled(ctx)
+
 	var fromTxNum, toTxNum uint64
 	var err error
 
@@ -375,6 +378,9 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	nSeen := uint64(0)
 	nExported := uint64(0)
 	includeAll := len(fromAddresses) == 0 && len(toAddresses) == 0
+	if debug {
+		log.Warn("[dbg] filterV3", "it.HasNext", it.HasNext(), "fromBlock", fromBlock, "toBlock", toBlock, "count", count)
+	}
 
 	var lastBlockHash common.Hash
 	var lastHeader *types.Header
