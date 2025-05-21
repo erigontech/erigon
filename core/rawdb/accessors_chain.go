@@ -1280,7 +1280,7 @@ func ReadReceiptCacheV2(tx kv.TemporalTx, blockNum uint64, blockHash common.Hash
 		fmt.Printf("[dbg] a1: %d\n", len(v))
 
 	}
-	v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txNum+1 /*history storing values BEFORE-change*/)
+	v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txNum /*history storing values BEFORE-change*/)
 	if err != nil {
 		return nil, false, fmt.Errorf("unexpected error, couldn't find changeset: txNum=%d, %w", txNum, err)
 	}
