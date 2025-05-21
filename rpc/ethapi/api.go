@@ -506,6 +506,20 @@ type RPCTransaction struct {
 	YParity              *hexutil.Big               `json:"yParity,omitempty"`
 	R                    *hexutil.Big               `json:"r"`
 	S                    *hexutil.Big               `json:"s"`
+
+	// Arbitrum fields:
+	RequestId           *libcommon.Hash    `json:"requestId,omitempty"`           // Contract SubmitRetryable Deposit
+	TicketId            *libcommon.Hash    `json:"ticketId,omitempty"`            // Retry
+	MaxRefund           *hexutil.Big       `json:"maxRefund,omitempty"`           // Retry
+	SubmissionFeeRefund *hexutil.Big       `json:"submissionFeeRefund,omitempty"` // Retry
+	RefundTo            *libcommon.Address `json:"refundTo,omitempty"`            // SubmitRetryable Retry
+	L1BaseFee           *hexutil.Big       `json:"l1BaseFee,omitempty"`           // SubmitRetryable
+	DepositValue        *hexutil.Big       `json:"depositValue,omitempty"`        // SubmitRetryable
+	RetryTo             *libcommon.Address `json:"retryTo,omitempty"`             // SubmitRetryable
+	RetryValue          *hexutil.Big       `json:"retryValue,omitempty"`          // SubmitRetryable
+	RetryData           *hexutil.Bytes     `json:"retryData,omitempty"`           // SubmitRetryable
+	Beneficiary         *libcommon.Address `json:"beneficiary,omitempty"`         // SubmitRetryable
+	MaxSubmissionFee    *hexutil.Big       `json:"maxSubmissionFee,omitempty"`    // SubmitRetryable
 }
 
 // NewRPCTransaction returns a transaction that will serialize to the RPC
@@ -540,40 +554,85 @@ func NewRPCTransaction(txn types.Transaction, blockHash libcommon.Hash, blockNum
 		if !chainId.IsZero() {
 			result.ChainID = (*hexutil.Big)(chainId.ToBig())
 		}
-		result.GasPrice = (*hexutil.Big)(txn.GetTipCap().ToBig())
 	} else {
 		chainId.Set(txn.GetChainID())
 		result.ChainID = (*hexutil.Big)(chainId.ToBig())
+	}
+	switch txn.Type() {
+	case types.LegacyTxType:
+		result.GasPrice = (*hexutil.Big)(txn.GetTipCap().ToBig())
+	case types.AccessListTxType:
 		result.YParity = (*hexutil.Big)(v.ToBig())
 		acl := txn.GetAccessList()
 		result.Accesses = &acl
-
-		if txn.Type() == types.AccessListTxType {
-			result.GasPrice = (*hexutil.Big)(txn.GetTipCap().ToBig())
-		} else {
-			result.GasPrice = computeGasPrice(txn, blockHash, baseFee)
-			result.MaxPriorityFeePerGas = (*hexutil.Big)(txn.GetTipCap().ToBig())
-			result.MaxFeePerGas = (*hexutil.Big)(txn.GetFeeCap().ToBig())
+		result.GasPrice = (*hexutil.Big)(txn.GetTipCap().ToBig())
+	case types.DynamicFeeTxType:
+		result.YParity = (*hexutil.Big)(v.ToBig())
+		acl := txn.GetAccessList()
+		result.Accesses = &acl
+		result.GasPrice = computeGasPrice(txn, blockHash, baseFee)
+		result.MaxPriorityFeePerGas = (*hexutil.Big)(txn.GetTipCap().ToBig())
+		result.MaxFeePerGas = (*hexutil.Big)(txn.GetFeeCap().ToBig())
+	case types.BlobTxType:
+		result.YParity = (*hexutil.Big)(v.ToBig())
+		acl := txn.GetAccessList()
+		result.Accesses = &acl
+		result.GasPrice = computeGasPrice(txn, blockHash, baseFee)
+		result.MaxPriorityFeePerGas = (*hexutil.Big)(txn.GetTipCap().ToBig())
+		result.MaxFeePerGas = (*hexutil.Big)(txn.GetFeeCap().ToBig())
+		txn.GetBlobGas()
+		blobTx := txn.(*types.BlobTx)
+		result.MaxFeePerBlobGas = (*hexutil.Big)(blobTx.MaxFeePerBlobGas.ToBig())
+		result.BlobVersionedHashes = blobTx.BlobVersionedHashes
+	case types.SetCodeTxType:
+		result.YParity = (*hexutil.Big)(v.ToBig())
+		acl := txn.GetAccessList()
+		result.Accesses = &acl
+		result.GasPrice = computeGasPrice(txn, blockHash, baseFee)
+		result.MaxPriorityFeePerGas = (*hexutil.Big)(txn.GetTipCap().ToBig())
+		result.MaxFeePerGas = (*hexutil.Big)(txn.GetFeeCap().ToBig())
+		setCodeTx := txn.(*types.SetCodeTransaction)
+		ats := make([]types.JsonAuthorization, len(setCodeTx.GetAuthorizations()))
+		for i, a := range setCodeTx.GetAuthorizations() {
+			ats[i] = types.JsonAuthorization{}.FromAuthorization(a)
 		}
-
-		if txn.Type() == types.BlobTxType {
-			txn.GetBlobGas()
-			blobTx := txn.(*types.BlobTx)
-			result.MaxFeePerBlobGas = (*hexutil.Big)(blobTx.MaxFeePerBlobGas.ToBig())
-			result.BlobVersionedHashes = blobTx.BlobVersionedHashes
-		} else if txn.Type() == types.SetCodeTxType {
-			setCodeTx := txn.(*types.SetCodeTransaction)
-			ats := make([]types.JsonAuthorization, len(setCodeTx.GetAuthorizations()))
-			for i, a := range setCodeTx.GetAuthorizations() {
-				ats[i] = types.JsonAuthorization{}.FromAuthorization(a)
-			}
-			result.Authorizations = &ats
-		}
+		result.Authorizations = &ats
 	}
-
-	signer := types.LatestSignerForChainID(chainId.ToBig())
+	switch tx := txn.(type) {
+	case *types.ArbitrumInternalTx:
+		result.GasPrice = (*hexutil.Big)(tx.GetPrice().ToBig())
+	case *types.ArbitrumDepositTx:
+		result.GasPrice = (*hexutil.Big)(tx.GetPrice().ToBig())
+		result.RequestId = &tx.L1RequestId
+	case *types.ArbitrumContractTx:
+		result.GasPrice = (*hexutil.Big)(tx.GasFeeCap)
+		result.RequestId = &tx.RequestId
+		result.MaxFeePerGas = (*hexutil.Big)(tx.GasFeeCap)
+	case *types.ArbitrumRetryTx:
+		result.GasPrice = (*hexutil.Big)(tx.GasFeeCap)
+		result.TicketId = &tx.TicketId
+		result.RefundTo = &tx.RefundTo
+		result.MaxFeePerGas = (*hexutil.Big)(tx.GasFeeCap)
+		result.MaxRefund = (*hexutil.Big)(tx.MaxRefund)
+		result.SubmissionFeeRefund = (*hexutil.Big)(tx.SubmissionFeeRefund)
+	case *types.ArbitrumSubmitRetryableTx:
+		result.GasPrice = (*hexutil.Big)(tx.GasFeeCap)
+		result.RequestId = &tx.RequestId
+		result.L1BaseFee = (*hexutil.Big)(tx.L1BaseFee)
+		result.DepositValue = (*hexutil.Big)(tx.DepositValue)
+		result.RetryTo = tx.RetryTo
+		result.RetryValue = (*hexutil.Big)(tx.RetryValue)
+		result.RetryData = (*hexutil.Bytes)(&tx.RetryData)
+		result.Beneficiary = &tx.Beneficiary
+		result.RefundTo = &tx.FeeRefundAddr
+		result.MaxSubmissionFee = (*hexutil.Big)(tx.MaxSubmissionFee)
+		result.MaxFeePerGas = (*hexutil.Big)(tx.GasFeeCap)
+	case *types.ArbitrumUnsignedTx:
+		result.GasPrice = (*hexutil.Big)(tx.GasFeeCap)
+	}
+	signer := types.NewArbitrumSigner(*types.LatestSignerForChainID(chainId.ToBig()))
 	var err error
-	result.From, err = txn.Sender(*signer)
+	result.From, err = signer.Sender(txn)
 	if err != nil {
 		log.Warn("sender recovery", "err", err)
 	}
