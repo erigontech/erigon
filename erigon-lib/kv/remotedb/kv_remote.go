@@ -266,7 +266,7 @@ func (tx *tx) Rollback() {
 	}
 }
 
-func (tx *tx) Apply(ctx context.Context, f func(tx kv.Tx) error ) error {
+func (tx *tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 	return f(tx)
 }
 

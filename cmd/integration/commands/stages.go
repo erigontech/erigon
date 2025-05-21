@@ -988,16 +988,15 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
 	s := stage(sync, nil, db, stages.Execution)
+	if chainTipMode {
+		s.CurrentSyncCycle.IsFirstCycle = false
+		s.CurrentSyncCycle.IsInitialCycle = false
+	}
 
 	logger.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 	chainConfig, pm := fromdb.ChainConfig(db), fromdb.PruneMode(db)
 	if pruneTo > 0 {
 		pm.History = prune.Distance(s.BlockNumber - pruneTo)
-	}
-
-	if chainTipMode {
-		s.CurrentSyncCycle.IsFirstCycle = false
-		s.CurrentSyncCycle.IsInitialCycle = false
 	}
 
 	genesis := core.GenesisBlockByChainName(chain)

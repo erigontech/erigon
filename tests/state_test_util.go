@@ -278,11 +278,7 @@ func (t *StateTest) RunNoVerify(tx kv.TemporalRwTx, subtest StateSubtest, vmconf
 		statedb.RevertToSnapshot(snapshot, nil)
 	}
 	if vmconfig.Tracer != nil && vmconfig.Tracer.OnTxEnd != nil {
-		var receipt types.Receipt
-		if err == nil {
-			receipt.GasUsed = res.GasUsed
-		}
-		vmconfig.Tracer.OnTxEnd(&receipt, err)
+		vmconfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: res.GasUsed}, nil)
 	}
 
 	if err = statedb.FinalizeTx(evm.ChainRules(), w); err != nil {

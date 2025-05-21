@@ -188,9 +188,9 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 			)
 			gasUsed += _gasUsed
 		} else {
-			var _usedGas uint64
-			_usedGas, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout)
-			gasUsed += _usedGas
+			var _gasUsed uint64
+			_gasUsed, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout)
+			gasUsed += _gasUsed
 		}
 		if err == nil {
 			err = ibs.FinalizeTx(rules, state.NewNoopWriter())
@@ -218,7 +218,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 			refunds = false
 		}
 
-		if refunds && block.GasUsed() != gasUsed {
+		if refunds == true && block.GasUsed() != gasUsed {
 			panic(fmt.Errorf("assert: block.GasUsed() %d != gasUsed %d. blockNum=%d", block.GasUsed(), gasUsed, blockNumber))
 		}
 	}

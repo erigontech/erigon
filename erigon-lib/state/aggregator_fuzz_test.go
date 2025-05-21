@@ -91,7 +91,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 			err = domains.DomainPut(kv.AccountsDomain, rwTx, addrs[txNum].Bytes(), nil, buf, nil, 0)
 			require.NoError(t, err)
 
-			err = domains.DomainPut(kv.StorageDomain, rwTx, addrs[txNum].Bytes(), locs[txNum].Bytes(), []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}, nil, 0)
+			err = domains.DomainPut(kv.StorageDomain, append(common.Copy(addrs[txNum].Bytes()), locs[txNum].Bytes()...), nil, []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}, nil, 0)
 			require.NoError(t, err)
 
 			var v [8]byte
@@ -215,7 +215,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 			err = domains.DomainPut(kv.AccountsDomain, rwTx, addrs[txNum].Bytes(), nil, buf, nil, 0)
 			require.NoError(t, err)
 
-			err = domains.DomainPut(kv.StorageDomain, rwTx, addrs[txNum].Bytes(), locs[txNum].Bytes(), []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}, nil, 0)
+			err = domains.DomainPut(kv.StorageDomain, composite(addrs[txNum].Bytes(), locs[txNum].Bytes()), nil, []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}, nil, 0)
 			require.NoError(t, err)
 
 			if (txNum+1)%agg.StepSize() == 0 {

@@ -266,11 +266,10 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 	}
 
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		ac := libstate.AggTx(tx)
-		if err := ac.GreedyPruneHistory(ctx, kv.CommitmentDomain, tx); err != nil {
+		if err := tx.(kv.TemporalRwTx).GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
 			return err
 		}
-		if _, err := ac.PruneSmallBatches(ctx, 10*time.Hour, tx); err != nil {
+		if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, 10*time.Hour); err != nil {
 			return err
 		}
 		return nil

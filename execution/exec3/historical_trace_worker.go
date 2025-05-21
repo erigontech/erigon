@@ -253,7 +253,28 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.TxResult {
 				return err
 			}
 
-			result.ExecutionResult = applyRes
+			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, *rw.vmCfg, rules)
+			rw.execAATxn(txTask)
+			break
+		}
+
+		msg := txTask.TxAsMessage
+		txContext := core.NewEVMTxContext(msg)
+		if rw.vmCfg.TraceJumpDest {
+			txContext.TxHash = txn.Hash()
+		}
+		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, *rw.vmCfg, rules)
+		if hooks != nil && hooks.OnTxStart != nil {
+			hooks.OnTxStart(rw.evm.GetVMContext(), txn, msg.From())
+		}
+
+		// MA applytx
+		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */, rw.execArgs.Engine)
+		if err != nil {
+			txTask.Error = err
+		} else {
+			txTask.Failed = applyRes.Failed()
+			txTask.GasUsed = applyRes.GasUsed
 			// Update the state with pending changes
 			ibs.SoftFinalise()
 

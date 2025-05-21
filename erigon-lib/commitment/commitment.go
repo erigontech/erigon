@@ -251,12 +251,9 @@ func (be *BranchEncoder) putUvarAndVal(size uint64, val []byte) error {
 func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCell func(nibble int, skip bool) (*cell, error)) (BranchData, int, error) {
 	be.buf.Reset()
 
-	var encoded [2]byte
+	var encoded [4]byte
 	binary.BigEndian.PutUint16(encoded[:], touchMap)
-	if _, err := be.buf.Write(encoded[:]); err != nil {
-		return nil, 0, err
-	}
-	binary.BigEndian.PutUint16(encoded[:], afterMap)
+	binary.BigEndian.PutUint16(encoded[2:], afterMap)
 	if _, err := be.buf.Write(encoded[:]); err != nil {
 		return nil, 0, err
 	}

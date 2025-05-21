@@ -269,8 +269,15 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
-			Name:        "integrity",
-			Action:      doIntegrity,
+			Name: "integrity",
+			Action: func(cliCtx *cli.Context) error {
+				if err := doIntegrity(cliCtx); err != nil {
+					log.Error("[integrity]", "err", err)
+					return err
+				}
+				log.Info("[integrity] snapshots are publishable")
+				return nil
+			},
 			Description: "run slow validation of files. use --check to run single",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
@@ -1794,7 +1801,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 	for hasMoreToPrune := true; hasMoreToPrune; {
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
-			hasMoreToPrune, err = tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, 2*time.Minute)
+			hasMoreToPrune, err = tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, 30*time.Second)
 			return err
 		}); err != nil {
 			return err

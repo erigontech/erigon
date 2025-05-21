@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -59,7 +60,7 @@ var allPrecompiles = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{0x04}):       &dataCopy{},
 	common.BytesToAddress([]byte{0x05}):       &bigModExp{eip2565: false},
 	common.BytesToAddress([]byte{0xa5}):       &bigModExp{eip2565: true},
-	common.BytesToAddress([]byte{0xb5}):       &bigModExp{eip7883: true},
+	common.BytesToAddress([]byte{0xb5}):       &bigModExp{osaka: true},
 	common.BytesToAddress([]byte{0x06}):       &bn256AddIstanbul{},
 	common.BytesToAddress([]byte{0x07}):       &bn256ScalarMulIstanbul{},
 	common.BytesToAddress([]byte{0x08}):       &bn256PairingIstanbul{},
@@ -268,13 +269,29 @@ func TestPrecompiledModExpOOG(t *testing.T) {
 	}
 }
 
-func TestModExpPrecompilePotentialOutOfRange(t *testing.T) {
+func TestPrecompiledModExpPotentialOutOfRange(t *testing.T) {
 	modExpContract := allPrecompiles[common.BytesToAddress([]byte{0xa5})]
 	hexString := "0x0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000ffffffffffffffff0000000000000000000000000000000000000000000000000000000000000000ee"
 	input := hexutil.MustDecode(hexString)
 	maxGas := uint64(math.MaxUint64)
 	_, _, err := RunPrecompiledContract(modExpContract, input, maxGas, nil)
 	require.NoError(t, err)
+}
+
+func TestPrecompiledModExpInputEip7823(t *testing.T) {
+	// length_of_EXPONENT = 2048; everything else is zero
+	in := common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000000")
+
+	pragueModExp := allPrecompiles[common.BytesToAddress([]byte{0xa5})]
+	gas := pragueModExp.RequiredGas(in)
+	res, _, err := RunPrecompiledContract(pragueModExp, in, gas, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "", common.Bytes2Hex(res))
+
+	osakaModExp := allPrecompiles[common.BytesToAddress([]byte{0xb5})]
+	gas = osakaModExp.RequiredGas(in)
+	_, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil)
+	assert.ErrorIs(t, err, errModExpExponentLengthTooLarge)
 }
 
 // Tests the sample inputs from the elliptic curve scalar multiplication EIP 213.
