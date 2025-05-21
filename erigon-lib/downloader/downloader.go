@@ -40,6 +40,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/anacrolix/missinggo/v2/panicif"
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/semaphore"
 
@@ -71,8 +72,10 @@ type Downloader struct {
 
 	cfg *downloadercfg.Cfg
 
-	lock  sync.RWMutex
-	stats AggStats
+	lock sync.RWMutex
+	// Pieces having extra verification due to file size mismatches.
+	piecesBeingVerified map[*torrent.Piece]struct{}
+	stats               AggStats
 
 	torrentStorage storage.ClientImplCloser
 
@@ -465,32 +468,83 @@ func getWebpeerTorrentInfo(ctx context.Context, downloadUrl *url.URL) (*metainfo
 
 func (d *Downloader) SnapDir() string { return d.cfg.Dirs.Snap }
 
-func (d *Downloader) allTorrentsComplete() bool {
+func (d *Downloader) allTorrentsComplete() (ret bool) {
+	ret = true
 	for _, t := range d.torrentClient.Torrents() {
 		if !t.Complete().Bool() {
-			return false
+			ret = false
+			continue
 		}
-		ti := t.Info()
-		for f := range ti.UpvertedFilesIter() {
-			fp := filepath.Join(d.SnapDir(), filepath.FromSlash(ti.Name), filepath.Join(f.BestPath()...))
-			fi, err := os.Stat(fp)
-			if err != nil {
-				panic(err)
-			}
-			if fi.Size() != f.Length {
-				d.logger.Crit("snapshot file has wrong size", "name", f.DisplayPath(ti), "expected", f.Length, "actual", fi.Size())
-				if fi.Size() > f.Length {
-					os.Chmod(fp, 0o200)
-					err = os.Truncate(fp, f.Length)
-					if err != nil {
-						panic(err)
-					}
-					os.Chmod(fp, 0o400)
-				}
-			}
+		if !d.validateCompletedSnapshot(t) {
+			ret = false
 		}
 	}
-	return true
+	// Require that we're not waiting on any piece verification.
+	if len(d.piecesBeingVerified) != 0 {
+		ret = false
+	}
+	return
+}
+
+// Basic checks and fixes for a snapshot torrent claiming it's complete from experiments. If passed
+// is false, come back later and check again. You could ask why this isn't in the torrent lib. This
+// is an extra level of pedantry due to some file modification I saw outside of the torrent lib. It
+// may go away with only writing torrent files and preverified after completion.
+func (d *Downloader) validateCompletedSnapshot(t *torrent.Torrent) (passed bool) {
+	passed = true
+	// This has to be available if it's complete.
+	for _, f := range t.Files() {
+		fp := filepath.Join(d.SnapDir(), filepath.FromSlash(f.Path()))
+		fi, err := os.Stat(fp)
+		if err == nil {
+			if fi.Size() == f.Length() {
+				continue
+			}
+			d.logger.Crit(
+				"snapshot file has wrong size",
+				"name", f.Path(),
+				"expected", f.Length,
+				"actual", fi.Size(),
+			)
+			if fi.Size() > f.Length() {
+				os.Chmod(fp, 0o200)
+				err = os.Truncate(fp, f.Length())
+				if err != nil {
+					d.logger.Crit("error truncating oversize snapshot file", "name", f.Path(), "err", err)
+				}
+				os.Chmod(fp, 0o400)
+			}
+		} else {
+			d.logger.Crit("error checking snapshot file length", "name", f.Path(), "err", err)
+		}
+		passed = false
+		d.verifyPieces(f)
+	}
+	return
+}
+
+// Run verification for pieces of the file that aren't already being verified.
+func (d *Downloader) verifyPieces(f *torrent.File) {
+	for p := range f.Pieces() {
+		if g.MapContains(d.piecesBeingVerified, p) {
+			continue
+		}
+		g.MakeMapIfNil(&d.piecesBeingVerified)
+		if !g.MapInsert(d.piecesBeingVerified, p, struct{}{}).Ok {
+			d.wg.Add(1)
+			go func() {
+				defer d.wg.Done()
+				err := p.VerifyDataContext(d.ctx)
+				d.lock.Lock()
+				defer d.lock.Unlock()
+				g.MustDelete(d.piecesBeingVerified, p)
+				if d.ctx.Err() != nil {
+					return
+				}
+				panicif.Err(err)
+			}()
+		}
+	}
 }
 
 // Interval is how long between recalcs.
@@ -1005,13 +1059,6 @@ type SnapshotTuple struct {
 	Name string
 }
 
-func (d *Downloader) specInfoUnknown(tup SnapshotTuple) *torrent.TorrentSpec {
-	return &torrent.TorrentSpec{
-		InfoHash:    tup.Hash,
-		DisplayName: tup.Name,
-	}
-}
-
 // Loads metainfo from disk, removing it if it's invalid. Returns Some metainfo if it's valid. TODO:
 // If something fishy happens here (what was an error return before), should we force a verification
 // or something? If the metainfo isn't valid, the data might be wrong.
@@ -1344,35 +1391,6 @@ func calculateTime(amountLeft, rate uint64) string {
 
 func (d *Downloader) Completed() bool {
 	return d.allTorrentsComplete()
-}
-
-// Store completed torrents in order to notify GrpcServer subscribers when they subscribe and there is already downloaded files
-func (d *Downloader) torrentCompleted(tName string, tHash metainfo.Hash) {
-	d.lock.Lock()
-	defer d.lock.Unlock()
-	hash := InfoHashes2Proto(tHash)
-
-	//check is torrent already completed cause some funcs may call this method multiple times
-	if _, ok := d.completedTorrents[tName]; !ok {
-		d.notifyCompleted(tName, hash)
-	}
-
-	d.completedTorrents[tName] = completedTorrentInfo{
-		path: tName,
-		hash: hash,
-	}
-}
-
-// Notify GrpcServer subscribers about completed torrent
-func (d *Downloader) notifyCompleted(tName string, tHash *prototypes.H160) {
-	d.onTorrentComplete(tName, tHash)
-}
-
-func (d *Downloader) CompletedTorrents() map[string]completedTorrentInfo {
-	d.lock.RLock()
-	defer d.lock.RUnlock()
-
-	return d.completedTorrents
 }
 
 // Expose torrent client status to HTTP on the public/default serve mux used by GOPPROF=http. Only
