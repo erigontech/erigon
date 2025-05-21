@@ -142,7 +142,7 @@ func (rs *ParallelExecutionState) applyState(txTask *TxTask, domains *libstate.S
 						return err
 					}
 				} else {
-					if err := domains.DomainPut(domain, []byte(key), nil, list.Vals[i], nil, 0); err != nil {
+					if err := domains.DomainPut(domain, []byte(key), list.Vals[i], nil, 0); err != nil {
 						return err
 					}
 				}
@@ -171,7 +171,7 @@ func (rs *ParallelExecutionState) applyState(txTask *TxTask, domains *libstate.S
 			}
 		} else {
 			enc1 := accounts.SerialiseV3(&acc)
-			if err := domains.DomainPut(kv.AccountsDomain, addrBytes, nil, enc1, enc0, step0); err != nil {
+			if err := domains.DomainPut(kv.AccountsDomain, addrBytes, enc1, enc0, step0); err != nil {
 				return err
 			}
 		}
@@ -518,7 +518,7 @@ func (w *Writer) UpdateAccountData(address common.Address, original, account *ac
 		w.accumulator.ChangeAccount(address, account.Incarnation, value)
 	}
 
-	if err := w.tx.DomainPut(kv.AccountsDomain, address[:], nil, value, nil, 0); err != nil {
+	if err := w.tx.DomainPut(kv.AccountsDomain, address[:], value, nil, 0); err != nil {
 		return err
 	}
 	return nil
@@ -528,7 +528,7 @@ func (w *Writer) UpdateAccountCode(address common.Address, incarnation uint64, c
 	if w.trace {
 		fmt.Printf("code: %x, %x, valLen: %d\n", address.Bytes(), codeHash, len(code))
 	}
-	if err := w.tx.DomainPut(kv.CodeDomain, address[:], nil, code, nil, 0); err != nil {
+	if err := w.tx.DomainPut(kv.CodeDomain, address[:], code, nil, 0); err != nil {
 		return err
 	}
 	if w.accumulator != nil {
@@ -573,7 +573,7 @@ func (w *Writer) WriteAccountStorage(address common.Address, incarnation uint64,
 		w.accumulator.ChangeStorage(address, incarnation, key, v)
 	}
 
-	return w.tx.DomainPut(kv.StorageDomain, composite, nil, v, nil, 0)
+	return w.tx.DomainPut(kv.StorageDomain, composite, v, nil, 0)
 }
 
 func (w *Writer) CreateContract(address common.Address) error {
