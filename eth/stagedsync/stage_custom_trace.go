@@ -426,7 +426,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 						}
 					}
 				}
-				if err := rawdb.WriteReceiptCacheV2(doms, receipt); err != nil {
+				if err := rawdb.WriteReceiptCacheV2(doms, receipt, txTask.TxNum); err != nil {
 					return err
 				}
 			}

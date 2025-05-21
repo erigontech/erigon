@@ -138,7 +138,7 @@ func (rs *ParallelExecutionState) applyState(txTask *TxTask, domains *libstate.S
 
 			for i, key := range list.Keys {
 				if list.Vals[i] == nil {
-					if err := domains.DomainDel(domain, []byte(key), nil, 0); err != nil {
+					if err := domains.DomainDel(domain, []byte(key), txTask.TxNum, nil, 0); err != nil {
 						return err
 					}
 				} else {
@@ -166,7 +166,7 @@ func (rs *ParallelExecutionState) applyState(txTask *TxTask, domains *libstate.S
 		}
 		acc.Balance.Add(&acc.Balance, &increase)
 		if emptyRemoval && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() {
-			if err := domains.DomainDel(kv.AccountsDomain, addrBytes, enc0, step0); err != nil {
+			if err := domains.DomainDel(kv.AccountsDomain, addrBytes, txTask.TxNum, enc0, step0); err != nil {
 				return err
 			}
 		} else {
@@ -248,7 +248,7 @@ func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *li
 		if txTask.TxIndex >= 0 && txTask.TxIndex < len(txTask.BlockReceipts) {
 			receipt = txTask.BlockReceipts[txTask.TxIndex]
 		}
-		if err := rawdb.WriteReceiptCacheV2(domains, receipt); err != nil {
+		if err := rawdb.WriteReceiptCacheV2(domains, receipt, txTask.TxNum); err != nil {
 			return err
 		}
 	}
@@ -355,6 +355,7 @@ type StateWriterBufferedV3 struct {
 	storagePrevs map[string][]byte
 	codePrevs    map[string]uint64
 	accumulator  *shards.Accumulator
+	txNum        uint64
 }
 
 func NewStateWriterBufferedV3(rs *ParallelExecutionState, accumulator *shards.Accumulator) *StateWriterBufferedV3 {
@@ -367,6 +368,7 @@ func NewStateWriterBufferedV3(rs *ParallelExecutionState, accumulator *shards.Ac
 }
 
 func (w *StateWriterBufferedV3) SetTxNum(ctx context.Context, txNum uint64) {
+	w.txNum = txNum
 	w.rs.domains.SetTxNum(txNum)
 }
 func (w *StateWriterBufferedV3) SetTx(tx kv.Tx) {}
@@ -393,7 +395,7 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 	}
 	if original.Incarnation > account.Incarnation {
 		//del, before create: to clanup code/storage
-		if err := w.rs.domains.DomainDel(kv.CodeDomain, address[:], nil, 0); err != nil {
+		if err := w.rs.domains.DomainDel(kv.CodeDomain, address[:], w.txNum, nil, 0); err != nil {
 			return err
 		}
 		if err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte, step uint64) (bool, error) {
@@ -508,10 +510,10 @@ func (w *Writer) UpdateAccountData(address common.Address, original, account *ac
 	}
 	if original.Incarnation > account.Incarnation {
 		//del, before create: to clanup code/storage
-		if err := w.tx.DomainDel(kv.CodeDomain, address[:], nil, 0); err != nil {
+		if err := w.tx.DomainDel(kv.CodeDomain, address[:], w.txNum, nil, 0); err != nil {
 			return err
 		}
-		if err := w.tx.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
+		if err := w.tx.DomainDelPrefix(kv.StorageDomain, address[:], w.txNum); err != nil {
 			return err
 		}
 	}
@@ -550,7 +552,7 @@ func (w *Writer) DeleteAccount(address common.Address, original *accounts.Accoun
 	//if err := w.tx.DomainDel(kv.CodeDomain, address[:], nil, 0); err != nil {
 	//	return err
 	//}
-	if err := w.tx.DomainDel(kv.AccountsDomain, address[:], nil, 0); err != nil {
+	if err := w.tx.DomainDel(kv.AccountsDomain, address[:], w.txNum, nil, 0); err != nil {
 		return err
 	}
 	// if w.accumulator != nil { TODO: investigate later. basically this will always panic. keeping this out should be fine anyway.
@@ -569,7 +571,7 @@ func (w *Writer) WriteAccountStorage(address common.Address, incarnation uint64,
 		fmt.Printf("storage: %x,%x,%x\n", address, key, v)
 	}
 	if len(v) == 0 {
-		return w.tx.DomainDel(kv.StorageDomain, composite, nil, 0)
+		return w.tx.DomainDel(kv.StorageDomain, composite, w.txNum, nil, 0)
 	}
 	if w.accumulator != nil {
 		w.accumulator.ChangeStorage(address, incarnation, key, v)
@@ -582,7 +584,7 @@ func (w *Writer) CreateContract(address common.Address) error {
 	if w.trace {
 		fmt.Printf("create contract: %x\n", address)
 	}
-	if err := w.tx.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
+	if err := w.tx.DomainDelPrefix(kv.StorageDomain, address[:], w.txNum); err != nil {
 		return err
 	}
 	return nil

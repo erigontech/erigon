@@ -321,7 +321,7 @@ func (sd *SharedDomains) updateCommitmentData(prefix string, data, prev []byte, 
 
 func (sd *SharedDomains) deleteAccount(addr []byte, txNum uint64, prev []byte, prevStep uint64) error {
 	addrS := string(addr)
-	if err := sd.DomainDelPrefix(kv.StorageDomain, addr); err != nil {
+	if err := sd.DomainDelPrefix(kv.StorageDomain, addr, txNum); err != nil {
 		return err
 	}
 
@@ -579,7 +579,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, k []byte, txNum uint64, pre
 	}
 }
 
-func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error {
+func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
 	if domain != kv.StorageDomain {
 		return errors.New("DomainDelPrefix: not supported")
 	}
@@ -596,7 +596,7 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 		return err
 	}
 	for _, tomb := range tombs {
-		if err := sd.DomainDel(kv.StorageDomain, tomb.k, tomb.v, tomb.step); err != nil {
+		if err := sd.DomainDel(kv.StorageDomain, tomb.k, txNum, tomb.v, tomb.step); err != nil {
 			return err
 		}
 	}

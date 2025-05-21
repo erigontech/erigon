@@ -629,7 +629,7 @@ type TemporalPutDel interface {
 	//   - user can append k2 into k1, then underlying methods will not preform append
 	//   - if `val == nil` it will call DomainDel
 	DomainDel(domain Domain, k []byte, txNum uint64, prevVal []byte, prevStep uint64) error
-	DomainDelPrefix(domain Domain, prefix []byte) error
+	DomainDelPrefix(domain Domain, prefix []byte, txNum uint64) error
 }
 
 type TemporalRoDB interface {
