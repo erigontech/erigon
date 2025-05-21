@@ -54,7 +54,7 @@ type CallArgs struct {
 	ChainID              *hexutil.Big              `json:"chainId,omitempty"`
 	AuthorizationList    []types.JsonAuthorization `json:"authorizationList"`
 
-	SkipL1Charging       *bool                     `json:"skipL1Charging"` // Arbitrum
+	SkipL1Charging *bool `json:"skipL1Charging"` // Arbitrum
 }
 
 // from retrieves the transaction sender address.
@@ -259,6 +259,7 @@ func (args *CallArgs) L2OnlyGasCap(gasCap uint64, header *types.Header) (uint64,
 
 // Allows ArbOS to update the gas cap so that it ignores the message's specific L1 poster costs.
 var InterceptRPCGasCap = func(gascap *uint64, msg *types.Message, header *types.Header) {}
+
 // End arbitrum
 
 // Account indicates the overriding fields of account during the execution of
@@ -418,11 +419,11 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 // RPCMarshalBlock converts the given block to the RPC output which depends on fullTx. If inclTx is true transactions are
 // returned. When fullTx is true the returned block contains full transaction details, otherwise it will only contain
 // transaction hashes.
-func RPCMarshalBlockDeprecated(block *types.Block, inclTx bool, fullTx bool) (map[string]interface{}, error) {
-	return RPCMarshalBlockExDeprecated(block, inclTx, fullTx, nil, libcommon.Hash{})
+func RPCMarshalBlockDeprecated(block *types.Block, inclTx bool, fullTx bool, isArbitrumNitro bool) (map[string]interface{}, error) {
+	return RPCMarshalBlockExDeprecated(block, inclTx, fullTx, nil, libcommon.Hash{}, isArbitrumNitro)
 }
 
-func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, borTx types.Transaction, borTxHash libcommon.Hash) (map[string]interface{}, error) {
+func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, borTx types.Transaction, borTxHash libcommon.Hash, isArbitrumNitro bool) (map[string]interface{}, error) {
 	fields := RPCMarshalHeader(block.Header())
 	fields["size"] = hexutil.Uint64(block.Size())
 	if _, ok := fields["transactions"]; !ok {
@@ -467,8 +468,17 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 	if block.Withdrawals() != nil {
 		fields["withdrawals"] = block.Withdrawals()
 	}
-
+	if isArbitrumNitro {
+		fillArbitrumHeaderInfo(block.Header(), fields)
+	}
 	return fields, nil
+}
+
+func fillArbitrumHeaderInfo(header *types.Header, fields map[string]interface{}) {
+	info := types.DeserializeHeaderExtraInformation(header)
+	fields["l1BlockNumber"] = hexutil.Uint64(info.L1BlockNumber)
+	fields["sendRoot"] = info.SendRoot
+	fields["sendCount"] = hexutil.Uint64(info.SendCount)
 }
 
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction

@@ -240,9 +240,11 @@ func TestGetBlockByTimestampLatestTime(t *testing.T) {
 	defer tx.Rollback()
 	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
 
+	chainConfig, err := api.chainConfig(ctx, tx)
+	assert.NoError(t, err)
 	latestBlock, err := m.BlockReader.CurrentBlock(tx)
 	require.NoError(t, err)
-	response, err := ethapi.RPCMarshalBlockDeprecated(latestBlock, true, false)
+	response, err := ethapi.RPCMarshalBlockDeprecated(latestBlock, true, false, chainConfig.IsArbitrumNitro(latestBlock.Number()))
 
 	if err != nil {
 		t.Error("couldn't get the rpc marshal block")
@@ -280,7 +282,9 @@ func TestGetBlockByTimestampOldestTime(t *testing.T) {
 		t.Error("couldn't retrieve oldest block")
 	}
 
-	response, err := ethapi.RPCMarshalBlockDeprecated(oldestBlock, true, false)
+	chainConfig, err := api.chainConfig(ctx, tx)
+	assert.NoError(t, err)
+	response, err := ethapi.RPCMarshalBlockDeprecated(oldestBlock, true, false, chainConfig.IsArbitrumNitro(oldestBlock.Number()))
 
 	if err != nil {
 		t.Error("couldn't get the rpc marshal block")
@@ -316,7 +320,9 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 	latestBlock, err := m.BlockReader.CurrentBlock(tx)
 	require.NoError(t, err)
 
-	response, err := ethapi.RPCMarshalBlockDeprecated(latestBlock, true, false)
+	chainConfig, err := api.chainConfig(ctx, tx)
+	assert.NoError(t, err)
+	response, err := ethapi.RPCMarshalBlockDeprecated(latestBlock, true, false, chainConfig.IsArbitrumNitro(latestBlock.Number()))
 
 	if err != nil {
 		t.Error("couldn't get the rpc marshal block")
@@ -364,7 +370,9 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 		t.Error("couldn't retrieve middle block")
 	}
 
-	response, err := ethapi.RPCMarshalBlockDeprecated(middleBlock, true, false)
+	chainConfig, err := api.chainConfig(ctx, tx)
+	assert.NoError(t, err)
+	response, err := ethapi.RPCMarshalBlockDeprecated(middleBlock, true, false, chainConfig.IsArbitrumNitro(middleBlock.Number()))
 
 	if err != nil {
 		t.Error("couldn't get the rpc marshal block")
@@ -405,7 +413,9 @@ func TestGetBlockByTimestamp(t *testing.T) {
 	if pickedBlock == nil {
 		t.Error("couldn't retrieve picked block")
 	}
-	response, err := ethapi.RPCMarshalBlockDeprecated(pickedBlock, true, false)
+	chainConfig, err := api.chainConfig(ctx, tx)
+	assert.NoError(t, err)
+	response, err := ethapi.RPCMarshalBlockDeprecated(pickedBlock, true, false, chainConfig.IsArbitrumNitro(pickedBlock.Number()))
 
 	if err != nil {
 		t.Error("couldn't get the rpc marshal block")

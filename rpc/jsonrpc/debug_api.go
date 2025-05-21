@@ -458,6 +458,10 @@ func (api *PrivateDebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]
 	if err != nil || len(blocks) == 0 {
 		return nil, err
 	}
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 
 	results := make([]map[string]interface{}, 0, len(blocks))
 	for _, block := range blocks {
@@ -468,7 +472,7 @@ func (api *PrivateDebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]
 			blockRlp = fmt.Sprintf("%#x", rlpBytes)
 		}
 
-		blockJson, err := ethapi.RPCMarshalBlock(block, true, true, nil)
+		blockJson, err := ethapi.RPCMarshalBlock(block, true, true, nil, chainConfig.IsArbitrumNitro(block.Number()))
 		if err != nil {
 			log.Error("Failed to marshal block", "err", err)
 			blockJson = map[string]interface{}{}
