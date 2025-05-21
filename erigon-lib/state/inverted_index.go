@@ -886,7 +886,7 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txT
 			txTo = min(txTo, iit.files.EndTxNum())
 		}
 		if !iit.CanPrune(tx) {
-			return stat, nil
+			return &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}, nil
 		}
 	}
 	return iit.prune(ctx, tx, txFrom, txTo, limit, logEvery, fn)

@@ -556,7 +556,6 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 	require.NoError(t, err)
 	t.Logf("stat=%v", stat)
 
-	fmt.Printf("start hist table:\n")
 	icc, err := rwTx.CursorDupSort(h.valuesTable)
 	require.NoError(t, err)
 	defer icc.Close()

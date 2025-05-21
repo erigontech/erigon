@@ -459,10 +459,14 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remote.AAValid
 
 	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &common.Address{}, s.chainConfig)
 
-	//ot := commands.NewOpcodeTracer(header.Number.Uint64(), true, false)
-	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, s.chainConfig, vm.Config{Tracer: nil, ReadOnly: true})
-	//ibs.SetHooks(ot.Tracer().Hooks)
-	//ot.OnTxStart(evm.GetVMContext(), nil, common.Address{})
+	senderCodeSize, err := ibs.GetCodeSize(*aaTxn.SenderAddress)
+	if err != nil {
+		return nil, err
+	}
+
+	validationTracer := aa.NewValidationRulesTracer(*aaTxn.SenderAddress, senderCodeSize != 0)
+	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, s.chainConfig, vm.Config{Tracer: validationTracer.Hooks(), ReadOnly: true})
+	ibs.SetHooks(validationTracer.Hooks())
 
 	vmConfig := evm.Config()
 	rules := s.chainConfig.Rules(header.Number.Uint64(), header.Time)
@@ -476,11 +480,9 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remote.AAValid
 	totalGasLimit := preTxCost + aaTxn.ValidationGasLimit + aaTxn.PaymasterValidationGasLimit + aaTxn.GasLimit + aaTxn.PostOpGasLimit
 	_, _, err = aa.ValidateAATransaction(aaTxn, ibs, new(core.GasPool).AddGas(totalGasLimit), header, evm, s.chainConfig)
 	if err != nil {
-		log.Info("err", "err", err.Error())
+		log.Info("RIP-7560 validation err", "err", err.Error())
 		return &remote.AAValidationReply{Valid: false}, nil
 	}
 
-	// read tracer
-
-	return &remote.AAValidationReply{Valid: true}, nil
+	return &remote.AAValidationReply{Valid: validationTracer.Err() == nil}, nil
 }

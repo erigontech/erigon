@@ -107,7 +107,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 		err = domains.DomainPut(kv.AccountsDomain, addr, nil, buf, nil, 0)
 		require.NoError(t, err)
 
-		err = domains.DomainPut(kv.StorageDomain, addr, loc, []byte{addr[0], loc[0]}, nil, 0)
+		err = domains.DomainPut(kv.StorageDomain, append(common.Copy(addr), loc...), nil, []byte{addr[0], loc[0]}, nil, 0)
 		require.NoError(t, err)
 
 		var v [8]byte
@@ -233,7 +233,7 @@ func TestAggregatorV3_DirtyFilesRo(t *testing.T) {
 		err = domains.DomainPut(kv.AccountsDomain, addr, nil, buf, nil, 0)
 		require.NoError(t, err)
 
-		err = domains.DomainPut(kv.StorageDomain, addr, loc, []byte{addr[0], loc[0]}, nil, 0)
+		err = domains.DomainPut(kv.StorageDomain, composite(addr, loc), nil, []byte{addr[0], loc[0]}, nil, 0)
 		require.NoError(t, err)
 
 		var v [8]byte
@@ -363,7 +363,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 		err = domains.DomainPut(kv.AccountsDomain, addr, nil, buf, nil, 0)
 		require.NoError(t, err)
 
-		err = domains.DomainPut(kv.StorageDomain, addr, loc, []byte{addr[0], loc[0]}, nil, 0)
+		err = domains.DomainPut(kv.StorageDomain, composite(addr, loc), nil, []byte{addr[0], loc[0]}, nil, 0)
 		require.NoError(t, err)
 
 		if (txNum+1)%agg.StepSize() == 0 {
@@ -499,7 +499,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 		err = domains.DomainPut(kv.AccountsDomain, addr, nil, buf, nil, 0)
 		require.NoError(t, err)
 
-		err = domains.DomainPut(kv.StorageDomain, addr, loc, []byte{addr[0], loc[0]}, nil, 0)
+		err = domains.DomainPut(kv.StorageDomain, composite(addr, loc), nil, []byte{addr[0], loc[0]}, nil, 0)
 		require.NoError(t, err)
 
 		err = domains.DomainPut(kv.CommitmentDomain, someKey, nil, aux[:], nil, 0)
@@ -920,7 +920,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txN
 				prev, step, err := domains.GetLatest(kv.StorageDomain, sk[:length.Addr])
 				require.NoError(t, err)
 
-				err = domains.DomainPut(kv.StorageDomain, sk[:length.Addr], sk[length.Addr:], uint256.NewInt(txNum).Bytes(), prev, step)
+				err = domains.DomainPut(kv.StorageDomain, sk, nil, uint256.NewInt(txNum).Bytes(), prev, step)
 				require.NoError(t, err)
 			}
 
@@ -983,7 +983,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		err = domains.DomainPut(kv.AccountsDomain, addr, nil, buf[:], nil, 0)
 		require.NoError(t, err)
 
-		err = domains.DomainPut(kv.StorageDomain, addr, loc, []byte{addr[0], loc[0]}, nil, 0)
+		err = domains.DomainPut(kv.StorageDomain, composite(addr, loc), nil, []byte{addr[0], loc[0]}, nil, 0)
 		require.NoError(t, err)
 
 		keys[txNum-1] = append(addr, loc...)
@@ -1143,7 +1143,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 		require.NoError(t, err)
 		prev1 = buf
 
-		err = domains.DomainPut(kv.StorageDomain, addr, loc, []byte{addr[0], loc[0]}, prev2, 0)
+		err = domains.DomainPut(kv.StorageDomain, composite(addr, loc), nil, []byte{addr[0], loc[0]}, prev2, 0)
 		require.NoError(t, err)
 		prev2 = []byte{addr[0], loc[0]}
 
@@ -1158,7 +1158,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 
 		prev, step, _, err := ac.d[kv.StorageDomain].GetLatest(keys[txNum-1-half], tx)
 		require.NoError(t, err)
-		err = domains.DomainPut(kv.StorageDomain, addr, loc, []byte{addr[0], loc[0]}, prev, step)
+		err = domains.DomainPut(kv.StorageDomain, composite(addr, loc), nil, []byte{addr[0], loc[0]}, prev, step)
 		require.NoError(t, err)
 	}
 

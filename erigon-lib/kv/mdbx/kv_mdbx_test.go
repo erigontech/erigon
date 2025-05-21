@@ -36,6 +36,25 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
+type a struct {
+}
+
+func (a *a) Hi() uint64 {
+	return 1
+}
+
+type A struct {
+	a
+}
+
+func BenchmarkName(b *testing.B) {
+	b.ReportAllocs()
+	a := &A{}
+	for i := 0; i < b.N; i++ {
+		a.Hi()
+	}
+}
+
 func BaseCaseDB(t *testing.T) kv.RwDB {
 	t.Helper()
 	path := t.TempDir()
