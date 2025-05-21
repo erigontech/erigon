@@ -350,14 +350,8 @@ func (sd *SharedDomains) writeAccountStorage(addr, loc []byte, value, preVal []b
 }
 
 func (sd *SharedDomains) delAccountStorage(k, preVal []byte, prevStep uint64) error {
-	composite := k
-	if loc != nil { // if caller passed already `composite` key, then just use it. otherwise join parts
-		composite = make([]byte, 0, len(k)+len(loc))
-		composite = append(append(composite, k...), loc...)
-	}
-	compositeS := string(composite)
-	sd.put(kv.StorageDomain, compositeS, nil)
-	return sd.domainWriters[kv.StorageDomain].DeleteWithPrev(composite, sd.txNum, preVal, prevStep)
+	sd.put(kv.StorageDomain, string(k), nil)
+	return sd.domainWriters[kv.StorageDomain].DeleteWithPrev(k, sd.txNum, preVal, prevStep)
 }
 
 func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) {
