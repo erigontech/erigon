@@ -26,6 +26,8 @@ import (
 	"strings"
 	"time"
 
+	"google.golang.org/grpc"
+
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -38,7 +40,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
-	"google.golang.org/grpc"
 
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -97,7 +98,6 @@ const (
 type DownloadRequest struct {
 	Path        string
 	TorrentHash string
-	Verify      bool
 }
 
 func NewDownloadRequest(path string, torrentHash string) DownloadRequest {
@@ -388,10 +388,6 @@ func WaitForDownloader(
 		downloadRequest = append(downloadRequest, DownloadRequest{
 			Path:        p.Name,
 			TorrentHash: p.Hash,
-			// TODO: Why is this so convoluted? Perhaps we should only do this for a local
-			// downloader? Currently I only plan to verify when a torrent is first added, for a
-			// shared downloader that might not make sense.
-			Verify: blockReader.FreezingCfg().Verify,
 		})
 	}
 

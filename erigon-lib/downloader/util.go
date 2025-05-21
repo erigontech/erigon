@@ -18,22 +18,22 @@ package downloader
 
 import (
 	"context"
-	"slices"
-
 	//nolint:gosec
 	"errors"
 	"fmt"
 	"path"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	common2 "github.com/erigontech/erigon-lib/common"
@@ -326,8 +326,12 @@ func (d *Downloader) addTorrentSpec(
 	ts.ChunkSize = downloadercfg.DefaultNetworkChunkSize
 	ts.Trackers = Trackers
 	ts.Webseeds = nil
-	// Non-zero chunksize is not allowed for existing torrents. If this breaks I will fix
-	// anacrolix/torrent instead of working around it.
+	// I wonder how this should be handled for AddNewSeedableFile. What if there's bad piece
+	// completion data? We might want to clobber any piece completion and force the client to accept
+	// what we provide, assuming we trust our own metainfo generation more.
+	ts.IgnoreUnverifiedPieceCompletion = d.cfg.VerifyTorrentData
+	// Non-zero chunk size is not allowed for existing torrents. If this breaks I will fix
+	// anacrolix/torrent instead of working around it. See torrent.Client.AddTorrentOpt.
 	t, new, err = d.torrentClient.AddTorrentSpec(ts)
 	if err != nil {
 		return

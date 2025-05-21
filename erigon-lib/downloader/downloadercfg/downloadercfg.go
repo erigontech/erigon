@@ -30,6 +30,7 @@ import (
 	"time"
 
 	g "github.com/anacrolix/generics"
+
 	analog "github.com/anacrolix/log"
 
 	"github.com/anacrolix/dht/v2"
@@ -70,6 +71,8 @@ type Cfg struct {
 	Dirs datadir.Dirs
 
 	MdbxWriteMap bool
+	// Don't trust any existing piece completion. Revalidate all pieces when added.
+	VerifyTorrentData bool
 }
 
 // Before options/flags applied.
@@ -106,6 +109,7 @@ func defaultTorrentClientConfig() *torrent.ClientConfig {
 type NewCfgOpts struct {
 	// If set, clobber the default torrent config value.
 	DisableTrackers g.Option[bool]
+	Verify          bool
 }
 
 func New(
