@@ -621,7 +621,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			continue
 		}
 		if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
-			ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.UsedGas}, nil)
+			ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.GasUsed}, nil)
 		}
 		traceResult.Output = common.Copy(execResult.ReturnData)
 		if err = ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {

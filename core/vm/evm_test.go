@@ -29,7 +29,7 @@ import (
 
 func TestInterpreterReadonly(t *testing.T) {
 	t.Parallel()
-	c := NewJumpDestCache()
+	c := NewJumpDestCache(128)
 	rapid.Check(t, func(t *rapid.T) {
 		env := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, chain.TestChainConfig, Config{})
 
@@ -137,7 +137,7 @@ func TestInterpreterReadonly(t *testing.T) {
 
 func TestReadonlyBasicCases(t *testing.T) {
 	t.Parallel()
-	c := NewJumpDestCache()
+	c := NewJumpDestCache(128)
 
 	cases := []struct {
 		testName          string
@@ -405,7 +405,7 @@ func newTestSequential(env *EVM, currentIdx *int, readonlies []bool, isEVMCalled
 
 func (st *testSequential) Run(_ *Contract, _ []byte, _ bool) ([]byte, error) {
 	*st.currentIdx++
-	c := NewJumpDestCache()
+	c := NewJumpDestCache(16)
 	nextContract := NewContract(
 		&dummyContractRef{},
 		common.Address{},

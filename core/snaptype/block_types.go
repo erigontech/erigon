@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/crypto/cryptopool"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
@@ -110,7 +109,7 @@ var (
 		snaptype.IndexBuilderFunc(
 			func(ctx context.Context, info snaptype.FileInfo, salt uint32, _ *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 				hasher := crypto.NewKeccakState()
-				defer cryptopool.ReturnToPoolKeccak256(hasher)
+				defer crypto.ReturnToPool(hasher)
 				var h common.Hash
 
 				cfg := recsplit.RecSplitArgs{

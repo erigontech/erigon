@@ -39,6 +39,10 @@ import (
 
 // This test checks that dynamic dials are launched from discovery results.
 func TestDialSchedDynDial(t *testing.T) {
+	if testing.Short() {
+		t.Skip("too slow for testing.Short")
+	}
+
 	t.Parallel()
 
 	config := dialConfig{
@@ -296,6 +300,10 @@ func TestDialSchedRemoveStatic(t *testing.T) {
 
 // This test checks that past dials are not retried for some time.
 func TestDialSchedHistory(t *testing.T) {
+	if testing.Short() {
+		t.Skip("too slow for testing.Short")
+	}
+
 	t.Parallel()
 
 	config := dialConfig{

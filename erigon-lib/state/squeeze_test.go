@@ -6,12 +6,11 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common"
-	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
-
-	"github.com/erigontech/erigon-lib/commitment"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 )
@@ -140,5 +139,5 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, root)
 	require.Equal(t, latestRoot, root)
-	require.NotEqual(t, commitment.EmptyRootHash, root)
+	require.NotEqual(t, empty.RootHash.Bytes(), root)
 }

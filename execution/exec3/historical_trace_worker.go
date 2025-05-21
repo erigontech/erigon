@@ -120,7 +120,7 @@ func (rw *HistoricalTraceWorker) Run() (err error) {
 			err = fmt.Errorf("HistoricalTraceWorker panic: %s, %s", rec, dbg.Stack())
 		}
 	}()
-	defer rw.evm.JumpDestCache.LogStats()
+	defer rw.evm.Config().JumpDestCache.LogStats()
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
 		rw.RunTxTaskNoLock(txTask)
 		if err := rw.out.Add(rw.ctx, txTask); err != nil {
@@ -241,7 +241,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 			txTask.Error = err
 		} else {
 			txTask.Failed = applyRes.Failed()
-			txTask.UsedGas = applyRes.UsedGas
+			txTask.GasUsed = applyRes.GasUsed
 			// Update the state with pending changes
 			ibs.SoftFinalise()
 
@@ -311,7 +311,7 @@ func (rw *HistoricalTraceWorker) execAATxn(txTask *state.TxTask) {
 	}
 
 	txTask.Failed = status != 0
-	txTask.UsedGas = gasUsed
+	txTask.GasUsed = gasUsed
 	// Update the state with pending changes
 	rw.ibs.SoftFinalise()
 	txTask.Logs = rw.ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)

@@ -32,17 +32,34 @@ func EnvString(envVarName string, defaultVal string) string {
 	v, _ := os.LookupEnv(envVarName)
 	if v != "" {
 		WarnOnErigonPrefix(envVarName)
-		log.Info("[env]", envVarName, v)
+		log.Warn("[env]", envVarName, v)
 		return v
 	}
 
 	v, _ = os.LookupEnv("ERIGON_" + envVarName)
 	if v != "" {
-		log.Info("[env]", envVarName, v)
+		log.Warn("[env]", envVarName, v)
 		return v
 	}
 	return defaultVal
 }
+
+func EnvStrings(envVarName string, sep string, defaultVal []string) []string {
+	v, _ := os.LookupEnv(envVarName)
+	if v != "" {
+		WarnOnErigonPrefix(envVarName)
+		log.Info("[env]", envVarName, v)
+		return strings.Split(v, sep)
+	}
+
+	v, _ = os.LookupEnv("ERIGON_" + envVarName)
+	if v != "" {
+		log.Info("[env]", envVarName, v)
+		return strings.Split(v, sep)
+	}
+	return defaultVal
+}
+
 func EnvBool(envVarName string, defaultVal bool) bool {
 	v, _ := os.LookupEnv(envVarName)
 	if v == "true" {
@@ -73,17 +90,84 @@ func EnvInt(envVarName string, defaultVal int) int {
 		WarnOnErigonPrefix(envVarName)
 		i := MustParseInt(v)
 		log.Info("[env]", envVarName, i)
-		return i
+		return int(i)
 	}
 
 	v, _ = os.LookupEnv("ERIGON_" + envVarName)
 	if v != "" {
 		i := MustParseInt(v)
 		log.Info("[env]", envVarName, i)
+		return int(i)
+	}
+	return defaultVal
+}
+
+func EnvUint(envVarName string, defaultVal uint64) uint64 {
+	v, _ := os.LookupEnv(envVarName)
+	if v != "" {
+		WarnOnErigonPrefix(envVarName)
+		i := MustParseUint(v)
+		log.Info("[env]", envVarName, i)
+		return i
+	}
+
+	v, _ = os.LookupEnv("ERIGON_" + envVarName)
+	if v != "" {
+		i := MustParseUint(v)
+		log.Info("[env]", envVarName, i)
 		return i
 	}
 	return defaultVal
 }
+
+func EnvInts(envVarName string, sep string, defaultVal []int64) []int64 {
+	v, _ := os.LookupEnv(envVarName)
+	if v != "" {
+		WarnOnErigonPrefix(envVarName)
+		log.Info("[env]", envVarName, v)
+		var ints []int64
+		for _, str := range strings.Split(v, sep) {
+			ints = append(ints, MustParseInt(str))
+		}
+		return ints
+	}
+
+	v, _ = os.LookupEnv("ERIGON_" + envVarName)
+	if v != "" {
+		log.Info("[env]", envVarName, v)
+		var ints []int64
+		for _, str := range strings.Split(v, sep) {
+			ints = append(ints, MustParseInt(str))
+		}
+		return ints
+	}
+	return defaultVal
+}
+
+func EnvUints(envVarName string, sep string, defaultVal []uint64) []uint64 {
+	v, _ := os.LookupEnv(envVarName)
+	if v != "" {
+		WarnOnErigonPrefix(envVarName)
+		log.Info("[env]", envVarName, v)
+		var ints []uint64
+		for _, str := range strings.Split(v, sep) {
+			ints = append(ints, MustParseUint(str))
+		}
+		return ints
+	}
+
+	v, _ = os.LookupEnv("ERIGON_" + envVarName)
+	if v != "" {
+		log.Info("[env]", envVarName, v)
+		var ints []uint64
+		for _, str := range strings.Split(v, sep) {
+			ints = append(ints, MustParseUint(str))
+		}
+		return ints
+	}
+	return defaultVal
+}
+
 func EnvDataSize(envVarName string, defaultVal datasize.ByteSize) datasize.ByteSize {
 	v, _ := os.LookupEnv(envVarName)
 	if v != "" {
@@ -137,11 +221,20 @@ func WarnOnErigonPrefix(envVarName string) {
 	}
 }
 
-func MustParseInt(strNum string) int {
+func MustParseInt(strNum string) int64 {
 	cleanNum := strings.ReplaceAll(strNum, "_", "")
 	parsed, err := strconv.ParseInt(cleanNum, 10, 64)
 	if err != nil {
 		panic(fmt.Errorf("%w, str: %s", err, strNum))
 	}
-	return int(parsed)
+	return parsed
+}
+
+func MustParseUint(strNum string) uint64 {
+	cleanNum := strings.ReplaceAll(strNum, "_", "")
+	parsed, err := strconv.ParseUint(cleanNum, 10, 64)
+	if err != nil {
+		panic(fmt.Errorf("%w, str: %s", err, strNum))
+	}
+	return parsed
 }

@@ -82,7 +82,7 @@ type TxTask struct {
 	TraceFroms         map[common.Address]struct{}
 	TraceTos           map[common.Address]struct{}
 
-	UsedGas uint64
+	GasUsed uint64
 
 	// BlockReceipts is used only by Gnosis:
 	//  - it does store `proof, err := rlp.EncodeToBytes(ValidatorSetProof{Header: header, Receipts: r})`
@@ -144,8 +144,8 @@ func (t *TxTask) CreateReceipt(tx kv.TemporalTx) {
 		}
 	}
 
-	cumulativeGasUsed += t.UsedGas
-	if t.UsedGas == 0 {
+	cumulativeGasUsed += t.GasUsed
+	if t.GasUsed == 0 {
 		msg := fmt.Sprintf("no gas used stack: %s tx %+v", dbg.Stack(), t.Tx)
 		panic(msg)
 	}
@@ -166,7 +166,7 @@ func (t *TxTask) createReceipt(cumulativeGasUsed uint64, firstLogIndex uint32) *
 		BlockHash:         t.BlockHash,
 		TransactionIndex:  uint(t.TxIndex),
 		Type:              t.Tx.Type(),
-		GasUsed:           t.UsedGas,
+		GasUsed:           t.GasUsed,
 		CumulativeGasUsed: cumulativeGasUsed,
 		TxHash:            t.Tx.Hash(),
 		Logs:              t.Logs,

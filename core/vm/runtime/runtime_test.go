@@ -232,9 +232,9 @@ func BenchmarkCall(b *testing.B) {
 	db := testTemporalDB(b)
 	tx, sd := testTemporalTxSD(b, db)
 	defer tx.Rollback()
-	cfg.r = state.NewReaderV3(sd)
-	cfg.w = state.NewWriter(sd, nil)
-	cfg.State = state.New(cfg.r)
+	//cfg.w = state.NewWriter(sd, nil)
+	cfg.State = state.New(state.NewReaderV3(sd))
+	cfg.EVMConfig.JumpDestCache = vm.NewJumpDestCache(128)
 
 	tmpdir := b.TempDir()
 	b.ResetTimer()
@@ -285,7 +285,9 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 			TangerineWhistleBlock: new(big.Int),
 			SpuriousDragonBlock:   new(big.Int),
 		},
-		EVMConfig: vm.Config{},
+		EVMConfig: vm.Config{
+			JumpDestCache: vm.NewJumpDestCache(128),
+		},
 	}
 	// Warm up the intpools and stuff
 	b.ResetTimer()

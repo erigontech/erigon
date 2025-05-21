@@ -81,8 +81,8 @@ var (
 	jumpDestCacheTrace = dbg.EnvBool("JD_LRU_TRACE", false)
 )
 
-func NewJumpDestCache() *JumpDestCache {
-	c, err := simplelru.NewLRU[common.Hash, bitvec](jumpDestCacheLimit, nil)
+func NewJumpDestCache(limit int) *JumpDestCache {
+	c, err := simplelru.NewLRU[common.Hash, bitvec](limit, nil)
 	if err != nil {
 		panic(err)
 	}

@@ -443,16 +443,14 @@ func ExecV3(ctx context.Context,
 	agg.BuildFilesInBackground(outputTxNum.Load())
 
 	var readAhead chan uint64
-	if !parallel {
+	if !isMining && !inMemExec && execStage.CurrentSyncCycle.IsInitialCycle {
 		// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 		// can't use OS-level ReadAhead - because Data >> RAM
 		// it also warmsup state a bit - by touching senders/coninbase accounts and code
-		if !execStage.CurrentSyncCycle.IsInitialCycle {
-			var clean func()
+		var clean func()
 
-			readAhead, clean = blocksReadAhead(ctx, &cfg, 4, true)
-			defer clean()
-		}
+		readAhead, clean = blocksReadAhead(ctx, &cfg, 4, true)
+		defer clean()
 	}
 
 	var b *types.Block
@@ -554,7 +552,7 @@ Loop:
 		// Thus, we need to skip the first txs in the block, however, this causes the GasUsed to be incorrect.
 		// So we skip that check for the first block, if we find half-executed data.
 		skipPostEvaluation := false
-		var usedGas uint64
+		var gasUsed uint64
 		var txTasks []*state.TxTask
 		var validationResults []state.AAValidationResult
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
@@ -584,8 +582,8 @@ Loop:
 
 				ValidationResults: validationResults,
 			}
-			if txTask.HistoryExecution && usedGas == 0 {
-				usedGas, _, _, err = rawtemporaldb.ReceiptAsOf(executor.tx().(kv.TemporalTx), txTask.TxNum)
+			if txTask.HistoryExecution && gasUsed == 0 {
+				gasUsed, _, _, err = rawtemporaldb.ReceiptAsOf(executor.tx().(kv.TemporalTx), txTask.TxNum)
 				if err != nil {
 					if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
 						hooks.OnBlockEnd(err)
@@ -609,14 +607,12 @@ Loop:
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
 
-				if txTask.Tx.Type() != types.AccountAbstractionTxType {
-					txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
-					if err != nil {
-						if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
-							hooks.OnBlockEnd(err)
-						}
-						return err
+				txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
+				if err != nil {
+					if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
+						hooks.OnBlockEnd(err)
 					}
+					return err
 				}
 			}
 
@@ -679,9 +675,9 @@ Loop:
 			}
 
 			count += uint64(len(txTasks))
-			logGas += se.usedGas
+			logGas += se.gasUsed
 
-			se.usedGas = 0
+			se.gasUsed = 0
 			se.blobGasUsed = 0
 
 			if !continueLoop {
@@ -985,8 +981,8 @@ func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader ser
 	if b == nil {
 		return nil, nil
 	}
-	for _, txn := range b.Transactions() {
-		_ = txn.Hash()
-	}
+	//for _, txn := range b.Transactions() {
+	//	_ = txn.Hash()
+	//}
 	return b, err
 }
