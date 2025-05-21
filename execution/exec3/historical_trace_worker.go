@@ -183,7 +183,11 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 			if err != nil {
 				return nil, err
 			}
-			txTask.Logs = append(txTask.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
+			rl := ibs.GetRawLogs(txTask.TxIndex)
+			if txTask.BlockNum == 2566653 {
+				fmt.Printf("[dbg] syscall logs: len=%d, bn=%d, txidx=%d\n", len(rl), txTask.BlockNum, txTask.TxIndex)
+			}
+			txTask.Logs = append(txTask.Logs, rl...)
 			return res, nil
 		}
 
