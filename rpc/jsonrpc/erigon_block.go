@@ -202,7 +202,7 @@ func buildBlockResponse(ctx context.Context, br services.FullBlockReader, db kv.
 
 	additionalFields := make(map[string]interface{})
 
-	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, nil, common.Hash{}, additionalFields, chainConfig)
+	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, nil, common.Hash{}, additionalFields, chainConfig.IsArbitrumNitro(block.Number()))
 
 	if err == nil && rpc.BlockNumber(block.NumberU64()) == rpc.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields

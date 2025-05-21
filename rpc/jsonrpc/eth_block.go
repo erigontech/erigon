@@ -256,7 +256,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 		}
 	}
 
-	response, err := ethapi.RPCMarshalBlockEx(b, true, fullTx, borTx, borTxHash, additionalFields, chainConfig)
+	response, err := ethapi.RPCMarshalBlockEx(b, true, fullTx, borTx, borTxHash, additionalFields, chainConfig.IsArbitrumNitro(b.Number()))
 	api.checkAndFillArbClassicL1BlockNumber(ctx, b, response, chainConfig, tx)
 
 	if err == nil && number == rpc.PendingBlockNumber {
@@ -324,7 +324,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 		}
 	}
 
-	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, borTx, borTxHash, additionalFields, chainConfig)
+	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, borTx, borTxHash, additionalFields, chainConfig.IsArbitrumNitro(block.Number()))
 	api.checkAndFillArbClassicL1BlockNumber(ctx, block, response, chainConfig, tx)
 
 	if err == nil && int64(number) == rpc.PendingBlockNumber.Int64() {
@@ -348,6 +348,10 @@ func (api *APIImpl) checkAndFillArbClassicL1BlockNumber(ctx context.Context, blo
 	}
 }
 
+// L1 block number is different in Arbitrum Classic than in Nitro.
+// In Classic, the L1 block number is stored in the first transaction of the block, excluding empty or filler blocks(for example during reorg),
+// so it is needed to traverse the chain backwards until a block with transactions is found.
+// https://github.com/OffchainLabs/go-ethereum/blob/25fc5f0842584e72455e4d60a61f035623b1aba0/internal/ethapi/api.go#L1098-L1125
 func (api *APIImpl) fillArbClassicL1BlockNumber(ctx context.Context, block *types.Block, tx kv.Tx) (hexutil.Uint64, error) {
 	startBlockNum := block.Number().Int64()
 	blockNum := startBlockNum

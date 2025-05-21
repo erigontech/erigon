@@ -244,7 +244,7 @@ func TestGetBlockByTimestampLatestTime(t *testing.T) {
 	assert.NoError(t, err)
 	latestBlock, err := m.BlockReader.CurrentBlock(tx)
 	require.NoError(t, err)
-	response, err := ethapi.RPCMarshalBlockDeprecated(latestBlock, true, false, chainConfig)
+	response, err := ethapi.RPCMarshalBlockDeprecated(latestBlock, true, false, chainConfig.IsArbitrumNitro(latestBlock.Number()))
 
 	if err != nil {
 		t.Error("couldn't get the rpc marshal block")
@@ -284,7 +284,7 @@ func TestGetBlockByTimestampOldestTime(t *testing.T) {
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	assert.NoError(t, err)
-	response, err := ethapi.RPCMarshalBlockDeprecated(oldestBlock, true, false, chainConfig)
+	response, err := ethapi.RPCMarshalBlockDeprecated(oldestBlock, true, false, chainConfig.IsArbitrumNitro(oldestBlock.Number()))
 
 	if err != nil {
 		t.Error("couldn't get the rpc marshal block")
@@ -322,7 +322,7 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	assert.NoError(t, err)
-	response, err := ethapi.RPCMarshalBlockDeprecated(latestBlock, true, false, chainConfig)
+	response, err := ethapi.RPCMarshalBlockDeprecated(latestBlock, true, false, chainConfig.IsArbitrumNitro(latestBlock.Number()))
 
 	if err != nil {
 		t.Error("couldn't get the rpc marshal block")
@@ -372,7 +372,7 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	assert.NoError(t, err)
-	response, err := ethapi.RPCMarshalBlockDeprecated(middleBlock, true, false, chainConfig)
+	response, err := ethapi.RPCMarshalBlockDeprecated(middleBlock, true, false, chainConfig.IsArbitrumNitro(middleBlock.Number()))
 
 	if err != nil {
 		t.Error("couldn't get the rpc marshal block")
@@ -415,7 +415,7 @@ func TestGetBlockByTimestamp(t *testing.T) {
 	}
 	chainConfig, err := api.chainConfig(ctx, tx)
 	assert.NoError(t, err)
-	response, err := ethapi.RPCMarshalBlockDeprecated(pickedBlock, true, false, chainConfig)
+	response, err := ethapi.RPCMarshalBlockDeprecated(pickedBlock, true, false, chainConfig.IsArbitrumNitro(pickedBlock.Number()))
 
 	if err != nil {
 		t.Error("couldn't get the rpc marshal block")
