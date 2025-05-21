@@ -47,6 +47,44 @@ func (a *Aggregator) DebugBeginDirtyFilesRo() *aggDirtyFilesRoTx {
 	return ac
 }
 
+func (ac *aggDirtyFilesRoTx) MadvNormal() *aggDirtyFilesRoTx {
+	for _, d := range ac.domain {
+		for _, f := range d.files {
+			f.MadvNormal()
+		}
+		for _, f := range d.history.files {
+			f.MadvNormal()
+		}
+		for _, f := range d.history.ii.files {
+			f.MadvNormal()
+		}
+	}
+	for _, ii := range ac.ii {
+		for _, f := range ii.files {
+			f.MadvNormal()
+		}
+	}
+	return ac
+}
+func (ac *aggDirtyFilesRoTx) DisableReadAhead() {
+	for _, d := range ac.domain {
+		for _, f := range d.files {
+			f.DisableReadAhead()
+		}
+		for _, f := range d.history.files {
+			f.DisableReadAhead()
+		}
+		for _, f := range d.history.ii.files {
+			f.DisableReadAhead()
+		}
+	}
+	for _, ii := range ac.ii {
+		for _, f := range ii.files {
+			f.DisableReadAhead()
+		}
+	}
+}
+
 func (ac *aggDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorAggFiles) {
 	mf = &MissedAccessorAggFiles{
 		domain: make(map[kv.Domain]*MissedAccessorDomainFiles),

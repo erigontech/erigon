@@ -267,6 +267,9 @@ func (a *Aggregator) ReloadSalt() error {
 }
 
 func (a *Aggregator) AddDependency(dependency kv.Domain, dependent kv.Domain) {
+	// "hard alignment":
+	// only corresponding files should be included. e.g. commitment + account -
+	// cannot have merged account visibleFile, and unmerged commitment visibleFile for same step range.
 	if a.checker == nil {
 		a.checker = NewDependencyIntegrityChecker(a.dirs, a.logger)
 	}
@@ -277,6 +280,26 @@ func (a *Aggregator) AddDependency(dependency kv.Domain, dependent kv.Domain) {
 		accessors:   a.d[dependent].Accessors,
 	})
 	a.d[dependency].SetDependency(a.checker)
+}
+
+func (a *Aggregator) EnableAllDependencies() {
+	if a.checker == nil {
+		return
+	}
+	a.checker.Enable()
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
+}
+
+func (a *Aggregator) DisableAllDependencies() {
+	if a.checker == nil {
+		return
+	}
+	a.checker.Disable()
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
 }
 
 func (a *Aggregator) OpenFolder() error {
@@ -849,9 +872,10 @@ func (at *AggregatorRoTx) TxNumsInFiles(entitySet ...kv.Domain) (minTxNum uint64
 	if len(entitySet) == 0 {
 		panic("assert: missed arguments")
 	}
-	for i, domain := range entitySet {
+	minTxNum = math.MaxUint64
+	for _, domain := range entitySet {
 		domainEnd := at.d[domain].files.EndTxNum()
-		if i == 0 || domainEnd < minTxNum {
+		if domainEnd < minTxNum {
 			minTxNum = domainEnd
 		}
 	}
