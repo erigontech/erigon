@@ -24,7 +24,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/big"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -174,10 +173,6 @@ func New(
 	cfg txpoolcfg.Config,
 	cache kvcache.Cache,
 	chainConfig *chain.Config,
-	shanghaiTime *big.Int,
-	agraBlock *big.Int,
-	cancunTime *big.Int,
-	pragueTime *big.Int,
 	sentryClients []sentryproto.SentryClient,
 	stateChangesClient StateChangesClient,
 	builderNotifyNewTxns func(),
@@ -249,32 +244,35 @@ func New(
 		}),
 	}
 
-	if shanghaiTime != nil {
-		if !shanghaiTime.IsUint64() {
+	if chainConfig.ShanghaiTime != nil {
+		if !chainConfig.ShanghaiTime.IsUint64() {
 			return nil, errors.New("shanghaiTime overflow")
 		}
-		shanghaiTimeU64 := shanghaiTime.Uint64()
+		shanghaiTimeU64 := chainConfig.ShanghaiTime.Uint64()
 		res.shanghaiTime = &shanghaiTimeU64
 	}
-	if agraBlock != nil {
-		if !agraBlock.IsUint64() {
-			return nil, errors.New("agraBlock overflow")
+	if chainConfig.Bor != nil {
+		agraBlock := chainConfig.Bor.GetAgraBlock()
+		if agraBlock != nil {
+			if !agraBlock.IsUint64() {
+				return nil, errors.New("agraBlock overflow")
+			}
+			agraBlockU64 := agraBlock.Uint64()
+			res.agraBlock = &agraBlockU64
 		}
-		agraBlockU64 := agraBlock.Uint64()
-		res.agraBlock = &agraBlockU64
 	}
-	if cancunTime != nil {
-		if !cancunTime.IsUint64() {
+	if chainConfig.CancunTime != nil {
+		if !chainConfig.CancunTime.IsUint64() {
 			return nil, errors.New("cancunTime overflow")
 		}
-		cancunTimeU64 := cancunTime.Uint64()
+		cancunTimeU64 := chainConfig.CancunTime.Uint64()
 		res.cancunTime = &cancunTimeU64
 	}
-	if pragueTime != nil {
-		if !pragueTime.IsUint64() {
+	if chainConfig.PragueTime != nil {
+		if !chainConfig.PragueTime.IsUint64() {
 			return nil, errors.New("pragueTime overflow")
 		}
-		pragueTimeU64 := pragueTime.Uint64()
+		pragueTimeU64 := chainConfig.PragueTime.Uint64()
 		res.pragueTime = &pragueTimeU64
 	}
 
