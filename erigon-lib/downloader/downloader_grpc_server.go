@@ -96,7 +96,7 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 
 		// TODO: I'm not sure this context is right here. The torrent should become bound to the
 		// Downloader, not the caller here.
-		if err := s.d.addPreverifiedTorrent(ctx, Proto2InfoHash(it.TorrentHash), it.Path); err != nil {
+		if err := s.d.addPreverifiedTorrent(Proto2InfoHash(it.TorrentHash), it.Path); err != nil {
 			return nil, err
 		}
 	}

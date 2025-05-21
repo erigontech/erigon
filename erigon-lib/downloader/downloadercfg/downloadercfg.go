@@ -18,6 +18,7 @@ package downloadercfg
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -307,11 +308,22 @@ func LoadSnapshotsHashes(ctx context.Context, dirs datadir.Dirs, chainName strin
 			log.Root().Crit("Snapshot hashes for supported networks was not loaded. Please check your network connection and/or GitHub status here https://www.githubstatus.com/", "chain", chainName)
 			return nil, fmt.Errorf("remote snapshot hashes was not fetched for chain %s", chainName)
 		}
-		if err := dir.WriteFileWithFsync(preverifiedPath, snapcfg.GetToml(chainName), 0644); err != nil {
-			return nil, err
-		}
 	}
 	return snapcfg.KnownCfg(chainName), nil
+}
+
+// Saves snapshot hashes. This is done only after the full set of snapshots is completed so that
+// clients that don't complete are able to restart from a newer snapshot in case files go missing
+// from the network. Should only occur when full preverified snapshot is complete. Probably doesn't
+// belong in this package, and neither does LoadSnapshotHashes.
+func SaveSnapshotHashes(dirs datadir.Dirs, chainName string) (err error) {
+	preverifiedPath := filepath.Join(dirs.Snap, "preverified.toml")
+	// TODO: Should the file data be checked to match?
+	err = dir.WriteExclusiveFileWithFsync(preverifiedPath, snapcfg.GetToml(chainName), 0o444)
+	if errors.Is(err, os.ErrExist) {
+		err = nil
+	}
+	return
 }
 
 func getIpv6Enabled() bool {

@@ -20,21 +20,17 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Downloader_ProhibitNewDownloads_FullMethodName = "/downloader.Downloader/ProhibitNewDownloads"
-	Downloader_Add_FullMethodName                  = "/downloader.Downloader/Add"
-	Downloader_Delete_FullMethodName               = "/downloader.Downloader/Delete"
-	Downloader_SetLogPrefix_FullMethodName         = "/downloader.Downloader/SetLogPrefix"
-	Downloader_Completed_FullMethodName            = "/downloader.Downloader/Completed"
+	Downloader_Add_FullMethodName               = "/downloader.Downloader/Add"
+	Downloader_Delete_FullMethodName            = "/downloader.Downloader/Delete"
+	Downloader_SetLogPrefix_FullMethodName      = "/downloader.Downloader/SetLogPrefix"
+	Downloader_Completed_FullMethodName         = "/downloader.Downloader/Completed"
+	Downloader_CommitPreverified_FullMethodName = "/downloader.Downloader/CommitPreverified"
 )
 
 // DownloaderClient is the client API for Downloader service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type DownloaderClient interface {
-	// Erigon "download once" - means restart/upgrade/downgrade will not download files (and will be fast)
-	// After "download once" - Erigon will produce and seed new files
-	// Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
-	ProhibitNewDownloads(ctx context.Context, in *ProhibitNewDownloadsRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	// Adding new file to downloader: non-existing files it will download, existing - seed
 	Add(ctx context.Context, in *AddRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	Delete(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
@@ -42,6 +38,7 @@ type DownloaderClient interface {
 	SetLogPrefix(ctx context.Context, in *SetLogPrefixRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	// Get is download completed
 	Completed(ctx context.Context, in *CompletedRequest, opts ...grpc.CallOption) (*CompletedReply, error)
+	CommitPreverified(ctx context.Context, in *CommitPreverifiedRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 }
 
 type downloaderClient struct {
@@ -50,16 +47,6 @@ type downloaderClient struct {
 
 func NewDownloaderClient(cc grpc.ClientConnInterface) DownloaderClient {
 	return &downloaderClient{cc}
-}
-
-func (c *downloaderClient) ProhibitNewDownloads(ctx context.Context, in *ProhibitNewDownloadsRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(emptypb.Empty)
-	err := c.cc.Invoke(ctx, Downloader_ProhibitNewDownloads_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 func (c *downloaderClient) Add(ctx context.Context, in *AddRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
@@ -102,14 +89,20 @@ func (c *downloaderClient) Completed(ctx context.Context, in *CompletedRequest, 
 	return out, nil
 }
 
+func (c *downloaderClient) CommitPreverified(ctx context.Context, in *CommitPreverifiedRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, Downloader_CommitPreverified_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DownloaderServer is the server API for Downloader service.
 // All implementations must embed UnimplementedDownloaderServer
 // for forward compatibility.
 type DownloaderServer interface {
-	// Erigon "download once" - means restart/upgrade/downgrade will not download files (and will be fast)
-	// After "download once" - Erigon will produce and seed new files
-	// Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
-	ProhibitNewDownloads(context.Context, *ProhibitNewDownloadsRequest) (*emptypb.Empty, error)
 	// Adding new file to downloader: non-existing files it will download, existing - seed
 	Add(context.Context, *AddRequest) (*emptypb.Empty, error)
 	Delete(context.Context, *DeleteRequest) (*emptypb.Empty, error)
@@ -117,6 +110,7 @@ type DownloaderServer interface {
 	SetLogPrefix(context.Context, *SetLogPrefixRequest) (*emptypb.Empty, error)
 	// Get is download completed
 	Completed(context.Context, *CompletedRequest) (*CompletedReply, error)
+	CommitPreverified(context.Context, *CommitPreverifiedRequest) (*emptypb.Empty, error)
 	mustEmbedUnimplementedDownloaderServer()
 }
 
@@ -127,9 +121,6 @@ type DownloaderServer interface {
 // pointer dereference when methods are called.
 type UnimplementedDownloaderServer struct{}
 
-func (UnimplementedDownloaderServer) ProhibitNewDownloads(context.Context, *ProhibitNewDownloadsRequest) (*emptypb.Empty, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method ProhibitNewDownloads not implemented")
-}
 func (UnimplementedDownloaderServer) Add(context.Context, *AddRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Add not implemented")
 }
@@ -141,6 +132,9 @@ func (UnimplementedDownloaderServer) SetLogPrefix(context.Context, *SetLogPrefix
 }
 func (UnimplementedDownloaderServer) Completed(context.Context, *CompletedRequest) (*CompletedReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Completed not implemented")
+}
+func (UnimplementedDownloaderServer) CommitPreverified(context.Context, *CommitPreverifiedRequest) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CommitPreverified not implemented")
 }
 func (UnimplementedDownloaderServer) mustEmbedUnimplementedDownloaderServer() {}
 func (UnimplementedDownloaderServer) testEmbeddedByValue()                    {}
@@ -161,24 +155,6 @@ func RegisterDownloaderServer(s grpc.ServiceRegistrar, srv DownloaderServer) {
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&Downloader_ServiceDesc, srv)
-}
-
-func _Downloader_ProhibitNewDownloads_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ProhibitNewDownloadsRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DownloaderServer).ProhibitNewDownloads(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Downloader_ProhibitNewDownloads_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DownloaderServer).ProhibitNewDownloads(ctx, req.(*ProhibitNewDownloadsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
 }
 
 func _Downloader_Add_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -253,6 +229,24 @@ func _Downloader_Completed_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Downloader_CommitPreverified_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CommitPreverifiedRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DownloaderServer).CommitPreverified(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Downloader_CommitPreverified_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DownloaderServer).CommitPreverified(ctx, req.(*CommitPreverifiedRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Downloader_ServiceDesc is the grpc.ServiceDesc for Downloader service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -260,10 +254,6 @@ var Downloader_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "downloader.Downloader",
 	HandlerType: (*DownloaderServer)(nil),
 	Methods: []grpc.MethodDesc{
-		{
-			MethodName: "ProhibitNewDownloads",
-			Handler:    _Downloader_ProhibitNewDownloads_Handler,
-		},
 		{
 			MethodName: "Add",
 			Handler:    _Downloader_Add_Handler,
@@ -279,6 +269,10 @@ var Downloader_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Completed",
 			Handler:    _Downloader_Completed_Handler,
+		},
+		{
+			MethodName: "CommitPreverified",
+			Handler:    _Downloader_CommitPreverified_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

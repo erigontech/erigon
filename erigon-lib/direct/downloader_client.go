@@ -20,13 +20,18 @@ import (
 	"context"
 	"io"
 
-	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 )
 
 type DownloaderClient struct {
 	server proto_downloader.DownloaderServer
+}
+
+func (c *DownloaderClient) CommitPreverified(ctx context.Context, in *proto_downloader.CommitPreverifiedRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	return c.server.CommitPreverified(ctx, in)
 }
 
 func NewDownloaderClient(server proto_downloader.DownloaderServer) *DownloaderClient {
@@ -37,9 +42,6 @@ func (c *DownloaderClient) Add(ctx context.Context, in *proto_downloader.AddRequ
 	return c.server.Add(ctx, in)
 }
 
-func (c *DownloaderClient) ProhibitNewDownloads(ctx context.Context, in *proto_downloader.ProhibitNewDownloadsRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-	return c.server.ProhibitNewDownloads(ctx, in)
-}
 func (c *DownloaderClient) Delete(ctx context.Context, in *proto_downloader.DeleteRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	return c.server.Delete(ctx, in)
 }

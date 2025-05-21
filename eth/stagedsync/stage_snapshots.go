@@ -35,8 +35,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/anacrolix/torrent"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/anacrolix/torrent"
+	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
@@ -310,6 +312,14 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cfg.snapshotDownloader,
 		cfg.syncConfig,
 	); err != nil {
+		return err
+	}
+
+	// All snapshots are downloaded. Now commit the preverified.toml file so we load the same set of
+	// hashes next time.
+	err := downloadercfg.SaveSnapshotHashes(cfg.dirs, cfg.chainConfig.ChainName)
+	if err != nil {
+		err = fmt.Errorf("saving snapshot hashes: %w", err)
 		return err
 	}
 

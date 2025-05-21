@@ -470,6 +470,50 @@ func (x *TorrentCompletedReply) GetHash() *typesproto.H160 {
 	return nil
 }
 
+type CommitPreverifiedRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TomlBytes     []byte                 `protobuf:"bytes,1,opt,name=toml_bytes,json=tomlBytes,proto3" json:"toml_bytes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CommitPreverifiedRequest) Reset() {
+	*x = CommitPreverifiedRequest{}
+	mi := &file_downloader_downloader_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CommitPreverifiedRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CommitPreverifiedRequest) ProtoMessage() {}
+
+func (x *CommitPreverifiedRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_downloader_downloader_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CommitPreverifiedRequest.ProtoReflect.Descriptor instead.
+func (*CommitPreverifiedRequest) Descriptor() ([]byte, []int) {
+	return file_downloader_downloader_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *CommitPreverifiedRequest) GetTomlBytes() []byte {
+	if x != nil {
+		return x.TomlBytes
+	}
+	return nil
+}
+
 var File_downloader_downloader_proto protoreflect.FileDescriptor
 
 const file_downloader_downloader_proto_rawDesc = "" +
@@ -496,14 +540,17 @@ const file_downloader_downloader_proto_rawDesc = "" +
 	"\x17TorrentCompletedRequest\"L\n" +
 	"\x15TorrentCompletedReply\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1f\n" +
-	"\x04hash\x18\x02 \x01(\v2\v.types.H160R\x04hash2\xf3\x02\n" +
+	"\x04hash\x18\x02 \x01(\v2\v.types.H160R\x04hash\"9\n" +
+	"\x18CommitPreverifiedRequest\x12\x1d\n" +
 	"\n" +
-	"Downloader\x12Y\n" +
-	"\x14ProhibitNewDownloads\x12'.downloader.ProhibitNewDownloadsRequest\x1a\x16.google.protobuf.Empty\"\x00\x127\n" +
+	"toml_bytes\x18\x01 \x01(\fR\ttomlBytes2\xed\x02\n" +
+	"\n" +
+	"Downloader\x127\n" +
 	"\x03Add\x12\x16.downloader.AddRequest\x1a\x16.google.protobuf.Empty\"\x00\x12=\n" +
 	"\x06Delete\x12\x19.downloader.DeleteRequest\x1a\x16.google.protobuf.Empty\"\x00\x12I\n" +
 	"\fSetLogPrefix\x12\x1f.downloader.SetLogPrefixRequest\x1a\x16.google.protobuf.Empty\"\x00\x12G\n" +
-	"\tCompleted\x12\x1c.downloader.CompletedRequest\x1a\x1a.downloader.CompletedReply\"\x00B\x1eZ\x1c./downloader;downloaderprotob\x06proto3"
+	"\tCompleted\x12\x1c.downloader.CompletedRequest\x1a\x1a.downloader.CompletedReply\"\x00\x12S\n" +
+	"\x11CommitPreverified\x12$.downloader.CommitPreverifiedRequest\x1a\x16.google.protobuf.Empty\"\x00B\x1eZ\x1c./downloader;downloaderprotob\x06proto3"
 
 var (
 	file_downloader_downloader_proto_rawDescOnce sync.Once
@@ -517,7 +564,7 @@ func file_downloader_downloader_proto_rawDescGZIP() []byte {
 	return file_downloader_downloader_proto_rawDescData
 }
 
-var file_downloader_downloader_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_downloader_downloader_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_downloader_downloader_proto_goTypes = []any{
 	(*AddItem)(nil),                     // 0: downloader.AddItem
 	(*AddRequest)(nil),                  // 1: downloader.AddRequest
@@ -529,23 +576,24 @@ var file_downloader_downloader_proto_goTypes = []any{
 	(*CompletedReply)(nil),              // 7: downloader.CompletedReply
 	(*TorrentCompletedRequest)(nil),     // 8: downloader.TorrentCompletedRequest
 	(*TorrentCompletedReply)(nil),       // 9: downloader.TorrentCompletedReply
-	(*typesproto.H160)(nil),             // 10: types.H160
-	(*emptypb.Empty)(nil),               // 11: google.protobuf.Empty
+	(*CommitPreverifiedRequest)(nil),    // 10: downloader.CommitPreverifiedRequest
+	(*typesproto.H160)(nil),             // 11: types.H160
+	(*emptypb.Empty)(nil),               // 12: google.protobuf.Empty
 }
 var file_downloader_downloader_proto_depIdxs = []int32{
-	10, // 0: downloader.AddItem.torrent_hash:type_name -> types.H160
+	11, // 0: downloader.AddItem.torrent_hash:type_name -> types.H160
 	0,  // 1: downloader.AddRequest.items:type_name -> downloader.AddItem
-	10, // 2: downloader.TorrentCompletedReply.hash:type_name -> types.H160
-	4,  // 3: downloader.Downloader.ProhibitNewDownloads:input_type -> downloader.ProhibitNewDownloadsRequest
-	1,  // 4: downloader.Downloader.Add:input_type -> downloader.AddRequest
-	2,  // 5: downloader.Downloader.Delete:input_type -> downloader.DeleteRequest
-	5,  // 6: downloader.Downloader.SetLogPrefix:input_type -> downloader.SetLogPrefixRequest
-	6,  // 7: downloader.Downloader.Completed:input_type -> downloader.CompletedRequest
-	11, // 8: downloader.Downloader.ProhibitNewDownloads:output_type -> google.protobuf.Empty
-	11, // 9: downloader.Downloader.Add:output_type -> google.protobuf.Empty
-	11, // 10: downloader.Downloader.Delete:output_type -> google.protobuf.Empty
-	11, // 11: downloader.Downloader.SetLogPrefix:output_type -> google.protobuf.Empty
-	7,  // 12: downloader.Downloader.Completed:output_type -> downloader.CompletedReply
+	11, // 2: downloader.TorrentCompletedReply.hash:type_name -> types.H160
+	1,  // 3: downloader.Downloader.Add:input_type -> downloader.AddRequest
+	2,  // 4: downloader.Downloader.Delete:input_type -> downloader.DeleteRequest
+	5,  // 5: downloader.Downloader.SetLogPrefix:input_type -> downloader.SetLogPrefixRequest
+	6,  // 6: downloader.Downloader.Completed:input_type -> downloader.CompletedRequest
+	10, // 7: downloader.Downloader.CommitPreverified:input_type -> downloader.CommitPreverifiedRequest
+	12, // 8: downloader.Downloader.Add:output_type -> google.protobuf.Empty
+	12, // 9: downloader.Downloader.Delete:output_type -> google.protobuf.Empty
+	12, // 10: downloader.Downloader.SetLogPrefix:output_type -> google.protobuf.Empty
+	7,  // 11: downloader.Downloader.Completed:output_type -> downloader.CompletedReply
+	12, // 12: downloader.Downloader.CommitPreverified:output_type -> google.protobuf.Empty
 	8,  // [8:13] is the sub-list for method output_type
 	3,  // [3:8] is the sub-list for method input_type
 	3,  // [3:3] is the sub-list for extension type_name
@@ -564,7 +612,7 @@ func file_downloader_downloader_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_downloader_downloader_proto_rawDesc), len(file_downloader_downloader_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -226,36 +226,6 @@ func (tf *AtomicTorrentFS) prohibitNewDownloads(t string) error {
 	return f.Sync()
 }
 
-func (tf *AtomicTorrentFS) NewDownloadsAreProhibited(name string) (bool, error) {
-	tf.lock.Lock()
-	defer tf.lock.Unlock()
-	return tf.newDownloadsAreProhibited(name)
-}
-
-func (tf *AtomicTorrentFS) newDownloadsAreProhibited(name string) (bool, error) {
-	f, err := os.OpenFile(filepath.Join(tf.dir, ProhibitNewDownloadsFileName), os.O_CREATE|os.O_RDONLY, 0644)
-	if err != nil {
-		return false, err
-	}
-	defer f.Close()
-	var prohibitedList []string
-	torrentListJsonBytes, err := io.ReadAll(f)
-	if err != nil {
-		return false, fmt.Errorf("NewDownloadsAreProhibited: read file: %w", err)
-	}
-	if len(torrentListJsonBytes) > 0 {
-		if err := json.Unmarshal(torrentListJsonBytes, &prohibitedList); err != nil {
-			return false, fmt.Errorf("NewDownloadsAreProhibited: unmarshal: %w", err)
-		}
-	}
-	for _, p := range prohibitedList {
-		if strings.Contains(name, p) {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
 func (tf *AtomicTorrentFS) nameToPath(name string) string {
 	// Names are unix-style paths, and we need to convert them to the local path format.
 	return filepath.Join(tf.dir, filepath.FromSlash(name))

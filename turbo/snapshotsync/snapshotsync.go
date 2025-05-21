@@ -448,67 +448,6 @@ func WaitForDownloader(
 		return err
 	}
 
-	// ProhibitNewDownloads implies - so only make the download request once,
-	//
-	// Erigon "download once" - means restart/upgrade/downgrade will not download files (and will be fast)
-	// After "download once" - Erigon will produce and seed new files
-	// Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
-	//
-	// after the initial call the downloader or snapshot-lock.file will prevent this download from running
-	//
-
-	// prohibit new downloads for the files that were downloaded
-
-	// If we only download headers and bodies, we should prohibit only those.
-	if headerchain {
-		if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
-			Type: coresnaptype.Bodies.Name(),
-		}); err != nil {
-			return err
-		}
-		if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
-			Type: coresnaptype.Headers.Name(),
-		}); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	// prohibits further downloads, except some exceptions
-	for _, p := range blockReader.AllTypes() {
-		if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
-			Type: p.Name(),
-		}); err != nil {
-			return err
-		}
-	}
-	for _, p := range coresnaptype.E3StateTypes {
-		snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
-			Type: p.Name(),
-		})
-	}
-
-	if caplin != NoCaplin {
-		for _, p := range snaptype.CaplinSnapshotTypes {
-			if p.Enum() == snaptype.BlobSidecars.Enum() && !blobs {
-				continue
-			}
-
-			if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
-				Type: p.Name(),
-			}); err != nil {
-				return err
-			}
-		}
-		if caplinState {
-			if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
-				Type: "caplin",
-			}); err != nil {
-				return err
-			}
-		}
-	}
-
 	firstNonGenesis, err := rawdbv3.SecondKey(tx, kv.Headers)
 	if err != nil {
 		return err
