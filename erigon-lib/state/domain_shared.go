@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -115,7 +116,7 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 		tv = commitment.VariantConcurrentHexPatricia
 	}
 
-	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, tx, commitment.ModeDirect, tv)
+	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv)
 
 	if err := sd.SeekCommitment(context.Background(), tx); err != nil {
 		return nil, err
@@ -143,6 +144,23 @@ func (pd *temporalPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte) error
 
 func (sd *SharedDomains) AsPutDel(tx kv.Tx) kv.TemporalPutDel {
 	return &temporalPutDel{sd, tx}
+}
+
+type temporalGetter struct {
+	sd *SharedDomains
+	tx kv.Tx
+}
+
+func (gt *temporalGetter) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err error) {
+	return gt.sd.GetLatest(name, gt.tx, k)
+}
+
+func (gt *temporalGetter) HasPrefix(name kv.Domain, prefix []byte) (firstKey []byte, ok bool, err error) {
+	return gt.sd.HasPrefix(name, prefix, gt.tx)
+}
+
+func (sd *SharedDomains) AsGetter(tx kv.Tx) kv.TemporalGetter {
+	return &temporalGetter{sd, tx}
 }
 
 func (sd *SharedDomains) SetChangesetAccumulator(acc *StateChangeSet) {
@@ -522,7 +540,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, roTx kv.Tx, k []byte) (v []
 		return nil, 0, fmt.Errorf("storage %x read error: unexpected nil tx", k)
 	}
 	if domain == kv.CommitmentDomain {
-		return sd.LatestCommitment(roTx, k)
+		return sd.LatestCommitment(k, roTx)
 	}
 	if v, prevStep, ok := sd.get(domain, k); ok {
 		return v, prevStep, nil

@@ -502,7 +502,7 @@ func TestCommit(t *testing.T) {
 		require.NoError(t, err)
 		loc[0] = byte(i)
 
-		err = domains.DomainPut(kv.StorageDomain, append(common.Copy(addr), loc...), nil, []byte("0401"), nil, 0)
+		err = domains.DomainPut(kv.StorageDomain, tx, append(common.Copy(addr), loc...), nil, []byte("0401"), nil, 0)
 		require.NoError(t, err)
 	}
 

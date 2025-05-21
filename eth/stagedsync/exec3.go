@@ -697,21 +697,7 @@ func ExecV3(ctx context.Context,
 
 	agg.BuildFilesInBackground(outputTxNum.Load())
 
-<<<<<<< HEAD
 	var uncommittedGas int64
-=======
-	var readAhead chan uint64
-	if !isMining && !inMemExec && execStage.CurrentSyncCycle.IsInitialCycle {
-		// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
-		// can't use OS-level ReadAhead - because Data >> RAM
-		// it also warmsup state a bit - by touching senders/coninbase accounts and code
-		var clean func()
-
-		readAhead, clean = blocksReadAhead(ctx, &cfg, 4, true)
-		defer clean()
-	}
-
->>>>>>> main
 	var b *types.Block
 
 	var readAhead chan uint64
@@ -721,7 +707,7 @@ func ExecV3(ctx context.Context,
 	if !execStage.CurrentSyncCycle.IsInitialCycle {
 		var clean func()
 
-		readAhead, clean = blocksReadAhead(ctx, &cfg, 4, true)
+		readAhead, clean = blocksReadAhead(ctx, doms, &cfg, 4, true)
 		defer clean()
 	}
 
@@ -974,145 +960,12 @@ func ExecV3(ctx context.Context,
 		var uncommittedGas int64
 		var flushPending bool
 
-<<<<<<< HEAD
 		err = func() error {
 			defer func() {
 				if rec := recover(); rec != nil {
 					pe.logger.Warn("["+execStage.LogPrefix()+"] rw panic", "rec", rec, "stack", dbg.Stack())
 				} else if err != nil && !errors.Is(err, context.Canceled) {
 					pe.logger.Warn("["+execStage.LogPrefix()+"] rw exit", "err", err)
-=======
-		txs := b.Transactions()
-		header := b.HeaderNoCopy()
-		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
-		signer := *types.MakeSigner(chainConfig, blockNum, header.Time)
-
-		getHashFnMute := &sync.Mutex{}
-		getHashFn := core.GetHashFn(header, func(hash common.Hash, number uint64) (h *types.Header) {
-			getHashFnMute.Lock()
-			defer getHashFnMute.Unlock()
-			return executor.getHeader(ctx, hash, number)
-		})
-		totalGasUsed += b.GasUsed()
-		blockContext := core.NewEVMBlockContext(header, getHashFn, cfg.engine, cfg.author /* author */, chainConfig)
-		gp := new(core.GasPool).AddGas(header.GasLimit).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(b.Time()))
-
-		// print type of engine
-		if parallel {
-			if err := executor.status(ctx, commitThreshold); err != nil {
-				if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
-					hooks.OnBlockEnd(err)
-				}
-				return err
-			}
-		} else if accumulator != nil {
-			txs, err := blockReader.RawTransactions(context.Background(), executor.tx(), b.NumberU64(), b.NumberU64())
-			if err != nil {
-				if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
-					hooks.OnBlockEnd(err)
-				}
-				return err
-			}
-			accumulator.StartChange(header, txs, false)
-		}
-
-		rules := chainConfig.Rules(blockNum, b.Time())
-		blockReceipts := make(types.Receipts, len(txs))
-		// During the first block execution, we may have half-block data in the snapshots.
-		// Thus, we need to skip the first txs in the block, however, this causes the GasUsed to be incorrect.
-		// So we skip that check for the first block, if we find half-executed data.
-		skipPostEvaluation := false
-		var gasUsed uint64
-		var txTasks []*state.TxTask
-		var validationResults []state.AAValidationResult
-		for txIndex := -1; txIndex <= len(txs); txIndex++ {
-			// Do not oversend, wait for the result heap to go under certain size
-			txTask := &state.TxTask{
-				BlockNum:        blockNum,
-				Header:          header,
-				Coinbase:        b.Coinbase(),
-				Uncles:          b.Uncles(),
-				Rules:           rules,
-				Txs:             txs,
-				TxNum:           inputTxNum,
-				TxIndex:         txIndex,
-				BlockHash:       b.Hash(),
-				SkipAnalysis:    skipAnalysis,
-				Final:           txIndex == len(txs),
-				GetHashFn:       getHashFn,
-				EvmBlockContext: blockContext,
-				Withdrawals:     b.Withdrawals(),
-
-				// use history reader instead of state reader to catch up to the tx where we left off
-				HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
-
-				BlockReceipts: blockReceipts,
-
-				Config: chainConfig,
-
-				ValidationResults: validationResults,
-			}
-			if txTask.HistoryExecution && gasUsed == 0 {
-				gasUsed, _, _, err = rawtemporaldb.ReceiptAsOf(executor.tx().(kv.TemporalTx), txTask.TxNum)
-				if err != nil {
-					if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
-						hooks.OnBlockEnd(err)
-					}
-					return err
-				}
-			}
-
-			if cfg.genesis != nil {
-				txTask.Config = cfg.genesis.Config
-			}
-
-			if txTask.TxNum <= txNumInDB && txTask.TxNum > 0 && !cfg.blockProduction {
-				inputTxNum++
-				skipPostEvaluation = true
-				continue
-			}
-			executor.domains().SetTxNum(txTask.TxNum)
-			executor.domains().SetBlockNum(txTask.BlockNum)
-
-			if txIndex >= 0 && txIndex < len(txs) {
-				txTask.Tx = txs[txIndex]
-
-				txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
-				if err != nil {
-					if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
-						hooks.OnBlockEnd(err)
-					}
-					return err
-				}
-			}
-
-			txTasks = append(txTasks, txTask)
-			stageProgress = blockNum
-			inputTxNum++
-		}
-
-		// check for consecutive RIP-7560 sequence
-		var isAASequence bool
-		for _, txTask := range txTasks {
-			txIndex := txTask.TxIndex
-			if txIndex < 0 || txIndex > len(txs)-1 {
-				continue
-			}
-
-			if txTask.Tx.Type() != types.AccountAbstractionTxType {
-				isAASequence = false
-				continue
-			}
-			if isAASequence {
-				continue
-			}
-
-			aaBatchSize := uint64(0)
-			for _, tt := range txTasks {
-				if tt.TxIndex > txIndex && tt.Tx != nil && tt.Tx.Type() == types.AccountAbstractionTxType {
-					aaBatchSize++
-					tt.InBatch = true
->>>>>>> main
 				} else {
 					pe.logger.Debug("[" + execStage.LogPrefix() + "] rw exit")
 				}
@@ -1160,7 +1013,6 @@ func ExecV3(ctx context.Context,
 							lastBlockResult = *applyResult
 						}
 
-<<<<<<< HEAD
 						flushPending = pe.rs.SizeEstimate() > pe.cfg.batchSize.Bytes()
 
 						if !dbg.DiscardCommitment() {
@@ -1187,13 +1039,6 @@ func ExecV3(ctx context.Context,
 										for _, line := range captured {
 											fmt.Println(line)
 										}
-=======
-			count += uint64(len(txTasks))
-			logGas += se.gasUsed
-
-			se.gasUsed = 0
-			se.blobGasUsed = 0
->>>>>>> main
 
 										maxTxIndex := len(applyResult.TxIO.Inputs()) - 1
 
@@ -1265,86 +1110,9 @@ func ExecV3(ctx context.Context,
 
 		executorCancel()
 
-<<<<<<< HEAD
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {
 				return err
-=======
-		if offsetFromBlockBeginning > 0 {
-			// after history execution no offset will be required
-			offsetFromBlockBeginning = 0
-		}
-
-		// MA commitTx
-		if !parallel {
-			select {
-			case <-logEvery.C:
-				if inMemExec || isMining {
-					break
-				}
-
-				stepsInDB := rawdbhelpers.IdxStepsCountV3(executor.tx())
-				progress.Log("", executor.readState(), nil, nil, count, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
-
-				//TODO: https://github.com/erigontech/erigon/issues/10724
-				//if executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).CanPrune(executor.tx(), outputTxNum.Load()) {
-				//	//small prune cause MDBX_TXN_FULL
-				//	if _, err := executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Hour, executor.tx()); err != nil {
-				//		return err
-				//	}
-				//}
-
-				aggregatorRo := executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
-
-				needCalcRoot := executor.readState().SizeEstimate() >= commitThreshold ||
-					skipPostEvaluation || // If we skip post evaluation, then we should compute root hash ASAP for fail-fast
-					aggregatorRo.CanPrune(executor.tx(), outputTxNum.Load()) // if have something to prune - better prune ASAP to keep chaindata smaller
-				if !needCalcRoot {
-					break
-				}
-
-				var (
-					commitStart = time.Now()
-					tt          = time.Now()
-
-					t1, t3 time.Duration
-				)
-
-				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), executor.tx(), executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
-					return err
-				} else if !ok {
-					break Loop
-				}
-
-				t1 = time.Since(tt) + ts
-
-				tt = time.Now()
-
-				// allow greedy prune on non-chain-tip
-				if err = executor.tx().(kv.TemporalRwTx).GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
-					return err
-				}
-
-				if _, err := executor.tx().(kv.TemporalRwTx).PruneSmallBatches(ctx, 10*time.Hour); err != nil {
-					return err
-				}
-				t3 = time.Since(tt)
-
-				t2, err := executor.(*serialExecutor).commit(ctx, inputTxNum, outputBlockNum.GetValueUint64(), useExternalTx)
-				if err != nil {
-					return err
-				}
-
-				// on chain-tip: if batch is full then stop execution - to allow stages commit
-				if !execStage.CurrentSyncCycle.IsInitialCycle {
-					break Loop
-				}
-				logger.Info("Committed", "time", time.Since(commitStart),
-					"block", executor.domains().BlockNum(), "txNum", executor.domains().TxNum(),
-					"step", fmt.Sprintf("%.1f", float64(executor.domains().TxNum())/float64(agg.StepSize())),
-					"flush+commitment", t1, "tx.commit", t2, "prune", t3)
-			default:
->>>>>>> main
 			}
 		}
 
@@ -1545,29 +1313,4 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		}
 	}
 	return true, nil
-<<<<<<< HEAD
-=======
-
-}
-
-func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, blockNum uint64) (b *types.Block, err error) {
-	if tx == nil {
-		tx, err = db.BeginRo(ctx)
-		if err != nil {
-			return nil, err
-		}
-		defer tx.Rollback()
-	}
-	b, err = blockReader.BlockByNumber(ctx, tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-	if b == nil {
-		return nil, nil
-	}
-	//for _, txn := range b.Transactions() {
-	//	_ = txn.Hash()
-	//}
-	return b, err
->>>>>>> main
 }
