@@ -219,3 +219,27 @@ func TestBlobParameterInactiveHardfork(t *testing.T) {
 	assert.Equal(t, uint64(9), c.GetMaxBlobsPerBlock(time))
 	assert.Equal(t, uint64(5007716), c.GetBlobGasPriceUpdateFraction(time))
 }
+
+func TestBlobParameterDencunAndPectraAtGenesis(t *testing.T) {
+	var c Config
+	c.CancunTime = big.NewInt(0)
+	c.PragueTime = big.NewInt(0)
+
+	c.BlobSchedule = map[string]*params.BlobConfig{
+		"cancun": {
+			Target:                3,
+			Max:                   6,
+			BaseFeeUpdateFraction: 3338477,
+		},
+		"prague": {
+			Target:                6,
+			Max:                   9,
+			BaseFeeUpdateFraction: 5007716,
+		},
+	}
+
+	// Prague should take priority
+	assert.Equal(t, 6*params.BlobGasPerBlob, c.GetTargetBlobGasPerBlock(0))
+	assert.Equal(t, uint64(9), c.GetMaxBlobsPerBlock(0))
+	assert.Equal(t, uint64(5007716), c.GetBlobGasPriceUpdateFraction(0))
+}
