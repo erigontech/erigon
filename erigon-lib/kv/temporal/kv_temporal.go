@@ -484,7 +484,7 @@ func (tx *RwTx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, lim
 
 // Write methods
 
-func (tx *tx) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error {
+func (tx *tx) DomainPut(domain kv.Domain, k, v, prevVal []byte, prevStep uint64) error {
 	panic("implement me pls. or use SharedDomains")
 }
 func (tx *tx) DomainDel(domain kv.Domain, k []byte, prevVal []byte, prevStep uint64) error {

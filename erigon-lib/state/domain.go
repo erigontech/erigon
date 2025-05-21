@@ -509,35 +509,35 @@ func (d *Domain) Close() {
 	d.closeWhatNotInList([]string{})
 }
 
-func (w *DomainBufferedWriter) PutWithPrev(key1, key2, val []byte, txNum uint64, preval []byte, prevStep uint64) error {
+func (w *DomainBufferedWriter) PutWithPrev(k, v []byte, txNum uint64, preval []byte, prevStep uint64) error {
 	step := txNum / w.h.ii.aggregationStep
 	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `preval`` slice is invalidated
 	if tracePutWithPrev != "" && tracePutWithPrev == w.h.ii.filenameBase {
-		fmt.Printf("PutWithPrev(%s, txn %d, key[%x][%x] value[%x] preval[%x])\n", w.h.ii.filenameBase, step, key1, key2, val, preval)
+		fmt.Printf("PutWithPrev(%s, txn %d, key[%x] value[%x] preval[%x])\n", w.h.ii.filenameBase, step, k, v, preval)
 	}
-	if err := w.h.AddPrevValue(key1, key2, txNum, preval); err != nil {
+	if err := w.h.AddPrevValue(k, txNum, preval); err != nil {
 		return err
 	}
 	if w.diff != nil {
-		w.diff.DomainUpdate(key1, key2, step, preval, prevStep)
+		w.diff.DomainUpdate(k, step, preval, prevStep)
 	}
-	return w.addValue(key1, key2, val, step)
+	return w.addValue(k, v, step)
 }
 
-func (w *DomainBufferedWriter) DeleteWithPrev(key1, key2 []byte, txNum uint64, prev []byte, prevStep uint64) (err error) {
+func (w *DomainBufferedWriter) DeleteWithPrev(k []byte, txNum uint64, prev []byte, prevStep uint64) (err error) {
 	step := txNum / w.h.ii.aggregationStep
 
 	// This call to update needs to happen before d.tx.Delete() later, because otherwise the content of `original`` slice is invalidated
 	if tracePutWithPrev != "" && tracePutWithPrev == w.h.ii.filenameBase {
-		fmt.Printf("DeleteWithPrev(%s, txn %d, key[%x][%x] preval[%x])\n", w.h.ii.filenameBase, txNum, key1, key2, prev)
+		fmt.Printf("DeleteWithPrev(%s, txn %d, key[%x] preval[%x])\n", w.h.ii.filenameBase, txNum, k, prev)
 	}
-	if err := w.h.AddPrevValue(key1, key2, txNum, prev); err != nil {
+	if err := w.h.AddPrevValue(k, txNum, prev); err != nil {
 		return err
 	}
 	if w.diff != nil {
-		w.diff.DomainUpdate(key1, key2, step, prev, prevStep)
+		w.diff.DomainUpdate(k, step, prev, prevStep)
 	}
-	return w.addValue(key1, key2, nil, step)
+	return w.addValue(k, nil, step)
 }
 
 func (w *DomainBufferedWriter) SetDiff(diff *kv.DomainDiff) { w.diff = diff }
@@ -648,15 +648,15 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	return nil
 }
 
-func (w *DomainBufferedWriter) addValue(key1, key2, value []byte, step uint64) error {
+func (w *DomainBufferedWriter) addValue(k, value []byte, step uint64) error {
 	if w.discard {
 		return nil
 	}
 	binary.BigEndian.PutUint64(w.stepBytes[:], ^step)
 
 	if w.largeVals {
-		kl := len(key1) + len(key2)
-		w.aux = append(append(append(w.aux[:0], key1...), key2...), w.stepBytes[:]...)
+		kl := len(k)
+		w.aux = append(append(w.aux[:0], k...), w.stepBytes[:]...)
 		fullkey := w.aux[:kl+8]
 		if asserts && step != ^binary.BigEndian.Uint64(w.stepBytes[:]) {
 			panic(fmt.Sprintf("assert: %d != %d", step, ^binary.BigEndian.Uint64(w.stepBytes[:])))
@@ -668,7 +668,6 @@ func (w *DomainBufferedWriter) addValue(key1, key2, value []byte, step uint64) e
 		return nil
 	}
 
-	w.aux = append(append(w.aux[:0], key1...), key2...)
 	w.aux2 = append(append(w.aux2[:0], w.stepBytes[:]...), value...)
 
 	if asserts && step != ^binary.BigEndian.Uint64(w.stepBytes[:]) {
@@ -679,7 +678,7 @@ func (w *DomainBufferedWriter) addValue(key1, key2, value []byte, step uint64) e
 	//	fmt.Printf("addValue     [%p;tx=%d] '%x' -> '%x'\n", w, w.h.ii.txNum, fullkey, value)
 	//}()
 
-	if err := w.values.Collect(w.aux, w.aux2); err != nil {
+	if err := w.values.Collect(k, w.aux2); err != nil {
 		return err
 	}
 	return nil

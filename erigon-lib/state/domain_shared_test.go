@@ -173,7 +173,7 @@ Loop:
 			pv, step, err := domains.GetLatest(kv.AccountsDomain, rwTx, k0)
 			require.NoError(t, err)
 
-			err = domains.DomainPut(kv.AccountsDomain, rwTx, k0, nil, v, pv, step)
+			err = domains.DomainPut(kv.AccountsDomain, rwTx, k0, v, pv, step)
 			require.NoError(t, err)
 		}
 
@@ -275,10 +275,10 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	addr := acc(1)
 	for i := uint64(0); i < stepSize; i++ {
 		domains.SetTxNum(i)
-		if err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, nil, acc(i), nil, 0); err != nil {
+		if err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, acc(i), nil, 0); err != nil {
 			panic(err)
 		}
-		if err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addr, st(i)), nil, acc(i), nil, 0); err != nil {
+		if err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addr, st(i)), acc(i), nil, 0); err != nil {
 			panic(err)
 		}
 	}
@@ -310,10 +310,10 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		}
 		for i := stepSize; i < stepSize*2+2; i++ {
 			domains.SetTxNum(i)
-			if err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, nil, acc(i), nil, 0); err != nil {
+			if err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, acc(i), nil, 0); err != nil {
 				panic(err)
 			}
-			if err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addr, st(i)), nil, acc(i), nil, 0); err != nil {
+			if err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addr, st(i)), acc(i), nil, 0); err != nil {
 				panic(err)
 			}
 		}
@@ -368,7 +368,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		if err := domains.DomainDel(kv.StorageDomain, rwTx, append(addr, st(4)...), nil, 0); err != nil {
 			panic(err)
 		}
-		if err := domains.DomainPut(kv.StorageDomain, rwTx, append(addr, st(5)...), nil, acc(5), nil, 0); err != nil {
+		if err := domains.DomainPut(kv.StorageDomain, rwTx, append(addr, st(5)...), acc(5), nil, 0); err != nil {
 			panic(err)
 		}
 		require.Equal(int(stepSize*2+2-3), iterCount(domains))
@@ -453,7 +453,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 			pv, step, err := domains.GetLatest(kv.AccountsDomain, rwTx, k0)
 			require.NoError(t, err)
 
-			err = domains.DomainPut(kv.AccountsDomain, rwTx, k0, nil, v, pv, step)
+			err = domains.DomainPut(kv.AccountsDomain, rwTx, k0, v, pv, step)
 			require.NoError(t, err)
 			binary.BigEndian.PutUint64(l0[16:24], uint64(accs))
 
@@ -462,7 +462,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 				pv, step, err := domains.GetLatest(kv.AccountsDomain, rwTx, append(k0, l0...))
 				require.NoError(t, err)
 
-				err = domains.DomainPut(kv.StorageDomain, rwTx, composite(k0, l0), nil, l0[24:], pv, step)
+				err = domains.DomainPut(kv.StorageDomain, rwTx, composite(k0, l0), l0[24:], pv, step)
 				require.NoError(t, err)
 			}
 		}
