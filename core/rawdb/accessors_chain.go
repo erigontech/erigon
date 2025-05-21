@@ -1267,6 +1267,19 @@ func WriteDBCommitmentHistoryEnabled(tx kv.RwTx, enabled bool) error {
 }
 
 func ReadReceiptCacheV2(tx kv.TemporalTx, blockNum uint64, blockHash common.Hash, txNum uint64, txnHash common.Hash) (*types.Receipt, bool, error) {
+	{
+		v, _, _ := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txNum-1 /*history storing values BEFORE-change*/)
+		fmt.Printf("[dbg] a1: %d\n", len(v))
+		v, _, _ = tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txNum /*history storing values BEFORE-change*/)
+		fmt.Printf("[dbg] a1: %d\n", len(v))
+		v, _, _ = tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txNum+1 /*history storing values BEFORE-change*/)
+		fmt.Printf("[dbg] a1: %d\n", len(v))
+		v, _, _ = tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txNum+1+1 /*history storing values BEFORE-change*/)
+		fmt.Printf("[dbg] a1: %d\n", len(v))
+		v, _, _ = tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txNum+1+1+1 /*history storing values BEFORE-change*/)
+		fmt.Printf("[dbg] a1: %d\n", len(v))
+
+	}
 	v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txNum+1 /*history storing values BEFORE-change*/)
 	if err != nil {
 		return nil, false, fmt.Errorf("unexpected error, couldn't find changeset: txNum=%d, %w", txNum, err)
