@@ -248,9 +248,18 @@ func (sd *SharedDomains) SizeEstimate() uint64 {
 	//sd.muMaps.RLock()
 	//defer sd.muMaps.RUnlock()
 
-	// multiply 2: to cover data-structures overhead (and keep accounting cheap)
-	// and muliply 2 more: for Commitment calculation when batch is full
-	return uint64(sd.estSize) * 4
+	// RAM estimation must be pessimistic:
+	//  - over-accounting - is ok, user can increase limit
+	//  - under-accounting - is not ok, peak-ram-usage jumps may trigger OOM killer
+
+	// dataStructsOverhead - to cover data-structures overhead. Also SharedDomains has
+	//  much ETL collectors which also using RAM (not much).
+	const dataStructsOverhead = 2
+	// When batch is full: we will perform Commitment calculation - it's very RAM-intensive
+	// Example: on bor-mainnet 256m batch (1 step executed) can produce 8Gb of commitment
+	const commitmentOverhead = 4
+
+	return uint64(sd.estSize) * dataStructsOverhead * commitmentOverhead
 }
 
 const CodeSizeTableFake = "CodeSize"
