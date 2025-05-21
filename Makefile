@@ -129,7 +129,7 @@ dbg:
 %.cmd: override OUTPUT = $(GOBIN)/$*$(CMD_BUILD_SUFFIX)
 %.cmd:
 	@echo Building '$(OUTPUT)'
-	@cd ./cmd/$* && $(GOBUILD) -o $(OUTPUT)
+	cd ./cmd/$* && $(GOBUILD) -o $(OUTPUT)
 	@echo "Run \"$(GOBIN)/$*\" to launch $*."
 
 ## geth:                              run erigon (TODO: remove?)
