@@ -409,6 +409,43 @@ func TestRemoveOverlaps(t *testing.T) {
 	require.Len(list, 20)
 }
 
+func TestRemoveOverlaps_CrossingTypeString(t *testing.T) {
+	logger := log.New()
+	dir, require := t.TempDir(), require.New(t)
+	createFile := func(from, to uint64) {
+		for _, snT := range coresnaptype.BlockSnapshotTypes {
+			createTestSegmentFile(t, from, to, snT.Enum(), dir, version.V1_0, logger)
+		}
+	}
+
+	// 0 - 10_000 => 1 file
+
+	createFile(0, 10000)
+
+	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, coresnaptype.BlockSnapshotTypes, 0, true, logger)
+	defer s.Close()
+
+	list, err := snaptype.Segments(s.Dir())
+	require.NoError(err)
+	require.Equal(3, len(list))
+
+	list, err = snaptype.IdxFiles(s.Dir())
+	require.NoError(err)
+	require.Equal(4, len(list))
+
+	require.NoError(s.OpenSegments(coresnaptype.BlockSnapshotTypes, false))
+	require.NoError(s.RemoveOverlaps())
+
+	list, err = snaptype.Segments(s.Dir())
+	require.NoError(err)
+	require.Equal(3, len(list))
+
+	list, err = snaptype.IdxFiles(s.Dir())
+	require.NoError(err)
+	require.Equal(4, len(list))
+
+}
+
 func TestCanRetire(t *testing.T) {
 	require := require.New(t)
 	cases := []struct {
