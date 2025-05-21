@@ -185,6 +185,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 			if err != nil {
 				return nil, err
 			}
+			logs = ibs.GetRawLogs(txTask.TxIndex)
 			txTask.Logs = append(txTask.Logs, logs...)
 			return ret, err
 		}
