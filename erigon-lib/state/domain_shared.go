@@ -116,7 +116,7 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 		tv = commitment.VariantConcurrentHexPatricia
 	}
 
-	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv)
+	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, tx, commitment.ModeDirect, tv)
 
 	if err := sd.SeekCommitment(context.Background(), tx); err != nil {
 		return nil, err
