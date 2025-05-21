@@ -25,18 +25,22 @@ func newPrinter(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, err
 	t := &Printer{}
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
-			OnTxStart:       t.OnTxStart,
-			OnTxEnd:         t.OnTxEnd,
-			OnEnter:         t.OnEnter,
-			OnExit:          t.OnExit,
-			OnOpcode:        t.OnOpcode,
-			OnFault:         t.OnFault,
-			OnGasChange:     t.OnGasChange,
-			OnBalanceChange: t.OnBalanceChange,
-			OnNonceChange:   t.OnNonceChange,
-			OnCodeChange:    t.OnCodeChange,
-			OnStorageChange: t.OnStorageChange,
-			OnLog:           t.OnLog,
+			OnTxStart:                 t.OnTxStart,
+			OnTxEnd:                   t.OnTxEnd,
+			OnEnter:                   t.OnEnter,
+			OnExit:                    t.OnExit,
+			OnOpcode:                  t.OnOpcode,
+			OnFault:                   t.OnFault,
+			OnGasChange:               t.OnGasChange,
+			OnBalanceChange:           t.OnBalanceChange,
+			OnNonceChange:             t.OnNonceChange,
+			OnCodeChange:              t.OnCodeChange,
+			OnStorageChange:           t.OnStorageChange,
+			OnLog:                     t.OnLog,
+			CaptureArbitrumTransfer:   t.CaptureArbitrumTransfer,
+			CaptureArbitrumStorageGet: t.CaptureArbitrumStorageGet,
+			CaptureArbitrumStorageSet: t.CaptureArbitrumStorageSet,
+			CaptureStylusHostio:       t.CaptureStylusHostio,
 		},
 		GetResult: t.GetResult,
 		Stop:      t.Stop,
@@ -128,6 +132,22 @@ func (p *Printer) OnLog(l *types.Log) {
 
 func (p *Printer) OnGasChange(old, new uint64, reason tracing.GasChangeReason) {
 	fmt.Printf("OnGasChange: old=%v, new=%v, diff=%v\n", old, new, new-old)
+}
+
+func (p *Printer) CaptureArbitrumTransfer(from *libcommon.Address, to *libcommon.Address, value *uint256.Int, before bool, reason string) {
+	fmt.Printf("CaptureArbitrumTransfer: from=%v, to=%v, value=%v\n", from, to, value)
+}
+
+func (p *Printer) CaptureArbitrumStorageGet(key libcommon.Hash, depth int, before bool) {
+	fmt.Printf("CaptureArbitrumStorageGet: key=%v, depth=%v\n", key, depth)
+}
+
+func (p *Printer) CaptureArbitrumStorageSet(key libcommon.Hash, value libcommon.Hash, depth int, before bool) {
+	fmt.Printf("CaptureArbitrumStorageSet: key=%v, value=%v, depth=%d\n", key, value, depth)
+}
+
+func (p *Printer) CaptureStylusHostio(name string, args []byte, outs []byte, ink uint64, ink2 uint64) {
+	fmt.Printf("CaptureStylusHostio: name=%s, args=%s, outs=%s, ink=%d, ink2=%d\n", name, hexutil.Bytes(args), hexutil.Bytes(outs), ink, ink2)
 }
 
 func (p *Printer) GetResult() (json.RawMessage, error) {
