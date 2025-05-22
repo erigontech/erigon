@@ -546,7 +546,7 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 				Proofs:      make([]hexutil.Bytes, 0),
 			}
 		}
-		if len(payload.BlobsBundle.Commitments) != len(payload.BlobsBundle.Blobs) || len(payload.BlobsBundle.Proofs) != len(payload.BlobsBundle.Blobs) * int(params.CellsPerExtBlob) {
+		if len(payload.BlobsBundle.Commitments) != len(payload.BlobsBundle.Blobs) || len(payload.BlobsBundle.Proofs) != len(payload.BlobsBundle.Blobs)*int(params.CellsPerExtBlob) {
 			return nil, errors.New("built invalid blobsBundle")
 		}
 	}
