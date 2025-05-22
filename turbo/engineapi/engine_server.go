@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
@@ -524,19 +525,32 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 	}
 
 	ts := data.ExecutionPayload.Timestamp
-	if (!s.config.IsCancun(ts) && version >= clparams.DenebVersion) ||
-		(s.config.IsCancun(ts) && version < clparams.DenebVersion) ||
-		(!s.config.IsPrague(ts) && version >= clparams.ElectraVersion) ||
-		(s.config.IsPrague(ts) && version < clparams.ElectraVersion) {
+	if !((s.config.IsOsaka(ts) && version == clparams.FuluVersion) ||
+		(s.config.IsPrague(ts) && version == clparams.ElectraVersion) ||
+		(s.config.IsCancun(ts) && version == clparams.DenebVersion)) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
-	return &engine_types.GetPayloadResponse{
+	payload := &engine_types.GetPayloadResponse{
 		ExecutionPayload:  engine_types.ConvertPayloadFromRpc(data.ExecutionPayload),
 		BlockValue:        (*hexutil.Big)(gointerfaces.ConvertH256ToUint256Int(data.BlockValue).ToBig()),
 		BlobsBundle:       engine_types.ConvertBlobsFromRpc(data.BlobsBundle),
 		ExecutionRequests: executionRequests,
-	}, nil
+	}
+
+	if version == clparams.FuluVersion {
+		if payload.BlobsBundle == nil {
+			payload.BlobsBundle = &engine_types.BlobsBundleV1{
+				Commitments: make([]hexutil.Bytes, 0),
+				Blobs:       make([]hexutil.Bytes, 0),
+				Proofs:      make([]hexutil.Bytes, 0),
+			}
+		}
+		if len(payload.BlobsBundle.Commitments) != len(payload.BlobsBundle.Blobs) || len(payload.BlobsBundle.Proofs) != len(payload.BlobsBundle.Blobs) * int(params.CellsPerExtBlob) {
+			return nil, errors.New("built invalid blobsBundle")
+		}
+	}
+	return payload, nil
 }
 
 // engineForkChoiceUpdated either states new block head or request the assembling of a new block
