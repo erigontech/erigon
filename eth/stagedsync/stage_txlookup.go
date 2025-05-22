@@ -20,7 +20,9 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/types"
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -176,21 +178,27 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 // txnLookupTransform - [startKey, endKey)
 func txnLookupIntegrity(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) (err error) {
 	for i := blockFrom; i < blockTo; i++ {
-		blockHeader, err := cfg.blockReader.HeaderByNumber(ctx, tx, i)
+		var blockHeader *types.Header
+		blockHash, err := rawdb.ReadCanonicalHash(tx, i)
 		if err != nil {
 			return err
 		}
-		if blockHeader == nil {
-			logger.Warn(fmt.Sprintf("[%s] txnLookup integrity: empty block %d", logPrefix, i))
-			return fmt.Errorf("empty block %d", i)
-		}
-		currentHash := blockHeader.Hash()
-		calcHash := blockHeader.CalcHash()
-		if currentHash.Cmp(calcHash) != 0 {
-			logger.Error(fmt.Sprintf("[%s] txnLookup calc hash mismatch: block %d, currentHash %x calcHash %x", logPrefix, i, currentHash, calcHash))
-			return fmt.Errorf("[%s] txnLookup calc hash mismatch: block %d, currentHash %x calcHash %x", logPrefix, i, currentHash, calcHash)
+		emptyHash := common.Hash{}
+		if blockHash != emptyHash {
+			blockHeader = rawdb.ReadHeader(tx, blockHash, i)
+			if blockHeader == nil {
+				logger.Warn(fmt.Sprintf("[%s] txnLookup integrity: empty block %d", logPrefix, i))
+				return fmt.Errorf("[%s] txnLookup integrity: header not found in db block: %d", logPrefix, i)
+			}
+		} else {
+			return fmt.Errorf("[%s] txnLookup integrity: hash not found in db block: %d", logPrefix, i)
 		}
 
+		calcHash := blockHeader.CalcHash()
+		if blockHash.Cmp(calcHash) != 0 {
+			logger.Error(fmt.Sprintf("[%s] txnLookup calc hash mismatch: block %d, currentHash %x calcHash %x", logPrefix, i, blockHash, calcHash))
+			return fmt.Errorf("[%s] txnLookup calc hash mismatch: block %d, currentHash %x calcHash %x", logPrefix, i, blockHash, calcHash)
+		}
 	}
 	return nil
 }
