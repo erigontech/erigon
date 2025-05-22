@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
 
 type EncodableHashableSSZ interface {
@@ -211,4 +212,47 @@ func (l *ListSSZ[T]) ShallowCopy() *ListSSZ[T] {
 	}
 	copy(cpy.list, l.list)
 	return cpy
+}
+
+// ListSSZUint64 is a simpler version of ListSSZ that only accepts uint64
+var (
+	_ ssz2.SizedObjectSSZ = (*ListSSZUint64)(nil)
+)
+
+type ListSSZUint64 struct {
+	list []uint64
+}
+
+func (l *ListSSZUint64) List() []uint64 {
+	return l.list
+}
+
+func (l *ListSSZUint64) EncodeSSZ(buf []byte) (dst []byte, err error) {
+	dst = buf
+	for _, element := range l.list {
+		dst = append(dst, ssz.Uint64SSZ(element)...)
+	}
+	return
+}
+
+func (l *ListSSZUint64) DecodeSSZ(buf []byte, version int) error {
+	if l.list == nil {
+		l.list = make([]uint64, 0)
+	}
+	for i := 0; i < len(buf); i += 8 {
+		l.list = append(l.list, ssz.Uint64SSZDecode(buf[i:i+8]))
+	}
+	return nil
+}
+
+func (l *ListSSZUint64) EncodingSizeSSZ() int {
+	return len(l.list) * 8
+}
+
+func (l *ListSSZUint64) Clone() clonable.Clonable {
+	return &ListSSZUint64{list: append([]uint64{}, l.list...)}
+}
+
+func (l *ListSSZUint64) Static() bool {
+	return true
 }
