@@ -69,8 +69,8 @@ type ConsensusHandlers struct {
 	me                 *enode.LocalNode
 	netCfg             *clparams.NetworkConfig
 	blobsStorage       blob_storage.BlobStorage
-
-	enableBlocks bool
+	dataColumnStorage  blob_storage.DataCloumnStorage
+	enableBlocks       bool
 }
 
 const (
