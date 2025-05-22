@@ -338,7 +338,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
-	if temporal, ok := tx.(*temporal.Tx); ok {
+	if temporal, ok := tx.(*temporal.RwTx); ok {
 		temporal.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
 	}
 
@@ -372,7 +372,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return fmt.Errorf("FillDBFromSnapshots: %w", err)
 	}
 
-	if temporal, ok := tx.(*temporal.Tx); ok {
+	if temporal, ok := tx.(*temporal.RwTx); ok {
 		temporal.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
 	}
 

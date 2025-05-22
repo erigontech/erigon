@@ -158,7 +158,7 @@ func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash comm
 		return nil, err
 	}
 
-	var usedGas uint64
+	var gasUsed uint64
 	var usedBlobGas uint64
 
 	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(block.Header().Time))
@@ -179,7 +179,7 @@ func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash comm
 
 		ibs.SetTxContext(i)
 
-		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, &usedGas, &usedBlobGas, vm.Config{})
+		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, &gasUsed, &usedBlobGas, vm.Config{})
 
 		if err != nil {
 			return nil, err

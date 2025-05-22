@@ -552,7 +552,7 @@ Loop:
 		// Thus, we need to skip the first txs in the block, however, this causes the GasUsed to be incorrect.
 		// So we skip that check for the first block, if we find half-executed data.
 		skipPostEvaluation := false
-		var usedGas uint64
+		var gasUsed uint64
 		var txTasks []*state.TxTask
 		var validationResults []state.AAValidationResult
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
@@ -582,8 +582,8 @@ Loop:
 
 				ValidationResults: validationResults,
 			}
-			if txTask.HistoryExecution && usedGas == 0 {
-				usedGas, _, _, err = rawtemporaldb.ReceiptAsOf(executor.tx().(kv.TemporalTx), txTask.TxNum)
+			if txTask.HistoryExecution && gasUsed == 0 {
+				gasUsed, _, _, err = rawtemporaldb.ReceiptAsOf(executor.tx().(kv.TemporalTx), txTask.TxNum)
 				if err != nil {
 					if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
 						hooks.OnBlockEnd(err)
@@ -675,9 +675,9 @@ Loop:
 			}
 
 			count += uint64(len(txTasks))
-			logGas += se.usedGas
+			logGas += se.gasUsed
 
-			se.usedGas = 0
+			se.gasUsed = 0
 			se.blobGasUsed = 0
 
 			if !continueLoop {
@@ -767,11 +767,11 @@ Loop:
 				tt = time.Now()
 
 				// allow greedy prune on non-chain-tip
-				if err = executor.tx().(kv.TemporalRwTx).Debug().GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
+				if err = executor.tx().(kv.TemporalRwTx).GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
 					return err
 				}
 
-				if _, err := executor.tx().(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 10*time.Hour); err != nil {
+				if _, err := executor.tx().(kv.TemporalRwTx).PruneSmallBatches(ctx, 10*time.Hour); err != nil {
 					return err
 				}
 				t3 = time.Since(tt)

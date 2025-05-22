@@ -1343,7 +1343,7 @@ func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt) error {
 		toWrite = []byte{}
 	}
 
-	if err := tx.DomainPut(kv.RCacheDomain, receiptCacheKey, nil, toWrite, nil, 0); err != nil {
+	if err := tx.DomainPut(kv.RCacheDomain, receiptCacheKey, toWrite, nil, 0); err != nil {
 		return fmt.Errorf("WriteReceiptCache: %w", err)
 	}
 	return nil

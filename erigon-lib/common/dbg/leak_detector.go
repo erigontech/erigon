@@ -57,12 +57,9 @@ func NewLeakDetector(name string, slowThreshold time.Duration) *LeakDetector {
 		logEvery := time.NewTicker(60 * time.Second)
 		defer logEvery.Stop()
 
-		for {
-			select {
-			case <-logEvery.C:
-				if list := d.slowList(); len(list) > 0 {
-					log.Info(fmt.Sprintf("[dbg.%s] long living resources", name), "list", strings.Join(d.slowList(), ", "))
-				}
+		for range logEvery.C {
+			if list := d.slowList(); len(list) > 0 {
+				log.Info(fmt.Sprintf("[dbg.%s] long living resources", name), "list", strings.Join(d.slowList(), ", "))
 			}
 		}
 	}()

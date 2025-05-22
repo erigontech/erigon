@@ -360,7 +360,7 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, false)
 
 	result := &evmtypes.ExecutionResult{
-		UsedGas:             st.gasUsed(),
+		GasUsed:             st.gasUsed(),
 		Err:                 vmerr,
 		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
 		ReturnData:          ret,
@@ -535,7 +535,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	}
 
 	result := &evmtypes.ExecutionResult{
-		UsedGas:             st.gasUsed(),
+		GasUsed:             st.gasUsed(),
 		Err:                 vmerr,
 		Reverted:            vmerr == vm.ErrExecutionReverted,
 		ReturnData:          ret,

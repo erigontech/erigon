@@ -270,8 +270,15 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
-			Name:        "integrity",
-			Action:      doIntegrity,
+			Name: "integrity",
+			Action: func(cliCtx *cli.Context) error {
+				if err := doIntegrity(cliCtx); err != nil {
+					log.Error("[integrity]", "err", err)
+					return err
+				}
+				log.Info("[integrity] snapshots are publishable")
+				return nil
+			},
 			Description: "run slow validation of files. use --check to run single",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
@@ -1789,13 +1796,13 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	logger.Info("Prune state history")
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		return tx.(kv.TemporalRwTx).Debug().GreedyPruneHistory(ctx, kv.CommitmentDomain)
+		return tx.(kv.TemporalRwTx).GreedyPruneHistory(ctx, kv.CommitmentDomain)
 	}); err != nil {
 		return err
 	}
 	for hasMoreToPrune := true; hasMoreToPrune; {
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
-			hasMoreToPrune, err = tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 30*time.Second)
+			hasMoreToPrune, err = tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, 30*time.Second)
 			return err
 		}); err != nil {
 			return err

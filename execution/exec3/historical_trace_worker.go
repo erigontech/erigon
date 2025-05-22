@@ -241,7 +241,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 			txTask.Error = err
 		} else {
 			txTask.Failed = applyRes.Failed()
-			txTask.UsedGas = applyRes.UsedGas
+			txTask.GasUsed = applyRes.GasUsed
 			// Update the state with pending changes
 			ibs.SoftFinalise()
 
@@ -311,7 +311,7 @@ func (rw *HistoricalTraceWorker) execAATxn(txTask *state.TxTask) {
 	}
 
 	txTask.Failed = status != 0
-	txTask.UsedGas = gasUsed
+	txTask.GasUsed = gasUsed
 	// Update the state with pending changes
 	rw.ibs.SoftFinalise()
 	txTask.Logs = rw.ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)

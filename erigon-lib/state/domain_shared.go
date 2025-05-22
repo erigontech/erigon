@@ -305,26 +305,18 @@ func (sd *SharedDomains) ReadsValid(readLists map[string]*KvList) bool {
 	return true
 }
 
-func (sd *SharedDomains) updateAccountData(addr []byte, account, prevAccount []byte, prevStep uint64) error {
-	addrS := string(addr)
-	sd.sdCtx.TouchKey(kv.AccountsDomain, addrS, account)
-	sd.put(kv.AccountsDomain, addrS, account)
-	return sd.domainWriters[kv.AccountsDomain].PutWithPrev(addr, nil, account, sd.txNum, prevAccount, prevStep)
-}
-
 func (sd *SharedDomains) updateAccountCode(addr, code, prevCode []byte, prevStep uint64) error {
 	addrS := string(addr)
-	sd.sdCtx.TouchKey(kv.CodeDomain, addrS, code)
 	sd.put(kv.CodeDomain, addrS, code)
 	if len(code) == 0 {
-		return sd.domainWriters[kv.CodeDomain].DeleteWithPrev(addr, nil, sd.txNum, prevCode, prevStep)
+		return sd.domainWriters[kv.CodeDomain].DeleteWithPrev(addr, sd.txNum, prevCode, prevStep)
 	}
-	return sd.domainWriters[kv.CodeDomain].PutWithPrev(addr, nil, code, sd.txNum, prevCode, prevStep)
+	return sd.domainWriters[kv.CodeDomain].PutWithPrev(addr, code, sd.txNum, prevCode, prevStep)
 }
 
 func (sd *SharedDomains) updateCommitmentData(prefix string, data, prev []byte, prevStep uint64) error {
 	sd.put(kv.CommitmentDomain, prefix, data)
-	return sd.domainWriters[kv.CommitmentDomain].PutWithPrev(toBytesZeroCopy(prefix), nil, data, sd.txNum, prev, prevStep)
+	return sd.domainWriters[kv.CommitmentDomain].PutWithPrev(toBytesZeroCopy(prefix), data, sd.txNum, prev, prevStep)
 }
 
 func (sd *SharedDomains) deleteAccount(addr, prev []byte, prevStep uint64) error {
@@ -338,37 +330,22 @@ func (sd *SharedDomains) deleteAccount(addr, prev []byte, prevStep uint64) error
 		return err
 	}
 
-	sd.sdCtx.TouchKey(kv.AccountsDomain, addrS, nil)
 	sd.put(kv.AccountsDomain, addrS, nil)
-	if err := sd.domainWriters[kv.AccountsDomain].DeleteWithPrev(addr, nil, sd.txNum, prev, prevStep); err != nil {
+	if err := sd.domainWriters[kv.AccountsDomain].DeleteWithPrev(addr, sd.txNum, prev, prevStep); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (sd *SharedDomains) writeAccountStorage(addr, loc []byte, value, preVal []byte, prevStep uint64) error {
-	composite := addr
-	if loc != nil { // if caller passed already `composite` key, then just use it. otherwise join parts
-		composite = make([]byte, 0, len(addr)+len(loc))
-		composite = append(append(composite, addr...), loc...)
-	}
-	compositeS := string(composite)
-	sd.sdCtx.TouchKey(kv.StorageDomain, compositeS, value)
-	sd.put(kv.StorageDomain, compositeS, value)
-	return sd.domainWriters[kv.StorageDomain].PutWithPrev(composite, nil, value, sd.txNum, preVal, prevStep)
+func (sd *SharedDomains) writeAccountStorage(k, v, preVal []byte, prevStep uint64) error {
+	sd.put(kv.StorageDomain, string(k), v)
+	return sd.domainWriters[kv.StorageDomain].PutWithPrev(k, v, sd.txNum, preVal, prevStep)
 }
 
-func (sd *SharedDomains) delAccountStorage(addr, loc []byte, preVal []byte, prevStep uint64) error {
-	composite := addr
-	if loc != nil { // if caller passed already `composite` key, then just use it. otherwise join parts
-		composite = make([]byte, 0, len(addr)+len(loc))
-		composite = append(append(composite, addr...), loc...)
-	}
-	compositeS := string(composite)
-	sd.sdCtx.TouchKey(kv.StorageDomain, compositeS, nil)
-	sd.put(kv.StorageDomain, compositeS, nil)
-	return sd.domainWriters[kv.StorageDomain].DeleteWithPrev(composite, nil, sd.txNum, preVal, prevStep)
+func (sd *SharedDomains) delAccountStorage(k, preVal []byte, prevStep uint64) error {
+	sd.put(kv.StorageDomain, string(k), nil)
+	return sd.domainWriters[kv.StorageDomain].DeleteWithPrev(k, sd.txNum, preVal, prevStep)
 }
 
 func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) {
@@ -490,7 +467,7 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 		}
 	}
 	if dbg.PruneOnFlushTimeout != 0 {
-		if _, err := tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, dbg.PruneOnFlushTimeout); err != nil {
+		if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, dbg.PruneOnFlushTimeout); err != nil {
 			return err
 		}
 	}
@@ -530,40 +507,40 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, k []byte) (v []byte, step u
 //   - user can provide `prevVal != nil` - then it will not read prev value from storage
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
-func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error {
-	if k2 != nil {
-		panic(1)
-	}
-	if val == nil {
+func (sd *SharedDomains) DomainPut(domain kv.Domain, k, v []byte, prevVal []byte, prevStep uint64) error {
+	if v == nil {
 		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)
 	}
+
 	if prevVal == nil {
 		var err error
-		prevVal, prevStep, err = sd.GetLatest(domain, k1)
+		prevVal, prevStep, err = sd.GetLatest(domain, k)
 		if err != nil {
 			return err
 		}
 	}
+	//fmt.Printf("k %x comp %x S %x\n", k1, composite, compositeS)
+	//compositeS := toStringZeroCopy(composite) // composite is leaking pointer: once k1 changed it also changed in maps
+	ks := string(k)
 
+	sd.sdCtx.TouchKey(domain, ks, v)
 	switch domain {
-	case kv.AccountsDomain:
-		return sd.updateAccountData(k1, val, prevVal, prevStep)
 	case kv.StorageDomain:
-		return sd.writeAccountStorage(k1, k2, val, prevVal, prevStep)
+		return sd.writeAccountStorage(k, v, prevVal, prevStep)
 	case kv.CodeDomain:
-		if bytes.Equal(prevVal, val) {
+		if bytes.Equal(prevVal, v) {
 			return nil
 		}
-		return sd.updateAccountCode(k1, val, prevVal, prevStep)
-	case kv.CommitmentDomain, kv.RCacheDomain:
-		sd.put(domain, toStringZeroCopy(append(k1, k2...)), val)
-		return sd.domainWriters[domain].PutWithPrev(k1, k2, val, sd.txNum, prevVal, prevStep)
+		return sd.updateAccountCode(k, v, prevVal, prevStep)
+	case kv.AccountsDomain, kv.CommitmentDomain, kv.RCacheDomain:
+		sd.put(domain, ks, v)
+		return sd.domainWriters[domain].PutWithPrev(k, v, sd.txNum, prevVal, prevStep)
 	default:
-		if bytes.Equal(prevVal, val) {
+		if bytes.Equal(prevVal, v) {
 			return nil
 		}
-		sd.put(domain, toStringZeroCopy(append(k1, k2...)), val)
-		return sd.domainWriters[domain].PutWithPrev(k1, k2, val, sd.txNum, prevVal, prevStep)
+		sd.put(domain, ks, v)
+		return sd.domainWriters[domain].PutWithPrev(k, v, sd.txNum, prevVal, prevStep)
 	}
 }
 
@@ -581,11 +558,12 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, k, prevVal []byte, prevStep
 		}
 	}
 
+	sd.sdCtx.TouchKey(domain, toStringZeroCopy(k), nil)
 	switch domain {
 	case kv.AccountsDomain:
 		return sd.deleteAccount(k, prevVal, prevStep)
 	case kv.StorageDomain:
-		return sd.delAccountStorage(k, nil, prevVal, prevStep)
+		return sd.delAccountStorage(k, prevVal, prevStep)
 	case kv.CodeDomain:
 		if prevVal == nil {
 			return nil
@@ -594,8 +572,10 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, k, prevVal []byte, prevStep
 	case kv.CommitmentDomain:
 		return sd.updateCommitmentData(toStringZeroCopy(k), nil, prevVal, prevStep)
 	default:
+		//sd.put(kv.CommitmentDomain, prefix, data)
+		//return sd.domainWriters[kv.CommitmentDomain].PutWithPrev(toBytesZeroCopy(prefix), nil, data, sd.txNum, prev, prevStep)
 		sd.put(domain, toStringZeroCopy(k), nil)
-		return sd.domainWriters[domain].DeleteWithPrev(k, nil, sd.txNum, prevVal, prevStep)
+		return sd.domainWriters[domain].DeleteWithPrev(k, sd.txNum, prevVal, prevStep)
 	}
 }
 
