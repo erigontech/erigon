@@ -1474,7 +1474,8 @@ func (a *Aggregator) SetProduceMod(produce bool) {
 
 // Returns channel which is closed when aggregation is done
 func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
-	a.logger.Info("[snapshots] BuildFilesInBackground", "txNum", txNum)
+	a.logger.Info("[snapshots] BuildFilesInBackground", "txNum", txNum, "produce", a.produce,
+		"minimaxtxnum+aggstep", a.visibleFilesMinimaxTxNum.Load()+a.aggregationStep, "buildingfiles", a.buildingFiles.Load())
 	fin := make(chan struct{})
 
 	if !a.produce {
