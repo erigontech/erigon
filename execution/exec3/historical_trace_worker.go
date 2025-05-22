@@ -178,6 +178,9 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 		if txTask.BlockNum == 0 {
 			break
 		}
+		if rw.background { // `Final` system txn must be executed in reducer, because `consensus.Finalize` requires "all receipts of block" to be available
+			break
+		}
 
 		// End of block transaction in a block
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
@@ -376,7 +379,7 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 
 func doHistoryReduce(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, outputTxNum *atomic.Uint64, rws *state.ResultsQueue, logger log.Logger) error {
 	db := cfg.ChainDB
-	applyWorker := NewHistoricalTraceWorker(consumer, nil, rws, true, ctx, cfg, log.New())
+	applyWorker := NewHistoricalTraceWorker(consumer, nil, rws, false, ctx, cfg, logger)
 
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -425,6 +428,8 @@ func doHistoryMap(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, in
 }
 
 func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueue, outputTxNumIn uint64, tx kv.TemporalTx, forceStopAtBlockEnd bool, applyWorker *HistoricalTraceWorker) (outputTxNum uint64, stopedAtBlockEnd bool, err error) {
+	applyWorker.ResetTx(tx)
+
 	rwsIt := rws.Iter()
 	defer rwsIt.Close()
 
@@ -434,7 +439,7 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 		outputTxNum++
 		stopedAtBlockEnd = txTask.Final
 
-		if txTask.Final { // final txn must be executed here, because `consensus.Finalize` requires "all receipts of block" to be available
+		if txTask.Final { // `Final` system txn must be executed in reducer, because `consensus.Finalize` requires "all receipts of block" to be available
 			applyWorker.RunTxTaskNoLock(txTask.Reset())
 		}
 
