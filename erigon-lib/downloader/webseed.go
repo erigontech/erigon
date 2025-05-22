@@ -31,20 +31,18 @@ import (
 	"time"
 
 	"github.com/anacrolix/torrent"
-	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/c2h5oh/datasize"
 	"github.com/hashicorp/go-retryablehttp"
 	"github.com/pelletier/go-toml/v2"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
-// WebSeeds - allow use HTTP-based infrastrucutre to support Bittorrent network
+// WebSeeds - allow use HTTP-based infrastructure to support Bittorrent network
 // it allows download .torrent files and data files from trusted url's (for example: S3 signed url)
 type WebSeeds struct {
 	lock sync.Mutex
@@ -52,12 +50,12 @@ type WebSeeds struct {
 	byFileName          snaptype.WebSeedUrls // HTTP urls of data files
 	torrentUrls         snaptype.TorrentUrls // HTTP urls of .torrent files
 	downloadTorrentFile bool
-	torrentsWhitelist   snapcfg.Preverified
 	seeds               []*url.URL
 
 	logger    log.Logger
 	verbosity log.Lvl
 
+	// This doesn't belong here, it belongs in Downloader.
 	torrentFiles *AtomicTorrentFS
 	client       *http.Client
 }
@@ -125,9 +123,8 @@ func (d *WebSeeds) getWebDownloadInfo(ctx context.Context, t *torrent.Torrent) (
 	return infos, seedHashMismatches, nil
 }
 
-func (d *WebSeeds) SetTorrent(torrentFS *AtomicTorrentFS, whiteList snapcfg.Preverified, downloadTorrentFile bool) {
+func (d *WebSeeds) SetTorrent(torrentFS *AtomicTorrentFS, downloadTorrentFile bool) {
 	d.downloadTorrentFile = downloadTorrentFile
-	d.torrentsWhitelist = whiteList
 	d.torrentFiles = torrentFS
 }
 
@@ -293,17 +290,18 @@ func (d *WebSeeds) Discover(ctx context.Context, files []string, rootDir string)
 	d.makeWebSeedUrls(listsOfFiles, webSeedMap)
 }
 
-func (d *WebSeeds) constructListsOfFiles(ctx context.Context, httpProviders []*url.URL, diskProviders []string) []snaptype.WebSeedsFromProvider {
+func (d *WebSeeds) constructListsOfFiles(
+	ctx context.Context,
+	httpProviders []*url.URL,
+	diskProviders []string,
+) []snaptype.WebSeedsFromProvider {
 	log.Debug("[snapshots.webseed] providers", "http", len(httpProviders), "disk", len(diskProviders))
 	listsOfFiles := make([]snaptype.WebSeedsFromProvider, 0, len(httpProviders)+len(diskProviders))
 
 	for _, webSeedProviderURL := range httpProviders {
-		select {
-		case <-ctx.Done():
+		if ctx.Err() != nil {
 			return listsOfFiles
-		default:
 		}
-
 		manifestResponse, err := d.retrieveManifest(ctx, webSeedProviderURL)
 		if err != nil { // don't fail on error
 			d.logger.Debug("[snapshots.webseed] get from HTTP provider", "err", err, "url", webSeedProviderURL.String())
@@ -330,9 +328,6 @@ func (d *WebSeeds) makeTorrentUrls(listsOfFiles []snaptype.WebSeedsFromProvider)
 	for _, urls := range listsOfFiles {
 		for name, wUrl := range urls {
 			if !strings.HasSuffix(name, ".torrent") {
-				continue
-			}
-			if !nameWhitelisted(name, d.torrentsWhitelist) {
 				continue
 			}
 			uri, err := url.ParseRequestURI(wUrl)
@@ -430,6 +425,7 @@ func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url
 	}
 
 	response := snaptype.WebSeedsFromProvider{}
+	// Use a bytes.Scanner.
 	fileNames := strings.Split(string(b), "\n")
 	for fi, f := range fileNames {
 		trimmed := strings.TrimSpace(f)
@@ -465,12 +461,16 @@ func (d *WebSeeds) readWebSeedsFile(webSeedProviderPath string) (snaptype.WebSee
 }
 
 // downloadTorrentFilesFromProviders - if they are not exist on file-system
-func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDir string, torrentMap map[url.URL]string) map[string]struct{} {
+func (d *WebSeeds) downloadTorrentFilesFromProviders(
+	ctx context.Context,
+	rootDir string,
+	torrentMap map[url.URL]string,
+) map[string]struct{} {
 	// TODO: need more tests, need handle more forward-compatibility and backward-compatibility case
 	//  - now, if add new type of .torrent files to S3 bucket - existing nodes will start downloading it. maybe need whitelist of file types
 	//  - maybe need download new files if --snap.stop=true
 	webSeedMap := map[string]struct{}{}
-	var webSeeMapLock sync.RWMutex
+	var webSeedMapLock sync.RWMutex
 	if !d.downloadTorrentFile {
 		return webSeedMap
 	}
@@ -511,19 +511,18 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 			continue
 		}
 
-		tUrls := tUrls
 		e.Go(func() error {
 			for _, url := range tUrls {
 				//validation happens inside
-				_, err := d.callTorrentHttpProvider(ctx, url, name)
+				_, err := d.callTorrentHttpProvider(ctx, url)
 				if err != nil {
 					d.logger.Debug("[snapshots] got from webseed", "name", name, "err", err, "url", url)
 					continue
 				}
 				//don't save .torrent here - do it inside downloader.Add
-				webSeeMapLock.Lock()
+				webSeedMapLock.Lock()
 				webSeedMap[torrentMap[*url]] = struct{}{}
-				webSeeMapLock.Unlock()
+				webSeedMapLock.Unlock()
 				return nil
 			}
 			return nil
@@ -535,31 +534,7 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 	return webSeedMap
 }
 
-func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) (ts *torrent.TorrentSpec, ok bool, err error) {
-	urls, ok := d.ByFileName(name)
-	if !ok {
-		return nil, false, nil
-	}
-	for _, urlStr := range urls {
-		urlStr += ".torrent"
-		parsedUrl, err := url.Parse(urlStr)
-		if err != nil {
-			d.logger.Log(d.verbosity, "[snapshots] callTorrentHttpProvider parse url", "err", err)
-			continue // it's ok if some HTTP provider failed - try next one
-		}
-		res, err := d.callTorrentHttpProvider(ctx, parsedUrl, name)
-		if err != nil {
-			d.logger.Debug("[snapshots] .torrent from webseed rejected", "name", name, "err", err, "url", urlStr)
-			continue // it's ok if some HTTP provider failed - try next one
-		}
-		ts, _, err = d.torrentFiles.Create(name, res)
-		return ts, ts != nil, err
-	}
-
-	return nil, false, nil
-}
-
-func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL, fileName string) ([]byte, error) {
+func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL) ([]byte, error) {
 	if !strings.HasSuffix(url.Path, ".torrent") {
 		return nil, fmt.Errorf("seems not-torrent url passed: %s", url.String())
 	}
@@ -584,36 +559,5 @@ func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL, fi
 	if err != nil {
 		return nil, fmt.Errorf("webseed.downloadTorrentFile: read body: host=%s, url=%s, %w", url.Hostname(), url.EscapedPath(), err)
 	}
-	if err = validateTorrentBytes(fileName, res, d.torrentsWhitelist); err != nil {
-		return nil, fmt.Errorf("webseed.downloadTorrentFile: host=%s, url=%s, %w", url.Hostname(), url.EscapedPath(), err)
-	}
 	return res, nil
-}
-
-func validateTorrentBytes(fileName string, b []byte, whitelist snapcfg.Preverified) error {
-	var mi metainfo.MetaInfo
-	if err := bencode.NewDecoder(bytes.NewBuffer(b)).Decode(&mi); err != nil {
-		return err
-	}
-	torrentHash := mi.HashInfoBytes()
-	// files with different names can have same hash. means need check AND name AND hash.
-	if !nameAndHashWhitelisted(fileName, torrentHash.String(), whitelist) {
-		return fmt.Errorf(".torrent file is not whitelisted %s", torrentHash.String())
-	}
-	return nil
-}
-
-func nameWhitelisted(fileName string, whitelist snapcfg.Preverified) bool {
-	return whitelist.Contains(strings.TrimSuffix(fileName, ".torrent"))
-}
-
-func nameAndHashWhitelisted(fileName, fileHash string, whitelist snapcfg.Preverified) bool {
-	fileName = strings.TrimSuffix(fileName, ".torrent")
-
-	for i := 0; i < len(whitelist); i++ {
-		if whitelist[i].Name == fileName && whitelist[i].Hash == fileHash {
-			return true
-		}
-	}
-	return false
 }

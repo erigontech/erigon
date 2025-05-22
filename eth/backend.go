@@ -91,7 +91,6 @@ import (
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	rpcdaemoncli "github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/core"
-	snaptype2 "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -1059,28 +1058,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	hook := stages2.NewHook(backend.sentryCtx, backend.chainDB, backend.notifications, backend.stagedSync, backend.blockReader, backend.chainConfig, backend.logger, backend.sentriesClient.SetStatus)
 
-	useSnapshots := blockReader != nil && (blockReader.FreezingCfg().ProduceE2 || blockReader.FreezingCfg().ProduceE3)
-	if !useSnapshots && backend.downloaderClient != nil {
-		for _, p := range blockReader.AllTypes() {
-			backend.downloaderClient.ProhibitNewDownloads(ctx, &protodownloader.ProhibitNewDownloadsRequest{
-				Type: p.Name(),
-			})
-		}
-
-		for _, p := range snaptype.CaplinSnapshotTypes {
-			backend.downloaderClient.ProhibitNewDownloads(ctx, &protodownloader.ProhibitNewDownloadsRequest{
-				Type: p.Name(),
-			})
-		}
-
-		for _, p := range snaptype2.E3StateTypes {
-			backend.downloaderClient.ProhibitNewDownloads(ctx, &protodownloader.ProhibitNewDownloadsRequest{
-				Type: p.Name(),
-			})
-		}
-
-	}
-
 	checkStateRoot := true
 	pipelineStages := stages2.NewPipelineStages(ctx, backend.chainDB, config, p2pConfig, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.silkworm, backend.forkValidator, logger, tracer, checkStateRoot)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
@@ -1591,8 +1568,7 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 			downloaderCfg.AddTorrentsFromDisk = false
 		}
 
-		discover := true
-		s.downloader, err = downloader.New(ctx, downloaderCfg, s.logger, log.LvlDebug, discover)
+		s.downloader, err = downloader.New(ctx, downloaderCfg, s.logger, log.LvlDebug)
 		if err != nil {
 			return err
 		}
@@ -1728,7 +1704,7 @@ func (s *Ethereum) Start() error {
 		s.bgComponentsEg.Go(func() error {
 			defer s.logger.Info("[polygon.sync] goroutine terminated")
 			// when we're running in stand alone mode we need to run the downloader before we start the
-			// polygon services becuase they will wait for it to complete before opening thier stores
+			// polygon services because they will wait for it to complete before opening their stores
 			// which make use of snapshots and expect them to be initialize
 			// TODO: get the snapshots to call the downloader directly - which will avoid this
 			go func() {

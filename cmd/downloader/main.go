@@ -25,6 +25,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -33,7 +34,6 @@ import (
 	_ "github.com/erigontech/erigon/core/snaptype"    //hack
 	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
 
-	"github.com/anacrolix/torrent/metainfo"
 	"github.com/c2h5oh/datasize"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
@@ -45,6 +45,8 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
+
+	"github.com/anacrolix/torrent/metainfo"
 
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
@@ -217,7 +219,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	if err := checkChainName(ctx, dirs, chain); err != nil {
 		return err
 	}
-	torrentLogLevel, _, err := downloadercfg.Int2LogLevel(torrentVerbosity)
+	torrentLogLevel, err := downloadercfg.Int2LogLevel(torrentVerbosity)
 	if err != nil {
 		return err
 	}
@@ -245,12 +247,27 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 			return err
 		}
 	}
-	cfg, err := downloadercfg.New(ctx, dirs, version, torrentLogLevel, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots, staticPeers, webseedsList, chain, true, dbWritemap)
+	cfg, err := downloadercfg.New(
+		ctx,
+		dirs,
+		version,
+		torrentLogLevel,
+		downloadRate,
+		uploadRate,
+		torrentPort,
+		torrentConnsPerFile,
+		torrentDownloadSlots,
+		staticPeers,
+		webseedsList,
+		chain,
+		dbWritemap,
+		downloadercfg.NewCfgOpts{},
+	)
 	if err != nil {
 		return err
 	}
 
-	cfg.ClientConfig.PieceHashersPerTorrent = dbg.EnvInt("DL_HASHERS", 32)
+	cfg.ClientConfig.PieceHashersPerTorrent = dbg.EnvInt("DL_HASHERS", runtime.NumCPU())
 	cfg.ClientConfig.DisableIPv6 = disableIPV6
 	cfg.ClientConfig.DisableIPv4 = disableIPV4
 
@@ -262,7 +279,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 
 	cfg.AddTorrentsFromDisk = true // always true unless using uploader - which wants control of torrent files
 
-	d, err := downloader.New(ctx, cfg, logger, log.LvlInfo, seedbox)
+	d, err := downloader.New(ctx, cfg, logger, log.LvlInfo)
 	if err != nil {
 		return err
 	}

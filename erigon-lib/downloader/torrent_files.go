@@ -18,6 +18,7 @@ package downloader
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -31,7 +32,9 @@ import (
 	"github.com/erigontech/erigon-lib/common/dir"
 )
 
-// AtomicTorrentFS - does provide thread-safe CRUD operations on .torrent files
+// AtomicTorrentFS - does provide thread-safe CRUD operations on .torrent files. TODO: Is this
+// needed? Callers should be relying on inherently atomic FS operations anyway. Also we need this
+// treatment for many files not just .torrent files.
 type AtomicTorrentFS struct {
 	lock sync.Mutex
 	dir  string
@@ -51,8 +54,9 @@ func (tf *AtomicTorrentFS) exists(name string) (bool, error) {
 	if !strings.HasSuffix(name, ".torrent") {
 		name += ".torrent"
 	}
-	return dir.FileExist(filepath.Join(tf.dir, name))
+	return dir.FileExist(filepath.Join(tf.dir, filepath.FromSlash(name)))
 }
+
 func (tf *AtomicTorrentFS) Delete(name string) error {
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
@@ -66,79 +70,61 @@ func (tf *AtomicTorrentFS) delete(name string) error {
 	return os.Remove(filepath.Join(tf.dir, name))
 }
 
-func (tf *AtomicTorrentFS) Create(name string, res []byte) (ts *torrent.TorrentSpec, created bool, err error) {
-	tf.lock.Lock()
-	defer tf.lock.Unlock()
-
-	exists, err := tf.exists(name)
+func (tf *AtomicTorrentFS) writeFile(name string, r io.Reader) (err error) {
+	fPath := tf.nameToPath(name)
+	f, err := os.CreateTemp(filepath.Dir(fPath), filepath.Base(fPath))
 	if err != nil {
-		return nil, false, err
+		return
 	}
-	if !exists {
-		err = tf.create(name, res)
-		if err != nil {
-			return nil, false, err
+	// Defer this first so Close occurs before Remove (Windows).
+	removed := false
+	defer func() {
+		if removed {
+			return
 		}
-	}
-
-	ts, err = tf.load(filepath.Join(tf.dir, name))
+		// I wonder if in some circumstances os.Rename can fail but the source file is gone. I doubt
+		// it.
+		err = errors.Join(os.Remove(f.Name()))
+	}()
+	closed := false
+	defer func() {
+		if closed {
+			return
+		}
+		err = errors.Join(err, f.Close())
+	}()
+	_, err = io.Copy(f, r)
 	if err != nil {
-		return nil, false, err
+		return
 	}
-	return ts, false, nil
+	err = f.Sync()
+	if err != nil {
+		return
+	}
+	// Checking Close error is required because on many systems Write errors are delayed.
+	err = f.Close()
+	closed = true
+	if err != nil {
+		return
+	}
+	err = os.Rename(f.Name(), fPath)
+	if err != nil {
+		return
+	}
+	removed = true
+	return
 }
 
-func (tf *AtomicTorrentFS) create(name string, res []byte) error {
-	if !strings.HasSuffix(name, ".torrent") {
-		name += ".torrent"
-	}
-	if len(res) == 0 {
-		return fmt.Errorf("try to write 0 bytes to file: %s", name)
-	}
-
-	fPath := filepath.Join(tf.dir, name)
-	f, err := os.Create(fPath + ".tmp")
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	if _, err = f.Write(res); err != nil {
-		return err
-	}
-	if err = f.Sync(); err != nil {
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(fPath+".tmp", fPath); err != nil {
-		return err
-	}
-
-	return nil
+func (tf *AtomicTorrentFS) createFromMetaInfo(name string, mi *metainfo.MetaInfo) error {
+	r, w := io.Pipe()
+	go func() {
+		w.CloseWithError(mi.Write(w))
+	}()
+	return tf.writeFile(name, r)
 }
 
-func (tf *AtomicTorrentFS) createFromMetaInfo(fPath string, mi *metainfo.MetaInfo) error {
-	file, err := os.Create(fPath + ".tmp")
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	if err := mi.Write(file); err != nil {
-		return err
-	}
-	if err := file.Sync(); err != nil {
-		return err
-	}
-	if err := file.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(fPath+".tmp", fPath); err != nil {
-		return err
-	}
-	return nil
-}
-
+// TODO: Refactor this to not return created? At this point all callers (could) assume the file does
+// not exist.
 func (tf *AtomicTorrentFS) CreateWithMetaInfo(info *metainfo.Info, additionalMetaInfo *metainfo.MetaInfo) (created bool, err error) {
 	name := info.Name
 	if !strings.HasSuffix(name, ".torrent") {
@@ -159,7 +145,7 @@ func (tf *AtomicTorrentFS) CreateWithMetaInfo(info *metainfo.Info, additionalMet
 	if exists {
 		return false, nil
 	}
-	if err = tf.createFromMetaInfo(filepath.Join(tf.dir, name), mi); err != nil {
+	if err = tf.createFromMetaInfo(name, mi); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -240,32 +226,7 @@ func (tf *AtomicTorrentFS) prohibitNewDownloads(t string) error {
 	return f.Sync()
 }
 
-func (tf *AtomicTorrentFS) NewDownloadsAreProhibited(name string) (bool, error) {
-	tf.lock.Lock()
-	defer tf.lock.Unlock()
-	return tf.newDownloadsAreProhibited(name)
-}
-
-func (tf *AtomicTorrentFS) newDownloadsAreProhibited(name string) (bool, error) {
-	f, err := os.OpenFile(filepath.Join(tf.dir, ProhibitNewDownloadsFileName), os.O_CREATE|os.O_RDONLY, 0644)
-	if err != nil {
-		return false, err
-	}
-	defer f.Close()
-	var prohibitedList []string
-	torrentListJsonBytes, err := io.ReadAll(f)
-	if err != nil {
-		return false, fmt.Errorf("NewDownloadsAreProhibited: read file: %w", err)
-	}
-	if len(torrentListJsonBytes) > 0 {
-		if err := json.Unmarshal(torrentListJsonBytes, &prohibitedList); err != nil {
-			return false, fmt.Errorf("NewDownloadsAreProhibited: unmarshal: %w", err)
-		}
-	}
-	for _, p := range prohibitedList {
-		if strings.Contains(name, p) {
-			return true, nil
-		}
-	}
-	return false, nil
+func (tf *AtomicTorrentFS) nameToPath(name string) string {
+	// Names are unix-style paths, and we need to convert them to the local path format.
+	return filepath.Join(tf.dir, filepath.FromSlash(name))
 }

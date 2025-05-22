@@ -35,8 +35,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/anacrolix/torrent"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/anacrolix/torrent"
+	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
@@ -261,10 +263,30 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		List:  subStages,
 	})
 
+	log.Info("[OtterSync] Starting Ottersync")
+	log.Info(snapshotsync.GreatOtterBanner)
+
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download header-chain"})
 	agg := cfg.db.(*temporal.DB).Agg().(*state2.Aggregator)
 	// Download only the snapshots that are for the header chain.
-	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.dirs, true, cfg.blobs, cfg.caplinState, cfg.prune, cstate, agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, cfg.syncConfig); err != nil {
+
+	log.Info(fmt.Sprintf("[%s] Syncing header-chain", s.LogPrefix()))
+	if err := snapshotsync.WaitForDownloader(
+		ctx,
+		s.LogPrefix(),
+		cfg.dirs,
+		true, /*headerChain=*/
+		cfg.blobs,
+		cfg.caplinState,
+		cfg.prune,
+		cstate,
+		agg,
+		tx,
+		cfg.blockReader,
+		&cfg.chainConfig,
+		cfg.snapshotDownloader,
+		cfg.syncConfig,
+	); err != nil {
 		return err
 	}
 
@@ -273,7 +295,31 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download snapshots"})
-	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.dirs, false, cfg.blobs, cfg.caplinState, cfg.prune, cstate, agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, cfg.syncConfig); err != nil {
+	log.Info(fmt.Sprintf("[%s] Syncing snapshots", s.LogPrefix()))
+	if err := snapshotsync.WaitForDownloader(
+		ctx,
+		s.LogPrefix(),
+		cfg.dirs,
+		false, /*headerChain=*/
+		cfg.blobs,
+		cfg.caplinState,
+		cfg.prune,
+		cstate,
+		agg,
+		tx,
+		cfg.blockReader,
+		&cfg.chainConfig,
+		cfg.snapshotDownloader,
+		cfg.syncConfig,
+	); err != nil {
+		return err
+	}
+
+	// All snapshots are downloaded. Now commit the preverified.toml file so we load the same set of
+	// hashes next time.
+	err := downloadercfg.SaveSnapshotHashes(cfg.dirs, cfg.chainConfig.ChainName)
+	if err != nil {
+		err = fmt.Errorf("saving snapshot hashes: %w", err)
 		return err
 	}
 
