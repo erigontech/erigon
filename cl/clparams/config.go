@@ -674,6 +674,7 @@ func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
 		b.CapellaForkEpoch,
 		b.DenebForkEpoch,
 		b.ElectraForkEpoch,
+		b.FuluForkEpoch,
 	}
 	stateVersion := Phase0Version
 	for _, forkEpoch := range forkEpochList {
