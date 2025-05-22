@@ -438,8 +438,6 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 			applyWorker.RunTxTaskNoLock(txTask.Reset())
 		}
 
-		txTask.CreateReceipt(tx)
-
 		hooks := txTask.Tracer.TracingHooks()
 		if txTask.Error != nil {
 			if hooks != nil && hooks.OnTxEnd != nil {
@@ -447,6 +445,8 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 			}
 			return outputTxNum, false, fmt.Errorf("bn=%d, tn=%d: %w", txTask.BlockNum, txTask.TxNum, txTask.Error)
 		}
+		txTask.CreateReceipt(tx)
+
 		if hooks != nil && hooks.OnTxEnd != nil {
 			hooks.OnTxEnd(txTask.BlockReceipts[txTask.TxIndex], nil)
 		}
