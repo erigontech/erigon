@@ -577,12 +577,15 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	outTxNum := &atomic.Uint64{}
 	outTxNum.Store(fromTxNum)
 
+	ctx, cancleCtx := context.WithCancel(ctx)
 	workers := NewHistoricalTraceWorkers(consumer, cfg, ctx, toTxNum, in, WorkerCount, outTxNum, logger)
 	defer workers.Wait()
 
 	workersExited := &atomic.Bool{}
 	go func() {
-		workers.Wait()
+		if err := workers.Wait(); err != nil {
+			cancleCtx()
+		}
 		workersExited.Store(true)
 	}()
 

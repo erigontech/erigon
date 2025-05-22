@@ -328,16 +328,29 @@ func blocksReadAheadFunc(ctx context.Context, doms *libstate.SharedDomains, tx k
 
 	for _, txn := range block.Transactions() {
 		to := txn.GetTo()
-		if to == nil {
-			continue
+		if to != nil {
+			a, _ := stateReader.ReadAccountData(*to)
+			if a == nil {
+				continue
+			}
+			//if account != nil && !bytes.Equal(account.CodeHash, types.EmptyCodeHash.Bytes()) {
+			//	reader.Code(*tx.To(), common.BytesToHash(account.CodeHash))
+			//}
+			if code, _ := stateReader.ReadAccountCode(*to); len(code) > 0 {
+				_, _ = code[0], code[len(code)-1]
+			}
+
+			for _, list := range txn.GetAccessList() {
+				stateReader.ReadAccountData(list.Address)
+				if len(list.StorageKeys) > 0 {
+					for _, slot := range list.StorageKeys {
+						stateReader.ReadAccountStorage(list.Address, slot)
+					}
+				}
+			}
+			//TODO: exec txn and pre-fetch commitment keys. see also: `func (p *statePrefetcher) Prefetch` in geth
 		}
-		a, _ := stateReader.ReadAccountData(*to)
-		if a == nil {
-			continue
-		}
-		if code, _ := stateReader.ReadAccountCode(*to); len(code) > 0 {
-			_, _ = code[0], code[len(code)-1]
-		}
+
 	}
 	_, _ = stateReader.ReadAccountData(block.Coinbase())
 

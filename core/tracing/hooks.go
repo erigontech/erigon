@@ -146,7 +146,7 @@ type (
 	*/
 
 	// BalanceChangeHook is called when the balance of an account changes.
-	BalanceChangeHook = func(addr common.Address, prev, new *uint256.Int, reason BalanceChangeReason)
+	BalanceChangeHook = func(addr common.Address, prev, new uint256.Int, reason BalanceChangeReason)
 
 	// NonceChangeHook is called when the nonce of an account changes.
 	NonceChangeHook = func(addr common.Address, prev, new uint64)

@@ -144,11 +144,11 @@ type mockTracer struct {
 
 func (mt *mockTracer) Hooks() *tracing.Hooks {
 	return &tracing.Hooks{
-		OnBalanceChange: func(addr common.Address, prev, new *uint256.Int, reason tracing.BalanceChangeReason) {
+		OnBalanceChange: func(addr common.Address, prev, new uint256.Int, reason tracing.BalanceChangeReason) {
 			mt.balanceChangeTraces = append(mt.balanceChangeTraces, balanceChangeTrace{
 				addr:   addr,
-				prev:   *prev,
-				new:    *new,
+				prev:   prev,
+				new:    new,
 				reason: reason,
 			})
 		},
