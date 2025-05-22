@@ -554,13 +554,12 @@ func NewRPCTransaction(txn types.Transaction, blockHash libcommon.Hash, blockNum
 		if !chainId.IsZero() {
 			result.ChainID = (*hexutil.Big)(chainId.ToBig())
 		}
+		result.GasPrice = (*hexutil.Big)(txn.GetTipCap().ToBig())
 	} else {
 		chainId.Set(txn.GetChainID())
 		result.ChainID = (*hexutil.Big)(chainId.ToBig())
 	}
 	switch txn.Type() {
-	case types.LegacyTxType:
-		result.GasPrice = (*hexutil.Big)(txn.GetTipCap().ToBig())
 	case types.AccessListTxType:
 		result.YParity = (*hexutil.Big)(v.ToBig())
 		acl := txn.GetAccessList()
