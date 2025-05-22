@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"math"
 	"strconv"
 	"sync"
@@ -26,7 +27,7 @@ type DataCloumnStorage interface {
 	WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar) error
 	RemoveColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) error
 	ReadColumnSidecarByColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (*cltypes.DataColumnSidecar, error)
-	//WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error // Used for P2P networking
+	WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error // Used for P2P networking
 	//KzgCommitmentsCount(ctx context.Context, blockRoot common.Hash) (uint32, error)
 	//Prune() error
 }
@@ -181,6 +182,17 @@ func (s *dataCloumnStorageImpl) RemoveColumnSidecars(ctx context.Context, slot u
 		return err
 	}
 	return tx.Commit()
+}
+
+func (s *dataCloumnStorageImpl) WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error {
+	_, filepath := dataColumnFilePath(slot, blockRoot, idx)
+	fh, err := s.fs.Open(filepath)
+	if err != nil {
+		return err
+	}
+	defer fh.Close()
+	_, err = io.Copy(w, fh)
+	return err
 }
 
 func (s *dataCloumnStorageImpl) acquireMutexBySlot(slot uint64) *sync.RWMutex {
