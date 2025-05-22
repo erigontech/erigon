@@ -274,6 +274,7 @@ func New(
 		AddTorrentsFromDisk:             true,
 		SnapshotConfig:                  preverifiedCfg,
 		MdbxWriteMap:                    mdbxWriteMap,
+		VerifyTorrentData:               opts.Verify,
 	}, nil
 }
 
