@@ -1265,6 +1265,14 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 		Salt:       ii.salt.Load(),
 		NoFsync:    ii.noFsync,
 	}
+	defer func() {
+		r := recover()
+		if r == nil {
+			return
+		}
+		ii.logger.Crit("panic in buildHashMapAccessor", "idxPath", idxPath, "r", r)
+		panic(r)
+	}()
 	return buildHashMapAccessor(ctx, data, ii.Compression, idxPath, false, cfg, ps, ii.logger)
 }
 
