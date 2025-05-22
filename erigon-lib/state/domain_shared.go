@@ -121,7 +121,7 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 		tv = commitment.VariantConcurrentHexPatricia
 	}
 
-	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv)
+	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, commitment.ModeUpdateMap, tv)
 
 	if err := sd.SeekCommitment(context.Background(), tx); err != nil {
 		return nil, err
@@ -497,6 +497,34 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 		w.close()
 	}
 	return nil
+}
+
+func (sd *SharedDomains) GetWithCursor(domain kv.Domain, k []byte, c kv.Cursor, aggTx *AggregatorRoTx) (v []byte, step uint64, err error) {
+	if domain == kv.CommitmentDomain {
+		return sd.LatestCommitment(k)
+	}
+	if v, prevStep, ok := sd.get(domain, k); ok {
+		return v, prevStep, nil
+	}
+	// aggTx := tx.AggTx().(*AggregatorRoTx)
+
+	v, step, found, err := aggTx.DebugGetLatestFromCursor(domain, k, c)
+	if err != nil {
+		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
+	}
+	if found {
+		return v, step, nil
+	}
+
+	v, foundInFile, _, endTxNum, err := aggTx.DebugGetLatestFromFiles(domain, k, 0)
+	if err != nil {
+		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
+	}
+	if !foundInFile {
+		return nil, 0, nil
+	}
+
+	return v, endTxNum / sd.StepSize(), nil
 }
 
 // TemporalDomain satisfaction

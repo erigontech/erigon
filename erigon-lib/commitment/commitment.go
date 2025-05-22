@@ -101,7 +101,7 @@ type Trie interface {
 	// Process updates
 	Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error)
 
-	Warmup(hashedKey []byte) error
+	Warmup(ctx PatriciaContext, hashedKey []byte) error
 }
 
 type PatriciaContext interface {
@@ -960,6 +960,7 @@ type Updates struct {
 
 	sortPerNibble bool // if true, use nibbles collectors instead of etl (all-in-one)
 	nibbles       [16]*etl.Collector
+	ctx           [16]PatriciaContext
 }
 
 // Should be called right after updates initialisation. Otherwise could lost some data
@@ -1064,6 +1065,9 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			} else {
 				err = t.nibbles[u.hashedKey[0]].Collect(u.hashedKey, toBytesZeroCopy(key))
 			}
+			if COM_WARMUP && t.Warmup != nil {
+				go t.Warmup(u.hashedKey)
+			}
 			if err != nil {
 				log.Warn("failed to collect updated key", "key", key, "err", err)
 			}
@@ -1083,6 +1087,9 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			pivot.hashedKey = t.hasher(toBytesZeroCopy(pivot.plainKey))
 			fn(pivot, val)
 			t.tree.ReplaceOrInsert(pivot)
+			if COM_WARMUP && t.Warmup != nil {
+				go t.Warmup(pivot.hashedKey)
+			}
 		}
 	case ModeDirect:
 		if _, ok := t.keys[key]; !ok {
@@ -1095,8 +1102,8 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			} else {
 				err = t.nibbles[hashedKey[0]].Collect(hashedKey, keyBytes)
 			}
-			if t.Warmup != nil {
-				t.Warmup(hashedKey)
+			if COM_WARMUP && t.Warmup != nil {
+				go t.Warmup(hashedKey)
 			}
 			if err != nil {
 				log.Warn("failed to collect updated key", "key", key, "err", err)

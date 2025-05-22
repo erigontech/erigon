@@ -109,9 +109,14 @@ func (hph *HexPatriciaHashed) SpawnSubTrie(ctx PatriciaContext, forNibble int) *
 	return subTrie
 }
 
-func (hph *HexPatriciaHashed) Warmup(hashedKey []byte) error {
+func (hph *HexPatriciaHashed) Warmup(ctx PatriciaContext, hashedKey []byte) error {
 	// should not affect trie state
 	hph.readOnly = true
+	defer func() {
+		hph.readOnly = false
+		hph.currentKeyLen = 0
+	}()
+	hph.ResetContext(ctx)
 
 	for hph.needFolding(hashedKey) {
 		//foldDone := hph.metrics.StartFolding(plainKey)
@@ -2186,26 +2191,11 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	}
 
 	defer func() { logEvery.Stop() }()
-
-	var warmupFN func(hashed, plain []byte, stateUpdate *Update) error
-
-	if COM_WARMUP {
-		var warmupTrie *HexPatriciaHashed
-		warmupTrie = hph.SpawnSubTrie(hph.ctx, 0)
-		defer func() {
-			hph.mountedTries = hph.mountedTries[:0] // we do not have any clean/free function for tries, so we just reset the slice
-		}()
-		warmupTrie.mountedNib = 0
-		warmupTrie.mounted = false
-		warmupTrie.readOnly = true // do not produce updates on traversal
-		warmupFN = warmupTrie.followAndUpdate
-	}
 	defer func() {
 		log.Debug("commitment finished", "keys", common.PrettyCounter(ki), "spent", time.Since(start), "warmup", COM_WARMUP)
 	}()
 
-	//err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
-	err = updates.WarmupHashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
+	err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		select {
 		case <-logEvery.C:
 			dbg.ReadMemStats(&m)
@@ -2223,9 +2213,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		}
 		ki++
 		return nil
-	},
-		warmupFN,
-	)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("hash sort failed: %w", err)
 	}

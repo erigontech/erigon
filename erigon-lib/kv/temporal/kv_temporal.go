@@ -311,6 +311,9 @@ func (tx *Tx) RangeLatest(domain kv.Domain, from, to []byte, limit int) (stream.
 func (tx *Tx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step uint64, found bool, err error) {
 	return tx.aggtx.DebugGetLatestFromDB(domain, k, tx.MdbxTx)
 }
+func (tx *Tx) GetLatestFromCursor(domain kv.Domain, k []byte, c kv.Cursor) (v []byte, step uint64, found bool, err error) {
+	return tx.aggtx.DebugGetLatestFromCursor(domain, k, c)
+}
 func (tx *Tx) GetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	return tx.aggtx.DebugGetLatestFromFiles(domain, k, maxTxNum)
 }

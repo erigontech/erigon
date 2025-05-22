@@ -258,11 +258,17 @@ func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates
 	return rootHash, nil
 }
 
-func (p *ConcurrentPatriciaHashed) Warmup(hashedKey []byte) error {
+func (p *ConcurrentPatriciaHashed) Warmup(ctx PatriciaContext, hashedKey []byte) error {
 	if p.root.trace {
 		fmt.Printf("WARMUP %x\n", hashedKey)
 	}
-	if err := p.root.Warmup(hashedKey); err != nil {
+	p.root.ResetContext(ctx)
+	// p.root.readOnly = true
+	// defer func() {
+	// 	p.root.readOnly = false
+	// 	p.root.currentKeyLen = 0
+	// }()
+	if err := p.root.Warmup(ctx, hashedKey); err != nil {
 		return fmt.Errorf("warmup: %w", err)
 	}
 	//for i := range p.mounts {

@@ -1711,13 +1711,9 @@ func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	return dt.valsC, err
 }
 
-func (dt *DomainRoTx) getLatestFromDB(key []byte, roTx kv.Tx) ([]byte, uint64, bool, error) {
-	valsC, err := dt.valsCursor(roTx)
-	if err != nil {
-		return nil, 0, false, err
-	}
+func (dt *DomainRoTx) getLatestFromCursor(key []byte, valsC kv.Cursor) ([]byte, uint64, bool, error) {
 	var v, foundInvStep []byte
-
+	var err error
 	if dt.d.largeValues {
 		var fullkey []byte
 		fullkey, v, err = valsC.Seek(key)
@@ -1740,18 +1736,22 @@ func (dt *DomainRoTx) getLatestFromDB(key []byte, roTx kv.Tx) ([]byte, uint64, b
 			return nil, 0, false, nil
 		}
 
-		v = stepWithVal[8:]
-
-		foundInvStep = stepWithVal[:8]
+		foundInvStep, v = stepWithVal[:8], stepWithVal[8:]
 	}
 
 	foundStep := ^binary.BigEndian.Uint64(foundInvStep)
-
 	if lastTxNumOfStep(foundStep, dt.d.aggregationStep) >= dt.files.EndTxNum() {
 		return v, foundStep, true, nil
 	}
-
 	return nil, 0, false, nil
+}
+
+func (dt *DomainRoTx) getLatestFromDB(key []byte, roTx kv.Tx) ([]byte, uint64, bool, error) {
+	valsC, err := dt.valsCursor(roTx)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	return dt.getLatestFromCursor(key, valsC)
 }
 
 // GetLatest returns value, step in which the value last changed, and bool value which is true if the value
