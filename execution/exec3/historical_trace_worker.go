@@ -440,18 +440,15 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 
 		txTask.CreateReceipt(tx)
 
-		isSystemTxn := txTask.TxIndex < 0 || txTask.Final
-		if !isSystemTxn { // system txs - it's Erigon's internal concept - must not trigger hooks
-			hooks := txTask.Tracer.TracingHooks()
-			if txTask.Error != nil {
-				if hooks != nil && hooks.OnTxEnd != nil {
-					hooks.OnTxEnd(nil, err)
-				}
-				return outputTxNum, false, fmt.Errorf("bn=%d, tn=%d: %w", txTask.BlockNum, txTask.TxNum, txTask.Error)
-			}
+		hooks := txTask.Tracer.TracingHooks()
+		if txTask.Error != nil {
 			if hooks != nil && hooks.OnTxEnd != nil {
-				hooks.OnTxEnd(txTask.BlockReceipts[txTask.TxIndex], nil)
+				hooks.OnTxEnd(nil, err)
 			}
+			return outputTxNum, false, fmt.Errorf("bn=%d, tn=%d: %w", txTask.BlockNum, txTask.TxNum, txTask.Error)
+		}
+		if hooks != nil && hooks.OnTxEnd != nil {
+			hooks.OnTxEnd(txTask.BlockReceipts[txTask.TxIndex], nil)
 		}
 
 		if err := consumer.Reduce(txTask, tx); err != nil {
