@@ -47,7 +47,7 @@ func TestDifficulty(t *testing.T) {
 
 			cfg, ok := testutil.Forks[fork]
 			if !ok {
-				t.Error(testutil.UnsupportedForkError{fork})
+				t.Error(testutil.UnsupportedForkError{Name: fork})
 				continue
 			}
 
