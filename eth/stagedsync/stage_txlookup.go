@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -122,6 +123,13 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 			return err
 		}
 	}
+
+	if dbg.AssertEnabled {
+		err = txnLookupIntegrity(logPrefix, tx, startBlock, endBlock, ctx, cfg, logger)
+		if err != nil {
+			return fmt.Errorf("txnLookupIntegrity: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -163,6 +171,28 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
 		},
 	}, logger)
+}
+
+// txnLookupTransform - [startKey, endKey)
+func txnLookupIntegrity(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) (err error) {
+	for i := blockFrom; i < blockTo; i++ {
+		blockHeader, err := cfg.blockReader.HeaderByNumber(ctx, tx, i)
+		if err != nil {
+			return err
+		}
+		if blockHeader == nil {
+			logger.Warn(fmt.Sprintf("[%s] txnLookup integrity: empty block %d", logPrefix, i))
+			return fmt.Errorf("empty block %d", i)
+		}
+		currentHash := blockHeader.Hash()
+		calcHash := blockHeader.CalcHash()
+		if currentHash.Cmp(calcHash) != 0 {
+			logger.Error(fmt.Sprintf("[%s] txnLookup calc hash mismatch: block %d, currentHash %x calcHash %x", logPrefix, i, currentHash, calcHash))
+			return fmt.Errorf("[%s] txnLookup calc hash mismatch: block %d, currentHash %x calcHash %x", logPrefix, i, currentHash, calcHash)
+		}
+
+	}
+	return nil
 }
 
 func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context, logger log.Logger) (err error) {
