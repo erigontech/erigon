@@ -31,6 +31,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/etl"
@@ -248,12 +249,9 @@ func (be *BranchEncoder) putUvarAndVal(size uint64, val []byte) error {
 func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCell func(nibble int, skip bool) (*cell, error)) (BranchData, int, error) {
 	be.buf.Reset()
 
-	var encoded [2]byte
+	var encoded [4]byte
 	binary.BigEndian.PutUint16(encoded[:], touchMap)
-	if _, err := be.buf.Write(encoded[:]); err != nil {
-		return nil, 0, err
-	}
-	binary.BigEndian.PutUint16(encoded[:], afterMap)
+	binary.BigEndian.PutUint16(encoded[2:], afterMap)
 	if _, err := be.buf.Write(encoded[:]); err != nil {
 		return nil, 0, err
 	}
@@ -1089,10 +1087,10 @@ func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
 	}
 	if !bytes.Equal(acc.CodeHash.Bytes(), c.update.CodeHash[:]) {
 		if len(acc.CodeHash.Bytes()) == 0 {
-			copy(c.update.CodeHash[:], EmptyCodeHash)
+			c.update.CodeHash = empty.CodeHash
 		} else {
 			c.update.Flags |= CodeUpdate
-			copy(c.update.CodeHash[:], acc.CodeHash.Bytes())
+			c.update.CodeHash = acc.CodeHash
 		}
 	}
 }
@@ -1113,7 +1111,7 @@ func (t *Updates) TouchCode(c *KeyUpdate, code []byte) {
 		if c.update.Flags == 0 {
 			c.update.Flags = DeleteUpdate
 		}
-		copy(c.update.CodeHash[:], EmptyCodeHash)
+		c.update.CodeHash = empty.CodeHash
 		return
 	}
 	copy(c.update.CodeHash[:], crypto.Keccak256(code))
@@ -1240,7 +1238,7 @@ func (u *Update) Reset() {
 	u.Balance.Clear()
 	u.Nonce = 0
 	u.StorageLen = 0
-	u.CodeHash = EmptyCodeHashArray
+	u.CodeHash = empty.CodeHash
 }
 
 func (u *Update) Merge(b *Update) {

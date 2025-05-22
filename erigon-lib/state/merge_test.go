@@ -514,7 +514,7 @@ func TestMergeFiles(t *testing.T) {
 	prevStep := uint64(0)
 	for key, upd := range data {
 		for _, v := range upd {
-			err := w.PutWithPrev([]byte(key), nil, v.value, v.txNum, prev, prevStep)
+			err := w.PutWithPrev([]byte(key), v.value, v.txNum, prev, prevStep)
 
 			prev, prevStep = v.value, v.txNum/d.aggregationStep
 			require.NoError(t, err)

@@ -223,7 +223,7 @@ func (s *Stateless) UpdateAccountCode(address common.Address, incarnation uint64
 
 // WriteAccountStorage is a part of the StateWriter interface
 // This implementation registeres the change of the account's storage in the internal double map `storageUpdates`
-func (s *Stateless) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+func (s *Stateless) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error {
 	addrHash, err := common.HashData(address[:])
 	if err != nil {
 		return err
@@ -245,7 +245,7 @@ func (s *Stateless) WriteAccountStorage(address common.Address, incarnation uint
 		m[seckey] = nil
 	}
 	if s.trace {
-		fmt.Printf("Stateless: WriteAccountStorage %x key %x val %x\n", address, *key, *value)
+		fmt.Printf("Stateless: WriteAccountStorage %x key %x val %x\n", address, key, value)
 	}
 	return nil
 }

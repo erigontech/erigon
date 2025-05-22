@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon-lib/abi"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -56,7 +57,7 @@ func TestEmptyBlock(t *testing.T) {
 
 	time := uint64(1539016985)
 	header := core.MakeEmptyHeader(genesisBlock.Header(), chainConfig, time, nil)
-	header.UncleHash = types.EmptyUncleHash
+	header.UncleHash = empty.UncleHash
 	header.TxHash = trie.EmptyRoot
 	header.ReceiptHash = trie.EmptyRoot
 	header.Coinbase = common.HexToAddress("0xcace5b3c29211740e595850e80478416ee77ca21")

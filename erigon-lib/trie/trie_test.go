@@ -438,7 +438,7 @@ func TestCodeNodeGetExistingAccountEmptyCode(t *testing.T) {
 
 	address := getAddressForIndex(0)
 
-	codeHash := EmptyCodeHash
+	codeHash := emptyCodeHash
 	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
 
 	acc := accounts.NewAccount()

@@ -1554,12 +1554,32 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 // sets up blockReader and client downloader
 func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downloadercfg.Cfg, cc *chain.Config) error {
 	var err error
-	if s.config.Snapshot.NoDownloader {
-		return nil
-	}
+	s.chainDB.OnFilesChange(func(frozenFileNames []string) {
+		s.logger.Warn("files changed...sending notification")
+		events := s.notifications.Events
+		events.OnNewSnapshot()
+		if downloaderCfg != nil && downloaderCfg.ChainName == "" {
+			return
+		}
+		if !s.config.Snapshot.NoDownloader && s.downloaderClient != nil && len(frozenFileNames) > 0 {
+			req := &protodownloader.AddRequest{Items: make([]*protodownloader.AddItem, 0, len(frozenFileNames))}
+			for _, fName := range frozenFileNames {
+				req.Items = append(req.Items, &protodownloader.AddItem{
+					Path: filepath.Join("history", fName),
+				})
+			}
+			if _, err := s.downloaderClient.Add(ctx, req); err != nil {
+				s.logger.Warn("[snapshots] notify downloader", "err", err)
+			}
+		}
+	})
 
 	if downloaderCfg != nil && downloaderCfg.ChainName == "" {
 		downloaderCfg.ChainName = cc.ChainName
+		return nil
+	}
+
+	if s.config.Snapshot.NoDownloader {
 		return nil
 	}
 
@@ -1588,22 +1608,6 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 
 		s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
 	}
-
-	s.chainDB.OnFreeze(func(frozenFileNames []string) {
-		events := s.notifications.Events
-		events.OnNewSnapshot()
-		if s.downloaderClient != nil {
-			req := &protodownloader.AddRequest{Items: make([]*protodownloader.AddItem, 0, len(frozenFileNames))}
-			for _, fName := range frozenFileNames {
-				req.Items = append(req.Items, &protodownloader.AddItem{
-					Path: filepath.Join("history", fName),
-				})
-			}
-			if _, err := s.downloaderClient.Add(ctx, req); err != nil {
-				s.logger.Warn("[snapshots] notify downloader", "err", err)
-			}
-		}
-	})
 	return err
 }
 

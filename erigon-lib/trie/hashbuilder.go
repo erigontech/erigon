@@ -23,13 +23,12 @@ import (
 	"io"
 	"math/bits"
 
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon-lib/common"
 	length2 "github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/crypto"
-
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/rlphacks"
 	"github.com/erigontech/erigon-lib/types/accounts"
@@ -37,7 +36,7 @@ import (
 
 const hashStackStride = length2.Hash + 1 // + 1 byte for RLP encoding
 
-var EmptyCodeHash = crypto.Keccak256Hash(nil) //c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
+var emptyCodeHash = empty.CodeHash
 
 // HashBuilder implements the interface `structInfoReceiver` and opcodes that the structural information of the trie
 // is comprised of
@@ -238,7 +237,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	fullKey := keyHex[:len(keyHex)-1]
 	key := keyHex[len(keyHex)-length:]
 	copy(hb.acc.Root[:], EmptyRoot[:])
-	copy(hb.acc.CodeHash[:], EmptyCodeHash[:])
+	copy(hb.acc.CodeHash[:], emptyCodeHash[:])
 	hb.acc.Nonce = nonce
 	hb.acc.Balance.Set(balance)
 	hb.acc.Initialised = true
@@ -261,7 +260,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	if fieldSet&uint32(8) != 0 {
 		copy(hb.acc.CodeHash[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-length2.Hash:len(hb.hashStack)-popped*hashStackStride])
 		var ok bool
-		if !bytes.Equal(hb.acc.CodeHash[:], EmptyCodeHash[:]) {
+		if !bytes.Equal(hb.acc.CodeHash[:], emptyCodeHash[:]) {
 			stackTop := hb.nodeStack[len(hb.nodeStack)-popped-1]
 			if stackTop != nil { // if we don't have any stack top it might be okay because we didn't resolve the code yet (stateful resolver)
 				// but if we have something on top of the stack that isn't `nil`, it has to be a codeNode
@@ -285,7 +284,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	var accCopy accounts.Account
 	accCopy.Copy(&hb.acc)
 
-	if !bytes.Equal(accCopy.CodeHash[:], EmptyCodeHash[:]) && accountCode != nil {
+	if !bytes.Equal(accCopy.CodeHash[:], emptyCodeHash[:]) && accountCode != nil {
 		accountCodeSize = len(accountCode)
 	}
 
@@ -328,7 +327,7 @@ func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, balance *uint2
 		copy(hb.acc.CodeHash[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-length2.Hash:len(hb.hashStack)-popped*hashStackStride])
 		popped++
 	} else {
-		copy(hb.acc.CodeHash[:], EmptyCodeHash[:])
+		copy(hb.acc.CodeHash[:], emptyCodeHash[:])
 	}
 
 	return hb.accountLeafHashWithKey(key, popped)

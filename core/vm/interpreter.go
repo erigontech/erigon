@@ -37,6 +37,7 @@ import (
 // Config are the configuration options for the Interpreter
 type Config struct {
 	Tracer        *tracing.Hooks
+	JumpDestCache *JumpDestCache
 	NoRecursion   bool // Disables call, callcode, delegate call and create
 	NoBaseFee     bool // Forces the EIP-1559 baseFee to 0 (needed for 0 price calls)
 	SkipAnalysis  bool // Whether we can skip jumpdest analysis based on the checked history

@@ -155,7 +155,7 @@ var PrecompiledContractsOsaka = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{0x02}): &sha256hash{},
 	common.BytesToAddress([]byte{0x03}): &ripemd160hash{},
 	common.BytesToAddress([]byte{0x04}): &dataCopy{},
-	common.BytesToAddress([]byte{0x05}): &bigModExp{eip7883: true},
+	common.BytesToAddress([]byte{0x05}): &bigModExp{osaka: true},
 	common.BytesToAddress([]byte{0x06}): &bn256AddIstanbul{},
 	common.BytesToAddress([]byte{0x07}): &bn256ScalarMulIstanbul{},
 	common.BytesToAddress([]byte{0x08}): &bn256PairingIstanbul{},
@@ -337,17 +337,13 @@ func (c *dataCopy) Run(in []byte) ([]byte, error) {
 // bigModExp implements a native big integer exponential modular operation.
 type bigModExp struct {
 	eip2565 bool
-	eip7883 bool
+	osaka   bool // EIP-7823 & 7883
 }
 
 var (
 	big1      = big.NewInt(1)
-	big2      = big.NewInt(2)
 	big3      = big.NewInt(3)
-	big4      = big.NewInt(4)
 	big7      = big.NewInt(7)
-	big8      = big.NewInt(8)
-	big16     = big.NewInt(16)
 	big20     = big.NewInt(20)
 	big32     = big.NewInt(32)
 	big64     = big.NewInt(64)
@@ -374,13 +370,13 @@ func modExpMultComplexityEip198(x *big.Int) *big.Int {
 	case x.Cmp(big1024) <= 0:
 		// (x ** 2 // 4 ) + ( 96 * x - 3072)
 		x = new(big.Int).Add(
-			new(big.Int).Div(new(big.Int).Mul(x, x), big4),
+			new(big.Int).Rsh(new(big.Int).Mul(x, x), 2),
 			new(big.Int).Sub(new(big.Int).Mul(big96, x), big3072),
 		)
 	default:
 		// (x ** 2 // 16) + (480 * x - 199680)
 		x = new(big.Int).Add(
-			new(big.Int).Div(new(big.Int).Mul(x, x), big16),
+			new(big.Int).Rsh(new(big.Int).Mul(x, x), 4),
 			new(big.Int).Sub(new(big.Int).Mul(big480, x), big199680),
 		)
 	}
@@ -397,7 +393,7 @@ func modExpMultComplexityEip198(x *big.Int) *big.Int {
 // where is x is max(length_of_MODULUS, length_of_BASE)
 func modExpMultComplexityEip2565(x *big.Int) *big.Int {
 	x.Add(x, big7)
-	x.Div(x, big8)
+	x.Rsh(x, 3) // ÷8
 	return x.Mul(x, x)
 }
 
@@ -418,7 +414,7 @@ func modExpMultComplexityEip7883(x *big.Int) *big.Int {
 	if lessOrEq32 {
 		return x
 	} else {
-		return x.Mul(x, big2)
+		return x.Lsh(x, 1) // ×2
 	}
 }
 
@@ -453,10 +449,10 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 	adjExpLen := new(big.Int)
 	if expLen.Cmp(big32) > 0 {
 		adjExpLen.Sub(expLen, big32)
-		if c.eip7883 {
-			adjExpLen.Mul(big16, adjExpLen)
+		if c.osaka { // EIP-7883
+			adjExpLen.Lsh(adjExpLen, 4) // ×16
 		} else {
-			adjExpLen.Mul(big8, adjExpLen)
+			adjExpLen.Lsh(adjExpLen, 3) // ×8
 		}
 	}
 	adjExpLen.Add(adjExpLen, big.NewInt(int64(msb)))
@@ -464,7 +460,7 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 
 	// Calculate the gas cost of the operation
 	gas := new(big.Int).Set(math.BigMax(modLen, baseLen))
-	if c.eip7883 {
+	if c.osaka {
 		// EIP-7883: ModExp Gas Cost Increase
 		gas = modExpMultComplexityEip7883(gas)
 
@@ -500,12 +496,31 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 	return gas.Uint64()
 }
 
+var (
+	errModExpBaseLengthTooLarge     = errors.New("base length is too large")
+	errModExpExponentLengthTooLarge = errors.New("exponent length is too large")
+	errModExpModulusLengthTooLarge  = errors.New("modulus length is too large")
+)
+
 func (c *bigModExp) Run(input []byte) ([]byte, error) {
 	var (
 		baseLen = new(big.Int).SetBytes(getData(input, 0, 32)).Uint64()
 		expLen  = new(big.Int).SetBytes(getData(input, 32, 32)).Uint64()
 		modLen  = new(big.Int).SetBytes(getData(input, 64, 32)).Uint64()
 	)
+	if c.osaka {
+		// EIP-7823: Set upper bounds for MODEXP
+		if baseLen > 1024 {
+			return nil, errModExpBaseLengthTooLarge
+		}
+		if expLen > 1024 {
+			return nil, errModExpExponentLengthTooLarge
+		}
+		if modLen > 1024 {
+			return nil, errModExpModulusLengthTooLarge
+		}
+	}
+
 	if len(input) > 96 {
 		input = input[96:]
 	} else {

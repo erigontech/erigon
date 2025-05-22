@@ -12,7 +12,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/crypto/cryptopool"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 
@@ -100,5 +99,5 @@ func (f *HeaderAccessorIndexKeyFactory) Make(word []byte, _ uint64) []byte {
 }
 
 func (f *HeaderAccessorIndexKeyFactory) Close() {
-	cryptopool.ReturnToPoolKeccak256(f.s)
+	crypto.ReturnToPool(f.s)
 }

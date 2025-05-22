@@ -121,7 +121,7 @@ func (rw *HistoricalTraceWorker) Run() (err error) {
 			err = fmt.Errorf("HistoricalTraceWorker panic: %s, %s", rec, dbg.Stack())
 		}
 	}()
-	defer rw.evm.JumpDestCache.LogStats()
+	defer rw.evm.Config().JumpDestCache.LogStats()
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
 		rw.RunTxTaskNoLock(txTask)
 		if err := rw.out.Add(rw.ctx, txTask); err != nil {
@@ -242,7 +242,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 			txTask.Error = err
 		} else {
 			txTask.Failed = applyRes.Failed()
-			txTask.UsedGas = applyRes.UsedGas
+			txTask.GasUsed = applyRes.GasUsed
 			// Update the state with pending changes
 			ibs.SoftFinalise()
 
@@ -312,7 +312,7 @@ func (rw *HistoricalTraceWorker) execAATxn(txTask *state.TxTask) {
 	}
 
 	txTask.Failed = status != 0
-	txTask.UsedGas = gasUsed
+	txTask.GasUsed = gasUsed
 	// Update the state with pending changes
 	rw.ibs.SoftFinalise()
 	txTask.Logs = rw.ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)
@@ -370,12 +370,15 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 				err = fmt.Errorf("'reduce worker' paniced: %s, %s", rec, dbg.Stack())
 			}
 		}()
-		return doHistoryReduce(consumer, cfg.ChainDB, ctx, toTxNum, outputTxNum, rws)
+		return doHistoryReduce(consumer, cfg, ctx, toTxNum, outputTxNum, rws, logger)
 	})
 	return g
 }
 
-func doHistoryReduce(consumer TraceConsumer, db kv.TemporalRoDB, ctx context.Context, toTxNum uint64, outputTxNum *atomic.Uint64, rws *state.ResultsQueue) error {
+func doHistoryReduce(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, outputTxNum *atomic.Uint64, rws *state.ResultsQueue, logger log.Logger) error {
+	db := cfg.ChainDB
+	applyWorker := NewHistoricalTraceWorker(consumer, nil, rws, true, ctx, cfg, log.New())
+
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -388,7 +391,7 @@ func doHistoryReduce(consumer TraceConsumer, db kv.TemporalRoDB, ctx context.Con
 			return err
 		}
 
-		processedTxNum, _, err := processResultQueueHistorical(consumer, rws, outputTxNum.Load(), tx, true)
+		processedTxNum, _, err := processResultQueueHistorical(consumer, rws, outputTxNum.Load(), tx, true, applyWorker)
 		if err != nil {
 			return fmt.Errorf("processResultQueueHistorical: %w", err)
 		}
@@ -422,7 +425,7 @@ func doHistoryMap(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, in
 	return mapGroup.Wait()
 }
 
-func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueue, outputTxNumIn uint64, tx kv.TemporalTx, forceStopAtBlockEnd bool) (outputTxNum uint64, stopedAtBlockEnd bool, err error) {
+func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueue, outputTxNumIn uint64, tx kv.TemporalTx, forceStopAtBlockEnd bool, applyWorker *HistoricalTraceWorker) (outputTxNum uint64, stopedAtBlockEnd bool, err error) {
 	rwsIt := rws.Iter()
 	defer rwsIt.Close()
 
@@ -432,6 +435,10 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 		outputTxNum++
 		stopedAtBlockEnd = txTask.Final
 
+		if txTask.Final { // final txn must be executed here, because `consensus.Finalize` requires "all receipts of block" to be available
+			applyWorker.RunTxTaskNoLock(txTask.Reset())
+		}
+
 		hooks := txTask.Tracer.TracingHooks()
 		if txTask.Error != nil {
 			if hooks != nil && hooks.OnTxEnd != nil {
@@ -439,11 +446,12 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 			}
 			return outputTxNum, false, fmt.Errorf("bn=%d, tn=%d: %w", txTask.BlockNum, txTask.TxNum, txTask.Error)
 		}
-
 		txTask.CreateReceipt(tx)
+
 		if hooks != nil && hooks.OnTxEnd != nil {
 			hooks.OnTxEnd(txTask.BlockReceipts[txTask.TxIndex], nil)
 		}
+
 		if err := consumer.Reduce(txTask, tx); err != nil {
 			return outputTxNum, false, err
 		}
@@ -509,12 +517,15 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	outTxNum := &atomic.Uint64{}
 	outTxNum.Store(fromTxNum)
 
+	ctx, cancleCtx := context.WithCancel(ctx)
 	workers := NewHistoricalTraceWorkers(consumer, cfg, ctx, toTxNum, in, WorkerCount, outTxNum, logger)
 	defer workers.Wait()
 
 	workersExited := &atomic.Bool{}
 	go func() {
-		workers.Wait()
+		if err := workers.Wait(); err != nil {
+			cancleCtx()
+		}
 		workersExited.Store(true)
 	}()
 
