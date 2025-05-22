@@ -348,6 +348,9 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 		if txTask.Final { // final txn must be executed here, because `consensus.Finalize` requires "all receipts of block" to be available
 			applyWorker.RunTxTaskNoLock(txTask.Reset())
 		}
+		if txTask.Error != nil {
+			return outputTxNum, false, txTask.Error
+		}
 
 		txTask.CreateReceipt(tx)
 
