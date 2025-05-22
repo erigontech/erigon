@@ -1282,18 +1282,19 @@ func NewP2PConfig(
 	}
 
 	cfg := &p2p.Config{
-		ListenAddr:       fmt.Sprintf(":%d", port),
-		MaxPeers:         maxPeers,
-		MaxPendingPeers:  maxPendPeers,
-		NAT:              nat.Any(),
-		NoDiscovery:      nodiscover,
-		PrivateKey:       serverKey,
-		Name:             nodeName,
-		NodeDatabase:     enodeDBPath,
-		AllowedPorts:     allowedPorts,
-		TmpDir:           dirs.Tmp,
-		MetricsEnabled:   metricsEnabled,
-		LookupDNSNetwork: params2.KnownDNSNetwork,
+		ListenAddr:         fmt.Sprintf(":%d", port),
+		MaxPeers:           maxPeers,
+		MaxPendingPeers:    maxPendPeers,
+		NAT:                nat.Any(),
+		NoDiscovery:        nodiscover,
+		PrivateKey:         serverKey,
+		Name:               nodeName,
+		NodeDatabase:       enodeDBPath,
+		AllowedPorts:       allowedPorts,
+		TmpDir:             dirs.Tmp,
+		MetricsEnabled:     metricsEnabled,
+		LookupBootnodeURLs: params2.BootnodeURLsByGenesisHash,
+		LookupDNSNetwork:   params2.KnownDNSNetwork,
 	}
 	if netRestrict != "" {
 		cfg.NetRestrict = new(netutil.Netlist)

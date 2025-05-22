@@ -184,6 +184,11 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	}
 }
 
+func emptyBootnodeURL(genesis common.Hash) []string {
+	return []string{}
+
+}
+
 func mainnetDNSNetwork(genesis common.Hash, protocol string) string {
 	return "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@" + protocol + ".mainnet.ethdisco.net"
 }
@@ -199,7 +204,7 @@ func TestSentryServerImpl_SetStatusInitPanic(t *testing.T) {
 	dbNoFork := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	gspecNoFork := &types.Genesis{Config: configNoFork}
 	genesisNoFork := core.MustCommitGenesis(gspecNoFork, dbNoFork, datadir.New(t.TempDir()), log.Root())
-	ss := &GrpcServer{p2p: &p2p.Config{LookupDNSNetwork: mainnetDNSNetwork}}
+	ss := &GrpcServer{p2p: &p2p.Config{LookupBootnodeURLs: emptyBootnodeURL, LookupDNSNetwork: mainnetDNSNetwork}}
 
 	_, err := ss.SetStatus(context.Background(), &proto_sentry.StatusData{
 		ForkData: &proto_sentry.Forks{Genesis: gointerfaces.ConvertHashToH256(genesisNoFork.Hash())},

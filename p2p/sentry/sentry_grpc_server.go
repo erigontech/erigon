@@ -57,7 +57,6 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/forkid"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
-	"github.com/erigontech/erigon/params" // TODO(yperbasis)
 )
 
 const (
@@ -278,11 +277,7 @@ func makeP2PServer(
 	protocols []p2p.Protocol,
 ) (*p2p.Server, error) {
 	if len(p2pConfig.BootstrapNodes) == 0 {
-		var urls []string
-		chainConfig := params.ChainConfigByGenesisHash(genesisHash)
-		if chainConfig != nil {
-			urls = params.BootnodeURLsOfChain(chainConfig.ChainName)
-		}
+		urls := p2pConfig.LookupBootnodeURLs(genesisHash)
 		bootstrapNodes, err := enode.ParseNodesFromURLs(urls)
 		if err != nil {
 			return nil, fmt.Errorf("bad bootnodes option: %w", err)

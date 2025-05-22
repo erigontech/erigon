@@ -115,7 +115,7 @@ type Config struct {
 	// protocol.
 	BootstrapNodesV5 []*enode.Node `toml:",omitempty"`
 
-	// TODO(yperbasis): LookupBootstrapNodes
+	LookupBootnodeURLs LookupBootnodeURLsFunc
 
 	// Static nodes are used as pre-configured connections which are always
 	// maintained and re-connected on disconnects.

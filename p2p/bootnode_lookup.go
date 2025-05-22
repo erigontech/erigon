@@ -18,6 +18,8 @@ package p2p
 
 import "github.com/erigontech/erigon-lib/common"
 
+type LookupBootnodeURLsFunc func(genesis common.Hash) []string
+
 // LookupDNSNetwork returns the address of a public DNS-based node list for the given
 // genesis hash and protocol. See https://github.com/ethereum/discv4-dns-lists for more
 // information.
