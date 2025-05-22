@@ -120,7 +120,7 @@ type btHeaderMarshaling struct {
 func (bt *BlockTest) Run(t *testing.T, checkStateRoot bool) error {
 	config, ok := testutil.Forks[bt.json.Network]
 	if !ok {
-		return testutil.UnsupportedForkError{bt.json.Network}
+		return testutil.UnsupportedForkError{Name: bt.json.Network}
 	}
 
 	engine := ethconsensusconfig.CreateConsensusEngineBareBones(context.Background(), config, log.New())
