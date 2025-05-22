@@ -1127,7 +1127,7 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
 		balance := stateObject.Balance()
 		if tracingHooks != nil && tracingHooks.OnBalanceChange != nil && !(&balance).IsZero() && stateObject.selfdestructed {
-			tracingHooks.OnBalanceChange(stateObject.address, &balance, uint256.NewInt(0), tracing.BalanceDecreaseSelfdestructBurn)
+			tracingHooks.OnBalanceChange(stateObject.address, balance, *uint256.NewInt(0), tracing.BalanceDecreaseSelfdestructBurn)
 		}
 		if dbg.TraceTransactionIO && (trace || traceAccount(addr)) {
 			fmt.Printf("%d (%d.%d) Delete Account: %x selfdestructed=%v\n", stateObject.db.blockNum, stateObject.db.txIndex, stateObject.db.version, addr, stateObject.selfdestructed)
