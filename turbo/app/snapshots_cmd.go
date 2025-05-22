@@ -221,7 +221,7 @@ var snapshotCommand = cli.Command{
 			Name: "rm-all-state-snapshots",
 			Action: func(cliCtx *cli.Context) error {
 				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-				os.Remove(filepath.Join(dirs.Snap, "salt-state.txt"))
+				//os.Remove(filepath.Join(dirs.Snap, "salt-state.txt"))
 				return dir.DeleteFiles(dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors)
 			},
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
