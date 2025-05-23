@@ -313,6 +313,10 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			return nil, err
 		}
 		filtered := r.Logs.Filter(addrMap, crit.Topics, 0)
+		if err := noDuplicates2(r.Logs, blockNum); err != nil {
+			panic(err)
+			return nil, err
+		}
 
 		for _, filteredLog := range filtered {
 			logs = append(logs, &types.ErigonLog{
@@ -340,6 +344,24 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 }
 
 func noDuplicates(logs types.ErigonLogs, bn uint64) error {
+	if len(logs) <= 1 {
+		return nil
+	}
+	var indices []uint64
+	for i := 0; i < len(logs); i++ {
+		indices = append(indices, uint64(logs[i].Index))
+	}
+	slices.Sort(indices)
+	for i := 1; i < len(logs); i++ {
+		if indices[i-1] == indices[i] {
+			err := fmt.Errorf("duplicated log_index %d, all %d", indices[i], indices)
+			panic(err)
+			return err
+		}
+	}
+	return nil
+}
+func noDuplicates2(logs types.Logs, bn uint64) error {
 	if len(logs) <= 1 {
 		return nil
 	}
