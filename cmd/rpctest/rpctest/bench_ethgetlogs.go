@@ -178,7 +178,6 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 		return nil
 	}
 
-	_prevBn := blockFrom
 	for bn := blockFrom; bn < blockTo; {
 		batchEnd := min(bn+10, blockTo)
 		eg := &errgroup.Group{}
@@ -186,10 +185,9 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 		eg.SetLimit(1)
 		for ; bn < batchEnd; bn++ {
 			bn := bn
-			prevBn := _prevBn
 			//eg.Go(func() error {
 			var resp EthGetLogs
-			res := reqGen.Erigon("eth_getLogs", reqGen.getLogsNoFilters(prevBn, bn), &resp)
+			res := reqGen.Erigon("eth_getLogs", reqGen.getLogsNoFilters(bn, bn), &resp)
 			if res.Err != nil {
 				return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)
 			}
@@ -209,7 +207,7 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 				}
 				sawAddr[l.Address] = struct{}{}
 
-				res = reqGen.Erigon("eth_getLogs", reqGen.getLogs(prevBn, bn, l.Address), &resp)
+				res = reqGen.Erigon("eth_getLogs", reqGen.getLogs(bn, bn, l.Address), &resp)
 				if res.Err != nil {
 					return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)
 				}
@@ -235,7 +233,7 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 				}
 				sawTopic[l.Topics[0]] = struct{}{}
 
-				res = reqGen.Erigon("eth_getLogs", reqGen.getLogs1(prevBn, bn, l.Address, l.Topics[0]), &resp)
+				res = reqGen.Erigon("eth_getLogs", reqGen.getLogs1(bn, bn, l.Address, l.Topics[0]), &resp)
 				if res.Err != nil {
 					return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)
 				}

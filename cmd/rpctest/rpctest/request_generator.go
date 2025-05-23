@@ -369,7 +369,6 @@ func (g *RequestGenerator) Geth(method, body string, response interface{}) CallR
 }
 
 func (g *RequestGenerator) Erigon(method, body string, response interface{}) CallResult {
-	fmt.Printf("[dbg] a: %s, %s\n", body, response)
 	return g.call(Erigon, method, body, response)
 }
 
