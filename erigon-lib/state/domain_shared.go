@@ -177,10 +177,11 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.TemporalRwTx, block
 	//fmt.Printf("aggregator unwind step %d txUnwindTo %d\n", step, txUnwindTo)
 	sf := time.Now()
 	defer mxUnwindSharedTook.ObserveDuration(sf)
+	sd.sdCtx.Reset()
 
-	if err := sd.Flush(ctx, rwTx); err != nil {
-		return err
-	}
+	//if err := sd.Flush(ctx, rwTx); err != nil {
+	//	return err
+	//}
 
 	if err := rwTx.Unwind(ctx, txUnwindTo, changeset); err != nil {
 		return err
