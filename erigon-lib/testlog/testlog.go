@@ -29,6 +29,7 @@ import (
 
 // Handler returns a log handler which logs to the unit test log of t.
 func Handler(t *testing.T, level log.Lvl) log.Handler {
+	t.Helper()
 	return log.LvlFilterHandler(level, &handler{t, log.TerminalFormat()})
 }
 
@@ -65,6 +66,8 @@ func (h *bufHandler) Log(r *log.Record) error {
 
 // Logger returns a logger which logs to the unit test log of t.
 func Logger(t *testing.T, level log.Lvl) log.Logger {
+	t.Helper()
+
 	l := &logger{
 		t:   t,
 		log: log.New(),
