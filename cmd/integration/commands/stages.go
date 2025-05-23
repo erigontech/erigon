@@ -1183,8 +1183,8 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	blockSnapBuildSema := semaphore.NewWeighted(max(int64(runtime.NumCPU()), int64(dbg.BuildSnapshotAllowance)))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	agg.SetCollateAndBuildWorkers(estimate.AlmostAllCPUs())
-	agg.SetMergeWorkers(estimate.AlmostAllCPUs())
-	agg.SetCompressWorkers(estimate.AlmostAllCPUs())
+	agg.SetMergeWorkers(2)
+	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	agg.PeriodicalyPrintProcessSet(ctx)
 
 	err := stagedsync.SpawnCustomTrace(cfg, ctx, logger)
