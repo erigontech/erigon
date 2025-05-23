@@ -338,7 +338,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			})
 		}
 
-		if err := noDuplicates(logs, fmt.Sprintf("bn=%d, ti=%d", blockNum, txIndex)); err != nil {
+		if err := noDuplicates(logs, fmt.Sprintf("bn=%d, ti=%d, crit:=%s", blockNum, txIndex, crit)); err != nil {
 			panic(err)
 			return nil, err
 		}
