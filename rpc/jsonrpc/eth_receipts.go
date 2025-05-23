@@ -326,7 +326,6 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 
 		for _, filteredLog := range filtered {
-			log.Warn("[dbg] a", "bn", filteredLog.BlockNumber, "txi", filteredLog.TxIndex, "li", filteredLog.Index)
 			logs = append(logs, &types.ErigonLog{
 				Address:     filteredLog.Address,
 				Topics:      filteredLog.Topics,
