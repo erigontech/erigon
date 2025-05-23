@@ -51,7 +51,7 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) e
 
 		for _, columnIndex := range req.Columns.List() {
 			if count >= int(c.beaconConfig.NumberOfColumns) {
-				break
+				return nil
 			}
 			if err := c.dataColumnStorage.WriteStream(s, slot, blockRoot, columnIndex); err != nil {
 				return err
