@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/RoaringBitmap/roaring/v2"
 
@@ -327,11 +328,34 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				Timestamp:   header.Time,
 			})
 		}
-	}
 
+		if err := noDuplicates(logs, blockNum); err != nil {
+			panic(err)
+			return nil, err
+		}
+	}
 	log.Warn("[dbg] res", "logs", len(logs))
 
 	return logs, nil
+}
+
+func noDuplicates(logs types.ErigonLogs, bn uint64) error {
+	if len(logs) <= 1 {
+		return nil
+	}
+	var indices []uint64
+	for i := 0; i < len(logs); i++ {
+		indices = append(indices, uint64(logs[i].Index))
+	}
+	slices.Sort(indices)
+	for i := 1; i < len(logs); i++ {
+		if indices[i-1] == indices[i] {
+			err := fmt.Errorf("duplicated log_index %d, all %d", indices[i], indices)
+			panic(err)
+			return err
+		}
+	}
+	return nil
 }
 
 // The Topic list restricts matches to particular event topics. Each event has a list
