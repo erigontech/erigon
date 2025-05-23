@@ -90,29 +90,32 @@ func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode commitment.Mode, 
 			return nil
 		}
 
-		for i := 0; i < len(ctx.subTtx); i++ {
-			actx := sd.roTtx.AggTx().(*AggregatorRoTx).Agg().BeginFilesRo()
-			c, err := sd.roTtx.Cursor(Schema.CommitmentDomain.valuesTable)
-			if err != nil {
-				panic(fmt.Sprintf("failed to create cursor for commitment domain: %v", err))
-			}
-
-			ctx.subTtx[i] = &CursorContext{
-				c:                  c,
-				roTtx:              sd.roTtx,
-				aggTx:              actx,
-				sd:                 sd,
-				limitReadAsOfTxNum: ctx.mainTtx.limitReadAsOfTxNum,
-				stepSize:           ctx.mainTtx.stepSize,
-				domainsOnly:        ctx.mainTtx.domainsOnly,
-				trace:              ctx.mainTtx.trace,
-			}
-			ctx.warmupTries[i] = commitment.NewHexPatriciaHashed(length.Addr, ctx.subTtx[i])
-		}
-
+		ctx.openSubTtx(sd)
 	}
 	ctx.patriciaTrie.ResetContext(trieCtx)
 	return ctx
+}
+
+func (sdc *SharedDomainsCommitmentContext) openSubTtx(sd *SharedDomains) {
+	for i := 0; i < len(sdc.subTtx); i++ {
+		actx := sd.roTtx.AggTx().(*AggregatorRoTx).Agg().BeginFilesRo()
+		c, err := sd.roTtx.Cursor(Schema.CommitmentDomain.valuesTable)
+		if err != nil {
+			panic(fmt.Sprintf("failed to create cursor for commitment domain: %v", err))
+		}
+
+		sdc.subTtx[i] = &CursorContext{
+			c:                  c,
+			roTtx:              sd.roTtx,
+			aggTx:              actx,
+			sd:                 sd,
+			limitReadAsOfTxNum: sdc.mainTtx.limitReadAsOfTxNum,
+			stepSize:           sdc.mainTtx.stepSize,
+			domainsOnly:        sdc.mainTtx.domainsOnly,
+			trace:              sdc.mainTtx.trace,
+		}
+		sdc.warmupTries[i] = commitment.NewHexPatriciaHashed(length.Addr, sdc.subTtx[i])
+	}
 }
 
 func (sdc *SharedDomainsCommitmentContext) Close() {
@@ -324,6 +327,9 @@ func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(blockNu
 		return err
 	}
 	for ti := 0; ti < len(sdc.warmupTries); ti++ {
+		if sdc.warmupTries[ti] == nil {
+			continue
+		}
 		hph := sdc.warmupTries[ti].(*commitment.HexPatriciaHashed)
 		if err := hph.SetState(encodedState); err != nil {
 			return fmt.Errorf("failed to set state for warmup trie %d: %w", ti, err)
