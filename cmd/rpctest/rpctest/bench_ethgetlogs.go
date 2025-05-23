@@ -166,7 +166,6 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 		}
 		var indices []uint64
 		for i := 0; i < len(logs); i++ {
-			fmt.Printf("l %d, p: %d\n", logs[i].Index, logs[i].TxIndex)
 			indices = append(indices, uint64(logs[i].Index))
 		}
 		slices.Sort(indices)
