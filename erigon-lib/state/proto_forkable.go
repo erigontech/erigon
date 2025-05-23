@@ -118,7 +118,6 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 			return nil, false, err
 		}
 		sn.Close()
-		sn = nil
 		ps.Delete(p)
 
 	}
@@ -309,6 +308,7 @@ func (a *ProtoForkableTx) Files() VisibleFiles {
 }
 
 func (a *ProtoForkableTx) GetFromFile(entityNum Num, idx int) (v Bytes, found bool, err error) {
+	ap := a.a
 	a.NoFilesCheck()
 	if idx >= len(a.files) {
 		return nil, false, fmt.Errorf("index out of range: %d >= %d", idx, len(a.files))
@@ -317,24 +317,30 @@ func (a *ProtoForkableTx) GetFromFile(entityNum Num, idx int) (v Bytes, found bo
 	indexR := a.StatelessIdxReader(idx)
 	id := int64(entityNum) - int64(indexR.BaseDataID())
 	if id < 0 {
-		a.a.logger.Error("ordinal lookup by negative num", "entityNum", entityNum, "index", idx, "indexR.BaseDataID()", indexR.BaseDataID())
+		ap.logger.Error("ordinal lookup by negative num", "entityNum", entityNum, "index", idx, "indexR.BaseDataID()", indexR.BaseDataID())
 		panic("ordinal lookup by negative num")
 	}
 	offset := indexR.OrdinalLookup(uint64(id))
 	file := a.files[idx].src
+
 	g := file.decompressor.MakeGetter()
 	g.Reset(offset)
+
+	start, end := file.Range()
+	compression := seg.CompressNone
+	if a.a.isCompressionUsed(RootNum(start), RootNum(end)) {
+		compression = seg.CompressKeys
+	}
+	reader := seg.NewReader(g, compression)
+	reader.Reset(offset)
 	var word []byte
-	if g.HasNext() {
-		start, end := file.Range()
-		if a.a.isCompressionUsed(RootNum(start), RootNum(end)) {
-			word, _ = g.Next(word[:0])
-		} else {
-			word, _ = g.NextUncompressed()
-		}
+
+	if reader.HasNext() {
+		//start, end
+		word, _ = reader.Next(word[:0])
 		return word, true, nil
 	}
-	ap := a.a
+
 	return nil, false, fmt.Errorf("entity get error: %s expected %d in snapshot %s but not found", ap.a.Name(), entityNum, a.files[idx].src.decompressor.FileName())
 }
 
