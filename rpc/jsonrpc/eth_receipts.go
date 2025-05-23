@@ -89,6 +89,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		num := block.NumberU64()
 		begin = num
 		end = num
+		log.Warn("[dbg] see8", "begin", begin, "end", end)
 	} else {
 		// Convert the RPC block numbers into internal representations
 		latest, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, api._blockReader, nil)
@@ -113,6 +114,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 				return types.Logs{}, nil
 			}
 		}
+		log.Warn("[dbg] see9", "begin", begin, "end", end, "crit", crit)
 		end = latest
 		if crit.ToBlock != nil {
 			toBlock := crit.ToBlock.Int64()
@@ -126,6 +128,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 				}
 			}
 		}
+		log.Warn("[dbg] see91", "begin", begin, "end", end, "crit", crit)
 	}
 
 	if end < begin {
