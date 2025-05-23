@@ -1182,7 +1182,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	agg.SetCollateAndBuildWorkers(estimate.StateV3Collate.Workers())
 	agg.SetMergeWorkers(2)
-	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+	agg.SetCompressWorkers(estimate.CompressSnapshot.WorkersHalf())
 	agg.PeriodicalyPrintProcessSet(ctx)
 
 	err := stagedsync.SpawnCustomTrace(cfg, ctx, logger)
