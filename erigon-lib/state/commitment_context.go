@@ -91,6 +91,10 @@ func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode commitment.Mode, 
 		}
 
 		ctx.openSubTtx(sd)
+		// } else {
+		// 	ctx.updates.Warmup = func(hashedKey []byte) error {
+		// 	}
+		//
 	}
 	ctx.patriciaTrie.ResetContext(trieCtx)
 	return ctx
@@ -98,7 +102,11 @@ func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode commitment.Mode, 
 
 func (sdc *SharedDomainsCommitmentContext) openSubTtx(sd *SharedDomains) {
 	for i := 0; i < len(sdc.subTtx); i++ {
-		actx := sd.roTtx.AggTx().(*AggregatorRoTx).Agg().BeginFilesRo()
+		agg := sd.roTtx.AggTx().(*AggregatorRoTx).Agg()
+		if agg == nil {
+			panic("agg is nil")
+		}
+		actx := agg.BeginFilesRo()
 		c, err := sd.roTtx.Cursor(Schema.CommitmentDomain.valuesTable)
 		if err != nil {
 			panic(fmt.Sprintf("failed to create cursor for commitment domain: %v", err))
@@ -122,8 +130,8 @@ func (sdc *SharedDomainsCommitmentContext) Close() {
 	sdc.updates.Close()
 	for i := 0; i < len(sdc.subTtx); i++ {
 		if sdc.subTtx[i] != nil {
-			sdc.subTtx[i].c.Close()
-			sdc.subTtx[i].roTtx.Rollback()
+			sdc.subTtx[i].Close()
+			//sdc.subTtx[i].roTtx.Rollback()
 		}
 	}
 }
@@ -636,7 +644,7 @@ type CursorContext struct {
 
 func (sdc *CursorContext) Close() {
 	sdc.c.Close()
-	sdc.roTtx.Rollback()
+	//sdc.roTtx.Rollback()
 	sdc.aggTx.Close()
 }
 
@@ -697,6 +705,7 @@ func (sdc *CursorContext) Branch(pref []byte) ([]byte, uint64, error) {
 }
 
 func (sdc *CursorContext) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error {
+	panic("put branch")
 	if sdc.limitReadAsOfTxNum > 0 && !sdc.domainsOnly { // do not store branches if explicitly operate on history
 		return nil
 	}
