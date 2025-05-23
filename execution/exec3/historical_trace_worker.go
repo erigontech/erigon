@@ -105,13 +105,17 @@ func NewHistoricalTraceWorker(
 		background:  background,
 		stateReader: state.NewHistoryReaderV3(),
 
-		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, execArgs.ChainConfig, vm.Config{}),
 		taskGasPool: new(core.GasPool),
-		vmCfg:       &vm.Config{},
+		vmCfg:       &vm.Config{JumpDestCache: vm.NewJumpDestCache(vm.JumpDestCacheLimit)},
 	}
+	ie.evm = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, execArgs.ChainConfig, *ie.vmCfg)
 	ie.taskGasPool.AddBlobGas(execArgs.ChainConfig.GetMaxBlobGasPerBlock(0))
 	ie.ibs = state.New(ie.stateReader)
 	return ie
+}
+
+func (rw *HistoricalTraceWorker) LogStats() {
+	rw.evm.Config().JumpDestCache.LogStats()
 }
 
 func (rw *HistoricalTraceWorker) Run() (err error) {
@@ -120,7 +124,7 @@ func (rw *HistoricalTraceWorker) Run() (err error) {
 			err = fmt.Errorf("HistoricalTraceWorker panic: %s, %s", rec, dbg.Stack())
 		}
 	}()
-	defer rw.evm.Config().JumpDestCache.LogStats()
+	defer rw.LogStats()
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
 		rw.RunTxTaskNoLock(txTask)
 		if err := rw.out.Add(rw.ctx, txTask); err != nil {
@@ -169,7 +173,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			ret, _, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, constCall /* constCall */, hooks)
+			ret, _, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, constCall /* constCall */, hooks, *rw.vmCfg)
 			return ret, err
 		}
 		rw.execArgs.Engine.Initialize(cc, rw.chain, header, ibs, syscall, rw.logger, hooks)
@@ -184,7 +188,7 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 
 		// End of block transaction in a block
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			ret, logs, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, false /* constCall */, hooks)
+			ret, logs, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, false /* constCall */, hooks, *rw.vmCfg)
 			if err != nil {
 				return nil, err
 			}
@@ -378,14 +382,15 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 }
 
 func doHistoryReduce(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, outputTxNum *atomic.Uint64, rws *state.ResultsQueue, logger log.Logger) error {
-	db := cfg.ChainDB
-	applyWorker := NewHistoricalTraceWorker(consumer, nil, rws, false, ctx, cfg, logger)
-
-	tx, err := db.BeginTemporalRo(ctx)
+	tx, err := cfg.ChainDB.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+
+	applyWorker := NewHistoricalTraceWorker(consumer, nil, nil, false, ctx, cfg, logger)
+	defer applyWorker.LogStats()
+	applyWorker.ResetTx(tx)
 
 	for outputTxNum.Load() <= toTxNum {
 		err = rws.DrainNonBlocking(ctx)
@@ -428,8 +433,6 @@ func doHistoryMap(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, in
 }
 
 func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueue, outputTxNumIn uint64, tx kv.TemporalTx, forceStopAtBlockEnd bool, applyWorker *HistoricalTraceWorker) (outputTxNum uint64, stopedAtBlockEnd bool, err error) {
-	applyWorker.ResetTx(tx)
-
 	rwsIt := rws.Iter()
 	defer rwsIt.Close()
 
@@ -477,9 +480,6 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 
 	br := cfg.BlockReader
 	chainConfig := cfg.ChainConfig
-	//if chainConfig.Aura != nil && cfg.Workers > 1 {
-	//	panic("gnosis consensus doesn't support parallel exec yet: https://github.com/erigontech/erigon/issues/12054")
-	//}
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
 
@@ -634,9 +634,6 @@ func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader ser
 	}
 	if b == nil {
 		return nil, nil
-	}
-	for _, txn := range b.Transactions() {
-		_ = txn.Hash()
 	}
 	return b, err
 }
