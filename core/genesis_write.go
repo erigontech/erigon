@@ -223,8 +223,7 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, dirs datadir.Dirs, logger l
 		return nil, nil, err
 	}
 
-	var stateWriter state.StateWriter
-	stateWriter = state.NewNoopWriter()
+	stateWriter := state.NewNoopWriter()
 
 	if block.Number().Sign() != 0 {
 		return nil, statedb, errors.New("can't commit genesis block with number > 0")
@@ -303,17 +302,6 @@ func GenesisBlockForTesting(db kv.RwDB, addr common.Address, balance *big.Int, d
 type GenAccount struct {
 	Addr    common.Address
 	Balance *big.Int
-}
-
-func GenesisWithAccounts(db kv.RwDB, accs []GenAccount, dirs datadir.Dirs, logger log.Logger) *types.Block {
-	g := types.Genesis{Config: chain.TestChainConfig}
-	allocs := make(map[common.Address]types.GenesisAccount)
-	for _, acc := range accs {
-		allocs[acc.Addr] = types.GenesisAccount{Balance: acc.Balance}
-	}
-	g.Alloc = allocs
-	block := MustCommitGenesis(&g, db, dirs, logger)
-	return block
 }
 
 // MainnetGenesisBlock returns the Ethereum main net genesis block.
@@ -542,7 +530,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 	wg, ctx := errgroup.WithContext(ctx)
 	// we may run inside write tx, can't open 2nd write tx in same goroutine
 	wg.Go(func() error {
-		// some users creaing > 1Gb custome genesis by `erigon init`
+		// some users creating > 1Gb custome genesis by `erigon init`
 		genesisTmpDB := mdbx.New(kv.TemporaryDB, logger).InMem(dirs.DataDir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
 		defer genesisTmpDB.Close()
 
