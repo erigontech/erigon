@@ -30,8 +30,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
-	"github.com/erigontech/mdbx-go/mdbx"
 	"github.com/erigontech/secp256k1"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/spf13/cobra"
@@ -46,13 +44,14 @@ import (
 	"github.com/erigontech/erigon-lib/downloader"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/backup"
-	"github.com/erigontech/erigon-lib/kv/kvcfg"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/state/stats"
 	"github.com/erigontech/erigon-lib/wrap"
+	"github.com/erigontech/erigon/eth/ethconfig/estimate"
+	"github.com/erigontech/mdbx-go/mdbx"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
@@ -609,49 +608,52 @@ func init() {
 
 func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	br, bw := blocksIO(db, logger)
-	_, _, _, _, _, _ = newSync(ctx, db, nil /* miningConfig */, logger)
 
-	return db.Update(ctx, func(tx kv.RwTx) error {
-		if reset {
-			if err := stages.SaveStageProgress(tx, stages.Snapshots, 0); err != nil {
-				return fmt.Errorf("saving Snapshots progress failed: %w", err)
-			}
-		}
-		dirs := datadir.New(datadirCli)
-		if err := reset2.ResetBlocks(tx, br, bw, dirs, logger); err != nil {
-			return fmt.Errorf("resetting blocks: %w", err)
-		}
+	tx, err := db.BeginTemporalRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 
-		temporalTx, ok := tx.(kv.TemporalTx)
-		if !ok {
-			return errors.New("tx is not a temporal tx")
+	if reset {
+		if err := stages.SaveStageProgress(tx, stages.Snapshots, 0); err != nil {
+			return fmt.Errorf("saving Snapshots progress failed: %w", err)
 		}
-		domains, err := libstate.NewSharedDomains(temporalTx, logger)
-		if err != nil {
-			return err
-		}
-		defer domains.Close()
-		//txnUm := domains.TxNum()
-		blockNum := domains.BlockNum()
+	}
+	dirs := datadir.New(datadirCli)
+	if err := reset2.ResetBlocks(tx, br, bw, dirs, logger); err != nil {
+		return fmt.Errorf("resetting blocks: %w", err)
+	}
 
-		// stagedsync.SpawnStageSnapshots(s, ctx, rwTx, logger)
-		progress, err := stages.GetStageProgress(tx, stages.Snapshots)
+	temporalTx, ok := tx.(kv.TemporalTx)
+	if !ok {
+		return errors.New("tx is not a temporal tx")
+	}
+	domains, err := libstate.NewSharedDomains(temporalTx, logger)
+	if err != nil {
+		return err
+	}
+	defer domains.Close()
+	//txnUm := domains.TxNum()
+	blockNum := domains.BlockNum()
+
+	// stagedsync.SpawnStageSnapshots(s, ctx, rwTx, logger)
+	progress, err := stages.GetStageProgress(tx, stages.Snapshots)
+	if err != nil {
+		return fmt.Errorf("re-read Snapshots progress: %w", err)
+	}
+
+	if blockNum > progress {
+		if err := stages.SaveStageProgress(tx, stages.Execution, blockNum); err != nil {
+			return fmt.Errorf("saving Snapshots progress failed: %w", err)
+		}
+		progress, err = stages.GetStageProgress(tx, stages.Snapshots)
 		if err != nil {
 			return fmt.Errorf("re-read Snapshots progress: %w", err)
 		}
-
-		if blockNum > progress {
-			if err := stages.SaveStageProgress(tx, stages.Execution, blockNum); err != nil {
-				return fmt.Errorf("saving Snapshots progress failed: %w", err)
-			}
-			progress, err = stages.GetStageProgress(tx, stages.Snapshots)
-			if err != nil {
-				return fmt.Errorf("re-read Snapshots progress: %w", err)
-			}
-		}
-		logger.Info("Progress", "snapshots", progress)
-		return nil
-	})
+	}
+	logger.Info("Progress", "snapshots", progress)
+	return nil
 }
 
 func stageHeaders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
@@ -661,7 +663,6 @@ func stageHeaders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 	}
 
 	br, bw := blocksIO(db, logger)
-	_, _, _, _, _, _ = newSync(ctx, db, nil /* miningConfig */, logger)
 
 	if integritySlow {
 		if err := db.View(ctx, func(tx kv.Tx) error {
@@ -999,16 +1000,15 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
 	s := stage(sync, nil, db, stages.Execution)
+	if chainTipMode {
+		s.CurrentSyncCycle.IsFirstCycle = false
+		s.CurrentSyncCycle.IsInitialCycle = false
+	}
 
 	logger.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 	chainConfig, pm := fromdb.ChainConfig(db), fromdb.PruneMode(db)
 	if pruneTo > 0 {
 		pm.History = prune.Distance(s.BlockNumber - pruneTo)
-	}
-
-	if chainTipMode {
-		s.CurrentSyncCycle.IsFirstCycle = false
-		s.CurrentSyncCycle.IsInitialCycle = false
 	}
 
 	genesis := core.GenesisBlockByChainName(chain)
@@ -1326,24 +1326,8 @@ func allSnapshots(ctx context.Context, db kv.RwDB, logger log.Logger) (*freezebl
 	var err error
 
 	openSnapshotOnce.Do(func() {
-		if err := db.View(context.Background(), func(tx kv.Tx) (err error) {
-			syncCfg.KeepExecutionProofs, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
-			if err != nil {
-				return err
-			}
-			syncCfg.PersistReceiptsCacheV2, err = kvcfg.PersistReceipts.Enabled(tx)
-			if err != nil {
-				return err
-			}
-			return nil
-		}); err != nil {
-			panic(err)
-		}
-		if syncCfg.KeepExecutionProofs {
-			libstate.EnableHistoricalCommitment()
-		}
-		if syncCfg.PersistReceiptsCacheV2 {
-			libstate.EnableHistoricalRCache()
+		if syncCfg, err = features.EnableSyncCfg(db, syncCfg); err != nil {
+			return
 		}
 		log.Info("[dbg] cfg", "syncCfg", syncCfg)
 
