@@ -312,7 +312,9 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		filtered := r.Logs.Filter(addrMap, crit.Topics, 0)
 
 		for _, filteredLog := range filtered {
-			log.Warn("[dbg] bn", "bn", blockNum, "tx", filteredLog.TxIndex, "li", filteredLog.Index)
+			if blockNum == 7000011 {
+				log.Warn("[dbg] bn", "bn", blockNum, "tx", filteredLog.TxIndex, "li", filteredLog.Index)
+			}
 			logs = append(logs, &types.ErigonLog{
 				Address:     filteredLog.Address,
 				Topics:      filteredLog.Topics,
