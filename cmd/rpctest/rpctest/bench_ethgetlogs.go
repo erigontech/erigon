@@ -194,7 +194,6 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 			if resp.Error != nil {
 				return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", resp.Error.Code, resp.Error.Message)
 			}
-			log.Warn("[dbg] bn", "bn", bn, "logs", int(len(resp.Result)))
 			if err := noDuplicates(resp.Result, bn); err != nil {
 				return fmt.Errorf("eth_getLogs: at blockNum=%d %w", bn, err)
 			}
