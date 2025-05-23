@@ -44,7 +44,11 @@ func TestBlockTracker(t *testing.T) {
 	}
 	bt := shutter.NewBlockTracker(logger, bl, bnReader)
 	eg, egCtx := errgroup.WithContext(ctx)
-	defer eg.Wait()
+	defer func(eg *errgroup.Group) {
+		cancel()
+		err := eg.Wait()
+		require.ErrorIs(t, err, context.Canceled)
+	}(eg)
 	eg.Go(func() error { return bl.Run(egCtx) })
 	eg.Go(func() error { return bt.Run(egCtx) })
 
@@ -58,8 +62,4 @@ func TestBlockTracker(t *testing.T) {
 	defer waitCtxCancel2()
 	err = bt.Wait(waitCtx2, 15)
 	require.NoError(t, err)
-
-	cancel()
-	err = eg.Wait()
-	require.ErrorIs(t, err, context.Canceled)
 }
