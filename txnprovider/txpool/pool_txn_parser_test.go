@@ -219,9 +219,9 @@ func TestBlobTxnParsing(t *testing.T) {
 	assert.Equal(t, bodyEnvelope[3:], thinTxn.Rlp)
 	assert.Equal(t, BlobTxnType, thinTxn.Type)
 	assert.Len(t, thinTxn.BlobHashes, 2)
-	assert.Empty(t, thinTxn.Blobs)
-	assert.Empty(t, thinTxn.Commitments)
-	assert.Empty(t, thinTxn.Proofs)
+	assert.Empty(t, thinTxn.Blobs())
+	assert.Empty(t, thinTxn.Commitments())
+	assert.Empty(t, thinTxn.Proofs())
 
 	// Now parse the same txn body, but wrapped with blobs/commitments/proofs
 	wrappedWithBlobs = true
@@ -286,15 +286,21 @@ func TestBlobTxnParsing(t *testing.T) {
 	assert.Equal(t, thinTxn.BlobFeeCap, fatTxn.BlobFeeCap)
 	assert.Equal(t, thinTxn.BlobHashes, fatTxn.BlobHashes)
 
-	require.Len(t, fatTxn.Blobs, 2)
-	require.Len(t, fatTxn.Commitments, 2)
-	require.Len(t, fatTxn.Proofs, 2)
-	assert.Equal(t, blob0, fatTxn.Blobs[0])
-	assert.Equal(t, blob1, fatTxn.Blobs[1])
-	assert.Equal(t, commitment0, fatTxn.Commitments[0])
-	assert.Equal(t, commitment1, fatTxn.Commitments[1])
-	assert.Equal(t, proof0, fatTxn.Proofs[0])
-	assert.Equal(t, proof1, fatTxn.Proofs[1])
+	require.Len(t, fatTxn.BlobBundles, 2)
+	require.NotEmpty(t, fatTxn.BlobBundles[0].Blob)
+	require.NotEmpty(t, fatTxn.BlobBundles[0].Proofs)
+	require.NotEmpty(t, fatTxn.BlobBundles[0].Proofs[0])
+	require.NotEmpty(t, fatTxn.BlobBundles[0].Commitment)
+	require.NotEmpty(t, fatTxn.BlobBundles[1].Blob)
+	require.NotEmpty(t, fatTxn.BlobBundles[1].Proofs)
+	require.NotEmpty(t, fatTxn.BlobBundles[1].Proofs[0])
+	require.NotEmpty(t, fatTxn.BlobBundles[1].Commitment)
+	assert.Equal(t, blob0, fatTxn.Blobs()[0])
+	assert.Equal(t, blob1, fatTxn.Blobs()[1])
+	assert.Equal(t, commitment0, fatTxn.Commitments()[0])
+	assert.Equal(t, commitment1, fatTxn.Commitments()[1])
+	assert.Equal(t, proof0, fatTxn.Proofs()[0])
+	assert.Equal(t, proof1, fatTxn.Proofs()[1])
 }
 
 func TestSetCodeAuthSignatureRecover(t *testing.T) {
