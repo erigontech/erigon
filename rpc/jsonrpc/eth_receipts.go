@@ -342,7 +342,6 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			return nil, err
 		}
 	}
-	log.Warn("[dbg] res", "logs", len(logs))
 
 	return logs, nil
 }
