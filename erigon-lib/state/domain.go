@@ -694,15 +694,13 @@ type DomainRoTx struct {
 
 	d *Domain
 
-	getters    []*seg.Reader
-	readers    []*BtIndex
-	idxReaders []*recsplit.IndexReader
+	readerMutex sync.RWMutex
+	readers     []*BtIndex
+	idxReaders  []*recsplit.IndexReader
 
-	keyBuf [60]byte // 52b key and 8b for inverted step
 	comBuf []byte
 
-	valsC      kv.Cursor
-	valCViewID uint64 // to make sure that valsC reading from the same view with given kv.Tx
+	valsCs map[kv.Tx]kv.Cursor
 
 	getFromFileCache *DomainGetFromFileCache
 }
@@ -719,7 +717,7 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) (v []byte, ok boo
 		defer domainReadMetric(dt.name, i).ObserveDuration(time.Now())
 	}
 
-	g := dt.statelessGetter(i)
+	g := dt.reader(i)
 	if dt.d.Accessors.Has(AccessorBTree) {
 		_, v, offset, ok, err = dt.statelessBtree(i).Get(filekey, g)
 		if err != nil || !ok {
@@ -1491,11 +1489,21 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 	useCache := dt.name != kv.CommitmentDomain && maxTxNum == math.MaxUint64
 
 	hi, _ := dt.ht.iit.hashKey(k)
-	if useCache && dt.getFromFileCache == nil {
-		dt.getFromFileCache = dt.visible.newGetFromFileCache()
+
+	dt.readerMutex.RLock()
+	getFromFileCache := dt.getFromFileCache
+	dt.readerMutex.RUnlock()
+
+	if useCache && getFromFileCache == nil {
+		dt.readerMutex.Lock()
+		if dt.getFromFileCache == nil {
+			dt.getFromFileCache = dt.visible.newGetFromFileCache()
+		}
+		getFromFileCache = dt.getFromFileCache
+		dt.readerMutex.Unlock()
 	}
-	if dt.getFromFileCache != nil && maxTxNum == math.MaxUint64 {
-		if cv, ok := dt.getFromFileCache.Get(hi); ok {
+	if getFromFileCache != nil && maxTxNum == math.MaxUint64 {
+		if cv, ok := getFromFileCache.Get(hi); ok {
 			return cv.v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
 		}
 	}
@@ -1623,22 +1631,29 @@ func (dt *DomainRoTx) Close() {
 	}
 	dt.ht.Close()
 
+	dt.readerMutex.Lock()
+	defer dt.readerMutex.Unlock()
 	dt.visible.returnGetFromFileCache(dt.getFromFileCache)
 }
 
-func (dt *DomainRoTx) statelessGetter(i int) *seg.Reader {
-	if dt.getters == nil {
-		dt.getters = make([]*seg.Reader, len(dt.files))
+// statelessFileIndex figures out ordinal of file within required range
+func (dt *DomainRoTx) statelessFileIndex(txFrom uint64, txTo uint64) int {
+	for fi, f := range dt.files {
+		if f.startTxNum == txFrom && f.endTxNum == txTo {
+			return fi
+		}
 	}
-	r := dt.getters[i]
-	if r == nil {
-		r = seg.NewReader(dt.files[i].src.decompressor.MakeGetter(), dt.d.Compression)
-		dt.getters[i] = r
-	}
-	return r
+	return -1
+}
+
+func (dt *DomainRoTx) reader(i int) *seg.Reader {
+	// readers are not stateless - getters contain the current data pointer
+	return seg.NewReader(dt.files[i].src.decompressor.MakeGetter(), dt.d.Compression)
 }
 
 func (dt *DomainRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
+	dt.readerMutex.Lock()
+	defer dt.readerMutex.Unlock()
 	if dt.idxReaders == nil {
 		dt.idxReaders = make([]*recsplit.IndexReader, len(dt.files))
 	}
@@ -1651,6 +1666,8 @@ func (dt *DomainRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 }
 
 func (dt *DomainRoTx) statelessBtree(i int) *BtIndex {
+	dt.readerMutex.Lock()
+	defer dt.readerMutex.Unlock()
 	if dt.readers == nil {
 		dt.readers = make([]*BtIndex, len(dt.files))
 	}
@@ -1662,64 +1679,67 @@ func (dt *DomainRoTx) statelessBtree(i int) *BtIndex {
 	return r
 }
 
-var sdTxImmutabilityInvariant = errors.New("tx passed into ShredDomains is immutable")
-
 func (dt *DomainRoTx) closeValsCursor() {
-	if dt.valsC != nil {
-		dt.valsC.Close()
-		dt.valCViewID = 0
-		dt.valsC = nil
-		// dt.vcParentPtr.Store(0)
-	}
-}
+	dt.readerMutex.Lock()
+	defer dt.readerMutex.Unlock()
 
-type canCheckClosed interface {
-	IsClosed() bool
+	for _, c := range dt.valsCs {
+		c.Close()
+	}
+	dt.valsCs = nil
 }
 
 func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
-	if dt.valsC != nil { // run in assert mode only
-		if asserts {
-			if tx.ViewID() != dt.valCViewID {
-				panic(fmt.Errorf("%w: DomainRoTx=%s cursor ViewID=%d; given tx.ViewID=%d", sdTxImmutabilityInvariant, dt.d.filenameBase, dt.valCViewID, tx.ViewID())) // cursor opened by different tx, invariant broken
-			}
-			if mc, ok := dt.valsC.(canCheckClosed); !ok && mc.IsClosed() {
-				panic(fmt.Sprintf("domainRoTx=%s cursor lives longer than Cursor (=> than tx opened that cursor)", dt.d.filenameBase))
-			}
-			// if dt.d.largeValues {
-			// 	if mc, ok := dt.valsC.(*mdbx.MdbxCursor); ok && mc.IsClosed() {
-			// 		panic(fmt.Sprintf("domainRoTx=%s cursor lives longer than Cursor (=> than tx opened that cursor)", dt.d.filenameBase))
-			// 	}
-			// } else {
-			// 	if mc, ok := dt.valsC.(*mdbx.MdbxDupSortCursor); ok && mc.IsClosed() {
-			// 		panic(fmt.Sprintf("domainRoTx=%s cursor lives longer than DupCursor (=> than tx opened that cursor)", dt.d.filenameBase))
-			// 	}
-			// }
-		}
-		return dt.valsC, nil
+	dt.readerMutex.RLock()
+	c = dt.valsCs[tx]
+	dt.readerMutex.RUnlock()
+
+	if c != nil {
+		return c, nil
 	}
 
-	if asserts {
-		dt.valCViewID = tx.ViewID()
+	dt.readerMutex.Lock()
+	defer dt.readerMutex.Unlock()
+
+	if dt.valsCs == nil {
+		dt.valsCs = map[kv.Tx]kv.Cursor{}
+	} else {
+		if c = dt.valsCs[tx]; c != nil {
+			return c, nil
+		}
 	}
+
 	if dt.d.largeValues {
-		dt.valsC, err = tx.Cursor(dt.d.valuesTable)
-		return dt.valsC, err
+		c, err = tx.Cursor(dt.d.valuesTable)
+		if err == nil {
+			dt.valsCs[tx] = c
+		}
+		return c, err
+
 	}
-	dt.valsC, err = tx.CursorDupSort(dt.d.valuesTable)
-	return dt.valsC, err
+	c, err = tx.CursorDupSort(dt.d.valuesTable)
+	if err == nil {
+		dt.valsCs[tx] = c
+	}
+	return c, err
 }
 
-func (dt *DomainRoTx) getLatestFromDB(key []byte, roTx kv.Tx) ([]byte, uint64, bool, error) {
+func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, bool, error) {
+	if dt == nil {
+		return nil, 0, false, nil
+	}
+
+	var v []byte
+	var foundStep uint64
+
 	valsC, err := dt.valsCursor(roTx)
+
 	if err != nil {
 		return nil, 0, false, err
 	}
-	var v, foundInvStep []byte
 
 	if dt.d.largeValues {
-		var fullkey []byte
-		fullkey, v, err = valsC.Seek(key)
+		fullkey, val, err := valsC.Seek(key)
 		if err != nil {
 			return nil, 0, false, fmt.Errorf("valsCursor.Seek: %w", err)
 		}
@@ -1729,9 +1749,19 @@ func (dt *DomainRoTx) getLatestFromDB(key []byte, roTx kv.Tx) ([]byte, uint64, b
 		if !bytes.Equal(fullkey[:len(fullkey)-8], key) {
 			return nil, 0, false, nil // This key is not in DB
 		}
-		foundInvStep = fullkey[len(fullkey)-8:]
+
+		v = val
+		foundStep = ^binary.BigEndian.Uint64(fullkey[len(fullkey)-8:])
 	} else {
-		_, stepWithVal, err := valsC.SeekExact(key)
+		_, stepWithVal, err := func() (_ []byte, _ []byte, err error) {
+			defer func() {
+				if rec := recover(); rec != nil {
+					fmt.Println(fmt.Sprintf("%p: seek failed for: %d", dt, roTx.ViewID()), "reason", rec, "stack", dbg.Stack())
+					err = fmt.Errorf("paniced ")
+				}
+			}()
+			return valsC.SeekExact(key)
+		}()
 		if err != nil {
 			return nil, 0, false, fmt.Errorf("valsCursor.SeekExact: %w", err)
 		}
@@ -1740,17 +1770,14 @@ func (dt *DomainRoTx) getLatestFromDB(key []byte, roTx kv.Tx) ([]byte, uint64, b
 		}
 
 		v = stepWithVal[8:]
-
-		foundInvStep = stepWithVal[:8]
+		foundStep = ^binary.BigEndian.Uint64(stepWithVal[:8])
 	}
-
-	foundStep := ^binary.BigEndian.Uint64(foundInvStep)
 
 	if lastTxNumOfStep(foundStep, dt.d.aggregationStep) >= dt.files.EndTxNum() {
 		return v, foundStep, true, nil
 	}
 
-	return nil, 0, false, nil
+	return nil, 0, false, err
 }
 
 // GetLatest returns value, step in which the value last changed, and bool value which is true if the value
@@ -1772,7 +1799,7 @@ func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, uint64, bool, e
 		}()
 	}
 
-	v, foundStep, found, err = dt.getLatestFromDB(key, roTx)
+	v, foundStep, found, err = dt.getLatestFromDb(key, roTx)
 	if err != nil {
 		return nil, 0, false, fmt.Errorf("getLatestFromDb: %w", err)
 	}

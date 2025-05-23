@@ -88,10 +88,10 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
-			err = domains.DomainPut(kv.AccountsDomain, addrs[txNum].Bytes(), buf, nil, 0)
+			err = domains.DomainPut(kv.AccountsDomain, rwTx, addrs[txNum].Bytes(), buf, nil, 0)
 			require.NoError(t, err)
 
-			err = domains.DomainPut(kv.StorageDomain, append(common.Copy(addrs[txNum].Bytes()), locs[txNum].Bytes()...), []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}, nil, 0)
+			err = domains.DomainPut(kv.StorageDomain, rwTx, append(common.Copy(addrs[txNum].Bytes()), locs[txNum].Bytes()...), []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}, nil, 0)
 			require.NoError(t, err)
 
 			var v [8]byte
@@ -100,14 +100,14 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 				pv, step, _, err := ac.GetLatest(kv.CommitmentDomain, commKey2, rwTx)
 				require.NoError(t, err)
 
-				err = domains.DomainPut(kv.CommitmentDomain, commKey2, v[:], pv, step)
+				err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey2, v[:], pv, step)
 				require.NoError(t, err)
 				otherMaxWrite = txNum
 			} else {
 				pv, step, _, err := ac.GetLatest(kv.CommitmentDomain, commKey1, rwTx)
 				require.NoError(t, err)
 
-				err = domains.DomainPut(kv.CommitmentDomain, commKey1, v[:], pv, step)
+				err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey1, v[:], pv, step)
 				require.NoError(t, err)
 				maxWrite = txNum
 			}
@@ -212,14 +212,14 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
-			err = domains.DomainPut(kv.AccountsDomain, addrs[txNum].Bytes(), buf, nil, 0)
+			err = domains.DomainPut(kv.AccountsDomain, rwTx, addrs[txNum].Bytes(), buf, nil, 0)
 			require.NoError(t, err)
 
-			err = domains.DomainPut(kv.StorageDomain, composite(addrs[txNum].Bytes(), locs[txNum].Bytes()), []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}, nil, 0)
+			err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addrs[txNum].Bytes(), locs[txNum].Bytes()), []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}, nil, 0)
 			require.NoError(t, err)
 
 			if (txNum+1)%agg.StepSize() == 0 {
-				_, err := domains.ComputeCommitment(context.Background(), true, txNum/10, "")
+				_, err := domains.ComputeCommitment(context.Background(), rwTx, true, txNum/10, "")
 				require.NoError(t, err)
 			}
 

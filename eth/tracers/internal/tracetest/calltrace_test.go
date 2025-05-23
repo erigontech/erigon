@@ -150,7 +150,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			rules := test.Genesis.Config.Rules(context.BlockNumber, context.Time)
 
 			m := mock.Mock(t)
-			dbTx, err := m.DB.BeginRw(m.Ctx)
+			dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 			require.NoError(t, err)
 			defer dbTx.Rollback()
 			statedb, err := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
@@ -262,7 +262,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 		GasLimit:    uint64(test.Context.GasLimit),
 	}
 	m := mock.Mock(b)
-	dbTx, err := m.DB.BeginRw(m.Ctx)
+	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(b, err)
 	defer dbTx.Rollback()
 	statedb, _ := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
@@ -338,7 +338,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 	}
 	rules := params.MainnetChainConfig.Rules(context.BlockNumber, context.Time)
 	m := mock.Mock(t)
-	dbTx, err := m.DB.BeginRw(m.Ctx)
+	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(t, err)
 	defer dbTx.Rollback()
 

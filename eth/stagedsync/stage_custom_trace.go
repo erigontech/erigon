@@ -119,7 +119,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 			return errors.New("stage_exec progress is 0. please run `integration stage_exec --batchSize=1m` for couple minutes")
 		}
 
-		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+		ac := state2.AggTx(tx)
 
 		//TODO: need better way to detect start point. What if domain/index is sparse (has rare events).
 		txNum := uint64(math.MaxUint64)
@@ -196,7 +196,7 @@ Loop:
 
 	log.Info("SpawnCustomTrace finish")
 	if err := cfg.db.View(ctx, func(tx kv.Tx) error {
-		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+		ac := state2.AggTx(tx)
 		receiptProgress := ac.HistoryProgress(producingDomain, tx)
 		accProgress := ac.HistoryProgress(kv.AccountsDomain, tx)
 		if accProgress != receiptProgress {
@@ -216,7 +216,7 @@ Loop:
 
 func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.ExecArgs, db kv.TemporalRwDB, fromBlock, toBlock uint64, logPrefix string, producingDomain kv.Domain, logger log.Logger) error {
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+		ac := state2.AggTx(tx)
 		if err := ac.GreedyPruneHistory(ctx, kv.CommitmentDomain, tx); err != nil {
 			return err
 		}
@@ -245,7 +245,6 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 			return err
 		}
 
-		doms.SetTx(tx)
 		if err := doms.Flush(ctx, tx); err != nil {
 			return err
 		}
@@ -269,7 +268,7 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 		toStep = lastTxNum / agg.StepSize()
 	}
 	if err := db.View(ctx, func(tx kv.Tx) error {
-		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+		ac := state2.AggTx(tx)
 		fromStep = ac.DbgDomain(producingDomain).FirstStepNotInFiles()
 		return nil
 	}); err != nil {
@@ -385,7 +384,6 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 				cumulativeBlobGasUsedInBlock += txTask.Tx.GetBlobGas()
 			}
 
-			doms.SetTx(tx)
 			doms.SetTxNum(txTask.TxNum)
 
 			if produce.ReceiptDomain {
@@ -394,7 +392,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 					if txTask.TxIndex >= 0 {
 						receipt = txTask.BlockReceipts[txTask.TxIndex]
 					}
-					if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock); err != nil {
+					if err := rawtemporaldb.AppendReceipt(doms.AsPutDel(tx), receipt, cumulativeBlobGasUsedInBlock); err != nil {
 						return err
 					}
 				}
@@ -413,7 +411,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 								FirstLogIndexWithinBlock: uint32(firstIndex),
 							}
 
-							if err := rawtemporaldb.AppendReceipt(doms, &receipt, cumulativeBlobGasUsedInBlock); err != nil {
+							if err := rawtemporaldb.AppendReceipt(doms.AsPutDel(tx), &receipt, cumulativeBlobGasUsedInBlock); err != nil {
 								return err
 							}
 						}
@@ -437,7 +435,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 						}
 					}
 				}
-				if err := rawdb.WriteReceiptCacheV2(doms, receipt); err != nil {
+				if err := rawdb.WriteReceiptCacheV2(doms.AsPutDel(tx), receipt); err != nil {
 					return err
 				}
 			}

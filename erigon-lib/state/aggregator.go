@@ -1583,6 +1583,14 @@ func (at *AggregatorRoTx) FileStream(name kv.Domain, fromTxNum, toTxNum uint64) 
 	return NewSegStreamReader(r, -1), nil
 }
 
+func AggTx(tx kv.Tx) *AggregatorRoTx {
+	if withAggTx, ok := tx.(interface{ AggTx() any }); ok {
+		return withAggTx.AggTx().(*AggregatorRoTx)
+	}
+
+	return nil
+}
+
 // AggregatorRoTx guarantee consistent View of files ("snapshots isolation" level https://en.wikipedia.org/wiki/Snapshot_isolation):
 //   - long-living consistent view of all files (no limitations)
 //   - hiding garbage and files overlaps
@@ -1609,7 +1617,9 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 		ac.iis[id] = ii.BeginFilesRo()
 	}
 	for id, d := range a.d {
-		ac.d[id] = d.BeginFilesRo()
+		if d != nil {
+			ac.d[id] = d.BeginFilesRo()
+		}
 	}
 	a.visibleFilesLock.RUnlock()
 
@@ -1640,7 +1650,7 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []b
 	return at.d[domain].GetLatest(k, tx)
 }
 func (at *AggregatorRoTx) DebugGetLatestFromDB(domain kv.Domain, key []byte, tx kv.Tx) ([]byte, uint64, bool, error) {
-	return at.d[domain].getLatestFromDB(key, tx)
+	return at.d[domain].getLatestFromDb(key, tx)
 }
 func (at *AggregatorRoTx) DebugGetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	return at.d[domain].getLatestFromFiles(k, maxTxNum)
