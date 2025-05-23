@@ -171,7 +171,7 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 		slices.Sort(indices)
 		for i := 1; i < len(logs); i++ {
 			if indices[i-1] == indices[i] {
-				return fmt.Errorf("eth_getLogs: at blockNum=%d and addr %x has duplicated log_index %d", blockNum, addr, indices[i])
+				return fmt.Errorf("eth_getLogs: at blockNum=%d and addr %x has duplicated log_index %d", blockNum, addr, indices)
 			}
 		}
 		return nil
