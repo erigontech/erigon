@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/mdbx-go/mdbx"
 	"github.com/erigontech/secp256k1"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/spf13/cobra"
@@ -44,15 +45,13 @@ import (
 	"github.com/erigontech/erigon-lib/downloader"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/backup"
+	"github.com/erigontech/erigon-lib/kv/kvcfg"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/state/stats"
 	"github.com/erigontech/erigon-lib/wrap"
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
-	"github.com/erigontech/mdbx-go/mdbx"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/consensus"
@@ -63,6 +62,7 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/ethconsensusconfig"
 	"github.com/erigontech/erigon/eth/integrity"
 	"github.com/erigontech/erigon/eth/stagedsync"
@@ -1000,15 +1000,16 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
 	s := stage(sync, nil, db, stages.Execution)
-	if chainTipMode {
-		s.CurrentSyncCycle.IsFirstCycle = false
-		s.CurrentSyncCycle.IsInitialCycle = false
-	}
 
 	logger.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 	chainConfig, pm := fromdb.ChainConfig(db), fromdb.PruneMode(db)
 	if pruneTo > 0 {
 		pm.History = prune.Distance(s.BlockNumber - pruneTo)
+	}
+
+	if chainTipMode {
+		s.CurrentSyncCycle.IsFirstCycle = false
+		s.CurrentSyncCycle.IsInitialCycle = false
 	}
 
 	genesis := core.GenesisBlockByChainName(chain)
@@ -1326,8 +1327,24 @@ func allSnapshots(ctx context.Context, db kv.RwDB, logger log.Logger) (*freezebl
 	var err error
 
 	openSnapshotOnce.Do(func() {
-		if syncCfg, err = features.EnableSyncCfg(db, syncCfg); err != nil {
-			return
+		if err := db.View(context.Background(), func(tx kv.Tx) (err error) {
+			syncCfg.KeepExecutionProofs, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
+			if err != nil {
+				return err
+			}
+			syncCfg.PersistReceiptsCacheV2, err = kvcfg.PersistReceipts.Enabled(tx)
+			if err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			panic(err)
+		}
+		if syncCfg.KeepExecutionProofs {
+			libstate.EnableHistoricalCommitment()
+		}
+		if syncCfg.PersistReceiptsCacheV2 {
+			libstate.EnableHistoricalRCache()
 		}
 		log.Info("[dbg] cfg", "syncCfg", syncCfg)
 
