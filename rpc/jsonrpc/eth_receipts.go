@@ -338,7 +338,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			})
 		}
 
-		if err := noDuplicates(logs, blockNum); err != nil {
+		if err := noDuplicates(logs, fmt.Sprintf("bn=%d, ti=%d", blockNum, txIndex)); err != nil {
 			panic(err)
 			return nil, err
 		}
@@ -348,7 +348,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	return logs, nil
 }
 
-func noDuplicates(logs types.ErigonLogs, bn uint64) error {
+func noDuplicates(logs types.ErigonLogs, msg string) error {
 	if len(logs) <= 1 {
 		return nil
 	}
@@ -359,7 +359,7 @@ func noDuplicates(logs types.ErigonLogs, bn uint64) error {
 	slices.Sort(indices)
 	for i := 1; i < len(logs); i++ {
 		if indices[i-1] == indices[i] {
-			err := fmt.Errorf("duplicated log_index %d, all %d", indices[i], indices)
+			err := fmt.Errorf("duplicated log_index %d %s", indices[i], msg)
 			panic(err)
 			return err
 		}
