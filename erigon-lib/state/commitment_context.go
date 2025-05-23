@@ -440,7 +440,7 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, p
 	//	defer sdc.mu.Unlock()
 	//}
 
-	return sdc.sd.DomainPut(kv.CommitmentDomain, prefix, data, prevData, prevStep)
+	return sdc.sd.DomainPut(kv.CommitmentDomain, prefix, data, sdc.sd.txNum, prevData, prevStep)
 }
 
 func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, err error) {
