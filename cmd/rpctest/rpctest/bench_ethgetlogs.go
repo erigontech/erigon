@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -181,8 +182,8 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 	for bn := blockFrom; bn < blockTo; {
 		batchEnd := min(bn+10, blockTo)
 		eg := &errgroup.Group{}
-		//eg.SetLimit(estimate.AlmostAllCPUs())
-		eg.SetLimit(1)
+		eg.SetLimit(estimate.AlmostAllCPUs())
+		//eg.SetLimit(1)
 		for ; bn < batchEnd; bn++ {
 			bn := bn
 			//eg.Go(func() error {
