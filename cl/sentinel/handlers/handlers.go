@@ -69,8 +69,8 @@ type ConsensusHandlers struct {
 	me                 *enode.LocalNode
 	netCfg             *clparams.NetworkConfig
 	blobsStorage       blob_storage.BlobStorage
-
-	enableBlocks bool
+	dataColumnStorage  blob_storage.DataCloumnStorage
+	enableBlocks       bool
 }
 
 const (
@@ -112,8 +112,12 @@ func NewConsensusHandlers(ctx context.Context, db freezeblocks.BeaconSnapshotRea
 	if c.enableBlocks {
 		hm[communication.BeaconBlocksByRangeProtocolV2] = c.beaconBlocksByRangeHandler
 		hm[communication.BeaconBlocksByRootProtocolV2] = c.beaconBlocksByRootHandler
+		// blobs
 		hm[communication.BlobSidecarByRangeProtocolV1] = c.blobsSidecarsByRangeHandlerDeneb
 		hm[communication.BlobSidecarByRootProtocolV1] = c.blobsSidecarsByIdsHandlerDeneb
+		// data column sidecars
+		hm[communication.DataColumnSidecarsByRangeProtocolV1] = c.dataColumnSidecarsByRangeHandler
+		hm[communication.DataColumnSidecarsByRootProtocolV1] = c.dataColumnSidecarsByRootHandler
 	}
 
 	c.handlers = map[protocol.ID]network.StreamHandler{}
