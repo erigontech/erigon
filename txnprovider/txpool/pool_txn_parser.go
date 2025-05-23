@@ -200,11 +200,11 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		}
 
 		// Check if blob txn has wrapperVersion
-		cellProofsPerBlob := 1
+		proofsPerBlob := 1
 		dataPos, dataLen, err = rlp.ParseString(payload, p)
 		if err == nil && dataLen == 1 {
 			p = p + 1
-			cellProofsPerBlob = int(params.CellsPerExtBlob)
+			proofsPerBlob = int(params.CellsPerExtBlob)
 		}
 
 		dataPos, dataLen, err = rlp.ParseList(payload, p)
@@ -266,9 +266,12 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			proofs = append(proofs, proof)
 			proofPos += 48
 		}
+		if len(proofs) != proofsPerBlob*len(slot.BlobBundles) {
+			return 0, fmt.Errorf("%w: unexpected proofs len=%d expected=%d ", ErrParseTxn, len(proofs), proofsPerBlob*len(slot.BlobBundles)) //nolint
+		}
 		proofsIdx := 0
 		for blobIdx = 0; blobIdx < len(slot.BlobBundles); blobIdx++ {
-			for range cellProofsPerBlob {
+			for range proofsPerBlob {
 				slot.BlobBundles[blobIdx].Proofs = append(slot.BlobBundles[blobIdx].Proofs, proofs[proofsIdx])
 				proofsIdx++
 			}
