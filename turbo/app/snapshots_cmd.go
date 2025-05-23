@@ -128,7 +128,6 @@ var snapshotCommand = cli.Command{
 			Usage: "Create all missed indices for snapshots. It also removing unsupported versions of existing indices and re-build them",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
-				&SnapshotFromFlag,
 				&SnapshotRebuildFlag,
 			}),
 		},
@@ -146,7 +145,6 @@ var snapshotCommand = cli.Command{
 			Usage: "create snapshots from the specified block number",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
-				&SnapshotFromFlag,
 			}),
 		},
 		{
@@ -313,11 +311,6 @@ var snapshotCommand = cli.Command{
 }
 
 var (
-	SnapshotFromFlag = cli.Uint64Flag{
-		Name:  "from",
-		Usage: "From block number",
-		Value: 0,
-	}
 	SnapshotRebuildFlag = cli.BoolFlag{
 		Name:  "rebuild",
 		Usage: "Force rebuild",
@@ -633,9 +626,8 @@ func doDebugKey(cliCtx *cli.Context) error {
 
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
-	from := cliCtx.Uint64(SnapshotFromFlag.Name)
 
-	_, _, _, _, agg, clean, err := openSnaps(ctx, cfg, dirs, from, chainDB, logger)
+	_, _, _, _, agg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
@@ -668,9 +660,8 @@ func doIntegrity(cliCtx *cli.Context) error {
 
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
-	from := cliCtx.Uint64(SnapshotFromFlag.Name)
 
-	_, borSnaps, _, blockRetire, agg, clean, err := openSnaps(ctx, cfg, dirs, from, chainDB, logger)
+	_, borSnaps, _, blockRetire, agg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
@@ -1225,15 +1216,14 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
-	from := cliCtx.Uint64(SnapshotFromFlag.Name)
 
-	_, _, caplinSnaps, br, agg, clean, err := openSnaps(ctx, cfg, dirs, from, chainDB, logger)
+	_, _, caplinSnaps, br, agg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
 	defer clean()
 
-	if err := br.BuildMissedIndicesIfNeed(ctx, "Indexing", nil, chainConfig); err != nil {
+	if err := br.BuildMissedIndicesIfNeed(ctx, "Indexing", nil); err != nil {
 		return err
 	}
 	if err := caplinSnaps.BuildMissingIndices(ctx, logger); err != nil {
@@ -1257,9 +1247,8 @@ func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(chainDB).ChainName)
-	from := cliCtx.Uint64(SnapshotFromFlag.Name)
 
-	blockSnaps, borSnaps, caplinSnaps, _, agg, clean, err := openSnaps(ctx, cfg, dirs, from, chainDB, logger)
+	blockSnaps, borSnaps, caplinSnaps, _, agg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
@@ -1273,13 +1262,10 @@ func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	return nil
 }
 
-func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, from uint64, chainDB kv.RwDB, logger log.Logger) (
-	blockSnaps *freezeblocks.RoSnapshots,
-	borSnaps *heimdall.RoSnapshots,
-	csn *freezeblocks.CaplinSnapshots,
+func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (
+	blockSnaps *freezeblocks.RoSnapshots, borSnaps *heimdall.RoSnapshots, csn *freezeblocks.CaplinSnapshots,
 	br *freezeblocks.BlockRetire,
-	agg *libstate.Aggregator,
-	clean func(), err error,
+	agg *libstate.Aggregator, clean func(), err error,
 ) {
 	chainConfig := fromdb.ChainConfig(chainDB)
 
@@ -1640,7 +1626,7 @@ func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	defer chainDB.Close()
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
-	_, _, _, br, _, clean, err := openSnaps(ctx, cfg, dirs, info.From, chainDB, logger)
+	_, _, _, br, _, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
@@ -1668,7 +1654,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	chainConfig := fromdb.ChainConfig(db)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
-	_, _, caplinSnaps, br, agg, clean, err := openSnaps(ctx, cfg, dirs, from, db, logger)
+	_, _, caplinSnaps, br, agg, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
 	if err != nil {
 		return err
 	}
@@ -1716,21 +1702,11 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		from, to = from2, to2
 	}
 
-	isBor := blockReader.BorSnapshots() != nil
-	borSnaps := blockReader.BorSnapshots()
-	blockSnaps := blockReader.Snapshots()
-
 	if err := br.RetireBlocks(ctx, from, to, log.LvlInfo, nil, nil, nil); err != nil {
 		return err
 	}
-
-	if err := blockSnaps.RemoveOverlaps(); err != nil {
+	if err := br.RemoveOverlaps(); err != nil {
 		return err
-	}
-	if isBor {
-		if err := borSnaps.RemoveOverlaps(); err != nil {
-			return err
-		}
 	}
 
 	deletedBlocks := math.MaxInt // To pass the first iteration
