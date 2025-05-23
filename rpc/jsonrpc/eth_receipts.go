@@ -311,7 +311,6 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if r == nil {
 			return nil, err
 		}
-		log.Warn("[dbg] bn", "bn", blockNum, "ti", r.TransactionIndex)
 		filtered := r.Logs.Filter(addrMap, crit.Topics, 0)
 
 		for _, filteredLog := range filtered {
@@ -329,6 +328,8 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			})
 		}
 	}
+
+	log.Warn("[dbg] res", "bn", len(logs))
 
 	return logs, nil
 }
