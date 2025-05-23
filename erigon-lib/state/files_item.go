@@ -370,6 +370,13 @@ func (files visibleFiles) EndTxNum() uint64 {
 	return files[len(files)-1].endTxNum
 }
 
+func (files visibleFiles) StartTxNum() uint64 {
+	if len(files) == 0 {
+		return 0
+	}
+	return files[0].startTxNum
+}
+
 func (files visibleFiles) LatestMergedRange() MergeRange {
 	if len(files) == 0 {
 		return MergeRange{}
@@ -388,6 +395,17 @@ func (files visibleFiles) String(stepSize uint64) string {
 		res = append(res, fmt.Sprintf("%d-%d", file.startTxNum/stepSize, file.endTxNum/stepSize))
 	}
 	return strings.Join(res, ",")
+}
+func (files visibleFiles) Len() int {
+	return len(files)
+}
+
+func (files visibleFiles) VisibleFiles() []VisibleFile {
+	res := make([]VisibleFile, 0, len(files))
+	for _, file := range files {
+		res = append(res, file)
+	}
+	return res
 }
 
 // fileItemsWithMissedAccessors returns list of files with missed accessors

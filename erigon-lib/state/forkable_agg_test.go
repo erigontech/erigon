@@ -4,7 +4,6 @@ import (
 	"context"
 	"math/rand"
 	"os"
-	"runtime"
 	"testing"
 	"time"
 
@@ -80,11 +79,11 @@ func TestOpenFolder(t *testing.T) {
 	checkGet(headerTx, bodyTx, rwtx)
 	rwtx.Commit()
 
-	ch := agg.BuildFiles(RootNum(amount-1), true)
+	ch := agg.BuildFiles(RootNum(amount))
 	select {
 	case <-ch:
-		// case <-time.After(time.Second * 10):
-		// 	t.Fatal("timeout")
+	case <-time.After(time.Second * 10):
+		t.Fatal("timeout")
 	}
 
 	headerF, bodyF := agg.marked[0], agg.marked[1]
@@ -167,7 +166,7 @@ func TestRecalcVisibleFilesAligned(t *testing.T) {
 	// create files
 	aggTx.Close()
 	require.NoError(t, rwtx.Commit())
-	ch := agg.BuildFiles(RootNum(amount-1), true)
+	ch := agg.BuildFiles(RootNum(amount))
 	select {
 	case <-ch:
 	case <-time.After(time.Second * 10):
@@ -226,7 +225,7 @@ func TestRecalcVisibleFilesUnaligned(t *testing.T) {
 	// create files
 	aggTx.Close()
 	require.NoError(t, rwtx.Commit())
-	ch := agg.BuildFiles(RootNum(amount-1), true)
+	ch := agg.BuildFiles(RootNum(amount))
 	select {
 	case <-ch:
 	case <-time.After(time.Second * 10):
@@ -266,7 +265,7 @@ func TestRecalcVisibleFilesUnaligned(t *testing.T) {
 	// nothing for headers
 	bfreezer.Expect(20, 30)
 
-	ch = agg.BuildFiles(RootNum(amount-1), true)
+	ch = agg.BuildFiles(RootNum(amount))
 	select {
 	case <-ch:
 	case <-time.After(time.Second * 10):
@@ -275,11 +274,6 @@ func TestRecalcVisibleFilesUnaligned(t *testing.T) {
 
 	hfreezer.Check()
 	bfreezer.Check()
-}
-
-func TestRecalcVisibleFiles2(t *testing.T) {
-	// ReferencingIntegrityChecker (need to optimise it first -- it does file exist check
-	// everytime )
 }
 
 func TestClose(t *testing.T) {
@@ -306,7 +300,7 @@ func TestClose(t *testing.T) {
 	// create files
 	aggTx.Close()
 	require.NoError(t, rwtx.Commit())
-	ch := agg.BuildFiles(RootNum(amount-1), true)
+	ch := agg.BuildFiles(RootNum(amount))
 	select {
 	case <-ch:
 	case <-time.After(time.Second * 10):
@@ -331,10 +325,9 @@ func TestClose(t *testing.T) {
 	checkRefCnt(1)
 }
 
-func TestBuildFiles(t *testing.T) {
-	// a single forkable is fine...
-	// no need to check merge loop
-	// just check if multiple files are built
+func TestRecalcVisibleFiles2(t *testing.T) {
+	// ReferencingIntegrityChecker (need to optimise it first -- it does file exist check
+	// everytime )
 }
 
 func TestForkableAggState(t *testing.T) {
@@ -346,14 +339,130 @@ func TestMergedFileGet(t *testing.T) {
 	// merged file -- addWord (compressed)
 	// this reflects in the GetFiles() as well...ensure that is the case, and correct logic is applied
 	// we go with this simple logic..this is not something user should bother with.
+	dirs, db, log := setup(t)
+	headerId, header := setupHeader(t, db, log, dirs)
+	bodyId, bodies := setupBodies(t, db, log, dirs)
+
+	agg := NewForkableAgg(context.Background(), dirs, db, log)
+	agg.RegisterMarkedForkable(header)
+	agg.RegisterMarkedForkable(bodies)
+
+	rwtx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwtx.Rollback()
+
+	aggTx := agg.BeginTemporalTx()
+	defer aggTx.Close()
+
+	headerTx := aggTx.Marked(headerId)
+	bodyTx := aggTx.Marked(bodyId)
+
+	amount := 200 //rand.Int() % 5000
+	t.Logf("amount of headers: %d", amount)
+
+	// populate forkables
+	canonicalHashes := fillForkables(t, rwtx, headerTx, bodyTx, amount)
+
+	// check GET
+	checkGet := func(headerTx, bodyTx MarkedTxI, rwtx kv.RwTx) {
+		for i := range amount {
+			HEADER_M, BODY_M := 100, 101
+			if i%3 == 0 {
+				// just use different value
+				HEADER_M, BODY_M = 200, 201
+			}
+			v, err := headerTx.Get(Num(i), rwtx)
+			require.NoError(t, err)
+			require.Equal(t, Num(i*HEADER_M).EncTo8Bytes(), v)
+
+			v, err = bodyTx.Get(Num(i), rwtx)
+			require.NoError(t, err)
+			require.Equal(t, Num(i*BODY_M).EncTo8Bytes(), v)
+
+			chash, err := rwtx.GetOne(kv.HeaderCanonical, RootNum(i).EncTo8Bytes())
+			require.NoError(t, err)
+			require.Equal(t, canonicalHashes[i], chash)
+		}
+	}
+
+	checkGet(headerTx, bodyTx, rwtx)
+
+	// create files
+	aggTx.Close()
+	require.NoError(t, rwtx.Commit())
+
+	rwtx, err = db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwtx.Commit()
+	checkGet(headerTx, bodyTx, rwtx)
+	rwtx.Commit()
+
+	checkBuildFilesFn := func(mergeDisabled bool) {
+		agg.SetMergeDisabled(mergeDisabled)
+		for i := range amount {
+			ch := agg.BuildFiles(RootNum(i + 1))
+			select {
+			case <-ch:
+			case <-time.After(time.Second * 30):
+				t.Fatal("timeout")
+			}
+		}
+
+		snapCfg := headerId.SnapshotConfig()
+		var nDirtyFiles, nVisibleFiles int
+		if mergeDisabled {
+			nDirtyFiles = (amount - int(snapCfg.SafetyMargin)) / int(snapCfg.MinimumSize)
+			nVisibleFiles = nDirtyFiles
+		} else {
+			nDirtyFiles = (amount - int(snapCfg.SafetyMargin)) / int(snapCfg.MinimumSize)
+			_amount := amount - int(snapCfg.SafetyMargin)
+			for i := len(snapCfg.MergeStages) - 1; i >= 0; i-- {
+				// merged files...
+				stage := int(snapCfg.MergeStages[i])
+				nDirtyFiles += _amount / stage
+				_amount %= stage
+			}
+			nVisibleFiles = int(calculateNumberOfFiles(uint64(amount), snapCfg))
+			//nDirtyFiles = nVisibleFiles // enable this after garbage is done..
+		}
+
+		// check dirty files count
+		headerF, bodyF := agg.marked[0], agg.marked[1]
+		headerItems := headerF.snaps.dirtyFiles.Items()
+		bodyItems := bodyF.snaps.dirtyFiles.Items()
+		require.Equal(t, nDirtyFiles, len(headerItems))
+		require.Equal(t, nDirtyFiles, len(bodyItems))
+
+		// check visiblefiles count
+		require.Equal(t, nVisibleFiles, len(headerF.snaps.visibleFiles()))
+		require.Equal(t, nVisibleFiles, len(bodyF.snaps.visibleFiles()))
+
+		aggTx = agg.BeginTemporalTx()
+		defer aggTx.Close()
+		rwtx, err = db.BeginRw(context.Background())
+		require.NoError(t, err)
+		defer rwtx.Commit()
+		headerTx, bodyTx = aggTx.Marked(headerId), aggTx.Marked(bodyId)
+		checkGet(headerTx, bodyTx, rwtx)
+	}
+
+	checkBuildFilesFn(true)
+	checkBuildFilesFn(false)
+}
+
+func TestRedundantMerge(t *testing.T) {
+	// 1.
+	// we use visibleFiles to merge files
+	// it's possible that the merge process outputs
+	// a file which was already present/created.
+
+	// 2. panic handling --
+	// it's there in PRotoForkable#MergeFiles (it gives exact info about files which were being merged)
+	//
 }
 
 func setup(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
 	tb.Helper()
-	if runtime.GOOS == "windows" {
-		tb.Skip("TODO: fix me")
-	}
-
 	logger := log.New()
 	dirs := datadir.New(tb.TempDir())
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
@@ -417,6 +526,19 @@ func registerEntity(dirs datadir.Dirs, name string) ee.ForkableId {
 
 func registerEntityWithSnapshotConfig(dirs datadir.Dirs, name string, cfg *ee.SnapshotConfig) ee.ForkableId {
 	return ee.RegisterForkable(name, dirs, nil, ee.WithSnapshotConfig(cfg))
+}
+
+func calculateNumberOfFiles(amount uint64, snapConfig *ee.SnapshotConfig) (nfiles uint64) {
+	amount -= snapConfig.SafetyMargin
+	for i := len(snapConfig.MergeStages) - 1; i >= 0; i-- {
+		mergeStageSize := snapConfig.MergeStages[i]
+		nfiles += amount / mergeStageSize
+		amount %= mergeStageSize
+	}
+
+	nfiles += amount / snapConfig.MinimumSize
+
+	return
 }
 
 type TRand struct {
