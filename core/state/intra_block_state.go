@@ -458,7 +458,7 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount *uint256.Int,
 				prev.Add(prev, &bi.increase)
 			}
 
-			sdb.tracingHooks.OnBalanceChange(addr, prev, new(uint256.Int).Add(prev, amount), reason)
+			sdb.tracingHooks.OnBalanceChange(addr, *prev, *new(uint256.Int).Add(prev, amount), reason)
 		}
 
 		bi.increase.Add(&bi.increase, amount)
@@ -598,7 +598,7 @@ func (sdb *IntraBlockState) Selfdestruct(addr common.Address) (bool, error) {
 	})
 
 	if sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil && !prevBalance.IsZero() {
-		sdb.tracingHooks.OnBalanceChange(addr, &prevBalance, uint256.NewInt(0), tracing.BalanceDecreaseSelfdestruct)
+		sdb.tracingHooks.OnBalanceChange(addr, prevBalance, zeroBalance, tracing.BalanceDecreaseSelfdestruct)
 	}
 
 	stateObject.markSelfdestructed()
@@ -607,6 +607,8 @@ func (sdb *IntraBlockState) Selfdestruct(addr common.Address) (bool, error) {
 
 	return true, nil
 }
+
+var zeroBalance uint256.Int
 
 func (sdb *IntraBlockState) Selfdestruct6780(addr common.Address) error {
 	stateObject, err := sdb.getStateObject(addr)
@@ -807,7 +809,7 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 	emptyRemoval := EIP161Enabled && stateObject.empty() && (!isAura || addr != SystemAddress)
 	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
 		if tracingHooks != nil && tracingHooks.OnBalanceChange != nil && !stateObject.Balance().IsZero() && stateObject.selfdestructed {
-			tracingHooks.OnBalanceChange(stateObject.address, stateObject.Balance(), uint256.NewInt(0), tracing.BalanceDecreaseSelfdestructBurn)
+			tracingHooks.OnBalanceChange(stateObject.address, stateObject.data.Balance, zeroBalance, tracing.BalanceDecreaseSelfdestructBurn)
 		}
 		if err := stateWriter.DeleteAccount(addr, &stateObject.original); err != nil {
 			return err

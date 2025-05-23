@@ -400,7 +400,7 @@ func (t *Tracer) OnSystemCallEnd() {
 	})
 }
 
-func (t *Tracer) OnBalanceChange(address common.Address, oldBalance, newBalance *uint256.Int, reason tracing.BalanceChangeReason) {
+func (t *Tracer) OnBalanceChange(address common.Address, oldBalance, newBalance uint256.Int, reason tracing.BalanceChangeReason) {
 	if t.recordOptions.DisableOnBalanceChangeRecording {
 		return
 	}
@@ -708,8 +708,8 @@ type OnSystemCallEndTrace struct{}
 
 type OnBalanceChangeTrace struct {
 	Address    common.Address `json:"address,omitempty"`
-	OldBalance *uint256.Int   `json:"oldBalance,omitempty"`
-	NewBalance *uint256.Int   `json:"newBalance,omitempty"`
+	OldBalance uint256.Int    `json:"oldBalance,omitempty"`
+	NewBalance uint256.Int    `json:"newBalance,omitempty"`
 	Reason     string         `json:"reason,omitempty"`
 }
 
