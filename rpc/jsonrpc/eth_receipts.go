@@ -312,8 +312,12 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if r == nil {
 			return nil, err
 		}
-		filtered := r.Logs.Filter(addrMap, crit.Topics, 0)
 		if err := noDuplicates2(r.Logs, blockNum); err != nil {
+			panic(err)
+			return nil, err
+		}
+		filtered := r.Logs.Filter(addrMap, crit.Topics, 0)
+		if err := noDuplicates2(filtered, blockNum); err != nil {
 			panic(err)
 			return nil, err
 		}
