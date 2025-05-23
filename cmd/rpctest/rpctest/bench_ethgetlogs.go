@@ -165,7 +165,6 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 		}
 		var indices []uint64
 		for i := 0; i < len(logs); i++ {
-			log.Warn("[dbg] bn", "bn", bn, "ti", int(logs[i].TxIndex), "li", int(logs[i].Index))
 			indices = append(indices, uint64(logs[i].Index))
 		}
 		slices.Sort(indices)
@@ -195,6 +194,7 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 			if resp.Error != nil {
 				return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", resp.Error.Code, resp.Error.Message)
 			}
+			log.Warn("[dbg] bn", "bn", bn, "ti", int(len(resp.Result)))
 			if err := noDuplicates(resp.Result, bn); err != nil {
 				return fmt.Errorf("eth_getLogs: at blockNum=%d %w", bn, err)
 			}
