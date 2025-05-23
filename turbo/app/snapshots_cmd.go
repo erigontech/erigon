@@ -1646,7 +1646,7 @@ func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 	defer clean()
 
-	if err := br.BuildMissedIndicesIfNeed(ctx, "indexing", nil, chainConfig); err != nil {
+	if err := br.BuildMissedIndicesIfNeed(ctx, "indexing", nil); err != nil {
 		return err
 	}
 
@@ -1686,7 +1686,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	agg.PeriodicalyPrintProcessSet(ctx)
 
-	if err := br.BuildMissedIndicesIfNeed(ctx, "retire", nil, chainConfig); err != nil {
+	if err := br.BuildMissedIndicesIfNeed(ctx, "retire", nil); err != nil {
 		return err
 	}
 	if err := caplinSnaps.BuildMissingIndices(ctx, logger); err != nil {

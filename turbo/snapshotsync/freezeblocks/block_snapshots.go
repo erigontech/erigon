@@ -419,7 +419,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, requestedMinBlockNum ui
 	}
 	includeBor := br.chainConfig.Bor != nil
 
-	if err := br.BuildMissedIndicesIfNeed(ctx, "RetireBlocks", br.notifier, br.chainConfig); err != nil {
+	if err := br.BuildMissedIndicesIfNeed(ctx, "RetireBlocks", br.notifier); err != nil {
 		return err
 	}
 
@@ -471,13 +471,26 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, requestedMinBlockNum ui
 	return nil
 }
 
-func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier, cc *chain.Config) error {
-	if err := br.snapshots().BuildMissedIndices(ctx, logPrefix, notifier, br.dirs, cc, br.logger); err != nil {
+func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier) error {
+	if err := br.snapshots().BuildMissedIndices(ctx, logPrefix, notifier, br.dirs, br.chainConfig, br.logger); err != nil {
 		return err
 	}
 
-	if cc.Bor != nil {
-		if err := br.borSnapshots().RoSnapshots.BuildMissedIndices(ctx, logPrefix, notifier, br.dirs, cc, br.logger); err != nil {
+	if br.chainConfig.Bor != nil {
+		if err := br.borSnapshots().RoSnapshots.BuildMissedIndices(ctx, logPrefix, notifier, br.dirs, br.chainConfig, br.logger); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+func (br *BlockRetire) RemoveOverlaps() error {
+	if err := br.snapshots().RemoveOverlaps(); err != nil {
+		return err
+	}
+
+	if br.chainConfig.Bor != nil {
+		if err := br.borSnapshots().RoSnapshots.RemoveOverlaps(); err != nil {
 			return err
 		}
 	}

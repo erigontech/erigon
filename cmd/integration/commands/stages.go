@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/mdbx-go/mdbx"
 	"github.com/erigontech/secp256k1"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
@@ -973,6 +974,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		return err
 	}
 
+	engine, vmConfig, sync, _, _ := allSnapshots(ctx, db, logger)
 	engine, vmConfig, sync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
 	must(sync.SetCurrentStage(stages.Execution))
 	_, _, agg, _, _, _, err := allSnapshots(ctx, db, logger)
@@ -1192,10 +1194,16 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
 	agg := db.(libstate.HasAgg).Agg().(*libstate.Aggregator)
-	//defer br.MadvNormal().DisableReadAhead()
+	defer br.MadvNormal().DisableReadAhead()
 	//defer agg.MadvNormal().DisableReadAhead()
-	blockSnapBuildSema := semaphore.NewWeighted(max(int64(runtime.NumCPU()), int64(dbg.BuildSnapshotAllowance)))
+	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
+
+	// `erigon retire` command is designed to maximize resouces utilization. But `Erigon itself` does minimize background impact (because not in rush).
+	agg.SetCollateAndBuildWorkers(estimate.StateV3Collate.Workers())
+	agg.SetMergeWorkers(2)
+	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+	agg.PeriodicalyPrintProcessSet(ctx)
 
 	err := stagedsync.SpawnCustomTrace(cfg, ctx, logger)
 	if err != nil {
