@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -76,7 +77,7 @@ type SharedDomains struct {
 	blockNum atomic.Uint64
 	estSize  int
 	trace    bool //nolint
-	//muMaps   sync.RWMutex
+	muMaps   sync.RWMutex
 	//walLock sync.RWMutex
 
 	domains [kv.DomainLen]map[string]dataWithPrevStep
@@ -210,7 +211,9 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 
 func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte) {
 	// disable mutex - because work on parallel execution postponed after E3 release.
-	//sd.muMaps.Lock()
+	sd.muMaps.Lock()
+	defer sd.muMaps.Unlock()
+
 	valWithPrevStep := dataWithPrevStep{data: val, prevStep: sd.txNum / sd.StepSize()}
 	if domain == kv.StorageDomain {
 		if old, ok := sd.storage.Set(key, valWithPrevStep); ok {
@@ -232,7 +235,8 @@ func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte) {
 
 // get returns cached value by key. Cache is invalidated when associated WAL is flushed
 func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, prevStep uint64, ok bool) {
-	//sd.muMaps.RLock()
+	sd.muMaps.RLock()
+	defer sd.muMaps.RUnlock()
 	keyS := toStringZeroCopy(key)
 	var dataWithPrevStep dataWithPrevStep
 	if table == kv.StorageDomain {
@@ -242,7 +246,7 @@ func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, prevStep ui
 	}
 	dataWithPrevStep, ok = sd.domains[table][keyS]
 	return dataWithPrevStep.data, dataWithPrevStep.prevStep, ok
-	//sd.muMaps.RUnlock()
+	// sd.muMaps.RUnlock()
 }
 
 func (sd *SharedDomains) SizeEstimate() uint64 {
@@ -501,14 +505,9 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 }
 
 func (sd *SharedDomains) GetWithCursor(domain kv.Domain, k []byte, c kv.Cursor, aggTx *AggregatorRoTx) (v []byte, step uint64, err error) {
-	if domain == kv.CommitmentDomain {
-		return sd.LatestCommitment(k)
-	}
 	if v, prevStep, ok := sd.get(domain, k); ok {
 		return v, prevStep, nil
 	}
-	// aggTx := tx.AggTx().(*AggregatorRoTx)
-
 	v, step, found, err := aggTx.DebugGetLatestFromCursor(domain, k, c)
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
@@ -517,12 +516,47 @@ func (sd *SharedDomains) GetWithCursor(domain kv.Domain, k []byte, c kv.Cursor, 
 		return v, step, nil
 	}
 
-	v, foundInFile, _, endTxNum, err := aggTx.DebugGetLatestFromFiles(domain, k, 0)
+	v, foundInFile, startTxNum, endTxNum, err := aggTx.DebugGetLatestFromFiles(domain, k, 0)
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
 	if !foundInFile {
 		return nil, 0, nil
+	}
+	// aggTx := sd.AggTx()
+	// if v, prevStep, ok := sd.get(kv.CommitmentDomain, prefix); ok {
+	// 	// sd cache values as is (without transformation) so safe to return
+	// 	return v, prevStep, nil
+	// }
+	// v, step, found, err := sd.roTtx.Debug().GetLatestFromDB(kv.CommitmentDomain, prefix)
+	// if err != nil {
+	// 	return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
+	// }
+	// if found {
+	// 	// db store values as is (without transformation) so safe to return
+	// 	return v, step, nil
+	// }
+
+	// // getLatestFromFiles doesn't provide same semantics as getLatestFromDB - it returns start/end tx
+	// // of file where the value is stored (not exact step when kv has been set)
+	// v, _, startTx, endTx, err := sd.roTtx.Debug().GetLatestFromFiles(kv.CommitmentDomain, prefix, 0)
+	// if err != nil {
+	// 	return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
+	// }
+	if domain == kv.CommitmentDomain {
+		prefix := k
+		if !aggTx.a.commitmentValuesTransform || bytes.Equal(prefix, keyCommitmentState) {
+			sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), v)
+			return v, endTxNum / sd.StepSize(), nil
+		}
+
+		// replace shortened keys in the branch with full keys to allow HPH work seamlessly
+		rv, err := sd.replaceShortenedKeysInBranch(prefix, commitment.BranchData(v), startTxNum, endTxNum, aggTx)
+		if err != nil {
+			return nil, 0, err
+		}
+		sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), rv) // keep dereferenced value in cache (to avoid waste on another dereference)
+		return rv, endTxNum / sd.StepSize(), nil
 	}
 
 	return v, endTxNum / sd.StepSize(), nil
