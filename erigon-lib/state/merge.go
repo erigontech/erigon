@@ -346,14 +346,14 @@ func mergeEfs(preval, val, buf []byte) ([]byte, error) {
 	for preIt.HasNext() {
 		v, err := preIt.Next()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("mergeEfs: preIt.Next %w", err)
 		}
 		newEf.AddOffset(v)
 	}
 	for efIt.HasNext() {
 		v, err := efIt.Next()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("mergeEfs: efIt.Next %w", err)
 		}
 		newEf.AddOffset(v)
 	}
@@ -687,7 +687,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 		return nil, fmt.Errorf("merge %s buildAccessor [%d-%d]: %w", iit.ii.filenameBase, startTxNum, endTxNum, err)
 	}
 	if outItem.index, err = recsplit.OpenIndex(iit.ii.efAccessorFilePath(fromStep, toStep)); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("merge %s OpenIndex [%d-%d]: %w", iit.ii.filenameBase, startTxNum, endTxNum, err)
 	}
 
 	closeItem = false
