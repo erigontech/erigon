@@ -203,7 +203,10 @@ func (a *Aggregator) PeriodicalyPrintProcessSet(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-logEvery.C:
-				a.logger.Info("[agg] ", "files", a.ps.String())
+				s := a.ps.String()
+				if s != "" {
+					a.logger.Info("[agg] building", "files", s)
+				}
 			}
 		}
 	}()
