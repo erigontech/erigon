@@ -745,6 +745,15 @@ Loop:
 					break
 				}
 
+				// allow greedy prune on non-chain-tip
+				if err = executor.tx().(kv.TemporalRwTx).GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
+					return err
+				}
+
+				if _, err := executor.tx().(kv.TemporalRwTx).PruneSmallBatches(ctx, 10*time.Hour); err != nil {
+					return err
+				}
+
 				var (
 					commitStart = time.Now()
 					tt          = time.Now()
