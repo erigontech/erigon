@@ -160,7 +160,7 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	noDuplicates := func(logs []Log, blockNum uint64, addr common.Address) error {
+	noDuplicates := func(logs []Log) error {
 		if len(logs) <= 1 {
 			return nil
 		}
@@ -171,7 +171,7 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 		slices.Sort(indices)
 		for i := 1; i < len(logs); i++ {
 			if indices[i-1] == indices[i] {
-				return fmt.Errorf("eth_getLogs: at blockNum=%d and addr %x has duplicated log_index %d", blockNum, addr, indices[i])
+				return fmt.Errorf("duplicated log_index %d", indices[i])
 			}
 		}
 		return nil
@@ -194,6 +194,9 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 				if resp.Error != nil {
 					return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", resp.Error.Code, resp.Error.Message)
 				}
+				if err := noDuplicates(resp.Result); err != nil {
+					return fmt.Errorf("eth_getLogs: at blockNum=%d %w", bn, err)
+				}
 
 				sawAddr := map[common.Address]struct{}{} // don't check same addr in this block
 				sawTopic := map[common.Hash]struct{}{}
@@ -210,17 +213,16 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 					if resp.Error != nil {
 						return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", resp.Error.Code, resp.Error.Message)
 					}
-					//invariant1.1: if `log` visible without filter - then must be visible with filter. (in another words: `address` must be indexed well)
+					//invariant1: if `log` visible without filter - then must be visible with filter. (in another words: `address` must be indexed well)
 					if len(resp.Result) == 0 {
 						return fmt.Errorf("eth_getLogs: at blockNum=%d account %x not indexed", bn, l.Address)
 					}
 
-					//invariant1.2: no repeats
-					if err := noDuplicates(resp.Result, bn, l.Address); err != nil {
-						return err
+					if err := noDuplicates(resp.Result); err != nil {
+						return fmt.Errorf("eth_getLogs: at blockNum=%d and addr %x %w", bn, l.Address, err)
 					}
 
-					//invariant2.1: if `log` visible without filter - then must be visible with filter. (in another words: `topic` must be indexed well)
+					//invariant2: if `log` visible without filter - then must be visible with filter. (in another words: `topic` must be indexed well)
 					if len(l.Topics) == 0 {
 						continue
 					}
@@ -240,9 +242,8 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 					if len(resp.Result) == 0 {
 						return fmt.Errorf("eth_getLogs: at blockNum=%d account %x, topic %x not indexed", bn, l.Address, l.Topics[0])
 					}
-					//invariant2.2: no repeats
-					if err := noDuplicates(resp.Result, bn, l.Address); err != nil {
-						return err
+					if err := noDuplicates(resp.Result); err != nil {
+						return fmt.Errorf("eth_getLogs: at blockNum=%d and topic %x %w", bn, l.Topics[0], err)
 					}
 				}
 
