@@ -17,7 +17,6 @@
 package aura
 
 import (
-	"bytes"
 	"math/big"
 
 	"github.com/holiman/uint256"
@@ -86,43 +85,23 @@ func callBlockGasLimitAbi(contractAddr common.Address, syscall consensus.SystemC
 }
 
 func blockGasLimitAbi() abi.ABI {
-	a, err := abi.JSON(bytes.NewReader(contracts.BlockGasLimit))
-	if err != nil {
-		panic(err)
-	}
-	return a
+	return contracts.BlockGasLimitABI
 }
 
 func blockRewardAbi() abi.ABI {
-	a, err := abi.JSON(bytes.NewReader(contracts.BlockReward))
-	if err != nil {
-		panic(err)
-	}
-	return a
+	return contracts.BlockRewardABI
 }
 
 func certifierAbi() abi.ABI {
-	a, err := abi.JSON(bytes.NewReader(contracts.Certifier))
-	if err != nil {
-		panic(err)
-	}
-	return a
+	return contracts.CertifierABI
 }
 
 func registrarAbi() abi.ABI {
-	a, err := abi.JSON(bytes.NewReader(contracts.Registrar))
-	if err != nil {
-		panic(err)
-	}
-	return a
+	return contracts.RegistrarABI
 }
 
 func withdrawalAbi() abi.ABI {
-	a, err := abi.JSON(bytes.NewReader(contracts.Withdrawal))
-	if err != nil {
-		panic(err)
-	}
-	return a
+	return contracts.WithdrawalABI
 }
 
 func getCertifier(registrar common.Address, syscall consensus.SystemCall) *common.Address {
