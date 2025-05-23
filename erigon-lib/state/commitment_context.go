@@ -129,6 +129,11 @@ func (sdc *SharedDomainsCommitmentContext) Reset() {
 	if !sdc.justRestored.Load() {
 		sdc.patriciaTrie.Reset()
 	}
+	for i := 0; i < len(sdc.subTtx); i++ {
+		if sdc.subTtx[i] != nil {
+			sdc.subTtx[i].Close()
+		}
+	}
 }
 
 func (sdc *SharedDomainsCommitmentContext) KeysCount() uint64 {
@@ -621,6 +626,12 @@ type CursorContext struct {
 	stepSize           uint64
 	domainsOnly        bool // if true, do not use history reader and limit to domain files only
 	trace              bool
+}
+
+func (sdc *CursorContext) Close() {
+	sdc.c.Close()
+	sdc.roTtx.Rollback()
+	sdc.aggTx.Close()
 }
 
 func (sdc *CursorContext) Storage(plainKey []byte) (u *commitment.Update, err error) {
