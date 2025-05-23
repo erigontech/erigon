@@ -1703,7 +1703,7 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 
 	// Promote best transactions from the queued pool to either pending or base fee pool, while they qualify
 	for best := p.queued.Best(); p.queued.Len() > 0 && best.subPool >= BaseFeePoolBits; best = p.queued.Best() {
-		if best.minFeeCap.Cmp(uint256.NewInt(pendingBaseFee)) >= 0 {
+		if best.minFeeCap.CmpUint64(pendingBaseFee) >= 0 {
 			tx := p.queued.PopBest()
 			announcements.Append(tx.Tx.Type, tx.Tx.Size, tx.Tx.IDHash[:])
 			p.pending.Add(tx)
@@ -2654,7 +2654,7 @@ func (s *bestSlice) Swap(i, j int) {
 	s.ms[i].bestIndex, s.ms[j].bestIndex = i, j
 }
 func (s *bestSlice) Less(i, j int) bool {
-	return s.ms[i].better(s.ms[j], *uint256.NewInt(s.pendingBaseFee))
+	return s.ms[i].better(s.ms[j], s.pendingBaseFee)
 }
 func (s *bestSlice) UnsafeRemove(i *metaTx) {
 	s.Swap(i.bestIndex, len(s.ms)-1)
@@ -2816,41 +2816,43 @@ type BestQueue struct {
 // depending on the pool - pending (P), basefee (B), queued (Q) -
 // it compares the effective tip (for P), nonceDistance (for both P,Q)
 // minFeeCap (for B), and cumulative balance distance (for P, Q)
-func (mt *metaTx) better(than *metaTx, pendingBaseFee uint256.Int) bool {
+func (mt *metaTx) better(than *metaTx, pendingBaseFee uint64) bool {
 	subPool := mt.subPool
 	thanSubPool := than.subPool
-	if mt.minFeeCap.Cmp(&pendingBaseFee) >= 0 {
+
+	difference := &uint256.Int{}
+	difference.SubUint64(&mt.minFeeCap, pendingBaseFee)
+
+	if difference.Sign() >= 0 {
 		subPool |= EnoughFeeCapBlock
 	}
-	if than.minFeeCap.Cmp(&pendingBaseFee) >= 0 {
+
+	thanDifference := &uint256.Int{}
+	thanDifference.SubUint64(&than.minFeeCap, pendingBaseFee)
+	if thanDifference.Sign() >= 0 {
 		thanSubPool |= EnoughFeeCapBlock
 	}
 	if subPool != thanSubPool {
 		return subPool > thanSubPool
 	}
-
 	switch mt.currentSubPool {
 	case PendingSubPool:
 		var effectiveTip, thanEffectiveTip uint256.Int
-		if mt.minFeeCap.Cmp(&pendingBaseFee) >= 0 {
-			difference := uint256.NewInt(0)
-			difference.Sub(&mt.minFeeCap, &pendingBaseFee)
-			if difference.Cmp(uint256.NewInt(mt.minTip)) <= 0 {
+		if (subPool & EnoughFeeCapBlock) == EnoughFeeCapBlock {
+			if difference.CmpUint64(mt.minTip) <= 0 {
 				effectiveTip = *difference
 			} else {
-				effectiveTip = *uint256.NewInt(mt.minTip)
+				effectiveTip[0] = mt.minTip
 			}
 		}
-		if than.minFeeCap.Cmp(&pendingBaseFee) >= 0 {
-			difference := uint256.NewInt(0)
-			difference.Sub(&than.minFeeCap, &pendingBaseFee)
-			if difference.Cmp(uint256.NewInt(than.minTip)) <= 0 {
-				thanEffectiveTip = *difference
+		if (thanSubPool & EnoughFeeCapBlock) == EnoughFeeCapBlock {
+			if thanDifference.CmpUint64(than.minTip) <= 0 {
+				thanEffectiveTip = *thanDifference
 			} else {
-				thanEffectiveTip = *uint256.NewInt(than.minTip)
+				thanEffectiveTip[0] = than.minTip
 			}
 		}
-		if effectiveTip.Cmp(&thanEffectiveTip) != 0 {
+		if !effectiveTip.Eq(&thanEffectiveTip) {
 			return effectiveTip.Cmp(&thanEffectiveTip) > 0
 		}
 		// Compare nonce and cumulative balance. Just as a side note, it doesn't
@@ -2864,8 +2866,8 @@ func (mt *metaTx) better(than *metaTx, pendingBaseFee uint256.Int) bool {
 			return mt.cumulativeBalanceDistance < than.cumulativeBalanceDistance
 		}
 	case BaseFeeSubPool:
-		if mt.minFeeCap.Cmp(&than.minFeeCap) != 0 {
-			return mt.minFeeCap.Cmp(&than.minFeeCap) > 0
+		if res := mt.minFeeCap.Cmp(&than.minFeeCap); res != 0 {
+			return res > 0
 		}
 	case QueuedSubPool:
 		if mt.nonceDistance != than.nonceDistance {
@@ -2878,13 +2880,13 @@ func (mt *metaTx) better(than *metaTx, pendingBaseFee uint256.Int) bool {
 	return mt.timestamp < than.timestamp
 }
 
-func (mt *metaTx) worse(than *metaTx, pendingBaseFee uint256.Int) bool {
+func (mt *metaTx) worse(than *metaTx, pendingBaseFee uint64) bool {
 	subPool := mt.subPool
 	thanSubPool := than.subPool
-	if mt.minFeeCap.Cmp(&pendingBaseFee) >= 0 {
+	if mt.minFeeCap.CmpUint64(pendingBaseFee) >= 0 {
 		subPool |= EnoughFeeCapBlock
 	}
-	if than.minFeeCap.Cmp(&pendingBaseFee) >= 0 {
+	if than.minFeeCap.CmpUint64(pendingBaseFee) >= 0 {
 		thanSubPool |= EnoughFeeCapBlock
 	}
 	if subPool != thanSubPool {
@@ -2915,7 +2917,7 @@ func (mt *metaTx) worse(than *metaTx, pendingBaseFee uint256.Int) bool {
 
 func (p BestQueue) Len() int { return len(p.ms) }
 func (p BestQueue) Less(i, j int) bool {
-	return p.ms[i].better(p.ms[j], *uint256.NewInt(p.pendingBastFee))
+	return p.ms[i].better(p.ms[j], p.pendingBastFee)
 }
 func (p BestQueue) Swap(i, j int) {
 	p.ms[i], p.ms[j] = p.ms[j], p.ms[i]
@@ -2947,7 +2949,7 @@ type WorstQueue struct {
 
 func (p WorstQueue) Len() int { return len(p.ms) }
 func (p WorstQueue) Less(i, j int) bool {
-	return p.ms[i].worse(p.ms[j], *uint256.NewInt(p.pendingBaseFee))
+	return p.ms[i].worse(p.ms[j], p.pendingBaseFee)
 }
 func (p WorstQueue) Swap(i, j int) {
 	p.ms[i], p.ms[j] = p.ms[j], p.ms[i]

@@ -93,7 +93,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		// parameter of minimal base fee. Set to 0 if feeCap is less than minimum base fee, which means
 		// this transaction will never be included into this particular chain.
 		mt.subPool &^= EnoughFeeCapProtocol
-		if mt.minFeeCap.Cmp(uint256.NewInt(protocolBaseFee)) >= 0 {
+		if mt.minFeeCap.CmpUint64(protocolBaseFee) >= 0 {
 			mt.subPool |= EnoughFeeCapProtocol
 		} else {
 			mt.subPool = 0 // TODO: we immediately drop all transactions if they have no first bit - then maybe we don't need this bit at all? And don't add such transactions to queue?
