@@ -380,9 +380,9 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 
 	br := cfg.BlockReader
 	chainConfig := cfg.ChainConfig
-	if chainConfig.Aura != nil && cfg.Workers > 1 {
-		panic("gnosis consensus doesn't support parallel exec yet: https://github.com/erigontech/erigon/issues/12054")
-	}
+	//if chainConfig.Aura != nil && cfg.Workers > 1 {
+	//	panic("gnosis consensus doesn't support parallel exec yet: https://github.com/erigontech/erigon/issues/12054")
+	//}
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
 
