@@ -1064,14 +1064,9 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 	if len(txn.BlobHashes) != len(txn.BlobBundles) {
 		return txpoolcfg.UnequalBlobTxExt
 	}
-	var blobs [][]byte
-	var commitments []gokzg4844.KZGCommitment
-	var proofs []gokzg4844.KZGProof
-	for _, bb := range txn.BlobBundles {
-		blobs = append(blobs, bb.Blob)
-		commitments = append(commitments, bb.Commitment)
-		proofs = append(proofs, bb.Proofs...)
-	}
+	blobs := txn.Blobs()
+	commitments := txn.Commitments()
+	proofs := txn.Proofs()
 
 	if len(blobs) != len(commitments) {
 		return txpoolcfg.UnequalBlobTxExt
