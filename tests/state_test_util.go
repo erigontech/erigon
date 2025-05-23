@@ -302,11 +302,11 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, b
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)
 		statedb.SetNonce(addr, a.Nonce)
-		balance := uint256.NewInt(0)
+		var balance uint256.Int
 		if a.Balance != nil {
-			balance, _ = uint256.FromBig(a.Balance)
+			_ = balance.SetFromBig(a.Balance)
 		}
-		statedb.SetBalance(addr, *balance, tracing.BalanceChangeUnspecified)
+		statedb.SetBalance(addr, balance, tracing.BalanceChangeUnspecified)
 		for k, v := range a.Storage {
 			key := k
 			val := uint256.NewInt(0).SetBytes(v.Bytes())
