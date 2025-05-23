@@ -84,25 +84,11 @@ func callBlockGasLimitAbi(contractAddr common.Address, syscall consensus.SystemC
 	return val
 }
 
-func blockGasLimitAbi() abi.ABI {
-	return contracts.BlockGasLimitABI
-}
-
-func blockRewardAbi() abi.ABI {
-	return contracts.BlockRewardABI
-}
-
-func certifierAbi() abi.ABI {
-	return contracts.CertifierABI
-}
-
-func registrarAbi() abi.ABI {
-	return contracts.RegistrarABI
-}
-
-func withdrawalAbi() abi.ABI {
-	return contracts.WithdrawalABI
-}
+func blockGasLimitAbi() abi.ABI { return contracts.BlockGasLimitABI }
+func blockRewardAbi() abi.ABI   { return contracts.BlockRewardABI }
+func certifierAbi() abi.ABI     { return contracts.CertifierABI }
+func registrarAbi() abi.ABI     { return contracts.RegistrarABI }
+func withdrawalAbi() abi.ABI    { return contracts.WithdrawalABI }
 
 func getCertifier(registrar common.Address, syscall consensus.SystemCall) *common.Address {
 	hashedKey, err := common.HashData([]byte("service_transaction_checker"))
