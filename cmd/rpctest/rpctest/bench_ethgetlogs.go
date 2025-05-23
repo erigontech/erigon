@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
-	"runtime"
 	"slices"
 	"time"
 
@@ -182,7 +181,7 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 	for bn := blockFrom; bn < blockTo; {
 		batchEnd := min(bn+1000, blockTo)
 		eg := &errgroup.Group{}
-		eg.SetLimit(runtime.NumCPU())
+		eg.SetLimit(1)
 		for ; bn < batchEnd; bn++ {
 			bn := bn
 			prevBn := _prevBn
