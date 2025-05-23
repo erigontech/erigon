@@ -394,7 +394,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		}
 	}()
 	if indexIn, historyIn, err = dt.ht.mergeFiles(ctx, indexFiles, historyFiles, r.history, ps); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, fmt.Errorf("ht.mergeFiles: %w", err)
 	}
 
 	if !r.values.needMerge {
@@ -713,7 +713,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		}
 	}()
 	if indexIn, err = ht.iit.mergeFiles(ctx, indexFiles, r.index.from, r.index.to, ps); err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("iit.mergeFiles: %w", err)
 	}
 	if r.history.needMerge {
 		var comp *seg.Compressor
