@@ -71,6 +71,8 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	var begin, end uint64
 	logs := types.Logs{}
 
+	log.Warn("[dbg] see9", "begin", begin, "end", end, "crit", crit)
+
 	tx, beginErr := api.db.BeginTemporalRo(ctx)
 	if beginErr != nil {
 		return logs, beginErr
