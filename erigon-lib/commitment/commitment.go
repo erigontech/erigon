@@ -1291,9 +1291,9 @@ func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte, update *U
 	case ModeUpdateMap:
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			// ku := t.ku[toStringZeroCopy(v)]
-			if ku == nil {
-				fmt.Printf("Update was not found for key %x\n", v)
-			}
+			// if ku == nil {
+			// 	fmt.Printf("Update was not found for key %x\n", v)
+			// }
 			return fn(k, v, nil) //ku.update)
 		}, etl.TransformArgs{Quit: ctx.Done()})
 		if err != nil {
