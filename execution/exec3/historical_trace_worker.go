@@ -391,6 +391,7 @@ func doHistoryReduce(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context,
 		return err
 	}
 	defer tx.Rollback()
+	applyWorker.ResetTx(tx)
 
 	for outputTxNum.Load() <= toTxNum {
 		err = rws.DrainNonBlocking(ctx)
@@ -433,8 +434,6 @@ func doHistoryMap(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, in
 }
 
 func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueue, outputTxNumIn uint64, tx kv.TemporalTx, forceStopAtBlockEnd bool, applyWorker *HistoricalTraceWorker) (outputTxNum uint64, stopedAtBlockEnd bool, err error) {
-	applyWorker.ResetTx(tx)
-
 	rwsIt := rws.Iter()
 	defer rwsIt.Close()
 
