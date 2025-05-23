@@ -18,7 +18,7 @@ package jsonrpc
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"strings"
 
 	"github.com/erigontech/erigon-lib/common/debug"
@@ -121,7 +121,7 @@ func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]any, er
 		}
 		return stub, nil
 	}
-	return nil, fmt.Errorf("filter not found")
+	return nil, errors.New("filter not found")
 }
 
 // GetFilterLogs implements eth_getFilterLogs.
@@ -135,7 +135,7 @@ func (api *APIImpl) GetFilterLogs(_ context.Context, index string) ([]*types.Log
 	if logs, ok := api.filters.ReadLogs(rpchelper.LogsSubID(cutIndex)); ok {
 		return logs, nil
 	}
-	return nil, fmt.Errorf("filter not found")
+	return nil, errors.New("filter not found")
 }
 
 // NewHeads send a notification each time a new (header) block is appended to the chain.
