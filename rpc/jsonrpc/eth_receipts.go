@@ -223,7 +223,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	if err != nil {
 		return logs, err
 	}
-	log.Warn("[dbg] bn1", "cr", crit)
+	//log.Warn("[dbg] bn1", "cr", crit)
 
 	it := rawdbv3.TxNums2BlockNums(tx,
 		api._txNumReader,
@@ -234,7 +234,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			return nil, err
 		}
 		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := it.Next()
-		log.Warn("[dbg] bn2", "bn", blockNum, "txIndex", txIndex)
+		//log.Warn("[dbg] bn2", "bn", blockNum, "txIndex", txIndex)
 		if err != nil {
 			return nil, err
 		}
@@ -329,7 +329,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 	}
 
-	log.Warn("[dbg] res", "bn", len(logs))
+	log.Warn("[dbg] res", "logs", len(logs))
 
 	return logs, nil
 }
