@@ -256,7 +256,6 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 
 			//return nil
 			//})
-			_prevBn = bn
 		}
 
 		if err := eg.Wait(); err != nil {
