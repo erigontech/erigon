@@ -18,6 +18,7 @@ package shutter_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -38,8 +39,11 @@ func TestBlockTracker(t *testing.T) {
 	logger := testlog.Logger(t, log.LvlTrace)
 	recvC := make(chan *remoteproto.StateChangeBatch)
 	bl := shutter.NewBlockListener(logger, testhelpers.NewStateChangesClientMock(ctx, recvC))
+	btInitialisationWg := &sync.WaitGroup{}
+	btInitialisationWg.Add(1)
 	bnReader := func(ctx context.Context) (*uint64, error) {
 		start := uint64(10)
+		btInitialisationWg.Done()
 		return &start, nil
 	}
 	bt := shutter.NewBlockTracker(logger, bl, bnReader)
@@ -51,6 +55,7 @@ func TestBlockTracker(t *testing.T) {
 	}(eg)
 	eg.Go(func() error { return bl.Run(egCtx) })
 	eg.Go(func() error { return bt.Run(egCtx) })
+	btInitialisationWg.Wait() // This ensures the block tracker has been initialised i.e. it observes the block listener
 
 	waitCtx1, waitCtxCancel1 := context.WithTimeout(ctx, 50*time.Millisecond)
 	defer waitCtxCancel1()
