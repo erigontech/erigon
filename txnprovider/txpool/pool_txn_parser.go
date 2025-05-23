@@ -127,6 +127,7 @@ func PeekTransactionType(serialized []byte) (byte, error) {
 // ParseTransaction extracts all the information from the transactions's payload (RLP) necessary to build TxnSlot.
 // It also performs syntactic validation of the transactions.
 // wrappedWithBlobs means that for blob (type 3) transactions the full version with blobs/commitments/proofs is expected
+// wrapperVersion
 // (see https://eips.ethereum.org/EIPS/eip-4844#networking).
 func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnSlot, sender []byte, hasEnvelope, wrappedWithBlobs bool, validateHash func([]byte) error) (p int, err error) {
 	if len(payload) == 0 {
@@ -198,18 +199,29 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			return 0, fmt.Errorf("%w: unexpected leftover after blob txn body", ErrParseTxn)
 		}
 
+		// Check if blob txn has wrapperVersion
+		cellProofsPerBlob := 1
+		dataPos, dataLen, err = rlp.ParseString(payload, p)
+		if err == nil && dataLen == 1 {
+			p = p + 1
+			cellProofsPerBlob = int(params.CellsPerExtBlob)
+		}
+
 		dataPos, dataLen, err = rlp.ParseList(payload, p)
 		if err != nil {
 			return 0, fmt.Errorf("%w: blobs len: %s", ErrParseTxn, err) //nolint
 		}
 		blobPos := dataPos
+		blobIdx := 0
 		for blobPos < dataPos+dataLen {
+			slot.BlobBundles = append(slot.BlobBundles, PoolBlobBundle{})
 			blobPos, err = rlp.StringOfLen(payload, blobPos, params.BlobSize)
 			if err != nil {
 				return 0, fmt.Errorf("%w: blob: %s", ErrParseTxn, err) //nolint
 			}
-			slot.Blobs = append(slot.Blobs, payload[blobPos:blobPos+params.BlobSize])
+			slot.BlobBundles[blobIdx].Blob = payload[blobPos : blobPos+params.BlobSize]
 			blobPos += params.BlobSize
+			blobIdx++
 		}
 		if blobPos != dataPos+dataLen {
 			return 0, fmt.Errorf("%w: extraneous space in blobs", ErrParseTxn)
@@ -221,6 +233,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			return 0, fmt.Errorf("%w: commitments len: %s", ErrParseTxn, err) //nolint
 		}
 		commitmentPos := dataPos
+		blobIdx = 0
 		for commitmentPos < dataPos+dataLen {
 			commitmentPos, err = rlp.StringOfLen(payload, commitmentPos, 48)
 			if err != nil {
@@ -228,8 +241,9 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			}
 			var commitment gokzg4844.KZGCommitment
 			copy(commitment[:], payload[commitmentPos:commitmentPos+48])
-			slot.Commitments = append(slot.Commitments, commitment)
+			slot.BlobBundles[blobIdx].Commitment = commitment
 			commitmentPos += 48
+			blobIdx++
 		}
 		if commitmentPos != dataPos+dataLen {
 			return 0, fmt.Errorf("%w: extraneous space in commitments", ErrParseTxn)
@@ -241,6 +255,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			return 0, fmt.Errorf("%w: proofs len: %s", ErrParseTxn, err) //nolint
 		}
 		proofPos := dataPos
+		proofs := make([]gokzg4844.KZGProof, 0)
 		for proofPos < dataPos+dataLen {
 			proofPos, err = rlp.StringOfLen(payload, proofPos, 48)
 			if err != nil {
@@ -248,8 +263,15 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			}
 			var proof gokzg4844.KZGProof
 			copy(proof[:], payload[proofPos:proofPos+48])
-			slot.Proofs = append(slot.Proofs, proof)
+			proofs = append(proofs, proof)
 			proofPos += 48
+		}
+		proofsIdx := 0
+		for blobIdx = 0; blobIdx < len(slot.BlobBundles); blobIdx++ {
+			for range cellProofsPerBlob {
+				slot.BlobBundles[blobIdx].Proofs = append(slot.BlobBundles[blobIdx].Proofs, proofs[proofsIdx])
+				proofsIdx++
+			}
 		}
 		if proofPos != dataPos+dataLen {
 			return 0, fmt.Errorf("%w: extraneous space in proofs", ErrParseTxn)
@@ -819,6 +841,12 @@ type AuthAndNonce struct {
 	nonce     uint64
 }
 
+type PoolBlobBundle struct {
+	Commitment gokzg4844.KZGCommitment
+	Blob       []byte
+	Proofs     []gokzg4844.KZGProof // Can be 1 or more Proofs/CellProofs
+}
+
 // TxnSlot contains information extracted from an Ethereum transaction, which is enough to manage it inside the transaction.
 // Also, it contains some auxiliary information, like ephemeral fields, and indices within priority queues
 type TxnSlot struct {
@@ -841,11 +869,9 @@ type TxnSlot struct {
 	ChainID             uint256.Int
 
 	// EIP-4844: Shard Blob Transactions
-	BlobFeeCap  uint256.Int // max_fee_per_blob_gas
-	BlobHashes  []common.Hash
-	Blobs       [][]byte
-	Commitments []gokzg4844.KZGCommitment
-	Proofs      []gokzg4844.KZGProof
+	BlobFeeCap uint256.Int // max_fee_per_blob_gas
+	BlobHashes []common.Hash
+	BlobBundles []PoolBlobBundle
 
 	AuthAndNonces []AuthAndNonce // Indexed authorization signers + nonces for EIP-7702 txns (type-4)
 
