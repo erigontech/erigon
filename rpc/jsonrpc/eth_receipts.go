@@ -223,7 +223,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	if err != nil {
 		return logs, err
 	}
-	log.Warn("[dbg] bn1")
+	log.Warn("[dbg] bn1", "cr", crit)
 
 	it := rawdbv3.TxNums2BlockNums(tx,
 		api._txNumReader,
