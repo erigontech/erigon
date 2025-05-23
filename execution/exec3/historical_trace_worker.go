@@ -114,6 +114,8 @@ func NewHistoricalTraceWorker(
 	return ie
 }
 
+func (rw *HistoricalTraceWorker) LogStats() { rw.evm.JumpDestCache.LogStats() }
+
 func (rw *HistoricalTraceWorker) Run() (err error) {
 	defer func() { // convert panic to err - because it's background workers
 		if rec := recover(); rec != nil {
@@ -121,7 +123,7 @@ func (rw *HistoricalTraceWorker) Run() (err error) {
 			log.Warn("[HistoricalTraceWorker]", "err", err)
 		}
 	}()
-	defer rw.evm.JumpDestCache.LogStats()
+	defer rw.LogStats()
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
 		rw.RunTxTaskNoLock(txTask)
 		if err := rw.out.Add(rw.ctx, txTask); err != nil {
@@ -174,6 +176,9 @@ func (rw *HistoricalTraceWorker) RunTxTaskNoLock(txTask *state.TxTask) {
 		txTask.Error = ibs.FinalizeTx(rules, noop)
 	case txTask.Final:
 		if txTask.BlockNum == 0 {
+			break
+		}
+		if rw.background { // `Final` system txn must be executed in reducer, because `consensus.Finalize` requires "all receipts of block" to be available
 			break
 		}
 
@@ -286,14 +291,14 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 }
 
 func doHistoryReduce(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, outputTxNum *atomic.Uint64, rws *state.ResultsQueue, logger log.Logger) error {
-	db := cfg.ChainDB
-	applyWorker := NewHistoricalTraceWorker(consumer, nil, rws, true, ctx, cfg, log.New())
-
-	tx, err := db.BeginTemporalRo(ctx)
+	tx, err := cfg.ChainDB.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	applyWorker := NewHistoricalTraceWorker(consumer, nil, nil, false, ctx, cfg, logger)
+	defer applyWorker.LogStats()
+	applyWorker.ResetTx(tx)
 
 	for outputTxNum.Load() <= toTxNum {
 		err = rws.DrainNonBlocking(ctx)
@@ -345,7 +350,7 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 		outputTxNum++
 		stopedAtBlockEnd = txTask.Final
 
-		if txTask.Final { // final txn must be executed here, because `consensus.Finalize` requires "all receipts of block" to be available
+		if txTask.Final { // `Final` system txn must be executed in reducer, because `consensus.Finalize` requires "all receipts of block" to be available
 			applyWorker.RunTxTaskNoLock(txTask.Reset())
 		}
 		if txTask.Error != nil {
@@ -375,9 +380,9 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 
 	br := cfg.BlockReader
 	chainConfig := cfg.ChainConfig
-	if chainConfig.Aura != nil && cfg.Workers > 1 {
-		panic("gnosis consensus doesn't support parallel exec yet: https://github.com/erigontech/erigon/issues/12054")
-	}
+	//if chainConfig.Aura != nil && cfg.Workers > 1 {
+	//	panic("gnosis consensus doesn't support parallel exec yet: https://github.com/erigontech/erigon/issues/12054")
+	//}
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
 

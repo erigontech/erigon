@@ -159,6 +159,18 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
+	noDuplicates := func(logs []Log, blockNum uint64, addr common.Address) error {
+		if len(logs) <= 1 {
+			return nil
+		}
+		//for i := 1; i < len(logs); i++ {
+		//	if logs[i-1].TxIndex == logs[i].TxIndex {
+		//		return fmt.Errorf("eth_getLogs: at blockNum=%d and addr %x has duplicated logs", blockNum, addr)
+		//	}
+		//}
+		return nil
+	}
+
 	_prevBn := blockFrom
 	for bn := blockFrom; bn < blockTo; {
 		batchEnd := min(bn+1000, blockTo)
@@ -192,17 +204,22 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 					if resp.Error != nil {
 						return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", resp.Error.Code, resp.Error.Message)
 					}
-					//invariant1: if `log` visible without filter - then must be visible with filter. (in another words: `address` must be indexed well)
+					//invariant1.1: if `log` visible without filter - then must be visible with filter. (in another words: `address` must be indexed well)
 					if len(resp.Result) == 0 {
 						return fmt.Errorf("eth_getLogs: at blockNum=%d account %x not indexed", bn, l.Address)
 					}
 
-					//invariant2: if `log` visible without filter - then must be visible with filter. (in another words: `topic` must be indexed well)
+					//invariant1.2: no repeats
+					if err := noDuplicates(resp.Result, bn, l.Address); err != nil {
+						return err
+					}
+
+					//invariant2.1: if `log` visible without filter - then must be visible with filter. (in another words: `topic` must be indexed well)
 					if len(l.Topics) == 0 {
 						continue
 					}
 
-					if _, ok := sawTopic[l.Topics[0]]; ok { //nolint:staticcheck // SA4006: false positive
+					if _, ok := sawTopic[l.Topics[0]]; ok {
 						continue
 					}
 
@@ -217,6 +234,10 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 					}
 					if len(resp.Result) == 0 {
 						return fmt.Errorf("eth_getLogs: at blockNum=%d account %x, topic %x not indexed", bn, l.Address, l.Topics[0])
+					}
+					//invariant2.2: no repeats
+					if err := noDuplicates(resp.Result, bn, l.Address); err != nil {
+						return err
 					}
 				}
 

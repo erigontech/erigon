@@ -17,20 +17,36 @@
 package contracts
 
 import (
+	"bytes"
 	_ "embed"
+
+	"github.com/erigontech/erigon/accounts/abi"
 )
 
 //go:embed block_reward.json
 var BlockReward []byte
+var BlockRewardABI = mustABI(BlockReward)
 
 //go:embed certifier.json
 var Certifier []byte
+var CertifierABI = mustABI(Certifier)
 
 //go:embed registrar.json
 var Registrar []byte
+var RegistrarABI = mustABI(Registrar)
 
 //go:embed withdrawal.json
 var Withdrawal []byte
+var WithdrawalABI = mustABI(Withdrawal)
 
 //go:embed block_gas_limit.json
 var BlockGasLimit []byte
+var BlockGasLimitABI = mustABI(BlockGasLimit)
+
+func mustABI(in []byte) abi.ABI {
+	a, err := abi.JSON(bytes.NewReader(in))
+	if err != nil {
+		panic(err)
+	}
+	return a
+}
