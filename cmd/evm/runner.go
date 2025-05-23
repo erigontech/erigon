@@ -132,7 +132,7 @@ func runCmd(ctx *cli.Context) error {
 	if machineFriendlyOutput {
 		log.Root().SetHandler(log.DiscardHandler())
 	} else {
-		log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+		log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(ctx.Int(VerbosityFlag.Name)), log.StderrHandler))
 	}
 	logconfig := &logger.LogConfig{
 		DisableMemory:     ctx.Bool(DisableMemoryFlag.Name),
@@ -152,7 +152,7 @@ func runCmd(ctx *cli.Context) error {
 		genesisConfig *types.Genesis
 	)
 	if machineFriendlyOutput {
-		tracer = logger.NewJSONLogger(logconfig, os.Stdout).Tracer()
+		tracer = logger.NewJSONLogger(logconfig, os.Stderr).Tracer()
 	} else if ctx.Bool(DebugFlag.Name) {
 		debugLogger = logger.NewStructLogger(logconfig)
 		tracer = debugLogger.Tracer()
@@ -260,10 +260,12 @@ func runCmd(ctx *cli.Context) error {
 		Time:        new(big.Int).SetUint64(genesisConfig.Timestamp),
 		Coinbase:    genesisConfig.Coinbase,
 		BlockNumber: new(big.Int).SetUint64(genesisConfig.Number),
-		EVMConfig: vm.Config{
-			Tracer: tracer.Hooks,
-		},
 	}
+
+	if tracer != nil {
+		runtimeConfig.EVMConfig.Tracer = tracer.Hooks
+	}
+	runtimeConfig.EVMConfig.JumpDestCache = vm.NewJumpDestCache(16)
 
 	if cpuProfilePath := ctx.String(CPUProfileFlag.Name); cpuProfilePath != "" {
 		f, err := os.Create(cpuProfilePath)

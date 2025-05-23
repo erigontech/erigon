@@ -44,7 +44,9 @@ func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.RwDB, *Aggregato
 	dirs := datadir.New(b.TempDir())
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	b.Cleanup(db.Close)
-	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, logger)
+	salt, err := GetStateIndicesSalt(dirs, true, logger)
+	require.NoError(b, err)
+	agg, err := NewAggregator2(context.Background(), dirs, aggStep, salt, db, logger)
 	require.NoError(b, err)
 	b.Cleanup(agg.Close)
 	return db, agg
@@ -85,7 +87,7 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 		val := <-vals
 		txNum := uint64(i)
 		domains.SetTxNum(txNum)
-		err := domains.DomainPut(kv.StorageDomain, key[:length.Addr], key[length.Addr:], val, prev, 0)
+		err := domains.DomainPut(kv.StorageDomain, key, val, prev, 0)
 		prev = val
 		require.NoError(b, err)
 

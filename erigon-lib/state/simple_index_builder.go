@@ -9,12 +9,12 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
 	ee "github.com/erigontech/erigon-lib/state/entity_extras"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 // interfaces defined here are not required to be implemented in
@@ -129,7 +129,7 @@ func (s *SimpleAccessorBuilder) SetFirstEntityNumFetcher(fetcher FirstEntityNumF
 }
 
 func (s *SimpleAccessorBuilder) GetInputDataQuery(from, to RootNum) *DecompressorIndexInputDataQuery {
-	sgname := s.parser.DataFile(snaptype.V1_0, from, to)
+	sgname := s.parser.DataFile(version.V1_0, from, to)
 	decomp, _ := seg.NewDecompressor(sgname)
 	return &DecompressorIndexInputDataQuery{decomp: decomp, baseDataId: uint64(s.fetcher(from, to, decomp))}
 }
@@ -150,7 +150,7 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *
 	}()
 	iidq := s.GetInputDataQuery(from, to)
 	defer iidq.Close()
-	idxFile := s.parser.AccessorIdxFile(snaptype.V1_0, from, to, s.indexPos)
+	idxFile := s.parser.AccessorIdxFile(version.V1_0, from, to, s.indexPos)
 
 	keyCount := iidq.GetCount()
 	if p != nil {
@@ -177,6 +177,7 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, from, to RootNum, p *
 	if err != nil {
 		return nil, err
 	}
+	defer rs.Close()
 
 	s.kf.Refresh()
 	defer s.kf.Close()

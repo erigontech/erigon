@@ -31,7 +31,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-db/rawdb"
@@ -40,6 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -449,8 +449,7 @@ var DevnetSignKey = func(address common.Address) *ecdsa.PrivateKey {
 // DeveloperGenesisBlock returns the 'geth --dev' genesis block.
 func DeveloperGenesisBlock(period uint64, faucet common.Address) *types.Genesis {
 	// Override the default period to the user requested one
-	var config chain.Config
-	copier.Copy(&config, params2.AllCliqueProtocolChanges)
+	config := *params2.AllCliqueProtocolChanges
 	config.Clique.Period = period
 
 	// Assemble and return the genesis with the precompiles and faucet pre-funded
@@ -532,7 +531,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		if g.RequestsHash != nil {
 			head.RequestsHash = g.RequestsHash
 		} else {
-			head.RequestsHash = &types.EmptyRequestsHash
+			head.RequestsHash = &empty.RequestsHash
 		}
 	}
 
@@ -547,7 +546,11 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		genesisTmpDB := mdbx.New(kv.TemporaryDB, logger).InMem(dirs.DataDir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
 		defer genesisTmpDB.Close()
 
-		agg, err := state2.NewAggregator(context.Background(), dirs, config3.DefaultStepSize, genesisTmpDB, logger)
+		salt, err := state2.GetStateIndicesSalt(dirs, false, logger)
+		if err != nil {
+			return err
+		}
+		agg, err := state2.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, salt, genesisTmpDB, logger)
 		if err != nil {
 			return err
 		}
@@ -603,7 +606,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 			for key, value := range account.Storage {
 				key := key
 				val := uint256.NewInt(0).SetBytes(value.Bytes())
-				statedb.SetState(addr, &key, *val)
+				statedb.SetState(addr, key, *val)
 			}
 
 			if len(account.Constructor) > 0 {

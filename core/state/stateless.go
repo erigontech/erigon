@@ -111,7 +111,7 @@ func (s *Stateless) ReadAccountData(address common.Address) (*accounts.Account, 
 
 // ReadAccountStorage is a part of the StateReader interface
 // This implementation attempts to look up the storage in the state trie, and fails if it is not found
-func (s *Stateless) ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error) {
+func (s *Stateless) ReadAccountStorage(address common.Address, key common.Hash) ([]byte, error) {
 	if s.trace {
 		fmt.Printf("Stateless: ReadAccountStorage(address=%x, key=%x)\n", address.Bytes(), key.Bytes())
 	}
@@ -223,7 +223,7 @@ func (s *Stateless) UpdateAccountCode(address common.Address, incarnation uint64
 
 // WriteAccountStorage is a part of the StateWriter interface
 // This implementation registeres the change of the account's storage in the internal double map `storageUpdates`
-func (s *Stateless) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+func (s *Stateless) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error {
 	addrHash, err := common.HashData(address[:])
 	if err != nil {
 		return err
@@ -245,7 +245,7 @@ func (s *Stateless) WriteAccountStorage(address common.Address, incarnation uint
 		m[seckey] = nil
 	}
 	if s.trace {
-		fmt.Printf("Stateless: WriteAccountStorage %x key %x val %x\n", address, *key, *value)
+		fmt.Printf("Stateless: WriteAccountStorage %x key %x val %x\n", address, key, value)
 	}
 	return nil
 }

@@ -50,7 +50,7 @@ import (
 
 type SortedRange interface {
 	GetRange() (from, to uint64)
-	GetType() snaptype.Type
+	GetGrouping() string
 }
 
 // NoOverlaps - keep largest ranges and avoid overlap
@@ -119,7 +119,7 @@ func findOverlaps[T SortedRange](in []T) (res []T, overlapped []T) {
 			f2 := in[j]
 			jFrom, jTo := f2.GetRange()
 
-			if f.GetType().Enum() != f2.GetType().Enum() {
+			if f.GetGrouping() != f2.GetGrouping() {
 				break
 			}
 			if jFrom == jTo {
@@ -930,10 +930,10 @@ func (s *RoSnapshots) Ls() {
 
 	for _, t := range s.enums {
 		for _, seg := range s.visible[t] {
-			if seg.src.Decompressor == nil {
+			if seg.src == nil || seg.src.Decompressor == nil {
 				continue
 			}
-			log.Info("[snapshots] ", "f", seg.src.FileName(), "from", seg.from, "to", seg.to)
+			log.Info("[snapshots] ", "f", seg.src.Decompressor.FileName(), "count", seg.src.Decompressor.Count())
 		}
 	}
 }

@@ -186,6 +186,7 @@ func (db *DB) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 }
 func (db *DB) Debug() kv.TemporalDebugDB                           { return kv.TemporalDebugDB(db) }
 func (db *DB) DomainTables(domain ...kv.Domain) []string           { panic("not implemented") }
+func (db *DB) ReloadSalt() error                                   { panic("not implemented") }
 func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string { panic("not implemented") }
 
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
@@ -232,10 +233,10 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) (err e
 	return errors.New("remote db provider doesn't support .UpdateNosync method")
 }
 
-func (tx *tx) AggTx() any                 { panic("not implemented") }
-func (tx *tx) Debug() kv.TemporalDebugTx  { panic("not implemented") }
-func (tx *tx) FreezeInfo() kv.FreezeInfo  { panic("not implemented") }
-func (db *DB) OnFreeze(f kv.OnFreezeFunc) { panic("not implemented") }
+func (tx *tx) AggTx() any                       { panic("not implemented") }
+func (tx *tx) Debug() kv.TemporalDebugTx        { panic("not implemented") }
+func (tx *tx) FreezeInfo() kv.FreezeInfo        { panic("not implemented") }
+func (db *DB) OnFilesChange(f kv.OnFilesChange) { panic("not implemented") }
 
 func (tx *tx) ViewID() uint64  { return tx.viewID }
 func (tx *tx) CollectMetrics() {}
@@ -264,6 +265,11 @@ func (tx *tx) Rollback() {
 		c.Close()
 	}
 }
+
+func (tx *tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
+	return f(tx)
+}
+
 func (tx *tx) DBSize() (uint64, error) { panic("not implemented") }
 
 func (tx *tx) statelessCursor(bucket string) (kv.Cursor, error) {

@@ -234,7 +234,20 @@ func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[s
 	// delete old sub segments
 	for enum, delSegs := range out {
 		dirtySegments := snapshots.dirty[enum]
+		inDirtySegments := in[enum]
+
 		for _, delSeg := range delSegs {
+			skip := false
+			for _, inDSeg := range inDirtySegments {
+				if inDSeg.from == delSeg.from && inDSeg.to == delSeg.to {
+					skip = true
+					break
+				}
+			}
+			if skip {
+				continue
+			}
+
 			dirtySegments.Delete(delSeg)
 			delSeg.canDelete.Store(true)
 		}

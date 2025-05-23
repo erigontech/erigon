@@ -104,7 +104,10 @@ func testTemporalDB(t *testing.T) *temporal.DB {
 
 	t.Cleanup(db.Close)
 
-	agg, err := state3.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, log.New())
+	dirs, logger := datadir.New(t.TempDir()), log.New()
+	salt, err := state3.GetStateIndicesSalt(dirs, true, logger)
+	require.NoError(t, err)
+	agg, err := state3.NewAggregator2(context.Background(), datadir.New(t.TempDir()), 16, salt, db, log.New())
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 
@@ -142,7 +145,7 @@ func TestEIP2200(t *testing.T) {
 			address := common.BytesToAddress([]byte("contract"))
 			s.CreateAccount(address, true)
 			s.SetCode(address, hexutil.MustDecode(tt.input))
-			s.SetState(address, &common.Hash{}, *uint256.NewInt(uint64(tt.original)))
+			s.SetState(address, common.Hash{}, *uint256.NewInt(uint64(tt.original)))
 
 			_ = s.CommitBlock(params.AllProtocolChanges.Rules(0, 0), w)
 			vmctx := evmtypes.BlockContext{

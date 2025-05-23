@@ -28,7 +28,6 @@ import (
 
 	"github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
@@ -37,7 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 	"github.com/erigontech/erigon-lib/seg"
 )
 
@@ -348,28 +347,28 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 	return
 }
 
-func mergeEfs(preval, val, buf []byte) ([]byte, error) {
-	preef, _ := eliasfano32.ReadEliasFano(preval)
-	ef, _ := eliasfano32.ReadEliasFano(val)
-	preIt := preef.Iterator()
-	efIt := ef.Iterator()
-	newEf := eliasfano32.NewEliasFano(preef.Count()+ef.Count(), ef.Max())
+func mergeNumSeqs(preval, val []byte, preBaseNum, baseNum uint64, buf []byte, outBaseNum uint64) ([]byte, error) {
+	preSeq := multiencseq.ReadMultiEncSeq(preBaseNum, preval)
+	seq := multiencseq.ReadMultiEncSeq(baseNum, val)
+	preIt := preSeq.Iterator(0)
+	efIt := seq.Iterator(0)
+	newSeq := multiencseq.NewBuilder(outBaseNum, preSeq.Count()+seq.Count(), seq.Max())
 	for preIt.HasNext() {
 		v, err := preIt.Next()
 		if err != nil {
 			return nil, err
 		}
-		newEf.AddOffset(v)
+		newSeq.AddOffset(v)
 	}
 	for efIt.HasNext() {
 		v, err := efIt.Next()
 		if err != nil {
 			return nil, err
 		}
-		newEf.AddOffset(v)
+		newSeq.AddOffset(v)
 	}
-	newEf.Build()
-	return newEf.AppendBytes(buf), nil
+	newSeq.Build()
+	return newSeq.AppendBytes(buf), nil
 }
 
 type valueTransformer func(val []byte, startTxNum, endTxNum uint64) ([]byte, error)
@@ -459,17 +458,18 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	// to `lastKey` and `lastVal` correspondingly, and the next step of multi-way merge happens. Therefore, after the multi-way merge loop
 	// (when CursorHeap cp is empty), there is a need to process the last pair `keyBuf=>valBuf`, because it was one step behind
 	var keyBuf, valBuf []byte
+	var lastKey, lastVal []byte
 	var keyFileStartTxNum, keyFileEndTxNum uint64
 	for cp.Len() > 0 {
-		lastKey := common.Copy(cp[0].key)
-		lastVal := common.Copy(cp[0].val)
+		lastKey = append(lastKey[:0], cp[0].key...)
+		lastVal = append(lastVal[:0], cp[0].val...)
 		lastFileStartTxNum, lastFileEndTxNum := cp[0].startTxNum, cp[0].endTxNum
 		// Advance all the items that have this key (including the top)
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 			ci1 := heap.Pop(&cp).(*CursorItem)
 			if ci1.idx.HasNext() {
-				ci1.key, _ = ci1.idx.Next(nil)
-				ci1.val, _ = ci1.idx.Next(nil)
+				ci1.key, _ = ci1.idx.Next(ci1.key[:0])
+				ci1.val, _ = ci1.idx.Next(ci1.val[:0])
 				heap.Push(&cp, ci1)
 			}
 		}
@@ -533,7 +533,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		if toStep == 0 && dt.d.filenameBase == "commitment" {
 			btM = 128
 		}
-		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, btM, valuesIn.decompressor, dt.d.Compression, *dt.d.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync, dt.d.Accessors)
+		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, btM, valuesIn.decompressor, dt.d.Compression, *dt.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync, dt.d.Accessors)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
@@ -611,12 +611,13 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 			val, _ := g.Next(nil)
 			//fmt.Printf("heap push %s [%d] %x\n", item.decompressor.FilePath(), item.endTxNum, key)
 			heap.Push(&cp, &CursorItem{
-				t:        FILE_CURSOR,
-				idx:      g,
-				key:      key,
-				val:      val,
-				endTxNum: item.endTxNum,
-				reverse:  true,
+				t:          FILE_CURSOR,
+				idx:        g,
+				key:        key,
+				val:        val,
+				startTxNum: item.startTxNum,
+				endTxNum:   item.endTxNum,
+				reverse:    true,
 			})
 		}
 	}
@@ -627,16 +628,31 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 	// to `lastKey` and `lastVal` correspondingly, and the next step of multi-way merge happens. Therefore, after the multi-way merge loop
 	// (when CursorHeap cp is empty), there is a need to process the last pair `keyBuf=>valBuf`, because it was one step behind
 	var keyBuf, valBuf []byte
+	var lastKey, lastVal []byte
 	for cp.Len() > 0 {
-		lastKey := common.Copy(cp[0].key)
-		lastVal := common.Copy(cp[0].val)
+		lastKey = append(lastKey[:0], cp[0].key...)
+		lastVal = append(lastVal[:0], cp[0].val...)
+
+		// Pre-rebase the first sequence
+		preSeq := multiencseq.ReadMultiEncSeq(cp[0].startTxNum, lastVal)
+		preIt := preSeq.Iterator(0)
+		newSeq := multiencseq.NewBuilder(startTxNum, preSeq.Count(), preSeq.Max())
+		for preIt.HasNext() {
+			v, err := preIt.Next()
+			if err != nil {
+				return nil, err
+			}
+			newSeq.AddOffset(v)
+		}
+		newSeq.Build()
+		lastVal = newSeq.AppendBytes(nil)
 		var mergedOnce bool
 
 		// Advance all the items that have this key (including the top)
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 			ci1 := heap.Pop(&cp).(*CursorItem)
 			if mergedOnce {
-				if lastVal, err = mergeEfs(ci1.val, lastVal, nil); err != nil {
+				if lastVal, err = mergeNumSeqs(ci1.val, lastVal, ci1.startTxNum, startTxNum, nil, startTxNum); err != nil {
 					return nil, fmt.Errorf("merge %s inverted index: %w", iit.ii.filenameBase, err)
 				}
 			} else {
@@ -644,8 +660,8 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 			}
 			// fmt.Printf("multi-way %s [%d] %x\n", ii.keysTable, ci1.endTxNum, ci1.key)
 			if ci1.idx.HasNext() {
-				ci1.key, _ = ci1.idx.Next(nil)
-				ci1.val, _ = ci1.idx.Next(nil)
+				ci1.key, _ = ci1.idx.Next(ci1.key[:0])
+				ci1.val, _ = ci1.idx.Next(ci1.val[:0])
 				// fmt.Printf("heap next push %s [%d] %x\n", ii.keysTable, ci1.endTxNum, ci1.key)
 				heap.Push(&cp, ci1)
 			}
@@ -771,13 +787,14 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				key, _ := g.Next(nil)
 				val, _ := g.Next(nil)
 				heap.Push(&cp, &CursorItem{
-					t:        FILE_CURSOR,
-					idx:      g,
-					hist:     g2,
-					key:      key,
-					val:      val,
-					endTxNum: item.endTxNum,
-					reverse:  false,
+					t:          FILE_CURSOR,
+					idx:        g,
+					hist:       g2,
+					key:        key,
+					val:        val,
+					startTxNum: item.startTxNum,
+					endTxNum:   item.endTxNum,
+					reverse:    false,
 				})
 			}
 		}
@@ -786,14 +803,14 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		// instead, the pair from the previous iteration is processed first - `keyBuf=>valBuf`. After that, `keyBuf` and `valBuf` are assigned
 		// to `lastKey` and `lastVal` correspondingly, and the next step of multi-way merge happens. Therefore, after the multi-way merge loop
 		// (when CursorHeap cp is empty), there is a need to process the last pair `keyBuf=>valBuf`, because it was one step behind
-		var valBuf []byte
+		var lastKey, valBuf []byte
 		var keyCount int
 		for cp.Len() > 0 {
-			lastKey := common.Copy(cp[0].key)
+			lastKey = append(lastKey[:0], cp[0].key...)
 			// Advance all the items that have this key (including the top)
 			for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 				ci1 := heap.Pop(&cp).(*CursorItem)
-				count := eliasfano32.Count(ci1.val)
+				count := multiencseq.Count(ci1.startTxNum, ci1.val)
 				for i := uint64(0); i < count; i++ {
 					if !ci1.hist.HasNext() {
 						panic(fmt.Errorf("assert: no value??? %s, i=%d, count=%d, lastKey=%x, ci1.key=%x", ci1.hist.FileName(), i, count, lastKey, ci1.key))
@@ -809,8 +826,8 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				// fmt.Printf("fput '%x'->%x\n", lastKey, ci1.val)
 				keyCount += int(count)
 				if ci1.idx.HasNext() {
-					ci1.key, _ = ci1.idx.Next(nil)
-					ci1.val, _ = ci1.idx.Next(nil)
+					ci1.key, _ = ci1.idx.Next(ci1.key[:0])
+					ci1.val, _ = ci1.idx.Next(ci1.val[:0])
 					heap.Push(&cp, ci1)
 				}
 			}
@@ -828,7 +845,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		}
 		ps.Delete(p)
 
-		if err = ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, ps); err != nil {
+		if err = ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps); err != nil {
 			return nil, nil, err
 		}
 

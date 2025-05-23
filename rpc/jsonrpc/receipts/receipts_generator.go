@@ -49,7 +49,7 @@ type Generator struct {
 
 type ReceiptEnv struct {
 	ibs         *state.IntraBlockState
-	usedGas     *uint64
+	gasUsed     *uint64
 	usedBlobGas *uint64
 	gp          *core.GasPool
 	noopWriter  *state.NoopWriter
@@ -103,6 +103,8 @@ func (g *Generator) GetCachedReceipt(ctx context.Context, hash common.Hash) (*ty
 	return g.receiptCache.Get(hash)
 }
 
+var rpcDisableRCache = dbg.EnvBool("RPC_DISABLE_RCACHE", false)
+
 func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *chain.Config, tx kv.TemporalTx, txIndex int) (*ReceiptEnv, error) {
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, g.blockReader))
 	ibs, _, _, _, _, err := transactions.ComputeBlockContext(ctx, g.engine, header, cfg, g.blockReader, txNumsReader, tx, txIndex)
@@ -110,7 +112,7 @@ func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *c
 		return nil, fmt.Errorf("ReceiptsGen: PrepareEnv: bn=%d, %w", header.Number.Uint64(), err)
 	}
 
-	usedGas := new(uint64)
+	gasUsed := new(uint64)
 	usedBlobGas := new(uint64)
 	gp := new(core.GasPool).AddGas(header.GasLimit).AddBlobGas(cfg.GetMaxBlobGasPerBlock(header.Time))
 
@@ -125,7 +127,7 @@ func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *c
 	}
 	return &ReceiptEnv{
 		ibs:         ibs,
-		usedGas:     usedGas,
+		gasUsed:     gasUsed,
 		usedBlobGas: usedBlobGas,
 		gp:          gp,
 		noopWriter:  noopWriter,
@@ -148,12 +150,17 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	txnHash := txn.Hash()
 
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
-	receiptFromDB, ok, err := rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, uint32(index), txnHash, g.txNumReader)
-	if err != nil {
-		return nil, err
-	}
-	if ok && receiptFromDB != nil && !dbg.AssertEnabled {
-		return receiptFromDB, nil
+	var receiptFromDB *types.Receipt
+	if !rpcDisableRCache {
+		var ok bool
+		var err error
+		receiptFromDB, ok, err = rawdb.ReadReceiptCacheV2(tx, blockNum, blockHash, txnHash, txNum)
+		if err != nil {
+			return nil, err
+		}
+		if ok && receiptFromDB != nil && !dbg.AssertEnabled {
+			return receiptFromDB, nil
+		}
 	}
 
 	if receipts, ok := g.receiptsCache.Get(blockHash); ok && len(receipts) > index {
@@ -195,7 +202,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		logs := genEnv.ibs.GetLogs(genEnv.ibs.TxnIndex(), txn.Hash(), header.Number.Uint64(), header.Hash())
 		receipt = aa.CreateAAReceipt(txn.Hash(), status, gasUsed, header.GasUsed, header.Number.Uint64(), uint64(genEnv.ibs.TxnIndex()), logs)
 	} else {
-		receipt, _, err = core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.usedGas, genEnv.usedBlobGas, vm.Config{})
+		receipt, _, err = core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vm.Config{})
 		if err != nil {
 			return nil, fmt.Errorf("ReceiptGen.GetReceipt: bn=%d, txnIdx=%d, %w", blockNum, index, err)
 		}
@@ -221,13 +228,18 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
 	blockHash := block.Hash()
+
 	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
-	receiptsFromDB, err := rawdb.ReadReceiptsCacheV2(tx, block, g.txNumReader)
-	if err != nil {
-		return nil, err
-	}
-	if len(receiptsFromDB) > 0 && !dbg.AssertEnabled {
-		return receiptsFromDB, nil
+	var receiptsFromDB types.Receipts
+	if !rpcDisableRCache {
+		var err error
+		receiptsFromDB, err = rawdb.ReadReceiptsCacheV2(tx, block, g.txNumReader)
+		if err != nil {
+			return nil, err
+		}
+		if len(receiptsFromDB) > 0 && !dbg.AssertEnabled {
+			return receiptsFromDB, nil
+		}
 	}
 
 	mu := g.blockExecMutex.lock(blockHash) // parallel requests of same blockNum will executed only once
@@ -242,10 +254,11 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	if err != nil {
 		return nil, err
 	}
+	//genEnv.ibs.SetTrace(true)
 
 	for i, txn := range block.Transactions() {
 		genEnv.ibs.SetTxContext(i)
-		receipt, _, err := core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.usedGas, genEnv.usedBlobGas, vm.Config{})
+		receipt, _, err := core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vm.Config{})
 		if err != nil {
 			return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", block.NumberU64(), i, err)
 		}
