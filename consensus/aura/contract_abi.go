@@ -17,7 +17,6 @@
 package aura
 
 import (
-	"bytes"
 	"math/big"
 
 	"github.com/holiman/uint256"
@@ -103,11 +102,7 @@ func registrarAbi() abi.ABI {
 }
 
 func withdrawalAbi() abi.ABI {
-	a, err := abi.JSON(bytes.NewReader(contracts.Withdrawal))
-	if err != nil {
-		panic(err)
-	}
-	return a
+	return contracts.WithdrawalABI
 }
 
 func getCertifier(registrar libcommon.Address, syscall consensus.SystemCall) *libcommon.Address {
