@@ -57,7 +57,6 @@ import (
 	"github.com/erigontech/erigon/core/vm/runtime"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/eth/tracers/logger"
-	"github.com/erigontech/erigon/params"
 )
 
 var runCommand = cli.Command{
@@ -283,7 +282,7 @@ func runCmd(ctx *cli.Context) error {
 	if chainConfig != nil {
 		runtimeConfig.ChainConfig = chainConfig
 	} else {
-		runtimeConfig.ChainConfig = params.AllProtocolChanges
+		runtimeConfig.ChainConfig = chain.AllProtocolChanges
 	}
 
 	var hexInput []byte
