@@ -17,7 +17,6 @@
 package freezeblocks
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -975,7 +974,6 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 }
 
 func ForEachHeader(ctx context.Context, s *RoSnapshots, walker func(header *types.Header) error) error {
-	r := bytes.NewReader(nil)
 	word := make([]byte, 0, 2*4096)
 
 	view := s.View()
@@ -987,8 +985,7 @@ func ForEachHeader(ctx context.Context, s *RoSnapshots, walker func(header *type
 			for i := 0; g.HasNext(); i++ {
 				word, _ = g.Next(word[:0])
 				var header types.Header
-				r.Reset(word[1:])
-				if err := rlp.Decode(r, &header); err != nil {
+				if err := rlp.DecodeBytes(word[1:], &header); err != nil {
 					return fmt.Errorf("%w, file=%s, record=%d", err, sn.Src().FileName(), i)
 				}
 				if err := walker(&header); err != nil {

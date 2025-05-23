@@ -1708,6 +1708,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	agg.SetMergeWorkers(2)
 	agg.SetCompressWorkers(estimate.CompressSnapshot.WorkersHalf())
 	agg.PeriodicalyPrintProcessSet(ctx)
+	agg.PeriodicalyPrintProcessSet(ctx)
 
 	if err := br.BuildMissedIndicesIfNeed(ctx, "retire", nil); err != nil {
 		return err

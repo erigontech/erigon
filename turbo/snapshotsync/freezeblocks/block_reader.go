@@ -17,7 +17,6 @@
 package freezeblocks
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -210,7 +209,7 @@ func (r *RemoteBlockReader) BlockWithSenders(ctx context.Context, _ kv.Getter, h
 	}
 
 	block = &types.Block{}
-	err = rlp.Decode(bytes.NewReader(reply.BlockRlp), block)
+	err = rlp.DecodeBytes(reply.BlockRlp, block)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -369,7 +368,7 @@ func (r *RemoteBlockReader) CanonicalBodyForStorage(ctx context.Context, tx kv.G
 		return nil, nil
 	}
 	body = &types.BodyForStorage{}
-	err = rlp.Decode(bytes.NewReader(bdRaw.Body), body)
+	err = rlp.DecodeBytes(bdRaw.Body, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1010,8 +1009,7 @@ func (r *BlockReader) bodyForStorageFromSnapshot(blockHeight uint64, sn *snapsho
 		return nil, buf, nil
 	}
 	b := &types.BodyForStorage{}
-	reader := bytes.NewReader(buf)
-	if err := rlp.Decode(reader, b); err != nil {
+	if err := rlp.DecodeBytes(buf, b); err != nil {
 		return nil, buf, err
 	}
 
