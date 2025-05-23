@@ -223,6 +223,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	if err != nil {
 		return logs, err
 	}
+	log.Warn("[dbg] bn1")
 
 	it := rawdbv3.TxNums2BlockNums(tx,
 		api._txNumReader,
@@ -309,9 +310,9 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if r == nil {
 			return nil, err
 		}
+		log.Warn("[dbg] bn", "bn", blockNum, "ti", r.TransactionIndex)
 		filtered := r.Logs.Filter(addrMap, crit.Topics, 0)
 
-		log.Warn("[dbg] bn", "bn", blockNum, "ti", r.TransactionIndex)
 		for _, filteredLog := range filtered {
 			logs = append(logs, &types.ErigonLog{
 				Address:     filteredLog.Address,
