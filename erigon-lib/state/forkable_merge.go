@@ -6,9 +6,9 @@ import (
 	"path"
 
 	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 // type Merger struct {
@@ -59,7 +59,7 @@ func (f *ProtoForkable) MergeFiles(ctx context.Context, _filesToMerge []visibleF
 
 	from, to := RootNum(filesToMerge[0].startTxNum), RootNum(filesToMerge.EndTxNum())
 
-	segPath := f.snaps.schema.DataFile(snaptype.V1_0, from, to)
+	segPath := f.snaps.schema.DataFile(version.V1_0, from, to)
 	cfg := seg.DefaultCfg
 	cfg.Workers = compressWorkers
 	comp, err := seg.NewCompressor(ctx, "merge_forkable_"+f.a.String(), segPath, f.a.Dirs().Tmp, cfg, log.LvlTrace, f.logger)

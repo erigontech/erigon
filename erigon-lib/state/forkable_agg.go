@@ -130,6 +130,7 @@ func (r *ForkableAgg) OpenFolder() error {
 }
 
 // BuildFiles builds all snapshots (asynchronously) upto a given RootNum
+// num is exclusive
 func (r *ForkableAgg) BuildFiles(num RootNum) chan struct{} {
 	// build in background
 	fin := make(chan struct{})
@@ -217,8 +218,7 @@ func (r *ForkableAgg) mergeLoopStep(ctx context.Context) (somethingMerged bool, 
 		}
 	}()
 
-	mergeFn := func(proto *ProtoForkable, ap ForkableFilesTxI, repo *SnapshotRepo, appending *[]*filesItem) {
-		vfs := ap.Files()
+	mergeFn := func(proto *ProtoForkable, vfs VisibleFiles, repo *SnapshotRepo, appending *[]*filesItem) {
 		if len(vfs) == 0 {
 			return
 		}
@@ -264,13 +264,13 @@ func (r *ForkableAgg) mergeLoopStep(ctx context.Context) (somethingMerged bool, 
 	}
 
 	for i, ap := range aggTx.marked {
-		mergeFn(r.marked[i].ProtoForkable, ap.DebugFiles(), r.marked[i].Repo(), &mf.marked)
+		mergeFn(r.marked[i].ProtoForkable, ap.DebugFiles().Files(), r.marked[i].Repo(), &mf.marked)
 	}
 	for i, ap := range aggTx.unmarked {
-		mergeFn(r.unmarked[i].ProtoForkable, ap.DebugFiles(), r.unmarked[i].Repo(), &mf.unmarked)
+		mergeFn(r.unmarked[i].ProtoForkable, ap.DebugFiles().Files(), r.unmarked[i].Repo(), &mf.unmarked)
 	}
 	for i, ap := range aggTx.buffered {
-		mergeFn(r.buffered[i].ProtoForkable, ap.DebugFiles(), r.buffered[i].Repo(), &mf.buffered)
+		mergeFn(r.buffered[i].ProtoForkable, ap.DebugFiles().Files(), r.buffered[i].Repo(), &mf.buffered)
 	}
 
 	if err := g.Wait(); err != nil {

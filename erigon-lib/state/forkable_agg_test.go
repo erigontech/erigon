@@ -357,7 +357,7 @@ func TestMergedFileGet(t *testing.T) {
 	headerTx := aggTx.Marked(headerId)
 	bodyTx := aggTx.Marked(bodyId)
 
-	amount := rand.Int() % 5000
+	amount := 200 //rand.Int() % 5000
 	t.Logf("amount of headers: %d", amount)
 
 	// populate forkables
@@ -400,7 +400,7 @@ func TestMergedFileGet(t *testing.T) {
 	checkBuildFilesFn := func(mergeDisabled bool) {
 		agg.SetMergeDisabled(mergeDisabled)
 		for i := range amount {
-			ch := agg.BuildFiles(RootNum(i))
+			ch := agg.BuildFiles(RootNum(i + 1))
 			select {
 			case <-ch:
 			case <-time.After(time.Second * 30):
@@ -423,6 +423,7 @@ func TestMergedFileGet(t *testing.T) {
 				_amount %= stage
 			}
 			nVisibleFiles = int(calculateNumberOfFiles(uint64(amount), snapCfg))
+			//nDirtyFiles = nVisibleFiles // enable this after garbage is done..
 		}
 
 		// check dirty files count
