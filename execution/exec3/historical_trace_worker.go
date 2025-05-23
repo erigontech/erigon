@@ -290,7 +290,7 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 
 func doHistoryReduce(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, outputTxNum *atomic.Uint64, rws *state.ResultsQueue, logger log.Logger) error {
 	db := cfg.ChainDB
-	applyWorker := NewHistoricalTraceWorker(consumer, nil, rws, false, ctx, cfg, logger)
+	applyWorker := NewHistoricalTraceWorker(consumer, nil, nil, false, ctx, cfg, logger)
 
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
