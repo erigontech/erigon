@@ -318,6 +318,12 @@ func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(blockNu
 	if err != nil {
 		return err
 	}
+	for ti := 0; ti < len(sdc.warmupTries); ti++ {
+		hph := sdc.warmupTries[ti].(*commitment.HexPatriciaHashed)
+		if err := hph.SetState(encodedState); err != nil {
+			return fmt.Errorf("failed to set state for warmup trie %d: %w", ti, err)
+		}
+	}
 	prevState, prevStep, err := sdc.mainTtx.Branch(keyCommitmentState)
 	if err != nil {
 		return err
