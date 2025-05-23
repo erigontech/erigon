@@ -107,7 +107,7 @@ func NewHistoricalTraceWorker(
 
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, execArgs.ChainConfig, vm.Config{}),
 		taskGasPool: new(core.GasPool),
-		vmCfg:       &vm.Config{},
+		vmCfg:       &vm.Config{JumpDestCache: vm.NewJumpDestCache(vm.JumpDestCacheLimit)},
 	}
 	ie.taskGasPool.AddBlobGas(execArgs.ChainConfig.GetMaxBlobGasPerBlock(0))
 	ie.ibs = state.New(ie.stateReader)
