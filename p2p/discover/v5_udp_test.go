@@ -35,9 +35,9 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/testlog"
-	"github.com/erigontech/erigon/p2p/discover/v5wire"
-	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/p2p/enr"
+	"github.com/erigontech/erigon-p2p/discover/v5wire"
+	"github.com/erigontech/erigon-p2p/enode"
+	"github.com/erigontech/erigon-p2p/enr"
 )
 
 func startLocalhostV5(t *testing.T, cfg Config, logger log.Logger) *UDPv5 {

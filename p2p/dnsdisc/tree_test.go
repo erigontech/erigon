@@ -27,7 +27,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
-	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon-p2p/enode"
 )
 
 func TestParseRoot(t *testing.T) {
