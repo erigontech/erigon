@@ -107,7 +107,13 @@ func (sdc *SharedDomainsCommitmentContext) openSubTtx(sd *SharedDomains) {
 			panic("agg is nil")
 		}
 		actx := agg.BeginFilesRo()
-		c, err := sd.roTtx.Cursor(Schema.CommitmentDomain.valuesTable)
+		var c kv.Cursor
+		var err error
+		if Schema.CommitmentDomain.largeValues {
+			c, err = sd.roTtx.Cursor(Schema.CommitmentDomain.valuesTable)
+		} else {
+			c, err = sd.roTtx.CursorDupSort(Schema.CommitmentDomain.valuesTable)
+		}
 		if err != nil {
 			panic(fmt.Sprintf("failed to create cursor for commitment domain: %v", err))
 		}
