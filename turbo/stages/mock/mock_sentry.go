@@ -77,7 +77,6 @@ import (
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -652,7 +651,7 @@ func MockWithTxPoolCancun(t *testing.T) *MockSentry {
 	funds := big.NewInt(1 * common.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
-	chainConfig := params.AllProtocolChanges
+	chainConfig := chain.AllProtocolChanges
 	gspec := &types.Genesis{
 		Config: chainConfig,
 		Alloc: types.GenesisAlloc{
@@ -668,7 +667,7 @@ func MockWithZeroTTD(t *testing.T, withPosDownloader bool) *MockSentry {
 	funds := big.NewInt(1 * common.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
-	chainConfig := params.AllProtocolChanges
+	chainConfig := chain.AllProtocolChanges
 	chainConfig.TerminalTotalDifficulty = common.Big0
 	gspec := &types.Genesis{
 		Config: chainConfig,

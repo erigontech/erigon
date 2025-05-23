@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -141,7 +142,7 @@ func TestAllocConstructor(t *testing.T) {
 	funds := big.NewInt(1000000000)
 	address := common.HexToAddress("0x1000000000000000000000000000000000000001")
 	genSpec := &types.Genesis{
-		Config: params.AllProtocolChanges,
+		Config: chain.AllProtocolChanges,
 		Alloc: types.GenesisAlloc{
 			address: {Constructor: deploymentCode, Balance: funds},
 		},
