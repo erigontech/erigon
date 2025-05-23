@@ -390,7 +390,6 @@ func doHistoryReduce(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context,
 
 	applyWorker := NewHistoricalTraceWorker(consumer, nil, nil, false, ctx, cfg, logger)
 	defer applyWorker.LogStats()
-
 	applyWorker.ResetTx(tx)
 
 	for outputTxNum.Load() <= toTxNum {
