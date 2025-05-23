@@ -367,6 +367,12 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64
 
 func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64) (res stream.U64, err error) {
 	for _, addr := range addrs {
+		{
+			it, _ := tx.IndexRange(kv.LogAddrIdx, addr[:], int(from), int(to), true, kv.Unlim)
+			cnt, _ := stream.Count(it)
+			log.Warn("[dbg] getAddrsBitmapV3", "cnt", cnt)
+
+		}
 		it, err := tx.IndexRange(kv.LogAddrIdx, addr[:], int(from), int(to), true, kv.Unlim)
 		if err != nil {
 			return nil, err
