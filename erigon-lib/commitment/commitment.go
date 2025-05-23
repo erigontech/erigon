@@ -960,7 +960,6 @@ type Updates struct {
 
 	sortPerNibble bool // if true, use nibbles collectors instead of etl (all-in-one)
 	nibbles       [16]*etl.Collector
-	ctx           [16]PatriciaContext
 }
 
 // Should be called right after updates initialisation. Otherwise could lost some data
