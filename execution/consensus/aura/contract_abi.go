@@ -90,12 +90,10 @@ func certifierAbi() abi.ABI     { return contracts.CertifierABI }
 func registrarAbi() abi.ABI     { return contracts.RegistrarABI }
 func withdrawalAbi() abi.ABI    { return contracts.WithdrawalABI }
 
+var serviceTransactionCheckerHashedKey, _ = common.HashData([]byte("service_transaction_checker"))
+
 func getCertifier(registrar common.Address, syscall consensus.SystemCall) *common.Address {
-	hashedKey, err := common.HashData([]byte("service_transaction_checker"))
-	if err != nil {
-		panic(err)
-	}
-	packed, err := registrarAbi().Pack("getAddress", hashedKey, "A")
+	packed, err := registrarAbi().Pack("getAddress", serviceTransactionCheckerHashedKey, "A")
 	if err != nil {
 		panic(err)
 	}
