@@ -22,6 +22,7 @@ import (
 	"math/rand"
 	"os"
 	"runtime"
+	"slices"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -163,11 +164,16 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 		if len(logs) <= 1 {
 			return nil
 		}
-		//for i := 1; i < len(logs); i++ {
-		//	if logs[i-1].TxIndex == logs[i].TxIndex {
-		//		return fmt.Errorf("eth_getLogs: at blockNum=%d and addr %x has duplicated logs", blockNum, addr)
-		//	}
-		//}
+		var indices []uint64
+		for i := 0; i < len(logs); i++ {
+			indices = append(indices, uint64(logs[i].Index))
+		}
+		slices.Sort(indices)
+		for i := 1; i < len(logs); i++ {
+			if indices[i-1] == indices[i] {
+				return fmt.Errorf("eth_getLogs: at blockNum=%d and addr %x has duplicated log_index %d", blockNum, addr, indices[i])
+			}
+		}
 		return nil
 	}
 
