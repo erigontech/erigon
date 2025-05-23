@@ -1,9 +1,4 @@
 version: "2"
-run:
-  build-tags:
-    - nosqlite
-    - noboltdb
-    - nosilkworm
 linters:
   enable:
     - asasalint
