@@ -234,6 +234,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			return nil, err
 		}
 		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := it.Next()
+		log.Warn("[dbg] bn1")
 		if err != nil {
 			return nil, err
 		}
