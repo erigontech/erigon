@@ -114,13 +114,17 @@ func NewHistoricalTraceWorker(
 	return ie
 }
 
+func (rw *HistoricalTraceWorker) LogStats() {
+	rw.evm.Config().JumpDestCache.LogStats()
+}
+
 func (rw *HistoricalTraceWorker) Run() (err error) {
 	defer func() { // convert panic to err - because it's background workers
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("HistoricalTraceWorker panic: %s, %s", rec, dbg.Stack())
 		}
 	}()
-	defer rw.evm.Config().JumpDestCache.LogStats()
+	defer rw.LogStats()
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
 		rw.RunTxTaskNoLock(txTask)
 		if err := rw.out.Add(rw.ctx, txTask); err != nil {
@@ -379,7 +383,8 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 
 func doHistoryReduce(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, outputTxNum *atomic.Uint64, rws *state.ResultsQueue, logger log.Logger) error {
 	db := cfg.ChainDB
-	applyWorker := NewHistoricalTraceWorker(consumer, nil, rws, false, ctx, cfg, logger)
+	applyWorker := NewHistoricalTraceWorker(consumer, nil, nil, false, ctx, cfg, logger)
+	defer applyWorker.LogStats()
 
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
