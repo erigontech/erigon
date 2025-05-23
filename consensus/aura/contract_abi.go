@@ -87,35 +87,19 @@ func callBlockGasLimitAbi(contractAddr libcommon.Address, syscall consensus.Syst
 }
 
 func blockGasLimitAbi() abi.ABI {
-	a, err := abi.JSON(bytes.NewReader(contracts.BlockGasLimit))
-	if err != nil {
-		panic(err)
-	}
-	return a
+	return contracts.BlockGasLimitABI
 }
 
 func blockRewardAbi() abi.ABI {
-	a, err := abi.JSON(bytes.NewReader(contracts.BlockReward))
-	if err != nil {
-		panic(err)
-	}
-	return a
+	return contracts.BlockRewardABI
 }
 
 func certifierAbi() abi.ABI {
-	a, err := abi.JSON(bytes.NewReader(contracts.Certifier))
-	if err != nil {
-		panic(err)
-	}
-	return a
+	return contracts.CertifierABI
 }
 
 func registrarAbi() abi.ABI {
-	a, err := abi.JSON(bytes.NewReader(contracts.Registrar))
-	if err != nil {
-		panic(err)
-	}
-	return a
+	return contracts.RegistrarABI
 }
 
 func withdrawalAbi() abi.ABI {
