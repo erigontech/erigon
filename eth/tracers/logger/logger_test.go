@@ -63,9 +63,12 @@ func (*dummyStatedb) GetCommittedState(common.Address, common.Hash, *uint256.Int
 
 func TestStoreCapture(t *testing.T) {
 	c := vm.NewJumpDestCache(128)
+	ibs := state.New(state.NewNoopReader())
+	ibs.AddRefund(1337)
+
 	var (
 		logger   = NewStructLogger(nil)
-		evm      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, chain.TestChainConfig, vm.Config{Tracer: logger.Hooks()})
+		evm      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.TestChainConfig, vm.Config{Tracer: logger.Hooks()})
 		contract = vm.NewContract(&dummyContractRef{}, common.Address{}, new(uint256.Int), 100000, false /* skipAnalysis */, c)
 	)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x0, byte(vm.SSTORE)}
