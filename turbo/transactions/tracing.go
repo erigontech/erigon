@@ -98,7 +98,7 @@ func TraceTx(
 	txCtx evmtypes.TxContext,
 	blockHash common.Hash,
 	txnIndex int,
-	ibs evmtypes.IntraBlockState,
+	ibs *state.IntraBlockState,
 	config *tracersConfig.TraceConfig,
 	chainConfig *chain.Config,
 	stream *jsoniter.Stream,
@@ -188,7 +188,7 @@ func AssembleTracer(
 func ExecuteTraceTx(
 	blockCtx evmtypes.BlockContext,
 	txCtx evmtypes.TxContext,
-	ibs evmtypes.IntraBlockState,
+	ibs *state.IntraBlockState,
 	config *tracersConfig.TraceConfig,
 	chainConfig *chain.Config,
 	stream *jsoniter.Stream,
