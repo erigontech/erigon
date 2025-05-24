@@ -32,6 +32,7 @@ import (
 	"github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
+	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	common2 "github.com/erigontech/erigon-lib/common"
@@ -43,14 +44,13 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 )
 
 type SortedRange interface {
 	GetRange() (from, to uint64)
-	GetType() snaptype.Type
+	GetGrouping() string
 }
 
 // NoOverlaps - keep largest ranges and avoid overlap
@@ -119,7 +119,7 @@ func findOverlaps[T SortedRange](in []T) (res []T, overlapped []T) {
 			f2 := in[j]
 			jFrom, jTo := f2.GetRange()
 
-			if f.GetType().Enum() != f2.GetType().Enum() {
+			if f.GetGrouping() != f2.GetGrouping() {
 				break
 			}
 			if jFrom == jTo {

@@ -65,7 +65,7 @@ type TxContext struct {
 // ExecutionResult includes all output after executing given evm
 // message no matter the execution itself is successful or not.
 type ExecutionResult struct {
-	UsedGas             uint64 // Total used gas but include the refunded gas
+	GasUsed             uint64 // Total used gas but include the refunded gas
 	Err                 error  // Any error encountered during the execution(listed in core/vm/errors.go)
 	Reverted            bool   // Whether the execution was aborted by `REVERT`
 	ReturnData          []byte // Returned data from evm(function result or data supplied with revert opcode)
@@ -178,4 +178,7 @@ type IntraBlockState interface {
 	AddLog(*types.Log)
 
 	SetHooks(hooks *tracing.Hooks)
+	Trace() bool
+	TxIndex() int
+	Incarnation() int
 }

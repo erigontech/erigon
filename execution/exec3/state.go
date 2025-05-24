@@ -236,7 +236,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			ret, _, err := core.SysCallContract(contract, data, cc, ibs, header, rw.engine, constCall /* constCall */, hooks)
+			ret, _, err := core.SysCallContract(contract, data, cc, ibs, header, rw.engine, constCall /* constCall */, hooks, rw.vmCfg)
 			return ret, err
 		}
 		rw.engine.Initialize(cc, rw.chain, header, ibs, syscall, rw.logger, hooks)
@@ -248,7 +248,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 
 		// End of block transaction in a block
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			ret, logs, err := core.SysCallContract(contract, data, cc, ibs, header, rw.engine, false /* constCall */, hooks)
+			ret, logs, err := core.SysCallContract(contract, data, cc, ibs, header, rw.engine, false /* constCall */, hooks, rw.vmCfg)
 			if err != nil {
 				return nil, err
 			}
@@ -310,7 +310,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			}
 		} else {
 			txTask.Failed = applyRes.Failed()
-			txTask.UsedGas = applyRes.UsedGas
+			txTask.GasUsed = applyRes.GasUsed
 			// Update the state with pending changes
 			ibs.SoftFinalise()
 			//txTask.Error = ibs.FinalizeTx(rules, noop)
@@ -401,7 +401,7 @@ func (rw *Worker) execAATxn(txTask *state.TxTask) {
 	}
 
 	txTask.Failed = status != 0
-	txTask.UsedGas = gasUsed
+	txTask.GasUsed = gasUsed
 	// Update the state with pending changes
 	rw.ibs.SoftFinalise()
 	txTask.Logs = rw.ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)

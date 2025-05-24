@@ -37,9 +37,9 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/p2p/sentry"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/p2p/protocols/eth"
-	"github.com/erigontech/erigon/turbo/testlog"
+	"github.com/erigontech/erigon-p2p/protocols/eth"
 )
 
 func TestMessageListenerRegisterBlockHeadersObserver(t *testing.T) {

@@ -32,7 +32,6 @@ disabled_tests=(
     eth_submitWork/test_1.json
     net_peerCount/test_1.json
     net_version/test_1.json
-    parity_listStorageKeys/test_07.json
     txpool_status/test_1.json
     web3_clientVersion/test_1.json)
 

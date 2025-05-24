@@ -113,7 +113,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 		chainRules:      chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time),
 	}
 	if evm.config.JumpDestCache == nil {
-		evm.config.JumpDestCache = NewJumpDestCache(jumpDestCacheLimit)
+		evm.config.JumpDestCache = NewJumpDestCache(JumpDestCacheLimit)
 	}
 
 	evm.interpreter = NewEVMInterpreter(evm, vmConfig)

@@ -342,16 +342,29 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, cfg *ExecuteBlockCfg, bl
 
 	for _, txn := range block.Transactions() {
 		to := txn.GetTo()
-		if to == nil {
-			continue
+		if to != nil {
+			a, _ := stateReader.ReadAccountData(*to)
+			if a == nil {
+				continue
+			}
+			//if account != nil && !bytes.Equal(account.CodeHash, types.EmptyCodeHash.Bytes()) {
+			//	reader.Code(*tx.To(), common.BytesToHash(account.CodeHash))
+			//}
+			if code, _ := stateReader.ReadAccountCode(*to); len(code) > 0 {
+				_, _ = code[0], code[len(code)-1]
+			}
+
+			for _, list := range txn.GetAccessList() {
+				stateReader.ReadAccountData(list.Address)
+				if len(list.StorageKeys) > 0 {
+					for _, slot := range list.StorageKeys {
+						stateReader.ReadAccountStorage(list.Address, slot)
+					}
+				}
+			}
+			//TODO: exec txn and pre-fetch commitment keys. see also: `func (p *statePrefetcher) Prefetch` in geth
 		}
-		a, _ := stateReader.ReadAccountData(*to)
-		if a == nil {
-			continue
-		}
-		if code, _ := stateReader.ReadAccountCode(*to); len(code) > 0 {
-			_, _ = code[0], code[len(code)-1]
-		}
+
 	}
 	_, _ = stateReader.ReadAccountData(block.Coinbase())
 
@@ -474,12 +487,12 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		pruneTimeout = 12 * time.Hour
 
 		// allow greedy prune on non-chain-tip
-		if err = tx.(kv.TemporalRwTx).Debug().GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
+		if err = tx.(kv.TemporalRwTx).GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
 			return err
 		}
 	}
 
-	if _, err := tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, pruneTimeout); err != nil {
+	if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, pruneTimeout); err != nil {
 		return err
 	}
 
