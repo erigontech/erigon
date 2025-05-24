@@ -504,7 +504,7 @@ func (sdb *IntraBlockState) SubBalance(addr common.Address, amount *uint256.Int,
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) SetBalance(addr common.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) error {
+func (sdb *IntraBlockState) SetBalance(addr common.Address, amount uint256.Int, reason tracing.BalanceChangeReason) error {
 	stateObject, err := sdb.GetOrNewStateObject(addr)
 	if err != nil {
 		return err
