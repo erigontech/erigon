@@ -526,7 +526,7 @@ func (evm *EVM) ChainRules() *chain.Rules {
 }
 
 // IntraBlockState returns the EVM's IntraBlockState
-func (evm *EVM) IntraBlockState() evmtypes.IntraBlockState {
+func (evm *EVM) IntraBlockState() *state.IntraBlockState {
 	return evm.intraBlockState
 }
 
