@@ -26,6 +26,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon-db/interfaces"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -111,13 +112,17 @@ func NewHistoricalTraceWorker(
 		background:  background,
 		stateReader: state.NewHistoryReaderV3(),
 
-		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, execArgs.ChainConfig, vm.Config{}),
 		taskGasPool: new(core.GasPool),
-		vmCfg:       &vm.Config{},
+		vmCfg:       &vm.Config{JumpDestCache: vm.NewJumpDestCache(vm.JumpDestCacheLimit)},
 	}
+	ie.evm = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, execArgs.ChainConfig, *ie.vmCfg)
 	ie.taskGasPool.AddBlobGas(execArgs.ChainConfig.GetMaxBlobGasPerBlock(0))
 	ie.ibs = state.New(ie.stateReader)
 	return ie
+}
+
+func (rw *HistoricalTraceWorker) LogStats() {
+	rw.evm.Config().JumpDestCache.LogStats()
 }
 
 func (rw *HistoricalTraceWorker) Run() (err error) {
@@ -126,7 +131,7 @@ func (rw *HistoricalTraceWorker) Run() (err error) {
 			err = fmt.Errorf("HistoricalTraceWorker panic: %s, %s", rec, dbg.Stack())
 		}
 	}()
-	defer rw.evm.Config().JumpDestCache.LogStats()
+	defer rw.LogStats()
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
 		result := rw.RunTxTask(txTask.(*exec.TxTask))
 		if err := rw.out.Add(rw.ctx, result); err != nil {
@@ -181,7 +186,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.TxResult {
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			ret, _, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, constCall /* constCall */, hooks)
+			ret, _, err := core.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, constCall /* constCall */, hooks, *rw.vmCfg)
 			return ret, err
 		}
 		rw.execArgs.Engine.Initialize(cc, rw.chain, header, ibs, syscall, rw.logger, hooks)
@@ -526,9 +531,6 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 
 	br := cfg.BlockReader
 	chainConfig := cfg.ChainConfig
-	if chainConfig.Aura != nil && cfg.Workers > 1 {
-		panic("gnosis consensus doesn't support parallel exec yet: https://github.com/erigontech/erigon/issues/12054")
-	}
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
 
@@ -673,9 +675,6 @@ func BlockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader ser
 	}
 	if b == nil {
 		return nil, nil
-	}
-	for _, txn := range b.Transactions() {
-		_ = txn.Hash()
 	}
 	return b, err
 }

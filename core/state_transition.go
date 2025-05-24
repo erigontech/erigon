@@ -91,7 +91,7 @@ type StateTransition struct {
 	initialGas   uint64
 	value        *uint256.Int
 	data         []byte
-	state        evmtypes.IntraBlockState
+	state        *state.IntraBlockState
 	evm          *vm.EVM
 
 	// If true, fee burning and tipping won't happen during transition. Instead, their values will be included in the
@@ -160,7 +160,7 @@ func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailou
 		blockContext := evm.Context
 		blockContext.Coinbase = state.SystemAddress
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			ret, _, err := SysCallContractWithBlockContext(contract, data, evm.ChainConfig(), evm.IntraBlockState(), blockContext, engine, true /* constCall */, evm.Config().Tracer)
+			ret, _, err := SysCallContractWithBlockContext(contract, data, evm.ChainConfig(), evm.IntraBlockState(), blockContext, true, nil, evm.Config())
 			return ret, err
 		}
 		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))

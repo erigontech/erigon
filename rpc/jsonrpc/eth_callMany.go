@@ -237,7 +237,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	// after replaying the txns, we want to overload the state
 	// overload state
 	if stateOverride != nil {
-		err = stateOverride.Override((evm.IntraBlockState()).(*state.IntraBlockState))
+		err = stateOverride.Override(evm.IntraBlockState())
 		if err != nil {
 			return nil, err
 		}

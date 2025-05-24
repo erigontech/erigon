@@ -24,6 +24,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-db/interfaces"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -36,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/rpc"
 	ethapi2 "github.com/erigontech/erigon/rpc/ethapi"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
 func DoCall(
@@ -50,7 +50,7 @@ func DoCall(
 	gasCap uint64,
 	chainConfig *chain.Config,
 	stateReader state.StateReader,
-	headerReader services.HeaderReader,
+	headerReader interfaces.HeaderReader,
 	callTimeout time.Duration,
 ) (*evmtypes.ExecutionResult, error) {
 	// todo: Pending state is only known by the miner
@@ -122,7 +122,7 @@ func DoCall(
 }
 
 func NewEVMBlockContext(engine consensus.EngineReader, header *types.Header, requireCanonical bool, tx kv.Getter,
-	headerReader services.HeaderReader, config *chain.Config) evmtypes.BlockContext {
+	headerReader interfaces.HeaderReader, config *chain.Config) evmtypes.BlockContext {
 	blockHashFunc := MakeHeaderGetter(requireCanonical, tx, headerReader)
 	return core.NewEVMBlockContext(header, blockHashFunc, engine, nil /* author */, config)
 }
@@ -209,7 +209,7 @@ func NewReusableCaller(
 	gasCap uint64,
 	blockNrOrHash rpc.BlockNumberOrHash,
 	tx kv.Tx,
-	headerReader services.HeaderReader,
+	headerReader interfaces.HeaderReader,
 	chainConfig *chain.Config,
 	callTimeout time.Duration,
 ) (*ReusableCaller, error) {

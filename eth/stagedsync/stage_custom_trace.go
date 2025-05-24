@@ -166,7 +166,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 		producingDomain = kv.RCacheDomain
 	}
 
-	batchSize := uint64(50_000)
+	batchSize := uint64(25_000)
 	for ; startBlock < endBlock; startBlock += batchSize {
 		to := min(endBlock+1, startBlock+batchSize)
 		if err := customTraceBatchProduce(ctx, cfg.Produce, cfg.ExecArgs, cfg.db, startBlock, to, "custom_trace", producingDomain, logger); err != nil {
@@ -215,6 +215,18 @@ Loop:
 }
 
 func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.ExecArgs, db kv.TemporalRwDB, fromBlock, toBlock uint64, logPrefix string, producingDomain kv.Domain, logger log.Logger) error {
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
+		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+		if err := ac.GreedyPruneHistory(ctx, kv.CommitmentDomain, tx); err != nil {
+			return err
+		}
+		if _, err := ac.PruneSmallBatches(ctx, 10*time.Hour, tx); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
 	var lastTxNum uint64
 	{
 		tx, err := db.BeginTemporalRw(ctx)
@@ -264,7 +276,6 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.Ex
 	if err := agg.BuildFiles2(ctx, fromStep, toStep); err != nil {
 		return err
 	}
-
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		if err := tx.(kv.TemporalRwTx).GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
 			return err
