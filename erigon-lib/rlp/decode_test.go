@@ -822,7 +822,7 @@ func runTests(t *testing.T, decode func([]byte, interface{}) error) {
 
 func TestDecodeWithByteReader(t *testing.T) {
 	runTests(t, func(input []byte, into interface{}) error {
-		return Decode(bytes.NewReader(input), into)
+		return DecodeBytes(input, into)
 	})
 }
 
@@ -895,7 +895,7 @@ func TestDecodeDecoder(t *testing.T) {
 		T2 *testDecoder
 		T3 **testDecoder
 	}
-	if err := Decode(bytes.NewReader(unhex("C3010203")), &s); err != nil {
+	if err := DecodeBytes(unhex("C3010203"), &s); err != nil {
 		t.Fatalf("Decode error: %v", err)
 	}
 
@@ -921,7 +921,7 @@ func TestDecodeDecoderNilPointer(t *testing.T) {
 		T1 *testDecoder `rlp:"nil"`
 		T2 *testDecoder
 	}
-	if err := Decode(bytes.NewReader(unhex("C2C002")), &s); err != nil {
+	if err := DecodeBytes(unhex("C2C002"), &s); err != nil {
 		t.Fatalf("Decode error: %v", err)
 	}
 	if s.T1 != nil {
@@ -948,14 +948,14 @@ func (bd byteDecoder) called() bool {
 // does not kick in for element types implementing Decoder.
 func TestDecoderInByteSlice(t *testing.T) {
 	var slice []byteDecoder
-	if err := Decode(bytes.NewReader(unhex("C101")), &slice); err != nil {
+	if err := DecodeBytes(unhex("C101"), &slice); err != nil {
 		t.Errorf("unexpected Decode error %v", err)
 	} else if !slice[0].called() {
 		t.Errorf("DecodeRLP not called for slice element")
 	}
 
 	var array [1]byteDecoder
-	if err := Decode(bytes.NewReader(unhex("C101")), &array); err != nil {
+	if err := DecodeBytes(unhex("C101"), &array); err != nil {
 		t.Errorf("unexpected Decode error %v", err)
 	} else if !array[0].called() {
 		t.Errorf("DecodeRLP not called for array element")
@@ -1026,7 +1026,7 @@ func ExampleDecode() {
 	}
 
 	var s example
-	err := Decode(bytes.NewReader(input), &s)
+	err := DecodeBytes(input, &s)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 	} else {
@@ -1047,7 +1047,7 @@ func ExampleDecode_structTagNil() {
 	var normalRules struct {
 		String *string
 	}
-	_ = Decode(bytes.NewReader(input), &normalRules)
+	_ = DecodeBytes(input, &normalRules)
 	fmt.Printf("normal: String = %q\n", *normalRules.String)
 
 	// This type uses the struct tag.
@@ -1055,7 +1055,7 @@ func ExampleDecode_structTagNil() {
 	var withEmptyOK struct {
 		String *string `rlp:"nil"`
 	}
-	_ = Decode(bytes.NewReader(input), &withEmptyOK)
+	_ = DecodeBytes(input, &withEmptyOK)
 	fmt.Printf("with nil tag: String = %v\n", withEmptyOK.String)
 
 	// Output:
@@ -1101,8 +1101,7 @@ func BenchmarkDecode(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		var s []uint
-		r := bytes.NewReader(enc)
-		if err := Decode(r, &s); err != nil {
+		if err := DecodeBytes(enc, &s); err != nil {
 			b.Fatalf("Decode error: %v", err)
 		}
 	}
@@ -1116,8 +1115,7 @@ func BenchmarkDecodeIntSliceReuse(b *testing.B) {
 
 	var s []uint
 	for i := 0; i < b.N; i++ {
-		r := bytes.NewReader(enc)
-		if err := Decode(r, &s); err != nil {
+		if err := DecodeBytes(enc, &s); err != nil {
 			b.Fatalf("Decode error: %v", err)
 		}
 	}

@@ -178,4 +178,7 @@ type IntraBlockState interface {
 	AddLog(*types.Log)
 
 	SetHooks(hooks *tracing.Hooks)
+	Trace() bool
+	TxIndex() int
+	Incarnation() int
 }
