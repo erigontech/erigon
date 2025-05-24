@@ -435,6 +435,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		cfg.Snap.NoDownloader = true
 		allSnapshots = freezeblocks.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
 		allBorSnapshots = heimdall.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
+		allBorSnapshots.DownloadComplete() // mark as ready
 
 		log.Info("[rpc] config", "sync", cfg.Sync)
 
