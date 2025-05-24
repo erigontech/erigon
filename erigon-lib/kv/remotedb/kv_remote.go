@@ -265,6 +265,11 @@ func (tx *tx) Rollback() {
 		c.Close()
 	}
 }
+
+func (tx *tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
+	return f(tx)
+}
+
 func (tx *tx) DBSize() (uint64, error) { panic("not implemented") }
 
 func (tx *tx) statelessCursor(bucket string) (kv.Cursor, error) {

@@ -25,9 +25,9 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/tracers"
 )
 
@@ -140,7 +140,7 @@ func (al accessList) accessListSorted() types.AccessList {
 type AccessListTracer struct {
 	excl               map[common.Address]struct{} // Set of account to exclude from the list
 	list               accessList                  // Set of accounts and storage slots touched
-	state              evmtypes.IntraBlockState    // State for nonce calculation of created contracts
+	state              *state.IntraBlockState      // State for nonce calculation of created contracts
 	createdContracts   map[common.Address]struct{} // Set of all addresses of contracts created during txn execution
 	usedBeforeCreation map[common.Address]struct{} // Set of all contract addresses first used before creation
 }
@@ -150,7 +150,7 @@ type AccessListTracer struct {
 // the resulting accesslist.
 // An optional set of addresses to be excluded from the resulting accesslist can
 // also be specified.
-func NewAccessListTracer(acl types.AccessList, exclude map[common.Address]struct{}, state evmtypes.IntraBlockState) *AccessListTracer {
+func NewAccessListTracer(acl types.AccessList, exclude map[common.Address]struct{}, state *state.IntraBlockState) *AccessListTracer {
 	excl := make(map[common.Address]struct{})
 	if exclude != nil {
 		excl = exclude

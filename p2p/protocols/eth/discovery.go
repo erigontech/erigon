@@ -24,8 +24,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/p2p/enr"
-	"github.com/erigontech/erigon/p2p/forkid"
+	"github.com/erigontech/erigon-p2p/enr"
+	"github.com/erigontech/erigon-p2p/forkid"
 )
 
 // enrEntry is the ENR entry which advertises `eth` protocol on the discovery.
