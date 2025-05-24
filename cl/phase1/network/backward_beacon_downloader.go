@@ -143,6 +143,7 @@ func (b *BackwardBeaconDownloader) requestChunk(ctx context.Context, start, coun
 	if err != nil {
 		return nil, err
 	}
+	fmt.Println("end Requesting chunk", start, count, maxSlot)
 	if len(blocks) == 0 {
 		return nil, nil
 	}
