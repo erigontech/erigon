@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -170,9 +171,7 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 		slices.Sort(indices)
 		for i := 1; i < len(logs); i++ {
 			if indices[i-1] == indices[i] {
-				err := fmt.Errorf("duplicated log_index %d", indices[i])
-				panic(err)
-				return err
+				return fmt.Errorf("duplicated log_index %d", indices[i])
 			}
 		}
 		return nil
