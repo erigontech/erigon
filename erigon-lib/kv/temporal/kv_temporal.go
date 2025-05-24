@@ -403,7 +403,7 @@ func (tx *tx) hasPrefix(name kv.Domain, dbTx kv.Tx, prefix []byte) ([]byte, []by
 		to = nil
 	}
 
-	it, err := tx.rangeLatest(name, dbTx, prefix, nil, 1)
+	it, err := tx.rangeLatest(name, dbTx, prefix, to, 1)
 	if err != nil {
 		return nil, nil, false, err
 	}
