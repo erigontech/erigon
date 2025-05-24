@@ -341,6 +341,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 				if downloadedBlocksTemp == nil {
 					return
 				}
+				fmt.Println("done")
 				// append the downloaded blocks to the main list
 				b.downloadedBlocksLock.Lock()
 				defer b.downloadedBlocksLock.Unlock()
