@@ -352,6 +352,14 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 				}
 			}(dr)
 		}
+		// add the blocks from the pending cache
+		for i := start; i <= currEndSlot; i++ {
+			blockInCache, ok := b.pendingResults.Get(i)
+			if !ok || blockInCache == nil {
+				continue
+			}
+			downloadedBlocks = append(downloadedBlocks, blockInCache)
+		}
 
 		if start == 0 {
 			break
