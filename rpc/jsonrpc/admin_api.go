@@ -22,7 +22,7 @@ import (
 	"fmt"
 
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon/p2p"
+	p2p "github.com/erigontech/erigon-p2p"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
