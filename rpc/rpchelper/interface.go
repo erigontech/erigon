@@ -24,7 +24,7 @@ import (
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/p2p"
+	p2p "github.com/erigontech/erigon-p2p"
 )
 
 // ApiBackend - interface which must be used by API layer

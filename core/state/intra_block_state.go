@@ -126,6 +126,18 @@ func (sdb *IntraBlockState) SetTrace(trace bool) {
 	sdb.trace = trace
 }
 
+func (sdb *IntraBlockState) Trace() bool {
+	return sdb.trace
+}
+
+func (sdb *IntraBlockState) TxIndex() int {
+	return sdb.txIndex
+}
+
+func (sdb *IntraBlockState) Incarnation() int {
+	return 0
+}
+
 // setErrorUnsafe sets error but should be called in medhods that already have locks
 // Deprecated: The IBS api now returns errors directly
 func (sdb *IntraBlockState) setErrorUnsafe(err error) {
