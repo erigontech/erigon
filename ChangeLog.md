@@ -1,17 +1,109 @@
 ChangeLog
 ---------
 
-## v3.0.3 (in development)
+## v3.0.5 (in development)
+
+### Milestone
+
+https://github.com/erigontech/erigon/milestone/44
+
+## v3.0.4
+
+### Milestone
+
+https://github.com/erigontech/erigon/milestone/43
+
+**Improvements:**
+
+- disable diagnostics by default by @yperbasis in https://github.com/erigontech/erigon/pull/14953
+- less disk IO during files merge by @AskAlexSharov in https://github.com/erigontech/erigon/pull/14901
+- stage_custom_trace: to produce indices by @AskAlexSharov in https://github.com/erigontech/erigon/pull/14879
+- persist receipts - external rpcd support by @AskAlexSharov in https://github.com/erigontech/erigon/pull/15004
+- support `NO_PRUNE` env var by @AskAlexSharov in https://github.com/erigontech/erigon/pull/15131
+- cmd: Increase default `db.size.limit` by @AskAlexSharov in https://github.com/erigontech/erigon/pull/15170
+- notify rpcd when e3 files change by @sudeepdino008 in https://github.com/erigontech/erigon/pull/15044
+- mdbx v0.13.6 by @JkLondon in https://github.com/erigontech/erigon/pull/15112
+
+**Bugfixes:**
+
+- Fix issues reported in snapshot processing to fix sync issues due to bugs in sync event and checkpoint snapshot production by @eastorski in https://github.com/erigontech/erigon/pull/14887, https://github.com/erigontech/erigon/pull/14947,  https://github.com/erigontech/erigon/pull/14951
+- Update go-libutp for AUR build error by @anacrolix in https://github.com/erigontech/erigon/pull/14892
+- Caplin: fix occassional mev-boost bug by @Giulio2002 in https://github.com/erigontech/erigon/pull/14991
+- Erigon: optimistic inclusion for deep reorgs #14875 by @Giulio2002 in https://github.com/erigontech/erigon/pull/14876
+- Caplin: Fix misc issues after electra (#14910) by @domiwei in https://github.com/erigontech/erigon/pull/14935
+- fix erigon seg retire to handle incomplete merges by @sudeepdino008 in https://github.com/erigontech/erigon/pull/15003
+- fast failing if version string contains "." (v1.0- v2.23 for ex) by @JkLondon in https://github.com/erigontech/erigon/pull/15048
+- prune mode flag parsing and `String()`-ing by @awskii in https://github.com/erigontech/erigon/pull/14882
+- rpcdaemon: fix txNum at GetReceipt call in getLogsV3 by @lupin012 in https://github.com/erigontech/erigon/pull/14986
+
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.0.3...v3.0.4
+
+## v3.0.3
 
 ### Milestone
 
 https://github.com/erigontech/erigon/milestone/42
+
+**RPC fixes:**
+
+Polygon users who have previously run migration steps to fix incorrect logIndex related to state sync transactions released in 3.0.2 are advised to run the migration steps again and add the --polygon.logindex flag to their flags for a complete mitigation.
+
+**Improvements:**
+
+- consensus: Add syscall failure scenarios (#14403) by @somnathb1 in https://github.com/erigontech/erigon/pull/14818
+- consensus: validate fixed lengths in abi decoding EIP-6110 deposit requests by @somnathb1 in https://github.com/erigontech/erigon/pull/14823
+- historical receipts persistency (optional) by @AskAlexSharov in https://github.com/erigontech/erigon/pull/14781
+- reduce dependency on github; download snapshot hashes from R2 by @wmitsuda in https://github.com/erigontech/erigon/pull/14849
+
+**Bugfixes:**
+
+- eth, execution: Use block level gasPool in serial execution (#14761) by @somnathb1 in https://github.com/erigontech/erigon/pull/14820
+- no greedy prune on chain-tip  (node did fall behind periodically) by @AskAlexSharov in https://github.com/erigontech/erigon/pull/14782
+- fixed performance and ordering issues with the [RPC fix from 3.0.2](https://github.com/erigontech/erigon/releases/tag/v3.0.2) by @mh0lt and @shohamc1 in https://github.com/erigontech/erigon/pull/14842 https://github.com/erigontech/erigon/pull/14785 https://github.com/erigontech/erigon/pull/14790
+
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.0.2...v3.0.3
 
 ## v3.0.2
 
 ### Milestone
 
 https://github.com/erigontech/erigon/milestone/41
+
+**Gnosis users: this is a required update for the upcoming Pectra hardfork scheduled for 30 April 2025**
+
+**RPC fixes:**
+
+Previous versions of Erigon 3 have two bugs regarding handling of state sync events on Polygon chains:
+- Incorrect `logIndex` on all state sync transaction logs
+- Missing log events when using `eth_getLogs` with filters
+
+A proper fix has been implemented and will be progressively rolled out in Erigon 3.1 and 3.2 (track issue [here](https://github.com/erigontech/erigon/issues/14003)). A temporary workaround has been introduced if these issues are critical for your use-case. This requires regenerating receipts for all transactions on the chain. The procedure is as follows:
+1. Shutdown Erigon and all rpcdaemon processes
+2. Update binaries Erigon release
+3. `erigon seg rm-state-snapshots --domain=receipt --datadir <your-datadir>`
+4. `integration stage_custom_trace --datadir <your-datadir> --chain <amoy|bor-mainnet> --bor.heimdall <heimdall-url>`
+	- For machines with many cores, you can add ` --exec.workers=<num>` to improve performance (default is `7`)
+5. Once complete, `rm -rf <your-datadir>/chaindata`
+6. Start Erigon
+
+**Improvements:**
+
+- Schedule Pectra hard fork for Gnosis Mainnet (#14521) by @somnathb1 in https://github.com/erigontech/erigon/pull/14523
+- params: Use no padding in minor version (#14588) by @somnathb1 in https://github.com/erigontech/erigon/pull/14594
+- recent receipts persistence: to reduce RPC latency  by @AskAlexSharov in https://github.com/erigontech/erigon/pull/14532
+- historical `eth_getProof` experimental flag by @Giulio2002 in https://github.com/erigontech/erigon/pull/14568
+- Enhance efficiency of attestation selection (#14624) by @Giulio2002 in https://github.com/erigontech/erigon/pull/14633
+- EngineAPI: recover from missing chain segments (#14579) by @Giulio2002 in https://github.com/erigontech/erigon/pull/14589
+- remove unsafe closing of subsumed files in mergeLoopStep by @sudeepdino008 in https://github.com/erigontech/erigon/pull/14557
+
+**Bugfixes:**
+
+- execution: fix missing log notifications when flushing extending fork… by @Giulio2002 in https://github.com/erigontech/erigon/pull/14578
+- EthereumExecution: fix canonical chain routine (#14580) by @Giulio2002 in https://github.com/erigontech/erigon/pull/14592
+- caplin: fix parsing topics (#14543) by @Giulio2002 in https://github.com/erigontech/erigon/pull/14593
+- Fix `trace_transaction` for Polygon chains (#14470) by @shohamc1 in https://github.com/erigontech/erigon/pull/14530
+
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.0.1...v3.0.2
 
 ## v3.0.1 
 
