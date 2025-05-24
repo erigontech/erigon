@@ -124,15 +124,15 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state
 
 // Reset resets the EVM with a new transaction context.Reset
 // This is not threadsafe and should only be done very cautiously.
-func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState) {
+func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs *state.IntraBlockState) {
 	evm.TxContext = txCtx
-	evm.intraBlockState = ibs.(*state.IntraBlockState)
+	evm.intraBlockState = ibs
 
 	// ensure the evm is reset to be used again
 	evm.abort.Store(false)
 }
 
-func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState, vmConfig Config, chainRules *chain.Rules) {
+func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state.IntraBlockState, vmConfig Config, chainRules *chain.Rules) {
 	if vmConfig.NoBaseFee {
 		if txCtx.GasPrice.IsZero() {
 			blockCtx.BaseFee = new(uint256.Int)
@@ -140,7 +140,7 @@ func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtype
 	}
 	evm.Context = blockCtx
 	evm.TxContext = txCtx
-	evm.intraBlockState = ibs.(*state.IntraBlockState)
+	evm.intraBlockState = ibs
 	if vmConfig.JumpDestCache == nil && evm.config.JumpDestCache != nil {
 		vmConfig.JumpDestCache = evm.config.JumpDestCache
 	}

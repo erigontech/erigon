@@ -22,6 +22,7 @@ package vm
 import (
 	"math/big"
 
+	"github.com/erigontech/erigon/core/state"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -45,7 +46,7 @@ type CallContext interface {
 
 // VMInterface exposes the EVM interface for external callers.
 type VMInterface interface {
-	Reset(txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState)
+	Reset(txCtx evmtypes.TxContext, ibs *state.IntraBlockState)
 	Create(caller ContractRef, code []byte, gas uint64, value *uint256.Int) (ret []byte, contractAddr common.Address, leftOverGas uint64, err error)
 	Call(caller ContractRef, addr common.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error)
 	Cancel()
@@ -53,7 +54,7 @@ type VMInterface interface {
 	ChainConfig() *chain.Config
 	ChainRules() *chain.Rules
 	Context() evmtypes.BlockContext
-	IntraBlockState() evmtypes.IntraBlockState
+	IntraBlockState() *state.IntraBlockState
 	TxContext() evmtypes.TxContext
 }
 
