@@ -520,7 +520,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *SharedDomains, roTx kv.Tx, 
 	sd.discardWrites(kv.StorageDomain)
 	sd.discardWrites(kv.CodeDomain)
 
-	visComFiles := roTx.(kv.WithFreezeInfo).FreezeInfo().Files(kv.CommitmentDomain)
+	visComFiles := aggTx.Files(kv.CommitmentDomain)
 	logger.Info("starting commitment", "shard", fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo),
 		"totalKeys", common.PrettyCounter(cfg.Keys), "block", sd.BlockNum(),
 		"commitment files before dump step", cfg.StepTo,
