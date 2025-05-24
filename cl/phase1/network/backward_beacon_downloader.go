@@ -43,6 +43,12 @@ import (
 // Whether the reverse downloader arrived at expected height or condition.
 type OnNewBlock func(blk *cltypes.SignedBeaconBlock) (finished bool, err error)
 
+const (
+	maxBlocksPerRequest     = 64 // maximum number of blocks to request per request
+	minBlocksPerRequest     = 16 // minimum number of blocks to request per request
+	defaultBlocksPerRequest = 32 // default number of blocks to request per request
+)
+
 type BackwardBeaconDownloader struct {
 	ctx                  context.Context
 	slotToDownload       atomic.Uint64
@@ -57,6 +63,7 @@ type BackwardBeaconDownloader struct {
 	neverSkip            bool
 	pendingResults       *lru.Cache[uint64, *requestResult]
 	downloadedBlocksLock sync.Mutex // lock for downloaded blocks
+	blocksPerRequest     atomic.Uint64
 
 	mu sync.Mutex
 }
@@ -67,15 +74,19 @@ func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, sn 
 		panic(fmt.Sprintf("could not create lru cache for pending results: %v", err))
 	}
 
+	var blocksPerRequest atomic.Uint64
+	blocksPerRequest.Store(defaultBlocksPerRequest)
+
 	return &BackwardBeaconDownloader{
-		ctx:            ctx,
-		rpc:            rpc,
-		db:             db,
-		reqInterval:    time.NewTicker(300 * time.Millisecond),
-		neverSkip:      true,
-		engine:         engine,
-		sn:             sn,
-		pendingResults: pendingResults,
+		ctx:              ctx,
+		rpc:              rpc,
+		db:               db,
+		reqInterval:      time.NewTicker(300 * time.Millisecond),
+		neverSkip:        true,
+		engine:           engine,
+		sn:               sn,
+		pendingResults:   pendingResults,
+		blocksPerRequest: blocksPerRequest, // number of blocks to request per request
 	}
 }
 
@@ -84,6 +95,25 @@ func (b *BackwardBeaconDownloader) SetThrottle(throttle time.Duration) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.reqInterval.Reset(throttle)
+}
+
+func (b *BackwardBeaconDownloader) IncrementBlocksPerRequest() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	current := b.blocksPerRequest.Load()
+	if current < maxBlocksPerRequest {
+		b.blocksPerRequest.Store(current + 1)
+		log.Info("Incremented blocks per request", "new", b.blocksPerRequest.Load())
+	}
+}
+
+func (b *BackwardBeaconDownloader) DecrementBlocksPerRequest() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	current := b.blocksPerRequest.Load()
+	if current > minBlocksPerRequest {
+		b.blocksPerRequest.Store(current - 1)
+	}
 }
 
 // SetSlotToDownload sets slot to download.
@@ -270,23 +300,13 @@ func removeDuplicates(blocks []*requestResult, tempBuffer []*requestResult) []*r
 	return blocks
 }
 
-// isThereNilBlocksrequests more blocks from the remote beacon node.
-func isThereNilBlocks(blocks []*requestResult) bool {
-	for _, block := range blocks {
-		if block == nil {
-			return true
-		}
-	}
-	return false
-}
-
 // RequestMore downloads a range of blocks in a backward manner.
 // The function sends a request for a range of blocks starting from a given slot and ending count blocks before it.
 // It then processes the response by iterating over the blocks in reverse order and calling a provided callback function onNewBlock on each block.
 // If the callback returns an error or signals that the download should be finished, the function will exit.
 // If the block's root hash does not match the expected root hash, it will be rejected and the function will continue to the next block.
 func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
-	subCount := uint64(16)
+	subCount := uint64(32)
 	chunks := uint64(32)
 	count := subCount * chunks // 8 chunks of 32 blocks
 	lowerBound := b.slotToDownload.Load() - count + 1
@@ -396,8 +416,6 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 	if len(downloadedBlocks) == 0 {
 		return nil
 	}
-
-	//fmt.Println("Gotten all blocks", len(downloadedBlocks), b.slotToDownload.Load(), lowerBound, count)
 
 	// Import new blocks, order is forward so reverse the whole packet
 	for i := len(downloadedBlocks) - 1; i >= 0; i-- {

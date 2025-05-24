@@ -214,6 +214,13 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				speed := blockProgress / ratio
 				prevProgress = currProgress
 
+				pivot := 50.0 // pivot for the speed calculation (if above, we try to increase the block request rate)
+				if speed > pivot {
+					cfg.downloader.IncrementBlocksPerRequest()
+				} else {
+					cfg.downloader.DecrementBlocksPerRequest()
+				}
+
 				if speed == 0 || initialBeaconBlock == nil {
 					continue
 				}
