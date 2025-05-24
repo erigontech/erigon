@@ -297,6 +297,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 	if lowerBound > b.slotToDownload.Load() {
 		lowerBound = 0
 	}
+	fmt.Println("SLOT TO DOWNLOAD", b.slotToDownload.Load(), "LOWER BOUND", lowerBound, "COUNT", count)
 	// 1. initialize the response channel
 	downloadedBlocks := make([]*requestResult, 0, count)
 	downloadedBlocksTempBuffer := make([]*requestResult, 0, count)
