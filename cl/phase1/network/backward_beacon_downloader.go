@@ -332,7 +332,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 			wg.Add(1)
 			go func(downloadRange downloadRange) {
 				defer wg.Done()
-				<-b.reqInterval.C
+				time.Sleep(150 * time.Millisecond) // sleep to avoid flooding the network with requests
 				// request the range
 				downloadedBlocksTemp := b.requestRange(ctx, downloadRange, b.slotToDownload.Load())
 				if downloadedBlocksTemp == nil {
