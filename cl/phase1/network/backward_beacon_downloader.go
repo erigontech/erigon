@@ -282,7 +282,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 				// give it a 1 second timeout
 				ctxWithTimeout, cancel := context.WithTimeout(ctx, 1*time.Second)
 				defer cancel()
-
+				x := time.Now()
 				// 2. request the chunk
 				requestsResult, err := b.requestChunk(ctxWithTimeout, start, subCount, b.slotToDownload.Load())
 				if err != nil {
@@ -292,7 +292,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 				if requestsResult == nil {
 					return
 				}
-				fmt.Println("Gotten chunk", start, subCount)
+				fmt.Println("Gotten chunk", start, subCount, "in", time.Since(x))
 				downloadedBlocksLock.Lock()
 				defer downloadedBlocksLock.Unlock()
 				downloadedBlocks = append(downloadedBlocks, requestsResult...)
