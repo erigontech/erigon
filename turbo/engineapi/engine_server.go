@@ -926,7 +926,7 @@ func (e *EngineServer) SetConsuming(consuming bool) {
 	e.consuming.Store(consuming)
 }
 
-func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV1, error) {
+func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, version clparams.StateVersion) (any, error) {
 	if len(blobHashes) > 128 {
 		return nil, &engine_helpers.TooLargeRequestErr
 	}
@@ -938,22 +938,46 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash) (
 	if err != nil {
 		return nil, err
 	}
-	ret := make([]*engine_types.BlobAndProofV1, len(blobHashes))
-	if len(blobHashes) != len(res.Blobs) || len(blobHashes) != len(res.Proofs) { // Some fault in the underlying txpool, but still return sane resp
-		log.Warn("[GetBlobsV1] txpool returned unexpected number of blobs and proofs in response, returning nil blobs list")
+	logLine := []string{}
+
+	if version == clparams.FuluVersion {
+		ret := make([]*engine_types.BlobAndProofV2, len(blobHashes))
+		if len(blobHashes) != len(res.Blobs) || len(blobHashes)*int(params.CellsPerExtBlob) != len(res.Proofs) { // Some fault in the underlying txpool, but still return sane resp
+			log.Warn("[GetBlobsV2] txpool returned unexpected number of blobs and proofs in response, returning nil blobs list")
+			return ret, nil
+		}
+		for i := range res.Blobs {
+			if res.Blobs[i] != nil && len(res.Proofs) == int(params.CellsPerExtBlob) {
+				ret[i] = &engine_types.BlobAndProofV2{Blob: res.Blobs[i], CellProofs: make([]hexutil.Bytes, params.CellsPerExtBlob)}
+				for c := 0; c < int(params.CellsPerExtBlob); c++ {
+					ret[i].CellProofs[c] = res.Proofs[i*int(params.CellsPerExtBlob)+c]
+				}
+				logLine = append(logLine, fmt.Sprintf(" %d:", i), fmt.Sprintf(" hash=%x len(blob)=%d len(proof)=%d ", blobHashes[i], len(res.Blobs[i]), len(res.Proofs[i])))
+			} else {
+				logLine = append(logLine, fmt.Sprintf(" %d:", i), " nil")
+			}
+			e.logger.Debug("[GetBlobsV1]", "Responses", logLine)
+		}
+		return ret, nil
+	} else if version == clparams.CapellaVersion {
+		ret := make([]*engine_types.BlobAndProofV1, len(blobHashes))
+		if len(blobHashes) != len(res.Blobs) || len(blobHashes) != len(res.Proofs) { // Some fault in the underlying txpool, but still return sane resp
+			log.Warn("[GetBlobsV1] txpool returned unexpected number of blobs and proofs in response, returning nil blobs list")
+			return ret, nil
+		}
+		for i := range res.Blobs {
+			if res.Blobs[i] != nil {
+				ret[i] = &engine_types.BlobAndProofV1{Blob: res.Blobs[i], Proof: res.Proofs[i]}
+				logLine = append(logLine, fmt.Sprintf(" %d:", i), fmt.Sprintf(" hash=%x len(blob)=%d len(proof)=%d ", blobHashes[i], len(res.Blobs[i]), len(res.Proofs[i])))
+			} else {
+				logLine = append(logLine, fmt.Sprintf(" %d:", i), " nil")
+			}
+		}
+		e.logger.Debug("[GetBlobsV1]", "Responses", logLine)
 		return ret, nil
 	}
-	logLine := []string{}
-	for i := range res.Blobs {
-		if res.Blobs[i] != nil {
-			ret[i] = &engine_types.BlobAndProofV1{Blob: res.Blobs[i], Proof: res.Proofs[i]}
-			logLine = append(logLine, fmt.Sprintf(" %d:", i), fmt.Sprintf(" hash=%x len(blob)=%d len(proof)=%d ", blobHashes[i], len(res.Blobs[i]), len(res.Proofs[i])))
-		} else {
-			logLine = append(logLine, fmt.Sprintf(" %d:", i), " nil")
-		}
-	}
-	e.logger.Debug("[GetBlobsV1]", "Responses", logLine)
-	return ret, nil
+	return nil, nil
+	
 }
 
 func waitForStuff(maxWait time.Duration, waitCondnF func() (bool, error)) (bool, error) {
