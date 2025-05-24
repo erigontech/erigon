@@ -103,7 +103,6 @@ func (b *BackwardBeaconDownloader) IncrementBlocksPerRequest() {
 	current := b.blocksPerRequest.Load()
 	if current < maxBlocksPerRequest {
 		b.blocksPerRequest.Store(current + 1)
-		log.Info("Incremented blocks per request", "new", b.blocksPerRequest.Load())
 	}
 }
 
