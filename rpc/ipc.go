@@ -23,7 +23,7 @@ import (
 	"net"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/p2p/netutil"
+	"github.com/erigontech/erigon-p2p/netutil"
 )
 
 // ServeListener accepts connections on l, serving JSON-RPC on them.
