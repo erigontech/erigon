@@ -24,7 +24,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"golang.org/x/exp/maps"
 	"golang.org/x/net/context"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -35,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
@@ -44,30 +44,38 @@ import (
 type OnNewBlock func(blk *cltypes.SignedBeaconBlock) (finished bool, err error)
 
 type BackwardBeaconDownloader struct {
-	ctx            context.Context
-	slotToDownload atomic.Uint64
-	expectedRoot   common.Hash
-	rpc            *rpc.BeaconRpcP2P
-	engine         execution_client.ExecutionEngine
-	onNewBlock     OnNewBlock
-	finished       atomic.Bool
-	reqInterval    *time.Ticker
-	db             kv.RwDB
-	sn             *freezeblocks.CaplinSnapshots
-	neverSkip      bool
+	ctx                  context.Context
+	slotToDownload       atomic.Uint64
+	expectedRoot         common.Hash
+	rpc                  *rpc.BeaconRpcP2P
+	engine               execution_client.ExecutionEngine
+	onNewBlock           OnNewBlock
+	finished             atomic.Bool
+	reqInterval          *time.Ticker
+	db                   kv.RwDB
+	sn                   *freezeblocks.CaplinSnapshots
+	neverSkip            bool
+	pendingResults       *lru.Cache[uint64, *requestResult]
+	downloadedBlocksLock sync.Mutex // lock for downloaded blocks
 
 	mu sync.Mutex
 }
 
 func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, sn *freezeblocks.CaplinSnapshots, engine execution_client.ExecutionEngine, db kv.RwDB) *BackwardBeaconDownloader {
+	pendingResults, err := lru.New[uint64, *requestResult]("backward_beacon_downloader_pending_results", 2048)
+	if err != nil {
+		panic(fmt.Sprintf("could not create lru cache for pending results: %v", err))
+	}
+
 	return &BackwardBeaconDownloader{
-		ctx:         ctx,
-		rpc:         rpc,
-		db:          db,
-		reqInterval: time.NewTicker(300 * time.Millisecond),
-		neverSkip:   true,
-		engine:      engine,
-		sn:          sn,
+		ctx:            ctx,
+		rpc:            rpc,
+		db:             db,
+		reqInterval:    time.NewTicker(300 * time.Millisecond),
+		neverSkip:      true,
+		engine:         engine,
+		sn:             sn,
+		pendingResults: pendingResults,
 	}
 }
 
@@ -157,14 +165,64 @@ func (b *BackwardBeaconDownloader) requestChunk(ctx context.Context, start, coun
 	return responses, nil
 }
 
-// isRangePresent checks if a range of blocks is present in the map.
-func isRangePresent(start, end uint64, presentMap map[uint64]bool) bool {
-	for i := start; i <= end; i++ {
-		if !presentMap[i] {
-			return false
-		}
+func (b *BackwardBeaconDownloader) requestRange(ctx context.Context, downloadRange downloadRange, maxSlot uint64) (downloadedBlocks []*requestResult) {
+	// give it a 1 second timeout
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, 1*time.Second)
+	defer cancel()
+	x := time.Now()
+
+	count := downloadRange.end - downloadRange.start + 1
+	// 2. request the chunk
+	requestsResult, err := b.requestChunk(ctxWithTimeout, downloadRange.start, count, maxSlot)
+	if err != nil {
+		log.Trace("Error while requesting chunk", "err", err)
+		return
 	}
-	return true
+	if requestsResult == nil {
+		return
+	}
+	fmt.Println("Gotten chunk", downloadRange.start, count, len(requestsResult), time.Since(x))
+	downloadedBlocks = append(downloadedBlocks, requestsResult...)
+	for _, block := range requestsResult {
+		if block == nil {
+			continue
+		}
+		// add to the pending results
+		b.pendingResults.Add(block.block.Block.Slot, block)
+	}
+	return downloadedBlocks
+}
+
+type downloadRange struct {
+	start uint64 // start slot of the range
+	end   uint64 // end slot of the range
+}
+
+// isRangePresent checks if a range of blocks is present in the map.
+func getNeededRanges(start, end uint64, blockCache *lru.Cache[uint64, *requestResult]) []downloadRange {
+	// for i := start; i <= end; i++ {
+	// 	if !blockCache.Contains(i) {
+	// 		return false
+	// 	}
+	// }
+	// return true
+	ranges := make([]downloadRange, 0)
+	for i := start; i <= end; i++ {
+		if blockCache.Contains(i) {
+			continue
+		}
+		// find the next range
+		j := i
+		for j <= end && !blockCache.Contains(j) {
+			j++
+		}
+		ranges = append(ranges, downloadRange{
+			start: i,
+			end:   j - 1,
+		})
+		i = j - 1 // skip to the end of the range
+	}
+	return ranges
 }
 
 // removeNils removes nil blocks from the list.
@@ -240,117 +298,102 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 	downloadedBlocks := make([]*requestResult, 0, count)
 	downloadedBlocksTempBuffer := make([]*requestResult, 0, count)
 
-	var downloadedBlocksLock sync.Mutex
 	// iteratively download missing ranges
 
 	var wg sync.WaitGroup
-	presentMap := make(map[uint64]bool)
-	for {
-		// re-initialize the map
-		maps.Clear(presentMap)
-		for _, b := range downloadedBlocks {
-			if b == nil {
-				continue
-			}
-			presentMap[b.block.Block.Slot] = true
+
+	// re-initialize the map
+
+	startSlot := b.slotToDownload.Load()
+	for i := len(downloadedBlocks) - 1; i >= 0; i-- {
+		if downloadedBlocks[i] == nil {
+			break
+		}
+		startSlot = downloadedBlocks[i].block.Block.Slot
+	}
+
+	for currEndSlot := startSlot; currEndSlot > lowerBound; currEndSlot -= subCount { // inner iterations
+
+		start := currEndSlot - subCount + 1
+		if currEndSlot < subCount {
+			start = 0
 		}
 
-		startSlot := b.slotToDownload.Load()
-		for i := len(downloadedBlocks) - 1; i >= 0; i-- {
-			if downloadedBlocks[i] == nil {
-				break
-			}
-			startSlot = downloadedBlocks[i].block.Block.Slot
+		rangesToDownload := getNeededRanges(start, currEndSlot, b.pendingResults)
+		// check if the range is already present
+		if len(rangesToDownload) == 0 {
+			fmt.Println("No ranges to download, skipping", start, currEndSlot)
+			continue
 		}
-
-		for currEndSlot := startSlot; currEndSlot > lowerBound; currEndSlot -= subCount { // inner iterations
-			<-b.reqInterval.C // wait for the next request interval
-			start := currEndSlot - subCount + 1
-			if currEndSlot < subCount {
-				start = 0
-			}
-
-			// check if the range is already present
-			if isRangePresent(start, currEndSlot, presentMap) { // skip if already present
-				continue
-			}
-
-			// 2. request the chunk in parallel
+		// 2. request the chunk in parallel
+		wg.Add(1)
+		for _, dr := range rangesToDownload {
+			// download the range in a goroutine
 			wg.Add(1)
-			go func() {
+			go func(downloadRange downloadRange) {
+				<-b.reqInterval.C
 				defer wg.Done()
-				// give it a 1 second timeout
-				ctxWithTimeout, cancel := context.WithTimeout(ctx, 1*time.Second)
-				defer cancel()
-				x := time.Now()
-				// 2. request the chunk
-				requestsResult, err := b.requestChunk(ctxWithTimeout, start, subCount, b.slotToDownload.Load())
-				if err != nil {
-					log.Trace("Error while requesting chunk", "err", err)
+				// request the range
+				downloadedBlocksTemp := b.requestRange(ctx, downloadRange, b.slotToDownload.Load())
+				if downloadedBlocksTemp == nil {
 					return
 				}
-				if requestsResult == nil {
-					return
+				// append the downloaded blocks to the main list
+				b.downloadedBlocksLock.Lock()
+				defer b.downloadedBlocksLock.Unlock()
+				downloadedBlocks = append(downloadedBlocks, downloadedBlocksTemp...)
+
+				for _, block := range downloadedBlocksTemp {
+					b.pendingResults.Add(block.block.Block.Slot, block)
 				}
-				fmt.Println("Gotten chunk", start, subCount, "in", time.Since(x))
-				downloadedBlocksLock.Lock()
-				defer downloadedBlocksLock.Unlock()
-				downloadedBlocks = append(downloadedBlocks, requestsResult...)
-			}()
-			if start == 0 {
-				break
-			}
-		}
-		wg.Wait()
-
-		// remove all nil entries
-		downloadedBlocks = removeNils(downloadedBlocks, downloadedBlocksTempBuffer)
-		// Sanitize the downloaded blocks
-		// sort the blocks by slot
-		sort.Slice(downloadedBlocks, func(i, j int) bool {
-			return downloadedBlocks[i].block.Block.Slot < downloadedBlocks[j].block.Block.Slot
-		})
-
-		// remove duplicates
-		downloadedBlocks = removeDuplicates(downloadedBlocks, downloadedBlocksTempBuffer)
-
-		// check if the downloaded blocks have the correct parentRoot
-		// if not, remove them from the list
-		currentParentRoot := b.expectedRoot
-		for i := len(downloadedBlocks) - 1; i >= 0; i-- {
-			if downloadedBlocks[i] == nil {
-				continue
-			}
-			currentRoot, err := downloadedBlocks[i].block.Block.HashSSZ()
-			if err != nil {
-				panic(err)
-			}
-			if currentRoot != currentParentRoot {
-				b.rpc.BanPeer(downloadedBlocks[i].peer)
-				downloadedBlocks[i] = nil // nil means that the block was removed
-				log.Debug("Gotten unexpected root", "got", common.Hash(currentRoot), "expected", common.Hash(currentParentRoot))
-				break
-			}
-			currentParentRoot = downloadedBlocks[i].block.Block.ParentRoot
+			}(dr)
 		}
 
-		if len(downloadedBlocks) == 0 {
-			continue
-		}
-		fmt.Println("Downloaded blocks", len(downloadedBlocks), startSlot, lowerBound, count, b.slotToDownload.Load())
-		// stopping condition, are we done?
-		// 1. is there any nil block in the list?
-		if isThereNilBlocks(downloadedBlocks) {
-			// if there are nil blocks, we need to wait for the next iteration
-			continue
-		}
-
-		// 2. is the last block in the list the one we are looking for or close to it?
-		marginOfSimilarity := subCount * 2
-		if downloadedBlocks[0].block.Block.Slot <= startSlot+marginOfSimilarity {
-			break // we are done
+		if start == 0 {
+			break
 		}
 	}
+	wg.Wait()
+
+	// remove all nil entries
+	downloadedBlocks = removeNils(downloadedBlocks, downloadedBlocksTempBuffer)
+	// Sanitize the downloaded blocks
+	// sort the blocks by slot
+	sort.Slice(downloadedBlocks, func(i, j int) bool {
+		return downloadedBlocks[i].block.Block.Slot < downloadedBlocks[j].block.Block.Slot
+	})
+
+	// remove duplicates
+	downloadedBlocks = removeDuplicates(downloadedBlocks, downloadedBlocksTempBuffer)
+
+	// check if the downloaded blocks have the correct parentRoot
+	// if not, remove them from the list
+	currentParentRoot := b.expectedRoot
+	for i := len(downloadedBlocks) - 1; i >= 0; i-- {
+		if downloadedBlocks[i] == nil {
+			continue
+		}
+		currentRoot, err := downloadedBlocks[i].block.Block.HashSSZ()
+		if err != nil {
+			panic(err)
+		}
+		if currentRoot != currentParentRoot {
+			b.rpc.BanPeer(downloadedBlocks[i].peer)
+			// remove the block from the cache
+			b.pendingResults.Remove(downloadedBlocks[i].block.Block.Slot)
+			// truncate the list
+			downloadedBlocks = downloadedBlocks[:i]
+			log.Debug("Gotten unexpected root", "got", common.Hash(currentRoot), "expected", common.Hash(currentParentRoot))
+			break
+		}
+		currentParentRoot = downloadedBlocks[i].block.Block.ParentRoot
+	}
+
+	if len(downloadedBlocks) == 0 {
+		return nil
+	}
+	fmt.Println("Downloaded blocks", len(downloadedBlocks), startSlot, lowerBound, count, b.slotToDownload.Load())
+
 	fmt.Println("Gotten all blocks", len(downloadedBlocks), b.slotToDownload.Load(), lowerBound, count)
 
 	// Import new blocks, order is forward so reverse the whole packet
