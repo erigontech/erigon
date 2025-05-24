@@ -551,11 +551,6 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k, v []byte, prevVal []byte
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
 func (sd *SharedDomains) DomainDel(domain kv.Domain, k, prevVal []byte, prevStep uint64) error {
-	composite := k1
-	if k2 != nil {
-		composite = make([]byte, 0, len(k1)+len(k2))
-		composite = append(append(composite, k1...), k2...)
-	}
 	if prevVal == nil {
 		var err error
 		prevVal, prevStep, err = sd.GetLatest(domain, k)
