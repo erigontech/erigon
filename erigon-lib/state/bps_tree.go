@@ -380,6 +380,8 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 		defer func() { fmt.Printf("found %x [%d %d]\n", key, l, r) }()
 	}
 
+	var keyBuf []byte // keys and vals can have own compression settings - means must have separated buffers for k/v reads
+
 	var cmp int
 	var m uint64
 	for l < r {
@@ -390,20 +392,20 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 				offset = b.offt.Get(m)
 				g.Reset(offset)
 			}
-			v, _ = g.Next(v[:0])
-			if cmp = bytes.Compare(v, key); cmp > 0 {
+			keyBuf, _ = g.Next(keyBuf[:0])
+			if cmp = bytes.Compare(keyBuf, key); cmp > 0 {
 				return nil, false, 0, err
 			} else if cmp < 0 {
 				g.Skip()
 				l++
 				continue
 			}
-			v, _ = g.Next(nil)
+			v, _ = g.Next(v[:0])
 			offset = b.offt.Get(m)
 			return v, true, offset, nil
 		}
 
-		cmp, _, err = b.keyCmpFunc(key, m, g, v[:0])
+		cmp, keyBuf, err = b.keyCmpFunc(key, m, g, keyBuf[:0])
 		if err != nil {
 			return nil, false, 0, err
 		}
@@ -412,7 +414,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 			if !g.HasNext() {
 				return nil, false, 0, fmt.Errorf("pair %d/%d key not found in %s", m, b.offt.Count(), g.FileName())
 			}
-			v, _ = g.Next(nil)
+			v, _ = g.Next(v[:0])
 			return v, true, offset, nil
 		} else if cmp > 0 {
 			r = m
@@ -424,14 +426,14 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 		}
 	}
 
-	cmp, _, err = b.keyCmpFunc(key, l, g, v[:0])
+	cmp, keyBuf, err = b.keyCmpFunc(key, l, g, keyBuf[:0])
 	if err != nil || cmp != 0 {
 		return nil, false, 0, err
 	}
 	if !g.HasNext() {
 		return nil, false, 0, fmt.Errorf("pair %d/%d key not found in %s", l, b.offt.Count(), g.FileName())
 	}
-	v, _ = g.Next(nil)
+	v, _ = g.Next(v[:0])
 	return v, true, b.offt.Get(l), nil
 }
 
