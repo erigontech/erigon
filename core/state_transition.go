@@ -74,7 +74,7 @@ type StateTransition struct {
 	initialGas   uint64
 	value        *uint256.Int
 	data         []byte
-	state        evmtypes.IntraBlockState
+	state        *state.IntraBlockState
 	evm          *vm.EVM
 
 	//some pre-allocated intermediate variables
