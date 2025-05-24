@@ -28,6 +28,12 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+/*
+#include <unistd.h>
+#include <fcntl.h>
+*/
+import "C"
+
 const MaxMapSize = 0xFFFFFFFFFFFF
 
 // mmap memory maps a DB's data file.
@@ -44,6 +50,7 @@ func MmapRw(f *os.File, size int) ([]byte, *[MaxMapSize]byte, error) {
 		// Ignore not implemented error in kernel because it still works.
 		return nil, nil, fmt.Errorf("madvise: %w", err)
 	}
+
 	mmapHandle2 := (*[MaxMapSize]byte)(unsafe.Pointer(&mmapHandle1[0]))
 	return mmapHandle1, mmapHandle2, nil
 }
@@ -65,6 +72,7 @@ func Mmap(f *os.File, size int) ([]byte, *[MaxMapSize]byte, error) {
 }
 
 func MadviseSequential(mmapHandle1 []byte) error {
+
 	err := unix.Madvise(mmapHandle1, syscall.MADV_SEQUENTIAL)
 	if err != nil && !errors.Is(err, syscall.ENOSYS) {
 		// Ignore not implemented error in kernel because it still works.

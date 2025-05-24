@@ -263,8 +263,8 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 			startSlot = downloadedBlocks[i].block.Block.Slot
 		}
 
-		fmt.Println(startSlot, lowerBound, count, b.slotToDownload.Load())
 		for currEndSlot := startSlot; currEndSlot > lowerBound; currEndSlot -= subCount { // inner iterations
+			time.Sleep(250 * time.Millisecond)
 			start := currEndSlot - subCount + 1
 			if currEndSlot < subCount {
 				start = 0
