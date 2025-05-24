@@ -1637,7 +1637,7 @@ func (dt *DomainRoTx) Close() {
 }
 
 // statelessFileIndex figures out ordinal of file within required range
-func (dt *DomainRoTx) statelessFileIndex(txFrom uint64, txTo uint64) int {
+func (dt *DomainRoTx) statelessFileIndex(txFrom uint64, txTo uint64) int { //nolint:unused
 	for fi, f := range dt.files {
 		if f.startTxNum == txFrom && f.endTxNum == txTo {
 			return fi
@@ -1710,14 +1710,14 @@ func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	}
 
 	if dt.d.largeValues {
-		c, err = tx.Cursor(dt.d.valuesTable)
+		c, err = tx.Cursor(dt.d.valuesTable) //nolint:gocritic
 		if err == nil {
 			dt.valsCs[tx] = c
 		}
 		return c, err
 
 	}
-	c, err = tx.CursorDupSort(dt.d.valuesTable)
+	c, err = tx.CursorDupSort(dt.d.valuesTable) //nolint:gocritic
 	if err == nil {
 		dt.valsCs[tx] = c
 	}
