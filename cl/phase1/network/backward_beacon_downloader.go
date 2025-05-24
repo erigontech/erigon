@@ -323,11 +323,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 		}
 
 		rangesToDownload := getNeededRanges(start, currEndSlot, b.pendingResults)
-		// check if the range is already present
-		if len(rangesToDownload) == 0 {
-			fmt.Println("No ranges to download, skipping", start, currEndSlot)
-			continue
-		}
+
 		// 2. request the chunk in parallel
 		for _, dr := range rangesToDownload {
 			// download the range in a goroutine
