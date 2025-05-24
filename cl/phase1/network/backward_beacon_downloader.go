@@ -139,11 +139,12 @@ type requestResult struct {
 func (b *BackwardBeaconDownloader) requestChunk(ctx context.Context, start, count uint64, maxSlot uint64) ([]*requestResult, error) {
 	fmt.Println("Requesting chunk", start, count, maxSlot)
 	// 2. request the chunk
-	blocks, peer, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
+	blocks, peer, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count+1)
+	fmt.Println("end Requesting chunk", start, count, maxSlot)
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println("end Requesting chunk", start, count, maxSlot)
+
 	if len(blocks) == 0 {
 		return nil, nil
 	}
