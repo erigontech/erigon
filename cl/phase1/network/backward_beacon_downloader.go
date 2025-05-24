@@ -329,7 +329,6 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 			continue
 		}
 		// 2. request the chunk in parallel
-		wg.Add(1)
 		for _, dr := range rangesToDownload {
 			// download the range in a goroutine
 			wg.Add(1)
