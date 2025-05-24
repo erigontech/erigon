@@ -667,7 +667,7 @@ func CalculateStateRoot(tx kv.TemporalRwTx) (*common.Hash, error) {
 		}
 	}
 	c.Close()
-	root, err := domains.ComputeCommitment(context.Background(), true, domains.BlockNum(), "")
+	root, err := domains.ComputeCommitment(context.Background(), tx, true, domains.BlockNum(), "")
 	if err != nil {
 		return nil, err
 	}

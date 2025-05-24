@@ -19,6 +19,7 @@ package state
 import (
 	"bytes"
 	"container/heap"
+	"context"
 	"encoding/binary"
 	"fmt"
 
@@ -131,44 +132,51 @@ func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 	heap.Init(hi.h)
 	var key, value []byte
 
-	if dc.d.largeValues {
-		valsCursor, err := hi.roTx.Cursor(dc.d.valuesTable) //nolint:gocritic
-		if err != nil {
-			return err
-		}
-		if key, value, err = valsCursor.Seek(hi.from); err != nil {
-			return err
-		}
-		if key != nil && (hi.to == nil || bytes.Compare(key[:len(key)-8], hi.to) < 0) {
-			k := key[:len(key)-8]
-			stepBytes := key[len(key)-8:]
-			step := ^binary.BigEndian.Uint64(stepBytes)
-			endTxNum := step * dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+	err := hi.roTx.Apply(context.Background(), func(tx kv.Tx) error {
+		if dc.d.largeValues {
+			valsCursor, err := hi.roTx.Cursor(dc.d.valuesTable) //nolint:gocritic
+			if err != nil {
+				return err
+			}
+			if key, value, err = valsCursor.Seek(hi.from); err != nil {
+				return err
+			}
+			if key != nil && (hi.to == nil || bytes.Compare(key[:len(key)-8], hi.to) < 0) {
+				k := key[:len(key)-8]
+				stepBytes := key[len(key)-8:]
+				step := ^binary.BigEndian.Uint64(stepBytes)
+				endTxNum := step * dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
 
-			heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(value), cNonDup: valsCursor, endTxNum: endTxNum, reverse: true})
-		}
-	} else {
-		valsCursor, err := hi.roTx.CursorDupSort(dc.d.valuesTable) //nolint:gocritic
-		if err != nil {
-			return err
-		}
+				heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(value), cNonDup: valsCursor, endTxNum: endTxNum, reverse: true})
+			}
+		} else {
+			valsCursor, err := hi.roTx.CursorDupSort(dc.d.valuesTable) //nolint:gocritic
+			if err != nil {
+				return err
+			}
 
-		if key, value, err = valsCursor.Seek(hi.from); err != nil {
-			return err
-		}
-		if key != nil && (hi.to == nil || bytes.Compare(key, hi.to) < 0) {
-			stepBytes := value[:8]
-			value = value[8:]
-			step := ^binary.BigEndian.Uint64(stepBytes)
-			endTxNum := step * dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+			if key, value, err = valsCursor.Seek(hi.from); err != nil {
+				return err
+			}
+			if key != nil && (hi.to == nil || bytes.Compare(key, hi.to) < 0) {
+				stepBytes := value[:8]
+				value = value[8:]
+				step := ^binary.BigEndian.Uint64(stepBytes)
+				endTxNum := step * dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
 
-			heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(key), val: common.Copy(value), cDup: valsCursor, endTxNum: endTxNum, reverse: true})
+				heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(key), val: common.Copy(value), cDup: valsCursor, endTxNum: endTxNum, reverse: true})
+			}
 		}
+		return nil
+	})
+
+	if err != nil {
+		return err
 	}
 
 	for i, item := range dc.files {
 		// todo release btcursor when iter over/make it truly stateless
-		btCursor, err := dc.statelessBtree(i).Seek(dc.statelessGetter(i), hi.from)
+		btCursor, err := dc.statelessBtree(i).Seek(dc.reader(i), hi.from)
 		if err != nil {
 			return err
 		}
@@ -353,7 +361,7 @@ func (dt *DomainRoTx) debugIteratePrefix(prefix []byte, haveRamUpdates bool,
 	}
 
 	for i, item := range dt.files {
-		cursor, err := item.src.bindex.Seek(dt.statelessGetter(i), prefix)
+		cursor, err := item.src.bindex.Seek(dt.reader(i), prefix)
 		if err != nil {
 			return err
 		}

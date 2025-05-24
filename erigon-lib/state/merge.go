@@ -41,6 +41,10 @@ import (
 )
 
 func (d *Domain) dirtyFilesEndTxNumMinimax() uint64 {
+	if d == nil {
+		return 0
+	}
+
 	minimax := d.History.dirtyFilesEndTxNumMinimax()
 	if _max, ok := d.dirtyFiles.Max(); ok {
 		endTxNum := _max.endTxNum

@@ -18,6 +18,7 @@ type u128 struct{ hi, lo uint64 }      //nolint
 type u192 struct{ hi, lo, ext uint64 } //nolint
 
 type DomainGetFromFileCache struct {
+	sync.RWMutex
 	*freelru.LRU[uint64, domainGetFromFileCacheItem]
 	enabled, trace bool
 	limit          uint32
@@ -43,13 +44,30 @@ func NewDomainGetFromFileCache(limit uint32) *DomainGetFromFileCache {
 	return &DomainGetFromFileCache{LRU: c, enabled: domainGetFromFileCacheEnabled, trace: domainGetFromFileCacheTrace, limit: limit}
 }
 
+func (c *DomainGetFromFileCache) Add(key uint64, value domainGetFromFileCacheItem) (evicted bool) {
+	c.Lock()
+	defer c.Unlock()
+	return c.LRU.Add(key, value)
+}
+
+func (c *DomainGetFromFileCache) Get(key uint64) (value domainGetFromFileCacheItem, ok bool) {
+	c.Lock() // get upates cache vars
+	defer c.Unlock()
+	return c.LRU.Get(key)
+}
+
 func (c *DomainGetFromFileCache) SetTrace(v bool) { c.trace = v }
-func (c *DomainGetFromFileCache) LogStats(domain kv.Domain) {
-	if c == nil || !c.enabled || !c.trace {
+func (c *DomainGetFromFileCache) LogStats(dt kv.Domain) {
+	if c == nil {
+		return
+	}
+	c.RLock()
+	defer c.RUnlock()
+	if !c.enabled || !c.trace {
 		return
 	}
 	m := c.Metrics()
-	log.Warn("[dbg] DomainGetFromFileCache", "a", domain.String(), "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)), "hit", m.Hits, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", c.limit)
+	log.Warn("[dbg] DomainGetFromFileCache", "a", dt.String(), "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)), "hit", m.Hits, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", c.limit)
 }
 
 func newDomainVisible(name kv.Domain, files []visibleFile) *domainVisible {

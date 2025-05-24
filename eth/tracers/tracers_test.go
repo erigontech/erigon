@@ -101,7 +101,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	}
 
 	m := mock.Mock(t)
-	tx, err := m.DB.BeginRw(m.Ctx)
+	tx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 	rules := chain.AllProtocolChanges.Rules(context.BlockNumber, context.Time)
