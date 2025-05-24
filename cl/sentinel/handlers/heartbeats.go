@@ -48,10 +48,11 @@ func (c *ConsensusHandlers) goodbyeHandler(s network.Stream) error {
 			log.Warn("Received goodbye message from peer", "v", v)
 		}
 	}
-
-	return ssz_snappy.EncodeAndWrite(s, &cltypes.Ping{
+	// ignore the error from goodbye, we don't care about it
+	ssz_snappy.EncodeAndWrite(s, &cltypes.Ping{
 		Id: 1,
 	}, SuccessfulResponsePrefix)
+	return nil
 }
 
 func (c *ConsensusHandlers) metadataV1Handler(s network.Stream) error {
