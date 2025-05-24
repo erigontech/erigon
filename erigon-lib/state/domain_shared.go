@@ -384,15 +384,16 @@ func (sd *SharedDomains) SetTrace(b bool) {
 	sd.trace = b
 }
 
-func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte) ([]byte, bool, error) {
-	var firstKey []byte
+func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
+	var firstKey, firstVal []byte
 	var hasPrefix bool
 	err := sd.IteratePrefix(domain, prefix, func(k []byte, v []byte, step uint64) (bool, error) {
 		firstKey = common.CopyBytes(k)
+		firstVal = common.CopyBytes(v)
 		hasPrefix = true
 		return false, nil // do not continue, end on first occurrence
 	})
-	return firstKey, hasPrefix, err
+	return firstKey, firstVal, hasPrefix, err
 }
 
 // IterateStoragePrefix iterates over key-value pairs of the storage domain that start with given prefix
@@ -550,6 +551,11 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k, v []byte, prevVal []byte
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
 func (sd *SharedDomains) DomainDel(domain kv.Domain, k, prevVal []byte, prevStep uint64) error {
+	composite := k1
+	if k2 != nil {
+		composite = make([]byte, 0, len(k1)+len(k2))
+		composite = append(append(composite, k1...), k2...)
+	}
 	if prevVal == nil {
 		var err error
 		prevVal, prevStep, err = sd.GetLatest(domain, k)
