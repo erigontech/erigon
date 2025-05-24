@@ -341,10 +341,8 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 
 				// request the range
 				downloadedBlocksTemp := b.requestRange(ctx, downloadRange, b.slotToDownload.Load())
-				if downloadedBlocksTemp == nil {
-					return
-				}
 				fmt.Println("done")
+
 				// append the downloaded blocks to the main list
 				b.downloadedBlocksLock.Lock()
 				defer b.downloadedBlocksLock.Unlock()
