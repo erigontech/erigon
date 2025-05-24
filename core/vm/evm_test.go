@@ -28,12 +28,6 @@ import (
 )
 
 func TestInterpreterReadonly(t *testing.T) {
-	//tx, sd := testTemporalTxSD(t, testTemporalDB(t))
-	//defer tx.Rollback()
-	//
-	//r, w := state.NewReaderV3(sd), state.NewWriter(sd, nil)
-	//s := state.New(r)
-
 	t.Parallel()
 	c := NewJumpDestCache(128)
 	rapid.Check(t, func(t *rapid.T) {
