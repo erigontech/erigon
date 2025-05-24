@@ -536,7 +536,7 @@ if ($BuildTarget -eq "db-tools") {
 } elseif ($BuildTarget -eq "test-all") {
     Write-Host " Running all tests ..."
     $env:GODEBUG = "cgocheck=0"
-    $TestCommand = "go test $($Erigon.BuildFlags) --timeout 60m ./... | Where-Object { $_ -notmatch 'PASS: ' } | Where-Object { $_ -notmatch '=== CONT' } | Where-Object { $_ -notmatch '=== RUN' } | Where-Object { $_ -notmatch '=== PAUSE' } | Where-Object { $_ -notmatch 'coverage: ' }
+    $TestCommand = "go test $($Erigon.BuildFlags) --timeout 60m ./... | Where-Object { $_ -notmatch 'PASS: ' } | Where-Object { $_ -notmatch '=== CONT' } | Where-Object { $_ -notmatch '=== RUN' } | Where-Object { $_ -notmatch '=== PAUSE' } | Where-Object { $_ -notmatch 'coverage: ' }""
     Invoke-Expression -Command $TestCommand | Out-Host
     if (!($?)) {
         Write-Host " ERROR : Tests failed"
