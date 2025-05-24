@@ -264,7 +264,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 		}
 
 		for currEndSlot := startSlot; currEndSlot > lowerBound; currEndSlot -= subCount { // inner iterations
-			time.Sleep(250 * time.Millisecond)
+			<-b.reqInterval.C // wait for the next request interval
 			start := currEndSlot - subCount + 1
 			if currEndSlot < subCount {
 				start = 0
