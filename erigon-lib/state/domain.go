@@ -1756,8 +1756,7 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 		_, stepWithVal, err := func() (_ []byte, _ []byte, err error) {
 			defer func() {
 				if rec := recover(); rec != nil {
-					fmt.Println(fmt.Sprintf("%p: seek failed for: %d", dt, roTx.ViewID()), "reason", rec, "stack", dbg.Stack())
-					err = fmt.Errorf("paniced ")
+					err = fmt.Errorf("%p: seek failed for: %d: reason %s", dt, roTx.ViewID(), rec)
 				}
 			}()
 			return valsC.SeekExact(key)
