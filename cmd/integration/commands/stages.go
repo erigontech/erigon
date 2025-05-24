@@ -1502,6 +1502,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 		bridgeStore = bridge.NewSnapshotStore(bridge.NewDbStore(db), borSn, chainConfig.Bor)
 		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewDbStore(db), borSn)
 	}
+	allSn.DownloadComplete() // mark as ready
 	borSn.DownloadComplete() // mark as ready
 	blockRetire := freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, heimdallStore, bridgeStore, chainConfig, &cfg, notifications.Events, blockSnapBuildSema, logger)
 
