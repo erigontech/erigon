@@ -137,6 +137,7 @@ type requestResult struct {
 
 // RequestChunk requests a chunk of blocks from the remote beacon node.
 func (b *BackwardBeaconDownloader) requestChunk(ctx context.Context, start, count uint64, maxSlot uint64) ([]*requestResult, error) {
+	fmt.Println("Requesting chunk", start, count, maxSlot)
 	// 2. request the chunk
 	blocks, peer, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
 	if err != nil {
