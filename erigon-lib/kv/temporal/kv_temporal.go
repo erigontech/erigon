@@ -389,7 +389,7 @@ func (tx *tx) getLatest(name kv.Domain, dbTx kv.Tx, k []byte) (v []byte, step ui
 	return v, step, err
 }
 
-func (tx *Tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, bool, error) {
+func (tx *Tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
 	return tx.hasPrefix(name, tx.Tx, prefix)
 }
 
@@ -397,7 +397,7 @@ func (tx *RwTx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, 
 	return tx.hasPrefix(name, tx.RwTx, prefix)
 }
 
-func (tx *tx) hasPrefix(name kv.Domain, dbTx kv.Tx, prefix []byte) ([]byte, bool, error) {
+func (tx *tx) hasPrefix(name kv.Domain, dbTx kv.Tx, prefix []byte) ([]byte, []byte, bool, error) {
 	to, ok := kv.NextSubtree(prefix)
 	if !ok {
 		to = nil
