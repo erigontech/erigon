@@ -77,7 +77,7 @@ type JumpDestCache struct {
 }
 
 var (
-	jumpDestCacheLimit = dbg.EnvInt("JD_LRU", 128)
+	JumpDestCacheLimit = dbg.EnvInt("JD_LRU", 128)
 	jumpDestCacheTrace = dbg.EnvBool("JD_LRU_TRACE", false)
 )
 
@@ -93,7 +93,7 @@ func (c *JumpDestCache) LogStats() {
 	if c == nil || !c.trace {
 		return
 	}
-	log.Warn("[dbg] JumpDestCache", "hit", c.hit, "total", c.total, "limit", jumpDestCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(c.hit)/float64(c.total)))
+	log.Warn("[dbg] JumpDestCache", "hit", c.hit, "total", c.total, "limit", JumpDestCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(c.hit)/float64(c.total)))
 }
 
 // NewContract returns a new contract environment for the execution of EVM.

@@ -66,3 +66,6 @@ const (
 func AlmostAllCPUs() int {
 	return max(1, runtime.GOMAXPROCS(-1)-1)
 }
+func HalfCPUs() int {
+	return max(1, runtime.GOMAXPROCS(-1)/2)
+}

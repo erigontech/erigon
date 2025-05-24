@@ -18,6 +18,7 @@ package shutter_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -26,7 +27,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/turbo/testlog"
+	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/testhelpers"
 )
@@ -38,15 +39,23 @@ func TestBlockTracker(t *testing.T) {
 	logger := testlog.Logger(t, log.LvlTrace)
 	recvC := make(chan *remoteproto.StateChangeBatch)
 	bl := shutter.NewBlockListener(logger, testhelpers.NewStateChangesClientMock(ctx, recvC))
+	btInitialisationWg := &sync.WaitGroup{}
+	btInitialisationWg.Add(1)
 	bnReader := func(ctx context.Context) (*uint64, error) {
 		start := uint64(10)
+		btInitialisationWg.Done()
 		return &start, nil
 	}
 	bt := shutter.NewBlockTracker(logger, bl, bnReader)
 	eg, egCtx := errgroup.WithContext(ctx)
-	defer eg.Wait()
+	defer func(eg *errgroup.Group) {
+		cancel()
+		err := eg.Wait()
+		require.ErrorIs(t, err, context.Canceled)
+	}(eg)
 	eg.Go(func() error { return bl.Run(egCtx) })
 	eg.Go(func() error { return bt.Run(egCtx) })
+	btInitialisationWg.Wait() // This ensures the block tracker has been initialised i.e. it observes the block listener
 
 	waitCtx1, waitCtxCancel1 := context.WithTimeout(ctx, 50*time.Millisecond)
 	defer waitCtxCancel1()
@@ -58,8 +67,4 @@ func TestBlockTracker(t *testing.T) {
 	defer waitCtxCancel2()
 	err = bt.Wait(waitCtx2, 15)
 	require.NoError(t, err)
-
-	cancel()
-	err = eg.Wait()
-	require.ErrorIs(t, err, context.Canceled)
 }

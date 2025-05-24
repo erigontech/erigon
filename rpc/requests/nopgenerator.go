@@ -25,7 +25,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/p2p"
+	p2p "github.com/erigontech/erigon-p2p"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )

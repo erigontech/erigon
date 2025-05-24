@@ -14,7 +14,7 @@ import (
 
 	event "github.com/erigontech/erigon-lib/event"
 	sentryproto "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	eth "github.com/erigontech/erigon/p2p/protocols/eth"
+	eth "github.com/erigontech/erigon-p2p/protocols/eth"
 	gomock "go.uber.org/mock/gomock"
 )
 

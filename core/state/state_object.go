@@ -294,7 +294,7 @@ func (so *stateObject) SetBalance(amount *uint256.Int, reason tracing.BalanceCha
 		prev:    so.data.Balance,
 	})
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnBalanceChange != nil {
-		so.db.tracingHooks.OnBalanceChange(so.address, so.Balance(), amount, reason)
+		so.db.tracingHooks.OnBalanceChange(so.address, so.data.Balance, *amount, reason)
 	}
 	so.setBalance(amount)
 }

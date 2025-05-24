@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
 
@@ -352,6 +353,19 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 				logged = true
 			}
 		}
+
+		// TODO - move this to a trace & set in the worker
+		if dbg.TraceInstructions && in.evm.intraBlockState.Trace() {
+			var str string
+			if operation.string != nil {
+				str = operation.string(*pc, callContext)
+			} else {
+				str = op.String()
+			}
+
+			fmt.Printf("(%d.%d) %5d %5d %s\n", in.evm.intraBlockState.TxIndex(), in.evm.intraBlockState.Incarnation(), _pc, cost, str)
+		}
+
 		if memorySize > 0 {
 			mem.Resize(memorySize)
 		}

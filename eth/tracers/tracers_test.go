@@ -29,6 +29,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -36,13 +37,12 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/tests"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 
 	// Force-load native and js packages, to trigger registration
-	"github.com/erigontech/erigon/eth/tracers"
 	_ "github.com/erigontech/erigon/eth/tracers/js"
 	_ "github.com/erigontech/erigon/eth/tracers/native"
 )
@@ -104,7 +104,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	rules := params.AllProtocolChanges.Rules(context.BlockNumber, context.Time)
+	rules := chain.AllProtocolChanges.Rules(context.BlockNumber, context.Time)
 	statedb, _ := tests.MakePreState(rules, tx, alloc, context.BlockNumber)
 
 	// Create the tracer, the EVM environment and run it
@@ -112,7 +112,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to prestate tracer: %v", err)
 	}
-	evm := vm.NewEVM(context, txContext, statedb, params.AllProtocolChanges, vm.Config{Tracer: tracer.Hooks})
+	evm := vm.NewEVM(context, txContext, statedb, chain.AllProtocolChanges, vm.Config{Tracer: tracer.Hooks})
 
 	msg, err := txn.AsMessage(*signer, nil, rules)
 	if err != nil {

@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon-db/rawdb"
@@ -820,7 +821,7 @@ func (api *TraceAPIImpl) callBlock(
 	}
 
 	syscall := func(contract common.Address, data []byte) ([]byte, error) {
-		ret, _, err := core.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */, tracingHooks)
+		ret, _, err := core.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */, tracingHooks, vm.Config{})
 		return ret, err
 	}
 

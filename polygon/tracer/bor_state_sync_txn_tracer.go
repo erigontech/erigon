@@ -159,7 +159,7 @@ func (bsstt *borStateSyncTxnTracer) OnGenesisBlock(b *types.Block, alloc types.G
 	}
 }
 
-func (bsstt *borStateSyncTxnTracer) OnBalanceChange(a common.Address, prev, new *uint256.Int, reason tracing.BalanceChangeReason) {
+func (bsstt *borStateSyncTxnTracer) OnBalanceChange(a common.Address, prev, new uint256.Int, reason tracing.BalanceChangeReason) {
 	if bsstt.Tracer.OnBalanceChange != nil {
 		bsstt.Tracer.OnBalanceChange(a, prev, new, reason)
 	}

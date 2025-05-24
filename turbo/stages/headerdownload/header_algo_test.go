@@ -22,11 +22,11 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -36,7 +36,7 @@ func TestSideChainInsert(t *testing.T) {
 	funds := big.NewInt(1000000000)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
-	chainConfig := params.AllProtocolChanges
+	chainConfig := chain.AllProtocolChanges
 	gspec := &types.Genesis{
 		Config: chainConfig,
 		Alloc: types.GenesisAlloc{

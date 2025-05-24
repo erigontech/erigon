@@ -27,10 +27,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-db/interfaces"
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/cmp"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -48,7 +48,6 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
@@ -211,9 +210,6 @@ func ExecV3(ctx context.Context,
 	inMemExec := txc.Doms != nil
 	// TODO: e35 doesn't support parallel-exec yet
 	parallel = false //nolint
-	if parallel && cfg.chainConfig.ChainName == networkname.Gnosis {
-		panic("gnosis consensus doesn't support parallel exec yet: https://github.com/erigontech/erigon/issues/12054")
-	}
 
 	blockReader := cfg.blockReader
 	chainConfig := cfg.chainConfig
@@ -966,7 +962,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 
 }
 
-func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, blockNum uint64) (b *types.Block, err error) {
+func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader interfaces.BlockReader, blockNum uint64) (b *types.Block, err error) {
 	if tx == nil {
 		tx, err = db.BeginRo(ctx)
 		if err != nil {
@@ -981,8 +977,5 @@ func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader ser
 	if b == nil {
 		return nil, nil
 	}
-	//for _, txn := range b.Transactions() {
-	//	_ = txn.Hash()
-	//}
 	return b, err
 }

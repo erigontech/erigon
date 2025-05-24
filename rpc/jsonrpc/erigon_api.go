@@ -23,8 +23,8 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/types"
+	p2p "github.com/erigontech/erigon-p2p"
 	"github.com/erigontech/erigon/eth/filters"
-	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )

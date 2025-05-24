@@ -137,7 +137,7 @@ func (t *muxTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	}
 }
 
-func (t *muxTracer) OnBalanceChange(a common.Address, prev, new *uint256.Int, reason tracing.BalanceChangeReason) {
+func (t *muxTracer) OnBalanceChange(a common.Address, prev, new uint256.Int, reason tracing.BalanceChangeReason) {
 	for _, t := range t.tracers {
 		if t.OnBalanceChange != nil {
 			t.OnBalanceChange(a, prev, new, reason)

@@ -17,7 +17,6 @@
 package rpchelper
 
 import (
-	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -291,7 +290,7 @@ func (ff *Filters) HandlePendingBlock(reply *txpool.OnPendingBlockReply) {
 	if reply == nil || len(reply.RplBlock) == 0 {
 		return
 	}
-	if err := rlp.Decode(bytes.NewReader(reply.RplBlock), b); err != nil {
+	if err := rlp.DecodeBytes(reply.RplBlock, b); err != nil {
 		ff.logger.Warn("OnNewPendingBlock rpc filters, unprocessable payload", "err", err)
 	}
 
@@ -339,7 +338,7 @@ func (ff *Filters) HandlePendingLogs(reply *txpool.OnPendingLogsReply) {
 		return
 	}
 	l := []*types.Log{}
-	if err := rlp.Decode(bytes.NewReader(reply.RplLogs), &l); err != nil {
+	if err := rlp.DecodeBytes(reply.RplLogs, &l); err != nil {
 		ff.logger.Warn("OnNewPendingLogs rpc filters, unprocessable payload", "err", err)
 	}
 	ff.pendingLogsSubs.Range(func(k PendingLogsSubID, v Sub[types.Logs]) error {
@@ -618,7 +617,7 @@ func (ff *Filters) onNewHeader(event *remote.SubscribeReply) error {
 	if len(payload) == 0 {
 		return nil
 	}
-	err := rlp.Decode(bytes.NewReader(payload), &header)
+	err := rlp.DecodeBytes(payload, &header)
 	if err != nil {
 		return fmt.Errorf("unprocessable payload: %w", err)
 	}

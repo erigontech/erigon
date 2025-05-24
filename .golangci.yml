@@ -140,10 +140,6 @@ linters:
       - linters:
           - gocritic
           - gosec
-        path: p2p/simulations
-      - linters:
-          - gocritic
-          - gosec
         path: p2p/dnsdisc
     paths:
       - third_party$

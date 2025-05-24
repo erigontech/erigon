@@ -29,7 +29,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/p2p/sentry"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon-p2p/protocols/eth"
 )
 
 func NewService(logger log.Logger, maxPeers int, sc sentryproto.SentryClient, sdf sentry.StatusDataFactory) *Service {
