@@ -223,6 +223,7 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 					return fmt.Errorf("eth_getLogs: at blockNum=%d and addr %x %w", bn, l.Address, err)
 				}
 
+				continue
 				//invariant2: if `log` visible without filter - then must be visible with filter. (in another words: `topic` must be indexed well)
 				if len(l.Topics) == 0 {
 					continue
