@@ -439,6 +439,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		log.Info("[rpc] config", "sync", cfg.Sync, "polygonSync", polygonSync)
 
 		if polygonSync {
+			allSnapshots.DownloadComplete()    // mark as ready
 			allBorSnapshots.DownloadComplete() // mark as ready
 			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, cfg.Dirs.DataDir, true, roTxLimit), allBorSnapshots)
 			bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(cfg.Dirs.DataDir, logger, true, roTxLimit), allBorSnapshots, cc.Bor)
