@@ -25,6 +25,7 @@ import (
 	"sync/atomic"
 
 	"github.com/erigontech/erigon-lib/common/empty"
+	"github.com/erigontech/erigon/core/state"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -76,7 +77,7 @@ type EVM struct {
 	Context evmtypes.BlockContext
 	evmtypes.TxContext
 	// IntraBlockState gives access to the underlying state
-	intraBlockState evmtypes.IntraBlockState
+	intraBlockState *state.IntraBlockState
 
 	// chainConfig contains information about the current chain
 	chainConfig *chain.Config
@@ -98,7 +99,7 @@ type EVM struct {
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
 // only ever be used *once*.
-func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmtypes.IntraBlockState, chainConfig *chain.Config, vmConfig Config) *EVM {
+func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState, chainConfig *chain.Config, vmConfig Config) *EVM {
 	if vmConfig.NoBaseFee {
 		if txCtx.GasPrice.IsZero() {
 			blockCtx.BaseFee = new(uint256.Int)
@@ -107,7 +108,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 	evm := &EVM{
 		Context:         blockCtx,
 		TxContext:       txCtx,
-		intraBlockState: state,
+		intraBlockState: ibs.(*state.IntraBlockState),
 		config:          vmConfig,
 		chainConfig:     chainConfig,
 		chainRules:      chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time),
@@ -125,7 +126,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 // This is not threadsafe and should only be done very cautiously.
 func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState) {
 	evm.TxContext = txCtx
-	evm.intraBlockState = ibs
+	evm.intraBlockState = ibs.(*state.IntraBlockState)
 
 	// ensure the evm is reset to be used again
 	evm.abort.Store(false)
@@ -139,7 +140,7 @@ func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtype
 	}
 	evm.Context = blockCtx
 	evm.TxContext = txCtx
-	evm.intraBlockState = ibs
+	evm.intraBlockState = ibs.(*state.IntraBlockState)
 	if vmConfig.JumpDestCache == nil && evm.config.JumpDestCache != nil {
 		vmConfig.JumpDestCache = evm.config.JumpDestCache
 	}
