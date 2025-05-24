@@ -347,7 +347,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 			// download the range in a goroutine
 			wg.Add(1)
 			// sleep to avoid flooding the network with requests
-			time.Sleep(150 * time.Millisecond)
+			<-b.reqInterval.C
 			go func(downloadRange downloadRange) {
 				defer wg.Done()
 
