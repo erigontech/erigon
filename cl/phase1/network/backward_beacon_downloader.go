@@ -382,7 +382,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 			panic(err)
 		}
 		if currentRoot != currentParentRoot {
-			b.rpc.BanPeer(downloadedBlocks[i].peer)
+			//b.rpc.BanPeer(downloadedBlocks[i].peer)
 			// remove the block from the cache
 			b.pendingResults.Remove(downloadedBlocks[i].block.Block.Slot)
 			// truncate the list
