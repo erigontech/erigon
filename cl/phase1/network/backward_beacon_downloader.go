@@ -396,7 +396,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 			// remove the block from the cache
 			b.pendingResults.Remove(downloadedBlocks[i].block.Block.Slot)
 			// truncate the list
-			downloadedBlocks = downloadedBlocks[:i]
+			downloadedBlocks = downloadedBlocks[i:]
 			log.Debug("Gotten unexpected root", "got", common.Hash(currentRoot), "expected", common.Hash(currentParentRoot))
 			break
 		}
