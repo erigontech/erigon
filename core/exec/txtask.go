@@ -458,7 +458,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			ret, _, err := core.SysCallContract(contract, data, chainConfig, ibs, header, engine, constCall /* constCall */, evm.Config().Tracer)
+			ret, _, err := core.SysCallContract(contract, data, chainConfig, ibs, header, engine, constCall /* constCall */, evm.Config().Tracer, evm.Config())
 			return ret, err
 		}
 		engine.Initialize(chainConfig, chainReader, header, ibs, syscall, txTask.Logger, nil)

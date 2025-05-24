@@ -492,7 +492,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 				ibs := state.New(state.NewHistoryReaderV3())
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 				syscall := func(contract common.Address, data []byte) ([]byte, error) {
-					ret, logs, err := core.SysCallContract(contract, data, cfg.ChainConfig, ibs, txTask.Header, txTask.Engine, false /* constCall */, hooks)
+					ret, logs, err := core.SysCallContract(contract, data, cfg.ChainConfig, ibs, txTask.Header, txTask.Engine, false /* constCall */, hooks, vm.Config{})
 					result.Logs = append(result.Logs, logs...)
 					return ret, err
 				}
@@ -656,7 +656,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	return nil
 }
 
-func BlockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, blockNum uint64) (b *types.Block, err error) {
+func BlockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader interfaces.BlockReader, blockNum uint64) (b *types.Block, err error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()

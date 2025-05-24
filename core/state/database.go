@@ -124,8 +124,8 @@ func (*NoopReader) ReadAccountData(address common.Address) (*accounts.Account, e
 func (*NoopReader) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
 	return nil, nil
 }
-func (*NoopReader) ReadAccountStorage(address common.Address, key common.Hash) ([]byte, error) {
-	return nil, nil
+func (*NoopReader) ReadAccountStorage(address common.Address, key common.Hash) (uint256.Int, bool, error) {
+	return uint256.Int{}, false, nil
 }
 func (*NoopReader) ReadAccountCode(address common.Address) ([]byte, error)        { return nil, nil }
 func (*NoopReader) ReadAccountCodeSize(address common.Address) (int, error)       { return 0, nil }

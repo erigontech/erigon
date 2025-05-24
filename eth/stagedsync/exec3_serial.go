@@ -15,6 +15,7 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/exec"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3"
@@ -132,7 +133,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, isInit
 				ibs := state.New(state.NewReaderV3(se.rs.Domains(), se.applyTx))
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 				syscall := func(contract common.Address, data []byte) ([]byte, error) {
-					ret, logs, err := core.SysCallContract(contract, data, se.cfg.chainConfig, ibs, txTask.Header, se.cfg.engine, false /* constCall */, se.hooks)
+					ret, logs, err := core.SysCallContract(contract, data, se.cfg.chainConfig, ibs, txTask.Header, se.cfg.engine, false /* constCall */, se.hooks, vm.Config{})
 					if err != nil {
 						return nil, err
 					}

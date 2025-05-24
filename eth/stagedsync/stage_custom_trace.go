@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
+	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/exec"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -216,7 +217,7 @@ Loop:
 
 func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec3.ExecArgs, db kv.TemporalRwDB, fromBlock, toBlock uint64, logPrefix string, producingDomain kv.Domain, logger log.Logger) error {
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+		ac := state2.AggTx(tx)
 		if err := ac.GreedyPruneHistory(ctx, kv.CommitmentDomain, tx); err != nil {
 			return err
 		}
