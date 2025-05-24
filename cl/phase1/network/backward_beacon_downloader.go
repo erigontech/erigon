@@ -353,7 +353,9 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 			break
 		}
 	}
+	fmt.Println("XXY")
 	wg.Wait()
+	fmt.Println("XXX")
 
 	// remove all nil entries
 	downloadedBlocks = removeNils(downloadedBlocks, downloadedBlocksTempBuffer)
