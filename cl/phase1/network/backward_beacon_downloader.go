@@ -137,10 +137,8 @@ type requestResult struct {
 
 // RequestChunk requests a chunk of blocks from the remote beacon node.
 func (b *BackwardBeaconDownloader) requestChunk(ctx context.Context, start, count uint64, maxSlot uint64) ([]*requestResult, error) {
-	fmt.Println("Requesting chunk", start, count, maxSlot)
 	// 2. request the chunk
 	blocks, peer, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count+1)
-	fmt.Println("end Requesting chunk", start, count, maxSlot)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +170,6 @@ func (b *BackwardBeaconDownloader) requestRange(ctx context.Context, downloadRan
 	// give it a 1 second timeout
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, 1*time.Second)
 	defer cancel()
-	x := time.Now()
 
 	count := downloadRange.end - downloadRange.start + 1
 	// 2. request the chunk
@@ -184,7 +181,7 @@ func (b *BackwardBeaconDownloader) requestRange(ctx context.Context, downloadRan
 	if requestsResult == nil {
 		return
 	}
-	fmt.Println("Gotten chunk", downloadRange.start, count, len(requestsResult), time.Since(x))
+
 	downloadedBlocks = append(downloadedBlocks, requestsResult...)
 	for _, block := range requestsResult {
 		if block == nil {
@@ -333,11 +330,9 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 			time.Sleep(150 * time.Millisecond)
 			go func(downloadRange downloadRange) {
 				defer wg.Done()
-				fmt.Println(downloadRange)
 
 				// request the range
 				downloadedBlocksTemp := b.requestRange(ctx, downloadRange, b.slotToDownload.Load())
-				fmt.Println("done")
 
 				// append the downloaded blocks to the main list
 				b.downloadedBlocksLock.Lock()
@@ -362,9 +357,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 			break
 		}
 	}
-	fmt.Println("XXY")
 	wg.Wait()
-	fmt.Println("XXX")
 
 	// remove all nil entries
 	downloadedBlocks = removeNils(downloadedBlocks, downloadedBlocksTempBuffer)
@@ -399,12 +392,12 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 		}
 		currentParentRoot = downloadedBlocks[i].block.Block.ParentRoot
 	}
-	fmt.Println("Downloaded blocks", len(downloadedBlocks), startSlot, lowerBound, count, b.slotToDownload.Load())
+	//fmt.Println("Downloaded blocks", len(downloadedBlocks), startSlot, lowerBound, count, b.slotToDownload.Load())
 	if len(downloadedBlocks) == 0 {
 		return nil
 	}
 
-	fmt.Println("Gotten all blocks", len(downloadedBlocks), b.slotToDownload.Load(), lowerBound, count)
+	//fmt.Println("Gotten all blocks", len(downloadedBlocks), b.slotToDownload.Load(), lowerBound, count)
 
 	// Import new blocks, order is forward so reverse the whole packet
 	for i := len(downloadedBlocks) - 1; i >= 0; i-- {
