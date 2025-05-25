@@ -23,6 +23,7 @@ import (
 	"slices"
 
 	"github.com/RoaringBitmap/roaring/v2"
+	"github.com/erigontech/erigon-lib/common/dbg"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -257,7 +258,11 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 					continue
 				}
 
-				borLogs, err := api.borReceiptGenerator.GenerateBorLogs(ctx, events, api._txNumReader, tx, header, chainConfig, txIndex, len(logs))
+				var logIndex int
+				if len(logs) > 0 {
+					logIndex = int(logs[len(logs)-1].Index)
+				}
+				borLogs, err := api.borReceiptGenerator.GenerateBorLogs(ctx, events, api._txNumReader, tx, header, chainConfig, txIndex, logIndex)
 				if err != nil {
 					return logs, err
 				}
@@ -278,7 +283,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 					})
 				}
 			}
-			if err := noDuplicates(logs, fmt.Sprintf("bn=%d, ti=%d, crit:=%s", blockNum, txIndex, crit)); err != nil {
+			if err := assertNoDuplicates(logs, fmt.Sprintf("bn=%d, ti=%d, crit:=%s", blockNum, txIndex, crit)); err != nil {
 				panic(err)
 				return nil, err
 			}
@@ -315,12 +320,12 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if r == nil {
 			return nil, err
 		}
-		if err := noDuplicates2(r.Logs, blockNum); err != nil {
+		if err := assertNoDuplicates2(r.Logs, blockNum); err != nil {
 			panic(err)
 			return nil, err
 		}
 		filtered := r.Logs.Filter(addrMap, crit.Topics, 0)
-		if err := noDuplicates2(filtered, blockNum); err != nil {
+		if err := assertNoDuplicates2(filtered, blockNum); err != nil {
 			panic(err)
 			return nil, err
 		}
@@ -340,7 +345,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			})
 		}
 
-		if err := noDuplicates(logs, fmt.Sprintf("bn=%d, ti=%d, crit:=%s", blockNum, txIndex, crit)); err != nil {
+		if err := assertNoDuplicates(logs, fmt.Sprintf("bn=%d, ti=%d, crit:=%s", blockNum, txIndex, crit)); err != nil {
 			panic(err)
 			return nil, err
 		}
@@ -349,7 +354,10 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	return logs, nil
 }
 
-func noDuplicates(logs types.ErigonLogs, msg string) error {
+func assertNoDuplicates(logs types.ErigonLogs, msg string) error {
+	if !dbg.AssertEnabled {
+		return nil
+	}
 	if len(logs) <= 1 {
 		return nil
 	}
@@ -367,7 +375,10 @@ func noDuplicates(logs types.ErigonLogs, msg string) error {
 	}
 	return nil
 }
-func noDuplicates2(logs types.Logs, bn uint64) error {
+func assertNoDuplicates2(logs types.Logs, bn uint64) error {
+	if !dbg.AssertEnabled {
+		return nil
+	}
 	if len(logs) <= 1 {
 		return nil
 	}
