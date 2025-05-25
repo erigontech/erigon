@@ -24,6 +24,7 @@ import (
 	"sort"
 	"strconv"
 
+	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain/params"
@@ -98,7 +99,7 @@ func opSelfBalance(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeCo
 	if err != nil {
 		return nil, err
 	}
-	callContext.Stack.push(balance)
+	callContext.Stack.push(*balance)
 	return nil, nil
 }
 
@@ -117,7 +118,7 @@ func enable1344(jt *JumpTable) {
 // opChainID implements CHAINID opcode
 func opChainID(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeContext) ([]byte, error) {
 	chainId, _ := uint256.FromBig(interpreter.evm.ChainRules().ChainID)
-	callContext.Stack.push(chainId)
+	callContext.Stack.push(*chainId)
 	return nil, nil
 }
 
@@ -224,7 +225,7 @@ func opTstore(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 // opBaseFee implements BASEFEE opcode
 func opBaseFee(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeContext) ([]byte, error) {
 	baseFee := interpreter.evm.Context.BaseFee
-	callContext.Stack.push(baseFee)
+	callContext.Stack.push(*baseFee)
 	return nil, nil
 }
 
@@ -241,7 +242,7 @@ func enable3855(jt *JumpTable) {
 
 // opPush0 implements the PUSH0 opcode
 func opPush0(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	scope.Stack.push(new(uint256.Int))
+	scope.Stack.push(*u256.Num0)
 	return nil, nil
 }
 
@@ -309,7 +310,7 @@ func enable6780(jt *JumpTable) {
 // opBlobBaseFee implements the BLOBBASEFEE opcode
 func opBlobBaseFee(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeContext) ([]byte, error) {
 	blobBaseFee := interpreter.evm.Context.BlobBaseFee
-	callContext.Stack.push(blobBaseFee)
+	callContext.Stack.push(*blobBaseFee)
 	return nil, nil
 }
 
