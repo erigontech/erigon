@@ -103,6 +103,8 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 		//trace:   true,
 	}
 	aggTx := AggTx(tx)
+	sd.stepSize = sd.AggTx().StepSize()
+
 	sd.stepSize = aggTx.StepSize()
 
 	sd.iiWriters = make([]*InvertedIndexBufferedWriter, len(aggTx.iis))
@@ -421,7 +423,7 @@ func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) 
 		firstKey = common.CopyBytes(k)
 		hasPrefix = true
 		return false, nil // do not continue, end on first occurrence
-	})
+	}, sd.roTtx)
 	return firstKey, hasPrefix, err
 }
 
@@ -429,10 +431,10 @@ func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) 
 //
 // k and v lifetime is bounded by the lifetime of the iterator
 func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step uint64) (cont bool, err error)) error {
-	return sd.IteratePrefix(kv.StorageDomain, prefix, roTx, it)
+	return sd.IteratePrefix(kv.StorageDomain, prefix, roTx, it, sd.roTtx)
 }
 
-func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step uint64) (cont bool, err error)) error {
+func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step uint64) (cont bool, err error), tx kv.Tx) error {
 	var haveRamUpdates bool
 	var ramIter btree2.MapIter[string, dataWithPrevStep]
 	if domain == kv.StorageDomain {
