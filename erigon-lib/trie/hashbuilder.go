@@ -23,11 +23,11 @@ import (
 	"io"
 	"math/bits"
 
-	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	length2 "github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/rlphacks"
@@ -236,7 +236,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	}
 	fullKey := keyHex[:len(keyHex)-1]
 	key := keyHex[len(keyHex)-length:]
-	copy(hb.acc.Root[:], EmptyRoot[:])
+	copy(hb.acc.Root[:], empty.RootHash[:])
 	copy(hb.acc.CodeHash[:], emptyCodeHash[:])
 	hb.acc.Nonce = nonce
 	hb.acc.Balance.Set(balance)
@@ -247,7 +247,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	var root Node
 	if fieldSet&uint32(4) != 0 {
 		copy(hb.acc.Root[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-length2.Hash:len(hb.hashStack)-popped*hashStackStride])
-		if hb.acc.Root != EmptyRoot {
+		if hb.acc.Root != empty.RootHash {
 			// Root is on top of the stack
 			root = hb.nodeStack[len(hb.nodeStack)-popped-1]
 			if root == nil {
@@ -320,7 +320,7 @@ func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, balance *uint2
 		copy(hb.acc.Root[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-length2.Hash:len(hb.hashStack)-popped*hashStackStride])
 		popped++
 	} else {
-		copy(hb.acc.Root[:], EmptyRoot[:])
+		copy(hb.acc.Root[:], empty.RootHash[:])
 	}
 
 	if fieldSet&AccountFieldCodeOnly != 0 {
@@ -664,7 +664,7 @@ func (hb *HashBuilder) emptyRoot() {
 	hb.nodeStack = append(hb.nodeStack, nil)
 	var hash [hashStackStride]byte // RLP representation of hash (or un-hashes value)
 	hash[0] = 0x80 + length2.Hash
-	copy(hash[1:], EmptyRoot[:])
+	copy(hash[1:], empty.RootHash[:])
 	hb.hashStack = append(hb.hashStack, hash[:]...)
 }
 

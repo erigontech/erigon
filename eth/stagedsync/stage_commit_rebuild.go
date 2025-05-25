@@ -21,11 +21,11 @@ import (
 	"errors"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/stages/headerdownload"
@@ -64,7 +64,7 @@ func RebuildPatriciaTrieBasedOnFiles(ctx context.Context, cfg TrieCfg) (common.H
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.blockReader))
 	rh, err := state.RebuildCommitmentFiles(ctx, cfg.db, &txNumsReader, log.New())
 	if err != nil {
-		return trie.EmptyRoot, err
+		return empty.RootHash, err
 	}
 	return common.BytesToHash(rh), err
 }

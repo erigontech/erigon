@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/tracing"
@@ -734,7 +733,7 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 	} else {
 		original = &previous.original
 	}
-	account.Root.SetBytes(trie.EmptyRoot[:]) // old storage should be ignored
+	account.Root = empty.RootHash // old storage should be ignored
 	newobj = newObject(sdb, addr, account, original)
 	newobj.setNonce(0) // sets the object to dirty
 	if previous == nil {

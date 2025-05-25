@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
@@ -459,7 +460,7 @@ func (tds *TrieDbState) buildAccountWrites() (common.Hashes, []*accounts.Account
 				if _, ok := tds.aggregateBuffer.storageUpdates[addrHash]; ok {
 					var ac accounts.Account
 					ac.Copy(a.Account)
-					ac.Root = trie.EmptyRoot
+					ac.Root = empty.RootHash
 					a.Account = &ac
 				}
 			}
@@ -597,7 +598,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 					//fmt.Printf("(b)Set %x root for addrHash %x\n", root, addrHash)
 				} else {
 					//fmt.Printf("(b)Set empty root for addrHash %x\n", addrHash)
-					accountWithAddress.Account.Root = trie.EmptyRoot
+					accountWithAddress.Account.Root = empty.RootHash
 				}
 			}
 		}

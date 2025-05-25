@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -294,7 +295,7 @@ func (s *Stateless) Finalize() common.Hash {
 		}
 		alreadyCreated[addrHash] = struct{}{}
 		if account, ok := s.accountUpdates[addrHash]; ok && account != nil {
-			account.Root = trie.EmptyRoot
+			account.Root = empty.RootHash
 		}
 		// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
 		// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
@@ -326,7 +327,7 @@ func (s *Stateless) Finalize() common.Hash {
 			if ok {
 				account.Root = root
 			} else {
-				account.Root = trie.EmptyRoot
+				account.Root = empty.RootHash
 			}
 		}
 	}
@@ -344,7 +345,7 @@ func (s *Stateless) Finalize() common.Hash {
 			continue
 		}
 		if account, ok := s.accountUpdates[addrHash]; ok && account != nil {
-			account.Root = trie.EmptyRoot
+			account.Root = empty.RootHash
 		}
 		s.t.DeleteSubtree(addrHash[:])
 	}

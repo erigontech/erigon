@@ -1180,7 +1180,7 @@ func (hph *HexPatriciaHashed) witnessCreateAccountNode(c *cell, row int, hashedK
 
 	var accountNode *trie.AccountNode
 	if !storageIsSet {
-		account.Root = trie.EmptyRoot
+		account.Root = empty.RootHash
 		accountNode = &trie.AccountNode{Account: account, Storage: nil, RootCorrect: true, Code: code, CodeSize: -1}
 	} else {
 		accountNode = &trie.AccountNode{Account: account, Storage: trie.NewHashNode(storageRootHash), RootCorrect: true, Code: code, CodeSize: -1}

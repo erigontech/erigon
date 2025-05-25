@@ -26,6 +26,7 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/rlphacks"
@@ -44,7 +45,7 @@ type DerivableList interface {
 
 func DeriveSha(list DerivableList) common.Hash {
 	if list.Len() < 1 {
-		return trie.EmptyRoot
+		return empty.RootHash
 	}
 
 	var curr bytes.Buffer

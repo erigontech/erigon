@@ -26,6 +26,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/erigontech/erigon-lib/common/empty"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
@@ -282,7 +283,7 @@ type receiptProof struct {
 
 func getReceiptProof(ctx context.Context, node requests.RequestGenerator, receipt *types.Receipt, block *requests.Block, receipts []*types.Receipt) (*receiptProof, error) {
 	stateSyncTxHash := bortypes.ComputeBorTxHash(block.Number.Uint64(), block.Hash)
-	receiptsTrie := trie.New(trie.EmptyRoot)
+	receiptsTrie := trie.New(empty.RootHash)
 
 	if len(receipts) == 0 {
 		g, gctx := errgroup.WithContext(ctx)
