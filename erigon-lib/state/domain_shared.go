@@ -67,9 +67,10 @@ type dataWithPrevStep struct {
 }
 
 type SharedDomains struct {
-	aggTx  *AggregatorRoTx
-	sdCtx  *SharedDomainsCommitmentContext
-	logger log.Logger
+	aggTx    *AggregatorRoTx
+	stepSize uint64
+	sdCtx    *SharedDomainsCommitmentContext
+	logger   log.Logger
 
 	txNum    uint64
 	blockNum atomic.Uint64
@@ -98,6 +99,7 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 		storage: btree2.NewMap[string, dataWithPrevStep](128),
 		//trace:   true,
 	}
+	sd.stepSize = AggTx(tx).StepSize()
 	sd.SetTx(AggTx(tx))
 	sd.iiWriters = make([]*InvertedIndexBufferedWriter, len(sd.AggTx().iis))
 
@@ -243,7 +245,7 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte) {
 	sd.muMaps.Lock()
 	defer sd.muMaps.Unlock()
-	valWithPrevStep := dataWithPrevStep{data: val, prevStep: sd.txNum / sd.aggTx.a.StepSize()}
+	valWithPrevStep := dataWithPrevStep{data: val, prevStep: sd.txNum / sd.stepSize}
 	if domain == kv.StorageDomain {
 		if old, ok := sd.storage.Set(key, valWithPrevStep); ok {
 			sd.estSize += len(val) - len(old.data)
