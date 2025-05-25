@@ -60,8 +60,10 @@ func Assemble(
 
 	shanghaiTime := chainConfig.ShanghaiTime
 	var agraBlock *big.Int
+	var bhilaiBlock *big.Int
 	if chainConfig.Bor != nil {
 		agraBlock = chainConfig.Bor.GetAgraBlock()
+		bhilaiBlock = chainConfig.Bor.GetBhilaiBlock()
 	}
 	cancunTime := chainConfig.CancunTime
 	pragueTime := chainConfig.PragueTime
@@ -81,6 +83,7 @@ func Assemble(
 		*chainID,
 		shanghaiTime,
 		agraBlock,
+		bhilaiBlock,
 		cancunTime,
 		pragueTime,
 		chainConfig.BlobSchedule,

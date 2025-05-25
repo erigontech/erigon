@@ -682,7 +682,7 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsCancun:           c.IsCancun(time),
 		IsNapoli:           c.IsNapoli(num),
 		IsBhilai:           c.IsBhilai(num),
-		IsPrague:           c.IsPrague(time),
+		IsPrague:           c.IsPrague(time) || c.IsBhilai(num),
 		IsOsaka:            c.IsOsaka(time),
 		IsAura:             c.Aura != nil,
 	}
