@@ -198,15 +198,6 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			case <-logInterval.C:
 				logTime := logIntervalTime
 
-				if cfg.engine != nil && cfg.engine.SupportInsertion() {
-					if ready, err := cfg.engine.Ready(ctx); !ready {
-						if err != nil {
-							log.Warn("could not log progress", "err", err)
-						}
-						continue
-					}
-
-				}
 				logArgs := []interface{}{}
 				currProgress := cfg.downloader.Progress()
 				blockProgress := float64(prevProgress - currProgress)
@@ -223,6 +214,16 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 				if speed == 0 || initialBeaconBlock == nil {
 					continue
+				}
+
+				if cfg.engine != nil && cfg.engine.SupportInsertion() {
+					if ready, err := cfg.engine.Ready(ctx); !ready {
+						if err != nil {
+							log.Warn("could not log progress", "err", err)
+						}
+						continue
+					}
+
 				}
 
 				if cfg.sn != nil && cfg.sn.SegmentsMax() == 0 {
