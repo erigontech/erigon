@@ -38,7 +38,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	common2 "github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
@@ -57,7 +57,6 @@ import (
 	"github.com/erigontech/erigon/core/vm/runtime"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/eth/tracers/logger"
-	"github.com/erigontech/erigon/params"
 )
 
 var runCommand = cli.Command{
@@ -115,11 +114,11 @@ func timedExec(bench bool, execFunc func() ([]byte, uint64, error)) (output []by
 		stats.bytesAllocated = result.AllocedBytesPerOp()
 	} else {
 		var memStatsBefore, memStatsAfter goruntime.MemStats
-		common2.ReadMemStats(&memStatsBefore)
+		dbg.ReadMemStats(&memStatsBefore)
 		startTime := time.Now()
 		output, gasLeft, err = execFunc()
 		stats.time = time.Since(startTime)
-		common2.ReadMemStats(&memStatsAfter)
+		dbg.ReadMemStats(&memStatsAfter)
 		stats.allocs = int64(memStatsAfter.Mallocs - memStatsBefore.Mallocs)
 		stats.bytesAllocated = int64(memStatsAfter.TotalAlloc - memStatsBefore.TotalAlloc)
 	}
@@ -283,7 +282,7 @@ func runCmd(ctx *cli.Context) error {
 	if chainConfig != nil {
 		runtimeConfig.ChainConfig = chainConfig
 	} else {
-		runtimeConfig.ChainConfig = params.AllProtocolChanges
+		runtimeConfig.ChainConfig = chain.AllProtocolChanges
 	}
 
 	var hexInput []byte
