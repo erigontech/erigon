@@ -296,6 +296,7 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 		fmt.Printf("seek %x\n", seekKey)
 	}
 	cur = b.cursorGetter(nil, nil, 0, g)
+	defer cur.Close()
 	if len(seekKey) == 0 && b.offt.Count() > 0 {
 		cur.Reset(0, g)
 		return cur, nil

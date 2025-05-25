@@ -64,7 +64,7 @@ type Cursor struct {
 }
 
 func (c *Cursor) Close() {
-	if c == nil {
+	if c == nil || c.getter == nil {
 		return
 	}
 	c.key = c.key[:0]
