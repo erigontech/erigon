@@ -86,6 +86,8 @@ type Domain struct {
 	// _visible - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
 	_visible *domainVisible
+
+	checker *DependencyIntegrityChecker
 }
 
 type domainCfg struct {
@@ -103,9 +105,6 @@ type domainCfg struct {
 	// replaceKeysInValues allows to replace commitment branch values with shorter keys.
 	// for commitment domain only
 	replaceKeysInValues bool
-
-	// restricts subset file deletions on domain open/close. Needed to hold files until commitment is merged
-	restrictSubsetFileDeletions bool
 
 	version DomainVersionTypes
 }
@@ -158,6 +157,10 @@ func NewDomain(cfg domainCfg, aggStep uint64, logger log.Logger) (*Domain, error
 
 	return d, nil
 }
+func (d *Domain) SetDependency(checker *DependencyIntegrityChecker) {
+	d.checker = checker
+}
+
 func (d *Domain) kvFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kv", d.version.DataKV.String(), d.filenameBase, fromStep, toStep))
 }
@@ -495,7 +498,13 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 }
 
 func (d *Domain) reCalcVisibleFiles(toTxNum uint64) {
-	d._visible = newDomainVisible(d.name, calcVisibleFiles(d.dirtyFiles, d.Accessors, false, toTxNum))
+	var checker func(startTxNum, endTxNum uint64) bool
+	if d.checker != nil {
+		checker = func(startTxNum, endTxNum uint64) bool {
+			return d.checker.CheckDependentPresent(d.name, All, startTxNum, endTxNum)
+		}
+	}
+	d._visible = newDomainVisible(d.name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum))
 	d.History.reCalcVisibleFiles(toTxNum)
 }
 

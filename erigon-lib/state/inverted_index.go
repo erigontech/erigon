@@ -240,7 +240,7 @@ const (
 )
 
 func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
-	ii._visible = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, false, toTxNum))
+	ii._visible = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, nil, false, toTxNum))
 }
 
 func (ii *InvertedIndex) MissedMapAccessors() (l []*filesItem) {
