@@ -67,10 +67,13 @@ type dataWithPrevStep struct {
 }
 
 type SharedDomains struct {
-	aggTx    *AggregatorRoTx
+	sdCtx *SharedDomainsCommitmentContext
+
 	stepSize uint64
-	sdCtx    *SharedDomainsCommitmentContext
-	logger   log.Logger
+	aggTx    *AggregatorRoTx
+	roTtx    kv.TemporalTx
+
+	logger log.Logger
 
 	txNum    uint64
 	blockNum atomic.Uint64
@@ -99,8 +102,9 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 		storage: btree2.NewMap[string, dataWithPrevStep](128),
 		//trace:   true,
 	}
-	sd.stepSize = AggTx(tx).StepSize()
+	sd.stepSize = sd.AggTx().StepSize()
 	sd.SetTx(AggTx(tx))
+
 	sd.iiWriters = make([]*InvertedIndexBufferedWriter, len(sd.AggTx().iis))
 
 	for id, ii := range sd.AggTx().iis {
@@ -428,7 +432,7 @@ func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) 
 		firstKey = common.CopyBytes(k)
 		hasPrefix = true
 		return false, nil // do not continue, end on first occurrence
-	})
+	}, sd.roTtx)
 	return firstKey, hasPrefix, err
 }
 
@@ -436,10 +440,10 @@ func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) 
 //
 // k and v lifetime is bounded by the lifetime of the iterator
 func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step uint64) (cont bool, err error)) error {
-	return sd.IteratePrefix(kv.StorageDomain, prefix, roTx, it)
+	return sd.IteratePrefix(kv.StorageDomain, prefix, roTx, it, sd.roTtx)
 }
 
-func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step uint64) (cont bool, err error)) error {
+func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step uint64) (cont bool, err error), tx kv.Tx) error {
 	var haveRamUpdates bool
 	var ramIter btree2.MapIter[string, dataWithPrevStep]
 	if domain == kv.StorageDomain {
@@ -447,7 +451,7 @@ func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.
 		ramIter = sd.storage.Iter()
 	}
 
-	return sd.AggTx().d[domain].debugIteratePrefix(prefix, haveRamUpdates, ramIter, it, sd.txNum, sd.StepSize(), roTx)
+	return AggTx(tx).d[domain].debugIteratePrefix(prefix, haveRamUpdates, ramIter, it, sd.txNum, sd.stepSize, roTx)
 }
 
 func (sd *SharedDomains) Close() {
@@ -658,3 +662,11 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.Tx, prefix []
 
 func toStringZeroCopy(v []byte) string { return unsafe.String(&v[0], len(v)) }
 func toBytesZeroCopy(s string) []byte  { return unsafe.Slice(unsafe.StringData(s), len(s)) }
+
+func AggTx(tx kv.Tx) *AggregatorRoTx {
+	if withAggTx, ok := tx.(interface{ AggTx() any }); ok {
+		return withAggTx.AggTx().(*AggregatorRoTx)
+	}
+
+	return nil
+}

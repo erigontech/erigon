@@ -1583,14 +1583,6 @@ func (at *AggregatorRoTx) FileStream(name kv.Domain, fromTxNum, toTxNum uint64) 
 	return NewSegStreamReader(r, -1), nil
 }
 
-func AggTx(tx kv.Tx) *AggregatorRoTx {
-	if withAggTx, ok := tx.(interface{ AggTx() any }); ok {
-		return withAggTx.AggTx().(*AggregatorRoTx)
-	}
-
-	return nil
-}
-
 // AggregatorRoTx guarantee consistent View of files ("snapshots isolation" level https://en.wikipedia.org/wiki/Snapshot_isolation):
 //   - long-living consistent view of all files (no limitations)
 //   - hiding garbage and files overlaps
