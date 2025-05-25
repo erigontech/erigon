@@ -392,6 +392,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.genesisBlock = genesis
 	backend.genesisHash = genesis.Hash()
 
+	setDefaultMinerGasLimit(chainConfig, config, logger)
+
 	setBorDefaultMinerGasPrice(chainConfig, config, logger)
 	setBorDefaultTxPoolPriceLimit(chainConfig, config.TxPool, logger)
 
@@ -1973,6 +1975,20 @@ func setBorDefaultMinerGasPrice(chainConfig *chain.Config, config *ethconfig.Con
 	if chainConfig.Bor != nil && (config.Miner.GasPrice == nil || config.Miner.GasPrice.Cmp(ethconfig.BorDefaultMinerGasPrice) != 0) {
 		logger.Warn("Sanitizing invalid bor miner gas price", "provided", config.Miner.GasPrice, "updated", ethconfig.BorDefaultMinerGasPrice)
 		config.Miner.GasPrice = ethconfig.BorDefaultMinerGasPrice
+	}
+}
+
+func setDefaultMinerGasLimit(chainConfig *chain.Config, config *ethconfig.Config, logger log.Logger) {
+	if chainConfig.Bor != nil {
+		if config.Miner.GasLimit == nil {
+			gasLimit := ethconfig.BorDefaultMinerGasLimit
+			config.Miner.GasLimit = &gasLimit
+		}
+	} else {
+		if config.Miner.GasLimit == nil {
+			gasLimit := ethconfig.DefaultMinerGasLimit
+			config.Miner.GasLimit = &gasLimit
+		}
 	}
 }
 

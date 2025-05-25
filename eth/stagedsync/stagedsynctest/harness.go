@@ -289,8 +289,7 @@ func (h *Harness) SetMiningBlockEmptyHeader(ctx context.Context, t *testing.T, p
 	require.NotNil(t, parent)
 
 	timestamp := uint64(time.Now().Unix())
-	gasLimit := &h.miningState.MiningConfig.GasLimit
-	h.miningState.MiningBlock.Header = core.MakeEmptyHeader(parent, h.chainConfig, timestamp, gasLimit)
+	h.miningState.MiningBlock.Header = core.MakeEmptyHeader(parent, h.chainConfig, timestamp, h.miningState.MiningConfig.GasLimit)
 }
 
 func (h *Harness) ReadSpansFromDB(ctx context.Context) (spans []*heimdall.Span, err error) {
