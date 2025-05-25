@@ -2,6 +2,7 @@ package receipts
 
 import (
 	"context"
+	"fmt"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 
@@ -77,7 +78,7 @@ func (g *BorGenerator) GenerateBorReceipt(ctx context.Context, tx kv.TemporalTx,
 	return receipt, nil
 }
 
-func (g *BorGenerator) GenerateBorLogs(ctx context.Context, msgs []*types.Message, txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, header *types.Header, chainConfig *chain.Config, txIndex, logIndex int) (types.Logs, error) {
+func (g *BorGenerator) GenerateBorLogs(ctx context.Context, msgs []*types.Message, txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, header *types.Header, chainConfig *chain.Config, txIndex int, txNum uint64) (types.Logs, error) {
 	ibs, blockContext, _, _, _, err := transactions.ComputeBlockContext(ctx, g.engine, header, chainConfig, g.blockReader, txNumsReader, tx, txIndex)
 	if err != nil {
 		return nil, err
@@ -86,7 +87,12 @@ func (g *BorGenerator) GenerateBorLogs(ctx context.Context, msgs []*types.Messag
 	gp := new(core.GasPool).AddGas(msgs[0].Gas() * uint64(len(msgs))).AddBlobGas(msgs[0].BlobGas() * uint64(len(msgs)))
 	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, chainConfig, vm.Config{})
 
-	return getBorLogs(msgs, evm, gp, ibs, header.Number.Uint64(), header.Hash(), uint(txIndex), uint(logIndex))
+	_, _, firstLogIndex, err := rawtemporaldb.ReceiptAsOf(tx, txNum+1)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Printf("firstLogIndex: %d\n", firstLogIndex)
+	return getBorLogs(msgs, evm, gp, ibs, header.Number.Uint64(), header.Hash(), uint(txIndex), uint(firstLogIndex))
 }
 
 func getBorLogs(msgs []*types.Message, evm *vm.EVM, gp *core.GasPool, ibs *state.IntraBlockState, blockNum uint64, blockHash common.Hash, txIndex, logIndex uint) (types.Logs, error) {
