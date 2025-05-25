@@ -144,7 +144,7 @@ func BenchmarkSharedDomains_ComputeCommitment(b *testing.B) {
 		for key, upd := range d {
 			for _, u := range upd {
 				domains.SetTxNum(u.txNum)
-				err := domains.DomainPut(fom, []byte(key), u.value, u.txNum, nil, 0)
+				err := domains.DomainPut(fom, rwTx, []byte(key), u.value, u.txNum, nil, 0)
 				require.NoError(b, err)
 			}
 		}
@@ -152,7 +152,7 @@ func BenchmarkSharedDomains_ComputeCommitment(b *testing.B) {
 
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
+		_, err := domains.ComputeCommitment(ctx, rwTx, true, domains.BlockNum(), "")
 		require.NoError(b, err)
 	}
 }
