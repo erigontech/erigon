@@ -70,7 +70,7 @@ type BackwardBeaconDownloader struct {
 }
 
 func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, sn *freezeblocks.CaplinSnapshots, engine execution_client.ExecutionEngine, db kv.RwDB) *BackwardBeaconDownloader {
-	pendingResults, err := lru.New[uint64, *requestResult]("backward_beacon_downloader_pending_results", 1024)
+	pendingResults, err := lru.New[uint64, *requestResult]("backward_beacon_downloader_pending_results", 2048)
 	if err != nil {
 		panic(fmt.Sprintf("could not create lru cache for pending results: %v", err))
 	}
@@ -220,7 +220,6 @@ func (b *BackwardBeaconDownloader) requestRange(ctx context.Context, downloadRan
 	// 2. request the chunk
 	requestsResult, err := b.requestChunk(ctxWithTimeout, downloadRange.start, count, maxSlot)
 	if err != nil {
-		fmt.Println("Error requesting chunk", err, "start", downloadRange.start, "count", count, "maxSlot", maxSlot)
 		if errors.Is(err, context.DeadlineExceeded) {
 			b.rpc.BanPeer(requestsResult[0].peer)
 		}
@@ -236,7 +235,7 @@ func (b *BackwardBeaconDownloader) requestRange(ctx context.Context, downloadRan
 			continue
 		}
 		// add to the pending results
-		b.pendingResults.Add(block.block.Block.Slot, block)
+		b.pendingResults.Add(block.Slot(), block)
 	}
 	return downloadedBlocks
 }
@@ -318,14 +317,13 @@ func removeDuplicates(blocks []*requestResult) []*requestResult {
 // If the block's root hash does not match the expected root hash, it will be rejected and the function will continue to the next block.
 func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 	subCount := uint64(b.blocksPerRequest.Load())
-	chunks := uint64(16)
+	chunks := uint64(32)
 	count := subCount * chunks // 8 chunks of 32 blocks
 	lowerBound := b.slotToDownload.Load() - count + 1
 	// Overflow? round to 0.
 	if lowerBound > b.slotToDownload.Load() {
 		lowerBound = 0
 	}
-	fmt.Println("SLOT TO DOWNLOAD", b.slotToDownload.Load(), "LOWER BOUND", lowerBound, "COUNT", count)
 	// 1. initialize the response channel
 	downloadedBlocks := make([]*requestResult, 0, count)
 
@@ -340,7 +338,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 		if downloadedBlocks[i] == nil {
 			break
 		}
-		startSlot = downloadedBlocks[i].block.Block.Slot
+		startSlot = downloadedBlocks[i].Slot()
 	}
 
 	for currEndSlot := startSlot; currEndSlot > lowerBound; currEndSlot -= subCount { // inner iterations
@@ -370,7 +368,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 				downloadedBlocks = append(downloadedBlocks, downloadedBlocksTemp...)
 
 				for _, block := range downloadedBlocksTemp {
-					b.pendingResults.Add(block.block.Block.Slot, block)
+					b.pendingResults.Add(block.Slot(), block)
 				}
 			}(dr)
 		}
@@ -387,12 +385,12 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 			break
 		}
 	}
-	wg.Wait()
+	wg.Wait() // wait for all the requests to be completed
 
 	// Sanitize the downloaded blocks
 	// sort the blocks by slot
 	sort.Slice(downloadedBlocks, func(i, j int) bool {
-		return downloadedBlocks[i].block.Block.Slot < downloadedBlocks[j].block.Block.Slot
+		return downloadedBlocks[i].Slot() < downloadedBlocks[j].Slot()
 	})
 
 	// remove duplicates
@@ -411,7 +409,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 		}
 		if currentRoot != currentParentRoot {
 			// remove the block from the cache
-			b.pendingResults.Remove(downloadedBlocks[i].block.Block.Slot)
+			b.pendingResults.Remove(downloadedBlocks[i].Slot())
 			// truncate the list
 			downloadedBlocks = downloadedBlocks[i:]
 			log.Debug("Gotten unexpected root", "got", common.Hash(currentRoot), "expected", common.Hash(currentParentRoot))
