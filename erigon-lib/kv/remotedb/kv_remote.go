@@ -667,7 +667,7 @@ func (tx *tx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err er
 	return reply.V, 0, nil
 }
 
-func (tx *tx) HasPrefix(domain kv.Domain, prefix []byte) (firstKey []byte, ok bool, err error) {
+func (tx *tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
 	//TODO implement me
 	panic("implement me")
 }
