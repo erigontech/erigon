@@ -23,6 +23,7 @@ import (
 	"slices"
 
 	"github.com/RoaringBitmap/roaring/v2"
+	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon-lib/common/dbg"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -262,6 +263,12 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				if len(logs) > 0 {
 					logIndex = int(logs[len(logs)-1].Index) + 1
 				}
+				_, _, firstLogIndex, err := rawtemporaldb.ReceiptAsOf(tx, txNum+1)
+				if err != nil {
+					return nil, err
+				}
+				logIndex = int(firstLogIndex)
+
 				borLogs, err := api.borReceiptGenerator.GenerateBorLogs(ctx, events, api._txNumReader, tx, header, chainConfig, txIndex, logIndex)
 				if err != nil {
 					return logs, err
