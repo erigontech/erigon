@@ -26,7 +26,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
@@ -62,7 +61,7 @@ func (ms *MockState) TempDir() string {
 	return ms.t.TempDir()
 }
 
-func (ms *MockState) PutBranch(tx kv.Tx, prefix []byte, data []byte, prevData []byte, prevStep uint64) error {
+func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error {
 	// updates already merged by trie
 	if ms.concurrent.Load() {
 		ms.mu.Lock()
@@ -72,7 +71,7 @@ func (ms *MockState) PutBranch(tx kv.Tx, prefix []byte, data []byte, prevData []
 	return nil
 }
 
-func (ms *MockState) Branch(tx kv.Tx, prefix []byte) ([]byte, uint64, error) {
+func (ms *MockState) Branch(prefix []byte) ([]byte, uint64, error) {
 	if ms.concurrent.Load() {
 		ms.mu.Lock()
 		defer ms.mu.Unlock()
