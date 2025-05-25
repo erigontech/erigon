@@ -127,7 +127,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 // options: blockCount and LogCount are not compatible
 // if blockCount is specified wins if less than block range (from, to)
 // if LogCount is specidied returns the logCount record starting from latest tx of end block if log present
-// if LogCount is specified returns the logCount record starting from latest tx of end block if log present even if the range [from, to] specify more blocks 
+// if LogCount is specified returns the logCount record starting from latest tx of end block if log present even if the range [from, to] specify more blocks
 // `crit` filter is the same filter.
 //
 // Examples:
@@ -137,8 +137,10 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	if logOptions.LogCount != 0 && logOptions.BlockCount != 0 {
 		return nil, errors.New("logs count & block count are ambigious")
 	}
+	ignoreTopicOrder := logOptions.IgnoreTopicsOrder
 	if logOptions.LogCount == 0 && logOptions.BlockCount == 0 {
 		logOptions = filters.DefaultLogFilterOptions()
+		logOptions.IgnoreTopicsOrder = ignoreTopicOrder
 	}
 	erigonLogs := types.ErigonLogs{}
 	tx, beginErr := api.db.BeginTemporalRo(ctx)
@@ -267,6 +269,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		if err != nil {
 			return nil, err
 		}
+
 		blockLogs = exec.GetRawLogs(txIndex)
 		for _, log := range blockLogs {
 			log.Index = logIndex
@@ -286,6 +289,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		if len(filtered) == 0 {
 			continue
 		}
+
 		for i := range filtered {
 			filtered[i].TxIndex = uint(txIndex)
 			logCount++
