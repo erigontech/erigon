@@ -211,7 +211,7 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 		if out == nil {
 			out = addrBitmap
 		} else {
-			out = stream.Intersect[uint64](out, addrBitmap, kv.Unlim)
+			out = stream.Intersect[uint64](out, addrBitmap, asc, kv.Unlim)
 		}
 	}
 	if out == nil {
@@ -383,7 +383,7 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64
 			res = topicsUnion
 			continue
 		}
-		res = stream.Intersect[uint64](res, topicsUnion, kv.Unlim)
+		res = stream.Intersect[uint64](res, topicsUnion, asc, kv.Unlim)
 	}
 	return res, nil
 }
