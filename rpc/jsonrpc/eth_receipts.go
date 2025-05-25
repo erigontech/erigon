@@ -260,7 +260,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 
 				var logIndex int
 				if len(logs) > 0 {
-					logIndex = int(logs[len(logs)-1].Index)
+					logIndex = int(logs[len(logs)-1].Index) + 1
 				}
 				borLogs, err := api.borReceiptGenerator.GenerateBorLogs(ctx, events, api._txNumReader, tx, header, chainConfig, txIndex, logIndex)
 				if err != nil {
