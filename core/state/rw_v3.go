@@ -398,6 +398,7 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 		if err := w.rs.domains.DomainDel(kv.CodeDomain, address[:], w.txNum, nil, 0); err != nil {
 			return err
 		}
+
 		if err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte, step uint64) (bool, error) {
 			w.writeLists[kv.StorageDomain.String()].Push(string(k), nil)
 			return true, nil

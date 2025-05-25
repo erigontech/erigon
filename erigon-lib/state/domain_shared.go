@@ -68,7 +68,8 @@ type dataWithPrevStep struct {
 type SharedDomains struct {
 	sdCtx *SharedDomainsCommitmentContext
 
-	roTtx kv.TemporalTx
+	stepSize uint64
+	roTtx    kv.TemporalTx
 
 	logger log.Logger
 
@@ -104,6 +105,8 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 		//trace:   true,
 	}
 	sd.SetTx(tx)
+	sd.stepSize = sd.AggTx().StepSize()
+
 	sd.iiWriters = make([]*InvertedIndexBufferedWriter, len(sd.AggTx().iis))
 
 	for id, ii := range sd.AggTx().iis {
@@ -171,7 +174,7 @@ func (sd *SharedDomains) AggTx() *AggregatorRoTx { return sd.roTtx.AggTx().(*Agg
 
 // aggregator context should call aggTx.Unwind before this one.
 func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.TemporalRwTx, blockUnwindTo, txUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
-	step := txUnwindTo / sd.StepSize()
+	step := txUnwindTo / sd.stepSize
 	sd.logger.Info("aggregator unwind", "step", step,
 		"txUnwindTo", txUnwindTo)
 	//fmt.Printf("aggregator unwind step %d txUnwindTo %d\n", step, txUnwindTo)
@@ -210,7 +213,7 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte) {
 	// disable mutex - because work on parallel execution postponed after E3 release.
 	//sd.muMaps.Lock()
-	valWithPrevStep := dataWithPrevStep{data: val, prevStep: sd.txNum / sd.StepSize()}
+	valWithPrevStep := dataWithPrevStep{data: val, prevStep: sd.txNum / sd.stepSize}
 	if domain == kv.StorageDomain {
 		if old, ok := sd.storage.Set(key, valWithPrevStep); ok {
 			sd.estSize += len(val) - len(old.data)
@@ -364,7 +367,7 @@ func (sd *SharedDomains) SetTx(tx kv.TemporalTx) {
 	sd.roTtx = tx
 }
 
-func (sd *SharedDomains) StepSize() uint64 { return sd.AggTx().StepSize() }
+func (sd *SharedDomains) StepSize() uint64 { return sd.stepSize }
 
 // SetTxNum sets txNum for all domains as well as common txNum for all domains
 // Requires for sd.rwTx because of commitment evaluation in shared domains if aggregationStep is reached
@@ -391,7 +394,7 @@ func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte) ([]byte, boo
 		firstKey = common.CopyBytes(k)
 		hasPrefix = true
 		return false, nil // do not continue, end on first occurrence
-	})
+	}, sd.roTtx)
 	return firstKey, hasPrefix, err
 }
 
@@ -399,10 +402,10 @@ func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte) ([]byte, boo
 //
 // k and v lifetime is bounded by the lifetime of the iterator
 func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v []byte, step uint64) (cont bool, err error)) error {
-	return sd.IteratePrefix(kv.StorageDomain, prefix, it)
+	return sd.IteratePrefix(kv.StorageDomain, prefix, it, sd.roTtx)
 }
 
-func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, it func(k []byte, v []byte, step uint64) (cont bool, err error)) error {
+func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, it func(k []byte, v []byte, step uint64) (cont bool, err error), tx kv.Tx) error {
 	var haveRamUpdates bool
 	var ramIter btree2.MapIter[string, dataWithPrevStep]
 	if domain == kv.StorageDomain {
@@ -410,7 +413,7 @@ func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, it func(
 		ramIter = sd.storage.Iter()
 	}
 
-	return sd.AggTx().d[domain].debugIteratePrefix(prefix, haveRamUpdates, ramIter, it, sd.txNum, sd.StepSize(), sd.roTtx)
+	return AggTx(tx).d[domain].debugIteratePrefix(prefix, haveRamUpdates, ramIter, it, sd.txNum, sd.stepSize, sd.roTtx)
 }
 
 func (sd *SharedDomains) Close() {
@@ -490,7 +493,7 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 // TemporalDomain satisfaction
 func (sd *SharedDomains) GetLatest(domain kv.Domain, k []byte) (v []byte, step uint64, err error) {
 	if domain == kv.CommitmentDomain {
-		return sd.LatestCommitment(k)
+		return sd.LatestCommitment(k, sd.roTtx)
 	}
 	if v, prevStep, ok := sd.get(domain, k); ok {
 		return v, prevStep, nil
@@ -619,3 +622,11 @@ func (sd *SharedDomains) Tx() kv.TemporalTx { return sd.roTtx }
 
 func toStringZeroCopy(v []byte) string { return unsafe.String(&v[0], len(v)) }
 func toBytesZeroCopy(s string) []byte  { return unsafe.Slice(unsafe.StringData(s), len(s)) }
+
+func AggTx(tx kv.Tx) *AggregatorRoTx {
+	if withAggTx, ok := tx.(interface{ AggTx() any }); ok {
+		return withAggTx.AggTx().(*AggregatorRoTx)
+	}
+
+	return nil
+}

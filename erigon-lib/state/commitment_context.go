@@ -108,7 +108,7 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, expected
 }
 
 // Evaluates commitment for gathered updates.
-func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, saveState bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
+func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, saveState bool, blockNum uint64, logPrefix string, txNum uint64) (rootHash []byte, err error) {
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
 	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
@@ -136,7 +136,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	sdc.justRestored.Store(false)
 
 	if saveState {
-		if err = sdc.encodeAndStoreCommitmentState(blockNum, sdc.sharedDomains.txNum, rootHash); err != nil {
+		if err = sdc.encodeAndStoreCommitmentState(blockNum, txNum, rootHash); err != nil {
 			return nil, err
 		}
 	}
@@ -187,7 +187,7 @@ func (sdc *SharedDomainsCommitmentContext) enableConcurrentCommitmentIfPossible(
 
 // SeekCommitment searches for last encoded state from DomainCommitted
 // and if state found, sets it up to current domain
-func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, tx kv.Tx) (blockNum, txNum uint64, ok bool, err error) {
+func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (blockNum, txNum uint64, ok bool, err error) {
 	_, _, state, err := sdc.LatestCommitmentState()
 	if err != nil {
 		return 0, 0, false, err
@@ -231,7 +231,7 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 		return 0, 0, true, nil
 	}
 
-	newRh, err := sdc.rebuildCommitment(ctx, sdc.sharedDomains.roTtx, blockNum, txNum)
+	newRh, err := sdc.rebuildCommitment(ctx, tx, blockNum, txNum)
 	if err != nil {
 		return 0, 0, false, err
 	}
@@ -381,7 +381,7 @@ func (sdc *SharedDomainsCommitmentContext) rebuildCommitment(ctx context.Context
 	}
 
 	sdc.Reset()
-	return sdc.ComputeCommitment(ctx, true, blockNum, "rebuild commit")
+	return sdc.ComputeCommitment(ctx, true, blockNum, "rebuild commit", txNum)
 }
 
 type TrieContext struct {
