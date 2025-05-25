@@ -22,7 +22,9 @@ type testAggConfig struct {
 
 func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Aggregator) {
 	tb.Helper()
-	db, agg := testDbAndAggregatorv3(tb, cfg.stepSize)
+	_db, agg := testDbAndAggregatorv3(tb, cfg.stepSize)
+	db := wrapDbWithCtx(_db, agg)
+
 	agg.commitmentValuesTransform = !cfg.disableCommitmentBranchTransform
 	agg.d[kv.CommitmentDomain].replaceKeysInValues = agg.commitmentValuesTransform
 
@@ -32,11 +34,11 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
-	rwTx, err := db.BeginRw(context.Background())
+	rwTx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(tb, err)
 	defer rwTx.Rollback()
 
-	domains, err := NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
+	domains, err := NewSharedDomains(rwTx, log.New())
 	require.NoError(tb, err)
 	defer domains.Close()
 
