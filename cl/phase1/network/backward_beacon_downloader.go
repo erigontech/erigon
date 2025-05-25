@@ -63,7 +63,7 @@ type BackwardBeaconDownloader struct {
 	neverSkip            bool
 	pendingResults       *lru.Cache[uint64, *requestResult]
 	downloadedBlocksLock sync.Mutex // lock for downloaded blocks
-	blocksPerRequest     atomic.Uint64
+	blocksPerRequest     atomic.Int64
 
 	mu sync.Mutex
 }
@@ -74,7 +74,7 @@ func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, sn 
 		panic(fmt.Sprintf("could not create lru cache for pending results: %v", err))
 	}
 
-	var blocksPerRequest atomic.Uint64
+	var blocksPerRequest atomic.Int64
 	blocksPerRequest.Store(defaultBlocksPerRequest)
 
 	return &BackwardBeaconDownloader{
@@ -97,22 +97,18 @@ func (b *BackwardBeaconDownloader) SetThrottle(throttle time.Duration) {
 	b.reqInterval.Reset(throttle)
 }
 
-func (b *BackwardBeaconDownloader) IncrementBlocksPerRequest() {
+func (b *BackwardBeaconDownloader) IncrementBlocksPerRequest(amnt int64) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	current := b.blocksPerRequest.Load()
-	if current < maxBlocksPerRequest {
-		b.blocksPerRequest.Store(current + 1)
-	}
+	b.blocksPerRequest.Store(min(maxBlocksPerRequest, current+amnt))
 }
 
-func (b *BackwardBeaconDownloader) DecrementBlocksPerRequest() {
+func (b *BackwardBeaconDownloader) DecrementBlocksPerRequest(amnt int64) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	current := b.blocksPerRequest.Load()
-	if current > minBlocksPerRequest {
-		b.blocksPerRequest.Store(current - 1)
-	}
+	b.blocksPerRequest.Store(max(minBlocksPerRequest, current-amnt))
 }
 
 // SetSlotToDownload sets slot to download.
@@ -305,7 +301,7 @@ func removeDuplicates(blocks []*requestResult, tempBuffer []*requestResult) []*r
 // If the callback returns an error or signals that the download should be finished, the function will exit.
 // If the block's root hash does not match the expected root hash, it will be rejected and the function will continue to the next block.
 func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
-	subCount := b.blocksPerRequest.Load()
+	subCount := uint64(b.blocksPerRequest.Load())
 	chunks := uint64(32)
 	count := subCount * chunks // 8 chunks of 32 blocks
 	lowerBound := b.slotToDownload.Load() - count + 1
