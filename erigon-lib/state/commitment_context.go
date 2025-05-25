@@ -51,7 +51,7 @@ func NewSharedDomainsCommitmentContext(sd *SharedDomains, tx kv.TemporalTx, mode
 	trieCtx := &TrieContext{
 		roTtx:  tx,
 		getter: sd.AsGetter(tx),
-		sd:     sd,
+		putter: sd.AsPutDel(tx),
 
 		stepSize: sd.StepSize(),
 	}
@@ -387,7 +387,8 @@ func (sdc *SharedDomainsCommitmentContext) rebuildCommitment(ctx context.Context
 type TrieContext struct {
 	roTtx  kv.TemporalTx
 	getter kv.TemporalGetter
-	sd     *SharedDomains
+	putter kv.TemporalPutDel
+	txNum  uint64
 
 	limitReadAsOfTxNum uint64
 	stepSize           uint64
@@ -440,7 +441,7 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, p
 	//	defer sdc.mu.Unlock()
 	//}
 
-	return sdc.sd.DomainPut(kv.CommitmentDomain, sdc.roTtx, prefix, data, sdc.sd.txNum, prevData, prevStep)
+	return sdc.putter.DomainPut(kv.CommitmentDomain, prefix, data, sdc.txNum, prevData, prevStep)
 }
 
 func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, err error) {
