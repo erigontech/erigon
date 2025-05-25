@@ -206,7 +206,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				prevProgress = currProgress
 
 				pivot := 20.0 // pivot for the speed calculation (if above, we try to increase the block request rate)
-				absoluteDifferenceFromPivot := int64(math.Abs(speed-pivot) / 10.0)
+				absoluteDifferenceFromPivot := int64(math.Abs(speed-pivot) / 5.0)
 				if speed > pivot {
 					cfg.downloader.IncrementBlocksPerRequest(absoluteDifferenceFromPivot)
 				} else {
