@@ -101,7 +101,7 @@ func newObject(db *IntraBlockState, address common.Address, data, original *acco
 		blockOriginStorage: make(Storage),
 		dirtyStorage:       make(Storage),
 	}
-	so.data.Copy(data)
+	so.data = *data
 	if !so.data.Initialised {
 		so.data.Balance.SetUint64(0)
 		so.data.Initialised = true
@@ -112,7 +112,7 @@ func newObject(db *IntraBlockState, address common.Address, data, original *acco
 	if so.data.Root == (common.Hash{}) {
 		so.data.Root = empty.RootHash
 	}
-	so.original.Copy(original)
+	so.original = *original
 	return &so
 }
 

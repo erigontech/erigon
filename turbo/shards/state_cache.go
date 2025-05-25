@@ -233,7 +233,7 @@ func (ai *AccountItem) CopyValueFrom(item CacheItem) {
 	if !ok {
 		panic(fmt.Sprintf("expected AccountItem, got %T", item))
 	}
-	ai.account.Copy(&otherAi.account)
+	ai.account = otherAi.account
 }
 
 func (swi *StorageWriteItem) Less(than btree.Item) bool {

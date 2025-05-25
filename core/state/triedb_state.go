@@ -71,7 +71,7 @@ func (b *Buffer) detachAccounts() {
 		address := accountWithAddress.Address
 		account := accountWithAddress.Account
 		if account != nil {
-			b.accountUpdates[addrHash] = witnesstypes.AccountWithAddress{Address: address, Account: account.SelfCopy()}
+			b.accountUpdates[addrHash] = witnesstypes.AccountWithAddress{Address: address, Account: account}
 		}
 	}
 }
@@ -457,10 +457,9 @@ func (tds *TrieDbState) buildAccountWrites() (common.Hashes, []*accounts.Account
 			a := tds.aggregateBuffer.accountUpdates[addrHash]
 			if a.Account != nil {
 				if _, ok := tds.aggregateBuffer.storageUpdates[addrHash]; ok {
-					var ac accounts.Account
-					ac.Copy(a.Account)
-					ac.Root = trie.EmptyRoot
-					a.Account = &ac
+					aCopy := *a.Account
+					aCopy.Root = trie.EmptyRoot
+					a.Account = &aCopy
 				}
 			}
 			aValues[i] = a.Account

@@ -266,9 +266,9 @@ func (a *Account) EncodeForHashing(buffer []byte) {
 func (a *Account) Copy(image *Account) {
 	a.Initialised = image.Initialised
 	a.Nonce = image.Nonce
-	a.Balance.Set(&image.Balance)
-	copy(a.Root[:], image.Root[:])
-	copy(a.CodeHash[:], image.CodeHash[:])
+	a.Balance = image.Balance
+	a.Root = image.Root
+	a.CodeHash = image.CodeHash
 	a.Incarnation = image.Incarnation
 }
 
@@ -567,12 +567,6 @@ func DecodeIncarnationFromStorage(enc []byte) (uint64, error) {
 
 }
 
-func (a *Account) SelfCopy() *Account {
-	newAcc := NewAccount()
-	newAcc.Copy(a)
-	return &newAcc
-}
-
 func (a *Account) DecodeRLP(s *rlp.Stream) error {
 	raw, err := s.Raw()
 	if err != nil {
@@ -608,16 +602,6 @@ func (a *Account) Equals(acc *Account) bool {
 		a.CodeHash == acc.CodeHash &&
 		a.Balance.Cmp(&acc.Balance) == 0 &&
 		a.Incarnation == acc.Incarnation
-}
-
-func ConvertV3toV2(v []byte) ([]byte, error) {
-	var a Account
-	if err := DeserialiseV3(&a, v); err != nil {
-		return nil, fmt.Errorf("ConvertV3toV2(%x): %w", v, err)
-	}
-	v = make([]byte, a.EncodingLengthForStorage())
-	a.EncodeForStorage(v)
-	return v, nil
 }
 
 // DeserialiseV3 - method to deserialize accounts in Erigon22 history
