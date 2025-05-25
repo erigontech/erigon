@@ -206,7 +206,7 @@ func (sd *SharedDomains) AggTx() *AggregatorRoTx { return sd.aggTx }
 
 // aggregator context should call aggTx.Unwind before this one.
 func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.TemporalRwTx, blockUnwindTo, txUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
-	step := txUnwindTo / sd.StepSize()
+	step := txUnwindTo / sd.stepSize
 	sd.logger.Info("aggregator unwind", "step", step,
 		"txUnwindTo", txUnwindTo)
 	//fmt.Printf("aggregator unwind step %d txUnwindTo %d\n", step, txUnwindTo)
@@ -401,7 +401,7 @@ func (sd *SharedDomains) SetTx(aggTx *AggregatorRoTx) {
 	sd.aggTx = aggTx
 }
 
-func (sd *SharedDomains) StepSize() uint64 { return sd.AggTx().StepSize() }
+func (sd *SharedDomains) StepSize() uint64 { return sd.stepSize }
 
 // SetTxNum sets txNum for all domains as well as common txNum for all domains
 // Requires for sd.rwTx because of commitment evaluation in shared domains if aggregationStep is reached
