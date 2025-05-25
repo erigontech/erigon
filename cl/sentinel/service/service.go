@@ -208,7 +208,7 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	if err != nil {
 		return nil, err
 	}
-	// httpReq = httpReq.WithContext(ctx) // set proper context
+	httpReq = httpReq.WithContext(ctx) // set proper context
 
 	activePeers, _, _ := s.sentinel.GetPeersCount()
 
