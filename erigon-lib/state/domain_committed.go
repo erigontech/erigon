@@ -97,7 +97,7 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (err erro
 // replaceShortenedKeysInBranch method on each read. Data stored in DB is not referenced (so as in history).
 // Values from domain files with ranges > 2 steps are referenced.
 func (sd *SharedDomains) LatestCommitment(prefix []byte, tx kv.TemporalTx) ([]byte, uint64, error) {
-	aggTx := sd.AggTx()
+	aggTx := AggTx(tx)
 	if v, prevStep, ok := sd.get(kv.CommitmentDomain, prefix); ok {
 		// sd cache values as is (without transformation) so safe to return
 		return v, prevStep, nil
