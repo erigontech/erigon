@@ -24,6 +24,7 @@ import (
 	"math/big"
 	"testing"
 
+	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
@@ -1536,25 +1537,24 @@ func TestGetBlobsV1(t *testing.T) {
 
 	blobBundles := pool.GetBlobs(blobHashes)
 	require.Equal(len(blobBundles), len(blobHashes))
-	blobs := make([][]byte, len(blobBundles))
-	proofs := make([][]byte, len(blobBundles))
+	blobs := make([][]byte, 0, len(blobBundles))
+	proofs := make([]gokzg4844.KZGProof, 0, len(blobBundles))
 	for _, bb := range blobBundles {
 		blobs = append(blobs, bb.Blob)
 		for _, p := range bb.Proofs{
-			proofs = append(proofs, p[:])
+			proofs = append(proofs, p)
 		}
 		
 	}
 	require.Equal(len(proofs), len(blobHashes))
-	assert.Equal(blobTxn, blobs)
+	assert.Equal(blobTxn.BlobBundles[0].Blob, blobs[0])
+	assert.Equal(blobTxn.BlobBundles[1].Blob, blobs[1])
 	assert.Equal(blobTxn.BlobBundles[0].Proofs[0], proofs[0])
 	assert.Equal(blobTxn.BlobBundles[1].Proofs[0], proofs[1])
-	
-
 }
 
 func TextGetBlobsV2(t *testing.T) {
-
+	//TODO
 }
 
 func TestGasLimitChanged(t *testing.T) {
