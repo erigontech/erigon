@@ -88,10 +88,10 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
-			err = domains.DomainPut(kv.AccountsDomain, addrs[txNum].Bytes(), buf, txNum, nil, 0)
+			err = domains.DomainPut(kv.AccountsDomain, rwTx, addrs[txNum].Bytes(), buf, txNum, nil, 0)
 			require.NoError(t, err)
 
-			err = domains.DomainPut(kv.StorageDomain, composite(addrs[txNum].Bytes(), locs[txNum].Bytes()), []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}, txNum, nil, 0)
+			err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addrs[txNum].Bytes(), locs[txNum].Bytes()), []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}, txNum, nil, 0)
 			require.NoError(t, err)
 
 			var v [8]byte
@@ -100,14 +100,14 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 				pv, step, _, err := ac.GetLatest(kv.CommitmentDomain, commKey2, rwTx)
 				require.NoError(t, err)
 
-				err = domains.DomainPut(kv.CommitmentDomain, commKey2, v[:], txNum, pv, step)
+				err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey2, v[:], txNum, pv, step)
 				require.NoError(t, err)
 				otherMaxWrite = txNum
 			} else {
 				pv, step, _, err := ac.GetLatest(kv.CommitmentDomain, commKey1, rwTx)
 				require.NoError(t, err)
 
-				err = domains.DomainPut(kv.CommitmentDomain, commKey1, v[:], txNum, pv, step)
+				err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey1, v[:], txNum, pv, step)
 				require.NoError(t, err)
 				maxWrite = txNum
 			}
@@ -212,16 +212,16 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
-			err = domains.DomainPut(kv.AccountsDomain, addrs[txNum].Bytes(), buf, txNum, nil, 0)
+			err = domains.DomainPut(kv.AccountsDomain, rwTx, addrs[txNum].Bytes(), buf, txNum, nil, 0)
 			require.NoError(t, err)
 
 			k := composite(addrs[txNum].Bytes(), locs[txNum].Bytes())
 			v := []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}
-			err = domains.DomainPut(kv.StorageDomain, k, v, txNum, nil, 0)
+			err = domains.DomainPut(kv.StorageDomain, rwTx, k, v, txNum, nil, 0)
 			require.NoError(t, err)
 
 			if (txNum+1)%agg.StepSize() == 0 {
-				_, err := domains.ComputeCommitment(context.Background(), true, txNum/10, "")
+				_, err := domains.ComputeCommitment(context.Background(), rwTx, true, txNum/10, "")
 				require.NoError(t, err)
 			}
 
