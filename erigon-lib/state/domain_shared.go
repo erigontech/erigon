@@ -493,7 +493,7 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 // TemporalDomain satisfaction
 func (sd *SharedDomains) GetLatest(domain kv.Domain, k []byte) (v []byte, step uint64, err error) {
 	if domain == kv.CommitmentDomain {
-		return sd.LatestCommitment(k)
+		return sd.LatestCommitment(k, sd.roTtx)
 	}
 	if v, prevStep, ok := sd.get(domain, k); ok {
 		return v, prevStep, nil

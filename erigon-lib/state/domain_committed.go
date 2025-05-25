@@ -96,13 +96,13 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (err erro
 // Requires separate function because commitment values have references inside and we need to properly dereference them using
 // replaceShortenedKeysInBranch method on each read. Data stored in DB is not referenced (so as in history).
 // Values from domain files with ranges > 2 steps are referenced.
-func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error) {
+func (sd *SharedDomains) LatestCommitment(prefix []byte, tx kv.TemporalTx) ([]byte, uint64, error) {
 	aggTx := sd.AggTx()
 	if v, prevStep, ok := sd.get(kv.CommitmentDomain, prefix); ok {
 		// sd cache values as is (without transformation) so safe to return
 		return v, prevStep, nil
 	}
-	v, step, found, err := sd.roTtx.Debug().GetLatestFromDB(kv.CommitmentDomain, prefix)
+	v, step, found, err := tx.Debug().GetLatestFromDB(kv.CommitmentDomain, prefix)
 	if err != nil {
 		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
 	}
@@ -113,7 +113,7 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error)
 
 	// getLatestFromFiles doesn't provide same semantics as getLatestFromDB - it returns start/end tx
 	// of file where the value is stored (not exact step when kv has been set)
-	v, _, startTx, endTx, err := sd.roTtx.Debug().GetLatestFromFiles(kv.CommitmentDomain, prefix, 0)
+	v, _, startTx, endTx, err := tx.Debug().GetLatestFromFiles(kv.CommitmentDomain, prefix, 0)
 	if err != nil {
 		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
 	}
