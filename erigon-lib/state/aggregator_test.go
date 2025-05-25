@@ -1335,14 +1335,16 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 
 func TestAggregatorV3_SharedDomains(t *testing.T) {
 	t.Parallel()
-	_db, agg := testDbAndAggregatorv3(t, 20)
+	db, agg := testDbAndAggregatorv3(t, 20)
 	ctx := context.Background()
-	db := wrapDbWithCtx(_db, agg)
 
-	rwTx, err := db.BeginTemporalRw(context.Background())
+	ac := agg.BeginFilesRo()
+	defer ac.Close()
+
+	_rwTx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
-	defer rwTx.Rollback()
-	ac := AggTx(rwTx)
+	defer _rwTx.Rollback()
+	rwTx := wrapTxWithCtx(_rwTx, ac)
 
 	domains, err := NewSharedDomains(rwTx, log.New())
 	require.NoError(t, err)
@@ -1397,14 +1399,16 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 
 	ac = agg.BeginFilesRo()
 	defer ac.Close()
-	domains, err = NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
+	rwTx = wrapTxWithCtx(_rwTx, ac)
+
+	domains, err = NewSharedDomains(rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	diffs := [kv.DomainLen][]kv.DomainEntryDiff{}
 	for idx := range changesetAt5.Diffs {
 		diffs[idx] = changesetAt5.Diffs[idx].GetDiffSet()
 	}
-	err = domains.Unwind(context.Background(), wrapTxWithCtx(rwTx, ac), 0, pruneFrom, &diffs)
+	err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom, &diffs)
 	require.NoError(t, err)
 
 	domains.SetChangesetAccumulator(changesetAt3)
@@ -1443,13 +1447,14 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 
 	ac = agg.BeginFilesRo()
 	defer ac.Close()
-	domains, err = NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
+	rwTx = wrapTxWithCtx(_rwTx, ac)
+	domains, err = NewSharedDomains(rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	for idx := range changesetAt3.Diffs {
 		diffs[idx] = changesetAt3.Diffs[idx].GetDiffSet()
 	}
-	err = domains.Unwind(context.Background(), wrapTxWithCtx(rwTx, ac), 0, pruneFrom, &diffs)
+	err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom, &diffs)
 	require.NoError(t, err)
 
 	for i = int(pruneFrom); i < len(vals); i++ {
