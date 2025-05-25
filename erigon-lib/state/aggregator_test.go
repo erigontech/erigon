@@ -1335,17 +1335,16 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 
 func TestAggregatorV3_SharedDomains(t *testing.T) {
 	t.Parallel()
-	db, agg := testDbAndAggregatorv3(t, 20)
+	_db, agg := testDbAndAggregatorv3(t, 20)
 	ctx := context.Background()
+	db := wrapDbWithCtx(_db, agg)
 
-	ac := agg.BeginFilesRo()
-	defer ac.Close()
-
-	rwTx, err := db.BeginRw(context.Background())
+	rwTx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
+	ac := AggTx(rwTx)
 
-	domains, err := NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
+	domains, err := NewSharedDomains(rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	changesetAt5 := &StateChangeSet{}
