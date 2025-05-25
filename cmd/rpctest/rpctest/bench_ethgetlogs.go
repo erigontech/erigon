@@ -160,7 +160,7 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	noDuplicates := func(logs []Log, bn uint64) error {
+	noDuplicates := func(logs []Log) error {
 		if len(logs) <= 1 {
 			return nil
 		}
@@ -193,7 +193,7 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 			if resp.Error != nil {
 				return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", resp.Error.Code, resp.Error.Message)
 			}
-			if err := noDuplicates(resp.Result, bn); err != nil {
+			if err := noDuplicates(resp.Result); err != nil {
 				return fmt.Errorf("eth_getLogs: at blockNum=%d %w", bn, err)
 			}
 
@@ -217,7 +217,7 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 					return fmt.Errorf("eth_getLogs: at blockNum=%d account %x not indexed", bn, l.Address)
 				}
 
-				if err := noDuplicates(resp.Result, bn); err != nil {
+				if err := noDuplicates(resp.Result); err != nil {
 					return fmt.Errorf("eth_getLogs: at blockNum=%d and addr %x %w", bn, l.Address, err)
 				}
 
@@ -242,7 +242,7 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 				if len(resp.Result) == 0 {
 					return fmt.Errorf("eth_getLogs: at blockNum=%d account %x, topic %x not indexed", bn, l.Address, l.Topics[0])
 				}
-				if err := noDuplicates(resp.Result, bn); err != nil {
+				if err := noDuplicates(resp.Result); err != nil {
 					return fmt.Errorf("eth_getLogs: at blockNum=%d and topic %x %w", bn, l.Topics[0], err)
 				}
 			}

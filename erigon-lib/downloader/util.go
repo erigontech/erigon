@@ -35,7 +35,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
-	common2 "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	dir2 "github.com/erigontech/erigon-lib/common/dir"
@@ -456,7 +456,7 @@ func readPeerID(db kv.RoDB) (peerID []byte, err error) {
 		if err != nil {
 			return fmt.Errorf("get peer id: %w", err)
 		}
-		peerID = common2.Copy(peerIDFromDB)
+		peerID = common.Copy(peerIDFromDB)
 		return nil
 	}); err != nil {
 		return nil, err

@@ -84,3 +84,25 @@ func (nw *NoopWriter) WriteAccountStorage(address common.Address, incarnation ui
 func (nw *NoopWriter) CreateContract(address common.Address) error {
 	return nil
 }
+
+type NoopReader struct {
+}
+
+var noopReader = &NoopReader{}
+
+func NewNoopReader() *NoopReader {
+	return noopReader
+}
+
+func (*NoopReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
+	return nil, nil
+}
+func (*NoopReader) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
+	return nil, nil
+}
+func (*NoopReader) ReadAccountStorage(address common.Address, key common.Hash) ([]byte, error) {
+	return nil, nil
+}
+func (*NoopReader) ReadAccountCode(address common.Address) ([]byte, error)        { return nil, nil }
+func (*NoopReader) ReadAccountCodeSize(address common.Address) (int, error)       { return 0, nil }
+func (*NoopReader) ReadAccountIncarnation(address common.Address) (uint64, error) { return 0, nil }
