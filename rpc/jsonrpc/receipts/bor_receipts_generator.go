@@ -2,7 +2,6 @@ package receipts
 
 import (
 	"context"
-	"fmt"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 
@@ -84,14 +83,13 @@ func (g *BorGenerator) GenerateBorLogs(ctx context.Context, msgs []*types.Messag
 		return nil, err
 	}
 
-	gp := new(core.GasPool).AddGas(msgs[0].Gas() * uint64(len(msgs))).AddBlobGas(msgs[0].BlobGas() * uint64(len(msgs)))
-	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, chainConfig, vm.Config{})
-
 	_, _, firstLogIndex, err := rawtemporaldb.ReceiptAsOf(tx, txNum+1)
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("firstLogIndex: %d\n", firstLogIndex)
+
+	gp := new(core.GasPool).AddGas(msgs[0].Gas() * uint64(len(msgs))).AddBlobGas(msgs[0].BlobGas() * uint64(len(msgs)))
+	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, chainConfig, vm.Config{})
 	return getBorLogs(msgs, evm, gp, ibs, header.Number.Uint64(), header.Hash(), uint(txIndex), uint(firstLogIndex))
 }
 
