@@ -91,7 +91,8 @@ func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *state3.Shared
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)
 		statedb.SetNonce(addr, a.Nonce)
-		balance, _ := uint256.FromBig(a.Balance)
+		var balance uint256.Int
+		_ = balance.SetFromBig(a.Balance)
 		statedb.SetBalance(addr, balance, tracing.BalanceIncreaseGenesisBalance)
 		for k, v := range a.Storage {
 			key := k

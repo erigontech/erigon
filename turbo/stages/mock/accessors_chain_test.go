@@ -537,13 +537,13 @@ func TestBlockReceiptStorage(t *testing.T) {
 		require.NoError(err)
 		// Insert the receipt slice into the database and check presence
 		sd.SetTxNum(base)
-		require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil))
+		require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, base))
 		for i, r := range receipts {
 			sd.SetTxNum(base + 1 + uint64(i))
-			require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), r))
+			require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), r, base+1+uint64(i)))
 		}
 		sd.SetTxNum(base + uint64(len(receipts)) + 1)
-		require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil))
+		require.NoError(rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, base+uint64(len(receipts))+1))
 		require.NoError(sd.Flush(ctx, tx))
 	}
 

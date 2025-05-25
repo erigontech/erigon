@@ -117,7 +117,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 			if txTask.TxIndex >= 0 {
 				receipt = txTask.BlockReceipts[txTask.TxIndex]
 			}
-			if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), receipt, se.blobGasUsed); err != nil {
+			if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), receipt, se.blobGasUsed, txTask.TxNum); err != nil {
 				return false, err
 			}
 		} else {
@@ -133,7 +133,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask, gp
 						CumulativeGasUsed:        lastReceipt.CumulativeGasUsed,
 						FirstLogIndexWithinBlock: uint32(firstIndex),
 					}
-					if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), &receipt, se.blobGasUsed); err != nil {
+					if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), &receipt, se.blobGasUsed, txTask.TxNum); err != nil {
 						return false, err
 					}
 				}

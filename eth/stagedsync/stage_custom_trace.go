@@ -392,7 +392,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 					if txTask.TxIndex >= 0 {
 						receipt = txTask.BlockReceipts[txTask.TxIndex]
 					}
-					if err := rawtemporaldb.AppendReceipt(doms.AsPutDel(tx), receipt, cumulativeBlobGasUsedInBlock); err != nil {
+					if err := rawtemporaldb.AppendReceipt(doms.AsPutDel(tx), receipt, cumulativeBlobGasUsedInBlock, txTask.TxNum); err != nil {
 						return err
 					}
 				}
@@ -411,7 +411,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 								FirstLogIndexWithinBlock: uint32(firstIndex),
 							}
 
-							if err := rawtemporaldb.AppendReceipt(doms.AsPutDel(tx), &receipt, cumulativeBlobGasUsedInBlock); err != nil {
+							if err := rawtemporaldb.AppendReceipt(doms.AsPutDel(tx), &receipt, cumulativeBlobGasUsedInBlock, txTask.TxNum); err != nil {
 								return err
 							}
 						}
@@ -435,7 +435,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 						}
 					}
 				}
-				if err := rawdb.WriteReceiptCacheV2(doms.AsPutDel(tx), receipt); err != nil {
+				if err := rawdb.WriteReceiptCacheV2(doms.AsPutDel(tx), receipt, txTask.TxNum); err != nil {
 					return err
 				}
 			}

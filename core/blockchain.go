@@ -261,7 +261,7 @@ func rlpHash(x interface{}) (h common.Hash) {
 	return h
 }
 
-func SysCallContract(contract common.Address, data []byte, chainConfig *chain.Config, ibs evmtypes.IntraBlockState, header *types.Header, engine consensus.EngineReader, constCall bool, tracing *tracing.Hooks, vmCfg vm.Config) (result []byte, logs []*types.Log, err error) {
+func SysCallContract(contract common.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine consensus.EngineReader, constCall bool, tracing *tracing.Hooks, vmCfg vm.Config) (result []byte, logs []*types.Log, err error) {
 	isBor := chainConfig.Bor != nil
 	var author *common.Address
 	if isBor {
@@ -273,7 +273,7 @@ func SysCallContract(contract common.Address, data []byte, chainConfig *chain.Co
 	return SysCallContractWithBlockContext(contract, data, chainConfig, ibs, blockContext, constCall, tracing, vmCfg)
 }
 
-func SysCallContractWithBlockContext(contract common.Address, data []byte, chainConfig *chain.Config, ibs evmtypes.IntraBlockState, blockContext evmtypes.BlockContext, constCall bool, tracer *tracing.Hooks, vmCfg vm.Config) (result []byte, logs []*types.Log, err error) {
+func SysCallContractWithBlockContext(contract common.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, blockContext evmtypes.BlockContext, constCall bool, tracer *tracing.Hooks, vmCfg vm.Config) (result []byte, logs []*types.Log, err error) {
 	innerTracer := &tracing.Hooks{}
 	if tracer != nil {
 		//innerTracer = tracer

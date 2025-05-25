@@ -46,7 +46,8 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 	tb.Logf("keys %d vals %d\n", len(keys), len(vals))
 
 	for i := 0; i < len(vals); i++ {
-		domains.SetTxNum(uint64(i))
+		txNum := uint64(i)
+		domains.SetTxNum(txNum)
 
 		for j := 0; j < len(keys); j++ {
 			acc := accounts3.Account{
@@ -59,7 +60,7 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 			prev, step, err := domains.GetLatest(kv.AccountsDomain, rwTx, keys[j])
 			require.NoError(tb, err)
 
-			err = domains.DomainPut(kv.AccountsDomain, rwTx, keys[j], buf, prev, step)
+			err = domains.DomainPut(kv.AccountsDomain, rwTx, keys[j], buf, txNum, prev, step)
 			require.NoError(tb, err)
 		}
 		if uint64(i+1)%agg.StepSize() == 0 {

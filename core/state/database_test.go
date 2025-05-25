@@ -1368,7 +1368,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	}
 	rh1, err := sd.ComputeCommitment(context.Background(), tx, true, 0, "")
 	require.NoError(t, err)
-	t.Logf("stateRoot %x", rh1)
+	//t.Logf("stateRoot %x", rh1)
 
 	sd.SetTxNum(2)
 	sd.SetBlockNum(1)

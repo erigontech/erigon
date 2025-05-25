@@ -130,16 +130,16 @@ type temporalPutDel struct {
 	tx kv.Tx
 }
 
-func (pd *temporalPutDel) DomainPut(domain kv.Domain, k1 []byte, val, prevVal []byte, prevStep uint64) error {
-	return pd.sd.DomainPut(domain, pd.tx, k1, val, prevVal, prevStep)
+func (pd *temporalPutDel) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep uint64) error {
+	return pd.sd.DomainPut(domain, pd.tx, k, v, txNum, prevVal, prevStep)
 }
 
-func (pd *temporalPutDel) DomainDel(domain kv.Domain, k []byte, prevVal []byte, prevStep uint64) error {
-	return pd.sd.DomainDel(domain, pd.tx, k, prevVal, prevStep)
+func (pd *temporalPutDel) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte, prevStep uint64) error {
+	return pd.sd.DomainDel(domain, pd.tx, k, txNum, prevVal, prevStep)
 }
 
-func (pd *temporalPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte) error {
-	return pd.sd.DomainDelPrefix(domain, pd.tx, prefix)
+func (pd *temporalPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
+	return pd.sd.DomainDelPrefix(domain, pd.tx, prefix, txNum)
 }
 
 func (sd *SharedDomains) AsPutDel(tx kv.Tx) kv.TemporalPutDel {
@@ -353,19 +353,19 @@ func (sd *SharedDomains) updateCommitmentData(prefix string, data, prev []byte, 
 	return sd.domainWriters[kv.CommitmentDomain].PutWithPrev(toBytesZeroCopy(prefix), data, sd.txNum, prev, prevStep)
 }
 
-func (sd *SharedDomains) deleteAccount(roTx kv.Tx, addr, prev []byte, prevStep uint64) error {
+func (sd *SharedDomains) deleteAccount(roTx kv.Tx, addr []byte, txNum uint64, prev []byte, prevStep uint64) error {
 	addrS := string(addr)
-	if err := sd.DomainDelPrefix(kv.StorageDomain, roTx, addr); err != nil {
+	if err := sd.DomainDelPrefix(kv.StorageDomain, roTx, addr, txNum); err != nil {
 		return err
 	}
 
 	// commitment delete already has been applied via account
-	if err := sd.DomainDel(kv.CodeDomain, roTx, addr, nil, prevStep); err != nil {
+	if err := sd.DomainDel(kv.CodeDomain, roTx, addr, txNum, nil, prevStep); err != nil {
 		return err
 	}
 
 	sd.put(kv.AccountsDomain, addrS, nil)
-	if err := sd.domainWriters[kv.AccountsDomain].DeleteWithPrev(addr, sd.txNum, prev, prevStep); err != nil {
+	if err := sd.domainWriters[kv.AccountsDomain].DeleteWithPrev(addr, txNum, prev, prevStep); err != nil {
 		return err
 	}
 
@@ -545,7 +545,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, roTx kv.Tx, k []byte) (v []
 //   - user can provide `prevVal != nil` - then it will not read prev value from storage
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
-func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.Tx, k, v []byte, prevVal []byte, prevStep uint64) error {
+func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.Tx, k, v []byte, txNum uint64, prevVal []byte, prevStep uint64) error {
 	if v == nil {
 		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)
 	}
@@ -572,13 +572,13 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.Tx, k, v []byte, pr
 		return sd.updateAccountCode(k, v, prevVal, prevStep)
 	case kv.AccountsDomain, kv.CommitmentDomain, kv.RCacheDomain:
 		sd.put(domain, ks, v)
-		return sd.domainWriters[domain].PutWithPrev(k, v, sd.txNum, prevVal, prevStep)
+		return sd.domainWriters[domain].PutWithPrev(k, v, txNum, prevVal, prevStep)
 	default:
 		if bytes.Equal(prevVal, v) {
 			return nil
 		}
 		sd.put(domain, ks, v)
-		return sd.domainWriters[domain].PutWithPrev(k, v, sd.txNum, prevVal, prevStep)
+		return sd.domainWriters[domain].PutWithPrev(k, v, txNum, prevVal, prevStep)
 	}
 }
 
@@ -587,7 +587,7 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.Tx, k, v []byte, pr
 //   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
-func (sd *SharedDomains) DomainDel(domain kv.Domain, roTx kv.Tx, k []byte, prevVal []byte, prevStep uint64) error {
+func (sd *SharedDomains) DomainDel(domain kv.Domain, roTx kv.Tx, k []byte, txNum uint64, prevVal []byte, prevStep uint64) error {
 	if prevVal == nil {
 		var err error
 		prevVal, prevStep, err = sd.GetLatest(domain, roTx, k)
@@ -599,7 +599,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, roTx kv.Tx, k []byte, prevV
 	sd.sdCtx.TouchKey(domain, toStringZeroCopy(k), nil)
 	switch domain {
 	case kv.AccountsDomain:
-		return sd.deleteAccount(roTx, k, prevVal, prevStep)
+		return sd.deleteAccount(roTx, k, txNum, prevVal, prevStep)
 	case kv.StorageDomain:
 		return sd.delAccountStorage(k, prevVal, prevStep)
 	case kv.CodeDomain:
@@ -613,11 +613,11 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, roTx kv.Tx, k []byte, prevV
 		//sd.put(kv.CommitmentDomain, prefix, data)
 		//return sd.domainWriters[kv.CommitmentDomain].PutWithPrev(toBytesZeroCopy(prefix), nil, data, sd.txNum, prev, prevStep)
 		sd.put(domain, toStringZeroCopy(k), nil)
-		return sd.domainWriters[domain].DeleteWithPrev(k, sd.txNum, prevVal, prevStep)
+		return sd.domainWriters[domain].DeleteWithPrev(k, txNum, prevVal, prevStep)
 	}
 }
 
-func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.Tx, prefix []byte) error {
+func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.Tx, prefix []byte, txNum uint64) error {
 	if domain != kv.StorageDomain {
 		return errors.New("DomainDelPrefix: not supported")
 	}
@@ -634,7 +634,7 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.Tx, prefix []
 		return err
 	}
 	for _, tomb := range tombs {
-		if err := sd.DomainDel(kv.StorageDomain, roTx, tomb.k, tomb.v, tomb.step); err != nil {
+		if err := sd.DomainDel(kv.StorageDomain, roTx, tomb.k, txNum, tomb.v, tomb.step); err != nil {
 			return err
 		}
 	}

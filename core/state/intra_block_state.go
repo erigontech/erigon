@@ -126,6 +126,18 @@ func (sdb *IntraBlockState) SetTrace(trace bool) {
 	sdb.trace = trace
 }
 
+func (sdb *IntraBlockState) Trace() bool {
+	return sdb.trace
+}
+
+func (sdb *IntraBlockState) TxIndex() int {
+	return sdb.txIndex
+}
+
+func (sdb *IntraBlockState) Incarnation() int {
+	return 0
+}
+
 // setErrorUnsafe sets error but should be called in medhods that already have locks
 // Deprecated: The IBS api now returns errors directly
 func (sdb *IntraBlockState) setErrorUnsafe(err error) {
@@ -492,7 +504,7 @@ func (sdb *IntraBlockState) SubBalance(addr common.Address, amount *uint256.Int,
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) SetBalance(addr common.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) error {
+func (sdb *IntraBlockState) SetBalance(addr common.Address, amount uint256.Int, reason tracing.BalanceChangeReason) error {
 	stateObject, err := sdb.GetOrNewStateObject(addr)
 	if err != nil {
 		return err
