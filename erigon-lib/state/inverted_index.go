@@ -746,10 +746,10 @@ func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNu
 // [startTxNum; endNumTx)
 func (iit *InvertedIndexRoTx) iterateRangeOnFiles(key []byte, startTxNum, endTxNum int, asc order.By, limit int) (*InvertedIdxStreamFiles, error) {
 	if asc && (startTxNum >= 0 && endTxNum >= 0) && startTxNum > endTxNum {
-		return nil, fmt.Errorf("startTxNum=%d epected to be lower than endTxNum=%d", startTxNum, endTxNum)
+		return nil, fmt.Errorf("startTxNum=%d expected to be lower than endTxNum=%d", startTxNum, endTxNum)
 	}
 	if !asc && (startTxNum >= 0 && endTxNum >= 0) && startTxNum < endTxNum {
-		return nil, fmt.Errorf("startTxNum=%d epected to be bigger than endTxNum=%d", startTxNum, endTxNum)
+		return nil, fmt.Errorf("startTxNum=%d expected to be bigger than endTxNum=%d", startTxNum, endTxNum)
 	}
 
 	it := &InvertedIdxStreamFiles{

@@ -377,6 +377,10 @@ func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isF
 	}
 
 	txIndex = int(txNum) - int(i.minTxNumInBlock) - 1
-	isFinalTxn = txNum == i.maxTxNumInBlock
+	if (i.orderAscend) {
+	   isFinalTxn = txNum == i.maxTxNumInBlock
+	} else {
+  	   isFinalTxn = txNum == i.minTxNumInBlock
+	}
 	return
 }

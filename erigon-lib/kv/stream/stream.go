@@ -84,6 +84,24 @@ func (it *RangeIter[T]) Next() (T, error) {
 	return v, nil
 }
 
+
+func ReverseRange[T constraints.Integer](from, to T) *ReverseRangeIter[T] {
+	return &ReverseRangeIter[T]{i: from, to: to}
+}
+
+type ReverseRangeIter[T constraints.Integer] struct {
+	i, to T
+}
+
+func (it *ReverseRangeIter[T]) HasNext() bool { return it.i > it.to }
+func (it *ReverseRangeIter[T]) Close()        {}
+func (it *ReverseRangeIter[T]) Next() (T, error) {
+	v := it.i
+	it.i--
+	return v, nil
+}
+
+
 // UnionUno
 type UnionUno[T cmp.Ordered] struct {
 	x, y           Uno[T]

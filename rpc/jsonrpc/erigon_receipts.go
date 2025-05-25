@@ -124,6 +124,10 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 // When IgnoreTopicsOrde option is true, once the logs have a topic that matched, it will be returned no matter what topic position it is in.
 //
 // blockCount parameter is for better pagination.
+// options: blockCount and LogCount are not compatible
+// if blockCount is specified wins if less than block range (from, to)
+// if LogCount is specidied returns the logCount record starting from latest tx of end block if log present
+// if LogCount is specified returns the logCount record starting from latest tx of end block if log present even if the range [from, to] specify more blocks 
 // `crit` filter is the same filter.
 //
 // Examples:
@@ -191,7 +195,8 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	exec := exec3.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, nil)
 	defer exec.Close()
 
-	txNumbers, err := applyFiltersV3(api._txNumReader, tx, begin, end, crit)
+	// The Logs should retrieve from latest to oldest order=Descend
+	txNumbers, err := applyFiltersV3(api._txNumReader, tx, begin, end, crit, order.Desc)
 	if err != nil {
 		return erigonLogs, err
 	}
@@ -208,9 +213,8 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	}
 
 	// latest logs that match the filter crit
-	it := rawdbv3.TxNums2BlockNums(tx,
-		api._txNumReader,
-		txNumbers, order.Asc)
+	it := rawdbv3.TxNums2BlockNums(tx, api._txNumReader, txNumbers, order.Desc)
+
 	defer it.Close()
 
 	var blockHash common.Hash
@@ -241,9 +245,15 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			blockHash = header.Hash()
 			exec.ChangeBlock(header)
 			timestamp = header.Time
+			blockCount++
+
 		}
 		var logIndex uint
 		var blockLogs types.Logs
+
+		if logOptions.BlockCount != 0 && logOptions.BlockCount < blockCount {
+			return erigonLogs, nil
+		}
 
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 		if err != nil {
@@ -281,8 +291,6 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			logCount++
 		}
 
-		blockCount++
-
 		if len(blockLogs) == 0 {
 			continue
 		}
@@ -314,9 +322,6 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		}
 
 		if logOptions.LogCount != 0 && logOptions.LogCount <= logCount {
-			return erigonLogs, nil
-		}
-		if logOptions.BlockCount != 0 && logOptions.BlockCount <= blockCount {
 			return erigonLogs, nil
 		}
 	}
