@@ -205,7 +205,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				speed := blockProgress / ratio
 				prevProgress = currProgress
 
-				pivot := 20.0 // pivot for the speed calculation (if above, we try to increase the block request rate)
+				pivot := 30.0 // pivot for the speed calculation (if above, we try to increase the block request rate)
 				absoluteDifferenceFromPivot := int64(math.Abs(speed-pivot) / 5.0)
 				if speed > pivot {
 					cfg.downloader.IncrementBlocksPerRequest(absoluteDifferenceFromPivot)
@@ -267,9 +267,11 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				logger.Debug(logMsg, logArgs...)
 
 				if !isDownloadingForBeacon {
-					remaining := float64(highestBlockSeen - lowestBlockToReach)
+					blocksProcessed := highestBlockSeen - uint64(currEth1Progress.Load())
+					totalBlocksToProcess := highestBlockSeen - lowestBlockToReach
+					remaining := float64(totalBlocksToProcess - blocksProcessed)
 					log.Info("Downloading Execution History", "progress",
-						fmt.Sprintf("%d/%d", highestBlockSeen-uint64(currEth1Progress.Load()), highestBlockSeen-lowestBlockToReach),
+						fmt.Sprintf("%d/%d", blocksProcessed, totalBlocksToProcess),
 						"ETA", (time.Duration(remaining/speed) * time.Second).String(),
 						"blk/sec", fmt.Sprintf("%.1f", speed))
 				} else {
