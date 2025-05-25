@@ -42,15 +42,15 @@ func (sdc *SharedDomainsCommitmentContext) SetLimitReadAsOfTxNum(txNum uint64, d
 	sdc.mainTtx.SetLimitReadAsOfTxNum(txNum, domainOnly)
 }
 
-func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode commitment.Mode, trieVariant commitment.TrieVariant) *SharedDomainsCommitmentContext {
+func NewSharedDomainsCommitmentContext(sd *SharedDomains, tx kv.TemporalTx, mode commitment.Mode, trieVariant commitment.TrieVariant, tmpDir string) *SharedDomainsCommitmentContext {
 	ctx := &SharedDomainsCommitmentContext{
 		sharedDomains: sd,
 	}
 
-	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, sd.AggTx().a.tmpdir)
+	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, tmpDir)
 	trieCtx := &TrieContext{
-		roTtx:  sd.roTtx,
-		getter: sd, // to read from sd cache as well
+		roTtx:  tx,
+		getter: sd.AsGetter(tx),
 		sd:     sd,
 
 		stepSize: sd.StepSize(),
@@ -108,7 +108,7 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, expected
 }
 
 // Evaluates commitment for gathered updates.
-func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, saveState bool, blockNum uint64, logPrefix string, txNum uint64) (rootHash []byte, err error) {
+func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, tx kv.Tx, saveState bool, blockNum uint64, logPrefix string, txNum uint64) (rootHash []byte, err error) {
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
 	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
@@ -381,7 +381,7 @@ func (sdc *SharedDomainsCommitmentContext) rebuildCommitment(ctx context.Context
 	}
 
 	sdc.Reset()
-	return sdc.ComputeCommitment(ctx, true, blockNum, "rebuild commit", txNum)
+	return sdc.ComputeCommitment(ctx, roTx, true, blockNum, "rebuild commit", txNum)
 }
 
 type TrieContext struct {
@@ -440,7 +440,7 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, p
 	//	defer sdc.mu.Unlock()
 	//}
 
-	return sdc.sd.DomainPut(kv.CommitmentDomain, prefix, data, sdc.sd.txNum, prevData, prevStep)
+	return sdc.sd.DomainPut(kv.CommitmentDomain, sdc.roTtx, prefix, data, sdc.sd.txNum, prevData, prevStep)
 }
 
 func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, err error) {
