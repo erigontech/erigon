@@ -851,12 +851,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	mining := stagedsync.New(
 		config.Sync,
 		stagedsync.MiningStages(backend.sentryCtx,
-			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, nil, tmpdir, backend.blockReader),
+			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, backend.chainConfig, backend.engine, nil, tmpdir, backend.blockReader),
 			stagedsync.StageBorHeimdallCfg(
 				backend.chainDB,
 				snapDb,
 				miner,
-				*backend.chainConfig,
+				backend.chainConfig,
 				heimdallClient,
 				heimdallStore,
 				bridgeStore,
@@ -885,8 +885,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				stages2.SilkwormForExecutionStage(backend.silkworm, config),
 			),
 			stagedsync.StageSendersCfg(backend.chainDB, chainConfig, config.Sync, false, dirs.Tmp, config.Prune, blockReader, backend.sentriesClient.Hd),
-			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, nil, 0, txnProvider, blockReader),
-			stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore),
+			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, nil, 0, txnProvider, blockReader),
+			stagedsync.StageMiningFinishCfg(backend.chainDB, backend.chainConfig, backend.engine, miner, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore),
 			astridEnabled,
 		), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder,
 		logger, stages.ModeBlockProduction)
@@ -898,12 +898,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		proposingSync := stagedsync.New(
 			config.Sync,
 			stagedsync.MiningStages(backend.sentryCtx,
-				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, param, tmpdir, backend.blockReader),
+				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, backend.chainConfig, backend.engine, param, tmpdir, backend.blockReader),
 				stagedsync.StageBorHeimdallCfg(
 					backend.chainDB,
 					snapDb,
 					miningStatePos,
-					*backend.chainConfig,
+					backend.chainConfig,
 					heimdallClient,
 					heimdallStore,
 					bridgeStore,
@@ -932,8 +932,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 					stages2.SilkwormForExecutionStage(backend.silkworm, config),
 				),
 				stagedsync.StageSendersCfg(backend.chainDB, chainConfig, config.Sync, false, dirs.Tmp, config.Prune, blockReader, backend.sentriesClient.Hd),
-				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, txnProvider, blockReader),
-				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore),
+				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, txnProvider, blockReader),
+				stagedsync.StageMiningFinishCfg(backend.chainDB, backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore),
 				astridEnabled,
 			), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder, logger, stages.ModeBlockProduction)
 		// We start the mining step
@@ -1163,7 +1163,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 		backend.polygonDownloadSync = stagedsync.New(backend.config.Sync, stagedsync.DownloadSyncStages(
 			backend.sentryCtx, stagedsync.StageSnapshotsCfg(
-				backend.chainDB, *backend.sentriesClient.ChainConfig, config.Sync, dirs, blockRetire, backend.downloaderClient,
+				backend.chainDB, backend.sentriesClient.ChainConfig, config.Sync, dirs, blockRetire, backend.downloaderClient,
 				blockReader, backend.notifications, false, false, false, backend.silkworm, config.Prune,
 			)), nil, nil, backend.logger, stages.ModeApplyingBlocks)
 

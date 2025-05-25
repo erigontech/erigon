@@ -18,7 +18,6 @@ package txpool
 
 import (
 	"context"
-	"math/big"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -58,17 +57,6 @@ func Assemble(
 
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
-	shanghaiTime := chainConfig.ShanghaiTime
-	var agraBlock *big.Int
-	if chainConfig.Bor != nil {
-		agraBlock = chainConfig.Bor.GetAgraBlock()
-	}
-	cancunTime := chainConfig.CancunTime
-	pragueTime := chainConfig.PragueTime
-	if cfg.OverridePragueTime != nil {
-		pragueTime = cfg.OverridePragueTime
-	}
-
 	newTxns := make(chan Announcements, 1024)
 	newSlotsStreams := &NewSlotsStreams{}
 	pool, err := New(
@@ -78,12 +66,7 @@ func Assemble(
 		chainDB.(kv.TemporalRwDB),
 		cfg,
 		cache,
-		*chainID,
-		shanghaiTime,
-		agraBlock,
-		cancunTime,
-		pragueTime,
-		chainConfig.BlobSchedule,
+		chainConfig,
 		sentryClients,
 		stateChangesClient,
 		builderNotifyNewTxns,

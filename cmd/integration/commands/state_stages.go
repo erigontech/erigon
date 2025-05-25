@@ -302,7 +302,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig params.MiningConfig, ctx 
 			miner.MiningConfig.ExtraData = nextBlock.Extra()
 			miningStages.MockExecFunc(stages.MiningCreateBlock, func(badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				err = stagedsync.SpawnMiningCreateBlockStage(s, txc,
-					stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, dirs.Tmp, br),
+					stagedsync.StageMiningCreateBlockCfg(db, miner, chainConfig, engine, nil, dirs.Tmp, br),
 					quit, logger)
 				if err != nil {
 					return err
