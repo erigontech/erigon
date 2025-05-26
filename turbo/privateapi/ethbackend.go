@@ -484,3 +484,8 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remote.AAValid
 
 	return &remote.AAValidationReply{Valid: true}, nil
 }
+
+func (s *EthBackendServer) MinimumBlockAvailable(ctx context.Context, req *emptypb.Empty) (*remote.EarliestBlockAvailableReply, error) {
+	blockNum, err := s.blockReader.EarliestBlockNum(ctx)
+	return &remote.EarliestBlockAvailableReply{BlockNum: blockNum}, err
+}

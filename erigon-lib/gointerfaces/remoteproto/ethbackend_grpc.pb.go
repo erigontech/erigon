@@ -42,6 +42,7 @@ const (
 	ETHBACKEND_BorTxnLookup_FullMethodName            = "/remote.ETHBACKEND/BorTxnLookup"
 	ETHBACKEND_BorEvents_FullMethodName               = "/remote.ETHBACKEND/BorEvents"
 	ETHBACKEND_AAValidation_FullMethodName            = "/remote.ETHBACKEND/AAValidation"
+	ETHBACKEND_MinimumBlockAvailable_FullMethodName   = "/remote.ETHBACKEND/MinimumBlockAvailable"
 )
 
 // ETHBACKENDClient is the client API for ETHBACKEND service.
@@ -85,6 +86,7 @@ type ETHBACKENDClient interface {
 	BorTxnLookup(ctx context.Context, in *BorTxnLookupRequest, opts ...grpc.CallOption) (*BorTxnLookupReply, error)
 	BorEvents(ctx context.Context, in *BorEventsRequest, opts ...grpc.CallOption) (*BorEventsReply, error)
 	AAValidation(ctx context.Context, in *AAValidationRequest, opts ...grpc.CallOption) (*AAValidationReply, error)
+	MinimumBlockAvailable(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*EarliestBlockAvailableReply, error)
 }
 
 type eTHBACKENDClient struct {
@@ -317,6 +319,16 @@ func (c *eTHBACKENDClient) AAValidation(ctx context.Context, in *AAValidationReq
 	return out, nil
 }
 
+func (c *eTHBACKENDClient) MinimumBlockAvailable(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*EarliestBlockAvailableReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EarliestBlockAvailableReply)
+	err := c.cc.Invoke(ctx, ETHBACKEND_MinimumBlockAvailable_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ETHBACKENDServer is the server API for ETHBACKEND service.
 // All implementations must embed UnimplementedETHBACKENDServer
 // for forward compatibility.
@@ -358,6 +370,7 @@ type ETHBACKENDServer interface {
 	BorTxnLookup(context.Context, *BorTxnLookupRequest) (*BorTxnLookupReply, error)
 	BorEvents(context.Context, *BorEventsRequest) (*BorEventsReply, error)
 	AAValidation(context.Context, *AAValidationRequest) (*AAValidationReply, error)
+	MinimumBlockAvailable(context.Context, *emptypb.Empty) (*EarliestBlockAvailableReply, error)
 	mustEmbedUnimplementedETHBACKENDServer()
 }
 
@@ -430,6 +443,9 @@ func (UnimplementedETHBACKENDServer) BorEvents(context.Context, *BorEventsReques
 }
 func (UnimplementedETHBACKENDServer) AAValidation(context.Context, *AAValidationRequest) (*AAValidationReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AAValidation not implemented")
+}
+func (UnimplementedETHBACKENDServer) MinimumBlockAvailable(context.Context, *emptypb.Empty) (*EarliestBlockAvailableReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method MinimumBlockAvailable not implemented")
 }
 func (UnimplementedETHBACKENDServer) mustEmbedUnimplementedETHBACKENDServer() {}
 func (UnimplementedETHBACKENDServer) testEmbeddedByValue()                    {}
@@ -812,6 +828,24 @@ func _ETHBACKEND_AAValidation_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ETHBACKEND_MinimumBlockAvailable_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ETHBACKENDServer).MinimumBlockAvailable(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ETHBACKEND_MinimumBlockAvailable_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ETHBACKENDServer).MinimumBlockAvailable(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ETHBACKEND_ServiceDesc is the grpc.ServiceDesc for ETHBACKEND service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -894,6 +928,10 @@ var ETHBACKEND_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AAValidation",
 			Handler:    _ETHBACKEND_AAValidation_Handler,
+		},
+		{
+			MethodName: "MinimumBlockAvailable",
+			Handler:    _ETHBACKEND_MinimumBlockAvailable_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

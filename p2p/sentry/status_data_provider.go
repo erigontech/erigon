@@ -28,24 +28,27 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	protosentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/p2p/forkid"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 var ErrNoHead = errors.New("ReadChainHead: ReadCurrentHeader error")
 
 type ChainHead struct {
-	HeadHeight uint64
-	HeadTime   uint64
-	HeadHash   common.Hash
-	HeadTd     *uint256.Int
+	HeadHeight     uint64
+	HeadTime       uint64
+	HeadHash       common.Hash
+	EarliestHeight uint64 // need to set EarliestHeight
+	HeadTd         *uint256.Int
 }
 
 type StatusDataProvider struct {
-	db kv.RoDB
+	db          kv.RoDB
+	blockReader services.FullBlockReader
 
 	networkId   uint64
 	genesisHash common.Hash
@@ -62,9 +65,11 @@ func NewStatusDataProvider(
 	genesis *types.Block,
 	networkId uint64,
 	logger log.Logger,
+	blockReader services.FullBlockReader,
 ) *StatusDataProvider {
 	s := &StatusDataProvider{
 		db:          db,
+		blockReader: blockReader,
 		networkId:   networkId,
 		genesisHash: genesis.Hash(),
 		genesisHead: makeGenesisChainHead(genesis),
@@ -95,21 +100,23 @@ func makeGenesisChainHead(genesis *types.Block) ChainHead {
 	}
 
 	return ChainHead{
-		HeadHeight: genesis.NumberU64(),
-		HeadTime:   genesis.Time(),
-		HeadHash:   genesis.Hash(),
-		HeadTd:     genesisDifficulty,
+		HeadHeight:     genesis.NumberU64(),
+		HeadTime:       genesis.Time(),
+		HeadHash:       genesis.Hash(),
+		EarliestHeight: genesis.NumberU64(),
+		HeadTd:         genesisDifficulty,
 	}
 }
 
-func (s *StatusDataProvider) makeStatusData(head ChainHead) *proto_sentry.StatusData {
-	return &proto_sentry.StatusData{
-		NetworkId:       s.networkId,
-		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(head.HeadTd),
-		BestHash:        gointerfaces.ConvertHashToH256(head.HeadHash),
-		MaxBlockHeight:  head.HeadHeight,
-		MaxBlockTime:    head.HeadTime,
-		ForkData: &proto_sentry.Forks{
+func (s *StatusDataProvider) makeStatusData(head ChainHead) *protosentry.StatusData {
+	return &protosentry.StatusData{
+		NetworkId:           s.networkId,
+		TotalDifficulty:     gointerfaces.ConvertUint256IntToH256(head.HeadTd),
+		BestHash:            gointerfaces.ConvertHashToH256(head.HeadHash),
+		MaxBlockHeight:      head.HeadHeight,
+		MaxBlockTime:        head.HeadTime,
+		EarliestBlockHeight: head.EarliestHeight,
+		ForkData: &protosentry.Forks{
 			Genesis:     gointerfaces.ConvertHashToH256(s.genesisHash),
 			HeightForks: s.heightForks,
 			TimeForks:   s.timeForks,
@@ -117,8 +124,8 @@ func (s *StatusDataProvider) makeStatusData(head ChainHead) *proto_sentry.Status
 	}
 }
 
-func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*proto_sentry.StatusData, error) {
-	chainHead, err := ReadChainHead(ctx, s.db)
+func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*protosentry.StatusData, error) {
+	chainHead, err := ReadChainHead(ctx, s.db, s.blockReader)
 	if err != nil {
 		if errors.Is(err, ErrNoHead) {
 			s.logger.Warn("sentry.StatusDataProvider: The canonical chain current header not found in the database. Check the database consistency. Using genesis as a fallback.")
@@ -129,7 +136,7 @@ func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*proto_sentry.S
 	return s.makeStatusData(chainHead), err
 }
 
-func ReadChainHeadWithTx(tx kv.Tx) (ChainHead, error) {
+func ReadChainHeadWithTx(tx kv.Tx, blockReader services.BlockReader) (ChainHead, error) {
 	header := rawdb.ReadCurrentHeaderHavingBody(tx)
 	if header == nil {
 		return ChainHead{}, ErrNoHead
@@ -148,14 +155,21 @@ func ReadChainHeadWithTx(tx kv.Tx) (ChainHead, error) {
 		return ChainHead{}, fmt.Errorf("ReadChainHead: total difficulty conversion error: %w", err)
 	}
 
-	return ChainHead{height, time, hash, td256}, nil
+	var earliestHeight uint64
+	res, err := blockReader.EarliestBlockNum(context.Background())
+	if err == nil {
+		earliestHeight = res
+		log.Info("ReadChainHead: earliest height is ", earliestHeight)
+	}
+
+	return ChainHead{height, time, hash, earliestHeight, td256}, nil
 }
 
-func ReadChainHead(ctx context.Context, db kv.RoDB) (ChainHead, error) {
+func ReadChainHead(ctx context.Context, db kv.RoDB, blockReader services.FullBlockReader) (ChainHead, error) {
 	var head ChainHead
 	var err error
 	err = db.View(ctx, func(tx kv.Tx) error {
-		head, err = ReadChainHeadWithTx(tx)
+		head, err = ReadChainHeadWithTx(tx, blockReader)
 		return err
 	})
 	return head, err
