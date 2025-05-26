@@ -1293,7 +1293,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	changesetAt5 := &StateChangeSet{}
 	changesetAt3 := &StateChangeSet{}
 
-	keys, vals := generateInputData(t, 20, 16, 10)
+	keys, vals := generateInputData(t, 20, 4, 10)
 	keys = keys[:2]
 
 	var i int

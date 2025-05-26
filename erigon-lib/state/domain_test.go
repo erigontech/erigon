@@ -1203,7 +1203,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 
 	d.aggregationStep = 20
 
-	keys, vals := generateInputData(t, 8, 16, 100)
+	keys, vals := generateInputData(t, 8, 4, 100)
 	keys = keys[:20]
 
 	var i int
