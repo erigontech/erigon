@@ -1513,7 +1513,6 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	}
 	err = agg.OpenFolder()
 	require.NoError(t, err)
-	defer func(t time.Time) { fmt.Printf("aggregator_test.go:1591: %s\n", time.Since(t)) }(time.Now())
 
 	ctx := context.Background()
 	finalRoot, err := RebuildCommitmentFiles(ctx, db, &rawdbv3.TxNums, agg.logger)
