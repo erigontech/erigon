@@ -1082,14 +1082,9 @@ func TestScanStaticFilesD(t *testing.T) {
 		"v1.0-accounts.4-5.kv",
 	}
 	d.scanDirtyFiles(files)
-	var found []string
-	d.dirtyFiles.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			found = append(found, fmt.Sprintf("%d-%d", item.startTxNum, item.endTxNum))
-		}
-		return true
-	})
-	require.Len(t, found, 6)
+	require.Equal(t, 6, d.dirtyFiles.Len())
+	d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
+	require.Equal(t, 0, len(d._visible.files))
 }
 
 func TestDomain_CollationBuildInMem(t *testing.T) {
