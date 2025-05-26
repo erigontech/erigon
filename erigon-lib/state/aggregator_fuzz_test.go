@@ -119,7 +119,6 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 		require.NoError(t, err)
 		err = rwTx.Commit()
 		require.NoError(t, err)
-		rwTx = nil
 
 		err = agg.BuildFiles(txs)
 		require.NoError(t, err)
@@ -229,7 +228,6 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 
 		err = rwTx.Commit()
 		require.NoError(t, err)
-		rwTx = nil
 
 		err = agg.BuildFiles(txs)
 		require.NoError(t, err)

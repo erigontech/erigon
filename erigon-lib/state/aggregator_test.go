@@ -159,18 +159,15 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	dc := agg.BeginFilesRo()
-
-	v, _, ex, err := dc.GetLatest(kv.CommitmentDomain, commKey1, roTx)
+	v, _, ex, err := AggTx(roTx).GetLatest(kv.CommitmentDomain, commKey1, roTx)
 	require.NoError(t, err)
 	require.Truef(t, ex, "key %x not found", commKey1)
 
 	require.Equal(t, maxWrite, binary.BigEndian.Uint64(v[:]))
 
-	v, _, ex, err = dc.GetLatest(kv.CommitmentDomain, commKey2, roTx)
+	v, _, ex, err = AggTx(roTx).GetLatest(kv.CommitmentDomain, commKey2, roTx)
 	require.NoError(t, err)
 	require.Truef(t, ex, "key %x not found", commKey2)
-	dc.Close()
 
 	require.Equal(t, otherMaxWrite, binary.BigEndian.Uint64(v[:]))
 }
@@ -255,7 +252,6 @@ func TestAggregatorV3_DirtyFilesRo(t *testing.T) {
 	require.NoError(t, err)
 	err = rwTx.Commit()
 	require.NoError(t, err)
-	rwTx = nil
 
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
@@ -368,7 +364,6 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 
 	err = rwTx.Commit()
 	require.NoError(t, err)
-	rwTx = nil
 
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
@@ -523,18 +518,15 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	require.GreaterOrEqual(t, sstartTx, latestCommitTxNum)
 	_ = sstartTx
 	rwTx.Rollback()
-	rwTx = nil
 
 	// Check the history
-	roTx, err := db.BeginRo(context.Background())
+	roTx, err := db.BeginTemporalRo(context.Background())
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	dc := anotherAgg.BeginFilesRo()
-	v, _, ex, err := dc.GetLatest(kv.CommitmentDomain, someKey, roTx)
+	v, _, ex, err := AggTx(roTx).GetLatest(kv.CommitmentDomain, someKey, roTx)
 	require.NoError(t, err)
 	require.True(t, ex)
-	dc.Close()
 
 	require.Equal(t, maxWrite, binary.BigEndian.Uint64(v[:]))
 }
@@ -953,7 +945,6 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
 
-	tx = nil
 	agg.Close()
 	db.Close()
 
@@ -1113,11 +1104,8 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	tx, err = db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
 
-	aggCtx2 := agg.BeginFilesRo()
-	defer aggCtx2.Close()
-
 	for i, key := range keys {
-		storedV, _, found, err := aggCtx2.d[kv.StorageDomain].GetLatest(key, tx)
+		storedV, _, found, err := AggTx(tx).d[kv.StorageDomain].GetLatest(key, tx)
 		require.Truef(t, found, "key %x not found %d", key, i)
 		require.NoError(t, err)
 		require.Equal(t, key[0], storedV[0])
@@ -1458,9 +1446,11 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 		disableCommitmentBranchTransform: false,
 	})
 	db := wrapDbWithCtx(_db, agg)
-	defer func(t time.Time) { fmt.Printf("aggregator_test.go:1525: %s\n", time.Since(t)) }(time.Now())
 
-	ac := agg.BeginFilesRo()
+	tx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	ac := AggTx(tx)
 	roots := make([]common.Hash, 0)
 
 	// collect latest root from each available file
@@ -1493,9 +1483,8 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 		fmt.Printf("file %s root %x\n", filepath.Base(f.src.decompressor.FilePath()), rh)
 		fnames = append(fnames, f.src.decompressor.FilePath())
 	}
-	ac.Close()
+	tx.Rollback()
 	agg.d[kv.CommitmentDomain].closeFilesAfterStep(0) // close commitment files to remove
-	defer func(t time.Time) { fmt.Printf("aggregator_test.go:1562: %s\n", time.Since(t)) }(time.Now())
 
 	// now clean all commitment files along with related db buckets
 	rwTx, err := db.BeginRw(context.Background())

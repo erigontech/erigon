@@ -308,6 +308,10 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	a := rwDb.(HasAgg).Agg().(*Aggregator)
 	defer func(t time.Time) { fmt.Printf("squeeze.go:309: %s\n", time.Since(t)) }(time.Now())
 
+	// disable hard alignment; allowing commitment and storage/account to have
+	// different visibleFiles
+	a.DisableAllDependencies()
+
 	acRo := a.BeginFilesRo() // this tx is used to read existing domain files and closed in the end
 	defer acRo.Close()
 	defer acRo.MadvNormal().DisableReadAhead()
@@ -342,7 +346,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	defer func() { logger.Info("Commitment DONE", "duration", time.Since(start)) }()
 	defer func(t time.Time) { fmt.Printf("squeeze.go:343: %s\n", time.Since(t)) }(time.Now())
 
-	acRo.RestrictSubsetFileDeletions(true)
 	a.commitmentValuesTransform = false
 
 	var totalKeysCommitted uint64
