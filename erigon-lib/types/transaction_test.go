@@ -751,6 +751,28 @@ func TestShortUnwrap(t *testing.T) {
 	assertEqual(blobTx, &wrappedBlobTx.Tx)
 }
 
+func TestV1BlobTxnUnwrap(t *testing.T) {
+	blobTxRlp, _ := MakeV1WrappedBlobTxnRlp()
+	shortRlp, err := UnwrapTxPlayloadRlp(blobTxRlp)
+	if err != nil {
+		t.Errorf("short rlp stripping failed: %v", err)
+		return
+	}
+	blobTx, err := DecodeTransaction(shortRlp)
+
+	if err != nil {
+		t.Errorf("short rlp decoding failed : %v", err)
+	}
+	wrappedBlobTx := BlobTxWrapper{}
+	blockTxRlp2, _ := MakeBlobTxnRlp()
+	err = wrappedBlobTx.DecodeRLP(rlp.NewStream(bytes.NewReader(blockTxRlp2[1:]), 0))
+	if err != nil {
+		t.Errorf("long rlp decoding failed: %v", err)
+	}
+
+	assertEqual(blobTx, &wrappedBlobTx.Tx)
+}
+
 func TestTrailingBytes(t *testing.T) {
 	// Create a valid transaction
 	valid_rlp_transaction := []byte{201, 38, 38, 128, 128, 107, 58, 42, 38, 42}
