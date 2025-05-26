@@ -491,7 +491,6 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
-	tx = nil
 
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
@@ -505,11 +504,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	anotherAgg, err := NewAggregator2(context.Background(), agg.dirs, aggStep, salt, db, logger)
 	require.NoError(t, err)
 	defer anotherAgg.Close()
-
 	require.NoError(t, anotherAgg.OpenFolder())
-
-	err = tx.Commit()
-	require.NoError(t, err)
 
 	db = wrapDbWithCtx(db, anotherAgg)
 
