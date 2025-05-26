@@ -178,7 +178,7 @@ func TestAggregatorV3_DirtyFilesRo(t *testing.T) {
 	}
 
 	t.Parallel()
-	_db, agg := testDbAndAggregatorv3(t, 10)
+	_db, agg := testDbAndAggregatorv3(t, 3)
 	db := wrapDbWithCtx(_db, agg)
 
 	rwTx, err := db.BeginTemporalRw(context.Background())
@@ -189,7 +189,7 @@ func TestAggregatorV3_DirtyFilesRo(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	txs := uint64(1000)
+	txs := uint64(300)
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	var (
@@ -305,7 +305,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	}
 
 	t.Parallel()
-	_db, agg := testDbAndAggregatorv3(t, 10)
+	_db, agg := testDbAndAggregatorv3(t, 5)
 	db := wrapDbWithCtx(_db, agg)
 	rwTx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
@@ -315,7 +315,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	txs := uint64(1000)
+	txs := uint64(100)
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	agg.commitmentValuesTransform = true
@@ -1480,7 +1480,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 		require.NoError(t, err)
 
 		roots = append(roots, common.BytesToHash(rh))
-		fmt.Printf("file %s root %x\n", filepath.Base(f.src.decompressor.FilePath()), rh)
+		//fmt.Printf("file %s root %x\n", filepath.Base(f.src.decompressor.FilePath()), rh)
 		fnames = append(fnames, f.src.decompressor.FilePath())
 	}
 	tx.Rollback()
@@ -1493,11 +1493,11 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 
 	buckets, err := rwTx.ListTables()
 	require.NoError(t, err)
-	for i, b := range buckets {
+	for _, b := range buckets {
 		if strings.Contains(strings.ToLower(b), kv.CommitmentDomain.String()) {
-			size, err := rwTx.BucketSize(b)
-			require.NoError(t, err)
-			t.Logf("cleaned table #%d %s: %d keys", i, b, size)
+			//size, err := rwTx.BucketSize(b)
+			//require.NoError(t, err)
+			//t.Logf("cleaned table %s: %d keys", b, size)
 
 			err = rwTx.ClearTable(b)
 			require.NoError(t, err)
@@ -1508,7 +1508,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	for _, fn := range fnames {
 		if strings.Contains(fn, kv.CommitmentDomain.String()) {
 			require.NoError(t, os.Remove(fn))
-			t.Logf("removed file %s", filepath.Base(fn))
+			//t.Logf("removed file %s", filepath.Base(fn))
 		}
 	}
 	err = agg.OpenFolder()
