@@ -36,6 +36,7 @@ func NewDependencyIntegrityChecker(dirs datadir.Dirs, logger log.Logger) *Depend
 		dependencyMap: make(map[kv.Domain][]*DependentInfo),
 		dirs:          dirs,
 		logger:        logger,
+		trace:         true,
 	}
 }
 

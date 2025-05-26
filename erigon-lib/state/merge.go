@@ -1000,8 +1000,10 @@ func garbage(dirtyFiles *btree.BTreeG[*filesItem], visibleFiles []visibleFile, m
 				continue
 			}
 
-			if merged == nil && hasCoverVisibleFile(visibleFiles, item) {
-				outs = append(outs, item)
+			if merged == nil {
+				if hasCoverVisibleFile(visibleFiles, item) {
+					outs = append(outs, item)
+				}
 				continue
 			}
 			// this case happens when in previous process run, the merged file was created,
