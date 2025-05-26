@@ -558,10 +558,11 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 
 	acc1 := common.HexToAddress("0x1234567890123456789012345678901234567890")
 	acc1slot1 := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000001")
+	storageK1 := append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...)
 
 	// --- check 1: non-existing storage ---
 	{
-		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1.Bytes())
+		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), rwTtx1)
 		require.NoError(t, err)
 		require.False(t, ok)
 		require.Nil(t, firstKey)
@@ -572,10 +573,10 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 	{
 		// write to storage
 		sd.SetTxNum(1)
-		err = sd.DomainPut(kv.StorageDomain, acc1.Bytes(), acc1slot1.Bytes(), []byte{1}, nil, 0)
+		err = sd.DomainPut(kv.StorageDomain, rwTtx1, storageK1, []byte{1}, 1, nil, 0)
 		require.NoError(t, err)
 		// check before flush
-		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1.Bytes())
+		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), rwTtx1)
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
@@ -615,9 +616,8 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		require.Equal(t, uint64(0), roTtx1.Debug().TxNumsInFiles(kv.StorageDomain))
 
 		// finally, verify SharedDomains.HasPrefix returns true
-		sd.SetTx(roTtx1)
 		sd.SetTxNum(2) // needed for HasPrefix (in-mem has to be ahead of tx num)
-		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1.Bytes())
+		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), roTtx1)
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
@@ -630,15 +630,15 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		// move data to files and trigger prune (need one more step for prune so write to some other storage)
 		acc2 := common.HexToAddress("0x1234567890123456789012345678901234567891")
 		acc2slot2 := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000002")
+		storageK2 := append(append([]byte{}, acc2.Bytes()...), acc2slot2.Bytes()...)
 		rwTtx2, err := temporalDb.BeginTemporalRw(ctx)
 		require.NoError(t, err)
 		t.Cleanup(rwTtx2.Rollback)
 		sd.SetTxNum(2)
-		sd.SetTx(rwTtx2)
-		err = sd.DomainPut(kv.StorageDomain, acc2.Bytes(), acc2slot2.Bytes(), []byte{2}, nil, 0)
+		err = sd.DomainPut(kv.StorageDomain, rwTtx2, storageK2, []byte{2}, 2, nil, 0)
 		require.NoError(t, err)
 		// check before flush
-		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1.Bytes())
+		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), rwTtx2)
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
@@ -657,7 +657,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		t.Cleanup(rwTtx3.Rollback)
 
 		// prune
-		haveMore, err := rwTtx3.Debug().PruneSmallBatches(ctx, time.Minute)
+		haveMore, err := rwTtx3.PruneSmallBatches(ctx, time.Minute)
 		require.NoError(t, err)
 		require.False(t, haveMore)
 		err = rwTtx3.Commit()
@@ -689,9 +689,8 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		require.Equal(t, uint64(2), roTtx2.Debug().TxNumsInFiles(kv.StorageDomain))
 
 		// finally, verify SharedDomains.HasPrefix returns true
-		sd.SetTx(roTtx2)
 		sd.SetTxNum(3) // needed for HasPrefix (in-mem has to be ahead of tx num)
-		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1.Bytes())
+		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), roTtx2)
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
@@ -705,11 +704,10 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(rwTtx4.Rollback)
 		sd.SetTxNum(3)
-		sd.SetTx(rwTtx4)
-		err = sd.DomainDelPrefix(kv.StorageDomain, acc1.Bytes())
+		err = sd.DomainDelPrefix(kv.StorageDomain, rwTtx4, acc1.Bytes(), 3)
 		require.NoError(t, err)
 		// check before flush
-		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1.Bytes())
+		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), rwTtx4)
 		require.NoError(t, err)
 		require.False(t, ok)
 		require.Nil(t, firstKey)
@@ -723,9 +721,8 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		roTtx3, err := temporalDb.BeginTemporalRo(ctx)
 		require.NoError(t, err)
 		t.Cleanup(roTtx3.Rollback)
-		sd.SetTx(roTtx3)
 		sd.SetTxNum(4) // needed for HasPrefix (in-mem has to be ahead of tx num)
-		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1.Bytes())
+		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), roTtx3)
 		require.NoError(t, err)
 		require.False(t, ok)
 		require.Nil(t, firstKey)
@@ -739,11 +736,10 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(rwTtx5.Rollback)
 		sd.SetTxNum(4)
-		sd.SetTx(rwTtx5)
-		err = sd.DomainPut(kv.StorageDomain, acc1.Bytes(), acc1slot1.Bytes(), []byte{3}, nil, 0)
+		err = sd.DomainPut(kv.StorageDomain, rwTtx5, storageK1, []byte{3}, 4, nil, 0)
 		require.NoError(t, err)
 		// check before flush
-		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1.Bytes())
+		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), rwTtx5)
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
@@ -757,9 +753,8 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		roTtx4, err := temporalDb.BeginTemporalRo(ctx)
 		require.NoError(t, err)
 		t.Cleanup(roTtx4.Rollback)
-		sd.SetTx(roTtx4)
 		sd.SetTxNum(5) // needed for HasPrefix (in-mem has to be ahead of tx num)
-		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1.Bytes())
+		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), roTtx4)
 		require.NoError(t, err)
 		require.True(t, ok)
 		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
