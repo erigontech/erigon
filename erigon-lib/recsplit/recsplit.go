@@ -611,8 +611,6 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return fmt.Errorf("create index file %s: %w", rs.indexFile, err)
 	}
 
-	rs.logger.Debug("[index] created", "file", rs.tmpFilePath)
-
 	defer rs.indexF.Close()
 	rs.indexW = bufio.NewWriterSize(rs.indexF, etl.BufIOSize)
 	// Write minimal app-specific dataID in this index file
@@ -750,6 +748,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		rs.logger.Warn("[index] rename", "file", rs.tmpFilePath, "err", err)
 		return err
 	}
+	rs.logger.Debug("[index] created", "file", rs.indexFileName)
 
 	return nil
 }
