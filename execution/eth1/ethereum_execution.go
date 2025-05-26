@@ -372,15 +372,15 @@ func (e *EthereumExecutionModule) Start(ctx context.Context) {
 
 func (e *EthereumExecutionModule) Ready(ctx context.Context, _ *emptypb.Empty) (*execution.ReadyResponse, error) {
 
-	if err := <-e.blockReader.Ready(ctx); err != nil {
-		return &execution.ReadyResponse{Ready: false}, err
-	}
-
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.Ready: ExecutionStatus_Busy")
 		return &execution.ReadyResponse{Ready: false}, nil
 	}
 	defer e.semaphore.Release(1)
+
+	if err := <-e.blockReader.Ready(ctx); err != nil {
+		return &execution.ReadyResponse{Ready: false}, err
+	}
 	return &execution.ReadyResponse{Ready: true}, nil
 }
 
