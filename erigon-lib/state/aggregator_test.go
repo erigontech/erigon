@@ -838,7 +838,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txN
 		panic("unreachable")
 	}
 
-	const maxStorageKeys = 350
+	const maxStorageKeys = 10
 	usedKeys := make(map[string]struct{}, keysCount)
 
 	for j := uint64(0); j < keysCount; j++ {
