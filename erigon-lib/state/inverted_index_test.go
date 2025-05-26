@@ -703,12 +703,8 @@ func TestScanStaticFiles(t *testing.T) {
 	}
 	ii.scanDirtyFiles(files)
 	require.Equal(t, 6, ii.dirtyFiles.Len())
-
-	//integrity extension case
-	ii.dirtyFiles.Clear()
-	ii.integrity = func(fromStep, toStep uint64) bool { return false }
-	ii.scanDirtyFiles(files)
-	require.Equal(t, 0, ii.dirtyFiles.Len())
+	ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
+	require.Equal(t, 0, len(ii._visible.files))
 }
 
 func TestCtxFiles(t *testing.T) {
