@@ -55,6 +55,7 @@ linters:
         - ruleguard
         - unnecessaryDefer
         - appendAssign
+        - sortSlice
       disabled-checks:
         - regexpMust
         - rangeValCopy
