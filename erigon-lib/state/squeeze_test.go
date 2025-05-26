@@ -2,10 +2,8 @@ package state
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"testing"
-	"time"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
@@ -26,7 +24,6 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 	tb.Helper()
 	_db, agg := testDbAndAggregatorv3(tb, cfg.stepSize)
 	db := wrapDbWithCtx(_db, agg)
-	defer func(t time.Time) { fmt.Printf("squeeze_test.go:27: %s\n", time.Since(t)) }(time.Now())
 
 	agg.commitmentValuesTransform = !cfg.disableCommitmentBranchTransform
 	agg.d[kv.CommitmentDomain].replaceKeysInValues = agg.commitmentValuesTransform
@@ -92,7 +89,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 		t.Skip()
 	}
 
-	cfgd := &testAggConfig{stepSize: 32, disableCommitmentBranchTransform: true}
+	cfgd := &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true}
 	_db, agg := testDbAggregatorWithFiles(t, cfgd)
 	db := wrapDbWithCtx(_db, agg)
 

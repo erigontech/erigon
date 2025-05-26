@@ -650,13 +650,9 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	err = buildTx.Commit()
 	require.NoError(t, err)
 
-	afterTx, err := db.BeginRw(context.Background())
+	afterTx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
-	defer func() {
-		if afterTx != nil {
-			afterTx.Rollback()
-		}
-	}()
+	defer afterTx.Rollback()
 
 	var (
 		// after pruning
@@ -669,25 +665,25 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	)
 
 	{
-		it, err := buildTx.Debug().RangeLatest(kv.AccountsDomain, nil, nil, maxInt)
+		it, err := afterTx.Debug().RangeLatest(kv.AccountsDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		accountsRangeAfter = extractKVErrIterator(t, it)
 
-		it, err = buildTx.Debug().RangeLatest(kv.StorageDomain, nil, nil, maxInt)
+		it, err = afterTx.Debug().RangeLatest(kv.StorageDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		storageRangeAfter = extractKVErrIterator(t, it)
 
-		it, err = buildTx.Debug().RangeLatest(kv.CodeDomain, nil, nil, maxInt)
+		it, err = afterTx.Debug().RangeLatest(kv.CodeDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		codeRangeAfter = extractKVErrIterator(t, it)
 
-		its, err := AggTx(tx).d[kv.AccountsDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, afterTx)
+		its, err := AggTx(afterTx).d[kv.AccountsDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, afterTx)
 		require.NoError(t, err)
 		accountHistRangeAfter = extractKVSErrIterator(t, its)
-		its, err = AggTx(tx).d[kv.CodeDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, afterTx)
+		its, err = AggTx(afterTx).d[kv.CodeDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, afterTx)
 		require.NoError(t, err)
 		codeHistRangeAfter = extractKVSErrIterator(t, its)
-		its, err = AggTx(tx).d[kv.StorageDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, afterTx)
+		its, err = AggTx(afterTx).d[kv.StorageDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, afterTx)
 		require.NoError(t, err)
 		storageHistRangeAfter = extractKVSErrIterator(t, its)
 	}
