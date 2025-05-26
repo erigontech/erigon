@@ -168,12 +168,12 @@ func copyJumpTable(jt *JumpTable) *JumpTable {
 func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	var jt *JumpTable
 	switch {
+	case evm.ChainRules().IsBhilai:
+		jt = &bhilaiInstructionSet
 	case evm.ChainRules().IsPrague:
 		jt = &pragueInstructionSet
 	case evm.ChainRules().IsCancun:
 		jt = &cancunInstructionSet
-	case evm.ChainRules().IsBhilai:
-		jt = &bhilaiInstructionSet
 	case evm.ChainRules().IsNapoli:
 		jt = &napoliInstructionSet
 	case evm.ChainRules().IsShanghai:

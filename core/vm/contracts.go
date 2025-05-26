@@ -237,10 +237,10 @@ func ActivePrecompiles(rules *chain.Rules) []common.Address {
 	switch {
 	case rules.IsOsaka:
 		return PrecompiledAddressesOsaka
-	case rules.IsPrague:
-		return PrecompiledAddressesPrague
 	case rules.IsBhilai:
 		return PrecompiledAddressesBhilai
+	case rules.IsPrague:
+		return PrecompiledAddressesPrague
 	case rules.IsNapoli:
 		return PrecompiledAddressesNapoli
 	case rules.IsCancun:
