@@ -103,8 +103,6 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 		//trace:   true,
 	}
 	aggTx := AggTx(tx)
-	sd.stepSize = sd.AggTx().StepSize()
-
 	sd.stepSize = aggTx.StepSize()
 
 	sd.iiWriters = make([]*InvertedIndexBufferedWriter, len(aggTx.iis))
