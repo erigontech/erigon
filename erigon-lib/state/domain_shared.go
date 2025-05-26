@@ -308,8 +308,8 @@ func (sd *SharedDomains) ReadsValid(readLists map[string]*KvList) bool {
 	return true
 }
 
-func (sd *SharedDomains) updateAccountCode(addr, code, prevCode []byte, prevStep uint64) error {
-	addrS := string(addr)
+func (sd *SharedDomains) updateAccountCode(addrS string, code, prevCode []byte, prevStep uint64) error {
+	addr := toBytesZeroCopy(addrS)
 	sd.put(kv.CodeDomain, addrS, code)
 	if len(code) == 0 {
 		return sd.domainWriters[kv.CodeDomain].DeleteWithPrev(addr, sd.txNum, prevCode, prevStep)
@@ -322,8 +322,8 @@ func (sd *SharedDomains) updateCommitmentData(prefix string, data, prev []byte, 
 	return sd.domainWriters[kv.CommitmentDomain].PutWithPrev(toBytesZeroCopy(prefix), data, sd.txNum, prev, prevStep)
 }
 
-func (sd *SharedDomains) deleteAccount(addr []byte, txNum uint64, prev []byte, prevStep uint64) error {
-	addrS := string(addr)
+func (sd *SharedDomains) deleteAccount(addrS string, txNum uint64, prev []byte, prevStep uint64) error {
+	addr := toBytesZeroCopy(addrS)
 	if err := sd.DomainDelPrefix(kv.StorageDomain, addr, txNum); err != nil {
 		return err
 	}
@@ -341,14 +341,14 @@ func (sd *SharedDomains) deleteAccount(addr []byte, txNum uint64, prev []byte, p
 	return nil
 }
 
-func (sd *SharedDomains) writeAccountStorage(k, v, preVal []byte, prevStep uint64) error {
-	sd.put(kv.StorageDomain, string(k), v)
-	return sd.domainWriters[kv.StorageDomain].PutWithPrev(k, v, sd.txNum, preVal, prevStep)
+func (sd *SharedDomains) writeAccountStorage(k string, v, preVal []byte, prevStep uint64) error {
+	sd.put(kv.StorageDomain, k, v)
+	return sd.domainWriters[kv.StorageDomain].PutWithPrev(toBytesZeroCopy(k), v, sd.txNum, preVal, prevStep)
 }
 
-func (sd *SharedDomains) delAccountStorage(k, preVal []byte, prevStep uint64) error {
-	sd.put(kv.StorageDomain, string(k), nil)
-	return sd.domainWriters[kv.StorageDomain].DeleteWithPrev(k, sd.txNum, preVal, prevStep)
+func (sd *SharedDomains) delAccountStorage(k string, preVal []byte, prevStep uint64) error {
+	sd.put(kv.StorageDomain, k, nil)
+	return sd.domainWriters[kv.StorageDomain].DeleteWithPrev(toBytesZeroCopy(k), sd.txNum, preVal, prevStep)
 }
 
 func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) {
@@ -522,19 +522,17 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, 
 			return err
 		}
 	}
-	//fmt.Printf("k %x comp %x S %x\n", k1, composite, compositeS)
-	//compositeS := toStringZeroCopy(composite) // composite is leaking pointer: once k1 changed it also changed in maps
 	ks := string(k)
 
 	sd.sdCtx.TouchKey(domain, ks, v)
 	switch domain {
 	case kv.StorageDomain:
-		return sd.writeAccountStorage(k, v, prevVal, prevStep)
+		return sd.writeAccountStorage(ks, v, prevVal, prevStep)
 	case kv.CodeDomain:
 		if bytes.Equal(prevVal, v) {
 			return nil
 		}
-		return sd.updateAccountCode(k, v, prevVal, prevStep)
+		return sd.updateAccountCode(ks, v, prevVal, prevStep)
 	case kv.AccountsDomain, kv.CommitmentDomain, kv.RCacheDomain:
 		sd.put(domain, ks, v)
 		return sd.domainWriters[domain].PutWithPrev(k, v, txNum, prevVal, prevStep)
@@ -561,23 +559,22 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, k []byte, txNum uint64, pre
 		}
 	}
 
-	sd.sdCtx.TouchKey(domain, toStringZeroCopy(k), nil)
+	ks := string(k)
+	sd.sdCtx.TouchKey(domain, ks, nil)
 	switch domain {
 	case kv.AccountsDomain:
-		return sd.deleteAccount(k, txNum, prevVal, prevStep)
+		return sd.deleteAccount(ks, txNum, prevVal, prevStep)
 	case kv.StorageDomain:
-		return sd.delAccountStorage(k, prevVal, prevStep)
+		return sd.delAccountStorage(ks, prevVal, prevStep)
 	case kv.CodeDomain:
 		if prevVal == nil {
 			return nil
 		}
-		return sd.updateAccountCode(k, nil, prevVal, prevStep)
+		return sd.updateAccountCode(ks, nil, prevVal, prevStep)
 	case kv.CommitmentDomain:
-		return sd.updateCommitmentData(toStringZeroCopy(k), nil, prevVal, prevStep)
+		return sd.updateCommitmentData(ks, nil, prevVal, prevStep)
 	default:
-		//sd.put(kv.CommitmentDomain, prefix, data)
-		//return sd.domainWriters[kv.CommitmentDomain].PutWithPrev(toBytesZeroCopy(prefix), nil, data, sd.txNum, prev, prevStep)
-		sd.put(domain, toStringZeroCopy(k), nil)
+		sd.put(domain, ks, nil)
 		return sd.domainWriters[domain].DeleteWithPrev(k, txNum, prevVal, prevStep)
 	}
 }

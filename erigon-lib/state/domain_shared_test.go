@@ -533,7 +533,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 		require.NoError(t, err)
 		require.Zero(t, missed)
 
-		err = domains.deleteAccount(k0, domains.TxNum(), pv, step)
+		err = domains.deleteAccount(string(k0), domains.TxNum(), pv, step)
 		require.NoError(t, err)
 
 		notRemoved := 0
