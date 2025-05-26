@@ -93,17 +93,14 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	}
 
 	cfgd := &testAggConfig{stepSize: 32, disableCommitmentBranchTransform: true}
-	db, agg := testDbAggregatorWithFiles(t, cfgd)
-	defer db.Close()
+	_db, agg := testDbAggregatorWithFiles(t, cfgd)
+	db := wrapDbWithCtx(_db, agg)
 
-	ac := agg.BeginFilesRo()
-	defer ac.Close()
-
-	rwTx, err := db.BeginRw(context.Background())
+	rwTx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
+	domains, err := NewSharedDomains(rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -116,20 +113,22 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	// now do the squeeze
 	agg.commitmentValuesTransform = true
 	agg.d[kv.CommitmentDomain].replaceKeysInValues = true
-	err = SqueezeCommitmentFiles(ac, log.New())
+	err = SqueezeCommitmentFiles(AggTx(rwTx), log.New())
 	require.NoError(t, err)
-	ac.Close()
+
 	agg.recalcVisibleFiles(math.MaxUint64)
+	err = rwTx.Commit()
+	require.NoError(t, err)
 
-	// check now
-	ac = agg.BeginFilesRo()
-	defer ac.Close()
+	rwTx, err = db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
 
-	domains, err = NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
+	domains, err = NewSharedDomains(rwTx, log.New())
 	require.NoError(t, err)
 
 	// collect account keys to trigger commitment
-	acit, err := ac.DebugRangeLatest(rwTx, kv.AccountsDomain, nil, nil, -1)
+	acit, err := rwTx.Debug().RangeLatest(kv.AccountsDomain, nil, nil, -1)
 	require.NoError(t, err)
 	defer acit.Close()
 
