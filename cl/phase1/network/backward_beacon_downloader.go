@@ -547,3 +547,12 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 
 	return tx.Commit()
 }
+
+func (b *BackwardBeaconDownloader) Close() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.slotToDownload.Store(0)
+	b.expectedRoot = common.Hash{}
+	b.finished.Store(false)
+	b.pendingResults = nil
+}
