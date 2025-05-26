@@ -178,6 +178,10 @@ MainLoop:
 			// Handle errors received on the error channel
 			return err
 		case blocks := <-respCh:
+			if blocks == nil {
+				// If no blocks are received, continue to the next iteration
+				continue
+			}
 			// Handle blocks received on the response channel
 			for _, block := range blocks.Data {
 				// Check if the parent block is known
