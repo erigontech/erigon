@@ -131,6 +131,7 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 		// Fetch blocks from the specified range
 		blocks, err := fetchBlocksFromReqResp(ctx, cfg, from, count)
 		if err != nil {
+			fmt.Println("startFetchingBlocksMissedByGossipAfterSomeTime: error fetching blocks:", err)
 			// Send error to the error channel and return
 			errCh <- err
 			return

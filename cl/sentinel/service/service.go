@@ -185,22 +185,22 @@ func (s *SentinelServer) gossipMatchSubscription(obj gossipObject, data *sentine
 	return true
 }
 
-func (s *SentinelServer) withTimeoutCtx(pctx context.Context, dur time.Duration) (ctx context.Context, cn func()) {
-	if dur > 0 {
-		ctx, cn = context.WithTimeout(pctx, 8*time.Second)
-	} else {
-		ctx, cn = context.WithCancel(pctx)
-	}
-	go func() {
-		select {
-		case <-s.ctx.Done():
-			cn()
-		case <-ctx.Done():
-			return
-		}
-	}()
-	return ctx, cn
-}
+// func (s *SentinelServer) withTimeoutCtx(pctx context.Context, dur time.Duration) (ctx context.Context, cn func()) {
+// 	if dur > 0 {
+// 		ctx, cn = context.WithTimeout(pctx, 8*time.Second)
+// 	} else {
+// 		ctx, cn = context.WithCancel(pctx)
+// 	}
+// 	go func() {
+// 		select {
+// 		case <-s.ctx.Done():
+// 			cn()
+// 		case <-ctx.Done():
+// 			return
+// 		}
+// 	}()
+// 	return ctx, cn
+// }
 
 func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sentinelrpc.RequestData) (*sentinelrpc.ResponseData, error) {
 	// prepare the http request
