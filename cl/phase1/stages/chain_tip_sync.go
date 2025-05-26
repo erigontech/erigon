@@ -62,7 +62,7 @@ func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count ui
 	// spam requests to fetch blocks by range from the execution client
 	blocks, pid, err := cfg.rpc.SendBeaconBlocksByRangeReq(ctx, from, count)
 	for err != nil {
-		return nil, fmt.Errorf("failed to send beacon blocks by range request: %w", err)
+		return nil, nil
 	}
 
 	// If no blocks are returned, return nil without error
