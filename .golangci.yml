@@ -53,10 +53,10 @@ linters:
     gocritic:
       enabled-checks:
         - ruleguard
-        - unnecessaryDefer
-        - appendAssign
         - sortSlice
       disabled-checks:
+        - unnecessaryDefer
+        - appendAssign
         - regexpMust
         - rangeValCopy
         - exitAfterDefer
