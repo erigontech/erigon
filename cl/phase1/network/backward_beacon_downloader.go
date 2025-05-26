@@ -417,7 +417,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 		}
 		currentParentRoot = downloadedBlocks[i].block.Block.ParentRoot
 	}
-	//fmt.Println("Downloaded blocks", len(downloadedBlocks), startSlot, lowerBound, count, b.slotToDownload.Load())
+
 	if len(downloadedBlocks) == 0 {
 		return nil
 	}
