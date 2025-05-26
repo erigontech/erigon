@@ -25,7 +25,6 @@ import (
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
 
@@ -197,32 +196,4 @@ func (l *BlobsByRangeRequest) EncodingSizeSSZ() int {
 
 func (*BlobsByRangeRequest) Clone() clonable.Clonable {
 	return &BlobsByRangeRequest{}
-}
-
-// ColumnSidecarsByRangeRequest is the request for getting a range of column sidecars.
-type ColumnSidecarsByRangeRequest struct {
-	/*
-	  start_slot: Slot
-	  count: uint64
-	  columns: List[ColumnIndex, NUMBER_OF_COLUMNS]
-	*/
-	StartSlot uint64
-	Count     uint64
-	Columns   solid.ListSSZUint64
-}
-
-func (c *ColumnSidecarsByRangeRequest) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, c.StartSlot, c.Count, &c.Columns)
-}
-
-func (c *ColumnSidecarsByRangeRequest) DecodeSSZ(buf []byte, _ int) error {
-	return ssz2.UnmarshalSSZ(buf, 0, &c.StartSlot, &c.Count, &c.Columns)
-}
-
-func (c *ColumnSidecarsByRangeRequest) EncodingSizeSSZ() int {
-	return 16 + c.Columns.EncodingSizeSSZ()
-}
-
-func (*ColumnSidecarsByRangeRequest) Clone() clonable.Clonable {
-	return &ColumnSidecarsByRangeRequest{}
 }
