@@ -1042,15 +1042,16 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 	if txn.Creation {
 		return txpoolcfg.InvalidCreateTxn
 	}
-	blobCount := uint64(len(txn.BlobHashes))
+	blobCount := len(txn.BlobHashes)
 	if blobCount == 0 {
 		return txpoolcfg.NoBlobs
 	}
-	if blobCount > p.GetMaxBlobsPerBlock() {
+	if blobCount > int(p.GetMaxBlobsPerBlock()) {
 		return txpoolcfg.TooManyBlobs
 	}
 
-	if len(txn.BlobHashes) != len(txn.BlobBundles) {
+	if blobCount != len(txn.BlobBundles) {
+		log.Error(fmt.Sprintf("blobCount %d != len(txn.BlobBundles) %d", blobCount, len(txn.BlobBundles)))
 		return txpoolcfg.UnequalBlobTxExt
 	}
 	blobs := txn.Blobs()
@@ -1058,6 +1059,7 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 	proofs := txn.Proofs()
 
 	if len(blobs) != len(commitments) {
+		log.Error(fmt.Sprintf("len(blobs) %d != len(commitments) %d", len(blobs),len(commitments)))
 		return txpoolcfg.UnequalBlobTxExt
 	}
 	if p.isOsaka() {
@@ -1066,6 +1068,7 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 		}
 	} else {
 		if len(commitments) != len(proofs) {
+			log.Error(fmt.Sprintf("NOT OSAKA len(commitments) %d != len(proofs) %d", len(commitments),len(proofs)))
 			return txpoolcfg.UnequalBlobTxExt
 		}
 	}
