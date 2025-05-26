@@ -41,6 +41,10 @@ import (
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
+var (
+	ErrResourceUnavailable = errors.New("resource unavailable")
+)
+
 type RateLimits struct {
 	pingLimit                int
 	goodbyeLimit             int
@@ -163,16 +167,19 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 				l["agent"] = str
 			}
 		}
-		err = fn(s)
-		if err != nil {
-			l["err"] = err
+		if err := fn(s); err != nil {
+			if errors.Is(err, ErrResourceUnavailable) {
+				// write resource unavailable prefix
+				if _, err := s.Write([]byte{ResourceUnavailablePrefix}); err != nil {
+					log.Debug("failed to write resource unavailable prefix", "err", err)
+				}
+			}
 			log.Debug("[pubsubhandler] stream handler returned error", "protocol", name, "peer", s.Conn().RemotePeer().String(), "err", err)
 			_ = s.Reset()
 			_ = s.Close()
 			return
 		}
-		err = s.Close()
-		if err != nil {
+		if err := s.Close(); err != nil {
 			l["err"] = err
 			if !(strings.Contains(name, "goodbye") &&
 				(strings.Contains(err.Error(), "session shut down") ||
