@@ -67,10 +67,6 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 	require.NoError(b, err)
 	defer tx.Rollback()
 
-	require.NoError(b, err)
-	ac := agg.BeginFilesRo()
-	defer ac.Close()
-
 	domains, err := NewSharedDomains(tx, log.New())
 	require.NoError(b, err)
 	defer domains.Close()

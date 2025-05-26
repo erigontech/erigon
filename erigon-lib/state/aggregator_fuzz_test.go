@@ -45,8 +45,6 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 	require.NoError(f, err)
 	defer rwTx.Rollback()
 
-	ac := agg.BeginFilesRo()
-	defer ac.Close()
 	domains, err := NewSharedDomains(rwTx, log.New())
 	require.NoError(f, err)
 	defer domains.Close()
@@ -95,14 +93,14 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 			var v [8]byte
 			binary.BigEndian.PutUint64(v[:], txNum)
 			if txNum%135 == 0 {
-				pv, step, _, err := ac.GetLatest(kv.CommitmentDomain, commKey2, rwTx)
+				pv, step, err := rwTx.GetLatest(kv.CommitmentDomain, commKey2)
 				require.NoError(t, err)
 
 				err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey2, v[:], txNum, pv, step)
 				require.NoError(t, err)
 				otherMaxWrite = txNum
 			} else {
-				pv, step, _, err := ac.GetLatest(kv.CommitmentDomain, commKey1, rwTx)
+				pv, step, err := rwTx.GetLatest(kv.CommitmentDomain, commKey1)
 				require.NoError(t, err)
 
 				err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey1, v[:], txNum, pv, step)
@@ -129,7 +127,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
-		stat, err := ac.prune(context.Background(), rwTx, 0, logEvery)
+		stat, err := AggTx(rwTx).prune(context.Background(), rwTx, 0, logEvery)
 		require.NoError(t, err)
 		t.Logf("Prune: %s", stat)
 
@@ -144,18 +142,15 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 		require.NoError(t, err)
 		defer roTx.Rollback()
 
-		dc := agg.BeginFilesRo()
-
-		v, _, ex, err := dc.GetLatest(kv.CommitmentDomain, commKey1, roTx)
+		v, _, ex, err := AggTx(roTx).GetLatest(kv.CommitmentDomain, commKey1, roTx)
 		require.NoError(t, err)
 		require.Truef(t, ex, "key %x not found", commKey1)
 
 		require.Equal(t, maxWrite, binary.BigEndian.Uint64(v[:]))
 
-		v, _, ex, err = dc.GetLatest(kv.CommitmentDomain, commKey2, roTx)
+		v, _, ex, err = AggTx(roTx).GetLatest(kv.CommitmentDomain, commKey2, roTx)
 		require.NoError(t, err)
 		require.Truef(t, ex, "key %x not found", commKey2)
-		dc.Close()
 
 		require.Equal(t, otherMaxWrite, binary.BigEndian.Uint64(v[:]))
 	})

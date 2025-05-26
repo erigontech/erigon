@@ -83,15 +83,12 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	ac2 := agg.BeginFilesRo()
-	defer ac2.Close()
-
 	latest := make([]byte, 8)
 	binary.BigEndian.PutUint64(latest, maxTx-1)
 	//t.Run("GetLatest", func(t *testing.B) {
 	for ik := 0; ik < t.N; ik++ {
 		for i := 0; i < len(keys); i++ {
-			v, _, ok, err := ac2.GetLatest(kv.AccountsDomain, keys[i], rwTx)
+			v, _, ok, err := AggTx(rwTx).GetLatest(kv.AccountsDomain, keys[i], rwTx)
 
 			require.True(t, ok)
 			require.Equalf(t, latest, v, "unexpected %d, wanted %d", binary.BigEndian.Uint64(v), maxTx-1)
@@ -102,7 +99,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	for ik := 0; ik < t.N; ik++ {
 		for i := 0; i < len(keys); i++ {
 			ts := uint64(rnd.IntN(int(maxTx)))
-			v, ok, err := ac2.HistorySeek(kv.AccountsDomain, keys[i], ts, rwTx)
+			v, ok, err := rwTx.HistorySeek(kv.AccountsDomain, keys[i], ts)
 
 			require.True(t, ok)
 			require.NotNil(t, v)

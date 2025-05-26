@@ -188,14 +188,12 @@ Loop:
 	unwindTo := uint64(commitStep * rnd.IntN(int(maxTx)/commitStep))
 	domains.currentChangesAccumulator = nil
 
-	acu := agg.BeginFilesRo()
 	var a [kv.DomainLen][]kv.DomainEntryDiff
 	for idx, d := range stateChangeset.Diffs {
 		a[idx] = d.GetDiffSet()
 	}
 	err = domains.Unwind(ctx, rwTx, 0, unwindTo, &a)
 	require.NoError(t, err)
-	acu.Close()
 
 	err = rwTx.Commit()
 	require.NoError(t, err)
