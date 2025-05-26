@@ -522,7 +522,7 @@ if ($BuildTarget -eq "db-tools") {
 } elseif ($BuildTarget -eq "test") {
     Write-Host " Running short tests ..."
     $env:GODEBUG = "cgocheck=0"
-    $TestCommand = "go test $($Erigon.BuildFlags) -short --timeout 10m ./... | Where-Object { $_ -notmatch 'PASS: ' }""
+    $TestCommand = "go test $($Erigon.BuildFlags) -short --timeout 10m ./... | Where-Object { $_ -notmatch 'PASS: ' }"
     Invoke-Expression -Command $TestCommand | Out-Host
     if (!($?)) {
         Write-Host " ERROR : Tests failed"
@@ -536,7 +536,7 @@ if ($BuildTarget -eq "db-tools") {
 } elseif ($BuildTarget -eq "test-all") {
     Write-Host " Running all tests ..."
     $env:GODEBUG = "cgocheck=0"
-    $TestCommand = "go test $($Erigon.BuildFlags) --timeout 60m ./... | Where-Object { $_ -notmatch 'PASS: ' }""
+    $TestCommand = "go test $($Erigon.BuildFlags) --timeout 60m ./... | Where-Object { $_ -notmatch 'PASS: ' }"
     Invoke-Expression -Command $TestCommand | Out-Host
     if (!($?)) {
         Write-Host " ERROR : Tests failed"
