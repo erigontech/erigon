@@ -1318,7 +1318,7 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 	return res, nil
 }
 
-func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt) error {
+func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uint64) error {
 	var toWrite []byte
 
 	if receipt != nil {
@@ -1343,7 +1343,7 @@ func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt) error {
 		toWrite = []byte{}
 	}
 
-	if err := tx.DomainPut(kv.RCacheDomain, receiptCacheKey, toWrite, nil, 0); err != nil {
+	if err := tx.DomainPut(kv.RCacheDomain, receiptCacheKey, toWrite, txNum, nil, 0); err != nil {
 		return fmt.Errorf("WriteReceiptCache: %w", err)
 	}
 	return nil
