@@ -138,9 +138,6 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
 
-	err = rwTx.Commit()
-	require.NoError(t, err)
-
 	rwTx, err = db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
