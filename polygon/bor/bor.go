@@ -1192,7 +1192,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 
 func (c *Bor) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
 	state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) {
-	if chain.Config().IsBhilai(header.Time) {
+	if chain != nil && chain.Config().IsBhilai(header.Time) {
 		misc.StoreBlockHashesEip2935(header, state, config, chain)
 	}
 }
