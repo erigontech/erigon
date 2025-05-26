@@ -1408,12 +1408,8 @@ func TestScanStaticFilesH(t *testing.T) {
 	}
 	h.scanDirtyFiles(files)
 	require.Equal(t, 6, h.dirtyFiles.Len())
-
-	h.dirtyFiles.Clear()
-	h.integrity = func(fromStep, toStep uint64) bool { return false }
-	h.scanDirtyFiles(files)
-	require.Equal(t, 0, h.dirtyFiles.Len())
-
+	h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
+	require.Equal(t, 0, len(h._visible.files))
 }
 
 func writeSomeHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History, [][]byte, uint64) {
