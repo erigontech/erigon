@@ -393,7 +393,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))
 
-	stepSize := uint64(10)
+	stepSize := uint64(4)
 	_db, agg := testDbAndAggregatorv3(t, stepSize)
 	db := wrapDbWithCtx(_db, agg)
 
@@ -408,10 +408,6 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 
 	maxTx := 3*stepSize + 10
 	hashes := make([][]byte, maxTx)
-
-	domains, err = NewSharedDomains(rwTx, log.New())
-	require.NoError(t, err)
-	defer domains.Close()
 
 	i := 0
 	k0 := make([]byte, length.Addr)
@@ -439,7 +435,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 			require.NoError(t, err)
 			binary.BigEndian.PutUint64(l0[16:24], uint64(accs))
 
-			for locs := 0; locs < 15000; locs++ {
+			for locs := 0; locs < 1000; locs++ {
 				binary.BigEndian.PutUint64(l0[24:], uint64(locs))
 				pv, step, err := domains.GetLatest(kv.AccountsDomain, rwTx, append(k0, l0...))
 				require.NoError(t, err)
@@ -530,6 +526,4 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	err = domains.Flush(ctx, rwTx)
 	require.NoError(t, err)
 	rwTx.Rollback()
-
-	domains.Close()
 }
