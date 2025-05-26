@@ -192,7 +192,7 @@ func (b *BackwardBeaconDownloader) requestChunk(ctx context.Context, start, coun
 		return nil, nil
 	}
 
-	var responses []*requestResult
+	responses := make([]*requestResult, 0, len(blocks))
 	for _, block := range blocks {
 		if block == nil {
 			continue
