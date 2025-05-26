@@ -116,6 +116,9 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 		return
 	}
 
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	// Continuously fetch and process blocks
 	for {
 		// Calculate the range of blocks to fetch
