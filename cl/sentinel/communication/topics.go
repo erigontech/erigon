@@ -24,6 +24,7 @@ const EncodingProtocol = "/ssz_snappy"
 // request and response versions
 const Schema1 = "/1"
 const Schema2 = "/2"
+const Schema3 = "/3"
 
 // Request and Response topics
 const MetadataTopic = "/metadata"
@@ -49,6 +50,7 @@ var (
 
 	MetadataProtocolV1 = ProtocolPrefix + MetadataTopic + Schema1 + EncodingProtocol
 	MetadataProtocolV2 = ProtocolPrefix + MetadataTopic + Schema2 + EncodingProtocol
+	MetadataProtocolV3 = ProtocolPrefix + MetadataTopic + Schema3 + EncodingProtocol
 
 	StatusProtocolV1 = ProtocolPrefix + StatusTopic + Schema1 + EncodingProtocol
 

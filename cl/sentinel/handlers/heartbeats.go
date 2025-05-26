@@ -87,6 +87,28 @@ func (c *ConsensusHandlers) metadataV2Handler(s network.Stream) error {
 	}, SuccessfulResponsePrefix)
 }
 
+func (c *ConsensusHandlers) metadataV3Handler(s network.Stream) error {
+	subnetField := [8]byte{}
+	syncnetField := [1]byte{}
+	attSubEnr := enr.WithEntry(c.netCfg.AttSubnetKey, &subnetField)
+	syncNetEnr := enr.WithEntry(c.netCfg.SyncCommsSubnetKey, &syncnetField)
+	if err := c.me.Node().Load(attSubEnr); err != nil {
+		return err
+	}
+	if err := c.me.Node().Load(syncNetEnr); err != nil {
+		return err
+	}
+
+	custodyGroupCount := c.beaconConfig.NumberOfCustodyGroups
+
+	return ssz_snappy.EncodeAndWrite(s, &cltypes.Metadata{
+		SeqNumber:         c.me.Seq(),
+		Attnets:           subnetField,
+		Syncnets:          &syncnetField,
+		CustodyGroupCount: &custodyGroupCount,
+	}, SuccessfulResponsePrefix)
+}
+
 // TODO: Actually respond with proper status
 func (c *ConsensusHandlers) statusHandler(s network.Stream) error {
 	return ssz_snappy.EncodeAndWrite(s, c.hs.Status(), SuccessfulResponsePrefix)
