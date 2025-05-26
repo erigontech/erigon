@@ -106,9 +106,6 @@ type histCfg struct {
 	Compression   seg.FileCompression // defines type of Compression for history files
 	historyIdx    kv.InvertedIdx
 
-	//TODO: re-visit this check - maybe we don't need it. It's about kill in the middle of merge
-	integrity rangeIntegrityChecker
-
 	version HistVersionTypes
 }
 
