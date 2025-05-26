@@ -958,8 +958,8 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 			} else {
 				logLine = append(logLine, fmt.Sprintf(" %d:", i), " nil")
 			}
-			e.logger.Debug("[GetBlobsV1]", "Responses", logLine)
 		}
+		e.logger.Debug("[GetBlobsV2]", "Responses", logLine)
 		return ret, nil
 	} else if version == clparams.CapellaVersion {
 		ret := make([]*engine_types.BlobAndProofV1, len(blobHashes))
