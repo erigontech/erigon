@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
-	common2 "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -277,7 +276,7 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 			return false, nil
 		}
 		logger.Log(lvl, "[snapshots] Retire Blocks", "range",
-			fmt.Sprintf("%s-%s", common2.PrettyCounter(blockFrom), common2.PrettyCounter(blockTo)))
+			fmt.Sprintf("%s-%s", common.PrettyCounter(blockFrom), common.PrettyCounter(blockTo)))
 		// in future we will do it in background
 		if err := DumpBlocks(ctx, blockFrom, blockTo, br.chainConfig, tmpDir, snapshots.Dir(), db, int(workers), lvl, logger, blockReader); err != nil {
 			return ok, fmt.Errorf("DumpBlocks: %w", err)
@@ -619,7 +618,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 	defer cancel()
 
 	numBuf := make([]byte, 8)
-	parse := func(v, valueBuf []byte, senders []common2.Address, j int) ([]byte, error) {
+	parse := func(v, valueBuf []byte, senders []common.Address, j int) ([]byte, error) {
 		var sender [20]byte
 		txn2, err := types.DecodeTransaction(v)
 		if err != nil {
@@ -679,7 +678,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			return false, nil
 		}
 
-		h := common2.BytesToHash(v)
+		h := common.BytesToHash(v)
 		dataRLP := rawdb.ReadStorageBodyRLP(tx, h, blockNum)
 		if dataRLP == nil {
 			return false, fmt.Errorf("body not found: %d, %x", blockNum, h)
@@ -790,7 +789,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			if lvl >= log.LvlInfo {
 				var m runtime.MemStats
 				dbg.ReadMemStats(&m)
-				logger.Log(lvl, "[snapshots] Dumping txs", "block num", blockNum, "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+				logger.Log(lvl, "[snapshots] Dumping txs", "block num", blockNum, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 			} else {
 				logger.Log(lvl, "[snapshots] Dumping txs", "block num", blockNum)
 			}
@@ -878,7 +877,7 @@ func DumpHeadersRaw(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom,
 				dbg.ReadMemStats(&m)
 			}
 			logger.Log(lvl, "[snapshots] Dumping headers", "block num", blockNum,
-				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys),
+				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 			)
 		default:
 		}
@@ -961,7 +960,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 				dbg.ReadMemStats(&m)
 			}
 			logger.Log(lvl, "[snapshots] Wrote into file", "block num", blockNum,
-				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys),
+				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 			)
 		default:
 		}

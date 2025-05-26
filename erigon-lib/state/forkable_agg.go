@@ -7,14 +7,15 @@ import (
 	"sync"
 	"sync/atomic"
 
-	common2 "github.com/erigontech/erigon-lib/common"
+	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	ee "github.com/erigontech/erigon-lib/state/entity_extras"
-	"golang.org/x/sync/errgroup"
 )
 
 type ForkableAgg struct {
@@ -149,7 +150,7 @@ func (r *ForkableAgg) BuildFiles(num RootNum) chan struct{} {
 		defer r.buildingFiles.Store(false)
 		for built {
 			built, err = r.buildFile(r.ctx, num)
-			if err != nil && (errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped)) {
+			if err != nil && (errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped)) {
 				r.logger.Debug("buildFile cancelled/stopped", "err", err)
 				close(fin)
 				return
@@ -161,7 +162,7 @@ func (r *ForkableAgg) BuildFiles(num RootNum) chan struct{} {
 		go func() {
 			defer close(fin)
 			if err := r.MergeLoop(r.ctx); err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
+				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
 					r.logger.Debug("MergeLoop cancelled/stopped", "err", err)
 					return
 				}
