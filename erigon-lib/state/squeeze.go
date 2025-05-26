@@ -307,6 +307,10 @@ func SqueezeCommitmentFiles(at *AggregatorRoTx, logger log.Logger) error {
 func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, logger log.Logger) (latestRoot []byte, err error) {
 	a := rwDb.(HasAgg).Agg().(*Aggregator)
 
+	// disable hard alignment; allowing commitment and storage/account to have
+	// different visibleFiles
+	a.DisableAllDependencies()
+
 	acRo := a.BeginFilesRo() // this tx is used to read existing domain files and closed in the end
 	defer acRo.Close()
 	defer acRo.MadvNormal().DisableReadAhead()
@@ -340,7 +344,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	start := time.Now()
 	defer func() { logger.Info("Commitment DONE", "duration", time.Since(start)) }()
 
-	acRo.RestrictSubsetFileDeletions(true)
 	a.commitmentValuesTransform = false
 
 	var totalKeysCommitted uint64
