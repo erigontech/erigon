@@ -872,8 +872,8 @@ type TxnSlot struct {
 	ChainID             uint256.Int
 
 	// EIP-4844: Shard Blob Transactions
-	BlobFeeCap uint256.Int // max_fee_per_blob_gas
-	BlobHashes []common.Hash
+	BlobFeeCap  uint256.Int // max_fee_per_blob_gas
+	BlobHashes  []common.Hash
 	BlobBundles []PoolBlobBundle
 
 	AuthAndNonces []AuthAndNonce // Indexed authorization signers + nonces for EIP-7702 txns (type-4)
@@ -890,7 +890,7 @@ func (tx *TxnSlot) PrintDebug(prefix string) {
 	//fmt.Printf("%s: senderID=%d,nonce=%d,tip=%d,hash=%x\n", prefix, tx.senderID, tx.nonce, tx.tip, tx.IdHash)
 }
 
-func (tx *TxnSlot) Blobs() [][]byte{
+func (tx *TxnSlot) Blobs() [][]byte {
 	b := make([][]byte, 0, len(tx.BlobBundles))
 	for _, bb := range tx.BlobBundles {
 		b = append(b, bb.Blob)
@@ -898,7 +898,7 @@ func (tx *TxnSlot) Blobs() [][]byte{
 	return b
 }
 
-func (tx *TxnSlot) Commitments() []gokzg4844.KZGCommitment{
+func (tx *TxnSlot) Commitments() []gokzg4844.KZGCommitment {
 	c := make([]gokzg4844.KZGCommitment, 0, len(tx.BlobBundles))
 	for _, bb := range tx.BlobBundles {
 		c = append(c, bb.Commitment)
@@ -906,14 +906,13 @@ func (tx *TxnSlot) Commitments() []gokzg4844.KZGCommitment{
 	return c
 }
 
-func (tx *TxnSlot) Proofs() []gokzg4844.KZGProof{
+func (tx *TxnSlot) Proofs() []gokzg4844.KZGProof {
 	p := make([]gokzg4844.KZGProof, 0, len(tx.BlobBundles))
 	for _, bb := range tx.BlobBundles {
 		p = append(p, bb.Proofs...)
 	}
 	return p
 }
-
 
 // ToProtoAccountAbstractionTxn converts a TxnSlot to a typesproto.AccountAbstractionTransaction
 func (tx *TxnSlot) ToProtoAccountAbstractionTxn() *typesproto.AccountAbstractionTransaction {

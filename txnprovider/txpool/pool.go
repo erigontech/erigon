@@ -84,7 +84,7 @@ type Pool interface {
 	FilterKnownIdHashes(tx kv.Tx, hashes Hashes) (unknownHashes Hashes, err error)
 	Started() bool
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
-	GetBlobs(blobhashes []common.Hash) ([]PoolBlobBundle)
+	GetBlobs(blobhashes []common.Hash) []PoolBlobBundle
 	AddNewGoodPeer(peerID PeerID)
 }
 
@@ -143,8 +143,8 @@ type TxPool struct {
 	isPostCancun            atomic.Bool
 	pragueTime              *uint64
 	isPostPrague            atomic.Bool
-	osakaTime				*uint64
-	isPostOsaka				atomic.Bool
+	osakaTime               *uint64
+	isPostOsaka             atomic.Bool
 	blobSchedule            *chain.BlobSchedule
 	feeCalculator           FeeCalculator
 	p2pFetcher              *Fetch
@@ -1059,7 +1059,7 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 		return txpoolcfg.UnequalBlobTxExt
 	}
 	if p.isOsaka() {
-		if len(proofs) != len(blobs)*int(params.CellsPerExtBlob) {	// cell_proofs contains exactly CELLS_PER_EXT_BLOB * len(blobs) cell proofs
+		if len(proofs) != len(blobs)*int(params.CellsPerExtBlob) { // cell_proofs contains exactly CELLS_PER_EXT_BLOB * len(blobs) cell proofs
 			return txpoolcfg.UnmatchedBlobTxExt
 		}
 	} else {
@@ -1076,7 +1076,7 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 
 	if p.isOsaka() {
 		err := libkzg.VerifyCellProofBatch(blobs, commitments, proofs)
-				if err != nil {
+		if err != nil {
 			return txpoolcfg.UnmatchedBlobTxExt
 		}
 	} else {
@@ -1711,7 +1711,7 @@ func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
 	}
 }
 
-func (p *TxPool) getBlobsAndProofByBlobHashLocked(blobHashes []common.Hash) ([]PoolBlobBundle) {
+func (p *TxPool) getBlobsAndProofByBlobHashLocked(blobHashes []common.Hash) []PoolBlobBundle {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	blobBundles := make([]PoolBlobBundle, 0)
@@ -1729,7 +1729,7 @@ func (p *TxPool) getBlobsAndProofByBlobHashLocked(blobHashes []common.Hash) ([]P
 	return blobBundles
 }
 
-func (p *TxPool) GetBlobs(blobHashes []common.Hash) ([]PoolBlobBundle) {
+func (p *TxPool) GetBlobs(blobHashes []common.Hash) []PoolBlobBundle {
 	return p.getBlobsAndProofByBlobHashLocked(blobHashes)
 }
 

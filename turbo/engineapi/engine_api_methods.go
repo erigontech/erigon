@@ -196,7 +196,7 @@ func (e *EngineServer) ExchangeCapabilities(fromCl []string) []string {
 
 func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV1, error) {
 	e.logger.Debug("[GetBlobsV1] Received Request", "hashes", len(blobHashes))
-	resp, err :=  e.getBlobs(ctx, blobHashes, clparams.CapellaVersion)
+	resp, err := e.getBlobs(ctx, blobHashes, clparams.CapellaVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -206,10 +206,9 @@ func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []common.Hash)
 	return nil, err
 }
 
-
 func (e *EngineServer) GetBlobsV2(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV2, error) {
 	e.logger.Debug("[GetBlobsV2] Received Request", "hashes", len(blobHashes))
-	resp, err :=  e.getBlobs(ctx, blobHashes, clparams.FuluVersion)
+	resp, err := e.getBlobs(ctx, blobHashes, clparams.FuluVersion)
 	if err != nil {
 		return nil, err
 	}
