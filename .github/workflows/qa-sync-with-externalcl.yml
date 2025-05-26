@@ -30,6 +30,7 @@ jobs:
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 3600 # 1 hour
       TOTAL_TIME_SECONDS: 25200 # 7 hours
+      ERIGON_ASSERT: true
 
     steps:
       - name: Check out repository
