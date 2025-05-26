@@ -442,7 +442,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 
 			if produce.LogAddr {
 				for _, lg := range txTask.Logs {
-					if err := doms.IndexAdd(kv.LogAddrIdx, lg.Address[:]); err != nil {
+					if err := doms.IndexAdd(kv.LogAddrIdx, lg.Address[:], txTask.TxNum); err != nil {
 						return err
 					}
 				}
@@ -450,7 +450,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 			if produce.LogTopic {
 				for _, lg := range txTask.Logs {
 					for _, topic := range lg.Topics {
-						if err := doms.IndexAdd(kv.LogTopicIdx, topic[:]); err != nil {
+						if err := doms.IndexAdd(kv.LogTopicIdx, topic[:], txTask.TxNum); err != nil {
 							return err
 						}
 					}
@@ -458,14 +458,14 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec3.ExecArgs,
 			}
 			if produce.TraceFrom {
 				for addr := range txTask.TraceFroms {
-					if err := doms.IndexAdd(kv.TracesFromIdx, addr[:]); err != nil {
+					if err := doms.IndexAdd(kv.TracesFromIdx, addr[:], txTask.TxNum); err != nil {
 						return err
 					}
 				}
 			}
 			if produce.TraceTo {
 				for addr := range txTask.TraceTos {
-					if err := doms.IndexAdd(kv.TracesToIdx, addr[:]); err != nil {
+					if err := doms.IndexAdd(kv.TracesToIdx, addr[:], txTask.TxNum); err != nil {
 						return err
 					}
 				}
