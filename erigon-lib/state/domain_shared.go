@@ -122,7 +122,6 @@ func NewSharedDomains(tx kv.TemporalTx, logger log.Logger) (*SharedDomains, erro
 	}
 
 	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, tx, commitment.ModeDirect, tv, aggTx.a.tmpdir)
-	sd.SetTxNum(0)
 
 	if err := sd.SeekCommitment(context.Background(), tx); err != nil {
 		return nil, err
@@ -525,7 +524,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.Tx, k []byte) (v []by
 		return nil, 0, fmt.Errorf("sd.GetLatest: unexpected nil tx")
 	}
 	if domain == kv.CommitmentDomain {
-		return sd.LatestCommitment(k, sd.txNum, tx)
+		return sd.LatestCommitment(k, tx)
 	}
 	if v, prevStep, ok := sd.get(domain, k); ok {
 		return v, prevStep, nil
