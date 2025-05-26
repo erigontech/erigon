@@ -1016,7 +1016,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 
 	t.Parallel()
 	ctx := context.Background()
-	aggStep := uint64(500)
+	aggStep := uint64(20)
 
 	_db, agg := testDbAndAggregatorv3(t, aggStep)
 	db := wrapDbWithCtx(_db, agg)
@@ -1099,10 +1099,10 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	}
 
 	err = tx.Commit()
-	tx = nil
 
 	tx, err = db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
+	defer tx.Rollback()
 
 	for i, key := range keys {
 		storedV, _, found, err := AggTx(tx).d[kv.StorageDomain].GetLatest(key, tx)
