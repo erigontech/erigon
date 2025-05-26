@@ -242,28 +242,29 @@ func (f *SnapshotRepo) Garbage(visibleFiles []visibleFile, merged *filesItem) (o
 // FindMergeRange returns the most recent merge range to process
 // can be successively called with updated (merge processed) visibleFiles
 // to get the next range to process.
-func (f *SnapshotRepo) FindMergeRange(maxEndRootNum RootNum, files visibleFiles) (mrange MergeRange) {
-	toRootNum := min(uint64(maxEndRootNum), files.EndTxNum())
+func (f *SnapshotRepo) FindMergeRange(maxEndRootNum RootNum, files VisibleFiles) (mrange MergeRange) {
+	toRootNum := min(uint64(maxEndRootNum), files.EndRootNum())
 	for i := 0; i < len(files); i++ {
 		item := files[i]
-		if item.endTxNum > toRootNum {
+		if item.EndRootNum() > toRootNum {
 			break
 		}
 
-		calcFrom, calcTo, canFreeze := f.GetFreezingRange(RootNum(item.startTxNum), RootNum(toRootNum))
+		startTxNum := RootNum(item.StartRootNum())
+		calcFrom, calcTo, canFreeze := f.GetFreezingRange(startTxNum, RootNum(toRootNum))
 		if !canFreeze {
 			break
 		}
 
-		if calcFrom.Uint64() != item.startTxNum {
-			panic(fmt.Sprintf("f.GetFreezingRange() returned wrong fromRootNum: %d, expected %d", calcFrom.Uint64(), item.startTxNum))
+		if calcFrom != startTxNum {
+			panic(fmt.Sprintf("f.GetFreezingRange() returned wrong fromRootNum: %d, expected %d", calcFrom.Uint64(), startTxNum))
 		}
 
 		// skip through files which come under the above freezing range
 		j := i + 1
 		for ; j < len(files); j++ {
 			item := files[j]
-			if item.endTxNum > calcTo.Uint64() {
+			if item.EndRootNum() > calcTo.Uint64() {
 				break
 			}
 
@@ -271,7 +272,7 @@ func (f *SnapshotRepo) FindMergeRange(maxEndRootNum RootNum, files visibleFiles)
 			// this function sends the most frequent merge range
 			mrange.from = calcFrom.Uint64()
 			mrange.needMerge = true
-			mrange.to = item.endTxNum
+			mrange.to = item.EndRootNum()
 		}
 
 		i = j - 1
@@ -540,16 +541,19 @@ func getFreezingRange(rootFrom, rootTo RootNum, cfg *ee.SnapshotConfig) (freezeF
 	    as allowed by the MergeSteps or MinimumSize.
 	**/
 
-	if rootFrom >= rootTo {
-		return rootFrom, rootTo, false
-	}
-
 	from := uint64(rootFrom)
 	to := uint64(rootTo)
 
-	to = to - cfg.SafetyMargin
+	if to < cfg.SafetyMargin {
+		return rootFrom, rootTo, false
+	}
+
+	to -= cfg.SafetyMargin
 	from = (from / cfg.MinimumSize) * cfg.MinimumSize
 	to = (to / cfg.MinimumSize) * cfg.MinimumSize
+	if from >= to {
+		return rootFrom, rootTo, false
+	}
 
 	mergeLimit := getMergeLimit(cfg, from)
 	maxJump := cfg.RootNumPerStep

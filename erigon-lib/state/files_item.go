@@ -282,7 +282,7 @@ func (i visibleFile) EndRootNum() uint64 {
 	return i.endTxNum
 }
 
-func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l Accessors, trace bool, toTxNum uint64) (roItems []visibleFile) {
+func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l Accessors, checker func(startTxNum, endTxNum uint64) bool, trace bool, toTxNum uint64) (roItems []visibleFile) {
 	newVisibleFiles := make([]visibleFile, 0, files.Len())
 	// trace = true
 	if trace {
@@ -296,39 +296,10 @@ func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l Accessors, trace bool,
 				}
 				continue
 			}
-			if item.canDelete.Load() {
-				if trace {
-					log.Warn("[dbg] calcVisibleFiles: canDelete=true", "f", item.decompressor.FileName())
-				}
+			if !checkForVisibility(item, l, trace) {
 				continue
 			}
-
-			// TODO: need somehow handle this case, but indices do not open in tests TestFindMergeRangeCornerCases
-			if item.decompressor == nil {
-				if trace {
-					log.Warn("[dbg] calcVisibleFiles: decompressor not opened", "from", item.startTxNum, "to", item.endTxNum)
-				}
-				continue
-			}
-			if l.Has(AccessorBTree) && item.bindex == nil {
-				if trace {
-					log.Warn("[dbg] calcVisibleFiles: BTindex not opened", "f", item.decompressor.FileName())
-				}
-				//panic(fmt.Errorf("btindex nil: %s", item.decompressor.FileName()))
-				continue
-			}
-			if l.Has(AccessorHashMap) && item.index == nil {
-				if trace {
-					log.Warn("[dbg] calcVisibleFiles: RecSplit not opened", "f", item.decompressor.FileName())
-				}
-				//panic(fmt.Errorf("index nil: %s", item.decompressor.FileName()))
-				continue
-			}
-			if l.Has(AccessorExistence) && item.existence == nil {
-				if trace {
-					log.Warn("[dbg] calcVisibleFiles: Existence not opened", "f", item.decompressor.FileName())
-				}
-				//panic(fmt.Errorf("existence nil: %s", item.decompressor.FileName()))
+			if checker != nil && !checker(item.startTxNum, item.endTxNum) {
 				continue
 			}
 
@@ -359,6 +330,43 @@ func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l Accessors, trace bool,
 	return newVisibleFiles
 }
 
+func checkForVisibility(item *filesItem, l Accessors, trace bool) (canBeVisible bool) {
+	if item.canDelete.Load() {
+		if trace {
+			log.Warn("[dbg] canDelete=true", "f", item.decompressor.FileName())
+		}
+		return false
+	}
+	if item.decompressor == nil {
+		if trace {
+			log.Warn("[dbg] decompressor not opened", "from", item.startTxNum, "to", item.endTxNum)
+		}
+		return false
+	}
+	if l.Has(AccessorBTree) && item.bindex == nil {
+		if trace {
+			log.Warn("[dbg] checkForVisibility: BTindex not opened", "f", item.decompressor.FileName())
+		}
+		//panic(fmt.Errorf("btindex nil: %s", item.decompressor.FileName()))
+		return false
+	}
+	if l.Has(AccessorHashMap) && item.index == nil {
+		if trace {
+			log.Warn("[dbg] checkForVisibility: RecSplit not opened", "f", item.decompressor.FileName())
+		}
+		//panic(fmt.Errorf("index nil: %s", item.decompressor.FileName()))
+		return false
+	}
+	if l.Has(AccessorExistence) && item.existence == nil {
+		if trace {
+			log.Warn("[dbg] checkForVisibility: Existence not opened", "f", item.decompressor.FileName())
+		}
+		//panic(fmt.Errorf("existence nil: %s", item.decompressor.FileName()))
+		return false
+	}
+	return true
+}
+
 // visibleFiles have no garbage (overlaps, unindexed, etc...)
 type visibleFiles []visibleFile
 
@@ -368,6 +376,13 @@ func (files visibleFiles) EndTxNum() uint64 {
 		return 0
 	}
 	return files[len(files)-1].endTxNum
+}
+
+func (files visibleFiles) StartTxNum() uint64 {
+	if len(files) == 0 {
+		return 0
+	}
+	return files[0].startTxNum
 }
 
 func (files visibleFiles) LatestMergedRange() MergeRange {
@@ -388,6 +403,17 @@ func (files visibleFiles) String(stepSize uint64) string {
 		res = append(res, fmt.Sprintf("%d-%d", file.startTxNum/stepSize, file.endTxNum/stepSize))
 	}
 	return strings.Join(res, ",")
+}
+func (files visibleFiles) Len() int {
+	return len(files)
+}
+
+func (files visibleFiles) VisibleFiles() []VisibleFile {
+	res := make([]VisibleFile, 0, len(files))
+	for _, file := range files {
+		res = append(res, file)
+	}
+	return res
 }
 
 // fileItemsWithMissedAccessors returns list of files with missed accessors

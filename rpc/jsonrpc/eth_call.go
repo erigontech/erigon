@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/gointerfaces"
@@ -269,7 +270,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	// Assuming a contract can freely run all the instructions, we have
 	// the true amount of gas it wants to consume to execute fully.
 	// We want to ensure that the gas used doesn't fall below this
-	trueGas := result.UsedGas // Must not fall below this
+	trueGas := result.GasUsed // Must not fall below this
 	lo = max(trueGas+result.EvmRefund-1, params.TxGas-1)
 
 	i := 0
@@ -287,7 +288,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		if err != nil && !errors.Is(err, core.ErrIntrinsicGas) {
 			return 0, err
 		}
-		if errors.Is(err, core.ErrIntrinsicGas) || result.Failed() || result.UsedGas < trueGas {
+		if errors.Is(err, core.ErrIntrinsicGas) || result.Failed() || result.GasUsed < trueGas {
 			lo = mid
 		} else {
 			hi = mid
@@ -299,7 +300,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 
 // GetProof implements eth_getProof partially; Proofs are available only with the `latest` block tag.
 func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNrOrHash rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
-	roTx, err := api.db.BeginRo(ctx)
+	roTx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -319,7 +320,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 	return api.getProof(ctx, roTx, address, storageKeysConverted, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(requestedBlockNr)), api.db, api.logger)
 }
 
-func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address common.Address, storageKeys []common.Hash, blockNrOrHash rpc.BlockNumberOrHash, db kv.RoDB, logger log.Logger) (*accounts.AccProofResult, error) {
+func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address common.Address, storageKeys []common.Hash, blockNrOrHash rpc.BlockNumberOrHash, db kv.RoDB, logger log.Logger) (*accounts.AccProofResult, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -357,7 +358,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address common.Add
 
 		sdCtx.SetLimitReadAsOfTxNum(lastTxnInBlock, false)
 		//domains.SetTrace(true)
-		if _, err := domains.SeekCommitment(context.Background(), roTx); err != nil {
+		if err := domains.SeekCommitment(context.Background(), roTx); err != nil {
 			return nil, err
 		}
 		domains.SetTrace(false)
@@ -408,7 +409,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address common.Add
 	proof.StorageHash = acc.Root
 
 	// if storage is not empty touch keys and build trie
-	if proof.StorageHash.Cmp(common.BytesToHash(commitment.EmptyRootHash)) != 0 && len(storageKeys) != 0 {
+	if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash.Bytes())) != 0 && len(storageKeys) != 0 {
 		// touch storage keys
 		for _, storageKey := range storageKeys {
 			sdCtx.TouchKey(kv.StorageDomain, string(common.FromHex(address.Hex()[2:]+storageKey.String()[2:])), nil)
@@ -431,7 +432,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address common.Add
 		proof.StorageProof[i].Key = uint256.NewInt(0).SetBytes(keyHash[:]).Hex()
 
 		// if we have simple non contract account just set values directly without requesting any key proof
-		if proof.StorageHash.Cmp(common.BytesToHash(commitment.EmptyRootHash)) == 0 {
+		if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash.Bytes())) == 0 {
 			proof.StorageProof[i].Proof = nil
 			proof.StorageProof[i].Value = new(hexutil.Big)
 			continue
@@ -448,7 +449,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address common.Add
 			return nil, errors.New("cannot verify store proof")
 		}
 
-		res, err := reader.ReadAccountStorage(address, &keyHash)
+		res, err := reader.ReadAccountStorage(address, keyHash)
 		if err != nil {
 			res = []byte{}
 			logger.Warn(fmt.Sprintf("couldn't read account storage for the address %s\n", address.String()))
@@ -843,7 +844,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 			if res.Err != nil {
 				errString = res.Err.Error()
 			}
-			accessList := &accessListResult{Accesslist: &accessList, Error: errString, GasUsed: hexutil.Uint64(res.UsedGas)}
+			accessList := &accessListResult{Accesslist: &accessList, Error: errString, GasUsed: hexutil.Uint64(res.GasUsed)}
 			if optimizeGas != nil && *optimizeGas {
 				optimizeWarmAddrInAccessList(accessList, *args.From)
 				optimizeWarmAddrInAccessList(accessList, to)

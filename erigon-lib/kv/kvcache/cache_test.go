@@ -244,7 +244,7 @@ func TestAPI(t *testing.T) {
 				return err
 			}
 			defer d.Close()
-			if err := d.DomainPut(kv.AccountsDomain, k, nil, v, prevVals[string(k)], uint64(counter.Load())); err != nil {
+			if err := d.DomainPut(kv.AccountsDomain, k, v, d.TxNum(), prevVals[string(k)], uint64(counter.Load())); err != nil {
 				return err
 			}
 			prevVals[string(k)] = v

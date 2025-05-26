@@ -307,6 +307,10 @@ func SqueezeCommitmentFiles(at *AggregatorRoTx, logger log.Logger) error {
 func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, logger log.Logger) (latestRoot []byte, err error) {
 	a := rwDb.(HasAgg).Agg().(*Aggregator)
 
+	// disable hard alignment; allowing commitment and storage/account to have
+	// different visibleFiles
+	a.DisableAllDependencies()
+
 	acRo := a.BeginFilesRo() // this tx is used to read existing domain files and closed in the end
 	defer acRo.Close()
 	defer acRo.MadvNormal().DisableReadAhead()
@@ -340,7 +344,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	start := time.Now()
 	defer func() { logger.Info("Commitment DONE", "duration", time.Since(start)) }()
 
-	acRo.RestrictSubsetFileDeletions(true)
 	a.commitmentValuesTransform = false
 
 	var totalKeysCommitted uint64
@@ -430,7 +433,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			domains.SetTxNum(lastTxnumInShard - 1)
 			domains.sdCtx.SetLimitReadAsOfTxNum(domains.TxNum()+1, true) // this helps to read state from correct file during commitment
 
-			rebuiltCommit, err = rebuildCommitmentShard(ctx, domains, domains.roTtx, domains.AggTx(), nextKey, &rebuiltCommitment{
+			rebuiltCommit, err = rebuildCommitmentShard(ctx, domains, rwTx, nextKey, &rebuiltCommitment{
 				StepFrom: shardFrom,
 				StepTo:   shardTo,
 				TxnFrom:  fromTxNumRange,
@@ -478,6 +481,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			if !smthDone {
 				break
 			}
+			a.onFilesChange(nil)
 		}
 
 		keyIter.Close()
@@ -514,12 +518,13 @@ func (sd *SharedDomains) discardWrites(d kv.Domain) {
 	sd.domainWriters[d].h.discard = true
 }
 
-func rebuildCommitmentShard(ctx context.Context, sd *SharedDomains, roTx kv.Tx, aggTx *AggregatorRoTx, next func() (bool, []byte), cfg *rebuiltCommitment, logger log.Logger) (*rebuiltCommitment, error) {
+func rebuildCommitmentShard(ctx context.Context, sd *SharedDomains, tx kv.TemporalTx, next func() (bool, []byte), cfg *rebuiltCommitment, logger log.Logger) (*rebuiltCommitment, error) {
+	aggTx := AggTx(tx)
 	sd.discardWrites(kv.AccountsDomain)
 	sd.discardWrites(kv.StorageDomain)
 	sd.discardWrites(kv.CodeDomain)
 
-	visComFiles := roTx.(kv.WithFreezeInfo).FreezeInfo().Files(kv.CommitmentDomain)
+	visComFiles := tx.(kv.WithFreezeInfo).FreezeInfo().Files(kv.CommitmentDomain)
 	logger.Info("starting commitment", "shard", fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo),
 		"totalKeys", common.PrettyCounter(cfg.Keys), "block", sd.BlockNum(),
 		"commitment files before dump step", cfg.StepTo,
@@ -535,7 +540,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *SharedDomains, roTx kv.Tx, 
 		}
 	}
 	collectionSpent := time.Since(sf)
-	rh, err := sd.sdCtx.ComputeCommitment(ctx, true, sd.BlockNum(), fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo))
+	rh, err := sd.sdCtx.ComputeCommitment(ctx, true, sd.BlockNum(), fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), sd.TxNum())
 	if err != nil {
 		return nil, err
 	}

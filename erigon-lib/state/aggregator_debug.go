@@ -1,6 +1,9 @@
 package state
 
 import (
+	"context"
+	"time"
+
 	"github.com/erigontech/erigon-lib/kv"
 )
 
@@ -45,6 +48,44 @@ func (a *Aggregator) DebugBeginDirtyFilesRo() *aggDirtyFilesRoTx {
 	}
 
 	return ac
+}
+
+func (ac *aggDirtyFilesRoTx) MadvNormal() *aggDirtyFilesRoTx {
+	for _, d := range ac.domain {
+		for _, f := range d.files {
+			f.MadvNormal()
+		}
+		for _, f := range d.history.files {
+			f.MadvNormal()
+		}
+		for _, f := range d.history.ii.files {
+			f.MadvNormal()
+		}
+	}
+	for _, ii := range ac.ii {
+		for _, f := range ii.files {
+			f.MadvNormal()
+		}
+	}
+	return ac
+}
+func (ac *aggDirtyFilesRoTx) DisableReadAhead() {
+	for _, d := range ac.domain {
+		for _, f := range d.files {
+			f.DisableReadAhead()
+		}
+		for _, f := range d.history.files {
+			f.DisableReadAhead()
+		}
+		for _, f := range d.history.ii.files {
+			f.DisableReadAhead()
+		}
+	}
+	for _, ii := range ac.ii {
+		for _, f := range ii.files {
+			f.DisableReadAhead()
+		}
+	}
 }
 
 func (ac *aggDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorAggFiles) {
@@ -191,11 +232,46 @@ func (f *iiDirtyFilesRoTx) Close() {
 	f.ii = nil
 }
 
+func (a *Aggregator) PeriodicalyPrintProcessSet(ctx context.Context) {
+	go func() {
+		logEvery := time.NewTicker(30 * time.Second)
+		defer logEvery.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-logEvery.C:
+				if s := a.ps.String(); s != "" {
+					a.logger.Info("[agg] building", "files", s)
+				}
+			}
+		}
+	}()
+}
+
 // fileItems collection of missed files
 type MissedFilesMap map[Accessors][]*filesItem
 type MissedAccessorAggFiles struct {
 	domain map[kv.Domain]*MissedAccessorDomainFiles
 	ii     map[kv.InvertedIdx]*MissedAccessorIIFiles
+}
+
+func (m *MissedAccessorAggFiles) IsEmpty() bool {
+	if m == nil {
+		return true
+	}
+	for _, v := range m.domain {
+		if !v.IsEmpty() {
+			return false
+		}
+	}
+	for _, v := range m.ii {
+		if !v.IsEmpty() {
+			return false
+		}
+	}
+
+	return true
 }
 
 type MissedAccessorDomainFiles struct {
@@ -211,6 +287,18 @@ func (m *MissedAccessorDomainFiles) missedMapAccessors() []*filesItem {
 	return m.files[AccessorHashMap]
 }
 
+func (m *MissedAccessorDomainFiles) IsEmpty() bool {
+	if m == nil {
+		return true
+	}
+	for _, v := range m.files {
+		if len(v) > 0 {
+			return false
+		}
+	}
+	return m.history.IsEmpty()
+}
+
 type MissedAccessorHistoryFiles struct {
 	ii    *MissedAccessorIIFiles
 	files MissedFilesMap
@@ -220,12 +308,36 @@ func (m *MissedAccessorHistoryFiles) missedMapAccessors() []*filesItem {
 	return m.files[AccessorHashMap]
 }
 
+func (m *MissedAccessorHistoryFiles) IsEmpty() bool {
+	if m == nil {
+		return true
+	}
+	for _, v := range m.files {
+		if len(v) > 0 {
+			return false
+		}
+	}
+	return m.ii.IsEmpty()
+}
+
 type MissedAccessorIIFiles struct {
 	files MissedFilesMap
 }
 
 func (m *MissedAccessorIIFiles) missedMapAccessors() []*filesItem {
 	return m.files[AccessorHashMap]
+}
+
+func (m *MissedAccessorIIFiles) IsEmpty() bool {
+	if m == nil {
+		return true
+	}
+	for _, v := range m.files {
+		if len(v) > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func (at *AggregatorRoTx) DbgDomain(idx kv.Domain) *DomainRoTx         { return at.d[idx] }

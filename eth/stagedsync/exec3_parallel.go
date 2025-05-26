@@ -257,7 +257,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 				if err != nil {
 					return err
 				}
-				if _, err := tx.(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, dbg.PruneOnFlushTimeout); err != nil {
+				if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, dbg.PruneOnFlushTimeout); err != nil {
 					return err
 				}
 				if !pe.inMemExec {

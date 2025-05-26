@@ -458,7 +458,7 @@ func (ot *OeTracer) OnEnter(depth int, typ byte, from common.Address, to common.
 	ot.captureStartOrEnter(depth != 0 /* deep */, vm.OpCode(typ), from, to, precompile, isCreate, input, gas, value, code)
 }
 
-func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, usedGas uint64, err error) {
+func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed uint64, err error) {
 	if ot.r.VmTrace != nil {
 		if len(ot.vmOpStack) > 0 {
 			ot.lastOffStack = ot.vmOpStack[len(ot.vmOpStack)-1]
@@ -494,11 +494,11 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, usedGas uint64, e
 			switch topTrace.Type {
 			case CALL:
 				topTrace.Result.(*TraceResult).GasUsed = new(hexutil.Big)
-				topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(usedGas)
+				topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(gasUsed)
 				topTrace.Result.(*TraceResult).Output = common.CopyBytes(output)
 			case CREATE:
 				topTrace.Result.(*CreateTraceResult).GasUsed = new(hexutil.Big)
-				topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(usedGas)
+				topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(gasUsed)
 				topTrace.Result.(*CreateTraceResult).Code = common.CopyBytes(output)
 			}
 		} else {
@@ -517,10 +517,10 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, usedGas uint64, e
 		switch topTrace.Type {
 		case CALL:
 			topTrace.Result.(*TraceResult).GasUsed = new(hexutil.Big)
-			topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(usedGas)
+			topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(gasUsed)
 		case CREATE:
 			topTrace.Result.(*CreateTraceResult).GasUsed = new(hexutil.Big)
-			topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(usedGas)
+			topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(gasUsed)
 		}
 	}
 	ot.traceStack = ot.traceStack[:len(ot.traceStack)-1]
@@ -699,8 +699,8 @@ func (sd *StateDiff) DeleteAccount(address common.Address, original *accounts.Ac
 	return nil
 }
 
-func (sd *StateDiff) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
-	if *original == *value {
+func (sd *StateDiff) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error {
+	if original == value {
 		return nil
 	}
 	accountDiff := sd.sdMap[address]
@@ -710,7 +710,7 @@ func (sd *StateDiff) WriteAccountStorage(address common.Address, incarnation uin
 	}
 	m := make(map[string]interface{})
 	m["*"] = &StateDiffStorage{From: common.BytesToHash(original.Bytes()), To: common.BytesToHash(value.Bytes())}
-	accountDiff.Storage[*key] = m
+	accountDiff.Storage[key] = m
 	return nil
 }
 
@@ -1160,7 +1160,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 	if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
-		ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.UsedGas}, nil)
+		ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.GasUsed}, nil)
 	}
 	traceResult.Output = common.CopyBytes(execResult.ReturnData)
 	if traceTypeStateDiff {
@@ -1470,7 +1470,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		}
 
 		if tracer != nil && tracer.Hooks.OnTxEnd != nil {
-			tracer.Hooks.OnTxEnd(&types.Receipt{GasUsed: execResult.UsedGas}, nil)
+			tracer.Hooks.OnTxEnd(&types.Receipt{GasUsed: execResult.GasUsed}, nil)
 		}
 
 		chainRules := chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time)

@@ -48,6 +48,7 @@ import (
 
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-db/rawdb/blockio"
+	snaptype2 "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
@@ -85,13 +86,16 @@ import (
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
+	p2p "github.com/erigontech/erigon-p2p"
+	"github.com/erigontech/erigon-p2p/enode"
+	"github.com/erigontech/erigon-p2p/protocols/eth"
+	"github.com/erigontech/erigon-p2p/sentry"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
 	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	rpcdaemoncli "github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/core"
-	snaptype2 "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -107,13 +111,9 @@ import (
 	"github.com/erigontech/erigon/execution/consensus/merge"
 	"github.com/erigontech/erigon/execution/eth1"
 	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
+	"github.com/erigontech/erigon/execution/sentry_multi_client"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/p2p"
-	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/p2p/protocols/eth"
-	"github.com/erigontech/erigon/p2p/sentry"
-	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
@@ -492,6 +492,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			return res
 		}
 
+		p2pConfig.LookupBootnodeURLs = params.BootnodeURLsByGenesisHash
+		p2pConfig.LookupDNSNetwork = params.KnownDNSNetwork
 		p2pConfig.DiscoveryDNS = backend.config.EthDiscoveryURLs
 
 		listenHost, listenPort, err := splitAddrIntoHostAndPort(p2pConfig.ListenAddr)
@@ -1553,12 +1555,32 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 // sets up blockReader and client downloader
 func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downloadercfg.Cfg, cc *chain.Config) error {
 	var err error
-	if s.config.Snapshot.NoDownloader {
-		return nil
-	}
+	s.chainDB.OnFilesChange(func(frozenFileNames []string) {
+		s.logger.Warn("files changed...sending notification")
+		events := s.notifications.Events
+		events.OnNewSnapshot()
+		if downloaderCfg != nil && downloaderCfg.ChainName == "" {
+			return
+		}
+		if !s.config.Snapshot.NoDownloader && s.downloaderClient != nil && len(frozenFileNames) > 0 {
+			req := &protodownloader.AddRequest{Items: make([]*protodownloader.AddItem, 0, len(frozenFileNames))}
+			for _, fName := range frozenFileNames {
+				req.Items = append(req.Items, &protodownloader.AddItem{
+					Path: filepath.Join("history", fName),
+				})
+			}
+			if _, err := s.downloaderClient.Add(ctx, req); err != nil {
+				s.logger.Warn("[snapshots] notify downloader", "err", err)
+			}
+		}
+	})
 
 	if downloaderCfg != nil && downloaderCfg.ChainName == "" {
 		downloaderCfg.ChainName = cc.ChainName
+		return nil
+	}
+
+	if s.config.Snapshot.NoDownloader {
 		return nil
 	}
 
@@ -1587,22 +1609,6 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 
 		s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
 	}
-
-	s.chainDB.OnFreeze(func(frozenFileNames []string) {
-		events := s.notifications.Events
-		events.OnNewSnapshot()
-		if s.downloaderClient != nil {
-			req := &protodownloader.AddRequest{Items: make([]*protodownloader.AddItem, 0, len(frozenFileNames))}
-			for _, fName := range frozenFileNames {
-				req.Items = append(req.Items, &protodownloader.AddItem{
-					Path: filepath.Join("history", fName),
-				})
-			}
-			if _, err := s.downloaderClient.Add(ctx, req); err != nil {
-				s.logger.Warn("[snapshots] notify downloader", "err", err)
-			}
-		}
-	})
 	return err
 }
 

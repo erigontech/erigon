@@ -176,7 +176,7 @@ func (db *DB) Close() {
 	db.agg.Close()
 }
 
-func (db *DB) OnFreeze(f kv.OnFreezeFunc) { db.agg.OnFreeze(f) }
+func (db *DB) OnFilesChange(f kv.OnFilesChange) { db.agg.OnFilesChange(f) }
 
 type Tx struct {
 	*mdbx.MdbxTx
@@ -292,13 +292,13 @@ func (tx *Tx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit
 
 // Write methods
 
-func (tx *Tx) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error {
+func (tx *Tx) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep uint64) error {
 	panic("implement me pls. or use SharedDomains")
 }
-func (tx *Tx) DomainDel(domain kv.Domain, k []byte, prevVal []byte, prevStep uint64) error {
+func (tx *Tx) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte, prevStep uint64) error {
 	panic("implement me pls. or use SharedDomains")
 }
-func (tx *Tx) DomainDelPrefix(domain kv.Domain, prefix []byte) error {
+func (tx *Tx) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
 	panic("implement me pls. or use SharedDomains")
 }
 

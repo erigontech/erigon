@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
-	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -44,7 +43,6 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
@@ -114,7 +112,7 @@ func configOrDefault(g *types.Genesis, genesisHash common.Hash) *chain.Config {
 	if config != nil {
 		return config
 	} else {
-		return params2.AllProtocolChanges
+		return chain.AllProtocolChanges
 	}
 }
 
@@ -125,7 +123,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *b
 
 	var storedBlock *types.Block
 	if genesis != nil && genesis.Config == nil {
-		return params2.AllProtocolChanges, nil, types.ErrGenesisNoConfig
+		return chain.AllProtocolChanges, nil, types.ErrGenesisNoConfig
 	}
 	// Just commit the new block if there is no stored genesis block.
 	storedHash, storedErr := rawdb.ReadCanonicalHash(tx, 0)
@@ -188,7 +186,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *b
 	}
 	if storedCfg == nil {
 		logger.Warn("Found genesis block without chain config")
-		err1 := WriteChainConfig(tx, storedHash, newCfg)
+		err1 := rawdb.WriteChainConfig(tx, storedHash, newCfg)
 		if err1 != nil {
 			return newCfg, nil, err1
 		}
@@ -210,7 +208,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *b
 			return newCfg, storedBlock, compatibilityErr
 		}
 	}
-	if err := WriteChainConfig(tx, storedHash, newCfg); err != nil {
+	if err := rawdb.WriteChainConfig(tx, storedHash, newCfg); err != nil {
 		return newCfg, nil, err
 	}
 	return newCfg, storedBlock, nil
@@ -222,8 +220,7 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, dirs datadir.Dirs, logger l
 		return nil, nil, err
 	}
 
-	var stateWriter state.StateWriter
-	stateWriter = state.NewNoopWriter()
+	stateWriter := state.NewNoopWriter()
 
 	if block.Number().Sign() != 0 {
 		return nil, statedb, errors.New("can't commit genesis block with number > 0")
@@ -255,41 +252,12 @@ func MustCommitGenesis(g *types.Genesis, db kv.RwDB, dirs datadir.Dirs, logger l
 // Write writes the block and state of a genesis specification to the database.
 // The block is committed as the canonical head block.
 func write(tx kv.RwTx, g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
-	block, statedb, err2 := WriteGenesisState(g, tx, dirs, logger)
-	if err2 != nil {
-		return block, statedb, err2
+	block, statedb, err := WriteGenesisState(g, tx, dirs, logger)
+	if err != nil {
+		return block, statedb, err
 	}
-	config := g.Config
-	if config == nil {
-		config = params2.AllProtocolChanges
-	}
-	if err := config.CheckConfigForkOrder(); err != nil {
-		return nil, nil, err
-	}
-
-	if err := rawdb.WriteBlock(tx, block); err != nil {
-		return nil, nil, err
-	}
-	if err := rawdb.WriteTd(tx, block.Hash(), block.NumberU64(), g.Difficulty); err != nil {
-		return nil, nil, err
-	}
-	if err := rawdbv3.TxNums.Append(tx, 0, uint64(block.Transactions().Len()+1)); err != nil {
-		return nil, nil, err
-	}
-
-	if err := rawdb.WriteCanonicalHash(tx, block.Hash(), block.NumberU64()); err != nil {
-		return nil, nil, err
-	}
-
-	rawdb.WriteHeadBlockHash(tx, block.Hash())
-	if err := rawdb.WriteHeadHeaderHash(tx, block.Hash()); err != nil {
-		return nil, nil, err
-	}
-	if err := WriteChainConfig(tx, block.Hash(), config); err != nil {
-		return nil, nil, err
-	}
-
-	return block, statedb, nil
+	err = rawdb.WriteGenesisBesideState(block, tx, g)
+	return block, statedb, err
 }
 
 // GenesisBlockForTesting creates and writes a block in which addr has the given wei balance.
@@ -302,17 +270,6 @@ func GenesisBlockForTesting(db kv.RwDB, addr common.Address, balance *big.Int, d
 type GenAccount struct {
 	Addr    common.Address
 	Balance *big.Int
-}
-
-func GenesisWithAccounts(db kv.RwDB, accs []GenAccount, dirs datadir.Dirs, logger log.Logger) *types.Block {
-	g := types.Genesis{Config: chain.TestChainConfig}
-	allocs := make(map[common.Address]types.GenesisAccount)
-	for _, acc := range accs {
-		allocs[acc.Addr] = types.GenesisAccount{Balance: acc.Balance}
-	}
-	g.Alloc = allocs
-	block := MustCommitGenesis(&g, db, dirs, logger)
-	return block
 }
 
 // MainnetGenesisBlock returns the Ethereum main net genesis block.
@@ -461,7 +418,7 @@ func DeveloperGenesisBlock(period uint64, faucet common.Address) *types.Genesis 
 	}
 }
 
-// ToBlock creates the genesis block and writes state of a genesis specification
+// GenesisToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
 func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
 	if dirs.SnapDomain == "" {
@@ -469,70 +426,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 	}
 	_ = g.Alloc //nil-check
 
-	head := &types.Header{
-		Number:        new(big.Int).SetUint64(g.Number),
-		Nonce:         types.EncodeNonce(g.Nonce),
-		Time:          g.Timestamp,
-		ParentHash:    g.ParentHash,
-		Extra:         g.ExtraData,
-		GasLimit:      g.GasLimit,
-		GasUsed:       g.GasUsed,
-		Difficulty:    g.Difficulty,
-		MixDigest:     g.Mixhash,
-		Coinbase:      g.Coinbase,
-		BaseFee:       g.BaseFee,
-		BlobGasUsed:   g.BlobGasUsed,
-		ExcessBlobGas: g.ExcessBlobGas,
-		RequestsHash:  g.RequestsHash,
-	}
-	if g.AuRaSeal != nil && len(g.AuRaSeal.AuthorityRound.Signature) > 0 {
-		head.AuRaSeal = g.AuRaSeal.AuthorityRound.Signature
-		head.AuRaStep = uint64(g.AuRaSeal.AuthorityRound.Step)
-	}
-	if g.GasLimit == 0 {
-		head.GasLimit = params.GenesisGasLimit
-	}
-	if g.Difficulty == nil {
-		head.Difficulty = params.GenesisDifficulty
-	}
-	if g.Config != nil && g.Config.IsLondon(0) {
-		if g.BaseFee != nil {
-			head.BaseFee = g.BaseFee
-		} else {
-			head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
-		}
-	}
-
-	var withdrawals []*types.Withdrawal
-	if g.Config != nil && g.Config.IsShanghai(g.Timestamp) {
-		withdrawals = []*types.Withdrawal{}
-	}
-
-	if g.Config != nil && g.Config.IsCancun(g.Timestamp) {
-		if g.BlobGasUsed != nil {
-			head.BlobGasUsed = g.BlobGasUsed
-		} else {
-			head.BlobGasUsed = new(uint64)
-		}
-		if g.ExcessBlobGas != nil {
-			head.ExcessBlobGas = g.ExcessBlobGas
-		} else {
-			head.ExcessBlobGas = new(uint64)
-		}
-		if g.ParentBeaconBlockRoot != nil {
-			head.ParentBeaconBlockRoot = g.ParentBeaconBlockRoot
-		} else {
-			head.ParentBeaconBlockRoot = &common.Hash{}
-		}
-	}
-
-	if g.Config != nil && g.Config.IsPrague(g.Timestamp) {
-		if g.RequestsHash != nil {
-			head.RequestsHash = g.RequestsHash
-		} else {
-			head.RequestsHash = &types.EmptyRequestsHash
-		}
-	}
+	head, withdrawals := rawdb.GenesisWithoutStateToBlock(g)
 
 	var root common.Hash
 	var statedb *state.IntraBlockState // reader behind this statedb is dead at the moment of return, tx is rolled back
@@ -541,7 +435,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 	wg, ctx := errgroup.WithContext(ctx)
 	// we may run inside write tx, can't open 2nd write tx in same goroutine
 	wg.Go(func() error {
-		// some users creaing > 1Gb custome genesis by `erigon init`
+		// some users creating > 1Gb custome genesis by `erigon init`
 		genesisTmpDB := mdbx.New(kv.TemporaryDB, logger).InMem(dirs.DataDir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
 		defer genesisTmpDB.Close()
 
@@ -605,7 +499,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 			for key, value := range account.Storage {
 				key := key
 				val := uint256.NewInt(0).SetBytes(value.Bytes())
-				statedb.SetState(addr, &key, *val)
+				statedb.SetState(addr, key, *val)
 			}
 
 			if len(account.Constructor) > 0 {

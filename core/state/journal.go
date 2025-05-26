@@ -197,7 +197,7 @@ func (ch selfdestructChange) revert(s *IntraBlockState) error {
 	}
 	if obj != nil {
 		obj.selfdestructed = ch.prev
-		obj.setBalance(&ch.prevbalance)
+		obj.setBalance(ch.prevbalance)
 	}
 	return nil
 }
@@ -219,7 +219,7 @@ func (ch balanceChange) revert(s *IntraBlockState) error {
 	if err != nil {
 		return err
 	}
-	obj.setBalance(&ch.prev)
+	obj.setBalance(ch.prev)
 	return nil
 }
 
@@ -281,7 +281,7 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 	if err != nil {
 		return err
 	}
-	obj.setState(&ch.key, ch.prevalue)
+	obj.setState(ch.key, ch.prevalue)
 	return nil
 }
 

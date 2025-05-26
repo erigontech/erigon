@@ -26,7 +26,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon/p2p/enr"
+	"github.com/erigontech/erigon-p2p/enr"
 )
 
 func TestReadNodes(t *testing.T) {

@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
 	state3 "github.com/erigontech/erigon-lib/state"
@@ -90,12 +91,13 @@ func MakePreState(chainRules *chain.Rules, tx kv.RwTx, sd *state3.SharedDomains,
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)
 		statedb.SetNonce(addr, a.Nonce)
-		balance, _ := uint256.FromBig(a.Balance)
+		var balance uint256.Int
+		_ = balance.SetFromBig(a.Balance)
 		statedb.SetBalance(addr, balance, tracing.BalanceIncreaseGenesisBalance)
 		for k, v := range a.Storage {
 			key := k
 			val := uint256.NewInt(0).SetBytes(v.Bytes())
-			statedb.SetState(addr, &key, *val)
+			statedb.SetState(addr, key, *val)
 		}
 
 		if len(a.Code) > 0 || len(a.Storage) > 0 {
@@ -124,7 +126,7 @@ func calcDifficulty(config *chain.Config, number, currentTime, parentTime uint64
 	parentDifficulty *big.Int, parentUncleHash common.Hash) *big.Int {
 	uncleHash := parentUncleHash
 	if uncleHash == (common.Hash{}) {
-		uncleHash = types.EmptyUncleHash
+		uncleHash = empty.UncleHash
 	}
 	parent := &types.Header{
 		ParentHash: common.Hash{},

@@ -26,6 +26,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/math"
@@ -33,12 +34,10 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon-lib/version"
-
-	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/turbo/testlog"
 )
 
 func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, ver snaptype.Version, logger log.Logger) {
@@ -407,6 +406,43 @@ func TestRemoveOverlaps(t *testing.T) {
 	list, err = snaptype.IdxFiles(s.Dir())
 	require.NoError(err)
 	require.Len(list, 20)
+}
+
+func TestRemoveOverlaps_CrossingTypeString(t *testing.T) {
+	logger := log.New()
+	dir, require := t.TempDir(), require.New(t)
+	createFile := func(from, to uint64) {
+		for _, snT := range coresnaptype.BlockSnapshotTypes {
+			createTestSegmentFile(t, from, to, snT.Enum(), dir, version.V1_0, logger)
+		}
+	}
+
+	// 0 - 10_000 => 1 file
+
+	createFile(0, 10000)
+
+	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, coresnaptype.BlockSnapshotTypes, 0, true, logger)
+	defer s.Close()
+
+	list, err := snaptype.Segments(s.Dir())
+	require.NoError(err)
+	require.Equal(3, len(list))
+
+	list, err = snaptype.IdxFiles(s.Dir())
+	require.NoError(err)
+	require.Equal(4, len(list))
+
+	require.NoError(s.OpenSegments(coresnaptype.BlockSnapshotTypes, false))
+	require.NoError(s.RemoveOverlaps())
+
+	list, err = snaptype.Segments(s.Dir())
+	require.NoError(err)
+	require.Equal(3, len(list))
+
+	list, err = snaptype.IdxFiles(s.Dir())
+	require.NoError(err)
+	require.Equal(4, len(list))
+
 }
 
 func TestCanRetire(t *testing.T) {

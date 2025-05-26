@@ -6,12 +6,11 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common"
-	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
-
-	"github.com/erigontech/erigon-lib/commitment"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	accounts3 "github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 )
@@ -47,7 +46,8 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 	tb.Logf("keys %d vals %d\n", len(keys), len(vals))
 
 	for i := 0; i < len(vals); i++ {
-		domains.SetTxNum(uint64(i))
+		txNum := uint64(i)
+		domains.SetTxNum(txNum)
 
 		for j := 0; j < len(keys); j++ {
 			acc := accounts3.Account{
@@ -60,7 +60,7 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 			prev, step, err := domains.GetLatest(kv.AccountsDomain, keys[j])
 			require.NoError(tb, err)
 
-			err = domains.DomainPut(kv.AccountsDomain, keys[j], nil, buf, prev, step)
+			err = domains.DomainPut(kv.AccountsDomain, keys[j], buf, txNum, prev, step)
 			require.NoError(tb, err)
 		}
 		if uint64(i+1)%agg.StepSize() == 0 {
@@ -140,5 +140,5 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, root)
 	require.Equal(t, latestRoot, root)
-	require.NotEqual(t, commitment.EmptyRootHash, root)
+	require.NotEqual(t, empty.RootHash.Bytes(), root)
 }

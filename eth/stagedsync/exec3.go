@@ -27,10 +27,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-db/interfaces"
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/cmp"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -48,7 +48,6 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
@@ -211,9 +210,6 @@ func ExecV3(ctx context.Context,
 	inMemExec := txc.Doms != nil
 	// TODO: e35 doesn't support parallel-exec yet
 	parallel = false //nolint
-	if parallel && cfg.chainConfig.ChainName == networkname.Gnosis {
-		panic("gnosis consensus doesn't support parallel exec yet: https://github.com/erigontech/erigon/issues/12054")
-	}
 
 	blockReader := cfg.blockReader
 	chainConfig := cfg.chainConfig
@@ -443,16 +439,14 @@ func ExecV3(ctx context.Context,
 	agg.BuildFilesInBackground(outputTxNum.Load())
 
 	var readAhead chan uint64
-	if !parallel {
+	if !isMining && !inMemExec && execStage.CurrentSyncCycle.IsInitialCycle {
 		// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 		// can't use OS-level ReadAhead - because Data >> RAM
 		// it also warmsup state a bit - by touching senders/coninbase accounts and code
-		if !execStage.CurrentSyncCycle.IsInitialCycle {
-			var clean func()
+		var clean func()
 
-			readAhead, clean = blocksReadAhead(ctx, &cfg, 4, true)
-			defer clean()
-		}
+		readAhead, clean = blocksReadAhead(ctx, &cfg, 4, true)
+		defer clean()
 	}
 
 	var b *types.Block
@@ -465,8 +459,6 @@ Loop:
 		// set shouldGenerateChangesets=true if we are at last n blocks from maxBlockNum. this is as a safety net in chains
 		// where during initial sync we can expect bogus blocks to be imported.
 		if !shouldGenerateChangesets && shouldGenerateChangesetsForLastBlocks && blockNum > cfg.blockReader.FrozenBlocks() && blockNum+changesetSafeRange >= maxBlockNum {
-			aggTx := executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
-			aggTx.RestrictSubsetFileDeletions(true)
 			start := time.Now()
 			executor.domains().SetChangesetAccumulator(nil) // Make sure we don't have an active changeset accumulator
 			// First compute and commit the progress done so far
@@ -474,7 +466,6 @@ Loop:
 				return err
 			}
 			ts += time.Since(start)
-			aggTx.RestrictSubsetFileDeletions(false)
 			shouldGenerateChangesets = true // now we can generate changesets for the safety net
 		}
 		changeset := &state2.StateChangeSet{}
@@ -554,7 +545,7 @@ Loop:
 		// Thus, we need to skip the first txs in the block, however, this causes the GasUsed to be incorrect.
 		// So we skip that check for the first block, if we find half-executed data.
 		skipPostEvaluation := false
-		var usedGas uint64
+		var gasUsed uint64
 		var txTasks []*state.TxTask
 		var validationResults []state.AAValidationResult
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
@@ -584,8 +575,8 @@ Loop:
 
 				ValidationResults: validationResults,
 			}
-			if txTask.HistoryExecution && usedGas == 0 {
-				usedGas, _, _, err = rawtemporaldb.ReceiptAsOf(executor.tx().(kv.TemporalTx), txTask.TxNum)
+			if txTask.HistoryExecution && gasUsed == 0 {
+				gasUsed, _, _, err = rawtemporaldb.ReceiptAsOf(executor.tx().(kv.TemporalTx), txTask.TxNum)
 				if err != nil {
 					if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
 						hooks.OnBlockEnd(err)
@@ -609,14 +600,12 @@ Loop:
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
 
-				if txTask.Tx.Type() != types.AccountAbstractionTxType {
-					txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
-					if err != nil {
-						if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
-							hooks.OnBlockEnd(err)
-						}
-						return err
+				txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
+				if err != nil {
+					if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
+						hooks.OnBlockEnd(err)
 					}
+					return err
 				}
 			}
 
@@ -679,9 +668,9 @@ Loop:
 			}
 
 			count += uint64(len(txTasks))
-			logGas += se.usedGas
+			logGas += se.gasUsed
 
-			se.usedGas = 0
+			se.gasUsed = 0
 			se.blobGasUsed = 0
 
 			if !continueLoop {
@@ -692,8 +681,6 @@ Loop:
 		mxExecBlocks.Add(1)
 
 		if shouldGenerateChangesets || cfg.syncCfg.KeepExecutionProofs {
-			aggTx := executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
-			aggTx.RestrictSubsetFileDeletions(true)
 			start := time.Now()
 			_ /*rh*/, err := executor.domains().ComputeCommitment(ctx, true, blockNum, execStage.LogPrefix())
 			if err != nil {
@@ -706,7 +693,6 @@ Loop:
 			//}
 
 			ts += time.Since(start)
-			aggTx.RestrictSubsetFileDeletions(false)
 			if shouldGenerateChangesets {
 				executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
 				if !inMemExec {
@@ -771,11 +757,11 @@ Loop:
 				tt = time.Now()
 
 				// allow greedy prune on non-chain-tip
-				if err = executor.tx().(kv.TemporalRwTx).Debug().GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
+				if err = executor.tx().(kv.TemporalRwTx).GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
 					return err
 				}
 
-				if _, err := executor.tx().(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 10*time.Hour); err != nil {
+				if _, err := executor.tx().(kv.TemporalRwTx).PruneSmallBatches(ctx, 10*time.Hour); err != nil {
 					return err
 				}
 				t3 = time.Since(tt)
@@ -970,7 +956,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 
 }
 
-func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, blockNum uint64) (b *types.Block, err error) {
+func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader interfaces.BlockReader, blockNum uint64) (b *types.Block, err error) {
 	if tx == nil {
 		tx, err = db.BeginRo(ctx)
 		if err != nil {
@@ -984,9 +970,6 @@ func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader ser
 	}
 	if b == nil {
 		return nil, nil
-	}
-	for _, txn := range b.Transactions() {
-		_ = txn.Hash()
 	}
 	return b, err
 }

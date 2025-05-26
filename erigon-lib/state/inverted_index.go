@@ -33,8 +33,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/version"
-
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
@@ -54,6 +52,7 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 	"github.com/erigontech/erigon-lib/seg"
 	ee "github.com/erigontech/erigon-lib/state/entity_extras"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 type InvertedIndex struct {
@@ -241,7 +240,7 @@ const (
 )
 
 func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
-	ii._visible = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, false, toTxNum))
+	ii._visible = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, nil, false, toTxNum))
 }
 
 func (ii *InvertedIndex) MissedMapAccessors() (l []*filesItem) {
@@ -871,7 +870,7 @@ func (is *InvertedIndexPruneStat) Accumulate(other *InvertedIndexPruneStat) {
 }
 
 func (iit *InvertedIndexRoTx) unwind(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, fn func(key []byte, txnum []byte) error) error {
-	_, err := iit.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, fn)
+	_, err := iit.prune(ctx, rwTx, txFrom, txTo, limit, logEvery, fn)
 	if err != nil {
 		return err
 	}
@@ -880,11 +879,20 @@ func (iit *InvertedIndexRoTx) unwind(ctx context.Context, rwTx kv.RwTx, txFrom, 
 
 // [txFrom; txTo)
 // forced - prune even if CanPrune returns false, so its true only when we do Unwind.
-func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, fn func(key []byte, txnum []byte) error) (stat *InvertedIndexPruneStat, err error) {
-	stat = &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}
-	if !forced && !iit.CanPrune(rwTx) {
-		return stat, nil
+func (iit *InvertedIndexRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, fn func(key []byte, txnum []byte) error) (stat *InvertedIndexPruneStat, err error) {
+	if !forced {
+		if iit.files.EndTxNum() > 0 {
+			txTo = min(txTo, iit.files.EndTxNum())
+		}
+		if !iit.CanPrune(tx) {
+			return &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}, nil
+		}
 	}
+	return iit.prune(ctx, tx, txFrom, txTo, limit, logEvery, fn)
+}
+
+func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, fn func(key []byte, txnum []byte) error) (stat *InvertedIndexPruneStat, err error) {
+	stat = &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}
 
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
