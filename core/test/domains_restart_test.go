@@ -123,10 +123,11 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 		accs  = make([]*accounts.Account, 0)
 		locs  = make([]common.Hash, 0)
 
-		writer = state2.NewWriter(domains.AsPutDel(tx), nil)
+		writer = state2.NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
 	)
 
 	for txNum := uint64(1); txNum <= txs; txNum++ {
+		writer.SetTxNum(txNum)
 		domains.SetTxNum(txNum)
 		domains.SetBlockNum(txNum / blockSize)
 		binary.BigEndian.PutUint64(aux[:], txNum)
@@ -250,7 +251,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	domains, err = state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
-	writer = state2.NewWriter(domains.AsPutDel(tx), nil)
+	writer = state2.NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
 
 	txToStart := domains.TxNum()
 
@@ -329,7 +330,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		accs  = make([]*accounts.Account, 0)
 		locs  = make([]common.Hash, 0)
 
-		writer = state2.NewWriter(domains.AsPutDel(tx), nil)
+		writer = state2.NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
 	)
 
 	testStartedFromTxNum := uint64(1)
@@ -421,7 +422,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	writer = state2.NewWriter(domains.AsPutDel(tx), nil)
+	writer = state2.NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
 
 	txToStart := domains.TxNum()
 	require.EqualValues(t, 0, txToStart)

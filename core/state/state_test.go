@@ -145,7 +145,8 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 	}
 	defer domains.Close()
 
-	domains.SetTxNum(1)
+	txNum := uint64(1)
+	domains.SetTxNum(txNum)
 	domains.SetBlockNum(1)
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	if err != nil {
@@ -153,7 +154,7 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 	}
 	s.tx = tx
 	s.r = NewReaderV3(domains.AsGetter(tx))
-	s.w = NewWriter(domains.AsPutDel(tx), nil)
+	s.w = NewWriter(domains.AsPutDel(tx), nil, txNum)
 	s.state = New(s.r)
 }
 
@@ -255,12 +256,13 @@ func TestSnapshot2(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	domains.SetTxNum(1)
+	txNum := uint64(1)
+	domains.SetTxNum(txNum)
 	domains.SetBlockNum(2)
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	w := NewWriter(domains.AsPutDel(tx), nil)
+	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 
 	state := New(NewReaderV3(domains.AsGetter(tx)))
 
@@ -443,7 +445,7 @@ func TestDump(t *testing.T) {
 	require.NoError(t, err)
 	obj3.SetBalance(*uint256.NewInt(44), tracing.BalanceChangeUnspecified)
 
-	w := NewWriter(domains.AsPutDel(tx), nil)
+	w := NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
 	// write some of them to the trie
 	err = w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
 	require.NoError(t, err)
@@ -452,7 +454,7 @@ func TestDump(t *testing.T) {
 	err = st.FinalizeTx(&chain.Rules{}, w)
 	require.NoError(t, err)
 
-	blockWriter := NewWriter(domains.AsPutDel(tx), nil)
+	blockWriter := NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
 	err = st.CommitBlock(&chain.Rules{}, blockWriter)
 	require.NoError(t, err)
 	err = domains.Flush(context.Background(), tx)
