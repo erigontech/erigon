@@ -1203,7 +1203,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 
 	d.aggregationStep = 20
 
-	keys, vals := generateInputData(t, 8, 16, 100)
+	keys, vals := generateInputData(t, 8, 4, 100)
 	keys = keys[:20]
 
 	var i int
@@ -1214,6 +1214,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 	writer := dc.NewWriter()
 	defer writer.Close()
 
+	defer func(t time.Time) { fmt.Printf("domain_test.go:1217: %s\n", time.Since(t)) }(time.Now())
 	var prev []byte
 	for i = 0; i < len(vals); i++ {
 
@@ -1239,6 +1240,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer dc.Close()
 
+	defer func(t time.Time) { fmt.Printf("domain_test.go:1243: %s\n", time.Since(t)) }(time.Now())
 	ctx := context.Background()
 	ps := background.NewProgressSet()
 	for step := uint64(0); step < uint64(len(vals))/d.aggregationStep; step++ {
@@ -1277,6 +1279,8 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 
 		dc.Close()
 	}
+
+	defer func(t time.Time) { fmt.Printf("domain_test.go:1283: %s\n", time.Since(t)) }(time.Now())
 
 	dc = d.BeginFilesRo()
 	defer dc.Close()

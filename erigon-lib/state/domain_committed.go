@@ -96,13 +96,13 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (
 // Requires separate function because commitment values have references inside and we need to properly dereference them using
 // replaceShortenedKeysInBranch method on each read. Data stored in DB is not referenced (so as in history).
 // Values from domain files with ranges > 2 steps are referenced.
-func (sd *SharedDomains) LatestCommitment(prefix []byte, tx kv.TemporalTx) ([]byte, uint64, error) {
+func (sd *SharedDomains) LatestCommitment(prefix []byte, tx kv.Tx) ([]byte, uint64, error) {
 	aggTx := AggTx(tx)
 	if v, prevStep, ok := sd.get(kv.CommitmentDomain, prefix); ok {
 		// sd cache values as is (without transformation) so safe to return
 		return v, prevStep, nil
 	}
-	v, step, found, err := tx.Debug().GetLatestFromDB(kv.CommitmentDomain, prefix)
+	v, step, found, err := tx.(kv.TemporalTx).Debug().GetLatestFromDB(kv.CommitmentDomain, prefix)
 	if err != nil {
 		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
 	}
@@ -113,13 +113,13 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte, tx kv.TemporalTx) ([]by
 
 	// getLatestFromFiles doesn't provide same semantics as getLatestFromDB - it returns start/end tx
 	// of file where the value is stored (not exact step when kv has been set)
-	v, _, startTx, endTx, err := tx.Debug().GetLatestFromFiles(kv.CommitmentDomain, prefix, 0)
+	v, _, startTx, endTx, err := tx.(kv.TemporalTx).Debug().GetLatestFromFiles(kv.CommitmentDomain, prefix, 0)
 	if err != nil {
 		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
 	}
 
 	if !aggTx.a.commitmentValuesTransform || bytes.Equal(prefix, keyCommitmentState) {
-		sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), v)
+		sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), v, sd.txNum)
 		return v, endTx / sd.StepSize(), nil
 	}
 
@@ -128,12 +128,12 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte, tx kv.TemporalTx) ([]by
 	if err != nil {
 		return nil, 0, err
 	}
-	sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), rv) // keep dereferenced value in cache (to avoid waste on another dereference)
+	sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), rv, sd.txNum) // keep dereferenced value in cache (to avoid waste on another dereference)
 	return rv, endTx / sd.StepSize(), nil
 }
 
-func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
-	rootHash, err = sd.sdCtx.ComputeCommitment(ctx, saveStateAfter, blockNum, logPrefix, sd.txNum)
+func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.Tx, saveStateAfter bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
+	rootHash, err = sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, logPrefix, sd.txNum)
 	return
 }
 
