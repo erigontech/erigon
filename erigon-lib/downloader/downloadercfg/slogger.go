@@ -19,18 +19,28 @@ func slogLevelToErigon(from slog.Level) log.Lvl {
 }
 
 type slogHandler struct {
-	attrs   []slog.Attr
-	enabled func(level slog.Level, names []string) bool
+	attrs       []slog.Attr
+	enabled     func(level slog.Level, names []string) bool
+	modifyLevel func(level *slog.Level, names []string)
 }
 
 func (me *slogHandler) Enabled(ctx context.Context, level slog.Level) bool {
-	return me.enabled(level, me.getNames())
+	names := me.getNames()
+	if me.modifyLevel != nil {
+		me.modifyLevel(&level, names)
+	}
+	return me.enabled(level, names)
 }
 
 func (me *slogHandler) Handle(ctx context.Context, record slog.Record) error {
+	// Allow tweaking record to fit downstream erigon logging expectations.
+	if me.modifyLevel != nil {
+		// Should we add the record names here too?
+		me.modifyLevel(&record.Level, me.getNames())
+	}
 	// Unfortunately the *handlers* in Erigon's loggers are loaded with filter levels, which makes
 	// it hard to reuse them with our own log level flags. The global root logger here is still
-	// instrumented but it'll do for now. You need to set the console or log file verbosity to get
+	// instrumented, but it'll do for now. You need to set the console or log file verbosity to get
 	// our messages through to the canonical loggers.
 	log.Log(slogLevelToErigon(record.Level), record.Message, me.attrsToCtx(record)...)
 	return nil

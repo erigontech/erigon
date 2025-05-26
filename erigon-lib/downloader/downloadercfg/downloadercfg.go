@@ -152,16 +152,54 @@ func New(
 		panic(err)
 	}
 	slogLevel := erigonToSlogLevel(verbosity)
-	torrentConfig.Slogger = slog.New(&slogHandler{
+
+	// This handler routes messages deemed worth sending to regular Erigon logging machinery, which
+	// has filter levels that don't play nice with debugging subsystems with different levels.
+	torrentSlogToErigonHandler := slogHandler{
 		enabled: func(level slog.Level, names []string) bool {
-			if slices.Contains(names, "tracker") {
-				level -= 4
-			}
 			return level >= slogLevel
 		},
-	})
-	//torrentConfig.Logger.Levelf(analog.Debug, "test")
-	torrentConfig.Slogger.Debug("test")
+		// We modify the level because otherwise we apply torrent verbosity in the Enabled check,
+		// and then downstream Erigon filters with dir or console.
+		modifyLevel: func(level *slog.Level, names []string) {
+			// Demote tracker messages one whole level.
+			//if slices.Contains(names, "tracker") {
+			//	*level -= 4
+			//}
+		},
+	}
+
+	torrentSloggerHandlers := multiHandler{&torrentSlogToErigonHandler}
+
+	torrentLogFile, err := os.OpenFile(
+		filepath.Join(dirs.DataDir, "logs", "torrent.log"),
+		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err == nil {
+		torrentSloggerHandlers = append(
+			torrentSloggerHandlers,
+			slog.NewJSONHandler(torrentLogFile, &slog.HandlerOptions{
+				AddSource:   true,
+				Level:       erigonToSlogLevel(verbosity),
+				ReplaceAttr: nil,
+			}))
+	} else {
+		log.Error("error opening torrent log file", "err", err)
+	}
+
+	torrentConfig.Slogger = slog.New(torrentSloggerHandlers)
+
+	// Check torrent slogger levels and how they route through to erigon log, and anywhere else.
+	for _, level := range []slog.Level{
+		slog.LevelDebug,
+		slog.LevelInfo,
+		slog.LevelWarn,
+		slog.LevelError,
+	} {
+		err = torrentConfig.Slogger.Handler().Handle(ctx, slog.NewRecord(time.Now(), level, "test torrent config slogger level", 0))
+		if err != nil {
+			log.Crit("error testing torrent config slogger level", "err", err, "level", level)
+		}
+	}
 	// Previously this used a logger passed to the callers of this function. Do we need it here?
 	log.Info(
 		"torrent verbosity",

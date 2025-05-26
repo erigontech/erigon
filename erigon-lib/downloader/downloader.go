@@ -1304,6 +1304,7 @@ func newTorrentClient(
 	m = storage.NewFileOpts(storage.NewFileClientOpts{
 		ClientBaseDir: snapDir,
 		UsePartFiles:  g.Some(true),
+		Logger:        cfg.Slogger.With("storage"),
 	})
 	cfg.DefaultStorage = m
 
