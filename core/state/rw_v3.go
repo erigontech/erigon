@@ -517,10 +517,6 @@ func (w *Writer) PrevAndDels() (map[string][]byte, map[string]*accounts.Account,
 }
 
 func (w *Writer) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
-	if w.txNum == 0 {
-		err := fmt.Errorf("probably you didn't set SharedDomains.SetTxNum(): %d", w.txNum)
-		panic(err)
-	}
 	if w.trace {
 		fmt.Printf("acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
 	}
