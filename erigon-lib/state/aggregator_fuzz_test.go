@@ -38,18 +38,16 @@ import (
 )
 
 func Fuzz_AggregatorV3_Merge(f *testing.F) {
-	db, agg := testFuzzDbAndAggregatorv3(f, 10)
-	rwTx, err := db.BeginRwNosync(context.Background())
+	_db, agg := testFuzzDbAndAggregatorv3(f, 10)
+	db := wrapDbWithCtx(_db, agg)
+
+	rwTx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(f, err)
-	defer func() {
-		if rwTx != nil {
-			rwTx.Rollback()
-		}
-	}()
+	defer rwTx.Rollback()
 
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
-	domains, err := NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
+	domains, err := NewSharedDomains(rwTx, log.New())
 	require.NoError(f, err)
 	defer domains.Close()
 
@@ -126,7 +124,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 		err = agg.BuildFiles(txs)
 		require.NoError(t, err)
 
-		rwTx, err = db.BeginRw(context.Background())
+		rwTx, err = db.BeginTemporalRw(context.Background())
 		require.NoError(t, err)
 		defer rwTx.Rollback()
 
@@ -166,17 +164,14 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 }
 
 func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
-	db, agg := testFuzzDbAndAggregatorv3(f, 10)
-	rwTx, err := db.BeginRwNosync(context.Background())
+	_db, agg := testFuzzDbAndAggregatorv3(f, 10)
+	db := wrapDbWithCtx(_db, agg)
+
+	rwTx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(f, err)
-	defer func() {
-		if rwTx != nil {
-			rwTx.Rollback()
-		}
-	}()
-	ac := agg.BeginFilesRo()
-	defer ac.Close()
-	domains, err := NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
+	defer rwTx.Rollback()
+
+	domains, err := NewSharedDomains(rwTx, log.New())
 	require.NoError(f, err)
 	defer domains.Close()
 
@@ -239,21 +234,13 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 		err = agg.BuildFiles(txs)
 		require.NoError(t, err)
 
-		ac.Close()
-		ac = agg.BeginFilesRo()
-		defer ac.Close()
-
-		rwTx, err = db.BeginRwNosync(context.Background())
+		rwTx, err = db.BeginTemporalRw(context.Background())
 		require.NoError(t, err)
-		defer func() {
-			if rwTx != nil {
-				rwTx.Rollback()
-			}
-		}()
+		defer rwTx.Rollback()
 
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
-		stat, err := ac.prune(context.Background(), rwTx, 0, logEvery)
+		stat, err := AggTx(rwTx).prune(context.Background(), rwTx, 0, logEvery)
 		require.NoError(t, err)
 		t.Logf("Prune: %s", stat)
 
