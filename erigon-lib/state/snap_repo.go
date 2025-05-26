@@ -100,6 +100,38 @@ func (f *SnapshotRepo) IntegrateDirtyFiles(files []*filesItem) {
 	}
 }
 
+func (f *SnapshotRepo) IntegrateMergedFiles(dfs []*filesItem, mergedFile *filesItem) {
+	if mergedFile != nil {
+		f.dirtyFiles.Set(mergedFile)
+	}
+}
+
+// DeleteFilesAfterMerge files are removed from repo and marked for deletion
+// from file system.
+func (f *SnapshotRepo) DeleteFilesAfterMerge(files []*filesItem) {
+	for _, file := range files {
+		if file == nil {
+			panic("must not happen: " + f.schema.DataTag())
+		}
+		f.dirtyFiles.Delete(file)
+		file.canDelete.Store(true)
+
+		// if merged file not visible for any alive reader (even for us): can remove it immediately
+		// otherwise: mark it as `canDelete=true` and last reader of this file - will remove it inside `aggRoTx.Close()`
+		if file.refcount.Load() == 0 {
+			file.closeFilesAndRemove()
+
+			if f.schema.DataTag() == traceFileLife && file.decompressor != nil {
+				f.logger.Warn("[agg.dbg] DeleteFilesAfterMerge: remove", "f", file.decompressor.FileName())
+			}
+		} else {
+			if f.schema.DataTag() == traceFileLife && file.decompressor != nil {
+				f.logger.Warn("[agg.dbg] DeleteFilesAfterMerge: mark as canDelete=true", "f", file.decompressor.FileName())
+			}
+		}
+	}
+}
+
 func (f *SnapshotRepo) DirtyFilesMaxRootNum() RootNum {
 	fi, found := f.dirtyFiles.Max()
 	if !found {
@@ -205,36 +237,34 @@ func (f *SnapshotRepo) CloseVisibleFilesAfterRootNum(after RootNum) {
 	f.current = f.current[:i+1]
 }
 
-func (f *SnapshotRepo) Garbage(visibleFiles []visibleFile, merged *filesItem) (outs []*filesItem) {
-	if merged == nil {
-		return
-	}
-
-	integrity := f.cfg.Integrity
+func (f *SnapshotRepo) Garbage(vfs visibleFiles, merged *filesItem) (garbage []*filesItem) {
 	f.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.frozen {
 				continue
 			}
-			if item.isProperSubsetOf(merged) {
-				if integrity != nil && integrity.Check(ee.RootNum(item.startTxNum), ee.RootNum(item.endTxNum)) {
-					continue
-				}
-				outs = append(outs, item)
+
+			if merged == nil && hasCoverVisibleFile(vfs, item) {
+				garbage = append(garbage, item)
 				continue
 			}
-			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using rotx)
-			if item.isBefore(merged) && hasCoverVisibleFile(visibleFiles, item) {
-				if integrity != nil && integrity.Check(ee.RootNum(item.startTxNum), ee.RootNum(item.endTxNum)) {
-					continue
+
+			if item.isBefore(merged) && hasCoverVisibleFile(vfs, item) {
+				garbage = append(garbage, item)
+				continue
+			}
+
+			if item.isProperSubsetOf(merged) {
+				if f.cfg.Integrity == nil || !f.cfg.Integrity.Check(ee.RootNum(item.startTxNum), ee.RootNum(item.endTxNum)) {
+					garbage = append(garbage, item)
 				}
-				outs = append(outs, item)
 			}
 		}
+
 		return true
 	})
 
-	return outs
+	return
 }
 
 // TODO: crossRepoIntegrityCheck
