@@ -208,11 +208,11 @@ func (h *History) scanDirtyFiles(fileNames []string) {
 		panic("assert: empty `aggregationStep`")
 	}
 	for _, dirtyFile := range scanDirtyFiles(fileNames, h.aggregationStep, h.filenameBase, "v", h.logger) {
-		startStep, endStep := dirtyFile.startTxNum/h.aggregationStep, dirtyFile.endTxNum/h.aggregationStep
-		if h.integrity != nil && !h.integrity(startStep, endStep) {
-			h.logger.Debug("[agg] skip garbage file", "name", h.filenameBase, "startStep", startStep, "endStep", endStep)
-			continue
-		}
+		//startStep, endStep := dirtyFile.startTxNum/h.aggregationStep, dirtyFile.endTxNum/h.aggregationStep
+		//if h.integrity != nil && !h.integrity(startStep, endStep) {
+		//	h.logger.Debug("[agg] skip garbage file", "name", h.filenameBase, "startStep", startStep, "endStep", endStep)
+		//	continue
+		//}
 		if _, has := h.dirtyFiles.Get(dirtyFile); !has {
 			h.dirtyFiles.Set(dirtyFile)
 		}

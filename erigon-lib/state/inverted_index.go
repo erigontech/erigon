@@ -220,11 +220,11 @@ func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {
 		panic("assert: empty `aggregationStep`")
 	}
 	for _, dirtyFile := range scanDirtyFiles(fileNames, ii.aggregationStep, ii.filenameBase, "ef", ii.logger) {
-		startStep, endStep := dirtyFile.startTxNum/ii.aggregationStep, dirtyFile.endTxNum/ii.aggregationStep
-		if ii.integrity != nil && !ii.integrity(startStep, endStep) {
-			ii.logger.Debug("[agg] skip garbage file", "name", ii.filenameBase, "startStep", startStep, "endStep", endStep)
-			continue
-		}
+		//startStep, endStep := dirtyFile.startTxNum/ii.aggregationStep, dirtyFile.endTxNum/ii.aggregationStep
+		//if ii.integrity != nil && !ii.integrity(startStep, endStep) {
+		//	ii.logger.Debug("[agg] skip garbage file", "name", ii.filenameBase, "startStep", startStep, "endStep", endStep)
+		//	continue
+		//}
 		if _, has := ii.dirtyFiles.Get(dirtyFile); !has {
 			ii.dirtyFiles.Set(dirtyFile)
 		}
