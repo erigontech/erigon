@@ -577,20 +577,14 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 
 	t.Parallel()
 	aggStep := uint64(2)
-	db, agg := testDbAndAggregatorv3(t, aggStep)
+	_db, agg := testDbAndAggregatorv3(t, aggStep)
+	db := wrapDbWithCtx(_db, agg)
 
-	tx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
-	defer func() {
-		if tx != nil {
-			tx.Rollback()
-		}
-	}()
+	defer tx.Rollback()
 
-	ac := agg.BeginFilesRo()
-	defer ac.Close()
-
-	domains, err := NewSharedDomains(wrapTxWithCtx(tx, ac), log.New())
+	domains, err := NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -616,25 +610,25 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	)
 	maxInt := math.MaxInt
 	{
-		it, err := ac.DebugRangeLatest(tx, kv.AccountsDomain, nil, nil, maxInt)
+		it, err := tx.Debug().RangeLatest(kv.AccountsDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		accountsRange = extractKVErrIterator(t, it)
 
-		it, err = ac.DebugRangeLatest(tx, kv.StorageDomain, nil, nil, maxInt)
+		it, err = tx.Debug().RangeLatest(kv.StorageDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		storageRange = extractKVErrIterator(t, it)
 
-		it, err = ac.DebugRangeLatest(tx, kv.CodeDomain, nil, nil, maxInt)
+		it, err = tx.Debug().RangeLatest(kv.CodeDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		codeRange = extractKVErrIterator(t, it)
 
-		its, err := ac.d[kv.AccountsDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, tx)
+		its, err := AggTx(tx).d[kv.AccountsDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, tx)
 		require.NoError(t, err)
 		accountHistRange = extractKVSErrIterator(t, its)
-		its, err = ac.d[kv.CodeDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, tx)
+		its, err = AggTx(tx).d[kv.CodeDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, tx)
 		require.NoError(t, err)
 		codeHistRange = extractKVSErrIterator(t, its)
-		its, err = ac.d[kv.StorageDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, tx)
+		its, err = AggTx(tx).d[kv.StorageDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, tx)
 		require.NoError(t, err)
 		storageHistRange = extractKVSErrIterator(t, its)
 	}
@@ -645,16 +639,12 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	err = agg.BuildFiles(maxTx)
 	require.NoError(t, err)
 
-	buildTx, err := db.BeginRw(context.Background())
+	buildTx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
-	defer func() {
-		if buildTx != nil {
-			buildTx.Rollback()
-		}
-	}()
-	ac = agg.BeginFilesRo()
+	defer buildTx.Rollback()
+
 	for i := 0; i < 10; i++ {
-		_, err = ac.PruneSmallBatches(context.Background(), time.Second*3, buildTx)
+		_, err = buildTx.PruneSmallBatches(context.Background(), time.Second*3)
 		require.NoError(t, err)
 	}
 	err = buildTx.Commit()
@@ -679,25 +669,25 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	)
 
 	{
-		it, err := ac.DebugRangeLatest(afterTx, kv.AccountsDomain, nil, nil, maxInt)
+		it, err := buildTx.Debug().RangeLatest(kv.AccountsDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		accountsRangeAfter = extractKVErrIterator(t, it)
 
-		it, err = ac.DebugRangeLatest(afterTx, kv.StorageDomain, nil, nil, maxInt)
+		it, err = buildTx.Debug().RangeLatest(kv.StorageDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		storageRangeAfter = extractKVErrIterator(t, it)
 
-		it, err = ac.DebugRangeLatest(afterTx, kv.CodeDomain, nil, nil, maxInt)
+		it, err = buildTx.Debug().RangeLatest(kv.CodeDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		codeRangeAfter = extractKVErrIterator(t, it)
 
-		its, err := ac.d[kv.AccountsDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, afterTx)
+		its, err := AggTx(tx).d[kv.AccountsDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, afterTx)
 		require.NoError(t, err)
 		accountHistRangeAfter = extractKVSErrIterator(t, its)
-		its, err = ac.d[kv.CodeDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, afterTx)
+		its, err = AggTx(tx).d[kv.CodeDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, afterTx)
 		require.NoError(t, err)
 		codeHistRangeAfter = extractKVSErrIterator(t, its)
-		its, err = ac.d[kv.StorageDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, afterTx)
+		its, err = AggTx(tx).d[kv.StorageDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, afterTx)
 		require.NoError(t, err)
 		storageHistRangeAfter = extractKVSErrIterator(t, its)
 	}
@@ -1049,19 +1039,14 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	ctx := context.Background()
 	aggStep := uint64(500)
 
-	db, agg := testDbAndAggregatorv3(t, aggStep)
+	_db, agg := testDbAndAggregatorv3(t, aggStep)
+	db := wrapDbWithCtx(_db, agg)
 
-	tx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
-	defer func() {
-		if tx != nil {
-			tx.Rollback()
-		}
-	}()
+	defer tx.Rollback()
 
-	ac := agg.BeginFilesRo()
-	defer ac.Close()
-	domains, err := NewSharedDomains(wrapTxWithCtx(tx, ac), log.New())
+	domains, err := NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -1069,14 +1054,14 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	commit := func(txn uint64) error {
 		err = domains.Flush(ctx, tx)
 		require.NoError(t, err)
-		ac.Close()
+
 		err = tx.Commit()
 		require.NoError(t, err)
 
-		tx, err = db.BeginRw(context.Background())
+		tx, err = db.BeginTemporalRw(context.Background())
 		require.NoError(t, err)
-		ac = agg.BeginFilesRo()
-		domains, err = NewSharedDomains(wrapTxWithCtx(tx, ac), log.New())
+
+		domains, err = NewSharedDomains(tx, log.New())
 		require.NoError(t, err)
 		atomic.StoreUint64(&latestCommitTxNum, txn)
 		return nil
@@ -1128,17 +1113,16 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 
 		addr, loc := keys[txNum-1-half][:length.Addr], keys[txNum-1-half][length.Addr:]
 
-		prev, step, _, err := ac.d[kv.StorageDomain].GetLatest(keys[txNum-1-half], tx)
+		prev, step, _, err := AggTx(tx).d[kv.StorageDomain].GetLatest(keys[txNum-1-half], tx)
 		require.NoError(t, err)
 		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, prev, step)
 		require.NoError(t, err)
 	}
 
-	ac.Close()
 	err = tx.Commit()
 	tx = nil
 
-	tx, err = db.BeginRw(context.Background())
+	tx, err = db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
 
 	aggCtx2 := agg.BeginFilesRo()
