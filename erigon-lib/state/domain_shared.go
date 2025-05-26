@@ -243,10 +243,10 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 	sd.estSize = 0
 }
 
-func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte) {
+func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte, txNum uint64) {
 	// disable mutex - because work on parallel execution postponed after E3 release.
 	//sd.muMaps.Lock()
-	valWithPrevStep := dataWithPrevStep{data: val, prevStep: sd.txNum / sd.stepSize}
+	valWithPrevStep := dataWithPrevStep{data: val, prevStep: txNum / sd.stepSize}
 	if domain == kv.StorageDomain {
 		if old, ok := sd.storage.Set(key, valWithPrevStep); ok {
 			sd.estSize += len(val) - len(old.data)
@@ -343,7 +343,7 @@ func (sd *SharedDomains) ReadsValid(readLists map[string]*KvList) bool {
 
 func (sd *SharedDomains) updateAccountCode(addr, code []byte, txNum uint64, prevCode []byte, prevStep uint64) error {
 	addrS := string(addr)
-	sd.put(kv.CodeDomain, addrS, code)
+	sd.put(kv.CodeDomain, addrS, code, txNum)
 	if len(code) == 0 {
 		return sd.domainWriters[kv.CodeDomain].DeleteWithPrev(addr, txNum, prevCode, prevStep)
 	}
@@ -351,7 +351,7 @@ func (sd *SharedDomains) updateAccountCode(addr, code []byte, txNum uint64, prev
 }
 
 func (sd *SharedDomains) updateCommitmentData(prefix string, data []byte, txNum uint64, prev []byte, prevStep uint64) error {
-	sd.put(kv.CommitmentDomain, prefix, data)
+	sd.put(kv.CommitmentDomain, prefix, data, txNum)
 	return sd.domainWriters[kv.CommitmentDomain].PutWithPrev(toBytesZeroCopy(prefix), data, txNum, prev, prevStep)
 }
 
@@ -366,7 +366,7 @@ func (sd *SharedDomains) deleteAccount(roTx kv.Tx, addr []byte, txNum uint64, pr
 		return err
 	}
 
-	sd.put(kv.AccountsDomain, addrS, nil)
+	sd.put(kv.AccountsDomain, addrS, nil, txNum)
 	if err := sd.domainWriters[kv.AccountsDomain].DeleteWithPrev(addr, txNum, prev, prevStep); err != nil {
 		return err
 	}
@@ -375,12 +375,12 @@ func (sd *SharedDomains) deleteAccount(roTx kv.Tx, addr []byte, txNum uint64, pr
 }
 
 func (sd *SharedDomains) writeAccountStorage(k, v, preVal []byte, prevStep, txNum uint64) error {
-	sd.put(kv.StorageDomain, string(k), v)
+	sd.put(kv.StorageDomain, string(k), v, txNum)
 	return sd.domainWriters[kv.StorageDomain].PutWithPrev(k, v, txNum, preVal, prevStep)
 }
 
 func (sd *SharedDomains) delAccountStorage(k, preVal []byte, prevStep, txNum uint64) error {
-	sd.put(kv.StorageDomain, string(k), nil)
+	sd.put(kv.StorageDomain, string(k), nil, txNum)
 	return sd.domainWriters[kv.StorageDomain].DeleteWithPrev(k, txNum, preVal, prevStep)
 }
 
@@ -566,15 +566,15 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.Tx, k, v []byte, tx
 		if bytes.Equal(prevVal, v) {
 			return nil
 		}
-		return sd.updateAccountCode(k, v, 0, prevVal, prevStep)
+		return sd.updateAccountCode(k, v, txNum, prevVal, prevStep)
 	case kv.AccountsDomain, kv.CommitmentDomain, kv.RCacheDomain:
-		sd.put(domain, ks, v)
+		sd.put(domain, ks, v, txNum)
 		return sd.domainWriters[domain].PutWithPrev(k, v, txNum, prevVal, prevStep)
 	default:
 		if bytes.Equal(prevVal, v) {
 			return nil
 		}
-		sd.put(domain, ks, v)
+		sd.put(domain, ks, v, txNum)
 		return sd.domainWriters[domain].PutWithPrev(k, v, txNum, prevVal, prevStep)
 	}
 }
@@ -609,7 +609,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.Tx, k []byte, txNum u
 	default:
 		//sd.put(kv.CommitmentDomain, prefix, data)
 		//return sd.domainWriters[kv.CommitmentDomain].PutWithPrev(toBytesZeroCopy(prefix), nil, data, sd.txNum, prev, prevStep)
-		sd.put(domain, toStringZeroCopy(k), nil)
+		sd.put(domain, toStringZeroCopy(k), nil, txNum)
 		return sd.domainWriters[domain].DeleteWithPrev(k, txNum, prevVal, prevStep)
 	}
 }
