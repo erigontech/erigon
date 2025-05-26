@@ -30,17 +30,15 @@ import (
 
 func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	stepSize := uint64(100)
-	db, agg := testDbAndAggregatorBench(t, stepSize)
+	_db, agg := testDbAndAggregatorBench(t, stepSize)
+	db := wrapDbWithCtx(_db, agg)
 
 	ctx := context.Background()
-	rwTx, err := db.BeginRw(ctx)
+	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	ac := agg.BeginFilesRo()
-	defer ac.Close()
-
-	domains, err := NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
+	domains, err := NewSharedDomains(rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	maxTx := stepSize * 258
@@ -81,7 +79,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	err = rwTx.Commit()
 	require.NoError(t, err)
 
-	rwTx, err = db.BeginRw(ctx)
+	rwTx, err = db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
@@ -118,17 +116,15 @@ func BenchmarkSharedDomains_ComputeCommitment(b *testing.B) {
 	b.StopTimer()
 
 	stepSize := uint64(100)
-	db, agg := testDbAndAggregatorBench(b, stepSize)
+	_db, agg := testDbAndAggregatorBench(b, stepSize)
+	db := wrapDbWithCtx(_db, agg)
 
 	ctx := context.Background()
-	rwTx, err := db.BeginRw(ctx)
+	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(b, err)
 	defer rwTx.Rollback()
 
-	ac := agg.BeginFilesRo()
-	defer ac.Close()
-
-	domains, err := NewSharedDomains(wrapTxWithCtx(rwTx, ac), log.New())
+	domains, err := NewSharedDomains(rwTx, log.New())
 	require.NoError(b, err)
 	defer domains.Close()
 
