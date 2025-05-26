@@ -320,6 +320,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 	chunks := uint64(32)
 	count := subCount * chunks // 8 chunks of 32 blocks
 	lowerBound := b.slotToDownload.Load() - count + 1
+
 	// Overflow? round to 0.
 	if lowerBound > b.slotToDownload.Load() {
 		lowerBound = 0
