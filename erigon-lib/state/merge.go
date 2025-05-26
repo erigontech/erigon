@@ -867,56 +867,13 @@ func (d *Domain) integrateMergedDirtyFiles(valuesOuts, indexOuts, historyOuts []
 	d.History.integrateMergedDirtyFiles(indexOuts, historyOuts, indexIn, historyIn)
 	if valuesIn != nil {
 		d.dirtyFiles.Set(valuesIn)
-
-		// `kill -9` may leave some garbage
-		// but it still may be useful for merges, until we finish merge frozen file
-		d.dirtyFiles.Walk(func(items []*filesItem) bool {
-			for _, item := range items {
-				if item.frozen {
-					continue
-				}
-				if item.startTxNum < valuesIn.startTxNum {
-					continue
-				}
-				if item.endTxNum > valuesIn.endTxNum {
-					continue
-				}
-				if item.startTxNum == valuesIn.startTxNum && item.endTxNum == valuesIn.endTxNum {
-					continue
-				}
-				valuesOuts = append(valuesOuts, item)
-			}
-			return true
-		})
-	}
-	for _, out := range valuesOuts {
-		if out == nil {
-			panic("must not happen")
-		}
-		d.dirtyFiles.Delete(out)
-		out.canDelete.Store(true)
 	}
 }
 
 func (ii *InvertedIndex) integrateMergedDirtyFiles(outs []*filesItem, in *filesItem) {
 	if in != nil {
 		ii.dirtyFiles.Set(in)
-
-		// `kill -9` may leave some garbage
-		// but it still may be useful for merges, until we finish merge frozen file
-		if in.frozen {
-			ii.dirtyFiles.Walk(func(items []*filesItem) bool {
-				for _, item := range items {
-					if item.frozen || item.endTxNum > in.endTxNum {
-						continue
-					}
-					outs = append(outs, item)
-				}
-				return true
-			})
-		}
 	}
-	deleteMergeFile(ii.dirtyFiles, outs, ii.filenameBase, ii.logger)
 }
 
 func (h *History) integrateMergedDirtyFiles(indexOuts, historyOuts []*filesItem, indexIn, historyIn *filesItem) {
@@ -924,22 +881,7 @@ func (h *History) integrateMergedDirtyFiles(indexOuts, historyOuts []*filesItem,
 	//TODO: handle collision
 	if historyIn != nil {
 		h.dirtyFiles.Set(historyIn)
-
-		// `kill -9` may leave some garbage
-		// but it still may be useful for merges, until we finish merge frozen file
-		if historyIn.frozen {
-			h.dirtyFiles.Walk(func(items []*filesItem) bool {
-				for _, item := range items {
-					if item.frozen || item.endTxNum > historyIn.endTxNum {
-						continue
-					}
-					historyOuts = append(historyOuts, item)
-				}
-				return true
-			})
-		}
 	}
-	deleteMergeFile(h.dirtyFiles, historyOuts, h.filenameBase, h.logger)
 }
 
 func (dt *DomainRoTx) cleanAfterMerge(mergedDomain, mergedHist, mergedIdx *filesItem) {
