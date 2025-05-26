@@ -374,20 +374,20 @@ func (sd *SharedDomains) deleteAccount(roTx kv.Tx, addr []byte, txNum uint64, pr
 	return nil
 }
 
-func (sd *SharedDomains) writeAccountStorage(k, v, preVal []byte, prevStep, txNum uint64) error {
+func (sd *SharedDomains) writeAccountStorage(k, v []byte, txNum uint64, preVal []byte, prevStep uint64) error {
 	sd.put(kv.StorageDomain, string(k), v, txNum)
 	return sd.domainWriters[kv.StorageDomain].PutWithPrev(k, v, txNum, preVal, prevStep)
 }
 
-func (sd *SharedDomains) delAccountStorage(k, preVal []byte, prevStep, txNum uint64) error {
+func (sd *SharedDomains) delAccountStorage(k []byte, txNum uint64, preVal []byte, prevStep uint64) error {
 	sd.put(kv.StorageDomain, string(k), nil, txNum)
 	return sd.domainWriters[kv.StorageDomain].DeleteWithPrev(k, txNum, preVal, prevStep)
 }
 
-func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) {
+func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) (err error) {
 	for _, writer := range sd.iiWriters {
 		if writer.name == table {
-			return writer.Add(key, sd.txNum)
+			return writer.Add(key, txNum)
 		}
 	}
 	panic(fmt.Errorf("unknown index %s", table))
@@ -561,7 +561,7 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.Tx, k, v []byte, tx
 	sd.sdCtx.TouchKey(domain, ks, v)
 	switch domain {
 	case kv.StorageDomain:
-		return sd.writeAccountStorage(k, v, prevVal, prevStep, txNum)
+		return sd.writeAccountStorage(k, v, txNum, prevVal, prevStep)
 	case kv.CodeDomain:
 		if bytes.Equal(prevVal, v) {
 			return nil
@@ -598,7 +598,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.Tx, k []byte, txNum u
 	case kv.AccountsDomain:
 		return sd.deleteAccount(tx, k, txNum, prevVal, prevStep)
 	case kv.StorageDomain:
-		return sd.delAccountStorage(k, prevVal, prevStep, txNum)
+		return sd.delAccountStorage(k, txNum, prevVal, prevStep)
 	case kv.CodeDomain:
 		if prevVal == nil {
 			return nil
