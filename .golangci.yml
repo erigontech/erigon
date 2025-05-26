@@ -53,6 +53,8 @@ linters:
     gocritic:
       enabled-checks:
         - ruleguard
+        - unnecessaryDefer
+        - appendAssign
       disabled-checks:
         - regexpMust
         - rangeValCopy
@@ -73,7 +75,6 @@ linters:
         - returnAfterHttpError
         - weakCond
         - builtinShadowDecl
-        - unnecessaryDefer
         - uncheckedInlineErr
         - preferStringWriter
         - commentedOutCode
