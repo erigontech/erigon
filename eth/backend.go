@@ -695,7 +695,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
-	sentryMcDisableBlockDownload := chainConfig.Bor != nil && (config.PolygonSync || config.PolygonSyncStage)
+	sentryMcDisableBlockDownload := chainConfig.Bor != nil && (config.PolygonSync)
 	backend.sentriesClient, err = sentry_multi_client.NewMultiClient(
 		backend.chainDB,
 		chainConfig,
@@ -1023,39 +1023,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return nil, err
 	}
 
-	if config.PolygonSyncStage {
-		backend.syncStages = stages2.NewPolygonSyncStages(
-			backend.sentryCtx,
-			logger,
-			backend.chainDB,
-			config,
-			backend.chainConfig,
-			backend.engine,
-			backend.notifications,
-			backend.downloaderClient,
-			blockReader,
-			blockRetire,
-			backend.silkworm,
-			backend.forkValidator,
-			heimdallClient,
-			heimdallStore,
-			bridgeStore,
-			polygonSyncSentry(sentries),
-			p2pConfig.MaxPeers,
-			statusDataProvider,
-			backend.stopNode,
-			&engineAPISwitcher{backend: backend},
-			backend,
-			tracer,
-		)
-		backend.syncUnwindOrder = stagedsync.PolygonSyncUnwindOrder
-		backend.syncPruneOrder = stagedsync.PolygonSyncPruneOrder
-	} else {
-		backend.syncStages = stages2.NewDefaultStages(backend.sentryCtx, backend.chainDB, snapDb, p2pConfig, config, backend.sentriesClient, backend.notifications, backend.downloaderClient,
-			blockReader, blockRetire, backend.silkworm, backend.forkValidator, heimdallClient, heimdallStore, bridgeStore, recents, signatures, logger, tracer)
-		backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
-		backend.syncPruneOrder = stagedsync.DefaultPruneOrder
-	}
+	backend.syncStages = stages2.NewDefaultStages(backend.sentryCtx, backend.chainDB, snapDb, p2pConfig, config, backend.sentriesClient, backend.notifications, backend.downloaderClient,
+		blockReader, blockRetire, backend.silkworm, backend.forkValidator, heimdallClient, heimdallStore, bridgeStore, recents, signatures, logger, tracer)
+	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
+	backend.syncPruneOrder = stagedsync.DefaultPruneOrder
 
 	backend.stagedSync = stagedsync.New(config.Sync, backend.syncStages, backend.syncUnwindOrder, backend.syncPruneOrder, logger, stages.ModeApplyingBlocks)
 

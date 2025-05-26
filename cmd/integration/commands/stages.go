@@ -171,27 +171,6 @@ var cmdStageBodies = &cobra.Command{
 	},
 }
 
-var cmdStagePolygon = &cobra.Command{
-	Use:   "stage_polygon_sync",
-	Short: "",
-	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
-		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
-		}
-		defer db.Close()
-
-		if err := stagePolygonSync(db, cmd.Context(), logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
-	},
-}
-
 var cmdStageSenders = &cobra.Command{
 	Use:   "stage_senders",
 	Short: "",
@@ -524,16 +503,6 @@ func init() {
 	withChaosMonkey(cmdStageBodies)
 	rootCmd.AddCommand(cmdStageBodies)
 
-	withConfig(cmdStagePolygon)
-	withDataDir(cmdStagePolygon)
-	withReset(cmdStagePolygon)
-	withUnwind(cmdStagePolygon)
-	withUnwindTypes(cmdStagePolygon)
-	withChain(cmdStagePolygon)
-	withHeimdall(cmdStagePolygon)
-	withChaosMonkey(cmdStagePolygon)
-	rootCmd.AddCommand(cmdStagePolygon)
-
 	withConfig(cmdStageExec)
 	withDataDir(cmdStageExec)
 	withReset(cmdStageExec)
@@ -848,37 +817,6 @@ func stageBodies(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) err
 		return err
 	}
 	return nil
-}
-
-func stagePolygonSync(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
-	dirs := datadir.New(datadirCli)
-	_, engine, _, stageSync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
-	heimdallClient := engine.(*bor.Bor).HeimdallClient
-	_, _, _, _, bridgeStore, heimdallStore, err := allSnapshots(ctx, db, logger)
-	if err != nil {
-		return err
-	}
-	blockReader, blockWriter := blocksIO(db, logger)
-	chainConfig := fromdb.ChainConfig(db)
-
-	return db.Update(ctx, func(tx kv.RwTx) error {
-		if reset {
-			return reset2.ResetPolygonSync(tx, db, blockReader, blockWriter, dirs, logger)
-		}
-
-		stageState := stage(stageSync, tx, nil, stages.PolygonSync)
-		cfg := stagedsync.NewPolygonSyncStageCfg(&ethconfig.Defaults, logger, chainConfig, nil, heimdallClient,
-			heimdallStore, bridgeStore, nil, 0, nil, blockReader, nil, 0, unwindTypes, nil /* notifications */, nil, nil)
-		// we only need blockReader and blockWriter (blockWriter is constructed in NewPolygonSyncStageCfg)
-		if unwind > 0 {
-			u := stageSync.NewUnwindState(stageState.ID, stageState.BlockNumber-unwind, stageState.BlockNumber, true, false)
-			if err := stagedsync.UnwindPolygonSyncStage(ctx, tx, u, cfg); err != nil {
-				return err
-			}
-		}
-
-		return nil
-	})
 }
 
 func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
