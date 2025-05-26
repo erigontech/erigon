@@ -243,6 +243,9 @@ func (s *GrpcServer) GetBlobs(ctx context.Context, in *txpool_proto.GetBlobsRequ
 	proofs := make([][]byte, 0)
 	for _, bb := range blobBundles {
 		blobs = append(blobs, bb.Blob)
+		if len(bb.Proofs) == 0 {
+			proofs = append(proofs, nil)
+		}
 		for _, p := range bb.Proofs {
 			proofs = append(proofs, p[:])
 		}

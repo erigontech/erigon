@@ -1764,8 +1764,8 @@ func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
 func (p *TxPool) getBlobsAndProofByBlobHashLocked(blobHashes []common.Hash) []PoolBlobBundle {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	blobBundles := make([]PoolBlobBundle, 0)
-	for _, h := range blobHashes {
+	blobBundles := make([]PoolBlobBundle, len(blobHashes))
+	for i, h := range blobHashes {
 		th, ok := p.blobHashToTxn[h]
 		if !ok {
 			continue
@@ -1774,7 +1774,7 @@ func (p *TxPool) getBlobsAndProofByBlobHashLocked(blobHashes []common.Hash) []Po
 		if !ok || mt == nil {
 			continue
 		}
-		blobBundles = append(blobBundles, mt.TxnSlot.BlobBundles[th.index])
+		blobBundles[i] = mt.TxnSlot.BlobBundles[th.index]
 	}
 	return blobBundles
 }
