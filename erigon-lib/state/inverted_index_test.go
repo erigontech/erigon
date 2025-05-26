@@ -732,7 +732,7 @@ func TestCtxFiles(t *testing.T) {
 		return true
 	})
 
-	visibleFiles := calcVisibleFiles(ii.dirtyFiles, 0, nil, false, ii.dirtyFilesEndTxNumMinimax())
+	visibleFiles := calcVisibleFiles(ii.dirtyFiles, 0, false, ii.dirtyFilesEndTxNumMinimax())
 	for i, item := range visibleFiles {
 		if item.src.canDelete.Load() {
 			require.Failf(t, "deleted file", "%d-%d", item.startTxNum, item.endTxNum)

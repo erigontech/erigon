@@ -459,6 +459,8 @@ Loop:
 		// set shouldGenerateChangesets=true if we are at last n blocks from maxBlockNum. this is as a safety net in chains
 		// where during initial sync we can expect bogus blocks to be imported.
 		if !shouldGenerateChangesets && shouldGenerateChangesetsForLastBlocks && blockNum > cfg.blockReader.FrozenBlocks() && blockNum+changesetSafeRange >= maxBlockNum {
+			aggTx := executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+			aggTx.RestrictSubsetFileDeletions(true)
 			start := time.Now()
 			executor.domains().SetChangesetAccumulator(nil) // Make sure we don't have an active changeset accumulator
 			// First compute and commit the progress done so far
@@ -466,6 +468,7 @@ Loop:
 				return err
 			}
 			ts += time.Since(start)
+			aggTx.RestrictSubsetFileDeletions(false)
 			shouldGenerateChangesets = true // now we can generate changesets for the safety net
 		}
 		changeset := &state2.StateChangeSet{}
@@ -681,6 +684,8 @@ Loop:
 		mxExecBlocks.Add(1)
 
 		if shouldGenerateChangesets || cfg.syncCfg.KeepExecutionProofs {
+			aggTx := executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+			aggTx.RestrictSubsetFileDeletions(true)
 			start := time.Now()
 			_ /*rh*/, err := executor.domains().ComputeCommitment(ctx, true, blockNum, execStage.LogPrefix())
 			if err != nil {
@@ -693,6 +698,7 @@ Loop:
 			//}
 
 			ts += time.Since(start)
+			aggTx.RestrictSubsetFileDeletions(false)
 			if shouldGenerateChangesets {
 				executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
 				if !inMemExec {
