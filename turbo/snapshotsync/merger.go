@@ -52,7 +52,7 @@ func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toM
 			}
 			aggFrom := r.To() - span
 			toMerge = append(toMerge, NewRange(aggFrom, r.To()))
-			for currentRanges[i].From() > aggFrom {
+			for i >= 0 && currentRanges[i].From() > aggFrom {
 				i--
 			}
 			break
