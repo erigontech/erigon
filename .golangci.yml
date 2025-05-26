@@ -55,7 +55,6 @@ linters:
         - ruleguard
       disabled-checks:
         - regexpMust
-        - appendAssign
         - rangeValCopy
         - exitAfterDefer
         - elseif

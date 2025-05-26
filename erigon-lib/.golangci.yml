@@ -64,7 +64,6 @@ linters:
         - captLocal
         - commentFormatting
         - ifElseChain
-        - appendAssign
         - preferFprint
         - sloppyReassign
         - sprintfQuotedString
@@ -95,6 +94,8 @@ linters:
       excludes:
         - G115
     govet:
+      enable:
+        - nilness
       disable:
         - deepequalerrors
         - shadow
