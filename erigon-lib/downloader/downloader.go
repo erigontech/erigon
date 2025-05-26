@@ -1054,8 +1054,8 @@ func (d *Downloader) loadSpecFromDisk(tup SnapshotTuple) (spec g.Option[*torrent
 	diskSpec := torrent.TorrentSpecFromMetaInfo(mi)
 	if diskSpec.InfoHash != tup.Hash {
 		// This is allowed if the torrent file was committed to disk. It's assumed the torrent was
-		// downloaded in its entirety with a previous hash.
-		d.logger.Warn("disk metainfo hash mismatch",
+		// downloaded in its entirety with a previous hash. TODO: Should we check there were actually info bytes?
+		d.logger.Debug("disk metainfo hash mismatch",
 			"expected", tup.Hash,
 			"actual", diskSpec.InfoHash,
 			"name", tup.Name)
@@ -1128,6 +1128,10 @@ func (d *Downloader) addPreverifiedTorrent(
 	// The following is a bit elaborate with avoiding goroutines. Maybe it's overkill.
 
 	metainfoOnDisk := specOpt.Ok
+
+	// TODO: If the metainfo was on disk already, do we want to ensure Info exists, and that the
+	// torrent passes completion checks? The metainfo should not be stored unless it passed to begin
+	// with.
 
 	onGotInfo := func() {
 		t.DownloadAll()
