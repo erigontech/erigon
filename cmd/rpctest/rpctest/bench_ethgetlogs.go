@@ -21,12 +21,12 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
-	"runtime"
 	"slices"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -160,7 +160,7 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	noDuplicates := func(logs []Log, blockNum uint64, addr common.Address) error {
+	noDuplicates := func(logs []Log) error {
 		if len(logs) <= 1 {
 			return nil
 		}
@@ -171,90 +171,89 @@ func EthGetLogsInvariants(erigonURL, gethURL string, needCompare bool, blockFrom
 		slices.Sort(indices)
 		for i := 1; i < len(logs); i++ {
 			if indices[i-1] == indices[i] {
-				return fmt.Errorf("eth_getLogs: at blockNum=%d and addr %x has duplicated log_index %d", blockNum, addr, indices[i])
+				return fmt.Errorf("duplicated log_index %d", indices[i])
 			}
 		}
 		return nil
 	}
 
-	_prevBn := blockFrom
 	for bn := blockFrom; bn < blockTo; {
-		batchEnd := min(bn+1000, blockTo)
+		batchEnd := min(bn+10, blockTo)
 		eg := &errgroup.Group{}
-		eg.SetLimit(runtime.NumCPU())
+		eg.SetLimit(estimate.AlmostAllCPUs())
+		//eg.SetLimit(1)
 		for ; bn < batchEnd; bn++ {
 			bn := bn
-			prevBn := _prevBn
-			eg.Go(func() error {
-				var resp EthGetLogs
-				res := reqGen.Erigon("eth_getLogs", reqGen.getLogsNoFilters(prevBn, bn), &resp)
+			//eg.Go(func() error {
+			var resp EthGetLogs
+			res := reqGen.Erigon("eth_getLogs", reqGen.getLogsNoFilters(bn, bn), &resp)
+			if res.Err != nil {
+				return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)
+			}
+			if resp.Error != nil {
+				return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", resp.Error.Code, resp.Error.Message)
+			}
+			if err := noDuplicates(resp.Result); err != nil {
+				return fmt.Errorf("eth_getLogs: at blockNum=%d %w", bn, err)
+			}
+
+			sawAddr := map[common.Address]struct{}{} // don't check same addr in this block
+			sawTopic := map[common.Hash]struct{}{}
+			for _, l := range resp.Result {
+				if _, ok := sawAddr[l.Address]; ok {
+					continue
+				}
+				sawAddr[l.Address] = struct{}{}
+
+				res = reqGen.Erigon("eth_getLogs", reqGen.getLogs(bn, bn, l.Address), &resp)
 				if res.Err != nil {
 					return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)
 				}
 				if resp.Error != nil {
 					return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", resp.Error.Code, resp.Error.Message)
 				}
-
-				sawAddr := map[common.Address]struct{}{} // don't check same addr in this block
-				sawTopic := map[common.Hash]struct{}{}
-				for _, l := range resp.Result {
-					if _, ok := sawAddr[l.Address]; ok {
-						continue
-					}
-					sawAddr[l.Address] = struct{}{}
-
-					res = reqGen.Erigon("eth_getLogs", reqGen.getLogs(prevBn, bn, l.Address), &resp)
-					if res.Err != nil {
-						return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)
-					}
-					if resp.Error != nil {
-						return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", resp.Error.Code, resp.Error.Message)
-					}
-					//invariant1.1: if `log` visible without filter - then must be visible with filter. (in another words: `address` must be indexed well)
-					if len(resp.Result) == 0 {
-						return fmt.Errorf("eth_getLogs: at blockNum=%d account %x not indexed", bn, l.Address)
-					}
-
-					//invariant1.2: no repeats
-					if err := noDuplicates(resp.Result, bn, l.Address); err != nil {
-						return err
-					}
-
-					//invariant2.1: if `log` visible without filter - then must be visible with filter. (in another words: `topic` must be indexed well)
-					if len(l.Topics) == 0 {
-						continue
-					}
-
-					if _, ok := sawTopic[l.Topics[0]]; ok {
-						continue
-					}
-					sawTopic[l.Topics[0]] = struct{}{}
-
-					res = reqGen.Erigon("eth_getLogs", reqGen.getLogs1(prevBn, bn, l.Address, l.Topics[0]), &resp)
-					if res.Err != nil {
-						return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)
-					}
-					if resp.Error != nil {
-						return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", resp.Error.Code, resp.Error.Message)
-					}
-					if len(resp.Result) == 0 {
-						return fmt.Errorf("eth_getLogs: at blockNum=%d account %x, topic %x not indexed", bn, l.Address, l.Topics[0])
-					}
-					//invariant2.2: no repeats
-					if err := noDuplicates(resp.Result, bn, l.Address); err != nil {
-						return err
-					}
+				//invariant1: if `log` visible without filter - then must be visible with filter. (in another words: `address` must be indexed well)
+				if len(resp.Result) == 0 {
+					return fmt.Errorf("eth_getLogs: at blockNum=%d account %x not indexed", bn, l.Address)
 				}
 
-				select {
-				case <-logEvery.C:
-					log.Info("[ethGetLogsInvariants]", "block_num", bn)
-				default:
+				if err := noDuplicates(resp.Result); err != nil {
+					return fmt.Errorf("eth_getLogs: at blockNum=%d and addr %x %w", bn, l.Address, err)
 				}
 
-				return nil
-			})
-			_prevBn = bn
+				//invariant2: if `log` visible without filter - then must be visible with filter. (in another words: `topic` must be indexed well)
+				if len(l.Topics) == 0 {
+					continue
+				}
+
+				if _, ok := sawTopic[l.Topics[0]]; ok {
+					continue
+				}
+				sawTopic[l.Topics[0]] = struct{}{}
+
+				res = reqGen.Erigon("eth_getLogs", reqGen.getLogs1(bn, bn, l.Address, l.Topics[0]), &resp)
+				if res.Err != nil {
+					return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)
+				}
+				if resp.Error != nil {
+					return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", resp.Error.Code, resp.Error.Message)
+				}
+				if len(resp.Result) == 0 {
+					return fmt.Errorf("eth_getLogs: at blockNum=%d account %x, topic %x not indexed", bn, l.Address, l.Topics[0])
+				}
+				if err := noDuplicates(resp.Result); err != nil {
+					return fmt.Errorf("eth_getLogs: at blockNum=%d and topic %x %w", bn, l.Topics[0], err)
+				}
+			}
+
+			select {
+			case <-logEvery.C:
+				log.Info("[ethGetLogsInvariants]", "block_num", bn)
+			default:
+			}
+
+			//return nil
+			//})
 		}
 
 		if err := eg.Wait(); err != nil {

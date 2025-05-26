@@ -221,12 +221,6 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 		defer tx.Rollback()
 	}
 
-	temporalTx, ok := tx.(kv.TemporalTx)
-	if ok {
-		return fmt.Errorf("cast error: temporal tx %v", temporalTx)
-	}
-	pe.doms.SetTx(temporalTx)
-
 	defer pe.applyLoopWg.Wait()
 	applyCtx, cancelApplyCtx := context.WithCancel(ctx)
 	defer cancelApplyCtx()
@@ -253,7 +247,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 				if pe.doms.BlockNum() != pe.outputBlockNum.GetValueUint64() {
 					panic(fmt.Errorf("%d != %d", pe.doms.BlockNum(), pe.outputBlockNum.GetValueUint64()))
 				}
-				_, err := pe.doms.ComputeCommitment(ctx, true, pe.outputBlockNum.GetValueUint64(), pe.execStage.LogPrefix())
+				_, err := pe.doms.ComputeCommitment(ctx, tx, true, pe.outputBlockNum.GetValueUint64(), pe.execStage.LogPrefix())
 				if err != nil {
 					return err
 				}
@@ -355,11 +349,6 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 				return err
 			}
 			defer tx.Rollback()
-			temporalTx, ok := tx.(kv.TemporalTx)
-			if ok {
-				return fmt.Errorf("cast error: temporal tx %v", temporalTx)
-			}
-			pe.doms.SetTx(temporalTx)
 
 			applyCtx, cancelApplyCtx = context.WithCancel(ctx) //nolint:fatcontext
 			defer cancelApplyCtx()
