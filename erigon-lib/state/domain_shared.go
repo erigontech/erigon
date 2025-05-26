@@ -374,9 +374,9 @@ func (sd *SharedDomains) deleteAccount(roTx kv.Tx, addr []byte, txNum uint64, pr
 	return nil
 }
 
-func (sd *SharedDomains) writeAccountStorage(k, v, preVal []byte, prevStep uint64) error {
+func (sd *SharedDomains) writeAccountStorage(k, v, preVal []byte, prevStep, txNum uint64) error {
 	sd.put(kv.StorageDomain, string(k), v)
-	return sd.domainWriters[kv.StorageDomain].PutWithPrev(k, v, sd.txNum, preVal, prevStep)
+	return sd.domainWriters[kv.StorageDomain].PutWithPrev(k, v, txNum, preVal, prevStep)
 }
 
 func (sd *SharedDomains) delAccountStorage(k, preVal []byte, prevStep, txNum uint64) error {
@@ -561,7 +561,7 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.Tx, k, v []byte, tx
 	sd.sdCtx.TouchKey(domain, ks, v)
 	switch domain {
 	case kv.StorageDomain:
-		return sd.writeAccountStorage(k, v, prevVal, prevStep)
+		return sd.writeAccountStorage(k, v, prevVal, prevStep, txNum)
 	case kv.CodeDomain:
 		if bytes.Equal(prevVal, v) {
 			return nil
