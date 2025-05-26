@@ -21,11 +21,9 @@ package js
 
 import (
 	"github.com/dop251/goja"
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/holiman/uint256"
-	"math/big"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 func (jst *jsTracer) CaptureArbitrumTransfer(
@@ -74,7 +72,7 @@ func (jst *jsTracer) CaptureStylusHostio(name string, args, outs []byte, startIn
 	}
 }
 
-func (jst *jsTracer) OnBalanceChange(addr libcommon.Address, prev, new *big.Int, reason tracing.BalanceChangeReason) {
+func (jst *jsTracer) OnBalanceChange(addr libcommon.Address, prev, new *uint256.Int, reason tracing.BalanceChangeReason) {
 	traceBalanceChange, ok := goja.AssertFunction(jst.obj.Get("onBalanceChange"))
 
 	if !ok {
