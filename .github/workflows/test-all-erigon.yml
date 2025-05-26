@@ -106,10 +106,6 @@ jobs:
         if: needs.source-of-changes.outputs.changed_files != 'true'
         uses: actions/checkout@v4
         
-      - name: Update submodules on Windows
-        if: needs.source-of-changes.outputs.changed_files != 'true'
-        run: git submodule update --init --recursive --force
-        
       - name: Setup Go environment on ${{ matrix.os }}
         if: needs.source-of-changes.outputs.changed_files != 'true'
         uses: actions/setup-go@v5
