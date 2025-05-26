@@ -414,10 +414,10 @@ func (sd *SharedDomains) SetTrace(b bool) {
 	sd.trace = b
 }
 
-func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
+func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, bool, error) {
 	var firstKey []byte
 	var hasPrefix bool
-	err := sd.IteratePrefix(domain, prefix, txNum, roTx, func(k []byte, v []byte, step uint64) (bool, error) {
+	err := sd.IteratePrefix(domain, prefix, sd.txNum, roTx, func(k []byte, v []byte, step uint64) (bool, error) {
 		firstKey = common.CopyBytes(k)
 		hasPrefix = true
 		return false, nil // do not continue, end on first occurrence
@@ -525,7 +525,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.Tx, k []byte) (v []by
 		return nil, 0, fmt.Errorf("sd.GetLatest: unexpected nil tx")
 	}
 	if domain == kv.CommitmentDomain {
-		return sd.LatestCommitment(k, tx, sd.txNum)
+		return sd.LatestCommitment(k, sd.txNum, tx)
 	}
 	if v, prevStep, ok := sd.get(domain, k); ok {
 		return v, prevStep, nil
