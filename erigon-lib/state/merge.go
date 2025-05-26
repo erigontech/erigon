@@ -971,29 +971,48 @@ func (iit *InvertedIndexRoTx) cleanAfterMerge(merged *filesItem) {
 
 // garbage - returns list of garbage files after merge step is done. at startup pass here last frozen file
 func (dt *DomainRoTx) garbage(merged *filesItem) (outs []*filesItem) {
-	var checker func(startTxNum, endTxNum uint64) bool
-	dchecker := dt.d.checker
-	dname := dt.d.name
-	if dchecker != nil {
-		checker = func(startTxNum, endTxNum uint64) bool {
-			return dchecker.CheckDependentPresent(dname, Any, startTxNum, endTxNum)
+	// `kill -9` may leave some garbage
+	// AggRoTx doesn't have such files, only Agg.files does
+	dt.d.dirtyFiles.Walk(func(items []*filesItem) bool {
+		for _, item := range items {
+			if item.frozen {
+				continue
+			}
+			if merged == nil {
+				if hasCoverVisibleFile(dt.files, item) {
+					outs = append(outs, item)
+				}
+				continue
+			}
+
+			if item.isProperSubsetOf(merged) {
+				if dt.d.restrictSubsetFileDeletions {
+					continue
+				}
+				outs = append(outs, item)
+			}
+			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainRoTx`)
+			if item.isBefore(merged) && hasCoverVisibleFile(dt.files, item) {
+				outs = append(outs, item)
+			}
 		}
-	}
-	return garbage(dt.d.dirtyFiles, dt.files, merged, checker)
+		return true
+	})
+	return outs
 }
 
 // garbage - returns list of garbage files after merge step is done. at startup pass here last frozen file
 func (ht *HistoryRoTx) garbage(merged *filesItem) (outs []*filesItem) {
-	return garbage(ht.h.dirtyFiles, ht.files, merged, nil)
+	return garbage(ht.h.dirtyFiles, ht.files, merged)
 }
 
 func (iit *InvertedIndexRoTx) garbage(merged *filesItem) (outs []*filesItem) {
-	return garbage(iit.ii.dirtyFiles, iit.files, merged, nil)
+	return garbage(iit.ii.dirtyFiles, iit.files, merged)
 }
 
-func garbage(dirtyFiles *btree.BTreeG[*filesItem], visibleFiles []visibleFile, merged *filesItem, checker func(startTxNum, endTxNum uint64) bool) (outs []*filesItem) {
+func garbage(dirtyFiles *btree.BTreeG[*filesItem], visibleFiles []visibleFile, merged *filesItem) (outs []*filesItem) {
 	// `kill -9` may leave some garbage
-	// AggRoTx doesn't have such files, only Agg.files does
+	// AggRotx doesn't have such files, only Agg.files does
 	dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.frozen {
@@ -1006,26 +1025,21 @@ func garbage(dirtyFiles *btree.BTreeG[*filesItem], visibleFiles []visibleFile, m
 				}
 				continue
 			}
+
+			if item.isProperSubsetOf(merged) {
+				outs = append(outs, item)
+			}
 			// this case happens when in previous process run, the merged file was created,
 			// but the processed ended before subsumed files could be deleted.
 			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainRoTx`)
 			if item.isBefore(merged) && hasCoverVisibleFile(visibleFiles, item) {
 				outs = append(outs, item)
-				continue
-			}
-
-			if item.isProperSubsetOf(merged) {
-				if checker == nil || !checker(item.startTxNum, item.endTxNum) {
-					// no dependent file is present for item, can delete safely...
-					outs = append(outs, item)
-				}
 			}
 		}
 		return true
 	})
 	return outs
 }
-
 func hasCoverVisibleFile(visibleFiles []visibleFile, item *filesItem) bool {
 	for _, f := range visibleFiles {
 		if item.isProperSubsetOf(f.src) {

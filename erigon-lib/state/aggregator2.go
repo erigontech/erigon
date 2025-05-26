@@ -57,10 +57,6 @@ func NewAggregator2(ctx context.Context, dirs datadir.Dirs, aggregationStep uint
 	if err := a.registerII(kv.TracesToIdx, salt, dirs, logger); err != nil {
 		return nil, err
 	}
-
-	a.AddDependency(kv.AccountsDomain, kv.CommitmentDomain)
-	a.AddDependency(kv.StorageDomain, kv.CommitmentDomain)
-
 	a.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(100_000) // ~1k blocks of history
 
 	a.dirtyFilesLock.Lock()
