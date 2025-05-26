@@ -359,8 +359,13 @@ func (txw *BlobTxWrapper) DecodeRLP(s *rlp.Stream) error {
 	}
 
 	if k, size, err := s.Kind(); err == nil {
-		if size == 0 && k == rlp.Byte {
-			s.Decode(&txw.WrapperVersion)
+		if size == 0 {
+			if k == rlp.Byte {
+				if err := s.Decode(&txw.WrapperVersion); err != nil {
+					return err
+				}
+			}
+			return errors.New("BlobTxWrapper DecodeRLP: Unexpected element in rlp strem")
 		}
 	} else {
 		return err
