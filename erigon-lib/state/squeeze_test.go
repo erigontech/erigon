@@ -2,8 +2,10 @@ package state
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/empty"
@@ -24,6 +26,7 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 	tb.Helper()
 	_db, agg := testDbAndAggregatorv3(tb, cfg.stepSize)
 	db := wrapDbWithCtx(_db, agg)
+	defer func(t time.Time) { fmt.Printf("squeeze_test.go:27: %s\n", time.Since(t)) }(time.Now())
 
 	agg.commitmentValuesTransform = !cfg.disableCommitmentBranchTransform
 	agg.d[kv.CommitmentDomain].replaceKeysInValues = agg.commitmentValuesTransform
@@ -44,7 +47,7 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Agg
 
 	txCount := int(cfg.stepSize) * 32 // will produce files up to step 31, good because covers different ranges (16, 8, 4, 2, 1)
 
-	keys, vals := generateInputData(tb, length.Addr, 16, txCount)
+	keys, vals := generateInputData(tb, length.Addr, 5, txCount)
 	tb.Logf("keys %d vals %d\n", len(keys), len(vals))
 
 	for i := 0; i < len(vals); i++ {

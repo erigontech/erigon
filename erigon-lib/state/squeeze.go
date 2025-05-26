@@ -306,6 +306,7 @@ func SqueezeCommitmentFiles(at *AggregatorRoTx, logger log.Logger) error {
 // DB expected to be empty, committed into db keys will be not processed.
 func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, logger log.Logger) (latestRoot []byte, err error) {
 	a := rwDb.(HasAgg).Agg().(*Aggregator)
+	defer func(t time.Time) { fmt.Printf("squeeze.go:309: %s\n", time.Since(t)) }(time.Now())
 
 	acRo := a.BeginFilesRo() // this tx is used to read existing domain files and closed in the end
 	defer acRo.Close()
@@ -339,6 +340,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 	start := time.Now()
 	defer func() { logger.Info("Commitment DONE", "duration", time.Since(start)) }()
+	defer func(t time.Time) { fmt.Printf("squeeze.go:343: %s\n", time.Since(t)) }(time.Now())
 
 	acRo.RestrictSubsetFileDeletions(true)
 	a.commitmentValuesTransform = false
@@ -484,6 +486,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		keyIter.Close()
 	}
 	logger.Info("Commitment rebuild", "duration", time.Since(start), "totalKeysProcessed", common.PrettyCounter(totalKeysCommitted))
+	defer func(t time.Time) { fmt.Printf("squeeze.go:489: %s\n", time.Since(t)) }(time.Now())
 
 	logger.Info("Squeezing commitment files")
 	a.commitmentValuesTransform = true

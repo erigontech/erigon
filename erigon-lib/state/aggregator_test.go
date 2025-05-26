@@ -1335,16 +1335,13 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 
 func TestAggregatorV3_SharedDomains(t *testing.T) {
 	t.Parallel()
-	db, agg := testDbAndAggregatorv3(t, 20)
+	_db, agg := testDbAndAggregatorv3(t, 20)
 	ctx := context.Background()
 
-	ac := agg.BeginFilesRo()
-	defer ac.Close()
-
-	_rwTx, err := db.BeginRw(context.Background())
+	db := wrapDbWithCtx(_db, agg)
+	rwTx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
-	defer _rwTx.Rollback()
-	rwTx := wrapTxWithCtx(_rwTx, ac)
+	defer rwTx.Rollback()
 
 	domains, err := NewSharedDomains(rwTx, log.New())
 	require.NoError(t, err)
@@ -1395,11 +1392,12 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 
 	err = domains.Flush(context.Background(), rwTx)
 	require.NoError(t, err)
-	ac.Close()
+	err = rwTx.Commit()
+	require.NoError(t, err)
 
-	ac = agg.BeginFilesRo()
-	defer ac.Close()
-	rwTx = wrapTxWithCtx(_rwTx, ac)
+	rwTx, err = db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
 
 	domains, err = NewSharedDomains(rwTx, log.New())
 	require.NoError(t, err)
@@ -1441,13 +1439,16 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 
 	err = domains.Flush(context.Background(), rwTx)
 	require.NoError(t, err)
-	ac.Close()
 
 	pruneFrom = 3
 
-	ac = agg.BeginFilesRo()
-	defer ac.Close()
-	rwTx = wrapTxWithCtx(_rwTx, ac)
+	err = rwTx.Commit()
+	require.NoError(t, err)
+
+	rwTx, err = db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
 	domains, err = NewSharedDomains(rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
@@ -1498,8 +1499,8 @@ func Test_helper_decodeAccountv3Bytes(t *testing.T) {
 
 // wrapTxWithCtx - deprecated copy of kv_temporal.go - visible only in tests
 // need to move non-unit-tests to own package
-func wrapTxWithCtx(tx kv.Tx, aggTx *AggregatorRoTx) *Tx {
-	return &Tx{MdbxTx: tx.(*mdbx.MdbxTx), aggtx: aggTx}
+func wrapTxWithCtx(ttx kv.Tx, aggTx *AggregatorRoTx) *Tx {
+	return &Tx{Tx: ttx.(*mdbx.MdbxTx), tx: tx{aggtx: aggTx}}
 }
 
 // wrapTxWithCtx - deprecated copy of kv_temporal.go - visible only in tests
@@ -1518,10 +1519,11 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	}
 
 	_db, agg := testDbAggregatorWithFiles(t, &testAggConfig{
-		stepSize:                         20,
+		stepSize:                         10,
 		disableCommitmentBranchTransform: false,
 	})
 	db := wrapDbWithCtx(_db, agg)
+	defer func(t time.Time) { fmt.Printf("aggregator_test.go:1525: %s\n", time.Since(t)) }(time.Now())
 
 	ac := agg.BeginFilesRo()
 	roots := make([]common.Hash, 0)
@@ -1558,6 +1560,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	}
 	ac.Close()
 	agg.d[kv.CommitmentDomain].closeFilesAfterStep(0) // close commitment files to remove
+	defer func(t time.Time) { fmt.Printf("aggregator_test.go:1562: %s\n", time.Since(t)) }(time.Now())
 
 	// now clean all commitment files along with related db buckets
 	rwTx, err := db.BeginRw(context.Background())
@@ -1586,6 +1589,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	}
 	err = agg.OpenFolder()
 	require.NoError(t, err)
+	defer func(t time.Time) { fmt.Printf("aggregator_test.go:1591: %s\n", time.Since(t)) }(time.Now())
 
 	ctx := context.Background()
 	finalRoot, err := RebuildCommitmentFiles(ctx, db, &rawdbv3.TxNums, agg.logger)
