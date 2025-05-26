@@ -326,12 +326,12 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(agg.BuildFiles(stepSize * 2))
 		require.Equal(1, agg.d[kv.StorageDomain].dirtyFiles.Len())
 
-		ac := AggTx(rwTx)
-		require.Equal(int(stepSize*2), int(ac.TxNumsInFiles(kv.StateDomains...)))
-
 		rwTx, err = db.BeginTemporalRw(ctx)
 		require.NoError(err)
 		defer rwTx.Rollback()
+
+		ac := AggTx(rwTx)
+		require.Equal(int(stepSize*2), int(ac.TxNumsInFiles(kv.StateDomains...)))
 
 		_, err := ac.prune(ctx, rwTx, 0, nil)
 		require.NoError(err)
