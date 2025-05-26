@@ -29,22 +29,34 @@ import (
 )
 
 type Metadata struct {
-	SeqNumber uint64
-	Attnets   [8]byte
-	Syncnets  *[1]byte
+	SeqNumber         uint64
+	Attnets           [8]byte
+	Syncnets          *[1]byte
+	CustodyGroupCount *uint64
 }
 
 func (m *Metadata) EncodeSSZ(buf []byte) ([]byte, error) {
-	if m.Syncnets == nil {
-		return ssz2.MarshalSSZ(buf, m.SeqNumber, m.Attnets[:])
+	schema := []interface{}{
+		m.SeqNumber,
+		m.Attnets[:],
 	}
-	return ssz2.MarshalSSZ(buf, m.SeqNumber, m.Attnets[:], m.Syncnets[:])
+	if m.Syncnets != nil {
+		schema = append(schema, m.Syncnets[:])
+	}
+	if m.CustodyGroupCount != nil {
+		schema = append(schema, m.CustodyGroupCount)
+	}
+
+	return ssz2.MarshalSSZ(buf, schema...)
 }
 
 func (m *Metadata) EncodingSizeSSZ() (ret int) {
 	ret = 8 * 2
 	if m.Syncnets != nil {
 		ret += 1
+	}
+	if m.CustodyGroupCount != nil {
+		ret += 8
 	}
 	return
 }
@@ -60,6 +72,12 @@ func (m *Metadata) DecodeSSZ(buf []byte, _ int) error {
 	}
 	m.Syncnets = new([1]byte)
 	copy(m.Syncnets[:], buf[16:17])
+
+	if len(buf) < 25 {
+		return nil
+	}
+	m.CustodyGroupCount = new(uint64)
+	*m.CustodyGroupCount = ssz.UnmarshalUint64SSZ(buf[17:25])
 	return nil
 }
 
@@ -71,6 +89,10 @@ func (m *Metadata) MarshalJSON() ([]byte, error) {
 	if m.Syncnets != nil {
 		out["syncnets"] = hexutil.Bytes(m.Syncnets[:])
 	}
+	if m.CustodyGroupCount != nil {
+		out["custody_group_count"] = *m.CustodyGroupCount
+	}
+
 	// Attnets and syncnets are hex encoded
 	return json.Marshal(out)
 }
