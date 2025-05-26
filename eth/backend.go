@@ -852,21 +852,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		config.Sync,
 		stagedsync.MiningStages(backend.sentryCtx,
 			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, nil, tmpdir, backend.blockReader),
-			stagedsync.StageBorHeimdallCfg(
-				backend.chainDB,
-				snapDb,
-				miner,
-				*backend.chainConfig,
-				heimdallClient,
-				heimdallStore,
-				bridgeStore,
-				backend.blockReader,
-				nil,
-				nil,
-				recents,
-				signatures,
-				false,
-				nil),
 			stagedsync.StageExecuteBlocksCfg(
 				backend.chainDB,
 				config.Prune,
@@ -899,21 +884,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			config.Sync,
 			stagedsync.MiningStages(backend.sentryCtx,
 				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, param, tmpdir, backend.blockReader),
-				stagedsync.StageBorHeimdallCfg(
-					backend.chainDB,
-					snapDb,
-					miningStatePos,
-					*backend.chainConfig,
-					heimdallClient,
-					heimdallStore,
-					bridgeStore,
-					backend.blockReader,
-					nil,
-					nil,
-					recents,
-					signatures,
-					false,
-					nil),
 				stagedsync.StageExecuteBlocksCfg(
 					backend.chainDB,
 					config.Prune,
@@ -1338,20 +1308,6 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 			borcfg.Authorize(eb, func(_ common.Address, mimeType string, message []byte) ([]byte, error) {
 				return crypto.Sign(crypto.Keccak256(message), miner.MiningConfig.SigKey)
 			})
-
-			if !s.config.WithoutHeimdall {
-				err := stagedsync.FetchSpanZeroForMiningIfNeeded(
-					ctx,
-					s.chainDB,
-					s.blockReader,
-					borcfg.HeimdallClient,
-					heimdallStore,
-					logger,
-				)
-				if err != nil {
-					return err
-				}
-			}
 		} else if s.chainConfig.Consensus == chain.CliqueConsensus {
 			s.engine.(*clique.Clique).Authorize(eb, func(_ common.Address, _ string, msg []byte) ([]byte, error) {
 				return crypto.Sign(crypto.Keccak256(msg), miner.MiningConfig.SigKey)
