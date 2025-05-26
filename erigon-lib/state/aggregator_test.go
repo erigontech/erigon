@@ -133,24 +133,24 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	require.NoError(t, err)
 	err = rwTx.Commit()
 	require.NoError(t, err)
-	rwTx = nil
 
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
 
-	rwTx, err = db.BeginTemporalRw(context.Background())
-	require.NoError(t, err)
-	defer rwTx.Rollback()
+	{ //prune
+		rwTx, err = db.BeginTemporalRw(context.Background())
+		require.NoError(t, err)
+		defer rwTx.Rollback()
 
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-	stat, err := AggTx(rwTx).prune(context.Background(), rwTx, 0, logEvery)
-	require.NoError(t, err)
-	t.Logf("Prune: %s", stat)
+		logEvery := time.NewTicker(30 * time.Second)
+		defer logEvery.Stop()
+		stat, err := AggTx(rwTx).prune(context.Background(), rwTx, 0, logEvery)
+		require.NoError(t, err)
+		t.Logf("Prune: %s", stat)
 
-	err = rwTx.Commit()
-	require.NoError(t, err)
-
+		err = rwTx.Commit()
+		require.NoError(t, err)
+	}
 	err = agg.MergeLoop(context.Background())
 	require.NoError(t, err)
 
