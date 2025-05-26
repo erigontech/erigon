@@ -1075,7 +1075,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 
 	t.Parallel()
 	ctx := context.Background()
-	aggStep := uint64(500)
+	aggStep := uint64(20)
 
 	db, agg := testDbAndAggregatorv3(t, aggStep)
 
@@ -1514,7 +1514,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	}
 
 	_db, agg := testDbAggregatorWithFiles(t, &testAggConfig{
-		stepSize:                         20,
+		stepSize:                         10,
 		disableCommitmentBranchTransform: false,
 	})
 	db := wrapDbWithCtx(_db, agg)
