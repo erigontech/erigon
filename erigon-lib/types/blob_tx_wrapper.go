@@ -426,7 +426,7 @@ func (txw *BlobTxWrapper) MarshalBinaryWrapped(w io.Writer) error {
 		b[0] = txw.WrapperVersion
 		if _, err := w.Write(b[:1]); err != nil {
 			return err
-		}	
+		}
 	}
 	if err := txw.Blobs.encodePayload(w, b[:], txw.Blobs.payloadSize()); err != nil {
 		return err

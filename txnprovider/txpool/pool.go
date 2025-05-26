@@ -277,6 +277,13 @@ func New(
 		pragueTimeU64 := chainConfig.PragueTime.Uint64()
 		res.pragueTime = &pragueTimeU64
 	}
+	if chainConfig.OsakaTime != nil {
+		if !chainConfig.OsakaTime.IsUint64() {
+			return nil, errors.New("osakaTime overflow")
+		}
+		osakatimeU64 := chainConfig.OsakaTime.Uint64()
+		res.osakaTime = &osakatimeU64
+	}
 
 	res.p2pFetcher = NewFetch(ctx, sentryClients, res, stateChangesClient, poolDB, res.chainID, logger, opts...)
 	res.p2pSender = NewSend(ctx, sentryClients, logger, opts...)
@@ -1059,7 +1066,7 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 	proofs := txn.Proofs()
 
 	if len(blobs) != len(commitments) {
-		log.Error(fmt.Sprintf("len(blobs) %d != len(commitments) %d", len(blobs),len(commitments)))
+		log.Error(fmt.Sprintf("len(blobs) %d != len(commitments) %d", len(blobs), len(commitments)))
 		return txpoolcfg.UnequalBlobTxExt
 	}
 	if p.isOsaka() {
@@ -1068,7 +1075,7 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 		}
 	} else {
 		if len(commitments) != len(proofs) {
-			log.Error(fmt.Sprintf("NOT OSAKA len(commitments) %d != len(proofs) %d", len(commitments),len(proofs)))
+			log.Error(fmt.Sprintf("NOT OSAKA len(commitments) %d != len(proofs) %d", len(commitments), len(proofs)))
 			return txpoolcfg.UnequalBlobTxExt
 		}
 	}
