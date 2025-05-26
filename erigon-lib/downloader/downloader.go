@@ -40,13 +40,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/anacrolix/missinggo/v2/panicif"
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/semaphore"
 
-	g "github.com/anacrolix/generics"
+	"github.com/anacrolix/missinggo/v2/panicif"
+
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
+
+	g "github.com/anacrolix/generics"
 
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
@@ -1304,7 +1306,7 @@ func newTorrentClient(
 	m = storage.NewFileOpts(storage.NewFileClientOpts{
 		ClientBaseDir: snapDir,
 		UsePartFiles:  g.Some(true),
-		Logger:        cfg.Slogger.With("storage"),
+		Logger:        cfg.Slogger.With("names", "storage"),
 	})
 	cfg.DefaultStorage = m
 

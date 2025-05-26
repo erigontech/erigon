@@ -1,8 +1,6 @@
 module github.com/erigontech/erigon
 
-go 1.23.0
-
-toolchain go1.23.6
+go 1.24
 
 replace (
 	github.com/erigontech/erigon-db => ./erigon-db
@@ -33,7 +31,7 @@ require (
 	github.com/RoaringBitmap/roaring/v2 v2.4.5
 	github.com/alecthomas/kong v0.8.1
 	github.com/anacrolix/sync v0.5.4
-	github.com/anacrolix/torrent v1.58.2-0.20250516052732-e2dbaf465fb6
+	github.com/anacrolix/torrent v1.58.2-0.20250526145351-80c17abd53a6
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/consensys/gnark-crypto v0.17.0
@@ -161,12 +159,12 @@ require (
 	github.com/anacrolix/chansync v0.6.0 // indirect
 	github.com/anacrolix/dht/v2 v2.21.1 // indirect
 	github.com/anacrolix/envpprof v1.3.0 // indirect
-	github.com/anacrolix/generics v0.0.3-0.20240902042256-7fb2702ef0ca
+	github.com/anacrolix/generics v0.0.3-0.20250526144502-593be7092deb
 	github.com/anacrolix/go-libutp v1.3.2 // indirect
-	github.com/anacrolix/log v0.16.1-0.20250429062012-9dd7c8a776c6 // indirect
+	github.com/anacrolix/log v0.16.1-0.20250526073428-5cb74e15092b // indirect
 	github.com/anacrolix/missinggo v1.3.0 // indirect
 	github.com/anacrolix/missinggo/perf v1.0.0 // indirect
-	github.com/anacrolix/missinggo/v2 v2.7.4 // indirect
+	github.com/anacrolix/missinggo/v2 v2.8.0 // indirect
 	github.com/anacrolix/mmsg v1.0.1 // indirect
 	github.com/anacrolix/multiless v0.4.0 // indirect
 	github.com/anacrolix/stm v0.4.1-0.20221221005312-96d17df0e496 // indirect
