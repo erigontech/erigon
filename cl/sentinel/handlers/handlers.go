@@ -107,6 +107,7 @@ func NewConsensusHandlers(ctx context.Context, db freezeblocks.BeaconSnapshotRea
 		communication.StatusProtocolV1:                      c.statusHandler,
 		communication.MetadataProtocolV1:                    c.metadataV1Handler,
 		communication.MetadataProtocolV2:                    c.metadataV2Handler,
+		communication.MetadataProtocolV3:                    c.metadataV3Handler,
 		communication.LightClientOptimisticUpdateProtocolV1: c.optimisticLightClientUpdateHandler,
 		communication.LightClientFinalityUpdateProtocolV1:   c.finalityLightClientUpdateHandler,
 		communication.LightClientBootstrapProtocolV1:        c.lightClientBootstrapHandler,
