@@ -700,8 +700,9 @@ func (r *ready) set() {
 	if r.state.Load() {
 		return
 	}
-	r.state.CompareAndSwap(false, true)
-	close(r.on)
+	if r.state.CompareAndSwap(false, true) {
+		close(r.on)
+	}
 }
 
 func (s *RoSnapshots) Ready(ctx context.Context) <-chan error {
