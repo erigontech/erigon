@@ -335,7 +335,7 @@ func (t *Trie) GetAccountCode(key []byte) (value []byte, gotValue bool) {
 
 	accNode, gotValue := t.getAccount(t.RootNode, hex, 0)
 	if accNode != nil {
-		if bytes.Equal(accNode.Account.CodeHash[:], EmptyCodeHash[:]) {
+		if bytes.Equal(accNode.Account.CodeHash[:], emptyCodeHash[:]) {
 			return nil, gotValue
 		}
 
@@ -357,7 +357,7 @@ func (t *Trie) GetAccountCodeSize(key []byte) (value int, gotValue bool) {
 
 	accNode, gotValue := t.getAccount(t.RootNode, hex, 0)
 	if accNode != nil {
-		if bytes.Equal(accNode.Account.CodeHash[:], EmptyCodeHash[:]) {
+		if bytes.Equal(accNode.Account.CodeHash[:], emptyCodeHash[:]) {
 			return 0, gotValue
 		}
 
@@ -593,7 +593,7 @@ func (t *Trie) NewLoadRequestForCode(addrHash common.Hash, codeHash common.Hash,
 }
 
 func (t *Trie) NeedLoadCode(addrHash common.Hash, codeHash common.Hash, bytecode bool) (bool, *LoadRequestForCode) {
-	if bytes.Equal(codeHash[:], EmptyCodeHash[:]) {
+	if bytes.Equal(codeHash[:], emptyCodeHash[:]) {
 		return false, nil
 	}
 

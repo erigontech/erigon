@@ -94,46 +94,46 @@ func (j *journal) length() int {
 type (
 	// Changes to the account trie.
 	createObjectChange struct {
-		account *common.Address
+		account common.Address
 	}
 	resetObjectChange struct {
-		account *common.Address
+		account common.Address
 		prev    *stateObject
 	}
 	selfdestructChange struct {
-		account     *common.Address
+		account     common.Address
 		prev        bool // whether account had already selfdestructed
 		prevbalance uint256.Int
 	}
 
 	// Changes to individual accounts.
 	balanceChange struct {
-		account *common.Address
+		account common.Address
 		prev    uint256.Int
 	}
 	balanceIncrease struct {
-		account  *common.Address
+		account  common.Address
 		increase uint256.Int
 	}
 	balanceIncreaseTransfer struct {
 		bi *BalanceIncrease
 	}
 	nonceChange struct {
-		account *common.Address
+		account common.Address
 		prev    uint64
 	}
 	storageChange struct {
-		account  *common.Address
+		account  common.Address
 		key      common.Hash
 		prevalue uint256.Int
 	}
 	fakeStorageChange struct {
-		account  *common.Address
+		account  common.Address
 		key      common.Hash
 		prevalue uint256.Int
 	}
 	codeChange struct {
-		account  *common.Address
+		account  common.Address
 		prevcode []byte
 		prevhash common.Hash
 	}
@@ -146,20 +146,20 @@ type (
 		txIndex int
 	}
 	touchChange struct {
-		account *common.Address
+		account common.Address
 	}
 
 	// Changes to the access list
 	accessListAddAccountChange struct {
-		address *common.Address
+		address common.Address
 	}
 	accessListAddSlotChange struct {
-		address *common.Address
-		slot    *common.Hash
+		address common.Address
+		slot    common.Hash
 	}
 
 	transientStorageChange struct {
-		account  *common.Address
+		account  common.Address
 		key      common.Hash
 		prevalue uint256.Int
 	}
@@ -172,17 +172,17 @@ type (
 //}
 
 func (ch createObjectChange) revert(s *IntraBlockState) error {
-	delete(s.stateObjects, *ch.account)
-	delete(s.stateObjectsDirty, *ch.account)
+	delete(s.stateObjects, ch.account)
+	delete(s.stateObjectsDirty, ch.account)
 	return nil
 }
 
 func (ch createObjectChange) dirtied() *common.Address {
-	return ch.account
+	return &ch.account
 }
 
 func (ch resetObjectChange) revert(s *IntraBlockState) error {
-	s.setStateObject(*ch.account, ch.prev)
+	s.setStateObject(ch.account, ch.prev)
 	return nil
 }
 
@@ -191,19 +191,19 @@ func (ch resetObjectChange) dirtied() *common.Address {
 }
 
 func (ch selfdestructChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(*ch.account)
+	obj, err := s.getStateObject(ch.account)
 	if err != nil {
 		return err
 	}
 	if obj != nil {
 		obj.selfdestructed = ch.prev
-		obj.setBalance(&ch.prevbalance)
+		obj.setBalance(ch.prevbalance)
 	}
 	return nil
 }
 
 func (ch selfdestructChange) dirtied() *common.Address {
-	return ch.account
+	return &ch.account
 }
 
 var ripemd = common.HexToAddress("0000000000000000000000000000000000000003")
@@ -212,36 +212,34 @@ func (ch touchChange) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch touchChange) dirtied() *common.Address {
-	return ch.account
-}
+func (ch touchChange) dirtied() *common.Address { return &ch.account }
 
 func (ch balanceChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(*ch.account)
+	obj, err := s.getStateObject(ch.account)
 	if err != nil {
 		return err
 	}
-	obj.setBalance(&ch.prev)
+	obj.setBalance(ch.prev)
 	return nil
 }
 
 func (ch balanceChange) dirtied() *common.Address {
-	return ch.account
+	return &ch.account
 }
 
 func (ch balanceIncrease) revert(s *IntraBlockState) error {
-	if bi, ok := s.balanceInc[*ch.account]; ok {
+	if bi, ok := s.balanceInc[ch.account]; ok {
 		bi.increase.Sub(&bi.increase, &ch.increase)
 		bi.count--
 		if bi.count == 0 {
-			delete(s.balanceInc, *ch.account)
+			delete(s.balanceInc, ch.account)
 		}
 	}
 	return nil
 }
 
 func (ch balanceIncrease) dirtied() *common.Address {
-	return ch.account
+	return &ch.account
 }
 
 func (ch balanceIncreaseTransfer) dirtied() *common.Address {
@@ -253,7 +251,7 @@ func (ch balanceIncreaseTransfer) revert(s *IntraBlockState) error {
 	return nil
 }
 func (ch nonceChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(*ch.account)
+	obj, err := s.getStateObject(ch.account)
 	if err != nil {
 		return err
 	}
@@ -262,11 +260,11 @@ func (ch nonceChange) revert(s *IntraBlockState) error {
 }
 
 func (ch nonceChange) dirtied() *common.Address {
-	return ch.account
+	return &ch.account
 }
 
 func (ch codeChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(*ch.account)
+	obj, err := s.getStateObject(ch.account)
 	if err != nil {
 		return err
 	}
@@ -275,24 +273,24 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 }
 
 func (ch codeChange) dirtied() *common.Address {
-	return ch.account
+	return &ch.account
 }
 
 func (ch storageChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(*ch.account)
+	obj, err := s.getStateObject(ch.account)
 	if err != nil {
 		return err
 	}
-	obj.setState(&ch.key, ch.prevalue)
+	obj.setState(ch.key, ch.prevalue)
 	return nil
 }
 
 func (ch storageChange) dirtied() *common.Address {
-	return ch.account
+	return &ch.account
 }
 
 func (ch fakeStorageChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(*ch.account)
+	obj, err := s.getStateObject(ch.account)
 	if err != nil {
 		return err
 	}
@@ -301,11 +299,11 @@ func (ch fakeStorageChange) revert(s *IntraBlockState) error {
 }
 
 func (ch fakeStorageChange) dirtied() *common.Address {
-	return ch.account
+	return &ch.account
 }
 
 func (ch transientStorageChange) revert(s *IntraBlockState) error {
-	s.setTransientState(*ch.account, ch.key, ch.prevalue)
+	s.setTransientState(ch.account, ch.key, ch.prevalue)
 	return nil
 }
 
@@ -346,7 +344,7 @@ func (ch accessListAddAccountChange) revert(s *IntraBlockState) error {
 		(addr) at this point, since no storage adds can remain when come upon
 		a single (addr) change.
 	*/
-	s.accessList.DeleteAddress(*ch.address)
+	s.accessList.DeleteAddress(ch.address)
 	return nil
 }
 
@@ -355,7 +353,7 @@ func (ch accessListAddAccountChange) dirtied() *common.Address {
 }
 
 func (ch accessListAddSlotChange) revert(s *IntraBlockState) error {
-	s.accessList.DeleteSlot(*ch.address, *ch.slot)
+	s.accessList.DeleteSlot(ch.address, ch.slot)
 	return nil
 }
 

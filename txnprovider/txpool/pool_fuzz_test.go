@@ -558,7 +558,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 		require.NoError(err)
 
 		p2.senders = pool.senders // senders are not persisted
-		err = coreDB.View(ctx, func(coreTx kv.Tx) error { return p2.fromDB(ctx, tx, coreTx) })
+		err = coreDB.ViewTemporal(ctx, func(coreTx kv.TemporalTx) error { return p2.fromDB(ctx, tx, coreTx) })
 		require.NoError(err)
 		for _, txn := range p2.byHash {
 			assert.Nil(txn.TxnSlot.Rlp)

@@ -83,6 +83,9 @@ type CaplinConfig struct {
 
 	BootstrapNodes []string
 	StaticPeers    []string
+
+	// Extra
+	EnableEngineAPI bool
 }
 
 func (c CaplinConfig) IsDevnet() bool {
@@ -377,25 +380,25 @@ func (b *BeaconChainConfig) MinSlotsForBlobsSidecarsRequest() uint64 {
 type ConfigDurationSec time.Duration
 
 func (d *ConfigDurationSec) MarshalJSON() ([]byte, error) {
-	return []byte(fmt.Sprintf("\"%d\"", int64(time.Duration(*d).Seconds()))), nil
+	return fmt.Appendf(nil, "\"%d\"", int64(time.Duration(*d).Seconds())), nil
 }
 
 type ConfigDurationMSec time.Duration
 
 func (d *ConfigDurationMSec) MarshalJSON() ([]byte, error) {
-	return []byte(fmt.Sprintf("\"%d\"", time.Duration(*d).Milliseconds())), nil
+	return fmt.Appendf(nil, "\"%d\"", time.Duration(*d).Milliseconds()), nil
 }
 
 type ConfigByte byte
 
 func (b ConfigByte) MarshalJSON() ([]byte, error) {
-	return []byte(fmt.Sprintf("\"0x%02x\"", b)), nil
+	return fmt.Appendf(nil, "\"0x%02x\"", b), nil
 }
 
 type ConfigForkVersion uint32
 
 func (v ConfigForkVersion) MarshalJSON() ([]byte, error) {
-	return []byte(fmt.Sprintf("\"0x%08x\"", v)), nil
+	return fmt.Appendf(nil, "\"0x%08x\"", v), nil
 }
 
 type VersionScheduleEntry struct {
@@ -406,7 +409,7 @@ type VersionScheduleEntry struct {
 type ConfigHex4Bytes [4]byte
 
 func (b ConfigHex4Bytes) MarshalJSON() ([]byte, error) {
-	return []byte(fmt.Sprintf(`"0x%s"`, hex.EncodeToString(b[:]))), nil
+	return fmt.Appendf(nil, `"0x%s"`, hex.EncodeToString(b[:])), nil
 }
 
 // BeaconChainConfig contains constant configs for node to participate in beacon chain.

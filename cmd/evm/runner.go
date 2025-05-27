@@ -38,7 +38,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	common2 "github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
@@ -57,7 +57,6 @@ import (
 	"github.com/erigontech/erigon/core/vm/runtime"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/eth/tracers/logger"
-	"github.com/erigontech/erigon/params"
 )
 
 var runCommand = cli.Command{
@@ -115,11 +114,11 @@ func timedExec(bench bool, execFunc func() ([]byte, uint64, error)) (output []by
 		stats.bytesAllocated = result.AllocedBytesPerOp()
 	} else {
 		var memStatsBefore, memStatsAfter goruntime.MemStats
-		common2.ReadMemStats(&memStatsBefore)
+		dbg.ReadMemStats(&memStatsBefore)
 		startTime := time.Now()
 		output, gasLeft, err = execFunc()
 		stats.time = time.Since(startTime)
-		common2.ReadMemStats(&memStatsAfter)
+		dbg.ReadMemStats(&memStatsAfter)
 		stats.allocs = int64(memStatsAfter.Mallocs - memStatsBefore.Mallocs)
 		stats.bytesAllocated = int64(memStatsAfter.TotalAlloc - memStatsBefore.TotalAlloc)
 	}
@@ -132,7 +131,7 @@ func runCmd(ctx *cli.Context) error {
 	if machineFriendlyOutput {
 		log.Root().SetHandler(log.DiscardHandler())
 	} else {
-		log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+		log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(ctx.Int(VerbosityFlag.Name)), log.StderrHandler))
 	}
 	logconfig := &logger.LogConfig{
 		DisableMemory:     ctx.Bool(DisableMemoryFlag.Name),
@@ -152,7 +151,7 @@ func runCmd(ctx *cli.Context) error {
 		genesisConfig *types.Genesis
 	)
 	if machineFriendlyOutput {
-		tracer = logger.NewJSONLogger(logconfig, os.Stdout).Tracer()
+		tracer = logger.NewJSONLogger(logconfig, os.Stderr).Tracer()
 	} else if ctx.Bool(DebugFlag.Name) {
 		debugLogger = logger.NewStructLogger(logconfig)
 		tracer = debugLogger.Tracer()
@@ -189,7 +188,7 @@ func runCmd(ctx *cli.Context) error {
 		return err
 	}
 	defer sd.Close()
-	stateReader := state.NewReaderV3(sd)
+	stateReader := state.NewReaderV3(sd.AsGetter(tx))
 	statedb = state.New(stateReader)
 	if ctx.String(SenderFlag.Name) != "" {
 		sender = common.HexToAddress(ctx.String(SenderFlag.Name))
@@ -260,10 +259,12 @@ func runCmd(ctx *cli.Context) error {
 		Time:        new(big.Int).SetUint64(genesisConfig.Timestamp),
 		Coinbase:    genesisConfig.Coinbase,
 		BlockNumber: new(big.Int).SetUint64(genesisConfig.Number),
-		EVMConfig: vm.Config{
-			Tracer: tracer.Hooks,
-		},
 	}
+
+	if tracer != nil {
+		runtimeConfig.EVMConfig.Tracer = tracer.Hooks
+	}
+	runtimeConfig.EVMConfig.JumpDestCache = vm.NewJumpDestCache(16)
 
 	if cpuProfilePath := ctx.String(CPUProfileFlag.Name); cpuProfilePath != "" {
 		f, err := os.Create(cpuProfilePath)
@@ -281,7 +282,7 @@ func runCmd(ctx *cli.Context) error {
 	if chainConfig != nil {
 		runtimeConfig.ChainConfig = chainConfig
 	} else {
-		runtimeConfig.ChainConfig = params.AllProtocolChanges
+		runtimeConfig.ChainConfig = chain.AllProtocolChanges
 	}
 
 	var hexInput []byte

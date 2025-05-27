@@ -106,7 +106,7 @@ func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNr
 	if acc == nil || err != nil {
 		return hexutil.Bytes(""), nil
 	}
-	res, _ := reader.ReadAccountCode(address, acc.Incarnation)
+	res, _ := reader.ReadAccountCode(address)
 	if res == nil {
 		return hexutil.Bytes(""), nil
 	}
@@ -139,7 +139,7 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 	}
 
 	location := common.HexToHash(index)
-	res, err := reader.ReadAccountStorage(address, acc.Incarnation, &location)
+	res, err := reader.ReadAccountStorage(address, location)
 	if err != nil {
 		res = empty
 	}

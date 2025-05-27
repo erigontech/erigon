@@ -52,6 +52,7 @@ type CallArgs struct {
 	Input                *hexutil.Bytes            `json:"input"`
 	AccessList           *types.AccessList         `json:"accessList"`
 	ChainID              *hexutil.Big              `json:"chainId,omitempty"`
+	BlobVersionedHashes  []common.Hash             `json:"blobVersionedHashes,omitempty"`
 	AuthorizationList    []types.JsonAuthorization `json:"authorizationList"`
 }
 
@@ -161,6 +162,10 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 	}
 
 	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* isFree */, maxFeePerBlobGas)
+
+	if args.BlobVersionedHashes != nil {
+		msg.SetBlobVersionedHashes(args.BlobVersionedHashes)
+	}
 
 	if args.AuthorizationList != nil {
 		authorizations := make([]types.Authorization, len(args.AuthorizationList))
@@ -561,7 +566,7 @@ func computeGasPrice(txn types.Transaction, blockHash common.Hash, baseFee *big.
 	fee, overflow := uint256.FromBig(baseFee)
 	if fee != nil && !overflow && blockHash != (common.Hash{}) {
 		// price = min(tip + baseFee, gasFeeCap)
-		price := math.Min256(new(uint256.Int).Add(txn.GetTipCap(), fee), txn.GetFeeCap())
+		price := math.U256Min(new(uint256.Int).Add(txn.GetTipCap(), fee), txn.GetFeeCap())
 		return (*hexutil.Big)(price.ToBig())
 	}
 	return nil

@@ -42,12 +42,12 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-p2p/event"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/event"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/consensus/ethash"
@@ -247,7 +247,7 @@ func (b *SimulatedBackend) StorageAt(ctx context.Context, contract common.Addres
 
 	stateDB := b.stateByBlockNumber(tx, blockNumber)
 	var val uint256.Int
-	stateDB.GetState(contract, &key, &val)
+	stateDB.GetState(contract, key, &val)
 	return val.Bytes(), nil
 }
 
@@ -729,7 +729,7 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	if err != nil {
 		return nil, err
 	}
-	from.SetBalance(uint256.NewInt(0).SetAllOne(), tracing.BalanceChangeUnspecified)
+	from.SetBalance(*uint256.NewInt(0).SetAllOne(), tracing.BalanceChangeUnspecified)
 	// Execute the call.
 	msg := callMsg{call}
 

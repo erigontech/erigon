@@ -31,7 +31,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli/v2"
@@ -51,6 +50,10 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
+	p2p "github.com/erigontech/erigon-p2p"
+	"github.com/erigontech/erigon-p2p/enode"
+	"github.com/erigontech/erigon-p2p/nat"
+	"github.com/erigontech/erigon-p2p/netutil"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/utils/flags"
@@ -59,14 +62,11 @@ import (
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/p2p"
-	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/p2p/nat"
-	"github.com/erigontech/erigon/p2p/netutil"
 	params2 "github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -100,7 +100,7 @@ var (
 	}
 	PersistReceiptsV2Flag = cli.BoolFlag{
 		Name:  "experiment.persist.receipts.v2",
-		Usage: "To store receipts in chaindata db (only on chain-tip) - RPC for recent receit/logs will be faster. Values: 1_000 good starting point. 10_000 receitps it's ~1Gb (not much IO increase). Please test before go over 100_000",
+		Usage: "To store receipts in chaindata db (only on chain-tip) - RPC for recent receipts/logs will be faster. Values: 1_000 good starting point. 10_000 receipts it's ~1Gb (not much IO increase). Please test before go over 100_000",
 		Value: ethconfig.Defaults.PersistReceiptsCacheV2,
 	}
 	DeveloperPeriodFlag = cli.IntFlag{
@@ -696,7 +696,7 @@ var (
 	}
 	TorrentDownloadSlotsFlag = cli.IntFlag{
 		Name:  "torrent.download.slots",
-		Value: 128,
+		Value: 32,
 		Usage: "Amount of files to download in parallel.",
 	}
 	TorrentStaticPeersFlag = cli.StringFlag{
@@ -746,7 +746,7 @@ var (
 	DbSizeLimitFlag = cli.StringFlag{
 		Name:  "db.size.limit",
 		Usage: "Runtime limit of chaindata db size (can change at any time)",
-		Value: (200 * datasize.GB).String(),
+		Value: (1 * datasize.TB).String(),
 	}
 	DbWriteMapFlag = cli.BoolFlag{
 		Name:  "db.writemap",
@@ -805,12 +805,6 @@ var (
 		Name:  "polygon.sync",
 		Usage: "Enabling syncing using the new polygon sync component",
 		Value: true,
-	}
-
-	// TODO - this is a depricated flag - should be removed
-	PolygonSyncStageFlag = cli.BoolFlag{
-		Name:  "polygon.sync.stage",
-		Usage: "Enabling syncing with a stage that uses the polygon sync component",
 	}
 
 	AAFlag = cli.BoolFlag{
@@ -885,7 +879,11 @@ var (
 		Usage: "Max number of peers to connect",
 		Value: 128,
 	}
-
+	CaplinUseEngineApiFlag = cli.BoolFlag{
+		Name:  "caplin.use-engine-api",
+		Usage: "Use engine API for internal Caplin. useful for testing and if CL network is degraded",
+		Value: false,
+	}
 	SentinelAddrFlag = cli.StringFlag{
 		Name:  "sentinel.addr",
 		Usage: "Address for sentinel",
@@ -1084,7 +1082,7 @@ var (
 	DiagDisabledFlag = cli.BoolFlag{
 		Name:  "diagnostics.disabled",
 		Usage: "Disable diagnostics",
-		Value: false,
+		Value: true,
 	}
 	DiagEndpointAddrFlag = cli.StringFlag{
 		Name:  "diagnostics.endpoint.addr",
@@ -1211,7 +1209,7 @@ func GetBootnodesFromFlags(urlsStr, chain string) ([]*enode.Node, error) {
 	} else {
 		urls = params2.BootnodeURLsOfChain(chain)
 	}
-	return ParseNodesFromURLs(urls)
+	return enode.ParseNodesFromURLs(urls)
 }
 
 func setStaticPeers(ctx *cli.Context, cfg *p2p.Config) {
@@ -1223,7 +1221,7 @@ func setStaticPeers(ctx *cli.Context, cfg *p2p.Config) {
 		urls = params2.StaticPeerURLsOfChain(chain)
 	}
 
-	nodes, err := ParseNodesFromURLs(urls)
+	nodes, err := enode.ParseNodesFromURLs(urls)
 	if err != nil {
 		Fatalf("Option %s: %v", StaticPeersFlag.Name, err)
 	}
@@ -1237,27 +1235,12 @@ func setTrustedPeers(ctx *cli.Context, cfg *p2p.Config) {
 	}
 
 	urls := common.CliString2Array(ctx.String(TrustedPeersFlag.Name))
-	trustedNodes, err := ParseNodesFromURLs(urls)
+	trustedNodes, err := enode.ParseNodesFromURLs(urls)
 	if err != nil {
 		Fatalf("Option %s: %v", TrustedPeersFlag.Name, err)
 	}
 
 	cfg.TrustedNodes = append(cfg.TrustedNodes, trustedNodes...)
-}
-
-func ParseNodesFromURLs(urls []string) ([]*enode.Node, error) {
-	nodes := make([]*enode.Node, 0, len(urls))
-	for _, url := range urls {
-		if url == "" {
-			continue
-		}
-		n, err := enode.Parse(enode.ValidSchemes, url)
-		if err != nil {
-			return nil, fmt.Errorf("invalid node URL %s: %w", url, err)
-		}
-		nodes = append(nodes, n)
-	}
-	return nodes, nil
 }
 
 // NewP2PConfig
@@ -1293,31 +1276,33 @@ func NewP2PConfig(
 	}
 
 	cfg := &p2p.Config{
-		ListenAddr:      fmt.Sprintf(":%d", port),
-		MaxPeers:        maxPeers,
-		MaxPendingPeers: maxPendPeers,
-		NAT:             nat.Any(),
-		NoDiscovery:     nodiscover,
-		PrivateKey:      serverKey,
-		Name:            nodeName,
-		NodeDatabase:    enodeDBPath,
-		AllowedPorts:    allowedPorts,
-		TmpDir:          dirs.Tmp,
-		MetricsEnabled:  metricsEnabled,
+		ListenAddr:         fmt.Sprintf(":%d", port),
+		MaxPeers:           maxPeers,
+		MaxPendingPeers:    maxPendPeers,
+		NAT:                nat.Any(),
+		NoDiscovery:        nodiscover,
+		PrivateKey:         serverKey,
+		Name:               nodeName,
+		NodeDatabase:       enodeDBPath,
+		AllowedPorts:       allowedPorts,
+		TmpDir:             dirs.Tmp,
+		MetricsEnabled:     metricsEnabled,
+		LookupBootnodeURLs: params2.BootnodeURLsByGenesisHash,
+		LookupDNSNetwork:   params2.KnownDNSNetwork,
 	}
 	if netRestrict != "" {
 		cfg.NetRestrict = new(netutil.Netlist)
 		cfg.NetRestrict.Add(netRestrict)
 	}
 	if staticPeers != nil {
-		staticNodes, err := ParseNodesFromURLs(staticPeers)
+		staticNodes, err := enode.ParseNodesFromURLs(staticPeers)
 		if err != nil {
 			return nil, fmt.Errorf("bad option %s: %w", StaticPeersFlag.Name, err)
 		}
 		cfg.StaticNodes = staticNodes
 	}
 	if trustedPeers != nil {
-		trustedNodes, err := ParseNodesFromURLs(trustedPeers)
+		trustedNodes, err := enode.ParseNodesFromURLs(trustedPeers)
 		if err != nil {
 			return nil, fmt.Errorf("bad option %s: %w", TrustedPeersFlag.Name, err)
 		}
@@ -1506,10 +1491,6 @@ func setDataDir(ctx *cli.Context, cfg *nodecfg.Config) error {
 		cfg.Dirs = datadir.New(ctx.String(DataDirFlag.Name))
 	} else {
 		cfg.Dirs = datadir.New(paths.DataDirForNetwork(paths.DefaultDataDir(), ctx.String(ChainFlag.Name)))
-	}
-	_, err := downloadercfg2.LoadSnapshotsHashes(ctx.Context, cfg.Dirs, ctx.String(ChainFlag.Name))
-	if err != nil {
-		return err
 	}
 
 	cfg.MdbxPageSize = flags.DBPageSizeFlagUnmarshal(ctx, DbPageSizeFlag.Name, DbPageSizeFlag.Usage)
@@ -1729,14 +1710,13 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.C
 	cfg.WithHeimdallMilestones = ctx.Bool(WithHeimdallMilestones.Name)
 	cfg.WithHeimdallWaypointRecording = ctx.Bool(WithHeimdallWaypoints.Name)
 	cfg.PolygonSync = ctx.Bool(PolygonSyncFlag.Name)
-	cfg.PolygonSyncStage = ctx.Bool(PolygonSyncStageFlag.Name)
 
 	if cfg.PolygonSync {
 		cfg.WithHeimdallMilestones = false
 		cfg.WithHeimdallWaypointRecording = true
 	}
 
-	heimdall.RecordWayPoints(cfg.WithHeimdallWaypointRecording || cfg.PolygonSync || cfg.PolygonSyncStage)
+	heimdall.RecordWayPoints(cfg.WithHeimdallWaypointRecording || cfg.PolygonSync)
 
 	chainConfig := params2.ChainConfigByChainName(ctx.String(ChainFlag.Name))
 	if chainConfig != nil && chainConfig.Bor != nil && !ctx.IsSet(MaxPeersFlag.Name) {
@@ -1811,6 +1791,13 @@ func setWhitelist(ctx *cli.Context, cfg *ethconfig.Config) {
 }
 
 func setBeaconAPI(ctx *cli.Context, cfg *ethconfig.Config) error {
+	cfg.CaplinConfig.EnableEngineAPI = ctx.Bool(CaplinUseEngineApiFlag.Name)
+
+	if cfg.CaplinConfig.EnableEngineAPI && ctx.IsSet(BeaconAPIFlag.Name) {
+		log.Warn("Beacon API flag is set, but engine API is enabled. Beacon API is automatically disabled.")
+		return nil
+	}
+
 	allowed := ctx.StringSlice(BeaconAPIFlag.Name)
 	if err := cfg.CaplinConfig.BeaconAPIRouter.UnwrapEndpointsList(allowed); err != nil {
 		return err
@@ -1828,15 +1815,33 @@ func setBeaconAPI(ctx *cli.Context, cfg *ethconfig.Config) error {
 }
 
 func setCaplin(ctx *cli.Context, cfg *ethconfig.Config) {
+	cfg.CaplinConfig.EnableEngineAPI = ctx.Bool(CaplinUseEngineApiFlag.Name)
+
 	// Caplin's block's backfilling is enabled if any of the following flags are set
-	cfg.CaplinConfig.ArchiveBlocks = ctx.Bool(CaplinArchiveBlocksFlag.Name) || ctx.Bool(CaplinArchiveStatesFlag.Name) || ctx.Bool(CaplinArchiveBlobsFlag.Name)
-	cfg.CaplinConfig.SnapshotGenerationEnabled = ctx.Bool(CaplinEnableSnapshotGeneration.Name)
-	// More granularity here.
-	cfg.CaplinConfig.ArchiveBlobs = ctx.Bool(CaplinArchiveBlobsFlag.Name)
+	if !cfg.CaplinConfig.EnableEngineAPI {
+		cfg.CaplinConfig.ArchiveBlocks = ctx.Bool(CaplinArchiveBlocksFlag.Name) || ctx.Bool(CaplinArchiveStatesFlag.Name) || ctx.Bool(CaplinArchiveBlobsFlag.Name)
+		cfg.CaplinConfig.ArchiveBlobs = ctx.Bool(CaplinArchiveBlobsFlag.Name)
+		cfg.CaplinConfig.BlobPruningDisabled = ctx.Bool(CaplinDisableBlobPruningFlag.Name)
+		cfg.CaplinConfig.ArchiveStates = ctx.Bool(CaplinArchiveStatesFlag.Name)
+	} else {
+		if ctx.IsSet(CaplinArchiveBlocksFlag.Name) {
+			log.Warn("Caplin's block backfilling is disabled when engine API is enabled")
+		}
+		if ctx.IsSet(CaplinArchiveStatesFlag.Name) {
+			log.Warn("Caplin's state backfilling is disabled when engine API is enabled")
+		}
+		if ctx.IsSet(CaplinArchiveBlobsFlag.Name) {
+			log.Warn("Caplin's blob backfilling is disabled when engine API is enabled")
+		}
+		if ctx.IsSet(CaplinImmediateBlobBackfillFlag.Name) {
+			log.Warn("Caplin's immediate blob backfilling is disabled when engine API is enabled")
+		}
+	}
+
 	cfg.CaplinConfig.ImmediateBlobsBackfilling = ctx.Bool(CaplinImmediateBlobBackfillFlag.Name)
-	cfg.CaplinConfig.BlobPruningDisabled = ctx.Bool(CaplinDisableBlobPruningFlag.Name)
+	cfg.CaplinConfig.SnapshotGenerationEnabled = ctx.Bool(CaplinEnableSnapshotGeneration.Name)
 	cfg.CaplinConfig.DisabledCheckpointSync = ctx.Bool(CaplinDisableCheckpointSyncFlag.Name)
-	cfg.CaplinConfig.ArchiveStates = ctx.Bool(CaplinArchiveStatesFlag.Name)
+	// bunch of extra stuff
 	cfg.CaplinConfig.MevRelayUrl = ctx.String(CaplinMevRelayUrl.Name)
 	cfg.CaplinConfig.EnableValidatorMonitor = ctx.Bool(CaplinValidatorMonitorFlag.Name)
 	if checkpointUrls := ctx.StringSlice(CaplinCheckpointSyncUrlFlag.Name); len(checkpointUrls) > 0 {

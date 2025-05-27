@@ -32,9 +32,10 @@ import (
 	"github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
+	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
-	common2 "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -43,14 +44,13 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 )
 
 type SortedRange interface {
 	GetRange() (from, to uint64)
-	GetType() snaptype.Type
+	GetGrouping() string
 }
 
 // NoOverlaps - keep largest ranges and avoid overlap
@@ -119,7 +119,7 @@ func findOverlaps[T SortedRange](in []T) (res []T, overlapped []T) {
 			f2 := in[j]
 			jFrom, jTo := f2.GetRange()
 
-			if f.GetType().Enum() != f2.GetType().Enum() {
+			if f.GetGrouping() != f2.GetGrouping() {
 				break
 			}
 			if jFrom == jTo {
@@ -650,8 +650,8 @@ func (s *RoSnapshots) LogStat(label string) {
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	s.logger.Info(fmt.Sprintf("[snapshots:%s] Stat", label),
-		"blocks", common2.PrettyCounter(s.SegmentsMax()+1), "indices", common2.PrettyCounter(s.IndicesMax()+1),
-		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+		"blocks", common.PrettyCounter(s.SegmentsMax()+1), "indices", common.PrettyCounter(s.IndicesMax()+1),
+		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 }
 
 func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapcfg.Cfg) error {
@@ -674,7 +674,7 @@ func (s *RoSnapshots) HasType(in snaptype.Type) bool {
 type ready struct {
 	mu     sync.Mutex
 	on     chan struct{}
-	state  bool
+	state  atomic.Bool
 	inited bool
 }
 
@@ -697,15 +697,21 @@ func (r *ready) set() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.init()
-	if r.state {
+	if r.state.Load() {
 		return
 	}
-	r.state = true
-	close(r.on)
+	if r.state.CompareAndSwap(false, true) {
+		close(r.on)
+	}
 }
 
 func (s *RoSnapshots) Ready(ctx context.Context) <-chan error {
 	errc := make(chan error)
+
+	if s.ready.state.Load() {
+		close(errc)
+		return errc
+	}
 
 	go func() {
 		select {
@@ -740,7 +746,19 @@ func (s *RoSnapshots) EnableReadAhead() *RoSnapshots {
 
 	for _, t := range s.enums {
 		for _, sn := range v.segments[t].Segments {
-			sn.src.EnableReadAhead()
+			sn.src.MadvSequential()
+		}
+	}
+
+	return s
+}
+func (s *RoSnapshots) MadvNormal() *RoSnapshots {
+	v := s.View()
+	defer v.Close()
+
+	for _, t := range s.enums {
+		for _, sn := range v.segments[t].Segments {
+			sn.src.MadvNormal()
 		}
 	}
 
@@ -753,7 +771,7 @@ func (s *RoSnapshots) EnableMadvWillNeed() *RoSnapshots {
 
 	for _, t := range s.enums {
 		for _, sn := range v.segments[t].Segments {
-			sn.src.EnableMadvWillNeed()
+			sn.src.MadvWillNeed()
 		}
 	}
 	return s
@@ -918,10 +936,10 @@ func (s *RoSnapshots) Ls() {
 
 	for _, t := range s.enums {
 		for _, seg := range s.visible[t] {
-			if seg.src.Decompressor == nil {
+			if seg.src == nil || seg.src.Decompressor == nil {
 				continue
 			}
-			log.Info("[snapshots] ", "f", seg.src.FileName(), "from", seg.from, "to", seg.to)
+			log.Info("[snapshots] ", "f", seg.src.Decompressor.FileName(), "count", seg.src.Decompressor.Count())
 		}
 	}
 }
@@ -996,7 +1014,7 @@ func (s *RoSnapshots) InitSegments(fileNames []string) error {
 	return nil
 }
 
-func TypedSegments(dir string, minBlock uint64, types []snaptype.Type, allowGaps bool) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
+func TypedSegments(dir string, _ uint64, types []snaptype.Type, allowGaps bool) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
 	list, err := snaptype.Segments(dir)
 
 	if err != nil {
@@ -1383,7 +1401,7 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 				var m runtime.MemStats
 				dbg.ReadMemStats(&m)
 				sendDiagnostics(startIndexingTime, ps.DiagnosticsData(), m.Alloc, m.Sys)
-				logger.Info(fmt.Sprintf("[%s] Indexing", logPrefix), "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+				logger.Info(fmt.Sprintf("[%s] Indexing", logPrefix), "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 			case <-finish:
 				return
 			case <-ctx.Done():
@@ -1588,9 +1606,11 @@ func removeOldFiles(toDel []string, snapDir string) {
 		ext := filepath.Ext(f)
 		withoutExt := f[:len(f)-len(ext)]
 		_ = os.Remove(withoutExt + ".idx")
+		_ = os.Remove(withoutExt + ".idx.torrent")
 		isTxnType := strings.HasSuffix(withoutExt, coresnaptype.Transactions.Name())
 		if isTxnType {
 			_ = os.Remove(withoutExt + "-to-block.idx")
+			_ = os.Remove(withoutExt + "-to-block.idx.torrent")
 		}
 	}
 	tmpFiles, err := snaptype.TmpFiles(snapDir)
@@ -1602,7 +1622,7 @@ func removeOldFiles(toDel []string, snapDir string) {
 	}
 }
 
-func SegmentsCaplin(dir string, minBlock uint64) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
+func SegmentsCaplin(dir string, _ uint64) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
 	list, err := snaptype.Segments(dir)
 	if err != nil {
 		return nil, missingSnapshots, err
