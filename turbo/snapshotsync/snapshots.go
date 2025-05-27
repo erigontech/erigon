@@ -700,7 +700,7 @@ func (r *ready) set() {
 	if r.state.Load() {
 		return
 	}
-	r.state.Store(true)
+	r.state.CompareAndSwap(false, true)
 	close(r.on)
 }
 
