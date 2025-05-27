@@ -65,7 +65,7 @@ func (db *Database) open(ctx context.Context) error {
 	if db.roTxLimit > 0 {
 		txLimiter = semaphore.NewWeighted(db.roTxLimit)
 	}
-	log.Warn("[dbg] Opening Database", "label", db.label, "path", dbPath, "db.accede", db.accede)
+
 	var err error
 	db.db, err = mdbx.New(db.label, db.logger).
 		Path(dbPath).
