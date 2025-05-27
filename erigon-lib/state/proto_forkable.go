@@ -297,7 +297,7 @@ func (a *ProtoForkableTx) GetFromFiles(entityNum Num) (b Bytes, found bool, file
 	return nil, false, -1, nil
 }
 
-func (a *ProtoForkableTx) Files() VisibleFiles {
+func (a *ProtoForkableTx) VisibleFiles() VisibleFiles {
 	a.NoFilesCheck()
 	v := a.files
 	fi := make([]VisibleFile, len(v))
@@ -305,6 +305,11 @@ func (a *ProtoForkableTx) Files() VisibleFiles {
 		fi[i] = f
 	}
 	return fi
+}
+
+func (a *ProtoForkableTx) vfs() visibleFiles {
+	a.NoFilesCheck()
+	return a.files
 }
 
 func (a *ProtoForkableTx) GetFromFile(entityNum Num, idx int) (v Bytes, found bool, err error) {
