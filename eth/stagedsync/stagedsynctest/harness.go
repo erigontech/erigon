@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -64,6 +65,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 	borConsensusDB := memdb.NewTestDB(t, kv.ChainDB)
 	ctrl := gomock.NewController(t)
 	heimdallClient := heimdall.NewMockClient(ctrl)
+	bridgeClient := bridge.NewMockClient(ctrl)
 	miningState := stagedsync.NewMiningState(&ethconfig.Defaults.Miner)
 
 	stateSyncStages := stagedsync.DefaultStages(ctx, stagedsync.SnapshotsCfg{}, stagedsync.HeadersCfg{}, stagedsync.BlockHashesCfg{}, stagedsync.BodiesCfg{}, stagedsync.SendersCfg{}, stagedsync.ExecuteBlockCfg{}, stagedsync.TxLookupCfg{}, stagedsync.FinishCfg{}, true)
@@ -108,6 +110,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		miningSync:                miningSync,
 		miningState:               miningState,
 		heimdallClient:            heimdallClient,
+		bridgeClient:              bridgeClient,
 		heimdallProducersOverride: cfg.GetOrCreateDefaultHeimdallProducersOverride(),
 		sealedHeaders:             make(map[uint64]*types.Header),
 		borSpanner:                bor.NewMockSpanner(ctrl),
@@ -162,6 +165,7 @@ type Harness struct {
 	miningSync                 *stagedsync.Sync
 	miningState                stagedsync.MiningState
 	heimdallClient             *heimdall.MockClient
+	bridgeClient               *bridge.MockClient
 	heimdallNextMockSpan       *heimdall.Span
 	heimdallLastEventID        uint64
 	heimdallLastEventHeaderNum uint64
@@ -494,6 +498,7 @@ func (h *Harness) consensusEngine(t *testing.T, cfg HarnessCfg) consensus.Engine
 			nil,
 			h.borSpanner,
 			h.heimdallClient,
+			h.bridgeClient,
 			stateReceiver,
 			h.logger,
 			nil,
@@ -623,17 +628,17 @@ func (h *Harness) mockHeimdallClient() {
 		}).
 		AnyTimes()
 
-	h.heimdallClient.
+	h.bridgeClient.
 		EXPECT().
 		FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ uint64, _ time.Time, _ int) ([]*heimdall.EventRecordWithTime, error) {
+		DoAndReturn(func(_ context.Context, _ uint64, _ time.Time, _ int) ([]*bridge.EventRecordWithTime, error) {
 			if h.heimdallLastEventID > 0 {
 				h.heimdallLastEventHeaderNum += h.borConfig.CalculateSprintLength(h.heimdallLastEventHeaderNum)
 			}
 			h.heimdallLastEventID++
 			stateSyncDelay := h.borConfig.CalculateStateSyncDelay(h.heimdallLastEventHeaderNum)
-			newEvent := heimdall.EventRecordWithTime{
-				EventRecord: heimdall.EventRecord{
+			newEvent := bridge.EventRecordWithTime{
+				EventRecord: bridge.EventRecord{
 					ID:      h.heimdallLastEventID,
 					ChainID: h.chainConfig.ChainID.String(),
 				},
@@ -641,14 +646,14 @@ func (h *Harness) mockHeimdallClient() {
 			}
 
 			// 1 per sprint
-			return []*heimdall.EventRecordWithTime{&newEvent}, nil
+			return []*bridge.EventRecordWithTime{&newEvent}, nil
 		}).
 		AnyTimes()
-	h.heimdallClient.
+	h.bridgeClient.
 		EXPECT().
 		FetchStateSyncEvent(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ uint64) (*heimdall.EventRecordWithTime, error) {
-			return nil, heimdall.ErrEventRecordNotFound
+		DoAndReturn(func(_ context.Context, _ uint64) (*bridge.EventRecordWithTime, error) {
+			return nil, bridge.ErrEventRecordNotFound
 		}).
 		AnyTimes()
 }

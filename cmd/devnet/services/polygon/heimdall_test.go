@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
@@ -34,25 +35,26 @@ func TestHeimdallServer(t *testing.T) {
 
 	ctx := context.Background()
 	ctrl := gomock.NewController(t)
-	client := heimdall.NewMockClient(ctrl)
+	heimdallClient := heimdall.NewMockClient(ctrl)
+	bridgeClient := bridge.NewMockClient(ctrl)
 
-	events := []*heimdall.EventRecordWithTime{
+	events := []*bridge.EventRecordWithTime{
 		{
-			EventRecord: heimdall.EventRecord{
+			EventRecord: bridge.EventRecord{
 				ID:      1,
 				ChainID: "80002",
 			},
 			Time: time.Now(),
 		},
 		{
-			EventRecord: heimdall.EventRecord{
+			EventRecord: bridge.EventRecord{
 				ID:      2,
 				ChainID: "80002",
 			},
 			Time: time.Now(),
 		},
 	}
-	client.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes().Return(events, nil)
+	bridgeClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes().Return(events, nil)
 
 	span := &heimdall.Span{
 		Id:         1,
@@ -60,7 +62,7 @@ func TestHeimdallServer(t *testing.T) {
 		EndBlock:   2000,
 		ChainID:    "80002",
 	}
-	client.EXPECT().FetchSpan(gomock.Any(), gomock.Any()).AnyTimes().Return(span, nil)
+	heimdallClient.EXPECT().FetchSpan(gomock.Any(), gomock.Any()).AnyTimes().Return(span, nil)
 
 	checkpoint1 := &heimdall.Checkpoint{
 		Fields: heimdall.WaypointFields{
@@ -69,9 +71,9 @@ func TestHeimdallServer(t *testing.T) {
 			ChainID:    "80002",
 		},
 	}
-	client.EXPECT().FetchCheckpoint(gomock.Any(), gomock.Any()).AnyTimes().Return(checkpoint1, nil)
-	client.EXPECT().FetchCheckpointCount(gomock.Any()).AnyTimes().Return(int64(1), nil)
+	heimdallClient.EXPECT().FetchCheckpoint(gomock.Any(), gomock.Any()).AnyTimes().Return(checkpoint1, nil)
+	heimdallClient.EXPECT().FetchCheckpointCount(gomock.Any()).AnyTimes().Return(int64(1), nil)
 
-	err := http.ListenAndServe(HeimdallURLDefault[7:], makeHeimdallRouter(ctx, client))
+	err := http.ListenAndServe(HeimdallURLDefault[7:], makeHeimdallRouter(ctx, heimdallClient, bridgeClient))
 	require.NoError(t, err)
 }

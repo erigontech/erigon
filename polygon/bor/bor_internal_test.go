@@ -38,20 +38,20 @@ import (
 func TestUseBridgeReader(t *testing.T) {
 	// test for Go's interface nil-ness caveat - https://codefibershq.com/blog/golang-why-nil-is-not-always-nil
 	var br *mockBridgeReader
-	bor := New(params.AmoyChainConfig, nil, nil, nil, nil, nil, nil, br, nil)
+	bor := New(params.AmoyChainConfig, nil, nil, nil, nil, nil, nil, nil, br, nil)
 	require.False(t, bor.useBridgeReader)
 	br = &mockBridgeReader{}
-	bor = New(params.AmoyChainConfig, nil, nil, nil, nil, nil, nil, br, nil)
+	bor = New(params.AmoyChainConfig, nil, nil, nil, nil, nil, nil, nil, br, nil)
 	require.True(t, bor.useBridgeReader)
 }
 
 func TestUseSpanReader(t *testing.T) {
 	// test for Go's interface nil-ness caveat - https://codefibershq.com/blog/golang-why-nil-is-not-always-nil
 	var sr *mockSpanReader
-	b := New(params.AmoyChainConfig, nil, nil, nil, nil, nil, nil, nil, sr)
+	b := New(params.AmoyChainConfig, nil, nil, nil, nil, nil, nil, nil, nil, sr)
 	require.False(t, b.useSpanReader)
 	sr = &mockSpanReader{}
-	b = New(params.AmoyChainConfig, nil, nil, nil, nil, nil, nil, nil, sr)
+	b = New(params.AmoyChainConfig, nil, nil, nil, nil, nil, nil, nil, nil, sr)
 	require.True(t, b.useSpanReader)
 }
 
@@ -88,7 +88,7 @@ func TestCommitStatesIndore(t *testing.T) {
 	cr := consensus.NewMockChainReader(ctrl)
 	br := NewMockbridgeReader(ctrl)
 
-	bor := New(params.BorDevnetChainConfig, nil, nil, nil, nil, nil, nil, br, nil)
+	bor := New(params.BorDevnetChainConfig, nil, nil, nil, nil, nil, nil, nil, br, nil)
 
 	header := &types.Header{
 		Number: big.NewInt(112),

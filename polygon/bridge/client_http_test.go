@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package heimdall
+package bridge
 
 import (
 	"context"
@@ -41,31 +41,27 @@ func (ebrc emptyBodyReadCloser) Close() error {
 	return nil
 }
 
-func TestHeimdallClientFetchesTerminateUponTooManyErrors(t *testing.T) {
-	if testing.Short() {
-		t.Skip("too slow for testing.Short")
-	}
-
+func TestHeimdallClientStateSyncEventsReturnsErrNoResponseWhenHttp200WithEmptyBody(t *testing.T) {
 	ctx := context.Background()
 	ctrl := gomock.NewController(t)
 	requestHandler := NewMockhttpRequestHandler(ctrl)
 	requestHandler.EXPECT().
 		Do(gomock.Any()).
 		Return(&http.Response{
-			StatusCode: 404,
+			StatusCode: 200,
 			Body:       emptyBodyReadCloser{},
 		}, nil).
-		Times(5)
+		Times(2)
 	logger := testlog.Logger(t, log.LvlDebug)
-	heimdallClient := NewHttpClient(
+	bridgeClient := NewHttpClient(
 		"https://dummyheimdal.com",
 		logger,
 		poshttp.WithHttpRequestHandler(requestHandler),
-		poshttp.WithHttpRetryBackOff(100*time.Millisecond),
-		poshttp.WithHttpMaxRetries(5),
+		poshttp.WithHttpRetryBackOff(time.Millisecond),
+		poshttp.WithHttpMaxRetries(2),
 	)
 
-	spanRes, err := heimdallClient.FetchSpan(ctx, 1534)
+	spanRes, err := bridgeClient.FetchStateSyncEvents(ctx, 100, time.Now(), 0)
 	require.Nil(t, spanRes)
-	require.Error(t, err)
+	require.ErrorIs(t, err, poshttp.ErrNoResponse)
 }

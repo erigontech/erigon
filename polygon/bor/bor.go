@@ -63,6 +63,7 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
 	"github.com/erigontech/erigon/polygon/bor/statefull"
 	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/services"
@@ -328,6 +329,7 @@ type Bor struct {
 	spanner         Spanner
 	stateReceiver   StateReceiver
 	HeimdallClient  heimdall.Client
+	bridgeClient    bridge.Client
 	useSpanReader   bool
 	spanReader      spanReader
 	useBridgeReader bool
@@ -357,6 +359,7 @@ func New(
 	blockReader services.FullBlockReader,
 	spanner Spanner,
 	heimdallClient heimdall.Client,
+	bridgeClient bridge.Client,
 	genesisContracts StateReceiver,
 	logger log.Logger,
 	bridgeReader bridgeReader,
@@ -384,6 +387,7 @@ func New(
 		spanner:         spanner,
 		stateReceiver:   genesisContracts,
 		HeimdallClient:  heimdallClient,
+		bridgeClient:    bridgeClient,
 		execCtx:         context.Background(),
 		logger:          logger,
 		closeCh:         make(chan struct{}),
@@ -1630,10 +1634,10 @@ func (c *Bor) CommitStates(
 	const checkEvents = false
 
 	if checkEvents {
-		if err := heimdall.RemoteEventCheckForBlock(
+		if err := bridge.RemoteEventCheckForBlock(
 			header, chain.Chain.GetHeaderByNumber(blockNum-c.config.CalculateSprintLength(blockNum)),
 			c.chainConfig.ChainID.String(), chain.Chain.BorStartEventId(header.Hash(), blockNum),
-			events, c.HeimdallClient, c.config, logger); err != nil {
+			events, c.bridgeClient, c.config, logger); err != nil {
 			return err
 		}
 	}

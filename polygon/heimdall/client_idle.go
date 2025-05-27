@@ -33,14 +33,6 @@ func NewIdleClient(cfg params.MiningConfig) Client {
 	return &IdleClient{cfg: cfg}
 }
 
-func (c *IdleClient) FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*EventRecordWithTime, error) {
-	return nil, nil
-}
-
-func (c *IdleClient) FetchStateSyncEvent(ctx context.Context, id uint64) (*EventRecordWithTime, error) {
-	return nil, nil
-}
-
 func (c *IdleClient) FetchLatestSpan(ctx context.Context) (*Span, error) {
 	return &Span{
 		ValidatorSet: valset.ValidatorSet{

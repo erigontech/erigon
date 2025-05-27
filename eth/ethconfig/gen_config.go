@@ -51,7 +51,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		WithoutHeimdall                     bool
 		WithHeimdallMilestones              bool
 		WithHeimdallWaypointRecording       bool
-		PolygonSync                         bool
 		Ethstats                            string
 		InternalCL                          bool
 		OverridePragueTime                  *big.Int `toml:",omitempty"`
@@ -98,7 +97,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.WithoutHeimdall = c.WithoutHeimdall
 	enc.WithHeimdallMilestones = c.WithHeimdallMilestones
 	enc.WithHeimdallWaypointRecording = c.WithHeimdallWaypointRecording
-	enc.PolygonSync = c.PolygonSync
 	enc.Ethstats = c.Ethstats
 	enc.InternalCL = c.InternalCL
 	enc.OverridePragueTime = c.OverridePragueTime
@@ -149,7 +147,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		WithoutHeimdall                     *bool
 		WithHeimdallMilestones              *bool
 		WithHeimdallWaypointRecording       *bool
-		PolygonSync                         *bool
 		Ethstats                            *string
 		InternalCL                          *bool
 		OverridePragueTime                  *big.Int `toml:",omitempty"`
@@ -252,9 +249,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.WithHeimdallWaypointRecording != nil {
 		c.WithHeimdallWaypointRecording = *dec.WithHeimdallWaypointRecording
-	}
-	if dec.PolygonSync != nil {
-		c.PolygonSync = *dec.PolygonSync
 	}
 	if dec.Ethstats != nil {
 		c.Ethstats = *dec.Ethstats

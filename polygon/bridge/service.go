@@ -36,7 +36,7 @@ import (
 )
 
 type eventFetcher interface {
-	FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error)
+	FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*EventRecordWithTime, error)
 }
 
 type ServiceConfig struct {
@@ -181,7 +181,7 @@ func (s *Service) Run(ctx context.Context) error {
 		// start scraping events
 		from := lastFetchedEventId + 1
 		to := time.Now()
-		events, err := s.eventFetcher.FetchStateSyncEvents(ctx, from, to, heimdall.StateEventsFetchLimit)
+		events, err := s.eventFetcher.FetchStateSyncEvents(ctx, from, to, StateEventsFetchLimit)
 		if err != nil {
 			if liberrors.IsOneOf(err, s.transientErrors) {
 				s.logger.Warn(

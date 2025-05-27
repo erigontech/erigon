@@ -13,11 +13,11 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
-func ValidateBorEvents(ctx context.Context, db kv.TemporalRoDB, blockReader services.FullBlockReader, from, to uint64, failFast bool) (err error) {
+func ValidateBorEvents(ctx context.Context, db kv.TemporalRoDB, bridgeStore bridge.Store, from, to uint64, failFast bool) (err error) {
 	defer func() {
 		log.Info("[integrity] ValidateBorEvents: done", "err", err)
 	}()
@@ -80,7 +80,7 @@ func ValidateBorEvents(ctx context.Context, db kv.TemporalRoDB, blockReader serv
 			break
 		}
 
-		prevEventId, err = heimdall.ValidateBorEvents(ctx, config, db, blockReader, eventSegment, prevEventId, maxBlockNum, failFast, logEvery)
+		prevEventId, err = bridge.ValidateBorEvents(ctx, config, db, bridgeStore, eventSegment, prevEventId, maxBlockNum, failFast, logEvery)
 
 		if err != nil && failFast {
 			return err
@@ -90,7 +90,7 @@ func ValidateBorEvents(ctx context.Context, db kv.TemporalRoDB, blockReader serv
 	if db != nil {
 		err = db.View(ctx, func(tx kv.Tx) error {
 			if false {
-				lastEventId, _, err := blockReader.LastEventId(ctx, tx)
+				lastEventId, err := bridgeStore.WithTx(tx).LastEventId(ctx)
 				if err != nil {
 					return err
 				}

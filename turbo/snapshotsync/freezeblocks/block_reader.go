@@ -289,10 +289,6 @@ func (r *RemoteBlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash comm
 	return bodyRlp, nil
 }
 
-func (r *RemoteBlockReader) LastEventId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	return 0, false, errors.New("not implemented")
-}
-
 func (r *RemoteBlockReader) EventLookup(ctx context.Context, tx kv.Tx, borTxnHash common.Hash) (uint64, bool, error) {
 	reply, err := r.client.BorTxnLookup(ctx, &remote.BorTxnLookupRequest{BorTxHash: gointerfaces.ConvertHashToH256(borTxnHash)})
 	if err != nil {
@@ -1360,7 +1356,9 @@ func (r *BlockReader) ReadAncestor(db kv.Getter, hash common.Hash, number, ances
 }
 
 func (r *BlockReader) EventLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash) (uint64, bool, error) {
-	txHandler, ok := r.borBridgeStore.(interface{ WithTx(kv.Tx) bridge.Store })
+	txHandler, ok := r.borBridgeStore.(interface {
+		WithTx(kv.Tx) bridge.Store
+	})
 
 	if !ok {
 		return 0, false, fmt.Errorf("%T has no WithTx converter", r.borBridgeStore)
@@ -1370,7 +1368,9 @@ func (r *BlockReader) EventLookup(ctx context.Context, tx kv.Tx, txnHash common.
 }
 
 func (r *BlockReader) BorStartEventId(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (uint64, error) {
-	txHandler, ok := r.borBridgeStore.(interface{ WithTx(kv.Tx) bridge.Store })
+	txHandler, ok := r.borBridgeStore.(interface {
+		WithTx(kv.Tx) bridge.Store
+	})
 
 	if !ok {
 		return 0, fmt.Errorf("%T has no WithTx converter", r.borBridgeStore)
@@ -1380,7 +1380,9 @@ func (r *BlockReader) BorStartEventId(ctx context.Context, tx kv.Tx, hash common
 }
 
 func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
-	txHandler, ok := r.borBridgeStore.(interface{ WithTx(kv.Tx) bridge.Store })
+	txHandler, ok := r.borBridgeStore.(interface {
+		WithTx(kv.Tx) bridge.Store
+	})
 
 	if !ok {
 		return nil, fmt.Errorf("%T has no WithTx converter", r.borBridgeStore)
@@ -1390,20 +1392,8 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 }
 
 // EventsByIdFromSnapshot returns the list of records limited by time, or the number of records along with a bool value to signify if the records were limited by time
-func (r *BlockReader) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {
+func (r *BlockReader) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*bridge.EventRecordWithTime, bool, error) {
 	return r.borBridgeStore.EventsByIdFromSnapshot(from, to, limit)
-}
-
-func (r *BlockReader) LastEventId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	txHandler, ok := r.borBridgeStore.(interface{ WithTx(kv.Tx) bridge.Store })
-
-	if !ok {
-		return 0, false, fmt.Errorf("%T has no WithTx converter", r.borBridgeStore)
-	}
-
-	lastEventId, err := txHandler.WithTx(tx).LastEventId(ctx)
-	ok = err == nil && lastEventId != 0
-	return lastEventId, ok, err
 }
 
 func (r *BlockReader) LastFrozenEventId() uint64 {
