@@ -127,27 +127,6 @@ var cmdStageHeaders = &cobra.Command{
 	},
 }
 
-var cmdStageBorHeimdall = &cobra.Command{
-	Use:   "stage_bor_heimdall",
-	Short: "",
-	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
-		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
-		}
-		defer db.Close()
-
-		if err := stageBorHeimdall(db, cmd.Context(), unwindTypes, logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
-	},
-}
-
 var cmdStageBodies = &cobra.Command{
 	Use:   "stage_bodies",
 	Short: "",
@@ -504,16 +483,6 @@ func init() {
 	withChaosMonkey(cmdStageHeaders)
 	rootCmd.AddCommand(cmdStageHeaders)
 
-	withConfig(cmdStageBorHeimdall)
-	withDataDir(cmdStageBorHeimdall)
-	withReset(cmdStageBorHeimdall)
-	withUnwind(cmdStageBorHeimdall)
-	withUnwindTypes(cmdStageBorHeimdall)
-	withChain(cmdStageBorHeimdall)
-	withHeimdall(cmdStageBorHeimdall)
-	withChaosMonkey(cmdStageBorHeimdall)
-	rootCmd.AddCommand(cmdStageBorHeimdall)
-
 	withConfig(cmdStageBodies)
 	withDataDir(cmdStageBodies)
 	withUnwind(cmdStageBodies)
@@ -737,83 +706,6 @@ func stageHeaders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 		logger.Info("Progress", "headers", progress)
 		return nil
 	})
-}
-
-func stageBorHeimdall(db kv.TemporalRwDB, ctx context.Context, unwindTypes []string, logger log.Logger) error {
-	_, engine, _, sync, _, miningState := newSync(ctx, db, nil /* miningConfig */, logger)
-	chainConfig := fromdb.ChainConfig(db)
-
-	heimdallClient := engine.(*bor.Bor).HeimdallClient
-
-	if reset {
-		if err := reset2.ResetBorHeimdall(ctx, nil, db); err != nil {
-			return err
-		}
-		return nil
-	}
-	if unwind > 0 {
-		sn, borSn, _, _, bridgeStore, heimdallStore, err := allSnapshots(ctx, db, logger)
-		if err != nil {
-			return err
-		}
-		defer sn.Close()
-		defer borSn.Close()
-
-		stageState := stage(sync, nil, db, stages.BorHeimdall)
-
-		snapshotsMaxBlock := borSn.BlocksAvailable()
-		if unwind <= snapshotsMaxBlock {
-			return fmt.Errorf("cannot unwind past snapshots max block: %d", snapshotsMaxBlock)
-		}
-
-		if unwind > stageState.BlockNumber {
-			return fmt.Errorf("cannot unwind to a point beyond stage: %d", stageState.BlockNumber)
-		}
-
-		unwindState := sync.NewUnwindState(stages.BorHeimdall, stageState.BlockNumber-unwind, stageState.BlockNumber, true, false)
-		cfg := stagedsync.StageBorHeimdallCfg(db, nil, miningState, *chainConfig, nil, heimdallStore, bridgeStore, nil, nil, nil, nil, nil, false, unwindTypes)
-		if err := stagedsync.BorHeimdallUnwind(unwindState, ctx, stageState, nil, cfg); err != nil {
-			return err
-		}
-
-		stageProgress, err := stagedsync.BorHeimdallStageProgress(nil, cfg)
-		if err != nil {
-			return fmt.Errorf("re-read bor heimdall progress: %w", err)
-		}
-
-		logger.Info("progress", "bor heimdall", stageProgress)
-		return nil
-	}
-
-	_, _, _, _, bridgeStore, heimdallStore, err := allSnapshots(ctx, db, logger)
-	if err != nil {
-		return err
-	}
-	blockReader, _ := blocksIO(db, logger)
-	var (
-		snapDb     kv.RwDB
-		recents    *lru.ARCCache[libcommon.Hash, *bor.Snapshot]
-		signatures *lru.ARCCache[libcommon.Hash, libcommon.Address]
-	)
-	if bor, ok := engine.(*bor.Bor); ok {
-		snapDb = bor.DB
-		recents = bor.Recents
-		signatures = bor.Signatures
-	}
-	cfg := stagedsync.StageBorHeimdallCfg(db, snapDb, miningState, *chainConfig, heimdallClient, heimdallStore, bridgeStore, blockReader, nil, nil, recents, signatures, false, unwindTypes)
-
-	stageState := stage(sync, nil, db, stages.BorHeimdall)
-	if err := stagedsync.BorHeimdallForward(stageState, sync, ctx, nil, cfg, logger); err != nil {
-		return err
-	}
-
-	stageProgress, err := stagedsync.BorHeimdallStageProgress(nil, cfg)
-	if err != nil {
-		return fmt.Errorf("re-read bor heimdall progress: %w", err)
-	}
-
-	logger.Info("progress", "bor heimdall", stageProgress)
-	return nil
 }
 
 func stageBodies(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
@@ -1531,7 +1423,6 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 		cfg.Sync,
 		stagedsync.MiningStages(ctx,
 			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, dirs.Tmp, blockReader),
-			stagedsync.StageBorHeimdallCfg(db, snapDb, miner, *chainConfig, heimdallClient, heimdallStore, bridgeStore, blockReader, nil, nil, recents, signatures, false, unwindTypes),
 			stagedsync.StageExecuteBlocksCfg(
 				db,
 				cfg.Prune,

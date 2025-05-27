@@ -95,18 +95,10 @@ func ValidateBorEvents(ctx context.Context, db kv.TemporalRoDB, blockReader serv
 					return err
 				}
 
-				borHeimdallProgress, err := stages.GetStageProgress(tx, stages.BorHeimdall)
-				if err != nil {
-					return err
-				}
-
 				polygonSyncProgress, err := stages.GetStageProgress(tx, stages.PolygonSync)
 				if err != nil {
 					return err
 				}
-
-				// bor heimdall and polygon sync are mutually exclusive, bor heimdall will be removed soon
-				polygonSyncProgress = max(borHeimdallProgress, polygonSyncProgress)
 
 				bodyProgress, err := stages.GetStageProgress(tx, stages.Bodies)
 				if err != nil {
@@ -114,12 +106,6 @@ func ValidateBorEvents(ctx context.Context, db kv.TemporalRoDB, blockReader serv
 				}
 
 				log.Info("[integrity] LAST Event", "event", lastEventId, "bor-progress", polygonSyncProgress, "body-progress", bodyProgress)
-
-				if bodyProgress > borHeimdallProgress {
-					for blockNum := maxBlockNum + 1; blockNum <= bodyProgress; blockNum++ {
-
-					}
-				}
 			}
 
 			return nil
