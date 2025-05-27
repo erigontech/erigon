@@ -47,6 +47,9 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 	acc1 := common.HexToAddress("0x1234567890123456789012345678901234567890")
 	acc1slot1 := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000001")
 	storageK1 := append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...)
+	acc2 := common.HexToAddress("0x1234567890123456789012345678901234567891")
+	acc2slot2 := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000002")
+	storageK2 := append(append([]byte{}, acc2.Bytes()...), acc2slot2.Bytes()...)
 
 	// --- check 1: non-existing storage ---
 	{
@@ -101,14 +104,18 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
 		require.Equal(t, []byte{1}, firstVal)
+
+		// check some other non-existing storages for non-existence after write operation
+		firstKey, firstVal, ok, err = roTtx1.HasPrefix(kv.StorageDomain, acc2.Bytes())
+		require.NoError(t, err)
+		require.False(t, ok)
+		require.Nil(t, firstKey)
+		require.Nil(t, firstVal)
 	}
 
 	// --- check 3: storage exists in files only - TemporalTx.HasPrefix should catch this
 	{
 		// move data to files and trigger prune (need one more step for prune so write to some other storage)
-		acc2 := common.HexToAddress("0x1234567890123456789012345678901234567891")
-		acc2slot2 := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000002")
-		storageK2 := append(append([]byte{}, acc2.Bytes()...), acc2slot2.Bytes()...)
 		rwTtx2, err := temporalDb.BeginTemporalRw(ctx)
 		require.NoError(t, err)
 		t.Cleanup(rwTtx2.Rollback)
