@@ -17,24 +17,25 @@
 package dbg
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
 	"runtime/pprof"
-	"strconv"
 	"sync"
 	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/mmap"
 )
 
 var (
+	MaxReorgDepth = EnvInt("MAX_REORG_DEPTH", 512)
+
 	doMemstat           = EnvBool("NO_MEMSTAT", true)
 	saveHeapProfile     = EnvBool("SAVE_HEAP_PROFILE", false)
 	heapProfileFilePath = EnvString("HEAP_PROFILE_FILE_PATH", "")
-	mdbxReadahead       = EnvBool("MDBX_READAHEAD", false)
 	mdbxLockInRam       = EnvBool("MDBX_LOCK_IN_RAM", false)
 	StagesOnlyBlocks    = EnvBool("STAGES_ONLY_BLOCKS", false)
 
@@ -46,7 +47,6 @@ var (
 	//state v3
 	noPrune              = EnvBool("NO_PRUNE", false)
 	noMerge              = EnvBool("NO_MERGE", false)
-	discardHistory       = EnvBool("DISCARD_HISTORY", false)
 	discardCommitment    = EnvBool("DISCARD_COMMITMENT", false)
 	pruneTotalDifficulty = EnvBool("PRUNE_TOTAL_DIFFICULTY", true)
 
@@ -67,6 +67,23 @@ var (
 	OnlyCreateDB    = EnvBool("ONLY_CREATE_DB", false)
 
 	CommitEachStage = EnvBool("COMMIT_EACH_STAGE", false)
+
+	CaplinSyncedDataMangerDeadlockDetection = EnvBool("CAPLIN_SYNCED_DATA_MANAGER_DEADLOCK_DETECTION", false)
+
+	Exec3Parallel = EnvBool("EXEC3_PARALLEL", false)
+	numWorkers    = runtime.NumCPU() / 2
+	Exec3Workers  = EnvInt("EXEC3_WORKERS", numWorkers)
+
+	TraceAccounts        = EnvStrings("TRACE_ACCOUNTS", ",", nil)
+	TraceStateKeys       = EnvStrings("TRACE_STATE_KEYS", ",", nil)
+	TraceInstructions    = EnvBool("TRACE_INSTRUCTIONS", false)
+	TraceTransactionIO   = EnvBool("TRACE_TRANSACTION_IO", false)
+	TraceBlocks          = EnvUints("TRACE_BLOCKS", ",", nil)
+	TraceTxIndexes       = EnvInts("TRACE_TRANSACTIONS", ",", nil)
+	StopAfterBlock       = EnvUint("STOP_AFTER_BLOCK", 0)
+	BatchCommitments     = EnvBool("BATCH_COMMITMENTS", true)
+	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
+	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
 )
 
 func ReadMemStats(m *runtime.MemStats) {
@@ -75,10 +92,8 @@ func ReadMemStats(m *runtime.MemStats) {
 	}
 }
 
-func MdbxReadAhead() bool { return mdbxReadahead }
 func MdbxLockInRam() bool { return mdbxLockInRam }
 
-func DiscardHistory() bool       { return discardHistory }
 func DiscardCommitment() bool    { return discardCommitment }
 func NoPrune() bool              { return noPrune }
 func NoMerge() bool              { return noMerge }
@@ -93,10 +108,7 @@ func DirtySpace() uint64 {
 	dirtySaceOnce.Do(func() {
 		v, _ := os.LookupEnv("MDBX_DIRTY_SPACE_MB")
 		if v != "" {
-			i, err := strconv.Atoi(v)
-			if err != nil {
-				panic(err)
-			}
+			i := MustParseInt(v)
 			log.Info("[Experiment]", "MDBX_DIRTY_SPACE_MB", i)
 			dirtySace = uint64(i * 1024 * 1024)
 		}
@@ -194,8 +206,8 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 	if logger != nil {
 		logger.Info(
 			"[Experiment] heap profile threshold check",
-			"alloc", libcommon.ByteCount(memStats.Alloc),
-			"total", libcommon.ByteCount(totalMemory),
+			"alloc", common.ByteCount(memStats.Alloc),
+			"total", common.ByteCount(totalMemory),
 		)
 	}
 	if memStats.Alloc < (totalMemory/100)*45 {
@@ -229,5 +241,23 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 	err = pprof.WriteHeapProfile(f)
 	if err != nil && logger != nil {
 		logger.Warn("[Experiment] could not write heap profile file", "err", err)
+	}
+}
+
+func SaveHeapProfileNearOOMPeriodically(ctx context.Context, opts ...SaveHeapOption) {
+	if !saveHeapProfile {
+		return
+	}
+
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			SaveHeapProfileNearOOM(opts...)
+		}
 	}
 }

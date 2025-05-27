@@ -21,18 +21,18 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 
-	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
 // CachedWriter is a wrapper for an instance of type StateWriter
 type CachedWriter struct {
-	w     WriterWithChangeSets
+	w     StateWriter
 	cache *shards.StateCache
 }
 
 // NewCachedWriter wraps a given state writer into a cached writer
-func NewCachedWriter(w WriterWithChangeSets, cache *shards.StateCache) *CachedWriter {
+func NewCachedWriter(w StateWriter, cache *shards.StateCache) *CachedWriter {
 	return &CachedWriter{w: w, cache: cache}
 }
 
@@ -60,11 +60,11 @@ func (cw *CachedWriter) DeleteAccount(address common.Address, original *accounts
 	return nil
 }
 
-func (cw *CachedWriter) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+func (cw *CachedWriter) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error {
 	if err := cw.w.WriteAccountStorage(address, incarnation, key, original, value); err != nil {
 		return err
 	}
-	if *original == *value {
+	if original == value {
 		return nil
 	}
 	if value.IsZero() {
@@ -77,12 +77,4 @@ func (cw *CachedWriter) WriteAccountStorage(address common.Address, incarnation 
 
 func (cw *CachedWriter) CreateContract(address common.Address) error {
 	return cw.w.CreateContract(address)
-}
-
-func (cw *CachedWriter) WriteChangeSets() error {
-	return cw.w.WriteChangeSets()
-}
-
-func (cw *CachedWriter) WriteHistory() error {
-	return cw.w.WriteHistory()
 }

@@ -20,7 +20,7 @@ import (
 	"context"
 	"testing"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -30,7 +30,7 @@ import (
 
 func setupTestDB(t *testing.T) kv.RwDB {
 	// Create an in-memory SQLite DB for testing purposes
-	db := memdb.NewTestDB(t)
+	db := memdb.NewTestDB(t, kv.ChainDB)
 	return db
 }
 
@@ -57,14 +57,14 @@ func TestWriteBlockRoot(t *testing.T) {
 
 	canonicalRoot, err := ReadCanonicalBlockRoot(tx, *retrievedSlot)
 	require.NoError(t, err)
-	require.Equal(t, libcommon.Hash{}, canonicalRoot)
+	require.Equal(t, common.Hash{}, canonicalRoot)
 
 	err = MarkRootCanonical(context.Background(), tx, *retrievedSlot, blockRoot)
 	require.NoError(t, err)
 
 	canonicalRoot, err = ReadCanonicalBlockRoot(tx, *retrievedSlot)
 	require.NoError(t, err)
-	require.Equal(t, libcommon.Hash(blockRoot), canonicalRoot)
+	require.Equal(t, common.Hash(blockRoot), canonicalRoot)
 }
 
 func TestReadParentBlockRoot(t *testing.T) {
@@ -73,7 +73,7 @@ func TestReadParentBlockRoot(t *testing.T) {
 	tx, _ := db.BeginRw(context.Background())
 	defer tx.Rollback()
 
-	mockParentRoot := libcommon.Hash{1}
+	mockParentRoot := common.Hash{1}
 	// Mock a block
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
 	block.Block.Slot = 56
@@ -97,7 +97,7 @@ func TestTruncateCanonicalChain(t *testing.T) {
 	tx, _ := db.BeginRw(context.Background())
 	defer tx.Rollback()
 
-	mockParentRoot := libcommon.Hash{1}
+	mockParentRoot := common.Hash{1}
 	// Mock a block
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
 	block.Block.Slot = 56
@@ -112,13 +112,13 @@ func TestTruncateCanonicalChain(t *testing.T) {
 
 	canonicalRoot, err := ReadCanonicalBlockRoot(tx, block.Block.Slot)
 	require.NoError(t, err)
-	require.Equal(t, libcommon.Hash(blockRoot), canonicalRoot)
+	require.Equal(t, common.Hash(blockRoot), canonicalRoot)
 
 	require.NoError(t, TruncateCanonicalChain(context.Background(), tx, 0))
 
 	canonicalRoot, err = ReadCanonicalBlockRoot(tx, block.Block.Slot)
 	require.NoError(t, err)
-	require.Equal(t, canonicalRoot, libcommon.Hash{})
+	require.Equal(t, common.Hash{}, canonicalRoot)
 }
 
 func TestReadBeaconBlockHeader(t *testing.T) {
@@ -127,7 +127,7 @@ func TestReadBeaconBlockHeader(t *testing.T) {
 	tx, _ := db.BeginRw(context.Background())
 	defer tx.Rollback()
 
-	mockParentRoot := libcommon.Hash{1}
+	mockParentRoot := common.Hash{1}
 	mockSignature := [96]byte{23}
 
 	// Mock a block
@@ -163,7 +163,7 @@ func TestWriteExecutionBlockNumber(t *testing.T) {
 	tx, _ := db.BeginRw(context.Background())
 	defer tx.Rollback()
 
-	tHash := libcommon.HexToHash("0x2")
+	tHash := common.HexToHash("0x2")
 	require.NoError(t, WriteExecutionBlockNumber(tx, tHash, 1))
 	require.NoError(t, WriteExecutionBlockNumber(tx, tHash, 2))
 	require.NoError(t, WriteExecutionBlockNumber(tx, tHash, 3))
@@ -180,8 +180,8 @@ func TestWriteExecutionBlockHash(t *testing.T) {
 	tx, _ := db.BeginRw(context.Background())
 	defer tx.Rollback()
 
-	tHash := libcommon.HexToHash("0x2")
-	tHash2 := libcommon.HexToHash("0x3")
+	tHash := common.HexToHash("0x2")
+	tHash2 := common.HexToHash("0x3")
 	require.NoError(t, WriteExecutionBlockHash(tx, tHash, tHash2))
 	// Try to retrieve the block's slot by its blockRoot and verify
 	tHash3, err := ReadExecutionBlockHash(tx, tHash)

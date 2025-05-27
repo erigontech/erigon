@@ -6,20 +6,24 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
+	"slices"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common/generics"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
-	"golang.org/x/sync/errgroup"
 )
 
 func NewSnapshotStore(base Store, snapshots *RoSnapshots) *SnapshotStore {
 	return &SnapshotStore{
 		Store:                       base,
-		checkpoints:                 &checkpointSnapshotStore{base.Checkpoints(), snapshots},
-		milestones:                  &milestoneSnapshotStore{base.Milestones(), snapshots},
+		checkpoints:                 NewCheckpointSnapshotStore(base.Checkpoints(), snapshots),
+		milestones:                  NewMilestoneSnapshotStore(base.Milestones(), snapshots),
 		spans:                       NewSpanSnapshotStore(base.Spans(), snapshots),
 		spanBlockProducerSelections: base.SpanBlockProducerSelections(),
 	}
@@ -60,16 +64,16 @@ func (s *SnapshotStore) Prepare(ctx context.Context) error {
 
 var ErrSpanNotFound = errors.New("span not found")
 
-type spanSnapshotStore struct {
+type SpanSnapshotStore struct {
 	EntityStore[*Span]
 	snapshots *RoSnapshots
 }
 
-func NewSpanSnapshotStore(base EntityStore[*Span], snapshots *RoSnapshots) *spanSnapshotStore {
-	return &spanSnapshotStore{base, snapshots}
+func NewSpanSnapshotStore(base EntityStore[*Span], snapshots *RoSnapshots) *SpanSnapshotStore {
+	return &SpanSnapshotStore{base, snapshots}
 }
 
-func (s *spanSnapshotStore) Prepare(ctx context.Context) error {
+func (s *SpanSnapshotStore) Prepare(ctx context.Context) error {
 	if err := s.EntityStore.Prepare(ctx); err != nil {
 		return err
 	}
@@ -77,11 +81,11 @@ func (s *spanSnapshotStore) Prepare(ctx context.Context) error {
 	return <-s.snapshots.Ready(ctx)
 }
 
-func (s *spanSnapshotStore) WithTx(tx kv.Tx) EntityStore[*Span] {
-	return &spanSnapshotStore{txEntityStore[*Span]{s.EntityStore.(*mdbxEntityStore[*Span]), tx}, s.snapshots}
+func (s *SpanSnapshotStore) WithTx(tx kv.Tx) EntityStore[*Span] {
+	return &SpanSnapshotStore{txEntityStore[*Span]{s.EntityStore.(*mdbxEntityStore[*Span]), tx}, s.snapshots}
 }
 
-func (s *spanSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
+func (s *SpanSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
 	return snaptype.RangeExtractorFunc(
 		func(ctx context.Context, blockFrom, blockTo uint64, firstKey snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 			return s.SnapType().RangeExtractor().Extract(ctx, blockFrom, blockTo, firstKey,
@@ -89,24 +93,27 @@ func (s *spanSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
 		})
 }
 
-func (r *spanSnapshotStore) LastFrozenEntityId() uint64 {
-	if r.snapshots == nil {
+func (s *SpanSnapshotStore) LastFrozenEntityId() uint64 {
+	if s.snapshots == nil {
 		return 0
 	}
 
-	tx := r.snapshots.ViewType(r.SnapType())
+	tx := s.snapshots.ViewType(s.SnapType())
 	defer tx.Close()
 	segments := tx.Segments
 
 	if len(segments) == 0 {
 		return 0
 	}
-	// find the last segment which has a built index
+	// find the last segment which has a built non-empty index
 	var lastSegment *snapshotsync.VisibleSegment
 	for i := len(segments) - 1; i >= 0; i-- {
 		if segments[i].Src().Index() != nil {
-			lastSegment = segments[i]
-			break
+			gg := segments[i].Src().MakeGetter()
+			if gg.HasNext() {
+				lastSegment = segments[i]
+				break
+			}
 		}
 	}
 	if lastSegment == nil {
@@ -120,21 +127,21 @@ func (r *spanSnapshotStore) LastFrozenEntityId() uint64 {
 	return uint64(lastSpanID)
 }
 
-func (r *spanSnapshotStore) Entity(ctx context.Context, id uint64) (*Span, bool, error) {
+func (s *SpanSnapshotStore) Entity(ctx context.Context, id uint64) (*Span, bool, error) {
 	var endBlock uint64
 	if id > 0 {
 		endBlock = SpanEndBlockNum(SpanId(id))
 	}
 
-	maxBlockNumInFiles := r.snapshots.VisibleBlocksAvailable(r.SnapType().Enum())
+	maxBlockNumInFiles := s.snapshots.VisibleBlocksAvailable(s.SnapType().Enum())
 	if maxBlockNumInFiles == 0 || endBlock > maxBlockNumInFiles {
-		return r.EntityStore.Entity(ctx, id)
+		return s.EntityStore.Entity(ctx, id)
 	}
 
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], id)
 
-	tx := r.snapshots.ViewType(r.SnapType())
+	tx := s.snapshots.ViewType(s.SnapType())
 	defer tx.Close()
 	segments := tx.Segments
 
@@ -172,10 +179,10 @@ func (r *spanSnapshotStore) Entity(ctx context.Context, id uint64) (*Span, bool,
 	return nil, false, fmt.Errorf("span %d: %w (snapshots)", id, ErrSpanNotFound)
 }
 
-func (r *spanSnapshotStore) LastEntityId(ctx context.Context) (uint64, bool, error) {
-	lastId, ok, err := r.EntityStore.LastEntityId(ctx)
+func (s *SpanSnapshotStore) LastEntityId(ctx context.Context) (uint64, bool, error) {
+	lastId, ok, err := s.EntityStore.LastEntityId(ctx)
 
-	snapshotLastId := r.LastFrozenEntityId()
+	snapshotLastId := s.LastFrozenEntityId()
 	if snapshotLastId > lastId {
 		return snapshotLastId, true, nil
 	}
@@ -183,12 +190,28 @@ func (r *spanSnapshotStore) LastEntityId(ctx context.Context) (uint64, bool, err
 	return lastId, ok, err
 }
 
-type milestoneSnapshotStore struct {
+func (s *SpanSnapshotStore) LastEntity(ctx context.Context) (*Span, bool, error) {
+	return snapshotStoreLastEntity(ctx, s)
+}
+
+func (s *SpanSnapshotStore) RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]*Span, error) {
+	return snapshotStoreRangeFromBlockNum(ctx, startBlockNum, s.EntityStore, s.snapshots, s.SnapType(), generics.New[Span])
+}
+
+func (s *SpanSnapshotStore) ValidateSnapshots(ctx context.Context, logger log.Logger, failFast bool) error {
+	return validateSnapshots(ctx, logger, s.EntityStore, failFast, s.snapshots, s.SnapType(), generics.New[Span])
+}
+
+type MilestoneSnapshotStore struct {
 	EntityStore[*Milestone]
 	snapshots *RoSnapshots
 }
 
-func (s *milestoneSnapshotStore) Prepare(ctx context.Context) error {
+func NewMilestoneSnapshotStore(base EntityStore[*Milestone], snapshots *RoSnapshots) *MilestoneSnapshotStore {
+	return &MilestoneSnapshotStore{base, snapshots}
+}
+
+func (s *MilestoneSnapshotStore) Prepare(ctx context.Context) error {
 	if err := s.EntityStore.Prepare(ctx); err != nil {
 		return err
 	}
@@ -196,11 +219,11 @@ func (s *milestoneSnapshotStore) Prepare(ctx context.Context) error {
 	return <-s.snapshots.Ready(ctx)
 }
 
-func (s *milestoneSnapshotStore) WithTx(tx kv.Tx) EntityStore[*Milestone] {
-	return &milestoneSnapshotStore{txEntityStore[*Milestone]{s.EntityStore.(*mdbxEntityStore[*Milestone]), tx}, s.snapshots}
+func (s *MilestoneSnapshotStore) WithTx(tx kv.Tx) EntityStore[*Milestone] {
+	return &MilestoneSnapshotStore{txEntityStore[*Milestone]{s.EntityStore.(*mdbxEntityStore[*Milestone]), tx}, s.snapshots}
 }
 
-func (s *milestoneSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
+func (s *MilestoneSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
 	return snaptype.RangeExtractorFunc(
 		func(ctx context.Context, blockFrom, blockTo uint64, firstKey snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 			return s.SnapType().RangeExtractor().Extract(ctx, blockFrom, blockTo, firstKey,
@@ -208,24 +231,27 @@ func (s *milestoneSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
 		})
 }
 
-func (r *milestoneSnapshotStore) LastFrozenEntityId() uint64 {
-	if r.snapshots == nil {
+func (s *MilestoneSnapshotStore) LastFrozenEntityId() uint64 {
+	if s.snapshots == nil {
 		return 0
 	}
 
-	tx := r.snapshots.ViewType(r.SnapType())
+	tx := s.snapshots.ViewType(s.SnapType())
 	defer tx.Close()
 	segments := tx.Segments
 
 	if len(segments) == 0 {
 		return 0
 	}
-	// find the last segment which has a built index
+	// find the last segment which has a built non-empty index
 	var lastSegment *snapshotsync.VisibleSegment
 	for i := len(segments) - 1; i >= 0; i-- {
 		if segments[i].Src().Index() != nil {
-			lastSegment = segments[i]
-			break
+			gg := segments[i].Src().MakeGetter()
+			if gg.HasNext() {
+				lastSegment = segments[i]
+				break
+			}
 		}
 	}
 	if lastSegment == nil {
@@ -237,10 +263,10 @@ func (r *milestoneSnapshotStore) LastFrozenEntityId() uint64 {
 	return index.BaseDataID() + index.KeyCount() - 1
 }
 
-func (r *milestoneSnapshotStore) LastEntityId(ctx context.Context) (uint64, bool, error) {
-	lastId, ok, err := r.EntityStore.LastEntityId(ctx)
+func (s *MilestoneSnapshotStore) LastEntityId(ctx context.Context) (uint64, bool, error) {
+	lastId, ok, err := s.EntityStore.LastEntityId(ctx)
 
-	snapshotLastId := r.LastFrozenEntityId()
+	snapshotLastId := s.LastFrozenEntityId()
 	if snapshotLastId > lastId {
 		return snapshotLastId, true, nil
 	}
@@ -248,8 +274,8 @@ func (r *milestoneSnapshotStore) LastEntityId(ctx context.Context) (uint64, bool
 	return lastId, ok, err
 }
 
-func (r *milestoneSnapshotStore) Entity(ctx context.Context, id uint64) (*Milestone, bool, error) {
-	entity, ok, err := r.EntityStore.Entity(ctx, id)
+func (s *MilestoneSnapshotStore) Entity(ctx context.Context, id uint64) (*Milestone, bool, error) {
+	entity, ok, err := s.EntityStore.Entity(ctx, id)
 
 	if ok {
 		return entity, ok, err
@@ -258,7 +284,7 @@ func (r *milestoneSnapshotStore) Entity(ctx context.Context, id uint64) (*Milest
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], id)
 
-	tx := r.snapshots.ViewType(r.SnapType())
+	tx := s.snapshots.ViewType(s.SnapType())
 	defer tx.Close()
 	segments := tx.Segments
 
@@ -295,12 +321,28 @@ func (r *milestoneSnapshotStore) Entity(ctx context.Context, id uint64) (*Milest
 	return nil, false, fmt.Errorf("%w: %w", ErrMilestoneNotFound, err)
 }
 
-type checkpointSnapshotStore struct {
+func (s *MilestoneSnapshotStore) LastEntity(ctx context.Context) (*Milestone, bool, error) {
+	return snapshotStoreLastEntity(ctx, s)
+}
+
+func (s *MilestoneSnapshotStore) RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]*Milestone, error) {
+	return snapshotStoreRangeFromBlockNum(ctx, startBlockNum, s.EntityStore, s.snapshots, s.SnapType(), generics.New[Milestone])
+}
+
+func (s *MilestoneSnapshotStore) ValidateSnapshots(ctx context.Context, logger log.Logger, failFast bool) error {
+	return validateSnapshots(ctx, logger, s.EntityStore, failFast, s.snapshots, s.SnapType(), generics.New[Milestone])
+}
+
+type CheckpointSnapshotStore struct {
 	EntityStore[*Checkpoint]
 	snapshots *RoSnapshots
 }
 
-func (s *checkpointSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
+func NewCheckpointSnapshotStore(base EntityStore[*Checkpoint], snapshots *RoSnapshots) *CheckpointSnapshotStore {
+	return &CheckpointSnapshotStore{base, snapshots}
+}
+
+func (s *CheckpointSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
 	return snaptype.RangeExtractorFunc(
 		func(ctx context.Context, blockFrom, blockTo uint64, firstKey snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 			return s.SnapType().RangeExtractor().Extract(ctx, blockFrom, blockTo, firstKey,
@@ -308,7 +350,7 @@ func (s *checkpointSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
 		})
 }
 
-func (s *checkpointSnapshotStore) Prepare(ctx context.Context) error {
+func (s *CheckpointSnapshotStore) Prepare(ctx context.Context) error {
 	if err := s.EntityStore.Prepare(ctx); err != nil {
 		return err
 	}
@@ -316,14 +358,14 @@ func (s *checkpointSnapshotStore) Prepare(ctx context.Context) error {
 	return <-s.snapshots.Ready(ctx)
 }
 
-func (s *checkpointSnapshotStore) WithTx(tx kv.Tx) EntityStore[*Checkpoint] {
-	return &checkpointSnapshotStore{txEntityStore[*Checkpoint]{s.EntityStore.(*mdbxEntityStore[*Checkpoint]), tx}, s.snapshots}
+func (s *CheckpointSnapshotStore) WithTx(tx kv.Tx) EntityStore[*Checkpoint] {
+	return &CheckpointSnapshotStore{txEntityStore[*Checkpoint]{s.EntityStore.(*mdbxEntityStore[*Checkpoint]), tx}, s.snapshots}
 }
 
-func (r *checkpointSnapshotStore) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	lastId, ok, err := r.EntityStore.LastEntityId(ctx)
+func (s *CheckpointSnapshotStore) LastEntityId(ctx context.Context) (uint64, bool, error) {
+	lastId, ok, err := s.EntityStore.LastEntityId(ctx)
 
-	snapshotLastCheckpointId := r.LastFrozenEntityId()
+	snapshotLastCheckpointId := s.LastFrozenEntityId()
 
 	if snapshotLastCheckpointId > lastId {
 		return snapshotLastCheckpointId, true, nil
@@ -332,14 +374,14 @@ func (r *checkpointSnapshotStore) LastCheckpointId(ctx context.Context, tx kv.Tx
 	return lastId, ok, err
 }
 
-func (r *checkpointSnapshotStore) Entity(ctx context.Context, id uint64) (*Checkpoint, bool, error) {
-	entity, ok, err := r.EntityStore.Entity(ctx, id)
+func (s *CheckpointSnapshotStore) Entity(ctx context.Context, id uint64) (*Checkpoint, bool, error) {
+	entity, ok, err := s.EntityStore.Entity(ctx, id)
 
 	if ok {
 		return entity, ok, err
 	}
 
-	tx := r.snapshots.ViewType(r.SnapType())
+	tx := s.snapshots.ViewType(s.SnapType())
 	defer tx.Close()
 	segments := tx.Segments
 
@@ -367,24 +409,27 @@ func (r *checkpointSnapshotStore) Entity(ctx context.Context, id uint64) (*Check
 	return nil, false, fmt.Errorf("checkpoint %d: %w", id, ErrCheckpointNotFound)
 }
 
-func (r *checkpointSnapshotStore) LastFrozenEntityId() uint64 {
-	if r.snapshots == nil {
+func (s *CheckpointSnapshotStore) LastFrozenEntityId() uint64 {
+	if s.snapshots == nil {
 		return 0
 	}
 
-	tx := r.snapshots.ViewType(r.SnapType())
+	tx := s.snapshots.ViewType(s.SnapType())
 	defer tx.Close()
 	segments := tx.Segments
 
 	if len(segments) == 0 {
 		return 0
 	}
-	// find the last segment which has a built index
+	// find the last segment which has a built non-empty index
 	var lastSegment *snapshotsync.VisibleSegment
 	for i := len(segments) - 1; i >= 0; i-- {
 		if segments[i].Src().Index() != nil {
-			lastSegment = segments[i]
-			break
+			gg := segments[i].Src().MakeGetter()
+			if gg.HasNext() {
+				lastSegment = segments[i]
+				break
+			}
 		}
 	}
 
@@ -395,4 +440,187 @@ func (r *checkpointSnapshotStore) LastFrozenEntityId() uint64 {
 	index := lastSegment.Src().Index()
 
 	return index.BaseDataID() + index.KeyCount() - 1
+}
+
+func (s *CheckpointSnapshotStore) LastEntity(ctx context.Context) (*Checkpoint, bool, error) {
+	return snapshotStoreLastEntity(ctx, s)
+}
+
+func (s *CheckpointSnapshotStore) RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]*Checkpoint, error) {
+	return snapshotStoreRangeFromBlockNum(ctx, startBlockNum, s.EntityStore, s.snapshots, s.SnapType(), generics.New[Checkpoint])
+}
+
+func (s *CheckpointSnapshotStore) ValidateSnapshots(ctx context.Context, logger log.Logger, failFast bool) error {
+	return validateSnapshots(ctx, logger, s.EntityStore, failFast, s.snapshots, s.SnapType(), generics.New[Checkpoint])
+}
+
+func validateSnapshots[T Entity](
+	ctx context.Context,
+	logger log.Logger,
+	dbStore EntityStore[T],
+	failFast bool,
+	snaps *RoSnapshots,
+	t snaptype.Type,
+	makeEntity func() T,
+) error {
+	tx := snaps.ViewType(t)
+	defer tx.Close()
+
+	segs := tx.Segments
+	if len(segs) == 0 {
+		return errors.New("no segments")
+	}
+
+	var accumulatedErr error
+	var prev *T
+	for _, seg := range segs {
+		idx := seg.Src().Index()
+		if idx == nil || idx.KeyCount() == 0 {
+			continue
+		}
+
+		segGetter := seg.Src().MakeGetter()
+		for segGetter.HasNext() {
+			buf, _ := segGetter.Next(nil)
+			entity := makeEntity()
+			if err := json.Unmarshal(buf, entity); err != nil {
+				return err
+			}
+
+			logger.Trace(
+				"validating entity",
+				"id", entity.RawId(),
+				"kind", reflect.TypeOf(entity),
+				"start", entity.BlockNumRange().Start,
+				"end", entity.BlockNumRange().End,
+				"segmentFrom", seg.From(),
+				"segmentTo", seg.To(),
+			)
+
+			if prev == nil {
+				prev = &entity
+				continue
+			}
+
+			expectedId := (*prev).RawId() + 1
+			if expectedId == entity.RawId() {
+				prev = &entity
+				continue
+			}
+
+			if accumulatedErr == nil {
+				accumulatedErr = errors.New("missing entities")
+			}
+
+			accumulatedErr = fmt.Errorf("%w: snap [%d, %d)", accumulatedErr, expectedId, entity.RawId())
+			if failFast {
+				return accumulatedErr
+			}
+
+			prev = &entity
+		}
+	}
+
+	// make sure snapshots connect with data in the db and there are no gaps at all
+	lastInDb, ok, err := dbStore.LastEntityId(ctx)
+	if err != nil {
+		return err
+	}
+	if !ok || prev == nil {
+		return nil
+	}
+	for i := (*prev).RawId() + 1; i <= lastInDb; i++ {
+		_, ok, err := dbStore.Entity(ctx, i)
+		if err != nil {
+			return err
+		}
+		if ok {
+			continue
+		}
+		// we've found a gap between snapshots and db
+		accumulatedErr = fmt.Errorf("%w: db [%d]", accumulatedErr, i)
+		if failFast {
+			return accumulatedErr
+		}
+	}
+
+	return accumulatedErr
+}
+
+func snapshotStoreLastEntity[T Entity](ctx context.Context, store EntityStore[T]) (T, bool, error) {
+	entityId, ok, err := store.LastEntityId(ctx)
+	if err != nil || !ok {
+		return generics.Zero[T](), false, err
+	}
+
+	return store.Entity(ctx, entityId)
+}
+
+func snapshotStoreRangeFromBlockNum[T Entity](
+	ctx context.Context,
+	startBlockNum uint64,
+	dbStore EntityStore[T],
+	snapshots *RoSnapshots,
+	snapType snaptype.Type,
+	makeEntity func() T,
+) ([]T, error) {
+	dbEntities, err := dbStore.RangeFromBlockNum(ctx, startBlockNum)
+	if err != nil {
+		return nil, err
+	}
+	if len(dbEntities) > 0 && dbEntities[0].BlockNumRange().End < startBlockNum {
+		// this should not happen unless there is a bug in the db store
+		return nil, fmt.Errorf("unexpected first entity end in db range: expected >= %d, got %d", startBlockNum, dbEntities[0].BlockNumRange().End)
+	}
+	if len(dbEntities) > 0 && dbEntities[0].BlockNumRange().Start <= startBlockNum {
+		// all entities in the given range have been found in the db store
+		return dbEntities, nil
+	}
+
+	// otherwise there may be some earlier entities in the range that are in the snapshot files
+	// we start scanning backwards until entityEnd < startBlockNum, or we reach the end
+	var fromEntityStart uint64
+	if len(dbEntities) > 0 {
+		fromEntityStart = dbEntities[0].BlockNumRange().Start
+	}
+	toEntityEnd := startBlockNum
+	tx := snapshots.ViewType(snapType)
+	defer tx.Close()
+	segments := tx.Segments
+	var snapshotEntities []T
+
+OUTER:
+	for i := len(segments) - 1; i >= 0; i-- {
+		sn := segments[i]
+		idx := sn.Src().Index()
+		if idx == nil || idx.KeyCount() == 0 {
+			continue
+		}
+
+		gg := sn.Src().MakeGetter()
+		keyCount := idx.KeyCount()
+		for j := int64(keyCount) - 1; j >= 0; j-- {
+			offset := idx.OrdinalLookup(uint64(j))
+			gg.Reset(offset)
+			result, _ := gg.Next(nil)
+			entity := makeEntity()
+			if err := json.Unmarshal(result, &entity); err != nil {
+				return nil, err
+			}
+
+			entityStart := entity.BlockNumRange().Start
+			entityEnd := entity.BlockNumRange().End
+			if fromEntityStart > 0 && entityStart >= fromEntityStart {
+				continue
+			} else if entityEnd < toEntityEnd {
+				break OUTER
+			} else {
+				snapshotEntities = append(snapshotEntities, entity)
+			}
+		}
+	}
+
+	// prepend snapshot dbEntities that fall in the range
+	slices.Reverse(snapshotEntities)
+	return append(snapshotEntities, dbEntities...), nil
 }

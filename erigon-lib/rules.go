@@ -19,7 +19,6 @@
 
 package gorules
 
-// https://github.com/golang/go/wiki/Modules#how-can-i-track-tool-dependencies-for-a-module
 // to apply changes in this file, please do: ./build/bin/golangci-lint cache clean
 import (
 	"github.com/quasilyte/go-ruleguard/dsl"
@@ -52,6 +51,12 @@ func txDeferRollback(m dsl.Matcher) {
 		`$tx, $err = $db.Begin($ctx); $chk; $rollback`,
 		`$tx, $err := $db.BeginRo($ctx); $chk; $rollback`,
 		`$tx, $err = $db.BeginRo($ctx); $chk; $rollback`,
+		`$tx, $err = $db.BeginTemporalRw($ctx); $chk; $rollback`,
+		`$tx, $err := $db.BeginTemporalRw($ctx); $chk; $rollback`,
+		`$tx, $err = $db.BeginTemporalRo($ctx); $chk; $rollback`,
+		`$tx, $err := $db.BeginTemporalRo($ctx); $chk; $rollback`,
+		`$tx, $err := $db.BeginRwNosync($ctx); $chk; $rollback`,
+		`$tx, $err = $db.BeginRwNosync($ctx); $chk; $rollback`,
 	).
 		Where(!m["rollback"].Text.Matches(`defer .*\.Rollback()`)).
 		//At(m["rollback"]).
@@ -60,6 +65,36 @@ func txDeferRollback(m dsl.Matcher) {
 			Without rollback in defer - app can deadlock on error or panic.
 			Rules are in ./rules.go file.
 			`)
+}
+
+func cursorDeferClose(m dsl.Matcher) {
+	m.Match(
+		`$c, $err = $db.Cursor($table); $chk; $close`,
+		`$c, $err := $db.Cursor($table); $chk; $close`,
+		`$c, $err = $db.RwCursor($table); $chk; $close`,
+		`$c, $err := $db.RwCursor($table); $chk; $close`,
+		`$c, $err = $db.CursorDupSort($table); $chk; $close`,
+		`$c, $err := $db.CursorDupSort($table); $chk; $close`,
+		`$c, $err = $db.RwCursorDupSort($table); $chk; $close`,
+		`$c, $err := $db.RwCursorDupSort($table); $chk; $close`,
+	).
+		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
+		//At(m["rollback"]).
+		Report(`Add "defer $c.Close()" right after cursor creation error check`)
+}
+
+func streamDeferClose(m dsl.Matcher) {
+	m.Match(
+		`$c, $err = $db.Range($params); $chk; $close`,
+		`$c, $err := $db.Range($params); $chk; $close`,
+		`$c, $err = $db.RangeDupSort($params); $chk; $close`,
+		`$c, $err := $db.RangeDupSort($params); $chk; $close`,
+		`$c, $err = $db.Prefix($params); $chk; $close`,
+		`$c, $err := $db.Prefix($params); $chk; $close`,
+	).
+		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
+		//At(m["rollback"]).
+		Report(`Add "defer $c.Close()" right after cursor creation error check`)
 }
 
 func closeCollector(m dsl.Matcher) {

@@ -31,7 +31,9 @@ import (
 	mdbx2 "github.com/erigontech/mdbx-go/mdbx"
 	"github.com/urfave/cli/v2"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
@@ -55,12 +57,12 @@ var stateTestCommand = cli.Command{
 // StatetestResult contains the execution status after running a state test, any
 // error that might have occurred and a dump of the final state if requested.
 type StatetestResult struct {
-	Name  string          `json:"name"`
-	Pass  bool            `json:"pass"`
-	Root  *libcommon.Hash `json:"stateRoot,omitempty"`
-	Fork  string          `json:"fork"`
-	Error string          `json:"error,omitempty"`
-	State *state.Dump     `json:"state,omitempty"`
+	Name  string       `json:"name"`
+	Pass  bool         `json:"pass"`
+	Root  *common.Hash `json:"stateRoot,omitempty"`
+	Fork  string       `json:"fork"`
+	Error string       `json:"error,omitempty"`
+	State *state.Dump  `json:"state,omitempty"`
 }
 
 func stateTestCmd(ctx *cli.Context) error {
@@ -78,13 +80,11 @@ func stateTestCmd(ctx *cli.Context) error {
 		DisableStorage:    ctx.Bool(DisableStorageFlag.Name),
 		DisableReturnData: ctx.Bool(DisableReturnDataFlag.Name),
 	}
-	cfg := vm.Config{
-		Debug: ctx.Bool(DebugFlag.Name) || ctx.Bool(MachineFlag.Name),
-	}
+	cfg := vm.Config{}
 	if machineFriendlyOutput {
-		cfg.Tracer = logger.NewJSONLogger(config, os.Stderr)
+		cfg.Tracer = logger.NewJSONLogger(config, os.Stderr).Tracer().Hooks
 	} else if ctx.Bool(DebugFlag.Name) {
-		cfg.Tracer = logger.NewStructLogger(config)
+		cfg.Tracer = logger.NewStructLogger(config).Tracer().Hooks
 	}
 
 	if len(ctx.Args().First()) != 0 {
@@ -133,16 +133,14 @@ func aggregateResultsFromStateTests(
 	//this DB is shared. means:
 	// - faster sequential tests: don't need create/delete db
 	// - less parallelism: multiple processes can open same DB but only 1 can create rw-transaction (other will wait when 1-st finish)
-	_db := mdbx.NewMDBX(log.New()).
+	_db := mdbx.New(kv.ChainDB, log.New()).
 		Path(dirs.Chaindata).
-		Flags(func(u uint) uint {
-			return u | mdbx2.UtterlyNoSync | mdbx2.NoMetaSync | mdbx2.NoMemInit | mdbx2.WriteMap
-		}).
+		AddFlags(mdbx2.UtterlyNoSync | mdbx2.NoMetaSync | mdbx2.NoMemInit | mdbx2.WriteMap).
 		GrowthStep(1 * datasize.MB).
 		MustOpen()
 	defer _db.Close()
 
-	agg, err := libstate.NewAggregator(context.Background(), dirs, config3.HistoryV3AggregationStep, _db, log.New())
+	agg, err := libstate.NewAggregator(context.Background(), dirs, config3.DefaultStepSize, _db, log.New())
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +152,7 @@ func aggregateResultsFromStateTests(
 	}
 	defer db.Close()
 
-	tx, txErr := db.BeginRw(context.Background())
+	tx, txErr := db.BeginTemporalRw(context.Background())
 	if txErr != nil {
 		return nil, txErr
 	}

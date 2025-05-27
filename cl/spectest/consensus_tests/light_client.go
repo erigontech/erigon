@@ -20,7 +20,7 @@ import (
 	"io/fs"
 	"testing"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -36,7 +36,7 @@ var LightClientBeaconBlockBodyExecutionMerkleProof = spectest.HandlerFunc(func(t
 	var proof [][32]byte
 	switch c.CaseName {
 	case "execution_merkle_proof":
-		beaconBody := cltypes.NewBeaconBody(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+		beaconBody := cltypes.NewBeaconBody(&clparams.MainnetBeaconConfig, c.Version())
 		require.NoError(t, spectest.ReadSsz(root, c.Version(), spectest.ObjectSSZ, beaconBody))
 		proof, err = beaconBody.ExecutionPayloadMerkleProof()
 		require.NoError(t, err)
@@ -67,7 +67,7 @@ var LightClientBeaconBlockBodyExecutionMerkleProof = spectest.HandlerFunc(func(t
 
 	branch := make([][32]byte, len(proofYaml.Branch))
 	for i, b := range proofYaml.Branch {
-		branch[i] = libcommon.HexToHash(b)
+		branch[i] = common.HexToHash(b)
 	}
 
 	require.Equal(t, branch, proof)

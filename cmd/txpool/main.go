@@ -26,8 +26,11 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/erigontech/erigon/turbo/privateapi"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/paths"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
@@ -37,19 +40,12 @@ import (
 	"github.com/erigontech/erigon-lib/kv/remotedb"
 	"github.com/erigontech/erigon-lib/kv/remotedbserver"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/txpool"
-	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
-	"github.com/erigontech/erigon-lib/txpool/txpoolutil"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
-	common2 "github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/consensus/misc"
-	"github.com/erigontech/erigon/ethdb/privateapi"
-
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/common/paths"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/txnprovider/txpool"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 var (
@@ -136,6 +132,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 		return fmt.Errorf("could not connect to remoteKv: %w", err)
 	}
 
+	ethBackendClient := remote.NewETHBACKENDClient(coreConn)
 	kvClient := remote.NewKVClient(coreConn)
 	coreDB, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), log.New(), kvClient).Open()
 	if err != nil {
@@ -163,7 +160,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 
 	cfg.DBDir = dirs.TxPool
 
-	cfg.CommitEvery = common2.RandomizeDuration(commitEvery)
+	cfg.CommitEvery = common.RandomizeDuration(commitEvery)
 	cfg.PendingSubPoolLimit = pendingPoolLimit
 	cfg.BaseFeeSubPoolLimit = baseFeePoolLimit
 	cfg.QueuedSubPoolLimit = queuedPoolLimit
@@ -185,25 +182,32 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 		cfg.TracedSenders[i] = string(sender[:])
 	}
 
-	newTxs := make(chan types.Announcements, 1024)
-	defer close(newTxs)
-	txPoolDB, txPool, fetch, send, txpoolGrpcServer, err := txpoolutil.AllComponents(ctx, cfg,
-		kvcache.New(cacheConfig), newTxs, coreDB, sentryClients, kvClient, misc.Eip1559FeeCalculator, logger)
+	notifyMiner := func() {}
+	txPool, txpoolGrpcServer, err := txpool.Assemble(
+		ctx,
+		cfg,
+		coreDB,
+		kvcache.New(cacheConfig),
+		sentryClients,
+		kvClient,
+		notifyMiner,
+		logger,
+		ethBackendClient,
+	)
 	if err != nil {
 		return err
 	}
-	fetch.ConnectCore()
-	fetch.ConnectSentries()
 
 	miningGrpcServer := privateapi.NewMiningServer(ctx, &rpcdaemontest.IsMiningMock{}, nil, logger)
-
 	grpcServer, err := txpool.StartGrpc(txpoolGrpcServer, miningGrpcServer, txpoolApiAddr, nil, logger)
 	if err != nil {
 		return err
 	}
 
-	notifyMiner := func() {}
-	txpool.MainLoop(ctx, txPoolDB, txPool, newTxs, send, txpoolGrpcServer.NewSlotsStreams, notifyMiner)
+	err = txPool.Run(ctx)
+	if err != nil {
+		return err
+	}
 
 	grpcServer.GracefulStop()
 	return nil

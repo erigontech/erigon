@@ -31,6 +31,7 @@ import (
 	"io"
 	"math/big"
 	"os"
+	"sync"
 
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
@@ -38,7 +39,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/crypto/cryptopool"
 	"github.com/erigontech/erigon-lib/rlp"
 )
 
@@ -67,11 +67,6 @@ type KeccakState interface {
 	Read([]byte) (int, error)
 }
 
-// NewKeccakState creates a new KeccakState
-func NewKeccakState() KeccakState {
-	return cryptopool.NewLegacyKeccak256().(KeccakState)
-}
-
 // HashData hashes the provided data using the KeccakState and returns a 32 byte hash
 func HashData(kh KeccakState, data []byte) (h common.Hash) {
 	kh.Reset()
@@ -90,7 +85,7 @@ func Keccak256(data ...[]byte) []byte {
 		d.Write(b)
 	}
 	d.Read(b) //nolint:errcheck
-	cryptopool.ReturnToPoolKeccak256(d)
+	ReturnToPool(d)
 	return b
 }
 
@@ -102,7 +97,7 @@ func Keccak256Hash(data ...[]byte) (h common.Hash) {
 		d.Write(b)
 	}
 	d.Read(h[:]) //nolint:errcheck
-	cryptopool.ReturnToPoolKeccak256(d)
+	ReturnToPool(d)
 	return h
 }
 
@@ -187,6 +182,9 @@ func FromECDSA(priv *ecdsa.PrivateKey) []byte {
 func UnmarshalPubkeyStd(pub []byte) (*ecdsa.PublicKey, error) {
 	x, y := elliptic.Unmarshal(S256(), pub)
 	if x == nil {
+		return nil, errInvalidPubkey
+	}
+	if !S256().IsOnCurve(x, y) {
 		return nil, errInvalidPubkey
 	}
 	return &ecdsa.PublicKey{Curve: S256(), X: x, Y: y}, nil
@@ -323,3 +321,18 @@ func PubkeyToAddress(p ecdsa.PublicKey) common.Address {
 	pubBytes := MarshalPubkey(&p)
 	return common.BytesToAddress(Keccak256(pubBytes)[12:])
 }
+
+// hasherPool holds LegacyKeccak hashers.
+var hasherPool = sync.Pool{
+	New: func() interface{} {
+		return sha3.NewLegacyKeccak256()
+	},
+}
+
+// NewKeccakState creates a new KeccakState
+func NewKeccakState() KeccakState {
+	h := hasherPool.Get().(KeccakState)
+	h.Reset()
+	return h
+}
+func ReturnToPool(h KeccakState) { hasherPool.Put(h) }

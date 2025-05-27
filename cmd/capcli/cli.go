@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -34,9 +35,9 @@ import (
 	"github.com/spf13/afero"
 	"google.golang.org/grpc"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
@@ -44,6 +45,7 @@ import (
 	"github.com/erigontech/erigon-lib/metrics"
 
 	"github.com/erigontech/erigon/cl/antiquary"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -59,10 +61,10 @@ import (
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/turbo/snapshotsync"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -80,6 +82,7 @@ var CLI struct {
 	CheckBlobsSnapshots       CheckBlobsSnapshots       `cmd:"" help:"check blobs snapshots"`
 	CheckBlobsSnapshotsCount  CheckBlobsSnapshotsCount  `cmd:"" help:"check blobs snapshots count"`
 	DumpBlobsSnapshotsToStore DumpBlobsSnapshotsToStore `cmd:"" help:"dump blobs snapshots to store"`
+	DumpStateSnapshots        DumpStateSnapshots        `cmd:"" help:"dump state snapshots"`
 }
 
 type chainCfg struct {
@@ -143,11 +146,14 @@ func (c *Chain) Run(ctx *Context) error {
 
 	dirs := datadir.New(c.Datadir)
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = c.Chain
+	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
 	bs, err := checkpoint_sync.NewRemoteCheckpointSync(beaconConfig, networkType).GetLatestBeaconState(ctx)
 	if err != nil {
 		return err
 	}
+
 	ethClock := eth_clock.NewEthereumClock(bs.GenesisTime(), bs.GenesisValidatorsRoot(), beaconConfig)
 	db, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, ethClock, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {
@@ -178,7 +184,7 @@ func (c *Chain) Run(ctx *Context) error {
 	}
 
 	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, nil, nil, db)
-	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, false, false, false, false, nil), csn, db, nil, beaconConfig, true, false, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root())
+	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, nil, nil, false, false, false, false, nil), csn, db, nil, beaconConfig, clparams.CaplinConfig{}, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root())
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
 }
 
@@ -188,7 +194,7 @@ type ChainEndpoint struct {
 	outputFolder
 }
 
-func retrieveAndSanitizeBlockFromRemoteEndpoint(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, uri string, expectedBlockRoot *libcommon.Hash) (*cltypes.SignedBeaconBlock, error) {
+func retrieveAndSanitizeBlockFromRemoteEndpoint(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, uri string, expectedBlockRoot *common.Hash) (*cltypes.SignedBeaconBlock, error) {
 	log.Debug("[Checkpoint Sync] Requesting beacon block", "uri", uri)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
 	if err != nil {
@@ -277,7 +283,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 	}
 	defer tx.Rollback()
 
-	log.Info("Starting with", "root", libcommon.Hash(currentRoot), "slot", currentBlock.Block.Slot)
+	log.Info("Starting with", "root", common.Hash(currentRoot), "slot", currentBlock.Block.Slot)
 	currentRoot = currentBlock.Block.ParentRoot
 	if err := beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, currentBlock, true); err != nil {
 		return err
@@ -299,7 +305,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 
 		stringifiedRoot := common.Bytes2Hex(currentRoot[:])
 		// Let's fetch the head first
-		currentBlock, err := retrieveAndSanitizeBlockFromRemoteEndpoint(ctx, beaconConfig, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot), (*libcommon.Hash)(&currentRoot))
+		currentBlock, err := retrieveAndSanitizeBlockFromRemoteEndpoint(ctx, beaconConfig, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot), (*common.Hash)(&currentRoot))
 		if err != nil {
 			return false, fmt.Errorf("failed to retrieve block: %w, uri: %s", err, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot))
 		}
@@ -431,7 +437,9 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 
 	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = c.Chain
+	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
@@ -516,7 +524,9 @@ func (c *LoopSnapshots) Run(ctx *Context) error {
 
 	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = c.Chain
+	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
@@ -534,6 +544,7 @@ func (c *LoopSnapshots) Run(ctx *Context) error {
 type RetrieveHistoricalState struct {
 	chainCfg
 	outputFolder
+	withPPROF
 	CompareFile string `help:"compare file" default:""`
 	CompareSlot uint64 `help:"compare slot" default:"0"`
 	Out         string `help:"output file" default:""`
@@ -558,7 +569,9 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	}
 	defer tx.Rollback()
 
-	allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, 0, log.Root())
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = r.Chain
+	allSnapshots := freezeblocks.NewRoSnapshots(freezingCfg, dirs.Snap, 0, log.Root())
 	if err := allSnapshots.OpenFolder(); err != nil {
 		return err
 	}
@@ -569,7 +582,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, nil, nil, nil)
 	eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, db)
 	eth1Getter.SetBeaconChainConfig(beaconConfig)
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
+	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
@@ -579,7 +592,24 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 
-	hr := historical_states_reader.NewHistoricalStatesReader(beaconConfig, snr, vt, gSpot)
+	snTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(db)
+	stateSn := snapshotsync.NewCaplinStateSnapshots(freezingCfg, beaconConfig, dirs, snTypes, log.Root())
+	if err := stateSn.OpenFolder(); err != nil {
+		return err
+	}
+	if _, err := antiquary.FillStaticValidatorsTableIfNeeded(ctx, log.Root(), stateSn, vt); err != nil {
+		return err
+	}
+
+	bs, err := checkpoint_sync.NewRemoteCheckpointSync(beaconConfig, t).GetLatestBeaconState(ctx)
+	if err != nil {
+		return err
+	}
+	sn := synced_data.NewSyncedDataManager(beaconConfig, true)
+	sn.OnHeadState(bs)
+
+	r.withPPROF.withProfile()
+	hr := historical_states_reader.NewHistoricalStatesReader(beaconConfig, snr, vt, gSpot, stateSn, sn)
 	start := time.Now()
 	haveState, err := hr.ReadHistoricalState(ctx, tx, r.CompareSlot)
 	if err != nil {
@@ -590,7 +620,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	log.Info("Got state", "slot", haveState.Slot(), "root", libcommon.Hash(hRoot), "elapsed", endTime)
+	log.Info("Got state", "slot", haveState.Slot(), "root", common.Hash(hRoot), "elapsed", endTime)
 
 	if err := haveState.InitBeaconState(); err != nil {
 		return err
@@ -635,12 +665,37 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 	if hRoot != wRoot {
-		// for i := 0; i < haveState.PreviousEpochParticipation().Length(); i++ {
-		// 	if haveState.PreviousEpochParticipation().Get(i) != wantState.PreviousEpochParticipation().Get(i) {
-		// 		log.Info("Participation mismatch", "index", i, "have", haveState.PreviousEpochParticipation().Get(i), "want", wantState.PreviousEpochParticipation().Get(i))
-		// 	}
-		// }
-		return fmt.Errorf("state mismatch: got %s, want %s", libcommon.Hash(hRoot), libcommon.Hash(wRoot))
+		haveState.PrintLeaves()
+		wantState.PrintLeaves()
+		for i := 0; i < haveState.ValidatorLength(); i++ {
+			haveState.ValidatorSet().Get(i)
+			// Compare each field
+			if haveState.ValidatorSet().Get(i).PublicKey() != wantState.ValidatorSet().Get(i).PublicKey() {
+				log.Error("PublicKey mismatch", "index", i, "have", haveState.ValidatorSet().Get(i).PublicKey(), "want", wantState.ValidatorSet().Get(i).PublicKey())
+			}
+			if haveState.ValidatorSet().Get(i).WithdrawalCredentials() != wantState.ValidatorSet().Get(i).WithdrawalCredentials() {
+				log.Error("WithdrawalCredentials mismatch", "index", i, "have", haveState.ValidatorSet().Get(i).WithdrawalCredentials(), "want", wantState.ValidatorSet().Get(i).WithdrawalCredentials())
+			}
+			if haveState.ValidatorSet().Get(i).EffectiveBalance() != wantState.ValidatorSet().Get(i).EffectiveBalance() {
+				log.Error("EffectiveBalance mismatch", "index", i, "have", haveState.ValidatorSet().Get(i).EffectiveBalance(), "want", wantState.ValidatorSet().Get(i).EffectiveBalance())
+			}
+			if haveState.ValidatorSet().Get(i).Slashed() != wantState.ValidatorSet().Get(i).Slashed() {
+				log.Error("Slashed mismatch", "index", i, "have", haveState.ValidatorSet().Get(i).Slashed(), "want", wantState.ValidatorSet().Get(i).Slashed())
+			}
+			if haveState.ValidatorSet().Get(i).ActivationEligibilityEpoch() != wantState.ValidatorSet().Get(i).ActivationEligibilityEpoch() {
+				log.Error("ActivationEligibilityEpoch mismatch", "index", i, "have", haveState.ValidatorSet().Get(i).ActivationEligibilityEpoch(), "want", wantState.ValidatorSet().Get(i).ActivationEligibilityEpoch())
+			}
+			if haveState.ValidatorSet().Get(i).ActivationEpoch() != wantState.ValidatorSet().Get(i).ActivationEpoch() {
+				log.Error("ActivationEpoch mismatch", "index", i, "have", haveState.ValidatorSet().Get(i).ActivationEpoch(), "want", wantState.ValidatorSet().Get(i).ActivationEpoch())
+			}
+			if haveState.ValidatorSet().Get(i).ExitEpoch() != wantState.ValidatorSet().Get(i).ExitEpoch() {
+				log.Error("ExitEpoch mismatch", "index", i, "have", haveState.ValidatorSet().Get(i).ExitEpoch(), "want", wantState.ValidatorSet().Get(i).ExitEpoch())
+			}
+			if haveState.ValidatorSet().Get(i).WithdrawableEpoch() != wantState.ValidatorSet().Get(i).WithdrawableEpoch() {
+				log.Error("WithdrawableEpoch mismatch", "index", i, "have", haveState.ValidatorSet().Get(i).WithdrawableEpoch(), "want", wantState.ValidatorSet().Get(i).WithdrawableEpoch())
+			}
+		}
+		return fmt.Errorf("state mismatch: got %s, want %s", common.Hash(hRoot), common.Hash(wRoot))
 	}
 	return nil
 }
@@ -685,31 +740,31 @@ func getHead(beaconApiURL string) (uint64, error) {
 	return slot, nil
 }
 
-func getStateRootAtSlot(beaconApiURL string, slot uint64) (libcommon.Hash, error) {
+func getStateRootAtSlot(beaconApiURL string, slot uint64) (common.Hash, error) {
 	response := map[string]interface{}{}
 	req, err := http.NewRequest("GET", fmt.Sprintf("%s/eth/v1/beacon/states/%d/root", beaconApiURL, slot), nil)
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 	if resp.StatusCode == http.StatusNotFound {
-		return libcommon.Hash{}, nil
+		return common.Hash{}, nil
 	}
 	defer resp.Body.Close()
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 	data := response["data"].(map[string]interface{})
 	if len(data) == 0 {
-		return libcommon.Hash{}, errors.New("no head found")
+		return common.Hash{}, errors.New("no head found")
 	}
 	rootStr := data["root"].(string)
 
-	return libcommon.HexToHash(rootStr), nil
+	return common.HexToHash(rootStr), nil
 }
 
 func getBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, uri string, slot uint64) (*state.CachingBeaconState, error) {
@@ -766,7 +821,7 @@ func (a *ArchiveSanitizer) Run(ctx *Context) error {
 		if err != nil {
 			return err
 		}
-		if stateRoot == (libcommon.Hash{}) {
+		if stateRoot == (common.Hash{}) {
 			continue
 		}
 		state, err := getBeaconState(ctx, beaconConfig, fmt.Sprintf("%s/eth/v2/debug/beacon/states/%d", a.BeaconApiURL, i), i)
@@ -900,7 +955,9 @@ func (b *BlobArchiveStoreCheck) Run(ctx *Context) error {
 	}
 	defer db.Close()
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = b.Chain
+	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
@@ -1015,7 +1072,9 @@ func (c *CheckBlobsSnapshots) Run(ctx *Context) error {
 	}
 	defer tx.Rollback()
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = c.Chain
+	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
@@ -1076,7 +1135,9 @@ func (c *CheckBlobsSnapshotsCount) Run(ctx *Context) error {
 	}
 	defer tx.Rollback()
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = c.Chain
+	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
@@ -1143,7 +1204,9 @@ func (c *DumpBlobsSnapshotsToStore) Run(ctx *Context) error {
 	}
 	defer tx.Rollback()
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = c.Chain
+	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
@@ -1158,7 +1221,7 @@ func (c *DumpBlobsSnapshotsToStore) Run(ctx *Context) error {
 		if err != nil {
 			return err
 		}
-		if blockRoot == (libcommon.Hash{}) {
+		if blockRoot == (common.Hash{}) {
 			continue
 		}
 		if err := blobStore.WriteBlobSidecars(ctx, blockRoot, sds); err != nil {
@@ -1168,6 +1231,66 @@ func (c *DumpBlobsSnapshotsToStore) Run(ctx *Context) error {
 			log.Info("Successfully dumped", "slot", i)
 		}
 	}
+
+	return nil
+}
+
+type DumpStateSnapshots struct {
+	chainCfg
+	outputFolder
+	To       uint64 `name:"to" help:"slot to dump"`
+	StepSize uint64 `name:"step-size" help:"step size" default:"10000"`
+}
+
+func (c *DumpStateSnapshots) Run(ctx *Context) error {
+	_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
+	if err != nil {
+		return err
+	}
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
+	log.Info("Started chain download", "chain", c.Chain)
+
+	dirs := datadir.New(c.Datadir)
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+
+	db, _, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
+	if err != nil {
+		return err
+	}
+	var to uint64
+	db.View(ctx, func(tx kv.Tx) (err error) {
+		if c.To == 0 {
+			to, err = state_accessors.GetStateProcessingProgress(tx)
+			return
+		}
+		to = c.To
+		return
+	})
+
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = c.Chain
+
+	salt, err := snaptype.GetIndexSalt(dirs.Snap)
+
+	if err != nil {
+		return err
+	}
+	snTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(db)
+	stateSn := snapshotsync.NewCaplinStateSnapshots(freezingCfg, beaconConfig, dirs, snTypes, log.Root())
+	if err := stateSn.OpenFolder(); err != nil {
+		return err
+	}
+	r, _ := stateSn.Get(kv.BlockRoot, 999424)
+	fmt.Printf("%x\n", r)
+
+	if err := stateSn.DumpCaplinState(ctx, stateSn.BlocksAvailable(), to, c.StepSize, salt, dirs, runtime.NumCPU(), log.LvlInfo, log.Root()); err != nil {
+		return err
+	}
+	if err := stateSn.OpenFolder(); err != nil {
+		return err
+	}
+	r, _ = stateSn.Get(kv.BlockRoot, 999424)
+	fmt.Printf("%x\n", r)
 
 	return nil
 }

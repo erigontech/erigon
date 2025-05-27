@@ -26,18 +26,12 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-p2p/protocols/eth"
 )
 
-type Publisher interface {
-	PublishNewBlock(block *types.Block, td *big.Int)
-	PublishNewBlockHashes(block *types.Block)
-	Run(ctx context.Context) error
-}
-
-func NewPublisher(logger log.Logger, messageSender MessageSender, peerTracker PeerTracker) Publisher {
-	return publisher{
+func NewPublisher(logger log.Logger, messageSender *MessageSender, peerTracker *PeerTracker) *Publisher {
+	return &Publisher{
 		logger:        logger,
 		messageSender: messageSender,
 		peerTracker:   peerTracker,
@@ -45,7 +39,7 @@ func NewPublisher(logger log.Logger, messageSender MessageSender, peerTracker Pe
 	}
 }
 
-// publisher manages block announcements according to the devp2p specs:
+// Publisher manages block announcements according to the devp2p specs:
 // https://github.com/ethereum/devp2p/blob/master/caps/eth.md#block-propagation
 //
 // It co-operates with the PeerTracker to ensure that we do not publish block/block hash announcements to peers if:
@@ -56,14 +50,14 @@ func NewPublisher(logger log.Logger, messageSender MessageSender, peerTracker Pe
 //
 // All publish tasks are done asynchronously by putting them on a queue. If the publisher is struggling to keep up
 // then newly enqueued publish tasks will get dropped.
-type publisher struct {
+type Publisher struct {
 	logger        log.Logger
-	messageSender MessageSender
-	peerTracker   PeerTracker
+	messageSender *MessageSender
+	peerTracker   *PeerTracker
 	tasks         chan publishTask
 }
 
-func (p publisher) PublishNewBlock(block *types.Block, td *big.Int) {
+func (p Publisher) PublishNewBlock(block *types.Block, td *big.Int) {
 	p.enqueueTask(publishTask{
 		taskType: newBlockPublishTask,
 		block:    block,
@@ -71,15 +65,16 @@ func (p publisher) PublishNewBlock(block *types.Block, td *big.Int) {
 	})
 }
 
-func (p publisher) PublishNewBlockHashes(block *types.Block) {
+func (p Publisher) PublishNewBlockHashes(block *types.Block) {
 	p.enqueueTask(publishTask{
 		taskType: newBlockHashesPublishTask,
 		block:    block,
 	})
 }
 
-func (p publisher) Run(ctx context.Context) error {
-	p.logger.Debug("[p2p-publisher] running publisher")
+func (p Publisher) Run(ctx context.Context) error {
+	p.logger.Info("[p2p-publisher] running publisher component")
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -90,7 +85,7 @@ func (p publisher) Run(ctx context.Context) error {
 	}
 }
 
-func (p publisher) enqueueTask(t publishTask) {
+func (p Publisher) enqueueTask(t publishTask) {
 	select {
 	case p.tasks <- t: // enqueued
 	default:
@@ -103,7 +98,7 @@ func (p publisher) enqueueTask(t publishTask) {
 	}
 }
 
-func (p publisher) processPublishTask(ctx context.Context, t publishTask) {
+func (p Publisher) processPublishTask(ctx context.Context, t publishTask) {
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 
@@ -117,7 +112,7 @@ func (p publisher) processPublishTask(ctx context.Context, t publishTask) {
 	}
 }
 
-func (p publisher) processNewBlocksPublishTask(ctx context.Context, t publishTask) {
+func (p Publisher) processNewBlocksPublishTask(ctx context.Context, t publishTask) {
 	newBlockPacket := eth.NewBlockPacket{
 		Block: t.block,
 		TD:    t.td,
@@ -153,7 +148,7 @@ func (p publisher) processNewBlocksPublishTask(ctx context.Context, t publishTas
 	_ = eg.Wait() // best effort async publish
 }
 
-func (p publisher) processNewBlockHashesPublishTask(ctx context.Context, t publishTask) {
+func (p Publisher) processNewBlockHashesPublishTask(ctx context.Context, t publishTask) {
 	blockHash := t.block.Hash()
 	blockNum := t.block.NumberU64()
 	newBlockHashesPacket := eth.NewBlockHashesPacket{

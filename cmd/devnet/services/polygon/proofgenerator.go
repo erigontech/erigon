@@ -29,19 +29,19 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/trie"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
-	"github.com/erigontech/erigon/cmd/devnet/requests"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/execution/abi/bind"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
-	"github.com/erigontech/erigon/turbo/trie"
+	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/requests"
 )
 
 var ErrTokenIndexOutOfRange = errors.New("index is grater than the number of tokens in transaction")
@@ -79,7 +79,7 @@ func (pg *ProofGenerator) Start(ctx context.Context) error {
 func (pg *ProofGenerator) Stop() {
 }
 
-func (pg *ProofGenerator) GenerateExitPayload(ctx context.Context, burnTxHash libcommon.Hash, eventSignature libcommon.Hash, tokenIndex int) ([]byte, error) {
+func (pg *ProofGenerator) GenerateExitPayload(ctx context.Context, burnTxHash common.Hash, eventSignature common.Hash, tokenIndex int) ([]byte, error) {
 	logger := devnet.Logger(ctx)
 
 	if pg.heimdall == nil || pg.heimdall.rootChainBinding == nil {
@@ -116,13 +116,13 @@ func (pg *ProofGenerator) GenerateExitPayload(ctx context.Context, burnTxHash li
 	return result, nil
 }
 
-func (pg *ProofGenerator) getChainBlockInfo(ctx context.Context, burnTxHash libcommon.Hash) (uint64, uint64, error) {
+func (pg *ProofGenerator) getChainBlockInfo(ctx context.Context, burnTxHash common.Hash) (uint64, uint64, error) {
 	childNode := devnet.SelectBlockProducer(devnet.WithCurrentNetwork(ctx, networkname.BorDevnet))
 
 	var wg sync.WaitGroup
 
 	var lastChild *big.Int
-	var burnTransaction *jsonrpc.RPCTransaction
+	var burnTransaction *ethapi.RPCTransaction
 	var err [2]error
 
 	// err group
@@ -150,7 +150,7 @@ func (pg *ProofGenerator) getChainBlockInfo(ctx context.Context, burnTxHash libc
 }
 
 // lastchild block is greater equal to transacton block number;
-func (pg *ProofGenerator) isCheckPointed(ctx context.Context, burnTxHash libcommon.Hash) (bool, error) {
+func (pg *ProofGenerator) isCheckPointed(ctx context.Context, burnTxHash common.Hash) (bool, error) {
 	lastChildBlockNum, burnTxBlockNum, err := pg.getChainBlockInfo(ctx, burnTxHash)
 
 	if err != nil {
@@ -160,7 +160,7 @@ func (pg *ProofGenerator) isCheckPointed(ctx context.Context, burnTxHash libcomm
 	return lastChildBlockNum >= burnTxBlockNum, nil
 }
 
-func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash libcommon.Hash, logEventSig libcommon.Hash, index int) ([]byte, error) {
+func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash common.Hash, logEventSig common.Hash, index int) ([]byte, error) {
 
 	node := devnet.SelectBlockProducer(ctx)
 
@@ -260,20 +260,20 @@ func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash li
 	return rlp.EncodeToBytes(
 		[]interface{}{
 			rootBlockNumber,
-			hexutility.Encode(bytes.Join(blockProofs, []byte{})),
+			hexutil.Encode(bytes.Join(blockProofs, []byte{})),
 			block.Number.Uint64(),
 			block.Time,
-			hexutility.Encode(block.TxHash[:]),
-			hexutility.Encode(block.ReceiptHash[:]),
-			hexutility.Encode(getReceiptBytes(receipt)), //rpl encoded
-			hexutility.Encode(parentNodesBytes),
-			hexutility.Encode(append([]byte{0}, receiptProof.path...)),
+			hexutil.Encode(block.TxHash[:]),
+			hexutil.Encode(block.ReceiptHash[:]),
+			hexutil.Encode(getReceiptBytes(receipt)), //rpl encoded
+			hexutil.Encode(parentNodesBytes),
+			hexutil.Encode(append([]byte{0}, receiptProof.path...)),
 			logIndex,
 		})
 }
 
 type receiptProof struct {
-	blockHash   libcommon.Hash
+	blockHash   common.Hash
 	parentNodes [][]byte
 	root        []byte
 	path        []byte
@@ -454,17 +454,17 @@ func getBlockProofs(ctx context.Context, node requests.RequestGenerator, blockNu
 	return reversedProof, nil
 }
 
-func recursiveZeroHash(n int) libcommon.Hash {
+func recursiveZeroHash(n int) common.Hash {
 	if n == 0 {
-		return libcommon.Hash{}
+		return common.Hash{}
 	}
 
 	subHash := recursiveZeroHash(n - 1)
-	bytes, _ := rlp.EncodeToBytes([]libcommon.Hash{subHash, subHash})
+	bytes, _ := rlp.EncodeToBytes([]common.Hash{subHash, subHash})
 	return crypto.Keccak256Hash(bytes)
 }
 
-func getAllLogIndices(logEventSig libcommon.Hash, receipt *types.Receipt) []int {
+func getAllLogIndices(logEventSig common.Hash, receipt *types.Receipt) []int {
 	var logIndices []int
 
 	switch logEventSig.Hex() {
@@ -487,7 +487,7 @@ func getAllLogIndices(logEventSig libcommon.Hash, receipt *types.Receipt) []int 
 
 	case "0xf871896b17e9cb7a64941c62c188a4f5c621b86800e3d15452ece01ce56073df":
 		for index, log := range receipt.Logs {
-			if strings.EqualFold(hexutility.Encode(log.Topics[0][:]), "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef") &&
+			if strings.EqualFold(hexutil.Encode(log.Topics[0][:]), "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef") &&
 				log.Topics[2] == zeroHash {
 				logIndices = append(logIndices, index)
 			}
@@ -504,7 +504,7 @@ func getAllLogIndices(logEventSig libcommon.Hash, receipt *types.Receipt) []int 
 	return logIndices
 }
 
-func getLogIndex(logEventSig libcommon.Hash, receipt *types.Receipt) int {
+func getLogIndex(logEventSig common.Hash, receipt *types.Receipt) int {
 	switch logEventSig.Hex() {
 	case "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef":
 	case "0xf94915c6d1fd521cee85359239227480c7e8776d7caf1fc3bacad5c269b66a14":

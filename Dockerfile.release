@@ -1,6 +1,8 @@
-ARG RELEASE_DOCKER_BASE_IMAGE="alpine:3.20.1" \
-    CI_CD_MAIN_BUILDER_IMAGE="golang:1.22-bookworm" \
-    CI_CD_MAIN_TARGET_BASE_IMAGE="alpine:3.20.1" \
+ARG RELEASE_DOCKER_BASE_IMAGE="debian:12.8-slim" \
+    CI_CD_MAIN_BUILDER_IMAGE="golang:1.24-bookworm" \
+    CI_CD_MAIN_TARGET_BASE_IMAGE="alpine:3" \
+    UID_ERIGON=1000 \
+    GID_ERIGON=1000 \
     EXPOSED_PORTS="8545 \
        8551 \
        8546 \
@@ -22,7 +24,8 @@ ARG TARGETARCH \
     VERSION=${VERSION} \
     APPLICATION
 
-COPY ./dist/${APPLICATION}_${VERSION}_linux_${TARGETARCH}${TARGETVARIANT}.tar.gz /tmp/${APPLICATION}.tar.gz
+COPY ${APPLICATION}_${VERSION}_linux_${TARGETARCH}${TARGETVARIANT}.tar.gz /tmp/${APPLICATION}.tar.gz
+
 RUN tar xzvf /tmp/${APPLICATION}.tar.gz -C /tmp && \
     mv /tmp/${APPLICATION}_${VERSION}_linux_${TARGETARCH}${TARGETVARIANT} /tmp/${APPLICATION}
 
@@ -30,21 +33,37 @@ FROM ${RELEASE_DOCKER_BASE_IMAGE} AS release
 
 ARG USER=erigon \
     GROUP=erigon \
+    UID_ERIGON \
+    GID_ERIGON \
+    TARGETARCH \
     APPLICATION \
     EXPOSED_PORTS
 
+STOPSIGNAL 2
+
+SHELL ["/bin/bash", "-c"]
+
 RUN --mount=type=bind,from=temporary,source=/tmp/${APPLICATION},target=/tmp/${APPLICATION} \
-    apk add --no-cache ca-certificates tzdata && \
-    addgroup ${GROUP} && \
-    adduser -D -h /home/${USER} -G ${GROUP} ${USER} && \
+    echo Installing on ${TARGETOS} with variant ${TARGETVARIANT} && \
+    addgroup --gid ${GID_ERIGON} ${GROUP} && \
+    adduser --system --uid ${UID_ERIGON} --ingroup ${GROUP} --home /home/${USER} --shell /bin/bash ${USER} && \
+    apt update -y && \
+    apt install -y --no-install-recommends ca-certificates && \
+    apt clean && \
+    rm -rf /var/lib/apt/lists/* && \
+    if [ "x${TARGETARCH}" == "xamd64" ]; then \
+        echo "Installing libsilkworm_capi.so library to /lib/x86_64-linux-gnu/ in case amd64 architecture:"; \
+        find /tmp/${APPLICATION} -name libsilkworm_capi.so -type f | xargs -I % install -m a=r -v % /lib/x86_64-linux-gnu/; \
+        echo "Done." ; \
+    fi && \
     install -d -o ${USER} -g ${GROUP} /home/${USER}/.local /home/${USER}/.local/share /home/${USER}/.local/share/erigon && \
-    install -o ${USER} -g ${GROUP} /tmp/${APPLICATION}/erigon /usr/local/bin/ && \
-    install -o ${USER} -g ${GROUP} /tmp/${APPLICATION}/integration /usr/local/bin/ && \
-    install -o ${USER} -g ${GROUP} /tmp/${APPLICATION}/diag /usr/local/bin/ && \
-    install -o ${USER} -g ${GROUP} /tmp/${APPLICATION}/sentry /usr/local/bin/ && \
-    install -o ${USER} -g ${GROUP} /tmp/${APPLICATION}/txpool /usr/local/bin/ && \
-    install -o ${USER} -g ${GROUP} /tmp/${APPLICATION}/downloader /usr/local/bin/ && \
-    install -o ${USER} -g ${GROUP} /tmp/${APPLICATION}/rpcdaemon /usr/local/bin/
+    install -o root -g root /tmp/${APPLICATION}/erigon /usr/local/bin/ && \
+    install -o root -g root /tmp/${APPLICATION}/integration /usr/local/bin/ && \
+    install -o root -g root /tmp/${APPLICATION}/diag /usr/local/bin/ && \
+    install -o root -g root /tmp/${APPLICATION}/sentry /usr/local/bin/ && \
+    install -o root -g root /tmp/${APPLICATION}/txpool /usr/local/bin/ && \
+    install -o root -g root /tmp/${APPLICATION}/downloader /usr/local/bin/ && \
+    install -o root -g root /tmp/${APPLICATION}/rpcdaemon /usr/local/bin/
 
 VOLUME [ "/home/${USER}" ]
 WORKDIR /home/${USER}
@@ -76,7 +95,7 @@ ARG USER=erigon \
     EXPOSED_PORTS
 
 RUN --mount=type=bind,from=ci-cd-main-branch-builder,source=/build-${TARGETARCH},target=/tmp/erigon \
-    apk add --no-cache ca-certificates tzdata libstdc++ && \
+    apk add --no-cache curl ca-certificates tzdata libstdc++ && \
     addgroup ${GROUP} && \
     adduser -D -h /home/${USER} -G ${GROUP} ${USER} && \
     install -d -o ${USER} -g ${GROUP} /home/${USER}/.local /home/${USER}/.local/share /home/${USER}/.local/share/erigon && \

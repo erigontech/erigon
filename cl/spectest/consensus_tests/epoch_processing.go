@@ -66,7 +66,7 @@ func (b *EpochProcessing) Run(t *testing.T, root fs.FS, c spectest.TestCase) (er
 	expectedRoot, err := expectedState.HashSSZ()
 	require.NoError(t, err)
 
-	assert.EqualValues(t, expectedRoot, haveRoot)
+	assert.Equal(t, expectedRoot, haveRoot)
 	return nil
 }
 
@@ -121,5 +121,15 @@ var slashingsResetTest = NewEpochProcessing(func(s abstract.BeaconState) error {
 
 var recordsResetTest = NewEpochProcessing(func(s abstract.BeaconState) error {
 	statechange.ProcessParticipationRecordUpdates(s)
+	return nil
+})
+
+var pendingDepositTest = NewEpochProcessing(func(s abstract.BeaconState) error {
+	statechange.ProcessPendingDeposits(s)
+	return nil
+})
+
+var PendingConsolidationTest = NewEpochProcessing(func(s abstract.BeaconState) error {
+	statechange.ProcessPendingConsolidations(s)
 	return nil
 })

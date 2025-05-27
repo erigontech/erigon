@@ -39,15 +39,15 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	stateLib "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types/accounts"
 )
 
 var toAddr = common.BytesToAddress
 
 type StateSuite struct {
-	kv    kv.RwDB
-	tx    kv.RwTx
+	kv    kv.TemporalRwDB
+	tx    kv.TemporalTx
 	state *IntraBlockState
 	r     StateReader
 	w     StateWriter
@@ -57,15 +57,18 @@ var _ = checker.Suite(&StateSuite{})
 
 func (s *StateSuite) TestDump(c *checker.C) {
 	// generate a few entries
-	obj1 := s.state.GetOrNewStateObject(toAddr([]byte{0x01}))
+	obj1, err := s.state.GetOrNewStateObject(toAddr([]byte{0x01}))
+	c.Check(err, checker.IsNil)
 	obj1.AddBalance(uint256.NewInt(22), tracing.BalanceChangeUnspecified)
-	obj2 := s.state.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
+	obj2, err := s.state.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
+	c.Check(err, checker.IsNil)
 	obj2.SetCode(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3}), []byte{3, 3, 3, 3, 3, 3, 3})
-	obj3 := s.state.GetOrNewStateObject(toAddr([]byte{0x02}))
-	obj3.SetBalance(uint256.NewInt(44), tracing.BalanceChangeUnspecified)
+	obj3, err := s.state.GetOrNewStateObject(toAddr([]byte{0x02}))
+	c.Check(err, checker.IsNil)
+	obj3.SetBalance(*uint256.NewInt(44), tracing.BalanceChangeUnspecified)
 
 	// write some of them to the trie
-	err := s.w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
+	err = s.w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
 	c.Check(err, checker.IsNil)
 	err = s.w.UpdateAccountData(obj2.address, &obj2.data, new(accounts.Account))
 	c.Check(err, checker.IsNil)
@@ -77,7 +80,7 @@ func (s *StateSuite) TestDump(c *checker.C) {
 	c.Check(err, checker.IsNil)
 
 	// check that dump contains the state objects that are in trie
-	tx, err1 := s.kv.BeginRo(context.Background())
+	tx, err1 := s.kv.BeginTemporalRo(context.Background())
 	if err1 != nil {
 		c.Fatalf("create tx: %v", err1)
 	}
@@ -142,16 +145,16 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 	}
 	defer domains.Close()
 
-	domains.SetTxNum(1)
+	txNum := uint64(1)
+	domains.SetTxNum(txNum)
 	domains.SetBlockNum(1)
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	if err != nil {
 		panic(err)
 	}
 	s.tx = tx
-	//s.r = NewWriterV4(s.tx)
-	s.r = NewReaderV3(domains)
-	s.w = NewWriterV4(domains)
+	s.r = NewReaderV3(domains.AsGetter(tx))
+	s.w = NewWriter(domains.AsPutDel(tx), nil, txNum)
 	s.state = New(s.r)
 }
 
@@ -166,7 +169,7 @@ func (s *StateSuite) TestNull(c *checker.C) {
 	//value := common.FromHex("0x823140710bf13990e4500136726d8b55")
 	var value uint256.Int
 
-	s.state.SetState(address, &common.Hash{}, value)
+	s.state.SetState(address, common.Hash{}, value)
 
 	err := s.state.FinalizeTx(&chain.Rules{}, s.w)
 	c.Check(err, checker.IsNil)
@@ -174,7 +177,7 @@ func (s *StateSuite) TestNull(c *checker.C) {
 	err = s.state.CommitBlock(&chain.Rules{}, s.w)
 	c.Check(err, checker.IsNil)
 
-	s.state.GetCommittedState(address, &common.Hash{}, &value)
+	s.state.GetCommittedState(address, common.Hash{}, &value)
 	if !value.IsZero() {
 		c.Errorf("expected empty hash. got %x", value)
 	}
@@ -217,24 +220,24 @@ func (s *StateSuite) TestSnapshot(c *checker.C) {
 	genesis := s.state.Snapshot()
 
 	// set initial state object value
-	s.state.SetState(stateobjaddr, &storageaddr, *data1)
+	s.state.SetState(stateobjaddr, storageaddr, *data1)
 	snapshot := s.state.Snapshot()
 
 	// set a new state object value, revert it and ensure correct content
-	s.state.SetState(stateobjaddr, &storageaddr, *data2)
+	s.state.SetState(stateobjaddr, storageaddr, *data2)
 	s.state.RevertToSnapshot(snapshot)
 
 	var value uint256.Int
-	s.state.GetState(stateobjaddr, &storageaddr, &value)
+	s.state.GetState(stateobjaddr, storageaddr, &value)
 	c.Assert(value, checker.DeepEquals, data1)
-	s.state.GetCommittedState(stateobjaddr, &storageaddr, &value)
+	s.state.GetCommittedState(stateobjaddr, storageaddr, &value)
 	c.Assert(value, checker.DeepEquals, common.Hash{})
 
 	// revert up to the genesis state and ensure correct content
 	s.state.RevertToSnapshot(genesis)
-	s.state.GetState(stateobjaddr, &storageaddr, &value)
+	s.state.GetState(stateobjaddr, storageaddr, &value)
 	c.Assert(value, checker.DeepEquals, common.Hash{})
-	s.state.GetCommittedState(stateobjaddr, &storageaddr, &value)
+	s.state.GetCommittedState(stateobjaddr, storageaddr, &value)
 	c.Assert(value, checker.DeepEquals, common.Hash{})
 }
 
@@ -253,14 +256,15 @@ func TestSnapshot2(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	domains.SetTxNum(1)
+	txNum := uint64(1)
+	domains.SetTxNum(txNum)
 	domains.SetBlockNum(2)
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	w := NewWriterV4(domains)
+	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 
-	state := New(NewReaderV3(domains))
+	state := New(NewReaderV3(domains.AsGetter(tx)))
 
 	stateobjaddr0 := toAddr([]byte("so0"))
 	stateobjaddr1 := toAddr([]byte("so1"))
@@ -269,12 +273,15 @@ func TestSnapshot2(t *testing.T) {
 	data0 := uint256.NewInt(17)
 	data1 := uint256.NewInt(18)
 
-	state.SetState(stateobjaddr0, &storageaddr, *data0)
-	state.SetState(stateobjaddr1, &storageaddr, *data1)
+	state.SetState(stateobjaddr0, storageaddr, *data0)
+	state.SetState(stateobjaddr1, storageaddr, *data1)
 
 	// db, trie are already non-empty values
-	so0 := state.getStateObject(stateobjaddr0)
-	so0.SetBalance(uint256.NewInt(42), tracing.BalanceChangeUnspecified)
+	so0, err := state.getStateObject(stateobjaddr0)
+	if err != nil {
+		t.Fatal("getting state", err)
+	}
+	so0.SetBalance(*uint256.NewInt(42), tracing.BalanceChangeUnspecified)
 	so0.SetNonce(43)
 	so0.SetCode(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e'}), []byte{'c', 'a', 'f', 'e'})
 	so0.selfdestructed = false
@@ -292,15 +299,21 @@ func TestSnapshot2(t *testing.T) {
 	}
 
 	// and one with deleted == true
-	so1 := state.getStateObject(stateobjaddr1)
-	so1.SetBalance(uint256.NewInt(52), tracing.BalanceChangeUnspecified)
+	so1, err := state.getStateObject(stateobjaddr1)
+	if err != nil {
+		t.Fatal("getting state", err)
+	}
+	so1.SetBalance(*uint256.NewInt(52), tracing.BalanceChangeUnspecified)
 	so1.SetNonce(53)
 	so1.SetCode(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e', '2'}), []byte{'c', 'a', 'f', 'e', '2'})
 	so1.selfdestructed = true
 	so1.deleted = true
 	state.setStateObject(stateobjaddr1, so1)
 
-	so1 = state.getStateObject(stateobjaddr1)
+	so1, err = state.getStateObject(stateobjaddr1)
+	if err != nil {
+		t.Fatal("getting state", err)
+	}
 	if so1 != nil && !so1.deleted {
 		t.Fatalf("deleted object not nil when getting")
 	}
@@ -308,16 +321,22 @@ func TestSnapshot2(t *testing.T) {
 	snapshot := state.Snapshot()
 	state.RevertToSnapshot(snapshot)
 
-	so0Restored := state.getStateObject(stateobjaddr0)
+	so0Restored, err := state.getStateObject(stateobjaddr0)
+	if err != nil {
+		t.Fatal("getting restored state", err)
+	}
 	// Update lazily-loaded values before comparing.
 	var tmp uint256.Int
-	so0Restored.GetState(&storageaddr, &tmp)
+	so0Restored.GetState(storageaddr, &tmp)
 	so0Restored.Code()
 	// non-deleted is equal (restored)
 	compareStateObjects(so0Restored, so0, t)
 
 	// deleted should be nil, both before and after restore of state copy
-	so1Restored := state.getStateObject(stateobjaddr1)
+	so1Restored, err := state.getStateObject(stateobjaddr1)
+	if err != nil {
+		t.Fatal("getting restored state", err)
+	}
 	if so1Restored != nil && !so1Restored.deleted {
 		t.Fatalf("deleted object not nil after restoring snapshot: %+v", so1Restored)
 	}
@@ -371,12 +390,17 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 	}
 }
 
-func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *state.Aggregator) {
+func NewTestTemporalDb(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *state.Aggregator) {
 	tb.Helper()
 	db := memdb.NewStateDB(tb.TempDir())
 	tb.Cleanup(db.Close)
 
-	agg, err := state.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, log.New())
+	dirs, logger := datadir.New(tb.TempDir()), log.New()
+	salt, err := state.GetStateIndicesSalt(dirs, true, logger)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	agg, err := state.NewAggregator2(context.Background(), dirs, 16, salt, db, log.New())
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -407,18 +431,21 @@ func TestDump(t *testing.T) {
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	st := New(NewReaderV3(domains))
+	st := New(NewReaderV3(domains.AsGetter(tx)))
 
 	// generate a few entries
-	obj1 := st.GetOrNewStateObject(toAddr([]byte{0x01}))
+	obj1, err := st.GetOrNewStateObject(toAddr([]byte{0x01}))
+	require.NoError(t, err)
 	obj1.AddBalance(uint256.NewInt(22), tracing.BalanceChangeUnspecified)
-	obj2 := st.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
+	obj2, err := st.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
+	require.NoError(t, err)
 	obj2.SetCode(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3}), []byte{3, 3, 3, 3, 3, 3, 3})
 	obj2.setIncarnation(1)
-	obj3 := st.GetOrNewStateObject(toAddr([]byte{0x02}))
-	obj3.SetBalance(uint256.NewInt(44), tracing.BalanceChangeUnspecified)
+	obj3, err := st.GetOrNewStateObject(toAddr([]byte{0x02}))
+	require.NoError(t, err)
+	obj3.SetBalance(*uint256.NewInt(44), tracing.BalanceChangeUnspecified)
 
-	w := NewWriterV4(domains)
+	w := NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
 	// write some of them to the trie
 	err = w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
 	require.NoError(t, err)
@@ -427,7 +454,7 @@ func TestDump(t *testing.T) {
 	err = st.FinalizeTx(&chain.Rules{}, w)
 	require.NoError(t, err)
 
-	blockWriter := NewWriterV4(domains)
+	blockWriter := NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
 	err = st.CommitBlock(&chain.Rules{}, blockWriter)
 	require.NoError(t, err)
 	err = domains.Flush(context.Background(), tx)

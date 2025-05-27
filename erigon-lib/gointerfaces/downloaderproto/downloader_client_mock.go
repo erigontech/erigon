@@ -263,14 +263,14 @@ func (c *MockDownloaderClientSetLogPrefixCall) DoAndReturn(f func(context.Contex
 }
 
 // TorrentCompleted mocks base method.
-func (m *MockDownloaderClient) TorrentCompleted(ctx context.Context, in *TorrentCompletedRequest, opts ...grpc.CallOption) (Downloader_TorrentCompletedClient, error) {
+func (m *MockDownloaderClient) TorrentCompleted(ctx context.Context, in *TorrentCompletedRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TorrentCompletedReply], error) {
 	m.ctrl.T.Helper()
 	varargs := []any{ctx, in}
 	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "TorrentCompleted", varargs...)
-	ret0, _ := ret[0].(Downloader_TorrentCompletedClient)
+	ret0, _ := ret[0].(grpc.ServerStreamingClient[TorrentCompletedReply])
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -289,19 +289,19 @@ type MockDownloaderClientTorrentCompletedCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockDownloaderClientTorrentCompletedCall) Return(arg0 Downloader_TorrentCompletedClient, arg1 error) *MockDownloaderClientTorrentCompletedCall {
+func (c *MockDownloaderClientTorrentCompletedCall) Return(arg0 grpc.ServerStreamingClient[TorrentCompletedReply], arg1 error) *MockDownloaderClientTorrentCompletedCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockDownloaderClientTorrentCompletedCall) Do(f func(context.Context, *TorrentCompletedRequest, ...grpc.CallOption) (Downloader_TorrentCompletedClient, error)) *MockDownloaderClientTorrentCompletedCall {
+func (c *MockDownloaderClientTorrentCompletedCall) Do(f func(context.Context, *TorrentCompletedRequest, ...grpc.CallOption) (grpc.ServerStreamingClient[TorrentCompletedReply], error)) *MockDownloaderClientTorrentCompletedCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockDownloaderClientTorrentCompletedCall) DoAndReturn(f func(context.Context, *TorrentCompletedRequest, ...grpc.CallOption) (Downloader_TorrentCompletedClient, error)) *MockDownloaderClientTorrentCompletedCall {
+func (c *MockDownloaderClientTorrentCompletedCall) DoAndReturn(f func(context.Context, *TorrentCompletedRequest, ...grpc.CallOption) (grpc.ServerStreamingClient[TorrentCompletedReply], error)) *MockDownloaderClientTorrentCompletedCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

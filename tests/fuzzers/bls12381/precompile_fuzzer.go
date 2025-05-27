@@ -23,28 +23,23 @@ import (
 	"bytes"
 	"fmt"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/vm"
 )
 
 const (
-	blsG1Add      = byte(0x0b)
-	blsG1Mul      = byte(0x0c)
-	blsG1MultiExp = byte(0x0d)
-	blsG2Add      = byte(0x0e)
-	blsG2Mul      = byte(0x0f)
-	blsG2MultiExp = byte(0x10)
-	blsPairing    = byte(0x11)
-	blsMapG1      = byte(0x12)
-	blsMapG2      = byte(0x13)
+	blsG1Add      = byte(11)
+	blsG1MultiExp = byte(12)
+	blsG2Add      = byte(13)
+	blsG2MultiExp = byte(14)
+	blsPairing    = byte(15)
+	blsMapG1      = byte(16)
+	blsMapG2      = byte(17)
 )
 
 func FuzzG1Add(data []byte) int      { return fuzz(blsG1Add, data) }
-func FuzzG1Mul(data []byte) int      { return fuzz(blsG1Mul, data) }
 func FuzzG1MultiExp(data []byte) int { return fuzz(blsG1MultiExp, data) }
 func FuzzG2Add(data []byte) int      { return fuzz(blsG2Add, data) }
-func FuzzG2Mul(data []byte) int      { return fuzz(blsG2Mul, data) }
 func FuzzG2MultiExp(data []byte) int { return fuzz(blsG2MultiExp, data) }
 func FuzzPairing(data []byte) int    { return fuzz(blsPairing, data) }
 func FuzzMapG1(data []byte) int      { return fuzz(blsMapG1, data) }
@@ -54,14 +49,10 @@ func checkInput(id byte, inputLen int) bool {
 	switch id {
 	case blsG1Add:
 		return inputLen == 256
-	case blsG1Mul:
-		return inputLen == 160
 	case blsG1MultiExp:
 		return inputLen%160 == 0
 	case blsG2Add:
 		return inputLen == 512
-	case blsG2Mul:
-		return inputLen == 288
 	case blsG2MultiExp:
 		return inputLen%288 == 0
 	case blsPairing:
@@ -85,7 +76,7 @@ func checkInput(id byte, inputLen int) bool {
 // other values are reserved for future use.
 func fuzz(id byte, data []byte) int {
 	// Even on bad input, it should not crash, so we still test the gas calc
-	precompile := vm.PrecompiledContractsPrague[libcommon.BytesToAddress([]byte{id})]
+	precompile := vm.PrecompiledContractsPrague[common.BytesToAddress([]byte{id})]
 	gas := precompile.RequiredGas(data)
 	if !checkInput(id, len(data)) {
 		return 0

@@ -19,20 +19,18 @@ package historical_states_reader
 import (
 	"errors"
 	"fmt"
-	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/erigontech/erigon/cl/utils"
 )
 
-func (r *HistoricalStatesReader) attestingIndicies(attestation *solid.Attestation, checkBitsLength bool, mix libcommon.Hash, idxs []uint64) ([]uint64, error) {
+func (r *HistoricalStatesReader) attestingIndicies(attestation *solid.Attestation, checkBitsLength bool, mix common.Hash, idxs []uint64) ([]uint64, error) {
 	slot := attestation.Data.Slot
 	epoch := slot / r.cfg.SlotsPerEpoch
 	clversion := r.cfg.GetCurrentStateVersion(epoch)
@@ -72,6 +70,7 @@ func (r *HistoricalStatesReader) attestingIndicies(attestation *solid.Attestatio
 	var (
 		committeeBits   = attestation.CommitteeBits
 		aggregationBits = attestation.AggregationBits
+		aggrBitsLen     = aggregationBits.Bits()
 		attesters       = []uint64{}
 	)
 	committeeOffset := 0
@@ -84,38 +83,33 @@ func (r *HistoricalStatesReader) attestingIndicies(attestation *solid.Attestatio
 			return nil, err
 		}
 		for i, member := range committee {
-			if i >= aggregationBits.Bits() {
-				return nil, errors.New("GetAttestingIndicies: committee is too big")
+			if i >= aggrBitsLen {
+				return nil, fmt.Errorf("attestingIndicies: committee is too big, committeeOffset: %d, aggrBitsLen: %d, committeeSize: %d",
+					committeeOffset, aggrBitsLen, len(committee))
 			}
 			if aggregationBits.GetBitAt(committeeOffset + i) {
 				attesters = append(attesters, member)
 			}
-			committeeOffset += len(committee)
 		}
+		committeeOffset += len(committee)
 	}
 	return attesters, nil
 }
 
 // computeCommittee uses cache to compute compittee
-func (r *HistoricalStatesReader) ComputeCommittee(mix libcommon.Hash, indicies []uint64, slot uint64, count, index uint64) ([]uint64, error) {
+func (r *HistoricalStatesReader) ComputeCommittee(mix common.Hash, indicies []uint64, slot uint64, count, index uint64) ([]uint64, error) {
 	cfg := r.cfg
 	lenIndicies := uint64(len(indicies))
 
 	start := (lenIndicies * index) / count
 	end := (lenIndicies * (index + 1)) / count
 	var shuffledIndicies []uint64
-	epoch := slot / cfg.SlotsPerEpoch
-	/*
-	   mixPosition := (epoch + cfg.EpochsPerHistoricalVector - cfg.MinSeedLookahead - 1) % cfg.EpochsPerHistoricalVector
-	*/
-	if shuffledIndicesInterface, ok := r.shuffledSetsCache.Get(epoch); ok {
-		shuffledIndicies = shuffledIndicesInterface
-	} else {
+
+	shuffledIndicies, ok := r.shuffledIndiciesCache.Get(slot / cfg.SlotsPerEpoch)
+	if !ok {
 		shuffledIndicies = make([]uint64, lenIndicies)
-		start := time.Now()
 		shuffledIndicies = shuffling.ComputeShuffledIndicies(cfg, mix, shuffledIndicies, indicies, slot)
-		shuffling_metrics.ObserveComputeShuffledIndiciesTime(start)
-		r.shuffledSetsCache.Add(epoch, shuffledIndicies)
+		r.shuffledIndiciesCache.Add(slot/cfg.SlotsPerEpoch, shuffledIndicies)
 	}
 
 	return shuffledIndicies[start:end], nil
@@ -132,7 +126,7 @@ func committeeCount(cfg *clparams.BeaconChainConfig, epoch uint64, idxs []uint64
 	return committeCount
 }
 
-func (r *HistoricalStatesReader) readHistoricalBlockRoot(tx kv.Tx, slot, index uint64) (libcommon.Hash, error) {
+func (r *HistoricalStatesReader) readHistoricalBlockRoot(kvGetter state_accessors.GetValFn, slot, index uint64) (common.Hash, error) {
 	slotSubIndex := slot % r.cfg.SlotsPerHistoricalRoot
 	needFromGenesis := true
 
@@ -152,19 +146,20 @@ func (r *HistoricalStatesReader) readHistoricalBlockRoot(tx kv.Tx, slot, index u
 	if needFromGenesis {
 		return r.genesisState.GetBlockRootAtSlot(slot)
 	}
-	br, err := tx.GetOne(kv.BlockRoot, base_encoding.Encode64ToBytes4(slotLookup))
+	br, err := kvGetter(kv.BlockRoot, base_encoding.Encode64ToBytes4(slotLookup))
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 	if len(br) != 32 {
-		return libcommon.Hash{}, fmt.Errorf("invalid block root length %d", len(br))
+		return common.Hash{}, fmt.Errorf("invalid block root length %d", len(br))
 	}
-	return libcommon.BytesToHash(br), nil
+	return common.BytesToHash(br), nil
 
 }
 
-func (r *HistoricalStatesReader) getAttestationParticipationFlagIndicies(tx kv.Tx, version clparams.StateVersion, stateSlot uint64, data solid.AttestationData, inclusionDelay uint64, skipAssert bool) ([]uint8, error) {
-	currentCheckpoint, previousCheckpoint, _, ok, err := state_accessors.ReadCheckpoints(tx, r.cfg.RoundSlotToEpoch(stateSlot))
+func (r *HistoricalStatesReader) getAttestationParticipationFlagIndicies(tx kv.Tx, getter state_accessors.GetValFn, version clparams.StateVersion, stateSlot uint64, data solid.AttestationData, inclusionDelay uint64, skipAssert bool) ([]uint8, error) {
+
+	currentCheckpoint, previousCheckpoint, _, ok, err := state_accessors.ReadCheckpoints(getter, r.cfg.RoundSlotToEpoch(stateSlot))
 	if err != nil {
 		return nil, err
 	}
@@ -186,13 +181,13 @@ func (r *HistoricalStatesReader) getAttestationParticipationFlagIndicies(tx kv.T
 		return nil, errors.New("GetAttestationParticipationFlagIndicies: source does not match.")
 	}
 	i := (data.Target.Epoch * r.cfg.SlotsPerEpoch) % r.cfg.SlotsPerHistoricalRoot
-	targetRoot, err := r.readHistoricalBlockRoot(tx, stateSlot, i)
+	targetRoot, err := r.readHistoricalBlockRoot(getter, stateSlot, i)
 	if err != nil {
 		return nil, err
 	}
 
 	i = data.Slot % r.cfg.SlotsPerHistoricalRoot
-	headRoot, err := r.readHistoricalBlockRoot(tx, stateSlot, i)
+	headRoot, err := r.readHistoricalBlockRoot(getter, stateSlot, i)
 	if err != nil {
 		return nil, err
 	}

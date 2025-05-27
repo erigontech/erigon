@@ -17,22 +17,46 @@
 package kv
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
+	"maps"
 	"os"
+	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	"github.com/erigontech/erigon-lib/common"
 )
 
-func DefaultPageSize() uint64 {
+// Adapts an RoDB to the RwDB interface (invoking write operations results in error)
+type RwWrapper struct {
+	RoDB
+}
+
+func (w RwWrapper) Update(ctx context.Context, f func(tx RwTx) error) error {
+	return errors.New("Update not implemented")
+}
+func (w RwWrapper) UpdateNosync(ctx context.Context, f func(tx RwTx) error) error {
+	return errors.New("UpdateNosync not implemented")
+}
+func (w RwWrapper) BeginRw(ctx context.Context) (RwTx, error) {
+	return nil, errors.New("BeginRw not implemented")
+}
+func (w RwWrapper) BeginRwNosync(ctx context.Context) (RwTx, error) {
+	return nil, errors.New("BeginRwNosync not implemented")
+}
+
+func DefaultPageSize() datasize.ByteSize {
 	osPageSize := os.Getpagesize()
 	if osPageSize < 4096 { // reduce further may lead to errors (because some data is just big)
 		osPageSize = 4096
@@ -40,7 +64,7 @@ func DefaultPageSize() uint64 {
 		osPageSize = mdbx.MaxPageSize
 	}
 	osPageSize = osPageSize / 4096 * 4096 // ensure it's rounded
-	return uint64(osPageSize)
+	return datasize.ByteSize(osPageSize)
 }
 
 // BigChunks - read `table` by big chunks - restart read transaction after each 1 minutes
@@ -110,7 +134,7 @@ func bytes2bool(in []byte) bool {
 var ErrChanged = errors.New("key must not change")
 
 // EnsureNotChangedBool - used to store immutable config flags in db. protects from human mistakes
-func EnsureNotChangedBool(tx GetPut, bucket string, k []byte, value bool) (ok, enabled bool, err error) {
+func EnsureNotChangedBool(tx GetPut, bucket string, k []byte, value bool) (notChanged, enabled bool, err error) {
 	vBytes, err := tx.GetOne(bucket, k)
 	if err != nil {
 		return false, enabled, err
@@ -236,5 +260,73 @@ func IncrementKey(tx RwTx, table string, k []byte) error {
 		version = binary.BigEndian.Uint64(v)
 	}
 	version++
-	return tx.Put(table, k, hexutility.EncodeTs(version))
+	return tx.Put(table, k, hexutil.EncodeTs(version))
 }
+
+type DomainEntryDiff struct {
+	Key           string
+	Value         []byte
+	PrevStepBytes []byte
+}
+
+// DomainDiff represents a domain of state changes.
+type DomainDiff struct {
+	// We can probably flatten these into single slices for GC/cache optimization
+	keys          map[string][]byte
+	prevValues    map[string][]byte
+	prevValsSlice []DomainEntryDiff
+
+	prevStepBuf, currentStepBuf, keyBuf []byte
+}
+
+func (d *DomainDiff) Copy() *DomainDiff {
+	return &DomainDiff{keys: maps.Clone(d.keys), prevValues: maps.Clone(d.prevValues)}
+}
+
+// RecordDelta records a state change.
+func (d *DomainDiff) DomainUpdate(k []byte, step uint64, prevValue []byte, prevStep uint64) {
+	if d.keys == nil {
+		d.keys = make(map[string][]byte, 16)
+		d.prevValues = make(map[string][]byte, 16)
+		d.prevStepBuf = make([]byte, 8)
+		d.currentStepBuf = make([]byte, 8)
+	}
+	binary.BigEndian.PutUint64(d.prevStepBuf, ^prevStep)
+	binary.BigEndian.PutUint64(d.currentStepBuf, ^step)
+
+	d.keyBuf = append(append(d.keyBuf[:0], k...), d.currentStepBuf...)
+	key := toStringZeroCopy(d.keyBuf[:len(k)])
+	if _, ok := d.keys[key]; !ok {
+		d.keys[strings.Clone(key)] = common.Copy(d.prevStepBuf)
+	}
+
+	valsKey := toStringZeroCopy(d.keyBuf)
+	if _, ok := d.prevValues[valsKey]; !ok {
+		valsKeySCopy := strings.Clone(valsKey)
+		if bytes.Equal(d.currentStepBuf, d.prevStepBuf) {
+			d.prevValues[valsKeySCopy] = common.Copy(prevValue)
+		} else {
+			d.prevValues[valsKeySCopy] = []byte{} // We need to delete the current step but restore the previous one
+		}
+		d.prevValsSlice = nil
+	}
+}
+
+func (d *DomainDiff) GetDiffSet() (keysToValue []DomainEntryDiff) {
+	if len(d.prevValsSlice) != 0 {
+		return d.prevValsSlice
+	}
+	d.prevValsSlice = make([]DomainEntryDiff, len(d.prevValues))
+	i := 0
+	for k, v := range d.prevValues {
+		d.prevValsSlice[i].Key = k
+		d.prevValsSlice[i].Value = v
+		d.prevValsSlice[i].PrevStepBytes = d.keys[k[:len(k)-8]]
+		i++
+	}
+	sort.Slice(d.prevValsSlice, func(i, j int) bool {
+		return d.prevValsSlice[i].Key < d.prevValsSlice[j].Key
+	})
+	return d.prevValsSlice
+}
+func toStringZeroCopy(v []byte) string { return unsafe.String(&v[0], len(v)) }

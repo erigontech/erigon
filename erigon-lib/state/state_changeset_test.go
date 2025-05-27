@@ -17,21 +17,43 @@
 package state
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/stretchr/testify/require"
 )
+
+func TestOverflowPages(t *testing.T) {
+	db, _ := testDbAndAggregatorv3(t, 10)
+	ctx := context.Background()
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	k, v := make([]byte, diffChunkKeyLen), make([]byte, diffChunkLen)
+	k[0] = 0
+	_ = tx.Put(kv.ChangeSets3, k, v)
+	k[0] = 1
+	_ = tx.Put(kv.ChangeSets3, k, v)
+	st, err := tx.(*mdbx.MdbxTx).BucketStat(kv.ChangeSets3)
+	require.NoError(t, err)
+	require.Equal(t, 2, int(st.OverflowPages))
+	require.Equal(t, 1, int(st.LeafPages))
+	require.Equal(t, 2, int(st.Entries))
+	require.Equal(t, 2, int(st.Entries))
+}
 
 func TestSerializeDeserializeDiff(t *testing.T) {
 	t.Parallel()
 
-	var d []DomainEntryDiff
+	var d []kv.DomainEntryDiff
 	step1, step2, step3 := [8]byte{1}, [8]byte{2}, [8]byte{3}
-	d = append(d, DomainEntryDiff{Key: []byte("key188888888"), Value: []byte("value1"), PrevStepBytes: step1[:]})
-	d = append(d, DomainEntryDiff{Key: []byte("key288888888"), Value: []byte("value2"), PrevStepBytes: step2[:]})
-	d = append(d, DomainEntryDiff{Key: []byte("key388888888"), Value: []byte("value3"), PrevStepBytes: step3[:]})
-	d = append(d, DomainEntryDiff{Key: []byte("key388888888"), Value: []byte("value3"), PrevStepBytes: step1[:]})
+	d = append(d, kv.DomainEntryDiff{Key: "key188888888", Value: []byte("value1"), PrevStepBytes: step1[:]})
+	d = append(d, kv.DomainEntryDiff{Key: "key288888888", Value: []byte("value2"), PrevStepBytes: step2[:]})
+	d = append(d, kv.DomainEntryDiff{Key: "key388888888", Value: []byte("value3"), PrevStepBytes: step3[:]})
+	d = append(d, kv.DomainEntryDiff{Key: "key388888888", Value: []byte("value3"), PrevStepBytes: step1[:]})
 
 	serialized := SerializeDiffSet(d, nil)
 	fmt.Println(len(serialized))
@@ -43,20 +65,20 @@ func TestSerializeDeserializeDiff(t *testing.T) {
 func TestMergeDiffSet(t *testing.T) {
 	t.Parallel()
 
-	var d1 []DomainEntryDiff
+	var d1 []kv.DomainEntryDiff
 	step1, step2, step3 := [8]byte{1}, [8]byte{2}, [8]byte{3}
-	d1 = append(d1, DomainEntryDiff{Key: []byte("key188888888"), Value: []byte("value1"), PrevStepBytes: step1[:]})
-	d1 = append(d1, DomainEntryDiff{Key: []byte("key288888888"), Value: []byte("value2"), PrevStepBytes: step2[:]})
-	d1 = append(d1, DomainEntryDiff{Key: []byte("key388888888"), Value: []byte("value3"), PrevStepBytes: step3[:]})
+	d1 = append(d1, kv.DomainEntryDiff{Key: "key188888888", Value: []byte("value1"), PrevStepBytes: step1[:]})
+	d1 = append(d1, kv.DomainEntryDiff{Key: "key288888888", Value: []byte("value2"), PrevStepBytes: step2[:]})
+	d1 = append(d1, kv.DomainEntryDiff{Key: "key388888888", Value: []byte("value3"), PrevStepBytes: step3[:]})
 
-	var d2 []DomainEntryDiff
+	var d2 []kv.DomainEntryDiff
 	step4, step5, step6 := [8]byte{4}, [8]byte{5}, [8]byte{6}
-	d2 = append(d2, DomainEntryDiff{Key: []byte("key188888888"), Value: []byte("value5"), PrevStepBytes: step5[:]})
-	d2 = append(d2, DomainEntryDiff{Key: []byte("key388888888"), Value: []byte("value6"), PrevStepBytes: step6[:]})
-	d2 = append(d2, DomainEntryDiff{Key: []byte("key488888888"), Value: []byte("value4"), PrevStepBytes: step4[:]})
+	d2 = append(d2, kv.DomainEntryDiff{Key: "key188888888", Value: []byte("value5"), PrevStepBytes: step5[:]})
+	d2 = append(d2, kv.DomainEntryDiff{Key: "key388888888", Value: []byte("value6"), PrevStepBytes: step6[:]})
+	d2 = append(d2, kv.DomainEntryDiff{Key: "key488888888", Value: []byte("value4"), PrevStepBytes: step4[:]})
 
 	merged := MergeDiffSets(d1, d2)
-	require.Equal(t, 4, len(merged))
+	require.Len(t, merged, 4)
 
 	require.Equal(t, d2[0], merged[0])
 	require.Equal(t, d1[1], merged[1])

@@ -11,17 +11,19 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
+	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/emptypb"
+
+	"github.com/erigontech/secp256k1"
+
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/p2p/sentry"
-	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/secp256k1"
-	"github.com/stretchr/testify/require"
-	"go.uber.org/mock/gomock"
-	"google.golang.org/grpc"
-	"google.golang.org/protobuf/types/known/emptypb"
+	"github.com/erigontech/erigon-p2p/enode"
 )
 
 func newClient(ctrl *gomock.Controller, i int, caps []string) *direct.MockSentryClient {
@@ -45,7 +47,7 @@ func newClient(ctrl *gomock.Controller, i int, caps []string) *direct.MockSentry
 		ListenerAddr: fmt.Sprintf("127.0.0.%d", i),
 	}, nil).AnyTimes()
 
-	client.EXPECT().HandShake(gomock.Any(), gomock.Any(), gomock.Any()).Return(&sentryproto.HandShakeReply{}, nil).AnyTimes()
+	client.EXPECT().HandShake(gomock.Any(), gomock.Any(), gomock.Any()).Return(&sentryproto.HandShakeReply{Protocol: sentryproto.Protocol_ETH67}, nil).AnyTimes()
 
 	client.EXPECT().Peers(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 		func(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentryproto.PeersReply, error) {
@@ -197,7 +199,7 @@ func TestSend(t *testing.T) {
 	for i := byte(0); i < 10; i++ {
 		sendReply, err = mux.SendMessageById(context.Background(), &sentryproto.SendMessageByIdRequest{
 			Data: &sentryproto.OutboundMessageData{
-				Id: sentryproto.MessageId_BLOCK_BODIES_65,
+				Id: sentryproto.MessageId_BLOCK_BODIES_66,
 			},
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{i}),
 		})
@@ -210,7 +212,7 @@ func TestSend(t *testing.T) {
 
 	sendReply, err = mux.SendMessageToRandomPeers(context.Background(), &sentryproto.SendMessageToRandomPeersRequest{
 		Data: &sentryproto.OutboundMessageData{
-			Id: sentryproto.MessageId_BLOCK_BODIES_65,
+			Id: sentryproto.MessageId_BLOCK_BODIES_66,
 		},
 	})
 	require.NoError(t, err)
@@ -220,7 +222,7 @@ func TestSend(t *testing.T) {
 	statusCount = 0
 
 	sendReply, err = mux.SendMessageToAll(context.Background(), &sentryproto.OutboundMessageData{
-		Id: sentryproto.MessageId_BLOCK_BODIES_65,
+		Id: sentryproto.MessageId_BLOCK_BODIES_66,
 	})
 	require.NoError(t, err)
 	require.NotNil(t, sendReply)
@@ -377,5 +379,5 @@ func TestPeers(t *testing.T) {
 	peersReply, err := mux.Peers(context.Background(), &emptypb.Empty{})
 	require.NoError(t, err)
 	require.NotNil(t, peersReply)
-	require.Equal(t, 10, len(peersReply.GetPeers()))
+	require.Len(t, peersReply.GetPeers(), 10)
 }

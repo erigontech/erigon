@@ -14,8 +14,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build integration_skip
-
 package discover
 
 import (
@@ -26,7 +24,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/p2p/discover/v5wire"
+	"github.com/erigontech/erigon-p2p/discover/v5wire"
 )
 
 // This test checks that pending calls are re-sent when a handshake happens.

@@ -2,23 +2,15 @@ package merkle_tree
 
 import (
 	"bytes"
-	"encoding/binary"
-	"io"
 	"sync"
 	"sync/atomic"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/common/math"
 )
 
 func ceil(num, divisor int) int {
 	return (num + (divisor - 1)) / divisor
-}
-
-type HashTreeEncodable interface {
-	WriteMerkleTree(w io.Writer) error
-	ReadMerkleTree(r io.Reader) error
 }
 
 const OptimalMaxTreeCacheDepth = 12
@@ -34,8 +26,6 @@ type MerkleTree struct {
 	dirtyLeaves []atomic.Bool
 	mu          sync.RWMutex
 }
-
-var _ HashTreeEncodable = (*MerkleTree)(nil)
 
 // Layout of the layers:
 
@@ -56,6 +46,10 @@ func (m *MerkleTree) Initialize(leavesCount, maxTreeCacheDepth int, computeLeaf 
 		*m.limit = *limitOptional
 	}
 	m.dirtyLeaves = make([]atomic.Bool, leavesCount)
+}
+
+func (m *MerkleTree) SetComputeLeafFn(computeLeaf func(idx int, out []byte)) {
+	m.computeLeaf = computeLeaf
 }
 
 func (m *MerkleTree) MarkLeafAsDirty(idx int) {
@@ -136,10 +130,10 @@ func (m *MerkleTree) extendLayer(layerIdx int) {
 }
 
 // ComputeRoot computes the root of the Merkle tree.
-func (m *MerkleTree) ComputeRoot() libcommon.Hash {
+func (m *MerkleTree) ComputeRoot() common.Hash {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	var root libcommon.Hash
+	var root common.Hash
 	if len(m.layers) == 0 {
 		return ZeroHashes[0]
 	}
@@ -176,7 +170,7 @@ func (m *MerkleTree) ComputeRoot() libcommon.Hash {
 	}
 
 	if len(m.layers[0]) == length.Hash {
-		var node libcommon.Hash
+		var node common.Hash
 		m.computeLeaf(0, node[:])
 		if m.limit != nil {
 			if err := MerkleRootFromFlatFromIntermediateLevelWithLimit(node[:], root[:], int(*m.limit), 0); err != nil {
@@ -207,17 +201,46 @@ func (m *MerkleTree) CopyInto(other *MerkleTree) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	defer other.mu.Unlock()
+
+	// Copy primitive fields
 	other.computeLeaf = m.computeLeaf
-	other.layers = make([][]byte, len(m.layers))
-	for i := 0; i < len(m.layers); i++ {
-		other.layers[i] = make([]byte, len(m.layers[i]))
+	other.leavesCount = m.leavesCount
+	if m.limit != nil {
+		other.limit = new(uint64) // Shallow copy
+		*other.limit = *m.limit
+	} else {
+		other.limit = nil
+	}
+
+	// Ensure `other.layers` has enough capacity (with +50% buffer for future growth)
+	requiredLayersLen := len(m.layers)
+	if cap(other.layers) < requiredLayersLen {
+		other.layers = make([][]byte, requiredLayersLen, requiredLayersLen+(requiredLayersLen/2))
+	} else {
+		other.layers = other.layers[:requiredLayersLen]
+	}
+
+	// Copy layers while reusing memory, and allocate with +50% extra space if needed
+	for i := range m.layers {
+		requiredLayerLen := len(m.layers[i])
+		if cap(other.layers[i]) < requiredLayerLen {
+			other.layers[i] = make([]byte, requiredLayerLen, requiredLayerLen+(requiredLayerLen/2))
+		} else {
+			other.layers[i] = other.layers[i][:requiredLayerLen]
+		}
 		copy(other.layers[i], m.layers[i])
 	}
-	other.leavesCount = m.leavesCount
-	other.limit = m.limit
-	other.dirtyLeaves = make([]atomic.Bool, len(m.dirtyLeaves))
 
-	for i := 0; i < len(m.dirtyLeaves); i++ {
+	// Ensure `other.dirtyLeaves` has enough capacity (with +50% buffer for future growth)
+	requiredLeavesLen := len(m.dirtyLeaves)
+	if cap(other.dirtyLeaves) < requiredLeavesLen {
+		other.dirtyLeaves = make([]atomic.Bool, requiredLeavesLen, requiredLeavesLen+(requiredLeavesLen/2))
+	} else {
+		other.dirtyLeaves = other.dirtyLeaves[:requiredLeavesLen]
+	}
+
+	// Copy atomic dirty leaves state
+	for i := range m.dirtyLeaves {
 		other.dirtyLeaves[i].Store(m.dirtyLeaves[i].Load())
 	}
 }
@@ -290,69 +313,4 @@ func (m *MerkleTree) computeLayer(layerIdx int) {
 			panic(err)
 		}
 	}
-}
-
-// Write writes the Merkle tree to the given writer.
-func (m *MerkleTree) WriteMerkleTree(w io.Writer) error {
-	if err := binary.Write(w, binary.BigEndian, uint32(len(m.layers))); err != nil {
-		return err
-	}
-	for _, layer := range m.layers {
-		if err := binary.Write(w, binary.BigEndian, uint32(len(layer))); err != nil {
-			return err
-		}
-		if _, err := w.Write(layer); err != nil {
-			return err
-		}
-	}
-
-	if err := binary.Write(w, binary.BigEndian, uint32(m.leavesCount)); err != nil {
-		return err
-	}
-	if m.limit != nil {
-		if err := binary.Write(w, binary.BigEndian, *m.limit); err != nil {
-			return err
-		}
-	} else {
-		if err := binary.Write(w, binary.BigEndian, uint64(math.MaxUint64)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// Read reads the Merkle tree from the given reader.
-func (m *MerkleTree) ReadMerkleTree(r io.Reader) error {
-	var layersCount uint32
-	if err := binary.Read(r, binary.BigEndian, &layersCount); err != nil {
-		return err
-	}
-	m.layers = make([][]byte, layersCount)
-	for i := 0; i < int(layersCount); i++ {
-		var layerSize uint32
-		if err := binary.Read(r, binary.BigEndian, &layerSize); err != nil {
-			return err
-		}
-		m.layers[i] = make([]byte, layerSize)
-		if _, err := io.ReadFull(r, m.layers[i]); err != nil {
-			return err
-		}
-	}
-	leavesCount := uint32(0)
-
-	if err := binary.Read(r, binary.BigEndian, &leavesCount); err != nil {
-		return err
-	}
-	m.leavesCount = int(leavesCount)
-	var limit uint64
-	if err := binary.Read(r, binary.BigEndian, &limit); err != nil {
-		return err
-	}
-	if limit == math.MaxUint64 {
-		m.limit = nil
-	} else {
-		m.limit = new(uint64)
-		*m.limit = limit
-	}
-	return nil
 }

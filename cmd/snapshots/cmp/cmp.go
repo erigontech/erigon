@@ -32,17 +32,16 @@ import (
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
+	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/downloader"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/snapshots/flags"
 	"github.com/erigontech/erigon/cmd/snapshots/sync"
 	"github.com/erigontech/erigon/cmd/utils"
-	coresnaptype "github.com/erigontech/erigon/core/snaptype"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/logging"
@@ -225,7 +224,7 @@ func cmp(cliCtx *cli.Context) error {
 		return errors.New("no first session established")
 	}
 
-	if session1 == nil {
+	if session2 == nil {
 		return errors.New("no second session established")
 	}
 
@@ -338,7 +337,7 @@ type BodyEntry struct {
 func splitEntries(files []fs.DirEntry, version snaptype.Version, firstBlock, lastBlock uint64) (hents []fs.DirEntry, bents []*BodyEntry) {
 	for _, ent := range files {
 		if info, err := ent.Info(); err == nil {
-			if snapInfo, ok := info.Sys().(downloader.SnapInfo); ok && snapInfo.Version() > 0 {
+			if snapInfo, ok := info.Sys().(downloader.SnapInfo); ok && !snapInfo.Version().IsZero() {
 				if version == snapInfo.Version() &&
 					(firstBlock == 0 || snapInfo.From() >= firstBlock) &&
 					(lastBlock == 0 || snapInfo.From() < lastBlock) {
@@ -401,6 +400,11 @@ func (c comparitor) chainConfig() *chain.Config {
 func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2ents []fs.DirEntry, workers int, logger log.Logger) (time.Duration, time.Duration, time.Duration, error) {
 	var downloadTime uint64
 	var compareTime uint64
+
+	freezeCfg := ethconfig.Defaults.Snapshot
+	freezeCfg.NoDownloader = true
+	freezeCfg.ProduceE2 = false
+	freezeCfg.ChainName = c.chain
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(workers)
@@ -477,19 +481,13 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 
 				info1, _, _ := snaptype.ParseFileName(c.session1.LocalFsRoot(), ent1.Name())
 
-				f1snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-					ProduceE2:    false,
-					NoDownloader: true,
-				}, info1.Dir(), info1.From, logger)
+				f1snaps := freezeblocks.NewRoSnapshots(freezeCfg, info1.Dir(), info1.From, logger)
 
 				f1snaps.OpenList([]string{ent1.Name()}, false)
 
 				info2, _, _ := snaptype.ParseFileName(c.session2.LocalFsRoot(), ent1.Name())
 
-				f2snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-					ProduceE2:    false,
-					NoDownloader: true,
-				}, info2.Dir(), info2.From, logger)
+				f2snaps := freezeblocks.NewRoSnapshots(freezeCfg, info2.Dir(), info2.From, logger)
 
 				f2snaps.OpenList([]string{ent2.Name()}, false)
 
@@ -580,6 +578,11 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 	var downloadTime uint64
 	var indexTime uint64
 	var compareTime uint64
+
+	freezeCfg := ethconfig.Defaults.Snapshot
+	freezeCfg.NoDownloader = true
+	freezeCfg.ProduceE2 = false
+	freezeCfg.ChainName = c.chain
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(workers)
@@ -756,19 +759,13 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 
 				info1, _, _ := snaptype.ParseFileName(c.session1.LocalFsRoot(), ent1.Body.Name())
 
-				f1snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-					ProduceE2:    false,
-					NoDownloader: true,
-				}, info1.Dir(), info1.From, logger)
+				f1snaps := freezeblocks.NewRoSnapshots(freezeCfg, info1.Dir(), info1.From, logger)
 
 				f1snaps.OpenList([]string{ent1.Body.Name(), ent1.Transactions.Name()}, false)
 
 				info2, _, _ := snaptype.ParseFileName(c.session2.LocalFsRoot(), ent2.Body.Name())
 
-				f2snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-					ProduceE2:    false,
-					NoDownloader: true,
-				}, info2.Dir(), info2.From, logger)
+				f2snaps := freezeblocks.NewRoSnapshots(freezeCfg, info2.Dir(), info2.From, logger)
 
 				f2snaps.OpenList([]string{ent2.Body.Name(), ent2.Transactions.Name()}, false)
 

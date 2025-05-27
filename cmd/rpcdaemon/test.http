@@ -105,7 +105,8 @@ Content-Type: application/json
 
 ###
 
-# curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_getBlockByNumber", "params": ["0x1b4", true], "id":1}' localhost:8545
+
+# curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_getBlockByNumber", "params": ["0x141F644", true], "id":1}' localhost:8545
 POST localhost:8545
 Content-Type: application/json
 

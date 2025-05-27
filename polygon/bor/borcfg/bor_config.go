@@ -21,6 +21,7 @@ import (
 	"sort"
 	"strconv"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 )
 
@@ -53,7 +54,7 @@ func (c *BorConfig) String() string {
 }
 
 func (c *BorConfig) CalculateProducerDelay(number uint64) uint64 {
-	return borKeyValueConfigHelper(c.ProducerDelay, number)
+	return chain.ConfigValueLookup(c.ProducerDelay, number)
 }
 
 func (c *BorConfig) IsSprintStart(number uint64) bool {
@@ -111,11 +112,11 @@ func (c *BorConfig) CalculateSprintNumber(number uint64) uint64 {
 }
 
 func (c *BorConfig) CalculateBackupMultiplier(number uint64) uint64 {
-	return borKeyValueConfigHelper(c.BackupMultiplier, number)
+	return chain.ConfigValueLookup(c.BackupMultiplier, number)
 }
 
 func (c *BorConfig) CalculatePeriod(number uint64) uint64 {
-	return borKeyValueConfigHelper(c.Period, number)
+	return chain.ConfigValueLookup(c.Period, number)
 }
 
 // isForked returns whether a fork scheduled at block s is active at the given head block.
@@ -155,41 +156,24 @@ func (c *BorConfig) IsNapoli(num uint64) bool {
 	return isForked(c.NapoliBlock, num)
 }
 
-func (c *BorConfig) IsAhmedabad(number uint64) bool {
-	return isForked(c.AhmedabadBlock, number)
-}
-
 func (c *BorConfig) GetNapoliBlock() *big.Int {
 	return c.NapoliBlock
 }
 
+func (c *BorConfig) IsAhmedabad(number uint64) bool {
+	return isForked(c.AhmedabadBlock, number)
+}
+
+func (c *BorConfig) GetAhmedabadBlock() *big.Int {
+	return c.AhmedabadBlock
+}
+
 func (c *BorConfig) CalculateStateSyncDelay(number uint64) uint64 {
-	return borKeyValueConfigHelper(c.StateSyncConfirmationDelay, number)
+	return chain.ConfigValueLookup(c.StateSyncConfirmationDelay, number)
 }
 
 func (c *BorConfig) StateReceiverContractAddress() common.Address {
 	return common.HexToAddress(c.StateReceiverContract)
-}
-
-func borKeyValueConfigHelper[T uint64 | common.Address](field map[string]T, number uint64) T {
-	fieldUint := make(map[uint64]T)
-	for k, v := range field {
-		keyUint, err := strconv.ParseUint(k, 10, 64)
-		if err != nil {
-			panic(err)
-		}
-		fieldUint[keyUint] = v
-	}
-
-	keys := common.SortedKeys(fieldUint)
-
-	for i := 0; i < len(keys)-1; i++ {
-		if number >= keys[i] && number < keys[i+1] {
-			return fieldUint[keys[i]]
-		}
-	}
-
-	return fieldUint[keys[len(keys)-1]]
 }
 
 type sprint struct {

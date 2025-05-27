@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	mdbxgo "github.com/erigontech/mdbx-go/mdbx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -40,7 +41,7 @@ func BaseCaseDB(t *testing.T) kv.RwDB {
 	path := t.TempDir()
 	logger := log.New()
 	table := "Table"
-	db := NewMDBX(logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db := New(kv.ChainDB, logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			table:       kv.TableCfgItem{Flags: kv.DupSort},
 			kv.Sequence: kv.TableCfgItem{},
@@ -55,7 +56,7 @@ func BaseCaseDBForBenchmark(b *testing.B) kv.RwDB {
 	path := b.TempDir()
 	logger := log.New()
 	table := "Table"
-	db := NewMDBX(logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db := New(kv.ChainDB, logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			table:       kv.TableCfgItem{Flags: kv.DupSort},
 			kv.Sequence: kv.TableCfgItem{},
@@ -94,7 +95,7 @@ func iteration(t *testing.T, c kv.RwCursorDupSort, start []byte, val []byte) ([]
 	var err error
 	i := 0
 	for k, v, err := start, val, err; k != nil; k, v, err = c.Next() {
-		require.Nil(t, err)
+		require.NoError(t, err)
 		keys = append(keys, string(k))
 		values = append(values, string(v))
 		i += 1
@@ -213,13 +214,13 @@ func TestRangeDupSort(t *testing.T) {
 		require.NoError(t, err)
 		_, vals, err := stream.ToArrayKV(it)
 		require.NoError(t, err)
-		require.Equal(t, 2, len(vals))
+		require.Len(t, vals, 2)
 
 		it, err = tx.RangeDupSort("Table", []byte("key1"), []byte("value1"), []byte("value1.3"), order.Asc, -1)
 		require.NoError(t, err)
 		_, vals, err = stream.ToArrayKV(it)
 		require.NoError(t, err)
-		require.Equal(t, 1, len(vals))
+		require.Len(t, vals, 1)
 	})
 	t.Run("Desc", func(t *testing.T) {
 		_, tx, _ := BaseCase(t)
@@ -245,13 +246,13 @@ func TestRangeDupSort(t *testing.T) {
 		require.NoError(t, err)
 		_, vals, err := stream.ToArrayKV(it)
 		require.NoError(t, err)
-		require.Equal(t, 2, len(vals))
+		require.Len(t, vals, 2)
 
 		it, err = tx.RangeDupSort("Table", []byte("key1"), []byte("value1.3"), []byte("value1.1"), order.Desc, -1)
 		require.NoError(t, err)
 		_, vals, err = stream.ToArrayKV(it)
 		require.NoError(t, err)
-		require.Equal(t, 1, len(vals))
+		require.Len(t, vals, 1)
 	})
 }
 
@@ -288,7 +289,7 @@ func TestPutGet(t *testing.T) {
 
 	var v []byte
 	v, err := tx.GetOne("Table", []byte("key1"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.Equal(t, v, []byte("value1.1"))
 
 	v, err = tx.GetOne("RANDOM", []byte("key1"))
@@ -302,15 +303,15 @@ func TestIncrementRead(t *testing.T) {
 	table := "Table"
 
 	_, err := tx.IncrementSequence(table, uint64(12))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	chaV, err := tx.ReadSequence(table)
-	require.Nil(t, err)
-	require.Equal(t, chaV, uint64(12))
+	require.NoError(t, err)
+	require.Equal(t, uint64(12), chaV)
 	_, err = tx.IncrementSequence(table, uint64(240))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	chaV, err = tx.ReadSequence(table)
-	require.Nil(t, err)
-	require.Equal(t, chaV, uint64(252))
+	require.NoError(t, err)
+	require.Equal(t, uint64(252), chaV)
 }
 
 func TestHasDelete(t *testing.T) {
@@ -331,19 +332,19 @@ func TestHasDelete(t *testing.T) {
 	require.NoError(t, c.DeleteExact([]byte("key2"), []byte("value1.1"))) //valid key but wrong value
 
 	res, err := tx.Has(table, []byte("key1"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.False(t, res)
 
 	res, err = tx.Has(table, []byte("key2"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.True(t, res)
 
 	res, err = tx.Has(table, []byte("key3"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.True(t, res) //There is another key3 left
 
 	res, err = tx.Has(table, []byte("k"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.False(t, res)
 }
 
@@ -362,7 +363,7 @@ func TestForAmount(t *testing.T) {
 		keys = append(keys, string(k))
 		return nil
 	})
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.Equal(t, []string{"key3", "key3"}, keys)
 
 	var keys1 []string
@@ -371,7 +372,7 @@ func TestForAmount(t *testing.T) {
 		keys1 = append(keys1, string(k))
 		return nil
 	})
-	require.Nil(t, err1)
+	require.NoError(t, err1)
 	require.Equal(t, []string{"key1", "key1", "key2", "key3", "key3", "key4", "key5"}, keys1)
 
 	var keys2 []string
@@ -380,7 +381,7 @@ func TestForAmount(t *testing.T) {
 		keys2 = append(keys2, string(k))
 		return nil
 	})
-	require.Nil(t, err2)
+	require.NoError(t, err2)
 	require.Nil(t, keys2)
 
 	var keys3 []string
@@ -389,7 +390,7 @@ func TestForAmount(t *testing.T) {
 		keys3 = append(keys3, string(k))
 		return nil
 	})
-	require.Nil(t, err3)
+	require.NoError(t, err3)
 	require.Nil(t, keys3)
 }
 
@@ -399,31 +400,31 @@ func TestPrefix(t *testing.T) {
 	table := "Table"
 	var keys, keys1, keys2 []string
 	kvs1, err := tx.Prefix(table, []byte("key"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	defer kvs1.Close()
 	for kvs1.HasNext() {
 		k1, _, err := kvs1.Next()
-		require.Nil(t, err)
+		require.NoError(t, err)
 		keys = append(keys, string(k1))
 	}
 	require.Equal(t, []string{"key1", "key1", "key3", "key3"}, keys)
 
 	kvs2, err := tx.Prefix(table, []byte("key1"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	defer kvs2.Close()
 	for kvs2.HasNext() {
 		k1, _, err := kvs2.Next()
-		require.Nil(t, err)
+		require.NoError(t, err)
 		keys1 = append(keys1, string(k1))
 	}
 	require.Equal(t, []string{"key1", "key1"}, keys1)
 
 	kvs3, err := tx.Prefix(table, []byte("e"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	defer kvs3.Close()
 	for kvs3.HasNext() {
 		k1, _, err := kvs3.Next()
-		require.Nil(t, err)
+		require.NoError(t, err)
 		keys2 = append(keys2, string(k1))
 	}
 	require.Nil(t, keys2)
@@ -440,7 +441,7 @@ func TestAppendFirstLast(t *testing.T) {
 	require.NoError(t, tx.AppendDup(table, []byte("key2"), []byte("value1.11")))
 
 	k, v, err := c.First()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.Equal(t, k, []byte("key1"))
 	require.Equal(t, v, []byte("value1.1"))
 
@@ -449,90 +450,32 @@ func TestAppendFirstLast(t *testing.T) {
 	require.Equal(t, []string{"value1.1", "value1.3", "value1.11", "value3.1", "value3.3", "value6.1"}, values)
 
 	k, v, err = c.Last()
-	require.Nil(t, err)
-	require.Equal(t, k, []byte("key6"))
-	require.Equal(t, v, []byte("value6.1"))
+	require.NoError(t, err)
+	require.Equal(t, []byte("key6"), k)
+	require.Equal(t, []byte("value6.1"), v)
 
 	keys, values = iteration(t, c, k, v)
 	require.Equal(t, []string{"key6"}, keys)
 	require.Equal(t, []string{"value6.1"}, values)
 }
 
-func TestNextPrevCurrent(t *testing.T) {
-	_, _, c := BaseCase(t)
-
-	k, v, err := c.First()
-	require.Nil(t, err)
-	keys, values := iteration(t, c, k, v)
-	require.Equal(t, []string{"key1", "key1", "key3", "key3"}, keys)
-	require.Equal(t, []string{"value1.1", "value1.3", "value3.1", "value3.3"}, values)
-
-	k, v, err = c.Next()
-	require.Equal(t, []byte("key1"), k)
-	require.Nil(t, err)
-	keys, values = iteration(t, c, k, v)
-	require.Equal(t, []string{"key1", "key3", "key3"}, keys)
-	require.Equal(t, []string{"value1.3", "value3.1", "value3.3"}, values)
-
-	k, v, err = c.Current()
-	require.Nil(t, err)
-	keys, values = iteration(t, c, k, v)
-	require.Equal(t, []string{"key1", "key3", "key3"}, keys)
-	require.Equal(t, []string{"value1.3", "value3.1", "value3.3"}, values)
-	require.Equal(t, k, []byte("key1"))
-	require.Equal(t, v, []byte("value1.3"))
-
-	k, v, err = c.Next()
-	require.Nil(t, err)
-	keys, values = iteration(t, c, k, v)
-	require.Equal(t, []string{"key3", "key3"}, keys)
-	require.Equal(t, []string{"value3.1", "value3.3"}, values)
-
-	k, v, err = c.Prev()
-	require.Nil(t, err)
-	keys, values = iteration(t, c, k, v)
-	require.Equal(t, []string{"key1", "key3", "key3"}, keys)
-	require.Equal(t, []string{"value1.3", "value3.1", "value3.3"}, values)
-
-	k, v, err = c.Current()
-	require.Nil(t, err)
-	keys, values = iteration(t, c, k, v)
-	require.Equal(t, []string{"key1", "key3", "key3"}, keys)
-	require.Equal(t, []string{"value1.3", "value3.1", "value3.3"}, values)
-
-	k, v, err = c.Prev()
-	require.Nil(t, err)
-	keys, values = iteration(t, c, k, v)
-	require.Equal(t, []string{"key1", "key1", "key3", "key3"}, keys)
-	require.Equal(t, []string{"value1.1", "value1.3", "value3.1", "value3.3"}, values)
-
-	err = c.DeleteCurrent()
-	require.Nil(t, err)
-	k, v, err = c.Current()
-	require.Nil(t, err)
-	keys, values = iteration(t, c, k, v)
-	require.Equal(t, []string{"key1", "key3", "key3"}, keys)
-	require.Equal(t, []string{"value1.3", "value3.1", "value3.3"}, values)
-
-}
-
 func TestSeek(t *testing.T) {
 	_, _, c := BaseCase(t)
 
 	k, v, err := c.Seek([]byte("k"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values := iteration(t, c, k, v)
 	require.Equal(t, []string{"key1", "key1", "key3", "key3"}, keys)
 	require.Equal(t, []string{"value1.1", "value1.3", "value3.1", "value3.3"}, values)
 
 	k, v, err = c.Seek([]byte("key3"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values = iteration(t, c, k, v)
 	require.Equal(t, []string{"key3", "key3"}, keys)
 	require.Equal(t, []string{"value3.1", "value3.3"}, values)
 
 	k, v, err = c.Seek([]byte("xyz"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values = iteration(t, c, k, v)
 	require.Nil(t, keys)
 	require.Nil(t, values)
@@ -542,13 +485,13 @@ func TestSeekExact(t *testing.T) {
 	_, _, c := BaseCase(t)
 
 	k, v, err := c.SeekExact([]byte("key3"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values := iteration(t, c, k, v)
 	require.Equal(t, []string{"key3", "key3"}, keys)
 	require.Equal(t, []string{"value3.1", "value3.3"}, values)
 
 	k, v, err = c.SeekExact([]byte("key"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values = iteration(t, c, k, v)
 	require.Nil(t, keys)
 	require.Nil(t, values)
@@ -558,25 +501,25 @@ func TestSeekBothExact(t *testing.T) {
 	_, _, c := BaseCase(t)
 
 	k, v, err := c.SeekBothExact([]byte("key1"), []byte("value1.2"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values := iteration(t, c, k, v)
 	require.Nil(t, keys)
 	require.Nil(t, values)
 
 	k, v, err = c.SeekBothExact([]byte("key2"), []byte("value1.1"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values = iteration(t, c, k, v)
 	require.Nil(t, keys)
 	require.Nil(t, values)
 
 	k, v, err = c.SeekBothExact([]byte("key1"), []byte("value1.1"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values = iteration(t, c, k, v)
 	require.Equal(t, []string{"key1", "key1", "key3", "key3"}, keys)
 	require.Equal(t, []string{"value1.1", "value1.3", "value3.1", "value3.3"}, values)
 
 	k, v, err = c.SeekBothExact([]byte("key3"), []byte("value3.3"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values = iteration(t, c, k, v)
 	require.Equal(t, []string{"key3"}, keys)
 	require.Equal(t, []string{"value3.3"}, values)
@@ -601,43 +544,43 @@ func TestNextDups(t *testing.T) {
 	require.NoError(t, c.Put([]byte("key"), []byte("value1.7")))
 
 	k, v, err := c.Current()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values := iteration(t, c, k, v)
 	require.Equal(t, []string{"key", "key2", "key2", "key3"}, keys)
 	require.Equal(t, []string{"value1.7", "value1.1", "value1.2", "value1.6"}, values)
 
 	v, err = c.FirstDup()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values = iteration(t, c, k, v)
 	require.Equal(t, []string{"key", "key2", "key2", "key3"}, keys)
 	require.Equal(t, []string{"value1.7", "value1.1", "value1.2", "value1.6"}, values)
 
 	k, v, err = c.NextNoDup()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values = iteration(t, c, k, v)
 	require.Equal(t, []string{"key2", "key2", "key3"}, keys)
 	require.Equal(t, []string{"value1.1", "value1.2", "value1.6"}, values)
 
 	k, v, err = c.NextDup()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values = iteration(t, c, k, v)
 	require.Equal(t, []string{"key2", "key3"}, keys)
 	require.Equal(t, []string{"value1.2", "value1.6"}, values)
 
 	v, err = c.LastDup()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values = iteration(t, c, k, v)
 	require.Equal(t, []string{"key2", "key3"}, keys)
 	require.Equal(t, []string{"value1.2", "value1.6"}, values)
 
 	k, v, err = c.NextDup()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values = iteration(t, c, k, v)
 	require.Nil(t, keys)
 	require.Nil(t, values)
 
 	k, v, err = c.NextNoDup()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values = iteration(t, c, k, v)
 	require.Equal(t, []string{"key3"}, keys)
 	require.Equal(t, []string{"value1.6"}, values)
@@ -647,14 +590,14 @@ func TestCurrentDup(t *testing.T) {
 	_, _, c := BaseCase(t)
 
 	count, err := c.CountDuplicates()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.Equal(t, uint64(2), count)
 
 	require.Error(t, c.PutNoDupData([]byte("key3"), []byte("value3.3")))
 	require.NoError(t, c.DeleteCurrentDuplicates())
 
 	k, v, err := c.SeekExact([]byte("key1"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keys, values := iteration(t, c, k, v)
 	require.Equal(t, []string{"key1", "key1"}, keys)
 	require.Equal(t, []string{"value1.1", "value1.3"}, values)
@@ -667,37 +610,37 @@ func TestDupDelete(t *testing.T) {
 	_, tx, c := BaseCase(t)
 
 	k, _, err := c.Current()
-	require.Nil(t, err)
+	require.NoError(t, err)
 	require.Equal(t, []byte("key3"), k)
 
 	err = c.DeleteCurrentDuplicates()
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	err = c.Delete([]byte("key1"))
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	//TODO: find better way
 	count, err := tx.Count("Table")
-	require.Nil(t, err)
+	require.NoError(t, err)
 	assert.Zero(t, count)
 }
 
 func TestBeginRoAfterClose(t *testing.T) {
-	db := NewMDBX(log.New()).InMem(t.TempDir()).MustOpen()
+	db := New(kv.ChainDB, log.New()).InMem(t.TempDir()).MustOpen()
 	db.Close()
 	_, err := db.BeginRo(context.Background())
 	require.ErrorContains(t, err, "closed")
 }
 
 func TestBeginRwAfterClose(t *testing.T) {
-	db := NewMDBX(log.New()).InMem(t.TempDir()).MustOpen()
+	db := New(kv.ChainDB, log.New()).InMem(t.TempDir()).MustOpen()
 	db.Close()
 	_, err := db.BeginRw(context.Background())
 	require.ErrorContains(t, err, "closed")
 }
 
 func TestBeginRoWithDoneContext(t *testing.T) {
-	db := NewMDBX(log.New()).InMem(t.TempDir()).MustOpen()
+	db := New(kv.ChainDB, log.New()).InMem(t.TempDir()).MustOpen()
 	defer db.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -706,7 +649,7 @@ func TestBeginRoWithDoneContext(t *testing.T) {
 }
 
 func TestBeginRwWithDoneContext(t *testing.T) {
-	db := NewMDBX(log.New()).InMem(t.TempDir()).MustOpen()
+	db := New(kv.ChainDB, log.New()).InMem(t.TempDir()).MustOpen()
 	defer db.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -721,11 +664,11 @@ func testCloseWaitsAfterTxBegin(
 	txEndFunc func(kv.Getter) error,
 ) {
 	t.Helper()
-	db := NewMDBX(log.New()).InMem(t.TempDir()).MustOpen()
+	db := New(kv.ChainDB, log.New()).InMem(t.TempDir()).MustOpen()
 	var txs []kv.Getter
 	for i := 0; i < count; i++ {
 		tx, err := txBeginFunc(db)
-		require.Nil(t, err)
+		require.NoError(t, err)
 		txs = append(txs, tx)
 	}
 
@@ -744,7 +687,7 @@ func testCloseWaitsAfterTxBegin(
 		assert.False(t, isClosed.Load())
 
 		err := txEndFunc(tx)
-		require.Nil(t, err)
+		require.NoError(t, err)
 	}
 
 	<-closeDone
@@ -1099,4 +1042,88 @@ func BenchmarkDB_Delete(b *testing.B) {
 	}); err != nil {
 		b.Fatal(err)
 	}
+}
+
+func TestSequenceOps(t *testing.T) {
+	table1 := []byte("Table132323")
+	table2 := []byte("Table232232")
+	t.Run("empty read", func(t *testing.T) {
+		_, tx, _ := BaseCase(t)
+		_, err := tx.ReadSequence(string(table1))
+		require.NoError(t, err)
+	})
+
+	t.Run("putting things and reading back", func(t *testing.T) {
+		_, tx, _ := BaseCase(t)
+		t1, err := tx.IncrementSequence(string(table1), 5)
+		require.NoError(t, err)
+		require.Equal(t, uint64(0), t1)
+
+		t2, err := tx.IncrementSequence(string(table2), 10)
+		require.NoError(t, err)
+		require.Equal(t, uint64(0), t2)
+
+		t1, err = tx.ReadSequence(string(table1))
+		require.NoError(t, err)
+		require.Equal(t, uint64(5), t1)
+
+		t2, err = tx.ReadSequence(string(table2))
+		require.NoError(t, err)
+		require.Equal(t, uint64(10), t2)
+	})
+
+	t.Run("reset sequence", func(t *testing.T) {
+		_, tx, _ := BaseCase(t)
+		t1, err := tx.ReadSequence(string(table1))
+		require.NoError(t, err)
+		require.Equal(t, uint64(0), t1)
+
+		// increment sequence and then reset and test value
+		// start
+		t1, err = tx.IncrementSequence(string(table1), 5)
+		require.NoError(t, err)
+		require.Equal(t, uint64(0), t1)
+
+		err = tx.ResetSequence(string(table1), 3)
+		require.NoError(t, err)
+
+		t1, err = tx.ReadSequence(string(table1))
+		require.NoError(t, err)
+		require.Equal(t, uint64(3), t1)
+	})
+}
+
+func BenchmarkDB_ResetSequence(b *testing.B) {
+	_db := BaseCaseDBForBenchmark(b)
+	table := "Table"
+	//db := _db.(*MdbxKV)
+	ctx := context.Background()
+
+	tx, err := _db.BeginRw(ctx)
+	require.NoError(b, err)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		err = tx.ResetSequence(table, uint64(i))
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+	tx.Rollback()
+}
+
+func TestMdbxWithSyncBytes(t *testing.T) {
+	db, err := New(kv.TemporaryDB, log.Root()).
+		Path(t.TempDir()).
+		MapSize(8 * datasize.GB).
+		GrowthStep(16 * datasize.MB).
+		Flags(func(f uint) uint { return f&^mdbxgo.Durable | mdbxgo.SafeNoSync }).
+		SyncPeriod(2 * time.Second).
+		SyncBytes(20_000).
+		DirtySpace(uint64(64 * datasize.MB)).
+		// WithMetrics().
+		Open(context.Background())
+	if err != nil {
+		t.Fatalf("failed to open mdbx")
+	}
+	t.Cleanup(db.Close)
 }

@@ -110,6 +110,10 @@ type Record struct {
 	KeyNames RecordKeyNames
 }
 
+func (r *Record) Call(skip int) stack.Call {
+	return stack.Caller(skip)
+}
+
 // RecordKeyNames are the predefined names of the log props used by the Logger interface.
 type RecordKeyNames struct {
 	Time string

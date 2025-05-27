@@ -30,13 +30,14 @@ import (
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
+	"github.com/erigontech/erigon-lib/chain/networkid"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/antiquary"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -50,12 +51,15 @@ import (
 
 func loadChain(t *testing.T) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState, reader *tests.MockBlockReader) {
 	blocks, preState, postState = tests.GetPhase0Random()
-	db = memdb.NewTestDB(t)
+	db = memdb.NewTestDB(t, kv.ChainDB)
 	reader = tests.LoadChain(blocks, postState, db, t)
+
+	sn := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	sn.OnHeadState(postState)
 
 	ctx := context.Background()
 	vt := state_accessors.NewStaticValidatorTable()
-	a := antiquary.NewAntiquary(ctx, nil, preState, vt, &clparams.MainnetBeaconConfig, datadir.New("/tmp"), nil, db, nil, reader, log.New(), true, true, false, false, nil)
+	a := antiquary.NewAntiquary(ctx, nil, preState, vt, &clparams.MainnetBeaconConfig, datadir.New("/tmp"), nil, db, nil, nil, reader, sn, log.New(), true, true, false, false, nil)
 	require.NoError(t, a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
 	return
 }
@@ -66,13 +70,14 @@ func TestSentinelBlocksByRange(t *testing.T) {
 	ethClock := getEthClock(t)
 	ctx := context.Background()
 	db, blocks, _, _, _, reader := loadChain(t)
-	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
+	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(networkid.MainnetChainID)
 	sentinel, err := New(ctx, &SentinelConfig{
 		NetworkConfig: networkConfig,
 		BeaconConfig:  beaconConfig,
 		IpAddr:        listenAddrHost,
 		Port:          7070,
 		EnableBlocks:  true,
+		MaxPeerCount:  8883,
 	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel.Stop()
@@ -105,7 +110,7 @@ func TestSentinelBlocksByRange(t *testing.T) {
 	code := make([]byte, 1)
 	_, err = stream.Read(code)
 	require.NoError(t, err)
-	require.Equal(t, code[0], uint8(0))
+	require.Equal(t, uint8(0), code[0])
 
 	var w bytes.Buffer
 	_, err = io.Copy(&w, stream)
@@ -151,7 +156,7 @@ func TestSentinelBlocksByRange(t *testing.T) {
 		// TODO(issues/5884): figure out why there is this extra byte.
 		r.ReadByte()
 	}
-	require.Equal(t, len(responsePacket), len(blocks))
+	require.Len(t, blocks, len(responsePacket))
 	for i := 0; i < len(blocks); i++ {
 		root1, err := responsePacket[i].HashSSZ()
 		require.NoError(t, err)
@@ -170,13 +175,14 @@ func TestSentinelBlocksByRoots(t *testing.T) {
 	ctx := context.Background()
 	db, blocks, _, _, _, reader := loadChain(t)
 	ethClock := getEthClock(t)
-	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
+	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(networkid.MainnetChainID)
 	sentinel, err := New(ctx, &SentinelConfig{
 		NetworkConfig: networkConfig,
 		BeaconConfig:  beaconConfig,
 		IpAddr:        listenAddrHost,
 		Port:          7070,
 		EnableBlocks:  true,
+		MaxPeerCount:  8883,
 	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel.Stop()
@@ -213,7 +219,7 @@ func TestSentinelBlocksByRoots(t *testing.T) {
 	code := make([]byte, 1)
 	_, err = stream.Read(code)
 	require.NoError(t, err)
-	require.Equal(t, code[0], uint8(0))
+	require.Equal(t, uint8(0), code[0])
 
 	var w bytes.Buffer
 	_, err = io.Copy(&w, stream)
@@ -260,7 +266,7 @@ func TestSentinelBlocksByRoots(t *testing.T) {
 		r.ReadByte()
 	}
 
-	require.Equal(t, len(responsePacket), len(blocks))
+	require.Len(t, blocks, len(responsePacket))
 	for i := 0; i < len(responsePacket); i++ {
 		root1, err := responsePacket[i].HashSSZ()
 		require.NoError(t, err)
@@ -279,13 +285,14 @@ func TestSentinelStatusRequest(t *testing.T) {
 	ctx := context.Background()
 	db, blocks, _, _, _, reader := loadChain(t)
 	ethClock := getEthClock(t)
-	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
+	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(networkid.MainnetChainID)
 	sentinel, err := New(ctx, &SentinelConfig{
 		NetworkConfig: networkConfig,
 		BeaconConfig:  beaconConfig,
 		IpAddr:        listenAddrHost,
 		Port:          7070,
 		EnableBlocks:  true,
+		MaxPeerCount:  8883,
 	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel.Stop()
@@ -317,7 +324,7 @@ func TestSentinelStatusRequest(t *testing.T) {
 	code := make([]byte, 1)
 	_, err = stream.Read(code)
 	require.NoError(t, err)
-	require.Equal(t, code[0], uint8(0))
+	require.Equal(t, uint8(0), code[0])
 
 	resp := &cltypes.Status{}
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(stream, resp, 0); err != nil {

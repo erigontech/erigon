@@ -1,16 +1,23 @@
 name: QA - Clean exit (block downloading)
 
 on:
+  push:
+    branches:
+      - 'release/3.*'
   schedule:
     - cron: '0 8 * * 1-6'  # Run every day at 08:00 AM UTC except Sunday
   workflow_dispatch:     # Run manually
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   clean-exit-bd-test:
-    runs-on: [self-hosted, Erigon3]
+    runs-on: [self-hosted, qa, Erigon3]
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
-      ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
+      ERIGON_TESTBED_AREA: /opt/erigon-testbed
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       WORKING_TIME_SECONDS: 600
       CHAIN: mainnet
@@ -32,9 +39,10 @@ jobs:
       run: |
         python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
 
-    - name: Restore Erigon Testbed Data Directory
+    - name: Save Erigon Chaindata Directory
+      id: save_chaindata_step
       run: |
-        rsync -a --delete $ERIGON_REFERENCE_DATA_DIR/ $ERIGON_TESTBED_DATA_DIR/
+        mv $ERIGON_REFERENCE_DATA_DIR/chaindata $ERIGON_TESTBED_AREA/chaindata-prev
 
     - name: Run Erigon, send ctrl-c and check for clean exiting
       id: test_step
@@ -43,13 +51,13 @@ jobs:
         
         # Run Erigon, send ctrl-c and check logs
         python3 $ERIGON_QA_PATH/test_system/qa-tests/clean-exit/run_and_check_clean_exit.py \
-            ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $WORKING_TIME_SECONDS Erigon3
+            ${{ github.workspace }}/build/bin $ERIGON_REFERENCE_DATA_DIR $WORKING_TIME_SECONDS Erigon3
   
         # Capture monitoring script exit status
         test_exit_status=$?
 
         # Save the subsection reached status
-        echo "::set-output name=test_executed::true"
+        echo "test_executed=true" >> $GITHUB_OUTPUT
         
         # Clean up Erigon process if it's still running
         if kill -0 $ERIGON_PID 2> /dev/null; then
@@ -66,15 +74,6 @@ jobs:
           echo "Error detected during tests"
           echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
         fi
-
-    - name: Delete Erigon Testbed Data Directory
-      if: always()
-      run: |
-        rm -rf $ERIGON_TESTBED_DATA_DIR
-
-    - name: Resume the Erigon instance dedicated to db maintenance
-      run: |
-        python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
 
     - name: Save test results
       if: steps.test_step.outputs.test_executed == 'true'
@@ -103,6 +102,19 @@ jobs:
       with:
         name: test-results
         path: ${{ github.workspace }}/result.json
+
+    - name: Restore Erigon Chaindata Directory
+      if: ${{ always() }}
+      run: |
+        if [ -d "$ERIGON_TESTBED_AREA/chaindata-prev" ]; then
+          rm -rf $ERIGON_REFERENCE_DATA_DIR/chaindata
+          mv $ERIGON_TESTBED_AREA/chaindata-prev $ERIGON_REFERENCE_DATA_DIR/chaindata
+        fi
+
+    - name: Resume the Erigon instance dedicated to db maintenance
+      if: ${{ always() }}
+      run: |
+        python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
 
     - name: Action for Success
       if: steps.test_step.outputs.TEST_RESULT == 'success'

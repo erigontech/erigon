@@ -20,7 +20,7 @@ import (
 	"errors"
 	"fmt"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -45,7 +45,7 @@ func (b *BeaconState) GenesisTime() uint64 {
 	return b.genesisTime
 }
 
-func (b *BeaconState) GenesisValidatorsRoot() libcommon.Hash {
+func (b *BeaconState) GenesisValidatorsRoot() common.Hash {
 	return b.genesisValidatorsRoot
 }
 
@@ -146,9 +146,9 @@ func (b *BeaconState) ValidatorBalance(index int) (uint64, error) {
 	return b.balances.Get(index), nil
 }
 
-func (b *BeaconState) ValidatorPublicKey(index int) (libcommon.Bytes48, error) {
+func (b *BeaconState) ValidatorPublicKey(index int) (common.Bytes48, error) {
 	if index >= b.validators.Length() {
-		return libcommon.Bytes48{}, ErrInvalidValidatorIndex
+		return common.Bytes48{}, ErrInvalidValidatorIndex
 	}
 	return b.validators.Get(index).PublicKey(), nil
 }
@@ -323,15 +323,43 @@ func (b *BeaconState) NextWithdrawalValidatorIndex() uint64 {
 	return b.nextWithdrawalValidatorIndex
 }
 
+func (b *BeaconState) DepositRequestsStartIndex() uint64 {
+	return b.depositRequestsStartIndex
+}
+
+func (b *BeaconState) DepositBalanceToConsume() uint64 {
+	return b.depositBalanceToConsume
+}
+
+func (b *BeaconState) ConsolidationBalanceToConsume() uint64 {
+	return b.consolidationBalanceToConsume
+}
+
+func (b *BeaconState) EarliestConsolidationEpoch() uint64 {
+	return b.earliestConsolidationEpoch
+}
+
+func (b *BeaconState) PendingDeposits() *solid.ListSSZ[*solid.PendingDeposit] {
+	return b.pendingDeposits
+}
+
+func (b *BeaconState) PendingPartialWithdrawals() *solid.ListSSZ[*solid.PendingPartialWithdrawal] {
+	return b.pendingPartialWithdrawals
+}
+
+func (b *BeaconState) PendingConsolidations() *solid.ListSSZ[*solid.PendingConsolidation] {
+	return b.pendingConsolidations
+}
+
 // more compluicated ones
 
 // GetBlockRootAtSlot returns the block root at a given slot
-func (b *BeaconState) GetBlockRootAtSlot(slot uint64) (libcommon.Hash, error) {
+func (b *BeaconState) GetBlockRootAtSlot(slot uint64) (common.Hash, error) {
 	if slot >= b.Slot() {
-		return libcommon.Hash{}, ErrGetBlockRootAtSlotFuture
+		return common.Hash{}, ErrGetBlockRootAtSlotFuture
 	}
 	if b.Slot() > slot+b.BeaconConfig().SlotsPerHistoricalRoot {
-		return libcommon.Hash{}, errors.New("GetBlockRootAtSlot: slot too much far behind")
+		return common.Hash{}, errors.New("GetBlockRootAtSlot: slot too much far behind")
 	}
 	return b.blockRoots.Get(int(slot % b.BeaconConfig().SlotsPerHistoricalRoot)), nil
 }
@@ -346,4 +374,8 @@ func (b *BeaconState) GetDomain(domainType [4]byte, epoch uint64) ([]byte, error
 
 func (b *BeaconState) DebugPrint(prefix string) {
 	fmt.Printf("%s: %x\n", prefix, b.currentEpochParticipation)
+}
+
+func (b *BeaconState) GetPendingPartialWithdrawals() *solid.ListSSZ[*solid.PendingPartialWithdrawal] {
+	return b.pendingPartialWithdrawals
 }

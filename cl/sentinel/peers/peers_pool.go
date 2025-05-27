@@ -27,6 +27,10 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
+var (
+	ErrNoPeers = errors.New("no peers")
+)
+
 // Item is an item in the pool
 type Item struct {
 	id    peer.ID
@@ -68,7 +72,7 @@ func NewPool() *Pool {
 	return &Pool{
 		peerData:    make(map[peer.ID]*Item),
 		queue:       ring.NewBuffer[*Item](0, 1024),
-		bannedPeers: lru.NewWithTTL[peer.ID, struct{}]("bannedPeers", 100_000, 5*time.Minute),
+		bannedPeers: lru.NewWithTTL[peer.ID, struct{}]("bannedPeers", 100_000, 30*time.Minute),
 	}
 }
 
@@ -152,7 +156,7 @@ func (p *Pool) Request() (pid *Item, done func(), err error) {
 	//grab a peer from our ringbuffer
 	val, ok := p.queue.PopFront()
 	if !ok {
-		return nil, nil, errors.New("no peers? (  :(  > ")
+		return nil, nil, ErrNoPeers
 	}
 	return val, func() {
 		p.mu.Lock()

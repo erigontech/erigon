@@ -34,7 +34,7 @@ func TestHeimdallServer(t *testing.T) {
 
 	ctx := context.Background()
 	ctrl := gomock.NewController(t)
-	client := heimdall.NewMockHeimdallClient(ctrl)
+	client := heimdall.NewMockClient(ctrl)
 
 	events := []*heimdall.EventRecordWithTime{
 		{
@@ -73,5 +73,5 @@ func TestHeimdallServer(t *testing.T) {
 	client.EXPECT().FetchCheckpointCount(gomock.Any()).AnyTimes().Return(int64(1), nil)
 
 	err := http.ListenAndServe(HeimdallURLDefault[7:], makeHeimdallRouter(ctx, client))
-	require.Nil(t, err)
+	require.NoError(t, err)
 }

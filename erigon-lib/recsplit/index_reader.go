@@ -94,3 +94,4 @@ func (r *IndexReader) TwoLayerLookupByHash(hi, lo uint64) (uint64, bool) {
 	}
 	return r.index.OrdinalLookup(id), true
 }
+func (r *IndexReader) BaseDataID() uint64 { return r.index.BaseDataID() }

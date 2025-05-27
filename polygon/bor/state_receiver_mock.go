@@ -12,8 +12,8 @@ package bor
 import (
 	reflect "reflect"
 
-	consensus "github.com/erigontech/erigon/consensus"
-	rlp "github.com/erigontech/erigon/rlp"
+	rlp "github.com/erigontech/erigon-lib/rlp"
+	consensus "github.com/erigontech/erigon/execution/consensus"
 	gomock "go.uber.org/mock/gomock"
 )
 

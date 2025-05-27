@@ -13,7 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
-	types "github.com/erigontech/erigon/core/types"
+	types "github.com/erigontech/erigon-lib/types"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -113,6 +113,44 @@ func (c *MockStoreInsertBlocksCall) Do(f func(context.Context, []*types.Block) e
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockStoreInsertBlocksCall) DoAndReturn(f func(context.Context, []*types.Block) error) *MockStoreInsertBlocksCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// Prepare mocks base method.
+func (m *MockStore) Prepare(ctx context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Prepare", ctx)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Prepare indicates an expected call of Prepare.
+func (mr *MockStoreMockRecorder) Prepare(ctx any) *MockStorePrepareCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Prepare", reflect.TypeOf((*MockStore)(nil).Prepare), ctx)
+	return &MockStorePrepareCall{Call: call}
+}
+
+// MockStorePrepareCall wrap *gomock.Call
+type MockStorePrepareCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockStorePrepareCall) Return(arg0 error) *MockStorePrepareCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockStorePrepareCall) Do(f func(context.Context) error) *MockStorePrepareCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockStorePrepareCall) DoAndReturn(f func(context.Context) error) *MockStorePrepareCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

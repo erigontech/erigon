@@ -24,23 +24,19 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/erigontech/erigon-lib/kv/backup"
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/spf13/cobra"
 
+	"github.com/erigontech/erigon-db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/backup"
+	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-
-	"github.com/erigontech/erigon/core/rawdb/rawdbhelpers"
-	reset2 "github.com/erigontech/erigon/core/rawdb/rawdbreset"
+	reset2 "github.com/erigontech/erigon/eth/rawdbreset"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/ethdb/prune"
+	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 var cmdResetState = &cobra.Command{
@@ -55,19 +51,24 @@ var cmdResetState = &cobra.Command{
 		}
 		ctx, _ := common.RootContext()
 		defer db.Close()
-		sn, borSn, agg, _, _, _ := allSnapshots(ctx, db, logger)
+
+		sn, borSn, _, _, _, _, err := allSnapshots(ctx, db, logger)
+		if err != nil {
+			logger.Error("Opening snapshots", "error", err)
+			return
+		}
+
 		defer sn.Close()
 		defer borSn.Close()
-		defer agg.Close()
 
-		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, borSn, agg) }); err != nil {
+		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, borSn) }); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
 			return
 		}
 
-		if err = reset2.ResetState(db, ctx, chain, "", log.Root()); err != nil {
+		if err = reset2.ResetState(db, ctx); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -76,7 +77,7 @@ var cmdResetState = &cobra.Command{
 
 		// set genesis after reset all buckets
 		fmt.Printf("After reset: \n")
-		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, borSn, agg) }); err != nil {
+		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, borSn) }); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -99,7 +100,7 @@ var cmdClearBadBlocks = &cobra.Command{
 		defer db.Close()
 
 		return db.Update(ctx, func(tx kv.RwTx) error {
-			return backup.ClearTable(ctx, db, tx, "BadHeaderNumber")
+			return backup.ClearTables(ctx, tx, kv.BadHeaderNumber)
 		})
 	},
 }
@@ -114,7 +115,7 @@ func init() {
 	rootCmd.AddCommand(cmdClearBadBlocks)
 }
 
-func printStages(tx kv.Tx, snapshots *freezeblocks.RoSnapshots, borSn *heimdall.RoSnapshots, agg *state.Aggregator) error {
+func printStages(tx kv.Tx, snapshots *freezeblocks.RoSnapshots, borSn *heimdall.RoSnapshots) error {
 	var err error
 	var progress uint64
 	w := new(tabwriter.Writer)
@@ -138,11 +139,20 @@ func printStages(tx kv.Tx, snapshots *freezeblocks.RoSnapshots, borSn *heimdall.
 	}
 	fmt.Fprintf(w, "--\n")
 	fmt.Fprintf(w, "prune distance: %s\n\n", pm.String())
-	fmt.Fprintf(w, "blocks: segments=%d, indices=%d\n", snapshots.SegmentsMax(), snapshots.IndicesMax())
-	fmt.Fprintf(w, "blocks.bor: segments=%d, indices=%d\n\n", borSn.SegmentsMax(), borSn.IndicesMax())
+	if snapshots != nil {
+		fmt.Fprintf(w, "blocks: segments=%d, indices=%d\n", snapshots.SegmentsMax(), snapshots.IndicesMax())
+	} else {
+		fmt.Fprintf(w, "blocks: segments=0, indices=0; failed to open snapshots\n")
+	}
+	if borSn != nil {
+		fmt.Fprintf(w, "blocks.bor: segments=%d, indices=%d\n", borSn.SegmentsMax(), borSn.IndicesMax())
+	} else {
+		fmt.Fprintf(w, "blocks.bor: segments=0, indices=0; failed to open bor snapshots\n")
+	}
 
 	_lb, _lt, _ := rawdbv3.TxNums.Last(tx)
-	fmt.Fprintf(w, "state.history: idx steps: %.02f, TxNums_Index(%d,%d), filesAmount: %d\n\n", rawdbhelpers.IdxStepsCountV3(tx), _lb, _lt, agg.FilesAmount())
+
+	fmt.Fprintf(w, "state.history: idx steps: %.02f, TxNums_Index(%d,%d)\n\n", rawdbhelpers.IdxStepsCountV3(tx), _lb, _lt)
 	ethTxSequence, err := tx.ReadSequence(kv.EthTx)
 	if err != nil {
 		return err

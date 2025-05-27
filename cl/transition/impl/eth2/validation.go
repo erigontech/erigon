@@ -17,14 +17,15 @@
 package eth2
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 
-	"github.com/Giulio2002/bls"
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/utils/bls"
 )
 
 func (I *impl) VerifyTransition(s abstract.BeaconState, currentBlock *cltypes.BeaconBlock) error {
@@ -36,7 +37,7 @@ func (I *impl) VerifyTransition(s abstract.BeaconState, currentBlock *cltypes.Be
 		return fmt.Errorf("unable to generate state root: %v", err)
 	}
 	if expectedStateRoot != currentBlock.StateRoot {
-		return fmt.Errorf("expected state root differs from received state root, slot %d", currentBlock.Slot)
+		return fmt.Errorf("expected state root differs from received state root, slot %d , we have %s, ans %s", s.Slot(), hex.EncodeToString(expectedStateRoot[:]), hex.EncodeToString(currentBlock.StateRoot[:]))
 	}
 	return nil
 }

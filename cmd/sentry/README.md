@@ -12,21 +12,21 @@ combined). Ethereum mainnet configuration is currently hard-coded.
 ## Running with an external p2p sentry
 
 ```
-./buid/bin/sentry
+./build/bin/sentry
 ```
 
 ```
-./buid/bin/sentry --datadir=<sentry_datadir>
+./build/bin/sentry --datadir=<sentry_datadir>
 ```
 
-The command above specifies `--datadir` option - directory where the database files will be written (it doesn't need access to Erion's datadir). These two options
+The command above specifies `--datadir` option - directory where the database files will be written (it doesn't need access to Erigon's datadir). These two options
 will need to be specified regardless of the mode the program is run. This specific command above assumes and external
 p2p sentry running on the same computer listening to the port `9091`. In order to use a p2p sentry on a different
 computer, or a different port (or both), the option `--sentry.api.addr` can be used. For example:
 
 ```
-./buid/bin/sentry --datadir=<sentry1_datadir> --sentry.api.addr=localhost:9091
-./buid/bin/sentry --datadir=<sentry2_datadir> --sentry.api.addr=localhost:9191
+./build/bin/sentry --datadir=<sentry1_datadir> --sentry.api.addr=localhost:9091
+./build/bin/sentry --datadir=<sentry2_datadir> --sentry.api.addr=localhost:9191
 ./build/bin/erigon --sentry.api.addr="localhost:9091,localhost:9191"
 ```
 

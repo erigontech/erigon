@@ -36,7 +36,7 @@ Param(
         "sentry",
         "state",
         "test",
-        "test-integration",
+        "test-all",
         "txpool",
         "all"
     )]
@@ -160,7 +160,7 @@ function Get-Uninstall-Item {
     param ([string]$pattern = $(throw "A search pattern must be provided"))    
     
     # Trying to get the enumerable of all installed programs using Get-ItemProperty may cause 
-    # exceptions due to possible garbage values insterted into the registry by installers.
+    # exceptions due to possible garbage values inserted into the registry by installers.
     # Specifically an invalid cast exception throws when registry keys contain invalid DWORD data. 
     # See https://github.com/PowerShell/PowerShell/issues/9552
     # Due to this all items must be parsed one by one
@@ -397,7 +397,7 @@ if (!Test-Path -Path [string](Join-Path $MyContext.Directory "\.git") -PathType 
   Error !
   Directory $MyContext.Directory does not seem to be a properly cloned Erigon repository
   Please clone it using 
-  git clone --recurse-submodules -j8 https://github.com/erigontech/erigon.git
+  git clone -j8 https://github.com/erigontech/erigon.git
 
 "@
     exit 1
@@ -520,9 +520,9 @@ if ($BuildTarget -eq "db-tools") {
     go.exe clean -cache
 
 } elseif ($BuildTarget -eq "test") {
-    Write-Host " Running tests ..."
+    Write-Host " Running short tests ..."
     $env:GODEBUG = "cgocheck=0"
-    $TestCommand = "go test $($Erigon.BuildFlags) -p 2 -tags=e4 ./..."
+    $TestCommand = "go test $($Erigon.BuildFlags) -short --timeout 10m ./..."
     Invoke-Expression -Command $TestCommand | Out-Host
     if (!($?)) {
         Write-Host " ERROR : Tests failed"
@@ -533,10 +533,10 @@ if ($BuildTarget -eq "db-tools") {
         Remove-Item Env:\GODEBUG
     }
 
-} elseif ($BuildTarget -eq "test-integration") {
-    Write-Host " Running integration tests ..."
+} elseif ($BuildTarget -eq "test-all") {
+    Write-Host " Running all tests ..."
     $env:GODEBUG = "cgocheck=0"
-    $TestCommand = "go test $($Erigon.BuildFlags) -p 2 --timeout 130m -tags=e4 ./..."
+    $TestCommand = "go test $($Erigon.BuildFlags) --timeout 60m ./..."
     Invoke-Expression -Command $TestCommand | Out-Host
     if (!($?)) {
         Write-Host " ERROR : Tests failed"

@@ -26,10 +26,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/chain/networkid"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/core/types"
 )
 
 //go:embed testdata/block_test_gnosis_deneb.json
@@ -78,42 +79,42 @@ func TestBeaconBody(t *testing.T) {
 
 	// Test EncodeSSZ and DecodeSSZ
 	_, err := body.EncodeSSZ(nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Error(t, body.DecodeSSZ([]byte{1}, int(version)))
 
 	// Test HashSSZ
 	root, err := body.HashSSZ()
-	assert.NoError(t, err)
-	assert.Equal(t, libcommon.HexToHash("918d1ee08d700e422fcce6319cd7509b951d3ebfb1a05291aab9466b7e9826fc"), libcommon.Hash(root))
+	require.NoError(t, err)
+	assert.Equal(t, common.HexToHash("918d1ee08d700e422fcce6319cd7509b951d3ebfb1a05291aab9466b7e9826fc"), common.Hash(root))
 
 	// Test the blinded
 	blinded, err := body.Blinded()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	root2, err := blinded.HashSSZ()
-	assert.NoError(t, err)
-	assert.Equal(t, libcommon.HexToHash("918d1ee08d700e422fcce6319cd7509b951d3ebfb1a05291aab9466b7e9826fc"), libcommon.Hash(root2))
+	require.NoError(t, err)
+	assert.Equal(t, common.HexToHash("918d1ee08d700e422fcce6319cd7509b951d3ebfb1a05291aab9466b7e9826fc"), common.Hash(root2))
 
 	block2 := blinded.Full(body.ExecutionPayload.Transactions, body.ExecutionPayload.Withdrawals)
 	assert.Equal(t, block2.ExecutionPayload.version, body.ExecutionPayload.version)
 	root3, err := block2.HashSSZ()
-	assert.NoError(t, err)
-	assert.Equal(t, libcommon.HexToHash("918d1ee08d700e422fcce6319cd7509b951d3ebfb1a05291aab9466b7e9826fc"), libcommon.Hash(root3))
+	require.NoError(t, err)
+	assert.Equal(t, common.HexToHash("918d1ee08d700e422fcce6319cd7509b951d3ebfb1a05291aab9466b7e9826fc"), common.Hash(root3))
 
-	_, err = body.ExecutionPayload.RlpHeader(&libcommon.Hash{})
-	assert.NoError(t, err)
+	_, err = body.ExecutionPayload.RlpHeader(&common.Hash{}, common.Hash{})
+	require.NoError(t, err)
 
 	p, err := body.ExecutionPayload.PayloadHeader()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.NotNil(t, p)
 
 	b := body.ExecutionPayload.Body()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.NotNil(t, b)
 }
 
 func TestBeaconBlockJson(t *testing.T) {
-	_, bc := clparams.GetConfigsByNetwork(clparams.GnosisNetwork)
+	_, bc := clparams.GetConfigsByNetwork(networkid.GnosisChainID)
 	block := NewSignedBeaconBlock(bc, clparams.DenebVersion)
 	block.Block.Body.Version = clparams.DenebVersion
 	err := json.Unmarshal(beaconBodyJSON, block)
@@ -135,5 +136,5 @@ func TestBeaconBlockJson(t *testing.T) {
 	}
 
 	assert.Equal(t, map1, map2)
-	assert.Equal(t, libcommon.Hash(r), libcommon.HexToHash("0x1a9b89eb12282543a5fa0b0f251d8ec0c5c432121d7cb2a8d78461ea9d10c294"))
+	assert.Equal(t, common.Hash(r), common.HexToHash("0x1a9b89eb12282543a5fa0b0f251d8ec0c5c432121d7cb2a8d78461ea9d10c294"))
 }

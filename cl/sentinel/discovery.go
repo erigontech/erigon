@@ -27,9 +27,9 @@ import (
 	"github.com/prysmaticlabs/go-bitfield"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-p2p/enode"
+	"github.com/erigontech/erigon-p2p/enr"
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/p2p/enr"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -114,8 +114,8 @@ func (s *Sentinel) listenForPeers() {
 		}
 		node := iterator.Node()
 
-		needsPeersForSubnets := s.isPeerUsefulForAnySubnet(node)
-		if s.HasTooManyPeers() && !needsPeersForSubnets {
+		// needsPeersForSubnets := s.isPeerUsefulForAnySubnet(node)
+		if s.HasTooManyPeers() {
 			log.Trace("[Sentinel] Not looking for peers, at peer limit")
 			time.Sleep(100 * time.Millisecond)
 			continue
@@ -179,6 +179,12 @@ func (s *Sentinel) setupENR(
 func (s *Sentinel) onConnection(net network.Network, conn network.Conn) {
 	go func() {
 		peerId := conn.RemotePeer()
+		if s.HasTooManyPeers() {
+			log.Trace("[Sentinel] Not looking for peers, at peer limit")
+			s.host.Peerstore().RemovePeer(peerId)
+			s.host.Network().ClosePeer(peerId)
+			s.peers.RemovePeer(peerId)
+		}
 		valid, err := s.handshaker.ValidatePeer(peerId)
 		if err != nil {
 			log.Trace("[sentinel] failed to validate peer:", "err", err)

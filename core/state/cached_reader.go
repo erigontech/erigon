@@ -19,7 +19,7 @@ package state
 import (
 	"github.com/erigontech/erigon-lib/common"
 
-	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
@@ -53,45 +53,47 @@ func (cr *CachedReader) ReadAccountData(address common.Address) (*accounts.Accou
 	return a, nil
 }
 
+// ReadAccountDataForDebug is called when an account needs to be fetched from the state
+func (cr *CachedReader) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
+	return cr.ReadAccountData(address)
+}
+
 // ReadAccountStorage is called when a storage item needs to be fetched from the state
-func (cr *CachedReader) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+func (cr *CachedReader) ReadAccountStorage(address common.Address, key common.Hash) ([]byte, error) {
 	addrBytes := address.Bytes()
-	if s, ok := cr.cache.GetStorage(addrBytes, incarnation, key.Bytes()); ok {
+	if s, ok := cr.cache.GetStorage(addrBytes, 1, key.Bytes()); ok {
 		return s, nil
 	}
-	v, err := cr.r.ReadAccountStorage(address, incarnation, key)
+	v, err := cr.r.ReadAccountStorage(address, key)
 	if err != nil {
 		return nil, err
 	}
 	if len(v) == 0 {
-		cr.cache.SetStorageAbsent(addrBytes, incarnation, key.Bytes())
+		cr.cache.SetStorageAbsent(addrBytes, 1, key.Bytes())
 	} else {
-		cr.cache.SetStorageRead(addrBytes, incarnation, key.Bytes(), v)
+		cr.cache.SetStorageRead(addrBytes, 1, key.Bytes(), v)
 	}
 	return v, nil
 }
 
 // ReadAccountCode is called when code of an account needs to be fetched from the state
 // Usually, one of (address;incarnation) or codeHash is enough to uniquely identify the code
-func (cr *CachedReader) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	if codeHash == emptyCodeHashH {
-		return nil, nil
-	}
-	if c, ok := cr.cache.GetCode(address.Bytes(), incarnation); ok {
+func (cr *CachedReader) ReadAccountCode(address common.Address) ([]byte, error) {
+	if c, ok := cr.cache.GetCode(address.Bytes(), 1); ok {
 		return c, nil
 	}
-	c, err := cr.r.ReadAccountCode(address, incarnation, codeHash)
+	c, err := cr.r.ReadAccountCode(address)
 	if err != nil {
 		return nil, err
 	}
 	if cr.cache != nil && len(c) <= 1024 {
-		cr.cache.SetCodeRead(address.Bytes(), incarnation, c)
+		cr.cache.SetCodeRead(address.Bytes(), 1, c)
 	}
 	return c, nil
 }
 
-func (cr *CachedReader) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	c, err := cr.ReadAccountCode(address, incarnation, codeHash)
+func (cr *CachedReader) ReadAccountCodeSize(address common.Address) (int, error) {
+	c, err := cr.ReadAccountCode(address)
 	return len(c), err
 }
 

@@ -29,12 +29,12 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon-lib/common"
 	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/etl"
@@ -83,12 +83,11 @@ var DefaultCfg = Cfg{
 	MaxDictPatterns: 64 * 1024,
 
 	DictReducerSoftLimit: 1_000_000,
-
-	Workers: 1,
+	Workers:              1,
 }
 
 // Compressor is the main operating type for performing per-word compression
-// After creating a compression, one needs to add superstrings to it, using `AddWord` function
+// After creating a compression, one needs to add superstrings to it, using `Write` function
 // In order to add word without compression, function `AddUncompressedWord` needs to be used
 // Compressor only tracks which words are compressed and which are not until the compressed
 // file is created. After that, the user of the file needs to know when to call
@@ -241,9 +240,7 @@ func (c *Compressor) Compress() error {
 		c.superstrings <- c.superstring
 	}
 	close(c.superstrings)
-	runtime.GC()
 	c.wg.Wait()
-	runtime.GC()
 
 	if c.lvl < log.LvlTrace {
 		c.logger.Log(c.lvl, fmt.Sprintf("[%s] BuildDict start", c.logPrefix), "workers", c.Workers)

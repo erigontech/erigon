@@ -40,6 +40,13 @@ type SlotData struct {
 	// Capella
 	NextWithdrawalIndex          uint64
 	NextWithdrawalValidatorIndex uint64
+	// Electra
+	DepositRequestsStartIndex     uint64
+	DepositBalanceToConsume       uint64
+	ExitBalanceToConsume          uint64
+	EarliestExitEpoch             uint64
+	ConsolidationBalanceToConsume uint64
+	EarliestConsolidationEpoch    uint64
 
 	// BlockRewards for proposer
 	AttestationsRewards  uint64
@@ -61,7 +68,14 @@ func SlotDataFromBeaconState(s *state.CachingBeaconState) *SlotData {
 		Eth1DepositIndex:             s.Eth1DepositIndex(),
 		NextWithdrawalIndex:          s.NextWithdrawalIndex(),
 		NextWithdrawalValidatorIndex: s.NextWithdrawalValidatorIndex(),
-		Fork:                         s.Fork(),
+		// Electra
+		DepositRequestsStartIndex:     s.DepositRequestsStartIndex(),
+		DepositBalanceToConsume:       s.DepositBalanceToConsume(),
+		ExitBalanceToConsume:          s.ExitBalanceToConsume(),
+		EarliestExitEpoch:             s.EarliestExitEpoch(),
+		ConsolidationBalanceToConsume: s.ConsolidationBalanceToConsume(),
+		EarliestConsolidationEpoch:    s.EarliestConsolidationEpoch(),
+		Fork:                          s.Fork(),
 	}
 }
 
@@ -87,7 +101,7 @@ func (m *SlotData) WriteTo(w io.Writer) error {
 }
 
 // Deserialize deserializes the state from a byte slice with zstd compression.
-func (m *SlotData) ReadFrom(r io.Reader) error {
+func (m *SlotData) ReadFrom(r io.Reader, cfg *clparams.BeaconChainConfig) error {
 	m.Eth1Data = &cltypes.Eth1Data{}
 	m.Fork = &cltypes.Fork{}
 	var err error
@@ -121,6 +135,17 @@ func (m *SlotData) getSchema() []interface{} {
 	schema := []interface{}{m.Eth1Data, m.Fork, &m.Eth1DepositIndex, &m.ValidatorLength, &m.Eth1DataLength, &m.AttestationsRewards, &m.SyncAggregateRewards, &m.ProposerSlashings, &m.AttesterSlashings}
 	if m.Version >= clparams.CapellaVersion {
 		schema = append(schema, &m.NextWithdrawalIndex, &m.NextWithdrawalValidatorIndex)
+	}
+
+	if m.Version >= clparams.ElectraVersion {
+		schema = append(schema,
+			&m.DepositRequestsStartIndex,
+			&m.DepositBalanceToConsume,
+			&m.ExitBalanceToConsume,
+			&m.EarliestExitEpoch,
+			&m.ConsolidationBalanceToConsume,
+			&m.EarliestConsolidationEpoch,
+		)
 	}
 	return schema
 }

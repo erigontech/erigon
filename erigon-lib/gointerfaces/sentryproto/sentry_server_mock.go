@@ -15,6 +15,7 @@ import (
 
 	typesproto "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	gomock "go.uber.org/mock/gomock"
+	grpc "google.golang.org/grpc"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -121,7 +122,7 @@ func (c *MockSentryServerHandShakeCall) DoAndReturn(f func(context.Context, *emp
 }
 
 // Messages mocks base method.
-func (m *MockSentryServer) Messages(arg0 *MessagesRequest, arg1 Sentry_MessagesServer) error {
+func (m *MockSentryServer) Messages(arg0 *MessagesRequest, arg1 grpc.ServerStreamingServer[InboundMessage]) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Messages", arg0, arg1)
 	ret0, _ := ret[0].(error)
@@ -147,13 +148,13 @@ func (c *MockSentryServerMessagesCall) Return(arg0 error) *MockSentryServerMessa
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockSentryServerMessagesCall) Do(f func(*MessagesRequest, Sentry_MessagesServer) error) *MockSentryServerMessagesCall {
+func (c *MockSentryServerMessagesCall) Do(f func(*MessagesRequest, grpc.ServerStreamingServer[InboundMessage]) error) *MockSentryServerMessagesCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSentryServerMessagesCall) DoAndReturn(f func(*MessagesRequest, Sentry_MessagesServer) error) *MockSentryServerMessagesCall {
+func (c *MockSentryServerMessagesCall) DoAndReturn(f func(*MessagesRequest, grpc.ServerStreamingServer[InboundMessage]) error) *MockSentryServerMessagesCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -276,7 +277,7 @@ func (c *MockSentryServerPeerCountCall) DoAndReturn(f func(context.Context, *Pee
 }
 
 // PeerEvents mocks base method.
-func (m *MockSentryServer) PeerEvents(arg0 *PeerEventsRequest, arg1 Sentry_PeerEventsServer) error {
+func (m *MockSentryServer) PeerEvents(arg0 *PeerEventsRequest, arg1 grpc.ServerStreamingServer[PeerEvent]) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "PeerEvents", arg0, arg1)
 	ret0, _ := ret[0].(error)
@@ -302,13 +303,13 @@ func (c *MockSentryServerPeerEventsCall) Return(arg0 error) *MockSentryServerPee
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockSentryServerPeerEventsCall) Do(f func(*PeerEventsRequest, Sentry_PeerEventsServer) error) *MockSentryServerPeerEventsCall {
+func (c *MockSentryServerPeerEventsCall) Do(f func(*PeerEventsRequest, grpc.ServerStreamingServer[PeerEvent]) error) *MockSentryServerPeerEventsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSentryServerPeerEventsCall) DoAndReturn(f func(*PeerEventsRequest, Sentry_PeerEventsServer) error) *MockSentryServerPeerEventsCall {
+func (c *MockSentryServerPeerEventsCall) DoAndReturn(f func(*PeerEventsRequest, grpc.ServerStreamingServer[PeerEvent]) error) *MockSentryServerPeerEventsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

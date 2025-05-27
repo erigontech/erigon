@@ -21,24 +21,20 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
 const InMemorySignatures = 4096 // Number of recent block signatures to keep in memory
 
-type CanonicalChainBuilderFactory func(root *types.Header) CanonicalChainBuilder
+type CanonicalChainBuilderFactory func(root *types.Header) *CanonicalChainBuilder
 
 func NewCanonicalChainBuilderFactory(
 	chainConfig *chain.Config,
 	borConfig *borcfg.BorConfig,
 	blockProducersReader blockProducersReader,
+	signaturesCache *lru.ARCCache[common.Hash, common.Address],
 ) CanonicalChainBuilderFactory {
-	signaturesCache, err := lru.NewARC[common.Hash, common.Address](InMemorySignatures)
-	if err != nil {
-		panic(err)
-	}
-
 	difficultyCalculator := &DifficultyCalculator{
 		borConfig:            borConfig,
 		signaturesCache:      signaturesCache,
@@ -57,7 +53,7 @@ func NewCanonicalChainBuilderFactory(
 		headerTimeValidator: headerTimeValidator,
 	}
 
-	return func(root *types.Header) CanonicalChainBuilder {
+	return func(root *types.Header) *CanonicalChainBuilder {
 		return NewCanonicalChainBuilder(root, difficultyCalculator, headerValidator)
 	}
 }

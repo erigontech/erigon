@@ -17,7 +17,6 @@
 package statechange
 
 import (
-	"runtime"
 	"sort"
 	"sync"
 
@@ -49,20 +48,19 @@ func ProcessRegistryUpdates(s abstract.BeaconState) error {
 	var m sync.Mutex
 	activationQueue := make([]minimizeQueuedValidator, 0)
 	// Process activation eligibility and ejections.
-	if err := threading.ParallellForLoop(runtime.NumCPU(), 0, s.ValidatorSet().Length(), func(i int) error {
+	if err := threading.ParallellForLoop(1, 0, s.ValidatorSet().Length(), func(i int) error {
 		validator := s.ValidatorSet().Get(i)
-		activationEligibilityEpoch := validator.ActivationEligibilityEpoch()
-		effectivaBalance := validator.EffectiveBalance()
-		if activationEligibilityEpoch == s.BeaconConfig().FarFutureEpoch &&
-			validator.EffectiveBalance() == s.BeaconConfig().MaxEffectiveBalance {
+		if state.IsValidatorEligibleForActivationQueue(s, validator) {
 			s.SetActivationEligibilityEpochForValidatorAtIndex(i, currentEpoch+1)
 		}
+		effectivaBalance := validator.EffectiveBalance()
 		if validator.Active(currentEpoch) && effectivaBalance <= beaconConfig.EjectionBalance {
 			if err := s.InitiateValidatorExit(uint64(i)); err != nil {
 				return err
 			}
 		}
 		// Insert in the activation queue in case.
+		activationEligibilityEpoch := validator.ActivationEligibilityEpoch()
 		if activationEligibilityEpoch <= s.FinalizedCheckpoint().Epoch &&
 			validator.ActivationEpoch() == s.BeaconConfig().FarFutureEpoch {
 			m.Lock()
@@ -76,18 +74,22 @@ func ProcessRegistryUpdates(s abstract.BeaconState) error {
 	}); err != nil {
 		return err
 	}
-	// order the queue accordingly.
-	sort.Slice(activationQueue, func(i, j int) bool {
-		//  Order by the sequence of activation_eligibility_epoch setting and then index.
-		if activationQueue[i].activationEligibilityEpoch != activationQueue[j].activationEligibilityEpoch {
-			return activationQueue[i].activationEligibilityEpoch < activationQueue[j].activationEligibilityEpoch
+
+	if s.Version() <= clparams.DenebVersion {
+		// order the queue accordingly.
+		sort.Slice(activationQueue, func(i, j int) bool {
+			//  Order by the sequence of activation_eligibility_epoch setting and then index.
+			if activationQueue[i].activationEligibilityEpoch != activationQueue[j].activationEligibilityEpoch {
+				return activationQueue[i].activationEligibilityEpoch < activationQueue[j].activationEligibilityEpoch
+			}
+			return activationQueue[i].validatorIndex < activationQueue[j].validatorIndex
+		})
+		activationQueueLength := s.GetValidatorActivationChurnLimit()
+		if len(activationQueue) > int(activationQueueLength) {
+			activationQueue = activationQueue[:activationQueueLength]
 		}
-		return activationQueue[i].validatorIndex < activationQueue[j].validatorIndex
-	})
-	activationQueueLength := s.GetValidatorActivationChurnLimit()
-	if len(activationQueue) > int(activationQueueLength) {
-		activationQueue = activationQueue[:activationQueueLength]
 	}
+
 	// Only process up to epoch limit.
 	for _, entry := range activationQueue {
 		s.SetActivationEpochForValidatorAtIndex(int(entry.validatorIndex), computeActivationExitEpoch(beaconConfig, currentEpoch))

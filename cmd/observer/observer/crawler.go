@@ -26,15 +26,14 @@ import (
 
 	"golang.org/x/sync/semaphore"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-p2p/enode"
+	"github.com/erigontech/erigon-p2p/forkid"
 	"github.com/erigontech/erigon/cmd/observer/database"
 	"github.com/erigontech/erigon/cmd/observer/observer/node_utils"
 	"github.com/erigontech/erigon/cmd/observer/observer/sentry_candidates"
 	"github.com/erigontech/erigon/cmd/observer/utils"
-	"github.com/erigontech/erigon/core/forkid"
-	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/params"
 )
 
@@ -202,7 +201,7 @@ func (crawler *Crawler) selectCandidates(ctx context.Context, nodes chan<- candi
 		}
 
 		if len(candidates) == 0 {
-			if err := libcommon.Sleep(ctx, 1*time.Second); err != nil {
+			if err := common.Sleep(ctx, 1*time.Second); err != nil {
 				return err
 			}
 		}

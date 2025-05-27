@@ -25,24 +25,21 @@ import (
 	"os"
 	"time"
 
-	stateLib "github.com/erigontech/erigon-lib/state"
-
-	"github.com/erigontech/erigon-lib/wrap"
-
 	"github.com/c2h5oh/datasize"
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	chain2 "github.com/erigontech/erigon-lib/chain"
-	common2 "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/common/debugprint"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/debugprint"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
@@ -68,7 +65,7 @@ Examples:
 	Example: "go run ./cmd/integration state_stages --datadir=... --verbosity=3 --unwind=100 --unwind.every=100000 --block=2000000",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		ctx, _ := common2.RootContext()
+		ctx, _ := common.RootContext()
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
@@ -105,7 +102,7 @@ var loopExecCmd = &cobra.Command{
 	Use: "loop_exec",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		ctx, _ := common2.RootContext()
+		ctx, _ := common.RootContext()
 		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
@@ -150,26 +147,23 @@ func init() {
 	rootCmd.AddCommand(loopExecCmd)
 }
 
-func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.Context, logger1 log.Logger) error {
+func syncBySmallSteps(db kv.TemporalRwDB, miningConfig params.MiningConfig, ctx context.Context, logger1 log.Logger) error {
 	dirs := datadir.New(datadirCli)
 	if err := datadir.ApplyMigrations(dirs); err != nil {
 		return err
 	}
 
-	sn, borSn, agg, _, _, _ := allSnapshots(ctx, db, logger1)
-	defer sn.Close()
-	defer borSn.Close()
-	defer agg.Close()
-	engine, vmConfig, stateStages, miningStages, miner := newSync(ctx, db, &miningConfig, logger1)
+	_, engine, vmConfig, stateStages, miningStages, miner := newSync(ctx, db, &miningConfig, logger1)
 	chainConfig, pm := fromdb.ChainConfig(db), fromdb.PruneMode(db)
 
-	tx, err := db.BeginRw(ctx)
+	ttx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer ttx.Rollback()
+	var tx kv.RwTx = ttx
 
-	sd, err := stateLib.NewSharedDomains(tx, logger1)
+	sd, err := state.NewSharedDomains(ttx, logger1)
 	if err != nil {
 		return err
 	}
@@ -184,12 +178,9 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 	notifications := shards.NewNotifications(nil)
 
 	genesis := core.GenesisBlockByChainName(chain)
-	syncCfg := ethconfig.Defaults.Sync
-	syncCfg.ExecWorkerCount = int(workers)
-	syncCfg.ReconWorkerCount = int(reconWorkers)
 
 	br, _ := blocksIO(db, logger1)
-	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications, false, true, false, chaosMonkey, dirs, br, nil, genesis, syncCfg, nil)
+	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications, false, true, dirs, br, nil, genesis, syncCfg, nil)
 
 	execUntilFunc := func(execToBlock uint64) stagedsync.ExecFunc {
 		return func(badBlockUnwind bool, s *stagedsync.StageState, unwinder stagedsync.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
@@ -213,12 +204,13 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 		stopAt = 1
 	}
 
+	var structLogger *logger.StructLogger
 	traceStart := func() {
-		vmConfig.Tracer = logger.NewStructLogger(&logger.LogConfig{})
-		vmConfig.Debug = true
+		structLogger = logger.NewStructLogger(&logger.LogConfig{})
+		vmConfig.Tracer = structLogger.Hooks()
 	}
 	traceStop := func(id int) {
-		if !vmConfig.Debug {
+		if vmConfig.Tracer == nil {
 			return
 		}
 		w, err3 := os.Create(fmt.Sprintf("trace_%d.txt", id))
@@ -227,7 +219,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 		}
 		encoder := json.NewEncoder(w)
 		encoder.SetIndent(" ", " ")
-		for _, l := range logger.FormatLogs(vmConfig.Tracer.(*logger.StructLogger).StructLogs()) {
+		for _, l := range logger.FormatLogs(structLogger.StructLogs()) {
 			if err2 := encoder.Encode(l); err2 != nil {
 				panic(err2)
 			}
@@ -237,7 +229,6 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 		}
 
 		vmConfig.Tracer = nil
-		vmConfig.Debug = false
 	}
 	_, _ = traceStart, traceStop
 
@@ -280,7 +271,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 
 		stateStages.MockExecFunc(stages.Execution, execUntilFunc(execToBlock))
 		_ = stateStages.SetCurrentStage(stages.Execution)
-		if _, err := stateStages.Run(db, wrap.TxContainer{Tx: tx, Doms: sd}, false /* firstCycle */, false); err != nil {
+		if _, err := stateStages.Run(db, wrap.NewTxContainer(tx, sd), false /* firstCycle */, false); err != nil {
 			return err
 		}
 
@@ -306,12 +297,12 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 			panic(err)
 		}
 
-		if miner.MiningConfig.Enabled && nextBlock != nil && nextBlock.Coinbase() != (common2.Address{}) {
+		if miner.MiningConfig.Enabled && nextBlock != nil && nextBlock.Coinbase() != (common.Address{}) {
 			miner.MiningConfig.Etherbase = nextBlock.Coinbase()
 			miner.MiningConfig.ExtraData = nextBlock.Extra()
 			miningStages.MockExecFunc(stages.MiningCreateBlock, func(badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				err = stagedsync.SpawnMiningCreateBlockStage(s, txc,
-					stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, dirs.Tmp, br),
+					stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, dirs.Tmp, br),
 					quit, logger)
 				if err != nil {
 					return err
@@ -321,18 +312,18 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 				miner.MiningBlock.Header.GasLimit = nextBlock.GasLimit()
 				miner.MiningBlock.Header.Difficulty = nextBlock.Difficulty()
 				miner.MiningBlock.Header.Nonce = nextBlock.Nonce()
-				miner.MiningBlock.PreparedTxs = types.NewTransactionsFixedOrder(nextBlock.Transactions())
+				miner.MiningBlock.PreparedTxns = nextBlock.Transactions()
 				//debugprint.Headers(miningWorld.Block.Header, nextBlock.Header())
 				return err
 			})
 			//miningStages.MockExecFunc(stages.MiningFinish, func(s *stagedsync.StageState, u stagedsync.Unwinder) error {
-			//debugprint.Transactions(nextBlock.Transactions(), miningWorld.Block.Txs)
+			//debugprint.Transactions(nextBlock.Transactions(), miningWorld.Block.Txns)
 			//debugprint.Receipts(miningWorld.Block.Receipts, receiptsInDB)
 			//return stagedsync.SpawnMiningFinishStage(s, tx, miningWorld.Block, cc.Engine(), chainConfig, quit)
 			//})
 
 			_ = miningStages.SetCurrentStage(stages.MiningCreateBlock)
-			if _, err := miningStages.Run(db, wrap.TxContainer{Tx: tx, Doms: sd}, false /* firstCycle */, false); err != nil {
+			if _, err := miningStages.Run(db, wrap.NewTxContainer(tx, sd), false /* firstCycle */, false); err != nil {
 				return err
 			}
 			tx.Rollback()
@@ -387,14 +378,10 @@ func checkMinedBlock(b1, b2 *types.Block, chainConfig *chain2.Config) {
 	}
 }
 
-func loopExec(db kv.RwDB, ctx context.Context, unwind uint64, logger log.Logger) error {
+func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log.Logger) error {
 	chainConfig := fromdb.ChainConfig(db)
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
-	sn, borSn, agg, _, _, _ := allSnapshots(ctx, db, logger)
-	defer sn.Close()
-	defer borSn.Close()
-	defer agg.Close()
-	engine, vmConfig, sync, _, _ := newSync(ctx, db, nil, logger)
+	_, engine, vmConfig, sync, _, _ := newSync(ctx, db, nil, logger)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -414,13 +401,11 @@ func loopExec(db kv.RwDB, ctx context.Context, unwind uint64, logger log.Logger)
 	to := from + unwind
 
 	genesis := core.GenesisBlockByChainName(chain)
-	syncCfg := ethconfig.Defaults.Sync
-	syncCfg.ExecWorkerCount = int(workers)
-	syncCfg.ReconWorkerCount = int(reconWorkers)
 
 	initialCycle := false
 	br, _ := blocksIO(db, logger)
-	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, nil, false, true, false, chaosMonkey, dirs, br, nil, genesis, syncCfg, nil)
+	notifications := shards.NewNotifications(nil)
+	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications, false, true, dirs, br, nil, genesis, syncCfg, nil)
 
 	// set block limit of execute stage
 	sync.MockExecFunc(stages.Execution, func(badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
@@ -439,7 +424,7 @@ func loopExec(db kv.RwDB, ctx context.Context, unwind uint64, logger log.Logger)
 
 		_ = sync.SetCurrentStage(stages.Execution)
 		t := time.Now()
-		if _, err = sync.Run(db, wrap.TxContainer{Tx: tx}, initialCycle, false); err != nil {
+		if _, err = sync.Run(db, wrap.NewTxContainer(tx, nil), initialCycle, false); err != nil {
 			return err
 		}
 		logger.Info("[Integration] ", "loop time", time.Since(t))

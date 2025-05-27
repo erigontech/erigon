@@ -21,13 +21,24 @@ import (
 	"net/http"
 	"sort"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 )
 
 func (a *ApiHandler) getSpec(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	return newBeaconResponse(a.beaconChainCfg), nil
+	outSpec := struct {
+		*clparams.BeaconChainConfig
+		*clparams.NetworkConfig
+		MinEpochsForBlockRequests uint64 `json:"MIN_EPOCHS_FOR_BLOCK_REQUESTS,string"`
+	}{
+		BeaconChainConfig:         a.beaconChainCfg,
+		NetworkConfig:             a.netConfig,
+		MinEpochsForBlockRequests: a.beaconChainCfg.MinEpochsForBlockRequests(),
+	}
+
+	return newBeaconResponse(outSpec), nil
 }
 
 func (a *ApiHandler) getDepositContract(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -54,7 +65,7 @@ func (a *ApiHandler) getForkSchedule(w http.ResponseWriter, r *http.Request) (*b
 		}
 		return response[i].Epoch < response[j].Epoch
 	})
-	var previousVersion libcommon.Bytes4
+	var previousVersion common.Bytes4
 	for i := range response {
 		response[i].PreviousVersion = previousVersion
 		previousVersion = response[i].CurrentVersion

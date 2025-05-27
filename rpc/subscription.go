@@ -85,14 +85,74 @@ func encodeID(b []byte) ID {
 type notifierKey struct{}
 
 // NotifierFromContext returns the Notifier value stored in ctx, if any.
-func NotifierFromContext(ctx context.Context) (*Notifier, bool) {
-	n, ok := ctx.Value(notifierKey{}).(*Notifier)
+func NotifierFromContext(ctx context.Context) (Notifier, bool) {
+	n, ok := ctx.Value(notifierKey{}).(Notifier)
 	return n, ok
 }
 
-// Notifier is tied to a RPC connection that supports subscriptions.
-// Server callbacks use the notifier to send notifications.
-type Notifier struct {
+func ContextWithNotifier(ctx context.Context, n Notifier) context.Context {
+	return context.WithValue(ctx, notifierKey{}, n)
+}
+
+// Notifier is used by Server callbacks to send notifications.
+type Notifier interface {
+	CreateSubscription() *Subscription
+	Notify(id ID, data interface{}) error
+	Closed() <-chan interface{}
+}
+
+type LocalNotifier struct {
+	idgen     func() ID
+	namespace string
+	resc      chan<- any
+	closec    <-chan any
+	sub       *Subscription
+}
+
+func NewLocalNotifier(namespace string, resc chan<- any, closec <-chan any) *LocalNotifier {
+	return &LocalNotifier{
+		idgen:     randomIDGenerator(),
+		namespace: namespace,
+		resc:      resc,
+		closec:    closec,
+	}
+}
+
+func (n *LocalNotifier) CreateSubscription() *Subscription {
+	if n.sub != nil {
+		panic("can't create multiple subscriptions with LocalNotifier")
+	}
+
+	n.sub = &Subscription{
+		ID:        n.idgen(),
+		namespace: n.namespace,
+		err:       make(chan error, 1),
+	}
+
+	return n.sub
+}
+
+func (n *LocalNotifier) Notify(id ID, data interface{}) error {
+	if n.sub == nil {
+		panic("can't Notify before subscription is created")
+	} else if n.sub.ID != id {
+		panic("Notify with wrong ID")
+	}
+
+	select {
+	case <-n.closec:
+		return errDead
+	case n.resc <- data:
+		return nil
+	}
+}
+
+func (n *LocalNotifier) Closed() <-chan interface{} {
+	return n.closec
+}
+
+// RemoteNotifier is tied to a RPC connection that supports subscriptions.
+type RemoteNotifier struct {
 	h         *handler
 	namespace string
 
@@ -107,12 +167,12 @@ type Notifier struct {
 // RPC connection. By default subscriptions are inactive and notifications
 // are dropped until the subscription is marked as active. This is done
 // by the RPC server after the subscription ID is send to the client.
-func (n *Notifier) CreateSubscription() *Subscription {
+func (n *RemoteNotifier) CreateSubscription() *Subscription {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
 	if n.sub != nil {
-		panic("can't create multiple subscriptions with Notifier")
+		panic("can't create multiple subscriptions with RemoteNotifier")
 	} else if n.callReturned {
 		panic("can't create subscription after subscribe call has returned")
 	}
@@ -122,7 +182,7 @@ func (n *Notifier) CreateSubscription() *Subscription {
 
 // Notify sends a notification to the client with the given data as payload.
 // If an error occurs the RPC connection is closed and the error is returned.
-func (n *Notifier) Notify(id ID, data interface{}) error {
+func (n *RemoteNotifier) Notify(id ID, data interface{}) error {
 	enc, err := json.Marshal(data)
 	if err != nil {
 		return err
@@ -145,13 +205,13 @@ func (n *Notifier) Notify(id ID, data interface{}) error {
 
 // Closed returns a channel that is closed when the RPC connection is closed.
 // Deprecated: use subscription error channel
-func (n *Notifier) Closed() <-chan interface{} {
+func (n *RemoteNotifier) Closed() <-chan interface{} {
 	return n.h.conn.closed()
 }
 
 // takeSubscription returns the subscription (if one has been created). No subscription can
 // be created after this call.
-func (n *Notifier) takeSubscription() *Subscription {
+func (n *RemoteNotifier) takeSubscription() *Subscription {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.callReturned = true
@@ -161,7 +221,7 @@ func (n *Notifier) takeSubscription() *Subscription {
 // activate is called after the subscription ID was sent to client. Notifications are
 // buffered before activation. This prevents notifications being sent to the client before
 // the subscription ID is sent to the client.
-func (n *Notifier) activate() error {
+func (n *RemoteNotifier) activate() error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
@@ -174,7 +234,7 @@ func (n *Notifier) activate() error {
 	return nil
 }
 
-func (n *Notifier) send(sub *Subscription, data json.RawMessage) error {
+func (n *RemoteNotifier) send(sub *Subscription, data json.RawMessage) error {
 	params, _ := json.Marshal(&subscriptionResult{ID: string(sub.ID), Result: data})
 	ctx := context.Background()
 	return n.h.conn.WriteJSON(ctx, &jsonrpcMessage{
@@ -260,7 +320,7 @@ func (sub *ClientSubscription) quitWithError(unsubscribeServer bool, err error) 
 			sub.requestUnsubscribe()
 		}
 		if err != nil {
-			if err == ErrClientQuit {
+			if errors.Is(err, ErrClientQuit) {
 				err = nil // Adhere to subscription semantics.
 			}
 			sub.err <- err

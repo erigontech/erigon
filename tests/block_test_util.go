@@ -33,21 +33,18 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconsensusconfig"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -84,31 +81,31 @@ type btBlock struct {
 
 type btHeader struct {
 	Bloom                 types.Bloom
-	Coinbase              libcommon.Address
-	MixHash               libcommon.Hash
+	Coinbase              common.Address
+	MixHash               common.Hash
 	Nonce                 types.BlockNonce
 	Number                *big.Int
-	Hash                  libcommon.Hash
-	ParentHash            libcommon.Hash
-	ReceiptTrie           libcommon.Hash
-	StateRoot             libcommon.Hash
-	TransactionsTrie      libcommon.Hash
-	UncleHash             libcommon.Hash
+	Hash                  common.Hash
+	ParentHash            common.Hash
+	ReceiptTrie           common.Hash
+	StateRoot             common.Hash
+	TransactionsTrie      common.Hash
+	UncleHash             common.Hash
 	ExtraData             []byte
 	Difficulty            *big.Int
 	GasLimit              uint64
 	GasUsed               uint64
 	Timestamp             uint64
 	BaseFeePerGas         *big.Int
-	WithdrawalsRoot       *libcommon.Hash
+	WithdrawalsRoot       *common.Hash
 	BlobGasUsed           *uint64
 	ExcessBlobGas         *uint64
-	ParentBeaconBlockRoot *libcommon.Hash
-	RequestsHash          *libcommon.Hash
+	ParentBeaconBlockRoot *common.Hash
+	RequestsHash          *common.Hash
 }
 
 type btHeaderMarshaling struct {
-	ExtraData     hexutility.Bytes
+	ExtraData     hexutil.Bytes
 	Number        *math.HexOrDecimal256
 	Difficulty    *math.HexOrDecimal256
 	GasLimit      math.HexOrDecimal64
@@ -124,6 +121,7 @@ func (bt *BlockTest) Run(t *testing.T, checkStateRoot bool) error {
 	if !ok {
 		return UnsupportedForkError{bt.json.Network}
 	}
+
 	engine := ethconsensusconfig.CreateConsensusEngineBareBones(context.Background(), config, log.New())
 	m := mock.MockWithGenesisEngine(t, bt.genesis(config), engine, false, checkStateRoot)
 	defer m.Close()
@@ -149,7 +147,7 @@ func (bt *BlockTest) Run(t *testing.T, checkStateRoot bool) error {
 	defer tx.Rollback()
 
 	cmlast := rawdb.ReadHeadBlockHash(tx)
-	if libcommon.Hash(bt.json.BestBlock) != cmlast {
+	if common.Hash(bt.json.BestBlock) != cmlast {
 		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", bt.json.BestBlock, cmlast)
 	}
 	newDB := state.New(m.NewStateReader(tx))
@@ -319,9 +317,18 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 	// validate post state accounts in test file against what we have in state db
 	for addr, acct := range bt.json.Post {
 		// address is indirectly verified by the other fields, as it's the db key
-		code2 := statedb.GetCode(addr)
-		balance2 := statedb.GetBalance(addr)
-		nonce2 := statedb.GetNonce(addr)
+		code2, err := statedb.GetCode(addr)
+		if err != nil {
+			return err
+		}
+		balance2, err := statedb.GetBalance(addr)
+		if err != nil {
+			return err
+		}
+		nonce2, err := statedb.GetNonce(addr)
+		if err != nil {
+			return err
+		}
 		if nonce2 != acct.Nonce {
 			return fmt.Errorf("account nonce mismatch for addr: %x want: %d have: %d", addr, acct.Nonce, nonce2)
 		}
@@ -334,7 +341,7 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 		for loc, val := range acct.Storage {
 			val1 := uint256.NewInt(0).SetBytes(val.Bytes())
 			val2 := uint256.NewInt(0)
-			statedb.GetState(addr, &loc, val2)
+			statedb.GetState(addr, loc, val2)
 			if !val1.Eq(val2) {
 				return fmt.Errorf("storage mismatch for addr: %x loc: %x want: %d have: %d", addr, loc, val1, val2)
 			}
@@ -345,7 +352,7 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 
 func (bt *BlockTest) validateImportedHeaders(tx kv.Tx, validBlocks []btBlock, m *mock.MockSentry) error {
 	// to get constant lookup when verifying block headers by hash (some tests have many blocks)
-	bmap := make(map[libcommon.Hash]btBlock, len(bt.json.Blocks))
+	bmap := make(map[common.Hash]btBlock, len(bt.json.Blocks))
 	for _, b := range validBlocks {
 		bmap[b.BlockHeader.Hash] = b
 	}

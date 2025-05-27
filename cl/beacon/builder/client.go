@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 )
 
@@ -75,8 +76,8 @@ func (b *builderClient) RegisterValidator(ctx context.Context, registers []*clty
 	if err != nil {
 		return err
 	}
-	_, err = httpCall[json.RawMessage](ctx, b.httpClient, http.MethodPost, url, nil, bytes.NewBuffer(payload))
-	if err == ErrNoContent {
+	_, err = httpCall[json.RawMessage](ctx, b.httpClient, http.MethodPost, url, nil, bytes.NewBuffer(payload), json.RawMessage{})
+	if errors.Is(err, ErrNoContent) {
 		// no content is ok
 		return nil
 	}
@@ -90,7 +91,18 @@ func (b *builderClient) GetHeader(ctx context.Context, slot int64, parentHash co
 	// https://ethereum.github.io/builder-specs/#/Builder/getHeader
 	path := fmt.Sprintf("/eth/v1/builder/header/%d/%s/%s", slot, parentHash.Hex(), pubKey.Hex())
 	url := b.url.JoinPath(path).String()
-	header, err := httpCall[ExecutionHeader](ctx, b.httpClient, http.MethodGet, url, nil, nil)
+	var headerIn ExecutionHeader
+	var epoch uint64
+	//
+	if b.beaconConfig.SlotsPerEpoch != 0 {
+		epoch = uint64(slot / int64(b.beaconConfig.SlotsPerEpoch))
+	}
+	headerIn.Data = ExecutionHeaderData{Message: ExecutionHeaderMessage{
+		Header:             cltypes.NewEth1Header(b.beaconConfig.GetCurrentStateVersion(epoch)),
+		ExecutionRequests:  cltypes.NewExecutionRequests(b.beaconConfig),
+		BlobKzgCommitments: solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
+	}}
+	header, err := httpCall[ExecutionHeader](ctx, b.httpClient, http.MethodGet, url, nil, nil, headerIn)
 	if err != nil {
 		log.Warn("[mev builder] httpCall error on GetExecutionPayloadHeader", "err", err, "slot", slot, "parentHash", parentHash.Hex(), "pubKey", pubKey.Hex())
 		return nil, err
@@ -98,30 +110,31 @@ func (b *builderClient) GetHeader(ctx context.Context, slot int64, parentHash co
 	return header, nil
 }
 
-func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.SignedBlindedBeaconBlock) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, error) {
+func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.SignedBlindedBeaconBlock) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *cltypes.ExecutionRequests, error) {
 	// https://ethereum.github.io/builder-specs/#/Builder/submitBlindedBlocks
 	path := "/eth/v1/builder/blinded_blocks"
 	url := b.url.JoinPath(path).String()
 	payload, err := json.Marshal(block)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	headers := map[string]string{
 		"Eth-Consensus-Version": block.Version().String(),
 	}
-	resp, err := httpCall[BlindedBlockResponse](ctx, b.httpClient, http.MethodPost, url, headers, bytes.NewBuffer(payload))
+	resp, err := httpCall(ctx, b.httpClient, http.MethodPost, url, headers, bytes.NewBuffer(payload), BlindedBlockResponse{})
 	if err != nil {
 		log.Warn("[mev builder] httpCall error on SubmitBlindedBlocks", "err", err, "slot", block.Block.Slot)
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	var eth1Block *cltypes.Eth1Block
 	var blobsBundle *engine_types.BlobsBundleV1
+	var executionRequests *cltypes.ExecutionRequests
 	switch resp.Version {
 	case "bellatrix", "capella":
 		eth1Block = &cltypes.Eth1Block{}
 		if err := json.Unmarshal(resp.Data, block); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 	case "deneb":
 		denebResp := &struct {
@@ -132,26 +145,42 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 			BlobsBundle:      &engine_types.BlobsBundleV1{},
 		}
 		if err := json.Unmarshal(resp.Data, denebResp); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		eth1Block = denebResp.ExecutionPayload
 		blobsBundle = denebResp.BlobsBundle
+	case "electra":
+		denebResp := &struct {
+			ExecutionPayload  *cltypes.Eth1Block          `json:"execution_payload"`
+			BlobsBundle       *engine_types.BlobsBundleV1 `json:"blobs_bundle"`
+			ExecutionRequests *cltypes.ExecutionRequests  `json:"execution_requests"`
+		}{
+			ExecutionPayload:  cltypes.NewEth1Block(clparams.DenebVersion, b.beaconConfig),
+			BlobsBundle:       &engine_types.BlobsBundleV1{},
+			ExecutionRequests: cltypes.NewExecutionRequests(b.beaconConfig),
+		}
+		if err := json.Unmarshal(resp.Data, denebResp); err != nil {
+			return nil, nil, nil, err
+		}
+		eth1Block = denebResp.ExecutionPayload
+		blobsBundle = denebResp.BlobsBundle
+		executionRequests = denebResp.ExecutionRequests
 	}
-	return eth1Block, blobsBundle, nil
+	return eth1Block, blobsBundle, executionRequests, nil
 }
 
 func (b *builderClient) GetStatus(ctx context.Context) error {
 	path := "/eth/v1/builder/status"
 	url := b.url.JoinPath(path).String()
-	_, err := httpCall[json.RawMessage](ctx, b.httpClient, http.MethodGet, url, nil, nil)
-	if err == ErrNoContent {
+	_, err := httpCall[json.RawMessage](ctx, b.httpClient, http.MethodGet, url, nil, nil, json.RawMessage{})
+	if errors.Is(err, ErrNoContent) {
 		// no content is ok, we just need to check if the server is up
 		return nil
 	}
 	return err
 }
 
-func httpCall[T any](ctx context.Context, client *http.Client, method, url string, headers map[string]string, payloadReader io.Reader) (*T, error) {
+func httpCall[T any](ctx context.Context, client *http.Client, method, url string, headers map[string]string, payloadReader io.Reader, body T) (*T, error) {
 	request, err := http.NewRequestWithContext(ctx, method, url, payloadReader)
 	if err != nil {
 		log.Warn("[mev builder] http.NewRequest failed", "err", err, "url", url, "method", method)
@@ -190,7 +219,6 @@ func httpCall[T any](ctx context.Context, client *http.Client, method, url strin
 	}
 
 	// read response body
-	var body T
 	if response.Body == nil {
 		return &body, nil
 	}

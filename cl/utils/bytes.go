@@ -22,12 +22,15 @@ import (
 	"math/bits"
 	"unsafe"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/types/ssz"
 
 	"github.com/golang/snappy"
 )
 
 var IsSysLittleEndian bool
+
+const maxDecodeLenAllowed = 15 * datasize.MB
 
 func init() {
 	buf := [2]byte{}
@@ -63,11 +66,14 @@ func Uint64ToLE(i uint64) []byte {
 	return buf
 }
 
-func DecompressSnappy(data []byte) ([]byte, error) {
+func DecompressSnappy(data []byte, lengthCheck bool) ([]byte, error) {
 	// Decode the snappy
 	lenDecoded, err := snappy.DecodedLen(data)
 	if err != nil {
 		return nil, err
+	}
+	if lengthCheck && lenDecoded > int(maxDecodeLenAllowed) {
+		return nil, errors.New("snappy: decoded length is too large")
 	}
 	decodedData := make([]byte, lenDecoded)
 
@@ -160,15 +166,41 @@ func IsNonStrictSupersetBitlist(a, b []byte) bool {
 	return true
 }
 
-func IsOverlappingBitlist(a, b []byte) bool {
+// IsOverlappingSSZBitlist checks if bitlist 'a' and bitlist 'b' have any overlapping bits
+// However, it ignores the last bits in the last byte.
+func IsOverlappingSSZBitlist(a, b []byte) bool {
 	length := min(len(a), len(b))
 	for i := range length {
+
 		if a[i]&b[i] != 0 {
-			return true
+			if i != length-1 {
+				return true
+			}
+			var foundOverlap bool
+			// check the overlap bit by bit
+			for j := 0; j < 8; j++ {
+				if (a[i]>>j)&(b[i]>>j)&1 == 1 {
+					if foundOverlap {
+						return true
+					}
+					foundOverlap = true
+				}
+			}
 		}
 	}
 	return false
+
 }
+
+// func IsOverlappingBitlist(a, b []byte) bool {
+// 	length := min(len(a), len(b))
+// 	for i := range length {
+// 		if a[i]&b[i] != 0 {
+// 			return true
+// 		}
+// 	}
+// 	return false
+// }
 
 func BitsOnCount(b []byte) int {
 	count := 0

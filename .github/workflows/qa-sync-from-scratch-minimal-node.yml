@@ -1,20 +1,31 @@
 name: QA - Sync from scratch (minimal node)
 
 on:
+  push:
+    branches:
+      - 'release/3.*'
   schedule:
     - cron: '0 0 * * *'  # Run every night at 00:00 AM UTC
   workflow_dispatch:     # Run manually
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   minimal-node-sync-from-scratch-test:
-    runs-on: self-hosted
-    timeout-minutes: 360 # 6 hours
+    runs-on: [self-hosted, qa, long-running]
+    timeout-minutes: 1100  # 18 hours plus 20 minutes
+    strategy:
+      fail-fast: false
+      matrix:
+        chain: [ mainnet, bor-mainnet ]  # Chain name as specified on the erigon command line
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 7200 # 2 hours
-      TOTAL_TIME_SECONDS: 18000 # 5 hours
-      CHAIN: mainnet
+      TOTAL_TIME_SECONDS: 64800 # 18 hours
+      CHAIN: ${{ matrix.chain }}
 
     steps:
       - name: Check out repository
@@ -47,14 +58,7 @@ jobs:
           test_exit_status=$?
           
           # Save the subsection reached status
-          echo "::set-output name=test_executed::true"
-          
-          # Clean up Erigon process if it's still running
-          if kill -0 $ERIGON_PID 2> /dev/null; then
-            echo "Terminating Erigon"
-            kill $ERIGON_PID
-            wait $ERIGON_PID
-          fi
+          echo "test_executed=true" >> "$GITHUB_OUTPUT"
           
           # Check test runner script exit status
           if [ $test_exit_status -eq 0 ]; then
@@ -84,7 +88,7 @@ jobs:
         if: steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: test-results
+          name: test-results-${{ env.CHAIN }}
           path: |
             ${{ github.workspace }}/result-${{ env.CHAIN }}.json
             ${{ github.workspace }}/erigon_data/logs/erigon.log

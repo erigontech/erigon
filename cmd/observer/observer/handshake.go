@@ -25,16 +25,15 @@ import (
 	"net"
 	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/core/forkid"
-	"github.com/erigontech/erigon/eth/protocols/eth"
-	"github.com/erigontech/erigon/p2p"
-	"github.com/erigontech/erigon/p2p/rlpx"
+	"github.com/erigontech/erigon-lib/rlp"
+	p2p "github.com/erigontech/erigon-p2p"
+	"github.com/erigontech/erigon-p2p/forkid"
+	"github.com/erigontech/erigon-p2p/protocols/eth"
+	"github.com/erigontech/erigon-p2p/rlpx"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rlp"
 )
 
 // https://github.com/ethereum/devp2p/blob/master/rlpx.md#p2p-capability
@@ -66,8 +65,8 @@ type StatusMessage struct {
 	ProtocolVersion uint32
 	NetworkID       uint64
 	TD              *big.Int
-	Head            libcommon.Hash
-	Genesis         libcommon.Hash
+	Head            common.Hash
+	Genesis         common.Hash
 	ForkID          *forkid.ID     `rlp:"-"` // parsed from Rest if exists in v64+
 	Rest            []rlp.RawValue `rlp:"tail"`
 }
@@ -251,8 +250,6 @@ func makeOurHelloMessage(myPrivateKey *ecdsa.PrivateKey) HelloMessage {
 	clientID := common.MakeName("observer", version)
 
 	caps := []p2p.Cap{
-		{Name: eth.ProtocolName, Version: direct.ETH65},
-		{Name: eth.ProtocolName, Version: direct.ETH66},
 		{Name: eth.ProtocolName, Version: direct.ETH67},
 		{Name: eth.ProtocolName, Version: direct.ETH68},
 	}

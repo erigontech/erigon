@@ -42,7 +42,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/crypto/ecies"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon-lib/rlp"
 )
 
 // Conn is an RLPx network connection. It wraps a low-level network connection. The

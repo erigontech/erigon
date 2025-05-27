@@ -21,7 +21,7 @@ package params
 
 import (
 	"github.com/erigontech/erigon-lib/chain/networkname"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 // MainnetBootnodes are the enode URLs of the P2P bootstrap nodes running on
@@ -51,6 +51,15 @@ var SepoliaBootnodes = []string{
 	"enode://8b61dc2d06c3f96fddcbebb0efb29d60d3598650275dc469c22229d3e5620369b0d3dedafd929835fe7f489618f19f456fe7c0df572bf2d914a9f4e006f783a9@170.64.250.88:30303",  // sepolia-bootnode-1-syd1
 	"enode://10d62eff032205fcef19497f35ca8477bea0eadfff6d769a147e895d8b2b8f8ae6341630c645c30f5df6e67547c03494ced3d9c5764e8622a26587b083b028e8@139.59.49.206:30303",  // sepolia-bootnode-1-blr1
 	"enode://9e9492e2e8836114cc75f5b929784f4f46c324ad01daf87d956f98b3b6c5fcba95524d6e5cf9861dc96a2c8a171ea7105bb554a197455058de185fa870970c7c@138.68.123.152:30303", // sepolia-bootnode-1-ams3
+}
+
+// HoodiBootnodes are the enode URLs of the P2P bootstrap nodes running on the
+// Hoodi test network.
+var HoodiBootnodes = []string{
+	// EF DevOps
+	"enode://2112dd3839dd752813d4df7f40936f06829fc54c0e051a93967c26e5f5d27d99d886b57b4ffcc3c475e930ec9e79c56ef1dbb7d86ca5ee83a9d2ccf36e5c240c@134.209.138.84:30303",
+	"enode://60203fcb3524e07c5df60a14ae1c9c5b24023ea5d47463dfae051d2c9f3219f309657537576090ca0ae641f73d419f53d8e8000d7a464319d4784acd7d2abc41@209.38.124.160:30303",
+	"enode://8ae4a48101b2299597341263da0deb47cc38aa4d3ef4b7430b897d49bfa10eb1ccfe1655679b1ed46928ef177fbf21b86837bd724400196c508427a6f41602cd@134.199.184.23:30303",
 }
 
 var SepoliaStaticPeers = []string{
@@ -123,7 +132,7 @@ const dnsPrefix = "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUD
 // KnownDNSNetwork returns the address of a public DNS-based node list for the given
 // genesis hash and protocol. See https://github.com/ethereum/discv4-dns-lists for more
 // information.
-func KnownDNSNetwork(genesis libcommon.Hash, protocol string) string {
+func KnownDNSNetwork(genesis common.Hash, protocol string) string {
 	var net string
 	switch genesis {
 	case MainnetGenesisHash:
@@ -132,6 +141,8 @@ func KnownDNSNetwork(genesis libcommon.Hash, protocol string) string {
 		net = "sepolia"
 	case HoleskyGenesisHash:
 		net = "holesky"
+	case HoodiGenesisHash:
+		net = "hoodi"
 	case BorMainnetGenesisHash:
 		return "enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@pos.polygon-peers.io"
 	default:
@@ -140,12 +151,37 @@ func KnownDNSNetwork(genesis libcommon.Hash, protocol string) string {
 	return dnsPrefix + protocol + "." + net + ".ethdisco.net"
 }
 
+func BootnodeURLsByGenesisHash(genesis common.Hash) []string {
+	switch genesis {
+	case MainnetGenesisHash:
+		return MainnetBootnodes
+	case HoleskyGenesisHash:
+		return HoleskyBootnodes
+	case HoodiGenesisHash:
+		return HoodiBootnodes
+	case SepoliaGenesisHash:
+		return SepoliaBootnodes
+	case AmoyGenesisHash:
+		return AmoyBootnodes
+	case BorMainnetGenesisHash:
+		return BorMainnetBootnodes
+	case GnosisGenesisHash:
+		return GnosisBootnodes
+	case ChiadoGenesisHash:
+		return ChiadoBootnodes
+	default:
+		return []string{}
+	}
+}
+
 func BootnodeURLsOfChain(chain string) []string {
 	switch chain {
 	case networkname.Mainnet:
 		return MainnetBootnodes
 	case networkname.Holesky:
 		return HoleskyBootnodes
+	case networkname.Hoodi:
+		return HoodiBootnodes
 	case networkname.Sepolia:
 		return SepoliaBootnodes
 	case networkname.Amoy:

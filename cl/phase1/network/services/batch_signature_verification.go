@@ -5,14 +5,14 @@ import (
 	"errors"
 	"time"
 
-	"github.com/Giulio2002/bls"
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/monitor"
+	"github.com/erigontech/erigon/cl/utils/bls"
 )
 
 const (
-	batchSignatureVerificationThreshold = 300
+	batchSignatureVerificationThreshold = 50
 	reservedSize                        = 512
 )
 
@@ -26,6 +26,9 @@ type BatchSignatureVerifier struct {
 	attVerifyAndExecute        chan *AggregateVerificationData
 	aggregateProofVerify       chan *AggregateVerificationData
 	blsToExecutionChangeVerify chan *AggregateVerificationData
+	syncContributionVerify     chan *AggregateVerificationData
+	syncCommitteeMessage       chan *AggregateVerificationData
+	voluntaryExitVerify        chan *AggregateVerificationData
 	ctx                        context.Context
 }
 
@@ -35,11 +38,11 @@ var ErrInvalidBlsSignature = errors.New("invalid bls signature")
 // to make sure that we can validate it separately and in case of failure we ban corresponding
 // GossipData.Peer or simply run F and publish GossipData in case signature verification succeeds.
 type AggregateVerificationData struct {
-	Signatures [][]byte
-	SignRoots  [][]byte
-	Pks        [][]byte
-	F          func()
-	GossipData *sentinel.GossipData
+	Signatures  [][]byte
+	SignRoots   [][]byte
+	Pks         [][]byte
+	F           func()
+	SendingPeer *sentinel.Peer
 }
 
 func NewBatchSignatureVerifier(ctx context.Context, sentinel sentinel.SentinelClient) *BatchSignatureVerifier {
@@ -49,6 +52,9 @@ func NewBatchSignatureVerifier(ctx context.Context, sentinel sentinel.SentinelCl
 		attVerifyAndExecute:        make(chan *AggregateVerificationData, 1024),
 		aggregateProofVerify:       make(chan *AggregateVerificationData, 1024),
 		blsToExecutionChangeVerify: make(chan *AggregateVerificationData, 1024),
+		syncContributionVerify:     make(chan *AggregateVerificationData, 1024),
+		syncCommitteeMessage:       make(chan *AggregateVerificationData, 1024),
+		voluntaryExitVerify:        make(chan *AggregateVerificationData, 1024),
 	}
 }
 
@@ -65,6 +71,18 @@ func (b *BatchSignatureVerifier) AsyncVerifyBlsToExecutionChange(data *Aggregate
 	b.blsToExecutionChangeVerify <- data
 }
 
+func (b *BatchSignatureVerifier) AsyncVerifySyncContribution(data *AggregateVerificationData) {
+	b.syncContributionVerify <- data
+}
+
+func (b *BatchSignatureVerifier) AsyncVerifySyncCommitteeMessage(data *AggregateVerificationData) {
+	b.syncCommitteeMessage <- data
+}
+
+func (b *BatchSignatureVerifier) AsyncVerifyVoluntaryExit(data *AggregateVerificationData) {
+	b.voluntaryExitVerify <- data
+}
+
 func (b *BatchSignatureVerifier) ImmediateVerification(data *AggregateVerificationData) error {
 	return b.processSignatureVerification([]*AggregateVerificationData{data})
 }
@@ -74,6 +92,9 @@ func (b *BatchSignatureVerifier) Start() {
 	go b.start(b.attVerifyAndExecute)
 	go b.start(b.aggregateProofVerify)
 	go b.start(b.blsToExecutionChangeVerify)
+	go b.start(b.syncContributionVerify)
+	go b.start(b.syncCommitteeMessage)
+	go b.start(b.voluntaryExitVerify)
 }
 
 // When receiving AggregateVerificationData, we simply collect all the signature verification data
@@ -130,46 +151,37 @@ func (b *BatchSignatureVerifier) processSignatureVerification(aggregateVerificat
 	// Everything went well, run corresponding Fs and send all the gossip data to the network
 	for _, v := range aggregateVerificationData {
 		v.F()
-		if b.sentinel != nil && v.GossipData != nil {
-			if _, err := b.sentinel.PublishGossip(b.ctx, v.GossipData); err != nil {
-				log.Debug("failed to publish gossip", "err", err)
-				return err
-			}
-		}
 	}
 	return nil
 }
 
 // we could locate failing signature with binary search but for now let's choose simplicity over optimisation.
 func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerificationData []*AggregateVerificationData) {
+	alreadyBanned := false
 	for _, v := range aggregateVerificationData {
 		valid, err := blsVerifyMultipleSignatures(v.Signatures, v.SignRoots, v.Pks)
 		if err != nil {
 			log.Crit("[BatchVerifier] signature verification failed with the error: " + err.Error())
-			if b.sentinel != nil && v.GossipData != nil && v.GossipData.Peer != nil {
-				b.sentinel.BanPeer(b.ctx, v.GossipData.Peer)
+			if b.sentinel != nil && v.SendingPeer != nil {
+				b.sentinel.BanPeer(b.ctx, v.SendingPeer)
 			}
 			continue
 		}
 
 		if !valid {
-			if v.GossipData == nil {
+			if v.SendingPeer == nil || alreadyBanned {
 				continue
 			}
-			log.Debug("[BatchVerifier] received invalid signature on the gossip", "topic", v.GossipData.Name)
-			if b.sentinel != nil && v.GossipData != nil && v.GossipData.Peer != nil {
-				b.sentinel.BanPeer(b.ctx, v.GossipData.Peer)
+			log.Debug("[BatchVerifier] received invalid signature on the gossip", "peer", v.SendingPeer.Pid)
+			if b.sentinel != nil && v.SendingPeer != nil {
+				b.sentinel.BanPeer(b.ctx, v.SendingPeer)
+				alreadyBanned = true
 			}
 			continue
 		}
 
 		// run corresponding function and publish the gossip into the network
 		v.F()
-		if b.sentinel != nil && v.GossipData != nil {
-			if _, err := b.sentinel.PublishGossip(b.ctx, v.GossipData); err != nil {
-				log.Debug("failed to publish gossip", "err", err)
-			}
-		}
 	}
 }
 

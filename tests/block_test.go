@@ -17,18 +17,21 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build integration
-
 package tests
 
 import (
+	"path/filepath"
 	"runtime"
 	"testing"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
-func TestBlockchain(t *testing.T) {
+func TestLegacyBlockchain(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 	if runtime.GOOS == "windows" {
@@ -36,6 +39,8 @@ func TestBlockchain(t *testing.T) {
 	}
 
 	bt := new(testMatcher)
+	bt.skipLoad(`^.meta/`)
+
 	// General state tests are 'exported' as blockchain tests, but we can run them natively.
 	// For speedier CI-runs those are skipped.
 	bt.skipLoad(`^GeneralStateTests/`)
@@ -53,6 +58,30 @@ func TestBlockchain(t *testing.T) {
 	checkStateRoot := true
 
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
+		t.Parallel()
+		// import pre accounts & construct test genesis block & state root
+		if err := bt.checkFailure(t, test.Run(t, checkStateRoot)); err != nil {
+			t.Error(err)
+		}
+	})
+}
+
+func TestExecutionSpecBlockchain(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	defer log.Root().SetHandler(log.Root().GetHandler())
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
+
+	bt := new(testMatcher)
+
+	dir := filepath.Join(".", "execution-spec-tests", "blockchain_tests")
+	bt.skipLoad(`^prague/eip2935_historical_block_hashes_from_state/block_hashes/block_hashes_history.json`)
+	checkStateRoot := true
+
+	bt.walk(t, dir, func(t *testing.T, name string, test *BlockTest) {
+		t.Parallel()
 		// import pre accounts & construct test genesis block & state root
 		if err := bt.checkFailure(t, test.Run(t, checkStateRoot)); err != nil {
 			t.Error(err)

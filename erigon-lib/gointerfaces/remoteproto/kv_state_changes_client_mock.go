@@ -18,31 +18,31 @@ import (
 )
 
 // MockKV_StateChangesClient is a mock of KV_StateChangesClient interface.
-type MockKV_StateChangesClient struct {
+type MockKV_StateChangesClient[Res any] struct {
 	ctrl     *gomock.Controller
-	recorder *MockKV_StateChangesClientMockRecorder
+	recorder *MockKV_StateChangesClientMockRecorder[Res]
 	isgomock struct{}
 }
 
 // MockKV_StateChangesClientMockRecorder is the mock recorder for MockKV_StateChangesClient.
-type MockKV_StateChangesClientMockRecorder struct {
-	mock *MockKV_StateChangesClient
+type MockKV_StateChangesClientMockRecorder[Res any] struct {
+	mock *MockKV_StateChangesClient[Res]
 }
 
 // NewMockKV_StateChangesClient creates a new mock instance.
-func NewMockKV_StateChangesClient(ctrl *gomock.Controller) *MockKV_StateChangesClient {
-	mock := &MockKV_StateChangesClient{ctrl: ctrl}
-	mock.recorder = &MockKV_StateChangesClientMockRecorder{mock}
+func NewMockKV_StateChangesClient[Res any](ctrl *gomock.Controller) *MockKV_StateChangesClient[Res] {
+	mock := &MockKV_StateChangesClient[Res]{ctrl: ctrl}
+	mock.recorder = &MockKV_StateChangesClientMockRecorder[Res]{mock}
 	return mock
 }
 
 // EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockKV_StateChangesClient) EXPECT() *MockKV_StateChangesClientMockRecorder {
+func (m *MockKV_StateChangesClient[Res]) EXPECT() *MockKV_StateChangesClientMockRecorder[Res] {
 	return m.recorder
 }
 
 // CloseSend mocks base method.
-func (m *MockKV_StateChangesClient) CloseSend() error {
+func (m *MockKV_StateChangesClient[Res]) CloseSend() error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CloseSend")
 	ret0, _ := ret[0].(error)
@@ -50,37 +50,37 @@ func (m *MockKV_StateChangesClient) CloseSend() error {
 }
 
 // CloseSend indicates an expected call of CloseSend.
-func (mr *MockKV_StateChangesClientMockRecorder) CloseSend() *MockKV_StateChangesClientCloseSendCall {
+func (mr *MockKV_StateChangesClientMockRecorder[Res]) CloseSend() *MockKV_StateChangesClientCloseSendCall[Res] {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CloseSend", reflect.TypeOf((*MockKV_StateChangesClient)(nil).CloseSend))
-	return &MockKV_StateChangesClientCloseSendCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CloseSend", reflect.TypeOf((*MockKV_StateChangesClient[Res])(nil).CloseSend))
+	return &MockKV_StateChangesClientCloseSendCall[Res]{Call: call}
 }
 
 // MockKV_StateChangesClientCloseSendCall wrap *gomock.Call
-type MockKV_StateChangesClientCloseSendCall struct {
+type MockKV_StateChangesClientCloseSendCall[Res any] struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockKV_StateChangesClientCloseSendCall) Return(arg0 error) *MockKV_StateChangesClientCloseSendCall {
+func (c *MockKV_StateChangesClientCloseSendCall[Res]) Return(arg0 error) *MockKV_StateChangesClientCloseSendCall[Res] {
 	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockKV_StateChangesClientCloseSendCall) Do(f func() error) *MockKV_StateChangesClientCloseSendCall {
+func (c *MockKV_StateChangesClientCloseSendCall[Res]) Do(f func() error) *MockKV_StateChangesClientCloseSendCall[Res] {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockKV_StateChangesClientCloseSendCall) DoAndReturn(f func() error) *MockKV_StateChangesClientCloseSendCall {
+func (c *MockKV_StateChangesClientCloseSendCall[Res]) DoAndReturn(f func() error) *MockKV_StateChangesClientCloseSendCall[Res] {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // Context mocks base method.
-func (m *MockKV_StateChangesClient) Context() context.Context {
+func (m *MockKV_StateChangesClient[Res]) Context() context.Context {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Context")
 	ret0, _ := ret[0].(context.Context)
@@ -88,37 +88,37 @@ func (m *MockKV_StateChangesClient) Context() context.Context {
 }
 
 // Context indicates an expected call of Context.
-func (mr *MockKV_StateChangesClientMockRecorder) Context() *MockKV_StateChangesClientContextCall {
+func (mr *MockKV_StateChangesClientMockRecorder[Res]) Context() *MockKV_StateChangesClientContextCall[Res] {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Context", reflect.TypeOf((*MockKV_StateChangesClient)(nil).Context))
-	return &MockKV_StateChangesClientContextCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Context", reflect.TypeOf((*MockKV_StateChangesClient[Res])(nil).Context))
+	return &MockKV_StateChangesClientContextCall[Res]{Call: call}
 }
 
 // MockKV_StateChangesClientContextCall wrap *gomock.Call
-type MockKV_StateChangesClientContextCall struct {
+type MockKV_StateChangesClientContextCall[Res any] struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockKV_StateChangesClientContextCall) Return(arg0 context.Context) *MockKV_StateChangesClientContextCall {
+func (c *MockKV_StateChangesClientContextCall[Res]) Return(arg0 context.Context) *MockKV_StateChangesClientContextCall[Res] {
 	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockKV_StateChangesClientContextCall) Do(f func() context.Context) *MockKV_StateChangesClientContextCall {
+func (c *MockKV_StateChangesClientContextCall[Res]) Do(f func() context.Context) *MockKV_StateChangesClientContextCall[Res] {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockKV_StateChangesClientContextCall) DoAndReturn(f func() context.Context) *MockKV_StateChangesClientContextCall {
+func (c *MockKV_StateChangesClientContextCall[Res]) DoAndReturn(f func() context.Context) *MockKV_StateChangesClientContextCall[Res] {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // Header mocks base method.
-func (m *MockKV_StateChangesClient) Header() (metadata.MD, error) {
+func (m *MockKV_StateChangesClient[Res]) Header() (metadata.MD, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Header")
 	ret0, _ := ret[0].(metadata.MD)
@@ -127,37 +127,37 @@ func (m *MockKV_StateChangesClient) Header() (metadata.MD, error) {
 }
 
 // Header indicates an expected call of Header.
-func (mr *MockKV_StateChangesClientMockRecorder) Header() *MockKV_StateChangesClientHeaderCall {
+func (mr *MockKV_StateChangesClientMockRecorder[Res]) Header() *MockKV_StateChangesClientHeaderCall[Res] {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Header", reflect.TypeOf((*MockKV_StateChangesClient)(nil).Header))
-	return &MockKV_StateChangesClientHeaderCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Header", reflect.TypeOf((*MockKV_StateChangesClient[Res])(nil).Header))
+	return &MockKV_StateChangesClientHeaderCall[Res]{Call: call}
 }
 
 // MockKV_StateChangesClientHeaderCall wrap *gomock.Call
-type MockKV_StateChangesClientHeaderCall struct {
+type MockKV_StateChangesClientHeaderCall[Res any] struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockKV_StateChangesClientHeaderCall) Return(arg0 metadata.MD, arg1 error) *MockKV_StateChangesClientHeaderCall {
+func (c *MockKV_StateChangesClientHeaderCall[Res]) Return(arg0 metadata.MD, arg1 error) *MockKV_StateChangesClientHeaderCall[Res] {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockKV_StateChangesClientHeaderCall) Do(f func() (metadata.MD, error)) *MockKV_StateChangesClientHeaderCall {
+func (c *MockKV_StateChangesClientHeaderCall[Res]) Do(f func() (metadata.MD, error)) *MockKV_StateChangesClientHeaderCall[Res] {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockKV_StateChangesClientHeaderCall) DoAndReturn(f func() (metadata.MD, error)) *MockKV_StateChangesClientHeaderCall {
+func (c *MockKV_StateChangesClientHeaderCall[Res]) DoAndReturn(f func() (metadata.MD, error)) *MockKV_StateChangesClientHeaderCall[Res] {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // Recv mocks base method.
-func (m *MockKV_StateChangesClient) Recv() (*StateChangeBatch, error) {
+func (m *MockKV_StateChangesClient[Res]) Recv() (*StateChangeBatch, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Recv")
 	ret0, _ := ret[0].(*StateChangeBatch)
@@ -166,37 +166,37 @@ func (m *MockKV_StateChangesClient) Recv() (*StateChangeBatch, error) {
 }
 
 // Recv indicates an expected call of Recv.
-func (mr *MockKV_StateChangesClientMockRecorder) Recv() *MockKV_StateChangesClientRecvCall {
+func (mr *MockKV_StateChangesClientMockRecorder[Res]) Recv() *MockKV_StateChangesClientRecvCall[Res] {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Recv", reflect.TypeOf((*MockKV_StateChangesClient)(nil).Recv))
-	return &MockKV_StateChangesClientRecvCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Recv", reflect.TypeOf((*MockKV_StateChangesClient[Res])(nil).Recv))
+	return &MockKV_StateChangesClientRecvCall[Res]{Call: call}
 }
 
 // MockKV_StateChangesClientRecvCall wrap *gomock.Call
-type MockKV_StateChangesClientRecvCall struct {
+type MockKV_StateChangesClientRecvCall[Res any] struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockKV_StateChangesClientRecvCall) Return(arg0 *StateChangeBatch, arg1 error) *MockKV_StateChangesClientRecvCall {
+func (c *MockKV_StateChangesClientRecvCall[Res]) Return(arg0 *StateChangeBatch, arg1 error) *MockKV_StateChangesClientRecvCall[Res] {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockKV_StateChangesClientRecvCall) Do(f func() (*StateChangeBatch, error)) *MockKV_StateChangesClientRecvCall {
+func (c *MockKV_StateChangesClientRecvCall[Res]) Do(f func() (*StateChangeBatch, error)) *MockKV_StateChangesClientRecvCall[Res] {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockKV_StateChangesClientRecvCall) DoAndReturn(f func() (*StateChangeBatch, error)) *MockKV_StateChangesClientRecvCall {
+func (c *MockKV_StateChangesClientRecvCall[Res]) DoAndReturn(f func() (*StateChangeBatch, error)) *MockKV_StateChangesClientRecvCall[Res] {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // RecvMsg mocks base method.
-func (m_2 *MockKV_StateChangesClient) RecvMsg(m any) error {
+func (m_2 *MockKV_StateChangesClient[Res]) RecvMsg(m any) error {
 	m_2.ctrl.T.Helper()
 	ret := m_2.ctrl.Call(m_2, "RecvMsg", m)
 	ret0, _ := ret[0].(error)
@@ -204,37 +204,37 @@ func (m_2 *MockKV_StateChangesClient) RecvMsg(m any) error {
 }
 
 // RecvMsg indicates an expected call of RecvMsg.
-func (mr *MockKV_StateChangesClientMockRecorder) RecvMsg(m any) *MockKV_StateChangesClientRecvMsgCall {
+func (mr *MockKV_StateChangesClientMockRecorder[Res]) RecvMsg(m any) *MockKV_StateChangesClientRecvMsgCall[Res] {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RecvMsg", reflect.TypeOf((*MockKV_StateChangesClient)(nil).RecvMsg), m)
-	return &MockKV_StateChangesClientRecvMsgCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RecvMsg", reflect.TypeOf((*MockKV_StateChangesClient[Res])(nil).RecvMsg), m)
+	return &MockKV_StateChangesClientRecvMsgCall[Res]{Call: call}
 }
 
 // MockKV_StateChangesClientRecvMsgCall wrap *gomock.Call
-type MockKV_StateChangesClientRecvMsgCall struct {
+type MockKV_StateChangesClientRecvMsgCall[Res any] struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockKV_StateChangesClientRecvMsgCall) Return(arg0 error) *MockKV_StateChangesClientRecvMsgCall {
+func (c *MockKV_StateChangesClientRecvMsgCall[Res]) Return(arg0 error) *MockKV_StateChangesClientRecvMsgCall[Res] {
 	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockKV_StateChangesClientRecvMsgCall) Do(f func(any) error) *MockKV_StateChangesClientRecvMsgCall {
+func (c *MockKV_StateChangesClientRecvMsgCall[Res]) Do(f func(any) error) *MockKV_StateChangesClientRecvMsgCall[Res] {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockKV_StateChangesClientRecvMsgCall) DoAndReturn(f func(any) error) *MockKV_StateChangesClientRecvMsgCall {
+func (c *MockKV_StateChangesClientRecvMsgCall[Res]) DoAndReturn(f func(any) error) *MockKV_StateChangesClientRecvMsgCall[Res] {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // SendMsg mocks base method.
-func (m_2 *MockKV_StateChangesClient) SendMsg(m any) error {
+func (m_2 *MockKV_StateChangesClient[Res]) SendMsg(m any) error {
 	m_2.ctrl.T.Helper()
 	ret := m_2.ctrl.Call(m_2, "SendMsg", m)
 	ret0, _ := ret[0].(error)
@@ -242,37 +242,37 @@ func (m_2 *MockKV_StateChangesClient) SendMsg(m any) error {
 }
 
 // SendMsg indicates an expected call of SendMsg.
-func (mr *MockKV_StateChangesClientMockRecorder) SendMsg(m any) *MockKV_StateChangesClientSendMsgCall {
+func (mr *MockKV_StateChangesClientMockRecorder[Res]) SendMsg(m any) *MockKV_StateChangesClientSendMsgCall[Res] {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SendMsg", reflect.TypeOf((*MockKV_StateChangesClient)(nil).SendMsg), m)
-	return &MockKV_StateChangesClientSendMsgCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SendMsg", reflect.TypeOf((*MockKV_StateChangesClient[Res])(nil).SendMsg), m)
+	return &MockKV_StateChangesClientSendMsgCall[Res]{Call: call}
 }
 
 // MockKV_StateChangesClientSendMsgCall wrap *gomock.Call
-type MockKV_StateChangesClientSendMsgCall struct {
+type MockKV_StateChangesClientSendMsgCall[Res any] struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockKV_StateChangesClientSendMsgCall) Return(arg0 error) *MockKV_StateChangesClientSendMsgCall {
+func (c *MockKV_StateChangesClientSendMsgCall[Res]) Return(arg0 error) *MockKV_StateChangesClientSendMsgCall[Res] {
 	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockKV_StateChangesClientSendMsgCall) Do(f func(any) error) *MockKV_StateChangesClientSendMsgCall {
+func (c *MockKV_StateChangesClientSendMsgCall[Res]) Do(f func(any) error) *MockKV_StateChangesClientSendMsgCall[Res] {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockKV_StateChangesClientSendMsgCall) DoAndReturn(f func(any) error) *MockKV_StateChangesClientSendMsgCall {
+func (c *MockKV_StateChangesClientSendMsgCall[Res]) DoAndReturn(f func(any) error) *MockKV_StateChangesClientSendMsgCall[Res] {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // Trailer mocks base method.
-func (m *MockKV_StateChangesClient) Trailer() metadata.MD {
+func (m *MockKV_StateChangesClient[Res]) Trailer() metadata.MD {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Trailer")
 	ret0, _ := ret[0].(metadata.MD)
@@ -280,31 +280,31 @@ func (m *MockKV_StateChangesClient) Trailer() metadata.MD {
 }
 
 // Trailer indicates an expected call of Trailer.
-func (mr *MockKV_StateChangesClientMockRecorder) Trailer() *MockKV_StateChangesClientTrailerCall {
+func (mr *MockKV_StateChangesClientMockRecorder[Res]) Trailer() *MockKV_StateChangesClientTrailerCall[Res] {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Trailer", reflect.TypeOf((*MockKV_StateChangesClient)(nil).Trailer))
-	return &MockKV_StateChangesClientTrailerCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Trailer", reflect.TypeOf((*MockKV_StateChangesClient[Res])(nil).Trailer))
+	return &MockKV_StateChangesClientTrailerCall[Res]{Call: call}
 }
 
 // MockKV_StateChangesClientTrailerCall wrap *gomock.Call
-type MockKV_StateChangesClientTrailerCall struct {
+type MockKV_StateChangesClientTrailerCall[Res any] struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockKV_StateChangesClientTrailerCall) Return(arg0 metadata.MD) *MockKV_StateChangesClientTrailerCall {
+func (c *MockKV_StateChangesClientTrailerCall[Res]) Return(arg0 metadata.MD) *MockKV_StateChangesClientTrailerCall[Res] {
 	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockKV_StateChangesClientTrailerCall) Do(f func() metadata.MD) *MockKV_StateChangesClientTrailerCall {
+func (c *MockKV_StateChangesClientTrailerCall[Res]) Do(f func() metadata.MD) *MockKV_StateChangesClientTrailerCall[Res] {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockKV_StateChangesClientTrailerCall) DoAndReturn(f func() metadata.MD) *MockKV_StateChangesClientTrailerCall {
+func (c *MockKV_StateChangesClientTrailerCall[Res]) DoAndReturn(f func() metadata.MD) *MockKV_StateChangesClientTrailerCall[Res] {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

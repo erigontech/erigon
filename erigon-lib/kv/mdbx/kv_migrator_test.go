@@ -20,7 +20,6 @@ package mdbx_test
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -59,20 +58,20 @@ func TestBucketCRUD(t *testing.T) {
 		uniquness[dbi] = true
 	}
 
-	require.True(migrator.ExistsBucket(normalBucket))
-	require.True(errors.Is(migrator.DropBucket(normalBucket), kv.ErrAttemptToDeleteNonDeprecatedBucket))
+	require.True(migrator.ExistsTable(normalBucket))
+	require.ErrorIs(migrator.DropTable(normalBucket), kv.ErrAttemptToDeleteNonDeprecatedBucket)
 
-	require.False(migrator.ExistsBucket(deprecatedBucket))
-	require.NoError(migrator.CreateBucket(deprecatedBucket))
-	require.True(migrator.ExistsBucket(deprecatedBucket))
+	require.False(migrator.ExistsTable(deprecatedBucket))
+	require.NoError(migrator.CreateTable(deprecatedBucket))
+	require.True(migrator.ExistsTable(deprecatedBucket))
 
 	if deprecatedBucket != "none" {
-		require.NoError(migrator.DropBucket(deprecatedBucket))
-		require.False(migrator.ExistsBucket(deprecatedBucket))
+		require.NoError(migrator.DropTable(deprecatedBucket))
+		require.False(migrator.ExistsTable(deprecatedBucket))
 	}
 
-	require.NoError(migrator.CreateBucket(deprecatedBucket))
-	require.True(migrator.ExistsBucket(deprecatedBucket))
+	require.NoError(migrator.CreateTable(deprecatedBucket))
+	require.True(migrator.ExistsTable(deprecatedBucket))
 
 	c, err := tx.RwCursor(deprecatedBucket)
 	require.NoError(err)
@@ -82,9 +81,9 @@ func TestBucketCRUD(t *testing.T) {
 	require.NoError(err)
 	require.Equal([]byte{1}, v)
 
-	buckets, err := migrator.ListBuckets()
+	buckets, err := migrator.ListTables()
 	require.NoError(err)
-	require.True(len(buckets) > 10)
+	require.Greater(len(buckets), 10)
 
 	// check thad buckets have unique DBI's
 	uniquness = map[kv.DBI]bool{}
@@ -101,7 +100,7 @@ func TestBucketCRUD(t *testing.T) {
 func TestReadOnlyMode(t *testing.T) {
 	path := t.TempDir()
 	logger := log.New()
-	db1 := mdbx.NewMDBX(logger).Path(path).MapSize(16 * datasize.MB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db1 := mdbx.New(kv.ChainDB, logger).Path(path).MapSize(16 * datasize.MB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			kv.Headers: kv.TableCfgItem{},
 		}
@@ -109,7 +108,7 @@ func TestReadOnlyMode(t *testing.T) {
 	db1.Close()
 	time.Sleep(10 * time.Millisecond) // win sometime need time to close file
 
-	db2 := mdbx.NewMDBX(logger).Readonly().Path(path).MapSize(16 * datasize.MB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db2 := mdbx.New(kv.ChainDB, logger).Readonly(true).Path(path).MapSize(16 * datasize.MB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			kv.Headers: kv.TableCfgItem{},
 		}

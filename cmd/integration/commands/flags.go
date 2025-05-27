@@ -19,46 +19,37 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon/turbo/cli"
-
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/turbo/cli"
 )
 
 var (
-	chaindata                                string
-	databaseVerbosity                        int
-	referenceChaindata                       string
-	block, pruneTo, unwind                   uint64
-	unwindEvery                              uint64
-	batchSizeStr                             string
-	reset, warmup, noCommit                  bool
-	resetPruneAt                             bool
-	bucket                                   string
-	datadirCli, toChaindata                  string
-	migration                                string
-	integrityFast, integritySlow             bool
-	file                                     string
-	HeimdallURL                              string
-	txtrace                                  bool // Whether to trace the execution (should only be used together with `block`)
-	pruneFlag                                string
-	pruneB, pruneH, pruneR, pruneT, pruneC   uint64
-	pruneBBefore, pruneHBefore, pruneRBefore uint64
-	pruneTBefore, pruneCBefore               uint64
-	experiments                              []string
-	unwindTypes                              []string
-	chain                                    string // Which chain to use (mainnet, sepolia, etc.)
-	outputCsvFile                            string
+	chaindata                    string
+	databaseVerbosity            int
+	referenceChaindata           string
+	block, pruneTo, unwind       uint64
+	unwindEvery                  uint64
+	batchSizeStr                 string
+	domain                       string
+	reset, noCommit              bool
+	bucket                       string
+	datadirCli, toChaindata      string
+	migration                    string
+	integrityFast, integritySlow bool
+	file                         string
+	HeimdallURL                  string
+	txtrace                      bool // Whether to trace the execution (should only be used together with `block`)
+	unwindTypes                  []string
+	chain                        string // Which chain to use (mainnet, sepolia, etc.)
+	outputCsvFile                string
 
-	commitmentMode string
-	commitmentTrie string
-	commitmentFreq int
-	startTxNum     uint64
-	traceFromTx    uint64
+	startTxNum uint64
 
-	workers, reconWorkers uint64
-	dbWriteMap            bool
-	chaosMonkey           bool
+	dbWriteMap bool
+
+	chainTipMode bool
+	syncCfg      = ethconfig.Defaults.Sync
 )
 
 func must(err error) {
@@ -119,11 +110,6 @@ func withUnwindEvery(cmd *cobra.Command) {
 
 func withReset(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&reset, "reset", false, "reset given stage")
-	cmd.Flags().BoolVar(&warmup, "warmup", false, "warmup relevant tables by parallel random reads")
-}
-
-func withResetPruneAt(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&resetPruneAt, "resetPruneAt", false, "reset prune_at to 0 for a given stage")
 }
 
 func withBucket(cmd *cobra.Command) {
@@ -157,6 +143,10 @@ func withBatchSize(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&batchSizeStr, "batchSize", cli.BatchSizeFlag.Value, cli.BatchSizeFlag.Usage)
 }
 
+func withDomain(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&domain, "domain", "", "Comma separated names of domain/inverted_indices")
+}
+
 func withIntegrityChecks(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&integritySlow, "integrity.slow", false, "enable slow data-integrity checks")
 	cmd.Flags().BoolVar(&integrityFast, "integrity.fast", false, "enable fast data-integrity checks")
@@ -180,26 +170,15 @@ func withHeimdall(cmd *cobra.Command) {
 }
 
 func withWorkers(cmd *cobra.Command) {
-	cmd.Flags().Uint64Var(&workers, "exec.workers", uint64(ethconfig.Defaults.Sync.ExecWorkerCount), "")
-	cmd.Flags().Uint64Var(&reconWorkers, "recon.workers", uint64(ethconfig.Defaults.Sync.ReconWorkerCount), "")
+	cmd.Flags().IntVar(&syncCfg.ExecWorkerCount, "exec.workers", ethconfig.Defaults.Sync.ExecWorkerCount, "")
 }
 
 func withStartTx(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&startTxNum, "tx", 0, "start processing from tx")
 }
 
-func withTraceFromTx(cmd *cobra.Command) {
-	cmd.Flags().Uint64Var(&traceFromTx, "txtrace.from", 0, "start tracing from txn number")
-}
-
 func withOutputCsvFile(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&outputCsvFile, "output.csv.file", "", "location to output csv data")
-}
-
-func withCommitment(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&commitmentMode, "commitment.mode", "direct", "defines the way to calculate commitments: 'direct' mode reads from state directly, 'update' accumulate updates before commitment, 'off' actually disables commitment calculation")
-	cmd.Flags().StringVar(&commitmentTrie, "commitment.trie", "hex", "hex - use Hex Patricia Hashed Trie for commitments, bin - use of binary patricia trie")
-	cmd.Flags().IntVar(&commitmentFreq, "commitment.freq", 1000000, "how many blocks to skip between calculating commitment")
 }
 
 func withUnwindTypes(cmd *cobra.Command) {
@@ -207,5 +186,8 @@ func withUnwindTypes(cmd *cobra.Command) {
 }
 
 func withChaosMonkey(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&chaosMonkey, utils.ChaosMonkeyFlag.Name, utils.ChaosMonkeyFlag.Value, utils.ChaosMonkeyFlag.Usage)
+	cmd.Flags().BoolVar(&syncCfg.ChaosMonkey, utils.ChaosMonkeyFlag.Name, utils.ChaosMonkeyFlag.Value, utils.ChaosMonkeyFlag.Usage)
+}
+func withChainTipMode(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&chainTipMode, "sync.mode.chaintip", false, "Every block does: `CalcCommitment`, `rwtx.Commit()`, generate diffs/changesets. Also can use it to generate diffs before `integration loop_exec`")
 }

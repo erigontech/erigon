@@ -1,34 +1,51 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package bridge
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/rlp"
 )
 
 type Reader struct {
 	store              Store
 	logger             log.Logger
-	stateClientAddress libcommon.Address
+	stateClientAddress common.Address
 }
 
 type ReaderConfig struct {
 	Store                        Store
 	Logger                       log.Logger
-	StateReceiverContractAddress libcommon.Address
+	StateReceiverContractAddress common.Address
 	RoTxLimit                    int64
 }
 
@@ -43,7 +60,7 @@ func AssembleReader(ctx context.Context, config ReaderConfig) (*Reader, error) {
 	return reader, nil
 }
 
-func NewReader(store Store, logger log.Logger, stateReceiverContractAddress libcommon.Address) *Reader {
+func NewReader(store Store, logger log.Logger, stateReceiverContractAddress common.Address) *Reader {
 	return &Reader{
 		store:              store,
 		logger:             logger,
@@ -55,26 +72,23 @@ func (r *Reader) Prepare(ctx context.Context) error {
 	return r.store.Prepare(ctx)
 }
 
-// Events returns all sync events at blockNum
-func (r *Reader) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
-	start, end, err := r.store.BlockEventIdsRange(ctx, blockNum)
-	if err != nil {
-		if errors.Is(err, ErrEventIdRangeNotFound) {
-			return nil, nil
-		}
-
-		return nil, err
-	}
-
-	eventsRaw := make([]*types.Message, 0, end-start+1)
-
-	events, err := r.store.Events(ctx, start, end+1)
+func (r *Reader) EventsWithinTime(ctx context.Context, timeFrom, timeTo time.Time) ([]*types.Message, error) {
+	events, ids, err := r.store.EventsByTimeframe(ctx, uint64(timeFrom.Unix()), uint64(timeTo.Unix()))
 	if err != nil {
 		return nil, err
 	}
 
-	if len(events) > 0 {
-		r.logger.Debug(bridgeLogPrefix("events for block"), "block", blockNum, "start", start, "end", end)
+	eventsRaw := make([]*types.Message, 0, len(events))
+
+	if len(events) > 0 && dbg.Enabled(ctx) {
+		r.logger.Debug(
+			bridgeLogPrefix("events for time range"),
+			"timeFrom", timeFrom.Unix(),
+			"timeTo", timeTo.Unix(),
+			"start", ids[0],
+			"end", ids[len(ids)-1],
+			"len", len(events),
+		)
 	}
 
 	// convert to message
@@ -91,13 +105,54 @@ func (r *Reader) Events(ctx context.Context, blockNum uint64) ([]*types.Message,
 			nil,
 		)
 
-		eventsRaw = append(eventsRaw, &msg)
+		eventsRaw = append(eventsRaw, msg)
 	}
 
 	return eventsRaw, nil
 }
 
-func (r *Reader) EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error) {
+// Events returns all sync events at blockNum
+func (r *Reader) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
+	start, end, ok, err := r.store.BlockEventIdsRange(ctx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
+
+	eventsRaw := make([]*types.Message, 0, end-start+1)
+
+	events, err := r.store.Events(ctx, start, end+1)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(events) > 0 && dbg.Enabled(ctx) {
+		r.logger.Debug(bridgeLogPrefix("events for block"), "block", blockNum, "start", start, "end", end, "len", len(events))
+	}
+
+	// convert to message
+	for _, event := range events {
+		msg := types.NewMessage(
+			state.SystemAddress,
+			&r.stateClientAddress,
+			0, u256.Num0,
+			core.SysCallGasLimit,
+			u256.Num0,
+			nil, nil,
+			event, nil, false,
+			true,
+			nil,
+		)
+
+		eventsRaw = append(eventsRaw, msg)
+	}
+
+	return eventsRaw, nil
+}
+
+func (r *Reader) EventTxnLookup(ctx context.Context, borTxHash common.Hash) (uint64, bool, error) {
 	return r.store.EventTxnToBlockNum(ctx, borTxHash)
 }
 
@@ -128,7 +183,7 @@ func (r *RemoteReader) Events(ctx context.Context, blockNum uint64) ([]*types.Me
 		return nil, nil
 	}
 
-	stateReceiverContractAddress := libcommon.HexToAddress(reply.StateReceiverContractAddress)
+	stateReceiverContractAddress := common.HexToAddress(reply.StateReceiverContractAddress)
 	result := make([]*types.Message, len(reply.EventRlps))
 	for i, event := range reply.EventRlps {
 		result[i] = messageFromData(stateReceiverContractAddress, event)
@@ -137,7 +192,7 @@ func (r *RemoteReader) Events(ctx context.Context, blockNum uint64) ([]*types.Me
 	return result, nil
 }
 
-func (r *RemoteReader) EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error) {
+func (r *RemoteReader) EventTxnLookup(ctx context.Context, borTxHash common.Hash) (uint64, bool, error) {
 	reply, err := r.client.BorTxnLookup(ctx, &remote.BorTxnLookupRequest{BorTxHash: gointerfaces.ConvertHashToH256(borTxHash)})
 	if err != nil {
 		return 0, false, err
@@ -149,8 +204,8 @@ func (r *RemoteReader) EventTxnLookup(ctx context.Context, borTxHash libcommon.H
 	return reply.BlockNumber, reply.Present, nil
 }
 
-// Close implements bridge.ReaderService. It's a noop as there is no attached store.
 func (r *RemoteReader) Close() {
+	// no-op as there is no attached store
 }
 
 func (r *RemoteReader) EnsureVersionCompatibility() bool {
@@ -169,7 +224,7 @@ func (r *RemoteReader) EnsureVersionCompatibility() bool {
 	return true
 }
 
-func messageFromData(to libcommon.Address, data []byte) *types.Message {
+func messageFromData(to common.Address, data []byte) *types.Message {
 	msg := types.NewMessage(
 		state.SystemAddress,
 		&to,
@@ -182,11 +237,11 @@ func messageFromData(to libcommon.Address, data []byte) *types.Message {
 		nil,
 	)
 
-	return &msg
+	return msg
 }
 
 // NewStateSyncEventMessages creates a corresponding message that can be passed to EVM for multiple state sync events
-func NewStateSyncEventMessages(stateSyncEvents []rlp.RawValue, stateReceiverContract *libcommon.Address, gasLimit uint64) []*types.Message {
+func NewStateSyncEventMessages(stateSyncEvents []rlp.RawValue, stateReceiverContract *common.Address, gasLimit uint64) []*types.Message {
 	msgs := make([]*types.Message, len(stateSyncEvents))
 	for i, event := range stateSyncEvents {
 		msg := types.NewMessage(
@@ -205,7 +260,7 @@ func NewStateSyncEventMessages(stateSyncEvents []rlp.RawValue, stateReceiverCont
 			nil,   // maxFeePerBlobGas
 		)
 
-		msgs[i] = &msg
+		msgs[i] = msg
 	}
 
 	return msgs

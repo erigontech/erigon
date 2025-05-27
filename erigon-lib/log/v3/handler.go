@@ -135,7 +135,7 @@ func (h *closingHandler) Close() error {
 // the calling function to the context with key "caller".
 func CallerFileHandler(h Handler) Handler {
 	return FuncHandler(func(r *Record) error {
-		r.Ctx = append(r.Ctx, "caller", fmt.Sprint(r.Call))
+		r.Ctx = append(r.Ctx, "caller", fmt.Sprint(r.Call(6)))
 		return h.Log(r)
 	})
 }
@@ -144,7 +144,7 @@ func CallerFileHandler(h Handler) Handler {
 // the context with key "fn".
 func CallerFuncHandler(h Handler) Handler {
 	return FuncHandler(func(r *Record) error {
-		r.Ctx = append(r.Ctx, "fn", fmt.Sprintf("%+n", r.Call))
+		r.Ctx = append(r.Ctx, "fn", fmt.Sprintf("%+n", r.Call(6)))
 		return h.Log(r)
 	})
 }
@@ -156,7 +156,7 @@ func CallerFuncHandler(h Handler) Handler {
 // package github.com/go-stack/stack for the list of supported formats.
 func CallerStackHandler(format string, h Handler) Handler {
 	return FuncHandler(func(r *Record) error {
-		s := stack.Trace().TrimBelow(r.Call).TrimRuntime()
+		s := stack.Trace().TrimBelow(r.Call(6)).TrimRuntime()
 		if len(s) > 0 {
 			r.Ctx = append(r.Ctx, "stack", fmt.Sprintf(format, s))
 		}
@@ -313,7 +313,7 @@ func LazyHandler(h Handler) Handler {
 					r.Ctx[i] = err
 				} else {
 					if cs, ok := v.(stack.CallStack); ok {
-						v = cs.TrimBelow(r.Call).TrimRuntime()
+						v = cs.TrimBelow(r.Call(6)).TrimRuntime()
 					}
 					r.Ctx[i] = v
 				}

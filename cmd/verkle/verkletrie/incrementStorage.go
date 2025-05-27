@@ -23,18 +23,16 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/debug"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/temporal/historyv2"
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/debug"
-	"github.com/erigontech/erigon/core/rawdb"
 )
 
-func IncrementStorage(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *VerkleTreeWriter, from, to uint64, tmpdir string) (libcommon.Hash, error) {
+func IncrementStorage(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *VerkleTreeWriter, from, to uint64, tmpdir string) (common.Hash, error) {
 	logInterval := time.NewTicker(30 * time.Second)
 	logPrefix := "IncrementVerkleStorage"
 
@@ -52,9 +50,9 @@ func IncrementStorage(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *Verkl
 	}
 	defer cancelWorkers()
 
-	storageCursor, err := tx.CursorDupSort(kv.StorageChangeSet)
+	storageCursor, err := tx.CursorDupSort(kv.StorageChangeSetDeprecated)
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 	defer storageCursor.Close()
 	// Start Goroutine for collection
@@ -70,13 +68,13 @@ func IncrementStorage(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *Verkl
 	marker := NewVerkleMarker(tmpdir)
 	defer marker.Rollback()
 
-	for k, v, err := storageCursor.Seek(hexutility.EncodeTs(from)); k != nil; k, v, err = storageCursor.Next() {
+	for k, v, err := storageCursor.Seek(hexutil.EncodeTs(from)); k != nil; k, v, err = storageCursor.Next() {
 		if err != nil {
-			return libcommon.Hash{}, err
+			return common.Hash{}, err
 		}
 		blockNumber, changesetKey, _, err := historyv2.DecodeStorage(k, v)
 		if err != nil {
-			return libcommon.Hash{}, err
+			return common.Hash{}, err
 		}
 
 		if blockNumber > to {
@@ -85,14 +83,14 @@ func IncrementStorage(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *Verkl
 
 		marked, err := marker.IsMarked(changesetKey)
 		if err != nil {
-			return libcommon.Hash{}, err
+			return common.Hash{}, err
 		}
 
 		if marked {
 			continue
 		}
 
-		address := libcommon.BytesToAddress(changesetKey[:20])
+		address := common.BytesToAddress(changesetKey[:20])
 
 		/*var acc accounts.Account
 		_, err := rawdb.ReadAccount(tx, address, &acc)
@@ -115,7 +113,7 @@ func IncrementStorage(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *Verkl
 
 		storageValue, err := tx.GetOne(kv.PlainState, changesetKey)
 		if err != nil {
-			return libcommon.Hash{}, err
+			return common.Hash{}, err
 		}
 		storageKey := new(uint256.Int).SetBytes(changesetKey[28:])
 		var storageValueFormatted []byte
@@ -131,7 +129,7 @@ func IncrementStorage(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *Verkl
 			storageValue: storageValueFormatted,
 		}
 		if err := marker.MarkAsDone(changesetKey); err != nil {
-			return libcommon.Hash{}, err
+			return common.Hash{}, err
 		}
 		select {
 		case <-logInterval.C:
@@ -145,11 +143,11 @@ func IncrementStorage(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *Verkl
 	// Get root
 	root, err := rawdb.ReadVerkleRoot(vTx, from)
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 	newRoot, err := verkleWriter.CommitVerkleTree(root)
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 	log.Info("Computed verkle root", "root", common.Bytes2Hex(newRoot[:]))
 

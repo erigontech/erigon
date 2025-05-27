@@ -23,12 +23,12 @@ import (
 	"net"
 	"net/http"
 	"os/signal"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/go-chi/chi/v5"
 	"github.com/prysmaticlabs/go-bitfield"
 
@@ -38,15 +38,15 @@ import (
 	"github.com/libp2p/go-libp2p/core/metrics"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
-	rcmgrObs "github.com/libp2p/go-libp2p/p2p/host/resource-manager/obs"
 
 	"github.com/erigontech/erigon-lib/crypto"
 	sentinelrpc "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-p2p/discover"
+	"github.com/erigontech/erigon-p2p/enode"
+	"github.com/erigontech/erigon-p2p/enr"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
@@ -55,9 +55,6 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/erigontech/erigon/p2p/discover"
-	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/p2p/enr"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -94,6 +91,7 @@ type Sentinel struct {
 
 	blockReader freezeblocks.BeaconSnapshotReader
 	blobStorage blob_storage.BlobStorage
+	bwc         *metrics.BandwidthCounter
 
 	indiciesDB kv.RoDB
 
@@ -148,25 +146,17 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	)
 
 	ip := net.ParseIP(ipAddr)
-	if ip.To4() == nil {
-		return nil, fmt.Errorf("IPV4 address not provided instead %s was provided", ipAddr)
+	if ip == nil {
+		return nil, fmt.Errorf("bad ip address provided, %s was provided", ipAddr)
 	}
 
 	var bindIP net.IP
 	var networkVersion string
-
-	// check for our network version
-	switch {
-	// if we have 16 byte and 4 byte representation then we are in using udp6
-	case ip.To16() != nil && ip.To4() == nil:
-		bindIP = net.IPv6zero
-		networkVersion = "udp6"
-		// only 4 bytes then we are using udp4
-	case ip.To4() != nil:
-		bindIP = net.IPv4zero
-		networkVersion = "udp4"
-	default:
-		return nil, fmt.Errorf("bad ip address provided, %s was provided", ipAddr)
+	// If the IP is an IPv4 address, bind to the correct zero address.
+	if ip.To4() != nil {
+		bindIP, networkVersion = ip.To4(), "udp4"
+	} else {
+		bindIP, networkVersion = ip.To16(), "udp6"
 	}
 
 	udpAddr := &net.UDPAddr{
@@ -184,11 +174,11 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	}
 
 	// Start stream handlers
-
 	net, err := discover.ListenV5(s.ctx, "any", conn, localNode, discCfg)
 	if err != nil {
 		return nil, err
 	}
+
 	handlers.NewConsensusHandlers(s.ctx, s.blockReader, s.indiciesDB, s.host, s.peers, s.cfg.NetworkConfig, localNode, s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.forkChoiceReader, s.blobStorage, s.cfg.EnableBlocks).Start()
 
 	return net, err
@@ -239,35 +229,14 @@ func New(
 	if err != nil {
 		return nil, err
 	}
-	str, err := rcmgrObs.NewStatsTraceReporter()
-	if err != nil {
-		return nil, err
-	}
-
-	subnetCount := cfg.NetworkConfig.AttestationSubnetCount +
-		cfg.BeaconConfig.SyncCommitteeSubnetCount +
-		cfg.BeaconConfig.MaxBlobsPerBlock
-
-	defaultLimits := rcmgr.DefaultLimits.AutoScale()
-	newLimit := rcmgr.PartialLimitConfig{
-		System: rcmgr.ResourceLimits{
-			StreamsOutbound: rcmgr.LimitVal(subnetCount * 4),
-			StreamsInbound:  rcmgr.LimitVal(subnetCount * 4),
-		},
-	}.Build(defaultLimits)
-	rmgr, err := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(newLimit), rcmgr.WithTraceReporter(str))
-	if err != nil {
-		return nil, err
-	}
-	opts = append(opts, libp2p.ResourceManager(rmgr))
 
 	gater, err := NewGater(cfg)
 	if err != nil {
 		return nil, err
 	}
-	bwc := metrics.NewBandwidthCounter()
+	s.bwc = metrics.NewBandwidthCounter()
 
-	opts = append(opts, libp2p.ConnectionGater(gater), libp2p.BandwidthReporter(bwc))
+	opts = append(opts, libp2p.ConnectionGater(gater), libp2p.BandwidthReporter(s.bwc))
 
 	host, err := libp2p.New(opts...)
 	signal.Reset(syscall.SIGINT)
@@ -275,7 +244,6 @@ func New(
 		return nil, err
 	}
 	s.host = host
-	go reportMetrics(ctx, bwc)
 	s.peers = peers.NewPool()
 
 	mux := chi.NewRouter()
@@ -294,16 +262,70 @@ func New(
 	return s, nil
 }
 
-func reportMetrics(ctx context.Context, bwc *metrics.BandwidthCounter) {
-	ticker := time.NewTicker(1 * time.Second)
+func (s *Sentinel) observeBandwidth(ctx context.Context) {
+	ticker := time.NewTicker(200 * time.Millisecond)
 	for {
+		countSubnetsSubscribed := func() int {
+			count := 0
+			if s.subManager == nil {
+				return count
+			}
+			s.GossipManager().subscriptions.Range(func(key, value any) bool {
+				sub := value.(*GossipSubscription)
+				if sub.topic == nil {
+					return true
+				}
+				if strings.Contains(sub.topic.String(), "beacon_attestation") && sub.subscribed.Load() {
+					count++
+				}
+				return true
+			})
+			return count
+		}()
+
+		multiplierForAdaptableTraffic := 1.0
+		if s.cfg.AdaptableTrafficRequirements {
+			multiplierForAdaptableTraffic = ((float64(countSubnetsSubscribed) / float64(s.cfg.NetworkConfig.AttestationSubnetCount)) * 8) + 1
+		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			totals := bwc.GetBandwidthTotals()
+			totals := s.bwc.GetBandwidthTotals()
 			monitor.ObserveTotalInBytes(totals.TotalIn)
 			monitor.ObserveTotalOutBytes(totals.TotalOut)
+			minBound := datasize.KB
+			// define rate cap
+			maxRateIn := float64(max(s.cfg.MaxInboundTrafficPerPeer, minBound)) * multiplierForAdaptableTraffic
+			maxRateOut := float64(max(s.cfg.MaxOutboundTrafficPerPeer, minBound)) * multiplierForAdaptableTraffic
+			peers := s.host.Network().Peers()
+			maxPeersToBan := 16
+			// do not ban peers if we have less than 1/8 of max peer count
+			if len(peers) <= maxPeersToBan {
+				continue
+			}
+			maxPeersToBan = min(maxPeersToBan, len(peers)-maxPeersToBan)
+
+			peersToBan := make([]peer.ID, 0, len(peers))
+			// Check which peers should be banned
+			for _, p := range peers {
+				// get peer bandwidth
+				peerBandwidth := s.bwc.GetBandwidthForPeer(p)
+				// check if peer is over limit
+				if peerBandwidth.RateIn > maxRateIn || peerBandwidth.RateOut > maxRateOut {
+					peersToBan = append(peersToBan, p)
+				}
+			}
+			// if we have more than 1/8 of max peer count to ban, limit to maxPeersToBan
+			if len(peersToBan) > maxPeersToBan {
+				peersToBan = peersToBan[:maxPeersToBan]
+			}
+			// ban hammer
+			for _, p := range peersToBan {
+				s.Peers().SetBanStatus(p, true)
+				s.Host().Peerstore().RemovePeer(p)
+				s.Host().Network().ClosePeer(p)
+			}
 		}
 	}
 }
@@ -342,6 +364,7 @@ func (s *Sentinel) Start() error {
 
 	go s.listenForPeers()
 	go s.forkWatcher()
+	go s.observeBandwidth(s.ctx)
 
 	return nil
 }
@@ -361,89 +384,89 @@ func (s *Sentinel) HasTooManyPeers() bool {
 	return active >= int(s.cfg.MaxPeerCount)
 }
 
-func (s *Sentinel) isPeerUsefulForAnySubnet(node *enode.Node) bool {
-	ret := false
+// func (s *Sentinel) isPeerUsefulForAnySubnet(node *enode.Node) bool {
+// 	ret := false
 
-	nodeAttnets := bitfield.NewBitvector64()
-	nodeSyncnets := bitfield.NewBitvector4()
-	if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &nodeAttnets)); err != nil {
-		log.Trace("Could not load att subnet", "err", err)
-		return false
-	}
-	if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, &nodeSyncnets)); err != nil {
-		log.Trace("Could not load sync subnet", "err", err)
-		return false
-	}
+// 	nodeAttnets := bitfield.NewBitvector64()
+// 	nodeSyncnets := bitfield.NewBitvector4()
+// 	if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &nodeAttnets)); err != nil {
+// 		log.Trace("Could not load att subnet", "err", err)
+// 		return false
+// 	}
+// 	if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, &nodeSyncnets)); err != nil {
+// 		log.Trace("Could not load sync subnet", "err", err)
+// 		return false
+// 	}
 
-	s.subManager.subscriptions.Range(func(key, value any) bool {
-		sub := value.(*GossipSubscription)
-		sub.lock.Lock()
-		defer sub.lock.Unlock()
-		if sub.sub == nil {
-			return true
-		}
+// 	s.subManager.subscriptions.Range(func(key, value any) bool {
+// 		sub := value.(*GossipSubscription)
+// 		sub.lock.Lock()
+// 		defer sub.lock.Unlock()
+// 		if sub.sub == nil {
+// 			return true
+// 		}
 
-		if !sub.subscribed.Load() {
-			return true
-		}
+// 		if !sub.subscribed.Load() {
+// 			return true
+// 		}
 
-		if len(sub.topic.ListPeers()) > peerSubnetTarget {
-			return true
-		}
-		if gossip.IsTopicBeaconAttestation(sub.sub.Topic()) {
-			ret = s.isPeerUsefulForAttNet(sub, nodeAttnets)
-			return !ret
-		}
+// 		if len(sub.topic.ListPeers()) > peerSubnetTarget {
+// 			return true
+// 		}
+// 		if gossip.IsTopicBeaconAttestation(sub.sub.Topic()) {
+// 			ret = s.isPeerUsefulForAttNet(sub, nodeAttnets)
+// 			return !ret
+// 		}
 
-		if gossip.IsTopicSyncCommittee(sub.sub.Topic()) {
-			ret = s.isPeerUsefulForSyncNet(sub, nodeSyncnets)
-			return !ret
-		}
+// 		if gossip.IsTopicSyncCommittee(sub.sub.Topic()) {
+// 			ret = s.isPeerUsefulForSyncNet(sub, nodeSyncnets)
+// 			return !ret
+// 		}
 
-		return true
-	})
-	return ret
-}
+// 		return true
+// 	})
+// 	return ret
+// }
 
-func (s *Sentinel) isPeerUsefulForAttNet(sub *GossipSubscription, nodeAttnets bitfield.Bitvector64) bool {
-	splitTopic := strings.Split(sub.sub.Topic(), "/")
-	if len(splitTopic) < 4 {
-		return false
-	}
-	subnetIdStr, found := strings.CutPrefix(splitTopic[3], "beacon_attestation_")
-	if !found {
-		return false
-	}
-	subnetId, err := strconv.Atoi(subnetIdStr)
-	if err != nil {
-		log.Warn("Could not parse subnet id", "subnet", subnetIdStr, "err", err)
-		return false
-	}
-	// check if subnetIdth bit is set in nodeAttnets
-	return nodeAttnets.BitAt(uint64(subnetId))
+// func (s *Sentinel) isPeerUsefulForAttNet(sub *GossipSubscription, nodeAttnets bitfield.Bitvector64) bool {
+// 	splitTopic := strings.Split(sub.sub.Topic(), "/")
+// 	if len(splitTopic) < 4 {
+// 		return false
+// 	}
+// 	subnetIdStr, found := strings.CutPrefix(splitTopic[3], "beacon_attestation_")
+// 	if !found {
+// 		return false
+// 	}
+// 	subnetId, err := strconv.Atoi(subnetIdStr)
+// 	if err != nil {
+// 		log.Warn("Could not parse subnet id", "subnet", subnetIdStr, "err", err)
+// 		return false
+// 	}
+// 	// check if subnetIdth bit is set in nodeAttnets
+// 	return nodeAttnets.BitAt(uint64(subnetId))
 
-}
+// }
 
-func (s *Sentinel) isPeerUsefulForSyncNet(sub *GossipSubscription, nodeSyncnets bitfield.Bitvector4) bool {
-	splitTopic := strings.Split(sub.sub.Topic(), "/")
-	if len(splitTopic) < 4 {
-		return false
-	}
-	syncnetIdStr, found := strings.CutPrefix(splitTopic[3], "sync_committee_")
-	if !found {
-		return false
-	}
-	syncnetId, err := strconv.Atoi(syncnetIdStr)
-	if err != nil {
-		log.Warn("Could not parse syncnet id", "syncnet", syncnetIdStr, "err", err)
-		return false
-	}
-	// check if syncnetIdth bit is set in nodeSyncnets
-	if nodeSyncnets.BitAt(uint64(syncnetId)) {
-		return true
-	}
-	return false
-}
+// func (s *Sentinel) isPeerUsefulForSyncNet(sub *GossipSubscription, nodeSyncnets bitfield.Bitvector4) bool {
+// 	splitTopic := strings.Split(sub.sub.Topic(), "/")
+// 	if len(splitTopic) < 4 {
+// 		return false
+// 	}
+// 	syncnetIdStr, found := strings.CutPrefix(splitTopic[3], "sync_committee_")
+// 	if !found {
+// 		return false
+// 	}
+// 	syncnetId, err := strconv.Atoi(syncnetIdStr)
+// 	if err != nil {
+// 		log.Warn("Could not parse syncnet id", "syncnet", syncnetIdStr, "err", err)
+// 		return false
+// 	}
+// 	// check if syncnetIdth bit is set in nodeSyncnets
+// 	if nodeSyncnets.BitAt(uint64(syncnetId)) {
+// 		return true
+// 	}
+// 	return false
+// }
 
 func (s *Sentinel) GetPeersCount() (active int, connected int, disconnected int) {
 	peers := s.host.Network().Peers()
@@ -528,20 +551,20 @@ func (s *Sentinel) Identity() (pid, enrStr string, p2pAddresses, discoveryAddres
 		port := s.listener.LocalNode().Node().UDP()
 		discoveryAddresses = append(discoveryAddresses, fmt.Sprintf("/%s/%s/udp/%d/p2p/%s", protocol, s.listener.LocalNode().Node().IP(), port, pid))
 	}
-	subnetField := [8]byte{}
-	syncnetField := [1]byte{}
-	attSubEnr := enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, subnetField[:])
-	syncNetEnr := enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, syncnetField[:])
+	subnetField := bitfield.NewBitvector64()
+	syncnetField := bitfield.NewBitvector8()
+	attSubEnr := enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &subnetField)
+	syncNetEnr := enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, &syncnetField)
 	if err := s.listener.LocalNode().Node().Load(attSubEnr); err != nil {
-		return
+		s.logger.Debug("[IDENTITY] Could not load att subnet", "err", err)
 	}
 	if err := s.listener.LocalNode().Node().Load(syncNetEnr); err != nil {
-		return
+		s.logger.Debug("[IDENTITY] Could not load sync subnet", "err", err)
 	}
 	metadata = &cltypes.Metadata{
 		SeqNumber: s.listener.LocalNode().Seq(),
-		Attnets:   subnetField,
-		Syncnets:  &syncnetField,
+		Attnets:   [8]byte(subnetField),
+		Syncnets:  (*[1]byte)(syncnetField),
 	}
 	return
 }

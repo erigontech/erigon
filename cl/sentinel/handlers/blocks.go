@@ -17,7 +17,7 @@
 package handlers
 
 import (
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -31,14 +31,9 @@ const (
 )
 
 func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
-	peerId := s.Conn().RemotePeer().String()
 
 	req := &cltypes.BeaconBlocksByRangeRequest{}
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.Phase0Version); err != nil {
-		return err
-	}
-	if err := c.checkRateLimit(peerId, "beaconBlocksByRange", rateLimits.beaconBlocksByRangeLimit, int(req.Count)); err != nil {
-		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
 		return err
 	}
 
@@ -85,18 +80,13 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 }
 
 func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
-	peerId := s.Conn().RemotePeer().String()
 
 	var req solid.HashListSSZ = solid.NewHashList(100)
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.Phase0Version); err != nil {
 		return err
 	}
-	if err := c.checkRateLimit(peerId, "beaconBlocksByRoot", rateLimits.beaconBlocksByRootLimit, req.Length()); err != nil {
-		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
-		return err
-	}
 
-	blockRoots := []libcommon.Hash{}
+	blockRoots := []common.Hash{}
 	for i := 0; i < req.Length(); i++ {
 		blockRoot := req.Get(i)
 		blockRoots = append(blockRoots, blockRoot)
@@ -116,7 +106,7 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 	defer tx.Rollback()
 
 	var block *cltypes.SignedBeaconBlock
-	req.Range(func(index int, blockRoot libcommon.Hash, length int) bool {
+	req.Range(func(index int, blockRoot common.Hash, length int) bool {
 		block, err = c.beaconDB.ReadBlockByRoot(c.ctx, tx, blockRoot)
 		if err != nil {
 			return false

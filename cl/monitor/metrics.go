@@ -28,6 +28,8 @@ var (
 	batchVerificationThroughput    = metrics.GetOrCreateGauge("aggregation_per_signature")
 	blobVerificationTime           = metrics.GetOrCreateGauge("blob_verification_time")
 	executionTime                  = metrics.GetOrCreateGauge("execution_time")
+	executionClientInsertingBlocks = metrics.GetOrCreateGauge("execution_client_insert_blocks_time")
+	executionClientValidateChain   = metrics.GetOrCreateGauge("execution_client_validate_chain_time")
 
 	// Epoch processing metrics
 	EpochProcessingTime                     = metrics.GetOrCreateGauge("epoch_processing_time")
@@ -40,6 +42,7 @@ var (
 	ProcessHistoricalRootsUpdateTime        = metrics.GetOrCreateGauge("process_historical_roots_update_time")
 	ProcessParticipationFlagUpdatesTime     = metrics.GetOrCreateGauge("process_participation_flag_updates_time")
 	ProcessSyncCommitteeUpdateTime          = metrics.GetOrCreateGauge("process_sync_committee_update_time")
+	ProcessPendingDepositsTime              = metrics.GetOrCreateGauge("process_pending_deposits_time")
 
 	// Network metrics
 	gossipTopicsMetricCounterPrefix = "gossip_topics_seen"
@@ -222,6 +225,14 @@ func ObserveBlobVerificationTime(startTime time.Time) {
 	blobVerificationTime.Set(microToMilli(time.Since(startTime).Microseconds()))
 }
 
-func ObserveExecutionTime(startTime time.Time) {
+func ObserveNewPayloadTime(startTime time.Time) {
 	executionTime.Set(microToMilli(time.Since(startTime).Microseconds()))
+}
+
+func ObserveExecutionClientInsertingBlocks(startTime time.Time) {
+	executionClientInsertingBlocks.Set(microToMilli(time.Since(startTime).Microseconds()))
+}
+
+func ObserveExecutionClientValidateChain(startTime time.Time) {
+	executionClientValidateChain.Set(microToMilli(time.Since(startTime).Microseconds()))
 }

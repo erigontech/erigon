@@ -19,13 +19,12 @@ package stagedsync
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/turbo/builder"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
@@ -68,8 +67,8 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 	//	continue
 	//}
 
-	block := types.NewBlockForAsembling(current.Header, current.Txs, current.Uncles, current.Receipts, current.Withdrawals)
-	blockWithReceipts := &types.BlockWithReceipts{Block: block, Receipts: current.Receipts}
+	block := types.NewBlockForAsembling(current.Header, current.Txns, current.Uncles, current.Receipts, current.Withdrawals)
+	blockWithReceipts := &types.BlockWithReceipts{Block: block, Receipts: current.Receipts, Requests: current.Requests}
 	*current = MiningBlock{} // hack to clean global data
 
 	//sealHash := engine.SealHash(block.Header())

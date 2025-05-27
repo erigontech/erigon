@@ -29,21 +29,20 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/accounts/abi/bind"
-	"github.com/erigontech/erigon/accounts/abi/bind/backends"
+	"github.com/erigontech/erigon-lib/trie"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/pics/contracts"
 	"github.com/erigontech/erigon/cmd/pics/visual"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/abi/bind"
+	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/turbo/stages/mock"
-	"github.com/erigontech/erigon/turbo/trie"
 )
 
 /*func statePicture(t *trie.Trie, number int, keyCompression int, codeCompressed bool, valCompressed bool,
@@ -86,27 +85,19 @@ import (
 }*/
 
 var bucketLabels = map[string]string{
-	kv.Receipts:          "Receipts",
-	kv.Log:               "Event Logs",
-	kv.E2AccountsHistory: "History Of Accounts",
-	kv.E2StorageHistory:  "History Of Storage",
-	kv.Headers:           "Headers",
-	kv.HeaderCanonical:   "Canonical headers",
-	kv.HeaderTD:          "Headers TD",
-	kv.BlockBody:         "Block Bodies",
-	kv.HeaderNumber:      "Header Numbers",
-	kv.TxLookup:          "Transaction Index",
-	kv.Code:              "Code Of Contracts",
-	kv.SyncStageProgress: "Sync Progress",
-	kv.PlainState:        "Plain State",
-	kv.HashedAccounts:    "Hashed Accounts",
-	kv.HashedStorage:     "Hashed Storage",
-	kv.TrieOfAccounts:    "Intermediate Hashes Of Accounts",
-	kv.TrieOfStorage:     "Intermediate Hashes Of Storage",
-	kv.AccountChangeSet:  "Account Changes",
-	kv.StorageChangeSet:  "Storage Changes",
-	kv.IncarnationMap:    "Incarnations",
-	kv.Senders:           "Transaction Senders",
+	kv.Headers:                  "Headers",
+	kv.HeaderCanonical:          "Canonical headers",
+	kv.HeaderTD:                 "Headers TD",
+	kv.BlockBody:                "Block Bodies",
+	kv.HeaderNumber:             "Header Numbers",
+	kv.TxLookup:                 "Transaction Index",
+	kv.Code:                     "Code Of Contracts",
+	kv.SyncStageProgress:        "Sync Progress",
+	kv.PlainState:               "Plain State",
+	kv.HashedAccountsDeprecated: "Hashed Accounts",
+	kv.HashedStorageDeprecated:  "Hashed Storage",
+	kv.IncarnationMap:           "Incarnations",
+	kv.Senders:                  "Transaction Senders",
 }
 
 /*dbutils.PlainContractCode,
@@ -287,9 +278,9 @@ func initialState1() error {
 		address  = crypto.PubkeyToAddress(key.PublicKey)
 		address1 = crypto.PubkeyToAddress(key1.PublicKey)
 		address2 = crypto.PubkeyToAddress(key2.PublicKey)
-		theAddr  = libcommon.Address{1}
+		theAddr  = common.Address{1}
 		gspec    = &types.Genesis{
-			Config: params.AllProtocolChanges,
+			Config: chain.AllProtocolChanges,
 			Alloc: types.GenesisAlloc{
 				address:  {Balance: big.NewInt(9000000000000000000)},
 				address1: {Balance: big.NewInt(200000000000000000)},
@@ -298,7 +289,7 @@ func initialState1() error {
 			GasLimit: 10000000,
 		}
 		// this code generates a log
-		signer = types.MakeSigner(params.AllProtocolChanges, 1, 0)
+		signer = types.MakeSigner(chain.AllProtocolChanges, 1, 0)
 	)
 	m := mock.MockWithGenesis(nil, gspec, key, false)
 	defer m.DB.Close()
@@ -356,7 +347,7 @@ func initialState1() error {
 		case 5:
 			// Multiple transactions sending small amounts of ether to various accounts
 			var j uint64
-			var toAddr libcommon.Address
+			var toAddr common.Address
 			nonce := block.TxNonce(address)
 			for j = 1; j <= 32; j++ {
 				binary.BigEndian.PutUint64(toAddr[:], j)
@@ -384,7 +375,7 @@ func initialState1() error {
 			txs = append(txs, txn)
 			// Multiple transactions sending small amounts of ether to various accounts
 			var j uint64
-			var toAddr libcommon.Address
+			var toAddr common.Address
 			for j = 1; j <= 32; j++ {
 				binary.BigEndian.PutUint64(toAddr[:], j)
 				txn, err = tokenContract.Transfer(transactOpts2, toAddr, big.NewInt(1))
@@ -394,7 +385,7 @@ func initialState1() error {
 				txs = append(txs, txn)
 			}
 		case 7:
-			var toAddr libcommon.Address
+			var toAddr common.Address
 			nonce := block.TxNonce(address)
 			binary.BigEndian.PutUint64(toAddr[:], 4)
 			txn, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
@@ -436,7 +427,7 @@ func initialState1() error {
 		return err
 	}
 
-	emptyKv := memdb.New("")
+	emptyKv := memdb.New("", kv.ChainDB)
 	if err = stateDatabaseComparison(emptyKv, m.DB, 0); err != nil {
 		return err
 	}

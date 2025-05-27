@@ -8,7 +8,7 @@ On a high level, Ethereum state is a collection of accounts. An account can be e
 
 ### Content of an account
 
-Type `Account` [core/types/accounts/account.go](../../core/types/accounts/account.go) lists the main components of an
+Type `Account` [erigon-lib/types/accounts/account.go](../../erigon-lib/types/accounts/account.go) lists the main components of an
 account's content (not identifier):
 
 1. Nonce
@@ -44,8 +44,8 @@ Binary 32-byte (256-bit) string.
 By root here one means the Merkle root of the smart contract storage, organised into a tree. Non-contract accounts
 cannot have storage, therefore root makes sense only for smart contract accounts. For non-contract accounts, the root
 field is assumed to be equal to the Merkle root of an empty tree, which is hard-coded in the variable `EmptyRoot` in
-[turbo/trie/trie.go](../../turbo/trie/trie.go). For contract accounts, the root is computed using member function `Hash`
-of type `Trie` [turbo/trie/trie.go](../../turbo/trie/trie.go), once the storage of the contract has been organised into
+[erigon-lib/trie/trie.go](../../erigon-lib/trie/trie.go). For contract accounts, the root is computed using member function `Hash`
+of type `Trie` [erigon-lib/trie/trie.go](../../erigon-lib/trie/trie.go), once the storage of the contract has been organised into
 the tree by calling member functions
 `Update` and `Delete` on the same type.
 
@@ -65,16 +65,16 @@ Accounts are identified by their addresses. Address is a 20-byte binary string, 
 contract and non-contract accounts.
 
 For non-contract accounts, the address is derived from the public key, by hashing it and taking lowest 20 bytes of the
-32-byte hash value, as shown in the function `PubkeyToAddress` in the file [crypto/crypto.go](../../crypto/crypto.go)
+32-byte hash value, as shown in the function `PubkeyToAddress` in the file [crypto/crypto.go](../../erigon-lib/crypto/crypto.go)
 
 For smart contract accounts created by a transaction without destination, or by `CREATE` opcode, the address is derived
 from the address and the nonce of the creator, as shown in the function `CreateAddress` in the
-file [crypto/crypto.go](../../crypto/crypto.go)
+file [crypto/crypto.go](../../erigon-lib/crypto/crypto.go)
 
 For smart contract accounts created by `CREATE2` opcode, the address is derived from the creator's address, salt (
 256-bit argument supplied to the `CREATE2` invocation), and the code hash of the initialisation code (code that is
 executed to output the actual, deployed code of the new contract), as shown in the function `CreateAddress2` in the
-file [crypto/crypto.go](../../crypto/crypto.go)
+file [crypto/crypto.go](../../erigon-lib/crypto/crypto.go)
 
 In many places in the code, sets of accounts are represented by mappings from account addresses to the objects
 representing the accounts themselves, for example, field `stateObjects` in the
@@ -128,14 +128,14 @@ Merkle Patricia tree hashing rules first remove redundant parts of each key with
 so-called "leaf nodes". To produce the hash of a leaf node, one applies the hash function to the two-piece RLP (
 Recursive Length Prefix). The first piece is the representation of the non-redundant part of the key. And the second
 piece is the representation of the leaf value corresponding to the key, as shown in the member function `hashChildren`
-of the type `hasher` [turbo/trie/hasher.go](../../turbo/trie/hasher.go), under the `*shortNode` case.
+of the type `hasher` [erigon-lib/trie/hasher.go](../../erigon-lib/trie/hasher.go), under the `*shortNode` case.
 
 Hashes of the elements within a prefix group are combined into so-called "branch nodes". They correspond to the
 types `duoNode` (for prefix groups with exactly two elements) and `fullNode` in the
-file [turbo/trie/node.go](../../turbo/trie/node.go). To produce the hash of a branch node, one represents it as an array
+file [erigon-lib/trie/node.go](../../erigon-lib/trie/node.go). To produce the hash of a branch node, one represents it as an array
 of 17 elements (17-th element is for the attached leaf, if exists). The positions in the array that do not have
 corresponding elements in the prefix group are filled with empty strings. This is shown in the member
-function `hashChildren` of the type `hasher` [turbo/trie/hasher.go](../../turbo/trie/hasher.go), under the `*duoNode`
+function `hashChildren` of the type `hasher` [erigon-lib/trie/hasher.go](../../erigon-lib/trie/hasher.go), under the `*duoNode`
 and
 `*fullNode` cases.
 
@@ -145,7 +145,7 @@ extension nodes". However, the value in an extension node is always the represen
 leaf. To produce the hash of an extension node, one applies the hash function to the two-piece RLP. The first piece is
 the representation of the non-redundant part of the key. The second part is the hash of the branch node representing the
 prefix group. This is shown in the member function `hashChildren` of the
-type `hasher` [turbo/trie/hasher.go](../../turbo/trie/hasher.go), under the `*shortNode` case.
+type `hasher` [erigon-lib/trie/hasher.go](../../erigon-lib/trie/hasher.go), under the `*shortNode` case.
 
 This is the illustration of resulting leaf nodes, branch nodes, and extension nodes for our example:
 
@@ -274,7 +274,7 @@ BRANCH 0123
 ```
 
 These opcodes are implemented by the type `HashBuilder` (implements the interface `structInfoReceiver`)
-in [turbo/trie/hashbuilder.go](../../turbo/trie/hashbuilder.go)
+in [erigon-lib/trie/hashbuilder.go](../../erigon-lib/trie/hashbuilder.go)
 
 ### Multiproofs
 
@@ -407,7 +407,7 @@ common prefix with the succeeding key (they are both empty). The optional part o
 is emitted, and `groups` is trimmed to become empty. No recursive invocation follows.
 
 The step of this algorithm is implemented by the function `GenStructStep`
-in [turbo/trie/gen_struct_step.go](../../turbo/trie/gen_struct_step.go).
+in [erigon-lib/trie/gen_struct_step.go](../../erigon-lib/trie/gen_struct_step.go).
 
 ### Converting sequence of keys and value into a multiproof
 
@@ -429,7 +429,7 @@ efficiently, the set of keys being resolved will be converted into a sorted list
 processes a key, it maintains references to two consecutive keys from that sorted list - one "LTE" (Less Than or Equal
 to the currently processed key), and another "GT" (Greater Than the currently processed key). If max common prefix is
 also prefix of either LTE or GT, then `BRANCH` opcode is emitted, otherwise, `BRANCHHASH` opcode is emitted. This is
-implemented by the type `RetainList` in [turbo/trie/retain_list.go](../../turbo/trie/retain_list.go)
+implemented by the type `RetainList` in [erigon-lib/trie/retain_list.go](../../erigon-lib/trie/retain_list.go)
 
 ### Extension of the structure to support contracts with contract storage
 
@@ -529,7 +529,7 @@ account (SELFDESTRUCT). Naive storage deletion may take several minutes - depend
 will not process any incoming block that time. To protect against this attack:
 PlainState, HashedState and IntermediateTrieHash buckets have "incarnations". Account entity has field "Incarnation" -
 just a digit which increasing each SELFDESTRUCT or CREATE2 opcodes. Storage key formed by:
-`{account_key}{incarnation}{storage_hash}`. And [turbo/trie/trie_root.go](../../turbo/trie/trie_root.go) has logic -
+`{account_key}{incarnation}{storage_hash}`. And [erigon-lib/trie/trie_root.go](../../erigon-lib/trie/trie_root.go) has logic -
 every time when Account visited - we save it to `accAddrHashWithInc` variable and skip any Storage or
 IntermediateTrieHashes with another incarnation.
 

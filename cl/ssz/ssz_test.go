@@ -38,6 +38,6 @@ func TestEncodeDecode(t *testing.T) {
 	require.Equal(t, common.Hash(root), common.HexToHash("0x36eb1bb5b4616f9d5046b2a719a8c4217f3dc40c1b7dff7abcc55c47f142a78b"))
 	d, err := bs.EncodeSSZ(nil)
 	require.NoError(t, err)
-	dec, _ := utils.DecompressSnappy(beaconState)
+	dec, _ := utils.DecompressSnappy(beaconState, true)
 	require.Equal(t, dec, d)
 }

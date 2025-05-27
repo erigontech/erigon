@@ -18,7 +18,7 @@ package database
 
 import (
 	"context"
-	"math/rand"
+	"math/rand/v2"
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -38,7 +38,8 @@ func retryBackoffTime(attempt int) time.Duration {
 	if attempt <= 0 {
 		return 0
 	}
-	jitter := rand.Int63n(30 * time.Millisecond.Nanoseconds() * int64(attempt)) // nolint: gosec
+
+	jitter := rand.Int64N(30 * time.Millisecond.Nanoseconds() * int64(attempt)) // nolint: gosec
 	var ns int64
 	if attempt <= 6 {
 		ns = ((50 * time.Millisecond.Nanoseconds()) << (attempt - 1)) + jitter

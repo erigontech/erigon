@@ -29,11 +29,14 @@ import (
 	"github.com/erigontech/erigon/eth/gasprice"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
 )
 
 func TestFeeHistory(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
 
 	overMaxQuery := make([]float64, 101)
 	for i := 0; i < 101; i++ {
@@ -77,7 +80,7 @@ func TestFeeHistory(t *testing.T) {
 			defer m.Close()
 
 			baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil)
-			tx, _ := m.DB.BeginRo(m.Ctx)
+			tx, _ := m.DB.BeginTemporalRo(m.Ctx)
 			defer tx.Rollback()
 
 			cache := jsonrpc.NewGasPriceCache()

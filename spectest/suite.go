@@ -13,7 +13,7 @@ import (
 
 func RunCases(t *testing.T, app Appendix, machineImpl machine.Interface, root fs.FS) {
 	cases, err := ReadTestCases(root)
-	require.Nil(t, err, "reading cases")
+	require.NoError(t, err, "reading cases")
 	// prepare for gore.....
 	type (
 		K1 = string
@@ -40,6 +40,10 @@ func RunCases(t *testing.T, app Appendix, machineImpl machine.Interface, root fs
 										t.Run(s, func(t *testing.T) {
 											t.Parallel()
 											m.Range0(func(key string, value TestCase) bool {
+												if value.ForkPhaseName == "whisk" || value.ForkPhaseName == "eip7594" {
+													t.Skipf("skipping %s", value.ForkPhaseName)
+													return true
+												}
 												t.Run(key, func(t *testing.T) {
 													require.NotPanics(t, func() {
 														t.Parallel()

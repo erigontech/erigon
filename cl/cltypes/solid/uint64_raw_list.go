@@ -21,7 +21,7 @@ import (
 	"encoding/json"
 	"strconv"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -33,7 +33,7 @@ type RawUint64List struct {
 	c int
 
 	hahsBuffer []byte
-	cachedHash libcommon.Hash
+	cachedHash common.Hash
 }
 
 func NewRawUint64List(limit int, u []uint64) *RawUint64List {
@@ -43,13 +43,17 @@ func NewRawUint64List(limit int, u []uint64) *RawUint64List {
 	}
 }
 
+func (arr *RawUint64List) SetCap(c int) {
+	arr.c = c
+}
+
 func (arr *RawUint64List) Clear() {
-	arr.cachedHash = libcommon.Hash{}
+	arr.cachedHash = common.Hash{}
 	arr.u = arr.u[:0]
 }
 
 func (arr *RawUint64List) Append(value uint64) {
-	arr.cachedHash = libcommon.Hash{}
+	arr.cachedHash = common.Hash{}
 	arr.u = append(arr.u, value)
 }
 
@@ -97,7 +101,7 @@ func (arr *RawUint64List) EncodeSSZ(buf []byte) (dst []byte, err error) {
 }
 
 func (arr *RawUint64List) DecodeSSZ(buf []byte, _ int) error {
-	arr.cachedHash = libcommon.Hash{}
+	arr.cachedHash = common.Hash{}
 	arr.u = make([]uint64, len(buf)/8)
 	for i := range arr.u {
 		arr.u[i] = binary.LittleEndian.Uint64(buf[i*8:])
@@ -130,7 +134,7 @@ func (arr *RawUint64List) hashBufLength() int {
 }
 
 func (arr *RawUint64List) HashSSZ() ([32]byte, error) {
-	if arr.cachedHash != (libcommon.Hash{}) {
+	if arr.cachedHash != (common.Hash{}) {
 		return arr.cachedHash, nil
 	}
 	if cap(arr.hahsBuffer) < arr.hashBufLength() {

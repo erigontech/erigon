@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/gorilla/websocket"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -55,6 +56,20 @@ type DiagnosticClient struct {
 	networkSpeed        NetworkSpeedTestResult
 	networkSpeedMutex   sync.Mutex
 	webseedsList        []string
+	conn                *websocket.Conn
+}
+
+var (
+	instance *DiagnosticClient
+	once     sync.Once
+)
+
+// Client returns the singleton instance of DiagnosticClient
+func Client() *DiagnosticClient {
+	if instance == nil {
+		return &DiagnosticClient{}
+	}
+	return instance
 }
 
 func NewDiagnosticClient(ctx context.Context, metricsMux *http.ServeMux, dataDirPath string, speedTest bool, webseedsList []string) (*DiagnosticClient, error) {
@@ -66,36 +81,39 @@ func NewDiagnosticClient(ctx context.Context, metricsMux *http.ServeMux, dataDir
 
 	hInfo, ss, snpdwl, snpidx, snpfd := ReadSavedData(db)
 
-	return &DiagnosticClient{
-		ctx:         ctx,
-		db:          db,
-		metricsMux:  metricsMux,
-		dataDirPath: dataDirPath,
-		speedTest:   speedTest,
-		syncStages:  ss,
-		syncStats: SyncStatistics{
-			SnapshotDownload: snpdwl,
-			SnapshotIndexing: snpidx,
-			SnapshotFillDB:   snpfd,
-		},
-		hardwareInfo:     hInfo,
-		snapshotFileList: SnapshoFilesList{},
-		bodies:           BodiesInfo{},
-		resourcesUsage: ResourcesUsage{
-			MemoryUsage: []MemoryStats{},
-		},
-		peersStats:   NewPeerStats(1000), // 1000 is the limit of peers; TODO: make it configurable through a flag
-		webseedsList: webseedsList,
-	}, nil
+	once.Do(func() {
+		instance = &DiagnosticClient{
+			ctx:         ctx,
+			db:          db,
+			metricsMux:  metricsMux,
+			dataDirPath: dataDirPath,
+			speedTest:   speedTest,
+			syncStages:  ss,
+			syncStats: SyncStatistics{
+				SnapshotDownload: snpdwl,
+				SnapshotIndexing: snpidx,
+				SnapshotFillDB:   snpfd,
+			},
+			hardwareInfo:     hInfo,
+			snapshotFileList: SnapshoFilesList{},
+			bodies:           BodiesInfo{},
+			resourcesUsage: ResourcesUsage{
+				MemoryUsage: []MemoryStats{},
+			},
+			peersStats:   NewPeerStats(1000), // 1000 is the limit of peers; TODO: make it configurable through a flag
+			webseedsList: webseedsList,
+		}
+	})
+
+	return instance, nil
 }
 
 func createDb(ctx context.Context, dbDir string) (db kv.RwDB, err error) {
-	db, err = mdbx.NewMDBX(log.New()).
-		Label(kv.DiagnosticsDB).
+	db, err = mdbx.New(kv.DiagnosticsDB, log.New()).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DiagnosticsTablesCfg }).
 		GrowthStep(4 * datasize.MB).
 		MapSize(16 * datasize.GB).
-		PageSize(uint64(4 * datasize.KB)).
+		PageSize(4 * datasize.KB).
 		RoTxsLimiter(semaphore.NewWeighted(9_000)).
 		Path(dbDir).
 		Open(ctx)
@@ -119,6 +137,9 @@ func (d *DiagnosticClient) Setup() {
 	d.setupBodiesDiagnostics(rootCtx)
 	d.setupResourcesUsageDiagnostics(rootCtx)
 	d.setupSpeedtestDiagnostics(rootCtx)
+
+	d.setupTxPoolDiagnostics(rootCtx)
+
 	d.runSaveProcess(rootCtx)
 
 	//d.logDiagMsgs()

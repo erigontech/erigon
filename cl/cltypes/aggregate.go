@@ -17,8 +17,7 @@
 package cltypes
 
 import (
-	libcommon "github.com/erigontech/erigon-lib/common"
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
@@ -31,7 +30,7 @@ import (
 type AggregateAndProof struct {
 	AggregatorIndex uint64             `json:"aggregator_index,string"`
 	Aggregate       *solid.Attestation `json:"aggregate"`
-	SelectionProof  libcommon.Bytes96  `json:"selection_proof"`
+	SelectionProof  common.Bytes96     `json:"selection_proof"`
 }
 
 func (a *AggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -55,20 +54,9 @@ func (a *AggregateAndProof) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(a.AggregatorIndex, a.Aggregate, a.SelectionProof[:])
 }
 
-// SignedAggregateAndProofData is passed to SignedAggregateAndProof service. The service does the signature verification
-// asynchronously. That's why we cannot wait for its ProcessMessage call to finish to check error. The service
-// will do re-publishing of the gossip or banning the peer in case of invalid signature by itself.
-// that's why we are passing sentinel.SentinelClient and *sentinel.GossipData to enable the service
-// to do all of that by itself.
-type SignedAggregateAndProofData struct {
-	SignedAggregateAndProof *SignedAggregateAndProof
-	GossipData              *sentinel.GossipData
-	ImmediateProcess        bool
-}
-
 type SignedAggregateAndProof struct {
 	Message   *AggregateAndProof `json:"message"`
-	Signature libcommon.Bytes96  `json:"signature"`
+	Signature common.Bytes96     `json:"signature"`
 }
 
 func (a *SignedAggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -93,8 +81,8 @@ func (a *SignedAggregateAndProof) HashSSZ() ([32]byte, error) {
  * and signature is the aggregate BLS signature of the committee.
  */
 type SyncAggregate struct {
-	SyncCommiteeBits      libcommon.Bytes64 `json:"sync_committee_bits"`
-	SyncCommiteeSignature libcommon.Bytes96 `json:"sync_committee_signature"`
+	SyncCommiteeBits      common.Bytes64 `json:"sync_committee_bits"`
+	SyncCommiteeSignature common.Bytes96 `json:"sync_committee_signature"`
 }
 
 func NewSyncAggregate() *SyncAggregate {

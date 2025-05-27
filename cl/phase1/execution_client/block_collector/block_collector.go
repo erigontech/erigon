@@ -22,14 +22,15 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/utils"
-	"github.com/erigontech/erigon/core/types"
 )
 
 var (
@@ -71,7 +72,7 @@ func (b *blockCollector) AddBlock(block *cltypes.BeaconBlock) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	payload := block.Body.ExecutionPayload
-	encodedBlock, err := encodeBlock(payload, block.ParentRoot)
+	encodedBlock, err := encodeBlock(payload, block.ParentRoot, block.Body.GetExecutionRequestsList())
 	if err != nil {
 		return err
 	}
@@ -97,13 +98,20 @@ func (b *blockCollector) Flush(ctx context.Context) error {
 		if len(v) == 0 {
 			return nil
 		}
-		v, err = utils.DecompressSnappy(v)
+		v, err = utils.DecompressSnappy(v, false)
 		if err != nil {
 			return err
 		}
 		version := clparams.StateVersion(v[0])
 		parentRoot := common.BytesToHash(v[1:33])
-		v = v[33:]
+		requestsHash := common.Hash{}
+		if version >= clparams.ElectraVersion {
+			// get the requests hash
+			requestsHash = common.BytesToHash(v[33:65])
+			v = v[65:]
+		} else {
+			v = v[33:]
+		}
 		executionPayload := cltypes.NewEth1Block(version, b.beaconChainCfg)
 		if err := executionPayload.DecodeSSZ(v, int(version)); err != nil {
 			return err
@@ -118,7 +126,7 @@ func (b *blockCollector) Flush(ctx context.Context) error {
 		if executionPayload.BlockNumber == 0 {
 			return nil
 		}
-		header, err := executionPayload.RlpHeader(&parentRoot)
+		header, err := executionPayload.RlpHeader(&parentRoot, requestsHash)
 		if err != nil {
 			b.logger.Warn("bad blocks segment received", "err", err)
 			return err
@@ -156,6 +164,7 @@ func (b *blockCollector) Flush(ctx context.Context) error {
 		if err := b.engine.InsertBlocks(ctx, blocksBatch, true); err != nil {
 			b.logger.Warn("failed to insert blocks", "err", err)
 		}
+		b.logger.Info("[Caplin] Inserted blocks", "progress", blocksBatch[len(blocksBatch)-1].NumberU64())
 	}
 	b.size = 0
 	// Create a new collector
@@ -165,12 +174,19 @@ func (b *blockCollector) Flush(ctx context.Context) error {
 }
 
 // serializes block value
-func encodeBlock(payload *cltypes.Eth1Block, parentRoot common.Hash) ([]byte, error) {
+func encodeBlock(payload *cltypes.Eth1Block, parentRoot common.Hash, executionRequestsList []hexutil.Bytes) ([]byte, error) {
 	encodedPayload, err := payload.EncodeSSZ(nil)
 	if err != nil {
 		return nil, fmt.Errorf("error encoding execution payload during download: %s", err)
 	}
+	if executionRequestsList != nil {
+		// electra version
+		requestsHash := cltypes.ComputeExecutionRequestHash(executionRequestsList)
+		// version + parentRoot + requestsHash + encodedPayload
+		return utils.CompressSnappy(append([]byte{byte(payload.Version())}, append(append(parentRoot[:], requestsHash[:]...), encodedPayload...)...)), nil
+	}
 	// Use snappy compression that the temporary files do not take too much disk.
+	// version + parentRoot + encodedPayload
 	return utils.CompressSnappy(append([]byte{byte(payload.Version())}, append(parentRoot[:], encodedPayload...)...)), nil
 }
 

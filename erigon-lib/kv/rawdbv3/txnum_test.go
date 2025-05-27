@@ -31,9 +31,7 @@ import (
 func TestName(t *testing.T) {
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
-	db := mdbx.NewMDBX(log.New()).InMem(dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		return kv.ChaindataTablesCfg
-	}).MustOpen()
+	db := mdbx.New(kv.ChainDB, log.New()).InMem(dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 
 	err := db.Update(context.Background(), func(tx kv.RwTx) error {
@@ -66,7 +64,7 @@ func TestName(t *testing.T) {
 
 		ok, _, err := TxNums.FindBlockNum(tx, 101)
 		require.NoError(err)
-		require.Equal(false, ok)
+		require.False(ok)
 		return nil
 	})
 	require.NoError(err)

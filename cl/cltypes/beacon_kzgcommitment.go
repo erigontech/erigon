@@ -21,8 +21,8 @@ import (
 	"reflect"
 
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
@@ -49,11 +49,11 @@ const (
 type KZGCommitment gokzg4844.KZGCommitment
 
 func (b KZGCommitment) MarshalJSON() ([]byte, error) {
-	return json.Marshal(libcommon.Bytes48(b))
+	return json.Marshal(common.Bytes48(b))
 }
 
 func (b *KZGCommitment) UnmarshalJSON(data []byte) error {
-	return json.Unmarshal(data, (*libcommon.Bytes48)(b))
+	return json.Unmarshal(data, (*common.Bytes48)(b))
 }
 
 func (b *KZGCommitment) Copy() *KZGCommitment {
@@ -78,11 +78,11 @@ func (b *KZGCommitment) HashSSZ() ([32]byte, error) {
 }
 
 func (b *Blob) MarshalJSON() ([]byte, error) {
-	return json.Marshal(hexutility.Bytes(b[:]))
+	return json.Marshal(hexutil.Bytes(b[:]))
 }
 
 func (b *Blob) UnmarshalJSON(in []byte) error {
-	return hexutility.UnmarshalFixedJSON(blobT, in, b[:])
+	return hexutil.UnmarshalFixedJSON(blobT, in, b[:])
 }
 
 func (b *Blob) Clone() clonable.Clonable {
@@ -111,11 +111,11 @@ func (b *Blob) HashSSZ() ([32]byte, error) {
 }
 
 func (b *KZGProof) MarshalJSON() ([]byte, error) {
-	return json.Marshal(libcommon.Bytes48(*b))
+	return json.Marshal(common.Bytes48(*b))
 }
 
 func (b *KZGProof) UnmarshalJSON(data []byte) error {
-	return json.Unmarshal(data, (*libcommon.Bytes48)(b))
+	return json.Unmarshal(data, (*common.Bytes48)(b))
 }
 
 func (b *KZGProof) DecodeSSZ(buf []byte, version int) error {

@@ -59,7 +59,7 @@ func NewHexOrDecimal256(x int64) *HexOrDecimal256 {
 // It is similar to UnmarshalText, but allows parsing real decimals too, not just
 // quoted decimal strings.
 func (i *HexOrDecimal256) UnmarshalJSON(input []byte) error {
-	if len(input) > 0 && input[0] == '"' {
+	if len(input) > 1 && input[0] == '"' {
 		input = input[1 : len(input)-1]
 	}
 	return i.UnmarshalText(input)
@@ -169,14 +169,6 @@ func BigMin(x, y *big.Int) *big.Int {
 
 // U256Min returns the smaller of x or y.
 func U256Min(x, y *uint256.Int) *uint256.Int {
-	if x.Cmp(y) > 0 {
-		return y
-	}
-	return x
-}
-
-// Min256 returns the smaller of x or y.
-func Min256(x, y *uint256.Int) *uint256.Int {
 	if x.Cmp(y) > 0 {
 		return y
 	}

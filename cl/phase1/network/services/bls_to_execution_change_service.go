@@ -22,19 +22,29 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/Giulio2002/bls"
+	"github.com/erigontech/erigon-lib/common"
+	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/bls"
 )
 
 var (
 	blsVerify = bls.Verify
 )
+
+// SignedBLSToExecutionChangeForGossip type represents SignedBLSToExecutionChange with the gossip data where it's coming from.
+type SignedBLSToExecutionChangeForGossip struct {
+	SignedBLSToExecutionChange *cltypes.SignedBLSToExecutionChange
+	Receiver                   *sentinel.Peer
+	ImmediateVerification      bool
+}
 
 type blsToExecutionChangeService struct {
 	operationsPool         pool.OperationsPool
@@ -60,7 +70,7 @@ func NewBLSToExecutionChangeService(
 	}
 }
 
-func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SignedBLSToExecutionChangeWithGossipData) error {
+func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet *uint64, msg *SignedBLSToExecutionChangeForGossip) error {
 	// https://github.com/ethereum/consensus-specs/blob/dev/specs/capella/p2p-interface.md#bls_to_execution_change
 	// [IGNORE] The signed_bls_to_execution_change is the first valid signed bls to execution change received
 	// for the validator with index signed_bls_to_execution_change.message.validator_index.
@@ -68,23 +78,29 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 		return ErrIgnore
 	}
 	change := msg.SignedBLSToExecutionChange.Message
-	stateReader, cn := s.syncedDataManager.HeadStateReader()
-	defer cn()
-	if stateReader == nil {
-		return ErrIgnore
-	}
 
-	// [IGNORE] current_epoch >= CAPELLA_FORK_EPOCH, where current_epoch is defined by the current wall-clock time.
-	if stateReader.Version() < clparams.CapellaVersion {
-		return ErrIgnore
+	var (
+		wc, genesisValidatorRoot common.Hash
+	)
+	if err := s.syncedDataManager.ViewHeadState(func(stateReader *state.CachingBeaconState) error {
+		// [IGNORE] current_epoch >= CAPELLA_FORK_EPOCH, where current_epoch is defined by the current wall-clock time.
+		if stateReader.Version() < clparams.CapellaVersion {
+			return ErrIgnore
+		}
+		// ref: https://github.com/ethereum/consensus-specs/blob/dev/specs/capella/beacon-chain.md#new-process_bls_to_execution_change
+		// assert address_change.validator_index < len(state.validators)
+		validator, err := stateReader.ValidatorForValidatorIndex(int(change.ValidatorIndex))
+		if err != nil {
+			return fmt.Errorf("unable to retrieve validator: %v", err)
+		}
+		wc = validator.WithdrawalCredentials()
+
+		// assert bls.Verify(address_change.from_bls_pubkey, signing_root, signed_address_change.signature)
+		genesisValidatorRoot = stateReader.GenesisValidatorsRoot()
+		return nil
+	}); err != nil {
+		return err
 	}
-	// ref: https://github.com/ethereum/consensus-specs/blob/dev/specs/capella/beacon-chain.md#new-process_bls_to_execution_change
-	// assert address_change.validator_index < len(state.validators)
-	validator, err := stateReader.ValidatorForValidatorIndex(int(change.ValidatorIndex))
-	if err != nil {
-		return fmt.Errorf("unable to retrieve validator: %v", err)
-	}
-	wc := validator.WithdrawalCredentials()
 
 	// assert validator.withdrawal_credentials[:1] == BLS_WITHDRAWAL_PREFIX
 	if wc[0] != byte(s.beaconCfg.BLSWithdrawalPrefixByte) {
@@ -99,10 +115,6 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 		return errors.New("invalid withdrawal credentials hash")
 	}
 
-	// assert bls.Verify(address_change.from_bls_pubkey, signing_root, signed_address_change.signature)
-	genesisValidatorRoot := stateReader.GenesisValidatorsRoot()
-	cn()
-
 	domain, err := fork.ComputeDomain(s.beaconCfg.DomainBLSToExecutionChange[:], utils.Uint32ToBytes4(uint32(s.beaconCfg.GenesisForkVersion)), genesisValidatorRoot)
 	if err != nil {
 		return err
@@ -113,10 +125,10 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 	}
 
 	aggregateVerificationData := &AggregateVerificationData{
-		Signatures: [][]byte{msg.SignedBLSToExecutionChange.Signature[:]},
-		SignRoots:  [][]byte{signedRoot[:]},
-		Pks:        [][]byte{change.From[:]},
-		GossipData: msg.GossipData,
+		Signatures:  [][]byte{msg.SignedBLSToExecutionChange.Signature[:]},
+		SignRoots:   [][]byte{signedRoot[:]},
+		Pks:         [][]byte{change.From[:]},
+		SendingPeer: msg.Receiver,
 		F: func() {
 			s.emitters.Operation().SendBlsToExecution(msg.SignedBLSToExecutionChange)
 			s.operationsPool.BLSToExecutionChangesPool.Insert(msg.SignedBLSToExecutionChange.Signature, msg.SignedBLSToExecutionChange)

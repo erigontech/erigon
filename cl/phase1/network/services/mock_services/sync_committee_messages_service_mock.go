@@ -13,7 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
-	cltypes "github.com/erigontech/erigon/cl/cltypes"
+	services "github.com/erigontech/erigon/cl/phase1/network/services"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -42,7 +42,7 @@ func (m *MockSyncCommitteeMessagesService) EXPECT() *MockSyncCommitteeMessagesSe
 }
 
 // ProcessMessage mocks base method.
-func (m *MockSyncCommitteeMessagesService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SyncCommitteeMessage) error {
+func (m *MockSyncCommitteeMessagesService) ProcessMessage(ctx context.Context, subnet *uint64, msg *services.SyncCommitteeMessageForGossip) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ProcessMessage", ctx, subnet, msg)
 	ret0, _ := ret[0].(error)
@@ -68,13 +68,13 @@ func (c *MockSyncCommitteeMessagesServiceProcessMessageCall) Return(arg0 error) 
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockSyncCommitteeMessagesServiceProcessMessageCall) Do(f func(context.Context, *uint64, *cltypes.SyncCommitteeMessage) error) *MockSyncCommitteeMessagesServiceProcessMessageCall {
+func (c *MockSyncCommitteeMessagesServiceProcessMessageCall) Do(f func(context.Context, *uint64, *services.SyncCommitteeMessageForGossip) error) *MockSyncCommitteeMessagesServiceProcessMessageCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSyncCommitteeMessagesServiceProcessMessageCall) DoAndReturn(f func(context.Context, *uint64, *cltypes.SyncCommitteeMessage) error) *MockSyncCommitteeMessagesServiceProcessMessageCall {
+func (c *MockSyncCommitteeMessagesServiceProcessMessageCall) DoAndReturn(f func(context.Context, *uint64, *services.SyncCommitteeMessageForGossip) error) *MockSyncCommitteeMessagesServiceProcessMessageCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

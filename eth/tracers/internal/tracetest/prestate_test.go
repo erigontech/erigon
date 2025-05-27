@@ -30,27 +30,27 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/tracers"
+	debugtracer "github.com/erigontech/erigon/eth/tracers/debug"
+	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/tests"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 // prestateTrace is the result of a prestateTrace run.
-type prestateTrace = map[libcommon.Address]*account
+type prestateTrace = map[common.Address]*account
 
 type account struct {
-	Balance string                            `json:"balance"`
-	Code    string                            `json:"code"`
-	Nonce   uint64                            `json:"nonce"`
-	Storage map[libcommon.Hash]libcommon.Hash `json:"storage"`
+	Balance string                      `json:"balance"`
+	Code    string                      `json:"code"`
+	Nonce   uint64                      `json:"nonce"`
+	Storage map[common.Hash]common.Hash `json:"storage"`
 }
 
 // testcase defines a single test to check the stateDiff tracer against.
@@ -63,18 +63,18 @@ type testcase struct {
 }
 
 func TestPrestateTracerLegacy(t *testing.T) {
-	testPrestateDiffTracer("prestateTracerLegacy", "prestate_tracer_legacy", t)
+	testPrestateTracer("prestateTracerLegacy", "prestate_tracer_legacy", t)
 }
 
 func TestPrestateTracer(t *testing.T) {
-	testPrestateDiffTracer("prestateTracer", "prestate_tracer", t)
+	testPrestateTracer("prestateTracer", "prestate_tracer", t)
 }
 
 func TestPrestateWithDiffModeTracer(t *testing.T) {
-	testPrestateDiffTracer("prestateTracer", "prestate_tracer_with_diff_mode", t)
+	testPrestateTracer("prestateTracer", "prestate_tracer_with_diff_mode", t)
 }
 
-func testPrestateDiffTracer(tracerName string, dirPath string, t *testing.T) {
+func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 	files, err := dir.ReadDir(filepath.Join("testdata", dirPath))
 	if err != nil {
 		t.Fatalf("failed to retrieve tracer test suite: %v", err)
@@ -116,7 +116,7 @@ func testPrestateDiffTracer(tracerName string, dirPath string, t *testing.T) {
 			}
 			rules := test.Genesis.Config.Rules(context.BlockNumber, context.Time)
 			m := mock.Mock(t)
-			dbTx, err := m.DB.BeginRw(m.Ctx)
+			dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 			require.NoError(t, err)
 			defer dbTx.Rollback()
 			statedb, err := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, context.BlockNumber)
@@ -125,16 +125,42 @@ func testPrestateDiffTracer(tracerName string, dirPath string, t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to create call tracer: %v", err)
 			}
+			if outputDir, ok := os.LookupEnv("PRESTATE_TRACER_TEST_DEBUG_TRACER_OUTPUT_DIR"); ok {
+				recordOptions := debugtracer.RecordOptions{
+					DisableOnOpcodeMemoryRecording:    true,
+					DisableOnOpcodeStackRecording:     true,
+					DisableOnBlockchainInitRecording:  true,
+					DisableOnBlockStartRecording:      true,
+					DisableOnBlockEndRecording:        true,
+					DisableOnGenesisBlockRecording:    true,
+					DisableOnSystemCallStartRecording: true,
+					DisableOnSystemCallEndRecording:   true,
+					DisableOnBalanceChangeRecording:   true,
+					DisableOnNonceChangeRecording:     true,
+					DisableOnStorageChangeRecording:   true,
+					DisableOnLogRecording:             true,
+				}
+				tracer = debugtracer.New(
+					outputDir,
+					debugtracer.WithWrappedTracer(tracer),
+					debugtracer.WithRecordOptions(recordOptions),
+					debugtracer.WithFlushMode(debugtracer.FlushModeTxn),
+				)
+			}
+			statedb.SetHooks(tracer.Hooks)
 			msg, err := tx.AsMessage(*signer, (*big.Int)(test.Context.BaseFee), rules)
 			if err != nil {
 				t.Fatalf("failed to prepare transaction for tracing: %v", err)
 			}
 			txContext := core.NewEVMTxContext(msg)
-			evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Debug: true, Tracer: tracer})
-			st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.GetGas()).AddBlobGas(tx.GetBlobGas()))
-			if _, err = st.TransitionDb(true /* refunds */, false /* gasBailout */); err != nil {
+			evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Tracer: tracer.Hooks})
+			tracer.OnTxStart(evm.GetVMContext(), tx, msg.From())
+			st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()))
+			vmRet, err := st.TransitionDb(true /* refunds */, false /* gasBailout */)
+			if err != nil {
 				t.Fatalf("failed to execute transaction: %v", err)
 			}
+			tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.GasUsed}, nil)
 			// Retrieve the trace result and compare against the expected
 			res, err := tracer.GetResult()
 			if err != nil {

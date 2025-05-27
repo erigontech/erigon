@@ -42,7 +42,9 @@ func (m mockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 
 var (
 	mockUrl, _       = url.Parse("https://anywhere.io")
-	mockBeaconConfig = &clparams.BeaconChainConfig{}
+	mockBeaconConfig = &clparams.BeaconChainConfig{
+		SlotsPerEpoch: 32,
+	}
 
 	//go:embed test_data/mock_blinded_block.json
 	mockBlindedBlockBytes []byte
@@ -76,7 +78,7 @@ func TestGetStatus(t *testing.T) {
 		}
 		builderClient.httpClient = mockHttpClient
 		err := builderClient.GetStatus(ctx)
-		require.ErrorIs(t, err, nil)
+		require.NoError(t, err)
 	})
 
 	t.Run("200 OK", func(t *testing.T) {
@@ -216,6 +218,7 @@ func TestGetHeader(t *testing.T) {
 			beaconConfig: mockBeaconConfig,
 		}
 		header, err := builderClient.GetHeader(ctx, mockSlot, mockParentHash, mockPubKey)
+		header.Data.Message.ExecutionRequests = nil
 		require.NoError(t, err)
 		require.NotNil(t, header)
 		// marshal and unmarshal to compare
@@ -278,7 +281,7 @@ func TestSubmitBlindedBlocks(t *testing.T) {
 			url:          mockUrl,
 			beaconConfig: mockBeaconConfig,
 		}
-		block, bundle, err := builderClient.SubmitBlindedBlocks(ctx, mockBlindedBlock)
+		block, bundle, _, err := builderClient.SubmitBlindedBlocks(ctx, mockBlindedBlock)
 		require.NoError(t, err)
 		result := struct {
 			Version string `json:"version"`
@@ -319,7 +322,7 @@ func TestSubmitBlindedBlocks(t *testing.T) {
 			url:          mockUrl,
 			beaconConfig: mockBeaconConfig,
 		}
-		block, bundle, err := builderClient.SubmitBlindedBlocks(ctx, mockBlindedBlock)
+		block, bundle, _, err := builderClient.SubmitBlindedBlocks(ctx, mockBlindedBlock)
 		require.Error(t, err)
 		require.Nil(t, block)
 		require.Nil(t, bundle)

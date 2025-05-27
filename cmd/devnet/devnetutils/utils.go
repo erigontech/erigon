@@ -27,7 +27,7 @@ import (
 	"strconv"
 	"strings"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -117,14 +117,14 @@ func UniqueIDFromEnode(enode string) (string, error) {
 	return enode[:i], nil
 }
 
-func RandomInt(max int) int {
-	if max == 0 {
+func RandomInt(_max int) int {
+	if _max == 0 {
 		return 0
 	}
 
 	var n uint16
 	binary.Read(rand.Reader, binary.LittleEndian, &n)
-	return int(n) % (max + 1)
+	return int(n) % (_max + 1)
 }
 
 // NamespaceAndSubMethodFromMethod splits a parent method into namespace and the actual method
@@ -136,16 +136,16 @@ func NamespaceAndSubMethodFromMethod(method string) (string, string, error) {
 	return parts[0], parts[1], nil
 }
 
-func GenerateTopic(signature string) []libcommon.Hash {
+func GenerateTopic(signature string) []common.Hash {
 	hashed := crypto.Keccak256([]byte(signature))
-	return []libcommon.Hash{libcommon.BytesToHash(hashed)}
+	return []common.Hash{common.BytesToHash(hashed)}
 }
 
 // RandomNumberInRange returns a random number between min and max NOT inclusive
-func RandomNumberInRange(min, max uint64) (uint64, error) {
-	if max <= min {
-		return 0, fmt.Errorf("Invalid range: upper bound %d less or equal than lower bound %d", max, min)
+func RandomNumberInRange(_min, _max uint64) (uint64, error) {
+	if _max <= _min {
+		return 0, fmt.Errorf("Invalid range: upper bound %d less or equal than lower bound %d", _max, _min)
 	}
 
-	return uint64(RandomInt(int(max-min)) + int(min)), nil
+	return uint64(RandomInt(int(_max-_min)) + int(_min)), nil
 }

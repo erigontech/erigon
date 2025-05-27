@@ -23,6 +23,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/version"
 )
 
 var (
@@ -32,26 +33,23 @@ var (
 	GitTag    string
 )
 
-// see https://calver.org
 const (
-	VersionMajor       = 3        // Major version component of the current release
-	VersionMinor       = 0        // Minor version component of the current release
-	VersionMicro       = 0        // Patch version component of the current release
-	VersionModifier    = "alpha5" // Modifier component of the current release
 	VersionKeyCreated  = "ErigonVersionCreated"
 	VersionKeyFinished = "ErigonVersionFinished"
+	ClientName         = "erigon"
+	ClientCode         = "EG"
 )
 
 // Version holds the textual version string.
 var Version = func() string {
-	return fmt.Sprintf("%d.%02d.%d", VersionMajor, VersionMinor, VersionMicro)
+	return fmt.Sprintf("%d.%d.%d", version.Major, version.Minor, version.Micro)
 }()
 
 // VersionWithMeta holds the textual version string including the metadata.
 var VersionWithMeta = func() string {
 	v := Version
-	if VersionModifier != "" {
-		v += "-" + VersionModifier
+	if version.Modifier != "" {
+		v += "-" + version.Modifier
 	}
 	return v
 }()

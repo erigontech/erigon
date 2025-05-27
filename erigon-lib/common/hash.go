@@ -22,10 +22,10 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/big"
-	"math/rand"
+	"math/rand/v2"
 	"reflect"
 
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
 )
 
@@ -60,7 +60,7 @@ func BigToHash(b *big.Int) Hash { return BytesToHash(b.Bytes()) }
 
 // HexToHash sets byte representation of s to hash.
 // If b is larger than len(h), b will be cropped from the left.
-func HexToHash(s string) Hash { return BytesToHash(hexutility.FromHex(s)) }
+func HexToHash(s string) Hash { return BytesToHash(hexutil.FromHex(s)) }
 
 // Cmp compares two hashes.
 func (h Hash) Cmp(other Hash) int {
@@ -74,7 +74,7 @@ func (h Hash) Bytes() []byte { return h[:] }
 func (h Hash) Big() *big.Int { return new(big.Int).SetBytes(h[:]) }
 
 // Hex converts a hash to a hex string.
-func (h Hash) Hex() string { return hexutility.Encode(h[:]) }
+func (h Hash) Hex() string { return hexutil.Encode(h[:]) }
 
 // TerminalString implements log.TerminalStringer, formatting a string for console
 // output during logging.
@@ -120,17 +120,17 @@ func (h Hash) Format(s fmt.State, c rune) {
 
 // UnmarshalText parses a hash in hex syntax.
 func (h *Hash) UnmarshalText(input []byte) error {
-	return hexutility.UnmarshalFixedText("Hash", input, h[:])
+	return hexutil.UnmarshalFixedText("Hash", input, h[:])
 }
 
 // UnmarshalJSON parses a hash in hex syntax.
 func (h *Hash) UnmarshalJSON(input []byte) error {
-	return hexutility.UnmarshalFixedJSON(hashT, input, h[:])
+	return hexutil.UnmarshalFixedJSON(hashT, input, h[:])
 }
 
 // MarshalText returns the hex representation of h.
 func (h Hash) MarshalText() ([]byte, error) {
-	return hexutility.Bytes(h[:]).MarshalText()
+	return hexutil.Bytes(h[:]).MarshalText()
 }
 
 // SetBytes sets the hash to the value of b.
@@ -145,7 +145,7 @@ func (h *Hash) SetBytes(b []byte) {
 
 // Generate implements testing/quick.Generator.
 func (h Hash) Generate(rand *rand.Rand, size int) reflect.Value {
-	m := rand.Intn(len(h))
+	m := rand.IntN(len(h))
 	for i := len(h) - 1; i > m; i-- {
 		h[i] = byte(rand.Uint32())
 	}
@@ -186,7 +186,7 @@ func (h *Hash) UnmarshalGraphQL(input interface{}) error {
 }
 
 func FromHex(in string) []byte {
-	return hexutility.MustDecodeHex(in)
+	return hexutil.MustDecodeHex(in)
 }
 
 type CodeRecord struct {

@@ -27,17 +27,17 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/gasprice"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
@@ -47,7 +47,7 @@ func newTestBackend(t *testing.T) *mock.MockSentry {
 		key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr   = crypto.PubkeyToAddress(key.PublicKey)
 		gspec  = &types.Genesis{
-			Config: params.TestChainConfig,
+			Config: chain.TestChainConfig,
 			Alloc:  types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
 		}
 		signer = types.LatestSigner(gspec.Config)
@@ -56,8 +56,8 @@ func newTestBackend(t *testing.T) *mock.MockSentry {
 
 	// Generate testing blocks
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 32, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(libcommon.Address{1})
-		tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), libcommon.HexToAddress("deadbeef"), uint256.NewInt(100), 21000, uint256.NewInt(uint64(int64(i+1)*params.GWei)), nil), *signer, key)
+		b.SetCoinbase(common.Address{1})
+		tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt(100), 21000, uint256.NewInt(uint64(int64(i+1)*common.GWei)), nil), *signer, key)
 		if txErr != nil {
 			t.Fatalf("failed to create tx: %v", txErr)
 		}
@@ -77,13 +77,13 @@ func TestSuggestPrice(t *testing.T) {
 	config := gaspricecfg.Config{
 		Blocks:     2,
 		Percentile: 60,
-		Default:    big.NewInt(params.GWei),
+		Default:    big.NewInt(common.GWei),
 	}
 
 	m := newTestBackend(t) //, big.NewInt(16), c.pending)
 	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil)
 
-	tx, _ := m.DB.BeginRo(m.Ctx)
+	tx, _ := m.DB.BeginTemporalRo(m.Ctx)
 	defer tx.Rollback()
 
 	cache := jsonrpc.NewGasPriceCache()
@@ -94,7 +94,7 @@ func TestSuggestPrice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to retrieve recommended gas price: %v", err)
 	}
-	expect := big.NewInt(params.GWei * int64(30))
+	expect := big.NewInt(common.GWei * int64(30))
 	if got.Cmp(expect) != 0 {
 		t.Fatalf("Gas price mismatch, want %d, got %d", expect, got)
 	}

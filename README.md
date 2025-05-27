@@ -1,21 +1,17 @@
 # Erigon
 
-Documentation: **[erigon.gitbook.io](https://erigon.gitbook.io)**
-Blog: **[erigon.substack.com](https://erigon.substack.com/)**
-Twitter: [x.com/ErigonEth](https://x.com/ErigonEth)
+[![Docs](https://img.shields.io/badge/docs-up-green)](https://docs.erigon.tech/)
+[![Blog](https://img.shields.io/badge/blog-up-green)](https://erigon.tech/blog/)
+[![Twitter](https://img.shields.io/twitter/follow/ErigonEth?style=social)](https://x.com/ErigonEth)
+[![Build status](https://github.com/erigontech/erigon/actions/workflows/ci.yml/badge.svg)](https://github.com/erigontech/erigon/actions/workflows/ci.yml)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=erigontech_erigon&metric=coverage)](https://sonarcloud.io/summary/new_code?id=erigontech_erigon)
 
 Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency
-frontier. [Archive Node](https://ethereum.org/en/developers/docs/nodes-and-clients/archive-nodes/#what-is-an-archive-node)
-by default.
-
-<br>
-
-![Build status](https://github.com/erigontech/erigon/actions/workflows/ci.yml/badge.svg) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=erigontech_erigon&metric=coverage)](https://sonarcloud.io/summary/new_code?id=erigontech_erigon)
-
-<!--ts-->
+frontier.
 
 - [Erigon](#erigon)
 - [System Requirements](#system-requirements)
+- [Sync Times](#sync-times)
 - [Usage](#usage)
     - [Getting Started](#getting-started)
     - [Datadir structure](#datadir-structure)
@@ -52,7 +48,7 @@ by default.
     - [Run local devnet](#run-local-devnet)
     - [Docker permissions error](#docker-permissions-error)
     - [Public RPC](#public-rpc)
-    - [RaspberyPI](#raspberypi)
+    - [RaspberryPI](#raspberrypi)
     - [Run all components by docker-compose](#run-all-components-by-docker-compose)
         - [Optional: Setup dedicated user](#optional-setup-dedicated-user)
         - [Environment Variables](#environment-variables)
@@ -62,8 +58,6 @@ by default.
     - [Windows](#windows)
 - [Getting in touch](#getting-in-touch)
     - [Erigon Discord Server](#erigon-discord-server)
-    - [Blog](#blog)
-    - [Twitter](#twitter)
     - [Reporting security issues/concerns](#reporting-security-issuesconcerns)
 - [Known issues](#known-issues)
     - [`htop` shows incorrect memory usage](#htop-shows-incorrect-memory-usage)
@@ -71,31 +65,45 @@ by default.
     - [Filesystem's background features are expensive](#filesystems-background-features-are-expensive)
     - [Gnome Tracker can kill Erigon](#gnome-tracker-can-kill-erigon)
     - [the --mount option requires BuildKit error](#the---mount-option-requires-buildkit-error)
+    - [`cannot allocate memory` Erigon crashes due to kernel allocation limits](#erigon-crashes-due-to-kernel-allocation-limits)
 
 <!--te-->
 
-**Important defaults**: Erigon is an Archive Node by default: use `--prune.mode` if need make it smaller (not allowed to
-change after first start)
+**Important defaults**: Erigon 3 is a Full Node by default. (Erigon 2 was an [Archive Node](https://ethereum.org/en/developers/docs/nodes-and-clients/archive-nodes/#what-is-an-archive-node) by default.)
+Set `--prune.mode` to "archive" if you need an archive node or to "minimal" if you run a validator on a small disk (not allowed to change after first start).
 
 <code>In-depth links are marked by the microscope sign (🔬) </code>
 
 System Requirements
 ===================
 
-RAM: >=32GB, [Golang >= 1.22](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4. 64-bit
+RAM: >=32GB, [Golang >= 1.23](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4. 64-bit
 architecture.
 
-- ArchiveNode Ethereum Mainnet: 2TB (April 2024). FullNode: 1.1TB (June 2024)
-- ArchiveNode Gnosis: 1.7TB (March 2024). FullNode: 300GB (June 2024)
+- ArchiveNode Ethereum Mainnet: 2TB (May 2025). FullNode: 1.1TB (May 2025)
+- ArchiveNode Gnosis: 640GB (May 2025). FullNode: 300GB (June 2024)
 - ArchiveNode Polygon Mainnet: 4.1TB (April 2024). FullNode: 2Tb (April 2024)
 
 SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind.
 Bear in mind that SSD performance deteriorates when close to capacity. CloudDrives (like
-gp3): [Blocks Execution is slow on cloud-network-drives](#blocks-execution-is-slow-on-cloud-network-drives)
+gp3): Blocks Execution is slow
+on [cloud-network-drives](https://github.com/erigontech/erigon?tab=readme-ov-file#cloud-network-drives)
 
 🔬 More details on [Erigon3 datadir size](#erigon3-datadir-size)
 
 🔬 More details on what type of data stored [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space)
+
+Sync Times
+==========
+
+These are the  approximate sync times syncing from scratch to the tip of the chain (results may vary depending on hardware and bandwidth).
+
+
+| Chain      | Archive         | Full           | Minimal        |
+|------------|-----------------|----------------|----------------|
+| Ethereum   | 7 Hours, 55 Minutes | 4 Hours, 23 Minutes | 1 Hour, 41 Minutes |
+| Gnosis     | 2 Hours, 10 Minutes | 1 Hour, 5 Minutes  | 33 Minutes      |
+| Polygon    | 1 Day, 21 Hours    | 21 Hours, 41 Minutes | 11 Hours, 54 Minutes |
 
 Usage
 =====
@@ -134,7 +142,7 @@ datadir
         domain    # Latest State
         history   # Historical values 
         idx       # InvertedIndices: can search/filtering/union/intersect them - to find historical data. like eth_getLogs or trace_transaction
-        accessors # Additional (generated) indices of history - have "random-touch" read-pattern. They can serve only `Get` requests (no search/filters).
+        accessor # Additional (generated) indices of history - have "random-touch" read-pattern. They can serve only `Get` requests (no search/filters).
     txpool        # pending transactions. safe to remove.
     nodes         # p2p peers. safe to remove.
     temp          # used to sort data bigger than RAM. can grow to ~100gb. cleaned at startup.
@@ -155,11 +163,11 @@ datadir
         domain    # link to fast disk
         history   
         idx       
-        accessors 
+        accessor 
     temp # buffers to sort data >> RAM. sequential-buffered IO - is slow-disk-friendly   
 
 # Example: how to speedup history access: 
-#   - go step-by-step - first try store `accessors` on fast disk
+#   - go step-by-step - first try store `accessor` on fast disk
 #   - if speed is not good enough: `idx`
 #   - if still not enough: `history` 
 ```
@@ -167,54 +175,49 @@ datadir
 ### Erigon3 datadir size
 
 ```sh
-# eth-mainnet - archive - April 2024
+# eth-mainnet - archive - Nov 2024
 
-du -hsc /erigon/* 
-6G  	/erigon/caplin
-50G 	/erigon/chaindata
-1.8T	/erigon/snapshots
-1.9T	total
+du -hsc /erigon/chaindata
+15G 	/erigon/chaindata
 
 du -hsc /erigon/snapshots/* 
-100G 	/erigon/snapshots/accessor
-240G	/erigon/snapshots/domain
-260G	/erigon/snapshots/history
-410G	/erigon/snapshots/idx
-1.7T	/erigon/snapshots
+120G 	/erigon/snapshots/accessor
+300G	/erigon/snapshots/domain
+280G	/erigon/snapshots/history
+430G	/erigon/snapshots/idx
+2.3T	/erigon/snapshots
 ```
 
 ```sh
-# bor-mainnet - archive - Jun 2024
+# bor-mainnet - archive - Nov 2024
 
-du -hsc /erigon/* 
-
-160M	/erigon/bor
-50G 	/erigon/chaindata
-3.7T	/erigon/snapshots
-3.8T	total
+du -hsc /erigon/chaindata
+20G 	/erigon/chaindata
 
 du -hsc /erigon/snapshots/* 
-260G	/erigon-data/snapshots/accessor
-850G	/erigon-data/snapshots/domain
-650G	/erigon-data/snapshots/history
-1.4T	/erigon-data/snapshots/idx
-4.1T	/erigon/snapshots
+360G	/erigon-data/snapshots/accessor
+1.1T	/erigon-data/snapshots/domain
+750G	/erigon-data/snapshots/history
+1.5T	/erigon-data/snapshots/idx
+4.9T	/erigon/snapshots
 ```
 
 ### Erigon3 changes from Erigon2
 
-- Initial sync does download LatestState and it's history - no re-exec from 0 anymore.
-- ExecutionStage included many E2 stages: stage_hash_state, stage_trie, log_index, history_index, trace_index
-- E3 can execute 1 historical transaction - without executing it's block - because history/indices have
-  transaction-granularity, instead of block-granularity.
-- E3 doesn't store Logs (aka Receipts) - it always re-executing historical txn (but it's cheaper then in E2 - see point
-  above).
-- Restart doesn't loose much partial progress: `--sync.loop.block.limit=5_000` enabled by default
-- `chaindata` is less than `15gb`. It's ok to `rm -rf chaindata`. To prevent it's grow: recommend `--batchSize <= 1G`
-- can symlink/mount latest state to fast drive and history to cheap drive
-- `--internalcl` is enabled by default. to disable use `--externalcl`
-- `--prune` flags changed: default `--prune.mode=archive`, FullNode: `--prune.mode=full`, MinimalNode (EIP-4444):
-  `--prune.mode=minimal`.
+- **Initial sync doesn't re-exec from 0:** downloading 99% LatestState and History
+- **Per-Transaction granularity of history** (Erigon2 had per-block). Means:
+    - Can execute 1 historical transaction - without executing it's block
+    - If account X change V1->V2->V1 within 1 block (different transactions): `debug_getModifiedAccountsByNumber` return
+      it
+    - Erigon3 doesn't store Logs (aka Receipts) - it always re-executing historical txn (but it's cheaper)
+- **Validator mode**: added. `--internalcl` is enabled by default. to disable use `--externalcl`.
+- **Store most of data in immutable files (segments/snapshots):**
+    - can symlink/mount latest state to fast drive and history to cheap drive
+    - `chaindata` is less than `15gb`. It's ok to `rm -rf chaindata`. (to prevent grow: recommend `--batchSize <= 1G`)
+- **`--prune` flags changed**: see `--prune.mode` (default: `full`, archive: `archive`, EIP-4444: `minimal`)
+- **Other changes:**
+    - ExecutionStage included many E2 stages: stage_hash_state, stage_trie, log_index, history_index, trace_index
+    - Restart doesn't loose much partial progress: `--sync.loop.block.limit=5_000` enabled by default
 
 ### Logging
 
@@ -258,11 +261,11 @@ Don't start services as separated processes unless you have clear reason for it:
 your own implementation, security.
 How to start Erigon's services as separated processes, see in [docker-compose.yml](./docker-compose.yml).
 Each service has own `./cmd/*/README.md` file.
-[Erigon Blog](https://erigon.substack.com/).
+[Erigon Blog](https://erigon.tech/blog/).
 
 ### Embedded Consensus Layer
 
-Built-in consensus for Ethereum Mainnet, Sepolia, Holesky, Gnosis.
+Built-in consensus for Ethereum Mainnet, Sepolia, Holesky, Hoodi, Gnosis, Chiado.
 To use external Consensus Layer: `--externalcl`.
 
 ### Testnets
@@ -348,12 +351,11 @@ Caplin is be enabled by default. to disable it and enable the Engine API, use th
 on, an external Consensus Layer will not be need
 anymore.
 
-Caplin also has an archivial mode for historical states and blocks. it can be enabled through the `--caplin.archive`
+Caplin also has an archival mode for historical states and blocks. it can be enabled through the `--caplin.archive`
 flag.
 In order to enable the caplin's Beacon API, the flag `--beacon.api=<namespaces>` must be added.
-e.g: `--beacon.api=beacon,builder,config,debug,node,validator,lighthouse` will enable all endpoints. **NOTE: Caplin is
-not staking-ready so aggregation endpoints are still to be implemented. Additionally enabling the Beacon API will lead
-to a 6 GB higher RAM usage.
+e.g: `--beacon.api=beacon,builder,config,debug,node,validator,lighthouse` will enable all endpoints. 
+Note: enabling the Beacon API will lead to a 6 GB higher RAM usage
 
 ### Multiple Instances / One Machine
 
@@ -373,7 +375,7 @@ Quote your path if it has spaces.
 
 ### Dev Chain
 
-<code> 🔬 Detailed explanation is [DEV_CHAIN](/DEV_CHAIN.md).</code>
+<code> 🔬 Detailed explanation is [DEV_CHAIN](/docs/DEV_CHAIN.md).</code>
 
 Key features
 ============
@@ -413,7 +415,7 @@ make erigon rpcdaemon
 ```
 
 - Supported JSON-RPC
-  calls: [eth](./cmd/rpcdaemon/commands/eth_api.go), [debug](./cmd/rpcdaemon/commands/debug_api.go), [net](./cmd/rpcdaemon/commands/net_api.go), [web3](./cmd/rpcdaemon/commands/web3_api.go)
+  calls: [eth](./rpc/jsonrpc/eth_api.go), [debug](./rpc/jsonrpc/debug_api.go), [net](./rpc/jsonrpc/net_api.go), [web3](./rpc/jsonrpc/web3_api.go)
 - increase throughput by: `--rpc.batch.concurrency`, `--rpc.batch.limit`, `--db.read.concurrency`
 - increase throughput by disabling: `--http.compression`, `--ws.compression`
 
@@ -539,7 +541,7 @@ make DIST=/opt/erigon install
 
 ### Run local devnet
 
-<code> 🔬 Detailed explanation is [here](/DEV_CHAIN.md).</code>
+<code> 🔬 Detailed explanation is [here](/docs/DEV_CHAIN.md).</code>
 
 ### Docker permissions error
 
@@ -556,7 +558,7 @@ in [post](https://www.fullstaq.com/knowledge-hub/blogs/docker-and-the-host-files
 - `--http.corsdomain="*"` is bad-practice: set exact hostname or IP
 - protect from DOS by reducing: `--rpc.batch.concurrency`, `--rpc.batch.limit`
 
-### RaspberyPI
+### RaspberryPI
 
 https://github.com/mathMakesArt/Erigon-on-RPi-4
 
@@ -593,7 +595,7 @@ targets `make user_linux` or `make user_macos`.
 
 #### Run
 
-Check permissions: In all cases, `XDG_DATA_HOME` (specified or default) must be writeable by the user UID/GID in docker,
+Check permissions: In all cases, `XDG_DATA_HOME` (specified or default) must be writable by the user UID/GID in docker,
 which will be determined by the `DOCKER_UID` and `DOCKER_GID` at build time. If a build or service startup is failing
 due to permissions, check that all the directories, UID, and GID controlled by these environment variables are correct.
 
@@ -674,7 +676,7 @@ Windows users may run erigon in 3 possible ways:
   build on windows :
     * [Git](https://git-scm.com/downloads) for Windows must be installed. If you're cloning this repository is very
       likely you already have it
-    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.22
+    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.23
     * GNU CC Compiler at least version 13 (is highly suggested that you install `chocolatey` package manager - see
       following point)
     * If you need to build MDBX tools (i.e. `.\wmake.ps1 db-tools`)
@@ -697,9 +699,10 @@ Windows users may run erigon in 3 possible ways:
 * Use WSL (Windows Subsystem for Linux) **strictly on version 2**. Under this option you can build Erigon just as you
   would on a regular Linux distribution. You can point your data also to any of the mounted Windows partitions (
   eg. `/mnt/c/[...]`, `/mnt/d/[...]` etc) but in such case be advised performance is impacted: this is due to the fact
-  those mount points use `DrvFS` which is a [network file system](#blocks-execution-is-slow-on-cloud-network-drives)
+  those mount points use `DrvFS` which is
+  a [network file system](https://github.com/erigontech/erigon?tab=readme-ov-file#cloud-network-drives)
   and, additionally, MDBX locks the db for exclusive access which implies only one process at a time can access data.
-  This has consequences on the running of `rpcdaemon` which has to be configured as [Remote DB](#for-remote-db) even if
+  This has consequences on the running of `rpcdaemon` which has to be configured as [Remote DB](#json-rpc-daemon) even if
   it is executed on the very same computer. If instead your data is hosted on the native Linux filesystem non
   limitations apply.
   **Please also note the default WSL2 environment has its own IP address which does not match the one of the network
@@ -712,14 +715,6 @@ Getting in touch
 
 The main discussions are happening on our Discord server. To get an invite, send an email to `bloxster [at] proton.me`
 with your name, occupation, a brief explanation of why you want to join the Discord, and how you heard about Erigon.
-
-### Blog
-
-**[erigon.substack.com](https://erigon.substack.com/)**
-
-### Twitter
-
-[x.com/ErigonEth](https://x.com/ErigonEth)
 
 ### Reporting security issues/concerns
 
@@ -754,7 +749,7 @@ Erigon uses ~4Gb of RAM during genesis sync and ~1Gb during normal work. OS page
 memory.
 
 **Warning:** Multiple instances of Erigon on same machine will touch Disk concurrently, it impacts performance - one of
-main Erigon optimisations: "reduce Disk random access".
+main Erigon optimizations: "reduce Disk random access".
 "Blocks Execution stage" still does many random reads - this is reason why it's slowest stage. We do not recommend
 running multiple genesis syncs on same Disk. If genesis sync passed, then it's fine to run multiple Erigon instances on
 same Disk.
@@ -763,10 +758,19 @@ same Disk.
 
 (Like gp3)
 You may read: https://github.com/erigontech/erigon/issues/1516#issuecomment-811958891
-In short: network-disks are bad for blocks execution - because blocks execution reading data from db non-parallel
-non-batched way.
-Tricks: if you throw anough RAM and set env variable `ERIGON_SNAPSHOT_MADV_RND=false` - then Erigon will work
-good-enough on Cloud drives - in cost of higher IO.
+In short: network-disks are bad for blocks execution - because they are designed for parallel/batch workloads (databases
+with many parallel requests). But blocks execution in Erigon is non-parallel and using blocking-io.
+
+What can do:
+
+- reduce disk latency (not throughput, not iops)
+    - use latency-critical cloud-drives
+    - or attached-NVMe (at least for initial sync)
+- increase RAM
+- if you throw enough RAM, then can set env variable `ERIGON_SNAPSHOT_MADV_RND=false`
+- Use `--db.pagesize=64kb` (less fragmentation, more IO)
+- Or buy/download synced archive node from some 3-rd party Erigon2 snapshots provider
+- Or use Erigon3 (it also sensitive for disk-latency - but it will download 99% of history)
 
 ### Filesystem's background features are expensive
 
@@ -784,4 +788,14 @@ For anyone else that was getting the BuildKit error when trying to start Erigon 
 XDG_DATA_HOME=/preferred/data/folder DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
 ```
 
+### Erigon crashes due to kernel allocation limits
+
+Erigon will crash with `cannot allocate memory`.
+
+to fix this add the following to `/etc/sysctl.conf` or a .conf file in `/etc/sysctl.d/`
+
+```
+vm.overcommit_memory = 1 (it is 0 by default)
+vm.max_map_count = 8388608 (it is 1048576 by default)
+```
 ---------

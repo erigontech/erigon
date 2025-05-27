@@ -17,7 +17,7 @@
 package handlers
 
 import (
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -29,15 +29,18 @@ import (
 
 const maxBlobsThroughoutputPerRequest = 72
 
-func (c *ConsensusHandlers) blobsSidecarsByRangeHandler(s network.Stream) error {
-	peerId := s.Conn().RemotePeer().String()
+func (c *ConsensusHandlers) blobsSidecarsByRangeHandlerElectra(s network.Stream) error {
+	return c.blobsSidecarsByRangeHandler(s, clparams.ElectraVersion)
+}
+
+func (c *ConsensusHandlers) blobsSidecarsByRangeHandlerDeneb(s network.Stream) error {
+	return c.blobsSidecarsByRangeHandler(s, clparams.DenebVersion)
+}
+
+func (c *ConsensusHandlers) blobsSidecarsByRangeHandler(s network.Stream, version clparams.StateVersion) error {
 
 	req := &cltypes.BlobsByRangeRequest{}
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.DenebVersion); err != nil {
-		return err
-	}
-	if err := c.checkRateLimit(peerId, "blobSidecar", rateLimits.blobSidecarsLimit, int(req.Count)); err != nil {
-		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
+	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, version); err != nil {
 		return err
 	}
 
@@ -48,12 +51,18 @@ func (c *ConsensusHandlers) blobsSidecarsByRangeHandler(s network.Stream) error 
 	defer tx.Rollback()
 
 	written := 0
+	maxIter := 32
+	currIter := 0
 	for slot := req.StartSlot; slot < req.StartSlot+req.Count; slot++ {
+		if currIter >= maxIter {
+			break
+		}
+		currIter++
 		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
 		if err != nil {
 			return err
 		}
-		if blockRoot == (libcommon.Hash{}) {
+		if blockRoot == (common.Hash{}) {
 			continue
 		}
 
@@ -84,16 +93,18 @@ func (c *ConsensusHandlers) blobsSidecarsByRangeHandler(s network.Stream) error 
 	return nil
 }
 
-func (c *ConsensusHandlers) blobsSidecarsByIdsHandler(s network.Stream) error {
-	peerId := s.Conn().RemotePeer().String()
+func (c *ConsensusHandlers) blobsSidecarsByIdsHandlerElectra(s network.Stream) error {
+	return c.blobsSidecarsByIdsHandler(s, clparams.ElectraVersion)
+}
+
+func (c *ConsensusHandlers) blobsSidecarsByIdsHandlerDeneb(s network.Stream) error {
+	return c.blobsSidecarsByIdsHandler(s, clparams.DenebVersion)
+}
+
+func (c *ConsensusHandlers) blobsSidecarsByIdsHandler(s network.Stream, version clparams.StateVersion) error {
 
 	req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](40269, 40)
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.DenebVersion); err != nil {
-		return err
-	}
-
-	if err := c.checkRateLimit(peerId, "blobSidecar", rateLimits.blobSidecarsLimit, req.Len()); err != nil {
-		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
+	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, version); err != nil {
 		return err
 	}
 

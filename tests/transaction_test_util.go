@@ -27,18 +27,18 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
-
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/types"
 )
 
 // TransactionTest checks RLP decoding and sender derivation of transactions.
 type TransactionTest struct {
-	RLP   hexutility.Bytes `json:"txbytes"`
-	Forks ttForks          `json:"result"`
+	RLP   hexutil.Bytes `json:"txbytes"`
+	Forks ttForks       `json:"result"`
 }
 
 type ttForks struct {
@@ -56,13 +56,13 @@ type ttForks struct {
 
 type ttFork struct {
 	Exception    string                `json:"exception"`
-	Sender       libcommon.Address     `json:"sender"`
-	Hash         libcommon.Hash        `json:"hash"`
+	Sender       common.Address        `json:"sender"`
+	Hash         common.Hash           `json:"hash"`
 	IntrinsicGas *math.HexOrDecimal256 `json:"intrinsicGas"`
 }
 
 func (tt *TransactionTest) Run(chainID *big.Int) error {
-	validateTx := func(rlpData hexutility.Bytes, signer types.Signer, rules *chain.Rules) (*libcommon.Address, *libcommon.Hash, uint64, error) {
+	validateTx := func(rlpData hexutil.Bytes, signer types.Signer, rules *chain.Rules) (*common.Address, *common.Hash, uint64, error) {
 		tx, err := types.DecodeTransaction(rlpData)
 		if err != nil {
 			return nil, nil, 0, err
@@ -78,9 +78,12 @@ func (tt *TransactionTest) Run(chainID *big.Int) error {
 		if stx, ok := tx.(*types.SetCodeTransaction); ok {
 			authorizationsLen = uint64(len(stx.GetAuthorizations()))
 		}
-		requiredGas, err := core.IntrinsicGas(msg.Data(), msg.AccessList(), msg.To() == nil, rules.IsHomestead, rules.IsIstanbul, rules.IsShanghai, authorizationsLen)
-		if err != nil {
-			return nil, nil, 0, err
+		requiredGas, floorGas, overflow := fixedgas.IntrinsicGas(msg.Data(), uint64(len(msg.AccessList())), uint64(msg.AccessList().StorageKeys()), msg.To() == nil, rules.IsHomestead, rules.IsIstanbul, rules.IsShanghai, rules.IsPrague, false, authorizationsLen)
+		if rules.IsPrague && floorGas > requiredGas {
+			requiredGas = floorGas
+		}
+		if overflow {
+			return nil, nil, 0, core.ErrGasUintOverflow
 		}
 		if requiredGas > msg.Gas() {
 			return nil, nil, requiredGas, fmt.Errorf("insufficient gas ( %d < %d )", msg.Gas(), requiredGas)
@@ -88,7 +91,7 @@ func (tt *TransactionTest) Run(chainID *big.Int) error {
 
 		if rules.IsLondon {
 			// EIP-1559 gas fee cap
-			err = core.CheckEip1559TxGasFeeCap(sender, msg.FeeCap(), msg.Tip(), nil, false /* isFree */)
+			err = core.CheckEip1559TxGasFeeCap(sender, msg.FeeCap(), msg.TipCap(), nil, false /* isFree */)
 			if err != nil {
 				return nil, nil, 0, err
 			}

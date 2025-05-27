@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/c2h5oh/datasize"
 	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 
 	"github.com/libp2p/go-libp2p"
@@ -40,6 +41,10 @@ type SentinelConfig struct {
 	IpAddr        string
 	Port          int
 	TCPPort       uint
+
+	MaxInboundTrafficPerPeer     datasize.ByteSize
+	MaxOutboundTrafficPerPeer    datasize.ByteSize
+	AdaptableTrafficRequirements bool
 	// Optional
 	LocalIP        string
 	EnableUPnP     bool
@@ -112,8 +117,10 @@ func buildOptions(cfg *SentinelConfig, s *Sentinel) ([]libp2p.Option, error) {
 		libp2p.Transport(libp2pquic.NewTransport),
 		libp2p.Muxer("/mplex/6.7.0", mplex.DefaultTransport),
 		libp2p.DefaultMuxers,
-		libp2p.NATPortMap(),
 		libp2p.Ping(false),
+	}
+	if cfg.EnableUPnP {
+		options = append(options, libp2p.NATPortMap())
 	}
 
 	options = append(options, libp2p.Security(noise.ID, noise.New), libp2p.DisableRelay())

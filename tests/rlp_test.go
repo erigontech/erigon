@@ -17,8 +17,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build integration
-
 package tests
 
 import (
@@ -26,7 +24,10 @@ import (
 )
 
 func TestRLP(t *testing.T) {
-	//t.Parallel()
+	if testing.Short() {
+		t.Skip()
+	}
+
 	tm := new(testMatcher)
 	tm.walk(t, rlpTestDir, func(t *testing.T, name string, test *RLPTest) {
 		if err := tm.checkFailure(t, test.Run()); err != nil {

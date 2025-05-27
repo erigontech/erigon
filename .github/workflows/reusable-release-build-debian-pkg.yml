@@ -1,0 +1,139 @@
+name: Build debian package (part of release process)
+
+on:
+  workflow_call:
+    inputs:
+      application:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Download arm64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.application }}_v${{ inputs.version }}_linux_arm64.tar.gz
+
+      - name: Download amd64v2 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.application }}_v${{ inputs.version }}_linux_amd64v2.tar.gz
+
+      - name: Update and install required packages, run dpkg
+        run: |
+          sudo apt-get update
+          sudo apt-get upgrade -y
+          sudo apt-get install -y dpkg-dev debhelper
+          sudo dpkg --clear-avail
+
+      - name: Extract archives and rename amd64v2 to amd64
+        run: |
+          tar xzvf ${{ inputs.application }}_v${{ inputs.version }}_linux_amd64v2.tar.gz
+          mv -v ${{ inputs.application }}_v${{ inputs.version }}_linux_amd64v2 ${{ inputs.application }}_v${{ inputs.version }}_linux_amd64
+          tar xzvf ${{ inputs.application }}_v${{ inputs.version }}_linux_arm64.tar.gz
+          cat <<-END > postinst.template
+          #!/bin/bash
+          echo "WARNING: Erigon package does not install any configurations nor services."
+          echo "Use your specific way to configure and run Erigon according to your needs."
+          echo "More details on how to run Erigon could be found at https://docs.erigon.tech ."
+          END
+
+      # Creating directory structure
+      # see https://www.debian.org/doc/debian-policy/ch-controlfields.html#version
+      #     https://www.debian.org/doc/manuals/developers-reference/best-pkging-practices.html
+      - name: Build debian package for amd64
+        env:
+          ARCH: "amd64"
+        run: |
+          mkdir -p deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}/usr/bin \
+                   deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}/DEBIAN
+          install postinst.template deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}/DEBIAN/postinst
+          cat <<-END  > deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}/DEBIAN/control
+          Package: ${{ inputs.application }}
+          Version: ${{ inputs.version }}
+          Section: misc
+          Priority: optional
+          Architecture: ${ARCH}
+          Maintainer: Erigon DevOps [https://github.com/erigontech/erigon/issues]
+          Description: Erigon - Ethereum implementation on the efficiency frontier
+          Vcs-Git: https://github.com/erigontech/erigon.git
+          Vcs-Browser: https://github.com/erigontech/erigon 
+          END
+          install -v -p ${{ inputs.application }}_v${{ inputs.version }}_linux_${ARCH}/* \
+                      deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}/usr/bin
+          dpkg-deb --build --root-owner-group deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}
+
+      - name: Build debian package for arm64
+        env:
+          ARCH: "arm64"
+        run: |
+          mkdir -p deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}/usr/bin \
+                    deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}/DEBIAN
+          install postinst.template deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}/DEBIAN/postinst
+          cat <<-END  > deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}/DEBIAN/control
+          Package: ${{ inputs.application }}
+          Version: ${{ inputs.version }}
+          Section: misc
+          Priority: optional
+          Architecture: ${ARCH}
+          Maintainer: Erigon DevOps [https://github.com/erigontech/erigon/issues]
+          Description: Erigon - Ethereum implementation on the efficiency frontier
+          Vcs-Git: https://github.com/erigontech/erigon.git
+          Vcs-Browser: https://github.com/erigontech/erigon 
+          END
+          echo "debug start"
+          cat deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}/DEBIAN/control
+          echo "debug end"
+          install -v -p ${{ inputs.application }}_v${{ inputs.version }}_linux_${ARCH}/* \
+                      deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}/usr/bin
+          dpkg-deb --build --root-owner-group deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}
+
+      - name: Debug output
+        run: |
+          cd ./deb-pkg
+          sha256sum ${{ inputs.application }}_${{ inputs.version }}_amd64.deb > ${{ inputs.application }}_${{ inputs.version }}_amd64.deb.checksum
+          sha256sum ${{ inputs.application }}_${{ inputs.version }}_arm64.deb > ${{ inputs.application }}_${{ inputs.version }}_arm64.deb.checksum
+          ls -l *deb *.checksum
+
+      - name: Apload artifact amd64.deb
+        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
+        with:
+          name: ${{ inputs.application }}_${{ inputs.version }}_amd64.deb
+          path: ./deb-pkg/${{ inputs.application }}_${{ inputs.version }}_amd64.deb
+          retention-days: 5
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Apload artifact amd64.deb.checksum
+        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
+        with:
+          name: ${{ inputs.application }}_${{ inputs.version }}_amd64.deb.checksum
+          path: ./deb-pkg/${{ inputs.application }}_${{ inputs.version }}_amd64.deb.checksum
+          retention-days: 5
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Apload artifact arm64.deb
+        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
+        with:
+          name: ${{ inputs.application }}_${{ inputs.version }}_arm64.deb
+          path: ./deb-pkg/${{ inputs.application }}_${{ inputs.version }}_arm64.deb
+          retention-days: 5
+          compression-level: 0
+          if-no-files-found: error
+  
+      - name: Apload artifact arm64.deb.checksum
+        uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
+        with:
+          name: ${{ inputs.application }}_${{ inputs.version }}_arm64.deb.checksum
+          path: ./deb-pkg/${{ inputs.application }}_${{ inputs.version }}_arm64.deb.checksum
+          retention-days: 5
+          compression-level: 0
+          if-no-files-found: error

@@ -17,6 +17,7 @@
 package network
 
 import (
+	"errors"
 	"sync/atomic"
 	"time"
 
@@ -34,7 +35,7 @@ var requestBlobBatchExpiration = 15 * time.Second
 // This is just a bunch of functions to handle blobs
 
 // BlobsIdentifiersFromBlocks returns a list of blob identifiers from a list of blocks, which should then be forwarded to the network.
-func BlobsIdentifiersFromBlocks(blocks []*cltypes.SignedBeaconBlock) (*solid.ListSSZ[*cltypes.BlobIdentifier], error) {
+func BlobsIdentifiersFromBlocks(blocks []*cltypes.SignedBeaconBlock, cfg *clparams.BeaconChainConfig) (*solid.ListSSZ[*cltypes.BlobIdentifier], error) {
 	ids := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](0, 40)
 	for _, block := range blocks {
 		if block.Version() < clparams.DenebVersion {
@@ -45,6 +46,9 @@ func BlobsIdentifiersFromBlocks(blocks []*cltypes.SignedBeaconBlock) (*solid.Lis
 			return nil, err
 		}
 		kzgCommitments := block.Block.Body.BlobKzgCommitments.Len()
+		if ids.Len()+kzgCommitments > cfg.MaxRequestBlobSidecarsByVersion(block.Version()) {
+			break
+		}
 		for i := 0; i < kzgCommitments; i++ {
 			ids.Append(&cltypes.BlobIdentifier{
 				BlockRoot: blockRoot,
@@ -55,7 +59,7 @@ func BlobsIdentifiersFromBlocks(blocks []*cltypes.SignedBeaconBlock) (*solid.Lis
 	return ids, nil
 }
 
-func BlobsIdentifiersFromBlindedBlocks(blocks []*cltypes.SignedBlindedBeaconBlock) (*solid.ListSSZ[*cltypes.BlobIdentifier], error) {
+func BlobsIdentifiersFromBlindedBlocks(blocks []*cltypes.SignedBlindedBeaconBlock, cfg *clparams.BeaconChainConfig) (*solid.ListSSZ[*cltypes.BlobIdentifier], error) {
 	ids := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](0, 40)
 	for _, block := range blocks {
 		if block.Version() < clparams.DenebVersion {
@@ -66,6 +70,9 @@ func BlobsIdentifiersFromBlindedBlocks(blocks []*cltypes.SignedBlindedBeaconBloc
 			return nil, err
 		}
 		kzgCommitments := block.Block.Body.BlobKzgCommitments.Len()
+		if ids.Len()+kzgCommitments > cfg.MaxRequestBlobSidecarsByVersion(block.Version()) {
+			break
+		}
 		for i := 0; i < kzgCommitments; i++ {
 			ids.Append(&cltypes.BlobIdentifier{
 				BlockRoot: blockRoot,
@@ -86,6 +93,8 @@ func RequestBlobsFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, req *soli
 	var atomicResp atomic.Value
 
 	atomicResp.Store(&PeerAndSidecars{})
+	timer := time.NewTimer(requestBlobBatchExpiration)
+	defer timer.Stop()
 	reqInterval := time.NewTicker(100 * time.Millisecond)
 	defer reqInterval.Stop()
 Loop:
@@ -98,11 +107,12 @@ Loop:
 				}
 				// this is so we do not get stuck on a side-fork
 				responses, pid, err := r.SendBlobsSidecarByIdentifierReq(ctx, req)
-
 				if err != nil {
+					log.Trace("RequestBlobsFrantically: error", "err", err, "peer", pid)
 					return
 				}
 				if responses == nil {
+					log.Trace("RequestBlobsFrantically: response is nil", "peer", pid)
 					return
 				}
 				if len(atomicResp.Load().(*PeerAndSidecars).Responses) > 0 {
@@ -115,9 +125,9 @@ Loop:
 			}()
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(requestBlobBatchExpiration):
-			log.Debug("RequestBlobsFrantically: timeout")
-			return nil, nil
+		case <-timer.C:
+			log.Trace("RequestBlobsFrantically: timeout")
+			return nil, errors.New("timeout")
 		default:
 			if len(atomicResp.Load().(*PeerAndSidecars).Responses) > 0 {
 				break Loop

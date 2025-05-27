@@ -25,7 +25,6 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -53,7 +52,7 @@ func getObjectsForBlobSidecarServiceTests(t *testing.T) (*state.CachingBeaconSta
 	require.NoError(t, utils.DecodeSSZSnappy(stateObj, blobSidecarServiceState, int(clparams.DenebVersion)))
 	require.NoError(t, utils.DecodeSSZSnappy(block, blobSidecarServiceBlock, int(clparams.DenebVersion)))
 	require.NoError(t, utils.DecodeSSZSnappy(&blob, blobSidecarServiceBlob, int(clparams.DenebVersion)))
-	var proof libcommon.Bytes48
+	var proof common.Bytes48
 	proofStr := "0xb5a64254a75a8dd4e5fde529e2f657de268fcb9eedff43363c946f40bbf36ef16ee13a890504a7a8c4f689085146ad51"
 	proofBytes := common.Hex2Bytes(proofStr[2:])
 	copy(proof[:], proofBytes)
@@ -73,7 +72,7 @@ func setupBlobSidecarService(t *testing.T, ctrl *gomock.Controller, test bool) (
 	ctx2, cn := context.WithTimeout(ctx, 1)
 	cn()
 	cfg := &clparams.MainnetBeaconConfig
-	syncedDataManager := synced_data.NewSyncedDataManager(true, cfg)
+	syncedDataManager := synced_data.NewSyncedDataManager(cfg, true)
 	ethClock := eth_clock.NewMockEthereumClock(ctrl)
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	emitters := beaconevents.NewEventEmitter()

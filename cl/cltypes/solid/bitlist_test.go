@@ -125,19 +125,32 @@ func TestBitListCap(t *testing.T) {
 
 // Add more tests as needed for other functions in the BitList struct.
 
-func TestBitlistUnion(t *testing.T) {
+func TestBitlistMerge(t *testing.T) {
 	require := require.New(t)
 
-	b1 := solid.NewBitList(5, 10)
-	b2 := solid.NewBitList(5, 10)
+	b1 := solid.BitlistFromBytes([]byte{0b11010000}, 10)
+	b2 := solid.BitlistFromBytes([]byte{0b10000101}, 10)
 
-	b1.Set(0, byte(0b11010000))
-	b2.Set(0, byte(0b00001101))
-
-	merged, err := b1.Union(b2)
+	merged, err := b1.Merge(b2)
 	require.NoError(err)
 
-	require.Equal(5, merged.Length(), "BitList Union did not return the expected length")
-	require.Equal(byte(0b11011101), merged.Get(0), "BitList Union did not return the expected value")
-	require.Equal(byte(0b00000000), merged.Get(1), "BitList Union did not return the expected value")
+	require.Equal(7, merged.Bits(), "BitList Merge did not return the expected number of bits")
+	require.Equal(1, merged.Length(), "BitList Union did not return the expected length")
+	require.Equal(byte(0b11010101), merged.Get(0), "BitList Union did not return the expected value")
+}
+
+func TestBitSlice(t *testing.T) {
+	require := require.New(t)
+
+	bs := solid.NewBitSlice()
+
+	bs.AppendBit(true)
+	bs.AppendBit(false)
+	bs.AppendBit(true)
+	bs.AppendBit(false)
+
+	bytes := bs.Bytes()
+
+	require.Equal([]byte{0b00000101}, bytes, "BitSlice AppendBit did not append the bits correctly")
+	require.Equal(4, bs.Length(), "BitSlice AppendBit did not increment the length correctly")
 }

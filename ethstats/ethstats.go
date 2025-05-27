@@ -34,21 +34,19 @@ import (
 	"sync"
 	"time"
 
-	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-
 	"github.com/gorilla/websocket"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-lib/common"
+	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/turbo/services"
-
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-p2p/sentry"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/node"
-	"github.com/erigontech/erigon/p2p/sentry"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 const (
@@ -207,7 +205,7 @@ func (s *Service) loop() {
 					break
 				}
 			}
-			if err != nil || conn == nil {
+			if conn == nil {
 				log.Warn("Stats server unreachable")
 				errTimer.Reset(10 * time.Second)
 				continue
@@ -481,24 +479,24 @@ func (s *Service) reportLatency(conn *connWrapper) error {
 
 // blockStats is the information to report about individual blocks.
 type blockStats struct {
-	Number     *big.Int          `json:"number"`
-	Hash       libcommon.Hash    `json:"hash"`
-	ParentHash libcommon.Hash    `json:"parentHash"`
-	Timestamp  *big.Int          `json:"timestamp"`
-	Miner      libcommon.Address `json:"miner"`
-	GasUsed    uint64            `json:"gasUsed"`
-	GasLimit   uint64            `json:"gasLimit"`
-	Diff       string            `json:"difficulty"`
-	TotalDiff  string            `json:"totalDifficulty"`
-	Txs        []txStats         `json:"transactions"`
-	TxHash     libcommon.Hash    `json:"transactionsRoot"`
-	Root       libcommon.Hash    `json:"stateRoot"`
-	Uncles     uncleStats        `json:"uncles"`
+	Number     *big.Int       `json:"number"`
+	Hash       common.Hash    `json:"hash"`
+	ParentHash common.Hash    `json:"parentHash"`
+	Timestamp  *big.Int       `json:"timestamp"`
+	Miner      common.Address `json:"miner"`
+	GasUsed    uint64         `json:"gasUsed"`
+	GasLimit   uint64         `json:"gasLimit"`
+	Diff       string         `json:"difficulty"`
+	TotalDiff  string         `json:"totalDifficulty"`
+	Txs        []txStats      `json:"transactions"`
+	TxHash     common.Hash    `json:"transactionsRoot"`
+	Root       common.Hash    `json:"stateRoot"`
+	Uncles     uncleStats     `json:"uncles"`
 }
 
 // txStats is the information to report about individual transactions.
 type txStats struct {
-	Hash libcommon.Hash `json:"hash"`
+	Hash common.Hash `json:"hash"`
 }
 
 // uncleStats is a custom wrapper around an uncle array to force serializing
@@ -553,7 +551,7 @@ func (s *Service) reportBlock(conn *connWrapper) error {
 // and assembles the block stats. If block is nil, the current head is processed.
 func (s *Service) assembleBlockStats(block *types.Block, td *big.Int) *blockStats {
 	if td == nil {
-		td = libcommon.Big0
+		td = common.Big0
 	}
 	// Gather the block infos from the local blockchain
 	txs := make([]txStats, 0, len(block.Transactions()))
@@ -595,9 +593,9 @@ func (s *Service) reportHistory(conn *connWrapper, list []uint64) error {
 	} else {
 		// No indexes requested, send back the top ones
 		headHash := rawdb.ReadHeadBlockHash(roTx)
-		headNumber, _ := s.blockReader.HeaderNumber(context.Background(), roTx, headHash)
-		if headNumber == nil {
-			return nil
+		headNumber, err := s.blockReader.HeaderNumber(context.Background(), roTx, headHash)
+		if headNumber == nil || err != nil {
+			return err
 		}
 		start := int(*headNumber - historyUpdateRange + 1)
 		if start < 0 {
@@ -615,12 +613,12 @@ func (s *Service) reportHistory(conn *connWrapper, list []uint64) error {
 		if err != nil {
 			return err
 		}
-		td, err := rawdb.ReadTd(roTx, block.Hash(), number)
-		if err != nil {
-			return err
-		}
 		// If we do have the block, add to the history and continue
 		if block != nil {
+			td, err := rawdb.ReadTd(roTx, block.Hash(), number)
+			if err != nil {
+				return err
+			}
 			history[len(history)-1-i] = s.assembleBlockStats(block, td)
 			continue
 		}

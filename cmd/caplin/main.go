@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
@@ -58,7 +59,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		log.Error("[Phase1] Could not initialize caplin", "err", err)
 		return err
 	}
-	if _, _, _, err := debug.Setup(cliCtx, true /* root logger */); err != nil {
+	if _, _, _, _, err := debug.Setup(cliCtx, true /* root logger */); err != nil {
 		return err
 	}
 	rcfg := beacon_router_configuration.RouterConfiguration{
@@ -86,10 +87,6 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	ctx, cn := context.WithCancel(cliCtx.Context)
 	defer cn()
 
-	if err != nil {
-		log.Error("[Checkpoint Sync] Failed", "reason", err)
-		return err
-	}
 	var executionEngine execution_client2.ExecutionEngine
 	if cfg.RunEngineAPI {
 		cc, err := execution_client2.NewExecutionClientRPC(cfg.JwtSecret, cfg.EngineAPIAddr, cfg.EngineAPIPort)
@@ -109,14 +106,16 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
 
 	return caplin1.RunCaplinService(ctx, executionEngine, clparams.CaplinConfig{
-		CaplinDiscoveryAddr:    cfg.Addr,
-		CaplinDiscoveryPort:    uint64(cfg.Port),
-		CaplinDiscoveryTCPPort: uint64(cfg.ServerTcpPort),
-		BeaconAPIRouter:        rcfg,
-		NetworkId:              networkId,
-		MevRelayUrl:            cfg.MevRelayUrl,
-		CustomConfigPath:       cfg.CustomConfig,
-		CustomGenesisStatePath: cfg.CustomGenesisState,
-		MaxPeerCount:           cfg.MaxPeerCount,
+		CaplinDiscoveryAddr:       cfg.Addr,
+		CaplinDiscoveryPort:       uint64(cfg.Port),
+		CaplinDiscoveryTCPPort:    uint64(cfg.ServerTcpPort),
+		BeaconAPIRouter:           rcfg,
+		NetworkId:                 networkId,
+		MevRelayUrl:               cfg.MevRelayUrl,
+		CustomConfigPath:          cfg.CustomConfig,
+		CustomGenesisStatePath:    cfg.CustomGenesisState,
+		MaxPeerCount:              cfg.MaxPeerCount,
+		MaxInboundTrafficPerPeer:  datasize.MB,
+		MaxOutboundTrafficPerPeer: datasize.MB,
 	}, cfg.Dirs, nil, nil, nil, blockSnapBuildSema)
 }

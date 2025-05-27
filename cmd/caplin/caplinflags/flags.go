@@ -58,7 +58,7 @@ var (
 	BeaconApiWriteTimeout = cli.Uint64Flag{
 		Name:  "beacon.api.write.timeout",
 		Usage: "Sets the seconds for a write time out in the beacon api",
-		Value: 60,
+		Value: 31536000,
 	}
 	BeaconApiAddr = cli.StringFlag{
 		Name:  "beacon.api.addr",

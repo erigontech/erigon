@@ -25,15 +25,13 @@ import (
 	"github.com/gballet/go-verkle"
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-db/rawdb"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/types/accounts"
-	"github.com/erigontech/erigon/turbo/trie/vtree"
+	"github.com/erigontech/erigon-lib/trie/vtree"
+	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
 func int256ToVerkleFormat(x *uint256.Int, buffer []byte) {
@@ -200,9 +198,9 @@ func (v *VerkleTreeWriter) WriteContractCodeChunks(codeKeys [][]byte, chunks [][
 	return nil
 }
 
-func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() (libcommon.Hash, error) {
-	if err := v.db.ClearBucket(kv.VerkleTrie); err != nil {
-		return libcommon.Hash{}, err
+func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() (common.Hash, error) {
+	if err := v.db.ClearTable(kv.VerkleTrie); err != nil {
+		return common.Hash{}, err
 	}
 
 	verkleCollector := etl.NewCollector(kv.VerkleTrie, v.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), v.logger)
@@ -215,7 +213,7 @@ func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() (libcommon.Hash, error)
 		if len(val) == 0 {
 			return next(k, nil, nil)
 		}
-		if err := root.InsertOrdered(libcommon.CopyBytes(k), libcommon.CopyBytes(val), func(node verkle.VerkleNode) {
+		if err := root.InsertOrdered(common.CopyBytes(k), common.CopyBytes(val), func(node verkle.VerkleNode) {
 			rootHash := node.Commitment().Bytes()
 			encodedNode, err := node.Serialize()
 			if err != nil {
@@ -234,12 +232,12 @@ func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() (libcommon.Hash, error)
 		}
 		return next(k, nil, nil)
 	}, etl.TransformArgs{Quit: context.Background().Done()}); err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 
 	// Flush the rest all at once
 	if err := collectVerkleNode(v.collector, root, logInterval, nil, v.logger); err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 
 	v.logger.Info("Started Verkle Tree Flushing")
@@ -249,17 +247,17 @@ func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() (libcommon.Hash, error)
 		}})
 }
 
-func (v *VerkleTreeWriter) CommitVerkleTree(root libcommon.Hash) (libcommon.Hash, error) {
+func (v *VerkleTreeWriter) CommitVerkleTree(root common.Hash) (common.Hash, error) {
 	resolverFunc := func(root []byte) ([]byte, error) {
 		return v.db.GetOne(kv.VerkleTrie, root)
 	}
 
 	var rootNode verkle.VerkleNode
 	var err error
-	if root != (libcommon.Hash{}) {
+	if root != (common.Hash{}) {
 		rootNode, err = rawdb.ReadVerkleNode(v.db, root)
 		if err != nil {
-			return libcommon.Hash{}, err
+			return common.Hash{}, err
 		}
 	} else {
 		return v.CommitVerkleTreeFromScratch() // TODO(Giulio2002): ETL is buggy, go fix it >:(.
@@ -273,7 +271,7 @@ func (v *VerkleTreeWriter) CommitVerkleTree(root libcommon.Hash) (libcommon.Hash
 	logInterval := time.NewTicker(30 * time.Second)
 	if err := v.collector.Load(v.db, kv.VerkleTrie, func(key []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if len(value) > 0 {
-			if err := rootNode.Insert(libcommon.CopyBytes(key), libcommon.CopyBytes(value), resolverFunc); err != nil {
+			if err := rootNode.Insert(common.CopyBytes(key), common.CopyBytes(value), resolverFunc); err != nil {
 				return err
 			}
 			insertions++
@@ -286,10 +284,10 @@ func (v *VerkleTreeWriter) CommitVerkleTree(root libcommon.Hash) (libcommon.Hash
 		}
 		return next(key, nil, nil)
 	}, etl.TransformArgs{Quit: context.Background().Done()}); err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 	commitment := rootNode.Commitment().Bytes()
-	return libcommon.BytesToHash(commitment[:]), flushVerkleNode(v.db, rootNode, logInterval, nil, v.logger)
+	return common.BytesToHash(commitment[:]), flushVerkleNode(v.db, rootNode, logInterval, nil, v.logger)
 }
 
 func (v *VerkleTreeWriter) Close() {

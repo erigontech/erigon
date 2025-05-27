@@ -20,7 +20,6 @@ import (
 	"context"
 
 	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -47,33 +46,32 @@ type ForkChoiceStorageReader interface {
 	JustifiedSlot() uint64
 	ProposerBoostRoot() common.Hash
 	GetStateAtBlockRoot(
-		blockRoot libcommon.Hash,
+		blockRoot common.Hash,
 		alwaysCopy bool,
 	) (*state.CachingBeaconState, error)
 	GetFinalityCheckpoints(
-		blockRoot libcommon.Hash,
+		blockRoot common.Hash,
 	) (solid.Checkpoint, solid.Checkpoint, solid.Checkpoint, bool)
 	GetSyncCommittees(period uint64) (*solid.SyncCommittee, *solid.SyncCommittee, bool)
-	GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, error)
 	Slot() uint64
 	Time() uint64
 	Participation(epoch uint64) (*solid.ParticipationBitList, bool)
-	RandaoMixes(blockRoot libcommon.Hash, out solid.HashListSSZ) bool
-	BlockRewards(root libcommon.Hash) (*eth2.BlockRewardsCollector, bool)
-	TotalActiveBalance(root libcommon.Hash) (uint64, bool)
+	RandaoMixes(blockRoot common.Hash, out solid.HashListSSZ) bool
+	BlockRewards(root common.Hash) (*eth2.BlockRewardsCollector, bool)
+	TotalActiveBalance(root common.Hash) (uint64, bool)
 
 	ForkNodes() []ForkNode
 	Synced() bool
-	GetLightClientBootstrap(blockRoot libcommon.Hash) (*cltypes.LightClientBootstrap, bool)
+	GetLightClientBootstrap(blockRoot common.Hash) (*cltypes.LightClientBootstrap, bool)
 	NewestLightClientUpdate() *cltypes.LightClientUpdate
 	GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool)
-	GetHeader(blockRoot libcommon.Hash) (*cltypes.BeaconBlockHeader, bool)
+	GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool)
 
-	GetBalances(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error)
-	GetInactivitiesScores(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error)
-	GetPreviousParticipationIndicies(blockRoot libcommon.Hash) (*solid.ParticipationBitList, error)
-	GetValidatorSet(blockRoot libcommon.Hash) (*solid.ValidatorSet, error)
-	GetCurrentParticipationIndicies(blockRoot libcommon.Hash) (*solid.ParticipationBitList, error)
+	GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error)
+	GetInactivitiesScores(blockRoot common.Hash) (solid.Uint64ListSSZ, error)
+	GetPreviousParticipationIndicies(blockRoot common.Hash) (*solid.ParticipationBitList, error)
+	GetValidatorSet(blockRoot common.Hash) (*solid.ValidatorSet, error)
+	GetCurrentParticipationIndicies(blockRoot common.Hash) (*solid.ParticipationBitList, error)
 
 	ValidateOnAttestation(attestation *solid.Attestation) error
 	IsRootOptimistic(root common.Hash) bool

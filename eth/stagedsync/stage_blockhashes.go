@@ -20,10 +20,10 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/erigontech/erigon-db/rawdb/blockio"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/rawdb/blockio"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 )
 
@@ -93,24 +93,6 @@ func UnwindBlockHashStage(u *UnwindState, tx kv.RwTx, cfg BlockHashesCfg, ctx co
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return fmt.Errorf("failed to write db commit: %w", err)
-		}
-	}
-	return nil
-}
-
-func PruneBlockHashStage(p *PruneState, tx kv.RwTx, cfg BlockHashesCfg, ctx context.Context) (err error) {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
-	if !useExternalTx {
-		if err = tx.Commit(); err != nil {
-			return err
 		}
 	}
 	return nil

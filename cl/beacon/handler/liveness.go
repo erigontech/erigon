@@ -23,11 +23,12 @@ import (
 	"sort"
 	"strconv"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 )
 
 type live struct {
@@ -78,7 +79,7 @@ func (a *ApiHandler) liveness(w http.ResponseWriter, r *http.Request) (*beaconht
 	for _, idx := range idxs {
 		liveSet[idx] = &live{Index: int(idx), IsLive: false}
 	}
-	var lastBlockRootProcess libcommon.Hash
+	var lastBlockRootProcess common.Hash
 	var lastSlotProcess uint64
 	// we need to obtain the relevant data:
 	// Use the blocks in the epoch as heuristic
@@ -133,16 +134,20 @@ func (a *ApiHandler) liveness(w http.ResponseWriter, r *http.Request) (*beaconht
 	return newBeaconResponse(resp), nil
 }
 
-func (a *ApiHandler) obtainCurrentEpochParticipationFromEpoch(tx kv.Tx, epoch uint64, blockRoot libcommon.Hash, blockSlot uint64) (*solid.ParticipationBitList, *solid.ParticipationBitList, error) {
+func (a *ApiHandler) obtainCurrentEpochParticipationFromEpoch(tx kv.Tx, epoch uint64, blockRoot common.Hash, blockSlot uint64) (*solid.ParticipationBitList, *solid.ParticipationBitList, error) {
 	prevEpoch := epoch
 	if epoch > 0 {
 		prevEpoch--
 	}
+	snRoTx := a.caplinStateSnapshots.View()
+	defer snRoTx.Close()
+
+	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
 
 	currParticipation, ok1 := a.forkchoiceStore.Participation(epoch)
 	prevParticipation, ok2 := a.forkchoiceStore.Participation(prevEpoch)
 	if !ok1 || !ok2 {
-		return a.stateReader.ReadParticipations(tx, blockSlot)
+		return a.stateReader.ReadParticipations(tx, stateGetter, blockSlot)
 	}
 	return currParticipation, prevParticipation, nil
 

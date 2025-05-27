@@ -97,7 +97,7 @@ func DefaultStages(ctx context.Context,
 				return UnwindBlockHashStage(u, txc.Tx, blockHashCfg, ctx)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneBlockHashStage(p, tx, blockHashCfg, ctx)
+				return nil
 			},
 		},
 		{
@@ -123,7 +123,7 @@ func DefaultStages(ctx context.Context,
 				return UnwindSendersStage(u, txc.Tx, senders, ctx)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneSendersStage(p, tx, senders, ctx)
+				return nil
 			},
 		},
 		{
@@ -137,7 +137,7 @@ func DefaultStages(ctx context.Context,
 				return UnwindExecutionStage(u, s, txc, ctx, exec, logger)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneExecutionStage(p, tx, exec, ctx)
+				return PruneExecutionStage(p, tx, exec, ctx, logger)
 			},
 		},
 		//{
@@ -215,7 +215,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 				return UnwindBlockHashStage(u, txc.Tx, blockHashCfg, ctx)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneBlockHashStage(p, tx, blockHashCfg, ctx)
+				return nil
 			},
 		},
 		{
@@ -228,7 +228,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 				return UnwindSendersStage(u, txc.Tx, senders, ctx)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneSendersStage(p, tx, senders, ctx)
+				return nil
 			},
 		},
 		{
@@ -241,7 +241,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 				return UnwindExecutionStage(u, s, txc, ctx, exec, logger)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneExecutionStage(p, tx, exec, ctx)
+				return PruneExecutionStage(p, tx, exec, ctx, logger)
 			},
 		},
 
@@ -274,7 +274,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 	}
 }
 
-// when uploading - potentially from zero we need to include headers and bodies stages otherwise we won't recover the POW portion of the chain
+// UploaderPipelineStages when uploading - potentially from zero we need to include headers and bodies stages otherwise we won't recover the POW portion of the chain
 func UploaderPipelineStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersCfg, blockHashCfg BlockHashesCfg, senders SendersCfg, bodies BodiesCfg, exec ExecuteBlockCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
 	return []*Stage{
 		{
@@ -319,7 +319,7 @@ func UploaderPipelineStages(ctx context.Context, snapshots SnapshotsCfg, headers
 				return UnwindBlockHashStage(u, txc.Tx, blockHashCfg, ctx)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneBlockHashStage(p, tx, blockHashCfg, ctx)
+				return nil
 			},
 		},
 		{
@@ -345,7 +345,7 @@ func UploaderPipelineStages(ctx context.Context, snapshots SnapshotsCfg, headers
 				return UnwindSendersStage(u, txc.Tx, senders, ctx)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneSendersStage(p, tx, senders, ctx)
+				return nil
 			},
 		},
 		{
@@ -358,7 +358,7 @@ func UploaderPipelineStages(ctx context.Context, snapshots SnapshotsCfg, headers
 				return UnwindExecutionStage(u, s, txc, ctx, exec, logger)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneExecutionStage(p, tx, exec, ctx)
+				return PruneExecutionStage(p, tx, exec, ctx, logger)
 			},
 		},
 		{
@@ -495,7 +495,7 @@ func PolygonSyncStages(
 				return UnwindSendersStage(u, txc.Tx, senders, ctx)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneSendersStage(p, tx, senders, ctx)
+				return nil
 			},
 		},
 		{
@@ -509,7 +509,7 @@ func PolygonSyncStages(
 				return UnwindExecutionStage(u, s, txc, ctx, exec, logger)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneExecutionStage(p, tx, exec, ctx)
+				return PruneExecutionStage(p, tx, exec, ctx, logger)
 			},
 		},
 		{

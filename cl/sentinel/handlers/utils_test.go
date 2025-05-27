@@ -21,7 +21,6 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
@@ -33,7 +32,7 @@ import (
 )
 
 func setupStore(t *testing.T) (freezeblocks.BeaconSnapshotReader, kv.RwDB) {
-	db := memdb.NewTestDB(t)
+	db := memdb.NewTestDB(t, kv.ChainDB)
 	return tests.NewMockBlockReader(), db
 }
 
@@ -44,7 +43,7 @@ func populateDatabaseWithBlocks(t *testing.T, store *tests.MockBlockReader, tx k
 		slot := startSlot + i
 		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
 		block.Block.Slot = slot
-		block.Block.StateRoot = libcommon.Hash{byte(i)}
+		block.Block.StateRoot = common.Hash{byte(i)}
 		block.Block.ParentRoot = mockParentRoot
 		block.EncodingSizeSSZ()
 		bodyRoot, _ := block.Block.Body.HashSSZ()

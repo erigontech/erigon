@@ -20,7 +20,7 @@ import (
 	"io/fs"
 	"testing"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -43,10 +43,10 @@ var Eip4844MerkleProof = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c s
 
 	branch := make([][32]byte, len(proofYaml.Branch))
 	for i, b := range proofYaml.Branch {
-		branch[i] = libcommon.HexToHash(b)
+		branch[i] = common.HexToHash(b)
 	}
-	leaf := libcommon.HexToHash(proofYaml.Leaf)
-	beaconBody := cltypes.NewBeaconBody(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	leaf := common.HexToHash(proofYaml.Leaf)
+	beaconBody := cltypes.NewBeaconBody(&clparams.MainnetBeaconConfig, c.Version())
 	require.NoError(t, spectest.ReadSsz(root, c.Version(), spectest.ObjectSSZ, beaconBody))
 	proof, err := beaconBody.KzgCommitmentMerkleProof(0)
 	require.NoError(t, err)
@@ -54,16 +54,16 @@ var Eip4844MerkleProof = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c s
 	require.Equal(t, branch, proof)
 	bodyRoot, err := beaconBody.HashSSZ()
 	require.NoError(t, err)
-	proofHashes := make([]libcommon.Hash, len(proof))
+	proofHashes := make([]common.Hash, len(proof))
 	for i := range proof {
-		proofHashes[i] = libcommon.Hash(proof[i])
+		proofHashes[i] = common.Hash(proof[i])
 	}
 	require.True(t, utils.IsValidMerkleBranch(leaf, proofHashes, 17, proofYaml.LeafIndex, bodyRoot)) // Test if this is correct
 	hashList := solid.NewHashVector(17)
 	for i, h := range proof {
-		hashList.Set(i, libcommon.Hash(h))
+		hashList.Set(i, common.Hash(h))
 	}
-	require.True(t, cltypes.VerifyCommitmentInclusionProof(libcommon.Bytes48(*beaconBody.BlobKzgCommitments.Get(0)), hashList, 0, c.Version(), bodyRoot))
+	require.True(t, cltypes.VerifyCommitmentInclusionProof(common.Bytes48(*beaconBody.BlobKzgCommitments.Get(0)), hashList, 0, c.Version(), bodyRoot))
 	return nil
 
 })

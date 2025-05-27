@@ -36,9 +36,9 @@ func TestKvServer_renew(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 
-	require, ctx, db := require.New(t), context.Background(), memdb.NewTestDB(t)
+	require, ctx, db := require.New(t), context.Background(), memdb.NewTestDB(t, kv.ChainDB)
 	require.NoError(db.Update(ctx, func(tx kv.RwTx) error {
-		wc, err := tx.RwCursorDupSort(kv.AccountChangeSet)
+		wc, err := tx.RwCursorDupSort(kv.TblAccountVals)
 		require.NoError(err)
 		require.NoError(wc.Append([]byte{1}, []byte{1}))
 		require.NoError(wc.Append([]byte{1}, []byte{2}))
@@ -56,7 +56,7 @@ func TestKvServer_renew(t *testing.T) {
 		}
 		var c, c2 kv.Cursor
 		if err = s.with(id, func(tx kv.Tx) error {
-			c, err = tx.Cursor(kv.AccountChangeSet)
+			c, err = tx.Cursor(kv.TblAccountVals)
 			return err
 		}); err != nil {
 			return err
@@ -71,11 +71,11 @@ func TestKvServer_renew(t *testing.T) {
 		}
 
 		if err = s.with(id, func(tx kv.Tx) error {
-			c, err = tx.Cursor(kv.AccountChangeSet)
+			c, err = tx.Cursor(kv.TblAccountVals)
 			if err != nil {
 				return err
 			}
-			c2, err = tx.Cursor(kv.AccountChangeSet)
+			c2, err = tx.Cursor(kv.TblAccountVals)
 			return err
 		}); err != nil {
 			return err

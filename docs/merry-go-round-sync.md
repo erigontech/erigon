@@ -13,11 +13,11 @@ node might like to do in the beginning).
 
 The process of syncing happens in cycles. During each cycle, all participants attempt to distribute the entire content of the
 Ethereum state to each other. Therefore the duration of one cycle for the Ethereum mainnet is likely to be some hours.
-Cycle is divided into ticks. For convenience, we can say that each ticks starts after the mining of certain block, and lasts
+Cycle is divided into ticks. For convenience, we can say that each tick starts after the mining of a certain block, and lasts
 for some predetermined amount of time, let's say, 30 seconds. This definition means that the ticks will often overlap, but not
 always, as shown on the picture below.
 
-![cycles-and-ticks](mgr-sync-1.png)
+![cycles-and-ticks](./assets/mgr-sync-1.png)
 
 If chain reorgs occur, and the timings of recent Ethereum blocks change as a result, we can accept these rules to prevent
 the reorgs to be used to disrupt the sync. Imagine the tick started at block A (height H), and then due to reorg, block A

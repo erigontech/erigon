@@ -24,6 +24,7 @@ import (
 	"math/bits"
 	"unsafe"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/common/bitutil"
 )
 
@@ -263,6 +264,7 @@ type DoubleEliasFano struct {
 	posMinDelta           uint64
 }
 
+func (ef *DoubleEliasFano) Size() datasize.ByteSize { return datasize.ByteSize(len(ef.data) * 8) }
 func (ef *DoubleEliasFano) deriveFields() (int, int) {
 	if ef.uPosition/(ef.numBuckets+1) == 0 {
 		ef.lPosition = 0

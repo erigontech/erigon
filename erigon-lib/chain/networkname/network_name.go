@@ -20,6 +20,7 @@ const (
 	Mainnet             = "mainnet"
 	Holesky             = "holesky"
 	Sepolia             = "sepolia"
+	Hoodi               = "hoodi"
 	Dev                 = "dev"
 	Amoy                = "amoy"
 	BorMainnet          = "bor-mainnet"
@@ -34,19 +35,11 @@ var All = []string{
 	Mainnet,
 	Holesky,
 	Sepolia,
+	Hoodi,
 	Amoy,
 	BorMainnet,
 	BorDevnet,
 	Gnosis,
 	Chiado,
 	Test,
-}
-
-func IsKnownNetwork(s string) bool {
-	for _, n := range All {
-		if n == s {
-			return true
-		}
-	}
-	return false
 }

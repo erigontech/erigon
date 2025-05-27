@@ -18,21 +18,16 @@ package backup
 
 import (
 	"context"
-	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"maps"
 	"runtime"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/mdbx-go/mdbx"
-	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
-	common2 "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	mdbx2 "github.com/erigontech/erigon-lib/kv/mdbx"
@@ -41,25 +36,23 @@ import (
 
 func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize, logger log.Logger) (kv.RoDB, kv.RwDB) {
 	const ThreadsHardLimit = 9_000
-	src := mdbx2.NewMDBX(logger).Path(from).
-		Label(label).
+	src := mdbx2.New(label, logger).Path(from).
 		RoTxsLimiter(semaphore.NewWeighted(ThreadsHardLimit)).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TablesCfgByLabel(label) }).
-		Flags(func(flags uint) uint { return flags | mdbx.Accede }).
+		Accede(true).
 		MustOpen()
 	if targetPageSize <= 0 {
-		targetPageSize = datasize.ByteSize(src.PageSize())
+		targetPageSize = src.PageSize()
 	}
 	info, err := src.(*mdbx2.MdbxKV).Env().Info(nil)
 	if err != nil {
 		panic(err)
 	}
-	dst := mdbx2.NewMDBX(logger).Path(to).
-		Label(label).
-		PageSize(targetPageSize.Bytes()).
+	dst := mdbx2.New(label, logger).Path(to).
+		PageSize(targetPageSize).
 		MapSize(datasize.ByteSize(info.Geo.Upper)).
 		GrowthStep(4 * datasize.GB).
-		Flags(func(flags uint) uint { return flags | mdbx.WriteMap }).
+		WriteMap(true).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TablesCfgByLabel(label) }).
 		MustOpen()
 	return src, dst
@@ -90,7 +83,7 @@ func Kv2kv(ctx context.Context, src kv.RoDB, dst kv.RwDB, tables []string, readA
 		if b.IsDeprecated {
 			continue
 		}
-		if err := backupTable(ctx, src, srcTx, dst, name, readAheadThreads, logEvery, logger); err != nil {
+		if err := backupTable(ctx, srcTx, dst, name, logEvery, logger); err != nil {
 			return err
 		}
 	}
@@ -98,26 +91,17 @@ func Kv2kv(ctx context.Context, src kv.RoDB, dst kv.RwDB, tables []string, readA
 	return nil
 }
 
-func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, table string, readAheadThreads int, logEvery *time.Ticker, logger log.Logger) error {
+func backupTable(ctx context.Context, srcTx kv.Tx, dst kv.RwDB, table string, logEvery *time.Ticker, logger log.Logger) error {
 	var total uint64
-	wg := sync.WaitGroup{}
-	defer wg.Wait()
-	warmupCtx, warmupCancel := context.WithCancel(ctx)
-	defer warmupCancel()
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		WarmupTable(warmupCtx, src, table, log.LvlTrace, readAheadThreads)
-	}()
 	srcC, err := srcTx.Cursor(table)
 	if err != nil {
 		return err
 	}
+	defer srcC.Close()
 	total, _ = srcTx.Count(table)
 
 	if err := dst.Update(ctx, func(tx kv.RwTx) error {
-		return tx.ClearBucket(table)
+		return tx.ClearTable(table)
 	}); err != nil {
 		return err
 	}
@@ -131,6 +115,7 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 	if err != nil {
 		return err
 	}
+	defer c.Close()
 	casted, isDupsort := c.(kv.RwCursorDupSort)
 	i := uint64(0)
 
@@ -158,8 +143,8 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 				var m runtime.MemStats
 				dbg.ReadMemStats(&m)
 				logger.Info("Progress", "table", table, "progress",
-					fmt.Sprintf("%s/%s", common2.PrettyCounter(i), common2.PrettyCounter(total)), "key", hex.EncodeToString(k),
-					"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+					fmt.Sprintf("%s/%s", common.PrettyCounter(i), common.PrettyCounter(total)), "key", hex.EncodeToString(k),
+					"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 			default:
 			}
 		}
@@ -181,133 +166,12 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 
 const ReadAheadThreads = 2048
 
-func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, readAheadThreads int) {
-	var ThreadsLimit = readAheadThreads
-	var total uint64
-	db.View(ctx, func(tx kv.Tx) error {
-		total, _ = tx.Count(bucket)
-		return nil
-	})
-	if total < 10_000 {
-		return
-	}
-	progress := atomic.Int64{}
-
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
-
-	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(ThreadsLimit)
-	for i := 0; i < 256; i++ {
-		for j := 0; j < 256; j++ {
-			i := i
-			j := j
-			g.Go(func() error {
-				return db.View(ctx, func(tx kv.Tx) error {
-					it, err := tx.Prefix(bucket, []byte{byte(i), byte(j)})
-					if err != nil {
-						return err
-					}
-					defer it.Close()
-					kNum := 0
-					for it.HasNext() {
-						k, v, err := it.Next()
-						if err != nil {
-							return err
-						}
-						if len(k) > 0 {
-							_, _ = k[0], k[len(k)-1]
-						}
-						if len(v) > 0 {
-							_, _ = v[0], v[len(v)-1]
-						}
-						progress.Add(1)
-					}
-
-					kNum++
-					if kNum%1024 == 0 { // a bit reduce runtime cost
-						select {
-						case <-ctx.Done():
-							return ctx.Err()
-						case <-logEvery.C:
-							log.Log(lvl, fmt.Sprintf("[warmup] Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
-						default:
-						}
-					}
-					return nil
-				})
-			})
-		}
-	}
-	for i := 0; i < 1_000; i++ {
-		i := i
-		g.Go(func() error {
-			return db.View(ctx, func(tx kv.Tx) error {
-				seek := make([]byte, 8)
-				binary.BigEndian.PutUint64(seek, uint64(i*100_000))
-				it, err := tx.Prefix(bucket, seek)
-				if err != nil {
-					return err
-				}
-				defer it.Close()
-				kNum := 0
-				for it.HasNext() {
-					k, v, err := it.Next()
-					if err != nil {
-						return err
-					}
-					if len(k) > 0 {
-						_, _ = k[0], k[len(k)-1]
-					}
-					if len(v) > 0 {
-						_, _ = v[0], v[len(v)-1]
-					}
-
-					kNum++
-					if kNum%1024 == 0 {
-						select {
-						case <-ctx.Done():
-							return ctx.Err()
-						case <-logEvery.C:
-							log.Log(lvl, fmt.Sprintf("[warmup] Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
-						default:
-						}
-					}
-				}
-
-				return nil
-			})
-		})
-	}
-	_ = g.Wait()
-}
-
-func ClearTables(ctx context.Context, db kv.RoDB, tx kv.RwTx, tables ...string) error {
+func ClearTables(ctx context.Context, tx kv.RwTx, tables ...string) error {
 	for _, tbl := range tables {
-		if err := ClearTable(ctx, db, tx, tbl); err != nil {
+		log.Info("Clear", "table", tbl)
+		if err := tx.ClearTable(tbl); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-func ClearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error {
-	ctx, cancel := context.WithCancel(ctx)
-	clean := warmup(ctx, db, table)
-	defer func() {
-		cancel()
-		clean()
-	}()
-	log.Info("Clear", "table", table)
-	return tx.ClearBucket(table)
-}
-
-func warmup(ctx context.Context, db kv.RoDB, bucket string) func() {
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		WarmupTable(ctx, db, bucket, log.LvlInfo, ReadAheadThreads)
-	}()
-	return func() { wg.Wait() }
 }

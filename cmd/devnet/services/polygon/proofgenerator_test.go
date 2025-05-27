@@ -30,28 +30,27 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/pion/randutil"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/devnet/blocks"
-	"github.com/erigontech/erigon/cmd/devnet/requests"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/requests"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 	"github.com/erigontech/erigon/turbo/transactions"
@@ -63,11 +62,11 @@ type requestGenerator struct {
 	sentry     *mock.MockSentry
 	bor        *bor.Bor
 	chain      *core.ChainPack
-	txBlockMap map[libcommon.Hash]*types.Block
+	txBlockMap map[common.Hash]*types.Block
 }
 
 func newRequestGenerator(sentry *mock.MockSentry, chain *core.ChainPack) (*requestGenerator, error) {
-	db := memdb.New("")
+	db := memdb.New("", kv.ChainDB)
 	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
 		if err := rawdb.WriteHeader(tx, chain.TopBlock.Header()); err != nil {
 			return err
@@ -88,35 +87,35 @@ func newRequestGenerator(sentry *mock.MockSentry, chain *core.ChainPack) (*reque
 		chain:      chain,
 		sentry:     sentry,
 		bor:        bor.NewRo(params.BorDevnetChainConfig, db, reader, log.Root()),
-		txBlockMap: map[libcommon.Hash]*types.Block{},
+		txBlockMap: map[common.Hash]*types.Block{},
 	}, nil
 }
 
-func (rg *requestGenerator) GetRootHash(ctx context.Context, startBlock uint64, endBlock uint64) (libcommon.Hash, error) {
+func (rg *requestGenerator) GetRootHash(ctx context.Context, startBlock uint64, endBlock uint64) (common.Hash, error) {
 	tx, err := rg.bor.DB.BeginRo(context.Background())
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 	defer tx.Rollback()
 
 	result, err := rg.bor.GetRootHash(ctx, tx, startBlock, endBlock)
 
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 
-	return libcommon.HexToHash(result), nil
+	return common.HexToHash(result), nil
 }
 
 func (rg *requestGenerator) GetBlockByNumber(ctx context.Context, blockNum rpc.BlockNumber, withTxs bool) (*requests.Block, error) {
 	if bn := int(blockNum.Uint64()); bn < len(rg.chain.Blocks) {
 		block := rg.chain.Blocks[bn]
 
-		transactions := make([]*jsonrpc.RPCTransaction, len(block.Transactions()))
+		transactions := make([]*ethapi.RPCTransaction, len(block.Transactions()))
 
 		for i, txn := range block.Transactions() {
 			rg.txBlockMap[txn.Hash()] = block
-			transactions[i] = jsonrpc.NewRPCTransaction(txn, block.Hash(), blockNum.Uint64(), uint64(i), block.BaseFee())
+			transactions[i] = ethapi.NewRPCTransaction(txn, block.Hash(), blockNum.Uint64(), uint64(i), block.BaseFee())
 		}
 
 		return &requests.Block{
@@ -131,7 +130,7 @@ func (rg *requestGenerator) GetBlockByNumber(ctx context.Context, blockNum rpc.B
 	return nil, fmt.Errorf("block %d not found", blockNum.Uint64())
 }
 
-func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash libcommon.Hash) (*types.Receipt, error) {
+func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash common.Hash) (*types.Receipt, error) {
 	rg.Lock()
 	defer rg.Unlock()
 
@@ -148,7 +147,7 @@ func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash libc
 		chain: rg.chain,
 	}
 
-	tx, err := rg.sentry.DB.BeginRo(context.Background())
+	tx, err := rg.sentry.DB.BeginTemporalRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -159,10 +158,10 @@ func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash libc
 		return nil, err
 	}
 
-	var usedGas uint64
+	var gasUsed uint64
 	var usedBlobGas uint64
 
-	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock())
+	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(block.Header().Time))
 
 	noopWriter := state.NewNoopWriter()
 
@@ -180,7 +179,7 @@ func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash libc
 
 		ibs.SetTxContext(i)
 
-		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, &usedGas, &usedBlobGas, vm.Config{})
+		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, &gasUsed, &usedBlobGas, vm.Config{})
 
 		if err != nil {
 			return nil, err
@@ -240,6 +239,9 @@ func TestMerkle(t *testing.T) {
 }
 
 func TestBlockGeneration(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
 
 	_, chain, err := generateBlocks(t, 1600)
 
@@ -271,6 +273,10 @@ func TestBlockGeneration(t *testing.T) {
 }
 
 func TestBlockProof(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	sentry, chain, err := generateBlocks(t, 1600)
 
 	if err != nil {
@@ -351,7 +357,7 @@ func TestReceiptProof(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fmt.Println(hexutility.Encode(parentNodesBytes), hexutility.Encode(append([]byte{0}, receiptProof.path...)))
+	fmt.Println(hexutil.Encode(parentNodesBytes), hexutil.Encode(append([]byte{0}, receiptProof.path...)))
 }
 
 func generateBlocks(t *testing.T, number int) (*mock.MockSentry, *core.ChainPack, error) {
@@ -378,7 +384,7 @@ func generateBlocks(t *testing.T, number int) (*mock.MockSentry, *core.ChainPack
 	})
 }
 
-func getBlockTx(from libcommon.Address, to libcommon.Address, amount *uint256.Int) blocks.TxFn {
+func getBlockTx(from common.Address, to common.Address, amount *uint256.Int) blocks.TxFn {
 	return func(block *core.BlockGen, _ bind.ContractBackend) (types.Transaction, bool) {
 		return types.NewTransaction(block.TxNonce(from), to, amount, 21000, new(uint256.Int), nil), false
 	}
@@ -386,7 +392,7 @@ func getBlockTx(from libcommon.Address, to libcommon.Address, amount *uint256.In
 
 type initialData struct {
 	keys         []*ecdsa.PrivateKey
-	addresses    []libcommon.Address
+	addresses    []common.Address
 	transactOpts []*bind.TransactOpts
 	genesisSpec  *types.Genesis
 }
@@ -403,7 +409,7 @@ func getGenesis(accounts int, funds ...*big.Int) initialData {
 		keys[i], _ = crypto.GenerateKey()
 	}
 
-	addresses := make([]libcommon.Address, 0, len(keys))
+	addresses := make([]common.Address, 0, len(keys))
 	transactOpts := make([]*bind.TransactOpts, 0, len(keys))
 	allocs := types.GenesisAlloc{}
 	for _, key := range keys {

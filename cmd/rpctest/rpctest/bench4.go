@@ -18,18 +18,13 @@ package rpctest
 
 import (
 	"fmt"
-	"net/http"
-	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 func Bench4(erigon_url string) error {
-	var client = &http.Client{
-		Timeout: time.Second * 600,
-	}
 
-	blockhash := libcommon.HexToHash("0xdf15213766f00680c6a20ba76ba2cc9534435e19bc490039f3a7ef42095c8d13")
+	blockhash := common.HexToHash("0xdf15213766f00680c6a20ba76ba2cc9534435e19bc490039f3a7ef42095c8d13")
 	req_id := 1
 	template := `{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x%x",true],"id":%d}`
 	var b EthBlockByNumber
@@ -53,9 +48,9 @@ func Bench4(erigon_url string) error {
 		}
 		print(client, erigon_url, fmt.Sprintf(template, txhash, req_id))
 	}
-	to := libcommon.HexToAddress("0x8b3b3b624c3c0397d3da8fd861512393d51dcbac")
-	sm := make(map[libcommon.Hash]storageEntry)
-	start := libcommon.HexToHash("0xa283ff49a55f86420a4acd5835658d8f45180db430c7b0d7ae98da5c64f620dc")
+	to := common.HexToAddress("0x8b3b3b624c3c0397d3da8fd861512393d51dcbac")
+	sm := make(map[common.Hash]storageEntry)
+	start := common.HexToHash("0xa283ff49a55f86420a4acd5835658d8f45180db430c7b0d7ae98da5c64f620dc")
 
 	req_id++
 	template = `{"jsonrpc":"2.0","method":"debug_storageRangeAt","params":["0x%x", %d,"0x%x","0x%x",%d],"id":%d}`

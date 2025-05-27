@@ -16,7 +16,11 @@
 
 package common
 
-import "math/big"
+import (
+	"math/big"
+
+	"github.com/holiman/uint256"
+)
 
 var (
 	Big0   = big.NewInt(0)
@@ -26,4 +30,12 @@ var (
 	Big32  = big.NewInt(32)
 	Big256 = big.NewInt(256)
 	Big257 = big.NewInt(257)
+	Num0   = uint256.NewInt(0)
+	Num1   = uint256.NewInt(1)
+	Num2   = uint256.NewInt(2)
+	Num4   = uint256.NewInt(4)
+	Num8   = uint256.NewInt(8)
+	Num27  = uint256.NewInt(27)
+	Num32  = uint256.NewInt(32)
+	Num35  = uint256.NewInt(35)
 )

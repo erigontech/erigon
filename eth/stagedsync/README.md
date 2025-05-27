@@ -28,7 +28,7 @@ Here is a pie chart showing the proportional time spent on each stage (it was
 taken from the full sync). It is by all means just an estimation, but it gives
 an idea.
 
-![Full sync breakdown](/docs/stagedsync_proportions.png)
+![Full sync breakdown](/docs/assets/stagedsync_proportions.png)
 
 ## Reorgs / Unwinds
 
@@ -61,7 +61,7 @@ This optimization sometimes leads to dramatic (orders of magnitude) write speed 
 ## What happens after the Merge?
 
 In the Proof-of-Stake world staged sync becomes somewhat more complicated, as the following diagram shows.
-![Staged Sync in PoS](/docs/pos_downloader.png)
+![Staged Sync in PoS](/docs/assets/pos_downloader.png)
 
 ## Stages (for the up to date list see [`stages.go`](/eth/stagedsync/stages/stages.go) and [`stagebuilder.go`](/eth/stagedsync/stagebuilder.go))
 
@@ -73,33 +73,13 @@ We can add/remove stages, so exact stage numbers may change - but order and name
 
 ### Stage 1: [Snapshots](/eth/stagedsync/stage_snapshots.go)
 
-Download Snapshots
+Download Snapshots (segments)
 
-### Stage 2: [Download Headers Stage](/eth/stagedsync/stage_headers.go)
-
-During this stage we download all the headers between the local HEAD and our peer's head.
-
-This stage is CPU intensive and can benefit from a multicore processor due to verifying PoW of the headers.
-
-Most of the unwinds are initiated on this stage due to the chain reorgs.
-
-This stage promotes local HEAD pointer.
-
-### Stage 3: [Cumulative Index](/eth/stagedsync/stage_cumulative_index.go)
-
-Calculate how much gas has been used up to each block.
-
-### Stage 4: [Block Hashes](/eth/stagedsync/stage_blockhashes.go)
+### Stage 2: [Block Hashes](/eth/stagedsync/stage_blockhashes.go)
 
 Creates an index of blockHash -> blockNumber extracted from the headers for faster lookups and making the sync friendlier for HDDs.
 
-### Stage 5: [Download Block Bodies Stage](/eth/stagedsync/stage_bodies.go)
-
-At that stage, we download bodies for block headers that we already downloaded.
-
-That is the most intensive stage for the network connection, the vast majority of data is downloaded here.
-
-### Stage 6: [Recover Senders Stage](/eth/stagedsync/stage_senders.go)
+### Stage 3: [Recover Senders Stage](/eth/stagedsync/stage_senders.go)
 
 This stage recovers and stores senders for each transaction in each downloaded block.
 
@@ -107,7 +87,7 @@ This is also a CPU intensive stage and also benefits from multi-core CPUs.
 
 This stage doesn't use any network connection.
 
-### Stage 7: [Execute Blocks Stage](/eth/stagedsync/stage_execute.go)
+### Stage 4: [Execute Blocks Stage](/eth/stagedsync/stage_execute.go)
 
 During this stage, we execute block-by-block everything that we downloaded before.
 
@@ -121,76 +101,14 @@ This stage is disk intensive.
 
 This stage can spawn unwinds if the block execution fails.
 
-### Stage 8: [Transpile marked VM contracts to TEVM](/eth/stagedsync/stage_tevm.go)
+Also at this stage we computing MerkleTrie Root (also we call it Commitment)
 
-Translation each marked for translation contract (from EVM to TEVM)
+Also at this stage we writing: **Account History Index**, **Storage History Index**, **Log Index**, **Call traces index**
 
-### Stage 9: [VerkleTrie](/eth/stagedsync/stage_verkle_trie.go)
-
-[TODO]
-
-### Stage 10: [Compute State Root Stage](/eth/stagedsync/stage_interhashes.go)
-
-This stage build the Merkle trie and checks the root hash for the current state.
-
-It also builds Intermediate Hashes along the way and stores them into the database.
-
-If there were no intermediate hashes stored before (that could happen during the first initial sync), it builds the full Merkle Trie and its root hash.
-
-If there are intermediate hashes in the database, it uses the block history to figure out which ones are outdated and which ones are still up to date. Then it builds a partial Merkle trie using the up-to-date hashes and only rebuilding the outdated ones.
-
-If the root hash doesn't match, it initiates an unwind one block backwards.
-
-This stage doesn't use a network connection.
-
-### Stage 11: [Generate Hashed State Stage](/eth/stagedsync/stage_hashstate.go)
-
-Erigon during execution uses Plain state storage.
-
-> Plain State: Instead of the normal (we call it "Hashed State") where accounts and storage items are addressed as `keccak256(address)`, in the plain state them are addressed by the `address` itself.
-
-Though, to make sure that some APIs work and keep the compatibility with the other clients, we generate Hashed state as well.
-
-If the hashed state is not empty, then we are looking at the History ChangeSets and update only the items that were changed.
-
-This stage doesn't use a network connection.
-
-### Stages [12, 13](/eth/stagedsync/stage_indexes.go), [14](/eth/stagedsync/stage_log_index.go), [15](/eth/stagedsync/stage_call_traces.go) and [16](/eth/stagedsync/stage_txlookup.go): Generate Indexes
-
-There are 5 indexes that are generated during sync.
-
-They might be disabled because they aren't used for all the APIs.
-
-These stages do not use a network connection.
-
-**Account History Index**
-
-This index stores the mapping from the account address to the list of blocks where this account was changed in some way.
-
-**Storage History Index**
-
-This index stores the mapping from the storage item address to the list of blocks where this storage item was changed in some way.
-
-**Log Index**
-
-This index sets up a link from the [TODO] to [TODO].
-
-**Call traces index**
-
-[TODO]
-
-**Tx Lookup Index**
+### Stage 5: Tx Lookup Index
 
 This index sets up a link from the transaction hash to the block number.
 
-### Stage 16: [Transaction Pool Stage](/eth/stagedsync/stage_txpool.go)
-
-During this stage we start the transaction pool or update its state. For instance, we remove the transactions from the blocks we have downloaded from the pool.
-
-On unwinds, we add the transactions from the blocks we unwind, back to the pool.
-
-This stage doesn't use a network connection.
-
-### Stage 17: Finish
+### Stage 6: Finish
 
 This stage sets the current block number that is then used by [RPC calls](../../cmd/rpcdaemon/README.md), such as [`eth_blockNumber`](../../README.md).

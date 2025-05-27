@@ -19,7 +19,6 @@ package freezeblocks
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
@@ -33,7 +32,7 @@ import (
 	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -41,8 +40,8 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/version"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -54,33 +53,6 @@ import (
 )
 
 var sidecarSSZSize = (&cltypes.BlobSidecar{}).EncodingSizeSSZ()
-
-func BeaconSimpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
-	num := make([]byte, binary.MaxVarintLen64)
-	cfg := recsplit.RecSplitArgs{
-		Enums:      true,
-		BucketSize: 2000,
-		LeafSize:   8,
-		TmpDir:     tmpDir,
-		Salt:       &salt,
-		BaseDataID: sn.From,
-	}
-	if err := snaptype.BuildIndex(ctx, sn, cfg, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
-		if i%20_000 == 0 {
-			logger.Log(lvl, "Generating idx for "+sn.Type.Name(), "progress", i)
-		}
-		p.Processed.Add(1)
-		n := binary.PutUvarint(num, i)
-		if err := idx.AddKey(num[:n], offset); err != nil {
-			return err
-		}
-		return nil
-	}, logger); err != nil {
-		return fmt.Errorf("idx: %w", err)
-	}
-
-	return nil
-}
 
 // value: chunked(ssz(SignedBeaconBlocks))
 // slot       -> beacon_slot_segment_offset
@@ -112,6 +84,9 @@ type CaplinSnapshots struct {
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
 func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.BeaconChainConfig, dirs datadir.Dirs, logger log.Logger) *CaplinSnapshots {
+	if cfg.ChainName == "" {
+		log.Debug("[dbg] NewCaplinSnapshots created with empty ChainName", "stack", dbg.Stack())
+	}
 	c := &CaplinSnapshots{dir: dirs.Snap, tmpdir: dirs.Tmp, cfg: cfg, logger: logger, beaconCfg: beaconCfg,
 		dirty:   make([]*btree.BTreeG[*snapshotsync.DirtySegment], snaptype.MaxEnum),
 		visible: make([]snapshotsync.VisibleSegments, snaptype.MaxEnum),
@@ -127,7 +102,7 @@ func (s *CaplinSnapshots) SegmentsMax() uint64 { return s.segmentsMax.Load() }
 
 func (s *CaplinSnapshots) LogStat(str string) {
 	s.logger.Info(fmt.Sprintf("[snapshots:%s] Stat", str),
-		"blocks", libcommon.PrettyCounter(s.SegmentsMax()+1), "indices", libcommon.PrettyCounter(s.IndicesMax()+1))
+		"blocks", common.PrettyCounter(s.SegmentsMax()+1), "indices", common.PrettyCounter(s.IndicesMax()+1))
 }
 
 func (s *CaplinSnapshots) LS() {
@@ -220,7 +195,7 @@ Loop:
 					snaptype.BeaconBlocks,
 					f.Version,
 					f.From, f.To,
-					snapcfg.IsFrozen(s.cfg.ChainName, f))
+					true)
 			}
 			if err := sn.Open(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
@@ -276,7 +251,7 @@ Loop:
 					snaptype.BlobSidecars,
 					f.Version,
 					f.From, f.To,
-					snapcfg.IsFrozen(s.cfg.ChainName, f))
+					true)
 			}
 			if err := sn.Open(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
@@ -448,7 +423,7 @@ func (v *CaplinView) BlobSidecarsSegment(slot uint64) (*snapshotsync.VisibleSegm
 func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toSlot uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
 	tmpDir, snapDir := dirs.Tmp, dirs.Snap
 
-	segName := snaptype.BeaconBlocks.FileName(0, fromSlot, toSlot)
+	segName := snaptype.BeaconBlocks.FileName(version.ZeroVersion, fromSlot, toSlot)
 	f, _, _ := snaptype.ParseFileName(snapDir, segName)
 
 	compressCfg := seg.DefaultCfg
@@ -466,7 +441,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 	defer tx.Rollback()
 
 	skippedInARow := 0
-	var prevBlockRoot libcommon.Hash
+	var prevBlockRoot common.Hash
 
 	// Generate .seg file, which is just the list of beacon blocks.
 	for i := fromSlot; i < toSlot; i++ {
@@ -479,7 +454,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 		if err != nil {
 			return err
 		}
-		if blockRoot != (libcommon.Hash{}) && prevBlockRoot != (libcommon.Hash{}) && parentRoot != prevBlockRoot {
+		if blockRoot != (common.Hash{}) && prevBlockRoot != (common.Hash{}) && parentRoot != prevBlockRoot {
 			return fmt.Errorf("parent block root mismatch at slot %d", i)
 		}
 
@@ -503,6 +478,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 			return err
 		}
 	}
+	tx.Rollback()
 	if sn.Count() != snaptype.CaplinMergeLimit {
 		return fmt.Errorf("expected %d blocks, got %d", snaptype.CaplinMergeLimit, sn.Count())
 	}
@@ -515,13 +491,13 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 	// Ugly hack to wait for fsync
 	time.Sleep(15 * time.Second)
 
-	return BeaconSimpleIdx(ctx, f, salt, tmpDir, p, lvl, logger)
+	return snapshotsync.BeaconSimpleIdx(ctx, f, salt, tmpDir, p, lvl, logger)
 }
 
 func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage.BlobStorage, fromSlot uint64, toSlot uint64, salt uint32, dirs datadir.Dirs, workers int, blobCountFn BlobCountBySlotFn, lvl log.Lvl, logger log.Logger) error {
 	tmpDir, snapDir := dirs.Tmp, dirs.Snap
 
-	segName := snaptype.BlobSidecars.FileName(0, fromSlot, toSlot)
+	segName := snaptype.BlobSidecars.FileName(version.ZeroVersion, fromSlot, toSlot)
 	f, _, _ := snaptype.ParseFileName(snapDir, segName)
 
 	compressCfg := seg.DefaultCfg
@@ -595,13 +571,14 @@ func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 		}
 
 	}
+	tx.Rollback()
 	if err := sn.Compress(); err != nil {
 		return fmt.Errorf("compress: %w", err)
 	}
 	// Generate .idx file, which is the slot => offset mapping.
 	p := &background.Progress{}
 
-	return BeaconSimpleIdx(ctx, f, salt, tmpDir, p, lvl, logger)
+	return snapshotsync.BeaconSimpleIdx(ctx, f, salt, tmpDir, p, lvl, logger)
 }
 
 func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, fromSlot, toSlot uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
@@ -665,7 +642,7 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 		}
 		p := &background.Progress{}
 		noneDone = false
-		if err := BeaconSimpleIdx(ctx, segment, s.Salt, s.tmpdir, p, log.LvlDebug, logger); err != nil {
+		if err := snapshotsync.BeaconSimpleIdx(ctx, segment, s.Salt, s.tmpdir, p, log.LvlDebug, logger); err != nil {
 			return err
 		}
 	}
@@ -676,7 +653,7 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 	return s.OpenFolder()
 }
 
-func (s *CaplinSnapshots) ReadHeader(slot uint64) (*cltypes.SignedBeaconBlockHeader, uint64, libcommon.Hash, error) {
+func (s *CaplinSnapshots) ReadHeader(slot uint64) (*cltypes.SignedBeaconBlockHeader, uint64, common.Hash, error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			panic(fmt.Sprintf("ReadHeader(%d), %s, %s\n", slot, rec, dbg.Stack()))
@@ -690,25 +667,25 @@ func (s *CaplinSnapshots) ReadHeader(slot uint64) (*cltypes.SignedBeaconBlockHea
 
 	seg, ok := view.BeaconBlocksSegment(slot)
 	if !ok {
-		return nil, 0, libcommon.Hash{}, nil
+		return nil, 0, common.Hash{}, nil
 	}
 
 	idxSlot := seg.Src().Index()
 
 	if idxSlot == nil {
-		return nil, 0, libcommon.Hash{}, nil
+		return nil, 0, common.Hash{}, nil
 	}
 	blockOffset := idxSlot.OrdinalLookup(slot - idxSlot.BaseDataID())
 
 	gg := seg.Src().MakeGetter()
 	gg.Reset(blockOffset)
 	if !gg.HasNext() {
-		return nil, 0, libcommon.Hash{}, nil
+		return nil, 0, common.Hash{}, nil
 	}
 
-	buf, _ = gg.Next(buf)
+	buf, _ = gg.Next(buf[:0])
 	if len(buf) == 0 {
-		return nil, 0, libcommon.Hash{}, nil
+		return nil, 0, common.Hash{}, nil
 	}
 	// Decompress this thing
 	buffer := buffersPool.Get().(*bytes.Buffer)
@@ -748,7 +725,7 @@ func (s *CaplinSnapshots) ReadBlobSidecars(slot uint64) ([]*cltypes.BlobSidecar,
 		return nil, nil
 	}
 
-	buf, _ = gg.Next(buf)
+	buf, _ = gg.Next(buf[:0])
 	if len(buf) == 0 {
 		return nil, nil
 	}

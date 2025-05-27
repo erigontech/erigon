@@ -35,19 +35,20 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
-	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
+	"github.com/erigontech/erigon-lib/kv/prune"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
-	"github.com/erigontech/erigon/ethdb/prune"
+	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 // BorDefaultMinerGasPrice defines the minimum gas price for bor validators to mine a transaction.
-var BorDefaultMinerGasPrice = big.NewInt(25 * params.GWei)
+var BorDefaultMinerGasPrice = big.NewInt(25 * common.GWei)
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gaspricecfg.Config{
@@ -78,6 +79,7 @@ var Defaults = Config{
 		BodyDownloadTimeoutSeconds: 2,
 		//LoopBlockLimit:             100_000,
 		ParallelStateFlushing: true,
+		ChaosMonkey:           false,
 	},
 	Ethash: ethashcfg.Config{
 		CachesInMem:      2,
@@ -89,15 +91,14 @@ var Defaults = Config{
 	NetworkID: 1,
 	Prune:     prune.DefaultMode,
 	Miner: params.MiningConfig{
-		GasLimit: 30_000_000,
-		GasPrice: big.NewInt(params.GWei),
+		GasLimit: 36_000_000,
+		GasPrice: big.NewInt(common.GWei),
 		Recommit: 3 * time.Second,
 	},
-	DeprecatedTxPool: DeprecatedDefaultTxPoolConfig,
-	TxPool:           txpoolcfg.DefaultConfig,
-	RPCGasCap:        50000000,
-	GPO:              FullNodeGPO,
-	RPCTxFeeCap:      1, // 1 ether
+	TxPool:      txpoolcfg.DefaultConfig,
+	RPCGasCap:   50000000,
+	GPO:         FullNodeGPO,
+	RPCTxFeeCap: 1, // 1 ether
 
 	ImportMode: false,
 	Snapshot: BlocksFreezing{
@@ -105,8 +106,6 @@ var Defaults = Config{
 		ProduceE2:  true,
 		ProduceE3:  true,
 	},
-
-	ChaosMonkey: false,
 }
 
 func init() {
@@ -136,13 +135,14 @@ func init() {
 //go:generate gencodec -dir . -type Config -formats toml -out gen_config.go
 
 type BlocksFreezing struct {
-	KeepBlocks     bool // produce new snapshots of blocks but don't remove blocks from DB
-	ProduceE2      bool // produce new block files
-	ProduceE3      bool // produce new state files
-	NoDownloader   bool // possible to use snapshots without calling Downloader
-	Verify         bool // verify snapshots on startup
-	DownloaderAddr string
-	ChainName      string
+	KeepBlocks        bool // produce new snapshots of blocks but don't remove blocks from DB
+	ProduceE2         bool // produce new block files
+	ProduceE3         bool // produce new state files
+	NoDownloader      bool // possible to use snapshots without calling Downloader
+	Verify            bool // verify snapshots on startup
+	DisableDownloadE3 bool // disable download state snapshots
+	DownloaderAddr    string
+	ChainName         string
 }
 
 func (s BlocksFreezing) String() string {
@@ -211,8 +211,8 @@ type Config struct {
 	Aura   chain.AuRaConfig
 
 	// Transaction pool options
-	DeprecatedTxPool DeprecatedTxPoolConfig
-	TxPool           txpoolcfg.Config
+	TxPool  txpoolcfg.Config
+	Shutter shuttercfg.Config
 
 	// Gas Price Oracle options
 	GPO gaspricecfg.Config
@@ -259,9 +259,12 @@ type Config struct {
 	SilkwormRpcNumWorkers        uint32
 	SilkwormRpcJsonCompatibility bool
 
-	DisableTxPoolGossip bool
+	// PoS Single Slot finality
+	PolygonPosSingleSlotFinality        bool
+	PolygonPosSingleSlotFinalityBlockAt uint64
 
-	ChaosMonkey bool
+	// Account Abstraction
+	AllowAA bool
 }
 
 type Sync struct {
@@ -279,4 +282,9 @@ type Sync struct {
 	UploadLocation   string
 	UploadFrom       rpc.BlockNumber
 	FrozenBlockLimit uint64
+
+	ChaosMonkey              bool
+	AlwaysGenerateChangesets bool
+	KeepExecutionProofs      bool
+	PersistReceiptsCacheV2   bool
 }

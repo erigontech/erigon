@@ -19,7 +19,7 @@ package cltypes
 import (
 	"encoding/json"
 
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/utils"
 )
@@ -86,11 +86,11 @@ func (j JustificationBits) MarshalJSON() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(hexutility.Bytes(enc))
+	return json.Marshal(hexutil.Bytes(enc))
 }
 
 func (j *JustificationBits) UnmarshalJSON(input []byte) error {
-	var hex hexutility.Bytes
+	var hex hexutil.Bytes
 	if err := json.Unmarshal(input, &hex); err != nil {
 		return err
 	}

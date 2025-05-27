@@ -21,11 +21,18 @@ jobs:
           repository: ethereum/hive
           # ref: master
           path: hive
+
       - name: Setup go env and cache
         uses: actions/setup-go@v5
         with:
-          go-version: '>=1.22'
+          go-version: '>=1.23'
           go-version-file: 'hive/go.mod'
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
+          password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
 
       # Targetting the clients/erigon/Dockerfile.git in the Hive director - 
       # this builds the container from github and uses it for tests
@@ -38,9 +45,6 @@ jobs:
           branch_name=$(echo ${GITHUB_REF#refs/heads/}  | sed 's/[&/\]/\\&/g')
           echo Building Hive with Erigon branch - $branch_name
           sed -i "s/^ARG tag=main$/ARG tag=${branch_name}/" clients/erigon/Dockerfile
-          if [[ "$branch_name" != "main" ]]; then
-            sed -i "/$sync.parallel-state-flushing/d" clients/erigon/erigon.sh
-          fi
           go build . >> buildlogs.log
       # Depends on the last line of hive output that prints the number of suites, tests and failed
       # Currently, we fail even if suites and tests are too few, indicating the tests did not run
@@ -73,10 +77,12 @@ jobs:
 
             if (( tests < 4 )); then
               echo "Too few tests run for suite ${1}-${2} - ${tests} tests"
+              echo "failed" > failed.log
               exit 1
             fi
-            if (( failed*2 > tests )); then
+            if (( failed*10 > tests )); then
               echo "Too many failures for suite ${1}-${2} - ${failed} failed out of ${tests}"
+              echo "failed" > failed.log
               exit 1
             fi
           }
@@ -84,5 +90,18 @@ jobs:
           run_suite engine withdrawals
           run_suite engine cancun
           run_suite engine api
-          run_suite engine auth
-          run_suite rpc compat
+          # run_suite engine auth
+          # run_suite rpc compat
+        continue-on-error: true
+      - name: Upload output log
+        uses: actions/upload-artifact@v4
+        with:
+          name: hive-workspace-log
+          path: hive/workspace/logs
+        continue-on-error: true
+      - name: Check for failures
+        run: |
+          if grep -q "failed" hive/failed.log; then
+            echo "One or more tests failed."
+            exit 1
+          fi

@@ -19,10 +19,9 @@ package forkchoice
 import (
 	"errors"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 var (
@@ -40,7 +39,7 @@ func (f *ForkChoiceStore) OnAttestation(
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.headHash = libcommon.Hash{}
+	f.headHash = common.Hash{}
 	data := attestation.Data
 	if err := f.ValidateOnAttestation(attestation); err != nil {
 		return err
@@ -56,20 +55,23 @@ func (f *ForkChoiceStore) OnAttestation(
 			return err
 		}
 	}
-	headState, cn := f.syncedDataManager.HeadState()
-	defer cn()
 	var attestationIndicies []uint64
 	var err error
 	target := data.Target
 
-	if headState == nil {
+	if f.syncedDataManager.Syncing() {
 		attestationIndicies, err = f.verifyAttestationWithCheckpointState(
 			target,
 			attestation,
 			fromBlock,
 		)
 	} else {
-		attestationIndicies, err = f.verifyAttestationWithState(headState, attestation, fromBlock)
+		if err := f.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+			attestationIndicies, err = f.verifyAttestationWithState(headState, attestation, fromBlock)
+			return err
+		}); err != nil {
+			return err
+		}
 	}
 	if err != nil {
 		return err
@@ -113,10 +115,6 @@ func (f *ForkChoiceStore) verifyAttestationWithCheckpointState(
 	}
 	if !fromBlock {
 		indexedAttestation := state.GetIndexedAttestation(attestation, attestationIndicies)
-		if err != nil {
-			return nil, err
-		}
-
 		valid, err := targetState.isValidIndexedAttestation(indexedAttestation)
 		if err != nil {
 			return nil, err
@@ -139,9 +137,6 @@ func (f *ForkChoiceStore) verifyAttestationWithState(
 	}
 	if !fromBlock {
 		indexedAttestation := state.GetIndexedAttestation(attestation, attestationIndicies)
-		if err != nil {
-			return nil, err
-		}
 		valid, err := state.IsValidIndexedAttestation(s, indexedAttestation)
 		if err != nil {
 			return nil, err
@@ -154,23 +149,11 @@ func (f *ForkChoiceStore) verifyAttestationWithState(
 }
 
 func (f *ForkChoiceStore) setLatestMessage(index uint64, message LatestMessage) {
-	if index >= uint64(len(f.latestMessages)) {
-		if index >= uint64(cap(f.latestMessages)) {
-			tmp := make([]LatestMessage, index+1, index*2)
-			copy(tmp, f.latestMessages)
-			f.latestMessages = tmp
-		}
-		f.latestMessages = f.latestMessages[:index+1]
-	}
-	f.latestMessages[index] = message
+	f.latestMessages.set(int(index), message)
 }
 
 func (f *ForkChoiceStore) getLatestMessage(validatorIndex uint64) (LatestMessage, bool) {
-	if validatorIndex >= uint64(len(f.latestMessages)) ||
-		f.latestMessages[validatorIndex] == (LatestMessage{}) {
-		return LatestMessage{}, false
-	}
-	return f.latestMessages[validatorIndex], true
+	return f.latestMessages.get(int(validatorIndex))
 }
 
 func (f *ForkChoiceStore) isUnequivocating(validatorIndex uint64) bool {
@@ -234,7 +217,7 @@ func (f *ForkChoiceStore) ValidateOnAttestation(attestation *solid.Attestation) 
 	// LMD vote must be consistent with FFG vote target
 	targetSlot := f.computeStartSlotAtEpoch(target.Epoch)
 	ancestorRoot := f.Ancestor(attestation.Data.BeaconBlockRoot, targetSlot)
-	if ancestorRoot == (libcommon.Hash{}) {
+	if ancestorRoot == (common.Hash{}) {
 		return errors.New("could not retrieve ancestor")
 	}
 	if ancestorRoot != target.Root {

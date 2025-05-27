@@ -40,22 +40,22 @@ var (
 		},
 	}
 	att1_1 = &solid.Attestation{
-		AggregationBits: solid.BitlistFromBytes([]byte{0b00000001, 0, 0, 0}, 2048),
+		AggregationBits: solid.BitlistFromBytes([]byte{0b01000001}, 2048),
 		Data:            attData1,
 		Signature:       [96]byte{'a', 'b', 'c', 'd', 'e', 'f'},
 	}
 	att1_2 = &solid.Attestation{
-		AggregationBits: solid.BitlistFromBytes([]byte{0b00000001, 0, 0, 0}, 2048),
+		AggregationBits: solid.BitlistFromBytes([]byte{0b01000001}, 2048),
 		Data:            attData1,
 		Signature:       [96]byte{'d', 'e', 'f', 'g', 'h', 'i'},
 	}
 	att1_3 = &solid.Attestation{
-		AggregationBits: solid.BitlistFromBytes([]byte{0b00000100, 0, 0, 0}, 2048),
+		AggregationBits: solid.BitlistFromBytes([]byte{0b01000100}, 2048),
 		Data:            attData1,
 		Signature:       [96]byte{'g', 'h', 'i', 'j', 'k', 'l'},
 	}
 	att1_4 = &solid.Attestation{
-		AggregationBits: solid.BitlistFromBytes([]byte{0b00100000, 0, 0, 0}, 2048),
+		AggregationBits: solid.BitlistFromBytes([]byte{0b01100000}, 2048),
 		Data:            attData1,
 		Signature:       [96]byte{'m', 'n', 'o', 'p', 'q', 'r'},
 	}
@@ -72,7 +72,7 @@ var (
 		},
 	}
 	att2_1 = &solid.Attestation{
-		AggregationBits: solid.BitlistFromBytes([]byte{0b00000001, 0, 0, 0}, 2048),
+		AggregationBits: solid.BitlistFromBytes([]byte{0b00000001}, 2048),
 		Data:            attData2,
 		Signature:       [96]byte{'t', 'e', 's', 't', 'i', 'n'},
 	}
@@ -107,21 +107,21 @@ func (t *PoolTestSuite) TearDownTest() {
 
 func (t *PoolTestSuite) TestAddAttestationElectra() {
 	cBits1 := solid.NewBitVector(64)
-	cBits1.SetBitAt(0, true)
+	cBits1.SetBitAt(10, true)
 	cBits2 := solid.NewBitVector(64)
 	cBits2.SetBitAt(10, true)
 	expectedCommitteeBits := solid.NewBitVector(64)
-	expectedCommitteeBits.SetBitAt(0, true)
+	expectedCommitteeBits.SetBitAt(10, true)
 	expectedCommitteeBits.SetBitAt(10, true)
 
 	att1 := &solid.Attestation{
-		AggregationBits: solid.BitlistFromBytes([]byte{0b00000001, 0, 0, 0}, 2048*64),
+		AggregationBits: solid.BitlistFromBytes([]byte{0b00001001}, 2048*64),
 		Data:            attData1,
 		Signature:       [96]byte{'a', 'b', 'c', 'd', 'e', 'f'},
 		CommitteeBits:   cBits1,
 	}
 	att2 := &solid.Attestation{
-		AggregationBits: solid.BitlistFromBytes([]byte{0b00000000, 0b00001000, 0, 0}, 2048*64),
+		AggregationBits: solid.BitlistFromBytes([]byte{0b00001100}, 2048*64),
 		Data:            attData1,
 		Signature:       [96]byte{'d', 'e', 'f', 'g', 'h', 'i'},
 		CommitteeBits:   cBits2,
@@ -141,11 +141,11 @@ func (t *PoolTestSuite) TestAddAttestationElectra() {
 			},
 			hashRoot: attData1Root,
 			mockFunc: func() {
-				t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(1)).Times(1)
-				t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.ElectraVersion).Times(1)
+				t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(1)).Times(2)
+				t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.ElectraVersion).Times(2)
 			},
 			expect: &solid.Attestation{
-				AggregationBits: solid.BitlistFromBytes([]byte{0b0000001, 0b00001000, 0, 0}, 2048*64),
+				AggregationBits: solid.BitlistFromBytes([]byte{0b00001101}, 2048*64),
 				Data:            attData1,
 				Signature:       mockAggrResult,
 				CommitteeBits:   expectedCommitteeBits,
@@ -162,9 +162,7 @@ func (t *PoolTestSuite) TestAddAttestationElectra() {
 		for i := range tc.atts {
 			pool.AddAttestation(tc.atts[i])
 		}
-		att := pool.GetAggregatationByRoot(tc.hashRoot)
-		//h1, _ := tc.expect.HashSSZ()
-		//h2, _ := att.HashSSZ()
+		att := pool.GetAggregatationByRootAndCommittee(tc.hashRoot, 10)
 		t.Equal(tc.expect, att, tc.name)
 	}
 }
@@ -184,7 +182,11 @@ func (t *PoolTestSuite) TestAddAttestation() {
 				att2_1,
 			},
 			hashRoot: attData1Root,
-			expect:   att1_1,
+			mockFunc: func() {
+				t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(1)).AnyTimes()
+				t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.DenebVersion).AnyTimes()
+			},
+			expect: att1_1,
 		},
 		{
 			name: "att1_2 is a super set of att1_1. skip att1_1",
@@ -194,7 +196,11 @@ func (t *PoolTestSuite) TestAddAttestation() {
 				att2_1, // none of its business
 			},
 			hashRoot: attData1Root,
-			expect:   att1_2,
+			mockFunc: func() {
+				t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(1)).AnyTimes()
+				t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.DenebVersion).AnyTimes()
+			},
+			expect: att1_2,
 		},
 		{
 			name: "merge att1_2, att1_3, att1_4",
@@ -209,7 +215,7 @@ func (t *PoolTestSuite) TestAddAttestation() {
 				t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.DenebVersion).AnyTimes()
 			},
 			expect: &solid.Attestation{
-				AggregationBits: solid.BitlistFromBytes([]byte{0b00100101, 0, 0, 0}, 2048),
+				AggregationBits: solid.BitlistFromBytes([]byte{0b01100101}, 2048),
 				Data:            attData1,
 				Signature:       mockAggrResult,
 			},
@@ -226,8 +232,6 @@ func (t *PoolTestSuite) TestAddAttestation() {
 			pool.AddAttestation(tc.atts[i])
 		}
 		att := pool.GetAggregatationByRoot(tc.hashRoot)
-		//h1, _ := tc.expect.HashSSZ()
-		//h2, _ := att.HashSSZ()
 		t.Equal(tc.expect, att, tc.name)
 	}
 }

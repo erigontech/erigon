@@ -17,16 +17,15 @@
 package bodydownload
 
 import (
-	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/google/btree"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/turbo/services"
-
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/core/types"
 )
 
 // BodyHashes is to be used for the mapping between TxHash, UncleHash, and WithdrawalsHash to the block header
@@ -75,7 +74,7 @@ type BodyDownload struct {
 // BodyRequest is a sketch of the request for block bodies, meaning that access to the database is required to convert it to the actual BlockBodies request (look up hashes of canonical blocks)
 type BodyRequest struct {
 	BlockNums []uint64
-	Hashes    []libcommon.Hash
+	Hashes    []common.Hash
 	peerID    [64]byte
 	waitUntil uint64
 }

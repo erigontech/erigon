@@ -14,12 +14,11 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package cltypes_test
+package cltypes
 
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/stretchr/testify/require"
 )
@@ -27,57 +26,57 @@ import (
 func TestKZGCommitmentCopy(t *testing.T) {
 	require := require.New(t)
 
-	commitment := cltypes.KZGCommitment{}
+	commitment := KZGCommitment{}
 	commitment[0] = 1
 	commitmentCopy := commitment.Copy()
 
 	// Modify the original commitment
 	commitment[0] = 2
 
-	require.EqualValues(commitmentCopy[0], 1, "KZGCommitment Copy did not create a separate copy")
+	require.EqualValues(1, commitmentCopy[0], "KZGCommitment Copy did not create a separate copy")
 }
 
 func TestKZGCommitmentEncodeSSZ(t *testing.T) {
 	require := require.New(t)
 
-	commitment := cltypes.KZGCommitment{}
+	commitment := KZGCommitment{}
 	commitment[0] = 1
 
 	encoded, err := commitment.EncodeSSZ([]byte{})
 	require.NoError(err, "Error encoding KZGCommitment")
 
 	expected := append([]byte{}, commitment[:]...)
-	require.Equal(encoded, expected, "KZGCommitment EncodeSSZ did not produce the expected result")
+	require.Equal(expected, encoded, "KZGCommitment EncodeSSZ did not produce the expected result")
 }
 
 func TestKZGCommitmentDecodeSSZ(t *testing.T) {
 	require := require.New(t)
 
-	commitment := cltypes.KZGCommitment{}
+	commitment := KZGCommitment{}
 	encoded := append([]byte{}, commitment[:]...)
 	encoded[0] = 1
 
 	err := commitment.DecodeSSZ(encoded, 0)
 	require.NoError(err, "Error decoding KZGCommitment")
 
-	expected := cltypes.KZGCommitment{}
+	expected := KZGCommitment{}
 	expected[0] = 1
-	require.Equal(commitment, expected, "KZGCommitment DecodeSSZ did not produce the expected result")
+	require.Equal(expected, commitment, "KZGCommitment DecodeSSZ did not produce the expected result")
 }
 
 func TestKZGCommitmentEncodingSizeSSZ(t *testing.T) {
 	require := require.New(t)
 
-	commitment := cltypes.KZGCommitment{}
+	commitment := KZGCommitment{}
 	encodingSize := commitment.EncodingSizeSSZ()
 
-	require.Equal(encodingSize, 48, "KZGCommitment EncodingSizeSSZ did not return the expected size")
+	require.Equal(48, encodingSize, "KZGCommitment EncodingSizeSSZ did not return the expected size")
 }
 
 func TestKZGCommitmentHashSSZ(t *testing.T) {
 	require := require.New(t)
 
-	commitment := cltypes.KZGCommitment{}
+	commitment := KZGCommitment{}
 	commitment[0] = 1
 
 	hash, err := commitment.HashSSZ()
@@ -87,5 +86,5 @@ func TestKZGCommitmentHashSSZ(t *testing.T) {
 	expected, err := merkle_tree.BytesRoot(commitment[:])
 	require.NoError(err, "Error calculating expected hash")
 
-	require.Equal(hash, expected, "KZGCommitment HashSSZ did not produce the expected result")
+	require.Equal(expected, hash, "KZGCommitment HashSSZ did not produce the expected result")
 }

@@ -22,8 +22,8 @@ package vm
 import (
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon/common"
 )
 
 // calcMemSize64 calculates the required memory size, and returns
@@ -60,8 +60,8 @@ func getData(data []byte, start uint64, size uint64) []byte {
 	if start > length {
 		start = length
 	}
-	end := start + size
-	if end > length {
+	end, overflow := math.SafeAdd(start, size)
+	if end > length || overflow {
 		end = length
 	}
 	return common.RightPadBytes(data[start:end], int(size))

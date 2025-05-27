@@ -18,9 +18,8 @@ package solid
 
 import (
 	"encoding/json"
-	"io"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
@@ -46,7 +45,7 @@ func (arr *hashList) Bytes() []byte {
 }
 
 func (arr *hashList) MarshalJSON() ([]byte, error) {
-	list := make([]libcommon.Hash, arr.l)
+	list := make([]common.Hash, arr.l)
 	for i := 0; i < arr.l; i++ {
 		list[i] = arr.Get(i)
 	}
@@ -54,7 +53,7 @@ func (arr *hashList) MarshalJSON() ([]byte, error) {
 }
 
 func (arr *hashList) UnmarshalJSON(buf []byte) error {
-	var list []libcommon.Hash
+	var list []common.Hash
 
 	if err := json.Unmarshal(buf, &list); err != nil {
 		return err
@@ -66,7 +65,7 @@ func (arr *hashList) UnmarshalJSON(buf []byte) error {
 	return nil
 }
 
-func (h *hashList) Append(val libcommon.Hash) {
+func (h *hashList) Append(val common.Hash) {
 	offset := h.l * length.Hash
 	if h.MerkleTree != nil {
 		h.MerkleTree.AppendLeaf()
@@ -97,7 +96,7 @@ func (h *hashList) Clone() clonable.Clonable {
 	return NewHashList(h.c)
 }
 
-func (h *hashList) CopyTo(t IterableSSZ[libcommon.Hash]) {
+func (h *hashList) CopyTo(t IterableSSZ[common.Hash]) {
 	tu := t.(*hashList)
 	tu.c = h.c
 	tu.l = h.l
@@ -109,6 +108,12 @@ func (h *hashList) CopyTo(t IterableSSZ[libcommon.Hash]) {
 			tu.MerkleTree = &merkle_tree.MerkleTree{}
 		}
 		h.MerkleTree.CopyInto(tu.MerkleTree)
+		// make the leaf function on the new buffer
+		tu.MerkleTree.SetComputeLeafFn(func(idx int, out []byte) {
+			copy(out, tu.u[idx*length.Hash:])
+		})
+	} else {
+		tu.MerkleTree = nil
 	}
 	copy(tu.u, h.u)
 }
@@ -122,7 +127,7 @@ func (h *hashList) DecodeSSZ(buf []byte, _ int) error {
 		return ssz.ErrBadDynamicLength
 	}
 	h.MerkleTree = nil
-	h.u = libcommon.Copy(buf)
+	h.u = common.Copy(buf)
 	h.l = len(h.u) / length.Hash
 	return nil
 }
@@ -135,7 +140,7 @@ func (h *hashList) EncodingSizeSSZ() int {
 	return h.l * length.Hash
 }
 
-func (h *hashList) Get(index int) (out libcommon.Hash) {
+func (h *hashList) Get(index int) (out common.Hash) {
 	if index >= h.l {
 		panic("too big bruh")
 	}
@@ -143,7 +148,7 @@ func (h *hashList) Get(index int) (out libcommon.Hash) {
 	return
 }
 
-func (h *hashList) Set(index int, newValue libcommon.Hash) {
+func (h *hashList) Set(index int, newValue common.Hash) {
 	if index >= h.l {
 		panic("too big bruh")
 	}
@@ -173,7 +178,7 @@ func (h *hashList) HashSSZ() ([32]byte, error) {
 	return utils.Sha256(coreRoot[:], lengthRoot[:]), nil
 }
 
-func (h *hashList) Range(fn func(int, libcommon.Hash, int) bool) {
+func (h *hashList) Range(fn func(int, common.Hash, int) bool) {
 	for i := 0; i < h.l; i++ {
 		if !fn(i, h.Get(i), h.l) {
 			return
@@ -181,27 +186,6 @@ func (h *hashList) Range(fn func(int, libcommon.Hash, int) bool) {
 	}
 }
 
-func (h *hashList) Pop() libcommon.Hash {
+func (h *hashList) Pop() common.Hash {
 	panic("didnt ask, dont need it, go fuck yourself")
-}
-
-func (h *hashList) ReadMerkleTree(r io.Reader) error {
-	if h.MerkleTree == nil {
-		h.MerkleTree = &merkle_tree.MerkleTree{}
-		h.MerkleTree.Initialize(h.l, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
-			copy(out, h.u[idx*length.Hash:(idx+1)*length.Hash])
-		}, /*limit=*/ nil)
-	}
-	return h.MerkleTree.ReadMerkleTree(r)
-}
-
-func (h *hashList) WriteMerkleTree(w io.Writer) error {
-	if h.MerkleTree == nil {
-		cap := uint64(h.c)
-		h.MerkleTree = &merkle_tree.MerkleTree{}
-		h.MerkleTree.Initialize(h.l, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
-			copy(out, h.u[idx*length.Hash:(idx+1)*length.Hash])
-		}, /*limit=*/ &cap)
-	}
-	return h.MerkleTree.WriteMerkleTree(w)
 }

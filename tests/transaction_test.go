@@ -17,8 +17,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build integration
-
 package tests
 
 import (
@@ -28,7 +26,9 @@ import (
 )
 
 func TestTransaction(t *testing.T) {
-	//t.Parallel()
+	if testing.Short() {
+		t.Skip()
+	}
 
 	txt := new(testMatcher)
 
@@ -38,6 +38,7 @@ func TestTransaction(t *testing.T) {
 	txt.skipLoad("^ttGasLimit/TransactionWithGasLimitxPriceOverflow.json")
 
 	txt.walk(t, transactionTestDir, func(t *testing.T, name string, test *TransactionTest) {
+		t.Parallel()
 		cfg := params.MainnetChainConfig
 		if err := txt.checkFailure(t, test.Run(cfg.ChainID)); err != nil {
 			t.Error(err)

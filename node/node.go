@@ -25,29 +25,26 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/gofrs/flock"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
-
-	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/turbo/debug"
-
-	"github.com/gofrs/flock"
-
-	"github.com/erigontech/erigon-lib/log/v3"
-
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon/migrations"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/node/migrations"
+	"github.com/erigontech/erigon/node/nodecfg"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/debug"
 )
 
 // Node is a container on which services can be registered.
@@ -203,12 +200,7 @@ func (n *Node) doClose(errs []error) error {
 
 // containsLifecycle checks if 'lfs' contains 'l'.
 func containsLifecycle(lfs []Lifecycle, l Lifecycle) bool {
-	for _, obj := range lfs {
-		if obj == l {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(lfs, l)
 }
 
 // stopServices terminates running services, RPC and p2p networking.
@@ -316,7 +308,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 
 	var db kv.RwDB
 	if config.Dirs.DataDir == "" {
-		db = memdb.New("")
+		db = memdb.New("", label)
 		return db, nil
 	}
 
@@ -329,23 +321,18 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 			roTxLimit = int64(config.Http.DBReadConcurrency)
 		}
 		roTxsLimiter := semaphore.NewWeighted(roTxLimit) // 1 less than max to allow unlocking to happen
-		opts := mdbx.NewMDBX(logger).
-			Path(dbPath).Label(label).
+		opts := mdbx.New(label, logger).
+			Path(dbPath).
 			GrowthStep(16 * datasize.MB).
 			DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter).
-			WriteMap(config.MdbxWriteMap)
-
-		if readonly {
-			opts = opts.Readonly()
-		}
-		if exclusive {
-			opts = opts.Exclusive()
-		}
+			WriteMap(config.MdbxWriteMap).
+			Readonly(readonly).
+			Exclusive(exclusive)
 
 		switch label {
 		case kv.ChainDB:
 			if config.MdbxPageSize.Bytes() > 0 {
-				opts = opts.PageSize(config.MdbxPageSize.Bytes())
+				opts = opts.PageSize(config.MdbxPageSize)
 			}
 			if config.MdbxDBSizeLimit > 0 {
 				opts = opts.MapSize(config.MdbxDBSizeLimit)
@@ -356,7 +343,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 			opts = opts.DirtySpace(uint64(1024 * datasize.MB))
 		case kv.ConsensusDB:
 			if config.MdbxPageSize.Bytes() > 0 {
-				opts = opts.PageSize(config.MdbxPageSize.Bytes())
+				opts = opts.PageSize(config.MdbxPageSize)
 			}
 			// Don't adjust up the consensus DB - this will lead to resource exhaustion lor large map sizes
 			if config.MdbxDBSizeLimit > 0 && config.MdbxDBSizeLimit < mdbx.DefaultMapSize {
@@ -377,36 +364,36 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 		return nil, err
 	}
 
-	migrator := migrations.NewMigrator(label)
-	if err := migrator.VerifyVersion(db, dbPath); err != nil {
-		return nil, err
-	}
-
-	has, err := migrator.HasPendingMigrations(db)
-	if err != nil {
-		return nil, err
-	}
-	if has && !dbg.OnlyCreateDB {
-		logger.Info("Re-Opening DB in exclusive mode to apply migrations")
-		db.Close()
-		db, err = openFunc(true)
+	if label == kv.ChainDB {
+		migrator := migrations.NewMigrator(label)
+		if err := migrator.VerifyVersion(db, dbPath); err != nil {
+			return nil, err
+		}
+		has, err := migrator.HasPendingMigrations(db)
 		if err != nil {
 			return nil, err
 		}
-		if err = migrator.Apply(db, config.Dirs.DataDir, dbPath, logger); err != nil {
+		if has && !dbg.OnlyCreateDB {
+			logger.Info("Re-Opening DB in exclusive mode to apply migrations")
+			db.Close()
+			db, err = openFunc(true)
+			if err != nil {
+				return nil, err
+			}
+			if err = migrator.Apply(db, config.Dirs.DataDir, dbPath, logger); err != nil {
+				return nil, err
+			}
+			db.Close()
+			db, err = openFunc(false)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if err := db.Update(context.Background(), func(tx kv.RwTx) (err error) {
+			return params.SetErigonVersion(tx, params.VersionKeyCreated)
+		}); err != nil {
 			return nil, err
 		}
-		db.Close()
-		db, err = openFunc(false)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if err := db.Update(context.Background(), func(tx kv.RwTx) (err error) {
-		return params.SetErigonVersion(tx, params.VersionKeyCreated)
-	}); err != nil {
-		return nil, err
 	}
 
 	return db, nil

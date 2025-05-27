@@ -260,8 +260,8 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 				if err != nil {
 					return fmt.Errorf("kvserver: %w", err)
 				}
-				c.k = bytesCopy(k)
-				c.v = bytesCopy(v)
+				c.k = common.CopyBytes(k)
+				c.v = common.CopyBytes(v)
 			}
 
 			if err := s.renew(stream.Context(), id); err != nil {
@@ -270,7 +270,7 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 			if err := s.with(id, func(tx kv.Tx) error {
 				for _, c := range cursors { // restore all cursors position
 					var err error
-					c.c, err = tx.Cursor(c.bucket)
+					c.c, err = tx.Cursor(c.bucket) //nolint:gocritic
 					if err != nil {
 						return err
 					}
@@ -311,7 +311,7 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 			CursorID++
 			var err error
 			if err := s.with(id, func(tx kv.Tx) error {
-				c, err = tx.Cursor(in.BucketName)
+				c, err = tx.Cursor(in.BucketName) //nolint:gocritic
 				if err != nil {
 					return err
 				}
@@ -331,7 +331,7 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 			CursorID++
 			var err error
 			if err := s.with(id, func(tx kv.Tx) error {
-				c, err = tx.CursorDupSort(in.BucketName)
+				c, err = tx.CursorDupSort(in.BucketName) //nolint:gocritic
 				if err != nil {
 					return err
 				}
@@ -421,15 +421,6 @@ func handleOp(c kv.Cursor, stream remote.KV_TxServer, in *remote.Cursor) error {
 	return nil
 }
 
-func bytesCopy(b []byte) []byte {
-	if b == nil {
-		return nil
-	}
-	copiedBytes := make([]byte, len(b))
-	copy(copiedBytes, b)
-	return copiedBytes
-}
-
 func (s *KvServer) StateChanges(_ *remote.StateChangeRequest, server remote.KV_StateChangesServer) error {
 	ch, remove := s.stateChangeStreams.Sub()
 	defer remove()
@@ -471,6 +462,21 @@ func (s *KvServer) Snapshots(_ context.Context, _ *remote.SnapshotsRequest) (rep
 		reply.HistoryFiles = s.historySnapshots.Files()
 	}
 
+	return reply, nil
+}
+
+func (s *KvServer) Sequence(_ context.Context, req *remote.SequenceReq) (reply *remote.SequenceReply, err error) {
+	reply = &remote.SequenceReply{}
+	if err := s.with(req.TxId, func(tx kv.Tx) error {
+		ttx, ok := tx.(kv.TemporalTx)
+		if !ok {
+			return errors.New("server DB doesn't implement kv.Temporal interface")
+		}
+		reply.Value, err = ttx.ReadSequence(req.Table)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
 	return reply, nil
 }
 
@@ -526,24 +532,24 @@ func (s *StateChangePubSub) remove(id uint) {
 // Temporal methods
 //
 
-func (s *KvServer) DomainGet(_ context.Context, req *remote.DomainGetReq) (reply *remote.DomainGetReply, err error) {
+func (s *KvServer) GetLatest(_ context.Context, req *remote.GetLatestReq) (reply *remote.GetLatestReply, err error) {
 	domainName, err := kv.String2Domain(req.Table)
 	if err != nil {
 		return nil, err
 	}
-	reply = &remote.DomainGetReply{}
+	reply = &remote.GetLatestReply{}
 	if err := s.with(req.TxId, func(tx kv.Tx) error {
 		ttx, ok := tx.(kv.TemporalTx)
 		if !ok {
 			return errors.New("server DB doesn't implement kv.Temporal interface")
 		}
 		if req.Latest {
-			reply.V, _, err = ttx.DomainGet(domainName, req.K, req.K2)
+			reply.V, _, err = ttx.GetLatest(domainName, req.K)
 			if err != nil {
 				return err
 			}
 		} else {
-			reply.V, reply.Ok, err = ttx.DomainGetAsOf(domainName, req.K, req.K2, req.Ts)
+			reply.V, reply.Ok, err = ttx.GetAsOf(domainName, req.K, req.Ts)
 			if err != nil {
 				return err
 			}
@@ -561,7 +567,11 @@ func (s *KvServer) HistorySeek(_ context.Context, req *remote.HistorySeekReq) (r
 		if !ok {
 			return errors.New("server DB doesn't implement kv.Temporal interface")
 		}
-		reply.V, reply.Ok, err = ttx.HistorySeek(kv.History(req.Table), req.K, req.Ts)
+		domain, err := kv.String2Domain(req.Table)
+		if err != nil {
+			return err
+		}
+		reply.V, reply.Ok, err = ttx.HistorySeek(domain, req.K, req.Ts)
 		if err != nil {
 			return err
 		}
@@ -593,7 +603,11 @@ func (s *KvServer) IndexRange(_ context.Context, req *remote.IndexRangeReq) (*re
 		if !ok {
 			return errors.New("server DB doesn't implement kv.Temporal interface")
 		}
-		it, err := ttx.IndexRange(kv.InvertedIdx(req.Table), req.K, from, int(req.ToTs), order.By(req.OrderAscend), limit)
+		ii, err := kv.String2InvertedIdx(req.Table)
+		if err != nil {
+			return err
+		}
+		it, err := ttx.IndexRange(ii, req.K, from, int(req.ToTs), order.By(req.OrderAscend), limit)
 		if err != nil {
 			return err
 		}
@@ -605,15 +619,13 @@ func (s *KvServer) IndexRange(_ context.Context, req *remote.IndexRangeReq) (*re
 			}
 			reply.Timestamps = append(reply.Timestamps, v)
 			limit--
-		}
-		if len(reply.Timestamps) == int(req.PageSize) && it.HasNext() {
-			next, err := it.Next()
-			if err != nil {
-				return err
-			}
-			reply.NextPageToken, err = marshalPagination(&remote.IndexPagination{NextTimeStamp: int64(next), Limit: int64(limit)})
-			if err != nil {
-				return err
+
+			if len(reply.Timestamps) == int(req.PageSize) && it.HasNext() {
+				reply.NextPageToken, err = marshalPagination(&remote.IndexPagination{NextTimeStamp: int64(v), Limit: int64(limit)})
+				if err != nil {
+					return err
+				}
+				break
 			}
 		}
 		return nil
@@ -631,7 +643,11 @@ func (s *KvServer) HistoryRange(_ context.Context, req *remote.HistoryRangeReq) 
 		if !ok {
 			return fmt.Errorf("server DB doesn't implement kv.Temporal interface")
 		}
-		it, err := ttx.HistoryRange(kv.History(req.Table), fromTs, int(req.ToTs), order.By(req.OrderAscend), limit)
+		domain, err := kv.String2Domain(req.Table)
+		if err != nil {
+			return err
+		}
+		it, err := ttx.HistoryRange(domain, fromTs, int(req.ToTs), order.By(req.OrderAscend), limit)
 		if err != nil {
 			return err
 		}
@@ -641,8 +657,8 @@ func (s *KvServer) HistoryRange(_ context.Context, req *remote.HistoryRangeReq) 
 			if err != nil {
 				return err
 			}
-			key := bytesCopy(k)
-			value := bytesCopy(v)
+			key := common.CopyBytes(k)
+			value := common.CopyBytes(v)
 			reply.Keys = append(reply.Keys, key)
 			reply.Values = append(reply.Values, value)
 		}
@@ -653,7 +669,7 @@ func (s *KvServer) HistoryRange(_ context.Context, req *remote.HistoryRangeReq) 
 	return reply, nil
 }
 
-func (s *KvServer) DomainRange(_ context.Context, req *remote.DomainRangeReq) (*remote.Pairs, error) {
+func (s *KvServer) RangeAsOf(_ context.Context, req *remote.RangeAsOfReq) (*remote.Pairs, error) {
 	domainName, err := kv.String2Domain(req.Table)
 	if err != nil {
 		return nil, err
@@ -676,7 +692,7 @@ func (s *KvServer) DomainRange(_ context.Context, req *remote.DomainRangeReq) (*
 		if !ok {
 			return errors.New("server DB doesn't implement kv.Temporal interface")
 		}
-		it, err := ttx.DomainRange(domainName, fromKey, toKey, req.Ts, order.By(req.OrderAscend), limit)
+		it, err := ttx.RangeAsOf(domainName, fromKey, toKey, req.Ts, order.By(req.OrderAscend), limit)
 		if err != nil {
 			return err
 		}
@@ -686,20 +702,18 @@ func (s *KvServer) DomainRange(_ context.Context, req *remote.DomainRangeReq) (*
 			if err != nil {
 				return err
 			}
-			key := bytesCopy(k)
-			value := bytesCopy(v)
+			key := common.CopyBytes(k)
+			value := common.CopyBytes(v)
 			reply.Keys = append(reply.Keys, key)
 			reply.Values = append(reply.Values, value)
 			limit--
-		}
-		if len(reply.Keys) == int(req.PageSize) && it.HasNext() {
-			nextK, _, err := it.Next()
-			if err != nil {
-				return err
-			}
-			reply.NextPageToken, err = marshalPagination(&remote.PairsPagination{NextKey: nextK, Limit: int64(limit)})
-			if err != nil {
-				return err
+
+			if len(reply.Keys) == int(req.PageSize) && it.HasNext() {
+				reply.NextPageToken, err = marshalPagination(&remote.PairsPagination{NextKey: k, Limit: int64(limit)})
+				if err != nil {
+					return err
+				}
+				break
 			}
 		}
 		return nil

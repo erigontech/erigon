@@ -17,7 +17,7 @@
 package cltypes
 
 import (
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -29,11 +29,11 @@ import (
  * It contains the hash of the block body, and state root data.
  */
 type BeaconBlockHeader struct {
-	Slot          uint64         `json:"slot,string"`
-	ProposerIndex uint64         `json:"proposer_index,string"`
-	ParentRoot    libcommon.Hash `json:"parent_root"`
-	Root          libcommon.Hash `json:"state_root"`
-	BodyRoot      libcommon.Hash `json:"body_root"`
+	Slot          uint64      `json:"slot,string"`
+	ProposerIndex uint64      `json:"proposer_index,string"`
+	ParentRoot    common.Hash `json:"parent_root"`
+	Root          common.Hash `json:"state_root"`
+	BodyRoot      common.Hash `json:"body_root"`
 }
 
 func (b *BeaconBlockHeader) Copy() *BeaconBlockHeader {
@@ -66,7 +66,7 @@ func (*BeaconBlockHeader) Static() bool {
  */
 type SignedBeaconBlockHeader struct {
 	Header    *BeaconBlockHeader `json:"message"`
-	Signature libcommon.Bytes96  `json:"signature"`
+	Signature common.Bytes96     `json:"signature"`
 }
 
 func (b *SignedBeaconBlockHeader) Static() bool {

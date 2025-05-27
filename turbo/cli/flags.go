@@ -21,32 +21,25 @@ import (
 	"math"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/config3"
-
-	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
-
-	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/rpc/rpccfg"
-
 	"github.com/c2h5oh/datasize"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
-
+	"github.com/erigontech/erigon-lib/kv/prune"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/rpc/rpchelper"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 var (
@@ -85,11 +78,11 @@ var (
 
 	PruneModeFlag = cli.StringFlag{
 		Name: "prune.mode",
-		Usage: `Choose a pruning preset to run onto. Available values: "archive","full","minimal".
-				Archive: Keep the entire indexed database, aka. no pruning. (Pruning is flexible),
-				Full: Keep only blocks and latest state (Pruning is not flexible)
-				Minimal: Keep only latest state (Pruning is not flexible)`,
-		Value: "archive",
+		Usage: `Choose a pruning preset to run onto. Available values: "full", "archive", "minimal".
+				Full: Keep only blocks and latest state,
+				Archive: Keep the entire indexed database, aka. no pruning,
+				Minimal: Keep only latest state`,
+		Value: "full",
 	}
 	PruneDistanceFlag = cli.Uint64Flag{
 		Name:  "prune.distance",
@@ -98,12 +91,6 @@ var (
 	PruneBlocksDistanceFlag = cli.Uint64Flag{
 		Name:  "prune.distance.blocks",
 		Usage: `Keep block history for the latest N blocks (default: everything)`,
-	}
-	ExperimentsFlag = cli.StringFlag{
-		Name: "experiments",
-		Usage: `Enable some experimental stages:
-* tevm - write TEVM translated code to the DB`,
-		Value: "default",
 	}
 
 	// mTLS flags
@@ -273,42 +260,13 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	if cfg.Genesis != nil {
 		chainId = cfg.Genesis.Config.ChainID.Uint64()
 	}
-	// Sanitize prune flag
-	if ctx.String(PruneModeFlag.Name) != "archive" && (ctx.IsSet(PruneBlocksDistanceFlag.Name) || ctx.IsSet(PruneDistanceFlag.Name)) {
-		utils.Fatalf("error: --prune.distance and --prune.distance.blocks are only allowed with --prune.mode=archive")
-	}
-	distance := ctx.Uint64(PruneDistanceFlag.Name)
-	blockDistance := ctx.Uint64(PruneBlocksDistanceFlag.Name)
+	_ = chainId
 
-	if !ctx.IsSet(PruneBlocksDistanceFlag.Name) {
-		blockDistance = math.MaxUint64
-	}
-	if !ctx.IsSet(PruneDistanceFlag.Name) {
-		distance = math.MaxUint64
-	}
-	mode, err := prune.FromCli(
-		chainId,
-		distance,
-		blockDistance,
-		libcommon.CliString2Array(ctx.String(ExperimentsFlag.Name)),
-	)
+	mode, err := prune.FromCli(ctx.String(PruneModeFlag.Name), ctx.Uint64(PruneDistanceFlag.Name), ctx.Uint64(PruneBlocksDistanceFlag.Name))
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
-	// Full mode prunes all but the latest state
-	if ctx.String(PruneModeFlag.Name) == "full" {
-		mode.Blocks = prune.Distance(math.MaxUint64)
-		mode.History = prune.Distance(config3.DefaultPruneDistance)
-	}
-	// Minimal mode prunes all but the latest state including blocks
-	if ctx.String(PruneModeFlag.Name) == "minimal" {
-		mode.Blocks = prune.Distance(config3.DefaultPruneDistance)
-		mode.History = prune.Distance(config3.DefaultPruneDistance)
-	}
 
-	if err != nil {
-		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
-	}
 	cfg.Prune = mode
 	if ctx.String(BatchSizeFlag.Name) != "" {
 		err := cfg.BatchSize.UnmarshalText([]byte(ctx.String(BatchSizeFlag.Name)))
@@ -371,7 +329,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		if err != nil {
 			logger.Warn("Error decoding block hash", "hash", ctx.String(BadBlockFlag.Name), "err", err)
 		} else {
-			cfg.BadBlockHash = libcommon.BytesToHash(bytes)
+			cfg.BadBlockHash = common.BytesToHash(bytes)
 		}
 	}
 
@@ -399,10 +357,6 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	pruneBlockDistance := f.Uint64(PruneBlocksDistanceFlag.Name, PruneBlocksDistanceFlag.Value, PruneBlocksDistanceFlag.Usage)
 	pruneDistance := f.Uint64(PruneDistanceFlag.Name, PruneDistanceFlag.Value, PruneDistanceFlag.Usage)
 
-	chainId := cfg.NetworkID
-	if *pruneMode != "archive" && (pruneBlockDistance != nil || pruneDistance != nil) {
-		utils.Fatalf("error: --prune.distance and --prune.distance.blocks are only allowed with --prune.mode=archive")
-	}
 	var distance, blockDistance uint64 = math.MaxUint64, math.MaxUint64
 	if pruneBlockDistance != nil {
 		blockDistance = *pruneBlockDistance
@@ -411,30 +365,9 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 		distance = *pruneDistance
 	}
 
-	experiments := f.String(ExperimentsFlag.Name, ExperimentsFlag.Value, ExperimentsFlag.Usage)
-	experimentsVal := ""
-	if experiments != nil {
-		experimentsVal = *experiments
-	}
-	mode, err := prune.FromCli(
-		chainId,
-		distance,
-		blockDistance,
-		libcommon.CliString2Array(experimentsVal),
-	)
+	mode, err := prune.FromCli(*pruneMode, distance, blockDistance)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
-	}
-	switch *pruneMode {
-	case "archive":
-	case "full":
-		mode.Blocks = prune.Distance(math.MaxUint64)
-		mode.History = prune.Distance(config3.DefaultPruneDistance)
-	case "minimal":
-		mode.Blocks = prune.Distance(config3.DefaultPruneDistance) // 2048 is just some blocks to allow reorgs and data for rpc
-		mode.History = prune.Distance(config3.DefaultPruneDistance)
-	default:
-		utils.Fatalf("error: --prune.mode must be one of archive, full, minimal")
 	}
 	cfg.Prune = mode
 
@@ -501,10 +434,10 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		JWTSecretPath:            jwtSecretPath,
 		TraceRequests:            ctx.Bool(utils.HTTPTraceFlag.Name),
 		DebugSingleRequest:       ctx.Bool(utils.HTTPDebugSingleFlag.Name),
-		HttpCORSDomain:           libcommon.CliString2Array(ctx.String(utils.HTTPCORSDomainFlag.Name)),
-		HttpVirtualHost:          libcommon.CliString2Array(ctx.String(utils.HTTPVirtualHostsFlag.Name)),
-		AuthRpcVirtualHost:       libcommon.CliString2Array(ctx.String(utils.AuthRpcVirtualHostsFlag.Name)),
-		API:                      libcommon.CliString2Array(apis),
+		HttpCORSDomain:           common.CliString2Array(ctx.String(utils.HTTPCORSDomainFlag.Name)),
+		HttpVirtualHost:          common.CliString2Array(ctx.String(utils.HTTPVirtualHostsFlag.Name)),
+		AuthRpcVirtualHost:       common.CliString2Array(ctx.String(utils.AuthRpcVirtualHostsFlag.Name)),
+		API:                      common.CliString2Array(apis),
 		HTTPTimeouts: rpccfg.HTTPTimeouts{
 			ReadTimeout:  ctx.Duration(HTTPReadTimeoutFlag.Name),
 			WriteTimeout: ctx.Duration(HTTPWriteTimeoutFlag.Name),
@@ -532,14 +465,13 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 			RpcSubscriptionFiltersMaxAddresses: ctx.Int(RpcSubscriptionFiltersMaxAddressesFlag.Name),
 			RpcSubscriptionFiltersMaxTopics:    ctx.Int(RpcSubscriptionFiltersMaxTopicsFlag.Name),
 		},
-		Gascap:                      ctx.Uint64(utils.RpcGasCapFlag.Name),
-		Feecap:                      ctx.Float64(utils.RPCGlobalTxFeeCapFlag.Name),
-		MaxTraces:                   ctx.Uint64(utils.TraceMaxtracesFlag.Name),
-		TraceCompatibility:          ctx.Bool(utils.RpcTraceCompatFlag.Name),
-		BatchLimit:                  ctx.Int(utils.RpcBatchLimit.Name),
-		ReturnDataLimit:             ctx.Int(utils.RpcReturnDataLimit.Name),
-		AllowUnprotectedTxs:         ctx.Bool(utils.AllowUnprotectedTxs.Name),
-		MaxGetProofRewindBlockCount: ctx.Int(utils.RpcMaxGetProofRewindBlockCount.Name),
+		Gascap:              ctx.Uint64(utils.RpcGasCapFlag.Name),
+		Feecap:              ctx.Float64(utils.RPCGlobalTxFeeCapFlag.Name),
+		MaxTraces:           ctx.Uint64(utils.TraceMaxtracesFlag.Name),
+		TraceCompatibility:  ctx.Bool(utils.RpcTraceCompatFlag.Name),
+		BatchLimit:          ctx.Int(utils.RpcBatchLimit.Name),
+		ReturnDataLimit:     ctx.Int(utils.RpcReturnDataLimit.Name),
+		AllowUnprotectedTxs: ctx.Bool(utils.AllowUnprotectedTxs.Name),
 
 		OtsMaxPageSize: ctx.Uint64(utils.OtsSearchMaxCapFlag.Name),
 

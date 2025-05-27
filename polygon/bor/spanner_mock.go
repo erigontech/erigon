@@ -12,7 +12,7 @@ package bor
 import (
 	reflect "reflect"
 
-	consensus "github.com/erigontech/erigon/consensus"
+	consensus "github.com/erigontech/erigon/execution/consensus"
 	valset "github.com/erigontech/erigon/polygon/bor/valset"
 	heimdall "github.com/erigontech/erigon/polygon/heimdall"
 	gomock "go.uber.org/mock/gomock"
@@ -81,9 +81,9 @@ func (c *MockSpannerCommitSpanCall) DoAndReturn(f func(heimdall.Span, consensus.
 }
 
 // GetCurrentProducers mocks base method.
-func (m *MockSpanner) GetCurrentProducers(arg0 uint64, arg1 ChainHeaderReader) ([]*valset.Validator, error) {
+func (m *MockSpanner) GetCurrentProducers(spanId uint64, chain ChainHeaderReader) ([]*valset.Validator, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetCurrentProducers", arg0, arg1)
+	ret := m.ctrl.Call(m, "GetCurrentProducers", spanId, chain)
 	ret0, _ := ret[0].([]*valset.Validator)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
@@ -159,9 +159,9 @@ func (c *MockSpannerGetCurrentSpanCall) DoAndReturn(f func(consensus.SystemCall)
 }
 
 // GetCurrentValidators mocks base method.
-func (m *MockSpanner) GetCurrentValidators(arg0 uint64, arg1 ChainHeaderReader) ([]*valset.Validator, error) {
+func (m *MockSpanner) GetCurrentValidators(spanId uint64, chain ChainHeaderReader) ([]*valset.Validator, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetCurrentValidators", arg0, arg1)
+	ret := m.ctrl.Call(m, "GetCurrentValidators", spanId, chain)
 	ret0, _ := ret[0].([]*valset.Validator)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1

@@ -28,11 +28,10 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
-
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -44,20 +43,20 @@ type OracleBackend interface {
 	BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error)
 	ChainConfig() *chain.Config
 
-	GetReceipts(ctx context.Context, block *types.Block) (types.Receipts, error)
+	GetReceiptsGasUsed(ctx context.Context, block *types.Block) (types.Receipts, error)
 	PendingBlockAndReceipts() (*types.Block, types.Receipts)
 }
 
 type Cache interface {
-	GetLatest() (libcommon.Hash, *big.Int)
-	SetLatest(hash libcommon.Hash, price *big.Int)
+	GetLatest() (common.Hash, *big.Int)
+	SetLatest(hash common.Hash, price *big.Int)
 }
 
 // Oracle recommends gas prices based on the content of recent
 // blocks. Suitable for both light and full clients.
 type Oracle struct {
 	backend     OracleBackend
-	lastHead    libcommon.Hash
+	lastHead    common.Hash
 	lastPrice   *big.Int
 	maxPrice    *big.Int
 	ignorePrice *big.Int
@@ -261,7 +260,7 @@ func (oracle *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit
 			continue
 		}
 		sender, _ := tx.GetSender()
-		if err == nil && sender != block.Coinbase() {
+		if sender != block.Coinbase() {
 			heap.Push(s, tip)
 			count = count + 1
 		}

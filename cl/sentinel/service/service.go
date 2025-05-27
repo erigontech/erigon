@@ -208,6 +208,10 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	if err != nil {
 		return nil, err
 	}
+
+	activePeers, _, _ := s.sentinel.GetPeersCount()
+
+	shouldBanOnFail := activePeers >= int(s.sentinel.Config().MaxPeerCount)
 	// set the peer and topic we are requesting
 	httpReq.Header.Set("REQRESP-PEER-ID", pid.String())
 	httpReq.Header.Set("REQRESP-TOPIC", req.Topic)
@@ -222,10 +226,15 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	if resp.StatusCode < 200 || resp.StatusCode > 399 {
 		errBody, _ := io.ReadAll(resp.Body)
 		errorMessage := fmt.Errorf("SentinelHttp: %s", string(errBody))
-		s.sentinel.Peers().RemovePeer(pid)
-		s.sentinel.Host().Peerstore().RemovePeer(pid)
-		s.sentinel.Host().Network().ClosePeer(pid)
-
+		if strings.Contains(errorMessage.Error(), "Read Code: EOF") {
+			// don't ban the peer.
+			return nil, errorMessage
+		}
+		if shouldBanOnFail {
+			s.sentinel.Peers().RemovePeer(pid)
+			s.sentinel.Host().Peerstore().RemovePeer(pid)
+			s.sentinel.Host().Network().ClosePeer(pid)
+		}
 		return nil, errorMessage
 	}
 	// we should never get an invalid response to this. our responder should always set it on non-error response
@@ -236,10 +245,11 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	}
 	// known error codes, just remove the peer
 	if isError != 0 {
-		s.sentinel.Peers().RemovePeer(pid)
-		s.sentinel.Host().Peerstore().RemovePeer(pid)
-		s.sentinel.Host().Network().ClosePeer(pid)
-
+		if shouldBanOnFail {
+			s.sentinel.Peers().RemovePeer(pid)
+			s.sentinel.Host().Peerstore().RemovePeer(pid)
+			s.sentinel.Host().Network().ClosePeer(pid)
+		}
 		return nil, fmt.Errorf("peer error code: %d", isError)
 	}
 
@@ -278,7 +288,7 @@ func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelrpc.Reque
 			s.sentinel.Host().Network().ClosePeer(pid)
 			s.sentinel.Peers().SetBanStatus(pid, true)
 		}
-		s.logger.Trace("[sentinel] peer gave us bad data", "peer", pid, "err", err)
+		s.logger.Trace("[sentinel] peer gave us bad data", "peer", pid, "err", err, "topic", req.Topic)
 		return nil, err
 	}
 	return resp, nil
@@ -376,7 +386,7 @@ func (s *SentinelServer) handleGossipPacket(pkt *sentinel.GossipMessage) error {
 	topic := pkt.TopicName
 	// If we use snappy codec then decompress it accordingly.
 	if strings.Contains(topic, sentinel.SSZSnappyCodec) {
-		data, err = utils.DecompressSnappy(data)
+		data, err = utils.DecompressSnappy(data, true)
 		if err != nil {
 			return err
 		}

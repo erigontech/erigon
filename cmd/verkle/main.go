@@ -29,15 +29,14 @@ import (
 	"github.com/c2h5oh/datasize"
 	"go.uber.org/zap/buffer"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/cmd/verkle/verkletrie"
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 )
 
@@ -192,7 +191,7 @@ func GenerateVerkleTree(ctx context.Context, cfg optionsCfg, logger log.Logger) 
 	// Verkle Tree to be built
 	logger.Info("Started Verkle Tree creation")
 
-	var root libcommon.Hash
+	var root common.Hash
 	if root, err = verkleWriter.CommitVerkleTreeFromScratch(); err != nil {
 		return err
 	}
@@ -222,7 +221,7 @@ func analyseOut(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
 	}
 	defer tx.Rollback()
 
-	buckets, err := tx.ListBuckets()
+	buckets, err := tx.ListTables()
 	if err != nil {
 		return err
 	}
@@ -260,6 +259,7 @@ func dump(ctx context.Context, cfg optionsCfg) error {
 	if err != nil {
 		return err
 	}
+	defer verkleCursor.Close()
 	for k, v, err := verkleCursor.First(); k != nil; k, v, err = verkleCursor.Next() {
 		if err != nil {
 			return err
@@ -325,6 +325,7 @@ func dump_acc_preimages(ctx context.Context, cfg optionsCfg) error {
 	if err != nil {
 		return err
 	}
+	defer stateCursor.Close()
 	num, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
 		return err
@@ -381,21 +382,22 @@ func dump_storage_preimages(ctx context.Context, cfg optionsCfg, logger log.Logg
 	if err != nil {
 		return err
 	}
+	defer stateCursor.Close()
 	num, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
 		return err
 	}
 	logger.Info("Current Block Number", "num", num)
 	var currentIncarnation uint64
-	var currentAddress libcommon.Address
-	var addressHash libcommon.Hash
+	var currentAddress common.Address
+	var addressHash common.Hash
 	var buf buffer.Buffer
 	for k, v, err := stateCursor.First(); k != nil; k, v, err = stateCursor.Next() {
 		if err != nil {
 			return err
 		}
 		if len(k) == 20 {
-			if currentAddress != (libcommon.Address{}) {
+			if currentAddress != (common.Address{}) {
 				if err := collector.Collect(addressHash[:], buf.Bytes()); err != nil {
 					return err
 				}
@@ -405,11 +407,11 @@ func dump_storage_preimages(ctx context.Context, cfg optionsCfg, logger log.Logg
 			if err := acc.DecodeForStorage(v); err != nil {
 				return err
 			}
-			currentAddress = libcommon.BytesToAddress(k)
+			currentAddress = common.BytesToAddress(k)
 			currentIncarnation = acc.Incarnation
 			addressHash = utils.Sha256(currentAddress[:])
 		} else {
-			address := libcommon.BytesToAddress(k[:20])
+			address := common.BytesToAddress(k[:20])
 			if address != currentAddress {
 				continue
 			}
@@ -495,16 +497,5 @@ func main() {
 }
 
 func openDB(ctx context.Context, path string, logger log.Logger, accede bool) (kv.RwDB, error) {
-	var db kv.RwDB
-	var err error
-	opts := mdbx.NewMDBX(logger).Path(path)
-	if accede {
-		opts = opts.Accede()
-	}
-	db, err = opts.Open(ctx)
-
-	if err != nil {
-		return nil, err
-	}
-	return db, nil
+	return mdbx.New(kv.ChainDB, logger).Path(path).Accede(accede).Open(ctx)
 }

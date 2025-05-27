@@ -25,6 +25,7 @@ import (
 	"io"
 	"math"
 	"math/big"
+	"reflect"
 	"sort"
 	"strconv"
 	"sync"
@@ -37,24 +38,25 @@ import (
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/chain/params"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/crypto/cryptopool"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/consensus/misc"
-	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/finality"
 	"github.com/erigontech/erigon/polygon/bor/finality/flags"
@@ -62,7 +64,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/statefull"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/services"
 )
@@ -156,10 +157,10 @@ var (
 
 // SignerFn is a signer callback function to request a header to be signed by a
 // backing account.
-type SignerFn func(signer libcommon.Address, mimeType string, message []byte) ([]byte, error)
+type SignerFn func(signer common.Address, mimeType string, message []byte) ([]byte, error)
 
 // Ecrecover extracts the Ethereum account address from a signed header.
-func Ecrecover(header *types.Header, sigcache *lru.ARCCache[libcommon.Hash, libcommon.Address], c *borcfg.BorConfig) (libcommon.Address, error) {
+func Ecrecover(header *types.Header, sigcache *lru.ARCCache[common.Hash, common.Address], c *borcfg.BorConfig) (common.Address, error) {
 	// If the signature's already cached, return that
 	hash := header.Hash()
 	if address, known := sigcache.Get(hash); known {
@@ -167,7 +168,7 @@ func Ecrecover(header *types.Header, sigcache *lru.ARCCache[libcommon.Hash, libc
 	}
 	// Retrieve the signature from the header extra-data
 	if len(header.Extra) < types.ExtraSealLength {
-		return libcommon.Address{}, errMissingSignature
+		return common.Address{}, errMissingSignature
 	}
 
 	signature := header.Extra[len(header.Extra)-types.ExtraSealLength:]
@@ -175,9 +176,9 @@ func Ecrecover(header *types.Header, sigcache *lru.ARCCache[libcommon.Hash, libc
 	// Recover the public key and the Ethereum address
 	pubkey, err := crypto.Ecrecover(SealHash(header, c).Bytes(), signature)
 	if err != nil {
-		return libcommon.Address{}, err
+		return common.Address{}, err
 	}
-	var signer libcommon.Address
+	var signer common.Address
 	copy(signer[:], crypto.Keccak256(pubkey[1:])[12:])
 
 	sigcache.Add(hash, signer)
@@ -186,9 +187,9 @@ func Ecrecover(header *types.Header, sigcache *lru.ARCCache[libcommon.Hash, libc
 }
 
 // SealHash returns the hash of a block prior to it being sealed.
-func SealHash(header *types.Header, c *borcfg.BorConfig) (hash libcommon.Hash) {
-	hasher := cryptopool.NewLegacyKeccak256()
-	defer cryptopool.ReturnToPoolKeccak256(hasher)
+func SealHash(header *types.Header, c *borcfg.BorConfig) (hash common.Hash) {
+	hasher := crypto.NewKeccakState()
+	defer crypto.ReturnToPool(hasher)
 
 	encodeSigHeader(hasher, header, c)
 	hasher.Sum(hash[:0])
@@ -248,7 +249,7 @@ func MinNextBlockTime(parent *types.Header, succession int, config *borcfg.BorCo
 
 // ValidateHeaderTimeSignerSuccessionNumber - valset.ValidatorSet abstraction for unit tests
 type ValidateHeaderTimeSignerSuccessionNumber interface {
-	GetSignerSuccessionNumber(signer libcommon.Address, number uint64) (int, error)
+	GetSignerSuccessionNumber(signer common.Address, number uint64) (int, error)
 }
 
 type spanReader interface {
@@ -256,9 +257,11 @@ type spanReader interface {
 	Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error)
 }
 
+//go:generate mockgen -typed=true -destination=./bridge_reader_mock.go -package=bor . bridgeReader
 type bridgeReader interface {
 	Events(ctx context.Context, blockNum uint64) ([]*types.Message, error)
-	EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error)
+	EventsWithinTime(ctx context.Context, timeFrom, timeTo time.Time) ([]*types.Message, error)
+	EventTxnLookup(ctx context.Context, borTxHash common.Hash) (uint64, bool, error)
 }
 
 func ValidateHeaderTime(
@@ -267,10 +270,10 @@ func ValidateHeaderTime(
 	parent *types.Header,
 	validatorSet ValidateHeaderTimeSignerSuccessionNumber,
 	config *borcfg.BorConfig,
-	signaturesCache *lru.ARCCache[libcommon.Hash, libcommon.Address],
+	signaturesCache *lru.ARCCache[common.Hash, common.Address],
 ) error {
 	if header.Time > uint64(now.Unix()) {
-		return consensus.ErrFutureBlock
+		return fmt.Errorf("%w: expected: %s(%s), got: %s", consensus.ErrFutureBlock, time.Unix(now.Unix(), 0), now, time.Unix(int64(header.Time), 0))
 	}
 
 	if parent == nil {
@@ -315,18 +318,20 @@ type Bor struct {
 	DB          kv.RwDB           // Database to store and retrieve snapshot checkpoints
 	blockReader services.FullBlockReader
 
-	Recents    *lru.ARCCache[libcommon.Hash, *Snapshot]         // Snapshots for recent block to speed up reorgs
-	Signatures *lru.ARCCache[libcommon.Hash, libcommon.Address] // Signatures of recent blocks to speed up mining
+	Recents    *lru.ARCCache[common.Hash, *Snapshot]      // Snapshots for recent block to speed up reorgs
+	Signatures *lru.ARCCache[common.Hash, common.Address] // Signatures of recent blocks to speed up mining
 
 	authorizedSigner atomic.Pointer[signer] // Ethereum address and sign function of the signing key
 
 	execCtx context.Context // context of caller execution stage
 
-	spanner        Spanner
-	stateReceiver  StateReceiver
-	HeimdallClient heimdall.HeimdallClient
-	spanReader     spanReader
-	bridgeReader   bridgeReader
+	spanner         Spanner
+	stateReceiver   StateReceiver
+	HeimdallClient  heimdall.Client
+	useSpanReader   bool
+	spanReader      spanReader
+	useBridgeReader bool
+	bridgeReader    bridgeReader
 
 	// scope event.SubscriptionScope
 	// The fields below are for testing only
@@ -341,8 +346,8 @@ type Bor struct {
 }
 
 type signer struct {
-	signer libcommon.Address // Ethereum address of the signing key
-	signFn SignerFn          // Signer function to authorize hashes with
+	signer common.Address // Ethereum address of the signing key
+	signFn SignerFn       // Signer function to authorize hashes with
 }
 
 // New creates a Matic Bor consensus engine.
@@ -351,7 +356,7 @@ func New(
 	db kv.RwDB,
 	blockReader services.FullBlockReader,
 	spanner Spanner,
-	heimdallClient heimdall.HeimdallClient,
+	heimdallClient heimdall.Client,
 	genesisContracts StateReceiver,
 	logger log.Logger,
 	bridgeReader bridgeReader,
@@ -366,31 +371,33 @@ func New(
 	}
 
 	// Allocate the snapshot caches and create the engine
-	recents, _ := lru.NewARC[libcommon.Hash, *Snapshot](inmemorySnapshots)
-	signatures, _ := lru.NewARC[libcommon.Hash, libcommon.Address](inmemorySignatures)
+	recents, _ := lru.NewARC[common.Hash, *Snapshot](inmemorySnapshots)
+	signatures, _ := lru.NewARC[common.Hash, common.Address](inmemorySignatures)
 
 	c := &Bor{
-		chainConfig:    chainConfig,
-		config:         borConfig,
-		DB:             db,
-		blockReader:    blockReader,
-		Recents:        recents,
-		Signatures:     signatures,
-		spanner:        spanner,
-		stateReceiver:  genesisContracts,
-		HeimdallClient: heimdallClient,
-		execCtx:        context.Background(),
-		logger:         logger,
-		closeCh:        make(chan struct{}),
-		bridgeReader:   bridgeReader,
-		spanReader:     spanReader,
+		chainConfig:     chainConfig,
+		config:          borConfig,
+		DB:              db,
+		blockReader:     blockReader,
+		Recents:         recents,
+		Signatures:      signatures,
+		spanner:         spanner,
+		stateReceiver:   genesisContracts,
+		HeimdallClient:  heimdallClient,
+		execCtx:         context.Background(),
+		logger:          logger,
+		closeCh:         make(chan struct{}),
+		useBridgeReader: bridgeReader != nil && !reflect.ValueOf(bridgeReader).IsNil(), // needed for interface nil caveat
+		bridgeReader:    bridgeReader,
+		useSpanReader:   spanReader != nil && !reflect.ValueOf(spanReader).IsNil(), // needed for interface nil caveat
+		spanReader:      spanReader,
 	}
 
 	c.authorizedSigner.Store(&signer{
-		libcommon.Address{},
-		func(_ libcommon.Address, _ string, i []byte) ([]byte, error) {
+		common.Address{},
+		func(_ common.Address, _ string, i []byte) ([]byte, error) {
 			// return an error to prevent panics
-			return nil, &valset.UnauthorizedSignerError{Number: 0, Signer: libcommon.Address{}.Bytes()}
+			return nil, &valset.UnauthorizedSignerError{Number: 0, Signer: common.Address{}.Bytes()}
 		},
 	})
 
@@ -404,26 +411,6 @@ func New(
 	return c
 }
 
-type rwWrapper struct {
-	kv.RoDB
-}
-
-func (w rwWrapper) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
-	return errors.New("Update not implemented")
-}
-
-func (w rwWrapper) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error {
-	return errors.New("UpdateNosync not implemented")
-}
-
-func (w rwWrapper) BeginRw(ctx context.Context) (kv.RwTx, error) {
-	return nil, errors.New("BeginRw not implemented")
-}
-
-func (w rwWrapper) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
-	return nil, errors.New("BeginRwNosync not implemented")
-}
-
 // NewRo is used by the rpcdaemon and tests which need read only access to the provided data services
 func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlockReader, logger log.Logger) *Bor {
 	// get bor config
@@ -434,13 +421,13 @@ func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlock
 		borConfig.Sprint = defaultSprintLength
 	}
 
-	recents, _ := lru.NewARC[libcommon.Hash, *Snapshot](inmemorySnapshots)
-	signatures, _ := lru.NewARC[libcommon.Hash, libcommon.Address](inmemorySignatures)
+	recents, _ := lru.NewARC[common.Hash, *Snapshot](inmemorySnapshots)
+	signatures, _ := lru.NewARC[common.Hash, common.Address](inmemorySignatures)
 
 	return &Bor{
 		chainConfig: chainConfig,
 		config:      borConfig,
-		DB:          rwWrapper{db},
+		DB:          kv.RwWrapper{RoDB: db},
 		blockReader: blockReader,
 		logger:      logger,
 		Recents:     recents,
@@ -471,7 +458,7 @@ func (c *Bor) HeaderProgress(p HeaderProgress) {
 // from the signature in the header's extra-data section.
 // This is thread-safe (only access the header and config (which is never updated),
 // as well as signatures, which are lru.ARCCache, which is thread-safe)
-func (c *Bor) Author(header *types.Header) (libcommon.Address, error) {
+func (c *Bor) Author(header *types.Header) (common.Address, error) {
 	return Ecrecover(header, c.Signatures, c.config)
 }
 
@@ -513,8 +500,9 @@ func (c *Bor) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 	number := header.Number.Uint64()
 
 	// Don't waste time checking blocks from the future
-	if header.Time > uint64(time.Now().Unix()) {
-		return consensus.ErrFutureBlock
+	now := time.Now().Unix()
+	if header.Time > uint64(now) {
+		return fmt.Errorf("%w: expected: %s, got: %s", consensus.ErrFutureBlock, time.Unix(now, 0), time.Unix(int64(header.Time), 0))
 	}
 
 	if err := ValidateHeaderUnusedFields(header); err != nil {
@@ -570,12 +558,12 @@ func ValidateHeaderSprintValidators(header *types.Header, config *borcfg.BorConf
 // ValidateHeaderUnusedFields validates that unused fields are empty.
 func ValidateHeaderUnusedFields(header *types.Header) error {
 	// Ensure that the mix digest is zero as we don't have fork protection currently
-	if header.MixDigest != (libcommon.Hash{}) {
+	if header.MixDigest != (common.Hash{}) {
 		return errInvalidMixDigest
 	}
 
 	// Ensure that the block doesn't contain any uncles which are meaningless in PoA
-	if header.UncleHash != types.EmptyUncleHash {
+	if header.UncleHash != empty.UncleHash {
 		return errInvalidUncleHash
 	}
 
@@ -730,7 +718,7 @@ func (c *Bor) initFrozenSnapshot(chain ChainHeaderReader, number uint64, logEver
 }
 
 // snapshot retrieves the authorization snapshot at a given point in time.
-func (c *Bor) snapshot(chain ChainHeaderReader, number uint64, hash libcommon.Hash, parents []*types.Header) (*Snapshot, error) {
+func (c *Bor) snapshot(chain ChainHeaderReader, number uint64, hash common.Hash, parents []*types.Header) (*Snapshot, error) {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	// Search for a snapshot in memory or on disk for checkpoints
@@ -847,7 +835,7 @@ func (c *Bor) VerifyUncles(_ consensus.ChainReader, _ *types.Header, uncles []*t
 // in the header satisfies the consensus protocol requirements.
 func (c *Bor) VerifySeal(chain ChainHeaderReader, header *types.Header) error {
 	var validatorSet *valset.ValidatorSet
-	if c.spanReader != nil {
+	if c.useSpanReader {
 		v, err := c.spanReader.Producers(context.Background(), header.Number.Uint64())
 		if err != nil {
 			return err
@@ -908,13 +896,13 @@ func (c *Bor) verifySeal(chain ChainHeaderReader, header *types.Header, parents 
 // header for running the transactions on top.
 func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
 	// If the block isn't a checkpoint, cast a random vote (good enough for now)
-	header.Coinbase = libcommon.Address{}
+	header.Coinbase = common.Address{}
 	header.Nonce = types.BlockNonce{}
 
 	number := header.Number.Uint64()
 	// Assemble the validator snapshot to check which votes make sense
 	var validatorSet *valset.ValidatorSet
-	if c.spanReader != nil {
+	if c.useSpanReader {
 		v, err := c.spanReader.Producers(context.Background(), header.Number.Uint64())
 		if err != nil {
 			return err
@@ -946,10 +934,23 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	// where it fetches producers internally. As we fetch data from span
 	// in Erigon, use directly the `GetCurrentProducers` function.
 	if c.config.IsSprintEnd(number) {
-		spanID := uint64(heimdall.SpanIdAt(number + 1))
-		newValidators, err := c.spanner.GetCurrentProducers(spanID, chain.(ChainHeaderReader))
-		if err != nil {
-			return errUnknownValidators
+		var newValidators []*valset.Validator
+
+		if c.useSpanReader {
+			validators, err := c.spanReader.Producers(context.Background(), number+1)
+			if err != nil {
+				return err
+			}
+
+			newValidators = validators.Validators
+		} else {
+			var err error
+			spanID := uint64(heimdall.SpanIdAt(number + 1))
+
+			newValidators, err = c.spanner.GetCurrentProducers(spanID, chain.(ChainHeaderReader))
+			if err != nil {
+				return errUnknownValidators
+			}
 		}
 
 		// sort validator by address
@@ -998,7 +999,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	header.Extra = append(header.Extra, make([]byte, types.ExtraSealLength)...)
 
 	// Mix digest is reserved for now, set to empty
-	header.MixDigest = libcommon.Hash{}
+	header.MixDigest = common.Hash{}
 
 	// Ensure the timestamp has the correct delay
 	parent := chain.GetHeader(header.ParentHash, number-1)
@@ -1010,7 +1011,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	var err error
 	signer := c.authorizedSigner.Load().signer
 	// if signer is not empty
-	if !bytes.Equal(signer.Bytes(), libcommon.Address{}.Bytes()) {
+	if !bytes.Equal(signer.Bytes(), common.Address{}.Bytes()) {
 		succession, err = validatorSet.GetSignerSuccessionNumber(signer, number)
 		if err != nil {
 			return err
@@ -1034,7 +1035,7 @@ func (c *Bor) CalculateRewards(config *chain.Config, header *types.Header, uncle
 // rewards given.
 func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
-	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
+	chain consensus.ChainReader, syscall consensus.SystemCall, skipReceiptsEval bool, logger log.Logger,
 ) (types.Transactions, types.Receipts, types.FlatRequests, error) {
 	headerNumber := header.Number.Uint64()
 
@@ -1058,7 +1059,7 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 			}
 
 			// commit states
-			if err := c.CommitStates(state, header, cx, syscall, logger); err != nil {
+			if err := c.CommitStates(state, header, cx, syscall, logger, false); err != nil {
 				err := fmt.Errorf("Finalize.CommitStates: %w", err)
 				c.logger.Error("[bor] Error while committing states", "err", err)
 				return nil, types.Receipts{}, nil, err
@@ -1124,7 +1125,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 				return nil, nil, types.Receipts{}, nil, err
 			}
 			// commit states
-			if err := c.CommitStates(state, header, cx, syscall, logger); err != nil {
+			if err := c.CommitStates(state, header, cx, syscall, logger, true); err != nil {
 				err := fmt.Errorf("FinalizeAndAssemble.CommitStates: %w", err)
 				c.logger.Error("[bor] committing states", "err", err)
 				return nil, nil, types.Receipts{}, nil, err
@@ -1154,7 +1155,7 @@ func (c *Bor) Initialize(config *chain.Config, chain consensus.ChainHeaderReader
 
 // Authorize injects a private key into the consensus engine to mint new blocks
 // with.
-func (c *Bor) Authorize(currentSigner libcommon.Address, signFn SignerFn) {
+func (c *Bor) Authorize(currentSigner common.Address, signFn SignerFn) {
 	c.authorizedSigner.Store(&signer{
 		signer: currentSigner,
 		signFn: signFn,
@@ -1166,7 +1167,7 @@ func (c *Bor) Authorize(currentSigner libcommon.Address, signFn SignerFn) {
 func (c *Bor) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *types.BlockWithReceipts, results chan<- *types.BlockWithReceipts, stop <-chan struct{}) error {
 	block := blockWithReceipts.Block
 	receipts := blockWithReceipts.Receipts
-	header := block.HeaderNoCopy()
+	header := block.Header()
 	// Sealing the genesis block is not supported
 	number := header.Number.Uint64()
 
@@ -1185,7 +1186,7 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *types.B
 	signer, signFn := currentSigner.signer, currentSigner.signFn
 
 	var successionNumber int
-	if c.spanReader != nil {
+	if c.useSpanReader {
 		validatorSet, err := c.spanReader.Producers(context.Background(), number)
 		if err != nil {
 			return err
@@ -1221,7 +1222,7 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *types.B
 
 	go func() {
 		// Wait until sealing is terminated or delay timeout.
-		c.logger.Info("[bor] Waiting for slot to sign and propagate", "number", number, "hash", header.Hash, "delay", libcommon.PrettyDuration(delay), "TxCount", block.Transactions().Len(), "Signer", signer)
+		c.logger.Info("[bor] Waiting for slot to sign and propagate", "number", number, "hash", header.Hash, "delay", common.PrettyDuration(delay), "TxCount", block.Transactions().Len(), "Signer", signer)
 
 		select {
 		case <-stop:
@@ -1240,7 +1241,7 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *types.B
 				c.logger.Info(
 					"[bor] Sealed out-of-turn",
 					"number", number,
-					"wiggle", libcommon.PrettyDuration(wiggle),
+					"wiggle", common.PrettyDuration(wiggle),
 					"delay", delay,
 					"headerDifficulty", header.Difficulty,
 					"signer", signer.Hex(),
@@ -1274,7 +1275,7 @@ func (c *Bor) IsValidator(header *types.Header) (bool, error) {
 
 	currentSigner := c.authorizedSigner.Load()
 
-	if c.spanReader != nil {
+	if c.useSpanReader {
 		validatorSet, err := c.spanReader.Producers(context.Background(), number)
 		if err != nil {
 			return false, err
@@ -1306,7 +1307,7 @@ func (c *Bor) IsProposer(header *types.Header) (bool, error) {
 
 	var validatorSet *valset.ValidatorSet
 	var err error
-	if c.spanReader != nil {
+	if c.useSpanReader {
 		validatorSet, err = c.spanReader.Producers(context.Background(), number)
 		if err != nil {
 			return false, err
@@ -1327,10 +1328,10 @@ func (c *Bor) IsProposer(header *types.Header) (bool, error) {
 // CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
 // that a new block should have based on the previous blocks in the chain and the
 // current signer.
-func (c *Bor) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _ *big.Int, parentNumber uint64, parentHash, _ libcommon.Hash, _ uint64) *big.Int {
+func (c *Bor) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _ *big.Int, parentNumber uint64, parentHash, _ common.Hash, _ uint64) *big.Int {
 	signer := c.authorizedSigner.Load().signer
 
-	if c.spanReader != nil {
+	if c.useSpanReader {
 		validatorSet, err := c.spanReader.Producers(context.Background(), parentNumber+1)
 		if err != nil {
 			return nil
@@ -1348,11 +1349,11 @@ func (c *Bor) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _ *
 }
 
 // SealHash returns the hash of a block prior to it being sealed.
-func (c *Bor) SealHash(header *types.Header) libcommon.Hash {
+func (c *Bor) SealHash(header *types.Header) common.Hash {
 	return SealHash(header, c.config)
 }
 
-func (c *Bor) IsServiceTransaction(sender libcommon.Address, syscall consensus.SystemCall) bool {
+func (c *Bor) IsServiceTransaction(sender common.Address, syscall consensus.SystemCall) bool {
 	return false
 }
 
@@ -1414,7 +1415,7 @@ func (c *Bor) checkAndCommitSpan(
 
 	currentSpan, err := c.spanner.GetCurrentSpan(syscall)
 	if err != nil {
-		return err
+		return fmt.Errorf("GetCurrentSpan: %w", err)
 	}
 
 	// Whenever `checkAndCommitSpan` is called for the first time, during the start of 'technically'
@@ -1423,13 +1424,17 @@ func (c *Bor) checkAndCommitSpan(
 	// is committed eventually when we commit 1st span (as per the contract). The check below
 	// takes care of that and commits the 1st span (hence the `currentSpan.Id+1` param).
 	if currentSpan.EndBlock == 0 {
-		return c.fetchAndCommitSpan(uint64(currentSpan.Id+1), state, header, chain, syscall)
+		if err := c.fetchAndCommitSpan(uint64(currentSpan.Id+1), state, header, chain, syscall); err != nil {
+			return fmt.Errorf("fetchAndCommitSpan: %w", err)
+		}
 	}
 
 	// For subsequent calls, commit the next span on the first block of the last sprint of a span
 	sprintLength := c.config.CalculateSprintLength(headerNumber)
 	if currentSpan.EndBlock > sprintLength && currentSpan.EndBlock-sprintLength+1 == headerNumber {
-		return c.fetchAndCommitSpan(uint64(currentSpan.Id+1), state, header, chain, syscall)
+		if err := c.fetchAndCommitSpan(uint64(currentSpan.Id+1), state, header, chain, syscall); err != nil {
+			return fmt.Errorf("fetchAndCommitSpan2: %w", err)
+		}
 	}
 
 	return nil
@@ -1452,7 +1457,7 @@ func (c *Bor) fetchAndCommitSpan(
 		}
 
 		heimdallSpan = s
-	} else if c.spanReader != nil {
+	} else if c.useSpanReader {
 		span, ok, err := c.spanReader.Span(context.Background(), newSpanID)
 		if err != nil {
 			return err
@@ -1560,13 +1565,52 @@ func (c *Bor) CommitStates(
 	chain statefull.ChainContext,
 	syscall consensus.SystemCall,
 	logger log.Logger,
+	fetchEventsWithingTime bool,
 ) error {
 	blockNum := header.Number.Uint64()
 
-	if c.bridgeReader != nil {
-		events, err := c.bridgeReader.Events(c.execCtx, blockNum)
-		if err != nil {
-			return err
+	if c.useBridgeReader {
+		var events []*types.Message
+		var err error
+
+		ctx := dbg.ContextWithDebug(c.execCtx, true)
+		if fetchEventsWithingTime {
+			sprintLength := c.config.CalculateSprintLength(blockNum)
+
+			if blockNum < sprintLength {
+				return nil
+			}
+
+			prevSprintStart := chain.Chain.GetHeaderByNumber(blockNum - sprintLength)
+			stateSyncDelay := c.config.CalculateStateSyncDelay(blockNum)
+
+			timeFrom := time.Unix(int64(prevSprintStart.Time-stateSyncDelay), 0)
+			timeTo := time.Unix(int64(header.Time-stateSyncDelay), 0)
+
+			// Previous sprint was not indore.
+			if !c.config.IsIndore(prevSprintStart.Number.Uint64()) {
+				if prevSprintStart.Number.Uint64() >= sprintLength {
+					prevPrevSprintStart := chain.Chain.GetHeaderByNumber(prevSprintStart.Number.Uint64() - sprintLength)
+					timeFrom = time.Unix(int64(prevPrevSprintStart.Time), 0)
+				} else {
+					timeFrom = time.Unix(0, 0)
+				}
+			}
+
+			// Current sprint was not indore.
+			if !c.config.IsIndore(blockNum) {
+				timeTo = time.Unix(int64(prevSprintStart.Time), 0)
+			}
+
+			events, err = c.bridgeReader.EventsWithinTime(ctx, timeFrom, timeTo)
+			if err != nil {
+				return err
+			}
+		} else {
+			events, err = c.bridgeReader.Events(ctx, blockNum)
+			if err != nil {
+				return err
+			}
 		}
 
 		for _, event := range events {
@@ -1603,7 +1647,7 @@ func (c *Bor) CommitStates(
 	return nil
 }
 
-func (c *Bor) SetHeimdallClient(h heimdall.HeimdallClient) {
+func (c *Bor) SetHeimdallClient(h heimdall.Client) {
 	c.HeimdallClient = h
 }
 
@@ -1627,7 +1671,7 @@ func (c *Bor) getNextHeimdallSpanForTest(
 
 	// Retrieve the snapshot needed to verify this header and cache it
 	var validatorSet *valset.ValidatorSet
-	if c.spanReader != nil {
+	if c.useSpanReader {
 		v, err := c.spanReader.Producers(context.Background(), headerNumber)
 		if err != nil {
 			return nil, err
@@ -1668,22 +1712,42 @@ func (c *Bor) getNextHeimdallSpanForTest(
 }
 
 // BorTransfer transfer in Bor
-func BorTransfer(db evmtypes.IntraBlockState, sender, recipient libcommon.Address, amount *uint256.Int, bailout bool) {
+func BorTransfer(db evmtypes.IntraBlockState, sender, recipient common.Address, amount *uint256.Int, bailout bool) error {
 	// get inputs before
-	input1 := db.GetBalance(sender).Clone()
-	input2 := db.GetBalance(recipient).Clone()
-
-	if !bailout {
-		db.SubBalance(sender, amount, tracing.BalanceChangeTransfer)
+	input1, err := db.GetBalance(sender)
+	if err != nil {
+		return err
 	}
-	db.AddBalance(recipient, amount, tracing.BalanceChangeTransfer)
-
+	input1 = input1.Clone()
+	input2, err := db.GetBalance(recipient)
+	if err != nil {
+		return err
+	}
+	input2 = input2.Clone()
+	if !bailout {
+		err := db.SubBalance(sender, amount, tracing.BalanceChangeTransfer)
+		if err != nil {
+			return err
+		}
+	}
+	err = db.AddBalance(recipient, amount, tracing.BalanceChangeTransfer)
+	if err != nil {
+		return err
+	}
 	// get outputs after
-	output1 := db.GetBalance(sender).Clone()
-	output2 := db.GetBalance(recipient).Clone()
-
+	output1, err := db.GetBalance(sender)
+	if err != nil {
+		return err
+	}
+	output1 = output1.Clone()
+	output2, err := db.GetBalance(recipient)
+	if err != nil {
+		return err
+	}
+	output2 = output2.Clone()
 	// add transfer log into state
 	addTransferLog(db, transferLogSig, sender, recipient, amount, input1, input2, output1, output2)
+	return nil
 }
 
 func (c *Bor) GetTransferFunc() evmtypes.TransferFunc {
@@ -1692,7 +1756,7 @@ func (c *Bor) GetTransferFunc() evmtypes.TransferFunc {
 
 // AddFeeTransferLog adds fee transfer log into state
 // Deprecating transfer log and will be removed in future fork. PLEASE DO NOT USE this transfer log going forward. Parameters won't get updated as expected going forward with EIP1559
-func AddFeeTransferLog(ibs evmtypes.IntraBlockState, sender libcommon.Address, coinbase libcommon.Address, result *evmtypes.ExecutionResult) {
+func AddFeeTransferLog(ibs evmtypes.IntraBlockState, sender common.Address, coinbase common.Address, result *evmtypes.ExecutionResult) {
 	output1 := result.SenderInitBalance.Clone()
 	output2 := result.CoinbaseInitBalance.Clone()
 	addTransferLog(

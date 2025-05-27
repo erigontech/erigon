@@ -18,8 +18,8 @@ package antiquary
 
 import (
 	"context"
-	"io/ioutil"
 	"math"
+	"os"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -32,11 +32,13 @@ import (
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/turbo/snapshotsync"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -50,6 +52,7 @@ type Antiquary struct {
 	downloader                     proto_downloader.DownloaderClient
 	logger                         log.Logger
 	sn                             *freezeblocks.CaplinSnapshots
+	stateSn                        *snapshotsync.CaplinStateSnapshots
 	snReader                       freezeblocks.BeaconSnapshotReader
 	snBuildSema                    *semaphore.Weighted // semaphore for building only one type (blocks, caplin, v3) at a time
 	ctx                            context.Context
@@ -60,12 +63,13 @@ type Antiquary struct {
 
 	validatorsTable *state_accessors.StaticValidatorTable
 	genesisState    *state.CachingBeaconState
+	syncedData      synced_data.SyncedData
 	// set to nil
 	currentState *state.CachingBeaconState
 	balances32   []byte
 }
 
-func NewAntiquary(ctx context.Context, blobStorage blob_storage.BlobStorage, genesisState *state.CachingBeaconState, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, logger log.Logger, states, blocks, blobs, snapgen bool, snBuildSema *semaphore.Weighted) *Antiquary {
+func NewAntiquary(ctx context.Context, blobStorage blob_storage.BlobStorage, genesisState *state.CachingBeaconState, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, stateSn *snapshotsync.CaplinStateSnapshots, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, syncedData synced_data.SyncedData, logger log.Logger, states, blocks, blobs, snapgen bool, snBuildSema *semaphore.Weighted) *Antiquary {
 	backfilled := &atomic.Bool{}
 	blobBackfilled := &atomic.Bool{}
 	backfilled.Store(false)
@@ -89,13 +93,15 @@ func NewAntiquary(ctx context.Context, blobStorage blob_storage.BlobStorage, gen
 		blocks:          blocks,
 		blobs:           blobs,
 		snapgen:         snapgen,
+		stateSn:         stateSn,
+		syncedData:      syncedData,
 	}
 }
 
 // Check if the snapshot directory has beacon blocks files aka "contains beaconblock" and has a ".seg" extension over its first layer
 func doesSnapshotDirHaveBeaconBlocksFiles(snapshotDir string) bool {
 	// Iterate over the files in the snapshot directory
-	files, err := ioutil.ReadDir(snapshotDir)
+	files, err := os.ReadDir(snapshotDir)
 	if err != nil {
 		return false
 	}
@@ -160,6 +166,12 @@ func (a *Antiquary) Loop() error {
 	if err := a.sn.OpenFolder(); err != nil {
 		return err
 	}
+	if a.stateSn != nil {
+		if err := a.stateSn.OpenFolder(); err != nil {
+			return err
+		}
+	}
+
 	defer logInterval.Stop()
 	if from != a.sn.BlocksAvailable() && a.sn.BlocksAvailable() != 0 {
 		a.logger.Info("[Antiquary] Stopping Caplin to process historical indicies", "from", from, "to", a.sn.BlocksAvailable())
@@ -205,6 +217,14 @@ func (a *Antiquary) Loop() error {
 		}
 	}
 
+	if a.stateSn != nil {
+		if err := a.stateSn.OpenFolder(); err != nil {
+			return err
+		}
+	}
+	log.Info("[Caplin] Stat", "blocks-static", a.sn.BlocksAvailable(), "states-static", a.stateSn.BlocksAvailable(), "blobs-static", a.sn.FrozenBlobs(),
+		"state-history-enabled", a.states, "block-history-enabled", a.blocks, "blob-history-enabled", a.blobs, "snapgen", a.snapgen)
+
 	frozenSlots := a.sn.BlocksAvailable()
 	if frozenSlots != 0 {
 		if err := beacon_indicies.PruneBlocks(a.ctx, tx, frozenSlots); err != nil {
@@ -212,9 +232,6 @@ func (a *Antiquary) Loop() error {
 		}
 	}
 
-	if a.states {
-		go a.loopStates(a.ctx)
-	}
 	if err := beacon_indicies.WriteLastBeaconSnapshot(tx, frozenSlots); err != nil {
 		return err
 	}
@@ -222,6 +239,10 @@ func (a *Antiquary) Loop() error {
 	a.logger.Info("[Antiquary] Restarting Caplin")
 	if err := tx.Commit(); err != nil {
 		return err
+	}
+
+	if a.states {
+		go a.loopStates(a.ctx)
 	}
 	// Check for snapshots retirement every 3 minutes
 	retirementTicker := time.NewTicker(12 * time.Second)

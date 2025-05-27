@@ -22,9 +22,9 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/erigontech/erigon/cl/phase1/core/state"
-
+	"github.com/erigontech/erigon-lib/chain/networkid"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
 func downloadGenesisState(url string) ([]byte, error) {
@@ -50,31 +50,47 @@ var sepoliaStateSSZ []byte
 //go:embed gnosis.state.ssz
 var gnosisStateSSZ []byte
 
+//go:embed chiado.state.ssz
+var chiadoStateSSZ []byte
+
 // Return genesis state
 func GetGenesisState(network clparams.NetworkType) (*state.CachingBeaconState, error) {
 	_, config := clparams.GetConfigsByNetwork(network)
 	returnState := state.New(config)
 
 	switch network {
-	case clparams.MainnetNetwork:
+	case networkid.MainnetChainID:
 		if err := returnState.DecodeSSZ(mainnetStateSSZ, int(clparams.Phase0Version)); err != nil {
 			return nil, err
 		}
-	case clparams.SepoliaNetwork:
+	case networkid.SepoliaChainID:
 		if err := returnState.DecodeSSZ(sepoliaStateSSZ, int(clparams.Phase0Version)); err != nil {
 			return nil, err
 		}
-	case clparams.GnosisNetwork:
+	case networkid.GnosisChainID:
 		if err := returnState.DecodeSSZ(gnosisStateSSZ, int(clparams.Phase0Version)); err != nil {
 			return nil, err
 		}
-	case clparams.HoleskyNetwork:
+	case networkid.ChiadoChainID:
+		if err := returnState.DecodeSSZ(chiadoStateSSZ, int(clparams.Phase0Version)); err != nil {
+			return nil, err
+		}
+	case networkid.HoleskyChainID:
 		// Download genesis state by wget the url
 		encodedState, err := downloadGenesisState("https://github.com/eth-clients/holesky/raw/main/metadata/genesis.ssz")
 		if err != nil {
 			return nil, err
 		}
-		if err := returnState.DecodeSSZ(encodedState, int(clparams.BellatrixVersion)); err != nil {
+		if err := returnState.DecodeSSZ(encodedState, int(clparams.Phase0Version)); err != nil {
+			return nil, err
+		}
+	case networkid.HoodiChainID:
+		// Download genesis state by wget the url
+		encodedState, err := downloadGenesisState("https://github.com/eth-clients/hoodi/raw/main/metadata/genesis.ssz")
+		if err != nil {
+			return nil, err
+		}
+		if err := returnState.DecodeSSZ(encodedState, int(clparams.Phase0Version)); err != nil {
 			return nil, err
 		}
 	default:
@@ -84,5 +100,5 @@ func GetGenesisState(network clparams.NetworkType) (*state.CachingBeaconState, e
 }
 
 func IsGenesisStateSupported(network clparams.NetworkType) bool {
-	return network == clparams.MainnetNetwork || network == clparams.SepoliaNetwork || network == clparams.GnosisNetwork || network == clparams.HoleskyNetwork
+	return network == networkid.MainnetChainID || network == networkid.SepoliaChainID || network == networkid.GnosisChainID || network == networkid.ChiadoChainID || network == networkid.HoleskyChainID || network == networkid.HoodiChainID
 }

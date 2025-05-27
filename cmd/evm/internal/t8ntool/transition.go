@@ -34,9 +34,9 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -44,18 +44,19 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
 	libstate "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/consensus/ethash"
-	"github.com/erigontech/erigon/consensus/merge"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	trace_logger "github.com/erigontech/erigon/eth/tracers/logger"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/execution/consensus/ethash"
+	"github.com/erigontech/erigon/execution/consensus/merge"
+	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/tests"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
 )
 
 const (
@@ -103,7 +104,7 @@ func Main(ctx *cli.Context) error {
 		err     error
 		baseDir = ""
 	)
-	var getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error)
+	var getTracer func(txIndex int, txHash common.Hash) (*tracing.Hooks, error)
 
 	// If user specified a basedir, make sure it exists
 	if ctx.IsSet(OutputBasedir.Name) {
@@ -130,7 +131,7 @@ func Main(ctx *cli.Context) error {
 				prevFile.Close()
 			}
 		}()
-		getTracer = func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error) {
+		getTracer = func(txIndex int, txHash common.Hash) (*tracing.Hooks, error) {
 			if prevFile != nil {
 				prevFile.Close()
 			}
@@ -139,10 +140,10 @@ func Main(ctx *cli.Context) error {
 				return nil, NewError(ErrorIO, fmt.Errorf("failed creating trace-file: %v", err2))
 			}
 			prevFile = traceFile
-			return trace_logger.NewJSONLogger(logConfig, traceFile), nil
+			return trace_logger.NewJSONLogger(logConfig, traceFile).Tracer().Hooks, nil
 		}
 	} else {
-		getTracer = func(txIndex int, txHash libcommon.Hash) (tracer vm.EVMLogger, err error) {
+		getTracer = func(txIndex int, txHash common.Hash) (tracer *tracing.Hooks, err error) {
 			return nil, nil
 		}
 	}
@@ -195,14 +196,13 @@ func Main(ctx *cli.Context) error {
 
 	vmConfig := vm.Config{
 		Tracer:        nil,
-		Debug:         ctx.Bool(TraceFlag.Name),
 		StatelessExec: true,
 	}
 	// Construct the chainconfig
 	var chainConfig *chain.Config
 	if cConf, extraEips, err1 := tests.GetChainConfig(ctx.String(ForknameFlag.Name)); err1 != nil {
 		return NewError(ErrorVMConfig, fmt.Errorf("failed constructing chain configuration: %v", err1))
-	} else { //nolint:golint
+	} else {
 		chainConfig = cConf
 		vmConfig.ExtraEips = extraEips
 	}
@@ -285,10 +285,10 @@ func Main(ctx *cli.Context) error {
 	block := types.NewBlock(header, txs, ommerHeaders, nil /* receipts */, prestate.Env.Withdrawals)
 
 	var hashError error
-	getHash := func(num uint64) libcommon.Hash {
+	getHash := func(num uint64) common.Hash {
 		if prestate.Env.BlockHashes == nil {
 			hashError = fmt.Errorf("getHash(%d) invoked, no blockhashes provided", num)
-			return libcommon.Hash{}
+			return common.Hash{}
 		}
 		h, ok := prestate.Env.BlockHashes[math.HexOrDecimal64(num)]
 		if !ok {
@@ -297,11 +297,10 @@ func Main(ctx *cli.Context) error {
 		return h
 	}
 
-	db, agg := temporaltest.NewTestDB(nil, datadir.New(""))
+	db := temporaltest.NewTestDB(nil, datadir.New(""))
 	defer db.Close()
-	defer agg.Close()
 
-	tx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginTemporalRw(context.Background())
 	if err != nil {
 		return err
 	}
@@ -341,7 +340,7 @@ func Main(ctx *cli.Context) error {
 	collector := make(Alloc)
 
 	dumper := state.NewDumper(tx, rawdbv3.TxNums, prestate.Env.Number)
-	dumper.DumpToCollector(collector, false, false, libcommon.Address{}, 0)
+	dumper.DumpToCollector(collector, false, false, common.Address{}, 0)
 	return dispatchOutput(ctx, baseDir, result, collector, body)
 }
 
@@ -355,7 +354,7 @@ type txWithKey struct {
 func (t *txWithKey) UnmarshalJSON(input []byte) error {
 	// Read the secretKey, if present
 	type sKey struct {
-		Key *libcommon.Hash `json:"secretKey"`
+		Key *common.Hash `json:"secretKey"`
 	}
 	var key sKey
 	if err := json.Unmarshal(input, &key); err != nil {
@@ -371,7 +370,7 @@ func (t *txWithKey) UnmarshalJSON(input []byte) error {
 	}
 
 	// Now, read the transaction itself
-	var txJson jsonrpc.RPCTransaction
+	var txJson ethapi.RPCTransaction
 
 	if err := json.Unmarshal(input, &txJson); err != nil {
 		return err
@@ -386,7 +385,7 @@ func (t *txWithKey) UnmarshalJSON(input []byte) error {
 	return nil
 }
 
-func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
+func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 	gasPrice, value := uint256.NewInt(0), uint256.NewInt(0)
 	var overflow bool
 	var chainId *uint256.Int
@@ -413,11 +412,11 @@ func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
 	}
 
 	commonTx := types.CommonTx{
-		Nonce: uint64(txJson.Nonce),
-		To:    txJson.To,
-		Value: value,
-		Gas:   uint64(txJson.Gas),
-		Data:  txJson.Input,
+		Nonce:    uint64(txJson.Nonce),
+		To:       txJson.To,
+		Value:    value,
+		GasLimit: uint64(txJson.Gas),
+		Data:     txJson.Input,
 	}
 
 	commonTx.V.SetFromBig(txJson.V.ToInt())
@@ -441,17 +440,17 @@ func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
 			AccessList: *txJson.Accesses,
 		}, nil
 	} else if txJson.Type == types.DynamicFeeTxType || txJson.Type == types.SetCodeTxType {
-		var tip *uint256.Int
+		var tipCap *uint256.Int
 		var feeCap *uint256.Int
-		if txJson.Tip != nil {
-			tip, overflow = uint256.FromBig(txJson.Tip.ToInt())
+		if txJson.MaxPriorityFeePerGas != nil {
+			tipCap, overflow = uint256.FromBig(txJson.MaxPriorityFeePerGas.ToInt())
 			if overflow {
 				return nil, errors.New("maxPriorityFeePerGas field caused an overflow (uint256)")
 			}
 		}
 
-		if txJson.FeeCap != nil {
-			feeCap, overflow = uint256.FromBig(txJson.FeeCap.ToInt())
+		if txJson.MaxFeePerGas != nil {
+			feeCap, overflow = uint256.FromBig(txJson.MaxFeePerGas.ToInt())
 			if overflow {
 				return nil, errors.New("maxFeePerGas field caused an overflow (uint256)")
 			}
@@ -461,7 +460,7 @@ func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
 			//it's ok to copy here - because it's constructor of object - no parallel access yet
 			CommonTx:   commonTx, //nolint
 			ChainID:    chainId,
-			Tip:        tip,
+			TipCap:     tipCap,
 			FeeCap:     feeCap,
 			AccessList: *txJson.Accesses,
 		}
@@ -472,7 +471,11 @@ func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
 
 		auths := make([]types.Authorization, 0)
 		for _, auth := range *txJson.Authorizations {
-			auths = append(auths, auth.ToAuthorization())
+			a, err := auth.ToAuthorization()
+			if err != nil {
+				return nil, err
+			}
+			auths = append(auths, a)
 		}
 
 		return &types.SetCodeTransaction{
@@ -518,17 +521,17 @@ func signUnsignedTransactions(txs []*txWithKey, signer types.Signer) (types.Tran
 	return signedTxs, nil
 }
 
-type Alloc map[libcommon.Address]types.GenesisAccount
+type Alloc map[common.Address]types.GenesisAccount
 
-func (g Alloc) OnRoot(libcommon.Hash) {}
+func (g Alloc) OnRoot(common.Hash) {}
 
-func (g Alloc) OnAccount(addr libcommon.Address, dumpAccount state.DumpAccount) {
+func (g Alloc) OnAccount(addr common.Address, dumpAccount state.DumpAccount) {
 	balance, _ := new(big.Int).SetString(dumpAccount.Balance, 10)
-	var storage map[libcommon.Hash]libcommon.Hash
+	var storage map[common.Hash]common.Hash
 	if dumpAccount.Storage != nil {
-		storage = make(map[libcommon.Hash]libcommon.Hash)
+		storage = make(map[common.Hash]common.Hash)
 		for k, v := range dumpAccount.Storage {
-			storage[libcommon.HexToHash(k)] = libcommon.HexToHash(v)
+			storage[common.HexToHash(k)] = common.HexToHash(v)
 		}
 	}
 	genesisAccount := types.GenesisAccount{
@@ -556,7 +559,7 @@ func saveFile(baseDir, filename string, data interface{}) error {
 
 // dispatchOutput writes the output data to either stderr or stdout, or to the specified
 // files
-func dispatchOutput(ctx *cli.Context, baseDir string, result *core.EphemeralExecResult, alloc Alloc, body hexutility.Bytes) error {
+func dispatchOutput(ctx *cli.Context, baseDir string, result *core.EphemeralExecResult, alloc Alloc, body hexutil.Bytes) error {
 	stdOutObject := make(map[string]interface{})
 	stdErrObject := make(map[string]interface{})
 	dispatch := func(baseDir, fName, name string, obj interface{}) error {
@@ -617,14 +620,15 @@ func NewHeader(env stEnv) *types.Header {
 	return &header
 }
 
-func CalculateStateRoot(tx kv.RwTx) (*libcommon.Hash, error) {
+func CalculateStateRoot(tx kv.TemporalRwTx) (*common.Hash, error) {
 	// Generate hashed state
 	c, err := tx.RwCursor(kv.PlainState)
 	if err != nil {
 		return nil, err
 	}
-	h := libcommon.NewHasher()
-	defer libcommon.ReturnHasherToPool(h)
+	defer c.Close()
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
 	domains, err := libstate.NewSharedDomains(tx, log.New())
 	if err != nil {
 		return nil, fmt.Errorf("NewSharedDomains: %w", err)
@@ -653,21 +657,21 @@ func CalculateStateRoot(tx kv.RwTx) (*libcommon.Hash, error) {
 			h.Sha.Write(k[length.Addr+length.Incarnation:])
 			//nolint:errcheck
 			h.Sha.Read(newK[length.Hash+length.Incarnation:])
-			if err = tx.Put(kv.HashedStorage, newK, libcommon.CopyBytes(v)); err != nil {
+			if err = tx.Put(kv.HashedStorageDeprecated, newK, common.CopyBytes(v)); err != nil {
 				return nil, fmt.Errorf("insert hashed key: %w", err)
 			}
 		} else {
-			if err = tx.Put(kv.HashedAccounts, newK, libcommon.CopyBytes(v)); err != nil {
+			if err = tx.Put(kv.HashedAccountsDeprecated, newK, common.CopyBytes(v)); err != nil {
 				return nil, fmt.Errorf("insert hashed key: %w", err)
 			}
 		}
 	}
 	c.Close()
-	root, err := domains.ComputeCommitment(context.Background(), true, domains.BlockNum(), "")
+	root, err := domains.ComputeCommitment(context.Background(), tx, true, domains.BlockNum(), "")
 	if err != nil {
 		return nil, err
 	}
-	hashRoot := libcommon.Hash{}
+	hashRoot := common.Hash{}
 	hashRoot.SetBytes(root)
 
 	return &hashRoot, nil

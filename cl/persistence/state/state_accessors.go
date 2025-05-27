@@ -18,135 +18,28 @@ package state_accessors
 
 import (
 	"bytes"
+	"encoding/binary"
 
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 
-// InitializeValidatorTable initializes the validator table in the database.
-func InitializeStaticTables(tx kv.RwTx, state *state.CachingBeaconState) error {
-	var err error
-	if err = tx.ClearBucket(kv.ValidatorPublicKeys); err != nil {
-		return err
-	}
-	if err = tx.ClearBucket(kv.HistoricalRoots); err != nil {
-		return err
-	}
-	if err = tx.ClearBucket(kv.HistoricalSummaries); err != nil {
-		return err
-	}
-	state.ForEachValidator(func(v solid.Validator, idx, total int) bool {
-		key := base_encoding.Encode64ToBytes4(uint64(idx))
-		if err = tx.Append(kv.ValidatorPublicKeys, key, v.PublicKeyBytes()); err != nil {
-			return false
-		}
-		if err = tx.Put(kv.InvertedValidatorPublicKeys, v.PublicKeyBytes(), key); err != nil {
-			return false
-		}
-		return true
-	})
-	if err != nil {
-		return err
-	}
-	for i := 0; i < int(state.HistoricalRootsLength()); i++ {
-		key := base_encoding.Encode64ToBytes4(uint64(i))
-		root := state.HistoricalRoot(i)
-		if err = tx.Append(kv.HistoricalRoots, key, root[:]); err != nil {
-			return err
-		}
-	}
-	var temp []byte
-	for i := 0; i < int(state.HistoricalSummariesLength()); i++ {
-		temp = temp[:0]
-		key := base_encoding.Encode64ToBytes4(uint64(i))
-		summary := state.HistoricalSummary(i)
-		temp, err = summary.EncodeSSZ(temp)
-		if err != nil {
-			return err
-		}
-		if err = tx.Append(kv.HistoricalSummaries, key, temp); err != nil {
-			return err
-		}
-	}
-	return err
-}
+type GetValFn func(table string, key []byte) ([]byte, error)
 
-// IncrementValidatorTable increments the validator table in the database, by ignoring all the preverified indices.
-func IncrementPublicKeyTable(tx kv.RwTx, state *state.CachingBeaconState, preverifiedIndicies uint64) error {
-	valLength := state.ValidatorLength()
-	for i := preverifiedIndicies; i < uint64(valLength); i++ {
-		key := base_encoding.Encode64ToBytes4(i)
-		pubKey, err := state.ValidatorPublicKey(int(i))
-		if err != nil {
-			return err
+func GetValFnTxAndSnapshot(tx kv.Tx, snapshotRoTx *snapshotsync.CaplinStateView) GetValFn {
+	return func(table string, key []byte) ([]byte, error) {
+		if snapshotRoTx != nil {
+			slot := uint64(binary.BigEndian.Uint32(key))
+			segment, ok := snapshotRoTx.VisibleSegment(slot, table)
+			if ok {
+				return segment.Get(slot)
+			}
 		}
-		// We put as there could be reorgs and thus some of overwriting
-		if err := tx.Put(kv.ValidatorPublicKeys, key, pubKey[:]); err != nil {
-			return err
-		}
-		if err := tx.Put(kv.InvertedValidatorPublicKeys, pubKey[:], key); err != nil {
-			return err
-		}
+		return tx.GetOne(table, key)
 	}
-	return nil
-}
-
-func IncrementHistoricalRootsTable(tx kv.RwTx, state *state.CachingBeaconState, preverifiedIndicies uint64) error {
-	for i := preverifiedIndicies; i < state.HistoricalRootsLength(); i++ {
-		key := base_encoding.Encode64ToBytes4(i)
-		root := state.HistoricalRoot(int(i))
-		if err := tx.Put(kv.HistoricalRoots, key, root[:]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func IncrementHistoricalSummariesTable(tx kv.RwTx, state *state.CachingBeaconState, preverifiedIndicies uint64) error {
-	var temp []byte
-	var err error
-	for i := preverifiedIndicies; i < state.HistoricalSummariesLength(); i++ {
-		temp = temp[:0]
-		key := base_encoding.Encode64ToBytes4(i)
-		summary := state.HistoricalSummary(int(i))
-		temp, err = summary.EncodeSSZ(temp)
-		if err != nil {
-			return err
-		}
-		if err = tx.Put(kv.HistoricalSummaries, key, temp); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func ReadPublicKeyByIndex(tx kv.Tx, index uint64) (libcommon.Bytes48, error) {
-	var pks []byte
-	var err error
-	key := base_encoding.Encode64ToBytes4(index)
-	if pks, err = tx.GetOne(kv.ValidatorPublicKeys, key); err != nil {
-		return libcommon.Bytes48{}, err
-	}
-	var ret libcommon.Bytes48
-	copy(ret[:], pks)
-	return ret, err
-}
-
-func ReadValidatorIndexByPublicKey(tx kv.Tx, key libcommon.Bytes48) (uint64, bool, error) {
-	var index []byte
-	var err error
-	if index, err = tx.GetOne(kv.InvertedValidatorPublicKeys, key[:]); err != nil {
-		return 0, false, err
-	}
-	if len(index) == 0 {
-		return 0, false, nil
-	}
-	return base_encoding.Decode64FromBytes4(index), true, nil
 }
 
 func GetStateProcessingProgress(tx kv.Tx) (uint64, error) {
@@ -164,9 +57,9 @@ func SetStateProcessingProgress(tx kv.RwTx, progress uint64) error {
 	return tx.Put(kv.StatesProcessingProgress, kv.StatesProcessingKey, base_encoding.Encode64ToBytes4(progress))
 }
 
-func ReadSlotData(tx kv.Tx, slot uint64) (*SlotData, error) {
+func ReadSlotData(getFn GetValFn, slot uint64, cfg *clparams.BeaconChainConfig) (*SlotData, error) {
 	sd := &SlotData{}
-	v, err := tx.GetOne(kv.SlotData, base_encoding.Encode64ToBytes4(slot))
+	v, err := getFn(kv.SlotData, base_encoding.Encode64ToBytes4(slot))
 	if err != nil {
 		return nil, err
 	}
@@ -175,12 +68,12 @@ func ReadSlotData(tx kv.Tx, slot uint64) (*SlotData, error) {
 	}
 	buf := bytes.NewBuffer(v)
 
-	return sd, sd.ReadFrom(buf)
+	return sd, sd.ReadFrom(buf, cfg)
 }
 
-func ReadEpochData(tx kv.Tx, slot uint64) (*EpochData, error) {
+func ReadEpochData(getFn GetValFn, slot uint64) (*EpochData, error) {
 	ed := &EpochData{}
-	v, err := tx.GetOne(kv.EpochData, base_encoding.Encode64ToBytes4(slot))
+	v, err := getFn(kv.EpochData, base_encoding.Encode64ToBytes4(slot))
 	if err != nil {
 		return nil, err
 	}
@@ -193,10 +86,10 @@ func ReadEpochData(tx kv.Tx, slot uint64) (*EpochData, error) {
 }
 
 // ReadCheckpoints reads the checkpoints from the database, Current, Previous and Finalized
-func ReadCheckpoints(tx kv.Tx, slot uint64) (current solid.Checkpoint, previous solid.Checkpoint, finalized solid.Checkpoint, ok bool, err error) {
+func ReadCheckpoints(getFn GetValFn, slot uint64) (current solid.Checkpoint, previous solid.Checkpoint, finalized solid.Checkpoint, ok bool, err error) {
 	ed := &EpochData{}
 	var v []byte
-	v, err = tx.GetOne(kv.EpochData, base_encoding.Encode64ToBytes4(slot))
+	v, err = getFn(kv.EpochData, base_encoding.Encode64ToBytes4(slot))
 	if err != nil {
 		return
 	}
@@ -212,8 +105,8 @@ func ReadCheckpoints(tx kv.Tx, slot uint64) (current solid.Checkpoint, previous 
 }
 
 // ReadCheckpoints reads the checkpoints from the database, Current, Previous and Finalized
-func ReadNextSyncCommittee(tx kv.Tx, slot uint64) (committee *solid.SyncCommittee, err error) {
-	v, err := tx.GetOne(kv.NextSyncCommittee, base_encoding.Encode64ToBytes4(slot))
+func ReadNextSyncCommittee(getFn GetValFn, slot uint64) (committee *solid.SyncCommittee, err error) {
+	v, err := getFn(kv.NextSyncCommittee, base_encoding.Encode64ToBytes4(slot))
 	if err != nil {
 		return nil, err
 	}
@@ -226,8 +119,8 @@ func ReadNextSyncCommittee(tx kv.Tx, slot uint64) (committee *solid.SyncCommitte
 }
 
 // ReadCheckpoints reads the checkpoints from the database, Current, Previous and Finalized
-func ReadCurrentSyncCommittee(tx kv.Tx, slot uint64) (committee *solid.SyncCommittee, err error) {
-	v, err := tx.GetOne(kv.CurrentSyncCommittee, base_encoding.Encode64ToBytes4(slot))
+func ReadCurrentSyncCommittee(getFn GetValFn, slot uint64) (committee *solid.SyncCommittee, err error) {
+	v, err := getFn(kv.CurrentSyncCommittee, base_encoding.Encode64ToBytes4(slot))
 	if err != nil {
 		return nil, err
 	}
@@ -237,38 +130,6 @@ func ReadCurrentSyncCommittee(tx kv.Tx, slot uint64) (committee *solid.SyncCommi
 	committee = &solid.SyncCommittee{}
 	copy(committee[:], v)
 	return
-}
-
-func ReadHistoricalRoots(tx kv.Tx, l uint64, fn func(idx int, root libcommon.Hash) error) error {
-	for i := 0; i < int(l); i++ {
-		key := base_encoding.Encode64ToBytes4(uint64(i))
-		v, err := tx.GetOne(kv.HistoricalRoots, key)
-		if err != nil {
-			return err
-		}
-		if err := fn(i, libcommon.BytesToHash(v)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func ReadHistoricalSummaries(tx kv.Tx, l uint64, fn func(idx int, historicalSummary *cltypes.HistoricalSummary) error) error {
-	for i := 0; i < int(l); i++ {
-		key := base_encoding.Encode64ToBytes4(uint64(i))
-		v, err := tx.GetOne(kv.HistoricalSummaries, key)
-		if err != nil {
-			return err
-		}
-		historicalSummary := &cltypes.HistoricalSummary{}
-		if err := historicalSummary.DecodeSSZ(v, 0); err != nil {
-			return err
-		}
-		if err := fn(i, historicalSummary); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func ReadValidatorsTable(tx kv.Tx, out *StaticValidatorTable) error {
@@ -290,7 +151,7 @@ func ReadValidatorsTable(tx kv.Tx, out *StaticValidatorTable) error {
 		}
 		out.validatorTable = append(out.validatorTable, staticValidator)
 	}
-	if err != nil {
+	if err != nil { //nolint:govet
 		return err
 	}
 	slot, err := GetStateProcessingProgress(tx)
@@ -301,9 +162,9 @@ func ReadValidatorsTable(tx kv.Tx, out *StaticValidatorTable) error {
 	return err
 }
 
-func ReadActiveIndicies(tx kv.Tx, slot uint64) ([]uint64, error) {
+func ReadActiveIndicies(getFn GetValFn, slot uint64) ([]uint64, error) {
 	key := base_encoding.Encode64ToBytes4(slot)
-	v, err := tx.GetOne(kv.ActiveValidatorIndicies, key)
+	v, err := getFn(kv.ActiveValidatorIndicies, key)
 	if err != nil {
 		return nil, err
 	}

@@ -28,15 +28,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
-
-	"github.com/erigontech/erigon/accounts/abi/bind"
-	"github.com/erigontech/erigon/accounts/abi/bind/backends"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/execution/abi/bind"
+	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/tests/contracts"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -70,7 +69,7 @@ func TestSelfDestructReceive(t *testing.T) {
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	require.NoError(t, err)
 
-	var contractAddress libcommon.Address
+	var contractAddress common.Address
 	var selfDestructorContract *contracts.SelfDestructor
 
 	// There are two blocks
@@ -105,10 +104,18 @@ func TestSelfDestructReceive(t *testing.T) {
 
 	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(m.NewStateReader(tx))
-		if !st.Exist(address) {
+		exist, err := st.Exist(address)
+		if err != nil {
+			return err
+		}
+		if !exist {
 			t.Error("expected account to exist")
 		}
-		if st.Exist(contractAddress) {
+		exist, err = st.Exist(contractAddress)
+		if err != nil {
+			return err
+		}
+		if exist {
 			t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
 		}
 		return nil
@@ -131,13 +138,25 @@ func TestSelfDestructReceive(t *testing.T) {
 		// and that means that the state of the accounts written in the first block was correct.
 		// This test checks that the storage root of the account is properly set to the root of the empty tree
 		st := state.New(m.NewStateReader(tx))
-		if !st.Exist(address) {
+		exist, err := st.Exist(address)
+		if err != nil {
+			t.Error(err)
+		}
+		if !exist {
 			t.Error("expected account to exist")
 		}
-		if !st.Exist(contractAddress) {
+		exist, err = st.Exist(contractAddress)
+		if err != nil {
+			t.Error(err)
+		}
+		if !exist {
 			t.Error("expected contractAddress to exist at the block 2", contractAddress.String())
 		}
-		if len(st.GetCode(contractAddress)) != 0 {
+		code, err := st.GetCode(contractAddress)
+		if err != nil {
+			t.Error(err)
+		}
+		if len(code) != 0 {
 			t.Error("expected empty code in contract at block 2", contractAddress.String())
 		}
 		return nil

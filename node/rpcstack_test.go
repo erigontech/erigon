@@ -29,16 +29,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common"
-
 	"github.com/gorilla/websocket"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
-	"github.com/erigontech/erigon/turbo/testlog"
-
-	"github.com/stretchr/testify/assert"
 )
 
 // TestCorsHandler makes sure CORS are properly handled on the http server.
@@ -53,7 +52,7 @@ func TestCorsHandler(t *testing.T) {
 
 	resp2 := rpcRequest(t, url, "origin", "bad")
 	defer resp2.Body.Close()
-	assert.Equal(t, "", resp2.Header.Get("Access-Control-Allow-Origin"))
+	assert.Empty(t, resp2.Header.Get("Access-Control-Allow-Origin"))
 }
 
 // TestVhosts makes sure vhosts is properly handled on the http server.
@@ -64,11 +63,11 @@ func TestVhosts(t *testing.T) {
 
 	resp := rpcRequest(t, url, "host", "test")
 	defer resp.Body.Close()
-	assert.Equal(t, resp.StatusCode, http.StatusOK)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	resp2 := rpcRequest(t, url, "host", "bad")
 	defer resp2.Body.Close()
-	assert.Equal(t, resp2.StatusCode, http.StatusForbidden)
+	assert.Equal(t, http.StatusForbidden, resp2.StatusCode)
 }
 
 // TestVhostsAny makes sure vhosts any is properly handled on the http server.
@@ -79,11 +78,11 @@ func TestVhostsAny(t *testing.T) {
 
 	resp := rpcRequest(t, url, "host", "test")
 	defer resp.Body.Close()
-	assert.Equal(t, resp.StatusCode, http.StatusOK)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	resp2 := rpcRequest(t, url, "host", "bad")
 	defer resp2.Body.Close()
-	assert.Equal(t, resp.StatusCode, http.StatusOK)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
 type originTest struct {
@@ -238,7 +237,7 @@ func Test_checkPath(t *testing.T) {
 
 	for i, tt := range tests {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
-			assert.Equal(t, tt.expected, checkPath(tt.req, tt.prefix)) //nolint:scopelint
+			assert.Equal(t, tt.expected, checkPath(tt.req, tt.prefix))
 		})
 	}
 }
@@ -247,12 +246,12 @@ func createAndStartServer(t *testing.T, conf *httpConfig, ws bool, wsConf *wsCon
 	t.Helper()
 
 	srv := newHTTPServer(testlog.Logger(t, log.LvlError), rpccfg.DefaultHTTPTimeouts)
-	assert.NoError(t, srv.enableRPC(nil, *conf, nil))
+	require.NoError(t, srv.enableRPC(nil, *conf, nil))
 	if ws {
-		assert.NoError(t, srv.enableWS(nil, *wsConf, nil))
+		require.NoError(t, srv.enableWS(nil, *wsConf, nil))
 	}
-	assert.NoError(t, srv.setListenAddr("localhost", 0))
-	assert.NoError(t, srv.start())
+	require.NoError(t, srv.setListenAddr("localhost", 0))
+	require.NoError(t, srv.start())
 	return srv
 }
 
@@ -263,12 +262,12 @@ func createAndStartServerWithAllowList(t *testing.T, conf httpConfig, ws bool, w
 
 	allowList := rpc.AllowList(map[string]struct{}{"net_version": {}}) //don't allow RPC modules
 
-	assert.NoError(t, srv.enableRPC(nil, conf, allowList))
+	require.NoError(t, srv.enableRPC(nil, conf, allowList))
 	if ws {
-		assert.NoError(t, srv.enableWS(nil, wsConf, allowList))
+		require.NoError(t, srv.enableWS(nil, wsConf, allowList))
 	}
-	assert.NoError(t, srv.setListenAddr("localhost", 0))
-	assert.NoError(t, srv.start())
+	require.NoError(t, srv.setListenAddr("localhost", 0))
+	require.NoError(t, srv.start())
 	return srv
 }
 
@@ -308,7 +307,7 @@ func testCustomRequest(t *testing.T, srv *httpServer, method string) bool {
 	}
 	defer resp.Body.Close()
 	respBody, err := io.ReadAll(resp.Body)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	return !strings.Contains(string(respBody), "error")
 }

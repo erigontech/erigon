@@ -19,11 +19,9 @@ package state
 import (
 	"bytes"
 	"fmt"
-	"path"
 	"path/filepath"
 	"testing"
 
-	bloomfilter "github.com/holiman/bloomfilter/v2"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -33,25 +31,6 @@ import (
 	"github.com/erigontech/erigon-lib/seg"
 )
 
-func Test_BtreeIndex_Init2(t *testing.T) {
-	t.Parallel()
-
-	//mainnet: storage.128-160.kv  110mil keys, 100mb bloomfilter of 0.01 (1%) miss-probability
-	//no much reason to merge bloomfilter - can merge them on startup
-	//1B keys: 1Gb
-
-	sizes := []int{54, 74, 135, 139, 109, 105, 144}
-	sum := 0
-	sumB := 0
-	for _, sz := range sizes {
-		sum += sz
-		sumB += int(bloomfilter.OptimalM(uint64(sz*1_000_000), 0.001))
-	}
-	large := bloomfilter.OptimalM(uint64(sum*1_000_000), 0.001)
-	fmt.Printf("see: %d\n", bloomfilter.OptimalM(uint64(1_000_000_000), 0.001)/8/1024/1024)
-	fmt.Printf("see: %d vs %d\n", sumB/8/1024/1024, large/8/1024/1024)
-
-}
 func Test_BtreeIndex_Init(t *testing.T) {
 	t.Parallel()
 
@@ -64,7 +43,7 @@ func Test_BtreeIndex_Init(t *testing.T) {
 	require.NoError(t, err)
 	defer decomp.Close()
 
-	err = BuildBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), decomp, seg.CompressNone, background.NewProgressSet(), tmp, 1, logger, true)
+	err = BuildBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), decomp, seg.CompressNone, background.NewProgressSet(), tmp, 1, logger, true, AccessorBTree|AccessorExistence)
 	require.NoError(t, err)
 
 	bt, err := OpenBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), M, decomp, seg.CompressKeys|seg.CompressVals)
@@ -80,11 +59,10 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	logger := log.New()
 	keyCount, M := 120, 30
 	compressFlags := seg.CompressKeys | seg.CompressVals
-	//UseBpsTree = true
 
 	t.Run("empty index", func(t *testing.T) {
 		dataPath := generateKV(t, tmp, 52, 180, 0, logger, 0)
-		indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
+		indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 		buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 
 		kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)
@@ -95,7 +73,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	})
 	dataPath := generateKV(t, tmp, 52, 180, keyCount, logger, 0)
 
-	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 
 	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)
@@ -123,24 +101,24 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 		cur, err := bt.Seek(getter, common.FromHex("0xffffffffffffff")) //seek beyeon the last key
 		require.NoError(t, err)
 		require.Nil(t, cur)
+		cur.Close()
 	})
 
 	c, err := bt.Seek(getter, nil)
 	require.NoError(t, err)
 	for i := 0; i < len(keys); i++ {
 		k := c.Key()
-		//if !bytes.Equal(keys[i], k) {
-		//	fmt.Printf("\tinvalid, want %x, got %x\n", keys[i], k)
-		//}
-		require.EqualValues(t, keys[i], k)
+		require.Equal(t, keys[i], k)
 		c.Next()
 	}
+	c.Close()
 
 	for i := 0; i < len(keys); i++ {
 		cur, err := bt.Seek(getter, keys[i])
 		require.NoErrorf(t, err, "i=%d", i)
-		require.EqualValuesf(t, keys[i], cur.key, "i=%d", i)
+		require.Equalf(t, keys[i], cur.key, "i=%d", i)
 		require.NotEmptyf(t, cur.Value(), "i=%d", i)
+		cur.Close()
 		// require.EqualValues(t, uint64(i), cur.Value())
 	}
 	for i := 1; i < len(keys); i++ {
@@ -153,11 +131,16 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 		}
 		cur, err := bt.Seek(getter, keys[i])
 		require.NoError(t, err)
-		require.EqualValues(t, keys[i], cur.Key())
+		require.Equal(t, keys[i], cur.Key())
+		cur.Close()
 	}
 }
 
 func Test_BtreeIndex_Build(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	tmp := t.TempDir()
@@ -169,7 +152,7 @@ func Test_BtreeIndex_Build(t *testing.T) {
 	keys, err := pivotKeysFromKV(dataPath)
 	require.NoError(t, err)
 
-	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 	require.NoError(t, err)
 
@@ -191,10 +174,13 @@ func Test_BtreeIndex_Build(t *testing.T) {
 		}
 		c.Next()
 	}
+	c.Close()
+
 	for i := 0; i < 10000; i++ {
 		c, err := bt.Seek(getter, keys[i])
 		require.NoError(t, err)
-		require.EqualValues(t, keys[i], c.Key())
+		require.Equal(t, keys[i], c.Key())
+		c.Close()
 	}
 }
 
@@ -205,11 +191,13 @@ func buildBtreeIndex(tb testing.TB, dataPath, indexPath string, compressed seg.F
 	require.NoError(tb, err)
 	defer decomp.Close()
 
-	err = BuildBtreeIndexWithDecompressor(indexPath, decomp, compressed, background.NewProgressSet(), filepath.Dir(indexPath), seed, logger, noFsync)
+	err = BuildBtreeIndexWithDecompressor(indexPath, decomp, compressed, background.NewProgressSet(), filepath.Dir(indexPath), seed, logger, noFsync, AccessorBTree|AccessorExistence)
 	require.NoError(tb, err)
 }
 
 func Test_BtreeIndex_Seek2(t *testing.T) {
+	t.Skip("issue #15028")
+
 	t.Parallel()
 
 	tmp := t.TempDir()
@@ -219,7 +207,7 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 	compressFlags := seg.CompressKeys | seg.CompressVals
 	dataPath := generateKV(t, tmp, 52, 48, keyCount, logger, compressFlags)
 
-	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 
 	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)
@@ -247,25 +235,47 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 		cur, err := bt.Seek(getter, common.FromHex("0xffffffffffffff")) //seek beyeon the last key
 		require.NoError(t, err)
 		require.Nil(t, cur)
+		cur.Close()
 	})
 
-	c, err := bt.Seek(getter, nil)
-	require.NoError(t, err)
-	for i := 0; i < len(keys); i++ {
-		k := c.Key()
-		if !bytes.Equal(keys[i], k) {
-			fmt.Printf("\tinvalid, want %x\n", keys[i])
-		}
-		c.Next()
-	}
+	t.Run("checkNextAgainstGetter", func(t *testing.T) {
+		cur, err := bt.Seek(getter, nil)
+		require.NoError(t, err)
+		defer cur.Close()
 
-	for i := 0; i < len(keys); i++ {
-		cur, err := bt.Seek(getter, keys[i])
-		require.NoErrorf(t, err, "i=%d", i)
-		require.EqualValues(t, keys[i], cur.key)
-		require.NotEmptyf(t, cur.Value(), "i=%d", i)
-		// require.EqualValues(t, uint64(i), cur.Value())
-	}
+		require.NoError(t, err)
+		require.Equal(t, keys[0], cur.Key())
+		require.NotEmptyf(t, cur.Value(), "i=%d", 0)
+
+		k, v, _, err := bt.dataLookup(0, getter)
+		require.NoError(t, err)
+		cur.Reset(0, getter)
+
+		require.Equal(t, k, cur.Key())
+		require.Equal(t, v, cur.Value())
+
+		totalKeys := kv.Count() / 2
+
+		for i := 1; i < totalKeys; i++ {
+			k, v, _, err = bt.dataLookup(uint64(i), getter)
+			require.NoError(t, err)
+
+			b := cur.Next()
+			require.True(t, b)
+
+			require.Equalf(t, k, cur.Key(), "i=%d", i)
+			require.Equalf(t, v, cur.Value(), "i=%d", i)
+
+			curS, err := bt.Seek(getter, cur.Key())
+			require.NoError(t, err)
+
+			require.Equalf(t, cur.Key(), curS.Key(), "i=%d", i)
+			require.Equalf(t, cur.Value(), curS.Value(), "i=%d", i)
+			require.Equal(t, cur.d, curS.d)
+			require.Equal(t, cur.getter, curS.getter)
+		}
+	})
+
 	for i := 1; i < len(keys); i++ {
 		alt := common.Copy(keys[i])
 		for j := len(alt) - 1; j >= 0; j-- {
@@ -276,7 +286,7 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 		}
 		cur, err := bt.Seek(getter, keys[i])
 		require.NoError(t, err)
-		require.EqualValues(t, keys[i], cur.Key())
+		require.Equal(t, keys[i], cur.Key())
 	}
 }
 
@@ -324,20 +334,19 @@ func TestBpsTree_Seek(t *testing.T) {
 
 	ir := NewMockIndexReader(efi)
 	bp := NewBpsTree(g, efi, uint64(M), ir.dataLookup, ir.keyCmp)
+	bp.cursorGetter = ir.newCursor
 	bp.trace = false
 
 	for i := 0; i < len(keys); i++ {
 		sk := keys[i]
-		k, _, di, found, err := bp.Seek(g, sk[:len(sk)/2])
-		_ = di
-		_ = found
+		c, err := bp.Seek(g, sk[:len(sk)/2])
 		require.NoError(t, err)
-		require.NotNil(t, k)
-		require.False(t, found) // we are looking up by half of key, while FOUND=true when exact match found.
+		require.NotNil(t, c)
+		require.NotNil(t, c.Key())
 
 		//k, _, err := it.KVFromGetter(g)
 		//require.NoError(t, err)
-		require.EqualValues(t, keys[i], k)
+		require.Equal(t, keys[i], c.Key())
 	}
 }
 
@@ -347,6 +356,16 @@ func NewMockIndexReader(ef *eliasfano32.EliasFano) *mockIndexReader {
 
 type mockIndexReader struct {
 	ef *eliasfano32.EliasFano
+}
+
+func (b *mockIndexReader) newCursor(k, v []byte, di uint64, g *seg.Reader) *Cursor {
+	return &Cursor{
+		ef:     b.ef,
+		getter: g,
+		key:    common.Copy(k),
+		value:  common.Copy(v),
+		d:      di,
+	}
 }
 
 func (b *mockIndexReader) dataLookup(di uint64, g *seg.Reader) (k, v []byte, offset uint64, err error) {

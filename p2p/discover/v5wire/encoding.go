@@ -31,10 +31,11 @@ import (
 	"fmt"
 	"hash"
 
-	"github.com/erigontech/erigon/common/mclock"
-	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/p2p/enr"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/mclock"
+	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-p2p/enode"
+	"github.com/erigontech/erigon-p2p/enr"
 )
 
 // TODO concurrent WHOAREYOU tie-breaker
@@ -199,7 +200,7 @@ func (c *Codec) Encode(id enode.ID, addr string, packet Packet, challenge *Whoar
 
 	// Store sent WHOAREYOU challenges.
 	if challenge, ok := packet.(*Whoareyou); ok {
-		challenge.ChallengeData = bytesCopy(&c.buf)
+		challenge.ChallengeData = common.CopyBytes(c.buf.Bytes())
 		c.sc.storeSentHandshake(id, addr, challenge)
 	} else if msgData == nil {
 		headerData := c.buf.Bytes()
@@ -293,7 +294,7 @@ func (c *Codec) encodeWhoareyou(toID enode.ID, packet *Whoareyou) (Header, error
 
 	// Create header.
 	head := c.makeHeader(toID, flagWhoareyou, 0)
-	head.AuthData = bytesCopy(&c.buf)
+	head.AuthData = common.CopyBytes(c.buf.Bytes())
 	head.Nonce = packet.Nonce
 
 	// Encode auth data.
@@ -400,7 +401,7 @@ func (c *Codec) encodeMessageHeader(toID enode.ID, s *session) (Header, error) {
 	auth := messageAuthData{SrcID: c.localnode.ID()}
 	c.buf.Reset()
 	binary.Write(&c.buf, binary.BigEndian, &auth) //nolint:errcheck
-	head.AuthData = bytesCopy(&c.buf)
+	head.AuthData = common.CopyBytes(c.buf.Bytes())
 	head.Nonce = nonce
 	return head, err
 }
@@ -648,10 +649,4 @@ func (h *Header) mask(destID enode.ID) cipher.Stream {
 		panic("can't create cipher")
 	}
 	return cipher.NewCTR(block, h.IV[:])
-}
-
-func bytesCopy(r *bytes.Buffer) []byte {
-	b := make([]byte, r.Len())
-	copy(b, r.Bytes())
-	return b
 }

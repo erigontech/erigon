@@ -27,27 +27,31 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 func TestGenesisBlockHashes(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	t.Parallel()
 	logger := log.New()
-	db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	check := func(network string) {
 		genesis := core.GenesisBlockByChainName(network)
 		tx, err := db.BeginRw(context.Background())
@@ -59,7 +63,7 @@ func TestGenesisBlockHashes(t *testing.T) {
 		require.NoError(t, err)
 		expect := params.GenesisHashByChainName(network)
 		require.NotNil(t, expect, network)
-		require.EqualValues(t, block.Hash(), *expect, network)
+		require.Equal(t, block.Hash(), *expect, network)
 	}
 	for _, network := range networkname.All {
 		check(network)
@@ -97,17 +101,17 @@ func TestGenesisBlockRoots(t *testing.T) {
 	block, _, err = core.GenesisToBlock(core.TestGenesisBlock(), datadir.New(t.TempDir()), log.Root())
 	require.NoError(err)
 	if block.Root() != params.TestGenesisStateRoot {
-		t.Errorf("wrong Chiado genesis state root, got %v, want %v", block.Root(), params.TestGenesisStateRoot)
+		t.Errorf("wrong test genesis state root, got %v, want %v", block.Root(), params.TestGenesisStateRoot)
 	}
 	if block.Hash() != params.TestGenesisHash {
-		t.Errorf("wrong Chiado genesis hash, got %v, want %v", block.Hash(), params.TestGenesisHash)
+		t.Errorf("wrong test genesis hash, got %v, want %v", block.Hash(), params.TestGenesisHash)
 	}
 }
 
 func TestCommitGenesisIdempotency(t *testing.T) {
 	t.Parallel()
 	logger := log.New()
-	db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -136,9 +140,9 @@ func TestAllocConstructor(t *testing.T) {
 	deploymentCode := common.FromHex("602a5f556101c960015560048060135f395ff35f355f55")
 
 	funds := big.NewInt(1000000000)
-	address := libcommon.HexToAddress("0x1000000000000000000000000000000000000001")
+	address := common.HexToAddress("0x1000000000000000000000000000000000000001")
 	genSpec := &types.Genesis{
-		Config: params.AllProtocolChanges,
+		Config: chain.AllProtocolChanges,
 		Alloc: types.GenesisAlloc{
 			address: {Constructor: deploymentCode, Balance: funds},
 		},
@@ -147,7 +151,7 @@ func TestAllocConstructor(t *testing.T) {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	m := mock.MockWithGenesis(t, genSpec, key, false)
 
-	tx, err := m.DB.BeginRo(context.Background())
+	tx, err := m.DB.BeginTemporalRo(context.Background())
 	require.NoError(err)
 	defer tx.Rollback()
 
@@ -155,18 +159,20 @@ func TestAllocConstructor(t *testing.T) {
 	reader, err := rpchelper.CreateHistoryStateReader(tx, rawdbv3.TxNums, 1, 0, genSpec.Config.ChainName)
 	require.NoError(err)
 	state := state.New(reader)
-	balance := state.GetBalance(address)
+	balance, err := state.GetBalance(address)
+	require.NoError(err)
 	assert.Equal(funds, balance.ToBig())
-	code := state.GetCode(address)
+	code, err := state.GetCode(address)
+	require.NoError(err)
 	assert.Equal(common.FromHex("5f355f55"), code)
 
-	key0 := libcommon.HexToHash("0000000000000000000000000000000000000000000000000000000000000000")
+	key0 := common.HexToHash("0000000000000000000000000000000000000000000000000000000000000000")
 	storage0 := &uint256.Int{}
-	state.GetState(address, &key0, storage0)
+	state.GetState(address, key0, storage0)
 	assert.Equal(uint256.NewInt(0x2a), storage0)
-	key1 := libcommon.HexToHash("0000000000000000000000000000000000000000000000000000000000000001")
+	key1 := common.HexToHash("0000000000000000000000000000000000000000000000000000000000000001")
 	storage1 := &uint256.Int{}
-	state.GetState(address, &key1, storage1)
+	state.GetState(address, key1, storage1)
 	assert.Equal(uint256.NewInt(0x01c9), storage1)
 }
 

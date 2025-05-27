@@ -111,10 +111,6 @@ func torrents(cliCtx *cli.Context, command string) error {
 		if src, err = sync.ParseLocator(cliCtx.Args().Get(pos)); err != nil {
 			return err
 		}
-
-		if err != nil {
-			return err
-		}
 	}
 
 	pos++
@@ -144,12 +140,10 @@ func torrents(cliCtx *cli.Context, command string) error {
 
 	switch src.LType {
 	case sync.RemoteFs:
-		if rcCli == nil {
-			rcCli, err = downloader.NewRCloneClient(logger)
+		rcCli, err = downloader.NewRCloneClient(logger)
 
-			if err != nil {
-				return err
-			}
+		if err != nil {
+			return err
 		}
 
 		if err = sync.CheckRemote(rcCli, src.Src); err != nil {
@@ -178,7 +172,7 @@ func torrents(cliCtx *cli.Context, command string) error {
 	}
 
 	if rcCli != nil {
-		if src != nil && src.LType == sync.RemoteFs {
+		if src.LType == sync.RemoteFs {
 			ctx := cliCtx.Context // avoiding sonar dup complaint
 			srcSession, err = rcCli.NewSession(ctx, filepath.Join(tempDir, "src"), src.Src+":"+src.Root, nil)
 
@@ -188,7 +182,7 @@ func torrents(cliCtx *cli.Context, command string) error {
 		}
 	}
 
-	if src != nil && srcSession == nil {
+	if srcSession == nil {
 		return errors.New("no src session established")
 	}
 

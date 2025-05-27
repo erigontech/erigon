@@ -37,6 +37,7 @@ type LayeredBeaconHandler struct {
 func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router_configuration.RouterConfiguration) error {
 	listener, err := net.Listen(routerCfg.Protocol, routerCfg.Address)
 	if err != nil {
+		log.Warn("[Beacon API] Failed to start listening", "addr", routerCfg.Address, "err", err)
 		return err
 	}
 	defer listener.Close()
@@ -70,10 +71,7 @@ func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router
 		Handler:      mux,
 		ReadTimeout:  routerCfg.ReadTimeTimeout,
 		IdleTimeout:  routerCfg.IdleTimeout,
-		WriteTimeout: routerCfg.IdleTimeout,
-	}
-	if err != nil {
-		log.Warn("[Beacon API] Failed to start listening", "addr", routerCfg.Address, "err", err)
+		WriteTimeout: routerCfg.WriteTimeout,
 	}
 
 	if err := server.Serve(listener); err != nil {

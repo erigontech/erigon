@@ -21,7 +21,7 @@ import (
 	"errors"
 	"net/http"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -67,15 +67,15 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWr
 		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("beacon node is syncing"))
 	}
 	if root == headRoot {
-		headState, cn := a.syncedData.HeadState()
-		defer cn()
-		if headState == nil {
-			return nil, beaconhttp.NewEndpointError(
-				http.StatusServiceUnavailable,
-				errors.New("node is syncing"),
-			)
+		var expectedWithdrawals []*cltypes.Withdrawal
+
+		if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+			expectedWithdrawals, _ = state.ExpectedWithdrawals(headState, state.Epoch(headState))
+			return nil
+		}); err != nil {
+			return nil, err
 		}
-		return newBeaconResponse(state.ExpectedWithdrawals(headState, state.Epoch(headState))).WithFinalized(false), nil
+		return newBeaconResponse(expectedWithdrawals).WithFinalized(false), nil
 	}
 	lookAhead := 1024
 	for currSlot := *slot + 1; currSlot < *slot+uint64(lookAhead); currSlot++ {
@@ -86,7 +86,7 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWr
 		if err != nil {
 			return nil, err
 		}
-		if blockRoot == (libcommon.Hash{}) {
+		if blockRoot == (common.Hash{}) {
 			continue
 		}
 		blk, err := a.blockReader.ReadBlockByRoot(ctx, tx, blockRoot)

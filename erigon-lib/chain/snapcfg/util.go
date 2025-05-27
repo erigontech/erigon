@@ -20,23 +20,27 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
 
-	"github.com/pkg/errors"
-
+	snapshothashes "github.com/erigontech/erigon-snapshot"
+	"github.com/erigontech/erigon-snapshot/webseed"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/tidwall/btree"
 
-	snapshothashes "github.com/erigontech/erigon-snapshot"
-	"github.com/erigontech/erigon-snapshot/webseed"
-
 	"github.com/erigontech/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/version"
+	ver "github.com/erigontech/erigon-lib/version"
 )
+
+var snapshotGitBranch = dbg.EnvString("SNAPS_GIT_BRANCH", version.DefaultSnapshotGitBranch)
 
 var (
 	Mainnet    = fromToml(snapshothashes.Mainnet)
@@ -89,8 +93,18 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 	var bestVersions btree.Map[string, PreverifiedItem]
 
 	for _, p := range p {
+		if strings.HasPrefix(p.Name, "salt") && strings.HasSuffix(p.Name, "txt") {
+			bestVersions.Set(p.Name, p)
+			continue
+		}
+
 		v, name, ok := strings.Cut(p.Name, "-")
 		if !ok {
+			continue
+		}
+
+		if strings.HasPrefix(p.Name, "caplin") {
+			bestVersions.Set(p.Name, p)
 			continue
 		}
 
@@ -136,24 +150,24 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 			continue
 		}
 
-		version, err := snaptype.ParseVersion(v)
+		version, err := ver.ParseVersion(v)
 		if err != nil {
 			continue
 		}
 
-		if version < minVersion {
+		if version.Less(minVersion) {
 			continue
 		}
 
-		if version > preferredVersion {
+		if preferredVersion.Less(version) {
 			continue
 		}
 
 		if current, ok := bestVersions.Get(name); ok {
 			v, _, _ := strings.Cut(current.Name, "-")
-			cv, _ := snaptype.ParseVersion(v)
+			cv, _ := ver.ParseVersion(v)
 
-			if version > cv {
+			if cv.Less(version) {
 				bestVersions.Set(name, p)
 			}
 		} else {
@@ -171,7 +185,7 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 	return versioned
 }
 
-func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion snaptype.Version, types ...snaptype.Enum) Preverified {
+func (p Preverified) Versioned(preferredVersion ver.Version, minVersion ver.Version, types ...snaptype.Enum) Preverified {
 	var bestVersions btree.Map[string, PreverifiedItem]
 
 	for _, p := range p {
@@ -208,25 +222,25 @@ func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion sna
 			}
 		}
 
-		version, err := snaptype.ParseVersion(v)
+		version, err := ver.ParseVersion(v)
 
 		if err != nil {
 			continue
 		}
 
-		if version < minVersion {
+		if version.Less(minVersion) {
 			continue
 		}
 
-		if version > preferredVersion {
+		if preferredVersion.Less(version) {
 			continue
 		}
 
 		if current, ok := bestVersions.Get(name); ok {
 			v, _, _ := strings.Cut(current.Name, "-")
-			cv, _ := snaptype.ParseVersion(v)
+			cv, _ := ver.ParseVersion(v)
 
-			if version > cv {
+			if cv.Less(version) {
 				bestVersions.Set(name, p)
 			}
 		} else {
@@ -244,8 +258,8 @@ func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion sna
 	return versioned
 }
 
-func (p Preverified) MaxBlock(version snaptype.Version) (uint64, error) {
-	max := uint64(0)
+func (p Preverified) MaxBlock(version ver.Version) (uint64, error) {
+	_max := uint64(0)
 	for _, p := range p {
 		_, fileName := filepath.Split(p.Name)
 		ext := filepath.Ext(fileName)
@@ -261,32 +275,32 @@ func (p Preverified) MaxBlock(version snaptype.Version) (uint64, error) {
 			return 0, err
 		}
 
-		if max < to {
-			max = to
+		if _max < to {
+			_max = to
 		}
 
 	}
-	if max == 0 { // to prevent underflow
+	if _max == 0 { // to prevent underflow
 		return 0, nil
 	}
 
-	return max*1_000 - 1, nil
+	return _max*1_000 - 1, nil
 }
 
 var errWrongVersion = errors.New("wrong version")
 
-func ExtractBlockFromName(name string, v snaptype.Version) (block uint64, err error) {
+func ExtractBlockFromName(name string, v ver.Version) (block uint64, err error) {
 	i := 0
 	for i < len(name) && name[i] != '-' {
 		i++
 	}
 
-	version, err := snaptype.ParseVersion(name[:i])
+	version, err := ver.ParseVersion(name[:i])
 	if err != nil {
 		return 0, err
 	}
 
-	if v != 0 && v != version {
+	if !v.IsZero() && v != version {
 		return 0, errWrongVersion
 	}
 
@@ -359,8 +373,17 @@ func doSort(in map[string]string) Preverified {
 }
 
 func newCfg(networkName string, preverified Preverified) *Cfg {
-	maxBlockNum, _ := preverified.MaxBlock(0)
-	return &Cfg{ExpectBlocks: maxBlockNum, Preverified: preverified, networkName: networkName}
+	maxBlockNum, _ := preverified.MaxBlock(ver.ZeroVersion)
+	cfg := &Cfg{ExpectBlocks: maxBlockNum, Preverified: preverified, networkName: networkName}
+	cfg.PreverifiedParsed = make([]*snaptype.FileInfo, len(preverified))
+	for i, p := range cfg.Preverified {
+		info, _, ok := snaptype.ParseFileName("", p.Name)
+		if !ok {
+			continue
+		}
+		cfg.PreverifiedParsed[i] = &info
+	}
+	return cfg
 }
 
 func NewNonSeededCfg(networkName string) *Cfg {
@@ -368,9 +391,10 @@ func NewNonSeededCfg(networkName string) *Cfg {
 }
 
 type Cfg struct {
-	ExpectBlocks uint64
-	Preverified  Preverified
-	networkName  string
+	ExpectBlocks      uint64
+	Preverified       Preverified          // immutable
+	PreverifiedParsed []*snaptype.FileInfo //Preverified field after `snaptype.ParseFileName("", p.Name)`
+	networkName       string
 }
 
 // Seedable - can seed it over Bittorrent network to other nodes
@@ -388,9 +412,11 @@ func (c Cfg) IsFrozen(info snaptype.FileInfo) bool {
 func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 	hasType := t == snaptype.MinCoreEnum
 
-	for _, p := range c.Preverified {
-		info, _, ok := snaptype.ParseFileName("", p.Name)
-		if !ok {
+	for _, info := range c.PreverifiedParsed {
+		if info == nil {
+			continue
+		}
+		if strings.Contains(info.Name(), "caplin") {
 			continue
 		}
 
@@ -452,29 +478,22 @@ func Seedable(networkName string, info snaptype.FileInfo) bool {
 	return KnownCfg(networkName).Seedable(info)
 }
 
-func IsFrozen(networkName string, info snaptype.FileInfo) bool {
-	if networkName == "" {
-		return false
-	}
-	return KnownCfg(networkName).IsFrozen(info)
-}
-
 func MergeLimitFromCfg(cfg *Cfg, snapType snaptype.Enum, fromBlock uint64) uint64 {
 	return cfg.MergeLimit(snapType, fromBlock)
 }
 
 func MaxSeedableSegment(chain string, dir string) uint64 {
-	var max uint64
-
+	var _max uint64
+	segConfig := KnownCfg(chain)
 	if list, err := snaptype.Segments(dir); err == nil {
 		for _, info := range list {
-			if Seedable(chain, info) && info.Type.Enum() == snaptype.MinCoreEnum && info.To > max {
-				max = info.To
+			if segConfig.Seedable(info) && info.Type.Enum() == snaptype.MinCoreEnum && info.To > _max {
+				_max = info.To
 			}
 		}
 	}
 
-	return max
+	return _max
 }
 
 var oldMergeSteps = append([]uint64{snaptype.Erigon2OldMergeLimit}, snaptype.MergeSteps...)
@@ -489,6 +508,13 @@ func MergeStepsFromCfg(cfg *Cfg, snapType snaptype.Enum, fromBlock uint64) []uin
 	return snaptype.MergeSteps
 }
 
+func IsFrozen(networkName string, info snaptype.FileInfo) bool {
+	if networkName == "" {
+		return false
+	}
+	return KnownCfg(networkName).IsFrozen(info)
+}
+
 // KnownCfg return list of preverified hashes for given network, but apply whiteList filter if it's not empty
 func KnownCfg(networkName string) *Cfg {
 	c, ok := knownPreverified[networkName]
@@ -498,14 +524,14 @@ func KnownCfg(networkName string) *Cfg {
 	return newCfg(networkName, c.Typed(knownTypes[networkName]))
 }
 
-func VersionedCfg(networkName string, preferred snaptype.Version, min snaptype.Version) *Cfg {
+func VersionedCfg(networkName string, preferred snaptype.Version, _min snaptype.Version) *Cfg {
 	c, ok := knownPreverified[networkName]
 
 	if !ok {
 		return newCfg(networkName, Preverified{})
 	}
 
-	return newCfg(networkName, c.Versioned(preferred, min))
+	return newCfg(networkName, c.Versioned(preferred, _min))
 }
 
 var KnownWebseeds = map[string][]string{
@@ -531,9 +557,15 @@ func webseedsParse(in []byte) (res []string) {
 }
 
 func LoadRemotePreverified(ctx context.Context) (loaded bool, err error) {
-	loaded, err = snapshothashes.LoadSnapshots(ctx)
+	loaded, err = snapshothashes.LoadSnapshots(ctx, snapshothashes.R2, snapshotGitBranch)
 	if err != nil {
-		return false, err
+		log.Root().Warn("Failed to load snapshot hashes from R2; falling back to GitHub", "err", err)
+
+		// Fallback to github if R2 fails
+		loaded, err = snapshothashes.LoadSnapshots(ctx, snapshothashes.Github, snapshotGitBranch)
+		if err != nil {
+			return false, err
+		}
 	}
 
 	// Re-load the preverified hashes

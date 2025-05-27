@@ -31,7 +31,7 @@ import (
 	"github.com/huin/goupnp/dcps/internetgateway1"
 	"github.com/huin/goupnp/dcps/internetgateway2"
 
-	"github.com/erigontech/erigon/common/debug"
+	"github.com/erigontech/erigon-lib/common/debug"
 )
 
 const (
@@ -213,7 +213,7 @@ func discover(out chan<- *upnp, target string, matcher func(goupnp.ServiceClient
 			if upnp == nil {
 				return
 			}
-			upnp.dev = devs[i].Root //nolint:scopelint
+			upnp.dev = devs[i].Root
 
 			// check whether port mapping is enabled
 			if upnp.natEnabled() {

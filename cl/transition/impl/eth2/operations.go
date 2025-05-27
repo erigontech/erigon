@@ -17,6 +17,7 @@
 package eth2
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"slices"
@@ -31,7 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 
-	"github.com/Giulio2002/bls"
+	"github.com/erigontech/erigon/cl/utils/bls"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
@@ -39,6 +40,10 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/utils"
+)
+
+const (
+	FullExitRequestAmount = 0
 )
 
 func (I *impl) FullValidate() bool {
@@ -138,6 +143,31 @@ func (I *impl) ProcessAttesterSlashing(
 	return nil
 }
 
+func isValidDepositSignature(depositData *cltypes.DepositData, cfg *clparams.BeaconChainConfig) (bool, error) {
+	// Agnostic domain.
+	domain, err := fork.ComputeDomain(
+		cfg.DomainDeposit[:],
+		utils.Uint32ToBytes4(uint32(cfg.GenesisForkVersion)),
+		[32]byte{},
+	)
+	if err != nil {
+		return false, err
+	}
+	depositMessageRoot, err := depositData.MessageHash()
+	if err != nil {
+		return false, err
+	}
+	signedRoot := utils.Sha256(depositMessageRoot[:], domain)
+	// Perform BLS verification and if successful noice.
+	valid, err := bls.Verify(depositData.Signature[:], signedRoot[:], depositData.PubKey[:])
+	if err != nil || !valid {
+		// ignore err here
+		log.Debug("Validator BLS verification failed", "valid", valid, "err", err)
+		return false, nil
+	}
+	return true, nil
+}
+
 func (I *impl) ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) error {
 	if deposit == nil {
 		return nil
@@ -163,7 +193,6 @@ func (I *impl) ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) 
 	) {
 		return errors.New("processDepositForAltair: Could not validate deposit root")
 	}
-
 	// Increment index
 	s.SetEth1DepositIndex(depositIndex + 1)
 	publicKey := deposit.Data.PubKey
@@ -171,39 +200,46 @@ func (I *impl) ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) 
 	// Check if pub key is in validator set
 	validatorIndex, has := s.ValidatorIndexByPubkey(publicKey)
 	if !has {
-		// Agnostic domain.
-		domain, err := fork.ComputeDomain(
-			s.BeaconConfig().DomainDeposit[:],
-			utils.Uint32ToBytes4(uint32(s.BeaconConfig().GenesisForkVersion)),
-			[32]byte{},
-		)
-		if err != nil {
+		// Check if the deposit is valid
+		if valid, err := statechange.IsValidDepositSignature(deposit.Data, s.BeaconConfig()); err != nil {
 			return err
-		}
-		depositMessageRoot, err := deposit.Data.MessageHash()
-		if err != nil {
-			return err
-		}
-		signedRoot := utils.Sha256(depositMessageRoot[:], domain)
-		// Perform BLS verification and if successful noice.
-		valid, err := bls.Verify(deposit.Data.Signature[:], signedRoot[:], publicKey[:])
-		// Literally you can input it trash.
-		if !valid || err != nil {
-			log.Debug("Validator BLS verification failed", "valid", valid, "err", err)
+		} else if !valid {
 			return nil
 		}
 		// Append validator
-		s.AddValidator(state.ValidatorFromDeposit(s.BeaconConfig(), deposit), amount)
-		// Altair forward
-		if s.Version() >= clparams.AltairVersion {
-			s.AddCurrentEpochParticipationFlags(cltypes.ParticipationFlags(0))
-			s.AddPreviousEpochParticipationFlags(cltypes.ParticipationFlags(0))
-			s.AddInactivityScore(0)
+		if s.Version() >= clparams.ElectraVersion {
+			statechange.AddValidatorToRegistry(s, publicKey, deposit.Data.WithdrawalCredentials, 0)
+		} else {
+			// Append validator and done
+			statechange.AddValidatorToRegistry(s, publicKey, deposit.Data.WithdrawalCredentials, amount)
+			return nil
 		}
-		return nil
 	}
-	// Increase the balance if exists already
-	return state.IncreaseBalance(s, validatorIndex, amount)
+	if s.Version() >= clparams.ElectraVersion {
+		s.AppendPendingDeposit(&solid.PendingDeposit{
+			PubKey:                publicKey,
+			WithdrawalCredentials: deposit.Data.WithdrawalCredentials,
+			Amount:                amount,
+			Signature:             deposit.Data.Signature,
+			Slot:                  s.BeaconConfig().GenesisSlot, // Use GENESIS_SLOT to distinguish from a pending deposit request
+		})
+		return nil
+	} else {
+		// Deneb and before: Increase the balance if exists already
+		return state.IncreaseBalance(s, validatorIndex, amount)
+	}
+}
+
+func getPendingBalanceToWithdraw(s abstract.BeaconState, validatorIndex uint64) uint64 {
+	ws := s.GetPendingPartialWithdrawals()
+	balance := uint64(0)
+	ws.Range(func(index int, withdrawal *solid.PendingPartialWithdrawal, length int) bool {
+		if withdrawal.Index == validatorIndex {
+			balance += withdrawal.Amount
+		}
+		return true
+	})
+	return balance
 }
 
 func IsVoluntaryExitApplicable(s abstract.BeaconState, voluntaryExit *cltypes.VoluntaryExit) error {
@@ -212,19 +248,29 @@ func IsVoluntaryExitApplicable(s abstract.BeaconState, voluntaryExit *cltypes.Vo
 	if err != nil {
 		return err
 	}
+	// Verify the validator is active
 	if !validator.Active(currentEpoch) {
 		return errors.New("ProcessVoluntaryExit: validator is not active")
 	}
+	// Verify exit has not been initiated
 	if validator.ExitEpoch() != s.BeaconConfig().FarFutureEpoch {
 		return errors.New(
 			"ProcessVoluntaryExit: another exit for the same validator is already getting processed",
 		)
 	}
+	// Exits must specify an epoch when they become valid; they are not valid before then
 	if currentEpoch < voluntaryExit.Epoch {
 		return errors.New("ProcessVoluntaryExit: exit is happening in the future")
 	}
+	// Verify the validator has been active long enough
 	if currentEpoch < validator.ActivationEpoch()+s.BeaconConfig().ShardCommitteePeriod {
 		return errors.New("ProcessVoluntaryExit: exit is happening too fast")
+	}
+	if s.Version() >= clparams.ElectraVersion {
+		// Only exit validator if it has no pending withdrawals in the queue
+		if b := getPendingBalanceToWithdraw(s, voluntaryExit.ValidatorIndex); b > 0 {
+			return fmt.Errorf("ProcessVoluntaryExit: validator has pending balance to withdraw: %d", b)
+		}
 	}
 	return nil
 }
@@ -257,8 +303,8 @@ func (I *impl) ProcessWithdrawals(
 	numValidators := uint64(s.ValidatorLength())
 
 	// Check if full validation is required and verify expected withdrawals.
+	expectedWithdrawals, partialWithdrawalsCount := state.ExpectedWithdrawals(s, state.Epoch(s))
 	if I.FullValidation {
-		expectedWithdrawals := state.ExpectedWithdrawals(s, state.Epoch(s))
 		if len(expectedWithdrawals) != withdrawals.Len() {
 			return fmt.Errorf(
 				"ProcessWithdrawals: expected %d withdrawals, but got %d",
@@ -274,6 +320,13 @@ func (I *impl) ProcessWithdrawals(
 		}); err != nil {
 			return err
 		}
+	}
+
+	if s.Version() >= clparams.ElectraVersion {
+		// Update pending partial withdrawals [New in Electra:EIP7251]
+		pendingPartialWithdrawal := s.GetPendingPartialWithdrawals()
+		pendingPartialWithdrawal.Cut(int(partialWithdrawalsCount))
+		s.SetPendingPartialWithdrawals(pendingPartialWithdrawal)
 	}
 
 	if err := solid.RangeErr[*cltypes.Withdrawal](withdrawals, func(_ int, w *cltypes.Withdrawal, _ int) error {
@@ -304,22 +357,43 @@ func (I *impl) ProcessWithdrawals(
 }
 
 // ProcessExecutionPayload sets the latest payload header accordinly.
-func (I *impl) ProcessExecutionPayload(s abstract.BeaconState, parentHash, prevRandao common.Hash, time uint64, payloadHeader *cltypes.Eth1Header) error {
+func (I *impl) ProcessExecutionPayload(s abstract.BeaconState, body cltypes.GenericBeaconBody) error {
+	payloadHeader, err := body.GetPayloadHeader()
+	if err != nil {
+		return err
+	}
+	parentHash := payloadHeader.ParentHash
+	prevRandao := payloadHeader.PrevRandao
+	time := payloadHeader.Time
 	if state.IsMergeTransitionComplete(s) {
-		if parentHash != s.LatestExecutionPayloadHeader().BlockHash {
+		// Verify consistency of the parent hash with respect to the previous execution payload header
+		// assert payload.parent_hash == state.latest_execution_payload_header.block_hash
+		if !bytes.Equal(parentHash[:], s.LatestExecutionPayloadHeader().BlockHash[:]) {
 			return errors.New("ProcessExecutionPayload: invalid eth1 chain. mismatching parent")
 		}
 	}
-	if prevRandao != s.GetRandaoMixes(state.Epoch(s)) {
+	random := s.GetRandaoMixes(state.Epoch(s))
+	if !bytes.Equal(prevRandao[:], random[:]) {
+		// Verify prev_randao
+		// assert payload.prev_randao == get_randao_mix(state, get_current_epoch(state))
 		return fmt.Errorf(
 			"ProcessExecutionPayload: randao mix mismatches with mix digest, expected %x, got %x",
-			s.GetRandaoMixes(state.Epoch(s)),
+			random,
 			prevRandao,
 		)
 	}
 	if time != state.ComputeTimestampAtSlot(s, s.Slot()) {
+		// Verify timestamp
+		// assert payload.timestamp == compute_timestamp_at_slot(state, state.slot)
 		return errors.New("ProcessExecutionPayload: invalid Eth1 timestamp")
 	}
+
+	// Verify commitments are under limit
+	// assert len(body.blob_kzg_commitments) <= MAX_BLOBS_PER_BLOCK
+	if body.GetBlobKzgCommitments().Len() > int(s.BeaconConfig().MaxBlobsPerBlockByVersion(s.Version())) {
+		return errors.New("ProcessExecutionPayload: too many blob commitments")
+	}
+
 	s.SetLatestExecutionPayloadHeader(payloadHeader)
 	return nil
 }
@@ -430,10 +504,39 @@ func (I *impl) ProcessBlsToExecutionChange(
 	if err != nil {
 		return err
 	}
+	credentials := validator.WithdrawalCredentials()
+	// assert validator.withdrawal_credentials[:1] == BLS_WITHDRAWAL_PREFIX
+	if credentials[0] != byte(beaconConfig.BLSWithdrawalPrefixByte) {
+		return errors.New("ProcessBlsToExecutionChange: withdrawal credentials prefix mismatch")
+	}
+	// assert validator.withdrawal_credentials[1:] == hash(address_change.from_bls_pubkey)[1:]
+	hashKey := utils.Sha256(change.From[:])
+	if !bytes.Equal(credentials[1:], hashKey[1:]) {
+		return errors.New("ProcessBlsToExecutionChange: withdrawal credentials mismatch")
+	}
+
+	// Fork-agnostic domain since address changes are valid across forks
+	domain, err := fork.ComputeDomain(
+		s.BeaconConfig().DomainBLSToExecutionChange[:],
+		utils.Uint32ToBytes4(uint32(s.BeaconConfig().GenesisForkVersion)),
+		s.GenesisValidatorsRoot())
+	if err != nil {
+		return err
+	}
+	signingRoot, err := fork.ComputeSigningRoot(change, domain)
+	if err != nil {
+		return err
+	}
+	// Verify the signature
+	ok, err := bls.Verify(signedChange.Signature[:], signingRoot[:], change.From[:])
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("ProcessBlsToExecutionChange: invalid signature")
+	}
 
 	// Perform full validation if requested.
-	wc := validator.WithdrawalCredentials()
-	credentials := wc
 	// Reset the validator's withdrawal credentials.
 	credentials[0] = byte(beaconConfig.ETH1AddressWithdrawalPrefixByte)
 	copy(credentials[1:], make([]byte, 11))
@@ -488,6 +591,42 @@ func (I *impl) processAttestationPostAltair(
 	currentEpoch := state.Epoch(s)
 	stateSlot := s.Slot()
 	beaconConfig := s.BeaconConfig()
+
+	if s.Version() >= clparams.ElectraVersion {
+		// assert index == 0
+		if data.CommitteeIndex != 0 {
+			return nil, errors.New("processAttestationPostAltair: committee index must be 0")
+		}
+		// check committee
+		committeeIndices := attestation.CommitteeBits.GetOnIndices()
+		committeeOffset := 0
+		for _, committeeIndex := range committeeIndices {
+			// assert committee_index < get_committee_count_per_slot(state, data.target.epoch)
+			if uint64(committeeIndex) >= s.CommitteeCount(currentEpoch) {
+				return nil, errors.New("processAttestationPostAltair: committee index out of bounds")
+			}
+			committee, err := s.GetBeaconCommitee(data.Slot, uint64(committeeIndex))
+			if err != nil {
+				return nil, err
+			}
+			attesters := []uint64{}
+			for i, attester := range committee {
+				if attestation.AggregationBits.GetBitAt(committeeOffset + i) {
+					attesters = append(attesters, attester)
+				}
+			}
+			// assert len(committee_attesters) > 0
+			if len(attesters) == 0 {
+				return nil, errors.New("processAttestationPostAltair: no attesters in committee")
+			}
+			committeeOffset += len(committee)
+		}
+		// Bitfield length matches total number of participants
+		// assert len(attestation.aggregation_bits) == committee_offset
+		if attestation.AggregationBits.Bits() != committeeOffset {
+			return nil, errors.New("processAttestationPostAltair: aggregation bits length mismatch")
+		}
+	}
 
 	participationFlagsIndicies, err := s.GetAttestationParticipationFlagIndicies(
 		data,
@@ -687,7 +826,7 @@ func IsAttestationApplicable(s abstract.BeaconState, attestation *solid.Attestat
 	}
 	cIndex := data.CommitteeIndex
 	if s.Version().AfterOrEqual(clparams.ElectraVersion) {
-		index, err := attestation.ElectraSingleCommitteeIndex()
+		index, err := attestation.GetCommitteeIndexFromBits()
 		if err != nil {
 			return err
 		}
@@ -741,7 +880,7 @@ func batchVerifyAttestations(
 	s abstract.BeaconState,
 	indexedAttestations []*cltypes.IndexedAttestation,
 ) (valid bool, err error) {
-	c := make(chan indexedAttestationVerificationResult, 1)
+	c := make(chan indexedAttestationVerificationResult, len(indexedAttestations))
 
 	for idx := range indexedAttestations {
 		go func(idx int) {
@@ -755,7 +894,7 @@ func batchVerifyAttestations(
 	for i := 0; i < len(indexedAttestations); i++ {
 		result := <-c
 		if result.err != nil {
-			return false, err
+			return false, result.err
 		}
 		if !result.valid {
 			return false, nil
@@ -899,6 +1038,7 @@ func (I *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 				return err
 			}
 		}
+
 		if state.Epoch(s) == beaconConfig.ElectraForkEpoch {
 			if err := s.UpgradeToElectra(); err != nil {
 				return err
@@ -906,4 +1046,256 @@ func (I *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 		}
 	}
 	return nil
+}
+
+func (I *impl) ProcessDepositRequest(s abstract.BeaconState, depositRequest *solid.DepositRequest) error {
+	if s.GetDepositRequestsStartIndex() == s.BeaconConfig().UnsetDepositRequestsStartIndex {
+		s.SetDepositRequestsStartIndex(depositRequest.Index)
+	}
+
+	// Create pending deposit
+	s.AppendPendingDeposit(&solid.PendingDeposit{
+		PubKey:                depositRequest.PubKey,
+		WithdrawalCredentials: depositRequest.WithdrawalCredentials,
+		Amount:                depositRequest.Amount,
+		Signature:             depositRequest.Signature,
+		Slot:                  s.Slot(),
+	})
+	return nil
+}
+
+func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.WithdrawalRequest) error {
+	var (
+		amount            = req.Amount
+		isFullExitRequest = req.Amount == FullExitRequestAmount
+		reqPubkey         = req.ValidatorPubKey
+	)
+	// If partial withdrawal queue is full, only full exits are processed
+	if uint64(s.GetPendingPartialWithdrawals().Len()) >= s.BeaconConfig().PendingPartialWithdrawalsLimit && !isFullExitRequest {
+		return nil
+	}
+	// Verify pubkey exists
+	vindex, exist := s.ValidatorIndexByPubkey(reqPubkey)
+	if !exist {
+		log.Warn("ProcessWithdrawalRequest: validator index not found", "pubkey", common.Bytes2Hex(reqPubkey[:]))
+		return nil
+	}
+	validator, err := s.ValidatorForValidatorIndex(int(vindex))
+	if err != nil {
+		return fmt.Errorf("ProcessWithdrawalRequest: validator not found for index %d", vindex)
+	}
+	// Verify withdrawal credentials
+	hasCorrectCredential := state.HasExecutionWithdrawalCredential(validator, s.BeaconConfig())
+	wc := validator.WithdrawalCredentials()
+	isCorrectSourceAddress := bytes.Equal(req.SourceAddress[:], wc[12:])
+	if !(isCorrectSourceAddress && hasCorrectCredential) {
+		return nil
+	}
+	// check validator is active
+	if !validator.Active(state.Epoch(s)) {
+		return nil
+	}
+	// Verify exit has not been initiated
+	if validator.ExitEpoch() != s.BeaconConfig().FarFutureEpoch {
+		return nil
+	}
+	// Verify the validator has been active long enough
+	if state.Epoch(s) < validator.ActivationEpoch()+s.BeaconConfig().ShardCommitteePeriod {
+		return nil
+	}
+	pendingBalanceToWithdraw := getPendingBalanceToWithdraw(s, vindex)
+	if isFullExitRequest {
+		// Only exit validator if it has no pending withdrawals in the queue
+		if pendingBalanceToWithdraw == 0 {
+			return s.InitiateValidatorExit(vindex)
+		}
+		return nil
+	}
+
+	vbalance, err := s.ValidatorBalance(int(vindex))
+	if err != nil {
+		return err
+	}
+	hasSufficientEffectiveBalance := validator.EffectiveBalance() >= s.BeaconConfig().MinActivationBalance
+	hasExcessBalance := vbalance > s.BeaconConfig().MinActivationBalance+pendingBalanceToWithdraw
+	// Only allow partial withdrawals with compounding withdrawal credentials
+	if state.HasCompoundingWithdrawalCredential(validator, s.BeaconConfig()) && hasSufficientEffectiveBalance && hasExcessBalance {
+		toWithdraw := min(
+			vbalance-s.BeaconConfig().MinActivationBalance-pendingBalanceToWithdraw,
+			amount,
+		)
+		exitQueueEpoch := s.ComputeExitEpochAndUpdateChurn(toWithdraw)
+		withdrawableEpoch := exitQueueEpoch + s.BeaconConfig().MinValidatorWithdrawabilityDelay
+		s.AppendPendingPartialWithdrawal(&solid.PendingPartialWithdrawal{
+			Index:             vindex,
+			Amount:            toWithdraw,
+			WithdrawableEpoch: withdrawableEpoch,
+		})
+	}
+	return nil
+}
+
+func (I *impl) ProcessConsolidationRequest(s abstract.BeaconState, consolidationRequest *solid.ConsolidationRequest) error {
+	if isValidSwitchToCompoundingRequest(s, consolidationRequest) {
+		// source index
+		sourceIndex, exist := s.ValidatorIndexByPubkey(consolidationRequest.SourcePubKey)
+		if !exist {
+			log.Warn("Validator index not found for source pubkey", "pubkey", consolidationRequest.SourcePubKey)
+			return nil
+		}
+		if err := switchToCompoundingValidator(s, sourceIndex); err != nil {
+			return err
+		}
+		return nil
+	}
+	// Verify that source != target, so a consolidation cannot be used as an exit.
+	if bytes.Equal(consolidationRequest.SourcePubKey[:], consolidationRequest.TargetPubKey[:]) {
+		return nil
+	}
+	// If the pending consolidations queue is full, consolidation requests are ignored
+	if s.GetPendingConsolidations().Len() == int(s.BeaconConfig().PendingConsolidationsLimit) {
+		return nil
+	}
+	// If there is too little available consolidation churn limit, consolidation requests are ignored
+	if state.GetConsolidationChurnLimit(s) <= s.BeaconConfig().MinActivationBalance {
+		return nil
+	}
+	// source/target index and validator
+	sourceIndex, exist := s.ValidatorIndexByPubkey(consolidationRequest.SourcePubKey)
+	if !exist {
+		log.Warn("Validator index not found for source pubkey", "pubkey", consolidationRequest.SourcePubKey)
+		return nil
+	}
+	targetIndex, exist := s.ValidatorIndexByPubkey(consolidationRequest.TargetPubKey)
+	if !exist {
+		log.Warn("Validator index not found for target pubkey", "pubkey", consolidationRequest.TargetPubKey)
+		return nil
+	}
+	sourceValidator, err := s.ValidatorForValidatorIndex(int(sourceIndex))
+	if err != nil {
+		return err
+	}
+	targetValidator, err := s.ValidatorForValidatorIndex(int(targetIndex))
+	if err != nil {
+		return err
+	}
+
+	// Verify source withdrawal credentials
+	hasCorrectCredential := state.HasExecutionWithdrawalCredential(sourceValidator, s.BeaconConfig())
+	sourceWc := sourceValidator.WithdrawalCredentials()
+	isCorrectSourceAddress := bytes.Equal(consolidationRequest.SourceAddress[:], sourceWc[12:])
+	if !(isCorrectSourceAddress && hasCorrectCredential) {
+		return nil
+	}
+	// Verify that target has compounding withdrawal credentials
+	if !state.HasCompoundingWithdrawalCredential(targetValidator, s.BeaconConfig()) {
+		return nil
+	}
+	// Verify the source and the target are active
+	curEpoch := state.Epoch(s)
+	if !sourceValidator.Active(curEpoch) || !targetValidator.Active(curEpoch) {
+		return nil
+	}
+	// Verify exits for source and target have not been initiated
+	if sourceValidator.ExitEpoch() != s.BeaconConfig().FarFutureEpoch ||
+		targetValidator.ExitEpoch() != s.BeaconConfig().FarFutureEpoch {
+		return nil
+	}
+	// Verify the source has been active long enough
+	if curEpoch < sourceValidator.ActivationEpoch()+s.BeaconConfig().ShardCommitteePeriod {
+		log.Info("[Consolidation] Source has not been active long enough, ignoring consolidation request", "slot", s.Slot(), "curEpoch", curEpoch, "activationEpoch", sourceValidator.ActivationEpoch())
+		return nil
+	}
+	// Verify the source has no pending withdrawals in the queue
+	if getPendingBalanceToWithdraw(s, sourceIndex) > 0 {
+		log.Info("[Consolidation] Source has pending withdrawals, ignoring consolidation request", "slot", s.Slot())
+		return nil
+	}
+
+	// Initiate source validator exit and append pending consolidation
+	s.SetExitEpochForValidatorAtIndex(int(sourceIndex), computeConsolidationEpochAndUpdateChurn(s, sourceValidator.EffectiveBalance()))
+	s.SetWithdrawableEpochForValidatorAtIndex(int(sourceIndex), sourceValidator.ExitEpoch()+s.BeaconConfig().MinValidatorWithdrawabilityDelay)
+
+	s.AppendPendingConsolidation(&solid.PendingConsolidation{
+		SourceIndex: sourceIndex,
+		TargetIndex: targetIndex,
+	})
+	return nil
+}
+
+func isValidSwitchToCompoundingRequest(s abstract.BeaconState, request *solid.ConsolidationRequest) bool {
+	// Switch to compounding requires source and target be equal
+	if !bytes.Equal(request.SourcePubKey[:], request.TargetPubKey[:]) {
+		return false
+	}
+	// Verify pubkey exists
+	vindex, exist := s.ValidatorIndexByPubkey(request.SourcePubKey)
+	if !exist {
+		return false
+	}
+	sourceValidator, err := s.ValidatorForValidatorIndex(int(vindex))
+	if err != nil {
+		log.Warn("Error getting validator for source pubkey", "error", err)
+		return false
+	}
+	// Verify request has been authorized
+	wc := sourceValidator.WithdrawalCredentials()
+	if !bytes.Equal(wc[12:], request.SourceAddress[:]) {
+		return false
+	}
+	// Verify source withdrawal credentials
+	if !state.HasEth1WithdrawalCredential(sourceValidator, s.BeaconConfig()) {
+		return false
+	}
+	// Verify the source is active
+	curEpoch := state.Epoch(s)
+	if !sourceValidator.Active(curEpoch) {
+		return false
+	}
+	// Verify exit for source has not been initiated
+	if sourceValidator.ExitEpoch() != s.BeaconConfig().FarFutureEpoch {
+		return false
+	}
+	return true
+}
+
+func switchToCompoundingValidator(s abstract.BeaconState, vindex uint64) error {
+	validator, err := s.ValidatorForValidatorIndex(int(vindex))
+	if err != nil {
+		return err
+	}
+	// copy the withdrawal credentials
+	wc := validator.WithdrawalCredentials()
+	newWc := common.Hash{}
+	copy(newWc[:], wc[:])
+	newWc[0] = byte(s.BeaconConfig().CompoundingWithdrawalPrefix)
+	s.SetWithdrawalCredentialForValidatorAtIndex(int(vindex), newWc)
+	return state.QueueExcessActiveBalance(s, vindex, &validator)
+}
+
+// compute_consolidation_epoch_and_update_churn
+func computeConsolidationEpochAndUpdateChurn(s abstract.BeaconState, consolidationBalance uint64) uint64 {
+	earlistConsolidationEpoch := max(
+		s.GetEarlistConsolidationEpoch(),
+		state.ComputeActivationExitEpoch(s.BeaconConfig(), state.Epoch(s)),
+	)
+	perEpochConsolidationChurn := state.GetConsolidationChurnLimit(s)
+	// New epoch for consolidations.
+	var consolidationBalanceToConsume uint64
+	if s.GetEarlistConsolidationEpoch() < earlistConsolidationEpoch {
+		consolidationBalanceToConsume = perEpochConsolidationChurn
+	} else {
+		consolidationBalanceToConsume = s.GetConsolidationBalanceToConsume()
+	}
+	// Consolidation doesn't fit in the current earliest epoch.
+	if consolidationBalance > consolidationBalanceToConsume {
+		balanceToProcess := consolidationBalance - consolidationBalanceToConsume
+		additionalEpochs := (balanceToProcess-1)/perEpochConsolidationChurn + 1
+		earlistConsolidationEpoch += additionalEpochs
+		consolidationBalanceToConsume += additionalEpochs * perEpochConsolidationChurn
+	}
+	// Consume the balance and update state variables.
+	s.SetConsolidationBalanceToConsume(consolidationBalanceToConsume - consolidationBalance)
+	s.SetEarlistConsolidationEpoch(earlistConsolidationEpoch)
+	return earlistConsolidationEpoch
 }

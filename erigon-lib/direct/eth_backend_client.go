@@ -51,6 +51,10 @@ func (s *EthBackendClientDirect) Version(ctx context.Context, in *emptypb.Empty,
 	return s.server.Version(ctx, in)
 }
 
+func (s *EthBackendClientDirect) Syncing(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remote.SyncingReply, error) {
+	return s.server.Syncing(ctx, in)
+}
+
 func (s *EthBackendClientDirect) ProtocolVersion(ctx context.Context, in *remote.ProtocolVersionRequest, opts ...grpc.CallOption) (*remote.ProtocolVersionReply, error) {
 	return s.server.ProtocolVersion(ctx, in)
 }
@@ -100,12 +104,17 @@ type SubscribeStreamC struct {
 }
 
 func (c *SubscribeStreamC) Recv() (*remote.SubscribeReply, error) {
-	m, ok := <-c.ch
-	if !ok || m == nil {
-		return nil, io.EOF
+	select {
+	case m, ok := <-c.ch:
+		if !ok || m == nil {
+			return nil, io.EOF
+		}
+		return m.r, m.err
+	case <-c.ctx.Done():
+		return nil, c.ctx.Err()
 	}
-	return m.r, m.err
 }
+
 func (c *SubscribeStreamC) Context() context.Context { return c.ctx }
 
 // -- end Subscribe
@@ -156,11 +165,15 @@ func (s *SubscribeLogsStreamS) Send(m *remote.SubscribeLogsReply) error {
 }
 
 func (s *SubscribeLogsStreamS) Recv() (*remote.LogsFilterRequest, error) {
-	m, ok := <-s.chRecv
-	if !ok || m == nil {
-		return nil, io.EOF
+	select {
+	case m, ok := <-s.chRecv:
+		if !ok || m == nil {
+			return nil, io.EOF
+		}
+		return m.r, m.err
+	case <-s.ctx.Done():
+		return nil, s.ctx.Err()
 	}
-	return m.r, m.err
 }
 
 func (s *SubscribeLogsStreamS) Err(err error) {
@@ -183,11 +196,15 @@ func (c *SubscribeLogsStreamC) Send(m *remote.LogsFilterRequest) error {
 }
 
 func (c *SubscribeLogsStreamC) Recv() (*remote.SubscribeLogsReply, error) {
-	m, ok := <-c.chRecv
-	if !ok || m == nil {
-		return nil, io.EOF
+	select {
+	case m, ok := <-c.chRecv:
+		if !ok || m == nil {
+			return nil, io.EOF
+		}
+		return m.r, m.err
+	case <-c.ctx.Done():
+		return nil, c.ctx.Err()
 	}
-	return m.r, m.err
 }
 
 // -- end SubscribeLogs
@@ -234,4 +251,8 @@ func (s *EthBackendClientDirect) BorTxnLookup(ctx context.Context, in *remote.Bo
 
 func (s *EthBackendClientDirect) BorEvents(ctx context.Context, in *remote.BorEventsRequest, opts ...grpc.CallOption) (*remote.BorEventsReply, error) {
 	return s.server.BorEvents(ctx, in)
+}
+
+func (s *EthBackendClientDirect) AAValidation(ctx context.Context, in *remote.AAValidationRequest, opts ...grpc.CallOption) (*remote.AAValidationReply, error) {
+	return s.server.AAValidation(ctx, in)
 }

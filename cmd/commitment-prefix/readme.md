@@ -15,7 +15,7 @@ Usage of ./comvis:
 -compression string
     compression type (none, k, v, kv) (default "none")
 -j int
-    amount of concurrently proceeded files (default 4)
+    amount of concurrently processed files (default 4)
 -output string
     existing directory to store output images. By default, same as commitment files
 -trie string

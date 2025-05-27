@@ -18,7 +18,6 @@ package solid
 
 import (
 	"encoding/json"
-	"io"
 
 	"github.com/erigontech/erigon-lib/types/clonable"
 )
@@ -117,14 +116,6 @@ func (arr *uint64ListSSZ) Pop() uint64 {
 
 func (arr *uint64ListSSZ) Append(v uint64) {
 	arr.u.Append(v)
-}
-
-func (arr *uint64ListSSZ) ReadMerkleTree(r io.Reader) error {
-	return arr.u.ReadMerkleTree(r)
-}
-
-func (arr *uint64ListSSZ) WriteMerkleTree(w io.Writer) error {
-	return arr.u.WriteMerkleTree(w)
 }
 
 // Check if it is sorted and check if there are duplicates. O(N) complexity.

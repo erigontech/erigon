@@ -18,12 +18,13 @@ package shards
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 type RpcEventType uint64
@@ -161,6 +162,11 @@ type Notifications struct {
 	Accumulator          *Accumulator // StateAccumulator
 	StateChangesConsumer StateChangeConsumer
 	RecentLogs           *RecentLogs
+	LastNewBlockSeen     atomic.Uint64 // This is used by eth_syncing as an heuristic to determine if the node is syncing or not.
+}
+
+func (n *Notifications) NewLastBlockSeen(blockNum uint64) {
+	n.LastNewBlockSeen.Store(blockNum)
 }
 
 func NewNotifications(StateChangesConsumer StateChangeConsumer) *Notifications {
@@ -220,7 +226,7 @@ func (r *RecentLogs) Notify(n *Events, from, to uint64, isUnwind bool) {
 
 			for _, l := range receipt.Logs {
 				res := &remote.SubscribeLogsReply{
-					Address:          gointerfaces.ConvertAddressToH160(receipt.ContractAddress),
+					Address:          gointerfaces.ConvertAddressToH160(l.Address),
 					BlockHash:        gointerfaces.ConvertHashToH256(receipt.BlockHash),
 					BlockNumber:      blockNum,
 					Data:             l.Data,
@@ -270,5 +276,14 @@ func (r *RecentLogs) Add(receipts types.Receipts) {
 		if bn+r.limit < blockNum {
 			delete(r.receipts, bn)
 		}
+	}
+}
+
+func (r *RecentLogs) CopyAndReset(target *RecentLogs) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for blockNum, receipts := range r.receipts {
+		target.Add(receipts)
+		delete(r.receipts, blockNum)
 	}
 }

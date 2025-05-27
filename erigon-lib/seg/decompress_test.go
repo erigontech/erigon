@@ -19,17 +19,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"math/rand"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/common/page"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
@@ -62,6 +63,35 @@ func prepareLoremDict(t *testing.T) *Decompressor {
 	return d
 }
 
+func prepareLoremDictOnPagedWriter(t *testing.T, sampling int, pageCompression bool) *Decompressor {
+	t.Helper()
+	logger, require := log.New(), require.New(t)
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "compressed")
+	t.Name()
+	cfg := DefaultCfg
+	cfg.MinPatternScore = 1
+	cfg.Workers = 2
+	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	require.NoError(err)
+	defer c.Close()
+	wr := NewWriter(c, CompressNone)
+	defer wr.Close()
+
+	p := page.NewWriter(wr, sampling, pageCompression)
+	for k, w := range loremStrings {
+		key := fmt.Sprintf("key %d", k)
+		val := fmt.Sprintf("%s %d", w, k)
+		require.NoError(p.Add([]byte(key), []byte(val)))
+	}
+	require.NoError(p.Flush())
+	require.NoError(wr.Compress())
+
+	d, err := NewDecompressor(file)
+	require.NoError(err)
+	return d
+}
+
 func TestDecompressSkip(t *testing.T) {
 	d := prepareLoremDict(t)
 	defer d.Close()
@@ -80,6 +110,51 @@ func TestDecompressSkip(t *testing.T) {
 		}
 		i++
 	}
+
+	g.Reset(0)
+	_, offset := g.Next(nil)
+	require.Equal(t, 8, int(offset))
+	_, offset = g.Next(nil)
+	require.Equal(t, 16, int(offset))
+}
+
+func TestPagedReader(t *testing.T) {
+	d := prepareLoremDictOnPagedWriter(t, 2, false)
+	defer d.Close()
+	require := require.New(t)
+	g1 := NewPagedReader(d.MakeGetter(), 2, false)
+	var buf []byte
+	_, _, buf, o1 := g1.Next2(buf[:0])
+	require.Zero(o1)
+	_, _, buf, o1 = g1.Next2(buf[:0])
+	require.Zero(o1)
+	_, _, buf, o1 = g1.Next2(buf[:0])
+	require.NotZero(o1)
+
+	g := NewPagedReader(d.MakeGetter(), 2, false)
+	i := 0
+	for g.HasNext() {
+		w := loremStrings[i]
+		if i%2 == 0 {
+			g.Skip()
+		} else {
+			var word []byte
+			_, word, buf, _ = g.Next2(buf[:0])
+			expected := fmt.Sprintf("%s %d", w, i)
+			require.Equal(expected, string(word))
+		}
+		i++
+	}
+
+	g.Reset(0)
+	_, offset := g.Next(buf[:0])
+	require.Equal(0, int(offset))
+	_, offset = g.Next(buf[:0])
+	require.Equal(0x2a, int(offset))
+	_, offset = g.Next(buf[:0])
+	require.Equal(0x2a, int(offset))
+	_, offset = g.Next(buf[:0])
+	require.Equal(0x52, int(offset))
 }
 
 func TestDecompressMatchOK(t *testing.T) {
@@ -257,22 +332,23 @@ func prepareLoremDictUncompressed(t *testing.T) *Decompressor {
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
 	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer c.Close()
+	slices.Sort(loremStrings)
 	for k, w := range loremStrings {
-		if err = c.AddUncompressedWord([]byte(fmt.Sprintf("%s %d", w, k))); err != nil {
-			t.Fatal(err)
+		if len(w) == 0 {
+			err = c.AddUncompressedWord([]byte(w))
+			require.NoError(t, err)
+			continue
 		}
+		err = c.AddUncompressedWord([]byte(fmt.Sprintf("%s %d", w, k)))
+		require.NoError(t, err)
 	}
-	if err = c.Compress(); err != nil {
-		t.Fatal(err)
-	}
-	var d *Decompressor
-	if d, err = NewDecompressor(file); err != nil {
-		t.Fatal(err)
-	}
+	err = c.Compress()
+	require.NoError(t, err)
+	d, err := NewDecompressor(file)
+	require.NoError(t, err)
+	t.Cleanup(d.Close)
 	return d
 }
 
@@ -281,16 +357,60 @@ func TestUncompressed(t *testing.T) {
 	defer d.Close()
 	g := d.MakeGetter()
 	i := 0
+	var offsets []uint64
+	offsets = append(offsets, 0)
 	for g.HasNext() {
 		w := loremStrings[i]
 		expected := []byte(fmt.Sprintf("%s %d", w, i+1))
 		expected = expected[:len(expected)/2]
-		actual, _ := g.NextUncompressed()
+		actual, offset := g.NextUncompressed()
 		if bytes.Equal(expected, actual) {
 			t.Errorf("expected %s, actual %s", expected, actual)
 		}
 		i++
+		offsets = append(offsets, offset)
 	}
+
+	t.Run("BinarySearch middle", func(t *testing.T) {
+		require := require.New(t)
+		_, ok := g.BinarySearch([]byte("ipsum"), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
+		require.True(ok)
+		k, _ := g.Next(nil)
+		require.Equal("ipsum 38", string(k))
+		_, ok = g.BinarySearch([]byte("ipsu"), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
+		require.True(ok)
+		k, _ = g.Next(nil)
+		require.Equal("ipsum 38", string(k))
+	})
+	t.Run("BinarySearch end of file", func(t *testing.T) {
+		require := require.New(t)
+		//last word is `voluptate`
+		_, ok := g.BinarySearch([]byte("voluptate"), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
+		require.True(ok)
+		k, _ := g.Next(nil)
+		require.Equal("voluptate 69", string(k))
+		_, ok = g.BinarySearch([]byte("voluptat"), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
+		require.True(ok)
+		k, _ = g.Next(nil)
+		require.Equal("voluptate 69", string(k))
+		_, ok = g.BinarySearch([]byte("voluptatez"), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
+		require.False(ok)
+	})
+
+	t.Run("BinarySearch begin of file", func(t *testing.T) {
+		require := require.New(t)
+		//first word is ``
+		_, ok := g.BinarySearch([]byte(""), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
+		require.True(ok)
+		k, _ := g.Next(nil)
+		require.Empty(string(k))
+
+		_, ok = g.BinarySearch(nil, d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
+		require.True(ok)
+		k, _ = g.Next(nil)
+		require.Empty(string(k))
+	})
+
 }
 
 func TestDecompressor_OpenCorrupted(t *testing.T) {
@@ -394,7 +514,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		require.NoError(t, err)
 
 		d, err := NewDecompressor(fpath)
-		require.Truef(t, errors.Is(err, &ErrCompressedFileCorrupted{}),
+		require.ErrorIsf(t, err, &ErrCompressedFileCorrupted{},
 			"file is some garbage or smaller compressedMinSize(%d) bytes, got error %v", compressedMinSize, err)
 		require.Nil(t, d)
 
@@ -422,7 +542,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		require.NoError(t, err)
 
 		d, err := NewDecompressor(fpath)
-		require.Truef(t, errors.Is(err, &ErrCompressedFileCorrupted{}),
+		require.ErrorIsf(t, err, &ErrCompressedFileCorrupted{},
 			"file contains incorrect pattern dictionary size in bytes, got error %v", err)
 		require.Nil(t, d)
 	})
@@ -438,7 +558,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		require.NoError(t, err)
 
 		d, err := NewDecompressor(fpath)
-		require.Truef(t, errors.Is(err, &ErrCompressedFileCorrupted{}),
+		require.ErrorIsf(t, err, &ErrCompressedFileCorrupted{},
 			"file contains incorrect dictionary size in bytes, got error %v", err)
 		require.Nil(t, d)
 	})
@@ -455,23 +575,26 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		require.NoError(t, err)
 
 		d, err := NewDecompressor(fpath)
-		require.Truef(t, errors.Is(err, &ErrCompressedFileCorrupted{}),
+		require.ErrorIsf(t, err, &ErrCompressedFileCorrupted{},
 			"file contains incorrect dictionary size in bytes, got error %v", err)
 		require.Nil(t, d)
 	})
 }
 
-const lorem = `Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et
-dolore magna aliqua Ut enim ad minim veniam quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo
-consequat Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur
-Excepteur sint occaecat cupidatat non proident sunt in culpa qui officia deserunt mollit anim id est laborum`
+const lorem = `lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et
+dolore magna aliqua ut enim ad minim veniam quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo
+consequat duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur
+excepteur sint occaecat cupidatat non proident sunt in culpa qui officia deserunt mollit anim id est laborum`
 
-var loremStrings = strings.Split(lorem, " ")
+var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
+func rmNewLine(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "\n", " "), "\r", "")
+}
 
 func TestDecompressTorrent(t *testing.T) {
 	t.Skip()
 
-	fpath := "/mnt/data/chains/mainnet/snapshots/v1-014000-014500-transactions.seg"
+	fpath := "/mnt/data/chains/mainnet/snapshots/v1.0-014000-014500-transactions.seg"
 	st, err := os.Stat(fpath)
 	require.NoError(t, err)
 	fmt.Printf("file: %v, size: %d\n", st.Name(), st.Size())
@@ -515,10 +638,6 @@ func generateRandWords() {
 	// make sure we have at least 2 emtpy []byte
 	WORDS[N-2] = []byte{}
 	WORDS[N-1] = []byte{}
-}
-
-func randIntInRange(min, max int) int {
-	return (rand.Intn(max-min) + min)
 }
 
 func clearPrevDict() {

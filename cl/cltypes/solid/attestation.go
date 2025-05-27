@@ -21,7 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
@@ -39,13 +39,13 @@ const (
 
 // Attestation type represents a statement or confirmation of some occurrence or phenomenon.
 type Attestation struct {
-	AggregationBits *BitList          `json:"aggregation_bits"`
-	Data            *AttestationData  `json:"data"`
-	Signature       libcommon.Bytes96 `json:"signature"`
-	CommitteeBits   *BitVector        `json:"committee_bits,omitempty"` // Electra EIP-7549
+	AggregationBits *BitList         `json:"aggregation_bits"`
+	Data            *AttestationData `json:"data"`
+	Signature       common.Bytes96   `json:"signature"`
+	CommitteeBits   *BitVector       `json:"committee_bits,omitempty"` // Electra EIP-7549
 }
 
-func (a *Attestation) ElectraSingleCommitteeIndex() (uint64, error) {
+func (a *Attestation) GetCommitteeIndexFromBits() (uint64, error) {
 	bits := a.CommitteeBits.GetOnIndices()
 	if len(bits) == 0 {
 		return 0, errors.New("no committee bits set in electra attestation")
@@ -63,7 +63,7 @@ func (a *Attestation) Copy() *Attestation {
 	new.AggregationBits = a.AggregationBits.Copy()
 	new.Data = &AttestationData{}
 	*new.Data = *a.Data
-	new.Signature = a.Signature
+	copy(new.Signature[:], a.Signature[:])
 	new.CommitteeBits = a.CommitteeBits.Copy()
 	return new
 }
@@ -72,9 +72,9 @@ func (a *Attestation) Copy() *Attestation {
 func (a *Attestation) EncodingSizeSSZ() (size int) {
 	if a.CommitteeBits != nil {
 		// Electra case
-		return 4 + AttestationDataSize + length.Bytes96 + 4 +
-			a.AggregationBits.EncodingSizeSSZ() +
-			a.CommitteeBits.EncodingSizeSSZ()
+		return 4 + AttestationDataSize + length.Bytes96 +
+			a.CommitteeBits.EncodingSizeSSZ() +
+			a.AggregationBits.EncodingSizeSSZ()
 	}
 	// Deneb case
 	size = AttestationDataSize + length.Bytes96
@@ -131,10 +131,10 @@ func (a *Attestation) Clone() clonable.Clonable {
 func (a *Attestation) UnmarshalJSON(data []byte) error {
 	// Unmarshal as normal into a temporary struct
 	type tempAttestation struct {
-		AggregationBits *BitList          `json:"aggregation_bits"`
-		Data            *AttestationData  `json:"data"`
-		Signature       libcommon.Bytes96 `json:"signature"`
-		CommitteeBits   *BitVector        `json:"committee_bits,omitempty"`
+		AggregationBits *BitList         `json:"aggregation_bits"`
+		Data            *AttestationData `json:"data"`
+		Signature       common.Bytes96   `json:"signature"`
+		CommitteeBits   *BitVector       `json:"committee_bits,omitempty"`
 	}
 
 	// For Electra, the committee bits are present in the JSON
@@ -150,6 +150,7 @@ func (a *Attestation) UnmarshalJSON(data []byte) error {
 		a.Data = temp.Data
 		a.Signature = temp.Signature
 		a.CommitteeBits = temp.CommitteeBits
+		return nil
 	}
 
 	// Deneb case
@@ -163,4 +164,64 @@ func (a *Attestation) UnmarshalJSON(data []byte) error {
 	a.Data = temp.Data
 	a.Signature = temp.Signature
 	return nil
+}
+
+// class SingleAttestation(Container):
+//
+//	committee_index: CommitteeIndex
+//	attester_index: ValidatorIndex
+//	data: AttestationData
+//	signature: BLSSignature
+type SingleAttestation struct {
+	CommitteeIndex uint64           `json:"committee_index,string"`
+	AttesterIndex  uint64           `json:"attester_index,string"`
+	Data           *AttestationData `json:"data"`
+	Signature      common.Bytes96   `json:"signature"`
+}
+
+func (s *SingleAttestation) EncodeSSZ(dst []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(dst, &s.CommitteeIndex, &s.AttesterIndex, s.Data, s.Signature[:])
+}
+
+func (s *SingleAttestation) DecodeSSZ(buf []byte, version int) error {
+	s.Data = &AttestationData{}
+	return ssz2.UnmarshalSSZ(buf, version, &s.CommitteeIndex, &s.AttesterIndex, s.Data, s.Signature[:])
+}
+
+func (s *SingleAttestation) EncodingSizeSSZ() (size int) {
+	return 8 + 8 + AttestationDataSize + length.Bytes96
+}
+
+func (s *SingleAttestation) HashSSZ() (o [32]byte, err error) {
+	return merkle_tree.HashTreeRoot(&s.CommitteeIndex, &s.AttesterIndex, s.Data, s.Signature[:])
+}
+
+func (s *SingleAttestation) Clone() clonable.Clonable {
+	return &SingleAttestation{
+		Data: &AttestationData{},
+	}
+}
+
+func (s *SingleAttestation) Static() bool {
+	return true
+}
+
+func (s *SingleAttestation) ToAttestation(memberIndexInCommittee int, committeeLen int) *Attestation {
+	committeeBits := NewBitVector(maxCommitteesPerSlot)
+	committeeBits.SetBitAt(int(s.CommitteeIndex), true)
+	// flip the bit for the validator and also mark the last bit
+	bytes := make([]byte, committeeLen/8+1)
+	bytes[memberIndexInCommittee/8] |= 1 << (memberIndexInCommittee % 8)
+	bytes[committeeLen/8] |= 1 << (committeeLen % 8)
+	aggregationBits := BitlistFromBytes(bytes, aggregationBitsSizeElectra)
+	return &Attestation{
+		AggregationBits: aggregationBits,
+		Data:            s.Data,
+		Signature:       s.Signature,
+		CommitteeBits:   committeeBits,
+	}
+}
+
+func (s *SingleAttestation) AttestationData() *AttestationData {
+	return s.Data
 }

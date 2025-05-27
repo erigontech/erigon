@@ -27,10 +27,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/common"
 )
 
 func TestGetBlockRewards(t *testing.T) {
@@ -89,7 +89,7 @@ func TestGetBlockRewards(t *testing.T) {
 }
 
 func TestPostSyncCommitteeRewards(t *testing.T) {
-	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
+	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	var err error
 	fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
 	require.NoError(t, err)

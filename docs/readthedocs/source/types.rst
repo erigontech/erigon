@@ -3,12 +3,12 @@ Erigon Types
 ================
 
 This document will list each major types defined and used by Erigon.
-They are found in `github.com/erigontech/erigon/core/types` and `github.com/erigontech/erigon/common`
+They are found in `github.com/erigontech/erigon-lib/types` and `github.com/erigontech/erigon-lib/common`
 
 Address and Hash
 ================
 
-package: `github.com/erigontech/erigon/common`
+package: `github.com/erigontech/erigon-lib/common`
 
 .. code-block:: go
 
@@ -130,7 +130,7 @@ represent an Ethereum Transaction.
 Block Header
 ============
 
-package: `github.com/erigontech/erigon/core/types`
+package: `github.com/erigontech/erigon-lib/types`
 
 .. code-block:: go
 
@@ -239,7 +239,7 @@ total difficulty accumulated up to the block. sum of all prev blocks difficultie
 Account
 =======
 
-package: `github.com/erigontech/erigon/core/types/accounts`
+package: `github.com/erigontech/erigon-lib/types/accounts`
 
 .. code-block:: go
 

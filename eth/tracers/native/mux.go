@@ -24,9 +24,9 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-
-	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/eth/tracers"
 )
 
@@ -38,18 +38,18 @@ func init() {
 // runs multiple tracers in one go.
 type muxTracer struct {
 	names   []string
-	tracers []tracers.Tracer
+	tracers []*tracers.Tracer
 }
 
 // newMuxTracer returns a new mux tracer.
-func newMuxTracer(ctx *tracers.Context, cfg json.RawMessage) (tracers.Tracer, error) {
+func newMuxTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, error) {
 	var config map[string]json.RawMessage
 	if cfg != nil {
 		if err := json.Unmarshal(cfg, &config); err != nil {
 			return nil, err
 		}
 	}
-	objects := make([]tracers.Tracer, 0, len(config))
+	objects := make([]*tracers.Tracer, 0, len(config))
 	names := make([]string, 0, len(config))
 	for k, v := range config {
 		t, err := tracers.New(k, ctx, v)
@@ -60,61 +60,120 @@ func newMuxTracer(ctx *tracers.Context, cfg json.RawMessage) (tracers.Tracer, er
 		names = append(names, k)
 	}
 
-	return &muxTracer{names: names, tracers: objects}, nil
+	t := &muxTracer{names: names, tracers: objects}
+	return &tracers.Tracer{
+		Hooks: &tracing.Hooks{
+			OnTxStart:       t.OnTxStart,
+			OnTxEnd:         t.OnTxEnd,
+			OnEnter:         t.OnEnter,
+			OnExit:          t.OnExit,
+			OnOpcode:        t.OnOpcode,
+			OnFault:         t.OnFault,
+			OnGasChange:     t.OnGasChange,
+			OnBalanceChange: t.OnBalanceChange,
+			OnNonceChange:   t.OnNonceChange,
+			OnCodeChange:    t.OnCodeChange,
+			OnStorageChange: t.OnStorageChange,
+			OnLog:           t.OnLog,
+		},
+		GetResult: t.GetResult,
+		Stop:      t.Stop,
+	}, nil
 }
 
-// CaptureStart implements the EVMLogger interface to initialize the tracing operation.
-func (t *muxTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *muxTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
 	for _, t := range t.tracers {
-		t.CaptureStart(env, from, to, precompile, create, input, gas, value, code)
+		if t.OnOpcode != nil {
+			t.OnOpcode(pc, op, gas, cost, scope, rData, depth, err)
+		}
 	}
 }
 
-// CaptureEnd is called after the call finishes to finalize the tracing.
-func (t *muxTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
+func (t *muxTracer) OnFault(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, depth int, err error) {
 	for _, t := range t.tracers {
-		t.CaptureEnd(output, gasUsed, err)
+		if t.OnFault != nil {
+			t.OnFault(pc, op, gas, cost, scope, depth, err)
+		}
 	}
 }
 
-// CaptureState implements the EVMLogger interface to trace a single step of VM execution.
-func (t *muxTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
+func (t *muxTracer) OnGasChange(old, new uint64, reason tracing.GasChangeReason) {
 	for _, t := range t.tracers {
-		t.CaptureState(pc, op, gas, cost, scope, rData, depth, err)
+		if t.OnGasChange != nil {
+			t.OnGasChange(old, new, reason)
+		}
 	}
 }
 
-// CaptureFault implements the EVMLogger interface to trace an execution fault.
-func (t *muxTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
+func (t *muxTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	for _, t := range t.tracers {
-		t.CaptureFault(pc, op, gas, cost, scope, depth, err)
+		if t.OnEnter != nil {
+			t.OnEnter(depth, typ, from, to, precompile, input, gas, value, code)
+		}
 	}
 }
 
-// CaptureEnter is called when EVM enters a new scope (via call, create or selfdestruct).
-func (t *muxTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *muxTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
 	for _, t := range t.tracers {
-		t.CaptureEnter(typ, from, to, precompile, create, input, gas, value, code)
+		if t.OnExit != nil {
+			t.OnExit(depth, output, gasUsed, err, reverted)
+		}
 	}
 }
 
-// CaptureExit is called when EVM exits a scope, even if the scope didn't
-// execute any code.
-func (t *muxTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
+func (t *muxTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from common.Address) {
 	for _, t := range t.tracers {
-		t.CaptureExit(output, gasUsed, err)
+		if t.OnTxStart != nil {
+			t.OnTxStart(env, tx, from)
+		}
 	}
 }
 
-func (t *muxTracer) CaptureTxStart(gasLimit uint64) {
+func (t *muxTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	for _, t := range t.tracers {
-		t.CaptureTxStart(gasLimit)
+		if t.OnTxEnd != nil {
+			t.OnTxEnd(receipt, err)
+		}
 	}
 }
 
-func (t *muxTracer) CaptureTxEnd(restGas uint64) {
+func (t *muxTracer) OnBalanceChange(a common.Address, prev, new uint256.Int, reason tracing.BalanceChangeReason) {
 	for _, t := range t.tracers {
-		t.CaptureTxEnd(restGas)
+		if t.OnBalanceChange != nil {
+			t.OnBalanceChange(a, prev, new, reason)
+		}
+	}
+}
+
+func (t *muxTracer) OnNonceChange(a common.Address, prev, new uint64) {
+	for _, t := range t.tracers {
+		if t.OnNonceChange != nil {
+			t.OnNonceChange(a, prev, new)
+		}
+	}
+}
+
+func (t *muxTracer) OnCodeChange(a common.Address, prevCodeHash common.Hash, prev []byte, codeHash common.Hash, code []byte) {
+	for _, t := range t.tracers {
+		if t.OnCodeChange != nil {
+			t.OnCodeChange(a, prevCodeHash, prev, codeHash, code)
+		}
+	}
+}
+
+func (t *muxTracer) OnStorageChange(addr common.Address, slot common.Hash, prev uint256.Int, new uint256.Int) {
+	for _, t := range t.tracers {
+		if t.OnStorageChange != nil {
+			t.OnStorageChange(addr, slot, prev, new)
+		}
+	}
+}
+
+func (t *muxTracer) OnLog(log *types.Log) {
+	for _, t := range t.tracers {
+		if t.OnLog != nil {
+			t.OnLog(log)
+		}
 	}
 }
 

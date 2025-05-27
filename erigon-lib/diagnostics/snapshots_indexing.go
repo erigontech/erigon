@@ -87,12 +87,23 @@ func (d *DiagnosticClient) UpdateIndexingStatus() (indexingFinished bool) {
 }
 
 func (d *DiagnosticClient) updateIndexingStatus() (indexingFinished bool) {
+	segments := d.syncStats.SnapshotIndexing.Segments
+	if len(segments) == 0 {
+		// If there are no segments, update progress as 0% and return false.
+		d.updateSnapshotStageStats(SyncStageStats{
+			TimeElapsed: SecondsToHHMMString(uint64(d.syncStats.SnapshotIndexing.TimeElapsed)),
+			TimeLeft:    "unknown",
+			Progress:    "0%",
+		}, "Indexing snapshots")
+		return false
+	}
+
 	totalProgressPercent := 0
-	for _, seg := range d.syncStats.SnapshotIndexing.Segments {
+	for _, seg := range segments {
 		totalProgressPercent += seg.Percent
 	}
 
-	totalProgress := totalProgressPercent / len(d.syncStats.SnapshotIndexing.Segments)
+	totalProgress := totalProgressPercent / len(segments)
 
 	d.updateSnapshotStageStats(SyncStageStats{
 		TimeElapsed: SecondsToHHMMString(uint64(d.syncStats.SnapshotIndexing.TimeElapsed)),

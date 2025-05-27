@@ -19,18 +19,18 @@ package solid
 import (
 	"encoding/json"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 )
 
-type encodableHashableSSZ interface {
+type EncodableHashableSSZ interface {
 	ssz.EncodableSSZ
 	ssz.HashableSSZ
 }
 
-type ListSSZ[T encodableHashableSSZ] struct {
+type ListSSZ[T EncodableHashableSSZ] struct {
 	list []T
 
 	limit int
@@ -42,17 +42,17 @@ type ListSSZ[T encodableHashableSSZ] struct {
 	// an always newly created object
 	bytesPerElement int
 	// We can keep hash_tree_root result cached
-	root libcommon.Hash
+	root common.Hash
 }
 
-func NewDynamicListSSZ[T encodableHashableSSZ](limit int) *ListSSZ[T] {
+func NewDynamicListSSZ[T EncodableHashableSSZ](limit int) *ListSSZ[T] {
 	return &ListSSZ[T]{
 		list:  make([]T, 0),
 		limit: limit,
 	}
 }
 
-func NewStaticListSSZ[T encodableHashableSSZ](limit int, bytesPerElement int) *ListSSZ[T] {
+func NewStaticListSSZ[T EncodableHashableSSZ](limit int, bytesPerElement int) *ListSSZ[T] {
 	return &ListSSZ[T]{
 		list:            make([]T, 0),
 		limit:           limit,
@@ -69,14 +69,14 @@ func (l *ListSSZ[T]) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, &l.list)
 }
 
-func NewDynamicListSSZFromList[T encodableHashableSSZ](list []T, limit int) *ListSSZ[T] {
+func NewDynamicListSSZFromList[T EncodableHashableSSZ](list []T, limit int) *ListSSZ[T] {
 	return &ListSSZ[T]{
 		list:  list,
 		limit: limit,
 	}
 }
 
-func NewStaticListSSZFromList[T encodableHashableSSZ](list []T, limit int, bytesPerElement int) *ListSSZ[T] {
+func NewStaticListSSZFromList[T EncodableHashableSSZ](list []T, limit int, bytesPerElement int) *ListSSZ[T] {
 	return &ListSSZ[T]{
 		list:            list,
 		limit:           limit,
@@ -109,7 +109,7 @@ func (l *ListSSZ[T]) DecodeSSZ(buf []byte, version int) (err error) {
 	} else {
 		l.list, err = ssz.DecodeDynamicList[T](buf, 0, uint32(len(buf)), uint64(l.limit), version)
 	}
-	l.root = libcommon.Hash{}
+	l.root = common.Hash{}
 	return
 }
 
@@ -125,7 +125,7 @@ func (l *ListSSZ[T]) EncodingSizeSSZ() (size int) {
 }
 
 func (l *ListSSZ[T]) HashSSZ() ([32]byte, error) {
-	if (l.root != libcommon.Hash{}) {
+	if (l.root != common.Hash{}) {
 		return l.root, nil
 	}
 	var err error
@@ -159,17 +159,26 @@ func (l *ListSSZ[T]) Len() int {
 
 func (l *ListSSZ[T]) Append(obj T) {
 	l.list = append(l.list, obj)
-	l.root = libcommon.Hash{}
+	l.root = common.Hash{}
 }
 
 func (l *ListSSZ[T]) Clear() {
 	l.list = nil
-	l.root = libcommon.Hash{}
+	l.root = common.Hash{}
 }
 
 func (l *ListSSZ[T]) Truncate(length int) {
 	l.list = l.list[:length]
-	l.root = libcommon.Hash{}
+	l.root = common.Hash{}
+}
+
+func (l *ListSSZ[T]) Cut(length int) {
+	if length >= len(l.list) {
+		l.list = make([]T, 0)
+	} else {
+		l.list = l.list[length:]
+	}
+	l.root = common.Hash{}
 }
 
 func (l *ListSSZ[T]) ElementProof(i int) [][32]byte {
@@ -190,4 +199,16 @@ func (l *ListSSZ[T]) ElementProof(i int) [][32]byte {
 		panic(err)
 	}
 	return append(branch, merkle_tree.Uint64Root(uint64(len(l.list))))
+}
+
+func (l *ListSSZ[T]) ShallowCopy() *ListSSZ[T] {
+	cpy := &ListSSZ[T]{
+		list:            make([]T, len(l.list), cap(l.list)),
+		limit:           l.limit,
+		static:          l.static,
+		bytesPerElement: l.bytesPerElement,
+		root:            common.Hash(common.CopyBytes(l.root[:])),
+	}
+	copy(cpy.list, l.list)
+	return cpy
 }

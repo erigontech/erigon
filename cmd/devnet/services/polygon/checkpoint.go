@@ -27,26 +27,26 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
 	"github.com/erigontech/erigon/cmd/devnet/blocks"
 	"github.com/erigontech/erigon/cmd/devnet/contracts"
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
-	"github.com/erigontech/erigon/cmd/devnet/requests"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/rpc/requests"
 )
 
 type CheckpointBlock struct {
-	Proposer        libcommon.Address `json:"proposer"`
-	StartBlock      uint64            `json:"start_block"`
-	EndBlock        uint64            `json:"end_block"`
-	RootHash        libcommon.Hash    `json:"root_hash"`
-	AccountRootHash libcommon.Hash    `json:"account_root_hash"`
-	BorChainID      string            `json:"bor_chain_id"`
+	Proposer        common.Address `json:"proposer"`
+	StartBlock      uint64         `json:"start_block"`
+	EndBlock        uint64         `json:"end_block"`
+	RootHash        common.Hash    `json:"root_hash"`
+	AccountRootHash common.Hash    `json:"account_root_hash"`
+	BorChainID      string         `json:"bor_chain_id"`
 }
 
 func (c CheckpointBlock) GetSigners() []byte {
@@ -65,18 +65,18 @@ func (c CheckpointBlock) GetSignBytes() ([]byte, error) {
 }
 
 type CheckpointAck struct {
-	From       libcommon.Address `json:"from"`
-	Number     uint64            `json:"number"`
-	Proposer   libcommon.Address `json:"proposer"`
-	StartBlock uint64            `json:"start_block"`
-	EndBlock   uint64            `json:"end_block"`
-	RootHash   libcommon.Hash    `json:"root_hash"`
-	TxHash     libcommon.Hash    `json:"tx_hash"`
-	LogIndex   uint64            `json:"log_index"`
+	From       common.Address `json:"from"`
+	Number     uint64         `json:"number"`
+	Proposer   common.Address `json:"proposer"`
+	StartBlock uint64         `json:"start_block"`
+	EndBlock   uint64         `json:"end_block"`
+	RootHash   common.Hash    `json:"root_hash"`
+	TxHash     common.Hash    `json:"tx_hash"`
+	LogIndex   uint64         `json:"log_index"`
 }
 
-var zeroHash libcommon.Hash
-var zeroAddress libcommon.Address
+var zeroHash common.Hash
+var zeroAddress common.Address
 
 func (c CheckpointBlock) ValidateBasic() error {
 
@@ -227,7 +227,7 @@ func (h *Heimdall) handleChildHeader(ctx context.Context, header *types.Header) 
 
 	if shouldSend {
 		// TODO simulate tendermint chain stats
-		txHash := libcommon.Hash{}
+		txHash := common.Hash{}
 		blockHeight := int64(0)
 
 		if err := h.createAndSendCheckpointToRootchain(ctx, start, end, blockHeight, txHash); err != nil {
@@ -346,17 +346,17 @@ func (h *Heimdall) currentHeaderBlock(childBlockInterval uint64) (uint64, error)
 	return currentHeaderBlock.Uint64() / childBlockInterval, nil
 }
 
-func (h *Heimdall) fetchDividendAccountRoot() (libcommon.Hash, error) {
+func (h *Heimdall) fetchDividendAccountRoot() (common.Hash, error) {
 	//TODO
 	return crypto.Keccak256Hash([]byte("dividendaccountroot")), nil
 }
 
 func (h *Heimdall) getHeaderInfo(number uint64) (
-	root libcommon.Hash,
+	root common.Hash,
 	start uint64,
 	end uint64,
 	createdAt uint64,
-	proposer libcommon.Address,
+	proposer common.Address,
 	err error,
 ) {
 	// get header from rootChain
@@ -378,19 +378,19 @@ func (h *Heimdall) getHeaderInfo(number uint64) (
 		headerBlock.Start.Uint64(),
 		headerBlock.End.Uint64(),
 		createdAt,
-		libcommon.BytesToAddress(headerBlock.Proposer.Bytes()),
+		common.BytesToAddress(headerBlock.Proposer.Bytes()),
 		nil
 }
 
-func (h *Heimdall) getRootHash(ctx context.Context, start uint64, end uint64) (libcommon.Hash, error) {
+func (h *Heimdall) getRootHash(ctx context.Context, start uint64, end uint64) (common.Hash, error) {
 	noOfBlock := end - start + 1
 
 	if start > end {
-		return libcommon.Hash{}, errors.New("start is greater than end")
+		return common.Hash{}, errors.New("start is greater than end")
 	}
 
 	if noOfBlock > h.checkpointConfig.MaxCheckpointLength {
-		return libcommon.Hash{}, errors.New("number of headers requested exceeds")
+		return common.Hash{}, errors.New("number of headers requested exceeds")
 	}
 
 	return devnet.SelectBlockProducer(devnet.WithCurrentNetwork(ctx, networkname.BorDevnet)).GetRootHash(ctx, start, end)
@@ -429,7 +429,7 @@ func (h *Heimdall) shouldSendCheckpoint(start uint64, end uint64) (bool, error) 
 	return shouldSend, nil
 }
 
-func (h *Heimdall) createAndSendCheckpointToRootchain(ctx context.Context, start uint64, end uint64, height int64, txHash libcommon.Hash) error {
+func (h *Heimdall) createAndSendCheckpointToRootchain(ctx context.Context, start uint64, end uint64, height int64, txHash common.Hash) error {
 	h.logger.Info("Preparing checkpoint to be pushed on chain", "height", height, "txHash", txHash, "start", start, "end", end)
 
 	/*
@@ -561,7 +561,7 @@ func (h *Heimdall) handleRootHeaderBlock(event *contracts.TestRootChainNewHeader
 		"start", event.Start,
 		"end", event.End,
 		"reward", event.Reward,
-		"root", hexutility.Bytes(event.Root[:]),
+		"root", hexutil.Bytes(event.Root[:]),
 		"proposer", event.Proposer.Hex(),
 		"checkpointNumber", checkpointNumber,
 		"txHash", event.Raw.TxHash,
@@ -576,7 +576,7 @@ func (h *Heimdall) handleRootHeaderBlock(event *contracts.TestRootChainNewHeader
 
 	// create msg checkpoint ack message
 	ack := CheckpointAck{
-		//From       libcommon.Address `json:"from"`
+		//From       common.Address `json:"from"`
 		Number:     checkpointNumber.Uint64(),
 		Proposer:   event.Proposer,
 		StartBlock: event.Start.Uint64(),

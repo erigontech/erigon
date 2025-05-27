@@ -19,6 +19,7 @@ package raw
 import (
 	"fmt"
 
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 
 	"github.com/erigontech/erigon-lib/types/clonable"
@@ -55,6 +56,8 @@ func (b *BeaconState) baseOffsetSSZ() uint32 {
 		return 2736653
 	case clparams.DenebVersion:
 		return 2736653
+	case clparams.ElectraVersion:
+		return 2736653
 	default:
 		// ?????
 		panic("tf is that")
@@ -81,13 +84,26 @@ func (b *BeaconState) getSchema() []interface{} {
 	if b.version >= clparams.CapellaVersion {
 		s = append(s, &b.nextWithdrawalIndex, &b.nextWithdrawalValidatorIndex, b.historicalSummaries)
 	}
+	if b.version >= clparams.ElectraVersion {
+		// Electra fields
+		s = append(s, &b.depositRequestsStartIndex, &b.depositBalanceToConsume, &b.exitBalanceToConsume, &b.earliestExitEpoch, &b.consolidationBalanceToConsume,
+			&b.earliestConsolidationEpoch, b.pendingDeposits, b.pendingPartialWithdrawals, b.pendingConsolidations)
+	}
 	return s
 }
 
 func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 	b.version = clparams.StateVersion(version)
-	if len(buf) < b.EncodingSizeSSZ() {
+	if len(buf) < int(b.baseOffsetSSZ()) {
 		return fmt.Errorf("[BeaconState] err: %s", ssz.ErrLowBufferSize)
+	}
+	if version >= int(clparams.BellatrixVersion) {
+		b.latestExecutionPayloadHeader = &cltypes.Eth1Header{}
+	}
+	if version >= int(clparams.ElectraVersion) {
+		b.pendingDeposits = solid.NewPendingDepositList(b.beaconConfig)
+		b.pendingPartialWithdrawals = solid.NewPendingWithdrawalList(b.beaconConfig)
+		b.pendingConsolidations = solid.NewPendingConsolidationList(b.beaconConfig)
 	}
 	if err := ssz2.UnmarshalSSZ(buf, version, b.getSchema()...); err != nil {
 		return err
@@ -112,6 +128,14 @@ func (b *BeaconState) EncodingSizeSSZ() (size int) {
 
 	size += b.inactivityScores.Length() * 8
 	size += b.historicalSummaries.EncodingSizeSSZ()
+
+	if b.version >= clparams.ElectraVersion {
+		// 6 uint64 fields
+		size += 6 * 8
+		size += b.pendingDeposits.EncodingSizeSSZ()
+		size += b.pendingPartialWithdrawals.EncodingSizeSSZ()
+		size += b.pendingConsolidations.EncodingSizeSSZ()
+	}
 	return
 }
 

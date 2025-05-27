@@ -19,15 +19,16 @@ package aggregation
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
-	"github.com/Giulio2002/bls"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 )
 
@@ -43,7 +44,14 @@ type aggregationPoolImpl struct {
 	netConfig      *clparams.NetworkConfig
 	ethClock       eth_clock.EthereumClock
 	aggregatesLock sync.RWMutex
-	aggregates     map[common.Hash]*solid.Attestation
+	aggregates     map[common.Hash]*solid.Attestation // don't need this anymore after electra upgrade
+	// aggregationInCommittee is a cache for aggregation in committee, which is used after electra upgrade
+	aggregatesInCommittee *lru.CacheWithTTL[keyAggrInCommittee, *solid.Attestation]
+}
+
+type keyAggrInCommittee struct {
+	dataRoot       common.Hash
+	committeeIndex uint64
 }
 
 func NewAggregationPool(
@@ -53,11 +61,12 @@ func NewAggregationPool(
 	ethClock eth_clock.EthereumClock,
 ) AggregationPool {
 	p := &aggregationPoolImpl{
-		ethClock:       ethClock,
-		beaconConfig:   beaconConfig,
-		netConfig:      netConfig,
-		aggregatesLock: sync.RWMutex{},
-		aggregates:     make(map[common.Hash]*solid.Attestation),
+		ethClock:              ethClock,
+		beaconConfig:          beaconConfig,
+		netConfig:             netConfig,
+		aggregatesLock:        sync.RWMutex{},
+		aggregates:            make(map[common.Hash]*solid.Attestation),
+		aggregatesInCommittee: lru.NewWithTTL[keyAggrInCommittee, *solid.Attestation]("aggregation_in_committee", 100_000, 30*time.Minute),
 	}
 	go p.sweepStaleAtt(ctx)
 	return p
@@ -69,37 +78,37 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 	if err != nil {
 		return err
 	}
-	p.aggregatesLock.Lock()
-	defer p.aggregatesLock.Unlock()
-	att, ok := p.aggregates[hashRoot]
-	if !ok {
-		p.aggregates[hashRoot] = inAtt.Copy()
-		return nil
-	}
 
-	if utils.IsOverlappingBitlist(att.AggregationBits.Bytes(), inAtt.AggregationBits.Bytes()) {
-		// the on bit is already set, so ignore
-		return ErrIsSuperset
-	}
-
-	// merge signature
-	baseSig := att.Signature
-	inSig := inAtt.Signature
-	merged, err := blsAggregate([][]byte{baseSig[:], inSig[:]})
-	if err != nil {
-		return err
-	}
-	if len(merged) != 96 {
-		return errors.New("merged signature is too long")
-	}
-	var mergedSig [96]byte
-	copy(mergedSig[:], merged)
-
-	epoch := p.ethClock.GetEpochAtSlot(att.Data.Slot)
+	epoch := p.ethClock.GetEpochAtSlot(inAtt.Data.Slot)
 	clversion := p.ethClock.StateVersionByEpoch(epoch)
 	if clversion.BeforeOrEqual(clparams.DenebVersion) {
+		p.aggregatesLock.Lock()
+		defer p.aggregatesLock.Unlock()
+		att, ok := p.aggregates[hashRoot]
+		if !ok {
+			p.aggregates[hashRoot] = inAtt.Copy()
+			return nil
+		}
+
+		if utils.IsOverlappingSSZBitlist(att.AggregationBits.Bytes(), inAtt.AggregationBits.Bytes()) {
+			// the on bit is already set, so ignore
+			return ErrIsSuperset
+		}
+		// merge signature
+		baseSig := att.Signature
+		inSig := inAtt.Signature
+		merged, err := blsAggregate([][]byte{baseSig[:], inSig[:]})
+		if err != nil {
+			return err
+		}
+		if len(merged) != 96 {
+			return errors.New("merged signature is too long")
+		}
+		var mergedSig [96]byte
+		copy(mergedSig[:], merged)
+
 		// merge aggregation bits
-		mergedBits, err := att.AggregationBits.Union(inAtt.AggregationBits)
+		mergedBits, err := att.AggregationBits.Merge(inAtt.AggregationBits)
 		if err != nil {
 			return err
 		}
@@ -110,26 +119,59 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 			Signature:       mergedSig,
 		}
 	} else {
-		// Electra and after case
-		aggrBitSize := p.beaconConfig.MaxCommitteesPerSlot * p.beaconConfig.MaxValidatorsPerCommittee
-		mergedAggrBits, err := att.AggregationBits.Union(inAtt.AggregationBits)
-		if err != nil {
-			return err
-		}
-		if mergedAggrBits.Cap() != int(aggrBitSize) {
-			return fmt.Errorf("incorrect aggregation bits size: %d", mergedAggrBits.Cap())
-		}
-		mergedCommitteeBits, err := att.CommitteeBits.Union(inAtt.CommitteeBits)
-		if err != nil {
-			return err
-		}
-		p.aggregates[hashRoot] = &solid.Attestation{
-			AggregationBits: mergedAggrBits,
-			CommitteeBits:   mergedCommitteeBits,
-			Data:            att.Data,
-			Signature:       mergedSig,
-		}
+		// Electra and after case, aggregate by committee
+		p.aggregateByCommittee(inAtt)
 	}
+	return nil
+}
+
+func (p *aggregationPoolImpl) aggregateByCommittee(inAtt *solid.Attestation) error {
+	indices := inAtt.CommitteeBits.GetOnIndices()
+	if len(indices) != 1 {
+		// it's composed of multiple committees, so ignore
+		return nil
+	}
+	committeeIndex := uint64(indices[0])
+	hashRoot, err := inAtt.Data.HashSSZ()
+	if err != nil {
+		return err
+	}
+	key := keyAggrInCommittee{
+		dataRoot:       hashRoot,
+		committeeIndex: committeeIndex,
+	}
+	att, exist := p.aggregatesInCommittee.Get(key)
+	if !exist {
+		p.aggregatesInCommittee.Add(key, inAtt)
+		return nil
+	}
+
+	if utils.IsOverlappingSSZBitlist(att.AggregationBits.Bytes(), inAtt.AggregationBits.Bytes()) {
+		// the on bit is already set, so ignore
+		return ErrIsSuperset
+	}
+
+	// It's fine to directly merge aggregation bits here, because the attestation is from the same committee
+	mergedAggrBits, err := att.AggregationBits.Merge(inAtt.AggregationBits)
+	if err != nil {
+		log.Debug("failed to merge aggregation bits", "err", err)
+		return err
+	}
+	merged, err := blsAggregate([][]byte{att.Signature[:], inAtt.Signature[:]})
+	if err != nil {
+		return err
+	}
+	if len(merged) != 96 {
+		return errors.New("merged signature is too long")
+	}
+	var mergedSig [96]byte
+	copy(mergedSig[:], merged)
+	p.aggregatesInCommittee.Add(key, &solid.Attestation{
+		AggregationBits: mergedAggrBits,
+		CommitteeBits:   att.CommitteeBits,
+		Data:            att.Data,
+		Signature:       mergedSig,
+	})
 	return nil
 }
 
@@ -137,6 +179,20 @@ func (p *aggregationPoolImpl) GetAggregatationByRoot(root common.Hash) *solid.At
 	p.aggregatesLock.RLock()
 	defer p.aggregatesLock.RUnlock()
 	return p.aggregates[root]
+}
+
+func (p *aggregationPoolImpl) GetAggregatationByRootAndCommittee(root common.Hash, committeeIndex uint64) *solid.Attestation {
+	p.aggregatesLock.RLock()
+	defer p.aggregatesLock.RUnlock()
+	key := keyAggrInCommittee{
+		dataRoot:       root,
+		committeeIndex: committeeIndex,
+	}
+	att, exist := p.aggregatesInCommittee.Get(key)
+	if !exist {
+		return nil
+	}
+	return att
 }
 
 func (p *aggregationPoolImpl) sweepStaleAtt(ctx context.Context) {

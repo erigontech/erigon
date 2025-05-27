@@ -59,7 +59,7 @@ func TestValidator(t *testing.T) {
 	encoded, _ := validator.EncodeSSZ(nil)
 	newValidator := NewValidator()
 	err := newValidator.DecodeSSZ(encoded, 0)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, validator, newValidator)
 
 	// Testing CopyTo

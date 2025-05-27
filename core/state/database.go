@@ -17,7 +17,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//nolint:scopelint
 package state
 
 import (
@@ -25,7 +24,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 
-	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
 const (
@@ -37,9 +36,10 @@ const (
 
 type StateReader interface {
 	ReadAccountData(address common.Address) (*accounts.Account, error)
-	ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error)
-	ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error)
-	ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error)
+	ReadAccountDataForDebug(address common.Address) (*accounts.Account, error)
+	ReadAccountStorage(address common.Address, key common.Hash) ([]byte, error)
+	ReadAccountCode(address common.Address) ([]byte, error)
+	ReadAccountCodeSize(address common.Address) (int, error)
 	ReadAccountIncarnation(address common.Address) (uint64, error)
 }
 
@@ -52,14 +52,8 @@ type StateWriter interface {
 	UpdateAccountData(address common.Address, original, account *accounts.Account) error
 	UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error
 	DeleteAccount(address common.Address, original *accounts.Account) error
-	WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error
+	WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error
 	CreateContract(address common.Address) error
-}
-
-type WriterWithChangeSets interface {
-	StateWriter
-	WriteChangeSets() error
-	WriteHistory() error
 }
 
 type NoopWriter struct {
@@ -83,7 +77,7 @@ func (nw *NoopWriter) UpdateAccountCode(address common.Address, incarnation uint
 	return nil
 }
 
-func (nw *NoopWriter) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+func (nw *NoopWriter) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error {
 	return nil
 }
 
@@ -91,10 +85,24 @@ func (nw *NoopWriter) CreateContract(address common.Address) error {
 	return nil
 }
 
-func (nw *NoopWriter) WriteChangeSets() error {
-	return nil
+type NoopReader struct {
 }
 
-func (nw *NoopWriter) WriteHistory() error {
-	return nil
+var noopReader = &NoopReader{}
+
+func NewNoopReader() *NoopReader {
+	return noopReader
 }
+
+func (*NoopReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
+	return nil, nil
+}
+func (*NoopReader) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
+	return nil, nil
+}
+func (*NoopReader) ReadAccountStorage(address common.Address, key common.Hash) ([]byte, error) {
+	return nil, nil
+}
+func (*NoopReader) ReadAccountCode(address common.Address) ([]byte, error)        { return nil, nil }
+func (*NoopReader) ReadAccountCodeSize(address common.Address) (int, error)       { return 0, nil }
+func (*NoopReader) ReadAccountIncarnation(address common.Address) (uint64, error) { return 0, nil }

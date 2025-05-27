@@ -57,7 +57,8 @@ var (
 
 	BlobSidecarByRootProtocolV1 = ProtocolPrefix + BlobSidecarByRootTopic + Schema1 + EncodingProtocol
 
-	BlobSidecarByRangeProtocolV1          = ProtocolPrefix + BlobSidecarByRangeTopic + Schema1 + EncodingProtocol
+	BlobSidecarByRangeProtocolV1 = ProtocolPrefix + BlobSidecarByRangeTopic + Schema1 + EncodingProtocol
+
 	LightClientOptimisticUpdateProtocolV1 = ProtocolPrefix + LightClientOptimisticUpdateTopic + Schema1 + EncodingProtocol
 	LightClientFinalityUpdateProtocolV1   = ProtocolPrefix + LightClientFinalityUpdateTopic + Schema1 + EncodingProtocol
 	LightClientBootstrapProtocolV1        = ProtocolPrefix + LightClientBootstrapTopic + Schema1 + EncodingProtocol

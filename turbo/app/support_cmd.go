@@ -27,6 +27,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -78,7 +79,7 @@ var supportCommand = cli.Command{
 	Usage:     "Connect Erigon instance to a diagnostics system for support",
 	ArgsUsage: "--diagnostics.addr <URL for the diagnostics system> --ids <diagnostic session ids allowed to connect> --metrics.urls <http://erigon_host:metrics_port>",
 	Before: func(cliCtx *cli.Context) error {
-		_, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+		_, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 		if err != nil {
 			return err
 		}
@@ -93,12 +94,54 @@ var supportCommand = cli.Command{
 	Description: `The support command connects a running Erigon instances to a diagnostics system specified by the URL.`,
 }
 
+type nodeRequest struct {
+	NodeId      string     `json:"nodeId"`
+	QueryParams url.Values `json:"queryParams"`
+}
+
+type nodeResponse struct {
+	Id     string          `json:"id"`
+	Result json.RawMessage `json:"result"`
+	Error  *responseError  `json:"error,omitempty"`
+	Last   bool            `json:"last"`
+}
+
+type tunnelInfo struct {
+	Id        string          `json:"id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Protocols json.RawMessage `json:"protocols,omitempty"`
+	Enodes    []tunnelEnode   `json:"enodes,omitempty"`
+}
+
+type tunnelEnode struct {
+	Enode        string               `json:"enode,omitempty"`
+	Enr          string               `json:"enr,omitempty"`
+	Ports        *types.NodeInfoPorts `json:"ports,omitempty"`
+	ListenerAddr string               `json:"listener_addr,omitempty"`
+}
+
+type requestAction struct {
+	requestId   string
+	method      string
+	queryParams url.Values
+}
+
+type responseError struct {
+	Code    int64            `json:"code"`
+	Message string           `json:"message"`
+	Data    *json.RawMessage `json:"data,omitempty"`
+}
+
 const Version = 1
 
 func connectDiagnostics(cliCtx *cli.Context) error {
 	return ConnectDiagnostics(cliCtx, log.Root())
 }
 
+// Setting up the connection to the diagnostics system
+// by creating a tunnel between the diagnostics system and the debug endpoints
+// (Erigon node)  <-------->  (  Support cmd  )  <--->  (diagnostics system)
+// (debug.addrs)  (wss,http)  (current program)  (wss)  ( diagnostics.addr )
 func ConnectDiagnostics(cliCtx *cli.Context, logger log.Logger) error {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -133,144 +176,45 @@ func ConnectDiagnostics(cliCtx *cli.Context, logger log.Logger) error {
 	}
 }
 
-type conn struct {
-	io.ReadCloser
-	*io.PipeWriter
-}
-
-func (c *conn) Close() error {
-	c.ReadCloser.Close()
-	c.PipeWriter.Close()
-	return nil
-}
-
-func (c *conn) SetWriteDeadline(time time.Time) error {
-	return nil
-}
-
-// tunnel operates the tunnel from diagnostics system to the metrics URL for one http/2 request
-// needs to be called repeatedly to implement re-connect logic
+// Setting up connections to erigon nodes (if more then one is specified in (debug.addrs)
+// and send nodes info to diagnostics to notify about connection and nodes details like: enode, enr, ports, listener_addr
+//
+// Listen for incoming requests from diagnostics system and send them to the incommitg request channel
 func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal, diagnosticsUrl string, sessionIds []string, debugURLs []string, logger log.Logger) error {
-	metricsClient := &http.Client{}
-	defer metricsClient.CloseIdleConnections()
-
-	ctx1, cancel1 := context.WithCancel(ctx)
-	defer cancel1()
-
 	go func() {
 		select {
 		case <-sigs:
-			cancel()
-		case <-ctx1.Done():
+			logger.Info("Got interrupt, shutting down...")
+			cancel() // Cancel the outer context
+		case <-ctx.Done():
+			return
 		}
 	}()
 
-	type enode struct {
-		Enode        string               `json:"enode,omitempty"`
-		Enr          string               `json:"enr,omitempty"`
-		Ports        *types.NodeInfoPorts `json:"ports,omitempty"`
-		ListenerAddr string               `json:"listener_addr,omitempty"`
-	}
-
-	type info struct {
-		Id        string          `json:"id,omitempty"`
-		Name      string          `json:"name,omitempty"`
-		Protocols json.RawMessage `json:"protocols,omitempty"`
-		Enodes    []enode         `json:"enodes,omitempty"`
-	}
-
-	type node struct {
-		debugURL string
-		info     *info
-	}
-
-	nodes := map[string]*node{}
-
-	for _, debugURL := range debugURLs {
-		debugResponse, err := metricsClient.Get(debugURL + "/debug/diag/nodeinfo")
-
-		if err != nil {
-			return err
-		}
-
-		if debugResponse.StatusCode != http.StatusOK {
-			return fmt.Errorf("debug request to %s failed: %s", debugURL, debugResponse.Status)
-		}
-
-		var reply remote.NodesInfoReply
-
-		err = json.NewDecoder(debugResponse.Body).Decode(&reply)
-
-		debugResponse.Body.Close()
-
-		if err != nil {
-			return err
-		}
-
-		for _, ni := range reply.NodesInfo {
-			if n, ok := nodes[ni.Id]; ok {
-				n.info.Enodes = append(n.info.Enodes, enode{
-					Enode:        ni.Enode,
-					Enr:          ni.Enr,
-					Ports:        ni.Ports,
-					ListenerAddr: ni.ListenerAddr,
-				})
-			} else {
-				nodes[ni.Id] = &node{debugURL, &info{
-					Id:        ni.Id,
-					Name:      ni.Name,
-					Protocols: ni.Protocols,
-					Enodes: []enode{{
-						Enode:        ni.Enode,
-						Enr:          ni.Enr,
-						Ports:        ni.Ports,
-						ListenerAddr: ni.ListenerAddr,
-					}}}}
-			}
-		}
-	}
-
-	dialer := websocket.Dialer{
-		ReadBufferSize:  wsReadBuffer,
-		WriteBufferSize: wsWriteBuffer,
-		WriteBufferPool: wsBufferPool,
-	}
-
-	conn, resp, err := dialer.DialContext(ctx1, "wss://"+diagnosticsUrl, nil)
-
+	codec, err := createCodec(ctx, diagnosticsUrl)
 	if err != nil {
-		conn, resp, err = dialer.DialContext(ctx1, "ws://"+diagnosticsUrl, nil)
-
-		if err != nil {
-			return err
-		}
+		return err
 	}
-
-	if resp.StatusCode != http.StatusSwitchingProtocols {
-		return fmt.Errorf("support request to %s failed: %s", diagnosticsUrl, resp.Status)
-	}
-
-	type connectionInfo struct {
-		Version  uint64   `json:"version"`
-		Sessions []string `json:"sessions"`
-		Nodes    []*info  `json:"nodes"`
-	}
-
-	codec := rpc.NewWebsocketCodec(conn, "wss://"+diagnosticsUrl, nil) //TODO: revise why is it so
 	defer codec.Close()
 
-	err = codec.WriteJSON(ctx1, &connectionInfo{
-		Version:  Version,
-		Sessions: sessionIds,
-		Nodes: func() (replies []*info) {
-			for _, node := range nodes {
-				replies = append(replies, node.info)
-			}
+	go func() {
+		<-ctx.Done()
+		codec.Close()
+	}()
 
-			return replies
-		}(),
-	})
+	metricsClient := &http.Client{}
+	defer metricsClient.CloseIdleConnections()
 
+	connections, err := createConnections(ctx, codec, metricsClient, debugURLs)
+	if err != nil {
+		return err
+	}
+
+	if len(connections) == 0 {
+		return nil
+	}
+
+	err = sendNodesInfoToDiagnostics(ctx, codec, sessionIds, connections)
 	if err != nil {
 		return err
 	}
@@ -279,7 +223,6 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 
 	for {
 		requests, _, err := codec.ReadBatch()
-
 		select {
 		case <-ctx.Done():
 			return nil
@@ -290,178 +233,446 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 			}
 		}
 
-		var requestId string
+		for _, request := range requests {
+			fmt.Println("Received request", request)
+			var requestId string
 
-		if err = json.Unmarshal(requests[0].ID, &requestId); err != nil {
-			logger.Error("Invalid request id", "err", err)
-			continue
-		}
+			if err = json.Unmarshal(request.ID, &requestId); err != nil {
+				logger.Error("Invalid request id", "err", err)
+				continue
+			}
 
-		nodeRequest := struct {
-			NodeId      string     `json:"nodeId"`
-			QueryParams url.Values `json:"queryParams"`
-		}{}
+			nodeRequest := nodeRequest{}
 
-		if err = json.Unmarshal(requests[0].Params, &nodeRequest); err != nil {
-			logger.Error("Invalid node request", "err", err, "id", requestId)
-			continue
-		}
+			if err = json.Unmarshal(request.Params, &nodeRequest); err != nil {
+				logger.Error("Invalid node request", "err", err, "id", requestId)
+				continue
+			}
 
-		type responseError struct {
-			Code    int64            `json:"code"`
-			Message string           `json:"message"`
-			Data    *json.RawMessage `json:"data,omitempty"`
-		}
-
-		type nodeResponse struct {
-			Id     string          `json:"id"`
-			Result json.RawMessage `json:"result,omitempty"`
-			Error  *responseError  `json:"error,omitempty"`
-			Last   bool            `json:"last,omitempty"`
-		}
-
-		if node, ok := nodes[nodeRequest.NodeId]; ok {
-			err := func() error {
-				var queryString string
-
-				if len(nodeRequest.QueryParams) > 0 {
-					queryString = "?" + nodeRequest.QueryParams.Encode()
+			if conn, ok := connections[nodeRequest.NodeId]; ok {
+				fmt.Println("Sending request to", conn.debugURL)
+				conn.requestChannel <- requestAction{
+					requestId:   requestId,
+					method:      request.Method,
+					queryParams: nodeRequest.QueryParams,
 				}
-
-				debugURL := node.debugURL + "/debug/diag/" + requests[0].Method + queryString
-				debugResponse, err := metricsClient.Get(debugURL)
-
-				if err != nil {
-					return codec.WriteJSON(ctx1, &nodeResponse{
-						Id: requestId,
-						Error: &responseError{
-							Code:    http.StatusFailedDependency,
-							Message: fmt.Sprintf("Request for metrics method [%s] failed: %v", debugURL, err),
-						},
-						Last: true,
-					})
-				}
-
-				defer debugResponse.Body.Close()
-
-				//Websocket ok message
-				if resp.StatusCode != http.StatusSwitchingProtocols {
-					body, _ := io.ReadAll(debugResponse.Body)
-					return codec.WriteJSON(ctx1, &nodeResponse{
-						Id: requestId,
-						Error: &responseError{
-							Code:    int64(resp.StatusCode),
-							Message: fmt.Sprintf("Request for metrics method [%s] failed: %s", debugURL, string(body)),
-						},
-						Last: true,
-					})
-				}
-
-				buffer := &bytes.Buffer{}
-
-				switch debugResponse.Header.Get("Content-Type") {
-				case "application/json":
-					if _, err := io.Copy(buffer, debugResponse.Body); err != nil {
-						return codec.WriteJSON(ctx1, &nodeResponse{
-							Id: requestId,
-							Error: &responseError{
-								Code:    http.StatusInternalServerError,
-								Message: fmt.Sprintf("Request for metrics method [%s] failed: %v", debugURL, err),
-							},
-							Last: true,
-						})
-
-					}
-				case "application/octet-stream":
-					if _, err := io.Copy(buffer, debugResponse.Body); err != nil {
-						return codec.WriteJSON(ctx1, &nodeResponse{
-							Id: requestId,
-							Error: &responseError{
-								Code:    int64(http.StatusInternalServerError),
-								Message: fmt.Sprintf("Can't copy metrics response for [%s]: %s", debugURL, err),
-							},
-							Last: true,
-						})
-					}
-
-					offset, _ := strconv.ParseInt(debugResponse.Header.Get("X-Offset"), 10, 64)
-					size, _ := strconv.ParseInt(debugResponse.Header.Get("X-Size"), 10, 64)
-
-					data, err := json.Marshal(struct {
-						Offset int64  `json:"offset"`
-						Size   int64  `json:"size"`
-						Data   []byte `json:"chunk"`
-					}{
-						Offset: offset,
-						Size:   size,
-						Data:   buffer.Bytes(),
-					})
-
-					buffer = bytes.NewBuffer(data)
-
-					if err != nil {
-						return codec.WriteJSON(ctx1, &nodeResponse{
-							Id: requestId,
-							Error: &responseError{
-								Code:    int64(http.StatusInternalServerError),
-								Message: fmt.Sprintf("Can't copy metrics response for [%s]: %s", debugURL, err),
-							},
-							Last: true,
-						})
-					}
-
-				case "aplication/profile":
-					if _, err := io.Copy(buffer, debugResponse.Body); err != nil {
-						return codec.WriteJSON(ctx1, &nodeResponse{
-							Id: requestId,
-							Error: &responseError{
-								Code:    http.StatusInternalServerError,
-								Message: fmt.Sprintf("Request for metrics method [%s] failed: %v", debugURL, err),
-							},
-							Last: true,
-						})
-					}
-
-					data, err := json.Marshal(struct {
-						Data []byte `json:"chunk"`
-					}{
-						Data: buffer.Bytes(),
-					})
-
-					buffer = bytes.NewBuffer(data)
-
-					if err != nil {
-						return codec.WriteJSON(ctx1, &nodeResponse{
-							Id: requestId,
-							Error: &responseError{
-								Code:    int64(http.StatusInternalServerError),
-								Message: fmt.Sprintf("Can't copy metrics response for [%s]: %s", debugURL, err),
-							},
-							Last: true,
-						})
-					}
-
-				default:
-					return codec.WriteJSON(ctx1, &nodeResponse{
-						Id: requestId,
-						Error: &responseError{
-							Code:    int64(http.StatusInternalServerError),
-							Message: fmt.Sprintf("Unhandled content type: %s, from: %s", debugResponse.Header.Get("Content-Type"), debugURL),
-						},
-						Last: true,
-					})
-				}
-
-				return codec.WriteJSON(ctx1, &nodeResponse{
-					Id:     requestId,
-					Result: json.RawMessage(buffer.Bytes()),
-					Last:   true,
-				})
-			}()
-
-			if err != nil {
-				return err
 			}
 		}
 	}
+}
+
+// Establishes a WebSocket connection with diagnostics system (flag: diagnostics.addr) and creates a codec for communication.
+// This function connects to the diagnostics server using a WebSocket and initializes an RPC codec for bidirectional communication.
+func createCodec(ctx context.Context, diagnosticsUrl string) (rpc.ServerCodec, error) {
+	conn, err := establishConnection(ctx, diagnosticsUrl)
+	if err != nil {
+		return nil, err
+	}
+
+	codec := rpc.NewWebsocketCodec(conn, "wss://"+diagnosticsUrl, nil) //TODO: revise why is it so
+
+	return codec, nil
+}
+
+// Establishes a WebSocket connection with the diagnostics system.
+// Trying to establish secure wss:// connection first, if it fails, fallback to ws://.
+// Returns the WebSocket connection if successful, otherwise an error.
+func establishConnection(ctx context.Context, diagnosticsUrl string) (*websocket.Conn, error) {
+	dialer := websocket.Dialer{
+		ReadBufferSize:  wsReadBuffer,
+		WriteBufferSize: wsWriteBuffer,
+		WriteBufferPool: wsBufferPool,
+	}
+
+	var conn *websocket.Conn
+	var resp *http.Response
+	var err error
+
+	// Attempt to establish a secure WebSocket connection (wss://)
+	conn, resp, err = dialer.DialContext(ctx, "wss://"+diagnosticsUrl, nil)
+	if err != nil {
+		conn, resp, err = dialer.DialContext(ctx, "ws://"+diagnosticsUrl, nil)
+	}
+
+	defer func() {
+		if resp != nil {
+			resp.Body.Close()
+		}
+	}()
+
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		return nil, fmt.Errorf("support request to %s failed: %s", diagnosticsUrl, resp.Status)
+	}
+
+	return conn, nil
+}
+
+// Creates connections to the nodes specified by the flag debug.addrs.
+// Returns a map of node connections, where the key is the node ID.
+// As soon as connection created for a node, it starts processing requests and responses.
+func createConnections(ctx context.Context, codec rpc.ServerCodec, metricsClient *http.Client, debugURLs []string) (map[string]*nodeConnection, error) {
+	nodes := map[string]*nodeConnection{}
+
+	for _, debugURL := range debugURLs {
+		reply, err := queryNode(metricsClient, debugURL)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, ni := range reply.NodesInfo {
+			if n, ok := nodes[ni.Id]; ok {
+				n.info.Enodes = append(n.info.Enodes, tunnelEnode{
+					Enode:        ni.Enode,
+					Enr:          ni.Enr,
+					Ports:        ni.Ports,
+					ListenerAddr: ni.ListenerAddr,
+				})
+			} else {
+				node := &nodeConnection{
+					ctx:             ctx,
+					debugURL:        debugURL,
+					info:            &tunnelInfo{Id: ni.Id, Name: ni.Name, Protocols: ni.Protocols},
+					requestChannel:  make(chan requestAction, 100),
+					responseChannel: make(chan nodeResponse, 100),
+					codec:           codec,
+				}
+				go node.processRequests(metricsClient)
+				go node.processResponses()
+				nodes[ni.Id] = node
+			}
+		}
+	}
+
+	return nodes, nil
+}
+
+// Attempt to query nodes specified by flag debug.addrs and return the response.
+// If the request fails, an error is returned, as we expect all nodes to be reachable.
+// TODO: maybe it make sense to think about allowing some nodes to be unreachable
+func queryNode(metricsClient *http.Client, debugURL string) (*remote.NodesInfoReply, error) {
+	debugResponse, err := metricsClient.Get(debugURL + "/debug/diag/nodeinfo")
+
+	if err != nil {
+		return nil, err
+	}
+
+	if debugResponse.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("debug request to %s failed: %s", debugURL, debugResponse.Status)
+	}
+
+	var reply remote.NodesInfoReply
+
+	err = json.NewDecoder(debugResponse.Body).Decode(&reply)
+
+	debugResponse.Body.Close()
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &reply, nil
+}
+
+// Send nodes info to diagnostics to notify about connection and nodes details like: enode, enr, ports, listener_addr
+// This info will tell diagnostics about the nodes that are connected to the diagnostics system
+func sendNodesInfoToDiagnostics(ctx context.Context, codec rpc.ServerCodec, sessionIds []string, nodes map[string]*nodeConnection) error {
+	type connectionInfo struct {
+		Version  uint64        `json:"version"`
+		Sessions []string      `json:"sessions"`
+		Nodes    []*tunnelInfo `json:"nodes"`
+	}
+
+	err := codec.WriteJSON(ctx, &connectionInfo{
+		Version:  Version,
+		Sessions: sessionIds,
+		Nodes: func() (replies []*tunnelInfo) {
+			for _, node := range nodes {
+				replies = append(replies, node.info)
+			}
+
+			return replies
+		}(),
+	})
+
+	return err
+}
+
+type nodeConnection struct {
+	ctx             context.Context
+	debugURL        string
+	info            *tunnelInfo
+	connection      *websocket.Conn
+	requestId       string
+	requestChannel  chan requestAction
+	responseChannel chan nodeResponse
+	codec           rpc.ServerCodec
+}
+
+// Connects to the WebSocket endpoint of the node and starts listening for incoming messages.
+// (erigon nodes) ----> (support cmd)
+func (nc *nodeConnection) connectSocket(requestId string) error {
+	//already connected
+	if nc.connection != nil {
+		return nil
+	}
+
+	socketURL := strings.Replace(nc.debugURL, "http://", "ws://", 1) + "/debug/diag/ws"
+	conn, resp, err := websocket.DefaultDialer.Dial(socketURL, nil)
+	defer resp.Body.Close()
+	if err != nil {
+		return err
+	}
+
+	nc.connection = conn
+	nc.requestId = requestId
+
+	go nc.startListening()
+
+	return nil
+}
+
+func (nc *nodeConnection) closeWebSocket() error {
+	if nc.connection == nil {
+		return nil
+	}
+
+	err := nc.connection.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "closing connection"))
+	if err != nil {
+		fmt.Printf("Failed to send close message: %v\n", err)
+	}
+
+	err = nc.connection.Close()
+	if err != nil {
+		fmt.Printf("Failed to close connection: %v\n", err)
+		return err
+	}
+
+	nc.connection = nil
+	fmt.Println("WebSocket connection closed successfully")
+	return nil
+}
+
+// Starts listening for incoming messages from the WebSocket connection.
+// (erigon nodes) ----> (support cmd)
+func (nc *nodeConnection) startListening() {
+	for {
+		select {
+		case <-nc.ctx.Done():
+			return
+		default:
+		}
+		if nc.connection == nil {
+			fmt.Println("connection closed, exiting read loop")
+			return
+		}
+
+		_, message, err := nc.connection.ReadMessage()
+		if err != nil {
+			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) ||
+				websocket.IsUnexpectedCloseError(err) {
+				fmt.Println("Connection closed by peer:", err)
+				return
+			}
+
+			fmt.Println("Error reading message:", err)
+			return
+		}
+
+		nc.responseChannel <- nodeResponse{
+			Id:     nc.requestId,
+			Result: message,
+			Last:   false,
+		}
+	}
+}
+
+type subscrigeResponse struct {
+	MessageType string `json:"type"`
+	Message     string `json:"message"`
+}
+
+// Processes the incoming requests from the diagnostics system.
+// Handle subscribe/unsubscribe and all other messages.
+func (nc *nodeConnection) processRequests(metricsClient *http.Client) {
+	for action := range nc.requestChannel {
+		select {
+		case <-nc.ctx.Done():
+			return
+		default:
+		}
+
+		switch {
+		case isSubscribe(action.method):
+			err := nc.connectSocket(action.requestId)
+			if err != nil {
+				nc.responseChannel <- errorResponseMessage(action.requestId, http.StatusFailedDependency, fmt.Sprintf("Subscription failed: %v", err))
+				continue
+			}
+
+			fmt.Println("Subscribed to", nc.debugURL)
+
+			response := subscrigeResponse{
+				MessageType: "subscribe",
+				Message:     "subscribed",
+			}
+
+			bytes := &bytes.Buffer{}
+
+			if err := json.NewEncoder(bytes).Encode(response); err != nil {
+				nc.responseChannel <- errorResponseMessage(action.requestId, http.StatusInternalServerError, "Failed to encode response: "+err.Error())
+				continue
+			}
+
+			nc.responseChannel <- nodeResponse{
+				Id:     action.requestId,
+				Result: json.RawMessage(bytes.Bytes()),
+				Last:   false,
+			}
+
+		case isUnsubscribe(action.method):
+			err := nc.closeWebSocket()
+			if err != nil {
+				nc.responseChannel <- errorResponseMessage(action.requestId, http.StatusFailedDependency, fmt.Sprintf("Unsubscription failed: %v", err))
+				continue
+			}
+
+			fmt.Println("Unsubscribed from", nc.debugURL)
+			response := subscrigeResponse{
+				MessageType: "subscribe",
+				Message:     "unsubscribed",
+			}
+
+			bytes := &bytes.Buffer{}
+
+			if err := json.NewEncoder(bytes).Encode(response); err != nil {
+				nc.responseChannel <- errorResponseMessage(action.requestId, http.StatusInternalServerError, "Failed to encode response: "+err.Error())
+				continue
+			}
+
+			nc.responseChannel <- nodeResponse{
+				Id:     action.requestId,
+				Result: json.RawMessage(bytes.Bytes()),
+				Last:   true,
+			}
+
+		default:
+			debugURL := nc.debugURL + "/debug/diag/" + action.method + "?" + action.queryParams.Encode()
+			debugResponse, err := metricsClient.Get(debugURL)
+			if err != nil {
+				nc.responseChannel <- errorResponseMessage(action.requestId, http.StatusFailedDependency, "Request failed: "+err.Error())
+				debugResponse.Body.Close()
+				continue
+			}
+
+			if debugResponse.StatusCode != http.StatusOK {
+				body, _ := io.ReadAll(debugResponse.Body)
+				nc.responseChannel <- errorResponseMessage(action.requestId, int64(debugResponse.StatusCode), "Request failed: "+string(body))
+				debugResponse.Body.Close()
+				continue
+			}
+
+			buffer := &bytes.Buffer{}
+			if err := copyResponseBody(buffer, debugResponse); err != nil {
+				nc.responseChannel <- errorResponseMessage(action.requestId, http.StatusInternalServerError, "Request failed: "+err.Error())
+				debugResponse.Body.Close()
+				continue
+			}
+
+			debugResponse.Body.Close()
+			nc.responseChannel <- nodeResponse{
+				Id:     action.requestId,
+				Result: json.RawMessage(buffer.Bytes()),
+				Last:   true,
+			}
+		}
+	}
+}
+
+// Sends responses to the diagnostics system.
+// (support cmd) ----> (diagnostics system)
+func (nc *nodeConnection) processResponses() {
+	for response := range nc.responseChannel {
+		select {
+		case <-nc.ctx.Done():
+			return
+		default:
+		}
+
+		if err := nc.codec.WriteJSON(nc.ctx, response); err != nil {
+			fmt.Println("Failed to send response", err)
+		}
+	}
+}
+
+// detect is the method is a txpool subscription
+// TODO: implementation of othere subscribtions (e.g. downloader)
+// TODO: change subscribe from plain string to something more structured
+func isSubscribe(method string) bool {
+	return method == "subscribe/txpool"
+}
+
+func isUnsubscribe(method string) bool {
+	return method == "unsubscribe/txpool"
+}
+
+func errorResponseMessage(requestId string, code int64, message string) nodeResponse {
+	return nodeResponse{
+		Id: requestId,
+		Error: &responseError{
+			Code:    code,
+			Message: message,
+		},
+		Last: true,
+	}
+}
+
+// Processes and copies the HTTP response body to a buffer based on content type.
+// Supported Content Types: application/json, application/octet-stream, application/profile
+func copyResponseBody(buffer *bytes.Buffer, debugResponse *http.Response) error {
+	switch debugResponse.Header.Get("Content-Type") {
+	case "application/json":
+		_, err := io.Copy(buffer, debugResponse.Body)
+		return err
+	case "application/octet-stream":
+		if _, err := io.Copy(buffer, debugResponse.Body); err != nil {
+			return err
+		}
+		offset, _ := strconv.ParseInt(debugResponse.Header.Get("X-Offset"), 10, 64)
+		size, _ := strconv.ParseInt(debugResponse.Header.Get("X-Size"), 10, 64)
+		data, err := json.Marshal(struct {
+			Offset int64  `json:"offset"`
+			Size   int64  `json:"size"`
+			Data   []byte `json:"chunk"`
+		}{
+			Offset: offset,
+			Size:   size,
+			Data:   buffer.Bytes(),
+		})
+		if err != nil {
+			return err
+		}
+		buffer.Reset()
+		buffer.Write(data)
+	case "application/profile":
+		if _, err := io.Copy(buffer, debugResponse.Body); err != nil {
+			return err
+		}
+		data, err := json.Marshal(struct {
+			Data []byte `json:"chunk"`
+		}{
+			Data: buffer.Bytes(),
+		})
+		if err != nil {
+			return err
+		}
+		buffer.Reset()
+		buffer.Write(data)
+	default:
+		return fmt.Errorf("unhandled content type: %s, from: %s", debugResponse.Header.Get("Content-Type"), debugResponse.Request.URL)
+	}
+	return nil
 }

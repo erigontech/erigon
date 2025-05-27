@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon-lib/seg"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/kv"
@@ -28,6 +29,10 @@ import (
 )
 
 func TestGCReadAfterRemoveFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -58,14 +63,15 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 			h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 			lastInView := hc.files[len(hc.files)-1]
-			g := lastInView.src.decompressor.MakeGetter()
+
+			g := seg.NewPagedReader(hc.statelessGetter(len(hc.files)-1), hc.h.historyValuesOnCompressedPage, true)
 			require.Equal(lastInView.startTxNum, lastOnFs.startTxNum)
 			require.Equal(lastInView.endTxNum, lastOnFs.endTxNum)
 			if g.HasNext() {
 				k, _ := g.Next(nil)
-				require.Equal(8, len(k))
+				require.Len(k, 8)
 				v, _ := g.Next(nil)
-				require.Equal(8, len(v))
+				require.Len(v, 8)
 			}
 
 			require.NotNil(lastOnFs.decompressor)
@@ -113,6 +119,10 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 }
 
 func TestDomainGCReadAfterRemoveFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	ctx := context.Background()
@@ -147,9 +157,9 @@ func TestDomainGCReadAfterRemoveFile(t *testing.T) {
 			require.Equal(lastInView.endTxNum, lastOnFs.endTxNum)
 			if g.HasNext() {
 				k, _ := g.Next(nil)
-				require.Equal(8, len(k))
+				require.Len(k, 8)
 				v, _ := g.Next(nil)
-				require.Equal(8, len(v))
+				require.Len(v, 8)
 			}
 
 			require.NotNil(lastOnFs.decompressor)

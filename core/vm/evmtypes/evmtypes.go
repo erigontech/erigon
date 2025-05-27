@@ -21,12 +21,9 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	types2 "github.com/erigontech/erigon-lib/types"
-
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 )
 
 // BlockContext provides the EVM with auxiliary information. Once provided
@@ -67,13 +64,14 @@ type TxContext struct {
 // ExecutionResult includes all output after executing given evm
 // message no matter the execution itself is successful or not.
 type ExecutionResult struct {
-	UsedGas             uint64 // Total used gas but include the refunded gas
+	GasUsed             uint64 // Total used gas but include the refunded gas
 	Err                 error  // Any error encountered during the execution(listed in core/vm/errors.go)
 	Reverted            bool   // Whether the execution was aborted by `REVERT`
 	ReturnData          []byte // Returned data from evm(function result or data supplied with revert opcode)
 	SenderInitBalance   *uint256.Int
 	CoinbaseInitBalance *uint256.Int
 	FeeTipped           *uint256.Int
+	EvmRefund           uint64 // Gas refunded by EVM without considering refundQuotient
 }
 
 // Unwrap returns the internal evm error which allows us for further
@@ -105,10 +103,10 @@ func (result *ExecutionResult) Revert() []byte {
 
 type (
 	// CanTransferFunc is the signature of a transfer guard function
-	CanTransferFunc func(IntraBlockState, common.Address, *uint256.Int) bool
+	CanTransferFunc func(IntraBlockState, common.Address, *uint256.Int) (bool, error)
 
 	// TransferFunc is the signature of a transfer function
-	TransferFunc func(IntraBlockState, common.Address, common.Address, *uint256.Int, bool)
+	TransferFunc func(IntraBlockState, common.Address, common.Address, *uint256.Int, bool) error
 
 	// GetHashFunc returns the nth block hash in the blockchain
 	// and is used by the BLOCKHASH EVM op code.
@@ -121,61 +119,14 @@ type (
 
 // IntraBlockState is an EVM database for full state querying.
 type IntraBlockState interface {
-	CreateAccount(common.Address, bool)
-
-	SubBalance(common.Address, *uint256.Int, tracing.BalanceChangeReason)
-	AddBalance(common.Address, *uint256.Int, tracing.BalanceChangeReason)
-	GetBalance(common.Address) *uint256.Int
-
-	GetNonce(common.Address) uint64
-	SetNonce(common.Address, uint64)
-
-	GetCodeHash(common.Address) common.Hash
-	GetCode(common.Address) []byte
-	SetCode(common.Address, []byte)
-	GetCodeSize(common.Address) int
-
-	// eip-7702; delegated designations
-	ResolveCodeHash(common.Address) common.Hash
-	ResolveCode(common.Address) []byte
-	ResolveCodeSize(common.Address) int
-	GetDelegatedDesignation(common.Address) (common.Address, bool)
-
-	AddRefund(uint64)
-	SubRefund(uint64)
-	GetRefund() uint64
-
-	GetCommittedState(common.Address, *common.Hash, *uint256.Int)
-	GetState(address common.Address, slot *common.Hash, outValue *uint256.Int)
-	SetState(common.Address, *common.Hash, uint256.Int)
-
-	GetTransientState(addr common.Address, key common.Hash) uint256.Int
-	SetTransientState(addr common.Address, key common.Hash, value uint256.Int)
-
-	Selfdestruct(common.Address) bool
-	HasSelfdestructed(common.Address) bool
-	Selfdestruct6780(common.Address)
-
-	// Exist reports whether the given account exists in state.
-	// Notably this should also return true for suicided accounts.
-	Exist(common.Address) bool
-	// Empty returns whether the given account is empty. Empty
-	// is defined according to EIP161 (balance = nonce = code = 0).
-	Empty(common.Address) bool
-
-	Prepare(rules *chain.Rules, sender, coinbase common.Address, dest *common.Address,
-		precompiles []common.Address, txAccesses types2.AccessList, authorities []common.Address)
-
-	AddressInAccessList(addr common.Address) bool
-	// AddAddressToAccessList adds the given address to the access list. This operation is safe to perform
-	// even if the feature/fork is not active yet
-	AddAddressToAccessList(addr common.Address) (addrMod bool)
-	// AddSlotToAccessList adds the given (address,slot) to the access list. This operation is safe to perform
-	// even if the feature/fork is not active yet
-	AddSlotToAccessList(addr common.Address, slot common.Hash) (addrMod, slotMod bool)
-
-	RevertToSnapshot(int)
-	Snapshot() int
+	SubBalance(common.Address, *uint256.Int, tracing.BalanceChangeReason) error
+	AddBalance(common.Address, *uint256.Int, tracing.BalanceChangeReason) error
+	GetBalance(common.Address) (*uint256.Int, error)
 
 	AddLog(*types.Log)
+
+	SetHooks(hooks *tracing.Hooks)
+	Trace() bool
+	TxIndex() int
+	Incarnation() int
 }

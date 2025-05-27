@@ -23,7 +23,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/Giulio2002/bls"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/spectest"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -75,7 +75,7 @@ func operationAttestationHandler(t *testing.T, root fs.FS, c spectest.TestCase) 
 	expectedRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
 
-	assert.EqualValues(t, haveRoot, expectedRoot)
+	assert.EqualValues(t, expectedRoot, haveRoot)
 	return nil
 }
 
@@ -105,7 +105,7 @@ func operationAttesterSlashingHandler(t *testing.T, root fs.FS, c spectest.TestC
 	expectedRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
 
-	assert.EqualValues(t, haveRoot, expectedRoot)
+	assert.EqualValues(t, expectedRoot, haveRoot)
 	return nil
 }
 
@@ -162,7 +162,7 @@ func operationProposerSlashingHandler(t *testing.T, root fs.FS, c spectest.TestC
 	expectedRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
 
-	assert.EqualValues(t, haveRoot, expectedRoot)
+	assert.EqualValues(t, expectedRoot, haveRoot)
 	return nil
 }
 
@@ -194,7 +194,7 @@ func operationBlockHeaderHandler(t *testing.T, root fs.FS, c spectest.TestCase) 
 	expectedRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
 
-	assert.EqualValues(t, haveRoot, expectedRoot)
+	assert.EqualValues(t, expectedRoot, haveRoot)
 	return nil
 }
 
@@ -224,7 +224,7 @@ func operationDepositHandler(t *testing.T, root fs.FS, c spectest.TestCase) erro
 	expectedRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
 
-	assert.EqualValues(t, haveRoot, expectedRoot)
+	assert.EqualValues(t, expectedRoot, haveRoot)
 	return nil
 }
 
@@ -254,7 +254,7 @@ func operationSyncAggregateHandler(t *testing.T, root fs.FS, c spectest.TestCase
 	expectedRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
 
-	assert.EqualValues(t, haveRoot, expectedRoot)
+	assert.EqualValues(t, expectedRoot, haveRoot)
 	return nil
 }
 
@@ -309,7 +309,7 @@ func operationVoluntaryExitHandler(t *testing.T, root fs.FS, c spectest.TestCase
 	expectedRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
 
-	assert.EqualValues(t, haveRoot, expectedRoot)
+	assert.EqualValues(t, expectedRoot, haveRoot)
 	return nil
 }
 
@@ -339,7 +339,7 @@ func operationWithdrawalHandler(t *testing.T, root fs.FS, c spectest.TestCase) e
 	expectedRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
 
-	assert.EqualValues(t, haveRoot, expectedRoot)
+	assert.EqualValues(t, expectedRoot, haveRoot)
 	return nil
 }
 
@@ -370,6 +370,130 @@ func operationSignedBlsChangeHandler(t *testing.T, root fs.FS, c spectest.TestCa
 	expectedRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
 
-	assert.EqualValues(t, haveRoot, expectedRoot)
+	assert.EqualValues(t, expectedRoot, haveRoot)
+	return nil
+}
+
+func operationConsolidationRequestHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
+	require.NoError(t, err)
+	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
+	expectedError := os.IsNotExist(err)
+	if err != nil && !expectedError {
+		return err
+	}
+	consolidation := &solid.ConsolidationRequest{}
+	if err := spectest.ReadSszOld(root, consolidation, c.Version(), "consolidation_request.ssz_snappy"); err != nil {
+		return err
+	}
+	if err := c.Machine.ProcessConsolidationRequest(preState, consolidation); err != nil {
+		if expectedError {
+			return nil
+		}
+		return err
+	}
+	if expectedError {
+		return errors.New("expected error")
+	}
+	haveRoot, err := preState.HashSSZ()
+	require.NoError(t, err)
+
+	expectedRoot, err := postState.HashSSZ()
+	require.NoError(t, err)
+
+	assert.EqualValues(t, expectedRoot, haveRoot)
+	return nil
+}
+
+func operationDepositRequstHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
+	require.NoError(t, err)
+	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
+	expectedError := os.IsNotExist(err)
+	if err != nil && !expectedError {
+		return err
+	}
+	request := &solid.DepositRequest{}
+	if err := spectest.ReadSszOld(root, request, c.Version(), "deposit_request.ssz_snappy"); err != nil {
+		return err
+	}
+	if err := c.Machine.ProcessDepositRequest(preState, request); err != nil {
+		if expectedError {
+			return nil
+		}
+		return err
+	}
+	if expectedError {
+		return errors.New("expected error")
+	}
+	haveRoot, err := preState.HashSSZ()
+	require.NoError(t, err)
+
+	expectedRoot, err := postState.HashSSZ()
+	require.NoError(t, err)
+
+	assert.EqualValues(t, expectedRoot, haveRoot)
+	return nil
+}
+
+func operationWithdrawalRequstHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
+	require.NoError(t, err)
+	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
+	expectedError := os.IsNotExist(err)
+	if err != nil && !expectedError {
+		return err
+	}
+	request := &solid.WithdrawalRequest{}
+	if err := spectest.ReadSszOld(root, request, c.Version(), "withdrawal_request.ssz_snappy"); err != nil {
+		return err
+	}
+	if err := c.Machine.ProcessWithdrawalRequest(preState, request); err != nil {
+		if expectedError {
+			return nil
+		}
+		return err
+	}
+	if expectedError {
+		return errors.New("expected error")
+	}
+	haveRoot, err := preState.HashSSZ()
+	require.NoError(t, err)
+
+	expectedRoot, err := postState.HashSSZ()
+	require.NoError(t, err)
+
+	assert.EqualValues(t, expectedRoot, haveRoot)
+	return nil
+}
+
+func operationExecutionPayloadHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
+	require.NoError(t, err)
+	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
+	expectedError := os.IsNotExist(err)
+	if err != nil && !expectedError {
+		return err
+	}
+	body := cltypes.NewBeaconBody(&clparams.MainnetBeaconConfig, c.Version())
+	if err := spectest.ReadSszOld(root, body, c.Version(), "body.ssz_snappy"); err != nil {
+		return err
+	}
+	if err := c.Machine.ProcessExecutionPayload(preState, body); err != nil {
+		if expectedError {
+			return nil
+		}
+		return err
+	}
+	if expectedError {
+		return errors.New("expected error")
+	}
+	haveRoot, err := preState.HashSSZ()
+	require.NoError(t, err)
+
+	expectedRoot, err := postState.HashSSZ()
+	require.NoError(t, err)
+
+	assert.EqualValues(t, expectedRoot, haveRoot)
 	return nil
 }

@@ -77,14 +77,10 @@ func (b *CachingBeaconState) SlashValidator(slashedInd uint64, whistleblowerInd 
 		whistleblowerInd = new(uint64)
 		*whistleblowerInd = proposerInd
 	}
-	whistleBlowerReward := newEffectiveBalance / b.BeaconConfig().WhistleBlowerRewardQuotient
+	whistleBlowerReward := newEffectiveBalance / b.BeaconConfig().GetWhistleBlowerRewardQuotient(b.Version())
 	proposerReward := b.getSlashingProposerReward(whistleBlowerReward)
 	if err := IncreaseBalance(b, proposerInd, proposerReward); err != nil {
 		return 0, err
-	}
-	rewardWhist := whistleBlowerReward - proposerReward
-	if whistleblowerInd == nil {
-		proposerReward += rewardWhist
 	}
 	return proposerReward, IncreaseBalance(b, *whistleblowerInd, whistleBlowerReward-proposerReward)
 }
@@ -98,24 +94,35 @@ func (b *CachingBeaconState) InitiateValidatorExit(index uint64) error {
 		return nil
 	}
 
-	currentEpoch := Epoch(b)
-	exitQueueEpoch := ComputeActivationExitEpoch(b.BeaconConfig(), currentEpoch)
-	b.ForEachValidator(func(v solid.Validator, idx, total int) bool {
-		if v.ExitEpoch() != b.BeaconConfig().FarFutureEpoch && v.ExitEpoch() > exitQueueEpoch {
-			exitQueueEpoch = v.ExitEpoch()
+	var exitQueueEpoch uint64
+	switch {
+	case b.Version() >= clparams.ElectraVersion:
+		// electra and after
+		effectiveBalance, err := b.ValidatorEffectiveBalance(int(index))
+		if err != nil {
+			return err
 		}
-		return true
-	})
+		exitQueueEpoch = b.ComputeExitEpochAndUpdateChurn(effectiveBalance)
+	default:
+		currentEpoch := Epoch(b)
+		exitQueueEpoch = ComputeActivationExitEpoch(b.BeaconConfig(), currentEpoch)
+		b.ForEachValidator(func(v solid.Validator, idx, total int) bool {
+			if v.ExitEpoch() != b.BeaconConfig().FarFutureEpoch && v.ExitEpoch() > exitQueueEpoch {
+				exitQueueEpoch = v.ExitEpoch()
+			}
+			return true
+		})
 
-	exitQueueChurn := 0
-	b.ForEachValidator(func(v solid.Validator, idx, total int) bool {
-		if v.ExitEpoch() == exitQueueEpoch {
-			exitQueueChurn += 1
+		exitQueueChurn := 0
+		b.ForEachValidator(func(v solid.Validator, idx, total int) bool {
+			if v.ExitEpoch() == exitQueueEpoch {
+				exitQueueChurn += 1
+			}
+			return true
+		})
+		if exitQueueChurn >= int(b.GetValidatorChurnLimit()) {
+			exitQueueEpoch += 1
 		}
-		return true
-	})
-	if exitQueueChurn >= int(b.GetValidatorChurnLimit()) {
-		exitQueueEpoch += 1
 	}
 
 	var overflow bool
@@ -126,4 +133,31 @@ func (b *CachingBeaconState) InitiateValidatorExit(index uint64) error {
 	b.SetExitEpochForValidatorAtIndex(int(index), exitQueueEpoch)
 	b.SetWithdrawableEpochForValidatorAtIndex(int(index), newWithdrawableEpoch)
 	return nil
+}
+
+// def compute_exit_epoch_and_update_churn(state: BeaconState, exit_balance: Gwei) -> Epoch
+func (b *CachingBeaconState) ComputeExitEpochAndUpdateChurn(exitBalance uint64) uint64 {
+	earliestExitEpoch := max(
+		b.EarliestExitEpoch(),
+		ComputeActivationExitEpoch(b.BeaconConfig(), Epoch(b)),
+	)
+	perEpochChurn := GetActivationExitChurnLimit(b)
+
+	var exitBalanceToConsume uint64
+	if b.EarliestExitEpoch() < earliestExitEpoch {
+		exitBalanceToConsume = perEpochChurn
+	} else {
+		exitBalanceToConsume = b.ExitBalanceToConsume()
+	}
+	if exitBalance > exitBalanceToConsume {
+		// Exit doesn't fit in the current earliest epoch.
+		balanceToProcess := exitBalance - exitBalanceToConsume
+		addtionalEpochs := (balanceToProcess-1)/perEpochChurn + 1
+		earliestExitEpoch += addtionalEpochs
+		exitBalanceToConsume += addtionalEpochs * perEpochChurn
+	}
+	// Consume the balance and update state variables.
+	b.SetExitBalanceToConsume(exitBalanceToConsume - exitBalance)
+	b.SetEarliestExitEpoch(earliestExitEpoch)
+	return earliestExitEpoch
 }

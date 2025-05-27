@@ -24,20 +24,21 @@ import (
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
 
+	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
-	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 // Build snapshot indexes for given snapshot files.
 // Sample usage:
-// build_idx --datadir erigon-1 --snapshot_path /snapshots/v1-000000-000500-headers.seg,/snapshots/v1-000500-001000-headers.seg
+// build_idx --datadir erigon-1 --snapshot_path /snapshots/v1.0-000000-000500-headers.seg,/snapshots/v1.0-000500-001000-headers.seg
 
 func main() {
 
@@ -73,7 +74,7 @@ func FindIf(segments []snaptype.FileInfo, predicate func(snaptype.FileInfo) bool
 }
 
 func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string, minBlock uint64) error {
-	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -87,7 +88,7 @@ func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string, min
 
 	dirs := datadir.New(dataDir)
 
-	chainDB := mdbx.NewMDBX(logger).Path(dirs.Chaindata).MustOpen()
+	chainDB := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
 	chainConfig := fromdb.ChainConfig(chainDB)

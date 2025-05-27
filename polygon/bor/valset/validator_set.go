@@ -27,7 +27,7 @@ import (
 	"sort"
 	"strings"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
@@ -63,7 +63,7 @@ type ValidatorSet struct {
 
 	// cached (unexported)
 	totalVotingPower int64
-	validatorsMap    map[libcommon.Address]int // address -> index
+	validatorsMap    map[common.Address]int // address -> index
 }
 
 // NewValidatorSet initializes a ValidatorSet by copying over the
@@ -190,20 +190,20 @@ func computeMaxMinPriorityDiff(vals *ValidatorSet) int64 {
 		panic("empty validator set")
 	}
 
-	max := int64(math.MinInt64)
-	min := int64(math.MaxInt64)
+	_max := int64(math.MinInt64)
+	_min := int64(math.MaxInt64)
 
 	for _, v := range vals.Validators {
-		if v.ProposerPriority < min {
-			min = v.ProposerPriority
+		if v.ProposerPriority < _min {
+			_min = v.ProposerPriority
 		}
 
-		if v.ProposerPriority > max {
-			max = v.ProposerPriority
+		if v.ProposerPriority > _max {
+			_max = v.ProposerPriority
 		}
 	}
 
-	diff := max - min
+	diff := _max - _min
 
 	if diff < 0 {
 		return -1 * diff
@@ -251,7 +251,7 @@ func validatorListCopy(valsList []*Validator) []*Validator {
 // Copy each validator into a new ValidatorSet.
 func (vals *ValidatorSet) Copy() *ValidatorSet {
 	valCopy := validatorListCopy(vals.Validators)
-	validatorsMap := make(map[libcommon.Address]int, len(vals.Validators))
+	validatorsMap := make(map[common.Address]int, len(vals.Validators))
 
 	for i, val := range valCopy {
 		validatorsMap[val.Address] = i
@@ -267,7 +267,7 @@ func (vals *ValidatorSet) Copy() *ValidatorSet {
 
 // HasAddress returns true if address given is in the validator set, false -
 // otherwise.
-func (vals *ValidatorSet) HasAddress(address libcommon.Address) bool {
+func (vals *ValidatorSet) HasAddress(address common.Address) bool {
 	_, ok := vals.validatorsMap[address]
 
 	return ok
@@ -275,7 +275,7 @@ func (vals *ValidatorSet) HasAddress(address libcommon.Address) bool {
 
 // GetByAddress returns an index of the validator with address and validator
 // itself if found. Otherwise, -1 and nil are returned.
-func (vals *ValidatorSet) GetByAddress(address libcommon.Address) (index int, val *Validator) {
+func (vals *ValidatorSet) GetByAddress(address common.Address) (index int, val *Validator) {
 	idx, ok := vals.validatorsMap[address]
 	if ok {
 		return idx, vals.Validators[idx].Copy()
@@ -399,7 +399,7 @@ func processChanges(origChanges []*Validator) (updates, removals []*Validator, e
 	removals = make([]*Validator, 0, sliceCap)
 	updates = make([]*Validator, 0, sliceCap)
 
-	var prevAddr libcommon.Address
+	var prevAddr common.Address
 
 	// Scan changes by address and append valid validators to updates or removals lists.
 	for i, valUpdate := range changes {
@@ -647,7 +647,7 @@ func (vals *ValidatorSet) updateValidators(updates []*Validator, deletes []*Vali
 }
 
 func (vals *ValidatorSet) UpdateValidatorMap() {
-	vals.validatorsMap = make(map[libcommon.Address]int, len(vals.Validators))
+	vals.validatorsMap = make(map[common.Address]int, len(vals.Validators))
 
 	for i, val := range vals.Validators {
 		vals.validatorsMap[val.Address] = i
@@ -672,7 +672,7 @@ func (vals *ValidatorSet) UpdateWithChangeSet(changes []*Validator) error {
 }
 
 // Difficulty returns the difficulty for a particular signer at the current snapshot number
-func (vals *ValidatorSet) Difficulty(signer libcommon.Address) (uint64, error) {
+func (vals *ValidatorSet) Difficulty(signer common.Address) (uint64, error) {
 	indexDiff, err := vals.GetSignerSuccessionNumber(signer, 0)
 	if err != nil {
 		return 0, fmt.Errorf("ValidatorSet.Difficulty: %w", err)
@@ -683,8 +683,8 @@ func (vals *ValidatorSet) Difficulty(signer libcommon.Address) (uint64, error) {
 
 // SafeDifficulty returns the difficulty for a particular signer at the current snapshot number if available,
 // otherwise it returns 1 for empty signer and 0 if it is not in the validator set.
-func (vals *ValidatorSet) SafeDifficulty(signer libcommon.Address) uint64 {
-	if bytes.Equal(signer.Bytes(), libcommon.Address{}.Bytes()) {
+func (vals *ValidatorSet) SafeDifficulty(signer common.Address) uint64 {
+	if bytes.Equal(signer.Bytes(), common.Address{}.Bytes()) {
 		return 1
 	}
 
@@ -696,7 +696,7 @@ func (vals *ValidatorSet) SafeDifficulty(signer libcommon.Address) uint64 {
 }
 
 // GetSignerSuccessionNumber returns the relative position of signer in terms of the in-turn proposer
-func (vals *ValidatorSet) GetSignerSuccessionNumber(signer libcommon.Address, number uint64) (int, error) {
+func (vals *ValidatorSet) GetSignerSuccessionNumber(signer common.Address, number uint64) (int, error) {
 	proposer := vals.GetProposer()
 	if proposer == nil {
 		return -1, &UnauthorizedProposerError{Number: number, Proposer: []byte{}}

@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 
 	"github.com/erigontech/erigon/cl/utils"
@@ -29,6 +30,11 @@ func ComputeProposerIndex(b *raw.BeaconState, indices []uint64, seed [32]byte) (
 	if len(indices) == 0 {
 		return 0, nil
 	}
+	if b.Version() >= clparams.ElectraVersion {
+		return computeProposerIndexElectra(b, indices, seed)
+	}
+
+	// before electra case
 	maxRandomByte := uint64(1<<8 - 1)
 	i := uint64(0)
 	total := uint64(len(indices))
@@ -50,7 +56,40 @@ func ComputeProposerIndex(b *raw.BeaconState, indices []uint64, seed [32]byte) (
 		if err != nil {
 			return 0, err
 		}
-		if validator.EffectiveBalance()*maxRandomByte >= b.BeaconConfig().MaxEffectiveBalance*randomByte {
+		if validator.EffectiveBalance()*maxRandomByte >= b.BeaconConfig().MaxEffectiveBalanceForVersion(b.Version())*randomByte {
+			return candidateIndex, nil
+		}
+		i += 1
+	}
+}
+
+func computeProposerIndexElectra(b *raw.BeaconState, indices []uint64, seed [32]byte) (uint64, error) {
+	maxRandomValue := uint64(1<<16 - 1)
+	i := uint64(0)
+	total := uint64(len(indices))
+	input := make([]byte, 40)
+	preInputs := ComputeShuffledIndexPreInputs(b.BeaconConfig(), seed)
+	for {
+		shuffled, err := ComputeShuffledIndex(b.BeaconConfig(), i%total, total, seed, preInputs, utils.Sha256)
+		if err != nil {
+			return 0, err
+		}
+		candidateIndex := indices[shuffled]
+		// [Modified in Electra]
+		// random_bytes = hash(seed + uint_to_bytes(i // 16))
+		// offset = i % 16 * 2
+		// random_value = bytes_to_uint64(random_bytes[offset:offset + 2])
+		copy(input, seed[:])
+		binary.LittleEndian.PutUint64(input[32:], i/16)
+		randomBytes := utils.Sha256(input)
+		offset := (i % 16) * 2
+		randomValue := binary.LittleEndian.Uint16(randomBytes[offset : offset+2])
+
+		validator, err := b.ValidatorForValidatorIndex(int(candidateIndex))
+		if err != nil {
+			return 0, err
+		}
+		if validator.EffectiveBalance()*maxRandomValue >= b.BeaconConfig().MaxEffectiveBalanceForVersion(b.Version())*uint64(randomValue) {
 			return candidateIndex, nil
 		}
 		i += 1

@@ -34,9 +34,10 @@ package tools
 
 import (
 	_ "github.com/erigontech/mdbx-go"
-	_ "github.com/erigontech/mdbx-go/mdbxdist"
+	_ "github.com/erigontech/mdbx-go/libmdbx"
 	_ "github.com/fjl/gencodec"
 	_ "go.uber.org/mock/mockgen"
 	_ "go.uber.org/mock/mockgen/model"
+	_ "golang.org/x/tools/cmd/stringer"
 	_ "google.golang.org/grpc/cmd/protoc-gen-go-grpc"
 )

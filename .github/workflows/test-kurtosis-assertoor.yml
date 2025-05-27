@@ -5,75 +5,61 @@ env:
   APP_REPO: "erigontech/erigon"
 
 on:
+  push:
+    branches:
+        - main
+        - release/*
+        - docker_pectra
   workflow_call:
-    inputs:
-      checkout_ref:
-        required: true
-        type: string
-      os:
-        required: true
-        type: string
-      docker_build_tag:
-        required: true
-        type: string
+  workflow_dispatch:
 
 jobs:
-  assertoor_test:
-    runs-on: ${{ inputs.os }}
+  assertoor_regular_test:
+    runs-on: ubuntu-latest
 
     steps:
       - name: Fast checkout git repository
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 ## 4.1.7 release
+        uses: actions/checkout@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
         with:
-          repository: ${{ env.APP_REPO }}
-          fetch-depth: 1
-          ref: ${{ inputs.checkout_ref }}
-          path: 'erigon'
+          username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
+          password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
 
-      - name: Cleanup some space
+      - name: Docker build current branch
         run: |
-          df -h
-          sudo rm -drf \
-            /usr/share/dotnet \
-            /usr/share/swift \
-            /usr/local/julia* \
-            /opt/google/chrome \
-            /opt/microsoft/msedge \
-            /opt/microsoft/powershell \
-            /usr/lib/mono \
-            /usr/local/lib/android \
-            /usr/local/share/chromium 
-          echo DEBUG current list of docker images
-          docker image ls
-          echo DEBUG Removing legacy node:1 matching docker images
-          sudo docker image rm $(docker image ls --filter=reference='node:1*' -q)
-          echo DEBUG new disk free output
-          df -h
+          docker build -t test/erigon:current .
 
-      - name: Setup go env and cache
-        uses: actions/setup-go@v5
-        with:
-          #go-version: '>=1.22'
-          go-version-file: 'erigon/go.mod'
-          cache-dependency-path: |
-            erigon/go.sum
-
-      - name: Install dependencies on Linux
-        if: runner.os == 'Linux'
-        run: sudo apt update && sudo apt install build-essential
-
-      - name: download kurtosis config
-        env:
-          BUILD_VERSION: ${{ inputs.docker_build_tag }}
-          DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
-        run: |
-          wget -O kurtosis_config_with_p.yaml https://raw.githubusercontent.com/erigontech/erigon/main/.github/workflows/kurtosis/config.properties
-          sed 's#<<ERIGON_IMAGE_PLACEHOLDER>>#${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }}#g' kurtosis_config_with_p.yaml > kurtosis_config.yaml
-
-      - name: Run Kurtosis + assertoor tests
+      - name: Run regular Kurtosis + assertoor tests
         uses: ethpandaops/kurtosis-assertoor-github-action@v1
         with:
-            enclave_name: "kurtosis-run-${{ github.run_id }}"
-            ethereum_package_args: "./kurtosis_config.yaml"
-            #kurtosis_extra_args: --verbosity detailed --cli-log-level trace
-            enclave_dump: false
+            enclave_name: "kurtosis-run1-${{ github.run_id }}"
+            ethereum_package_args: ".github/workflows/kurtosis/regular-assertoor.io"
+            kurtosis_extra_args: --verbosity detailed --cli-log-level trace
+            persistent_logs: "true"
+
+  assertoor_pectra_test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Fast checkout git repository
+        uses: actions/checkout@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567  ## v3.3.0
+        with:
+          username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
+          password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
+
+      - name: Docker build current branch
+        run: |
+          docker build -t test/erigon:current .
+
+      - name: Run Pectra Kurtosis + assertoor tests
+        uses: ethpandaops/kurtosis-assertoor-github-action@v1
+        with:
+            enclave_name: "kurtosis-run2-${{ github.run_id }}"
+            ethereum_package_args: ".github/workflows/kurtosis/pectra.io"
+            kurtosis_extra_args: --verbosity detailed --cli-log-level trace
+            persistent_logs: "true"

@@ -12,9 +12,9 @@ package p2p
 import (
 	reflect "reflect"
 
+	event "github.com/erigontech/erigon-lib/event"
 	sentryproto "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	eth "github.com/erigontech/erigon/eth/protocols/eth"
-	polygoncommon "github.com/erigontech/erigon/polygon/polygoncommon"
+	eth "github.com/erigontech/erigon-p2p/protocols/eth"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -43,7 +43,7 @@ func (m *MockpeerEventRegistrar) EXPECT() *MockpeerEventRegistrarMockRecorder {
 }
 
 // RegisterNewBlockHashesObserver mocks base method.
-func (m *MockpeerEventRegistrar) RegisterNewBlockHashesObserver(observer polygoncommon.Observer[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]) UnregisterFunc {
+func (m *MockpeerEventRegistrar) RegisterNewBlockHashesObserver(observer event.Observer[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]) UnregisterFunc {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "RegisterNewBlockHashesObserver", observer)
 	ret0, _ := ret[0].(UnregisterFunc)
@@ -69,19 +69,19 @@ func (c *MockpeerEventRegistrarRegisterNewBlockHashesObserverCall) Return(arg0 U
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockpeerEventRegistrarRegisterNewBlockHashesObserverCall) Do(f func(polygoncommon.Observer[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]) UnregisterFunc) *MockpeerEventRegistrarRegisterNewBlockHashesObserverCall {
+func (c *MockpeerEventRegistrarRegisterNewBlockHashesObserverCall) Do(f func(event.Observer[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]) UnregisterFunc) *MockpeerEventRegistrarRegisterNewBlockHashesObserverCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockpeerEventRegistrarRegisterNewBlockHashesObserverCall) DoAndReturn(f func(polygoncommon.Observer[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]) UnregisterFunc) *MockpeerEventRegistrarRegisterNewBlockHashesObserverCall {
+func (c *MockpeerEventRegistrarRegisterNewBlockHashesObserverCall) DoAndReturn(f func(event.Observer[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]) UnregisterFunc) *MockpeerEventRegistrarRegisterNewBlockHashesObserverCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // RegisterNewBlockObserver mocks base method.
-func (m *MockpeerEventRegistrar) RegisterNewBlockObserver(observer polygoncommon.Observer[*DecodedInboundMessage[*eth.NewBlockPacket]]) UnregisterFunc {
+func (m *MockpeerEventRegistrar) RegisterNewBlockObserver(observer event.Observer[*DecodedInboundMessage[*eth.NewBlockPacket]]) UnregisterFunc {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "RegisterNewBlockObserver", observer)
 	ret0, _ := ret[0].(UnregisterFunc)
@@ -107,19 +107,19 @@ func (c *MockpeerEventRegistrarRegisterNewBlockObserverCall) Return(arg0 Unregis
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockpeerEventRegistrarRegisterNewBlockObserverCall) Do(f func(polygoncommon.Observer[*DecodedInboundMessage[*eth.NewBlockPacket]]) UnregisterFunc) *MockpeerEventRegistrarRegisterNewBlockObserverCall {
+func (c *MockpeerEventRegistrarRegisterNewBlockObserverCall) Do(f func(event.Observer[*DecodedInboundMessage[*eth.NewBlockPacket]]) UnregisterFunc) *MockpeerEventRegistrarRegisterNewBlockObserverCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockpeerEventRegistrarRegisterNewBlockObserverCall) DoAndReturn(f func(polygoncommon.Observer[*DecodedInboundMessage[*eth.NewBlockPacket]]) UnregisterFunc) *MockpeerEventRegistrarRegisterNewBlockObserverCall {
+func (c *MockpeerEventRegistrarRegisterNewBlockObserverCall) DoAndReturn(f func(event.Observer[*DecodedInboundMessage[*eth.NewBlockPacket]]) UnregisterFunc) *MockpeerEventRegistrarRegisterNewBlockObserverCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // RegisterPeerEventObserver mocks base method.
-func (m *MockpeerEventRegistrar) RegisterPeerEventObserver(observer polygoncommon.Observer[*sentryproto.PeerEvent]) UnregisterFunc {
+func (m *MockpeerEventRegistrar) RegisterPeerEventObserver(observer event.Observer[*sentryproto.PeerEvent]) UnregisterFunc {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "RegisterPeerEventObserver", observer)
 	ret0, _ := ret[0].(UnregisterFunc)
@@ -145,13 +145,13 @@ func (c *MockpeerEventRegistrarRegisterPeerEventObserverCall) Return(arg0 Unregi
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockpeerEventRegistrarRegisterPeerEventObserverCall) Do(f func(polygoncommon.Observer[*sentryproto.PeerEvent]) UnregisterFunc) *MockpeerEventRegistrarRegisterPeerEventObserverCall {
+func (c *MockpeerEventRegistrarRegisterPeerEventObserverCall) Do(f func(event.Observer[*sentryproto.PeerEvent]) UnregisterFunc) *MockpeerEventRegistrarRegisterPeerEventObserverCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockpeerEventRegistrarRegisterPeerEventObserverCall) DoAndReturn(f func(polygoncommon.Observer[*sentryproto.PeerEvent]) UnregisterFunc) *MockpeerEventRegistrarRegisterPeerEventObserverCall {
+func (c *MockpeerEventRegistrarRegisterPeerEventObserverCall) DoAndReturn(f func(event.Observer[*sentryproto.PeerEvent]) UnregisterFunc) *MockpeerEventRegistrarRegisterPeerEventObserverCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

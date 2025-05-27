@@ -20,26 +20,22 @@ import (
 	"context"
 	"errors"
 
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/types"
 )
 
-func NewTrackingFetcher(fetcher Fetcher, peerTracker PeerTracker) Fetcher {
-	return newTrackingFetcher(fetcher, peerTracker)
-}
-
-func newTrackingFetcher(fetcher Fetcher, peerTracker PeerTracker) *trackingFetcher {
-	return &trackingFetcher{
+func NewTrackingFetcher(fetcher Fetcher, peerTracker *PeerTracker) *TrackingFetcher {
+	return &TrackingFetcher{
 		Fetcher:     fetcher,
 		peerTracker: peerTracker,
 	}
 }
 
-type trackingFetcher struct {
+type TrackingFetcher struct {
 	Fetcher
-	peerTracker PeerTracker
+	peerTracker *PeerTracker
 }
 
-func (tf *trackingFetcher) FetchHeaders(
+func (tf *TrackingFetcher) FetchHeaders(
 	ctx context.Context,
 	start uint64,
 	end uint64,
@@ -62,7 +58,7 @@ func (tf *trackingFetcher) FetchHeaders(
 	return res, nil
 }
 
-func (tf *trackingFetcher) FetchBodies(
+func (tf *TrackingFetcher) FetchBodies(
 	ctx context.Context,
 	headers []*types.Header,
 	peerId *PeerId,

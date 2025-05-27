@@ -13,9 +13,13 @@ on:
       - ready_for_review
   workflow_dispatch:     # Run manually
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   clean-exit-sd-test:
-    runs-on: self-hosted
+    runs-on: [self-hosted, qa]
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
@@ -52,8 +56,8 @@ jobs:
         # Capture monitoring script exit status
         test_exit_status=$?
         
-        # Save the subsection reached status
-        echo "::set-output name=test_executed::true"
+        # Save the subsection reached status        
+        echo "test_executed=true" >> $GITHUB_OUTPUT
         
         # Clean up Erigon process if it's still running
         if kill -0 $ERIGON_PID 2> /dev/null; then

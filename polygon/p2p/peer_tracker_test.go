@@ -28,14 +28,14 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/eth/protocols/eth"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
-	"github.com/erigontech/erigon/turbo/testlog"
+	"github.com/erigontech/erigon-lib/testlog"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-p2p/protocols/eth"
 )
 
 func TestPeerTracker(t *testing.T) {
@@ -44,7 +44,7 @@ func TestPeerTracker(t *testing.T) {
 	test := newPeerTrackerTest(t)
 	peerTracker := test.peerTracker
 	peerIds := peerTracker.ListPeersMayHaveBlockNum(100)
-	require.Len(t, peerIds, 0)
+	require.Empty(t, peerIds)
 
 	peerTracker.PeerConnected(PeerIdFromUint64(1))
 	peerTracker.PeerConnected(PeerIdFromUint64(2))
@@ -72,20 +72,20 @@ func TestPeerTracker(t *testing.T) {
 	require.Equal(t, PeerIdFromUint64(1), peerIds[0])
 
 	peerTracker.PeerConnected(PeerIdFromUint64(2))
-	peerIds = peerTracker.ListPeersMayMissBlockHash(libcommon.HexToHash("0x0"))
+	peerIds = peerTracker.ListPeersMayMissBlockHash(common.HexToHash("0x0"))
 	require.Len(t, peerIds, 2)
 	sortPeerIdsAssumingUints(peerIds)
 	require.Equal(t, PeerIdFromUint64(1), peerIds[0])
 	require.Equal(t, PeerIdFromUint64(2), peerIds[1])
 
-	peerTracker.BlockHashPresent(PeerIdFromUint64(2), libcommon.HexToHash("0x0"))
-	peerIds = peerTracker.ListPeersMayMissBlockHash(libcommon.HexToHash("0x0"))
+	peerTracker.BlockHashPresent(PeerIdFromUint64(2), common.HexToHash("0x0"))
+	peerIds = peerTracker.ListPeersMayMissBlockHash(common.HexToHash("0x0"))
 	require.Len(t, peerIds, 1)
 	require.Equal(t, PeerIdFromUint64(1), peerIds[0])
 
-	peerTracker.BlockHashPresent(PeerIdFromUint64(1), libcommon.HexToHash("0x0"))
-	peerIds = peerTracker.ListPeersMayMissBlockHash(libcommon.HexToHash("0x0"))
-	require.Len(t, peerIds, 0)
+	peerTracker.BlockHashPresent(PeerIdFromUint64(1), common.HexToHash("0x0"))
+	peerIds = peerTracker.ListPeersMayMissBlockHash(common.HexToHash("0x0"))
+	require.Empty(t, peerIds)
 }
 
 func TestPeerTrackerPeerEventObserver(t *testing.T) {
@@ -174,7 +174,7 @@ func TestPeerTrackerNewBlockHashesObserver(t *testing.T) {
 		var peerIds []*PeerId
 		waitCond := func(wantPeerIdsLen int) func() bool {
 			return func() bool {
-				peerIds = peerTracker.ListPeersMayMissBlockHash(libcommon.HexToHash("0x0"))
+				peerIds = peerTracker.ListPeersMayMissBlockHash(common.HexToHash("0x0"))
 				return len(peerIds) == wantPeerIdsLen
 			}
 		}
@@ -188,7 +188,7 @@ func TestPeerTrackerNewBlockHashesObserver(t *testing.T) {
 			PeerId: PeerIdFromUint64(2),
 			Decoded: &eth.NewBlockHashesPacket{
 				{
-					Hash:   libcommon.HexToHash("0x0"),
+					Hash:   common.HexToHash("0x0"),
 					Number: 1,
 				},
 			},
@@ -271,7 +271,7 @@ type peerTrackerTest struct {
 	ctx                context.Context
 	ctxCancel          context.CancelFunc
 	t                  *testing.T
-	peerTracker        PeerTracker
+	peerTracker        *PeerTracker
 	peerProvider       *MockpeerProvider
 	peerEventRegistrar *MockpeerEventRegistrar
 }
@@ -286,7 +286,7 @@ func (ptt *peerTrackerTest) mockPeerProvider(peerReply *sentryproto.PeersReply) 
 func (ptt *peerTrackerTest) mockPeerEvents(events <-chan *sentryproto.PeerEvent) {
 	ptt.peerEventRegistrar.EXPECT().
 		RegisterPeerEventObserver(gomock.Any()).
-		DoAndReturn(func(observer polygoncommon.Observer[*sentryproto.PeerEvent]) UnregisterFunc {
+		DoAndReturn(func(observer event.Observer[*sentryproto.PeerEvent]) UnregisterFunc {
 			ctx, cancel := context.WithCancel(context.Background())
 			go func() {
 				for {
@@ -308,7 +308,7 @@ func (ptt *peerTrackerTest) mockNewBlockHashesEvents(events <-chan *DecodedInbou
 	ptt.peerEventRegistrar.EXPECT().
 		RegisterNewBlockHashesObserver(gomock.Any()).
 		DoAndReturn(
-			func(observer polygoncommon.Observer[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]) UnregisterFunc {
+			func(observer event.Observer[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]) UnregisterFunc {
 				ctx, cancel := context.WithCancel(context.Background())
 				go func() {
 					for {
@@ -331,7 +331,7 @@ func (ptt *peerTrackerTest) mockNewBlockEvents(events <-chan *DecodedInboundMess
 	ptt.peerEventRegistrar.EXPECT().
 		RegisterNewBlockObserver(gomock.Any()).
 		DoAndReturn(
-			func(observer polygoncommon.Observer[*DecodedInboundMessage[*eth.NewBlockPacket]]) UnregisterFunc {
+			func(observer event.Observer[*DecodedInboundMessage[*eth.NewBlockPacket]]) UnregisterFunc {
 				ctx, cancel := context.WithCancel(context.Background())
 				go func() {
 					for {

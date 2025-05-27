@@ -57,6 +57,8 @@ func (b *TransitionCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err
 		startState.BeaconConfig().CapellaForkEpoch = meta.ForkEpoch
 	case clparams.DenebVersion:
 		startState.BeaconConfig().DenebForkEpoch = meta.ForkEpoch
+	case clparams.ElectraVersion:
+		startState.BeaconConfig().ElectraForkEpoch = meta.ForkEpoch
 	}
 	startSlot := startState.Slot()
 	blockIndex := 0
@@ -81,9 +83,9 @@ func (b *TransitionCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err
 		}
 	}
 	expectedRoot, err := stopState.HashSSZ()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	haveRoot, err := startState.HashSSZ()
-	assert.NoError(t, err)
-	assert.EqualValues(t, haveRoot, expectedRoot, "state root")
+	require.NoError(t, err)
+	assert.EqualValues(t, expectedRoot, haveRoot, "state root")
 	return nil
 }

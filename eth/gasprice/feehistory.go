@@ -29,9 +29,9 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/consensus/misc"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/consensus/misc"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -97,12 +97,13 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64) {
 
 	// Fill in blob base fee and next blob base fee.
 	if excessBlobGas := bf.header.ExcessBlobGas; excessBlobGas != nil {
-		blobBaseFee256, err := misc.GetBlobGasPrice(chainconfig, *excessBlobGas)
+		blobBaseFee256, err := misc.GetBlobGasPrice(chainconfig, *excessBlobGas, bf.header.Time)
 		if err != nil {
 			bf.err = err
 			return
 		}
-		nextBlobBaseFee256, err := misc.GetBlobGasPrice(chainconfig, misc.CalcExcessBlobGas(chainconfig, bf.header))
+		nextBlockTime := bf.header.Time + chainconfig.SecondsPerSlot()
+		nextBlobBaseFee256, err := misc.GetBlobGasPrice(chainconfig, misc.CalcExcessBlobGas(chainconfig, bf.header, nextBlockTime), nextBlockTime)
 		if err != nil {
 			bf.err = err
 			return
@@ -115,14 +116,16 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64) {
 		bf.nextBlobBaseFee = new(big.Int)
 	}
 	bf.gasUsedRatio = float64(bf.header.GasUsed) / float64(bf.header.GasLimit)
+
+	if blobGasUsed := bf.header.BlobGasUsed; blobGasUsed != nil && chainconfig.GetMaxBlobGasPerBlock(bf.header.Time) != 0 {
+		bf.blobGasUsedRatio = float64(*blobGasUsed) / float64(chainconfig.GetMaxBlobGasPerBlock(bf.header.Time))
+	}
+
 	if len(percentiles) == 0 {
 		// rewards were not requested, return null
 		return
 	}
 
-	if blobGasUsed := bf.header.BlobGasUsed; blobGasUsed != nil && chainconfig.MaxBlobGasPerBlock != nil {
-		bf.blobGasUsedRatio = float64(*blobGasUsed) / float64(*chainconfig.MaxBlobGasPerBlock)
-	}
 	if bf.block == nil || (bf.receipts == nil && len(bf.block.Transactions()) != 0) {
 		oracle.log.Error("Block or receipts are missing while reward percentiles are requested")
 		return
@@ -233,21 +236,21 @@ func (oracle *Oracle) resolveBlockRange(ctx context.Context, lastBlock rpc.Block
 // value can be derived from the newest block.
 func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLastBlock rpc.BlockNumber, rewardPercentiles []float64) (*big.Int, [][]*big.Int, []*big.Int, []float64, []*big.Int, []float64, error) {
 	if blocks < 1 {
-		return libcommon.Big0, nil, nil, nil, nil, nil, nil // returning with no data and no error means there are no retrievable blocks
+		return common.Big0, nil, nil, nil, nil, nil, nil // returning with no data and no error means there are no retrievable blocks
 	}
 	if blocks > maxFeeHistory {
 		oracle.log.Warn("Sanitizing fee history length", "requested", blocks, "truncated", maxFeeHistory)
 		blocks = maxFeeHistory
 	}
 	if len(rewardPercentiles) > maxQueryLimit {
-		return libcommon.Big0, nil, nil, nil, nil, nil, fmt.Errorf("%w: over the query limit %d", ErrInvalidPercentile, maxQueryLimit)
+		return common.Big0, nil, nil, nil, nil, nil, fmt.Errorf("%w: over the query limit %d", ErrInvalidPercentile, maxQueryLimit)
 	}
 	for i, p := range rewardPercentiles {
 		if p < 0 || p > 100 {
-			return libcommon.Big0, nil, nil, nil, nil, nil, fmt.Errorf("%w: %f", ErrInvalidPercentile, p)
+			return common.Big0, nil, nil, nil, nil, nil, fmt.Errorf("%w: %f", ErrInvalidPercentile, p)
 		}
 		if i > 0 && p <= rewardPercentiles[i-1] {
-			return libcommon.Big0, nil, nil, nil, nil, nil, fmt.Errorf("%w: #%d:%f >= #%d:%f", ErrInvalidPercentile, i-1, rewardPercentiles[i-1], i, p)
+			return common.Big0, nil, nil, nil, nil, nil, fmt.Errorf("%w: #%d:%f >= #%d:%f", ErrInvalidPercentile, i-1, rewardPercentiles[i-1], i, p)
 		}
 	}
 	// Only process blocks if reward percentiles were requested
@@ -262,7 +265,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 	)
 	pendingBlock, pendingReceipts, lastBlock, blocks, err := oracle.resolveBlockRange(ctx, unresolvedLastBlock, blocks, maxHistory)
 	if err != nil || blocks == 0 {
-		return libcommon.Big0, nil, nil, nil, nil, nil, err
+		return common.Big0, nil, nil, nil, nil, nil, err
 	}
 	oldestBlock := lastBlock + 1 - uint64(blocks)
 
@@ -278,8 +281,8 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 		firstMissing     = blocks
 	)
 	for ; blocks > 0; blocks-- {
-		if err = libcommon.Stopped(ctx.Done()); err != nil {
-			return libcommon.Big0, nil, nil, nil, nil, nil, err
+		if err = common.Stopped(ctx.Done()); err != nil {
+			return common.Big0, nil, nil, nil, nil, nil, err
 		}
 		// Retrieve the next block number to fetch with this goroutine
 		blockNumber := atomic.AddUint64(&next, 1) - 1
@@ -294,7 +297,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 			if len(rewardPercentiles) != 0 {
 				fees.block, fees.err = oracle.backend.BlockByNumber(ctx, rpc.BlockNumber(blockNumber))
 				if fees.block != nil && fees.err == nil {
-					fees.receipts, fees.err = oracle.backend.GetReceipts(ctx, fees.block)
+					fees.receipts, fees.err = oracle.backend.GetReceiptsGasUsed(ctx, fees.block)
 				}
 			} else {
 				fees.header, fees.err = oracle.backend.HeaderByNumber(ctx, rpc.BlockNumber(blockNumber))
@@ -308,7 +311,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 		}
 
 		if fees.err != nil {
-			return libcommon.Big0, nil, nil, nil, nil, nil, fees.err
+			return common.Big0, nil, nil, nil, nil, nil, fees.err
 		}
 		i := int(fees.blockNumber - oldestBlock)
 		if fees.header != nil {
@@ -322,7 +325,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 		}
 	}
 	if firstMissing == 0 {
-		return libcommon.Big0, nil, nil, nil, nil, nil, nil
+		return common.Big0, nil, nil, nil, nil, nil, nil
 	}
 	if len(rewardPercentiles) != 0 {
 		reward = reward[:firstMissing]

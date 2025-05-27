@@ -17,9 +17,9 @@
 package stagedsync
 
 import (
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
@@ -70,7 +70,8 @@ type StageState struct {
 	CurrentSyncCycle CurrentSyncCycleInfo
 }
 
-func (s *StageState) LogPrefix() string { return s.state.LogPrefix() }
+func (s *StageState) LogPrefix() string     { return s.state.LogPrefix() }
+func (s *StageState) SyncMode() stages.Mode { return s.state.mode }
 
 // Update updates the stage state (current block number) in the database. Can be called multiple times during stage execution.
 func (s *StageState) Update(db kv.Putter, newBlockNum uint64) error {
@@ -89,7 +90,7 @@ func (s *StageState) ExecutionAt(db kv.Getter) (uint64, error) {
 type UnwindReason struct {
 	// If we're unwinding due to a fork - we want to unlink blocks but not mark
 	// them as bad - as they may get replayed then deselected
-	Block *libcommon.Hash
+	Block *common.Hash
 	// If unwind is caused by a bad block, this error is not empty
 	Err error
 }
@@ -102,11 +103,11 @@ var StagedUnwind = UnwindReason{nil, nil}
 var ExecUnwind = UnwindReason{nil, nil}
 var ForkChoice = UnwindReason{nil, nil}
 
-func BadBlock(badBlock libcommon.Hash, err error) UnwindReason {
+func BadBlock(badBlock common.Hash, err error) UnwindReason {
 	return UnwindReason{&badBlock, err}
 }
 
-func ForkReset(badBlock libcommon.Hash) UnwindReason {
+func ForkReset(badBlock common.Hash) UnwindReason {
 	return UnwindReason{&badBlock, nil}
 }
 

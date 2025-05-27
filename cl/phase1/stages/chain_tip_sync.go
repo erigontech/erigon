@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -59,7 +60,6 @@ func waitForExecutionEngineToBeFinished(ctx context.Context, cfg *Cfg) (ready bo
 // It returns a PeeredObject containing the blocks and the peer ID, or an error if something goes wrong.
 func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count uint64) (*peers.PeeredObject[[]*cltypes.SignedBeaconBlock], error) {
 	// spam requests to fetch blocks by range from the execution client
-
 	blocks, pid, err := cfg.rpc.SendBeaconBlocksByRangeReq(ctx, from, count)
 	for err != nil {
 		blocks, pid, err = cfg.rpc.SendBeaconBlocksByRangeReq(ctx, from, count)
@@ -71,7 +71,7 @@ func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count ui
 	}
 
 	// Generate blob identifiers from the retrieved blocks
-	ids, err := network2.BlobsIdentifiersFromBlocks(blocks)
+	ids, err := network2.BlobsIdentifiersFromBlocks(blocks, cfg.beaconCfg)
 	if err != nil {
 		return nil, err
 	}
@@ -90,12 +90,12 @@ func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count ui
 		// Request blobs frantically from the execution client
 		blobs, err := network2.RequestBlobsFrantically(ctx, cfg.rpc, ids)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to request blobs frantically: %w", err)
 		}
 
 		// Verify the blobs against identifiers and insert them into the blob store
 		if _, inserted, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, nil); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to verify blobs against identifiers and insert into the blob store: %w", err)
 		}
 	}
 
@@ -150,8 +150,8 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 // It processes blocks, checks their validity, and publishes them. It also handles context cancellation and logs progress periodically.
 func listenToIncomingBlocksUntilANewBlockIsReceived(ctx context.Context, logger log.Logger, cfg *Cfg, args Args, respCh <-chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], errCh chan error) error {
 	// Timer to log progress every 30 seconds
-	logTimer := time.NewTicker(30 * time.Second)
-	defer logTimer.Stop()
+	logTicker := time.NewTicker(30 * time.Second)
+	defer logTicker.Stop()
 
 	// Timer to check block presence every 20 milliseconds
 	presenceTicker := time.NewTicker(20 * time.Millisecond)
@@ -159,7 +159,6 @@ func listenToIncomingBlocksUntilANewBlockIsReceived(ctx context.Context, logger 
 
 	// Map to keep track of seen block roots
 	seenBlockRoots := make(map[common.Hash]struct{})
-
 MainLoop:
 	for {
 		select {
@@ -198,21 +197,21 @@ MainLoop:
 					continue
 				}
 
-				// Mark the block root as seen
-				seenBlockRoots[blockRoot] = struct{}{}
-
 				// Process the block
 				if err := processBlock(ctx, cfg, cfg.indiciesDB, block, true, true, true); err != nil {
-					log.Debug("bad blocks segment received", "err", err)
+					log.Debug("bad blocks segment received", "err", err, "blockSlot", block.Block.Slot)
 					continue
 				}
+
+				// Mark the block root as seen
+				seenBlockRoots[blockRoot] = struct{}{}
 
 				// Check if the block slot is greater than or equal to the target slot
 				if block.Block.Slot >= args.targetSlot {
 					break MainLoop
 				}
 			}
-		case <-logTimer.C:
+		case <-logTicker.C:
 			// Log progress periodically
 			logger.Info("[Caplin] Progress", "progress", cfg.forkChoice.HighestSeen(), "from", args.seenSlot, "to", args.targetSlot)
 		}
@@ -227,9 +226,11 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 	// If the execution engine is not ready, wait for it to be ready.
 	ready, err := waitForExecutionEngineToBeFinished(ctx, cfg)
 	if err != nil {
+		log.Warn("[chainTipSync] error waiting for execution engine to be ready", "err", err)
 		return err
 	}
 	if !ready {
+		log.Debug("[chainTipSync] execution engine is not ready yet")
 		return nil
 	}
 

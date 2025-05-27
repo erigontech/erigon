@@ -21,19 +21,16 @@ import (
 
 	"github.com/erigontech/erigon-lib/kv"
 
-	"github.com/erigontech/erigon/common/paths"
+	"github.com/erigontech/erigon-lib/common/paths"
 )
 
 var (
-	datadirCli      string
-	chaindata       string
-	statsfile       string
-	block           uint64
-	changeSetBucket string
-	indexBucket     string
-	snapshotsCli    bool
-	chain           string
-	logdir          string
+	datadirCli  string
+	chaindata   string
+	statsfile   string
+	block       uint64
+	indexBucket string
+	chain       string
 )
 
 func must(err error) {
@@ -59,14 +56,6 @@ func withStatsfile(cmd *cobra.Command) {
 	must(cmd.MarkFlagFilename("statsfile", "csv"))
 }
 
-func withCSBucket(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&changeSetBucket, "changeset-bucket", kv.AccountChangeSet, kv.AccountChangeSet+" for account and "+kv.StorageChangeSet+" for storage")
-}
-
 func withIndexBucket(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&indexBucket, "index-bucket", kv.E2AccountsHistory, kv.E2AccountsHistory+" for account and "+kv.E2StorageHistory+" for storage")
-}
-
-func withChain(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&chain, "chain", "", "pick a chain to assume (mainnet, sepolia, etc.)")
 }

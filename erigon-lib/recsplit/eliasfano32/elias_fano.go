@@ -18,7 +18,6 @@ package eliasfano32
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -26,7 +25,9 @@ import (
 	"sort"
 	"unsafe"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/common/bitutil"
+	"github.com/erigontech/erigon-lib/kv/stream"
 )
 
 // EliasFano algo overview https://www.antoniomallia.it/sorted-integers-compression-with-elias-fano-encoding.html
@@ -43,8 +44,6 @@ const (
 	qPerSuperQ uint64 = superQ / q       // 64
 	superQSize uint64 = 1 + qPerSuperQ/2 // 1 + 64/2 = 33
 )
-
-var ErrEliasFanoIterExhausted = errors.New("elias fano iterator exhausted")
 
 // EliasFano can be used to encode one monotone sequence
 type EliasFano struct {
@@ -74,6 +73,8 @@ func NewEliasFano(count uint64, maxOffset uint64) *EliasFano {
 	ef.wordsUpperBits = ef.deriveFields()
 	return ef
 }
+
+func (ef *EliasFano) Size() datasize.ByteSize { return datasize.ByteSize(len(ef.data) * 8) }
 
 func (ef *EliasFano) AddOffset(offset uint64) {
 	//fmt.Printf("0x%x,\n", offset)
@@ -225,11 +226,9 @@ func (ef *EliasFano) upper(i uint64) uint64 {
 	return currWord*64 + uint64(sel) - i
 }
 
-// TODO: optimize me - to avoid object allocation
 func Seek(data []byte, n uint64) (uint64, bool) {
-	ef, _ := ReadEliasFano(data)
-	//TODO: if startTxNum==0, can do ef.Get(0)
-	return ef.Search(n)
+	ef, _ := ReadEliasFano(data) //for better perf: app-code can use ef.Reset(data).Seek(n)
+	return ef.Seek(n)
 }
 
 func (ef *EliasFano) search(v uint64, reverse bool) (nextV uint64, nextI uint64, ok bool) {
@@ -275,8 +274,8 @@ func (ef *EliasFano) search(v uint64, reverse bool) (nextV uint64, nextI uint64,
 	return 0, 0, false
 }
 
-// Search returns the value in the sequence, equal or greater than given value
-func (ef *EliasFano) Search(v uint64) (uint64, bool) {
+// Seek returns the value in the sequence, equal or greater than given value
+func (ef *EliasFano) Seek(v uint64) (uint64, bool) {
 	n, _, ok := ef.search(v, false /* reverse */)
 	return n, ok
 }
@@ -486,7 +485,7 @@ func (efi *EliasFanoIter) decrement() {
 
 func (efi *EliasFanoIter) Next() (uint64, error) {
 	if !efi.HasNext() {
-		return 0, ErrEliasFanoIterExhausted
+		return 0, stream.ErrIteratorExhausted
 	}
 	idx64, shift := efi.lowerIdx/64, efi.lowerIdx%64
 	lower := efi.lowerBits[idx64] >> shift
@@ -540,12 +539,13 @@ func ReadEliasFano(r []byte) (*EliasFano, int) {
 }
 
 // Reset - like ReadEliasFano, but for existing object
-func (ef *EliasFano) Reset(r []byte) {
+func (ef *EliasFano) Reset(r []byte) *EliasFano {
 	ef.count = binary.BigEndian.Uint64(r[:8])
 	ef.u = binary.BigEndian.Uint64(r[8:16])
 	ef.data = unsafe.Slice((*uint64)(unsafe.Pointer(&r[16])), (len(r)-16)/uint64Size)
 	ef.maxOffset = ef.u - 1
 	ef.deriveFields()
+	return ef
 }
 
 func Max(r []byte) uint64   { return binary.BigEndian.Uint64(r[8:16]) - 1 }

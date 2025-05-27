@@ -28,11 +28,11 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 
@@ -185,7 +185,7 @@ func ValidateBorEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB
 		event := word[length.Hash+length.BlockNum+8:]
 
 		recordId := EventId(event)
-
+		log.Trace("validating event", "id", eventId)
 		if recordId != eventId {
 			if failFast {
 				return prevEventId, fmt.Errorf("invalid event id %d in block %d: expected: %d", recordId, block, eventId)
@@ -257,7 +257,7 @@ func ValidateBorEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB
 }
 
 func RemoteEventCheckForBlock(header *types.Header, previousHeader *types.Header, chainId string, startEventId uint64, events []rlp.RawValue,
-	heimdallClient HeimdallClient, config *borcfg.BorConfig, logger log.Logger) error {
+	heimdallClient Client, config *borcfg.BorConfig, logger log.Logger) error {
 
 	blockNum := header.Number.Uint64()
 

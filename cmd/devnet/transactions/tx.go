@@ -22,21 +22,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon-lib/chain/params"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
 	"github.com/erigontech/erigon/cmd/devnet/blocks"
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
 	"github.com/erigontech/erigon/cmd/devnet/devnetutils"
 	"github.com/erigontech/erigon/cmd/devnet/scenarios"
 	"github.com/erigontech/erigon/rpc"
-
-	"github.com/holiman/uint256"
-
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/params"
 )
 
 func init() {
@@ -75,7 +72,7 @@ func CheckTxPoolContent(ctx context.Context, expectedPendingSize, expectedQueued
 	logger.Info("Subpool sizes", "pending", pendingSize, "queued", queuedSize, "basefee", baseFeeSize)
 }
 
-func Transfer(ctx context.Context, toAddr, fromAddr string, value uint64, wait bool) (libcommon.Hash, error) {
+func Transfer(ctx context.Context, toAddr, fromAddr string, value uint64, wait bool) (common.Hash, error) {
 	logger := devnet.Logger(ctx)
 
 	node := devnet.SelectNode(ctx)
@@ -85,7 +82,7 @@ func Transfer(ctx context.Context, toAddr, fromAddr string, value uint64, wait b
 
 	if err != nil {
 		logger.Error("failed to create a transaction", "error", err)
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 
 	logger.Info("Sending tx", "value", value, "to", toAddr, "from", fromAddr, "tx", signedTx.Hash())
@@ -95,19 +92,19 @@ func Transfer(ctx context.Context, toAddr, fromAddr string, value uint64, wait b
 
 	if err != nil {
 		logger.Error("failed to send transaction", "error", err)
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 
 	if wait {
 		if _, err = AwaitTransactions(ctx, hash); err != nil {
-			return libcommon.Hash{}, fmt.Errorf("failed to call contract tx: %v", err)
+			return common.Hash{}, fmt.Errorf("failed to call contract tx: %v", err)
 		}
 	}
 
 	return hash, nil
 }
 
-func SendTxWithDynamicFee(ctx context.Context, to, from string, amount uint64) ([]libcommon.Hash, error) {
+func SendTxWithDynamicFee(ctx context.Context, to, from string, amount uint64) ([]common.Hash, error) {
 	// get the latest nonce for the next transaction
 	logger := devnet.Logger(ctx)
 
@@ -160,7 +157,7 @@ func SendTxLoad(ctx context.Context, to, from string, amount uint64, txPerSec ui
 		tx, err := CreateManyEIP1559TransactionsHigherThanBaseFee(ctx, to, from, int(batchCount))
 
 		if err != nil {
-			logger.Error("failed Create Txs", "error", err)
+			logger.Error("failed Create Txns", "error", err)
 			return err
 		}
 
@@ -216,8 +213,8 @@ func AwaitBlocks(ctx context.Context, sleepTime time.Duration) error {
 const gasPrice = 912_345_678
 
 func CreateManyEIP1559TransactionsRefWithBaseFee(ctx context.Context, to, from string, logger log.Logger) ([]types.Transaction, []types.Transaction, error) {
-	toAddress := libcommon.HexToAddress(to)
-	fromAddress := libcommon.HexToAddress(from)
+	toAddress := common.HexToAddress(to)
+	fromAddress := common.HexToAddress(from)
 
 	baseFeePerGas, err := blocks.BaseFeeFromBlock(ctx)
 
@@ -237,8 +234,8 @@ func CreateManyEIP1559TransactionsRefWithBaseFee(ctx context.Context, to, from s
 }
 
 func CreateManyEIP1559TransactionsRefWithBaseFee2(ctx context.Context, to, from string, count int) ([]types.Transaction, []types.Transaction, error) {
-	toAddress := libcommon.HexToAddress(to)
-	fromAddress := libcommon.HexToAddress(from)
+	toAddress := common.HexToAddress(to)
+	fromAddress := common.HexToAddress(from)
 
 	baseFeePerGas, err := blocks.BaseFeeFromBlock(ctx)
 	if err != nil {
@@ -260,8 +257,8 @@ func CreateManyEIP1559TransactionsRefWithBaseFee2(ctx context.Context, to, from 
 }
 
 func CreateManyEIP1559TransactionsHigherThanBaseFee(ctx context.Context, to, from string, count int) ([]types.Transaction, error) {
-	toAddress := libcommon.HexToAddress(to)
-	fromAddress := libcommon.HexToAddress(from)
+	toAddress := common.HexToAddress(to)
+	fromAddress := common.HexToAddress(from)
 
 	baseFeePerGas, err := blocks.BaseFeeFromBlock(ctx)
 
@@ -287,16 +284,16 @@ func CreateManyEIP1559TransactionsHigherThanBaseFee(ctx context.Context, to, fro
 }
 
 // createNonContractTx returns a signed transaction and the recipient address
-func CreateTransaction(node devnet.Node, to, from string, value uint64) (types.Transaction, libcommon.Address, error) {
+func CreateTransaction(node devnet.Node, to, from string, value uint64) (types.Transaction, common.Address, error) {
 	toAccount := accounts.GetAccount(to)
 
-	var toAddress libcommon.Address
+	var toAddress common.Address
 
 	if toAccount == nil {
 		if strings.HasPrefix(to, "0x") {
-			toAddress = libcommon.HexToAddress(from)
+			toAddress = common.HexToAddress(from)
 		} else {
-			return nil, libcommon.Address{}, fmt.Errorf("unknown to account: %s", to)
+			return nil, common.Address{}, fmt.Errorf("unknown to account: %s", to)
 		}
 	} else {
 		toAddress = toAccount.Address
@@ -305,13 +302,13 @@ func CreateTransaction(node devnet.Node, to, from string, value uint64) (types.T
 	fromAccount := accounts.GetAccount(from)
 
 	if fromAccount == nil {
-		return nil, libcommon.Address{}, fmt.Errorf("unknown from account: %s", from)
+		return nil, common.Address{}, fmt.Errorf("unknown from account: %s", from)
 	}
 
 	res, err := node.GetTransactionCount(fromAccount.Address, rpc.PendingBlock)
 
 	if err != nil {
-		return nil, libcommon.Address{}, fmt.Errorf("failed to get transaction count for address 0x%x: %v", fromAccount.Address, err)
+		return nil, common.Address{}, fmt.Errorf("failed to get transaction count for address 0x%x: %v", fromAccount.Address, err)
 	}
 
 	// create a new transaction using the parameters to send
@@ -321,13 +318,13 @@ func CreateTransaction(node devnet.Node, to, from string, value uint64) (types.T
 	signedTx, err := types.SignTx(transaction, *types.LatestSignerForChainID(node.ChainID()), fromAccount.SigKey())
 
 	if err != nil {
-		return nil, libcommon.Address{}, fmt.Errorf("failed to sign non-contract transaction: %v", err)
+		return nil, common.Address{}, fmt.Errorf("failed to sign non-contract transaction: %v", err)
 	}
 
 	return signedTx, toAddress, nil
 }
 
-func signEIP1559TxsLowerAndHigherThanBaseFee2(ctx context.Context, amountLower, amountHigher int, baseFeePerGas uint64, toAddress libcommon.Address, fromAddress libcommon.Address) ([]types.Transaction, []types.Transaction, error) {
+func signEIP1559TxsLowerAndHigherThanBaseFee2(ctx context.Context, amountLower, amountHigher int, baseFeePerGas uint64, toAddress common.Address, fromAddress common.Address) ([]types.Transaction, []types.Transaction, error) {
 	node := devnet.SelectNode(ctx)
 
 	res, err := node.GetTransactionCount(fromAddress, rpc.PendingBlock)
@@ -354,7 +351,7 @@ func signEIP1559TxsLowerAndHigherThanBaseFee2(ctx context.Context, amountLower, 
 }
 
 // signEIP1559TxsLowerThanBaseFee creates n number of transactions with gasFeeCap lower than baseFeePerGas
-func signEIP1559TxsLowerThanBaseFee(ctx context.Context, n int, baseFeePerGas uint64, nonce *uint64, toAddress, fromAddress libcommon.Address) ([]types.Transaction, error) {
+func signEIP1559TxsLowerThanBaseFee(ctx context.Context, n int, baseFeePerGas uint64, nonce *uint64, toAddress, fromAddress common.Address) ([]types.Transaction, error) {
 	var signedTransactions []types.Transaction
 
 	var (
@@ -397,7 +394,7 @@ func signEIP1559TxsLowerThanBaseFee(ctx context.Context, n int, baseFeePerGas ui
 }
 
 // signEIP1559TxsHigherThanBaseFee creates amount number of transactions with gasFeeCap higher than baseFeePerGas
-func signEIP1559TxsHigherThanBaseFee(ctx context.Context, n int, baseFeePerGas uint64, nonce *uint64, toAddress, fromAddress libcommon.Address) ([]types.Transaction, error) {
+func signEIP1559TxsHigherThanBaseFee(ctx context.Context, n int, baseFeePerGas uint64, nonce *uint64, toAddress, fromAddress common.Address) ([]types.Transaction, error) {
 	var signedTransactions []types.Transaction
 
 	var (
@@ -441,11 +438,11 @@ func signEIP1559TxsHigherThanBaseFee(ctx context.Context, n int, baseFeePerGas u
 	return signedTransactions, nil
 }
 
-func SendManyTransactions(ctx context.Context, signedTransactions []types.Transaction) ([]libcommon.Hash, error) {
+func SendManyTransactions(ctx context.Context, signedTransactions []types.Transaction) ([]common.Hash, error) {
 	logger := devnet.Logger(ctx)
 
 	logger.Info(fmt.Sprintf("Sending %d transactions to the txpool...", len(signedTransactions)))
-	hashes := make([]libcommon.Hash, len(signedTransactions))
+	hashes := make([]common.Hash, len(signedTransactions))
 
 	for idx, txn := range signedTransactions {
 		hash, err := devnet.SelectNode(ctx).SendTransaction(txn)

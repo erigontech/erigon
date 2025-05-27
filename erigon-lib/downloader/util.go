@@ -19,11 +19,11 @@ package downloader
 import (
 	"bytes"
 	"context"
-	"crypto/sha1"
+
+	//nolint:gosec
 	"errors"
 	"fmt"
-	"io"
-	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -36,7 +36,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
-	common2 "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	dir2 "github.com/erigontech/erigon-lib/common/dir"
@@ -77,10 +77,20 @@ func seedableSegmentFiles(dir string, chainName string, skipSeedableCheck bool) 
 		return nil, err
 	}
 
+	segConfig := snapcfg.KnownCfg(chainName)
+
 	res := make([]string, 0, len(files))
 	for _, fPath := range files {
-
 		_, name := filepath.Split(fPath)
+		// A bit hacky but whatever... basically caplin is incompatible with enums.
+		if strings.HasSuffix(fPath, path.Join("caplin", name)) {
+			res = append(res, path.Join("caplin", name))
+			continue
+		}
+		if strings.HasPrefix(name, "salt") && strings.HasSuffix(name, "txt") {
+			res = append(res, name)
+			continue
+		}
 		if !skipSeedableCheck && !snaptype.IsCorrectFileName(name) {
 			continue
 		}
@@ -88,7 +98,7 @@ func seedableSegmentFiles(dir string, chainName string, skipSeedableCheck bool) 
 		if !skipSeedableCheck && (!ok || isStateFile) {
 			continue
 		}
-		if !skipSeedableCheck && !snapcfg.Seedable(chainName, ff) {
+		if !skipSeedableCheck && !segConfig.Seedable(ff) {
 			continue
 		}
 		res = append(res, name)
@@ -268,7 +278,11 @@ func AllTorrentPaths(dirs datadir.Dirs) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	files = append(append(append(append(files, l1...), l2...), l3...), l4...)
+	l5, err := dir2.ListFiles(dirs.SnapCaplin, ".torrent")
+	if err != nil {
+		return nil, err
+	}
+	files = append(append(append(append(append(files, l1...), l2...), l3...), l4...), l5...)
 	return files, nil
 }
 
@@ -443,7 +457,7 @@ func readPeerID(db kv.RoDB) (peerID []byte, err error) {
 		if err != nil {
 			return fmt.Errorf("get peer id: %w", err)
 		}
-		peerID = common2.Copy(peerIDFromDB)
+		peerID = common.Copy(peerIDFromDB)
 		return nil
 	}); err != nil {
 		return nil, err
@@ -502,41 +516,4 @@ func ScheduleVerifyFile(ctx context.Context, t *torrent.Torrent, completePieces 
 			}
 		}
 	}
-}
-
-func VerifyFileFailFast(ctx context.Context, t *torrent.Torrent, root string, completePieces *atomic.Uint64) error {
-	info := t.Info()
-	file := info.UpvertedFiles()[0]
-	fPath := filepath.Join(append([]string{root, info.Name}, file.Path...)...)
-	f, err := os.Open(fPath)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err != nil {
-			f.Close()
-		}
-	}()
-
-	hasher := sha1.New()
-	for i := 0; i < info.NumPieces(); i++ {
-		p := info.Piece(i)
-		hasher.Reset()
-		_, err := io.Copy(hasher, io.NewSectionReader(f, p.Offset(), p.Length()))
-		if err != nil {
-			return err
-		}
-		good := bytes.Equal(hasher.Sum(nil), p.Hash().Bytes())
-		if !good {
-			return fmt.Errorf("hash mismatch at piece %d, file: %s", i, t.Name())
-		}
-
-		completePieces.Add(1)
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-	}
-	return nil
 }

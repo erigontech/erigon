@@ -18,51 +18,57 @@ package heimdall
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common"
 	commonerrors "github.com/erigontech/erigon-lib/common/errors"
 	"github.com/erigontech/erigon-lib/common/generics"
+	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
-type scraper[TEntity Entity] struct {
+type Scraper[TEntity Entity] struct {
+	name            string
 	store           EntityStore[TEntity]
 	fetcher         entityFetcher[TEntity]
 	pollDelay       time.Duration
-	observers       *polygoncommon.Observers[[]TEntity]
-	syncEvent       *polygoncommon.EventNotifier
+	observers       *event.Observers[[]TEntity]
+	syncEvent       *event.Notifier
 	transientErrors []error
 	logger          log.Logger
 }
 
-func newScraper[TEntity Entity](
+func NewScraper[TEntity Entity](
+	name string,
 	store EntityStore[TEntity],
 	fetcher entityFetcher[TEntity],
 	pollDelay time.Duration,
 	transientErrors []error,
 	logger log.Logger,
-) *scraper[TEntity] {
-	return &scraper[TEntity]{
+) *Scraper[TEntity] {
+	return &Scraper[TEntity]{
+		name:            name,
 		store:           store,
 		fetcher:         fetcher,
 		pollDelay:       pollDelay,
-		observers:       polygoncommon.NewObservers[[]TEntity](),
-		syncEvent:       polygoncommon.NewEventNotifier(),
+		observers:       event.NewObservers[[]TEntity](),
+		syncEvent:       event.NewNotifier(),
 		transientErrors: transientErrors,
 		logger:          logger,
 	}
 }
 
-func (s *scraper[TEntity]) Run(ctx context.Context) error {
+func (s *Scraper[TEntity]) Run(ctx context.Context) error {
+	s.logger.Info(heimdallLogPrefix("running scraper component"), "name", s.name)
+
 	defer s.store.Close()
 	if err := s.store.Prepare(ctx); err != nil {
 		return err
 	}
+
+	progressLogTicker := time.NewTicker(30 * time.Second)
+	defer progressLogTicker.Stop()
 
 	for ctx.Err() == nil {
 		lastKnownId, hasLastKnownId, err := s.store.LastEntityId(ctx)
@@ -86,7 +92,7 @@ func (s *scraper[TEntity]) Run(ctx context.Context) error {
 
 		if idRange.Start > idRange.End {
 			s.syncEvent.SetAndBroadcast()
-			if err := libcommon.Sleep(ctx, s.pollDelay); err != nil {
+			if err := common.Sleep(ctx, s.pollDelay); err != nil {
 				s.syncEvent.Reset()
 				return err
 			}
@@ -116,27 +122,36 @@ func (s *scraper[TEntity]) Run(ctx context.Context) error {
 			}
 
 			s.observers.NotifySync(entities) // NotifySync preserves order of events
+
+			select {
+			case <-progressLogTicker.C:
+				if len(entities) > 0 {
+					s.logger.Info(
+						heimdallLogPrefix("scraper periodic progress"),
+						"name", s.name,
+						"rangeStart", idRange.Start,
+						"rangeEnd", idRange.End,
+						"priorLastKnownId", lastKnownId,
+						"newLast", entities[len(entities)-1].RawId(),
+					)
+				}
+			default:
+				// carry on
+			}
 		}
 	}
+
 	return ctx.Err()
 }
 
-func (s *scraper[TEntity]) RegisterObserver(observer func([]TEntity)) polygoncommon.UnregisterFunc {
+func (s *Scraper[TEntity]) RegisterObserver(observer func([]TEntity)) event.UnregisterFunc {
 	return s.observers.Register(observer)
 }
 
-func (s *scraper[TEntity]) Synchronize(ctx context.Context) (TEntity, error) {
+func (s *Scraper[TEntity]) Synchronize(ctx context.Context) (TEntity, bool, error) {
 	if err := s.syncEvent.Wait(ctx); err != nil {
-		return generics.Zero[TEntity](), err
+		return generics.Zero[TEntity](), false, err
 	}
 
-	last, ok, err := s.store.LastEntity(ctx)
-	if err != nil {
-		return generics.Zero[TEntity](), err
-	}
-	if !ok {
-		return generics.Zero[TEntity](), errors.New("unexpected last entity not available")
-	}
-
-	return last, nil
+	return s.store.LastEntity(ctx)
 }

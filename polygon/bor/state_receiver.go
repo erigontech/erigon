@@ -17,9 +17,9 @@
 package bor
 
 import (
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/rlp"
+	common "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/execution/consensus"
 )
 
 //go:generate mockgen -typed=true -destination=./state_receiver_mock.go -package=bor . StateReceiver
@@ -28,10 +28,10 @@ type StateReceiver interface {
 }
 
 type ChainStateReceiver struct {
-	contractAddress libcommon.Address
+	contractAddress common.Address
 }
 
-func NewStateReceiver(contractAddress libcommon.Address) *ChainStateReceiver {
+func NewStateReceiver(contractAddress common.Address) *ChainStateReceiver {
 	return &ChainStateReceiver{
 		contractAddress: contractAddress,
 	}

@@ -35,22 +35,22 @@ type BlockService Service[*cltypes.SignedBeaconBlock]
 type BlobSidecarsService Service[*cltypes.BlobSidecar]
 
 //go:generate mockgen -typed=true -destination=./mock_services/sync_committee_messages_service_mock.go -package=mock_services . SyncCommitteeMessagesService
-type SyncCommitteeMessagesService Service[*cltypes.SyncCommitteeMessage]
+type SyncCommitteeMessagesService Service[*SyncCommitteeMessageForGossip]
 
 //go:generate mockgen -typed=true -destination=./mock_services/sync_contribution_service_mock.go -package=mock_services . SyncContributionService
-type SyncContributionService Service[*cltypes.SignedContributionAndProof]
+type SyncContributionService Service[*SignedContributionAndProofForGossip]
 
 //go:generate mockgen -typed=true -destination=./mock_services/aggregate_and_proof_service_mock.go -package=mock_services . AggregateAndProofService
-type AggregateAndProofService Service[*cltypes.SignedAggregateAndProofData]
+type AggregateAndProofService Service[*SignedAggregateAndProofForGossip]
 
 //go:generate mockgen -typed=true -destination=./mock_services/attestation_service_mock.go -package=mock_services . AttestationService
-type AttestationService Service[*AttestationWithGossipData]
+type AttestationService Service[*AttestationForGossip]
 
 //go:generate mockgen -typed=true -destination=./mock_services/voluntary_exit_service_mock.go -package=mock_services . VoluntaryExitService
-type VoluntaryExitService Service[*cltypes.SignedVoluntaryExit]
+type VoluntaryExitService Service[*SignedVoluntaryExitForGossip]
 
 //go:generate mockgen -typed=true -destination=./mock_services/bls_to_execution_change_service_mock.go -package=mock_services . BLSToExecutionChangeService
-type BLSToExecutionChangeService Service[*cltypes.SignedBLSToExecutionChangeWithGossipData]
+type BLSToExecutionChangeService Service[*SignedBLSToExecutionChangeForGossip]
 
 //go:generate mockgen -typed=true -destination=./mock_services/proposer_slashing_service_mock.go -package=mock_services . ProposerSlashingService
 type ProposerSlashingService Service[*cltypes.ProposerSlashing]

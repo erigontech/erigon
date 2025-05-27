@@ -1,4 +1,4 @@
-name: Consensus specification tests
+name: Consensus spec
 on:
   push:
     branches:
@@ -13,20 +13,20 @@ on:
       - reopened
       - synchronize
       - ready_for_review
-
+    
 jobs:
   tests:
     strategy:
       matrix:
-        #        disable macos-11 until https://github.com/erigontech/erigon/issues/8789
-        os: [ ubuntu-22.04 ] # list of os: https://github.com/actions/virtual-environments
+        #        disable macos-15 until https://github.com/erigontech/erigon/issues/8789
+        os: [ ubuntu-24.04 ] # list of os: https://github.com/actions/virtual-environments
     runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.24'
           cache: ${{ contains(fromJSON('[
             "refs/heads/release/2.60",
             "refs/heads/release/2.61",
@@ -43,14 +43,14 @@ jobs:
   tests-windows:
     strategy:
       matrix:
-        os: [ windows-2022 ]
+        os: [ windows-2025 ]
     runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.24'
           cache: ${{ contains(fromJSON('[
             "refs/heads/release/2.60",
             "refs/heads/release/2.61",
@@ -66,7 +66,6 @@ jobs:
       - name: Install dependencies
         run: |
           choco upgrade mingw -y --no-progress --version 13.2.0
-          choco install cmake -y --no-progress --version 3.27.8
 
       - name: test-integration-caplin
         run: cd ./cl/spectest/ && .\wmake.ps1 Tests Mainnet

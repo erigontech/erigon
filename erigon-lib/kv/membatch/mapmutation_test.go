@@ -30,7 +30,7 @@ import (
 )
 
 func TestMapmutation_Flush_Close(t *testing.T) {
-	db := memdb.NewTestDB(t)
+	db := memdb.NewTestDB(t, kv.ChainDB)
 
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
@@ -40,16 +40,16 @@ func TestMapmutation_Flush_Close(t *testing.T) {
 	defer func() {
 		batch.Close()
 	}()
-	assert.Equal(t, batch.size, 0)
+	assert.Zero(t, batch.size)
 	err = batch.Put(kv.ChaindataTables[0], []byte{1}, []byte{1})
 	require.NoError(t, err)
-	assert.Equal(t, batch.size, 2)
+	assert.Equal(t, 2, batch.size)
 	err = batch.Put(kv.ChaindataTables[0], []byte{2}, []byte{2})
 	require.NoError(t, err)
-	assert.Equal(t, batch.size, 4)
+	assert.Equal(t, 4, batch.size)
 	err = batch.Put(kv.ChaindataTables[0], []byte{1}, []byte{3, 2, 1, 0})
 	require.NoError(t, err)
-	assert.Equal(t, batch.size, 7)
+	assert.Equal(t, 7, batch.size)
 	err = batch.Flush(context.Background(), tx)
 	require.NoError(t, err)
 	batch.Close()

@@ -203,8 +203,8 @@ func (t *ethereumClockImpl) StateVersionByEpoch(epoch uint64) clparams.StateVers
 
 func (t *ethereumClockImpl) StateVersionByForkDigest(digest common.Bytes4) (clparams.StateVersion, error) {
 	var (
-		phase0ForkDigest, altairForkDigest, bellatrixForkDigest, capellaForkDigest, denebForkDigest common.Bytes4
-		err                                                                                         error
+		phase0ForkDigest, altairForkDigest, bellatrixForkDigest, capellaForkDigest, denebForkDigest, electraForkDigest common.Bytes4
+		err                                                                                                            error
 	)
 	phase0ForkDigest, err = t.ComputeForkDigestForVersion(utils.Uint32ToBytes4(uint32(t.beaconCfg.GenesisForkVersion)))
 	if err != nil {
@@ -230,6 +230,12 @@ func (t *ethereumClockImpl) StateVersionByForkDigest(digest common.Bytes4) (clpa
 	if err != nil {
 		return 0, err
 	}
+
+	electraForkDigest, err = t.ComputeForkDigestForVersion(utils.Uint32ToBytes4(uint32(t.beaconCfg.ElectraForkVersion)))
+	if err != nil {
+		return 0, err
+	}
+
 	switch digest {
 	case phase0ForkDigest:
 		return clparams.Phase0Version, nil
@@ -241,6 +247,8 @@ func (t *ethereumClockImpl) StateVersionByForkDigest(digest common.Bytes4) (clpa
 		return clparams.CapellaVersion, nil
 	case denebForkDigest:
 		return clparams.DenebVersion, nil
+	case electraForkDigest:
+		return clparams.ElectraVersion, nil
 	}
 	return 0, nil
 }

@@ -18,6 +18,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -26,11 +27,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/common"
 )
 
 func TestGetStateFork(t *testing.T) {
@@ -84,9 +85,9 @@ func TestGetStateFork(t *testing.T) {
 			// unmarshal the json
 			require.NoError(t, json.NewDecoder(resp.Body).Decode(&jsonVal))
 			data := jsonVal["data"].(map[string]interface{})
-			require.Equal(t, data["current_version"], "0x00000000")
-			require.Equal(t, data["previous_version"], "0x00000000")
-			require.Equal(t, data["epoch"], "0")
+			require.Equal(t, "0x00000000", data["current_version"])
+			require.Equal(t, "0x00000000", data["previous_version"])
+			require.Equal(t, "0", data["epoch"])
 		})
 	}
 }
@@ -159,6 +160,7 @@ func TestGetStateFullHistorical(t *testing.T) {
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 
+	fmt.Println("AX")
 	postRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
 
@@ -213,7 +215,32 @@ func TestGetStateFullHistorical(t *testing.T) {
 			require.NoError(t, err)
 			other := state.New(&clparams.MainnetBeaconConfig)
 			require.NoError(t, other.DecodeSSZ(out, int(clparams.Phase0Version)))
-
+			for i := 0; i < other.ValidatorLength(); i++ {
+				if other.ValidatorSet().Get(i).PublicKey() != postState.ValidatorSet().Get(i).PublicKey() {
+					fmt.Println("difference in validator", i, other.ValidatorSet().Get(i).PublicKey(), postState.ValidatorSet().Get(i).PublicKey())
+				}
+				if other.ValidatorSet().Get(i).WithdrawalCredentials() != postState.ValidatorSet().Get(i).WithdrawalCredentials() {
+					fmt.Println("difference in withdrawal", i, other.ValidatorSet().Get(i).WithdrawalCredentials(), postState.ValidatorSet().Get(i).WithdrawalCredentials())
+				}
+				if other.ValidatorSet().Get(i).EffectiveBalance() != postState.ValidatorSet().Get(i).EffectiveBalance() {
+					fmt.Println("difference in effective", i, other.ValidatorSet().Get(i).EffectiveBalance(), postState.ValidatorSet().Get(i).EffectiveBalance())
+				}
+				if other.ValidatorSet().Get(i).Slashed() != postState.ValidatorSet().Get(i).Slashed() {
+					fmt.Println("difference in slashed", i, other.ValidatorSet().Get(i).Slashed(), postState.ValidatorSet().Get(i).Slashed())
+				}
+				if other.ValidatorSet().Get(i).ActivationEligibilityEpoch() != postState.ValidatorSet().Get(i).ActivationEligibilityEpoch() {
+					fmt.Println("difference in activation", i, other.ValidatorSet().Get(i).ActivationEligibilityEpoch(), postState.ValidatorSet().Get(i).ActivationEligibilityEpoch())
+				}
+				if other.ValidatorSet().Get(i).ActivationEpoch() != postState.ValidatorSet().Get(i).ActivationEpoch() {
+					fmt.Println("difference in activation", i, other.ValidatorSet().Get(i).ActivationEpoch(), postState.ValidatorSet().Get(i).ActivationEpoch())
+				}
+				if other.ValidatorSet().Get(i).ExitEpoch() != postState.ValidatorSet().Get(i).ExitEpoch() {
+					fmt.Println("difference in exit", i, other.ValidatorSet().Get(i).ExitEpoch(), postState.ValidatorSet().Get(i).ExitEpoch())
+				}
+				if other.ValidatorSet().Get(i).WithdrawableEpoch() != postState.ValidatorSet().Get(i).WithdrawableEpoch() {
+					fmt.Println("difference in withdrawable", i, other.ValidatorSet().Get(i).WithdrawableEpoch(), postState.ValidatorSet().Get(i).WithdrawableEpoch())
+				}
+			}
 			otherRoot, err := other.HashSSZ()
 			require.NoError(t, err)
 			require.Equal(t, postRoot, otherRoot)
@@ -293,7 +320,7 @@ func TestGetStateFullForkchoice(t *testing.T) {
 func TestGetStateSyncCommittees(t *testing.T) {
 
 	// setupTestingHandler(t, clparams.Phase0Version)
-	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
+	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
 	postRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
@@ -350,7 +377,7 @@ func TestGetStateSyncCommittees(t *testing.T) {
 			// read the all of the octect
 			out, err := io.ReadAll(resp.Body)
 			require.NoError(t, err)
-			require.Equal(t, string(out), expected)
+			require.Equal(t, expected, string(out))
 		})
 	}
 }
@@ -358,7 +385,7 @@ func TestGetStateSyncCommittees(t *testing.T) {
 func TestGetStateSyncCommitteesHistorical(t *testing.T) {
 
 	// setupTestingHandler(t, clparams.Phase0Version)
-	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
+	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
 	postRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
@@ -408,7 +435,7 @@ func TestGetStateSyncCommitteesHistorical(t *testing.T) {
 			// read the all of the octect
 			out, err := io.ReadAll(resp.Body)
 			require.NoError(t, err)
-			require.Equal(t, string(out), expected)
+			require.Equal(t, expected, string(out))
 		})
 	}
 }
@@ -450,7 +477,7 @@ func TestGetStateFinalityCheckpoints(t *testing.T) {
 			code:    http.StatusOK,
 		},
 	}
-	expected := `{"data":{"finalized":{"epoch":"1","root":"0xde46b0f2ed5e72f0cec20246403b14c963ec995d7c2825f3532b0460c09d5693"},"current_justified":{"epoch":"3","root":"0xa6e47f164b1a3ca30ea3b2144bd14711de442f51e5b634750a12a1734e24c987"},"previous_justified":{"epoch":"2","root":"0x4c3ee7969e485696669498a88c17f70e6999c40603e2f4338869004392069063"}},"execution_optimistic":false,"finalized":false,"version":"bellatrix"}` + "\n"
+	expected := `{"data":{"finalized":{"epoch":"1","root":"0xde46b0f2ed5e72f0cec20246403b14c963ec995d7c2825f3532b0460c09d5693"},"current_justified":{"epoch":"3","root":"0xa6e47f164b1a3ca30ea3b2144bd14711de442f51e5b634750a12a1734e24c987"},"previous_justified":{"epoch":"2","root":"0x4c3ee7969e485696669498a88c17f70e6999c40603e2f4338869004392069063"}},"execution_optimistic":false,"finalized":false}` + "\n"
 	for _, c := range cases {
 		t.Run(c.blockID, func(t *testing.T) {
 			server := httptest.NewServer(handler.mux)
@@ -466,7 +493,7 @@ func TestGetStateFinalityCheckpoints(t *testing.T) {
 			// read the all of the octect
 			out, err := io.ReadAll(resp.Body)
 			require.NoError(t, err)
-			require.Equal(t, string(out), expected)
+			require.Equal(t, expected, string(out))
 		})
 	}
 }
@@ -523,7 +550,7 @@ func TestGetRandao(t *testing.T) {
 			// read the all of the octect
 			out, err := io.ReadAll(resp.Body)
 			require.NoError(t, err)
-			require.Equal(t, string(out), expected)
+			require.Equal(t, expected, string(out))
 		})
 	}
 }

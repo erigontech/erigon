@@ -24,7 +24,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon/eth/tracers/logger"
-	"github.com/erigontech/erigon/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon/rpc/ethapi"
 )
 
 // TraceConfig holds extra parameters to trace functions.

@@ -22,10 +22,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/wrap"
@@ -49,6 +49,7 @@ type Sync struct {
 	logPrefixes   []string
 	logger        log.Logger
 	stagesIdsList []string
+	mode          stages.Mode
 }
 
 type Timing struct {
@@ -207,7 +208,7 @@ func (s *Sync) SetCurrentStage(id stages.SyncStage) error {
 	return fmt.Errorf("stage not found with id: %v", id)
 }
 
-func New(cfg ethconfig.Sync, stagesList []*Stage, unwindOrder UnwindOrder, pruneOrder PruneOrder, logger log.Logger) *Sync {
+func New(cfg ethconfig.Sync, stagesList []*Stage, unwindOrder UnwindOrder, pruneOrder PruneOrder, logger log.Logger, mode stages.Mode) *Sync {
 	unwindStages := make([]*Stage, len(stagesList))
 	for i, stageIndex := range unwindOrder {
 		for _, s := range stagesList {
@@ -243,6 +244,7 @@ func New(cfg ethconfig.Sync, stagesList []*Stage, unwindOrder UnwindOrder, prune
 		logPrefixes:   logPrefixes,
 		logger:        logger,
 		stagesIdsList: stagesIdsList,
+		mode:          mode,
 	}
 }
 
@@ -325,7 +327,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, txc wrap.TxContainer) error {
 
 		if string(stage.ID) == dbg.StopBeforeStage() { // stop process for debugging reasons
 			s.logger.Warn("STOP_BEFORE_STAGE env flag forced to stop app")
-			return libcommon.ErrStopped
+			return common.ErrStopped
 		}
 
 		if stage.Disabled || stage.Forward == nil {
@@ -341,7 +343,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, txc wrap.TxContainer) error {
 
 		if string(stage.ID) == dbg.StopAfterStage() { // stop process for debugging reasons
 			s.logger.Warn("STOP_AFTER_STAGE env flag forced to stop app")
-			return libcommon.ErrStopped
+			return common.ErrStopped
 		}
 
 		if string(stage.ID) == s.cfg.BreakAfterStage { // break process loop
@@ -399,7 +401,7 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bo
 
 		if string(stage.ID) == dbg.StopBeforeStage() { // stop process for debugging reasons
 			s.logger.Warn("STOP_BEFORE_STAGE env flag forced to stop app")
-			return false, libcommon.ErrStopped
+			return false, common.ErrStopped
 		}
 
 		if stage.Disabled || stage.Forward == nil {
@@ -413,7 +415,7 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bo
 
 		if string(stage.ID) == dbg.StopAfterStage() { // stop process for debugging reasons
 			s.logger.Warn("STOP_AFTER_STAGE env flag forced to stop app")
-			return false, libcommon.ErrStopped
+			return false, common.ErrStopped
 		}
 
 		if string(stage.ID) == s.cfg.BreakAfterStage { // break process loop
@@ -500,17 +502,17 @@ func CollectTableSizes(db kv.RoDB, tx kv.Tx, buckets []string) []interface{} {
 		if err1 != nil {
 			return bucketSizes
 		}
-		bucketSizes = append(bucketSizes, bucket, libcommon.ByteCount(sz))
+		bucketSizes = append(bucketSizes, bucket, common.ByteCount(sz))
 	}
 
 	sz, err1 := tx.BucketSize("freelist")
 	if err1 != nil {
 		return bucketSizes
 	}
-	bucketSizes = append(bucketSizes, "FreeList", libcommon.ByteCount(sz))
+	bucketSizes = append(bucketSizes, "FreeList", common.ByteCount(sz))
 	amountOfFreePagesInDb := sz / 4 // page_id encoded as bigEndian_u32
 	if db != nil {
-		bucketSizes = append(bucketSizes, "ReclaimableSpace", libcommon.ByteCount(amountOfFreePagesInDb*db.PageSize()))
+		bucketSizes = append(bucketSizes, "ReclaimableSpace", common.ByteCount(amountOfFreePagesInDb*db.PageSize().Bytes()))
 	}
 
 	return bucketSizes
@@ -518,6 +520,7 @@ func CollectTableSizes(db kv.RoDB, tx kv.Tx, buckets []string) []interface{} {
 
 func (s *Sync) runStage(stage *Stage, db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bool, badBlockUnwind bool) (err error) {
 	start := time.Now()
+	s.logger.Debug(fmt.Sprintf("[%s] Starting Stage run", s.LogPrefix()))
 	stageState, err := s.StageState(stage.ID, txc.Tx, db, initialCycle, firstCycle)
 	if err != nil {
 		return err

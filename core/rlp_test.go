@@ -27,21 +27,21 @@ import (
 
 	"golang.org/x/crypto/sha3"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/execution/consensus/ethash"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir string, logger log.Logger) *types.Block {
 	var (
-		aa = libcommon.HexToAddress("0x000000000000000000000000000000000000aaaa")
+		aa = common.HexToAddress("0x000000000000000000000000000000000000aaaa")
 		// Generate a canonical chain to act as the main dataset
 		engine = ethash.NewFaker()
 		// A sender who makes transactions, has some funds
@@ -49,7 +49,7 @@ func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir 
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
-			Config: params.TestChainConfig,
+			Config: chain.TestChainConfig,
 			Alloc:  types.GenesisAlloc{address: {Balance: funds}},
 		}
 	)
@@ -58,7 +58,7 @@ func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir 
 	db := m.DB
 
 	// We need to generate as many blocks +1 as uncles
-	chain, _ := core.GenerateChain(params.TestChainConfig, genesis, engine, db, uncles+1, func(n int, b *core.BlockGen) {
+	chain, _ := core.GenerateChain(chain.TestChainConfig, genesis, engine, db, uncles+1, func(n int, b *core.BlockGen) {
 		if n == uncles {
 			// Add transactions and stuff on the last block
 			for i := 0; i < transactions; i++ {
@@ -118,8 +118,8 @@ func testRlpIterator(t *testing.T, txs, uncles, datasize int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var gotHashes []libcommon.Hash
-	var expHashes []libcommon.Hash
+	var gotHashes []common.Hash
+	var expHashes []common.Hash
 	for txIt.Next() {
 		gotHashes = append(gotHashes, crypto.Keccak256Hash(txIt.Value()))
 	}
@@ -159,12 +159,12 @@ func BenchmarkHashing(b *testing.B) {
 		bodyRlp, _ = rlp.EncodeToBytes(block.Body())
 		blockRlp, _ = rlp.EncodeToBytes(block)
 	}
-	var got libcommon.Hash
+	var got common.Hash
 	var hasher = sha3.NewLegacyKeccak256()
 	b.Run("iteratorhashing", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			var hash libcommon.Hash
+			var hash common.Hash
 			it, err := rlp.NewListIterator(bodyRlp)
 			if err != nil {
 				b.Fatal(err)
@@ -183,7 +183,7 @@ func BenchmarkHashing(b *testing.B) {
 			}
 		}
 	})
-	var exp libcommon.Hash
+	var exp common.Hash
 	b.Run("fullbodyhashing", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {

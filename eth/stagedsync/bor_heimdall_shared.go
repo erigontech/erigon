@@ -23,10 +23,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -42,7 +41,7 @@ func FetchSpanZeroForMiningIfNeeded(
 	ctx context.Context,
 	db kv.RwDB,
 	blockReader services.FullBlockReader,
-	heimdallClient heimdall.HeimdallClient,
+	heimdallClient heimdall.Client,
 	heimdallStore heimdall.Store,
 	logger log.Logger,
 ) error {
@@ -106,7 +105,7 @@ func fetchAndWriteHeimdallSpan(
 	ctx context.Context,
 	spanID uint64,
 	tx kv.RwTx,
-	heimdallClient heimdall.HeimdallClient,
+	heimdallClient heimdall.Client,
 	heimdallStore heimdall.Store,
 	logPrefix string,
 	logger log.Logger,
@@ -201,7 +200,7 @@ func fetchAndWriteHeimdallCheckpoint(
 	ctx context.Context,
 	checkpointId uint64,
 	tx kv.RwTx,
-	heimdallClient heimdall.HeimdallClient,
+	heimdallClient heimdall.Client,
 	heimdallStore heimdall.Store,
 	logPrefix string,
 	logger log.Logger,
@@ -305,7 +304,7 @@ func fetchAndWriteHeimdallMilestone(
 	ctx context.Context,
 	milestoneId uint64,
 	tx kv.RwTx,
-	heimdallClient heimdall.HeimdallClient,
+	heimdallClient heimdall.Client,
 	heimdallStore heimdall.Store,
 	logPrefix string,
 	logger log.Logger,
@@ -332,7 +331,7 @@ func fetchRequiredHeimdallStateSyncEventsIfNeeded(
 	tx kv.RwTx,
 	borConfig *borcfg.BorConfig,
 	blockReader services.FullBlockReader,
-	heimdallClient heimdall.HeimdallClient,
+	heimdallClient heimdall.Client,
 	bridgeStore bridge.Store,
 	chainID string,
 	logPrefix string,
@@ -371,7 +370,7 @@ func fetchAndWriteHeimdallStateSyncEvents(
 	tx kv.RwTx,
 	config *borcfg.BorConfig,
 	blockReader services.FullBlockReader,
-	heimdallClient heimdall.HeimdallClient,
+	heimdallClient heimdall.Client,
 	bridgeStore bridge.Store,
 	chainID string,
 	logPrefix string,

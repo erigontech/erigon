@@ -204,10 +204,11 @@ func (d *DiagnosticClient) UpdateSnapshotStageStats(stats SyncStageStats, subSta
 	d.updateSnapshotStageStats(stats, subStageInfo)
 }
 
+// TODO: Rethink functionality of stages/substages
 func (d *DiagnosticClient) updateSnapshotStageStats(stats SyncStageStats, subStageInfo string) {
 	idxs := d.getCurrentSyncIdxs()
 	if idxs.Stage == -1 || idxs.SubStage == -1 {
-		log.Debug("[Diagnostics] Can't find running stage or substage while updating Snapshots stage stats.", "stages:", d.syncStages, "stats:", stats, "subStageInfo:", subStageInfo)
+		//log.Debug("[Diagnostics] Can't find running stage or substage while updating Snapshots stage stats.", "stages:", d.syncStages, "stats:", stats, "subStageInfo:", subStageInfo)
 		return
 	}
 

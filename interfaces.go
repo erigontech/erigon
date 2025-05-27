@@ -27,10 +27,8 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	types2 "github.com/erigontech/erigon-lib/types"
-
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 // NotFound is returned by API methods if the requested item does not exist.
@@ -59,12 +57,12 @@ type Subscription interface {
 //
 // The returned error is NotFound if the requested item does not exist.
 type ChainReader interface {
-	BlockByHash(ctx context.Context, hash libcommon.Hash) (*types.Block, error)
+	BlockByHash(ctx context.Context, hash common.Hash) (*types.Block, error)
 	BlockByNumber(ctx context.Context, number *big.Int) (*types.Block, error)
-	HeaderByHash(ctx context.Context, hash libcommon.Hash) (*types.Header, error)
+	HeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error)
 	HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error)
-	TransactionCount(ctx context.Context, blockHash libcommon.Hash) (uint, error)
-	TransactionInBlock(ctx context.Context, blockHash libcommon.Hash, index uint) (*types.Transaction, error)
+	TransactionCount(ctx context.Context, blockHash common.Hash) (uint, error)
+	TransactionInBlock(ctx context.Context, blockHash common.Hash, index uint) (*types.Transaction, error)
 
 	// This method subscribes to notifications about changes of the head block of
 	// the canonical chain.
@@ -85,21 +83,21 @@ type TransactionReader interface {
 	// blockchain. The isPending return value indicates whether the transaction has been
 	// mined yet. Note that the transaction may not be part of the canonical chain even if
 	// it's not pending.
-	TransactionByHash(ctx context.Context, txHash libcommon.Hash) (tx *types.Transaction, isPending bool, err error)
+	TransactionByHash(ctx context.Context, txHash common.Hash) (tx *types.Transaction, isPending bool, err error)
 	// TransactionReceipt returns the receipt of a mined transaction. Note that the
 	// transaction may not be included in the current canonical chain even if a receipt
 	// exists.
-	TransactionReceipt(ctx context.Context, txHash libcommon.Hash) (*types.Receipt, error)
+	TransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error)
 }
 
 // ChainStateReader wraps access to the state trie of the canonical blockchain. Note that
 // implementations of the interface may be unable to return state values for old blocks.
 // In many cases, using CallContract can be preferable to reading raw contract storage.
 type ChainStateReader interface {
-	BalanceAt(ctx context.Context, account libcommon.Address, blockNumber *big.Int) (*big.Int, error)
-	StorageAt(ctx context.Context, account libcommon.Address, key libcommon.Hash, blockNumber *big.Int) ([]byte, error)
-	CodeAt(ctx context.Context, account libcommon.Address, blockNumber *big.Int) ([]byte, error)
-	NonceAt(ctx context.Context, account libcommon.Address, blockNumber *big.Int) (uint64, error)
+	BalanceAt(ctx context.Context, account common.Address, blockNumber *big.Int) (*big.Int, error)
+	StorageAt(ctx context.Context, account common.Address, key common.Hash, blockNumber *big.Int) ([]byte, error)
+	CodeAt(ctx context.Context, account common.Address, blockNumber *big.Int) ([]byte, error)
+	NonceAt(ctx context.Context, account common.Address, blockNumber *big.Int) (uint64, error)
 }
 
 // SyncProgress gives progress indications when the node is synchronising with
@@ -120,19 +118,19 @@ type ChainSyncReader interface {
 
 // CallMsg contains parameters for contract calls.
 type CallMsg struct {
-	From             libcommon.Address  // the sender of the 'transaction'
-	To               *libcommon.Address // the destination contract (nil for contract creation)
-	Gas              uint64             // if 0, the call executes with near-infinite gas
-	MaxFeePerBlobGas *uint256.Int       // EIP-4844 max_fee_per_blob_gas
-	GasPrice         *uint256.Int       // wei <-> gas exchange ratio
-	Value            *uint256.Int       // amount of wei sent along with the call
-	Data             []byte             // input data, usually an ABI-encoded contract method invocation
+	From             common.Address  // the sender of the 'transaction'
+	To               *common.Address // the destination contract (nil for contract creation)
+	Gas              uint64          // if 0, the call executes with near-infinite gas
+	MaxFeePerBlobGas *uint256.Int    // EIP-4844 max_fee_per_blob_gas
+	GasPrice         *uint256.Int    // wei <-> gas exchange ratio
+	Value            *uint256.Int    // amount of wei sent along with the call
+	Data             []byte          // input data, usually an ABI-encoded contract method invocation
 
-	FeeCap         *uint256.Int          // EIP-1559 fee cap per gas.
-	Tip            *uint256.Int          // EIP-1559 tip per gas.
-	AccessList     types2.AccessList     // EIP-2930 access list.
-	BlobHashes     []libcommon.Hash      // EIP-4844 versioned blob hashes.
-	Authorizations []types.Authorization // EIP-3074 authorizations.
+	FeeCap         *uint256.Int          // EIP-1559 max_fee_per_gas
+	TipCap         *uint256.Int          // EIP-1559 max_priority_fee_per_gas
+	AccessList     types.AccessList      // EIP-2930 access list
+	BlobHashes     []common.Hash         // EIP-4844 versioned blob hashes
+	Authorizations []types.Authorization // EIP-3074 authorizations
 }
 
 // A ContractCaller provides contract calls, essentially transactions that are executed by
@@ -145,10 +143,10 @@ type ContractCaller interface {
 
 // FilterQuery contains options for contract log filtering.
 type FilterQuery struct {
-	BlockHash *libcommon.Hash     // used by eth_getLogs, return logs only from block with this hash
-	FromBlock *big.Int            // beginning of the queried range, nil means genesis block
-	ToBlock   *big.Int            // end of the range, nil means latest block
-	Addresses []libcommon.Address // restricts matches to events created by specific contracts
+	BlockHash *common.Hash     // used by eth_getLogs, return logs only from block with this hash
+	FromBlock *big.Int         // beginning of the queried range, nil means genesis block
+	ToBlock   *big.Int         // end of the range, nil means latest block
+	Addresses []common.Address // restricts matches to events created by specific contracts
 
 	// The Topic list restricts matches to particular event topics. Each event has a list
 	// of topics. Topics matches a prefix of that list. An empty element slice matches any
@@ -161,7 +159,7 @@ type FilterQuery struct {
 	// {{}, {B}}          matches any topic in first position AND B in second position
 	// {{A}, {B}}         matches topic A in first position AND B in second position
 	// {{A, B}, {C, D}}   matches topic (A OR B) in first position AND (C OR D) in second position
-	Topics [][]libcommon.Hash
+	Topics [][]common.Hash
 }
 
 // LogFilterer provides access to contract log events using a one-off query or continuous
@@ -198,10 +196,10 @@ type GasPricer interface {
 // transfers) initiated by the user. The PendingNonceAt operation is a good way to
 // retrieve the next available transaction nonce for a specific account.
 type PendingStateReader interface {
-	PendingBalanceAt(ctx context.Context, account libcommon.Address) (*big.Int, error)
-	PendingStorageAt(ctx context.Context, account libcommon.Address, key libcommon.Hash) ([]byte, error)
-	PendingCodeAt(ctx context.Context, account libcommon.Address) ([]byte, error)
-	PendingNonceAt(ctx context.Context, account libcommon.Address) (uint64, error)
+	PendingBalanceAt(ctx context.Context, account common.Address) (*big.Int, error)
+	PendingStorageAt(ctx context.Context, account common.Address, key common.Hash) ([]byte, error)
+	PendingCodeAt(ctx context.Context, account common.Address) ([]byte, error)
+	PendingNonceAt(ctx context.Context, account common.Address) (uint64, error)
 	PendingTransactionCount(ctx context.Context) (uint, error)
 }
 

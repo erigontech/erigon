@@ -44,9 +44,8 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 	}
 
 	snapshots := br.borSnapshots()
-
 	chainConfig := fromdb.ChainConfig(br.db)
-	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers
+	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, int(br.workers.Load())
 
 	blocksRetired := false
 
@@ -67,7 +66,7 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 				return false, nil
 			}
 
-			logger.Log(log.LvlInfo /*lvl*/, "[bor snapshots] Retire Bor Blocks", "type", snap,
+			logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "type", snap,
 				"range", fmt.Sprintf("%s-%s", common.PrettyCounter(blockFrom), common.PrettyCounter(blockTo)))
 
 			var firstKeyGetter snaptype.FirstKeyGetter
@@ -100,15 +99,22 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 		}
 	}
 
+	merged, err := br.MergeBorBlocks(ctx, lvl, seedNewSnapshots, onDelete)
+	return blocksRetired || merged, err
+}
+
+func (br *BlockRetire) MergeBorBlocks(ctx context.Context, lvl log.Lvl, seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error, onDelete func(l []string) error) (mergedBlocks bool, err error) {
+	notifier, logger, _, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, int(br.workers.Load())
+	snapshots := br.borSnapshots()
+	chainConfig := fromdb.ChainConfig(br.db)
 	merger := snapshotsync.NewMerger(tmpDir, workers, lvl, db, chainConfig, logger)
 	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(), snapshots.BlocksAvailable())
 	if len(rangesToMerge) > 0 {
 		logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "rangesToMerge", snapshotsync.Ranges(rangesToMerge))
 	}
 	if len(rangesToMerge) == 0 {
-		return blocksRetired, nil
+		return false, nil
 	}
-	blocksRetired = true // have something to merge
 	onMerge := func(r snapshotsync.Range) error {
 		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 			notifier.OnNewSnapshot()
@@ -124,16 +130,14 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 		}
 		return nil
 	}
-
-	err := merger.Merge(ctx, &snapshots.RoSnapshots, heimdall.SnapshotTypes(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete)
-	if err != nil {
-		return blocksRetired, err
+	if err := merger.Merge(ctx, &snapshots.RoSnapshots, heimdall.SnapshotTypes(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete); err != nil {
+		return false, err
 	}
 
 	{
 		files, _, err := snapshotsync.TypedSegments(br.borSnapshots().Dir(), br.borSnapshots().SegmentsMin(), heimdall.SnapshotTypes(), false)
 		if err != nil {
-			return blocksRetired, err
+			return true, err
 		}
 
 		// this is one off code to fix an issue in 2.49.x->2.52.x which missed
@@ -141,12 +145,12 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 		removeBorOverlaps(br.borSnapshots().Dir(), files, br.borSnapshots().BlocksAvailable())
 	}
 
-	return blocksRetired, nil
+	return true, nil
 }
 
 // this is one off code to fix an issue in 2.49.x->2.52.x which missed
 // removal of intermediate segments after a merge operation
-func removeBorOverlaps(dir string, active []snaptype.FileInfo, max uint64) {
+func removeBorOverlaps(dir string, active []snaptype.FileInfo, _max uint64) {
 	list, err := snaptype.Segments(dir)
 
 	if err != nil {
@@ -165,12 +169,12 @@ func removeBorOverlaps(dir string, active []snaptype.FileInfo, max uint64) {
 
 	// added overhead to make sure we don't delete in the
 	// current 500k block segment
-	if max > 500_001 {
-		max -= 500_001
+	if _max > 500_001 {
+		_max -= 500_001
 	}
 
 	for _, f := range l {
-		if max < f.From {
+		if _max < f.From {
 			continue
 		}
 

@@ -34,7 +34,7 @@ var (
 	FileFilterFlag = cli.StringFlag{
 		Name:     "downloader.file.filter",
 		Aliases:  []string{"dff"},
-		Usage:    "Filter files list [all|active|inactive|downloaded|queued], dafault value is all",
+		Usage:    "Filter files list [all|active|inactive|downloaded|queued], default value is all",
 		Required: false,
 		Value:    "all",
 	}

@@ -1,10 +1,10 @@
-name: CI-CD build and deploy docker images based on the last commit in the main branch
-run-name: "Commit id ${{ github.sha }}: CI-CD build and deploy docker images based on the commit id in the main branch"
+name: CI-CD build and deploy docker images based on the last commit in the target branch
+run-name: "Commit id ${{ github.sha }}: CI-CD build and deploy docker images based on the commit id in the ${{ inputs.checkout_ref == '' && github.ref_name || inputs.checkout_ref }} branch"
 
 env:
   APPLICATION: "erigon"
-  BUILDER_IMAGE: "golang:1.23.1-alpine3.20"
-  TARGET_BASE_IMAGE: "alpine:3.20.3"
+  BUILDER_IMAGE: "golang:1.24-alpine"
+  TARGET_BASE_IMAGE: "alpine:3.21"
   APP_REPO: "erigontech/erigon"
   CHECKOUT_REF: "main"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
@@ -14,44 +14,75 @@ on:
   push:
     branches:
       - 'main'
+      - 'docker_pectra'
     paths-ignore:
       - '.github/**'
   workflow_dispatch:
+    inputs:
+      checkout_ref:
+        required: false
+        type: string
+        default: ''
+        description: 'The branch to checkout and build artifacts from (in case of manual run). Default is "" .'
 
 jobs:
-  define_matrix:
-    runs-on: ubuntu-latest
-    outputs:
-      os: ${{ steps.os.outputs.os }}
-
-    steps:
-     - name: Define os
-       id: os
-       run: echo 'os=ubuntu-latest' >> "$GITHUB_OUTPUT"
 
   Build:
-    needs: define_matrix
-    runs-on: ${{ needs.define_matrix.outputs.os }}
+    runs-on: ubuntu-22.04 ## revert it to "ubuntu-latest" once https://github.com/actions/runner-images/issues/11471 fixed
     timeout-minutes: 45
     outputs:
       docker_build_tag: ${{ steps.built_tag_export.outputs.docker_build_tag }}
 
     steps:
-      - name: Fast checkout git repository
+      - name: Fast checkout git repository, git ref ${{ inputs.checkout_ref == '' && github.ref_name || inputs.checkout_ref }}
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 ## 4.1.7 release
         with:
           repository: ${{ env.APP_REPO }}
           fetch-depth: 1
-          ref: ${{ env.CHECKOUT_REF }}
+          ref: ${{ inputs.checkout_ref == '' && github.ref || inputs.checkout_ref }}
           path: 'erigon'
 
       - name: Setup go env and cache
         uses: actions/setup-go@v5
         with:
-          go-version: '>=1.22'
-          go-version-file: 'erigon/go.mod'
+          go-version: '>=1.23'
+          cache: ${{ contains(fromJSON('["refs/heads/main","refs/heads/docker_pectra"]'), github.ref) }}
           cache-dependency-path: |
             erigon/go.sum
+
+      - name: Define variables
+        id: def_docker_vars
+        ## Idea is:
+        ##   latest image:    erigontech/erigon:${tag_name}${latest_suffix}
+        ##   commit id image: erigontech/erigon:${tag_name}-${short_commit_id}
+        run: |
+          branch_name="${{ inputs.checkout_ref == '' && github.ref_name || inputs.checkout_ref }}"
+          case "$branch_name" in
+            "main" )
+              export tag_name='main';
+              export keep_images=100;
+              export latest_suffix='-latest'
+              export binaries="erigon integration rpcdaemon"
+              ;;
+            "docker_pectra" )
+              export tag_name='docker_pectra';
+              export keep_images=5;
+              export latest_suffix='';
+              export binaries="erigon caplin diag devnet downloader evm hack integration rpcdaemon rpctest sentinel sentry state txpool"
+              ;;
+            * )
+              # use last string after last slash '/' by default if branch contains slash:
+              export tag_name=$(echo ${{ inputs.checkout_ref }} | sed -e  's/.*\///g' );
+              export keep_images=0;
+              export latest_suffix=''
+              export binaries="erigon"
+              ;;
+          esac
+          echo "tag_name=${tag_name}" >> $GITHUB_OUTPUT
+          echo "keep_images=${keep_images}" >> $GITHUB_OUTPUT
+          echo "latest_suffix=${latest_suffix}" >> $GITHUB_OUTPUT
+          echo "binaries=${binaries}" >> $GITHUB_OUTPUT
+          echo "Debug ${tag_name} ${keep_images} ${latest_suffix} ${binaries}"
 
       - name: Get commit id
         id: getCommitId
@@ -74,33 +105,41 @@ jobs:
         uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db ## v3.6.1
 
       - name: Build arm64
+        env:
+          BINARIES: ${{ steps.def_docker_vars.outputs.binaries }}
         run: |
           docker run --platform linux/arm64 \
           --rm -v $(pwd)/erigon:/erigon:ro \
           -v $(pwd)/build-arm64:/erigon-build \
-          -v ${HOME}/.cache/go-build/arm64:/root/.cache/go-build \
+          -v ${HOME}/.cache/go-build:/root/.cache/go-build \
           -v ${HOME}/go/pkg/mod:/go/pkg/mod \
           -w /erigon --entrypoint /bin/sh \
           ${{ env.BUILDER_IMAGE }} \
-          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm erigon integration rpcdaemon"
+          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm,netgo ${{ env.BINARIES }}"
 
       - name: Build amd64
+        env:
+          BINARIES: ${{ steps.def_docker_vars.outputs.binaries }}
         run: |
           docker run --platform linux/amd64 \
           --rm -v $(pwd)/erigon:/erigon:ro \
           -v $(pwd)/build-amd64:/erigon-build \
-          -v ${HOME}/.cache/go-build/amd64:/root/.cache/go-build \
+          -v ${HOME}/.cache/go-build:/root/.cache/go-build \
           -v ${HOME}/go/pkg/mod:/go/pkg/mod \
           -w /erigon --entrypoint /bin/sh \
           ${{ env.BUILDER_IMAGE }} \
-          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm erigon integration rpcdaemon"
+          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm,netgo ${{ env.BINARIES }}"
 
-      - name: Build and push multi-platform docker image based on the commit id ${{ steps.getCommitId.outputs.short_commit_id }} in the main branch
+      - name: Build and push multi-platform docker image based on the commit id ${{ steps.getCommitId.outputs.short_commit_id }} in the ${{ GITHUB.BASE_REF }} branch
+        id: built_tag_export
         env:
-          BUILD_VERSION: "main-${{ steps.getCommitId.outputs.short_commit_id }}"
+          BUILD_VERSION: "${{ steps.def_docker_vars.outputs.tag_name }}-${{ steps.getCommitId.outputs.short_commit_id }}"
+          BUILD_VERSION_LATEST: "${{ steps.def_docker_vars.outputs.tag_name }}${{ steps.def_docker_vars.outputs.latest_suffix }}"
+          DOCKER_PUBLISH_CONDITION: ${{ steps.def_docker_vars.outputs.keep_images > 0 && format('--tag {0}:{1} ', env.DOCKER_URL, env.BUILD_VERSION) || '' }}
           DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
           DOCKERFILE_PATH: Dockerfile.release
         run: |
+          echo "docker_build_tag=${{ env.BUILD_VERSION }}" >> $GITHUB_OUTPUT
           cp -vr build-amd64 erigon/
           cp -vr build-arm64 erigon/
           cd erigon
@@ -111,8 +150,8 @@ jobs:
           --sbom=true \
           --build-arg CI_CD_MAIN_TARGET_BASE_IMAGE=${{ env.TARGET_BASE_IMAGE }} \
           --build-arg CI_CD_MAIN_BUILDER_IMAGE=${{ env.BUILDER_IMAGE }} \
-          --tag ${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }} \
-          --tag ${{ env.DOCKER_URL }}:main-latest \
+          ${{ steps.def_docker_vars.outputs.keep_images > 0 && format('--tag {0}:{1} ', env.DOCKER_URL, env.BUILD_VERSION) || '' }} \
+          --tag ${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION_LATEST }} \
           --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
           --label org.opencontainers.image.authors="https://github.com/erigontech/erigon/graphs/contributors" \
           --label org.opencontainers.image.url="https://github.com/erigontech/erigon/blob/main/Dockerfile" \
@@ -127,20 +166,49 @@ jobs:
           --push \
           --platform linux/amd64,linux/arm64 .
 
-      - name: export and print docker build tag
-        id: built_tag_export
+      - name: export and print docker build tag, cleanup old docker images
         env:
-          BUILD_VERSION: "main-${{ steps.getCommitId.outputs.short_commit_id }}"
+          BUILD_VERSION: "${{ steps.def_docker_vars.outputs.tag_name }}-${{ steps.getCommitId.outputs.short_commit_id }}"
+          BUILD_VERSION_LATEST: "${{ steps.def_docker_vars.outputs.tag_name }}${{ steps.def_docker_vars.outputs.latest_suffix }}"
+          BUILD_VERSION_CONDITION: ${{ steps.def_docker_vars.outputs.keep_images > 0 && format('{0}:{1} ',env.DOCKER_URL,env.BUILD_VERSION) || '' }}
+          DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
+          TAG_KEY: ${{ steps.def_docker_vars.outputs.tag_name }}
+          KEEP_IMAGES: ${{ steps.def_docker_vars.outputs.keep_images }}
         run: |
-          echo "docker_build_tag=${{ env.BUILD_VERSION }}" >> $GITHUB_OUTPUT
           echo The following docker images have been published:
-          echo "${{ env.DOCKERHUB_REPOSITORY }}:main-${{ env.BUILD_VERSION }}"
-          echo "${{ env.DOCKERHUB_REPOSITORY }}:main-latest"
-
-  run-kurtosis-assertoor:
-    needs: [define_matrix, Build]
-    uses: erigontech/erigon/.github/workflows/test-kurtosis-assertoor.yml@main
-    with:
-      checkout_ref: ${{ github.sha }}
-      os: ${{ needs.define_matrix.outputs.os }}
-      docker_build_tag: ${{ needs.Build.outputs.docker_build_tag }}
+          echo "${{ env.DOCKERHUB_REPOSITORY }}:${{ env.BUILD_VERSION_LATEST }}"
+          echo "${{ steps.def_docker_vars.outputs.keep_images > 0 && format('{0}:{1} ',env.DOCKER_URL,env.BUILD_VERSION) || '' }} (empty, if keep_images is 0)"
+          echo
+          echo "Cleanup old docker images matching pattern tag ~= ${{ env.TAG_KEY }}-XXXXXXX (where XXXXXXX is a short Commit IDs)"
+          echo "Only last $KEEP_IMAGES images will be kept."
+          curl_cmd="curl -s -H \"Authorization: JWT ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}\" "
+          dockerhub_url='https://hub.docker.com/v2/namespaces/erigontech/repositories/erigon'
+          ## getting all pages in a loop from dockerhub and grepping required tag from the list of tags:
+          my_list () {
+            # First page:
+            next_page="$dockerhub_url/tags?page=1&page_size=100"
+            while [ "$next_page" != "null" ]
+              do
+              # Print tags and push dates for tags matching "${{ env.TAG_KEY }}-":
+              $curl_cmd $next_page | jq -r '.results|.[]|.name + " " + .tag_last_pushed' | grep '${{ env.TAG_KEY }}-' || true
+              next_page=`$curl_cmd $next_page | jq '.next' | sed -e 's/^\"//' -e 's/\"$//'`
+            done
+            }
+            echo "DEBUG: full list of images:"
+            my_list
+            echo "DEBUG: end of the list."
+            my_list | tail -n+${{ env.KEEP_IMAGES }} | while read line; do
+              echo -n "Removing docker image/published - $line "
+              current_image=$(echo $line | sed -e 's/^\(${{ env.TAG_KEY }}-.\{7\}\) .*/\1/')
+              output_code=$(curl --write-out %{http_code} --output curl-output.log \
+                    -s -X DELETE -H "Accept: application/json" \
+                    -H "Authorization: JWT ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}" \
+                    https://hub.docker.com/v2/repositories/erigontech/erigon/tags/${current_image} )
+              if [ $output_code -ne 204 ]; then
+                echo "ERROR: failed to remove docker image erigon:${current_image}"
+                echo "ERROR: API response: $(cat curl-output.log)."
+              else
+                echo -n " - removed. "
+              fi
+              echo "Done."
+            done

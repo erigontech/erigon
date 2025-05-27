@@ -17,7 +17,7 @@
 package cltypes
 
 import (
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -25,9 +25,9 @@ import (
 )
 
 type Eth1Data struct {
-	Root         libcommon.Hash `json:"deposit_root"`
-	DepositCount uint64         `json:"deposit_count,string"`
-	BlockHash    libcommon.Hash `json:"block_hash"`
+	Root         common.Hash `json:"deposit_root"`
+	DepositCount uint64      `json:"deposit_count,string"`
+	BlockHash    common.Hash `json:"block_hash"`
 }
 
 func NewEth1Data() *Eth1Data {
@@ -35,8 +35,11 @@ func NewEth1Data() *Eth1Data {
 }
 
 func (e *Eth1Data) Copy() *Eth1Data {
-	copied := *e
-	return &copied
+	return &Eth1Data{
+		Root:         e.Root,
+		DepositCount: e.DepositCount,
+		BlockHash:    e.BlockHash,
+	}
 }
 
 func (e *Eth1Data) Equal(b *Eth1Data) bool {

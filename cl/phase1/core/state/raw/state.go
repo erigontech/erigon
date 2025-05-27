@@ -72,6 +72,17 @@ type BeaconState struct {
 	previousEpochAttestations *solid.ListSSZ[*solid.PendingAttestation]
 	currentEpochAttestations  *solid.ListSSZ[*solid.PendingAttestation]
 
+	// Electra
+	depositRequestsStartIndex     uint64
+	depositBalanceToConsume       uint64
+	exitBalanceToConsume          uint64
+	earliestExitEpoch             uint64
+	consolidationBalanceToConsume uint64
+	earliestConsolidationEpoch    uint64
+	pendingDeposits               *solid.ListSSZ[*solid.PendingDeposit]
+	pendingPartialWithdrawals     *solid.ListSSZ[*solid.PendingPartialWithdrawal]
+	pendingConsolidations         *solid.ListSSZ[*solid.PendingConsolidation]
+
 	//  leaves for computing hashes
 	leaves        []byte          // Pre-computed leaves.
 	touchedLeaves []atomic.Uint32 // Maps each leaf to whether they were touched or not.
@@ -95,29 +106,33 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 		currentSyncCommittee:         &solid.SyncCommittee{},
 		nextSyncCommittee:            &solid.SyncCommittee{},
 		latestExecutionPayloadHeader: &cltypes.Eth1Header{},
-		//inactivityScores: solid.NewSimpleUint64Slice(int(cfg.ValidatorRegistryLimit)),
-		inactivityScores:           solid.NewUint64ListSSZ(int(cfg.ValidatorRegistryLimit)),
-		balances:                   solid.NewUint64ListSSZ(int(cfg.ValidatorRegistryLimit)),
-		previousEpochParticipation: solid.NewParticipationBitList(0, int(cfg.ValidatorRegistryLimit)),
-		currentEpochParticipation:  solid.NewParticipationBitList(0, int(cfg.ValidatorRegistryLimit)),
-		slashings:                  solid.NewUint64VectorSSZ(SlashingsLength),
-		currentEpochAttestations:   solid.NewDynamicListSSZ[*solid.PendingAttestation](int(cfg.CurrentEpochAttestationsLength())),
-		previousEpochAttestations:  solid.NewDynamicListSSZ[*solid.PendingAttestation](int(cfg.PreviousEpochAttestationsLength())),
-		historicalRoots:            solid.NewHashList(int(cfg.HistoricalRootsLimit)),
-		blockRoots:                 solid.NewHashVector(int(cfg.SlotsPerHistoricalRoot)),
-		stateRoots:                 solid.NewHashVector(int(cfg.SlotsPerHistoricalRoot)),
-		randaoMixes:                solid.NewHashVector(int(cfg.EpochsPerHistoricalVector)),
-		validators:                 solid.NewValidatorSet(int(cfg.ValidatorRegistryLimit)),
-		leaves:                     make([]byte, 32*32),
+		inactivityScores:             solid.NewUint64ListSSZ(int(cfg.ValidatorRegistryLimit)),
+		balances:                     solid.NewUint64ListSSZ(int(cfg.ValidatorRegistryLimit)),
+		previousEpochParticipation:   solid.NewParticipationBitList(0, int(cfg.ValidatorRegistryLimit)),
+		currentEpochParticipation:    solid.NewParticipationBitList(0, int(cfg.ValidatorRegistryLimit)),
+		slashings:                    solid.NewUint64VectorSSZ(SlashingsLength),
+		currentEpochAttestations:     solid.NewDynamicListSSZ[*solid.PendingAttestation](int(cfg.CurrentEpochAttestationsLength())),
+		previousEpochAttestations:    solid.NewDynamicListSSZ[*solid.PendingAttestation](int(cfg.PreviousEpochAttestationsLength())),
+		historicalRoots:              solid.NewHashList(int(cfg.HistoricalRootsLimit)),
+		blockRoots:                   solid.NewHashVector(int(cfg.SlotsPerHistoricalRoot)),
+		stateRoots:                   solid.NewHashVector(int(cfg.SlotsPerHistoricalRoot)),
+		randaoMixes:                  solid.NewHashVector(int(cfg.EpochsPerHistoricalVector)),
+		validators:                   solid.NewValidatorSet(int(cfg.ValidatorRegistryLimit)),
+		leaves:                       make([]byte, StateLeafSize*32),
+		pendingDeposits:              solid.NewPendingDepositList(cfg),
+		pendingPartialWithdrawals:    solid.NewPendingWithdrawalList(cfg),
+		pendingConsolidations:        solid.NewPendingConsolidationList(cfg),
 	}
 	state.init()
 	return state
 }
 
+func (b *BeaconState) SetValidatorSet(validatorSet *solid.ValidatorSet) {
+	b.validators = validatorSet
+}
+
 func (b *BeaconState) init() error {
-	if b.touchedLeaves == nil {
-		b.touchedLeaves = make([]atomic.Uint32, StateLeafSize)
-	}
+	b.touchedLeaves = make([]atomic.Uint32, StateLeafSize)
 	return nil
 }
 
@@ -162,6 +177,17 @@ func (b *BeaconState) MarshalJSON() ([]byte, error) {
 		obj["next_withdrawal_index"] = strconv.FormatInt(int64(b.nextWithdrawalIndex), 10)
 		obj["next_withdrawal_validator_index"] = strconv.FormatInt(int64(b.nextWithdrawalValidatorIndex), 10)
 		obj["historical_summaries"] = b.historicalSummaries
+	}
+	if b.version >= clparams.ElectraVersion {
+		obj["deposit_requests_start_index"] = strconv.FormatInt(int64(b.depositRequestsStartIndex), 10)
+		obj["deposit_balance_to_consume"] = strconv.FormatInt(int64(b.depositBalanceToConsume), 10)
+		obj["exit_balance_to_consume"] = strconv.FormatInt(int64(b.exitBalanceToConsume), 10)
+		obj["earliest_exit_epoch"] = strconv.FormatInt(int64(b.earliestExitEpoch), 10)
+		obj["consolidation_balance_to_consume"] = strconv.FormatInt(int64(b.consolidationBalanceToConsume), 10)
+		obj["earliest_consolidation_epoch"] = strconv.FormatInt(int64(b.earliestConsolidationEpoch), 10)
+		obj["pending_deposits"] = b.pendingDeposits
+		obj["pending_partial_withdrawals"] = b.pendingPartialWithdrawals
+		obj["pending_consolidations"] = b.pendingConsolidations
 	}
 	return json.Marshal(obj)
 }
@@ -214,4 +240,44 @@ func (b *BeaconState) HistoricalSummary(index int) *cltypes.HistoricalSummary {
 
 func (b *BeaconState) RawSlashings() []byte {
 	return b.slashings.Bytes()
+}
+
+func (b *BeaconState) EarliestExitEpoch() uint64 {
+	return b.earliestExitEpoch
+}
+
+func (b *BeaconState) ExitBalanceToConsume() uint64 {
+	return b.exitBalanceToConsume
+}
+
+func (b *BeaconState) GetDepositBalanceToConsume() uint64 {
+	return b.depositBalanceToConsume
+}
+
+func (b *BeaconState) GetPendingDeposits() *solid.ListSSZ[*solid.PendingDeposit] {
+	return b.pendingDeposits
+}
+
+func (b *BeaconState) GetDepositRequestsStartIndex() uint64 {
+	return b.depositRequestsStartIndex
+}
+
+func (b *BeaconState) GetPendingConsolidations() *solid.ListSSZ[*solid.PendingConsolidation] {
+	return b.pendingConsolidations
+}
+
+func (b *BeaconState) GetEarlistConsolidationEpoch() uint64 {
+	return b.earliestConsolidationEpoch
+}
+
+func (b *BeaconState) GetEarlistExitEpoch() uint64 {
+	return b.earliestExitEpoch
+}
+
+func (b *BeaconState) GetExitBalanceToConsume() uint64 {
+	return b.exitBalanceToConsume
+}
+
+func (b *BeaconState) GetConsolidationBalanceToConsume() uint64 {
+	return b.consolidationBalanceToConsume
 }

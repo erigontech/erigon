@@ -30,15 +30,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/debug"
+	"github.com/erigontech/erigon-lib/common/mclock"
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon/common/debug"
-	"github.com/erigontech/erigon/common/mclock"
-	"github.com/erigontech/erigon/event"
-	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/p2p/enr"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-p2p/enode"
+	"github.com/erigontech/erigon-p2p/enr"
+	"github.com/erigontech/erigon-p2p/event"
 )
 
 var (
@@ -437,7 +436,7 @@ func (p *Peer) startProtocols(writeStart <-chan struct{}, writeErr chan<- error)
 		proto.werr = writeErr
 		var rw MsgReadWriter = proto
 		if p.events != nil {
-			rw = newMsgEventer(rw, p.events, p.ID(), proto.Name, p.Info().Network.RemoteAddress, p.Info().Network.LocalAddress)
+			rw = newMsgEventer(rw, p.events, p.ID(), proto.Name, p.RemoteAddr().String(), p.LocalAddr().String())
 		}
 		p.log.Trace(fmt.Sprintf("Starting protocol %s/%d", proto.Name, proto.Version))
 		go func() {

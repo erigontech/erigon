@@ -34,7 +34,7 @@ func getFlagsTotalBalances(s abstract.BeaconState, flagsUnslashedIndiciesSet [][
 	flagsTotalBalances := make([]uint64, len(weights))
 
 	numWorkers := runtime.NumCPU()
-	wp := threading.CreateWorkerPool(numWorkers)
+	wp := threading.NewParallelExecutor()
 	flagsTotalBalancesShards := make([][]uint64, len(weights))
 	shardSize := s.ValidatorLength() / numWorkers
 
@@ -70,7 +70,7 @@ func getFlagsTotalBalances(s abstract.BeaconState, flagsUnslashedIndiciesSet [][
 		}
 	}
 
-	wp.WaitAndClose()
+	wp.Execute()
 
 	for i := range weights {
 		for j := 0; j < numWorkers; j++ {
@@ -98,7 +98,7 @@ func processRewardsAndPenaltiesPostAltair(s abstract.BeaconState, eligibleValida
 	rewardDenominator := (totalActiveBalance / beaconConfig.EffectiveBalanceIncrement) * beaconConfig.WeightDenominator
 	inactivityLeaking := state.InactivityLeaking(s)
 
-	return threading.ParallellForLoop(runtime.NumCPU(), 0, len(eligibleValidators), func(i int) error {
+	return threading.ParallellForLoop(1, 0, len(eligibleValidators), func(i int) error {
 		index := eligibleValidators[i]
 		baseReward, err := s.BaseReward(index)
 		if err != nil {

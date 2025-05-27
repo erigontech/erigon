@@ -18,13 +18,12 @@ package snaptype
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math/rand"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -36,36 +35,11 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/version"
 )
 
-type Version uint8
-
-func ParseVersion(v string) (Version, error) {
-	if strings.HasPrefix(v, "v") {
-		v, err := strconv.ParseUint(v[1:], 10, 8)
-
-		if err != nil {
-			return 0, fmt.Errorf("invalid version: %w", err)
-		}
-
-		return Version(v), nil
-	}
-
-	if len(v) == 0 {
-		return 0, errors.New("invalid version: no prefix")
-	}
-
-	return 0, fmt.Errorf("invalid version prefix: %s", v[0:1])
-}
-
-func (v Version) String() string {
-	return "v" + strconv.Itoa(int(v))
-}
-
-type Versions struct {
-	Current      Version
-	MinSupported Version
-}
+type Version = version.Version
+type Versions = version.Versions
 
 type FirstKeyGetter func(ctx context.Context) uint64
 
@@ -93,6 +67,10 @@ var saltMap = map[string]uint32{}
 var saltLock sync.RWMutex
 
 func ReadAndCreateSaltIfNeeded(baseDir string) (uint32, error) {
+	// issue: https://github.com/erigontech/erigon/issues/14300
+	// NOTE: The salt value from this is read after snapshot stage AND the value is not
+	// cached before snapshot stage (which downloads salt-blocks.txt too), and therefore
+	// we're good as far as the above issue is concerned.
 	fpath := filepath.Join(baseDir, "salt-blocks.txt")
 	exists, err := dir.FileExist(fpath)
 	if err != nil {
@@ -103,7 +81,7 @@ func ReadAndCreateSaltIfNeeded(baseDir string) (uint32, error) {
 		dir.MustExist(baseDir)
 
 		saltBytes := make([]byte, 4)
-		binary.BigEndian.PutUint32(saltBytes, rand.Uint32())
+		binary.BigEndian.PutUint32(saltBytes, randUint32())
 		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
 			return 0, err
 		}
@@ -116,7 +94,7 @@ func ReadAndCreateSaltIfNeeded(baseDir string) (uint32, error) {
 		dir.MustExist(baseDir)
 
 		saltBytes := make([]byte, 4)
-		binary.BigEndian.PutUint32(saltBytes, rand.Uint32())
+		binary.BigEndian.PutUint32(saltBytes, randUint32())
 		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
 			return 0, err
 		}
@@ -137,12 +115,12 @@ func GetIndexSalt(baseDir string) (uint32, error) {
 		return salt, nil
 	}
 
-	saltLock.Lock()
 	salt, err := ReadAndCreateSaltIfNeeded(baseDir)
 	if err != nil {
 		return 0, err
 	}
 
+	saltLock.Lock()
 	saltMap[baseDir] = salt
 	saltLock.Unlock()
 
@@ -224,6 +202,12 @@ func RegisterType(enum Enum, name string, versions Versions, rangeExtractor Rang
 	registeredTypes[enum] = t
 	namedTypes[strings.ToLower(name)] = t
 
+	for _, index := range indexes {
+		if _, ok := namedTypes[strings.ToLower(index.Name)]; !ok {
+			namedTypes[strings.ToLower(index.Name)] = t
+		}
+	}
+
 	return t
 }
 
@@ -248,7 +232,7 @@ func (s snapType) RangeExtractor() RangeExtractor {
 }
 
 func (s snapType) FileName(version Version, from uint64, to uint64) string {
-	if version == 0 {
+	if version.Major == 0 && version.Minor == 0 {
 		version = s.versions.Current
 	}
 
@@ -349,10 +333,10 @@ type Enums struct {
 }
 
 const MinCoreEnum = 1
-const MinBorEnum = 4
-const MinCaplinEnum = 8
+const MinBorEnum = 5
+const MinCaplinEnum = 9
 
-const MaxEnum = 11
+const MaxEnum = 12
 
 var CaplinEnums = struct {
 	Enums
@@ -447,9 +431,72 @@ func BuildIndex(ctx context.Context, info FileInfo, cfg recsplit.RecSplitArgs, l
 	if err != nil {
 		return err
 	}
+	defer rs.Close()
 	rs.LogLvl(lvl)
 
-	defer d.EnableReadAhead().DisableReadAhead()
+	defer d.MadvSequential().DisableReadAhead()
+
+	for {
+		g := d.MakeGetter()
+		var i, offset, nextPos uint64
+		word := make([]byte, 0, 4096)
+
+		for g.HasNext() {
+			word, nextPos = g.Next(word[:0])
+			if err := walker(rs, i, offset, word); err != nil {
+				return err
+			}
+			i++
+			offset = nextPos
+
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+		}
+
+		if err = rs.Build(ctx); err != nil {
+			if errors.Is(err, recsplit.ErrCollision) {
+				logger.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
+				rs.ResetNextSalt()
+				continue
+			}
+			return err
+		}
+
+		return nil
+	}
+}
+
+func BuildIndexWithSnapName(ctx context.Context, info FileInfo, cfg recsplit.RecSplitArgs, lvl log.Lvl, p *background.Progress, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error, logger log.Logger) (err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("index panic: at=%s, %v, %s", info.Name(), rec, dbg.Stack())
+		}
+	}()
+
+	d, err := seg.NewDecompressor(info.Path)
+	if err != nil {
+		return fmt.Errorf("can't open %s for indexing: %w", info.Name(), err)
+	}
+	defer d.Close()
+
+	if p != nil {
+		fname := info.Name()
+		p.Name.Store(&fname)
+		p.Total.Store(uint64(d.Count()))
+	}
+	cfg.KeyCount = d.Count()
+	cfg.IndexFile = filepath.Join(info.Dir(), strings.ReplaceAll(info.name, ".seg", ".idx"))
+	rs, err := recsplit.NewRecSplit(cfg, logger)
+	if err != nil {
+		return err
+	}
+	defer rs.Close()
+	rs.LogLvl(lvl)
+
+	defer d.MadvSequential().DisableReadAhead()
 
 	for {
 		g := d.MakeGetter()
@@ -487,7 +534,7 @@ func BuildIndex(ctx context.Context, info FileInfo, cfg recsplit.RecSplitArgs, l
 func ExtractRange(ctx context.Context, f FileInfo, extractor RangeExtractor, indexBuilder IndexBuilder, firstKey FirstKeyGetter, chainDB kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 	var lastKeyValue uint64
 
-	sn, err := seg.NewCompressor(ctx, "Snapshot "+f.Type.Name(), f.Path, tmpDir, seg.DefaultCfg, log.LvlTrace, logger)
+	sn, err := seg.NewCompressor(ctx, "Snapshot "+f.Type.Name(), f.Path, tmpDir, seg.DefaultCfg, lvl, logger)
 
 	if err != nil {
 		return lastKeyValue, err
@@ -516,4 +563,13 @@ func ExtractRange(ctx context.Context, f FileInfo, extractor RangeExtractor, ind
 	}
 
 	return lastKeyValue, nil
+}
+
+func randUint32() uint32 {
+	var buf [4]byte
+	_, err := rand.Read(buf[:])
+	if err != nil {
+		panic(err)
+	}
+	return binary.LittleEndian.Uint32(buf[:])
 }

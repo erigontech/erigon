@@ -23,7 +23,6 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -34,6 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/remotedb"
 	"github.com/erigontech/erigon-lib/kv/remotedbserver"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -164,7 +164,7 @@ func TestRemoteKvVersion(t *testing.T) {
 	}
 	ctx := context.Background()
 	logger := log.New()
-	writeDB := mdbx.NewMDBX(logger).InMem("").MustOpen()
+	writeDB := mdbx.New(kv.ChainDB, logger).InMem("").MustOpen()
 	defer writeDB.Close()
 	conn := bufconn.Listen(1024 * 1024)
 	grpcServer := grpc.NewServer()
@@ -180,7 +180,7 @@ func TestRemoteKvVersion(t *testing.T) {
 	v1.Major++
 
 	cc, err := grpc.Dial("", grpc.WithInsecure(), grpc.WithContextDialer(func(ctx context.Context, url string) (net.Conn, error) { return conn.Dial() }))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	a, err := remotedb.NewRemote(v1, logger, remote.NewKVClient(cc)).Open()
 	if err != nil {
 		t.Fatalf("%v", err)
@@ -207,7 +207,7 @@ func TestRemoteKvRange(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 	logger := log.New()
-	ctx, writeDB := context.Background(), memdb.NewTestDB(t)
+	ctx, writeDB := context.Background(), memdb.NewTestDB(t, kv.ChainDB)
 	grpcServer, conn := grpc.NewServer(), bufconn.Listen(1024*1024)
 	go func() {
 		kvServer := remotedbserver.NewKvServer(ctx, writeDB, nil, nil, nil, logger)
@@ -225,7 +225,7 @@ func TestRemoteKvRange(t *testing.T) {
 
 	require := require.New(t)
 	require.NoError(writeDB.Update(ctx, func(tx kv.RwTx) error {
-		wc, err := tx.RwCursorDupSort(kv.AccountChangeSet)
+		wc, err := tx.RwCursorDupSort(kv.TblAccountVals)
 		require.NoError(err)
 		require.NoError(wc.Append([]byte{1}, []byte{1}))
 		require.NoError(wc.Append([]byte{1}, []byte{2}))
@@ -235,7 +235,7 @@ func TestRemoteKvRange(t *testing.T) {
 	}))
 
 	require.NoError(db.View(ctx, func(tx kv.Tx) error {
-		c, err := tx.Cursor(kv.AccountChangeSet)
+		c, err := tx.Cursor(kv.TblAccountVals)
 		require.NoError(err)
 
 		k, v, err := c.First()
@@ -245,7 +245,7 @@ func TestRemoteKvRange(t *testing.T) {
 
 		// it must be possible to Stream and manipulate cursors in same time
 		cnt := 0
-		require.NoError(tx.ForEach(kv.AccountChangeSet, nil, func(_, _ []byte) error {
+		require.NoError(tx.ForEach(kv.TblAccountVals, nil, func(_, _ []byte) error {
 			if cnt == 0 {
 				k, v, err = c.Next()
 				require.NoError(err)
@@ -259,7 +259,7 @@ func TestRemoteKvRange(t *testing.T) {
 
 		// remote Tx must provide Snapshots-Isolation-Level: new updates are not visible for old readers
 		require.NoError(writeDB.Update(ctx, func(tx kv.RwTx) error {
-			require.NoError(tx.Put(kv.AccountChangeSet, []byte{4}, []byte{1}))
+			require.NoError(tx.Put(kv.TblAccountVals, []byte{4}, []byte{1}))
 			return nil
 		}))
 
@@ -272,7 +272,7 @@ func TestRemoteKvRange(t *testing.T) {
 
 	err = db.View(ctx, func(tx kv.Tx) error {
 		cntRange := func(from, to []byte) (i int) {
-			it, err := tx.Range(kv.AccountChangeSet, from, to, order.Asc, kv.Unlim)
+			it, err := tx.Range(kv.TblAccountVals, from, to, order.Asc, kv.Unlim)
 			require.NoError(err)
 			for it.HasNext() {
 				_, _, err = it.Next()
@@ -293,7 +293,7 @@ func TestRemoteKvRange(t *testing.T) {
 	// Limit
 	err = db.View(ctx, func(tx kv.Tx) error {
 		cntRange := func(from, to []byte) (i int) {
-			it, err := tx.Range(kv.AccountChangeSet, from, to, order.Asc, 2)
+			it, err := tx.Range(kv.TblAccountVals, from, to, order.Asc, 2)
 			require.NoError(err)
 			for it.HasNext() {
 				_, _, err := it.Next()
@@ -313,7 +313,7 @@ func TestRemoteKvRange(t *testing.T) {
 
 	err = db.View(ctx, func(tx kv.Tx) error {
 		cntRange := func(from, to []byte) (i int) {
-			it, err := tx.Range(kv.AccountChangeSet, from, to, order.Desc, 2)
+			it, err := tx.Range(kv.TblAccountVals, from, to, order.Desc, 2)
 			require.NoError(err)
 			for it.HasNext() {
 				_, _, err := it.Next()
@@ -336,8 +336,8 @@ func setupDatabases(t *testing.T, logger log.Logger, f mdbx.TableCfgFunc) (write
 	t.Helper()
 	ctx := context.Background()
 	writeDBs = []kv.RwDB{
-		mdbx.NewMDBX(logger).InMem("").WithTableCfg(f).MustOpen(),
-		mdbx.NewMDBX(logger).InMem("").WithTableCfg(f).MustOpen(), // for remote db
+		mdbx.New(kv.ChainDB, logger).InMem("").WithTableCfg(f).MustOpen(),
+		mdbx.New(kv.ChainDB, logger).InMem("").WithTableCfg(f).MustOpen(), // for remote db
 	}
 
 	conn := bufconn.Listen(1024 * 1024)
@@ -352,9 +352,9 @@ func setupDatabases(t *testing.T, logger log.Logger, f mdbx.TableCfgFunc) (write
 	go f2()
 	v := gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion)
 	cc, err := grpc.Dial("", grpc.WithInsecure(), grpc.WithContextDialer(func(ctx context.Context, url string) (net.Conn, error) { return conn.Dial() }))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	rdb, err := remotedb.NewRemote(v, logger, remote.NewKVClient(cc)).Open()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	readDBs = []kv.RwDB{
 		writeDBs[0],
 		writeDBs[1],
@@ -383,6 +383,7 @@ func setupDatabases(t *testing.T, logger log.Logger, f mdbx.TableCfgFunc) (write
 func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 	t.Helper()
 	assert, ctx := assert.New(t), context.Background()
+	require := require.New(t)
 
 	if err := db.View(ctx, func(tx kv.Tx) error {
 		c1, err := tx.Cursor(bucket1)
@@ -395,84 +396,84 @@ func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 		}
 
 		k1, v1, err := c1.First()
-		assert.NoError(err)
+		require.NoError(err)
 		k2, v2, err := c2.First()
-		assert.NoError(err)
+		require.NoError(err)
 		assert.Equal(k1, k2)
 		assert.Equal(v1, v2)
 
 		k1, v1, err = c1.Next()
-		assert.NoError(err)
+		require.NoError(err)
 		k2, v2, err = c2.Next()
-		assert.NoError(err)
+		require.NoError(err)
 		assert.Equal(k1, k2)
 		assert.Equal(v1, v2)
 
 		k1, v1, err = c1.Seek([]byte{0})
-		assert.NoError(err)
+		require.NoError(err)
 		k2, v2, err = c2.Seek([]byte{0})
-		assert.NoError(err)
+		require.NoError(err)
 		assert.Equal(k1, k2)
 		assert.Equal(v1, v2)
 
 		k1, v1, err = c1.Seek([]byte{0, 0})
-		assert.NoError(err)
+		require.NoError(err)
 		k2, v2, err = c2.Seek([]byte{0, 0})
-		assert.NoError(err)
+		require.NoError(err)
 		assert.Equal(k1, k2)
 		assert.Equal(v1, v2)
 
 		k1, v1, err = c1.Seek([]byte{0, 0, 0, 0})
-		assert.NoError(err)
+		require.NoError(err)
 		k2, v2, err = c2.Seek([]byte{0, 0, 0, 0})
-		assert.NoError(err)
+		require.NoError(err)
 		assert.Equal(k1, k2)
 		assert.Equal(v1, v2)
 
 		k1, v1, err = c1.Next()
-		assert.NoError(err)
+		require.NoError(err)
 		k2, v2, err = c2.Next()
-		assert.NoError(err)
+		require.NoError(err)
 		assert.Equal(k1, k2)
 		assert.Equal(v1, v2)
 
 		k1, v1, err = c1.Seek([]byte{0})
-		assert.NoError(err)
+		require.NoError(err)
 		k2, v2, err = c2.Seek([]byte{0})
-		assert.NoError(err)
+		require.NoError(err)
 		assert.Equal(k1, k2)
 		assert.Equal(v1, v2)
 
 		k1, v1, err = c1.Seek([]byte{0, 0})
-		assert.NoError(err)
+		require.NoError(err)
 		k2, v2, err = c2.Seek([]byte{0, 0})
-		assert.NoError(err)
+		require.NoError(err)
 		assert.Equal(k1, k2)
 		assert.Equal(v1, v2)
 
 		k1, v1, err = c1.Seek([]byte{0, 0, 0, 0})
-		assert.NoError(err)
+		require.NoError(err)
 		k2, v2, err = c2.Seek([]byte{0, 0, 0, 0})
-		assert.NoError(err)
+		require.NoError(err)
 		assert.Equal(k1, k2)
 		assert.Equal(v1, v2)
 
 		k1, v1, err = c1.Next()
-		assert.NoError(err)
+		require.NoError(err)
 		k2, v2, err = c2.Next()
-		assert.NoError(err)
+		require.NoError(err)
 		assert.Equal(k1, k2)
 		assert.Equal(v1, v2)
 		k1, v1, err = c1.Seek([]byte{2})
-		assert.NoError(err)
+		require.NoError(err)
 		k2, v2, err = c2.Seek([]byte{2})
-		assert.NoError(err)
+		require.NoError(err)
 		assert.Equal(k1, k2)
 		assert.Equal(v1, v2)
 
 		return nil
 	}); err != nil {
-		assert.NoError(err)
+		require.NoError(err)
 	}
 }
 

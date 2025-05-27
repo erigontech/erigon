@@ -23,9 +23,9 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types/accounts"
 )
 
 const (
@@ -57,7 +57,7 @@ func generateBlocks2(t *testing.T, from uint64, numberOfBlocks uint64, blockWrit
 		updateIncarnation := difficulty != staticCodeStaticIncarnations && blockNumber%10 == 0
 
 		for i, oldAcc := range testAccounts {
-			addr := libcommon.HexToAddress(fmt.Sprintf("0x1234567890%d", i))
+			addr := common.HexToAddress(fmt.Sprintf("0x1234567890%d", i))
 
 			newAcc := oldAcc.SelfCopy()
 			newAcc.Balance.SetUint64(blockNumber)
@@ -75,7 +75,7 @@ func generateBlocks2(t *testing.T, from uint64, numberOfBlocks uint64, blockWrit
 			if blockNumber == 1 || updateIncarnation || difficulty == changeCodeIndepenentlyOfIncarnations {
 				if newAcc.Incarnation > 0 {
 					code := []byte(fmt.Sprintf("acc-code-%v", blockNumber))
-					codeHash, _ := libcommon.HashData(code)
+					codeHash, _ := common.HashData(code)
 					if blockNumber >= from {
 						if err := blockWriter.UpdateAccountCode(addr, newAcc.Incarnation, codeHash, code); err != nil {
 							t.Fatal(err)
@@ -88,10 +88,10 @@ func generateBlocks2(t *testing.T, from uint64, numberOfBlocks uint64, blockWrit
 			if newAcc.Incarnation > 0 {
 				var oldValue, newValue uint256.Int
 				newValue.SetOne()
-				var location libcommon.Hash
+				var location common.Hash
 				location.SetBytes(new(big.Int).SetUint64(blockNumber).Bytes())
 				if blockNumber >= from {
-					if err := blockWriter.WriteAccountStorage(addr, newAcc.Incarnation, &location, &oldValue, &newValue); err != nil {
+					if err := blockWriter.WriteAccountStorage(addr, newAcc.Incarnation, location, oldValue, newValue); err != nil {
 						t.Fatal(err)
 					}
 				}

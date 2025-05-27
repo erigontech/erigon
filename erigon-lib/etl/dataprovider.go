@@ -33,6 +33,7 @@ type dataProvider interface {
 	Next(keyBuf, valBuf []byte) ([]byte, []byte, error)
 	Dispose()    // Safe for repeated call, doesn't return error - means defer-friendly
 	Wait() error // join point for async providers
+	String() string
 }
 
 type fileDataProvider struct {
@@ -43,14 +44,22 @@ type fileDataProvider struct {
 }
 
 // FlushToDiskAsync - `doFsync` is true only for 'critical' collectors (which should not loose).
-func FlushToDiskAsync(logPrefix string, b Buffer, tmpdir string, doFsync bool, lvl log.Lvl) (dataProvider, error) {
+func FlushToDiskAsync(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl, allocator *Allocator) (dataProvider, error) {
 	if b.Len() == 0 {
+		if allocator != nil {
+			allocator.Put(b)
+		}
 		return nil, nil
 	}
 
 	provider := &fileDataProvider{reader: nil, wg: &errgroup.Group{}}
 	provider.wg.Go(func() (err error) {
-		provider.file, err = sortAndFlush(b, tmpdir, doFsync)
+		defer func() {
+			if allocator != nil {
+				allocator.Put(b)
+			}
+		}()
+		provider.file, err = sortAndFlush(b, tmpdir)
 		if err != nil {
 			return err
 		}
@@ -63,14 +72,14 @@ func FlushToDiskAsync(logPrefix string, b Buffer, tmpdir string, doFsync bool, l
 }
 
 // FlushToDisk - `doFsync` is true only for 'critical' collectors (which should not loose).
-func FlushToDisk(logPrefix string, b Buffer, tmpdir string, doFsync bool, lvl log.Lvl) (dataProvider, error) {
+func FlushToDisk(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl) (dataProvider, error) {
 	if b.Len() == 0 {
 		return nil, nil
 	}
 
 	var err error
 	provider := &fileDataProvider{reader: nil, wg: &errgroup.Group{}}
-	provider.file, err = sortAndFlush(b, tmpdir, doFsync)
+	provider.file, err = sortAndFlush(b, tmpdir)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +88,7 @@ func FlushToDisk(logPrefix string, b Buffer, tmpdir string, doFsync bool, lvl lo
 	return provider, nil
 }
 
-func sortAndFlush(b Buffer, tmpdir string, doFsync bool) (*os.File, error) {
+func sortAndFlush(b Buffer, tmpdir string) (*os.File, error) {
 	b.Sort()
 
 	// if we are going to create files in the system temp dir, we don't need any
@@ -93,10 +102,6 @@ func sortAndFlush(b Buffer, tmpdir string, doFsync bool) (*os.File, error) {
 	bufferFile, err := os.CreateTemp(tmpdir, "erigon-sortable-buf-")
 	if err != nil {
 		return nil, err
-	}
-
-	if doFsync {
-		defer bufferFile.Sync() //nolint:errcheck
 	}
 
 	w := bufio.NewWriterSize(bufferFile, BufIOSize)
@@ -126,9 +131,14 @@ func (p *fileDataProvider) Wait() error { return p.wg.Wait() }
 func (p *fileDataProvider) Dispose() {
 	if p.file != nil { //invariant: safe to call multiple time
 		p.Wait()
-		_ = p.file.Close()
-		go func(fPath string) { _ = os.Remove(fPath) }(p.file.Name())
+		file := p.file
 		p.file = nil
+
+		go func() {
+			filePath := file.Name()
+			file.Close()
+			_ = os.Remove(filePath)
+		}()
 	}
 }
 

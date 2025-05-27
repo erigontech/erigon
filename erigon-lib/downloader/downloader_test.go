@@ -87,3 +87,20 @@ func TestNoEscape(t *testing.T) {
 	_, err = BuildTorrentIfNeed(ctx, "./../a.seg", dirs.Snap, tf)
 	require.Error(err)
 }
+
+func TestVerifyData(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
+
+	require := require.New(t)
+	dirs := datadir.New(t.TempDir())
+	cfg, err := downloadercfg2.New(context.Background(), dirs, "", lg.Info, 0, 0, 0, 0, 0, nil, nil, "testnet", false, false)
+	require.NoError(err)
+	d, err := New(context.Background(), cfg, log.New(), log.LvlInfo, true)
+	require.NoError(err)
+	defer d.Close()
+
+	err = d.VerifyData(d.ctx, nil, false)
+	require.NoError(err)
+}

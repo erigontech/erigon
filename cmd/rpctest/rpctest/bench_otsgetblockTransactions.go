@@ -19,9 +19,7 @@ package rpctest
 import (
 	"bufio"
 	"fmt"
-	"net/http"
 	"os"
-	"time"
 )
 
 // BenchOtsGetBlockTransactions compares response of Erigon with Geth
@@ -32,9 +30,6 @@ import (
 //	use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
 func BenchOtsGetBlockTransactions(erigonURL, gethURL string, needCompare, visitAllPages bool, latest bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) error {
 	setRoutes(erigonURL, gethURL)
-	var client = &http.Client{
-		Timeout: time.Second * 600,
-	}
 
 	var rec *bufio.Writer
 	var errs *bufio.Writer
@@ -69,11 +64,7 @@ func BenchOtsGetBlockTransactions(erigonURL, gethURL string, needCompare, visitA
 
 	var res CallResult
 
-	reqGen := &RequestGenerator{
-		client: client,
-	}
-
-	reqGen.reqID++
+	reqGen := &RequestGenerator{}
 
 	for bn := blockFrom; bn <= blockTo; bn++ {
 
@@ -81,7 +72,7 @@ func BenchOtsGetBlockTransactions(erigonURL, gethURL string, needCompare, visitA
 		pageEnded := false
 
 		for !pageEnded {
-			reqGen.reqID++
+
 			var b OtsBlockTransactions
 			res = reqGen.Erigon("ots_getBlockTransactions", reqGen.otsGetBlockTransactions(bn, pageCount, 10), &b)
 

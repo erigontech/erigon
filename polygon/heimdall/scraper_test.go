@@ -11,7 +11,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/turbo/testlog"
+	"github.com/erigontech/erigon-lib/testlog"
 )
 
 func TestScrapper_Run_TransientErr(t *testing.T) {
@@ -72,7 +72,7 @@ func TestScrapper_Run_TransientErr(t *testing.T) {
 	)
 
 	transientErrs := []error{ErrNotInMilestoneList, ErrBadGateway}
-	scrapper := newScraper[*Milestone](store, fetcher, time.Millisecond, transientErrs, logger)
+	scrapper := NewScraper[*Milestone]("test", store, fetcher, time.Millisecond, transientErrs, logger)
 
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error {

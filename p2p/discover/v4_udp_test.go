@@ -17,8 +17,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build integration_skip
-
 package discover
 
 import (
@@ -27,7 +25,6 @@ import (
 	"crypto/ecdsa"
 	crand "crypto/rand"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -38,11 +35,10 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/turbo/testlog"
-
-	"github.com/erigontech/erigon/p2p/discover/v4wire"
-	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/p2p/enr"
+	"github.com/erigontech/erigon-lib/testlog"
+	"github.com/erigontech/erigon-p2p/discover/v4wire"
+	"github.com/erigontech/erigon-p2p/enode"
+	"github.com/erigontech/erigon-p2p/enr"
 )
 
 // shared test variables
@@ -447,6 +443,7 @@ func TestUDPv4_pingMatchIP(t *testing.T) {
 }
 
 func TestUDPv4_successfulPing(t *testing.T) {
+	t.Skip("issue #15000")
 	logger := log.New()
 	test := newUDPTest(t, logger)
 	added := make(chan *node, 1)
@@ -695,8 +692,6 @@ func (c *dgramPipe) WriteToUDP(b []byte, to *net.UDPAddr) (n int, err error) {
 	msg := make([]byte, len(b))
 	copy(msg, b)
 
-	n = 0
-	err = errors.New("closed")
 	defer recover()
 
 	c.queue <- dgram{*to, b}

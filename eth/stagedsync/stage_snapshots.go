@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"math/big"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -36,35 +35,31 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-
 	"github.com/anacrolix/torrent"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon-lib/diagnostics"
-	"github.com/erigontech/erigon-lib/kv/temporal"
-
+	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/downloader"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
-	"github.com/erigontech/erigon-lib/etl"
 	protodownloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/prune"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/temporal"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/core/rawdb"
-	coresnaptype "github.com/erigontech/erigon/core/snaptype"
-	"github.com/erigontech/erigon/core/types"
+	state2 "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/state/stats"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
+	"github.com/erigontech/erigon/eth/rawdbreset"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/services"
@@ -74,17 +69,8 @@ import (
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
-const (
-	/*
-		we strive to read indexes from snapshots instead to db... this means that there can be sometimes (e.g when we merged past indexes),
-		a situation when we need to read indexes and we choose to read them from either a corrupt index or an incomplete index.
-		so we need to extend the threshold to > max_merge_segment_size.
-	*/
-	pruneMarkerSafeThreshold = snaptype.Erigon2MergeLimit * 1.5 // 1.5x the merge limit
-)
-
 type SnapshotsCfg struct {
-	db          kv.RwDB
+	db          kv.TemporalRwDB
 	chainConfig chain.Config
 	dirs        datadir.Dirs
 
@@ -95,14 +81,14 @@ type SnapshotsCfg struct {
 
 	caplin           bool
 	blobs            bool
-	agg              *state.Aggregator
+	caplinState      bool
 	silkworm         *silkworm.Silkworm
 	snapshotUploader *snapshotUploader
 	syncConfig       ethconfig.Sync
 	prune            prune.Mode
 }
 
-func StageSnapshotsCfg(db kv.RwDB,
+func StageSnapshotsCfg(db kv.TemporalRwDB,
 	chainConfig chain.Config,
 	syncConfig ethconfig.Sync,
 	dirs datadir.Dirs,
@@ -110,9 +96,9 @@ func StageSnapshotsCfg(db kv.RwDB,
 	snapshotDownloader protodownloader.DownloaderClient,
 	blockReader services.FullBlockReader,
 	notifier *shards.Notifications,
-	agg *state.Aggregator,
 	caplin bool,
 	blobs bool,
+	caplinState bool,
 	silkworm *silkworm.Silkworm,
 	prune prune.Mode,
 ) SnapshotsCfg {
@@ -125,11 +111,11 @@ func StageSnapshotsCfg(db kv.RwDB,
 		blockReader:        blockReader,
 		notifier:           notifier,
 		caplin:             caplin,
-		agg:                agg,
 		silkworm:           silkworm,
 		syncConfig:         syncConfig,
 		blobs:              blobs,
 		prune:              prune,
+		caplinState:        caplinState,
 	}
 
 	if uploadFs := cfg.syncConfig.UploadLocation; len(uploadFs) > 0 {
@@ -276,8 +262,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	})
 
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download header-chain"})
+	agg := cfg.db.(*temporal.DB).Agg().(*state2.Aggregator)
 	// Download only the snapshots that are for the header chain.
-	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.dirs, true /*headerChain=*/, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
+	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.dirs, true, cfg.blobs, cfg.caplinState, cfg.prune, cstate, agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, cfg.syncConfig); err != nil {
 		return err
 	}
 
@@ -286,41 +273,44 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download snapshots"})
-	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.dirs, false /*headerChain=*/, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
+	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.dirs, false, cfg.blobs, cfg.caplinState, cfg.prune, cstate, agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, cfg.syncConfig); err != nil {
 		return err
 	}
+
 	if cfg.notifier.Events != nil {
 		cfg.notifier.Events.OnNewSnapshot()
 	}
 
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "E2 Indexing"})
-	if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.notifier.Events, &cfg.chainConfig); err != nil {
+	if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.notifier.Events); err != nil {
 		return err
-	}
-
-	if cfg.silkworm != nil {
-		if err := cfg.blockReader.Snapshots().(silkworm.CanAddSnapshotsToSilkwarm).AddSnapshotsToSilkworm(cfg.silkworm); err != nil {
-			return err
-		}
 	}
 
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	if err := cfg.agg.BuildOptionalMissedIndices(ctx, indexWorkers); err != nil {
-		return err
-	}
-
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "E3 Indexing"})
-	if err := cfg.agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
+	if err := agg.BuildMissedAccessors(ctx, indexWorkers); err != nil {
 		return err
 	}
 
-	if temporal, ok := tx.(*temporal.Tx); ok {
+	if temporal, ok := tx.(*temporal.RwTx); ok {
 		temporal.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
 	}
 
 	// It's ok to notify before tx.Commit(), because RPCDaemon does read list of files by gRPC (not by reading from db)
 	if cfg.notifier.Events != nil {
 		cfg.notifier.Events.OnNewSnapshot()
+	}
+
+	if cfg.silkworm != nil {
+		repository := silkworm.NewSnapshotsRepository(
+			cfg.silkworm,
+			cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots),
+			agg,
+			logger,
+		)
+		if err := repository.Update(); err != nil {
+			return err
+		}
 	}
 
 	frozenBlocks := cfg.blockReader.FrozenBlocks()
@@ -332,18 +322,19 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Fill DB"})
-	if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, cfg.blockReader, cfg.agg, logger); err != nil {
-		return err
+	if err := rawdbreset.FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, cfg.blockReader, logger); err != nil {
+		return fmt.Errorf("FillDBFromSnapshots: %w", err)
 	}
 
-	if temporal, ok := tx.(*temporal.Tx); ok {
+	if temporal, ok := tx.(*temporal.RwTx); ok {
 		temporal.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
 	}
 
 	{
 		cfg.blockReader.Snapshots().LogStat("download")
 		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.blockReader))
-		tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx).LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
+		aggtx := tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx)
+		stats.LogStats(aggtx, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
 			_, histBlockNumProgress, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
 			return histBlockNumProgress, err
 		})
@@ -352,181 +343,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	return nil
 }
 
-func getPruneMarkerSafeThreshold(blockReader services.FullBlockReader) uint64 {
-	snapProgress := min(blockReader.FrozenBorBlocks(), blockReader.FrozenBlocks())
-	if blockReader.BorSnapshots() == nil {
-		snapProgress = blockReader.FrozenBlocks()
-	}
-	if snapProgress < pruneMarkerSafeThreshold {
-		return 0
-	}
-	return snapProgress - pruneMarkerSafeThreshold
-}
-
-func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, blockReader services.FullBlockReader, agg *state.Aggregator, logger log.Logger) error {
-	startTime := time.Now()
-	blocksAvailable := blockReader.FrozenBlocks()
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
-	pruneMarkerBlockThreshold := getPruneMarkerSafeThreshold(blockReader)
-
-	// updating the progress of further stages (but only forward) that are contained inside of snapshots
-	for _, stage := range []stages.SyncStage{stages.Headers, stages.Bodies, stages.BlockHashes, stages.Senders} {
-		progress, err := stages.GetStageProgress(tx, stage)
-
-		if err != nil {
-			return fmt.Errorf("get %s stage progress to advance: %w", stage, err)
-		}
-		if progress >= blocksAvailable {
-			continue
-		}
-
-		if err = stages.SaveStageProgress(tx, stage, blocksAvailable); err != nil {
-			return fmt.Errorf("advancing %s stage: %w", stage, err)
-		}
-
-		switch stage {
-		case stages.Headers:
-			h2n := etl.NewCollector(logPrefix, dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/2), logger)
-			defer h2n.Close()
-			h2n.SortAndFlushInBackground(true)
-			h2n.LogLvl(log.LvlDebug)
-
-			// fill some small tables from snapshots, in future we may store this data in snapshots also, but
-			// for now easier just store them in db
-			td := big.NewInt(0)
-			blockNumBytes := make([]byte, 8)
-			if err := blockReader.HeadersRange(ctx, func(header *types.Header) error {
-				blockNum, blockHash := header.Number.Uint64(), header.Hash()
-				td.Add(td, header.Difficulty)
-				// What can happen if chaindata is deleted is that maybe header.seg progress is lower or higher than
-				// body.seg progress. In this case we need to skip the header, and "normalize" the progress to keep them in sync.
-				if blockNum > blocksAvailable {
-					return nil // This can actually happen as FrozenBlocks() is SegmentIdMax() and not the last .seg
-				}
-				if !dbg.PruneTotalDifficulty() {
-					if err := rawdb.WriteTd(tx, blockHash, blockNum, td); err != nil {
-						return err
-					}
-				}
-
-				// Write marker for pruning only if we are above our safe threshold
-				if blockNum >= pruneMarkerBlockThreshold || blockNum == 0 {
-					if err := rawdb.WriteCanonicalHash(tx, blockHash, blockNum); err != nil {
-						return err
-					}
-					binary.BigEndian.PutUint64(blockNumBytes, blockNum)
-					if err := h2n.Collect(blockHash[:], blockNumBytes); err != nil {
-						return err
-					}
-					if dbg.PruneTotalDifficulty() {
-						if err := rawdb.WriteTd(tx, blockHash, blockNum, td); err != nil {
-							return err
-						}
-					}
-				}
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-logEvery.C:
-					diagnostics.Send(diagnostics.SnapshotFillDBStageUpdate{
-						Stage: diagnostics.SnapshotFillDBStage{
-							StageName: string(stage),
-							Current:   header.Number.Uint64(),
-							Total:     blocksAvailable,
-						},
-						TimeElapsed: time.Since(startTime).Seconds(),
-					})
-					logger.Info(fmt.Sprintf("[%s] Total difficulty index: %s/%s", logPrefix,
-						common.PrettyCounter(header.Number.Uint64()), common.PrettyCounter(blockReader.FrozenBlocks())))
-				default:
-				}
-				return nil
-			}); err != nil {
-				return err
-			}
-			if err := h2n.Load(tx, kv.HeaderNumber, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
-				return err
-			}
-			canonicalHash, ok, err := blockReader.CanonicalHash(ctx, tx, blocksAvailable)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				return fmt.Errorf("canonical marker not found: %d", blocksAvailable)
-			}
-			if err = rawdb.WriteHeadHeaderHash(tx, canonicalHash); err != nil {
-				return err
-			}
-
-		case stages.Bodies:
-			firstTxNum := blockReader.FirstTxnNumNotInSnapshots()
-			// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
-			if err := rawdb.ResetSequence(tx, kv.EthTx, firstTxNum); err != nil {
-				return err
-			}
-
-			_ = tx.ClearBucket(kv.MaxTxNum)
-			if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-logEvery.C:
-					diagnostics.Send(diagnostics.SnapshotFillDBStageUpdate{
-						Stage: diagnostics.SnapshotFillDBStage{
-							StageName: string(stage),
-							Current:   blockNum,
-							Total:     blocksAvailable,
-						},
-						TimeElapsed: time.Since(startTime).Seconds(),
-					})
-					logger.Info(fmt.Sprintf("[%s] MaxTxNums index: %s/%s", logPrefix, common.PrettyCounter(blockNum), common.PrettyCounter(blockReader.FrozenBlocks())))
-				default:
-				}
-				if baseTxNum+txAmount == 0 {
-					panic(baseTxNum + txAmount) //uint-underflow
-				}
-				maxTxNum := baseTxNum + txAmount - 1
-				// What can happen if chaindata is deleted is that maybe header.seg progress is lower or higher than
-				// body.seg progress. In this case we need to skip the header, and "normalize" the progress to keep them in sync.
-				if blockNum > blocksAvailable {
-					return nil // This can actually happen as FrozenBlocks() is SegmentIdMax() and not the last .seg
-				}
-				if blockNum >= pruneMarkerBlockThreshold || blockNum == 0 {
-					if err := rawdbv3.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
-						return fmt.Errorf("%w. blockNum=%d, maxTxNum=%d", err, blockNum, maxTxNum)
-					}
-				}
-				return nil
-			}); err != nil {
-				return fmt.Errorf("build txNum => blockNum mapping: %w", err)
-			}
-			if blockReader.FrozenBlocks() > 0 {
-				if err := rawdb.AppendCanonicalTxNums(tx, blockReader.FrozenBlocks()+1); err != nil {
-					return err
-				}
-			} else {
-				if err := rawdb.AppendCanonicalTxNums(tx, 0); err != nil {
-					return err
-				}
-			}
-
-		default:
-			diagnostics.Send(diagnostics.SnapshotFillDBStageUpdate{
-				Stage: diagnostics.SnapshotFillDBStage{
-					StageName: string(stage),
-					Current:   blocksAvailable, // as we are done with other stages
-					Total:     blocksAvailable,
-				},
-				TimeElapsed: time.Since(startTime).Seconds(),
-			})
-		}
-	}
-	return nil
-}
-
 func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader services.FullBlockReader) error {
-	pruneThreshold := getPruneMarkerSafeThreshold(blockReader)
+	pruneThreshold := rawdbreset.GetPruneMarkerSafeThreshold(blockReader)
 	if pruneThreshold == 0 {
 		return nil
 	}
@@ -758,22 +576,22 @@ func (u *snapshotUploader) init(ctx context.Context, logger log.Logger) {
 }
 
 func (u *snapshotUploader) maxUploadedHeader() uint64 {
-	var max uint64
+	var _max uint64
 
 	if len(u.files) > 0 {
 		for _, state := range u.files {
 			if state.local && state.remote {
 				if state.info != nil {
 					if state.info.Type.Enum() == coresnaptype.Enums.Headers {
-						if state.info.To > max {
-							max = state.info.To
+						if state.info.To > _max {
+							_max = state.info.To
 						}
 					}
 				} else {
 					if info, _, ok := snaptype.ParseFileName(u.cfg.dirs.Snap, state.file); ok {
 						if info.Type.Enum() == coresnaptype.Enums.Headers {
-							if info.To > max {
-								max = info.To
+							if info.To > _max {
+								_max = info.To
 							}
 						}
 						state.info = &info
@@ -783,7 +601,7 @@ func (u *snapshotUploader) maxUploadedHeader() uint64 {
 		}
 	}
 
-	return max
+	return _max
 }
 
 type dirEntry struct {
@@ -1040,25 +858,25 @@ func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context, blockNum
 		}
 	}
 
-	var min uint64
+	var _min uint64
 
 	for _, info := range lastSegments {
 		if lastInfo, ok := info.Sys().(downloader.SnapInfo); ok {
-			if min == 0 || lastInfo.From() < min {
-				min = lastInfo.From()
+			if _min == 0 || lastInfo.From() < _min {
+				_min = lastInfo.From()
 			}
 		}
 	}
 
 	for segType, info := range lastSegments {
 		if lastInfo, ok := info.Sys().(downloader.SnapInfo); ok {
-			if lastInfo.From() > min {
+			if lastInfo.From() > _min {
 				for _, ent := range entries {
 					if info, err := ent.Info(); err == nil {
 						snapInfo, ok := info.Sys().(downloader.SnapInfo)
 
 						if ok && snapInfo.Type().Enum() == segType &&
-							snapInfo.From() == min {
+							snapInfo.From() == _min {
 							lastSegments[segType] = info
 						}
 					}
@@ -1088,17 +906,17 @@ func (u *snapshotUploader) maxSeedableHeader() uint64 {
 }
 
 func (u *snapshotUploader) minBlockNumber() uint64 {
-	var min uint64
+	var _min uint64
 
 	if list, err := snaptype.Segments(u.cfg.dirs.Snap); err == nil {
 		for _, info := range list {
-			if u.seedable(info) && min == 0 || info.From < min {
-				min = info.From
+			if u.seedable(info) && _min == 0 || info.From < _min {
+				_min = info.From
 			}
 		}
 	}
 
-	return min
+	return _min
 }
 
 func expandHomeDir(dirpath string) string {

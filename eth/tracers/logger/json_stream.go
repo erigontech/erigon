@@ -24,10 +24,11 @@ import (
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/eth/tracers"
 )
 
 // JsonStreamLogger is an EVM state logger and implements Tracer.
@@ -43,11 +44,11 @@ type JsonStreamLogger struct {
 	firstCapture bool
 
 	locations common.Hashes // For sorting
-	storage   map[libcommon.Address]Storage
+	storage   map[common.Address]Storage
 	logs      []StructLog
 	output    []byte //nolint
 	err       error  //nolint
-	env       *vm.EVM
+	env       *tracing.VMContext
 }
 
 // NewStructLogger returns a new logger
@@ -55,7 +56,7 @@ func NewJsonStreamLogger(cfg *LogConfig, ctx context.Context, stream *jsoniter.S
 	logger := &JsonStreamLogger{
 		ctx:          ctx,
 		stream:       stream,
-		storage:      make(map[libcommon.Address]Storage),
+		storage:      make(map[common.Address]Storage),
 		firstCapture: true,
 	}
 	if cfg != nil {
@@ -64,26 +65,26 @@ func NewJsonStreamLogger(cfg *LogConfig, ctx context.Context, stream *jsoniter.S
 	return logger
 }
 
-func (l *JsonStreamLogger) CaptureTxStart(gasLimit uint64) {}
+func (l *JsonStreamLogger) Tracer() *tracers.Tracer {
+	return &tracers.Tracer{
+		Hooks: &tracing.Hooks{
+			OnTxStart: l.OnTxStart,
+			OnOpcode:  l.OnOpcode,
+		},
+	}
+}
 
-func (l *JsonStreamLogger) CaptureTxEnd(restGas uint64) {}
-
-// CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (l *JsonStreamLogger) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (l *JsonStreamLogger) OnTxStart(env *tracing.VMContext, tx types.Transaction, from common.Address) {
 	l.env = env
 }
 
-func (l *JsonStreamLogger) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-}
+// OnOpcode also tracks SLOAD/SSTORE ops to track storage change.
+func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
+	contractAddr := scope.Address()
+	memory := scope.MemoryData()
+	stack := scope.StackData()
 
-// CaptureState logs a new structured log message and pushes it out to the environment
-//
-// CaptureState also tracks SLOAD/SSTORE ops to track storage change.
-func (l *JsonStreamLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
-	contract := scope.Contract
-	memory := scope.Memory
-	stack := scope.Stack
-
+	op := vm.OpCode(typ)
 	select {
 	case <-l.ctx.Done():
 		return
@@ -102,26 +103,26 @@ func (l *JsonStreamLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint6
 	if !l.cfg.DisableStorage {
 		// initialise new changed values storage container for this contract
 		// if not present.
-		if l.storage[contract.Address()] == nil {
-			l.storage[contract.Address()] = make(Storage)
+		if l.storage[contractAddr] == nil {
+			l.storage[contractAddr] = make(Storage)
 		}
 		// capture SLOAD opcodes and record the read entry in the local storage
-		if op == vm.SLOAD && stack.Len() >= 1 {
+		if op == vm.SLOAD && len(stack) >= 1 {
 			var (
-				address = libcommon.Hash(stack.Data[stack.Len()-1].Bytes32())
+				address = common.Hash(stack[len(stack)-1].Bytes32())
 				value   uint256.Int
 			)
-			l.env.IntraBlockState().GetState(contract.Address(), &address, &value)
-			l.storage[contract.Address()][address] = value.Bytes32()
+			l.env.IntraBlockState.GetState(contractAddr, address, &value)
+			l.storage[contractAddr][address] = value.Bytes32()
 			outputStorage = true
 		}
 		// capture SSTORE opcodes and record the written entry in the local storage.
-		if op == vm.SSTORE && stack.Len() >= 2 {
+		if op == vm.SSTORE && len(stack) >= 2 {
 			var (
-				value   = libcommon.Hash(stack.Data[stack.Len()-2].Bytes32())
-				address = libcommon.Hash(stack.Data[stack.Len()-1].Bytes32())
+				value   = common.Hash(stack[len(stack)-2].Bytes32())
+				address = common.Hash(stack[len(stack)-1].Bytes32())
 			)
-			l.storage[contract.Address()][address] = value
+			l.storage[contractAddr][address] = value
 			outputStorage = true
 		}
 	}
@@ -150,7 +151,7 @@ func (l *JsonStreamLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint6
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("stack")
 		l.stream.WriteArrayStart()
-		for i, stackValue := range stack.Data {
+		for i, stackValue := range stack {
 			if i > 0 {
 				l.stream.WriteMore()
 			}
@@ -159,7 +160,7 @@ func (l *JsonStreamLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint6
 		l.stream.WriteArrayEnd()
 	}
 	if !l.cfg.DisableMemory {
-		memData := memory.Data()
+		memData := memory
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("memory")
 		l.stream.WriteArrayStart()
@@ -180,7 +181,7 @@ func (l *JsonStreamLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint6
 		if l.locations != nil {
 			l.locations = l.locations[:0]
 		}
-		s := l.storage[contract.Address()]
+		s := l.storage[contractAddr]
 		for loc := range s {
 			l.locations = append(l.locations, loc)
 		}
@@ -199,16 +200,4 @@ func (l *JsonStreamLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint6
 	}
 	l.stream.WriteObjectEnd()
 	_ = l.stream.Flush()
-}
-
-// CaptureFault implements the Tracer interface to trace an execution fault
-// while running an opcode.
-func (l *JsonStreamLogger) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
-}
-
-// CaptureEnd is called after the call finishes to finalize the tracing.
-func (l *JsonStreamLogger) CaptureEnd(output []byte, usedGas uint64, err error) {
-}
-
-func (l *JsonStreamLogger) CaptureExit(output []byte, usedGas uint64, err error) {
 }
