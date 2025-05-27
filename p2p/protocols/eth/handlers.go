@@ -20,6 +20,7 @@
 package eth
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 
@@ -172,65 +173,77 @@ type ReceiptsGetter interface {
 	GetCachedReceipts(ctx context.Context, blockHash common.Hash) (types.Receipts, bool)
 }
 
-type cachedReceipts struct {
+type CachedReceipts struct {
 	EncodedReceipts []rlp.RawValue
 	Bytes           int // total size of the encoded receipts
 	PendingIndex    int // index of the first not-found receipt in the query
 }
 
-func AnswerGetReceiptsQueryCacheOnly(ctx context.Context, receiptsGetter ReceiptsGetter, query GetReceiptsPacket) (*cachedReceipts, bool, error) {
+func AnswerGetReceiptsQueryCacheOnly(ctx context.Context, receiptsGetter ReceiptsGetter, query GetReceiptsPacket, isEth69 bool) (*CachedReceipts, bool, error) {
 	var (
-		bytes        int
+		numBytes     int
 		receiptsList []rlp.RawValue
 		pendingIndex int
 		needMore     = true
 	)
 
 	for lookups, hash := range query {
-		if bytes >= softResponseLimit || len(receiptsList) >= maxReceiptsServe ||
+		if numBytes >= softResponseLimit || len(receiptsList) >= maxReceiptsServe ||
 			lookups >= 2*maxReceiptsServe {
 			needMore = false
 			break
 		}
-		if receipts, ok := receiptsGetter.GetCachedReceipts(ctx, hash); ok {
-			if encoded, err := rlp.EncodeToBytes(receipts); err != nil {
-				return nil, needMore, fmt.Errorf("failed to encode receipt: %w", err)
-			} else {
-				receiptsList = append(receiptsList, encoded)
-				bytes += len(encoded)
-				pendingIndex = lookups + 1
-			}
-		} else {
+
+		receipts, ok := receiptsGetter.GetCachedReceipts(ctx, hash)
+		if !ok {
 			break
 		}
+
+		var encoded []byte
+		var err error
+		if isEth69 { // eth/69 does not return Bloom field
+			buf := &bytes.Buffer{}
+			if err = receipts.EncodeRLP69(buf); err != nil {
+				return nil, needMore, fmt.Errorf("failed to encode receipt: %w", err)
+			}
+			encoded = buf.Bytes()
+		} else {
+			if encoded, err = rlp.EncodeToBytes(receipts); err != nil {
+				return nil, needMore, fmt.Errorf("failed to encode receipt: %w", err)
+			}
+		}
+
+		receiptsList = append(receiptsList, encoded)
+		numBytes += len(encoded)
+		pendingIndex = lookups + 1
 	}
 	if pendingIndex == len(query) {
 		needMore = false
 	}
-	return &cachedReceipts{
+	return &CachedReceipts{
 		EncodedReceipts: receiptsList,
-		Bytes:           bytes,
+		Bytes:           numBytes,
 		PendingIndex:    pendingIndex,
 	}, needMore, nil
 }
 
-func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGetter ReceiptsGetter, br services.FullBlockReader, db kv.TemporalTx, query GetReceiptsPacket, cachedReceipts *cachedReceipts) ([]rlp.RawValue, error) { //nolint:unparam
+func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGetter ReceiptsGetter, br services.FullBlockReader, db kv.TemporalTx, query GetReceiptsPacket, cachedReceipts *CachedReceipts, isEth69 bool) ([]rlp.RawValue, error) { //nolint:unparam
 	// Gather state data until the fetch or network limits is reached
 	var (
-		bytes        int
+		numBytes     int
 		receipts     []rlp.RawValue
 		pendingIndex int
 	)
 
 	if cachedReceipts != nil {
-		bytes = cachedReceipts.Bytes
+		numBytes = cachedReceipts.Bytes
 		receipts = cachedReceipts.EncodedReceipts
 		pendingIndex = cachedReceipts.PendingIndex
 	}
 
 	for lookups := pendingIndex; lookups < len(query); lookups++ {
 		hash := query[lookups]
-		if bytes >= softResponseLimit || len(receipts) >= maxReceiptsServe ||
+		if numBytes >= softResponseLimit || len(receipts) >= maxReceiptsServe ||
 			lookups >= 2*maxReceiptsServe {
 			break
 		}
@@ -268,12 +281,21 @@ func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGett
 		//}
 
 		// If known, encode and queue for response packet
-		if encoded, err := rlp.EncodeToBytes(results); err != nil {
-			return nil, fmt.Errorf("failed to encode receipt: %w", err)
+		var encoded []byte
+		if isEth69 && results != nil { // if nil use EncodeToBytes for empty byte array
+			buf := &bytes.Buffer{}
+			if err = results.EncodeRLP69(buf); err != nil {
+				return nil, fmt.Errorf("failed to encode receipt: %w", err)
+			}
+			encoded = buf.Bytes()
 		} else {
-			receipts = append(receipts, encoded)
-			bytes += len(encoded)
+			if encoded, err = rlp.EncodeToBytes(results); err != nil {
+				return nil, fmt.Errorf("failed to encode receipt: %w", err)
+			}
 		}
+
+		receipts = append(receipts, encoded)
+		numBytes += len(encoded)
 	}
 	return receipts, nil
 }

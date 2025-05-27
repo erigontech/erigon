@@ -584,15 +584,23 @@ func (cs *MultiClient) getBlockBodies66(ctx context.Context, inreq *proto_sentry
 }
 
 func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient proto_sentry.SentryClient) error {
+	return cs.getReceiptsInner(ctx, inreq, sentryClient, false)
+}
+
+func (cs *MultiClient) getReceipts69(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient proto_sentry.SentryClient) error {
+	return cs.getReceiptsInner(ctx, inreq, sentryClient, true)
+}
+
+func (cs *MultiClient) getReceiptsInner(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient proto_sentry.SentryClient, isEth69 bool) error {
 	var query eth.GetReceiptsPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getReceipts66: %w, data: %x", err, inreq.Data)
 	}
-	cachedReceipts, needMore, err := eth.AnswerGetReceiptsQueryCacheOnly(ctx, cs.ethApiWrapper, query.GetReceiptsPacket)
+	cachedReceipts, needMore, err := eth.AnswerGetReceiptsQueryCacheOnly(ctx, cs.ethApiWrapper, query.GetReceiptsPacket, isEth69)
 	if err != nil {
 		return err
 	}
-	receiptsList := []rlp.RawValue{}
+	var receiptsList []rlp.RawValue
 	if cachedReceipts != nil {
 		receiptsList = cachedReceipts.EncodedReceipts
 	}
@@ -608,7 +616,7 @@ func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.In
 			return err
 		}
 		defer tx.Rollback()
-		receiptsList, err = eth.AnswerGetReceiptsQuery(ctx, cs.ChainConfig, cs.ethApiWrapper, cs.blockReader, tx, query.GetReceiptsPacket, cachedReceipts)
+		receiptsList, err = eth.AnswerGetReceiptsQuery(ctx, cs.ChainConfig, cs.ethApiWrapper, cs.blockReader, tx, query.GetReceiptsPacket, cachedReceipts, isEth69)
 		if err != nil {
 			return err
 		}
@@ -641,14 +649,26 @@ func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.In
 
 // blockRange69 handles incoming BLOCK_RANGE_UPDATE messages
 func (cs *MultiClient) blockRange69(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient proto_sentry.SentryClient) error {
-	//	//cs.Bd.AddToPrefetch(request.Block.Header(), request.Block.RawBody())
-	//	//outreq := proto_sentry.PeerLatestBlockRequest{
-	//	//	PeerId:            inreq.PeerId,
-	//	//	LatestBlockHeight: request.Block.NumberU64(),
-	//	}
-	//	if _, err1 := sentryClient.PeerLatestBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
-	//		cs.logger.Error("Could not send min block for peer", "err", err1)
-	//	}
+	var query eth.BlockRangeUpdatePacket
+	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
+		return fmt.Errorf("decoding getReceipts66: %w, data: %x", err, inreq.Data)
+	}
+
+	outreq := proto_sentry.PeerLatestBlockRequest{
+		PeerId:            inreq.PeerId,
+		LatestBlockHeight: query.Latest,
+	}
+	if _, err1 := sentryClient.PeerLatestBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
+		cs.logger.Error("Could not send min block for peer", "err", err1)
+	}
+
+	outreq2 := proto_sentry.PeerMinimumBlockRequest{
+		PeerId:         inreq.PeerId,
+		MinBlockHeight: query.Earliest,
+	}
+	if _, err1 := sentryClient.PeerMinimumBlock(ctx, &outreq2, &grpc.EmptyCallOption{}); err1 != nil {
+		cs.logger.Error("Could not send min block for peer", "err", err1)
+	} // TODO: do these in one GRPC request
 
 	return nil
 }
@@ -699,6 +719,8 @@ func (cs *MultiClient) handleInboundMessage(ctx context.Context, inreq *proto_se
 		return cs.receipts66(ctx, inreq, sentry)
 	case proto_sentry.MessageId_GET_RECEIPTS_66:
 		return cs.getReceipts66(ctx, inreq, sentry)
+	case proto_sentry.MessageId_GET_RECEIPTS_69:
+		return cs.getReceipts69(ctx, inreq, sentry)
 	case proto_sentry.MessageId_BLOCK_RANGE_UPDATE_69:
 		return cs.blockRange69(ctx, inreq, sentry)
 	default:

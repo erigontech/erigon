@@ -466,3 +466,7 @@ func (back *RemoteBackend) Peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
 
 	return peers, nil
 }
+
+func (back *RemoteBackend) EarliestBlockNum(ctx context.Context) (uint64, error) {
+	return back.EarliestBlockNum(ctx)
+}

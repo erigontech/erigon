@@ -95,6 +95,13 @@ type receiptRLP struct {
 	Logs              []*Log
 }
 
+// receiptRLP69 is the post-eth/69 consensus encoding of a receipt.
+type receiptRLP69 struct {
+	PostStateOrStatus []byte
+	CumulativeGasUsed uint64
+	Logs              []*Log
+}
+
 // storedReceiptRLP is the storage encoding of a receipt.
 type storedReceiptRLP struct {
 	Type              uint8
@@ -140,8 +147,30 @@ func (r Receipt) EncodeRLP(w io.Writer) error {
 	return rlp.Encode(w, buf.Bytes())
 }
 
+// EncodeRLPNoBloom implements rlp.Encoder for post-eth/69 messages, and flattens the consensus fields of a receipt
+// into an RLP stream. If no post state is present, byzantium fork is assumed.
+func (r Receipt) EncodeRLPNoBloom(w io.Writer) error {
+	data := &receiptRLP69{r.statusEncoding(), r.CumulativeGasUsed, r.Logs}
+	if r.Type == LegacyTxType {
+		return rlp.Encode(w, data)
+	}
+	buf := encodeBufferPool.Get().(*bytes.Buffer)
+	defer encodeBufferPool.Put(buf)
+	buf.Reset()
+	if err := r.encodeTyped69(data, buf); err != nil {
+		return err
+	}
+	return rlp.Encode(w, buf.Bytes())
+}
+
 // encodeTyped writes the canonical encoding of a typed receipt to w.
 func (r *Receipt) encodeTyped(data *receiptRLP, w *bytes.Buffer) error {
+	w.WriteByte(r.Type)
+	return rlp.Encode(w, data)
+}
+
+// encodeTyped writes the post-eth/69 canonical encoding of a typed receipt to w.
+func (r *Receipt) encodeTyped69(data *receiptRLP69, w *bytes.Buffer) error {
 	w.WriteByte(r.Type)
 	return rlp.Encode(w, data)
 }
@@ -474,49 +503,59 @@ func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 
 // DeriveFields fills the receipts with their computed fields based on consensus
 // data and contextual infos like containing block and transactions.
-func (r Receipts) DeriveFields(hash common.Hash, number uint64, txs Transactions, senders []common.Address) error {
+func (rs Receipts) DeriveFields(hash common.Hash, number uint64, txs Transactions, senders []common.Address) error {
 	logIndex := uint(0) // logIdx is unique within the block and starts from 0
-	if len(txs) != len(r) {
-		return fmt.Errorf("transaction and receipt count mismatch, txn count = %d, receipts count = %d", len(txs), len(r))
+	if len(txs) != len(rs) {
+		return fmt.Errorf("transaction and receipt count mismatch, txn count = %d, receipts count = %d", len(txs), len(rs))
 	}
 	if len(senders) != len(txs) {
 		return fmt.Errorf("transaction and senders count mismatch, txn count = %d, senders count = %d", len(txs), len(senders))
 	}
 
 	blockNumber := new(big.Int).SetUint64(number)
-	for i := 0; i < len(r); i++ {
+	for i := 0; i < len(rs); i++ {
 		// The transaction type and hash can be retrieved from the transaction itself
-		r[i].Type = txs[i].Type()
-		r[i].TxHash = txs[i].Hash()
+		rs[i].Type = txs[i].Type()
+		rs[i].TxHash = txs[i].Hash()
 
 		// block location fields
-		r[i].BlockHash = hash
-		r[i].BlockNumber = blockNumber
-		r[i].TransactionIndex = uint(i)
+		rs[i].BlockHash = hash
+		rs[i].BlockNumber = blockNumber
+		rs[i].TransactionIndex = uint(i)
 
 		// The contract address can be derived from the transaction itself
 		if txs[i].GetTo() == nil {
 			// If one wants to deploy a contract, one needs to send a transaction that does not have `To` field
 			// and then the address of the contract one is creating this way will depend on the `tx.From`
 			// and the nonce of the creating account (which is `tx.From`).
-			r[i].ContractAddress = crypto.CreateAddress(senders[i], txs[i].GetNonce())
+			rs[i].ContractAddress = crypto.CreateAddress(senders[i], txs[i].GetNonce())
 		}
 		// The used gas can be calculated based on previous r
 		if i == 0 {
-			r[i].GasUsed = r[i].CumulativeGasUsed
+			rs[i].GasUsed = rs[i].CumulativeGasUsed
 		} else {
-			r[i].GasUsed = r[i].CumulativeGasUsed - r[i-1].CumulativeGasUsed
+			rs[i].GasUsed = rs[i].CumulativeGasUsed - rs[i-1].CumulativeGasUsed
 		}
 		// The derived log fields can simply be set from the block and transaction
-		for j := 0; j < len(r[i].Logs); j++ {
-			r[i].Logs[j].BlockNumber = number
-			r[i].Logs[j].BlockHash = hash
-			r[i].Logs[j].TxHash = r[i].TxHash
-			r[i].Logs[j].TxIndex = uint(i)
-			r[i].Logs[j].Index = logIndex
+		for j := 0; j < len(rs[i].Logs); j++ {
+			rs[i].Logs[j].BlockNumber = number
+			rs[i].Logs[j].BlockHash = hash
+			rs[i].Logs[j].TxHash = rs[i].TxHash
+			rs[i].Logs[j].TxIndex = uint(i)
+			rs[i].Logs[j].Index = logIndex
 			logIndex++
 		}
 	}
+	return nil
+}
+
+func (rs *Receipts) EncodeRLP69(w io.Writer) error {
+	for _, receipt := range *rs {
+		if err := receipt.EncodeRLP(w); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 

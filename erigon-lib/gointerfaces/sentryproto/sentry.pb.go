@@ -64,7 +64,7 @@ const (
 	MessageId_NEW_POOLED_TRANSACTION_HASHES_68 MessageId = 32
 	// ======= eth 69 protocol ===========
 	MessageId_STATUS_69             MessageId = 33
-	MessageId_RECEIPTS_69           MessageId = 34
+	MessageId_GET_RECEIPTS_69       MessageId = 34
 	MessageId_BLOCK_RANGE_UPDATE_69 MessageId = 35
 )
 
@@ -104,7 +104,7 @@ var (
 		31: "POOLED_TRANSACTIONS_66",
 		32: "NEW_POOLED_TRANSACTION_HASHES_68",
 		33: "STATUS_69",
-		34: "RECEIPTS_69",
+		34: "GET_RECEIPTS_69",
 		35: "BLOCK_RANGE_UPDATE_69",
 	}
 	MessageId_value = map[string]int32{
@@ -141,7 +141,7 @@ var (
 		"POOLED_TRANSACTIONS_66":           31,
 		"NEW_POOLED_TRANSACTION_HASHES_68": 32,
 		"STATUS_69":                        33,
-		"RECEIPTS_69":                      34,
+		"GET_RECEIPTS_69":                  34,
 		"BLOCK_RANGE_UPDATE_69":            35,
 	}
 )
@@ -1597,7 +1597,7 @@ const file_p2psentry_sentry_proto_rawDesc = "" +
 	"\n" +
 	"Disconnect\x10\x01\"(\n" +
 	"\fAddPeerReply\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess*\xbb\x06\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess*\xbf\x06\n" +
 	"\tMessageId\x12\r\n" +
 	"\tSTATUS_65\x10\x00\x12\x18\n" +
 	"\x14GET_BLOCK_HEADERS_65\x10\x01\x12\x14\n" +
@@ -1632,8 +1632,8 @@ const file_p2psentry_sentry_proto_rawDesc = "" +
 	"\vRECEIPTS_66\x10\x1e\x12\x1a\n" +
 	"\x16POOLED_TRANSACTIONS_66\x10\x1f\x12$\n" +
 	" NEW_POOLED_TRANSACTION_HASHES_68\x10 \x12\r\n" +
-	"\tSTATUS_69\x10!\x12\x0f\n" +
-	"\vRECEIPTS_69\x10\"\x12\x19\n" +
+	"\tSTATUS_69\x10!\x12\x13\n" +
+	"\x0fGET_RECEIPTS_69\x10\"\x12\x19\n" +
 	"\x15BLOCK_RANGE_UPDATE_69\x10#*\x17\n" +
 	"\vPenaltyKind\x12\b\n" +
 	"\x04Kick\x10\x00*A\n" +
