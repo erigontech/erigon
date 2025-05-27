@@ -630,7 +630,7 @@ func (x *PenalizePeerRequest) GetPenalty() PenaltyKind {
 	return PenaltyKind_Kick
 }
 
-type PeerLatestBlockRequest struct {
+type SetPeerLatestBlockRequest struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	PeerId            *typesproto.H512       `protobuf:"bytes,1,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
 	LatestBlockHeight uint64                 `protobuf:"varint,2,opt,name=latest_block_height,json=latestBlockHeight,proto3" json:"latest_block_height,omitempty"`
@@ -638,20 +638,20 @@ type PeerLatestBlockRequest struct {
 	sizeCache         protoimpl.SizeCache
 }
 
-func (x *PeerLatestBlockRequest) Reset() {
-	*x = PeerLatestBlockRequest{}
+func (x *SetPeerLatestBlockRequest) Reset() {
+	*x = SetPeerLatestBlockRequest{}
 	mi := &file_p2psentry_sentry_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *PeerLatestBlockRequest) String() string {
+func (x *SetPeerLatestBlockRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*PeerLatestBlockRequest) ProtoMessage() {}
+func (*SetPeerLatestBlockRequest) ProtoMessage() {}
 
-func (x *PeerLatestBlockRequest) ProtoReflect() protoreflect.Message {
+func (x *SetPeerLatestBlockRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_p2psentry_sentry_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -663,26 +663,26 @@ func (x *PeerLatestBlockRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use PeerLatestBlockRequest.ProtoReflect.Descriptor instead.
-func (*PeerLatestBlockRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use SetPeerLatestBlockRequest.ProtoReflect.Descriptor instead.
+func (*SetPeerLatestBlockRequest) Descriptor() ([]byte, []int) {
 	return file_p2psentry_sentry_proto_rawDescGZIP(), []int{6}
 }
 
-func (x *PeerLatestBlockRequest) GetPeerId() *typesproto.H512 {
+func (x *SetPeerLatestBlockRequest) GetPeerId() *typesproto.H512 {
 	if x != nil {
 		return x.PeerId
 	}
 	return nil
 }
 
-func (x *PeerLatestBlockRequest) GetLatestBlockHeight() uint64 {
+func (x *SetPeerLatestBlockRequest) GetLatestBlockHeight() uint64 {
 	if x != nil {
 		return x.LatestBlockHeight
 	}
 	return 0
 }
 
-type PeerMinimumBlockRequest struct {
+type SetPeerMinimumBlockRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	PeerId         *typesproto.H512       `protobuf:"bytes,1,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
 	MinBlockHeight uint64                 `protobuf:"varint,2,opt,name=min_block_height,json=minBlockHeight,proto3" json:"min_block_height,omitempty"`
@@ -690,20 +690,20 @@ type PeerMinimumBlockRequest struct {
 	sizeCache      protoimpl.SizeCache
 }
 
-func (x *PeerMinimumBlockRequest) Reset() {
-	*x = PeerMinimumBlockRequest{}
+func (x *SetPeerMinimumBlockRequest) Reset() {
+	*x = SetPeerMinimumBlockRequest{}
 	mi := &file_p2psentry_sentry_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *PeerMinimumBlockRequest) String() string {
+func (x *SetPeerMinimumBlockRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*PeerMinimumBlockRequest) ProtoMessage() {}
+func (*SetPeerMinimumBlockRequest) ProtoMessage() {}
 
-func (x *PeerMinimumBlockRequest) ProtoReflect() protoreflect.Message {
+func (x *SetPeerMinimumBlockRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_p2psentry_sentry_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -715,19 +715,19 @@ func (x *PeerMinimumBlockRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use PeerMinimumBlockRequest.ProtoReflect.Descriptor instead.
-func (*PeerMinimumBlockRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use SetPeerMinimumBlockRequest.ProtoReflect.Descriptor instead.
+func (*SetPeerMinimumBlockRequest) Descriptor() ([]byte, []int) {
 	return file_p2psentry_sentry_proto_rawDescGZIP(), []int{7}
 }
 
-func (x *PeerMinimumBlockRequest) GetPeerId() *typesproto.H512 {
+func (x *SetPeerMinimumBlockRequest) GetPeerId() *typesproto.H512 {
 	if x != nil {
 		return x.PeerId
 	}
 	return nil
 }
 
-func (x *PeerMinimumBlockRequest) GetMinBlockHeight() uint64 {
+func (x *SetPeerMinimumBlockRequest) GetMinBlockHeight() uint64 {
 	if x != nil {
 		return x.MinBlockHeight
 	}
@@ -1540,11 +1540,11 @@ const file_p2psentry_sentry_proto_rawDesc = "" +
 	"\x05peers\x18\x01 \x03(\v2\v.types.H512R\x05peers\"j\n" +
 	"\x13PenalizePeerRequest\x12$\n" +
 	"\apeer_id\x18\x01 \x01(\v2\v.types.H512R\x06peerId\x12-\n" +
-	"\apenalty\x18\x02 \x01(\x0e2\x13.sentry.PenaltyKindR\apenalty\"n\n" +
-	"\x16PeerLatestBlockRequest\x12$\n" +
+	"\apenalty\x18\x02 \x01(\x0e2\x13.sentry.PenaltyKindR\apenalty\"q\n" +
+	"\x19SetPeerLatestBlockRequest\x12$\n" +
 	"\apeer_id\x18\x01 \x01(\v2\v.types.H512R\x06peerId\x12.\n" +
-	"\x13latest_block_height\x18\x02 \x01(\x04R\x11latestBlockHeight\"i\n" +
-	"\x17PeerMinimumBlockRequest\x12$\n" +
+	"\x13latest_block_height\x18\x02 \x01(\x04R\x11latestBlockHeight\"l\n" +
+	"\x1aSetPeerMinimumBlockRequest\x12$\n" +
 	"\apeer_id\x18\x01 \x01(\v2\v.types.H512R\x06peerId\x12(\n" +
 	"\x10min_block_height\x18\x02 \x01(\x04R\x0eminBlockHeight\"\"\n" +
 	"\x0eAddPeerRequest\x12\x10\n" +
@@ -1642,12 +1642,12 @@ const file_p2psentry_sentry_proto_rawDesc = "" +
 	"\x05ETH66\x10\x01\x12\t\n" +
 	"\x05ETH67\x10\x02\x12\t\n" +
 	"\x05ETH68\x10\x03\x12\t\n" +
-	"\x05ETH69\x10\x042\xaf\b\n" +
+	"\x05ETH69\x10\x042\xbb\b\n" +
 	"\x06Sentry\x127\n" +
 	"\tSetStatus\x12\x12.sentry.StatusData\x1a\x16.sentry.SetStatusReply\x12C\n" +
-	"\fPenalizePeer\x12\x1b.sentry.PenalizePeerRequest\x1a\x16.google.protobuf.Empty\x12I\n" +
-	"\x0fPeerLatestBlock\x12\x1e.sentry.PeerLatestBlockRequest\x1a\x16.google.protobuf.Empty\x12K\n" +
-	"\x10PeerMinimumBlock\x12\x1f.sentry.PeerMinimumBlockRequest\x1a\x16.google.protobuf.Empty\x12;\n" +
+	"\fPenalizePeer\x12\x1b.sentry.PenalizePeerRequest\x1a\x16.google.protobuf.Empty\x12O\n" +
+	"\x12SetPeerLatestBlock\x12!.sentry.SetPeerLatestBlockRequest\x1a\x16.google.protobuf.Empty\x12Q\n" +
+	"\x13SetPeerMinimumBlock\x12\".sentry.SetPeerMinimumBlockRequest\x1a\x16.google.protobuf.Empty\x12;\n" +
 	"\tHandShake\x12\x16.google.protobuf.Empty\x1a\x16.sentry.HandShakeReply\x12P\n" +
 	"\x15SendMessageByMinBlock\x12$.sentry.SendMessageByMinBlockRequest\x1a\x11.sentry.SentPeers\x12D\n" +
 	"\x0fSendMessageById\x12\x1e.sentry.SendMessageByIdRequest\x1a\x11.sentry.SentPeers\x12V\n" +
@@ -1687,8 +1687,8 @@ var file_p2psentry_sentry_proto_goTypes = []any{
 	(*SendMessageToRandomPeersRequest)(nil), // 7: sentry.SendMessageToRandomPeersRequest
 	(*SentPeers)(nil),                       // 8: sentry.SentPeers
 	(*PenalizePeerRequest)(nil),             // 9: sentry.PenalizePeerRequest
-	(*PeerLatestBlockRequest)(nil),          // 10: sentry.PeerLatestBlockRequest
-	(*PeerMinimumBlockRequest)(nil),         // 11: sentry.PeerMinimumBlockRequest
+	(*SetPeerLatestBlockRequest)(nil),       // 10: sentry.SetPeerLatestBlockRequest
+	(*SetPeerMinimumBlockRequest)(nil),      // 11: sentry.SetPeerMinimumBlockRequest
 	(*AddPeerRequest)(nil),                  // 12: sentry.AddPeerRequest
 	(*InboundMessage)(nil),                  // 13: sentry.InboundMessage
 	(*Forks)(nil),                           // 14: sentry.Forks
@@ -1720,8 +1720,8 @@ var file_p2psentry_sentry_proto_depIdxs = []int32{
 	28, // 5: sentry.SentPeers.peers:type_name -> types.H512
 	28, // 6: sentry.PenalizePeerRequest.peer_id:type_name -> types.H512
 	1,  // 7: sentry.PenalizePeerRequest.penalty:type_name -> sentry.PenaltyKind
-	28, // 8: sentry.PeerLatestBlockRequest.peer_id:type_name -> types.H512
-	28, // 9: sentry.PeerMinimumBlockRequest.peer_id:type_name -> types.H512
+	28, // 8: sentry.SetPeerLatestBlockRequest.peer_id:type_name -> types.H512
+	28, // 9: sentry.SetPeerMinimumBlockRequest.peer_id:type_name -> types.H512
 	0,  // 10: sentry.InboundMessage.id:type_name -> sentry.MessageId
 	28, // 11: sentry.InboundMessage.peer_id:type_name -> types.H512
 	29, // 12: sentry.Forks.genesis:type_name -> types.H256
@@ -1739,8 +1739,8 @@ var file_p2psentry_sentry_proto_depIdxs = []int32{
 	3,  // 24: sentry.PeerEvent.event_id:type_name -> sentry.PeerEvent.PeerEventId
 	15, // 25: sentry.Sentry.SetStatus:input_type -> sentry.StatusData
 	9,  // 26: sentry.Sentry.PenalizePeer:input_type -> sentry.PenalizePeerRequest
-	10, // 27: sentry.Sentry.PeerLatestBlock:input_type -> sentry.PeerLatestBlockRequest
-	11, // 28: sentry.Sentry.PeerMinimumBlock:input_type -> sentry.PeerMinimumBlockRequest
+	10, // 27: sentry.Sentry.SetPeerLatestBlock:input_type -> sentry.SetPeerLatestBlockRequest
+	11, // 28: sentry.Sentry.SetPeerMinimumBlock:input_type -> sentry.SetPeerMinimumBlockRequest
 	31, // 29: sentry.Sentry.HandShake:input_type -> google.protobuf.Empty
 	5,  // 30: sentry.Sentry.SendMessageByMinBlock:input_type -> sentry.SendMessageByMinBlockRequest
 	6,  // 31: sentry.Sentry.SendMessageById:input_type -> sentry.SendMessageByIdRequest
@@ -1755,8 +1755,8 @@ var file_p2psentry_sentry_proto_depIdxs = []int32{
 	31, // 40: sentry.Sentry.NodeInfo:input_type -> google.protobuf.Empty
 	16, // 41: sentry.Sentry.SetStatus:output_type -> sentry.SetStatusReply
 	31, // 42: sentry.Sentry.PenalizePeer:output_type -> google.protobuf.Empty
-	31, // 43: sentry.Sentry.PeerLatestBlock:output_type -> google.protobuf.Empty
-	31, // 44: sentry.Sentry.PeerMinimumBlock:output_type -> google.protobuf.Empty
+	31, // 43: sentry.Sentry.SetPeerLatestBlock:output_type -> google.protobuf.Empty
+	31, // 44: sentry.Sentry.SetPeerMinimumBlock:output_type -> google.protobuf.Empty
 	17, // 45: sentry.Sentry.HandShake:output_type -> sentry.HandShakeReply
 	8,  // 46: sentry.Sentry.SendMessageByMinBlock:output_type -> sentry.SentPeers
 	8,  // 47: sentry.Sentry.SendMessageById:output_type -> sentry.SentPeers

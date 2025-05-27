@@ -901,7 +901,7 @@ func (ss *GrpcServer) PenalizePeer(_ context.Context, req *proto_sentry.Penalize
 	return &emptypb.Empty{}, nil
 }
 
-func (ss *GrpcServer) PeerLatestBlock(_ context.Context, req *proto_sentry.PeerLatestBlockRequest) (*emptypb.Empty, error) {
+func (ss *GrpcServer) SetPeerLatestBlock(_ context.Context, req *proto_sentry.SetPeerLatestBlockRequest) (*emptypb.Empty, error) {
 	peerID := ConvertH512ToPeerID(req.PeerId)
 	if peerInfo := ss.getPeer(peerID); peerInfo != nil {
 		peerInfo.SetIncreasedHeight(req.LatestBlockHeight)
@@ -909,7 +909,7 @@ func (ss *GrpcServer) PeerLatestBlock(_ context.Context, req *proto_sentry.PeerL
 	return &emptypb.Empty{}, nil
 }
 
-func (ss *GrpcServer) PeerMinimumBlock(_ context.Context, req *proto_sentry.PeerMinimumBlockRequest) (*emptypb.Empty, error) {
+func (ss *GrpcServer) SetPeerMinimumBlock(_ context.Context, req *proto_sentry.SetPeerMinimumBlockRequest) (*emptypb.Empty, error) {
 	peerID := ConvertH512ToPeerID(req.PeerId)
 	if peerInfo := ss.getPeer(peerID); peerInfo != nil {
 		peerInfo.SetNewMinBlock(req.MinBlockHeight)

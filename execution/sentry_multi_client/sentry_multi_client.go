@@ -387,12 +387,12 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 			}
 		}
 	}
-	outreq := proto_sentry.PeerLatestBlockRequest{
+	outreq := proto_sentry.SetPeerLatestBlockRequest{
 		PeerId:            peerID,
 		LatestBlockHeight: highestBlock,
 	}
-	if _, err1 := sentryClient.PeerLatestBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
-		cs.logger.Error("Could not send min block for peer", "err", err1)
+	if _, err1 := sentryClient.SetPeerLatestBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
+		cs.logger.Error("Could not send latest block for peer", "err", err1)
 	}
 	return nil
 }
@@ -465,12 +465,12 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 		return fmt.Errorf("singleHeaderAsSegment failed: %w", err)
 	}
 	cs.Bd.AddToPrefetch(request.Block.Header(), request.Block.RawBody())
-	outreq := proto_sentry.PeerLatestBlockRequest{
+	outreq := proto_sentry.SetPeerLatestBlockRequest{
 		PeerId:            inreq.PeerId,
 		LatestBlockHeight: request.Block.NumberU64(),
 	}
-	if _, err1 := sentryClient.PeerLatestBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
-		cs.logger.Error("Could not send min block for peer", "err", err1)
+	if _, err1 := sentryClient.SetPeerLatestBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
+		cs.logger.Error("Could not send latest block for peer", "err", err1)
 	}
 	cs.logger.Trace(fmt.Sprintf("NewBlockMsg{blockNumber: %d} from [%s]", request.Block.NumberU64(), sentry.ConvertH512ToPeerID(inreq.PeerId)))
 	return nil
@@ -654,19 +654,17 @@ func (cs *MultiClient) blockRange69(ctx context.Context, inreq *proto_sentry.Inb
 		return fmt.Errorf("decoding getReceipts66: %w, data: %x", err, inreq.Data)
 	}
 
-	outreq := proto_sentry.PeerLatestBlockRequest{
+	if _, err1 := sentryClient.SetPeerLatestBlock(ctx, &proto_sentry.SetPeerLatestBlockRequest{
 		PeerId:            inreq.PeerId,
 		LatestBlockHeight: query.Latest,
-	}
-	if _, err1 := sentryClient.PeerLatestBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
-		cs.logger.Error("Could not send min block for peer", "err", err1)
+	}, &grpc.EmptyCallOption{}); err1 != nil {
+		cs.logger.Error("Could not send latest block for peer", "err", err1)
 	}
 
-	outreq2 := proto_sentry.PeerMinimumBlockRequest{
+	if _, err1 := sentryClient.SetPeerMinimumBlock(ctx, &proto_sentry.SetPeerMinimumBlockRequest{
 		PeerId:         inreq.PeerId,
 		MinBlockHeight: query.Earliest,
-	}
-	if _, err1 := sentryClient.PeerMinimumBlock(ctx, &outreq2, &grpc.EmptyCallOption{}); err1 != nil {
+	}, &grpc.EmptyCallOption{}); err1 != nil {
 		cs.logger.Error("Could not send min block for peer", "err", err1)
 	} // TODO: do these in one GRPC request
 

@@ -138,12 +138,12 @@ func (c *SentryClientDirect) PenalizePeer(ctx context.Context, in *sentryproto.P
 	return c.server.PenalizePeer(ctx, in)
 }
 
-func (c *SentryClientDirect) PeerLatestBlock(ctx context.Context, in *sentryproto.PeerLatestBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-	return c.server.PeerLatestBlock(ctx, in)
+func (c *SentryClientDirect) SetPeerLatestBlock(ctx context.Context, in *sentryproto.SetPeerLatestBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	return c.server.SetPeerLatestBlock(ctx, in)
 }
 
-func (c *SentryClientDirect) PeerMinimumBlock(ctx context.Context, in *sentryproto.PeerMinimumBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-	return c.server.PeerMinimumBlock(ctx, in)
+func (c *SentryClientDirect) SetPeerMinimumBlock(ctx context.Context, in *sentryproto.SetPeerMinimumBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	return c.server.SetPeerMinimumBlock(ctx, in)
 }
 
 func (c *SentryClientDirect) SendMessageByMinBlock(ctx context.Context, in *sentryproto.SendMessageByMinBlockRequest, opts ...grpc.CallOption) (*sentryproto.SentPeers, error) {
