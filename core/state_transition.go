@@ -74,7 +74,7 @@ type StateTransition struct {
 	initialGas   uint64
 	value        *uint256.Int
 	data         []byte
-	state        evmtypes.IntraBlockState
+	state        *state.IntraBlockState
 	evm          *vm.EVM
 
 	//some pre-allocated intermediate variables
@@ -141,7 +141,7 @@ func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailou
 		blockContext := evm.Context
 		blockContext.Coinbase = state.SystemAddress
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			ret, _, err := SysCallContractWithBlockContext(contract, data, evm.ChainConfig(), evm.IntraBlockState(), blockContext, engine, true /* constCall */, nil)
+			ret, _, err := SysCallContractWithBlockContext(contract, data, evm.ChainConfig(), evm.IntraBlockState(), blockContext, true, nil, evm.Config())
 			return ret, err
 		}
 		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
@@ -360,7 +360,7 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, false)
 
 	result := &evmtypes.ExecutionResult{
-		UsedGas:             st.gasUsed(),
+		GasUsed:             st.gasUsed(),
 		Err:                 vmerr,
 		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
 		ReturnData:          ret,
@@ -535,7 +535,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	}
 
 	result := &evmtypes.ExecutionResult{
-		UsedGas:             st.gasUsed(),
+		GasUsed:             st.gasUsed(),
 		Err:                 vmerr,
 		Reverted:            vmerr == vm.ErrExecutionReverted,
 		ReturnData:          ret,

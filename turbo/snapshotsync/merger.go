@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common/background"
@@ -17,7 +18,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
-	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 )
 
 type Merger struct {
@@ -52,7 +52,7 @@ func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toM
 			}
 			aggFrom := r.To() - span
 			toMerge = append(toMerge, NewRange(aggFrom, r.To()))
-			for currentRanges[i].From() > aggFrom {
+			for i >= 0 && currentRanges[i].From() > aggFrom {
 				i--
 			}
 			break

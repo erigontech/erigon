@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -100,10 +101,10 @@ func TestGenesisBlockRoots(t *testing.T) {
 	block, _, err = core.GenesisToBlock(core.TestGenesisBlock(), datadir.New(t.TempDir()), log.Root())
 	require.NoError(err)
 	if block.Root() != params.TestGenesisStateRoot {
-		t.Errorf("wrong Chiado genesis state root, got %v, want %v", block.Root(), params.TestGenesisStateRoot)
+		t.Errorf("wrong test genesis state root, got %v, want %v", block.Root(), params.TestGenesisStateRoot)
 	}
 	if block.Hash() != params.TestGenesisHash {
-		t.Errorf("wrong Chiado genesis hash, got %v, want %v", block.Hash(), params.TestGenesisHash)
+		t.Errorf("wrong test genesis hash, got %v, want %v", block.Hash(), params.TestGenesisHash)
 	}
 }
 
@@ -141,7 +142,7 @@ func TestAllocConstructor(t *testing.T) {
 	funds := big.NewInt(1000000000)
 	address := common.HexToAddress("0x1000000000000000000000000000000000000001")
 	genSpec := &types.Genesis{
-		Config: params.AllProtocolChanges,
+		Config: chain.AllProtocolChanges,
 		Alloc: types.GenesisAlloc{
 			address: {Constructor: deploymentCode, Balance: funds},
 		},

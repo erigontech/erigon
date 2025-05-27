@@ -24,6 +24,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon-db/interfaces"
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -32,8 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/p2p/forkid"
-	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon-p2p/forkid"
 )
 
 var ErrNoHead = errors.New("ReadChainHead: ReadCurrentHeader error")
@@ -48,7 +48,7 @@ type ChainHead struct {
 
 type StatusDataProvider struct {
 	db          kv.RoDB
-	blockReader services.FullBlockReader
+	blockReader interfaces.BlockReader
 
 	networkId   uint64
 	genesisHash common.Hash
@@ -65,7 +65,7 @@ func NewStatusDataProvider(
 	genesis *types.Block,
 	networkId uint64,
 	logger log.Logger,
-	blockReader services.FullBlockReader,
+	blockReader interfaces.BlockReader,
 ) *StatusDataProvider {
 	s := &StatusDataProvider{
 		db:          db,
@@ -136,7 +136,7 @@ func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*protosentry.St
 	return s.makeStatusData(chainHead), err
 }
 
-func ReadChainHeadWithTx(tx kv.Tx, blockReader services.BlockReader) (ChainHead, error) {
+func ReadChainHeadWithTx(tx kv.Tx, blockReader interfaces.BlockReader) (ChainHead, error) {
 	header := rawdb.ReadCurrentHeaderHavingBody(tx)
 	if header == nil {
 		return ChainHead{}, ErrNoHead
@@ -165,7 +165,7 @@ func ReadChainHeadWithTx(tx kv.Tx, blockReader services.BlockReader) (ChainHead,
 	return ChainHead{height, time, hash, earliestHeight, td256}, nil
 }
 
-func ReadChainHead(ctx context.Context, db kv.RoDB, blockReader services.FullBlockReader) (ChainHead, error) {
+func ReadChainHead(ctx context.Context, db kv.RoDB, blockReader interfaces.BlockReader) (ChainHead, error) {
 	var head ChainHead
 	var err error
 	err = db.View(ctx, func(tx kv.Tx) error {

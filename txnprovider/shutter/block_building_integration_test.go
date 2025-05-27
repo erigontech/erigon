@@ -14,9 +14,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-// Skip when running tests with race detector: see issue #15007
-//go:build !race
-
 package shutter_test
 
 import (
@@ -26,6 +23,7 @@ import (
 	"fmt"
 	"math/big"
 	"path"
+	"runtime"
 	"testing"
 	"time"
 
@@ -41,7 +39,9 @@ import (
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/testlog"
 	"github.com/erigontech/erigon-lib/types"
+	p2p "github.com/erigontech/erigon-p2p"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/core"
@@ -49,12 +49,10 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc/contracts"
 	"github.com/erigontech/erigon/rpc/requests"
 	"github.com/erigontech/erigon/turbo/engineapi"
-	"github.com/erigontech/erigon/turbo/testlog"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/testhelpers"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
@@ -63,7 +61,11 @@ import (
 
 func TestShutterBlockBuilding(t *testing.T) {
 	if testing.Short() {
-		t.Skip("too slow for testing.Short")
+		t.Skip()
+	}
+	if runtime.GOOS == "darwin" {
+		// We run race detector for medium tests which fails on macOS.
+		t.Skip("issue #15007")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

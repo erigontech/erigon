@@ -621,7 +621,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			continue
 		}
 		if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
-			ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.UsedGas}, nil)
+			ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.GasUsed}, nil)
 		}
 		traceResult.Output = common.Copy(execResult.ReturnData)
 		if err = ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {
@@ -820,7 +820,7 @@ func (api *TraceAPIImpl) callBlock(
 	}
 
 	syscall := func(contract common.Address, data []byte) ([]byte, error) {
-		ret, _, err := core.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */, tracingHooks)
+		ret, _, err := core.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */, tracingHooks, vm.Config{})
 		return ret, err
 	}
 

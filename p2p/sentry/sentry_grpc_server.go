@@ -52,13 +52,11 @@ import (
 	proto_types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/p2p"
-	"github.com/erigontech/erigon/p2p/dnsdisc"
-	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/p2p/forkid"
-	"github.com/erigontech/erigon/p2p/protocols/eth"
-	"github.com/erigontech/erigon/params"
+	p2p "github.com/erigontech/erigon-p2p"
+	"github.com/erigontech/erigon-p2p/dnsdisc"
+	"github.com/erigontech/erigon-p2p/enode"
+	"github.com/erigontech/erigon-p2p/forkid"
+	"github.com/erigontech/erigon-p2p/protocols/eth"
 )
 
 const (
@@ -298,15 +296,11 @@ func makeP2PServer(
 	genesisHash common.Hash,
 	protocols []p2p.Protocol,
 ) (*p2p.Server, error) {
-	var urls []string
-	chainConfig := params.ChainConfigByGenesisHash(genesisHash)
-	if chainConfig != nil {
-		urls = params.BootnodeURLsOfChain(chainConfig.ChainName)
-	}
 	if len(p2pConfig.BootstrapNodes) == 0 {
-		bootstrapNodes, err := utils.ParseNodesFromURLs(urls)
+		urls := p2pConfig.LookupBootnodeURLs(genesisHash)
+		bootstrapNodes, err := enode.ParseNodesFromURLs(urls)
 		if err != nil {
-			return nil, fmt.Errorf("bad option %s: %w", utils.BootnodesFlag.Name, err)
+			return nil, fmt.Errorf("bad bootnodes option: %w", err)
 		}
 		p2pConfig.BootstrapNodes = bootstrapNodes
 		p2pConfig.BootstrapNodesV5 = bootstrapNodes
@@ -1115,7 +1109,7 @@ func (ss *GrpcServer) HandShake(context.Context, *emptypb.Empty) (*proto_sentry.
 func (ss *GrpcServer) startP2PServer(genesisHash common.Hash) (*p2p.Server, error) {
 	if !ss.p2p.NoDiscovery {
 		if len(ss.p2p.DiscoveryDNS) == 0 {
-			if url := params.KnownDNSNetwork(genesisHash, "all"); url != "" {
+			if url := ss.p2p.LookupDNSNetwork(genesisHash, "all"); url != "" {
 				ss.p2p.DiscoveryDNS = []string{url}
 			}
 
@@ -1248,8 +1242,7 @@ func (ss *GrpcServer) PeerById(_ context.Context, req *proto_sentry.PeerByIdRequ
 	return &proto_sentry.PeerByIdReply{Peer: rpcPeer}, nil
 }
 
-// setupDiscovery creates the node discovery source for the `eth` and `snap`
-// protocols.
+// setupDiscovery creates the node discovery source for the `eth` protocol.
 func setupDiscovery(urls []string) (enode.Iterator, error) {
 	if len(urls) == 0 {
 		return nil, nil

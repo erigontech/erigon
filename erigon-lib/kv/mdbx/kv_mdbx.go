@@ -833,6 +833,115 @@ func (db *MdbxKV) View(ctx context.Context, f func(tx kv.Tx) error) (err error) 
 	return f(tx)
 }
 
+func (tx *MdbxTx) Apply(_ context.Context, f func(tx kv.Tx) error) (err error) {
+	return f(tx)
+}
+
+func (tx *MdbxTx) ApplyRw(_ context.Context, f func(tx kv.RwTx) error) (err error) {
+	return f(tx)
+}
+
+type TxApplySource interface {
+	ApplyChan() TxApplyChan
+}
+
+type TxApplyChan chan apply
+
+type apply interface {
+	Apply()
+}
+
+type applyTx struct {
+	err chan error
+	tx  kv.Tx
+	f   func(kv.Tx) error
+}
+
+func (a *applyTx) Apply() {
+	defer func() { // Would prefer this not to crash but rather log the error
+		r := recover()
+		if r != nil {
+			a.err <- fmt.Errorf("apply paniced: %s", r)
+		}
+	}()
+	a.err <- a.f(a.tx)
+}
+
+type applyRwTx struct {
+	err chan error
+	tx  kv.RwTx
+	f   func(kv.RwTx) error
+}
+
+func (a *applyRwTx) Apply() {
+	defer func() { // Would prefer this not to crash but rather log the error
+		r := recover()
+		if r != nil {
+			a.err <- fmt.Errorf("apply paniced: %s", r)
+		}
+	}()
+	a.err <- a.f(a.tx)
+}
+
+type asyncTx struct {
+	kv.Tx
+	requests chan apply
+}
+
+func NewAsyncTx(tx kv.Tx, queueSize int) *asyncTx {
+	return &asyncTx{tx, make(chan apply, queueSize)}
+}
+
+func (a *asyncTx) Apply(ctx context.Context, f func(kv.Tx) error) error {
+	rc := make(chan error)
+	a.requests <- &applyTx{rc, a.Tx, f}
+	select {
+	case err := <-rc:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (a *asyncTx) ApplyChan() TxApplyChan {
+	return a.requests
+}
+
+type asyncRwTx struct {
+	kv.RwTx
+	requests chan apply
+}
+
+func NewAsyncRwTx(tx kv.RwTx, queueSize int) *asyncRwTx {
+	return &asyncRwTx{tx, make(chan apply, queueSize)}
+}
+
+func (a *asyncRwTx) Apply(ctx context.Context, f func(kv.Tx) error) error {
+	rc := make(chan error)
+	a.requests <- &applyTx{rc, a.RwTx, f}
+	select {
+	case err := <-rc:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (a *asyncRwTx) ApplyRw(ctx context.Context, f func(kv.RwTx) error) error {
+	rc := make(chan error)
+	a.requests <- &applyRwTx{rc, a.RwTx, f}
+	select {
+	case err := <-rc:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (a *asyncRwTx) ApplyChan() TxApplyChan {
+	return a.requests
+}
+
 func (db *MdbxKV) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) (err error) {
 	tx, err := db.BeginRwNosync(ctx)
 	if err != nil {
@@ -1025,7 +1134,6 @@ func (tx *MdbxTx) Rollback() {
 		tx.db.leakDetector.Del(tx.traceID)
 	}()
 	tx.closeCursors()
-	//tx.printDebugInfo()
 	tx.tx.Abort()
 }
 

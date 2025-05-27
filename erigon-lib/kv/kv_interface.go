@@ -425,6 +425,8 @@ type Tx interface {
 	Count(bucket string) (uint64, error)
 
 	ListTables() ([]string, error)
+
+	Apply(ctx context.Context, f func(tx Tx) error) error
 }
 
 // RwTx
@@ -442,6 +444,8 @@ type RwTx interface {
 	RwCursorDupSort(table string) (RwCursorDupSort, error)
 
 	Commit() error // Commit all the operations of a transaction into the database.
+
+	ApplyRw(ctx context.Context, f func(tx RwTx) error) error
 }
 
 // Cursor - class for navigating through a database
@@ -583,8 +587,6 @@ type TemporalDebugTx interface {
 
 	DomainFiles(domain ...Domain) VisibleFiles
 
-	GreedyPruneHistory(ctx context.Context, domain Domain) error
-	PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error)
 	TxNumsInFiles(domains ...Domain) (minTxNum uint64)
 }
 
@@ -608,6 +610,8 @@ type TemporalRwTx interface {
 	TemporalTx
 	TemporalPutDel
 
+	GreedyPruneHistory(ctx context.Context, domain Domain) error
+	PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error)
 	Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff) error
 }
 
@@ -616,7 +620,7 @@ type TemporalPutDel interface {
 	// Optimizations:
 	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 	//   - user can append k2 into k1, then underlying methods will not preform append
-	DomainPut(domain Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error
+	DomainPut(domain Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep uint64) error
 	//DomainPut2(domain Domain, k1 []byte, val []byte, ts uint64) error
 
 	// DomainDel
@@ -624,8 +628,8 @@ type TemporalPutDel interface {
 	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 	//   - user can append k2 into k1, then underlying methods will not preform append
 	//   - if `val == nil` it will call DomainDel
-	DomainDel(domain Domain, k, prevVal []byte, prevStep uint64) error
-	DomainDelPrefix(domain Domain, prefix []byte) error
+	DomainDel(domain Domain, k []byte, txNum uint64, prevVal []byte, prevStep uint64) error
+	DomainDelPrefix(domain Domain, prefix []byte, txNum uint64) error
 }
 
 type TemporalRoDB interface {

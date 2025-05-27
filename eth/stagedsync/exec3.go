@@ -27,10 +27,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-db/interfaces"
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/cmp"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -48,7 +48,6 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
@@ -211,9 +210,6 @@ func ExecV3(ctx context.Context,
 	inMemExec := txc.Doms != nil
 	// TODO: e35 doesn't support parallel-exec yet
 	parallel = false //nolint
-	if parallel && cfg.chainConfig.ChainName == networkname.Gnosis {
-		panic("gnosis consensus doesn't support parallel exec yet: https://github.com/erigontech/erigon/issues/12054")
-	}
 
 	blockReader := cfg.blockReader
 	chainConfig := cfg.chainConfig
@@ -315,7 +311,7 @@ func ExecV3(ctx context.Context,
 			accumulator = shards.NewAccumulator()
 		}
 	}
-	rs := state.NewParallelExecutionState(doms, cfg.syncCfg, cfg.chainConfig.Bor != nil, logger)
+	rs := state.NewParallelExecutionState(doms, applyTx, cfg.syncCfg, cfg.chainConfig.Bor != nil, logger)
 
 	////TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
 	// Now rwLoop closing both (because applyLoop we completely restart)
@@ -394,11 +390,6 @@ func ExecV3(ctx context.Context,
 		executor = pe
 	} else {
 		applyWorker.ResetTx(applyTx)
-		temporalTx, ok := applyTx.(kv.TemporalTx)
-		if !ok {
-			return errors.New("applyTx is not a temporal transaction")
-		}
-		doms.SetTx(temporalTx)
 
 		se := &serialExecutor{
 			txExecutor: txExecutor{
@@ -443,16 +434,14 @@ func ExecV3(ctx context.Context,
 	agg.BuildFilesInBackground(outputTxNum.Load())
 
 	var readAhead chan uint64
-	if !parallel {
+	if !isMining && !inMemExec && execStage.CurrentSyncCycle.IsInitialCycle {
 		// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 		// can't use OS-level ReadAhead - because Data >> RAM
 		// it also warmsup state a bit - by touching senders/coninbase accounts and code
-		if !execStage.CurrentSyncCycle.IsInitialCycle {
-			var clean func()
+		var clean func()
 
-			readAhead, clean = blocksReadAhead(ctx, &cfg, 4, true)
-			defer clean()
-		}
+		readAhead, clean = blocksReadAhead(ctx, &cfg, 4, true)
+		defer clean()
 	}
 
 	var b *types.Block
@@ -470,7 +459,7 @@ Loop:
 			start := time.Now()
 			executor.domains().SetChangesetAccumulator(nil) // Make sure we don't have an active changeset accumulator
 			// First compute and commit the progress done so far
-			if _, err := executor.domains().ComputeCommitment(ctx, true, blockNum, execStage.LogPrefix()); err != nil {
+			if _, err := executor.domains().ComputeCommitment(ctx, applyTx, true, blockNum, execStage.LogPrefix()); err != nil {
 				return err
 			}
 			ts += time.Since(start)
@@ -554,7 +543,7 @@ Loop:
 		// Thus, we need to skip the first txs in the block, however, this causes the GasUsed to be incorrect.
 		// So we skip that check for the first block, if we find half-executed data.
 		skipPostEvaluation := false
-		var usedGas uint64
+		var gasUsed uint64
 		var txTasks []*state.TxTask
 		var validationResults []state.AAValidationResult
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
@@ -584,8 +573,8 @@ Loop:
 
 				ValidationResults: validationResults,
 			}
-			if txTask.HistoryExecution && usedGas == 0 {
-				usedGas, _, _, err = rawtemporaldb.ReceiptAsOf(executor.tx().(kv.TemporalTx), txTask.TxNum)
+			if txTask.HistoryExecution && gasUsed == 0 {
+				gasUsed, _, _, err = rawtemporaldb.ReceiptAsOf(executor.tx().(kv.TemporalTx), txTask.TxNum)
 				if err != nil {
 					if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
 						hooks.OnBlockEnd(err)
@@ -677,9 +666,9 @@ Loop:
 			}
 
 			count += uint64(len(txTasks))
-			logGas += se.usedGas
+			logGas += se.gasUsed
 
-			se.usedGas = 0
+			se.gasUsed = 0
 			se.blobGasUsed = 0
 
 			if !continueLoop {
@@ -693,7 +682,7 @@ Loop:
 			aggTx := executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 			aggTx.RestrictSubsetFileDeletions(true)
 			start := time.Now()
-			_ /*rh*/, err := executor.domains().ComputeCommitment(ctx, true, blockNum, execStage.LogPrefix())
+			_ /*rh*/, err := executor.domains().ComputeCommitment(ctx, executor.tx(), true, blockNum, execStage.LogPrefix())
 			if err != nil {
 				return err
 			}
@@ -742,7 +731,7 @@ Loop:
 				//	}
 				//}
 
-				aggregatorRo := executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+				aggregatorRo := state2.AggTx(executor.tx())
 
 				needCalcRoot := executor.readState().SizeEstimate() >= commitThreshold ||
 					skipPostEvaluation || // If we skip post evaluation, then we should compute root hash ASAP for fail-fast
@@ -769,11 +758,11 @@ Loop:
 				tt = time.Now()
 
 				// allow greedy prune on non-chain-tip
-				if err = executor.tx().(kv.TemporalRwTx).Debug().GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
+				if err = executor.tx().(kv.TemporalRwTx).GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
 					return err
 				}
 
-				if _, err := executor.tx().(kv.TemporalRwTx).Debug().PruneSmallBatches(ctx, 10*time.Hour); err != nil {
+				if _, err := executor.tx().(kv.TemporalRwTx).PruneSmallBatches(ctx, 10*time.Hour); err != nil {
 					return err
 				}
 				t3 = time.Since(tt)
@@ -894,7 +883,7 @@ func handleIncorrectRootHashError(header *types.Header, applyTx kv.RwTx, cfg Exe
 		return false, nil
 	}
 
-	aggTx := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+	aggTx := state2.AggTx(applyTx)
 	unwindToLimit, err := aggTx.CanUnwindToBlockNum(applyTx)
 	if err != nil {
 		return false, err
@@ -947,7 +936,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
 
-	computedRootHash, err := doms.ComputeCommitment(ctx, true, header.Number.Uint64(), e.LogPrefix())
+	computedRootHash, err := doms.ComputeCommitment(ctx, applyTx, true, header.Number.Uint64(), e.LogPrefix())
 	if err != nil {
 		return false, fmt.Errorf("ParallelExecutionState.Apply: %w", err)
 	}
@@ -968,7 +957,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 
 }
 
-func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, blockNum uint64) (b *types.Block, err error) {
+func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader interfaces.BlockReader, blockNum uint64) (b *types.Block, err error) {
 	if tx == nil {
 		tx, err = db.BeginRo(ctx)
 		if err != nil {
@@ -982,9 +971,6 @@ func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader ser
 	}
 	if b == nil {
 		return nil, nil
-	}
-	for _, txn := range b.Transactions() {
-		_ = txn.Hash()
 	}
 	return b, err
 }

@@ -34,7 +34,7 @@ func TestAttestationProducer(t *testing.T) {
 	root, err := headState.BlockRoot()
 	require.NoError(t, err)
 
-	att, err := attProducer.ProduceAndCacheAttestationData(nil, headState, root, headState.Slot(), 0)
+	att, err := attProducer.ProduceAndCacheAttestationData(nil, headState, root, headState.Slot())
 	require.NoError(t, err)
 
 	attJson, err := json.Marshal(att)

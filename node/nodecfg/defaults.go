@@ -21,9 +21,8 @@ package nodecfg
 
 import (
 	"github.com/erigontech/erigon-lib/direct"
-
-	"github.com/erigontech/erigon/p2p"
-	"github.com/erigontech/erigon/p2p/nat"
+	p2p "github.com/erigontech/erigon-p2p"
+	"github.com/erigontech/erigon-p2p/nat"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 

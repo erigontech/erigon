@@ -71,7 +71,7 @@ func ReceiptAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed uint64, cumBlobGasu
 	return
 }
 
-func AppendReceipt(tx kv.TemporalPutDel, receipt *types.Receipt, cumBlobGasUsed uint64) error {
+func AppendReceipt(tx kv.TemporalPutDel, receipt *types.Receipt, cumBlobGasUsed uint64, txNum uint64) error {
 	var cumGasUsedInBlock uint64
 	var firstLogIndexWithinBlock uint32
 	if receipt != nil {
@@ -82,7 +82,7 @@ func AppendReceipt(tx kv.TemporalPutDel, receipt *types.Receipt, cumBlobGasUsed 
 	{
 		var buf [binary.MaxVarintLen64]byte
 		i := binary.PutUvarint(buf[:], cumGasUsedInBlock)
-		if err := tx.DomainPut(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, nil, buf[:i], nil, 0); err != nil {
+		if err := tx.DomainPut(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, buf[:i], txNum, nil, 0); err != nil {
 			return err
 		}
 	}
@@ -90,7 +90,7 @@ func AppendReceipt(tx kv.TemporalPutDel, receipt *types.Receipt, cumBlobGasUsed 
 	{
 		var buf [binary.MaxVarintLen64]byte
 		i := binary.PutUvarint(buf[:], cumBlobGasUsed)
-		if err := tx.DomainPut(kv.ReceiptDomain, CumulativeBlobGasUsedInBlockKey, nil, buf[:i], nil, 0); err != nil {
+		if err := tx.DomainPut(kv.ReceiptDomain, CumulativeBlobGasUsedInBlockKey, buf[:i], txNum, nil, 0); err != nil {
 			return err
 		}
 	}
@@ -98,7 +98,7 @@ func AppendReceipt(tx kv.TemporalPutDel, receipt *types.Receipt, cumBlobGasUsed 
 	{
 		var buf [binary.MaxVarintLen64]byte
 		i := binary.PutUvarint(buf[:], uint64(firstLogIndexWithinBlock))
-		if err := tx.DomainPut(kv.ReceiptDomain, FirstLogIndexKey, nil, buf[:i], nil, 0); err != nil {
+		if err := tx.DomainPut(kv.ReceiptDomain, FirstLogIndexKey, buf[:i], txNum, nil, 0); err != nil {
 			return err
 		}
 	}

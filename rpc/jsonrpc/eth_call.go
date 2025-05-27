@@ -270,7 +270,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	// Assuming a contract can freely run all the instructions, we have
 	// the true amount of gas it wants to consume to execute fully.
 	// We want to ensure that the gas used doesn't fall below this
-	trueGas := result.UsedGas // Must not fall below this
+	trueGas := result.GasUsed // Must not fall below this
 	lo = max(trueGas+result.EvmRefund-1, params.TxGas-1)
 
 	i := 0
@@ -288,7 +288,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		if err != nil && !errors.Is(err, core.ErrIntrinsicGas) {
 			return 0, err
 		}
-		if errors.Is(err, core.ErrIntrinsicGas) || result.Failed() || result.UsedGas < trueGas {
+		if errors.Is(err, core.ErrIntrinsicGas) || result.Failed() || result.GasUsed < trueGas {
 			lo = mid
 		} else {
 			hi = mid
@@ -300,7 +300,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 
 // GetProof implements eth_getProof partially; Proofs are available only with the `latest` block tag.
 func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNrOrHash rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
-	roTx, err := api.db.BeginRo(ctx)
+	roTx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -320,7 +320,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 	return api.getProof(ctx, roTx, address, storageKeysConverted, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(requestedBlockNr)), api.db, api.logger)
 }
 
-func (api *APIImpl) getProof(ctx context.Context, roTx kv.Tx, address common.Address, storageKeys []common.Hash, blockNrOrHash rpc.BlockNumberOrHash, db kv.RoDB, logger log.Logger) (*accounts.AccProofResult, error) {
+func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address common.Address, storageKeys []common.Hash, blockNrOrHash rpc.BlockNumberOrHash, db kv.RoDB, logger log.Logger) (*accounts.AccProofResult, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -844,7 +844,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 			if res.Err != nil {
 				errString = res.Err.Error()
 			}
-			accessList := &accessListResult{Accesslist: &accessList, Error: errString, GasUsed: hexutil.Uint64(res.UsedGas)}
+			accessList := &accessListResult{Accesslist: &accessList, Error: errString, GasUsed: hexutil.Uint64(res.GasUsed)}
 			if optimizeGas != nil && *optimizeGas {
 				optimizeWarmAddrInAccessList(accessList, *args.From)
 				optimizeWarmAddrInAccessList(accessList, to)

@@ -17,7 +17,6 @@
 package freezeblocks
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -27,6 +26,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-db/rawdb"
+	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types"
-	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -222,7 +221,7 @@ func (r *RemoteBlockReader) BlockWithSenders(ctx context.Context, _ kv.Getter, h
 	}
 
 	block = &types.Block{}
-	err = rlp.Decode(bytes.NewReader(reply.BlockRlp), block)
+	err = rlp.DecodeBytes(reply.BlockRlp, block)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -381,7 +380,7 @@ func (r *RemoteBlockReader) CanonicalBodyForStorage(ctx context.Context, tx kv.G
 		return nil, nil
 	}
 	body = &types.BodyForStorage{}
-	err = rlp.Decode(bytes.NewReader(bdRaw.Body), body)
+	err = rlp.DecodeBytes(bdRaw.Body, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1022,8 +1021,7 @@ func (r *BlockReader) bodyForStorageFromSnapshot(blockHeight uint64, sn *snapsho
 		return nil, buf, nil
 	}
 	b := &types.BodyForStorage{}
-	reader := bytes.NewReader(buf)
-	if err := rlp.Decode(reader, b); err != nil {
+	if err := rlp.DecodeBytes(buf, b); err != nil {
 		return nil, buf, err
 	}
 

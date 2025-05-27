@@ -8,13 +8,11 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	common2 "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/state"
 	ee "github.com/erigontech/erigon-lib/state/entity_extras"
@@ -71,7 +69,7 @@ func (f *HeaderFreezer) Freeze(ctx context.Context, blockFrom, blockTo ee.RootNu
 			var m runtime.MemStats
 			dbg.ReadMemStats(&m)
 			f.logger.Info("[snapshots] Dumping headers", "block num", blockNum,
-				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys),
+				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 			)
 		default:
 		}
