@@ -674,7 +674,7 @@ func (s *RoSnapshots) HasType(in snaptype.Type) bool {
 type ready struct {
 	mu     sync.Mutex
 	on     chan struct{}
-	state  bool
+	state  atomic.Bool
 	inited bool
 }
 
@@ -697,15 +697,21 @@ func (r *ready) set() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.init()
-	if r.state {
+	if r.state.Load() {
 		return
 	}
-	r.state = true
-	close(r.on)
+	if r.state.CompareAndSwap(false, true) {
+		close(r.on)
+	}
 }
 
 func (s *RoSnapshots) Ready(ctx context.Context) <-chan error {
 	errc := make(chan error)
+
+	if s.ready.state.Load() {
+		close(errc)
+		return errc
+	}
 
 	go func() {
 		select {
@@ -1600,9 +1606,11 @@ func removeOldFiles(toDel []string, snapDir string) {
 		ext := filepath.Ext(f)
 		withoutExt := f[:len(f)-len(ext)]
 		_ = os.Remove(withoutExt + ".idx")
+		_ = os.Remove(withoutExt + ".idx.torrent")
 		isTxnType := strings.HasSuffix(withoutExt, coresnaptype.Transactions.Name())
 		if isTxnType {
 			_ = os.Remove(withoutExt + "-to-block.idx")
+			_ = os.Remove(withoutExt + "-to-block.idx.torrent")
 		}
 	}
 	tmpFiles, err := snaptype.TmpFiles(snapDir)
