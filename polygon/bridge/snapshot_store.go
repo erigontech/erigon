@@ -415,7 +415,7 @@ func (s *SnapshotStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit 
 	return result, maxTime, nil
 }
 
-func ValidateBorEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB, blockReader blockReader, eventSegment *snapshotsync.VisibleSegment, prevEventId uint64, maxBlockNum uint64, failFast bool, logEvery *time.Ticker) (uint64, error) {
+func ValidateEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB, blockReader blockReader, eventSegment *snapshotsync.VisibleSegment, prevEventId uint64, maxBlockNum uint64, failFast bool, logEvery *time.Ticker) (uint64, error) {
 	g := eventSegment.Src().MakeGetter()
 
 	word := make([]byte, 0, 4096)

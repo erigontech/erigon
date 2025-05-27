@@ -1,4 +1,4 @@
-package integrity
+package bridge
 
 import (
 	"context"
@@ -7,17 +7,15 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
-func ValidateBorEvents(ctx context.Context, db kv.TemporalRoDB, bridgeStore bridge.Store, from, to uint64, failFast bool) (err error) {
+func ValidateBorEvents(ctx context.Context, db kv.TemporalRoDB, blockReader blockReader, snapshots *heimdall.RoSnapshots, from, to uint64, failFast bool) (err error) {
 	defer func() {
 		log.Info("[integrity] ValidateBorEvents: done", "err", err)
 	}()
@@ -56,8 +54,6 @@ func ValidateBorEvents(ctx context.Context, db kv.TemporalRoDB, bridgeStore brid
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
-	snapshots := blockReader.BorSnapshots().(*heimdall.RoSnapshots)
-
 	var prevEventId uint64
 	var maxBlockNum uint64
 
@@ -80,7 +76,7 @@ func ValidateBorEvents(ctx context.Context, db kv.TemporalRoDB, bridgeStore brid
 			break
 		}
 
-		prevEventId, err = bridge.ValidateBorEvents(ctx, config, db, bridgeStore, eventSegment, prevEventId, maxBlockNum, failFast, logEvery)
+		prevEventId, err = ValidateEvents(ctx, config, db, blockReader, eventSegment, prevEventId, maxBlockNum, failFast, logEvery)
 
 		if err != nil && failFast {
 			return err
@@ -90,7 +86,7 @@ func ValidateBorEvents(ctx context.Context, db kv.TemporalRoDB, bridgeStore brid
 	if db != nil {
 		err = db.View(ctx, func(tx kv.Tx) error {
 			if false {
-				lastEventId, err := bridgeStore.WithTx(tx).LastEventId(ctx)
+				lastEventId, err := NewSnapshotStore(NewTxStore(tx), snapshots, nil).LastEventId(ctx)
 				if err != nil {
 					return err
 				}
@@ -119,43 +115,4 @@ func ValidateBorEvents(ctx context.Context, db kv.TemporalRoDB, bridgeStore brid
 	log.Info("[integrity] done checking bor events", "event", prevEventId)
 
 	return nil
-}
-
-func ValidateBorSpans(ctx context.Context, logger log.Logger, dirs datadir.Dirs, snaps *heimdall.RoSnapshots, failFast bool) error {
-	baseStore := heimdall.NewMdbxStore(logger, dirs.DataDir, true, 32)
-	snapshotStore := heimdall.NewSpanSnapshotStore(baseStore.Spans(), snaps)
-	err := snapshotStore.Prepare(ctx)
-	if err != nil {
-		return err
-	}
-	defer snapshotStore.Close()
-	err = snapshotStore.ValidateSnapshots(ctx, logger, failFast)
-	logger.Info("[integrity] ValidateBorSpans: done", "err", err)
-	return err
-}
-
-func ValidateBorCheckpoints(ctx context.Context, logger log.Logger, dirs datadir.Dirs, snaps *heimdall.RoSnapshots, failFast bool) error {
-	baseStore := heimdall.NewMdbxStore(logger, dirs.DataDir, true, 32)
-	snapshotStore := heimdall.NewCheckpointSnapshotStore(baseStore.Checkpoints(), snaps)
-	err := snapshotStore.Prepare(ctx)
-	if err != nil {
-		return err
-	}
-	defer snapshotStore.Close()
-	err = snapshotStore.ValidateSnapshots(ctx, logger, failFast)
-	logger.Info("[integrity] ValidateBorCheckpoints: done", "err", err)
-	return err
-}
-
-func ValidateBorMilestones(ctx context.Context, logger log.Logger, dirs datadir.Dirs, snaps *heimdall.RoSnapshots, failFast bool) error {
-	baseStore := heimdall.NewMdbxStore(logger, dirs.DataDir, true, 32)
-	snapshotStore := heimdall.NewMilestoneSnapshotStore(baseStore.Milestones(), snaps)
-	err := snapshotStore.Prepare(ctx)
-	if err != nil {
-		return err
-	}
-	defer snapshotStore.Close()
-	err = snapshotStore.ValidateSnapshots(ctx, logger, failFast)
-	logger.Info("[integrity] ValidateBorMilestones: done", "err", err)
-	return err
 }
