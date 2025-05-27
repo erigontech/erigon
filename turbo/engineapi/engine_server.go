@@ -943,19 +943,23 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 
 	if version == clparams.FuluVersion {
 		ret := make([]*engine_types.BlobAndProofV2, len(blobHashes))
-		if len(blobHashes) != len(res.Blobs) || len(blobHashes)*int(params.CellsPerExtBlob) != len(res.Proofs) { // Some fault in the underlying txpool, but still return sane resp
-			log.Warn("[GetBlobsV2] txpool returned unexpected number of blobs and proofs in response, returning nil blobs list")
-			return ret, nil
-		}
+		proofIdx := 0
 		for i := range res.Blobs {
-			if res.Blobs[i] != nil && len(res.Proofs) == int(params.CellsPerExtBlob) {
+			if res.Blobs[i] == nil {
+				// We append nil for both blob and proof
+				proofIdx++
+				logLine = append(logLine, fmt.Sprintf(" %d:", i), " nil")
+			} else if len(res.Proofs)-proofIdx >= int(params.CellsPerExtBlob) {
+				// Returned set of proofs must have all the cellproofs
 				ret[i] = &engine_types.BlobAndProofV2{Blob: res.Blobs[i], CellProofs: make([]hexutil.Bytes, params.CellsPerExtBlob)}
-				for c := 0; c < int(params.CellsPerExtBlob); c++ {
-					ret[i].CellProofs[c] = res.Proofs[i*int(params.CellsPerExtBlob)+c]
+				for c := range params.CellsPerExtBlob {
+					ret[i].CellProofs[c] = res.Proofs[proofIdx]
+					proofIdx++
 				}
 				logLine = append(logLine, fmt.Sprintf(" %d:", i), fmt.Sprintf(" hash=%x len(blob)=%d len(proof)=%d ", blobHashes[i], len(res.Blobs[i]), len(res.Proofs[i])))
 			} else {
-				logLine = append(logLine, fmt.Sprintf(" %d:", i), " nil")
+				log.Error("[GetBlobsV2] txpool returned unexpected number of blobs and proofs in response, returning nil blobs list")
+				return ret, nil
 			}
 		}
 		e.logger.Debug("[GetBlobsV2]", "Responses", logLine)
