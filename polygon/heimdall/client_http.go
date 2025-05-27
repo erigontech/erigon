@@ -66,6 +66,10 @@ const (
 	maxRetries         = 5
 )
 
+type apiVersioner interface {
+	Version() HeimdallVersion
+}
+
 var _ Client = &HttpClient{}
 
 type HttpClient struct {
@@ -75,6 +79,7 @@ type HttpClient struct {
 	maxRetries   int
 	closeCh      chan struct{}
 	logger       log.Logger
+	apiVersioner apiVersioner
 }
 
 type HttpRequest struct {
@@ -100,6 +105,12 @@ func WithHttpRetryBackOff(retryBackOff time.Duration) HttpClientOption {
 func WithHttpMaxRetries(maxRetries int) HttpClientOption {
 	return func(client *HttpClient) {
 		client.maxRetries = maxRetries
+	}
+}
+
+func WithApiVersioner(apiVersioner apiVersioner) HttpClientOption {
+	return func(client *HttpClient) {
+		client.apiVersioner = apiVersioner
 	}
 }
 
@@ -227,7 +238,16 @@ func (c *HttpClient) FetchLatestSpan(ctx context.Context) (*Span, error) {
 
 	ctx = withRequestType(ctx, spanRequest)
 
-	response, err := FetchWithRetry[SpanResponse](ctx, c, url, c.logger)
+	if c.apiVersioner != nil && c.apiVersioner.Version() == HeimdallV2 {
+		response, err := FetchWithRetry[SpanResponseV2](ctx, c, url, c.logger)
+		if err != nil {
+			return nil, err
+		}
+
+		return response.Span, nil
+	}
+
+	response, err := FetchWithRetry[SpanResponseV1](ctx, c, url, c.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -243,7 +263,17 @@ func (c *HttpClient) FetchSpan(ctx context.Context, spanID uint64) (*Span, error
 
 	ctx = withRequestType(ctx, spanRequest)
 
-	response, err := FetchWithRetry[SpanResponse](ctx, c, url, c.logger)
+	if c.apiVersioner != nil && c.apiVersioner.Version() == HeimdallV2 {
+		response, err := FetchWithRetry[SpanResponseV2](ctx, c, url, c.logger)
+		if err != nil {
+			return nil, fmt.Errorf("%w, spanID=%d", err, spanID)
+		}
+
+		return response.Span, nil
+
+	}
+
+	response, err := FetchWithRetry[SpanResponseV1](ctx, c, url, c.logger)
 	if err != nil {
 		return nil, fmt.Errorf("%w, spanID=%d", err, spanID)
 	}
