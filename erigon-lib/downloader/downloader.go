@@ -1296,10 +1296,18 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 				switch {
 				case len(t.PeerConns()) > 0:
+					if strings.Contains(t.Name(), HackName) {
+						log.Warn("[dbg] loop.here51", "f", t.Name())
+					}
+
 					d.logger.Debug("[snapshots] Downloading from torrent", "file", t.Name(), "peers", len(t.PeerConns()), "webpeers", len(t.WebseedPeerConns()))
 					delete(waiting, t.Name())
 					d.torrentDownload(t, downloadComplete)
 				case len(t.WebseedPeerConns()) > 0:
+					if strings.Contains(t.Name(), HackName) {
+						log.Warn("[dbg] loop.here52", "f", t.Name())
+					}
+
 					if d.webDownloadClient != nil {
 						var peerUrls []*url.URL
 
@@ -1326,11 +1334,19 @@ func (d *Downloader) mainLoop(silent bool) error {
 							continue
 						}
 					} else {
+						if strings.Contains(t.Name(), HackName) {
+							log.Warn("[dbg] loop.here53", "f", t.Name())
+						}
+
 						d.logger.Debug("[snapshots] Downloading from torrent", "file", t.Name(), "peers", len(t.PeerConns()), "webpeers", len(t.WebseedPeerConns()))
 						delete(waiting, t.Name())
 						d.torrentDownload(t, downloadComplete)
 					}
 				default:
+					if strings.Contains(t.Name(), HackName) {
+						log.Warn("[dbg] loop.here53", "f", t.Name())
+					}
+
 					if d.webDownloadClient != nil {
 						d.lock.RLock()
 						webDownload, ok := d.webDownloadInfo[t.Name()]
@@ -1394,6 +1410,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 				for _, t := range d.torrentClient.Torrents() {
 					if t.Info() == nil {
 						if isComplete, _, _ := d.checkComplete(t.Name()); isComplete {
+							if strings.Contains(t.Name(), HackName) {
+								log.Warn("[dbg] loop.here54", "f", t.Name())
+							}
 							continue
 						}
 
