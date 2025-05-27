@@ -1344,7 +1344,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 					}
 				default:
 					if strings.Contains(t.Name(), HackName) {
-						log.Warn("[dbg] loop.here53", "f", t.Name())
+						log.Warn("[dbg] loop.here54", "f", t.Name())
 					}
 
 					if d.webDownloadClient != nil {
