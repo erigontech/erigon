@@ -2071,6 +2071,9 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		default: // if some torrents have no metadata, we are for-sure uncomplete
 			stats.Completed = false
 			noMetadata = append(noMetadata, t.Name())
+			if strings.Contains(t.Name(), HackName) {
+				log.Warn("[dbg] stat.skip21", "f", t.Name())
+			}
 			continue
 		}
 
@@ -2082,6 +2085,9 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		// call methods once - to reduce internal mutex contention
 		peersOfThisFile := t.PeerConns()
 		weebseedPeersOfThisFile := t.WebseedPeerConns()
+		if strings.Contains(t.Name(), HackName) {
+			log.Warn("[dbg] stat.torrentComplete", "f", t.Name(), "torrentComplete", torrentComplete, "BytesMissing", t.BytesMissing(), "stats", t.Stats())
+		}
 
 		tLen := t.Length()
 		var bytesCompleted int64
