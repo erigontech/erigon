@@ -115,8 +115,8 @@ func TestStatus(t *testing.T) {
 				statusCount++
 				return &emptypb.Empty{}, nil
 			})
-		client.EXPECT().PeerMinimumBlock(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
-			func(ctx context.Context, sd *sentryproto.PeerMinimumBlockRequest, co ...grpc.CallOption) (*emptypb.Empty, error) {
+		client.EXPECT().SetPeerMinimumBlock(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+			func(ctx context.Context, sd *sentryproto.SetPeerMinimumBlockRequest, co ...grpc.CallOption) (*emptypb.Empty, error) {
 				mu.Lock()
 				defer mu.Unlock()
 				statusCount++
@@ -147,7 +147,7 @@ func TestStatus(t *testing.T) {
 
 	statusCount = 0
 
-	empty, err = mux.PeerMinimumBlock(context.Background(), &sentryproto.PeerMinimumBlockRequest{})
+	empty, err = mux.SetPeerMinimumBlock(context.Background(), &sentryproto.SetPeerMinimumBlockRequest{})
 	require.NoError(t, err)
 	require.NotNil(t, empty)
 	require.Equal(t, 10, statusCount)
