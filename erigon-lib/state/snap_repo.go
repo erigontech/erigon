@@ -244,8 +244,10 @@ func (f *SnapshotRepo) Garbage(vfs visibleFiles, merged *filesItem) (garbage []*
 				continue
 			}
 
-			if merged == nil && hasCoverVisibleFile(vfs, item) {
-				garbage = append(garbage, item)
+			if merged == nil {
+				if hasCoverVisibleFile(vfs, item) {
+					garbage = append(garbage, item)
+				}
 				continue
 			}
 

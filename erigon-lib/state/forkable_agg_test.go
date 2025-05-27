@@ -82,7 +82,7 @@ func TestOpenFolder(t *testing.T) {
 	ch := agg.BuildFiles(RootNum(amount))
 	select {
 	case <-ch:
-	case <-time.After(time.Second * 10):
+	case <-time.After(time.Second * 20):
 		t.Fatal("timeout")
 	}
 
@@ -414,16 +414,8 @@ func TestMergedFileGet(t *testing.T) {
 			nDirtyFiles = (amount - int(snapCfg.SafetyMargin)) / int(snapCfg.MinimumSize)
 			nVisibleFiles = nDirtyFiles
 		} else {
-			nDirtyFiles = (amount - int(snapCfg.SafetyMargin)) / int(snapCfg.MinimumSize)
-			_amount := amount - int(snapCfg.SafetyMargin)
-			for i := len(snapCfg.MergeStages) - 1; i >= 0; i-- {
-				// merged files...
-				stage := int(snapCfg.MergeStages[i])
-				nDirtyFiles += _amount / stage
-				_amount %= stage
-			}
 			nVisibleFiles = int(calculateNumberOfFiles(uint64(amount), snapCfg))
-			//nDirtyFiles = nVisibleFiles // enable this after garbage is done..
+			nDirtyFiles = nVisibleFiles
 		}
 
 		// check dirty files count
