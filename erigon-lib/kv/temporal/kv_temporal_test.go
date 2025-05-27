@@ -29,6 +29,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 	mdbxDb := memdb.NewTestDB(t, kv.ChainDB)
 	dirs := datadir.New(t.TempDir())
 	_, err := state.GetStateIndicesSalt(dirs, true /* genNew */, logger) // gen salt needed by aggregator
+	require.NoError(t, err)
 	aggStep := uint64(1)
 	agg, err := state.NewAggregator(ctx, dirs, aggStep, mdbxDb, logger)
 	require.NoError(t, err)
@@ -232,6 +233,7 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	mdbxDb := memdb.NewTestDB(t, kv.ChainDB)
 	dirs := datadir.New(t.TempDir())
 	_, err := state.GetStateIndicesSalt(dirs, true /* genNew */, logger) // gen salt needed by aggregator
+	require.NoError(t, err)
 	aggStep := uint64(1)
 	agg, err := state.NewAggregator(ctx, dirs, aggStep, mdbxDb, logger)
 	require.NoError(t, err)
