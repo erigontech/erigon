@@ -552,7 +552,6 @@ func DownloadSyncStages(
 var DefaultForwardOrder = UnwindOrder{
 	stages.Snapshots,
 	stages.Headers,
-	stages.BorHeimdall,
 	stages.BlockHashes,
 	stages.Bodies,
 
@@ -581,7 +580,6 @@ var DefaultUnwindOrder = UnwindOrder{
 
 	stages.Bodies,
 	stages.BlockHashes,
-	stages.BorHeimdall,
 	stages.Headers,
 }
 
@@ -620,7 +618,6 @@ var DefaultPruneOrder = PruneOrder{
 
 	stages.Bodies,
 	stages.BlockHashes,
-	stages.BorHeimdall,
 	stages.Headers,
 	stages.Snapshots,
 }
