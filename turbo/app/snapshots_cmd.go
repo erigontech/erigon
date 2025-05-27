@@ -529,20 +529,12 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	}
 
 	var removed uint64
-	var cleanedSize datasize.ByteSize
 	for _, res := range toRemove {
-		s, err := os.Stat(res.Path)
-		if err != nil {
-			return fmt.Errorf("failed to stat %s: %w", res.Path, err)
-		}
-		cleanedSize += datasize.ByteSize(s.Size())
-
-		if err := os.Remove(res.Path); err != nil {
-			return fmt.Errorf("failed to remove %s: %w", res.Path, err)
-		}
+		os.Remove(res.Path)
+		os.Remove(res.Path + ".torrent")
 		removed++
 	}
-	fmt.Printf("removed %d (%v) state snapshot segments files\n", removed, cleanedSize.HumanReadable())
+	fmt.Printf("removed %d state snapshot segments files\n", removed)
 
 	return nil
 }
