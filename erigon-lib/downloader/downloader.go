@@ -2722,7 +2722,10 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 
 		if whitelisted, ok := d.webseeds.torrentsWhitelist.Get(ts.DisplayName); ok {
 			if ts.InfoHash.HexString() != whitelisted.Hash {
-				log.Warn("[dbg] addFromDisk.skip1", "f", ts.DisplayName)
+				if strings.Contains(ts.DisplayName, HackName) {
+					log.Warn("[dbg] addFromDisk.skip1", "f", ts.DisplayName)
+				}
+
 				//continue
 			}
 		}
