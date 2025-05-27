@@ -282,6 +282,9 @@ kurtosis-pectra-assertoor:	check-kurtosis
 kurtosis-regular-assertoor:	check-kurtosis 
 	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/regular-assertoor.io")
 
+kurtosis-fusaka-assertoor: check-kurtosis
+	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/fusaka.io")
+
 kurtosis-cleanup:
 	@echo "Currently Running Enclaves: "
 	@kurtosis enclave ls
