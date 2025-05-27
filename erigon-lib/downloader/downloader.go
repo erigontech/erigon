@@ -1624,7 +1624,7 @@ func getWebpeerTorrentInfo(ctx context.Context, downloadUrl *url.URL) (*metainfo
 
 func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloadStatus) {
 	if strings.Contains(t.Name(), HackName) {
-		log.Warn("[dbg] dl.torrentDownload()", "f", t.Name())
+		log.Warn("[dbg] dl.torrentDownload()", "f", t.Name(), "h", fmt.Sprintf("%x", t.InfoHash()))
 	}
 
 	d.lock.Lock()
