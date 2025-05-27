@@ -1604,6 +1604,10 @@ func getWebpeerTorrentInfo(ctx context.Context, downloadUrl *url.URL) (*metainfo
 }
 
 func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloadStatus) {
+	if strings.Contains(t.Name(), HackName) {
+		log.Warn("[dbg] dl.torrentDownload()", "f", t.Name())
+	}
+
 	d.lock.Lock()
 	d.downloading[t.Name()] = &downloadInfo{torrent: t}
 	d.lock.Unlock()
@@ -1615,6 +1619,9 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloa
 
 		downloadStarted := time.Now()
 
+		if strings.Contains(t.Name(), HackName) {
+			log.Warn("[dbg] dl.torrentDownload()_2", "f", t.Name())
+		}
 		t.AllowDataDownload()
 
 		select {
@@ -1659,6 +1666,9 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloa
 				//fallback to webDownloadClient, but only if it's enabled
 				if d.webDownloadClient != nil && idleCount > 6 {
 					t.DisallowDataDownload()
+					if strings.Contains(t.Name(), HackName) {
+						log.Warn("[dbg] dl.torrentDownload()_3", "f", t.Name())
+					}
 					return
 				}
 			}
