@@ -30,7 +30,6 @@ import (
 func DefaultStages(ctx context.Context,
 	snapshots SnapshotsCfg,
 	headers HeadersCfg,
-	borHeimdallCfg BorHeimdallCfg,
 	blockHashCfg BlockHashesCfg,
 	bodies BodiesCfg,
 	senders SendersCfg,
@@ -66,22 +65,6 @@ func DefaultStages(ctx context.Context,
 			},
 			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
 				return HeadersUnwind(ctx, u, s, txc.Tx, headers, test)
-			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return nil
-			},
-		},
-		{
-			ID:          stages.BorHeimdall,
-			Description: "Download Bor-specific data from Heimdall",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				if badBlockUnwind {
-					return nil
-				}
-				return BorHeimdallForward(s, u, ctx, txc.Tx, borHeimdallCfg, logger)
-			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return BorHeimdallUnwind(u, ctx, s, txc.Tx, borHeimdallCfg)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return nil
@@ -569,7 +552,6 @@ func DownloadSyncStages(
 var DefaultForwardOrder = UnwindOrder{
 	stages.Snapshots,
 	stages.Headers,
-	stages.BorHeimdall,
 	stages.BlockHashes,
 	stages.Bodies,
 
@@ -598,7 +580,6 @@ var DefaultUnwindOrder = UnwindOrder{
 
 	stages.Bodies,
 	stages.BlockHashes,
-	stages.BorHeimdall,
 	stages.Headers,
 }
 
@@ -637,7 +618,6 @@ var DefaultPruneOrder = PruneOrder{
 
 	stages.Bodies,
 	stages.BlockHashes,
-	stages.BorHeimdall,
 	stages.Headers,
 	stages.Snapshots,
 }
