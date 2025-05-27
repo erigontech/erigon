@@ -571,7 +571,6 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 	// --- check 2: storage exists in DB - SharedDomains.HasPrefix should catch this ---
 	{
 		// write to storage
-		sd.SetTxNum(1)
 		err = sd.DomainPut(kv.StorageDomain, rwTtx1, storageK1, []byte{1}, 1, nil, 0)
 		require.NoError(t, err)
 		// check before flush
@@ -633,7 +632,6 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		rwTtx2, err := temporalDb.BeginTemporalRw(ctx)
 		require.NoError(t, err)
 		t.Cleanup(rwTtx2.Rollback)
-		sd.SetTxNum(2)
 		err = sd.DomainPut(kv.StorageDomain, rwTtx2, storageK2, []byte{2}, 2, nil, 0)
 		require.NoError(t, err)
 		// check before flush
@@ -688,7 +686,6 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		require.Equal(t, uint64(2), roTtx2.Debug().TxNumsInFiles(kv.StorageDomain))
 
 		// finally, verify SharedDomains.HasPrefix returns true
-		sd.SetTxNum(3) // needed for HasPrefix (in-mem has to be ahead of tx num)
 		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), roTtx2)
 		require.NoError(t, err)
 		require.True(t, ok)
@@ -702,7 +699,6 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		rwTtx4, err := temporalDb.BeginTemporalRw(ctx)
 		require.NoError(t, err)
 		t.Cleanup(rwTtx4.Rollback)
-		sd.SetTxNum(3)
 		err = sd.DomainDelPrefix(kv.StorageDomain, rwTtx4, acc1.Bytes(), 3)
 		require.NoError(t, err)
 		// check before flush
@@ -734,7 +730,6 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		rwTtx5, err := temporalDb.BeginTemporalRw(ctx)
 		require.NoError(t, err)
 		t.Cleanup(rwTtx5.Rollback)
-		sd.SetTxNum(4)
 		err = sd.DomainPut(kv.StorageDomain, rwTtx5, storageK1, []byte{3}, 4, nil, 0)
 		require.NoError(t, err)
 		// check before flush
