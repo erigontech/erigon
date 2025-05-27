@@ -179,7 +179,7 @@ func (s *server) PeerEvents(*isentry.PeerEventsRequest, isentry.Sentry_PeerEvent
 	return errors.New("TODO")
 }
 
-func (s *server) PeerMinBlock(context.Context, *isentry.PeerMinBlockRequest) (*emptypb.Empty, error) {
+func (s *server) PeerMinBlock(context.Context, *isentry.PeerMinimumBlockRequest) (*emptypb.Empty, error) {
 	return nil, errors.New("TODO")
 }
 

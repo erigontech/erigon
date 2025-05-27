@@ -255,7 +255,7 @@ type NewBlockPacket struct {
 	TD    *big.Int
 }
 
-func (nbp *NewBlockPacket) EncodeRLP(w io.Writer) error {
+func (nbp NewBlockPacket) EncodeRLP(w io.Writer) error {
 	encodingSize := 0
 	// size of Block
 	blockLen := nbp.Block.EncodingSize()
