@@ -1283,7 +1283,7 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 	}
 }
 
-func buildHashMapAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {
+func buildHashMapAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) (err error) {
 	count := d.Count()
 	if !values {
 		count = d.Count() / 2
@@ -1293,7 +1293,6 @@ func buildHashMapAccessor(ctx context.Context, d *seg.Decompressor, compressed s
 
 	g := seg.NewReader(d.MakeGetter(), compressed)
 	var rs *recsplit.RecSplit
-	var err error
 	cfg.KeyCount = count
 	if rs, err = recsplit.NewRecSplit(cfg, logger); err != nil {
 		return fmt.Errorf("create recsplit: %w", err)
@@ -1302,6 +1301,12 @@ func buildHashMapAccessor(ctx context.Context, d *seg.Decompressor, compressed s
 	rs.LogLvl(log.LvlTrace)
 	p := ps.AddNew(rs.FileName(), uint64(count))
 	defer ps.Delete(p)
+
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("buildHashMapAccessor: %s, %s, %s", rs.FileName(), rec, dbg.Stack())
+		}
+	}()
 
 	var keyPos, valPos uint64
 	for {

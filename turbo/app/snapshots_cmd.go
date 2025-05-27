@@ -219,7 +219,6 @@ var snapshotCommand = cli.Command{
 			Name: "rm-all-state-snapshots",
 			Action: func(cliCtx *cli.Context) error {
 				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-				//os.Remove(filepath.Join(dirs.Snap, "salt-state.txt"))
 				return dir.DeleteFiles(dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors)
 			},
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
@@ -529,20 +528,12 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	}
 
 	var removed uint64
-	var cleanedSize datasize.ByteSize
 	for _, res := range toRemove {
-		s, err := os.Stat(res.Path)
-		if err != nil {
-			return fmt.Errorf("failed to stat %s: %w", res.Path, err)
-		}
-		cleanedSize += datasize.ByteSize(s.Size())
-
-		if err := os.Remove(res.Path); err != nil {
-			return fmt.Errorf("failed to remove %s: %w", res.Path, err)
-		}
+		os.Remove(res.Path)
+		os.Remove(res.Path + ".torrent")
 		removed++
 	}
-	fmt.Printf("removed %d (%v) state snapshot segments files\n", removed, cleanedSize.HumanReadable())
+	fmt.Printf("removed %d state snapshot segments files\n", removed)
 
 	return nil
 }
@@ -1039,7 +1030,9 @@ func doClearIndexing(cliCtx *cli.Context) error {
 
 	// remove salt-state.txt and salt-blocks.txt
 	os.Remove(filepath.Join(snapDir, "salt-state.txt"))
+	os.Remove(filepath.Join(snapDir, "salt-state.txt.torrent"))
 	os.Remove(filepath.Join(snapDir, "salt-blocks.txt"))
+	os.Remove(filepath.Join(snapDir, "salt-blocks.txt.torrent"))
 
 	return nil
 }
