@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/metrics"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
@@ -42,7 +41,6 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
 	p2p "github.com/erigontech/erigon-p2p"
-	"github.com/erigontech/erigon-p2p/sentry"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -55,7 +53,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/polygon/sync"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -761,87 +758,5 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 		nil, /* pruneOrder */
 		logger,
 		stages.ModeForkValidation,
-	)
-}
-
-func NewPolygonSyncStages(
-	ctx context.Context,
-	logger log.Logger,
-	db kv.TemporalRwDB,
-	config *ethconfig.Config,
-	chainConfig *chain.Config,
-	consensusEngine consensus.Engine,
-	notifications *shards.Notifications,
-	snapDownloader proto_downloader.DownloaderClient,
-	blockReader services.FullBlockReader,
-	blockRetire services.BlockRetire,
-	silkworm *silkworm.Silkworm,
-	forkValidator *engine_helpers.ForkValidator,
-	heimdallClient heimdall.Client,
-	heimdallStore heimdall.Store,
-	bridgeStore bridge.Store,
-	sentry sentryproto.SentryClient,
-	maxPeers int,
-	statusDataProvider *sentry.StatusDataProvider,
-	stopNode func() error,
-	engineAPISwitcher sync.EngineAPISwitcher,
-	minedBlockReg sync.MinedBlockObserverRegistrar,
-	tracer *tracers.Tracer,
-) []*stagedsync.Stage {
-	var tracingHooks *tracing.Hooks
-	if tracer != nil {
-		tracingHooks = tracer.Hooks
-	}
-
-	return stagedsync.PolygonSyncStages(
-		ctx,
-		stagedsync.StageSnapshotsCfg(
-			db,
-			*chainConfig,
-			config.Sync,
-			config.Dirs,
-			blockRetire,
-			snapDownloader,
-			blockReader,
-			notifications,
-			config.InternalCL && config.CaplinConfig.ArchiveBlocks,
-			config.CaplinConfig.ArchiveBlobs,
-			config.CaplinConfig.ArchiveStates,
-			silkworm,
-			config.Prune,
-		),
-		stagedsync.NewPolygonSyncStageCfg(
-			config,
-			logger,
-			chainConfig,
-			db,
-			heimdallClient,
-			heimdallStore,
-			bridgeStore,
-			sentry,
-			maxPeers,
-			statusDataProvider,
-			blockReader,
-			stopNode,
-			config.LoopBlockLimit,
-			nil, /* userUnwindTypeOverrides */
-			notifications,
-			engineAPISwitcher,
-			minedBlockReg,
-		),
-		stagedsync.StageSendersCfg(db, chainConfig, config.Sync, false, config.Dirs.Tmp, config.Prune, blockReader, nil),
-		stagedsync.StageExecuteBlocksCfg(db, config.Prune, config.BatchSize, chainConfig, consensusEngine, &vm.Config{Tracer: tracingHooks}, notifications, config.StateStream, false, config.Dirs, blockReader, nil, config.Genesis, config.Sync, SilkwormForExecutionStage(silkworm, config)),
-		stagedsync.StageTxLookupCfg(
-			db,
-			config.Prune,
-			config.Dirs.Tmp,
-			chainConfig.Bor,
-			blockReader,
-		),
-		stagedsync.StageFinishCfg(
-			db,
-			config.Dirs.Tmp,
-			forkValidator,
-		),
 	)
 }
