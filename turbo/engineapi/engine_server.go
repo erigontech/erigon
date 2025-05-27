@@ -950,16 +950,16 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 				proofIdx++
 				logLine = append(logLine, fmt.Sprintf(" %d:", i), " nil")
 			} else if len(res.Proofs)-proofIdx >= int(params.CellsPerExtBlob) {
-				// Returned set of proofs must have all the cellproofs
+				// Proofs for this blob must have all the cellproofs
 				ret[i] = &engine_types.BlobAndProofV2{Blob: res.Blobs[i], CellProofs: make([]hexutil.Bytes, params.CellsPerExtBlob)}
 				for c := range params.CellsPerExtBlob {
 					ret[i].CellProofs[c] = res.Proofs[proofIdx]
 					proofIdx++
 				}
-				logLine = append(logLine, fmt.Sprintf(" %d:", i), fmt.Sprintf(" hash=%x len(blob)=%d len(proof)=%d ", blobHashes[i], len(res.Blobs[i]), len(res.Proofs[i])))
-			} else {
+				logLine = append(logLine, fmt.Sprintf(" %d:", i), fmt.Sprintf(" hash=%x len(blob)=%d len(cellProofs)=%d ", blobHashes[i], len(res.Blobs[i]), len(ret[i].CellProofs)))
+			} else { // Possibly non-V1 wrapped txn, don't append, continue
 				log.Error("[GetBlobsV2] txpool returned unexpected number of blobs and proofs in response, returning nil blobs list")
-				return ret, nil
+				continue
 			}
 		}
 		e.logger.Debug("[GetBlobsV2]", "Responses", logLine)
