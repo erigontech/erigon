@@ -160,13 +160,14 @@ func (c *MockBuilderClientRegisterValidatorCall) DoAndReturn(f func(context.Cont
 }
 
 // SubmitBlindedBlocks mocks base method.
-func (m *MockBuilderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.SignedBlindedBeaconBlock) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, error) {
+func (m *MockBuilderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.SignedBlindedBeaconBlock) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *cltypes.ExecutionRequests, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "SubmitBlindedBlocks", ctx, block)
 	ret0, _ := ret[0].(*cltypes.Eth1Block)
 	ret1, _ := ret[1].(*engine_types.BlobsBundleV1)
-	ret2, _ := ret[2].(error)
-	return ret0, ret1, ret2
+	ret2, _ := ret[2].(*cltypes.ExecutionRequests)
+	ret3, _ := ret[3].(error)
+	return ret0, ret1, ret2, ret3
 }
 
 // SubmitBlindedBlocks indicates an expected call of SubmitBlindedBlocks.
@@ -182,19 +183,19 @@ type MockBuilderClientSubmitBlindedBlocksCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockBuilderClientSubmitBlindedBlocksCall) Return(arg0 *cltypes.Eth1Block, arg1 *engine_types.BlobsBundleV1, arg2 error) *MockBuilderClientSubmitBlindedBlocksCall {
-	c.Call = c.Call.Return(arg0, arg1, arg2)
+func (c *MockBuilderClientSubmitBlindedBlocksCall) Return(arg0 *cltypes.Eth1Block, arg1 *engine_types.BlobsBundleV1, arg2 *cltypes.ExecutionRequests, arg3 error) *MockBuilderClientSubmitBlindedBlocksCall {
+	c.Call = c.Call.Return(arg0, arg1, arg2, arg3)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBuilderClientSubmitBlindedBlocksCall) Do(f func(context.Context, *cltypes.SignedBlindedBeaconBlock) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, error)) *MockBuilderClientSubmitBlindedBlocksCall {
+func (c *MockBuilderClientSubmitBlindedBlocksCall) Do(f func(context.Context, *cltypes.SignedBlindedBeaconBlock) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *cltypes.ExecutionRequests, error)) *MockBuilderClientSubmitBlindedBlocksCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBuilderClientSubmitBlindedBlocksCall) DoAndReturn(f func(context.Context, *cltypes.SignedBlindedBeaconBlock) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, error)) *MockBuilderClientSubmitBlindedBlocksCall {
+func (c *MockBuilderClientSubmitBlindedBlocksCall) DoAndReturn(f func(context.Context, *cltypes.SignedBlindedBeaconBlock) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *cltypes.ExecutionRequests, error)) *MockBuilderClientSubmitBlindedBlocksCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

@@ -24,6 +24,7 @@ func TestAppendReceipt(t *testing.T) {
 	doms, err := state.NewSharedDomains(ttx, log.New())
 	require.NoError(err)
 	defer doms.Close()
+
 	doms.SetTxNum(0) // block1
 	err = AppendReceipt(doms.AsPutDel(ttx), &types.Receipt{CumulativeGasUsed: 10, FirstLogIndexWithinBlock: 0}, 0, 0)
 	require.NoError(err)

@@ -42,15 +42,17 @@ func (sdc *SharedDomainsCommitmentContext) SetLimitReadAsOfTxNum(txNum uint64, d
 	sdc.mainTtx.SetLimitReadAsOfTxNum(txNum, domainOnly)
 }
 
-func NewSharedDomainsCommitmentContext(sd *SharedDomains, tx kv.TemporalTx, mode commitment.Mode, trieVariant commitment.TrieVariant) *SharedDomainsCommitmentContext {
+func NewSharedDomainsCommitmentContext(sd *SharedDomains, tx kv.TemporalTx, mode commitment.Mode, trieVariant commitment.TrieVariant, tmpDir string) *SharedDomainsCommitmentContext {
 	ctx := &SharedDomainsCommitmentContext{
 		sharedDomains: sd,
 	}
 
-	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, sd.AggTx().a.tmpdir)
+	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, tmpDir)
 	trieCtx := &TrieContext{
-		sd:       sd,
-		tx:       tx,
+		roTtx:  tx,
+		getter: sd.AsGetter(tx),
+		putter: sd.AsPutDel(tx),
+
 		stepSize: sd.StepSize(),
 	}
 	ctx.mainTtx = trieCtx
@@ -229,7 +231,7 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 		return 0, 0, true, nil
 	}
 
-	newRh, err := sdc.rebuildCommitment(ctx, blockNum, txNum)
+	newRh, err := sdc.rebuildCommitment(ctx, tx, blockNum, txNum)
 	if err != nil {
 		return 0, 0, false, err
 	}
@@ -350,8 +352,8 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 
 // Dummy way to rebuild commitment. Dummy because works for small state only.
 // To rebuild commitment correctly for any state size - use RebuildCommitmentFiles.
-func (sdc *SharedDomainsCommitmentContext) rebuildCommitment(ctx context.Context, blockNum, txNum uint64) ([]byte, error) {
-	it, err := sdc.mainTtx.tx.HistoryRange(kv.StorageDomain, int(txNum), math.MaxInt64, order.Asc, -1)
+func (sdc *SharedDomainsCommitmentContext) rebuildCommitment(ctx context.Context, roTx kv.TemporalTx, blockNum, txNum uint64) ([]byte, error) {
+	it, err := roTx.HistoryRange(kv.StorageDomain, int(txNum), math.MaxInt64, order.Asc, -1)
 	if err != nil {
 		return nil, err
 	}
@@ -364,7 +366,7 @@ func (sdc *SharedDomainsCommitmentContext) rebuildCommitment(ctx context.Context
 		sdc.TouchKey(kv.AccountsDomain, string(k), nil)
 	}
 
-	it, err = sdc.mainTtx.tx.HistoryRange(kv.StorageDomain, int(txNum), math.MaxInt64, order.Asc, -1)
+	it, err = roTx.HistoryRange(kv.StorageDomain, int(txNum), math.MaxInt64, order.Asc, -1)
 	if err != nil {
 		return nil, err
 	}
@@ -379,12 +381,15 @@ func (sdc *SharedDomainsCommitmentContext) rebuildCommitment(ctx context.Context
 	}
 
 	sdc.Reset()
-	return sdc.ComputeCommitment(ctx, sdc.mainTtx.tx, true, blockNum, "rebuild commit", txNum)
+	return sdc.ComputeCommitment(ctx, roTx, true, blockNum, "rebuild commit", txNum)
 }
 
 type TrieContext struct {
-	sd                 *SharedDomains
-	tx                 kv.TemporalTx
+	roTtx  kv.TemporalTx
+	getter kv.TemporalGetter
+	putter kv.TemporalPutDel
+	txNum  uint64
+
 	limitReadAsOfTxNum uint64
 	stepSize           uint64
 	domainsOnly        bool // if true, do not use history reader and limit to domain files only
@@ -399,7 +404,7 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, uint64, error) {
 	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update.
 	// Keep dereferenced version inside sd commitmentDomain map ready to read again
 	if !sdc.domainsOnly && sdc.limitReadAsOfTxNum > 0 {
-		branch, _, err := sdc.tx.GetAsOf(kv.CommitmentDomain, pref, sdc.limitReadAsOfTxNum)
+		branch, _, err := sdc.roTtx.GetAsOf(kv.CommitmentDomain, pref, sdc.limitReadAsOfTxNum)
 		if sdc.trace {
 			fmt.Printf("[SDC] Branch @%d: %x: %x\n%s\n", sdc.limitReadAsOfTxNum, pref, branch, commitment.BranchData(branch).String())
 		}
@@ -411,7 +416,7 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, uint64, error) {
 
 	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update.
 	// Dereferenced branch is kept inside sharedDomains commitment domain map (but not written into buffer so not flushed into db, unless updated)
-	v, step, err := sdc.sd.AsGetter(sdc.tx).GetLatest(kv.CommitmentDomain, pref)
+	v, step, err := sdc.getter.GetLatest(kv.CommitmentDomain, pref)
 	if err != nil {
 		return nil, 0, fmt.Errorf("branch failed: %w", err)
 	}
@@ -436,7 +441,7 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, p
 	//	defer sdc.mu.Unlock()
 	//}
 
-	return sdc.sd.DomainPut(kv.CommitmentDomain, sdc.tx, prefix, data, sdc.sd.txNum, prevData, prevStep)
+	return sdc.putter.DomainPut(kv.CommitmentDomain, prefix, data, sdc.txNum, prevData, prevStep)
 }
 
 func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, err error) {
@@ -448,15 +453,15 @@ func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, er
 	if sdc.limitReadAsOfTxNum > 0 {
 		if sdc.domainsOnly {
 			var ok bool
-			enc, ok, _, _, err = sdc.tx.Debug().GetLatestFromFiles(d, plainKey, sdc.limitReadAsOfTxNum)
+			enc, ok, _, _, err = sdc.roTtx.Debug().GetLatestFromFiles(d, plainKey, sdc.limitReadAsOfTxNum)
 			if !ok {
 				enc = nil
 			}
 		} else {
-			enc, _, err = sdc.tx.GetAsOf(d, plainKey, sdc.limitReadAsOfTxNum)
+			enc, _, err = sdc.roTtx.GetAsOf(d, plainKey, sdc.limitReadAsOfTxNum)
 		}
 	} else {
-		enc, _, err = sdc.sd.AsGetter(sdc.tx).GetLatest(d, plainKey)
+		enc, _, err = sdc.getter.GetLatest(d, plainKey)
 	}
 
 	if err != nil {

@@ -119,7 +119,7 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte, tx kv.Tx) ([]byte, uint
 	}
 
 	if !aggTx.a.commitmentValuesTransform || bytes.Equal(prefix, keyCommitmentState) {
-		sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), v)
+		sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), v, sd.txNum)
 		return v, endTx / sd.StepSize(), nil
 	}
 
@@ -128,7 +128,7 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte, tx kv.Tx) ([]byte, uint
 	if err != nil {
 		return nil, 0, err
 	}
-	sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), rv) // keep dereferenced value in cache (to avoid waste on another dereference)
+	sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), rv, sd.txNum) // keep dereferenced value in cache (to avoid waste on another dereference)
 	return rv, endTx / sd.StepSize(), nil
 }
 

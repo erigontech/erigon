@@ -120,7 +120,7 @@ func (rw *Worker) ResetState(rs *state.ParallelExecutionState, accumulator *shar
 	} else {
 		rw.SetReader(state.NewReaderV3(rs.TemporalGetter()))
 	}
-	rw.stateWriter = state.NewWriter(rs.TemporalPutDel(), accumulator)
+	rw.stateWriter = state.NewWriter(rs.TemporalPutDel(), accumulator, 0)
 }
 
 func (rw *Worker) SetGaspool(gp *core.GasPool) {

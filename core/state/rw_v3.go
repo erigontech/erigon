@@ -231,23 +231,23 @@ func (rs *ParallelExecutionState) ApplyState(ctx context.Context, txTask *TxTask
 
 func (rs *ParallelExecutionState) ApplyLogsAndTraces(txTask *TxTask, domains *libstate.SharedDomains) error {
 	for addr := range txTask.TraceFroms {
-		if err := domains.IndexAdd(kv.TracesFromIdx, addr[:]); err != nil {
+		if err := domains.IndexAdd(kv.TracesFromIdx, addr[:], txTask.TxNum); err != nil {
 			return err
 		}
 	}
 
 	for addr := range txTask.TraceTos {
-		if err := domains.IndexAdd(kv.TracesToIdx, addr[:]); err != nil {
+		if err := domains.IndexAdd(kv.TracesToIdx, addr[:], txTask.TxNum); err != nil {
 			return err
 		}
 	}
 
 	for _, lg := range txTask.Logs {
-		if err := domains.IndexAdd(kv.LogAddrIdx, lg.Address[:]); err != nil {
+		if err := domains.IndexAdd(kv.LogAddrIdx, lg.Address[:], txTask.TxNum); err != nil {
 			return err
 		}
 		for _, topic := range lg.Topics {
-			if err := domains.IndexAdd(kv.LogTopicIdx, topic[:]); err != nil {
+			if err := domains.IndexAdd(kv.LogTopicIdx, topic[:], txTask.TxNum); err != nil {
 				return err
 			}
 		}
@@ -409,7 +409,7 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 			return err
 		}
 
-		if err := w.rs.domains.IterateStoragePrefix(address[:], w.rs.tx, func(k, v []byte, step uint64) (bool, error) {
+		if err := w.rs.domains.IterateStoragePrefix(address[:], w.txNum, w.rs.tx, func(k, v []byte, step uint64) (bool, error) {
 			w.writeLists[kv.StorageDomain.String()].Push(string(k), nil)
 			return true, nil
 		}); err != nil {
@@ -496,10 +496,11 @@ type Writer struct {
 	txNum       uint64
 }
 
-func NewWriter(tx kv.TemporalPutDel, accumulator *shards.Accumulator) *Writer {
+func NewWriter(tx kv.TemporalPutDel, accumulator *shards.Accumulator, txNum uint64) *Writer {
 	return &Writer{
 		tx:          tx,
 		accumulator: accumulator,
+		txNum:       txNum,
 		//trace: true,
 	}
 }
