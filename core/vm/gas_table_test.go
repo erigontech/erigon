@@ -45,7 +45,6 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -139,7 +138,7 @@ func TestEIP2200(t *testing.T) {
 			tx, sd := testTemporalTxSD(t, testTemporalDB(t))
 			defer tx.Rollback()
 
-			r, w := state.NewReaderV3(sd), state.NewWriter(sd, nil)
+			r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, sd.TxNum())
 			s := state.New(r)
 
 			address := common.BytesToAddress([]byte("contract"))
@@ -147,14 +146,14 @@ func TestEIP2200(t *testing.T) {
 			s.SetCode(address, hexutil.MustDecode(tt.input))
 			s.SetState(address, common.Hash{}, *uint256.NewInt(uint64(tt.original)))
 
-			_ = s.CommitBlock(params.AllProtocolChanges.Rules(0, 0), w)
+			_ = s.CommitBlock(chain.AllProtocolChanges.Rules(0, 0), w)
 			vmctx := evmtypes.BlockContext{
 				CanTransfer: func(evmtypes.IntraBlockState, common.Address, *uint256.Int) (bool, error) { return true, nil },
 				Transfer: func(evmtypes.IntraBlockState, common.Address, common.Address, *uint256.Int, bool) error {
 					return nil
 				},
 			}
-			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, params.AllProtocolChanges, vm.Config{ExtraEips: []int{2200}})
+			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, vm.Config{ExtraEips: []int{2200}})
 
 			_, gas, err := vmenv.Call(vm.AccountRef(common.Address{}), address, nil, tt.gaspool, new(uint256.Int), false /* bailout */)
 			if !errors.Is(err, tt.failure) {
@@ -208,7 +207,7 @@ func TestCreateGas(t *testing.T) {
 		txc.Doms = domains
 
 		//stateReader = rpchelper.NewLatestStateReader(domains)
-		stateReader = rpchelper.NewLatestDomainStateReader(domains)
+		stateReader = rpchelper.NewLatestStateReader(domains.AsGetter(tx))
 		stateWriter = rpchelper.NewLatestStateWriter(txc, nil, 0)
 
 		s := state.New(stateReader)

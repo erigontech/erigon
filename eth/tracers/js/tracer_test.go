@@ -51,15 +51,6 @@ func (account) Address() common.Address                             { return com
 func (account) SetCode(common.Hash, []byte)                         {}
 func (account) ForEachStorage(cb func(key, value common.Hash) bool) {}
 
-type dummyStatedb struct {
-	state.IntraBlockState
-}
-
-func (*dummyStatedb) GetRefund() uint64 { return 1337 }
-func (*dummyStatedb) GetBalance(addr common.Address) (*uint256.Int, error) {
-	return &uint256.Int{}, nil
-}
-
 type vmContext struct {
 	blockCtx evmtypes.BlockContext
 	txCtx    evmtypes.TxContext
@@ -72,7 +63,7 @@ func testCtx() *vmContext {
 func runTrace(tracer *tracers.Tracer, vmctx *vmContext, chaincfg *chain.Config, contractCode []byte) (json.RawMessage, error) {
 	c := vm.NewJumpDestCache(16)
 	var (
-		env             = vm.NewEVM(vmctx.blockCtx, vmctx.txCtx, &dummyStatedb{}, chaincfg, vm.Config{Tracer: tracer.Hooks})
+		env             = vm.NewEVM(vmctx.blockCtx, vmctx.txCtx, state.New(state.NewNoopReader()), chaincfg, vm.Config{Tracer: tracer.Hooks})
 		gasLimit uint64 = 31000
 		startGas uint64 = 10000
 		value           = uint256.NewInt(0)
@@ -198,7 +189,7 @@ func TestHaltBetweenSteps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env := vm.NewEVM(evmtypes.BlockContext{BlockNumber: 1}, evmtypes.TxContext{GasPrice: uint256.NewInt(1)}, &dummyStatedb{}, chain.TestChainConfig, vm.Config{Tracer: tracer.Hooks})
+	env := vm.NewEVM(evmtypes.BlockContext{BlockNumber: 1}, evmtypes.TxContext{GasPrice: uint256.NewInt(1)}, state.New(state.NewNoopReader()), chain.TestChainConfig, vm.Config{Tracer: tracer.Hooks})
 	scope := &vm.ScopeContext{
 		Contract: vm.NewContract(&account{}, common.Address{}, uint256.NewInt(0), 0, false /* skipAnalysis */, c),
 	}
@@ -223,7 +214,7 @@ func TestNoStepExec(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		env := vm.NewEVM(evmtypes.BlockContext{BlockNumber: 1}, evmtypes.TxContext{GasPrice: uint256.NewInt(100)}, &dummyStatedb{}, chain.TestChainConfig, vm.Config{Tracer: tracer.Hooks})
+		env := vm.NewEVM(evmtypes.BlockContext{BlockNumber: 1}, evmtypes.TxContext{GasPrice: uint256.NewInt(100)}, state.New(state.NewNoopReader()), chain.TestChainConfig, vm.Config{Tracer: tracer.Hooks})
 		tracer.OnTxStart(env.GetVMContext(), types.NewTransaction(0, common.Address{}, new(uint256.Int), 0, new(uint256.Int), nil), common.Address{})
 		tracer.OnEnter(0, byte(vm.CALL), common.Address{}, common.Address{}, false, []byte{}, 1000, uint256.NewInt(0), []byte{})
 		tracer.OnExit(0, nil, 0, nil, false)

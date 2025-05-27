@@ -25,6 +25,7 @@ import (
 	"sync/atomic"
 
 	"github.com/erigontech/erigon-lib/common/empty"
+	"github.com/erigontech/erigon/core/state"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -76,7 +77,7 @@ type EVM struct {
 	Context evmtypes.BlockContext
 	evmtypes.TxContext
 	// IntraBlockState gives access to the underlying state
-	intraBlockState evmtypes.IntraBlockState
+	intraBlockState *state.IntraBlockState
 
 	// chainConfig contains information about the current chain
 	chainConfig *chain.Config
@@ -98,7 +99,7 @@ type EVM struct {
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
 // only ever be used *once*.
-func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmtypes.IntraBlockState, chainConfig *chain.Config, vmConfig Config) *EVM {
+func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state.IntraBlockState, chainConfig *chain.Config, vmConfig Config) *EVM {
 	if vmConfig.NoBaseFee {
 		if txCtx.GasPrice.IsZero() {
 			blockCtx.BaseFee = new(uint256.Int)
@@ -107,13 +108,13 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 	evm := &EVM{
 		Context:         blockCtx,
 		TxContext:       txCtx,
-		intraBlockState: state,
+		intraBlockState: ibs,
 		config:          vmConfig,
 		chainConfig:     chainConfig,
 		chainRules:      chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time),
 	}
 	if evm.config.JumpDestCache == nil {
-		evm.config.JumpDestCache = NewJumpDestCache(jumpDestCacheLimit)
+		evm.config.JumpDestCache = NewJumpDestCache(JumpDestCacheLimit)
 	}
 
 	evm.interpreter = NewEVMInterpreter(evm, vmConfig)
@@ -123,7 +124,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 
 // Reset resets the EVM with a new transaction context.Reset
 // This is not threadsafe and should only be done very cautiously.
-func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState) {
+func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs *state.IntraBlockState) {
 	evm.TxContext = txCtx
 	evm.intraBlockState = ibs
 
@@ -131,7 +132,7 @@ func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState) {
 	evm.abort.Store(false)
 }
 
-func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState, vmConfig Config, chainRules *chain.Rules) {
+func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state.IntraBlockState, vmConfig Config, chainRules *chain.Rules) {
 	if vmConfig.NoBaseFee {
 		if txCtx.GasPrice.IsZero() {
 			blockCtx.BaseFee = new(uint256.Int)
@@ -525,7 +526,7 @@ func (evm *EVM) ChainRules() *chain.Rules {
 }
 
 // IntraBlockState returns the EVM's IntraBlockState
-func (evm *EVM) IntraBlockState() evmtypes.IntraBlockState {
+func (evm *EVM) IntraBlockState() *state.IntraBlockState {
 	return evm.intraBlockState
 }
 

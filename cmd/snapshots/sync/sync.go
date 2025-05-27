@@ -47,9 +47,9 @@ import (
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/version"
+	"github.com/erigontech/erigon-p2p/nat"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/params"
 )
 

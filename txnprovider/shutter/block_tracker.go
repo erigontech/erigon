@@ -57,6 +57,15 @@ func (bt *BlockTracker) Run(ctx context.Context) error {
 		bt.blockChangeCond.L.Unlock()
 	}()
 
+	blockEventC := make(chan BlockEvent)
+	unregisterBlockEventObserver := bt.blockListener.RegisterObserver(func(blockEvent BlockEvent) {
+		select {
+		case <-ctx.Done(): // no-op
+		case blockEventC <- blockEvent:
+		}
+	})
+	defer unregisterBlockEventObserver()
+
 	bn, err := bt.currentBlockNumReader(ctx)
 	if err != nil {
 		return err
@@ -69,15 +78,6 @@ func (bt *BlockTracker) Run(ctx context.Context) error {
 		bt.blockChangeCond.L.Unlock()
 	}
 
-	blockEventC := make(chan BlockEvent)
-	unregisterBlockEventObserver := bt.blockListener.RegisterObserver(func(blockEvent BlockEvent) {
-		select {
-		case <-ctx.Done(): // no-op
-		case blockEventC <- blockEvent:
-		}
-	})
-
-	defer unregisterBlockEventObserver()
 	for {
 		select {
 		case <-ctx.Done():

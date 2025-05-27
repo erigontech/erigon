@@ -183,7 +183,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 		domains = txc.Doms
 	}
 
-	rs := state.NewParallelExecutionState(domains, cfg.syncCfg, cfg.chainConfig.Bor != nil, logger)
+	rs := state.NewParallelExecutionState(domains, txc.Tx, cfg.syncCfg, cfg.chainConfig.Bor != nil, logger)
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, br))
 
@@ -342,16 +342,29 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, cfg *ExecuteBlockCfg, bl
 
 	for _, txn := range block.Transactions() {
 		to := txn.GetTo()
-		if to == nil {
-			continue
+		if to != nil {
+			a, _ := stateReader.ReadAccountData(*to)
+			if a == nil {
+				continue
+			}
+			//if account != nil && !bytes.Equal(account.CodeHash, types.EmptyCodeHash.Bytes()) {
+			//	reader.Code(*tx.To(), common.BytesToHash(account.CodeHash))
+			//}
+			if code, _ := stateReader.ReadAccountCode(*to); len(code) > 0 {
+				_, _ = code[0], code[len(code)-1]
+			}
+
+			for _, list := range txn.GetAccessList() {
+				stateReader.ReadAccountData(list.Address)
+				if len(list.StorageKeys) > 0 {
+					for _, slot := range list.StorageKeys {
+						stateReader.ReadAccountStorage(list.Address, slot)
+					}
+				}
+			}
+			//TODO: exec txn and pre-fetch commitment keys. see also: `func (p *statePrefetcher) Prefetch` in geth
 		}
-		a, _ := stateReader.ReadAccountData(*to)
-		if a == nil {
-			continue
-		}
-		if code, _ := stateReader.ReadAccountCode(*to); len(code) > 0 {
-			_, _ = code[0], code[len(code)-1]
-		}
+
 	}
 	_, _ = stateReader.ReadAccountData(block.Coinbase())
 
@@ -374,7 +387,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 	logPrefix := u.LogPrefix()
 	logger.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
 
-	unwindToLimit, ok, err := txc.Tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).CanUnwindBeforeBlockNum(u.UnwindPoint, txc.Tx)
+	unwindToLimit, ok, err := libstate.AggTx(txc.Tx).CanUnwindBeforeBlockNum(u.UnwindPoint, txc.Tx)
 	if err != nil {
 		return err
 	}

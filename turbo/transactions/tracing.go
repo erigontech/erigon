@@ -26,6 +26,7 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/erigontech/erigon-db/interfaces"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -40,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
 type BlockGetter interface {
@@ -53,7 +53,7 @@ type BlockGetter interface {
 
 // ComputeBlockContext returns the execution environment of a certain block.
 func ComputeBlockContext(ctx context.Context, engine consensus.EngineReader, header *types.Header, cfg *chain.Config,
-	headerReader services.HeaderReader, txNumsReader rawdbv3.TxNumsReader, dbtx kv.TemporalTx,
+	headerReader interfaces.HeaderReader, txNumsReader rawdbv3.TxNumsReader, dbtx kv.TemporalTx,
 	txIndex int) (*state.IntraBlockState, evmtypes.BlockContext, state.StateReader, *chain.Rules, *types.Signer, error) {
 	reader, err := rpchelper.CreateHistoryStateReader(dbtx, txNumsReader, header.Number.Uint64(), txIndex, cfg.ChainName)
 	if err != nil {
@@ -98,7 +98,7 @@ func TraceTx(
 	txCtx evmtypes.TxContext,
 	blockHash common.Hash,
 	txnIndex int,
-	ibs evmtypes.IntraBlockState,
+	ibs *state.IntraBlockState,
 	config *tracersConfig.TraceConfig,
 	chainConfig *chain.Config,
 	stream *jsoniter.Stream,
@@ -188,7 +188,7 @@ func AssembleTracer(
 func ExecuteTraceTx(
 	blockCtx evmtypes.BlockContext,
 	txCtx evmtypes.TxContext,
-	ibs evmtypes.IntraBlockState,
+	ibs *state.IntraBlockState,
 	config *tracersConfig.TraceConfig,
 	chainConfig *chain.Config,
 	stream *jsoniter.Stream,

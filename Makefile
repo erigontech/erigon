@@ -187,16 +187,22 @@ test-erigon-db:
 test-erigon-db-all:
 	@cd erigon-db && $(MAKE) test-all
 
+test-p2:
+	@cd p2p && $(MAKE) test
+
+test-p2p-all:
+	@cd p2p && $(MAKE) test-all
+
 test-erigon-ext:
 	@cd tests/erigon-ext-test && ./test.sh $(GIT_COMMIT)
 
 ## test:                      run short tests with a 10m timeout
-test: test-erigon-lib test-erigon-db
-	$(GOTEST) -short --timeout 10m -coverprofile=coverage-test.out
+test: test-erigon-lib test-erigon-db test-p2
+	$(GOTEST) -short --timeout 10m -coverprofile=coverage-test.out | grep -v '=== CONT ' | grep -v '=== RUN' | grep -v '=== PAUSE' | grep -v 'PASS: '
 
 ## test-all:                  run all tests with a 1h timeout
-test-all: test-erigon-lib-all test-erigon-db-all
-	$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out -race
+test-all: test-erigon-lib-all test-erigon-db-all test-p2p-all
+	$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out -race | grep -v '=== CONT ' | grep -v '=== RUN' | grep -v '=== PAUSE' | grep -v 'PASS: '
 
 ## test-hive						run the hive tests locally off nektos/act workflows simulator
 test-hive:
@@ -304,6 +310,7 @@ lint:
 	@./erigon-lib/tools/golangci_lint.sh
 	@./erigon-lib/tools/mod_tidy_check.sh
 	@cd erigon-db && ./../erigon-lib/tools/mod_tidy_check.sh
+	@cd p2p && ./../erigon-lib/tools/mod_tidy_check.sh
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
 clean:
