@@ -1054,6 +1054,11 @@ func RemoveIncompatibleIndices(dirs datadir.Dirs) error {
 				} else {
 					log.Info("Removing incompatible index", "file", fName)
 				}
+				if err = os.Remove(fPath + ".torrent"); err != nil {
+					log.Warn("Removing incompatible index", "file", fName, "err", err)
+				} else {
+					log.Info("Removing incompatible index", "file", fName)
+				}
 				continue
 			}
 			return fmt.Errorf("%w, %s", err, fPath)
