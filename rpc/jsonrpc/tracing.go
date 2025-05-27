@@ -501,7 +501,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 	}
 
 	if transactionIndex == -1 {
-		transactionIndex = len(block.Transactions())
+		transactionIndex = len(block.Transactions()) // in this special case we can just set transactionIndex = 0 and query blockNum instead of blockNum-1
 	}
 
 	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), transactionIndex, api.filters, api.stateCache, chainConfig.ChainName)

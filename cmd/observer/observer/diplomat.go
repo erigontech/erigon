@@ -69,7 +69,12 @@ func NewDiplomat(
 	return &instance
 }
 
-func (diplomat *Diplomat) handshake(ctx context.Context) (*HelloMessage, *StatusMessage, *HandshakeError) {
+type DiplomatStatus struct {
+	NetworkID       *uint64
+	ProtocolVersion *uint32
+}
+
+func (diplomat *Diplomat) handshake(ctx context.Context) (*HelloMessage, *DiplomatStatus, *HandshakeError) {
 	node := diplomat.node
 	return Handshake(ctx, node.IP(), node.TCP(), node.Pubkey(), diplomat.privateKey)
 }
@@ -92,11 +97,11 @@ func (diplomat *Diplomat) Run(ctx context.Context) DiplomatResult {
 	}
 
 	if status != nil {
-		result.NetworkID = &status.NetworkID
+		result.NetworkID = status.NetworkID
 		diplomat.log.Debug("Got network ID", "networkID", *result.NetworkID)
 	}
 	if status != nil {
-		result.EthVersion = &status.ProtocolVersion
+		result.EthVersion = status.ProtocolVersion
 		diplomat.log.Debug("Got eth version", "ethVersion", *result.EthVersion)
 	}
 

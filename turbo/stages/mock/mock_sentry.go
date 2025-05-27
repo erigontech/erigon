@@ -169,7 +169,12 @@ func (ms *MockSentry) SetStatus(context.Context, *proto_sentry.StatusData) (*pro
 func (ms *MockSentry) PenalizePeer(context.Context, *proto_sentry.PenalizePeerRequest) (*emptypb.Empty, error) {
 	return nil, nil
 }
-func (ms *MockSentry) PeerMinBlock(context.Context, *proto_sentry.PeerMinBlockRequest) (*emptypb.Empty, error) {
+
+func (ms *MockSentry) SetPeerMinimumBlock(context.Context, *proto_sentry.SetPeerMinimumBlockRequest) (*emptypb.Empty, error) {
+	return nil, nil
+}
+
+func (ms *MockSentry) SetPeerLatestBlock(context.Context, *proto_sentry.SetPeerLatestBlockRequest) (*emptypb.Empty, error) {
 	return nil, nil
 }
 
@@ -405,6 +410,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		mock.Genesis,
 		mock.ChainConfig.ChainID.Uint64(),
 		logger,
+		mock.BlockReader,
 	)
 
 	maxBlockBroadcastPeers := func(header *types.Header) uint { return 0 }
