@@ -228,11 +228,6 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	require.NoError(err)
 	defer rwTx.Rollback()
 
-	ctx := context.Background()
-	rwTx, err := db.BeginRw(ctx)
-	require.NoError(err)
-	defer rwTx.Rollback()
-
 	iterCount := func(domains *SharedDomains) int {
 		var list [][]byte
 		require.NoError(domains.IterateStoragePrefix(nil, domains.txNum, rwTx, func(k []byte, v []byte, step uint64) (bool, error) {

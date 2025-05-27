@@ -694,9 +694,8 @@ type DomainRoTx struct {
 
 	d *Domain
 
-	readerMutex sync.RWMutex
-	readers     []*BtIndex
-	idxReaders  []*recsplit.IndexReader
+	readers    []*BtIndex
+	idxReaders []*recsplit.IndexReader
 
 	comBuf []byte
 
@@ -1489,21 +1488,11 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 	useCache := dt.name != kv.CommitmentDomain && maxTxNum == math.MaxUint64
 
 	hi, _ := dt.ht.iit.hashKey(k)
-
-	dt.readerMutex.RLock()
-	getFromFileCache := dt.getFromFileCache
-	dt.readerMutex.RUnlock()
-
-	if useCache && getFromFileCache == nil {
-		dt.readerMutex.Lock()
-		if dt.getFromFileCache == nil {
-			dt.getFromFileCache = dt.visible.newGetFromFileCache()
-		}
-		getFromFileCache = dt.getFromFileCache
-		dt.readerMutex.Unlock()
+	if useCache && dt.getFromFileCache == nil {
+		dt.getFromFileCache = dt.visible.newGetFromFileCache()
 	}
-	if getFromFileCache != nil && maxTxNum == math.MaxUint64 {
-		if cv, ok := getFromFileCache.Get(hi); ok {
+	if dt.getFromFileCache != nil && maxTxNum == math.MaxUint64 {
+		if cv, ok := dt.getFromFileCache.Get(hi); ok {
 			return cv.v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
 		}
 	}
@@ -1631,8 +1620,6 @@ func (dt *DomainRoTx) Close() {
 	}
 	dt.ht.Close()
 
-	dt.readerMutex.Lock()
-	defer dt.readerMutex.Unlock()
 	dt.visible.returnGetFromFileCache(dt.getFromFileCache)
 }
 
@@ -1652,8 +1639,6 @@ func (dt *DomainRoTx) reader(i int) *seg.Reader {
 }
 
 func (dt *DomainRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
-	dt.readerMutex.Lock()
-	defer dt.readerMutex.Unlock()
 	if dt.idxReaders == nil {
 		dt.idxReaders = make([]*recsplit.IndexReader, len(dt.files))
 	}
@@ -1666,8 +1651,6 @@ func (dt *DomainRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 }
 
 func (dt *DomainRoTx) statelessBtree(i int) *BtIndex {
-	dt.readerMutex.Lock()
-	defer dt.readerMutex.Unlock()
 	if dt.readers == nil {
 		dt.readers = make([]*BtIndex, len(dt.files))
 	}
@@ -1680,9 +1663,6 @@ func (dt *DomainRoTx) statelessBtree(i int) *BtIndex {
 }
 
 func (dt *DomainRoTx) closeValsCursor() {
-	dt.readerMutex.Lock()
-	defer dt.readerMutex.Unlock()
-
 	for _, c := range dt.valsCs {
 		c.Close()
 	}
@@ -1690,16 +1670,11 @@ func (dt *DomainRoTx) closeValsCursor() {
 }
 
 func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
-	dt.readerMutex.RLock()
 	c = dt.valsCs[tx]
-	dt.readerMutex.RUnlock()
 
 	if c != nil {
 		return c, nil
 	}
-
-	dt.readerMutex.Lock()
-	defer dt.readerMutex.Unlock()
 
 	if dt.valsCs == nil {
 		dt.valsCs = map[kv.Tx]kv.Cursor{}
