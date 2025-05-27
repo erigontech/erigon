@@ -19,6 +19,7 @@ package downloadercfg
 import (
 	"bytes"
 	"fmt"
+
 	analog "github.com/anacrolix/log"
 
 	"github.com/erigontech/erigon-lib/log/v3"

@@ -48,7 +48,6 @@ import (
 
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-db/rawdb/blockio"
-	snaptype2 "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"

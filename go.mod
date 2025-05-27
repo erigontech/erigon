@@ -127,6 +127,11 @@ require (
 	github.com/jackpal/go-nat-pmp v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4 // indirect
+	github.com/pion/dtls/v3 v3.0.3 // indirect
+	github.com/pion/ice/v4 v4.0.2 // indirect
+	github.com/pion/mdns/v2 v2.0.7 // indirect
+	github.com/pion/srtp/v3 v3.0.4 // indirect
+	github.com/pion/stun v0.6.1 // indirect
 	github.com/pion/stun/v3 v3.0.0 // indirect
 	github.com/pion/transport/v3 v3.0.7 // indirect
 	github.com/pion/turn/v4 v4.0.0 // indirect

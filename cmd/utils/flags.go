@@ -32,12 +32,6 @@ import (
 
 	g "github.com/anacrolix/generics"
 	"github.com/c2h5oh/datasize"
-	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
-	"github.com/urfave/cli/v2"
-
-	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
-
 	"github.com/erigontech/erigon-lib/chain/networkid"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/params"
@@ -57,6 +51,10 @@ import (
 	"github.com/erigontech/erigon-p2p/enode"
 	"github.com/erigontech/erigon-p2p/nat"
 	"github.com/erigontech/erigon-p2p/netutil"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+	"github.com/urfave/cli/v2"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/utils/flags"

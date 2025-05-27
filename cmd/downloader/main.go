@@ -30,9 +30,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	_ "github.com/erigontech/erigon/core/snaptype"    //hack
-	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/c2h5oh/datasize"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
@@ -45,8 +42,6 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
-
-	"github.com/anacrolix/torrent/metainfo"
 
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
@@ -66,11 +61,11 @@ import (
 	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/params"
+	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
 
-	_ "github.com/erigontech/erigon-db/snaptype"      //hack
-	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
+	_ "github.com/erigontech/erigon-db/snaptype" //hack
 )
 
 func main() {
