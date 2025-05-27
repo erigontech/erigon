@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding"
 	"fmt"
+	"unique"
 
 	"github.com/erigontech/erigon-lib/app/util"
 )
@@ -41,28 +42,28 @@ type IdGenerator[T comparable] interface {
 }
 
 type components[T comparable] struct {
-	domain Handle[Domain]
-	value  Handle[T]
+	domain unique.Handle[Domain]
+	value  unique.Handle[T]
 }
 
 func NewId[T comparable](d Domain, t T) (Id, error) {
-	return id[T](Make(components[T]{Make(d), Make(t)})), nil
+	return id[T](unique.Make(components[T]{unique.Make(d), unique.Make(t)})), nil
 }
 
-type id[T comparable] Handle[components[T]]
+type id[T comparable] unique.Handle[components[T]]
 
 var _ Id = id[string]{}
 
 func (i id[T]) Domain() Domain {
-	return ((Handle[components[T]])(i)).Value().domain.Value()
+	return ((unique.Handle[components[T]])(i)).Value().domain.Value()
 }
 
 func (i id[T]) Value() any {
-	return ((Handle[components[T]])(i)).Value().value.Value()
+	return ((unique.Handle[components[T]])(i)).Value().value.Value()
 }
 
 func (i id[T]) String() string {
-	components := ((Handle[components[T]])(i)).Value()
+	components := ((unique.Handle[components[T]])(i)).Value()
 	return fmt.Sprintf("%s:%v", components.domain.Value(), components.value.Value())
 }
 
@@ -71,7 +72,7 @@ func (i id[T]) MarshalText() (text []byte, err error) {
 }
 
 func (i id[T]) Keys() Keys {
-	value := ((Handle[components[T]])(i)).Value()
+	value := ((unique.Handle[components[T]])(i)).Value()
 	return KeyArray{value.domain.Value(), value.value.Value()}
 }
 
@@ -95,8 +96,8 @@ func (i id[T]) Matches(other Id) bool {
 
 func (i id[T]) CompareTo(other interface{}) int {
 	if other, ok := other.(id[T]); ok {
-		otherComponents := ((Handle[components[T]])(other)).Value()
-		components := ((Handle[components[T]])(i)).Value()
+		otherComponents := ((unique.Handle[components[T]])(other)).Value()
+		components := ((unique.Handle[components[T]])(i)).Value()
 
 		if comp := components.domain.Value().CompareTo(otherComponents.domain.Value()); comp != 0 {
 			return comp

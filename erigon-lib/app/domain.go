@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unique"
 	"unsafe"
 
 	"github.com/erigontech/erigon-lib/common/hton"
@@ -61,7 +62,7 @@ func (f DomainFactoryFunc) New(context context.Context) (Domain, error) {
 func CompareDomains(a, b interface{}) int {
 	ad := a.(Domain)
 	bd := b.(Domain)
-	return bytes.Compare(ad.Id().value.asBytes(), bd.Id().value.asBytes())
+	return bytes.Compare(unique.Handle[ident](ad.Id()).Value().asBytes(), unique.Handle[ident](bd.Id()).Value().asBytes())
 }
 
 type domain[T comparable] struct {
@@ -106,7 +107,7 @@ func WithInfo[T comparable](info map[any]any) domainFeature {
 	})
 }
 
-type DomainId Handle[ident]
+type DomainId unique.Handle[ident]
 
 func (id DomainId) Get(context context.Context) (Domain, error) {
 	resolvedDomainsLock.RLock()
@@ -121,7 +122,7 @@ func (id DomainId) Get(context context.Context) (Domain, error) {
 }
 
 func (id DomainId) String() string {
-	v := Handle[ident](id).Value()
+	v := unique.Handle[ident](id).Value()
 
 	if v[0] < 9 {
 		return strconv.Itoa(int(ntoh.UInt([]byte(v), 1, int(v[0]))))
@@ -147,13 +148,13 @@ func (id DomainId) TypeId() TypeId {
 }
 
 func (id DomainId) asBytes() []byte {
-	return Handle[ident](id).Value().asBytes()
+	return unique.Handle[ident](id).Value().asBytes()
 }
 
-func toId(rootId Handle[ident], incarnation Incarnation, _ ...domainFeature) (DomainId, error) {
+func toId(rootId unique.Handle[ident], incarnation Incarnation, _ ...domainFeature) (DomainId, error) {
 	// TODO this needs rlp encoding
 	if incarnation != nil {
-		return DomainId(Make(ident(strings.Join([]string{string(rootId.Value()), string(incarnation.asIdent())}, "-")))), nil
+		return DomainId(unique.Make(ident(strings.Join([]string{string(rootId.Value()), string(incarnation.asIdent())}, "-")))), nil
 	}
 
 	return DomainId(rootId), nil
@@ -188,7 +189,7 @@ func NewNamedDomain[T comparable](name string, features ...domainFeature) (Domai
 }
 
 func newDomain[T comparable](rootId ident, incarnation Incarnation, features ...domainFeature) (Domain, error) {
-	id, err := toId(Make(rootId), incarnation, features...)
+	id, err := toId(unique.Make(rootId), incarnation, features...)
 
 	if err != nil {
 		return nil, err

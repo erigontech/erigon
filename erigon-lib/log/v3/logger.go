@@ -110,7 +110,7 @@ type Record struct {
 	KeyNames RecordKeyNames
 }
 
-func (r *Record) Call(skip int) stack.Call {
+func (r *Record) Caller(skip int) stack.Call {
 	return stack.Caller(skip)
 }
 
