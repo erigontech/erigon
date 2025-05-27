@@ -17,7 +17,6 @@
 package downloader
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -30,7 +29,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/c2h5oh/datasize"
 	"github.com/hashicorp/go-retryablehttp"
@@ -72,55 +70,6 @@ func NewWebSeeds(seeds []*url.URL, verbosity log.Lvl, logger log.Logger) *WebSee
 	rc.Logger = downloadercfg.NewRetryableHttpLogger(logger.New("app", "downloader"))
 	ws.client = rc.StandardClient()
 	return ws
-}
-
-func (d *WebSeeds) getWebDownloadInfo(ctx context.Context, t *torrent.Torrent) (infos []webDownloadInfo, seedHashMismatches []*seedHash, err error) {
-	torrentHash := t.InfoHash().Bytes()
-
-	for _, webseed := range d.seeds {
-		downloadUrl := webseed.JoinPath(t.Name())
-
-		if headRequest, err := http.NewRequestWithContext(ctx, http.MethodHead, downloadUrl.String(), nil); err == nil {
-			insertCloudflareHeaders(headRequest)
-
-			headResponse, err := d.client.Do(headRequest)
-			if err != nil {
-				continue
-			}
-			headResponse.Body.Close()
-
-			if headResponse.StatusCode != http.StatusOK {
-				d.logger.Trace("[snapshots.webseed] getWebDownloadInfo: HEAD request failed",
-					"webseed", webseed.String(), "name", t.Name(), "status", headResponse.Status)
-				continue
-			}
-			if meta, err := getWebpeerTorrentInfo(ctx, downloadUrl); err == nil {
-				if bytes.Equal(torrentHash, meta.HashInfoBytes().Bytes()) {
-					md5tag := headResponse.Header.Get("Etag")
-					if md5tag != "" {
-						md5tag = strings.Trim(md5tag, "\"")
-					}
-
-					infos = append(infos, webDownloadInfo{
-						url:     downloadUrl,
-						length:  headResponse.ContentLength,
-						md5:     md5tag,
-						torrent: t,
-					})
-				} else {
-					hash := meta.HashInfoBytes()
-					seedHashMismatches = append(seedHashMismatches, &seedHash{url: webseed, hash: &hash})
-				}
-			}
-		}
-		seedHashMismatches = append(seedHashMismatches, &seedHash{url: webseed})
-	}
-
-	if len(infos) == 0 {
-		d.logger.Trace("[snapshots.webseed] webseed info not found", "name", t.Name())
-	}
-
-	return infos, seedHashMismatches, nil
 }
 
 func (d *WebSeeds) SetTorrent(torrentFS *AtomicTorrentFS, downloadTorrentFile bool) {

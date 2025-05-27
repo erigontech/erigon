@@ -404,27 +404,22 @@ func WaitForDownloader(
 		break
 	}
 
-	const checkInterval = 20 * time.Second
-	checkEvery := time.NewTicker(checkInterval)
-	defer checkEvery.Stop()
-
-	// Check once without delay, for faster erigon re-start. There was a race here, now fixed.
-	completedResp, err := snapshotDownloader.Completed(ctx, &proto_downloader.CompletedRequest{})
-	if err != nil {
-		return err
-	}
-
-	// Print download progress until all segments are available
-	for completedResp == nil || !completedResp.Completed {
+	// Check for completion immediately, then growing intervals.
+	interval := time.Second
+	for {
+		completedResp, err := snapshotDownloader.Completed(ctx, &proto_downloader.CompletedRequest{})
+		if err != nil {
+			return fmt.Errorf("waiting for snapshot download: %w", err)
+		}
+		if completedResp.GetCompleted() {
+			break
+		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
-		case <-checkEvery.C:
-			completedResp, err = snapshotDownloader.Completed(ctx, &proto_downloader.CompletedRequest{})
-			if err != nil {
-				log.Warn("Error while waiting for snapshots progress", "err", err)
-			}
+			return context.Cause(ctx)
+		case <-time.After(interval):
 		}
+		interval = min(interval*2, 20*time.Second)
 	}
 
 	if !headerchain {

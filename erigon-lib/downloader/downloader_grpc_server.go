@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -61,6 +62,10 @@ func (s *GrpcServer) ProhibitNewDownloads(ctx context.Context, req *proto_downlo
 // After "download once" - Erigon will produce and seed new files
 // Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
 func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddRequest) (*emptypb.Empty, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	defer s.d.resetLogInterval.Broadcast()
+
 	//for _, item := range request.Items {
 	//	fmt.Printf("%v: %v\n", Proto2InfoHash(item.TorrentHash), item.Path)
 	//}
@@ -69,18 +74,29 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 		s.d.startTime = time.Now()
 	}
 
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
+	var progress atomic.Int32
+
+	go func() {
+		logProgress := func() {
+			log.Info("[snapshots] initializing downloads", "torrents", fmt.Sprintf("%d/%d", progress.Load(), len(request.Items)))
+		}
+		defer logProgress()
+		interval := time.Second
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(interval):
+				interval *= 2
+			}
+			logProgress()
+		}
+	}()
 
 	for i, it := range request.Items {
+		progress.Store(int32(i))
 		if it.Path == "" {
 			return nil, errors.New("field 'path' is required")
-		}
-
-		select {
-		case <-logEvery.C:
-			log.Info("[snapshots] initializing", "files", fmt.Sprintf("%d/%d", i, len(request.Items)))
-		default:
 		}
 
 		if it.TorrentHash == nil {
@@ -94,12 +110,11 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 			// TODO: Try to fetch the torrent file from provider if we don't have it here.
 		}
 
-		// TODO: I'm not sure this context is right here. The torrent should become bound to the
-		// Downloader, not the caller here.
 		if err := s.d.addPreverifiedTorrent(Proto2InfoHash(it.TorrentHash), it.Path); err != nil {
 			return nil, err
 		}
 	}
+	progress.Store(int32(len(request.Items)))
 
 	return &emptypb.Empty{}, nil
 }
