@@ -25,6 +25,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -43,7 +44,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 	"github.com/erigontech/erigon-lib/seg"
 )
 
@@ -51,18 +52,21 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	tb.Helper()
 	dirs := datadir.New(tb.TempDir())
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
-	//TODO: tests will fail if set histCfg.compression = CompressKeys | CompressValues
+	//TODO: tests will fail if set histCfg.Compression = CompressKeys | CompressValues
 	salt := uint32(1)
 	cfg := Schema.AccountsDomain
 
 	cfg.hist.iiCfg.dirs = dirs
-	cfg.hist.iiCfg.salt = &salt
+	if cfg.hist.iiCfg.salt == nil {
+		cfg.hist.iiCfg.salt = new(atomic.Pointer[uint32])
+	}
+	cfg.hist.iiCfg.salt.Store(&salt)
 
 	cfg.hist.historyLargeValues = largeValues
 
 	//perf of tests
-	cfg.hist.iiCfg.compression = seg.CompressNone
-	cfg.hist.compression = seg.CompressNone
+	cfg.hist.iiCfg.Compression = seg.CompressNone
+	cfg.hist.Compression = seg.CompressNone
 	//cfg.hist.historyValuesOnCompressedPage = 16
 	aggregationStep := uint64(16)
 	h, err := NewHistory(cfg.hist, aggregationStep, logger)
@@ -109,8 +113,8 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 			require.NotNil(t, sf)
 			defer sf.CleanupOnError()
 
-			efReader := seg.NewReader(sf.efHistoryDecomp.MakeGetter(), h.compression)
-			hReader := seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.compression), h.historyValuesOnCompressedPage, true)
+			efReader := seg.NewReader(sf.efHistoryDecomp.MakeGetter(), h.Compression)
+			hReader := seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.Compression), h.historyValuesOnCompressedPage, true)
 
 			// ef contains all sorted keys
 			// for each key it has a list of txNums
@@ -122,8 +126,8 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 				keyBuf, _ = efReader.Next(nil)
 				valBuf, _ = efReader.Next(nil)
 
-				ef, _ := eliasfano32.ReadEliasFano(valBuf)
-				efIt := ef.Iterator()
+				ef := multiencseq.ReadMultiEncSeq(i, valBuf)
+				efIt := ef.Iterator(0)
 
 				require.Contains(t, values, string(keyBuf), "key not found in values")
 				seenKeys = append(seenKeys, string(keyBuf))
@@ -193,23 +197,23 @@ func TestHistoryCollationBuild(t *testing.T) {
 		writer := hc.NewWriter()
 		defer writer.close()
 
-		err = writer.AddPrevValue([]byte("key1"), nil, 2, nil)
+		err = writer.AddPrevValue([]byte("key1"), 2, nil)
 		require.NoError(err)
 
-		err = writer.AddPrevValue([]byte("key2"), nil, 3, nil)
+		err = writer.AddPrevValue([]byte("key2"), 3, nil)
 		require.NoError(err)
 
-		err = writer.AddPrevValue([]byte("key1"), nil, 6, []byte("value1.1"))
+		err = writer.AddPrevValue([]byte("key1"), 6, []byte("value1.1"))
 		require.NoError(err)
-		err = writer.AddPrevValue([]byte("key2"), nil, 6, []byte("value2.1"))
+		err = writer.AddPrevValue([]byte("key2"), 6, []byte("value2.1"))
 		require.NoError(err)
 
 		flusher := writer
 		writer = hc.NewWriter()
 
-		err = writer.AddPrevValue([]byte("key2"), nil, 7, []byte("value2.2"))
+		err = writer.AddPrevValue([]byte("key2"), 7, []byte("value2.2"))
 		require.NoError(err)
-		err = writer.AddPrevValue([]byte("key3"), nil, 7, nil)
+		err = writer.AddPrevValue([]byte("key3"), 7, nil)
 		require.NoError(err)
 
 		err = flusher.Flush(ctx, tx)
@@ -229,7 +233,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 		require.NoError(err)
 		defer sf.CleanupOnError()
 		var valWords []string
-		gh := seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.compression), h.historyValuesOnCompressedPage, true)
+		gh := seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.Compression), h.historyValuesOnCompressedPage, true)
 		gh.Reset(0)
 		for gh.HasNext() {
 			w, _ := gh.Next(nil)
@@ -245,8 +249,8 @@ func TestHistoryCollationBuild(t *testing.T) {
 			w, _ := ge.Next(nil)
 			keyWords = append(keyWords, string(w))
 			w, _ = ge.Next(w[:0])
-			ef, _ := eliasfano32.ReadEliasFano(w)
-			ints, err := stream.ToArrayU64(ef.Iterator())
+			ef := multiencseq.ReadMultiEncSeq(0, w)
+			ints, err := stream.ToArrayU64(ef.Iterator(0))
 			require.NoError(err)
 			intArrs = append(intArrs, ints)
 		}
@@ -263,7 +267,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 			require.Equal(keyWords[i], string(w))
 		}
 		r = recsplit.NewIndexReader(sf.historyIdx)
-		gh = seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.compression), h.historyValuesOnCompressedPage, true)
+		gh = seg.NewPagedReader(seg.NewReader(sf.historyDecomp.MakeGetter(), h.Compression), h.historyValuesOnCompressedPage, true)
 		var vi int
 		for i := 0; i < len(keyWords); i++ {
 			ints := intArrs[i]
@@ -307,20 +311,20 @@ func TestHistoryAfterPrune(t *testing.T) {
 		writer := hc.NewWriter()
 		defer writer.close()
 
-		err = writer.AddPrevValue([]byte("key1"), nil, 2, nil)
+		err = writer.AddPrevValue([]byte("key1"), 2, nil)
 		require.NoError(err)
 
-		err = writer.AddPrevValue([]byte("key2"), nil, 3, nil)
+		err = writer.AddPrevValue([]byte("key2"), 3, nil)
 		require.NoError(err)
 
-		err = writer.AddPrevValue([]byte("key1"), nil, 6, []byte("value1.1"))
+		err = writer.AddPrevValue([]byte("key1"), 6, []byte("value1.1"))
 		require.NoError(err)
-		err = writer.AddPrevValue([]byte("key2"), nil, 6, []byte("value2.1"))
+		err = writer.AddPrevValue([]byte("key2"), 6, []byte("value2.1"))
 		require.NoError(err)
 
-		err = writer.AddPrevValue([]byte("key2"), nil, 7, []byte("value2.2"))
+		err = writer.AddPrevValue([]byte("key2"), 7, []byte("value2.2"))
 		require.NoError(err)
-		err = writer.AddPrevValue([]byte("key3"), nil, 7, nil)
+		err = writer.AddPrevValue([]byte("key3"), 7, nil)
 		require.NoError(err)
 
 		err = writer.Flush(ctx, tx)
@@ -401,7 +405,7 @@ func TestHistoryCanPrune(t *testing.T) {
 				binary.BigEndian.PutUint64(val, i)
 			}
 
-			err = writer.AddPrevValue(addr[:], val, i, prev)
+			err = writer.AddPrevValue(append(addr[:], val...), i, prev)
 			require.NoError(err)
 
 			prev = common.Copy(val)
@@ -552,7 +556,6 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 	require.NoError(t, err)
 	t.Logf("stat=%v", stat)
 
-	fmt.Printf("start hist table:\n")
 	icc, err := rwTx.CursorDupSort(h.valuesTable)
 	require.NoError(t, err)
 	defer icc.Close()
@@ -722,7 +725,7 @@ func filledHistoryValues(tb testing.TB, largeValues bool, values map[string][]up
 		var keyFlushCount = 0
 		for key, upds := range values {
 			for i := 0; i < len(upds); i++ {
-				err := writer.AddPrevValue([]byte(key), nil, upds[i].txNum, upds[i].value)
+				err := writer.AddPrevValue([]byte(key), upds[i].txNum, upds[i].value)
 				require.NoError(tb, err)
 			}
 			keyFlushCount++
@@ -774,7 +777,7 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 				binary.BigEndian.PutUint64(v[:], valNum)
 				k[0] = 1   //mark key to simplify debug
 				v[0] = 255 //mark value to simplify debug
-				err = writer.AddPrevValue(k[:], nil, txNum, prevVal[keyNum])
+				err = writer.AddPrevValue(k[:], txNum, prevVal[keyNum])
 				require.NoError(tb, err)
 				prevVal[keyNum] = v[:]
 			}
@@ -1388,8 +1391,8 @@ func TestScanStaticFilesH(t *testing.T) {
 	newTestDomain := func() (*InvertedIndex, *History) {
 		d := emptyTestDomain(1)
 		d.History.InvertedIndex.integrity = nil
-		d.History.InvertedIndex.indexList = 0
-		d.History.indexList = 0
+		d.History.InvertedIndex.Accessors = 0
+		d.History.Accessors = 0
 		return d.History.InvertedIndex, d.History
 	}
 
@@ -1445,14 +1448,14 @@ func writeSomeHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 			if ik == 0 && txNum%33 == 0 {
 				continue
 			}
-			err = writer.AddPrevValue(k, nil, txNum, prevVal[ik])
+			err = writer.AddPrevValue(k, txNum, prevVal[ik])
 			require.NoError(tb, err)
 
 			prevVal[ik] = v[:]
 		}
 
 		if txNum%33 == 0 {
-			err = writer.AddPrevValue(keys[0], nil, txNum, nil)
+			err = writer.AddPrevValue(keys[0], txNum, nil)
 			require.NoError(tb, err)
 		}
 

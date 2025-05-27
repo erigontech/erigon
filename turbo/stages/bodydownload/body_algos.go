@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/types"
@@ -131,8 +132,8 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 			}
 		}
 		if request {
-			if header.UncleHash == types.EmptyUncleHash && header.TxHash == types.EmptyRootHash &&
-				(header.WithdrawalsHash == nil || *header.WithdrawalsHash == types.EmptyRootHash) {
+			if header.UncleHash == empty.UncleHash && header.TxHash == empty.RootHash &&
+				(header.WithdrawalsHash == nil || *header.WithdrawalsHash == empty.RootHash) {
 				// Empty block body
 				body := &types.RawBody{}
 				if header.WithdrawalsHash != nil {

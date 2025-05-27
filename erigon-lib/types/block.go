@@ -33,6 +33,7 @@ import (
 	"github.com/gballet/go-verkle"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/rlp"
 )
@@ -40,12 +41,6 @@ import (
 const (
 	ExtraVanityLength = 32 // Fixed number of extra-data prefix bytes reserved for signer vanity
 	ExtraSealLength   = 65 // Fixed number of extra-data suffix bytes reserved for signer seal
-)
-
-var (
-	EmptyRootHash     = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
-	EmptyRequestsHash = common.HexToHash("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855") // sha256.Sum256([]byte(""))
-	EmptyUncleHash    = rlpHash([]*Header(nil))
 )
 
 // A BlockNonce is a 64-bit hash which proves (combined with the
@@ -1014,7 +1009,7 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 
 	// TODO: panic if len(txs) != len(receipts)
 	if len(txs) == 0 {
-		b.header.TxHash = EmptyRootHash
+		b.header.TxHash = empty.TxsHash
 	} else {
 		b.header.TxHash = DeriveSha(Transactions(txs))
 		b.transactions = make(Transactions, len(txs))
@@ -1022,7 +1017,7 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 	}
 
 	if len(receipts) == 0 {
-		b.header.ReceiptHash = EmptyRootHash
+		b.header.ReceiptHash = empty.ReceiptsHash
 		b.header.Bloom = Bloom{}
 	} else {
 		b.header.ReceiptHash = DeriveSha(Receipts(receipts))
@@ -1030,7 +1025,7 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 	}
 
 	if len(uncles) == 0 {
-		b.header.UncleHash = EmptyUncleHash
+		b.header.UncleHash = empty.UncleHash
 	} else {
 		b.header.UncleHash = CalcUncleHash(uncles)
 		b.uncles = make([]*Header, len(uncles))
@@ -1042,7 +1037,7 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 	if withdrawals == nil {
 		b.header.WithdrawalsHash = nil
 	} else if len(withdrawals) == 0 {
-		b.header.WithdrawalsHash = &EmptyRootHash
+		b.header.WithdrawalsHash = &empty.WithdrawalsHash
 		b.withdrawals = make(Withdrawals, len(withdrawals))
 	} else {
 		h := DeriveSha(Withdrawals(withdrawals))
@@ -1366,12 +1361,12 @@ func (b *Block) HashCheck(fullCheck bool) error {
 		// execution-spec-tests contain such scenarios where block has an invalid tx, but receiptHash is default (=EmptyRootHash)
 		// the test is to see if tx is rejected in EL, but in mock_sentry.go, we have HashCheck() before block execution.
 		// Since we want the tx execution to happen, we skip it here and bypass this guard.
-		if len(b.transactions) > 0 && b.ReceiptHash() == EmptyRootHash {
+		if len(b.transactions) > 0 && b.ReceiptHash() == empty.RootHash {
 			return fmt.Errorf("block has empty receipt hash: %x but it includes %x transactions", b.ReceiptHash(), len(b.transactions))
 		}
 	}
 
-	if len(b.transactions) == 0 && b.ReceiptHash() != EmptyRootHash {
+	if len(b.transactions) == 0 && b.ReceiptHash() != empty.RootHash {
 		return fmt.Errorf("block has non-empty receipt hash: %x but no transactions", b.ReceiptHash())
 	}
 
@@ -1405,7 +1400,7 @@ func (c *writeCounter) Write(b []byte) (int, error) {
 
 func CalcUncleHash(uncles []*Header) common.Hash {
 	if len(uncles) == 0 {
-		return EmptyUncleHash
+		return empty.UncleHash
 	}
 	return rlpHash(uncles)
 }

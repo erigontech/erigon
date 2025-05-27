@@ -183,7 +183,7 @@ func TestRequestGenerator_traceTransaction(t *testing.T) {
 
 	reqGen := MockRequestGenerator(0)
 	for _, testCase := range testCases {
-		got := reqGen.debugTraceTransaction(testCase.hash)
+		got := reqGen.debugTraceTransaction(testCase.hash, "")
 		require.Equal(t, testCase.expected, got)
 	}
 }

@@ -29,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/trie"
@@ -161,6 +162,18 @@ func (sdb *IntraBlockState) HasStorage(addr common.Address) (bool, error) {
 
 	// Otherwise check in the DB
 	return sdb.stateReader.HasStorage(addr)
+}
+
+func (sdb *IntraBlockState) Trace() bool {
+	return sdb.trace
+}
+
+func (sdb *IntraBlockState) TxIndex() int {
+	return sdb.txIndex
+}
+
+func (sdb *IntraBlockState) Incarnation() int {
+	return 0
 }
 
 // setErrorUnsafe sets error but should be called in medhods that already have locks
@@ -348,10 +361,10 @@ func (sdb *IntraBlockState) GetCodeSize(addr common.Address) (int, error) {
 	if stateObject.code != nil {
 		return len(stateObject.code), nil
 	}
-	if stateObject.data.CodeHash == emptyCodeHashH {
+	if stateObject.data.CodeHash == empty.CodeHash {
 		return 0, nil
 	}
-	l, err := sdb.stateReader.ReadAccountCodeSize(addr, stateObject.data.Incarnation)
+	l, err := sdb.stateReader.ReadAccountCodeSize(addr)
 	if err != nil {
 		sdb.setErrorUnsafe(err)
 		return l, err
@@ -412,7 +425,7 @@ func (sdb *IntraBlockState) GetDelegatedDesignation(addr common.Address) (common
 
 // GetState retrieves a value from the given account's storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) GetState(addr common.Address, key *common.Hash, value *uint256.Int) error {
+func (sdb *IntraBlockState) GetState(addr common.Address, key common.Hash, value *uint256.Int) error {
 	stateObject, err := sdb.getStateObject(addr)
 	if err != nil {
 		return err
@@ -427,7 +440,7 @@ func (sdb *IntraBlockState) GetState(addr common.Address, key *common.Hash, valu
 
 // GetCommittedState retrieves a value from the given account's committed storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) GetCommittedState(addr common.Address, key *common.Hash, value *uint256.Int) error {
+func (sdb *IntraBlockState) GetCommittedState(addr common.Address, key common.Hash, value *uint256.Int) error {
 	stateObject, err := sdb.getStateObject(addr)
 	if err != nil {
 		return err
@@ -475,7 +488,7 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount *uint256.Int,
 	}
 	if !needAccount {
 		sdb.journal.append(balanceIncrease{
-			account:  &addr,
+			account:  addr,
 			increase: *amount,
 		})
 
@@ -495,7 +508,7 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount *uint256.Int,
 				prev.Add(prev, &bi.increase)
 			}
 
-			sdb.tracingHooks.OnBalanceChange(addr, prev, new(uint256.Int).Add(prev, amount), reason)
+			sdb.tracingHooks.OnBalanceChange(addr, *prev, *new(uint256.Int).Add(prev, amount), reason)
 		}
 
 		bi.increase.Add(&bi.increase, amount)
@@ -529,7 +542,7 @@ func (sdb *IntraBlockState) SubBalance(addr common.Address, amount *uint256.Int,
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) SetBalance(addr common.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) error {
+func (sdb *IntraBlockState) SetBalance(addr common.Address, amount uint256.Int, reason tracing.BalanceChangeReason) error {
 	stateObject, err := sdb.GetOrNewStateObject(addr)
 	if err != nil {
 		return err
@@ -566,7 +579,7 @@ func (sdb *IntraBlockState) SetCode(addr common.Address, code []byte) error {
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) SetState(addr common.Address, key *common.Hash, value uint256.Int) error {
+func (sdb *IntraBlockState) SetState(addr common.Address, key common.Hash, value uint256.Int) error {
 	stateObject, err := sdb.GetOrNewStateObject(addr)
 	if err != nil {
 		return err
@@ -629,13 +642,13 @@ func (sdb *IntraBlockState) Selfdestruct(addr common.Address) (bool, error) {
 
 	prevBalance := *stateObject.Balance()
 	sdb.journal.append(selfdestructChange{
-		account:     &addr,
+		account:     addr,
 		prev:        stateObject.selfdestructed,
 		prevbalance: prevBalance,
 	})
 
 	if sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil && !prevBalance.IsZero() {
-		sdb.tracingHooks.OnBalanceChange(addr, &prevBalance, uint256.NewInt(0), tracing.BalanceDecreaseSelfdestruct)
+		sdb.tracingHooks.OnBalanceChange(addr, prevBalance, zeroBalance, tracing.BalanceDecreaseSelfdestruct)
 	}
 
 	stateObject.markSelfdestructed()
@@ -644,6 +657,8 @@ func (sdb *IntraBlockState) Selfdestruct(addr common.Address) (bool, error) {
 
 	return true, nil
 }
+
+var zeroBalance uint256.Int
 
 func (sdb *IntraBlockState) Selfdestruct6780(addr common.Address) error {
 	stateObject, err := sdb.getStateObject(addr)
@@ -675,7 +690,7 @@ func (sdb *IntraBlockState) SetTransientState(addr common.Address, key common.Ha
 	}
 
 	sdb.journal.append(transientStorageChange{
-		account:  &addr,
+		account:  addr,
 		key:      key,
 		prevalue: prev,
 	})
@@ -761,9 +776,9 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 	newobj = newObject(sdb, addr, account, original)
 	newobj.setNonce(0) // sets the object to dirty
 	if previous == nil {
-		sdb.journal.append(createObjectChange{account: &addr})
+		sdb.journal.append(createObjectChange{account: addr})
 	} else {
-		sdb.journal.append(resetObjectChange{account: &addr, prev: previous})
+		sdb.journal.append(resetObjectChange{account: addr, prev: previous})
 	}
 	newobj.newlyCreated = true
 	sdb.setStateObject(addr, newobj)
@@ -789,12 +804,7 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 	if previous != nil && previous.selfdestructed {
 		prevInc = previous.data.Incarnation
 	} else {
-		if inc, err := sdb.stateReader.ReadAccountIncarnation(addr); err == nil {
-			prevInc = inc
-		} else {
-			sdb.savedErr = err
-			return err
-		}
+		prevInc = 0 // sdb.stateReader.ReadAccountIncarnation(addr)
 	}
 	if previous != nil && prevInc < previous.data.PrevIncarnation {
 		prevInc = previous.data.PrevIncarnation
@@ -849,7 +859,7 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 	emptyRemoval := EIP161Enabled && stateObject.empty() && (!isAura || addr != SystemAddress)
 	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
 		if tracingHooks != nil && tracingHooks.OnBalanceChange != nil && !stateObject.Balance().IsZero() && stateObject.selfdestructed {
-			tracingHooks.OnBalanceChange(stateObject.address, stateObject.Balance(), uint256.NewInt(0), tracing.BalanceDecreaseSelfdestructBurn)
+			tracingHooks.OnBalanceChange(stateObject.address, stateObject.data.Balance, zeroBalance, tracing.BalanceDecreaseSelfdestructBurn)
 		}
 		if err := stateWriter.DeleteAccount(addr, &stateObject.original); err != nil {
 			return err
@@ -1090,7 +1100,7 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase common.
 func (sdb *IntraBlockState) AddAddressToAccessList(addr common.Address) (addrMod bool) {
 	addrMod = sdb.accessList.AddAddress(addr)
 	if addrMod {
-		sdb.journal.append(accessListAddAccountChange{&addr})
+		sdb.journal.append(accessListAddAccountChange{addr})
 	}
 	return addrMod
 }
@@ -1103,12 +1113,12 @@ func (sdb *IntraBlockState) AddSlotToAccessList(addr common.Address, slot common
 		// scope of 'address' without having the 'address' become already added
 		// to the access list (via call-variant, create, etc).
 		// Better safe than sorry, though
-		sdb.journal.append(accessListAddAccountChange{&addr})
+		sdb.journal.append(accessListAddAccountChange{addr})
 	}
 	if slotMod {
 		sdb.journal.append(accessListAddSlotChange{
-			address: &addr,
-			slot:    &slot,
+			address: addr,
+			slot:    slot,
 		})
 	}
 	return addrMod, slotMod

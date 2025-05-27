@@ -177,7 +177,7 @@ func TestCreate2Revive(t *testing.T) {
 		}
 		// We expect number 0x42 in the position [2], because it is the block number 2
 		key2 = common.BigToHash(big.NewInt(2))
-		st.GetState(create2address, &key2, &check2)
+		st.GetState(create2address, key2, &check2)
 		if check2.Uint64() != 0x42 {
 			t.Errorf("expected 0x42 in position 2, got: %x", check2.Uint64())
 		}
@@ -214,12 +214,12 @@ func TestCreate2Revive(t *testing.T) {
 		// We expect number 0x42 in the position [4], because it is the block number 4
 		key4 := common.BigToHash(big.NewInt(4))
 		var check4 uint256.Int
-		st.GetState(create2address, &key4, &check4)
+		st.GetState(create2address, key4, &check4)
 		if check4.Uint64() != 0x42 {
 			t.Errorf("expected 0x42 in position 4, got: %x", check4.Uint64())
 		}
 		// We expect number 0x0 in the position [2], because it is the block number 4
-		st.GetState(create2address, &key2, &check2)
+		st.GetState(create2address, key2, &check2)
 		if !check2.IsZero() {
 			t.Errorf("expected 0x0 in position 2, got: %x", check2)
 		}
@@ -613,7 +613,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		}
 
 		// Remember value of field "x" (storage item 0) after the first block, to check after rewinding
-		st.GetState(contractAddress, &key0, &correctValueX)
+		st.GetState(contractAddress, key0, &correctValueX)
 		return nil
 	})
 	require.NoError(t, err)
@@ -645,7 +645,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 			t.Error("expected contractAddress to exist at the block 4", contractAddress.String())
 		}
 		var valueX uint256.Int
-		st.GetState(contractAddress, &key0, &valueX)
+		st.GetState(contractAddress, key0, &valueX)
 		if valueX != correctValueX {
 			t.Fatalf("storage value has changed after reorg: %x, expected %x", valueX, correctValueX)
 		}
@@ -766,7 +766,7 @@ func TestReorgOverStateChange(t *testing.T) {
 		}
 
 		// Remember value of field "x" (storage item 0) after the first block, to check after rewinding
-		st.GetState(contractAddress, &key0, &correctValueX)
+		st.GetState(contractAddress, key0, &correctValueX)
 		return nil
 	})
 	require.NoError(t, err)
@@ -790,7 +790,7 @@ func TestReorgOverStateChange(t *testing.T) {
 
 		// Reload blockchain from the database
 		var valueX uint256.Int
-		st.GetState(contractAddress, &key0, &valueX)
+		st.GetState(contractAddress, key0, &valueX)
 		if valueX != correctValueX {
 			t.Fatalf("storage value has changed after reorg: %x, expected %x", valueX, correctValueX)
 		}
@@ -901,7 +901,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 		}
 
-		st.GetState(contractAddress, &key0, &check0)
+		st.GetState(contractAddress, key0, &check0)
 		if !check0.IsZero() {
 			t.Errorf("expected 0x00 in position 0, got: %x", check0.Bytes())
 		}
@@ -930,10 +930,11 @@ func TestReproduceCrash(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	tsw := state.NewWriterV4(sd)
-	tsr := state.NewReaderV3(sd)
-	sd.SetTxNum(1)
-	sd.SetBlockNum(1)
+	txNum := uint64(1)
+	tsw := state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	tsr := state.NewReaderV3(sd.AsGetter(tx))
+	sd.SetTxNum(txNum)
+	sd.SetBlockNum(txNum)
 
 	intraBlockState := state.New(tsr)
 	// Start the 1st transaction
@@ -942,20 +943,20 @@ func TestReproduceCrash(t *testing.T) {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 2nd transaction
-	intraBlockState.SetState(contract, &storageKey1, *value1)
+	intraBlockState.SetState(contract, storageKey1, *value1)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 3rd transaction
 	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
-	intraBlockState.SetState(contract, &storageKey2, *value2)
+	intraBlockState.SetState(contract, storageKey2, *value2)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 4th transaction - clearing both storage cells
 	intraBlockState.SubBalance(contract, uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
-	intraBlockState.SetState(contract, &storageKey1, *value0)
-	intraBlockState.SetState(contract, &storageKey2, *value0)
+	intraBlockState.SetState(contract, storageKey1, *value0)
+	intraBlockState.SetState(contract, storageKey2, *value0)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
@@ -1354,7 +1355,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	r, tsw := state.NewReaderV3(sd), state.NewWriterV4(sd)
+	r, tsw := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, sd.TxNum())
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
@@ -1366,14 +1367,14 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
-	rh1, err := sd.ComputeCommitment(context.Background(), true, 0, "")
+	rh1, err := sd.ComputeCommitment(context.Background(), tx, true, 0, "")
 	require.NoError(t, err)
-	t.Logf("stateRoot %x", rh1)
+	//t.Logf("stateRoot %x", rh1)
 
 	sd.SetTxNum(2)
 	sd.SetBlockNum(1)
 
-	trieCode, tcErr := r.ReadAccountCode(contract, 1)
+	trieCode, tcErr := r.ReadAccountCode(contract)
 	require.NoError(t, tcErr, "you can receive the new code")
 	assert.Equal(t, oldCode, trieCode, "new code should be received")
 
@@ -1384,11 +1385,11 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 
-	trieCode, tcErr = r.ReadAccountCode(contract, 1)
+	trieCode, tcErr = r.ReadAccountCode(contract)
 	require.NoError(t, tcErr, "you can receive the new code")
 	assert.Equal(t, newCode, trieCode, "new code should be received")
 
-	rh2, err := sd.ComputeCommitment(context.Background(), true, 1, "")
+	rh2, err := sd.ComputeCommitment(context.Background(), tx, true, 1, "")
 	require.NoError(t, err)
 	require.NotEqual(t, rh1, rh2)
 }
@@ -1404,7 +1405,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	r, w := state.NewReaderV3(sd), state.NewWriterV4(sd)
+	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, sd.TxNum())
 
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
@@ -1421,11 +1422,11 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 		t.Errorf("error committing block: %v", err)
 	}
 
-	codeSize, err := r.ReadAccountCodeSize(contract, 1)
+	codeSize, err := r.ReadAccountCodeSize(contract)
 	require.NoError(t, err, "you can receive the new code")
 	assert.Equal(t, len(code), codeSize, "new code should be received")
 
-	code2, err := r.ReadAccountCode(contract, 1)
+	code2, err := r.ReadAccountCode(contract)
 	require.NoError(t, err, "you can receive the new code")
 	assert.Equal(t, code, code2, "new code should be received")
 }
@@ -1442,7 +1443,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	r, w := state.NewReaderV3(sd), state.NewWriterV4(sd)
+	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, sd.TxNum())
 
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
@@ -1459,22 +1460,22 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 		t.Errorf("error committing block: %v", err)
 	}
 
-	r2, err := sd.ComputeCommitment(context.Background(), true, 1, "")
+	r2, err := sd.ComputeCommitment(context.Background(), tx, true, 1, "")
 	require.NoError(t, err)
 	require.Equal(t, root, common.CastToHash(r2))
 
 	codeHash := common.BytesToHash(crypto.Keccak256(code))
-	codeSize, err := r.ReadAccountCodeSize(contract, 1)
+	codeSize, err := r.ReadAccountCodeSize(contract)
 	require.NoError(t, err, "you can receive the code size ")
 	assert.Equal(t, len(code), codeSize, "you can receive the code size")
 
 	require.NoError(t, tx.Delete(kv.Code, codeHash[:]), nil)
 
-	codeSize2, err := r.ReadAccountCodeSize(contract, 1)
+	codeSize2, err := r.ReadAccountCodeSize(contract)
 	require.NoError(t, err, "you can still receive code size even with empty DB")
 	assert.Equal(t, len(code), codeSize2, "code size should be received even with empty DB")
 
-	r2, err = sd.ComputeCommitment(context.Background(), true, 1, "")
+	r2, err = sd.ComputeCommitment(context.Background(), tx, true, 1, "")
 	require.NoError(t, err)
 	require.Equal(t, root, common.CastToHash(r2))
 }
@@ -1639,7 +1640,7 @@ func TestRecreateAndRewind(t *testing.T) {
 			t.Errorf("expected phoenix %x to exist after first insert", phoenixAddress)
 		}
 
-		st.GetState(phoenixAddress, &key0, &check0)
+		st.GetState(phoenixAddress, key0, &check0)
 		if check0.Cmp(uint256.NewInt(2)) != 0 {
 			t.Errorf("expected 0x02 in position 0, got: 0x%x", check0.Bytes())
 		}
@@ -1660,7 +1661,7 @@ func TestRecreateAndRewind(t *testing.T) {
 			t.Errorf("expected phoenix %x to exist after second insert", phoenixAddress)
 		}
 
-		st.GetState(phoenixAddress, &key0, &check0)
+		st.GetState(phoenixAddress, key0, &check0)
 		if check0.Cmp(uint256.NewInt(1)) != 0 {
 			t.Errorf("expected 0x01 in position 0, got: 0x%x", check0.Bytes())
 		}
@@ -1680,7 +1681,7 @@ func TestRecreateAndRewind(t *testing.T) {
 			t.Errorf("expected phoenix %x to exist after second insert", phoenixAddress)
 		}
 
-		st.GetState(phoenixAddress, &key0, &check0)
+		st.GetState(phoenixAddress, key0, &check0)
 		if check0.Cmp(uint256.NewInt(0)) != 0 {
 			t.Errorf("expected 0x00 in position 0, got: 0x%x", check0.Bytes())
 		}

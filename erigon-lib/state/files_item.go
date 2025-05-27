@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
@@ -49,7 +50,7 @@ type filesItem struct {
 	decompressor         *seg.Decompressor
 	index                *recsplit.Index
 	bindex               *BtIndex
-	existence            *ExistenceFilter
+	existence            *existence.Filter
 	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
 
 	// Frozen: file of size StepsInFrozenFile. Completely immutable.
@@ -67,7 +68,8 @@ type FilesItem interface {
 	Segment() *seg.Decompressor
 	AccessorIndex() *recsplit.Index
 	BtIndex() *BtIndex
-	ExistenceFilter() *ExistenceFilter
+	ExistenceFilter() *existence.Filter
+	Range() (startTxNum, endTxNum uint64)
 }
 
 var _ FilesItem = (*filesItem)(nil)
@@ -93,7 +95,23 @@ func (i *filesItem) AccessorIndex() *recsplit.Index { return i.index }
 
 func (i *filesItem) BtIndex() *BtIndex { return i.bindex }
 
-func (i *filesItem) ExistenceFilter() *ExistenceFilter { return i.existence }
+func (i *filesItem) ExistenceFilter() *existence.Filter { return i.existence }
+func (i *filesItem) MadvNormal() {
+	i.decompressor.MadvNormal()
+	i.index.MadvNormal()
+	//i.bindex.MadvNormal()
+	//i.existence.MadvNormal()
+}
+func (i *filesItem) DisableReadAhead() {
+	i.decompressor.DisableReadAhead()
+	i.index.DisableReadAhead()
+	//i.bindex.DisableReadAhead()
+	//i.existence.DisableReadAhead()
+}
+
+func (i *filesItem) Range() (startTxNum, endTxNum uint64) {
+	return i.startTxNum, i.endTxNum
+}
 
 // isProperSubsetOf - when `j` covers `i` but not equal `i`
 func (i *filesItem) isProperSubsetOf(j *filesItem) bool {
@@ -352,6 +370,13 @@ func (files visibleFiles) EndTxNum() uint64 {
 	return files[len(files)-1].endTxNum
 }
 
+func (files visibleFiles) StartTxNum() uint64 {
+	if len(files) == 0 {
+		return 0
+	}
+	return files[0].startTxNum
+}
+
 func (files visibleFiles) LatestMergedRange() MergeRange {
 	if len(files) == 0 {
 		return MergeRange{}
@@ -370,6 +395,17 @@ func (files visibleFiles) String(stepSize uint64) string {
 		res = append(res, fmt.Sprintf("%d-%d", file.startTxNum/stepSize, file.endTxNum/stepSize))
 	}
 	return strings.Join(res, ",")
+}
+func (files visibleFiles) Len() int {
+	return len(files)
+}
+
+func (files visibleFiles) VisibleFiles() []VisibleFile {
+	res := make([]VisibleFile, 0, len(files))
+	for _, file := range files {
+		res = append(res, file)
+	}
+	return res
 }
 
 // fileItemsWithMissedAccessors returns list of files with missed accessors

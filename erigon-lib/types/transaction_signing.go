@@ -56,7 +56,7 @@ func MakeSigner(config *chain.Config, blockNumber uint64, blockTime uint64) *Sig
 		signer.blob = true
 		signer.setCode = true
 		signer.chainID.Set(&chainId)
-		signer.chainIDMul.Mul(&chainId, u256.Num2)
+		signer.chainIDMul.Lsh(&chainId, 1) // ×2
 	case config.IsCancun(blockTime):
 		// All transaction types are still supported
 		signer.protected = true
@@ -64,22 +64,22 @@ func MakeSigner(config *chain.Config, blockNumber uint64, blockTime uint64) *Sig
 		signer.dynamicFee = true
 		signer.blob = true
 		signer.chainID.Set(&chainId)
-		signer.chainIDMul.Mul(&chainId, u256.Num2)
+		signer.chainIDMul.Lsh(&chainId, 1) // ×2
 	case config.IsLondon(blockNumber):
 		signer.protected = true
 		signer.accessList = true
 		signer.dynamicFee = true
 		signer.chainID.Set(&chainId)
-		signer.chainIDMul.Mul(&chainId, u256.Num2)
+		signer.chainIDMul.Lsh(&chainId, 1) // ×2
 	case config.IsBerlin(blockNumber):
 		signer.protected = true
 		signer.accessList = true
 		signer.chainID.Set(&chainId)
-		signer.chainIDMul.Mul(&chainId, u256.Num2)
+		signer.chainIDMul.Lsh(&chainId, 1) // ×2
 	case config.IsSpuriousDragon(blockNumber):
 		signer.protected = true
 		signer.chainID.Set(&chainId)
-		signer.chainIDMul.Mul(&chainId, u256.Num2)
+		signer.chainIDMul.Lsh(&chainId, 1) // ×2
 	case config.IsHomestead(blockNumber):
 	default:
 		// Only allow malleable transactions in Frontier
@@ -110,7 +110,7 @@ func LatestSigner(config *chain.Config) *Signer {
 		panic("chainID higher than 2^256-1")
 	}
 	signer.chainID.Set(chainId)
-	signer.chainIDMul.Mul(chainId, u256.Num2)
+	signer.chainIDMul.Lsh(chainId, 1) // ×2
 	if config.ChainID != nil {
 		if config.CancunTime != nil {
 			signer.blob = true
@@ -149,7 +149,7 @@ func LatestSignerForChainID(chainID *big.Int) *Signer {
 		panic("chainID higher than 2^256-1")
 	}
 	signer.chainID.Set(chainId)
-	signer.chainIDMul.Mul(chainId, u256.Num2)
+	signer.chainIDMul.Lsh(chainId, 1) // ×2
 	signer.protected = true
 	signer.accessList = true
 	signer.dynamicFee = true
@@ -397,5 +397,5 @@ func DeriveChainId(v *uint256.Int) *uint256.Int {
 		return new(uint256.Int).SetUint64((v - 35) / 2)
 	}
 	r := new(uint256.Int).Sub(v, u256.Num35)
-	return r.Div(r, u256.Num2)
+	return r.Rsh(r, 1) // ÷2
 }

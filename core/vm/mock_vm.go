@@ -23,7 +23,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/state"
 )
 
 type readonlyGetSetter interface {
@@ -65,13 +64,13 @@ func (evm *testVM) Run(_ *Contract, _ []byte, readOnly bool) (ret []byte, err er
 	*evm.currentIdx++
 
 	if *evm.currentIdx < len(evm.readOnlySliceTest) {
-		res, err := run(evm.env, NewContract(
+		res, err := evm.env.interpreter.Run(NewContract(
 			&dummyContractRef{},
 			common.Address{},
 			new(uint256.Int),
 			0,
 			false,
-			evm.env.JumpDestCache,
+			evm.env.config.JumpDestCache,
 		), nil, evm.readOnlySliceTest[*evm.currentIdx])
 		return res, err
 	}
@@ -110,9 +109,3 @@ func (d *dummyContractRef) AddBalance(amount *big.Int) {}
 func (d *dummyContractRef) SetBalance(*big.Int)        {}
 func (d *dummyContractRef) SetNonce(uint64)            {}
 func (d *dummyContractRef) Balance() *big.Int          { return new(big.Int) }
-
-type dummyStatedb struct {
-	state.IntraBlockState
-}
-
-func (*dummyStatedb) GetRefund() uint64 { return 1337 }

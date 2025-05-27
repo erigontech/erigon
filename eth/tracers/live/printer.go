@@ -101,7 +101,7 @@ func (p *Printer) OnGenesisBlock(b *types.Block, alloc types.GenesisAlloc) {
 	fmt.Printf("OnGenesisBlock: b=%v, allocLength=%d\n", b.NumberU64(), len(alloc))
 }
 
-func (p *Printer) OnBalanceChange(a common.Address, prev, new *uint256.Int, reason tracing.BalanceChangeReason) {
+func (p *Printer) OnBalanceChange(a common.Address, prev, new uint256.Int, reason tracing.BalanceChangeReason) {
 	fmt.Printf("OnBalanceChange: a=%v, prev=%v, new=%v\n", a, prev, new)
 }
 
@@ -113,7 +113,7 @@ func (p *Printer) OnCodeChange(a common.Address, prevCodeHash common.Hash, prev 
 	fmt.Printf("OnCodeChange: a=%v, prevCodeHash=%v, prev=%s, codeHash=%v, code=%s\n", a, prevCodeHash, hexutil.Bytes(prev), codeHash, hexutil.Bytes(code))
 }
 
-func (p *Printer) OnStorageChange(a common.Address, k *common.Hash, prev, new uint256.Int) {
+func (p *Printer) OnStorageChange(a common.Address, k common.Hash, prev, new uint256.Int) {
 	fmt.Printf("OnStorageChange: a=%v, k=%v, prev=%v, new=%v\n", a, k, prev, new)
 }
 

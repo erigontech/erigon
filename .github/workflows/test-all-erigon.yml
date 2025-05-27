@@ -1,4 +1,4 @@
-name: All tests - ERIGON
+name: All tests
 
 on:
   push:
@@ -46,8 +46,8 @@ jobs:
     strategy:
       matrix:
         os:
-          - ubuntu-22.04
-          - macos-14
+          - ubuntu-24.04
+          - macos-15
           # - ubuntu-latest-erigontests-large
     runs-on: ${{ matrix.os }}
 
@@ -70,7 +70,7 @@ jobs:
         if: needs.source-of-changes.outputs.changed_files != 'true'
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.24'
           cache: ${{ contains(fromJSON('["refs/heads/main","refs/heads/release/3.0","refs/heads/release/2.61"]'), github.ref) }}
           
       - name: Install dependencies on Linux
@@ -106,15 +106,11 @@ jobs:
         if: needs.source-of-changes.outputs.changed_files != 'true'
         uses: actions/checkout@v4
         
-      - name: Update submodules on Windows
-        if: needs.source-of-changes.outputs.changed_files != 'true'
-        run: git submodule update --init --recursive --force
-        
       - name: Setup Go environment on ${{ matrix.os }}
         if: needs.source-of-changes.outputs.changed_files != 'true'
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.24'
 
       - name: Cache Chocolatey packages
         if: needs.source-of-changes.outputs.changed_files != 'true'

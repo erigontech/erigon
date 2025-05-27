@@ -17,7 +17,6 @@
 package freezeblocks
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -36,10 +35,10 @@ import (
 
 	"github.com/erigontech/erigon-db/rawdb"
 	"github.com/erigontech/erigon-db/rawdb/blockio"
+	coresnaptype "github.com/erigontech/erigon-db/snaptype"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
-	common2 "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -53,7 +52,6 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/types"
-	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
@@ -278,7 +276,7 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 			return false, nil
 		}
 		logger.Log(lvl, "[snapshots] Retire Blocks", "range",
-			fmt.Sprintf("%s-%s", common2.PrettyCounter(blockFrom), common2.PrettyCounter(blockTo)))
+			fmt.Sprintf("%s-%s", common.PrettyCounter(blockFrom), common.PrettyCounter(blockTo)))
 		// in future we will do it in background
 		if err := DumpBlocks(ctx, blockFrom, blockTo, br.chainConfig, tmpDir, snapshots.Dir(), db, int(workers), lvl, logger, blockReader); err != nil {
 			return ok, fmt.Errorf("DumpBlocks: %w", err)
@@ -293,6 +291,14 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 		}
 	}
 
+	merged, err := br.MergeBlocks(ctx, lvl, seedNewSnapshots)
+	return ok || merged, err
+}
+
+func (br *BlockRetire) MergeBlocks(ctx context.Context, lvl log.Lvl, seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error) (merged bool, err error) {
+	notifier, logger, _, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers.Load()
+	snapshots := br.snapshots()
+
 	merger := snapshotsync.NewMerger(tmpDir, int(workers), lvl, db, br.chainConfig, logger)
 	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(), snapshots.BlocksAvailable())
 	if len(rangesToMerge) == 0 {
@@ -300,9 +306,9 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 		//if err := snapshots.RemoveOverlaps(); err != nil {
 		//	return false, err
 		//}
-		return ok, nil
+		return false, nil
 	}
-	ok = true // have something to merge
+	merged = true
 	onMerge := func(r snapshotsync.Range) error {
 		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 			notifier.OnNewSnapshot()
@@ -318,16 +324,15 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 		}
 		return nil
 	}
-	err := merger.Merge(ctx, &snapshots.RoSnapshots, snapshots.Types(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete)
-	if err != nil {
-		return ok, err
+	if err = merger.Merge(ctx, &snapshots.RoSnapshots, snapshots.Types(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, nil); err != nil {
+		return false, err
 	}
 
 	// remove old garbage files
-	if err := snapshots.RemoveOverlaps(); err != nil {
+	if err = snapshots.RemoveOverlaps(); err != nil {
 		return false, err
 	}
-	return ok, nil
+	return
 }
 
 var ErrNothingToPrune = errors.New("nothing to prune")
@@ -413,7 +418,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, requestedMinBlockNum ui
 	}
 	includeBor := br.chainConfig.Bor != nil
 
-	if err := br.BuildMissedIndicesIfNeed(ctx, "RetireBlocks", br.notifier, br.chainConfig); err != nil {
+	if err := br.BuildMissedIndicesIfNeed(ctx, "RetireBlocks", br.notifier); err != nil {
 		return err
 	}
 
@@ -465,18 +470,45 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, requestedMinBlockNum ui
 	return nil
 }
 
-func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier, cc *chain.Config) error {
-	if err := br.snapshots().BuildMissedIndices(ctx, logPrefix, notifier, br.dirs, cc, br.logger); err != nil {
+func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier) error {
+	if err := br.snapshots().BuildMissedIndices(ctx, logPrefix, notifier, br.dirs, br.chainConfig, br.logger); err != nil {
 		return err
 	}
 
-	if cc.Bor != nil {
-		if err := br.borSnapshots().RoSnapshots.BuildMissedIndices(ctx, logPrefix, notifier, br.dirs, cc, br.logger); err != nil {
+	if br.chainConfig.Bor != nil {
+		if err := br.borSnapshots().RoSnapshots.BuildMissedIndices(ctx, logPrefix, notifier, br.dirs, br.chainConfig, br.logger); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+func (br *BlockRetire) RemoveOverlaps() error {
+	if err := br.snapshots().RemoveOverlaps(); err != nil {
+		return err
+	}
+
+	if br.chainConfig.Bor != nil {
+		if err := br.borSnapshots().RoSnapshots.RemoveOverlaps(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (br *BlockRetire) MadvNormal() *BlockRetire {
+	br.snapshots().MadvNormal()
+	if br.chainConfig.Bor != nil {
+		br.borSnapshots().RoSnapshots.MadvNormal()
+	}
+	return br
+}
+
+func (br *BlockRetire) DisableReadAhead() {
+	br.snapshots().DisableReadAhead()
+	if br.chainConfig.Bor != nil {
+		br.borSnapshots().RoSnapshots.DisableReadAhead()
+	}
 }
 
 func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
@@ -531,7 +563,7 @@ func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstK
 
 	compressCfg := BlockCompressCfg
 	compressCfg.Workers = workers
-	sn, err := seg.NewCompressor(ctx, "Snapshot "+f.Type.Name(), f.Path, tmpDir, compressCfg, log.LvlInfo, logger)
+	sn, err := seg.NewCompressor(ctx, "Snapshot "+f.Type.Name(), f.Path, tmpDir, compressCfg, log.LvlTrace, logger)
 	if err != nil {
 		return lastKeyValue, err
 	}
@@ -555,7 +587,7 @@ func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstK
 	}
 
 	ext := filepath.Ext(f.Name())
-	logger.Log(lvl, "[snapshots] Compression start", "file", f.Name()[:len(f.Name())-len(ext)], "workers", sn.WorkersAmount(), "stack", dbg.Stack())
+	logger.Log(lvl, "[snapshots] Compression start", "file", f.Name()[:len(f.Name())-len(ext)], "workers", sn.WorkersAmount())
 
 	if err := sn.Compress(); err != nil {
 		return lastKeyValue, fmt.Errorf("compress: %w", err)
@@ -586,7 +618,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 	defer cancel()
 
 	numBuf := make([]byte, 8)
-	parse := func(v, valueBuf []byte, senders []common2.Address, j int) ([]byte, error) {
+	parse := func(v, valueBuf []byte, senders []common.Address, j int) ([]byte, error) {
 		var sender [20]byte
 		txn2, err := types.DecodeTransaction(v)
 		if err != nil {
@@ -646,7 +678,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			return false, nil
 		}
 
-		h := common2.BytesToHash(v)
+		h := common.BytesToHash(v)
 		dataRLP := rawdb.ReadStorageBodyRLP(tx, h, blockNum)
 		if dataRLP == nil {
 			return false, fmt.Errorf("body not found: %d, %x", blockNum, h)
@@ -757,7 +789,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			if lvl >= log.LvlInfo {
 				var m runtime.MemStats
 				dbg.ReadMemStats(&m)
-				logger.Log(lvl, "[snapshots] Dumping txs", "block num", blockNum, "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+				logger.Log(lvl, "[snapshots] Dumping txs", "block num", blockNum, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 			} else {
 				logger.Log(lvl, "[snapshots] Dumping txs", "block num", blockNum)
 			}
@@ -767,7 +799,6 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 	}); err != nil {
 		return 0, fmt.Errorf("BigChunks: %w", err)
 	}
-	println("exiting big chunks")
 	return 0, nil
 }
 
@@ -846,7 +877,7 @@ func DumpHeadersRaw(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom,
 				dbg.ReadMemStats(&m)
 			}
 			logger.Log(lvl, "[snapshots] Dumping headers", "block num", blockNum,
-				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys),
+				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 			)
 		default:
 		}
@@ -929,7 +960,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 				dbg.ReadMemStats(&m)
 			}
 			logger.Log(lvl, "[snapshots] Wrote into file", "block num", blockNum,
-				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys),
+				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 			)
 		default:
 		}
@@ -942,7 +973,6 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 }
 
 func ForEachHeader(ctx context.Context, s *RoSnapshots, walker func(header *types.Header) error) error {
-	r := bytes.NewReader(nil)
 	word := make([]byte, 0, 2*4096)
 
 	view := s.View()
@@ -954,8 +984,7 @@ func ForEachHeader(ctx context.Context, s *RoSnapshots, walker func(header *type
 			for i := 0; g.HasNext(); i++ {
 				word, _ = g.Next(word[:0])
 				var header types.Header
-				r.Reset(word[1:])
-				if err := rlp.Decode(r, &header); err != nil {
+				if err := rlp.DecodeBytes(word[1:], &header); err != nil {
 					return fmt.Errorf("%w, file=%s, record=%d", err, sn.Src().FileName(), i)
 				}
 				if err := walker(&header); err != nil {
@@ -1021,6 +1050,11 @@ func RemoveIncompatibleIndices(dirs datadir.Dirs) error {
 			if errors.Is(err, recsplit.IncompatibleErr) {
 				_, fName := filepath.Split(fPath)
 				if err = os.Remove(fPath); err != nil {
+					log.Warn("Removing incompatible index", "file", fName, "err", err)
+				} else {
+					log.Info("Removing incompatible index", "file", fName)
+				}
+				if err = os.Remove(fPath + ".torrent"); err != nil {
 					log.Warn("Removing incompatible index", "file", fName, "err", err)
 				} else {
 					log.Info("Removing incompatible index", "file", fName)

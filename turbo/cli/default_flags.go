@@ -174,7 +174,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.WithHeimdallMilestones,
 	&utils.WithHeimdallWaypoints,
 	&utils.PolygonSyncFlag,
-	&utils.PolygonSyncStageFlag,
 	&utils.AAFlag,
 	&utils.EthStatsURLFlag,
 	&utils.OverridePragueFlag,
@@ -231,6 +230,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.CaplinValidatorMonitorFlag,
 	&utils.CaplinCustomConfigFlag,
 	&utils.CaplinCustomGenesisFlag,
+	&utils.CaplinUseEngineApiFlag,
 
 	&utils.TrustedSetupFile,
 	&utils.RPCSlowFlag,

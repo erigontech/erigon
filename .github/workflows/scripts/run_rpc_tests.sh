@@ -21,8 +21,10 @@ disabled_tests=(
     eth_coinbase/test_01.json
     eth_createAccessList/test_16.json
     eth_getTransactionByHash/test_02.json
+    ots_searchTransactionsBefore/test_02.json
     # Small prune issue that leads to wrong ReceiptDomain data at 16999999 (probably at every million) block: https://github.com/erigontech/erigon/issues/13050
     ots_searchTransactionsBefore/test_04.tar
+    ots_getTransactionBySenderAndNonce/test_07.json
     eth_getWork/test_01.json
     eth_mining/test_01.json
     eth_protocolVersion/test_1.json

@@ -9,11 +9,12 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
 	ee "github.com/erigontech/erigon-lib/state/entity_extras"
+	"github.com/erigontech/erigon-lib/version"
 	"github.com/stretchr/testify/require"
 )
 
@@ -50,7 +51,7 @@ func TestOpenFolder_AccountsDomain(t *testing.T) {
 	// check dirty files
 	repo.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
-			filename := item.decompressor.FileName1
+			filename := item.decompressor.FileName()
 			require.Contains(t, filename, name)
 			require.NotContains(t, filename, "torrent")
 			dataCount--
@@ -104,7 +105,7 @@ func TestOpenFolder_CodeII(t *testing.T) {
 	// check dirty files
 	repo.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
-			filename := item.decompressor.FileName1
+			filename := item.decompressor.FileName()
 			require.Contains(t, filename, name)
 			require.NotContains(t, filename, "torrent")
 			dataCount--
@@ -161,7 +162,7 @@ func TestIntegrateDirtyFile(t *testing.T) {
 	require.NoError(t, err)
 
 	filesItem := newFilesItemWithSnapConfig(0, 1024, repo.cfg)
-	filename := repo.schema.DataFile(snaptype.V1_0, 0, 1024)
+	filename := repo.schema.DataFile(version.V1_0, 0, 1024)
 	comp, err := seg.NewCompressor(context.Background(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 	require.NoError(t, err)
 	defer comp.Close()
@@ -271,16 +272,16 @@ func TestMergeRangeSnapRepo(t *testing.T) {
 		require.Positive(t, dataCount)
 		require.NoError(t, repo.OpenFolder())
 		repo.RecalcVisibleFiles(RootNum(MaxUint64))
-		vf := repo.visibleFiles()
+		vf := repo.VisibleFiles()
 		require.Len(t, vf, vfCount)
 
-		mr := repo.FindMergeRange(RootNum(vf.EndTxNum()), vf)
+		mr := repo.FindMergeRange(RootNum(vf.EndRootNum()), vf)
 		require.Equal(t, mr.needMerge, needMerge)
 		if !mr.needMerge {
 			require.Equal(t, mr.from, mergeFromStep*stepSize)
 			require.Equal(t, mr.to, mergeToStep*stepSize)
 		}
-		cleanup(t, repo, dirs)
+		cleanupFiles(t, repo, dirs)
 	}
 
 	// 0-1, 1-2 => 0-2
@@ -456,10 +457,10 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 		repo.RecalcVisibleFiles(RootNum(MaxUint64))
 		vf := repo.visibleFiles()
 
-		mr := repo.FindMergeRange(RootNum(vf.EndTxNum()), vf)
+		mr := repo.FindMergeRange(RootNum(vf.EndTxNum()), vf.VisibleFiles())
 		require.Equal(t, mr.needMerge, needMerge)
 		if !mr.needMerge {
-			cleanup(t, repo, dirs)
+			cleanupFiles(t, repo, dirs)
 			return
 		}
 
@@ -480,7 +481,7 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 		repo.CleanAfterMerge(merged, vf)
 		require.Equal(t, repo.dirtyFiles.Len(), dirtyFilesAfterMerge)
 
-		cleanup(t, repo, dirs)
+		cleanupFiles(t, repo, dirs)
 	}
 
 	// 0-1, 1-2 => 0-2
@@ -516,11 +517,10 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 
 // /////////////////////////////////////// helpers and utils
 
-func cleanup(t *testing.T, repo *SnapshotRepo, dirs datadir.Dirs) {
+func cleanupFiles(t *testing.T, repo *SnapshotRepo, dirs datadir.Dirs) {
 	t.Helper()
 	repo.Close()
-	repo.RecalcVisibleFiles(RootNum(MaxUint64))
-
+	repo.RecalcVisibleFiles(0)
 	filepath.Walk(dirs.DataDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -585,7 +585,7 @@ func populateFiles2(t *testing.T, dirs datadir.Dirs, name string, repo *Snapshot
 	t.Helper()
 	allFiles := dhiiFiles{fullPath: true}
 	extensions := repo.cfg.Schema.(*ee.E3SnapSchema).FileExtensions()
-	v := snaptype.V1_0
+	v := version.V1_0
 	acc := repo.schema.AccessorList()
 	for _, r := range ranges {
 		from, to := RootNum(r.fromStep*repo.stepSize), RootNum(r.toStep*repo.stepSize)
@@ -667,7 +667,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 		}
 
 		if strings.HasSuffix(filename, ".kvei") {
-			filter, err := NewExistenceFilter(0, filename)
+			filter, err := existence.NewFilter(0, filename)
 			require.NoError(t, err)
 			require.NoError(t, filter.Build())
 			filter.Close()
@@ -692,6 +692,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 			if err != nil {
 				t.Fatal(err)
 			}
+			defer rs.Close()
 
 			if err = rs.AddKey([]byte("first_key"), 0); err != nil {
 				t.Error(err)
@@ -747,7 +748,7 @@ func fileExistsCheck(t *testing.T, repo *SnapshotRepo, startStep, endStep uint64
 	_, found := repo.dirtyFiles.Get(&filesItem{startTxNum: startTxNum, endTxNum: endTxNum})
 	require.Equal(t, found, isFound)
 
-	_, err := os.Stat(repo.cfg.Schema.DataFile(snaptype.V1_0, ee.RootNum(startTxNum), ee.RootNum(endTxNum)))
+	_, err := os.Stat(repo.cfg.Schema.DataFile(version.V1_0, ee.RootNum(startTxNum), ee.RootNum(endTxNum)))
 	if isFound {
 		require.NoError(t, err)
 	} else {

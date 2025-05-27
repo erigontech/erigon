@@ -11,6 +11,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
@@ -51,15 +52,22 @@ func ValidateAATransaction(
 		return nil, 0, err
 	}
 
-	validationGasUsed = 0
+	vmConfig := evm.Config()
+	rules := chainConfig.Rules(header.Number.Uint64(), header.Time)
+	hasEIP3860 := vmConfig.HasEip3860(rules)
 
-	if err = chargeGas(header, tx, gasPool, ibs); err != nil {
+	preTxCost, err := tx.PreTransactionGasCost(rules, hasEIP3860)
+	if err != nil {
+		return nil, 0, err
+	}
+	validationGasUsed = preTxCost
+
+	if err = chargeGas(header, tx, gasPool, ibs, preTxCost); err != nil {
 		return nil, 0, err
 	}
 
 	var originalEvmHook tracing.EnterHook
 	entryPointTracer := EntryPointTracer{}
-	vmConfig := evm.Config()
 	if vmConfig.Tracer != nil && vmConfig.Tracer.OnEnter != nil {
 		entryPointTracer = EntryPointTracer{OnEnterSuper: originalEvmHook}
 	}
@@ -75,7 +83,7 @@ func ValidateAATransaction(
 	}
 
 	// Deployer frame
-	msg := tx.DeployerFrame()
+	msg := tx.DeployerFrame(rules, hasEIP3860)
 	applyRes, err := core.ApplyFrame(innerEvm, msg, gasPool)
 	if err != nil {
 		return nil, 0, err
@@ -93,10 +101,10 @@ func ValidateAATransaction(
 	}
 	entryPointTracer.Reset()
 
-	deploymentGasUsed := applyRes.UsedGas
+	deploymentGasUsed := applyRes.GasUsed
 
 	// Validation frame
-	msg, err = tx.ValidationFrame(chainConfig.ChainID, deploymentGasUsed)
+	msg, err = tx.ValidationFrame(chainConfig.ChainID, deploymentGasUsed, rules, hasEIP3860)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -117,7 +125,7 @@ func ValidateAATransaction(
 	}
 	entryPointTracer.Reset()
 
-	validationGasUsed += applyRes.UsedGas
+	validationGasUsed += applyRes.GasUsed
 
 	// Paymaster frame
 	msg, err = tx.PaymasterFrame(chainConfig.ChainID)
@@ -143,8 +151,10 @@ func ValidateAATransaction(
 			return nil, 0, err
 		}
 		entryPointTracer.Reset()
-		validationGasUsed += applyRes.UsedGas
+		validationGasUsed += applyRes.GasUsed
 	}
+
+	log.Info("validation gas report", "gasUsed", validationGasUsed, "nonceManager", 0, "refund", 0, "pretransactioncost", preTxCost)
 
 	return paymasterContext, validationGasUsed, nil
 }
@@ -189,7 +199,7 @@ func validationValidation(tx *types.AccountAbstractionTransaction, header *types
 	if ept.Input == nil {
 		return errors.New("account validation did not call the EntryPoint 'acceptAccount' callback")
 	}
-	if bytes.Compare(ept.From[:], tx.SenderAddress[:]) != 0 {
+	if !bytes.Equal(ept.From[:], tx.SenderAddress[:]) {
 		return fmt.Errorf("invalid call to EntryPoint contract from a wrong account address, wanted %s got %s", tx.SenderAddress.String(), ept.From)
 	}
 
@@ -208,7 +218,7 @@ func paymasterValidation(tx *types.AccountAbstractionTransaction, header *types.
 		return nil, errors.New("paymaster validation did not call the EntryPoint 'acceptPaymaster' callback")
 	}
 
-	if bytes.Compare(ept.From[:], tx.Paymaster[:]) != 0 {
+	if !bytes.Equal(ept.From[:], tx.Paymaster[:]) {
 		return nil, errors.New("invalid call to EntryPoint contract from a wrong paymaster address")
 	}
 	paymasterValidity, err := types.DecodeAcceptPaymaster(ept.Input) // TODO: find better name
@@ -262,34 +272,38 @@ func ExecuteAATransaction(
 		executionStatus = types.ExecutionStatusExecutionFailure
 	}
 
-	execRefund := capRefund(tx.GasLimit-applyRes.UsedGas, applyRes.UsedGas) // TODO: can be moved into statetransition
+	execRefund := capRefund(tx.GasLimit-applyRes.GasUsed, applyRes.GasUsed) // TODO: can be moved into statetransition
 	validationRefund := capRefund(tx.ValidationGasLimit-validationGasUsed, validationGasUsed)
 
-	executionGasPenalty := (tx.GasLimit - applyRes.UsedGas) * types.AA_GAS_PENALTY_PCT / 100
-	gasUsed = validationGasUsed + applyRes.UsedGas + executionGasPenalty
+	executionGasPenalty := (tx.GasLimit - applyRes.GasUsed) * types.AA_GAS_PENALTY_PCT / 100
+	gasUsed = validationGasUsed + applyRes.GasUsed + executionGasPenalty
 	gasRefund := capRefund(execRefund+validationRefund, gasUsed)
+	log.Info("execution gas used", "gasUsed", applyRes.GasUsed, "penalty", executionGasPenalty)
 
 	// Paymaster post-op frame
-	msg, err = tx.PaymasterPostOp(paymasterContext, gasUsed, !applyRes.Failed())
-	if err != nil {
-		return 0, 0, err
-	}
-
-	applyRes, err = core.ApplyFrame(evm, msg, gasPool)
-	if err != nil {
-		return 0, 0, err
-	}
-	if applyRes.Failed() {
-		if executionStatus == types.ExecutionStatusExecutionFailure {
-			executionStatus = types.ExecutionStatusExecutionAndPostOpFailure
-		} else {
-			executionStatus = types.ExecutionStatusPostOpFailure
+	if len(paymasterContext) != 0 {
+		msg, err = tx.PaymasterPostOp(paymasterContext, gasUsed, !applyRes.Failed())
+		if err != nil {
+			return 0, 0, err
 		}
-	}
 
-	validationGasPenalty := (tx.PostOpGasLimit - applyRes.UsedGas) * types.AA_GAS_PENALTY_PCT / 100
-	gasRefund += capRefund(tx.PostOpGasLimit-applyRes.UsedGas, applyRes.UsedGas)
-	gasUsed += applyRes.UsedGas + validationGasPenalty
+		applyRes, err = core.ApplyFrame(evm, msg, gasPool)
+		if err != nil {
+			return 0, 0, err
+		}
+		if applyRes.Failed() {
+			if executionStatus == types.ExecutionStatusExecutionFailure {
+				executionStatus = types.ExecutionStatusExecutionAndPostOpFailure
+			} else {
+				executionStatus = types.ExecutionStatusPostOpFailure
+			}
+		}
+
+		validationGasPenalty := (tx.PostOpGasLimit - applyRes.GasUsed) * types.AA_GAS_PENALTY_PCT / 100
+		gasRefund += capRefund(tx.PostOpGasLimit-applyRes.GasUsed, applyRes.GasUsed)
+		gasUsed += applyRes.GasUsed + validationGasPenalty
+		log.Info("post op gas used", "gasUsed", applyRes.GasUsed, "penalty", validationGasPenalty)
+	}
 
 	if err = refundGas(header, tx, ibs, gasUsed-gasRefund); err != nil {
 		return 0, 0, err
@@ -332,10 +346,10 @@ func PerformTxnStaticValidation(
 	senderCodeSize, paymasterCodeSize, deployerCodeSize int,
 ) error {
 	hasPaymaster := txn.Paymaster != nil
-	hasPaymasterData := txn.PaymasterData != nil && len(txn.PaymasterData) != 0
+	hasPaymasterData := len(txn.PaymasterData) != 0
 	hasPaymasterGasLimit := txn.PaymasterValidationGasLimit != 0
 	hasDeployer := txn.Deployer != nil
-	hasDeployerData := txn.DeployerData != nil && len(txn.DeployerData) != 0
+	hasDeployerData := len(txn.DeployerData) != 0
 	hasCodeSender := senderCodeSize != 0
 	hasCodeDeployer := deployerCodeSize != 0
 

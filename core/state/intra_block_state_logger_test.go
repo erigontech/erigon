@@ -127,7 +127,7 @@ func TestStateLogger(t *testing.T) {
 			mockCtl := gomock.NewController(t)
 			defer mockCtl.Finish()
 			mt := mockTracer{}
-			state := New(NewReaderV3(domains))
+			state := New(NewReaderV3(domains.AsGetter(tx)))
 			state.SetHooks(mt.Hooks())
 
 			tt.run(state)
@@ -143,11 +143,11 @@ type mockTracer struct {
 
 func (mt *mockTracer) Hooks() *tracing.Hooks {
 	return &tracing.Hooks{
-		OnBalanceChange: func(addr common.Address, prev, new *uint256.Int, reason tracing.BalanceChangeReason) {
+		OnBalanceChange: func(addr common.Address, prev, new uint256.Int, reason tracing.BalanceChangeReason) {
 			mt.balanceChangeTraces = append(mt.balanceChangeTraces, balanceChangeTrace{
 				addr:   addr,
-				prev:   *prev,
-				new:    *new,
+				prev:   prev,
+				new:    new,
 				reason: reason,
 			})
 		},

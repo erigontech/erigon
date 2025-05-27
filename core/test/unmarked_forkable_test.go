@@ -67,7 +67,7 @@ func TestUnmarked_PutToDb(t *testing.T) {
 	dir, db, log := setup(t)
 	_, uma := setupBorSpans(t, log, dir, db)
 
-	uma_tx := uma.BeginFilesTx()
+	uma_tx := uma.BeginTemporalTx()
 	defer uma_tx.Close()
 	rwtx, err := db.BeginRw(context.Background())
 	defer rwtx.Rollback()
@@ -99,7 +99,7 @@ func TestUnmarkedPrune(t *testing.T) {
 			cfg := borSpanId.SnapshotConfig()
 			entries_count := cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 5
 
-			uma_tx := uma.BeginFilesTx()
+			uma_tx := uma.BeginTemporalTx()
 			defer uma_tx.Close()
 			rwtx, err := db.BeginRw(ctx)
 			defer rwtx.Rollback()
@@ -129,7 +129,7 @@ func TestUnmarkedPrune(t *testing.T) {
 			require.Equal(t, ndels, uint64(spanId))
 
 			require.NoError(t, rwtx.Commit())
-			uma_tx = uma.BeginFilesTx()
+			uma_tx = uma.BeginTemporalTx()
 			defer uma_tx.Close()
 			rwtx, err = db.BeginRw(ctx)
 			require.NoError(t, err)
@@ -146,7 +146,7 @@ func TestBuildFiles_Unmarked(t *testing.T) {
 	borSpanId, uma := setupBorSpans(t, log, dir, db)
 	ctx := context.Background()
 
-	uma_tx := uma.BeginFilesTx()
+	uma_tx := uma.BeginTemporalTx()
 	defer uma_tx.Close()
 	rwtx, err := db.BeginRw(ctx)
 	defer rwtx.Rollback()
@@ -169,14 +169,34 @@ func TestBuildFiles_Unmarked(t *testing.T) {
 	uma_tx.Close()
 
 	ps := background.NewProgressSet()
-	files, err := uma.BuildFiles(ctx, 0, RootNum(entries_count), db, ps)
-	require.NoError(t, err)
-	require.Equal(t, len(files), int(num_files))
 
-	uma.IntegrateDirtyFiles(files)
+	built := true
+	i := 0
+	from, to := RootNum(0), RootNum(entries_count)
+	files := make([]state.FilesItem, 0)
+	for built {
+		file, built2, err := uma.BuildFile(ctx, from, to, db, 1, ps)
+		require.NoError(t, err)
+		if i < int(num_files) {
+			require.NotNil(t, file)
+			require.True(t, built2)
+			files = append(files, file)
+		} else {
+			require.Nil(t, file)
+			require.False(t, built2)
+			built = built2
+			continue
+		}
+		i++
+		_, endTxNum := file.Range()
+		from, to = RootNum(endTxNum), RootNum(entries_count)
+	}
+
+	require.Len(t, files, int(num_files))
+	uma.IntegrateDirtyFiles2(files)
 	uma.RecalcVisibleFiles(RootNum(entries_count))
 
-	uma_tx = uma.BeginFilesTx()
+	uma_tx = uma.BeginTemporalTx()
 	defer uma_tx.Close()
 
 	rwtx, err = db.BeginRw(ctx)
@@ -190,7 +210,7 @@ func TestBuildFiles_Unmarked(t *testing.T) {
 	require.Equal(t, del, uint64(firstSpanIdNotInSnap))
 
 	require.NoError(t, rwtx.Commit())
-	uma_tx = uma.BeginFilesTx()
+	uma_tx = uma.BeginTemporalTx()
 	defer uma_tx.Close()
 	rwtx, err = db.BeginRw(ctx)
 	require.NoError(t, err)

@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/params"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/types"
 )
@@ -86,7 +87,7 @@ func TestCalcDifficulty(t *testing.T) {
 			test.ParentTimestamp,
 			test.ParentDifficulty,
 			number.Uint64(),
-			types.EmptyUncleHash,
+			empty.UncleHash,
 		)
 		if diff.Cmp(test.CurrentDifficulty) != 0 {
 			t.Error(name, "failed. Expected", test.CurrentDifficulty, "and calculated", diff)
@@ -126,7 +127,7 @@ func TestDifficultyCalculators(t *testing.T) {
 			Time:       rand.Uint64() - timeDelta,
 		}
 		if rand.Uint32()&1 == 0 {
-			header.UncleHash = types.EmptyUncleHash
+			header.UncleHash = empty.UncleHash
 		}
 		bombDelay := rand.Uint64() % 50_000_000
 		for i, pair := range []struct {
@@ -157,7 +158,7 @@ func BenchmarkDifficultyCalculator(b *testing.B) {
 	x2 := MakeDifficultyCalculatorU256(1000000)
 	h := &types.Header{
 		ParentHash: common.Hash{},
-		UncleHash:  types.EmptyUncleHash,
+		UncleHash:  empty.UncleHash,
 		Difficulty: big.NewInt(0xffffff),
 		Number:     big.NewInt(500000),
 		Time:       1000000,

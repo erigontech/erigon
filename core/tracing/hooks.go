@@ -47,7 +47,7 @@ type IntraBlockState interface {
 	GetBalance(common.Address) (*uint256.Int, error)
 	GetNonce(common.Address) (uint64, error)
 	GetCode(common.Address) ([]byte, error)
-	GetState(addr common.Address, key *common.Hash, value *uint256.Int) error
+	GetState(addr common.Address, key common.Hash, value *uint256.Int) error
 	Exist(common.Address) (bool, error)
 	GetRefund() uint64
 }
@@ -146,7 +146,7 @@ type (
 	*/
 
 	// BalanceChangeHook is called when the balance of an account changes.
-	BalanceChangeHook = func(addr common.Address, prev, new *uint256.Int, reason BalanceChangeReason)
+	BalanceChangeHook = func(addr common.Address, prev, new uint256.Int, reason BalanceChangeReason)
 
 	// NonceChangeHook is called when the nonce of an account changes.
 	NonceChangeHook = func(addr common.Address, prev, new uint64)
@@ -155,7 +155,7 @@ type (
 	CodeChangeHook = func(addr common.Address, prevCodeHash common.Hash, prevCode []byte, codeHash common.Hash, code []byte)
 
 	// StorageChangeHook is called when the storage of an account changes.
-	StorageChangeHook = func(addr common.Address, slot *common.Hash, prev, new uint256.Int)
+	StorageChangeHook = func(addr common.Address, slot common.Hash, prev, new uint256.Int)
 
 	// LogHook is called when a log is emitted.
 	LogHook = func(log *types.Log)

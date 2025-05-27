@@ -342,7 +342,7 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 		for loc, val := range acct.Storage {
 			val1 := uint256.NewInt(0).SetBytes(val.Bytes())
 			val2 := uint256.NewInt(0)
-			statedb.GetState(addr, &loc, val2)
+			statedb.GetState(addr, loc, val2)
 			if !val1.Eq(val2) {
 				return fmt.Errorf("storage mismatch for addr: %x loc: %x want: %d have: %d", addr, loc, val1, val2)
 			}
