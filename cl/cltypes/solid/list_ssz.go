@@ -223,6 +223,10 @@ type ListSSZUint64 struct {
 	list []uint64
 }
 
+func NewListSSZUint64(list []uint64) *ListSSZUint64 {
+	return &ListSSZUint64{list: list}
+}
+
 func (l *ListSSZUint64) List() []uint64 {
 	return l.list
 }
