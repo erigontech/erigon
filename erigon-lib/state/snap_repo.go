@@ -334,7 +334,7 @@ func (f *SnapshotRepo) FilesInRange(mrange MergeRange, files visibleFiles) (item
 
 func (f *SnapshotRepo) CleanAfterMerge(merged *filesItem, vf visibleFiles) {
 	outs := f.Garbage(vf, merged)
-	deleteMergeFile(f.dirtyFiles, outs, f.schema.DataTag(), f.logger)
+	f.DeleteFilesAfterMerge(outs)
 }
 
 // private methods

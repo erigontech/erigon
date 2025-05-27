@@ -82,7 +82,7 @@ func TestOpenFolder(t *testing.T) {
 	ch := agg.BuildFiles(RootNum(amount))
 	select {
 	case <-ch:
-	case <-time.After(time.Second * 20):
+	case <-time.After(time.Second * 10):
 		t.Fatal("timeout")
 	}
 

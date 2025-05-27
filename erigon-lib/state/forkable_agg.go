@@ -646,7 +646,7 @@ func loopOverDebugDbs[R any](r *ForkableAggTemporalTx, forId ForkableId, fn func
 	panic(fmt.Sprintf("no forkable with id %s", forId.String()))
 }
 
-func loopOverDebugFiles[R any](r *ForkableAggTemporalTx, forId ForkableId, skipUnaligned bool, fn func(f ForkableFilesTxI) R) R {
+func loopOverDebugFiles[R any](r *ForkableAggTemporalTx, forId ForkableId, skipUnaligned bool, fn func(ForkableFilesTxI) R) R {
 	for i, mt := range r.marked {
 		if skipUnaligned && r.f.marked[i].unaligned {
 			continue
