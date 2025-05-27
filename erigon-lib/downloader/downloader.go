@@ -1648,6 +1648,9 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloa
 					TimeTook:    downloadTime.Seconds(),
 					AverageRate: uint64(float64(downloaded.Int64()) / downloadTime.Seconds()),
 				})
+				if strings.Contains(t.Name(), HackName) {
+					log.Warn("[dbg] dl.torrentDownload()_4", "f", t.Name())
+				}
 
 				d.logger.Debug("[snapshots] Downloaded from BitTorrent", "file", t.Name(),
 					"download-time", downloadTime.Round(time.Second).String(), "downloaded", common.ByteCount(uint64(downloaded.Int64())),
