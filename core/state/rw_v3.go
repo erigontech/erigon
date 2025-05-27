@@ -624,7 +624,7 @@ func (r *ReaderV3) SetTrace(trace bool)                  { r.trace = trace }
 func (r *ReaderV3) ResetReadSet()                        {}
 
 func (r *ReaderV3) HasStorage(address common.Address) (bool, error) {
-	_, _, hasStorage, err := r.tx.HasPrefix(kv.StorageDomain, address.Bytes())
+	_, _, hasStorage, err := r.tx.HasPrefix(kv.StorageDomain, address[:])
 	return hasStorage, err
 }
 
@@ -725,7 +725,7 @@ func (r *ReaderParallelV3) SetTrace(trace bool)                  { r.trace = tra
 func (r *ReaderParallelV3) ResetReadSet()                        { r.readLists = newReadList() }
 
 func (r *ReaderParallelV3) HasStorage(address common.Address) (bool, error) {
-	firstK, firstV, hasStorage, err := r.sd.HasPrefix(kv.StorageDomain, address.Bytes())
+	firstK, firstV, hasStorage, err := r.sd.HasPrefix(kv.StorageDomain, address[:], r.tx)
 	if err != nil {
 		return false, err
 	}
