@@ -19,7 +19,6 @@ package downloader
 import (
 	"bytes"
 	"context"
-
 	//nolint:gosec
 	"errors"
 	"fmt"
@@ -349,6 +348,9 @@ func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient
 	default:
 	}
 	if !IsSnapNameAllowed(ts.DisplayName) {
+		if strings.Contains(ts.DisplayName, HackName) {
+			log.Warn("[dbg] _addTorrentFile.skip2", "f", ts.DisplayName)
+		}
 		return nil, false, nil
 	}
 	ts.Webseeds, _ = webseeds.ByFileName(ts.DisplayName)

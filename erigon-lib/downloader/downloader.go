@@ -809,6 +809,8 @@ type downloadStatus struct {
 	err      error
 }
 
+const HackName = "v1.0-022040-022041-headers.idx"
+
 type seedHash struct {
 	url      *url.URL
 	hash     *infohash.T
@@ -844,6 +846,10 @@ func (d *Downloader) mainLoop(silent bool) error {
 							_, _, err = addTorrentFile(d.ctx, ts, d.torrentClient, d.db, d.webseeds)
 							if err != nil {
 								d.logger.Warn("[snapshots] addTorrentFile from webseed", "err", err)
+								if strings.Contains(ts.DisplayName, HackName) {
+									log.Warn("[dbg] loop.skip3", "f", ts.DisplayName)
+								}
+
 								continue
 							}
 						}
@@ -900,6 +906,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 			for _, t := range torrents {
 				if _, ok := d.completedTorrents[t.Name()]; ok {
 					clist = append(clist, t.Name())
+					if strings.Contains(t.Name(), HackName) {
+						log.Warn("[dbg] loop.skip4", "f", t.Name())
+					}
 					continue
 				}
 
@@ -953,6 +962,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 							} else {
 								clist = append(clist, t.Name())
 								d.torrentCompleted(t.Name(), t.InfoHash())
+								if strings.Contains(t.Name(), HackName) {
+									log.Warn("[dbg] loop.skip5", "f", t.Name())
+								}
 								continue
 							}
 						}
@@ -963,6 +975,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 				if _, ok := failed[t.Name()]; ok {
 					flist = append(flist, t.Name())
+					if strings.Contains(t.Name(), HackName) {
+						log.Warn("[dbg] loop.skip6", "f", t.Name())
+					}
 					continue
 				}
 
@@ -983,6 +998,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 					if !ok {
 						d.logger.Debug("[snapshots] Can't parse downloaded filename", "file", t.Name())
 						failed[t.Name()] = struct{}{}
+						if strings.Contains(t.Name(), HackName) {
+							log.Warn("[dbg] loop.skip7", "f", t.Name())
+						}
 						continue
 					}
 
@@ -1020,11 +1038,17 @@ func (d *Downloader) mainLoop(silent bool) error {
 					clist = append(clist, t.Name())
 					d.torrentCompleted(t.Name(), t.InfoHash())
 
+					if strings.Contains(t.Name(), HackName) {
+						log.Warn("[dbg] loop.skip8", "f", t.Name())
+					}
 					continue
 				}
 
 				if downloading {
 					dlist = append(dlist, t.Name())
+					if strings.Contains(t.Name(), HackName) {
+						log.Warn("[dbg] loop.skip9", "f", t.Name())
+					}
 					continue
 				}
 
@@ -1057,6 +1081,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 					if !ok {
 						d.logger.Debug("[snapshots] Can't parse downloaded filename", "file", status.name)
+						if strings.Contains(status.name, HackName) {
+							log.Warn("[dbg] loop.skip10", "f", status.name)
+						}
 						continue
 					}
 
@@ -1087,9 +1114,15 @@ func (d *Downloader) mainLoop(silent bool) error {
 					}
 
 					d.torrentCompleted(status.name, status.infoHash)
+					if strings.Contains(status.name, HackName) {
+						log.Warn("[dbg] loop.skip11", "f", status.name)
+					}
 					continue
 				} else {
 					d.lock.Lock()
+					if strings.Contains(status.name, HackName) {
+						log.Warn("[dbg] loop.skip12", "f", status.name)
+					}
 					delete(d.completedTorrents, status.name)
 					d.lock.Unlock()
 				}
@@ -1134,6 +1167,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 				_, downloading := d.downloading[webDownload.torrent.Name()]
 
 				if downloading {
+					if strings.Contains(webDownload.torrent.Name(), HackName) {
+						log.Warn("[dbg] loop.skip13", "f", webDownload.torrent.Name())
+					}
 					continue
 				}
 
@@ -1194,6 +1230,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 				if !ok {
 					d.logger.Debug("[snapshots] Can't parse download filename", "file", t.Name())
 					failed[t.Name()] = struct{}{}
+					if strings.Contains(t.Name(), HackName) {
+						log.Warn("[dbg] loop.skip14", "f", t.Name())
+					}
 					continue
 				}
 
@@ -1209,12 +1248,17 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 								if complete {
 									d.logger.Trace("[snapshots] Ignoring download request - already complete", "file", t.Name(), "hash", t.InfoHash())
+									if strings.Contains(t.Name(), HackName) {
+										log.Warn("[dbg] loop.skip15", "f", t.Name())
+									}
 									continue
 								}
 
 								failed[t.Name()] = struct{}{}
 								d.logger.Debug("[snapshots] NonCanonical hash", "file", t.Name(), "got", hex.EncodeToString(localHash), "expected", t.InfoHash(), "downloaded", *torrentInfo.Completed)
-
+								if strings.Contains(t.Name(), HackName) {
+									log.Warn("[dbg] loop.skip16", "f", t.Name())
+								}
 								continue
 
 							} else {
@@ -1229,6 +1273,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 							if _, complete := localHashCompletionCheck(d.ctx, t, fileInfo, downloadComplete, &d.stats, d.lock); complete {
 								d.logger.Trace("[snapshots] Ignoring download request - already complete", "file", t.Name(), "hash", t.InfoHash())
+								if strings.Contains(t.Name(), HackName) {
+									log.Warn("[dbg] loop.skip17", "f", t.Name())
+								}
 								continue
 							}
 						}
@@ -1237,6 +1284,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 					if _, ok := waiting[t.Name()]; !ok {
 						if _, complete := localHashCompletionCheck(d.ctx, t, fileInfo, downloadComplete, &d.stats, d.lock); complete {
 							d.logger.Trace("[snapshots] Ignoring download request - already complete", "file", t.Name(), "hash", t.InfoHash())
+							if strings.Contains(t.Name(), HackName) {
+								log.Warn("[dbg] loop.skip18", "f", t.Name())
+							}
 							continue
 						}
 
@@ -1270,6 +1320,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 								delete(waiting, t.Name())
 								d.torrentDownload(t, downloadComplete)
 							}
+							if strings.Contains(t.Name(), HackName) {
+								log.Warn("[dbg] loop.skip19", "f", t.Name())
+							}
 							continue
 						}
 					} else {
@@ -1296,6 +1349,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 								}
 
 								d.logger.Warn("Can't complete web download", "file", t.Info().Name, "err", err)
+								if strings.Contains(t.Name(), HackName) {
+									log.Warn("[dbg] loop.skip20", "f", t.Name())
+								}
 								continue
 							}
 						}
@@ -1305,6 +1361,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 						if err != nil {
 							d.logger.Warn("Can't complete web download", "file", t.Info().Name, "err", err)
+							if strings.Contains(t.Name(), HackName) {
+								log.Warn("[dbg] loop.skip21", "f", t.Name())
+							}
 							continue
 						}
 
@@ -1344,6 +1403,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 						if !ok {
 							if _, ok := seedHashMismatches[t.InfoHash()]; ok {
+								if strings.Contains(t.Name(), HackName) {
+									log.Warn("[dbg] loop.skip22", "f", t.Name())
+								}
 								continue
 							}
 
@@ -1354,6 +1416,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 							if err != nil {
 								if len(mismatches) > 0 {
 									logSeedHashMismatches(t.InfoHash(), t.Name(), seedHashMismatches, d.logger)
+								}
+								if strings.Contains(t.Name(), HackName) {
+									log.Warn("[dbg] loop.skip23", "f", t.Name())
 								}
 								continue
 							}
