@@ -27,6 +27,7 @@ import (
 	"sync/atomic"
 
 	"github.com/anacrolix/torrent"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func VerifyFileFailFast(ctx context.Context, t *torrent.Torrent, root string, completePieces *atomic.Uint64) error {
@@ -54,7 +55,9 @@ func VerifyFileFailFast(ctx context.Context, t *torrent.Torrent, root string, co
 		}
 		good := bytes.Equal(hasher.Sum(nil), p.V1Hash().Unwrap().Bytes())
 		if !good {
-			return fmt.Errorf("hash mismatch at piece %d, file: %s", i, t.Name())
+			err := fmt.Errorf("hash mismatch at piece %d, file: %s", i, t.Name())
+			log.Warn("[verify.failfast] ", "err", err)
+			return err
 		}
 
 		completePieces.Add(1)

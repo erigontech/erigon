@@ -414,16 +414,8 @@ func TestMergedFileGet(t *testing.T) {
 			nDirtyFiles = (amount - int(snapCfg.SafetyMargin)) / int(snapCfg.MinimumSize)
 			nVisibleFiles = nDirtyFiles
 		} else {
-			nDirtyFiles = (amount - int(snapCfg.SafetyMargin)) / int(snapCfg.MinimumSize)
-			_amount := amount - int(snapCfg.SafetyMargin)
-			for i := len(snapCfg.MergeStages) - 1; i >= 0; i-- {
-				// merged files...
-				stage := int(snapCfg.MergeStages[i])
-				nDirtyFiles += _amount / stage
-				_amount %= stage
-			}
 			nVisibleFiles = int(calculateNumberOfFiles(uint64(amount), snapCfg))
-			//nDirtyFiles = nVisibleFiles // enable this after garbage is done..
+			nDirtyFiles = nVisibleFiles
 		}
 
 		// check dirty files count
@@ -448,17 +440,6 @@ func TestMergedFileGet(t *testing.T) {
 
 	checkBuildFilesFn(true)
 	checkBuildFilesFn(false)
-}
-
-func TestRedundantMerge(t *testing.T) {
-	// 1.
-	// we use visibleFiles to merge files
-	// it's possible that the merge process outputs
-	// a file which was already present/created.
-
-	// 2. panic handling --
-	// it's there in PRotoForkable#MergeFiles (it gives exact info about files which were being merged)
-	//
 }
 
 func setup(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {

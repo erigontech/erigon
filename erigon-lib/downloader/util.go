@@ -18,7 +18,6 @@ package downloader
 
 import (
 	"context"
-
 	//nolint:gosec
 	"errors"
 	"fmt"

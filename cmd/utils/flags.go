@@ -805,12 +805,6 @@ var (
 		Value: true,
 	}
 
-	// TODO - this is a depricated flag - should be removed
-	PolygonSyncStageFlag = cli.BoolFlag{
-		Name:  "polygon.sync.stage",
-		Usage: "Enabling syncing with a stage that uses the polygon sync component",
-	}
-
 	AAFlag = cli.BoolFlag{
 		Name:  "aa",
 		Usage: "Enable AA transactions",
@@ -1714,14 +1708,13 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.C
 	cfg.WithHeimdallMilestones = ctx.Bool(WithHeimdallMilestones.Name)
 	cfg.WithHeimdallWaypointRecording = ctx.Bool(WithHeimdallWaypoints.Name)
 	cfg.PolygonSync = ctx.Bool(PolygonSyncFlag.Name)
-	cfg.PolygonSyncStage = ctx.Bool(PolygonSyncStageFlag.Name)
 
 	if cfg.PolygonSync {
 		cfg.WithHeimdallMilestones = false
 		cfg.WithHeimdallWaypointRecording = true
 	}
 
-	heimdall.RecordWayPoints(cfg.WithHeimdallWaypointRecording || cfg.PolygonSync || cfg.PolygonSyncStage)
+	heimdall.RecordWayPoints(cfg.WithHeimdallWaypointRecording || cfg.PolygonSync)
 
 	chainConfig := params2.ChainConfigByChainName(ctx.String(ChainFlag.Name))
 	if chainConfig != nil && chainConfig.Bor != nil && !ctx.IsSet(MaxPeersFlag.Name) {

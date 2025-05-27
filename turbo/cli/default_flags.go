@@ -175,7 +175,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.WithHeimdallMilestones,
 	&utils.WithHeimdallWaypoints,
 	&utils.PolygonSyncFlag,
-	&utils.PolygonSyncStageFlag,
 	&utils.AAFlag,
 	&utils.EthStatsURLFlag,
 	&utils.OverridePragueFlag,
