@@ -1638,6 +1638,9 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloa
 		for {
 			select {
 			case <-d.ctx.Done():
+				if strings.Contains(t.Name(), HackName) {
+					log.Warn("[dbg] dl.torrentDownload()_5", "f", t.Name())
+				}
 				return
 			case <-t.Complete.On():
 				downloadTime := time.Since(downloadStarted)
