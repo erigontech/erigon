@@ -35,11 +35,9 @@ import (
 )
 
 func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
-	t.Skip("issue #15028")
-
 	t.Parallel()
 
-	stepSize := uint64(100)
+	stepSize := uint64(5)
 	_db, agg := testDbAndAggregatorv3(t, stepSize)
 	db := wrapDbWithCtx(_db, agg)
 
