@@ -107,11 +107,11 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 			}
 			continue
 		} else {
-			// TODO: Try to fetch the torrent file from provider if we don't have it here.
-		}
-
-		if err := s.d.addPreverifiedTorrent(Proto2InfoHash(it.TorrentHash), it.Path); err != nil {
-			return nil, err
+			ih := Proto2InfoHash(it.TorrentHash)
+			if err := s.d.RequestSnapshot(ih, it.Path); err != nil {
+				err = fmt.Errorf("requesting snapshot %s with infohash %v: %w", it.Path, ih, err)
+				return nil, err
+			}
 		}
 	}
 	progress.Store(int32(len(request.Items)))

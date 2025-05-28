@@ -40,6 +40,7 @@ import (
 	"time"
 
 	"github.com/anacrolix/chansync"
+	"github.com/anacrolix/torrent/types/infohash"
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/semaphore"
 
@@ -59,7 +60,6 @@ import (
 	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
-	prototypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -70,11 +70,6 @@ type Downloader struct {
 	torrentClient *torrent.Client
 
 	cfg *downloadercfg.Cfg
-
-	lock sync.RWMutex
-	// Pieces having extra verification due to file size mismatches.
-	piecesBeingVerified map[*torrent.Piece]struct{}
-	stats               AggStats
 
 	torrentStorage storage.ClientImplCloser
 
@@ -91,9 +86,16 @@ type Downloader struct {
 
 	torrentFS *AtomicTorrentFS
 
-	logPrefix         string
-	startTime         time.Time
-	onTorrentComplete func(name string, hash *prototypes.H160)
+	logPrefix string
+	startTime time.Time
+
+	lock sync.RWMutex
+	// Pieces having extra verification due to file size mismatches.
+	piecesBeingVerified map[*torrent.Piece]struct{}
+	// Torrents that block completion. They were requested specifically. Torrents added from disk
+	// that aren't subsequently requested are not required to satisfy the sync stage.
+	requiredTorrents map[*torrent.Torrent]struct{}
+	stats            AggStats
 }
 
 // Sets the log interval low again after making new requests.
@@ -105,13 +107,6 @@ type downloadInfo struct {
 	torrent  *torrent.Torrent
 	time     time.Time
 	progress float32
-}
-
-type webDownloadInfo struct {
-	url     *url.URL
-	length  int64
-	md5     string
-	torrent *torrent.Torrent
 }
 
 type AggStats struct {
@@ -351,9 +346,53 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 
 	requestHandler.downloader = d
 
-	d.ctx, d.stopMainLoop = context.WithCancel(ctx)
+	d.ctx, d.stopMainLoop = context.WithCancel(context.Background())
+
+	if d.cfg.AddTorrentsFromDisk {
+		d.spawn(func() {
+			err := d.AddTorrentsFromDisk(d.ctx)
+			if err == nil || ctx.Err() != nil {
+				return
+			}
+			log.Error("error adding torrents from disk", "err", err)
+		})
+	}
 
 	return d, nil
+}
+
+// This should be called synchronously after Downloader.New and probably before adding
+// torrents/requests. However, I call it based on the existing config field for now.
+func (d *Downloader) AddTorrentsFromDisk(ctx context.Context) error {
+	// Does WalkDir do path or filepath?
+	return fs.WalkDir(
+		os.DirFS(d.SnapDir()),
+		".",
+		func(path string, de fs.DirEntry, err error) error {
+			if ctx.Err() != nil {
+				return context.Cause(ctx)
+			}
+			if err != nil {
+				d.logger.Warn("error walking snapshots dir", "path", path, "err", err)
+				return nil
+			}
+			if de.IsDir() {
+				return nil
+			}
+			// should need rel here.
+			//filepath.Rel()
+			name, ok := strings.CutSuffix(path, ".torrent")
+			if !ok {
+				return nil
+			}
+			_, err = d.addPreverifiedTorrent(g.None[metainfo.Hash](), name)
+			if err != nil {
+				err = fmt.Errorf("adding torrent for %v: %w", path, err)
+				return err
+			}
+			return nil
+		},
+	)
 }
 
 // This should only be called once...?
@@ -428,17 +467,28 @@ func (d *Downloader) SnapDir() string { return d.cfg.Dirs.Snap }
 
 func (d *Downloader) allTorrentsComplete() (ret bool) {
 	ret = true
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	for _, t := range d.torrentClient.Torrents() {
 		if !t.Complete().Bool() {
-			ret = false
+			if g.MapContains(d.requiredTorrents, t) {
+				ret = false
+			}
 			continue
 		}
+		// Keep going even if this fails, because we want to trigger piece verification for all
+		// torrents that fail. We also validate torrents that weren't explicitly requested, because
+		// behaviour might depend on those. If they fail validation they might get made into part
+		// files again and protect the corruption from spreading.
 		if !d.validateCompletedSnapshot(t) {
-			ret = false
+			if g.MapContains(d.requiredTorrents, t) {
+				ret = false
+			}
 		}
 		// TODO: Should we write the torrent files here instead of in the goroutine spawned in addTorrentSpec?
 	}
-	// Require that we're not waiting on any piece verification.
+	// Require that we're not waiting on any piece verification. NB this isn't just requiredTorrent
+	// pieces, but that might be best.
 	if len(d.piecesBeingVerified) != 0 {
 		ret = false
 	}
@@ -961,22 +1011,10 @@ func (d *Downloader) alreadyHaveThisName(name string) bool {
 	return false
 }
 
-// Push this up? It's from the preverified list elsewhere. It's derived from
-// snapshotsync.DownloadRequest but seems the Downloader only applies to snapshots now. TODO:
-// Resolve this.
-type SnapshotTuple struct {
-	// Would this be variable to support BitTorrent v1/v2?
-	Hash metainfo.Hash
-	// Name identifying the file. This should be unique. Various extensions are
-	// used on it, .torrent, .part, etc.
-	Name string
-}
-
-// Loads metainfo from disk, removing it if it's invalid. Returns Some metainfo if it's valid. TODO:
-// If something fishy happens here (what was an error return before), should we force a verification
-// or something? If the metainfo isn't valid, the data might be wrong.
-func (d *Downloader) loadSpecFromDisk(tup SnapshotTuple) (spec g.Option[*torrent.TorrentSpec]) {
-	miPath := filepath.Join(d.SnapDir(), filepath.FromSlash(tup.Name)+".torrent")
+// Loads metainfo from disk, removing it if it's invalid. Returns Some metainfo if it's valid. Logs
+// errors.
+func (d *Downloader) loadSpecFromDisk(name string) (spec g.Option[*torrent.TorrentSpec]) {
+	miPath := filepath.Join(d.SnapDir(), filepath.FromSlash(name)+".torrent")
 	mi, err := metainfo.LoadFromFile(miPath)
 	if errors.Is(err, fs.ErrNotExist) {
 		return
@@ -984,24 +1022,16 @@ func (d *Downloader) loadSpecFromDisk(tup SnapshotTuple) (spec g.Option[*torrent
 	removeMetainfo := func() {
 		err := os.Remove(miPath)
 		if err != nil {
-			d.logger.Error("error removing metainfo file", "err", err, "name", tup.Name)
+			d.logger.Error("error removing metainfo file", "err", err, "name", name)
 		}
 	}
 	if err != nil {
-		d.logger.Error("loading metainfo from disk", "err", err, "name", tup.Name)
+		d.logger.Error("loading metainfo from disk", "err", err, "name", name)
 		removeMetainfo()
 		return
 	}
-	diskSpec := torrent.TorrentSpecFromMetaInfo(mi)
-	if diskSpec.InfoHash != tup.Hash {
-		// This is allowed if the torrent file was committed to disk. It's assumed the torrent was
-		// downloaded in its entirety with a previous hash. TODO: Should we check there were actually info bytes?
-		d.logger.Debug("disk metainfo hash mismatch",
-			"expected", tup.Hash,
-			"actual", diskSpec.InfoHash,
-			"name", tup.Name)
-	}
-	spec.Set(diskSpec)
+	// TODO: Are we missing a check that the name and the Info.Name match here?
+	spec.Set(torrent.TorrentSpecFromMetaInfo(mi))
 	return
 }
 
@@ -1010,12 +1040,102 @@ func (d *Downloader) webSeedUrlStrs() iter.Seq[string] {
 }
 
 // Add a torrent with a known info hash. Either someone else made it, or it was on disk.
-func (d *Downloader) addPreverifiedTorrent(
+func (d *Downloader) RequestSnapshot(
+	// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
 	infoHash metainfo.Hash,
 	name string,
-) error {
+) (err error) {
+	t, err := d.addPreverifiedTorrent(g.Some(infoHash), name)
+	if err == nil {
+		d.lock.Lock()
+		g.MakeMapIfNil(&d.requiredTorrents)
+		g.MapInsert(d.requiredTorrents, t, struct{}{})
+		d.lock.Unlock()
+	}
+	return
+}
+
+// Add a torrent with a known info hash. Either someone else made it, or it was on disk. This might
+// be two functions now, the infoHashHint is getting a bit heavy.
+func (d *Downloader) addPreverifiedTorrent(
+	// The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
+	infoHashHint g.Option[metainfo.Hash],
+	name string,
+) (t *torrent.Torrent, err error) {
+	diskSpecOpt := d.loadSpecFromDisk(name)
+	if !diskSpecOpt.Ok && !infoHashHint.Ok {
+		err = errors.New("can't add torrent without infohash")
+		return
+	}
+	if diskSpecOpt.Ok && infoHashHint.Ok && diskSpecOpt.Value.InfoHash != infoHashHint.Value {
+		// This is allowed if the torrent file was committed to disk. It's assumed the torrent was
+		// downloaded in its entirety with a previous hash. TODO: Should we check there were
+		// actually info bytes?
+		d.logger.Debug("disk metainfo hash mismatch",
+			"expected", infoHashHint,
+			"actual", diskSpecOpt.Value.InfoHash,
+			"name", name)
+	}
+	// Prefer the infohash from disk, then the caller's.
+	finalInfoHash := func() infohash.T {
+		if diskSpecOpt.Ok {
+			return diskSpecOpt.Value.InfoHash
+		}
+		return infoHashHint.Unwrap()
+	}()
+
+	ok, err := d.shouldAddTorrent(finalInfoHash, name)
+	if err != nil {
+		return
+	}
+	if !ok {
+		return
+	}
+
+	// TorrentSpec was created before I knew better about Go's heap... Set a default
+	spec := diskSpecOpt.UnwrapOr(new(torrent.TorrentSpec))
+	// This will trigger a mismatch if info bytes are known and don't match. We would have already
+	// failed if the info bytes aren't known.
+	spec.InfoHash = finalInfoHash
+	spec.DisplayName = cmp.Or(spec.DisplayName, name)
+	spec.Sources = nil
+	for s := range d.webSeedUrlStrs() {
+		u := s + name + ".torrent"
+		spec.Sources = append(spec.Sources, u)
+	}
+	t, ok, err = d.addTorrentSpec(spec)
+	if err != nil {
+		return
+	}
+	if !ok {
+		return
+	}
+
+	metainfoOnDisk := diskSpecOpt.Ok
+	if metainfoOnDisk {
+		d.spawn(func() {
+			if !d.validateCompletedSnapshot(t) {
+				// This is totally recoverable. It's not great if it happens for files that aren't
+				// in the current preverified set because we have no guarantees about WebSeeds or
+				// other peers.
+				d.logger.Warn("torrent metainfo on disk but torrent failed validation", "name", t.Name())
+				// Maybe we could replace the torrent with the infoHashHint?
+			}
+		})
+	}
+
+	d.afterAddNewTorrent(metainfoOnDisk, t)
+	return
+}
+
+// Check the proposed infohash and name combo don't conflict with an existing torrent. Names need to
+// be unique, and infohashes are 160bit hashes of data that includes the name...
+func (d *Downloader) shouldAddTorrent(
+	infoHash metainfo.Hash,
+	name string,
+) (bool, error) {
 	if !IsSnapNameAllowed(name) {
-		return fmt.Errorf("snap name %q is not allowed", name)
+		return false, fmt.Errorf("snap name %q is not allowed", name)
 	}
 	t, ok := d.torrentClient.Torrent(infoHash)
 	if ok {
@@ -1027,49 +1147,20 @@ func (d *Downloader) addPreverifiedTorrent(
 			// changed.
 			existingName := t.Info().Name
 			if existingName != name {
-				return fmt.Errorf("torrent with hash %v already exists with name %q", infoHash, existingName)
+				return false, fmt.Errorf("torrent with hash %v already exists with name %q", infoHash, existingName)
 			}
 		}
-		return nil
 	} else if d.alreadyHaveThisName(name) {
-		return fmt.Errorf("name exists with different torrent hash")
+		return false, fmt.Errorf("name exists with different torrent hash")
 	}
-	snapTup := SnapshotTuple{
-		Hash: infoHash,
-		Name: name,
-	}
-	specOpt := d.loadSpecFromDisk(snapTup)
+	return !ok, nil
+}
 
-	// TorrentSpec was created before I knew better about Go's heap... Set a default
-	spec := specOpt.UnwrapOr(new(torrent.TorrentSpec))
-	// This will trigger a mismatch if info bytes are known and don't match. We
-	// would have already failed if the info bytes aren't known.
-	spec.InfoHash = infoHash
-	spec.DisplayName = cmp.Or(spec.DisplayName, name)
-	spec.Sources = nil
-	for s := range d.webSeedUrlStrs() {
-		u := s + name + ".torrent"
-		//fmt.Printf("%v: adding torrent source %q\n", snapTup, u)
-		spec.Sources = append(spec.Sources, u)
-	}
-	t, ok, err := d.addTorrentSpec(spec)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return nil
-	}
-
-	// We could check here if the spec was loaded from disk that the entire file was available. If
-	// it wasn't we could abandon the data or clobber it with the preverified hash.
-
+// Add a torrent with a known info hash. Either someone else made it, or it was on disk.
+func (d *Downloader) afterAddNewTorrent(metainfoOnDisk bool, t *torrent.Torrent) {
 	// The following is a bit elaborate with avoiding goroutines. Maybe it's overkill.
 
-	metainfoOnDisk := specOpt.Ok
-
-	// TODO: If the metainfo was on disk already, do we want to ensure Info exists, and that the
-	// torrent passes completion checks? The metainfo should not be stored unless it passed to begin
-	// with.
+	// TODO: If the metainfo was on disk already, do we want to ensure Info exists?
 
 	onGotInfo := func() {
 		t.DownloadAll()
@@ -1096,8 +1187,6 @@ func (d *Downloader) addPreverifiedTorrent(
 			onGotInfo()
 		})
 	}
-
-	return nil
 }
 
 func (d *Downloader) saveMetainfoWhenComplete(t *torrent.Torrent) {
@@ -1165,8 +1254,8 @@ func SeedableFiles(dirs datadir.Dirs, chainName string, all bool) ([]string, err
 			return nil, err
 		}
 	}
-	files = append(append(append(append(append(files, l1...), l2...), l3...), l4...), l5...)
-	return files, nil
+
+	return slices.Concat(files, l1, l2, l3, l4, l5), nil
 }
 
 func (d *Downloader) BuildTorrentFilesIfNeed(ctx context.Context, chain string, ignore snapcfg.Preverified) error {
@@ -1269,6 +1358,7 @@ func newTorrentClient(
 }
 
 func (d *Downloader) SetLogPrefix(prefix string) {
+	// Data race?
 	d.logPrefix = prefix
 }
 
