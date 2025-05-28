@@ -1390,7 +1390,6 @@ func TestScanStaticFilesH(t *testing.T) {
 
 	newTestDomain := func() (*InvertedIndex, *History) {
 		d := emptyTestDomain(1)
-		d.History.InvertedIndex.integrity = nil
 		d.History.InvertedIndex.Accessors = 0
 		d.History.Accessors = 0
 		return d.History.InvertedIndex, d.History
