@@ -92,14 +92,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	db, agg, datadir := testDbAndAggregatorv3(t, "", aggStep)
 	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
-	defer func() {
-		if tx != nil {
-			tx.Rollback()
-		}
-	}()
-
-	domCtx := agg.BeginFilesRo()
-	defer domCtx.Close()
+	defer tx.Rollback()
 
 	domains, err := state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
@@ -215,8 +208,6 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 
 	tx, err = db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
-	domCtx = agg.BeginFilesRo()
-	defer domCtx.Close()
 	domains, err = state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
@@ -239,7 +230,6 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	require.NoError(t, err)
 	tx.Rollback()
 
-	domCtx.Close()
 	domains.Close()
 
 	err = reset2.ResetExec(ctx, db)
@@ -249,8 +239,6 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	tx, err = db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	domCtx = agg.BeginFilesRo()
-	defer domCtx.Close()
 	domains, err = state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
@@ -263,9 +251,11 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	t.Logf("restart hash %x\n", rh)
 
 	var i, j int
-	for txNum := txToStart; txNum <= txs; txNum++ {
+	for tt := txToStart; tt <= txs; tt++ {
+		txNum = tt
+		blockNum = txNum / blockSize
 		domains.SetTxNum(txNum)
-		domains.SetBlockNum(txNum / blockSize)
+		domains.SetBlockNum(blockNum)
 		binary.BigEndian.PutUint64(aux[:], txNum)
 
 		//fmt.Printf("tx+ %d addr %x\n", txNum, addrs[i])
@@ -307,9 +297,6 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 			tx.Rollback()
 		}
 	}()
-
-	domCtx := agg.BeginFilesRo()
-	defer domCtx.Close()
 
 	domains, err := state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
@@ -402,8 +389,6 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domCtx = agg.BeginFilesRo()
-	defer domCtx.Close()
 	domains, err = state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
@@ -412,7 +397,6 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	tx.Rollback()
 	require.NoError(t, err)
 
-	domCtx.Close()
 	domains.Close()
 
 	err = reset2.ResetExec(ctx, db)
@@ -422,8 +406,6 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	tx, err = db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	domCtx = agg.BeginFilesRo()
-	defer domCtx.Close()
 	domains, err = state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
@@ -440,9 +422,9 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	//require.NotEqualValues(t, latestHash, common.BytesToHash(rh))
 	//common.BytesToHash(rh))
 
-	var j int
-	for i := txToStart; i <= txs; i++ {
-		txNum = i
+	var i, j int
+	for tt := txToStart; tt <= txs; tt++ {
+		txNum = tt
 		blockNum = txNum / blockSize
 		domains.SetTxNum(txNum)
 		domains.SetBlockNum(blockNum)
