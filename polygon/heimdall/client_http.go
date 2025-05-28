@@ -155,8 +155,11 @@ const (
 	fetchNoAckMilestone     = "/milestone/noAck/%s"
 	fetchMilestoneID        = "/milestone/ID/%s"
 
-	fetchSpanFormat     = "bor/span/%d"
-	fetchSpanLatest     = "bor/latest-span"
+	fetchSpanFormat = "bor/span/%d"
+
+	fetchSpanLatestV1 = "bor/latest-span"
+	fetchSpanLatestV2 = "bor/span/latest"
+
 	fetchSpanListFormat = "page=%d&limit=%d" // max limit = 150
 	fetchSpanListPath   = "bor/span/list"
 )
@@ -235,20 +238,25 @@ func (c *HttpClient) FetchStateSyncEvent(ctx context.Context, id uint64) (*Event
 }
 
 func (c *HttpClient) FetchLatestSpan(ctx context.Context) (*Span, error) {
-	url, err := latestSpanURL(c.urlString)
-	if err != nil {
-		return nil, err
-	}
-
 	ctx = withRequestType(ctx, spanRequest)
 
 	if c.apiVersioner != nil && c.apiVersioner.Version() == HeimdallV2 {
+		url, err := makeURL(c.urlString, fetchSpanLatestV2, "")
+		if err != nil {
+			return nil, err
+		}
+
 		response, err := FetchWithRetry[SpanResponseV2](ctx, c, url, c.logger)
 		if err != nil {
 			return nil, err
 		}
 
 		return response.Span, nil
+	}
+
+	url, err := makeURL(c.urlString, fetchSpanLatestV1, "")
+	if err != nil {
+		return nil, err
 	}
 
 	response, err := FetchWithRetry[SpanResponseV1](ctx, c, url, c.logger)
@@ -617,10 +625,6 @@ func spanURL(urlString string, spanID uint64) (*url.URL, error) {
 
 func spanListURL(urlString string, page, limit uint64) (*url.URL, error) {
 	return makeURL(urlString, fetchSpanListPath, fmt.Sprintf(fetchSpanListFormat, page, limit))
-}
-
-func latestSpanURL(urlString string) (*url.URL, error) {
-	return makeURL(urlString, fetchSpanLatest, "")
 }
 
 func stateSyncListURL(urlString string, fromID uint64, to int64) (*url.URL, error) {
