@@ -1415,11 +1415,11 @@ func (a *Aggregator) IntegrateMergedDirtyFiles(outs *SelectedStaticFiles, in *Me
 	defer a.dirtyFilesLock.Unlock()
 
 	for id, d := range a.d {
-		d.integrateMergedDirtyFiles(outs.d[id], outs.dIdx[id], outs.dHist[id], in.d[id], in.dIdx[id], in.dHist[id])
+		d.integrateMergedDirtyFiles(in.d[id], in.dIdx[id], in.dHist[id])
 	}
 
 	for id, ii := range a.iis {
-		ii.integrateMergedDirtyFiles(outs.ii[id], in.iis[id])
+		ii.integrateMergedDirtyFiles(in.iis[id])
 	}
 
 	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())

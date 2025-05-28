@@ -863,21 +863,21 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 	return
 }
 
-func (d *Domain) integrateMergedDirtyFiles(valuesOuts, indexOuts, historyOuts []*filesItem, valuesIn, indexIn, historyIn *filesItem) {
-	d.History.integrateMergedDirtyFiles(indexOuts, historyOuts, indexIn, historyIn)
+func (d *Domain) integrateMergedDirtyFiles(valuesIn, indexIn, historyIn *filesItem) {
+	d.History.integrateMergedDirtyFiles(indexIn, historyIn)
 	if valuesIn != nil {
 		d.dirtyFiles.Set(valuesIn)
 	}
 }
 
-func (ii *InvertedIndex) integrateMergedDirtyFiles(outs []*filesItem, in *filesItem) {
+func (ii *InvertedIndex) integrateMergedDirtyFiles(in *filesItem) {
 	if in != nil {
 		ii.dirtyFiles.Set(in)
 	}
 }
 
-func (h *History) integrateMergedDirtyFiles(indexOuts, historyOuts []*filesItem, indexIn, historyIn *filesItem) {
-	h.InvertedIndex.integrateMergedDirtyFiles(indexOuts, indexIn)
+func (h *History) integrateMergedDirtyFiles(indexIn, historyIn *filesItem) {
+	h.InvertedIndex.integrateMergedDirtyFiles(indexIn)
 	//TODO: handle collision
 	if historyIn != nil {
 		h.dirtyFiles.Set(historyIn)
