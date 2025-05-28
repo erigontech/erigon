@@ -182,7 +182,6 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 
 	err = tx.Commit()
 	require.NoError(t, err)
-	tx = nil
 
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
@@ -204,7 +203,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 		}
 	}
 
-	db, agg, _ = testDbAndAggregatorv3(t, datadir, aggStep)
+	db, _, _ = testDbAndAggregatorv3(t, datadir, aggStep)
 
 	tx, err = db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
@@ -383,7 +382,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	require.NoError(t, err)
 	//t.Logf("datadir has been removed")
 
-	db, agg, _ = testDbAndAggregatorv3(t, datadir, aggStep)
+	db, _, _ = testDbAndAggregatorv3(t, datadir, aggStep)
 
 	tx, err = db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
