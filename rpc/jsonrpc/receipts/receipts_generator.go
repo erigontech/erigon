@@ -154,12 +154,14 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	}
 
 	if receipts, ok := g.receiptsCache.Get(blockHash); ok && len(receipts) > index {
+		// log.Info("GetReceipt: found in cache", "blockNum", blockNum, "index", index, "txnHash", txnHash)
 		return receipts[index], nil
 	}
 
 	mu := g.txnExecMutex.lock(txnHash)
 	defer g.txnExecMutex.unlock(mu, txnHash)
 	if receipt, ok := g.receiptCache.Get(txnHash); ok {
+		// log.Info("GetReceipt: found in cache", "blockNum", blockNum, "index", index, "txnHash", txnHash)
 		return receipt, nil
 	}
 
@@ -174,8 +176,8 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	if err != nil {
 		return nil, err
 	}
-
-	receipt, _, err = core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.usedGas, genEnv.usedBlobGas, vm.Config{})
+	// log.Info("ApplyTransaction", "blockNum", blockNum, "index", index, "txnHash", txnHash, "cumGasUsed", cumGasUsed, "firstLogIndex", firstLogIndex)
+	receipt, _, err = core.ApplyArbTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.usedGas, genEnv.usedBlobGas, vm.Config{})
 	if err != nil {
 		return nil, fmt.Errorf("ReceiptGen.GetReceipt: bn=%d, txnIdx=%d, %w", blockNum, index, err)
 	}
