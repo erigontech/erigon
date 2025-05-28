@@ -141,7 +141,6 @@ func (sdb *IntraBlockState) SetTrace(trace bool) {
 	sdb.trace = trace
 }
 
-
 func (sdb *IntraBlockState) Trace() bool {
 	return sdb.trace
 }
