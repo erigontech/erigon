@@ -410,16 +410,11 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	}
 
 	{
-		fromTxNum, err := txNumsReader.Min(tx, fromBlock)
+		fromStep, toStep, err := blkRangeToSteps(tx, fromBlock, toBlock, txNumsReader)
 		if err != nil {
 			return err
 		}
-		toTxNum, err := txNumsReader.Min(tx, fromBlock)
-		if err != nil {
-			return err
-		}
-		stepSize := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).StepSize()
-		log.Info("[custom_trace] batch start", "blocks", fmt.Sprintf("%dk-%dk", fromBlock/1_000, toBlock/1_000), "steps", fmt.Sprintf("%.2f-%.2f", float64(fromTxNum)/float64(stepSize), float64(toTxNum)/float64(stepSize)), "workers", cfg.Workers)
+		log.Info("[custom_trace] batch start", "blocks", fmt.Sprintf("%dk-%dk", fromBlock/1_000, toBlock/1_000), "steps", fmt.Sprintf("%.2f-%.2f", fromStep, toStep), "workers", cfg.Workers)
 	}
 
 	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {
@@ -553,4 +548,18 @@ func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader ser
 		_ = txn.Hash()
 	}
 	return b, err
+}
+
+func blkRangeToSteps(tx kv.Tx, fromBlock, toBlock uint64, txNumsReader rawdbv3.TxNumsReader) (float64, float64, error) {
+	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
+	if err != nil {
+		return 0, 0, err
+	}
+	toTxNum, err := txNumsReader.Min(tx, toBlock)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	stepSize := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).StepSize()
+	return float64(fromTxNum) / float64(stepSize), float64(toTxNum) / float64(stepSize), nil
 }
