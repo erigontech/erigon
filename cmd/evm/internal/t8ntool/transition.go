@@ -312,7 +312,14 @@ func Main(ctx *cli.Context) error {
 	}
 	defer sd.Close()
 
-	reader, writer := MakePreState(chainConfig.Rules(0, 0), tx, sd, prestate.Pre)
+	blockNum, txNum := uint64(0), uint64(0)
+	sd.SetTxNum(txNum)
+	sd.SetBlockNum(blockNum)
+	reader, writer := MakePreState(chainConfig.Rules(0, 0), tx, sd, prestate.Pre, blockNum, txNum)
+	blockNum, txNum = uint64(1), uint64(2)
+	sd.SetTxNum(txNum)
+	sd.SetBlockNum(blockNum)
+
 	// Merge engine can be used for pre-merge blocks as well, as it
 	// redirects to the ethash engine based on the block number
 	engine := merge.New(&ethash.FakeEthash{})
@@ -329,7 +336,7 @@ func Main(ctx *cli.Context) error {
 	}
 
 	// state root calculation
-	root, err := CalculateStateRoot(tx)
+	root, err := CalculateStateRoot(tx, blockNum, txNum)
 	if err != nil {
 		return err
 	}
@@ -620,7 +627,7 @@ func NewHeader(env stEnv) *types.Header {
 	return &header
 }
 
-func CalculateStateRoot(tx kv.TemporalRwTx) (*common.Hash, error) {
+func CalculateStateRoot(tx kv.TemporalRwTx, blockNum uint64, txNum uint64) (*common.Hash, error) {
 	// Generate hashed state
 	c, err := tx.RwCursor(kv.PlainState)
 	if err != nil {
@@ -667,7 +674,7 @@ func CalculateStateRoot(tx kv.TemporalRwTx) (*common.Hash, error) {
 		}
 	}
 	c.Close()
-	root, err := domains.ComputeCommitment(context.Background(), true, domains.BlockNum(), "")
+	root, err := domains.ComputeCommitment(context.Background(), true, blockNum, txNum, "")
 	if err != nil {
 		return nil, err
 	}
