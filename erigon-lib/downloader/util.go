@@ -348,9 +348,6 @@ func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient
 	default:
 	}
 	if !IsSnapNameAllowed(ts.DisplayName) {
-		if strings.Contains(ts.DisplayName, HackName) {
-			log.Warn("[dbg] _addTorrentFile.skip2", "f", ts.DisplayName)
-		}
 		return nil, false, nil
 	}
 	ts.Webseeds, _ = webseeds.ByFileName(ts.DisplayName)
@@ -403,7 +400,7 @@ func torrentInfoUpdater(fileName string, infoHash []byte, length int64, completi
 
 		changed := false
 
-		if err != nil || (len(infoHash) > 0 && !bytes.Equal(info.Hash, infoHash)) {
+		if err != nil || (len(infoHash) > 0 && !bytes.Equal(info.Hash, infoHash)) { //nolint
 			now := time.Now()
 			info.Name = fileName
 			info.Hash = infoHash

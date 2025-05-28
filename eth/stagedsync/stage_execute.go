@@ -248,10 +248,6 @@ func stageProgress(tx kv.Tx, db kv.RoDB, stage stages.SyncStage) (prevStageProgr
 	return prevStageProgress, nil
 }
 
-func BorHeimdallStageProgress(tx kv.Tx, cfg BorHeimdallCfg) (prevStageProgress uint64, err error) {
-	return stageProgress(tx, cfg.db, stages.BorHeimdall)
-}
-
 // ================ Erigon3 End ================
 
 func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
