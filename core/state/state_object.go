@@ -28,15 +28,11 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/common/empty"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/tracing"
 )
-
-var emptyCodeHash = crypto.Keccak256(nil)
-var emptyCodeHashH = common.BytesToHash(emptyCodeHash)
 
 type Code []byte
 
@@ -93,7 +89,7 @@ type stateObject struct {
 
 // empty returns whether the account is considered empty.
 func (so *stateObject) empty() bool {
-	return so.data.Nonce == 0 && so.data.Balance.IsZero() && (so.data.CodeHash == emptyCodeHashH)
+	return so.data.Nonce == 0 && so.data.Balance.IsZero() && (so.data.CodeHash == empty.CodeHash)
 }
 
 // newObject creates a state object.
@@ -111,10 +107,10 @@ func newObject(db *IntraBlockState, address common.Address, data, original *acco
 		so.data.Initialised = true
 	}
 	if so.data.CodeHash == (common.Hash{}) {
-		so.data.CodeHash = emptyCodeHashH
+		so.data.CodeHash = empty.CodeHash
 	}
 	if so.data.Root == (common.Hash{}) {
-		so.data.Root = trie.EmptyRoot
+		so.data.Root = empty.RootHash
 	}
 	so.original.Copy(original)
 	return &so
@@ -253,11 +249,10 @@ func (so *stateObject) setState(key common.Hash, value uint256.Int) {
 // updateTrie writes cached storage modifications into the object's storage trie.
 func (so *stateObject) updateTrie(stateWriter StateWriter) error {
 	for key, value := range so.dirtyStorage {
-		original := so.blockOriginStorage[key]
-		so.originStorage[key] = value
-		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), &key, &original, &value); err != nil {
+		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), key, so.blockOriginStorage[key], value); err != nil {
 			return err
 		}
+		so.originStorage[key] = value
 	}
 	return nil
 }
@@ -279,8 +274,9 @@ func (so *stateObject) AddBalance(amount *uint256.Int, reason tracing.BalanceCha
 
 		return
 	}
-
-	so.SetBalance(new(uint256.Int).Add(so.Balance(), amount), reason)
+	var newBalance uint256.Int
+	newBalance.Add(so.Balance(), amount)
+	so.SetBalance(newBalance, reason)
 }
 
 // SubBalance removes amount from so's balance.
@@ -289,22 +285,24 @@ func (so *stateObject) SubBalance(amount *uint256.Int, reason tracing.BalanceCha
 	if amount.IsZero() {
 		return
 	}
-	so.SetBalance(new(uint256.Int).Sub(so.Balance(), amount), reason)
+	var newBalance uint256.Int
+	newBalance.Sub(so.Balance(), amount)
+	so.SetBalance(newBalance, reason)
 }
 
-func (so *stateObject) SetBalance(amount *uint256.Int, reason tracing.BalanceChangeReason) {
+func (so *stateObject) SetBalance(amount uint256.Int, reason tracing.BalanceChangeReason) {
 	so.db.journal.append(balanceChange{
 		account: so.address,
 		prev:    so.data.Balance,
 	})
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnBalanceChange != nil {
-		so.db.tracingHooks.OnBalanceChange(so.address, so.Balance(), amount, reason)
+		so.db.tracingHooks.OnBalanceChange(so.address, so.data.Balance, amount, reason)
 	}
 	so.setBalance(amount)
 }
 
-func (so *stateObject) setBalance(amount *uint256.Int) {
-	so.data.Balance.Set(amount)
+func (so *stateObject) setBalance(amount uint256.Int) {
+	so.data.Balance = amount
 	so.data.Initialised = true
 }
 
@@ -329,7 +327,7 @@ func (so *stateObject) Code() []byte {
 	if so.code != nil {
 		return so.code
 	}
-	if so.data.CodeHash == emptyCodeHashH {
+	if so.data.CodeHash == empty.CodeHash {
 		return nil
 	}
 	code, err := so.db.stateReader.ReadAccountCode(so.Address())

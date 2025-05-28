@@ -23,13 +23,13 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 )
 
 type dummyContractRef struct {
@@ -49,23 +49,14 @@ func (d *dummyContractRef) SetBalance(*big.Int)        {}
 func (d *dummyContractRef) SetNonce(uint64)            {}
 func (d *dummyContractRef) Balance() *big.Int          { return new(big.Int) }
 
-type dummyStatedb struct {
-	state.IntraBlockState
-}
-
-func (*dummyStatedb) GetRefund() uint64                                              { return 1337 }
-func (*dummyStatedb) GetState(_ common.Address, _ common.Hash, _ *uint256.Int) error { return nil }
-func (*dummyStatedb) SetState(_ common.Address, _ common.Hash, _ uint256.Int) error  { return nil }
-func (*dummyStatedb) AddSlotToAccessList(_ common.Address, _ common.Hash) (addrMod, slotMod bool) {
-	return false, false
-}
-func (*dummyStatedb) GetCommittedState(common.Address, common.Hash, *uint256.Int) error { return nil }
-
 func TestStoreCapture(t *testing.T) {
-	c := vm.NewJumpDestCache()
+	c := vm.NewJumpDestCache(128)
+	ibs := state.New(state.NewNoopReader())
+	ibs.AddRefund(1337)
+
 	var (
 		logger   = NewStructLogger(nil)
-		evm      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, chain.TestChainConfig, vm.Config{Tracer: logger.Hooks()})
+		evm      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.TestChainConfig, vm.Config{Tracer: logger.Hooks()})
 		contract = vm.NewContract(&dummyContractRef{}, common.Address{}, new(uint256.Int), 100000, false /* skipAnalysis */, c)
 	)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x0, byte(vm.SSTORE)}

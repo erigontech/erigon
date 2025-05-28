@@ -114,3 +114,6 @@ jobs:
 
       - name: Test erigon-db
         run: cd erigon-db && make test
+
+      - name: Test p2p
+        run: cd p2p && make test

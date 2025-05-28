@@ -923,7 +923,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 							}
 						}
 
-						if completionTime != nil {
+						if completionTime != nil { //nolint
 							if !stat.ModTime().Equal(*completionTime) {
 								checking[t.Name()] = struct{}{}
 

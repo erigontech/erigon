@@ -930,10 +930,11 @@ func TestReproduceCrash(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	tsw := state.NewWriter(sd, nil)
-	tsr := state.NewReaderV3(sd)
-	sd.SetTxNum(1)
-	sd.SetBlockNum(1)
+	txNum := uint64(1)
+	tsw := state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	tsr := state.NewReaderV3(sd.AsGetter(tx))
+	sd.SetTxNum(txNum)
+	sd.SetBlockNum(txNum)
 
 	intraBlockState := state.New(tsr)
 	// Start the 1st transaction
@@ -1354,7 +1355,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	r, tsw := state.NewReaderV3(sd), state.NewWriter(sd, nil)
+	r, tsw := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, sd.TxNum())
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
@@ -1366,9 +1367,9 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
-	rh1, err := sd.ComputeCommitment(context.Background(), true, 0, "")
+	rh1, err := sd.ComputeCommitment(context.Background(), tx, true, 0, "")
 	require.NoError(t, err)
-	t.Logf("stateRoot %x", rh1)
+	//t.Logf("stateRoot %x", rh1)
 
 	sd.SetTxNum(2)
 	sd.SetBlockNum(1)
@@ -1388,7 +1389,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	require.NoError(t, tcErr, "you can receive the new code")
 	assert.Equal(t, newCode, trieCode, "new code should be received")
 
-	rh2, err := sd.ComputeCommitment(context.Background(), true, 1, "")
+	rh2, err := sd.ComputeCommitment(context.Background(), tx, true, 1, "")
 	require.NoError(t, err)
 	require.NotEqual(t, rh1, rh2)
 }
@@ -1404,7 +1405,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	r, w := state.NewReaderV3(sd), state.NewWriter(sd, nil)
+	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, sd.TxNum())
 
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
@@ -1442,7 +1443,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	r, w := state.NewReaderV3(sd), state.NewWriter(sd, nil)
+	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, sd.TxNum())
 
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
@@ -1459,7 +1460,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 		t.Errorf("error committing block: %v", err)
 	}
 
-	r2, err := sd.ComputeCommitment(context.Background(), true, 1, "")
+	r2, err := sd.ComputeCommitment(context.Background(), tx, true, 1, "")
 	require.NoError(t, err)
 	require.Equal(t, root, common.CastToHash(r2))
 
@@ -1474,7 +1475,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	require.NoError(t, err, "you can still receive code size even with empty DB")
 	assert.Equal(t, len(code), codeSize2, "code size should be received even with empty DB")
 
-	r2, err = sd.ComputeCommitment(context.Background(), true, 1, "")
+	r2, err = sd.ComputeCommitment(context.Background(), tx, true, 1, "")
 	require.NoError(t, err)
 	require.Equal(t, root, common.CastToHash(r2))
 }

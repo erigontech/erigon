@@ -31,7 +31,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli/v2"
@@ -51,6 +50,10 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types"
+	p2p "github.com/erigontech/erigon-p2p"
+	"github.com/erigontech/erigon-p2p/enode"
+	"github.com/erigontech/erigon-p2p/nat"
+	"github.com/erigontech/erigon-p2p/netutil"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/utils/flags"
@@ -59,14 +62,11 @@ import (
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/execution/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/p2p"
-	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/p2p/nat"
-	"github.com/erigontech/erigon/p2p/netutil"
 	params2 "github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -807,12 +807,6 @@ var (
 		Value: true,
 	}
 
-	// TODO - this is a depricated flag - should be removed
-	PolygonSyncStageFlag = cli.BoolFlag{
-		Name:  "polygon.sync.stage",
-		Usage: "Enabling syncing with a stage that uses the polygon sync component",
-	}
-
 	AAFlag = cli.BoolFlag{
 		Name:  "aa",
 		Usage: "Enable AA transactions",
@@ -1215,7 +1209,7 @@ func GetBootnodesFromFlags(urlsStr, chain string) ([]*enode.Node, error) {
 	} else {
 		urls = params2.BootnodeURLsOfChain(chain)
 	}
-	return ParseNodesFromURLs(urls)
+	return enode.ParseNodesFromURLs(urls)
 }
 
 func setStaticPeers(ctx *cli.Context, cfg *p2p.Config) {
@@ -1227,7 +1221,7 @@ func setStaticPeers(ctx *cli.Context, cfg *p2p.Config) {
 		urls = params2.StaticPeerURLsOfChain(chain)
 	}
 
-	nodes, err := ParseNodesFromURLs(urls)
+	nodes, err := enode.ParseNodesFromURLs(urls)
 	if err != nil {
 		Fatalf("Option %s: %v", StaticPeersFlag.Name, err)
 	}
@@ -1241,27 +1235,12 @@ func setTrustedPeers(ctx *cli.Context, cfg *p2p.Config) {
 	}
 
 	urls := common.CliString2Array(ctx.String(TrustedPeersFlag.Name))
-	trustedNodes, err := ParseNodesFromURLs(urls)
+	trustedNodes, err := enode.ParseNodesFromURLs(urls)
 	if err != nil {
 		Fatalf("Option %s: %v", TrustedPeersFlag.Name, err)
 	}
 
 	cfg.TrustedNodes = append(cfg.TrustedNodes, trustedNodes...)
-}
-
-func ParseNodesFromURLs(urls []string) ([]*enode.Node, error) {
-	nodes := make([]*enode.Node, 0, len(urls))
-	for _, url := range urls {
-		if url == "" {
-			continue
-		}
-		n, err := enode.Parse(enode.ValidSchemes, url)
-		if err != nil {
-			return nil, fmt.Errorf("invalid node URL %s: %w", url, err)
-		}
-		nodes = append(nodes, n)
-	}
-	return nodes, nil
 }
 
 // NewP2PConfig
@@ -1297,31 +1276,33 @@ func NewP2PConfig(
 	}
 
 	cfg := &p2p.Config{
-		ListenAddr:      fmt.Sprintf(":%d", port),
-		MaxPeers:        maxPeers,
-		MaxPendingPeers: maxPendPeers,
-		NAT:             nat.Any(),
-		NoDiscovery:     nodiscover,
-		PrivateKey:      serverKey,
-		Name:            nodeName,
-		NodeDatabase:    enodeDBPath,
-		AllowedPorts:    allowedPorts,
-		TmpDir:          dirs.Tmp,
-		MetricsEnabled:  metricsEnabled,
+		ListenAddr:         fmt.Sprintf(":%d", port),
+		MaxPeers:           maxPeers,
+		MaxPendingPeers:    maxPendPeers,
+		NAT:                nat.Any(),
+		NoDiscovery:        nodiscover,
+		PrivateKey:         serverKey,
+		Name:               nodeName,
+		NodeDatabase:       enodeDBPath,
+		AllowedPorts:       allowedPorts,
+		TmpDir:             dirs.Tmp,
+		MetricsEnabled:     metricsEnabled,
+		LookupBootnodeURLs: params2.BootnodeURLsByGenesisHash,
+		LookupDNSNetwork:   params2.KnownDNSNetwork,
 	}
 	if netRestrict != "" {
 		cfg.NetRestrict = new(netutil.Netlist)
 		cfg.NetRestrict.Add(netRestrict)
 	}
 	if staticPeers != nil {
-		staticNodes, err := ParseNodesFromURLs(staticPeers)
+		staticNodes, err := enode.ParseNodesFromURLs(staticPeers)
 		if err != nil {
 			return nil, fmt.Errorf("bad option %s: %w", StaticPeersFlag.Name, err)
 		}
 		cfg.StaticNodes = staticNodes
 	}
 	if trustedPeers != nil {
-		trustedNodes, err := ParseNodesFromURLs(trustedPeers)
+		trustedNodes, err := enode.ParseNodesFromURLs(trustedPeers)
 		if err != nil {
 			return nil, fmt.Errorf("bad option %s: %w", TrustedPeersFlag.Name, err)
 		}
@@ -1729,14 +1710,13 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.C
 	cfg.WithHeimdallMilestones = ctx.Bool(WithHeimdallMilestones.Name)
 	cfg.WithHeimdallWaypointRecording = ctx.Bool(WithHeimdallWaypoints.Name)
 	cfg.PolygonSync = ctx.Bool(PolygonSyncFlag.Name)
-	cfg.PolygonSyncStage = ctx.Bool(PolygonSyncStageFlag.Name)
 
 	if cfg.PolygonSync {
 		cfg.WithHeimdallMilestones = false
 		cfg.WithHeimdallWaypointRecording = true
 	}
 
-	heimdall.RecordWayPoints(cfg.WithHeimdallWaypointRecording || cfg.PolygonSync || cfg.PolygonSyncStage)
+	heimdall.RecordWayPoints(cfg.WithHeimdallWaypointRecording || cfg.PolygonSync)
 
 	chainConfig := params2.ChainConfigByChainName(ctx.String(ChainFlag.Name))
 	if chainConfig != nil && chainConfig.Bor != nil && !ctx.IsSet(MaxPeersFlag.Name) {

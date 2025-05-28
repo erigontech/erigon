@@ -18,12 +18,14 @@ package types
 
 import (
 	"testing"
+
+	"github.com/erigontech/erigon-lib/common/empty"
 )
 
 func TestEmptyRequestsHashCalculation(t *testing.T) {
 	reqs := make(FlatRequests, 0)
 	h := reqs.Hash()
-	testH := EmptyRequestsHash
+	testH := empty.RequestsHash
 	if *h != testH {
 		t.Errorf("Requests Hash calculation error for empty hash, expected: %v, got: %v", testH, h)
 	}

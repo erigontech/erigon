@@ -38,8 +38,8 @@ func TestCheckCompatible(t *testing.T) {
 		wantErr     *chain.ConfigCompatError
 	}
 	tests := []test{
-		{stored: AllProtocolChanges, new: AllProtocolChanges, head: 0, wantErr: nil},
-		{stored: AllProtocolChanges, new: AllProtocolChanges, head: 100, wantErr: nil},
+		{stored: chain.AllProtocolChanges, new: chain.AllProtocolChanges, head: 0, wantErr: nil},
+		{stored: chain.AllProtocolChanges, new: chain.AllProtocolChanges, head: 100, wantErr: nil},
 		{
 			stored:  &chain.Config{TangerineWhistleBlock: big.NewInt(10)},
 			new:     &chain.Config{TangerineWhistleBlock: big.NewInt(20)},
@@ -47,7 +47,7 @@ func TestCheckCompatible(t *testing.T) {
 			wantErr: nil,
 		},
 		{
-			stored: AllProtocolChanges,
+			stored: chain.AllProtocolChanges,
 			new:    &chain.Config{HomesteadBlock: nil},
 			head:   3,
 			wantErr: &chain.ConfigCompatError{
@@ -58,7 +58,7 @@ func TestCheckCompatible(t *testing.T) {
 			},
 		},
 		{
-			stored: AllProtocolChanges,
+			stored: chain.AllProtocolChanges,
 			new:    &chain.Config{HomesteadBlock: big.NewInt(1)},
 			head:   3,
 			wantErr: &chain.ConfigCompatError{

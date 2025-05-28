@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
 
@@ -37,6 +38,7 @@ import (
 // Config are the configuration options for the Interpreter
 type Config struct {
 	Tracer        *tracing.Hooks
+	JumpDestCache *JumpDestCache
 	NoRecursion   bool // Disables call, callcode, delegate call and create
 	NoBaseFee     bool // Forces the EIP-1559 baseFee to 0 (needed for 0 price calls)
 	SkipAnalysis  bool // Whether we can skip jumpdest analysis based on the checked history
@@ -309,9 +311,10 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		if !contract.UseGas(cost, in.cfg.Tracer, tracing.GasChangeIgnored) {
 			return nil, ErrOutOfGas
 		}
+
+		// All ops with a dynamic memory usage also has a dynamic gas cost.
+		var memorySize uint64
 		if operation.dynamicGas != nil {
-			// All ops with a dynamic memory usage also has a dynamic gas cost.
-			var memorySize uint64
 			// calculate the new memory size and expand the memory to fit
 			// the operation
 			// Memory check needs to be done prior to evaluating the dynamic gas portion,
@@ -338,17 +341,10 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			if !contract.UseGas(dynamicCost, in.cfg.Tracer, tracing.GasChangeIgnored) {
 				return nil, ErrOutOfGas
 			}
-			// Do tracing before memory expansion
-			if debug {
-				if in.cfg.Tracer.OnOpcode != nil {
-					in.cfg.Tracer.OnOpcode(_pc, byte(op), gasCopy, cost, callContext, in.returnData, in.depth, VMErrorFromErr(err))
-					logged = true
-				}
-			}
-			if memorySize > 0 {
-				mem.Resize(memorySize)
-			}
-		} else if debug {
+		}
+
+		// Do tracing before memory expansion
+		if in.cfg.Tracer != nil {
 			if in.cfg.Tracer.OnGasChange != nil {
 				in.cfg.Tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
 			}
@@ -357,6 +353,23 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 				logged = true
 			}
 		}
+
+		// TODO - move this to a trace & set in the worker
+		if dbg.TraceInstructions && in.evm.intraBlockState.Trace() {
+			var str string
+			if operation.string != nil {
+				str = operation.string(*pc, callContext)
+			} else {
+				str = op.String()
+			}
+
+			fmt.Printf("(%d.%d) %5d %5d %s\n", in.evm.intraBlockState.TxIndex(), in.evm.intraBlockState.Incarnation(), _pc, cost, str)
+		}
+
+		if memorySize > 0 {
+			mem.Resize(memorySize)
+		}
+
 		// execute the operation
 		res, err = operation.execute(pc, in, callContext)
 
