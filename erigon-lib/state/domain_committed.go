@@ -128,7 +128,7 @@ func (sd *SharedDomains) latestCommitment(prefix []byte, tx kv.Tx) (v []byte, st
 	// of file where the value is stored (not exact step when kv has been set)
 	v, _, startTx, endTx, err := tx.(kv.TemporalTx).Debug().GetLatestFromFiles(kv.CommitmentDomain, prefix, 0)
 	if err != nil {
-		return nil, 0, true, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
+		return nil, 0, false, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
 	}
 
 	if !aggTx.a.commitmentValuesTransform || bytes.Equal(prefix, keyCommitmentState) {
@@ -144,7 +144,7 @@ func (sd *SharedDomains) latestCommitment(prefix []byte, tx kv.Tx) (v []byte, st
 }
 
 func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum, txNum uint64, logPrefix string) (rootHash []byte, err error) {
-	rootHash, err = sd.sdCtx.ComputeCommitment(ctx, saveStateAfter, blockNum, txNum, logPrefix)
+	rootHash, err = sd.sdCtx.ComputeCommitment(ctx, saveStateAfter, blockNum, sd.txNum, logPrefix)
 	return
 }
 
