@@ -922,7 +922,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 			require.NoError(err)
 			indexIn, historyIn, err := hc.mergeFiles(ctx, indexOuts, historyOuts, r, background.NewProgressSet())
 			require.NoError(err)
-			h.integrateMergedDirtyFiles(indexOuts, historyOuts, indexIn, historyIn)
+			h.integrateMergedDirtyFiles(indexIn, historyIn)
 			h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 			return false
 		}(); stop {

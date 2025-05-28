@@ -99,13 +99,13 @@ func (e *Events) AddLogsSubscription() (chan []*remote.SubscribeLogsReply, func(
 	}
 }
 
-func (e *Events) EmptyLogSubsctiption(empty bool) {
+func (e *Events) EmptyLogSubscription(empty bool) {
 	e.lock.Lock()
 	defer e.lock.Unlock()
 	e.hasLogSubscriptions = !empty
 }
 
-func (e *Events) HasLogSubsriptions() bool {
+func (e *Events) HasLogSubscriptions() bool {
 	e.lock.RLock()
 	defer e.lock.RUnlock()
 	return e.hasLogSubscriptions
@@ -194,7 +194,7 @@ func NewRecentLogs(limit uint64) *RecentLogs {
 
 // [from,to)
 func (r *RecentLogs) Notify(n *Events, from, to uint64, isUnwind bool) {
-	if !n.HasLogSubsriptions() {
+	if !n.HasLogSubscriptions() {
 		return
 	}
 	r.mu.Lock()
