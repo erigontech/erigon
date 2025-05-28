@@ -99,9 +99,10 @@ var (
 		Value: ethconfig.Defaults.NetworkID,
 	}
 	PersistReceiptsV2Flag = cli.BoolFlag{
-		Name:  "experiment.persist.receipts.v2",
-		Usage: "To store receipts in chaindata db (only on chain-tip) - RPC for recent receipts/logs will be faster. Values: 1_000 good starting point. 10_000 receipts it's ~1Gb (not much IO increase). Please test before go over 100_000",
-		Value: ethconfig.Defaults.PersistReceiptsCacheV2,
+		Name:    "persist.receipts",
+		Aliases: []string{"experiment.persist.receipts.v2"},
+		Usage:   "To store receipts in chaindata db (only on chain-tip) - RPC for recent receipts/logs will be faster. Values: 1_000 good starting point. 10_000 receipts it's ~1Gb (not much IO increase). Please test before go over 100_000",
+		Value:   ethconfig.Defaults.PersistReceiptsCacheV2,
 	}
 	DeveloperPeriodFlag = cli.IntFlag{
 		Name:  "dev.period",
