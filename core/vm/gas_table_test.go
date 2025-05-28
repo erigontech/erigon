@@ -22,11 +22,9 @@ package vm_test
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math"
 	"strconv"
 	"testing"
-	"unsafe"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -192,9 +190,6 @@ func TestCreateGas(t *testing.T) {
 		tx, err := db.BeginTemporalRw(context.Background())
 		require.NoError(t, err)
 		defer tx.Rollback()
-
-		eface := *(*[2]uintptr)(unsafe.Pointer(&tx))
-		fmt.Printf("init tx %x\n", eface[1])
 
 		domains, err := state3.NewSharedDomains(tx, log.New())
 		require.NoError(t, err)
