@@ -516,7 +516,8 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 		if err != nil {
 			return err
 		}
-		stepSize := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).StepSize()
+
+		stepSize := libstate.AggTx(tx).StepSize()
 		log.Info("[custom_trace] batch start", "blocks", fmt.Sprintf("%dk-%dk", fromBlock/1_000, toBlock/1_000), "steps", fmt.Sprintf("%.2f-%.2f", float64(fromTxNum)/float64(stepSize), float64(toTxNum)/float64(stepSize)), "workers", cfg.Workers)
 	}
 
