@@ -210,7 +210,7 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.TemporalRwTx, block
 	sf := time.Now()
 	defer mxUnwindSharedTook.ObserveDuration(sf)
 
-	if err := sd.Flush(ctx, rwTx, 0); err != nil {
+	if err := sd.Flush(ctx, rwTx); err != nil {
 		return err
 	}
 
@@ -221,7 +221,7 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.TemporalRwTx, block
 	sd.ClearRam(true)
 	sd.SetTxNum(txUnwindTo)
 	sd.SetBlockNum(blockUnwindTo)
-	return sd.Flush(ctx, rwTx, 0)
+	return sd.Flush(ctx, rwTx)
 }
 
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {
@@ -656,11 +656,3 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.Tx, prefix []
 
 func toStringZeroCopy(v []byte) string { return unsafe.String(&v[0], len(v)) }
 func toBytesZeroCopy(s string) []byte  { return unsafe.Slice(unsafe.StringData(s), len(s)) }
-
-func AggTx(tx kv.Tx) *AggregatorRoTx {
-	if withAggTx, ok := tx.(interface{ AggTx() any }); ok {
-		return withAggTx.AggTx().(*AggregatorRoTx)
-	}
-
-	return nil
-}

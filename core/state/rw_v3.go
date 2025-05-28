@@ -593,17 +593,15 @@ func (w *Writer) CreateContract(address common.Address) error {
 }
 
 type ReaderV3 struct {
-	txNum uint64
-	trace bool
-	sd    *state.SharedDomains
-	tx    kv.Tx
+	txNum  uint64
+	trace  bool
+	getter kv.TemporalGetter
 }
 
-func NewReaderV3(domains *state.SharedDomains, tx kv.Tx) *ReaderV3 {
+func NewReaderV3(getter kv.TemporalGetter) *ReaderV3 {
 	return &ReaderV3{
 		//trace:     true,
-		tx: tx,
-		sd: domains,
+		getter: getter,
 	}
 }
 

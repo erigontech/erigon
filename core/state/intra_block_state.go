@@ -519,13 +519,13 @@ func (sdb *IntraBlockState) ReadVersion(addr common.Address, path AccountPath, k
 
 // AddBalance adds amount to the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) AddBalance(addr common.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) error {
+func (sdb *IntraBlockState) AddBalance(addr common.Address, amount uint256.Int, reason tracing.BalanceChangeReason) error {
 	if sdb.trace || traceAccount(addr) {
 		prev0, _ := sdb.GetBalance(addr)
 
 		defer func() {
 			bal, _ := sdb.GetBalance(addr)
-			expected := (&uint256.Int{}).Add(&prev0, amount)
+			expected := (&uint256.Int{}).Add(&prev0, &amount)
 			if bal.Cmp(expected) != 0 {
 				panic(fmt.Sprintf("add failed: expected: %d got: %d", expected, &bal))
 			}
@@ -538,7 +538,7 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount *uint256.Int,
 		if _, needAccount := sdb.stateObjects[addr]; !needAccount && addr == ripemd && amount.IsZero() {
 			sdb.journal.append(balanceIncrease{
 				account:  &addr,
-				increase: *amount,
+				increase: amount,
 			})
 
 			bi, ok := sdb.balanceInc[addr]
@@ -562,10 +562,10 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount *uint256.Int,
 					prev.Add(prev, &bi.increase)
 				}
 
-				sdb.tracingHooks.OnBalanceChange(addr, *prev, *(new(uint256.Int).Add(prev, amount)), reason)
+				sdb.tracingHooks.OnBalanceChange(addr, *prev, *(new(uint256.Int).Add(prev, &amount)), reason)
 			}
 
-			bi.increase.Add(&bi.increase, amount)
+			bi.increase.Add(&bi.increase, &amount)
 			bi.count++
 			return nil
 		}
@@ -596,7 +596,7 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount *uint256.Int,
 	}
 
 	update := new(uint256.Int).Add(&prev, amount)
-	stateObject.SetBalance(update, reason)
+	stateObject.SetBalance(*update, reason)
 	sdb.versionWritten(addr, BalancePath, common.Hash{}, *update)
 	return nil
 }
@@ -627,7 +627,7 @@ func (sdb *IntraBlockState) SubBalance(addr common.Address, amount *uint256.Int,
 	}
 
 	update := new(uint256.Int).Sub(&prev, amount)
-	stateObject.SetBalance(update, reason)
+	stateObject.SetBalance(*update, reason)
 	sdb.versionWritten(addr, BalancePath, common.Hash{}, *update)
 
 	return nil
@@ -1581,7 +1581,7 @@ func (s *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 				s.setState(addr, stateKey, state, true)
 			case BalancePath:
 				balance := val.(uint256.Int)
-				s.SetBalance(addr, &balance, writes[i].Reason)
+				s.SetBalance(addr, balance, writes[i].Reason)
 			case NoncePath:
 				nonce := val.(uint64)
 				s.SetNonce(addr, nonce)

@@ -934,7 +934,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 	if be.finalizeTasks.minPending() != -1 {
 		stateWriter = state.NewStateWriterBufferedV3(pe.rs, nil)
-		stateReader := state.NewBufferedReader(pe.rs, state.NewReaderV3(pe.rs.Domains(), applyTx))
+		stateReader := state.NewBufferedReader(pe.rs, state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx)))
 
 		applyResult = txResult{
 			blockNum:   be.blockNum,
@@ -1308,7 +1308,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					pe.RLock()
 					defer pe.RUnlock()
 
-					ibs := state.New(state.NewBufferedReader(pe.rs, state.NewReaderV3(pe.rs.Domains(), applyTx)))
+					ibs := state.New(state.NewBufferedReader(pe.rs, state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx))))
 					ibs.SetTxContext(result.Version().BlockNum, result.Version().TxIndex)
 					ibs.SetVersion(result.Version().Incarnation)
 

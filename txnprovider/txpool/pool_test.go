@@ -937,7 +937,7 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			err = sd.DomainPut(kv.AccountsDomain, tx, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, sndrBytes, sd.TxNum(), nil, 0)
 			asrt.NoError(err)
 
-			err = sd.Flush(ctx, tx, 0)
+			err = sd.Flush(ctx, tx)
 			asrt.NoError(err)
 
 			txn := &TxnSlot{
@@ -1056,7 +1056,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	err = sd.DomainPut(kv.AccountsDomain, tx, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, sndrBytes, sd.TxNum(), nil, 0)
 	require.NoError(t, err)
 
-	err = sd.Flush(ctx, tx, 0)
+	err = sd.Flush(ctx, tx)
 	require.NoError(t, err)
 
 	txn := &TxnSlot{

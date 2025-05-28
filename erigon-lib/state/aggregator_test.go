@@ -127,7 +127,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 
 	}
 
-	err = domains.Flush(context.Background(), rwTx, 0)
+	err = domains.Flush(context.Background(), rwTx)
 	require.NoError(t, err)
 
 	require.NoError(t, err)
@@ -246,7 +246,7 @@ func TestAggregatorV3_DirtyFilesRo(t *testing.T) {
 
 	}
 
-	err = domains.Flush(context.Background(), rwTx, 0)
+	err = domains.Flush(context.Background(), rwTx)
 	require.NoError(t, err)
 
 	require.NoError(t, err)
@@ -359,7 +359,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 		state[string(addr)+string(loc)] = []byte{addr[0], loc[0]}
 	}
 
-	err = domains.Flush(context.Background(), rwTx, 0)
+	err = domains.Flush(context.Background(), rwTx)
 	require.NoError(t, err)
 
 	err = rwTx.Commit()
@@ -481,7 +481,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	_, err = domains.ComputeCommitment(ctx, true, domains.BlockNum(), txNum, "")
 	require.NoError(t, err)
 
-	err = domains.Flush(context.Background(), tx, 0)
+	err = domains.Flush(context.Background(), tx)
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
@@ -582,7 +582,7 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	generateSharedDomainsUpdates(t, domains, tx, maxTx, rnd, length.Addr, 10, aggStep/2)
 
 	// flush and build files
-	err = domains.Flush(context.Background(), tx, 0)
+	err = domains.Flush(context.Background(), tx)
 	require.NoError(t, err)
 
 	var (
@@ -935,7 +935,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	}
 
 	// flush and build files
-	err = domains.Flush(context.Background(), tx, 0)
+	err = domains.Flush(context.Background(), tx)
 	require.NoError(t, err)
 
 	latestStepInDB := agg.d[kv.AccountsDomain].maxStepInDB(tx)
@@ -1033,7 +1033,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 
 	var latestCommitTxNum uint64
 	commit := func(txn uint64) error {
-		err = domains.Flush(ctx, tx, 0)
+		err = domains.Flush(ctx, tx)
 		require.NoError(t, err)
 
 		err = tx.Commit()
@@ -1321,7 +1321,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 		roots = append(roots, rh)
 	}
 
-	err = domains.Flush(context.Background(), rwTx, 0)
+	err = domains.Flush(context.Background(), rwTx)
 	require.NoError(t, err)
 	err = rwTx.Commit()
 	require.NoError(t, err)
@@ -1368,7 +1368,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 		require.Equal(t, roots[i], rh)
 	}
 
-	err = domains.Flush(context.Background(), rwTx, 0)
+	err = domains.Flush(context.Background(), rwTx)
 	require.NoError(t, err)
 
 	pruneFrom = 3

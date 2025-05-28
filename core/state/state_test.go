@@ -58,7 +58,7 @@ func (s *StateSuite) TestDump(c *checker.C) {
 	// generate a few entries
 	obj1, err := s.state.GetOrNewStateObject(toAddr([]byte{0x01}))
 	c.Check(err, checker.IsNil)
-	s.state.AddBalance(toAddr([]byte{0x01}), uint256.NewInt(22), tracing.BalanceChangeUnspecified)
+	s.state.AddBalance(toAddr([]byte{0x01}), *uint256.NewInt(22), tracing.BalanceChangeUnspecified)
 	obj2, err := s.state.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
 	c.Check(err, checker.IsNil)
 	obj2.SetCode(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3}), []byte{3, 3, 3, 3, 3, 3, 3})
@@ -198,7 +198,7 @@ func (s *StateSuite) TestTouchDelete(c *checker.C) {
 	s.state.Reset()
 
 	snapshot := s.state.Snapshot()
-	s.state.AddBalance(common.Address{}, new(uint256.Int), tracing.BalanceChangeUnspecified)
+	s.state.AddBalance(common.Address{}, uint256.Int{}, tracing.BalanceChangeUnspecified)
 
 	if len(s.state.journal.dirties) != 1 {
 		c.Fatal("expected one dirty state object")
@@ -458,7 +458,7 @@ func TestDump(t *testing.T) {
 	blockWriter := NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
 	err = st.CommitBlock(&chain.Rules{}, blockWriter)
 	require.NoError(t, err)
-	err = domains.Flush(context.Background(), tx, 0)
+	err = domains.Flush(context.Background(), tx)
 	require.NoError(t, err)
 
 	// check that dump contains the state objects that are in trie

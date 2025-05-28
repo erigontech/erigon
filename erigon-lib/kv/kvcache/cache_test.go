@@ -249,7 +249,7 @@ func TestAPI(t *testing.T) {
 			}
 			prevVals[string(k)] = v
 			counter.Add(1)
-			return d.Flush(ctx, tx, 0)
+			return d.Flush(ctx, tx)
 		})
 		require.NoError(err)
 		return txID

@@ -65,7 +65,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 		if i%stepSize == 0 {
 			_, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), txNum, "")
 			require.NoError(t, err)
-			err = domains.Flush(ctx, rwTx, 0)
+			err = domains.Flush(ctx, rwTx)
 			require.NoError(t, err)
 			if i/stepSize > 3 {
 				err = agg.BuildFiles(i - (2 * stepSize))
@@ -75,7 +75,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	}
 	_, err = domains.ComputeCommitment(ctx, true, domains.BlockNum(), txNum, "")
 	require.NoError(t, err)
-	err = domains.Flush(ctx, rwTx, 0)
+	err = domains.Flush(ctx, rwTx)
 	require.NoError(t, err)
 	err = rwTx.Commit()
 	require.NoError(t, err)

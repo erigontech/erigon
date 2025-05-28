@@ -389,11 +389,11 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			//	return nil, nil, err
 			//}
 			//b.header.Root, err = CalcHashRootForTests(tx, b.header, histV3, true)
-			stateRoot, err := domains.ComputeCommitment(ctx, tx, true, b.header.Number.Uint64(), uint64(txNum), "")
+			stateRoot, err := domains.ComputeCommitment(ctx, true, b.header.Number.Uint64(), uint64(txNum), "")
 			if err != nil {
 				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
 			}
-			if err = domains.Flush(ctx, tx, 0); err != nil {
+			if err = domains.Flush(ctx, tx); err != nil {
 				return nil, nil, err
 			}
 			b.header.Root = common.BytesToHash(stateRoot)

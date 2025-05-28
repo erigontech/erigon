@@ -307,7 +307,7 @@ func blocksReadAheadFunc(ctx context.Context, doms *libstate.SharedDomains, tx k
 	}
 	_, _ = cfg.engine.Author(block.HeaderNoCopy()) // Bor consensus: this calc is heavy and has cache
 
-	stateReader := state.NewReaderV3(doms, tx)
+	stateReader := state.NewReaderV3(doms.AsGetter(tx))
 	senders := block.Body().SendersFromTxs()
 
 	for _, sender := range senders {

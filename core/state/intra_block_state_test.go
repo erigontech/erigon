@@ -481,7 +481,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	domains.SetBlockNum(1)
 	mvhm := NewVersionMap()
 
-	s := NewWithVersionMap(NewReaderV3(domains, tx), mvhm)
+	s := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
 
 	states := []*IntraBlockState{s}
 
@@ -507,7 +507,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	// Tx1 write
 	states[1].GetOrNewStateObject(addr)
 	states[1].SetState(addr, key, val)
-	states[1].SetBalance(addr, balance, tracing.BalanceChangeUnspecified)
+	states[1].SetBalance(addr, *balance, tracing.BalanceChangeUnspecified)
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
 
 	// Tx1 read
@@ -1020,26 +1020,26 @@ func TestApplyVersionedWrites(t *testing.T) {
 
 	// Tx1 write
 	states[1].SetState(addr1, key2, val2)
-	states[1].SetBalance(addr1, balance2, tracing.BalanceChangeUnspecified)
+	states[1].SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified)
 	states[1].SetNonce(addr1, 1)
 	states[1].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil))
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
 
 	sSingleProcess.SetState(addr1, key2, val2)
-	sSingleProcess.SetBalance(addr1, balance2, tracing.BalanceChangeUnspecified)
+	sSingleProcess.SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified)
 	sSingleProcess.SetNonce(addr1, 1)
 
 	sClean.ApplyVersionedWrites(states[1].VersionedWrites(true))
 
 	// Tx2 write
 	states[2].SetState(addr1, key1, val2)
-	states[2].SetBalance(addr1, balance2, tracing.BalanceChangeUnspecified)
+	states[2].SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified)
 	states[2].SetNonce(addr1, 2)
 	states[2].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil))
 	states[2].versionMap.FlushVersionedWrites(states[2].VersionedWrites(true), true, "")
 
 	sSingleProcess.SetState(addr1, key1, val2)
-	sSingleProcess.SetBalance(addr1, balance2, tracing.BalanceChangeUnspecified)
+	sSingleProcess.SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified)
 	sSingleProcess.SetNonce(addr1, 2)
 
 	sClean.ApplyVersionedWrites(states[2].VersionedWrites(true))

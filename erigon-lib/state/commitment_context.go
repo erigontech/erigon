@@ -231,7 +231,7 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 		return 0, 0, true, nil
 	}
 
-	newRh, err := sdc.rebuildCommitment(ctx, tx, blockNum, txNum)
+	newRh, err := sdc.rebuildCommitment(ctx, blockNum, txNum)
 	if err != nil {
 		return 0, 0, false, err
 	}

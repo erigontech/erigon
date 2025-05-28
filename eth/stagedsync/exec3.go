@@ -1091,7 +1091,7 @@ func ExecV3(ctx context.Context,
 						flushPending = false
 
 						if !pe.inMemExec {
-							if err := pe.doms.Flush(ctx, applyTx, 150*time.Millisecond); err != nil {
+							if err := pe.doms.Flush(ctx, applyTx); err != nil {
 								return err
 							}
 						}
@@ -1116,7 +1116,7 @@ func ExecV3(ctx context.Context,
 			}
 		}
 
-		if err := pe.doms.Flush(ctx, applyTx, 150*time.Millisecond); err != nil {
+		if err := pe.doms.Flush(ctx, applyTx); err != nil {
 			return err
 		}
 
@@ -1173,7 +1173,7 @@ func ExecV3(ctx context.Context,
 // nolint
 func dumpPlainStateDebug(tx kv.RwTx, doms *libstate.SharedDomains) {
 	if doms != nil {
-		doms.Flush(context.Background(), tx, 0)
+		doms.Flush(context.Background(), tx)
 	}
 
 	temporalRwTx, ok := tx.(kv.TemporalRwTx)
@@ -1308,7 +1308,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		return handleIncorrectRootHashError(header, applyTx, cfg, e, maxBlockNum, logger, u)
 	}
 	if !inMemExec {
-		if err := doms.Flush(ctx, applyTx, 150*time.Millisecond); err != nil {
+		if err := doms.Flush(ctx, applyTx); err != nil {
 			return false, err
 		}
 	}

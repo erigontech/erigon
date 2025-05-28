@@ -163,11 +163,11 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 		}
 	}
 
-	rh, err := domains.ComputeCommitment(ctx, tx, true, domains.BlockNum(), "")
+	rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), txNum, "")
 	require.NoError(t, err)
 	t.Logf("executed tx %d root %x datadir %q\n", txs, rh, datadir)
 
-	err = domains.Flush(ctx, tx, 0)
+	err = domains.Flush(ctx, tx)
 	require.NoError(t, err)
 
 	//COMS := make(map[string][]byte)
@@ -499,7 +499,7 @@ func TestCommit(t *testing.T) {
 	domains.SetTrace(false)
 	domainsHash, err := domains.ComputeCommitment(ctx, true, blockNum, txNum, "")
 	require.NoError(t, err)
-	err = domains.Flush(ctx, tx, 0)
+	err = domains.Flush(ctx, tx)
 	require.NoError(t, err)
 
 	require.Equal(t, common.BytesToHash(common.FromHex("0xfe81cd91357cd915cae7c02b5a4771e903c16b29dec582818076954be3741030")), common.BytesToHash(domainsHash))
