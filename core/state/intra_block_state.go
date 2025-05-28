@@ -141,6 +141,7 @@ func (sdb *IntraBlockState) SetTrace(trace bool) {
 	sdb.trace = trace
 }
 
+
 func (sdb *IntraBlockState) Trace() bool {
 	return sdb.trace
 }
@@ -150,7 +151,7 @@ func (sdb *IntraBlockState) TxIndex() int {
 }
 
 func (sdb *IntraBlockState) Incarnation() int {
-	return 0
+	return sdb.version
 }
 
 // setErrorUnsafe sets error but should be called in medhods that already have locks
@@ -1269,16 +1270,4 @@ func traceAccount(addr common.Address) bool {
 
 func (sdb *IntraBlockState) TraceAccount(addr common.Address) bool {
 	return traceAccount(addr)
-}
-
-func (sdb *IntraBlockState) Trace() bool {
-	return sdb.trace
-}
-
-func (sdb *IntraBlockState) TxIndex() int {
-	return sdb.txIndex
-}
-
-func (sdb *IntraBlockState) Incarnation() int {
-	return sdb.version
 }
