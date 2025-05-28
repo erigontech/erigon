@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
@@ -464,7 +463,7 @@ func (sd *SharedDomains) Close() {
 	sd.sdCtx = nil
 }
 
-func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
+func (sd *SharedDomains) flushDiffSet(ctx context.Context, tx kv.RwTx) error {
 	for key, changeset := range sd.pastChangesAccumulator {
 		blockNum := binary.BigEndian.Uint64(toBytesZeroCopy(key[:8]))
 		blockHash := common.BytesToHash(toBytesZeroCopy(key[8:]))
@@ -472,15 +471,10 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 			return err
 		}
 	}
-	sd.pastChangesAccumulator = make(map[string]*StateChangeSet)
+	return nil
+}
+func (sd *SharedDomains) flushWriters(ctx context.Context, tx kv.RwTx) error {
 	aggTx := AggTx(tx)
-
-	defer mxFlushTook.ObserveDuration(time.Now())
-	_, err := sd.ComputeCommitment(ctx, tx, true, sd.BlockNum(), "flush-commitment")
-	if err != nil {
-		return err
-	}
-
 	for di, w := range sd.domainWriters {
 		if w == nil {
 			continue
@@ -489,6 +483,7 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 			return err
 		}
 		aggTx.d[di].closeValsCursor() //TODO: why?
+		w.Close()
 	}
 	for _, w := range sd.iiWriters {
 		if w == nil {
@@ -497,24 +492,36 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 		if err := w.Flush(ctx, tx); err != nil {
 			return err
 		}
+		w.close()
 	}
-	if dbg.PruneOnFlushTimeout != 0 {
-		if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, dbg.PruneOnFlushTimeout); err != nil {
-			return err
-		}
+	return nil
+}
+
+func (sd *SharedDomains) FlushWithoutCommitment(ctx context.Context, tx kv.RwTx) error {
+	defer mxFlushTook.ObserveDuration(time.Now())
+	if err := sd.flushDiffSet(ctx, tx); err != nil {
+		return err
+	}
+	sd.pastChangesAccumulator = make(map[string]*StateChangeSet)
+	if err := sd.flushWriters(ctx, tx); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
+	defer mxFlushTook.ObserveDuration(time.Now())
+	if err := sd.flushDiffSet(ctx, tx); err != nil {
+		return err
+	}
+	sd.pastChangesAccumulator = make(map[string]*StateChangeSet)
+	_, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), sd.txNum, "flush-commitment")
+	if err != nil {
+		return err
 	}
 
-	for _, w := range sd.domainWriters {
-		if w == nil {
-			continue
-		}
-		w.Close()
-	}
-	for _, w := range sd.iiWriters {
-		if w == nil {
-			continue
-		}
-		w.close()
+	if err := sd.flushWriters(ctx, tx); err != nil {
+		return err
 	}
 	return nil
 }
