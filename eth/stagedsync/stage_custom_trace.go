@@ -152,7 +152,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 			_nextBlock += batchSize
 		}
 
-		to := min(endBlock+1, startBlock+batchSize)
+		to := min(endBlock+1, _nextBlock)
 		if err := customTraceBatchProduce(ctx, cfg.Produce, cfg.ExecArgs, cfg.db, startBlock, to, "custom_trace", logger); err != nil {
 			return err
 		}
