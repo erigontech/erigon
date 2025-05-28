@@ -21,9 +21,9 @@ package js
 
 import (
 	"github.com/dop251/goja"
-	"github.com/holiman/uint256"
-
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/holiman/uint256"
 )
 
 func (jst *jsTracer) CaptureArbitrumTransfer(
@@ -51,5 +51,41 @@ func (jst *jsTracer) CaptureArbitrumTransfer(
 
 	if _, err := traceTransfer(transfer); err != nil {
 		jst.err = wrapError("captureArbitrumTransfer", err)
+	}
+}
+
+func (jst *jsTracer) CaptureStylusHostio(name string, args, outs []byte, startInk, endInk uint64) {
+	hostio, ok := goja.AssertFunction(jst.obj.Get("hostio"))
+	if !ok {
+		return
+	}
+
+	info := jst.vm.NewObject()
+	info.Set("name", name)
+	info.Set("args", args)
+	info.Set("outs", outs)
+	info.Set("startInk", startInk)
+	info.Set("endInk", endInk)
+
+	if _, err := hostio(jst.obj, info); err != nil {
+		jst.err = wrapError("hostio", err)
+	}
+}
+
+func (jst *jsTracer) OnBalanceChange(addr libcommon.Address, prev, new *uint256.Int, reason tracing.BalanceChangeReason) {
+	traceBalanceChange, ok := goja.AssertFunction(jst.obj.Get("onBalanceChange"))
+
+	if !ok {
+		return
+	}
+
+	balanceChange := jst.vm.NewObject()
+	balanceChange.Set("addr", addr.String())
+	balanceChange.Set("prev", prev)
+	balanceChange.Set("new", new)
+	balanceChange.Set("reason", reason.Str())
+
+	if _, err := traceBalanceChange(jst.obj, balanceChange); err != nil {
+		jst.err = wrapError("onBalanceChange", err)
 	}
 }

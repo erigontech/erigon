@@ -21,6 +21,7 @@ package native
 
 import (
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/core/types"
 	"github.com/holiman/uint256"
 )
 
@@ -49,4 +50,14 @@ func (t *callTracer) CaptureArbitrumTransfer(from, to *libcommon.Address, value 
 	} else {
 		t.afterEVMTransfers = append(t.afterEVMTransfers, transfer)
 	}
+}
+
+func (t *prestateTracer) CaptureArbitrumStorageGet(key libcommon.Hash, depth int, before bool) {
+	t.lookupAccount(types.ArbosStateAddress)
+	t.lookupStorage(types.ArbosStateAddress, key)
+}
+
+func (t *prestateTracer) CaptureArbitrumStorageSet(key, value libcommon.Hash, depth int, before bool) {
+	t.lookupAccount(types.ArbosStateAddress)
+	t.lookupStorage(types.ArbosStateAddress, key)
 }
