@@ -10,7 +10,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/datastruct/existence"
-	"github.com/erigontech/erigon-lib/datastruct/existence"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
@@ -668,7 +667,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, name string, extensions []st
 		}
 
 		if strings.HasSuffix(filename, ".kvei") {
-			filter, err := existence.NewFilter(0, filename)
+			filter, err := existence.NewFilter(0, filename, true)
 			require.NoError(t, err)
 			require.NoError(t, filter.Build())
 			filter.Close()

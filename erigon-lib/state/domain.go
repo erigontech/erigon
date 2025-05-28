@@ -1438,7 +1438,8 @@ func buildExistanceFilter(ctx context.Context, d *seg.Decompressor, compressed s
 
 	g := seg.NewReader(d.MakeGetter(), compressed)
 
-	existenceFilter, err := existence.NewFilter(uint64(count), idxPath)
+	useFuse := true
+	existenceFilter, err := existence.NewFilter(uint64(count), idxPath, useFuse)
 	if err != nil {
 		return err
 	}
