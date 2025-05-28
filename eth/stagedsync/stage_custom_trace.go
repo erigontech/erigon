@@ -283,6 +283,27 @@ func AssertNotBehindAccounts(db kv.RoDB, domain kv.Domain, txNumsReader rawdbv3.
 	}
 	defer tx.Rollback()
 
+	ac := state2.AggTx(tx)
+	receiptProgress := ac.HistoryProgress(domain, tx)
+	accProgress := ac.HistoryProgress(kv.AccountsDomain, tx)
+	if accProgress != receiptProgress {
+		_, e1, _ := txNumsReader.FindBlockNum(tx, receiptProgress)
+		_, e2, _ := txNumsReader.FindBlockNum(tx, accProgress)
+
+		err := fmt.Errorf("[integrity] %s=%d (%d) is behind AccountDomain=%d(%d)", domain.String(), receiptProgress, e1, accProgress, e2)
+		log.Warn(err.Error())
+		return nil
+	}
+	return nil
+}
+
+func AssertNotBehindAccounts(db kv.RoDB, domain kv.Domain, txNumsReader rawdbv3.TxNumsReader) (err error) {
+	tx, err := db.BeginRo(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
 	ac := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 	receiptProgress := ac.HistoryProgress(domain, tx)
 	accProgress := ac.HistoryProgress(kv.AccountsDomain, tx)
