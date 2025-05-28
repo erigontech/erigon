@@ -97,39 +97,50 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (
 // replaceShortenedKeysInBranch method on each read. Data stored in DB is not referenced (so as in history).
 // Values from domain files with ranges > 2 steps are referenced.
 func (sd *SharedDomains) LatestCommitment(prefix []byte, tx kv.Tx) ([]byte, uint64, error) {
+	v, step, fromRam, err := sd.latestCommitment(prefix, tx)
+	if err != nil {
+		return v, step, err
+	}
+	if fromRam {
+		return v, step, nil
+	}
+
+	sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), v, sd.txNum)
+	return v, step, nil
+}
+
+func (sd *SharedDomains) latestCommitment(prefix []byte, tx kv.Tx) (v []byte, step uint64, fromRam bool, err error) {
 	aggTx := AggTx(tx)
 	if v, prevStep, ok := sd.get(kv.CommitmentDomain, prefix); ok {
 		// sd cache values as is (without transformation) so safe to return
-		return v, prevStep, nil
+		return v, prevStep, true, nil
 	}
 	v, step, found, err := tx.(kv.TemporalTx).Debug().GetLatestFromDB(kv.CommitmentDomain, prefix)
 	if err != nil {
-		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
+		return nil, 0, false, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
 	}
 	if found {
 		// db store values as is (without transformation) so safe to return
-		return v, step, nil
+		return v, step, true, nil
 	}
 
 	// getLatestFromFiles doesn't provide same semantics as getLatestFromDB - it returns start/end tx
 	// of file where the value is stored (not exact step when kv has been set)
 	v, _, startTx, endTx, err := tx.(kv.TemporalTx).Debug().GetLatestFromFiles(kv.CommitmentDomain, prefix, 0)
 	if err != nil {
-		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
+		return nil, 0, true, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
 	}
 
 	if !aggTx.a.commitmentValuesTransform || bytes.Equal(prefix, keyCommitmentState) {
-		sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), v, sd.txNum)
-		return v, endTx / sd.StepSize(), nil
+		return v, endTx / sd.StepSize(), false, nil
 	}
 
 	// replace shortened keys in the branch with full keys to allow HPH work seamlessly
 	rv, err := sd.replaceShortenedKeysInBranch(prefix, commitment.BranchData(v), startTx, endTx, aggTx)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, false, err
 	}
-	sd.put(kv.CommitmentDomain, toStringZeroCopy(prefix), rv, sd.txNum) // keep dereferenced value in cache (to avoid waste on another dereference)
-	return rv, endTx / sd.StepSize(), nil
+	return rv, endTx / sd.StepSize(), false, nil
 }
 
 func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.Tx, saveStateAfter bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
