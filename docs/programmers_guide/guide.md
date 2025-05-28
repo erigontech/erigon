@@ -91,7 +91,7 @@ Organising Ethereum State into a Merkle Tree
 Ethereum network produces checkpoints of the Ethereum State after every block. These checkpoints come in a form of
 32-byte binary string, which is the root hash of the Merkle tree constructed out of the accounts in the state. This root
 hash is often referred to as "State root". It is part of block header, and is contained in the field `Root` of the type
-`Header` [core/types/block.go](../../core/types/block.go)
+`Header` [erigon-lib/types/block.go](../../erigon-lib/types/block.go)
 
 Prior to Byzantium release, the state root was also part of every transaction receipt, and was contained in the
 field `PostState`
