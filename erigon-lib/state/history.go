@@ -72,8 +72,6 @@ type History struct {
 	_visibleFiles []visibleFile
 }
 
-type rangeIntegrityChecker func(fromStep, toStep uint64) bool
-
 type histCfg struct {
 	iiCfg iiCfg
 

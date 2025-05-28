@@ -4,8 +4,6 @@ import (
 	"github.com/erigontech/erigon-lib/version"
 )
 
-var commitmentDomainVersion version.Versions
-
 func InitSchemas() {
 	Schema.AccountsDomain.version.DataKV = version.V1_0_standart
 	Schema.AccountsDomain.version.AccessorBT = version.V1_0_standart
@@ -37,7 +35,6 @@ func InitSchemas() {
 	Schema.CommitmentDomain.hist.version.AccessorVI = version.V1_0_standart
 	Schema.CommitmentDomain.hist.iiCfg.version.DataEF = version.V2_0_standart
 	Schema.CommitmentDomain.hist.iiCfg.version.AccessorEFI = version.V1_1_standart
-	commitmentDomainVersion = Schema.CommitmentDomain.version.DataKV
 
 	Schema.ReceiptDomain.version.DataKV = version.V1_0_standart
 	Schema.ReceiptDomain.version.AccessorBT = version.V1_0_standart
